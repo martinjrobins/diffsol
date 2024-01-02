@@ -6,3 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+nalgebra = ">=0.32"
+nalgebra-sparse = ">=0.9"
+anyhow = ">=1.0.77"
+num-traits = "0.2.17"

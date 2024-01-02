@@ -1,14 +1,24 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
+
+pub trait Scalar: nalgebra::Scalar + Display + SimdRealField + Copy + ClosedSub + From<f64> + ClosedMul + ClosedDiv + ClosedAdd + Signed + PartialOrd + Pow<Self, Output=Self> + Pow<i32, Output=Self> {
+    const EPSILON: Self;
+}
+impl Scalar for f64 {
+    const EPSILON: Self = f64::EPSILON;
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+type IndexType = usize;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub mod vector;
+pub mod matrix;
+pub mod linear_solver;
+pub mod callable;
+pub mod nonlinear_solver;
+
+use std::fmt::Display;
+
+use nalgebra::{ClosedSub, ClosedMul, ClosedDiv, ClosedAdd, SimdRealField};
+use num_traits::{Signed, Pow};
+use vector::Vector;
+use callable::Callable;
+use matrix::Matrix;
+use linear_solver::LinearSolver;
