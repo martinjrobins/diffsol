@@ -30,6 +30,7 @@ pub trait Vector<T: Scalar>:
     fn component_mul_assign(&mut self, other: &Self);
     fn component_div_assign(&mut self, other: &Self);
     fn norm(&self) -> T;
+    fn map_mut<F: Fn(T) -> T>(&mut self, f: F);
     fn assert_eq(&self, other: &Self, tol: T) {
         assert_eq!(self.len(), other.len(), "Vector length mismatch: {} != {}", self.len(), other.len());
         for i in 0..self.len() {

@@ -30,6 +30,9 @@ impl<T: Scalar> Vector<T> for DVector<T> {
     fn from_vec(vec: Vec<T>) -> Self {
         Self::from_vec(vec)
     }
+    fn map_mut<F: Fn(T) -> T>(&mut self, f: F) {
+        self.map_mut(f);
+    }
 }
 
 

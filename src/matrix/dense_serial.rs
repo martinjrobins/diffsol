@@ -29,4 +29,7 @@ impl<T: Scalar> Matrix<T, DVector<T>> for DMatrix<T> {
         }
         Ok(m)
     }
+    fn diagonal(&self) -> DVector<T> {
+        self.diagonal()
+    }
 }

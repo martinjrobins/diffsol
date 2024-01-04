@@ -41,4 +41,7 @@ impl<T: Scalar> Matrix<T, DVector<T>> for CsrMatrix<T>
         let coo = CooMatrix::try_from_triplets(nrows, ncols, row_indices, col_indices, values).map_err(|e| anyhow::anyhow!("{}", e))?;
         Ok(Self::from(&coo))
     }
+    fn diagonal(&self) -> DVector<T> {
+        self.diagonal()
+    }
 }

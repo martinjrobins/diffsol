@@ -30,4 +30,7 @@ impl<F, G, D, T, V> Callable<T, V> for Closure<F, G, D>
     fn nstates(&self) -> usize {
         self.nstates
     }
+    fn nparams(&self) -> usize {
+        0
+    }
 }

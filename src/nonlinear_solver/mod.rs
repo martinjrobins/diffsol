@@ -79,8 +79,8 @@ impl <T: Scalar, V: Vector<T>> Convergence<T, V> {
 }
 
 
-pub trait NonLinearSolver<T: Scalar, V: Vector<T>, M: Matrix<T, V>, C: Callable<T, V>> {
-    fn new(callable: C) -> Self;
+pub trait NonLinearSolver<T: Scalar, V: Vector<T>, C: Callable<T, V>> {
+    fn new(callable: C, mask: Option<V>) -> Self;
     fn solve(&mut self, x0: &V) -> Result<V>;
 } 
 
@@ -118,12 +118,19 @@ pub mod tests {
         )
     }
     
-    pub fn test_nonlinear_solver<T: Scalar, V: Vector<T>, M: Matrix<T, V>, S: NonLinearSolver<T, V, M, SquareClosure<V, M>>> () {
-        let mut solver = S::new(get_square_problem::<T, V, M>());
+    pub fn test_nonlinear_solver<T: Scalar, V: Vector<T>, M: Matrix<T, V>, S: NonLinearSolver<T, V, SquareClosure<V, M>>> () {
+        let mut solver = S::new(get_square_problem::<T, V, M>(), None);
         let x0 = V::from_vec(vec![2.1.into(), 2.1.into()]);
         let x = solver.solve(&x0).unwrap();
         let expect = V::from_vec(vec![2.0.into(), 2.0.into()]);
         x.assert_eq(&expect, 1e-6.into());
+        
+        let mut solver = S::new(get_square_problem::<T, V, M>(), vec![0, 1]);
+        let x0 = V::from_vec(vec![2.1.into(), 2.1.into()]);
+        let x = solver.solve(&x0).unwrap();
+        let expect = V::from_vec(vec![2.1.into(), 2.0.into()]);
+        x.assert_eq(&expect, 1e-6.into());
+
     }
     
     

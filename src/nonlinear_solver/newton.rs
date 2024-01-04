@@ -1,7 +1,8 @@
 use std::marker::PhantomData;
 
-use crate::{Scalar, Vector, Matrix, Callable, LinearSolver};
+use crate::{Scalar, Vector, Matrix, Callable, LinearSolver, IndexType};
 use anyhow::{anyhow, Result};
+use nalgebra_sparse::ops::Op;
 
 use super::{NonLinearSolver, Convergence, ConvergenceStatus};
 
@@ -10,39 +11,48 @@ pub struct NewtonNonlinearSolver<T: Scalar, V: Vector<T>, M: Matrix<T, V>, LS: L
     callable: C,
     jacobian_linear_solver: Option<LS>,
     convergence: Convergence<T, V>,
-    phantom_t: PhantomData<T>,
-    phantom_m: PhantomData<M>,
+    zero_by_mask: Option<M>,
+    _phantom: PhantomData<(T, M)>
 }
 
-impl<T: Scalar, V: Vector<T>, M: Matrix<T, V>, LS: LinearSolver<T, V, M>, C: Callable<T, V>> NonLinearSolver<T, V, M, C> for NewtonNonlinearSolver<T, V, M, LS, C> {
-    fn new(callable: C) -> Self {
+impl<T: Scalar, V: Vector<T>, M: Matrix<T, V>, LS: LinearSolver<T, V, M>, C: Callable<T, V>> NonLinearSolver<T, V, C> for NewtonNonlinearSolver<T, V, M, LS, C> {
+    fn new(callable: C, mask: Option<Vec<IndexType>>) -> Self {
         let nstates = callable.nstates();
         let convergence = Convergence::new(T::from(1e-6), V::from_element(nstates, 1e-6.into()), 10);
+        let zero_by_mask= match mask {
+            Some(mask) => {
+                Some(M::from_diagonal(mask))
+            },
+            None => None,
+        };
         Self {
             callable,
             jacobian_linear_solver: None,
             convergence,
-            phantom_m: PhantomData,
-            phantom_t: PhantomData,
+            zero_by_mask,
+            _phantom: PhantomData,
         }
     }
 
-    fn solve(&mut self, x0: &V) -> Result<V> {
+    fn solve(&mut self, x0: &V, p: &V) -> Result<V> {
         let mut xn = x0.clone();
         self.convergence.reset(&xn);
         let mut f_at_n = xn.clone();
         let mut updated_jacobian = false;
         loop {
             if self.jacobian_linear_solver.is_none() {
-                let jac = self.callable.jacobian::<M>(&xn);
+                let jac = self.callable.jacobian::<M>(&xn, p);
                 self.jacobian_linear_solver = Some(LS::new(jac));
                 updated_jacobian = true;
             }
             let jac = self.jacobian_linear_solver.as_ref().unwrap();
             loop {
-                self.callable.call(&xn, &mut f_at_n);
+                self.callable.call(&xn, p, &mut f_at_n);
                 
                 let delta_xn = jac.solve(&f_at_n)?;
+                if let Some(zero_indices) = &self.zero_by_mask {
+                    delta_xn *= self.zero_by_mask;
+                }
 
                 xn -= &delta_xn;
 

@@ -13,6 +13,7 @@ pub mod matrix;
 pub mod linear_solver;
 pub mod callable;
 pub mod nonlinear_solver;
+pub mod ode_solver;
 
 use std::fmt::Display;
 
@@ -22,3 +23,4 @@ use vector::Vector;
 use callable::Callable;
 use matrix::Matrix;
 use linear_solver::LinearSolver;
+use nonlinear_solver::NonLinearSolver;
