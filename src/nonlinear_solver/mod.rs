@@ -80,7 +80,6 @@ impl <T: Scalar, V: Vector<T>> Convergence<T, V> {
 
 
 pub trait NonLinearSolver<T: Scalar, V: Vector<T>, C: Callable<T, V>> {
-    fn new(callable: C, mask: Option<V>) -> Self;
     fn solve(&mut self, x0: &V) -> Result<V>;
 } 
 

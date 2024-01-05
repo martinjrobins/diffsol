@@ -6,7 +6,6 @@ use nalgebra_sparse::ops::Op;
 
 use super::{NonLinearSolver, Convergence, ConvergenceStatus};
 
-
 pub struct NewtonNonlinearSolver<T: Scalar, V: Vector<T>, M: Matrix<T, V>, LS: LinearSolver<T, V, M>, C: Callable<T, V>> {
     callable: C,
     jacobian_linear_solver: Option<LS>,
@@ -15,7 +14,7 @@ pub struct NewtonNonlinearSolver<T: Scalar, V: Vector<T>, M: Matrix<T, V>, LS: L
     _phantom: PhantomData<(T, M)>
 }
 
-impl<T: Scalar, V: Vector<T>, M: Matrix<T, V>, LS: LinearSolver<T, V, M>, C: Callable<T, V>> NonLinearSolver<T, V, C> for NewtonNonlinearSolver<T, V, M, LS, C> {
+impl <T: Scalar, V: Vector<T>, M: Matrix<T, V>, LS: LinearSolver<T, V, M>, C: Callable<T, V>> NewtonNonlinearSolver<T, V, M, LS, C> {
     fn new(callable: C, mask: Option<Vec<IndexType>>) -> Self {
         let nstates = callable.nstates();
         let convergence = Convergence::new(T::from(1e-6), V::from_element(nstates, 1e-6.into()), 10);
@@ -33,7 +32,9 @@ impl<T: Scalar, V: Vector<T>, M: Matrix<T, V>, LS: LinearSolver<T, V, M>, C: Cal
             _phantom: PhantomData,
         }
     }
+}
 
+impl<T: Scalar, V: Vector<T>, M: Matrix<T, V>, LS: LinearSolver<T, V, M>, C: Callable<T, V>> NonLinearSolver<T, V, C> for NewtonNonlinearSolver<T, V, M, LS, C> {
     fn solve(&mut self, x0: &V, p: &V) -> Result<V> {
         let mut xn = x0.clone();
         self.convergence.reset(&xn);

@@ -8,11 +8,12 @@ pub struct BdfCallable<RightHandSide: Callable<T, V>, T: Scalar, V: Vector<T>, M
     mass: M,
     psi: T,
     c: T,
+    phantom: std::marker::PhantomData<V>,
 }
 
 impl<RightHandSide: Callable<T, V>, T: Scalar, V: Vector<T>, M: Matrix<T, V>> BdfCallable<RightHandSide, T, V, M> {
     pub fn new(rhs: RightHandSide, mass: M, psi: T, c: T) -> Self {
-        Self { rhs, mass, psi, c }
+        Self { rhs, mass, psi, c, phantom: std::marker::PhantomData }
     }
 }
 
