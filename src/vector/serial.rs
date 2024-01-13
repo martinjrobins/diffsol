@@ -33,6 +33,9 @@ impl<T: Scalar> Vector<T> for DVector<T> {
     fn map_mut<F: Fn(T) -> T>(&mut self, f: F) {
         self.map_mut(f);
     }
+    fn axpy(&mut self, alpha: T, x: &Self) {
+        self.axpy(alpha, x, T::one());
+    }
 }
 
 

@@ -6,25 +6,30 @@ pub mod ode;
 
 pub trait Callable<T: Scalar, V: Vector<T>> {
     fn call(&self, x: &V, p: &V, y: &mut V);
+    fn gemv(&self, x: &V, p: &V, alpha: T, beta: T, y: &mut V) {
+        let beta_y = y * beta;
+        self.call(x, p, y);
+        y *= alpha;
+        y += beta_y;
+    }
     fn nstates(&self) -> usize;
+    fn nout(&self) -> usize;
     fn nparams(&self) -> usize;
     fn jacobian_action(&self, x: &V, p: &V, v: &V, y: &mut V);
-    fn jacobian<M: Matrix<T, V>>(&self, x: &V, p: &V) -> M {
-        let mut v = V::zeros(x.len());
-        let mut col = V::zeros(x.len());
-        let mut triplets = Vec::with_capacity(x.len());
-        for j in 0..x.len() {
+    fn jacobian<M: Matrix<T, V>>(&self, p: &V) -> M {
+        let mut v = V::zeros(self.nstates());
+        let mut col = V::zeros(self.nout());
+        let mut triplets = Vec::with_capacity(self.nstates());
+        for j in 0..self.nstates() {
             v[j] = T::one();
-            self.jacobian_action(x, p, &v, &mut col);
-            for i in 0..x.len() {
+            self.call(v, p, &mut col);
+            for i in 0..self.nout() {
                 if col[i] != T::zero() {
                     triplets.push((i, j, col[i]));
                 }
             }
             v[j] = T::zero();
         }
-        M::try_from_triplets(x.len(), x.len(), triplets).unwrap()
+        M::try_from_triplets(self.nstates(), self.nout(), triplets).unwrap()
     }
-
 }
-

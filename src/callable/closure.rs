@@ -16,18 +16,21 @@ impl<F, G, D> Closure<F, G, D> {
 }
 
 impl<F, G, D, T, V> Callable<T, V> for Closure<F, G, D>
-    where F: Fn(&V, &mut V, &D),
-          G: Fn(&V, &V, &mut V, &D),
+    where F: Fn(&V, &V, &mut V, &D),
+          G: Fn(&V, &V, &V, &mut V, &D),
           T: Scalar,
           V: Vector<T>,
 {
-    fn call(&self, x: &V, y: &mut V) {
-        (self.func)(x, y, &self.data)
+    fn call(&self, x: &V, p: &V, y: &mut V) {
+        (self.func)(x, p, y, &self.data)
     }
-    fn jacobian_action(&self, x: &V, v: &V, y: &mut V) {
-        (self.jacobian_action)(x, v, y, &self.data)
+    fn jacobian_action(&self, x: &V, p: &V, v: &V, y: &mut V) {
+        (self.jacobian_action)(x, p, v, y, &self.data)
     }
     fn nstates(&self) -> usize {
+        self.nstates
+    }
+    fn nout(&self) -> usize {
         self.nstates
     }
     fn nparams(&self) -> usize {

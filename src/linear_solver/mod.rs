@@ -1,23 +1,34 @@
-use crate::{Matrix, Scalar, Vector};
-use anyhow::Result;
-
-mod lu;
-
-pub trait LinearSolver<T: Scalar, V: Vector<T>, M: Matrix<T, V>> {
-    fn new(a: M) -> Self;
-    fn solve(&self, b: &V) -> Result<V>;
-}
+pub mod lu;
+pub mod gmres;
 
 #[cfg(test)]
 pub mod tests {
-    use super::*;
+    use crate::{Matrix, Solver, LU, Scalar, Vector, callable::closure::Closure};
 
-    pub fn test_linear_solver<T: Scalar, V: Vector<T>, M: Matrix<T, V>, S: LinearSolver<T, V, M>>() {
-        let triplets = vec![(0, 0, 2.0.into()), (1, 1, 2.0.into())];
-        let a = M::try_from_triplets(2, 2, triplets).unwrap();
-        let b = V::from_vec(vec![1.0.into(), 2.0.into()]);
-        let x = S::new(a).solve(&b).unwrap();
-        let expect = V::from_vec(vec![(0.5).into(), 1.0.into()]);
+    
+    // 0 = J * x - 8
+    fn square<T: Scalar, V: Vector<T>, M: Matrix<T, V>>(x: &V, y: &mut V, jac: &M) {
+        jac.mul_to(x, y);
+        y.add_scalar_mut(T::from(-8.0));
+    }
+
+    // J = J * dx
+    fn square_jacobian<T: Scalar, V: Vector<T>, M: Matrix<T, V>>(x: &V, v: &V, y: &mut V, jac: &M) {
+        jac.mul_to(x, y);
+    }
+
+    pub fn test_linear_solver<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, S: Solver<'a, T, V>>(mut s: S) {
+        let jac = Matrix::from_diagonal(&V::from_vec(vec![2.0.into(), 2.0.into()]));
+        let op = Closure::<fn(&V, &mut V, &M), fn(&V, &V, &mut V, &M), M>::new(
+            square,
+            square_jacobian,
+            jac, 
+            2,
+        );
+        s.set_callable(&op, &V::zeros(0));
+        let b = V::from_vec(vec![2.0.into(), 4.0.into()]);
+        let x = s.solve(&b).unwrap();
+        let expect = V::from_vec(vec![(5.0).into(), 6.0.into()]);
         x.assert_eq(&expect, 1e-6.into());
     }
     
@@ -26,7 +37,6 @@ pub mod tests {
         type T = f64;
         type V = nalgebra::DVector<T>;
         type M = nalgebra::DMatrix<T>;
-        type S = nalgebra::LU<T, nalgebra::Dyn, nalgebra::Dyn>;
-        test_linear_solver::<T, V, M, S>();
+        test_linear_solver::<T, V, M>(LU::default());
     }
 }

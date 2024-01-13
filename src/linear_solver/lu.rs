@@ -1,24 +1,47 @@
-use nalgebra::{LU, DVector, ComplexField, Dyn, DMatrix};
+use nalgebra::{DVector, Dyn};
 use anyhow::Result;
 
-use crate::Scalar;
+use crate::{Scalar, callable::Callable, solver::Solver};
 
-use super::LinearSolver;
+pub struct LU<T: Scalar> {
+    lu: Option<nalgebra::LU<T, Dyn, Dyn>>,
+}
 
-
-// implement LinearSolver for LU, DMatrix and DVector from nalgebra
-impl<T> LinearSolver<T, DVector<T>, DMatrix<T>> for LU<T, Dyn, Dyn>
-where
-    T: Scalar + ComplexField,
-{
-    fn new(a: DMatrix<T>) -> Self {
-        Self::new(a)
+impl<T: Scalar> Default for LU<T> {
+    fn default() -> Self {
+        Self {
+            lu: None,
+        }
     }
+}
+
+
+impl<'a, T: Scalar, C: Callable<T, DVector<T>>> Solver<'a, T, DVector<T>> for LU<T> {
 
     fn solve(&self, b: &DVector<T>) -> Result<DVector<T>> {
-        match LU::solve(self, b) {
+        if self.lu.is_none() {
+            return Err(anyhow::anyhow!("LU not initialized"));
+        }
+        let lu = self.lu.as_ref().unwrap();
+        match lu.solve(b) {
             Some(x) => Ok(x),
             None => Err(anyhow::anyhow!("LU solve failed")),
         }
+    }
+
+    fn get_statistics(&self) -> &crate::solver::SolverStatistics {
+        todo!()
+    }
+    
+    fn is_callable_set(&self) -> bool {
+        self.lu.is_some()
+    }
+    
+    fn clear_callable(&mut self) {
+        self.lu = None;
+    }
+
+    fn set_callable(&mut self, c: &'a C, p: &'a DVector<T>) {
+        self.lu = Some(nalgebra::LU::new(c.jacobian(p)));
     }
 }

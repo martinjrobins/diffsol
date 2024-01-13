@@ -1,11 +1,10 @@
 use core::panic;
 
-use crate::{Scalar, Vector, Matrix, Callable, IndexType};
-use anyhow::Result;
+use crate::{Scalar, Vector, IndexType};
 
-struct Convergence<T: Scalar, V: Vector<T>> {
+struct Convergence<'a, T: Scalar, V: Vector<T>> {
     rtol: T,
-    atol: V,
+    atol: &'a V,
     tol: T,
     max_iter: IndexType,
     iter: IndexType,
@@ -20,8 +19,8 @@ enum ConvergenceStatus {
     MaximumIterations
 }
 
-impl <T: Scalar, V: Vector<T>> Convergence<T, V> {
-    fn new(rtol: T, atol: V, max_iter: IndexType) -> Self {
+impl <'a, T: Scalar, V: Vector<T>> Convergence<'a, T, V> {
+    fn new(rtol: T, atol: &'a V, max_iter: IndexType) -> Self {
         let minimum_tol = T::from(10.0) * T::EPSILON / rtol;
         let maximum_tol = T::from(0.03);
         let mut tol = rtol.pow(T::from(0.5));
@@ -79,16 +78,12 @@ impl <T: Scalar, V: Vector<T>> Convergence<T, V> {
 }
 
 
-pub trait NonLinearSolver<T: Scalar, V: Vector<T>, C: Callable<T, V>> {
-    fn solve(&mut self, x0: &V) -> Result<V>;
-} 
-
 pub mod newton;
 
 //tests
 #[cfg(test)]
 pub mod tests {
-    use crate::callable::closure::Closure;
+    use crate::{callable::closure::Closure, Matrix, Solver};
     use super::*;
     
     // 0 = J * x * x - 8
@@ -117,14 +112,14 @@ pub mod tests {
         )
     }
     
-    pub fn test_nonlinear_solver<T: Scalar, V: Vector<T>, M: Matrix<T, V>, S: NonLinearSolver<T, V, SquareClosure<V, M>>> () {
-        let mut solver = S::new(get_square_problem::<T, V, M>(), None);
+    pub fn test_nonlinear_solver<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, S: Solver<'a, T, V>> (solver: S) {
+        solver.set_callable(&get_square_problem::<T, V, M>(), &V::zeros(0));
         let x0 = V::from_vec(vec![2.1.into(), 2.1.into()]);
         let x = solver.solve(&x0).unwrap();
         let expect = V::from_vec(vec![2.0.into(), 2.0.into()]);
         x.assert_eq(&expect, 1e-6.into());
         
-        let mut solver = S::new(get_square_problem::<T, V, M>(), vec![0, 1]);
+        solver.set_callable(&get_square_problem::<T, V, M>(), vec![0, 1]);
         let x0 = V::from_vec(vec![2.1.into(), 2.1.into()]);
         let x = solver.solve(&x0).unwrap();
         let expect = V::from_vec(vec![2.1.into(), 2.0.into()]);

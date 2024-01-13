@@ -1,55 +1,76 @@
-use crate::{Scalar, Vector, Matrix, NonLinearSolver, callable::{Callable, ode::BdfCallable}, nonlinear_solver::{self, newton::NewtonNonlinearSolver}, linear_solver::LinearSolver};
+use crate::{Scalar, Vector, Matrix, callable::Callable, IndexType, solver::Solver};
 
-use anyhow::{Result, anyhow};
+use anyhow::Result;
+use ouroboros::self_referencing;
 
 pub mod bdf;
 
-trait OdeSolverMethod<T: Scalar, V: Vector<T>, M: Matrix<T, V>, C: Callable<T, V>> {
+trait OdeSolverMethod<'a, T: Scalar, V: Vector<T>> {
+    fn set_state(&mut self, state: &'a OdeSolverState<T, V>);
+    fn is_state_set(&self) -> bool;
+    fn clear_state(&mut self);
     fn step(&mut self, t: T) -> T;
     fn interpolate(&self, t: T) -> V;
 }
 
-enum MethodName {
-    Bdf,
-}
-
-struct OdeSolverState<T: Scalar, V: Vector<T>, M: Matrix<T, V>, C: Callable<T, V>> {
+struct OdeSolverState<T: Scalar, V: Vector<T>> {
     y: V,
     t: T,
     h: T,
     p: V,
     atol: V,
     rtol: T,
-    mass: M,
-    method: MethodName,
-    rhs: C,
+    mass: Box::<dyn Callable<T, V>>,
+    rhs: Box::<dyn Callable<T, V>>,
+    root_solver_max_iter: IndexType,
+    nonlinear_max_iter: IndexType,
 }
 
-pub struct OdeSolver<T: Scalar, V: Vector<T>, M: Matrix<T, V>, C: Callable<T, V>> {
-    method: Option<Box<dyn OdeSolverMethod<T, V, M, C>>>,
-    state: OdeSolverState<T, V, M, C>,
+impl <T: Scalar, V: Vector<T>, M: Matrix<T, V>> OdeSolverState<T, V> {
+    fn new(rhs: impl Callable<T, V>) -> Self {
+        Self {
+            y: V::zeros(rhs.nstates()),
+            t: T::zero(),
+            h: T::one(),
+            p: V::zeros(rhs.nparams()),
+            atol: V::zeros(rhs.nstates()),
+            rtol: T::zero(),
+            mass: Callable::<T, V>::eye(rhs.nstates()),
+            rhs,
+            root_solver_max_iter: 15,
+            nonlinear_max_iter: 4,
+        }
+    }
 }
 
-impl <T: Scalar, V: Vector<T>, M: Matrix<T, V>, C: Callable<T, V>> OdeSolver<T, V, M, C> {
-    fn new(rhs: C) -> Self {
+#[self_referencing]
+struct MyStruct {
+    int_data: i32,
+    float_data: f32,
+    #[borrows(int_data)]
+    // the 'this lifetime is created by the #[self_referencing] macro
+    // and should be used on all references marked by the #[borrows] macro
+    int_reference: &'this i32,
+    #[borrows(mut float_data)]
+    float_reference: &'this mut f32,
+}
+
+#[self_referencing]
+pub struct OdeSolver<T: Scalar, V: Vector<T>> {
+    state: OdeSolverState<T, V>,
+    #[borrows(mut state)]
+    method: Box<dyn OdeSolverMethod<'this, T, V>>,
+}
+
+impl <T: Scalar, V: Vector<T>> OdeSolver<T, V> {
+    fn new<C: Callable<T, V>>(rhs: C) -> Self {
         Self {
             method: None,
             state: Self::default_state(&rhs),
         }
     }
     
-    fn default_state(rhs: &C) -> OdeSolverState<T, V, M, C> {
-        let nstates = rhs.nstates();
-        let nparams = rhs.nparams();
-        let y0 = V::zeros(nstates);
-        let t0 = T::zero();
-        let h0 = T::one();
-        let p = V::zeros(nparams);
-        let mass = M::eye(nstates);
-        OdeSolverState::new(y0, t0, h0, p, mass, rhs)
-    }
-    
-    fn get_state(&mut self) -> &OdeSolverState<T, V, M, C> {
+    fn get_state(&mut self) -> &OdeSolverState<T, V> {
         if self.method.is_some() {
             panic!("Cannot change state after method is initialized")
         }
@@ -86,15 +107,15 @@ impl <T: Scalar, V: Vector<T>, M: Matrix<T, V>, C: Callable<T, V>> OdeSolver<T, 
         self
     }
     
-    fn set_mass(&mut self, mass: M) -> &mut Self {
+    fn set_mass(&mut self, mass: Box<dyn Callable<T, V>>) -> &mut Self {
         self.get_state().mass = mass;
         self
     }
     
-    fn calculate_consistent_y0<NLS: NonLinearSolver<T, V, C>>(&mut self) -> Result<&mut Self> {
+    fn calculate_consistent_y0<S: Solver<T, V>>(&mut self) -> Result<&mut Self> {
         let mut mask = self.get_state().mass.diagonal();
         mask.map(|x| if x == T::zero() { T::one() } else { T::zero() });
-        let newton = NLS::new(self.rhs, Some(mask));
+        let newton = S::new(self.rhs, Some(mask));
         self.y = newton.solve(&self.y0)?;
         Ok(self)
     }

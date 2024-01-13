@@ -1,4 +1,4 @@
-use std::ops::{Index, IndexMut};
+use std::ops::{Index, IndexMut, Add, Sub};
 use std::fmt::{Debug, Display};
 
 use nalgebra::{ClosedMul, ClosedDiv, ClosedAdd, ClosedSub};
@@ -7,29 +7,25 @@ use crate::{Scalar, IndexType};
 
 mod serial;
 
-pub trait Vector<T: Scalar>: 
-    Clone + Debug + Display
-    + Index<IndexType, Output=T> 
+pub trait VectorView<T: Scalar, V: Vector<T>>: 
+    Index<IndexType, Output=T> 
     + IndexMut<IndexType, Output=T> 
+    + Debug + Display + Clone
     + for<'a> ClosedAdd<&'a Self> 
     + for<'a> ClosedSub<&'a Self> 
     + ClosedMul<T, Output=Self> 
     + ClosedDiv<T, Output=Self>
 {
-    fn from_element(nstates: usize, value: T) -> Self;
-    fn zeros(nstates: usize) -> Self {
-        Self::from_element(nstates, T::zero())
-    }
-    fn from_vec(vec: Vec<T>) -> Self;
-    fn abs(&self) -> Self;
-    fn add_scalar_mut(&mut self, scalar: T);
     fn len(&self) -> IndexType;
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    fn axpy(&mut self, alpha: T, x: &V);
+    fn norm(&self) -> T;
+    fn abs(&self) -> Self;
+    fn add_scalar_mut(&mut self, scalar: T);
     fn component_mul_assign(&mut self, other: &Self);
     fn component_div_assign(&mut self, other: &Self);
-    fn norm(&self) -> T;
     fn map_mut<F: Fn(T) -> T>(&mut self, f: F);
     fn assert_eq(&self, other: &Self, tol: T) {
         assert_eq!(self.len(), other.len(), "Vector length mismatch: {} != {}", self.len(), other.len());
@@ -50,6 +46,15 @@ pub trait Vector<T: Scalar>:
             }
         }
     }
+}
+
+pub trait Vector<T: Scalar>: VectorView<T, Self>
+{
+    fn from_element(nstates: usize, value: T) -> Self;
+    fn zeros(nstates: usize) -> Self {
+        Self::from_element(nstates, T::zero())
+    }
+    fn from_vec(vec: Vec<T>) -> Self;
 }
 
 
