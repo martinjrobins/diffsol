@@ -23,7 +23,7 @@ use nalgebra::{ClosedSub, ClosedMul, ClosedDiv, ClosedAdd, SimdRealField, Comple
 use num_traits::{Signed, Pow};
 use vector::{Vector, VectorView};
 use nonlinear_solver::newton::NewtonNonlinearSolver;
-use callable::Callable;
+use callable::{Callable, Jacobian};
 use matrix::{Matrix, MatrixView};
 use solver::{Solver, SolverStatistics};
 use linear_solver::lu::LU;

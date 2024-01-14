@@ -1,6 +1,6 @@
 use crate::{Scalar, Vector, Matrix};
 
-use super::Callable;
+use super::{Callable, Jacobian};
 
 // callable to solve for F(y) = M (y' + psi) - c * f(y) = 0 
 pub struct BdfCallable<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> {
@@ -44,7 +44,7 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> BdfCallable<'a, T, V, M> {
 
 
 // callable to solve for F(y) = M (y' + psi) - f(y) = 0 
-impl<'a, RightHandSide: Callable<T, V>, T: Scalar, V: Vector<T>, M: Matrix<T, V>> Callable<T, V> for BdfCallable<'a, T, V, M> {
+impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> Callable<T, V> for BdfCallable<'a, T, V, M> {
 
     // F(y) = M (y - y0 + psi) - c * f(y) = 0
     fn call(&self, x: &V, p: &V, y: &mut V) {
@@ -64,7 +64,11 @@ impl<'a, RightHandSide: Callable<T, V>, T: Scalar, V: Vector<T>, M: Matrix<T, V>
         self.rhs.jacobian_action(x, p, v, y);
         self.mass.gemv(v, p,  T::one(), -self.c, y);
     }
-    fn jacobian<M2: Matrix<T, V>>(&self, p: &V) -> M2 {
+    
+}
+
+impl<T: Scalar, V: Vector<T>, M: Matrix<T, V>> Jacobian<T, V, M> for BdfCallable<'_, T, V, M> {
+    fn jacobian(&self, p: &V) -> M {
         if self.rhs_jacobian_is_stale {
             self.rhs_jac = self.rhs.jacobian(p);
             self.rhs_jacobian_is_stale = false;
@@ -76,3 +80,4 @@ impl<'a, RightHandSide: Callable<T, V>, T: Scalar, V: Vector<T>, M: Matrix<T, V>
         self.jac
     }
 }
+

@@ -16,7 +16,10 @@ pub trait Callable<T: Scalar, V: Vector<T>> {
     fn nout(&self) -> usize;
     fn nparams(&self) -> usize;
     fn jacobian_action(&self, x: &V, p: &V, v: &V, y: &mut V);
-    fn jacobian<M: Matrix<T, V>>(&self, p: &V) -> M {
+}
+
+pub trait Jacobian<T: Scalar, V: Vector<T>, M: Matrix<T, V>>: Callable<T, V> {
+    fn jacobian(&self, p: &V) -> M {
         let mut v = V::zeros(self.nstates());
         let mut col = V::zeros(self.nout());
         let mut triplets = Vec::with_capacity(self.nstates());

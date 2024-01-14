@@ -28,8 +28,8 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> Bdf<'a, T, V, M> {
     const MIN_FACTOR: T = T::from(0.2);
     const MAX_FACTOR: T = T::from(10.0);
     
-    pub fn new(rtol: T, atol: &'a V, max_iter: IndexType, nonlinear_solver: impl Solver<'a, T, V>) -> Self {
-        let n = atol.len();
+    pub fn new() -> Self {
+        let n = 1;
         Self { 
             nonlinear_solver: None, 
             bdf_callable: None, 
@@ -164,16 +164,19 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> OdeSolverMethod<'a, T, V> for
         let mut f0 = V::zeros(nstates);
         state.rhs.call(&state.y, &state.p, &mut f0);
 
+        // y1 = y0 + h * f0
         let mut y1 = state.y.clone();
-        y1.axpy(state.h, &f0);
+        y1.axpy(state.h, &f0, T::one());
 
+        // df = f1 here
         let mut df = V::zeros(nstates);
         state.rhs.call(&y1, &state.p, &mut df);
         
         // store f1 in diff[1] for use in step size control
         self.diff.set_col(1, df * state.h);
 
-        df.axpy(T::from(-1.0), &f0);
+        // now df = f1 - f0
+        df.axpy(T::from(-1.0), &f0, T::one());
         df.component_div_assign(&scale);
         let d2 = df.norm();
         let mut new_h = state.h * d2.pow(-1 / (self.order + 1).into());

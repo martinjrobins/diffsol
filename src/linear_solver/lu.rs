@@ -16,9 +16,9 @@ impl<T: Scalar> Default for LU<T> {
 }
 
 
-impl<'a, T: Scalar, C: Callable<T, DVector<T>>> Solver<'a, T, DVector<T>> for LU<T> {
+impl<'a, T: Scalar> Solver<'a, T, DVector<T>> for LU<T> {
 
-    fn solve(&self, b: &DVector<T>) -> Result<DVector<T>> {
+    fn solve(&mut self, b: &DVector<T>) -> Result<DVector<T>> {
         if self.lu.is_none() {
             return Err(anyhow::anyhow!("LU not initialized"));
         }
@@ -41,7 +41,7 @@ impl<'a, T: Scalar, C: Callable<T, DVector<T>>> Solver<'a, T, DVector<T>> for LU
         self.lu = None;
     }
 
-    fn set_callable(&mut self, c: &'a C, p: &'a DVector<T>) {
+    fn set_callable(&mut self, c: &'a impl Callable<T, DVector<T>>, p: &'a DVector<T>) {
         self.lu = Some(nalgebra::LU::new(c.jacobian(p)));
     }
 }

@@ -1,4 +1,4 @@
-use crate::{Scalar, Vector, Matrix, callable::Callable, IndexType, solver::Solver};
+use crate::{Scalar, Vector, Matrix, callable::Callable, IndexType, solver::Solver, nonlinear_solver::newton::NewtonNonlinearSolver, linear_solver::lu::LU};
 
 use anyhow::Result;
 use ouroboros::self_referencing;
@@ -26,7 +26,7 @@ struct OdeSolverState<T: Scalar, V: Vector<T>> {
     nonlinear_max_iter: IndexType,
 }
 
-impl <T: Scalar, V: Vector<T>, M: Matrix<T, V>> OdeSolverState<T, V> {
+impl <T: Scalar, V: Vector<T>> OdeSolverState<T, V> {
     fn new(rhs: impl Callable<T, V>) -> Self {
         Self {
             y: V::zeros(rhs.nstates()),
@@ -59,17 +59,11 @@ struct MyStruct {
 pub struct OdeSolver<T: Scalar, V: Vector<T>> {
     state: OdeSolverState<T, V>,
     #[borrows(mut state)]
-    method: Box<dyn OdeSolverMethod<'this, T, V>>,
+    #[covariant]
+    method: Option<Box<dyn OdeSolverMethod<'this, T, V>>>,
 }
 
 impl <T: Scalar, V: Vector<T>> OdeSolver<T, V> {
-    fn new<C: Callable<T, V>>(rhs: C) -> Self {
-        Self {
-            method: None,
-            state: Self::default_state(&rhs),
-        }
-    }
-    
     fn get_state(&mut self) -> &OdeSolverState<T, V> {
         if self.method.is_some() {
             panic!("Cannot change state after method is initialized")
@@ -112,19 +106,19 @@ impl <T: Scalar, V: Vector<T>> OdeSolver<T, V> {
         self
     }
     
-    fn calculate_consistent_y0<S: Solver<T, V>>(&mut self) -> Result<&mut Self> {
+    fn calculate_consistent_y0(&mut self) -> Result<&mut Self> {
         let mut mask = self.get_state().mass.diagonal();
         mask.map(|x| if x == T::zero() { T::one() } else { T::zero() });
-        let newton = S::new(self.rhs, Some(mask));
+        let newton = NewtonNonlinearSolver::new(self.get_state().rtol, &self.get_state().atol, self.get_state().root_solver_max_iter, LU::default(), mask);
         self.y = newton.solve(&self.y0)?;
         Ok(self)
     }
     
     pub fn solve(&mut self, t: T) -> V {
         if self.method.is_none() {
-            self.method = match self.get_state().method {
-                Method::Bdf(method) => self.method = Some(Box::new(method)),
-            }
+            self.with_method_mut(|method| {
+                method = Some(bdf::Bdf::new());
+            });
         }
         while self.t <= t {
             self.t = self.method.step(t);

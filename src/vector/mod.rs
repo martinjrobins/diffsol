@@ -20,7 +20,7 @@ pub trait VectorView<T: Scalar, V: Vector<T>>:
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn axpy(&mut self, alpha: T, x: &V);
+    fn axpy<V2: VectorView<T, V>>(&mut self, alpha: T, x: &V2, beta: T);
     fn norm(&self) -> T;
     fn abs(&self) -> Self;
     fn add_scalar_mut(&mut self, scalar: T);
