@@ -3,28 +3,20 @@ pub mod gmres;
 
 #[cfg(test)]
 pub mod tests {
-    use crate::{Matrix, Solver, LU, Scalar, Vector, callable::closure::Closure};
-
+    use crate::{Matrix, Solver, LU, Scalar, Vector, callable::{closure::Closure, Callable}};
     
     // 0 = J * x - 8
-    fn square<T: Scalar, V: Vector<T>, M: Matrix<T, V>>(x: &V, y: &mut V, jac: &M) {
-        jac.mul_to(x, y);
+    fn square<T: Scalar, V: Vector<T>, M: Matrix<T, V>>(x: &V, p: &V, y: &mut V, jac: &M) {
+        jac.gemv(T::one(), x, T::zero(), y); // y = J * x
         y.add_scalar_mut(T::from(-8.0));
     }
 
     // J = J * dx
-    fn square_jacobian<T: Scalar, V: Vector<T>, M: Matrix<T, V>>(x: &V, v: &V, y: &mut V, jac: &M) {
-        jac.mul_to(x, y);
+    fn square_jacobian<T: Scalar, V: Vector<T>, M: Matrix<T, V>>(x: &V, p: &V, v: &V, y: &mut V, jac: &M) {
+        jac.gemv(T::one(), v, T::zero(), y); // y = J * v
     }
 
-    pub fn test_linear_solver<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, S: Solver<'a, T, V>>(mut s: S) {
-        let jac = Matrix::from_diagonal(&V::from_vec(vec![2.0.into(), 2.0.into()]));
-        let op = Closure::<fn(&V, &mut V, &M), fn(&V, &V, &mut V, &M), M>::new(
-            square,
-            square_jacobian,
-            jac, 
-            2,
-        );
+    pub fn test_linear_solver<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, C: Callable<T, V>, S: Solver<'a, T, V, C>>(mut s: S, op: C) {
         s.set_callable(&op, &V::zeros(0));
         let b = V::from_vec(vec![2.0.into(), 4.0.into()]);
         let x = s.solve(&b).unwrap();
@@ -37,6 +29,15 @@ pub mod tests {
         type T = f64;
         type V = nalgebra::DVector<T>;
         type M = nalgebra::DMatrix<T>;
-        test_linear_solver::<T, V, M>(LU::default());
+        type C = Closure<fn(&V, &V, &mut V, &M), fn(&V, &V, &V, &mut V, &M), M>;
+        type S = LU<T>;
+        let lu = LU::<T>::default();
+        let op = C::new(
+            square,
+            square_jacobian,
+            M::from_diagonal(&V::from_vec(vec![2.0.into(), 2.0.into()])), 
+            2,
+        );
+        test_linear_solver::<T, V, M, C, S>(lu, op);
     }
 }

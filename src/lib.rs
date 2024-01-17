@@ -21,9 +21,9 @@ use std::fmt::Display;
 
 use nalgebra::{ClosedSub, ClosedMul, ClosedDiv, ClosedAdd, SimdRealField, ComplexField};
 use num_traits::{Signed, Pow};
-use vector::{Vector, VectorView};
+use vector::{Vector, VectorView, VectorViewMut};
 use nonlinear_solver::newton::NewtonNonlinearSolver;
 use callable::{Callable, Jacobian};
-use matrix::{Matrix, MatrixView};
+use matrix::{Matrix, MatrixView, MatrixViewMut};
 use solver::{Solver, SolverStatistics};
 use linear_solver::lu::LU;

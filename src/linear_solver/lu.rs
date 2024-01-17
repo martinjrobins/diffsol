@@ -1,7 +1,7 @@
-use nalgebra::{DVector, Dyn};
+use nalgebra::{DVector, Dyn, DMatrix};
 use anyhow::Result;
 
-use crate::{Scalar, callable::Callable, solver::Solver};
+use crate::{Scalar, callable::{Callable, Jacobian}, solver::Solver, matrix::Matrix};
 
 pub struct LU<T: Scalar> {
     lu: Option<nalgebra::LU<T, Dyn, Dyn>>,
@@ -16,7 +16,7 @@ impl<T: Scalar> Default for LU<T> {
 }
 
 
-impl<'a, T: Scalar> Solver<'a, T, DVector<T>> for LU<T> {
+impl<'a, T: Scalar, C: Callable<T, DVector<T>> + Jacobian<T, DVector<T>, DMatrix<T>>> Solver<'a, T, DVector<T>, C> for LU<T> {
 
     fn solve(&mut self, b: &DVector<T>) -> Result<DVector<T>> {
         if self.lu.is_none() {
@@ -41,7 +41,7 @@ impl<'a, T: Scalar> Solver<'a, T, DVector<T>> for LU<T> {
         self.lu = None;
     }
 
-    fn set_callable(&mut self, c: &'a impl Callable<T, DVector<T>>, p: &'a DVector<T>) {
+    fn set_callable(&mut self, c: &'a C, p: &'a DVector<T>) {
         self.lu = Some(nalgebra::LU::new(c.jacobian(p)));
     }
 }

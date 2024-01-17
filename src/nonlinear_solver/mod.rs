@@ -42,7 +42,7 @@ impl <'a, T: Scalar, V: Vector<T>> Convergence<'a, T, V> {
     }
     fn reset(&mut self, y: &V) {
         let mut scale = y.abs() * self.rtol;
-        scale += &self.atol;
+        scale += self.atol;
         self.scale = Some(scale);
         self.iter = 0;
         self.old_norm = None;
@@ -83,28 +83,27 @@ pub mod newton;
 //tests
 #[cfg(test)]
 pub mod tests {
-    use crate::{callable::closure::Closure, Matrix, Solver};
+    use crate::{callable::{closure::Closure, Callable}, Matrix, Solver};
     use super::*;
     
     // 0 = J * x * x - 8
-    fn square<T: Scalar, V: Vector<T>, M: Matrix<T, V>>(x: &V, y: &mut V, jac: &M) {
-        jac.mul_to(x, y);
+    fn square<T: Scalar, V: Vector<T>, M: Matrix<T, V>>(x: &V, p: &V, y: &mut V, jac: &M) {
+        jac.gemv(T::one(), x, T::zero(), y); // y = J * x
         y.component_mul_assign(x);
         y.add_scalar_mut(T::from(-8.0));
     }
 
     // J = 2 * J * x * dx
-    fn square_jacobian<T: Scalar, V: Vector<T>, M: Matrix<T, V>>(x: &V, v: &V, y: &mut V, jac: &M) {
-        jac.mul_to(x, y);
+    fn square_jacobian<T: Scalar, V: Vector<T>, M: Matrix<T, V>>(x: &V, p: &V, v: &V, y: &mut V, jac: &M) {
+        jac.gemv(T::from(2.0), x, T::zero(), y); // y = 2 * J * x
         y.component_mul_assign(v);
-        *y *= T::from(2.0);
     }
     
     pub type SquareClosure<V, M> = Closure<fn(&V, &mut V, &M), fn(&V, &V, &mut V, &M), M>;
     
-    pub fn get_square_problem<T: Scalar, V: Vector<T>, M: Matrix<T, V>>() -> SquareClosure<V, M> {
+    pub fn get_square_problem<T: Scalar, V: Vector<T>, M: Matrix<T, V>>() -> Closure<fn(&V, &V, &mut V, &M), fn(&V, &V, &V, &mut V, &M), M> {
         let jac = Matrix::from_diagonal(&V::from_vec(vec![2.0.into(), 2.0.into()]));
-        Closure::<fn(&V, &mut V, &M), fn(&V, &V, &mut V, &M), M>::new(
+        Closure::<fn(&V, &V, &mut V, &M), fn(&V, &V, &V, &mut V, &M), M>::new(
             square,
             square_jacobian,
             jac, 
@@ -112,19 +111,12 @@ pub mod tests {
         )
     }
     
-    pub fn test_nonlinear_solver<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, S: Solver<'a, T, V>> (solver: S) {
-        solver.set_callable(&get_square_problem::<T, V, M>(), &V::zeros(0));
+    pub fn test_nonlinear_solver<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, C: Callable<T, V>, S: Solver<'a, T, V, C>> (mut solver: S, op: C) {
+        solver.set_callable(&op, &V::zeros(0));
         let x0 = V::from_vec(vec![2.1.into(), 2.1.into()]);
         let x = solver.solve(&x0).unwrap();
         let expect = V::from_vec(vec![2.0.into(), 2.0.into()]);
         x.assert_eq(&expect, 1e-6.into());
-        
-        solver.set_callable(&get_square_problem::<T, V, M>(), vec![0, 1]);
-        let x0 = V::from_vec(vec![2.1.into(), 2.1.into()]);
-        let x = solver.solve(&x0).unwrap();
-        let expect = V::from_vec(vec![2.1.into(), 2.0.into()]);
-        x.assert_eq(&expect, 1e-6.into());
-
     }
     
     

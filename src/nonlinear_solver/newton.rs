@@ -1,19 +1,19 @@
-use crate::{Scalar, Vector, Callable, IndexType, Solver, SolverStatistics};
+use crate::{Scalar, Vector, Callable, IndexType, Solver, SolverStatistics, callable::Jacobian, matrix::Matrix};
 use anyhow::{anyhow, Result};
 
 use super::{Convergence, ConvergenceStatus};
 
-pub struct NewtonNonlinearSolver<'a, T: Scalar, V: Vector<T>> {
-    callable: Option<&'a dyn Callable<T, V>>,
+pub struct NewtonNonlinearSolver<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> {
+    callable: Option<&'a C>,
     params: Option<&'a V>,
     convergence: Convergence<'a, T, V>,
     zero_by_mask: Option<V>,
-    linear_solver: Box<dyn Solver<'a, T, V>>,
+    linear_solver: Box<dyn Solver<'a, T, V, C>>,
     statistics: SolverStatistics,
 }
 
-impl <'a, T: Scalar, V: Vector<T>> NewtonNonlinearSolver<'a, T, V> {
-    pub fn new(rtol: T, atol: &'a V, max_iter: IndexType, linear_solver: impl Solver<'a, T, V>, mask: Option<Vec<IndexType>>) -> Self {
+impl <'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> NewtonNonlinearSolver<'a, T, V, C> {
+    pub fn new(rtol: T, atol: &'a V, max_iter: IndexType, linear_solver: impl Solver<'a, T, V, C>, mask: Option<Vec<IndexType>>) -> Self {
         let convergence = Convergence::new(rtol, atol, max_iter);
         let zero_by_mask= match mask {
             Some(mask) => {
@@ -38,8 +38,8 @@ impl <'a, T: Scalar, V: Vector<T>> NewtonNonlinearSolver<'a, T, V> {
 }
 
 
-impl<'a, T: Scalar, V: Vector<T>> Solver<'a, T, V> for NewtonNonlinearSolver<'a, T, V> {
-    fn set_callable(&mut self, c: &'a impl Callable<T, V>, p: &'a V) {
+impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> Solver<'a, T, V, C> for NewtonNonlinearSolver<'a, T, V, C> {
+    fn set_callable(&mut self, c: &'a C, p: &'a V) {
         if self.convergence.atol.len() != c.nstates() {
             panic!("NewtonNonlinearSolver::set_callable() called with callable with different number of states");
         }
@@ -89,7 +89,7 @@ impl<'a, T: Scalar, V: Vector<T>> Solver<'a, T, V> for NewtonNonlinearSolver<'a,
                     delta_xn
                 };
 
-                xn -= &delta_xn;
+                xn -= delta_xn;
 
                 let res = self.convergence.check_new_iteration(delta_xn);
                 match res  {
@@ -115,9 +115,10 @@ impl<'a, T: Scalar, V: Vector<T>> Solver<'a, T, V> for NewtonNonlinearSolver<'a,
 // tests
 #[cfg(test)]
 mod tests {
-    use nalgebra::Dyn;
 
     use crate::LU;
+    use crate::callable::closure::Closure;
+    use crate::nonlinear_solver::tests::get_square_problem;
 
     use super::*;
     use super::super::tests::test_nonlinear_solver;
@@ -127,14 +128,17 @@ mod tests {
         type T = f64;
         type V = nalgebra::DVector<T>;
         type M = nalgebra::DMatrix<T>;
-        type LS = nalgebra::LU<T, Dyn, Dyn>;
-        let s = NewtonNonlinearSolver::new(
+        type C = Closure<fn(&V, &V, &mut V, &M), fn(&V, &V, &V, &mut V, &M), M>;
+        type S = NewtonNonlinearSolver<'static, T, V, C>;
+        let lu = LU::<T>::default();
+        let op = get_square_problem::<T, V, M>();
+        let s = S::new(
             T::from(1e-6),
             &V::from_vec(vec![T::from(1e-6), T::from(1e-6)]),
             100,
-            LU::<T>::default(),
+            lu,
             None,
         );
-        test_nonlinear_solver::<T, V, M>(s);
+        test_nonlinear_solver::<T, V, M, C, S>(s, op);
     }
 }

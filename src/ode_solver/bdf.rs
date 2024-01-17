@@ -5,13 +5,14 @@ use crate::{Scalar, Vector, IndexType, Callable, Matrix, Solver, callable::ode::
 use super::{OdeSolverState, OdeSolverMethod};
 
 
-pub struct Bdf<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> {
-    nonlinear_solver: Option<Box<dyn Solver<'a, T, V>>>,
-    bdf_callable: Option<BdfCallable<'a, T, V, M>>,
+pub struct Bdf<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V>> {
+    nonlinear_solver: Option<Box<dyn Solver<'a, T, V, BdfCallable<'a, T, V, M, CRhs, CMass>>>>,
+    bdf_callable: Option<BdfCallable<'a, T, V, M, CRhs, CMass>>,
     state: Option<&'a OdeSolverState<T, V>>,
-    order: u32,
-    n_equal_steps: u32,
+    order: usize,
+    n_equal_steps: usize,
     diff: M,
+    diff_tmp: M,
     u: M,
     r: M,
     ru: M,
@@ -22,7 +23,7 @@ pub struct Bdf<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> {
 
 // implement OdeSolverMethod for Bdf
 
-impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> Bdf<'a, T, V, M> {
+impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V>> Bdf<'a, T, V, M, CRhs, CMass> {
     const MAX_ORDER: IndexType = 5;
     const NEWTON_MAXITER: IndexType = 4;
     const MIN_FACTOR: T = T::from(0.2);
@@ -36,7 +37,8 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> Bdf<'a, T, V, M> {
             state: None, 
             order: 1, 
             n_equal_steps: 0, 
-            diff: M::zeros(Self::MAX_ORDER, n), 
+            diff: M::zeros(n, Self::MAX_ORDER), 
+            diff_tmp: M::zeros(n, Self::MAX_ORDER), 
             gamma: vec![T::from(1.0); Self::MAX_ORDER + 1], 
             alpha: vec![T::from(1.0); Self::MAX_ORDER + 1], 
             error_const: vec![T::from(1.0); Self::MAX_ORDER + 1], 
@@ -48,12 +50,12 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> Bdf<'a, T, V, M> {
     fn _predict(&self) {
         // predict forward to new step (eq 2 in [1])
         for i in 1..=self.order {
-            self.y += self.diff.row(i);
+            self.state.unwrap().y += self.diff.column(i);
         }
         self.scale_y = self.atol + self.state.rtol * self.y.abs();
     }
 
-    fn _compute_r(order: u32, factor: T) -> M {
+    fn _compute_r(order: usize, factor: T) -> M {
         //computes the R matrix with entries
         //given by the first equation on page 8 of [1]
         //
@@ -65,7 +67,9 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> Bdf<'a, T, V, M> {
         let mut r = M::zeros(order + 1, order + 1);
         for i in 1..=order {
             for j in 1..=order {
-                r[(i, j)] = r[(i-1, j)] * (i - 1 - factor * j) / i;
+                let i_t: T = T::from(i as f64);
+                let j_t = T::from(j as f64);
+                r[(i, j)] = r[(i-1, j)] * (i_t - T::one() - factor * j_t) / i_t;
             }
         }
         r
@@ -79,21 +83,26 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> Bdf<'a, T, V, M> {
         //- lu factorisation of (M - c * J) used in newton iteration (same equation)
         //- psi term
 
-        self.h *= factor;
+        self.state.unwrap().h *= factor;
         self.n_equal_steps = 0;
 
         // update D using equations in section 3.2 of [1]
-        self.r = self._compute_R(self.order, factor);
-        M::gemm(T::one(), &self.r, &self.u, T::zero(), &mut self.ru);
-        M::gemm(T::one(), self.diff.rows(0, self.order), &self.ru, T::zero(), &mut self.diff_tmp);
+        self.r = Self::_compute_r(self.order, factor);
+        self.ru.gemm(T::one(), &self.r, &self.u, T::zero()); // ru = R * U
+        // D[0:order] = R * U * D[0:order]
+        let d_zero_order = self.diff.columns(0, self.order);
+        let d_zero_order_tmp = self.diff_tmp.columns_mut(0, self.order);
+        d_zero_order_tmp.gemm(T::one(), &self.ru, d_zero_order, T::zero()); // diff_sub = R * U * diff
         std::mem::swap(&mut self.diff, &mut self.diff_tmp);
 
         // update y0 (D has changed)
         self._predict();
 
         // update psi and c (h, D, y0 has changed)
-        self.bdf_callable.set_psi_and_y0(&self.diff, &self.gamma, &self.alpha, self.order, &self.y);
-        self.bdf_callable.set_c(self.h, &self.alpha, self.order);
+        let state = self.state.unwrap();
+        let callable = self.bdf_callable.as_ref().unwrap();
+        callable.set_psi_and_y0(&self.diff, &self.gamma, &self.alpha, self.order, &state.y);
+        callable.set_c(state.h, &self.alpha, self.order);
     }
 
     
@@ -109,25 +118,27 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> Bdf<'a, T, V, M> {
         //
         //Combining these gives the following algorithm
         let order = self.order;
-        self.diff.row_mut(order + 2) = d - self.diff.row(order + 1);
-        self.diff.row_mut(order + 1) = d;
+        self.diff.set_column(order + 2, d - self.diff.column(order + 1));
+        self.diff.set_column(order + 1, d);
         for i in (0..=order).rev() {
-            self.diff.row_mut(i) += self.diff.row(i + 1);
+            self.diff.add_assign_column(i, self.diff.column(i + 1));
         }
     }
 }
 
 
-impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> OdeSolverMethod<'a, T, V> for Bdf<'a, T, V, M> {
+impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V>> OdeSolverMethod<'a, T, V> for Bdf<'a, T, V, M, CRhs, CMass> {
     fn interpolate(&self, t: T) -> V {
         //interpolate solution at time values t* where t-h < t* < t
         //
         //definition of the interpolating polynomial can be found on page 7 of [1]
         let mut time_factor = T::from(1.0);
-        let order_summation = self.diff.row(0).clone();
+        let state = self.state.unwrap();
+        let order_summation = self.diff.column(0).clone();
         for i in 0..self.order {
-            time_factor *= (t - (self.state.t - self.state.h * i)) / (self.state.h * (1 + i));
-            order_summation += self.diff.row(i + 1) * time_factor;
+            let i_t = T::from(i as f64);
+            time_factor *= (t - (state.t - state.h * i)) / (state.h * (T::one() + i_t));
+            order_summation += self.diff.column(i + 1) * time_factor;
         }
         order_summation
     }
@@ -137,23 +148,21 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> OdeSolverMethod<'a, T, V> for
         self.state = Some(state);
 
         let nstates = state.rhs.nstates();
-        self.order = 1u32; 
-        self.psi = T::from(1.0);
-        self.c = T::from(1.0);
+        self.order = 1usize; 
         self.n_equal_steps = 0;
         self.diff = M::zeros(Self::MAX_ORDER + 1, nstates);
-        self.diff.set_col(0, state.y);
+        self.diff.column_mut(0) = state.y;
         
         // kappa values for difference orders, taken from Table 1 of [1]
-        let mut kappa = vec![0, -0.1850, -1 / 9, -0.0823, -0.0415, 0];
-        self.alpha = vec![0];
-        self.gamma = vec![0];
-        self.error_const = vec![0];
+        let mut kappa = vec![T::from(0.0), T::from(-0.1850), T::from(-1.0) / T::from(9.0), T::from(-0.0823), T::from(-0.0415), T::from(0.0)];
+        self.alpha = vec![T::zero()];
+        self.gamma = vec![T::zero()];
+        self.error_const = vec![T::zero()];
         let mut gamma = 0;
         for i in 1..=Self::MAX_ORDER {
             self.gamma.push(self.gamma[i-1] + 1 / (i + 1).into());
-            self.alpha.push(1.0 / ((1 - kappa[i]) * gamma));
-            self.error_const.push(kappa[i] * gamma + 1 / (i + 1).into());
+            self.alpha.push(T::one() / ((T::one() - kappa[i]) * self.gamma[i]));
+            self.error_const.push(kappa[i] * self.gamma[i] + 1 / (i + 1).into());
         }
 
         // update initial step size based on function
@@ -173,7 +182,7 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> OdeSolverMethod<'a, T, V> for
         state.rhs.call(&y1, &state.p, &mut df);
         
         // store f1 in diff[1] for use in step size control
-        self.diff.set_col(1, df * state.h);
+        self.diff.column_mut(1) = df * state.h;
 
         // now df = f1 - f0
         df.axpy(T::from(-1.0), &f0, T::one());
@@ -192,7 +201,7 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> OdeSolverMethod<'a, T, V> for
         self.nonlinear_solver.set_callable(callable, &state.p);
         
         // setup U
-        self.u = self._compute_R(self.order, 1.0);
+        self.u = Self::_compute_r(self.order, T::one());
     }
 
     fn is_state_set(&self) -> bool {
@@ -244,7 +253,7 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> OdeSolverMethod<'a, T, V> for
                         // and reduce step size and try again
                         let newton_stats = self.nonlinear_solver.get_statistics();
                         let factor = max( 
-                            Self::MIN_FACTOR, safety * error_norm ** (-1 / (self.order + 1))
+                            Self::MIN_FACTOR, safety * error_norm.pow(-1 / (self.order + 1))
                         );
                         self._update_step_size(factor);
                         step_accepted = false; 
@@ -296,7 +305,7 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>> OdeSolverMethod<'a, T, V> for
 
             let error_norms = vec!([error_m_norm, error_norm, error_p_norm]);
             let factors = error_norms.into_iter().enumerate().map(|(i, error_norm)| {
-                error_norm ** (-1 / (i + order))
+                error_norm.pow(-1 / (i + order))
             }).collect::<Vec<_>>();
 
             // now we have the three factors for orders k-1, k and k+1, pick the maximum in

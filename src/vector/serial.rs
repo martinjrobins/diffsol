@@ -1,33 +1,30 @@
-use nalgebra::DVector;
+use nalgebra::{DVector, DVectorView, DVectorViewMut};
 
 use crate::Scalar;
 
-use super::{Vector, VectorView};
+use super::{Vector, VectorView, VectorCommon};
 
-impl<T: Scalar> VectorView<T, DVector<T>> for DVector<T> {
-    fn abs(&self) -> Self {
-        self.abs()
-    }
-    fn add_scalar_mut(&mut self, scalar: T) {
-        self.add_scalar_mut(scalar);
-    }
-    fn axpy<V: VectorView<T, DVector<T>>>(&mut self, alpha: T, x: &V, beta: T) {
-        self.axpy(alpha, x, beta);
-    }
-    fn component_div_assign(&mut self, other: &Self) {
-        self.component_div_assign(other);
-    }
-    fn component_mul_assign(&mut self, other: &Self) {
-        self.component_mul_assign(other);
-    }
-    fn is_empty(&self) -> bool {
-        self.is_empty()
-    }
+impl<T: Scalar> VectorCommon<T> for DVector<T> {
     fn len(&self) -> crate::IndexType {
         self.len()
     }
-    fn map_mut<F: Fn(T) -> T>(&mut self, f: F) {
-        self.map_mut(f);
+    fn norm(&self) -> T {
+        self.norm()
+    }
+}
+
+impl<'a, T: Scalar> VectorCommon<T> for DVectorView<'a, T> {
+    fn len(&self) -> crate::IndexType {
+        self.len()
+    }
+    fn norm(&self) -> T {
+        self.norm()
+    }
+}
+
+impl<'a, T: Scalar> VectorCommon<T> for DVectorViewMut<'a, T> {
+    fn len(&self) -> crate::IndexType {
+        self.len()
     }
     fn norm(&self) -> T {
         self.norm()
@@ -35,7 +32,18 @@ impl<T: Scalar> VectorView<T, DVector<T>> for DVector<T> {
 }
 
 
+impl<'a, T: Scalar> VectorView<'a, T> for DVectorView<'a, T> {
+    type Owned = DVector<T>;
+    fn abs(&self) -> DVector<T> {
+        self.abs()
+    }
+}
+
 impl<T: Scalar> Vector<T> for DVector<T> {
+    type View<'a> = DVectorView<'a, T>;
+    fn abs(&self) -> Self {
+        self.abs()
+    }
     fn from_element(nstates: usize, value: T) -> Self {
         Self::from_element(nstates, value)
     }
@@ -44,6 +52,21 @@ impl<T: Scalar> Vector<T> for DVector<T> {
     }
     fn zeros(nstates: usize) -> Self {
         Self::zeros(nstates)
+    }
+    fn add_scalar_mut(&mut self, scalar: T) {
+        self.add_scalar_mut(scalar);
+    }
+    fn axpy(&mut self, alpha: T, x: &Self, beta: T) {
+        self.axpy(alpha, x, beta);
+    }
+    fn component_div_assign(&mut self, other: &Self) {
+        self.component_div_assign(other);
+    }
+    fn component_mul_assign(&mut self, other: &Self) {
+        self.component_mul_assign(other);
+    }
+    fn map_mut<F: Fn(T) -> T>(&mut self, f: F) {
+        self.map_mut(f);
     }
 }
 

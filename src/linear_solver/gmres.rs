@@ -1,18 +1,18 @@
 use anyhow::Result;
 
-use crate::{Scalar, Vector, Solver, SolverStatistics};
+use crate::{Scalar, Vector, Solver, SolverStatistics, callable::Callable};
 
 
-pub struct GMRES<T: Scalar, V: Vector<T>> {
+pub struct GMRES<T: Scalar, V: Vector<T>, C: Callable<T, V>> {
     // ...
 }
 
-impl<T: Scalar, V: Vector<T>> GMRES<T, V> {
+impl<T: Scalar, V: Vector<T>, C: Callable<T, V>> GMRES<T, V, C> {
     // ...
 }
 
-impl<'a, T: Scalar, V: Vector<T>> Solver<'a, T, V> for GMRES<T, V> {
-    fn set_callable(&mut self, c: &'a impl crate::callable::Callable<T, V>, p: &'a V) {
+impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> Solver<'a, T, V, C> for GMRES<T, V, C> {
+    fn set_callable(&mut self, c: &'a C, p: &'a V) {
         todo!()
     }
 

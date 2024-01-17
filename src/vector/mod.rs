@@ -1,36 +1,23 @@
-use std::ops::{Index, IndexMut, Add, Sub};
+use std::ops::{Index, IndexMut, Deref, Mul, MulAssign, Div, DivAssign, Add, Sub};
 use std::fmt::{Debug, Display};
 
-use nalgebra::{ClosedMul, ClosedDiv, ClosedAdd, ClosedSub};
+use nalgebra::{ClosedMul, ClosedDiv, ClosedAdd, ClosedSub, Owned};
 
 use crate::{Scalar, IndexType};
 
 mod serial;
 
-pub trait VectorView<T: Scalar, V: Vector<T>>: 
-    Index<IndexType, Output=T> 
-    + IndexMut<IndexType, Output=T> 
-    + Debug + Display + Clone
-    + for<'a> ClosedAdd<&'a Self> 
-    + for<'a> ClosedSub<&'a Self> 
-    + ClosedMul<T, Output=Self> 
-    + ClosedDiv<T, Output=Self>
-{
+pub trait VectorCommon<T: Scalar>: Sized + Index<IndexType, Output=T> + Debug + Display {
+    fn norm(&self) -> T;
+    
     fn len(&self) -> IndexType;
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn axpy<V2: VectorView<T, V>>(&mut self, alpha: T, x: &V2, beta: T);
-    fn norm(&self) -> T;
-    fn abs(&self) -> Self;
-    fn add_scalar_mut(&mut self, scalar: T);
-    fn component_mul_assign(&mut self, other: &Self);
-    fn component_div_assign(&mut self, other: &Self);
-    fn map_mut<F: Fn(T) -> T>(&mut self, f: F);
     fn assert_eq(&self, other: &Self, tol: T) {
         assert_eq!(self.len(), other.len(), "Vector length mismatch: {} != {}", self.len(), other.len());
         for i in 0..self.len() {
-            if T::abs(&(self[i] - other[i])) > tol {
+            if num_traits::abs(self[i] - other[i]) > tol {
                 eprintln!("Vector element mismatch at index {}: {} != {}", i, self[i], other[i]);
                 if self.len() <= 3 {
                     eprintln!("left: {}", self);
@@ -48,13 +35,44 @@ pub trait VectorView<T: Scalar, V: Vector<T>>:
     }
 }
 
-pub trait Vector<T: Scalar>: VectorView<T, Self>
+pub trait VectorView<'a, T: Scalar>: 
+    VectorCommon<T>
+    + for<'b> Add<&'b Self, Output = Self::Owned> 
+    + for<'b> Sub<&'b Self, Output = Self::Owned> 
+    + Add<Self, Output = Self::Owned> 
+    + Sub<Self, Output = Self::Owned> 
+    + Mul<T, Output = Self::Owned>
+    + Div<T, Output = Self::Owned>
 {
+    type Owned: Vector<T>;
+    fn abs(&self) -> Self::Owned;
+}
+
+pub trait Vector<T: Scalar>:
+    VectorCommon<T>
+    + for<'a> ClosedAdd<&'a Self, Output = Self> 
+    + for<'a> ClosedSub<&'a Self, Output = Self> 
+    + for<'a> ClosedAdd<Self::View<'a>, Output = Self> 
+    + for<'a> ClosedSub<Self::View<'a>, Output = Self> 
+    + ClosedAdd<Self, Output = Self> 
+    + ClosedSub<Self, Output = Self> 
+    + ClosedMul<T, Output = Self> 
+    + ClosedDiv<T, Output = Self> 
+    + IndexMut<IndexType, Output=T> 
+    + Clone
+{
+    type View<'a>: VectorView<'a, T, Owned = Self> where Self: 'a;
+    fn abs(&self) -> Self;
     fn from_element(nstates: usize, value: T) -> Self;
     fn zeros(nstates: usize) -> Self {
         Self::from_element(nstates, T::zero())
     }
     fn from_vec(vec: Vec<T>) -> Self;
+    fn axpy(&mut self, alpha: T, x: &Self, beta: T);
+    fn add_scalar_mut(&mut self, scalar: T);
+    fn component_mul_assign(&mut self, other: &Self);
+    fn component_div_assign(&mut self, other: &Self);
+    fn map_mut<F: Fn(T) -> T>(&mut self, f: F);
 }
 
 

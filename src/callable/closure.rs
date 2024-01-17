@@ -1,6 +1,6 @@
-use crate::{Scalar, Vector, IndexType};
+use crate::{Scalar, Vector, IndexType, matrix::Matrix};
 
-use super::Callable;
+use super::{Callable, Jacobian};
 
 pub struct Closure<F, G, D> {
     func: F,
@@ -37,3 +37,12 @@ impl<F, G, D, T, V> Callable<T, V> for Closure<F, G, D>
         0
     }
 }
+
+// implement Jacobian
+impl<F, G, D, T, V, M> Jacobian<T, V, M> for Closure<F, G, D>
+    where F: Fn(&V, &V, &mut V, &D),
+          G: Fn(&V, &V, &V, &mut V, &D),
+          T: Scalar,
+          V: Vector<T>,
+          M: Matrix<T, V>,
+{}
