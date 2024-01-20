@@ -1,93 +1,102 @@
-use crate::{Scalar, Vector, Callable, IndexType, Solver, SolverStatistics, callable::Jacobian, matrix::Matrix};
+use crate::{Scalar, Vector, Callable, IndexType, Solver, SolverStatistics, Jacobian, Matrix, SolverOptions, LU, SolverProblem};
 use anyhow::{anyhow, Result};
 
 use super::{Convergence, ConvergenceStatus};
 
 pub struct NewtonNonlinearSolver<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> {
-    callable: Option<&'a C>,
-    params: Option<&'a V>,
-    convergence: Convergence<'a, T, V>,
-    zero_by_mask: Option<V>,
+    convergence: Option<Convergence<'a, T, V>>,
     linear_solver: Box<dyn Solver<'a, T, V, C>>,
+    atol: Option<V>,
     statistics: SolverStatistics,
+    options: SolverOptions<T>,
+    problem: Option<SolverProblem<'a, T, V, C>>,
 }
 
 impl <'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> NewtonNonlinearSolver<'a, T, V, C> {
-    pub fn new(rtol: T, atol: &'a V, max_iter: IndexType, linear_solver: impl Solver<'a, T, V, C>, mask: Option<Vec<IndexType>>) -> Self {
-        let convergence = Convergence::new(rtol, atol, max_iter);
-        let zero_by_mask= match mask {
-            Some(mask) => {
-                let diag = V::from_vec(mask.iter().map(|i| if *i == 0 { T::zero() } else { T::one() }).collect());
-                Some(diag)
-            },
-            None => None,
-        };
+    pub fn new(linear_solver: impl Solver<'a, T, V, C>) -> Self {
+        let options = SolverOptions::<T, V>::default();
         let statistics = SolverStatistics {
             niter: 0,
-            nmaxiter: max_iter,
+            nmaxiter: 0,
         };
+        let linear_solver = Box::new(linear_solver);
         Self {
-            callable: None,
-            params: None,
-            linear_solver: Box::new(linear_solver),
-            convergence,
-            zero_by_mask,
+            problem: None,
+            convergence: None,
+            atol: None,
+            linear_solver,
             statistics,
+            options,
         }
     }
 }
 
-
 impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> Solver<'a, T, V, C> for NewtonNonlinearSolver<'a, T, V, C> {
-    fn set_callable(&mut self, c: &'a C, p: &'a V) {
-        if self.convergence.atol.len() != c.nstates() {
-            panic!("NewtonNonlinearSolver::set_callable() called with callable with different number of states");
-        }
-        self.callable = Some(c);
-        self.params = Some(p);
-        self.linear_solver.clear_callable()
-    }
-    fn is_callable_set(&self) -> bool {
-        self.callable.is_some()
+
+    fn options(&self) -> Option<&SolverOptions<T>> {
+        Some(&self.options)
     }
 
-    fn clear_callable(&mut self) {
-        self.callable = None;
-        self.params = None;
-        self.linear_solver.clear_callable()
+    fn set_options(&mut self, options: SolverOptions<T>) {
+        self.options = options;
     }
+
+    fn problem(&self) -> Option<&SolverProblem<'a, T, V, C>> {
+        self.problem.as_ref()
+    }
+
+    fn set_problem(&mut self, problem: SolverProblem<'a, T, V, C>) {
+        let nstates = problem.f.nstates();
+        let atol = if problem.atol.is_some() {
+            problem.atol.unwrap()
+        } else {
+            if self.atol.is_none() {
+                self.atol = Some(V::from_element(nstates, self.options.atol));
+            } else if self.atol.unwrap().len() != nstates {
+                self.atol = Some(V::from_element(nstates, self.options.atol));
+            }
+            &self.atol.unwrap()
+        };
+        self.problem = Some(problem);
+        if self.convergence.is_none() {
+            self.convergence = Some(Convergence::new(
+                self.options.rtol,
+                atol,
+                self.options.max_iter,
+            ));
+        } else {
+            self.convergence.unwrap().rtol = self.options.rtol;
+            self.convergence.unwrap().atol = atol;
+            self.convergence.unwrap().max_iter = self.options.max_iter;
+        }
+    }
+    
     
     fn get_statistics(&self) -> &SolverStatistics {
         &self.statistics
     }
 
     fn solve(&mut self, x0: &V) -> Result<V> {
-        if self.callable.is_none() {
-            return Err(anyhow!("NewtonNonlinearSolver::solve() called before callable was set"));
+        if self.convergence.is_none() || self.problem.is_none() {
+            return Err(anyhow!("NewtonNonlinearSolver::solve() called before set_problem"));
         }
-        let op = self.callable.unwrap();
-        let p = self.params.unwrap();
+        let convergence = self.convergence.as_mut().unwrap();
+        let problem = self.problem.as_ref().unwrap();
         let mut xn = x0.clone();
         self.convergence.reset(&xn);
         let mut f_at_n = xn.clone();
         let mut updated_jacobian = false;
         self.statistics.niter = 0;
         loop {
-            if !self.linear_solver.is_callable_set() {
-                self.linear_solver.set_callable(op, p);
+            if self.linear_solver.problem().is_none() {
+                self.linear_solver.set_problem(problem.clone());
                 updated_jacobian = true;
             }
             loop {
                 self.statistics.niter += 1;
-                op.call(&xn, p, &mut f_at_n);
+                problem.f.call(&xn, problem.p, &mut f_at_n);
                 
-                let delta_xn = {
-                    let mut delta_xn = self.linear_solver.solve(&f_at_n)?;
-                    if let Some(zero_indices) = &self.zero_by_mask {
-                        delta_xn.component_mul_assign(zero_indices);
-                    }
-                    delta_xn
-                };
+                let mut delta_xn = self.linear_solver.solve(&f_at_n)?;
 
                 xn -= delta_xn;
 
@@ -132,13 +141,7 @@ mod tests {
         type S = NewtonNonlinearSolver<'static, T, V, C>;
         let lu = LU::<T>::default();
         let op = get_square_problem::<T, V, M>();
-        let s = S::new(
-            T::from(1e-6),
-            &V::from_vec(vec![T::from(1e-6), T::from(1e-6)]),
-            100,
-            lu,
-            None,
-        );
+        let s = S::new(lu);
         test_nonlinear_solver::<T, V, M, C, S>(s, op);
     }
 }

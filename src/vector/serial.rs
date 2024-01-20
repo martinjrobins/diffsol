@@ -2,7 +2,7 @@ use nalgebra::{DVector, DVectorView, DVectorViewMut};
 
 use crate::Scalar;
 
-use super::{Vector, VectorView, VectorCommon};
+use super::{Vector, VectorView, VectorCommon, VectorViewMut};
 
 impl<T: Scalar> VectorCommon<T> for DVector<T> {
     fn len(&self) -> crate::IndexType {
@@ -37,12 +37,35 @@ impl<'a, T: Scalar> VectorView<'a, T> for DVectorView<'a, T> {
     fn abs(&self) -> DVector<T> {
         self.abs()
     }
+    fn into_owned(self) -> Self::Owned {
+        self.into_owned()
+    }
+}
+
+impl<'a, T: Scalar> VectorViewMut<'a, T> for DVectorViewMut<'a, T> {
+    type Owned = DVector<T>;
+    fn abs(&self) -> DVector<T> {
+        self.abs()
+    }
+    fn copy_from(&mut self, other: &Self::Owned) {
+        self.copy_from(other);
+    }
+    fn copy_from_view(&mut self, other: &<Self::Owned as Vector<T>>::View<'_>) {
+        self.copy_from(other);
+    }
 }
 
 impl<T: Scalar> Vector<T> for DVector<T> {
     type View<'a> = DVectorView<'a, T>;
+    type ViewMut<'a> = DVectorViewMut<'a, T>;
     fn abs(&self) -> Self {
         self.abs()
+    }
+    fn copy_from(&mut self, other: &Self) {
+        self.copy_from(other);
+    }
+    fn copy_from_view(&mut self, other: &Self::View<'_>) {
+        self.copy_from(other);
     }
     fn from_element(nstates: usize, value: T) -> Self {
         Self::from_element(nstates, value)

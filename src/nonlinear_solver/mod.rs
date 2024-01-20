@@ -83,7 +83,9 @@ pub mod newton;
 //tests
 #[cfg(test)]
 pub mod tests {
-    use crate::{callable::{closure::Closure, Callable}, Matrix, Solver};
+    use std::option;
+
+    use crate::{callable::{closure::Closure, Callable}, Matrix, Solver, solver::{SolverOptions, SolverProblem}};
     use super::*;
     
     // 0 = J * x * x - 8
@@ -112,7 +114,8 @@ pub mod tests {
     }
     
     pub fn test_nonlinear_solver<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, C: Callable<T, V>, S: Solver<'a, T, V, C>> (mut solver: S, op: C) {
-        solver.set_callable(&op, &V::zeros(0));
+        let problem = SolverProblem::new(&op, &V::zeros(0));
+        solver.set_problem(problem);
         let x0 = V::from_vec(vec![2.1.into(), 2.1.into()]);
         let x = solver.solve(&x0).unwrap();
         let expect = V::from_vec(vec![2.0.into(), 2.0.into()]);

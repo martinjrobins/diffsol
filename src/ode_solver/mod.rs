@@ -1,3 +1,5 @@
+use std::borrow::Borrow;
+
 use crate::{Scalar, Vector, Matrix, callable::Callable, IndexType, solver::Solver, nonlinear_solver::newton::NewtonNonlinearSolver, linear_solver::lu::LU};
 
 use anyhow::Result;
@@ -5,25 +7,26 @@ use ouroboros::self_referencing;
 
 pub mod bdf;
 
-trait OdeSolverMethod<'a, T: Scalar, V: Vector<T>> {
-    fn set_state(&mut self, state: &'a OdeSolverState<T, V>);
-    fn is_state_set(&self) -> bool;
-    fn clear_state(&mut self);
-    fn step(&mut self, t: T) -> T;
-    fn interpolate(&self, t: T) -> V;
+trait OdeSolverMethod<'a, T: Scalar, V: Vector<T>, CRhs: Callable<T, V>, CMass: Callable<T, V>> {
+    fn reset(&mut self, state: &OdeSolverState<T, V>, options: &'a OdeSolverOptions<T, V, CRhs, CMass>);
+    fn step(&mut self, state: &mut OdeSolverState<T, V>, t: T) -> T;
+    fn interpolate(&self, state: &OdeSolverState<T, V>, t: T) -> V;
 }
 
-struct OdeSolverState<T: Scalar, V: Vector<T>> {
-    y: V,
-    t: T,
-    h: T,
-    p: V,
-    atol: V,
-    rtol: T,
-    mass: Box::<dyn Callable<T, V>>,
-    rhs: Box::<dyn Callable<T, V>>,
-    root_solver_max_iter: IndexType,
-    nonlinear_max_iter: IndexType,
+pub struct OdeSolverState<T: Scalar, V: Vector<T>> {
+    pub y: V,
+    pub t: T,
+    pub h: T,
+}
+
+pub struct OdeSolverOptions<T: Scalar, V: Vector<T>, CRhs: Callable<T, V>, CMass: Callable<T, V>> {
+    pub p: V,
+    pub atol: V,
+    pub rtol: T,
+    pub mass: CMass,
+    pub rhs: CRhs,
+    pub root_solver_max_iter: IndexType,
+    pub nonlinear_max_iter: IndexType,
 }
 
 impl <T: Scalar, V: Vector<T>> OdeSolverState<T, V> {
@@ -32,10 +35,17 @@ impl <T: Scalar, V: Vector<T>> OdeSolverState<T, V> {
             y: V::zeros(rhs.nstates()),
             t: T::zero(),
             h: T::one(),
+        }
+    }
+}
+
+impl <T: Scalar, V: Vector<T>, CRhs: Callable<T, V>, CMass: Callable<T, V>> OdeSolverOptions<T, V, CRhs, CMass> {
+    fn new(rhs: CRhs, mass: CMass) -> Self {
+        Self {
             p: V::zeros(rhs.nparams()),
             atol: V::zeros(rhs.nstates()),
             rtol: T::zero(),
-            mass: Callable::<T, V>::eye(rhs.nstates()),
+            mass,
             rhs,
             root_solver_max_iter: 15,
             nonlinear_max_iter: 4,
@@ -44,78 +54,98 @@ impl <T: Scalar, V: Vector<T>> OdeSolverState<T, V> {
 }
 
 #[self_referencing]
-struct MyStruct {
-    int_data: i32,
-    float_data: f32,
-    #[borrows(int_data)]
-    // the 'this lifetime is created by the #[self_referencing] macro
-    // and should be used on all references marked by the #[borrows] macro
-    int_reference: &'this i32,
-    #[borrows(mut float_data)]
-    float_reference: &'this mut f32,
-}
-
-#[self_referencing]
-pub struct OdeSolver<T: Scalar, V: Vector<T>> {
-    state: OdeSolverState<T, V>,
-    #[borrows(mut state)]
+pub struct OdeSolverSelf<T: Scalar + 'static, V: Vector<T> + 'static, CRhs: Callable<T, V> + 'static, CMass: Callable<T, V> + 'static> {
+    options: OdeSolverOptions<T, V, CRhs, CMass>,
+    #[borrows(options)]
     #[covariant]
-    method: Option<Box<dyn OdeSolverMethod<'this, T, V>>>,
+    method: Option<Box<dyn OdeSolverMethod<'this, T, V, CRhs, CMass>>>,
 }
 
-impl <T: Scalar, V: Vector<T>> OdeSolver<T, V> {
-    fn get_state(&mut self) -> &OdeSolverState<T, V> {
-        if self.method.is_some() {
-            panic!("Cannot change state after method is initialized")
+pub struct OdeSolver<T: Scalar + 'static, V: Vector<T> + 'static, CRhs: Callable<T, V> + 'static, CMass: Callable<T, V> + 'static> {
+    state: OdeSolverState<T, V>,
+    options_and_method: OdeSolverSelf<T, V, CRhs, CMass>,
+}
+
+impl <T: Scalar, V: Vector<T>, CRhs: Callable<T, V>, CMass: Callable<T, V>> OdeSolver<T, V, CRhs, CMass> {
+    fn new(rhs: CRhs, mass: CMass) -> Self {
+        Self {
+            state: OdeSolverState::new(rhs),
+            options_and_method: OdeSolverSelfBuilder {
+                options: OdeSolverOptions::new(rhs, mass),
+                method_builder: |_| None,
+            }.build()
         }
+    }
+
+    fn state(&self) -> &OdeSolverState<T, V> {
         &self.state
     }
     
+    fn state_mut(&mut self) -> &mut OdeSolverState<T, V> {
+        &mut self.state
+    }
+    
+    fn options(&self) -> &OdeSolverOptions<T, V, CRhs, CMass> {
+        self.options_and_method.borrow_options()
+    }
+    
+    fn options_mut(&mut self) -> &mut OdeSolverOptions<T, V, CRhs, CMass> {
+        self.options_and_method.borrow_options_mut()
+    }
+    
     fn set_suggested_step_size(&mut self, h: T) -> &mut Self {
-        self.get_state().h = h;
+        self.options_mut().h = h;
         self
     }
     
     fn set_time(&mut self, t: T) -> &mut Self {
-        self.get_state().t = t;
+        self.state_mut().t = t;
         self
     }
     
     fn set_rtol(&mut self, rtol: T) -> &mut Self {
-        self.get_state().rtol = rtol;
+        self.options_mut().rtol = rtol;
         self
     }
     
     fn set_atol(&mut self, atol: V) -> &mut Self {
-        self.get_state().atol = atol;
+        self.options_mut().atol = atol;
         self
     }
 
     fn set_parameters(&mut self, p: V) -> &mut Self {
-        self.get_state().p = p;
+        self.options_mut().p = p;
         self
     }
     
     fn set_state(&mut self, y: V) -> &mut Self {
-        self.get_state().y = y;
+        self.state_mut().y = y;
         self
     }
     
     fn set_mass(&mut self, mass: Box<dyn Callable<T, V>>) -> &mut Self {
-        self.get_state().mass = mass;
+        self.options_mut().mass = mass;
         self
+    }
+    
+    fn method_mut(&mut self) -> &mut Option<Box<dyn OdeSolverMethod<T, V, CRhs, CMass>>> {
+        self.options_and_method.borrow_method_mut()
+    }
+    
+    fn method(&self) -> &Option<Box<dyn OdeSolverMethod<T, V, CRhs, CMass>>> {
+        self.options_and_method.borrow_method()
     }
     
     fn calculate_consistent_y0(&mut self) -> Result<&mut Self> {
         let mut mask = self.get_state().mass.diagonal();
         mask.map(|x| if x == T::zero() { T::one() } else { T::zero() });
-        let newton = NewtonNonlinearSolver::new(self.get_state().rtol, &self.get_state().atol, self.get_state().root_solver_max_iter, LU::default(), mask);
-        self.y = newton.solve(&self.y0)?;
+        let newton = NewtonNonlinearSolver::new(self.options().rtol, &self.options().atol, self.options().root_solver_max_iter, LU::default(), mask);
+        self.state_mut().y = newton.solve(&self.state().y)?;
         Ok(self)
     }
     
     pub fn solve(&mut self, t: T) -> V {
-        if self.method.is_none() {
+        if self.method().is_none() {
             self.with_method_mut(|method| {
                 method = Some(bdf::Bdf::new());
             });

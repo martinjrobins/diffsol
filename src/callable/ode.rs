@@ -1,6 +1,8 @@
+use nalgebra::Unit;
+
 use crate::{Scalar, Vector, Matrix, IndexType};
 
-use super::{Callable, Jacobian};
+use super::{Callable, Jacobian, unit::UnitCallable};
 
 // callable to solve for F(y) = M (y' + psi) - c * f(y) = 0 
 pub struct BdfCallable<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V>> {

@@ -2,6 +2,9 @@ use crate::{Scalar, Vector, Matrix};
 
 pub mod closure;
 pub mod ode;
+pub mod unit;
+pub mod filter;
+
 
 
 pub trait Callable<T: Scalar, V: Vector<T>> {

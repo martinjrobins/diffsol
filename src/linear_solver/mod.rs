@@ -3,7 +3,7 @@ pub mod gmres;
 
 #[cfg(test)]
 pub mod tests {
-    use crate::{Matrix, Solver, LU, Scalar, Vector, callable::{closure::Closure, Callable}};
+    use crate::{Matrix, Solver, LU, Scalar, Vector, callable::{closure::Closure, Callable}, solver::{SolverOptions, SolverProblem}};
     
     // 0 = J * x - 8
     fn square<T: Scalar, V: Vector<T>, M: Matrix<T, V>>(x: &V, p: &V, y: &mut V, jac: &M) {
@@ -17,7 +17,8 @@ pub mod tests {
     }
 
     pub fn test_linear_solver<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, C: Callable<T, V>, S: Solver<'a, T, V, C>>(mut s: S, op: C) {
-        s.set_callable(&op, &V::zeros(0));
+        let problem = SolverProblem::new(&op, &V::zeros(0));
+        s.set_problem(problem);
         let b = V::from_vec(vec![2.0.into(), 4.0.into()]);
         let x = s.solve(&b).unwrap();
         let expect = V::from_vec(vec![(5.0).into(), 6.0.into()]);

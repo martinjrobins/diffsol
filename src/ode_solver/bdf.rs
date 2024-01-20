@@ -1,14 +1,14 @@
 use std::cmp::{max, min};
 
-use crate::{Scalar, Vector, IndexType, Callable, Matrix, Solver, callable::ode::BdfCallable};
+use crate::{Scalar, Vector, VectorViewMut, VectorView, IndexType, Callable, Matrix, Solver, callable::ode::BdfCallable, nonlinear_solver, linear_solver::lu::LU, matrix::MatrixViewMut};
 
-use super::{OdeSolverState, OdeSolverMethod};
+use super::{OdeSolverState, OdeSolverMethod, OdeSolverOptions};
 
 
 pub struct Bdf<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V>> {
     nonlinear_solver: Option<Box<dyn Solver<'a, T, V, BdfCallable<'a, T, V, M, CRhs, CMass>>>>,
     bdf_callable: Option<BdfCallable<'a, T, V, M, CRhs, CMass>>,
-    state: Option<&'a OdeSolverState<T, V>>,
+    options: Option<&'a OdeSolverOptions<T, V, CRhs, CMass>>,
     order: usize,
     n_equal_steps: usize,
     diff: M,
@@ -32,9 +32,9 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
     pub fn new() -> Self {
         let n = 1;
         Self { 
-            nonlinear_solver: None, 
+            nonlinear_solver: None,
             bdf_callable: None, 
-            state: None, 
+            options: None, 
             order: 1, 
             n_equal_steps: 0, 
             diff: M::zeros(n, Self::MAX_ORDER), 
@@ -47,12 +47,11 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
             ru: M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
         }
     }
-    fn _predict(&self) {
+    fn _predict(&self, state: &mut OdeSolverState<T, V>) {
         // predict forward to new step (eq 2 in [1])
         for i in 1..=self.order {
-            self.state.unwrap().y += self.diff.column(i);
+            state.y += self.diff.column(i);
         }
-        self.scale_y = self.atol + self.state.rtol * self.y.abs();
     }
 
     fn _compute_r(order: usize, factor: T) -> M {
@@ -75,7 +74,7 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
         r
     }
 
-    fn _update_step_size(&self, factor: T) {
+    fn _update_step_size(&self, factor: T, state: &mut OdeSolverState<T, V>) {
         //If step size h is changed then also need to update the terms in
         //the first equation of page 9 of [1]:
         //
@@ -83,7 +82,7 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
         //- lu factorisation of (M - c * J) used in newton iteration (same equation)
         //- psi term
 
-        self.state.unwrap().h *= factor;
+        state.h *= factor;
         self.n_equal_steps = 0;
 
         // update D using equations in section 3.2 of [1]
@@ -91,15 +90,14 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
         self.ru.gemm(T::one(), &self.r, &self.u, T::zero()); // ru = R * U
         // D[0:order] = R * U * D[0:order]
         let d_zero_order = self.diff.columns(0, self.order);
-        let d_zero_order_tmp = self.diff_tmp.columns_mut(0, self.order);
-        d_zero_order_tmp.gemm(T::one(), &self.ru, d_zero_order, T::zero()); // diff_sub = R * U * diff
+        let mut d_zero_order_tmp = self.diff_tmp.columns_mut(0, self.order);
+        d_zero_order_tmp.gemm_ov(T::one(), &self.ru, &d_zero_order, T::zero()); // diff_sub = R * U * diff
         std::mem::swap(&mut self.diff, &mut self.diff_tmp);
 
         // update y0 (D has changed)
-        self._predict();
+        self._predict(state);
 
         // update psi and c (h, D, y0 has changed)
-        let state = self.state.unwrap();
         let callable = self.bdf_callable.as_ref().unwrap();
         callable.set_psi_and_y0(&self.diff, &self.gamma, &self.alpha, self.order, &state.y);
         callable.set_c(state.h, &self.alpha, self.order);
@@ -118,40 +116,40 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
         //
         //Combining these gives the following algorithm
         let order = self.order;
-        self.diff.set_column(order + 2, d - self.diff.column(order + 1));
-        self.diff.set_column(order + 1, d);
+        let d_minus_order_plus_one = *d - self.diff.column(order + 1);
+        self.diff.column_mut(order + 2).copy_from(&d_minus_order_plus_one);
+        self.diff.column_mut(order + 1).copy_from(d);
         for i in (0..=order).rev() {
-            self.diff.add_assign_column(i, self.diff.column(i + 1));
+            self.diff.column_mut(i).copy_from_view(&self.diff.column(i + 1));
         }
     }
 }
 
 
-impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V>> OdeSolverMethod<'a, T, V> for Bdf<'a, T, V, M, CRhs, CMass> {
-    fn interpolate(&self, t: T) -> V {
+impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V>> OdeSolverMethod<'a, T, V, CRhs, CMass> for Bdf<'a, T, V, M, CRhs, CMass> {
+    fn interpolate(&self, state: &OdeSolverState<T, V>, t: T) -> V {
         //interpolate solution at time values t* where t-h < t* < t
         //
         //definition of the interpolating polynomial can be found on page 7 of [1]
         let mut time_factor = T::from(1.0);
-        let state = self.state.unwrap();
-        let order_summation = self.diff.column(0).clone();
+        let mut order_summation = self.diff.column(0).into_owned();
         for i in 0..self.order {
             let i_t = T::from(i as f64);
-            time_factor *= (t - (state.t - state.h * i)) / (state.h * (T::one() + i_t));
+            time_factor *= (t - (state.t - state.h * i_t)) / (state.h * (T::one() + i_t));
             order_summation += self.diff.column(i + 1) * time_factor;
         }
         order_summation
     }
 
 
-    fn set_state(&mut self, state: &'a OdeSolverState<T, V>) {
-        self.state = Some(state);
+    fn reset(&mut self, state: &OdeSolverState<T, V>, options: &'a OdeSolverOptions<T, V, CRhs, CMass>) {
+        self.options = Some(options);
 
-        let nstates = state.rhs.nstates();
+        let nstates = options.rhs.nstates();
         self.order = 1usize; 
         self.n_equal_steps = 0;
         self.diff = M::zeros(Self::MAX_ORDER + 1, nstates);
-        self.diff.column_mut(0) = state.y;
+        self.diff.column_mut(0).copy_from(&state.y);
         
         // kappa values for difference orders, taken from Table 1 of [1]
         let mut kappa = vec![T::from(0.0), T::from(-0.1850), T::from(-1.0) / T::from(9.0), T::from(-0.0823), T::from(-0.0415), T::from(0.0)];
@@ -167,11 +165,11 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
 
         // update initial step size based on function
         let mut scale = state.y.abs();
-        scale *= state.rtol;
-        scale += &state.atol;
+        scale *= options.rtol;
+        scale += &options.atol;
 
         let mut f0 = V::zeros(nstates);
-        state.rhs.call(&state.y, &state.p, &mut f0);
+        options.rhs.call(&state.y, &options.p, &mut f0);
 
         // y1 = y0 + h * f0
         let mut y1 = state.y.clone();
@@ -179,10 +177,10 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
 
         // df = f1 here
         let mut df = V::zeros(nstates);
-        state.rhs.call(&y1, &state.p, &mut df);
+        options.rhs.call(&y1, &options.p, &mut df);
         
         // store f1 in diff[1] for use in step size control
-        self.diff.column_mut(1) = df * state.h;
+        self.diff.column_mut(1).copy_from(&(df * state.h));
 
         // now df = f1 - f0
         df.axpy(T::from(-1.0), &f0, T::one());
@@ -196,9 +194,9 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
 
         // setup linear solver for first step
         let c = state.h * self.alpha[self.order];
-        self.bdf_callable = Some(BdfCallable::new(&state.rhs, &state.mass));
+        self.bdf_callable = Some(BdfCallable::new(&options.rhs, &options.mass));
         let callable = self.bdf_callable.as_ref().unwrap();
-        self.nonlinear_solver.set_callable(callable, &state.p);
+        self.nonlinear_solver.set_callable(callable, &options.p);
         
         // setup U
         self.u = Self::_compute_r(self.order, T::one());

@@ -1,4 +1,4 @@
-use std::ops::{Index, IndexMut, Deref, Mul, MulAssign, Div, DivAssign, Add, Sub};
+use std::ops::{Index, IndexMut, Deref, Mul, MulAssign, Div, DivAssign, Add, Sub, AddAssign, SubAssign};
 use std::fmt::{Debug, Display};
 
 use nalgebra::{ClosedMul, ClosedDiv, ClosedAdd, ClosedSub, Owned};
@@ -35,6 +35,22 @@ pub trait VectorCommon<T: Scalar>: Sized + Index<IndexType, Output=T> + Debug + 
     }
 }
 
+pub trait VectorViewMut<'a, T: Scalar>: 
+    VectorCommon<T>
+    + for<'b> AddAssign<&'b Self::Owned> 
+    + for<'b> SubAssign<&'b Self::Owned> 
+    + AddAssign<Self::Owned> 
+    + AddAssign<Self::Owned> 
+    + MulAssign<T> 
+    + DivAssign<T> 
+    + IndexMut<IndexType, Output=T> 
+{
+    type Owned: Vector<T>;
+    fn abs(&self) -> Self::Owned;
+    fn copy_from(&mut self, other: &Self::Owned);
+    fn copy_from_view(&mut self, other: &<Self::Owned as Vector<T>>::View<'_>);
+}
+
 pub trait VectorView<'a, T: Scalar>: 
     VectorCommon<T>
     + for<'b> Add<&'b Self, Output = Self::Owned> 
@@ -46,6 +62,7 @@ pub trait VectorView<'a, T: Scalar>:
 {
     type Owned: Vector<T>;
     fn abs(&self) -> Self::Owned;
+    fn into_owned(self) -> Self::Owned;
 }
 
 pub trait Vector<T: Scalar>:
@@ -62,11 +79,14 @@ pub trait Vector<T: Scalar>:
     + Clone
 {
     type View<'a>: VectorView<'a, T, Owned = Self> where Self: 'a;
+    type ViewMut<'a>: VectorViewMut<'a, T, Owned = Self> where Self: 'a;
     fn abs(&self) -> Self;
     fn from_element(nstates: usize, value: T) -> Self;
     fn zeros(nstates: usize) -> Self {
         Self::from_element(nstates, T::zero())
     }
+    fn copy_from(&mut self, other: &Self);
+    fn copy_from_view(&mut self, other: &Self::View<'_>);
     fn from_vec(vec: Vec<T>) -> Self;
     fn axpy(&mut self, alpha: T, x: &Self, beta: T);
     fn add_scalar_mut(&mut self, scalar: T);
