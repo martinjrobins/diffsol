@@ -1,8 +1,14 @@
 use nalgebra::{DVector, DVectorView, DVectorViewMut};
 
-use crate::Scalar;
+use crate::{Scalar, IndexType};
 
-use super::{Vector, VectorView, VectorCommon, VectorViewMut};
+use super::{Vector, VectorView, VectorCommon, VectorViewMut, VectorIndex};
+
+impl VectorIndex for DVector<IndexType> {
+    fn len(&self) -> crate::IndexType {
+        self.len()
+    }
+}
 
 impl<T: Scalar> VectorCommon<T> for DVector<T> {
     fn len(&self) -> crate::IndexType {
@@ -58,6 +64,7 @@ impl<'a, T: Scalar> VectorViewMut<'a, T> for DVectorViewMut<'a, T> {
 impl<T: Scalar> Vector<T> for DVector<T> {
     type View<'a> = DVectorView<'a, T>;
     type ViewMut<'a> = DVectorViewMut<'a, T>;
+    type Index = DVector<IndexType>;
     fn abs(&self) -> Self {
         self.abs()
     }
@@ -90,6 +97,15 @@ impl<T: Scalar> Vector<T> for DVector<T> {
     }
     fn map_mut<F: Fn(T) -> T>(&mut self, f: F) {
         self.map_mut(f);
+    }
+    fn filter_indices<F: Fn(T) -> bool>(&self, f: F) -> Self::Index {
+        self.filter_indices(f)
+    }
+    fn gather_from(&mut self, other: &Self, indices: &Self::Index) {
+        self.gather_from(other, indices);
+    }
+    fn scatter_from(&mut self, other: &Self, indices: &Self::Index) {
+        self.scatter_from(other, indices);
     }
 }
 

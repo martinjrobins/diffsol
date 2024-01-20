@@ -28,17 +28,16 @@ impl<'a, T: Scalar, C: Callable<T, DVector<T>> + Jacobian<T, DVector<T>, DMatrix
     
     fn set_options(&mut self, options: SolverOptions<T>) {}
     
-    fn set_problem(&mut self, problem: SolverProblem<'a, T, DVector<T>, C>) {
-        self.lu = Some(nalgebra::LU::new(problem.f.jacobian(problem.p)));
+    fn set_problem(&mut self, state: &DVector<T>, problem: SolverProblem<'a, T, DVector<T>, C>) {
+        self.lu = Some(nalgebra::LU::new(problem.f.jacobian(state, problem.p)));
     }
-    
 
-    fn solve(&mut self, b: &DVector<T>) -> Result<DVector<T>> {
+    fn solve(&mut self, b: DVector<T>) -> Result<DVector<T>> {
         if self.lu.is_none() {
             return Err(anyhow::anyhow!("LU not initialized"));
         }
         let lu = self.lu.as_ref().unwrap();
-        match lu.solve(b) {
+        match lu.solve(&b) {
             Some(x) => Ok(x),
             None => Err(anyhow::anyhow!("LU solve failed")),
         }

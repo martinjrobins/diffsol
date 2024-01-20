@@ -1,18 +1,22 @@
 use std::cmp::{max, min};
+use anyhow::Result;
 
-use crate::{Scalar, Vector, VectorViewMut, VectorView, IndexType, Callable, Matrix, Solver, callable::ode::BdfCallable, nonlinear_solver, linear_solver::lu::LU, matrix::MatrixViewMut};
+use crate::{Scalar, Vector, VectorViewMut, VectorView, IndexType, Callable, Matrix, Solver, callable::{ode::BdfCallable, Diagonal}, nonlinear_solver, linear_solver::{lu::LU, self}, matrix::MatrixViewMut};
 
-use super::{OdeSolverState, OdeSolverMethod, OdeSolverOptions};
+use super::{OdeSolverState, OdeSolverMethod, OdeSolverOptions, OdeSolverStatistics, OdeSolverProblem};
 
 
-pub struct Bdf<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V>> {
+pub struct Bdf<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V> + Diagonal<T, V>> {
     nonlinear_solver: Option<Box<dyn Solver<'a, T, V, BdfCallable<'a, T, V, M, CRhs, CMass>>>>,
     bdf_callable: Option<BdfCallable<'a, T, V, M, CRhs, CMass>>,
-    options: Option<&'a OdeSolverOptions<T, V, CRhs, CMass>>,
+    options: OdeSolverOptions<T>,
+    problem: Option<OdeSolverProblem<'a, T, V, CRhs, CMass>>,
+    statistics: OdeSolverStatistics,
     order: usize,
     n_equal_steps: usize,
     diff: M,
     diff_tmp: M,
+    atol: Option<V>,
     u: M,
     r: M,
     ru: M,
@@ -23,7 +27,7 @@ pub struct Bdf<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V
 
 // implement OdeSolverMethod for Bdf
 
-impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V>> Bdf<'a, T, V, M, CRhs, CMass> {
+impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V> + Diagonal<T, V>> Bdf<'a, T, V, M, CRhs, CMass> {
     const MAX_ORDER: IndexType = 5;
     const NEWTON_MAXITER: IndexType = 4;
     const MIN_FACTOR: T = T::from(0.2);
@@ -31,10 +35,17 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
     
     pub fn new() -> Self {
         let n = 1;
+        let options = OdeSolverOptions::default();
+        let linear_solver = LU::new();
+        let nonlinear_solver = nonlinear_solver::newton::NewtonNonlinearSolver::new(linear_solver);
+        let statistics = OdeSolverStatistics { niter: 0, nmaxiter: 0 };
         Self { 
-            nonlinear_solver: None,
+            problem: None,
+            statistics,
+            nonlinear_solver,
             bdf_callable: None, 
-            options: None, 
+            atol: None,
+            options, 
             order: 1, 
             n_equal_steps: 0, 
             diff: M::zeros(n, Self::MAX_ORDER), 
@@ -51,6 +62,18 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
         // predict forward to new step (eq 2 in [1])
         for i in 1..=self.order {
             state.y += self.diff.column(i);
+        }
+    }
+    
+    fn atol(&mut self) -> &V {
+        let problem = self.problem.as_ref().unwrap();
+        if let Some(atol) = problem.atol {
+            atol
+        } else {
+            if self.atol.is_none() {
+                self.atol = Some(V::from_element(problem.rhs.nstates(), self.options.atol));
+            }
+            self.atol.as_ref().unwrap()
         }
     }
 
@@ -126,7 +149,7 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
 }
 
 
-impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V>> OdeSolverMethod<'a, T, V, CRhs, CMass> for Bdf<'a, T, V, M, CRhs, CMass> {
+impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V> + Diagonal<T, V>> OdeSolverMethod<'a, T, V, CRhs, CMass> for Bdf<'a, T, V, M, CRhs, CMass> {
     fn interpolate(&self, state: &OdeSolverState<T, V>, t: T) -> V {
         //interpolate solution at time values t* where t-h < t* < t
         //
@@ -140,12 +163,27 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
         }
         order_summation
     }
+    
+    fn problem(&self) -> Option<&OdeSolverProblem<'a, T, V, CRhs, CMass>> {
+        self.problem.as_ref()
+    }
+    
+    fn get_statistics(&self) -> &OdeSolverStatistics {
+        &self.statistics
+    }
+    
+    fn set_options(&mut self, options: OdeSolverOptions<T>) {
+        self.options = options;
+    }
+    
+    fn options(&self) -> Option<&OdeSolverOptions<T>> {
+        Some(&self.options)
+    }
 
-
-    fn reset(&mut self, state: &OdeSolverState<T, V>, options: &'a OdeSolverOptions<T, V, CRhs, CMass>) {
-        self.options = Some(options);
-
-        let nstates = options.rhs.nstates();
+    fn set_problem(&mut self, state: &OdeSolverState<T, V>, problem: OdeSolverProblem<'a, T, V, CRhs, CMass>) {
+        self.problem = Some(problem);
+        let problem = self.problem.as_ref().unwrap();
+        let nstates = problem.rhs.nstates();
         self.order = 1usize; 
         self.n_equal_steps = 0;
         self.diff = M::zeros(Self::MAX_ORDER + 1, nstates);
@@ -165,11 +203,11 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
 
         // update initial step size based on function
         let mut scale = state.y.abs();
-        scale *= options.rtol;
-        scale += &options.atol;
+        scale *= self.options.rtol;
+        scale += self.atol();
 
         let mut f0 = V::zeros(nstates);
-        options.rhs.call(&state.y, &options.p, &mut f0);
+        problem.rhs.call(&state.y, &problem.p, &mut f0);
 
         // y1 = y0 + h * f0
         let mut y1 = state.y.clone();
@@ -177,7 +215,7 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
 
         // df = f1 here
         let mut df = V::zeros(nstates);
-        options.rhs.call(&y1, &options.p, &mut df);
+        problem.rhs.call(&y1, &problem.p, &mut df);
         
         // store f1 in diff[1] for use in step size control
         self.diff.column_mut(1).copy_from(&(df * state.h));
@@ -194,24 +232,15 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
 
         // setup linear solver for first step
         let c = state.h * self.alpha[self.order];
-        self.bdf_callable = Some(BdfCallable::new(&options.rhs, &options.mass));
+        self.bdf_callable = Some(BdfCallable::new(&problem.rhs, &problem.mass));
         let callable = self.bdf_callable.as_ref().unwrap();
-        self.nonlinear_solver.set_callable(callable, &options.p);
+        self.nonlinear_solver.set_callable(callable, &problem.p);
         
         // setup U
         self.u = Self::_compute_r(self.order, T::one());
     }
 
-    fn is_state_set(&self) -> bool {
-        self.state.is_some()
-    }
-
-    fn clear_state(&mut self) {
-        self.state = None;
-        self.callable = None;
-    }
-
-    fn step(&mut self, t: T) -> T {
+    fn step(&mut self, state: OdeSolverState<T, V>) -> Result<OdeSolverState<T, V>> {
         // we will try and use the old jacobian unless convergence of newton iteration
         // fails
         // tells callable to update rhs jacobian if the jacobian is requested (by nonlinear solver)
@@ -253,7 +282,7 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
                         let factor = max( 
                             Self::MIN_FACTOR, safety * error_norm.pow(-1 / (self.order + 1))
                         );
-                        self._update_step_size(factor);
+                        self._update_step_size(factor, &mut state);
                         step_accepted = false; 
                         continue
                     }
@@ -261,7 +290,7 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
                 Err(e) => {
                     // newton iteration did not converge, but jacobian has already been
                     // evaluated so reduce step size by 0.3 (as per [1]) and try again
-                    self._update_step_size(0.3);
+                    self._update_step_size(0.3, &mut state);
                     step_accepted = false;
                     continue
                 }
@@ -279,7 +308,7 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
         self.n_equal_steps += 1;
         
         if self.n_equal_steps < self.order + 1 {
-            self._predict();
+            self._predict(&mut state);
             self.bdf_callable.set_psi_and_y0(&self.diff, &self.gamma, &self.alpha, self.order, &self.y);
         } else {
             let order = self.order;
@@ -312,7 +341,7 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
             order += max_index - 1;
 
             let factor = min(Self::MAX_FACTOR, safety * factors[max_index]);
-            self._update_step_size(factor);
+            self._update_step_size(factor, &mut state);
         }
         self.state.t
     }

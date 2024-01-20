@@ -73,12 +73,12 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
 }
 
 impl<T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V> + Jacobian<T, V, M>, CMass: Callable<T, V> + Jacobian<T, V, M>> Jacobian<T, V, M> for BdfCallable<'_, T, V, M, CRhs, CMass> {
-    fn jacobian(&self, p: &V) -> M {
+    fn jacobian(&self, x: &V, p: &V) -> M {
         if self.mass_jacobian_is_stale {
-            self.mass_jac = self.mass.jacobian(p);
+            self.mass_jac = self.mass.jacobian(x, p);
         }
         if self.rhs_jacobian_is_stale {
-            self.rhs_jac = self.rhs.jacobian(p);
+            self.rhs_jac = self.rhs.jacobian(x, p);
             self.rhs_jacobian_is_stale = false;
         }
         if self.jacobian_is_stale {

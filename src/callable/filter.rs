@@ -4,46 +4,50 @@
 
 use std::cell::RefCell;
 
-use crate::{Scalar, vector::Vector, matrix::Matrix};
+use crate::{Scalar, Vector, VectorIndex};
 
-use super::{Callable, Jacobian};
+use super::Callable;
 
 
 pub struct GatherCallable<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> {
     callable: &'a C,
-    indices: V,
+    indices: <V as Vector<T>>::Index,
     y_full: RefCell<V>,
+    x_full: RefCell<V>,
     _phantom: std::marker::PhantomData<T>,
 }
 
 impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> GatherCallable<'a, T, V, C> {
-    pub fn new(callable: &'a C, indices: V) -> Self {
-        if callable.nstates() != mask.len() {
+    pub fn new(callable: &'a C, x: &V, indices: <V as Vector<T>>::Index) -> Self {
+        if callable.nstates() != indices.len() {
             panic!("FilterCallable::new() called with callable with different number of states");
         }
         let y_full = RefCell::new(V::zeros(callable.nout()));
-        Self { callable, mask, y_full, _phantom: std::marker::PhantomData }
+        let x_full = RefCell::new(x.clone());
+        Self { callable, indices, y_full, x_full, _phantom: std::marker::PhantomData }
     }
 }
 
 impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> Callable<T, V> for GatherCallable<'a, T, V, C> {
     fn call(&self, x: &V, p: &V, y: &mut V) {
         let mut y_full = self.y_full.borrow_mut();
-        self.callable.call(&x, p, &mut y_full);
-        y.gather_from(&y_full);
+        let mut x_full = self.x_full.borrow_mut();
+        x_full.scatter_from(x, &self.indices);
+        self.callable.call(&x_full, p, &mut y_full);
+        y.gather_from(&y_full, &self.indices);
     }
     fn jacobian_action(&self, x: &V, p: &V, v: &V, y: &mut V) {
-        let mut x_masked = V::zeros(self.callable.nstates());
-        for i in 0..self.callable.nstates() {
-            x_masked[i] = x[i] * self.mask[i];
-        }
-        self.callable.jacobian_action(&x_masked, p, v, y)
+        let mut y_full = self.y_full.borrow_mut();
+        let mut x_full = self.x_full.borrow_mut();
+        x_full.scatter_from(x, &self.indices);
+        self.callable.jacobian_action(&x_full, p, v, &mut y_full);
+        y.gather_from(&y_full, &self.indices);
     }
     fn nstates(&self) -> usize {
-        self.callable.nstates()
+        self.indices.len()
     }
     fn nout(&self) -> usize {
-        self.callable.nout()
+        self.indices.len()
     }
     fn nparams(&self) -> usize {
         self.callable.nparams()

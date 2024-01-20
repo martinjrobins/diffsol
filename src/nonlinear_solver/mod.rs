@@ -115,9 +115,9 @@ pub mod tests {
     
     pub fn test_nonlinear_solver<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, C: Callable<T, V>, S: Solver<'a, T, V, C>> (mut solver: S, op: C) {
         let problem = SolverProblem::new(&op, &V::zeros(0));
-        solver.set_problem(problem);
         let x0 = V::from_vec(vec![2.1.into(), 2.1.into()]);
-        let x = solver.solve(&x0).unwrap();
+        solver.set_problem(&x0, problem);
+        let x = solver.solve(x0).unwrap();
         let expect = V::from_vec(vec![2.0.into(), 2.0.into()]);
         x.assert_eq(&expect, 1e-6.into());
     }

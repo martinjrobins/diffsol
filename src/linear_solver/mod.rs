@@ -18,9 +18,10 @@ pub mod tests {
 
     pub fn test_linear_solver<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, C: Callable<T, V>, S: Solver<'a, T, V, C>>(mut s: S, op: C) {
         let problem = SolverProblem::new(&op, &V::zeros(0));
-        s.set_problem(problem);
+        let state = V::zeros(problem.f.nstates());
+        s.set_problem(&state, problem);
         let b = V::from_vec(vec![2.0.into(), 4.0.into()]);
-        let x = s.solve(&b).unwrap();
+        let x = s.solve(b).unwrap();
         let expect = V::from_vec(vec![(5.0).into(), 6.0.into()]);
         x.assert_eq(&expect, 1e-6.into());
     }

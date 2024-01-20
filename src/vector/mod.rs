@@ -7,6 +7,10 @@ use crate::{Scalar, IndexType};
 
 mod serial;
 
+pub trait VectorIndex: Sized + Index<IndexType, Output=IndexType> + Debug + Display {
+    fn len(&self) -> IndexType;
+}
+
 pub trait VectorCommon<T: Scalar>: Sized + Index<IndexType, Output=T> + Debug + Display {
     fn norm(&self) -> T;
     
@@ -80,6 +84,7 @@ pub trait Vector<T: Scalar>:
 {
     type View<'a>: VectorView<'a, T, Owned = Self> where Self: 'a;
     type ViewMut<'a>: VectorViewMut<'a, T, Owned = Self> where Self: 'a;
+    type Index: VectorIndex;
     fn abs(&self) -> Self;
     fn from_element(nstates: usize, value: T) -> Self;
     fn zeros(nstates: usize) -> Self {
@@ -93,6 +98,9 @@ pub trait Vector<T: Scalar>:
     fn component_mul_assign(&mut self, other: &Self);
     fn component_div_assign(&mut self, other: &Self);
     fn map_mut<F: Fn(T) -> T>(&mut self, f: F);
+    fn filter_indices<F: Fn(T) -> bool>(&self, f: F) -> Self::Index;
+    fn gather_from(&mut self, other: &Self, indices: &Self::Index);
+    fn scatter_from(&mut self, other: &Self, indices: &Self::Index);
 }
 
 

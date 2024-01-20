@@ -14,7 +14,7 @@ pub struct NewtonNonlinearSolver<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>>
 
 impl <'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> NewtonNonlinearSolver<'a, T, V, C> {
     pub fn new(linear_solver: impl Solver<'a, T, V, C>) -> Self {
-        let options = SolverOptions::<T, V>::default();
+        let options = SolverOptions::<T>::default();
         let statistics = SolverStatistics {
             niter: 0,
             nmaxiter: 0,
@@ -45,7 +45,7 @@ impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> Solver<'a, T, V, C> for New
         self.problem.as_ref()
     }
 
-    fn set_problem(&mut self, problem: SolverProblem<'a, T, V, C>) {
+    fn set_problem(&mut self, state: &V, problem: SolverProblem<'a, T, V, C>) {
         let nstates = problem.f.nstates();
         let atol = if problem.atol.is_some() {
             problem.atol.unwrap()
@@ -69,6 +69,7 @@ impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> Solver<'a, T, V, C> for New
             self.convergence.unwrap().atol = atol;
             self.convergence.unwrap().max_iter = self.options.max_iter;
         }
+        self.linear_solver.set_problem(state, problem.clone());
     }
     
     
@@ -76,31 +77,27 @@ impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> Solver<'a, T, V, C> for New
         &self.statistics
     }
 
-    fn solve(&mut self, x0: &V) -> Result<V> {
+    fn solve(&mut self, x0: V) -> Result<V> {
         if self.convergence.is_none() || self.problem.is_none() {
             return Err(anyhow!("NewtonNonlinearSolver::solve() called before set_problem"));
         }
         let convergence = self.convergence.as_mut().unwrap();
         let problem = self.problem.as_ref().unwrap();
         let mut xn = x0.clone();
-        self.convergence.reset(&xn);
+        convergence.reset(&xn);
         let mut f_at_n = xn.clone();
         let mut updated_jacobian = false;
         self.statistics.niter = 0;
         loop {
-            if self.linear_solver.problem().is_none() {
-                self.linear_solver.set_problem(problem.clone());
-                updated_jacobian = true;
-            }
             loop {
                 self.statistics.niter += 1;
                 problem.f.call(&xn, problem.p, &mut f_at_n);
                 
-                let mut delta_xn = self.linear_solver.solve(&f_at_n)?;
+                let mut delta_xn = self.linear_solver.solve(f_at_n)?;
 
                 xn -= delta_xn;
 
-                let res = self.convergence.check_new_iteration(delta_xn);
+                let res = convergence.check_new_iteration(delta_xn);
                 match res  {
                     ConvergenceStatus::Continue => continue,
                     ConvergenceStatus::Converged => return Ok(xn),
@@ -111,7 +108,7 @@ impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> Solver<'a, T, V, C> for New
             // only get here if we've diverged or hit max iterations
             // if we havn't updated the jacobian, we can update it and try again
             if !updated_jacobian {
-                self.linear_solver.clear_callable();
+                self.linear_solver.set_problem(&x0, problem.clone());
                 continue;
             } else {
                 break;
