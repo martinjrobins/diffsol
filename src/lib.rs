@@ -4,13 +4,14 @@ pub trait Scalar: nalgebra::Scalar + Display + SimdRealField + ComplexField + Co
     const INFINITY: Self;
 }
 
+type IndexType = usize;
+
 
 impl Scalar for f64 {
     const EPSILON: Self = f64::EPSILON;
     const INFINITY: Self = f64::INFINITY;
 }
 
-type IndexType = usize;
 
 pub mod vector;
 pub mod matrix;
@@ -26,7 +27,7 @@ use nalgebra::{ClosedSub, ClosedMul, ClosedDiv, ClosedAdd, SimdRealField, Comple
 use num_traits::{Signed, Pow};
 use vector::{Vector, VectorView, VectorViewMut, VectorIndex};
 use nonlinear_solver::newton::NewtonNonlinearSolver;
-use callable::{Callable, Jacobian, Diagonal, GatherCallable};
+use callable::{Callable, Jacobian};
 use matrix::{Matrix, MatrixView, MatrixViewMut};
 use solver::{Solver, SolverStatistics, SolverOptions, SolverProblem};
 use linear_solver::lu::LU;

@@ -3,7 +3,7 @@ pub mod gmres;
 
 #[cfg(test)]
 pub mod tests {
-    use crate::{Matrix, Solver, LU, Scalar, Vector, callable::{closure::Closure, Callable}, solver::{SolverOptions, SolverProblem}};
+    use crate::{callable::closure::Closure, Callable, Matrix, Scalar, Solver, SolverProblem, Vector, LU};
     
     // 0 = J * x - 8
     fn square<T: Scalar, V: Vector<T>, M: Matrix<T, V>>(x: &V, p: &V, y: &mut V, jac: &M) {

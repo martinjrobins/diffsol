@@ -1,6 +1,6 @@
 use std::ops::{Index, Add, Sub, Div, Mul, AddAssign, SubAssign, MulAssign, DivAssign};
 
-use crate::{IndexType, Vector, Scalar, VectorView, vector::VectorViewMut};
+use crate::{IndexType, Vector, Scalar};
 use anyhow::Result;
 use nalgebra::{ClosedAdd, ClosedSub, ClosedMul, ClosedDiv};
 

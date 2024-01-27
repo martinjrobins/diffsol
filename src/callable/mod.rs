@@ -8,10 +8,10 @@ pub mod filter;
 pub trait Callable<T: Scalar, V: Vector<T>> {
     fn call(&self, x: &V, p: &V, y: &mut V);
     fn gemv(&self, x: &V, p: &V, alpha: T, beta: T, y: &mut V) {
-        let beta_y = *y * beta;
+        let beta_y = y * beta;
         self.call(x, p, y);
-        *y *= alpha;
-        *y += &beta_y;
+        y *= alpha;
+        y += &beta_y;
     }
     fn nstates(&self) -> usize;
     fn nout(&self) -> usize;
@@ -38,17 +38,4 @@ pub trait Jacobian<T: Scalar, V: Vector<T>, M: Matrix<T, V>>: Callable<T, V> {
     }
 }
 
-pub trait Diagonal<T: Scalar, V: Vector<T>>: Callable<T, V> {
-    fn diagonal(&self, x: &V, p: &V) -> V {
-        let mut v = V::zeros(self.nstates());
-        let mut col = V::zeros(self.nout());
-        let mut diag = V::zeros(self.nstates());
-        for j in 0..self.nstates() {
-            v[j] = T::one();
-            self.jacobian_action(x, p, &v, &mut col);
-            diag[j] = col[j];
-            v[j] = T::zero();
-        }
-        diag
-    }
-}
+

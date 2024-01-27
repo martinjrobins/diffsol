@@ -1,9 +1,20 @@
 use crate::{Scalar, vector::Vector, callable::Callable, IndexType};
 use anyhow::Result;
 
+pub mod atol;
+
 pub struct SolverStatistics {
     pub niter: IndexType,
     pub nmaxiter: IndexType,
+}
+
+pub trait Problem<T: Scalar, V: Vector<T>> {
+    fn nstates(&self) -> IndexType;
+    fn atol(&self) -> Option<&V>;
+}
+
+pub trait Options<T: Scalar> {
+    fn atol(&self) -> T;
 }
 
 pub struct SolverOptions<T: Scalar> {
@@ -22,11 +33,28 @@ impl <'a, T: Scalar> Default for SolverOptions<T> {
     }
 }
 
+impl <T: Scalar> Options<T> for SolverOptions<T> {
+    fn atol(&self) -> T {
+        self.atol
+    }
+}
+
+
+
 pub struct SolverProblem<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> {
     pub f: &'a C,
     pub p: &'a V,
     pub atol: Option<&'a V>,
     _phantom: std::marker::PhantomData<T>,
+}
+
+impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> Problem<T, V> for SolverProblem<'a, T, V, C> {
+    fn atol(&self) -> Option<&V> {
+        self.atol
+    }
+    fn nstates(&self) -> IndexType {
+        self.f.nstates()
+    }
 }
 
 impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> SolverProblem<'a, T, V, C> {

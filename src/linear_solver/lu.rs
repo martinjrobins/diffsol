@@ -1,7 +1,7 @@
 use nalgebra::{DVector, Dyn, DMatrix};
 use anyhow::Result;
 
-use crate::{Scalar, callable::{Callable, Jacobian}, solver::{Solver, SolverOptions, SolverProblem}, matrix::Matrix};
+use crate::{Scalar, Callable, Jacobian, Solver, SolverOptions, SolverProblem};
 
 pub struct LU<T: Scalar> {
     lu: Option<nalgebra::LU<T, Dyn, Dyn>>,

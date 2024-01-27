@@ -1,13 +1,13 @@
 use std::cmp::{max, min};
 use anyhow::Result;
+use nalgebra::{DVector, DMatrix};
 
-use crate::{Scalar, Vector, VectorViewMut, VectorView, IndexType, Callable, Matrix, Solver, callable::{ode::BdfCallable, Diagonal}, nonlinear_solver, linear_solver::{lu::LU, self}, matrix::MatrixViewMut};
+use crate::{Scalar, Vector, VectorViewMut, VectorView, IndexType, Callable, Matrix, Solver, Jacobian, callable::ode::BdfCallable, NewtonNonlinearSolver, LU, MatrixViewMut, solver::{atol::Atol, SolverProblem}};
 
 use super::{OdeSolverState, OdeSolverMethod, OdeSolverOptions, OdeSolverStatistics, OdeSolverProblem};
 
-
-pub struct Bdf<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V> + Diagonal<T, V>> {
-    nonlinear_solver: Option<Box<dyn Solver<'a, T, V, BdfCallable<'a, T, V, M, CRhs, CMass>>>>,
+pub struct Bdf<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V>> {
+    nonlinear_solver: Box<dyn Solver<'a, T, V, BdfCallable<'a, T, V, M, CRhs, CMass>>>,
     bdf_callable: Option<BdfCallable<'a, T, V, M, CRhs, CMass>>,
     options: OdeSolverOptions<T>,
     problem: Option<OdeSolverProblem<'a, T, V, CRhs, CMass>>,
@@ -16,7 +16,7 @@ pub struct Bdf<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V
     n_equal_steps: usize,
     diff: M,
     diff_tmp: M,
-    atol: Option<V>,
+    atol: Atol<T, V>,
     u: M,
     r: M,
     ru: M,
@@ -25,39 +25,40 @@ pub struct Bdf<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V
     error_const: Vec<T>,
 }
 
-// implement OdeSolverMethod for Bdf
-
-impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V> + Diagonal<T, V>> Bdf<'a, T, V, M, CRhs, CMass> {
-    const MAX_ORDER: IndexType = 5;
-    const NEWTON_MAXITER: IndexType = 4;
-    const MIN_FACTOR: T = T::from(0.2);
-    const MAX_FACTOR: T = T::from(10.0);
-    
+impl<'a, T: Scalar, CRhs: Callable<T, DVector<T>> + Jacobian<T, DVector<T>, DMatrix<T>>, CMass: Callable<T, DVector<T>> + Jacobian<T, DVector<T>, DMatrix<T>>> Bdf<'a, T, DVector<T>, DMatrix<T>, CRhs, CMass> {
     pub fn new() -> Self {
         let n = 1;
         let options = OdeSolverOptions::default();
-        let linear_solver = LU::new();
-        let nonlinear_solver = nonlinear_solver::newton::NewtonNonlinearSolver::new(linear_solver);
+        let linear_solver = LU::<T>::default();
+        let nonlinear_solver = Box::new(NewtonNonlinearSolver::<T, DVector<T>, BdfCallable<T, DVector<T>, DMatrix<T>, CRhs, CMass>>::new(linear_solver));
         let statistics = OdeSolverStatistics { niter: 0, nmaxiter: 0 };
         Self { 
             problem: None,
             statistics,
             nonlinear_solver,
             bdf_callable: None, 
-            atol: None,
+            atol: Atol::default(),
             options, 
             order: 1, 
             n_equal_steps: 0, 
-            diff: M::zeros(n, Self::MAX_ORDER), 
-            diff_tmp: M::zeros(n, Self::MAX_ORDER), 
+            diff: DMatrix::<T>::zeros(n, Self::MAX_ORDER), 
+            diff_tmp: DMatrix::<T>::zeros(n, Self::MAX_ORDER), 
             gamma: vec![T::from(1.0); Self::MAX_ORDER + 1], 
             alpha: vec![T::from(1.0); Self::MAX_ORDER + 1], 
             error_const: vec![T::from(1.0); Self::MAX_ORDER + 1], 
-            u: M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
-            r: M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
-            ru: M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+            u: DMatrix::<T>::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+            r: DMatrix::<T>::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+            ru: DMatrix::<T>::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
         }
     }
+}
+
+impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V>> Bdf<'a, T, V, M, CRhs, CMass> {
+    const MAX_ORDER: IndexType = 5;
+    const NEWTON_MAXITER: IndexType = 4;
+    const MIN_FACTOR: T = T::from(0.2);
+    const MAX_FACTOR: T = T::from(10.0);
+    
     fn _predict(&self, state: &mut OdeSolverState<T, V>) {
         // predict forward to new step (eq 2 in [1])
         for i in 1..=self.order {
@@ -65,18 +66,6 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
         }
     }
     
-    fn atol(&mut self) -> &V {
-        let problem = self.problem.as_ref().unwrap();
-        if let Some(atol) = problem.atol {
-            atol
-        } else {
-            if self.atol.is_none() {
-                self.atol = Some(V::from_element(problem.rhs.nstates(), self.options.atol));
-            }
-            self.atol.as_ref().unwrap()
-        }
-    }
-
     fn _compute_r(order: usize, factor: T) -> M {
         //computes the R matrix with entries
         //given by the first equation on page 8 of [1]
@@ -149,7 +138,7 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
 }
 
 
-impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V> + Diagonal<T, V>> OdeSolverMethod<'a, T, V, CRhs, CMass> for Bdf<'a, T, V, M, CRhs, CMass> {
+impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: Callable<T, V>> OdeSolverMethod<'a, T, V, CRhs, CMass> for Bdf<'a, T, V, M, CRhs, CMass> {
     fn interpolate(&self, state: &OdeSolverState<T, V>, t: T) -> V {
         //interpolate solution at time values t* where t-h < t* < t
         //
@@ -196,15 +185,17 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
         self.error_const = vec![T::zero()];
         let mut gamma = 0;
         for i in 1..=Self::MAX_ORDER {
-            self.gamma.push(self.gamma[i-1] + 1 / (i + 1).into());
+            let i_t = T::from(i as f64);
+            let one_over_i_plus_one = T::one() / (i_t + T::one());
+            self.gamma.push(self.gamma[i-1] + one_over_i_plus_one);
             self.alpha.push(T::one() / ((T::one() - kappa[i]) * self.gamma[i]));
-            self.error_const.push(kappa[i] * self.gamma[i] + 1 / (i + 1).into());
+            self.error_const.push(kappa[i] * self.gamma[i] + one_over_i_plus_one);
         }
 
         // update initial step size based on function
         let mut scale = state.y.abs();
         scale *= self.options.rtol;
-        scale += self.atol();
+        scale += self.atol.value(problem, &self.options);
 
         let mut f0 = V::zeros(nstates);
         problem.rhs.call(&state.y, &problem.p, &mut f0);
@@ -224,7 +215,8 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
         df.axpy(T::from(-1.0), &f0, T::one());
         df.component_div_assign(&scale);
         let d2 = df.norm();
-        let mut new_h = state.h * d2.pow(-1 / (self.order + 1).into());
+        let one_over_order_plus_one = T::one() / (T::from(self.order as f64) + T::one());
+        let mut new_h = state.h * d2.pow(-one_over_order_plus_one);
         if new_h > T::from(100.0) * state.h {
             new_h = T::from(100.0) * state.h;
         }
@@ -234,7 +226,7 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
         let c = state.h * self.alpha[self.order];
         self.bdf_callable = Some(BdfCallable::new(&problem.rhs, &problem.mass));
         let callable = self.bdf_callable.as_ref().unwrap();
-        self.nonlinear_solver.set_callable(callable, &problem.p);
+        self.nonlinear_solver.as_mut().set_problem(&state.y, SolverProblem::new(callable, &problem.p));
         
         // setup U
         self.u = Self::_compute_r(self.order, T::one());
@@ -244,7 +236,7 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
         // we will try and use the old jacobian unless convergence of newton iteration
         // fails
         // tells callable to update rhs jacobian if the jacobian is requested (by nonlinear solver)
-        self.bdf_callable.set_rhs_jacobian_is_stale();
+        self.bdf_callable.unwrap().set_rhs_jacobian_is_stale();
         // initialise step size and try to make the step,
         // iterate, reducing step size until error is in bounds
         let step_accepted = false;
@@ -257,21 +249,24 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
         // loop until step is accepted
         while !step_accepted {
             // solve BDF equation using y0 as starting point
-            match self.nonlinear_solver.solve(&self.state.y) {
+            match self.nonlinear_solver.solve(state.y) {
                 Ok(y) => {
                     // test error is within tolerance
-                    scale_y = y.abs() * self.state.rtol;
-                    scale_y.add_scalar_assign(&self.state.atol);
+                    scale_y = y.abs() * self.options.rtol;
+                    scale_y += self.atol.value(self.problem.as_ref().unwrap(), &self.options);
 
                     // combine eq 3, 4 and 6 from [1] to obtain error
                     // Note that error = C_k * h^{k+1} y^{k+1}
                     // and d = D^{k+1} y_{n+1} \approx h^{k+1} y^{k+1}
-                    d = y - self.state.y;
-                    let error = self.state.error_const[self.state.order] * d;
-                    error_norm = (error / scale_y).norm();
-                    safety = 0.9 * (2 * self.newton_stats.maxiter + 1) / (2 * self.newton_stats.maxiter + self.newton_stats.niter);
+                    let d = y - state.y;
+                    let mut error =  d * self.error_const[self.order];
+                    error.component_div_assign(&scale_y);
+                    let error_norm = error.norm();
+                    let maxiter = self.nonlinear_solver.options().unwrap().max_iter as f64;
+                    let niter = self.nonlinear_solver.get_statistics().niter as f64;
+                    let safety = T::from(0.9 * (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter));
                     
-                    if error_norm <= 1.0 {
+                    if error_norm <= T::from(1.0) {
                         // step is accepted
                         step_accepted = true;
                     } else {
@@ -279,9 +274,11 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
                         // calculate optimal step size factor as per eq 2.46 of [2]
                         // and reduce step size and try again
                         let newton_stats = self.nonlinear_solver.get_statistics();
-                        let factor = max( 
-                            Self::MIN_FACTOR, safety * error_norm.pow(-1 / (self.order + 1))
-                        );
+                        let order = self.order as f64;
+                        let mut factor = safety * error_norm.pow(T::from(-1.0 / (order + 1.0)));
+                        if factor < Self::MIN_FACTOR {
+                            factor = Self::MIN_FACTOR;
+                        }
                         self._update_step_size(factor, &mut state);
                         step_accepted = false; 
                         continue
@@ -290,7 +287,7 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
                 Err(e) => {
                     // newton iteration did not converge, but jacobian has already been
                     // evaluated so reduce step size by 0.3 (as per [1]) and try again
-                    self._update_step_size(0.3, &mut state);
+                    self._update_step_size(T::from(0.3), &mut state);
                     step_accepted = false;
                     continue
                 }
@@ -298,8 +295,8 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
         }
 
         // take the accepted step
-        self.state.t += self.state.h;
-        self.state.y += d;
+        state.t += state.h;
+        state.y += d;
         
         self._update_differences(&d);
 
@@ -309,30 +306,30 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
         
         if self.n_equal_steps < self.order + 1 {
             self._predict(&mut state);
-            self.bdf_callable.set_psi_and_y0(&self.diff, &self.gamma, &self.alpha, self.order, &self.y);
+            self.bdf_callable.as_mut().unwrap().set_psi_and_y0(&self.diff, &self.gamma, &self.alpha, self.order, &state.y);
         } else {
             let order = self.order;
             // similar to the optimal step size factor we calculated above for the current
             // order k, we need to calculate the optimal step size factors for orders
             // k-1 and k+1. To do this, we note that the error = C_k * D^{k+1} y_n
             let error_m_norm = if order > 1 {
-                let mut error_m = self.diff.row(order) * self.error_const[order];
-                error_m.component_div_assign(scale_y);
+                let mut error_m = self.diff.column(order) * self.error_const[order];
+                error_m.component_div_assign(&scale_y);
                 error_m.norm()
             } else {
                 T::INFINITY
             };
             let error_p_norm = if order < Self::MAX_ORDER {
-                let mut error_p = self.diff.row(order) * self.error_const[order + 2];
-                error_p.component_div_assign(scale_y);
+                let mut error_p = self.diff.column(order) * self.error_const[order + 2];
+                error_p.component_div_assign(&scale_y);
                 error_p.norm()
             } else {
                 T::INFINITY
             };
 
-            let error_norms = vec!([error_m_norm, error_norm, error_p_norm]);
+            let error_norms = [error_m_norm, error_norm, error_p_norm];
             let factors = error_norms.into_iter().enumerate().map(|(i, error_norm)| {
-                error_norm.pow(-1 / (i + order))
+                error_norm.pow(T::from(-1.0 / (i as f64 + order as f64)))
             }).collect::<Vec<_>>();
 
             // now we have the three factors for orders k-1, k and k+1, pick the maximum in
@@ -340,10 +337,13 @@ impl<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, CRhs: Callable<T, V>, CMass: 
             let max_index = factors.iter().enumerate().max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap()).unwrap().0;
             order += max_index - 1;
 
-            let factor = min(Self::MAX_FACTOR, safety * factors[max_index]);
+            let mut factor = safety * factors[max_index];
+            if factor > Self::MAX_FACTOR {
+                factor = Self::MAX_FACTOR;
+            }
             self._update_step_size(factor, &mut state);
         }
-        self.state.t
+        Ok(state)
     }
 
     

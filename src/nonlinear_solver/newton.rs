@@ -1,4 +1,4 @@
-use crate::{Scalar, Vector, Callable, IndexType, Solver, SolverStatistics, Jacobian, Matrix, SolverOptions, LU, SolverProblem};
+use crate::{solver::atol::Atol, Callable, IndexType, Jacobian, Matrix, Scalar, Solver, SolverOptions, SolverProblem, SolverStatistics, Vector, LU};
 use anyhow::{anyhow, Result};
 
 use super::{Convergence, ConvergenceStatus};
@@ -6,7 +6,7 @@ use super::{Convergence, ConvergenceStatus};
 pub struct NewtonNonlinearSolver<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> {
     convergence: Option<Convergence<'a, T, V>>,
     linear_solver: Box<dyn Solver<'a, T, V, C>>,
-    atol: Option<V>,
+    atol: Atol<T, V>,
     statistics: SolverStatistics,
     options: SolverOptions<T>,
     problem: Option<SolverProblem<'a, T, V, C>>,
@@ -23,7 +23,7 @@ impl <'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> NewtonNonlinearSolver<'a, 
         Self {
             problem: None,
             convergence: None,
-            atol: None,
+            atol: Atol::default(),
             linear_solver,
             statistics,
             options,
@@ -47,16 +47,7 @@ impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> Solver<'a, T, V, C> for New
 
     fn set_problem(&mut self, state: &V, problem: SolverProblem<'a, T, V, C>) {
         let nstates = problem.f.nstates();
-        let atol = if problem.atol.is_some() {
-            problem.atol.unwrap()
-        } else {
-            if self.atol.is_none() {
-                self.atol = Some(V::from_element(nstates, self.options.atol));
-            } else if self.atol.unwrap().len() != nstates {
-                self.atol = Some(V::from_element(nstates, self.options.atol));
-            }
-            &self.atol.unwrap()
-        };
+        let atol = self.atol.value(&problem, &self.options);
         self.problem = Some(problem);
         if self.convergence.is_none() {
             self.convergence = Some(Convergence::new(
