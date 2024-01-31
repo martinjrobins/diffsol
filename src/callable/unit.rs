@@ -1,31 +1,33 @@
 // unit is a callable that returns returns the input vector
 
-use crate::{Scalar, vector::Vector, matrix::Matrix};
+use crate::{VectorRef, Matrix, Vector};
+use num_traits::{One, Zero};
 
 use super::{Callable, Jacobian};
 
 
-pub struct UnitCallable<T: Scalar, V: Vector<T>> {
+pub struct UnitCallable<V: Vector> {
     n: usize,
     ones: V,
-    _phantom: std::marker::PhantomData<T>,
+    _phantom: std::marker::PhantomData<V::T>,
 }
 
-impl<T: Scalar, V: Vector<T>> Default for UnitCallable<T, V> {
+impl<V: Vector> Default for UnitCallable<V> {
     fn default() -> Self {
         Self::new(1)
     }
 }
 
-impl<T: Scalar, V: Vector<T>> UnitCallable<T, V> {
+impl<V: Vector> UnitCallable<V> {
     pub fn new(n: usize) -> Self {
         let mut ones = V::zeros(n);
-        ones.add_scalar_mut(T::one());
+        ones.add_scalar_mut(V::T::one());
         Self { n, ones, _phantom: std::marker::PhantomData }
     }
 }
 
-impl<T: Scalar, V: Vector<T>> Callable<T, V> for UnitCallable<T, V> {
+impl<V: Vector> Callable<V> for UnitCallable<V> 
+{
     fn call(&self, x: &V, _p: &V, y: &mut V) {
         y.copy_from(&x)
     }
@@ -44,5 +46,6 @@ impl<T: Scalar, V: Vector<T>> Callable<T, V> for UnitCallable<T, V> {
 }
 
 // implement Jacobian
-impl<T: Scalar, V: Vector<T>, M: Matrix<T, V>> Jacobian<T, V, M> for UnitCallable<T, V> {}
+impl<M: Matrix> Jacobian<M> for UnitCallable<M::V> 
+{}
 

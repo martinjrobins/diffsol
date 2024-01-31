@@ -1,20 +1,26 @@
-use crate::{solver::atol::Atol, Callable, IndexType, Jacobian, Matrix, Scalar, Solver, SolverOptions, SolverProblem, SolverStatistics, Vector, LU};
+use crate::{solver::atol::Atol, vector::VectorRef, Callable, Solver, SolverOptions, SolverProblem, SolverStatistics, Vector};
 use anyhow::{anyhow, Result};
 
 use super::{Convergence, ConvergenceStatus};
 
-pub struct NewtonNonlinearSolver<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> {
-    convergence: Option<Convergence<'a, T, V>>,
-    linear_solver: Box<dyn Solver<'a, T, V, C>>,
-    atol: Atol<T, V>,
+pub struct NewtonNonlinearSolver<'a, V: Vector, C: Callable<V>> 
+where
+    for <'b> &'b V: VectorRef<V>,
+{
+    convergence: Option<Convergence<'a, V>>,
+    linear_solver: Box<dyn Solver<'a, V, C>>,
+    atol: Atol<V>,
     statistics: SolverStatistics,
-    options: SolverOptions<T>,
-    problem: Option<SolverProblem<'a, T, V, C>>,
+    options: SolverOptions<V::T>,
+    problem: Option<SolverProblem<'a, V, C>>,
 }
 
-impl <'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> NewtonNonlinearSolver<'a, T, V, C> {
-    pub fn new(linear_solver: impl Solver<'a, T, V, C>) -> Self {
-        let options = SolverOptions::<T>::default();
+impl <'a, V: Vector, C: Callable<V>> NewtonNonlinearSolver<'a, V, C> 
+where
+    for <'b> &'b V: VectorRef<V>,
+{
+    pub fn new(linear_solver: impl Solver<'a, V, C>) -> Self {
+        let options = SolverOptions::<V::T>::default();
         let statistics = SolverStatistics {
             niter: 0,
             nmaxiter: 0,
@@ -31,21 +37,24 @@ impl <'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> NewtonNonlinearSolver<'a, 
     }
 }
 
-impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> Solver<'a, T, V, C> for NewtonNonlinearSolver<'a, T, V, C> {
+impl<'a, V: Vector, C: Callable<V>> Solver<'a, V, C> for NewtonNonlinearSolver<'a, V, C> 
+where
+    for <'b> &'b V: VectorRef<V>,
+{
 
-    fn options(&self) -> Option<&SolverOptions<T>> {
+    fn options(&self) -> Option<&SolverOptions<V::T>> {
         Some(&self.options)
     }
 
-    fn set_options(&mut self, options: SolverOptions<T>) {
+    fn set_options(&mut self, options: SolverOptions<V::T>) {
         self.options = options;
     }
 
-    fn problem(&self) -> Option<&SolverProblem<'a, T, V, C>> {
+    fn problem(&self) -> Option<&SolverProblem<'a, V, C>> {
         self.problem.as_ref()
     }
 
-    fn set_problem(&mut self, state: &V, problem: SolverProblem<'a, T, V, C>) {
+    fn set_problem(&mut self, state: &V, problem: SolverProblem<'a, V, C>) {
         let nstates = problem.f.nstates();
         let atol = self.atol.value(&problem, &self.options);
         self.problem = Some(problem);
@@ -126,10 +135,10 @@ mod tests {
         type V = nalgebra::DVector<T>;
         type M = nalgebra::DMatrix<T>;
         type C = Closure<fn(&V, &V, &mut V, &M), fn(&V, &V, &V, &mut V, &M), M>;
-        type S = NewtonNonlinearSolver<'static, T, V, C>;
+        type S = NewtonNonlinearSolver<'static, V, C>;
         let lu = LU::<T>::default();
-        let op = get_square_problem::<T, V, M>();
+        let op = get_square_problem::<M>();
         let s = S::new(lu);
-        test_nonlinear_solver::<T, V, M, C, S>(s, op);
+        test_nonlinear_solver::<M, C, S>(s, op);
     }
 }

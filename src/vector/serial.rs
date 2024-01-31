@@ -10,35 +10,20 @@ impl VectorIndex for DVector<IndexType> {
     }
 }
 
-impl<T: Scalar> VectorCommon<T> for DVector<T> {
-    fn len(&self) -> crate::IndexType {
-        self.len()
-    }
-    fn norm(&self) -> T {
-        self.norm()
-    }
+impl<T: Scalar> VectorCommon for DVector<T> {
+    type T = T;
 }
 
-impl<'a, T: Scalar> VectorCommon<T> for DVectorView<'a, T> {
-    fn len(&self) -> crate::IndexType {
-        self.len()
-    }
-    fn norm(&self) -> T {
-        self.norm()
-    }
+impl<'a, T: Scalar> VectorCommon for DVectorView<'a, T> {
+    type T = T;
 }
 
-impl<'a, T: Scalar> VectorCommon<T> for DVectorViewMut<'a, T> {
-    fn len(&self) -> crate::IndexType {
-        self.len()
-    }
-    fn norm(&self) -> T {
-        self.norm()
-    }
+impl<'a, T: Scalar> VectorCommon for DVectorViewMut<'a, T> {
+    type T = T;
 }
 
 
-impl<'a, T: Scalar> VectorView<'a, T> for DVectorView<'a, T> {
+impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
     type Owned = DVector<T>;
     fn abs(&self) -> DVector<T> {
         self.abs()
@@ -48,23 +33,30 @@ impl<'a, T: Scalar> VectorView<'a, T> for DVectorView<'a, T> {
     }
 }
 
-impl<'a, T: Scalar> VectorViewMut<'a, T> for DVectorViewMut<'a, T> {
+impl<'a, T: Scalar> VectorViewMut<'a> for DVectorViewMut<'a, T> {
     type Owned = DVector<T>;
+    type View = DVectorView<'a, T>;
     fn abs(&self) -> DVector<T> {
         self.abs()
     }
     fn copy_from(&mut self, other: &Self::Owned) {
         self.copy_from(other);
     }
-    fn copy_from_view(&mut self, other: &<Self::Owned as Vector<T>>::View<'_>) {
+    fn copy_from_view(&mut self, other: &<Self::Owned as Vector>::View<'_>) {
         self.copy_from(other);
     }
 }
 
-impl<T: Scalar> Vector<T> for DVector<T> {
+impl<T: Scalar> Vector for DVector<T> {
     type View<'a> = DVectorView<'a, T>;
     type ViewMut<'a> = DVectorViewMut<'a, T>;
     type Index = DVector<IndexType>;
+    fn len(&self) -> IndexType {
+        self.len()
+    }
+    fn norm(&self) -> Self::T {
+        self.norm()
+    }
     fn abs(&self) -> Self {
         self.abs()
     }

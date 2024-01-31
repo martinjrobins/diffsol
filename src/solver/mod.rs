@@ -8,7 +8,7 @@ pub struct SolverStatistics {
     pub nmaxiter: IndexType,
 }
 
-pub trait Problem<T: Scalar, V: Vector<T>> {
+pub trait Problem<V: Vector> {
     fn nstates(&self) -> IndexType;
     fn atol(&self) -> Option<&V>;
 }
@@ -41,14 +41,13 @@ impl <T: Scalar> Options<T> for SolverOptions<T> {
 
 
 
-pub struct SolverProblem<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> {
-    pub f: &'a C,
-    pub p: &'a V,
-    pub atol: Option<&'a V>,
-    _phantom: std::marker::PhantomData<T>,
+pub struct SolverProblem<V: Vector, C: Callable<V>> {
+    pub f: C,
+    pub p: V,
+    pub atol: Option<V>,
 }
 
-impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> Problem<T, V> for SolverProblem<'a, T, V, C> {
+impl<'a, V: Vector, C: Callable<V>> Problem<V> for SolverProblem<V, C> {
     fn atol(&self) -> Option<&V> {
         self.atol
     }
@@ -57,24 +56,22 @@ impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> Problem<T, V> for SolverPro
     }
 }
 
-impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> SolverProblem<'a, T, V, C> {
+impl<'a, V: Vector, C: Callable<V>> SolverProblem<V, C> {
     pub fn new(f: &'a C, p: &'a V) -> Self {
         Self {
             f,
             p,
             atol: None,
-            _phantom: std::marker::PhantomData,
         }
     }
 }
 
-impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> Clone for SolverProblem<'a, T, V, C> {
+impl<'a, V: Vector, C: Callable<V>> Clone for SolverProblem<V, C> {
     fn clone(&self) -> Self {
         Self {
             f: self.f,
             p: self.p,
             atol: self.atol,
-            _phantom: std::marker::PhantomData,
         }
     }
 }
@@ -83,11 +80,11 @@ impl<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>> Clone for SolverProblem<'a,
 
 
 
-pub trait Solver<'a, T: Scalar, V: Vector<T>, C: Callable<T, V>>: {
-    fn options(&self) -> Option<&SolverOptions<T>>;
-    fn set_options(&mut self, options: SolverOptions<T>);
-    fn problem(&self) -> Option<&SolverProblem<'a, T, V, C>>;
-    fn set_problem(&mut self, state: &V, problem: SolverProblem<'a, T, V, C>);
+pub trait Solver<'a, V: Vector, C: Callable<V>> {
+    fn options(&self) -> Option<&SolverOptions<V::T>>;
+    fn set_options(&mut self, options: SolverOptions<V::T>);
+    fn problem(&self) -> Option<&SolverProblem<V, C>>;
+    fn set_problem(&mut self, state: &V, problem: SolverProblem<V, C>);
     fn solve(&mut self, state: V) -> Result<V>;
     fn get_statistics(&self) -> &SolverStatistics;
 }

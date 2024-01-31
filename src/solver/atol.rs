@@ -1,32 +1,29 @@
 use crate::{callable::Callable, vector::Vector, Scalar};
 
-use super::{Options, Problem, SolverOptions, SolverProblem};
+use super::{Options, Problem};
 
 
-pub struct Atol<T: Scalar, V: Vector<T>>{
+pub struct Atol<V: Vector>{
     value: Option<V>,
-    _phantom: std::marker::PhantomData<T>,
 }
 
 
-impl<T: Scalar, V: Vector<T>> Default for Atol<T, V> {
+impl<V: Vector> Default for Atol<V> {
     fn default() -> Self {
         Self {
             value: None,
-            _phantom: std::marker::PhantomData,
         }
     }
 }
 
 
-impl <V: Vector<T>, T: Scalar> Atol<T, V> {
+impl <V: Vector> Atol<V> {
     pub fn new(value: V) -> Self {
         Self {
             value: Some(value),
-            _phantom: std::marker::PhantomData,
         }
     }
-    pub fn value<'a, P: Problem<T, V>, O: Options<T>>(&mut self, problem: &P, options: &O) -> &V {
+    pub fn value<'a, P: Problem<V>, O: Options<V::T>>(&mut self, problem: &P, options: &O) -> &V {
         let nstates = problem.nstates();
         if problem.atol().is_some() {
             problem.atol().unwrap()

@@ -3,43 +3,47 @@ pub mod gmres;
 
 #[cfg(test)]
 pub mod tests {
-    use crate::{callable::closure::Closure, Callable, Matrix, Scalar, Solver, SolverProblem, Vector, LU};
-    
+    use crate::{callable::closure::Closure, vector::VectorRef, Callable, Matrix, Solver, SolverProblem, Vector, LU};
+    use num_traits::{One, Zero};
+
     // 0 = J * x - 8
-    fn square<T: Scalar, V: Vector<T>, M: Matrix<T, V>>(x: &V, p: &V, y: &mut V, jac: &M) {
-        jac.gemv(T::one(), x, T::zero(), y); // y = J * x
-        y.add_scalar_mut(T::from(-8.0));
+    fn square<M: Matrix>(x: &M::V, p: &M::V, y: &mut M::V, jac: &M) {
+        jac.gemv(M::T::one(), x, M::T::zero(), y); // y = J * x
+        y.add_scalar_mut(M::T::from(-8.0));
     }
 
     // J = J * dx
-    fn square_jacobian<T: Scalar, V: Vector<T>, M: Matrix<T, V>>(x: &V, p: &V, v: &V, y: &mut V, jac: &M) {
-        jac.gemv(T::one(), v, T::zero(), y); // y = J * v
+    fn square_jacobian<M: Matrix>(x: &M::V, p: &M::V, v: &M::V, y: &mut M::V, jac: &M) {
+        jac.gemv(M::T::one(), v, M::T::zero(), y); // y = J * v
     }
 
-    pub fn test_linear_solver<'a, T: Scalar, V: Vector<T>, M: Matrix<T, V>, C: Callable<T, V>, S: Solver<'a, T, V, C>>(mut s: S, op: C) {
-        let problem = SolverProblem::new(&op, &V::zeros(0));
-        let state = V::zeros(problem.f.nstates());
-        s.set_problem(&state, problem);
-        let b = V::from_vec(vec![2.0.into(), 4.0.into()]);
-        let x = s.solve(b).unwrap();
-        let expect = V::from_vec(vec![(5.0).into(), 6.0.into()]);
+    pub fn test_linear_solver<'a, M: Matrix, S: Solver<'a, M::V, Closure<fn(&M::V, &M::V, &mut M::V, &M), fn(&M::V, &M::V, &M::V, &mut M::V, &M), M>>>() 
+        where 
+            for <'b> &'b M::V: VectorRef<M::V>,
+            S: Default,
+    {
+        let op = Closure::<fn(&M::V, &M::V, &mut M::V, &M), fn(&M::V, &M::V, &M::V, &mut M::V, &M), M>::new(
+            square,
+            square_jacobian,
+            M::from_diagonal(&M::V::from_vec(vec![2.0.into(), 2.0.into()])), 
+            2,
+        );
+        let p = M::V::zeros(0);
+        let problem = SolverProblem::new(&op, &p);
+        let solver = S::default();
+        let state = <M::V as Vector>::zeros(problem.f.nstates());
+        solver.set_problem(&state, problem);
+        let b = M::V::from_vec(vec![2.0.into(), 4.0.into()]);
+        let x = solver.solve(b).unwrap();
+        let expect = M::V::from_vec(vec![(5.0).into(), 6.0.into()]);
         x.assert_eq(&expect, 1e-6.into());
     }
     
     #[test]
     fn test_lu() {
         type T = f64;
-        type V = nalgebra::DVector<T>;
         type M = nalgebra::DMatrix<T>;
-        type C = Closure<fn(&V, &V, &mut V, &M), fn(&V, &V, &V, &mut V, &M), M>;
         type S = LU<T>;
-        let lu = LU::<T>::default();
-        let op = C::new(
-            square,
-            square_jacobian,
-            M::from_diagonal(&V::from_vec(vec![2.0.into(), 2.0.into()])), 
-            2,
-        );
-        test_linear_solver::<T, V, M, C, S>(lu, op);
+        test_linear_solver::<M, S>();
     }
 }

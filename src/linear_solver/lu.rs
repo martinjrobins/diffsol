@@ -16,19 +16,19 @@ impl<T: Scalar> Default for LU<T> {
 }
 
 
-impl<'a, T: Scalar, C: Callable<T, DVector<T>> + Jacobian<T, DVector<T>, DMatrix<T>>> Solver<'a, T, DVector<T>, C> for LU<T> {
+impl<'a, T: Scalar, C: Callable<DVector<T>> + Jacobian<DMatrix<T>>> Solver<'a, DVector<T>, C> for LU<T> {
     
     fn options(&self) -> Option<&SolverOptions<T>> {
        None 
     }
     
-    fn problem(&self) -> Option<&SolverProblem<'a, T, DVector<T>, C>> {
+    fn problem(&self) -> Option<&SolverProblem<'a, DVector<T>, C>> {
         None
     }
     
     fn set_options(&mut self, options: SolverOptions<T>) {}
     
-    fn set_problem(&mut self, state: &DVector<T>, problem: SolverProblem<'a, T, DVector<T>, C>) {
+    fn set_problem(&mut self, state: &DVector<T>, problem: SolverProblem<'a, DVector<T>, C>) {
         self.lu = Some(nalgebra::LU::new(problem.f.jacobian(state, problem.p)));
     }
 

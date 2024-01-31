@@ -5,7 +5,9 @@ use crate::{Scalar, IndexType};
 
 use super::{Matrix, MatrixView, MatrixCommon, MatrixViewMut};
 
-impl<'a, T: Scalar> MatrixCommon<T, DVector<T>> for DMatrixViewMut<'a, T> {
+impl<'a, T: Scalar> MatrixCommon for DMatrixViewMut<'a, T> {
+    type V = DVector<T>;
+    type T = T;
     fn diagonal(&self) -> DVector<T> {
         self.diagonal()
     }
@@ -20,17 +22,20 @@ impl<'a, T: Scalar> MatrixCommon<T, DVector<T>> for DMatrixViewMut<'a, T> {
     }
 }
 
-impl<'a, T: Scalar> MatrixViewMut<'a, T, DVector<T>> for DMatrixViewMut<'a, T> {
+impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
     type Owned = DMatrix<T>;
-    fn gemm_oo(&mut self, alpha: T, a: &Self::Owned, b: &Self::Owned, beta: T) {
+    type View = DMatrixView<'a, T>;
+    fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T) {
         self.gemm(alpha, a, b, beta);
     }
-    fn gemm_ov<'b>(&mut self, alpha: T, a: &Self::Owned, b: &DMatrixView<'b, T>, beta: T) {
+    fn gemm_ov(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::View, beta: Self::T) {
         self.gemm(alpha, a, b, beta);
     }
 }
 
-impl<'a, T: Scalar> MatrixCommon<T, DVector<T>> for DMatrixView<'a, T> {
+impl<'a, T: Scalar> MatrixCommon for DMatrixView<'a, T> {
+    type V = DVector<T>;
+    type T = T;
     fn diagonal(&self) -> DVector<T> {
         self.diagonal()
     }
@@ -45,11 +50,13 @@ impl<'a, T: Scalar> MatrixCommon<T, DVector<T>> for DMatrixView<'a, T> {
     }
 }
 
-impl<'a, T: Scalar> MatrixView<'a, T, DVector<T>> for DMatrixView<'a, T> {
+impl<'a, T: Scalar> MatrixView<'a> for DMatrixView<'a, T> {
     type Owned = DMatrix<T>;
 }
 
-impl<T: Scalar> MatrixCommon<T, DVector<T>> for DMatrix<T> {
+impl<T: Scalar> MatrixCommon for DMatrix<T> {
+    type V = DVector<T>;
+    type T = T;
     fn diagonal(&self) -> DVector<T> {
         self.diagonal()
     }
@@ -65,7 +72,7 @@ impl<T: Scalar> MatrixCommon<T, DVector<T>> for DMatrix<T> {
     }
 }
 
-impl<T: Scalar> Matrix<T, DVector<T>> for DMatrix<T> {
+impl<T: Scalar> Matrix for DMatrix<T> {
     type View<'a> = DMatrixView<'a, T>;
     type ViewMut<'a> = DMatrixViewMut<'a, T>;
     

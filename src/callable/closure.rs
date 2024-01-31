@@ -1,4 +1,4 @@
-use crate::{Scalar, Vector, IndexType, matrix::Matrix};
+use crate::{IndexType, Matrix, Vector};
 
 use super::{Callable, Jacobian};
 
@@ -15,11 +15,10 @@ impl<F, G, D> Closure<F, G, D> {
     }
 }
 
-impl<F, G, D, T, V> Callable<T, V> for Closure<F, G, D>
+impl<F, G, D, V> Callable<V> for Closure<F, G, D>
     where F: Fn(&V, &V, &mut V, &D),
           G: Fn(&V, &V, &V, &mut V, &D),
-          T: Scalar,
-          V: Vector<T>,
+          V: Vector,
 {
     fn call(&self, x: &V, p: &V, y: &mut V) {
         (self.func)(x, p, y, &self.data)
@@ -39,10 +38,8 @@ impl<F, G, D, T, V> Callable<T, V> for Closure<F, G, D>
 }
 
 // implement Jacobian
-impl<F, G, D, T, V, M> Jacobian<T, V, M> for Closure<F, G, D>
-    where F: Fn(&V, &V, &mut V, &D),
-          G: Fn(&V, &V, &V, &mut V, &D),
-          T: Scalar,
-          V: Vector<T>,
-          M: Matrix<T, V>,
+impl<F, G, D, M> Jacobian<M> for Closure<F, G, D>
+    where F: Fn(&M::V, &M::V, &mut M::V, &D),
+          G: Fn(&M::V, &M::V, &M::V, &mut M::V, &D),
+          M: Matrix,
 {}
