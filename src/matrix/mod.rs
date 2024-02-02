@@ -1,4 +1,4 @@
-use std::ops::{Index, Add, Sub, Div, Mul, AddAssign, SubAssign, MulAssign, DivAssign};
+use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 use std::fmt::{Debug, Display};
 
 use crate::{IndexType, Scalar, Vector};
@@ -50,7 +50,7 @@ impl <'a, M> MatrixCommon for &'a mut M where M: MatrixCommon {
     }
 }
 
-trait MatrixOpsByValue<Rhs = Self, Output = Self>: MatrixCommon 
+pub trait MatrixOpsByValue<Rhs = Self, Output = Self>: MatrixCommon 
     + Add<Rhs, Output = Output>
     + Sub<Rhs, Output = Output> 
 {}
@@ -108,16 +108,18 @@ where
     + Div<Self::T, Output = Self>
 {}
 
-pub trait MatrixRef<T>:
-    // &T op T -> T
-    MatrixOpsByValue<T, T>
-    // &T op &T -> T
-    + for<'a> MatrixOpsByValue<T, T> 
+pub trait MatrixRef<M: MatrixCommon>:
+    MatrixOpsByValue<M, M>
+    + for<'a> MatrixOpsByValue<M, M> 
+    + Mul<M::T, Output = M>
+    + Div<M::T, Output = M>
 {}
 
-impl <RefT, T> MatrixRef<T> for RefT where
-    RefT: MatrixOpsByValue<T, T>
-    + for<'a> MatrixOpsByValue<&'a T, T>
+impl <RefT, M: MatrixCommon> MatrixRef<M> for RefT where
+    RefT: MatrixOpsByValue<M, M>
+    + for<'a> MatrixOpsByValue<&'a M, M>
+    + Mul<M::T, Output = M>
+    + Div<M::T, Output = M>
 {}
 
 
@@ -141,6 +143,7 @@ pub trait Matrix:
     for <'a> MatrixOps<Self::View<'a>>
     + for <'a> MatrixMutOps<Self::View<'a>>
     + Index<(IndexType, IndexType), Output = Self::T> 
+    + IndexMut<(IndexType, IndexType), Output = Self::T> 
     + Clone 
 {
     type View<'a>: MatrixView<'a, Owned = Self, T = Self::T> where Self: 'a;
@@ -150,8 +153,7 @@ pub trait Matrix:
     fn try_from_triplets(nrows: IndexType, ncols: IndexType, triplets: Vec<(IndexType, IndexType, Self::T)>) -> Result<Self>;
     fn columns(&self, start: IndexType, nrows: IndexType) -> Self::View<'_>;
     fn column(&self, i: IndexType) -> <Self::V as Vector>::View<'_>;
-    fn columns_mut(&self, start: IndexType, nrows: IndexType) -> Self::ViewMut<'_>;
-    fn column_mut(&self, i: IndexType) -> <Self::V as Vector>::ViewMut<'_>;
-    fn add_assign_column(&self, i: IndexType, other: &Self::V);
+    fn columns_mut(&mut self, start: IndexType, nrows: IndexType) -> Self::ViewMut<'_>;
+    fn column_mut(&mut self, i: IndexType) -> <Self::V as Vector>::ViewMut<'_>;
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T);
 }

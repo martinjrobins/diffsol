@@ -1,26 +1,26 @@
 use anyhow::Result;
 
-use crate::{vector::VectorRef, Callable, Solver, SolverStatistics, Vector};
+use crate::{solver::SolverProblem, vector::VectorRef, Callable, Solver};
 
 
-pub struct GMRES<V: Vector, C: Callable<V>> 
+pub struct GMRES<C: Callable> 
 where 
-    for <'a> &'a V: VectorRef<V>,
+    for <'a> &'a C::V: VectorRef<C::V>,
 {
-    _phantom: std::marker::PhantomData<(V, C)>,
+    _phantom: std::marker::PhantomData<C>,
 }
 
-impl<V: Vector, C: Callable<V>> GMRES<V, C> 
+impl<C: Callable> GMRES<C> 
 where
-    for <'a> &'a V: VectorRef<V>,
+    for <'a> &'a C::V: VectorRef<C::V>,
 {
     // ...
 }
 
 // implement default for gmres
-impl<V: Vector, C: Callable<V>> Default for GMRES<V, C> 
+impl<C: Callable> Default for GMRES<C> 
 where
-    for <'a> &'a V: VectorRef<V>,
+    for <'a> &'a C::V: VectorRef<C::V>,
 {
     fn default() -> Self {
         Self {
@@ -29,32 +29,20 @@ where
     }
 }
 
-impl <'a, V: Vector, C: Callable<V>> Solver<'a, V, C> for GMRES<V, C> 
+impl <C: Callable> Solver<C> for GMRES<C> 
 where
-    for <'b> &'b V: VectorRef<V>,
+    for <'b> &'b C::V: VectorRef<C::V>,
 {
-
-    fn options(&self) -> Option<&crate::solver::SolverOptions<V::T>> {
+    fn problem(&self) -> Option<&SolverProblem<C>> {
         todo!()
     }
 
-    fn set_options(&mut self, options: crate::solver::SolverOptions<V::T>) {
+    fn set_problem(&mut self, _state: &<C as Callable>::V, _problem: std::rc::Rc<crate::solver::SolverProblem<C>>) {
+        todo!() 
+    }
+
+    fn solve_in_place(&mut self, _state: &mut C::V) -> Result<()> {
         todo!()
     }
 
-    fn problem(&self) -> Option<&crate::solver::SolverProblem<'a, V, C>> {
-        todo!()
-    }
-
-    fn set_problem(&mut self, state: &V, problem: crate::solver::SolverProblem<'a, V, C>) {
-        todo!()
-    }
-
-    fn get_statistics(&self) -> &SolverStatistics {
-        todo!()
-    }
-
-    fn solve(&mut self, state: V) -> Result<V> {
-        todo!()
-    }
 } 

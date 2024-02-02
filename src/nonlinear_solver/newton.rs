@@ -1,106 +1,94 @@
-use crate::{solver::atol::Atol, vector::VectorRef, Callable, Solver, SolverOptions, SolverProblem, SolverStatistics, Vector};
+use std::rc::Rc;
+
+use crate::{solver::IterativeSolver, vector::Vector, Callable, Solver, SolverProblem};
 use anyhow::{anyhow, Result};
+use std::ops::SubAssign;
 
 use super::{Convergence, ConvergenceStatus};
 
-pub struct NewtonNonlinearSolver<'a, V: Vector, C: Callable<V>> 
-where
-    for <'b> &'b V: VectorRef<V>,
+pub struct NewtonNonlinearSolver<C: Callable> 
 {
-    convergence: Option<Convergence<'a, V>>,
-    linear_solver: Box<dyn Solver<'a, V, C>>,
-    atol: Atol<V>,
-    statistics: SolverStatistics,
-    options: SolverOptions<V::T>,
-    problem: Option<SolverProblem<'a, V, C>>,
+    convergence: Option<Convergence<C>>,
+    linear_solver: Box<dyn Solver<C>>,
+    problem: Option<Rc<SolverProblem<C>>>,
+    max_iter: usize,
+    niter: usize,
 }
 
-impl <'a, V: Vector, C: Callable<V>> NewtonNonlinearSolver<'a, V, C> 
-where
-    for <'b> &'b V: VectorRef<V>,
+impl <C: Callable> NewtonNonlinearSolver<C> 
 {
-    pub fn new(linear_solver: impl Solver<'a, V, C>) -> Self {
-        let options = SolverOptions::<V::T>::default();
-        let statistics = SolverStatistics {
-            niter: 0,
-            nmaxiter: 0,
-        };
+    pub fn new<S: Solver<C> + 'static>(linear_solver: S) -> Self {
         let linear_solver = Box::new(linear_solver);
         Self {
             problem: None,
             convergence: None,
-            atol: Atol::default(),
             linear_solver,
-            statistics,
-            options,
+            max_iter: 100,
+            niter: 0,
         }
     }
 }
 
-impl<'a, V: Vector, C: Callable<V>> Solver<'a, V, C> for NewtonNonlinearSolver<'a, V, C> 
-where
-    for <'b> &'b V: VectorRef<V>,
+impl<C: Callable> IterativeSolver<C> for NewtonNonlinearSolver<C> 
+{
+    fn set_max_iter(&mut self, max_iter: usize) {
+        self.max_iter = max_iter;
+    }
+    fn max_iter(&self) -> usize {
+        self.max_iter
+    }
+    fn niter(&self) -> usize {
+        self.niter 
+    }
+}
+
+impl<C: Callable> Solver<C> for NewtonNonlinearSolver<C> 
 {
 
-    fn options(&self) -> Option<&SolverOptions<V::T>> {
-        Some(&self.options)
+    fn problem(&self) -> Option<&SolverProblem<C>> {
+        self.problem.as_deref()
     }
 
-    fn set_options(&mut self, options: SolverOptions<V::T>) {
-        self.options = options;
-    }
-
-    fn problem(&self) -> Option<&SolverProblem<'a, V, C>> {
-        self.problem.as_ref()
-    }
-
-    fn set_problem(&mut self, state: &V, problem: SolverProblem<'a, V, C>) {
-        let nstates = problem.f.nstates();
-        let atol = self.atol.value(&problem, &self.options);
+    fn set_problem(&mut self, state: &C::V, problem: Rc<SolverProblem<C>>) {
         self.problem = Some(problem);
+        let problem = self.problem.as_ref().unwrap();
         if self.convergence.is_none() {
             self.convergence = Some(Convergence::new(
-                self.options.rtol,
-                atol,
-                self.options.max_iter,
+                problem.clone(), self.max_iter
             ));
         } else {
-            self.convergence.unwrap().rtol = self.options.rtol;
-            self.convergence.unwrap().atol = atol;
-            self.convergence.unwrap().max_iter = self.options.max_iter;
+            self.convergence.as_mut().unwrap().problem = problem.clone();
         }
         self.linear_solver.set_problem(state, problem.clone());
     }
     
     
-    fn get_statistics(&self) -> &SolverStatistics {
-        &self.statistics
-    }
-
-    fn solve(&mut self, x0: V) -> Result<V> {
+    fn solve_in_place(&mut self, xn: & mut C::V) -> Result<()> {
         if self.convergence.is_none() || self.problem.is_none() {
             return Err(anyhow!("NewtonNonlinearSolver::solve() called before set_problem"));
         }
         let convergence = self.convergence.as_mut().unwrap();
         let problem = self.problem.as_ref().unwrap();
-        let mut xn = x0.clone();
-        convergence.reset(&xn);
-        let mut f_at_n = xn.clone();
+        let x0 = xn.clone();
+        convergence.reset(&x0);
+        let mut tmp = x0.clone();
         let mut updated_jacobian = false;
-        self.statistics.niter = 0;
+        self.niter = 0;
         loop {
             loop {
-                self.statistics.niter += 1;
-                problem.f.call(&xn, problem.p, &mut f_at_n);
-                
-                let mut delta_xn = self.linear_solver.solve(f_at_n)?;
+                self.niter += 1;
+                problem.f.call(&xn, &problem.p, &mut tmp);
 
-                xn -= delta_xn;
+                //tmp = f_at_n
+                self.linear_solver.solve_in_place(&mut tmp)?;
 
-                let res = convergence.check_new_iteration(delta_xn);
+                //tmp = delta_n
+                xn.sub_assign(&tmp);
+
+                let res = convergence.check_new_iteration(&mut tmp);
                 match res  {
                     ConvergenceStatus::Continue => continue,
-                    ConvergenceStatus::Converged => return Ok(xn),
+                    ConvergenceStatus::Converged => return Ok(()),
                     ConvergenceStatus::Diverged => break,
                     ConvergenceStatus::MaximumIterations => break,
                 }
@@ -109,6 +97,8 @@ where
             // if we havn't updated the jacobian, we can update it and try again
             if !updated_jacobian {
                 self.linear_solver.set_problem(&x0, problem.clone());
+                xn.copy_from(&x0);
+                updated_jacobian = true;
                 continue;
             } else {
                 break;
@@ -124,7 +114,6 @@ mod tests {
 
     use crate::LU;
     use crate::callable::closure::Closure;
-    use crate::nonlinear_solver::tests::get_square_problem;
 
     use super::*;
     use super::super::tests::test_nonlinear_solver;
@@ -134,11 +123,10 @@ mod tests {
         type T = f64;
         type V = nalgebra::DVector<T>;
         type M = nalgebra::DMatrix<T>;
-        type C = Closure<fn(&V, &V, &mut V, &M), fn(&V, &V, &V, &mut V, &M), M>;
-        type S = NewtonNonlinearSolver<'static, V, C>;
+        type C = Closure<M, fn(&V, &V, &mut V, &M), fn(&V, &V, &V, &mut V, &M), M>;
+        type S = NewtonNonlinearSolver<C>;
         let lu = LU::<T>::default();
-        let op = get_square_problem::<M>();
         let s = S::new(lu);
-        test_nonlinear_solver::<M, C, S>(s, op);
+        test_nonlinear_solver(s);
     }
 }

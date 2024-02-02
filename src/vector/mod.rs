@@ -26,15 +26,11 @@ impl <'a, V> VectorCommon for &'a mut V where V: VectorCommon {
 trait VectorOpsByValue<Rhs = Self, Output = Self>: VectorCommon 
     + Add<Rhs, Output = Output>
     + Sub<Rhs, Output = Output> 
-    + Mul<Self::T, Output = Output>
-    + Div<Self::T, Output = Output>
 {}
 
 impl <V, Rhs, Output> VectorOpsByValue<Rhs, Output> for V where V: VectorCommon 
     + Add<Rhs, Output = Output>
     + Sub<Rhs, Output = Output> 
-    + Mul<Self::T, Output = Output>
-    + Div<Self::T, Output = Output>
 {}
 
 
@@ -43,6 +39,8 @@ pub trait VectorOps<View>:
     + for<'a> VectorOpsByValue<&'a Self>
     + VectorOpsByValue<View> 
     + for<'a> VectorOpsByValue<&'a View>
+    + Mul<Self::T, Output = Self>
+    + Div<Self::T, Output = Self>
 {}
 
 impl <V, View> VectorOps<View> for V 
@@ -51,6 +49,8 @@ where
     + for<'a> VectorOpsByValue<&'a Self> 
     + VectorOpsByValue<View> 
     + for<'a> VectorOpsByValue<&'a View>
+    + Mul<Self::T, Output = Self>
+    + Div<Self::T, Output = Self>
 {}
 
 pub trait VectorMutOpsByValue<Rhs = Self>: VectorCommon 
@@ -82,13 +82,13 @@ where
     + DivAssign<Self::T>
 {}
 
-pub trait VectorRef<V>:
+pub trait VectorRef<V: Vector>:
     VectorOpsByValue<V, V>
     + for<'a> VectorOpsByValue<&'a V, V> 
     + for<'a> VectorOpsByValue<V::View<'a>, V>
     + for<'a, 'b> VectorOpsByValue<&'a V::View<'b>, V> 
-where
-    V: Vector
+    + Mul<V::T, Output = V>
+    + Div<V::T, Output = V>
 {}
 
 impl <RefT, V: Vector> VectorRef<V> for RefT where
@@ -96,6 +96,17 @@ impl <RefT, V: Vector> VectorRef<V> for RefT where
     + for<'a> VectorOpsByValue<&'a V, V>
     + for<'a> VectorOpsByValue<V::View<'a>, V>
     + for<'a, 'b> VectorOpsByValue<&'a V::View<'b>, V> 
+    + Mul<V::T, Output = V>
+    + Div<V::T, Output = V>
+{}
+
+pub trait VectorMutRef<V>:
+    VectorMutOpsByValue<V>
+    + for<'a> VectorMutOpsByValue<&'a V> 
+    + for<'a> VectorMutOpsByValue<V::View<'a>>
+    + for<'a, 'b> VectorMutOpsByValue<&'a V::View<'b>> 
+where
+    V: Vector
 {}
 
 pub trait VectorViewMut<'a>: 

@@ -76,16 +76,12 @@ impl<T: Scalar> Matrix for DMatrix<T> {
     type View<'a> = DMatrixView<'a, T>;
     type ViewMut<'a> = DMatrixViewMut<'a, T>;
     
-    fn column_mut(&self, i: IndexType) -> DVectorViewMut<'_, T> {
+    fn column_mut(&mut self, i: IndexType) -> DVectorViewMut<'_, T> {
         self.column_mut(i)
     }
     
-    fn columns_mut(&self, start: IndexType, nrows: IndexType) -> Self::ViewMut<'_> {
+    fn columns_mut(&mut self, start: IndexType, nrows: IndexType) -> Self::ViewMut<'_> {
         self.columns_mut(start, nrows)
-    }
-
-    fn add_assign_column(&self, i: IndexType, other: &DVector<T>) {
-        self.set_column(i, &(self.column(i) + other));
     }
 
     fn column(&self, i: IndexType) -> DVectorView<'_, T> {
