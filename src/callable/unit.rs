@@ -30,7 +30,7 @@ impl<M: Matrix> Callable for UnitCallable<M>
     type T = M::T;
     type V = M::V;
     fn call(&self, x: &M::V, _p: &M::V, y: &mut M::V) {
-        y.copy_from(&x)
+        y.copy_from(x)
     }
     fn jacobian_action(&self, _x: &M::V, _p: &M::V, _v: &M::V, y: &mut M::V) {
         y.copy_from(&self.ones); 
@@ -50,5 +50,10 @@ impl<M: Matrix> Callable for UnitCallable<M>
 impl<M: Matrix> Jacobian for UnitCallable<M> 
 {
     type M = M;
+    fn jacobian(&self, _x: &Self::V, _p: &Self::V) -> Self::M {
+        let mut jac = M::V::zeros(self.n);
+        jac.add_scalar_mut(M::T::one());
+        M::from_diagonal(&jac)
+    }
 }
 

@@ -5,7 +5,7 @@ pub mod gmres;
 pub mod tests {
     use std::rc::Rc;
 
-    use crate::{nonlinear_solver::tests::SquareClosure, Callable, Matrix, Solver, SolverProblem, Vector, LU};
+    use crate::{callable::closure::Closure, Callable, Matrix, Solver, SolverProblem, Vector, LU};
     use num_traits::{One, Zero};
 
     // 0 = J * x - 8
@@ -20,11 +20,13 @@ pub mod tests {
     }
 
 
-    pub fn test_linear_solver<M: Matrix, S: Solver<SquareClosure<M>>>(mut solver: S) {
-        let op = Rc::new(SquareClosure::<M>::new(
+    pub fn test_linear_solver<M: Matrix + 'static, S: Solver<Closure<M, M>>>(mut solver: S) {
+        let diagonal = M::V::from_vec(vec![2.0.into(), 2.0.into()]);
+        let data = M::from_diagonal(&diagonal);
+        let op = Rc::new(Closure::<M, M>::new(
             square,
             square_jacobian,
-            M::from_diagonal(&M::V::from_vec(vec![2.0.into(), 2.0.into()])), 
+            data, 
             2,
         ));
         let p = M::V::zeros(0);

@@ -8,10 +8,10 @@ use crate::{callable::ode::BdfCallable, IterativeSolver, Callable, IndexType, Ja
 
 use super::{OdeSolverState, OdeSolverMethod, OdeSolverStatistics, OdeSolverProblem};
 
-pub struct Bdf<M: Matrix, CRhs: Callable<V = M::V, T = M::T>, CMass: Callable<V = M::V, T = M::T>> {
+pub struct Bdf<M: Matrix, CRhs: Callable<V = M::V, T = M::T>, CMass: Callable<V = M::V, T = M::T>, CInit: Callable<V = M::V, T = M::T>> {
     nonlinear_solver: Box<dyn IterativeSolver<BdfCallable<M, CRhs, CMass>>>,
     bdf_callable: Option<Rc<BdfCallable<M, CRhs, CMass>>>,
-    ode_problem: Option<Rc<OdeSolverProblem<CRhs, CMass>>>,
+    ode_problem: Option<Rc<OdeSolverProblem<CRhs, CMass, CInit>>>,
     statistics: OdeSolverStatistics,
     order: usize,
     n_equal_steps: usize,
@@ -25,12 +25,13 @@ pub struct Bdf<M: Matrix, CRhs: Callable<V = M::V, T = M::T>, CMass: Callable<V 
     error_const: Vec<CRhs::T>,
 }
 
-impl<T: Scalar, CRhs: Jacobian<V = DVector<T>, M = DMatrix<T>, T=T> + 'static, CMass: Jacobian<V = DVector<T>, M = DMatrix<T>, T=T> + 'static> Bdf<DMatrix<T>, CRhs, CMass> 
+impl<T: Scalar, CRhs: Jacobian<V = DVector<T>, M = DMatrix<T>, T=T> + 'static, CMass: Jacobian<V = DVector<T>, M = DMatrix<T>, T=T> + 'static, CInit: Jacobian<V = DVector<T>, M = DMatrix<T>, T=T> + 'static> Default for Bdf<DMatrix<T>, CRhs, CMass, CInit> 
 {
-    pub fn new() -> Self {
+    fn default() -> Self {
         let n = 1;
         let linear_solver = LU::<T>::default();
-        let nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<DMatrix<T>, CRhs, CMass>>::new(linear_solver));
+        let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<DMatrix<T>, CRhs, CMass>>::new(linear_solver));
+        nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
         let statistics = OdeSolverStatistics { niter: 0, nmaxiter: 0 };
         Self { 
             ode_problem: None,
@@ -51,7 +52,7 @@ impl<T: Scalar, CRhs: Jacobian<V = DVector<T>, M = DMatrix<T>, T=T> + 'static, C
     }
 }
 
-impl<M: Matrix, CRhs: Callable<V = M::V, T = M::T>, CMass: Callable<V = M::V, T = M::T>> Bdf<M, CRhs, CMass> 
+impl<M: Matrix, CRhs: Callable<V = M::V, T = M::T>, CMass: Callable<V = M::V, T = M::T>, CInit: Jacobian<V = M::V, T = M::T>> Bdf<M, CRhs, CMass, CInit> 
 where
     for<'b> &'b M::V: VectorRef<M::V>,
 {
@@ -142,7 +143,7 @@ where
 }
 
 
-impl<M: Matrix, CRhs: Callable<V = M::V, T = M::T>, CMass: Callable<V = M::V, T = M::T>> OdeSolverMethod<CRhs, CMass> for Bdf<M, CRhs, CMass> 
+impl<M: Matrix, CRhs: Callable<V = M::V, T = M::T>, CMass: Callable<V = M::V, T = M::T>, CInit: Callable<V = M::V, T = M::T>> OdeSolverMethod<CRhs, CMass, CInit> for Bdf<M, CRhs, CMass, CInit> 
 where
     for<'b> &'b M::V: VectorRef<M::V>,
 {
@@ -160,7 +161,7 @@ where
         order_summation
     }
     
-    fn problem(&self) -> Option<&Rc<OdeSolverProblem<CRhs, CMass>>> {
+    fn problem(&self) -> Option<&Rc<OdeSolverProblem<CRhs, CMass, CInit>>> {
         self.ode_problem.as_ref()
     }
     
@@ -168,7 +169,7 @@ where
         &self.statistics
     }
     
-    fn set_problem(&mut self, state: &mut OdeSolverState<M::V>, problem: Rc<OdeSolverProblem<CRhs, CMass>>) {
+    fn set_problem(&mut self, state: &mut OdeSolverState<M::V>, problem: Rc<OdeSolverProblem<CRhs, CMass, CInit>>) {
         self.ode_problem = Some(problem);
         let ode_problem = self.ode_problem.as_ref().unwrap();
         let problem = &ode_problem.problem;
@@ -179,10 +180,12 @@ where
         self.diff.column_mut(0).copy_from(&state.y);
         
         // kappa values for difference orders, taken from Table 1 of [1]
-        let kappa = vec![M::T::from(0.0), M::T::from(-0.1850), M::T::from(-1.0) / M::T::from(9.0), M::T::from(-0.0823), M::T::from(-0.0415), M::T::from(0.0)];
+        let kappa = [M::T::from(0.0), M::T::from(-0.1850), M::T::from(-1.0) / M::T::from(9.0), M::T::from(-0.0823), M::T::from(-0.0415), M::T::from(0.0)];
         self.alpha = vec![M::T::zero()];
         self.gamma = vec![M::T::zero()];
         self.error_const = vec![M::T::zero()];
+
+        #[allow(clippy::needless_range_loop)]
         for i in 1..=Self::MAX_ORDER {
             let i_t = M::T::from(i as f64);
             let one_over_i_plus_one = M::T::one() / (i_t + M::T::one());
@@ -344,6 +347,24 @@ where
         }
         Ok(())
     }
+}
 
-    
+
+#[cfg(test)]
+mod tests {
+    use crate::{callable::closure::Closure, ode_solver::tests::test_ode_solver};
+
+    use super::*;
+
+    #[test]
+    fn test_bdf_nalgebra() {
+        type T = f64;
+        type M = nalgebra::DMatrix<T>;
+        type CRhs = Closure<M, M>;
+        type CMass = Closure<M, M>;
+        type CInit = Closure<M, M>;
+        type S = Bdf<M, CRhs, CMass, CInit>;
+        let s = S::default();
+        test_ode_solver(s);
+    }
 }

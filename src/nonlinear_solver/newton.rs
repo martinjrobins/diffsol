@@ -1,7 +1,8 @@
 use std::rc::Rc;
 
-use crate::{solver::IterativeSolver, vector::Vector, Callable, Solver, SolverProblem};
+use crate::{callable::Jacobian, linear_solver::lu::LU, solver::IterativeSolver, vector::Vector, Callable, Scalar, Solver, SolverProblem};
 use anyhow::{anyhow, Result};
+use nalgebra::{DMatrix, DVector};
 use std::ops::SubAssign;
 
 use super::{Convergence, ConvergenceStatus};
@@ -13,6 +14,20 @@ pub struct NewtonNonlinearSolver<C: Callable>
     problem: Option<Rc<SolverProblem<C>>>,
     max_iter: usize,
     niter: usize,
+}
+
+impl <T: Scalar, C: Jacobian<M = DMatrix<T>, V = DVector<T>>> Default for NewtonNonlinearSolver<C> 
+{
+    fn default() -> Self {
+        let linear_solver = Box::<LU<T>>::default();
+        Self {
+            problem: None,
+            convergence: None,
+            linear_solver,
+            max_iter: 100,
+            niter: 0,
+        }
+    }
 }
 
 impl <C: Callable> NewtonNonlinearSolver<C> 
@@ -77,7 +92,7 @@ impl<C: Callable> Solver<C> for NewtonNonlinearSolver<C>
         loop {
             loop {
                 self.niter += 1;
-                problem.f.call(&xn, &problem.p, &mut tmp);
+                problem.f.call(xn, &problem.p, &mut tmp);
 
                 //tmp = f_at_n
                 self.linear_solver.solve_in_place(&mut tmp)?;
@@ -123,7 +138,7 @@ mod tests {
         type T = f64;
         type V = nalgebra::DVector<T>;
         type M = nalgebra::DMatrix<T>;
-        type C = Closure<M, fn(&V, &V, &mut V, &M), fn(&V, &V, &V, &mut V, &M), M>;
+        type C = Closure<M, M>;
         type S = NewtonNonlinearSolver<C>;
         let lu = LU::<T>::default();
         let s = S::new(lu);

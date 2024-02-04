@@ -156,4 +156,5 @@ pub trait Matrix:
     fn columns_mut(&mut self, start: IndexType, nrows: IndexType) -> Self::ViewMut<'_>;
     fn column_mut(&mut self, i: IndexType) -> <Self::V as Vector>::ViewMut<'_>;
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T);
+    fn diagonal(&self) -> Self::V;
 }

@@ -101,9 +101,8 @@ pub mod tests {
         y.component_mul_assign(v);
     }
     
-    pub type SquareClosure<M: Matrix> = Closure<M, fn(&M::V, &M::V, &mut M::V, &M), fn(&M::V, &M::V, &M::V, &mut M::V, &M), M>;
     
-    pub fn get_square_problem<M: Matrix>() -> SquareClosure<M> {
+    pub fn get_square_problem<M: Matrix + 'static>() -> Closure<M, M>{
         let jac = Matrix::from_diagonal(&M::V::from_vec(vec![2.0.into(), 2.0.into()]));
         Closure::new(
             square,
@@ -113,7 +112,7 @@ pub mod tests {
         )
     }
     
-    pub fn test_nonlinear_solver<M: Matrix, S: Solver<SquareClosure<M>>> (mut solver: S) 
+    pub fn test_nonlinear_solver<M: Matrix + 'static, S: Solver<Closure<M, M>>> (mut solver: S) 
     {
         let op = Rc::new(get_square_problem::<M>());
         let problem = Rc::new(SolverProblem::new(op, <M::V as Vector>::zeros(0)));

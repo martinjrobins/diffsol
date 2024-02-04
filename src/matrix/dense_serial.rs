@@ -107,5 +107,8 @@ impl<T: Scalar> Matrix for DMatrix<T> {
     fn gemm(&mut self, alpha: T, a: &Self, b: &Self, beta: T) {
         self.gemm(alpha, a, b, beta);
     }
+    fn diagonal(&self) -> Self::V {
+        self.diagonal()
+    }
 
 }

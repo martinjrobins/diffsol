@@ -1,6 +1,6 @@
-use std::ops::{Index, IndexMut, Deref, Mul, MulAssign, Div, DivAssign, Add, Sub, AddAssign, SubAssign};
+use std::ops::{Index, IndexMut, Mul, MulAssign, Div, DivAssign, Add, Sub, AddAssign, SubAssign};
 use std::fmt::{Debug, Display};
-use num_traits::{Zero, One};
+use num_traits::Zero;
 
 
 use crate::{Scalar, IndexType};
@@ -9,6 +9,9 @@ mod serial;
 
 pub trait VectorIndex: Sized + Index<IndexType, Output=IndexType> + Debug + Display {
     fn len(&self) -> IndexType;
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
 }
 
 pub trait VectorCommon: Sized + Debug + Display {
@@ -23,7 +26,7 @@ impl <'a, V> VectorCommon for &'a mut V where V: VectorCommon {
     type T = V::T;
 }
 
-trait VectorOpsByValue<Rhs = Self, Output = Self>: VectorCommon 
+pub trait VectorOpsByValue<Rhs = Self, Output = Self>: VectorCommon 
     + Add<Rhs, Output = Output>
     + Sub<Rhs, Output = Output> 
 {}
@@ -156,7 +159,6 @@ pub trait Vector:
     fn add_scalar_mut(&mut self, scalar: Self::T);
     fn component_mul_assign(&mut self, other: &Self);
     fn component_div_assign(&mut self, other: &Self);
-    fn map_mut<F: Fn(Self::T) -> Self::T>(&mut self, f: F);
     fn filter_indices<F: Fn(Self::T) -> bool>(&self, f: F) -> Self::Index;
     fn gather_from(&mut self, other: &Self, indices: &Self::Index);
     fn scatter_from(&mut self, other: &Self, indices: &Self::Index);

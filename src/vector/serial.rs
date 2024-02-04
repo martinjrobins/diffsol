@@ -87,17 +87,24 @@ impl<T: Scalar> Vector for DVector<T> {
     fn component_mul_assign(&mut self, other: &Self) {
         self.component_mul_assign(other);
     }
-    fn map_mut<F: Fn(T) -> T>(&mut self, f: F) {
-        self.map_mut(f);
-    }
     fn filter_indices<F: Fn(T) -> bool>(&self, f: F) -> Self::Index {
-        self.filter_indices(f)
+        let mut indices = vec![];
+        for (i, &x) in self.iter().enumerate() {
+            if f(x) {
+                indices.push(i as IndexType);
+            }
+        }
+        Self::Index::from_vec(indices)
     }
     fn gather_from(&mut self, other: &Self, indices: &Self::Index) {
-        self.gather_from(other, indices);
+        for (i, &index) in indices.iter().enumerate() {
+            self[i] = other[index];
+        }
     }
     fn scatter_from(&mut self, other: &Self, indices: &Self::Index) {
-        self.scatter_from(other, indices);
+        for (i, &index) in indices.iter().enumerate() {
+            self[index] = other[i];
+        }
     }
 }
 
