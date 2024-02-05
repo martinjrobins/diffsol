@@ -2,9 +2,9 @@ use core::panic;
 use std::rc::Rc;
 use num_traits::Pow;
 
-use crate::{callable::Callable, solver::SolverProblem, IndexType, Scalar, Vector};
+use crate::{callable::Op, solver::SolverProblem, IndexType, Scalar, Vector};
 
-struct Convergence<C: Callable> {
+struct Convergence<C: Op> {
     problem: Rc<SolverProblem<C>>,
     tol: C::T,
     max_iter: IndexType,
@@ -20,7 +20,7 @@ enum ConvergenceStatus {
     MaximumIterations
 }
 
-impl <C: Callable> Convergence<C> {
+impl <C: Op> Convergence<C> {
     fn new(problem: Rc<SolverProblem<C>>, max_iter: IndexType) -> Self {
         let rtol = problem.rtol;
         let minimum_tol = C::T::from(10.0) * C::T::EPSILON / rtol;
@@ -117,7 +117,7 @@ pub mod tests {
         let op = Rc::new(get_square_problem::<M>());
         let problem = Rc::new(SolverProblem::new(op, <M::V as Vector>::zeros(0)));
         let x0 = M::V::from_vec(vec![2.1.into(), 2.1.into()]);
-        solver.set_problem(&x0, problem);
+        solver.set_problem(problem);
         let x = solver.solve(&x0).unwrap();
         let expect = M::V::from_vec(vec![2.0.into(), 2.0.into()]);
         x.assert_eq(&expect, 1e-6.into());

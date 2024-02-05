@@ -27,7 +27,7 @@ use nalgebra::{ClosedSub, ClosedMul, ClosedDiv, ClosedAdd, SimdRealField, Comple
 use num_traits::{Signed, Pow};
 use vector::{Vector, VectorView, VectorViewMut, VectorIndex, VectorRef};
 use nonlinear_solver::newton::NewtonNonlinearSolver;
-use callable::{Callable, Jacobian};
+use callable::{NonLinearOp, LinearOp, ConstantOp, Jacobian, ConstantJacobian};
 use matrix::{Matrix, MatrixViewMut};
 use solver::{Solver, SolverProblem, IterativeSolver};
 use linear_solver::lu::LU;

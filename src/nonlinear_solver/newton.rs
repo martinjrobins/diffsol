@@ -1,22 +1,22 @@
 use std::rc::Rc;
 
-use crate::{callable::Jacobian, linear_solver::lu::LU, solver::IterativeSolver, vector::Vector, Callable, Scalar, Solver, SolverProblem};
+use crate::{callable::{linearise::LinearisedOp, Jacobian, NonLinearOp}, vector::Vector, IterativeSolver, Scalar, Solver, SolverProblem, LU};
 use anyhow::{anyhow, Result};
 use nalgebra::{DMatrix, DVector};
 use std::ops::SubAssign;
 
 use super::{Convergence, ConvergenceStatus};
 
-pub struct NewtonNonlinearSolver<C: Callable> 
+pub struct NewtonNonlinearSolver<C: NonLinearOp> 
 {
     convergence: Option<Convergence<C>>,
-    linear_solver: Box<dyn Solver<C>>,
+    linear_solver: Box<dyn Solver<LinearisedOp<C>>>,
     problem: Option<Rc<SolverProblem<C>>>,
     max_iter: usize,
     niter: usize,
 }
 
-impl <T: Scalar, C: Jacobian<M = DMatrix<T>, V = DVector<T>>> Default for NewtonNonlinearSolver<C> 
+impl <T: Scalar, C: Jacobian<M = DMatrix<T>, V = DVector<T>, T = T>> Default for NewtonNonlinearSolver<C> 
 {
     fn default() -> Self {
         let linear_solver = Box::<LU<T>>::default();
@@ -30,9 +30,9 @@ impl <T: Scalar, C: Jacobian<M = DMatrix<T>, V = DVector<T>>> Default for Newton
     }
 }
 
-impl <C: Callable> NewtonNonlinearSolver<C> 
+impl <C: NonLinearOp> NewtonNonlinearSolver<C> 
 {
-    pub fn new<S: Solver<C> + 'static>(linear_solver: S) -> Self {
+    pub fn new<S: Solver<LinearisedOp<C>> + 'static>(linear_solver: S) -> Self {
         let linear_solver = Box::new(linear_solver);
         Self {
             problem: None,
@@ -44,7 +44,7 @@ impl <C: Callable> NewtonNonlinearSolver<C>
     }
 }
 
-impl<C: Callable> IterativeSolver<C> for NewtonNonlinearSolver<C> 
+impl<C: NonLinearOp> IterativeSolver<C> for NewtonNonlinearSolver<C> 
 {
     fn set_max_iter(&mut self, max_iter: usize) {
         self.max_iter = max_iter;
@@ -57,14 +57,9 @@ impl<C: Callable> IterativeSolver<C> for NewtonNonlinearSolver<C>
     }
 }
 
-impl<C: Callable> Solver<C> for NewtonNonlinearSolver<C> 
-{
 
-    fn problem(&self) -> Option<&SolverProblem<C>> {
-        self.problem.as_deref()
-    }
-
-    fn set_problem(&mut self, state: &C::V, problem: Rc<SolverProblem<C>>) {
+impl<C: NonLinearOp> Solver<C> for NewtonNonlinearSolver<C> {
+    fn set_problem(&mut self, problem: Rc<SolverProblem<C>>) {
         self.problem = Some(problem);
         let problem = self.problem.as_ref().unwrap();
         if self.convergence.is_none() {
@@ -74,10 +69,10 @@ impl<C: Callable> Solver<C> for NewtonNonlinearSolver<C>
         } else {
             self.convergence.as_mut().unwrap().problem = problem.clone();
         }
-        self.linear_solver.set_problem(state, problem.clone());
     }
-    
-    
+    fn problem(&self) -> Option<&SolverProblem<C>> {
+        self.problem.as_deref()
+    }
     fn solve_in_place(&mut self, xn: & mut C::V) -> Result<()> {
         if self.convergence.is_none() || self.problem.is_none() {
             return Err(anyhow!("NewtonNonlinearSolver::solve() called before set_problem"));
@@ -87,12 +82,17 @@ impl<C: Callable> Solver<C> for NewtonNonlinearSolver<C>
         let x0 = xn.clone();
         convergence.reset(&x0);
         let mut tmp = x0.clone();
-        let mut updated_jacobian = false;
+        let mut updated_jacobian = if self.linear_solver.problem().is_none() {
+            self.linear_solver.set_problem(Rc::new(problem.linearise(&x0)));
+            true
+        } else {
+            false
+        };
         self.niter = 0;
         loop {
             loop {
                 self.niter += 1;
-                problem.f.call(xn, &problem.p, &mut tmp);
+                problem.f.call_inplace(xn, &problem.p, &mut tmp);
 
                 //tmp = f_at_n
                 self.linear_solver.solve_in_place(&mut tmp)?;
@@ -111,7 +111,7 @@ impl<C: Callable> Solver<C> for NewtonNonlinearSolver<C>
             // only get here if we've diverged or hit max iterations
             // if we havn't updated the jacobian, we can update it and try again
             if !updated_jacobian {
-                self.linear_solver.set_problem(&x0, problem.clone());
+                self.linear_solver.set_problem(Rc::new(problem.linearise(&x0)));
                 xn.copy_from(&x0);
                 updated_jacobian = true;
                 continue;
@@ -121,6 +121,8 @@ impl<C: Callable> Solver<C> for NewtonNonlinearSolver<C>
         }
         Err(anyhow!("Newton iteration did not converge"))
     }
+
+    
 }
 
 // tests

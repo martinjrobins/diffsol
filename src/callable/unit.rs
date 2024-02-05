@@ -3,7 +3,7 @@
 use crate::{Matrix, Vector};
 use num_traits::One;
 
-use super::{Callable, Jacobian};
+use super::{Jacobian, LinearOp};
 
 
 pub struct UnitCallable<M: Matrix> {
@@ -25,16 +25,9 @@ impl<M: Matrix> UnitCallable<M> {
     }
 }
 
-impl<M: Matrix> Callable for UnitCallable<M> 
-{
+impl<M: Matrix> super::Op for UnitCallable<M> {
     type T = M::T;
     type V = M::V;
-    fn call(&self, x: &M::V, _p: &M::V, y: &mut M::V) {
-        y.copy_from(x)
-    }
-    fn jacobian_action(&self, _x: &M::V, _p: &M::V, _v: &M::V, y: &mut M::V) {
-        y.copy_from(&self.ones); 
-    }
     fn nstates(&self) -> usize {
         self.n
     }
@@ -43,6 +36,16 @@ impl<M: Matrix> Callable for UnitCallable<M>
     }
     fn nparams(&self) -> usize {
         0
+    }
+}
+
+impl<M: Matrix> LinearOp for UnitCallable<M> 
+{
+    fn call_inplace(&self, x: &M::V, _p: &M::V, y: &mut M::V) {
+        y.copy_from(x)
+    }
+    fn jac_mul_inplace(&self, _p: &M::V, _v: &M::V, y: &mut M::V) {
+        y.copy_from(&self.ones); 
     }
 }
 

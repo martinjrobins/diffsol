@@ -4,11 +4,11 @@ use anyhow::Result;
 use nalgebra::{DVector, DMatrix};
 use num_traits::{One, Zero, Pow};
 
-use crate::{callable::ode::BdfCallable, IterativeSolver, Callable, IndexType, Jacobian, Matrix, MatrixViewMut, NewtonNonlinearSolver, Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut, LU};
+use crate::{callable::ode::BdfCallable, ConstantJacobian, ConstantOp, LinearOp, NonLinearOp, IndexType, IterativeSolver, Jacobian, Matrix, MatrixViewMut, NewtonNonlinearSolver, Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut, LU};
 
 use super::{OdeSolverState, OdeSolverMethod, OdeSolverStatistics, OdeSolverProblem};
 
-pub struct Bdf<M: Matrix, CRhs: Callable<V = M::V, T = M::T>, CMass: Callable<V = M::V, T = M::T>, CInit: Callable<V = M::V, T = M::T>> {
+pub struct Bdf<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V, T = M::T>, CInit: ConstantOp<V = M::V, T = M::T>> {
     nonlinear_solver: Box<dyn IterativeSolver<BdfCallable<M, CRhs, CMass>>>,
     bdf_callable: Option<Rc<BdfCallable<M, CRhs, CMass>>>,
     ode_problem: Option<Rc<OdeSolverProblem<CRhs, CMass, CInit>>>,
@@ -25,7 +25,7 @@ pub struct Bdf<M: Matrix, CRhs: Callable<V = M::V, T = M::T>, CMass: Callable<V 
     error_const: Vec<CRhs::T>,
 }
 
-impl<T: Scalar, CRhs: Jacobian<V = DVector<T>, M = DMatrix<T>, T=T> + 'static, CMass: Jacobian<V = DVector<T>, M = DMatrix<T>, T=T> + 'static, CInit: Jacobian<V = DVector<T>, M = DMatrix<T>, T=T> + 'static> Default for Bdf<DMatrix<T>, CRhs, CMass, CInit> 
+impl<T: Scalar, CRhs: Jacobian<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CMass: ConstantJacobian<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CInit: ConstantOp<V = DVector<T>, T=T> + 'static> Default for Bdf<DMatrix<T>, CRhs, CMass, CInit> 
 {
     fn default() -> Self {
         let n = 1;
@@ -52,7 +52,37 @@ impl<T: Scalar, CRhs: Jacobian<V = DVector<T>, M = DMatrix<T>, T=T> + 'static, C
     }
 }
 
-impl<M: Matrix, CRhs: Callable<V = M::V, T = M::T>, CMass: Callable<V = M::V, T = M::T>, CInit: Jacobian<V = M::V, T = M::T>> Bdf<M, CRhs, CMass, CInit> 
+// implement clone for bdf
+impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V, T = M::T>, CInit: ConstantOp<V = M::V, T = M::T>> Clone for Bdf<M, CRhs, CMass, CInit> 
+where
+    for<'b> &'b M::V: VectorRef<M::V>,
+{
+    fn clone(&self) -> Self {
+        let n = self.diff.nrows();
+        let linear_solver = LU::<M::T>::default();
+        let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<M, CRhs, CMass>>::new(linear_solver));
+        nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
+        let statistics = OdeSolverStatistics { niter: 0, nmaxiter: 0 };
+        Self { 
+            ode_problem: self.ode_problem.clone(),
+            statistics,
+            nonlinear_solver,
+            bdf_callable: self.bdf_callable.clone(), 
+            order: self.order, 
+            n_equal_steps: self.n_equal_steps, 
+            diff: M::zeros(n, Self::MAX_ORDER), 
+            diff_tmp: M::zeros(n, Self::MAX_ORDER), 
+            gamma: self.gamma.clone(), 
+            alpha: self.alpha.clone(), 
+            error_const: self.error_const.clone(), 
+            u: M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+            r: M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+            ru: M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+        }
+    }
+}
+
+impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V, T = M::T>, CInit: ConstantOp<V = M::V, T = M::T>> Bdf<M, CRhs, CMass, CInit> 
 where
     for<'b> &'b M::V: VectorRef<M::V>,
 {
@@ -143,7 +173,7 @@ where
 }
 
 
-impl<M: Matrix, CRhs: Callable<V = M::V, T = M::T>, CMass: Callable<V = M::V, T = M::T>, CInit: Callable<V = M::V, T = M::T>> OdeSolverMethod<CRhs, CMass, CInit> for Bdf<M, CRhs, CMass, CInit> 
+impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V, T = M::T>, CInit: ConstantOp<V = M::V, T = M::T>> OdeSolverMethod<CRhs, CMass, CInit> for Bdf<M, CRhs, CMass, CInit> 
 where
     for<'b> &'b M::V: VectorRef<M::V>,
 {
@@ -199,16 +229,14 @@ where
         scale *= problem.rtol;
         scale += &problem.atol;
 
-        let mut f0 = <M::V as Vector>::zeros(nstates);
-        problem.f.call(&state.y, &problem.p, &mut f0);
+        let f0 = problem.f.call(&state.y, &problem.p);
 
         // y1 = y0 + h * f0
         let mut y1 = state.y.clone();
         y1.axpy(state.h, &f0, M::T::one());
 
         // df = f1 here
-        let mut df = <M::V as Vector>::zeros(nstates);
-        problem.f.call(&y1, &problem.p, &mut df);
+        let mut df = problem.f.call(&y1, &problem.p);
         
         // store f1 in diff[1] for use in step size control
         let h_times_f1 = &df * state.h;
@@ -227,7 +255,7 @@ where
 
         // setup linear solver for first step
         self.bdf_callable = Some(Rc::new(BdfCallable::new(ode_problem.clone())));
-        self.nonlinear_solver.as_mut().set_problem(&state.y, Rc::new(SolverProblem::new(self.bdf_callable.as_ref().unwrap().clone(), ode_problem.problem.p.clone())));
+        self.nonlinear_solver.as_mut().set_problem(Rc::new(SolverProblem::new(self.bdf_callable.as_ref().unwrap().clone(), ode_problem.problem.p.clone())));
         
         // setup U
         self.u = Self::_compute_r(self.order, M::T::one());
@@ -352,7 +380,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{callable::closure::Closure, ode_solver::tests::test_ode_solver};
+    use crate::{callable::{closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure}, ode_solver::tests::test_ode_solver};
 
     use super::*;
 
@@ -361,8 +389,8 @@ mod tests {
         type T = f64;
         type M = nalgebra::DMatrix<T>;
         type CRhs = Closure<M, M>;
-        type CMass = Closure<M, M>;
-        type CInit = Closure<M, M>;
+        type CMass = LinearClosure<M, M>;
+        type CInit = ConstantClosure<M, M>;
         type S = Bdf<M, CRhs, CMass, CInit>;
         let s = S::default();
         test_ode_solver(s);

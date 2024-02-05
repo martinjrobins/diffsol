@@ -6,9 +6,9 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{Vector, VectorIndex};
 
-use super::{Callable, Jacobian};
+use super::{Jacobian, NonLinearOp, Op};
 
-pub struct FilterCallable<C: Callable> 
+pub struct FilterCallable<C: NonLinearOp> 
 {
     callable: Rc<C>,
     indices: <C::V as Vector>::Index,
@@ -16,7 +16,7 @@ pub struct FilterCallable<C: Callable>
     x_full: RefCell<C::V>,
 }
 
-impl<C: Callable> FilterCallable<C> 
+impl<C: NonLinearOp> FilterCallable<C> 
 {
     pub fn new(callable: Rc<C>, x: &C::V, indices: <C::V as Vector>::Index) -> Self {
         if callable.nstates() != indices.len() {
@@ -28,24 +28,10 @@ impl<C: Callable> FilterCallable<C>
     }
 }
 
-impl<C: Callable> Callable for FilterCallable<C> 
+impl<C: NonLinearOp> Op for FilterCallable<C> 
 {
     type V = C::V;
     type T = C::T;
-    fn call(&self, x: &Self::V, p: &Self::V, y: &mut Self::V) {
-        let mut y_full = self.y_full.borrow_mut();
-        let mut x_full = self.x_full.borrow_mut();
-        x_full.scatter_from(x, &self.indices);
-        self.callable.call(&x_full, p, &mut y_full);
-        y.gather_from(&y_full, &self.indices);
-    }
-    fn jacobian_action(&self, x: &Self::V, p: &Self::V, v: &Self::V, y: &mut Self::V) {
-        let mut y_full = self.y_full.borrow_mut();
-        let mut x_full = self.x_full.borrow_mut();
-        x_full.scatter_from(x, &self.indices);
-        self.callable.jacobian_action(&x_full, p, v, &mut y_full);
-        y.gather_from(&y_full, &self.indices);
-    }
     fn nstates(&self) -> usize {
         self.indices.len()
     }
@@ -57,7 +43,25 @@ impl<C: Callable> Callable for FilterCallable<C>
     }
 }
 
-impl <C: Callable + Jacobian> Jacobian for FilterCallable<C> 
+impl<C: NonLinearOp> NonLinearOp for FilterCallable<C> 
+{
+    fn call_inplace(&self, x: &Self::V, p: &Self::V, y: &mut Self::V) {
+        let mut y_full = self.y_full.borrow_mut();
+        let mut x_full = self.x_full.borrow_mut();
+        x_full.scatter_from(x, &self.indices);
+        self.callable.call_inplace(&x_full, p, &mut y_full);
+        y.gather_from(&y_full, &self.indices);
+    }
+    fn jac_mul_inplace(&self, x: &Self::V, p: &Self::V, v: &Self::V, y: &mut Self::V) {
+        let mut y_full = self.y_full.borrow_mut();
+        let mut x_full = self.x_full.borrow_mut();
+        x_full.scatter_from(x, &self.indices);
+        self.callable.jac_mul_inplace(&x_full, p, v, &mut y_full);
+        y.gather_from(&y_full, &self.indices);
+    }
+}
+
+impl <C: Jacobian> Jacobian for FilterCallable<C> 
 {
     type M = C::M;
 }

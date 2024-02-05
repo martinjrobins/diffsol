@@ -2,10 +2,10 @@ use crate::{matrix::MatrixRef, ode_solver::OdeSolverProblem, IndexType, Matrix, 
 use num_traits::{One, Zero};
 use std::{cell::RefCell, ops::{Deref, SubAssign}, rc::Rc};
 
-use super::{Callable, Jacobian};
+use super::{ConstantJacobian, ConstantOp, Jacobian, LinearOp, NonLinearOp, Op};
 
 // callable to solve for F(y) = M (y' + psi) - c * f(y) = 0 
-pub struct BdfCallable<M: Matrix, CRhs: Callable<V = M::V, T = M::T>, CMass: Callable<V = M::V, T = M::T>> 
+pub struct BdfCallable<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V, T = M::T>> 
 {
     rhs: Rc<CRhs>,
     mass: Rc<CMass>,
@@ -19,9 +19,9 @@ pub struct BdfCallable<M: Matrix, CRhs: Callable<V = M::V, T = M::T>, CMass: Cal
     mass_jacobian_is_stale: RefCell<bool>,
 }
 
-impl<M: Matrix, CRhs: Callable<V = M::V, T = M::T>, CMass: Callable<V = M::V, T = M::T>> BdfCallable<M, CRhs, CMass> 
+impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V, T = M::T>> BdfCallable<M, CRhs, CMass> 
 {
-    pub fn new<CInit: Callable<V = M::V, T = M::T>>(ode_problem: Rc<OdeSolverProblem<CRhs, CMass, CInit>>) -> Self {
+    pub fn new<CInit: ConstantOp<V = M::V, T = M::T>>(ode_problem: Rc<OdeSolverProblem<CRhs, CMass, CInit>>) -> Self {
         let n = ode_problem.problem.f.nstates();
         let c = RefCell::new(CRhs::T::zero());
         let psi_neg_y0 = RefCell::new(<CRhs::V as Vector>::zeros(n));
@@ -59,41 +59,43 @@ impl<M: Matrix, CRhs: Callable<V = M::V, T = M::T>, CMass: Callable<V = M::V, T 
 }
 
 
+impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V, T = M::T>> Op for BdfCallable<M, CRhs, CMass> 
+{
+    type V = CRhs::V;
+    type T = CRhs::T;
+    fn nstates(&self) -> usize {
+        self.rhs.nstates()
+    }
+    fn nout(&self) -> usize {
+        self.rhs.nout()
+    }
+    fn nparams(&self) -> usize {
+        self.rhs.nparams()
+    }
+}
+
 // callable to solve for F(y) = M (y' + psi) - f(y) = 0 
-impl<M: Matrix, CRhs: Callable<V = M::V, T = M::T>, CMass: Callable<V = M::V, T = M::T>, CInit: Callable<V = M::V, T = M::T>> Callable for BdfCallable<M, CRhs, CMass> 
+impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V, T = M::T>> NonLinearOp for BdfCallable<M, CRhs, CMass> 
 where 
     for <'b> &'b CRhs::V: VectorRef<CRhs::V>,
 {
-    type T = CRhs::T;
-    type V = CRhs::V;
-
     // F(y) = M (y - y0 + psi) - c * f(y) = 0
-    fn call(&self, x: &CRhs::V, p: &CRhs::V, y: &mut CRhs::V) {
-        self.rhs.call(x, p, y);
+    fn call_inplace(&self, x: &CRhs::V, p: &CRhs::V, y: &mut CRhs::V) {
+        self.rhs.call_inplace(x, p, y);
         let psi_neg_y0_ref = self.psi_neg_y0.borrow();
         let psi_neg_y0 = psi_neg_y0_ref.deref();
         let c = *self.c.borrow().deref();
         let tmp = x - psi_neg_y0;
         self.mass.gemv(&tmp, p, CRhs::T::one(), -c, y);
 }
-    fn nstates(&self) -> usize {
-        self.rhs.nstates()
-    }
-    fn nparams(&self) -> usize {
-        self.rhs.nparams()
-    }
-    fn nout(&self) -> usize {
-        self.rhs.nout()
-    }
-    fn jacobian_action(&self, x: &CRhs::V, p: &CRhs::V, v: &CRhs::V, y: &mut CRhs::V) {
+    fn jac_mul_inplace(&self, x: &CRhs::V, p: &CRhs::V, v: &CRhs::V, y: &mut CRhs::V) {
         let c = *self.c.borrow().deref();
-        self.rhs.jacobian_action(x, p, v, y);
+        self.rhs.jac_mul_inplace(x, p, v, y);
         self.mass.gemv(v, p,  CRhs::T::one(), -c, y);
     }
-    
 }
 
-impl<CRhs: Jacobian, CMass: Jacobian<M = CRhs::M, V = CRhs::V, T = CRhs::T> + Callable<V = CRhs::V, T = CRhs::T>, CInit: Callable<V = CRhs::V, T = CRhs::T>> Jacobian for BdfCallable<CRhs::M, CRhs, CMass> 
+impl<CRhs: Jacobian, CMass: ConstantJacobian<M = CRhs::M, V = CRhs::V, T = CRhs::T>> Jacobian for BdfCallable<CRhs::M, CRhs, CMass> 
 where 
     for <'b> &'b CRhs::V: VectorRef<CRhs::V>,
     for <'b> &'b CRhs::M: MatrixRef<CRhs::M>,
@@ -101,7 +103,7 @@ where
     type M = CRhs::M;
     fn jacobian(&self, x: &CRhs::V, p: &CRhs::V) -> CRhs::M {
         if *self.mass_jacobian_is_stale.borrow() {
-            self.mass_jac.replace(self.mass.jacobian(x, p));
+            self.mass_jac.replace(self.mass.jacobian(p));
         }
         if *self.rhs_jacobian_is_stale.borrow() {
             self.rhs_jac.replace(self.rhs.jacobian(x, p));
