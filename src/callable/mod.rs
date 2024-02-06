@@ -53,6 +53,18 @@ pub trait LinearOp: Op {
         self.call_inplace(x, p, y);
         y.mul_assign(alpha);
     }
+    fn jacobian_diagonal(&self, p: &Self::V) -> Self::V {
+        let mut v = Self::V::zeros(self.nstates());
+        let mut col = Self::V::zeros(self.nout());
+        let mut diag = Self::V::zeros(self.nstates());
+        for j in 0..self.nstates() {
+            v[j] = Self::T::one();
+            self.jac_mul_inplace(p, &v, &mut col);
+            diag[j] = col[j];
+            v[j] = Self::T::zero();
+        }
+        diag
+    }
 }
 
 impl<C: LinearOp> NonLinearOp for C {

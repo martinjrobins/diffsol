@@ -8,7 +8,7 @@ pub mod tests {
     use crate::{callable::linear_closure::LinearClosure, Matrix, Solver, SolverProblem, Vector, LU};
     use num_traits::{One, Zero};
 
-    // 0 = J * x - 8
+    // f = J * x - 8
     fn square<M: Matrix>(x: &M::V, _p: &M::V, y: &mut M::V, jac: &M) {
         jac.gemv(M::T::one(), x, M::T::zero(), y); // y = J * x
         y.add_scalar_mut(M::T::from(-8.0));

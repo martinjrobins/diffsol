@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{Vector, VectorIndex, Matrix, IndexType, Solver, Jacobian, callable::{filter::FilterCallable, ConstantJacobian, ConstantOp, LinearOp, NonLinearOp}, solver::SolverProblem};
+use crate::{callable::{filter::FilterCallable, ConstantOp, LinearOp, NonLinearOp}, solver::SolverProblem, IndexType, Solver, Vector, VectorIndex};
 
 use anyhow::Result;
 use num_traits::{One, Zero};
@@ -8,12 +8,28 @@ use num_traits::{One, Zero};
 
 pub mod bdf;
 
-trait OdeSolverMethod<CRhs: NonLinearOp, CMass: LinearOp<V = CRhs::V>, CInit: ConstantOp<V = CRhs::V>> {
+pub trait OdeSolverMethod<CRhs: NonLinearOp, CMass: LinearOp<V = CRhs::V, T = CRhs::T>, CInit: ConstantOp<V = CRhs::V, T = CRhs::T>> {
     fn problem(&self) -> Option<&Rc<OdeSolverProblem<CRhs, CMass, CInit>>>;
     fn set_problem(&mut self, state: &mut OdeSolverState<CRhs::V>, problem: Rc<OdeSolverProblem<CRhs, CMass, CInit>>);
     fn step(&mut self, state: &mut OdeSolverState<CRhs::V>) -> Result<()>;
     fn interpolate(&self, state: &OdeSolverState<CRhs::V>, t: CRhs::T) -> CRhs::V;
     fn get_statistics(&self) -> &OdeSolverStatistics;
+    fn solve(&mut self, problem: OdeSolverProblem<CRhs, CMass, CInit>, t: CRhs::T) -> Result<CRhs::V> {
+        let mut state = OdeSolverState::new(&problem);
+        self.set_problem(&mut state, Rc::new(problem));
+        while state.t <= t {
+            self.step(&mut state)?;
+        }
+        Ok(self.interpolate(&state, t))
+    }
+    fn make_consistent_and_solve<RS: Solver<FilterCallable<CRhs>>>(&mut self, problem: OdeSolverProblem<CRhs, CMass, CInit>, t: CRhs::T, root_solver: &mut RS) -> Result<CRhs::V> {
+        let mut state = OdeSolverState::new_consistent(&problem, root_solver)?;
+        self.set_problem(&mut state, Rc::new(problem));
+        while state.t <= t {
+            self.step(&mut state)?;
+        }
+        Ok(self.interpolate(&state, t))
+    }
 }
 
 pub struct OdeSolverStatistics {
@@ -58,18 +74,15 @@ impl <CRhs: NonLinearOp, CMass: LinearOp<V = CRhs::V>, CInit: ConstantOp<V = CRh
 impl <V: Vector> OdeSolverState<V> {
     fn new<CRhs, CMass, CInit>(ode_problem: &OdeSolverProblem<CRhs, CMass, CInit>) -> Self
     where
-        CRhs: NonLinearOp<V = V, T = V::T> + 'static, 
-        CMass: ConstantJacobian<V = V, T = V::T> + 'static, 
+        CRhs: NonLinearOp<V = V, T = V::T>, 
+        CMass: LinearOp<V = V, T = V::T>, 
         CInit: ConstantOp<V = V, T = V::T>,
     {
 
         let p = &ode_problem.problem.p;
-        let rhs = ode_problem.problem.f.as_ref();
-        let mass = ode_problem.mass.as_ref();
         let init = ode_problem.init.as_ref();
-        let dummy_x = V::zeros(0);
-        let y = init.call(&p);
-        return Self {
+        let y = init.call(p);
+        Self {
             y,
             t: ode_problem.t0,
             h: ode_problem.h0,
@@ -78,17 +91,17 @@ impl <V: Vector> OdeSolverState<V> {
     }
     fn new_consistent<CRhs, CMass, CInit, S>(ode_problem: &OdeSolverProblem<CRhs, CMass, CInit>, root_solver: &mut S) -> Result<Self>
     where
-        CRhs: NonLinearOp<V = V, T = V::T> + 'static, 
-        CMass: ConstantJacobian<V = V, T = V::T> + 'static, 
+        CRhs: NonLinearOp<V = V, T = V::T>, 
+        CMass: LinearOp<V = V, T = V::T>, 
         CInit: ConstantOp<V = V, T = V::T>,
-        S: Solver<FilterCallable<CRhs>> + 'static + ?Sized,
+        S: Solver<FilterCallable<CRhs>> + ?Sized,
     {
 
         let p = &ode_problem.problem.p;
         let dummy_x = V::zeros(0);
-        let diag = ode_problem.mass.jacobian(&p).diagonal();
+        let diag = ode_problem.mass.jacobian_diagonal(p);
         let indices = diag.filter_indices(|x| x == CRhs::T::zero());
-        let mut y = ode_problem.init.call(&p);
+        let mut y = ode_problem.init.call(p);
         if indices.len() == 0 {
             return Ok(Self {
                 y,
@@ -109,67 +122,10 @@ impl <V: Vector> OdeSolverState<V> {
 }
 
 
-pub struct OdeSolver<CRhs: NonLinearOp, CMass: LinearOp<V = CRhs::V, T = CRhs::T>, CInit: ConstantOp<V = CRhs::V, T = CRhs::T>> {
-    state: Option<OdeSolverState<CRhs::V>>,
-    ode_problem: Rc<OdeSolverProblem<CRhs, CMass, CInit>>,
-    method: Box<dyn OdeSolverMethod<CRhs, CMass, CInit>>,
-    root_solver: Option<Box<dyn Solver<FilterCallable<CRhs>>>>,
-}
-
-
-
-impl <CRhs: NonLinearOp + 'static, CMass: ConstantJacobian<V = CRhs::V, T = CRhs::T> + 'static, CInit: ConstantOp<V = CRhs::V, T = CRhs::T> + 'static> OdeSolver<CRhs, CMass, CInit> {
-    fn new(ode_problem: OdeSolverProblem<CRhs, CMass, CInit>, method: impl OdeSolverMethod<CRhs, CMass, CInit> + 'static) -> Self 
-    {
-        let ode_problem = Rc::new(ode_problem);
-        let state = None;
-        let method = Box::new(method);
-        let root_solver = None;
-        
-        Self {
-            state,
-            method,
-            ode_problem,
-            root_solver,
-        }
-    }
-    fn initialise(&mut self) -> Result<()> {
-        let root_solver = self.root_solver.as_mut();
-        match root_solver {
-            Some(solver) => {
-                let state = OdeSolverState::new_consistent(&self.ode_problem, solver.as_mut())?;
-                self.state = Some(state);
-            }
-            None => {
-                let state = OdeSolverState::new(&self.ode_problem);
-                self.state = Some(state);
-            }
-        }
-        Ok(())
-    }
-    fn state(&self) -> Option<&OdeSolverState<CRhs::V>> {
-        self.state.as_ref()
-    }
-    
-    fn state_mut(&mut self) -> Option<&mut OdeSolverState<CRhs::V>> {
-        self.state.as_mut()
-    }
-    
-    pub fn solve(&mut self, t: CRhs::T) -> Result<CRhs::V> {
-        if self.state.is_none() {
-            return Err(anyhow::anyhow!("OdeSolver::solve() called before initialise"));
-        }
-        while self.state.as_ref().unwrap().t <= t {
-            self.method.step(self.state.as_mut().unwrap())?;
-        }
-        Ok(self.method.interpolate(self.state.as_ref().unwrap(), t))
-    }
-}
-
 
 #[cfg(test)]
 mod tests {
-    use std::ops::{IndexMut, MulAssign};
+    use std::ops::MulAssign;
 
     use crate::{callable::{closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure}, vector::VectorRef, Matrix};
     use nalgebra::ComplexField;
@@ -196,7 +152,7 @@ mod tests {
         y.copy_from(v);
     }
 
-    fn exponential_decay_init<M: Matrix>(p: &M::V, y: &mut M::V, _data: &M) {
+    fn exponential_decay_init<M: Matrix>(_p: &M::V, y: &mut M::V, _data: &M) {
         let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into()]);
         y.copy_from(&y0);
     }
@@ -228,11 +184,14 @@ mod tests {
     // exponential decay problem with algebraic constraint
     // dy/dt = -ay
     // 0 = z - y
-    fn exponential_decay_with_algebraic<M: Matrix>(x: &M::V, p: &M::V, y: &mut M::V, _data: &M) 
+    // remove warning about unused mut
+    #[allow(unused_mut)]
+    fn exponential_decay_with_algebraic<M: Matrix>(x: &M::V, p: &M::V, mut y: &mut M::V, _data: &M) 
     {
         y.copy_from(x);
         y.mul_assign(-p[0]);
         let nstates = y.len();
+        y[nstates - 1] = x[nstates - 1] - x[nstates - 2];
     }
     
     // Jv = [-av; 0]
@@ -255,7 +214,7 @@ mod tests {
         y[nstates - 1] = M::T::zero();
     }
 
-    fn exponential_decay_with_algebraic_init<M: Matrix>(p: &M::V, y: &mut M::V, _data: &M) {
+    fn exponential_decay_with_algebraic_init<M: Matrix>(_p: &M::V, y: &mut M::V, _data: &M) {
         let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into(), 0.0.into()]);
         y.copy_from(&y0);
     }
@@ -284,7 +243,7 @@ mod tests {
         OdeSolverProblem::new(rhs, mass, init, p)
     }
     
-    pub fn test_ode_solver<M: Matrix + 'static, SM: OdeSolverMethod<Closure<M, M>, LinearClosure<M, M>, ConstantClosure<M, M>> + Clone + 'static> (method: SM) 
+    pub fn test_ode_solver<M: Matrix + 'static, SM: OdeSolverMethod<Closure<M, M>, LinearClosure<M, M>, ConstantClosure<M, M>> + 'static, RS: Solver<FilterCallable<Closure<M, M>>>>(mut method: SM, mut root_solver: RS) 
     where 
         for <'a> &'a M::V: VectorRef<M::V>,
     {
@@ -301,12 +260,8 @@ mod tests {
             &y0s[0] * M::T::exp(-problems[0].problem.p[0] * t1),
             &y0s[1] * M::T::exp(-problems[1].problem.p[0] * t1),
         ];
-        for ((problem, y0), soln) in problems.into_iter().zip(y0s.into_iter()).zip(solutions_at_t1.into_iter()) {
-            let mut solver = OdeSolver::new(problem, method);
-            solver.initialise().unwrap();
-            solver.state().unwrap().y.assert_eq(&y0, M::T::from(1e-6));
-            let result = solver.solve(t1);
-            result.unwrap().assert_eq(&soln, M::T::from(1e-6));
+        for ((problem, _y0), soln) in problems.into_iter().zip(y0s.into_iter()).zip(solutions_at_t1.into_iter()) {
+            method.make_consistent_and_solve(problem, t1, &mut root_solver).unwrap().assert_eq(&soln, M::T::from(1e-6));
         }
     }
 }

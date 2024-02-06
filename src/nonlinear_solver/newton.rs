@@ -30,6 +30,7 @@ impl <T: Scalar, C: Jacobian<M = DMatrix<T>, V = DVector<T>, T = T>> Default for
     }
 }
 
+
 impl <C: NonLinearOp> NewtonNonlinearSolver<C> 
 {
     pub fn new<S: Solver<LinearisedOp<C>> + 'static>(linear_solver: S) -> Self {
@@ -138,7 +139,6 @@ mod tests {
     #[test]
     fn test_newton_nalgebra() {
         type T = f64;
-        type V = nalgebra::DVector<T>;
         type M = nalgebra::DMatrix<T>;
         type C = Closure<M, M>;
         type S = NewtonNonlinearSolver<C>;

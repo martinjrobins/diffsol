@@ -53,14 +53,14 @@ impl<T: Scalar, CRhs: Jacobian<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, C
 }
 
 // implement clone for bdf
-impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V, T = M::T>, CInit: ConstantOp<V = M::V, T = M::T>> Clone for Bdf<M, CRhs, CMass, CInit> 
+impl<T: Scalar, CRhs: Jacobian<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CMass: ConstantJacobian<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CInit: ConstantOp<V = DVector<T>, T=T> + 'static> Clone for Bdf<DMatrix<T>, CRhs, CMass, CInit> 
 where
-    for<'b> &'b M::V: VectorRef<M::V>,
+    for<'b> &'b DVector<T>: VectorRef<DVector<T>>,
 {
     fn clone(&self) -> Self {
         let n = self.diff.nrows();
-        let linear_solver = LU::<M::T>::default();
-        let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<M, CRhs, CMass>>::new(linear_solver));
+        let linear_solver = LU::<CRhs::T>::default();
+        let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<CRhs::M, CRhs, CMass>>::new(linear_solver));
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
         let statistics = OdeSolverStatistics { niter: 0, nmaxiter: 0 };
         Self { 
@@ -70,14 +70,14 @@ where
             bdf_callable: self.bdf_callable.clone(), 
             order: self.order, 
             n_equal_steps: self.n_equal_steps, 
-            diff: M::zeros(n, Self::MAX_ORDER), 
-            diff_tmp: M::zeros(n, Self::MAX_ORDER), 
+            diff: CRhs::M::zeros(n, Self::MAX_ORDER), 
+            diff_tmp: CRhs::M::zeros(n, Self::MAX_ORDER), 
             gamma: self.gamma.clone(), 
             alpha: self.alpha.clone(), 
             error_const: self.error_const.clone(), 
-            u: M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
-            r: M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
-            ru: M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+            u: CRhs::M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+            r: CRhs::M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+            ru: CRhs::M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
         }
     }
 }
@@ -380,7 +380,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{callable::{closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure}, ode_solver::tests::test_ode_solver};
+    use crate::{callable::{closure::Closure, constant_closure::ConstantClosure, filter::FilterCallable, linear_closure::LinearClosure}, ode_solver::tests::test_ode_solver};
 
     use super::*;
 
@@ -393,6 +393,7 @@ mod tests {
         type CInit = ConstantClosure<M, M>;
         type S = Bdf<M, CRhs, CMass, CInit>;
         let s = S::default();
-        test_ode_solver(s);
+        let rs = NewtonNonlinearSolver::<FilterCallable<CRhs>>::default();
+        test_ode_solver(s, rs);
     }
 }

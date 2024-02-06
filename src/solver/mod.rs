@@ -33,7 +33,7 @@ impl<C: Op> SolverProblem<C> {
 
 impl<C: NonLinearOp> SolverProblem<C> {
     pub fn linearise(&self, x: &C::V) -> SolverProblem<LinearisedOp<C>> {
-        let linearised_f= Rc::new(LinearisedOp::new(self.f.clone(), &x));
+        let linearised_f= Rc::new(LinearisedOp::new(self.f.clone(), x));
         SolverProblem::new(linearised_f, self.p.clone())
     }
     
