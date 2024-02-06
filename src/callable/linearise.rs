@@ -35,9 +35,6 @@ impl<C: NonLinearOp> LinearOp for LinearisedOp<C>
     fn call_inplace(&self, x: &Self::V, p: &Self::V, y: &mut Self::V) {
         self.callable.jac_mul_inplace(&self.x, p, x, y);
     }
-    fn jac_mul_inplace(&self, p: &Self::V, v: &Self::V, y: &mut Self::V) {
-        self.callable.jac_mul_inplace(&self.x, p, v, y);
-    }
 
 }
 

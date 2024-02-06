@@ -148,10 +148,6 @@ mod tests {
         y.copy_from(x);
     }
     
-    fn exponential_decay_mass_jacobian<M: Matrix>(_p: &M::V, v: &M::V, y: &mut M::V, _jac: &M) {
-        y.copy_from(v);
-    }
-
     fn exponential_decay_init<M: Matrix>(_p: &M::V, y: &mut M::V, _data: &M) {
         let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into()]);
         y.copy_from(&y0);
@@ -168,7 +164,6 @@ mod tests {
         );
         let mass = LinearClosure::<M, M>::new(
             exponential_decay_mass,
-            exponential_decay_mass_jacobian,
             data.clone(), 
             nstates,
         );
@@ -208,12 +203,6 @@ mod tests {
         y[nstates - 1] = M::T::zero();
     }
     
-    fn exponential_decay_with_algebraic_mass_jacobian<M: Matrix>(_p: &M::V, v: &M::V, y: &mut M::V, _jac: &M) {
-        y.copy_from(v);
-        let nstates = y.len();
-        y[nstates - 1] = M::T::zero();
-    }
-
     fn exponential_decay_with_algebraic_init<M: Matrix>(_p: &M::V, y: &mut M::V, _data: &M) {
         let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into(), 0.0.into()]);
         y.copy_from(&y0);
@@ -230,7 +219,6 @@ mod tests {
         );
         let mass = LinearClosure::<M, M>::new(
             exponential_decay_with_algebraic_mass,
-            exponential_decay_with_algebraic_mass_jacobian,
             data.clone(), 
             nstates,
         );

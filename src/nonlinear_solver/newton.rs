@@ -71,8 +71,8 @@ impl<C: NonLinearOp> Solver<C> for NewtonNonlinearSolver<C> {
             self.convergence.as_mut().unwrap().problem = problem.clone();
         }
     }
-    fn problem(&self) -> Option<&SolverProblem<C>> {
-        self.problem.as_deref()
+    fn is_problem_set(&self) -> bool {
+        self.problem.is_some()
     }
     fn solve_in_place(&mut self, xn: & mut C::V) -> Result<()> {
         if self.convergence.is_none() || self.problem.is_none() {
@@ -83,7 +83,7 @@ impl<C: NonLinearOp> Solver<C> for NewtonNonlinearSolver<C> {
         let x0 = xn.clone();
         convergence.reset(&x0);
         let mut tmp = x0.clone();
-        let mut updated_jacobian = if self.linear_solver.problem().is_none() {
+        let mut updated_jacobian = if self.linear_solver.is_problem_set() {
             self.linear_solver.set_problem(Rc::new(problem.linearise(&x0)));
             true
         } else {

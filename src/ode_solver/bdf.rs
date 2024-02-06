@@ -4,7 +4,7 @@ use anyhow::Result;
 use nalgebra::{DVector, DMatrix};
 use num_traits::{One, Zero, Pow};
 
-use crate::{callable::ode::BdfCallable, ConstantJacobian, ConstantOp, LinearOp, NonLinearOp, IndexType, IterativeSolver, Jacobian, Matrix, MatrixViewMut, NewtonNonlinearSolver, Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut, LU};
+use crate::{callable::ode::BdfCallable, matrix::MatrixRef, ConstantJacobian, ConstantOp, IndexType, IterativeSolver, Jacobian, LinearOp, Matrix, MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut, LU};
 
 use super::{OdeSolverState, OdeSolverMethod, OdeSolverStatistics, OdeSolverProblem};
 
@@ -19,7 +19,6 @@ pub struct Bdf<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp
     diff_tmp: M,
     u: M,
     r: M,
-    ru: M,
     alpha: Vec<CRhs::T>,
     gamma: Vec<CRhs::T>,
     error_const: Vec<CRhs::T>,
@@ -40,14 +39,13 @@ impl<T: Scalar, CRhs: Jacobian<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, C
             bdf_callable: None, 
             order: 1, 
             n_equal_steps: 0, 
-            diff: DMatrix::<T>::zeros(n, Self::MAX_ORDER), 
-            diff_tmp: DMatrix::<T>::zeros(n, Self::MAX_ORDER), 
+            diff: DMatrix::<T>::zeros(n, Self::MAX_ORDER + 1), 
+            diff_tmp: DMatrix::<T>::zeros(n, Self::MAX_ORDER + 1), 
             gamma: vec![T::from(1.0); Self::MAX_ORDER + 1], 
             alpha: vec![T::from(1.0); Self::MAX_ORDER + 1], 
             error_const: vec![T::from(1.0); Self::MAX_ORDER + 1], 
             u: DMatrix::<T>::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
             r: DMatrix::<T>::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
-            ru: DMatrix::<T>::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
         }
     }
 }
@@ -70,14 +68,13 @@ where
             bdf_callable: self.bdf_callable.clone(), 
             order: self.order, 
             n_equal_steps: self.n_equal_steps, 
-            diff: CRhs::M::zeros(n, Self::MAX_ORDER), 
-            diff_tmp: CRhs::M::zeros(n, Self::MAX_ORDER), 
+            diff: CRhs::M::zeros(n, Self::MAX_ORDER + 1), 
+            diff_tmp: CRhs::M::zeros(n, Self::MAX_ORDER + 1), 
             gamma: self.gamma.clone(), 
             alpha: self.alpha.clone(), 
             error_const: self.error_const.clone(), 
             u: CRhs::M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
             r: CRhs::M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
-            ru: CRhs::M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
         }
     }
 }
@@ -85,6 +82,7 @@ where
 impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V, T = M::T>, CInit: ConstantOp<V = M::V, T = M::T>> Bdf<M, CRhs, CMass, CInit> 
 where
     for<'b> &'b M::V: VectorRef<M::V>,
+    for<'b> &'b M: MatrixRef<M>,
 {
     const MAX_ORDER: IndexType = 5;
     const NEWTON_MAXITER: IndexType = 4;
@@ -131,12 +129,12 @@ where
 
         // update D using equations in section 3.2 of [1]
         self.r = Self::_compute_r(self.order, factor);
-        self.ru.gemm(M::T::one(), &self.r, &self.u, M::T::zero()); // ru = R * U
+        let ru = self.r.mat_mul(&self.u);
         // D[0:order] = R * U * D[0:order]
         {
-            let d_zero_order = self.diff.columns(0, self.order);
-            let mut d_zero_order_tmp = self.diff_tmp.columns_mut(0, self.order);
-            d_zero_order_tmp.gemm_ov(M::T::one(), &self.ru, &d_zero_order, M::T::zero()); // diff_sub = R * U * diff
+            let d_zero_order = self.diff.columns(0, self.order + 1);
+            let mut d_zero_order_tmp = self.diff_tmp.columns_mut(0, self.order + 1);
+            d_zero_order_tmp.gemm_vo(M::T::one(),  &d_zero_order, &ru, M::T::zero()); // diff_sub = R * U * diff
         }
         std::mem::swap(&mut self.diff, &mut self.diff_tmp);
 
@@ -147,6 +145,7 @@ where
         let callable = self.bdf_callable.as_ref().unwrap();
         callable.set_psi_and_y0(&self.diff, &self.gamma, &self.alpha, self.order, &state.y);
         callable.set_c(state.h, &self.alpha, self.order);
+
     }
 
     
@@ -176,6 +175,7 @@ where
 impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V, T = M::T>, CInit: ConstantOp<V = M::V, T = M::T>> OdeSolverMethod<CRhs, CMass, CInit> for Bdf<M, CRhs, CMass, CInit> 
 where
     for<'b> &'b M::V: VectorRef<M::V>,
+    for<'b> &'b M: MatrixRef<M>,
 {
     fn interpolate(&self, state: &OdeSolverState<M::V>, t: CRhs::T) -> M::V {
         //interpolate solution at time values t* where t-h < t* < t
@@ -206,7 +206,8 @@ where
         let nstates = problem.f.nstates();
         self.order = 1usize; 
         self.n_equal_steps = 0;
-        self.diff = M::zeros(Self::MAX_ORDER + 1, nstates);
+        self.diff = M::zeros(nstates, Self::MAX_ORDER + 1);
+        self.diff_tmp = M::zeros(nstates, Self::MAX_ORDER + 1);
         self.diff.column_mut(0).copy_from(&state.y);
         
         // kappa values for difference orders, taken from Table 1 of [1]

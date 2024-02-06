@@ -41,7 +41,7 @@ impl<C: NonLinearOp> SolverProblem<C> {
 
 pub trait Solver<C: Op> {
     fn set_problem(&mut self, problem: Rc<SolverProblem<C>>);
-    fn problem(&self) -> Option<&SolverProblem<C>>;
+    fn is_problem_set(&self) -> bool;
     fn solve(&mut self, state: &C::V) -> Result<C::V> {
         let mut state = state.clone();
         self.solve_in_place(&mut state)?;

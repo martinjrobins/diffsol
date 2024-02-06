@@ -28,7 +28,7 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
     fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T) {
         self.gemm(alpha, a, b, beta);
     }
-    fn gemm_ov(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::View, beta: Self::T) {
+    fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T) {
         self.gemm(alpha, a, b, beta);
     }
 }
@@ -75,6 +75,8 @@ impl<T: Scalar> MatrixCommon for DMatrix<T> {
 impl<T: Scalar> Matrix for DMatrix<T> {
     type View<'a> = DMatrixView<'a, T>;
     type ViewMut<'a> = DMatrixViewMut<'a, T>;
+    
+    
     
     fn column_mut(&mut self, i: IndexType) -> DVectorViewMut<'_, T> {
         self.column_mut(i)

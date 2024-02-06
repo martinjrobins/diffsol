@@ -18,9 +18,10 @@ impl<T: Scalar> Default for LU<T> {
 }
 
 impl<T: Scalar, C: ConstantJacobian<M = DMatrix<T>, V = DVector<T>, T = T>> Solver<C> for LU<T> {
-    fn problem(&self) -> Option<&SolverProblem<C>> {
-        None
+    fn is_problem_set(&self) -> bool {
+        self.lu.is_some()
     }
+    
     fn solve_in_place(&mut self, state: &mut C::V) -> Result<()> {
         if self.lu.is_none() {
             return Err(anyhow::anyhow!("LU not initialized"));

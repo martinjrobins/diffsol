@@ -36,9 +36,21 @@ impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V,
 
         Self { rhs, mass, psi_neg_y0, c, rhs_jac, jac, mass_jac, rhs_jacobian_is_stale, jacobian_is_stale, mass_jacobian_is_stale }
     }
-    pub fn set_c(&self, h: CRhs::T, alpha: &[CRhs::T], order: IndexType) {
+    pub fn set_c(&self, h: CRhs::T, alpha: &[CRhs::T], order: IndexType) 
+    where 
+        for <'b> &'b M: MatrixRef<M>,
+    {
         self.c.replace(h * alpha[order]);
-        self.jacobian_is_stale.replace(true);
+        if !*self.rhs_jacobian_is_stale.borrow() && !*self.mass_jacobian_is_stale.borrow() {
+            let rhs_jac_ref = self.rhs_jac.borrow();
+            let rhs_jac = rhs_jac_ref.deref();
+            let mass_jac_ref = self.mass_jac.borrow();
+            let mass_jac = mass_jac_ref.deref();
+            let c = *self.c.borrow().deref();
+            self.jac.replace(mass_jac - rhs_jac * c); 
+        } else {
+            self.jacobian_is_stale.replace(true);
+        }
     }
     pub fn set_psi_and_y0(&self, diff: &M, gamma: &[CRhs::T], alpha: &[CRhs::T], order: usize, y0: &CRhs::V) {
         // update psi term as defined in second equation on page 9 of [1]
@@ -104,10 +116,13 @@ where
     fn jacobian(&self, x: &CRhs::V, p: &CRhs::V) -> CRhs::M {
         if *self.mass_jacobian_is_stale.borrow() {
             self.mass_jac.replace(self.mass.jacobian(p));
+            self.mass_jacobian_is_stale.replace(false);
+            self.jacobian_is_stale.replace(true);
         }
         if *self.rhs_jacobian_is_stale.borrow() {
             self.rhs_jac.replace(self.rhs.jacobian(x, p));
             self.rhs_jacobian_is_stale.replace(false);
+            self.jacobian_is_stale.replace(true);
         }
         if *self.jacobian_is_stale.borrow() {
             let rhs_jac_ref = self.rhs_jac.borrow();

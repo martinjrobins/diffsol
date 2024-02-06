@@ -8,7 +8,7 @@ use super::{Jacobian, LinearOp};
 
 pub struct UnitCallable<M: Matrix> {
     n: usize,
-    ones: M::V,
+    _phantom: std::marker::PhantomData<M>,
 }
 
 impl<M: Matrix> Default for UnitCallable<M> {
@@ -19,9 +19,7 @@ impl<M: Matrix> Default for UnitCallable<M> {
 
 impl<M: Matrix> UnitCallable<M> {
     pub fn new(n: usize) -> Self {
-        let mut ones = M::V::zeros(n);
-        ones.add_scalar_mut(M::T::one());
-        Self { n, ones }
+        Self { n, _phantom: std::marker::PhantomData}
     }
 }
 
@@ -43,9 +41,6 @@ impl<M: Matrix> LinearOp for UnitCallable<M>
 {
     fn call_inplace(&self, x: &M::V, _p: &M::V, y: &mut M::V) {
         y.copy_from(x)
-    }
-    fn jac_mul_inplace(&self, _p: &M::V, _v: &M::V, y: &mut M::V) {
-        y.copy_from(&self.ones); 
     }
 }
 

@@ -36,15 +36,9 @@ pub trait NonLinearOp: Op {
 
 pub trait LinearOp: Op {
     fn call_inplace(&self, x: &Self::V, p: &Self::V, y: &mut Self::V);
-    fn jac_mul_inplace(&self, p: &Self::V, v: &Self::V, y: &mut Self::V);
     fn call(&self, x: &Self::V, p: &Self::V) -> Self::V {
         let mut y = Self::V::zeros(self.nout());
         self.call_inplace(x, p, &mut y);
-        y
-    }
-    fn jac_mul(&self, p: &Self::V, v: &Self::V) -> Self::V {
-        let mut y = Self::V::zeros(self.nstates());
-        self.jac_mul_inplace(p, v, &mut y);
         y
     }
     fn gemv(&self, x: &Self::V, p: &Self::V, alpha: Self::T, beta: Self::T, y: &mut Self::V) {
@@ -59,7 +53,7 @@ pub trait LinearOp: Op {
         let mut diag = Self::V::zeros(self.nstates());
         for j in 0..self.nstates() {
             v[j] = Self::T::one();
-            self.jac_mul_inplace(p, &v, &mut col);
+            self.call_inplace(p, &v, &mut col);
             diag[j] = col[j];
             v[j] = Self::T::zero();
         }
@@ -72,7 +66,7 @@ impl<C: LinearOp> NonLinearOp for C {
         C::call_inplace(self, x, p, y)
     }
     fn jac_mul_inplace(&self, _x: &Self::V, p: &Self::V, v: &Self::V, y: &mut Self::V) {
-        C::jac_mul_inplace(self, p, v, y)
+        C::call_inplace(self, v, p, y)
     }
     
 }
@@ -90,15 +84,6 @@ pub trait ConstantOp: Op {
     }
 }
 
-impl <C: ConstantOp> LinearOp for C {
-    fn call_inplace(&self, _x: &Self::V, p: &Self::V, y: &mut Self::V) {
-        C::call_inplace(self, p, y)
-    }
-    fn jac_mul_inplace(&self, _p: &Self::V, _v: &Self::V, y: &mut Self::V) {
-        C::jac_mul_inplace(self, y)
-    }
-}
-
 
 pub trait ConstantJacobian: LinearOp
 {
@@ -109,7 +94,7 @@ pub trait ConstantJacobian: LinearOp
         let mut triplets = Vec::with_capacity(self.nstates());
         for j in 0..self.nstates() {
             v[j] = Self::T::one();
-            self.jac_mul_inplace(p, &v, &mut col);
+            self.call_inplace(&v, p, &mut col);
             for i in 0..self.nout() {
                 if col[i] != Self::T::zero() {
                     triplets.push((i, j, col[i]));

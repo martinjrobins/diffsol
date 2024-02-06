@@ -1,5 +1,6 @@
 use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 use std::fmt::{Debug, Display};
+use num_traits::{One, Zero};
 
 use crate::{IndexType, Scalar, Vector};
 use anyhow::Result;
@@ -129,7 +130,7 @@ pub trait MatrixViewMut<'a>:
     type Owned: Matrix<V = Self::V>;
     type View: MatrixView<'a, V = Self::V, Owned = Self::Owned, T = Self::T>;
     fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T);
-    fn gemm_ov(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::View, beta: Self::T);
+    fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T);
 }
 
 pub trait MatrixView<'a>: 
@@ -151,10 +152,15 @@ pub trait Matrix:
     fn zeros(nrows: IndexType, ncols: IndexType) -> Self;
     fn from_diagonal(v: &Self::V) -> Self;
     fn try_from_triplets(nrows: IndexType, ncols: IndexType, triplets: Vec<(IndexType, IndexType, Self::T)>) -> Result<Self>;
-    fn columns(&self, start: IndexType, nrows: IndexType) -> Self::View<'_>;
+    fn columns(&self, start: IndexType, ncols: IndexType) -> Self::View<'_>;
     fn column(&self, i: IndexType) -> <Self::V as Vector>::View<'_>;
     fn columns_mut(&mut self, start: IndexType, nrows: IndexType) -> Self::ViewMut<'_>;
     fn column_mut(&mut self, i: IndexType) -> <Self::V as Vector>::ViewMut<'_>;
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T);
     fn diagonal(&self) -> Self::V;
+    fn mat_mul(&self, x: &Self) -> Self {
+        let mut y = Self::zeros(self.nrows(), x.ncols());
+        y.gemm(Self::T::one(), self, x, Self::T::zero());
+        y
+    }
 }
