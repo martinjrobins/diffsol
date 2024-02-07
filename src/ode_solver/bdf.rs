@@ -107,22 +107,17 @@ where
         //Note that the U matrix also defined in the same section can be also be
         //found using factor = 1, which corresponds to R with a constant step size
         let mut r = M::zeros(order + 1, order + 1);
-        let neg_rp = M::V::from_vec((1..=order).map(|i| -factor * M::T::from((i) as f64)).collect());
-
         
         // r[0, 0:order] = 1
         for j in 0..=order {
             r[(0, j)] = M::T::one();
         }
-        // r[1:order, 0] = -factor * [1:order]
-        for i in 1..=order {
-            r[(i, 1)] = neg_rp[i - 1];
-        }
         // r[i, j] = r[i, j-1] * (j - 1 - factor * i) / j
-        for j in 2..=order {
-            for i in 1..=order {
+        for i in 1..=order {
+            for j in 1..=order {
+                let i_t = M::T::from(i as f64);
                 let j_t = M::T::from(j as f64);
-                r[(i, j)] = r[(i, j-1)] * (j_t - M::T::one() + neg_rp[i - 1]) / j_t;
+                r[(i, j)] = r[(i - 1, j)] * (i_t - M::T::one() - factor * j_t) / i_t;
             }
         }
         r
@@ -363,14 +358,14 @@ where
             // order k, we need to calculate the optimal step size factors for orders
             // k-1 and k+1. To do this, we note that the error = C_k * D^{k+1} y_n
             let error_m_norm = if order > 1 {
-                let mut error_m = self.diff.column(order) * self.error_const[order];
+                let mut error_m = self.diff.column(order) * self.error_const[order - 1];
                 error_m.component_div_assign(&scale_y);
                 error_m.norm()
             } else {
                 M::T::INFINITY
             };
             let error_p_norm = if order < Self::MAX_ORDER {
-                let mut error_p = self.diff.column(order) * self.error_const[order + 2];
+                let mut error_p = self.diff.column(order + 2) * self.error_const[order + 1];
                 error_p.component_div_assign(&scale_y);
                 error_p.norm()
             } else {
