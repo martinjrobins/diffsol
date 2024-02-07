@@ -41,4 +41,7 @@ impl<C: NonLinearOp> LinearOp for LinearisedOp<C>
 impl <C: Jacobian> ConstantJacobian for LinearisedOp<C> 
 {
     type M = C::M;
+    fn jacobian(&self, p: &Self::V) -> Self::M {
+        self.callable.jacobian(&self.x, p)
+    }
 }

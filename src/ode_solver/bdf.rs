@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use std::ops::AddAssign;
 
 use anyhow::Result;
 use nalgebra::{DVector, DMatrix};
@@ -106,11 +107,22 @@ where
         //Note that the U matrix also defined in the same section can be also be
         //found using factor = 1, which corresponds to R with a constant step size
         let mut r = M::zeros(order + 1, order + 1);
+        let neg_rp = M::V::from_vec((1..=order).map(|i| -factor * M::T::from((i) as f64)).collect());
+
+        
+        // r[0, 0:order] = 1
+        for j in 0..=order {
+            r[(0, j)] = M::T::one();
+        }
+        // r[1:order, 0] = -factor * [1:order]
         for i in 1..=order {
-            for j in 1..=order {
-                let i_t: M::T = M::T::from(i as f64);
+            r[(i, 1)] = neg_rp[i - 1];
+        }
+        // r[i, j] = r[i, j-1] * (j - 1 - factor * i) / j
+        for j in 2..=order {
+            for i in 1..=order {
                 let j_t = M::T::from(j as f64);
-                r[(i, j)] = r[(i-1, j)] * (i_t - M::T::one() - factor * j_t) / i_t;
+                r[(i, j)] = r[(i, j-1)] * (j_t - M::T::one() + neg_rp[i - 1]) / j_t;
             }
         }
         r
@@ -128,13 +140,14 @@ where
         self.n_equal_steps = 0;
 
         // update D using equations in section 3.2 of [1]
+        self.u = Self::_compute_r(self.order, M::T::one());
         self.r = Self::_compute_r(self.order, factor);
         let ru = self.r.mat_mul(&self.u);
         // D[0:order] = R * U * D[0:order]
         {
             let d_zero_order = self.diff.columns(0, self.order + 1);
             let mut d_zero_order_tmp = self.diff_tmp.columns_mut(0, self.order + 1);
-            d_zero_order_tmp.gemm_vo(M::T::one(),  &d_zero_order, &ru, M::T::zero()); // diff_sub = R * U * diff
+            d_zero_order_tmp.gemm_vo(M::T::one(),  &d_zero_order, &ru, M::T::zero()); // diff_sub = diff * RU
         }
         std::mem::swap(&mut self.diff, &mut self.diff_tmp);
 
@@ -145,6 +158,9 @@ where
         let callable = self.bdf_callable.as_ref().unwrap();
         callable.set_psi_and_y0(&self.diff, &self.gamma, &self.alpha, self.order, &state.y);
         callable.set_c(state.h, &self.alpha, self.order);
+
+        // clear nonlinear's linear solver problem as lu factorisation has changed
+        self.nonlinear_solver.as_mut().set_problem(Rc::new(SolverProblem::new(self.bdf_callable.as_ref().unwrap().clone(), self.ode_problem.as_ref().unwrap().problem.p.clone())));
 
     }
 
@@ -214,13 +230,14 @@ where
         let kappa = [M::T::from(0.0), M::T::from(-0.1850), M::T::from(-1.0) / M::T::from(9.0), M::T::from(-0.0823), M::T::from(-0.0415), M::T::from(0.0)];
         self.alpha = vec![M::T::zero()];
         self.gamma = vec![M::T::zero()];
-        self.error_const = vec![M::T::zero()];
+        self.error_const = vec![M::T::one()];
 
         #[allow(clippy::needless_range_loop)]
         for i in 1..=Self::MAX_ORDER {
             let i_t = M::T::from(i as f64);
+            let one_over_i = M::T::one() / i_t;
             let one_over_i_plus_one = M::T::one() / (i_t + M::T::one());
-            self.gamma.push(self.gamma[i-1] + one_over_i_plus_one);
+            self.gamma.push(self.gamma[i-1] + one_over_i);
             self.alpha.push(M::T::one() / ((M::T::one() - kappa[i]) * self.gamma[i]));
             self.error_const.push(kappa[i] * self.gamma[i] + one_over_i_plus_one);
         }
@@ -270,7 +287,8 @@ where
         // initialise step size and try to make the step,
         // iterate, reducing step size until error is in bounds
         let mut step_accepted = false;
-        let mut d = <M::V as Vector>::zeros(0);
+        let nstates = self.diff.nrows();
+        let mut d = <M::V as Vector>::zeros(nstates);
         let mut safety = M::T::from(0.0);
         let mut error_norm = M::T::from(0.0);
         let mut scale_y = <M::V as Vector>::zeros(0);
@@ -290,7 +308,9 @@ where
                     // combine eq 3, 4 and 6 from [1] to obtain error
                     // Note that error = C_k * h^{k+1} y^{k+1}
                     // and d = D^{k+1} y_{n+1} \approx h^{k+1} y^{k+1}
+                    //d.add_assign(&y);
                     d = y - &state.y;
+
                     let mut error =  &d * self.error_const[self.order];
                     error.component_div_assign(&scale_y);
                     error_norm = error.norm();
@@ -327,7 +347,6 @@ where
 
         // take the accepted step
         state.t += state.h;
-        state.y += &d;
         
         self._update_differences(&d);
 

@@ -53,7 +53,7 @@ pub trait LinearOp: Op {
         let mut diag = Self::V::zeros(self.nstates());
         for j in 0..self.nstates() {
             v[j] = Self::T::one();
-            self.call_inplace(p, &v, &mut col);
+            self.call_inplace(&v, p, &mut col);
             diag[j] = col[j];
             v[j] = Self::T::zero();
         }

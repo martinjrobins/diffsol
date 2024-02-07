@@ -21,6 +21,10 @@ impl<T: Scalar, C: ConstantJacobian<M = DMatrix<T>, V = DVector<T>, T = T>> Solv
     fn is_problem_set(&self) -> bool {
         self.lu.is_some()
     }
+
+    fn clear_problem(&mut self) {
+        self.lu = None;
+    }
     
     fn solve_in_place(&mut self, state: &mut C::V) -> Result<()> {
         if self.lu.is_none() {

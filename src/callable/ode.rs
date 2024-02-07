@@ -54,8 +54,8 @@ impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V,
     }
     pub fn set_psi_and_y0(&self, diff: &M, gamma: &[CRhs::T], alpha: &[CRhs::T], order: usize, y0: &CRhs::V) {
         // update psi term as defined in second equation on page 9 of [1]
-        let mut new_psi_neg_y0 = diff.column(0) * gamma[0];
-        for (i, &gamma_i) in gamma.iter().enumerate().take(order + 1).skip(1) {
+        let mut new_psi_neg_y0 = diff.column(1) * gamma[1];
+        for (i, &gamma_i) in gamma.iter().enumerate().take(order + 1).skip(2) {
             new_psi_neg_y0 += diff.column(i) * gamma_i
         }
         new_psi_neg_y0 *= alpha[order];
@@ -91,13 +91,13 @@ impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V,
 where 
     for <'b> &'b CRhs::V: VectorRef<CRhs::V>,
 {
-    // F(y) = M (y - y0 + psi) - c * f(y) = 0
+    // F(y) = M (y - y0 + c * psi) - c * f(y) = 0
     fn call_inplace(&self, x: &CRhs::V, p: &CRhs::V, y: &mut CRhs::V) {
         self.rhs.call_inplace(x, p, y);
         let psi_neg_y0_ref = self.psi_neg_y0.borrow();
         let psi_neg_y0 = psi_neg_y0_ref.deref();
         let c = *self.c.borrow().deref();
-        let tmp = x - psi_neg_y0;
+        let tmp = x + psi_neg_y0;
         self.mass.gemv(&tmp, p, CRhs::T::one(), -c, y);
 }
     fn jac_mul_inplace(&self, x: &CRhs::V, p: &CRhs::V, v: &CRhs::V, y: &mut CRhs::V) {

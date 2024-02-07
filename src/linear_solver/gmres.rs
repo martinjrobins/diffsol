@@ -35,6 +35,9 @@ impl <C: LinearOp> Solver<C> for GMRES<C>
 where
     for <'b> &'b C::V: VectorRef<C::V>,
 {
+    fn clear_problem(&mut self) {
+        todo!()
+    }
     
     fn is_problem_set(&self) -> bool {
         todo!()
