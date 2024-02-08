@@ -1,6 +1,6 @@
-use crate::{Matrix, Scalar, Vector};
+use crate::{vector::VectorMutRef, Matrix, Scalar, Vector};
 use num_traits::{One, Zero};
-use std::ops::MulAssign;
+use std::ops::{MulAssign, AddAssign};
 
 
 pub mod closure;
@@ -41,11 +41,13 @@ pub trait LinearOp: Op {
         self.call_inplace(x, p, &mut y);
         y
     }
-    fn gemv(&self, x: &Self::V, p: &Self::V, alpha: Self::T, beta: Self::T, y: &mut Self::V) {
+    fn gemv(&self, x: &Self::V, p: &Self::V, alpha: Self::T, beta: Self::T, y: &mut Self::V) 
+    {
         let mut beta_y = y.clone();
         beta_y.mul_assign(beta);
         self.call_inplace(x, p, y);
         y.mul_assign(alpha);
+        y.add_assign(&beta_y);
     }
     fn jacobian_diagonal(&self, p: &Self::V) -> Self::V {
         let mut v = Self::V::zeros(self.nstates());

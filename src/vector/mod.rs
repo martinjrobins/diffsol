@@ -37,25 +37,6 @@ impl <V, Rhs, Output> VectorOpsByValue<Rhs, Output> for V where V: VectorCommon
 {}
 
 
-pub trait VectorOps<View>: 
-    VectorOpsByValue<Self> 
-    + for<'a> VectorOpsByValue<&'a Self>
-    + VectorOpsByValue<View> 
-    + for<'a> VectorOpsByValue<&'a View>
-    + Mul<Self::T, Output = Self>
-    + Div<Self::T, Output = Self>
-{}
-
-impl <V, View> VectorOps<View> for V 
-where 
-    V: VectorOpsByValue<Self> 
-    + for<'a> VectorOpsByValue<&'a Self> 
-    + VectorOpsByValue<View> 
-    + for<'a> VectorOpsByValue<&'a View>
-    + Mul<Self::T, Output = Self>
-    + Div<Self::T, Output = Self>
-{}
-
 pub trait VectorMutOpsByValue<Rhs = Self>: VectorCommon 
     + AddAssign<Rhs>
     + SubAssign<Rhs> 
@@ -64,25 +45,6 @@ pub trait VectorMutOpsByValue<Rhs = Self>: VectorCommon
 impl <V, Rhs> VectorMutOpsByValue<Rhs> for V where V: VectorCommon 
     + AddAssign<Rhs>
     + SubAssign<Rhs> 
-{}
-
-pub trait VectorMutOps<View>: 
-    VectorMutOpsByValue<Self>
-    + VectorMutOpsByValue<View>
-    + for<'a> VectorMutOpsByValue<&'a View>
-    + for<'a> VectorMutOpsByValue<&'a Self>
-    + MulAssign<Self::T>
-    + DivAssign<Self::T>
-{}
-
-impl <V, View> VectorMutOps<View> for V 
-where 
-    V: VectorMutOpsByValue<Self>
-    + VectorMutOpsByValue<View>
-    + for<'a> VectorMutOpsByValue<&'a Self>
-    + for<'a> VectorMutOpsByValue<&'a View>
-    + MulAssign<Self::T>
-    + DivAssign<Self::T>
 {}
 
 pub trait VectorRef<V: Vector>:
@@ -113,10 +75,18 @@ where
 {}
 
 pub trait VectorViewMut<'a>: 
-    VectorMutOps<Self::View>
+    VectorMutOpsByValue<Self::View>
+    + VectorMutOpsByValue<Self::Owned> where Self: 'a
+    + for<'b> VectorMutOpsByValue<&'b Self::View>
+    + for<'b> VectorMutOpsByValue<&'b Self::Owned>
+    + MulAssign<Self::T>
+    + DivAssign<Self::T>
 {
     type View: VectorView<'a, T = Self::T>;
-    type Owned: Vector<T = Self::T, ViewMut<'a> = Self> where Self: 'a;
+    type Owned: Vector<T = Self::T, ViewMut<'a> = Self> 
+    where 
+        Self: 'a, 
+    ;
     fn abs(&self) -> Self::Owned;
     fn copy_from(&mut self, other: &Self::Owned);
     fn copy_from_view(&mut self, other: &<Self::Owned as Vector>::View<'_>);
@@ -133,8 +103,20 @@ pub trait VectorView<'a>:
 
 
 pub trait Vector:
-    for <'a> VectorOps<Self::View<'a>>
-    + for <'a> VectorMutOps<Self::View<'a>>
+    VectorOpsByValue<Self> 
+    + for<'b> VectorOpsByValue<&'b Self>
+    + for<'a> VectorOpsByValue<Self::View<'a>> 
+    + for<'a, 'b> VectorOpsByValue<&'b Self::View<'a>>
+    + Mul<Self::T, Output = Self>
+    + Div<Self::T, Output = Self>
+
+    + VectorMutOpsByValue<Self>
+    + for<'a> VectorMutOpsByValue<Self::View<'a>>
+    + for<'b> VectorMutOpsByValue<&'b Self>
+    + for<'a, 'b> VectorMutOpsByValue<&'b Self::View<'a>>
+    + MulAssign<Self::T>
+    + DivAssign<Self::T>
+
     + Index<IndexType, Output=Self::T>
     + IndexMut<IndexType, Output=Self::T>
     + Clone

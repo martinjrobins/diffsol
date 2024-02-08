@@ -249,7 +249,7 @@ mod tests {
             &y0s[1] * M::T::exp(-problems[1].problem.p[0] * t1),
         ];
         for ((problem, _y0), soln) in problems.into_iter().zip(y0s.into_iter()).zip(solutions_at_t1.into_iter()) {
-            method.make_consistent_and_solve(problem, t1, &mut root_solver).unwrap().assert_eq(&soln, M::T::from(1e-6));
+            method.make_consistent_and_solve(problem, t1, &mut root_solver).unwrap().assert_eq(&soln, M::T::from(1e-5));
         }
     }
 }

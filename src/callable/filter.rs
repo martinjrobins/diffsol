@@ -19,9 +19,6 @@ pub struct FilterCallable<C: NonLinearOp>
 impl<C: NonLinearOp> FilterCallable<C> 
 {
     pub fn new(callable: Rc<C>, x: &C::V, indices: <C::V as Vector>::Index) -> Self {
-        if callable.nstates() != indices.len() {
-            panic!("FilterCallable::new() called with callable with different number of states");
-        }
         let y_full = RefCell::new(C::V::zeros(callable.nout()));
         let x_full = RefCell::new(x.clone());
         Self { callable, indices, y_full, x_full }

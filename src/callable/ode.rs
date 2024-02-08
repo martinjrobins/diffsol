@@ -91,7 +91,7 @@ impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V,
 where 
     for <'b> &'b CRhs::V: VectorRef<CRhs::V>,
 {
-    // F(y) = M (y - y0 + c * psi) - c * f(y) = 0
+    // F(y) = M (y - y0 + psi) - c * f(y) = 0
     fn call_inplace(&self, x: &CRhs::V, p: &CRhs::V, y: &mut CRhs::V) {
         self.rhs.call_inplace(x, p, y);
         let psi_neg_y0_ref = self.psi_neg_y0.borrow();

@@ -69,8 +69,8 @@ where
             bdf_callable: self.bdf_callable.clone(), 
             order: self.order, 
             n_equal_steps: self.n_equal_steps, 
-            diff: CRhs::M::zeros(n, Self::MAX_ORDER + 1), 
-            diff_tmp: CRhs::M::zeros(n, Self::MAX_ORDER + 1), 
+            diff: CRhs::M::zeros(n, Self::MAX_ORDER + 3), 
+            diff_tmp: CRhs::M::zeros(n, Self::MAX_ORDER + 3), 
             gamma: self.gamma.clone(), 
             alpha: self.alpha.clone(), 
             error_const: self.error_const.clone(), 
@@ -89,13 +89,6 @@ where
     const NEWTON_MAXITER: IndexType = 4;
     const MIN_FACTOR: f64 = 0.2;
     const MAX_FACTOR: f64 = 10.0;
-    
-    fn _predict(&self, state: &mut OdeSolverState<M::V>) {
-        // predict forward to new step (eq 2 in [1])
-        for i in 1..=self.order {
-            state.y += self.diff.column(i);
-        }
-    }
     
     fn _compute_r(order: usize, factor: M::T) -> M {
         //computes the R matrix with entries
@@ -138,7 +131,7 @@ where
         self.u = Self::_compute_r(self.order, M::T::one());
         self.r = Self::_compute_r(self.order, factor);
         let ru = self.r.mat_mul(&self.u);
-        // D[0:order] = R * U * D[0:order]
+        // D[0:order+1] = R * U * D[0:order+1]
         {
             let d_zero_order = self.diff.columns(0, self.order + 1);
             let mut d_zero_order_tmp = self.diff_tmp.columns_mut(0, self.order + 1);
@@ -146,16 +139,7 @@ where
         }
         std::mem::swap(&mut self.diff, &mut self.diff_tmp);
 
-        // update y0 (D has changed)
-        self._predict(state);
-
-        // update psi and c (h, D, y0 has changed)
-        let callable = self.bdf_callable.as_ref().unwrap();
-        callable.set_psi_and_y0(&self.diff, &self.gamma, &self.alpha, self.order, &state.y);
-        callable.set_c(state.h, &self.alpha, self.order);
-
-        // clear nonlinear's linear solver problem as lu factorisation has changed
-        self.nonlinear_solver.as_mut().set_problem(Rc::new(SolverProblem::new(self.bdf_callable.as_ref().unwrap().clone(), self.ode_problem.as_ref().unwrap().problem.p.clone())));
+        
 
     }
 
@@ -177,7 +161,7 @@ where
         self.diff.column_mut(order + 1).copy_from(d);
         for i in (0..=order).rev() {
             let tmp = self.diff.column(i + 1).into_owned();
-            self.diff.column_mut(i).copy_from(&tmp);
+            self.diff.column_mut(i).add_assign(&tmp);
         }
     }
 }
@@ -243,22 +227,16 @@ where
         scale += &problem.atol;
 
         let f0 = problem.f.call(&state.y, &problem.p);
+        let y1 = &state.y + &f0 * state.h;
+        let f1 = problem.f.call(&y1, &problem.p);
 
-        // y1 = y0 + h * f0
-        let mut y1 = state.y.clone();
-        y1.axpy(state.h, &f0, M::T::one());
-
-        // df = f1 here
-        let mut df = problem.f.call(&y1, &problem.p);
-        
         // store f1 in diff[1] for use in step size control
-        let h_times_f1 = &df * state.h;
-        self.diff.column_mut(1).copy_from(&h_times_f1);
+        self.diff.column_mut(1).copy_from(&(&f0 * state.h));
 
-        // now df = f1 - f0
-        df.axpy(M::T::from(-1.0), &f0, M::T::one());
+        let mut df = f1 - f0;
         df.component_div_assign(&scale);
         let d2 = df.norm();
+
         let one_over_order_plus_one = M::T::one() / (M::T::from(self.order as f64) + M::T::one());
         let mut new_h = state.h * d2.pow(-one_over_order_plus_one);
         if new_h > M::T::from(100.0) * state.h {
@@ -290,13 +268,29 @@ where
 
         // loop until step is accepted
         while !step_accepted {
+            // predict forward to new step (eq 2 in [1])
+            let mut y_predict = M::V::zeros(nstates);
+            for i in 0..=self.order {
+                y_predict += self.diff.column(i);
+            }
+            let y_predict = y_predict;
+
+            // update psi and c (h, D, y0 has changed)
+            let callable = self.bdf_callable.as_ref().unwrap();
+            callable.set_psi_and_y0(&self.diff, &self.gamma, &self.alpha, self.order, &y_predict);
+            callable.set_c(state.h, &self.alpha, self.order);
+
+            // clear nonlinear's linear solver problem as lu factorisation has changed
+            // TODO: do we need to do this?
+            self.nonlinear_solver.as_mut().set_problem(Rc::new(SolverProblem::new(self.bdf_callable.as_ref().unwrap().clone(), self.ode_problem.as_ref().unwrap().problem.p.clone())));
+
             // solve BDF equation using y0 as starting point
-            match self.nonlinear_solver.solve(&state.y) {
-                Ok(y) => {
+            match self.nonlinear_solver.solve(&y_predict) {
+                Ok(y_new) => {
                     // test error is within tolerance
                     {
                         let problem = &self.ode_problem.as_ref().unwrap().problem;
-                        scale_y = y.abs() * problem.rtol;
+                        scale_y = y_new.abs() * problem.rtol;
                         scale_y += &problem.atol;
                     }
 
@@ -304,7 +298,7 @@ where
                     // Note that error = C_k * h^{k+1} y^{k+1}
                     // and d = D^{k+1} y_{n+1} \approx h^{k+1} y^{k+1}
                     //d.add_assign(&y);
-                    d = y - &state.y;
+                    d = &y_new - &y_predict;
 
                     let mut error =  &d * self.error_const[self.order];
                     error.component_div_assign(&scale_y);
@@ -349,10 +343,7 @@ where
         // (see page 83 of [2])
         self.n_equal_steps += 1;
         
-        if self.n_equal_steps < self.order + 1 {
-            self._predict(state);
-            self.bdf_callable.as_mut().unwrap().set_psi_and_y0(&self.diff, &self.gamma, &self.alpha, self.order, &state.y);
-        } else {
+        if self.n_equal_steps > self.order {
             let order = self.order;
             // similar to the optimal step size factor we calculated above for the current
             // order k, we need to calculate the optimal step size factors for orders
