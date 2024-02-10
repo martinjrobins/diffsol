@@ -142,6 +142,11 @@ pub trait Vector:
     fn component_mul_assign(&mut self, other: &Self);
     fn component_div_assign(&mut self, other: &Self);
     fn filter_indices<F: Fn(Self::T) -> bool>(&self, f: F) -> Self::Index;
+    fn filter(&self, indices: &Self::Index) -> Self {
+        let mut result = Self::zeros(indices.len());
+        result.gather_from(self, indices);
+        result
+    }
     fn gather_from(&mut self, other: &Self, indices: &Self::Index);
     fn scatter_from(&mut self, other: &Self, indices: &Self::Index);
     fn assert_eq(&self, other: &Self, tol: Self::T) {
@@ -159,7 +164,7 @@ pub trait Vector:
                 } else {
                     eprintln!("left: [..., {}, {}, {}, ...] != [..., {}, {}, {}, ...]", self[i-1], self[i], self[i+1], other[i-1], other[i], other[i+1]);
                 }
-                break;
+                assert!(false, "Vector element mismatch at index {}: {} != {}", i, self[i], other[i]);
             }
         }
     }

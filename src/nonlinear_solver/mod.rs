@@ -1,6 +1,6 @@
 use core::panic;
 use std::rc::Rc;
-use num_traits::Pow;
+use num_traits::{Pow, One};
 
 use crate::{callable::Op, solver::SolverProblem, IndexType, Scalar, Vector};
 
@@ -54,11 +54,15 @@ impl <C: Op> Convergence<C> {
         }
         dy.component_div_assign(self.scale.as_ref().unwrap());
         let norm = dy.norm();
+        // if norm is zero then we are done
+        if norm <= C::T::EPSILON {
+            return ConvergenceStatus::Converged;
+        }
         if let Some(old_norm) = self.old_norm {
             let rate = norm / old_norm;
             
             // if converged then break out of iteration successfully
-            if rate / (C::T::from(1.0) - rate) * norm < self.tol {
+            if rate / (C::T::one() - rate) * norm < self.tol {
                 return ConvergenceStatus::Converged;
             }
             

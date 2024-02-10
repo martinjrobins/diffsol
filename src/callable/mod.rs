@@ -1,4 +1,4 @@
-use crate::{vector::VectorMutRef, Matrix, Scalar, Vector};
+use crate::{Matrix, Scalar, Vector};
 use num_traits::{One, Zero};
 use std::ops::{MulAssign, AddAssign};
 

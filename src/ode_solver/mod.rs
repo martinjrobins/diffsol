@@ -98,7 +98,6 @@ impl <V: Vector> OdeSolverState<V> {
     {
 
         let p = &ode_problem.problem.p;
-        let dummy_x = V::zeros(0);
         let diag = ode_problem.mass.jacobian_diagonal(p);
         let indices = diag.filter_indices(|x| x == CRhs::T::zero());
         let mut y = ode_problem.init.call(p);
@@ -109,10 +108,13 @@ impl <V: Vector> OdeSolverState<V> {
                 h: ode_problem.h0,
             })
         }
-        let f = Rc::new(FilterCallable::new(ode_problem.problem.f.clone(), &dummy_x, indices));
+        let mut y_filtered = y.filter(&indices);
+        let f = Rc::new(FilterCallable::new(ode_problem.problem.f.clone(), &y, indices));
         let init_problem = Rc::new(SolverProblem::new(f, p.clone()));
-        root_solver.set_problem(init_problem);
-        root_solver.solve_in_place(&mut y)?;
+        root_solver.set_problem(init_problem.clone());
+        root_solver.solve_in_place(&mut y_filtered)?;
+        let indices = init_problem.as_ref().f.indices();
+        y.scatter_from(&y_filtered, indices);
         Ok(Self {
             y,
             t: ode_problem.t0,
@@ -189,12 +191,12 @@ mod tests {
         y[nstates - 1] = x[nstates - 1] - x[nstates - 2];
     }
     
-    // Jv = [-av; 0]
+    // Jv = [[-av, 0], [-1, 1]]v = [-av, -v[0] + v[1]]
     fn exponential_decay_with_algebraic_jacobian<M: Matrix>(_x: &M::V, p: &M::V, v: &M::V, y: &mut M::V, _jac: &M) {
         y.copy_from(v);
         y.mul_assign(-p[0]);
         let nstates = y.len();
-        y[nstates - 1] = M::T::zero();
+        y[nstates - 1] = v[nstates - 1] - v[nstates - 2];
     }
     
     fn exponential_decay_with_algebraic_mass<M: Matrix>(x: &M::V, _p: &M::V, y: &mut M::V, _data: &M) {
@@ -248,7 +250,10 @@ mod tests {
             &y0s[0] * M::T::exp(-problems[0].problem.p[0] * t1),
             &y0s[1] * M::T::exp(-problems[1].problem.p[0] * t1),
         ];
-        for ((problem, _y0), soln) in problems.into_iter().zip(y0s.into_iter()).zip(solutions_at_t1.into_iter()) {
+        for ((problem, y0), soln) in problems.into_iter().zip(y0s.into_iter()).zip(solutions_at_t1.into_iter()) {
+
+            let state = OdeSolverState::new_consistent(&problem, &mut root_solver);
+            state.unwrap().y.assert_eq(&y0, M::T::from(1e-5));
             method.make_consistent_and_solve(problem, t1, &mut root_solver).unwrap().assert_eq(&soln, M::T::from(1e-5));
         }
     }

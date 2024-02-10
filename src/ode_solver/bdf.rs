@@ -40,8 +40,8 @@ impl<T: Scalar, CRhs: Jacobian<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, C
             bdf_callable: None, 
             order: 1, 
             n_equal_steps: 0, 
-            diff: DMatrix::<T>::zeros(n, Self::MAX_ORDER + 1), 
-            diff_tmp: DMatrix::<T>::zeros(n, Self::MAX_ORDER + 1), 
+            diff: DMatrix::<T>::zeros(n, Self::MAX_ORDER + 3), 
+            diff_tmp: DMatrix::<T>::zeros(n, Self::MAX_ORDER + 3), 
             gamma: vec![T::from(1.0); Self::MAX_ORDER + 1], 
             alpha: vec![T::from(1.0); Self::MAX_ORDER + 1], 
             error_const: vec![T::from(1.0); Self::MAX_ORDER + 1], 
@@ -122,7 +122,6 @@ where
         //
         //- constant c = h / (1-kappa) gamma_k term
         //- lu factorisation of (M - c * J) used in newton iteration (same equation)
-        //- psi term
 
         state.h *= factor;
         self.n_equal_steps = 0;
@@ -138,9 +137,10 @@ where
             d_zero_order_tmp.gemm_vo(M::T::one(),  &d_zero_order, &ru, M::T::zero()); // diff_sub = diff * RU
         }
         std::mem::swap(&mut self.diff, &mut self.diff_tmp);
-
         
-
+        self.bdf_callable.as_ref().unwrap().set_c(state.h, &self.alpha, self.order);
+        // clear nonlinear's linear solver problem as lu factorisation has changed
+        self.nonlinear_solver.as_mut().set_problem(Rc::new(SolverProblem::new(self.bdf_callable.as_ref().unwrap().clone(), self.ode_problem.as_ref().unwrap().problem.p.clone())));
     }
 
     
@@ -201,8 +201,8 @@ where
         let nstates = problem.f.nstates();
         self.order = 1usize; 
         self.n_equal_steps = 0;
-        self.diff = M::zeros(nstates, Self::MAX_ORDER + 1);
-        self.diff_tmp = M::zeros(nstates, Self::MAX_ORDER + 1);
+        self.diff = M::zeros(nstates, Self::MAX_ORDER + 3);
+        self.diff_tmp = M::zeros(nstates, Self::MAX_ORDER + 3);
         self.diff.column_mut(0).copy_from(&state.y);
         
         // kappa values for difference orders, taken from Table 1 of [1]
@@ -269,20 +269,18 @@ where
         // loop until step is accepted
         while !step_accepted {
             // predict forward to new step (eq 2 in [1])
-            let mut y_predict = M::V::zeros(nstates);
-            for i in 0..=self.order {
-                y_predict += self.diff.column(i);
-            }
-            let y_predict = y_predict;
+            let y_predict = {
+                let mut y_predict = M::V::zeros(nstates);
+                for i in 0..=self.order {
+                    y_predict += self.diff.column(i);
+                }
+                y_predict
+            };
 
             // update psi and c (h, D, y0 has changed)
             let callable = self.bdf_callable.as_ref().unwrap();
             callable.set_psi_and_y0(&self.diff, &self.gamma, &self.alpha, self.order, &y_predict);
-            callable.set_c(state.h, &self.alpha, self.order);
-
-            // clear nonlinear's linear solver problem as lu factorisation has changed
-            // TODO: do we need to do this?
-            self.nonlinear_solver.as_mut().set_problem(Rc::new(SolverProblem::new(self.bdf_callable.as_ref().unwrap().clone(), self.ode_problem.as_ref().unwrap().problem.p.clone())));
+            
 
             // solve BDF equation using y0 as starting point
             match self.nonlinear_solver.solve(&y_predict) {
@@ -297,7 +295,6 @@ where
                     // combine eq 3, 4 and 6 from [1] to obtain error
                     // Note that error = C_k * h^{k+1} y^{k+1}
                     // and d = D^{k+1} y_{n+1} \approx h^{k+1} y^{k+1}
-                    //d.add_assign(&y);
                     d = &y_new - &y_predict;
 
                     let mut error =  &d * self.error_const[self.order];
@@ -371,7 +368,11 @@ where
             // now we have the three factors for orders k-1, k and k+1, pick the maximum in
             // order to maximise the resultant step size
             let max_index = factors.iter().enumerate().max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap()).unwrap().0;
-            self.order += max_index - 1;
+            if max_index == 0 {
+                self.order -= 1;
+            } else {
+                self.order += max_index - 1;
+            }
 
             let mut factor = safety * factors[max_index];
             if factor > M::T::from(Self::MAX_FACTOR) {

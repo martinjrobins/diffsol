@@ -82,6 +82,9 @@ impl<C: NonLinearOp> Solver<C> for NewtonNonlinearSolver<C> {
         if self.convergence.is_none() || self.problem.is_none() {
             return Err(anyhow!("NewtonNonlinearSolver::solve() called before set_problem"));
         }
+        if xn.len() != self.problem.as_ref().unwrap().f.nstates() {
+            return Err(anyhow!("NewtonNonlinearSolver::solve() called with state of wrong size, expected {}, got {}", self.problem.as_ref().unwrap().f.nstates(), xn.len()));
+        }
         let convergence = self.convergence.as_mut().unwrap();
         let problem = self.problem.as_ref().unwrap();
         let x0 = xn.clone();

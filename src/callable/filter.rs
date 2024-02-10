@@ -14,6 +14,7 @@ pub struct FilterCallable<C: NonLinearOp>
     indices: <C::V as Vector>::Index,
     y_full: RefCell<C::V>,
     x_full: RefCell<C::V>,
+    v_full: RefCell<C::V>,
 }
 
 impl<C: NonLinearOp> FilterCallable<C> 
@@ -21,7 +22,12 @@ impl<C: NonLinearOp> FilterCallable<C>
     pub fn new(callable: Rc<C>, x: &C::V, indices: <C::V as Vector>::Index) -> Self {
         let y_full = RefCell::new(C::V::zeros(callable.nout()));
         let x_full = RefCell::new(x.clone());
-        Self { callable, indices, y_full, x_full }
+        let v_full = RefCell::new(C::V::zeros(callable.nstates()));
+        Self { callable, indices, y_full, x_full, v_full }
+    }
+
+    pub fn indices(&self) -> &<C::V as Vector>::Index {
+        &self.indices
     }
 }
 
@@ -52,8 +58,10 @@ impl<C: NonLinearOp> NonLinearOp for FilterCallable<C>
     fn jac_mul_inplace(&self, x: &Self::V, p: &Self::V, v: &Self::V, y: &mut Self::V) {
         let mut y_full = self.y_full.borrow_mut();
         let mut x_full = self.x_full.borrow_mut();
+        let mut v_full = self.v_full.borrow_mut();
         x_full.scatter_from(x, &self.indices);
-        self.callable.jac_mul_inplace(&x_full, p, v, &mut y_full);
+        v_full.scatter_from(v, &self.indices);
+        self.callable.jac_mul_inplace(&x_full, p, &v_full, &mut y_full);
         y.gather_from(&y_full, &self.indices);
     }
 }
