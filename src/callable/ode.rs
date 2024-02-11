@@ -92,18 +92,18 @@ where
     for <'b> &'b CRhs::V: VectorRef<CRhs::V>,
 {
     // F(y) = M (y - y0 + psi) - c * f(y) = 0
-    fn call_inplace(&self, x: &CRhs::V, p: &CRhs::V, y: &mut CRhs::V) {
-        self.rhs.call_inplace(x, p, y);
+    fn call_inplace(&self, x: &CRhs::V, p: &CRhs::V, t: CRhs::T, y: &mut CRhs::V) {
+        self.rhs.call_inplace(x, p, t, y);
         let psi_neg_y0_ref = self.psi_neg_y0.borrow();
         let psi_neg_y0 = psi_neg_y0_ref.deref();
         let c = *self.c.borrow().deref();
         let tmp = x + psi_neg_y0;
-        self.mass.gemv(&tmp, p, CRhs::T::one(), -c, y);
+        self.mass.gemv(&tmp, p, t, CRhs::T::one(), -c, y);
 }
-    fn jac_mul_inplace(&self, x: &CRhs::V, p: &CRhs::V, v: &CRhs::V, y: &mut CRhs::V) {
+    fn jac_mul_inplace(&self, x: &CRhs::V, p: &CRhs::V, t: CRhs::T, v: &CRhs::V, y: &mut CRhs::V) {
         let c = *self.c.borrow().deref();
-        self.rhs.jac_mul_inplace(x, p, v, y);
-        self.mass.gemv(v, p,  CRhs::T::one(), -c, y);
+        self.rhs.jac_mul_inplace(x, p, t, v, y);
+        self.mass.gemv(v, p, t,  CRhs::T::one(), -c, y);
     }
 }
 
@@ -113,14 +113,14 @@ where
     for <'b> &'b CRhs::M: MatrixRef<CRhs::M>,
 {
     type M = CRhs::M;
-    fn jacobian(&self, x: &CRhs::V, p: &CRhs::V) -> CRhs::M {
+    fn jacobian(&self, x: &CRhs::V, p: &CRhs::V, t: CRhs::T) -> CRhs::M {
         if *self.mass_jacobian_is_stale.borrow() {
-            self.mass_jac.replace(self.mass.jacobian(p));
+            self.mass_jac.replace(self.mass.jacobian(p, t));
             self.mass_jacobian_is_stale.replace(false);
             self.jacobian_is_stale.replace(true);
         }
         if *self.rhs_jacobian_is_stale.borrow() {
-            self.rhs_jac.replace(self.rhs.jacobian(x, p));
+            self.rhs_jac.replace(self.rhs.jacobian(x, p, t));
             self.rhs_jacobian_is_stale.replace(false);
             self.jacobian_is_stale.replace(true);
         }

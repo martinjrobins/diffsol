@@ -39,7 +39,7 @@ impl<M: Matrix> super::Op for UnitCallable<M> {
 
 impl<M: Matrix> LinearOp for UnitCallable<M> 
 {
-    fn call_inplace(&self, x: &M::V, _p: &M::V, y: &mut M::V) {
+    fn call_inplace(&self, x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
         y.copy_from(x)
     }
 }
@@ -48,7 +48,7 @@ impl<M: Matrix> LinearOp for UnitCallable<M>
 impl<M: Matrix> Jacobian for UnitCallable<M> 
 {
     type M = M;
-    fn jacobian(&self, _x: &Self::V, _p: &Self::V) -> Self::M {
+    fn jacobian(&self, _x: &Self::V, _p: &Self::V, _t: Self::T) -> Self::M {
         let mut jac = M::V::zeros(self.n);
         jac.add_scalar_mut(M::T::one());
         M::from_diagonal(&jac)

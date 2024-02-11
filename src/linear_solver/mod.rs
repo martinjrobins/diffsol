@@ -9,7 +9,7 @@ pub mod tests {
     use num_traits::{One, Zero};
 
     // f = J * x
-    fn square<M: Matrix>(x: &M::V, _p: &M::V, y: &mut M::V, jac: &M) {
+    fn square<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V, jac: &M) {
         jac.gemv(M::T::one(), x, M::T::zero(), y); // y = J * x
     }
 
@@ -23,7 +23,8 @@ pub mod tests {
             2,
         ));
         let p = M::V::zeros(0);
-        let problem = Rc::new(SolverProblem::new(op, p));
+        let t = M::T::zero();
+        let problem = Rc::new(SolverProblem::new(op, p, t));
         solver.set_problem(problem);
         let b = M::V::from_vec(vec![2.0.into(), 4.0.into()]);
         let x = solver.solve(&b).unwrap();

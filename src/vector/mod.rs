@@ -164,7 +164,7 @@ pub trait Vector:
                 } else {
                     eprintln!("left: [..., {}, {}, {}, ...] != [..., {}, {}, {}, ...]", self[i-1], self[i], self[i+1], other[i-1], other[i], other[i+1]);
                 }
-                assert!(false, "Vector element mismatch at index {}: {} != {}", i, self[i], other[i]);
+                panic!("Vector element mismatch at index {}: {} != {}", i, self[i], other[i]);
             }
         }
     }

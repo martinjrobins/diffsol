@@ -93,14 +93,14 @@ pub mod tests {
     use num_traits::{One, Zero};
     
     // 0 = J * x * x - 8
-    fn square<M: Matrix>(x: &M::V, _p: &M::V, y: &mut M::V, jac: &M) {
+    fn square<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V, jac: &M) {
         jac.gemv(M::T::one(), x, M::T::zero(), y); // y = J * x
         y.component_mul_assign(x);
         y.add_scalar_mut(M::T::from(-8.0));
     }
 
     // J = 2 * J * x * dx
-    fn square_jacobian<M: Matrix>(x: &M::V, _p: &M::V, v: &M::V, y: &mut M::V, jac: &M) {
+    fn square_jacobian<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V, jac: &M) {
         jac.gemv(M::T::from(2.0), x, M::T::zero(), y); // y = 2 * J * x
         y.component_mul_assign(v);
     }
@@ -119,7 +119,7 @@ pub mod tests {
     pub fn test_nonlinear_solver<M: Matrix + 'static, S: Solver<Closure<M, M>>> (mut solver: S) 
     {
         let op = Rc::new(get_square_problem::<M>());
-        let problem = Rc::new(SolverProblem::new(op, <M::V as Vector>::zeros(0)));
+        let problem = Rc::new(SolverProblem::new(op, <M::V as Vector>::zeros(0), M::T::zero()));
         let x0 = M::V::from_vec(vec![2.1.into(), 2.1.into()]);
         solver.set_problem(problem);
         let x = solver.solve(&x0).unwrap();

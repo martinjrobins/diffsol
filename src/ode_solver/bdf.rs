@@ -5,12 +5,12 @@ use anyhow::Result;
 use nalgebra::{DVector, DMatrix};
 use num_traits::{One, Zero, Pow};
 
-use crate::{callable::ode::BdfCallable, matrix::MatrixRef, ConstantJacobian, ConstantOp, IndexType, IterativeSolver, Jacobian, LinearOp, Matrix, MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut, LU};
+use crate::{callable::ode::BdfCallable, matrix::MatrixRef, solver::NonLinearSolver, ConstantJacobian, ConstantOp, IndexType, IterativeSolver, Jacobian, LinearOp, Matrix, MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut, LU};
 
 use super::{OdeSolverState, OdeSolverMethod, OdeSolverStatistics, OdeSolverProblem};
 
 pub struct Bdf<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V, T = M::T>, CInit: ConstantOp<V = M::V, T = M::T>> {
-    nonlinear_solver: Box<dyn IterativeSolver<BdfCallable<M, CRhs, CMass>>>,
+    nonlinear_solver: Box<dyn NonLinearSolver<BdfCallable<M, CRhs, CMass>>>,
     bdf_callable: Option<Rc<BdfCallable<M, CRhs, CMass>>>,
     ode_problem: Option<Rc<OdeSolverProblem<CRhs, CMass, CInit>>>,
     statistics: OdeSolverStatistics,
@@ -139,8 +139,10 @@ where
         std::mem::swap(&mut self.diff, &mut self.diff_tmp);
         
         self.bdf_callable.as_ref().unwrap().set_c(state.h, &self.alpha, self.order);
-        // clear nonlinear's linear solver problem as lu factorisation has changed
-        self.nonlinear_solver.as_mut().set_problem(Rc::new(SolverProblem::new(self.bdf_callable.as_ref().unwrap().clone(), self.ode_problem.as_ref().unwrap().problem.p.clone())));
+
+        // reset nonlinear's linear solver problem as lu factorisation has changed
+        let new_problem = Rc::new(SolverProblem::new(self.bdf_callable.as_ref().unwrap().clone(), self.ode_problem.as_ref().unwrap().problem.p.clone(), self.ode_problem.as_ref().unwrap().problem.t)); 
+        self.nonlinear_solver.as_mut().set_problem(new_problem);
     }
 
     
@@ -226,9 +228,10 @@ where
         scale *= problem.rtol;
         scale += &problem.atol;
 
-        let f0 = problem.f.call(&state.y, &problem.p);
+        let f0 = problem.f.call(&state.y, &problem.p, state.t);
         let y1 = &state.y + &f0 * state.h;
-        let f1 = problem.f.call(&y1, &problem.p);
+        let t1 = state.t + state.h;
+        let f1 = problem.f.call(&y1, &problem.p, t1);
 
         // store f1 in diff[1] for use in step size control
         self.diff.column_mut(1).copy_from(&(&f0 * state.h));
@@ -246,7 +249,8 @@ where
 
         // setup linear solver for first step
         self.bdf_callable = Some(Rc::new(BdfCallable::new(ode_problem.clone())));
-        self.nonlinear_solver.as_mut().set_problem(Rc::new(SolverProblem::new(self.bdf_callable.as_ref().unwrap().clone(), ode_problem.problem.p.clone())));
+        let problem = Rc::new(SolverProblem::new(self.bdf_callable.as_ref().unwrap().clone(), problem.p.clone(), state.t));
+        self.nonlinear_solver.as_mut().set_problem(problem);
         
         // setup U
         self.u = Self::_compute_r(self.order, M::T::one());
@@ -259,15 +263,14 @@ where
         self.bdf_callable.as_ref().unwrap().set_rhs_jacobian_is_stale();
         // initialise step size and try to make the step,
         // iterate, reducing step size until error is in bounds
-        let mut step_accepted = false;
         let nstates = self.diff.nrows();
-        let mut d = <M::V as Vector>::zeros(nstates);
-        let mut safety = M::T::from(0.0);
-        let mut error_norm = M::T::from(0.0);
-        let mut scale_y = <M::V as Vector>::zeros(0);
+        let mut d: M::V;
+        let mut safety: M::T;
+        let mut error_norm: M::T;
+        let mut scale_y: M::V;
 
         // loop until step is accepted
-        while !step_accepted {
+        let y_new = loop {
             // predict forward to new step (eq 2 in [1])
             let y_predict = {
                 let mut y_predict = M::V::zeros(nstates);
@@ -276,15 +279,23 @@ where
                 }
                 y_predict
             };
+            let mut y_new = y_predict.clone();
 
             // update psi and c (h, D, y0 has changed)
             let callable = self.bdf_callable.as_ref().unwrap();
             callable.set_psi_and_y0(&self.diff, &self.gamma, &self.alpha, self.order, &y_predict);
             
+            let t_new = state.t + state.h;
+            let problem = Rc::new(SolverProblem::new(
+                callable.clone(), 
+                self.ode_problem.as_ref().unwrap().problem.p.clone(), 
+                t_new,
+            ));
+            self.nonlinear_solver.as_mut().update_problem(problem);
 
             // solve BDF equation using y0 as starting point
-            match self.nonlinear_solver.solve(&y_predict) {
-                Ok(y_new) => {
+            match self.nonlinear_solver.solve_in_place(&mut y_new) {
+                Ok(()) => {
                     // test error is within tolerance
                     {
                         let problem = &self.ode_problem.as_ref().unwrap().problem;
@@ -306,7 +317,7 @@ where
                     
                     if error_norm <= M::T::from(1.0) {
                         // step is accepted
-                        step_accepted = true;
+                        break y_new;
                     } else {
                         // step is rejected
                         // calculate optimal step size factor as per eq 2.46 of [2]
@@ -317,23 +328,20 @@ where
                             factor = M::T::from(Self::MIN_FACTOR);
                         }
                         self._update_step_size(factor, state);
-                        step_accepted = false; 
-                        continue
                     }
                 }
                 Err(_e) => {
                     // newton iteration did not converge, but jacobian has already been
                     // evaluated so reduce step size by 0.3 (as per [1]) and try again
                     self._update_step_size(M::T::from(0.3), state);
-                    step_accepted = false;
-                    continue
                 }
             };
-        }
+        };
 
         // take the accepted step
         state.t += state.h;
-        
+        state.y = y_new;
+
         self._update_differences(&d);
 
         // a change in order is only done after running at order k for k + 1 steps

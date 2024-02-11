@@ -38,7 +38,7 @@ impl<T: Scalar, C: ConstantJacobian<M = DMatrix<T>, V = DVector<T>, T = T>> Solv
     }
 
     fn set_problem(&mut self, problem: Rc<SolverProblem<C>>) {
-        self.lu = Some(nalgebra::LU::new(problem.f.jacobian(&problem.p)));
+        self.lu = Some(nalgebra::LU::new(problem.f.jacobian(&problem.p, problem.t)));
     }
 }
     

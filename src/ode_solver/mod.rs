@@ -43,6 +43,7 @@ pub struct OdeSolverState<V: Vector> {
     pub h: V::T,
 }
 
+
 pub struct OdeSolverProblem<CRhs: NonLinearOp, CMass: LinearOp<V = CRhs::V>, CInit: ConstantOp<V = CRhs::V>> {
     pub problem: Rc<SolverProblem<CRhs>>,
     pub mass: Rc<CMass>,
@@ -53,10 +54,10 @@ pub struct OdeSolverProblem<CRhs: NonLinearOp, CMass: LinearOp<V = CRhs::V>, CIn
 
 impl <CRhs: NonLinearOp, CMass: LinearOp<V = CRhs::V>, CInit: ConstantOp<V = CRhs::V>> OdeSolverProblem<CRhs, CMass, CInit> {
     pub fn new(rhs: CRhs, mass: CMass, init: CInit, p: CRhs::V) -> Self {
-        let problem = Rc::new(SolverProblem::new(Rc::new(rhs), p));
+        let t0 = CRhs::T::zero();
+        let problem = Rc::new(SolverProblem::new(Rc::new(rhs), p, t0));
         let mass = Rc::new(mass);
         let init = Rc::new(init);
-        let t0 = CRhs::T::zero();
         let h0 = CRhs::T::one();
         //TODO: check mass does not depend on state
         //TODO: check init does not depend on state
@@ -80,12 +81,14 @@ impl <V: Vector> OdeSolverState<V> {
     {
 
         let p = &ode_problem.problem.p;
+        let t = ode_problem.t0;
+        let h = ode_problem.h0;
         let init = ode_problem.init.as_ref();
-        let y = init.call(p);
+        let y = init.call(p, t);
         Self {
             y,
-            t: ode_problem.t0,
-            h: ode_problem.h0,
+            t,
+            h,
         }
         
     }
@@ -98,27 +101,29 @@ impl <V: Vector> OdeSolverState<V> {
     {
 
         let p = &ode_problem.problem.p;
-        let diag = ode_problem.mass.jacobian_diagonal(p);
+        let t = ode_problem.t0;
+        let h = ode_problem.h0;
+        let diag = ode_problem.mass.jacobian_diagonal(p, t);
         let indices = diag.filter_indices(|x| x == CRhs::T::zero());
-        let mut y = ode_problem.init.call(p);
+        let mut y = ode_problem.init.call(p, t);
         if indices.len() == 0 {
             return Ok(Self {
                 y,
-                t: ode_problem.t0,
-                h: ode_problem.h0,
+                t,
+                h,
             })
         }
         let mut y_filtered = y.filter(&indices);
         let f = Rc::new(FilterCallable::new(ode_problem.problem.f.clone(), &y, indices));
-        let init_problem = Rc::new(SolverProblem::new(f, p.clone()));
+        let init_problem = Rc::new(SolverProblem::new(f, p.clone(), t));
         root_solver.set_problem(init_problem.clone());
         root_solver.solve_in_place(&mut y_filtered)?;
         let indices = init_problem.as_ref().f.indices();
         y.scatter_from(&y_filtered, indices);
         Ok(Self {
             y,
-            t: ode_problem.t0,
-            h: ode_problem.h0,
+            t,
+            h,
         })
     }
 }
@@ -135,22 +140,22 @@ mod tests {
     
     // exponential decay problem
     // dy/dt = -ay (p = [a])
-    fn exponential_decay<M: Matrix>(x: &M::V, p: &M::V, y: &mut M::V, _data: &M) {
+    fn exponential_decay<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V, _data: &M) {
         y.copy_from(x);
         y.mul_assign(-p[0]);
     }
 
     // Jv = -av
-    fn exponential_decay_jacobian<M: Matrix>(_x: &M::V, p: &M::V, v: &M::V, y: &mut M::V, _jac: &M) {
+    fn exponential_decay_jacobian<M: Matrix>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V, _jac: &M) {
         y.copy_from(v);
         y.mul_assign(-p[0]);
     }
     
-    fn exponential_decay_mass<M: Matrix>(x: &M::V, _p: &M::V, y: &mut M::V, _data: &M) {
+    fn exponential_decay_mass<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V, _data: &M) {
         y.copy_from(x);
     }
     
-    fn exponential_decay_init<M: Matrix>(_p: &M::V, y: &mut M::V, _data: &M) {
+    fn exponential_decay_init<M: Matrix>(_p: &M::V, _t: M::T, y: &mut M::V, _data: &M) {
         let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into()]);
         y.copy_from(&y0);
     }
@@ -183,7 +188,7 @@ mod tests {
     // 0 = z - y
     // remove warning about unused mut
     #[allow(unused_mut)]
-    fn exponential_decay_with_algebraic<M: Matrix>(x: &M::V, p: &M::V, mut y: &mut M::V, _data: &M) 
+    fn exponential_decay_with_algebraic<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, mut y: &mut M::V, _data: &M) 
     {
         y.copy_from(x);
         y.mul_assign(-p[0]);
@@ -192,20 +197,20 @@ mod tests {
     }
     
     // Jv = [[-av, 0], [-1, 1]]v = [-av, -v[0] + v[1]]
-    fn exponential_decay_with_algebraic_jacobian<M: Matrix>(_x: &M::V, p: &M::V, v: &M::V, y: &mut M::V, _jac: &M) {
+    fn exponential_decay_with_algebraic_jacobian<M: Matrix>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V, _jac: &M) {
         y.copy_from(v);
         y.mul_assign(-p[0]);
         let nstates = y.len();
         y[nstates - 1] = v[nstates - 1] - v[nstates - 2];
     }
     
-    fn exponential_decay_with_algebraic_mass<M: Matrix>(x: &M::V, _p: &M::V, y: &mut M::V, _data: &M) {
+    fn exponential_decay_with_algebraic_mass<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V, _data: &M) {
         y.copy_from(x);
         let nstates = y.len();
         y[nstates - 1] = M::T::zero();
     }
     
-    fn exponential_decay_with_algebraic_init<M: Matrix>(_p: &M::V, y: &mut M::V, _data: &M) {
+    fn exponential_decay_with_algebraic_init<M: Matrix>(_p: &M::V, _t: M::T, y: &mut M::V, _data: &M) {
         let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into(), 0.0.into()]);
         y.copy_from(&y0);
     }

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{callable::{linearise::LinearisedOp, Jacobian, NonLinearOp}, vector::Vector, IterativeSolver, Scalar, Solver, SolverProblem, LU};
+use crate::{callable::{linearise::LinearisedOp, Jacobian, NonLinearOp}, solver::NonLinearSolver, vector::Vector, IterativeSolver, Scalar, Solver, SolverProblem, LU};
 use anyhow::{anyhow, Result};
 use nalgebra::{DMatrix, DVector};
 use std::ops::SubAssign;
@@ -58,11 +58,10 @@ impl<C: NonLinearOp> IterativeSolver<C> for NewtonNonlinearSolver<C>
     }
 }
 
-
-impl<C: NonLinearOp> Solver<C> for NewtonNonlinearSolver<C> {
-    fn set_problem(&mut self, problem: Rc<SolverProblem<C>>) {
+impl<C: NonLinearOp> NonLinearSolver<C> for NewtonNonlinearSolver<C> 
+{
+    fn update_problem(&mut self, problem: Rc<SolverProblem<C>>) {
         self.problem = Some(problem);
-        self.linear_solver.clear_problem();
         let problem = self.problem.as_ref().unwrap();
         if self.convergence.is_none() {
             self.convergence = Some(Convergence::new(
@@ -71,6 +70,13 @@ impl<C: NonLinearOp> Solver<C> for NewtonNonlinearSolver<C> {
         } else {
             self.convergence.as_mut().unwrap().problem = problem.clone();
         }
+    }
+}
+
+impl<C: NonLinearOp> Solver<C> for NewtonNonlinearSolver<C> {
+    fn set_problem(&mut self, problem: Rc<SolverProblem<C>>) {
+        self.update_problem(problem);
+        self.linear_solver.clear_problem();
     }
     fn is_problem_set(&self) -> bool {
         self.problem.is_some()
@@ -100,7 +106,7 @@ impl<C: NonLinearOp> Solver<C> for NewtonNonlinearSolver<C> {
         loop {
             loop {
                 self.niter += 1;
-                problem.f.call_inplace(xn, &problem.p, &mut tmp);
+                problem.f.call_inplace(xn, &problem.p, problem.t, &mut tmp);
                 //tmp = f_at_n
 
                 self.linear_solver.solve_in_place(&mut tmp)?;
