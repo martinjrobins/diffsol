@@ -1,19 +1,20 @@
 use std::rc::Rc;
 
-use crate::{callable::{filter::FilterCallable, ConstantOp, LinearOp, NonLinearOp}, solver::SolverProblem, IndexType, Solver, Vector, VectorIndex};
+use crate::{callable::{filter::FilterCallable, ConstantOp, LinearOp, NonLinearOp}, solver::SolverProblem, Solver, Vector, VectorIndex};
 
 use anyhow::Result;
 use num_traits::{One, Zero};
 
 
 pub mod bdf;
+pub mod test_models;
 
 pub trait OdeSolverMethod<CRhs: NonLinearOp, CMass: LinearOp<V = CRhs::V, T = CRhs::T>, CInit: ConstantOp<V = CRhs::V, T = CRhs::T>> {
     fn problem(&self) -> Option<&Rc<OdeSolverProblem<CRhs, CMass, CInit>>>;
     fn set_problem(&mut self, state: &mut OdeSolverState<CRhs::V>, problem: Rc<OdeSolverProblem<CRhs, CMass, CInit>>);
     fn step(&mut self, state: &mut OdeSolverState<CRhs::V>) -> Result<()>;
     fn interpolate(&self, state: &OdeSolverState<CRhs::V>, t: CRhs::T) -> CRhs::V;
-    fn get_statistics(&self) -> &OdeSolverStatistics;
+    fn get_statistics(&self) -> OdeSolverStatistics;
     fn solve(&mut self, problem: OdeSolverProblem<CRhs, CMass, CInit>, t: CRhs::T) -> Result<CRhs::V> {
         let mut state = OdeSolverState::new(&problem);
         self.set_problem(&mut state, Rc::new(problem));
@@ -32,10 +33,14 @@ pub trait OdeSolverMethod<CRhs: NonLinearOp, CMass: LinearOp<V = CRhs::V, T = CR
     }
 }
 
+#[derive(Clone, Debug, Default)]
 pub struct OdeSolverStatistics {
-    pub niter: IndexType,
-    pub nmaxiter: IndexType,
+    pub number_of_rhs_jac_evals: usize,
+    pub number_of_rhs_evals: usize,
+    pub number_of_jacobian_evals: usize,
+    pub number_of_jac_mul_evals: usize,
 }
+
 
 pub struct OdeSolverState<V: Vector> {
     pub y: V,
@@ -50,6 +55,32 @@ pub struct OdeSolverProblem<CRhs: NonLinearOp, CMass: LinearOp<V = CRhs::V>, CIn
     pub init: Rc<CInit>,
     pub t0: CRhs::T,
     pub h0: CRhs::T,
+}
+
+pub struct OdeSolverSolutionPoint<V: Vector> {
+    pub state: V,
+    pub t: V::T,
+}
+
+pub struct OdeSolverSolution<V: Vector> {
+    pub solution_points: Vec<OdeSolverSolutionPoint<V>>,
+}
+
+impl <V: Vector> OdeSolverSolution<V> {
+    pub fn push(&mut self, state: V, t: V::T) {
+        // find the index to insert the new point keeping the times sorted
+        let index = self.solution_points.iter().position(|x| x.t > t).unwrap_or(self.solution_points.len());
+        // insert the new point at that index
+        self.solution_points.insert(index, OdeSolverSolutionPoint{state, t});
+    }
+}
+
+impl<V: Vector> Default for OdeSolverSolution<V> {
+    fn default() -> Self {
+        Self {
+            solution_points: Vec::new(),
+        }
+    }
 }
 
 impl <CRhs: NonLinearOp, CMass: LinearOp<V = CRhs::V>, CInit: ConstantOp<V = CRhs::V>> OdeSolverProblem<CRhs, CMass, CInit> {
@@ -132,134 +163,53 @@ impl <V: Vector> OdeSolverState<V> {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::MulAssign;
-
-    use crate::{callable::{closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure}, vector::VectorRef, Matrix};
-    use nalgebra::ComplexField;
+    use crate::{callable::{closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure}, nonlinear_solver::newton::NewtonNonlinearSolver, vector::VectorRef, Matrix};
+    use tests::bdf::Bdf;
     use super::*;
+    use super::test_models::{
+        exponential_decay::exponential_decay_problem, 
+        exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem
+    };
     
-    // exponential decay problem
-    // dy/dt = -ay (p = [a])
-    fn exponential_decay<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V, _data: &M) {
-        y.copy_from(x);
-        y.mul_assign(-p[0]);
-    }
-
-    // Jv = -av
-    fn exponential_decay_jacobian<M: Matrix>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V, _jac: &M) {
-        y.copy_from(v);
-        y.mul_assign(-p[0]);
-    }
     
-    fn exponential_decay_mass<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V, _data: &M) {
-        y.copy_from(x);
-    }
-    
-    fn exponential_decay_init<M: Matrix>(_p: &M::V, _t: M::T, y: &mut M::V, _data: &M) {
-        let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into()]);
-        y.copy_from(&y0);
-    }
-
-    fn exponential_decay_problem<M: Matrix + 'static>() -> OdeSolverProblem<Closure<M, M>, LinearClosure<M, M>, ConstantClosure<M, M>> {
-        let nstates = 2;
-        let data = M::zeros(1, 1);
-        let rhs = Closure::<M, M>::new(
-            exponential_decay,
-            exponential_decay_jacobian,
-            data.clone(), 
-            nstates,
-        );
-        let mass = LinearClosure::<M, M>::new(
-            exponential_decay_mass,
-            data.clone(), 
-            nstates,
-        );
-        let init = ConstantClosure::<M, M>::new(
-            exponential_decay_init,
-            data.clone(), 
-            nstates,
-        );
-        let p = M::V::from_vec(vec![0.1.into()]);
-        OdeSolverProblem::new(rhs, mass, init, p)
-    }
-    
-    // exponential decay problem with algebraic constraint
-    // dy/dt = -ay
-    // 0 = z - y
-    // remove warning about unused mut
-    #[allow(unused_mut)]
-    fn exponential_decay_with_algebraic<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, mut y: &mut M::V, _data: &M) 
-    {
-        y.copy_from(x);
-        y.mul_assign(-p[0]);
-        let nstates = y.len();
-        y[nstates - 1] = x[nstates - 1] - x[nstates - 2];
-    }
-    
-    // Jv = [[-av, 0], [-1, 1]]v = [-av, -v[0] + v[1]]
-    fn exponential_decay_with_algebraic_jacobian<M: Matrix>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V, _jac: &M) {
-        y.copy_from(v);
-        y.mul_assign(-p[0]);
-        let nstates = y.len();
-        y[nstates - 1] = v[nstates - 1] - v[nstates - 2];
-    }
-    
-    fn exponential_decay_with_algebraic_mass<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V, _data: &M) {
-        y.copy_from(x);
-        let nstates = y.len();
-        y[nstates - 1] = M::T::zero();
-    }
-    
-    fn exponential_decay_with_algebraic_init<M: Matrix>(_p: &M::V, _t: M::T, y: &mut M::V, _data: &M) {
-        let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into(), 0.0.into()]);
-        y.copy_from(&y0);
-    }
-
-    fn exponential_decay_with_algebraic_problem<M: Matrix + 'static>() -> OdeSolverProblem<Closure<M, M>, LinearClosure<M, M>, ConstantClosure<M, M>> {
-        let nstates = 3;
-        let data = M::zeros(1, 1);
-        let rhs = Closure::<M, M>::new(
-            exponential_decay_with_algebraic,
-            exponential_decay_with_algebraic_jacobian,
-            data.clone(), 
-            nstates,
-        );
-        let mass = LinearClosure::<M, M>::new(
-            exponential_decay_with_algebraic_mass,
-            data.clone(), 
-            nstates,
-        );
-        let init = ConstantClosure::<M, M>::new(
-            exponential_decay_with_algebraic_init,
-            data.clone(), 
-            nstates,
-        );
-        let p = M::V::from_vec(vec![0.1.into()]);
-        OdeSolverProblem::new(rhs, mass, init, p)
-    }
-    
-    pub fn test_ode_solver<M: Matrix + 'static, SM: OdeSolverMethod<Closure<M, M>, LinearClosure<M, M>, ConstantClosure<M, M>> + 'static, RS: Solver<FilterCallable<Closure<M, M>>>>(mut method: SM, mut root_solver: RS) 
+    fn test_ode_solver<M: Matrix + 'static, SM: OdeSolverMethod<Closure<M, M>, LinearClosure<M, M>, ConstantClosure<M, M>> + 'static, RS: Solver<FilterCallable<Closure<M, M>>>>(
+        mut method: SM, mut root_solver: RS, problem: OdeSolverProblem<Closure<M, M>, LinearClosure<M, M>, ConstantClosure<M, M>>, solver: OdeSolverSolution<M::V>
+    )
     where 
         for <'a> &'a M::V: VectorRef<M::V>,
     {
-        let problems = vec![
-            exponential_decay_problem::<M>(),
-            exponential_decay_with_algebraic_problem::<M>(),
-        ];
-        let y0s = vec![
-            M::V::from_vec(vec![1.0.into(), 1.0.into()]),
-            M::V::from_vec(vec![1.0.into(), 1.0.into(), 1.0.into()]),
-        ];
-        let t1 = M::T::from(1.0);
-        let solutions_at_t1 = vec![
-            &y0s[0] * M::T::exp(-problems[0].problem.p[0] * t1),
-            &y0s[1] * M::T::exp(-problems[1].problem.p[0] * t1),
-        ];
-        for ((problem, y0), soln) in problems.into_iter().zip(y0s.into_iter()).zip(solutions_at_t1.into_iter()) {
-
-            let state = OdeSolverState::new_consistent(&problem, &mut root_solver);
-            state.unwrap().y.assert_eq(&y0, M::T::from(1e-5));
-            method.make_consistent_and_solve(problem, t1, &mut root_solver).unwrap().assert_eq(&soln, M::T::from(1e-5));
+        let problem = Rc::new(problem);
+        method.set_problem(&mut OdeSolverState::new(&problem), problem.clone());
+        let mut state = OdeSolverState::new_consistent(&problem, &mut root_solver).unwrap();
+        for point in solver.solution_points.iter() {
+            while state.t < point.t {
+                method.step(&mut state).unwrap();
+            }
+            let soln = method.interpolate(&state, point.t);
+            soln.assert_eq(&point.state, M::T::from(1e-5));
         }
+    }
+    
+    type Mcpu = nalgebra::DMatrix<f64>;
+    type CRhs = Closure<Mcpu, Mcpu>;
+    type CMass = LinearClosure<Mcpu, Mcpu>;
+    type CInit = ConstantClosure<Mcpu, Mcpu>;
+    type BdfCpu = Bdf::<Mcpu, CRhs, CMass, CInit>;
+    type NewtonCpu = NewtonNonlinearSolver::<FilterCallable<CRhs>>;
+    
+    #[test]
+    fn test_bdf_nalgebra_exponential_decay() {
+        let s = BdfCpu::default();
+        let rs = NewtonCpu::default();
+        let (problem, soln) = exponential_decay_problem();
+        test_ode_solver(s, rs, problem, soln);
+    }
+    
+    #[test]
+    fn test_bdf_nalgebra_exponential_decay_algebraic() {
+        let s = BdfCpu::default();
+        let rs = NewtonCpu::default();
+        let (problem, soln) = exponential_decay_with_algebraic_problem();
+        test_ode_solver(s, rs, problem, soln);
     }
 }

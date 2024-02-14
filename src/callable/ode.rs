@@ -17,6 +17,10 @@ pub struct BdfCallable<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: 
     rhs_jacobian_is_stale: RefCell<bool>,
     jacobian_is_stale: RefCell<bool>,
     mass_jacobian_is_stale: RefCell<bool>,
+    number_of_rhs_jac_evals: RefCell<usize>,
+    number_of_rhs_evals: RefCell<usize>,
+    number_of_jac_evals: RefCell<usize>,
+    number_of_jac_mul_evals: RefCell<usize>,
 }
 
 impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V, T = M::T>> BdfCallable<M, CRhs, CMass> 
@@ -33,8 +37,25 @@ impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V,
         let mass_jacobian_is_stale = RefCell::new(true);
         let rhs = ode_problem.problem.f.clone();
         let mass = ode_problem.mass.clone();
+        let number_of_rhs_jac_evals = RefCell::new(0);
+        let number_of_rhs_evals = RefCell::new(0);
+        let number_of_jac_evals = RefCell::new(0);
+        let number_of_jac_mul_evals = RefCell::new(0);
 
-        Self { rhs, mass, psi_neg_y0, c, rhs_jac, jac, mass_jac, rhs_jacobian_is_stale, jacobian_is_stale, mass_jacobian_is_stale }
+        Self { rhs, mass, psi_neg_y0, c, rhs_jac, jac, mass_jac, rhs_jacobian_is_stale, jacobian_is_stale, mass_jacobian_is_stale, number_of_rhs_jac_evals, number_of_rhs_evals, number_of_jac_evals, number_of_jac_mul_evals }
+    }
+
+    pub fn number_of_rhs_jac_evals(&self) -> usize {
+        *self.number_of_rhs_jac_evals.borrow()
+    }
+    pub fn number_of_rhs_evals(&self) -> usize {
+        *self.number_of_rhs_evals.borrow()
+    }
+    pub fn number_of_jac_evals(&self) -> usize {
+        *self.number_of_jac_evals.borrow()
+    }
+    pub fn number_of_jac_mul_evals(&self) -> usize {
+        *self.number_of_jac_mul_evals.borrow()
     }
     pub fn set_c(&self, h: CRhs::T, alpha: &[CRhs::T], order: IndexType) 
     where 
@@ -99,11 +120,15 @@ where
         let c = *self.c.borrow().deref();
         let tmp = x + psi_neg_y0;
         self.mass.gemv(&tmp, p, t, CRhs::T::one(), -c, y);
+        let number_of_rhs_evals = *self.number_of_rhs_evals.borrow() + 1;
+        self.number_of_rhs_evals.replace(number_of_rhs_evals);
 }
     fn jac_mul_inplace(&self, x: &CRhs::V, p: &CRhs::V, t: CRhs::T, v: &CRhs::V, y: &mut CRhs::V) {
         let c = *self.c.borrow().deref();
         self.rhs.jac_mul_inplace(x, p, t, v, y);
         self.mass.gemv(v, p, t,  CRhs::T::one(), -c, y);
+        let number_of_jac_mul_evals = *self.number_of_jac_mul_evals.borrow() + 1;
+        self.number_of_jac_mul_evals.replace(number_of_jac_mul_evals);
     }
 }
 
@@ -121,6 +146,8 @@ where
         }
         if *self.rhs_jacobian_is_stale.borrow() {
             self.rhs_jac.replace(self.rhs.jacobian(x, p, t));
+            let number_of_rhs_jac_evals = *self.number_of_rhs_jac_evals.borrow() + 1;
+            self.number_of_rhs_jac_evals.replace(number_of_rhs_jac_evals);
             self.rhs_jacobian_is_stale.replace(false);
             self.jacobian_is_stale.replace(true);
         }
@@ -133,6 +160,8 @@ where
             self.jac.replace(mass_jac - rhs_jac * c); 
             self.jacobian_is_stale.replace(false);
         }
+        let number_of_jac_evals = *self.number_of_jac_evals.borrow() + 1;
+        self.number_of_jac_evals.replace(number_of_jac_evals);
         self.jac.borrow().clone()
     }
 }

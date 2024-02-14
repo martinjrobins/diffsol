@@ -13,7 +13,6 @@ pub struct Bdf<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp
     nonlinear_solver: Box<dyn NonLinearSolver<BdfCallable<M, CRhs, CMass>>>,
     bdf_callable: Option<Rc<BdfCallable<M, CRhs, CMass>>>,
     ode_problem: Option<Rc<OdeSolverProblem<CRhs, CMass, CInit>>>,
-    statistics: OdeSolverStatistics,
     order: usize,
     n_equal_steps: usize,
     diff: M,
@@ -32,10 +31,8 @@ impl<T: Scalar, CRhs: Jacobian<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, C
         let linear_solver = LU::<T>::default();
         let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<DMatrix<T>, CRhs, CMass>>::new(linear_solver));
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
-        let statistics = OdeSolverStatistics { niter: 0, nmaxiter: 0 };
         Self { 
             ode_problem: None,
-            statistics,
             nonlinear_solver,
             bdf_callable: None, 
             order: 1, 
@@ -61,10 +58,8 @@ where
         let linear_solver = LU::<CRhs::T>::default();
         let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<CRhs::M, CRhs, CMass>>::new(linear_solver));
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
-        let statistics = OdeSolverStatistics { niter: 0, nmaxiter: 0 };
         Self { 
             ode_problem: self.ode_problem.clone(),
-            statistics,
             nonlinear_solver,
             bdf_callable: self.bdf_callable.clone(), 
             order: self.order, 
@@ -141,8 +136,7 @@ where
         self.bdf_callable.as_ref().unwrap().set_c(state.h, &self.alpha, self.order);
 
         // reset nonlinear's linear solver problem as lu factorisation has changed
-        let new_problem = Rc::new(SolverProblem::new(self.bdf_callable.as_ref().unwrap().clone(), self.ode_problem.as_ref().unwrap().problem.p.clone(), self.ode_problem.as_ref().unwrap().problem.t)); 
-        self.nonlinear_solver.as_mut().set_problem(new_problem);
+        self.nonlinear_solver.as_mut().clear_problem();
     }
 
     
@@ -192,8 +186,13 @@ where
         self.ode_problem.as_ref()
     }
     
-    fn get_statistics(&self) -> &OdeSolverStatistics {
-        &self.statistics
+    fn get_statistics(&self) -> OdeSolverStatistics {
+        OdeSolverStatistics {
+            number_of_jac_mul_evals: self.bdf_callable.as_ref().unwrap().number_of_jac_mul_evals(),
+            number_of_rhs_evals: self.bdf_callable.as_ref().unwrap().number_of_rhs_evals(),
+            number_of_rhs_jac_evals: self.bdf_callable.as_ref().unwrap().number_of_rhs_jac_evals(),
+            number_of_jacobian_evals: self.bdf_callable.as_ref().unwrap().number_of_jac_evals(),
+        }
     }
     
     fn set_problem(&mut self, state: &mut OdeSolverState<M::V>, problem: Rc<OdeSolverProblem<CRhs, CMass, CInit>>) {
@@ -260,7 +259,6 @@ where
         // we will try and use the old jacobian unless convergence of newton iteration
         // fails
         // tells callable to update rhs jacobian if the jacobian is requested (by nonlinear solver)
-        self.bdf_callable.as_ref().unwrap().set_rhs_jacobian_is_stale();
         // initialise step size and try to make the step,
         // iterate, reducing step size until error is in bounds
         let nstates = self.diff.nrows();
@@ -268,6 +266,7 @@ where
         let mut safety: M::T;
         let mut error_norm: M::T;
         let mut scale_y: M::V;
+        let mut updated_jacobian = false;
 
         // loop until step is accepted
         let y_new = loop {
@@ -331,9 +330,16 @@ where
                     }
                 }
                 Err(_e) => {
-                    // newton iteration did not converge, but jacobian has already been
-                    // evaluated so reduce step size by 0.3 (as per [1]) and try again
-                    self._update_step_size(M::T::from(0.3), state);
+                    if updated_jacobian {
+                        // newton iteration did not converge, but jacobian has already been
+                        // evaluated so reduce step size by 0.3 (as per [1]) and try again
+                        self._update_step_size(M::T::from(0.3), state);
+                    } else {
+                        // newton iteration did not converge, so update jacobian and try again
+                        self.bdf_callable.as_ref().unwrap().set_rhs_jacobian_is_stale();
+                        self.nonlinear_solver.as_mut().clear_problem();
+                        updated_jacobian = true;
+                    }
                 }
             };
         };
@@ -389,26 +395,5 @@ where
             self._update_step_size(factor, state);
         }
         Ok(())
-    }
-}
-
-
-#[cfg(test)]
-mod tests {
-    use crate::{callable::{closure::Closure, constant_closure::ConstantClosure, filter::FilterCallable, linear_closure::LinearClosure}, ode_solver::tests::test_ode_solver};
-
-    use super::*;
-
-    #[test]
-    fn test_bdf_nalgebra() {
-        type T = f64;
-        type M = nalgebra::DMatrix<T>;
-        type CRhs = Closure<M, M>;
-        type CMass = LinearClosure<M, M>;
-        type CInit = ConstantClosure<M, M>;
-        type S = Bdf<M, CRhs, CMass, CInit>;
-        let s = S::default();
-        let rs = NewtonNonlinearSolver::<FilterCallable<CRhs>>::default();
-        test_ode_solver(s, rs);
     }
 }
