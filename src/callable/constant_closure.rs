@@ -1,44 +1,56 @@
-use crate::{matrix::MatrixCommon, IndexType, Matrix};
+use crate::Matrix;
 
 use super::{ConstantOp, Op};
 
-type ClosureFn<M, D> = dyn Fn(&<M as MatrixCommon>::V, <M as MatrixCommon>::T, &mut <M as MatrixCommon>::V, &D);
-
-pub struct ConstantClosure<M: Matrix, D> 
+pub struct ConstantClosure<M, F> 
+where
+    M: Matrix,
+    F: Fn(&M::V, M::T, &mut M::V)
 {
-    func: Box<ClosureFn<M, D>>,
-    data: D,
-    nstates: IndexType,
+    func: F,
+    nstates: usize,
+    nout: usize,
+    nparams: usize,
     _phantom: std::marker::PhantomData<M>,
 }
 
-impl<M: Matrix, D> ConstantClosure<M, D> 
+impl<M, F> ConstantClosure<M, F> 
+where
+    M: Matrix,
+    F: Fn(&M::V, M::T, &mut M::V)
 {
-    pub fn new(func: impl Fn(&M::V, M::T, &mut M::V, &D) + 'static, data: D, nstates: IndexType) -> Self {
-        Self { func: Box::new(func), data, nstates, _phantom: std::marker::PhantomData }
+    pub fn new(func: F, nstates: usize, nout: usize, nparams: usize) -> Self {
+        Self { func, nstates, nout, nparams, _phantom: std::marker::PhantomData }
     }
 }
 
-impl<M: Matrix, D> Op for ConstantClosure<M, D>
+impl<M, F> Op for ConstantClosure<M, F>
+where
+    M: Matrix,
+    F: Fn(&M::V, M::T, &mut M::V)
 {
     type V = M::V;
     type T = M::T;
+    type M = M;
     fn nstates(&self) -> usize {
         self.nstates
     }
     fn nout(&self) -> usize {
-        self.nstates
+        self.nout
     }
     fn nparams(&self) -> usize {
-        0
+        self.nparams
     }
 }
 
 
-impl<M: Matrix, D> ConstantOp for ConstantClosure<M, D>
+impl<M, F> ConstantOp for ConstantClosure<M, F>
+where
+    M: Matrix,
+    F: Fn(&M::V, M::T, &mut M::V)
 {
     fn call_inplace(&self, p: &M::V, t: M::T, y: &mut M::V) {
-        (self.func)(p, t, y, &self.data)
+        (self.func)(p, t, y)
     }
 }
 

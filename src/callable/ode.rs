@@ -2,18 +2,18 @@ use crate::{matrix::MatrixRef, ode_solver::OdeSolverProblem, IndexType, Matrix, 
 use num_traits::{One, Zero};
 use std::{cell::RefCell, ops::{Deref, SubAssign}, rc::Rc};
 
-use super::{ConstantJacobian, ConstantOp, Jacobian, LinearOp, NonLinearOp, Op};
+use super::{ConstantOp, LinearOp, NonLinearOp, Op};
 
 // callable to solve for F(y) = M (y' + psi) - c * f(y) = 0 
-pub struct BdfCallable<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V, T = M::T>> 
+pub struct BdfCallable<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> 
 {
     rhs: Rc<CRhs>,
     mass: Rc<CMass>,
     psi_neg_y0: RefCell<CRhs::V>,
     c: RefCell<CRhs::T>,
-    rhs_jac: RefCell<M>,
-    jac: RefCell<M>,
-    mass_jac: RefCell<M>,
+    rhs_jac: RefCell<CRhs::M>,
+    jac: RefCell<CRhs::M>,
+    mass_jac: RefCell<CRhs::M>,
     rhs_jacobian_is_stale: RefCell<bool>,
     jacobian_is_stale: RefCell<bool>,
     mass_jacobian_is_stale: RefCell<bool>,
@@ -23,15 +23,15 @@ pub struct BdfCallable<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: 
     number_of_jac_mul_evals: RefCell<usize>,
 }
 
-impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V, T = M::T>> BdfCallable<M, CRhs, CMass> 
+impl<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> BdfCallable<CRhs, CMass> 
 {
-    pub fn new<CInit: ConstantOp<V = M::V, T = M::T>>(ode_problem: Rc<OdeSolverProblem<CRhs, CMass, CInit>>) -> Self {
+    pub fn new<CInit: ConstantOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>>(ode_problem: Rc<OdeSolverProblem<CRhs, CMass, CInit>>) -> Self {
         let n = ode_problem.problem.f.nstates();
         let c = RefCell::new(CRhs::T::zero());
         let psi_neg_y0 = RefCell::new(<CRhs::V as Vector>::zeros(n));
-        let rhs_jac = RefCell::new(<M as Matrix>::zeros(n, n));
-        let jac = RefCell::new(<M as Matrix>::zeros(n, n));
-        let mass_jac = RefCell::new(<M as Matrix>::zeros(n, n));
+        let rhs_jac = RefCell::new(CRhs::M::zeros(n, n));
+        let jac = RefCell::new(CRhs::M::zeros(n, n));
+        let mass_jac = RefCell::new(CRhs::M::zeros(n, n));
         let rhs_jacobian_is_stale = RefCell::new(true);
         let jacobian_is_stale = RefCell::new(true);
         let mass_jacobian_is_stale = RefCell::new(true);
@@ -59,7 +59,7 @@ impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V,
     }
     pub fn set_c(&self, h: CRhs::T, alpha: &[CRhs::T], order: IndexType) 
     where 
-        for <'b> &'b M: MatrixRef<M>,
+        for <'b> &'b CRhs::M: MatrixRef<CRhs::M>,
     {
         self.c.replace(h * alpha[order]);
         if !*self.rhs_jacobian_is_stale.borrow() && !*self.mass_jacobian_is_stale.borrow() {
@@ -73,7 +73,7 @@ impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V,
             self.jacobian_is_stale.replace(true);
         }
     }
-    pub fn set_psi_and_y0(&self, diff: &M, gamma: &[CRhs::T], alpha: &[CRhs::T], order: usize, y0: &CRhs::V) {
+    pub fn set_psi_and_y0(&self, diff: &CRhs::M, gamma: &[CRhs::T], alpha: &[CRhs::T], order: usize, y0: &CRhs::V) {
         // update psi term as defined in second equation on page 9 of [1]
         let mut new_psi_neg_y0 = diff.column(1) * gamma[1];
         for (i, &gamma_i) in gamma.iter().enumerate().take(order + 1).skip(2) {
@@ -92,10 +92,11 @@ impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V,
 }
 
 
-impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V, T = M::T>> Op for BdfCallable<M, CRhs, CMass> 
+impl<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> Op for  BdfCallable<CRhs, CMass> 
 {
     type V = CRhs::V;
     type T = CRhs::T;
+    type M = CRhs::M;
     fn nstates(&self) -> usize {
         self.rhs.nstates()
     }
@@ -108,9 +109,10 @@ impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V,
 }
 
 // callable to solve for F(y) = M (y' + psi) - f(y) = 0 
-impl<M: Matrix, CRhs: NonLinearOp<V = M::V, T = M::T>, CMass: LinearOp<V = M::V, T = M::T>> NonLinearOp for BdfCallable<M, CRhs, CMass> 
+impl<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> NonLinearOp for  BdfCallable<CRhs, CMass> 
 where 
     for <'b> &'b CRhs::V: VectorRef<CRhs::V>,
+    for <'b> &'b CRhs::M: MatrixRef<CRhs::M>,
 {
     // F(y) = M (y - y0 + psi) - c * f(y) = 0
     fn call_inplace(&self, x: &CRhs::V, p: &CRhs::V, t: CRhs::T, y: &mut CRhs::V) {
@@ -130,14 +132,7 @@ where
         let number_of_jac_mul_evals = *self.number_of_jac_mul_evals.borrow() + 1;
         self.number_of_jac_mul_evals.replace(number_of_jac_mul_evals);
     }
-}
 
-impl<CRhs: Jacobian, CMass: ConstantJacobian<M = CRhs::M, V = CRhs::V, T = CRhs::T>> Jacobian for BdfCallable<CRhs::M, CRhs, CMass> 
-where 
-    for <'b> &'b CRhs::V: VectorRef<CRhs::V>,
-    for <'b> &'b CRhs::M: MatrixRef<CRhs::M>,
-{
-    type M = CRhs::M;
     fn jacobian(&self, x: &CRhs::V, p: &CRhs::V, t: CRhs::T) -> CRhs::M {
         if *self.mass_jacobian_is_stale.borrow() {
             self.mass_jac.replace(self.mass.jacobian(p, t));
@@ -165,4 +160,5 @@ where
         self.jac.borrow().clone()
     }
 }
+
 

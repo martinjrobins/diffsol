@@ -1,4 +1,4 @@
-use crate::{callable::{ConstantOp, closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure}, Matrix, Vector, ode_solver::{OdeSolverProblem, OdeSolverSolution}};
+use crate::{callable::{closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure, ConstantOp, LinearOp, NonLinearOp}, ode_solver::{OdeSolverProblem, OdeSolverSolution}, Matrix, Vector};
 use std::ops::MulAssign;
 use num_traits::Zero;
 use nalgebra::ComplexField;
@@ -8,7 +8,7 @@ use nalgebra::ComplexField;
 // 0 = z - y
 // remove warning about unused mut
 #[allow(unused_mut)]
-fn exponential_decay_with_algebraic<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, mut y: &mut M::V, _data: &M) 
+fn exponential_decay_with_algebraic<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, mut y: &mut M::V) 
 {
     y.copy_from(x);
     y.mul_assign(-p[0]);
@@ -17,42 +17,45 @@ fn exponential_decay_with_algebraic<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, mut
 }
 
 // Jv = [[-av, 0], [-1, 1]]v = [-av, -v[0] + v[1]]
-fn exponential_decay_with_algebraic_jacobian<M: Matrix>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V, _jac: &M) {
+#[allow(unused_mut)]
+fn exponential_decay_with_algebraic_jacobian<M: Matrix>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V, mut y: &mut M::V) {
     y.copy_from(v);
     y.mul_assign(-p[0]);
     let nstates = y.len();
     y[nstates - 1] = v[nstates - 1] - v[nstates - 2];
 }
 
-fn exponential_decay_with_algebraic_mass<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V, _data: &M) {
+fn exponential_decay_with_algebraic_mass<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
     y.copy_from(x);
     let nstates = y.len();
     y[nstates - 1] = M::T::zero();
 }
 
-fn exponential_decay_with_algebraic_init<M: Matrix>(_p: &M::V, _t: M::T, y: &mut M::V, _data: &M) {
+fn exponential_decay_with_algebraic_init<M: Matrix>(_p: &M::V, _t: M::T, y: &mut M::V) {
     let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into(), 0.0.into()]);
     y.copy_from(&y0);
 }
 
-pub fn exponential_decay_with_algebraic_problem<M: Matrix + 'static>() -> (OdeSolverProblem<Closure<M, M>, LinearClosure<M, M>, ConstantClosure<M, M>>, OdeSolverSolution<M::V>) {
+pub fn exponential_decay_with_algebraic_problem<M: Matrix + 'static>() -> (OdeSolverProblem<impl NonLinearOp<M = M, V = M::V, T = M::T>, impl LinearOp<M = M, V = M::V, T = M::T> , impl ConstantOp<M = M, V = M::V, T = M::T>>, OdeSolverSolution<M::V>) {
     let nstates = 3;
-    let data = M::zeros(1, 1);
-    let rhs = Closure::<M, M>::new(
-        exponential_decay_with_algebraic,
-        exponential_decay_with_algebraic_jacobian,
-        data.clone(), 
+    let rhs = Closure::new(
+        exponential_decay_with_algebraic::<M>,
+        exponential_decay_with_algebraic_jacobian::<M>,
         nstates,
+        nstates,
+        1,
     );
-    let mass = LinearClosure::<M, M>::new(
-        exponential_decay_with_algebraic_mass,
-        data.clone(), 
+    let mass = LinearClosure::new(
+        exponential_decay_with_algebraic_mass::<M>,
         nstates,
+        nstates,
+        1,
     );
-    let init = ConstantClosure::<M, M>::new(
-        exponential_decay_with_algebraic_init,
-        data.clone(), 
+    let init: ConstantClosure<M, fn(&M::V, M::T, &mut M::V)> = ConstantClosure::new(
+        exponential_decay_with_algebraic_init::<M>,
         nstates,
+        nstates,
+        1,
     );
     let p = M::V::from_vec(vec![0.1.into()]);
     let mut soln = OdeSolverSolution::default();

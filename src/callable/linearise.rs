@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use super::{ConstantJacobian, Jacobian, LinearOp, NonLinearOp, Op};
+use super::{LinearOp, NonLinearOp, Op};
 
 pub struct LinearisedOp<C: NonLinearOp> 
 {
@@ -19,6 +19,7 @@ impl<C: NonLinearOp> Op for LinearisedOp<C>
 {
     type V = C::V;
     type T = C::T;
+    type M = C::M;
     fn nstates(&self) -> usize {
         self.callable.nstates()
     }
@@ -35,12 +36,6 @@ impl<C: NonLinearOp> LinearOp for LinearisedOp<C>
     fn call_inplace(&self, x: &Self::V, p: &Self::V, t: Self::T, y: &mut Self::V) {
         self.callable.jac_mul_inplace(&self.x, p, t, x, y);
     }
-
-}
-
-impl <C: Jacobian> ConstantJacobian for LinearisedOp<C> 
-{
-    type M = C::M;
     fn jacobian(&self, p: &Self::V, t: Self::T) -> Self::M {
         self.callable.jacobian(&self.x, p, t)
     }

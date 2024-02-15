@@ -14,6 +14,7 @@ pub mod linear_closure;
 pub trait Op {
     type T: Scalar;
     type V: Vector<T = Self::T>;
+    type M: Matrix<T = Self::T, V = Self::V>;
     fn nstates(&self) -> usize;
     fn nout(&self) -> usize;
     fn nparams(&self) -> usize;
@@ -31,6 +32,22 @@ pub trait NonLinearOp: Op {
         let mut y = Self::V::zeros(self.nstates());
         self.jac_mul_inplace(x, p, t, v, &mut y);
         y
+    }
+    fn jacobian(&self, x: &Self::V, p: &Self::V, t: Self::T) -> Self::M {
+        let mut v = Self::V::zeros(self.nstates());
+        let mut col = Self::V::zeros(self.nout());
+        let mut triplets = Vec::with_capacity(self.nstates());
+        for j in 0..self.nstates() {
+            v[j] = Self::T::one();
+            self.jac_mul_inplace(x, p, t, &v, &mut col);
+            for i in 0..self.nout() {
+                if col[i] != Self::T::zero() {
+                    triplets.push((i, j, col[i]));
+                }
+            }
+            v[j] = Self::T::zero();
+        }
+        Self::M::try_from_triplets(self.nstates(), self.nout(), triplets).unwrap()
     }
 }
 
@@ -61,6 +78,22 @@ pub trait LinearOp: Op {
         }
         diag
     }
+    fn jacobian(&self, p: &Self::V, t: Self::T) -> Self::M {
+        let mut v = Self::V::zeros(self.nstates());
+        let mut col = Self::V::zeros(self.nout());
+        let mut triplets = Vec::with_capacity(self.nstates());
+        for j in 0..self.nstates() {
+            v[j] = Self::T::one();
+            self.call_inplace(&v, p, t, &mut col);
+            for i in 0..self.nout() {
+                if col[i] != Self::T::zero() {
+                    triplets.push((i, j, col[i]));
+                }
+            }
+            v[j] = Self::T::zero();
+        }
+        Self::M::try_from_triplets(self.nstates(), self.nout(), triplets).unwrap()
+    }
 }
 
 impl<C: LinearOp> NonLinearOp for C {
@@ -85,48 +118,3 @@ pub trait ConstantOp: Op {
         y.copy_from(&zeros);
     }
 }
-
-
-pub trait ConstantJacobian: LinearOp
-{
-    type M: Matrix<T = Self::T, V = Self::V>;
-    fn jacobian(&self, p: &Self::V, t: Self::T) -> Self::M {
-        let mut v = Self::V::zeros(self.nstates());
-        let mut col = Self::V::zeros(self.nout());
-        let mut triplets = Vec::with_capacity(self.nstates());
-        for j in 0..self.nstates() {
-            v[j] = Self::T::one();
-            self.call_inplace(&v, p, t, &mut col);
-            for i in 0..self.nout() {
-                if col[i] != Self::T::zero() {
-                    triplets.push((i, j, col[i]));
-                }
-            }
-            v[j] = Self::T::zero();
-        }
-        Self::M::try_from_triplets(self.nstates(), self.nout(), triplets).unwrap()
-    }
-}
-
-pub trait Jacobian: NonLinearOp
-{
-    type M: Matrix<T = Self::T, V = Self::V>;
-    fn jacobian(&self, x: &Self::V, p: &Self::V, t: Self::T) -> Self::M {
-        let mut v = Self::V::zeros(self.nstates());
-        let mut col = Self::V::zeros(self.nout());
-        let mut triplets = Vec::with_capacity(self.nstates());
-        for j in 0..self.nstates() {
-            v[j] = Self::T::one();
-            self.jac_mul_inplace(x, p, t, &v, &mut col);
-            for i in 0..self.nout() {
-                if col[i] != Self::T::zero() {
-                    triplets.push((i, j, col[i]));
-                }
-            }
-            v[j] = Self::T::zero();
-        }
-        Self::M::try_from_triplets(self.nstates(), self.nout(), triplets).unwrap()
-    }
-}
-
-

@@ -14,7 +14,6 @@ pub trait MatrixCommon: Sized + Debug + Display
     fn diagonal(&self) -> Self::V;
     fn nrows(&self) -> IndexType;
     fn ncols(&self) -> IndexType;
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V);
 }
 
 impl <'a, M> MatrixCommon for &'a M where M: MatrixCommon {
@@ -22,9 +21,6 @@ impl <'a, M> MatrixCommon for &'a M where M: MatrixCommon {
     type V = M::V;
     fn diagonal(&self) -> Self::V {
         M::diagonal(self)
-    }
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        M::gemv(self, alpha, x, beta, y)
     }
     fn ncols(&self) -> IndexType {
         M::ncols(self)
@@ -39,9 +35,6 @@ impl <'a, M> MatrixCommon for &'a mut M where M: MatrixCommon {
     type V = M::V;
     fn diagonal(&self) -> Self::V {
         M::diagonal(self)
-    }
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        M::gemv(self, alpha, x, beta, y)
     }
     fn ncols(&self) -> IndexType {
         M::ncols(self)
@@ -163,4 +156,5 @@ pub trait Matrix:
         y.gemm(Self::T::one(), self, x, Self::T::zero());
         y
     }
+    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V);
 }

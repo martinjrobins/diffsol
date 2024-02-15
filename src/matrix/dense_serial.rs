@@ -11,9 +11,6 @@ impl<'a, T: Scalar> MatrixCommon for DMatrixViewMut<'a, T> {
     fn diagonal(&self) -> DVector<T> {
         self.diagonal()
     }
-    fn gemv(&self, alpha: T, x: &DVector<T>, beta: T, y: &mut DVector<T>) {
-        y.gemv(alpha, self, x, beta);
-    }
     fn ncols(&self) -> IndexType {
         self.ncols()
     }
@@ -39,9 +36,7 @@ impl<'a, T: Scalar> MatrixCommon for DMatrixView<'a, T> {
     fn diagonal(&self) -> DVector<T> {
         self.diagonal()
     }
-    fn gemv(&self, alpha: T, x: &DVector<T>, beta: T, y: &mut DVector<T>) {
-        y.gemv(alpha, self, x, beta);
-    }
+    
     fn ncols(&self) -> IndexType {
         self.ncols()
     }
@@ -60,9 +55,6 @@ impl<T: Scalar> MatrixCommon for DMatrix<T> {
     fn diagonal(&self) -> DVector<T> {
         self.diagonal()
     }
-    fn gemv(&self, alpha: T, x: &DVector<T>, beta: T, y: &mut DVector<T>) {
-        y.gemv(alpha, self, x, beta);
-    }
     
     fn ncols(&self) -> IndexType {
         self.ncols()
@@ -77,7 +69,9 @@ impl<T: Scalar> Matrix for DMatrix<T> {
     type ViewMut<'a> = DMatrixViewMut<'a, T>;
     
     
-    
+    fn gemv(&self, alpha: T, x: &DVector<T>, beta: T, y: &mut DVector<T>) {
+        y.gemv(alpha, self, x, beta);
+    }
     fn column_mut(&mut self, i: IndexType) -> DVectorViewMut<'_, T> {
         self.column_mut(i)
     }

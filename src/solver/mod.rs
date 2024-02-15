@@ -33,6 +33,28 @@ impl<C: Op> SolverProblem<C> {
     }
 }
 
+pub struct LinearSolveSolution<V> {
+    pub x: V,
+    pub b: V,
+}
+
+impl <V> LinearSolveSolution<V> {
+    pub fn new(b: V, x: V) -> Self {
+        Self { x, b }
+    }
+}
+
+pub struct NonLinearSolveSolution<V> {
+    pub x0: V,
+    pub x: V,
+}
+
+impl <V> NonLinearSolveSolution<V> {
+    pub fn new(x0: V, x: V) -> Self {
+        Self { x0, x }
+    }
+}
+
 impl<C: NonLinearOp> SolverProblem<C> {
     pub fn linearise(&self, x: &C::V) -> SolverProblem<LinearisedOp<C>> {
         let linearised_f= Rc::new(LinearisedOp::new(self.f.clone(), x));
@@ -52,6 +74,7 @@ pub trait Solver<C: Op> {
     }
     fn solve_in_place(&mut self, state: &mut C::V) -> Result<()>;
 }
+
 
 pub trait NonLinearSolver<C: NonLinearOp>: Solver<C> + IterativeSolver<C> {
     fn update_problem(&mut self, problem: Rc<SolverProblem<C>>);

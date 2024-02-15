@@ -3,7 +3,7 @@ use std::rc::Rc;
 use nalgebra::{DVector, Dyn, DMatrix};
 use anyhow::Result;
 
-use crate::{ConstantJacobian, Scalar, Solver, SolverProblem};
+use crate::{callable::LinearOp, Scalar, Solver, SolverProblem};
 
 pub struct LU<T: Scalar> {
     lu: Option<nalgebra::LU<T, Dyn, Dyn>>,
@@ -17,7 +17,7 @@ impl<T: Scalar> Default for LU<T> {
     }
 }
 
-impl<T: Scalar, C: ConstantJacobian<M = DMatrix<T>, V = DVector<T>, T = T>> Solver<C> for LU<T> {
+impl<T: Scalar, C: LinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> Solver<C> for LU<T> {
     fn is_problem_set(&self) -> bool {
         self.lu.is_some()
     }

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{callable::{linearise::LinearisedOp, Jacobian, NonLinearOp}, solver::NonLinearSolver, vector::Vector, IterativeSolver, Scalar, Solver, SolverProblem, LU};
+use crate::{callable::{linearise::LinearisedOp, NonLinearOp}, solver::NonLinearSolver, vector::Vector, IterativeSolver, Scalar, Solver, SolverProblem, LU};
 use anyhow::{anyhow, Result};
 use nalgebra::{DMatrix, DVector};
 use std::ops::SubAssign;
@@ -16,7 +16,7 @@ pub struct NewtonNonlinearSolver<C: NonLinearOp>
     niter: usize,
 }
 
-impl <T: Scalar, C: Jacobian<M = DMatrix<T>, V = DVector<T>, T = T>> Default for NewtonNonlinearSolver<C> 
+impl <T: Scalar, C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> Default for NewtonNonlinearSolver<C> 
 {
     fn default() -> Self {
         let linear_solver = Box::<LU<T>>::default();
@@ -124,26 +124,4 @@ impl<C: NonLinearOp> Solver<C> for NewtonNonlinearSolver<C> {
     }
 
     
-}
-
-// tests
-#[cfg(test)]
-mod tests {
-
-    use crate::LU;
-    use crate::callable::closure::Closure;
-
-    use super::*;
-    use super::super::tests::test_nonlinear_solver;
-
-    #[test]
-    fn test_newton_nalgebra() {
-        type T = f64;
-        type M = nalgebra::DMatrix<T>;
-        type C = Closure<M, M>;
-        type S = NewtonNonlinearSolver<C>;
-        let lu = LU::<T>::default();
-        let s = S::new(lu);
-        test_nonlinear_solver(s);
-    }
 }

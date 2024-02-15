@@ -6,7 +6,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{Vector, VectorIndex};
 
-use super::{Jacobian, NonLinearOp, Op};
+use super::{NonLinearOp, Op};
 
 pub struct FilterCallable<C: NonLinearOp> 
 {
@@ -35,6 +35,7 @@ impl<C: NonLinearOp> Op for FilterCallable<C>
 {
     type V = C::V;
     type T = C::T;
+    type M = C::M;
     fn nstates(&self) -> usize {
         self.indices.len()
     }
@@ -64,9 +65,4 @@ impl<C: NonLinearOp> NonLinearOp for FilterCallable<C>
         self.callable.jac_mul_inplace(&x_full, p, t, &v_full, &mut y_full);
         y.gather_from(&y_full, &self.indices);
     }
-}
-
-impl <C: Jacobian> Jacobian for FilterCallable<C> 
-{
-    type M = C::M;
 }

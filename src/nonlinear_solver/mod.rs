@@ -88,43 +88,64 @@ pub mod newton;
 //tests
 #[cfg(test)]
 pub mod tests {
-    use crate::{callable::closure::Closure, Matrix, Solver, SolverProblem};
+    use crate::{callable::{closure::Closure, NonLinearOp}, linear_solver::lu::LU, solver::NonLinearSolveSolution, vector::VectorRef, Matrix, Solver, SolverProblem};
+    use self::newton::NewtonNonlinearSolver;
+
     use super::*;
     use num_traits::{One, Zero};
     
-    // 0 = J * x * x - 8
-    fn square<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V, jac: &M) {
-        jac.gemv(M::T::one(), x, M::T::zero(), y); // y = J * x
-        y.component_mul_assign(x);
-        y.add_scalar_mut(M::T::from(-8.0));
+    
+    pub fn get_square_problem<M>() -> (SolverProblem<impl NonLinearOp<M = M, V = M::V, T = M::T>>, Vec<NonLinearSolveSolution<M::V>>)
+    where
+        M: Matrix + 'static,
+    {
+        let jac1 = M::from_diagonal(&M::V::from_vec(vec![2.0.into(), 2.0.into()]));
+        let jac2 = jac1.clone();
+        let op = Closure::new(
+            // 0 = J * x * x - 8
+            move |x, _p, _t, y| {
+                jac1.gemv(M::T::one(), x, M::T::zero(), y); // y = J * x
+                y.component_mul_assign(x);
+                y.add_scalar_mut(M::T::from(-8.0));
+            },
+            // J = 2 * J * x * dx
+            move |x, _p, _t, v, y | {
+                jac2.gemv(M::T::from(2.0), x, M::T::zero(), y); // y = 2 * J * x
+                y.component_mul_assign(v);
+            },
+            2, 2, 0,
+        );
+        let problem = SolverProblem::new(Rc::new(op), M::V::zeros(0), M::T::zero());
+        let solns = vec![
+            NonLinearSolveSolution::new(M::V::from_vec(vec![2.1.into(), 2.1.into()]), M::V::from_vec(vec![2.0.into(), 2.0.into()]))
+        ];
+        (problem, solns)
+    }
+    
+    pub fn test_nonlinear_solver<C>(mut solver: impl Solver<C>, problem: SolverProblem<C>, solns: Vec<NonLinearSolveSolution<C::V>>) 
+    where
+        C: NonLinearOp,
+        for <'a> &'a C::V: VectorRef<C::V>,
+    {
+        let problem = Rc::new(problem);
+        solver.set_problem(problem.clone());
+        let problem = problem.as_ref();
+        for soln in solns {
+            let x = solver.solve(&soln.x0).unwrap();
+            let tol = &soln.x * problem.rtol + &problem.atol;
+            x.assert_eq(&soln.x, tol[0]);
+        }
     }
 
-    // J = 2 * J * x * dx
-    fn square_jacobian<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V, jac: &M) {
-        jac.gemv(M::T::from(2.0), x, M::T::zero(), y); // y = 2 * J * x
-        y.component_mul_assign(v);
-    }
-    
-    
-    pub fn get_square_problem<M: Matrix + 'static>() -> Closure<M, M>{
-        let jac = Matrix::from_diagonal(&M::V::from_vec(vec![2.0.into(), 2.0.into()]));
-        Closure::new(
-            square,
-            square_jacobian,
-            jac, 
-            2,
-        )
-    }
-    
-    pub fn test_nonlinear_solver<M: Matrix + 'static, S: Solver<Closure<M, M>>> (mut solver: S) 
-    {
-        let op = Rc::new(get_square_problem::<M>());
-        let problem = Rc::new(SolverProblem::new(op, <M::V as Vector>::zeros(0), M::T::zero()));
-        let x0 = M::V::from_vec(vec![2.1.into(), 2.1.into()]);
-        solver.set_problem(problem);
-        let x = solver.solve(&x0).unwrap();
-        let expect = M::V::from_vec(vec![2.0.into(), 2.0.into()]);
-        x.assert_eq(&expect, 1e-6.into());
+
+    type MCpu = nalgebra::DMatrix<f64>;
+
+    #[test]
+    fn test_newton_cpu_square() {
+        let lu = LU::<f64>::default();
+        let (prob, soln) = get_square_problem::<MCpu>();
+        let s = NewtonNonlinearSolver::new(lu);
+        test_nonlinear_solver(s, prob, soln);
     }
     
     
