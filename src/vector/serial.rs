@@ -60,6 +60,12 @@ impl<T: Scalar> Vector for DVector<T> {
     fn abs(&self) -> Self {
         self.abs()
     }
+    fn as_view(&self) -> Self::View<'_> {
+        self.as_view()
+    }
+    fn as_view_mut(&mut self) -> Self::ViewMut<'_> {
+        self.as_view_mut()
+    }
     fn copy_from(&mut self, other: &Self) {
         self.copy_from(other);
     }

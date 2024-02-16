@@ -38,16 +38,21 @@ where
     fn clear_problem(&mut self) {
         todo!()
     }
-    
-    fn is_problem_set(&self) -> bool {
+
+    fn problem(&self) -> Option<&SolverProblem<C>> {
         todo!()
     }
+
+    fn problem_mut(&mut self) -> Option<&mut SolverProblem<C>> {
+        todo!()
+    }
+    
 
     fn solve_in_place(&mut self, _state: &mut C::V) -> Result<()> {
         todo!()
     }
 
-    fn set_problem(&mut self, _problem: Rc<SolverProblem<C>>) {
+    fn set_problem(&mut self, _problem: SolverProblem<C>) {
         todo!()
     }
 }

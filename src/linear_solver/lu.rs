@@ -18,8 +18,12 @@ impl<T: Scalar> Default for LU<T> {
 }
 
 impl<T: Scalar, C: LinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> Solver<C> for LU<T> {
-    fn is_problem_set(&self) -> bool {
-        self.lu.is_some()
+    fn problem(&self) -> Option<&SolverProblem<C>> {
+        None
+    }
+
+    fn problem_mut(&mut self) -> Option<&mut SolverProblem<C>> {
+        None
     }
 
     fn clear_problem(&mut self) {
@@ -37,7 +41,7 @@ impl<T: Scalar, C: LinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> Solver<C> fo
         }
     }
 
-    fn set_problem(&mut self, problem: Rc<SolverProblem<C>>) {
+    fn set_problem(&mut self, problem: SolverProblem<C>) {
         self.lu = Some(nalgebra::LU::new(problem.f.jacobian(&problem.p, problem.t)));
     }
 }

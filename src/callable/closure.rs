@@ -24,7 +24,7 @@ where
 
 {
     pub fn new(func: F, jacobian_action: G, nstates: usize, nout: usize, nparams: usize) -> Self {
-        Self { func, jacobian_action: jacobian_action, nstates, nout, nparams, _phantom: std::marker::PhantomData }
+        Self { func, jacobian_action, nstates, nout, nparams, _phantom: std::marker::PhantomData }
     }
 }
 

@@ -81,6 +81,8 @@ pub trait VectorViewMut<'a>:
     + for<'b> VectorMutOpsByValue<&'b Self::Owned>
     + MulAssign<Self::T>
     + DivAssign<Self::T>
+    + Index<IndexType, Output=Self::T>
+    + IndexMut<IndexType, Output=Self::T>
 {
     type View: VectorView<'a, T = Self::T>;
     type Owned: Vector<T = Self::T, ViewMut<'a> = Self> 
@@ -134,6 +136,8 @@ pub trait Vector:
     fn zeros(nstates: usize) -> Self {
         Self::from_element(nstates, Self::T::zero())
     }
+    fn as_view(&self) -> Self::View<'_>;
+    fn as_view_mut(&mut self) -> Self::ViewMut<'_>;
     fn copy_from(&mut self, other: &Self);
     fn copy_from_view(&mut self, other: &Self::View<'_>);
     fn from_vec(vec: Vec<Self::T>) -> Self;

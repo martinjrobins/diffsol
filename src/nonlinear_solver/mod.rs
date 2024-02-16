@@ -5,7 +5,8 @@ use num_traits::{Pow, One};
 use crate::{callable::Op, solver::SolverProblem, IndexType, Scalar, Vector};
 
 struct Convergence<C: Op> {
-    problem: Rc<SolverProblem<C>>,
+    rtol: C::T,
+    atol: Rc<C::V>,
     tol: C::T,
     max_iter: IndexType,
     iter: IndexType,
@@ -21,8 +22,9 @@ enum ConvergenceStatus {
 }
 
 impl <C: Op> Convergence<C> {
-    fn new(problem: Rc<SolverProblem<C>>, max_iter: IndexType) -> Self {
+    fn new(problem: &SolverProblem<C>, max_iter: IndexType) -> Self {
         let rtol = problem.rtol;
+        let atol = problem.atol.clone();
         let minimum_tol = C::T::from(10.0) * C::T::EPSILON / rtol;
         let maximum_tol = C::T::from(0.03);
         let mut tol = rtol.pow(C::T::from(0.5));
@@ -33,7 +35,8 @@ impl <C: Op> Convergence<C> {
             tol = minimum_tol;
         }
         Self {
-            problem,
+            rtol,
+            atol,
             tol,
             max_iter,
             scale: None,
@@ -42,8 +45,8 @@ impl <C: Op> Convergence<C> {
         }
     }
     fn reset(&mut self, y: &C::V) {
-        let mut scale = y.abs() * self.problem.rtol;
-        scale += &self.problem.as_ref().atol;
+        let mut scale = y.abs() * self.rtol;
+        scale += self.atol.as_ref();
         self.scale = Some(scale);
         self.iter = 0;
         self.old_norm = None;
@@ -88,7 +91,7 @@ pub mod newton;
 //tests
 #[cfg(test)]
 pub mod tests {
-    use crate::{callable::{closure::Closure, NonLinearOp}, linear_solver::lu::LU, solver::NonLinearSolveSolution, vector::VectorRef, Matrix, Solver, SolverProblem};
+    use crate::{callable::{closure::Closure, NonLinearOp}, linear_solver::lu::LU, matrix::MatrixCommon, solver::NonLinearSolveSolution, Matrix, Solver, SolverProblem};
     use self::newton::NewtonNonlinearSolver;
 
     use super::*;
@@ -103,19 +106,23 @@ pub mod tests {
         let jac2 = jac1.clone();
         let op = Closure::new(
             // 0 = J * x * x - 8
-            move |x, _p, _t, y| {
+            move |x: &<M as MatrixCommon>::V, _p: &M::V, _t, y| {
                 jac1.gemv(M::T::one(), x, M::T::zero(), y); // y = J * x
                 y.component_mul_assign(x);
                 y.add_scalar_mut(M::T::from(-8.0));
             },
             // J = 2 * J * x * dx
-            move |x, _p, _t, v, y | {
+            move |x: &<M as MatrixCommon>::V, _p, _t, v, y | {
                 jac2.gemv(M::T::from(2.0), x, M::T::zero(), y); // y = 2 * J * x
                 y.component_mul_assign(v);
             },
             2, 2, 0,
         );
-        let problem = SolverProblem::new(Rc::new(op), M::V::zeros(0), M::T::zero());
+        let rtol = M::T::from(1e-6);
+        let atol = M::V::from_vec(vec![1e-6.into(), 1e-6.into()]);
+        let p = Rc::new(M::V::zeros(0));
+        let t = M::T::zero();
+        let problem = SolverProblem::new(Rc::new(op), p, t, Rc::new(atol), rtol);
         let solns = vec![
             NonLinearSolveSolution::new(M::V::from_vec(vec![2.1.into(), 2.1.into()]), M::V::from_vec(vec![2.0.into(), 2.0.into()]))
         ];
@@ -125,14 +132,12 @@ pub mod tests {
     pub fn test_nonlinear_solver<C>(mut solver: impl Solver<C>, problem: SolverProblem<C>, solns: Vec<NonLinearSolveSolution<C::V>>) 
     where
         C: NonLinearOp,
-        for <'a> &'a C::V: VectorRef<C::V>,
     {
-        let problem = Rc::new(problem);
-        solver.set_problem(problem.clone());
-        let problem = problem.as_ref();
+        solver.set_problem(problem);
+        let problem = solver.problem().unwrap();
         for soln in solns {
             let x = solver.solve(&soln.x0).unwrap();
-            let tol = &soln.x * problem.rtol + &problem.atol;
+            let tol = soln.x.abs() * problem.rtol + problem.atol.as_ref();
             x.assert_eq(&soln.x, tol[0]);
         }
     }

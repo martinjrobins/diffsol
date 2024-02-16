@@ -23,10 +23,12 @@ pub struct BdfCallable<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs:
     number_of_jac_mul_evals: RefCell<usize>,
 }
 
+
+
 impl<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> BdfCallable<CRhs, CMass> 
 {
-    pub fn new<CInit: ConstantOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>>(ode_problem: Rc<OdeSolverProblem<CRhs, CMass, CInit>>) -> Self {
-        let n = ode_problem.problem.f.nstates();
+    pub fn new<CInit: ConstantOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>>(ode_problem: &OdeSolverProblem<CRhs, CMass, CInit>) -> Self {
+        let n = ode_problem.rhs.nstates();
         let c = RefCell::new(CRhs::T::zero());
         let psi_neg_y0 = RefCell::new(<CRhs::V as Vector>::zeros(n));
         let rhs_jac = RefCell::new(CRhs::M::zeros(n, n));
@@ -35,7 +37,7 @@ impl<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> 
         let rhs_jacobian_is_stale = RefCell::new(true);
         let jacobian_is_stale = RefCell::new(true);
         let mass_jacobian_is_stale = RefCell::new(true);
-        let rhs = ode_problem.problem.f.clone();
+        let rhs = ode_problem.rhs.clone();
         let mass = ode_problem.mass.clone();
         let number_of_rhs_jac_evals = RefCell::new(0);
         let number_of_rhs_evals = RefCell::new(0);
@@ -121,14 +123,14 @@ where
         let psi_neg_y0 = psi_neg_y0_ref.deref();
         let c = *self.c.borrow().deref();
         let tmp = x + psi_neg_y0;
-        self.mass.gemv(&tmp, p, t, CRhs::T::one(), -c, y);
+        self.mass.as_ref().gemv(&tmp, p, t, CRhs::T::one(), -c, y);
         let number_of_rhs_evals = *self.number_of_rhs_evals.borrow() + 1;
         self.number_of_rhs_evals.replace(number_of_rhs_evals);
 }
     fn jac_mul_inplace(&self, x: &CRhs::V, p: &CRhs::V, t: CRhs::T, v: &CRhs::V, y: &mut CRhs::V) {
         let c = *self.c.borrow().deref();
         self.rhs.jac_mul_inplace(x, p, t, v, y);
-        self.mass.gemv(v, p, t,  CRhs::T::one(), -c, y);
+        self.mass.as_ref().gemv(v, p, t,  CRhs::T::one(), -c, y);
         let number_of_jac_mul_evals = *self.number_of_jac_mul_evals.borrow() + 1;
         self.number_of_jac_mul_evals.replace(number_of_jac_mul_evals);
     }

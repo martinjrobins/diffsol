@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{callable::{linearise::LinearisedOp, Op}, IndexType, NonLinearOp, Vector};
+use crate::{callable::{linearise::LinearisedOp, ConstantOp, LinearOp, Op}, ode_solver::OdeSolverProblem, IndexType, NonLinearOp, Vector};
 use anyhow::Result;
 
 
@@ -12,23 +12,38 @@ pub struct SolverStatistics {
 
 pub struct SolverProblem<C: Op> {
     pub f: Rc<C>,
-    pub p: C::V,
+    pub p: Rc<C::V>,
     pub t: C::T,
-    pub atol: C::V,
+    pub atol: Rc<C::V>,
     pub rtol: C::T,
 }
 
 impl<C: Op> SolverProblem<C> {
-    pub fn new(f: Rc<C>, p: C::V, t: C::T) -> Self {
-        let n = f.nstates();
-        let rtol = C::T::from(1e-6);
-        let atol = C::V::from_element(n, C::T::from(1e-6));
+    pub fn new(f: Rc<C>, p: Rc<C::V>, t: C::T, atol: Rc<C::V>, rtol: C::T) -> Self {
         Self {
             f,
             p,
             t,
             rtol,
             atol,
+        }
+    }
+    pub fn new_from_ode_problem(f: Rc<C>, other: &OdeSolverProblem<impl NonLinearOp<M = C::M, V = C::V, T = C::T>, impl LinearOp<M = C::M, V = C::V, T = C::T> , impl ConstantOp<M = C::M, V = C::V, T = C::T>>) -> Self {
+        Self {
+            f,
+            p: other.p.clone(),
+            t: other.t0,
+            rtol: other.rtol,
+            atol: other.atol.clone(),
+        }
+    }
+    pub fn new_from_problem(f: Rc<C>, other: &SolverProblem<C>) -> Self {
+        Self {
+            f,
+            p: other.p.clone(),
+            t: other.t,
+            rtol: other.rtol,
+            atol: other.atol.clone(),
         }
     }
 }
@@ -64,9 +79,14 @@ impl<C: NonLinearOp> SolverProblem<C> {
 }
 
 pub trait Solver<C: Op> {
-    fn set_problem(&mut self, problem: Rc<SolverProblem<C>>);
-    fn is_problem_set(&self) -> bool;
+    fn set_problem(&mut self, problem: SolverProblem<C>);
+    fn problem(&self) -> Option<&SolverProblem<C>>;
+    fn problem_mut(&mut self) -> Option<&mut SolverProblem<C>>;
     fn clear_problem(&mut self);
+    fn set_time(&mut self, t: C::T) -> Result<()> {
+        self.problem_mut().ok_or_else(|| anyhow!("No problem set"))?.t = t;
+        Ok(())
+    }
     fn solve(&mut self, state: &C::V) -> Result<C::V> {
         let mut state = state.clone();
         self.solve_in_place(&mut state)?;
@@ -77,7 +97,6 @@ pub trait Solver<C: Op> {
 
 
 pub trait NonLinearSolver<C: NonLinearOp>: Solver<C> + IterativeSolver<C> {
-    fn update_problem(&mut self, problem: Rc<SolverProblem<C>>);
 }
 
 pub trait IterativeSolver<C: NonLinearOp>: Solver<C> {

@@ -11,3 +11,7 @@ nalgebra-sparse = ">=0.9"
 anyhow = ">=1.0.77"
 num-traits = "0.2.17"
 ouroboros = "0.18.2"
+serde = { version = "1.0.196", features = ["derive"] }
+
+[dev-dependencies]
+insta = { version = "1.34.0", features = ["yaml"] }

@@ -11,8 +11,7 @@ use super::{OdeSolverState, OdeSolverMethod, OdeSolverStatistics, OdeSolverProbl
 
 pub struct Bdf<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>, CInit: ConstantOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> {
     nonlinear_solver: Box<dyn NonLinearSolver<BdfCallable<CRhs, CMass>>>,
-    bdf_callable: Option<Rc<BdfCallable<CRhs, CMass>>>,
-    ode_problem: Option<Rc<OdeSolverProblem<CRhs, CMass, CInit>>>,
+    ode_problem: Option<OdeSolverProblem<CRhs, CMass, CInit>>,
     order: usize,
     n_equal_steps: usize,
     diff: CRhs::M,
@@ -34,7 +33,6 @@ impl<T: Scalar, CRhs: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static
         Self { 
             ode_problem: None,
             nonlinear_solver,
-            bdf_callable: None, 
             order: 1, 
             n_equal_steps: 0, 
             diff: DMatrix::<T>::zeros(n, Self::MAX_ORDER + 3), 
@@ -47,6 +45,7 @@ impl<T: Scalar, CRhs: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static
         }
     }
 }
+
 
 // implement clone for bdf
 impl<T: Scalar, CRhs: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CMass: LinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CInit: ConstantOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static> Clone for Bdf<CRhs, CMass, CInit> 
@@ -61,7 +60,6 @@ where
         Self { 
             ode_problem: self.ode_problem.clone(),
             nonlinear_solver,
-            bdf_callable: self.bdf_callable.clone(), 
             order: self.order, 
             n_equal_steps: self.n_equal_steps, 
             diff: CRhs::M::zeros(n, Self::MAX_ORDER + 3), 
@@ -84,7 +82,11 @@ where
     const NEWTON_MAXITER: IndexType = 4;
     const MIN_FACTOR: f64 = 0.2;
     const MAX_FACTOR: f64 = 10.0;
-    
+
+    fn nonlinear_problem_op(&self) -> Option<&Rc<BdfCallable<CRhs, CMass>>> {
+        Some(&self.nonlinear_solver.as_ref().problem()?.f)
+    }
+
     fn _compute_r(order: usize, factor: CRhs::T) -> CRhs::M {
         //computes the R matrix with entries
         //given by the first equation on page 8 of [1]
@@ -111,7 +113,7 @@ where
         r
     }
 
-    fn _update_step_size(&mut self, factor: CRhs::T, state: &mut OdeSolverState<CRhs::V>) {
+    fn _update_step_size(&mut self, factor: CRhs::T, state: &mut OdeSolverState<CRhs::M>) {
         //If step size h is changed then also need to update the terms in
         //the first equation of page 9 of [1]:
         //
@@ -133,7 +135,7 @@ where
         }
         std::mem::swap(&mut self.diff, &mut self.diff_tmp);
         
-        self.bdf_callable.as_ref().unwrap().set_c(state.h, &self.alpha, self.order);
+        self.nonlinear_problem_op().unwrap().set_c(state.h, &self.alpha, self.order);
 
         // reset nonlinear's linear solver problem as lu factorisation has changed
         self.nonlinear_solver.as_mut().clear_problem();
@@ -168,7 +170,7 @@ where
     for<'b> &'b CRhs::V: VectorRef<CRhs::V>,
     for<'b> &'b CRhs::M: MatrixRef<CRhs::M>,
 {
-    fn interpolate(&self, state: &OdeSolverState<CRhs::V>, t: CRhs::T) -> CRhs::V {
+    fn interpolate(&self, state: &OdeSolverState<CRhs::M>, t: CRhs::T) -> CRhs::V {
         //interpolate solution at time values t* where t-h < t* < t
         //
         //definition of the interpolating polynomial can be found on page 7 of [1]
@@ -182,24 +184,24 @@ where
         order_summation
     }
     
-    fn problem(&self) -> Option<&Rc<OdeSolverProblem<CRhs, CMass, CInit>>> {
+    fn problem(&self) -> Option<&OdeSolverProblem<CRhs, CMass, CInit>> {
         self.ode_problem.as_ref()
     }
     
     fn get_statistics(&self) -> OdeSolverStatistics {
+        let op = self.nonlinear_problem_op().unwrap();
         OdeSolverStatistics {
-            number_of_jac_mul_evals: self.bdf_callable.as_ref().unwrap().number_of_jac_mul_evals(),
-            number_of_rhs_evals: self.bdf_callable.as_ref().unwrap().number_of_rhs_evals(),
-            number_of_rhs_jac_evals: self.bdf_callable.as_ref().unwrap().number_of_rhs_jac_evals(),
-            number_of_jacobian_evals: self.bdf_callable.as_ref().unwrap().number_of_jac_evals(),
+            number_of_jac_mul_evals: op.number_of_jac_mul_evals(),
+            number_of_rhs_evals: op.number_of_rhs_evals(),
+            number_of_rhs_jac_evals: op.number_of_rhs_jac_evals(),
+            number_of_jacobian_evals: op.number_of_jac_evals(),
         }
     }
     
-    fn set_problem(&mut self, state: &mut OdeSolverState<CRhs::V>, problem: Rc<OdeSolverProblem<CRhs, CMass, CInit>>) {
+    fn set_problem(&mut self, state: &mut OdeSolverState<CRhs::M>, problem: OdeSolverProblem<CRhs, CMass, CInit>) {
         self.ode_problem = Some(problem);
-        let ode_problem = self.ode_problem.as_ref().unwrap();
-        let problem = &ode_problem.problem;
-        let nstates = problem.f.nstates();
+        let problem = self.ode_problem.as_ref().unwrap();
+        let nstates = problem.rhs.nstates();
         self.order = 1usize; 
         self.n_equal_steps = 0;
         self.diff = CRhs::M::zeros(nstates, Self::MAX_ORDER + 3);
@@ -225,12 +227,12 @@ where
         // update initial step size based on function
         let mut scale = state.y.abs();
         scale *= problem.rtol;
-        scale += &problem.atol;
+        scale += problem.atol.as_ref();
 
-        let f0 = problem.f.call(&state.y, &problem.p, state.t);
+        let f0 = problem.rhs.call(&state.y, &problem.p, state.t);
         let y1 = &state.y + &f0 * state.h;
         let t1 = state.t + state.h;
-        let f1 = problem.f.call(&y1, &problem.p, t1);
+        let f1 = problem.rhs.call(&y1, &problem.p, t1);
 
         // store f1 in diff[1] for use in step size control
         self.diff.column_mut(1).copy_from(&(&f0 * state.h));
@@ -247,15 +249,15 @@ where
         state.h = new_h;
 
         // setup linear solver for first step
-        self.bdf_callable = Some(Rc::new(BdfCallable::new(ode_problem.clone())));
-        let problem = Rc::new(SolverProblem::new(self.bdf_callable.as_ref().unwrap().clone(), problem.p.clone(), state.t));
-        self.nonlinear_solver.as_mut().set_problem(problem);
+        let bdf_callable = Rc::new(BdfCallable::new(&problem));
+        let nonlinear_problem = SolverProblem::new_from_ode_problem(bdf_callable, problem);
+        self.nonlinear_solver.as_mut().set_problem(nonlinear_problem);
         
         // setup U
         self.u = Self::_compute_r(self.order, CRhs::T::one());
     }
 
-    fn step(&mut self, state: &mut OdeSolverState<CRhs::V>) -> Result<()> {
+    fn step(&mut self, state: &mut OdeSolverState<CRhs::M>) -> Result<()> {
         // we will try and use the old jacobian unless convergence of newton iteration
         // fails
         // tells callable to update rhs jacobian if the jacobian is requested (by nonlinear solver)
@@ -272,7 +274,7 @@ where
         let y_new = loop {
             // predict forward to new step (eq 2 in [1])
             let y_predict = {
-                let mut y_predict = CRhs::V::zeros(nstates);
+                let mut y_predict = <CRhs::V as Vector>::zeros(nstates);
                 for i in 0..=self.order {
                     y_predict += self.diff.column(i);
                 }
@@ -281,25 +283,21 @@ where
             let mut y_new = y_predict.clone();
 
             // update psi and c (h, D, y0 has changed)
-            let callable = self.bdf_callable.as_ref().unwrap();
+            let callable = self.nonlinear_problem_op().unwrap();
             callable.set_psi_and_y0(&self.diff, &self.gamma, &self.alpha, self.order, &y_predict);
             
+            // update time
             let t_new = state.t + state.h;
-            let problem = Rc::new(SolverProblem::new(
-                callable.clone(), 
-                self.ode_problem.as_ref().unwrap().problem.p.clone(), 
-                t_new,
-            ));
-            self.nonlinear_solver.as_mut().update_problem(problem);
+            self.nonlinear_solver.as_mut().set_time(t_new)?;
 
             // solve BDF equation using y0 as starting point
             match self.nonlinear_solver.solve_in_place(&mut y_new) {
                 Ok(()) => {
                     // test error is within tolerance
                     {
-                        let problem = &self.ode_problem.as_ref().unwrap().problem;
-                        scale_y = y_new.abs() * problem.rtol;
-                        scale_y += &problem.atol;
+                        let ode_problem = self.ode_problem.as_ref().unwrap();
+                        scale_y = y_new.abs() * ode_problem.rtol;
+                        scale_y += ode_problem.atol.as_ref();
                     }
 
                     // combine eq 3, 4 and 6 from [1] to obtain error
@@ -336,7 +334,7 @@ where
                         self._update_step_size(CRhs::T::from(0.3), state);
                     } else {
                         // newton iteration did not converge, so update jacobian and try again
-                        self.bdf_callable.as_ref().unwrap().set_rhs_jacobian_is_stale();
+                        callable.set_rhs_jacobian_is_stale();
                         self.nonlinear_solver.as_mut().clear_problem();
                         updated_jacobian = true;
                     }

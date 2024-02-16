@@ -11,7 +11,7 @@ pub struct NewtonNonlinearSolver<C: NonLinearOp>
 {
     convergence: Option<Convergence<C>>,
     linear_solver: Box<dyn Solver<LinearisedOp<C>>>,
-    problem: Option<Rc<SolverProblem<C>>>,
+    problem: Option<SolverProblem<C>>,
     max_iter: usize,
     niter: usize,
 }
@@ -59,28 +59,25 @@ impl<C: NonLinearOp> IterativeSolver<C> for NewtonNonlinearSolver<C>
 }
 
 impl<C: NonLinearOp> NonLinearSolver<C> for NewtonNonlinearSolver<C> 
-{
-    fn update_problem(&mut self, problem: Rc<SolverProblem<C>>) {
-        self.problem = Some(problem);
-        let problem = self.problem.as_ref().unwrap();
-        if self.convergence.is_none() {
-            self.convergence = Some(Convergence::new(
-                problem.clone(), self.max_iter
-            ));
-        } else {
-            self.convergence.as_mut().unwrap().problem = problem.clone();
-        }
-    }
-}
+{}
 
 impl<C: NonLinearOp> Solver<C> for NewtonNonlinearSolver<C> {
-    fn set_problem(&mut self, problem: Rc<SolverProblem<C>>) {
+    fn set_problem(&mut self, problem: SolverProblem<C>) {
         self.clear_problem();
-        self.update_problem(problem);
+        self.problem = Some(problem);
+        let problem = self.problem.as_ref().unwrap();
+        self.convergence = Some(Convergence::new(
+            &problem, self.max_iter
+        ));
     }
-    fn is_problem_set(&self) -> bool {
-        self.problem.is_some()
+
+    fn problem(&self) -> Option<&SolverProblem<C>> {
+        self.problem.as_ref()
     }
+    fn problem_mut(&mut self) -> Option<&mut SolverProblem<C>> {
+        self.problem.as_mut()
+    }
+
     fn clear_problem(&mut self) {
         self.problem = None;
         self.linear_solver.clear_problem();
@@ -97,8 +94,8 @@ impl<C: NonLinearOp> Solver<C> for NewtonNonlinearSolver<C> {
         let x0 = xn.clone();
         convergence.reset(&x0);
         let mut tmp = x0.clone();
-        if !self.linear_solver.is_problem_set() {
-            self.linear_solver.set_problem(Rc::new(problem.linearise(&x0)));
+        if self.linear_solver.problem().is_none() {
+            self.linear_solver.set_problem(problem.linearise(&x0));
         };
         self.niter = 0;
         loop {

@@ -16,9 +16,11 @@ pub mod tests {
             move | x, _p, _t, y | jac.gemv(M::T::one(), x, M::T::zero(), y),
             2, 2, 0
         ));
-        let p = M::V::zeros(0);
+        let p = Rc::new(M::V::zeros(0));
         let t = M::T::zero();
-        let problem = SolverProblem::new(op, p, t);
+        let rtol = M::T::from(1e-6);
+        let atol = Rc::new(M::V::from_vec(vec![1e-6.into(), 1e-6.into()]));
+        let problem = SolverProblem::new(op, p, t, atol, rtol);
         let solns = vec![
             LinearSolveSolution::new(M::V::from_vec(vec![2.0.into(), 4.0.into()]), M::V::from_vec(vec![1.0.into(), 2.0.into()]))
         ];
@@ -30,12 +32,11 @@ pub mod tests {
         C: LinearOp,
         for <'a> &'a C::V: VectorRef<C::V>,
     {
-        let problem = Rc::new(problem);
-        solver.set_problem(problem.clone());
-        let problem = problem.as_ref();
+        solver.set_problem(problem);
+        let problem = solver.problem().unwrap();
         for soln in solns {
             let x = solver.solve(&soln.b).unwrap();
-            let tol = &soln.x * problem.rtol + &problem.atol;
+            let tol = &soln.x * problem.rtol + problem.atol.as_ref();
             x.assert_eq(&soln.x, tol[0]);
         }
     }

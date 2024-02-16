@@ -1,33 +1,30 @@
-use crate::Matrix;
+use crate::{Matrix, Vector};
 
 use super::{ConstantOp, Op};
 
-pub struct ConstantClosure<M, F> 
+pub struct ConstantClosure<M> 
 where
     M: Matrix,
-    F: Fn(&M::V, M::T, &mut M::V)
 {
-    func: F,
+    func: Box<dyn Fn(&M::V, M::T) -> M::V>,
     nstates: usize,
     nout: usize,
     nparams: usize,
     _phantom: std::marker::PhantomData<M>,
 }
 
-impl<M, F> ConstantClosure<M, F> 
+impl<M> ConstantClosure<M> 
 where
     M: Matrix,
-    F: Fn(&M::V, M::T, &mut M::V)
 {
-    pub fn new(func: F, nstates: usize, nout: usize, nparams: usize) -> Self {
-        Self { func, nstates, nout, nparams, _phantom: std::marker::PhantomData }
+    pub fn new(func: impl Fn(&M::V, M::T) -> M::V + 'static, nstates: usize, nout: usize, nparams: usize) -> Self {
+        Self { func: Box::new(func), nstates, nout, nparams, _phantom: std::marker::PhantomData }
     }
 }
 
-impl<M, F> Op for ConstantClosure<M, F>
+impl<M,> Op for ConstantClosure<M>
 where
     M: Matrix,
-    F: Fn(&M::V, M::T, &mut M::V)
 {
     type V = M::V;
     type T = M::T;
@@ -44,13 +41,12 @@ where
 }
 
 
-impl<M, F> ConstantOp for ConstantClosure<M, F>
+impl<M> ConstantOp for ConstantClosure<M>
 where
     M: Matrix,
-    F: Fn(&M::V, M::T, &mut M::V)
 {
     fn call_inplace(&self, p: &M::V, t: M::T, y: &mut M::V) {
-        (self.func)(p, t, y)
+        y.copy_from(&(self.func)(p, t))
     }
 }
 

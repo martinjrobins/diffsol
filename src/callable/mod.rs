@@ -11,6 +11,7 @@ pub mod linearise;
 pub mod constant_closure;
 pub mod linear_closure;
 
+
 pub trait Op {
     type T: Scalar;
     type V: Vector<T = Self::T>;
