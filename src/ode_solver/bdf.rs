@@ -4,10 +4,42 @@ use std::ops::AddAssign;
 use anyhow::Result;
 use nalgebra::{DVector, DMatrix};
 use num_traits::{One, Zero, Pow};
+use serde::Serialize;
 
-use crate::{callable::ode::BdfCallable, matrix::MatrixRef, solver::NonLinearSolver, ConstantOp, IndexType, IterativeSolver, LinearOp, Matrix, MatrixCommon, MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut, LU};
+use crate::{callable::ode::BdfCallable, matrix::MatrixRef, NonLinearSolver, ConstantOp, IndexType, LinearOp, Matrix, MatrixCommon, MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut, LU};
 
-use super::{OdeSolverState, OdeSolverMethod, OdeSolverStatistics, OdeSolverProblem};
+use super::{OdeSolverState, OdeSolverMethod, OdeSolverProblem};
+
+#[derive(Clone, Debug, Serialize)]
+pub struct BdfStatistics<T: Scalar>{
+    pub number_of_rhs_jac_evals: usize,
+    pub number_of_rhs_evals: usize,
+    pub number_of_linear_solver_setups: usize,
+    pub number_of_jac_mul_evals: usize,
+    pub number_of_steps: usize,
+    pub number_of_error_test_failures: usize,
+    pub number_of_nonlinear_solver_iterations: usize,
+    pub number_of_nonlinear_solver_fails: usize,
+    pub initial_step_size: T,
+    pub final_step_size: T,
+}
+
+impl<T: Scalar> Default for BdfStatistics<T> {
+    fn default() -> Self {
+        Self {
+            number_of_rhs_jac_evals: 0,
+            number_of_rhs_evals: 0,
+            number_of_linear_solver_setups: 0,
+            number_of_jac_mul_evals: 0,
+            number_of_steps: 0,
+            number_of_error_test_failures: 0,
+            number_of_nonlinear_solver_iterations: 0,
+            number_of_nonlinear_solver_fails: 0,
+            initial_step_size: T::zero(),
+            final_step_size: T::zero(),
+        }
+    }
+}
 
 pub struct Bdf<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>, CInit: ConstantOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> {
     nonlinear_solver: Box<dyn NonLinearSolver<BdfCallable<CRhs, CMass>>>,
@@ -21,13 +53,14 @@ pub struct Bdf<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = 
     alpha: Vec<CRhs::T>,
     gamma: Vec<CRhs::T>,
     error_const: Vec<CRhs::T>,
+    statistics: BdfStatistics<CRhs::T>,
 }
 
 impl<T: Scalar, CRhs: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CMass: LinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CInit: ConstantOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static> Default for Bdf<CRhs, CMass, CInit> 
 {
     fn default() -> Self {
         let n = 1;
-        let linear_solver = LU::<T>::default();
+        let linear_solver = LU::default();
         let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<CRhs, CMass>>::new(linear_solver));
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
         Self { 
@@ -42,6 +75,7 @@ impl<T: Scalar, CRhs: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static
             error_const: vec![T::from(1.0); Self::MAX_ORDER + 1], 
             u: DMatrix::<T>::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
             r: DMatrix::<T>::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+            statistics: BdfStatistics::default(),
         }
     }
 }
@@ -54,7 +88,7 @@ where
 {
     fn clone(&self) -> Self {
         let n = self.diff.nrows();
-        let linear_solver = LU::<CRhs::T>::default();
+        let linear_solver = LU::default();
         let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<CRhs, CMass>>::new(linear_solver));
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
         Self { 
@@ -69,6 +103,7 @@ where
             error_const: self.error_const.clone(), 
             u: CRhs::M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
             r: CRhs::M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+            statistics: self.statistics.clone(),
         }
     }
 }
@@ -82,6 +117,10 @@ where
     const NEWTON_MAXITER: IndexType = 4;
     const MIN_FACTOR: f64 = 0.2;
     const MAX_FACTOR: f64 = 10.0;
+    
+    pub fn get_statistics(&self) -> &BdfStatistics<CRhs::T> {
+        &self.statistics
+    }
 
     fn nonlinear_problem_op(&self) -> Option<&Rc<BdfCallable<CRhs, CMass>>> {
         Some(&self.nonlinear_solver.as_ref().problem()?.f)
@@ -138,7 +177,7 @@ where
         self.nonlinear_problem_op().unwrap().set_c(state.h, &self.alpha, self.order);
 
         // reset nonlinear's linear solver problem as lu factorisation has changed
-        self.nonlinear_solver.as_mut().clear_problem();
+        self.nonlinear_solver.as_mut().reset();
     }
 
     
@@ -161,6 +200,29 @@ where
             let tmp = self.diff.column(i + 1).into_owned();
             self.diff.column_mut(i).add_assign(&tmp);
         }
+    }
+    
+    fn _predict_forward(&mut self, state: &OdeSolverState<CRhs::M>) -> CRhs::V {
+        let nstates = self.diff.nrows();
+        // predict forward to new step (eq 2 in [1])
+        let y_predict = {
+            let mut y_predict = <CRhs::V as Vector>::zeros(nstates);
+            for i in 0..=self.order {
+                y_predict += self.diff.column(i);
+            }
+            y_predict
+        };
+
+        // update psi and c (h, D, y0 has changed)
+        {
+            let callable = self.nonlinear_problem_op().unwrap();
+            callable.set_psi_and_y0(&self.diff, &self.gamma, &self.alpha, self.order, &y_predict);
+        }
+        
+        // update time
+        let t_new = state.t + state.h;
+        self.nonlinear_solver.as_mut().set_time(t_new).unwrap();
+        y_predict
     }
 }
 
@@ -188,15 +250,7 @@ where
         self.ode_problem.as_ref()
     }
     
-    fn get_statistics(&self) -> OdeSolverStatistics {
-        let op = self.nonlinear_problem_op().unwrap();
-        OdeSolverStatistics {
-            number_of_jac_mul_evals: op.number_of_jac_mul_evals(),
-            number_of_rhs_evals: op.number_of_rhs_evals(),
-            number_of_rhs_jac_evals: op.number_of_rhs_jac_evals(),
-            number_of_jacobian_evals: op.number_of_jac_evals(),
-        }
-    }
+    
     
     fn set_problem(&mut self, state: &mut OdeSolverState<CRhs::M>, problem: OdeSolverProblem<CRhs, CMass, CInit>) {
         self.ode_problem = Some(problem);
@@ -249,12 +303,16 @@ where
         state.h = new_h;
 
         // setup linear solver for first step
-        let bdf_callable = Rc::new(BdfCallable::new(&problem));
+        let bdf_callable = Rc::new(BdfCallable::new(problem));
         let nonlinear_problem = SolverProblem::new_from_ode_problem(bdf_callable, problem);
         self.nonlinear_solver.as_mut().set_problem(nonlinear_problem);
+        let _test = self.nonlinear_problem_op().unwrap();
         
         // setup U
         self.u = Self::_compute_r(self.order, CRhs::T::one());
+        
+        // update statistics
+        self.statistics.initial_step_size = state.h;
     }
 
     fn step(&mut self, state: &mut OdeSolverState<CRhs::M>) -> Result<()> {
@@ -263,35 +321,22 @@ where
         // tells callable to update rhs jacobian if the jacobian is requested (by nonlinear solver)
         // initialise step size and try to make the step,
         // iterate, reducing step size until error is in bounds
-        let nstates = self.diff.nrows();
         let mut d: CRhs::V;
         let mut safety: CRhs::T;
         let mut error_norm: CRhs::T;
         let mut scale_y: CRhs::V;
         let mut updated_jacobian = false;
+        let mut y_predict = self._predict_forward(state); 
 
         // loop until step is accepted
         let y_new = loop {
-            // predict forward to new step (eq 2 in [1])
-            let y_predict = {
-                let mut y_predict = <CRhs::V as Vector>::zeros(nstates);
-                for i in 0..=self.order {
-                    y_predict += self.diff.column(i);
-                }
-                y_predict
-            };
-            let mut y_new = y_predict.clone();
-
-            // update psi and c (h, D, y0 has changed)
-            let callable = self.nonlinear_problem_op().unwrap();
-            callable.set_psi_and_y0(&self.diff, &self.gamma, &self.alpha, self.order, &y_predict);
-            
-            // update time
-            let t_new = state.t + state.h;
-            self.nonlinear_solver.as_mut().set_time(t_new)?;
+           let mut y_new = y_predict.clone();
 
             // solve BDF equation using y0 as starting point
-            match self.nonlinear_solver.solve_in_place(&mut y_new) {
+            let solver_result = self.nonlinear_solver.solve_in_place(&mut y_new);
+            // update statistics
+            self.statistics.number_of_nonlinear_solver_iterations += self.nonlinear_solver.niter();
+            match solver_result {
                 Ok(()) => {
                     // test error is within tolerance
                     {
@@ -324,19 +369,36 @@ where
                         if factor < CRhs::T::from(Self::MIN_FACTOR) {
                             factor = CRhs::T::from(Self::MIN_FACTOR);
                         }
+                        // todo, do we need to update the linear solver problem here since we converged?
                         self._update_step_size(factor, state);
+
+                        // new prediction
+                        y_predict = self._predict_forward(state);
+                        
+                        // update statistics
+                        self.statistics.number_of_error_test_failures += 1;
                     }
                 }
                 Err(_e) => {
+                    self.statistics.number_of_nonlinear_solver_fails += 1;
                     if updated_jacobian {
                         // newton iteration did not converge, but jacobian has already been
                         // evaluated so reduce step size by 0.3 (as per [1]) and try again
                         self._update_step_size(CRhs::T::from(0.3), state);
+
+                        // new prediction
+                        y_predict = self._predict_forward(state);
+                        
+                        // update statistics
                     } else {
                         // newton iteration did not converge, so update jacobian and try again
-                        callable.set_rhs_jacobian_is_stale();
-                        self.nonlinear_solver.as_mut().clear_problem();
+                        {
+                            let callable = self.nonlinear_problem_op().unwrap();
+                            callable.set_rhs_jacobian_is_stale();
+                        }
+                        self.nonlinear_solver.as_mut().reset();
                         updated_jacobian = true;
+                        // same prediction as last time
                     }
                 }
             };
@@ -345,6 +407,14 @@ where
         // take the accepted step
         state.t += state.h;
         state.y = y_new;
+        
+        // update statistics
+        self.statistics.number_of_jac_mul_evals = self.nonlinear_problem_op().unwrap().number_of_jac_mul_evals();
+        self.statistics.number_of_rhs_evals = self.nonlinear_problem_op().unwrap().number_of_rhs_evals();
+        self.statistics.number_of_rhs_jac_evals = self.nonlinear_problem_op().unwrap().number_of_rhs_jac_evals();
+        self.statistics.number_of_linear_solver_setups = self.nonlinear_problem_op().unwrap().number_of_jac_evals();
+        self.statistics.number_of_steps += 1;
+        self.statistics.final_step_size = state.h;
 
         self._update_differences(&d);
 

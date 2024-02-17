@@ -1,8 +1,13 @@
+use std::rc::Rc;
+
 use crate::{callable::{ConstantOp, LinearOp, NonLinearOp}, matrix::Matrix, ode_solver::{OdeSolverProblem, OdeSolverSolution, Vector}};
 
 pub fn robertson<M: Matrix + 'static>() -> (OdeSolverProblem<impl NonLinearOp<M = M, V = M::V, T = M::T>, impl LinearOp<M = M, V = M::V, T = M::T> , impl ConstantOp<M = M, V = M::V, T = M::T>>, OdeSolverSolution<M::V>) {
     let p = M::V::from_vec(vec![0.04.into(), 1.0e4.into(), 3.0e7.into()]);
     let mut problem = OdeSolverProblem::new_ode_with_mass(
+ //*      dy1/dt = -.04*y1 + 1.e4*y2*y3
+ //*      dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*y2**2
+ //*         0   = y1 + y2 + y3 - 1
         | x: &M::V, p: &M::V, _t: M::T, y: &mut M::V | {
             y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
             y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
@@ -10,8 +15,8 @@ pub fn robertson<M: Matrix + 'static>() -> (OdeSolverProblem<impl NonLinearOp<M 
         },
         | x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V | {
             y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
-            y[1] = p[0] * v[0] - p[1] * v[1] * x[2] - p[1] * x[1] * v[2]  - M::T::from(2.0) * p[2] * v[1];
-            y[2] = M::T::from(1.0) - v[0] - v[1] - v[2];
+            y[1] = p[0] * v[0] - p[1] * v[1] * x[2] - p[1] * x[1] * v[2]  - M::T::from(2.0) * p[2] * x[1] * v[1];
+            y[2] = -v[0] - v[1] - v[2];
         },
         | x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V | {
             y[0] = x[0];
@@ -24,7 +29,7 @@ pub fn robertson<M: Matrix + 'static>() -> (OdeSolverProblem<impl NonLinearOp<M 
         p.clone(),
     );
     problem.rtol = M::T::from(1.0e-4);
-    problem.atol = M::V::from_vec(vec![1.0e-8.into(), 1.0e-6.into(), 1.0e-6.into()]);
+    problem.atol = Rc::new(M::V::from_vec(vec![1.0e-8.into(), 1.0e-6.into(), 1.0e-6.into()]));
     let mut soln = OdeSolverSolution::default();
     soln.push(M::V::from_vec(vec![1.0.into(), 0.0.into(), 0.0.into()]), 0.0.into());
     soln.push(M::V::from_vec(vec![9.8517e-01.into(), 3.3864e-05.into(), 1.4794e-02.into()]), 0.4.into());
@@ -41,6 +46,40 @@ pub fn robertson<M: Matrix + 'static>() -> (OdeSolverProblem<impl NonLinearOp<M 
     soln.push(M::V::from_vec(vec![4.8641e-08.into(), 1.9456e-13.into(), 1.0000e+00.into()]), 4.0000e+10.into());
     (problem, soln)
 }
+
+/* -----------------------------------------------------------------
+ * Programmer(s): Allan Taylor, Alan Hindmarsh and
+ *                Radu Serban @ LLNL
+ * -----------------------------------------------------------------
+ * SUNDIALS Copyright Start
+ * Copyright (c) 2002-2023, Lawrence Livermore National Security
+ * and Southern Methodist University.
+ * All rights reserved.
+ *
+ * See the top-level LICENSE and NOTICE files for details.
+ *
+ * SPDX-License-Identifier: BSD-3-Clause
+ * SUNDIALS Copyright End
+ * -----------------------------------------------------------------
+ * This simple example problem for IDA, due to Robertson,
+ * is from chemical kinetics, and consists of the following three
+ * equations:
+ *
+ *      dy1/dt = -.04*y1 + 1.e4*y2*y3
+ *      dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*y2**2
+ *         0   = y1 + y2 + y3 - 1
+ *
+ * on the interval from t = 0.0 to t = 4.e10, with initial
+ * conditions: y1 = 1, y2 = y3 = 0.
+ *
+ * While integrating the system, we also use the rootfinding
+ * feature to find the points at which y1 = 1e-4 or at which
+ * y3 = 0.01.
+ *
+ * The problem is solved with IDA using the DENSE linear
+ * solver, with a user-supplied Jacobian. Output is printed at
+ * t = .4, 4, 40, ..., 4e10.
+ * -----------------------------------------------------------------*/
 
 // Output from Sundials IDA serial example problem for Robertson kinetics:
 //

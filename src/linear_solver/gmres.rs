@@ -1,8 +1,6 @@
-use std::rc::Rc;
-
 use anyhow::Result;
 
-use crate::{vector::VectorRef, LinearOp, Solver, SolverProblem};
+use crate::{LinearSolver, vector::VectorRef, LinearOp, SolverProblem};
 
 
 pub struct GMRES<C: LinearOp> 
@@ -31,23 +29,22 @@ where
     }
 }
 
-impl <C: LinearOp> Solver<C> for GMRES<C> 
+impl <C: LinearOp> LinearSolver<C> for GMRES<C> 
 where
     for <'b> &'b C::V: VectorRef<C::V>,
 {
-    fn clear_problem(&mut self) {
-        todo!()
-    }
 
     fn problem(&self) -> Option<&SolverProblem<C>> {
         todo!()
-    }
-
+    } 
     fn problem_mut(&mut self) -> Option<&mut SolverProblem<C>> {
         todo!()
     }
-    
 
+    fn take_problem(&mut self) -> Option<SolverProblem<C>> {
+        todo!()
+    }
+        
     fn solve_in_place(&mut self, _state: &mut C::V) -> Result<()> {
         todo!()
     }

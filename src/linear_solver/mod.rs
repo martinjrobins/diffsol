@@ -5,7 +5,7 @@ pub mod gmres;
 pub mod tests {
     use std::rc::Rc;
 
-    use crate::{callable::{linear_closure::LinearClosure, LinearOp}, solver::LinearSolveSolution, vector::VectorRef, Matrix, Solver, SolverProblem, Vector, LU};
+    use crate::{callable::{linear_closure::LinearClosure, LinearOp}, solver::{LinearSolveSolution, LinearSolver}, vector::VectorRef, Matrix, SolverProblem, Vector, LU};
     use num_traits::{One, Zero};
 
     fn linear_problem<M: Matrix + 'static>() -> (SolverProblem<impl LinearOp<M = M, V = M::V, T = M::T>>, Vec<LinearSolveSolution<M::V>>) {
@@ -27,16 +27,18 @@ pub mod tests {
         (problem, solns)
     }
 
-    pub fn test_linear_solver<C>(mut solver: impl Solver<C>, problem: SolverProblem<C>, solns: Vec<LinearSolveSolution<C::V>>) 
+    pub fn test_linear_solver<C>(mut solver: impl LinearSolver<C>, problem: SolverProblem<C>, solns: Vec<LinearSolveSolution<C::V>>) 
     where
         C: LinearOp,
         for <'a> &'a C::V: VectorRef<C::V>,
     {
         solver.set_problem(problem);
-        let problem = solver.problem().unwrap();
         for soln in solns {
             let x = solver.solve(&soln.b).unwrap();
-            let tol = &soln.x * problem.rtol + problem.atol.as_ref();
+            let tol = {
+                let problem = solver.problem().unwrap();
+                &soln.x * problem.rtol + problem.atol.as_ref()
+            };
             x.assert_eq(&soln.x, tol[0]);
         }
     }

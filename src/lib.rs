@@ -29,5 +29,5 @@ use vector::{Vector, VectorView, VectorViewMut, VectorIndex, VectorRef};
 use nonlinear_solver::newton::NewtonNonlinearSolver;
 use callable::{NonLinearOp, LinearOp, ConstantOp};
 use matrix::{Matrix, MatrixViewMut, MatrixCommon};
-use solver::{Solver, SolverProblem, IterativeSolver};
+use solver::{SolverProblem, NonLinearSolver, LinearSolver};
 use linear_solver::lu::LU;

@@ -1,35 +1,42 @@
-use std::rc::Rc;
-
 use nalgebra::{DVector, Dyn, DMatrix};
 use anyhow::Result;
 
-use crate::{callable::LinearOp, Scalar, Solver, SolverProblem};
+use crate::{callable::LinearOp, solver::LinearSolver, Scalar, SolverProblem};
 
-pub struct LU<T: Scalar> {
+pub struct LU<T, C> 
+where
+    T: Scalar,
+    C: LinearOp<M = DMatrix<T>, V = DVector<T>, T = T>,
+{
     lu: Option<nalgebra::LU<T, Dyn, Dyn>>,
+    problem: Option<SolverProblem<C>>,
 }
 
-impl<T: Scalar> Default for LU<T> {
+impl<T, C> Default for LU<T, C> 
+where
+    T: Scalar,
+    C: LinearOp<M = DMatrix<T>, V = DVector<T>, T = T>,
+{
     fn default() -> Self {
         Self {
             lu: None,
+            problem: None,
         }
     }
 }
 
-impl<T: Scalar, C: LinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> Solver<C> for LU<T> {
+impl<T: Scalar, C: LinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> LinearSolver<C> for LU<T, C> {
     fn problem(&self) -> Option<&SolverProblem<C>> {
-        None
+        self.problem.as_ref()
     }
-
     fn problem_mut(&mut self) -> Option<&mut SolverProblem<C>> {
-        None
+        self.problem.as_mut()
+    }
+    fn take_problem(&mut self) -> Option<SolverProblem<C>> {
+        self.lu = None;
+        self.problem.take()
     }
 
-    fn clear_problem(&mut self) {
-        self.lu = None;
-    }
-    
     fn solve_in_place(&mut self, state: &mut C::V) -> Result<()> {
         if self.lu.is_none() {
             return Err(anyhow::anyhow!("LU not initialized"));
@@ -43,6 +50,7 @@ impl<T: Scalar, C: LinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> Solver<C> fo
 
     fn set_problem(&mut self, problem: SolverProblem<C>) {
         self.lu = Some(nalgebra::LU::new(problem.f.jacobian(&problem.p, problem.t)));
+        self.problem = Some(problem);
     }
 }
     

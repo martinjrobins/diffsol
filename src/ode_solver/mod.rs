@@ -1,7 +1,6 @@
 use std::rc::Rc;
-use serde::Serialize;
 
-use crate::{callable::{closure::Closure, constant_closure::ConstantClosure, filter::FilterCallable, linear_closure::LinearClosure, unit::UnitCallable, ConstantOp, LinearOp, NonLinearOp}, matrix::Matrix, solver::SolverProblem, Solver, Vector, VectorIndex};
+use crate::{callable::{closure::Closure, constant_closure::ConstantClosure, filter::FilterCallable, linear_closure::LinearClosure, unit::UnitCallable, ConstantOp, LinearOp, NonLinearOp}, matrix::Matrix, solver::{NonLinearSolver, SolverProblem}, Vector, VectorIndex};
 
 use anyhow::Result;
 use num_traits::{One, Zero};
@@ -15,7 +14,6 @@ pub trait OdeSolverMethod<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CR
     fn set_problem(&mut self, state: &mut OdeSolverState<CRhs::M>, problem: OdeSolverProblem<CRhs, CMass, CInit>);
     fn step(&mut self, state: &mut OdeSolverState<CRhs::M>) -> Result<()>;
     fn interpolate(&self, state: &OdeSolverState<CRhs::M>, t: CRhs::T) -> CRhs::V;
-    fn get_statistics(&self) -> OdeSolverStatistics;
     fn solve(&mut self, problem: OdeSolverProblem<CRhs, CMass, CInit>, t: CRhs::T) -> Result<CRhs::V> {
         let mut state = OdeSolverState::new(&problem);
         self.set_problem(&mut state, problem);
@@ -24,7 +22,7 @@ pub trait OdeSolverMethod<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CR
         }
         Ok(self.interpolate(&state, t))
     }
-    fn make_consistent_and_solve<RS: Solver<FilterCallable<CRhs>>>(&mut self, problem: OdeSolverProblem<CRhs, CMass, CInit>, t: CRhs::T, root_solver: &mut RS) -> Result<CRhs::V> {
+    fn make_consistent_and_solve<RS: NonLinearSolver<FilterCallable<CRhs>>>(&mut self, problem: OdeSolverProblem<CRhs, CMass, CInit>, t: CRhs::T, root_solver: &mut RS) -> Result<CRhs::V> {
         let mut state = OdeSolverState::new_consistent(&problem, root_solver)?;
         self.set_problem(&mut state, problem);
         while state.t <= t {
@@ -34,13 +32,7 @@ pub trait OdeSolverMethod<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CR
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
-pub struct OdeSolverStatistics {
-    pub number_of_rhs_jac_evals: usize,
-    pub number_of_rhs_evals: usize,
-    pub number_of_jacobian_evals: usize,
-    pub number_of_jac_mul_evals: usize,
-}
+
 
 
 pub struct OdeSolverState<M: Matrix> {
@@ -76,7 +68,7 @@ impl <M: Matrix> OdeSolverState<M> {
         CRhs: NonLinearOp<M = M, V = M::V, T = M::T>, 
         CMass: LinearOp<M = M, V = M::V, T = M::T>, 
         CInit: ConstantOp<M = M, V = M::V, T = M::T>,
-        S: Solver<FilterCallable<CRhs>> + ?Sized,
+        S: NonLinearSolver<FilterCallable<CRhs>> + ?Sized,
     {
 
         let p = &ode_problem.p;
@@ -94,11 +86,14 @@ impl <M: Matrix> OdeSolverState<M> {
             })
         }
         let mut y_filtered = y.filter(&indices);
+        let atol = Rc::new(ode_problem.atol.as_ref().filter(&indices));
         let f = Rc::new(FilterCallable::new(ode_problem.rhs.clone(), &y, indices));
-        let init_problem = SolverProblem::new_from_ode_problem(f, ode_problem);
+        let p = p.clone();
+        let rtol = ode_problem.rtol;
+        let init_problem = SolverProblem::new(f, p, t, atol, rtol);
         root_solver.set_problem(init_problem);
-        let init_problem = root_solver.problem().unwrap();
         root_solver.solve_in_place(&mut y_filtered)?;
+        let init_problem = root_solver.problem().unwrap();
         let indices = init_problem.f.indices();
         y.scatter_from(&y_filtered, indices);
         Ok(Self {
@@ -274,11 +269,16 @@ mod tests {
         exponential_decay::exponential_decay_problem, 
         exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem,
         robertson::robertson,
+        robertson_ode::robertson_ode,
     };
     
     
     fn test_ode_solver<M, CRhs, CMass, CInit>(
-        method: &mut impl OdeSolverMethod<CRhs, CMass, CInit>, mut root_solver: impl Solver<FilterCallable<CRhs>>, problem: OdeSolverProblem<CRhs, CMass, CInit>, solution: OdeSolverSolution<M::V>
+        method: &mut impl OdeSolverMethod<CRhs, CMass, CInit>, 
+        mut root_solver: impl NonLinearSolver<FilterCallable<CRhs>>, 
+        problem: OdeSolverProblem<CRhs, CMass, CInit>, 
+        solution: OdeSolverSolution<M::V>,
+        override_tol: Option<M::T>,
     )
     where 
         M: Matrix + 'static,
@@ -288,14 +288,22 @@ mod tests {
     {
         let mut state = OdeSolverState::new_consistent(&problem, &mut root_solver).unwrap();
         method.set_problem(&mut state, problem);
-        let problem = method.problem().unwrap();
         for point in solution.solution_points.iter() {
             while state.t < point.t {
                 method.step(&mut state).unwrap();
             }
+
             let soln = method.interpolate(&state, point.t);
-            let tol = soln.abs() * problem.rtol + problem.atol.as_ref();
-            soln.assert_eq(&point.state, tol[0]);
+
+            if let Some(override_tol) = override_tol {
+                soln.assert_eq(&point.state, override_tol);
+            } else {
+                let tol = {
+                    let problem = method.problem().unwrap();
+                    soln.abs() * problem.rtol + problem.atol.as_ref()
+                };
+                soln.assert_eq(&point.state, tol[0]);
+            }
         }
     }
     
@@ -306,13 +314,19 @@ mod tests {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::default();
         let (problem, soln) = exponential_decay_problem::<Mcpu>();
-        test_ode_solver(&mut s, rs, problem, soln);
+        test_ode_solver(&mut s, rs, problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_rhs_jac_evals: 1
         number_of_rhs_evals: 54
-        number_of_jacobian_evals: 16
+        number_of_linear_solver_setups: 16
         number_of_jac_mul_evals: 0
+        number_of_steps: 19
+        number_of_error_test_failures: 8
+        number_of_nonlinear_solver_iterations: 54
+        number_of_nonlinear_solver_fails: 0
+        initial_step_size: 0.011892071150027213
+        final_step_size: 0.23215911532645564
         "###);
     }
     
@@ -321,13 +335,19 @@ mod tests {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::default();
         let (problem, soln) = exponential_decay_with_algebraic_problem::<Mcpu>();
-        test_ode_solver(&mut s, rs, problem, soln);
+        test_ode_solver(&mut s, rs, problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_rhs_jac_evals: 2
         number_of_rhs_evals: 58
-        number_of_jacobian_evals: 18
+        number_of_linear_solver_setups: 18
         number_of_jac_mul_evals: 0
+        number_of_steps: 21
+        number_of_error_test_failures: 7
+        number_of_nonlinear_solver_iterations: 58
+        number_of_nonlinear_solver_fails: 2
+        initial_step_size: 0.004450050658086208
+        final_step_size: 0.20974041151932246
         "###);
     }
     
@@ -337,7 +357,40 @@ mod tests {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::default();
         let (problem, soln) = robertson::<Mcpu>();
-        test_ode_solver(&mut s, rs, problem, soln);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @"");
+        test_ode_solver(&mut s, rs, problem, soln, Some(1.0e-4));
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_rhs_jac_evals: 18
+        number_of_rhs_evals: 1046
+        number_of_linear_solver_setups: 129
+        number_of_jac_mul_evals: 0
+        number_of_steps: 374
+        number_of_error_test_failures: 17
+        number_of_nonlinear_solver_iterations: 1046
+        number_of_nonlinear_solver_fails: 25
+        initial_step_size: 0.0000045643545698038086
+        final_step_size: 7622668559.795311
+        "###);
+    }
+    
+    #[test]
+    fn test_bdf_nalgebra_robertson_ode() {
+        let mut s = Bdf::default();
+        let rs = NewtonNonlinearSolver::default();
+        let (problem, soln) = robertson_ode::<Mcpu>();
+        test_ode_solver(&mut s, rs, problem, soln, Some(1.0e-4));
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_rhs_jac_evals: 17
+        number_of_rhs_evals: 941
+        number_of_linear_solver_setups: 105
+        number_of_jac_mul_evals: 0
+        number_of_steps: 346
+        number_of_error_test_failures: 8
+        number_of_nonlinear_solver_iterations: 941
+        number_of_nonlinear_solver_fails: 18
+        initial_step_size: 0.0000038381494276795106
+        final_step_size: 7310380599.023874
+        "###);
     }
 }

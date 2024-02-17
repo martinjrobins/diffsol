@@ -91,7 +91,7 @@ pub mod newton;
 //tests
 #[cfg(test)]
 pub mod tests {
-    use crate::{callable::{closure::Closure, NonLinearOp}, linear_solver::lu::LU, matrix::MatrixCommon, solver::NonLinearSolveSolution, Matrix, Solver, SolverProblem};
+    use crate::{callable::{closure::Closure, NonLinearOp}, linear_solver::lu::LU, matrix::MatrixCommon, solver::{NonLinearSolveSolution, NonLinearSolver}, Matrix, SolverProblem};
     use self::newton::NewtonNonlinearSolver;
 
     use super::*;
@@ -129,15 +129,17 @@ pub mod tests {
         (problem, solns)
     }
     
-    pub fn test_nonlinear_solver<C>(mut solver: impl Solver<C>, problem: SolverProblem<C>, solns: Vec<NonLinearSolveSolution<C::V>>) 
+    pub fn test_nonlinear_solver<C>(mut solver: impl NonLinearSolver<C>, problem: SolverProblem<C>, solns: Vec<NonLinearSolveSolution<C::V>>) 
     where
         C: NonLinearOp,
     {
         solver.set_problem(problem);
-        let problem = solver.problem().unwrap();
         for soln in solns {
             let x = solver.solve(&soln.x0).unwrap();
-            let tol = soln.x.abs() * problem.rtol + problem.atol.as_ref();
+            let tol = {
+                let problem = solver.problem().unwrap();
+                soln.x.abs() * problem.rtol + problem.atol.as_ref()
+            };
             x.assert_eq(&soln.x, tol[0]);
         }
     }
@@ -147,7 +149,7 @@ pub mod tests {
 
     #[test]
     fn test_newton_cpu_square() {
-        let lu = LU::<f64>::default();
+        let lu = LU::default();
         let (prob, soln) = get_square_problem::<MCpu>();
         let s = NewtonNonlinearSolver::new(lu);
         test_nonlinear_solver(s, prob, soln);
