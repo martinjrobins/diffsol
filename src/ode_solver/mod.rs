@@ -14,7 +14,8 @@ pub trait OdeSolverMethod<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CR
     fn set_problem(&mut self, state: &mut OdeSolverState<CRhs::M>, problem: OdeSolverProblem<CRhs, CMass, CInit>);
     fn step(&mut self, state: &mut OdeSolverState<CRhs::M>) -> Result<()>;
     fn interpolate(&self, state: &OdeSolverState<CRhs::M>, t: CRhs::T) -> CRhs::V;
-    fn solve(&mut self, problem: OdeSolverProblem<CRhs, CMass, CInit>, t: CRhs::T) -> Result<CRhs::V> {
+    fn solve(&mut self, problem: &OdeSolverProblem<CRhs, CMass, CInit>, t: CRhs::T) -> Result<CRhs::V> {
+        let problem = problem.clone();
         let mut state = OdeSolverState::new(&problem);
         self.set_problem(&mut state, problem);
         while state.t <= t {
@@ -22,7 +23,8 @@ pub trait OdeSolverMethod<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CR
         }
         Ok(self.interpolate(&state, t))
     }
-    fn make_consistent_and_solve<RS: NonLinearSolver<FilterCallable<CRhs>>>(&mut self, problem: OdeSolverProblem<CRhs, CMass, CInit>, t: CRhs::T, root_solver: &mut RS) -> Result<CRhs::V> {
+    fn make_consistent_and_solve<RS: NonLinearSolver<FilterCallable<CRhs>>>(&mut self, problem: &OdeSolverProblem<CRhs, CMass, CInit>, t: CRhs::T, root_solver: &mut RS) -> Result<CRhs::V> {
+        let problem = problem.clone();
         let mut state = OdeSolverState::new_consistent(&problem, root_solver)?;
         self.set_problem(&mut state, problem);
         while state.t <= t {
@@ -43,7 +45,7 @@ pub struct OdeSolverState<M: Matrix> {
 }
 
 impl <M: Matrix> OdeSolverState<M> {
-    fn new<CRhs, CMass, CInit>(ode_problem: &OdeSolverProblem<CRhs, CMass, CInit>) -> Self
+    pub fn new<CRhs, CMass, CInit>(ode_problem: &OdeSolverProblem<CRhs, CMass, CInit>) -> Self
     where
         CRhs: NonLinearOp<M = M, V = M::V, T = M::T>, 
         CMass: LinearOp<M = M, V = M::V, T = M::T>, 
