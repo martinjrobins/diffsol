@@ -105,7 +105,7 @@ where
 /// A trait allowing for references to implement matrix operations
 /// Usage:
 /// ```
-/// use crate::{Matrix, Vector};
+/// use diffeq::{Matrix, Vector, MatrixRef};
 /// fn mat_vec_mul<M: Matrix, V: Vector>(m: &M, v: &V) -> V 
 /// where
 ///     for <'a> &'a M: MatrixRef<M>,
