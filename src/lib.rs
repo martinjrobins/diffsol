@@ -31,7 +31,7 @@ use op::{NonLinearOp, LinearOp, ConstantOp};
 use matrix::{Matrix, MatrixViewMut, MatrixCommon};
 use solver::SolverProblem;
 use linear_solver::{lu::LU, LinearSolver};
-use ode_solver::{OdeSolverProblem, OdeSolverState, bdf::Bdf, OdeSolverMethod};
+pub use ode_solver::{OdeSolverProblem, OdeSolverState, bdf::Bdf, OdeSolverMethod};
 
 
 #[cfg(test)]

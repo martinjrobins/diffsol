@@ -103,16 +103,6 @@ where
 {}
 
 /// A trait allowing for references to implement matrix operations
-/// Usage:
-/// ```
-/// use diffeq::{Matrix, Vector, MatrixRef};
-/// fn mat_vec_mul<M: Matrix, V: Vector>(m: &M, v: &V) -> V 
-/// where
-///     for <'a> &'a M: MatrixRef<M>,
-///{
-///     m.mat_mul(v)
-/// }
-/// ```
 pub trait MatrixRef<M: MatrixCommon>:
     MatrixOpsByValue<M, M>
     + for<'a> MatrixOpsByValue<M, M> 
