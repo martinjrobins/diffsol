@@ -1,4 +1,4 @@
-use crate::{callable::{linearise::LinearisedOp, NonLinearOp}, solver::{LinearSolver, NonLinearSolver}, vector::Vector, Scalar, SolverProblem, LU};
+use crate::{op::{linearise::LinearisedOp, NonLinearOp}, LinearSolver, NonLinearSolver, Vector, Scalar, SolverProblem, LU};
 use anyhow::{anyhow, Result};
 use nalgebra::{DMatrix, DVector};
 use std::ops::SubAssign;
@@ -60,7 +60,7 @@ impl<C: NonLinearOp> NonLinearSolver<C> for NewtonNonlinearSolver<C> {
         }
         let problem = self.problem.as_ref().unwrap();
         self.convergence = Some(Convergence::new(
-            &problem, self.max_iter
+            problem, self.max_iter
         ));
     }
 
@@ -90,10 +90,10 @@ impl<C: NonLinearOp> NonLinearSolver<C> for NewtonNonlinearSolver<C> {
         }
         let convergence = self.convergence.as_mut().unwrap();
         let problem = self.problem.as_ref().unwrap();
-        convergence.reset(&xn);
+        convergence.reset(xn);
         let mut tmp = xn.clone();
         if self.linear_solver.problem().is_none() {
-            self.linear_solver.set_problem(problem.linearise(&xn));
+            self.linear_solver.set_problem(problem.linearise(xn));
         };
         self.niter = 0;
         loop {

@@ -1,12 +1,61 @@
+use crate::{op::Op, solver::SolverProblem};
+use anyhow::Result;
+
 pub mod lu;
 pub mod gmres;
+
+/// A solver for the linear problem `Ax = b`. 
+/// The solver is parameterised by the type `C` which is the type of the linear operator `A` (see the [Op] trait for more details).
+pub trait LinearSolver<C: Op> {
+    /// Set the problem to be solved, any previous problem is discarded.
+    /// Any internal state of the solver is reset.
+    fn set_problem(&mut self, problem: SolverProblem<C>);
+
+    /// Get a reference to the current problem, if any.
+    fn problem(&self) -> Option<&SolverProblem<C>>;
+    
+    /// Get a mutable reference to the current problem, if any.
+    fn problem_mut(&mut self) -> Option<&mut SolverProblem<C>>;
+    
+    /// Take the current problem, if any, and return it.
+    fn take_problem(&mut self) -> Option<SolverProblem<C>>;
+    fn reset(&mut self) {
+        if let Some(problem) = self.take_problem() {
+            self.set_problem(problem);
+        }
+    }
+    
+    /// Solve the problem `Ax = b` and return the solution `x`.
+    fn solve(&mut self, b: &C::V) -> Result<C::V> {
+        let mut b = b.clone();
+        self.solve_in_place(&mut b)?;
+        Ok(b)
+    }
+    
+    fn solve_in_place(&mut self, b: &mut C::V) -> Result<()>;
+}
+
+pub struct LinearSolveSolution<V> {
+    pub x: V,
+    pub b: V,
+}
+
+impl <V> LinearSolveSolution<V> {
+    pub fn new(b: V, x: V) -> Self {
+        Self { x, b }
+    }
+}
+
+
 
 #[cfg(test)]
 pub mod tests {
     use std::rc::Rc;
 
-    use crate::{callable::{linear_closure::LinearClosure, LinearOp}, solver::{LinearSolveSolution, LinearSolver}, vector::VectorRef, Matrix, SolverProblem, Vector, LU};
+    use crate::{op::{linear_closure::LinearClosure, LinearOp}, LinearSolver, vector::VectorRef, Matrix, SolverProblem, Vector, LU};
     use num_traits::{One, Zero};
+
+    use super::LinearSolveSolution;
 
     fn linear_problem<M: Matrix + 'static>() -> (SolverProblem<impl LinearOp<M = M, V = M::V, T = M::T>>, Vec<LinearSolveSolution<M::V>>) {
         let diagonal = M::V::from_vec(vec![2.0.into(), 2.0.into()]);

@@ -1,7 +1,6 @@
 use std::rc::Rc;
 
-use crate::{callable::{linearise::LinearisedOp, ConstantOp, LinearOp, Op}, ode_solver::OdeSolverProblem, IndexType, NonLinearOp};
-use anyhow::{Result, anyhow};
+use crate::{op::{linearise::LinearisedOp, ConstantOp, LinearOp, Op}, ode_solver::OdeSolverProblem, IndexType, NonLinearOp};
 
 
 pub struct SolverStatistics {
@@ -51,27 +50,7 @@ impl<C: Op> SolverProblem<C> {
     }
 }
 
-pub struct LinearSolveSolution<V> {
-    pub x: V,
-    pub b: V,
-}
 
-impl <V> LinearSolveSolution<V> {
-    pub fn new(b: V, x: V) -> Self {
-        Self { x, b }
-    }
-}
-
-pub struct NonLinearSolveSolution<V> {
-    pub x0: V,
-    pub x: V,
-}
-
-impl <V> NonLinearSolveSolution<V> {
-    pub fn new(x0: V, x: V) -> Self {
-        Self { x0, x }
-    }
-}
 
 impl<C: NonLinearOp> SolverProblem<C> {
     pub fn linearise(&self, x: &C::V) -> SolverProblem<LinearisedOp<C>> {
@@ -82,46 +61,6 @@ impl<C: NonLinearOp> SolverProblem<C> {
 }
 
 
-pub trait LinearSolver<C: Op> {
-    fn set_problem(&mut self, problem: SolverProblem<C>);
-    fn problem(&self) -> Option<&SolverProblem<C>>;
-    fn problem_mut(&mut self) -> Option<&mut SolverProblem<C>>;
-    fn take_problem(&mut self) -> Option<SolverProblem<C>>;
-    fn reset(&mut self) {
-        if let Some(problem) = self.take_problem() {
-            self.set_problem(problem);
-        }
-    }
-    fn solve(&mut self, b: &C::V) -> Result<C::V> {
-        let mut b = b.clone();
-        self.solve_in_place(&mut b)?;
-        Ok(b)
-    }
-    
-    fn solve_in_place(&mut self, b: &mut C::V) -> Result<()>;
-}
 
-pub trait NonLinearSolver<C: Op> {
-    fn set_problem(&mut self, problem: SolverProblem<C>);
-    fn problem(&self) -> Option<&SolverProblem<C>>;
-    fn problem_mut(&mut self) -> Option<&mut SolverProblem<C>>;
-    fn take_problem(&mut self) -> Option<SolverProblem<C>>;
-    fn reset(&mut self) {
-        if let Some(problem) = self.take_problem() {
-            self.set_problem(problem);
-        }
-    }
-    fn set_time(&mut self, t: C::T) -> Result<()> {
-        self.problem_mut().ok_or_else(|| anyhow!("No problem set"))?.t = t;
-        Ok(())
-    }
-    fn solve(&mut self, state: &C::V) -> Result<C::V> {
-        let mut state = state.clone();
-        self.solve_in_place(&mut state)?;
-        Ok(state)
-    }
-    fn solve_in_place(&mut self, state: &mut C::V) -> Result<()>;
-    fn set_max_iter(&mut self, max_iter: usize);
-    fn max_iter(&self) -> usize;
-    fn niter(&self) -> usize;
-}
+
+

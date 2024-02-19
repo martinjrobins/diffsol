@@ -1,8 +1,9 @@
 use nalgebra::{DVector, Dyn, DMatrix};
 use anyhow::Result;
 
-use crate::{callable::LinearOp, solver::LinearSolver, Scalar, SolverProblem};
+use crate::{op::LinearOp, LinearSolver, Scalar, SolverProblem};
 
+/// A [LinearSolver] that uses the LU decomposition in the [`nalgebra` library](https://nalgebra.org/) to solve the linear system.
 pub struct LU<T, C> 
 where
     T: Scalar,

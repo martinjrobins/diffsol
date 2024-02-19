@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{callable::{closure::Closure, constant_closure::ConstantClosure, filter::FilterCallable, linear_closure::LinearClosure, unit::UnitCallable, ConstantOp, LinearOp, NonLinearOp}, matrix::Matrix, solver::{NonLinearSolver, SolverProblem}, Vector, VectorIndex};
+use crate::{op::{closure::Closure, constant_closure::ConstantClosure, filter::FilterCallable, linear_closure::LinearClosure, unit::UnitCallable, ConstantOp, LinearOp, NonLinearOp}, Matrix, NonLinearSolver, SolverProblem, Vector, VectorIndex};
 
 use anyhow::Result;
 use num_traits::{One, Zero};

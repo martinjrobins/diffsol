@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{callable::{ConstantOp, LinearOp, NonLinearOp}, matrix::Matrix, ode_solver::{OdeSolverProblem, OdeSolverSolution, Vector}};
+use crate::{op::{ConstantOp, LinearOp, NonLinearOp}, matrix::Matrix, ode_solver::{OdeSolverProblem, OdeSolverSolution, Vector}};
 
 pub fn robertson_ode<M: Matrix + 'static>() -> (OdeSolverProblem<impl NonLinearOp<M = M, V = M::V, T = M::T>, impl LinearOp<M = M, V = M::V, T = M::T> , impl ConstantOp<M = M, V = M::V, T = M::T>>, OdeSolverSolution<M::V>) {
     let p = M::V::from_vec(vec![0.04.into(), 1.0e4.into(), 3.0e7.into()]);

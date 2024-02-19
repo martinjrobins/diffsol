@@ -1,8 +1,46 @@
 use core::panic;
 use std::rc::Rc;
 use num_traits::{Pow, One};
+use anyhow::{Result, anyhow};
 
-use crate::{callable::Op, solver::SolverProblem, IndexType, Scalar, Vector};
+use crate::{op::Op, solver::SolverProblem, IndexType, Scalar, Vector};
+
+
+pub struct NonLinearSolveSolution<V> {
+    pub x0: V,
+    pub x: V,
+}
+
+impl <V> NonLinearSolveSolution<V> {
+    pub fn new(x0: V, x: V) -> Self {
+        Self { x0, x }
+    }
+}
+
+pub trait NonLinearSolver<C: Op> {
+    fn set_problem(&mut self, problem: SolverProblem<C>);
+    fn problem(&self) -> Option<&SolverProblem<C>>;
+    fn problem_mut(&mut self) -> Option<&mut SolverProblem<C>>;
+    fn take_problem(&mut self) -> Option<SolverProblem<C>>;
+    fn reset(&mut self) {
+        if let Some(problem) = self.take_problem() {
+            self.set_problem(problem);
+        }
+    }
+    fn set_time(&mut self, t: C::T) -> Result<()> {
+        self.problem_mut().ok_or_else(|| anyhow!("No problem set"))?.t = t;
+        Ok(())
+    }
+    fn solve(&mut self, state: &C::V) -> Result<C::V> {
+        let mut state = state.clone();
+        self.solve_in_place(&mut state)?;
+        Ok(state)
+    }
+    fn solve_in_place(&mut self, state: &mut C::V) -> Result<()>;
+    fn set_max_iter(&mut self, max_iter: usize);
+    fn max_iter(&self) -> usize;
+    fn niter(&self) -> usize;
+}
 
 struct Convergence<C: Op> {
     rtol: C::T,
@@ -91,7 +129,7 @@ pub mod newton;
 //tests
 #[cfg(test)]
 pub mod tests {
-    use crate::{callable::{closure::Closure, NonLinearOp}, linear_solver::lu::LU, matrix::MatrixCommon, solver::{NonLinearSolveSolution, NonLinearSolver}, Matrix, SolverProblem};
+    use crate::{op::{closure::Closure, NonLinearOp}, linear_solver::lu::LU, matrix::MatrixCommon, Matrix, SolverProblem};
     use self::newton::NewtonNonlinearSolver;
 
     use super::*;

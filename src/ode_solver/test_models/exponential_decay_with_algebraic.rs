@@ -1,4 +1,4 @@
-use crate::{callable::{ConstantOp, LinearOp, NonLinearOp}, ode_solver::{OdeSolverProblem, OdeSolverSolution}, Matrix, Vector};
+use crate::{op::{ConstantOp, LinearOp, NonLinearOp}, ode_solver::{OdeSolverProblem, OdeSolverSolution}, Matrix, Vector};
 use std::ops::MulAssign;
 use num_traits::Zero;
 use nalgebra::ComplexField;
