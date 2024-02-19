@@ -11,11 +11,19 @@ env:
 
 jobs:
   build:
-
+    name: Rust project - latest
     runs-on: ubuntu-latest
+    strategy:
+        matrix:
+          toolchain:
+            - stable
+            - beta
+            - nightly
 
     steps:
     - uses: actions/checkout@v3
+    - name: Set up Rust
+      run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
     - name: Build
       run: cargo build --verbose
     - name: Run tests
