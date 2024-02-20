@@ -7,7 +7,7 @@ out-of-the-box with vectors and matrices from the
 implementing the various vector and matrix traits in `diffeq`.
 
 **Note**: This library is still in the early stages of development and is not
-*ready for production use. The API is likely to change in the future.
+ready for production use. The API is likely to change in the future.
 
 ## Features
 
