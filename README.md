@@ -67,7 +67,7 @@ respectively. We set the problem up with the following code:
 ```rust
 type T = f64;
 type V = nalgebra::DVector<T>;
-let p = V::from_vec(vec![0.04.into(), 1.0e4.into(), 3.0e7.into()]);
+let p = V::from_vec(vec![0.04, 1.0e4, 3.0e7]);
 let mut problem = OdeSolverProblem::new_ode(
     // The rhs function `f` 
     | x: &V, p: &V, _t: T, y: &mut V | {
@@ -105,6 +105,7 @@ state, we can use the following code:
 
 ```rust
 let mut state = OdeSolverState::new(&problem);
+solver.set_problem(&mut state, problem);
 while state.t <= t {
     solver.step(&mut state).unwrap();
 }

@@ -39,14 +39,14 @@ pub use ode_solver::{OdeSolverProblem, OdeSolverState, bdf::Bdf, OdeSolverMethod
 mod tests {
     use std::rc::Rc;
 
-    use crate::{OdeSolverProblem, Bdf, OdeSolverState, OdeSolverMethod};
+    use crate::{vector::Vector, Bdf, OdeSolverMethod, OdeSolverProblem, OdeSolverState};
 
     // WARNING: if this test fails and you make a change to the code, you should update the README.md file as well!!!
     #[test]
     fn test_readme() {
         type T = f64;
         type V = nalgebra::DVector<T>;
-        let p = V::from_vec(vec![0.04.into(), 1.0e4.into(), 3.0e7.into()]);
+        let p = V::from_vec(vec![0.04, 1.0e4, 3.0e7]);
         let mut problem = OdeSolverProblem::new_ode(
             | x: &V, p: &V, _t: T, y: &mut V | {
                 y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
@@ -69,13 +69,18 @@ mod tests {
         let mut solver = Bdf::default();
 
         let t = 0.4;
-        let _y = solver.solve(&problem, t).unwrap();
+        let y = solver.solve(&problem, t).unwrap();
 
         let mut state = OdeSolverState::new(&problem);
+        solver.set_problem(&mut state, problem);
         while state.t <= t {
             solver.step(&mut state).unwrap();
         }
-        let _y = solver.interpolate(&state, t);
+        let y2 = solver.interpolate(&state, t);
+        
+        y2.assert_eq(&y, 1e-6);
+        
+
     }
 }
 
