@@ -1,10 +1,10 @@
-# Diffeq
+# Diffsol
 
-Diffeq is a library for solving ordinary differential equations (ODEs) or
+Diffsol is a library for solving ordinary differential equations (ODEs) or
 semi-explicit differential algebraic equations (DAEs) in Rust. You can use it
 out-of-the-box with vectors and matrices from the
 [nalgebra](https://nalgebra.org) crate, or you can implement your own types by
-implementing the various vector and matrix traits in `diffeq`.
+implementing the various vector and matrix traits in diffsol.
 
 **Note**: This library is still in the early stages of development and is not
 ready for production use. The API is likely to change in the future.
@@ -26,11 +26,16 @@ where `M` is a mass matrix, `y` is the state vector, `t` is the time, `p` is a
 vector of parameters, and `f` is the right-hand side function. The mass matrix
 `M` is optional (assumed to be the identity matrix if not provided).
 
-Both the RHS function `f` and the mass matrix `M` can be specified as functions
-that take the state vector `y`, the parameter vector `p`, and the time `t` as
-arguments. The action of the jacobian `J` of `f` must also be specified as a
+The RHS function `f`  can be specified as a function
+that takes the state vector `y`, the parameter vector `p`, and the time `t` as
+arguments and returns `f(t, y, p)`. The action of the jacobian `J` of `f` must also be specified as a
 function that takes the state vector `y`, the parameter vector `p`, the time `t`
 and a vector `v` and returns the product `Jv`.
+
+The action of the mass matrix `M` can also be specified as a function that takes an input vector `v`,
+the parameter vector `p` and the time `t` and returns the product mass matrix `Mv`. 
+Note that the only requirement for this mass matrix operator is that it must be linear. 
+It can be, for example, a singular matrix with zeros on the diagonal (i.e. defining a semi-explicit DAE).
 
 ## Installation
 
