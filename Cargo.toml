@@ -1,5 +1,5 @@
 [package]
-name = "diffeq"
+name = "diffsol"
 version = "0.1.0"
 edition = "2021"
 description = "A library for solving ordinary differential equations (ODEs) in Rust."
