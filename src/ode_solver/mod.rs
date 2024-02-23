@@ -264,7 +264,7 @@ impl<V: Vector> Default for OdeSolverSolution<V> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{nonlinear_solver::newton::NewtonNonlinearSolver};
+    use crate::nonlinear_solver::newton::NewtonNonlinearSolver;
     use tests::bdf::Bdf;
     use super::*;
     use super::test_models::{
