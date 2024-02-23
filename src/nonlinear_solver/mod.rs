@@ -129,7 +129,7 @@ pub mod newton;
 //tests
 #[cfg(test)]
 pub mod tests {
-    use crate::{op::{closure::Closure, NonLinearOp}, linear_solver::lu::LU, matrix::MatrixCommon, Matrix, SolverProblem};
+    use crate::{op::{closure::Closure, NonLinearOp}, linear_solver::lu::LU, matrix::MatrixCommon, Matrix};
     use self::newton::NewtonNonlinearSolver;
 
     use super::*;
