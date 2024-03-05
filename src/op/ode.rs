@@ -1,4 +1,4 @@
-use crate::{matrix::MatrixRef, ode_solver::OdeSolverProblem, IndexType, Matrix, Vector, VectorRef};
+use crate::{matrix::{DenseMatrix, MatrixRef}, ode_solver::OdeSolverProblem, IndexType, Vector, VectorRef, Matrix};
 use num_traits::{One, Zero};
 use std::{cell::RefCell, ops::{Deref, SubAssign}, rc::Rc};
 
@@ -75,7 +75,7 @@ impl<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> 
             self.jacobian_is_stale.replace(true);
         }
     }
-    pub fn set_psi_and_y0(&self, diff: &CRhs::M, gamma: &[CRhs::T], alpha: &[CRhs::T], order: usize, y0: &CRhs::V) {
+    pub fn set_psi_and_y0<M: DenseMatrix<T=CRhs::T, V=CRhs::V>>(&self, diff: &M, gamma: &[CRhs::T], alpha: &[CRhs::T], order: usize, y0: &CRhs::V) {
         // update psi term as defined in second equation on page 9 of [1]
         let mut new_psi_neg_y0 = diff.column(1) * gamma[1];
         for (i, &gamma_i) in gamma.iter().enumerate().take(order + 1).skip(2) {

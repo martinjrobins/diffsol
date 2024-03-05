@@ -129,7 +129,7 @@ pub mod newton;
 //tests
 #[cfg(test)]
 pub mod tests {
-    use crate::{op::{closure::Closure, NonLinearOp}, linear_solver::lu::LU, matrix::MatrixCommon, Matrix};
+    use crate::{op::{closure::Closure, NonLinearOp}, linear_solver::lu::LU, matrix::MatrixCommon, DenseMatrix};
     use self::newton::NewtonNonlinearSolver;
 
     use super::*;
@@ -138,7 +138,7 @@ pub mod tests {
     
     pub fn get_square_problem<M>() -> (SolverProblem<impl NonLinearOp<M = M, V = M::V, T = M::T>>, Vec<NonLinearSolveSolution<M::V>>)
     where
-        M: Matrix + 'static,
+        M: DenseMatrix + 'static,
     {
         let jac1 = M::from_diagonal(&M::V::from_vec(vec![2.0.into(), 2.0.into()]));
         let jac2 = jac1.clone();

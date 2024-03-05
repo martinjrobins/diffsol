@@ -28,7 +28,7 @@ use num_traits::{Signed, Pow};
 use vector::{Vector, VectorView, VectorViewMut, VectorIndex, VectorRef};
 use nonlinear_solver::{NonLinearSolver, newton::NewtonNonlinearSolver};
 use op::{NonLinearOp, LinearOp, ConstantOp};
-use matrix::{Matrix, MatrixViewMut, MatrixCommon};
+use matrix::{DenseMatrix, MatrixViewMut, Matrix};
 use solver::SolverProblem;
 use linear_solver::{lu::LU, LinearSolver};
 pub use ode_solver::{OdeSolverProblem, OdeSolverState, bdf::Bdf, OdeSolverMethod};

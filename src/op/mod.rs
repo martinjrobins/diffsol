@@ -11,6 +11,9 @@ pub mod linearise;
 pub mod constant_closure;
 pub mod linear_closure;
 
+#[cfg(feature = "iree")]
+pub mod iree;
+
 
 pub trait Op {
     type T: Scalar;

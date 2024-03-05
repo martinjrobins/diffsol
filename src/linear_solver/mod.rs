@@ -52,12 +52,12 @@ impl <V> LinearSolveSolution<V> {
 pub mod tests {
     use std::rc::Rc;
 
-    use crate::{op::{linear_closure::LinearClosure, LinearOp}, LinearSolver, vector::VectorRef, Matrix, SolverProblem, Vector, LU};
+    use crate::{op::{linear_closure::LinearClosure, LinearOp}, LinearSolver, vector::VectorRef, DenseMatrix, SolverProblem, Vector, LU};
     use num_traits::{One, Zero};
 
     use super::LinearSolveSolution;
 
-    fn linear_problem<M: Matrix + 'static>() -> (SolverProblem<impl LinearOp<M = M, V = M::V, T = M::T>>, Vec<LinearSolveSolution<M::V>>) {
+    fn linear_problem<M: DenseMatrix + 'static>() -> (SolverProblem<impl LinearOp<M = M, V = M::V, T = M::T>>, Vec<LinearSolveSolution<M::V>>) {
         let diagonal = M::V::from_vec(vec![2.0.into(), 2.0.into()]);
         let jac = M::from_diagonal(&diagonal);
         let op = Rc::new(LinearClosure::new(

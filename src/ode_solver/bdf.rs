@@ -6,7 +6,7 @@ use nalgebra::{DVector, DMatrix};
 use num_traits::{One, Zero, Pow};
 use serde::Serialize;
 
-use crate::{op::ode::BdfCallable, matrix::MatrixRef, NonLinearSolver, ConstantOp, IndexType, LinearOp, Matrix, MatrixCommon, MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut, LU};
+use crate::{op::ode::BdfCallable, matrix::MatrixRef, NonLinearSolver, ConstantOp, IndexType, LinearOp, DenseMatrix, MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut, LU};
 
 use super::{OdeSolverState, OdeSolverMethod, OdeSolverProblem};
 
@@ -41,22 +41,21 @@ impl<T: Scalar> Default for BdfStatistics<T> {
     }
 }
 
-pub struct Bdf<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>, CInit: ConstantOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> {
+pub struct Bdf<M: DenseMatrix<T = CRhs::T, V = CRhs::V>, CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>, CInit: ConstantOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> {
     nonlinear_solver: Box<dyn NonLinearSolver<BdfCallable<CRhs, CMass>>>,
     ode_problem: Option<OdeSolverProblem<CRhs, CMass, CInit>>,
     order: usize,
     n_equal_steps: usize,
-    diff: CRhs::M,
-    diff_tmp: CRhs::M,
-    u: CRhs::M,
-    r: CRhs::M,
+    diff: M,
+    diff_tmp: M,
+    u: M,
     alpha: Vec<CRhs::T>,
     gamma: Vec<CRhs::T>,
     error_const: Vec<CRhs::T>,
     statistics: BdfStatistics<CRhs::T>,
 }
 
-impl<T: Scalar, CRhs: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CMass: LinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CInit: ConstantOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static> Default for Bdf<CRhs, CMass, CInit> 
+impl<T: Scalar, CRhs: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CMass: LinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CInit: ConstantOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static> Default for Bdf<DMatrix<T>, CRhs, CMass, CInit> 
 {
     fn default() -> Self {
         let n = 1;
@@ -74,7 +73,6 @@ impl<T: Scalar, CRhs: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static
             alpha: vec![T::from(1.0); Self::MAX_ORDER + 1], 
             error_const: vec![T::from(1.0); Self::MAX_ORDER + 1], 
             u: DMatrix::<T>::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
-            r: DMatrix::<T>::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
             statistics: BdfStatistics::default(),
         }
     }
@@ -82,7 +80,7 @@ impl<T: Scalar, CRhs: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static
 
 
 // implement clone for bdf
-impl<T: Scalar, CRhs: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CMass: LinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CInit: ConstantOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static> Clone for Bdf<CRhs, CMass, CInit> 
+impl<T: Scalar, CRhs: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CMass: LinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CInit: ConstantOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static> Clone for Bdf<DMatrix<T>, CRhs, CMass, CInit> 
 where
     for<'b> &'b DVector<T>: VectorRef<DVector<T>>,
 {
@@ -96,19 +94,18 @@ where
             nonlinear_solver,
             order: self.order, 
             n_equal_steps: self.n_equal_steps, 
-            diff: CRhs::M::zeros(n, Self::MAX_ORDER + 3), 
-            diff_tmp: CRhs::M::zeros(n, Self::MAX_ORDER + 3), 
+            diff: DMatrix::zeros(n, Self::MAX_ORDER + 3), 
+            diff_tmp: DMatrix::zeros(n, Self::MAX_ORDER + 3), 
             gamma: self.gamma.clone(), 
             alpha: self.alpha.clone(), 
             error_const: self.error_const.clone(), 
-            u: CRhs::M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
-            r: CRhs::M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+            u: DMatrix::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
             statistics: self.statistics.clone(),
         }
     }
 }
 
-impl<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>, CInit: ConstantOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> Bdf<CRhs, CMass, CInit> 
+impl<M: DenseMatrix<T = CRhs::T, V = CRhs::V>, CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>, CInit: ConstantOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> Bdf<M, CRhs, CMass, CInit> 
 where
     for<'b> &'b CRhs::V: VectorRef<CRhs::V>,
     for<'b> &'b CRhs::M: MatrixRef<CRhs::M>,
@@ -126,7 +123,7 @@ where
         Some(&self.nonlinear_solver.as_ref().problem()?.f)
     }
 
-    fn _compute_r(order: usize, factor: CRhs::T) -> CRhs::M {
+    fn _compute_r(order: usize, factor: CRhs::T) -> M {
         //computes the R matrix with entries
         //given by the first equation on page 8 of [1]
         //
@@ -135,18 +132,18 @@ where
         //
         //Note that the U matrix also defined in the same section can be also be
         //found using factor = 1, which corresponds to R with a constant step size
-        let mut r = CRhs::M::zeros(order + 1, order + 1);
+        let mut r = M::zeros(order + 1, order + 1);
         
         // r[0, 0:order] = 1
         for j in 0..=order {
-            r[(0, j)] = CRhs::T::one();
+            r[(0, j)] = M::T::one();
         }
         // r[i, j] = r[i, j-1] * (j - 1 - factor * i) / j
         for i in 1..=order {
             for j in 1..=order {
-                let i_t = CRhs::T::from(i as f64);
-                let j_t = CRhs::T::from(j as f64);
-                r[(i, j)] = r[(i - 1, j)] * (i_t - CRhs::T::one() - factor * j_t) / i_t;
+                let i_t = M::T::from(i as f64);
+                let j_t = M::T::from(j as f64);
+                r[(i, j)] = r[(i - 1, j)] * (i_t - M::T::one() - factor * j_t) / i_t;
             }
         }
         r
@@ -164,8 +161,8 @@ where
 
         // update D using equations in section 3.2 of [1]
         self.u = Self::_compute_r(self.order, CRhs::T::one());
-        self.r = Self::_compute_r(self.order, factor);
-        let ru = self.r.mat_mul(&self.u);
+        let r = Self::_compute_r(self.order, factor);
+        let ru = r * &self.u;
         // D[0:order+1] = R * U * D[0:order+1]
         {
             let d_zero_order = self.diff.columns(0, self.order + 1);
@@ -227,7 +224,7 @@ where
 }
 
 
-impl<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>, CInit: ConstantOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> OdeSolverMethod<CRhs, CMass, CInit> for Bdf<CRhs, CMass, CInit> 
+impl<M: DenseMatrix<T = CRhs::T, V = CRhs::V>, CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>, CInit: ConstantOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> OdeSolverMethod<CRhs, CMass, CInit> for Bdf<M, CRhs, CMass, CInit> 
 where
     for<'b> &'b CRhs::V: VectorRef<CRhs::V>,
     for<'b> &'b CRhs::M: MatrixRef<CRhs::M>,
@@ -258,8 +255,8 @@ where
         let nstates = problem.rhs.nstates();
         self.order = 1usize; 
         self.n_equal_steps = 0;
-        self.diff = CRhs::M::zeros(nstates, Self::MAX_ORDER + 3);
-        self.diff_tmp = CRhs::M::zeros(nstates, Self::MAX_ORDER + 3);
+        self.diff = M::zeros(nstates, Self::MAX_ORDER + 3);
+        self.diff_tmp = M::zeros(nstates, Self::MAX_ORDER + 3);
         self.diff.column_mut(0).copy_from(&state.y);
         
         // kappa values for difference orders, taken from Table 1 of [1]

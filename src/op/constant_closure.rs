@@ -2,11 +2,13 @@ use crate::{Matrix, Vector};
 
 use super::{ConstantOp, Op};
 
+type ConstFn<V, T> = dyn Fn(&V, T) -> V;
+
 pub struct ConstantClosure<M> 
 where
     M: Matrix,
 {
-    func: Box<dyn Fn(&M::V, M::T) -> M::V>,
+    func: Box<ConstFn<M::V, M::T>>,
     nstates: usize,
     nout: usize,
     nparams: usize,
