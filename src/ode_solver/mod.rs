@@ -8,6 +8,7 @@ use num_traits::{One, Zero};
 
 pub mod bdf;
 pub mod test_models;
+mod tmp;
 
 pub trait OdeSolverMethod<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>, CInit: ConstantOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> {
     fn problem(&self) -> Option<&OdeSolverProblem<CRhs, CMass, CInit>>;
@@ -52,11 +53,10 @@ impl <M: Matrix> OdeSolverState<M> {
         CInit: ConstantOp<M = M, V = M::V, T = M::T>,
     {
 
-        let p = &ode_problem.p;
         let t = ode_problem.t0;
         let h = ode_problem.h0;
         let init = ode_problem.init.as_ref();
-        let y = init.call(p, t);
+        let y = init.call(t);
         Self {
             y,
             t,
@@ -73,12 +73,11 @@ impl <M: Matrix> OdeSolverState<M> {
         S: NonLinearSolver<FilterCallable<CRhs>> + ?Sized,
     {
 
-        let p = &ode_problem.p;
         let t = ode_problem.t0;
         let h = ode_problem.h0;
-        let diag = ode_problem.mass.jacobian_diagonal(p, t);
+        let diag = ode_problem.mass.jacobian_diagonal(t);
         let indices = diag.filter_indices(|x| x == CRhs::T::zero());
-        let mut y = ode_problem.init.call(p, t);
+        let mut y = ode_problem.init.call(t);
         if indices.len() == 0 {
             return Ok(Self {
                 y,
@@ -90,9 +89,8 @@ impl <M: Matrix> OdeSolverState<M> {
         let mut y_filtered = y.filter(&indices);
         let atol = Rc::new(ode_problem.atol.as_ref().filter(&indices));
         let f = Rc::new(FilterCallable::new(ode_problem.rhs.clone(), &y, indices));
-        let p = p.clone();
         let rtol = ode_problem.rtol;
-        let init_problem = SolverProblem::new(f, p, t, atol, rtol);
+        let init_problem = SolverProblem::new(f, t, atol, rtol);
         root_solver.set_problem(init_problem);
         root_solver.solve_in_place(&mut y_filtered)?;
         let init_problem = root_solver.problem().unwrap();
@@ -112,7 +110,6 @@ pub struct OdeSolverProblem<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = 
     pub rhs: Rc<CRhs>,
     pub mass: Rc<CMass>,
     pub init: Rc<CInit>,
-    pub p: Rc<CRhs::V>,
     pub rtol: CRhs::T,
     pub atol: Rc<CRhs::V>,
     pub t0: CRhs::T,
@@ -126,7 +123,6 @@ impl <CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>,
             rhs: self.rhs.clone(),
             mass: self.mass.clone(),
             init: self.init.clone(),
-            p: self.p.clone(),
             rtol: self.rtol,
             atol: self.atol.clone(),
             t0: self.t0,
@@ -142,10 +138,9 @@ impl <CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>,
     pub fn default_atol(nstates: usize) -> CRhs::V {
         CRhs::V::from_element(nstates, CRhs::T::from(1e-6))
     }
-    pub fn new(rhs: CRhs, mass: CMass, init: CInit, p: CRhs::V) -> Self {
+    pub fn new(rhs: CRhs, mass: CMass, init: CInit) -> Self {
         let t0 = CRhs::T::zero();
         let rhs = Rc::new(rhs);
-        let p = Rc::new(p);
         let mass = Rc::new(mass);
         let init = Rc::new(init);
         let h0 = CRhs::T::one();
@@ -156,7 +151,6 @@ impl <CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>,
             rhs,
             mass,
             init,
-            p,
             rtol,
             atol,
             t0,
@@ -168,6 +162,8 @@ impl <CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>,
         self.init.as_ref()
     }
 }
+
+
 impl <M, F, G> OdeSolverProblem<Closure<M, F, G>, UnitCallable<M>, ConstantClosure<M>> 
 where
     M: Matrix,
@@ -177,24 +173,23 @@ where
     pub fn new_ode(rhs: F, jac: G, init: impl Fn(&M::V, M::T) -> M::V + 'static, p: M::V) -> Self {
         let t0 = M::T::zero();
         let h0 = M::T::one();
-        let nparams = p.len();
+        let nparams = 0;
         let y0 = init(&p, t0);
+        let p = Rc::new(p);
         let nstates = y0.len();
-        let rhs = Rc::new(Closure::new(rhs, jac, nstates, nstates, nparams));
+        let rhs = Rc::new(Closure::new(rhs, jac, nstates, nstates, p.clone()));
         let mass = Rc::new(UnitCallable::new(nstates));
-        let init = Rc::new(ConstantClosure::new(init, nstates, nstates, nparams));
+        let init = Rc::new(ConstantClosure::new(init, nstates, nstates, p.clone()));
         let rtol = Self::default_rtol();
         let atol = Rc::new(Self::default_atol(nstates));
-        let p = Rc::new(p);
         Self {
             rhs,
             mass,
             init,
-            p,
             rtol,
             atol,
             t0,
-            h0
+            h0,
         }
     }
 }
@@ -209,24 +204,23 @@ where
     pub fn new_ode_with_mass(rhs: F, jac: G, mass: H, init: impl Fn(&M::V, M::T) -> M::V + 'static, p: M::V) -> Self {
         let t0 = M::T::zero();
         let h0 = M::T::one();
-        let nparams = p.len();
+        let nparams = 0;
         let y0 = init(&p, t0);
         let nstates = y0.len();
-        let rhs = Rc::new(Closure::new(rhs, jac, nstates, nstates, nparams));
-        let mass = Rc::new(LinearClosure::new(mass, nstates, nstates, nparams));
-        let init = Rc::new(ConstantClosure::new(init, nstates, nstates, nparams));
+        let p = Rc::new(p);
+        let rhs = Rc::new(Closure::new(rhs, jac, nstates, nstates, p.clone()));
+        let mass = Rc::new(LinearClosure::new(mass, nstates, nstates, p.clone()));
+        let init = Rc::new(ConstantClosure::new(init, nstates, nstates, p.clone()));
         let rtol = Self::default_rtol();
         let atol = Rc::new(Self::default_atol(nstates));
-        let p = Rc::new(p);
         Self {
             rhs,
             mass,
             init,
-            p,
             rtol,
             atol,
             t0,
-            h0
+            h0,
         }
     }
 }

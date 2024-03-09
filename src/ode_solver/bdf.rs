@@ -280,10 +280,10 @@ where
         scale *= problem.rtol;
         scale += problem.atol.as_ref();
 
-        let f0 = problem.rhs.call(&state.y, &problem.p, state.t);
+        let f0 = problem.rhs.call(&state.y, state.t);
         let y1 = &state.y + &f0 * state.h;
         let t1 = state.t + state.h;
-        let f1 = problem.rhs.call(&y1, &problem.p, t1);
+        let f1 = problem.rhs.call(&y1, t1);
 
         // store f1 in diff[1] for use in step size control
         self.diff.column_mut(1).copy_from(&(&f0 * state.h));

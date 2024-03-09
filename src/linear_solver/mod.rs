@@ -60,16 +60,16 @@ pub mod tests {
     fn linear_problem<M: DenseMatrix + 'static>() -> (SolverProblem<impl LinearOp<M = M, V = M::V, T = M::T>>, Vec<LinearSolveSolution<M::V>>) {
         let diagonal = M::V::from_vec(vec![2.0.into(), 2.0.into()]);
         let jac = M::from_diagonal(&diagonal);
+        let p = Rc::new(M::V::zeros(0));
         let op = Rc::new(LinearClosure::new(
             // f = J * x
             move | x, _p, _t, y | jac.gemv(M::T::one(), x, M::T::zero(), y),
-            2, 2, 0
+            2, 2, p
         ));
-        let p = Rc::new(M::V::zeros(0));
         let t = M::T::zero();
         let rtol = M::T::from(1e-6);
         let atol = Rc::new(M::V::from_vec(vec![1e-6.into(), 1e-6.into()]));
-        let problem = SolverProblem::new(op, p, t, atol, rtol);
+        let problem = SolverProblem::new(op, t, atol, rtol);
         let solns = vec![
             LinearSolveSolution::new(M::V::from_vec(vec![2.0.into(), 4.0.into()]), M::V::from_vec(vec![1.0.into(), 2.0.into()]))
         ];

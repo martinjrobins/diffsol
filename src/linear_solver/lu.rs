@@ -50,7 +50,7 @@ impl<T: Scalar, C: LinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> LinearSolver
     }
 
     fn set_problem(&mut self, problem: SolverProblem<C>) {
-        self.lu = Some(nalgebra::LU::new(problem.f.jacobian(&problem.p, problem.t)));
+        self.lu = Some(nalgebra::LU::new(problem.f.jacobian(problem.t)));
         self.problem = Some(problem);
     }
 }

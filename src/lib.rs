@@ -1,4 +1,3 @@
-
 pub trait Scalar: nalgebra::Scalar + From<f64> + Display + SimdRealField + ComplexField + Copy + ClosedSub + From<f64> + ClosedMul + ClosedDiv + ClosedAdd + Signed + PartialOrd + Pow<Self, Output=Self> + Pow<i32, Output=Self> {
     const EPSILON: Self;
     const INFINITY: Self;

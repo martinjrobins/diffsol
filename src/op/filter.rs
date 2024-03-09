@@ -49,20 +49,20 @@ impl<C: NonLinearOp> Op for FilterCallable<C>
 
 impl<C: NonLinearOp> NonLinearOp for FilterCallable<C> 
 {
-    fn call_inplace(&self, x: &Self::V, p: &Self::V, t: Self::T, y: &mut Self::V) {
+    fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
         let mut y_full = self.y_full.borrow_mut();
         let mut x_full = self.x_full.borrow_mut();
         x_full.scatter_from(x, &self.indices);
-        self.callable.call_inplace(&x_full, p, t, &mut y_full);
+        self.callable.call_inplace(&x_full, t, &mut y_full);
         y.gather_from(&y_full, &self.indices);
     }
-    fn jac_mul_inplace(&self, x: &Self::V, p: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+    fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         let mut y_full = self.y_full.borrow_mut();
         let mut x_full = self.x_full.borrow_mut();
         let mut v_full = self.v_full.borrow_mut();
         x_full.scatter_from(x, &self.indices);
         v_full.scatter_from(v, &self.indices);
-        self.callable.jac_mul_inplace(&x_full, p, t, &v_full, &mut y_full);
+        self.callable.jac_mul_inplace(&x_full, t, &v_full, &mut y_full);
         y.gather_from(&y_full, &self.indices);
     }
 }

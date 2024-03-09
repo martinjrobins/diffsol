@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::{Matrix, Vector};
 
 use super::{ConstantOp, Op};
@@ -12,15 +14,16 @@ where
     nstates: usize,
     nout: usize,
     nparams: usize,
-    _phantom: std::marker::PhantomData<M>,
+    p: Rc<M::V>,
 }
 
 impl<M> ConstantClosure<M> 
 where
     M: Matrix,
 {
-    pub fn new(func: impl Fn(&M::V, M::T) -> M::V + 'static, nstates: usize, nout: usize, nparams: usize) -> Self {
-        Self { func: Box::new(func), nstates, nout, nparams, _phantom: std::marker::PhantomData }
+    pub fn new(func: impl Fn(&M::V, M::T) -> M::V + 'static, nstates: usize, nout: usize, p: Rc<M::V>) -> Self {
+        let nparams = p.len();
+        Self { func: Box::new(func), nstates, nout, nparams, p }
     }
 }
 
@@ -47,8 +50,8 @@ impl<M> ConstantOp for ConstantClosure<M>
 where
     M: Matrix,
 {
-    fn call_inplace(&self, p: &M::V, t: M::T, y: &mut M::V) {
-        y.copy_from(&(self.func)(p, t))
+    fn call_inplace(&self, t: M::T, y: &mut M::V) {
+        y.copy_from(&(self.func)(self.p.as_ref(), t))
     }
 }
 

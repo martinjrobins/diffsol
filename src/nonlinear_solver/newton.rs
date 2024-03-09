@@ -98,7 +98,7 @@ impl<C: NonLinearOp> NonLinearSolver<C> for NewtonNonlinearSolver<C> {
         self.niter = 0;
         loop {
             self.niter += 1;
-            problem.f.call_inplace(xn, &problem.p, problem.t, &mut tmp);
+            problem.f.call_inplace(xn, problem.t, &mut tmp);
             //tmp = f_at_n
 
             self.linear_solver.solve_in_place(&mut tmp)?;
