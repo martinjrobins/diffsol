@@ -1,4 +1,4 @@
-use crate::{op::{ConstantOp, LinearOp, NonLinearOp}, ode_solver::{OdeSolverProblem, OdeSolverSolution}, DenseMatrix, Vector};
+use crate::{ode_solver::{OdeSolverProblem, OdeSolverSolution}, DenseMatrix, OdeEquations, Vector};
 use std::ops::MulAssign;
 use num_traits::Zero;
 use nalgebra::ComplexField;
@@ -35,14 +35,14 @@ fn exponential_decay_with_algebraic_init<M: DenseMatrix>(_p: &M::V, _t: M::T) ->
     M::V::from_vec(vec![1.0.into(), 1.0.into(), 0.0.into()])
 }
 
-pub fn exponential_decay_with_algebraic_problem<M: DenseMatrix + 'static>() -> (OdeSolverProblem<impl NonLinearOp<M = M, V = M::V, T = M::T>, impl LinearOp<M = M, V = M::V, T = M::T> , impl ConstantOp<M = M, V = M::V, T = M::T>>, OdeSolverSolution<M::V>) {
+pub fn exponential_decay_with_algebraic_problem<M: DenseMatrix + 'static>() -> (OdeSolverProblem<impl OdeEquations<M=M, V=M::V, T=M::T>>, OdeSolverSolution<M::V>) {
     let p = M::V::from_vec(vec![0.1.into()]);
     let problem = OdeSolverProblem::new_ode_with_mass(
         exponential_decay_with_algebraic::<M>,
         exponential_decay_with_algebraic_jacobian::<M>,
         exponential_decay_with_algebraic_mass::<M>,
         exponential_decay_with_algebraic_init::<M>,
-        p.clone(),
+        p.clone()
     );
     let mut soln = OdeSolverSolution::default();
     for i in 0..10 {

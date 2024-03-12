@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::{op::ode::BdfCallable, matrix::MatrixRef, NonLinearSolver, ConstantOp, IndexType, LinearOp, DenseMatrix, MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut, LU};
 
-use super::{OdeSolverState, OdeSolverMethod, OdeSolverProblem};
+use super::{equations::OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState};
 
 #[derive(Clone, Debug, Serialize)]
 pub struct BdfStatistics<T: Scalar>{
@@ -41,26 +41,26 @@ impl<T: Scalar> Default for BdfStatistics<T> {
     }
 }
 
-pub struct Bdf<M: DenseMatrix<T = CRhs::T, V = CRhs::V>, CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>, CInit: ConstantOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> {
-    nonlinear_solver: Box<dyn NonLinearSolver<BdfCallable<CRhs, CMass>>>,
-    ode_problem: Option<OdeSolverProblem<CRhs, CMass, CInit>>,
+pub struct Bdf<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations> {
+    nonlinear_solver: Box<dyn NonLinearSolver<BdfCallable<Eqn>>>,
+    ode_problem: Option<OdeSolverProblem<Eqn>>,
     order: usize,
     n_equal_steps: usize,
     diff: M,
     diff_tmp: M,
     u: M,
-    alpha: Vec<CRhs::T>,
-    gamma: Vec<CRhs::T>,
-    error_const: Vec<CRhs::T>,
-    statistics: BdfStatistics<CRhs::T>,
+    alpha: Vec<Eqn::T>,
+    gamma: Vec<Eqn::T>,
+    error_const: Vec<Eqn::T>,
+    statistics: BdfStatistics<Eqn::T>,
 }
 
-impl<T: Scalar, CRhs: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CMass: LinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CInit: ConstantOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static> Default for Bdf<DMatrix<T>, CRhs, CMass, CInit> 
+impl<T: Scalar, Eqn: OdeEquations<T=T, V=DVector<T>, M=DMatrix<T>>> Default for Bdf<DMatrix<T>, Eqn> 
 {
     fn default() -> Self {
         let n = 1;
         let linear_solver = LU::default();
-        let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<CRhs, CMass>>::new(linear_solver));
+        let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<Eqn>>::new(linear_solver));
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
         Self { 
             ode_problem: None,
@@ -80,14 +80,14 @@ impl<T: Scalar, CRhs: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static
 
 
 // implement clone for bdf
-impl<T: Scalar, CRhs: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CMass: LinearOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static, CInit: ConstantOp<M = DMatrix<T>, V = DVector<T>, T=T> + 'static> Clone for Bdf<DMatrix<T>, CRhs, CMass, CInit> 
+impl<T: Scalar, Eqn: OdeEquations<T=T, V=DVector<T>, M=DMatrix<T>>> Clone for Bdf<DMatrix<T>, Eqn> 
 where
     for<'b> &'b DVector<T>: VectorRef<DVector<T>>,
 {
     fn clone(&self) -> Self {
         let n = self.diff.nrows();
         let linear_solver = LU::default();
-        let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<CRhs, CMass>>::new(linear_solver));
+        let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<Eqn>>::new(linear_solver));
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
         Self { 
             ode_problem: self.ode_problem.clone(),
@@ -105,25 +105,25 @@ where
     }
 }
 
-impl<M: DenseMatrix<T = CRhs::T, V = CRhs::V>, CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>, CInit: ConstantOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> Bdf<M, CRhs, CMass, CInit> 
+impl<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations> Bdf<M, Eqn> 
 where
-    for<'b> &'b CRhs::V: VectorRef<CRhs::V>,
-    for<'b> &'b CRhs::M: MatrixRef<CRhs::M>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
     const MAX_ORDER: IndexType = 5;
     const NEWTON_MAXITER: IndexType = 4;
     const MIN_FACTOR: f64 = 0.2;
     const MAX_FACTOR: f64 = 10.0;
     
-    pub fn get_statistics(&self) -> &BdfStatistics<CRhs::T> {
+    pub fn get_statistics(&self) -> &BdfStatistics<Eqn::T> {
         &self.statistics
     }
 
-    fn nonlinear_problem_op(&self) -> Option<&Rc<BdfCallable<CRhs, CMass>>> {
+    fn nonlinear_problem_op(&self) -> Option<&Rc<BdfCallable<Eqn>>> {
         Some(&self.nonlinear_solver.as_ref().problem()?.f)
     }
 
-    fn _compute_r(order: usize, factor: CRhs::T) -> M {
+    fn _compute_r(order: usize, factor: Eqn::T) -> M {
         //computes the R matrix with entries
         //given by the first equation on page 8 of [1]
         //
@@ -149,7 +149,7 @@ where
         r
     }
 
-    fn _update_step_size(&mut self, factor: CRhs::T, state: &mut OdeSolverState<CRhs::M>) {
+    fn _update_step_size(&mut self, factor: Eqn::T, state: &mut OdeSolverState<Eqn::M>) {
         //If step size h is changed then also need to update the terms in
         //the first equation of page 9 of [1]:
         //
@@ -160,14 +160,14 @@ where
         self.n_equal_steps = 0;
 
         // update D using equations in section 3.2 of [1]
-        self.u = Self::_compute_r(self.order, CRhs::T::one());
+        self.u = Self::_compute_r(self.order, Eqn::T::one());
         let r = Self::_compute_r(self.order, factor);
-        let ru = r * &self.u;
+        let ru = r.mat_mul(&self.u);
         // D[0:order+1] = R * U * D[0:order+1]
         {
             let d_zero_order = self.diff.columns(0, self.order + 1);
             let mut d_zero_order_tmp = self.diff_tmp.columns_mut(0, self.order + 1);
-            d_zero_order_tmp.gemm_vo(CRhs::T::one(),  &d_zero_order, &ru, CRhs::T::zero()); // diff_sub = diff * RU
+            d_zero_order_tmp.gemm_vo(Eqn::T::one(),  &d_zero_order, &ru, Eqn::T::zero()); // diff_sub = diff * RU
         }
         std::mem::swap(&mut self.diff, &mut self.diff_tmp);
         
@@ -178,7 +178,7 @@ where
     }
 
     
-    fn _update_differences(&mut self, d: &CRhs::V) {
+    fn _update_differences(&mut self, d: &Eqn::V) {
         //update of difference equations can be done efficiently
         //by reusing d and D.
         //
@@ -199,11 +199,11 @@ where
         }
     }
     
-    fn _predict_forward(&mut self, state: &OdeSolverState<CRhs::M>) -> CRhs::V {
+    fn _predict_forward(&mut self, state: &OdeSolverState<Eqn::M>) -> Eqn::V {
         let nstates = self.diff.nrows();
         // predict forward to new step (eq 2 in [1])
         let y_predict = {
-            let mut y_predict = <CRhs::V as Vector>::zeros(nstates);
+            let mut y_predict = <Eqn::V as Vector>::zeros(nstates);
             for i in 0..=self.order {
                 y_predict += self.diff.column(i);
             }
@@ -224,35 +224,35 @@ where
 }
 
 
-impl<M: DenseMatrix<T = CRhs::T, V = CRhs::V>, CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>, CInit: ConstantOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> OdeSolverMethod<CRhs, CMass, CInit> for Bdf<M, CRhs, CMass, CInit> 
+impl<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations> OdeSolverMethod<Eqn> for Bdf<M, Eqn> 
 where
-    for<'b> &'b CRhs::V: VectorRef<CRhs::V>,
-    for<'b> &'b CRhs::M: MatrixRef<CRhs::M>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
-    fn interpolate(&self, state: &OdeSolverState<CRhs::M>, t: CRhs::T) -> CRhs::V {
+    fn interpolate(&self, state: &OdeSolverState<Eqn::M>, t: Eqn::T) -> Eqn::V {
         //interpolate solution at time values t* where t-h < t* < t
         //
         //definition of the interpolating polynomial can be found on page 7 of [1]
-        let mut time_factor = CRhs::T::from(1.0);
+        let mut time_factor = Eqn::T::from(1.0);
         let mut order_summation = self.diff.column(0).into_owned();
         for i in 0..self.order {
-            let i_t = CRhs::T::from(i as f64);
-            time_factor *= (t - (state.t - state.h * i_t)) / (state.h * (CRhs::T::one() + i_t));
+            let i_t = Eqn::T::from(i as f64);
+            time_factor *= (t - (state.t - state.h * i_t)) / (state.h * (Eqn::T::one() + i_t));
             order_summation += self.diff.column(i + 1) * time_factor;
         }
         order_summation
     }
     
-    fn problem(&self) -> Option<&OdeSolverProblem<CRhs, CMass, CInit>> {
+    fn problem(&self) -> Option<&OdeSolverProblem<Eqn>> {
         self.ode_problem.as_ref()
     }
     
     
     
-    fn set_problem(&mut self, state: &mut OdeSolverState<CRhs::M>, problem: OdeSolverProblem<CRhs, CMass, CInit>) {
+    fn set_problem(&mut self, state: &mut OdeSolverState<Eqn::M>, problem: OdeSolverProblem<Eqn>) {
         self.ode_problem = Some(problem);
         let problem = self.ode_problem.as_ref().unwrap();
-        let nstates = problem.rhs.nstates();
+        let nstates = problem.eqn.nstates();
         self.order = 1usize; 
         self.n_equal_steps = 0;
         self.diff = M::zeros(nstates, Self::MAX_ORDER + 3);
@@ -260,18 +260,18 @@ where
         self.diff.column_mut(0).copy_from(&state.y);
         
         // kappa values for difference orders, taken from Table 1 of [1]
-        let kappa = [CRhs::T::from(0.0), CRhs::T::from(-0.1850), CRhs::T::from(-1.0) / CRhs::T::from(9.0), CRhs::T::from(-0.0823), CRhs::T::from(-0.0415), CRhs::T::from(0.0)];
-        self.alpha = vec![CRhs::T::zero()];
-        self.gamma = vec![CRhs::T::zero()];
-        self.error_const = vec![CRhs::T::one()];
+        let kappa = [Eqn::T::from(0.0), Eqn::T::from(-0.1850), Eqn::T::from(-1.0) / Eqn::T::from(9.0), Eqn::T::from(-0.0823), Eqn::T::from(-0.0415), Eqn::T::from(0.0)];
+        self.alpha = vec![Eqn::T::zero()];
+        self.gamma = vec![Eqn::T::zero()];
+        self.error_const = vec![Eqn::T::one()];
 
         #[allow(clippy::needless_range_loop)]
         for i in 1..=Self::MAX_ORDER {
-            let i_t = CRhs::T::from(i as f64);
-            let one_over_i = CRhs::T::one() / i_t;
-            let one_over_i_plus_one = CRhs::T::one() / (i_t + CRhs::T::one());
+            let i_t = Eqn::T::from(i as f64);
+            let one_over_i = Eqn::T::one() / i_t;
+            let one_over_i_plus_one = Eqn::T::one() / (i_t + Eqn::T::one());
             self.gamma.push(self.gamma[i-1] + one_over_i);
-            self.alpha.push(CRhs::T::one() / ((CRhs::T::one() - kappa[i]) * self.gamma[i]));
+            self.alpha.push(Eqn::T::one() / ((Eqn::T::one() - kappa[i]) * self.gamma[i]));
             self.error_const.push(kappa[i] * self.gamma[i] + one_over_i_plus_one);
         }
 
@@ -280,10 +280,10 @@ where
         scale *= problem.rtol;
         scale += problem.atol.as_ref();
 
-        let f0 = problem.rhs.call(&state.y, state.t);
+        let f0 = problem.eqn.rhs(state.t, &state.y);
         let y1 = &state.y + &f0 * state.h;
         let t1 = state.t + state.h;
-        let f1 = problem.rhs.call(&y1, t1);
+        let f1 = problem.eqn.rhs(t1, &y1);
 
         // store f1 in diff[1] for use in step size control
         self.diff.column_mut(1).copy_from(&(&f0 * state.h));
@@ -292,10 +292,10 @@ where
         df.component_div_assign(&scale);
         let d2 = df.norm();
 
-        let one_over_order_plus_one = CRhs::T::one() / (CRhs::T::from(self.order as f64) + CRhs::T::one());
+        let one_over_order_plus_one = Eqn::T::one() / (Eqn::T::from(self.order as f64) + Eqn::T::one());
         let mut new_h = state.h * d2.pow(-one_over_order_plus_one);
-        if new_h > CRhs::T::from(100.0) * state.h {
-            new_h = CRhs::T::from(100.0) * state.h;
+        if new_h > Eqn::T::from(100.0) * state.h {
+            new_h = Eqn::T::from(100.0) * state.h;
         }
         state.h = new_h;
 
@@ -306,22 +306,22 @@ where
         let _test = self.nonlinear_problem_op().unwrap();
         
         // setup U
-        self.u = Self::_compute_r(self.order, CRhs::T::one());
+        self.u = Self::_compute_r(self.order, Eqn::T::one());
         
         // update statistics
         self.statistics.initial_step_size = state.h;
     }
 
-    fn step(&mut self, state: &mut OdeSolverState<CRhs::M>) -> Result<()> {
+    fn step(&mut self, state: &mut OdeSolverState<Eqn::M>) -> Result<()> {
         // we will try and use the old jacobian unless convergence of newton iteration
         // fails
         // tells callable to update rhs jacobian if the jacobian is requested (by nonlinear solver)
         // initialise step size and try to make the step,
         // iterate, reducing step size until error is in bounds
-        let mut d: CRhs::V;
-        let mut safety: CRhs::T;
-        let mut error_norm: CRhs::T;
-        let mut scale_y: CRhs::V;
+        let mut d: Eqn::V;
+        let mut safety: Eqn::T;
+        let mut error_norm: Eqn::T;
+        let mut scale_y: Eqn::V;
         let mut updated_jacobian = false;
         let mut y_predict = self._predict_forward(state); 
 
@@ -352,9 +352,9 @@ where
                     error_norm = error.norm();
                     let maxiter = self.nonlinear_solver.max_iter() as f64;
                     let niter = self.nonlinear_solver.niter() as f64;
-                    safety = CRhs::T::from(0.9 * (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter));
+                    safety = Eqn::T::from(0.9 * (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter));
                     
-                    if error_norm <= CRhs::T::from(1.0) {
+                    if error_norm <= Eqn::T::from(1.0) {
                         // step is accepted
                         break y_new;
                     } else {
@@ -362,9 +362,9 @@ where
                         // calculate optimal step size factor as per eq 2.46 of [2]
                         // and reduce step size and try again
                         let order = self.order as f64;
-                        let mut factor = safety * error_norm.pow(CRhs::T::from(-1.0 / (order + 1.0)));
-                        if factor < CRhs::T::from(Self::MIN_FACTOR) {
-                            factor = CRhs::T::from(Self::MIN_FACTOR);
+                        let mut factor = safety * error_norm.pow(Eqn::T::from(-1.0 / (order + 1.0)));
+                        if factor < Eqn::T::from(Self::MIN_FACTOR) {
+                            factor = Eqn::T::from(Self::MIN_FACTOR);
                         }
                         // todo, do we need to update the linear solver problem here since we converged?
                         self._update_step_size(factor, state);
@@ -381,7 +381,7 @@ where
                     if updated_jacobian {
                         // newton iteration did not converge, but jacobian has already been
                         // evaluated so reduce step size by 0.3 (as per [1]) and try again
-                        self._update_step_size(CRhs::T::from(0.3), state);
+                        self._update_step_size(Eqn::T::from(0.3), state);
 
                         // new prediction
                         y_predict = self._predict_forward(state);
@@ -429,19 +429,19 @@ where
                 error_m.component_div_assign(&scale_y);
                 error_m.norm()
             } else {
-                CRhs::T::INFINITY
+                Eqn::T::INFINITY
             };
             let error_p_norm = if order < Self::MAX_ORDER {
                 let mut error_p = self.diff.column(order + 2) * self.error_const[order + 1];
                 error_p.component_div_assign(&scale_y);
                 error_p.norm()
             } else {
-                CRhs::T::INFINITY
+                Eqn::T::INFINITY
             };
 
             let error_norms = [error_m_norm, error_norm, error_p_norm];
             let factors = error_norms.into_iter().enumerate().map(|(i, error_norm)| {
-                error_norm.pow(CRhs::T::from(-1.0 / (i as f64 + order as f64)))
+                error_norm.pow(Eqn::T::from(-1.0 / (i as f64 + order as f64)))
             }).collect::<Vec<_>>();
 
             // now we have the three factors for orders k-1, k and k+1, pick the maximum in
@@ -454,8 +454,8 @@ where
             }
 
             let mut factor = safety * factors[max_index];
-            if factor > CRhs::T::from(Self::MAX_FACTOR) {
-                factor = CRhs::T::from(Self::MAX_FACTOR);
+            if factor > Eqn::T::from(Self::MAX_FACTOR) {
+                factor = Eqn::T::from(Self::MAX_FACTOR);
             }
             self._update_step_size(factor, state);
         }

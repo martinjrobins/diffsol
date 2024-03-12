@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{op::{linearise::LinearisedOp, ConstantOp, LinearOp, Op}, ode_solver::OdeSolverProblem, IndexType, NonLinearOp};
+use crate::{ode_solver::OdeSolverProblem, op::{linearise::LinearisedOp, ConstantOp, LinearOp, Op}, IndexType, NonLinearOp, OdeEquations};
 
 
 pub struct SolverStatistics {
@@ -25,7 +25,7 @@ impl<C: Op> SolverProblem<C> {
             atol,
         }
     }
-    pub fn new_from_ode_problem(f: Rc<C>, other: &OdeSolverProblem<impl NonLinearOp<M = C::M, V = C::V, T = C::T>, impl LinearOp<M = C::M, V = C::V, T = C::T> , impl ConstantOp<M = C::M, V = C::V, T = C::T>>) -> Self {
+    pub fn new_from_ode_problem(f: Rc<C>, other: &OdeSolverProblem<impl OdeEquations<T=C::T, V=C::V, M=C::M>>) -> Self {
         Self {
             f,
             t: other.t0,

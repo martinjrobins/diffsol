@@ -8,6 +8,7 @@ use crate::{Scalar, IndexType};
 mod serial;
 
 pub trait VectorIndex: Sized + Index<IndexType, Output=IndexType> + Debug + Display {
+    fn zeros(len: IndexType) -> Self;
     fn len(&self) -> IndexType;
     fn is_empty(&self) -> bool {
         self.len() == 0

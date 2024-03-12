@@ -1,19 +1,18 @@
-use crate::{matrix::{DenseMatrix, MatrixRef}, ode_solver::OdeSolverProblem, IndexType, Vector, VectorRef, Matrix};
+use crate::{matrix::{DenseMatrix, MatrixRef}, ode_solver::{equations::OdeEquations, OdeSolverProblem}, IndexType, Matrix, Vector, VectorRef};
 use num_traits::{One, Zero};
 use std::{cell::RefCell, ops::{Deref, SubAssign}, rc::Rc};
 
 use super::{ConstantOp, LinearOp, NonLinearOp, Op};
 
 // callable to solve for F(y) = M (y' + psi) - c * f(y) = 0 
-pub struct BdfCallable<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> 
+pub struct BdfCallable<Eqn: OdeEquations> 
 {
-    rhs: Rc<CRhs>,
-    mass: Rc<CMass>,
-    psi_neg_y0: RefCell<CRhs::V>,
-    c: RefCell<CRhs::T>,
-    rhs_jac: RefCell<CRhs::M>,
-    jac: RefCell<CRhs::M>,
-    mass_jac: RefCell<CRhs::M>,
+    eqn: Rc<Eqn>,
+    psi_neg_y0: RefCell<Eqn::V>,
+    c: RefCell<Eqn::T>,
+    jac: RefCell<Eqn::M>,
+    rhs_jac: RefCell<Eqn::M>,
+    mass_jac: RefCell<Eqn::M>,
     rhs_jacobian_is_stale: RefCell<bool>,
     jacobian_is_stale: RefCell<bool>,
     mass_jacobian_is_stale: RefCell<bool>,
@@ -25,26 +24,25 @@ pub struct BdfCallable<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs:
 
 
 
-impl<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> BdfCallable<CRhs, CMass> 
+impl<Eqn: OdeEquations> BdfCallable<Eqn> 
 {
-    pub fn new<CInit: ConstantOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>>(ode_problem: &OdeSolverProblem<CRhs, CMass, CInit>) -> Self {
-        let n = ode_problem.rhs.nstates();
-        let c = RefCell::new(CRhs::T::zero());
-        let psi_neg_y0 = RefCell::new(<CRhs::V as Vector>::zeros(n));
-        let rhs_jac = RefCell::new(CRhs::M::zeros(n, n));
-        let jac = RefCell::new(CRhs::M::zeros(n, n));
-        let mass_jac = RefCell::new(CRhs::M::zeros(n, n));
+    pub fn new(ode_problem: &OdeSolverProblem<Eqn>) -> Self {
+        let eqn = ode_problem.eqn.clone();
+        let n = ode_problem.eqn.nstates();
+        let c = RefCell::new(Eqn::T::zero());
+        let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n));
+        let rhs_jac = RefCell::new(Eqn::M::zeros(n, n));
+        let jac = RefCell::new(Eqn::M::zeros(n, n));
+        let mass_jac = RefCell::new(Eqn::M::zeros(n, n));
         let rhs_jacobian_is_stale = RefCell::new(true);
         let jacobian_is_stale = RefCell::new(true);
         let mass_jacobian_is_stale = RefCell::new(true);
-        let rhs = ode_problem.rhs.clone();
-        let mass = ode_problem.mass.clone();
         let number_of_rhs_jac_evals = RefCell::new(0);
         let number_of_rhs_evals = RefCell::new(0);
         let number_of_jac_evals = RefCell::new(0);
         let number_of_jac_mul_evals = RefCell::new(0);
 
-        Self { rhs, mass, psi_neg_y0, c, rhs_jac, jac, mass_jac, rhs_jacobian_is_stale, jacobian_is_stale, mass_jacobian_is_stale, number_of_rhs_jac_evals, number_of_rhs_evals, number_of_jac_evals, number_of_jac_mul_evals }
+        Self { eqn, psi_neg_y0, c, jac, rhs_jac, mass_jac, rhs_jacobian_is_stale, jacobian_is_stale, mass_jacobian_is_stale, number_of_rhs_jac_evals, number_of_rhs_evals, number_of_jac_evals, number_of_jac_mul_evals }
     }
 
     pub fn number_of_rhs_jac_evals(&self) -> usize {
@@ -59,9 +57,9 @@ impl<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> 
     pub fn number_of_jac_mul_evals(&self) -> usize {
         *self.number_of_jac_mul_evals.borrow()
     }
-    pub fn set_c(&self, h: CRhs::T, alpha: &[CRhs::T], order: IndexType) 
+    pub fn set_c(&self, h: Eqn::T, alpha: &[Eqn::T], order: IndexType) 
     where 
-        for <'b> &'b CRhs::M: MatrixRef<CRhs::M>,
+        for <'b> &'b Eqn::M: MatrixRef<Eqn::M>,
     {
         self.c.replace(h * alpha[order]);
         if !*self.rhs_jacobian_is_stale.borrow() && !*self.mass_jacobian_is_stale.borrow() {
@@ -75,7 +73,7 @@ impl<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> 
             self.jacobian_is_stale.replace(true);
         }
     }
-    pub fn set_psi_and_y0<M: DenseMatrix<T=CRhs::T, V=CRhs::V>>(&self, diff: &M, gamma: &[CRhs::T], alpha: &[CRhs::T], order: usize, y0: &CRhs::V) {
+    pub fn set_psi_and_y0<M: DenseMatrix<T=Eqn::T, V=Eqn::V>>(&self, diff: &M, gamma: &[Eqn::T], alpha: &[Eqn::T], order: usize, y0: &Eqn::V) {
         // update psi term as defined in second equation on page 9 of [1]
         let mut new_psi_neg_y0 = diff.column(1) * gamma[1];
         for (i, &gamma_i) in gamma.iter().enumerate().take(order + 1).skip(2) {
@@ -94,55 +92,62 @@ impl<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> 
 }
 
 
-impl<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> Op for  BdfCallable<CRhs, CMass> 
+impl<Eqn: OdeEquations> Op for  BdfCallable<Eqn> 
 {
-    type V = CRhs::V;
-    type T = CRhs::T;
-    type M = CRhs::M;
+    type V = Eqn::V;
+    type T = Eqn::T;
+    type M = Eqn::M;
     fn nstates(&self) -> usize {
-        self.rhs.nstates()
+        self.eqn.nstates()
     }
     fn nout(&self) -> usize {
-        self.rhs.nout()
+        self.eqn.nstates()
     }
     fn nparams(&self) -> usize {
-        self.rhs.nparams()
+        self.eqn.nparams()
     }
 }
 
 // callable to solve for F(y) = M (y' + psi) - f(y) = 0 
-impl<CRhs: NonLinearOp, CMass: LinearOp<M = CRhs::M, V = CRhs::V, T = CRhs::T>> NonLinearOp for  BdfCallable<CRhs, CMass> 
+impl<Eqn: OdeEquations> NonLinearOp for  BdfCallable<Eqn> 
 where 
-    for <'b> &'b CRhs::V: VectorRef<CRhs::V>,
-    for <'b> &'b CRhs::M: MatrixRef<CRhs::M>,
+    for <'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for <'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
     // F(y) = M (y - y0 + psi) - c * f(y) = 0
-    fn call_inplace(&self, x: &CRhs::V, t: CRhs::T, y: &mut CRhs::V) {
-        self.rhs.call_inplace(x, t, y);
+    fn call_inplace(&self, x: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
         let psi_neg_y0_ref = self.psi_neg_y0.borrow();
         let psi_neg_y0 = psi_neg_y0_ref.deref();
+        let mut tmp = x + psi_neg_y0;
+        self.eqn.mass_inplace(t, &tmp, y);
+        self.eqn.rhs_inplace(t, x, &mut tmp);
+        // y = - c * tmp  + y``
         let c = *self.c.borrow().deref();
-        let tmp = x + psi_neg_y0;
-        self.mass.as_ref().gemv(&tmp, t, CRhs::T::one(), -c, y);
+        y.axpy(-c, &tmp, Eqn::T::one());
+
         let number_of_rhs_evals = *self.number_of_rhs_evals.borrow() + 1;
         self.number_of_rhs_evals.replace(number_of_rhs_evals);
-}
-    fn jac_mul_inplace(&self, x: &CRhs::V, t: CRhs::T, v: &CRhs::V, y: &mut CRhs::V) {
+    }
+    // (M - c * f'(y)) v
+    fn jac_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
+        self.eqn.mass_inplace(t, v, y);
+        let tmp = self.eqn.rhs_jac(t, x, v);
+        // y = - c * tmp  + y
         let c = *self.c.borrow().deref();
-        self.rhs.jac_mul_inplace(x, t, v, y);
-        self.mass.as_ref().gemv(v, t,  CRhs::T::one(), -c, y);
+        y.axpy(-c, &tmp, Eqn::T::one());
+
         let number_of_jac_mul_evals = *self.number_of_jac_mul_evals.borrow() + 1;
         self.number_of_jac_mul_evals.replace(number_of_jac_mul_evals);
     }
 
-    fn jacobian(&self, x: &CRhs::V, t: CRhs::T) -> CRhs::M {
+    fn jacobian(&self, x: &Eqn::V, t: Eqn::T) -> Eqn::M {
         if *self.mass_jacobian_is_stale.borrow() {
-            self.mass_jac.replace(self.mass.jacobian(t));
+            self.mass_jac.replace(self.eqn.mass_matrix(t));
             self.mass_jacobian_is_stale.replace(false);
             self.jacobian_is_stale.replace(true);
         }
         if *self.rhs_jacobian_is_stale.borrow() {
-            self.rhs_jac.replace(self.rhs.jacobian(x, t));
+            self.rhs_jac.replace(self.eqn.rhs_jacobian(x, t));
             let number_of_rhs_jac_evals = *self.number_of_rhs_jac_evals.borrow() + 1;
             self.number_of_rhs_jac_evals.replace(number_of_rhs_jac_evals);
             self.rhs_jacobian_is_stale.replace(false);

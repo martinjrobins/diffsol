@@ -5,6 +5,9 @@ use crate::{Scalar, IndexType};
 use super::{Vector, VectorView, VectorCommon, VectorViewMut, VectorIndex};
 
 impl VectorIndex for DVector<IndexType> {
+    fn zeros(len: IndexType) -> Self {
+        DVector::from_element(len, 0)
+    }
     fn len(&self) -> crate::IndexType {
         self.len()
     }

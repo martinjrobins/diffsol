@@ -1,6 +1,7 @@
 use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 use std::fmt::Debug;
 
+use num_traits::{One, Zero};
 use crate::{IndexType, Scalar, Vector};
 use anyhow::Result;
 
@@ -49,13 +50,11 @@ impl <'a, M> MatrixCommon for &'a mut M where M: MatrixCommon {
 pub trait MatrixOpsByValue<Rhs = Self, Output = Self>: MatrixCommon 
     + Add<Rhs, Output = Output>
     + Sub<Rhs, Output = Output> 
-    + Mul<Rhs, Output = Output> 
 {}
 
 impl <M, Rhs, Output> MatrixOpsByValue<Rhs, Output> for M where M: MatrixCommon 
     + Add<Rhs, Output = Output>
     + Sub<Rhs, Output = Output> 
-    + Mul<Rhs, Output = Output> 
 {}
 
 pub trait MatrixMutOpsByValue<Rhs = Self>: MatrixCommon 
@@ -103,7 +102,7 @@ impl <M, Rhs> MatrixOps<Rhs> for M where
 /// A trait allowing for references to implement matrix operations
 pub trait MatrixRef<M: MatrixCommon>:
     MatrixOpsByValue<M, M>
-    + for<'a> MatrixOpsByValue<M, M> 
+    + for<'a> MatrixOpsByValue<&'a M, M> 
     + Mul<M::T, Output = M>
     + Div<M::T, Output = M>
 {}
@@ -192,6 +191,14 @@ pub trait DenseMatrix:
     /// Get a mutable vector view of the column `i`
     fn column_mut(&mut self, i: IndexType) -> <Self::V as Vector>::ViewMut<'_>;
     
+    /// mat_mat_mul using gemm, allocating a new matrix
+    fn mat_mul(&self, b: &Self) -> Self {
+        let nrows = self.nrows();
+        let ncols = b.ncols();
+        let mut ret = Self::zeros(nrows, ncols);
+        ret.gemm(Self::T::one(), self, b, Self::T::zero());
+        ret
+    }
     
 }
 

@@ -26,11 +26,11 @@ use nalgebra::{ClosedSub, ClosedMul, ClosedDiv, ClosedAdd, SimdRealField, Comple
 use num_traits::{Signed, Pow};
 use vector::{Vector, VectorView, VectorViewMut, VectorIndex, VectorRef};
 use nonlinear_solver::{NonLinearSolver, newton::NewtonNonlinearSolver};
-use op::{NonLinearOp, LinearOp, ConstantOp};
+use op::{NonLinearOp, LinearOp, ConstantOp, ode_rhs::OdeRhs};
 use matrix::{DenseMatrix, MatrixViewMut, Matrix};
 use solver::SolverProblem;
 use linear_solver::{lu::LU, LinearSolver};
-pub use ode_solver::{OdeSolverProblem, OdeSolverState, bdf::Bdf, OdeSolverMethod};
+pub use ode_solver::{OdeSolverProblem, OdeSolverState, bdf::Bdf, OdeSolverMethod, equations::OdeEquations};
 
 
 #[cfg(test)]
