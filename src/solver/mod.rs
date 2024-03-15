@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{ode_solver::OdeSolverProblem, op::{linearise::LinearisedOp, ConstantOp, LinearOp, Op}, IndexType, NonLinearOp, OdeEquations};
+use crate::{ode_solver::OdeSolverProblem, op::{linearise::LinearisedOp, Op}, IndexType, NonLinearOp, OdeEquations};
 
 
 pub struct SolverStatistics {

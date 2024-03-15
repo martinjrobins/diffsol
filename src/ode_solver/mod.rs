@@ -1,6 +1,7 @@
 use std::rc::Rc;
+use anyhow::Context;
 
-use crate::{op::{filter::FilterCallable, Op}, Matrix, NonLinearSolver, OdeEquations, SolverProblem, Vector, OdeRhs, VectorIndex};
+use crate::{op::{filter::FilterCallable, ode_rhs::OdeRhs}, Matrix, NonLinearSolver, OdeEquations, SolverProblem, Vector, VectorIndex};
 
 use anyhow::Result;
 use num_traits::{One, Zero};
@@ -149,8 +150,10 @@ impl <Eqn: OdeEquations> OdeSolverProblem<Eqn> {
             h0,
         }
     }
-    pub fn set_params(&mut self, p: Eqn::V) {
-        self.eqn.set_params(p);
+    pub fn set_params(&mut self, p: Eqn::V) -> Result<()> {
+        let eqn = Rc::get_mut(&mut self.eqn).context("Failed to get mutable reference to equations, is there a solver created with this problem?")?;
+        eqn.set_params(p);
+        Ok(())
     }
 }
 

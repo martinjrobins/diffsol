@@ -1,4 +1,4 @@
-use crate::{ode_solver::{OdeSolverProblem, OdeSolverSolution}, op::{ConstantOp, LinearOp, NonLinearOp}, DenseMatrix, OdeEquations, Vector};
+use crate::{ode_solver::{OdeSolverProblem, OdeSolverSolution}, DenseMatrix, OdeEquations, Vector};
 use std::ops::MulAssign;
 use num_traits::Zero;
 use nalgebra::ComplexField;

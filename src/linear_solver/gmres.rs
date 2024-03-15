@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::{LinearSolver, vector::VectorRef, LinearOp, SolverProblem};
+use crate::{LinearSolver, vector::VectorRef, op::LinearOp, SolverProblem};
 
 
 pub struct GMRES<C: LinearOp> 

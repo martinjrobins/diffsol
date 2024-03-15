@@ -2,7 +2,7 @@ use crate::{matrix::{DenseMatrix, MatrixRef}, ode_solver::{equations::OdeEquatio
 use num_traits::{One, Zero};
 use std::{cell::RefCell, ops::{Deref, SubAssign}, rc::Rc};
 
-use super::{ConstantOp, LinearOp, NonLinearOp, Op};
+use super::{NonLinearOp, Op};
 
 // callable to solve for F(y) = M (y' + psi) - c * f(y) = 0 
 pub struct BdfCallable<Eqn: OdeEquations> 

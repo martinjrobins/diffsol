@@ -1,9 +1,7 @@
-use core::panic;
 use std::rc::Rc;
-use num_traits::{Zero, One};
-use std::ops::AddAssign;
+use num_traits::Zero;
 
-use crate::{op::{closure::Closure, linear_closure::{self, LinearClosure}, ode_rhs::OdeRhs, Op}, vector::VectorRef, ConstantOp, LinearOp, Matrix, NonLinearOp, Vector, VectorIndex};
+use crate::{op::{closure::Closure, linear_closure::LinearClosure, Op}, LinearOp, Matrix, NonLinearOp, Vector, VectorIndex};
 
 
 
@@ -34,10 +32,10 @@ pub trait OdeEquations: Op {
 
     /// rhs jacobian matrix J(x), re-use jacobian calculation from NonLinearOp
     fn rhs_jacobian(&self, x: &Self::V, t: Self::T) -> Self::M {
-        let rhs_inplace = |x: &Self::V, p: &Self::V, t: Self::T, y_rhs: &mut Self::V| {
+        let rhs_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y_rhs: &mut Self::V| {
             self.rhs_inplace(t, x, y_rhs);
         };
-        let rhs_jac_inplace = |x: &Self::V, p: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V| {
+        let rhs_jac_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V| {
             self.rhs_jac_inplace(t, x, v, y);
         };
         let dummy_p = Rc::new(Self::V::zeros(0));
@@ -46,14 +44,14 @@ pub trait OdeEquations: Op {
     }
 
     /// mass matrix action: y = M(t)
-    fn mass_inplace(&self, t: Self::T, v: &Self::V, y: &mut Self::V) {
+    fn mass_inplace(&self, _t: Self::T, v: &Self::V, y: &mut Self::V) {
         // assume identity mass matrix
         y.copy_from(v);
     }
 
     /// returns the indices of the algebraic state variables
     fn algebraic_indices(&self) -> <Self::V as Vector>::Index {
-        let mass = |y: &Self::V, p: &Self::V, t: Self::T, res: &mut Self::V| {
+        let mass = |y: &Self::V, _p: &Self::V, t: Self::T, res: &mut Self::V| {
             self.mass_inplace(t, y, res);
         };
         let dummy_p = Rc::new(Self::V::zeros(0));
@@ -65,7 +63,7 @@ pub trait OdeEquations: Op {
     
     /// mass matrix, re-use jacobian calculation from LinearOp
     fn mass_matrix(&self, t: Self::T) -> Self::M {
-        let mass = |y: &Self::V, p: &Self::V, t: Self::T, res: &mut Self::V| {
+        let mass = |y: &Self::V, _p: &Self::V, t: Self::T, res: &mut Self::V| {
             self.rhs_inplace(t, y, res);
         };
         let dummy_p = Rc::new(Self::V::zeros(0));

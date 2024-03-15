@@ -6,7 +6,7 @@ use nalgebra::{DVector, DMatrix};
 use num_traits::{One, Zero, Pow};
 use serde::Serialize;
 
-use crate::{op::ode::BdfCallable, matrix::MatrixRef, NonLinearSolver, ConstantOp, IndexType, LinearOp, DenseMatrix, MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut, LU};
+use crate::{op::ode::BdfCallable, matrix::MatrixRef, NonLinearSolver, IndexType, DenseMatrix, MatrixViewMut, NewtonNonlinearSolver, Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut, LU};
 
 use super::{equations::OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState};
 
@@ -55,7 +55,7 @@ pub struct Bdf<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations> {
     statistics: BdfStatistics<Eqn::T>,
 }
 
-impl<T: Scalar, Eqn: OdeEquations<T=T, V=DVector<T>, M=DMatrix<T>>> Default for Bdf<DMatrix<T>, Eqn> 
+impl<T: Scalar, Eqn: OdeEquations<T=T, V=DVector<T>, M=DMatrix<T>> + 'static> Default for Bdf<DMatrix<T>, Eqn> 
 {
     fn default() -> Self {
         let n = 1;
@@ -80,7 +80,7 @@ impl<T: Scalar, Eqn: OdeEquations<T=T, V=DVector<T>, M=DMatrix<T>>> Default for 
 
 
 // implement clone for bdf
-impl<T: Scalar, Eqn: OdeEquations<T=T, V=DVector<T>, M=DMatrix<T>>> Clone for Bdf<DMatrix<T>, Eqn> 
+impl<T: Scalar, Eqn: OdeEquations<T=T, V=DVector<T>, M=DMatrix<T>> + 'static> Clone for Bdf<DMatrix<T>, Eqn> 
 where
     for<'b> &'b DVector<T>: VectorRef<DVector<T>>,
 {

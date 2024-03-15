@@ -25,7 +25,7 @@ impl DiffSl {
     pub fn new(text: &str, p: V) -> Result<Self> {
         let compiler = Compiler::from_discrete_str(text)?;
         let mut data = compiler.get_new_data();
-        let mut ddata = compiler.get_new_data();
+        let ddata = compiler.get_new_data();
         compiler.set_inputs(p.as_slice(), data.as_mut_slice());
         let data = RefCell::new(data);
         let ddata = RefCell::new(ddata);
