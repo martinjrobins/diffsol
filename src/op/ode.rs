@@ -45,6 +45,14 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn>
         Self { eqn, psi_neg_y0, c, jac, rhs_jac, mass_jac, rhs_jacobian_is_stale, jacobian_is_stale, mass_jacobian_is_stale, number_of_rhs_jac_evals, number_of_rhs_evals, number_of_jac_evals, number_of_jac_mul_evals }
     }
 
+    pub(crate) fn set_c_direct(&mut self, c: Eqn::T) {
+        self.c.replace(c);
+    }
+
+    pub(crate) fn set_psi_neg_y0_direct(&mut self, psi_neg_y0: Eqn::V) {
+        self.psi_neg_y0.replace(psi_neg_y0);
+    }
+
     pub fn number_of_rhs_jac_evals(&self) -> usize {
         *self.number_of_rhs_jac_evals.borrow()
     }
@@ -169,3 +177,59 @@ where
 }
 
 
+#[cfg(test)]
+mod tests {
+    use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
+    use crate::op::NonLinearOp;
+    use crate::vector::Vector;
+
+    use super::BdfCallable;
+    type Mcpu = nalgebra::DMatrix<f64>;
+    type Vcpu = nalgebra::DVector<f64>;
+
+    #[test]
+    fn test_bdf_callable() {
+        let (problem, _soln) = exponential_decay_problem::<Mcpu>();
+        let mut bdf_callable = BdfCallable::new(&problem);
+        let c = 0.1;
+        let phi_neg_y0 = Vcpu::from_vec(vec![1.1, 1.2]);
+        bdf_callable.set_c_direct(c);
+        bdf_callable.set_psi_neg_y0_direct(phi_neg_y0);
+        // check that the bdf function is correct
+        let y = Vcpu::from_vec(vec![1.0, 1.0]);
+        let t = 0.0;
+        let mut y_out = Vcpu::from_vec(vec![0.0, 0.0]);
+
+        // F(y) = M (y - y0 + psi) - c * f(y)
+        // M = |1 0|
+        //     |0 1|
+        // y = |1|
+        //     |1|
+        // f(y) = |-0.1|
+        //        |-0.1|
+        //  i.e. F(y) = |1 0| |2.1| - 0.1 * |-0.1| =  |2.11|
+        //              |0 1| |2.2|         |-0.1|    |2.21|
+        bdf_callable.call_inplace(&y, t, &mut y_out);
+        let y_out_expect = Vcpu::from_vec(vec![2.11, 2.21]);
+        y_out.assert_eq(&y_out_expect, 1e-10);
+        
+        let v = Vcpu::from_vec(vec![1.0, 1.0]); 
+        // f'(y)v = |-0.1|
+        //          |-0.1|
+        // Mv - c * f'(y) v = |1 0| |1| - 0.1 * |-0.1| = |1.01|
+        //                    |0 1| |1|         |-0.1|   |1.01|
+        bdf_callable.jac_mul_inplace(&y, t, &v, &mut y_out);
+        let y_out_expect = Vcpu::from_vec(vec![1.01, 1.01]);
+        y_out.assert_eq(&y_out_expect, 1e-10);
+        
+        // J = M - c * f'(y) = |1 0| - 0.1 * |-0.1 0| = |1.01 0|
+        //                     |0 1|         |0 -0.1|   |0 1.01|
+        let jac = bdf_callable.jacobian(&y, t);
+        assert_eq!(jac[(0, 0)], 1.01);
+        assert_eq!(jac[(0, 1)], 0.0);
+        assert_eq!(jac[(1, 0)], 0.0);
+        assert_eq!(jac[(1, 1)], 1.01);
+
+        
+    }
+}

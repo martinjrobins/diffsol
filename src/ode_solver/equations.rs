@@ -64,7 +64,7 @@ pub trait OdeEquations: Op {
     /// mass matrix, re-use jacobian calculation from LinearOp
     fn mass_matrix(&self, t: Self::T) -> Self::M {
         let mass = |y: &Self::V, _p: &Self::V, t: Self::T, res: &mut Self::V| {
-            self.rhs_inplace(t, y, res);
+            self.mass_inplace(t, y, res)
         };
         let dummy_p = Rc::new(Self::V::zeros(0));
         let linear_closure = LinearClosure::new(mass, self.nstates(), self.nstates(), dummy_p);
@@ -258,5 +258,36 @@ where
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use nalgebra::DVector;
 
+    use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
+    use crate::ode_solver::equations::OdeEquations;
+    use crate::vector::Vector;
 
+    type Mcpu = nalgebra::DMatrix<f64>;
+    type Vcpu = nalgebra::DVector<f64>;
+    
+    #[test]
+    fn ode_equation_test() {
+        let (problem, _soln) = exponential_decay_problem::<Mcpu>();
+        let y = DVector::from_vec(vec![1.0, 1.0]);
+        let rhs_y = problem.eqn.rhs(0.0, &y);
+        let expect_rhs_y = DVector::from_vec(vec![-0.1, -0.1]);
+        rhs_y.assert_eq(&expect_rhs_y, 1e-10);
+        let jac_rhs_y = problem.eqn.rhs_jac(0.0, &y, &y);
+        let expect_jac_rhs_y = Vcpu::from_vec(vec![-0.1, -0.1]);
+        jac_rhs_y.assert_eq(&expect_jac_rhs_y, 1e-10);
+        let mass = problem.eqn.mass_matrix(0.0);
+        assert_eq!(mass[(0, 0)], 1.0);
+        assert_eq!(mass[(1, 1)], 1.0);
+        assert_eq!(mass[(0, 1)], 0.);
+        assert_eq!(mass[(1, 0)], 0.);
+        let jac = problem.eqn.rhs_jacobian(&y, 0.0);
+        assert_eq!(jac[(0, 0)], -0.1);
+        assert_eq!(jac[(1, 1)], -0.1);
+        assert_eq!(jac[(0, 1)], 0.0);
+        assert_eq!(jac[(1, 0)], 0.0);
+    }
+}

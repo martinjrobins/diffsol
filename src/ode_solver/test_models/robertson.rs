@@ -11,12 +11,12 @@ pub fn robertson<M: DenseMatrix + 'static>() -> (OdeSolverProblem<impl OdeEquati
         | x: &M::V, p: &M::V, _t: M::T, y: &mut M::V | {
             y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
             y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
-            y[2] = p[2] * x[1] * x[1];
+            y[2] = x[0] + x[1] + x[2] - M::T::from(1.0);
         },
         | x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V | {
             y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
             y[1] = p[0] * v[0] - p[1] * v[1] * x[2] - p[1] * x[1] * v[2]  - M::T::from(2.0) * p[2] * x[1] * v[1];
-            y[2] = M::T::from(2.0) * p[2] * x[1] * v[1];
+            y[2] = v[0] + v[1] + v[2];
         },
         | x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V | {
             y[0] = x[0];

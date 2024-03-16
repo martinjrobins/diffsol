@@ -12,8 +12,6 @@ pub mod constant_closure;
 pub mod linear_closure;
 pub mod ode_rhs;
 
-#[cfg(feature = "diffsl")]
-pub mod diffsl;
 
 
 pub trait Op {

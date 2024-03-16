@@ -114,6 +114,7 @@ where
     const NEWTON_MAXITER: IndexType = 4;
     const MIN_FACTOR: f64 = 0.2;
     const MAX_FACTOR: f64 = 10.0;
+    const MIN_TIMESTEP: f64 = 1e-32;
     
     pub fn get_statistics(&self) -> &BdfStatistics<Eqn::T> {
         &self.statistics
@@ -368,6 +369,11 @@ where
                         }
                         // todo, do we need to update the linear solver problem here since we converged?
                         self._update_step_size(factor, state);
+                        
+                        // if step size too small, then fail
+                        if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
+                            return Err(anyhow::anyhow!("Step size too small at t = {}", state.t));
+                        }
 
                         // new prediction
                         y_predict = self._predict_forward(state);

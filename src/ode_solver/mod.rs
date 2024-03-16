@@ -14,6 +14,9 @@ pub mod bdf;
 pub mod test_models;
 pub mod equations;
 
+#[cfg(feature = "diffsl")]
+pub mod diffsl;
+
 pub trait OdeSolverMethod<Eqn: OdeEquations> {
     fn problem(&self) -> Option<&OdeSolverProblem<Eqn>>;
     fn set_problem(&mut self, state: &mut OdeSolverState<Eqn::M>, problem: OdeSolverProblem<Eqn>);
@@ -324,7 +327,7 @@ mod tests {
         number_of_nonlinear_solver_iterations: 1046
         number_of_nonlinear_solver_fails: 25
         initial_step_size: 0.0000045643545698038086
-        final_step_size: 7622668559.795311
+        final_step_size: 7622676567.923919
         "###);
     }
     
