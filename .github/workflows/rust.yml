@@ -11,7 +11,7 @@ env:
 
 jobs:
   build:
-    name: Rust project - latest
+    name: Rust project - ${{ matrix.os }} - ${{ matrix.toolchain }}
     runs-on: ubuntu-latest
     strategy:
         matrix:
