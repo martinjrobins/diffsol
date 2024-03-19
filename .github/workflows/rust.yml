@@ -27,7 +27,7 @@ jobs:
             - cargo_args: --features diffsl-llvm14
             - toolchain: stable
               os: ubuntu-latest
-              cargo_args: --features diffsl-llvm14
+              cargo_args: 
 
 
 
