@@ -8,6 +8,23 @@ license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+diffsl = []
+diffsl-llvm4 = ["diffsl4-0", "diffsl"]
+diffsl-llvm5 = ["diffsl5-0", "diffsl"]
+diffsl-llvm6 = ["diffsl6-0", "diffsl"]
+diffsl-llvm7 = ["diffsl7-0", "diffsl"]
+diffsl-llvm8 = ["diffsl8-0", "diffsl"]
+diffsl-llvm9 = ["diffsl9-0", "diffsl"]
+diffsl-llvm10 = ["diffsl10-0", "diffsl"]
+diffsl-llvm11 = ["diffsl11-0", "diffsl"]
+diffsl-llvm12 = ["diffsl12-0", "diffsl"]
+diffsl-llvm13 = ["diffsl13-0", "diffsl"]
+diffsl-llvm14 = ["diffsl14-0", "diffsl"]
+diffsl-llvm15 = ["diffsl15-0", "diffsl"]
+diffsl-llvm16 = ["diffsl16-0", "diffsl"]
+diffsl-llvm17 = ["diffsl17-0", "diffsl"]
+
 [dependencies]
 nalgebra = ">=0.32"
 nalgebra-sparse = ">=0.9"
@@ -15,11 +32,21 @@ anyhow = ">=1.0.77"
 num-traits = "0.2.17"
 ouroboros = "0.18.2"
 serde = { version = "1.0.196", features = ["derive"] }
-diffsl = { git = "https://github.com/martinjrobins/diffsl.git", optional = true }
+diffsl4-0 = { package = "diffsl", git = "https://github.com/martinjrobins/diffsl.git", version = ">=0.1.1", features = ["llvm4-0"], optional = true }
+diffsl5-0 = { package = "diffsl", git = "https://github.com/martinjrobins/diffsl.git", version = ">=0.1.1", features = ["llvm5-0"], optional = true }
+diffsl6-0 = { package = "diffsl", git = "https://github.com/martinjrobins/diffsl.git", version = ">=0.1.1", features = ["llvm6-0"], optional = true }
+diffsl7-0 = { package = "diffsl", git = "https://github.com/martinjrobins/diffsl.git", version = ">=0.1.1", features = ["llvm7-0"], optional = true }
+diffsl8-0 = { package = "diffsl", git = "https://github.com/martinjrobins/diffsl.git", version = ">=0.1.1", features = ["llvm8-0"], optional = true }
+diffsl9-0 = { package = "diffsl", git = "https://github.com/martinjrobins/diffsl.git", version = ">=0.1.1", features = ["llvm9-0"], optional = true }
+diffsl10-0 = { package = "diffsl", git = "https://github.com/martinjrobins/diffsl.git", version = ">=0.1.1", features = ["llvm10-0"], optional = true }
+diffsl11-0 = { package = "diffsl", git = "https://github.com/martinjrobins/diffsl.git", version = ">=0.1.1", features = ["llvm11-0"], optional = true }
+diffsl12-0 = { package = "diffsl", git = "https://github.com/martinjrobins/diffsl.git", version = ">=0.1.1", features = ["llvm12-0"], optional = true }
+diffsl13-0 = { package = "diffsl", git = "https://github.com/martinjrobins/diffsl.git", version = ">=0.1.1", features = ["llvm13-0"], optional = true }
+diffsl14-0 = { package = "diffsl", git = "https://github.com/martinjrobins/diffsl.git", version = ">=0.1.1", features = ["llvm14-0"], optional = true }
+diffsl15-0 = { package = "diffsl", git = "https://github.com/martinjrobins/diffsl.git", version = ">=0.1.1", features = ["llvm15-0"], optional = true }
+diffsl16-0 = { package = "diffsl", git = "https://github.com/martinjrobins/diffsl.git", version = ">=0.1.1", features = ["llvm16-0"], optional = true }
+diffsl17-0 = { package = "diffsl", git = "https://github.com/martinjrobins/diffsl.git", version = ">=0.1.1", features = ["llvm17-0"], optional = true }
+
 
 [dev-dependencies]
 insta = { version = "1.34.0", features = ["yaml"] }
-
-[features]
-diffsl = ["dep:diffsl"]
-

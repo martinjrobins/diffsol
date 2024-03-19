@@ -45,11 +45,13 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn>
         Self { eqn, psi_neg_y0, c, jac, rhs_jac, mass_jac, rhs_jacobian_is_stale, jacobian_is_stale, mass_jacobian_is_stale, number_of_rhs_jac_evals, number_of_rhs_evals, number_of_jac_evals, number_of_jac_mul_evals }
     }
 
-    pub(crate) fn set_c_direct(&mut self, c: Eqn::T) {
+    #[cfg(test)]
+    fn set_c_direct(&mut self, c: Eqn::T) {
         self.c.replace(c);
     }
 
-    pub(crate) fn set_psi_neg_y0_direct(&mut self, psi_neg_y0: Eqn::V) {
+    #[cfg(test)]
+    fn set_psi_neg_y0_direct(&mut self, psi_neg_y0: Eqn::V) {
         self.psi_neg_y0.replace(psi_neg_y0);
     }
 

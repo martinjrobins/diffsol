@@ -1,18 +1,21 @@
 use std::rc::Rc;
 use anyhow::Context;
 
-use crate::{op::{filter::FilterCallable, ode_rhs::OdeRhs}, Matrix, NonLinearSolver, OdeEquations, SolverProblem, Vector, VectorIndex};
+use crate::{op::{filter::FilterCallable, ode_rhs::OdeRhs, Op}, Matrix, NonLinearSolver, OdeEquations, SolverProblem, Vector, VectorIndex};
 
 use anyhow::Result;
 use num_traits::{One, Zero};
 
 use self::equations::{OdeSolverEquations, OdeSolverEquationsMassI};
 
+#[cfg(feature = "diffsl")]
+use self::diffsl::DiffSl;
 
 
 pub mod bdf;
 pub mod test_models;
 pub mod equations;
+
 
 #[cfg(feature = "diffsl")]
 pub mod diffsl;
@@ -184,6 +187,14 @@ where
     pub fn new_ode(rhs: F, rhs_jac: G, init: I, p: M::V) -> Self {
         let eqn = OdeSolverEquationsMassI::new_ode(rhs, rhs_jac, init, p);
         OdeSolverProblem::new(eqn)
+    }
+}
+
+#[cfg(feature = "diffsl")]
+impl OdeSolverProblem<DiffSl> {
+    pub fn new_diffsl(source: &str, p: <DiffSl as Op>::V) -> Result<Self> {
+        let eqn = DiffSl::new(source, p)?;
+        Ok(OdeSolverProblem::new(eqn))
     }
 }
 

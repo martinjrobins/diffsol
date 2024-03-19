@@ -11,7 +11,7 @@ type V = nalgebra::DVector<T>;
 type M = nalgebra::DMatrix<T>;
 
 
-struct DiffSl {
+pub struct DiffSl {
     compiler: Compiler,
     data: RefCell<Vec<T>>,
     ddata: RefCell<Vec<T>>,
