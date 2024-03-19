@@ -24,14 +24,10 @@ jobs:
             - macos-latest
             - windows-latest
           cargo_args:
-            - "--features diffsl-llvm14"
+            - ""
           include:
             - toolchain: stable
-              os: ubuntu-latest
-              cargo_args: ""
-
-
-
+              cargo_args: "--features diffsl-llvm14"
 
     steps:
     - uses: actions/checkout@v3
