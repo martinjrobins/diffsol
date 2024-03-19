@@ -19,6 +19,11 @@ jobs:
             - stable
             - beta
             - nightly
+          os:
+            - ubuntu-latest
+            - macos-latest
+            - windows-latest
+
 
     steps:
     - uses: actions/checkout@v3
