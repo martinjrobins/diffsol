@@ -23,14 +23,12 @@ jobs:
             - ubuntu-latest
             - macos-latest
             - windows-latest
+          cargo_args:
+            - "--features diffsl-llvm14"
           include:
-            - cargo_args: "--features diffsl-llvm14"
             - toolchain: stable
               os: ubuntu-latest
               cargo_args: ""
-            - toolchain: stable
-              os: ubuntu-latest
-              cargo_args: "--features diffsl-llvm14"
 
 
 
