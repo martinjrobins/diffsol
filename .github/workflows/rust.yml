@@ -24,10 +24,10 @@ jobs:
             - macos-latest
             - windows-latest
           include:
-            - cargo_args: --features diffsl-llvm14
+            - cargo_args: "--features diffsl-llvm14"
             - toolchain: stable
               os: ubuntu-latest
-              cargo_args: 
+              cargo_args: ""
 
 
 
@@ -40,6 +40,6 @@ jobs:
       with:
         version: "14.0"
     - name: Build
-      run: cargo build --verbose --features diffsl-llvm14
+      run: cargo build --verbose ${{ matrix.cargo_args }}
     - name: Run tests
-      run: cargo test --verbose --features diffsl-llvm14
+      run: cargo test --verbose ${{ matrix.cargo_args }}
