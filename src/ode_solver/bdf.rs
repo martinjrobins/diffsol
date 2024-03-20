@@ -282,12 +282,13 @@ where
         scale += problem.atol.as_ref();
 
         let f0 = problem.eqn.rhs(state.t, &state.y);
-        let y1 = &state.y + &f0 * state.h;
+        let hf0 = &f0 * state.h;
+        let y1 = &state.y + &hf0;
         let t1 = state.t + state.h;
         let f1 = problem.eqn.rhs(t1, &y1);
 
         // store f1 in diff[1] for use in step size control
-        self.diff.column_mut(1).copy_from(&(&f0 * state.h));
+        self.diff.column_mut(1).copy_from(&hf0);
 
         let mut df = f1 - f0;
         df.component_div_assign(&scale);

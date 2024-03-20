@@ -45,7 +45,7 @@ impl<'a, T: Scalar> VectorViewMut<'a> for DVectorViewMut<'a, T> {
     fn copy_from(&mut self, other: &Self::Owned) {
         self.copy_from(other);
     }
-    fn copy_from_view(&mut self, other: &<Self::Owned as Vector>::View<'_>) {
+    fn copy_from_view(&mut self, other: &Self::View) {
         self.copy_from(other);
     }
 }

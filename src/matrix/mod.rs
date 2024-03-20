@@ -13,15 +13,11 @@ pub trait MatrixCommon: Sized + Debug
     type V: Vector<T = Self::T>;
     type T: Scalar;
 
-    
-
     /// Get the number of columns of the matrix
     fn nrows(&self) -> IndexType;
 
     /// Get the number of rows of the matrix
     fn ncols(&self) -> IndexType;
-
-    
 }
 
 impl <'a, M> MatrixCommon for &'a M where M: MatrixCommon {
@@ -67,38 +63,6 @@ impl <M, Rhs> MatrixMutOpsByValue<Rhs> for M where M: MatrixCommon
     + SubAssign<Rhs> 
 {}
 
-pub trait MatrixMutOps<Other>: 
-    MatrixMutOpsByValue<Other> 
-    + for<'a> MatrixMutOpsByValue<&'a Other>
-    + MulAssign<Self::T>
-    + DivAssign<Self::T>
-{}
-
-impl <M, View> MatrixMutOps<View> for M 
-where 
-    M: MatrixMutOpsByValue<Self> 
-    + for<'a> MatrixMutOpsByValue<&'a Self> 
-    + MatrixMutOpsByValue<View> 
-    + for<'a> MatrixMutOpsByValue<&'a View>
-    + MulAssign<Self::T>
-    + DivAssign<Self::T>
-{}
-
-
-pub trait MatrixOps<Rhs>: 
-    MatrixOpsByValue<Rhs> 
-    + for<'a> MatrixOpsByValue<&'a Rhs>
-    + Mul<Self::T, Output = Self>
-    + Div<Self::T, Output = Self>
-{}
-
-impl <M, Rhs> MatrixOps<Rhs> for M where 
-    M: MatrixOpsByValue<Rhs> 
-    + for<'a> MatrixOpsByValue<&'a Rhs>
-    + Mul<Self::T, Output = M>
-    + Div<Self::T, Output = M>
-{}
-
 /// A trait allowing for references to implement matrix operations
 pub trait MatrixRef<M: MatrixCommon>:
     MatrixOpsByValue<M, M>
@@ -117,28 +81,32 @@ impl <RefT, M: MatrixCommon> MatrixRef<M> for RefT where
 
 /// A mutable view of a dense matrix [Matrix]
 pub trait MatrixViewMut<'a>: 
-    MatrixMutOps<Self>
-    + MatrixMutOps<Self::View>
-    where Self: 'a
+    for<'b> MatrixMutOpsByValue<&'b Self>
+    + for<'b> MatrixMutOpsByValue<&'b Self::View>
+    + MulAssign<Self::T>
+    + DivAssign<Self::T>
 {
-    type Owned: DenseMatrix<T = Self::T, V = Self::V, ViewMut<'a> = Self>;
-    type View: MatrixView<'a, Owned = Self::Owned, T = Self::T>;
+    type Owned;
+    type View;
     fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T);
     fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T);
 }
 
 /// A view of a dense matrix [Matrix]
 pub trait MatrixView<'a>: 
-    MatrixRef<Self::Owned>
-    + Clone 
-    where Self: 'a
+    for<'b> MatrixOpsByValue<&'b Self::Owned, Self::Owned> 
+    + Mul<Self::T, Output = Self::Owned>
+    + Div<Self::T, Output = Self::Owned>
+    + Clone
 {
-    type Owned: DenseMatrix<T = Self::T, V = Self::V>;
+    type Owned;
 }
 
 /// A base matrix trait (including sparse and dense matrices)
 pub trait Matrix: 
-    MatrixOps<Self>
+    for<'a> MatrixOpsByValue<&'a Self, Self>
+    + Mul<Self::T, Output = Self>
+    + Div<Self::T, Output = Self>
     + Clone 
 {
     /// Extract the diagonal of the matrix as an owned vector
@@ -158,17 +126,17 @@ pub trait Matrix:
 /// A dense column-major matrix. The assumption is that the underlying matrix is stored in column-major order, so functions for taking columns views are efficient
 pub trait DenseMatrix: 
     Matrix
-    + for <'a> MatrixOps<Self::View<'a>>
-    + for <'a> MatrixMutOps<Self::View<'a>>
+    + for<'a, 'b> MatrixOpsByValue<&'b Self::View<'a>, Self>
+    + for<'a, 'b> MatrixMutOpsByValue<&'b Self::View<'a>>
     + Index<(IndexType, IndexType), Output = Self::T> 
     + IndexMut<(IndexType, IndexType), Output = Self::T> 
 {
 
     /// A view of the dense matrix type
-    type View<'a>: MatrixView<'a, Owned = Self, T = Self::T> where Self: 'a;
+    type View<'a>: MatrixView<'a, Owned = Self, T = Self::T, V = Self::V> where Self: 'a;
     
     /// A mutable view of the dense matrix type
-    type ViewMut<'a>: MatrixViewMut<'a, Owned = Self, T = Self::T, View = Self::View<'a>> where Self: 'a;
+    type ViewMut<'a>: MatrixViewMut<'a, Owned = Self, T = Self::T, V = Self::V, View = Self::View<'a>> where Self: 'a;
 
 
     /// Perform a matrix-matrix multiplication `self = alpha * a * b + beta * self`, where `alpha` and `beta` are scalars, and `a` and `b` are matrices
