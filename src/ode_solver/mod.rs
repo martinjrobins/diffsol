@@ -1,7 +1,8 @@
 use std::rc::Rc;
 use anyhow::Context;
 
-use crate::{op::{filter::FilterCallable, ode_rhs::OdeRhs, Op}, Matrix, NonLinearSolver, OdeEquations, SolverProblem, Vector, VectorIndex};
+use crate::{op::{filter::FilterCallable, ode_rhs::OdeRhs}, Matrix, NonLinearSolver, OdeEquations, SolverProblem, Vector, VectorIndex};
+
 
 use anyhow::Result;
 use num_traits::{One, Zero};
@@ -10,6 +11,9 @@ use self::equations::{OdeSolverEquations, OdeSolverEquationsMassI};
 
 #[cfg(feature = "diffsl")]
 use self::diffsl::DiffSl;
+
+#[cfg(feature = "diffsl")]
+use crate::op::Op;
 
 
 pub mod bdf;

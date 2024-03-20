@@ -13,15 +13,11 @@ pub trait MatrixCommon: Sized + Debug
     type V: Vector<T = Self::T>;
     type T: Scalar;
 
-    
-
     /// Get the number of columns of the matrix
     fn nrows(&self) -> IndexType;
 
     /// Get the number of rows of the matrix
     fn ncols(&self) -> IndexType;
-
-    
 }
 
 impl <'a, M> MatrixCommon for &'a M where M: MatrixCommon {
@@ -90,8 +86,8 @@ pub trait MatrixViewMut<'a>:
     + MulAssign<Self::T>
     + DivAssign<Self::T>
 {
-    type Owned: MatrixCommon<T = Self::T, V = Self::V>;
-    type View: MatrixCommon<T = Self::T, V = Self::V>;
+    type Owned;
+    type View;
     fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T);
     fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T);
 }
@@ -101,9 +97,9 @@ pub trait MatrixView<'a>:
     for<'b> MatrixOpsByValue<&'b Self::Owned, Self::Owned> 
     + Mul<Self::T, Output = Self::Owned>
     + Div<Self::T, Output = Self::Owned>
-    + Clone where Self::Owned: 'a 
+    + Clone
 {
-    type Owned: MatrixCommon<T = Self::T, V = Self::V>;
+    type Owned;
 }
 
 /// A base matrix trait (including sparse and dense matrices)
