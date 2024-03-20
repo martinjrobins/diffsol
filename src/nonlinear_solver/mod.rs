@@ -133,7 +133,7 @@ pub mod tests {
     use self::newton::NewtonNonlinearSolver;
 
     use super::*;
-    use num_traits::{One, Zero};
+    use num_traits::Zero;
     
     
     pub fn get_square_problem<M>() -> (SolverProblem<impl NonLinearOp<M = M, V = M::V, T = M::T>>, Vec<NonLinearSolveSolution<M::V>>)
