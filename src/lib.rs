@@ -48,6 +48,7 @@ pub mod op;
 pub mod nonlinear_solver;
 pub mod ode_solver;
 pub mod solver;
+pub mod jacobian;
 
 use std::fmt::Display;
 
