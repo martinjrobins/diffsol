@@ -133,7 +133,7 @@ pub mod tests {
     use self::newton::NewtonNonlinearSolver;
 
     use super::*;
-    use num_traits::{One, Zero};
+    use num_traits::Zero;
     
     
     pub fn get_square_problem<M>() -> (SolverProblem<impl NonLinearOp<M = M, V = M::V, T = M::T>>, Vec<NonLinearSolveSolution<M::V>>)
@@ -142,25 +142,25 @@ pub mod tests {
     {
         let jac1 = M::from_diagonal(&M::V::from_vec(vec![2.0.into(), 2.0.into()]));
         let jac2 = jac1.clone();
+        let p = Rc::new(M::V::zeros(0));
         let op = Closure::new(
             // 0 = J * x * x - 8
-            move |x: &<M as MatrixCommon>::V, _p: &M::V, _t, y| {
+            move |x: &<M as MatrixCommon>::V, _p: &<M as MatrixCommon>::V, _t, y| {
                 jac1.gemv(M::T::one(), x, M::T::zero(), y); // y = J * x
                 y.component_mul_assign(x);
                 y.add_scalar_mut(M::T::from(-8.0));
             },
             // J = 2 * J * x * dx
-            move |x: &<M as MatrixCommon>::V, _p, _t, v, y | {
+            move |x: &<M as MatrixCommon>::V, _p: &<M as MatrixCommon>::V, _t, v, y | {
                 jac2.gemv(M::T::from(2.0), x, M::T::zero(), y); // y = 2 * J * x
                 y.component_mul_assign(v);
             },
-            2, 2, 0,
+            2, 2, p,
         );
         let rtol = M::T::from(1e-6);
         let atol = M::V::from_vec(vec![1e-6.into(), 1e-6.into()]);
-        let p = Rc::new(M::V::zeros(0));
         let t = M::T::zero();
-        let problem = SolverProblem::new(Rc::new(op), p, t, Rc::new(atol), rtol);
+        let problem = SolverProblem::new(Rc::new(op), t, Rc::new(atol), rtol);
         let solns = vec![
             NonLinearSolveSolution::new(M::V::from_vec(vec![2.1.into(), 2.1.into()]), M::V::from_vec(vec![2.0.into(), 2.0.into()]))
         ];

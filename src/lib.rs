@@ -1,3 +1,31 @@
+#[cfg(feature = "diffsl-llvm4")]
+pub extern crate diffsl4_0 as diffsl;
+#[cfg(feature = "diffsl-llvm5")]
+pub extern crate diffsl5_0 as diffsl;
+#[cfg(feature = "diffsl-llvm6")]
+pub extern crate diffsl6_0 as diffsl;
+#[cfg(feature = "diffsl-llvm7")]
+pub extern crate diffsl7_0 as diffsl;
+#[cfg(feature = "diffsl-llvm8")]
+pub extern crate diffsl8_0 as diffsl;
+#[cfg(feature = "diffsl-llvm9")]
+pub extern crate diffsl9_0 as diffsl;
+#[cfg(feature = "diffsl-llvm10")]
+pub extern crate diffsl10_0 as diffsl;
+#[cfg(feature = "diffsl-llvm11")]
+pub extern crate diffsl11_0 as diffsl;
+#[cfg(feature = "diffsl-llvm12")]
+pub extern crate diffsl12_0 as diffsl;
+#[cfg(feature = "diffsl-llvm13")]
+pub extern crate diffsl13_0 as diffsl;
+#[cfg(feature = "diffsl-llvm14")]
+pub extern crate diffsl14_0 as diffsl;
+#[cfg(feature = "diffsl-llvm15")]
+pub extern crate diffsl15_0 as diffsl;
+#[cfg(feature = "diffsl-llvm16")]
+pub extern crate diffsl16_0 as diffsl;
+#[cfg(feature = "diffsl-llvm17")]
+pub extern crate diffsl17_0 as diffsl;
 
 pub trait Scalar: nalgebra::Scalar + From<f64> + Display + SimdRealField + ComplexField + Copy + ClosedSub + From<f64> + ClosedMul + ClosedDiv + ClosedAdd + Signed + PartialOrd + Pow<Self, Output=Self> + Pow<i32, Output=Self> {
     const EPSILON: Self;
@@ -27,14 +55,13 @@ use nalgebra::{ClosedSub, ClosedMul, ClosedDiv, ClosedAdd, SimdRealField, Comple
 use num_traits::{Signed, Pow};
 use vector::{Vector, VectorView, VectorViewMut, VectorIndex, VectorRef};
 use nonlinear_solver::{NonLinearSolver, newton::NewtonNonlinearSolver};
-use op::{NonLinearOp, LinearOp, ConstantOp};
 use matrix::{DenseMatrix, MatrixViewMut, Matrix};
+use op::{LinearOp, NonLinearOp};
 use solver::SolverProblem;
 use linear_solver::{lu::LU, LinearSolver};
-pub use ode_solver::{OdeSolverProblem, OdeSolverState, bdf::Bdf, OdeSolverMethod};
+pub use ode_solver::{OdeSolverProblem, OdeSolverState, bdf::Bdf, OdeSolverMethod, equations::OdeEquations};
 
 
-#[cfg(test)]
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;

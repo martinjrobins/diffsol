@@ -5,6 +5,9 @@ use crate::{Scalar, IndexType};
 use super::{Vector, VectorView, VectorCommon, VectorViewMut, VectorIndex};
 
 impl VectorIndex for DVector<IndexType> {
+    fn zeros(len: IndexType) -> Self {
+        DVector::from_element(len, 0)
+    }
     fn len(&self) -> crate::IndexType {
         self.len()
     }
@@ -42,7 +45,7 @@ impl<'a, T: Scalar> VectorViewMut<'a> for DVectorViewMut<'a, T> {
     fn copy_from(&mut self, other: &Self::Owned) {
         self.copy_from(other);
     }
-    fn copy_from_view(&mut self, other: &<Self::Owned as Vector>::View<'_>) {
+    fn copy_from_view(&mut self, other: &Self::View) {
         self.copy_from(other);
     }
 }

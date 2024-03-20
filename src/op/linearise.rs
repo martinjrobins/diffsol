@@ -33,10 +33,10 @@ impl<C: NonLinearOp> Op for LinearisedOp<C>
 
 impl<C: NonLinearOp> LinearOp for LinearisedOp<C> 
 {
-    fn call_inplace(&self, x: &Self::V, p: &Self::V, t: Self::T, y: &mut Self::V) {
-        self.callable.jac_mul_inplace(&self.x, p, t, x, y);
+    fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
+        self.callable.jac_mul_inplace(&self.x, t, x, y);
     }
-    fn jacobian(&self, p: &Self::V, t: Self::T) -> Self::M {
-        self.callable.jacobian(&self.x, p, t)
+    fn jacobian(&self, t: Self::T) -> Self::M {
+        self.callable.jacobian(&self.x, t)
     }
 }

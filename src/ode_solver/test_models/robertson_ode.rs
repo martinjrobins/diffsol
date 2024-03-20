@@ -1,14 +1,14 @@
 use std::rc::Rc;
 
-use crate::{op::{ConstantOp, LinearOp, NonLinearOp}, matrix::DenseMatrix, ode_solver::{OdeSolverProblem, OdeSolverSolution, Vector}};
+use crate::{matrix::DenseMatrix, ode_solver::{OdeSolverProblem, OdeSolverSolution}, OdeEquations, Vector};
 
-pub fn robertson_ode<M: DenseMatrix + 'static>() -> (OdeSolverProblem<impl NonLinearOp<M = M, V = M::V, T = M::T>, impl LinearOp<M = M, V = M::V, T = M::T> , impl ConstantOp<M = M, V = M::V, T = M::T>>, OdeSolverSolution<M::V>) {
+pub fn robertson_ode<M: DenseMatrix + 'static>() -> (OdeSolverProblem<impl OdeEquations<M=M, V=M::V, T=M::T>>, OdeSolverSolution<M::V>) {
     let p = M::V::from_vec(vec![0.04.into(), 1.0e4.into(), 3.0e7.into()]);
     let mut problem = OdeSolverProblem::new_ode(
- //     dy1/dt = -.04*y1 + 1.e4*y2*y3
- //*    dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*(y2)^2
- //*    dy3/dt = 3.e7*(y2)^2
 
+        //     dy1/dt = -.04*y1 + 1.e4*y2*y3
+         //*    dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*(y2)^2
+         //*    dy3/dt = 3.e7*(y2)^2
         | x: &M::V, p: &M::V, _t: M::T, y: &mut M::V | {
             y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
             y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
@@ -24,6 +24,7 @@ pub fn robertson_ode<M: DenseMatrix + 'static>() -> (OdeSolverProblem<impl NonLi
         },
         p.clone(),
     );
+
     problem.rtol = M::T::from(1.0e-4);
     problem.atol = Rc::new(M::V::from_vec(vec![1.0e-8.into(), 1.0e-6.into(), 1.0e-6.into()]));
     let mut soln = OdeSolverSolution::default();

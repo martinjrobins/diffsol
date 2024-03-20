@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{op::{linearise::LinearisedOp, ConstantOp, LinearOp, Op}, ode_solver::OdeSolverProblem, IndexType, NonLinearOp};
+use crate::{ode_solver::OdeSolverProblem, op::{linearise::LinearisedOp, Op}, IndexType, NonLinearOp, OdeEquations};
 
 
 pub struct SolverStatistics {
@@ -11,26 +11,23 @@ pub struct SolverStatistics {
 
 pub struct SolverProblem<C: Op> {
     pub f: Rc<C>,
-    pub p: Rc<C::V>,
     pub t: C::T,
     pub atol: Rc<C::V>,
     pub rtol: C::T,
 }
 
 impl<C: Op> SolverProblem<C> {
-    pub fn new(f: Rc<C>, p: Rc<C::V>, t: C::T, atol: Rc<C::V>, rtol: C::T) -> Self {
+    pub fn new(f: Rc<C>, t: C::T, atol: Rc<C::V>, rtol: C::T) -> Self {
         Self {
             f,
-            p,
             t,
             rtol,
             atol,
         }
     }
-    pub fn new_from_ode_problem(f: Rc<C>, other: &OdeSolverProblem<impl NonLinearOp<M = C::M, V = C::V, T = C::T>, impl LinearOp<M = C::M, V = C::V, T = C::T> , impl ConstantOp<M = C::M, V = C::V, T = C::T>>) -> Self {
+    pub fn new_from_ode_problem(f: Rc<C>, other: &OdeSolverProblem<impl OdeEquations<T=C::T, V=C::V, M=C::M>>) -> Self {
         Self {
             f,
-            p: other.p.clone(),
             t: other.t0,
             rtol: other.rtol,
             atol: other.atol.clone(),
@@ -42,7 +39,6 @@ impl<C: Op> SolverProblem<C> {
     {
         Self {
             f,
-            p: other.p.clone(),
             t: other.t,
             rtol: other.rtol,
             atol: other.atol.clone(),
