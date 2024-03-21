@@ -39,7 +39,6 @@ pub fn robertson_ode<M: DenseMatrix + 'static>() -> (
         1.0e-6.into(),
     ]));
     let mut soln = OdeSolverSolution::default();
-    #[rustfmt::skip]
     let data = vec![
         (vec![1.0, 0.0, 0.0], 0.0),
         (vec![9.851641e-01, 3.386242e-05, 1.480205e-02], 0.4),
