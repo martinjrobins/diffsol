@@ -1,12 +1,14 @@
-use crate::{op::{linearise::LinearisedOp, NonLinearOp}, LinearSolver, NonLinearSolver, Vector, Scalar, SolverProblem, LU};
+use crate::{
+    op::{linearise::LinearisedOp, NonLinearOp},
+    LinearSolver, NonLinearSolver, Scalar, SolverProblem, Vector, LU,
+};
 use anyhow::{anyhow, Result};
 use nalgebra::{DMatrix, DVector};
 use std::ops::SubAssign;
 
 use super::{Convergence, ConvergenceStatus};
 
-pub struct NewtonNonlinearSolver<C: NonLinearOp> 
-{
+pub struct NewtonNonlinearSolver<C: NonLinearOp> {
     convergence: Option<Convergence<C>>,
     linear_solver: Box<dyn LinearSolver<LinearisedOp<C>>>,
     problem: Option<SolverProblem<C>>,
@@ -14,10 +16,11 @@ pub struct NewtonNonlinearSolver<C: NonLinearOp>
     niter: usize,
 }
 
-impl <T: Scalar, C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T> + 'static> Default for NewtonNonlinearSolver<C> 
+impl<T: Scalar, C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T> + 'static> Default
+    for NewtonNonlinearSolver<C>
 {
     fn default() -> Self {
-        let linear_solver = Box::<LU<T,LinearisedOp<C>>>::default();
+        let linear_solver = Box::<LU<T, LinearisedOp<C>>>::default();
         Self {
             problem: None,
             convergence: None,
@@ -28,9 +31,7 @@ impl <T: Scalar, C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T> + 'static
     }
 }
 
-
-impl <C: NonLinearOp> NewtonNonlinearSolver<C> 
-{
+impl<C: NonLinearOp> NewtonNonlinearSolver<C> {
     pub fn new<S: LinearSolver<LinearisedOp<C>> + 'static>(linear_solver: S) -> Self {
         let linear_solver = Box::new(linear_solver);
         Self {
@@ -51,7 +52,7 @@ impl<C: NonLinearOp> NonLinearSolver<C> for NewtonNonlinearSolver<C> {
         self.max_iter
     }
     fn niter(&self) -> usize {
-        self.niter 
+        self.niter
     }
     fn set_problem(&mut self, problem: SolverProblem<C>) {
         self.problem = Some(problem);
@@ -59,9 +60,7 @@ impl<C: NonLinearOp> NonLinearSolver<C> for NewtonNonlinearSolver<C> {
             self.linear_solver.take_problem();
         }
         let problem = self.problem.as_ref().unwrap();
-        self.convergence = Some(Convergence::new(
-            problem, self.max_iter
-        ));
+        self.convergence = Some(Convergence::new(problem, self.max_iter));
     }
 
     fn reset(&mut self) {
@@ -80,10 +79,12 @@ impl<C: NonLinearOp> NonLinearSolver<C> for NewtonNonlinearSolver<C> {
     fn take_problem(&mut self) -> Option<SolverProblem<C>> {
         self.problem.take()
     }
-    
-    fn solve_in_place(&mut self, xn: & mut C::V) -> Result<()> {
+
+    fn solve_in_place(&mut self, xn: &mut C::V) -> Result<()> {
         if self.convergence.is_none() || self.problem.is_none() {
-            return Err(anyhow!("NewtonNonlinearSolver::solve() called before set_problem"));
+            return Err(anyhow!(
+                "NewtonNonlinearSolver::solve() called before set_problem"
+            ));
         }
         if xn.len() != self.problem.as_ref().unwrap().f.nstates() {
             return Err(anyhow!("NewtonNonlinearSolver::solve() called with state of wrong size, expected {}, got {}", self.problem.as_ref().unwrap().f.nstates(), xn.len()));
@@ -108,7 +109,7 @@ impl<C: NonLinearOp> NonLinearSolver<C> for NewtonNonlinearSolver<C> {
             // xn = xn + delta_n
 
             let res = convergence.check_new_iteration(&mut tmp);
-            match res  {
+            match res {
                 ConvergenceStatus::Continue => continue,
                 ConvergenceStatus::Converged => return Ok(()),
                 ConvergenceStatus::Diverged => break,
@@ -117,6 +118,4 @@ impl<C: NonLinearOp> NonLinearSolver<C> for NewtonNonlinearSolver<C> {
         }
         Err(anyhow!("Newton iteration did not converge"))
     }
-
-    
 }

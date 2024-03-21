@@ -6,7 +6,7 @@ use super::{ConstantOp, Op};
 
 type ConstFn<V, T> = dyn Fn(&V, T) -> V;
 
-pub struct ConstantClosure<M> 
+pub struct ConstantClosure<M>
 where
     M: Matrix,
 {
@@ -17,17 +17,28 @@ where
     p: Rc<M::V>,
 }
 
-impl<M> ConstantClosure<M> 
+impl<M> ConstantClosure<M>
 where
     M: Matrix,
 {
-    pub fn new(func: impl Fn(&M::V, M::T) -> M::V + 'static, nstates: usize, nout: usize, p: Rc<M::V>) -> Self {
+    pub fn new(
+        func: impl Fn(&M::V, M::T) -> M::V + 'static,
+        nstates: usize,
+        nout: usize,
+        p: Rc<M::V>,
+    ) -> Self {
         let nparams = p.len();
-        Self { func: Box::new(func), nstates, nout, nparams, p }
+        Self {
+            func: Box::new(func),
+            nstates,
+            nout,
+            nparams,
+            p,
+        }
     }
 }
 
-impl<M,> Op for ConstantClosure<M>
+impl<M> Op for ConstantClosure<M>
 where
     M: Matrix,
 {
@@ -45,7 +56,6 @@ where
     }
 }
 
-
 impl<M> ConstantOp for ConstantClosure<M>
 where
     M: Matrix,
@@ -54,4 +64,3 @@ where
         y.copy_from(&(self.func)(self.p.as_ref(), t))
     }
 }
-

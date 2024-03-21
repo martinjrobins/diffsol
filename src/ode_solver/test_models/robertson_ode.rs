@@ -1,46 +1,66 @@
 use std::rc::Rc;
 
-use crate::{matrix::DenseMatrix, ode_solver::{OdeSolverProblem, OdeSolverSolution}, OdeEquations, Vector};
+use crate::{
+    matrix::DenseMatrix,
+    ode_solver::{OdeSolverProblem, OdeSolverSolution},
+    OdeEquations, Vector,
+};
 
-pub fn robertson_ode<M: DenseMatrix + 'static>() -> (OdeSolverProblem<impl OdeEquations<M=M, V=M::V, T=M::T>>, OdeSolverSolution<M::V>) {
+pub fn robertson_ode<M: DenseMatrix + 'static>() -> (
+    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverSolution<M::V>,
+) {
     let p = M::V::from_vec(vec![0.04.into(), 1.0e4.into(), 3.0e7.into()]);
     let mut problem = OdeSolverProblem::new_ode(
-
         //     dy1/dt = -.04*y1 + 1.e4*y2*y3
-         //*    dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*(y2)^2
-         //*    dy3/dt = 3.e7*(y2)^2
-        | x: &M::V, p: &M::V, _t: M::T, y: &mut M::V | {
+        //*    dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*(y2)^2
+        //*    dy3/dt = 3.e7*(y2)^2
+        |x: &M::V, p: &M::V, _t: M::T, y: &mut M::V| {
             y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
             y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
             y[2] = p[2] * x[1] * x[1];
         },
-        | x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V | {
+        |x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
             y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
-            y[1] = p[0] * v[0] - p[1] * v[1] * x[2] - p[1] * x[1] * v[2]  - M::T::from(2.0) * p[2] * x[1] * v[1];
+            y[1] = p[0] * v[0]
+                - p[1] * v[1] * x[2]
+                - p[1] * x[1] * v[2]
+                - M::T::from(2.0) * p[2] * x[1] * v[1];
             y[2] = M::T::from(2.0) * p[2] * x[1] * v[1];
         },
-        | _p: &M::V, _t: M::T | {
-            M::V::from_vec(vec![1.0.into(), 0.0.into(), 0.0.into()])
-        },
+        |_p: &M::V, _t: M::T| M::V::from_vec(vec![1.0.into(), 0.0.into(), 0.0.into()]),
         p.clone(),
     );
 
     problem.rtol = M::T::from(1.0e-4);
-    problem.atol = Rc::new(M::V::from_vec(vec![1.0e-8.into(), 1.0e-6.into(), 1.0e-6.into()]));
+    problem.atol = Rc::new(M::V::from_vec(vec![
+        1.0e-8.into(),
+        1.0e-6.into(),
+        1.0e-6.into(),
+    ]));
     let mut soln = OdeSolverSolution::default();
-    soln.push(M::V::from_vec(vec![1.0.into(), 0.0.into(), 0.0.into()]), 0.0.into());
-    soln.push(M::V::from_vec(vec![9.851641e-01.into(), 3.386242e-05.into(), 1.480205e-02.into()]), 0.4.into());
-    soln.push(M::V::from_vec(vec![9.055097e-01.into(), 2.240338e-05.into(), 9.446793e-02.into()]), 4.0.into());
-    soln.push(M::V::from_vec(vec![7.158017e-01.into(), 9.185037e-06.into(), 2.841892e-01.into()]), 40.0.into());
-    soln.push(M::V::from_vec(vec![4.505360e-01.into(), 3.223271e-06.into(), 5.494608e-01.into()]), 400.0.into());
-    soln.push(M::V::from_vec(vec![1.832299e-01.into(), 8.944378e-07.into(), 8.167692e-01.into()]), 4000.0.into());
-    soln.push(M::V::from_vec(vec![3.898902e-02.into(), 1.622006e-07.into(), 9.610108e-01.into()]), 40000.0.into());
-    soln.push(M::V::from_vec(vec![4.936383e-03.into(), 1.984224e-08.into(), 9.950636e-01.into()]), 400000.0.into());
-    soln.push(M::V::from_vec(vec![5.168093e-04.into(), 2.068293e-09.into(), 9.994832e-01.into()]), 4000000.0.into());
-    soln.push(M::V::from_vec(vec![5.202440e-05.into(), 2.081083e-10.into(), 9.999480e-01.into()]), 4.0000e+07.into());
-    soln.push(M::V::from_vec(vec![5.201061e-06.into(), 2.080435e-11.into(), 9.999948e-01.into()]), 4.0000e+08.into());
-    soln.push(M::V::from_vec(vec![5.258603e-07.into(), 2.103442e-12.into(), 9.999995e-01.into()]), 4.0000e+09.into());
-    soln.push(M::V::from_vec(vec![6.934511e-08.into(), 2.773804e-13.into(), 9.999999e-01.into()]), 4.0000e+10.into());
+    let data = vec![
+        (vec![1.0, 0.0, 0.0], 0.0),
+        (vec![9.851641e-01, 3.386242e-05, 1.480205e-02], 0.4),
+        (vec![9.055097e-01, 2.240338e-05, 9.446793e-02], 4.0),
+        (vec![7.158017e-01, 9.185037e-06, 2.841892e-01], 40.0),
+        (vec![4.505360e-01, 3.223271e-06, 5.494608e-01], 400.0),
+        (vec![1.832299e-01, 8.944378e-07, 8.167692e-01], 4000.0),
+        (vec![3.898902e-02, 1.622006e-07, 9.610108e-01], 40000.0),
+        (vec![4.936383e-03, 1.984224e-08, 9.950636e-01], 400000.0),
+        (vec![5.168093e-04, 2.068293e-09, 9.994832e-01], 4000000.0),
+        (vec![5.202440e-05, 2.081083e-10, 9.999480e-01], 4.0000e+07),
+        (vec![5.201061e-06, 2.080435e-11, 9.999948e-01], 4.0000e+08),
+        (vec![5.258603e-07, 2.103442e-12, 9.999995e-01], 4.0000e+09),
+        (vec![6.934511e-08, 2.773804e-13, 9.999999e-01], 4.0000e+10),
+    ];
+
+    for (values, time) in data {
+        soln.push(
+            M::V::from_vec(values.into_iter().map(|v| v.into()).collect()),
+            time.into(),
+        );
+    }
     (problem, soln)
 }
 
@@ -79,7 +99,7 @@ pub fn robertson_ode<M: DenseMatrix + 'static>() -> (OdeSolverProblem<impl OdeEq
  * Run statistics (optional outputs) are printed at the end.
  * -----------------------------------------------------------------*/
 
- // 3-species kinetics problem
+// 3-species kinetics problem
 
 // At t = 2.6391e-01      y =  9.899653e-01    3.470564e-05    1.000000e-02
 // rootsfound[] =   0   1
@@ -97,7 +117,7 @@ pub fn robertson_ode<M: DenseMatrix + 'static>() -> (OdeSolverProblem<impl OdeEq
 // At t = 4.0000e+08      y =  5.201061e-06    2.080435e-11    9.999948e-01
 // At t = 4.0000e+09      y =  5.258603e-07    2.103442e-12    9.999995e-01
 // At t = 4.0000e+10      y =  6.934511e-08    2.773804e-13    9.999999e-01
-// 
+//
 // Final Statistics:
 // Current time                 = 41154661313.59952
 // Steps                        = 542

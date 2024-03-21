@@ -1,10 +1,10 @@
-use nalgebra::{DVector, Dyn, DMatrix};
 use anyhow::Result;
+use nalgebra::{DMatrix, DVector, Dyn};
 
 use crate::{op::LinearOp, LinearSolver, Scalar, SolverProblem};
 
 /// A [LinearSolver] that uses the LU decomposition in the [`nalgebra` library](https://nalgebra.org/) to solve the linear system.
-pub struct LU<T, C> 
+pub struct LU<T, C>
 where
     T: Scalar,
     C: LinearOp<M = DMatrix<T>, V = DVector<T>, T = T>,
@@ -13,7 +13,7 @@ where
     problem: Option<SolverProblem<C>>,
 }
 
-impl<T, C> Default for LU<T, C> 
+impl<T, C> Default for LU<T, C>
 where
     T: Scalar,
     C: LinearOp<M = DMatrix<T>, V = DVector<T>, T = T>,
@@ -54,4 +54,3 @@ impl<T: Scalar, C: LinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> LinearSolver
         self.problem = Some(problem);
     }
 }
-    

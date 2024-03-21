@@ -5,7 +5,6 @@ use num_traits::One;
 
 use super::{LinearOp, Op};
 
-
 pub struct UnitCallable<M: Matrix> {
     n: usize,
     _phantom: std::marker::PhantomData<M>,
@@ -19,7 +18,10 @@ impl<M: Matrix> Default for UnitCallable<M> {
 
 impl<M: Matrix> UnitCallable<M> {
     pub fn new(n: usize) -> Self {
-        Self { n, _phantom: std::marker::PhantomData}
+        Self {
+            n,
+            _phantom: std::marker::PhantomData,
+        }
     }
 }
 
@@ -38,8 +40,7 @@ impl<M: Matrix> Op for UnitCallable<M> {
     }
 }
 
-impl<M: Matrix> LinearOp for UnitCallable<M> 
-{
+impl<M: Matrix> LinearOp for UnitCallable<M> {
     fn call_inplace(&self, x: &M::V, _t: M::T, y: &mut M::V) {
         y.copy_from(x)
     }
@@ -49,5 +50,3 @@ impl<M: Matrix> LinearOp for UnitCallable<M>
         M::from_diagonal(&jac)
     }
 }
-
-
