@@ -115,7 +115,7 @@ mod tests {
         let y = solver.solve(&problem, t).unwrap();
 
         let mut state = OdeSolverState::new(&problem);
-        solver.set_problem(&mut state, problem);
+        solver.set_problem(&mut state, &problem);
         while state.t <= t {
             solver.step(&mut state).unwrap();
         }

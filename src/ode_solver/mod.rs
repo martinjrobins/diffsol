@@ -26,13 +26,13 @@ pub mod diffsl;
 
 pub trait OdeSolverMethod<Eqn: OdeEquations> {
     fn problem(&self) -> Option<&OdeSolverProblem<Eqn>>;
-    fn set_problem(&mut self, state: &mut OdeSolverState<Eqn::M>, problem: OdeSolverProblem<Eqn>);
+    fn set_problem(&mut self, state: &mut OdeSolverState<Eqn::M>, problem: &OdeSolverProblem<Eqn>);
     fn step(&mut self, state: &mut OdeSolverState<Eqn::M>) -> Result<()>;
     fn interpolate(&self, state: &OdeSolverState<Eqn::M>, t: Eqn::T) -> Eqn::V;
     fn solve(&mut self, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Result<Eqn::V> {
         let problem = problem.clone();
         let mut state = OdeSolverState::new(&problem);
-        self.set_problem(&mut state, problem);
+        self.set_problem(&mut state, &problem);
         while state.t <= t {
             self.step(&mut state)?;
         }
@@ -46,7 +46,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     ) -> Result<Eqn::V> {
         let problem = problem.clone();
         let mut state = OdeSolverState::new_consistent(&problem, root_solver)?;
-        self.set_problem(&mut state, problem);
+        self.set_problem(&mut state, &problem);
         while state.t <= t {
             self.step(&mut state)?;
         }
@@ -254,7 +254,7 @@ mod tests {
         Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
     {
         let mut state = OdeSolverState::new_consistent(&problem, &mut root_solver).unwrap();
-        method.set_problem(&mut state, problem);
+        method.set_problem(&mut state, &problem);
         for point in solution.solution_points.iter() {
             while state.t < point.t {
                 method.step(&mut state).unwrap();
