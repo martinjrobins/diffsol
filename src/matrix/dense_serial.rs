@@ -1,14 +1,14 @@
-use nalgebra::{DVector, DMatrix, DMatrixView, DVectorView, DMatrixViewMut, DVectorViewMut};
 use anyhow::Result;
+use nalgebra::{DMatrix, DMatrixView, DMatrixViewMut, DVector, DVectorView, DVectorViewMut};
 
-use crate::{Scalar, IndexType};
+use crate::{IndexType, Scalar};
 
 use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 
 impl<'a, T: Scalar> MatrixCommon for DMatrixViewMut<'a, T> {
     type V = DVector<T>;
     type T = T;
-    
+
     fn ncols(&self) -> IndexType {
         self.ncols()
     }
@@ -31,7 +31,7 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
 impl<'a, T: Scalar> MatrixCommon for DMatrixView<'a, T> {
     type V = DVector<T>;
     type T = T;
-        fn ncols(&self) -> IndexType {
+    fn ncols(&self) -> IndexType {
         self.ncols()
     }
     fn nrows(&self) -> IndexType {
@@ -46,18 +46,21 @@ impl<'a, T: Scalar> MatrixView<'a> for DMatrixView<'a, T> {
 impl<T: Scalar> MatrixCommon for DMatrix<T> {
     type V = DVector<T>;
     type T = T;
-    
+
     fn ncols(&self) -> IndexType {
         self.ncols()
     }
     fn nrows(&self) -> IndexType {
         self.nrows()
     }
-    
 }
 
 impl<T: Scalar> Matrix for DMatrix<T> {
-    fn try_from_triplets(nrows: IndexType, ncols: IndexType, triplets: Vec<(IndexType, IndexType, T)>) -> Result<Self> {
+    fn try_from_triplets(
+        nrows: IndexType,
+        ncols: IndexType,
+        triplets: Vec<(IndexType, IndexType, T)>,
+    ) -> Result<Self> {
         let mut m = Self::zeros(nrows, ncols);
         for (i, j, v) in triplets {
             m[(i, j)] = v;
@@ -75,7 +78,6 @@ impl<T: Scalar> Matrix for DMatrix<T> {
     }
 }
 
-
 impl<T: Scalar> DenseMatrix for DMatrix<T> {
     type View<'a> = DMatrixView<'a, T>;
     type ViewMut<'a> = DMatrixViewMut<'a, T>;
@@ -86,12 +88,11 @@ impl<T: Scalar> DenseMatrix for DMatrix<T> {
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
         y.gemv(alpha, self, x, beta);
     }
-    
-    
+
     fn column_mut(&mut self, i: IndexType) -> DVectorViewMut<'_, T> {
         self.column_mut(i)
     }
-    
+
     fn columns_mut(&mut self, start: IndexType, nrows: IndexType) -> Self::ViewMut<'_> {
         self.columns_mut(start, nrows)
     }

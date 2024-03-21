@@ -1,13 +1,12 @@
-use std::ops::{Index, IndexMut, Mul, MulAssign, Div, DivAssign, Add, Sub, AddAssign, SubAssign};
-use std::fmt::{Debug, Display};
 use num_traits::Zero;
+use std::fmt::{Debug, Display};
+use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
-
-use crate::{Scalar, IndexType};
+use crate::{IndexType, Scalar};
 
 mod serial;
 
-pub trait VectorIndex: Sized + Index<IndexType, Output=IndexType> + Debug + Display {
+pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug + Display {
     fn zeros(len: IndexType) -> Self;
     fn len(&self) -> IndexType;
     fn is_empty(&self) -> bool {
@@ -19,62 +18,63 @@ pub trait VectorCommon: Sized + Debug + Display {
     type T: Scalar;
 }
 
-impl <'a, V> VectorCommon for &'a V where V: VectorCommon {
+impl<'a, V> VectorCommon for &'a V
+where
+    V: VectorCommon,
+{
     type T = V::T;
 }
 
-impl <'a, V> VectorCommon for &'a mut V where V: VectorCommon {
+impl<'a, V> VectorCommon for &'a mut V
+where
+    V: VectorCommon,
+{
     type T = V::T;
 }
 
-pub trait VectorOpsByValue<Rhs = Self, Output = Self>: VectorCommon 
-    + Add<Rhs, Output = Output>
-    + Sub<Rhs, Output = Output> 
-{}
+pub trait VectorOpsByValue<Rhs = Self, Output = Self>:
+    VectorCommon + Add<Rhs, Output = Output> + Sub<Rhs, Output = Output>
+{
+}
 
-impl <V, Rhs, Output> VectorOpsByValue<Rhs, Output> for V where V: VectorCommon 
-    + Add<Rhs, Output = Output>
-    + Sub<Rhs, Output = Output> 
-{}
+impl<V, Rhs, Output> VectorOpsByValue<Rhs, Output> for V where
+    V: VectorCommon + Add<Rhs, Output = Output> + Sub<Rhs, Output = Output>
+{
+}
 
+pub trait VectorMutOpsByValue<Rhs = Self>: VectorCommon + AddAssign<Rhs> + SubAssign<Rhs> {}
 
-pub trait VectorMutOpsByValue<Rhs = Self>: VectorCommon 
-    + AddAssign<Rhs>
-    + SubAssign<Rhs> 
-{}
-
-impl <V, Rhs> VectorMutOpsByValue<Rhs> for V where V: VectorCommon 
-    + AddAssign<Rhs>
-    + SubAssign<Rhs> 
-{}
+impl<V, Rhs> VectorMutOpsByValue<Rhs> for V where V: VectorCommon + AddAssign<Rhs> + SubAssign<Rhs> {}
 
 pub trait VectorRef<V: Vector>:
     VectorOpsByValue<V, V>
-    + for<'a> VectorOpsByValue<&'a V, V> 
-    + for<'a> VectorOpsByValue<V::View<'a>, V>
-    + for<'a, 'b> VectorOpsByValue<&'a V::View<'b>, V> 
-    + Mul<V::T, Output = V>
-    + Div<V::T, Output = V>
-{}
-
-impl <RefT, V: Vector> VectorRef<V> for RefT where
-    RefT: VectorOpsByValue<V, V>
     + for<'a> VectorOpsByValue<&'a V, V>
     + for<'a> VectorOpsByValue<V::View<'a>, V>
-    + for<'a, 'b> VectorOpsByValue<&'a V::View<'b>, V> 
+    + for<'a, 'b> VectorOpsByValue<&'a V::View<'b>, V>
     + Mul<V::T, Output = V>
     + Div<V::T, Output = V>
-{}
+{
+}
 
-pub trait VectorViewMut<'a>: 
+impl<RefT, V: Vector> VectorRef<V> for RefT where
+    RefT: VectorOpsByValue<V, V>
+        + for<'a> VectorOpsByValue<&'a V, V>
+        + for<'a> VectorOpsByValue<V::View<'a>, V>
+        + for<'a, 'b> VectorOpsByValue<&'a V::View<'b>, V>
+        + Mul<V::T, Output = V>
+        + Div<V::T, Output = V>
+{
+}
+
+pub trait VectorViewMut<'a>:
     VectorMutOpsByValue<Self::View>
     + VectorMutOpsByValue<Self::Owned>
     + for<'b> VectorMutOpsByValue<&'b Self::View>
     + for<'b> VectorMutOpsByValue<&'b Self::Owned>
     + MulAssign<Self::T>
     + DivAssign<Self::T>
-    + Index<IndexType, Output=Self::T>
-    + IndexMut<IndexType, Output=Self::T>
+    + Index<IndexType, Output = Self::T>
+    + IndexMut<IndexType, Output = Self::T>
 {
     type Owned;
     type View;
@@ -83,42 +83,43 @@ pub trait VectorViewMut<'a>:
     fn copy_from_view(&mut self, other: &Self::View);
 }
 
-pub trait VectorView<'a>: 
-    VectorOpsByValue<Self, Self::Owned> 
-    + VectorOpsByValue<Self::Owned, Self::Owned> 
-    + for<'b> VectorOpsByValue<&'b Self::Owned, Self::Owned> 
-    + for<'b> VectorOpsByValue<&'b Self, Self::Owned> 
+pub trait VectorView<'a>:
+    VectorOpsByValue<Self, Self::Owned>
+    + VectorOpsByValue<Self::Owned, Self::Owned>
+    + for<'b> VectorOpsByValue<&'b Self::Owned, Self::Owned>
+    + for<'b> VectorOpsByValue<&'b Self, Self::Owned>
     + Mul<Self::T, Output = Self::Owned>
     + Div<Self::T, Output = Self::Owned>
-    + Index<IndexType, Output=Self::T>
+    + Index<IndexType, Output = Self::T>
 {
     type Owned;
     fn abs(&self) -> Self::Owned;
     fn into_owned(self) -> Self::Owned;
 }
 
-
 pub trait Vector:
-    VectorOpsByValue<Self> 
+    VectorOpsByValue<Self>
     + for<'b> VectorOpsByValue<&'b Self>
-    + for<'a> VectorOpsByValue<Self::View<'a>> 
+    + for<'a> VectorOpsByValue<Self::View<'a>>
     + for<'a, 'b> VectorOpsByValue<&'b Self::View<'a>>
     + Mul<Self::T, Output = Self>
     + Div<Self::T, Output = Self>
-
     + VectorMutOpsByValue<Self>
     + for<'a> VectorMutOpsByValue<Self::View<'a>>
     + for<'b> VectorMutOpsByValue<&'b Self>
     + for<'a, 'b> VectorMutOpsByValue<&'b Self::View<'a>>
     + MulAssign<Self::T>
     + DivAssign<Self::T>
-
-    + Index<IndexType, Output=Self::T>
-    + IndexMut<IndexType, Output=Self::T>
+    + Index<IndexType, Output = Self::T>
+    + IndexMut<IndexType, Output = Self::T>
     + Clone
 {
-    type View<'a>: VectorView<'a, T = Self::T, Owned = Self> where Self: 'a;
-    type ViewMut<'a>: VectorViewMut<'a, T = Self::T, Owned = Self, View = Self::View<'a>> where Self: 'a;
+    type View<'a>: VectorView<'a, T = Self::T, Owned = Self>
+    where
+        Self: 'a;
+    type ViewMut<'a>: VectorViewMut<'a, T = Self::T, Owned = Self, View = Self::View<'a>>
+    where
+        Self: 'a;
     type Index: VectorIndex;
     fn norm(&self) -> Self::T;
     fn len(&self) -> IndexType;
@@ -148,21 +149,52 @@ pub trait Vector:
     fn gather_from(&mut self, other: &Self, indices: &Self::Index);
     fn scatter_from(&mut self, other: &Self, indices: &Self::Index);
     fn assert_eq(&self, other: &Self, tol: Self::T) {
-        assert_eq!(self.len(), other.len(), "Vector length mismatch: {} != {}", self.len(), other.len());
+        assert_eq!(
+            self.len(),
+            other.len(),
+            "Vector length mismatch: {} != {}",
+            self.len(),
+            other.len()
+        );
         for i in 0..self.len() {
             if num_traits::abs(self[i] - other[i]) > tol {
-                eprintln!("Vector element mismatch at index {}: {} != {}", i, self[i], other[i]);
+                eprintln!(
+                    "Vector element mismatch at index {}: {} != {}",
+                    i, self[i], other[i]
+                );
                 if self.len() <= 3 {
                     eprintln!("left: {}", self);
                     eprintln!("right: {}", other);
                 } else if i == 0 {
-                    eprintln!("left: [{}, {}, {}, ...] != [{}, {}, {}, ...]", self[0], self[1], self[2], other[0], other[1], other[2]);
+                    eprintln!(
+                        "left: [{}, {}, {}, ...] != [{}, {}, {}, ...]",
+                        self[0], self[1], self[2], other[0], other[1], other[2]
+                    );
                 } else if i == self.len() - 1 {
-                    eprintln!("left: [..., {}, {}, {}] != [..., {}, {}, {}]", self[i-2], self[i-1], self[i], other[i-2], other[i-1], other[i]);
+                    eprintln!(
+                        "left: [..., {}, {}, {}] != [..., {}, {}, {}]",
+                        self[i - 2],
+                        self[i - 1],
+                        self[i],
+                        other[i - 2],
+                        other[i - 1],
+                        other[i]
+                    );
                 } else {
-                    eprintln!("left: [..., {}, {}, {}, ...] != [..., {}, {}, {}, ...]", self[i-1], self[i], self[i+1], other[i-1], other[i], other[i+1]);
+                    eprintln!(
+                        "left: [..., {}, {}, {}, ...] != [..., {}, {}, {}, ...]",
+                        self[i - 1],
+                        self[i],
+                        self[i + 1],
+                        other[i - 1],
+                        other[i],
+                        other[i + 1]
+                    );
                 }
-                panic!("Vector element mismatch at index {}: {} != {}", i, self[i], other[i]);
+                panic!(
+                    "Vector element mismatch at index {}: {} != {}",
+                    i, self[i], other[i]
+                );
             }
         }
     }

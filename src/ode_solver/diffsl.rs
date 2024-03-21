@@ -1,15 +1,13 @@
-
 use std::cell::RefCell;
 
-use diffsl::execution::Compiler;
 use anyhow::Result;
+use diffsl::execution::Compiler;
 
 use crate::{op::Op, OdeEquations};
 
 type T = f64;
 type V = nalgebra::DVector<T>;
 type M = nalgebra::DMatrix<T>;
-
 
 pub struct DiffSl {
     compiler: Compiler,
@@ -33,13 +31,14 @@ impl DiffSl {
             compiler,
             data,
             ddata,
-            nparams, 
+            nparams,
             nstates,
             nout,
         })
     }
     pub fn out(&self, t: T, y: &V) -> &[T] {
-        self.compiler.calc_out(t, y.as_slice(), self.data.borrow_mut().as_mut_slice());
+        self.compiler
+            .calc_out(t, y.as_slice(), self.data.borrow_mut().as_mut_slice());
         self.compiler.get_out(self.data.borrow().as_slice())
     }
 }
@@ -61,34 +60,56 @@ impl Op for DiffSl {
 
 impl OdeEquations for DiffSl {
     fn set_params(&mut self, p: Self::V) {
-        self.compiler.set_inputs(p.as_slice(), self.data.borrow_mut().as_mut_slice());
+        self.compiler
+            .set_inputs(p.as_slice(), self.data.borrow_mut().as_mut_slice());
     }
 
     fn rhs_inplace(&self, t: Self::T, y: &Self::V, rhs_y: &mut Self::V) {
-        self.compiler.rhs(t, y.as_slice(), self.data.borrow_mut().as_mut_slice(), rhs_y.as_mut_slice());
+        self.compiler.rhs(
+            t,
+            y.as_slice(),
+            self.data.borrow_mut().as_mut_slice(),
+            rhs_y.as_mut_slice(),
+        );
     }
 
     fn rhs_jac_inplace(&self, t: Self::T, x: &Self::V, v: &Self::V, y: &mut Self::V) {
         let mut dummy_rhs = Self::V::zeros(self.nstates());
-        self.compiler.rhs_grad(t, x.as_slice(), v.as_slice(), self.data.borrow_mut().as_mut_slice(), self.ddata.borrow_mut().as_mut_slice(), dummy_rhs.as_mut_slice(), y.as_mut_slice());
+        self.compiler.rhs_grad(
+            t,
+            x.as_slice(),
+            v.as_slice(),
+            self.data.borrow_mut().as_mut_slice(),
+            self.ddata.borrow_mut().as_mut_slice(),
+            dummy_rhs.as_mut_slice(),
+            y.as_mut_slice(),
+        );
     }
 
     fn init(&self, _t: Self::T) -> Self::V {
         let mut ret_y = Self::V::zeros(self.nstates());
-        self.compiler.set_u0(ret_y.as_mut_slice(), self.data.borrow_mut().as_mut_slice());
+        self.compiler
+            .set_u0(ret_y.as_mut_slice(), self.data.borrow_mut().as_mut_slice());
         ret_y
     }
     fn mass_inplace(&self, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        self.compiler.mass(t, v.as_slice(), self.data.borrow_mut().as_mut_slice(), y.as_mut_slice());
+        self.compiler.mass(
+            t,
+            v.as_slice(),
+            self.data.borrow_mut().as_mut_slice(),
+            y.as_mut_slice(),
+        );
     }
 }
-
 
 #[cfg(test)]
 mod tests {
     use nalgebra::DVector;
 
-    use crate::{nonlinear_solver::newton::NewtonNonlinearSolver, Bdf, OdeEquations, OdeSolverMethod, OdeSolverProblem, Vector};
+    use crate::{
+        nonlinear_solver::newton::NewtonNonlinearSolver, Bdf, OdeEquations, OdeSolverMethod,
+        OdeSolverProblem, Vector,
+    };
 
     use super::DiffSl;
 
@@ -120,7 +141,6 @@ mod tests {
             }
         ";
 
-        
         let k = 1.0;
         let r = 1.0;
         let p = DVector::from_vec(vec![r, k]);
@@ -149,7 +169,9 @@ mod tests {
         let mut solver = Bdf::default();
         let mut root_solver = NewtonNonlinearSolver::default();
         let t = 1.0;
-        let state = solver.make_consistent_and_solve(&problem, t, &mut root_solver).unwrap();
+        let state = solver
+            .make_consistent_and_solve(&problem, t, &mut root_solver)
+            .unwrap();
         let y_expect = k / (1.0 + (k - y0) * (-r * t).exp() / y0);
         let z_expect = 2.0 * y_expect;
         let expected_state = DVector::from_vec(vec![y_expect, z_expect]);

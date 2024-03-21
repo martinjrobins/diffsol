@@ -1,18 +1,15 @@
 use crate::{jacobian::Jacobian, Matrix, Scalar, Vector};
 use num_traits::{One, Zero};
-use std::ops::{MulAssign, AddAssign};
-
+use std::ops::{AddAssign, MulAssign};
 
 pub mod closure;
-pub mod ode;
-pub mod unit;
-pub mod filter;
-pub mod linearise;
 pub mod constant_closure;
+pub mod filter;
 pub mod linear_closure;
+pub mod linearise;
+pub mod ode;
 pub mod ode_rhs;
-
-
+pub mod unit;
 
 pub trait Op {
     type T: Scalar;
@@ -30,7 +27,7 @@ pub trait Op {
 pub trait NonLinearOp: Op {
     /// Compute the operator at a given state and time.
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V);
-    
+
     /// Compute the product of the Jacobian with a given vector.
     fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V);
     fn call(&self, x: &Self::V, t: Self::T) -> Self::V {
@@ -55,8 +52,7 @@ pub trait LinearOp: Op {
         self.call_inplace(x, t, &mut y);
         y
     }
-    fn gemv(&self, x: &Self::V, t: Self::T, alpha: Self::T, beta: Self::T, y: &mut Self::V) 
-    {
+    fn gemv(&self, x: &Self::V, t: Self::T, alpha: Self::T, beta: Self::T, y: &mut Self::V) {
         let mut beta_y = y.clone();
         beta_y.mul_assign(beta);
         self.call_inplace(x, t, y);
@@ -88,7 +84,6 @@ impl<C: LinearOp> NonLinearOp for C {
     fn jac_mul_inplace(&self, _x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         C::call_inplace(self, v, t, y)
     }
-    
 }
 
 pub trait ConstantOp: Op {
