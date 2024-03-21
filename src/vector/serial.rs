@@ -1,8 +1,8 @@
 use nalgebra::{DVector, DVectorView, DVectorViewMut};
 
-use crate::{Scalar, IndexType};
+use crate::{IndexType, Scalar};
 
-use super::{Vector, VectorView, VectorCommon, VectorViewMut, VectorIndex};
+use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
 impl VectorIndex for DVector<IndexType> {
     fn zeros(len: IndexType) -> Self {
@@ -24,7 +24,6 @@ impl<'a, T: Scalar> VectorCommon for DVectorView<'a, T> {
 impl<'a, T: Scalar> VectorCommon for DVectorViewMut<'a, T> {
     type T = T;
 }
-
 
 impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
     type Owned = DVector<T>;
@@ -116,7 +115,6 @@ impl<T: Scalar> Vector for DVector<T> {
         }
     }
 }
-
 
 // tests
 #[cfg(test)]

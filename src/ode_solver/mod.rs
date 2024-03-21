@@ -1,8 +1,10 @@
-use std::rc::Rc;
 use anyhow::Context;
+use std::rc::Rc;
 
-use crate::{op::{filter::FilterCallable, ode_rhs::OdeRhs}, Matrix, NonLinearSolver, OdeEquations, SolverProblem, Vector, VectorIndex};
-
+use crate::{
+    op::{filter::FilterCallable, ode_rhs::OdeRhs},
+    Matrix, NonLinearSolver, OdeEquations, SolverProblem, Vector, VectorIndex,
+};
 
 use anyhow::Result;
 use num_traits::{One, Zero};
@@ -15,11 +17,9 @@ use self::diffsl::DiffSl;
 #[cfg(feature = "diffsl")]
 use crate::op::Op;
 
-
 pub mod bdf;
-pub mod test_models;
 pub mod equations;
-
+pub mod test_models;
 
 #[cfg(feature = "diffsl")]
 pub mod diffsl;
@@ -38,7 +38,12 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         }
         Ok(self.interpolate(&state, t))
     }
-    fn make_consistent_and_solve<RS: NonLinearSolver<FilterCallable<OdeRhs<Eqn>>>>(&mut self, problem: &OdeSolverProblem<Eqn>, t: Eqn::T, root_solver: &mut RS) -> Result<Eqn::V> {
+    fn make_consistent_and_solve<RS: NonLinearSolver<FilterCallable<OdeRhs<Eqn>>>>(
+        &mut self,
+        problem: &OdeSolverProblem<Eqn>,
+        t: Eqn::T,
+        root_solver: &mut RS,
+    ) -> Result<Eqn::V> {
         let problem = problem.clone();
         let mut state = OdeSolverState::new_consistent(&problem, root_solver)?;
         self.set_problem(&mut state, &problem);
@@ -49,9 +54,6 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     }
 }
 
-
-
-
 pub struct OdeSolverState<M: Matrix> {
     pub y: M::V,
     pub t: M::T,
@@ -59,12 +61,11 @@ pub struct OdeSolverState<M: Matrix> {
     _phantom: std::marker::PhantomData<M>,
 }
 
-impl <M: Matrix> OdeSolverState<M> {
+impl<M: Matrix> OdeSolverState<M> {
     pub fn new<Eqn>(ode_problem: &OdeSolverProblem<Eqn>) -> Self
     where
         Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
     {
-
         let t = ode_problem.t0;
         let h = ode_problem.h0;
         let y = ode_problem.eqn.init(t);
@@ -74,14 +75,15 @@ impl <M: Matrix> OdeSolverState<M> {
             h,
             _phantom: std::marker::PhantomData,
         }
-        
     }
-    fn new_consistent<Eqn, S>(ode_problem: &OdeSolverProblem<Eqn>, root_solver: &mut S) -> Result<Self>
+    fn new_consistent<Eqn, S>(
+        ode_problem: &OdeSolverProblem<Eqn>,
+        root_solver: &mut S,
+    ) -> Result<Self>
     where
         Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
         S: NonLinearSolver<FilterCallable<OdeRhs<Eqn>>> + ?Sized,
     {
-
         let t = ode_problem.t0;
         let h = ode_problem.h0;
         let indices = ode_problem.eqn.algebraic_indices();
@@ -92,7 +94,7 @@ impl <M: Matrix> OdeSolverState<M> {
                 t,
                 h,
                 _phantom: std::marker::PhantomData,
-            })
+            });
         }
         let mut y_filtered = y.filter(&indices);
         let atol = Rc::new(ode_problem.atol.as_ref().filter(&indices));
@@ -114,9 +116,6 @@ impl <M: Matrix> OdeSolverState<M> {
     }
 }
 
-
-
-
 pub struct OdeSolverProblem<Eqn: OdeEquations> {
     pub eqn: Rc<Eqn>,
     pub rtol: Eqn::T,
@@ -126,7 +125,7 @@ pub struct OdeSolverProblem<Eqn: OdeEquations> {
 }
 
 // impl clone
-impl <Eqn: OdeEquations> Clone for OdeSolverProblem<Eqn> {
+impl<Eqn: OdeEquations> Clone for OdeSolverProblem<Eqn> {
     fn clone(&self) -> Self {
         Self {
             eqn: self.eqn.clone(),
@@ -138,7 +137,7 @@ impl <Eqn: OdeEquations> Clone for OdeSolverProblem<Eqn> {
     }
 }
 
-impl <Eqn: OdeEquations> OdeSolverProblem<Eqn> {
+impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
     pub fn default_rtol() -> Eqn::T {
         Eqn::T::from(1e-6)
     }
@@ -179,7 +178,7 @@ where
         let eqn = OdeSolverEquations::new_ode_with_mass(rhs, rhs_jac, mass, init, p);
         OdeSolverProblem::new(eqn)
     }
-} 
+}
 
 impl<M, F, G, I> OdeSolverProblem<OdeSolverEquationsMassI<M, F, G, I>>
 where
@@ -202,8 +201,6 @@ impl OdeSolverProblem<DiffSl> {
     }
 }
 
-
-
 pub struct OdeSolverSolutionPoint<V: Vector> {
     pub state: V,
     pub t: V::T,
@@ -213,12 +210,17 @@ pub struct OdeSolverSolution<V: Vector> {
     pub solution_points: Vec<OdeSolverSolutionPoint<V>>,
 }
 
-impl <V: Vector> OdeSolverSolution<V> {
+impl<V: Vector> OdeSolverSolution<V> {
     pub fn push(&mut self, state: V, t: V::T) {
         // find the index to insert the new point keeping the times sorted
-        let index = self.solution_points.iter().position(|x| x.t > t).unwrap_or(self.solution_points.len());
+        let index = self
+            .solution_points
+            .iter()
+            .position(|x| x.t > t)
+            .unwrap_or(self.solution_points.len());
         // insert the new point at that index
-        self.solution_points.insert(index, OdeSolverSolutionPoint{state, t});
+        self.solution_points
+            .insert(index, OdeSolverSolutionPoint { state, t });
     }
 }
 
@@ -230,32 +232,24 @@ impl<V: Vector> Default for OdeSolverSolution<V> {
     }
 }
 
-
-
-
-
-
 #[cfg(test)]
 mod tests {
+    use super::test_models::{
+        exponential_decay::exponential_decay_problem,
+        exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem,
+        robertson::robertson, robertson_ode::robertson_ode,
+    };
+    use super::*;
     use crate::nonlinear_solver::newton::NewtonNonlinearSolver;
     use tests::bdf::Bdf;
-    use super::*;
-    use super::test_models::{
-        exponential_decay::exponential_decay_problem, 
-        exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem,
-        robertson::robertson,
-        robertson_ode::robertson_ode,
-    };
-    
-    
+
     fn test_ode_solver<M, Eqn>(
-        method: &mut impl OdeSolverMethod<Eqn>, 
-        mut root_solver: impl NonLinearSolver<FilterCallable<OdeRhs<Eqn>>>, 
-        problem: OdeSolverProblem<Eqn>, 
+        method: &mut impl OdeSolverMethod<Eqn>,
+        mut root_solver: impl NonLinearSolver<FilterCallable<OdeRhs<Eqn>>>,
+        problem: OdeSolverProblem<Eqn>,
         solution: OdeSolverSolution<M::V>,
         override_tol: Option<M::T>,
-    )
-    where 
+    ) where
         M: Matrix + 'static,
         Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
     {
@@ -279,9 +273,9 @@ mod tests {
             }
         }
     }
-    
+
     type Mcpu = nalgebra::DMatrix<f64>;
-    
+
     #[test]
     fn test_bdf_nalgebra_exponential_decay() {
         let mut s = Bdf::default();
@@ -302,7 +296,7 @@ mod tests {
         final_step_size: 0.23215911532645564
         "###);
     }
-    
+
     #[test]
     fn test_bdf_nalgebra_exponential_decay_algebraic() {
         let mut s = Bdf::default();
@@ -323,8 +317,7 @@ mod tests {
         final_step_size: 0.20974041151932246
         "###);
     }
-    
-    
+
     #[test]
     fn test_bdf_nalgebra_robertson() {
         let mut s = Bdf::default();
@@ -345,7 +338,7 @@ mod tests {
         final_step_size: 7622676567.923919
         "###);
     }
-    
+
     #[test]
     fn test_bdf_nalgebra_robertson_ode() {
         let mut s = Bdf::default();
