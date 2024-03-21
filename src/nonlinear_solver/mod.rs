@@ -1,17 +1,16 @@
+use anyhow::{anyhow, Result};
 use core::panic;
+use num_traits::{One, Pow};
 use std::rc::Rc;
-use num_traits::{Pow, One};
-use anyhow::{Result, anyhow};
 
 use crate::{op::Op, solver::SolverProblem, IndexType, Scalar, Vector};
-
 
 pub struct NonLinearSolveSolution<V> {
     pub x0: V,
     pub x: V,
 }
 
-impl <V> NonLinearSolveSolution<V> {
+impl<V> NonLinearSolveSolution<V> {
     pub fn new(x0: V, x: V) -> Self {
         Self { x0, x }
     }
@@ -28,7 +27,9 @@ pub trait NonLinearSolver<C: Op> {
         }
     }
     fn set_time(&mut self, t: C::T) -> Result<()> {
-        self.problem_mut().ok_or_else(|| anyhow!("No problem set"))?.t = t;
+        self.problem_mut()
+            .ok_or_else(|| anyhow!("No problem set"))?
+            .t = t;
         Ok(())
     }
     fn solve(&mut self, state: &C::V) -> Result<C::V> {
@@ -56,10 +57,10 @@ enum ConvergenceStatus {
     Converged,
     Diverged,
     Continue,
-    MaximumIterations
+    MaximumIterations,
 }
 
-impl <C: Op> Convergence<C> {
+impl<C: Op> Convergence<C> {
     fn new(problem: &SolverProblem<C>, max_iter: IndexType) -> Self {
         let rtol = problem.rtol;
         let atol = problem.atol.clone();
@@ -101,15 +102,19 @@ impl <C: Op> Convergence<C> {
         }
         if let Some(old_norm) = self.old_norm {
             let rate = norm / old_norm;
-            
+
             // if converged then break out of iteration successfully
             if rate / (C::T::one() - rate) * norm < self.tol {
                 return ConvergenceStatus::Converged;
             }
-            
+
             // if iteration is not going to converge in NEWTON_MAXITER
             // (assuming the current rate), then abort
-            if rate.pow(i32::try_from(self.max_iter - self.iter).unwrap()) / (C::T::from(1.0) - rate) * norm > self.tol {
+            if rate.pow(i32::try_from(self.max_iter - self.iter).unwrap())
+                / (C::T::from(1.0) - rate)
+                * norm
+                > self.tol
+            {
                 return ConvergenceStatus::Diverged;
             }
         }
@@ -123,20 +128,26 @@ impl <C: Op> Convergence<C> {
     }
 }
 
-
 pub mod newton;
 
 //tests
 #[cfg(test)]
 pub mod tests {
-    use crate::{op::{closure::Closure, NonLinearOp}, linear_solver::lu::LU, matrix::MatrixCommon, DenseMatrix};
     use self::newton::NewtonNonlinearSolver;
+    use crate::{
+        linear_solver::lu::LU,
+        matrix::MatrixCommon,
+        op::{closure::Closure, NonLinearOp},
+        DenseMatrix,
+    };
 
     use super::*;
     use num_traits::Zero;
-    
-    
-    pub fn get_square_problem<M>() -> (SolverProblem<impl NonLinearOp<M = M, V = M::V, T = M::T>>, Vec<NonLinearSolveSolution<M::V>>)
+
+    pub fn get_square_problem<M>() -> (
+        SolverProblem<impl NonLinearOp<M = M, V = M::V, T = M::T>>,
+        Vec<NonLinearSolveSolution<M::V>>,
+    )
     where
         M: DenseMatrix + 'static,
     {
@@ -151,24 +162,30 @@ pub mod tests {
                 y.add_scalar_mut(M::T::from(-8.0));
             },
             // J = 2 * J * x * dx
-            move |x: &<M as MatrixCommon>::V, _p: &<M as MatrixCommon>::V, _t, v, y | {
+            move |x: &<M as MatrixCommon>::V, _p: &<M as MatrixCommon>::V, _t, v, y| {
                 jac2.gemv(M::T::from(2.0), x, M::T::zero(), y); // y = 2 * J * x
                 y.component_mul_assign(v);
             },
-            2, 2, p,
+            2,
+            2,
+            p,
         );
         let rtol = M::T::from(1e-6);
         let atol = M::V::from_vec(vec![1e-6.into(), 1e-6.into()]);
         let t = M::T::zero();
         let problem = SolverProblem::new(Rc::new(op), t, Rc::new(atol), rtol);
-        let solns = vec![
-            NonLinearSolveSolution::new(M::V::from_vec(vec![2.1.into(), 2.1.into()]), M::V::from_vec(vec![2.0.into(), 2.0.into()]))
-        ];
+        let solns = vec![NonLinearSolveSolution::new(
+            M::V::from_vec(vec![2.1.into(), 2.1.into()]),
+            M::V::from_vec(vec![2.0.into(), 2.0.into()]),
+        )];
         (problem, solns)
     }
-    
-    pub fn test_nonlinear_solver<C>(mut solver: impl NonLinearSolver<C>, problem: SolverProblem<C>, solns: Vec<NonLinearSolveSolution<C::V>>) 
-    where
+
+    pub fn test_nonlinear_solver<C>(
+        mut solver: impl NonLinearSolver<C>,
+        problem: SolverProblem<C>,
+        solns: Vec<NonLinearSolveSolution<C::V>>,
+    ) where
         C: NonLinearOp,
     {
         solver.set_problem(problem);
@@ -182,7 +199,6 @@ pub mod tests {
         }
     }
 
-
     type MCpu = nalgebra::DMatrix<f64>;
 
     #[test]
@@ -192,7 +208,4 @@ pub mod tests {
         let s = NewtonNonlinearSolver::new(lu);
         test_nonlinear_solver(s, prob, soln);
     }
-    
-    
-    
 }

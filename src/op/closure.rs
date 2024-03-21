@@ -4,11 +4,11 @@ use crate::{Matrix, Vector};
 
 use super::{NonLinearOp, Op};
 
-pub struct Closure<M, F, G> 
-where 
+pub struct Closure<M, F, G>
+where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V)
+    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
     func: F,
     jacobian_action: G,
@@ -18,16 +18,22 @@ where
     p: Rc<M::V>,
 }
 
-impl<M, F, G> Closure<M, F, G> 
-where 
+impl<M, F, G> Closure<M, F, G>
+where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V)
-
+    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
     pub fn new(func: F, jacobian_action: G, nstates: usize, nout: usize, p: Rc<M::V>) -> Self {
         let nparams = p.len();
-        Self { func, jacobian_action, nstates, nout, nparams, p }
+        Self {
+            func,
+            jacobian_action,
+            nstates,
+            nout,
+            nparams,
+            p,
+        }
     }
 }
 
@@ -35,7 +41,7 @@ impl<M, F, G> Op for Closure<M, F, G>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V)
+    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
     type V = M::V;
     type T = M::T;
@@ -51,12 +57,11 @@ where
     }
 }
 
-
 impl<M, F, G> NonLinearOp for Closure<M, F, G>
-where 
+where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V)
+    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
     fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
         (self.func)(x, self.p.as_ref(), t, y)
@@ -65,4 +70,3 @@ where
         (self.jacobian_action)(x, self.p.as_ref(), t, v, y)
     }
 }
-

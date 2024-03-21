@@ -1,9 +1,10 @@
-use std::rc::Rc;
 use num_traits::Zero;
+use std::rc::Rc;
 
-use crate::{op::{closure::Closure, linear_closure::LinearClosure, Op}, LinearOp, Matrix, NonLinearOp, Vector, VectorIndex};
-
-
+use crate::{
+    op::{closure::Closure, linear_closure::LinearClosure, Op},
+    LinearOp, Matrix, NonLinearOp, Vector, VectorIndex,
+};
 
 pub trait OdeEquations: Op {
     /// This must be called first
@@ -17,7 +18,7 @@ pub trait OdeEquations: Op {
 
     /// initializes `y` with the initial condition
     fn init(&self, t: Self::T) -> Self::V;
-    
+
     fn rhs(&self, t: Self::T, y: &Self::V) -> Self::V {
         let mut rhs_y = Self::V::zeros(self.nstates());
         self.rhs_inplace(t, y, &mut rhs_y);
@@ -35,11 +36,18 @@ pub trait OdeEquations: Op {
         let rhs_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y_rhs: &mut Self::V| {
             self.rhs_inplace(t, x, y_rhs);
         };
-        let rhs_jac_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V| {
-            self.rhs_jac_inplace(t, x, v, y);
-        };
+        let rhs_jac_inplace =
+            |x: &Self::V, _p: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V| {
+                self.rhs_jac_inplace(t, x, v, y);
+            };
         let dummy_p = Rc::new(Self::V::zeros(0));
-        let closure = Closure::new(rhs_inplace, rhs_jac_inplace, self.nstates(), self.nstates(), dummy_p);
+        let closure = Closure::new(
+            rhs_inplace,
+            rhs_jac_inplace,
+            self.nstates(),
+            self.nstates(),
+            dummy_p,
+        );
         closure.jacobian(x, t)
     }
 
@@ -55,24 +63,24 @@ pub trait OdeEquations: Op {
             self.mass_inplace(t, y, res);
         };
         let dummy_p = Rc::new(Self::V::zeros(0));
-        let mass_linear_op = LinearClosure::<Self::M, _>::new(mass, self.nstates(), self.nstates(), dummy_p);
+        let mass_linear_op =
+            LinearClosure::<Self::M, _>::new(mass, self.nstates(), self.nstates(), dummy_p);
         let t = Self::T::zero();
         let diag: Self::V = mass_linear_op.jacobian_diagonal(t);
         diag.filter_indices(|x| x == Self::T::zero())
     }
-    
+
     /// mass matrix, re-use jacobian calculation from LinearOp
     fn mass_matrix(&self, t: Self::T) -> Self::M {
-        let mass = |y: &Self::V, _p: &Self::V, t: Self::T, res: &mut Self::V| {
-            self.mass_inplace(t, y, res)
-        };
+        let mass =
+            |y: &Self::V, _p: &Self::V, t: Self::T, res: &mut Self::V| self.mass_inplace(t, y, res);
         let dummy_p = Rc::new(Self::V::zeros(0));
         let linear_closure = LinearClosure::new(mass, self.nstates(), self.nstates(), dummy_p);
         LinearOp::jacobian(&linear_closure, t)
     }
 }
 
-pub struct OdeSolverEquations<M, F, G, H, I> 
+pub struct OdeSolverEquations<M, F, G, H, I>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -111,8 +119,8 @@ where
     }
 }
 
-// impl Op 
-impl <M, F, G, H, I> Op for OdeSolverEquations<M, F, G, H, I>
+// impl Op
+impl<M, F, G, H, I> Op for OdeSolverEquations<M, F, G, H, I>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -124,18 +132,18 @@ where
     type V = M::V;
     type T = M::T;
 
-   fn nout(&self) -> usize {
-       self.nstates
-   } 
-   fn nparams(&self) -> usize {
-       self.p.len()
-   }
-   fn nstates(&self) -> usize {
-       self.nstates
-   }
+    fn nout(&self) -> usize {
+        self.nstates
+    }
+    fn nparams(&self) -> usize {
+        self.p.len()
+    }
+    fn nstates(&self) -> usize {
+        self.nstates
+    }
 }
 
-impl <M, F, G, H, I> OdeEquations for OdeSolverEquations<M, F, G, H, I>
+impl<M, F, G, H, I> OdeEquations for OdeSolverEquations<M, F, G, H, I>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -143,12 +151,11 @@ where
     H: Fn(&M::V, &M::V, M::T, &mut M::V),
     I: Fn(&M::V, M::T) -> M::V,
 {
-
     fn rhs_inplace(&self, t: Self::T, y: &Self::V, rhs_y: &mut Self::V) {
         let p = self.p.as_ref();
         (self.rhs)(y, p, t, rhs_y);
     }
-    
+
     fn rhs_jac_inplace(&self, t: Self::T, x: &Self::V, v: &Self::V, y: &mut Self::V) {
         let p = self.p.as_ref();
         (self.rhs_jac)(x, p, t, v, y);
@@ -169,7 +176,7 @@ where
     }
 }
 
-pub struct OdeSolverEquationsMassI<M, F, G, I> 
+pub struct OdeSolverEquationsMassI<M, F, G, I>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -204,8 +211,8 @@ where
     }
 }
 
-// impl Op 
-impl <M, F, G, I> Op for OdeSolverEquationsMassI<M, F, G, I>
+// impl Op
+impl<M, F, G, I> Op for OdeSolverEquationsMassI<M, F, G, I>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -216,18 +223,18 @@ where
     type V = M::V;
     type T = M::T;
 
-   fn nout(&self) -> usize {
-       self.nstates
-   } 
-   fn nparams(&self) -> usize {
-       self.p.len()
-   }
-   fn nstates(&self) -> usize {
-       self.nstates
-   }
+    fn nout(&self) -> usize {
+        self.nstates
+    }
+    fn nparams(&self) -> usize {
+        self.p.len()
+    }
+    fn nstates(&self) -> usize {
+        self.nstates
+    }
 }
 
-impl <M, F, G, I> OdeEquations for OdeSolverEquationsMassI<M, F, G, I>
+impl<M, F, G, I> OdeEquations for OdeSolverEquationsMassI<M, F, G, I>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -238,7 +245,7 @@ where
         let p = self.p.as_ref();
         (self.rhs)(y, p, t, rhs_y);
     }
-    
+
     fn rhs_jac_inplace(&self, t: Self::T, x: &Self::V, v: &Self::V, y: &mut Self::V) {
         let p = self.p.as_ref();
         (self.rhs_jac)(x, p, t, v, y);
@@ -252,7 +259,7 @@ where
     fn set_params(&mut self, p: Self::V) {
         self.p = Rc::new(p);
     }
-    
+
     fn algebraic_indices(&self) -> <Self::V as Vector>::Index {
         <Self::V as Vector>::Index::zeros(0)
     }
@@ -262,13 +269,13 @@ where
 mod tests {
     use nalgebra::DVector;
 
-    use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
     use crate::ode_solver::equations::OdeEquations;
+    use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
     use crate::vector::Vector;
 
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;
-    
+
     #[test]
     fn ode_equation_test() {
         let (problem, _soln) = exponential_decay_problem::<Mcpu>();

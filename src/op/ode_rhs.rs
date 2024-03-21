@@ -4,7 +4,6 @@ use crate::OdeEquations;
 
 use super::{NonLinearOp, Op};
 
-
 pub struct OdeRhs<Eqn: OdeEquations> {
     eqn: Rc<Eqn>,
 }
@@ -29,7 +28,6 @@ impl<Eqn: OdeEquations> Op for OdeRhs<Eqn> {
         self.eqn.nparams()
     }
 }
-
 
 impl<Eqn: OdeEquations> NonLinearOp for OdeRhs<Eqn> {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
