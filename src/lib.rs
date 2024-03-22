@@ -46,6 +46,8 @@ pub trait Scalar:
 {
     const EPSILON: Self;
     const INFINITY: Self;
+    const NAN: Self;
+    fn is_nan(self) -> bool;
 }
 
 type IndexType = usize;
@@ -53,15 +55,19 @@ type IndexType = usize;
 impl Scalar for f64 {
     const EPSILON: Self = f64::EPSILON;
     const INFINITY: Self = f64::INFINITY;
+    const NAN: Self = f64::NAN;
+    fn is_nan(self) -> bool {
+        self.is_nan()
+    }
 }
 
+pub mod jacobian;
 pub mod linear_solver;
 pub mod matrix;
 pub mod nonlinear_solver;
 pub mod ode_solver;
 pub mod op;
 pub mod solver;
-pub mod jacobian;
 pub mod vector;
 
 use std::fmt::Display;
