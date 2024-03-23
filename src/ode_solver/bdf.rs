@@ -259,10 +259,9 @@ where
     fn problem(&self) -> Option<&OdeSolverProblem<Eqn>> {
         self.ode_problem.as_ref()
     }
-
-    fn set_problem(&mut self, state: &mut OdeSolverState<Eqn::M>, problem: OdeSolverProblem<Eqn>) {
-        self.ode_problem = Some(problem);
-        let problem = self.ode_problem.as_ref().unwrap();
+  
+    fn set_problem(&mut self, state: &mut OdeSolverState<Eqn::M>, problem: &OdeSolverProblem<Eqn>) {
+        self.ode_problem = Some(problem.clone());
         let nstates = problem.eqn.nstates();
         self.order = 1usize;
         self.n_equal_steps = 0;
