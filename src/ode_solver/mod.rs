@@ -44,7 +44,6 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         t: Eqn::T,
         root_solver: &mut RS,
     ) -> Result<Eqn::V> {
-        let problem = problem.clone();
         let mut state = OdeSolverState::new_consistent(&problem, root_solver)?;
         self.set_problem(&mut state, &problem);
         while state.t <= t {
