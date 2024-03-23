@@ -70,7 +70,7 @@ and `1.0e-6` for the absolute tolerances of `y_1`, `y_2`, and `y_3`,
 respectively. We set the problem up with the following code:
 
 ```rust
- type T = f64;
+type T = f64;
 type V = nalgebra::DVector<T>;
 let problem = OdeBuilder::new()
     .p([0.04, 1.0e4, 3.0e7])
