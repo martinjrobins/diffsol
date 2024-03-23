@@ -30,7 +30,6 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     fn step(&mut self, state: &mut OdeSolverState<Eqn::M>) -> Result<()>;
     fn interpolate(&self, state: &OdeSolverState<Eqn::M>, t: Eqn::T) -> Eqn::V;
     fn solve(&mut self, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Result<Eqn::V> {
-        let problem = problem.clone();
         let mut state = OdeSolverState::new(&problem);
         self.set_problem(&mut state, &problem);
         while state.t <= t {
