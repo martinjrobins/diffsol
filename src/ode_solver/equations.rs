@@ -1,5 +1,5 @@
 use num_traits::Zero;
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     jacobian::{find_non_zero_entries, JacobianColoring},
@@ -7,6 +7,34 @@ use crate::{
     Matrix, NonLinearOp, Vector, VectorIndex,
 };
 use num_traits::One;
+use serde::Serialize;
+
+#[derive(Clone, Debug, Serialize)]
+pub struct OdeEquationsStatistics {
+    pub number_of_rhs_evals: usize,
+    pub number_of_jac_mul_evals: usize,
+    pub number_of_mass_evals: usize,
+    pub number_of_mass_matrix_evals: usize,
+    pub number_of_jacobian_matrix_evals: usize,
+}
+
+impl Default for OdeEquationsStatistics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl OdeEquationsStatistics {
+    pub fn new() -> Self {
+        Self {
+            number_of_rhs_evals: 0,
+            number_of_jac_mul_evals: 0,
+            number_of_mass_evals: 0,
+            number_of_mass_matrix_evals: 0,
+            number_of_jacobian_matrix_evals: 0,
+        }
+    }
+}
 
 pub trait OdeEquations: Op {
     /// This must be called first
@@ -27,14 +55,14 @@ pub trait OdeEquations: Op {
         rhs_y
     }
 
-    fn rhs_jac(&self, t: Self::T, x: &Self::V, v: &Self::V) -> Self::V {
+    fn jac_mul(&self, t: Self::T, x: &Self::V, v: &Self::V) -> Self::V {
         let mut rhs_jac_y = Self::V::zeros(self.nstates());
         self.rhs_jac_inplace(t, x, v, &mut rhs_jac_y);
         rhs_jac_y
     }
 
     /// rhs jacobian matrix J(x), re-use jacobian calculation from NonLinearOp
-    fn rhs_jacobian(&self, x: &Self::V, t: Self::T) -> Self::M {
+    fn jacobian_matrix(&self, x: &Self::V, t: Self::T) -> Self::M {
         let rhs_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y_rhs: &mut Self::V| {
             self.rhs_inplace(t, x, y_rhs);
         };
@@ -69,6 +97,10 @@ pub trait OdeEquations: Op {
         // assume identity mass matrix
         Self::M::from_diagonal(&Self::V::from_element(self.nstates(), Self::T::one()))
     }
+
+    fn get_statistics(&self) -> OdeEquationsStatistics {
+        OdeEquationsStatistics::new()
+    }
 }
 
 pub struct OdeSolverEquations<M, F, G, H, I>
@@ -87,6 +119,7 @@ where
     nstates: usize,
     jacobian_coloring: Option<JacobianColoring>,
     mass_coloring: Option<JacobianColoring>,
+    statistics: RefCell<OdeEquationsStatistics>,
 }
 
 impl<M, F, G, H, I> OdeSolverEquations<M, F, G, H, I>
@@ -109,25 +142,40 @@ where
         let y0 = init(&p, M::T::zero());
         let nstates = y0.len();
         let p = Rc::new(p);
+        let statistics = RefCell::default();
+        let mut ret = Self {
+            rhs,
+            rhs_jac,
+            mass,
+            init,
+            p: p.clone(),
+            nstates,
+            jacobian_coloring: None,
+            mass_coloring: None,
+            statistics,
+        };
         let (jacobian_coloring, mass_coloring) = if use_coloring {
-            let op = Closure::<M, &F, &G>::new(&rhs, &rhs_jac, nstates, nstates, p.clone());
+            let rhs_inplace = |x: &M::V, _p: &M::V, t: M::T, y_rhs: &mut M::V| {
+                ret.rhs_inplace(t, x, y_rhs);
+            };
+            let rhs_jac_inplace = |x: &M::V, _p: &M::V, t: M::T, v: &M::V, y: &mut M::V| {
+                ret.rhs_jac_inplace(t, x, v, y);
+            };
+            let mass_inplace = |x: &M::V, _p: &M::V, t: M::T, y: &mut M::V| {
+                ret.mass_inplace(t, x, y);
+            };
+            let op =
+                Closure::<M, _, _>::new(rhs_inplace, rhs_jac_inplace, nstates, nstates, p.clone());
             let jacobian_coloring = Some(JacobianColoring::new(&op, &y0, t0));
-            let op = LinearClosure::<M, &H>::new(&mass, nstates, nstates, p.clone());
+            let op = LinearClosure::<M, _>::new(mass_inplace, nstates, nstates, p.clone());
             let mass_coloring = Some(JacobianColoring::new(&op, &y0, t0));
             (jacobian_coloring, mass_coloring)
         } else {
             (None, None)
         };
-        Self {
-            rhs,
-            rhs_jac,
-            mass,
-            init,
-            p,
-            nstates,
-            jacobian_coloring,
-            mass_coloring,
-        }
+        ret.jacobian_coloring = jacobian_coloring;
+        ret.mass_coloring = mass_coloring;
+        ret
     }
 }
 
@@ -166,16 +214,19 @@ where
     fn rhs_inplace(&self, t: Self::T, y: &Self::V, rhs_y: &mut Self::V) {
         let p = self.p.as_ref();
         (self.rhs)(y, p, t, rhs_y);
+        self.statistics.borrow_mut().number_of_rhs_evals += 1;
     }
 
     fn rhs_jac_inplace(&self, t: Self::T, x: &Self::V, v: &Self::V, y: &mut Self::V) {
         let p = self.p.as_ref();
         (self.rhs_jac)(x, p, t, v, y);
+        self.statistics.borrow_mut().number_of_jac_mul_evals += 1;
     }
 
     fn mass_inplace(&self, t: Self::T, v: &Self::V, y: &mut Self::V) {
         let p = self.p.as_ref();
         (self.mass)(v, p, t, y);
+        self.statistics.borrow_mut().number_of_mass_evals += 1;
     }
 
     fn init(&self, t: Self::T) -> Self::V {
@@ -187,10 +238,18 @@ where
         self.p = Rc::new(p);
     }
 
-    fn rhs_jacobian(&self, x: &Self::V, t: Self::T) -> Self::M {
-        let op = Closure::<M, &F, &G>::new(
-            &self.rhs,
-            &self.rhs_jac,
+    fn jacobian_matrix(&self, x: &Self::V, t: Self::T) -> Self::M {
+        self.statistics.borrow_mut().number_of_jacobian_matrix_evals += 1;
+        let rhs_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y_rhs: &mut Self::V| {
+            self.rhs_inplace(t, x, y_rhs);
+        };
+        let rhs_jac_inplace =
+            |x: &Self::V, _p: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V| {
+                self.rhs_jac_inplace(t, x, v, y);
+            };
+        let op = Closure::<M, _, _>::new(
+            rhs_inplace,
+            rhs_jac_inplace,
             self.nstates,
             self.nstates,
             self.p.clone(),
@@ -204,8 +263,12 @@ where
     }
 
     fn mass_matrix(&self, t: Self::T) -> Self::M {
+        self.statistics.borrow_mut().number_of_mass_matrix_evals += 1;
+        let mass_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y: &mut Self::V| {
+            self.mass_inplace(t, x, y);
+        };
         let op =
-            LinearClosure::<M, &H>::new(&self.mass, self.nstates, self.nstates, self.p.clone());
+            LinearClosure::<M, _>::new(mass_inplace, self.nstates, self.nstates, self.p.clone());
         let triplets = if let Some(coloring) = &self.mass_coloring {
             coloring.find_non_zero_entries(&op, &self.init(t), t)
         } else {
@@ -218,6 +281,10 @@ where
         let mass = self.mass_matrix(Self::T::zero());
         let diag: Self::V = mass.diagonal();
         diag.filter_indices(|x| x == Self::T::zero())
+    }
+
+    fn get_statistics(&self) -> OdeEquationsStatistics {
+        self.statistics.borrow().clone()
     }
 }
 
@@ -234,6 +301,7 @@ where
     p: Rc<M::V>,
     nstates: usize,
     coloring: Option<JacobianColoring>,
+    statistics: RefCell<OdeEquationsStatistics>,
 }
 
 impl<M, F, G, I> OdeSolverEquationsMassI<M, F, G, I>
@@ -247,20 +315,32 @@ where
         let y0 = init(&p, M::T::zero());
         let nstates = y0.len();
         let p = Rc::new(p);
+
+        let statistics = RefCell::default();
+        let mut ret = Self {
+            rhs,
+            rhs_jac,
+            init,
+            p: p.clone(),
+            nstates,
+            coloring: None,
+            statistics,
+        };
         let coloring = if use_coloring {
-            let op = Closure::<M, &F, &G>::new(&rhs, &rhs_jac, nstates, nstates, p.clone());
+            let rhs_inplace = |x: &M::V, _p: &M::V, t: M::T, y_rhs: &mut M::V| {
+                ret.rhs_inplace(t, x, y_rhs);
+            };
+            let rhs_jac_inplace = |x: &M::V, _p: &M::V, t: M::T, v: &M::V, y: &mut M::V| {
+                ret.rhs_jac_inplace(t, x, v, y);
+            };
+            let op =
+                Closure::<M, _, _>::new(rhs_inplace, rhs_jac_inplace, nstates, nstates, p.clone());
             Some(JacobianColoring::new(&op, &y0, t0))
         } else {
             None
         };
-        Self {
-            rhs,
-            rhs_jac,
-            init,
-            p,
-            nstates,
-            coloring,
-        }
+        ret.coloring = coloring;
+        ret
     }
 }
 
@@ -297,11 +377,13 @@ where
     fn rhs_inplace(&self, t: Self::T, y: &Self::V, rhs_y: &mut Self::V) {
         let p = self.p.as_ref();
         (self.rhs)(y, p, t, rhs_y);
+        self.statistics.borrow_mut().number_of_rhs_evals += 1;
     }
 
     fn rhs_jac_inplace(&self, t: Self::T, x: &Self::V, v: &Self::V, y: &mut Self::V) {
         let p = self.p.as_ref();
         (self.rhs_jac)(x, p, t, v, y);
+        self.statistics.borrow_mut().number_of_jac_mul_evals += 1;
     }
 
     fn init(&self, t: Self::T) -> Self::V {
@@ -317,10 +399,18 @@ where
         <Self::V as Vector>::Index::zeros(0)
     }
 
-    fn rhs_jacobian(&self, x: &Self::V, t: Self::T) -> Self::M {
-        let op = Closure::<M, &F, &G>::new(
-            &self.rhs,
-            &self.rhs_jac,
+    fn jacobian_matrix(&self, x: &Self::V, t: Self::T) -> Self::M {
+        self.statistics.borrow_mut().number_of_jacobian_matrix_evals += 1;
+        let rhs_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y_rhs: &mut Self::V| {
+            self.rhs_inplace(t, x, y_rhs);
+        };
+        let rhs_jac_inplace =
+            |x: &Self::V, _p: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V| {
+                self.rhs_jac_inplace(t, x, v, y);
+            };
+        let op = Closure::<M, _, _>::new(
+            rhs_inplace,
+            rhs_jac_inplace,
             self.nstates,
             self.nstates,
             self.p.clone(),
@@ -331,6 +421,9 @@ where
             find_non_zero_entries(&op, x, t)
         };
         Self::M::try_from_triplets(self.nstates(), self.nout(), triplets).unwrap()
+    }
+    fn get_statistics(&self) -> OdeEquationsStatistics {
+        self.statistics.borrow().clone()
     }
 }
 
@@ -348,12 +441,12 @@ mod tests {
 
     #[test]
     fn ode_equation_test() {
-        let (problem, _soln) = exponential_decay_problem::<Mcpu>();
+        let (problem, _soln) = exponential_decay_problem::<Mcpu>(false);
         let y = DVector::from_vec(vec![1.0, 1.0]);
         let rhs_y = problem.eqn.rhs(0.0, &y);
         let expect_rhs_y = DVector::from_vec(vec![-0.1, -0.1]);
         rhs_y.assert_eq(&expect_rhs_y, 1e-10);
-        let jac_rhs_y = problem.eqn.rhs_jac(0.0, &y, &y);
+        let jac_rhs_y = problem.eqn.jac_mul(0.0, &y, &y);
         let expect_jac_rhs_y = Vcpu::from_vec(vec![-0.1, -0.1]);
         jac_rhs_y.assert_eq(&expect_jac_rhs_y, 1e-10);
         let mass = problem.eqn.mass_matrix(0.0);
@@ -361,7 +454,7 @@ mod tests {
         assert_eq!(mass[(1, 1)], 1.0);
         assert_eq!(mass[(0, 1)], 0.);
         assert_eq!(mass[(1, 0)], 0.);
-        let jac = problem.eqn.rhs_jacobian(&y, 0.0);
+        let jac = problem.eqn.jacobian_matrix(&y, 0.0);
         assert_eq!(jac[(0, 0)], -0.1);
         assert_eq!(jac[(1, 1)], -0.1);
         assert_eq!(jac[(0, 1)], 0.0);
@@ -370,12 +463,12 @@ mod tests {
 
     #[test]
     fn ode_with_mass_test() {
-        let (problem, _soln) = exponential_decay_with_algebraic_problem::<Mcpu>();
+        let (problem, _soln) = exponential_decay_with_algebraic_problem::<Mcpu>(false);
         let y = DVector::from_vec(vec![1.0, 1.0, 1.0]);
         let rhs_y = problem.eqn.rhs(0.0, &y);
         let expect_rhs_y = DVector::from_vec(vec![-0.1, -0.1, 0.0]);
         rhs_y.assert_eq(&expect_rhs_y, 1e-10);
-        let jac_rhs_y = problem.eqn.rhs_jac(0.0, &y, &y);
+        let jac_rhs_y = problem.eqn.jac_mul(0.0, &y, &y);
         let expect_jac_rhs_y = Vcpu::from_vec(vec![-0.1, -0.1, 0.0]);
         jac_rhs_y.assert_eq(&expect_jac_rhs_y, 1e-10);
         let mass = problem.eqn.mass_matrix(0.0);
@@ -388,7 +481,7 @@ mod tests {
         assert_eq!(mass[(2, 0)], 0.);
         assert_eq!(mass[(1, 2)], 0.);
         assert_eq!(mass[(2, 1)], 0.);
-        let jac = problem.eqn.rhs_jacobian(&y, 0.0);
+        let jac = problem.eqn.jacobian_matrix(&y, 0.0);
         assert_eq!(jac[(0, 0)], -0.1);
         assert_eq!(jac[(1, 1)], -0.1);
         assert_eq!(jac[(2, 2)], 1.0);

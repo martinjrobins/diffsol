@@ -16,10 +16,7 @@ use super::{equations::OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolve
 
 #[derive(Clone, Debug, Serialize)]
 pub struct BdfStatistics<T: Scalar> {
-    pub number_of_rhs_jac_evals: usize,
-    pub number_of_rhs_evals: usize,
     pub number_of_linear_solver_setups: usize,
-    pub number_of_jac_mul_evals: usize,
     pub number_of_steps: usize,
     pub number_of_error_test_failures: usize,
     pub number_of_nonlinear_solver_iterations: usize,
@@ -31,10 +28,7 @@ pub struct BdfStatistics<T: Scalar> {
 impl<T: Scalar> Default for BdfStatistics<T> {
     fn default() -> Self {
         Self {
-            number_of_rhs_jac_evals: 0,
-            number_of_rhs_evals: 0,
             number_of_linear_solver_setups: 0,
-            number_of_jac_mul_evals: 0,
             number_of_steps: 0,
             number_of_error_test_failures: 0,
             number_of_nonlinear_solver_iterations: 0,
@@ -436,16 +430,6 @@ where
         state.y = y_new;
 
         // update statistics
-        self.statistics.number_of_jac_mul_evals = self
-            .nonlinear_problem_op()
-            .unwrap()
-            .number_of_jac_mul_evals();
-        self.statistics.number_of_rhs_evals =
-            self.nonlinear_problem_op().unwrap().number_of_rhs_evals();
-        self.statistics.number_of_rhs_jac_evals = self
-            .nonlinear_problem_op()
-            .unwrap()
-            .number_of_rhs_jac_evals();
         self.statistics.number_of_linear_solver_setups =
             self.nonlinear_problem_op().unwrap().number_of_jac_evals();
         self.statistics.number_of_steps += 1;

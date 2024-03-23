@@ -29,12 +29,15 @@ fn exponential_decay_init<M: DenseMatrix>(_p: &M::V, _t: M::T) -> M::V {
     M::V::from_vec(vec![1.0.into(), 1.0.into()])
 }
 
-pub fn exponential_decay_problem<M: DenseMatrix + 'static>() -> (
+pub fn exponential_decay_problem<M: DenseMatrix + 'static>(
+    use_coloring: bool,
+) -> (
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::new()
         .p([0.1])
+        .use_coloring(use_coloring)
         .build_ode(
             exponential_decay::<M>,
             exponential_decay_jacobian::<M>,

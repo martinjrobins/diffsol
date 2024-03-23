@@ -127,6 +127,7 @@ pub trait Vector:
         self.len() == 0
     }
     fn abs(&self) -> Self;
+    fn exp(&self) -> Self;
     fn from_element(nstates: usize, value: Self::T) -> Self;
     fn zeros(nstates: usize) -> Self {
         Self::from_element(nstates, Self::T::zero())
