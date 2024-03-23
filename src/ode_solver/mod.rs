@@ -168,8 +168,7 @@ pub struct OdeBuilder {
     rtol: f64,
     atol: Vec<f64>,
     p: Vec<f64>,
-    jacobian_sparsity_is_constant: bool,
-    mass_sparsity_is_constant: bool,
+    use_coloring: bool,
 }
 
 impl Default for OdeBuilder {
@@ -186,8 +185,7 @@ impl OdeBuilder {
             rtol: 1e-6,
             atol: vec![1e-6],
             p: vec![],
-            jacobian_sparsity_is_constant: false,
-            mass_sparsity_is_constant: false,
+            use_coloring: false,
         }
     }
     pub fn t0(mut self, t0: f64) -> Self {
@@ -218,12 +216,8 @@ impl OdeBuilder {
         self.p = p.into_iter().map(|x| f64::from(x)).collect();
         self
     }
-    pub fn jacobian_sparsity_is_constant(mut self, jacobian_sparsity_is_constant: bool) -> Self {
-        self.jacobian_sparsity_is_constant = jacobian_sparsity_is_constant;
-        self
-    }
-    pub fn mass_sparsity_is_constant(mut self, mass_sparsity_is_constant: bool) -> Self {
-        self.mass_sparsity_is_constant = mass_sparsity_is_constant;
+    pub fn use_coloring(mut self, use_coloring: bool) -> Self {
+        self.use_coloring = use_coloring;
         self
     }
 
@@ -267,7 +261,15 @@ impl OdeBuilder {
         I: Fn(&M::V, M::T) -> M::V,
     {
         let p = Self::build_p(self.p);
-        let eqn = OdeSolverEquations::new_ode_with_mass(rhs, rhs_jac, mass, init, p);
+        let eqn = OdeSolverEquations::new_ode_with_mass(
+            rhs,
+            rhs_jac,
+            mass,
+            init,
+            p,
+            M::T::from(self.t0),
+            self.use_coloring,
+        );
         let atol = Self::build_atol(self.atol, eqn.nstates())?;
         Ok(OdeSolverProblem::new(
             eqn,
@@ -291,7 +293,14 @@ impl OdeBuilder {
         I: Fn(&M::V, M::T) -> M::V,
     {
         let p = Self::build_p(self.p);
-        let eqn = OdeSolverEquationsMassI::new_ode(rhs, rhs_jac, init, p);
+        let eqn = OdeSolverEquationsMassI::new_ode(
+            rhs,
+            rhs_jac,
+            init,
+            p,
+            M::T::from(self.t0),
+            self.use_coloring,
+        );
         let atol = Self::build_atol(self.atol, eqn.nstates())?;
         Ok(OdeSolverProblem::new(
             eqn,
@@ -432,7 +441,28 @@ mod tests {
     fn test_bdf_nalgebra_robertson() {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::default();
-        let (problem, soln) = robertson::<Mcpu>();
+        let (problem, soln) = robertson::<Mcpu>(false);
+        test_ode_solver(&mut s, rs, problem, soln, Some(1.0e-4));
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_rhs_jac_evals: 18
+        number_of_rhs_evals: 1046
+        number_of_linear_solver_setups: 129
+        number_of_jac_mul_evals: 0
+        number_of_steps: 374
+        number_of_error_test_failures: 17
+        number_of_nonlinear_solver_iterations: 1046
+        number_of_nonlinear_solver_fails: 25
+        initial_step_size: 0.0000045643545698038086
+        final_step_size: 7622676567.923919
+        "###);
+    }
+
+    #[test]
+    fn test_bdf_nalgebra_robertson_colored() {
+        let mut s = Bdf::default();
+        let rs = NewtonNonlinearSolver::default();
+        let (problem, soln) = robertson::<Mcpu>(true);
         test_ode_solver(&mut s, rs, problem, soln, Some(1.0e-4));
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
@@ -453,7 +483,28 @@ mod tests {
     fn test_bdf_nalgebra_robertson_ode() {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::default();
-        let (problem, soln) = robertson_ode::<Mcpu>();
+        let (problem, soln) = robertson_ode::<Mcpu>(false);
+        test_ode_solver(&mut s, rs, problem, soln, Some(1.0e-4));
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_rhs_jac_evals: 17
+        number_of_rhs_evals: 941
+        number_of_linear_solver_setups: 105
+        number_of_jac_mul_evals: 0
+        number_of_steps: 346
+        number_of_error_test_failures: 8
+        number_of_nonlinear_solver_iterations: 941
+        number_of_nonlinear_solver_fails: 18
+        initial_step_size: 0.0000038381494276795106
+        final_step_size: 7310380599.023874
+        "###);
+    }
+
+    #[test]
+    fn test_bdf_nalgebra_robertson_ode_colored() {
+        let mut s = Bdf::default();
+        let rs = NewtonNonlinearSolver::default();
+        let (problem, soln) = robertson_ode::<Mcpu>(true);
         test_ode_solver(&mut s, rs, problem, soln, Some(1.0e-4));
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---

@@ -4,7 +4,9 @@ use crate::{
     OdeEquations, Vector,
 };
 
-pub fn robertson_ode<M: DenseMatrix + 'static>() -> (
+pub fn robertson_ode<M: DenseMatrix + 'static>(
+    use_coloring: bool,
+) -> (
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
@@ -12,6 +14,7 @@ pub fn robertson_ode<M: DenseMatrix + 'static>() -> (
         .p([0.04, 1.0e4, 3.0e7])
         .rtol(1e-4)
         .atol([1.0e-8, 1.0e-6, 1.0e-6])
+        .use_coloring(use_coloring)
         .build_ode(
             //     dy1/dt = -.04*y1 + 1.e4*y2*y3
             //*    dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*(y2)^2

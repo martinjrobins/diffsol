@@ -80,7 +80,7 @@ use num_traits::{Pow, Signed};
 pub use ode_solver::{
     bdf::Bdf, equations::OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
 };
-use op::{LinearOp, NonLinearOp};
+use op::NonLinearOp;
 use solver::SolverProblem;
 use vector::{Vector, VectorIndex, VectorRef, VectorView, VectorViewMut};
 

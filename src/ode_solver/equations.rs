@@ -2,9 +2,11 @@ use num_traits::Zero;
 use std::rc::Rc;
 
 use crate::{
+    jacobian::{find_non_zero_entries, JacobianColoring},
     op::{closure::Closure, linear_closure::LinearClosure, Op},
-    LinearOp, Matrix, NonLinearOp, Vector, VectorIndex,
+    Matrix, NonLinearOp, Vector, VectorIndex,
 };
+use num_traits::One;
 
 pub trait OdeEquations: Op {
     /// This must be called first
@@ -59,24 +61,13 @@ pub trait OdeEquations: Op {
 
     /// returns the indices of the algebraic state variables
     fn algebraic_indices(&self) -> <Self::V as Vector>::Index {
-        let mass = |y: &Self::V, _p: &Self::V, t: Self::T, res: &mut Self::V| {
-            self.mass_inplace(t, y, res);
-        };
-        let dummy_p = Rc::new(Self::V::zeros(0));
-        let mass_linear_op =
-            LinearClosure::<Self::M, _>::new(mass, self.nstates(), self.nstates(), dummy_p);
-        let t = Self::T::zero();
-        let diag: Self::V = mass_linear_op.jacobian_diagonal(t);
-        diag.filter_indices(|x| x == Self::T::zero())
+        // assume identity mass matrix
+        <Self::V as Vector>::Index::zeros(0)
     }
 
-    /// mass matrix, re-use jacobian calculation from LinearOp
-    fn mass_matrix(&self, t: Self::T) -> Self::M {
-        let mass =
-            |y: &Self::V, _p: &Self::V, t: Self::T, res: &mut Self::V| self.mass_inplace(t, y, res);
-        let dummy_p = Rc::new(Self::V::zeros(0));
-        let linear_closure = LinearClosure::new(mass, self.nstates(), self.nstates(), dummy_p);
-        LinearOp::jacobian(&linear_closure, t)
+    fn mass_matrix(&self, _t: Self::T) -> Self::M {
+        // assume identity mass matrix
+        Self::M::from_diagonal(&Self::V::from_element(self.nstates(), Self::T::one()))
     }
 }
 
@@ -94,6 +85,8 @@ where
     init: I,
     p: Rc<M::V>,
     nstates: usize,
+    jacobian_coloring: Option<JacobianColoring>,
+    mass_coloring: Option<JacobianColoring>,
 }
 
 impl<M, F, G, H, I> OdeSolverEquations<M, F, G, H, I>
@@ -104,10 +97,27 @@ where
     H: Fn(&M::V, &M::V, M::T, &mut M::V),
     I: Fn(&M::V, M::T) -> M::V,
 {
-    pub fn new_ode_with_mass(rhs: F, rhs_jac: G, mass: H, init: I, p: M::V) -> Self {
+    pub fn new_ode_with_mass(
+        rhs: F,
+        rhs_jac: G,
+        mass: H,
+        init: I,
+        p: M::V,
+        t0: M::T,
+        use_coloring: bool,
+    ) -> Self {
         let y0 = init(&p, M::T::zero());
         let nstates = y0.len();
         let p = Rc::new(p);
+        let (jacobian_coloring, mass_coloring) = if use_coloring {
+            let op = Closure::<M, &F, &G>::new(&rhs, &rhs_jac, nstates, nstates, p.clone());
+            let jacobian_coloring = Some(JacobianColoring::new(&op, &y0, t0));
+            let op = LinearClosure::<M, &H>::new(&mass, nstates, nstates, p.clone());
+            let mass_coloring = Some(JacobianColoring::new(&op, &y0, t0));
+            (jacobian_coloring, mass_coloring)
+        } else {
+            (None, None)
+        };
         Self {
             rhs,
             rhs_jac,
@@ -115,6 +125,8 @@ where
             init,
             p,
             nstates,
+            jacobian_coloring,
+            mass_coloring,
         }
     }
 }
@@ -174,6 +186,39 @@ where
     fn set_params(&mut self, p: Self::V) {
         self.p = Rc::new(p);
     }
+
+    fn rhs_jacobian(&self, x: &Self::V, t: Self::T) -> Self::M {
+        let op = Closure::<M, &F, &G>::new(
+            &self.rhs,
+            &self.rhs_jac,
+            self.nstates,
+            self.nstates,
+            self.p.clone(),
+        );
+        let triplets = if let Some(coloring) = &self.jacobian_coloring {
+            coloring.find_non_zero_entries(&op, x, t)
+        } else {
+            find_non_zero_entries(&op, x, t)
+        };
+        Self::M::try_from_triplets(self.nstates(), self.nout(), triplets).unwrap()
+    }
+
+    fn mass_matrix(&self, t: Self::T) -> Self::M {
+        let op =
+            LinearClosure::<M, &H>::new(&self.mass, self.nstates, self.nstates, self.p.clone());
+        let triplets = if let Some(coloring) = &self.mass_coloring {
+            coloring.find_non_zero_entries(&op, &self.init(t), t)
+        } else {
+            find_non_zero_entries(&op, &self.init(t), t)
+        };
+        Self::M::try_from_triplets(self.nstates(), self.nout(), triplets).unwrap()
+    }
+
+    fn algebraic_indices(&self) -> <Self::V as Vector>::Index {
+        let mass = self.mass_matrix(Self::T::zero());
+        let diag: Self::V = mass.diagonal();
+        diag.filter_indices(|x| x == Self::T::zero())
+    }
 }
 
 pub struct OdeSolverEquationsMassI<M, F, G, I>
@@ -188,6 +233,7 @@ where
     init: I,
     p: Rc<M::V>,
     nstates: usize,
+    coloring: Option<JacobianColoring>,
 }
 
 impl<M, F, G, I> OdeSolverEquationsMassI<M, F, G, I>
@@ -197,16 +243,23 @@ where
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     I: Fn(&M::V, M::T) -> M::V,
 {
-    pub fn new_ode(rhs: F, rhs_jac: G, init: I, p: M::V) -> Self {
+    pub fn new_ode(rhs: F, rhs_jac: G, init: I, p: M::V, t0: M::T, use_coloring: bool) -> Self {
         let y0 = init(&p, M::T::zero());
         let nstates = y0.len();
         let p = Rc::new(p);
+        let coloring = if use_coloring {
+            let op = Closure::<M, &F, &G>::new(&rhs, &rhs_jac, nstates, nstates, p.clone());
+            Some(JacobianColoring::new(&op, &y0, t0))
+        } else {
+            None
+        };
         Self {
             rhs,
             rhs_jac,
             init,
             p,
             nstates,
+            coloring,
         }
     }
 }
@@ -262,6 +315,22 @@ where
 
     fn algebraic_indices(&self) -> <Self::V as Vector>::Index {
         <Self::V as Vector>::Index::zeros(0)
+    }
+
+    fn rhs_jacobian(&self, x: &Self::V, t: Self::T) -> Self::M {
+        let op = Closure::<M, &F, &G>::new(
+            &self.rhs,
+            &self.rhs_jac,
+            self.nstates,
+            self.nstates,
+            self.p.clone(),
+        );
+        let triplets = if let Some(coloring) = &self.coloring {
+            coloring.find_non_zero_entries(&op, x, t)
+        } else {
+            find_non_zero_entries(&op, x, t)
+        };
+        Self::M::try_from_triplets(self.nstates(), self.nout(), triplets).unwrap()
     }
 }
 
