@@ -15,8 +15,7 @@ pub fn color_graph_greedy(graph: &Graph) -> Vec<usize> {
     let mut available = vec![false; graph.node_count()];
 
     for ii in 1..graph.node_count() {
-        let i = NodeIndex::new(ii);
-        for j in graph.neighbors(i) {
+        for j in graph.neighbors(NodeIndex::new(ii)) {
             if result[j.index()] != 0 {
                 available[result[j.index()] - 1] = true;
             }

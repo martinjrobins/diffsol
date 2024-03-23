@@ -1,8 +1,6 @@
-use crate::matrix::Matrix;
 use crate::op::NonLinearOp;
 use crate::vector::Vector;
 use crate::Scalar;
-use anyhow::Result;
 use num_traits::{One, Zero};
 
 use self::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy};
@@ -11,68 +9,102 @@ pub mod coloring;
 pub mod graph;
 pub mod greedy_coloring;
 
-pub struct Jacobian<'a, F: NonLinearOp + ?Sized> {
-    op: &'a F,
-    x: &'a F::V,
-    t: F::T,
-    coloring: Option<Vec<usize>>,
+/// Find the non-zero entries of the Jacobian matrix of a non-linear operator.
+/// This is used as the default `find_non_zeros` function for the `NonLinearOp` and `LinearOp` traits.
+/// Users can override this function with a more efficient and reliable implementation if desired.
+pub fn find_non_zeros<F: NonLinearOp + ?Sized>(op: &F, x: &F::V, t: F::T) -> Vec<(usize, usize)> {
+    let mut v = F::V::zeros(op.nstates());
+    let mut col = F::V::zeros(op.nout());
+    let mut triplets = Vec::with_capacity(op.nstates());
+    for j in 0..op.nstates() {
+        v[j] = F::T::NAN;
+        op.jac_mul_inplace(x, t, &v, &mut col);
+        for i in 0..op.nout() {
+            if col[i].is_nan() {
+                triplets.push((i, j));
+            }
+            col[i] = F::T::zero();
+        }
+        v[j] = F::T::zero();
+    }
+    triplets
 }
 
-impl<'a, F: NonLinearOp> Jacobian<'a, F> {
-    pub fn new(op: &'a F, x: &'a F::V, t: F::T) -> Self {
-        let coloring = None;
-        Self { op, x, t, coloring }
+/// Find the non-zero entries of the Jacobian matrix of a non-linear operator.
+/// This is used in the default `jacobian` method of the `NonLinearOp` and `LinearOp` traits.
+pub fn find_non_zero_entries<F: NonLinearOp + ?Sized>(
+    op: &F,
+    x: &F::V,
+    t: F::T,
+) -> Vec<(usize, usize, F::T)> {
+    let mut v = F::V::zeros(op.nstates());
+    let mut col = F::V::zeros(op.nout());
+    let mut triplets = Vec::with_capacity(op.nstates());
+    for j in 0..op.nstates() {
+        v[j] = F::T::one();
+        op.jac_mul_inplace(x, t, &v, &mut col);
+        for i in 0..op.nout() {
+            if col[i] != F::T::zero() {
+                triplets.push((i, j, col[i]));
+            }
+        }
+        v[j] = F::T::zero();
     }
-    pub fn build_coloring(&mut self) {
-        let non_zeros = self.find_non_zeros();
-        let ncols = self.op.nstates();
+    triplets
+}
+
+pub struct JacobianColoring {
+    cols_per_color: Vec<Vec<usize>>,
+    ij_per_color: Vec<Vec<(usize, usize)>>,
+}
+
+impl JacobianColoring {
+    pub fn new<F: NonLinearOp>(op: &F, x: &F::V, t: F::T) -> Self {
+        let non_zeros = op.find_non_zeros(x, t);
+        let ncols = op.nstates();
         let graph = nonzeros2graph(non_zeros.as_slice(), ncols);
         let coloring = color_graph_greedy(&graph);
-        self.coloring = Some(coloring);
-    }
-    fn find_non_zeros(&self) -> Vec<(usize, usize)> {
-        let mut v = F::V::zeros(self.op.nstates());
-        let mut col = F::V::zeros(self.op.nout());
-        let mut triplets = Vec::with_capacity(self.op.nstates());
-        for j in 0..self.op.nstates() {
-            v[j] = F::T::NAN;
-            self.op.jac_mul_inplace(self.x, self.t, &v, &mut col);
-            for i in 0..self.op.nout() {
-                if col[i].is_nan() {
-                    triplets.push((i, j));
-                }
-                col[i] = F::T::zero();
-            }
-            v[j] = F::T::zero();
-        }
-        triplets
-    }
-    fn find_non_zero_entries(&self) -> Vec<(usize, usize, F::T)> {
-        let mut v = F::V::zeros(self.op.nstates());
-        let mut col = F::V::zeros(self.op.nout());
-        let mut triplets = Vec::with_capacity(self.op.nstates());
-        for j in 0..self.op.nstates() {
-            v[j] = F::T::one();
-            self.op.jac_mul_inplace(self.x, self.t, &v, &mut col);
-            for i in 0..self.op.nout() {
-                if col[i] != F::T::zero() {
-                    triplets.push((i, j, col[i]));
+        let max_color = coloring.iter().max().copied().unwrap_or(0);
+        let mut cols_per_color = vec![Vec::new(); max_color];
+        let mut ij_per_color = vec![Vec::new(); max_color];
+        for c in 1..=max_color {
+            for (i, j) in non_zeros.iter() {
+                if coloring[*j] == c {
+                    cols_per_color[c - 1].push(*j);
+                    ij_per_color[c - 1].push((*i, *j));
                 }
             }
-            v[j] = F::T::zero();
+        }
+        Self {
+            cols_per_color,
+            ij_per_color,
+        }
+    }
+
+    pub fn find_non_zero_entries<F: NonLinearOp>(
+        &self,
+        op: &F,
+        x: &F::V,
+        t: F::T,
+    ) -> Vec<(usize, usize, F::T)> {
+        let mut triplets = Vec::with_capacity(op.nstates());
+        let mut v = F::V::zeros(op.nstates());
+        let mut col = F::V::zeros(op.nout());
+        for (cols, ijs) in self.cols_per_color.iter().zip(self.ij_per_color.iter()) {
+            for j in cols {
+                v[*j] = F::T::one();
+            }
+            op.jac_mul_inplace(x, t, &v, &mut col);
+            for (i, j) in ijs {
+                if col[*i] != F::T::zero() {
+                    triplets.push((*i, *j, col[*i]));
+                }
+            }
+            for j in cols {
+                v[*j] = F::T::zero();
+            }
         }
         triplets
-    }
-    pub fn calc_jacobian_naive(&self) -> F::M {
-        let triplets = self.find_non_zero_entries();
-        F::M::try_from_triplets(self.op.nstates(), self.op.nout(), triplets).unwrap()
-    }
-    pub fn calc_jacobian_colored(&self) -> Result<F::M> {
-        let _coloring = self
-            .coloring
-            .as_ref()
-            .expect("Coloring not built, call `self.build_coloring()` first");
-        todo!()
     }
 }
 
@@ -80,8 +112,11 @@ impl<'a, F: NonLinearOp> Jacobian<'a, F> {
 mod tests {
     use std::rc::Rc;
 
-    use crate::jacobian::Jacobian;
-    use crate::op::{closure::Closure, NonLinearOp};
+    use crate::op::Op;
+    use crate::{
+        jacobian::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy},
+        op::{closure::Closure, NonLinearOp},
+    };
     use nalgebra::{DMatrix, DVector};
 
     fn helper_triplets2op(
@@ -120,8 +155,7 @@ mod tests {
             let op = helper_triplets2op(triplets.as_slice(), 2, 2);
             let x = DVector::from_vec(vec![1.0, 1.0]);
             let t = 0.0;
-            let jacobian = Jacobian::new(&op, &x, t);
-            let non_zeros = jacobian.find_non_zeros();
+            let non_zeros = op.find_non_zeros(&x, t);
             let expect = triplets
                 .iter()
                 .map(|(i, j, _v)| (*i, *j))
@@ -129,7 +163,7 @@ mod tests {
             assert_eq!(non_zeros, expect);
         }
     }
-    
+
     #[test]
     fn build_coloring() {
         let test_triplets = vec![
@@ -138,19 +172,17 @@ mod tests {
             vec![(1, 1, 1.0)],
             vec![(0, 0, 1.0), (1, 0, 1.0), (0, 1, 1.0), (1, 1, 1.0)],
         ];
-        let expect = vec![
-            vec![1, 1],
-            vec![1, 2],
-            vec![1, 1],
-            vec![1, 2],
-        ];
+        let expect = vec![vec![1, 1], vec![1, 2], vec![1, 1], vec![1, 2]];
         for (triplets, expect) in test_triplets.iter().zip(expect) {
             let op = helper_triplets2op(triplets.as_slice(), 2, 2);
             let x = DVector::from_vec(vec![1.0, 1.0]);
             let t = 0.0;
-            let mut jacobian = Jacobian::new(&op, &x, t);
-            jacobian.build_coloring();
-            let coloring = jacobian.coloring.unwrap();
+
+            let non_zeros = op.find_non_zeros(&x, t);
+            let ncols = op.nstates();
+            let graph = nonzeros2graph(non_zeros.as_slice(), ncols);
+            let coloring = color_graph_greedy(&graph);
+
             assert_eq!(coloring, expect);
         }
     }

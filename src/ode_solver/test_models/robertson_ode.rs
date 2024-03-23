@@ -1,8 +1,6 @@
-use std::rc::Rc;
-
 use crate::{
     matrix::DenseMatrix,
-    ode_solver::{OdeSolverProblem, OdeSolverSolution},
+    ode_solver::{OdeBuilder, OdeSolverProblem, OdeSolverSolution},
     OdeEquations, Vector,
 };
 
@@ -10,34 +8,31 @@ pub fn robertson_ode<M: DenseMatrix + 'static>() -> (
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
-    let p = M::V::from_vec(vec![0.04.into(), 1.0e4.into(), 3.0e7.into()]);
-    let mut problem = OdeSolverProblem::new_ode(
-        //     dy1/dt = -.04*y1 + 1.e4*y2*y3
-        //*    dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*(y2)^2
-        //*    dy3/dt = 3.e7*(y2)^2
-        |x: &M::V, p: &M::V, _t: M::T, y: &mut M::V| {
-            y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
-            y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
-            y[2] = p[2] * x[1] * x[1];
-        },
-        |x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
-            y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
-            y[1] = p[0] * v[0]
-                - p[1] * v[1] * x[2]
-                - p[1] * x[1] * v[2]
-                - M::T::from(2.0) * p[2] * x[1] * v[1];
-            y[2] = M::T::from(2.0) * p[2] * x[1] * v[1];
-        },
-        |_p: &M::V, _t: M::T| M::V::from_vec(vec![1.0.into(), 0.0.into(), 0.0.into()]),
-        p.clone(),
-    );
+    let problem = OdeBuilder::new()
+        .p([0.04, 1.0e4, 3.0e7])
+        .rtol(1e-4)
+        .atol([1.0e-8, 1.0e-6, 1.0e-6])
+        .build_ode(
+            //     dy1/dt = -.04*y1 + 1.e4*y2*y3
+            //*    dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*(y2)^2
+            //*    dy3/dt = 3.e7*(y2)^2
+            |x: &M::V, p: &M::V, _t: M::T, y: &mut M::V| {
+                y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
+                y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
+                y[2] = p[2] * x[1] * x[1];
+            },
+            |x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
+                y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
+                y[1] = p[0] * v[0]
+                    - p[1] * v[1] * x[2]
+                    - p[1] * x[1] * v[2]
+                    - M::T::from(2.0) * p[2] * x[1] * v[1];
+                y[2] = M::T::from(2.0) * p[2] * x[1] * v[1];
+            },
+            |_p: &M::V, _t: M::T| M::V::from_vec(vec![1.0.into(), 0.0.into(), 0.0.into()]),
+        )
+        .unwrap();
 
-    problem.rtol = M::T::from(1.0e-4);
-    problem.atol = Rc::new(M::V::from_vec(vec![
-        1.0e-8.into(),
-        1.0e-6.into(),
-        1.0e-6.into(),
-    ]));
     let mut soln = OdeSolverSolution::default();
     let data = vec![
         (vec![1.0, 0.0, 0.0], 0.0),
