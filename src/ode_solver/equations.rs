@@ -340,6 +340,7 @@ mod tests {
 
     use crate::ode_solver::equations::OdeEquations;
     use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
+    use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
     use crate::vector::Vector;
 
     type Mcpu = nalgebra::DMatrix<f64>;
@@ -365,5 +366,37 @@ mod tests {
         assert_eq!(jac[(1, 1)], -0.1);
         assert_eq!(jac[(0, 1)], 0.0);
         assert_eq!(jac[(1, 0)], 0.0);
+    }
+
+    #[test]
+    fn ode_with_mass_test() {
+        let (problem, _soln) = exponential_decay_with_algebraic_problem::<Mcpu>();
+        let y = DVector::from_vec(vec![1.0, 1.0, 1.0]);
+        let rhs_y = problem.eqn.rhs(0.0, &y);
+        let expect_rhs_y = DVector::from_vec(vec![-0.1, -0.1, 0.0]);
+        rhs_y.assert_eq(&expect_rhs_y, 1e-10);
+        let jac_rhs_y = problem.eqn.rhs_jac(0.0, &y, &y);
+        let expect_jac_rhs_y = Vcpu::from_vec(vec![-0.1, -0.1, 0.0]);
+        jac_rhs_y.assert_eq(&expect_jac_rhs_y, 1e-10);
+        let mass = problem.eqn.mass_matrix(0.0);
+        assert_eq!(mass[(0, 0)], 1.);
+        assert_eq!(mass[(1, 1)], 1.);
+        assert_eq!(mass[(2, 2)], 0.);
+        assert_eq!(mass[(0, 1)], 0.);
+        assert_eq!(mass[(1, 0)], 0.);
+        assert_eq!(mass[(0, 2)], 0.);
+        assert_eq!(mass[(2, 0)], 0.);
+        assert_eq!(mass[(1, 2)], 0.);
+        assert_eq!(mass[(2, 1)], 0.);
+        let jac = problem.eqn.rhs_jacobian(&y, 0.0);
+        assert_eq!(jac[(0, 0)], -0.1);
+        assert_eq!(jac[(1, 1)], -0.1);
+        assert_eq!(jac[(2, 2)], 1.0);
+        assert_eq!(jac[(0, 1)], 0.0);
+        assert_eq!(jac[(1, 0)], 0.0);
+        assert_eq!(jac[(0, 2)], 0.0);
+        assert_eq!(jac[(2, 0)], 0.0);
+        assert_eq!(jac[(1, 2)], 0.0);
+        assert_eq!(jac[(2, 1)], -1.0);
     }
 }
