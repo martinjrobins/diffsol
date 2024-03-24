@@ -19,6 +19,7 @@ pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug {
 pub trait VectorCommon: Sized + Debug {
     // + Display
     type T: Scalar;
+    type Op;
 }
 
 impl<'a, V> VectorCommon for &'a V
@@ -26,6 +27,7 @@ where
     V: VectorCommon,
 {
     type T = V::T;
+    type Op = V::Op;
 }
 
 impl<'a, V> VectorCommon for &'a mut V
@@ -33,6 +35,7 @@ where
     V: VectorCommon,
 {
     type T = V::T;
+    type Op = V::Op;
 }
 
 pub trait VectorOpsByValue<Rhs = Self, Output = Self>:
@@ -74,7 +77,7 @@ pub trait VectorViewMut<'a>:
     + VectorMutOpsByValue<Self::Owned>
     + for<'b> VectorMutOpsByValue<&'b Self::View>
     + for<'b> VectorMutOpsByValue<&'b Self::Owned>
-    + MulAssign<Self::T>
+    + MulAssign<Self::Op>
     // + DivAssign<Self::T>
     + Index<IndexType, Output = Self::T>
     + IndexMut<IndexType, Output = Self::T>
@@ -91,7 +94,7 @@ pub trait VectorView<'a>:
     + VectorOpsByValue<Self::Owned, Self::Owned>
     + for<'b> VectorOpsByValue<&'b Self::Owned, Self::Owned>
     + for<'b> VectorOpsByValue<&'b Self, Self::Owned>
-    + Mul<Self::T, Output = Self::Owned>
+    + Mul<Self::Op, Output = Self::Owned>
     // + Div<Self::T, Output = Self::Owned>
     + Index<IndexType, Output = Self::T>
 {
@@ -105,8 +108,8 @@ pub trait Vector:
     + for<'b> VectorOpsByValue<&'b Self>
     + for<'a> VectorOpsByValue<Self::View<'a>>
     + for<'a, 'b> VectorOpsByValue<&'b Self::View<'a>>
-    + Mul<Self::T, Output = Self>
-    + Div<Self::T, Output = Self>
+    + Mul<Self::Op, Output = Self>
+    // + Div<Self::T, Output = Self>
     + VectorMutOpsByValue<Self>
     + for<'a> VectorMutOpsByValue<Self::View<'a>>
     + for<'b> VectorMutOpsByValue<&'b Self>
