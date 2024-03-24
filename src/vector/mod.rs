@@ -5,8 +5,10 @@ use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, 
 use crate::{IndexType, Scalar};
 
 mod serial;
+mod vector_faer;
 
-pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug + Display {
+pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug {
+    //+ Display
     fn zeros(len: IndexType) -> Self;
     fn len(&self) -> IndexType;
     fn is_empty(&self) -> bool {
@@ -14,7 +16,8 @@ pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug + Di
     }
 }
 
-pub trait VectorCommon: Sized + Debug + Display {
+pub trait VectorCommon: Sized + Debug {
+    // + Display
     type T: Scalar;
 }
 
@@ -72,7 +75,7 @@ pub trait VectorViewMut<'a>:
     + for<'b> VectorMutOpsByValue<&'b Self::View>
     + for<'b> VectorMutOpsByValue<&'b Self::Owned>
     + MulAssign<Self::T>
-    + DivAssign<Self::T>
+    // + DivAssign<Self::T>
     + Index<IndexType, Output = Self::T>
     + IndexMut<IndexType, Output = Self::T>
 {
@@ -89,7 +92,7 @@ pub trait VectorView<'a>:
     + for<'b> VectorOpsByValue<&'b Self::Owned, Self::Owned>
     + for<'b> VectorOpsByValue<&'b Self, Self::Owned>
     + Mul<Self::T, Output = Self::Owned>
-    + Div<Self::T, Output = Self::Owned>
+    // + Div<Self::T, Output = Self::Owned>
     + Index<IndexType, Output = Self::T>
 {
     type Owned;
@@ -140,7 +143,7 @@ pub trait Vector:
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T);
     fn add_scalar_mut(&mut self, scalar: Self::T);
     fn component_mul_assign(&mut self, other: &Self);
-    fn component_div_assign(&mut self, other: &Self);
+    // fn component_div_assign(&mut self, other: &Self);
     fn filter_indices<F: Fn(Self::T) -> bool>(&self, f: F) -> Self::Index;
     fn filter(&self, indices: &Self::Index) -> Self {
         let mut result = Self::zeros(indices.len());
@@ -164,8 +167,8 @@ pub trait Vector:
                     i, self[i], other[i]
                 );
                 if self.len() <= 3 {
-                    eprintln!("left: {}", self);
-                    eprintln!("right: {}", other);
+                    eprintln!("left: {:?}", self);
+                    eprintln!("right: {:?}", other);
                 } else if i == 0 {
                     eprintln!(
                         "left: [{}, {}, {}, ...] != [{}, {}, {}, ...]",
