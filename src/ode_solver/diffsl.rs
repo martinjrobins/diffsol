@@ -5,9 +5,9 @@ use diffsl::execution::Compiler;
 
 use crate::{op::Op, OdeEquations};
 
-type T = f64;
-type V = nalgebra::DVector<T>;
-type M = nalgebra::DMatrix<T>;
+pub type T = f64;
+pub type V = nalgebra::DVector<T>;
+pub type M = nalgebra::DMatrix<T>;
 
 pub struct DiffSl {
     compiler: Compiler,

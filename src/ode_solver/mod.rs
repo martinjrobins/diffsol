@@ -13,9 +13,6 @@ use self::equations::{OdeSolverEquations, OdeSolverEquationsMassI};
 #[cfg(feature = "diffsl")]
 use self::diffsl::DiffSl;
 
-#[cfg(feature = "diffsl")]
-use crate::op::Op;
-
 pub mod bdf;
 pub mod equations;
 pub mod test_models;
@@ -310,15 +307,25 @@ impl OdeBuilder {
             M::T::from(self.h0),
         ))
     }
-}
 
-#[cfg(feature = "diffsl")]
-impl OdeSolverProblem<DiffSl> {
-    pub fn new_diffsl(source: &str, p: <DiffSl as Op>::V) -> Result<Self> {
+    #[cfg(feature = "diffsl")]
+    pub fn build_diffsl(self, source: &str) -> Result<OdeSolverProblem<DiffSl>> {
+        type V = diffsl::V;
+        type T = diffsl::T;
+        let p = Self::build_p::<V>(self.p);
         let eqn = DiffSl::new(source, p)?;
-        Ok(OdeSolverProblem::new(eqn))
+        let atol = Self::build_atol::<V>(self.atol, eqn.nstates())?;
+        Ok(OdeSolverProblem::new(
+            eqn,
+            T::from(self.rtol),
+            atol,
+            T::from(self.t0),
+            T::from(self.h0),
+        ))
     }
 }
+
+
 
 pub struct OdeSolverSolutionPoint<V: Vector> {
     pub state: V,
