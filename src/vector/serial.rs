@@ -71,6 +71,9 @@ impl<T: Scalar> Vector for DVector<T> {
     fn copy_from(&mut self, other: &Self) {
         self.copy_from(other);
     }
+    fn exp(&self) -> Self {
+        self.map(|x| x.exp())
+    }
     fn copy_from_view(&mut self, other: &Self::View<'_>) {
         self.copy_from(other);
     }

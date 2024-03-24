@@ -2,20 +2,16 @@ use anyhow::Context;
 use std::rc::Rc;
 
 use crate::{
-    op::{filter::FilterCallable, ode_rhs::OdeRhs},
+    op::{filter::FilterCallable, ode_rhs::OdeRhs, Op},
     Matrix, NonLinearSolver, OdeEquations, SolverProblem, Vector, VectorIndex,
 };
 
 use anyhow::Result;
-use num_traits::{One, Zero};
 
 use self::equations::{OdeSolverEquations, OdeSolverEquationsMassI};
 
 #[cfg(feature = "diffsl")]
 use self::diffsl::DiffSl;
-
-#[cfg(feature = "diffsl")]
-use crate::op::Op;
 
 pub mod bdf;
 pub mod equations;
@@ -142,13 +138,9 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
     pub fn default_atol(nstates: usize) -> Eqn::V {
         Eqn::V::from_element(nstates, Eqn::T::from(1e-6))
     }
-    pub fn new(eqn: Eqn) -> Self {
-        let t0 = Eqn::T::zero();
+    pub fn new(eqn: Eqn, rtol: Eqn::T, atol: Eqn::V, t0: Eqn::T, h0: Eqn::T) -> Self {
         let eqn = Rc::new(eqn);
-        let h0 = Eqn::T::one();
-        let nstates = eqn.nstates();
-        let rtol = Self::default_rtol();
-        let atol = Rc::new(Self::default_atol(nstates));
+        let atol = Rc::new(atol);
         Self {
             eqn,
             rtol,
@@ -157,6 +149,7 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
             h0,
         }
     }
+
     pub fn set_params(&mut self, p: Eqn::V) -> Result<()> {
         let eqn = Rc::get_mut(&mut self.eqn).context("Failed to get mutable reference to equations, is there a solver created with this problem?")?;
         eqn.set_params(p);
@@ -164,38 +157,169 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
     }
 }
 
-impl<M, F, G, H, I> OdeSolverProblem<OdeSolverEquations<M, F, G, H, I>>
-where
-    M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &mut M::V),
-    I: Fn(&M::V, M::T) -> M::V,
-{
-    pub fn new_ode_with_mass(rhs: F, rhs_jac: G, mass: H, init: I, p: M::V) -> Self {
-        let eqn = OdeSolverEquations::new_ode_with_mass(rhs, rhs_jac, mass, init, p);
-        OdeSolverProblem::new(eqn)
+pub struct OdeBuilder {
+    t0: f64,
+    h0: f64,
+    rtol: f64,
+    atol: Vec<f64>,
+    p: Vec<f64>,
+    use_coloring: bool,
+}
+
+impl Default for OdeBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-impl<M, F, G, I> OdeSolverProblem<OdeSolverEquationsMassI<M, F, G, I>>
-where
-    M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    I: Fn(&M::V, M::T) -> M::V,
-{
-    pub fn new_ode(rhs: F, rhs_jac: G, init: I, p: M::V) -> Self {
-        let eqn = OdeSolverEquationsMassI::new_ode(rhs, rhs_jac, init, p);
-        OdeSolverProblem::new(eqn)
+impl OdeBuilder {
+    pub fn new() -> Self {
+        Self {
+            t0: 0.0,
+            h0: 1.0,
+            rtol: 1e-6,
+            atol: vec![1e-6],
+            p: vec![],
+            use_coloring: false,
+        }
     }
-}
+    pub fn t0(mut self, t0: f64) -> Self {
+        self.t0 = t0;
+        self
+    }
+    pub fn h0(mut self, h0: f64) -> Self {
+        self.h0 = h0;
+        self
+    }
+    pub fn rtol(mut self, rtol: f64) -> Self {
+        self.rtol = rtol;
+        self
+    }
+    pub fn atol<V, T>(mut self, atol: V) -> Self
+    where
+        V: IntoIterator<Item = T>,
+        f64: From<T>,
+    {
+        self.atol = atol.into_iter().map(|x| f64::from(x)).collect();
+        self
+    }
+    pub fn p<V, T>(mut self, p: V) -> Self
+    where
+        V: IntoIterator<Item = T>,
+        f64: From<T>,
+    {
+        self.p = p.into_iter().map(|x| f64::from(x)).collect();
+        self
+    }
+    pub fn use_coloring(mut self, use_coloring: bool) -> Self {
+        self.use_coloring = use_coloring;
+        self
+    }
 
-#[cfg(feature = "diffsl")]
-impl OdeSolverProblem<DiffSl> {
-    pub fn new_diffsl(source: &str, p: <DiffSl as Op>::V) -> Result<Self> {
-        let eqn = DiffSl::new(source, p)?;
-        Ok(OdeSolverProblem::new(eqn))
+    fn build_atol<V: Vector>(atol: Vec<f64>, nstates: usize) -> Result<V> {
+        if atol.len() == 1 {
+            Ok(V::from_element(nstates, V::T::from(atol[0])))
+        } else if atol.len() != nstates {
+            Err(anyhow::anyhow!(
+                "atol must have length 1 or equal to the number of states"
+            ))
+        } else {
+            let mut v = V::zeros(nstates);
+            for (i, &a) in atol.iter().enumerate() {
+                v[i] = V::T::from(a);
+            }
+            Ok(v)
+        }
+    }
+
+    fn build_p<V: Vector>(p: Vec<f64>) -> V {
+        let mut v = V::zeros(p.len());
+        for (i, &p) in p.iter().enumerate() {
+            v[i] = V::T::from(p);
+        }
+        v
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub fn build_ode_with_mass<M, F, G, H, I>(
+        self,
+        rhs: F,
+        rhs_jac: G,
+        mass: H,
+        init: I,
+    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, F, G, H, I>>>
+    where
+        M: Matrix,
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        H: Fn(&M::V, &M::V, M::T, &mut M::V),
+        I: Fn(&M::V, M::T) -> M::V,
+    {
+        let p = Self::build_p(self.p);
+        let eqn = OdeSolverEquations::new_ode_with_mass(
+            rhs,
+            rhs_jac,
+            mass,
+            init,
+            p,
+            M::T::from(self.t0),
+            self.use_coloring,
+        );
+        let atol = Self::build_atol(self.atol, eqn.nstates())?;
+        Ok(OdeSolverProblem::new(
+            eqn,
+            M::T::from(self.rtol),
+            atol,
+            M::T::from(self.t0),
+            M::T::from(self.h0),
+        ))
+    }
+
+    pub fn build_ode<M, F, G, I>(
+        self,
+        rhs: F,
+        rhs_jac: G,
+        init: I,
+    ) -> Result<OdeSolverProblem<OdeSolverEquationsMassI<M, F, G, I>>>
+    where
+        M: Matrix,
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        I: Fn(&M::V, M::T) -> M::V,
+    {
+        let p = Self::build_p(self.p);
+        let eqn = OdeSolverEquationsMassI::new_ode(
+            rhs,
+            rhs_jac,
+            init,
+            p,
+            M::T::from(self.t0),
+            self.use_coloring,
+        );
+        let atol = Self::build_atol(self.atol, eqn.nstates())?;
+        Ok(OdeSolverProblem::new(
+            eqn,
+            M::T::from(self.rtol),
+            atol,
+            M::T::from(self.t0),
+            M::T::from(self.h0),
+        ))
+    }
+
+    #[cfg(feature = "diffsl")]
+    pub fn build_diffsl(self, source: &str) -> Result<OdeSolverProblem<DiffSl>> {
+        type V = diffsl::V;
+        type T = diffsl::T;
+        let p = Self::build_p::<V>(self.p);
+        let eqn = DiffSl::new(source, p, self.use_coloring)?;
+        let atol = Self::build_atol::<V>(self.atol, eqn.nstates())?;
+        Ok(OdeSolverProblem::new(
+            eqn,
+            T::from(self.rtol),
+            atol,
+            T::from(self.t0),
+            T::from(self.h0),
+        ))
     }
 }
 
@@ -240,6 +364,8 @@ mod tests {
     use super::*;
     use crate::nonlinear_solver::newton::NewtonNonlinearSolver;
     use tests::bdf::Bdf;
+    use tests::test_models::dydt_y2::dydt_y2_problem;
+    use tests::test_models::gaussian_decay::gaussian_decay_problem;
 
     fn test_ode_solver<M, Eqn>(
         method: &mut impl OdeSolverMethod<Eqn>,
@@ -278,14 +404,11 @@ mod tests {
     fn test_bdf_nalgebra_exponential_decay() {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::default();
-        let (problem, soln) = exponential_decay_problem::<Mcpu>();
-        test_ode_solver(&mut s, rs, problem, soln, None);
+        let (problem, soln) = exponential_decay_problem::<Mcpu>(false);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_rhs_jac_evals: 1
-        number_of_rhs_evals: 54
         number_of_linear_solver_setups: 16
-        number_of_jac_mul_evals: 0
         number_of_steps: 19
         number_of_error_test_failures: 8
         number_of_nonlinear_solver_iterations: 54
@@ -293,20 +416,25 @@ mod tests {
         initial_step_size: 0.011892071150027213
         final_step_size: 0.23215911532645564
         "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        ---
+        number_of_rhs_evals: 56
+        number_of_jac_mul_evals: 2
+        number_of_mass_evals: 0
+        number_of_mass_matrix_evals: 0
+        number_of_jacobian_matrix_evals: 1
+        "###);
     }
 
     #[test]
     fn test_bdf_nalgebra_exponential_decay_algebraic() {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::default();
-        let (problem, soln) = exponential_decay_with_algebraic_problem::<Mcpu>();
-        test_ode_solver(&mut s, rs, problem, soln, None);
+        let (problem, soln) = exponential_decay_with_algebraic_problem::<Mcpu>(false);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_rhs_jac_evals: 2
-        number_of_rhs_evals: 58
         number_of_linear_solver_setups: 18
-        number_of_jac_mul_evals: 0
         number_of_steps: 21
         number_of_error_test_failures: 7
         number_of_nonlinear_solver_iterations: 58
@@ -314,20 +442,25 @@ mod tests {
         initial_step_size: 0.004450050658086208
         final_step_size: 0.20974041151932246
         "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        ---
+        number_of_rhs_evals: 62
+        number_of_jac_mul_evals: 7
+        number_of_mass_evals: 64
+        number_of_mass_matrix_evals: 2
+        number_of_jacobian_matrix_evals: 2
+        "###);
     }
 
     #[test]
     fn test_bdf_nalgebra_robertson() {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::default();
-        let (problem, soln) = robertson::<Mcpu>();
-        test_ode_solver(&mut s, rs, problem, soln, Some(1.0e-4));
+        let (problem, soln) = robertson::<Mcpu>(false);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1.0e-4));
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_rhs_jac_evals: 18
-        number_of_rhs_evals: 1046
         number_of_linear_solver_setups: 129
-        number_of_jac_mul_evals: 0
         number_of_steps: 374
         number_of_error_test_failures: 17
         number_of_nonlinear_solver_iterations: 1046
@@ -335,26 +468,143 @@ mod tests {
         initial_step_size: 0.0000045643545698038086
         final_step_size: 7622676567.923919
         "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        ---
+        number_of_rhs_evals: 1049
+        number_of_jac_mul_evals: 55
+        number_of_mass_evals: 1052
+        number_of_mass_matrix_evals: 2
+        number_of_jacobian_matrix_evals: 18
+        "###);
+    }
+
+    #[test]
+    fn test_bdf_nalgebra_robertson_colored() {
+        let mut s = Bdf::default();
+        let rs = NewtonNonlinearSolver::default();
+        let (problem, soln) = robertson::<Mcpu>(true);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1.0e-4));
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 129
+        number_of_steps: 374
+        number_of_error_test_failures: 17
+        number_of_nonlinear_solver_iterations: 1046
+        number_of_nonlinear_solver_fails: 25
+        initial_step_size: 0.0000045643545698038086
+        final_step_size: 7622676567.923919
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        ---
+        number_of_rhs_evals: 1049
+        number_of_jac_mul_evals: 58
+        number_of_mass_evals: 1051
+        number_of_mass_matrix_evals: 2
+        number_of_jacobian_matrix_evals: 18
+        "###);
     }
 
     #[test]
     fn test_bdf_nalgebra_robertson_ode() {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::default();
-        let (problem, soln) = robertson_ode::<Mcpu>();
-        test_ode_solver(&mut s, rs, problem, soln, Some(1.0e-4));
+        let (problem, soln) = robertson_ode::<Mcpu>(false);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1.0e-4));
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_rhs_jac_evals: 17
-        number_of_rhs_evals: 941
         number_of_linear_solver_setups: 105
-        number_of_jac_mul_evals: 0
         number_of_steps: 346
         number_of_error_test_failures: 8
         number_of_nonlinear_solver_iterations: 941
         number_of_nonlinear_solver_fails: 18
         initial_step_size: 0.0000038381494276795106
         final_step_size: 7310380599.023874
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        ---
+        number_of_rhs_evals: 943
+        number_of_jac_mul_evals: 51
+        number_of_mass_evals: 0
+        number_of_mass_matrix_evals: 0
+        number_of_jacobian_matrix_evals: 17
+        "###);
+    }
+
+    #[test]
+    fn test_bdf_nalgebra_dydt_y2() {
+        let mut s = Bdf::default();
+        let rs = NewtonNonlinearSolver::default();
+        let (problem, soln) = dydt_y2_problem::<Mcpu>(false, 10);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1e-4));
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 109
+        number_of_steps: 469
+        number_of_error_test_failures: 16
+        number_of_nonlinear_solver_iterations: 1440
+        number_of_nonlinear_solver_fails: 4
+        initial_step_size: 0.000000024472764934039197
+        final_step_size: 0.6825461945378934
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        ---
+        number_of_rhs_evals: 1442
+        number_of_jac_mul_evals: 50
+        number_of_mass_evals: 0
+        number_of_mass_matrix_evals: 0
+        number_of_jacobian_matrix_evals: 5
+        "###);
+    }
+
+    #[test]
+    fn test_bdf_nalgebra_dydt_y2_colored() {
+        let mut s = Bdf::default();
+        let rs = NewtonNonlinearSolver::default();
+        let (problem, soln) = dydt_y2_problem::<Mcpu>(true, 10);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1e-4));
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 109
+        number_of_steps: 469
+        number_of_error_test_failures: 16
+        number_of_nonlinear_solver_iterations: 1440
+        number_of_nonlinear_solver_fails: 4
+        initial_step_size: 0.000000024472764934039197
+        final_step_size: 0.6825461945378934
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        ---
+        number_of_rhs_evals: 1442
+        number_of_jac_mul_evals: 15
+        number_of_mass_evals: 0
+        number_of_mass_matrix_evals: 0
+        number_of_jacobian_matrix_evals: 5
+        "###);
+    }
+
+    #[test]
+    fn test_bdf_nalgebra_gaussian_decay() {
+        let mut s = Bdf::default();
+        let rs = NewtonNonlinearSolver::default();
+        let (problem, soln) = gaussian_decay_problem::<Mcpu>(false, 10);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1.0e-4));
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 15
+        number_of_steps: 56
+        number_of_error_test_failures: 3
+        number_of_nonlinear_solver_iterations: 144
+        number_of_nonlinear_solver_fails: 0
+        initial_step_size: 0.0025148668593658707
+        final_step_size: 0.19513473994542221
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        ---
+        number_of_rhs_evals: 146
+        number_of_jac_mul_evals: 10
+        number_of_mass_evals: 0
+        number_of_mass_matrix_evals: 0
+        number_of_jacobian_matrix_evals: 1
         "###);
     }
 }

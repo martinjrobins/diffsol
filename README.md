@@ -72,28 +72,27 @@ respectively. We set the problem up with the following code:
 ```rust
 type T = f64;
 type V = nalgebra::DVector<T>;
-let p = V::from_vec(vec![0.04, 1.0e4, 3.0e7]);
-let mut problem = OdeSolverProblem::new_ode(
-    // The rhs function `f` 
-    | x: &V, p: &V, _t: T, y: &mut V | {
-        y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
-        y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
-        y[2] = p[2] * x[1] * x[1];
-    },
-    // The jacobian function `Jv`
-    | x: &V, p: &V, _t: T, v: &V, y: &mut V | {
-        y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
-        y[1] = p[0] * v[0] - p[1] * v[1] * x[2] - p[1] * x[1] * v[2]  - 2.0 * p[2] * x[1] * v[1];
-        y[2] = 2.0 * p[2] * x[1] * v[1];
-    },
-    // The initial condition
-    | _p: &V, _t: T | {
-        V::from_vec(vec![1.0, 0.0, 0.0])
-    },
-    p,
-);
-problem.rtol = 1.0e-4;
-problem.atol = Rc::new(V::from_vec(vec![1.0e-8, 1.0e-6, 1.0e-6]));
+let problem = OdeBuilder::new()
+    .p([0.04, 1.0e4, 3.0e7])
+    .rtol(1e-4)
+    .atol([1.0e-8, 1.0e-6, 1.0e-6])
+    .build_ode(
+        |x: &V, p: &V, _t: T, y: &mut V| {
+            y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
+            y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
+            y[2] = p[2] * x[1] * x[1];
+        },
+        |x: &V, p: &V, _t: T, v: &V, y: &mut V| {
+            y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
+            y[1] = p[0] * v[0]
+                - p[1] * v[1] * x[2]
+                - p[1] * x[1] * v[2]
+                - 2.0 * p[2] * x[1] * v[1];
+            y[2] = 2.0 * p[2] * x[1] * v[1];
+        },
+        |_p: &V, _t: T| V::from_vec(vec![1.0, 0.0, 0.0]),
+    )
+    .unwrap();
 
 let mut solver = Bdf::default();
 ```

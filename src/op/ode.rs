@@ -23,10 +23,7 @@ pub struct BdfCallable<Eqn: OdeEquations> {
     rhs_jacobian_is_stale: RefCell<bool>,
     jacobian_is_stale: RefCell<bool>,
     mass_jacobian_is_stale: RefCell<bool>,
-    number_of_rhs_jac_evals: RefCell<usize>,
-    number_of_rhs_evals: RefCell<usize>,
     number_of_jac_evals: RefCell<usize>,
-    number_of_jac_mul_evals: RefCell<usize>,
 }
 
 impl<Eqn: OdeEquations> BdfCallable<Eqn> {
@@ -41,10 +38,7 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
         let rhs_jacobian_is_stale = RefCell::new(true);
         let jacobian_is_stale = RefCell::new(true);
         let mass_jacobian_is_stale = RefCell::new(true);
-        let number_of_rhs_jac_evals = RefCell::new(0);
-        let number_of_rhs_evals = RefCell::new(0);
         let number_of_jac_evals = RefCell::new(0);
-        let number_of_jac_mul_evals = RefCell::new(0);
 
         Self {
             eqn,
@@ -56,10 +50,7 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
             rhs_jacobian_is_stale,
             jacobian_is_stale,
             mass_jacobian_is_stale,
-            number_of_rhs_jac_evals,
-            number_of_rhs_evals,
             number_of_jac_evals,
-            number_of_jac_mul_evals,
         }
     }
 
@@ -73,17 +64,8 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
         self.psi_neg_y0.replace(psi_neg_y0);
     }
 
-    pub fn number_of_rhs_jac_evals(&self) -> usize {
-        *self.number_of_rhs_jac_evals.borrow()
-    }
-    pub fn number_of_rhs_evals(&self) -> usize {
-        *self.number_of_rhs_evals.borrow()
-    }
     pub fn number_of_jac_evals(&self) -> usize {
         *self.number_of_jac_evals.borrow()
-    }
-    pub fn number_of_jac_mul_evals(&self) -> usize {
-        *self.number_of_jac_mul_evals.borrow()
     }
     pub fn set_c(&self, h: Eqn::T, alpha: &[Eqn::T], order: IndexType)
     where
@@ -157,21 +139,14 @@ where
         // y = - c * tmp  + y``
         let c = *self.c.borrow().deref();
         y.axpy(-c, &tmp, Eqn::T::one());
-
-        let number_of_rhs_evals = *self.number_of_rhs_evals.borrow() + 1;
-        self.number_of_rhs_evals.replace(number_of_rhs_evals);
     }
     // (M - c * f'(y)) v
     fn jac_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
         self.eqn.mass_inplace(t, v, y);
-        let tmp = self.eqn.rhs_jac(t, x, v);
+        let tmp = self.eqn.jac_mul(t, x, v);
         // y = - c * tmp  + y
         let c = *self.c.borrow().deref();
         y.axpy(-c, &tmp, Eqn::T::one());
-
-        let number_of_jac_mul_evals = *self.number_of_jac_mul_evals.borrow() + 1;
-        self.number_of_jac_mul_evals
-            .replace(number_of_jac_mul_evals);
     }
 
     fn jacobian(&self, x: &Eqn::V, t: Eqn::T) -> Eqn::M {
@@ -181,10 +156,7 @@ where
             self.jacobian_is_stale.replace(true);
         }
         if *self.rhs_jacobian_is_stale.borrow() {
-            self.rhs_jac.replace(self.eqn.rhs_jacobian(x, t));
-            let number_of_rhs_jac_evals = *self.number_of_rhs_jac_evals.borrow() + 1;
-            self.number_of_rhs_jac_evals
-                .replace(number_of_rhs_jac_evals);
+            self.rhs_jac.replace(self.eqn.jacobian_matrix(x, t));
             self.rhs_jacobian_is_stale.replace(false);
             self.jacobian_is_stale.replace(true);
         }
@@ -215,7 +187,7 @@ mod tests {
 
     #[test]
     fn test_bdf_callable() {
-        let (problem, _soln) = exponential_decay_problem::<Mcpu>();
+        let (problem, _soln) = exponential_decay_problem::<Mcpu>(false);
         let mut bdf_callable = BdfCallable::new(&problem);
         let c = 0.1;
         let phi_neg_y0 = Vcpu::from_vec(vec![1.1, 1.2]);

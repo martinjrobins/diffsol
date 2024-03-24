@@ -46,6 +46,8 @@ pub trait Scalar:
 {
     const EPSILON: Self;
     const INFINITY: Self;
+    const NAN: Self;
+    fn is_nan(self) -> bool;
 }
 
 type IndexType = usize;
@@ -53,8 +55,13 @@ type IndexType = usize;
 impl Scalar for f64 {
     const EPSILON: Self = f64::EPSILON;
     const INFINITY: Self = f64::INFINITY;
+    const NAN: Self = f64::NAN;
+    fn is_nan(self) -> bool {
+        self.is_nan()
+    }
 }
 
+pub mod jacobian;
 pub mod linear_solver;
 pub mod matrix;
 pub mod nonlinear_solver;
@@ -73,41 +80,41 @@ use num_traits::{Pow, Signed};
 pub use ode_solver::{
     bdf::Bdf, equations::OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
 };
-use op::{LinearOp, NonLinearOp};
+use op::NonLinearOp;
 use solver::SolverProblem;
 use vector::{Vector, VectorIndex, VectorRef, VectorView, VectorViewMut};
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
 
-    use crate::{vector::Vector, Bdf, OdeSolverMethod, OdeSolverProblem, OdeSolverState};
+    use crate::{ode_solver::OdeBuilder, vector::Vector, Bdf, OdeSolverMethod, OdeSolverState};
 
     // WARNING: if this test fails and you make a change to the code, you should update the README.md file as well!!!
     #[test]
     fn test_readme() {
         type T = f64;
         type V = nalgebra::DVector<T>;
-        let p = V::from_vec(vec![0.04, 1.0e4, 3.0e7]);
-        let mut problem = OdeSolverProblem::new_ode(
-            |x: &V, p: &V, _t: T, y: &mut V| {
-                y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
-                y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
-                y[2] = p[2] * x[1] * x[1];
-            },
-            |x: &V, p: &V, _t: T, v: &V, y: &mut V| {
-                y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
-                y[1] = p[0] * v[0]
-                    - p[1] * v[1] * x[2]
-                    - p[1] * x[1] * v[2]
-                    - 2.0 * p[2] * x[1] * v[1];
-                y[2] = 2.0 * p[2] * x[1] * v[1];
-            },
-            |_p: &V, _t: T| V::from_vec(vec![1.0, 0.0, 0.0]),
-            p,
-        );
-        problem.rtol = 1.0e-4;
-        problem.atol = Rc::new(V::from_vec(vec![1.0e-8, 1.0e-6, 1.0e-6]));
+        let problem = OdeBuilder::new()
+            .p([0.04, 1.0e4, 3.0e7])
+            .rtol(1e-4)
+            .atol([1.0e-8, 1.0e-6, 1.0e-6])
+            .build_ode(
+                |x: &V, p: &V, _t: T, y: &mut V| {
+                    y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
+                    y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
+                    y[2] = p[2] * x[1] * x[1];
+                },
+                |x: &V, p: &V, _t: T, v: &V, y: &mut V| {
+                    y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
+                    y[1] = p[0] * v[0]
+                        - p[1] * v[1] * x[2]
+                        - p[1] * x[1] * v[2]
+                        - 2.0 * p[2] * x[1] * v[1];
+                    y[2] = 2.0 * p[2] * x[1] * v[1];
+                },
+                |_p: &V, _t: T| V::from_vec(vec![1.0, 0.0, 0.0]),
+            )
+            .unwrap();
 
         let mut solver = Bdf::default();
 

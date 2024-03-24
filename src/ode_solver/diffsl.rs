@@ -1,13 +1,18 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, rc::Rc};
 
 use anyhow::Result;
 use diffsl::execution::Compiler;
 
-use crate::{op::Op, OdeEquations};
+use crate::{
+    jacobian::{find_non_zero_entries, JacobianColoring},
+    op::{closure::Closure, linear_closure::LinearClosure, Op},
+    vector::Vector,
+    Matrix, OdeEquations,
+};
 
-type T = f64;
-type V = nalgebra::DVector<T>;
-type M = nalgebra::DMatrix<T>;
+pub type T = f64;
+pub type V = nalgebra::DVector<T>;
+pub type M = nalgebra::DMatrix<T>;
 
 pub struct DiffSl {
     compiler: Compiler,
@@ -16,17 +21,67 @@ pub struct DiffSl {
     nstates: usize,
     nparams: usize,
     nout: usize,
+    jacobian_coloring: Option<JacobianColoring>,
+    mass_coloring: Option<JacobianColoring>,
 }
 
 impl DiffSl {
-    pub fn new(text: &str, p: V) -> Result<Self> {
+    pub fn new(text: &str, p: V, use_coloring: bool) -> Result<Self> {
+        let p = Rc::new(p);
         let compiler = Compiler::from_discrete_str(text)?;
         let mut data = compiler.get_new_data();
+
+        compiler.set_inputs(p.as_slice(), data.as_mut_slice());
+
         let ddata = compiler.get_new_data();
         compiler.set_inputs(p.as_slice(), data.as_mut_slice());
         let data = RefCell::new(data);
         let ddata = RefCell::new(ddata);
         let (nstates, nparams, nout, _ndata, _stop) = compiler.get_dims();
+
+        let (jacobian_coloring, mass_coloring) = if use_coloring {
+            let rhs_inplace = |x: &V, _p: &V, t: T, y_rhs: &mut V| {
+                compiler.rhs(
+                    t,
+                    x.as_slice(),
+                    data.borrow_mut().as_mut_slice(),
+                    y_rhs.as_mut_slice(),
+                );
+            };
+
+            let rhs_jac_inplace = |x: &V, _p: &V, t: T, v: &V, y: &mut V| {
+                let mut dummy_rhs = V::zeros(nstates);
+                compiler.rhs_grad(
+                    t,
+                    x.as_slice(),
+                    v.as_slice(),
+                    data.borrow_mut().as_mut_slice(),
+                    ddata.borrow_mut().as_mut_slice(),
+                    dummy_rhs.as_mut_slice(),
+                    y.as_mut_slice(),
+                );
+            };
+            let mass_inplace = |x: &V, _p: &V, t: T, y: &mut V| {
+                compiler.mass(
+                    t,
+                    x.as_slice(),
+                    data.borrow_mut().as_mut_slice(),
+                    y.as_mut_slice(),
+                );
+            };
+            let t0 = 0.;
+            let mut y0 = V::zeros(nstates);
+            compiler.set_u0(y0.as_mut_slice(), data.borrow_mut().as_mut_slice());
+
+            let op =
+                Closure::<M, _, _>::new(rhs_inplace, rhs_jac_inplace, nstates, nstates, p.clone());
+            let jacobian_coloring = Some(JacobianColoring::new(&op, &y0, t0));
+            let op = LinearClosure::<M, _>::new(mass_inplace, nstates, nstates, p.clone());
+            let mass_coloring = Some(JacobianColoring::new(&op, &y0, t0));
+            (jacobian_coloring, mass_coloring)
+        } else {
+            (None, None)
+        };
         Ok(Self {
             compiler,
             data,
@@ -34,6 +89,8 @@ impl DiffSl {
             nparams,
             nstates,
             nout,
+            jacobian_coloring,
+            mass_coloring,
         })
     }
     pub fn out(&self, t: T, y: &V) -> &[T] {
@@ -86,6 +143,56 @@ impl OdeEquations for DiffSl {
         );
     }
 
+    fn algebraic_indices(&self) -> <Self::V as Vector>::Index {
+        let mut ids = vec![0.; self.nstates()];
+        self.compiler.set_id(ids.as_mut_slice());
+        let mut indices = Vec::new();
+        for (i, id) in ids.iter().enumerate() {
+            if *id == 0. {
+                indices.push(i);
+            }
+        }
+        <Self::V as Vector>::Index::from_vec(indices)
+    }
+
+    fn mass_matrix(&self, t: Self::T) -> Self::M {
+        let mass_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y: &mut Self::V| {
+            self.mass_inplace(t, x, y);
+        };
+        let dummy_p = Rc::new(V::zeros(0));
+        let op = LinearClosure::<M, _>::new(mass_inplace, self.nstates, self.nstates, dummy_p);
+        let triplets = if let Some(coloring) = &self.mass_coloring {
+            coloring.find_non_zero_entries(&op, &self.init(t), t)
+        } else {
+            find_non_zero_entries(&op, &self.init(t), t)
+        };
+        Self::M::try_from_triplets(self.nstates(), self.nout(), triplets).unwrap()
+    }
+
+    fn jacobian_matrix(&self, x: &Self::V, t: Self::T) -> Self::M {
+        let rhs_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y_rhs: &mut Self::V| {
+            self.rhs_inplace(t, x, y_rhs);
+        };
+        let rhs_jac_inplace =
+            |x: &Self::V, _p: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V| {
+                self.rhs_jac_inplace(t, x, v, y);
+            };
+        let dummy_p = Rc::new(V::zeros(0));
+        let op = Closure::<M, _, _>::new(
+            rhs_inplace,
+            rhs_jac_inplace,
+            self.nstates,
+            self.nstates,
+            dummy_p,
+        );
+        let triplets = if let Some(coloring) = &self.jacobian_coloring {
+            coloring.find_non_zero_entries(&op, x, t)
+        } else {
+            find_non_zero_entries(&op, x, t)
+        };
+        Self::M::try_from_triplets(self.nstates(), self.nout(), triplets).unwrap()
+    }
+
     fn init(&self, _t: Self::T) -> Self::V {
         let mut ret_y = Self::V::zeros(self.nstates());
         self.compiler
@@ -107,8 +214,8 @@ mod tests {
     use nalgebra::DVector;
 
     use crate::{
-        nonlinear_solver::newton::NewtonNonlinearSolver, Bdf, OdeEquations, OdeSolverMethod,
-        OdeSolverProblem, Vector,
+        nonlinear_solver::newton::NewtonNonlinearSolver, ode_solver::OdeBuilder, Bdf, OdeEquations,
+        OdeSolverMethod, Vector,
     };
 
     use super::DiffSl;
@@ -144,7 +251,7 @@ mod tests {
         let k = 1.0;
         let r = 1.0;
         let p = DVector::from_vec(vec![r, k]);
-        let eqn = DiffSl::new(text, p).unwrap();
+        let eqn = DiffSl::new(text, p.clone(), false).unwrap();
 
         // test that the initial values look ok
         let y0 = 0.1;
@@ -155,7 +262,7 @@ mod tests {
         let rhs_expect = DVector::from_vec(vec![r * y0 * (1.0 - y0 / k), 2.0 * y0]);
         rhs.assert_eq(&rhs_expect, 1e-10);
         let v = DVector::from_vec(vec![1.0, 1.0]);
-        let rhs_jac = eqn.rhs_jac(0.0, &init, &v);
+        let rhs_jac = eqn.jac_mul(0.0, &init, &v);
         let rhs_jac_expect = DVector::from_vec(vec![r * (1.0 - y0 / k) - r * y0 / k, 1.0]);
         rhs_jac.assert_eq(&rhs_jac_expect, 1e-10);
         let mut mass_y = DVector::from_vec(vec![0.0, 0.0]);
@@ -165,7 +272,7 @@ mod tests {
         mass_y.assert_eq(&mass_y_expect, 1e-10);
 
         // solver a bit and check the state and output
-        let problem = OdeSolverProblem::new(eqn);
+        let problem = OdeBuilder::new().p([r, k]).build_diffsl(text).unwrap();
         let mut solver = Bdf::default();
         let mut root_solver = NewtonNonlinearSolver::default();
         let t = 1.0;
