@@ -313,7 +313,7 @@ impl OdeBuilder {
         type V = diffsl::V;
         type T = diffsl::T;
         let p = Self::build_p::<V>(self.p);
-        let eqn = DiffSl::new(source, p)?;
+        let eqn = DiffSl::new(source, p, self.use_coloring)?;
         let atol = Self::build_atol::<V>(self.atol, eqn.nstates())?;
         Ok(OdeSolverProblem::new(
             eqn,
@@ -324,8 +324,6 @@ impl OdeBuilder {
         ))
     }
 }
-
-
 
 pub struct OdeSolverSolutionPoint<V: Vector> {
     pub state: V,
