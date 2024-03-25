@@ -15,17 +15,14 @@ impl VectorIndex for DVector<IndexType> {
 
 impl<T: Scalar> VectorCommon for DVector<T> {
     type T = T;
-    type Op = T;
 }
 
 impl<'a, T: Scalar> VectorCommon for DVectorView<'a, T> {
     type T = T;
-    type Op = T;
 }
 
 impl<'a, T: Scalar> VectorCommon for DVectorViewMut<'a, T> {
     type T = T;
-    type Op = T;
 }
 
 impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {

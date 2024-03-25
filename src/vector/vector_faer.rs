@@ -76,15 +76,12 @@ impl VectorIndex for Vec<IndexType> {
 
 impl VectorCommon for faer::Col<f64> {
     type T = f64;
-    type Op = faer::Scale<f64>;
 }
 impl<'a> VectorCommon for faer::ColRef<'a, f64> {
     type T = f64;
-    type Op = faer::Scale<f64>;
 }
 impl<'a> VectorCommon for faer::ColMut<'a, f64> {
     type T = f64;
-    type Op = faer::Scale<f64>;
 }
 
 impl<'a> VectorView<'a> for faer::ColRef<'a, f64> {
