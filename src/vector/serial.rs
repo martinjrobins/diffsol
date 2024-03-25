@@ -95,9 +95,9 @@ impl<T: Scalar> Vector for DVector<T> {
     fn axpy(&mut self, alpha: T, x: &Self, beta: T) {
         self.axpy(alpha, x, beta);
     }
-    fn component_div_assign(&mut self, other: &Self) {
-        self.component_div_assign(other);
-    }
+    // fn component_div_assign(&mut self, other: &Self) {
+    //     self.component_div_assign(other);
+    // }
     fn component_mul_assign(&mut self, other: &Self) {
         self.component_mul_assign(other);
     }

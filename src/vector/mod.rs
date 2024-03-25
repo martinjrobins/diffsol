@@ -146,7 +146,7 @@ pub trait Vector:
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T);
     fn add_scalar_mut(&mut self, scalar: Self::T);
     fn component_mul_assign(&mut self, other: &Self);
-    fn component_div_assign(&mut self, other: &Self);
+    // fn component_div_assign(&mut self, other: &Self);
     fn filter_indices<F: Fn(Self::T) -> bool>(&self, f: F) -> Self::Index;
     fn filter(&self, indices: &Self::Index) -> Self {
         let mut result = Self::zeros(indices.len());
