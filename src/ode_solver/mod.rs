@@ -20,6 +20,9 @@ pub mod test_models;
 #[cfg(feature = "diffsl")]
 pub mod diffsl;
 
+#[cfg(feature = "sundials")]
+pub mod sundials;
+
 pub trait OdeSolverMethod<Eqn: OdeEquations> {
     fn problem(&self) -> Option<&OdeSolverProblem<Eqn>>;
     fn set_problem(&mut self, state: &mut OdeSolverState<Eqn::M>, problem: &OdeSolverProblem<Eqn>);

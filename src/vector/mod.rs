@@ -4,6 +4,9 @@ use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, 
 
 use crate::{IndexType, Scalar};
 
+#[cfg(feature = "sundials")]
+pub mod sundials;
+
 mod serial;
 
 pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug + Display {

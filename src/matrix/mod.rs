@@ -7,6 +7,8 @@ use num_traits::{One, Zero};
 
 mod dense_serial;
 mod sparse_serial;
+#[cfg(feature = "sundials")]
+pub mod sundials;
 
 pub trait MatrixCommon: Sized + Debug {
     type V: Vector<T = Self::T>;
