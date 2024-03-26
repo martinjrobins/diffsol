@@ -57,9 +57,19 @@ impl<T: Scalar> Mul<Scale<T>> for DVector<T> {
         self * rhs.value()
     }
 }
+
 impl<T: Scalar> MulAssign<Scale<T>> for DVector<T> {
     fn mul_assign(&mut self, rhs: Scale<T>) {
         *self = &*self * rhs.value();
+    }
+}
+impl<'a, T: Scalar> MulAssign<Scale<T>> for DVectorViewMut<'a, T> {
+    fn mul_assign(&mut self, rhs: Scale<T>) {
+        //I'm doing this horrendous hack because
+        //somehow I'm missing which trait to implement so I can multiply
+        //a &mut DVector by a scalar
+        let a = &*self * rhs.value();
+        self.copy_from(&a);
     }
 }
 

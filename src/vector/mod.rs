@@ -72,7 +72,7 @@ pub trait VectorViewMut<'a>:
     + VectorMutOpsByValue<Self::Owned>
     + for<'b> VectorMutOpsByValue<&'b Self::View>
     + for<'b> VectorMutOpsByValue<&'b Self::Owned>
-    + MulAssign<Self::T>
+    + MulAssign<Scale<Self::T>>
     // + DivAssign<Self::T>
     + Index<IndexType, Output = Self::T>
     + IndexMut<IndexType, Output = Self::T>
