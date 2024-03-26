@@ -6,6 +6,8 @@ use std::{
 use nalgebra::{ClosedAdd, ClosedDiv, ClosedMul, ClosedSub, ComplexField, SimdRealField};
 use num_traits::{Pow, Signed};
 
+use crate::vector::{Vector, VectorCommon, VectorRef, VectorView};
+
 pub trait Scalar:
     nalgebra::Scalar
     + From<f64>
@@ -108,6 +110,15 @@ impl<E: Scalar> PartialEq for Scale<E> {
     #[inline]
     fn eq(&self, rhs: &Self) -> bool {
         self.0 == rhs.0
+    }
+}
+
+// I have to implement Mul between Scale and VectorView
+impl<'a, V: VectorView<'static>> Mul<V> for Scale<f64> {
+    type Output = V::Owned;
+    #[inline]
+    fn mul(self, rhs: V) -> Self::Output {
+        rhs.scalar_mul(self.0.into())
     }
 }
 

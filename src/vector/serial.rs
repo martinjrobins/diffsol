@@ -36,6 +36,9 @@ impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
     fn into_owned(self) -> Self::Owned {
         self.into_owned()
     }
+    fn scalar_mul(&self, rhs: Self::T) -> Self::Owned {
+        self * rhs
+    }
 }
 
 impl<'a, T: Scalar> VectorViewMut<'a> for DVectorViewMut<'a, T> {
