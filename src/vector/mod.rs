@@ -1,8 +1,7 @@
+use crate::{IndexType, Scalar};
 use num_traits::Zero;
 use std::fmt::{Debug, Display};
 use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
-
-use crate::{IndexType, Scalar};
 
 mod serial;
 mod vector_faer;
@@ -19,6 +18,7 @@ pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug {
 pub trait VectorCommon: Sized + Debug {
     // + Display
     type T: Scalar;
+    type O;
 }
 
 impl<'a, V> VectorCommon for &'a V
@@ -26,6 +26,7 @@ where
     V: VectorCommon,
 {
     type T = V::T;
+    type O = V::O;
 }
 
 impl<'a, V> VectorCommon for &'a mut V
@@ -33,6 +34,7 @@ where
     V: VectorCommon,
 {
     type T = V::T;
+    type O = V::O;
 }
 
 pub trait VectorOpsByValue<Rhs = Self, Output = Self>:
@@ -55,7 +57,6 @@ pub trait VectorRef<V: Vector>:
     + for<'a> VectorOpsByValue<V::View<'a>, V>
     + for<'a, 'b> VectorOpsByValue<&'a V::View<'b>, V>
     + Mul<V::T, Output = V>
-    + Div<V::T, Output = V>
 {
 }
 
@@ -64,8 +65,7 @@ impl<RefT, V: Vector> VectorRef<V> for RefT where
         + for<'a> VectorOpsByValue<&'a V, V>
         + for<'a> VectorOpsByValue<V::View<'a>, V>
         + for<'a, 'b> VectorOpsByValue<&'a V::View<'b>, V>
-        + Mul<V::T, Output = V>
-        + Div<V::T, Output = V>
+        + Mul<V::T, Output = V> // + Div<V::T, Output = V>
 {
 }
 

@@ -9,6 +9,7 @@ use super::{Matrix, MatrixCommon};
 impl<T: Scalar> MatrixCommon for CscMatrix<T> {
     type V = DVector<T>;
     type T = T;
+    type O = T;
 
     fn ncols(&self) -> IndexType {
         self.ncols()

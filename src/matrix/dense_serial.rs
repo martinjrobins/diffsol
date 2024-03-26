@@ -8,6 +8,7 @@ use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 impl<'a, T: Scalar> MatrixCommon for DMatrixViewMut<'a, T> {
     type V = DVector<T>;
     type T = T;
+    type O = T;
 
     fn ncols(&self) -> IndexType {
         self.ncols()
@@ -31,6 +32,7 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
 impl<'a, T: Scalar> MatrixCommon for DMatrixView<'a, T> {
     type V = DVector<T>;
     type T = T;
+    type O = T;
     fn ncols(&self) -> IndexType {
         self.ncols()
     }
@@ -46,6 +48,7 @@ impl<'a, T: Scalar> MatrixView<'a> for DMatrixView<'a, T> {
 impl<T: Scalar> MatrixCommon for DMatrix<T> {
     type V = DVector<T>;
     type T = T;
+    type O = T;
 
     fn ncols(&self) -> IndexType {
         self.ncols()
