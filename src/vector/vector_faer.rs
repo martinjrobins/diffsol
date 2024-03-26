@@ -1,8 +1,30 @@
+// use std::ops::{Mul, MulAssign};
+
 // use faer::{unzipped, zipped};
 
-// use crate::IndexType;
+// use crate::{scalar::Scalar, IndexType};
 
 // use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
+// impl<'a, T: Scalar> Mul<crate::scalar::Scale<T>> for faer::ColRef<'a, f64> {
+//     type Output = faer::Col<f64>;
+//     fn mul(self, rhs: crate::scalar::Scale<T>) -> Self::Output {
+//         self * faer::scale(rhs.into())
+//     }
+// }
+
+// impl<'a, T: Scalar> Mul<crate::scalar::Scale<T>> for faer::ColMut<'a, f64> {
+//     type Output = faer::Col<f64>;
+//     fn mul(self, rhs: crate::scalar::Scale<T>) -> Self::Output {
+//         self * faer::scale(rhs)
+//     }
+// }
+
+// impl<'a, T: Scalar> MulAssign<crate::scalar::Scale<T>> for faer::ColMut<'a, f64> {
+//     fn mul_assign(&mut self, rhs: crate::scalar::Scale<T>) {
+//         self = self * faer::scale(rhs)
+//     }
+// }
+
 // impl Vector for faer::Col<f64> {
 //     type View<'a> = faer::ColRef<'a, f64>;
 //     type ViewMut<'a> = faer::ColMut<'a, f64>;
@@ -76,15 +98,12 @@
 
 // impl VectorCommon for faer::Col<f64> {
 //     type T = f64;
-//     type O = faer::Scale<f64>;
 // }
 // impl<'a> VectorCommon for faer::ColRef<'a, f64> {
 //     type T = f64;
-//     type O = faer::Scale<f64>;
 // }
 // impl<'a> VectorCommon for faer::ColMut<'a, f64> {
 //     type T = f64;
-//     type O = faer::Scale<f64>;
 // }
 
 // impl<'a> VectorView<'a> for faer::ColRef<'a, f64> {

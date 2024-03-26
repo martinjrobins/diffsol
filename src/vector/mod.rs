@@ -104,14 +104,14 @@ pub trait Vector:
     + for<'b> VectorOpsByValue<&'b Self>
     + for<'a> VectorOpsByValue<Self::View<'a>>
     + for<'a, 'b> VectorOpsByValue<&'b Self::View<'a>>
-    + Mul<Self::T, Output = Self>
-    + Div<Self::T, Output = Self>
+    + Mul<Scale<Self::T>, Output = Self>
+    + Div<Scale<Self::T>, Output = Self>
     + VectorMutOpsByValue<Self>
     + for<'a> VectorMutOpsByValue<Self::View<'a>>
     + for<'b> VectorMutOpsByValue<&'b Self>
     + for<'a, 'b> VectorMutOpsByValue<&'b Self::View<'a>>
-    + MulAssign<Self::T>
-    + DivAssign<Self::T>
+    + MulAssign<Scale<Self::T>>
+    // + DivAssign<Self::T>
     + Index<IndexType, Output = Self::T>
     + IndexMut<IndexType, Output = Self::T>
     + Clone

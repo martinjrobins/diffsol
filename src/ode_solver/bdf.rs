@@ -290,7 +290,7 @@ where
 
         // update initial step size based on function
         let mut scale = state.y.abs();
-        scale *= problem.rtol;
+        scale *= crate::scalar::scale(problem.rtol);
         scale += problem.atol.as_ref();
 
         let f0 = problem.eqn.rhs(state.t, &state.y);
@@ -355,7 +355,7 @@ where
                     // test error is within tolerance
                     {
                         let ode_problem = self.ode_problem.as_ref().unwrap();
-                        scale_y = y_new.abs() * ode_problem.rtol;
+                        scale_y = y_new.abs() * scale(ode_problem.rtol);
                         scale_y += ode_problem.atol.as_ref();
                     }
 
