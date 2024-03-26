@@ -1,6 +1,7 @@
 use crate::{
     matrix::{DenseMatrix, MatrixRef},
     ode_solver::{equations::OdeEquations, OdeSolverProblem},
+    scalar::scale,
     IndexType, Matrix, Vector, VectorRef,
 };
 use num_traits::{One, Zero};
@@ -92,9 +93,9 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
         y0: &Eqn::V,
     ) {
         // update psi term as defined in second equation on page 9 of [1]
-        let mut new_psi_neg_y0 = diff.column(1) * gamma[1];
+        let mut new_psi_neg_y0 = diff.column(1) * scale(gamma[1]);
         for (i, &gamma_i) in gamma.iter().enumerate().take(order + 1).skip(2) {
-            new_psi_neg_y0 += diff.column(i) * gamma_i
+            new_psi_neg_y0 += diff.column(i) * scale(gamma_i)
         }
         new_psi_neg_y0 *= alpha[order];
 

@@ -1,3 +1,4 @@
+use crate::scalar::Scale;
 use crate::{IndexType, Scalar};
 use num_traits::Zero;
 use std::fmt::{Debug, Display};
@@ -18,7 +19,6 @@ pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug {
 pub trait VectorCommon: Sized + Debug {
     // + Display
     type T: Scalar;
-    type O;
 }
 
 impl<'a, V> VectorCommon for &'a V
@@ -26,7 +26,6 @@ where
     V: VectorCommon,
 {
     type T = V::T;
-    type O = V::O;
 }
 
 impl<'a, V> VectorCommon for &'a mut V
@@ -34,7 +33,6 @@ where
     V: VectorCommon,
 {
     type T = V::T;
-    type O = V::O;
 }
 
 pub trait VectorOpsByValue<Rhs = Self, Output = Self>:
@@ -91,7 +89,7 @@ pub trait VectorView<'a>:
     + VectorOpsByValue<Self::Owned, Self::Owned>
     + for<'b> VectorOpsByValue<&'b Self::Owned, Self::Owned>
     + for<'b> VectorOpsByValue<&'b Self, Self::Owned>
-    + Mul<Self::T, Output = Self::Owned>
+    + Mul<Scale<Self::T>, Output = Self::Owned>
     // + Div<Self::T, Output = Self::Owned>
     + Index<IndexType, Output = Self::T>
 {

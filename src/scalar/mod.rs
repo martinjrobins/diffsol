@@ -6,7 +6,7 @@ use std::{
 use nalgebra::{ClosedAdd, ClosedDiv, ClosedMul, ClosedSub, ComplexField, SimdRealField};
 use num_traits::{Pow, Signed};
 
-use crate::vector::{Vector, VectorCommon, VectorRef, VectorView};
+use crate::vector::{Vector, VectorCommon, VectorRef, VectorView, VectorViewMut};
 
 pub trait Scalar:
     nalgebra::Scalar
@@ -113,7 +113,6 @@ impl<E: Scalar> PartialEq for Scale<E> {
     }
 }
 
-// I have to implement Mul between Scale and VectorView
 impl<'a, V: VectorView<'static, T = E>, E: Scalar> Mul<V> for Scale<E> {
     type Output = V::Owned;
     #[inline]
@@ -121,6 +120,19 @@ impl<'a, V: VectorView<'static, T = E>, E: Scalar> Mul<V> for Scale<E> {
         rhs.scalar_mul(self.0)
     }
 }
+
+//TODO: Not sure why it is now working
+// impl<'a, E, V> Mul<Scale<E>> for V
+// where
+//     V: VectorView<'static, T = E>,
+//     E: Scalar,
+// {
+//     type Output = V::Owned;
+//     #[inline]
+//     fn mul(self, rhs: Scale<E>) -> Self::Output {
+//         self.scalar_mul(rhs.0)
+//     }
+// }
 
 #[test]
 fn test_scale() {

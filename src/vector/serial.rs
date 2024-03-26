@@ -1,6 +1,8 @@
+use std::ops::Mul;
+
 use nalgebra::{DVector, DVectorView, DVectorViewMut};
 
-use crate::{IndexType, Scalar};
+use crate::{scalar::Scale, IndexType, Scalar};
 
 use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
@@ -15,17 +17,14 @@ impl VectorIndex for DVector<IndexType> {
 
 impl<T: Scalar> VectorCommon for DVector<T> {
     type T = T;
-    type O = T;
 }
 
 impl<'a, T: Scalar> VectorCommon for DVectorView<'a, T> {
     type T = T;
-    type O = T;
 }
 
 impl<'a, T: Scalar> VectorCommon for DVectorViewMut<'a, T> {
     type T = T;
-    type O = T;
 }
 
 impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
@@ -37,6 +36,12 @@ impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
         self.into_owned()
     }
     fn scalar_mul(&self, rhs: Self::T) -> Self::Owned {
+        self * rhs
+    }
+}
+impl<'a, T: Scalar> Mul<Scale<T>> for DVectorView<'a, T> {
+    type Output = DVector<T>;
+    fn mul(self, rhs: Scale<T>) -> Self::Output {
         self * rhs
     }
 }
