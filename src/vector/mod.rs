@@ -4,9 +4,10 @@ use num_traits::Zero;
 use std::fmt::{Debug, Display};
 use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
-mod serial;
 #[cfg(feature = "faer")]
-mod vector_faer;
+mod faer_serial;
+#[cfg(feature = "nalgebra")]
+mod nalgebra_serial;
 
 pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug {
     //+ Display
