@@ -8,29 +8,34 @@ use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 impl<'a, T: Scalar> Mul<crate::scalar::Scale<T>> for faer::ColRef<'a, f64> {
     type Output = faer::Col<f64>;
     fn mul(self, rhs: crate::scalar::Scale<T>) -> Self::Output {
-        self * faer::scale(rhs.into())
+        self * faer::scale(rhs.value().into())
     }
 }
 
 impl<'a, T: Scalar> Mul<crate::scalar::Scale<T>> for faer::ColMut<'a, f64> {
     type Output = faer::Col<f64>;
     fn mul(self, rhs: crate::scalar::Scale<T>) -> Self::Output {
-        self * faer::scale(rhs)
-    }
-}
-
-impl<'a, T: Scalar> MulAssign<crate::scalar::Scale<T>> for faer::ColMut<'a, f64> {
-    fn mul_assign(&mut self, rhs: crate::scalar::Scale<T>) {
-        self = self * faer::scale(rhs)
+        self * faer::scale(rhs.value().into())
     }
 }
 
 impl<'a, T: Scalar> Mul<crate::scalar::Scale<T>> for faer::Col<f64> {
     type Output = faer::Col<f64>;
     fn mul(self, rhs: crate::scalar::Scale<T>) -> Self::Output {
-        self * faer::scale(rhs)
+        self * faer::scale(rhs.value().into())
     }
 }
+impl<'a, T: Scalar> MulAssign<crate::scalar::Scale<T>> for faer::ColMut<'a, f64> {
+    fn mul_assign(&mut self, rhs: crate::scalar::Scale<T>) {
+        *self = (&*self * faer::scale(rhs.value().into())).as_mut()
+    }
+}
+impl<T: Scalar> MulAssign<crate::scalar::Scale<T>> for faer::Col<f64> {
+    fn mul_assign(&mut self, rhs: crate::scalar::Scale<T>) {
+        *self = &*self * faer::scale(rhs.value().into())
+    }
+}
+//
 
 impl Vector for faer::Col<f64> {
     type View<'a> = faer::ColRef<'a, f64>;
@@ -80,6 +85,9 @@ impl Vector for faer::Col<f64> {
         // );
         self = self * faer::scale(beta) + x * faer::scale(alpha)
     }
+    fn exp(&self) -> Self {
+        zipped!(self).map(|unzipped!(xi)| xi.exp())
+    }
     fn component_mul_assign(&mut self, other: &Self) {
         // faer::linalg::matmul::matmul(
         //     self.as_mut(),
@@ -92,6 +100,17 @@ impl Vector for faer::Col<f64> {
         // zipped!(&mut self, &other).for_each(|unzipped!(s, o)| *s = *s + *o);
         self = self * other
     }
+    fn component_div_assign(&mut self, other: &Self) {
+        zipped!(self.as_mut(), other.as_ref()).map(|unzipped!(si, oi)| si /= oi)
+    }
+    fn filter_indices<F: Fn(Self::T) -> bool>(&self, f: F) -> Self::Index {
+        self.iter()
+            .enumerate()
+            .filter_map(|(i, x)| if f(*x) { Some(i as IndexType) } else { None })
+            .collect()
+    }
+    fn gather_from(&mut self, other: &Self, indices: &Self::Index) {}
+    fn scatter_from(&mut self, other: &Self, indices: &Self::Index) {}
 }
 
 impl VectorIndex for Vec<IndexType> {

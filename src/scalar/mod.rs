@@ -21,6 +21,7 @@ pub trait Scalar:
     + ClosedDiv
     + ClosedAdd
     + Signed
+    + Into<f64>
     + PartialOrd
     + Pow<Self, Output = Self>
     + Pow<i32, Output = Self>
