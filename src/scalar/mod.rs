@@ -1,4 +1,7 @@
-use std::fmt::Display;
+use std::{
+    fmt::Display,
+    ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign},
+};
 
 use nalgebra::{ClosedAdd, ClosedDiv, ClosedMul, ClosedSub, ComplexField, SimdRealField};
 use num_traits::{Pow, Signed};
@@ -35,4 +38,80 @@ impl Scalar for f64 {
     fn is_nan(self) -> bool {
         self.is_nan()
     }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct Scale<E: Scalar>(pub E);
+
+impl<E: Scalar> Scale<E> {
+    #[inline]
+    pub fn value(self) -> E {
+        self.0
+    }
+}
+
+#[inline]
+pub fn scale<E: Scalar>(value: E) -> Scale<E> {
+    Scale(value)
+}
+
+//TODO: Is it possible for us to need RhsE != LhsE?
+impl<E: Scalar> Mul<Scale<E>> for Scale<E> {
+    type Output = Scale<E>;
+
+    #[inline]
+    fn mul(self, rhs: Scale<E>) -> Self::Output {
+        Scale(self.0 * rhs.0)
+    }
+}
+
+impl<E: Scalar> Add<Scale<E>> for Scale<E> {
+    type Output = Scale<E>;
+
+    #[inline]
+    fn add(self, rhs: Scale<E>) -> Self::Output {
+        Scale(self.0 + rhs.0)
+    }
+}
+
+impl<E: Scalar> Sub<Scale<E>> for Scale<E> {
+    type Output = Scale<E>;
+
+    #[inline]
+    fn sub(self, rhs: Scale<E>) -> Self::Output {
+        Scale(self.0 - rhs.0)
+    }
+}
+
+impl<E: Scalar> MulAssign<Scale<E>> for Scale<E> {
+    #[inline]
+    fn mul_assign(&mut self, rhs: Scale<E>) {
+        self.0 = self.0 * rhs.0
+    }
+}
+
+impl<E: Scalar> AddAssign<Scale<E>> for Scale<E> {
+    #[inline]
+    fn add_assign(&mut self, rhs: Scale<E>) {
+        self.0 = self.0 + rhs.0
+    }
+}
+
+impl<E: Scalar> SubAssign<Scale<E>> for Scale<E> {
+    #[inline]
+    fn sub_assign(&mut self, rhs: Scale<E>) {
+        self.0 = self.0 - rhs.0
+    }
+}
+
+impl<E: Scalar> PartialEq for Scale<E> {
+    #[inline]
+    fn eq(&self, rhs: &Self) -> bool {
+        self.0 == rhs.0
+    }
+}
+
+#[test]
+fn test_scale() {
+    assert_eq!(scale(2.0) * scale(3.0), scale(6.0));
 }
