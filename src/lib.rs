@@ -43,7 +43,7 @@ use nonlinear_solver::{newton::NewtonNonlinearSolver, NonLinearSolver};
 pub use ode_solver::{
     bdf::Bdf, equations::OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
 };
-use op::{LinearOp, NonLinearOp};
+use op::NonLinearOp;
 use scalar::{IndexType, Scalar};
 use solver::SolverProblem;
 use vector::{Vector, VectorIndex, VectorRef, VectorView, VectorViewMut};
