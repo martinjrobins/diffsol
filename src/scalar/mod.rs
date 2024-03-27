@@ -58,54 +58,39 @@ pub fn scale<E: Scalar>(value: E) -> Scale<E> {
     Scale(value)
 }
 
+macro_rules! impl_bin_op {
+    ($trait:ident, $method:ident, $operator:tt) => {
+        impl<E: Scalar> $trait<Scale<E>> for Scale<E> {
+            type Output = Scale<E>;
+
+            #[inline]
+            fn $method(self, rhs: Scale<E>) -> Self::Output {
+                Scale(self.0 $operator rhs.0)
+            }
+        }
+    };
+}
+
+macro_rules! impl_assign_bin_op {
+    ($trait:ident, $method:ident, $operator:tt) => {
+        impl<E: Scalar> $trait<Scale<E>> for Scale<E> {
+            #[inline]
+            fn $method(&mut self, rhs: Scale<E>) {
+                self.0 = self.0 $operator rhs.0
+            }
+        }
+    };
+}
+
 //TODO: Is it possible for us to need RhsE != LhsE?
-impl<E: Scalar> Mul<Scale<E>> for Scale<E> {
-    type Output = Scale<E>;
 
-    #[inline]
-    fn mul(self, rhs: Scale<E>) -> Self::Output {
-        Scale(self.0 * rhs.0)
-    }
-}
+impl_bin_op!(Mul, mul, *);
+impl_bin_op!(Add, add, +);
+impl_bin_op!(Sub, sub, -);
 
-impl<E: Scalar> Add<Scale<E>> for Scale<E> {
-    type Output = Scale<E>;
-
-    #[inline]
-    fn add(self, rhs: Scale<E>) -> Self::Output {
-        Scale(self.0 + rhs.0)
-    }
-}
-
-impl<E: Scalar> Sub<Scale<E>> for Scale<E> {
-    type Output = Scale<E>;
-
-    #[inline]
-    fn sub(self, rhs: Scale<E>) -> Self::Output {
-        Scale(self.0 - rhs.0)
-    }
-}
-
-impl<E: Scalar> MulAssign<Scale<E>> for Scale<E> {
-    #[inline]
-    fn mul_assign(&mut self, rhs: Scale<E>) {
-        self.0 = self.0 * rhs.0
-    }
-}
-
-impl<E: Scalar> AddAssign<Scale<E>> for Scale<E> {
-    #[inline]
-    fn add_assign(&mut self, rhs: Scale<E>) {
-        self.0 = self.0 + rhs.0
-    }
-}
-
-impl<E: Scalar> SubAssign<Scale<E>> for Scale<E> {
-    #[inline]
-    fn sub_assign(&mut self, rhs: Scale<E>) {
-        self.0 = self.0 - rhs.0
-    }
-}
+impl_assign_bin_op!(MulAssign, mul_assign, *);
+impl_assign_bin_op!(AddAssign, add_assign, +);
+impl_assign_bin_op!(SubAssign, sub_assign, -);
 
 impl<E: Scalar> PartialEq for Scale<E> {
     #[inline]
