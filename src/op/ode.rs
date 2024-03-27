@@ -97,7 +97,7 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
         for (i, &gamma_i) in gamma.iter().enumerate().take(order + 1).skip(2) {
             new_psi_neg_y0 += diff.column(i) * scale(gamma_i)
         }
-        new_psi_neg_y0 = new_psi_neg_y0 * scale(alpha[order]);
+        new_psi_neg_y0 *= scale(alpha[order]);
 
         // now negate y0
         new_psi_neg_y0.sub_assign(y0);

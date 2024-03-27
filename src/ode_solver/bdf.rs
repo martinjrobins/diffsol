@@ -289,9 +289,9 @@ where
         }
 
         // update initial step size based on function
-        let mut scale = state.y.abs();
-        scale *= crate::scalar::scale(problem.rtol);
-        scale += problem.atol.as_ref();
+        let mut scale_factor = state.y.abs();
+        scale_factor *= scale(problem.rtol);
+        scale_factor += problem.atol.as_ref();
 
         let f0 = problem.eqn.rhs(state.t, &state.y);
         let hf0 = &f0 * state.h;
@@ -303,7 +303,7 @@ where
         self.diff.column_mut(1).copy_from(&hf0);
 
         let mut df = f1 - f0;
-        df.component_div_assign(&scale);
+        df.component_div_assign(&scale_factor);
         let d2 = df.norm();
 
         let one_over_order_plus_one =

@@ -10,7 +10,6 @@ mod faer_serial;
 mod nalgebra_serial;
 
 pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug {
-    //+ Display
     fn zeros(len: IndexType) -> Self;
     fn len(&self) -> IndexType;
     fn is_empty(&self) -> bool {
@@ -19,7 +18,6 @@ pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug {
 }
 
 pub trait VectorCommon: Sized + Debug {
-    // + Display
     type T: Scalar;
 }
 
@@ -75,7 +73,6 @@ pub trait VectorViewMut<'a>:
     + for<'b> VectorMutOpsByValue<&'b Self::View>
     + for<'b> VectorMutOpsByValue<&'b Self::Owned>
     + MulAssign<Scale<Self::T>>
-    // + DivAssign<Self::T>
     + Index<IndexType, Output = Self::T>
     + IndexMut<IndexType, Output = Self::T>
 {
@@ -92,7 +89,6 @@ pub trait VectorView<'a>:
     + for<'b> VectorOpsByValue<&'b Self::Owned, Self::Owned>
     + for<'b> VectorOpsByValue<&'b Self, Self::Owned>
     + Mul<Scale<Self::T>, Output = Self::Owned>
-    // + Div<Self::T, Output = Self::Owned>
     + Index<IndexType, Output = Self::T>
 {
     type Owned;
@@ -113,7 +109,6 @@ pub trait Vector:
     + for<'b> VectorMutOpsByValue<&'b Self>
     + for<'a, 'b> VectorMutOpsByValue<&'b Self::View<'a>>
     + MulAssign<Scale<Self::T>>
-    // + DivAssign<Self::T>
     + Index<IndexType, Output = Self::T>
     + IndexMut<IndexType, Output = Self::T>
     + Clone

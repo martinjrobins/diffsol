@@ -1,38 +1,38 @@
 use std::ops::{Div, Mul, MulAssign};
 
-use faer::{unzipped, zipped};
+use faer::{unzipped, zipped, Col, ColMut, ColRef};
 
-use crate::{scalar::Scalar, IndexType};
+use crate::{scalar::Scalar, scalar::Scale, IndexType};
 
 use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
-impl<'a, T: Scalar> Mul<crate::scalar::Scale<T>> for faer::ColRef<'a, f64> {
-    type Output = faer::Col<f64>;
-    fn mul(self, rhs: crate::scalar::Scale<T>) -> Self::Output {
+impl<'a, T: Scalar> Mul<Scale<T>> for ColRef<'a, f64> {
+    type Output = Col<f64>;
+    fn mul(self, rhs: Scale<T>) -> Self::Output {
         self * faer::scale(rhs.value().into())
     }
 }
 
-impl<'a, T: Scalar> Mul<crate::scalar::Scale<T>> for faer::ColMut<'a, f64> {
-    type Output = faer::Col<f64>;
-    fn mul(self, rhs: crate::scalar::Scale<T>) -> Self::Output {
+impl<'a, T: Scalar> Mul<Scale<T>> for ColMut<'a, f64> {
+    type Output = Col<f64>;
+    fn mul(self, rhs: Scale<T>) -> Self::Output {
         self * faer::scale(rhs.value().into())
     }
 }
 
-impl<'a, T: Scalar> Mul<crate::scalar::Scale<T>> for faer::Col<f64> {
-    type Output = faer::Col<f64>;
-    fn mul(self, rhs: crate::scalar::Scale<T>) -> Self::Output {
+impl<'a, T: Scalar> Mul<Scale<T>> for Col<f64> {
+    type Output = Col<f64>;
+    fn mul(self, rhs: Scale<T>) -> Self::Output {
         self * faer::scale(rhs.value().into())
     }
 }
-impl<'a, T: Scalar> MulAssign<crate::scalar::Scale<T>> for faer::ColMut<'a, f64> {
-    fn mul_assign(&mut self, rhs: crate::scalar::Scale<T>) {
+impl<'a, T: Scalar> MulAssign<Scale<T>> for ColMut<'a, f64> {
+    fn mul_assign(&mut self, rhs: Scale<T>) {
         let scale = faer::scale(rhs.value().into());
         *self *= scale;
     }
 }
-impl<T: Scalar> MulAssign<crate::scalar::Scale<T>> for faer::Col<f64> {
-    fn mul_assign(&mut self, rhs: crate::scalar::Scale<T>) {
+impl<T: Scalar> MulAssign<Scale<T>> for Col<f64> {
+    fn mul_assign(&mut self, rhs: Scale<T>) {
         *self = &*self * faer::scale(rhs.value().into())
     }
 }
@@ -46,9 +46,9 @@ impl<'a, T: Scalar> Div<crate::scalar::Scale<T>> for faer::Col<f64> {
     }
 }
 
-impl Vector for faer::Col<f64> {
-    type View<'a> = faer::ColRef<'a, f64>;
-    type ViewMut<'a> = faer::ColMut<'a, f64>;
+impl Vector for Col<f64> {
+    type View<'a> = ColRef<'a, f64>;
+    type ViewMut<'a> = ColMut<'a, f64>;
     type Index = Vec<IndexType>;
     fn len(&self) -> IndexType {
         self.nrows()
@@ -72,10 +72,10 @@ impl Vector for faer::Col<f64> {
         self.copy_from(other)
     }
     fn from_element(nstates: usize, value: Self::T) -> Self {
-        faer::Col::from_vec(vec![value; nstates])
+        Col::from_vec(vec![value; nstates])
     }
     fn from_vec(vec: Vec<Self::T>) -> Self {
-        faer::Col::from_fn(vec.len(), |i| vec[i])
+        Col::from_fn(vec.len(), |i| vec[i])
     }
     fn zeros(nstates: usize) -> Self {
         Self::from_element(nstates, 0.0)
@@ -84,30 +84,13 @@ impl Vector for faer::Col<f64> {
         zipped!(self.as_mut()).for_each(|unzipped!(mut s)| *s += scalar)
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {
-        // faer::linalg::matmul::matmul(
-        //     self.as_mut(),
-        //     self.as_ref(),
-        //     x.as_ref(),
-        //     Some(beta),
-        //     alpha,
-        //     faer::Parallelism::None,
-        // );
         *self = &*self * faer::scale(beta) + x * faer::scale(alpha);
     }
     fn exp(&self) -> Self {
         zipped!(self).map(|unzipped!(xi)| xi.exp())
     }
     fn component_mul_assign(&mut self, other: &Self) {
-        // faer::linalg::matmul::matmul(
-        //     self.as_mut(),
-        //     self.as_ref(),
-        //     other.as_ref(),
-        //     None,
-        //     1.0,
-        //     faer::Parallelism::None,
-        // );
         zipped!(self.as_mut(), other.as_view()).for_each(|unzipped!(mut s, o)| *s *= *o);
-        // self = self * other
     }
     fn component_div_assign(&mut self, other: &Self) {
         zipped!(self.as_mut(), other.as_view()).for_each(|unzipped!(mut s, o)| *s /= *o);
@@ -142,22 +125,22 @@ impl VectorIndex for Vec<IndexType> {
     }
 }
 
-impl VectorCommon for faer::Col<f64> {
+impl VectorCommon for Col<f64> {
     type T = f64;
 }
-impl<'a> VectorCommon for faer::ColRef<'a, f64> {
+impl<'a> VectorCommon for ColRef<'a, f64> {
     type T = f64;
 }
-impl<'a> VectorCommon for faer::ColMut<'a, f64> {
+impl<'a> VectorCommon for ColMut<'a, f64> {
     type T = f64;
 }
 
-impl<'a> VectorView<'a> for faer::ColRef<'a, f64> {
-    type Owned = faer::Col<f64>;
-    fn abs(&self) -> faer::Col<f64> {
+impl<'a> VectorView<'a> for ColRef<'a, f64> {
+    type Owned = Col<f64>;
+    fn abs(&self) -> Col<f64> {
         zipped!(self).map(|unzipped!(xi)| xi.abs())
     }
-    fn into_owned(self) -> faer::Col<f64> {
+    fn into_owned(self) -> Col<f64> {
         self.to_owned()
     }
     fn scalar_mul(&self, rhs: Self::T) -> Self::Owned {
@@ -165,10 +148,10 @@ impl<'a> VectorView<'a> for faer::ColRef<'a, f64> {
     }
 }
 
-impl<'a> VectorViewMut<'a> for faer::ColMut<'a, f64> {
-    type Owned = faer::Col<f64>;
-    type View = faer::ColRef<'a, f64>;
-    fn abs(&self) -> faer::Col<f64> {
+impl<'a> VectorViewMut<'a> for ColMut<'a, f64> {
+    type Owned = Col<f64>;
+    type View = ColRef<'a, f64>;
+    fn abs(&self) -> Col<f64> {
         zipped!(self).map(|unzipped!(xi)| xi.abs())
     }
     fn copy_from(&mut self, other: &Self::Owned) {
@@ -186,16 +169,25 @@ mod tests {
 
     #[test]
     fn test_abs() {
-        let v = faer::Col::from_vec(vec![1.0, -2.0, 3.0]);
+        let v = Col::from_vec(vec![1.0, -2.0, 3.0]);
         let v_abs = v.abs();
-        assert_eq!(v_abs, faer::Col::from_vec(vec![1.0, 2.0, 3.0]));
+        assert_eq!(v_abs, Col::from_vec(vec![1.0, 2.0, 3.0]));
     }
 
     #[test]
     fn test_mult() {
-        let v = faer::Col::from_vec(vec![1.0, -2.0, 3.0]);
+        let v = Col::from_vec(vec![1.0, -2.0, 3.0]);
         let s = crate::scalar::scale(2.0);
-        let r = faer::Col::from_vec(vec![2.0, -4.0, 6.0]);
+        let r = Col::from_vec(vec![2.0, -4.0, 6.0]);
         assert_eq!(v * s, r);
+    }
+
+    #[test]
+    fn test_mul_assign() {
+        let mut v = Col::from_vec(vec![1.0, -2.0, 3.0]);
+        let s = crate::scalar::scale(2.0);
+        let r = Col::from_vec(vec![2.0, -4.0, 6.0]);
+        v.mul_assign(s);
+        assert_eq!(v, r);
     }
 }
