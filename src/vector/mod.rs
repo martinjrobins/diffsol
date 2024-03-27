@@ -4,7 +4,7 @@ use num_traits::Zero;
 use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
-// #[cfg(feature = "faer")]
+#[cfg(feature = "faer")]
 mod faer_serial;
 #[cfg(feature = "nalgebra")]
 mod nalgebra_serial;
