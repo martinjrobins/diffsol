@@ -27,7 +27,8 @@ impl<'a, T: Scalar> Mul<crate::scalar::Scale<T>> for faer::Col<f64> {
 }
 impl<'a, T: Scalar> MulAssign<crate::scalar::Scale<T>> for faer::ColMut<'a, f64> {
     fn mul_assign(&mut self, rhs: crate::scalar::Scale<T>) {
-        *self = (&*self * faer::scale(rhs.value().into())).as_mut()
+        let mut aux: faer::Col<f64> = self.as_ref() * faer::scale(rhs.value().into());
+        *self = aux.as_mut();
     }
 }
 impl<T: Scalar> MulAssign<crate::scalar::Scale<T>> for faer::Col<f64> {
@@ -72,7 +73,7 @@ impl Vector for faer::Col<f64> {
         Self::from_element(nstates, 0.0)
     }
     fn add_scalar_mut(&mut self, scalar: Self::T) {
-        self = self + scalar
+        zipped!(self.as_mut()).for_each(|unzipped!(mut s)| *s += scalar)
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {
         // faer::linalg::matmul::matmul(
@@ -83,7 +84,7 @@ impl Vector for faer::Col<f64> {
         //     alpha,
         //     faer::Parallelism::None,
         // );
-        self = self * faer::scale(beta) + x * faer::scale(alpha)
+        *self = &*self * faer::scale(beta) + x * faer::scale(alpha);
     }
     fn exp(&self) -> Self {
         zipped!(self).map(|unzipped!(xi)| xi.exp())
@@ -97,20 +98,31 @@ impl Vector for faer::Col<f64> {
         //     1.0,
         //     faer::Parallelism::None,
         // );
-        // zipped!(&mut self, &other).for_each(|unzipped!(s, o)| *s = *s + *o);
-        self = self * other
+        zipped!(self.as_mut(), other.as_view()).for_each(|unzipped!(mut s, o)| *s *= *o);
+        // self = self * other
     }
     fn component_div_assign(&mut self, other: &Self) {
-        zipped!(self.as_mut(), other.as_ref()).map(|unzipped!(si, oi)| si /= oi)
+        zipped!(self.as_mut(), other.as_view()).for_each(|unzipped!(mut s, o)| *s /= *o);
     }
     fn filter_indices<F: Fn(Self::T) -> bool>(&self, f: F) -> Self::Index {
-        self.iter()
-            .enumerate()
-            .filter_map(|(i, x)| if f(*x) { Some(i as IndexType) } else { None })
-            .collect()
+        let mut indices = vec![];
+        for i in 0..self.len() {
+            if f(self[i]) {
+                indices.push(i as IndexType);
+            }
+        }
+        indices
     }
-    fn gather_from(&mut self, other: &Self, indices: &Self::Index) {}
-    fn scatter_from(&mut self, other: &Self, indices: &Self::Index) {}
+    fn gather_from(&mut self, other: &Self, indices: &Self::Index) {
+        for (i, &index) in indices.iter().enumerate() {
+            self[i] = other[index];
+        }
+    }
+    fn scatter_from(&mut self, other: &Self, indices: &Self::Index) {
+        for (i, &index) in indices.iter().enumerate() {
+            self[index] = other[i];
+        }
+    }
 }
 
 impl VectorIndex for Vec<IndexType> {
