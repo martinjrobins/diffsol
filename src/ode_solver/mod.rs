@@ -363,6 +363,7 @@ mod tests {
     };
     use super::*;
     use crate::nonlinear_solver::newton::NewtonNonlinearSolver;
+    use crate::scalar::scale;
     use tests::bdf::Bdf;
     use tests::test_models::dydt_y2::dydt_y2_problem;
     use tests::test_models::gaussian_decay::gaussian_decay_problem;
@@ -391,7 +392,7 @@ mod tests {
             } else {
                 let tol = {
                     let problem = method.problem().unwrap();
-                    soln.abs() * problem.rtol + problem.atol.as_ref()
+                    soln.abs() * scale(problem.rtol) + problem.atol.as_ref()
                 };
                 soln.assert_eq(&point.state, tol[0]);
             }

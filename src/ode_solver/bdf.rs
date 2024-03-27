@@ -7,7 +7,7 @@ use num_traits::{One, Pow, Zero};
 use serde::Serialize;
 
 use crate::{
-    matrix::MatrixRef, op::ode::BdfCallable, DenseMatrix, IndexType, MatrixViewMut,
+    matrix::MatrixRef, op::ode::BdfCallable, scalar::scale, DenseMatrix, IndexType, MatrixViewMut,
     NewtonNonlinearSolver, NonLinearSolver, Scalar, SolverProblem, Vector, VectorRef, VectorView,
     VectorViewMut, LU,
 };
@@ -245,7 +245,7 @@ where
         for i in 0..self.order {
             let i_t = Eqn::T::from(i as f64);
             time_factor *= (t - (state.t - state.h * i_t)) / (state.h * (Eqn::T::one() + i_t));
-            order_summation += self.diff.column(i + 1) * time_factor;
+            order_summation += self.diff.column(i + 1) * scale(time_factor);
         }
         order_summation
     }
@@ -253,7 +253,7 @@ where
     fn problem(&self) -> Option<&OdeSolverProblem<Eqn>> {
         self.ode_problem.as_ref()
     }
-  
+
     fn set_problem(&mut self, state: &mut OdeSolverState<Eqn::M>, problem: &OdeSolverProblem<Eqn>) {
         self.ode_problem = Some(problem.clone());
         let nstates = problem.eqn.nstates();
@@ -289,9 +289,9 @@ where
         }
 
         // update initial step size based on function
-        let mut scale = state.y.abs();
-        scale *= problem.rtol;
-        scale += problem.atol.as_ref();
+        let mut scale_factor = state.y.abs();
+        scale_factor *= scale(problem.rtol);
+        scale_factor += problem.atol.as_ref();
 
         let f0 = problem.eqn.rhs(state.t, &state.y);
         let hf0 = &f0 * state.h;
@@ -303,7 +303,7 @@ where
         self.diff.column_mut(1).copy_from(&hf0);
 
         let mut df = f1 - f0;
-        df.component_div_assign(&scale);
+        df.component_div_assign(&scale_factor);
         let d2 = df.norm();
 
         let one_over_order_plus_one =
@@ -355,7 +355,7 @@ where
                     // test error is within tolerance
                     {
                         let ode_problem = self.ode_problem.as_ref().unwrap();
-                        scale_y = y_new.abs() * ode_problem.rtol;
+                        scale_y = y_new.abs() * scale(ode_problem.rtol);
                         scale_y += ode_problem.atol.as_ref();
                     }
 
@@ -446,14 +446,14 @@ where
             // order k, we need to calculate the optimal step size factors for orders
             // k-1 and k+1. To do this, we note that the error = C_k * D^{k+1} y_n
             let error_m_norm = if order > 1 {
-                let mut error_m = self.diff.column(order) * self.error_const[order - 1];
+                let mut error_m = self.diff.column(order) * scale(self.error_const[order - 1]);
                 error_m.component_div_assign(&scale_y);
                 error_m.norm()
             } else {
                 Eqn::T::INFINITY
             };
             let error_p_norm = if order < Self::MAX_ORDER {
-                let mut error_p = self.diff.column(order + 2) * self.error_const[order + 1];
+                let mut error_p = self.diff.column(order + 2) * scale(self.error_const[order + 1]);
                 error_p.component_div_assign(&scale_y);
                 error_p.norm()
             } else {

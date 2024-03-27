@@ -40,6 +40,7 @@ where
 {
     type T = M::T;
     type V = M::V;
+
     fn ncols(&self) -> IndexType {
         M::ncols(self)
     }

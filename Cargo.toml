@@ -9,6 +9,9 @@ license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
+default = ["nalgebra", "faer"]
+faer = []
+nalgebra = []
 diffsl = []
 diffsl-llvm4 = ["diffsl4-0", "diffsl"]
 diffsl-llvm5 = ["diffsl5-0", "diffsl"]
@@ -47,6 +50,7 @@ diffsl15-0 = { package = "diffsl", git = "https://github.com/martinjrobins/diffs
 diffsl16-0 = { package = "diffsl", git = "https://github.com/martinjrobins/diffsl.git", version = ">=0.1.1", features = ["llvm16-0"], optional = true }
 diffsl17-0 = { package = "diffsl", git = "https://github.com/martinjrobins/diffsl.git", version = ">=0.1.1", features = ["llvm17-0"], optional = true }
 petgraph = "0.6.4"
+faer = "0.18.2"
 
 
 [dev-dependencies]

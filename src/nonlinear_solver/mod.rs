@@ -3,7 +3,7 @@ use core::panic;
 use num_traits::{One, Pow};
 use std::rc::Rc;
 
-use crate::{op::Op, solver::SolverProblem, IndexType, Scalar, Vector};
+use crate::{op::Op, scalar::scale, solver::SolverProblem, IndexType, Scalar, Vector};
 
 pub struct NonLinearSolveSolution<V> {
     pub x0: V,
@@ -84,7 +84,7 @@ impl<C: Op> Convergence<C> {
         }
     }
     fn reset(&mut self, y: &C::V) {
-        let mut scale = y.abs() * self.rtol;
+        let mut scale = y.abs() * scale(self.rtol);
         scale += self.atol.as_ref();
         self.scale = Some(scale);
         self.iter = 0;
@@ -193,7 +193,7 @@ pub mod tests {
             let x = solver.solve(&soln.x0).unwrap();
             let tol = {
                 let problem = solver.problem().unwrap();
-                soln.x.abs() * problem.rtol + problem.atol.as_ref()
+                soln.x.abs() * scale(problem.rtol) + problem.atol.as_ref()
             };
             x.assert_eq(&soln.x, tol[0]);
         }

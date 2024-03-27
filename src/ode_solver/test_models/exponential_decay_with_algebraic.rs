@@ -1,5 +1,6 @@
 use crate::{
     ode_solver::{OdeBuilder, OdeSolverProblem, OdeSolverSolution},
+    scalar::scale,
     DenseMatrix, OdeEquations, Vector,
 };
 use nalgebra::ComplexField;
@@ -18,7 +19,7 @@ fn exponential_decay_with_algebraic<M: DenseMatrix>(
     mut y: &mut M::V,
 ) {
     y.copy_from(x);
-    y.mul_assign(-p[0]);
+    y.mul_assign(scale(-p[0]));
     let nstates = y.len();
     y[nstates - 1] = x[nstates - 1] - x[nstates - 2];
 }
@@ -33,7 +34,7 @@ fn exponential_decay_with_algebraic_jacobian<M: DenseMatrix>(
     mut y: &mut M::V,
 ) {
     y.copy_from(v);
-    y.mul_assign(-p[0]);
+    y.mul_assign(scale(-p[0]));
     let nstates = y.len();
     y[nstates - 1] = v[nstates - 1] - v[nstates - 2];
 }
@@ -75,7 +76,7 @@ pub fn exponential_decay_with_algebraic_problem<M: DenseMatrix + 'static>(
     for i in 0..10 {
         let t = M::T::from(i as f64 / 10.0);
         let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into(), 1.0.into()]);
-        let y: M::V = y0 * M::T::exp(-p[0] * t);
+        let y: M::V = y0 * scale(M::T::exp(-p[0] * t));
         soln.push(y, t);
     }
     (problem, soln)

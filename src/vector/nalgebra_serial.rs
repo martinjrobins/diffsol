@@ -1,6 +1,8 @@
+use std::ops::{Div, Mul, MulAssign};
+
 use nalgebra::{DVector, DVectorView, DVectorViewMut};
 
-use crate::{IndexType, Scalar};
+use crate::{scalar::Scale, IndexType, Scalar};
 
 use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
@@ -33,6 +35,38 @@ impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
     fn into_owned(self) -> Self::Owned {
         self.into_owned()
     }
+    fn scalar_mul(&self, rhs: Self::T) -> Self::Owned {
+        self * rhs
+    }
+}
+impl<'a, T: Scalar> Mul<Scale<T>> for DVectorView<'a, T> {
+    type Output = DVector<T>;
+    fn mul(self, rhs: Scale<T>) -> Self::Output {
+        self * rhs.value()
+    }
+}
+impl<'a, T: Scalar> Mul<Scale<T>> for DVectorViewMut<'a, T> {
+    type Output = DVector<T>;
+    fn mul(self, rhs: Scale<T>) -> Self::Output {
+        self * rhs.value()
+    }
+}
+impl<T: Scalar> Mul<Scale<T>> for DVector<T> {
+    type Output = DVector<T>;
+    fn mul(self, rhs: Scale<T>) -> Self::Output {
+        self * rhs.value()
+    }
+}
+
+impl<T: Scalar> MulAssign<Scale<T>> for DVector<T> {
+    fn mul_assign(&mut self, rhs: Scale<T>) {
+        *self *= rhs.value();
+    }
+}
+impl<'a, T: Scalar> MulAssign<Scale<T>> for DVectorViewMut<'a, T> {
+    fn mul_assign(&mut self, rhs: Scale<T>) {
+        *self *= rhs.value();
+    }
 }
 
 impl<'a, T: Scalar> VectorViewMut<'a> for DVectorViewMut<'a, T> {
@@ -46,6 +80,13 @@ impl<'a, T: Scalar> VectorViewMut<'a> for DVectorViewMut<'a, T> {
     }
     fn copy_from_view(&mut self, other: &Self::View) {
         self.copy_from(other);
+    }
+}
+
+impl<T: Scalar> Div<Scale<T>> for DVector<T> {
+    type Output = DVector<T>;
+    fn div(self, rhs: Scale<T>) -> Self::Output {
+        self / rhs.value()
     }
 }
 
