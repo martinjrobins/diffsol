@@ -190,4 +190,12 @@ mod tests {
         let v_abs = v.abs();
         assert_eq!(v_abs, faer::Col::from_vec(vec![1.0, 2.0, 3.0]));
     }
+
+    #[test]
+    fn test_mult() {
+        let v = faer::Col::from_vec(vec![1.0, -2.0, 3.0]);
+        let s = crate::scalar::scale(2.0);
+        let r = faer::Col::from_vec(vec![2.0, -4.0, 6.0]);
+        assert_eq!(v * s, r);
+    }
 }

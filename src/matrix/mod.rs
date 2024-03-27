@@ -11,7 +11,6 @@ mod sparse_serial;
 pub trait MatrixCommon: Sized + Debug {
     type V: Vector<T = Self::T>;
     type T: Scalar;
-    type O;
 
     /// Get the number of columns of the matrix
     fn nrows(&self) -> IndexType;
@@ -26,7 +25,6 @@ where
 {
     type T = M::T;
     type V = M::V;
-    type O = M::O;
 
     fn ncols(&self) -> IndexType {
         M::ncols(self)
@@ -42,7 +40,7 @@ where
 {
     type T = M::T;
     type V = M::V;
-    type O = M::O;
+
     fn ncols(&self) -> IndexType {
         M::ncols(self)
     }
