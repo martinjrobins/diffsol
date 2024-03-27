@@ -40,9 +40,7 @@ impl<T: Scalar> MulAssign<Scale<T>> for Col<f64> {
 impl<'a, T: Scalar> Div<crate::scalar::Scale<T>> for faer::Col<f64> {
     type Output = faer::Col<f64>;
     fn div(self, rhs: crate::scalar::Scale<T>) -> Self::Output {
-        self
-        // zipped!(self.as_ref()).map(|unzipped!(xi)| xi / rhs.value())
-        // self * faer::scale(rhs.value().into())
+        zipped!(self).map(|unzipped!(xi)| *xi / rhs.value().into())
     }
 }
 
