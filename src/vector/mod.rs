@@ -1,10 +1,10 @@
 use crate::scalar::Scale;
 use crate::{IndexType, Scalar};
 use num_traits::Zero;
-use std::fmt::{Debug, Display};
-use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
+use std::fmt::Debug;
+use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
-#[cfg(feature = "faer")]
+// #[cfg(feature = "faer")]
 mod faer_serial;
 #[cfg(feature = "nalgebra")]
 mod nalgebra_serial;

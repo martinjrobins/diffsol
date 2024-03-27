@@ -6,7 +6,7 @@ use std::{
 use nalgebra::{ClosedAdd, ClosedDiv, ClosedMul, ClosedSub, ComplexField, SimdRealField};
 use num_traits::{Pow, Signed};
 
-use crate::vector::{Vector, VectorCommon, VectorRef, VectorView, VectorViewMut};
+use crate::vector::VectorView;
 
 pub trait Scalar:
     nalgebra::Scalar

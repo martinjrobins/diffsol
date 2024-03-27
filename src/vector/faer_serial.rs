@@ -1,4 +1,4 @@
-use std::ops::{Mul, MulAssign};
+use std::ops::{Div, Mul, MulAssign};
 
 use faer::{unzipped, zipped};
 
@@ -27,8 +27,8 @@ impl<'a, T: Scalar> Mul<crate::scalar::Scale<T>> for faer::Col<f64> {
 }
 impl<'a, T: Scalar> MulAssign<crate::scalar::Scale<T>> for faer::ColMut<'a, f64> {
     fn mul_assign(&mut self, rhs: crate::scalar::Scale<T>) {
-        let mut aux: faer::Col<f64> = self.as_ref() * faer::scale(rhs.value().into());
-        *self = aux.as_mut();
+        let scale = faer::scale(rhs.value().into());
+        *self *= scale;
     }
 }
 impl<T: Scalar> MulAssign<crate::scalar::Scale<T>> for faer::Col<f64> {
@@ -36,7 +36,15 @@ impl<T: Scalar> MulAssign<crate::scalar::Scale<T>> for faer::Col<f64> {
         *self = &*self * faer::scale(rhs.value().into())
     }
 }
-//
+
+impl<'a, T: Scalar> Div<crate::scalar::Scale<T>> for faer::Col<f64> {
+    type Output = faer::Col<f64>;
+    fn div(self, rhs: crate::scalar::Scale<T>) -> Self::Output {
+        self
+        // zipped!(self.as_ref()).map(|unzipped!(xi)| xi / rhs.value())
+        // self * faer::scale(rhs.value().into())
+    }
+}
 
 impl Vector for faer::Col<f64> {
     type View<'a> = faer::ColRef<'a, f64>;
@@ -67,7 +75,7 @@ impl Vector for faer::Col<f64> {
         faer::Col::from_vec(vec![value; nstates])
     }
     fn from_vec(vec: Vec<Self::T>) -> Self {
-        faer::Col::from_vec(vec)
+        faer::Col::from_fn(vec.len(), |i| vec[i])
     }
     fn zeros(nstates: usize) -> Self {
         Self::from_element(nstates, 0.0)
@@ -168,5 +176,18 @@ impl<'a> VectorViewMut<'a> for faer::ColMut<'a, f64> {
     }
     fn copy_from_view(&mut self, other: &Self::View) {
         self.copy_from(other);
+    }
+}
+
+// tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_abs() {
+        let v = faer::Col::from_vec(vec![1.0, -2.0, 3.0]);
+        let v_abs = v.abs();
+        assert_eq!(v_abs, faer::Col::from_vec(vec![1.0, 2.0, 3.0]));
     }
 }
