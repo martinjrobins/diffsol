@@ -259,3 +259,21 @@ impl Matrix for SundialsMatrix {
         Ok(m)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_indexing() {
+        let mut m = SundialsMatrix::new_dense(2, 2);
+        m[(0, 0)] = 1.0;
+        m[(0, 1)] = 2.0;
+        m[(1, 0)] = 3.0;
+        m[(1, 1)] = 4.0;
+        assert_eq!(m[(0, 0)], 1.0);
+        assert_eq!(m[(0, 1)], 2.0);
+        assert_eq!(m[(1, 0)], 3.0);
+        assert_eq!(m[(1, 1)], 4.0);
+    }
+}

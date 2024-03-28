@@ -499,3 +499,165 @@ impl Vector for SundialsVector {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_indexing() {
+        let mut v = SundialsVector::new_serial(2);
+        v[0] = 1.0;
+        v[1] = 2.0;
+        assert_eq!(v[0], 1.0);
+        assert_eq!(v[1], 2.0);
+    }
+
+    #[test]
+    fn test_add_sub_ops() {
+        let mut v = SundialsVector::new_serial(2);
+        v[0] = 1.0;
+        v[1] = 2.0;
+        let v2 = v.clone();
+        let v3 = v + &v2;
+        assert_eq!(v3[0], 2.0);
+        assert_eq!(v3[1], 4.0);
+        let v4 = v3 - v2;
+        assert_eq!(v4[0], 1.0);
+        assert_eq!(v4[1], 2.0);
+    }
+
+    #[test]
+    fn test_mul_div_ops() {
+        let mut v = SundialsVector::new_serial(2);
+        v[0] = 1.0;
+        v[1] = 2.0;
+        let v2 = v * 2.0;
+        assert_eq!(v2[0], 2.0);
+        assert_eq!(v2[1], 4.0);
+        let v3 = v2 / 2.0;
+        assert_eq!(v3[0], 1.0);
+        assert_eq!(v3[1], 2.0);
+    }
+
+    #[test]
+    fn test_abs() {
+        let mut v = SundialsVector::new_serial(2);
+        v[0] = -1.0;
+        v[1] = 2.0;
+        let v2 = v.abs();
+        assert_eq!(v2[0], 1.0);
+        assert_eq!(v2[1], 2.0);
+    }
+
+    #[test]
+    fn test_axpy() {
+        let mut v = SundialsVector::new_serial(2);
+        v[0] = 1.0;
+        v[1] = 2.0;
+        let mut v2 = SundialsVector::new_serial(2);
+        v2[0] = 2.0;
+        v2[1] = 3.0;
+        v.axpy(2.0, &v2, 1.0);
+        assert_eq!(v[0], 5.0);
+        assert_eq!(v[1], 8.0);
+    }
+
+    #[test]
+    fn test_component_mul_div() {
+        let mut v = SundialsVector::new_serial(2);
+        v[0] = 1.0;
+        v[1] = 2.0;
+        let mut v2 = SundialsVector::new_serial(2);
+        v2[0] = 2.0;
+        v2[1] = 3.0;
+        v.component_mul_assign(&v2);
+        assert_eq!(v[0], 2.0);
+        assert_eq!(v[1], 6.0);
+        v.component_div_assign(&v2);
+        assert_eq!(v[0], 1.0);
+        assert_eq!(v[1], 2.0);
+    }
+
+    #[test]
+    fn test_copy_from() {
+        let mut v = SundialsVector::new_serial(2);
+        v[0] = 1.0;
+        v[1] = 2.0;
+        let mut v2 = SundialsVector::new_serial(2);
+        v2.copy_from(&v);
+        assert_eq!(v2[0], 1.0);
+        assert_eq!(v2[1], 2.0);
+    }
+
+    #[test]
+    fn test_exp() {
+        let mut v = SundialsVector::new_serial(2);
+        v[0] = 1.0;
+        v[1] = 2.0;
+        let v2 = v.exp();
+        assert_eq!(v2[0], 1.0_f64.exp());
+        assert_eq!(v2[1], 2.0_f64.exp());
+    }
+
+    #[test]
+    fn test_filter_indices() {
+        let mut v = SundialsVector::new_serial(2);
+        v[0] = 1.0;
+        v[1] = 2.0;
+        let indices = v.filter_indices(|x| x > 1.0);
+        assert_eq!(indices.len(), 1);
+        assert_eq!(indices[0], 1);
+    }
+
+    #[test]
+    fn test_gather_scatter() {
+        let mut v = SundialsVector::new_serial(3);
+        v[0] = 1.0;
+        v[1] = 2.0;
+        v[2] = 3.0;
+        let mut v2 = SundialsVector::new_serial(2);
+        v2.gather_from(&v, &SundialsIndexVector(vec![0, 2]));
+        assert_eq!(v2[0], 1.0);
+        assert_eq!(v2[1], 3.0);
+        v2[0] = 4.0;
+        v2[1] = 5.0;
+        v.scatter_from(&v2, &SundialsIndexVector(vec![0, 2]));
+        assert_eq!(v[0], 4.0);
+        assert_eq!(v[1], 2.0);
+        assert_eq!(v[2], 5.0);
+    }
+
+    #[test]
+    fn test_zeros() {
+        let v = SundialsIndexVector::zeros(1);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0], 0);
+        let v = SundialsVector::zeros(1);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0], 0.);
+    }
+
+    #[test]
+    fn test_from_element() {
+        let v = SundialsVector::from_element(2, 1.0);
+        assert_eq!(v[0], 1.0);
+        assert_eq!(v[1], 1.0);
+    }
+
+    #[test]
+    fn test_from_vec() {
+        let v = SundialsVector::from_vec(vec![1.0, 2.0]);
+        assert_eq!(v[0], 1.0);
+        assert_eq!(v[1], 2.0);
+    }
+
+    #[test]
+    fn test_norm() {
+        let mut v = SundialsVector::new_serial(2);
+        v[0] = 1.0;
+        v[1] = 2.0;
+        let norm = v.norm();
+        assert_eq!(norm, (1.0_f64.powi(2) + 2.0_f64.powi(2)).sqrt());
+    }
+}
