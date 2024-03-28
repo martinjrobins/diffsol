@@ -148,20 +148,11 @@ macro_rules! impl_bin_op {
             }
         }
 
-        impl $trait<SundialsMatrix> for &SundialsMatrix {
-            type Output = SundialsMatrix;
-
-            fn $fn(self, mut rhs: SundialsMatrix) -> Self::Output {
-                rhs $op self;
-                rhs
-            }
-        }
-
         impl $trait<&SundialsMatrix> for &SundialsMatrix {
             type Output = SundialsMatrix;
 
             fn $fn(self, rhs: &SundialsMatrix) -> Self::Output {
-                let mut m = SundialsMatrix::new_clone(self);
+                let mut m = self.clone();
                 m $op rhs;
                 m
             }
@@ -188,7 +179,7 @@ macro_rules! impl_scalar_op {
             type Output = SundialsMatrix;
 
             fn $fn(self, rhs: realtype) -> Self::Output {
-                let mut m = SundialsMatrix::new_clone(self);
+                let mut m = self.clone();
                 m.map_inplace(|x| x $op rhs);
                 m
             }
@@ -275,5 +266,65 @@ mod tests {
         assert_eq!(m[(0, 1)], 2.0);
         assert_eq!(m[(1, 0)], 3.0);
         assert_eq!(m[(1, 1)], 4.0);
+    }
+
+    #[test]
+    fn test_add_sub() {
+        let mut m1 = SundialsMatrix::new_dense(2, 2);
+        m1[(0, 0)] = 1.0;
+        m1[(0, 1)] = 2.0;
+        m1[(1, 0)] = 3.0;
+        m1[(1, 1)] = 4.0;
+
+        let mut m2 = SundialsMatrix::new_dense(2, 2);
+        m2[(0, 0)] = 1.0;
+        m2[(0, 1)] = 2.0;
+        m2[(1, 0)] = 3.0;
+        m2[(1, 1)] = 4.0;
+
+        let m3 = &m1 + &m2;
+        assert_eq!(m3[(0, 0)], 2.0);
+        assert_eq!(m3[(0, 1)], 4.0);
+        assert_eq!(m3[(1, 0)], 6.0);
+        assert_eq!(m3[(1, 1)], 8.0);
+
+        let m4 = &m1 - &m2;
+        assert_eq!(m4[(0, 0)], 0.0);
+        assert_eq!(m4[(0, 1)], 0.0);
+        assert_eq!(m4[(1, 0)], 0.0);
+        assert_eq!(m4[(1, 1)], 0.0);
+
+        let m5 = m1 + &m2;
+        assert_eq!(m5[(0, 0)], 2.0);
+        assert_eq!(m5[(0, 1)], 4.0);
+        assert_eq!(m5[(1, 0)], 6.0);
+        assert_eq!(m5[(1, 1)], 8.0);
+    }
+
+    #[test]
+    fn test_mul_div_scalar() {
+        let mut m = SundialsMatrix::new_dense(2, 2);
+        m[(0, 0)] = 1.0;
+        m[(0, 1)] = 2.0;
+        m[(1, 0)] = 3.0;
+        m[(1, 1)] = 4.0;
+
+        let m2 = &m * 2.0;
+        assert_eq!(m2[(0, 0)], 2.0);
+        assert_eq!(m2[(0, 1)], 4.0);
+        assert_eq!(m2[(1, 0)], 6.0);
+        assert_eq!(m2[(1, 1)], 8.0);
+
+        let m3 = &m / 2.0;
+        assert_eq!(m3[(0, 0)], 0.5);
+        assert_eq!(m3[(0, 1)], 1.0);
+        assert_eq!(m3[(1, 0)], 1.5);
+        assert_eq!(m3[(1, 1)], 2.0);
+
+        let m4 = m * 2.0;
+        assert_eq!(m4[(0, 0)], 2.0);
+        assert_eq!(m4[(0, 1)], 4.0);
+        assert_eq!(m4[(1, 0)], 6.0);
+        assert_eq!(m4[(1, 1)], 8.0);
     }
 }
