@@ -5,7 +5,12 @@ use crate::{IndexType, Scalar, Vector};
 use anyhow::Result;
 use num_traits::{One, Zero};
 
-mod dense_serial;
+#[cfg(feature = "nalgebra")]
+mod dense_nalgebra_serial;
+
+#[cfg(feature = "faer")]
+mod dense_faer_serial;
+
 mod sparse_serial;
 #[cfg(feature = "sundials")]
 pub mod sundials;
