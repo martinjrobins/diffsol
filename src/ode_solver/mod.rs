@@ -29,8 +29,8 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     fn step(&mut self, state: &mut OdeSolverState<Eqn::M>) -> Result<()>;
     fn interpolate(&self, state: &OdeSolverState<Eqn::M>, t: Eqn::T) -> Eqn::V;
     fn solve(&mut self, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Result<Eqn::V> {
-        let mut state = OdeSolverState::new(&problem);
-        self.set_problem(&mut state, &problem);
+        let mut state = OdeSolverState::new(problem);
+        self.set_problem(&mut state, problem);
         while state.t <= t {
             self.step(&mut state)?;
         }
@@ -42,8 +42,8 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         t: Eqn::T,
         root_solver: &mut RS,
     ) -> Result<Eqn::V> {
-        let mut state = OdeSolverState::new_consistent(&problem, root_solver)?;
-        self.set_problem(&mut state, &problem);
+        let mut state = OdeSolverState::new_consistent(problem, root_solver)?;
+        self.set_problem(&mut state, problem);
         while state.t <= t {
             self.step(&mut state)?;
         }

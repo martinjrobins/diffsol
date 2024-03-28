@@ -115,6 +115,9 @@ pub trait Matrix:
     /// Extract the diagonal of the matrix as an owned vector
     fn diagonal(&self) -> Self::V;
 
+    /// Copy the contents of `other` into `self`
+    fn copy_from(&mut self, other: &Self);
+
     /// Create a new matrix of shape `nrows` x `ncols` filled with zeros
     fn zeros(nrows: IndexType, ncols: IndexType) -> Self;
 
