@@ -82,8 +82,6 @@ macro_rules! impl_assign_bin_op {
     };
 }
 
-//TODO: Is it possible for us to need RhsE != LhsE?
-
 impl_bin_op!(Mul, mul, *);
 impl_bin_op!(Add, add, +);
 impl_bin_op!(Sub, sub, -);
@@ -106,19 +104,6 @@ impl<'a, V: VectorView<'static, T = E>, E: Scalar> Mul<V> for Scale<E> {
         rhs.scalar_mul(self.0)
     }
 }
-
-//TODO: Not sure why it is now working
-// impl<'a, E, V> Mul<Scale<E>> for V
-// where
-//     V: VectorView<'static, T = E>,
-//     E: Scalar,
-// {
-//     type Output = V::Owned;
-//     #[inline]
-//     fn mul(self, rhs: Scale<E>) -> Self::Output {
-//         self.scalar_mul(rhs.0)
-//     }
-// }
 
 #[test]
 fn test_scale() {

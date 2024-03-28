@@ -5,42 +5,42 @@ use faer::{unzipped, zipped, Col, ColMut, ColRef};
 use crate::{scalar::Scalar, scalar::Scale, IndexType};
 
 use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
-impl<'a, T: Scalar> Mul<Scale<T>> for ColRef<'a, f64> {
+
+macro_rules! impl_op_for_struct {
+    ($struct:ident, $trait_name:ident, $func_name:ident) => {
+        impl<'a, T: Scalar> $trait_name<Scale<T>> for $struct<'a, f64> {
+            type Output = Col<f64>;
+
+            fn $func_name(self, rhs: Scale<T>) -> Self::Output {
+                self * faer::scale(rhs.value().into())
+            }
+        }
+    };
+}
+
+impl_op_for_struct!(ColRef, Mul, mul);
+impl_op_for_struct!(ColMut, Mul, mul);
+
+impl<T: Scalar> Mul<Scale<T>> for Col<f64> {
     type Output = Col<f64>;
     fn mul(self, rhs: Scale<T>) -> Self::Output {
         self * faer::scale(rhs.value().into())
     }
 }
-
-impl<'a, T: Scalar> Mul<Scale<T>> for ColMut<'a, f64> {
-    type Output = Col<f64>;
-    fn mul(self, rhs: Scale<T>) -> Self::Output {
-        self * faer::scale(rhs.value().into())
-    }
-}
-
-impl<'a, T: Scalar> Mul<Scale<T>> for Col<f64> {
-    type Output = Col<f64>;
-    fn mul(self, rhs: Scale<T>) -> Self::Output {
-        self * faer::scale(rhs.value().into())
+impl<'a, T: Scalar> Div<Scale<T>> for faer::Col<f64> {
+    type Output = faer::Col<f64>;
+    fn div(self, rhs: Scale<T>) -> Self::Output {
+        zipped!(self).map(|unzipped!(xi)| *xi / rhs.value().into())
     }
 }
 impl<'a, T: Scalar> MulAssign<Scale<T>> for ColMut<'a, f64> {
     fn mul_assign(&mut self, rhs: Scale<T>) {
-        let scale = faer::scale(rhs.value().into());
-        *self *= scale;
+        *self *= faer::scale(rhs.value().into());
     }
 }
 impl<T: Scalar> MulAssign<Scale<T>> for Col<f64> {
     fn mul_assign(&mut self, rhs: Scale<T>) {
         *self = &*self * faer::scale(rhs.value().into())
-    }
-}
-
-impl<'a, T: Scalar> Div<crate::scalar::Scale<T>> for faer::Col<f64> {
-    type Output = faer::Col<f64>;
-    fn div(self, rhs: crate::scalar::Scale<T>) -> Self::Output {
-        zipped!(self).map(|unzipped!(xi)| *xi / rhs.value().into())
     }
 }
 
@@ -164,6 +164,7 @@ impl<'a> VectorViewMut<'a> for ColMut<'a, f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scalar::scale;
 
     #[test]
     fn test_abs() {
@@ -175,7 +176,7 @@ mod tests {
     #[test]
     fn test_mult() {
         let v = Col::from_vec(vec![1.0, -2.0, 3.0]);
-        let s = crate::scalar::scale(2.0);
+        let s = scale(2.0);
         let r = Col::from_vec(vec![2.0, -4.0, 6.0]);
         assert_eq!(v * s, r);
     }
@@ -183,7 +184,7 @@ mod tests {
     #[test]
     fn test_mul_assign() {
         let mut v = Col::from_vec(vec![1.0, -2.0, 3.0]);
-        let s = crate::scalar::scale(2.0);
+        let s = scale(2.0);
         let r = Col::from_vec(vec![2.0, -4.0, 6.0]);
         v.mul_assign(s);
         assert_eq!(v, r);

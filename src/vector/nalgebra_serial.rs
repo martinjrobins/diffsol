@@ -39,25 +39,26 @@ impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
         self * rhs
     }
 }
-impl<'a, T: Scalar> Mul<Scale<T>> for DVectorView<'a, T> {
-    type Output = DVector<T>;
-    fn mul(self, rhs: Scale<T>) -> Self::Output {
-        self * rhs.value()
-    }
+macro_rules! impl_op_for_dvector_struct {
+    ($struct:ident, $trait_name:ident, $func_name:ident) => {
+        impl<'a, T: Scalar> $trait_name<Scale<T>> for $struct<'a, T> {
+            type Output = DVector<T>;
+            fn $func_name(self, rhs: Scale<T>) -> Self::Output {
+                self * rhs.value()
+            }
+        }
+    };
 }
-impl<'a, T: Scalar> Mul<Scale<T>> for DVectorViewMut<'a, T> {
-    type Output = DVector<T>;
-    fn mul(self, rhs: Scale<T>) -> Self::Output {
-        self * rhs.value()
-    }
-}
+
+impl_op_for_dvector_struct!(DVectorView, Mul, mul);
+impl_op_for_dvector_struct!(DVectorViewMut, Mul, mul);
+
 impl<T: Scalar> Mul<Scale<T>> for DVector<T> {
     type Output = DVector<T>;
     fn mul(self, rhs: Scale<T>) -> Self::Output {
         self * rhs.value()
     }
 }
-
 impl<T: Scalar> MulAssign<Scale<T>> for DVector<T> {
     fn mul_assign(&mut self, rhs: Scale<T>) {
         *self *= rhs.value();
