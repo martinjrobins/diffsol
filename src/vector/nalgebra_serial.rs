@@ -6,6 +6,20 @@ use crate::{scalar::Scale, IndexType, Scalar};
 
 use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
+macro_rules! impl_op_for_dvector_struct {
+    ($struct:ident, $trait_name:ident, $func_name:ident) => {
+        impl<'a, T: Scalar> $trait_name<Scale<T>> for $struct<'a, T> {
+            type Output = DVector<T>;
+            fn $func_name(self, rhs: Scale<T>) -> Self::Output {
+                self * rhs.value()
+            }
+        }
+    };
+}
+
+impl_op_for_dvector_struct!(DVectorView, Mul, mul);
+impl_op_for_dvector_struct!(DVectorViewMut, Mul, mul);
+
 impl VectorIndex for DVector<IndexType> {
     fn zeros(len: IndexType) -> Self {
         DVector::from_element(len, 0)
@@ -39,19 +53,6 @@ impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
         self * rhs
     }
 }
-macro_rules! impl_op_for_dvector_struct {
-    ($struct:ident, $trait_name:ident, $func_name:ident) => {
-        impl<'a, T: Scalar> $trait_name<Scale<T>> for $struct<'a, T> {
-            type Output = DVector<T>;
-            fn $func_name(self, rhs: Scale<T>) -> Self::Output {
-                self * rhs.value()
-            }
-        }
-    };
-}
-
-impl_op_for_dvector_struct!(DVectorView, Mul, mul);
-impl_op_for_dvector_struct!(DVectorViewMut, Mul, mul);
 
 impl<T: Scalar> Mul<Scale<T>> for DVector<T> {
     type Output = DVector<T>;
