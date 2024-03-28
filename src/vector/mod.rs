@@ -1,12 +1,15 @@
-use num_traits::Zero;
-use std::fmt::{Debug, Display};
-use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
-
+use crate::scalar::Scale;
 use crate::{IndexType, Scalar};
+use num_traits::Zero;
+use std::fmt::Debug;
+use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
-mod serial;
+#[cfg(feature = "faer")]
+mod faer_serial;
+#[cfg(feature = "nalgebra")]
+mod nalgebra_serial;
 
-pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug + Display {
+pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug {
     fn zeros(len: IndexType) -> Self;
     fn len(&self) -> IndexType;
     fn is_empty(&self) -> bool {
@@ -14,7 +17,7 @@ pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug + Di
     }
 }
 
-pub trait VectorCommon: Sized + Debug + Display {
+pub trait VectorCommon: Sized + Debug {
     type T: Scalar;
 }
 
@@ -52,7 +55,6 @@ pub trait VectorRef<V: Vector>:
     + for<'a> VectorOpsByValue<V::View<'a>, V>
     + for<'a, 'b> VectorOpsByValue<&'a V::View<'b>, V>
     + Mul<V::T, Output = V>
-    + Div<V::T, Output = V>
 {
 }
 
@@ -61,8 +63,7 @@ impl<RefT, V: Vector> VectorRef<V> for RefT where
         + for<'a> VectorOpsByValue<&'a V, V>
         + for<'a> VectorOpsByValue<V::View<'a>, V>
         + for<'a, 'b> VectorOpsByValue<&'a V::View<'b>, V>
-        + Mul<V::T, Output = V>
-        + Div<V::T, Output = V>
+        + Mul<V::T, Output = V> // + Div<V::T, Output = V>
 {
 }
 
@@ -71,8 +72,7 @@ pub trait VectorViewMut<'a>:
     + VectorMutOpsByValue<Self::Owned>
     + for<'b> VectorMutOpsByValue<&'b Self::View>
     + for<'b> VectorMutOpsByValue<&'b Self::Owned>
-    + MulAssign<Self::T>
-    + DivAssign<Self::T>
+    + MulAssign<Scale<Self::T>>
     + Index<IndexType, Output = Self::T>
     + IndexMut<IndexType, Output = Self::T>
 {
@@ -88,13 +88,13 @@ pub trait VectorView<'a>:
     + VectorOpsByValue<Self::Owned, Self::Owned>
     + for<'b> VectorOpsByValue<&'b Self::Owned, Self::Owned>
     + for<'b> VectorOpsByValue<&'b Self, Self::Owned>
-    + Mul<Self::T, Output = Self::Owned>
-    + Div<Self::T, Output = Self::Owned>
+    + Mul<Scale<Self::T>, Output = Self::Owned>
     + Index<IndexType, Output = Self::T>
 {
     type Owned;
     fn abs(&self) -> Self::Owned;
     fn into_owned(self) -> Self::Owned;
+    fn scalar_mul(&self, rhs: Self::T) -> Self::Owned;
 }
 
 pub trait Vector:
@@ -102,14 +102,13 @@ pub trait Vector:
     + for<'b> VectorOpsByValue<&'b Self>
     + for<'a> VectorOpsByValue<Self::View<'a>>
     + for<'a, 'b> VectorOpsByValue<&'b Self::View<'a>>
-    + Mul<Self::T, Output = Self>
-    + Div<Self::T, Output = Self>
+    + Mul<Scale<Self::T>, Output = Self>
+    + Div<Scale<Self::T>, Output = Self>
     + VectorMutOpsByValue<Self>
     + for<'a> VectorMutOpsByValue<Self::View<'a>>
     + for<'b> VectorMutOpsByValue<&'b Self>
     + for<'a, 'b> VectorMutOpsByValue<&'b Self::View<'a>>
-    + MulAssign<Self::T>
-    + DivAssign<Self::T>
+    + MulAssign<Scale<Self::T>>
     + Index<IndexType, Output = Self::T>
     + IndexMut<IndexType, Output = Self::T>
     + Clone
@@ -164,8 +163,8 @@ pub trait Vector:
                     i, self[i], other[i]
                 );
                 if self.len() <= 3 {
-                    eprintln!("left: {}", self);
-                    eprintln!("right: {}", other);
+                    eprintln!("left: {:?}", self);
+                    eprintln!("right: {:?}", other);
                 } else if i == 0 {
                     eprintln!(
                         "left: [{}, {}, {}, ...] != [{}, {}, {}, ...]",

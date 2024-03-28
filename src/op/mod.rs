@@ -1,7 +1,9 @@
 use crate::{
     jacobian::{find_non_zero_entries, find_non_zeros},
+    scalar::scale,
     Matrix, Scalar, Vector,
 };
+
 use num_traits::{One, Zero};
 use std::ops::{AddAssign, MulAssign};
 
@@ -64,9 +66,9 @@ pub trait LinearOp: Op {
     }
     fn gemv(&self, x: &Self::V, t: Self::T, alpha: Self::T, beta: Self::T, y: &mut Self::V) {
         let mut beta_y = y.clone();
-        beta_y.mul_assign(beta);
+        beta_y.mul_assign(scale(beta));
         self.call_inplace(x, t, y);
-        y.mul_assign(alpha);
+        y.mul_assign(scale(alpha));
         y.add_assign(&beta_y);
     }
     fn jacobian_diagonal(&self, t: Self::T) -> Self::V {

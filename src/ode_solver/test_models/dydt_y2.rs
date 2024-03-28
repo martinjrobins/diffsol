@@ -1,5 +1,6 @@
 use crate::{
     ode_solver::{OdeBuilder, OdeSolverProblem, OdeSolverSolution},
+    scalar::scale,
     DenseMatrix, OdeEquations, Vector,
 };
 use num_traits::One;
@@ -15,7 +16,7 @@ fn rhs<M: DenseMatrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
 fn rhs_jac<M: DenseMatrix>(x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
     y.copy_from(v);
     y.component_mul_assign(x);
-    y.mul_assign(M::T::from(2.));
+    y.mul_assign(scale(M::T::from(2.)));
 }
 
 pub fn dydt_y2_problem<M: DenseMatrix + 'static>(
@@ -42,7 +43,7 @@ pub fn dydt_y2_problem<M: DenseMatrix + 'static>(
     for i in 0..=n {
         let t = M::T::from(i as f64 * dt);
         // y = y0 / (1 - y0 * t)
-        let mut denom = y0.clone() * (-t);
+        let mut denom = y0.clone() * (scale(-t));
         denom.add_scalar_mut(M::T::one());
         let mut y = y0.clone();
         y.component_div_assign(&denom);

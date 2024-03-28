@@ -31,6 +31,7 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
 impl<'a, T: Scalar> MatrixCommon for DMatrixView<'a, T> {
     type V = DVector<T>;
     type T = T;
+
     fn ncols(&self) -> IndexType {
         self.ncols()
     }

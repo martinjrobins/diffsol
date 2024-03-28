@@ -1,5 +1,6 @@
 use crate::{
     ode_solver::{OdeBuilder, OdeSolverProblem, OdeSolverSolution},
+    scalar::scale,
     DenseMatrix, OdeEquations, Vector,
 };
 use num_traits::Pow;
@@ -10,14 +11,14 @@ use std::ops::MulAssign;
 fn gaussian_decay<M: DenseMatrix>(x: &M::V, p: &M::V, t: M::T, y: &mut M::V) {
     y.copy_from(x);
     y.component_mul_assign(p);
-    y.mul_assign(-t);
+    y.mul_assign(scale(-t));
 }
 
 // Jv = -atv
 fn gaussian_decay_jacobian<M: DenseMatrix>(_x: &M::V, p: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
     y.copy_from(v);
     y.component_mul_assign(p);
-    y.mul_assign(-t);
+    y.mul_assign(scale(-t));
 }
 
 pub fn gaussian_decay_problem<M: DenseMatrix + 'static>(
@@ -41,7 +42,7 @@ pub fn gaussian_decay_problem<M: DenseMatrix + 'static>(
     let mut soln = OdeSolverSolution::default();
     for i in 0..10 {
         let t = M::T::from(i as f64 / 1.0);
-        let px = M::V::from_vec(p.clone()) * t.pow(2) / M::T::from(-2.0);
+        let px = M::V::from_vec(p.clone()) * scale(t.pow(2)) / scale(M::T::from(-2.0));
         let mut y: M::V = problem.eqn.init(M::T::zero());
         y.component_mul_assign(&px.exp());
         soln.push(y, t);
