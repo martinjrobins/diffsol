@@ -6,7 +6,7 @@ use crate::{scalar::Scalar, scalar::Scale, IndexType};
 
 use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
-macro_rules! impl_op_for_struct {
+macro_rules! impl_op_for_faer_struct {
     ($struct:ident, $trait_name:ident, $func_name:ident) => {
         impl<'a, T: Scalar> $trait_name<Scale<T>> for $struct<'a, f64> {
             type Output = Col<f64>;
@@ -18,8 +18,8 @@ macro_rules! impl_op_for_struct {
     };
 }
 
-impl_op_for_struct!(ColRef, Mul, mul);
-impl_op_for_struct!(ColMut, Mul, mul);
+impl_op_for_faer_struct!(ColRef, Mul, mul);
+impl_op_for_faer_struct!(ColMut, Mul, mul);
 
 impl<T: Scalar> Mul<Scale<T>> for Col<f64> {
     type Output = Col<f64>;
