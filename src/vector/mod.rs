@@ -64,8 +64,8 @@ impl<RefT, V: Vector> VectorRef<V> for RefT where
     RefT: VectorOpsByValue<V, V>
         + for<'a> VectorOpsByValue<&'a V, V>
         + for<'a> VectorOpsByValue<V::View<'a>, V>
-        + for<'a, 'b> VectorOpsByValue<&'a V::View<'b>, V>
-        + Mul<V::T, Output = V> // + Div<V::T, Output = V>
+        + for<'a, 'b> VectorOpsByValue<&'a V::View<'b>, V> // + Mul<Scale<V::T>, Output = V>
+        + Mul<V::T, Output = V>
 {
 }
 

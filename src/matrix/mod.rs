@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
+use crate::scalar::Scale;
 use crate::{IndexType, Scalar, Vector};
 use anyhow::Result;
 use num_traits::{One, Zero};
@@ -85,7 +86,7 @@ impl<RefT, M: MatrixCommon> MatrixRef<M> for RefT where
 pub trait MatrixViewMut<'a>:
     for<'b> MatrixMutOpsByValue<&'b Self>
     + for<'b> MatrixMutOpsByValue<&'b Self::View>
-    + MulAssign<Self::T>
+    + MulAssign<Scale<Self::T>>
 {
     type Owned;
     type View;
@@ -95,14 +96,16 @@ pub trait MatrixViewMut<'a>:
 
 /// A view of a dense matrix [Matrix]
 pub trait MatrixView<'a>:
-    for<'b> MatrixOpsByValue<&'b Self::Owned, Self::Owned> + Mul<Self::T, Output = Self::Owned> + Clone
+    for<'b> MatrixOpsByValue<&'b Self::Owned, Self::Owned>
+    + Mul<Scale<Self::T>, Output = Self::Owned>
+    + Clone
 {
     type Owned;
 }
 
 /// A base matrix trait (including sparse and dense matrices)
 pub trait Matrix:
-    for<'a> MatrixOpsByValue<&'a Self, Self> + Mul<Self::T, Output = Self> + Clone
+    for<'a> MatrixOpsByValue<&'a Self, Self> + Mul<Scale<Self::T>, Output = Self> + Clone
 {
     /// Extract the diagonal of the matrix as an owned vector
     fn diagonal(&self) -> Self::V;

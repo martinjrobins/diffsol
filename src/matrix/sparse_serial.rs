@@ -1,8 +1,10 @@
+use std::ops::Mul;
+
 use anyhow::Result;
 use nalgebra::DVector;
 use nalgebra_sparse::{CooMatrix, CscMatrix};
 
-use crate::{IndexType, Scalar};
+use crate::{scalar::Scale, IndexType, Scalar};
 
 use super::{Matrix, MatrixCommon};
 
@@ -15,6 +17,13 @@ impl<T: Scalar> MatrixCommon for CscMatrix<T> {
     }
     fn nrows(&self) -> IndexType {
         self.nrows()
+    }
+}
+
+impl<T: Scalar> Mul<Scale<T>> for CscMatrix<T> {
+    type Output = CscMatrix<T>;
+    fn mul(self, rhs: Scale<T>) -> Self::Output {
+        self * rhs.value()
     }
 }
 

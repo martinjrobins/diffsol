@@ -55,6 +55,7 @@ pub mod tests {
 
     use crate::{
         op::{linear_closure::LinearClosure, LinearOp},
+        scalar::scale,
         vector::VectorRef,
         DenseMatrix, LinearSolver, SolverProblem, Vector, LU,
     };

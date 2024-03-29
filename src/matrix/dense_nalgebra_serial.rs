@@ -1,7 +1,9 @@
+use std::ops::{Mul, MulAssign};
+
 use anyhow::Result;
 use nalgebra::{DMatrix, DMatrixView, DMatrixViewMut, DVector, DVectorView, DVectorViewMut};
 
-use crate::{IndexType, Scalar};
+use crate::{scalar::Scale, IndexType, Scalar};
 
 use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 
@@ -41,8 +43,21 @@ impl<T: Scalar> MatrixCommon for DMatrix<T> {
     }
 }
 
+impl<'a, T: Scalar> Mul<Scale<T>> for DMatrixView<'a, T> {
+    type Output = DMatrix<T>;
+    fn mul(self, rhs: Scale<T>) -> Self::Output {
+        self * rhs.value()
+    }
+}
+
 impl<'a, T: Scalar> MatrixView<'a> for DMatrixView<'a, T> {
     type Owned = DMatrix<T>;
+}
+
+impl<'a, T: Scalar> MulAssign<Scale<T>> for DMatrixViewMut<'a, T> {
+    fn mul_assign(&mut self, rhs: Scale<T>) {
+        *self *= rhs.value();
+    }
 }
 
 impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
@@ -53,6 +68,13 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
     }
     fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T) {
         self.gemm(alpha, a, b, beta);
+    }
+}
+
+impl<T: Scalar> Mul<Scale<T>> for DMatrix<T> {
+    type Output = DMatrix<T>;
+    fn mul(self, rhs: Scale<T>) -> Self::Output {
+        self * rhs.value()
     }
 }
 

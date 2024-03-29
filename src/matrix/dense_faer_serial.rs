@@ -1,5 +1,7 @@
+use std::ops::{Mul, MulAssign};
+
 use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
-use crate::scalar::IndexType;
+use crate::scalar::{IndexType, Scale};
 use anyhow::Result;
 use faer::{linalg::matmul::matmul, Col, ColMut, ColRef, Mat, MatMut, MatRef, Parallelism};
 
@@ -39,8 +41,21 @@ impl MatrixCommon for Mat<f64> {
     }
 }
 
+impl<'a> Mul<Scale<f64>> for MatRef<'a, f64> {
+    type Output = Mat<f64>;
+    fn mul(self, rhs: Scale<f64>) -> Self::Output {
+        self * faer::scale(rhs.value())
+    }
+}
+
 impl<'a> MatrixView<'a> for MatRef<'a, f64> {
     type Owned = Mat<f64>;
+}
+
+impl<'a> MulAssign<Scale<f64>> for MatMut<'a, f64> {
+    fn mul_assign(&mut self, rhs: Scale<f64>) {
+        *self *= faer::scale(rhs.value());
+    }
 }
 
 impl<'a> MatrixViewMut<'a> for MatMut<'a, f64> {
@@ -69,28 +84,44 @@ impl<'a> MatrixViewMut<'a> for MatMut<'a, f64> {
     }
 }
 
+impl Mul<Scale<f64>> for Mat<f64> {
+    type Output = Mat<f64>;
+    fn mul(self, rhs: Scale<f64>) -> Self::Output {
+        self * faer::scale(rhs.value())
+    }
+}
+
 impl DenseMatrix for Mat<f64> {
     type View<'a> = MatRef<'a, f64>;
     type ViewMut<'a> = MatMut<'a, f64>;
 
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T) {
-        self.gemm(alpha, a, b, beta);
+        matmul(
+            self.as_mut(),
+            a.as_ref(),
+            b.as_ref(),
+            Some(beta),
+            alpha,
+            Parallelism::None,
+        )
     }
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        y.gemv(alpha, self, x, beta);
-    }
+    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {}
     fn column_mut(&mut self, i: IndexType) -> ColMut<'_, f64> {
+        panic!("not implemented");
         self.column_mut(i)
     }
 
     fn columns_mut(&mut self, start: IndexType, nrows: IndexType) -> Self::ViewMut<'_> {
+        panic!("not implemented");
         self.columns_mut(start, nrows)
     }
 
     fn column(&self, i: IndexType) -> ColRef<'_, f64> {
+        panic!("not implemented");
         self.column(i)
     }
     fn columns(&self, start: IndexType, nrows: IndexType) -> Self::View<'_> {
+        panic!("not implemented");
         self.columns(start, nrows)
     }
 }
@@ -111,10 +142,10 @@ impl Matrix for Mat<f64> {
         Self::zeros(nrows, ncols)
     }
     fn copy_from(&mut self, other: &Self) {
-        self = other.clone().as_mut();
+        *self = other.clone();
     }
     fn from_diagonal(v: &Col<f64>) -> Self {
-        let dim = v.len();
+        let dim = v.nrows();
         Self::from_fn(dim, dim, |i, j| if i == j { v[i] } else { 0.0 })
     }
     fn diagonal(&self) -> Self::V {
