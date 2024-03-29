@@ -52,6 +52,9 @@ use vector::sundials::SundialsVector;
 #[cfg(feature = "sundials")]
 pub use linear_solver::sundials::SundialsLinearSolver;
 
+#[cfg(feature = "sundials")]
+pub use ode_solver::sundials::SundialsIda;
+
 use matrix::{DenseMatrix, Matrix, MatrixViewMut};
 use nonlinear_solver::{newton::NewtonNonlinearSolver, NonLinearSolver};
 pub use ode_solver::{

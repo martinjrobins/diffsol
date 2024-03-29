@@ -5,7 +5,7 @@ use std::{fmt, ptr};
 
 use sundials_sys::{
     realtype, N_VAbs, N_VAddConst, N_VClone, N_VConst, N_VDestroy, N_VDiv, N_VGetArrayPointer,
-    N_VGetLength_Serial, N_VLinearSum, N_VNew_Serial, N_VProd, N_VScale, N_VWrmsNorm_Serial,
+    N_VGetLength_Serial, N_VLinearSum, N_VNew_Serial, N_VProd, N_VScale, N_VWL2Norm_Serial,
     N_Vector, SUNContext, SUNContext_Create,
 };
 
@@ -423,7 +423,7 @@ impl Vector for SundialsVector {
     }
     fn norm(&self) -> Self::T {
         let ones = SundialsVector::from_element(self.len(), 1.0);
-        unsafe { N_VWl2Norm(self.sundials_vector(), ones.sundials_vector()) }
+        unsafe { N_VWL2Norm_Serial(self.sundials_vector(), ones.sundials_vector()) }
     }
     fn is_empty(&self) -> bool {
         self.len() == 0

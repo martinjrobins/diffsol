@@ -366,12 +366,9 @@ mod tests {
     };
     use super::*;
     use crate::linear_solver::lu::LU;
-    use crate::matrix::sundials::SundialsMatrix;
     use crate::nonlinear_solver::newton::NewtonNonlinearSolver;
     use crate::scalar::scale;
-    use crate::SundialsLinearSolver;
     use tests::bdf::Bdf;
-    use tests::sundials::SundialsIda;
     use tests::test_models::dydt_y2::dydt_y2_problem;
     use tests::test_models::gaussian_decay::gaussian_decay_problem;
 
@@ -434,11 +431,12 @@ mod tests {
         "###);
     }
 
+    #[cfg(feature = "sundials")]
     #[test]
     fn test_sundials_exponential_decay() {
-        let mut s = SundialsIda::default();
-        let rs = NewtonNonlinearSolver::new(SundialsLinearSolver::new_dense());
-        let (problem, soln) = exponential_decay_problem::<SundialsMatrix>(false);
+        let mut s = crate::SundialsIda::default();
+        let rs = NewtonNonlinearSolver::new(crate::SundialsLinearSolver::new_dense());
+        let (problem, soln) = exponential_decay_problem::<crate::SundialsMatrix>(false);
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
@@ -512,11 +510,12 @@ mod tests {
         "###);
     }
 
+    #[cfg(feature = "sundials")]
     #[test]
     fn test_sundials_robertson() {
-        let mut s = SundialsIda::default();
-        let rs = NewtonNonlinearSolver::new(SundialsLinearSolver::new_dense());
-        let (problem, soln) = robertson::<SundialsMatrix>(false);
+        let mut s = crate::SundialsIda::default();
+        let rs = NewtonNonlinearSolver::new(crate::SundialsLinearSolver::new_dense());
+        let (problem, soln) = robertson::<crate::SundialsMatrix>(false);
         test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1.0e-4));
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
