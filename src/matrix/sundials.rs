@@ -327,4 +327,13 @@ mod tests {
         assert_eq!(m4[(1, 0)], 6.0);
         assert_eq!(m4[(1, 1)], 8.0);
     }
+
+    #[test]
+    fn test_try_from_triplets() {
+        let m = SundialsMatrix::try_from_triplets(2, 2, vec![(0, 0, 1.0), (1, 1, 2.0)]).unwrap();
+        assert_eq!(m[(0, 0)], 1.0);
+        assert_eq!(m[(0, 1)], 0.0);
+        assert_eq!(m[(1, 0)], 0.0);
+        assert_eq!(m[(1, 1)], 2.0);
+    }
 }

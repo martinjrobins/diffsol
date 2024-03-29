@@ -9,7 +9,7 @@ use sundials_sys::{
     IDAGetNonlinSolvStats, IDAGetReturnFlagName, IDAInit, IDASVtolerances, IDASetId, IDASetJacFn,
     IDASetLinearSolver, IDASetUserData, IDASolve, N_Vector, SUNLinSolFree, SUNLinSolInitialize,
     SUNLinSol_Dense, SUNLinearSolver, SUNMatrix, IDA_CONSTR_FAIL, IDA_CONV_FAIL, IDA_ERR_FAIL,
-    IDA_ILL_INPUT, IDA_LINIT_FAIL, IDA_LSETUP_FAIL, IDA_LSOLVE_FAIL, IDA_MEM_NULL, IDA_NORMAL,
+    IDA_ILL_INPUT, IDA_LINIT_FAIL, IDA_LSETUP_FAIL, IDA_LSOLVE_FAIL, IDA_MEM_NULL, IDA_ONE_STEP,
     IDA_REP_RES_ERR, IDA_RES_FAIL, IDA_ROOT_RETURN, IDA_RTFUNC_FAIL, IDA_SUCCESS, IDA_TOO_MUCH_ACC,
     IDA_TOO_MUCH_WORK, IDA_TSTOP_RETURN, IDA_YA_YDP_INIT,
 };
@@ -121,6 +121,7 @@ where
     data: Option<SundialsData<Eqn>>,
     problem: Option<OdeSolverProblem<Eqn>>,
     yp: SundialsVector,
+    jacobian: SundialsMatrix,
     statistics: SundialsStatistics,
 }
 
@@ -183,6 +184,7 @@ where
         let ctx = *get_suncontext();
         let ida_mem = unsafe { IDACreate(ctx) };
         let yp = SundialsVector::new_serial(0);
+        let jacobian = SundialsMatrix::new_dense(0, 0);
 
         Self {
             ida_mem,
@@ -191,6 +193,7 @@ where
             yp,
             linear_solver: std::ptr::null_mut(),
             statistics: SundialsStatistics::new(),
+            jacobian,
         }
     }
 
@@ -255,42 +258,46 @@ where
         let ida_mem = self.ida_mem;
 
         // set user data
-        let data = Box::new(SundialsData::new(problem.eqn.clone()));
-        Self::check(unsafe {
-            IDASetUserData(self.ida_mem, data.as_ref() as *const _ as *mut c_void)
-        })
-        .unwrap();
+        let data = SundialsData::new(problem.eqn.clone());
+        self.data = Some(data);
+        Self::check(unsafe { IDASetUserData(self.ida_mem, &self.data as *const _ as *mut c_void) })
+            .unwrap();
 
         // initialize
-        let t0 = 0.0;
-        let y0 = state.y.clone();
         self.yp = SundialsVector::zeros(number_of_states);
         Self::check(unsafe {
             IDAInit(
                 ida_mem,
                 Some(Self::residual),
-                t0,
-                y0.sundials_vector(),
+                state.t,
+                state.y.sundials_vector(),
                 self.yp.sundials_vector(),
             )
         })
         .unwrap();
 
-        // linear solver
-        let jacobian = SundialsMatrix::new_dense(number_of_states, number_of_states);
-        Self::check(unsafe { IDASetJacFn(ida_mem, Some(Self::jacobian)) }).unwrap();
-        let linear_solver =
-            unsafe { SUNLinSol_Dense(y0.sundials_vector(), jacobian.sundials_matrix(), ctx) };
-        Self::check(unsafe {
-            IDASetLinearSolver(ida_mem, linear_solver, jacobian.sundials_matrix())
-        })
-        .unwrap();
-        Self::check(unsafe { SUNLinSolInitialize(linear_solver) }).unwrap();
-
         // tolerances
         let rtol = problem.rtol;
         let atol = problem.atol.as_ref();
         Self::check(unsafe { IDASVtolerances(ida_mem, rtol, atol.sundials_vector()) }).unwrap();
+
+        // linear solver
+        self.jacobian = SundialsMatrix::new_dense(number_of_states, number_of_states);
+        self.linear_solver = unsafe {
+            SUNLinSol_Dense(
+                state.y.sundials_vector(),
+                self.jacobian.sundials_matrix(),
+                ctx,
+            )
+        };
+        Self::check(unsafe { SUNLinSolInitialize(self.linear_solver) }).unwrap();
+        Self::check(unsafe {
+            IDASetLinearSolver(ida_mem, self.linear_solver, self.jacobian.sundials_matrix())
+        })
+        .unwrap();
+
+        // set jacobian function
+        Self::check(unsafe { IDASetJacFn(ida_mem, Some(Self::jacobian)) }).unwrap();
 
         //Self::check(unsafe { IDACalcIC(ida_mem, IDA_YA_YDP_INIT, t0 + 1.0) }).unwrap();
     }
@@ -306,7 +313,7 @@ where
                 &mut state.t as *mut realtype,
                 state.y.sundials_vector(),
                 self.yp.sundials_vector(),
-                IDA_NORMAL,
+                IDA_ONE_STEP,
             )
         };
 
