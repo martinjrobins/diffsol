@@ -37,7 +37,21 @@ pub mod scalar;
 pub mod solver;
 pub mod vector;
 
-use linear_solver::{lu::LU, LinearSolver};
+use linear_solver::LinearSolver;
+use std::fmt::Display;
+
+pub use linear_solver::lu::LU;
+use linear_solver::LinearSolver;
+
+#[cfg(feature = "sundials")]
+use matrix::sundials::SundialsMatrix;
+
+#[cfg(feature = "sundials")]
+use vector::sundials::SundialsVector;
+
+#[cfg(feature = "sundials")]
+pub use linear_solver::sundials::SundialsLinearSolver;
+
 use matrix::{DenseMatrix, Matrix, MatrixViewMut};
 use nonlinear_solver::{newton::NewtonNonlinearSolver, NonLinearSolver};
 pub use ode_solver::{

@@ -214,8 +214,8 @@ mod tests {
     use nalgebra::DVector;
 
     use crate::{
-        nonlinear_solver::newton::NewtonNonlinearSolver, ode_solver::OdeBuilder, Bdf, OdeEquations,
-        OdeSolverMethod, Vector,
+        linear_solver::lu::LU, nonlinear_solver::newton::NewtonNonlinearSolver,
+        ode_solver::OdeBuilder, Bdf, OdeEquations, OdeSolverMethod, Vector,
     };
 
     use super::DiffSl;
@@ -274,7 +274,7 @@ mod tests {
         // solver a bit and check the state and output
         let problem = OdeBuilder::new().p([r, k]).build_diffsl(text).unwrap();
         let mut solver = Bdf::default();
-        let mut root_solver = NewtonNonlinearSolver::default();
+        let mut root_solver = NewtonNonlinearSolver::new(LU::default());
         let t = 1.0;
         let state = solver
             .make_consistent_and_solve(&problem, t, &mut root_solver)

@@ -1,25 +1,22 @@
 use anyhow::{anyhow, Result};
+use serde::Serialize;
 use std::{
-    ffi::{c_int, c_void, CStr},
+    ffi::{c_int, c_long, c_void, CStr},
     rc::Rc,
 };
 use sundials_sys::{
-    realtype, IDACalcIC, IDACreate, IDAFree, IDAGetDky, IDAGetReturnFlagName, IDAInit, IDAReInit,
-    IDASVtolerances, IDASetId, IDASetJacFn, IDASetLinearSolver, IDASetUserData, IDASolve, N_Vector,
-    SUNLinSolFree, SUNLinSolInitialize, SUNLinSol_Dense, SUNLinearSolver, SUNMatrix,
-    IDA_CONSTR_FAIL, IDA_CONV_FAIL, IDA_ERR_FAIL, IDA_ILL_INPUT, IDA_LINIT_FAIL, IDA_LSETUP_FAIL,
-    IDA_LSOLVE_FAIL, IDA_MEM_NULL, IDA_NORMAL, IDA_REP_RES_ERR, IDA_RES_FAIL, IDA_ROOT_RETURN,
-    IDA_RTFUNC_FAIL, IDA_SUCCESS, IDA_TOO_MUCH_ACC, IDA_TOO_MUCH_WORK, IDA_TSTOP_RETURN,
-    IDA_YA_YDP_INIT,
+    realtype, IDACalcIC, IDACreate, IDAFree, IDAGetDky, IDAGetIntegratorStats,
+    IDAGetNonlinSolvStats, IDAGetReturnFlagName, IDAInit, IDASVtolerances, IDASetId, IDASetJacFn,
+    IDASetLinearSolver, IDASetUserData, IDASolve, N_Vector, SUNLinSolFree, SUNLinSolInitialize,
+    SUNLinSol_Dense, SUNLinearSolver, SUNMatrix, IDA_CONSTR_FAIL, IDA_CONV_FAIL, IDA_ERR_FAIL,
+    IDA_ILL_INPUT, IDA_LINIT_FAIL, IDA_LSETUP_FAIL, IDA_LSOLVE_FAIL, IDA_MEM_NULL, IDA_NORMAL,
+    IDA_REP_RES_ERR, IDA_RES_FAIL, IDA_ROOT_RETURN, IDA_RTFUNC_FAIL, IDA_SUCCESS, IDA_TOO_MUCH_ACC,
+    IDA_TOO_MUCH_WORK, IDA_TSTOP_RETURN, IDA_YA_YDP_INIT,
 };
 
 use crate::{
-    matrix::sundials::SundialsMatrix,
-    vector::{
-        sundials::{get_suncontext, SundialsVector},
-        Vector,
-    },
-    Matrix, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+    vector::sundials::get_suncontext, Matrix, OdeEquations, OdeSolverMethod, OdeSolverProblem,
+    OdeSolverState, SundialsMatrix, SundialsVector, Vector,
 };
 
 pub fn sundials_check(retval: c_int) -> Result<()> {
@@ -32,24 +29,86 @@ pub fn sundials_check(retval: c_int) -> Result<()> {
     }
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct SundialsStatistics {
+    pub number_of_linear_solver_setups: usize,
+    pub number_of_steps: usize,
+    pub number_of_error_test_failures: usize,
+    pub number_of_nonlinear_solver_iterations: usize,
+    pub number_of_nonlinear_solver_fails: usize,
+    pub initial_step_size: realtype,
+    pub final_step_size: realtype,
+}
+
+impl SundialsStatistics {
+    fn new() -> Self {
+        Self {
+            number_of_linear_solver_setups: 0,
+            number_of_steps: 0,
+            number_of_error_test_failures: 0,
+            number_of_nonlinear_solver_iterations: 0,
+            number_of_nonlinear_solver_fails: 0,
+            initial_step_size: 0.0,
+            final_step_size: 0.0,
+        }
+    }
+    fn new_from_ida(ida_mem: *mut c_void) -> Result<Self> {
+        let mut nsteps: c_long = 0;
+        let mut nrevals: c_long = 0;
+        let mut nlinsetups: c_long = 0;
+        let mut netfails: c_long = 0;
+        let mut klast: c_int = 0;
+        let mut kcur: c_int = 0;
+        let mut hinused: realtype = 0.;
+        let mut hlast: realtype = 0.;
+        let mut hcur: realtype = 0.;
+        let mut tcur: realtype = 0.;
+
+        sundials_check(unsafe {
+            IDAGetIntegratorStats(
+                ida_mem,
+                &mut nsteps,
+                &mut nrevals,
+                &mut nlinsetups,
+                &mut netfails,
+                &mut klast,
+                &mut kcur,
+                &mut hinused,
+                &mut hlast,
+                &mut hcur,
+                &mut tcur,
+            )
+        })?;
+
+        let mut nniters: c_long = 0;
+        let mut nncfails: c_long = 0;
+        sundials_check(unsafe { IDAGetNonlinSolvStats(ida_mem, &mut nniters, &mut nncfails) })?;
+
+        Ok(Self {
+            number_of_linear_solver_setups: nlinsetups.try_into().unwrap(),
+            number_of_steps: nsteps.try_into().unwrap(),
+            number_of_error_test_failures: netfails.try_into().unwrap(),
+            number_of_nonlinear_solver_iterations: nniters.try_into().unwrap(),
+            number_of_nonlinear_solver_fails: nncfails.try_into().unwrap(),
+            initial_step_size: hinused,
+            final_step_size: hcur,
+        })
+    }
+}
+
 struct SundialsData<Eqn>
 where
     Eqn: OdeEquations<T = realtype, V = SundialsVector, M = SundialsMatrix>,
 {
     eqn: Rc<Eqn>,
-    number_of_states: usize,
 }
 
 impl<Eqn> SundialsData<Eqn>
 where
     Eqn: OdeEquations<T = realtype, V = SundialsVector, M = SundialsMatrix>,
 {
-    fn new(eqn: Eqn) -> Self {
-        let number_of_states = eqn.nstates();
-        Self {
-            eqn: Rc::new(eqn),
-            number_of_states,
-        }
+    fn new(eqn: Rc<Eqn>) -> Self {
+        Self { eqn }
     }
 }
 
@@ -58,10 +117,11 @@ where
     Eqn: OdeEquations<T = realtype, V = SundialsVector, M = SundialsMatrix>,
 {
     ida_mem: *mut c_void,
-    data: Box<SundialsData<Eqn>>,
+    linear_solver: SUNLinearSolver,
+    data: Option<SundialsData<Eqn>>,
     problem: Option<OdeSolverProblem<Eqn>>,
     yp: SundialsVector,
-    linear_solver: SUNLinearSolver,
+    statistics: SundialsStatistics,
 }
 
 impl<Eqn> SundialsIda<Eqn>
@@ -119,17 +179,31 @@ where
         sundials_check(retval)
     }
 
-    pub fn new(eqn: Eqn) -> Result<Self> {
-        let number_of_states = eqn.nstates();
+    pub fn new() -> Self {
         let ctx = *get_suncontext();
-
-        let jacobian = SundialsMatrix::new_dense(number_of_states, number_of_states);
-        let yy = SundialsVector::new_serial(number_of_states);
-        let id = eqn.algebraic_indices();
-        let data = Box::new(SundialsData::new(eqn));
         let ida_mem = unsafe { IDACreate(ctx) };
-        Self::check(unsafe { IDASetUserData(ida_mem, data.as_ref() as *const _ as *mut c_void) })?;
+        let yp = SundialsVector::new_serial(0);
 
+        Self {
+            ida_mem,
+            data: None,
+            problem: None,
+            yp,
+            linear_solver: std::ptr::null_mut(),
+            statistics: SundialsStatistics::new(),
+        }
+    }
+
+    pub fn get_statistics(&self) -> &SundialsStatistics {
+        &self.statistics
+    }
+
+    pub fn calc_ic(&mut self, t: realtype) -> Result<()> {
+        if self.problem.is_none() {
+            return Err(anyhow!("Problem not set"));
+        }
+        let id = self.problem.as_ref().unwrap().eqn.algebraic_indices();
+        let number_of_states = self.problem.as_ref().unwrap().eqn.nstates();
         // need to convert to realtype sundials vector
         let mut id_realtype = SundialsVector::new_serial(number_of_states);
         for i in 0..number_of_states {
@@ -138,34 +212,18 @@ where
                 _ => id_realtype[i] = 0.0,
             }
         }
-        let t0 = 0.0;
-        let y = SundialsVector::zeros(number_of_states);
-        let yp = SundialsVector::zeros(number_of_states);
-        Self::check(unsafe {
-            IDAInit(
-                ida_mem,
-                Some(Self::residual),
-                t0,
-                y.sundials_vector(),
-                yp.sundials_vector(),
-            )
-        })?;
-        Self::check(unsafe { IDASetJacFn(ida_mem, Some(Self::jacobian)) })?;
-        Self::check(unsafe { IDASetId(ida_mem, id_realtype.sundials_vector()) })?;
-        let linear_solver =
-            unsafe { SUNLinSol_Dense(yy.sundials_vector(), jacobian.sundials_matrix(), ctx) };
-        Self::check(unsafe {
-            IDASetLinearSolver(ida_mem, linear_solver, jacobian.sundials_matrix())
-        })?;
-        Self::check(unsafe { SUNLinSolInitialize(linear_solver) })?;
+        Self::check(unsafe { IDASetId(self.ida_mem, id_realtype.sundials_vector()) })?;
+        Self::check(unsafe { IDACalcIC(self.ida_mem, IDA_YA_YDP_INIT, t) })?;
+        Ok(())
+    }
+}
 
-        Ok(Self {
-            ida_mem,
-            data,
-            problem: None,
-            yp: yy,
-            linear_solver,
-        })
+impl<Eqn> Default for SundialsIda<Eqn>
+where
+    Eqn: OdeEquations<T = realtype, V = SundialsVector, M = SundialsMatrix>,
+{
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -174,7 +232,9 @@ where
     Eqn: OdeEquations<T = realtype, V = SundialsVector, M = SundialsMatrix>,
 {
     fn drop(&mut self) {
-        unsafe { SUNLinSolFree(self.linear_solver) };
+        if !self.linear_solver.is_null() {
+            unsafe { SUNLinSolFree(self.linear_solver) };
+        }
         unsafe { IDAFree(&mut self.ida_mem) };
     }
 }
@@ -189,34 +249,70 @@ where
 
     fn set_problem(&mut self, state: &mut OdeSolverState<Eqn::M>, problem: &OdeSolverProblem<Eqn>) {
         self.problem = Some(problem.clone());
-        let data = &self.data;
+        let eqn = problem.eqn.as_ref();
+        let number_of_states = eqn.nstates();
+        let ctx = *get_suncontext();
         let ida_mem = self.ida_mem;
+
+        // set user data
+        let data = Box::new(SundialsData::new(problem.eqn.clone()));
+        Self::check(unsafe {
+            IDASetUserData(self.ida_mem, data.as_ref() as *const _ as *mut c_void)
+        })
+        .unwrap();
+
+        // initialize
+        let t0 = 0.0;
+        let y0 = state.y.clone();
+        self.yp = SundialsVector::zeros(number_of_states);
+        Self::check(unsafe {
+            IDAInit(
+                ida_mem,
+                Some(Self::residual),
+                t0,
+                y0.sundials_vector(),
+                self.yp.sundials_vector(),
+            )
+        })
+        .unwrap();
+
+        // linear solver
+        let jacobian = SundialsMatrix::new_dense(number_of_states, number_of_states);
+        Self::check(unsafe { IDASetJacFn(ida_mem, Some(Self::jacobian)) }).unwrap();
+        let linear_solver =
+            unsafe { SUNLinSol_Dense(y0.sundials_vector(), jacobian.sundials_matrix(), ctx) };
+        Self::check(unsafe {
+            IDASetLinearSolver(ida_mem, linear_solver, jacobian.sundials_matrix())
+        })
+        .unwrap();
+        Self::check(unsafe { SUNLinSolInitialize(linear_solver) }).unwrap();
+
+        // tolerances
         let rtol = problem.rtol;
         let atol = problem.atol.as_ref();
-        let n = data.number_of_states;
-
         Self::check(unsafe { IDASVtolerances(ida_mem, rtol, atol.sundials_vector()) }).unwrap();
 
-        let t0 = state.t;
-        let y0 = state.y.clone();
-        let yp0 = SundialsVector::zeros(n);
-        Self::check(unsafe { IDAReInit(ida_mem, t0, y0.sundials_vector(), yp0.sundials_vector()) })
-            .unwrap();
-        Self::check(unsafe { IDACalcIC(ida_mem, IDA_YA_YDP_INIT, t0 + 1.0) }).unwrap();
+        //Self::check(unsafe { IDACalcIC(ida_mem, IDA_YA_YDP_INIT, t0 + 1.0) }).unwrap();
     }
 
     fn step(&mut self, state: &mut OdeSolverState<<Eqn>::M>) -> Result<()> {
-        let mut t1: realtype = 0.0;
+        if self.problem.is_none() {
+            return Err(anyhow!("Problem not set"));
+        }
         let retval = unsafe {
             IDASolve(
                 self.ida_mem,
                 state.t + 1.0,
-                &mut t1 as *mut realtype,
+                &mut state.t as *mut realtype,
                 state.y.sundials_vector(),
                 self.yp.sundials_vector(),
                 IDA_NORMAL,
             )
         };
+
+        // update stats
+        self.statistics = SundialsStatistics::new_from_ida(self.ida_mem).unwrap();
+
         // check return value
         match retval {
             IDA_SUCCESS => Ok(()),
@@ -240,7 +336,10 @@ where
     }
 
     fn interpolate(&self, _state: &OdeSolverState<<Eqn>::M>, t: <Eqn>::T) -> <Eqn>::V {
-        let ret = SundialsVector::new_serial(self.data.number_of_states);
+        if self.data.is_none() {
+            panic!("Problem not set");
+        }
+        let ret = SundialsVector::new_serial(self.data.as_ref().unwrap().eqn.nstates());
         Self::check(unsafe { IDAGetDky(self.ida_mem, t, 0, ret.sundials_vector()) }).unwrap();
         ret
     }
