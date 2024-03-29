@@ -9,7 +9,7 @@ use sundials_sys::{
     N_Vector, SUNContext, SUNContext_Create,
 };
 
-use crate::IndexType;
+use crate::{IndexType, Scale};
 
 use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
@@ -207,11 +207,17 @@ impl_index_mut!(SundialsVectorViewMut);
 // div by realtype -> owned
 macro_rules! impl_div {
     ($type:tt) => {
-        impl_helper!(Div<realtype>, $type, {
+        impl_helper!(Div<Scale<realtype>>, $type, {
             type Output = SundialsVector;
-            fn div(self, rhs: realtype) -> Self::Output {
+            fn div(self, rhs: Scale<realtype>) -> Self::Output {
                 let z = SundialsVector::new_serial(self.len());
-                unsafe { N_VScale(1. / rhs, self.sundials_vector(), z.sundials_vector()) }
+                unsafe {
+                    N_VScale(
+                        1. / rhs.value(),
+                        self.sundials_vector(),
+                        z.sundials_vector(),
+                    )
+                }
                 z
             }
         });
@@ -225,11 +231,11 @@ impl_div!(SundialsVectorViewMut);
 // mul by realtype -> owned
 macro_rules! impl_mul {
     ($type:tt) => {
-        impl_helper!(Mul<realtype>, $type, {
+        impl_helper!(Mul<Scale<realtype>>, $type, {
             type Output = SundialsVector;
-            fn mul(self, rhs: realtype) -> Self::Output {
+            fn mul(self, rhs: Scale<realtype>) -> Self::Output {
                 let z = SundialsVector::new_serial(self.len());
-                unsafe { N_VScale(rhs, self.sundials_vector(), z.sundials_vector()) }
+                unsafe { N_VScale(rhs.value(), self.sundials_vector(), z.sundials_vector()) }
                 z
             }
         });
@@ -243,9 +249,15 @@ impl_mul!(SundialsVectorViewMut);
 // div assign with realtype
 macro_rules! impl_div_assign {
     ($type:tt) => {
-        impl_helper!(DivAssign<realtype>, $type, {
-            fn div_assign(&mut self, rhs: realtype) {
-                unsafe { N_VScale(1. / rhs, self.sundials_vector(), self.sundials_vector()) }
+        impl_helper!(DivAssign<Scale<realtype>>, $type, {
+            fn div_assign(&mut self, rhs: Scale<realtype>) {
+                unsafe {
+                    N_VScale(
+                        1. / rhs.value(),
+                        self.sundials_vector(),
+                        self.sundials_vector(),
+                    )
+                }
             }
         });
     };
@@ -258,9 +270,9 @@ impl_div_assign!(SundialsVectorView);
 // mul assign with realtype
 macro_rules! impl_mul_assign {
     ($type:tt) => {
-        impl_helper!(MulAssign<realtype>, $type, {
-            fn mul_assign(&mut self, rhs: realtype) {
-                unsafe { N_VScale(rhs, self.sundials_vector(), self.sundials_vector()) }
+        impl_helper!(MulAssign<Scale<realtype>>, $type, {
+            fn mul_assign(&mut self, rhs: Scale<realtype>) {
+                unsafe { N_VScale(rhs.value(), self.sundials_vector(), self.sundials_vector()) }
             }
         });
     };

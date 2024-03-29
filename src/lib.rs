@@ -37,9 +37,6 @@ pub mod scalar;
 pub mod solver;
 pub mod vector;
 
-use linear_solver::LinearSolver;
-use std::fmt::Display;
-
 pub use linear_solver::lu::LU;
 use linear_solver::LinearSolver;
 
@@ -61,7 +58,7 @@ pub use ode_solver::{
     bdf::Bdf, equations::OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
 };
 use op::NonLinearOp;
-use scalar::{IndexType, Scalar};
+use scalar::{IndexType, Scalar, Scale};
 use solver::SolverProblem;
 use vector::{Vector, VectorIndex, VectorRef, VectorView, VectorViewMut};
 
