@@ -140,14 +140,14 @@ where
         let y = SundialsVector::new_not_owned(y);
         let yp = SundialsVector::new_not_owned(yp);
         let mut rr = SundialsVector::new_not_owned(rr);
-        // F(t, y, y') = M y' - f(t, y)
+        // F(t, y, y') = f(t, y) - M y'
         // rr = f(t, y)
         data.eqn.rhs_inplace(t, &y, &mut rr);
         // tmp = M y'
         let mut tmp = SundialsVector::new_clone(&y);
         data.eqn.mass_inplace(t, &yp, &mut tmp);
-        // rr = M y' - rr (gemv)
-        rr.axpy(1., &tmp, 1.);
+        // rr = -M y' + rr (gemv)
+        rr.axpy(-1., &tmp, 1.);
         0
     }
 
@@ -172,7 +172,6 @@ where
         jac.copy_from(&eqn.mass_matrix(t));
         jac *= -c_j;
         jac += &eqn.jacobian_matrix(&y, t);
-
         0
     }
 
@@ -258,8 +257,7 @@ where
         let ida_mem = self.ida_mem;
 
         // set user data
-        let data = SundialsData::new(problem.eqn.clone());
-        self.data = Some(data);
+        self.data = Some(SundialsData::new(problem.eqn.clone()));
         Self::check(unsafe { IDASetUserData(self.ida_mem, &self.data as *const _ as *mut c_void) })
             .unwrap();
 
@@ -298,8 +296,6 @@ where
 
         // set jacobian function
         Self::check(unsafe { IDASetJacFn(ida_mem, Some(Self::jacobian)) }).unwrap();
-
-        //Self::check(unsafe { IDACalcIC(ida_mem, IDA_YA_YDP_INIT, t0 + 1.0) }).unwrap();
     }
 
     fn step(&mut self, state: &mut OdeSolverState<<Eqn>::M>) -> Result<()> {

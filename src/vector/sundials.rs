@@ -96,25 +96,41 @@ pub struct SundialsIndexVector(Vec<IndexType>);
 
 impl Display for SundialsIndexVector {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "SundialsIndexVector")
+        for i in 0..self.0.len() {
+            write!(f, "{} ", self.0[i])?;
+        }
+        writeln!(f)?;
+        Ok(())
     }
 }
 
 impl Display for SundialsVector {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "SundialsVector")
+        for i in 0..self.len() {
+            write!(f, "{} ", self[i])?;
+        }
+        writeln!(f)?;
+        Ok(())
     }
 }
 
 impl Display for SundialsVectorViewMut<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "SundialsVectorViewMut")
+        for i in 0..self.len() {
+            write!(f, "{} ", self[i])?;
+        }
+        writeln!(f)?;
+        Ok(())
     }
 }
 
 impl Display for SundialsVectorView<'_> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "SundialsVectorView")
+        for i in 0..self.len() {
+            write!(f, "{} ", self[i])?;
+        }
+        writeln!(f)?;
+        Ok(())
     }
 }
 
@@ -406,7 +422,8 @@ impl Vector for SundialsVector {
         unsafe { N_VGetLength_Serial(self.sundials_vector()) as IndexType }
     }
     fn norm(&self) -> Self::T {
-        unsafe { N_VWrmsNorm_Serial(self.sundials_vector(), self.sundials_vector()) }
+        let ones = SundialsVector::from_element(self.len(), 1.0);
+        unsafe { N_VWl2Norm(self.sundials_vector(), ones.sundials_vector()) }
     }
     fn is_empty(&self) -> bool {
         self.len() == 0

@@ -1,5 +1,6 @@
 use std::{
     cmp::min,
+    fmt::Display,
     ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign},
 };
 
@@ -59,6 +60,20 @@ impl Drop for SundialsMatrix {
         if self.owned {
             unsafe { SUNMatDestroy(self.sm) };
         }
+    }
+}
+
+impl Display for SundialsMatrix {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let n = self.ncols();
+        let m = self.nrows();
+        for i in 0..m {
+            for j in 0..n {
+                write!(f, "{} ", self[(i, j)])?;
+            }
+            writeln!(f)?;
+        }
+        Ok(())
     }
 }
 

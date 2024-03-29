@@ -443,20 +443,20 @@ mod tests {
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 16
-        number_of_steps: 19
-        number_of_error_test_failures: 8
-        number_of_nonlinear_solver_iterations: 54
+        number_of_steps: 24
+        number_of_error_test_failures: 3
+        number_of_nonlinear_solver_iterations: 39
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.011892071150027213
-        final_step_size: 0.23215911532645564
+        initial_step_size: 0.001
+        final_step_size: 0.256
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
-        number_of_rhs_evals: 56
-        number_of_jac_mul_evals: 2
+        number_of_rhs_evals: 39
+        number_of_jac_mul_evals: 32
         number_of_mass_evals: 0
         number_of_mass_matrix_evals: 0
-        number_of_jacobian_matrix_evals: 1
+        number_of_jacobian_matrix_evals: 16
         "###);
     }
 
@@ -509,6 +509,32 @@ mod tests {
         number_of_mass_evals: 1052
         number_of_mass_matrix_evals: 2
         number_of_jacobian_matrix_evals: 18
+        "###);
+    }
+
+    #[test]
+    fn test_sundials_robertson() {
+        let mut s = SundialsIda::default();
+        let rs = NewtonNonlinearSolver::new(SundialsLinearSolver::new_dense());
+        let (problem, soln) = robertson::<SundialsMatrix>(false);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1.0e-4));
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 59
+        number_of_steps: 355
+        number_of_error_test_failures: 15
+        number_of_nonlinear_solver_iterations: 506
+        number_of_nonlinear_solver_fails: 5
+        initial_step_size: 0.001
+        final_step_size: 11535117835.253025
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        ---
+        number_of_rhs_evals: 507
+        number_of_jac_mul_evals: 178
+        number_of_mass_evals: 686
+        number_of_mass_matrix_evals: 60
+        number_of_jacobian_matrix_evals: 59
         "###);
     }
 
