@@ -41,10 +41,10 @@ pub use linear_solver::lu::LU;
 use linear_solver::LinearSolver;
 
 #[cfg(feature = "sundials")]
-use matrix::sundials::SundialsMatrix;
+pub use matrix::sundials::SundialsMatrix;
 
 #[cfg(feature = "sundials")]
-use vector::sundials::SundialsVector;
+pub use vector::sundials::SundialsVector;
 
 #[cfg(feature = "sundials")]
 pub use linear_solver::sundials::SundialsLinearSolver;
@@ -53,7 +53,8 @@ pub use linear_solver::sundials::SundialsLinearSolver;
 pub use ode_solver::sundials::SundialsIda;
 
 use matrix::{DenseMatrix, Matrix, MatrixViewMut};
-use nonlinear_solver::{newton::NewtonNonlinearSolver, NonLinearSolver};
+pub use nonlinear_solver::newton::NewtonNonlinearSolver;
+use nonlinear_solver::NonLinearSolver;
 pub use ode_solver::{
     bdf::Bdf, equations::OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
 };
