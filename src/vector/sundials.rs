@@ -1,7 +1,7 @@
 use std::ffi::c_void;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
-use std::ptr::addr_of_mut;
+use std::ptr::{addr_of, addr_of_mut};
 use std::{fmt, ptr};
 
 use sundials_sys::{
@@ -22,7 +22,7 @@ pub fn get_suncontext() -> &'static SUNContext {
         if SUNCONTEXT.is_null() {
             SUNContext_Create(sun_comm_null, addr_of_mut!(SUNCONTEXT) as *mut SUNContext);
         }
-        &SUNCONTEXT
+        &*addr_of!(SUNCONTEXT)
     }
 }
 
