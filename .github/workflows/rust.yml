@@ -14,7 +14,6 @@ env:
   RUST_BACKTRACE: full
 
 jobs:
-  # Check formatting.
   rustfmt:
     name: Rustfmt
     runs-on: ubuntu-latest
@@ -24,24 +23,8 @@ jobs:
       - run: rustc -Vv
       - run: cargo fmt --all -- --check
 
-  # Build documentation.
-  rustdoc:
-    name: Rustdoc
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v3.3.2
-        with:
-          path: |
-            ${{ env.CARGO_HOME }}
-            target
-          key: rustdoc-${{ runner.os }}
-      - run: rustup update stable --no-self-update
-      - run: rustc -Vv
-      - run: cargo rustdoc --features sundials
-
   unit-tests:
-    name: Rust project - ${{ matrix.os }} - ${{ matrix.toolchain }} - ${{ matrix.cargo_args }}
+    name: Tests - ${{ matrix.os }} - ${{ matrix.toolchain }}
     runs-on: ubuntu-latest
     strategy:
         matrix:
@@ -53,15 +36,6 @@ jobs:
             - ubuntu-latest
             - macos-latest
             - windows-latest
-          cargo_args:
-            - ''
-            - '--features diffsl-llvm14'
-            - '--features sundials'
-          exclude:
-            - toolchain: beta
-              cargo_args: '--features diffsl-llvm14'
-            - toolchain: nightly
-              cargo_args: '--features diffsl-llvm14'
 
     steps:
     - uses: actions/checkout@v4
@@ -70,15 +44,22 @@ jobs:
         path: |
           ${{ env.CARGO_HOME }}
           target
-        key: unit-test-${{ runner.os }}-${{ matrix.toolchain}}-${{ matrix.cargo_args }}
+        key: unit-test-${{ runner.os }}-${{ matrix.toolchain}}
     - name: Set up Rust
       run: rustup default ${{ matrix.toolchain }} && rustup update ${{ matrix.toolchain }} --no-self-update
+    - name: Rust version
+      run: rustc -Vv
     - name: Install LLVM and Clang
       uses: KyleMayes/install-llvm-action@v1
-      if: matrix.cargo_args == '--features diffsl-llvm14'
       with:
         version: "14.0"
-    - name: Run tests
-      run: cargo test --verbose ${{ matrix.cargo_args }}
-    - name: Clippy
-      run: cargo clippy --verbose ${{ matrix.cargo_args }}
+    - name: Run tests - default features
+      run: cargo test --verbose 
+    - name: Run tests - sundials features
+      run: cargo test --verbose --features sundials
+    - name: Run tests - sundials and diffsl features
+      run: cargo test --verbose --features diffsl-llvm14 --features sundials
+    - name: Clippy - all features
+      run: cargo clippy --verbose --features diffsl-llvm14 --features sundials
+    - name: Docs - all features
+      run: cargo rustdoc --features diffsl-llvm14 --features sundials
