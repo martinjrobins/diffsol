@@ -1,10 +1,9 @@
 use crate::{
-    matrix::DenseMatrix,
     ode_solver::{OdeBuilder, OdeSolverProblem, OdeSolverSolution},
-    OdeEquations, Vector,
+    Matrix, OdeEquations, Vector,
 };
 
-pub fn robertson_ode<M: DenseMatrix + 'static>(
+pub fn robertson_ode<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
