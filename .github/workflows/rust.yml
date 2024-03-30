@@ -26,6 +26,7 @@ jobs:
           cargo_args:
             - ''
             - '--features diffsl-llvm14'
+            - '--features sundials'
           exclude:
             - toolchain: beta
               cargo_args: '--features diffsl-llvm14'

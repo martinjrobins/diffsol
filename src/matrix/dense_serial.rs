@@ -77,6 +77,9 @@ impl<T: Scalar> Matrix for DMatrix<T> {
     fn diagonal(&self) -> Self::V {
         self.diagonal()
     }
+    fn copy_from(&mut self, other: &Self) {
+        self.copy_from(other);
+    }
 }
 
 impl<T: Scalar> DenseMatrix for DMatrix<T> {

@@ -4,6 +4,9 @@ use anyhow::Result;
 pub mod gmres;
 pub mod lu;
 
+#[cfg(feature = "sundials")]
+pub mod sundials;
+
 /// A solver for the linear problem `Ax = b`.
 /// The solver is parameterised by the type `C` which is the type of the linear operator `A` (see the [Op] trait for more details).
 pub trait LinearSolver<C: Op> {

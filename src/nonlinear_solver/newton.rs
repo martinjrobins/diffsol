@@ -1,9 +1,8 @@
 use crate::{
     op::{linearise::LinearisedOp, NonLinearOp},
-    LinearSolver, NonLinearSolver, Scalar, SolverProblem, Vector, LU,
+    LinearSolver, NonLinearSolver, SolverProblem, Vector,
 };
 use anyhow::{anyhow, Result};
-use nalgebra::{DMatrix, DVector};
 use std::ops::SubAssign;
 
 use super::{Convergence, ConvergenceStatus};
@@ -14,21 +13,6 @@ pub struct NewtonNonlinearSolver<C: NonLinearOp> {
     problem: Option<SolverProblem<C>>,
     max_iter: usize,
     niter: usize,
-}
-
-impl<T: Scalar, C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T> + 'static> Default
-    for NewtonNonlinearSolver<C>
-{
-    fn default() -> Self {
-        let linear_solver = Box::<LU<T, LinearisedOp<C>>>::default();
-        Self {
-            problem: None,
-            convergence: None,
-            linear_solver,
-            max_iter: 100,
-            niter: 0,
-        }
-    }
 }
 
 impl<C: NonLinearOp> NewtonNonlinearSolver<C> {

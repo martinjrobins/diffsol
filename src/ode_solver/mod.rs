@@ -20,14 +20,17 @@ pub mod test_models;
 #[cfg(feature = "diffsl")]
 pub mod diffsl;
 
+#[cfg(feature = "sundials")]
+pub mod sundials;
+
 pub trait OdeSolverMethod<Eqn: OdeEquations> {
     fn problem(&self) -> Option<&OdeSolverProblem<Eqn>>;
     fn set_problem(&mut self, state: &mut OdeSolverState<Eqn::M>, problem: &OdeSolverProblem<Eqn>);
     fn step(&mut self, state: &mut OdeSolverState<Eqn::M>) -> Result<()>;
     fn interpolate(&self, state: &OdeSolverState<Eqn::M>, t: Eqn::T) -> Eqn::V;
     fn solve(&mut self, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Result<Eqn::V> {
-        let mut state = OdeSolverState::new(&problem);
-        self.set_problem(&mut state, &problem);
+        let mut state = OdeSolverState::new(problem);
+        self.set_problem(&mut state, problem);
         while state.t <= t {
             self.step(&mut state)?;
         }
@@ -39,8 +42,8 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         t: Eqn::T,
         root_solver: &mut RS,
     ) -> Result<Eqn::V> {
-        let mut state = OdeSolverState::new_consistent(&problem, root_solver)?;
-        self.set_problem(&mut state, &problem);
+        let mut state = OdeSolverState::new_consistent(problem, root_solver)?;
+        self.set_problem(&mut state, problem);
         while state.t <= t {
             self.step(&mut state)?;
         }
@@ -362,6 +365,7 @@ mod tests {
         robertson::robertson, robertson_ode::robertson_ode,
     };
     use super::*;
+    use crate::linear_solver::lu::LU;
     use crate::nonlinear_solver::newton::NewtonNonlinearSolver;
     use crate::scalar::scale;
     use tests::bdf::Bdf;
@@ -404,7 +408,7 @@ mod tests {
     #[test]
     fn test_bdf_nalgebra_exponential_decay() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::default();
+        let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = exponential_decay_problem::<Mcpu>(false);
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -427,10 +431,37 @@ mod tests {
         "###);
     }
 
+    #[cfg(feature = "sundials")]
+    #[test]
+    fn test_sundials_exponential_decay() {
+        let mut s = crate::SundialsIda::default();
+        let rs = NewtonNonlinearSolver::new(crate::SundialsLinearSolver::new_dense());
+        let (problem, soln) = exponential_decay_problem::<crate::SundialsMatrix>(false);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 16
+        number_of_steps: 24
+        number_of_error_test_failures: 3
+        number_of_nonlinear_solver_iterations: 39
+        number_of_nonlinear_solver_fails: 0
+        initial_step_size: 0.001
+        final_step_size: 0.256
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        ---
+        number_of_rhs_evals: 39
+        number_of_jac_mul_evals: 32
+        number_of_mass_evals: 0
+        number_of_mass_matrix_evals: 0
+        number_of_jacobian_matrix_evals: 16
+        "###);
+    }
+
     #[test]
     fn test_bdf_nalgebra_exponential_decay_algebraic() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::default();
+        let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = exponential_decay_with_algebraic_problem::<Mcpu>(false);
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -456,7 +487,7 @@ mod tests {
     #[test]
     fn test_bdf_nalgebra_robertson() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::default();
+        let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson::<Mcpu>(false);
         test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1.0e-4));
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -479,10 +510,37 @@ mod tests {
         "###);
     }
 
+    #[cfg(feature = "sundials")]
+    #[test]
+    fn test_sundials_robertson() {
+        let mut s = crate::SundialsIda::default();
+        let rs = NewtonNonlinearSolver::new(crate::SundialsLinearSolver::new_dense());
+        let (problem, soln) = robertson::<crate::SundialsMatrix>(false);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1.0e-4));
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 59
+        number_of_steps: 355
+        number_of_error_test_failures: 15
+        number_of_nonlinear_solver_iterations: 506
+        number_of_nonlinear_solver_fails: 5
+        initial_step_size: 0.001
+        final_step_size: 11535117835.253025
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        ---
+        number_of_rhs_evals: 507
+        number_of_jac_mul_evals: 178
+        number_of_mass_evals: 686
+        number_of_mass_matrix_evals: 60
+        number_of_jacobian_matrix_evals: 59
+        "###);
+    }
+
     #[test]
     fn test_bdf_nalgebra_robertson_colored() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::default();
+        let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson::<Mcpu>(true);
         test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1.0e-4));
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -508,7 +566,7 @@ mod tests {
     #[test]
     fn test_bdf_nalgebra_robertson_ode() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::default();
+        let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson_ode::<Mcpu>(false);
         test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1.0e-4));
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -534,7 +592,7 @@ mod tests {
     #[test]
     fn test_bdf_nalgebra_dydt_y2() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::default();
+        let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = dydt_y2_problem::<Mcpu>(false, 10);
         test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1e-4));
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -560,7 +618,7 @@ mod tests {
     #[test]
     fn test_bdf_nalgebra_dydt_y2_colored() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::default();
+        let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = dydt_y2_problem::<Mcpu>(true, 10);
         test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1e-4));
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -586,7 +644,7 @@ mod tests {
     #[test]
     fn test_bdf_nalgebra_gaussian_decay() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::default();
+        let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = gaussian_decay_problem::<Mcpu>(false, 10);
         test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1.0e-4));
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"

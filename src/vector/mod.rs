@@ -8,6 +8,8 @@ use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAss
 mod faer_serial;
 #[cfg(feature = "nalgebra")]
 mod nalgebra_serial;
+#[cfg(feature = "sundials")]
+pub mod sundials;
 
 pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug {
     fn zeros(len: IndexType) -> Self;
@@ -94,7 +96,6 @@ pub trait VectorView<'a>:
     type Owned;
     fn abs(&self) -> Self::Owned;
     fn into_owned(self) -> Self::Owned;
-    fn scalar_mul(&self, rhs: Self::T) -> Self::Owned;
 }
 
 pub trait Vector:

@@ -37,16 +37,32 @@ pub mod scalar;
 pub mod solver;
 pub mod vector;
 
-use linear_solver::{lu::LU, LinearSolver};
+pub use linear_solver::lu::LU;
+use linear_solver::LinearSolver;
+
+#[cfg(feature = "sundials")]
+use matrix::sundials::SundialsMatrix;
+
+#[cfg(feature = "sundials")]
+use vector::sundials::SundialsVector;
+
+#[cfg(feature = "sundials")]
+pub use linear_solver::sundials::SundialsLinearSolver;
+
+#[cfg(feature = "sundials")]
+pub use ode_solver::sundials::SundialsIda;
+
 use matrix::{DenseMatrix, Matrix, MatrixViewMut};
 use nonlinear_solver::{newton::NewtonNonlinearSolver, NonLinearSolver};
 pub use ode_solver::{
     bdf::Bdf, equations::OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
 };
 use op::NonLinearOp;
-use scalar::{IndexType, Scalar};
+use scalar::{IndexType, Scalar, Scale};
 use solver::SolverProblem;
 use vector::{Vector, VectorIndex, VectorRef, VectorView, VectorViewMut};
+
+pub use scalar::scale;
 
 #[cfg(test)]
 mod tests {

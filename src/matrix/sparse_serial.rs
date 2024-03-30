@@ -33,6 +33,9 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
     fn zeros(nrows: IndexType, ncols: IndexType) -> Self {
         Self::zeros(nrows, ncols)
     }
+    fn copy_from(&mut self, other: &Self) {
+        self.clone_from(other);
+    }
     fn from_diagonal(v: &DVector<T>) -> Self {
         let nrows = v.len();
         let ncols = v.len();
