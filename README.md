@@ -1,5 +1,7 @@
 # Diffsol
 
+<img src="https://github.com/martinjrobins/diffsol/actions/workflows/rust.yml/badge.svg" alt="CI build status badge">
+
 Diffsol is a library for solving ordinary differential equations (ODEs) or
 semi-explicit differential algebraic equations (DAEs) in Rust. You can use it
 out-of-the-box with vectors and matrices from the
