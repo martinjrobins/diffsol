@@ -97,11 +97,11 @@ impl<E: Scalar> PartialEq for Scale<E> {
     }
 }
 
-impl<'a, V: VectorView<'static, T = E>, E: Scalar> Mul<V> for Scale<E> {
+impl<V: VectorView<'static, T = E>, E: Scalar> Mul<V> for Scale<E> {
     type Output = V::Owned;
     #[inline]
     fn mul(self, rhs: V) -> Self::Output {
-        rhs.scalar_mul(self.0)
+        rhs * scale(self.0)
     }
 }
 

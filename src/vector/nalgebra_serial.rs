@@ -2,7 +2,7 @@ use std::ops::{Div, Mul, MulAssign};
 
 use nalgebra::{DVector, DVectorView, DVectorViewMut};
 
-use crate::{scalar::Scale, IndexType, Scalar};
+use crate::{IndexType, Scalar, Scale};
 
 use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
@@ -48,9 +48,6 @@ impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
     }
     fn into_owned(self) -> Self::Owned {
         self.into_owned()
-    }
-    fn scalar_mul(&self, rhs: Self::T) -> Self::Owned {
-        self * rhs
     }
 }
 

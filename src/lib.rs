@@ -62,6 +62,8 @@ use scalar::{IndexType, Scalar, Scale};
 use solver::SolverProblem;
 use vector::{Vector, VectorIndex, VectorRef, VectorView, VectorViewMut};
 
+pub use scalar::scale;
+
 #[cfg(test)]
 mod tests {
 

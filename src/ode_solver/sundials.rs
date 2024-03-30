@@ -15,8 +15,8 @@ use sundials_sys::{
 };
 
 use crate::{
-    vector::sundials::get_suncontext, Matrix, OdeEquations, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState, SundialsMatrix, SundialsVector, Vector,
+    scale, vector::sundials::get_suncontext, Matrix, OdeEquations, OdeSolverMethod,
+    OdeSolverProblem, OdeSolverState, SundialsMatrix, SundialsVector, Vector,
 };
 
 pub fn sundials_check(retval: c_int) -> Result<()> {
@@ -170,7 +170,7 @@ where
         let y = SundialsVector::new_not_owned(y);
         let mut jac = SundialsMatrix::new_not_owned(jac);
         jac.copy_from(&eqn.mass_matrix(t));
-        jac *= -c_j;
+        jac *= scale(-c_j);
         jac += &eqn.jacobian_matrix(&y, t);
         0
     }

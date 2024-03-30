@@ -96,7 +96,6 @@ pub trait VectorView<'a>:
     type Owned;
     fn abs(&self) -> Self::Owned;
     fn into_owned(self) -> Self::Owned;
-    fn scalar_mul(&self, rhs: Self::T) -> Self::Owned;
 }
 
 pub trait Vector:

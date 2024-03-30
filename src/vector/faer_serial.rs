@@ -2,7 +2,7 @@ use std::ops::{Div, Mul, MulAssign};
 
 use faer::{unzipped, zipped, Col, ColMut, ColRef};
 
-use crate::{scalar::Scalar, scalar::Scale, IndexType};
+use crate::{scalar::Scale, IndexType, Scalar};
 
 use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
@@ -27,8 +27,8 @@ impl<T: Scalar> Mul<Scale<T>> for Col<f64> {
         self * faer::scale(rhs.value().into())
     }
 }
-impl<'a, T: Scalar> Div<Scale<T>> for faer::Col<f64> {
-    type Output = faer::Col<f64>;
+impl<T: Scalar> Div<Scale<T>> for Col<f64> {
+    type Output = Col<f64>;
     fn div(self, rhs: Scale<T>) -> Self::Output {
         zipped!(self).map(|unzipped!(xi)| *xi / rhs.value().into())
     }
@@ -116,7 +116,7 @@ impl Vector for Col<f64> {
 
 impl VectorIndex for Vec<IndexType> {
     fn zeros(len: IndexType) -> Self {
-        vec![0; len as usize]
+        vec![0; len]
     }
     fn len(&self) -> IndexType {
         self.len() as IndexType
@@ -140,9 +140,6 @@ impl<'a> VectorView<'a> for ColRef<'a, f64> {
     }
     fn into_owned(self) -> Col<f64> {
         self.to_owned()
-    }
-    fn scalar_mul(&self, rhs: Self::T) -> Self::Owned {
-        self * faer::scale(rhs)
     }
 }
 

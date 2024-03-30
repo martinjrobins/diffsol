@@ -9,7 +9,7 @@ use sundials_sys::{
     N_Vector, SUNContext, SUNContext_Create,
 };
 
-use crate::{IndexType, Scale};
+use crate::{scale, IndexType, Scale};
 
 use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
@@ -378,7 +378,7 @@ macro_rules! impl_sub_view_owned {
             type Output = SundialsVector;
             fn sub(self, mut rhs: $rhs) -> Self::Output {
                 rhs -= self;
-                rhs *= -1.0;
+                rhs *= scale(-1.0);
                 rhs
             }
         });
@@ -561,10 +561,10 @@ mod tests {
         let mut v = SundialsVector::new_serial(2);
         v[0] = 1.0;
         v[1] = 2.0;
-        let v2 = v * 2.0;
+        let v2 = v * scale(2.0);
         assert_eq!(v2[0], 2.0);
         assert_eq!(v2[1], 4.0);
-        let v3 = v2 / 2.0;
+        let v3 = v2 / scale(2.0);
         assert_eq!(v3[0], 1.0);
         assert_eq!(v3[1], 2.0);
     }

@@ -11,6 +11,7 @@ use sundials_sys::{
 
 use crate::{
     ode_solver::sundials::sundials_check,
+    scalar::scale,
     vector::sundials::{get_suncontext, SundialsVector},
     IndexType, Scale, Vector,
 };
@@ -137,7 +138,7 @@ impl AddAssign<&SundialsMatrix> for SundialsMatrix {
 impl SubAssign<&SundialsMatrix> for SundialsMatrix {
     fn sub_assign(&mut self, rhs: &SundialsMatrix) {
         sundials_check(unsafe { SUNMatScaleAdd(-1.0, self.sm, rhs.sm) }).unwrap();
-        self.mul_assign(-1.0);
+        self.mul_assign(scale(-1.0));
     }
 }
 
@@ -181,21 +182,21 @@ impl_bin_op!(Sub, sub, -=);
 // mul and div by scalar
 macro_rules! impl_scalar_op {
     ($trait:ident, $fn:ident, $op:tt) => {
-        impl $trait<Scale<realtype>> for SundialsMatrix {
+        impl $trait<realtype> for SundialsMatrix {
             type Output = SundialsMatrix;
 
-            fn $fn(mut self, rhs: Scale<realtype>) -> Self::Output {
-                self.map_inplace(|x| x $op rhs.value());
+            fn $fn(mut self, rhs: realtype) -> Self::Output {
+                self.map_inplace(|x| x $op rhs);
                 self
             }
         }
 
-        impl $trait<Scale<realtype>> for &SundialsMatrix {
+        impl $trait<realtype> for &SundialsMatrix {
             type Output = SundialsMatrix;
 
-            fn $fn(self, rhs: Scale<realtype>) -> Self::Output {
+            fn $fn(self, rhs: realtype) -> Self::Output {
                 let mut m = self.clone();
-                m.map_inplace(|x| x $op rhs.value());
+                m.map_inplace(|x| x $op rhs);
                 m
             }
         }
