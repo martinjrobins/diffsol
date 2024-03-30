@@ -38,29 +38,8 @@ jobs:
           key: rustdoc-${{ runner.os }}
       - run: rustup update stable --no-self-update
       - run: rustc -Vv
-      - run: cargo rustdoc --features --features sundials --document-private-items
+      - run: cargo rustdoc --features sundials --document-private-items
 
-  # Run linter.
-  clippy:
-    name: Clippy
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
-          - windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v3.3.2
-        with:
-          path: |
-            ${{ env.CARGO_HOME }}
-            target
-          key: clippy-${{ runner.os }}
-      - run: rustup update stable --no-self-update
-      - run: rustc -Vv
-      - run: cargo clippy --all --all-targets --features sundials
   unit-tests:
     name: Rust project - ${{ matrix.os }} - ${{ matrix.toolchain }} - ${{ matrix.cargo_args }}
     runs-on: ubuntu-latest
@@ -85,7 +64,7 @@ jobs:
               cargo_args: '--features diffsl-llvm14'
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - uses: actions/cache@v3.3.2
       with:
         path: |
@@ -99,7 +78,7 @@ jobs:
       if: matrix.cargo_args == '--features diffsl-llvm14'
       with:
         version: "14.0"
-    - name: Build
-      run: cargo build --verbose ${{ matrix.cargo_args }}
     - name: Run tests
       run: cargo test --verbose ${{ matrix.cargo_args }}
+    - name: Clippy
+      run: cargo clippy --verbose ${{ matrix.cargo_args }}
