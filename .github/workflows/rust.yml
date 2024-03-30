@@ -38,7 +38,7 @@ jobs:
           key: rustdoc-${{ runner.os }}
       - run: rustup update stable --no-self-update
       - run: rustc -Vv
-      - run: cargo rustdoc --features --features diffsl-llvm14 --features sundials --document-private-items
+      - run: cargo rustdoc --features --features sundials --document-private-items
 
   # Run linter.
   clippy:
@@ -60,7 +60,7 @@ jobs:
           key: clippy-${{ runner.os }}
       - run: rustup update stable --no-self-update
       - run: rustc -Vv
-      - run: cargo clippy --all --all-targets --features diffsl-llvm14 --features sundials
+      - run: cargo clippy --all --all-targets --features sundials
   unit-tests:
     name: Rust project - ${{ matrix.os }} - ${{ matrix.toolchain }} - ${{ matrix.cargo_args }}
     runs-on: ubuntu-latest
