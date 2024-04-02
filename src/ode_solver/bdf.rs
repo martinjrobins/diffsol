@@ -2,7 +2,6 @@ use std::ops::AddAssign;
 use std::rc::Rc;
 
 use anyhow::{anyhow, Result};
-use faer::{Col, Mat};
 use nalgebra::{DMatrix, DVector};
 use num_traits::{One, Pow, Zero};
 use serde::Serialize;
