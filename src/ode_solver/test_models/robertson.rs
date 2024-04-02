@@ -1,7 +1,7 @@
 use crate::{
     matrix::Matrix,
-    ode_solver::{OdeBuilder, OdeSolverProblem, OdeSolverSolution},
-    OdeEquations, Vector,
+    ode_solver::{OdeSolverProblem, OdeSolverSolution},
+    OdeBuilder, OdeEquations, Vector,
 };
 
 pub fn robertson<M: Matrix + 'static>(

@@ -214,8 +214,8 @@ mod tests {
     use nalgebra::DVector;
 
     use crate::{
-        linear_solver::lu::LU, nonlinear_solver::newton::NewtonNonlinearSolver,
-        ode_solver::OdeBuilder, Bdf, OdeEquations, OdeSolverMethod, Vector,
+        linear_solver::lu::LU, nonlinear_solver::newton::NewtonNonlinearSolver, Bdf, OdeBuilder,
+        OdeEquations, OdeSolverMethod, Vector,
     };
 
     use super::DiffSl;
