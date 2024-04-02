@@ -79,7 +79,7 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
             let mass_jac_ref = self.mass_jac.borrow();
             let mass_jac = mass_jac_ref.deref();
             let c = *self.c.borrow().deref();
-            self.jac.replace(mass_jac - rhs_jac * c);
+            self.jac.replace(mass_jac - rhs_jac * scale(c));
         } else {
             self.jacobian_is_stale.replace(true);
         }
@@ -167,7 +167,7 @@ where
             let mass_jac_ref = self.mass_jac.borrow();
             let mass_jac = mass_jac_ref.deref();
             let c = *self.c.borrow().deref();
-            self.jac.replace(mass_jac - rhs_jac * c);
+            self.jac.replace(mass_jac - rhs_jac * scale(c));
             self.jacobian_is_stale.replace(false);
         }
         let number_of_jac_evals = *self.number_of_jac_evals.borrow() + 1;

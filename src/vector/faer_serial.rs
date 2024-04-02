@@ -27,8 +27,14 @@ impl<T: Scalar> Mul<Scale<T>> for Col<f64> {
         self * faer::scale(rhs.value().into())
     }
 }
-impl<T: Scalar> Div<Scale<T>> for Col<f64> {
+impl<T: Scalar> Mul<Scale<T>> for &Col<f64> {
     type Output = Col<f64>;
+    fn mul(self, rhs: Scale<T>) -> Self::Output {
+        self * faer::scale(rhs.value().into())
+    }
+}
+impl<'a, T: Scalar> Div<Scale<T>> for faer::Col<f64> {
+    type Output = faer::Col<f64>;
     fn div(self, rhs: Scale<T>) -> Self::Output {
         zipped!(self).map(|unzipped!(xi)| *xi / rhs.value().into())
     }

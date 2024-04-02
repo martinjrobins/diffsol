@@ -91,6 +91,13 @@ impl Mul<Scale<f64>> for Mat<f64> {
     }
 }
 
+impl Mul<Scale<f64>> for &Mat<f64> {
+    type Output = Mat<f64>;
+    fn mul(self, rhs: Scale<f64>) -> Self::Output {
+        self * faer::scale(rhs.value())
+    }
+}
+
 impl DenseMatrix for Mat<f64> {
     type View<'a> = MatRef<'a, f64>;
     type ViewMut<'a> = MatMut<'a, f64>;
@@ -105,24 +112,22 @@ impl DenseMatrix for Mat<f64> {
             Parallelism::None,
         )
     }
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {}
-    fn column_mut(&mut self, i: IndexType) -> ColMut<'_, f64> {
-        panic!("not implemented");
-        self.column_mut(i)
+    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
+        *y = faer::scale(alpha) * self * x + faer::scale(beta) * &*y;
+    }
+    fn column_mut(&mut self, i: usize) -> ColMut<'_, f64> {
+        self.get_mut(0..self.nrows(), i)
     }
 
-    fn columns_mut(&mut self, start: IndexType, nrows: IndexType) -> Self::ViewMut<'_> {
-        panic!("not implemented");
-        self.columns_mut(start, nrows)
+    fn columns_mut(&mut self, start: usize, ncols: usize) -> MatMut<'_, f64> {
+        self.get_mut(0..self.nrows(), start..ncols)
     }
 
-    fn column(&self, i: IndexType) -> ColRef<'_, f64> {
-        panic!("not implemented");
-        self.column(i)
+    fn column(&self, i: usize) -> ColRef<'_, f64> {
+        self.get(0..self.nrows(), i)
     }
-    fn columns(&self, start: IndexType, nrows: IndexType) -> Self::View<'_> {
-        panic!("not implemented");
-        self.columns(start, nrows)
+    fn columns(&self, start: usize, nrows: usize) -> MatRef<'_, f64> {
+        self.get(0..self.nrows(), start..nrows)
     }
 }
 

@@ -78,6 +78,13 @@ impl<T: Scalar> Mul<Scale<T>> for DMatrix<T> {
     }
 }
 
+impl<T: Scalar> Mul<Scale<T>> for &DMatrix<T> {
+    type Output = DMatrix<T>;
+    fn mul(self, rhs: Scale<T>) -> Self::Output {
+        self * rhs.value()
+    }
+}
+
 impl<T: Scalar> DenseMatrix for DMatrix<T> {
     type View<'a> = DMatrixView<'a, T>;
     type ViewMut<'a> = DMatrixViewMut<'a, T>;
@@ -93,15 +100,15 @@ impl<T: Scalar> DenseMatrix for DMatrix<T> {
         self.column_mut(i)
     }
 
-    fn columns_mut(&mut self, start: IndexType, nrows: IndexType) -> Self::ViewMut<'_> {
-        self.columns_mut(start, nrows)
+    fn columns_mut(&mut self, start: IndexType, ncols: IndexType) -> Self::ViewMut<'_> {
+        self.columns_mut(start, ncols)
     }
 
     fn column(&self, i: IndexType) -> DVectorView<'_, T> {
         self.column(i)
     }
-    fn columns(&self, start: IndexType, nrows: IndexType) -> Self::View<'_> {
-        self.columns(start, nrows)
+    fn columns(&self, start: IndexType, ncols: IndexType) -> Self::View<'_> {
+        self.columns(start, ncols)
     }
 }
 

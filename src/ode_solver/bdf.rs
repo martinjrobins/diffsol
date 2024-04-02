@@ -2,6 +2,7 @@ use std::ops::AddAssign;
 use std::rc::Rc;
 
 use anyhow::{anyhow, Result};
+use faer::{Col, Mat};
 use nalgebra::{DMatrix, DVector};
 use num_traits::{One, Pow, Zero};
 use serde::Serialize;
@@ -68,6 +69,30 @@ pub struct Bdf<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations> {
     statistics: BdfStatistics<Eqn::T>,
     state: Option<OdeSolverState<Eqn::M>>,
 }
+
+// impl<Eqn: OdeEquations<T = f64, V = Col<f64>, M = faer::Mat<f64>>> Default for Bdf<Mat<f64>, Eqn> {
+//     fn default() -> Self {
+//         let n = 1;
+//         let linear_solver = LU::default();
+//         let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<Eqn>>::new(
+//             linear_solver,
+//         ));
+//         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
+//         Self {
+//             ode_problem: None,
+//             nonlinear_solver,
+//             order: 1,
+//             n_equal_steps: 0,
+//             diff: Mat::zeros(n, Self::MAX_ORDER + 3), //DMatrix::<T>::zeros(n, Self::MAX_ORDER + 3),
+//             diff_tmp: Mat::zeros(n, Self::MAX_ORDER + 3),
+//             gamma: vec![f64::from(1.0); Self::MAX_ORDER + 1],
+//             alpha: vec![f64::from(1.0); Self::MAX_ORDER + 1],
+//             error_const: vec![f64::from(1.0); Self::MAX_ORDER + 1],
+//             u: Mat::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+//             statistics: BdfStatistics::default(),
+//         }
+//     }
+// }
 
 impl<T: Scalar, Eqn: OdeEquations<T = T, V = DVector<T>, M = DMatrix<T>> + 'static> Default
     for Bdf<DMatrix<T>, Eqn>
@@ -335,7 +360,7 @@ where
         scale_factor += problem.atol.as_ref();
 
         let f0 = problem.eqn.rhs(state.t, &state.y);
-        let hf0 = &f0 * state.h;
+        let hf0 = &f0 * scale(state.h);
         let y1 = &state.y + &hf0;
         let t1 = state.t + state.h;
         let f1 = problem.eqn.rhs(t1, &y1);
@@ -411,7 +436,7 @@ where
                     // and d = D^{k+1} y_{n+1} \approx h^{k+1} y^{k+1}
                     d = &y_new - &y_predict;
 
-                    let mut error = &d * self.error_const[self.order];
+                    let mut error = &d * scale(self.error_const[self.order]);
                     error.component_div_assign(&scale_y);
                     error_norm = error.norm();
                     let maxiter = self.nonlinear_solver.max_iter() as f64;

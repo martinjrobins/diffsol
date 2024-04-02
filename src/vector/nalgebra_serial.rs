@@ -51,6 +51,13 @@ impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
     }
 }
 
+impl<T: Scalar> Mul<Scale<T>> for &DVector<T> {
+    type Output = DVector<T>;
+    fn mul(self, rhs: Scale<T>) -> Self::Output {
+        self * rhs.value()
+    }
+}
+
 impl<T: Scalar> Mul<Scale<T>> for DVector<T> {
     type Output = DVector<T>;
     fn mul(self, rhs: Scale<T>) -> Self::Output {

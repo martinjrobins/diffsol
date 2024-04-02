@@ -1,5 +1,5 @@
 use std::fmt::Debug;
-use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
 use crate::scalar::Scale;
 use crate::{IndexType, Scalar, Vector};
@@ -73,12 +73,13 @@ impl<M, Rhs> MatrixMutOpsByValue<Rhs> for M where M: MatrixCommon + AddAssign<Rh
 
 /// A trait allowing for references to implement matrix operations
 pub trait MatrixRef<M: MatrixCommon>:
-    MatrixOpsByValue<M, M> + for<'a> MatrixOpsByValue<&'a M, M> + Mul<M::T, Output = M>
+    MatrixOpsByValue<M, M> + for<'a> MatrixOpsByValue<&'a M, M> + Mul<Scale<M::T>, Output = M>
 {
 }
 
 impl<RefT, M: MatrixCommon> MatrixRef<M> for RefT where
-    RefT: MatrixOpsByValue<M, M> + for<'a> MatrixOpsByValue<&'a M, M> + Mul<M::T, Output = M>
+    RefT:
+        MatrixOpsByValue<M, M> + for<'a> MatrixOpsByValue<&'a M, M> + Mul<Scale<M::T>, Output = M>
 {
 }
 
@@ -154,7 +155,7 @@ pub trait DenseMatrix:
     /// Perform a matrix-matrix multiplication `self = alpha * a * b + beta * self`, where `alpha` and `beta` are scalars, and `a` and `b` are matrices
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T);
 
-    /// Perform a matrix-vector multiplication `y = self * x + beta * y`.
+    /// Computes self = alpha * a * x + beta * self, where a is a matrix, x a vector, and alpha, beta two scalars.
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V);
 
     /// Get a matrix view of the columns starting at `start` and ending at `start + ncols`
@@ -164,7 +165,7 @@ pub trait DenseMatrix:
     fn column(&self, i: IndexType) -> <Self::V as Vector>::View<'_>;
 
     /// Get a mutable matrix view of the columns starting at `start` and ending at `start + ncols`
-    fn columns_mut(&mut self, start: IndexType, nrows: IndexType) -> Self::ViewMut<'_>;
+    fn columns_mut(&mut self, start: IndexType, ncols: IndexType) -> Self::ViewMut<'_>;
 
     /// Get a mutable vector view of the column `i`
     fn column_mut(&mut self, i: IndexType) -> <Self::V as Vector>::ViewMut<'_>;
