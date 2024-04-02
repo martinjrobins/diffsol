@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn build_coloring() {
-        let test_triplets = vec![
+        let test_triplets = [
             vec![(0, 0, 1.0), (1, 1, 1.0)],
             vec![(0, 0, 1.0), (0, 1, 1.0), (1, 1, 1.0)],
             vec![(1, 1, 1.0)],

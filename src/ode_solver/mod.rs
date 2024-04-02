@@ -2,18 +2,14 @@ use anyhow::Context;
 use std::rc::Rc;
 
 use crate::{
-    op::{filter::FilterCallable, ode_rhs::OdeRhs, Op},
+    op::{filter::FilterCallable, ode_rhs::OdeRhs},
     Matrix, NonLinearSolver, OdeEquations, SolverProblem, Vector, VectorIndex,
 };
 
 use anyhow::Result;
 
-use self::equations::{OdeSolverEquations, OdeSolverEquationsMassI};
-
-#[cfg(feature = "diffsl")]
-use self::diffsl::DiffSl;
-
 pub mod bdf;
+pub mod builder;
 pub mod equations;
 pub mod test_models;
 
@@ -157,172 +153,6 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
         let eqn = Rc::get_mut(&mut self.eqn).context("Failed to get mutable reference to equations, is there a solver created with this problem?")?;
         eqn.set_params(p);
         Ok(())
-    }
-}
-
-pub struct OdeBuilder {
-    t0: f64,
-    h0: f64,
-    rtol: f64,
-    atol: Vec<f64>,
-    p: Vec<f64>,
-    use_coloring: bool,
-}
-
-impl Default for OdeBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl OdeBuilder {
-    pub fn new() -> Self {
-        Self {
-            t0: 0.0,
-            h0: 1.0,
-            rtol: 1e-6,
-            atol: vec![1e-6],
-            p: vec![],
-            use_coloring: false,
-        }
-    }
-    pub fn t0(mut self, t0: f64) -> Self {
-        self.t0 = t0;
-        self
-    }
-    pub fn h0(mut self, h0: f64) -> Self {
-        self.h0 = h0;
-        self
-    }
-    pub fn rtol(mut self, rtol: f64) -> Self {
-        self.rtol = rtol;
-        self
-    }
-    pub fn atol<V, T>(mut self, atol: V) -> Self
-    where
-        V: IntoIterator<Item = T>,
-        f64: From<T>,
-    {
-        self.atol = atol.into_iter().map(|x| f64::from(x)).collect();
-        self
-    }
-    pub fn p<V, T>(mut self, p: V) -> Self
-    where
-        V: IntoIterator<Item = T>,
-        f64: From<T>,
-    {
-        self.p = p.into_iter().map(|x| f64::from(x)).collect();
-        self
-    }
-    pub fn use_coloring(mut self, use_coloring: bool) -> Self {
-        self.use_coloring = use_coloring;
-        self
-    }
-
-    fn build_atol<V: Vector>(atol: Vec<f64>, nstates: usize) -> Result<V> {
-        if atol.len() == 1 {
-            Ok(V::from_element(nstates, V::T::from(atol[0])))
-        } else if atol.len() != nstates {
-            Err(anyhow::anyhow!(
-                "atol must have length 1 or equal to the number of states"
-            ))
-        } else {
-            let mut v = V::zeros(nstates);
-            for (i, &a) in atol.iter().enumerate() {
-                v[i] = V::T::from(a);
-            }
-            Ok(v)
-        }
-    }
-
-    fn build_p<V: Vector>(p: Vec<f64>) -> V {
-        let mut v = V::zeros(p.len());
-        for (i, &p) in p.iter().enumerate() {
-            v[i] = V::T::from(p);
-        }
-        v
-    }
-
-    #[allow(clippy::type_complexity)]
-    pub fn build_ode_with_mass<M, F, G, H, I>(
-        self,
-        rhs: F,
-        rhs_jac: G,
-        mass: H,
-        init: I,
-    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, F, G, H, I>>>
-    where
-        M: Matrix,
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
-        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        H: Fn(&M::V, &M::V, M::T, &mut M::V),
-        I: Fn(&M::V, M::T) -> M::V,
-    {
-        let p = Self::build_p(self.p);
-        let eqn = OdeSolverEquations::new_ode_with_mass(
-            rhs,
-            rhs_jac,
-            mass,
-            init,
-            p,
-            M::T::from(self.t0),
-            self.use_coloring,
-        );
-        let atol = Self::build_atol(self.atol, eqn.nstates())?;
-        Ok(OdeSolverProblem::new(
-            eqn,
-            M::T::from(self.rtol),
-            atol,
-            M::T::from(self.t0),
-            M::T::from(self.h0),
-        ))
-    }
-
-    pub fn build_ode<M, F, G, I>(
-        self,
-        rhs: F,
-        rhs_jac: G,
-        init: I,
-    ) -> Result<OdeSolverProblem<OdeSolverEquationsMassI<M, F, G, I>>>
-    where
-        M: Matrix,
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
-        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        I: Fn(&M::V, M::T) -> M::V,
-    {
-        let p = Self::build_p(self.p);
-        let eqn = OdeSolverEquationsMassI::new_ode(
-            rhs,
-            rhs_jac,
-            init,
-            p,
-            M::T::from(self.t0),
-            self.use_coloring,
-        );
-        let atol = Self::build_atol(self.atol, eqn.nstates())?;
-        Ok(OdeSolverProblem::new(
-            eqn,
-            M::T::from(self.rtol),
-            atol,
-            M::T::from(self.t0),
-            M::T::from(self.h0),
-        ))
-    }
-
-    #[cfg(feature = "diffsl")]
-    pub fn build_diffsl(self, source: &str) -> Result<OdeSolverProblem<DiffSl>> {
-        type V = diffsl::V;
-        type T = diffsl::T;
-        let p = Self::build_p::<V>(self.p);
-        let eqn = DiffSl::new(source, p, self.use_coloring)?;
-        let atol = Self::build_atol::<V>(self.atol, eqn.nstates())?;
-        Ok(OdeSolverProblem::new(
-            eqn,
-            T::from(self.rtol),
-            atol,
-            T::from(self.t0),
-            T::from(self.h0),
-        ))
     }
 }
 

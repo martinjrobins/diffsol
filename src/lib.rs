@@ -56,7 +56,8 @@ use matrix::{DenseMatrix, Matrix, MatrixViewMut};
 pub use nonlinear_solver::newton::NewtonNonlinearSolver;
 use nonlinear_solver::NonLinearSolver;
 pub use ode_solver::{
-    bdf::Bdf, equations::OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+    bdf::Bdf, builder::OdeBuilder, equations::OdeEquations, OdeSolverMethod, OdeSolverProblem,
+    OdeSolverState,
 };
 use op::NonLinearOp;
 use scalar::{IndexType, Scalar, Scale};
@@ -68,7 +69,9 @@ pub use scalar::scale;
 #[cfg(test)]
 mod tests {
 
-    use crate::{ode_solver::OdeBuilder, vector::Vector, Bdf, OdeSolverMethod, OdeSolverState};
+    use crate::{
+        ode_solver::builder::OdeBuilder, vector::Vector, Bdf, OdeSolverMethod, OdeSolverState,
+    };
 
     // WARNING: if this test fails and you make a change to the code, you should update the README.md file as well!!!
     #[test]
