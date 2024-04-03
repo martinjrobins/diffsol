@@ -1,3 +1,51 @@
+//! # DiffSol
+//!
+//! DiffSol is a library for solving differential equations. It provides a simple interface to solve ODEs and semi-explicit DAEs.
+//!
+//! ## Getting Started
+//!
+//! To create a new problem, use the [OdeBuilder] struct. You can set the initial time, initial step size, relative tolerance, absolute tolerance, and parameters,
+//! or leave them at their default values. Then, call the [OdeBuilder::build_ode] method with the ODE equations, or the [OdeBuilder::build_ode_with_mass] method
+//! with the ODE equations and the mass matrix equations.
+//!
+//! You will also need to choose a matrix type to use. DiffSol can use the [nalgebra](https://nalgebra.org) `DMatrix` type, or any other type that implements the
+//! [Matrix] trait. You can also use the [sundials](https://computation.llnl.gov/projects/sundials) library for the matrix and vector types (see [SundialsMatrix]).
+//!
+//! To solve the problem, you need to choose a solver. DiffSol provides a pure rust [Bdf] solver, or you can use the [SundialsIda] solver from the [sundials] library.
+//! See the [OdeSolverMethod] trait for a more detailed description of the available methods on the solver.
+//!
+//! ```rust
+//! use diffsol::{OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod};
+//! type M = nalgebra::DMatrix<f64>;
+//!
+//! let problem = OdeBuilder::new()
+//!   .rtol(1e-6)
+//!   .p([0.1])
+//!   .build_ode::<M, _, _, _>(
+//!     // dy/dt = -ay
+//!     |x, p, t, y| {
+//!       y[0] = -p[0] * x[0];
+//!     },
+//!     // Jv = -av
+//!     |x, p, t, v, y| {
+//!       y[0] = -p[0] * v[0];
+//!     },
+//!     // y(0) = 1
+//!    |p, t| {
+//!       nalgebra::DVector::from_vec(vec![1.0])
+//!    },
+//!   ).unwrap();
+//!
+//! let mut solver = Bdf::default();
+//! let t = 0.4;
+//! let mut state = OdeSolverState::new(&problem);
+//! solver.set_problem(&mut state, &problem);
+//! while state.t <= t {
+//!     solver.step(&mut state).unwrap();
+//! }
+//! let y = solver.interpolate(&state, t);
+//! ```
+
 #[cfg(feature = "diffsl-llvm10")]
 pub extern crate diffsl10_0 as diffsl;
 #[cfg(feature = "diffsl-llvm11")]
