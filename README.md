@@ -111,7 +111,7 @@ state, we can use the following code:
 
 ```rust
 let mut state = OdeSolverState::new(&problem);
-solver.set_problem(&mut state, problem);
+solver.set_problem(&mut state, &problem);
 while state.t <= t {
     solver.step(&mut state).unwrap();
 }
