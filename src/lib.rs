@@ -11,7 +11,7 @@
 //! You will also need to choose a matrix type to use. DiffSol can use the [nalgebra](https://nalgebra.org) `DMatrix` type, or any other type that implements the
 //! [Matrix] trait. You can also use the [sundials](https://computation.llnl.gov/projects/sundials) library for the matrix and vector types (see [SundialsMatrix]).
 //!
-//! To solve the problem, you need to choose a solver. DiffSol provides a pure rust [Bdf] solver, or you can use the [SundialsIda] solver from the [sundials] library.
+//! To solve the problem, you need to choose a solver. DiffSol provides a pure rust [Bdf] solver, or you can use the [SundialsIda] solver from the sundials library (requires the `sundials` feature).
 //! See the [OdeSolverMethod] trait for a more detailed description of the available methods on the solver.
 //!
 //! ```rust

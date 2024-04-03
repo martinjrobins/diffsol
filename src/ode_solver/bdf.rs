@@ -40,20 +40,20 @@ impl<T: Scalar> Default for BdfStatistics<T> {
 }
 
 /// Implements a Backward Difference formula (BDF) implicit multistep integrator.
-/// The basic algorithm is derived in [1]. This
+/// The basic algorithm is derived in \[1\]. This
 /// particular implementation follows that implemented in the Matlab routine ode15s
-/// described in [2] and the SciPy implementation
-/// [3], which features the NDF formulas for improved
+/// described in \[2\] and the SciPy implementation
+/// /[3/], which features the NDF formulas for improved
 /// stability with associated differences in the error constants, and calculates
 /// the jacobian at J(t_{n+1}, y^0_{n+1}). This implementation was based on that
-/// implemented in the SciPy library [3], which also mainly
-/// follows [2] but uses the more standard Jacobian update.
+/// implemented in the SciPy library \[3\], which also mainly
+/// follows \[2\] but uses the more standard Jacobian update.
 ///
 /// # References
 ///
-/// [1] Byrne, G. D., & Hindmarsh, A. C. (1975). A polyalgorithm for the numerical solution of ordinary differential equations. ACM Transactions on Mathematical Software (TOMS), 1(1), 71-96.
-/// [2] Shampine, L. F., & Reichelt, M. W. (1997). The matlab ode suite. SIAM journal on scientific computing, 18(1), 1-22.
-/// [3] Virtanen, P., Gommers, R., Oliphant, T. E., Haberland, M., Reddy, T., Cournapeau, D., ... & Van Mulbregt, P. (2020). SciPy 1.0: fundamental algorithms for scientific computing in Python. Nature methods, 17(3), 261-272.
+/// \[1\] Byrne, G. D., & Hindmarsh, A. C. (1975). A polyalgorithm for the numerical solution of ordinary differential equations. ACM Transactions on Mathematical Software (TOMS), 1(1), 71-96.
+/// \[2\] Shampine, L. F., & Reichelt, M. W. (1997). The matlab ode suite. SIAM journal on scientific computing, 18(1), 1-22.
+/// \[3\] Virtanen, P., Gommers, R., Oliphant, T. E., Haberland, M., Reddy, T., Cournapeau, D., ... & Van Mulbregt, P. (2020). SciPy 1.0: fundamental algorithms for scientific computing in Python. Nature methods, 17(3), 261-272.
 pub struct Bdf<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations> {
     nonlinear_solver: Box<dyn NonLinearSolver<BdfCallable<Eqn>>>,
     ode_problem: Option<OdeSolverProblem<Eqn>>,
