@@ -8,11 +8,11 @@ use serde::Serialize;
 
 use crate::{
     matrix::MatrixRef, op::ode::BdfCallable, scalar::scale, DenseMatrix, IndexType, MatrixViewMut,
-    NewtonNonlinearSolver, NonLinearSolver, Scalar, SolverProblem, Vector, VectorRef, VectorView,
-    VectorViewMut, LU,
+    NewtonNonlinearSolver, NonLinearSolver, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+    Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut, LU,
 };
 
-use super::{equations::OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState};
+use super::equations::OdeEquations;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct BdfStatistics<T: Scalar> {

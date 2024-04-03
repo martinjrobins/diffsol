@@ -1,7 +1,6 @@
 use crate::{
-    ode_solver::{OdeSolverProblem, OdeSolverSolution},
-    scalar::scale,
-    DenseMatrix, OdeBuilder, OdeEquations, Vector,
+    ode_solver::problem::OdeSolverSolution, scalar::scale, DenseMatrix, OdeBuilder, OdeEquations,
+    OdeSolverProblem, Vector,
 };
 use num_traits::One;
 use std::ops::MulAssign;

@@ -1,9 +1,8 @@
 use std::rc::Rc;
 
 use crate::{
-    ode_solver::OdeSolverProblem,
     op::{linearise::LinearisedOp, Op},
-    IndexType, NonLinearOp, OdeEquations,
+    IndexType, NonLinearOp, OdeEquations, OdeSolverProblem,
 };
 
 pub struct SolverStatistics {

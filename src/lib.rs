@@ -56,8 +56,8 @@ use matrix::{DenseMatrix, Matrix, MatrixViewMut};
 pub use nonlinear_solver::newton::NewtonNonlinearSolver;
 use nonlinear_solver::NonLinearSolver;
 pub use ode_solver::{
-    bdf::Bdf, builder::OdeBuilder, equations::OdeEquations, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState,
+    bdf::Bdf, builder::OdeBuilder, equations::OdeEquations, method::OdeSolverMethod,
+    method::OdeSolverState, problem::OdeSolverProblem,
 };
 use op::NonLinearOp;
 use scalar::{IndexType, Scalar, Scale};
