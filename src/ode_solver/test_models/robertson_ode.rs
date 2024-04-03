@@ -1,6 +1,6 @@
 use crate::{
-    ode_solver::{OdeSolverProblem, OdeSolverSolution},
-    Matrix, OdeBuilder, OdeEquations, Vector,
+    ode_solver::problem::OdeSolverSolution, Matrix, OdeBuilder, OdeEquations, OdeSolverProblem,
+    Vector,
 };
 
 pub fn robertson_ode<M: Matrix + 'static>(

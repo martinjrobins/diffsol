@@ -1,16 +1,8 @@
-use anyhow::Context;
-use std::rc::Rc;
-
-use crate::{
-    op::{filter::FilterCallable, ode_rhs::OdeRhs},
-    Matrix, NonLinearSolver, OdeEquations, SolverProblem, Vector, VectorIndex,
-};
-
-use anyhow::Result;
-
 pub mod bdf;
 pub mod builder;
 pub mod equations;
+pub mod method;
+pub mod problem;
 pub mod test_models;
 
 #[cfg(feature = "diffsl")]
@@ -19,176 +11,10 @@ pub mod diffsl;
 #[cfg(feature = "sundials")]
 pub mod sundials;
 
-pub trait OdeSolverMethod<Eqn: OdeEquations> {
-    fn problem(&self) -> Option<&OdeSolverProblem<Eqn>>;
-    fn set_problem(&mut self, state: &mut OdeSolverState<Eqn::M>, problem: &OdeSolverProblem<Eqn>);
-    fn step(&mut self, state: &mut OdeSolverState<Eqn::M>) -> Result<()>;
-    fn interpolate(&self, state: &OdeSolverState<Eqn::M>, t: Eqn::T) -> Eqn::V;
-    fn solve(&mut self, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Result<Eqn::V> {
-        let mut state = OdeSolverState::new(problem);
-        self.set_problem(&mut state, problem);
-        while state.t <= t {
-            self.step(&mut state)?;
-        }
-        Ok(self.interpolate(&state, t))
-    }
-    fn make_consistent_and_solve<RS: NonLinearSolver<FilterCallable<OdeRhs<Eqn>>>>(
-        &mut self,
-        problem: &OdeSolverProblem<Eqn>,
-        t: Eqn::T,
-        root_solver: &mut RS,
-    ) -> Result<Eqn::V> {
-        let mut state = OdeSolverState::new_consistent(problem, root_solver)?;
-        self.set_problem(&mut state, problem);
-        while state.t <= t {
-            self.step(&mut state)?;
-        }
-        Ok(self.interpolate(&state, t))
-    }
-}
-
-pub struct OdeSolverState<M: Matrix> {
-    pub y: M::V,
-    pub t: M::T,
-    pub h: M::T,
-    _phantom: std::marker::PhantomData<M>,
-}
-
-impl<M: Matrix> OdeSolverState<M> {
-    pub fn new<Eqn>(ode_problem: &OdeSolverProblem<Eqn>) -> Self
-    where
-        Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
-    {
-        let t = ode_problem.t0;
-        let h = ode_problem.h0;
-        let y = ode_problem.eqn.init(t);
-        Self {
-            y,
-            t,
-            h,
-            _phantom: std::marker::PhantomData,
-        }
-    }
-    fn new_consistent<Eqn, S>(
-        ode_problem: &OdeSolverProblem<Eqn>,
-        root_solver: &mut S,
-    ) -> Result<Self>
-    where
-        Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
-        S: NonLinearSolver<FilterCallable<OdeRhs<Eqn>>> + ?Sized,
-    {
-        let t = ode_problem.t0;
-        let h = ode_problem.h0;
-        let indices = ode_problem.eqn.algebraic_indices();
-        let mut y = ode_problem.eqn.init(t);
-        if indices.len() == 0 {
-            return Ok(Self {
-                y,
-                t,
-                h,
-                _phantom: std::marker::PhantomData,
-            });
-        }
-        let mut y_filtered = y.filter(&indices);
-        let atol = Rc::new(ode_problem.atol.as_ref().filter(&indices));
-        let rhs = Rc::new(OdeRhs::new(ode_problem.eqn.clone()));
-        let f = Rc::new(FilterCallable::new(rhs, &y, indices));
-        let rtol = ode_problem.rtol;
-        let init_problem = SolverProblem::new(f, t, atol, rtol);
-        root_solver.set_problem(init_problem);
-        root_solver.solve_in_place(&mut y_filtered)?;
-        let init_problem = root_solver.problem().unwrap();
-        let indices = init_problem.f.indices();
-        y.scatter_from(&y_filtered, indices);
-        Ok(Self {
-            y,
-            t,
-            h,
-            _phantom: std::marker::PhantomData,
-        })
-    }
-}
-
-pub struct OdeSolverProblem<Eqn: OdeEquations> {
-    pub eqn: Rc<Eqn>,
-    pub rtol: Eqn::T,
-    pub atol: Rc<Eqn::V>,
-    pub t0: Eqn::T,
-    pub h0: Eqn::T,
-}
-
-// impl clone
-impl<Eqn: OdeEquations> Clone for OdeSolverProblem<Eqn> {
-    fn clone(&self) -> Self {
-        Self {
-            eqn: self.eqn.clone(),
-            rtol: self.rtol,
-            atol: self.atol.clone(),
-            t0: self.t0,
-            h0: self.h0,
-        }
-    }
-}
-
-impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
-    pub fn default_rtol() -> Eqn::T {
-        Eqn::T::from(1e-6)
-    }
-    pub fn default_atol(nstates: usize) -> Eqn::V {
-        Eqn::V::from_element(nstates, Eqn::T::from(1e-6))
-    }
-    pub fn new(eqn: Eqn, rtol: Eqn::T, atol: Eqn::V, t0: Eqn::T, h0: Eqn::T) -> Self {
-        let eqn = Rc::new(eqn);
-        let atol = Rc::new(atol);
-        Self {
-            eqn,
-            rtol,
-            atol,
-            t0,
-            h0,
-        }
-    }
-
-    pub fn set_params(&mut self, p: Eqn::V) -> Result<()> {
-        let eqn = Rc::get_mut(&mut self.eqn).context("Failed to get mutable reference to equations, is there a solver created with this problem?")?;
-        eqn.set_params(p);
-        Ok(())
-    }
-}
-
-pub struct OdeSolverSolutionPoint<V: Vector> {
-    pub state: V,
-    pub t: V::T,
-}
-
-pub struct OdeSolverSolution<V: Vector> {
-    pub solution_points: Vec<OdeSolverSolutionPoint<V>>,
-}
-
-impl<V: Vector> OdeSolverSolution<V> {
-    pub fn push(&mut self, state: V, t: V::T) {
-        // find the index to insert the new point keeping the times sorted
-        let index = self
-            .solution_points
-            .iter()
-            .position(|x| x.t > t)
-            .unwrap_or(self.solution_points.len());
-        // insert the new point at that index
-        self.solution_points
-            .insert(index, OdeSolverSolutionPoint { state, t });
-    }
-}
-
-impl<V: Vector> Default for OdeSolverSolution<V> {
-    fn default() -> Self {
-        Self {
-            solution_points: Vec::new(),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use self::problem::OdeSolverSolution;
+
     use super::test_models::{
         exponential_decay::exponential_decay_problem,
         exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem,
@@ -196,8 +22,13 @@ mod tests {
     };
     use super::*;
     use crate::linear_solver::lu::LU;
+    use crate::matrix::Matrix;
     use crate::nonlinear_solver::newton::NewtonNonlinearSolver;
+    use crate::op::filter::FilterCallable;
+    use crate::op::ode_rhs::OdeRhs;
     use crate::scalar::scale;
+    use crate::Vector;
+    use crate::{NonLinearSolver, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState};
     use tests::bdf::Bdf;
     use tests::test_models::dydt_y2::dydt_y2_problem;
     use tests::test_models::gaussian_decay::gaussian_decay_problem;

@@ -1,8 +1,8 @@
 use crate::{
     matrix::{DenseMatrix, MatrixRef},
-    ode_solver::{equations::OdeEquations, OdeSolverProblem},
+    ode_solver::equations::OdeEquations,
     scalar::scale,
-    IndexType, Matrix, Vector, VectorRef,
+    IndexType, Matrix, OdeSolverProblem, Vector, VectorRef,
 };
 use num_traits::{One, Zero};
 use std::{
