@@ -36,32 +36,47 @@ impl OdeEquationsStatistics {
     }
 }
 
+/// this is the trait that defines the ODE equations of the form
+///
+/// $$
+///  M \frac{dy}{dt} = F(t, y, p)
+///  y(t_0) = y_0(t_0, p)
+/// $$
+///
+/// The ODE equations are defined by the right-hand side function $F(t, y, p)$, the initial condition $y_0(t_0, p)$, and the mass matrix $M$.
 pub trait OdeEquations: Op {
-    /// This must be called first
+    /// The parameters of the ODE equations are assumed to be constant. This function sets the parameters to the given value before solving the ODE.
+    /// Note that `set_params` must always be called before calling any of the other functions in this trait.
     fn set_params(&mut self, p: Self::V);
 
-    /// calculates $F(y)$ where $y$ is given in `y` and stores the result in `rhs_y`
+    /// calculates $F(t, y, p)$ where $y$ is given in `y` and stores the result in `rhs_y`. Note that the parameter vector $p$ is assumed to be
+    /// already provided via [Self::set_params()]
     fn rhs_inplace(&self, t: Self::T, y: &Self::V, rhs_y: &mut Self::V);
 
-    /// calculates $y = J(x)v$
+    /// calculates $y = J(x)v$, where $J(x)$ is the Jacobian matrix of the right-hand side function $F(t, y, p)$ at $y = x$. The result is stored in `y`.
     fn rhs_jac_inplace(&self, t: Self::T, x: &Self::V, v: &Self::V, y: &mut Self::V);
 
-    /// initializes `y` with the initial condition
+    /// returns the initial condition, i.e. $y(t_0, p)$
     fn init(&self, t: Self::T) -> Self::V;
 
+    /// calculates the right-hand side function $F(t, y, p)$ where $y$ is given in `y`. The result is allocated and returned.
+    /// The default implementation calls [Self::rhs_inplace()] and allocates a new vector for the result.
     fn rhs(&self, t: Self::T, y: &Self::V) -> Self::V {
         let mut rhs_y = Self::V::zeros(self.nstates());
         self.rhs_inplace(t, y, &mut rhs_y);
         rhs_y
     }
 
+    /// calculates $y = J(x)v$, where $J(x)$ is the Jacobian matrix of the right-hand side function $F(t, y, p)$ at $y = x$. The result is allocated and returned.
+    /// The default implementation calls [Self::rhs_jac_inplace()] and allocates a new vector for the result.
     fn jac_mul(&self, t: Self::T, x: &Self::V, v: &Self::V) -> Self::V {
         let mut rhs_jac_y = Self::V::zeros(self.nstates());
         self.rhs_jac_inplace(t, x, v, &mut rhs_jac_y);
         rhs_jac_y
     }
 
-    /// rhs jacobian matrix J(x), re-use jacobian calculation from NonLinearOp
+    /// calculate and return the jacobian matrix $J(x)$ of the right-hand side function $F(t, y, p)$ at $y = x$.
+    /// The default implementation calls [Self::rhs_jac_inplace()] and uses the jacobian calculation in [NonLinearOp].
     fn jacobian_matrix(&self, x: &Self::V, t: Self::T) -> Self::M {
         let rhs_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y_rhs: &mut Self::V| {
             self.rhs_inplace(t, x, y_rhs);
@@ -81,28 +96,39 @@ pub trait OdeEquations: Op {
         closure.jacobian(x, t)
     }
 
-    /// mass matrix action: y = M(t)
+    /// calculate the action of the mass matrix $M$ on the vector $v$ at time $t$, i,e. $y = M(t)v$.
+    /// The default implementation assumes that the mass matrix is the identity matrix and returns $y = v$.
     fn mass_inplace(&self, _t: Self::T, v: &Self::V, y: &mut Self::V) {
         // assume identity mass matrix
         y.copy_from(v);
     }
 
-    /// returns the indices of the algebraic state variables
+    /// For semi-explicit DAEs (with zeros on the diagonal of the mass matrix), this function
+    /// returns the indices of the algebraic state variables. This is used to determine which
+    /// components of the solution vector are algebraic, and therefore must be solved for
+    /// when calculating the initial condition to make sure that the algebraic constraints are satisfied.
+    /// The default implementation returns an empty vector, assuming that the mass matrix is the identity matrix.
     fn algebraic_indices(&self) -> <Self::V as Vector>::Index {
         // assume identity mass matrix
         <Self::V as Vector>::Index::zeros(0)
     }
 
+    /// calculate and return the mass matrix $M(t)$ at time $t$.
+    /// The default implementation assumes that the mass matrix is the identity matrix and returns the identity matrix.
     fn mass_matrix(&self, _t: Self::T) -> Self::M {
         // assume identity mass matrix
         Self::M::from_diagonal(&Self::V::from_element(self.nstates(), Self::T::one()))
     }
 
+    /// calculate and return the statistics of the ODE equation object (i.e. how many times the right-hand side function was evaluated, how many times the jacobian was multiplied, etc.)
+    /// The default implementation returns an empty statistics object.
     fn get_statistics(&self) -> OdeEquationsStatistics {
         OdeEquationsStatistics::new()
     }
 }
 
+/// This struct implements the ODE equation trait [OdeEquations] for a given right-hand side function, jacobian function, mass matrix function, and initial condition function.
+/// These functions are provided as closures, and the parameters are assumed to be constant.
 pub struct OdeSolverEquations<M, F, G, H, I>
 where
     M: Matrix,
@@ -179,7 +205,6 @@ where
     }
 }
 
-// impl Op
 impl<M, F, G, H, I> Op for OdeSolverEquations<M, F, G, H, I>
 where
     M: Matrix,
@@ -288,6 +313,9 @@ where
     }
 }
 
+/// This struct implements the ODE equation trait [OdeEquations] for a given right-hand side function, jacobian function, and initial condition function.
+/// These functions are provided as closures, and the parameters are assumed to be constant.
+/// The mass matrix is assumed to be the identity matrix.
 pub struct OdeSolverEquationsMassI<M, F, G, I>
 where
     M: Matrix,

@@ -10,6 +10,7 @@ pub struct SolverStatistics {
     pub nmaxiter: IndexType,
 }
 
+/// A generic linear or nonlinear solver problem, containing the function to solve $f(t, y)$, the current time $t$, and the relative and absolute tolerances.
 pub struct SolverProblem<C: Op> {
     pub f: Rc<C>,
     pub t: C::T,
@@ -46,6 +47,8 @@ impl<C: Op> SolverProblem<C> {
 }
 
 impl<C: NonLinearOp> SolverProblem<C> {
+    /// Create a new solver problem from a nonlinear operator that solves for the linearised operator.
+    /// That is, if the original function is $f(t, y)$, this function creates a new problem $f'$ that solves $f' = J(x) v$, where $J(x)$ is the Jacobian of $f$ at $x$.
     pub fn linearise(&self, x: &C::V) -> SolverProblem<LinearisedOp<C>> {
         let linearised_f = Rc::new(LinearisedOp::new(self.f.clone(), x));
         SolverProblem::new_from_problem(linearised_f, self)
