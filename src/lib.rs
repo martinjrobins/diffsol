@@ -58,15 +58,18 @@
 //! For more information on the DiffSL language, see the [DiffSL documentation](https://martinjrobins.github.io/diffsl/)
 //!
 //! ```rust
-//! use diffsol::{OdeBuilder, Bdf, OdeSolverMethod};
-//! let code = "
-//!     u { y = 1 }
-//!     F { -y }
-//!     out { y }
-//! ";
-//! let problem = OdeBuilder::new().build_diffsl(code).unwrap();
-//! let mut solver = Bdf::default();
-//! let _y = solver.solve(&problem, 1.0).unwrap();
+//! #[cfg(feature = "diffsl-llvm14")]
+//! {
+//!     use diffsol::{OdeBuilder, Bdf, OdeSolverMethod};
+//!     let code = "
+//!         u { y = 1 }
+//!         F { -y }
+//!         out { y }
+//!     ";
+//!     let problem = OdeBuilder::new().build_diffsl(code).unwrap();
+//!     let mut solver = Bdf::default();
+//!     let _y = solver.solve(&problem, 1.0).unwrap();
+//! }
 //! ```
 //!
 //! ## Custom ODE problems
@@ -88,8 +91,8 @@
 //!
 //! ## Jacobian and Mass matrix calculation
 //!
-//! Via [OdeEquations], the user provides the action of the jacobian on a vector $J(x) v$. By default DiffSol uses this to generate a jacobian matrix for the ODE solver.
-//! Generally this requires $n$ evaluations of the jacobian action for a system of size $n$, so it is often more efficient if the user can provide the jacobian matrix directly
+//! Via [OdeEquations], the user provides the action of the jacobian on a vector `J(x) v`. By default DiffSol uses this to generate a jacobian matrix for the ODE solver.
+//! Generally this requires `n` evaluations of the jacobian action for a system of size `n`, so it is often more efficient if the user can provide the jacobian matrix directly
 //! by implementing the [OdeEquations::jacobian_matrix] and the [OdeEquations::mass_matrix] (is applicable) functions.
 //!
 //! DiffSol also provides an experimental feature to calculate sparse jacobians more efficiently by automatically detecting the sparsity pattern of the jacobian and using
