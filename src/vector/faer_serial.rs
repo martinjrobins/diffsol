@@ -4,7 +4,7 @@ use faer::{unzipped, zipped, Col, ColMut, ColRef};
 
 use crate::{scalar::Scale, IndexType, Scalar};
 
-use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
+use crate::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
 macro_rules! impl_op_for_faer_struct {
     ($struct:ident, $trait_name:ident, $func_name:ident) => {

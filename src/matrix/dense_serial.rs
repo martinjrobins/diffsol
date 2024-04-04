@@ -3,7 +3,7 @@ use nalgebra::{DMatrix, DMatrixView, DMatrixViewMut, DVector, DVectorView, DVect
 
 use crate::{IndexType, Scalar};
 
-use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
+use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 
 impl<'a, T: Scalar> MatrixCommon for DMatrixViewMut<'a, T> {
     type V = DVector<T>;
