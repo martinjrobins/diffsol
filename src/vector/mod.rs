@@ -101,8 +101,10 @@ pub trait VectorView<'a>:
 pub trait Vector:
     VectorOpsByValue<Self>
     + for<'b> VectorOpsByValue<&'b Self>
-    + for<'a> VectorOpsByValue<Self::View<'a>>
-    + for<'a, 'b> VectorOpsByValue<&'b Self::View<'a>>
+    // TODO: commenting out these because they cause a compiler hang (https://github.com/martinjrobins/diffsol/issues/3)
+    // TODO: replace when this is fixed
+    //+ for<'a> VectorOpsByValue<Self::View<'a>>
+    //+ for<'a, 'b> VectorOpsByValue<&'b Self::View<'a>>
     + Mul<Scale<Self::T>, Output = Self>
     + Div<Scale<Self::T>, Output = Self>
     + VectorMutOpsByValue<Self>
