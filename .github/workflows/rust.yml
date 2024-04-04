@@ -30,12 +30,15 @@ jobs:
         matrix:
           toolchain:
             - stable
-            - beta
-            - nightly
           os:
             - ubuntu-latest
             - macos-latest
             - windows-latest
+          include:
+            - toolchain: beta
+              os: ubuntu-latest
+            - toolchain: nightly
+              os: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
