@@ -53,24 +53,9 @@
 //!
 //! DiffSL is a domain-specific language for specifying differential equations <https://github.com/martinjrobins/diffsl>. It uses the LLVM compiler framwork
 //! to compile the equations to efficient machine code and uses the EnzymeAD library to compute the jacobian. You can use DiffSL with DiffSol by enabling one of the `diffsl-llvm*` features
-//! corresponding to the version of LLVM you have installed.
+//! corresponding to the version of LLVM you have installed, and using the [OdeBuilder::build_diffsl] method.
 //!
 //! For more information on the DiffSL language, see the [DiffSL documentation](https://martinjrobins.github.io/diffsl/)
-//!
-//! ```rust
-//! #[cfg(feature = "diffsl-llvm14")]
-//! {
-//!     use diffsol::{OdeBuilder, Bdf, OdeSolverMethod};
-//!     let code = "
-//!         u { y = 1 }
-//!         F { -y }
-//!         out { y }
-//!     ";
-//!     let problem = OdeBuilder::new().build_diffsl(code).unwrap();
-//!     let mut solver = Bdf::default();
-//!     let _y = solver.solve(&problem, 1.0).unwrap();
-//! }
-//! ```
 //!
 //! ## Custom ODE problems
 //!
