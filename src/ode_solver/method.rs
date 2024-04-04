@@ -17,12 +17,12 @@ use crate::{
 /// use diffsol::{ OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeEquations };
 ///
 /// fn solve_ode<Eqn: OdeEquations>(solver: &mut impl OdeSolverMethod<Eqn>, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Eqn::V {
-///     let mut state = OdeSolverState::new(problem);
-///     solver.set_problem(&mut state, problem);
-///     while state.t <= t {
-///         solver.step(&mut state).unwrap();
+///     let state = OdeSolverState::new(problem);
+///     solver.set_problem(state, problem);
+///     while solver.state().unwrap().t <= t {
+///         solver.step().unwrap();
 ///     }
-///     solver.interpolate(&state, t)
+///     solver.interpolate(t)
 /// }
 /// ```
 pub trait OdeSolverMethod<Eqn: OdeEquations> {
@@ -37,7 +37,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     fn step(&mut self) -> Result<()>;
 
     /// Interpolate the solution at a given time. This time should be between the current time and the last solver time step
-    fn interpolate(&self, t: Eqn::T) -> Eqn::V;
+    fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V>;
 
     /// Get the current state of the solver, if it exists
     fn state(&self) -> Option<&OdeSolverState<Eqn::M>>;
@@ -49,12 +49,12 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
 
     /// Reinitialise the solver state and solve the problem up to time `t`
     fn solve(&mut self, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Result<Eqn::V> {
-        let mut state = OdeSolverState::new(problem);
+        let state = OdeSolverState::new(problem);
         self.set_problem(state, problem);
-        while state.t <= t {
+        while self.state().unwrap().t <= t {
             self.step()?;
         }
-        Ok(self.interpolate(t))
+        self.interpolate(t)
     }
 
     /// Reinitialise the solver state making it consistent with the algebraic constraints and solve the problem up to time `t`
@@ -64,16 +64,17 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         t: Eqn::T,
         root_solver: &mut RS,
     ) -> Result<Eqn::V> {
-        let mut state = OdeSolverState::new_consistent(problem, root_solver)?;
+        let state = OdeSolverState::new_consistent(problem, root_solver)?;
         self.set_problem(state, problem);
-        while state.t <= t {
+        while self.state().unwrap().t <= t {
             self.step()?;
         }
-        Ok(self.interpolate(t))
+        self.interpolate(t)
     }
 }
 
 /// State for the ODE solver, containing the current solution `y`, the current time `t`, and the current step size `h`.
+#[derive(Clone)]
 pub struct OdeSolverState<M: Matrix> {
     pub y: M::V,
     pub t: M::T,

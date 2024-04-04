@@ -115,7 +115,7 @@ solver.set_problem(&mut state, &problem);
 while state.t <= t {
     solver.step(&mut state).unwrap();
 }
-let _y = solver.interpolate(&state, t);
+let _y = solver.interpolate(&state, t).unwrap();
 ```
 
 Note that `step` will advance the state to the next time step as chosen by the

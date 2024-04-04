@@ -123,6 +123,7 @@ where
     yp: SundialsVector,
     jacobian: SundialsMatrix,
     statistics: SundialsStatistics,
+    state: Option<OdeSolverState<Eqn::M>>,
 }
 
 impl<Eqn> SundialsIda<Eqn>
@@ -193,6 +194,7 @@ where
             linear_solver: std::ptr::null_mut(),
             statistics: SundialsStatistics::new(),
             jacobian,
+            state: None,
         }
     }
 
@@ -249,7 +251,17 @@ where
         self.problem.as_ref()
     }
 
-    fn set_problem(&mut self, state: &mut OdeSolverState<Eqn::M>, problem: &OdeSolverProblem<Eqn>) {
+    fn state(&self) -> Option<&OdeSolverState<<Eqn>::M>> {
+        self.state.as_ref()
+    }
+
+    fn take_state(&mut self) -> Option<OdeSolverState<<Eqn>::M>> {
+        self.state.take()
+    }
+
+    fn set_problem(&mut self, state: OdeSolverState<Eqn::M>, problem: &OdeSolverProblem<Eqn>) {
+        self.state = Some(state);
+        let state = self.state.as_ref().unwrap();
         self.problem = Some(problem.clone());
         let eqn = problem.eqn.as_ref();
         let number_of_states = eqn.nstates();
@@ -298,7 +310,8 @@ where
         Self::check(unsafe { IDASetJacFn(ida_mem, Some(Self::jacobian)) }).unwrap();
     }
 
-    fn step(&mut self, state: &mut OdeSolverState<<Eqn>::M>) -> Result<()> {
+    fn step(&mut self) -> Result<()> {
+        let state = self.state.as_mut().ok_or(anyhow!("State not set"))?;
         if self.problem.is_none() {
             return Err(anyhow!("Problem not set"));
         }
@@ -338,12 +351,30 @@ where
         }
     }
 
-    fn interpolate(&self, _state: &OdeSolverState<<Eqn>::M>, t: <Eqn>::T) -> <Eqn>::V {
+    fn interpolate(&self, t: <Eqn>::T) -> Result<Eqn::V> {
         if self.data.is_none() {
-            panic!("Problem not set");
+            return Err(anyhow!("Problem not set"));
         }
         let ret = SundialsVector::new_serial(self.data.as_ref().unwrap().eqn.nstates());
         Self::check(unsafe { IDAGetDky(self.ida_mem, t, 0, ret.sundials_vector()) }).unwrap();
-        ret
+        Ok(ret)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        ode_solver::tests::{test_no_set_problem, test_take_state},
+        SundialsIda, SundialsMatrix,
+    };
+
+    type M = SundialsMatrix;
+    #[test]
+    fn bdf_no_set_problem() {
+        test_no_set_problem::<M, _>(SundialsIda::default())
+    }
+    #[test]
+    fn bdf_take_state() {
+        test_take_state::<M, _>(SundialsIda::default())
     }
 }

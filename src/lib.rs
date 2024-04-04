@@ -41,12 +41,12 @@
 //!
 //! let mut solver = Bdf::default();
 //! let t = 0.4;
-//! let mut state = OdeSolverState::new(&problem);
-//! solver.set_problem(&mut state, &problem);
-//! while state.t <= t {
-//!     solver.step(&mut state).unwrap();
+//! let state = OdeSolverState::new(&problem);
+//! solver.set_problem(state, &problem);
+//! while solver.state().unwrap().t <= t {
+//!     solver.step().unwrap();
 //! }
-//! let y = solver.interpolate(&state, t);
+//! let y = solver.interpolate(t);
 //! ```
 //!
 //! ## DiffSL
@@ -203,12 +203,12 @@ mod tests {
         let t = 0.4;
         let y = solver.solve(&problem, t).unwrap();
 
-        let mut state = OdeSolverState::new(&problem);
-        solver.set_problem(&mut state, &problem);
-        while state.t <= t {
-            solver.step(&mut state).unwrap();
+        let state = OdeSolverState::new(&problem);
+        solver.set_problem(state, &problem);
+        while solver.state().unwrap().t <= t {
+            solver.step().unwrap();
         }
-        let y2 = solver.interpolate(&state, t);
+        let y2 = solver.interpolate(t).unwrap();
 
         y2.assert_eq(&y, 1e-6);
     }
