@@ -30,8 +30,8 @@ jobs:
         matrix:
           toolchain:
             - stable
-            #- beta
-            #- nightly
+            - beta
+            - nightly
           os:
             - ubuntu-latest
             - macos-latest
