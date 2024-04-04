@@ -49,7 +49,7 @@ jobs:
           target
         key: unit-test-${{ runner.os }}-${{ matrix.toolchain}}
     - name: Set up Rust
-      run: rustup default ${{ matrix.toolchain }} && rustup update ${{ matrix.toolchain }} --no-self-update
+      run: rustup default ${{ matrix.toolchain }} && rustup update ${{ matrix.toolchain }} --no-self-update && rustup component add clippy
     - name: Rust version
       run: rustc -Vv
     - name: Install LLVM and Clang
