@@ -2,7 +2,8 @@ use crate::{op::Op, solver::SolverProblem};
 use anyhow::Result;
 
 pub mod gmres;
-pub mod lu;
+#[cfg(feature = "nalgebra")]
+pub mod nalgebra;
 
 #[cfg(feature = "sundials")]
 pub mod sundials;

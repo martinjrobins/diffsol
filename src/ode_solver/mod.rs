@@ -21,7 +21,7 @@ mod tests {
         robertson::robertson, robertson_ode::robertson_ode,
     };
     use super::*;
-    use crate::linear_solver::lu::LU;
+    use crate::linear_solver::nalgebra::lu::LU;
     use crate::matrix::Matrix;
     use crate::nonlinear_solver::newton::NewtonNonlinearSolver;
     use crate::op::filter::FilterCallable;

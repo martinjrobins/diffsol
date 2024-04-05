@@ -159,7 +159,7 @@ pub mod newton;
 pub mod tests {
     use self::newton::NewtonNonlinearSolver;
     use crate::{
-        linear_solver::lu::LU,
+        linear_solver::nalgebra::lu::LU,
         matrix::MatrixCommon,
         op::{closure::Closure, NonLinearOp},
         DenseMatrix,
