@@ -1,4 +1,3 @@
-
 <div align="center">
 <a href="https://docs.rs/diffsol">
     <img src="https://img.shields.io/crates/v/diffsol.svg?label=docs&color=blue&logo=rust" alt="docs.rs badge">
@@ -19,7 +18,7 @@ implementing the various vector and matrix traits in diffsol.
 ## Features
 
 DiffSol has two implementations of the Backward Differentiation Formula
-(BDF) method, one in pure rust, the other wrapping the [Sundials](https://github.com/LLNL/sundials) IDA solver. 
+(BDF) method, one in pure rust, the other wrapping the [Sundials](https://github.com/LLNL/sundials) IDA solver.
 This method is a variable step-size implicit method that is suitable for
 stiff ODEs and semi-explicit DAEs and is similar to the BDF method in MATLAB's
 `ode15s` solver or the `bdf` solver in SciPy's `solve_ivp` function.
@@ -40,13 +39,13 @@ Add the following to your `Cargo.toml` file:
 
 ```toml
 [dependencies]
-diffeq = "0.1"
+diffsol = "0.1.4"
 ```
 
 or add it on the command line:
 
 ```sh
-cargo add diffeq
+cargo add diffsol
 ```
 
 ## Usage
