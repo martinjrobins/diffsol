@@ -7,9 +7,10 @@ use num_traits::{One, Pow, Zero};
 use serde::Serialize;
 
 use crate::{
-    matrix::MatrixRef, op::ode::BdfCallable, scalar::scale, DenseMatrix, IndexType, MatrixViewMut,
-    NalgebraLU, NewtonNonlinearSolver, NonLinearSolver, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState, Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
+    linear_solver::NalgebraLU, matrix::MatrixRef, op::ode::BdfCallable, scalar::scale, DenseMatrix,
+    IndexType, MatrixViewMut, NewtonNonlinearSolver, NonLinearSolver, OdeSolverMethod,
+    OdeSolverProblem, OdeSolverState, Scalar, SolverProblem, Vector, VectorRef, VectorView,
+    VectorViewMut,
 };
 
 use super::equations::OdeEquations;

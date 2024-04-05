@@ -11,6 +11,9 @@ pub mod faer;
 #[cfg(feature = "sundials")]
 pub mod sundials;
 
+pub use faer::lu::LU as FaerLU;
+pub use nalgebra::lu::LU as NalgebraLU;
+
 /// A solver for the linear problem `Ax = b`.
 /// The solver is parameterised by the type `C` which is the type of the linear operator `A` (see the [Op] trait for more details).
 pub trait LinearSolver<C: Op> {
@@ -59,10 +62,12 @@ pub mod tests {
     use std::rc::Rc;
 
     use crate::{
+        linear_solver::FaerLU,
+        linear_solver::NalgebraLU,
         op::{linear_closure::LinearClosure, LinearOp},
         scalar::scale,
         vector::VectorRef,
-        DenseMatrix, FaerLU, LinearSolver, NalgebraLU, SolverProblem, Vector,
+        DenseMatrix, LinearSolver, SolverProblem, Vector,
     };
     use num_traits::{One, Zero};
 

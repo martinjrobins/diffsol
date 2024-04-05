@@ -43,8 +43,8 @@ mod robertson_ode {
 
 mod robertson {
     use diffsol::{
-        ode_solver::test_models::robertson::robertson, Bdf, NalgebraLU, NewtonNonlinearSolver,
-        OdeSolverMethod,
+        linear_solver::NalgebraLU, ode_solver::test_models::robertson::robertson, Bdf,
+        NewtonNonlinearSolver, OdeSolverMethod,
     };
 
     #[divan::bench]
