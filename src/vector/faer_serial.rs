@@ -26,14 +26,16 @@ macro_rules! impl_mul_scale {
         impl<T: Scalar> Mul<Scale<T>> for $col_type {
             type Output = Col<T>;
             fn mul(self, rhs: Scale<T>) -> Self::Output {
-                self * faer::scale(rhs.value())
+                let scale: faer::Scale<T> = rhs.into();
+                self * scale
             }
         }
 
         impl<T: Scalar> Mul<Scale<T>> for &$col_type {
             type Output = Col<T>;
             fn mul(self, rhs: Scale<T>) -> Self::Output {
-                self * faer::scale(rhs.value())
+                let scale: faer::Scale<T> = rhs.into();
+                self * scale
             }
         }
     };
@@ -57,7 +59,8 @@ macro_rules! impl_mul_assign_scale {
     ($col_type:ty) => {
         impl<'a, T: Scalar> MulAssign<Scale<T>> for $col_type {
             fn mul_assign(&mut self, rhs: Scale<T>) {
-                *self *= faer::scale(rhs.value());
+                let scale: faer::Scale<T> = rhs.into();
+                *self *= scale;
             }
         }
     };

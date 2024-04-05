@@ -32,7 +32,8 @@ macro_rules! impl_mul_scale {
             type Output = Mat<T>;
 
             fn mul(self, rhs: Scale<T>) -> Self::Output {
-                self * faer::scale(rhs.value())
+                let scale: faer::Scale<T> = rhs.into();
+                self * scale
             }
         }
     };
@@ -43,7 +44,8 @@ impl_mul_scale!(&Mat<T>);
 
 impl<'a, T: Scalar> MulAssign<Scale<T>> for MatMut<'a, T> {
     fn mul_assign(&mut self, rhs: Scale<T>) {
-        *self *= faer::scale(rhs.value());
+        let scale: faer::Scale<T> = rhs.into();
+        *self *= scale;
     }
 }
 
