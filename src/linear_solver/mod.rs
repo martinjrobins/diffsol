@@ -55,6 +55,7 @@ pub mod tests {
 
     use crate::{
         op::{linear_closure::LinearClosure, LinearOp},
+        scalar::scale,
         vector::VectorRef,
         DenseMatrix, LinearSolver, SolverProblem, Vector, LU,
     };
@@ -100,7 +101,7 @@ pub mod tests {
             let x = solver.solve(&soln.b).unwrap();
             let tol = {
                 let problem = solver.problem().unwrap();
-                &soln.x * problem.rtol + problem.atol.as_ref()
+                &soln.x * scale(problem.rtol) + problem.atol.as_ref()
             };
             x.assert_eq(&soln.x, tol[0]);
         }

@@ -182,21 +182,21 @@ impl_bin_op!(Sub, sub, -=);
 // mul and div by scalar
 macro_rules! impl_scalar_op {
     ($trait:ident, $fn:ident, $op:tt) => {
-        impl $trait<realtype> for SundialsMatrix {
+        impl $trait<Scale<realtype>> for SundialsMatrix {
             type Output = SundialsMatrix;
 
-            fn $fn(mut self, rhs: realtype) -> Self::Output {
-                self.map_inplace(|x| x $op rhs);
+            fn $fn(mut self, rhs: Scale<realtype>) -> Self::Output {
+                self.map_inplace(|x| x $op rhs.value());
                 self
             }
         }
 
-        impl $trait<realtype> for &SundialsMatrix {
+        impl $trait<Scale<realtype>> for &SundialsMatrix {
             type Output = SundialsMatrix;
 
-            fn $fn(self, rhs: realtype) -> Self::Output {
+            fn $fn(self, rhs: Scale<realtype>) -> Self::Output {
                 let mut m = self.clone();
-                m.map_inplace(|x| x $op rhs);
+                m.map_inplace(|x| x $op rhs.value());
                 m
             }
         }
@@ -325,19 +325,19 @@ mod tests {
         m[(1, 0)] = 3.0;
         m[(1, 1)] = 4.0;
 
-        let m2 = &m * 2.0;
+        let m2 = &m * scale(2.0);
         assert_eq!(m2[(0, 0)], 2.0);
         assert_eq!(m2[(0, 1)], 4.0);
         assert_eq!(m2[(1, 0)], 6.0);
         assert_eq!(m2[(1, 1)], 8.0);
 
-        let m3 = &m / 2.0;
+        let m3 = &m / scale(2.0);
         assert_eq!(m3[(0, 0)], 0.5);
         assert_eq!(m3[(0, 1)], 1.0);
         assert_eq!(m3[(1, 0)], 1.5);
         assert_eq!(m3[(1, 1)], 2.0);
 
-        let m4 = m * 2.0;
+        let m4 = m * scale(2.0);
         assert_eq!(m4[(0, 0)], 2.0);
         assert_eq!(m4[(0, 1)], 4.0);
         assert_eq!(m4[(1, 0)], 6.0);

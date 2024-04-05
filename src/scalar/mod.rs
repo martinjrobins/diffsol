@@ -10,6 +10,10 @@ use crate::vector::VectorView;
 
 pub trait Scalar:
     nalgebra::Scalar
+    + faer::Entity
+    + faer::ComplexField
+    + faer::SimpleEntity
+    + faer::RealField
     + From<f64>
     + Display
     + SimdRealField
@@ -40,6 +44,17 @@ impl Scalar for f64 {
     const NAN: Self = f64::NAN;
     fn is_nan(self) -> bool {
         self.is_nan()
+    }
+}
+
+impl<T: Scalar> From<faer::Scale<T>> for Scale<T> {
+    fn from(s: faer::Scale<T>) -> Self {
+        Scale(s.value())
+    }
+}
+impl<T: Scalar> From<Scale<T>> for faer::Scale<T> {
+    fn from(s: Scale<T>) -> Self {
+        faer::Scale(s.value())
     }
 }
 

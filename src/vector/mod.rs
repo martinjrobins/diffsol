@@ -56,7 +56,7 @@ pub trait VectorRef<V: Vector>:
     + for<'a> VectorOpsByValue<&'a V, V>
     + for<'a> VectorOpsByValue<V::View<'a>, V>
     + for<'a, 'b> VectorOpsByValue<&'a V::View<'b>, V>
-    + Mul<V::T, Output = V>
+    + Mul<Scale<V::T>, Output = V>
 {
 }
 
@@ -65,7 +65,7 @@ impl<RefT, V: Vector> VectorRef<V> for RefT where
         + for<'a> VectorOpsByValue<&'a V, V>
         + for<'a> VectorOpsByValue<V::View<'a>, V>
         + for<'a, 'b> VectorOpsByValue<&'a V::View<'b>, V>
-        + Mul<V::T, Output = V> // + Div<V::T, Output = V>
+        + Mul<Scale<V::T>, Output = V>
 {
 }
 
