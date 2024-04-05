@@ -22,7 +22,7 @@ use crate::{
 ///     while solver.state().unwrap().t <= t {
 ///         solver.step().unwrap();
 ///     }
-///     solver.interpolate(t)
+///     solver.interpolate(t).unwrap()
 /// }
 /// ```
 pub trait OdeSolverMethod<Eqn: OdeEquations> {

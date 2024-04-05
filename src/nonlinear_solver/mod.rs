@@ -16,30 +16,54 @@ impl<V> NonLinearSolveSolution<V> {
     }
 }
 
+/// A solver for the nonlinear problem `F(x) = 0`.
 pub trait NonLinearSolver<C: Op> {
+    /// Set the problem to be solved, any previous problem is discarded.
     fn set_problem(&mut self, problem: SolverProblem<C>);
+
+    /// Get a reference to the current problem, if any.
     fn problem(&self) -> Option<&SolverProblem<C>>;
+
+    /// Get a mutable reference to the current problem, if any.
     fn problem_mut(&mut self) -> Option<&mut SolverProblem<C>>;
+
+    /// Take the current problem, if any, and return it.
+    /// Any internal state of the solver is reset, and `set_problem`
+    /// must be called before solving the problem again.
     fn take_problem(&mut self) -> Option<SolverProblem<C>>;
+
+    /// Reset the solver to its initial state.
     fn reset(&mut self) {
         if let Some(problem) = self.take_problem() {
             self.set_problem(problem);
         }
     }
+
+    /// Set the time for the problem, if the op `C` has a time parameter.
     fn set_time(&mut self, t: C::T) -> Result<()> {
         self.problem_mut()
             .ok_or_else(|| anyhow!("No problem set"))?
             .t = t;
         Ok(())
     }
+
+    // Solve the problem `F(x) = 0` and return the solution `x`.
     fn solve(&mut self, state: &C::V) -> Result<C::V> {
         let mut state = state.clone();
         self.solve_in_place(&mut state)?;
         Ok(state)
     }
+
+    // Solve the problem `F(x) = 0` in place.
     fn solve_in_place(&mut self, state: &mut C::V) -> Result<()>;
+
+    // Set the maximum number of iterations for the solver.
     fn set_max_iter(&mut self, max_iter: usize);
+
+    // Get the maximum number of iterations for the solver.
     fn max_iter(&self) -> usize;
+
+    // Get the number of iterations taken by the solver on the last call to `solve`.
     fn niter(&self) -> usize;
 }
 
