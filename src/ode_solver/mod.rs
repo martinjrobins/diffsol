@@ -1,4 +1,5 @@
 pub mod bdf;
+pub mod sdirk;
 pub mod builder;
 pub mod equations;
 pub mod method;

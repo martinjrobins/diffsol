@@ -68,11 +68,11 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
     pub fn number_of_jac_evals(&self) -> usize {
         *self.number_of_jac_evals.borrow()
     }
-    pub fn set_c(&self, h: Eqn::T, alpha: &[Eqn::T], order: IndexType)
+    pub fn set_c(&self, h: Eqn::T, alpha: Eqn::T)
     where
         for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
     {
-        self.c.replace(h * alpha[order]);
+        self.c.replace(h * alpha);
         if !*self.rhs_jacobian_is_stale.borrow() && !*self.mass_jacobian_is_stale.borrow() {
             let rhs_jac_ref = self.rhs_jac.borrow();
             let rhs_jac = rhs_jac_ref.deref();
@@ -84,20 +84,12 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
             self.jacobian_is_stale.replace(true);
         }
     }
-    pub fn set_psi_and_y0<M: DenseMatrix<T = Eqn::T, V = Eqn::V>>(
+    pub fn set_psi_and_y0(
         &self,
-        diff: &M,
-        gamma: &[Eqn::T],
-        alpha: &[Eqn::T],
-        order: usize,
+        psi: Eqn::V,
         y0: &Eqn::V,
     ) {
-        // update psi term as defined in second equation on page 9 of [1]
-        let mut new_psi_neg_y0 = diff.column(1) * scale(gamma[1]);
-        for (i, &gamma_i) in gamma.iter().enumerate().take(order + 1).skip(2) {
-            new_psi_neg_y0 += diff.column(i) * scale(gamma_i)
-        }
-        new_psi_neg_y0 *= scale(alpha[order]);
+        let mut new_psi_neg_y0 = psi;
 
         // now negate y0
         new_psi_neg_y0.sub_assign(y0);

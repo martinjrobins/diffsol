@@ -12,7 +12,8 @@ pub mod constant_closure;
 pub mod filter;
 pub mod linear_closure;
 pub mod linearise;
-pub mod ode;
+pub mod bdf;
+pub mod sdirk;
 pub mod ode_rhs;
 pub mod unit;
 

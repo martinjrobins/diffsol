@@ -1,0 +1,37 @@
+
+running 24 tests
+test jacobian::tests::build_coloring ... ignored
+test jacobian::tests::find_non_zeros ... ignored
+test linear_solver::tests::test_lu ... ignored
+test nonlinear_solver::tests::test_newton_cpu_square ... ignored
+test ode_solver::bdf::test::bdf_no_set_problem ... ignored
+test ode_solver::bdf::test::bdf_take_state ... ignored
+test ode_solver::bdf::test::bdf_test_interpolate ... ignored
+test ode_solver::equations::tests::ode_equation_test ... ignored
+test ode_solver::equations::tests::ode_with_mass_test ... ignored
+test ode_solver::tests::test_bdf_nalgebra_dydt_y2 ... ignored
+test ode_solver::tests::test_bdf_nalgebra_dydt_y2_colored ... ignored
+test ode_solver::tests::test_bdf_nalgebra_exponential_decay ... ignored
+test ode_solver::tests::test_bdf_nalgebra_exponential_decay_algebraic ... ignored
+test ode_solver::tests::test_bdf_nalgebra_gaussian_decay ... ignored
+test ode_solver::tests::test_bdf_nalgebra_robertson ... ignored
+test ode_solver::tests::test_bdf_nalgebra_robertson_colored ... ignored
+test ode_solver::tests::test_bdf_nalgebra_robertson_ode ... ignored
+test op::ode::tests::test_bdf_callable ... ignored
+test scalar::test_scale ... ignored
+test tests::test_readme ... ignored
+test vector::faer_serial::tests::test_abs ... ignored
+test vector::faer_serial::tests::test_mul_assign ... ignored
+test vector::faer_serial::tests::test_mult ... ignored
+test vector::nalgebra_serial::tests::test_abs ... ignored
+
+test result: ok. 0 passed; 0 failed; 24 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+solvers               fastest       │ slowest       │ median        │ mean          │ samples │ iters
+├─ exponential_decay                │               │               │               │         │
+│  ╰─ bdf             16.1 µs       │ 76.01 µs      │ 16.33 µs      │ 16.94 µs      │ 100     │ 100
+├─ robertson                        │               │               │               │         │
+│  ╰─ bdf             300 µs        │ 337.8 µs      │ 312.7 µs      │ 312.4 µs      │ 100     │ 100
+╰─ robertson_ode                    │               │               │               │         │
+   ╰─ bdf             263.9 µs      │ 4.283 ms      │ 271.2 µs      │ 310.7 µs      │ 100     │ 100
+
