@@ -12,7 +12,8 @@ macro_rules! impl_op_for_faer_struct {
             type Output = Col<T>;
 
             fn $func_name(self, rhs: Scale<T>) -> Self::Output {
-                self * faer::scale(rhs.value())
+                let scale: faer::Scale<T> = rhs.into();
+                self * scale
             }
         }
     };
