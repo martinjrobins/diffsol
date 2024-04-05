@@ -17,36 +17,44 @@ use crate::{
 /// use diffsol::{ OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeEquations };
 ///
 /// fn solve_ode<Eqn: OdeEquations>(solver: &mut impl OdeSolverMethod<Eqn>, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Eqn::V {
-///     let mut state = OdeSolverState::new(problem);
-///     solver.set_problem(&mut state, problem);
-///     while state.t <= t {
-///         solver.step(&mut state).unwrap();
+///     let state = OdeSolverState::new(problem);
+///     solver.set_problem(state, problem);
+///     while solver.state().unwrap().t <= t {
+///         solver.step().unwrap();
 ///     }
-///     solver.interpolate(&state, t)
+///     solver.interpolate(t).unwrap()
 /// }
 /// ```
 pub trait OdeSolverMethod<Eqn: OdeEquations> {
     /// Get the current problem if it has been set
     fn problem(&self) -> Option<&OdeSolverProblem<Eqn>>;
 
-    /// Set the problem to solve, this performs any initialisation required by the solver.
-    /// Call this before calling `step` or `solve`, and call it again if the state is changed manually (i.e. not by the solver)
-    fn set_problem(&mut self, state: &mut OdeSolverState<Eqn::M>, problem: &OdeSolverProblem<Eqn>);
+    /// Set the problem to solve, this performs any initialisation required by the solver. Call this before calling `step` or `solve`.
+    /// The solver takes ownership of the initial state given by `state`, this is assumed to be consistent with any algebraic constraints.
+    fn set_problem(&mut self, state: OdeSolverState<Eqn::M>, problem: &OdeSolverProblem<Eqn>);
 
-    /// Step the solution forward by one step, altering the state in place
-    fn step(&mut self, state: &mut OdeSolverState<Eqn::M>) -> Result<()>;
+    /// Step the solution forward by one step, altering the internal state of the solver.
+    fn step(&mut self) -> Result<()>;
 
     /// Interpolate the solution at a given time. This time should be between the current time and the last solver time step
-    fn interpolate(&self, state: &OdeSolverState<Eqn::M>, t: Eqn::T) -> Eqn::V;
+    fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V>;
+
+    /// Get the current state of the solver, if it exists
+    fn state(&self) -> Option<&OdeSolverState<Eqn::M>>;
+
+    /// Take the current state of the solver, if it exists, returning it to the user. This is useful if you want to use this
+    /// state in another solver or problem. Note that this will unset the current problem and solver state, so you will need to call
+    /// `set_problem` again before calling `step` or `solve`.
+    fn take_state(&mut self) -> Option<OdeSolverState<Eqn::M>>;
 
     /// Reinitialise the solver state and solve the problem up to time `t`
     fn solve(&mut self, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Result<Eqn::V> {
-        let mut state = OdeSolverState::new(problem);
-        self.set_problem(&mut state, problem);
-        while state.t <= t {
-            self.step(&mut state)?;
+        let state = OdeSolverState::new(problem);
+        self.set_problem(state, problem);
+        while self.state().unwrap().t <= t {
+            self.step()?;
         }
-        Ok(self.interpolate(&state, t))
+        self.interpolate(t)
     }
 
     /// Reinitialise the solver state making it consistent with the algebraic constraints and solve the problem up to time `t`
@@ -56,16 +64,17 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         t: Eqn::T,
         root_solver: &mut RS,
     ) -> Result<Eqn::V> {
-        let mut state = OdeSolverState::new_consistent(problem, root_solver)?;
-        self.set_problem(&mut state, problem);
-        while state.t <= t {
-            self.step(&mut state)?;
+        let state = OdeSolverState::new_consistent(problem, root_solver)?;
+        self.set_problem(state, problem);
+        while self.state().unwrap().t <= t {
+            self.step()?;
         }
-        Ok(self.interpolate(&state, t))
+        self.interpolate(t)
     }
 }
 
 /// State for the ODE solver, containing the current solution `y`, the current time `t`, and the current step size `h`.
+#[derive(Clone)]
 pub struct OdeSolverState<M: Matrix> {
     pub y: M::V,
     pub t: M::T,

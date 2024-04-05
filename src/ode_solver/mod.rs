@@ -26,9 +26,12 @@ mod tests {
     use crate::nonlinear_solver::newton::NewtonNonlinearSolver;
     use crate::op::filter::FilterCallable;
     use crate::op::ode_rhs::OdeRhs;
+    use crate::op::Op;
     use crate::scalar::scale;
     use crate::Vector;
     use crate::{NonLinearSolver, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState};
+    use num_traits::One;
+    use num_traits::Zero;
     use tests::bdf::Bdf;
     use tests::test_models::dydt_y2::dydt_y2_problem;
     use tests::test_models::gaussian_decay::gaussian_decay_problem;
@@ -43,14 +46,14 @@ mod tests {
         M: Matrix + 'static,
         Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
     {
-        let mut state = OdeSolverState::new_consistent(&problem, &mut root_solver).unwrap();
-        method.set_problem(&mut state, &problem);
+        let state = OdeSolverState::new_consistent(&problem, &mut root_solver).unwrap();
+        method.set_problem(state, &problem);
         for point in solution.solution_points.iter() {
-            while state.t < point.t {
-                method.step(&mut state).unwrap();
+            while method.state().unwrap().t < point.t {
+                method.step().unwrap();
             }
 
-            let soln = method.interpolate(&state, point.t);
+            let soln = method.interpolate(point.t).unwrap();
 
             if let Some(override_tol) = override_tol {
                 soln.assert_eq(&point.state, override_tol);
@@ -326,5 +329,92 @@ mod tests {
         number_of_mass_matrix_evals: 0
         number_of_jacobian_matrix_evals: 1
         "###);
+    }
+
+    pub struct TestEqn<M> {
+        _m: std::marker::PhantomData<M>,
+    }
+    impl<M: Matrix> Op for TestEqn<M> {
+        type M = M;
+        type T = M::T;
+        type V = M::V;
+
+        fn nout(&self) -> usize {
+            1
+        }
+
+        fn nstates(&self) -> usize {
+            1
+        }
+
+        fn nparams(&self) -> usize {
+            1
+        }
+    }
+    impl<M: Matrix> OdeEquations for TestEqn<M> {
+        fn set_params(&mut self, _p: Self::V) {}
+
+        fn rhs_inplace(&self, _t: Self::T, _y: &Self::V, rhs_y: &mut Self::V) {
+            rhs_y[0] = M::T::zero();
+        }
+
+        fn rhs_jac_inplace(&self, _t: Self::T, _x: &Self::V, _v: &Self::V, y: &mut Self::V) {
+            y[0] = M::T::zero();
+        }
+
+        fn init(&self, _t: Self::T) -> Self::V {
+            M::V::from_element(1, M::T::zero())
+        }
+    }
+
+    pub fn test_interpolate<M: Matrix, Method: OdeSolverMethod<TestEqn<M>>>(mut s: Method) {
+        let problem = OdeSolverProblem::new(
+            TestEqn {
+                _m: std::marker::PhantomData,
+            },
+            M::T::from(1e-6),
+            M::V::from_element(1, M::T::from(1e-6)),
+            M::T::zero(),
+            M::T::one(),
+        );
+        let state = OdeSolverState::new(&problem);
+        s.set_problem(state.clone(), &problem);
+        let t0 = M::T::zero();
+        let t1 = M::T::one();
+        s.interpolate(t0)
+            .unwrap()
+            .assert_eq(&state.y, M::T::from(1e-9));
+        assert!(s.interpolate(t1).is_err());
+        s.step().unwrap();
+        assert!(s.interpolate(s.state().unwrap().t).is_ok());
+        assert!(s.interpolate(s.state().unwrap().t + t1).is_err());
+    }
+
+    pub fn test_no_set_problem<M: Matrix, Method: OdeSolverMethod<TestEqn<M>>>(mut s: Method) {
+        assert!(s.state().is_none());
+        assert!(s.problem().is_none());
+        assert!(s.take_state().is_none());
+        assert!(s.step().is_err());
+        assert!(s.interpolate(M::T::one()).is_err());
+    }
+
+    pub fn test_take_state<M: Matrix, Method: OdeSolverMethod<TestEqn<M>>>(mut s: Method) {
+        let problem = OdeSolverProblem::new(
+            TestEqn {
+                _m: std::marker::PhantomData,
+            },
+            M::T::from(1e-6),
+            M::V::from_element(1, M::T::from(1e-6)),
+            M::T::zero(),
+            M::T::one(),
+        );
+        let state = OdeSolverState::new(&problem);
+        s.set_problem(state.clone(), &problem);
+        let state2 = s.take_state().unwrap();
+        state2.y.assert_eq(&state.y, M::T::from(1e-9));
+        assert!(s.take_state().is_none());
+        assert!(s.state().is_none());
+        assert!(s.step().is_err());
+        assert!(s.interpolate(M::T::one()).is_err());
     }
 }

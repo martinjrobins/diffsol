@@ -29,7 +29,7 @@ mod robertson_ode {
     fn bdf() {
         let mut s = Bdf::default();
         let (problem, _soln) = robertson_ode::<nalgebra::DMatrix<f64>>(false);
-        let _y = s.solve(&problem, 1.0);
+        let _y = s.solve(&problem, 4.0000e+10);
     }
 
     #[cfg(feature = "sundials")]
@@ -37,7 +37,7 @@ mod robertson_ode {
     fn sundials() {
         let mut s = diffsol::SundialsIda::default();
         let (problem, _soln) = robertson_ode::<diffsol::SundialsMatrix>(false);
-        let _y = s.solve(&problem, 1.0);
+        let _y = s.solve(&problem, 4.0000e+10);
     }
 }
 
@@ -52,7 +52,7 @@ mod robertson {
         let mut s = Bdf::default();
         let (problem, _soln) = robertson::<nalgebra::DMatrix<f64>>(false);
         let mut root = NewtonNonlinearSolver::new(LU::default());
-        let _y = s.make_consistent_and_solve(&problem, 1.0, &mut root);
+        let _y = s.make_consistent_and_solve(&problem, 4.0000e+10, &mut root);
     }
 
     #[cfg(feature = "sundials")]
@@ -63,6 +63,6 @@ mod robertson {
         let mut s = diffsol::SundialsIda::default();
         let (problem, _soln) = robertson::<diffsol::SundialsMatrix>(false);
         let mut root = NewtonNonlinearSolver::new(SundialsLinearSolver::new_dense());
-        let _y = s.make_consistent_and_solve(&problem, 1.0, &mut root);
+        let _y = s.make_consistent_and_solve(&problem, 4.0000e+10, &mut root);
     }
 }

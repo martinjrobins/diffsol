@@ -1,7 +1,7 @@
 use std::ops::AddAssign;
 use std::rc::Rc;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use nalgebra::{DMatrix, DVector};
 use num_traits::{One, Pow, Zero};
 use serde::Serialize;
@@ -66,6 +66,7 @@ pub struct Bdf<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations> {
     gamma: Vec<Eqn::T>,
     error_const: Vec<Eqn::T>,
     statistics: BdfStatistics<Eqn::T>,
+    state: Option<OdeSolverState<Eqn::M>>,
 }
 
 impl<T: Scalar, Eqn: OdeEquations<T = T, V = DVector<T>, M = DMatrix<T>> + 'static> Default
@@ -90,6 +91,7 @@ impl<T: Scalar, Eqn: OdeEquations<T = T, V = DVector<T>, M = DMatrix<T>> + 'stat
             error_const: vec![T::from(1.0); Self::MAX_ORDER + 1],
             u: DMatrix::<T>::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
             statistics: BdfStatistics::default(),
+            state: None,
         }
     }
 }
@@ -119,6 +121,7 @@ where
             error_const: self.error_const.clone(),
             u: DMatrix::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
             statistics: self.statistics.clone(),
+            state: self.state.clone(),
         }
     }
 }
@@ -168,14 +171,14 @@ where
         r
     }
 
-    fn _update_step_size(&mut self, factor: Eqn::T, state: &mut OdeSolverState<Eqn::M>) {
+    fn _update_step_size(&mut self, factor: Eqn::T) {
         //If step size h is changed then also need to update the terms in
         //the first equation of page 9 of [1]:
         //
         //- constant c = h / (1-kappa) gamma_k term
         //- lu factorisation of (M - c * J) used in newton iteration (same equation)
 
-        state.h *= factor;
+        self.state.as_mut().unwrap().h *= factor;
         self.n_equal_steps = 0;
 
         // update D using equations in section 3.2 of [1]
@@ -191,9 +194,11 @@ where
         }
         std::mem::swap(&mut self.diff, &mut self.diff_tmp);
 
-        self.nonlinear_problem_op()
-            .unwrap()
-            .set_c(state.h, &self.alpha, self.order);
+        self.nonlinear_problem_op().unwrap().set_c(
+            self.state.as_ref().unwrap().h,
+            &self.alpha,
+            self.order,
+        );
 
         // reset nonlinear's linear solver problem as lu factorisation has changed
         self.nonlinear_solver.as_mut().reset();
@@ -222,7 +227,7 @@ where
         }
     }
 
-    fn _predict_forward(&mut self, state: &OdeSolverState<Eqn::M>) -> Eqn::V {
+    fn _predict_forward(&mut self) -> Eqn::V {
         let nstates = self.diff.nrows();
         // predict forward to new step (eq 2 in [1])
         let y_predict = {
@@ -240,7 +245,10 @@ where
         }
 
         // update time
-        let t_new = state.t + state.h;
+        let t_new = {
+            let state = self.state.as_ref().unwrap();
+            state.t + state.h
+        };
         self.nonlinear_solver.as_mut().set_time(t_new).unwrap();
         y_predict
     }
@@ -251,10 +259,19 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
-    fn interpolate(&self, state: &OdeSolverState<Eqn::M>, t: Eqn::T) -> Eqn::V {
+    fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V> {
         //interpolate solution at time values t* where t-h < t* < t
         //
         //definition of the interpolating polynomial can be found on page 7 of [1]
+
+        // state must be set
+        let state = self.state.as_ref().ok_or(anyhow!("State not set"))?;
+
+        // check that t is before the current time
+        if t > state.t {
+            return Err(anyhow!("Interpolation time is after current time"));
+        }
+
         let mut time_factor = Eqn::T::from(1.0);
         let mut order_summation = self.diff.column(0).into_owned();
         for i in 0..self.order {
@@ -262,14 +279,23 @@ where
             time_factor *= (t - (state.t - state.h * i_t)) / (state.h * (Eqn::T::one() + i_t));
             order_summation += self.diff.column(i + 1) * scale(time_factor);
         }
-        order_summation
+        Ok(order_summation)
     }
 
     fn problem(&self) -> Option<&OdeSolverProblem<Eqn>> {
         self.ode_problem.as_ref()
     }
 
-    fn set_problem(&mut self, state: &mut OdeSolverState<Eqn::M>, problem: &OdeSolverProblem<Eqn>) {
+    fn state(&self) -> Option<&OdeSolverState<Eqn::M>> {
+        self.state.as_ref()
+    }
+
+    fn take_state(&mut self) -> Option<OdeSolverState<<Eqn>::M>> {
+        self.state.take()
+    }
+
+    fn set_problem(&mut self, state: OdeSolverState<Eqn::M>, problem: &OdeSolverProblem<Eqn>) {
+        let mut state = state;
         self.ode_problem = Some(problem.clone());
         let nstates = problem.eqn.nstates();
         self.order = 1usize;
@@ -342,9 +368,12 @@ where
 
         // update statistics
         self.statistics.initial_step_size = state.h;
+
+        // store state
+        self.state = Some(state);
     }
 
-    fn step(&mut self, state: &mut OdeSolverState<Eqn::M>) -> Result<()> {
+    fn step(&mut self) -> Result<()> {
         // we will try and use the old jacobian unless convergence of newton iteration
         // fails
         // tells callable to update rhs jacobian if the jacobian is requested (by nonlinear solver)
@@ -355,7 +384,10 @@ where
         let mut error_norm: Eqn::T;
         let mut scale_y: Eqn::V;
         let mut updated_jacobian = false;
-        let mut y_predict = self._predict_forward(state);
+        if self.state.is_none() {
+            return Err(anyhow!("State not set"));
+        }
+        let mut y_predict = self._predict_forward();
 
         // loop until step is accepted
         let y_new = loop {
@@ -400,15 +432,16 @@ where
                             factor = Eqn::T::from(Self::MIN_FACTOR);
                         }
                         // todo, do we need to update the linear solver problem here since we converged?
-                        self._update_step_size(factor, state);
+                        self._update_step_size(factor);
 
                         // if step size too small, then fail
+                        let state = self.state.as_ref().unwrap();
                         if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
                             return Err(anyhow::anyhow!("Step size too small at t = {}", state.t));
                         }
 
                         // new prediction
-                        y_predict = self._predict_forward(state);
+                        y_predict = self._predict_forward();
 
                         // update statistics
                         self.statistics.number_of_error_test_failures += 1;
@@ -419,10 +452,10 @@ where
                     if updated_jacobian {
                         // newton iteration did not converge, but jacobian has already been
                         // evaluated so reduce step size by 0.3 (as per [1]) and try again
-                        self._update_step_size(Eqn::T::from(0.3), state);
+                        self._update_step_size(Eqn::T::from(0.3));
 
                         // new prediction
-                        y_predict = self._predict_forward(state);
+                        y_predict = self._predict_forward();
 
                         // update statistics
                     } else {
@@ -440,14 +473,17 @@ where
         };
 
         // take the accepted step
-        state.t += state.h;
-        state.y = y_new;
+        {
+            let state = self.state.as_mut().unwrap();
+            state.y = y_new;
+            state.t += state.h;
+        }
 
         // update statistics
         self.statistics.number_of_linear_solver_setups =
             self.nonlinear_problem_op().unwrap().number_of_jac_evals();
         self.statistics.number_of_steps += 1;
-        self.statistics.final_step_size = state.h;
+        self.statistics.final_step_size = self.state.as_ref().unwrap().h;
 
         self._update_differences(&d);
 
@@ -502,8 +538,30 @@ where
             if factor > Eqn::T::from(Self::MAX_FACTOR) {
                 factor = Eqn::T::from(Self::MAX_FACTOR);
             }
-            self._update_step_size(factor, state);
+            self._update_step_size(factor);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        ode_solver::tests::{test_interpolate, test_no_set_problem, test_take_state},
+        Bdf,
+    };
+
+    type M = nalgebra::DMatrix<f64>;
+    #[test]
+    fn bdf_no_set_problem() {
+        test_no_set_problem::<M, _>(Bdf::default())
+    }
+    #[test]
+    fn bdf_take_state() {
+        test_take_state::<M, _>(Bdf::default())
+    }
+    #[test]
+    fn bdf_test_interpolate() {
+        test_interpolate::<M, _>(Bdf::default())
     }
 }

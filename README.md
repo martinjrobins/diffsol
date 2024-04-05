@@ -8,13 +8,11 @@ out-of-the-box with vectors and matrices from the
 [nalgebra](https://nalgebra.org) crate, or you can implement your own types by
 implementing the various vector and matrix traits in diffsol.
 
-**Note**: This library is still in the early stages of development and is not
-ready for production use. The API is likely to change in the future.
-
 ## Features
 
-Currently only one solver is implemented, the Backward Differentiation Formula
-(BDF) method. This is a variable step-size implicit method that is suitable for
+DiffSol has two implementations of the Backward Differentiation Formula
+(BDF) method, one in pure rust, the other wrapping the [Sundials](https://github.com/LLNL/sundials) IDA solver. 
+This method is a variable step-size implicit method that is suitable for
 stiff ODEs and semi-explicit DAEs and is similar to the BDF method in MATLAB's
 `ode15s` solver or the `bdf` solver in SciPy's `solve_ivp` function.
 
@@ -115,7 +113,7 @@ solver.set_problem(&mut state, &problem);
 while state.t <= t {
     solver.step(&mut state).unwrap();
 }
-let _y = solver.interpolate(&state, t);
+let _y = solver.interpolate(&state, t).unwrap();
 ```
 
 Note that `step` will advance the state to the next time step as chosen by the
