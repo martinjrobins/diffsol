@@ -7,57 +7,56 @@ use crate::{scalar::Scale, IndexType, Scalar};
 
 use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 
-impl<'a, T: Scalar> MatrixCommon for DMatrixViewMut<'a, T> {
-    type V = DVector<T>;
-    type T = T;
+macro_rules! impl_matrix_common {
+    ($matrix_type:ty) => {
+        impl<'a, T: Scalar> MatrixCommon for $matrix_type {
+            type V = DVector<T>;
+            type T = T;
 
-    fn ncols(&self) -> IndexType {
-        self.ncols()
-    }
-    fn nrows(&self) -> IndexType {
-        self.nrows()
-    }
+            fn ncols(&self) -> IndexType {
+                self.ncols()
+            }
+
+            fn nrows(&self) -> IndexType {
+                self.nrows()
+            }
+        }
+    };
 }
 
-impl<'a, T: Scalar> MatrixCommon for DMatrixView<'a, T> {
-    type V = DVector<T>;
-    type T = T;
+impl_matrix_common!(DMatrixViewMut<'a, T>);
+impl_matrix_common!(DMatrixView<'a, T>);
+impl_matrix_common!(DMatrix<T>);
 
-    fn ncols(&self) -> IndexType {
-        self.ncols()
-    }
-    fn nrows(&self) -> IndexType {
-        self.nrows()
-    }
+macro_rules! impl_mul_scale {
+    ($matrix_type:ty) => {
+        impl<'a, T: Scalar> Mul<Scale<T>> for $matrix_type {
+            type Output = DMatrix<T>;
+            fn mul(self, rhs: Scale<T>) -> Self::Output {
+                self * rhs.value()
+            }
+        }
+
+        impl<'a, T: Scalar> Mul<Scale<T>> for &$matrix_type {
+            type Output = DMatrix<T>;
+            fn mul(self, rhs: Scale<T>) -> Self::Output {
+                self * rhs.value()
+            }
+        }
+    };
 }
 
-impl<T: Scalar> MatrixCommon for DMatrix<T> {
-    type V = DVector<T>;
-    type T = T;
-
-    fn ncols(&self) -> IndexType {
-        self.ncols()
-    }
-    fn nrows(&self) -> IndexType {
-        self.nrows()
-    }
-}
-
-impl<'a, T: Scalar> Mul<Scale<T>> for DMatrixView<'a, T> {
-    type Output = DMatrix<T>;
-    fn mul(self, rhs: Scale<T>) -> Self::Output {
-        self * rhs.value()
-    }
-}
-
-impl<'a, T: Scalar> MatrixView<'a> for DMatrixView<'a, T> {
-    type Owned = DMatrix<T>;
-}
+impl_mul_scale!(DMatrixView<'a, T>);
+impl_mul_scale!(DMatrix<T>);
 
 impl<'a, T: Scalar> MulAssign<Scale<T>> for DMatrixViewMut<'a, T> {
     fn mul_assign(&mut self, rhs: Scale<T>) {
         *self *= rhs.value();
     }
+}
+
+impl<'a, T: Scalar> MatrixView<'a> for DMatrixView<'a, T> {
+    type Owned = DMatrix<T>;
 }
 
 impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
@@ -68,20 +67,6 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
     }
     fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T) {
         self.gemm(alpha, a, b, beta);
-    }
-}
-
-impl<T: Scalar> Mul<Scale<T>> for DMatrix<T> {
-    type Output = DMatrix<T>;
-    fn mul(self, rhs: Scale<T>) -> Self::Output {
-        self * rhs.value()
-    }
-}
-
-impl<T: Scalar> Mul<Scale<T>> for &DMatrix<T> {
-    type Output = DMatrix<T>;
-    fn mul(self, rhs: Scale<T>) -> Self::Output {
-        self * rhs.value()
     }
 }
 

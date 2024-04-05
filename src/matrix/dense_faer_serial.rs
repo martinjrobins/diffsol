@@ -5,57 +5,50 @@ use crate::scalar::{IndexType, Scale};
 use anyhow::Result;
 use faer::{linalg::matmul::matmul, Col, ColMut, ColRef, Mat, MatMut, MatRef, Parallelism};
 
-impl<'a> MatrixCommon for MatMut<'a, f64> {
-    type T = f64;
-    type V = Col<f64>;
+macro_rules! impl_matrix_common {
+    ($mat_type:ty) => {
+        impl<'a> MatrixCommon for $mat_type {
+            type T = f64;
+            type V = Col<f64>;
 
-    fn ncols(&self) -> IndexType {
-        self.ncols()
-    }
-    fn nrows(&self) -> IndexType {
-        self.nrows()
-    }
+            fn ncols(&self) -> IndexType {
+                self.ncols()
+            }
+
+            fn nrows(&self) -> IndexType {
+                self.nrows()
+            }
+        }
+    };
 }
 
-impl<'a> MatrixCommon for MatRef<'a, f64> {
-    type T = f64;
-    type V = Col<f64>;
+impl_matrix_common!(MatMut<'a, f64>);
+impl_matrix_common!(MatRef<'a, f64>);
+impl_matrix_common!(Mat<f64>);
 
-    fn ncols(&self) -> IndexType {
-        self.ncols()
-    }
-    fn nrows(&self) -> IndexType {
-        self.nrows()
-    }
+macro_rules! impl_mul_scale {
+    ($mat_type:ty) => {
+        impl<'a> Mul<Scale<f64>> for $mat_type {
+            type Output = Mat<f64>;
+
+            fn mul(self, rhs: Scale<f64>) -> Self::Output {
+                self * faer::scale(rhs.value())
+            }
+        }
+    };
 }
-
-impl MatrixCommon for Mat<f64> {
-    type T = f64;
-    type V = Col<f64>;
-
-    fn ncols(&self) -> IndexType {
-        self.ncols()
-    }
-    fn nrows(&self) -> IndexType {
-        self.nrows()
-    }
-}
-
-impl<'a> Mul<Scale<f64>> for MatRef<'a, f64> {
-    type Output = Mat<f64>;
-    fn mul(self, rhs: Scale<f64>) -> Self::Output {
-        self * faer::scale(rhs.value())
-    }
-}
-
-impl<'a> MatrixView<'a> for MatRef<'a, f64> {
-    type Owned = Mat<f64>;
-}
+impl_mul_scale!(MatRef<'a, f64>);
+impl_mul_scale!(Mat<f64>);
+impl_mul_scale!(&Mat<f64>);
 
 impl<'a> MulAssign<Scale<f64>> for MatMut<'a, f64> {
     fn mul_assign(&mut self, rhs: Scale<f64>) {
         *self *= faer::scale(rhs.value());
     }
+}
+
+impl<'a> MatrixView<'a> for MatRef<'a, f64> {
+    type Owned = Mat<f64>;
 }
 
 impl<'a> MatrixViewMut<'a> for MatMut<'a, f64> {
@@ -81,20 +74,6 @@ impl<'a> MatrixViewMut<'a> for MatMut<'a, f64> {
             alpha,
             Parallelism::None,
         )
-    }
-}
-
-impl Mul<Scale<f64>> for Mat<f64> {
-    type Output = Mat<f64>;
-    fn mul(self, rhs: Scale<f64>) -> Self::Output {
-        self * faer::scale(rhs.value())
-    }
-}
-
-impl Mul<Scale<f64>> for &Mat<f64> {
-    type Output = Mat<f64>;
-    fn mul(self, rhs: Scale<f64>) -> Self::Output {
-        self * faer::scale(rhs.value())
     }
 }
 

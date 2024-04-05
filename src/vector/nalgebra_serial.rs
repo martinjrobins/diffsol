@@ -29,17 +29,17 @@ impl VectorIndex for DVector<IndexType> {
     }
 }
 
-impl<T: Scalar> VectorCommon for DVector<T> {
-    type T = T;
+macro_rules! impl_vector_common {
+    ($vector_type:ty) => {
+        impl<'a, T: Scalar> VectorCommon for $vector_type {
+            type T = T;
+        }
+    };
 }
 
-impl<'a, T: Scalar> VectorCommon for DVectorView<'a, T> {
-    type T = T;
-}
-
-impl<'a, T: Scalar> VectorCommon for DVectorViewMut<'a, T> {
-    type T = T;
-}
+impl_vector_common!(DVector<T>);
+impl_vector_common!(DVectorView<'a, T>);
+impl_vector_common!(DVectorViewMut<'a, T>);
 
 impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
     type Owned = DVector<T>;
@@ -51,29 +51,37 @@ impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
     }
 }
 
-impl<T: Scalar> Mul<Scale<T>> for &DVector<T> {
-    type Output = DVector<T>;
-    fn mul(self, rhs: Scale<T>) -> Self::Output {
-        self * rhs.value()
-    }
+macro_rules! impl_mul_scale_vector {
+    ($vector_type:ty) => {
+        impl<T: Scalar> Mul<Scale<T>> for $vector_type {
+            type Output = DVector<T>;
+            fn mul(self, rhs: Scale<T>) -> Self::Output {
+                self * rhs.value()
+            }
+        }
+
+        impl<T: Scalar> Mul<Scale<T>> for &$vector_type {
+            type Output = DVector<T>;
+            fn mul(self, rhs: Scale<T>) -> Self::Output {
+                self * rhs.value()
+            }
+        }
+    };
 }
 
-impl<T: Scalar> Mul<Scale<T>> for DVector<T> {
-    type Output = DVector<T>;
-    fn mul(self, rhs: Scale<T>) -> Self::Output {
-        self * rhs.value()
-    }
+impl_mul_scale_vector!(DVector<T>);
+macro_rules! impl_mul_assign_scale_vector {
+    ($vector_type:ty) => {
+        impl<'a, T: Scalar> MulAssign<Scale<T>> for $vector_type {
+            fn mul_assign(&mut self, rhs: Scale<T>) {
+                *self *= rhs.value();
+            }
+        }
+    };
 }
-impl<T: Scalar> MulAssign<Scale<T>> for DVector<T> {
-    fn mul_assign(&mut self, rhs: Scale<T>) {
-        *self *= rhs.value();
-    }
-}
-impl<'a, T: Scalar> MulAssign<Scale<T>> for DVectorViewMut<'a, T> {
-    fn mul_assign(&mut self, rhs: Scale<T>) {
-        *self *= rhs.value();
-    }
-}
+
+impl_mul_assign_scale_vector!(DVector<T>);
+impl_mul_assign_scale_vector!(DVectorViewMut<'a, T>);
 
 impl<'a, T: Scalar> VectorViewMut<'a> for DVectorViewMut<'a, T> {
     type Owned = DVector<T>;
