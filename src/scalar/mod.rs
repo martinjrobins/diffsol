@@ -52,9 +52,9 @@ impl<T: Scalar> From<faer::Scale<T>> for Scale<T> {
         Scale(s.value())
     }
 }
-impl<T: Scalar> Into<faer::Scale<T>> for Scale<T> {
-    fn into(self) -> faer::Scale<T> {
-        faer::Scale(self.value())
+impl<T: Scalar> From<Scale<T>> for faer::Scale<T> {
+    fn from(s: Scale<T>) -> Self {
+        faer::Scale(s.value())
     }
 }
 
