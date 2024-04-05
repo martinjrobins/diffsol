@@ -68,4 +68,6 @@ harness = false
 [package.metadata.docs.rs]
 features = ["sundials", "diffsl-llvm12"]
 
-
+[profile.profiling]
+inherits = "release"
+debug = true
