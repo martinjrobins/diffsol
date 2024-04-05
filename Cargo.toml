@@ -11,7 +11,7 @@ repository = "https://github.com/martinjrobins/diffsol"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["nalgebra", "faer"]
+default = ["nalgebra", "faer", "sundials"]
 faer = []
 nalgebra = []
 sundials = ["sundials-sys"]
