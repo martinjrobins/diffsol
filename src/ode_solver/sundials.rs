@@ -355,6 +355,10 @@ where
         if self.data.is_none() {
             return Err(anyhow!("Problem not set"));
         }
+        let state = self.state.as_ref().ok_or(anyhow!("State not set"))?;
+        if t > state.t {
+            return Err(anyhow!("Interpolation time is greater than current time"));
+        }
         let ret = SundialsVector::new_serial(self.data.as_ref().unwrap().eqn.nstates());
         Self::check(unsafe { IDAGetDky(self.ida_mem, t, 0, ret.sundials_vector()) }).unwrap();
         Ok(ret)
@@ -364,17 +368,21 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
-        ode_solver::tests::{test_no_set_problem, test_take_state},
+        ode_solver::tests::{test_interpolate, test_no_set_problem, test_take_state},
         SundialsIda, SundialsMatrix,
     };
 
     type M = SundialsMatrix;
     #[test]
-    fn bdf_no_set_problem() {
+    fn sundials_no_set_problem() {
         test_no_set_problem::<M, _>(SundialsIda::default())
     }
     #[test]
-    fn bdf_take_state() {
+    fn sundials_take_state() {
         test_take_state::<M, _>(SundialsIda::default())
+    }
+    #[test]
+    fn sundials_interpolate() {
+        test_interpolate::<M, _>(SundialsIda::default())
     }
 }

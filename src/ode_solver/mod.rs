@@ -367,6 +367,29 @@ mod tests {
         }
     }
 
+    pub fn test_interpolate<M: Matrix, Method: OdeSolverMethod<TestEqn<M>>>(mut s: Method) {
+        let problem = OdeSolverProblem::new(
+            TestEqn {
+                _m: std::marker::PhantomData,
+            },
+            M::T::from(1e-6),
+            M::V::from_element(1, M::T::from(1e-6)),
+            M::T::zero(),
+            M::T::one(),
+        );
+        let state = OdeSolverState::new(&problem);
+        s.set_problem(state.clone(), &problem);
+        let t0 = M::T::zero();
+        let t1 = M::T::one();
+        s.interpolate(t0)
+            .unwrap()
+            .assert_eq(&state.y, M::T::from(1e-9));
+        assert!(s.interpolate(t1).is_err());
+        s.step().unwrap();
+        assert!(s.interpolate(s.state().unwrap().t).is_ok());
+        assert!(s.interpolate(s.state().unwrap().t + t1).is_err());
+    }
+
     pub fn test_no_set_problem<M: Matrix, Method: OdeSolverMethod<TestEqn<M>>>(mut s: Method) {
         assert!(s.state().is_none());
         assert!(s.problem().is_none());
@@ -380,9 +403,9 @@ mod tests {
             TestEqn {
                 _m: std::marker::PhantomData,
             },
+            M::T::from(1e-6),
+            M::V::from_element(1, M::T::from(1e-6)),
             M::T::zero(),
-            M::V::from_element(1, M::T::zero()),
-            M::T::one(),
             M::T::one(),
         );
         let state = OdeSolverState::new(&problem);

@@ -263,7 +263,15 @@ where
         //interpolate solution at time values t* where t-h < t* < t
         //
         //definition of the interpolating polynomial can be found on page 7 of [1]
+
+        // state must be set
         let state = self.state.as_ref().ok_or(anyhow!("State not set"))?;
+
+        // check that t is before the current time
+        if t > state.t {
+            return Err(anyhow!("Interpolation time is after current time"));
+        }
+
         let mut time_factor = Eqn::T::from(1.0);
         let mut order_summation = self.diff.column(0).into_owned();
         for i in 0..self.order {
@@ -539,7 +547,7 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
-        ode_solver::tests::{test_no_set_problem, test_take_state},
+        ode_solver::tests::{test_interpolate, test_no_set_problem, test_take_state},
         Bdf,
     };
 
@@ -551,5 +559,9 @@ mod test {
     #[test]
     fn bdf_take_state() {
         test_take_state::<M, _>(Bdf::default())
+    }
+    #[test]
+    fn bdf_test_interpolate() {
+        test_interpolate::<M, _>(Bdf::default())
     }
 }
