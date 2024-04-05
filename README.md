@@ -8,9 +8,6 @@ out-of-the-box with vectors and matrices from the
 [nalgebra](https://nalgebra.org) crate, or you can implement your own types by
 implementing the various vector and matrix traits in diffsol.
 
-**Note**: This library is still in the early stages of development and is not
-ready for production use. The API is likely to change in the future.
-
 ## Features
 
 Currently only one solver is implemented, the Backward Differentiation Formula
