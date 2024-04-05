@@ -5,6 +5,9 @@ pub mod gmres;
 #[cfg(feature = "nalgebra")]
 pub mod nalgebra;
 
+#[cfg(feature = "faer")]
+pub mod faer;
+
 #[cfg(feature = "sundials")]
 pub mod sundials;
 
@@ -23,6 +26,7 @@ pub trait LinearSolver<C: Op> {
 
     /// Take the current problem, if any, and return it.
     fn take_problem(&mut self) -> Option<SolverProblem<C>>;
+
     fn reset(&mut self) {
         if let Some(problem) = self.take_problem() {
             self.set_problem(problem);
@@ -58,7 +62,7 @@ pub mod tests {
         op::{linear_closure::LinearClosure, LinearOp},
         scalar::scale,
         vector::VectorRef,
-        DenseMatrix, LinearSolver, SolverProblem, Vector, LU,
+        DenseMatrix, FaerLU, LinearSolver, NalgebraLU, SolverProblem, Vector,
     };
     use num_traits::{One, Zero};
 
@@ -108,12 +112,19 @@ pub mod tests {
         }
     }
 
-    type MCpu = nalgebra::DMatrix<f64>;
+    type MCpuNalgebra = nalgebra::DMatrix<f64>;
+    type MCpuFaer = faer::Mat<f64>;
 
     #[test]
-    fn test_lu() {
-        let (p, solns) = linear_problem::<MCpu>();
-        let s = LU::default();
+    fn test_lu_nalgebra() {
+        let (p, solns) = linear_problem::<MCpuNalgebra>();
+        let s = NalgebraLU::default();
+        test_linear_solver(s, p, solns);
+    }
+    #[test]
+    fn test_lu_faer() {
+        let (p, solns) = linear_problem::<MCpuFaer>();
+        let s = FaerLU::default();
         test_linear_solver(s, p, solns);
     }
 }

@@ -8,8 +8,8 @@ use serde::Serialize;
 
 use crate::{
     matrix::MatrixRef, op::ode::BdfCallable, scalar::scale, DenseMatrix, IndexType, MatrixViewMut,
-    NewtonNonlinearSolver, NonLinearSolver, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-    Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut, LU,
+    NalgebraLU, NewtonNonlinearSolver, NonLinearSolver, OdeSolverMethod, OdeSolverProblem,
+    OdeSolverState, Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
 };
 
 use super::equations::OdeEquations;
@@ -98,7 +98,7 @@ impl<T: Scalar, Eqn: OdeEquations<T = T, V = DVector<T>, M = DMatrix<T>> + 'stat
 {
     fn default() -> Self {
         let n = 1;
-        let linear_solver = LU::default();
+        let linear_solver = NalgebraLU::default();
         let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<Eqn>>::new(
             linear_solver,
         ));
@@ -128,7 +128,7 @@ where
 {
     fn clone(&self) -> Self {
         let n = self.diff.nrows();
-        let linear_solver = LU::default();
+        let linear_solver = NalgebraLU::default();
         let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<Eqn>>::new(
             linear_solver,
         ));

@@ -135,7 +135,8 @@ pub mod scalar;
 pub mod solver;
 pub mod vector;
 
-pub use linear_solver::nalgebra::lu::LU;
+use crate::linear_solver::faer::lu::LU as FaerLU;
+use crate::linear_solver::nalgebra::lu::LU as NalgebraLU;
 use linear_solver::LinearSolver;
 
 #[cfg(feature = "sundials")]
