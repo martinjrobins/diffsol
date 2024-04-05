@@ -135,7 +135,6 @@ impl<T: Scalar> Matrix for Mat<T> {
         Self::from_fn(dim, dim, |i, j| if i == j { v[i] } else { T::zero() })
     }
     fn diagonal(&self) -> Self::V {
-        let dim = self.nrows().min(self.ncols());
-        Col::from_fn(dim, |i| self[(i, i)])
+        self.diagonal().column_vector().to_owned()
     }
 }
