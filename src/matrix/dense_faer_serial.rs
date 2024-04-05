@@ -1,15 +1,15 @@
 use std::ops::{Mul, MulAssign};
 
 use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
-use crate::scalar::{IndexType, Scale};
+use crate::scalar::{IndexType, Scalar, Scale};
 use anyhow::Result;
 use faer::{linalg::matmul::matmul, Col, ColMut, ColRef, Mat, MatMut, MatRef, Parallelism};
 
 macro_rules! impl_matrix_common {
     ($mat_type:ty) => {
-        impl<'a> MatrixCommon for $mat_type {
-            type T = f64;
-            type V = Col<f64>;
+        impl<'a, T: Scalar> MatrixCommon for $mat_type {
+            type T = T;
+            type V = Col<T>;
 
             fn ncols(&self) -> IndexType {
                 self.ncols()
@@ -22,38 +22,38 @@ macro_rules! impl_matrix_common {
     };
 }
 
-impl_matrix_common!(MatMut<'a, f64>);
-impl_matrix_common!(MatRef<'a, f64>);
-impl_matrix_common!(Mat<f64>);
+impl_matrix_common!(MatMut<'a, T>);
+impl_matrix_common!(MatRef<'a, T>);
+impl_matrix_common!(Mat<T>);
 
 macro_rules! impl_mul_scale {
     ($mat_type:ty) => {
-        impl<'a> Mul<Scale<f64>> for $mat_type {
-            type Output = Mat<f64>;
+        impl<'a, T: Scalar> Mul<Scale<T>> for $mat_type {
+            type Output = Mat<T>;
 
-            fn mul(self, rhs: Scale<f64>) -> Self::Output {
+            fn mul(self, rhs: Scale<T>) -> Self::Output {
                 self * faer::scale(rhs.value())
             }
         }
     };
 }
-impl_mul_scale!(MatRef<'a, f64>);
-impl_mul_scale!(Mat<f64>);
-impl_mul_scale!(&Mat<f64>);
+impl_mul_scale!(MatRef<'a, T>);
+impl_mul_scale!(Mat<T>);
+impl_mul_scale!(&Mat<T>);
 
-impl<'a> MulAssign<Scale<f64>> for MatMut<'a, f64> {
-    fn mul_assign(&mut self, rhs: Scale<f64>) {
+impl<'a, T: Scalar> MulAssign<Scale<T>> for MatMut<'a, T> {
+    fn mul_assign(&mut self, rhs: Scale<T>) {
         *self *= faer::scale(rhs.value());
     }
 }
 
-impl<'a> MatrixView<'a> for MatRef<'a, f64> {
-    type Owned = Mat<f64>;
+impl<'a, T: Scalar> MatrixView<'a> for MatRef<'a, T> {
+    type Owned = Mat<T>;
 }
 
-impl<'a> MatrixViewMut<'a> for MatMut<'a, f64> {
-    type Owned = Mat<f64>;
-    type View = MatRef<'a, f64>;
+impl<'a, T: Scalar> MatrixViewMut<'a> for MatMut<'a, T> {
+    type Owned = Mat<T>;
+    type View = MatRef<'a, T>;
 
     fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T) {
         matmul(
@@ -77,9 +77,9 @@ impl<'a> MatrixViewMut<'a> for MatMut<'a, f64> {
     }
 }
 
-impl DenseMatrix for Mat<f64> {
-    type View<'a> = MatRef<'a, f64>;
-    type ViewMut<'a> = MatMut<'a, f64>;
+impl<T: Scalar> DenseMatrix for Mat<T> {
+    type View<'a> = MatRef<'a, T>;
+    type ViewMut<'a> = MatMut<'a, T>;
 
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T) {
         matmul(
@@ -94,27 +94,27 @@ impl DenseMatrix for Mat<f64> {
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
         *y = faer::scale(alpha) * self * x + faer::scale(beta) * &*y;
     }
-    fn column_mut(&mut self, i: usize) -> ColMut<'_, f64> {
+    fn column_mut(&mut self, i: usize) -> ColMut<'_, T> {
         self.get_mut(0..self.nrows(), i)
     }
 
-    fn columns_mut(&mut self, start: usize, ncols: usize) -> MatMut<'_, f64> {
+    fn columns_mut(&mut self, start: usize, ncols: usize) -> MatMut<'_, T> {
         self.get_mut(0..self.nrows(), start..ncols)
     }
 
-    fn column(&self, i: usize) -> ColRef<'_, f64> {
+    fn column(&self, i: usize) -> ColRef<'_, T> {
         self.get(0..self.nrows(), i)
     }
-    fn columns(&self, start: usize, nrows: usize) -> MatRef<'_, f64> {
+    fn columns(&self, start: usize, nrows: usize) -> MatRef<'_, T> {
         self.get(0..self.nrows(), start..nrows)
     }
 }
 
-impl Matrix for Mat<f64> {
+impl<T: Scalar> Matrix for Mat<T> {
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,
-        triplets: Vec<(IndexType, IndexType, f64)>,
+        triplets: Vec<(IndexType, IndexType, T)>,
     ) -> Result<Self> {
         let mut m = Self::zeros(nrows, ncols);
         for (i, j, v) in triplets {
@@ -128,9 +128,9 @@ impl Matrix for Mat<f64> {
     fn copy_from(&mut self, other: &Self) {
         *self = other.clone();
     }
-    fn from_diagonal(v: &Col<f64>) -> Self {
+    fn from_diagonal(v: &Col<T>) -> Self {
         let dim = v.nrows();
-        Self::from_fn(dim, dim, |i, j| if i == j { v[i] } else { 0.0 })
+        Self::from_fn(dim, dim, |i, j| if i == j { v[i] } else { T::zero() })
     }
     fn diagonal(&self) -> Self::V {
         let dim = self.nrows().min(self.ncols());

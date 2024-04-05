@@ -10,6 +10,10 @@ use crate::vector::VectorView;
 
 pub trait Scalar:
     nalgebra::Scalar
+    + faer::Entity
+    + faer::ComplexField
+    + faer::SimpleEntity
+    + faer::RealField
     + From<f64>
     + Display
     + SimdRealField

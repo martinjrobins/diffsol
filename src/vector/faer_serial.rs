@@ -8,11 +8,11 @@ use crate::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
 macro_rules! impl_op_for_faer_struct {
     ($struct:ident, $trait_name:ident, $func_name:ident) => {
-        impl<'a, T: Scalar> $trait_name<Scale<T>> for $struct<'a, f64> {
-            type Output = Col<f64>;
+        impl<'a, T: Scalar> $trait_name<Scale<T>> for $struct<'a, T> {
+            type Output = Col<T>;
 
             fn $func_name(self, rhs: Scale<T>) -> Self::Output {
-                self * faer::scale(rhs.value().into())
+                self * faer::scale(rhs.value())
             }
         }
     };
@@ -24,16 +24,16 @@ impl_op_for_faer_struct!(ColMut, Mul, mul);
 macro_rules! impl_mul_scale {
     ($col_type:ty) => {
         impl<T: Scalar> Mul<Scale<T>> for $col_type {
-            type Output = Col<f64>;
+            type Output = Col<T>;
             fn mul(self, rhs: Scale<T>) -> Self::Output {
-                self * faer::scale(rhs.value().into())
+                self * faer::scale(rhs.value())
             }
         }
 
         impl<T: Scalar> Mul<Scale<T>> for &$col_type {
-            type Output = Col<f64>;
+            type Output = Col<T>;
             fn mul(self, rhs: Scale<T>) -> Self::Output {
-                self * faer::scale(rhs.value().into())
+                self * faer::scale(rhs.value())
             }
         }
     };
@@ -42,42 +42,42 @@ macro_rules! impl_mul_scale {
 macro_rules! impl_div_scale {
     ($col_type:ty) => {
         impl<'a, T: Scalar> Div<Scale<T>> for $col_type {
-            type Output = Col<f64>;
+            type Output = Col<T>;
             fn div(self, rhs: Scale<T>) -> Self::Output {
-                zipped!(self).map(|unzipped!(xi)| *xi / rhs.value().into())
+                zipped!(self).map(|unzipped!(xi)| *xi / rhs.value())
             }
         }
     };
 }
 
-impl_mul_scale!(Col<f64>);
-impl_div_scale!(faer::Col<f64>);
+impl_mul_scale!(Col<T>);
+impl_div_scale!(faer::Col<T>);
 
 macro_rules! impl_mul_assign_scale {
     ($col_type:ty) => {
         impl<'a, T: Scalar> MulAssign<Scale<T>> for $col_type {
             fn mul_assign(&mut self, rhs: Scale<T>) {
-                *self *= faer::scale(rhs.value().into());
+                *self *= faer::scale(rhs.value());
             }
         }
     };
 }
 
-impl_mul_assign_scale!(ColMut<'a, f64>);
-impl_mul_assign_scale!(Col<f64>);
+impl_mul_assign_scale!(ColMut<'a, T>);
+impl_mul_assign_scale!(Col<T>);
 
-impl Vector for Col<f64> {
-    type View<'a> = ColRef<'a, f64>;
-    type ViewMut<'a> = ColMut<'a, f64>;
+impl<T: Scalar> Vector for Col<T> {
+    type View<'a> = ColRef<'a, T>;
+    type ViewMut<'a> = ColMut<'a, T>;
     type Index = Vec<IndexType>;
     fn len(&self) -> IndexType {
         self.nrows()
     }
-    fn norm(&self) -> f64 {
+    fn norm(&self) -> T {
         self.norm_l2()
     }
     fn abs(&self) -> Self {
-        zipped!(self).map(|unzipped!(xi)| xi.abs())
+        zipped!(self).map(|unzipped!(xi)| xi.faer_abs())
     }
     fn as_view(&self) -> Self::View<'_> {
         self.as_ref()
@@ -98,7 +98,7 @@ impl Vector for Col<f64> {
         Col::from_fn(vec.len(), |i| vec[i])
     }
     fn zeros(nstates: usize) -> Self {
-        Self::from_element(nstates, 0.0)
+        Self::from_element(nstates, T::zero())
     }
     fn add_scalar_mut(&mut self, scalar: Self::T) {
         zipped!(self.as_mut()).for_each(|unzipped!(mut s)| *s += scalar)
@@ -147,31 +147,31 @@ impl VectorIndex for Vec<IndexType> {
 
 macro_rules! impl_vector_common {
     ($vector_type:ty) => {
-        impl<'a> VectorCommon for $vector_type {
-            type T = f64;
+        impl<'a, T: Scalar> VectorCommon for $vector_type {
+            type T = T;
         }
     };
 }
 
-impl_vector_common!(Col<f64>);
-impl_vector_common!(ColRef<'a, f64>);
-impl_vector_common!(ColMut<'a, f64>);
+impl_vector_common!(Col<T>);
+impl_vector_common!(ColRef<'a, T>);
+impl_vector_common!(ColMut<'a, T>);
 
-impl<'a> VectorView<'a> for ColRef<'a, f64> {
-    type Owned = Col<f64>;
-    fn abs(&self) -> Col<f64> {
-        zipped!(self).map(|unzipped!(xi)| xi.abs())
+impl<'a, T: Scalar> VectorView<'a> for ColRef<'a, T> {
+    type Owned = Col<T>;
+    fn abs(&self) -> Col<T> {
+        zipped!(self).map(|unzipped!(xi)| xi.faer_abs())
     }
-    fn into_owned(self) -> Col<f64> {
+    fn into_owned(self) -> Col<T> {
         self.to_owned()
     }
 }
 
-impl<'a> VectorViewMut<'a> for ColMut<'a, f64> {
-    type Owned = Col<f64>;
-    type View = ColRef<'a, f64>;
-    fn abs(&self) -> Col<f64> {
-        zipped!(self).map(|unzipped!(xi)| xi.abs())
+impl<'a, T: Scalar> VectorViewMut<'a> for ColMut<'a, T> {
+    type Owned = Col<T>;
+    type View = ColRef<'a, T>;
+    fn abs(&self) -> Col<T> {
+        zipped!(self).map(|unzipped!(xi)| xi.faer_abs())
     }
     fn copy_from(&mut self, other: &Self::Owned) {
         self.copy_from(other);
