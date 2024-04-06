@@ -1,11 +1,13 @@
+use num_traits::One;
+use num_traits::Pow;
 use num_traits::Zero;
-use std::cmp::{max, min};
-use std::{f32::consts::E, rc::Rc};
+use std::rc::Rc;
 
-use crate::matrix::DenseMatrix;
+use crate::vector::VectorRef;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
-    Matrix, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Scalar, Vector,
+    DenseMatrix, Matrix, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Scalar,
+    Vector,
 };
 
 struct Tableau<M: DenseMatrix> {
@@ -20,9 +22,9 @@ struct Tableau<M: DenseMatrix> {
 impl<M: DenseMatrix> Tableau<M> {
     pub fn new(a: M, b: M::V, c: M::V, d: M::V, beta: M, order: usize) -> Self {
         let s = b.len();
-        assert_eq!(a.rows(), s, "Invalid number of rows in a, expected {}", s);
+        assert_eq!(a.nrows(), s, "Invalid number of rows in a, expected {}", s);
         assert_eq!(
-            a.cols(),
+            a.ncols(),
             s,
             "Invalid number of columns in a, expected {}",
             s
@@ -40,13 +42,13 @@ impl<M: DenseMatrix> Tableau<M> {
             s
         );
         assert_eq!(
-            beta.rows(),
+            beta.nrows(),
             s,
             "Invalid number of rows in beta, expected {}",
             s
         );
         assert_eq!(
-            beta.cols(),
+            beta.ncols(),
             s,
             "Invalid number of columns in beta, expected {}",
             s
@@ -69,29 +71,30 @@ impl<M: DenseMatrix> Tableau<M> {
         self.b.len()
     }
 
-    pub fn a(&self, i: usize, j: usize) -> T {
+    pub fn a(&self, i: usize, j: usize) -> M::T {
         self.a[(i, j)]
     }
 
-    pub fn b(&self, i: usize) -> T {
+    pub fn b(&self, i: usize) -> M::T {
         self.b[i]
     }
 
-    pub fn c(&self, i: usize) -> T {
+    pub fn c(&self, i: usize) -> M::T {
         self.c[i]
     }
 
-    pub fn d(&self, i: usize) -> T {
+    pub fn d(&self, i: usize) -> M::T {
         self.d[i]
     }
 }
 
-struct Sdirk<Eqn, NS>
+struct Sdirk<M, Eqn, NS>
 where
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquations,
     NS: NonLinearSolver<SdirkCallable<Eqn>>,
 {
-    tableau: Tableau<Eqn::T>,
+    tableau: Tableau<M>,
     problem: Option<OdeSolverProblem<Eqn>>,
     nonlinear_solver: NS,
     state: Option<OdeSolverState<Eqn::M>>,
@@ -102,8 +105,9 @@ where
     old_y: Eqn::V,
 }
 
-impl<Eqn, NS> Sdirk<Eqn, NS>
+impl<M, Eqn, NS> Sdirk<M, Eqn, NS>
 where
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquations,
     NS: NonLinearSolver<SdirkCallable<Eqn>>,
 {
@@ -112,7 +116,7 @@ where
     const MAX_FACTOR: f64 = 10.0;
     const MIN_TIMESTEP: f64 = 1e-32;
 
-    pub fn new(tableau: Tableau<Eqn::T>, mut nonlinear_solver: NS) -> Self {
+    pub fn new(tableau: Tableau<M>, mut nonlinear_solver: NS) -> Self {
         // set max iterations for nonlinear solver
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
 
@@ -139,9 +143,10 @@ where
         // if a(0, 0) = gamma, then we're a SDIRK method
         // if a(0, 0) = 0, then we're a ESDIRK method
         // otherwise, error
+        let zero = Eqn::T::zero();
         let is_sdirk = match tableau.a(0, 0) {
             gamma => true,
-            Eqn::T::zero() => false,
+            zero => false,
             _ => panic!("Invalid tableau, expected a(0, 0) = 0 or a(0, 0) = gamma"),
         };
         assert!(
@@ -151,6 +156,8 @@ where
         let n = 1;
         let s = tableau.s();
         let diff = Eqn::M::zeros(n, s);
+        let old_t = Eqn::T::zero();
+        let old_y = Eqn::V::zeros(n);
         Self {
             tableau,
             nonlinear_solver,
@@ -159,6 +166,8 @@ where
             problem: None,
             gamma,
             is_sdirk,
+            old_t,
+            old_y,
         }
     }
 
@@ -167,10 +176,12 @@ where
     }
 }
 
-impl<Eqn, NS> OdeSolverMethod<Eqn> for Sdirk<Eqn, NS>
+impl<M, Eqn, NS> OdeSolverMethod<Eqn> for Sdirk<M, Eqn, NS>
 where
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquations,
     NS: NonLinearSolver<SdirkCallable<Eqn>>,
+    for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
 {
     fn problem(&self) -> Option<&OdeSolverProblem<Eqn>> {
         self.problem.as_ref()
@@ -200,7 +211,7 @@ where
             Eqn::T::from(0.01) * (d0 / d1)
         };
 
-        let y1 = &state.y + scale(h0) * f0;
+        let y1 = &state.y + f0 * scale(h0);
         let t1 = state.t + h0;
         let f1 = problem.eqn.rhs(t1, &y1);
 
@@ -209,15 +220,26 @@ where
         df.component_div_assign(&scale_factor);
         let d2 = df.norm();
 
-        let max_d = max(d1, d2);
+        let mut max_d = d2;
+        if max_d < d1 {
+            max_d = d1;
+        }
         let h1 = if max_d < Eqn::T::from(1e-15) {
-            max(Eqn::T::from(1e-6), h0 * Eqn::T::from(1e-3))
+            let h1 = h0 * Eqn::T::from(1e-3);
+            if h1 < Eqn::T::from(1e-6) {
+                Eqn::T::from(1e-6)
+            } else {
+                h1
+            }
         } else {
             (Eqn::T::from(0.01) / max_d)
                 .pow(Eqn::T::one() / Eqn::T::from(1.0 + self.tableau.order() as f64))
         };
 
-        state.h = min(100 * h0, h1);
+        state.h = Eqn::T::from * (100.0) * h0;
+        if state.h > h1 {
+            state.h = h1;
+        }
 
         // setup linear solver for first step
         let callable = Rc::new(SdirkCallable::new(problem));
@@ -355,8 +377,8 @@ where
             ));
         }
         let theta = (t - self.old_t) / (state.t - self.old_t);
-        let poly_order = self.tableau.interpolation_order();
-        let s_star = self.tableau.interpolation_stages();
+        let poly_order = self.tableau.beta().cols();
+        let s_star = self.tableau.beta().rows();
         let mut thetav = vec![Eqn::T::from(1.0); poly_order];
         for i in 1..poly_order {
             thetav[i] = theta * thetav[i - 1];

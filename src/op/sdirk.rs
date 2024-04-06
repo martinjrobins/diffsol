@@ -27,7 +27,7 @@ pub struct SdirkCallable<Eqn: OdeEquations> {
     number_of_jac_evals: RefCell<usize>,
 }
 
-impl<Eqn: OdeEquations> BdfCallable<Eqn> {
+impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
     pub fn new(ode_problem: &OdeSolverProblem<Eqn>) -> Self {
         let eqn = ode_problem.eqn.clone();
         let n = ode_problem.eqn.nstates();
@@ -74,10 +74,7 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
             self.jacobian_is_stale.replace(true);
         }
     }
-    pub fn set_phi(
-        &self,
-        phi: Eqn::V,
-    ) {
+    pub fn set_phi(&self, phi: Eqn::V) {
         self.phi.replace(phi);
     }
     pub fn set_rhs_jacobian_is_stale(&self) {
@@ -86,7 +83,7 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
     }
 }
 
-impl<Eqn: OdeEquations> Op for BdfCallable<Eqn> {
+impl<Eqn: OdeEquations> Op for SdirkCallable<Eqn> {
     type V = Eqn::V;
     type T = Eqn::T;
     type M = Eqn::M;
@@ -102,7 +99,7 @@ impl<Eqn: OdeEquations> Op for BdfCallable<Eqn> {
 }
 
 // callable to solve for F(y) = M (y' + psi) - f(y) = 0
-impl<Eqn: OdeEquations> NonLinearOp for BdfCallable<Eqn>
+impl<Eqn: OdeEquations> NonLinearOp for SdirkCallable<Eqn>
 where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
