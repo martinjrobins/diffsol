@@ -102,6 +102,15 @@ pub trait MatrixView<'a>:
     + Clone
 {
     type Owned;
+
+    /// Perform a matrix-vector multiplication `y = self * x + beta * y`.
+    fn gemv_v(
+        &self,
+        alpha: Self::T,
+        x: &<Self::V as Vector>::View<'_>,
+        beta: Self::T,
+        y: &mut Self::V,
+    );
 }
 
 /// A base matrix trait (including sparse and dense matrices)

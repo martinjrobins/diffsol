@@ -70,6 +70,70 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
     }
 }
 
+impl<'a, T: Scalar> MatrixCommon for DMatrixView<'a, T> {
+    type V = DVector<T>;
+    type T = T;
+
+    fn ncols(&self) -> IndexType {
+        self.ncols()
+    }
+    fn nrows(&self) -> IndexType {
+        self.nrows()
+    }
+}
+
+impl<'a, T: Scalar> MatrixView<'a> for DMatrixView<'a, T> {
+    type Owned = DMatrix<T>;
+
+    fn gemv_v(
+        &self,
+        alpha: Self::T,
+        x: &<Self::V as crate::vector::Vector>::View<'_>,
+        beta: Self::T,
+        y: &mut Self::V,
+    ) {
+        y.gemv(alpha, self, x, beta);
+    }
+}
+
+impl<T: Scalar> MatrixCommon for DMatrix<T> {
+    type V = DVector<T>;
+    type T = T;
+
+    fn ncols(&self) -> IndexType {
+        self.ncols()
+    }
+    fn nrows(&self) -> IndexType {
+        self.nrows()
+    }
+}
+
+impl<T: Scalar> Matrix for DMatrix<T> {
+    fn try_from_triplets(
+        nrows: IndexType,
+        ncols: IndexType,
+        triplets: Vec<(IndexType, IndexType, T)>,
+    ) -> Result<Self> {
+        let mut m = Self::zeros(nrows, ncols);
+        for (i, j, v) in triplets {
+            m[(i, j)] = v;
+        }
+        Ok(m)
+    }
+    fn zeros(nrows: IndexType, ncols: IndexType) -> Self {
+        Self::zeros(nrows, ncols)
+    }
+    fn from_diagonal(v: &DVector<T>) -> Self {
+        Self::from_diagonal(v)
+    }
+    fn diagonal(&self) -> Self::V {
+        self.diagonal()
+    }
+    fn copy_from(&mut self, other: &Self) {
+        self.copy_from(other);
+    }
+}
+
 impl<T: Scalar> DenseMatrix for DMatrix<T> {
     type View<'a> = DMatrixView<'a, T>;
     type ViewMut<'a> = DMatrixViewMut<'a, T>;

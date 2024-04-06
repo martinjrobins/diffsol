@@ -3,15 +3,16 @@ use num_traits::Pow;
 use num_traits::Zero;
 use std::rc::Rc;
 
+use crate::matrix::MatrixRef;
 use crate::vector::VectorRef;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
-    DenseMatrix, Matrix, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Scalar,
-    Vector,
+    DenseMatrix, MatrixView, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+    Vector, VectorView, VectorViewMut,
 };
 
 struct Tableau<M: DenseMatrix> {
-    a: M,
+    at: M, // A transpose
     b: M::V,
     c: M::V,
     d: M::V,
@@ -20,11 +21,11 @@ struct Tableau<M: DenseMatrix> {
 }
 
 impl<M: DenseMatrix> Tableau<M> {
-    pub fn new(a: M, b: M::V, c: M::V, d: M::V, beta: M, order: usize) -> Self {
+    pub fn new(at: M, b: M::V, c: M::V, d: M::V, beta: M, order: usize) -> Self {
         let s = b.len();
-        assert_eq!(a.nrows(), s, "Invalid number of rows in a, expected {}", s);
+        assert_eq!(at.nrows(), s, "Invalid number of rows in a, expected {}", s);
         assert_eq!(
-            a.ncols(),
+            at.ncols(),
             s,
             "Invalid number of columns in a, expected {}",
             s
@@ -54,7 +55,7 @@ impl<M: DenseMatrix> Tableau<M> {
             s
         );
         Self {
-            a,
+            at,
             b,
             c,
             d,
@@ -71,20 +72,24 @@ impl<M: DenseMatrix> Tableau<M> {
         self.b.len()
     }
 
-    pub fn a(&self, i: usize, j: usize) -> M::T {
-        self.a[(i, j)]
+    pub fn at(&self) -> &M {
+        &self.at
     }
 
-    pub fn b(&self, i: usize) -> M::T {
-        self.b[i]
+    pub fn b(&self) -> &M::V {
+        &self.b
     }
 
-    pub fn c(&self, i: usize) -> M::T {
-        self.c[i]
+    pub fn c(&self) -> &M::V {
+        &self.c
     }
 
-    pub fn d(&self, i: usize) -> M::T {
-        self.d[i]
+    pub fn d(&self) -> &M::V {
+        &self.d
+    }
+
+    pub fn beta(&self) -> &M {
+        &self.beta
     }
 }
 
@@ -98,7 +103,7 @@ where
     problem: Option<OdeSolverProblem<Eqn>>,
     nonlinear_solver: NS,
     state: Option<OdeSolverState<Eqn::M>>,
-    diff: Eqn::M,
+    diff: M,
     gamma: Eqn::T,
     is_sdirk: bool,
     old_t: Eqn::T,
@@ -124,17 +129,17 @@ where
         for i in 0..tableau.s() {
             for j in 0..i {
                 assert_eq!(
-                    tableau.a(i, j),
+                    tableau.at()[(j, i)],
                     Eqn::T::zero(),
                     "Invalid tableau, expected a(i, j) = 0 for i > j"
                 );
             }
         }
-        let gamma = tableau.a(0, 0);
+        let gamma = tableau.at()[(0, 0)];
         //check that for i = 1..s-1, a(i, i) = gamma
         for i in 1..tableau.s() {
             assert_eq!(
-                tableau.a(i, i),
+                tableau.at()[(i, i)],
                 gamma,
                 "Invalid tableau, expected a(i, i) = gamma = {} for i = 1..s-1",
                 gamma
@@ -144,20 +149,20 @@ where
         // if a(0, 0) = 0, then we're a ESDIRK method
         // otherwise, error
         let zero = Eqn::T::zero();
-        let is_sdirk = match tableau.a(0, 0) {
+        let is_sdirk = match tableau.at()[(0, 0)] {
             gamma => true,
             zero => false,
             _ => panic!("Invalid tableau, expected a(0, 0) = 0 or a(0, 0) = gamma"),
         };
         assert!(
-            gamma == Eqn::T::zero() || gamma == tableau.a(0, 0),
+            gamma == Eqn::T::zero() || gamma == tableau.at()[(0, 0)],
             "Invalid tableau, expected a(0, 0) = 0 or a(0, 0) = gamma"
         );
         let n = 1;
         let s = tableau.s();
-        let diff = Eqn::M::zeros(n, s);
+        let diff = M::zeros(n, s);
         let old_t = Eqn::T::zero();
-        let old_y = Eqn::V::zeros(n);
+        let old_y = <Eqn::V as Vector>::zeros(n);
         Self {
             tableau,
             nonlinear_solver,
@@ -182,12 +187,17 @@ where
     Eqn: OdeEquations,
     NS: NonLinearSolver<SdirkCallable<Eqn>>,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
+    for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
 {
     fn problem(&self) -> Option<&OdeSolverProblem<Eqn>> {
         self.problem.as_ref()
     }
 
-    fn set_problem(&mut self, state: OdeSolverState<<Eqn>::M>, problem: &OdeSolverProblem<Eqn>) {
+    fn set_problem(
+        &mut self,
+        mut state: OdeSolverState<<Eqn>::M>,
+        problem: &OdeSolverProblem<Eqn>,
+    ) {
         // update initial step size based on function
         let mut scale_factor = state.y.abs();
         scale_factor *= scale(problem.rtol);
@@ -211,7 +221,7 @@ where
             Eqn::T::from(0.01) * (d0 / d1)
         };
 
-        let y1 = &state.y + f0 * scale(h0);
+        let y1 = &state.y + &f0 * h0;
         let t1 = state.t + h0;
         let f1 = problem.eqn.rhs(t1, &y1);
 
@@ -236,7 +246,7 @@ where
                 .pow(Eqn::T::one() / Eqn::T::from(1.0 + self.tableau.order() as f64))
         };
 
-        state.h = Eqn::T::from * (100.0) * h0;
+        state.h = Eqn::T::from(100.0) * h0;
         if state.h > h1 {
             state.h = h1;
         }
@@ -245,14 +255,12 @@ where
         let callable = Rc::new(SdirkCallable::new(problem));
         callable.set_c(state.h, self.gamma);
         let nonlinear_problem = SolverProblem::new_from_ode_problem(callable, problem);
-        self.nonlinear_solver
-            .as_mut()
-            .set_problem(nonlinear_problem);
+        self.nonlinear_solver.set_problem(nonlinear_problem);
 
-        self.state = Some(state);
-        self.problem = Some(problem.clone());
         self.old_t = state.t;
         self.old_y = state.y.clone();
+        self.state = Some(state);
+        self.problem = Some(problem.clone());
     }
 
     fn step(&mut self) -> anyhow::Result<()> {
@@ -262,12 +270,11 @@ where
         let y0 = &state.y;
         let start = if self.is_sdirk { 0 } else { 1 };
         let mut updated_jacobian = false;
-        let mut phi = Eqn::V::zeros(n);
         let scale_y = {
-            let ode_problem = self.ode_problem.as_ref().unwrap();
-            let mut scale_y = y0.clone();
-            scale_y = y0.abs() * scale(ode_problem.rtol);
+            let ode_problem = self.problem.as_ref().unwrap();
+            let mut scale_y = y0.abs() * scale(ode_problem.rtol);
             scale_y += ode_problem.atol.as_ref();
+            scale_y
         };
         let mut t = state.t;
 
@@ -275,46 +282,54 @@ where
         loop {
             t = state.t;
             for i in start..self.tableau.s() {
-                t += self.tableau.c(i) * state.h;
-                phi.copy_from(y0);
-                for j in 0..i {
-                    phi += self.tableau.a(i, j) * self.diff.column(j);
-                }
-                phi *= state.h;
-                self.nonlinear_solver.as_mut().set_time(t).unwrap();
+                t += self.tableau.c()[i] * state.h;
+                let mut phi = y0.clone();
+                let at_col = self.tableau.at().column(i);
+                self.diff
+                    .columns(0, i)
+                    .gemv_v(state.h, &at_col, Eqn::T::one(), &mut phi);
+
+                self.nonlinear_solver.set_time(t).unwrap();
                 {
-                    let callable = self.nonlinear_problem_op().unwrap();
+                    let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
                     callable.set_phi(phi);
                 }
 
-                let dy = if i == 0 {
-                    self.diff.column(0).to_owned()
+                let mut dy = if i == 0 {
+                    self.diff.column(0).into_owned()
                 } else {
-                    self.diff.column(i - 1).to_owned()
+                    self.diff.column(i - 1).into_owned()
                 };
-                match self.nonlinear_solver.solve_in_place(dy) {
-                    Ok(result) => Ok(()),
+                match self.nonlinear_solver.solve_in_place(&mut dy) {
+                    Ok(r) => Ok(r),
                     Err(e) => {
                         if !updated_jacobian {
                             // newton iteration did not converge, so update jacobian and try again
                             {
-                                let callable = self.nonlinear_problem_op().unwrap();
+                                let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
                                 callable.set_rhs_jacobian_is_stale();
                             }
-                            self.nonlinear_solver.as_mut().reset();
+                            self.nonlinear_solver.reset();
                             updated_jacobian = true;
-                            self.nonlinear_solver.solve_in_place(dy)
+
+                            if i == 0 {
+                                dy.copy_from_view(&self.diff.column(0));
+                            } else {
+                                dy.copy_from_view(&self.diff.column(i - 1));
+                            };
+                            self.nonlinear_solver.solve_in_place(&mut dy)
                         } else {
                             Err(e)
                         }
                     }
                 }?;
+
+                // update diff with solved dy
+                self.diff.column_mut(i).copy_from(&dy);
             }
-            let mut error = Eqn::V::zeros(n);
-            for i in 0..self.tableau.s() {
-                error += self.tableau.d(i) * self.diff.column(i);
-            }
-            error *= state.h;
+            let mut error = <Eqn::V as Vector>::zeros(n);
+            self.diff
+                .gemv(state.h, self.tableau.d(), Eqn::T::zero(), &mut error);
 
             // scale error and compute norm
             error.component_div_assign(&scale_y);
@@ -342,28 +357,26 @@ where
             }
 
             // update c for new step size
-            let callable = self.nonlinear_problem_op().unwrap();
+            let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
             callable.set_c(state.h, self.gamma);
 
             // reset nonlinear's linear solver problem as lu factorisation has changed
-            self.nonlinear_solver.as_mut().reset();
+            self.nonlinear_solver.reset();
 
             // test error is within tolerance
             if error_norm <= Eqn::T::from(1.0) {
                 break;
             }
-            // step is rejected
-            // reduce step size and try again
+            // step is rejected, factor reduces step size, so we try again with the smaller step size
         }
 
         // take the step
         self.old_t = state.t;
         state.t = t;
-        self.old_y.copy_from(state.y);
+        self.old_y.copy_from(&state.y);
         let y1 = &mut state.y;
-        for i in 0..self.tableau.s() {
-            y1 += self.tableau.b(i) * self.diff.column(i);
-        }
+        self.diff
+            .gemv(Eqn::T::one(), self.tableau.b(), Eqn::T::one(), y1);
         Ok(())
     }
 
@@ -377,21 +390,22 @@ where
             ));
         }
         let theta = (t - self.old_t) / (state.t - self.old_t);
-        let poly_order = self.tableau.beta().cols();
-        let s_star = self.tableau.beta().rows();
+        let poly_order = self.tableau.beta().ncols();
+        let s_star = self.tableau.beta().nrows();
         let mut thetav = vec![Eqn::T::from(1.0); poly_order];
         for i in 1..poly_order {
             thetav[i] = theta * thetav[i - 1];
         }
         // beta_poly = beta * thetav
-        let mut beta = Eqn::V::from_vec(thetav);
+        let thetav = Eqn::V::from_vec(thetav);
+        let mut beta = <Eqn::V as Vector>::zeros(s_star);
         self.tableau
             .beta()
-            .gemv(Eqn::T::one(), &beta, Eqn::T::zero(), &mut beta);
-        beta *= state.h;
+            .gemv(state.h, &thetav, Eqn::T::zero(), &mut beta);
 
         // ret = old_y + sum_{i=0}^{s_star-1} beta[i] * diff[:, i]
-        let mut ret = self.old_y.clone();
+        let mut ret = thetav;
+        ret.copy_from(&self.old_y);
         self.diff
             .gemv(Eqn::T::one(), &beta, Eqn::T::one(), &mut ret);
         Ok(ret)

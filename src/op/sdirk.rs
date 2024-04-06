@@ -98,7 +98,6 @@ impl<Eqn: OdeEquations> Op for SdirkCallable<Eqn> {
     }
 }
 
-// callable to solve for F(y) = M (y' + psi) - f(y) = 0
 impl<Eqn: OdeEquations> NonLinearOp for SdirkCallable<Eqn>
 where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -106,10 +105,10 @@ where
 {
     // F(y) = M (y) - f(phi + c * y) = 0
     fn call_inplace(&self, x: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
-        let phi_ref = self.psi_neg_y0.borrow();
+        let phi_ref = self.phi.borrow();
         let phi = phi_ref.deref();
         let c = *self.c.borrow().deref();
-        let tmp = phi + c * x;
+        let mut tmp = phi + x * c;
         self.eqn.rhs_inplace(t, &tmp, y);
         self.eqn.mass_inplace(t, &x, &mut tmp);
         // y = tmp  - y
@@ -156,7 +155,7 @@ mod tests {
     use crate::op::NonLinearOp;
     use crate::vector::Vector;
 
-    use super::BdfCallable;
+    use super::SdirkCallable;
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;
 
@@ -166,7 +165,7 @@ mod tests {
         let mut sdirk_callable = SdirkCallable::new(&problem);
         let c = 0.1;
         let phi = Vcpu::from_vec(vec![1.1, 1.2]);
-        sdirk_callable.set_c(c);
+        sdirk_callable.set_c(1.0, c);
         sdirk_callable.set_phi(phi);
         // check that the function is correct
         let y = Vcpu::from_vec(vec![1.0, 1.0]);
@@ -193,13 +192,13 @@ mod tests {
         //          |-0.1|
         // Mv - c * f'(y) v = |1 0| |1| - 0.1 * |-0.1| = |1.01|
         //                    |0 1| |1|         |-0.1|   |1.01|
-        bdf_callable.jac_mul_inplace(&y, t, &v, &mut y_out);
+        sdirk_callable.jac_mul_inplace(&y, t, &v, &mut y_out);
         let y_out_expect = Vcpu::from_vec(vec![1.01, 1.01]);
         y_out.assert_eq(&y_out_expect, 1e-10);
 
         // J = M - c * f'(y) = |1 0| - 0.1 * |-0.1 0| = |1.01 0|
         //                     |0 1|         |0 -0.1|   |0 1.01|
-        let jac = bdf_callable.jacobian(&y, t);
+        let jac = sdirk_callable.jacobian(&y, t);
         assert_eq!(jac[(0, 0)], 1.01);
         assert_eq!(jac[(0, 1)], 0.0);
         assert_eq!(jac[(1, 0)], 0.0);
