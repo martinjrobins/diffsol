@@ -81,7 +81,7 @@ mod tests {
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
-        number_of_rhs_evals: 56
+        number_of_rhs_evals: 32
         number_of_jac_mul_evals: 2
         number_of_mass_evals: 0
         number_of_mass_matrix_evals: 0
@@ -143,6 +143,25 @@ mod tests {
     }
 
     #[test]
+    fn test_sdirk4_nalgebra_exponential_decay_algebraic() {
+        let mut s = Sdirk::new(
+            Tableau::<Mcpu>::sdirk4(),
+            NewtonNonlinearSolver::new(LU::default()),
+        );
+        let rs = NewtonNonlinearSolver::new(LU::default());
+        let (problem, soln) = exponential_decay_with_algebraic_problem::<Mcpu>(false);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        ---
+        number_of_rhs_evals: 34
+        number_of_jac_mul_evals: 4
+        number_of_mass_evals: 36
+        number_of_mass_matrix_evals: 2
+        number_of_jacobian_matrix_evals: 1
+        "###);
+    }
+
+    #[test]
     fn test_bdf_nalgebra_exponential_decay_algebraic() {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::new(LU::default());
@@ -165,6 +184,25 @@ mod tests {
         number_of_mass_evals: 64
         number_of_mass_matrix_evals: 2
         number_of_jacobian_matrix_evals: 2
+        "###);
+    }
+
+    #[test]
+    fn test_sdirk4_nalgebra_robertson() {
+        let mut s = Sdirk::new(
+            Tableau::<Mcpu>::sdirk4(),
+            NewtonNonlinearSolver::new(LU::default()),
+        );
+        let rs = NewtonNonlinearSolver::new(LU::default());
+        let (problem, soln) = robertson::<Mcpu>(false);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        ---
+        number_of_rhs_evals: 34
+        number_of_jac_mul_evals: 4
+        number_of_mass_evals: 36
+        number_of_mass_matrix_evals: 2
+        number_of_jacobian_matrix_evals: 1
         "###);
     }
 

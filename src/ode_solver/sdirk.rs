@@ -93,8 +93,10 @@ impl<M: DenseMatrix> Tableau<M> {
         beta[(2, 2)] = M::T::from(-8875.0 / 216.0);
         beta[(2, 3)] = M::T::from(250.0 / 27.0);
 
+        beta[(3, 0)] = M::T::from(0.0);
         beta[(3, 1)] = M::T::from(-85.0 / 4.0);
         beta[(3, 2)] = M::T::from(85.0 / 6.0);
+        beta[(3, 3)] = M::T::from(0.0);
 
         beta[(4, 0)] = M::T::from(-11.0 / 19.0);
         beta[(4, 1)] = M::T::from(557.0 / 108.0);
@@ -185,6 +187,8 @@ where
     is_sdirk: bool,
     old_t: Eqn::T,
     old_y: Eqn::V,
+    old_f: Eqn::V,
+    f: Eqn::V,
     a_rows: Vec<Eqn::V>,
 }
 
@@ -247,6 +251,8 @@ where
         let diff = M::zeros(n, s);
         let old_t = Eqn::T::zero();
         let old_y = <Eqn::V as Vector>::zeros(n);
+        let old_f = <Eqn::V as Vector>::zeros(n);
+        let f = <Eqn::V as Vector>::zeros(n);
         Self {
             tableau,
             nonlinear_solver,
@@ -258,6 +264,8 @@ where
             old_t,
             old_y,
             a_rows,
+            old_f,
+            f,
         }
     }
 }
@@ -310,7 +318,7 @@ where
         let t1 = state.t + h0;
         let f1 = problem.eqn.rhs(t1, &y1);
 
-        let mut df = f1 - f0;
+        let mut df = f1 - &f0;
         df *= scale(Eqn::T::one() / h0);
         df.component_div_assign(&scale_factor);
         let d2 = df.norm();
@@ -342,6 +350,8 @@ where
         let nonlinear_problem = SolverProblem::new_from_ode_problem(callable, problem);
         self.nonlinear_solver.set_problem(nonlinear_problem);
 
+        self.old_f = f0.clone();
+        self.f = f0;
         self.old_t = state.t;
         self.old_y = state.y.clone();
         self.state = Some(state);
@@ -361,6 +371,7 @@ where
             scale_y += ode_problem.atol.as_ref();
             scale_y
         };
+        let mut t1: Eqn::T;
 
         // loop until step is accepted
         loop {
@@ -434,6 +445,7 @@ where
             }
 
             // adjust step size for next step
+            t1 = state.t + state.h;
             state.h *= factor;
 
             // if step size too small, then fail
@@ -456,12 +468,21 @@ where
         }
 
         // take the step
+        if self.tableau.c()[self.tableau.s() - 1] == Eqn::T::one() {
+            self.old_f
+                .copy_from_view(&self.diff.column(self.diff.ncols() - 1));
+            std::mem::swap(&mut self.old_f, &mut self.f);
+        } else {
+            unimplemented!();
+        }
+
         self.old_t = state.t;
-        state.t += state.h;
+        let dt = t1 - state.t;
+        state.t = t1;
+
         self.old_y.copy_from(&state.y);
         let y1 = &mut state.y;
-        self.diff
-            .gemv(Eqn::T::one(), self.tableau.b(), Eqn::T::one(), y1);
+        self.diff.gemv(dt, self.tableau.b(), Eqn::T::one(), y1);
         Ok(())
     }
 
@@ -474,29 +495,41 @@ where
                 "Interpolation time is not within the current step"
             ));
         }
-        let dt = t - self.old_t;
+        let dt = state.t - self.old_t;
         let theta = if dt == Eqn::T::zero() {
             Eqn::T::zero()
         } else {
             (t - self.old_t) / dt
         };
-        let poly_order = self.tableau.beta().ncols();
-        let s_star = self.tableau.beta().nrows();
-        let mut thetav = Vec::with_capacity(poly_order);
-        thetav.push(theta);
-        for i in 1..poly_order {
-            thetav.push(theta * thetav[i - 1]);
-        }
-        // beta_poly = beta * thetav
-        let thetav = Eqn::V::from_vec(thetav);
-        let mut beta = <Eqn::V as Vector>::zeros(s_star);
-        self.tableau
-            .beta()
-            .gemv(Eqn::T::one(), &thetav, Eqn::T::zero(), &mut beta);
 
-        // ret = old_y + sum_{i=0}^{s_star-1} beta[i] * diff[:, i]
-        let mut ret = self.old_y.clone();
-        self.diff.gemv(state.h, &beta, Eqn::T::one(), &mut ret);
+        let f0 = &self.old_f;
+        let f1 = &self.f;
+        let u0 = &self.old_y;
+        let u1 = &state.y;
+        let ret = u0 * (Eqn::T::from(1.0) - theta)
+            + u1 * theta
+            + ((u1 - u0) * scale(Eqn::T::from(1.0) - Eqn::T::from(2.0) * theta)
+                + f0 * ((theta - Eqn::T::from(1.0)) * dt)
+                + f1 * (theta * dt))
+                * scale(theta * (theta - Eqn::T::from(1.0)));
+
+        //let poly_order = self.tableau.beta().ncols();
+        //let s_star = self.tableau.beta().nrows();
+        //let mut thetav = Vec::with_capacity(poly_order);
+        //thetav.push(theta);
+        //for i in 1..poly_order {
+        //    thetav.push(theta * thetav[i - 1]);
+        //}
+        //// beta_poly = beta * thetav
+        //let thetav = Eqn::V::from_vec(thetav);
+        //let mut beta = <Eqn::V as Vector>::zeros(s_star);
+        //self.tableau
+        //    .beta()
+        //    .gemv(Eqn::T::one(), &thetav, Eqn::T::zero(), &mut beta);
+
+        //// ret = old_y + sum_{i=0}^{s_star-1} beta[i] * diff[:, i]
+        //let mut ret = self.old_y.clone();
+        //self.diff.gemv(dt, &beta, Eqn::T::one(), &mut ret);
         Ok(ret)
     }
 
