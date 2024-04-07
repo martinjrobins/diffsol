@@ -1,8 +1,6 @@
 use crate::{
-    matrix::{DenseMatrix, MatrixRef},
-    ode_solver::equations::OdeEquations,
-    scalar::scale,
-    IndexType, Matrix, OdeSolverProblem, Vector, VectorRef,
+    matrix::MatrixRef, ode_solver::equations::OdeEquations, Matrix, OdeSolverProblem, Vector,
+    VectorRef,
 };
 use num_traits::{One, Zero};
 use std::{
@@ -84,11 +82,7 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
             self.jacobian_is_stale.replace(true);
         }
     }
-    pub fn set_psi_and_y0(
-        &self,
-        psi: Eqn::V,
-        y0: &Eqn::V,
-    ) {
+    pub fn set_psi_and_y0(&self, psi: Eqn::V, y0: &Eqn::V) {
         let mut new_psi_neg_y0 = psi;
 
         // now negate y0

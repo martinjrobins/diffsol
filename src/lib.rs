@@ -153,7 +153,7 @@ use matrix::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 pub use nonlinear_solver::newton::NewtonNonlinearSolver;
 use nonlinear_solver::NonLinearSolver;
 pub use ode_solver::{
-    bdf::Bdf, builder::OdeBuilder, equations::OdeEquations, method::OdeSolverMethod,
+    bdf::Bdf, sdirk::Sdirk, sdirk::Tableau, builder::OdeBuilder, equations::OdeEquations, method::OdeSolverMethod,
     method::OdeSolverState, problem::OdeSolverProblem,
 };
 use op::NonLinearOp;

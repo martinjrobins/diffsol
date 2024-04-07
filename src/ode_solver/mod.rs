@@ -1,9 +1,9 @@
 pub mod bdf;
-pub mod sdirk;
 pub mod builder;
 pub mod equations;
 pub mod method;
 pub mod problem;
+pub mod sdirk;
 pub mod test_models;
 
 #[cfg(feature = "diffsl")]
@@ -29,8 +29,8 @@ mod tests {
     use crate::op::ode_rhs::OdeRhs;
     use crate::op::Op;
     use crate::scalar::scale;
-    use crate::Vector;
     use crate::{NonLinearSolver, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState};
+    use crate::{Sdirk, Tableau, Vector};
     use num_traits::One;
     use num_traits::Zero;
     use tests::bdf::Bdf;
@@ -69,6 +69,25 @@ mod tests {
     }
 
     type Mcpu = nalgebra::DMatrix<f64>;
+
+    #[test]
+    fn test_sdirk4_nalgebra_exponential_decay() {
+        let mut s = Sdirk::new(
+            Tableau::<Mcpu>::sdirk4(),
+            NewtonNonlinearSolver::new(LU::default()),
+        );
+        let rs = NewtonNonlinearSolver::new(LU::default());
+        let (problem, soln) = exponential_decay_problem::<Mcpu>(false);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        ---
+        number_of_rhs_evals: 56
+        number_of_jac_mul_evals: 2
+        number_of_mass_evals: 0
+        number_of_mass_matrix_evals: 0
+        number_of_jacobian_matrix_evals: 1
+        "###);
+    }
 
     #[test]
     fn test_bdf_nalgebra_exponential_decay() {

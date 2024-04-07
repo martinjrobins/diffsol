@@ -1,15 +1,9 @@
 use crate::{
-    matrix::{DenseMatrix, MatrixRef},
-    ode_solver::equations::OdeEquations,
-    scalar::scale,
-    IndexType, Matrix, OdeSolverProblem, Vector, VectorRef,
+    matrix::MatrixRef, ode_solver::equations::OdeEquations, Matrix, OdeSolverProblem, Vector,
+    VectorRef,
 };
 use num_traits::{One, Zero};
-use std::{
-    cell::RefCell,
-    ops::{Deref, SubAssign},
-    rc::Rc,
-};
+use std::{cell::RefCell, ops::Deref, rc::Rc};
 
 use super::{NonLinearOp, Op};
 
@@ -110,7 +104,7 @@ where
         let c = *self.c.borrow().deref();
         let mut tmp = phi + x * c;
         self.eqn.rhs_inplace(t, &tmp, y);
-        self.eqn.mass_inplace(t, &x, &mut tmp);
+        self.eqn.mass_inplace(t, x, &mut tmp);
         // y = tmp  - y
         y.axpy(Eqn::T::one(), &tmp, -Eqn::T::one());
     }
@@ -162,7 +156,7 @@ mod tests {
     #[test]
     fn test_sdirk_callable() {
         let (problem, _soln) = exponential_decay_problem::<Mcpu>(false);
-        let mut sdirk_callable = SdirkCallable::new(&problem);
+        let sdirk_callable = SdirkCallable::new(&problem);
         let c = 0.1;
         let phi = Vcpu::from_vec(vec![1.1, 1.2]);
         sdirk_callable.set_c(1.0, c);
@@ -179,12 +173,12 @@ mod tests {
         //     |1|
         // f(y) = |-0.1 * y|
         //        |-0.1 * y|
-        // i.e. f(phi + c * y) = |-0.1 * (1.1 + 0.1 * 1)| = |-0.21|
-        //                       |-0.1 * (1.2 + 0.1 * 1)| = |-0.22|
-        //  i.e. F(y) = |1 0| |1| - |-0.21| =  |0.79|
-        //              |0 1| |2|   |-0.22|    |1.78|
+        // i.e. f(phi + c * y) = |-0.1 * (1.1 + 0.1 * 1)| = |-0.12|
+        //                       |-0.1 * (1.2 + 0.1 * 1)| = |-0.13|
+        //  i.e. F(y) = |1 0| |1| - |-0.12| =  |1.12|
+        //              |0 1| |1|   |-0.13|    |1.13|
         sdirk_callable.call_inplace(&y, t, &mut y_out);
-        let y_out_expect = Vcpu::from_vec(vec![0.79, 1.78]);
+        let y_out_expect = Vcpu::from_vec(vec![1.12, 1.13]);
         y_out.assert_eq(&y_out_expect, 1e-10);
 
         let v = Vcpu::from_vec(vec![1.0, 1.0]);

@@ -111,6 +111,8 @@ pub trait MatrixView<'a>:
         beta: Self::T,
         y: &mut Self::V,
     );
+
+    fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V);
 }
 
 /// A base matrix trait (including sparse and dense matrices)

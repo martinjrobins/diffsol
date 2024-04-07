@@ -11,7 +11,7 @@ use crate::{
     Vector, VectorView, VectorViewMut,
 };
 
-struct Tableau<M: DenseMatrix> {
+pub struct Tableau<M: DenseMatrix> {
     at: M, // A transpose
     b: M::V,
     c: M::V,
@@ -21,13 +21,102 @@ struct Tableau<M: DenseMatrix> {
 }
 
 impl<M: DenseMatrix> Tableau<M> {
+    /// L-stable SDIRK method of order 4, from
+    /// Hairer, Norsett, Wanner, Solving Ordinary Differential Equations II, Stiff and Differential-Algebraic Problems, 2nd Edition
+    /// Section IV.6, page 107
+    pub fn sdirk4() -> Self {
+        let mut a = M::zeros(5, 5);
+        a[(0, 0)] = M::T::from(1.0 / 4.0);
+
+        a[(1, 0)] = M::T::from(1.0 / 2.0);
+        a[(1, 1)] = M::T::from(1.0 / 4.0);
+
+        a[(2, 0)] = M::T::from(17.0 / 50.0);
+        a[(2, 1)] = M::T::from(-1.0 / 25.0);
+        a[(2, 2)] = M::T::from(1.0 / 4.0);
+
+        a[(3, 0)] = M::T::from(371.0 / 1360.0);
+        a[(3, 1)] = M::T::from(-137.0 / 2720.0);
+        a[(3, 2)] = M::T::from(15.0 / 544.0);
+        a[(3, 3)] = M::T::from(1.0 / 4.0);
+
+        a[(4, 0)] = M::T::from(25.0 / 24.0);
+        a[(4, 1)] = M::T::from(-49.0 / 48.0);
+        a[(4, 2)] = M::T::from(125.0 / 16.0);
+        a[(4, 3)] = M::T::from(-85.0 / 12.0);
+        a[(4, 4)] = M::T::from(1.0 / 4.0);
+
+        let mut at = M::zeros(5, 5);
+        for i in 0..5 {
+            for j in 0..5 {
+                at[(i, j)] = a[(j, i)];
+            }
+        }
+
+        let b = M::V::from_vec(vec![
+            M::T::from(25.0 / 24.0),
+            M::T::from(-49.0 / 48.0),
+            M::T::from(125.0 / 16.0),
+            M::T::from(-85.0 / 12.0),
+            M::T::from(1.0 / 4.0),
+        ]);
+
+        let c = M::V::from_vec(vec![
+            M::T::from(1.0 / 4.0),
+            M::T::from(3.0 / 4.0),
+            M::T::from(11.0 / 20.0),
+            M::T::from(1.0 / 2.0),
+            M::T::from(1.0),
+        ]);
+
+        let d = M::V::from_vec(vec![
+            M::T::from(-3.0 / 16.0),
+            M::T::from(-27.0 / 32.0),
+            M::T::from(25.0 / 32.0),
+            M::T::from(0.0),
+            M::T::from(1.0 / 4.0),
+        ]);
+
+        let mut beta = M::zeros(5, 4);
+        beta[(0, 0)] = M::T::from(11.0 / 3.0);
+        beta[(0, 1)] = M::T::from(-463.0 / 72.0);
+        beta[(0, 2)] = M::T::from(217.0 / 36.0);
+        beta[(0, 3)] = M::T::from(-20.0 / 9.0);
+
+        beta[(1, 0)] = M::T::from(11.0 / 2.0);
+        beta[(1, 1)] = M::T::from(-385.0 / 16.0);
+        beta[(1, 2)] = M::T::from(661.0 / 24.0);
+        beta[(1, 3)] = M::T::from(-10.0);
+
+        beta[(2, 0)] = M::T::from(-128.0 / 18.0);
+        beta[(2, 1)] = M::T::from(20125.0 / 432.0);
+        beta[(2, 2)] = M::T::from(-8875.0 / 216.0);
+        beta[(2, 3)] = M::T::from(250.0 / 27.0);
+
+        beta[(3, 1)] = M::T::from(-85.0 / 4.0);
+        beta[(3, 2)] = M::T::from(85.0 / 6.0);
+
+        beta[(4, 0)] = M::T::from(-11.0 / 19.0);
+        beta[(4, 1)] = M::T::from(557.0 / 108.0);
+        beta[(4, 2)] = M::T::from(-359.0 / 54.0);
+        beta[(4, 3)] = M::T::from(80.0 / 27.0);
+
+        let order = 4;
+        Self::new(at, b, c, d, beta, order)
+    }
     pub fn new(at: M, b: M::V, c: M::V, d: M::V, beta: M, order: usize) -> Self {
-        let s = b.len();
+        let s = c.len();
         assert_eq!(at.nrows(), s, "Invalid number of rows in a, expected {}", s);
         assert_eq!(
             at.ncols(),
             s,
             "Invalid number of columns in a, expected {}",
+            s
+        );
+        assert_eq!(
+            b.len(),
+            s,
+            "Invalid number of elements in b, expected {}",
             s
         );
         assert_eq!(
@@ -37,21 +126,9 @@ impl<M: DenseMatrix> Tableau<M> {
             s
         );
         assert_eq!(
-            d.len(),
-            s,
-            "Invalid number of elements in d, expected {}",
-            s
-        );
-        assert_eq!(
             beta.nrows(),
             s,
             "Invalid number of rows in beta, expected {}",
-            s
-        );
-        assert_eq!(
-            beta.ncols(),
-            s,
-            "Invalid number of columns in beta, expected {}",
             s
         );
         Self {
@@ -69,7 +146,7 @@ impl<M: DenseMatrix> Tableau<M> {
     }
 
     pub fn s(&self) -> usize {
-        self.b.len()
+        self.c.len()
     }
 
     pub fn at(&self) -> &M {
@@ -93,7 +170,7 @@ impl<M: DenseMatrix> Tableau<M> {
     }
 }
 
-struct Sdirk<M, Eqn, NS>
+pub struct Sdirk<M, Eqn, NS>
 where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquations,
@@ -108,6 +185,7 @@ where
     is_sdirk: bool,
     old_t: Eqn::T,
     old_y: Eqn::V,
+    a_rows: Vec<Eqn::V>,
 }
 
 impl<M, Eqn, NS> Sdirk<M, Eqn, NS>
@@ -126,8 +204,9 @@ where
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
 
         // check that the upper triangular part of a is zero
-        for i in 0..tableau.s() {
-            for j in 0..i {
+        let s = tableau.s();
+        for i in 0..s {
+            for j in (i + 1)..s {
                 assert_eq!(
                     tableau.at()[(j, i)],
                     Eqn::T::zero(),
@@ -149,15 +228,20 @@ where
         // if a(0, 0) = 0, then we're a ESDIRK method
         // otherwise, error
         let zero = Eqn::T::zero();
-        let is_sdirk = match tableau.at()[(0, 0)] {
-            gamma => true,
-            zero => false,
-            _ => panic!("Invalid tableau, expected a(0, 0) = 0 or a(0, 0) = gamma"),
-        };
-        assert!(
-            gamma == Eqn::T::zero() || gamma == tableau.at()[(0, 0)],
-            "Invalid tableau, expected a(0, 0) = 0 or a(0, 0) = gamma"
-        );
+        if tableau.at()[(0, 0)] != zero && tableau.at()[(0, 0)] != gamma {
+            panic!("Invalid tableau, expected a(0, 0) = 0 or a(0, 0) = gamma");
+        }
+        let is_sdirk = tableau.at()[(0, 0)] == gamma;
+
+        let mut a_rows = Vec::with_capacity(s);
+        for i in 0..s {
+            let mut row = Vec::with_capacity(i);
+            for j in 0..i {
+                row.push(tableau.at()[(j, i)]);
+            }
+            a_rows.push(Eqn::V::from_vec(row));
+        }
+
         let n = 1;
         let s = tableau.s();
         let diff = M::zeros(n, s);
@@ -173,11 +257,8 @@ where
             is_sdirk,
             old_t,
             old_y,
+            a_rows,
         }
-    }
-
-    fn nonlinear_problem_op(&self) -> Option<&Rc<SdirkCallable<Eqn>>> {
-        Some(&self.nonlinear_solver.problem()?.f)
     }
 }
 
@@ -207,6 +288,10 @@ where
         // Solving Ordinary Differential Equations I, Nonstiff Problems
         // Section II.4.2
         let f0 = problem.eqn.rhs(state.t, &state.y);
+
+        self.diff = M::zeros(state.y.len(), self.tableau.s());
+        self.diff.column_mut(0).copy_from(&f0);
+
         let mut tmp = f0.clone();
         tmp.component_div_assign(&scale_factor);
         let d0 = tmp.norm();
@@ -276,18 +361,18 @@ where
             scale_y += ode_problem.atol.as_ref();
             scale_y
         };
-        let mut t = state.t;
 
         // loop until step is accepted
         loop {
-            t = state.t;
             for i in start..self.tableau.s() {
-                t += self.tableau.c()[i] * state.h;
+                let t = state.t + self.tableau.c()[i] * state.h;
                 let mut phi = y0.clone();
-                let at_col = self.tableau.at().column(i);
-                self.diff
-                    .columns(0, i)
-                    .gemv_v(state.h, &at_col, Eqn::T::one(), &mut phi);
+                if i > 0 {
+                    let a_row = &self.a_rows[i];
+                    self.diff
+                        .columns(0, i)
+                        .gemv_o(state.h, a_row, Eqn::T::one(), &mut phi);
+                }
 
                 self.nonlinear_solver.set_time(t).unwrap();
                 {
@@ -296,7 +381,7 @@ where
                 }
 
                 let mut dy = if i == 0 {
-                    self.diff.column(0).into_owned()
+                    self.diff.column(self.diff.ncols() - 1).into_owned()
                 } else {
                     self.diff.column(i - 1).into_owned()
                 };
@@ -313,7 +398,7 @@ where
                             updated_jacobian = true;
 
                             if i == 0 {
-                                dy.copy_from_view(&self.diff.column(0));
+                                dy.copy_from_view(&self.diff.column(self.diff.ncols() - 1));
                             } else {
                                 dy.copy_from_view(&self.diff.column(i - 1));
                             };
@@ -372,7 +457,7 @@ where
 
         // take the step
         self.old_t = state.t;
-        state.t = t;
+        state.t += state.h;
         self.old_y.copy_from(&state.y);
         let y1 = &mut state.y;
         self.diff
@@ -389,25 +474,29 @@ where
                 "Interpolation time is not within the current step"
             ));
         }
-        let theta = (t - self.old_t) / (state.t - self.old_t);
+        let dt = t - self.old_t;
+        let theta = if dt == Eqn::T::zero() {
+            Eqn::T::zero()
+        } else {
+            (t - self.old_t) / dt
+        };
         let poly_order = self.tableau.beta().ncols();
         let s_star = self.tableau.beta().nrows();
-        let mut thetav = vec![Eqn::T::from(1.0); poly_order];
+        let mut thetav = Vec::with_capacity(poly_order);
+        thetav.push(theta);
         for i in 1..poly_order {
-            thetav[i] = theta * thetav[i - 1];
+            thetav.push(theta * thetav[i - 1]);
         }
         // beta_poly = beta * thetav
         let thetav = Eqn::V::from_vec(thetav);
         let mut beta = <Eqn::V as Vector>::zeros(s_star);
         self.tableau
             .beta()
-            .gemv(state.h, &thetav, Eqn::T::zero(), &mut beta);
+            .gemv(Eqn::T::one(), &thetav, Eqn::T::zero(), &mut beta);
 
         // ret = old_y + sum_{i=0}^{s_star-1} beta[i] * diff[:, i]
-        let mut ret = thetav;
-        ret.copy_from(&self.old_y);
-        self.diff
-            .gemv(Eqn::T::one(), &beta, Eqn::T::one(), &mut ret);
+        let mut ret = self.old_y.clone();
+        self.diff.gemv(state.h, &beta, Eqn::T::one(), &mut ret);
         Ok(ret)
     }
 

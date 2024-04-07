@@ -94,6 +94,10 @@ impl<'a, T: Scalar> MatrixView<'a> for DMatrixView<'a, T> {
     ) {
         y.gemv(alpha, self, x, beta);
     }
+
+    fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
+        y.gemv(alpha, self, x, beta);
+    }
 }
 
 impl<T: Scalar> MatrixCommon for DMatrix<T> {
