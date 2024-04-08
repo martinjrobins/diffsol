@@ -211,43 +211,46 @@ mod tests {
 
         y2.assert_eq(&y, 1e-6);
     }
-    // #[test]
-    // fn test_readme_faer() {
-    //     type T = f64;
-    //     type V = faer::Col<f64>;
-    //     let problem = OdeBuilder::new()
-    //         .p([0.04, 1.0e4, 3.0e7])
-    //         .rtol(1e-4)
-    //         .atol([1.0e-8, 1.0e-6, 1.0e-6])
-    //         .build_ode(
-    //             |x: &V, p: &V, _t: T, y: &mut V| {
-    //                 y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
-    //                 y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
-    //                 y[2] = p[2] * x[1] * x[1];
-    //             },
-    //             |x: &V, p: &V, _t: T, v: &V, y: &mut V| {
-    //                 y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
-    //                 y[1] = p[0] * v[0]
-    //                     - p[1] * v[1] * x[2]
-    //                     - p[1] * x[1] * v[2]
-    //                     - 2.0 * p[2] * x[1] * v[1];
-    //                 y[2] = 2.0 * p[2] * x[1] * v[1];
-    //             },
-    //             |_p: &V, _t: T| V::from_vec(vec![1.0, 0.0, 0.0]),
-    //         );
+    #[test]
+    fn test_readme_faer() {
+        type T = f64;
+        type V = faer::Col<f64>;
+        let problem = OdeBuilder::new()
+            .p([0.04, 1.0e4, 3.0e7])
+            .rtol(1e-4)
+            .atol([1.0e-8, 1.0e-6, 1.0e-6])
+            .build_ode(
+                |x: &V, p: &V, _t: T, y: &mut V| {
+                    y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
+                    y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
+                    y[2] = p[2] * x[1] * x[1];
+                },
+                |x: &V, p: &V, _t: T, v: &V, y: &mut V| {
+                    y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
+                    y[1] = p[0] * v[0]
+                        - p[1] * v[1] * x[2]
+                        - p[1] * x[1] * v[2]
+                        - 2.0 * p[2] * x[1] * v[1];
+                    y[2] = 2.0 * p[2] * x[1] * v[1];
+                },
+                |_p: &V, _t: T| V::from_vec(vec![1.0, 0.0, 0.0]),
+            )
+            .unwrap();
 
-    //     let mut solver = Bdf::default();
+        let mut solver = Bdf::default();
 
-    //     let t = 0.4;
-    //     let y = solver.solve(&problem.unwrap(), t).unwrap();
+        let t = 0.4;
+        let y = solver.solve(&problem, t).unwrap();
 
-    //     let mut state = OdeSolverState::new(&problem);
-    //     solver.set_problem(&mut state, &problem);
-    //     while state.t <= t {
-    //         solver.step(&mut state).unwrap();
-    //     }
-    //     let y2 = solver.interpolate(&state, t);
+        let state = OdeSolverState::new(&problem);
+        solver.set_problem(state, &problem);
+        while solver.state().unwrap().t <= t {
+            solver.step().unwrap();
+        }
+        let y2 = solver.interpolate(t).unwrap();
 
-    //     y2.assert_eq(&y, 1e-6);
-    // }
+        y2.assert_eq(&y, 1e-6);
+    }
+
+    // y2.assert_eq(&y, 1e-6);
 }
