@@ -68,7 +68,7 @@
 //! The linear solver trait is [LinearSolver], and the nonlinear solver trait is [NonLinearSolver]. The [SolverProblem] struct is used to define the problem to solve.
 //!
 //! The provided linear solvers are:
-//! - [LU]: a direct solver that uses the LU decomposition implemented in the [nalgebra](https://nalgebra.org) library.
+//! - [NalgebraLU]: a direct solver that uses the LU decomposition implemented in the [nalgebra](https://nalgebra.org) library.
 //! - [SundialsLinearSolver]: a linear solver that uses the [sundials](https://computation.llnl.gov/projects/sundials) library (requires the `sundials` feature).
 //!
 //! The provided nonlinear solvers are:
@@ -135,7 +135,7 @@ pub mod scalar;
 pub mod solver;
 pub mod vector;
 
-use linear_solver::LinearSolver;
+use linear_solver::{LinearSolver, NalgebraLU};
 
 #[cfg(feature = "sundials")]
 pub use matrix::sundials::SundialsMatrix;
