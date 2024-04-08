@@ -74,7 +74,7 @@ where
 
     fn take_problem(&mut self) -> Option<SolverProblem<Op>> {
         self.is_setup = false;
-        self.problem.take()
+        Option::take(&mut self.problem)
     }
 
     fn solve_in_place(&mut self, b: &mut Op::V) -> Result<()> {

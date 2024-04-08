@@ -33,7 +33,7 @@ impl<T: Scalar, C: LinearOp<M = Mat<T>, V = Col<T>, T = T>> LinearSolver<C> for 
     }
     fn take_problem(&mut self) -> Option<SolverProblem<C>> {
         self.lu = None;
-        self.problem.take()
+        Option::take(&mut self.problem)
     }
 
     fn solve_in_place(&mut self, state: &mut C::V) -> Result<()> {

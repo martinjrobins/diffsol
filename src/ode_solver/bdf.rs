@@ -316,7 +316,7 @@ where
     }
 
     fn take_state(&mut self) -> Option<OdeSolverState<<Eqn>::M>> {
-        self.state.take()
+        Option::take(&mut self.state)
     }
 
     fn set_problem(&mut self, state: OdeSolverState<Eqn::M>, problem: &OdeSolverProblem<Eqn>) {

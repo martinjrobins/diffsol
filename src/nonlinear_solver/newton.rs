@@ -61,7 +61,7 @@ impl<C: NonLinearOp> NonLinearSolver<C> for NewtonNonlinearSolver<C> {
     }
 
     fn take_problem(&mut self) -> Option<SolverProblem<C>> {
-        self.problem.take()
+        Option::take(&mut self.problem)
     }
 
     fn solve_in_place(&mut self, xn: &mut C::V) -> Result<()> {
