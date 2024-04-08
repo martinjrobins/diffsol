@@ -135,7 +135,7 @@ pub mod scalar;
 pub mod solver;
 pub mod vector;
 
-use linear_solver::{LinearSolver, NalgebraLU};
+pub use linear_solver::{LinearSolver, NalgebraLU};
 
 #[cfg(feature = "sundials")]
 pub use matrix::sundials::SundialsMatrix;
