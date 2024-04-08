@@ -77,7 +77,7 @@ where
         Option::take(&mut self.problem)
     }
 
-    fn solve_in_place(&mut self, b: &mut Op::V) -> Result<()> {
+    fn solve_in_place(&self, b: &mut Op::V) -> Result<()> {
         if !self.is_setup {
             return Err(anyhow::anyhow!("Linear solver not setup"));
         }

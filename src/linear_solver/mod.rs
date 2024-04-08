@@ -37,13 +37,13 @@ pub trait LinearSolver<C: Op> {
     }
 
     /// Solve the problem `Ax = b` and return the solution `x`.
-    fn solve(&mut self, b: &C::V) -> Result<C::V> {
+    fn solve(&self, b: &C::V) -> Result<C::V> {
         let mut b = b.clone();
         self.solve_in_place(&mut b)?;
         Ok(b)
     }
 
-    fn solve_in_place(&mut self, b: &mut C::V) -> Result<()>;
+    fn solve_in_place(&self, b: &mut C::V) -> Result<()>;
 }
 
 pub struct LinearSolveSolution<V> {

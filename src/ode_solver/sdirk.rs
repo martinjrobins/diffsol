@@ -3,8 +3,13 @@ use num_traits::Pow;
 use num_traits::Zero;
 use std::rc::Rc;
 
+use crate::linear_solver;
+use crate::linear_solver::LinearSolver;
 use crate::matrix::MatrixRef;
+use crate::nonlinear_solver;
+use crate::op::linearise::LinearisedOp;
 use crate::vector::VectorRef;
+use crate::NewtonNonlinearSolver;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
     DenseMatrix, MatrixView, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
@@ -21,6 +26,55 @@ pub struct Tableau<M: DenseMatrix> {
 }
 
 impl<M: DenseMatrix> Tableau<M> {
+    /// TR-BDF2 method
+    /// from R.E. Bank, W.M. Coughran Jr, W. Fichtner, E.H. Grosse, D.J. Rose and R.K. Smith, Transient simulation of silicon devices and circuits, IEEE Trans. Comput.-Aided Design 4 (1985) 436-451.
+    /// analysed in M.E. Hosea and L.F. Shampine. Analysis and implementation of TR-BDF2. Applied Numerical Mathematics, 20:21–37, 1996.
+    pub fn tr_bdf2() -> Self {
+        let gamma = M::T::from(2.0 - 2.0_f64.sqrt());
+        let d = gamma / M::T::from(2.0);
+        let w = M::T::from(2.0_f64.sqrt() / 4.0);
+
+        let mut a = M::zeros(3, 3);
+        a[(1, 0)] = d;
+        a[(1, 1)] = d;
+
+        a[(2, 0)] = w;
+        a[(2, 1)] = w;
+        a[(2, 2)] = d;
+
+        let mut at = M::zeros(3, 3);
+        for i in 0..3 {
+            for j in 0..3 {
+                at[(i, j)] = a[(j, i)];
+            }
+        }
+
+        let b = M::V::from_vec(vec![w, w, d]);
+        let b_hat = M::V::from_vec(vec![
+            (M::T::from(1.0) - w) / M::T::from(3.0),
+            (M::T::from(3.0) * w + M::T::from(1.0)) / M::T::from(3.0),
+            d / M::T::from(3.0),
+        ]);
+        let mut d = M::V::zeros(3);
+        for i in 0..3 {
+            d[i] = b[i] - b_hat[i];
+        }
+
+        let c = M::V::from_vec(vec![M::T::zero(), gamma, M::T::one()]);
+
+        let beta = M::zeros(1, 1);
+
+        let order = 2;
+
+        Self {
+            at,
+            b,
+            c,
+            d,
+            beta,
+            order,
+        }
+    }
     /// L-stable SDIRK method of order 4, from
     /// Hairer, Norsett, Wanner, Solving Ordinary Differential Equations II, Stiff and Differential-Algebraic Problems, 2nd Edition
     /// Section IV.6, page 107
@@ -172,15 +226,16 @@ impl<M: DenseMatrix> Tableau<M> {
     }
 }
 
-pub struct Sdirk<M, Eqn, NS>
+pub struct Sdirk<M, Eqn>
 where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquations,
-    NS: NonLinearSolver<SdirkCallable<Eqn>>,
+    for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
+    for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
 {
     tableau: Tableau<M>,
     problem: Option<OdeSolverProblem<Eqn>>,
-    nonlinear_solver: NS,
+    nonlinear_solver: NewtonNonlinearSolver<SdirkCallable<Eqn>>,
     state: Option<OdeSolverState<Eqn::M>>,
     diff: M,
     gamma: Eqn::T,
@@ -192,18 +247,20 @@ where
     a_rows: Vec<Eqn::V>,
 }
 
-impl<M, Eqn, NS> Sdirk<M, Eqn, NS>
+impl<M, Eqn> Sdirk<M, Eqn>
 where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquations,
-    NS: NonLinearSolver<SdirkCallable<Eqn>>,
+    for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
+    for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
 {
     const NEWTON_MAXITER: usize = 4;
     const MIN_FACTOR: f64 = 0.2;
     const MAX_FACTOR: f64 = 10.0;
     const MIN_TIMESTEP: f64 = 1e-32;
 
-    pub fn new(tableau: Tableau<M>, mut nonlinear_solver: NS) -> Self {
+    pub fn new(tableau: Tableau<M>, linear_solver: impl LinearSolver<LinearisedOp<SdirkCallable<Eqn>>> + 'static) -> Self {
+        let mut nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         // set max iterations for nonlinear solver
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
 
@@ -218,7 +275,7 @@ where
                 );
             }
         }
-        let gamma = tableau.at()[(0, 0)];
+        let gamma = tableau.at()[(1, 1)];
         //check that for i = 1..s-1, a(i, i) = gamma
         for i in 1..tableau.s() {
             assert_eq!(
@@ -270,11 +327,10 @@ where
     }
 }
 
-impl<M, Eqn, NS> OdeSolverMethod<Eqn> for Sdirk<M, Eqn, NS>
+impl<M, Eqn> OdeSolverMethod<Eqn> for Sdirk<M, Eqn>
 where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquations,
-    NS: NonLinearSolver<SdirkCallable<Eqn>>,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
     for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
 {
@@ -296,9 +352,7 @@ where
         // Solving Ordinary Differential Equations I, Nonstiff Problems
         // Section II.4.2
         let f0 = problem.eqn.rhs(state.t, &state.y);
-
-        self.diff = M::zeros(state.y.len(), self.tableau.s());
-        self.diff.column_mut(0).copy_from(&f0);
+        let hf0 = &f0 * state.h;
 
         let mut tmp = f0.clone();
         tmp.component_div_assign(&scale_factor);
@@ -314,7 +368,7 @@ where
             Eqn::T::from(0.01) * (d0 / d1)
         };
 
-        let y1 = &state.y + &f0 * h0;
+        let y1 = &state.y + hf0;
         let t1 = state.t + h0;
         let f1 = problem.eqn.rhs(t1, &y1);
 
@@ -345,11 +399,12 @@ where
         }
 
         // setup linear solver for first step
-        let callable = Rc::new(SdirkCallable::new(problem));
-        callable.set_c(state.h, self.gamma);
+        let callable = Rc::new(SdirkCallable::new(problem, self.gamma));
+        callable.set_h(state.h);
         let nonlinear_problem = SolverProblem::new_from_ode_problem(callable, problem);
         self.nonlinear_solver.set_problem(nonlinear_problem);
 
+        self.diff = M::zeros(state.y.len(), self.tableau.s());
         self.old_f = f0.clone();
         self.f = f0;
         self.old_t = state.t;
@@ -374,7 +429,13 @@ where
         let mut t1: Eqn::T;
 
         // loop until step is accepted
-        loop {
+        'step: loop {
+            // if start == 1, then we need to compute the first stage
+            if start == 1 {
+                let mut hf = self.diff.column_mut(0);
+                hf.copy_from(&self.f);
+                hf *= scale(state.h);
+            }
             for i in start..self.tableau.s() {
                 let t = state.t + self.tableau.c()[i] * state.h;
                 let mut phi = y0.clone();
@@ -382,7 +443,7 @@ where
                     let a_row = &self.a_rows[i];
                     self.diff
                         .columns(0, i)
-                        .gemv_o(state.h, a_row, Eqn::T::one(), &mut phi);
+                        .gemv_o(Eqn::T::one(), a_row, Eqn::T::one(), &mut phi);
                 }
 
                 self.nonlinear_solver.set_time(t).unwrap();
@@ -396,36 +457,57 @@ where
                 } else {
                     self.diff.column(i - 1).into_owned()
                 };
-                match self.nonlinear_solver.solve_in_place(&mut dy) {
-                    Ok(r) => Ok(r),
-                    Err(e) => {
-                        if !updated_jacobian {
-                            // newton iteration did not converge, so update jacobian and try again
-                            {
-                                let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
-                                callable.set_rhs_jacobian_is_stale();
-                            }
-                            self.nonlinear_solver.reset();
-                            updated_jacobian = true;
+                let solve_result = self.nonlinear_solver.solve_in_place(&mut dy);
 
-                            if i == 0 {
-                                dy.copy_from_view(&self.diff.column(self.diff.ncols() - 1));
-                            } else {
-                                dy.copy_from_view(&self.diff.column(i - 1));
-                            };
-                            self.nonlinear_solver.solve_in_place(&mut dy)
-                        } else {
-                            Err(e)
-                        }
+                // if we didn't update the jacobian and the solve failed, then we update the jacobian and try again
+                let solve_result = if solve_result.is_err() && !updated_jacobian {
+                    // newton iteration did not converge, so update jacobian and try again
+                    {
+                        let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
+                        callable.set_rhs_jacobian_is_stale();
                     }
-                }?;
+                    self.nonlinear_solver.reset();
+                    updated_jacobian = true;
+
+                    if i == 0 {
+                        dy.copy_from_view(&self.diff.column(self.diff.ncols() - 1));
+                    } else {
+                        dy.copy_from_view(&self.diff.column(i - 1));
+                    };
+                    self.nonlinear_solver.solve_in_place(&mut dy)
+                } else {
+                    solve_result
+                };
+
+                if solve_result.is_err() {
+                    // newton iteration did not converge, so we reduce step size and try again
+                    state.h *= Eqn::T::from(0.3);
+
+                    // if step size too small, then fail
+                    if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
+                        return Err(anyhow::anyhow!("Step size too small at t = {}", state.t));
+                    }
+
+                    // update h for new step size
+                    let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
+                    callable.set_h(state.h);
+
+                    // reset nonlinear's linear solver problem as lu factorisation has changed
+                    self.nonlinear_solver.reset();
+                    continue 'step;
+                };
 
                 // update diff with solved dy
                 self.diff.column_mut(i).copy_from(&dy);
             }
+
+            // successfully solved for all stages, now compute error
             let mut error = <Eqn::V as Vector>::zeros(n);
             self.diff
-                .gemv(state.h, self.tableau.d(), Eqn::T::zero(), &mut error);
+                .gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), &mut error);
+
+            // solve for  (M - h * c * J) * error = error_est as by Hosea, M. E., & Shampine, L. F. (1996). Analysis and implementation of TR-BDF2. Applied Numerical Mathematics, 20(1-2), 21-37.
+            self.nonlinear_solver.linear_solver().solve_in_place(&mut error)?;
 
             // scale error and compute norm
             error.component_div_assign(&scale_y);
@@ -455,34 +537,36 @@ where
 
             // update c for new step size
             let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
-            callable.set_c(state.h, self.gamma);
+            callable.set_h(state.h);
 
             // reset nonlinear's linear solver problem as lu factorisation has changed
             self.nonlinear_solver.reset();
 
             // test error is within tolerance
             if error_norm <= Eqn::T::from(1.0) {
-                break;
+                break 'step;
             }
             // step is rejected, factor reduces step size, so we try again with the smaller step size
         }
 
         // take the step
+        let dt = t1 - state.t;
+        self.old_t = state.t;
+        state.t = t1;
+
         if self.tableau.c()[self.tableau.s() - 1] == Eqn::T::one() {
             self.old_f
                 .copy_from_view(&self.diff.column(self.diff.ncols() - 1));
+            self.old_f *= scale(Eqn::T::one() / dt);
             std::mem::swap(&mut self.old_f, &mut self.f);
         } else {
             unimplemented!();
         }
 
-        self.old_t = state.t;
-        let dt = t1 - state.t;
-        state.t = t1;
-
         self.old_y.copy_from(&state.y);
         let y1 = &mut state.y;
-        self.diff.gemv(dt, self.tableau.b(), Eqn::T::one(), y1);
+        self.diff
+            .gemv(Eqn::T::one(), self.tableau.b(), Eqn::T::one(), y1);
         Ok(())
     }
 

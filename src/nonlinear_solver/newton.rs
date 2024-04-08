@@ -26,6 +26,9 @@ impl<C: NonLinearOp> NewtonNonlinearSolver<C> {
             niter: 0,
         }
     }
+    pub fn linear_solver(&self) -> &dyn LinearSolver<LinearisedOp<C>> {
+        self.linear_solver.as_ref()
+    }
 }
 
 impl<C: NonLinearOp> NonLinearSolver<C> for NewtonNonlinearSolver<C> {
