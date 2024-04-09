@@ -74,7 +74,7 @@ mod tests {
     fn test_tr_bdf2_nalgebra_exponential_decay() {
         let mut s = Sdirk::new(Tableau::<Mcpu>::tr_bdf2(), LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
-        let (problem, soln) = exponential_decay_with_algebraic_problem::<Mcpu>(false);
+        let (problem, soln) = exponential_decay_problem::<Mcpu>(false);
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
@@ -202,7 +202,7 @@ mod tests {
         let mut s = Sdirk::new(Tableau::<Mcpu>::tr_bdf2(), LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson::<Mcpu>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1.0e-4));
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
         number_of_rhs_evals: 32
@@ -218,7 +218,7 @@ mod tests {
         let mut s = Sdirk::new(Tableau::<Mcpu>::sdirk4(), LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson::<Mcpu>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1.0e-4));
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
         number_of_rhs_evals: 34
@@ -313,7 +313,7 @@ mod tests {
         let mut s = Sdirk::new(Tableau::<Mcpu>::tr_bdf2(), LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson_ode::<Mcpu>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1.0e-4));
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
         number_of_rhs_evals: 34
@@ -329,7 +329,7 @@ mod tests {
         let mut s = Sdirk::new(Tableau::<Mcpu>::sdirk4(), LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson_ode::<Mcpu>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1.0e-4));
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
         number_of_rhs_evals: 34
@@ -363,6 +363,22 @@ mod tests {
         number_of_mass_evals: 0
         number_of_mass_matrix_evals: 0
         number_of_jacobian_matrix_evals: 17
+        "###);
+    }
+
+    #[test]
+    fn test_tr_bdf2_nalgebra_dydt_y2() {
+        let mut s = Sdirk::new(Tableau::<Mcpu>::tr_bdf2(), LU::default());
+        let rs = NewtonNonlinearSolver::new(LU::default());
+        let (problem, soln) = dydt_y2_problem::<Mcpu>(false, 10);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, Some(1e-4));
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        ---
+        number_of_rhs_evals: 1442
+        number_of_jac_mul_evals: 50
+        number_of_mass_evals: 0
+        number_of_mass_matrix_evals: 0
+        number_of_jacobian_matrix_evals: 5
         "###);
     }
 

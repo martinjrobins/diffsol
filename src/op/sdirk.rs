@@ -108,25 +108,25 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
-    // F(y) = M (y) - h f(phi + c * y) = 0
+    // F(y) = M (y) - f(phi + c * h * y) = 0
     fn call_inplace(&self, x: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
         let phi_ref = self.phi.borrow();
         let phi = phi_ref.deref();
         let h = *self.h.borrow().deref();
         let c = self.c;
-        let mut tmp = phi + x * c;
+        let mut tmp = phi + x * (c * h);
         self.eqn.rhs_inplace(t, &tmp, y);
         self.eqn.mass_inplace(t, x, &mut tmp);
-        // y = tmp  - h y
-        y.axpy(Eqn::T::one(), &tmp, -h);
+        // y = tmp  - y
+        y.axpy(Eqn::T::one(), &tmp, -Eqn::T::one());
     }
-    // (M - c * h * f'(phi + c * y)) v
+    // (M - c * h * f'(phi + c * h * y)) v
     fn jac_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
         let phi_ref = self.phi.borrow();
         let phi = phi_ref.deref();
         let c = self.c;
         let h = *self.h.borrow().deref();
-        let mut tmp = phi + x * c;
+        let mut tmp = phi + x * (c * h);
         self.eqn.rhs_jac_inplace(t, &tmp, v, y);
         self.eqn.mass_inplace(t, v, &mut tmp);
 
@@ -134,6 +134,7 @@ where
         y.axpy(Eqn::T::one(), &tmp, -c * h);
     }
 
+    // M - c * h * f'(phi + c * h * y)
     fn jacobian(&self, x: &Eqn::V, t: Eqn::T) -> Eqn::M {
         if *self.mass_jacobian_is_stale.borrow() {
             self.mass_jac.replace(self.eqn.mass_matrix(t));
@@ -141,19 +142,26 @@ where
             self.jacobian_is_stale.replace(true);
         }
         if *self.rhs_jacobian_is_stale.borrow() {
-            self.rhs_jac.replace(self.eqn.jacobian_matrix(x, t));
+            println!("rhs_jacobian_is_stale at t = {}", t);
+
+            let phi_ref = self.phi.borrow();
+            let phi = phi_ref.deref();
+            let h = *self.h.borrow().deref();
+            let c = self.c;
+            let tmp = phi + x * (c * h);
+            self.rhs_jac.replace(self.eqn.jacobian_matrix(&tmp, t));
             self.rhs_jacobian_is_stale.replace(false);
             self.jacobian_is_stale.replace(true);
         }
         if *self.jacobian_is_stale.borrow() {
+            println!("jacobian_is_stale at t = {}", t);
             let rhs_jac_ref = self.rhs_jac.borrow();
             let rhs_jac = rhs_jac_ref.deref();
             let mass_jac_ref = self.mass_jac.borrow();
             let mass_jac = mass_jac_ref.deref();
             let h = *self.h.borrow().deref();
             let c = self.c;
-            let ch = c * h;
-            self.jac.replace(mass_jac - rhs_jac * ch);
+            self.jac.replace(mass_jac - rhs_jac * (c * h));
             self.jacobian_is_stale.replace(false);
         }
         let number_of_jac_evals = *self.number_of_jac_evals.borrow() + 1;
