@@ -43,15 +43,15 @@ mod robertson_ode {
 
 mod robertson {
     use diffsol::{
-        ode_solver::test_models::robertson::robertson, Bdf, NewtonNonlinearSolver, OdeSolverMethod,
-        LU,
+        linear_solver::NalgebraLU, ode_solver::test_models::robertson::robertson, Bdf,
+        NewtonNonlinearSolver, OdeSolverMethod,
     };
 
     #[divan::bench]
     fn bdf() {
         let mut s = Bdf::default();
         let (problem, _soln) = robertson::<nalgebra::DMatrix<f64>>(false);
-        let mut root = NewtonNonlinearSolver::new(LU::default());
+        let mut root = NewtonNonlinearSolver::new(NalgebraLU::default());
         let _y = s.make_consistent_and_solve(&problem, 4.0000e+10, &mut root);
     }
 
