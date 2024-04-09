@@ -13,7 +13,7 @@ use crate::NewtonNonlinearSolver;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
     DenseMatrix, MatrixView, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-    Vector, VectorView, VectorViewMut,
+    Vector, VectorIndex, VectorView, VectorViewMut,
 };
 
 pub struct Tableau<M: DenseMatrix> {
@@ -254,12 +254,15 @@ where
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
     for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
 {
-    const NEWTON_MAXITER: usize = 4;
+    const NEWTON_MAXITER: usize = 10;
     const MIN_FACTOR: f64 = 0.2;
     const MAX_FACTOR: f64 = 10.0;
     const MIN_TIMESTEP: f64 = 1e-32;
 
-    pub fn new(tableau: Tableau<M>, linear_solver: impl LinearSolver<LinearisedOp<SdirkCallable<Eqn>>> + 'static) -> Self {
+    pub fn new(
+        tableau: Tableau<M>,
+        linear_solver: impl LinearSolver<LinearisedOp<SdirkCallable<Eqn>>> + 'static,
+    ) -> Self {
         let mut nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         // set max iterations for nonlinear solver
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
@@ -301,6 +304,15 @@ where
                 row.push(tableau.at()[(j, i)]);
             }
             a_rows.push(Eqn::V::from_vec(row));
+        }
+
+        // check last row of a is the same as b
+        for i in 0..s {
+            assert_eq!(
+                tableau.at()[(i, s - 1)],
+                tableau.b()[i],
+                "Invalid tableau, expected a(s-1, i) = b(i)"
+            );
         }
 
         let n = 1;
@@ -507,7 +519,15 @@ where
                 .gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), &mut error);
 
             // solve for  (M - h * c * J) * error = error_est as by Hosea, M. E., & Shampine, L. F. (1996). Analysis and implementation of TR-BDF2. Applied Numerical Mathematics, 20(1-2), 21-37.
-            self.nonlinear_solver.linear_solver().solve_in_place(&mut error)?;
+            self.nonlinear_solver
+                .linear_solver()
+                .solve_in_place(&mut error)?;
+
+            // do not include algebraic variables in error calculation
+            let algebraic = self.problem.as_ref().unwrap().eqn.algebraic_indices();
+            for i in 0..algebraic.len() {
+                error[algebraic[i]] = Eqn::T::zero();
+            }
 
             // scale error and compute norm
             error.component_div_assign(&scale_y);

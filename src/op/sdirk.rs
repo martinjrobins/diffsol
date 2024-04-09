@@ -1,9 +1,14 @@
 use crate::{
-    matrix::MatrixRef, ode_solver::equations::OdeEquations, Matrix, OdeSolverProblem, Vector,
-    VectorRef,
+    matrix::MatrixRef, ode_solver::equations::OdeEquations, scale, Matrix, OdeSolverProblem,
+    Vector, VectorRef,
 };
 use num_traits::{One, Zero};
-use std::{cell::RefCell, ops::Deref, rc::Rc};
+use std::ops::{AddAssign, MulAssign, SubAssign};
+use std::{
+    cell::RefCell,
+    ops::{Deref, DerefMut},
+    rc::Rc,
+};
 
 use super::{NonLinearOp, Op};
 
@@ -20,6 +25,7 @@ pub struct SdirkCallable<Eqn: OdeEquations> {
     jacobian_is_stale: RefCell<bool>,
     mass_jacobian_is_stale: RefCell<bool>,
     number_of_jac_evals: RefCell<usize>,
+    last_f: RefCell<Eqn::V>,
 }
 
 impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
@@ -35,6 +41,7 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
         let jacobian_is_stale = RefCell::new(true);
         let mass_jacobian_is_stale = RefCell::new(true);
         let number_of_jac_evals = RefCell::new(0);
+        let last_f = RefCell::new(Eqn::V::zeros(n));
 
         Self {
             eqn,
@@ -48,6 +55,7 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
             jacobian_is_stale,
             mass_jacobian_is_stale,
             number_of_jac_evals,
+            last_f,
         }
     }
 
