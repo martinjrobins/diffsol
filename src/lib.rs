@@ -153,8 +153,8 @@ use matrix::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 pub use nonlinear_solver::newton::NewtonNonlinearSolver;
 use nonlinear_solver::NonLinearSolver;
 pub use ode_solver::{
-    bdf::Bdf, sdirk::Sdirk, sdirk::Tableau, builder::OdeBuilder, equations::OdeEquations, method::OdeSolverMethod,
-    method::OdeSolverState, problem::OdeSolverProblem,
+    bdf::Bdf, builder::OdeBuilder, equations::OdeEquations, method::OdeSolverMethod,
+    method::OdeSolverState, problem::OdeSolverProblem, sdirk::Sdirk, sdirk::Tableau,
 };
 use op::NonLinearOp;
 use scalar::{IndexType, Scalar, Scale};
@@ -209,7 +209,7 @@ mod tests {
         }
         let y2 = solver.interpolate(t).unwrap();
 
-        y2.assert_eq(&y, 1e-6);
+        y2.assert_eq_st(&y, 1e-6);
     }
     #[test]
     fn test_readme_faer() {

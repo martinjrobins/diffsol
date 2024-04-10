@@ -128,7 +128,6 @@ impl<C: Op> Convergence<C> {
             let rate = norm / old_norm;
 
             if rate > C::T::from(1.0) {
-                println!("Newton iteration diverged: rate = {}, norm = {}, old_norm = {}", rate, norm, old_norm);
                 return ConvergenceStatus::Diverged;
             }
 
@@ -144,7 +143,6 @@ impl<C: Op> Convergence<C> {
                 * norm
                 > self.tol
             {
-                println!("expected Newton iteration diverged: rate = {}", rate);
                 return ConvergenceStatus::Diverged;
             }
         }
@@ -225,7 +223,7 @@ pub mod tests {
                 let problem = solver.problem().unwrap();
                 soln.x.abs() * scale(problem.rtol) + problem.atol.as_ref()
             };
-            x.assert_eq(&soln.x, tol[0]);
+            x.assert_eq(&soln.x, &tol);
         }
     }
 

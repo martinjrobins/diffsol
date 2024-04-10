@@ -270,19 +270,19 @@ mod tests {
         let y0 = 0.1;
         let init = eqn.init(0.0);
         let init_expect = DVector::from_vec(vec![y0, 0.0]);
-        init.assert_eq(&init_expect, 1e-10);
+        init.assert_eq_st(&init_expect, 1e-10);
         let rhs = eqn.rhs(0.0, &init);
         let rhs_expect = DVector::from_vec(vec![r * y0 * (1.0 - y0 / k), 2.0 * y0]);
-        rhs.assert_eq(&rhs_expect, 1e-10);
+        rhs.assert_eq_st(&rhs_expect, 1e-10);
         let v = DVector::from_vec(vec![1.0, 1.0]);
         let rhs_jac = eqn.jac_mul(0.0, &init, &v);
         let rhs_jac_expect = DVector::from_vec(vec![r * (1.0 - y0 / k) - r * y0 / k, 1.0]);
-        rhs_jac.assert_eq(&rhs_jac_expect, 1e-10);
+        rhs_jac.assert_eq_st(&rhs_jac_expect, 1e-10);
         let mut mass_y = DVector::from_vec(vec![0.0, 0.0]);
         let v = DVector::from_vec(vec![1.0, 1.0]);
         eqn.mass_inplace(0.0, &v, &mut mass_y);
         let mass_y_expect = DVector::from_vec(vec![1.0, 0.0]);
-        mass_y.assert_eq(&mass_y_expect, 1e-10);
+        mass_y.assert_eq_st(&mass_y_expect, 1e-10);
 
         // solver a bit and check the state and output
         let problem = OdeBuilder::new().p([r, k]).build_diffsl(text).unwrap();
@@ -295,10 +295,10 @@ mod tests {
         let y_expect = k / (1.0 + (k - y0) * (-r * t).exp() / y0);
         let z_expect = 2.0 * y_expect;
         let expected_state = DVector::from_vec(vec![y_expect, z_expect]);
-        state.assert_eq(&expected_state, 1e-5);
+        state.assert_eq_st(&expected_state, 1e-5);
         let out = problem.eqn.out(t, &state);
         let out = DVector::from_vec(out.to_vec());
         let expected_out = DVector::from_vec(vec![3.0 * y_expect, 4.0 * z_expect]);
-        out.assert_eq(&expected_out, 1e-5);
+        out.assert_eq_st(&expected_out, 1e-5);
     }
 }

@@ -196,7 +196,7 @@ mod tests {
         //              |0 1| |2.2|         |-0.1|    |2.21|
         bdf_callable.call_inplace(&y, t, &mut y_out);
         let y_out_expect = Vcpu::from_vec(vec![2.11, 2.21]);
-        y_out.assert_eq(&y_out_expect, 1e-10);
+        y_out.assert_eq_st(&y_out_expect, 1e-10);
 
         let v = Vcpu::from_vec(vec![1.0, 1.0]);
         // f'(y)v = |-0.1|
@@ -205,7 +205,7 @@ mod tests {
         //                    |0 1| |1|         |-0.1|   |1.01|
         bdf_callable.jac_mul_inplace(&y, t, &v, &mut y_out);
         let y_out_expect = Vcpu::from_vec(vec![1.01, 1.01]);
-        y_out.assert_eq(&y_out_expect, 1e-10);
+        y_out.assert_eq_st(&y_out_expect, 1e-10);
 
         // J = M - c * f'(y) = |1 0| - 0.1 * |-0.1 0| = |1.01 0|
         //                     |0 1|         |0 -0.1|   |0 1.01|

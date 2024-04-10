@@ -30,7 +30,7 @@ pub fn dydt_y2_problem<M: DenseMatrix + 'static>(
     let tlast = 20.0;
     let problem = OdeBuilder::new()
         .use_coloring(use_coloring)
-        .rtol(1e-8)
+        .rtol(1e-4)
         .build_ode(rhs::<M>, rhs_jac::<M>, move |_p, _t| {
             M::V::from_vec([y0.into()].repeat(size2))
         })
@@ -46,7 +46,6 @@ pub fn dydt_y2_problem<M: DenseMatrix + 'static>(
         denom.add_scalar_mut(M::T::one());
         let mut y = y0.clone();
         y.component_div_assign(&denom);
-        println!("i = {}, t = {}, y = {}", i, t, y[0]);
         soln.push(y, t);
     }
     (problem, soln)

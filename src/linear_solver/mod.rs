@@ -113,7 +113,7 @@ pub mod tests {
                 let problem = solver.problem().unwrap();
                 &soln.x * scale(problem.rtol) + problem.atol.as_ref()
             };
-            x.assert_eq(&soln.x, tol[0]);
+            x.assert_eq(&soln.x, &tol);
         }
     }
 

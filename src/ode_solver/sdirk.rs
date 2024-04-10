@@ -2,6 +2,7 @@ use faer::linalg::cholesky::ldlt_diagonal::update;
 use num_traits::One;
 use num_traits::Pow;
 use num_traits::Zero;
+use std::ops::MulAssign;
 use std::rc::Rc;
 
 use crate::linear_solver;
@@ -16,6 +17,8 @@ use crate::{
     DenseMatrix, MatrixView, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
     Vector, VectorIndex, VectorView, VectorViewMut,
 };
+
+use super::bdf::BdfStatistics;
 
 pub struct Tableau<M: DenseMatrix> {
     at: M, // A transpose
@@ -246,6 +249,7 @@ where
     old_f: Eqn::V,
     f: Eqn::V,
     a_rows: Vec<Eqn::V>,
+    statistics: BdfStatistics<Eqn::T>,
 }
 
 impl<M, Eqn> Sdirk<M, Eqn>
@@ -323,6 +327,7 @@ where
         let old_y = <Eqn::V as Vector>::zeros(n);
         let old_f = <Eqn::V as Vector>::zeros(n);
         let f = <Eqn::V as Vector>::zeros(n);
+        let statistics = BdfStatistics::default();
         Self {
             tableau,
             nonlinear_solver,
@@ -336,7 +341,12 @@ where
             a_rows,
             old_f,
             f,
+            statistics,
         }
+    }
+
+    pub fn get_statistics(&self) -> &BdfStatistics<Eqn::T> {
+        &self.statistics
     }
 }
 
@@ -417,6 +427,10 @@ where
         let nonlinear_problem = SolverProblem::new_from_ode_problem(callable, problem);
         self.nonlinear_solver.set_problem(nonlinear_problem);
 
+        // update statistics
+        self.statistics = BdfStatistics::default();
+        self.statistics.initial_step_size = state.h;
+
         self.diff = M::zeros(state.y.len(), self.tableau.s());
         self.old_f = f0.clone();
         self.f = f0;
@@ -445,8 +459,9 @@ where
         'step: loop {
             // if start == 1, then we need to compute the first stage
             if start == 1 {
-                let mut f = self.diff.column_mut(0);
-                f.copy_from(&self.f);
+                let mut hf = self.diff.column_mut(0);
+                hf.copy_from(&self.f);
+                hf *= scale(state.h);
             }
             for i in start..self.tableau.s() {
                 let t = state.t + self.tableau.c()[i] * state.h;
@@ -455,7 +470,7 @@ where
                     let a_row = &self.a_rows[i];
                     self.diff
                         .columns(0, i)
-                        .gemv_o(state.h, a_row, Eqn::T::one(), &mut phi);
+                        .gemv_o(Eqn::T::one(), a_row, Eqn::T::one(), &mut phi);
                 }
 
                 self.nonlinear_solver.set_time(t).unwrap();
@@ -470,7 +485,8 @@ where
                     self.diff.column(i - 1).into_owned()
                 } else {
                     let df = self.diff.column(i - 1) - self.diff.column(i - 2);
-                    let c = (self.tableau.c[i] - self.tableau.c[i - 2]) / (self.tableau.c[i - 1] - self.tableau.c[i - 2]);
+                    let c = (self.tableau.c[i] - self.tableau.c[i - 2])
+                        / (self.tableau.c[i - 1] - self.tableau.c[i - 2]);
                     self.diff.column(i - 1) + df * scale(c)
                 };
                 let solve_result = self.nonlinear_solver.solve_in_place(&mut dy);
@@ -484,7 +500,6 @@ where
                     }
                     self.nonlinear_solver.reset();
                     updated_jacobian = true;
-                    println!("sdirk: Updated Jacobian at t = {}", state.t);
 
                     let mut dy = if i == 0 {
                         self.diff.column(self.diff.ncols() - 1).into_owned()
@@ -492,9 +507,11 @@ where
                         self.diff.column(i - 1).into_owned()
                     } else {
                         let df = self.diff.column(i - 1) - self.diff.column(i - 2);
-                        let c = (self.tableau.c[i] - self.tableau.c[i - 2]) / (self.tableau.c[i - 1] - self.tableau.c[i - 2]);
+                        let c = (self.tableau.c[i] - self.tableau.c[i - 2])
+                            / (self.tableau.c[i - 1] - self.tableau.c[i - 2]);
                         self.diff.column(i - 1) + df * scale(c)
                     };
+                    self.statistics.number_of_nonlinear_solver_fails += 1;
                     self.nonlinear_solver.solve_in_place(&mut dy)
                 } else {
                     solve_result
@@ -502,8 +519,8 @@ where
 
                 if solve_result.is_err() {
                     // newton iteration did not converge, so we reduce step size and try again
+                    self.statistics.number_of_nonlinear_solver_fails += 1;
                     state.h *= Eqn::T::from(0.3);
-                    println!("sdirk: Reduced step size to {} at t = {}", state.h, state.t);
 
                     // if step size too small, then fail
                     if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
@@ -526,7 +543,7 @@ where
             // successfully solved for all stages, now compute error
             let mut error = <Eqn::V as Vector>::zeros(n);
             self.diff
-                .gemv(state.h, self.tableau.d(), Eqn::T::zero(), &mut error);
+                .gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), &mut error);
 
             // solve for  (M - h * c * J) * error = error_est as by Hosea, M. E., & Shampine, L. F. (1996). Analysis and implementation of TR-BDF2. Applied Numerical Mathematics, 20(1-2), 21-37.
             self.nonlinear_solver
@@ -534,14 +551,13 @@ where
                 .solve_in_place(&mut error)?;
 
             // do not include algebraic variables in error calculation
-            let algebraic = self.problem.as_ref().unwrap().eqn.algebraic_indices();
-            for i in 0..algebraic.len() {
-                error[algebraic[i]] = Eqn::T::zero();
-            }
+            //let algebraic = self.problem.as_ref().unwrap().eqn.algebraic_indices();
+            //for i in 0..algebraic.len() {
+            //    error[algebraic[i]] = Eqn::T::zero();
+            //}
 
             // scale error and compute norm
             error.component_div_assign(&scale_y);
-            println!("sdirk: error = {:?}", error);
             let error_norm = error.norm();
 
             // adjust step size based on error
@@ -557,7 +573,6 @@ where
                 factor = Eqn::T::from(Self::MAX_FACTOR);
             }
 
-
             // adjust step size for next step
             t1 = state.t + state.h;
             state.h *= factor;
@@ -566,7 +581,6 @@ where
             if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
                 return Err(anyhow::anyhow!("Step size too small at t = {}", state.t));
             }
-
 
             // update c for new step size
             let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
@@ -577,11 +591,10 @@ where
 
             // test error is within tolerance
             if error_norm <= Eqn::T::from(1.0) {
-                println!("sdirk: accept step size {} at t = {}, error = {}, factor = {}", state.h, state.t, error_norm, factor);
                 break 'step;
             }
-            println!("sdirk: reject step size {} at t = {}, error = {}, factor = {}", state.h, state.t, error_norm, factor);
             // step is rejected, factor reduces step size, so we try again with the smaller step size
+            self.statistics.number_of_error_test_failures += 1;
         }
 
         // take the step
@@ -592,6 +605,7 @@ where
         if self.tableau.c()[self.tableau.s() - 1] == Eqn::T::one() {
             self.old_f
                 .copy_from_view(&self.diff.column(self.diff.ncols() - 1));
+            self.old_f.mul_assign(scale(Eqn::T::one() / dt));
             std::mem::swap(&mut self.old_f, &mut self.f);
         } else {
             unimplemented!();
@@ -599,7 +613,19 @@ where
 
         self.old_y.copy_from(&state.y);
         let y1 = &mut state.y;
-        self.diff.gemv(dt, self.tableau.b(), Eqn::T::one(), y1);
+        self.diff
+            .gemv(Eqn::T::one(), self.tableau.b(), Eqn::T::one(), y1);
+
+        // update statistics
+        self.statistics.number_of_linear_solver_setups = self
+            .nonlinear_solver
+            .problem()
+            .unwrap()
+            .f
+            .number_of_jac_evals();
+        self.statistics.number_of_steps += 1;
+        self.statistics.final_step_size = self.state.as_ref().unwrap().h;
+
         Ok(())
     }
 

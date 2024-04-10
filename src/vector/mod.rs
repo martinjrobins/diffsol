@@ -151,7 +151,11 @@ pub trait Vector:
     }
     fn gather_from(&mut self, other: &Self, indices: &Self::Index);
     fn scatter_from(&mut self, other: &Self, indices: &Self::Index);
-    fn assert_eq(&self, other: &Self, tol: Self::T) {
+    fn assert_eq_st(&self, other: &Self, tol: Self::T) {
+        let tol = Self::from_element(self.len() as usize, tol);
+        self.assert_eq(other, &tol);
+    }
+    fn assert_eq(&self, other: &Self, tol: &Self) {
         assert_eq!(
             self.len(),
             other.len(),
@@ -160,7 +164,7 @@ pub trait Vector:
             other.len()
         );
         for i in 0..self.len() {
-            if num_traits::abs(self[i] - other[i]) > tol {
+            if num_traits::abs(self[i] - other[i]) > tol[i] {
                 eprintln!(
                     "Vector element mismatch at index {}: {} != {}",
                     i, self[i], other[i]
