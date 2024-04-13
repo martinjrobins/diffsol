@@ -1,4 +1,4 @@
-use anyhow::{Ok, Result};
+use anyhow::Result;
 use nalgebra::{DMatrix, DVector, Dyn};
 
 use crate::{op::LinearOp, LinearSolver, Scalar, SolverProblem};

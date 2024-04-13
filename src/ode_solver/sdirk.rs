@@ -25,7 +25,6 @@ pub struct Tableau<M: DenseMatrix> {
     b: M::V,
     c: M::V,
     d: M::V,
-    beta: M,
     order: usize,
 }
 
@@ -61,14 +60,12 @@ impl<M: DenseMatrix> Tableau<M> {
 
         let order = 2;
 
-        let beta = Self::compute_beta(&a, &b, &c, order, linear_solver)?;
-
         Ok(Self::new(a, b, c, d, order, beta))
     }
     /// L-stable SDIRK method of order 4, from
     /// Hairer, Norsett, Wanner, Solving Ordinary Differential Equations II, Stiff and Differential-Algebraic Problems, 2nd Edition
     /// Section IV.6, page 107
-    pub fn sdirk4(linear_solver: impl LinearSolver<MatrixOp<M>>) -> Result<Self> {
+    pub fn sdirk4() -> Result<Self> {
         let mut a = M::zeros(5, 5);
         a[(0, 0)] = M::T::from(1.0 / 4.0);
 
@@ -157,9 +154,24 @@ impl<M: DenseMatrix> Tableau<M> {
         let q = order;
         let e = M::V::from_element(s, M::T::one());
         let mat_c = M::from_diagonal(c);
+        let o = 2_usize.pow(u32::try_from(order - 1).unwrap());
+        println!("o: {}", o);
+        println!("order: {}", order);
+        println!("s: {}", s);
+        println!("q: {}", q);
+
+        let neqn = o * q + s;
+        let nunknown = s * q;
+
+        let add_extra_condition = if neqn == nunknown {
+            false
+        } else if neqn + s == nunknown {
+            true
+        } else {
+            panic!("Error, expected neqn = nunknown or neqn + s = nunknown, got neqn = {}, nunknown = {}, s = {}", neqn, nunknown, s);
+        };
 
         // construct psi
-        let o = order.pow(2);
         println!("o: {}", o);
         println!("order: {}", order);
         let mut psi = M::zeros(o, s);
@@ -202,9 +214,11 @@ impl<M: DenseMatrix> Tableau<M> {
 
         println!("psi: {:?}", psi);
 
-        let mut order_c = M::zeros(q * o + s, q * s);
+        let nrows = if add_extra_condition { q * o + s + s } else { q * o + s };
+        let mut order_c = M::zeros(nrows, q * s);
         // orderC = | I_q kron psi | (q * o, q * s)
         //          | e kron I_s |   (s, q * s)
+        //          | c^k kron I_s | (s, q * s) (if add_extra_condition)
         for i in 0..q {
             for j in 0..o {
                 for k in 0..s {
@@ -213,6 +227,11 @@ impl<M: DenseMatrix> Tableau<M> {
             }
             for j in 0..s {
                 order_c[(q * o + j, i * s + j)] = M::T::one();
+            }
+            if add_extra_condition {
+                for j in 0..s {
+                    order_c[(q * o + s + j, i * s + j)] = c[s - 2].pow(i as i32);
+                }
             }
         }
         println!("orderC: {:?}", order_c);
@@ -237,7 +256,7 @@ impl<M: DenseMatrix> Tableau<M> {
 
         println!("gamma: {:?}", gamma);
 
-        let mut vec_gamma = M::V::zeros(q * o + s);
+        let mut vec_gamma = M::V::zeros(nrows);
         for j in 0..q {
             for i in 0..o {
                 vec_gamma[j * o + i] = gamma[(i, j)];
@@ -245,6 +264,11 @@ impl<M: DenseMatrix> Tableau<M> {
         }
         for i in 0..s {
             vec_gamma[q * o + i] = b[i];
+        }
+        if add_extra_condition {
+            for i in 0..s {
+                vec_gamma[q * o + s + i] = a[(s - 2, i)];
+            }
         }
 
         // solve orderC * vec_b = vec_gamma

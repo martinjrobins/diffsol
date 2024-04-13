@@ -75,7 +75,7 @@ mod tests {
 
     #[test]
     fn test_tr_bdf2_nalgebra_exponential_decay() {
-        let tableau = Tableau::<Mcpu>::tr_bdf2(SVD::default()).unwrap();
+        let tableau = Tableau::<Mcpu>::tr_bdf2(LU::default()).unwrap();
         let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = exponential_decay_problem::<Mcpu>(false);
