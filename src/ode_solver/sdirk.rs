@@ -1,27 +1,27 @@
-use faer::linalg::cholesky::ldlt_diagonal::update;
+use anyhow::Result;
+use nalgebra::ComplexField;
 use num_traits::One;
 use num_traits::Pow;
 use num_traits::Zero;
 use std::ops::MulAssign;
 use std::rc::Rc;
 
-use crate::linear_solver;
 use crate::linear_solver::LinearSolver;
 use crate::matrix::MatrixRef;
-use crate::nonlinear_solver;
 use crate::op::linearise::LinearisedOp;
+use crate::op::matrix::MatrixOp;
 use crate::vector::VectorRef;
 use crate::NewtonNonlinearSolver;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
     DenseMatrix, MatrixView, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-    Vector, VectorIndex, VectorView, VectorViewMut,
+    Vector, VectorView, VectorViewMut,
 };
 
 use super::bdf::BdfStatistics;
 
 pub struct Tableau<M: DenseMatrix> {
-    at: M, // A transpose
+    a: M,
     b: M::V,
     c: M::V,
     d: M::V,
@@ -33,7 +33,7 @@ impl<M: DenseMatrix> Tableau<M> {
     /// TR-BDF2 method
     /// from R.E. Bank, W.M. Coughran Jr, W. Fichtner, E.H. Grosse, D.J. Rose and R.K. Smith, Transient simulation of silicon devices and circuits, IEEE Trans. Comput.-Aided Design 4 (1985) 436-451.
     /// analysed in M.E. Hosea and L.F. Shampine. Analysis and implementation of TR-BDF2. Applied Numerical Mathematics, 20:21–37, 1996.
-    pub fn tr_bdf2() -> Self {
+    pub fn tr_bdf2(linear_solver: impl LinearSolver<MatrixOp<M>>) -> Result<Self> {
         let gamma = M::T::from(2.0 - 2.0_f64.sqrt());
         let d = gamma / M::T::from(2.0);
         let w = M::T::from(2.0_f64.sqrt() / 4.0);
@@ -45,13 +45,6 @@ impl<M: DenseMatrix> Tableau<M> {
         a[(2, 0)] = w;
         a[(2, 1)] = w;
         a[(2, 2)] = d;
-
-        let mut at = M::zeros(3, 3);
-        for i in 0..3 {
-            for j in 0..3 {
-                at[(i, j)] = a[(j, i)];
-            }
-        }
 
         let b = M::V::from_vec(vec![w, w, d]);
         let b_hat = M::V::from_vec(vec![
@@ -66,23 +59,16 @@ impl<M: DenseMatrix> Tableau<M> {
 
         let c = M::V::from_vec(vec![M::T::zero(), gamma, M::T::one()]);
 
-        let beta = M::zeros(1, 1);
-
         let order = 2;
 
-        Self {
-            at,
-            b,
-            c,
-            d,
-            beta,
-            order,
-        }
+        let beta = Self::compute_beta(&a, &b, &c, order, linear_solver)?;
+
+        Ok(Self::new(a, b, c, d, order, beta))
     }
     /// L-stable SDIRK method of order 4, from
     /// Hairer, Norsett, Wanner, Solving Ordinary Differential Equations II, Stiff and Differential-Algebraic Problems, 2nd Edition
     /// Section IV.6, page 107
-    pub fn sdirk4() -> Self {
+    pub fn sdirk4(linear_solver: impl LinearSolver<MatrixOp<M>>) -> Result<Self> {
         let mut a = M::zeros(5, 5);
         a[(0, 0)] = M::T::from(1.0 / 4.0);
 
@@ -103,13 +89,6 @@ impl<M: DenseMatrix> Tableau<M> {
         a[(4, 2)] = M::T::from(125.0 / 16.0);
         a[(4, 3)] = M::T::from(-85.0 / 12.0);
         a[(4, 4)] = M::T::from(1.0 / 4.0);
-
-        let mut at = M::zeros(5, 5);
-        for i in 0..5 {
-            for j in 0..5 {
-                at[(i, j)] = a[(j, i)];
-            }
-        }
 
         let b = M::V::from_vec(vec![
             M::T::from(25.0 / 24.0),
@@ -135,40 +114,186 @@ impl<M: DenseMatrix> Tableau<M> {
             M::T::from(1.0 / 4.0),
         ]);
 
-        let mut beta = M::zeros(5, 4);
-        beta[(0, 0)] = M::T::from(11.0 / 3.0);
-        beta[(0, 1)] = M::T::from(-463.0 / 72.0);
-        beta[(0, 2)] = M::T::from(217.0 / 36.0);
-        beta[(0, 3)] = M::T::from(-20.0 / 9.0);
-
-        beta[(1, 0)] = M::T::from(11.0 / 2.0);
-        beta[(1, 1)] = M::T::from(-385.0 / 16.0);
-        beta[(1, 2)] = M::T::from(661.0 / 24.0);
-        beta[(1, 3)] = M::T::from(-10.0);
-
-        beta[(2, 0)] = M::T::from(-128.0 / 18.0);
-        beta[(2, 1)] = M::T::from(20125.0 / 432.0);
-        beta[(2, 2)] = M::T::from(-8875.0 / 216.0);
-        beta[(2, 3)] = M::T::from(250.0 / 27.0);
-
-        beta[(3, 0)] = M::T::from(0.0);
-        beta[(3, 1)] = M::T::from(-85.0 / 4.0);
-        beta[(3, 2)] = M::T::from(85.0 / 6.0);
-        beta[(3, 3)] = M::T::from(0.0);
-
-        beta[(4, 0)] = M::T::from(-11.0 / 19.0);
-        beta[(4, 1)] = M::T::from(557.0 / 108.0);
-        beta[(4, 2)] = M::T::from(-359.0 / 54.0);
-        beta[(4, 3)] = M::T::from(80.0 / 27.0);
-
         let order = 4;
-        Self::new(at, b, c, d, beta, order)
+        let beta = Self::compute_beta(&a, &b, &c, order, linear_solver)?;
+        //beta[(0, 0)] = M::T::from(11.0 / 3.0);
+        //beta[(0, 1)] = M::T::from(-463.0 / 72.0);
+        //beta[(0, 2)] = M::T::from(217.0 / 36.0);
+        //beta[(0, 3)] = M::T::from(-20.0 / 9.0);
+
+        //beta[(1, 0)] = M::T::from(11.0 / 2.0);
+        //beta[(1, 1)] = M::T::from(-385.0 / 16.0);
+        //beta[(1, 2)] = M::T::from(661.0 / 24.0);
+        //beta[(1, 3)] = M::T::from(-10.0);
+
+        //beta[(2, 0)] = M::T::from(-128.0 / 18.0);
+        //beta[(2, 1)] = M::T::from(20125.0 / 432.0);
+        //beta[(2, 2)] = M::T::from(-8875.0 / 216.0);
+        //beta[(2, 3)] = M::T::from(250.0 / 27.0);
+
+        //beta[(3, 0)] = M::T::from(0.0);
+        //beta[(3, 1)] = M::T::from(-85.0 / 4.0);
+        //beta[(3, 2)] = M::T::from(85.0 / 6.0);
+        //beta[(3, 3)] = M::T::from(0.0);
+
+        //beta[(4, 0)] = M::T::from(-11.0 / 19.0);
+        //beta[(4, 1)] = M::T::from(557.0 / 108.0);
+        //beta[(4, 2)] = M::T::from(-359.0 / 54.0);
+        //beta[(4, 3)] = M::T::from(80.0 / 27.0);
+
+        Ok(Self::new(a, b, c, d, order, beta))
     }
-    pub fn new(at: M, b: M::V, c: M::V, d: M::V, beta: M, order: usize) -> Self {
+    fn compute_beta(
+        a: &M,
+        b: &M::V,
+        c: &M::V,
+        order: usize,
+        mut linear_solver: impl LinearSolver<MatrixOp<M>>,
+    ) -> Result<M> {
+        if order > 4 {
+            panic!("Invalid order, expected order <= 4");
+        }
         let s = c.len();
-        assert_eq!(at.nrows(), s, "Invalid number of rows in a, expected {}", s);
+        let q = order;
+        let e = M::V::from_element(s, M::T::one());
+        let mat_c = M::from_diagonal(c);
+
+        // construct psi
+        let o = order.pow(2);
+        println!("o: {}", o);
+        println!("order: {}", order);
+        let mut psi = M::zeros(o, s);
+        for i in 0..s {
+            psi[(0, i)] = e[i];
+        }
+        if order >= 2 {
+            let mut ce = M::V::zeros(s);
+            mat_c.gemv(M::T::one(), &e, M::T::zero(), &mut ce);
+            for i in 0..s {
+                psi[(1, i)] = ce[i];
+            }
+            if order >= 3 {
+                let mut c2e = M::V::zeros(s);
+                mat_c.gemv(M::T::one(), &ce, M::T::zero(), &mut c2e);
+                let mut ace = M::V::zeros(s);
+                a.gemv(M::T::one(), &ce, M::T::zero(), &mut ace);
+                for i in 0..s {
+                    psi[(2, i)] = c2e[i];
+                    psi[(3, i)] = ace[i];
+                }
+                if order >= 4 {
+                    let mut c3e = M::V::zeros(s);
+                    mat_c.gemv(M::T::one(), &c2e, M::T::zero(), &mut c3e);
+                    let mut cace = M::V::zeros(s);
+                    mat_c.gemv(M::T::one(), &ace, M::T::zero(), &mut cace);
+                    let mut ac2e = M::V::zeros(s);
+                    a.gemv(M::T::one(), &c2e, M::T::zero(), &mut ac2e);
+                    let mut a2ce = M::V::zeros(s);
+                    a.gemv(M::T::one(), &ace, M::T::zero(), &mut a2ce);
+                    for i in 0..s {
+                        psi[(4, i)] = c3e[i];
+                        psi[(5, i)] = cace[i];
+                        psi[(6, i)] = ac2e[i];
+                        psi[(7, i)] = a2ce[i];
+                    }
+                }
+            }
+        }
+
+        println!("psi: {:?}", psi);
+
+        let mut order_c = M::zeros(q * o + s, q * s);
+        // orderC = | I_q kron psi | (q * o, q * s)
+        //          | e kron I_s |   (s, q * s)
+        for i in 0..q {
+            for j in 0..o {
+                for k in 0..s {
+                    order_c[(i * o + j, i * s + k)] = psi[(j, k)];
+                }
+            }
+            for j in 0..s {
+                order_c[(q * o + j, i * s + j)] = M::T::one();
+            }
+        }
+        println!("orderC: {:?}", order_c);
+        let mut gamma = M::zeros(o, q);
+        gamma[(0, 0)] = M::T::one();
+
+        if order >= 2 {
+            gamma[(1, 1)] = M::T::from(1.0 / 2.0);
+        }
+
+        if order >= 3 {
+            gamma[(2, 2)] = M::T::from(1.0 / 3.0);
+            gamma[(3, 2)] = M::T::from(1.0 / 6.0);
+        }
+
+        if order >= 4 {
+            gamma[(4, 3)] = M::T::from(1.0 / 4.0);
+            gamma[(5, 3)] = M::T::from(1.0 / 8.0);
+            gamma[(6, 3)] = M::T::from(1.0 / 12.0);
+            gamma[(7, 3)] = M::T::from(1.0 / 24.0);
+        }
+
+        println!("gamma: {:?}", gamma);
+
+        let mut vec_gamma = M::V::zeros(q * o + s);
+        for j in 0..q {
+            for i in 0..o {
+                vec_gamma[j * o + i] = gamma[(i, j)];
+            }
+        }
+        for i in 0..s {
+            vec_gamma[q * o + i] = b[i];
+        }
+
+        // solve orderC * vec_b = vec_gamma
+        let op = MatrixOp::new(order_c);
+        let atol = M::V::from_element(q * o, M::T::from(1e-8));
+        let rtol = M::T::from(1e-8);
+        let problem = SolverProblem::new(Rc::new(op), M::T::zero(), Rc::new(atol), rtol);
+        linear_solver.set_problem(problem);
+        let vec_b = linear_solver.solve(&vec_gamma)?;
+
+        // construct beta
+        let mut beta = M::zeros(s, q);
+        for i in 0..s {
+            for j in 0..q {
+                beta[(i, j)] = vec_b[j * s + i];
+            }
+        }
+
+        // check that sum of 1st column of beta is 1
+        let mut sum = M::T::zero();
+        for i in 0..s {
+            sum += beta[(i, 0)];
+        }
+        if (sum - M::T::one()).abs() > M::T::from(1e-8).abs() {
+            panic!(
+                "Invalid beta, expected sum of 1st column to be 1 but is {}",
+                sum
+            );
+        }
+        // check that sum of rows of beta equals b
+        for i in 0..s {
+            sum = M::T::zero();
+            for j in 0..q {
+                sum += beta[(i, j)];
+            }
+            if (sum - b[i]).abs() > M::T::from(1e-8).abs() {
+                panic!(
+                    "Invalid beta, expected sum of rows to equal b but is {}",
+                    sum
+                );
+            }
+        }
+        Ok(beta)
+    }
+    pub fn new(a: M, b: M::V, c: M::V, d: M::V, order: usize, beta: M) -> Self {
+        let s = c.len();
+        assert_eq!(a.ncols(), s, "Invalid number of rows in a, expected {}", s);
         assert_eq!(
-            at.ncols(),
+            a.nrows(),
             s,
             "Invalid number of columns in a, expected {}",
             s
@@ -192,7 +317,7 @@ impl<M: DenseMatrix> Tableau<M> {
             s
         );
         Self {
-            at,
+            a,
             b,
             c,
             d,
@@ -209,8 +334,8 @@ impl<M: DenseMatrix> Tableau<M> {
         self.c.len()
     }
 
-    pub fn at(&self) -> &M {
-        &self.at
+    pub fn a(&self) -> &M {
+        &self.a
     }
 
     pub fn b(&self) -> &M::V {
@@ -277,17 +402,17 @@ where
         for i in 0..s {
             for j in (i + 1)..s {
                 assert_eq!(
-                    tableau.at()[(j, i)],
+                    tableau.a()[(i, j)],
                     Eqn::T::zero(),
                     "Invalid tableau, expected a(i, j) = 0 for i > j"
                 );
             }
         }
-        let gamma = tableau.at()[(1, 1)];
+        let gamma = tableau.a()[(1, 1)];
         //check that for i = 1..s-1, a(i, i) = gamma
         for i in 1..tableau.s() {
             assert_eq!(
-                tableau.at()[(i, i)],
+                tableau.a()[(i, i)],
                 gamma,
                 "Invalid tableau, expected a(i, i) = gamma = {} for i = 1..s-1",
                 gamma
@@ -297,16 +422,16 @@ where
         // if a(0, 0) = 0, then we're a ESDIRK method
         // otherwise, error
         let zero = Eqn::T::zero();
-        if tableau.at()[(0, 0)] != zero && tableau.at()[(0, 0)] != gamma {
+        if tableau.a()[(0, 0)] != zero && tableau.a()[(0, 0)] != gamma {
             panic!("Invalid tableau, expected a(0, 0) = 0 or a(0, 0) = gamma");
         }
-        let is_sdirk = tableau.at()[(0, 0)] == gamma;
+        let is_sdirk = tableau.a()[(0, 0)] == gamma;
 
         let mut a_rows = Vec::with_capacity(s);
         for i in 0..s {
             let mut row = Vec::with_capacity(i);
             for j in 0..i {
-                row.push(tableau.at()[(j, i)]);
+                row.push(tableau.a()[(i, j)]);
             }
             a_rows.push(Eqn::V::from_vec(row));
         }
@@ -314,7 +439,7 @@ where
         // check last row of a is the same as b
         for i in 0..s {
             assert_eq!(
-                tableau.at()[(i, s - 1)],
+                tableau.a()[(s - 1, i)],
                 tableau.b()[i],
                 "Invalid tableau, expected a(s-1, i) = b(i)"
             );
@@ -649,30 +774,32 @@ where
         let f1 = &self.f;
         let u0 = &self.old_y;
         let u1 = &state.y;
-        let ret = u0 * (Eqn::T::from(1.0) - theta)
+        let ret_h = u0 * (Eqn::T::from(1.0) - theta)
             + u1 * theta
             + ((u1 - u0) * scale(Eqn::T::from(1.0) - Eqn::T::from(2.0) * theta)
                 + f0 * ((theta - Eqn::T::from(1.0)) * dt)
                 + f1 * (theta * dt))
                 * scale(theta * (theta - Eqn::T::from(1.0)));
 
-        //let poly_order = self.tableau.beta().ncols();
-        //let s_star = self.tableau.beta().nrows();
-        //let mut thetav = Vec::with_capacity(poly_order);
-        //thetav.push(theta);
-        //for i in 1..poly_order {
-        //    thetav.push(theta * thetav[i - 1]);
-        //}
-        //// beta_poly = beta * thetav
-        //let thetav = Eqn::V::from_vec(thetav);
-        //let mut beta = <Eqn::V as Vector>::zeros(s_star);
-        //self.tableau
-        //    .beta()
-        //    .gemv(Eqn::T::one(), &thetav, Eqn::T::zero(), &mut beta);
+        let poly_order = self.tableau.beta().ncols();
+        let s_star = self.tableau.beta().nrows();
+        let mut thetav = Vec::with_capacity(poly_order);
+        thetav.push(theta);
+        for i in 1..poly_order {
+            thetav.push(theta * thetav[i - 1]);
+        }
+        // beta_poly = beta * thetav
+        let thetav = Eqn::V::from_vec(thetav);
+        let mut beta = <Eqn::V as Vector>::zeros(s_star);
+        self.tableau
+            .beta()
+            .gemv(Eqn::T::one(), &thetav, Eqn::T::zero(), &mut beta);
 
-        //// ret = old_y + sum_{i=0}^{s_star-1} beta[i] * diff[:, i]
-        //let mut ret = self.old_y.clone();
-        //self.diff.gemv(dt, &beta, Eqn::T::one(), &mut ret);
+        // ret = old_y + sum_{i=0}^{s_star-1} beta[i] * diff[:, i]
+        let mut ret = self.old_y.clone();
+        self.diff.gemv(dt, &beta, Eqn::T::one(), &mut ret);
+        println!("ret: {:?}", ret);
+        println!("ret_h: {:?}", ret_h);
         Ok(ret)
     }
 

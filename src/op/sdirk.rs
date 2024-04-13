@@ -1,14 +1,9 @@
 use crate::{
-    matrix::MatrixRef, ode_solver::equations::OdeEquations, scale, Matrix, OdeSolverProblem,
-    Vector, VectorRef,
+    matrix::MatrixRef, ode_solver::equations::OdeEquations, Matrix, OdeSolverProblem, Vector,
+    VectorRef,
 };
 use num_traits::{One, Zero};
-use std::ops::{AddAssign, MulAssign, SubAssign};
-use std::{
-    cell::RefCell,
-    ops::{Deref, DerefMut},
-    rc::Rc,
-};
+use std::{cell::RefCell, ops::Deref, rc::Rc};
 
 use super::{NonLinearOp, Op};
 
@@ -144,7 +139,6 @@ where
         if *self.rhs_jacobian_is_stale.borrow() {
             let phi_ref = self.phi.borrow();
             let phi = phi_ref.deref();
-            let h = *self.h.borrow().deref();
             let c = self.c;
             let tmp = phi + x * c;
             self.rhs_jac.replace(self.eqn.jacobian_matrix(&tmp, t));

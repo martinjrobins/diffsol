@@ -29,6 +29,8 @@ mod tests {
     use crate::op::ode_rhs::OdeRhs;
     use crate::op::Op;
     use crate::scalar::scale;
+    use crate::LU;
+    use crate::SVD;
     use crate::{NonLinearSolver, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState};
     use crate::{Sdirk, Tableau, Vector};
     use num_traits::One;
@@ -73,7 +75,8 @@ mod tests {
 
     #[test]
     fn test_tr_bdf2_nalgebra_exponential_decay() {
-        let mut s = Sdirk::new(Tableau::<Mcpu>::tr_bdf2(), LU::default());
+        let tableau = Tableau::<Mcpu>::tr_bdf2(SVD::default()).unwrap();
+        let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = exponential_decay_problem::<Mcpu>(false);
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
@@ -99,7 +102,8 @@ mod tests {
 
     #[test]
     fn test_sdirk4_nalgebra_exponential_decay() {
-        let mut s = Sdirk::new(Tableau::<Mcpu>::sdirk4(), LU::default());
+        let tableau = Tableau::<Mcpu>::sdirk4(SVD::default()).unwrap();
+        let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = exponential_decay_problem::<Mcpu>(false);
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
@@ -178,7 +182,8 @@ mod tests {
 
     #[test]
     fn test_sdirk4_nalgebra_exponential_decay_algebraic() {
-        let mut s = Sdirk::new(Tableau::<Mcpu>::sdirk4(), LU::default());
+        let tableau = Tableau::<Mcpu>::sdirk4(LU::default()).unwrap();
+        let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = exponential_decay_with_algebraic_problem::<Mcpu>(false);
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
@@ -220,7 +225,8 @@ mod tests {
 
     #[test]
     fn test_tr_bdf2_nalgebra_robertson() {
-        let mut s = Sdirk::new(Tableau::<Mcpu>::tr_bdf2(), LU::default());
+        let tableau = Tableau::<Mcpu>::sdirk4(LU::default()).unwrap();
+        let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson::<Mcpu>(false);
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
@@ -246,7 +252,8 @@ mod tests {
 
     #[test]
     fn test_sdirk4_nalgebra_robertson() {
-        let mut s = Sdirk::new(Tableau::<Mcpu>::sdirk4(), LU::default());
+        let tableau = Tableau::<Mcpu>::sdirk4(LU::default()).unwrap();
+        let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson::<Mcpu>(false);
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
@@ -351,7 +358,8 @@ mod tests {
 
     #[test]
     fn test_tr_bdf2_nalgebra_robertson_ode() {
-        let mut s = Sdirk::new(Tableau::<Mcpu>::tr_bdf2(), LU::default());
+        let tableau = Tableau::<Mcpu>::tr_bdf2(LU::default()).unwrap();
+        let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson_ode::<Mcpu>(false);
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
@@ -377,7 +385,8 @@ mod tests {
 
     #[test]
     fn test_sdirk4_nalgebra_robertson_ode() {
-        let mut s = Sdirk::new(Tableau::<Mcpu>::sdirk4(), LU::default());
+        let tableau = Tableau::<Mcpu>::tr_bdf2(LU::default()).unwrap();
+        let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson_ode::<Mcpu>(false);
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
@@ -429,7 +438,8 @@ mod tests {
 
     #[test]
     fn test_tr_bdf2_nalgebra_dydt_y2() {
-        let mut s = Sdirk::new(Tableau::<Mcpu>::tr_bdf2(), LU::default());
+        let tableau = Tableau::<Mcpu>::tr_bdf2(SVD::default()).unwrap();
+        let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = dydt_y2_problem::<Mcpu>(false, 10);
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);

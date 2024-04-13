@@ -6,7 +6,8 @@ use std::{
 
 use sundials_sys::{
     realtype, SUNDenseMatrix, SUNDenseMatrix_Cols, SUNDenseMatrix_Columns, SUNDenseMatrix_Rows,
-    SUNMatClone, SUNMatCopy, SUNMatDestroy, SUNMatScaleAdd, SUNMatZero, SUNMatrix,
+    SUNMatClone, SUNMatCopy, SUNMatDestroy, SUNMatMatvec, SUNMatMatvecSetup, SUNMatScaleAdd,
+    SUNMatZero, SUNMatrix,
 };
 
 use crate::{
@@ -264,6 +265,16 @@ impl Matrix for SundialsMatrix {
             m[(i, j)] = val;
         }
         Ok(m)
+    }
+
+    /// Perform a matrix-vector multiplication `y = alpha * self * x + beta * y`.
+    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
+        let a = self.sundials_matrix();
+        let tmp = SundialsVector::new_serial(self.nrows());
+        sundials_check(unsafe { SUNMatMatvecSetup(a) }).unwrap();
+        sundials_check(unsafe { SUNMatMatvec(a, x.sundials_vector(), tmp.sundials_vector()) })
+            .unwrap();
+        y.axpy(alpha, &tmp, beta);
     }
 }
 

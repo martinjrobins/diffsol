@@ -133,6 +133,10 @@ impl<T: Scalar> Matrix for DMatrix<T> {
     fn diagonal(&self) -> Self::V {
         self.diagonal()
     }
+
+    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
+        y.gemv(alpha, self, x, beta);
+    }
     fn copy_from(&mut self, other: &Self) {
         self.copy_from(other);
     }
@@ -144,9 +148,6 @@ impl<T: Scalar> DenseMatrix for DMatrix<T> {
 
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T) {
         self.gemm(alpha, a, b, beta);
-    }
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        y.gemv(alpha, self, x, beta);
     }
 
     fn column_mut(&mut self, i: IndexType) -> DVectorViewMut<'_, T> {

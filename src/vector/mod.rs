@@ -152,7 +152,7 @@ pub trait Vector:
     fn gather_from(&mut self, other: &Self, indices: &Self::Index);
     fn scatter_from(&mut self, other: &Self, indices: &Self::Index);
     fn assert_eq_st(&self, other: &Self, tol: Self::T) {
-        let tol = Self::from_element(self.len() as usize, tol);
+        let tol = Self::from_element(self.len(), tol);
         self.assert_eq(other, &tol);
     }
     fn assert_eq(&self, other: &Self, tol: &Self) {

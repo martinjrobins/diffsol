@@ -122,6 +122,9 @@ pub trait Matrix:
     /// Extract the diagonal of the matrix as an owned vector
     fn diagonal(&self) -> Self::V;
 
+    /// Perform a matrix-vector multiplication `y = self * x + beta * y`.
+    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V);
+
     /// Copy the contents of `other` into `self`
     fn copy_from(&mut self, other: &Self);
 
@@ -165,9 +168,6 @@ pub trait DenseMatrix:
 
     /// Perform a matrix-matrix multiplication `self = alpha * a * b + beta * self`, where `alpha` and `beta` are scalars, and `a` and `b` are matrices
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T);
-
-    /// Computes y = alpha * self * x + beta * y, where self is a matrix, x a vector, and alpha, beta two scalars.
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V);
 
     /// Get a matrix view of the columns starting at `start` and ending at `start + ncols`
     fn columns(&self, start: IndexType, ncols: IndexType) -> Self::View<'_>;

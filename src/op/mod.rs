@@ -7,14 +7,15 @@ use crate::{
 use num_traits::{One, Zero};
 use std::ops::{AddAssign, MulAssign};
 
+pub mod bdf;
 pub mod closure;
 pub mod constant_closure;
 pub mod filter;
 pub mod linear_closure;
 pub mod linearise;
-pub mod bdf;
-pub mod sdirk;
+pub mod matrix;
 pub mod ode_rhs;
+pub mod sdirk;
 pub mod unit;
 
 pub trait Op {
