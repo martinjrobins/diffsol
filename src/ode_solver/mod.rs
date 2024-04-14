@@ -30,7 +30,6 @@ mod tests {
     use crate::op::Op;
     use crate::scalar::scale;
     use crate::LU;
-    use crate::SVD;
     use crate::{NonLinearSolver, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState};
     use crate::{Sdirk, Tableau, Vector};
     use num_traits::One;
@@ -65,7 +64,6 @@ mod tests {
                     let problem = method.problem().unwrap();
                     point.state.abs() * scale(problem.rtol) + problem.atol.as_ref()
                 };
-                println!("tol: {:?} rtol {:?}", tol, problem.rtol);
                 soln.assert_eq(&point.state, &(tol * scale(Eqn::T::from(10.0))));
             }
         }
@@ -75,7 +73,7 @@ mod tests {
 
     #[test]
     fn test_tr_bdf2_nalgebra_exponential_decay() {
-        let tableau = Tableau::<Mcpu>::tr_bdf2(LU::default()).unwrap();
+        let tableau = Tableau::<Mcpu>::implicit_euler();
         let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = exponential_decay_problem::<Mcpu>(false);
@@ -93,33 +91,6 @@ mod tests {
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
         number_of_rhs_evals: 18
-        number_of_jac_mul_evals: 2
-        number_of_mass_evals: 0
-        number_of_mass_matrix_evals: 0
-        number_of_jacobian_matrix_evals: 1
-        "###);
-    }
-
-    #[test]
-    fn test_sdirk4_nalgebra_exponential_decay() {
-        let tableau = Tableau::<Mcpu>::sdirk4(SVD::default()).unwrap();
-        let mut s = Sdirk::new(tableau, LU::default());
-        let rs = NewtonNonlinearSolver::new(LU::default());
-        let (problem, soln) = exponential_decay_problem::<Mcpu>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
-        number_of_linear_solver_setups: 2
-        number_of_steps: 2
-        number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 0
-        number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.37144712429378357
-        final_step_size: 0.9108168533793789
-        "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
-        ---
-        number_of_rhs_evals: 22
         number_of_jac_mul_evals: 2
         number_of_mass_evals: 0
         number_of_mass_matrix_evals: 0
@@ -181,23 +152,6 @@ mod tests {
     }
 
     #[test]
-    fn test_sdirk4_nalgebra_exponential_decay_algebraic() {
-        let tableau = Tableau::<Mcpu>::sdirk4(LU::default()).unwrap();
-        let mut s = Sdirk::new(tableau, LU::default());
-        let rs = NewtonNonlinearSolver::new(LU::default());
-        let (problem, soln) = exponential_decay_with_algebraic_problem::<Mcpu>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
-        ---
-        number_of_rhs_evals: 34
-        number_of_jac_mul_evals: 4
-        number_of_mass_evals: 36
-        number_of_mass_matrix_evals: 2
-        number_of_jacobian_matrix_evals: 1
-        "###);
-    }
-
-    #[test]
     fn test_bdf_nalgebra_exponential_decay_algebraic() {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::new(LU::default());
@@ -224,35 +178,35 @@ mod tests {
     }
 
     #[test]
-    fn test_tr_bdf2_nalgebra_robertson() {
-        let tableau = Tableau::<Mcpu>::sdirk4(LU::default()).unwrap();
+    fn test_implicit_euler_nalgebra_robertson() {
+        let tableau = Tableau::<Mcpu>::implicit_euler();
         let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson::<Mcpu>(false);
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 534
-        number_of_steps: 515
-        number_of_error_test_failures: 7
+        number_of_linear_solver_setups: 243
+        number_of_steps: 182
+        number_of_error_test_failures: 16
         number_of_nonlinear_solver_iterations: 0
-        number_of_nonlinear_solver_fails: 12
-        initial_step_size: 0.0011378590984747281
-        final_step_size: 44556146608.845406
+        number_of_nonlinear_solver_fails: 45
+        initial_step_size: 0.017125887701465843
+        final_step_size: 54006237997.52221
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
-        number_of_rhs_evals: 3780
-        number_of_jac_mul_evals: 40
-        number_of_mass_evals: 3783
+        number_of_rhs_evals: 3387
+        number_of_jac_mul_evals: 130
+        number_of_mass_evals: 3390
         number_of_mass_matrix_evals: 2
-        number_of_jacobian_matrix_evals: 13
+        number_of_jacobian_matrix_evals: 43
         "###);
     }
 
     #[test]
-    fn test_sdirk4_nalgebra_robertson() {
-        let tableau = Tableau::<Mcpu>::sdirk4(LU::default()).unwrap();
+    fn test_esdirk34_nalgebra_robertson() {
+        let tableau = Tableau::<Mcpu>::esdirk34();
         let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson::<Mcpu>(false);
@@ -358,7 +312,7 @@ mod tests {
 
     #[test]
     fn test_tr_bdf2_nalgebra_robertson_ode() {
-        let tableau = Tableau::<Mcpu>::tr_bdf2(LU::default()).unwrap();
+        let tableau = Tableau::<Mcpu>::tr_bdf2();
         let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson_ode::<Mcpu>(false);
@@ -385,7 +339,7 @@ mod tests {
 
     #[test]
     fn test_sdirk4_nalgebra_robertson_ode() {
-        let tableau = Tableau::<Mcpu>::tr_bdf2(LU::default()).unwrap();
+        let tableau = Tableau::<Mcpu>::tr_bdf2();
         let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson_ode::<Mcpu>(false);
@@ -438,7 +392,7 @@ mod tests {
 
     #[test]
     fn test_tr_bdf2_nalgebra_dydt_y2() {
-        let tableau = Tableau::<Mcpu>::tr_bdf2(SVD::default()).unwrap();
+        let tableau = Tableau::<Mcpu>::tr_bdf2();
         let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = dydt_y2_problem::<Mcpu>(false, 10);

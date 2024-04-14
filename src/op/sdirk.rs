@@ -1,9 +1,14 @@
 use crate::{
-    matrix::MatrixRef, ode_solver::equations::OdeEquations, Matrix, OdeSolverProblem, Vector,
-    VectorRef,
+    matrix::{MatrixRef, MatrixView},
+    ode_solver::equations::OdeEquations,
+    Matrix, OdeSolverProblem, Vector, VectorRef,
 };
 use num_traits::{One, Zero};
-use std::{cell::RefCell, ops::Deref, rc::Rc};
+use std::{
+    cell::{Ref, RefCell},
+    ops::Deref,
+    rc::Rc,
+};
 
 use super::{NonLinearOp, Op};
 
@@ -13,6 +18,8 @@ pub struct SdirkCallable<Eqn: OdeEquations> {
     c: Eqn::T,
     h: RefCell<Eqn::T>,
     phi: RefCell<Eqn::V>,
+    tmp: RefCell<Eqn::V>,
+    tmp2: RefCell<Eqn::V>,
     jac: RefCell<Eqn::M>,
     rhs_jac: RefCell<Eqn::M>,
     mass_jac: RefCell<Eqn::M>,
@@ -20,7 +27,6 @@ pub struct SdirkCallable<Eqn: OdeEquations> {
     jacobian_is_stale: RefCell<bool>,
     mass_jacobian_is_stale: RefCell<bool>,
     number_of_jac_evals: RefCell<usize>,
-    last_f: RefCell<Eqn::V>,
 }
 
 impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
@@ -36,7 +42,8 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
         let jacobian_is_stale = RefCell::new(true);
         let mass_jacobian_is_stale = RefCell::new(true);
         let number_of_jac_evals = RefCell::new(0);
-        let last_f = RefCell::new(Eqn::V::zeros(n));
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n));
+        let tmp2 = RefCell::new(<Eqn::V as Vector>::zeros(n));
 
         Self {
             eqn,
@@ -50,7 +57,8 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
             jacobian_is_stale,
             mass_jacobian_is_stale,
             number_of_jac_evals,
-            last_f,
+            tmp,
+            tmp2,
         }
     }
 
@@ -74,9 +82,35 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
             self.jacobian_is_stale.replace(true);
         }
     }
-    pub fn set_phi(&self, phi: Eqn::V) {
-        self.phi.replace(phi);
+    pub fn get_last_f_eval(&self) -> Ref<Eqn::V> {
+        self.tmp.borrow()
     }
+    #[allow(dead_code)]
+    fn set_phi_direct(&self, phi: Eqn::V) {
+        let mut phi_ref = self.phi.borrow_mut();
+        phi_ref.copy_from(&phi);
+    }
+    pub fn set_phi<'a, M: MatrixView<'a, T = Eqn::T, V = Eqn::V>>(
+        &self,
+        diff: &M,
+        y0: &Eqn::V,
+        a: &Eqn::V,
+    ) {
+        let mut phi = self.phi.borrow_mut();
+        phi.copy_from(y0);
+        diff.gemv_o(Eqn::T::one(), a, Eqn::T::one(), &mut phi);
+    }
+
+    fn set_tmp(&self, x: &Eqn::V) {
+        let phi_ref = self.phi.borrow();
+        let phi = phi_ref.deref();
+        let mut tmp = self.tmp.borrow_mut();
+        let c = self.c;
+
+        tmp.copy_from(phi);
+        tmp.axpy(c, x, Eqn::T::one());
+    }
+
     pub fn set_rhs_jacobian_is_stale(&self) {
         self.rhs_jacobian_is_stale.replace(true);
         self.jacobian_is_stale.replace(true);
@@ -105,28 +139,30 @@ where
 {
     // F(y) = M (y) - h f(phi + c * y) = 0
     fn call_inplace(&self, x: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
-        let phi_ref = self.phi.borrow();
-        let phi = phi_ref.deref();
+        self.set_tmp(x);
+        let tmp = self.tmp.borrow();
+        let mut tmp2 = self.tmp2.borrow_mut();
         let h = *self.h.borrow().deref();
-        let c = self.c;
-        let mut tmp = phi + x * c;
+
         self.eqn.rhs_inplace(t, &tmp, y);
-        self.eqn.mass_inplace(t, x, &mut tmp);
+        self.eqn.mass_inplace(t, x, &mut tmp2);
+
         // y = tmp  - h y
-        y.axpy(Eqn::T::one(), &tmp, -h);
+        y.axpy(Eqn::T::one(), &tmp2, -h);
     }
     // (M - c * h * f'(phi + c * y)) v
     fn jac_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
-        let phi_ref = self.phi.borrow();
-        let phi = phi_ref.deref();
-        let c = self.c;
+        self.set_tmp(x);
+        let tmp = self.tmp.borrow();
+        let mut tmp2 = self.tmp2.borrow_mut();
         let h = *self.h.borrow().deref();
-        let mut tmp = phi + x * c;
+        let c = self.c;
+
         self.eqn.rhs_jac_inplace(t, &tmp, v, y);
-        self.eqn.mass_inplace(t, v, &mut tmp);
+        self.eqn.mass_inplace(t, v, &mut tmp2);
 
         // y = tmp  - c * h * y
-        y.axpy(Eqn::T::one(), &tmp, -c * h);
+        y.axpy(Eqn::T::one(), &tmp2, -c * h);
     }
 
     // M - c * h * f'(phi + c * y)
@@ -137,11 +173,11 @@ where
             self.jacobian_is_stale.replace(true);
         }
         if *self.rhs_jacobian_is_stale.borrow() {
-            let phi_ref = self.phi.borrow();
-            let phi = phi_ref.deref();
-            let c = self.c;
-            let tmp = phi + x * c;
-            self.rhs_jac.replace(self.eqn.jacobian_matrix(&tmp, t));
+            self.set_tmp(x);
+            let tmp_ref = self.tmp.borrow();
+            let tmp = tmp_ref.deref();
+
+            self.rhs_jac.replace(self.eqn.jacobian_matrix(tmp, t));
             self.rhs_jacobian_is_stale.replace(false);
             self.jacobian_is_stale.replace(true);
         }
@@ -180,7 +216,7 @@ mod tests {
         sdirk_callable.set_h(h);
 
         let phi = Vcpu::from_vec(vec![1.1, 1.2]);
-        sdirk_callable.set_phi(phi);
+        sdirk_callable.set_phi_direct(phi);
         // check that the function is correct
         let y = Vcpu::from_vec(vec![1.0, 1.0]);
         let t = 0.0;

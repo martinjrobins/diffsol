@@ -1,5 +1,3 @@
-use anyhow::Result;
-use nalgebra::ComplexField;
 use num_traits::One;
 use num_traits::Pow;
 use num_traits::Zero;
@@ -9,13 +7,12 @@ use std::rc::Rc;
 use crate::linear_solver::LinearSolver;
 use crate::matrix::MatrixRef;
 use crate::op::linearise::LinearisedOp;
-use crate::op::matrix::MatrixOp;
 use crate::vector::VectorRef;
 use crate::NewtonNonlinearSolver;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
-    DenseMatrix, MatrixView, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-    Vector, VectorView, VectorViewMut,
+    DenseMatrix, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Vector,
+    VectorView, VectorViewMut,
 };
 
 use super::bdf::BdfStatistics;
@@ -26,13 +23,32 @@ pub struct Tableau<M: DenseMatrix> {
     c: M::V,
     d: M::V,
     order: usize,
+    beta: Option<M>,
 }
 
 impl<M: DenseMatrix> Tableau<M> {
+    /// from Jørgensen, J. B., Kristensen, M. R., & Thomsen, P. G. (2018). A family of ESDIRK integration methods. arXiv preprint arXiv:1803.01613.
+    pub fn implicit_euler() -> Self {
+        let mut a = M::zeros(2, 2);
+        a[(1, 1)] = M::T::from(1.0);
+
+        let b = M::V::from_vec(vec![M::T::zero(), M::T::one()]);
+        let c = M::V::from_vec(vec![M::T::zero(), M::T::one()]);
+        let d = M::V::from_vec(vec![M::T::from(-0.5), M::T::from(0.5)]);
+
+        let mut beta = M::zeros(2, 1);
+        beta[(0, 0)] = M::T::zero();
+        beta[(1, 0)] = M::T::one();
+
+        Self::new(a, b, c, d, 1, Some(beta))
+    }
     /// TR-BDF2 method
     /// from R.E. Bank, W.M. Coughran Jr, W. Fichtner, E.H. Grosse, D.J. Rose and R.K. Smith, Transient simulation of silicon devices and circuits, IEEE Trans. Comput.-Aided Design 4 (1985) 436-451.
     /// analysed in M.E. Hosea and L.F. Shampine. Analysis and implementation of TR-BDF2. Applied Numerical Mathematics, 20:21–37, 1996.
-    pub fn tr_bdf2(linear_solver: impl LinearSolver<MatrixOp<M>>) -> Result<Self> {
+    ///
+    /// continuous extension from :
+    /// from Jørgensen, J. B., Kristensen, M. R., & Thomsen, P. G. (2018). A family of ESDIRK integration methods. arXiv preprint arXiv:1803.01613.
+    pub fn tr_bdf2() -> Self {
         let gamma = M::T::from(2.0 - 2.0_f64.sqrt());
         let d = gamma / M::T::from(2.0);
         let w = M::T::from(2.0_f64.sqrt() / 4.0);
@@ -56,264 +72,57 @@ impl<M: DenseMatrix> Tableau<M> {
             d[i] = b[i] - b_hat[i];
         }
 
+        let mut beta = M::zeros(3, 2);
+        beta[(0, 0)] = M::T::from(2.0) * w;
+        beta[(0, 1)] = -w;
+        beta[(1, 0)] = M::T::from(2.0) * w;
+        beta[(1, 1)] = -w;
+        beta[(2, 0)] = gamma - M::T::from(1.0);
+        beta[(2, 1)] = w;
+
         let c = M::V::from_vec(vec![M::T::zero(), gamma, M::T::one()]);
 
         let order = 2;
 
-        Ok(Self::new(a, b, c, d, order, beta))
+        Self::new(a, b, c, d, order, Some(beta))
     }
-    /// L-stable SDIRK method of order 4, from
-    /// Hairer, Norsett, Wanner, Solving Ordinary Differential Equations II, Stiff and Differential-Algebraic Problems, 2nd Edition
-    /// Section IV.6, page 107
-    pub fn sdirk4() -> Result<Self> {
-        let mut a = M::zeros(5, 5);
-        a[(0, 0)] = M::T::from(1.0 / 4.0);
 
-        a[(1, 0)] = M::T::from(1.0 / 2.0);
-        a[(1, 1)] = M::T::from(1.0 / 4.0);
+    /// from Jørgensen, J. B., Kristensen, M. R., & Thomsen, P. G. (2018). A family of ESDIRK integration methods. arXiv preprint arXiv:1803.01613.
+    pub fn esdirk34() -> Self {
+        let mut a = M::zeros(4, 4);
+        let gamma = M::T::from(0.367_891_756_475_028_25);
+        a[(1, 0)] = M::T::from(0.435_866_521_508_459);
+        a[(1, 1)] = gamma;
 
-        a[(2, 0)] = M::T::from(17.0 / 50.0);
-        a[(2, 1)] = M::T::from(-1.0 / 25.0);
-        a[(2, 2)] = M::T::from(1.0 / 4.0);
+        a[(2, 0)] = M::T::from(0.140_737_774_724_706_2);
+        a[(2, 1)] = M::T::from(-0.108_365_551_381_320_8);
+        a[(2, 2)] = gamma;
 
-        a[(3, 0)] = M::T::from(371.0 / 1360.0);
-        a[(3, 1)] = M::T::from(-137.0 / 2720.0);
-        a[(3, 2)] = M::T::from(15.0 / 544.0);
-        a[(3, 3)] = M::T::from(1.0 / 4.0);
+        a[(3, 0)] = M::T::from(0.102_399_400_619_911);
+        a[(3, 1)] = M::T::from(-0.376_878_452_255_556_1);
+        a[(3, 2)] = M::T::from(0.838_612_530_127_186_1);
+        a[(3, 3)] = gamma;
 
-        a[(4, 0)] = M::T::from(25.0 / 24.0);
-        a[(4, 1)] = M::T::from(-49.0 / 48.0);
-        a[(4, 2)] = M::T::from(125.0 / 16.0);
-        a[(4, 3)] = M::T::from(-85.0 / 12.0);
-        a[(4, 4)] = M::T::from(1.0 / 4.0);
-
-        let b = M::V::from_vec(vec![
-            M::T::from(25.0 / 24.0),
-            M::T::from(-49.0 / 48.0),
-            M::T::from(125.0 / 16.0),
-            M::T::from(-85.0 / 12.0),
-            M::T::from(1.0 / 4.0),
-        ]);
+        let b = M::V::from_vec(vec![a[(3, 0)], a[(3, 1)], a[(3, 2)], a[(3, 3)]]);
 
         let c = M::V::from_vec(vec![
-            M::T::from(1.0 / 4.0),
-            M::T::from(3.0 / 4.0),
-            M::T::from(11.0 / 20.0),
-            M::T::from(1.0 / 2.0),
-            M::T::from(1.0),
+            M::T::zero(),
+            M::T::from(0.871_733_043_016_918),
+            M::T::from(0.468_238_744_851_844_4),
+            M::T::one(),
         ]);
 
         let d = M::V::from_vec(vec![
-            M::T::from(-3.0 / 16.0),
-            M::T::from(-27.0 / 32.0),
-            M::T::from(25.0 / 32.0),
-            M::T::from(0.0),
-            M::T::from(1.0 / 4.0),
+            M::T::from(-0.054_625_497_240_413_94),
+            M::T::from(-0.494_208_893_625_994_96),
+            M::T::from(0.221_934_499_735_064_66),
+            M::T::from(0.326_899_891_131_344_27),
         ]);
 
-        let order = 4;
-        let beta = Self::compute_beta(&a, &b, &c, order, linear_solver)?;
-        //beta[(0, 0)] = M::T::from(11.0 / 3.0);
-        //beta[(0, 1)] = M::T::from(-463.0 / 72.0);
-        //beta[(0, 2)] = M::T::from(217.0 / 36.0);
-        //beta[(0, 3)] = M::T::from(-20.0 / 9.0);
-
-        //beta[(1, 0)] = M::T::from(11.0 / 2.0);
-        //beta[(1, 1)] = M::T::from(-385.0 / 16.0);
-        //beta[(1, 2)] = M::T::from(661.0 / 24.0);
-        //beta[(1, 3)] = M::T::from(-10.0);
-
-        //beta[(2, 0)] = M::T::from(-128.0 / 18.0);
-        //beta[(2, 1)] = M::T::from(20125.0 / 432.0);
-        //beta[(2, 2)] = M::T::from(-8875.0 / 216.0);
-        //beta[(2, 3)] = M::T::from(250.0 / 27.0);
-
-        //beta[(3, 0)] = M::T::from(0.0);
-        //beta[(3, 1)] = M::T::from(-85.0 / 4.0);
-        //beta[(3, 2)] = M::T::from(85.0 / 6.0);
-        //beta[(3, 3)] = M::T::from(0.0);
-
-        //beta[(4, 0)] = M::T::from(-11.0 / 19.0);
-        //beta[(4, 1)] = M::T::from(557.0 / 108.0);
-        //beta[(4, 2)] = M::T::from(-359.0 / 54.0);
-        //beta[(4, 3)] = M::T::from(80.0 / 27.0);
-
-        Ok(Self::new(a, b, c, d, order, beta))
+        Self::new(a, b, c, d, 3, None)
     }
-    fn compute_beta(
-        a: &M,
-        b: &M::V,
-        c: &M::V,
-        order: usize,
-        mut linear_solver: impl LinearSolver<MatrixOp<M>>,
-    ) -> Result<M> {
-        if order > 4 {
-            panic!("Invalid order, expected order <= 4");
-        }
-        let s = c.len();
-        let q = order;
-        let e = M::V::from_element(s, M::T::one());
-        let mat_c = M::from_diagonal(c);
-        let o = 2_usize.pow(u32::try_from(order - 1).unwrap());
-        println!("o: {}", o);
-        println!("order: {}", order);
-        println!("s: {}", s);
-        println!("q: {}", q);
 
-        let neqn = o * q + s;
-        let nunknown = s * q;
-
-        let add_extra_condition = if neqn == nunknown {
-            false
-        } else if neqn + s == nunknown {
-            true
-        } else {
-            panic!("Error, expected neqn = nunknown or neqn + s = nunknown, got neqn = {}, nunknown = {}, s = {}", neqn, nunknown, s);
-        };
-
-        // construct psi
-        println!("o: {}", o);
-        println!("order: {}", order);
-        let mut psi = M::zeros(o, s);
-        for i in 0..s {
-            psi[(0, i)] = e[i];
-        }
-        if order >= 2 {
-            let mut ce = M::V::zeros(s);
-            mat_c.gemv(M::T::one(), &e, M::T::zero(), &mut ce);
-            for i in 0..s {
-                psi[(1, i)] = ce[i];
-            }
-            if order >= 3 {
-                let mut c2e = M::V::zeros(s);
-                mat_c.gemv(M::T::one(), &ce, M::T::zero(), &mut c2e);
-                let mut ace = M::V::zeros(s);
-                a.gemv(M::T::one(), &ce, M::T::zero(), &mut ace);
-                for i in 0..s {
-                    psi[(2, i)] = c2e[i];
-                    psi[(3, i)] = ace[i];
-                }
-                if order >= 4 {
-                    let mut c3e = M::V::zeros(s);
-                    mat_c.gemv(M::T::one(), &c2e, M::T::zero(), &mut c3e);
-                    let mut cace = M::V::zeros(s);
-                    mat_c.gemv(M::T::one(), &ace, M::T::zero(), &mut cace);
-                    let mut ac2e = M::V::zeros(s);
-                    a.gemv(M::T::one(), &c2e, M::T::zero(), &mut ac2e);
-                    let mut a2ce = M::V::zeros(s);
-                    a.gemv(M::T::one(), &ace, M::T::zero(), &mut a2ce);
-                    for i in 0..s {
-                        psi[(4, i)] = c3e[i];
-                        psi[(5, i)] = cace[i];
-                        psi[(6, i)] = ac2e[i];
-                        psi[(7, i)] = a2ce[i];
-                    }
-                }
-            }
-        }
-
-        println!("psi: {:?}", psi);
-
-        let nrows = if add_extra_condition { q * o + s + s } else { q * o + s };
-        let mut order_c = M::zeros(nrows, q * s);
-        // orderC = | I_q kron psi | (q * o, q * s)
-        //          | e kron I_s |   (s, q * s)
-        //          | c^k kron I_s | (s, q * s) (if add_extra_condition)
-        for i in 0..q {
-            for j in 0..o {
-                for k in 0..s {
-                    order_c[(i * o + j, i * s + k)] = psi[(j, k)];
-                }
-            }
-            for j in 0..s {
-                order_c[(q * o + j, i * s + j)] = M::T::one();
-            }
-            if add_extra_condition {
-                for j in 0..s {
-                    order_c[(q * o + s + j, i * s + j)] = c[s - 2].pow(i as i32);
-                }
-            }
-        }
-        println!("orderC: {:?}", order_c);
-        let mut gamma = M::zeros(o, q);
-        gamma[(0, 0)] = M::T::one();
-
-        if order >= 2 {
-            gamma[(1, 1)] = M::T::from(1.0 / 2.0);
-        }
-
-        if order >= 3 {
-            gamma[(2, 2)] = M::T::from(1.0 / 3.0);
-            gamma[(3, 2)] = M::T::from(1.0 / 6.0);
-        }
-
-        if order >= 4 {
-            gamma[(4, 3)] = M::T::from(1.0 / 4.0);
-            gamma[(5, 3)] = M::T::from(1.0 / 8.0);
-            gamma[(6, 3)] = M::T::from(1.0 / 12.0);
-            gamma[(7, 3)] = M::T::from(1.0 / 24.0);
-        }
-
-        println!("gamma: {:?}", gamma);
-
-        let mut vec_gamma = M::V::zeros(nrows);
-        for j in 0..q {
-            for i in 0..o {
-                vec_gamma[j * o + i] = gamma[(i, j)];
-            }
-        }
-        for i in 0..s {
-            vec_gamma[q * o + i] = b[i];
-        }
-        if add_extra_condition {
-            for i in 0..s {
-                vec_gamma[q * o + s + i] = a[(s - 2, i)];
-            }
-        }
-
-        // solve orderC * vec_b = vec_gamma
-        let op = MatrixOp::new(order_c);
-        let atol = M::V::from_element(q * o, M::T::from(1e-8));
-        let rtol = M::T::from(1e-8);
-        let problem = SolverProblem::new(Rc::new(op), M::T::zero(), Rc::new(atol), rtol);
-        linear_solver.set_problem(problem);
-        let vec_b = linear_solver.solve(&vec_gamma)?;
-
-        // construct beta
-        let mut beta = M::zeros(s, q);
-        for i in 0..s {
-            for j in 0..q {
-                beta[(i, j)] = vec_b[j * s + i];
-            }
-        }
-
-        // check that sum of 1st column of beta is 1
-        let mut sum = M::T::zero();
-        for i in 0..s {
-            sum += beta[(i, 0)];
-        }
-        if (sum - M::T::one()).abs() > M::T::from(1e-8).abs() {
-            panic!(
-                "Invalid beta, expected sum of 1st column to be 1 but is {}",
-                sum
-            );
-        }
-        // check that sum of rows of beta equals b
-        for i in 0..s {
-            sum = M::T::zero();
-            for j in 0..q {
-                sum += beta[(i, j)];
-            }
-            if (sum - b[i]).abs() > M::T::from(1e-8).abs() {
-                panic!(
-                    "Invalid beta, expected sum of rows to equal b but is {}",
-                    sum
-                );
-            }
-        }
-        Ok(beta)
-    }
-    pub fn new(a: M, b: M::V, c: M::V, d: M::V, order: usize, beta: M) -> Self {
+    pub fn new(a: M, b: M::V, c: M::V, d: M::V, order: usize, beta: Option<M>) -> Self {
         let s = c.len();
         assert_eq!(a.ncols(), s, "Invalid number of rows in a, expected {}", s);
         assert_eq!(
@@ -334,19 +143,21 @@ impl<M: DenseMatrix> Tableau<M> {
             "Invalid number of elements in c, expected {}",
             s
         );
-        assert_eq!(
-            beta.nrows(),
-            s,
-            "Invalid number of rows in beta, expected {}",
-            s
-        );
+        if let Some(beta) = &beta {
+            assert_eq!(
+                beta.nrows(),
+                s,
+                "Invalid number of rows in beta, expected {}",
+                s
+            );
+        }
         Self {
             a,
             b,
             c,
             d,
-            beta,
             order,
+            beta,
         }
     }
 
@@ -374,8 +185,8 @@ impl<M: DenseMatrix> Tableau<M> {
         &self.d
     }
 
-    pub fn beta(&self) -> &M {
-        &self.beta
+    pub fn beta(&self) -> Option<&M> {
+        self.beta.as_ref()
     }
 }
 
@@ -468,6 +279,13 @@ where
                 "Invalid tableau, expected a(s-1, i) = b(i)"
             );
         }
+
+        // check that last c is 1
+        assert_eq!(
+            tableau.c()[s - 1],
+            Eqn::T::one(),
+            "Invalid tableau, expected c(s-1) = 1"
+        );
 
         let n = 1;
         let s = tableau.s();
@@ -596,12 +414,8 @@ where
         let y0 = &state.y;
         let start = if self.is_sdirk { 0 } else { 1 };
         let mut updated_jacobian = false;
-        let scale_y = {
-            let ode_problem = self.problem.as_ref().unwrap();
-            let mut scale_y = y0.abs() * scale(ode_problem.rtol);
-            scale_y += ode_problem.atol.as_ref();
-            scale_y
-        };
+        let mut error = <Eqn::V as Vector>::zeros(n);
+
         let mut t1: Eqn::T;
 
         // loop until step is accepted
@@ -614,18 +428,10 @@ where
             }
             for i in start..self.tableau.s() {
                 let t = state.t + self.tableau.c()[i] * state.h;
-                let mut phi = y0.clone();
-                if i > 0 {
-                    let a_row = &self.a_rows[i];
-                    self.diff
-                        .columns(0, i)
-                        .gemv_o(Eqn::T::one(), a_row, Eqn::T::one(), &mut phi);
-                }
-
                 self.nonlinear_solver.set_time(t).unwrap();
                 {
                     let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
-                    callable.set_phi(phi);
+                    callable.set_phi(&self.diff.columns(0, i), y0, &self.a_rows[i]);
                 }
 
                 let mut dy = if i == 0 {
@@ -688,9 +494,7 @@ where
                 // update diff with solved dy
                 self.diff.column_mut(i).copy_from(&dy);
             }
-
             // successfully solved for all stages, now compute error
-            let mut error = <Eqn::V as Vector>::zeros(n);
             self.diff
                 .gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), &mut error);
 
@@ -706,8 +510,21 @@ where
             //}
 
             // scale error and compute norm
+            let scale_y = {
+                let y1_ref = self
+                    .nonlinear_solver
+                    .problem()
+                    .unwrap()
+                    .f
+                    .as_ref()
+                    .get_last_f_eval();
+                let ode_problem = self.problem.as_ref().unwrap();
+                let mut scale_y = y1_ref.abs() * scale(ode_problem.rtol);
+                scale_y += ode_problem.atol.as_ref();
+                scale_y
+            };
             error.component_div_assign(&scale_y);
-            let error_norm = error.norm();
+            let error_norm = error.norm() / M::T::from((n as f64).sqrt());
 
             // adjust step size based on error
             let maxiter = self.nonlinear_solver.max_iter() as f64;
@@ -751,19 +568,20 @@ where
         self.old_t = state.t;
         state.t = t1;
 
-        if self.tableau.c()[self.tableau.s() - 1] == Eqn::T::one() {
-            self.old_f
-                .copy_from_view(&self.diff.column(self.diff.ncols() - 1));
-            self.old_f.mul_assign(scale(Eqn::T::one() / dt));
-            std::mem::swap(&mut self.old_f, &mut self.f);
-        } else {
-            unimplemented!();
-        }
+        self.old_f
+            .copy_from_view(&self.diff.column(self.diff.ncols() - 1));
+        self.old_f.mul_assign(scale(Eqn::T::one() / dt));
+        std::mem::swap(&mut self.old_f, &mut self.f);
 
-        self.old_y.copy_from(&state.y);
-        let y1 = &mut state.y;
-        self.diff
-            .gemv(Eqn::T::one(), self.tableau.b(), Eqn::T::one(), y1);
+        let y1 = self
+            .nonlinear_solver
+            .problem()
+            .unwrap()
+            .f
+            .as_ref()
+            .get_last_f_eval();
+        self.old_y.copy_from(&y1);
+        std::mem::swap(&mut self.old_y, &mut state.y);
 
         // update statistics
         self.statistics.number_of_linear_solver_setups = self
@@ -789,42 +607,42 @@ where
         }
         let dt = state.t - self.old_t;
         let theta = if dt == Eqn::T::zero() {
-            Eqn::T::zero()
+            Eqn::T::one()
         } else {
             (t - self.old_t) / dt
         };
 
-        let f0 = &self.old_f;
-        let f1 = &self.f;
-        let u0 = &self.old_y;
-        let u1 = &state.y;
-        let ret_h = u0 * (Eqn::T::from(1.0) - theta)
-            + u1 * theta
-            + ((u1 - u0) * scale(Eqn::T::from(1.0) - Eqn::T::from(2.0) * theta)
-                + f0 * ((theta - Eqn::T::from(1.0)) * dt)
-                + f1 * (theta * dt))
-                * scale(theta * (theta - Eqn::T::from(1.0)));
+        if let Some(beta) = self.tableau.beta() {
+            let poly_order = beta.ncols();
+            let s_star = beta.nrows();
+            let mut thetav = Vec::with_capacity(poly_order);
+            thetav.push(theta);
+            for i in 1..poly_order {
+                thetav.push(theta * thetav[i - 1]);
+            }
+            // beta_poly = beta * thetav
+            let thetav = Eqn::V::from_vec(thetav);
+            let mut beta_f = <Eqn::V as Vector>::zeros(s_star);
+            beta.gemv(Eqn::T::one(), &thetav, Eqn::T::zero(), &mut beta_f);
 
-        let poly_order = self.tableau.beta().ncols();
-        let s_star = self.tableau.beta().nrows();
-        let mut thetav = Vec::with_capacity(poly_order);
-        thetav.push(theta);
-        for i in 1..poly_order {
-            thetav.push(theta * thetav[i - 1]);
+            // ret = old_y + sum_{i=0}^{s_star-1} beta[i] * diff[:, i]
+            let mut ret = self.old_y.clone();
+            self.diff
+                .gemv(Eqn::T::one(), &beta_f, Eqn::T::one(), &mut ret);
+            Ok(ret)
+        } else {
+            let hf0 = self.diff.column(0);
+            let hf1 = self.diff.column(self.diff.ncols() - 1);
+            let u0 = &self.old_y;
+            let u1 = &state.y;
+            let ret = u0 * (Eqn::T::from(1.0) - theta)
+                + u1 * theta
+                + ((u1 - u0) * scale(Eqn::T::from(1.0) - Eqn::T::from(2.0) * theta)
+                    + hf0 * scale(theta - Eqn::T::from(1.0))
+                    + hf1 * scale(theta))
+                    * scale(theta * (theta - Eqn::T::from(1.0)));
+            Ok(ret)
         }
-        // beta_poly = beta * thetav
-        let thetav = Eqn::V::from_vec(thetav);
-        let mut beta = <Eqn::V as Vector>::zeros(s_star);
-        self.tableau
-            .beta()
-            .gemv(Eqn::T::one(), &thetav, Eqn::T::zero(), &mut beta);
-
-        // ret = old_y + sum_{i=0}^{s_star-1} beta[i] * diff[:, i]
-        let mut ret = self.old_y.clone();
-        self.diff.gemv(dt, &beta, Eqn::T::one(), &mut ret);
-        println!("ret: {:?}", ret);
-        println!("ret_h: {:?}", ret_h);
-        Ok(ret)
     }
 
     fn state(&self) -> Option<&OdeSolverState<<Eqn>::M>> {
