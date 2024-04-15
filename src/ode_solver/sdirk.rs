@@ -18,6 +18,14 @@ use crate::{
 
 use super::bdf::BdfStatistics;
 
+/// A singly diagonally implicit Runge-Kutta method. Can optionally have an explicit first stage for ESDIRK methods.
+/// The particular method is defined by the [Tableau] used to create the solver.
+/// If the `beta` matrix of the [Tableau] is present this is used for interpolation, otherwise hermite interpolation is used.
+///
+/// Restrictions:
+/// - The last row of the `a` matrix must be the same as the `b` vector.
+/// - The last element of the `c` vector must be 1.
+/// - If an explicit first stage is used, then the first row of the `a` matrix must be zero.
 pub struct Sdirk<M, Eqn>
 where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
@@ -114,6 +122,15 @@ where
             Eqn::T::one(),
             "Invalid tableau, expected c(s-1) = 1"
         );
+
+        // check that the first c is 0 for esdirk methods
+        if !is_sdirk {
+            assert_eq!(
+                tableau.c()[0],
+                Eqn::T::zero(),
+                "Invalid tableau, expected c(0) = 0 for esdirk methods"
+            );
+        }
 
         let n = 1;
         let s = tableau.s();
