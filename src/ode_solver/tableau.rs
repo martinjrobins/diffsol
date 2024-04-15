@@ -1,6 +1,26 @@
 use crate::{DenseMatrix, Vector};
 use num_traits::{One, Zero};
 
+/// A butcher tableau for a Runge-Kutta method.
+///
+/// The tableau is defined by the matrices `a`, `b`, `c` and `d` and the order of the method.
+/// The butchers tableau is often depicted like this example of a 3-stage method:
+///
+/// ```text
+/// c1 | a11 0   0
+/// c2 | a21 a22 0
+/// c3 | a31 a32 a33
+/// -------------------
+///   | b1  b2  b3  
+///   | be1 be2 be3
+/// -------------------
+///   | d1  d2  d3
+/// ```
+///
+/// where `be` is the embedded method for error control and `d` is the difference between the main and embedded method.
+///
+/// For continous extension methods, the beta matrix is also included.
+///
 pub struct Tableau<M: DenseMatrix> {
     a: M,
     b: M::V,
@@ -56,6 +76,7 @@ impl<M: DenseMatrix> Tableau<M> {
         Self::new(a, b, c, d, order, Some(beta))
     }
 
+    /// A third order ESDIRK method
     /// from Jørgensen, J. B., Kristensen, M. R., & Thomsen, P. G. (2018). A family of ESDIRK integration methods. arXiv preprint arXiv:1803.01613.
     pub fn esdirk34() -> Self {
         let mut a = M::zeros(4, 4);
