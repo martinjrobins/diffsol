@@ -36,7 +36,7 @@ impl<T: Scalar, C: LinearOp<M = Mat<T>, V = Col<T>, T = T>> LinearSolver<C> for 
         Option::take(&mut self.problem)
     }
 
-    fn solve_in_place(&mut self, state: &mut C::V) -> Result<()> {
+    fn solve_in_place(&self, state: &mut C::V) -> Result<()> {
         if self.lu.is_none() {
             return Err(anyhow::anyhow!("LU not initialized"));
         }

@@ -7,7 +7,7 @@ use num_traits::{One, Pow, Zero};
 use serde::Serialize;
 
 use crate::{
-    matrix::MatrixRef, op::ode::BdfCallable, scalar::scale, DenseMatrix, IndexType, MatrixViewMut,
+    matrix::MatrixRef, op::bdf::BdfCallable, scalar::scale, DenseMatrix, IndexType, MatrixViewMut,
     NonLinearSolver, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Scalar, SolverProblem,
     Vector, VectorRef, VectorView, VectorViewMut,
 };

@@ -135,8 +135,6 @@ pub mod scalar;
 pub mod solver;
 pub mod vector;
 
-pub use linear_solver::lu::LU;
-pub use linear_solver::svd::SVD;
 use linear_solver::LinearSolver;
 pub use linear_solver::NalgebraLU;
 
@@ -252,7 +250,7 @@ mod tests {
         }
         let y2 = solver.interpolate(t).unwrap();
 
-        y2.assert_eq(&y, 1e-6);
+        y2.assert_eq_st(&y, 1e-6);
     }
 
     // y2.assert_eq(&y, 1e-6);

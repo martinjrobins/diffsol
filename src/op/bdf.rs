@@ -1,6 +1,6 @@
 use crate::{
-    matrix::MatrixRef, ode_solver::equations::OdeEquations, Matrix, OdeSolverProblem, Vector,
-    VectorRef,
+    matrix::MatrixRef, ode_solver::equations::OdeEquations, scale, Matrix, OdeSolverProblem,
+    Vector, VectorRef,
 };
 use num_traits::{One, Zero};
 use std::{

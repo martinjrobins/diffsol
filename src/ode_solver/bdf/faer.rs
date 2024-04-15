@@ -1,7 +1,7 @@
 use faer::{Col, Mat};
 
 use crate::{
-    linear_solver::FaerLU, op::ode::BdfCallable, Bdf, NewtonNonlinearSolver, NonLinearSolver,
+    linear_solver::FaerLU, op::bdf::BdfCallable, Bdf, NewtonNonlinearSolver, NonLinearSolver,
     OdeEquations, Scalar, VectorRef,
 };
 

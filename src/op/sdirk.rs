@@ -1,7 +1,7 @@
 use crate::{
     matrix::{MatrixRef, MatrixView},
     ode_solver::equations::OdeEquations,
-    Matrix, OdeSolverProblem, Vector, VectorRef,
+    scale, Matrix, OdeSolverProblem, Vector, VectorRef,
 };
 use num_traits::{One, Zero};
 use std::{
@@ -77,7 +77,7 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
             let mass_jac = mass_jac_ref.deref();
             let h = *self.h.borrow().deref();
             let ch = self.c * h;
-            self.jac.replace(mass_jac - rhs_jac * ch);
+            self.jac.replace(mass_jac - rhs_jac * scale(ch));
         } else {
             self.jacobian_is_stale.replace(true);
         }
@@ -188,7 +188,7 @@ where
             let mass_jac = mass_jac_ref.deref();
             let h = *self.h.borrow().deref();
             let c = self.c;
-            self.jac.replace(mass_jac - rhs_jac * (c * h));
+            self.jac.replace(mass_jac - rhs_jac * scale(c * h));
             self.jacobian_is_stale.replace(false);
         }
         let number_of_jac_evals = *self.number_of_jac_evals.borrow() + 1;

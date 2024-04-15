@@ -8,8 +8,6 @@ pub mod nalgebra;
 #[cfg(feature = "faer")]
 pub mod faer;
 
-pub mod svd;
-
 #[cfg(feature = "sundials")]
 pub mod sundials;
 

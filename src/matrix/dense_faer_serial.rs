@@ -51,6 +51,19 @@ impl<'a, T: Scalar> MulAssign<Scale<T>> for MatMut<'a, T> {
 
 impl<'a, T: Scalar> MatrixView<'a> for MatRef<'a, T> {
     type Owned = Mat<T>;
+
+    fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
+        *y = faer::scale(alpha) * self * x + faer::scale(beta) * &*y;
+    }
+    fn gemv_v(
+        &self,
+        alpha: Self::T,
+        x: &<Self::V as crate::vector::Vector>::View<'_>,
+        beta: Self::T,
+        y: &mut Self::V,
+    ) {
+        *y = faer::scale(alpha) * self * x + faer::scale(beta) * &*y;
+    }
 }
 
 impl<'a, T: Scalar> MatrixViewMut<'a> for MatMut<'a, T> {
@@ -93,9 +106,6 @@ impl<T: Scalar> DenseMatrix for Mat<T> {
             Parallelism::None,
         )
     }
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        *y = faer::scale(alpha) * self * x + faer::scale(beta) * &*y;
-    }
     fn column_mut(&mut self, i: usize) -> ColMut<'_, T> {
         self.get_mut(0..self.nrows(), i)
     }
@@ -123,6 +133,9 @@ impl<T: Scalar> Matrix for Mat<T> {
             m[(i, j)] = v;
         }
         Ok(m)
+    }
+    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
+        *y = faer::scale(alpha) * self * x + faer::scale(beta) * &*y;
     }
     fn zeros(nrows: IndexType, ncols: IndexType) -> Self {
         Self::zeros(nrows, ncols)

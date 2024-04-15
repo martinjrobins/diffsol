@@ -30,7 +30,6 @@ mod tests {
     use crate::op::ode_rhs::OdeRhs;
     use crate::op::Op;
     use crate::scalar::scale;
-    use crate::LU;
     use crate::{NonLinearSolver, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState};
     use crate::{Sdirk, Tableau, Vector};
     use num_traits::One;

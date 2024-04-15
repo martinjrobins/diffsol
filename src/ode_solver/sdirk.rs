@@ -187,7 +187,7 @@ where
         // Solving Ordinary Differential Equations I, Nonstiff Problems
         // Section II.4.2
         let f0 = problem.eqn.rhs(state.t, &state.y);
-        let hf0 = &f0 * state.h;
+        let hf0 = &f0 * scale(state.h);
 
         let mut tmp = f0.clone();
         tmp.component_div_assign(&scale_factor);
@@ -480,8 +480,8 @@ where
             let hf1 = self.diff.column(self.diff.ncols() - 1);
             let u0 = &self.old_y;
             let u1 = &state.y;
-            let ret = u0 * (Eqn::T::from(1.0) - theta)
-                + u1 * theta
+            let ret = u0 * scale(Eqn::T::from(1.0) - theta)
+                + u1 * scale(theta)
                 + ((u1 - u0) * scale(Eqn::T::from(1.0) - Eqn::T::from(2.0) * theta)
                     + hf0 * scale(theta - Eqn::T::from(1.0))
                     + hf1 * scale(theta))
@@ -495,6 +495,6 @@ where
     }
 
     fn take_state(&mut self) -> Option<OdeSolverState<<Eqn>::M>> {
-        self.state.take()
+        Option::take(&mut self.state)
     }
 }

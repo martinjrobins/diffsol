@@ -57,33 +57,6 @@ impl<'a, T: Scalar> MulAssign<Scale<T>> for DMatrixViewMut<'a, T> {
 
 impl<'a, T: Scalar> MatrixView<'a> for DMatrixView<'a, T> {
     type Owned = DMatrix<T>;
-}
-
-impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
-    type Owned = DMatrix<T>;
-    type View = DMatrixView<'a, T>;
-    fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T) {
-        self.gemm(alpha, a, b, beta);
-    }
-    fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T) {
-        self.gemm(alpha, a, b, beta);
-    }
-}
-
-impl<'a, T: Scalar> MatrixCommon for DMatrixView<'a, T> {
-    type V = DVector<T>;
-    type T = T;
-
-    fn ncols(&self) -> IndexType {
-        self.ncols()
-    }
-    fn nrows(&self) -> IndexType {
-        self.nrows()
-    }
-}
-
-impl<'a, T: Scalar> MatrixView<'a> for DMatrixView<'a, T> {
-    type Owned = DMatrix<T>;
 
     fn gemv_v(
         &self,
@@ -100,15 +73,14 @@ impl<'a, T: Scalar> MatrixView<'a> for DMatrixView<'a, T> {
     }
 }
 
-impl<T: Scalar> MatrixCommon for DMatrix<T> {
-    type V = DVector<T>;
-    type T = T;
-
-    fn ncols(&self) -> IndexType {
-        self.ncols()
+impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
+    type Owned = DMatrix<T>;
+    type View = DMatrixView<'a, T>;
+    fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T) {
+        self.gemm(alpha, a, b, beta);
     }
-    fn nrows(&self) -> IndexType {
-        self.nrows()
+    fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T) {
+        self.gemm(alpha, a, b, beta);
     }
 }
 
@@ -163,31 +135,5 @@ impl<T: Scalar> DenseMatrix for DMatrix<T> {
     }
     fn columns(&self, start: IndexType, ncols: IndexType) -> Self::View<'_> {
         self.columns(start, ncols)
-    }
-}
-
-impl<T: Scalar> Matrix for DMatrix<T> {
-    fn try_from_triplets(
-        nrows: IndexType,
-        ncols: IndexType,
-        triplets: Vec<(IndexType, IndexType, T)>,
-    ) -> Result<Self> {
-        let mut m = Self::zeros(nrows, ncols);
-        for (i, j, v) in triplets {
-            m[(i, j)] = v;
-        }
-        Ok(m)
-    }
-    fn zeros(nrows: IndexType, ncols: IndexType) -> Self {
-        Self::zeros(nrows, ncols)
-    }
-    fn copy_from(&mut self, other: &Self) {
-        self.copy_from(other);
-    }
-    fn from_diagonal(v: &DVector<T>) -> Self {
-        Self::from_diagonal(v)
-    }
-    fn diagonal(&self) -> Self::V {
-        self.diagonal()
     }
 }
