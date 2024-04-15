@@ -157,7 +157,7 @@ pub use nonlinear_solver::newton::NewtonNonlinearSolver;
 use nonlinear_solver::NonLinearSolver;
 pub use ode_solver::{
     bdf::Bdf, builder::OdeBuilder, equations::OdeEquations, method::OdeSolverMethod,
-    method::OdeSolverState, problem::OdeSolverProblem, sdirk::Sdirk, sdirk::Tableau,
+    method::OdeSolverState, problem::OdeSolverProblem, sdirk::Sdirk, tableau::Tableau,
 };
 use op::NonLinearOp;
 use scalar::{IndexType, Scalar, Scale};
