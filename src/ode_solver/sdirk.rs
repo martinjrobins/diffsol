@@ -23,9 +23,9 @@ use super::bdf::BdfStatistics;
 /// If the `beta` matrix of the [Tableau] is present this is used for interpolation, otherwise hermite interpolation is used.
 ///
 /// Restrictions:
-/// - The last row of the `a` matrix must be the same as the `b` vector.
-/// - The last element of the `c` vector must be 1.
-/// - If an explicit first stage is used, then the first row of the `a` matrix must be zero.
+/// - The upper triangular part of the `a` matrix must be zero (i.e. not fully implicit).
+/// - The diagonal of the `a` matrix must be the same non-zero value for all rows (i.e. an SDIRK method), except for the first row which can be zero for ESDIRK methods.
+/// - The last row of the `a` matrix must be the same as the `b` vector, and the last element of the `c` vector must be 1 (i.e. a stiffly accurate method)
 pub struct Sdirk<M, Eqn>
 where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
