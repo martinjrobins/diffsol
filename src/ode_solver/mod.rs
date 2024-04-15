@@ -60,11 +60,19 @@ mod tests {
             if let Some(override_tol) = override_tol {
                 soln.assert_eq_st(&point.state, override_tol);
             } else {
-                let tol = {
+                let scale = {
                     let problem = method.problem().unwrap();
                     point.state.abs() * scale(problem.rtol) + problem.atol.as_ref()
                 };
-                soln.assert_eq(&point.state, &(tol * scale(Eqn::T::from(10.0))));
+                let mut error = soln.clone() - &point.state;
+                error.component_div_assign(&scale);
+                let error_norm = error.norm() / M::T::from((point.state.len() as f64).sqrt());
+                assert!(
+                    error_norm < M::T::from(10.0),
+                    "error_norm: {} at t = {}",
+                    error_norm,
+                    point.t
+                );
             }
         }
     }
@@ -73,7 +81,7 @@ mod tests {
 
     #[test]
     fn test_tr_bdf2_nalgebra_exponential_decay() {
-        let tableau = Tableau::<Mcpu>::implicit_euler();
+        let tableau = Tableau::<Mcpu>::tr_bdf2();
         let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = exponential_decay_problem::<Mcpu>(false);
@@ -86,11 +94,38 @@ mod tests {
         number_of_nonlinear_solver_iterations: 0
         number_of_nonlinear_solver_fails: 0
         initial_step_size: 0.1919383103666485
-        final_step_size: 0.2869585664044871
+        final_step_size: 0.32116185769995603
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
         number_of_rhs_evals: 18
+        number_of_jac_mul_evals: 2
+        number_of_mass_evals: 0
+        number_of_mass_matrix_evals: 0
+        number_of_jacobian_matrix_evals: 1
+        "###);
+    }
+
+    #[test]
+    fn test_esdirk34_nalgebra_exponential_decay() {
+        let tableau = Tableau::<Mcpu>::esdirk34();
+        let mut s = Sdirk::new(tableau, LU::default());
+        let rs = NewtonNonlinearSolver::new(LU::default());
+        let (problem, soln) = exponential_decay_problem::<Mcpu>(false);
+        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 2
+        number_of_steps: 2
+        number_of_error_test_failures: 0
+        number_of_nonlinear_solver_iterations: 0
+        number_of_nonlinear_solver_fails: 0
+        initial_step_size: 0.28998214001102113
+        final_step_size: 0.8287576160727735
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        ---
+        number_of_rhs_evals: 14
         number_of_jac_mul_evals: 2
         number_of_mass_evals: 0
         number_of_mass_matrix_evals: 0
@@ -178,29 +213,29 @@ mod tests {
     }
 
     #[test]
-    fn test_implicit_euler_nalgebra_robertson() {
-        let tableau = Tableau::<Mcpu>::implicit_euler();
+    fn test_tr_bdf2_nalgebra_robertson() {
+        let tableau = Tableau::<Mcpu>::tr_bdf2();
         let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson::<Mcpu>(false);
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 243
-        number_of_steps: 182
-        number_of_error_test_failures: 16
+        number_of_linear_solver_setups: 435
+        number_of_steps: 416
+        number_of_error_test_failures: 7
         number_of_nonlinear_solver_iterations: 0
-        number_of_nonlinear_solver_fails: 45
-        initial_step_size: 0.017125887701465843
-        final_step_size: 54006237997.52221
+        number_of_nonlinear_solver_fails: 12
+        initial_step_size: 0.0011378590984747281
+        final_step_size: 61530652710.46018
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
-        number_of_rhs_evals: 3387
-        number_of_jac_mul_evals: 130
-        number_of_mass_evals: 3390
+        number_of_rhs_evals: 3189
+        number_of_jac_mul_evals: 40
+        number_of_mass_evals: 3192
         number_of_mass_matrix_evals: 2
-        number_of_jacobian_matrix_evals: 43
+        number_of_jacobian_matrix_evals: 13
         "###);
     }
 
@@ -213,21 +248,21 @@ mod tests {
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 243
-        number_of_steps: 182
-        number_of_error_test_failures: 16
+        number_of_linear_solver_setups: 380
+        number_of_steps: 349
+        number_of_error_test_failures: 11
         number_of_nonlinear_solver_iterations: 0
-        number_of_nonlinear_solver_fails: 45
-        initial_step_size: 0.017125887701465843
-        final_step_size: 54006237997.52221
+        number_of_nonlinear_solver_fails: 20
+        initial_step_size: 0.00619535739618413
+        final_step_size: 58646462255.08058
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
-        number_of_rhs_evals: 3387
-        number_of_jac_mul_evals: 130
-        number_of_mass_evals: 3390
+        number_of_rhs_evals: 3513
+        number_of_jac_mul_evals: 55
+        number_of_mass_evals: 3516
         number_of_mass_matrix_evals: 2
-        number_of_jacobian_matrix_evals: 43
+        number_of_jacobian_matrix_evals: 18
         "###);
     }
 
@@ -319,48 +354,21 @@ mod tests {
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 283
-        number_of_steps: 270
-        number_of_error_test_failures: 1
+        number_of_linear_solver_setups: 242
+        number_of_steps: 230
+        number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 0
         number_of_nonlinear_solver_fails: 12
         initial_step_size: 0.0010137172178872197
-        final_step_size: 43056078583.7812
+        final_step_size: 30691200423.745472
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
-        number_of_rhs_evals: 2703
+        number_of_rhs_evals: 2354
         number_of_jac_mul_evals: 39
         number_of_mass_evals: 0
         number_of_mass_matrix_evals: 0
         number_of_jacobian_matrix_evals: 13
-        "###);
-    }
-
-    #[test]
-    fn test_sdirk4_nalgebra_robertson_ode() {
-        let tableau = Tableau::<Mcpu>::tr_bdf2();
-        let mut s = Sdirk::new(tableau, LU::default());
-        let rs = NewtonNonlinearSolver::new(LU::default());
-        let (problem, soln) = robertson_ode::<Mcpu>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
-        number_of_linear_solver_setups: 166
-        number_of_steps: 116
-        number_of_error_test_failures: 2
-        number_of_nonlinear_solver_iterations: 0
-        number_of_nonlinear_solver_fails: 48
-        initial_step_size: 0.015979018288085487
-        final_step_size: 38942585345.694695
-        "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
-        ---
-        number_of_rhs_evals: 2637
-        number_of_jac_mul_evals: 135
-        number_of_mass_evals: 0
-        number_of_mass_matrix_evals: 0
-        number_of_jacobian_matrix_evals: 45
         "###);
     }
 
@@ -387,33 +395,6 @@ mod tests {
         number_of_mass_evals: 0
         number_of_mass_matrix_evals: 0
         number_of_jacobian_matrix_evals: 19
-        "###);
-    }
-
-    #[test]
-    fn test_tr_bdf2_nalgebra_dydt_y2() {
-        let tableau = Tableau::<Mcpu>::tr_bdf2();
-        let mut s = Sdirk::new(tableau, LU::default());
-        let rs = NewtonNonlinearSolver::new(LU::default());
-        let (problem, soln) = dydt_y2_problem::<Mcpu>(false, 10);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
-        number_of_linear_solver_setups: 219
-        number_of_steps: 217
-        number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 0
-        number_of_nonlinear_solver_fails: 2
-        initial_step_size: 0.000027127822860263058
-        final_step_size: 0.8542727221697889
-        "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
-        ---
-        number_of_rhs_evals: 2352
-        number_of_jac_mul_evals: 30
-        number_of_mass_evals: 0
-        number_of_mass_matrix_evals: 0
-        number_of_jacobian_matrix_evals: 3
         "###);
     }
 

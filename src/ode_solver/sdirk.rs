@@ -27,21 +27,6 @@ pub struct Tableau<M: DenseMatrix> {
 }
 
 impl<M: DenseMatrix> Tableau<M> {
-    /// from Jørgensen, J. B., Kristensen, M. R., & Thomsen, P. G. (2018). A family of ESDIRK integration methods. arXiv preprint arXiv:1803.01613.
-    pub fn implicit_euler() -> Self {
-        let mut a = M::zeros(2, 2);
-        a[(1, 1)] = M::T::from(1.0);
-
-        let b = M::V::from_vec(vec![M::T::zero(), M::T::one()]);
-        let c = M::V::from_vec(vec![M::T::zero(), M::T::one()]);
-        let d = M::V::from_vec(vec![M::T::from(-0.5), M::T::from(0.5)]);
-
-        let mut beta = M::zeros(2, 1);
-        beta[(0, 0)] = M::T::zero();
-        beta[(1, 0)] = M::T::one();
-
-        Self::new(a, b, c, d, 1, Some(beta))
-    }
     /// TR-BDF2 method
     /// from R.E. Bank, W.M. Coughran Jr, W. Fichtner, E.H. Grosse, D.J. Rose and R.K. Smith, Transient simulation of silicon devices and circuits, IEEE Trans. Comput.-Aided Design 4 (1985) 436-451.
     /// analysed in M.E. Hosea and L.F. Shampine. Analysis and implementation of TR-BDF2. Applied Numerical Mathematics, 20:21–37, 1996.
@@ -78,7 +63,7 @@ impl<M: DenseMatrix> Tableau<M> {
         beta[(1, 0)] = M::T::from(2.0) * w;
         beta[(1, 1)] = -w;
         beta[(2, 0)] = gamma - M::T::from(1.0);
-        beta[(2, 1)] = w;
+        beta[(2, 1)] = M::T::from(2.0) * w;
 
         let c = M::V::from_vec(vec![M::T::zero(), gamma, M::T::one()]);
 
@@ -90,8 +75,8 @@ impl<M: DenseMatrix> Tableau<M> {
     /// from Jørgensen, J. B., Kristensen, M. R., & Thomsen, P. G. (2018). A family of ESDIRK integration methods. arXiv preprint arXiv:1803.01613.
     pub fn esdirk34() -> Self {
         let mut a = M::zeros(4, 4);
-        let gamma = M::T::from(0.367_891_756_475_028_25);
-        a[(1, 0)] = M::T::from(0.435_866_521_508_459);
+        let gamma = M::T::from(0.435_866_521_508_459);
+        a[(1, 0)] = gamma;
         a[(1, 1)] = gamma;
 
         a[(2, 0)] = M::T::from(0.140_737_774_724_706_2);
