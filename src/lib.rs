@@ -12,8 +12,9 @@
 //! [Matrix] trait. You can also use the [sundials](https://computation.llnl.gov/projects/sundials) library for the matrix and vector types (see [SundialsMatrix]).
 //!
 //! To solve the problem, you need to choose a solver. DiffSol provides the following solvers:
-//! - A pure rust Backwards Difference Formulae [Bdf] solver, suitable for stiff problems and singular mass matrices.
-//! - The IDA solver solver from the sundials library ([SundialsIda], requires the `sundials` feature).
+//! - A Backwards Difference Formulae [Bdf] solver, suitable for stiff problems and singular mass matrices.
+//! - A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver [Sdirk]. You can use your own butcher tableau using [Tableau] or use one of the provided ([Tableau::tr_bdf2], [Tableau::esdirk23]).
+//! - A BDF solver that wraps the IDA solver solver from the sundials library ([SundialsIda], requires the `sundials` feature).
 //!
 //! See the [OdeSolverMethod] trait for a more detailed description of the available methods on each solver.
 //!

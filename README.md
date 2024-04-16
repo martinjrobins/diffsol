@@ -17,11 +17,14 @@ implementing the various vector and matrix traits in diffsol.
 
 ## Features
 
-DiffSol has two implementations of the Backward Differentiation Formula
-(BDF) method, one in pure rust, the other wrapping the [Sundials](https://github.com/LLNL/sundials) IDA solver.
-This method is a variable step-size implicit method that is suitable for
-stiff ODEs and semi-explicit DAEs and is similar to the BDF method in MATLAB's
-`ode15s` solver or the `bdf` solver in SciPy's `solve_ivp` function.
+DiffSol implements the following solvers:
+- A variable order Backwards Difference Formulae (BDF) solver, suitable for stiff problems and singular mass matrices.
+- A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver, suitable for moderately stiff problems and singular mass matrices. You can use your own butcher tableau or use one of the provided (`tr_bdf2` or `esdirk23`).
+- A BDF solver that wraps the IDA solver solver from the [Sundials library](https://github.com/LLNL/sundials) (requires the `sundials` feature). This is similar to the BDF solver above and is include for comparison purposes.
+
+All solvers feature adaptive step-size control to given tolerances, and dense output. 
+For comparison, the BDF solvers are similar to MATLAB's `ode15s` solver or the `bdf` solver in SciPy's `solve_ivp` function. 
+The ESDIRK solver using the provided `tr_bdf2` tableau is similar to MATLAB's `ode23t` solver.
 
 Users can specify the equations to solve in the following ODE form:
 
