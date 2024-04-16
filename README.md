@@ -19,7 +19,7 @@ implementing the various vector and matrix traits in diffsol.
 
 DiffSol implements the following solvers:
 - A variable order Backwards Difference Formulae (BDF) solver, suitable for stiff problems and singular mass matrices.
-- A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver, suitable for moderately stiff problems and singular mass matrices. You can use your own butcher tableau or use one of the provided (`tr_bdf2` or `esdirk23`).
+- A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver, suitable for moderately stiff problems and singular mass matrices. You can use your own butcher tableau or use one of the provided (`tr_bdf2` or `esdirk34`).
 - A BDF solver that wraps the IDA solver solver from the [Sundials library](https://github.com/LLNL/sundials) (requires the `sundials` feature). This is similar to the BDF solver above and is include for comparison purposes.
 
 All solvers feature adaptive step-size control to given tolerances, and dense output. 

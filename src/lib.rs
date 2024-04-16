@@ -13,7 +13,7 @@
 //!
 //! To solve the problem, you need to choose a solver. DiffSol provides the following solvers:
 //! - A Backwards Difference Formulae [Bdf] solver, suitable for stiff problems and singular mass matrices.
-//! - A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver [Sdirk]. You can use your own butcher tableau using [Tableau] or use one of the provided ([Tableau::tr_bdf2], [Tableau::esdirk23]).
+//! - A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver [Sdirk]. You can use your own butcher tableau using [Tableau] or use one of the provided ([Tableau::tr_bdf2], [Tableau::esdirk34]).
 //! - A BDF solver that wraps the IDA solver solver from the sundials library ([SundialsIda], requires the `sundials` feature).
 //!
 //! See the [OdeSolverMethod] trait for a more detailed description of the available methods on each solver.
