@@ -57,6 +57,20 @@ impl<'a, T: Scalar> MulAssign<Scale<T>> for DMatrixViewMut<'a, T> {
 
 impl<'a, T: Scalar> MatrixView<'a> for DMatrixView<'a, T> {
     type Owned = DMatrix<T>;
+
+    fn gemv_v(
+        &self,
+        alpha: Self::T,
+        x: &<Self::V as crate::vector::Vector>::View<'_>,
+        beta: Self::T,
+        y: &mut Self::V,
+    ) {
+        y.gemv(alpha, self, x, beta);
+    }
+
+    fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
+        y.gemv(alpha, self, x, beta);
+    }
 }
 
 impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
@@ -67,33 +81,6 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
     }
     fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T) {
         self.gemm(alpha, a, b, beta);
-    }
-}
-
-impl<T: Scalar> DenseMatrix for DMatrix<T> {
-    type View<'a> = DMatrixView<'a, T>;
-    type ViewMut<'a> = DMatrixViewMut<'a, T>;
-
-    fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T) {
-        self.gemm(alpha, a, b, beta);
-    }
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        y.gemv(alpha, self, x, beta);
-    }
-
-    fn column_mut(&mut self, i: IndexType) -> DVectorViewMut<'_, T> {
-        self.column_mut(i)
-    }
-
-    fn columns_mut(&mut self, start: IndexType, ncols: IndexType) -> Self::ViewMut<'_> {
-        self.columns_mut(start, ncols)
-    }
-
-    fn column(&self, i: IndexType) -> DVectorView<'_, T> {
-        self.column(i)
-    }
-    fn columns(&self, start: IndexType, ncols: IndexType) -> Self::View<'_> {
-        self.columns(start, ncols)
     }
 }
 
@@ -112,13 +99,41 @@ impl<T: Scalar> Matrix for DMatrix<T> {
     fn zeros(nrows: IndexType, ncols: IndexType) -> Self {
         Self::zeros(nrows, ncols)
     }
-    fn copy_from(&mut self, other: &Self) {
-        self.copy_from(other);
-    }
     fn from_diagonal(v: &DVector<T>) -> Self {
         Self::from_diagonal(v)
     }
     fn diagonal(&self) -> Self::V {
         self.diagonal()
+    }
+
+    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
+        y.gemv(alpha, self, x, beta);
+    }
+    fn copy_from(&mut self, other: &Self) {
+        self.copy_from(other);
+    }
+}
+
+impl<T: Scalar> DenseMatrix for DMatrix<T> {
+    type View<'a> = DMatrixView<'a, T>;
+    type ViewMut<'a> = DMatrixViewMut<'a, T>;
+
+    fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T) {
+        self.gemm(alpha, a, b, beta);
+    }
+
+    fn column_mut(&mut self, i: IndexType) -> DVectorViewMut<'_, T> {
+        self.column_mut(i)
+    }
+
+    fn columns_mut(&mut self, start: IndexType, ncols: IndexType) -> Self::ViewMut<'_> {
+        self.columns_mut(start, ncols)
+    }
+
+    fn column(&self, i: IndexType) -> DVectorView<'_, T> {
+        self.column(i)
+    }
+    fn columns(&self, start: IndexType, ncols: IndexType) -> Self::View<'_> {
+        self.columns(start, ncols)
     }
 }

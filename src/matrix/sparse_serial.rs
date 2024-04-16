@@ -45,6 +45,12 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
     fn copy_from(&mut self, other: &Self) {
         self.clone_from(other);
     }
+    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
+        let mut tmp = self * x;
+        tmp *= alpha;
+        y.axpy(alpha, &tmp, beta);
+    }
+
     fn from_diagonal(v: &DVector<T>) -> Self {
         let nrows = v.len();
         let ncols = v.len();

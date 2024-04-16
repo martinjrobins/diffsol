@@ -38,7 +38,7 @@ impl<T: Scalar, C: LinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> LinearSolver
         Option::take(&mut self.problem)
     }
 
-    fn solve_in_place(&mut self, state: &mut C::V) -> Result<()> {
+    fn solve_in_place(&self, state: &mut C::V) -> Result<()> {
         if self.lu.is_none() {
             return Err(anyhow::anyhow!("LU not initialized"));
         }

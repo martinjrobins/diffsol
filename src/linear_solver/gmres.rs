@@ -43,7 +43,7 @@ where
         todo!()
     }
 
-    fn solve_in_place(&mut self, _state: &mut C::V) -> Result<()> {
+    fn solve_in_place(&self, _state: &mut C::V) -> Result<()> {
         todo!()
     }
 

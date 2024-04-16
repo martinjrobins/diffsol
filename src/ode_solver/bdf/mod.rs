@@ -7,7 +7,7 @@ use num_traits::{One, Pow, Zero};
 use serde::Serialize;
 
 use crate::{
-    matrix::MatrixRef, op::ode::BdfCallable, scalar::scale, DenseMatrix, IndexType, MatrixViewMut,
+    matrix::MatrixRef, op::bdf::BdfCallable, scalar::scale, DenseMatrix, IndexType, MatrixViewMut,
     NonLinearSolver, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Scalar, SolverProblem,
     Vector, VectorRef, VectorView, VectorViewMut,
 };
@@ -164,11 +164,9 @@ where
         }
         std::mem::swap(&mut self.diff, &mut self.diff_tmp);
 
-        self.nonlinear_problem_op().unwrap().set_c(
-            self.state.as_ref().unwrap().h,
-            &self.alpha,
-            self.order,
-        );
+        self.nonlinear_problem_op()
+            .unwrap()
+            .set_c(self.state.as_ref().unwrap().h, self.alpha[self.order]);
 
         // reset nonlinear's linear solver problem as lu factorisation has changed
         self.nonlinear_solver.as_mut().reset();
@@ -210,8 +208,15 @@ where
 
         // update psi and c (h, D, y0 has changed)
         {
+            // update psi term as defined in second equation on page 9 of [1]
+            let mut new_psi = self.diff.column(1) * scale(self.gamma[1]);
+            for (i, &gamma_i) in self.gamma.iter().enumerate().take(self.order + 1).skip(2) {
+                new_psi += self.diff.column(i) * scale(gamma_i)
+            }
+            new_psi *= scale(self.alpha[self.order]);
+
             let callable = self.nonlinear_problem_op().unwrap();
-            callable.set_psi_and_y0(&self.diff, &self.gamma, &self.alpha, self.order, &y_predict);
+            callable.set_psi_and_y0(new_psi, &y_predict);
         }
 
         // update time

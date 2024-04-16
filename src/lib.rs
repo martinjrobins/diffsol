@@ -12,8 +12,9 @@
 //! [Matrix] trait. You can also use the [sundials](https://computation.llnl.gov/projects/sundials) library for the matrix and vector types (see [SundialsMatrix]).
 //!
 //! To solve the problem, you need to choose a solver. DiffSol provides the following solvers:
-//! - A pure rust Backwards Difference Formulae [Bdf] solver, suitable for stiff problems and singular mass matrices.
-//! - The IDA solver solver from the sundials library ([SundialsIda], requires the `sundials` feature).
+//! - A Backwards Difference Formulae [Bdf] solver, suitable for stiff problems and singular mass matrices.
+//! - A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver [Sdirk]. You can use your own butcher tableau using [Tableau] or use one of the provided ([Tableau::tr_bdf2], [Tableau::esdirk34]).
+//! - A BDF solver that wraps the IDA solver solver from the sundials library ([SundialsIda], requires the `sundials` feature).
 //!
 //! See the [OdeSolverMethod] trait for a more detailed description of the available methods on each solver.
 //!
@@ -135,7 +136,8 @@ pub mod scalar;
 pub mod solver;
 pub mod vector;
 
-pub use linear_solver::{LinearSolver, NalgebraLU};
+use linear_solver::LinearSolver;
+pub use linear_solver::NalgebraLU;
 
 #[cfg(feature = "sundials")]
 pub use matrix::sundials::SundialsMatrix;
@@ -154,7 +156,7 @@ pub use nonlinear_solver::newton::NewtonNonlinearSolver;
 use nonlinear_solver::NonLinearSolver;
 pub use ode_solver::{
     bdf::Bdf, builder::OdeBuilder, equations::OdeEquations, method::OdeSolverMethod,
-    method::OdeSolverState, problem::OdeSolverProblem,
+    method::OdeSolverState, problem::OdeSolverProblem, sdirk::Sdirk, tableau::Tableau,
 };
 use op::NonLinearOp;
 use scalar::{IndexType, Scalar, Scale};
@@ -209,7 +211,7 @@ mod tests {
         }
         let y2 = solver.interpolate(t).unwrap();
 
-        y2.assert_eq(&y, 1e-6);
+        y2.assert_eq_st(&y, 1e-6);
     }
     #[test]
     fn test_readme_faer() {
@@ -249,7 +251,7 @@ mod tests {
         }
         let y2 = solver.interpolate(t).unwrap();
 
-        y2.assert_eq(&y, 1e-6);
+        y2.assert_eq_st(&y, 1e-6);
     }
 
     // y2.assert_eq(&y, 1e-6);

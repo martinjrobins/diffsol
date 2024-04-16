@@ -90,7 +90,7 @@ impl<C: Op> Convergence<C> {
         let atol = problem.atol.clone();
         let minimum_tol = C::T::from(10.0) * C::T::EPSILON / rtol;
         let maximum_tol = C::T::from(0.03);
-        let mut tol = rtol.pow(C::T::from(0.5));
+        let mut tol = C::T::from(0.5) * rtol.pow(C::T::from(0.5));
         if tol > maximum_tol {
             tol = maximum_tol;
         }
@@ -126,6 +126,10 @@ impl<C: Op> Convergence<C> {
         }
         if let Some(old_norm) = self.old_norm {
             let rate = norm / old_norm;
+
+            if rate > C::T::from(1.0) {
+                return ConvergenceStatus::Diverged;
+            }
 
             // if converged then break out of iteration successfully
             if rate / (C::T::one() - rate) * norm < self.tol {
@@ -219,7 +223,7 @@ pub mod tests {
                 let problem = solver.problem().unwrap();
                 soln.x.abs() * scale(problem.rtol) + problem.atol.as_ref()
             };
-            x.assert_eq(&soln.x, tol[0]);
+            x.assert_eq(&soln.x, &tol);
         }
     }
 

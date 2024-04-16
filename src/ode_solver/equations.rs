@@ -473,10 +473,10 @@ mod tests {
         let y = DVector::from_vec(vec![1.0, 1.0]);
         let rhs_y = problem.eqn.rhs(0.0, &y);
         let expect_rhs_y = DVector::from_vec(vec![-0.1, -0.1]);
-        rhs_y.assert_eq(&expect_rhs_y, 1e-10);
+        rhs_y.assert_eq_st(&expect_rhs_y, 1e-10);
         let jac_rhs_y = problem.eqn.jac_mul(0.0, &y, &y);
         let expect_jac_rhs_y = Vcpu::from_vec(vec![-0.1, -0.1]);
-        jac_rhs_y.assert_eq(&expect_jac_rhs_y, 1e-10);
+        jac_rhs_y.assert_eq_st(&expect_jac_rhs_y, 1e-10);
         let mass = problem.eqn.mass_matrix(0.0);
         assert_eq!(mass[(0, 0)], 1.0);
         assert_eq!(mass[(1, 1)], 1.0);
@@ -495,10 +495,10 @@ mod tests {
         let y = DVector::from_vec(vec![1.0, 1.0, 1.0]);
         let rhs_y = problem.eqn.rhs(0.0, &y);
         let expect_rhs_y = DVector::from_vec(vec![-0.1, -0.1, 0.0]);
-        rhs_y.assert_eq(&expect_rhs_y, 1e-10);
+        rhs_y.assert_eq_st(&expect_rhs_y, 1e-10);
         let jac_rhs_y = problem.eqn.jac_mul(0.0, &y, &y);
         let expect_jac_rhs_y = Vcpu::from_vec(vec![-0.1, -0.1, 0.0]);
-        jac_rhs_y.assert_eq(&expect_jac_rhs_y, 1e-10);
+        jac_rhs_y.assert_eq_st(&expect_jac_rhs_y, 1e-10);
         let mass = problem.eqn.mass_matrix(0.0);
         assert_eq!(mass[(0, 0)], 1.);
         assert_eq!(mass[(1, 1)], 1.);

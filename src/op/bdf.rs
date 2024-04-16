@@ -1,8 +1,6 @@
 use crate::{
-    matrix::{DenseMatrix, MatrixRef},
-    ode_solver::equations::OdeEquations,
-    scalar::scale,
-    IndexType, Matrix, OdeSolverProblem, Vector, VectorRef,
+    matrix::MatrixRef, ode_solver::equations::OdeEquations, scale, Matrix, OdeSolverProblem,
+    Vector, VectorRef,
 };
 use num_traits::{One, Zero};
 use std::{
@@ -68,11 +66,11 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
     pub fn number_of_jac_evals(&self) -> usize {
         *self.number_of_jac_evals.borrow()
     }
-    pub fn set_c(&self, h: Eqn::T, alpha: &[Eqn::T], order: IndexType)
+    pub fn set_c(&self, h: Eqn::T, alpha: Eqn::T)
     where
         for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
     {
-        self.c.replace(h * alpha[order]);
+        self.c.replace(h * alpha);
         if !*self.rhs_jacobian_is_stale.borrow() && !*self.mass_jacobian_is_stale.borrow() {
             let rhs_jac_ref = self.rhs_jac.borrow();
             let rhs_jac = rhs_jac_ref.deref();
@@ -84,20 +82,8 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
             self.jacobian_is_stale.replace(true);
         }
     }
-    pub fn set_psi_and_y0<M: DenseMatrix<T = Eqn::T, V = Eqn::V>>(
-        &self,
-        diff: &M,
-        gamma: &[Eqn::T],
-        alpha: &[Eqn::T],
-        order: usize,
-        y0: &Eqn::V,
-    ) {
-        // update psi term as defined in second equation on page 9 of [1]
-        let mut new_psi_neg_y0 = diff.column(1) * scale(gamma[1]);
-        for (i, &gamma_i) in gamma.iter().enumerate().take(order + 1).skip(2) {
-            new_psi_neg_y0 += diff.column(i) * scale(gamma_i)
-        }
-        new_psi_neg_y0 *= scale(alpha[order]);
+    pub fn set_psi_and_y0(&self, psi: Eqn::V, y0: &Eqn::V) {
+        let mut new_psi_neg_y0 = psi;
 
         // now negate y0
         new_psi_neg_y0.sub_assign(y0);
@@ -210,7 +196,7 @@ mod tests {
         //              |0 1| |2.2|         |-0.1|    |2.21|
         bdf_callable.call_inplace(&y, t, &mut y_out);
         let y_out_expect = Vcpu::from_vec(vec![2.11, 2.21]);
-        y_out.assert_eq(&y_out_expect, 1e-10);
+        y_out.assert_eq_st(&y_out_expect, 1e-10);
 
         let v = Vcpu::from_vec(vec![1.0, 1.0]);
         // f'(y)v = |-0.1|
@@ -219,7 +205,7 @@ mod tests {
         //                    |0 1| |1|         |-0.1|   |1.01|
         bdf_callable.jac_mul_inplace(&y, t, &v, &mut y_out);
         let y_out_expect = Vcpu::from_vec(vec![1.01, 1.01]);
-        y_out.assert_eq(&y_out_expect, 1e-10);
+        y_out.assert_eq_st(&y_out_expect, 1e-10);
 
         // J = M - c * f'(y) = |1 0| - 0.1 * |-0.1 0| = |1.01 0|
         //                     |0 1|         |0 -0.1|   |0 1.01|
