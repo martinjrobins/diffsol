@@ -162,7 +162,7 @@ impl OdeBuilder {
         M: Matrix,
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
         G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        H: Fn(&M::V, &M::V, M::T, &mut M::V),
+        H: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
         I: Fn(&M::V, M::T) -> M::V,
     {
         let p = Self::build_p(self.p);

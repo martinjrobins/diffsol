@@ -3,7 +3,7 @@ use crate::{
     OdeSolverProblem, Vector,
 };
 use nalgebra::ComplexField;
-use num_traits::Zero;
+use num_traits::One;
 use std::ops::MulAssign;
 
 // exponential decay problem with algebraic constraint
@@ -42,11 +42,12 @@ fn exponential_decay_with_algebraic_mass<M: DenseMatrix>(
     x: &M::V,
     _p: &M::V,
     _t: M::T,
+    beta: M::T,
     y: &mut M::V,
 ) {
-    y.copy_from(x);
+    y.axpy(M::T::one(), x, beta);
     let nstates = y.len();
-    y[nstates - 1] = M::T::zero();
+    y[nstates - 1] = beta * x[nstates - 1];
 }
 
 fn exponential_decay_with_algebraic_init<M: DenseMatrix>(_p: &M::V, _t: M::T) -> M::V {

@@ -57,6 +57,7 @@ impl<V> LinearSolveSolution<V> {
     }
 }
 
+
 #[cfg(test)]
 pub mod tests {
     use std::rc::Rc;

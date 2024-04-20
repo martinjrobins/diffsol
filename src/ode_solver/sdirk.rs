@@ -296,7 +296,7 @@ where
                     // newton iteration did not converge, so update jacobian and try again
                     {
                         let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
-                        callable.set_rhs_jacobian_is_stale();
+                        callable.set_jacobian_is_stale();
                     }
                     self.nonlinear_solver.reset();
                     updated_jacobian = true;
