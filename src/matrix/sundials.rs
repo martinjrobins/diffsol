@@ -12,12 +12,13 @@ use sundials_sys::{
 
 use crate::{
     ode_solver::sundials::sundials_check,
+    op::LinearOp,
     scalar::scale,
     vector::sundials::{get_suncontext, SundialsVector},
-    IndexType, Scale, Vector,
+    IndexType, Scale, SundialsLinearSolver, Vector,
 };
 
-use super::{Matrix, MatrixCommon};
+use super::{default_solver::DefaultSolver, Matrix, MatrixCommon};
 use anyhow::anyhow;
 
 #[derive(Debug)]
@@ -77,6 +78,11 @@ impl Display for SundialsMatrix {
         }
         Ok(())
     }
+}
+
+impl DefaultSolver for SundialsMatrix {
+    type LS<C: LinearOp<M = SundialsMatrix, V = SundialsVector, T = realtype>> =
+        SundialsLinearSolver<C>;
 }
 
 impl MatrixCommon for SundialsMatrix {

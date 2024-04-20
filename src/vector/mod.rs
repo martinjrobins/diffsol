@@ -1,3 +1,4 @@
+use crate::matrix::DenseMatrix;
 use crate::scalar::Scale;
 use crate::{IndexType, Scalar};
 use num_traits::Zero;
@@ -205,4 +206,8 @@ pub trait Vector:
             }
         }
     }
+}
+
+pub trait DefaultDenseMatrix: Vector {
+    type M: DenseMatrix<V = Self, T = Self::T>;
 }

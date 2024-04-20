@@ -1,9 +1,15 @@
 use std::ops::{Mul, MulAssign};
 
+use super::default_solver::DefaultSolver;
 use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 use crate::scalar::{IndexType, Scalar, Scale};
+use crate::{op::LinearOp, FaerLU};
 use anyhow::Result;
 use faer::{linalg::matmul::matmul, Col, ColMut, ColRef, Mat, MatMut, MatRef, Parallelism};
+
+impl<T: Scalar> DefaultSolver for Mat<T> {
+    type LS<C: LinearOp<M = Mat<T>, V = Col<T>, T = T>> = FaerLU<T, C>;
+}
 
 macro_rules! impl_matrix_common {
     ($mat_type:ty) => {

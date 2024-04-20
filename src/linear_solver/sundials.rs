@@ -23,6 +23,15 @@ where
     matrix: SundialsMatrix,
 }
 
+impl<Op> Default for SundialsLinearSolver<Op>
+where
+    Op: LinearOp<M = SundialsMatrix, V = SundialsVector, T = realtype>,
+{
+    fn default() -> Self {
+        Self::new_dense()
+    }
+}
+
 impl<Op> SundialsLinearSolver<Op>
 where
     Op: LinearOp<M = SundialsMatrix, V = SundialsVector, T = realtype>,

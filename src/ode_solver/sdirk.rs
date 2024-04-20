@@ -36,7 +36,7 @@ where
     tableau: Tableau<M>,
     problem: Option<OdeSolverProblem<Eqn>>,
     nonlinear_solver: NewtonNonlinearSolver<SdirkCallable<Eqn>>,
-    state: Option<OdeSolverState<Eqn::M>>,
+    state: Option<OdeSolverState<Eqn::V>>,
     diff: M,
     gamma: Eqn::T,
     is_sdirk: bool,
@@ -175,7 +175,7 @@ where
 
     fn set_problem(
         &mut self,
-        mut state: OdeSolverState<<Eqn>::M>,
+        mut state: OdeSolverState<<Eqn>::V>,
         problem: &OdeSolverProblem<Eqn>,
     ) {
         // update initial step size based on function
@@ -490,11 +490,11 @@ where
         }
     }
 
-    fn state(&self) -> Option<&OdeSolverState<<Eqn>::M>> {
+    fn state(&self) -> Option<&OdeSolverState<<Eqn>::V>> {
         self.state.as_ref()
     }
 
-    fn take_state(&mut self) -> Option<OdeSolverState<<Eqn>::M>> {
+    fn take_state(&mut self) -> Option<OdeSolverState<<Eqn>::V>> {
         Option::take(&mut self.state)
     }
 }

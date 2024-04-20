@@ -1,4 +1,4 @@
-use crate::{op::Op, Matrix, OdeSolverProblem, Vector};
+use crate::{op::Op, vector::DefaultDenseMatrix, Matrix, OdeSolverProblem, Vector};
 use anyhow::Result;
 
 use super::equations::{OdeSolverEquations, OdeSolverEquationsMassI};
@@ -243,6 +243,23 @@ impl OdeBuilder {
             M::T::from(self.t0),
             M::T::from(self.h0),
         ))
+    }
+
+    /// Build an ODE problem using the default dense matrix (see [Self::build_ode]).
+    #[allow(clippy::type_complexity)]
+    pub fn build_ode_dense<V, F, G, I>(
+        self,
+        rhs: F,
+        rhs_jac: G,
+        init: I,
+    ) -> Result<OdeSolverProblem<OdeSolverEquationsMassI<V::M, F, G, I>>>
+    where
+        V: Vector + DefaultDenseMatrix,
+        F: Fn(&V, &V, V::T, &mut V),
+        G: Fn(&V, &V, V::T, &V, &mut V),
+        I: Fn(&V, V::T) -> V,
+    {
+        self.build_ode(rhs, rhs_jac, init)
     }
 
     /// Build an ODE problem using the DiffSL language (requires the `diffsl` feature).
