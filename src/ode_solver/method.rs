@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use crate::{
     op::{filter::FilterCallable, ode_rhs::OdeRhs},
-    Matrix, NonLinearSolver, OdeEquations, OdeSolverProblem, SolverProblem, Vector, VectorIndex,
+    NonLinearSolver, OdeEquations, OdeSolverProblem, SolverProblem, Vector, VectorIndex,
 };
 
 /// Trait for ODE solver methods. This is the main user interface for the ODE solvers.

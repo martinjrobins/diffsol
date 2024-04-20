@@ -31,7 +31,7 @@ pub fn dydt_y2_problem<M: DenseMatrix + 'static>(
     let problem = OdeBuilder::new()
         .use_coloring(use_coloring)
         .rtol(1e-4)
-        .build_ode_dense(rhs::<M>, rhs_jac::<M>, move |_p, _t| {
+        .build_ode(rhs::<M>, rhs_jac::<M>, move |_p, _t| {
             M::V::from_vec([y0.into()].repeat(size2))
         })
         .unwrap();

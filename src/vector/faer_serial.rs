@@ -1,10 +1,16 @@
 use std::ops::{Div, Mul, MulAssign};
 
-use faer::{unzipped, zipped, Col, ColMut, ColRef};
+use faer::{unzipped, zipped, Col, ColMut, ColRef, Mat};
 
 use crate::{scalar::Scale, IndexType, Scalar};
 
 use crate::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
+
+use super::DefaultDenseMatrix;
+
+impl<T: Scalar> DefaultDenseMatrix for Col<T> {
+    type M = Mat<T>;
+}
 
 macro_rules! impl_op_for_faer_struct {
     ($struct:ident, $trait_name:ident, $func_name:ident) => {

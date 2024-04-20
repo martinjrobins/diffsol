@@ -32,7 +32,7 @@ pub fn exponential_decay_problem<M: Matrix + 'static>(
     let problem = OdeBuilder::new()
         .p([0.1])
         .use_coloring(use_coloring)
-        .build_ode_dense(
+        .build_ode(
             exponential_decay::<M>,
             exponential_decay_jacobian::<M>,
             exponential_decay_init::<M>,

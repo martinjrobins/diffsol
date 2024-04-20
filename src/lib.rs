@@ -177,12 +177,11 @@ mod tests {
     fn test_readme() {
         type T = f64;
         type V = nalgebra::DVector<T>;
-        type M = nalgebra::DMatrix<T>;
         let problem = OdeBuilder::new()
             .p([0.04, 1.0e4, 3.0e7])
             .rtol(1e-4)
             .atol([1.0e-8, 1.0e-6, 1.0e-6])
-            .build_ode_dense::<M, _, _, _>(
+            .build_ode_dense(
                 |x: &V, p: &V, _t: T, y: &mut V| {
                     y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
                     y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
@@ -200,7 +199,7 @@ mod tests {
             )
             .unwrap();
 
-        let mut solver = Bdf::<M, _>::default();
+        let mut solver = Bdf::default();
 
         let t = 0.4;
         let y = solver.solve(&problem, t).unwrap();

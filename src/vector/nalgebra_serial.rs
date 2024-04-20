@@ -1,10 +1,14 @@
 use std::ops::{Div, Mul, MulAssign};
 
-use nalgebra::{DVector, DVectorView, DVectorViewMut};
+use nalgebra::{DMatrix, DVector, DVectorView, DVectorViewMut};
 
 use crate::{IndexType, Scalar, Scale};
 
-use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
+use super::{DefaultDenseMatrix, Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
+
+impl<T: Scalar> DefaultDenseMatrix for DVector<T> {
+    type M = DMatrix<T>;
+}
 
 macro_rules! impl_op_for_dvector_struct {
     ($struct:ident, $trait_name:ident, $func_name:ident) => {

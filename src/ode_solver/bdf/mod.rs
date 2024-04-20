@@ -7,9 +7,10 @@ use num_traits::{One, Pow, Zero};
 use serde::Serialize;
 
 use crate::{
-    matrix::{default_solver::DefaultSolver, MatrixCommon, MatrixRef},
-    op::{bdf::BdfCallable, linearise::LinearisedOp, Op},
+    matrix::{default_solver::DefaultSolver, Matrix, MatrixRef},
+    op::bdf::BdfCallable,
     scalar::scale,
+    vector::DefaultDenseMatrix,
     DenseMatrix, IndexType, MatrixViewMut, NewtonNonlinearSolver, NonLinearSolver, OdeSolverMethod,
     OdeSolverProblem, OdeSolverState, Scalar, SolverProblem, Vector, VectorRef, VectorView,
     VectorViewMut,
@@ -75,11 +76,11 @@ pub struct Bdf<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations> {
     state: Option<OdeSolverState<Eqn::V>>,
 }
 
-impl<M, Eqn> Default for Bdf<M, Eqn>
+impl<Eqn> Default for Bdf<<Eqn::V as DefaultDenseMatrix>::M, Eqn>
 where
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquations + 'static,
     Eqn::M: DefaultSolver,
+    Eqn::V: DefaultDenseMatrix,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
@@ -90,17 +91,18 @@ where
             linear_solver,
         ));
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
+        type M<V> = <V as DefaultDenseMatrix>::M;
         Self {
             ode_problem: None,
             nonlinear_solver,
             order: 1,
             n_equal_steps: 0,
-            diff: M::zeros(n, Self::MAX_ORDER + 3), //DMatrix::<T>::zeros(n, Self::MAX_ORDER + 3),
-            diff_tmp: M::zeros(n, Self::MAX_ORDER + 3),
-            gamma: vec![M::T::from(1.0); Self::MAX_ORDER + 1],
-            alpha: vec![M::T::from(1.0); Self::MAX_ORDER + 1],
-            error_const: vec![M::T::from(1.0); Self::MAX_ORDER + 1],
-            u: M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+            diff: <M<Eqn::V> as Matrix>::zeros(n, Self::MAX_ORDER + 3), //DMatrix::<T>::zeros(n, Self::MAX_ORDER + 3),
+            diff_tmp: <M<Eqn::V> as Matrix>::zeros(n, Self::MAX_ORDER + 3),
+            gamma: vec![Eqn::T::from(1.0); Self::MAX_ORDER + 1],
+            alpha: vec![Eqn::T::from(1.0); Self::MAX_ORDER + 1],
+            error_const: vec![Eqn::T::from(1.0); Self::MAX_ORDER + 1],
+            u: <M<Eqn::V> as Matrix>::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
             statistics: BdfStatistics::default(),
             state: None,
         }

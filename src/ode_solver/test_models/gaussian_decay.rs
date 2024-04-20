@@ -30,7 +30,7 @@ pub fn gaussian_decay_problem<M: DenseMatrix + 'static>(
     let problem = OdeBuilder::new()
         .p([0.1].repeat(size))
         .use_coloring(use_coloring)
-        .build_ode_dense(
+        .build_ode(
             gaussian_decay::<M>,
             gaussian_decay_jacobian::<M>,
             move |_p, _t| M::V::from_vec([1.0.into()].repeat(size2)),
