@@ -1,4 +1,6 @@
-use crate::{op::Op, Matrix, OdeSolverProblem, Vector};
+use crate::{
+    matrix::DenseMatrix, op::Op, vector::DefaultDenseMatrix, Matrix, OdeSolverProblem, Vector,
+};
 use anyhow::Result;
 
 use super::equations::{OdeSolverEquations, OdeSolverEquationsMassI};
@@ -214,17 +216,17 @@ impl OdeBuilder {
     ///        |p, _t| DVector::from_element(1, 0.1),
     ///    );
     /// ```
-    pub fn build_ode<M, F, G, I>(
+    pub fn build_ode_dense<V, F, G, I>(
         self,
         rhs: F,
         rhs_jac: G,
         init: I,
-    ) -> Result<OdeSolverProblem<OdeSolverEquationsMassI<M, F, G, I>>>
+    ) -> Result<OdeSolverProblem<OdeSolverEquationsMassI<<V as DefaultDenseMatrix>::M, F, G, I>>>
     where
-        M: Matrix,
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
-        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        I: Fn(&M::V, M::T) -> M::V,
+        V: Vector + DefaultDenseMatrix,
+        F: Fn(&V, &V, V::T, &mut V),
+        G: Fn(&V, &V, V::T, &V, &mut V),
+        I: Fn(&V, V::T) -> V,
     {
         let p = Self::build_p(self.p);
         let eqn = OdeSolverEquationsMassI::new_ode(
@@ -238,10 +240,10 @@ impl OdeBuilder {
         let atol = Self::build_atol(self.atol, eqn.nstates())?;
         Ok(OdeSolverProblem::new(
             eqn,
-            M::T::from(self.rtol),
+            V::T::from(self.rtol),
             atol,
-            M::T::from(self.t0),
-            M::T::from(self.h0),
+            V::T::from(self.t0),
+            V::T::from(self.h0),
         ))
     }
 

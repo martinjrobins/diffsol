@@ -12,7 +12,9 @@ mod dense_nalgebra_serial;
 #[cfg(feature = "faer")]
 mod dense_faer_serial;
 
+pub mod default_solver;
 mod sparse_serial;
+
 #[cfg(feature = "sundials")]
 pub mod sundials;
 

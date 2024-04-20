@@ -3,9 +3,16 @@ use std::ops::{Mul, MulAssign};
 use anyhow::Result;
 use nalgebra::{DMatrix, DMatrixView, DMatrixViewMut, DVector, DVectorView, DVectorViewMut};
 
+use crate::op::LinearOp;
 use crate::{scalar::Scale, IndexType, Scalar};
 
-use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
+use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU};
+
+use super::default_solver::DefaultSolver;
+
+impl<T: Scalar> DefaultSolver for DMatrix<T> {
+    type LS<C: LinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> = NalgebraLU<T, C>;
+}
 
 macro_rules! impl_matrix_common {
     ($matrix_type:ty) => {

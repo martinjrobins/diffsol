@@ -7,9 +7,12 @@ use num_traits::{One, Pow, Zero};
 use serde::Serialize;
 
 use crate::{
-    matrix::MatrixRef, op::bdf::BdfCallable, scalar::scale, DenseMatrix, IndexType, MatrixViewMut,
-    NonLinearSolver, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Scalar, SolverProblem,
-    Vector, VectorRef, VectorView, VectorViewMut,
+    matrix::{default_solver::DefaultSolver, MatrixCommon, MatrixRef},
+    op::{bdf::BdfCallable, linearise::LinearisedOp, Op},
+    scalar::scale,
+    DenseMatrix, IndexType, MatrixViewMut, NewtonNonlinearSolver, NonLinearSolver, OdeSolverMethod,
+    OdeSolverProblem, OdeSolverState, Scalar, SolverProblem, Vector, VectorRef, VectorView,
+    VectorViewMut,
 };
 
 pub mod faer;
@@ -69,32 +72,72 @@ pub struct Bdf<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations> {
     gamma: Vec<Eqn::T>,
     error_const: Vec<Eqn::T>,
     statistics: BdfStatistics<Eqn::T>,
-    state: Option<OdeSolverState<Eqn::M>>,
+    state: Option<OdeSolverState<Eqn::V>>,
 }
 
-// impl<Eqn: OdeEquations<T = f64, V = Col<f64>, M = faer::Mat<f64>>> Default for Bdf<Mat<f64>, Eqn> {
-//     fn default() -> Self {
-//         let n = 1;
-//         let linear_solver = LU::default();
-//         let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<Eqn>>::new(
-//             linear_solver,
-//         ));
-//         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
-//         Self {
-//             ode_problem: None,
-//             nonlinear_solver,
-//             order: 1,
-//             n_equal_steps: 0,
-//             diff: Mat::zeros(n, Self::MAX_ORDER + 3), //DMatrix::<T>::zeros(n, Self::MAX_ORDER + 3),
-//             diff_tmp: Mat::zeros(n, Self::MAX_ORDER + 3),
-//             gamma: vec![f64::from(1.0); Self::MAX_ORDER + 1],
-//             alpha: vec![f64::from(1.0); Self::MAX_ORDER + 1],
-//             error_const: vec![f64::from(1.0); Self::MAX_ORDER + 1],
-//             u: Mat::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
-//             statistics: BdfStatistics::default(),
-//         }
-//     }
-// }
+impl<M, Eqn> Default for Bdf<M, Eqn>
+where
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    Eqn: OdeEquations + 'static,
+    Eqn::M: DefaultSolver,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+{
+    fn default() -> Self {
+        let n = 1;
+        let linear_solver = Eqn::M::default_solver();
+        let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<Eqn>>::new(
+            linear_solver,
+        ));
+        nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
+        Self {
+            ode_problem: None,
+            nonlinear_solver,
+            order: 1,
+            n_equal_steps: 0,
+            diff: M::zeros(n, Self::MAX_ORDER + 3), //DMatrix::<T>::zeros(n, Self::MAX_ORDER + 3),
+            diff_tmp: M::zeros(n, Self::MAX_ORDER + 3),
+            gamma: vec![M::T::from(1.0); Self::MAX_ORDER + 1],
+            alpha: vec![M::T::from(1.0); Self::MAX_ORDER + 1],
+            error_const: vec![M::T::from(1.0); Self::MAX_ORDER + 1],
+            u: M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+            statistics: BdfStatistics::default(),
+            state: None,
+        }
+    }
+}
+
+impl<M, Eqn> Clone for Bdf<M, Eqn>
+where
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    Eqn: OdeEquations + 'static,
+    Eqn::M: DefaultSolver,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+{
+    fn clone(&self) -> Self {
+        let n = self.diff.nrows();
+        let linear_solver = Eqn::M::default_solver();
+        let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<Eqn>>::new(
+            linear_solver,
+        ));
+        nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
+        Self {
+            ode_problem: self.ode_problem.clone(),
+            nonlinear_solver,
+            order: self.order,
+            n_equal_steps: self.n_equal_steps,
+            diff: M::zeros(n, Self::MAX_ORDER + 3),
+            diff_tmp: M::zeros(n, Self::MAX_ORDER + 3),
+            gamma: self.gamma.clone(),
+            alpha: self.alpha.clone(),
+            error_const: self.error_const.clone(),
+            u: M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+            statistics: self.statistics.clone(),
+            state: self.state.clone(),
+        }
+    }
+}
 
 impl<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations> Bdf<M, Eqn>
 where
@@ -261,15 +304,15 @@ where
         self.ode_problem.as_ref()
     }
 
-    fn state(&self) -> Option<&OdeSolverState<Eqn::M>> {
+    fn state(&self) -> Option<&OdeSolverState<Eqn::V>> {
         self.state.as_ref()
     }
 
-    fn take_state(&mut self) -> Option<OdeSolverState<<Eqn>::M>> {
+    fn take_state(&mut self) -> Option<OdeSolverState<<Eqn>::V>> {
         Option::take(&mut self.state)
     }
 
-    fn set_problem(&mut self, state: OdeSolverState<Eqn::M>, problem: &OdeSolverProblem<Eqn>) {
+    fn set_problem(&mut self, state: OdeSolverState<Eqn::V>, problem: &OdeSolverProblem<Eqn>) {
         let mut state = state;
         self.ode_problem = Some(problem.clone());
         let nstates = problem.eqn.nstates();

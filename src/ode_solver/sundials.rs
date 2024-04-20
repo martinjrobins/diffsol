@@ -123,7 +123,7 @@ where
     yp: SundialsVector,
     jacobian: SundialsMatrix,
     statistics: SundialsStatistics,
-    state: Option<OdeSolverState<Eqn::M>>,
+    state: Option<OdeSolverState<Eqn::V>>,
 }
 
 impl<Eqn> SundialsIda<Eqn>
@@ -251,15 +251,15 @@ where
         self.problem.as_ref()
     }
 
-    fn state(&self) -> Option<&OdeSolverState<<Eqn>::M>> {
+    fn state(&self) -> Option<&OdeSolverState<<Eqn>::V>> {
         self.state.as_ref()
     }
 
-    fn take_state(&mut self) -> Option<OdeSolverState<<Eqn>::M>> {
+    fn take_state(&mut self) -> Option<OdeSolverState<<Eqn>::V>> {
         Option::take(&mut self.state)
     }
 
-    fn set_problem(&mut self, state: OdeSolverState<Eqn::M>, problem: &OdeSolverProblem<Eqn>) {
+    fn set_problem(&mut self, state: OdeSolverState<Eqn::V>, problem: &OdeSolverProblem<Eqn>) {
         self.state = Some(state);
         let state = self.state.as_ref().unwrap();
         self.problem = Some(problem.clone());
