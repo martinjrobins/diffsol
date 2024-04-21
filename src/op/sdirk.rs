@@ -34,10 +34,15 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
         let phi = RefCell::new(<Eqn::V as Vector>::zeros(n));
         let rhs_jac = RefCell::new(Eqn::M::zeros(n, n));
         let jac = RefCell::new(Eqn::M::zeros(n, n));
-        let mass_jac = RefCell::new(Eqn::M::zeros(n, n));
         let jacobian_is_stale = RefCell::new(true);
         let number_of_jac_evals = RefCell::new(0);
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n));
+
+        let mass_jac = if eqn.is_mass_constant() {
+            RefCell::new(eqn.mass_matrix(Eqn::T::zero()))
+        } else {
+            RefCell::new(Eqn::M::zeros(n, n))
+        };
 
         Self {
             eqn,
@@ -157,14 +162,18 @@ where
             let tmp = tmp_ref.deref();
 
             let rhs_jac = self.eqn.jacobian_matrix(tmp, t);
-            let mass_jac = self.eqn.mass_matrix(t);
             let c = self.c;
             let h = *self.h.borrow().deref();
 
-            self.jac.replace(&mass_jac - &rhs_jac * scale(c * h));
+            if self.eqn.is_mass_constant() {
+                let mass_jac = self.mass_jac.borrow();
+                self.jac.replace(mass_jac.deref() - &rhs_jac * scale(c * h));
+            } else {
+                let mass_jac = self.eqn.mass_matrix(t);
+                self.jac.replace(&mass_jac - &rhs_jac * scale(c * h));
+                self.mass_jac.replace(mass_jac);
+            }
             self.rhs_jac.replace(rhs_jac);
-            self.mass_jac.replace(mass_jac);
-
             self.jacobian_is_stale.replace(false);
         }
         let number_of_jac_evals = *self.number_of_jac_evals.borrow() + 1;

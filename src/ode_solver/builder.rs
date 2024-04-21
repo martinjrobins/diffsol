@@ -11,6 +11,7 @@ pub struct OdeBuilder {
     atol: Vec<f64>,
     p: Vec<f64>,
     use_coloring: bool,
+    constant_mass: bool,
 }
 
 impl Default for OdeBuilder {
@@ -27,6 +28,7 @@ impl OdeBuilder {
     /// - atol = [1e-6]
     /// - p = []
     /// - use_coloring = false
+    /// - constant_mass = false
     pub fn new() -> Self {
         Self {
             t0: 0.0,
@@ -35,6 +37,7 @@ impl OdeBuilder {
             atol: vec![1e-6],
             p: vec![],
             use_coloring: false,
+            constant_mass: false,
         }
     }
 
@@ -63,6 +66,12 @@ impl OdeBuilder {
         f64: From<T>,
     {
         self.atol = atol.into_iter().map(|x| f64::from(x)).collect();
+        self
+    }
+
+    /// Set if mass matrix is constant.
+    pub fn constant_mass(mut self, constant_mass: bool) -> Self {
+        self.constant_mass = constant_mass;
         self
     }
 
@@ -115,7 +124,7 @@ impl OdeBuilder {
     ///
     /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
     /// - `rhs_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
-    /// - `mass`: Function of type Fn(v: &V, p: &V, t: S, y: &mut V) that computes the multiplication of the mass matrix with the vector v.
+    /// - `mass`: Function of type Fn(v: &V, p: &V, t: S, beta: S, y: &mut V) that computes a gemv multiplication of the mass matrix with the vector v (i.e. y = M * v + beta * y).
     /// - `init`: Function of type Fn(p: &V, t: S) -> V that computes the initial state.
     ///
     /// # Generic Arguments
@@ -143,9 +152,9 @@ impl OdeBuilder {
     ///           y[0] = v[0];
     ///           y[1] = v[1] - v[0];
     ///       },
-    ///       |v, _p, _t, y| {
-    ///           y[0] = v[0];
-    ///           y[1] = 0.0;
+    ///       |v, _p, _t, beta, y| {
+    ///           y[0] = v[0] + beta * y[0];
+    ///           y[1] = beta * y[1];
     ///       },
     ///       |p, _t| DVector::from_element(2, 0.1),
     /// );
@@ -174,6 +183,7 @@ impl OdeBuilder {
             p,
             M::T::from(self.t0),
             self.use_coloring,
+            self.constant_mass,
         );
         let atol = Self::build_atol(self.atol, eqn.nstates())?;
         Ok(OdeSolverProblem::new(

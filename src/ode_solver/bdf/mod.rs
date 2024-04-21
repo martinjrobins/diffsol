@@ -377,6 +377,8 @@ where
 
         // setup linear solver for first step
         let bdf_callable = Rc::new(BdfCallable::new(problem));
+        bdf_callable.set_c(state.h, self.alpha[self.order]);
+
         let nonlinear_problem = SolverProblem::new_from_ode_problem(bdf_callable, problem);
         self.nonlinear_solver
             .as_mut()

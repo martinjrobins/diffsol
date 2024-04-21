@@ -150,6 +150,7 @@ where
     jacobian_coloring: Option<JacobianColoring>,
     mass_coloring: Option<JacobianColoring>,
     statistics: RefCell<OdeEquationsStatistics>,
+    mass_is_constant: bool,
 }
 
 impl<M, F, G, H, I> OdeSolverEquations<M, F, G, H, I>
@@ -160,7 +161,8 @@ where
     H: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
     I: Fn(&M::V, M::T) -> M::V,
 {
-    pub fn new_ode_with_mass(
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_ode_with_mass(
         rhs: F,
         rhs_jac: G,
         mass: H,
@@ -168,6 +170,7 @@ where
         p: M::V,
         t0: M::T,
         use_coloring: bool,
+        mass_is_constant: bool,
     ) -> Self {
         let y0 = init(&p, M::T::zero());
         let nstates = y0.len();
@@ -183,6 +186,7 @@ where
             jacobian_coloring: None,
             mass_coloring: None,
             statistics,
+            mass_is_constant,
         };
         let (jacobian_coloring, mass_coloring) = if use_coloring {
             let rhs_inplace = |x: &M::V, _p: &M::V, t: M::T, y_rhs: &mut M::V| {
@@ -192,7 +196,7 @@ where
                 ret.rhs_jac_inplace(t, x, v, y);
             };
             let mass_inplace = |x: &M::V, _p: &M::V, t: M::T, y: &mut M::V| {
-                ret.mass_inplace(t, x, M::T::one(), y);
+                ret.mass_inplace(t, x, M::T::zero(), y);
             };
             let op =
                 Closure::<M, _, _>::new(rhs_inplace, rhs_jac_inplace, nstates, nstates, p.clone());
@@ -252,6 +256,10 @@ where
         self.statistics.borrow_mut().number_of_jac_mul_evals += 1;
     }
 
+    fn is_mass_constant(&self) -> bool {
+        self.mass_is_constant
+    }
+
     fn mass_inplace(&self, t: Self::T, v: &Self::V, beta: Self::T, y: &mut Self::V) {
         let p = self.p.as_ref();
         (self.mass)(v, p, t, beta, y);
@@ -294,7 +302,7 @@ where
     fn mass_matrix(&self, t: Self::T) -> Self::M {
         self.statistics.borrow_mut().number_of_mass_matrix_evals += 1;
         let mass_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y: &mut Self::V| {
-            self.mass_inplace(t, x, Self::T::one(), y);
+            self.mass_inplace(t, x, Self::T::zero(), y);
         };
         let op =
             LinearClosure::<M, _>::new(mass_inplace, self.nstates, self.nstates, self.p.clone());
