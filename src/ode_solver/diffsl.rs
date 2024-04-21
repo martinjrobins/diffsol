@@ -1,4 +1,4 @@
-use num_traits::One;
+use num_traits::Zero;
 use std::{cell::RefCell, rc::Rc};
 
 use anyhow::Result;
@@ -162,7 +162,7 @@ impl OdeEquations for DiffSl {
 
     fn mass_matrix(&self, t: Self::T) -> Self::M {
         let mass_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y: &mut Self::V| {
-            self.mass_inplace(t, x, Self::T::one(), y);
+            self.mass_inplace(t, x, Self::T::zero(), y);
         };
         let dummy_p = Rc::new(V::zeros(0));
         let op = LinearClosure::<M, _>::new(mass_inplace, self.nstates, self.nstates, dummy_p);
@@ -214,7 +214,7 @@ impl OdeEquations for DiffSl {
         );
 
         // y = tmp + beta * y
-        y.axpy(beta, &tmp, 1.0);
+        y.axpy(1.0, &tmp, beta);
     }
 }
 
