@@ -1,11 +1,10 @@
 use crate::{
-    jacobian::{find_non_zero_entries, find_non_zeros},
-    scalar::scale,
+    jacobian::{find_non_zero_entries, find_non_zeros, jacobian_dense},
+    matrix::DenseMatrix,
     Matrix, Scalar, Vector,
 };
 
 use num_traits::{One, Zero};
-use std::ops::{AddAssign, MulAssign};
 
 pub mod bdf;
 pub mod closure;
@@ -47,6 +46,13 @@ pub trait NonLinearOp: Op {
         self.jac_mul_inplace(x, t, v, &mut y);
         y
     }
+    fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M)
+    where
+        Self::M: DenseMatrix, // TODO: once we have sparse matrix support, update and remove this constraint
+    {
+        jacobian_dense(self, x, t, y);
+    }
+
     fn jacobian(&self, x: &Self::V, t: Self::T) -> Self::M
     where
         Self: std::marker::Sized,
@@ -66,13 +72,7 @@ pub trait LinearOp: Op {
         self.call_inplace(x, t, &mut y);
         y
     }
-    fn gemv(&self, x: &Self::V, t: Self::T, alpha: Self::T, beta: Self::T, y: &mut Self::V) {
-        let mut beta_y = y.clone();
-        beta_y.mul_assign(scale(beta));
-        self.call_inplace(x, t, y);
-        y.mul_assign(scale(alpha));
-        y.add_assign(&beta_y);
-    }
+
     fn jacobian_diagonal(&self, t: Self::T) -> Self::V {
         let mut v = Self::V::zeros(self.nstates());
         let mut col = Self::V::zeros(self.nout());
@@ -85,6 +85,15 @@ pub trait LinearOp: Op {
         }
         diag
     }
+
+    fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M)
+    where
+        Self::M: DenseMatrix, // TODO: once we have sparse matrix support, update and remove this constraint
+        Self: std::marker::Sized,
+    {
+        jacobian_dense(self, x, t, y);
+    }
+
     fn jacobian(&self, t: Self::T) -> Self::M
     where
         Self: std::marker::Sized,
@@ -93,6 +102,7 @@ pub trait LinearOp: Op {
         let triplets = find_non_zero_entries(self, &x, t);
         Self::M::try_from_triplets(self.nstates(), self.nout(), triplets).unwrap()
     }
+
     fn find_non_zeros(&self, t: Self::T) -> Vec<(usize, usize)>
     where
         Self: std::marker::Sized,

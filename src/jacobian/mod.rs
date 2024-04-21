@@ -1,6 +1,6 @@
-use crate::op::NonLinearOp;
 use crate::vector::Vector;
 use crate::Scalar;
+use crate::{matrix::DenseMatrix, op::NonLinearOp, VectorViewMut};
 use num_traits::{One, Zero};
 
 use self::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy};
@@ -51,6 +51,23 @@ pub fn find_non_zero_entries<F: NonLinearOp + ?Sized>(
         v[j] = F::T::zero();
     }
     triplets
+}
+
+/// Calculate the dense Jacobian matrix of a non-linear operator, overwrites a given dense matrix `y`.
+pub fn jacobian_dense<F: NonLinearOp + ?Sized>(op: &F, x: &F::V, t: F::T, y: &mut F::M)
+where
+    F::M: DenseMatrix,
+{
+    let mut v = F::V::zeros(op.nstates());
+    let mut col = F::V::zeros(op.nout());
+    for j in 0..op.nstates() {
+        v[j] = F::T::one();
+        // TODO: should be able to just give col_dest here!
+        op.jac_mul_inplace(x, t, &v, &mut col);
+        let mut col_dest = y.column_mut(j);
+        col_dest.copy_from(&col);
+        v[j] = F::T::zero();
+    }
 }
 
 pub struct JacobianColoring {
