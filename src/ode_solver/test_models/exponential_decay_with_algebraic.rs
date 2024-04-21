@@ -3,7 +3,7 @@ use crate::{
     OdeSolverProblem, Vector,
 };
 use nalgebra::ComplexField;
-use num_traits::Zero;
+use num_traits::One;
 use std::ops::MulAssign;
 
 // exponential decay problem with algebraic constraint
@@ -38,15 +38,19 @@ fn exponential_decay_with_algebraic_jacobian<M: DenseMatrix>(
     y[nstates - 1] = v[nstates - 1] - v[nstates - 2];
 }
 
+// y = Mx + beta * y = | 1 0 | | x[0] | + beta | y[0] |
+//                     | 0 0 | | x[1] |         | y[1] |
 fn exponential_decay_with_algebraic_mass<M: DenseMatrix>(
     x: &M::V,
     _p: &M::V,
     _t: M::T,
+    beta: M::T,
     y: &mut M::V,
 ) {
-    y.copy_from(x);
     let nstates = y.len();
-    y[nstates - 1] = M::T::zero();
+    let yn = beta * y[nstates - 1];
+    y.axpy(M::T::one(), x, beta);
+    y[nstates - 1] = yn;
 }
 
 fn exponential_decay_with_algebraic_init<M: DenseMatrix>(_p: &M::V, _t: M::T) -> M::V {
@@ -63,6 +67,7 @@ pub fn exponential_decay_with_algebraic_problem<M: DenseMatrix + 'static>(
     let problem = OdeBuilder::new()
         .p([0.1])
         .use_coloring(use_coloring)
+        .constant_mass(true)
         .build_ode_with_mass(
             exponential_decay_with_algebraic::<M>,
             exponential_decay_with_algebraic_jacobian::<M>,

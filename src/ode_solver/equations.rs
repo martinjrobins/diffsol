@@ -96,11 +96,15 @@ pub trait OdeEquations: Op {
         closure.jacobian(x, t)
     }
 
-    /// calculate the action of the mass matrix $M$ on the vector $v$ at time $t$, i,e. $y = M(t)v$.
+    fn is_mass_constant(&self) -> bool {
+        true
+    }
+
+    /// calculate the action of the mass matrix $M$ on the vector $v$ at time $t$, i,e. $y = M(t)v + beta y$.
     /// The default implementation assumes that the mass matrix is the identity matrix and returns $y = v$.
-    fn mass_inplace(&self, _t: Self::T, v: &Self::V, y: &mut Self::V) {
+    fn mass_inplace(&self, _t: Self::T, v: &Self::V, beta: Self::T, y: &mut Self::V) {
         // assume identity mass matrix
-        y.copy_from(v);
+        y.axpy(Self::T::one(), v, beta);
     }
 
     /// For semi-explicit DAEs (with zeros on the diagonal of the mass matrix), this function
@@ -134,7 +138,7 @@ where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &mut M::V),
+    H: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
     I: Fn(&M::V, M::T) -> M::V,
 {
     rhs: F,
@@ -146,6 +150,7 @@ where
     jacobian_coloring: Option<JacobianColoring>,
     mass_coloring: Option<JacobianColoring>,
     statistics: RefCell<OdeEquationsStatistics>,
+    mass_is_constant: bool,
 }
 
 impl<M, F, G, H, I> OdeSolverEquations<M, F, G, H, I>
@@ -153,10 +158,11 @@ where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &mut M::V),
+    H: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
     I: Fn(&M::V, M::T) -> M::V,
 {
-    pub fn new_ode_with_mass(
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_ode_with_mass(
         rhs: F,
         rhs_jac: G,
         mass: H,
@@ -164,6 +170,7 @@ where
         p: M::V,
         t0: M::T,
         use_coloring: bool,
+        mass_is_constant: bool,
     ) -> Self {
         let y0 = init(&p, M::T::zero());
         let nstates = y0.len();
@@ -179,6 +186,7 @@ where
             jacobian_coloring: None,
             mass_coloring: None,
             statistics,
+            mass_is_constant,
         };
         let (jacobian_coloring, mass_coloring) = if use_coloring {
             let rhs_inplace = |x: &M::V, _p: &M::V, t: M::T, y_rhs: &mut M::V| {
@@ -188,7 +196,7 @@ where
                 ret.rhs_jac_inplace(t, x, v, y);
             };
             let mass_inplace = |x: &M::V, _p: &M::V, t: M::T, y: &mut M::V| {
-                ret.mass_inplace(t, x, y);
+                ret.mass_inplace(t, x, M::T::zero(), y);
             };
             let op =
                 Closure::<M, _, _>::new(rhs_inplace, rhs_jac_inplace, nstates, nstates, p.clone());
@@ -210,7 +218,7 @@ where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &mut M::V),
+    H: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
     I: Fn(&M::V, M::T) -> M::V,
 {
     type M = M;
@@ -233,7 +241,7 @@ where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &mut M::V),
+    H: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
     I: Fn(&M::V, M::T) -> M::V,
 {
     fn rhs_inplace(&self, t: Self::T, y: &Self::V, rhs_y: &mut Self::V) {
@@ -248,9 +256,13 @@ where
         self.statistics.borrow_mut().number_of_jac_mul_evals += 1;
     }
 
-    fn mass_inplace(&self, t: Self::T, v: &Self::V, y: &mut Self::V) {
+    fn is_mass_constant(&self) -> bool {
+        self.mass_is_constant
+    }
+
+    fn mass_inplace(&self, t: Self::T, v: &Self::V, beta: Self::T, y: &mut Self::V) {
         let p = self.p.as_ref();
-        (self.mass)(v, p, t, y);
+        (self.mass)(v, p, t, beta, y);
         self.statistics.borrow_mut().number_of_mass_evals += 1;
     }
 
@@ -290,7 +302,7 @@ where
     fn mass_matrix(&self, t: Self::T) -> Self::M {
         self.statistics.borrow_mut().number_of_mass_matrix_evals += 1;
         let mass_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y: &mut Self::V| {
-            self.mass_inplace(t, x, y);
+            self.mass_inplace(t, x, Self::T::zero(), y);
         };
         let op =
             LinearClosure::<M, _>::new(mass_inplace, self.nstates, self.nstates, self.p.clone());

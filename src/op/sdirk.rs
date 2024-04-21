@@ -19,13 +19,10 @@ pub struct SdirkCallable<Eqn: OdeEquations> {
     h: RefCell<Eqn::T>,
     phi: RefCell<Eqn::V>,
     tmp: RefCell<Eqn::V>,
-    tmp2: RefCell<Eqn::V>,
     jac: RefCell<Eqn::M>,
     rhs_jac: RefCell<Eqn::M>,
     mass_jac: RefCell<Eqn::M>,
-    rhs_jacobian_is_stale: RefCell<bool>,
     jacobian_is_stale: RefCell<bool>,
-    mass_jacobian_is_stale: RefCell<bool>,
     number_of_jac_evals: RefCell<usize>,
 }
 
@@ -37,13 +34,15 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
         let phi = RefCell::new(<Eqn::V as Vector>::zeros(n));
         let rhs_jac = RefCell::new(Eqn::M::zeros(n, n));
         let jac = RefCell::new(Eqn::M::zeros(n, n));
-        let mass_jac = RefCell::new(Eqn::M::zeros(n, n));
-        let rhs_jacobian_is_stale = RefCell::new(true);
         let jacobian_is_stale = RefCell::new(true);
-        let mass_jacobian_is_stale = RefCell::new(true);
         let number_of_jac_evals = RefCell::new(0);
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n));
-        let tmp2 = RefCell::new(<Eqn::V as Vector>::zeros(n));
+
+        let mass_jac = if eqn.is_mass_constant() {
+            RefCell::new(eqn.mass_matrix(Eqn::T::zero()))
+        } else {
+            RefCell::new(Eqn::M::zeros(n, n))
+        };
 
         Self {
             eqn,
@@ -53,12 +52,9 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
             jac,
             rhs_jac,
             mass_jac,
-            rhs_jacobian_is_stale,
             jacobian_is_stale,
-            mass_jacobian_is_stale,
             number_of_jac_evals,
             tmp,
-            tmp2,
         }
     }
 
@@ -70,7 +66,7 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
         for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
     {
         self.h.replace(h);
-        if !*self.rhs_jacobian_is_stale.borrow() && !*self.mass_jacobian_is_stale.borrow() {
+        if !*self.jacobian_is_stale.borrow() {
             let rhs_jac_ref = self.rhs_jac.borrow();
             let rhs_jac = rhs_jac_ref.deref();
             let mass_jac_ref = self.mass_jac.borrow();
@@ -78,8 +74,6 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
             let h = *self.h.borrow().deref();
             let ch = self.c * h;
             self.jac.replace(mass_jac - rhs_jac * scale(ch));
-        } else {
-            self.jacobian_is_stale.replace(true);
         }
     }
     pub fn get_last_f_eval(&self) -> Ref<Eqn::V> {
@@ -111,8 +105,7 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
         tmp.axpy(c, x, Eqn::T::one());
     }
 
-    pub fn set_rhs_jacobian_is_stale(&self) {
-        self.rhs_jacobian_is_stale.replace(true);
+    pub fn set_jacobian_is_stale(&self) {
         self.jacobian_is_stale.replace(true);
     }
 }
@@ -141,54 +134,46 @@ where
     fn call_inplace(&self, x: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
         self.set_tmp(x);
         let tmp = self.tmp.borrow();
-        let mut tmp2 = self.tmp2.borrow_mut();
         let h = *self.h.borrow().deref();
 
         self.eqn.rhs_inplace(t, &tmp, y);
-        self.eqn.mass_inplace(t, x, &mut tmp2);
 
-        // y = tmp  - h y
-        y.axpy(Eqn::T::one(), &tmp2, -h);
+        // y = Mx - h y
+        self.eqn.mass_inplace(t, x, -h, y);
     }
     // (M - c * h * f'(phi + c * y)) v
     fn jac_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
         self.set_tmp(x);
         let tmp = self.tmp.borrow();
-        let mut tmp2 = self.tmp2.borrow_mut();
         let h = *self.h.borrow().deref();
         let c = self.c;
 
         self.eqn.rhs_jac_inplace(t, &tmp, v, y);
-        self.eqn.mass_inplace(t, v, &mut tmp2);
 
-        // y = tmp  - c * h * y
-        y.axpy(Eqn::T::one(), &tmp2, -c * h);
+        // y = Mv - c h y
+        self.eqn.mass_inplace(t, v, -c * h, y);
     }
 
     // M - c * h * f'(phi + c * y)
     fn jacobian(&self, x: &Eqn::V, t: Eqn::T) -> Eqn::M {
-        if *self.mass_jacobian_is_stale.borrow() {
-            self.mass_jac.replace(self.eqn.mass_matrix(t));
-            self.mass_jacobian_is_stale.replace(false);
-            self.jacobian_is_stale.replace(true);
-        }
-        if *self.rhs_jacobian_is_stale.borrow() {
+        if *self.jacobian_is_stale.borrow() {
             self.set_tmp(x);
             let tmp_ref = self.tmp.borrow();
             let tmp = tmp_ref.deref();
 
-            self.rhs_jac.replace(self.eqn.jacobian_matrix(tmp, t));
-            self.rhs_jacobian_is_stale.replace(false);
-            self.jacobian_is_stale.replace(true);
-        }
-        if *self.jacobian_is_stale.borrow() {
-            let rhs_jac_ref = self.rhs_jac.borrow();
-            let rhs_jac = rhs_jac_ref.deref();
-            let mass_jac_ref = self.mass_jac.borrow();
-            let mass_jac = mass_jac_ref.deref();
-            let h = *self.h.borrow().deref();
+            let rhs_jac = self.eqn.jacobian_matrix(tmp, t);
             let c = self.c;
-            self.jac.replace(mass_jac - rhs_jac * scale(c * h));
+            let h = *self.h.borrow().deref();
+
+            if self.eqn.is_mass_constant() {
+                let mass_jac = self.mass_jac.borrow();
+                self.jac.replace(mass_jac.deref() - &rhs_jac * scale(c * h));
+            } else {
+                let mass_jac = self.eqn.mass_matrix(t);
+                self.jac.replace(&mass_jac - &rhs_jac * scale(c * h));
+                self.mass_jac.replace(mass_jac);
+            }
+            self.rhs_jac.replace(rhs_jac);
             self.jacobian_is_stale.replace(false);
         }
         let number_of_jac_evals = *self.number_of_jac_evals.borrow() + 1;

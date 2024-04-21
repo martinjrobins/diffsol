@@ -1,3 +1,4 @@
+use num_traits::Zero;
 use std::{cell::RefCell, rc::Rc};
 
 use anyhow::Result;
@@ -18,6 +19,7 @@ pub struct DiffSl {
     compiler: Compiler,
     data: RefCell<Vec<T>>,
     ddata: RefCell<Vec<T>>,
+    tmp: RefCell<V>,
     nstates: usize,
     nparams: usize,
     nout: usize,
@@ -38,6 +40,8 @@ impl DiffSl {
         let data = RefCell::new(data);
         let ddata = RefCell::new(ddata);
         let (nstates, nparams, nout, _ndata, _stop) = compiler.get_dims();
+
+        let tmp = RefCell::new(V::zeros(nstates));
 
         let (jacobian_coloring, mass_coloring) = if use_coloring {
             let rhs_inplace = |x: &V, _p: &V, t: T, y_rhs: &mut V| {
@@ -91,6 +95,7 @@ impl DiffSl {
             nout,
             jacobian_coloring,
             mass_coloring,
+            tmp,
         })
     }
     pub fn out(&self, t: T, y: &V) -> &[T] {
@@ -157,7 +162,7 @@ impl OdeEquations for DiffSl {
 
     fn mass_matrix(&self, t: Self::T) -> Self::M {
         let mass_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y: &mut Self::V| {
-            self.mass_inplace(t, x, y);
+            self.mass_inplace(t, x, Self::T::zero(), y);
         };
         let dummy_p = Rc::new(V::zeros(0));
         let op = LinearClosure::<M, _>::new(mass_inplace, self.nstates, self.nstates, dummy_p);
@@ -199,13 +204,17 @@ impl OdeEquations for DiffSl {
             .set_u0(ret_y.as_mut_slice(), self.data.borrow_mut().as_mut_slice());
         ret_y
     }
-    fn mass_inplace(&self, t: Self::T, v: &Self::V, y: &mut Self::V) {
+    fn mass_inplace(&self, t: Self::T, v: &Self::V, beta: Self::T, y: &mut Self::V) {
+        let mut tmp = self.tmp.borrow_mut();
         self.compiler.mass(
             t,
             v.as_slice(),
             self.data.borrow_mut().as_mut_slice(),
-            y.as_mut_slice(),
+            tmp.as_mut_slice(),
         );
+
+        // y = tmp + beta * y
+        y.axpy(1.0, &tmp, beta);
     }
 }
 
@@ -280,7 +289,7 @@ mod tests {
         rhs_jac.assert_eq_st(&rhs_jac_expect, 1e-10);
         let mut mass_y = DVector::from_vec(vec![0.0, 0.0]);
         let v = DVector::from_vec(vec![1.0, 1.0]);
-        eqn.mass_inplace(0.0, &v, &mut mass_y);
+        eqn.mass_inplace(0.0, &v, 1.0, &mut mass_y);
         let mass_y_expect = DVector::from_vec(vec![1.0, 0.0]);
         mass_y.assert_eq_st(&mass_y_expect, 1e-10);
 

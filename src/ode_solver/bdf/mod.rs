@@ -377,6 +377,8 @@ where
 
         // setup linear solver for first step
         let bdf_callable = Rc::new(BdfCallable::new(problem));
+        bdf_callable.set_c(state.h, self.alpha[self.order]);
+
         let nonlinear_problem = SolverProblem::new_from_ode_problem(bdf_callable, problem);
         self.nonlinear_solver
             .as_mut()
@@ -482,7 +484,7 @@ where
                         // newton iteration did not converge, so update jacobian and try again
                         {
                             let callable = self.nonlinear_problem_op().unwrap();
-                            callable.set_rhs_jacobian_is_stale();
+                            callable.set_jacobian_is_stale();
                         }
                         self.nonlinear_solver.as_mut().reset();
                         updated_jacobian = true;

@@ -141,14 +141,11 @@ where
         let y = SundialsVector::new_not_owned(y);
         let yp = SundialsVector::new_not_owned(yp);
         let mut rr = SundialsVector::new_not_owned(rr);
-        // F(t, y, y') = f(t, y) - M y'
+        // F(t, y, y') =  M y' - f(t, y)
         // rr = f(t, y)
         data.eqn.rhs_inplace(t, &y, &mut rr);
-        // tmp = M y'
-        let mut tmp = SundialsVector::new_clone(&y);
-        data.eqn.mass_inplace(t, &yp, &mut tmp);
-        // rr = -M y' + rr (gemv)
-        rr.axpy(-1., &tmp, 1.);
+        // rr = M y' - rr
+        data.eqn.mass_inplace(t, &yp, -1.0, &mut rr);
         0
     }
 
@@ -167,12 +164,12 @@ where
         let data = unsafe { &*(user_data as *const SundialsData<Eqn>) };
         let eqn = &data.eqn;
 
-        // jac = rhs_jac - c_j * M
+        // jac = c_j * M - rhs_jac
         let y = SundialsVector::new_not_owned(y);
         let mut jac = SundialsMatrix::new_not_owned(jac);
         jac.copy_from(&eqn.mass_matrix(t));
-        jac *= scale(-c_j);
-        jac += &eqn.jacobian_matrix(&y, t);
+        jac *= scale(c_j);
+        jac -= &eqn.jacobian_matrix(&y, t);
         0
     }
 

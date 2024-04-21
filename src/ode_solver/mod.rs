@@ -194,21 +194,21 @@ mod tests {
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 18
+        number_of_linear_solver_setups: 17
         number_of_steps: 21
-        number_of_error_test_failures: 7
+        number_of_error_test_failures: 8
         number_of_nonlinear_solver_iterations: 58
-        number_of_nonlinear_solver_fails: 2
+        number_of_nonlinear_solver_fails: 0
         initial_step_size: 0.004450050658086208
-        final_step_size: 0.20974041151932246
+        final_step_size: 0.20995860176773154
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
         number_of_rhs_evals: 62
-        number_of_jac_mul_evals: 7
+        number_of_jac_mul_evals: 4
         number_of_mass_evals: 64
         number_of_mass_matrix_evals: 2
-        number_of_jacobian_matrix_evals: 2
+        number_of_jacobian_matrix_evals: 1
         "###);
     }
 
@@ -277,16 +277,16 @@ mod tests {
         number_of_linear_solver_setups: 106
         number_of_steps: 345
         number_of_error_test_failures: 5
-        number_of_nonlinear_solver_iterations: 983
+        number_of_nonlinear_solver_iterations: 985
         number_of_nonlinear_solver_fails: 22
         initial_step_size: 0.0000045643545698038086
         final_step_size: 5435491162.573224
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
-        number_of_rhs_evals: 986
+        number_of_rhs_evals: 988
         number_of_jac_mul_evals: 55
-        number_of_mass_evals: 989
+        number_of_mass_evals: 991
         number_of_mass_matrix_evals: 2
         number_of_jacobian_matrix_evals: 18
         "###);
@@ -330,16 +330,16 @@ mod tests {
         number_of_linear_solver_setups: 106
         number_of_steps: 345
         number_of_error_test_failures: 5
-        number_of_nonlinear_solver_iterations: 983
+        number_of_nonlinear_solver_iterations: 985
         number_of_nonlinear_solver_fails: 22
         initial_step_size: 0.0000045643545698038086
         final_step_size: 5435491162.573224
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
-        number_of_rhs_evals: 986
+        number_of_rhs_evals: 988
         number_of_jac_mul_evals: 58
-        number_of_mass_evals: 988
+        number_of_mass_evals: 990
         number_of_mass_matrix_evals: 2
         number_of_jacobian_matrix_evals: 18
         "###);
@@ -381,20 +381,20 @@ mod tests {
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 106
-        number_of_steps: 346
-        number_of_error_test_failures: 7
-        number_of_nonlinear_solver_iterations: 982
-        number_of_nonlinear_solver_fails: 20
+        number_of_steps: 345
+        number_of_error_test_failures: 5
+        number_of_nonlinear_solver_iterations: 981
+        number_of_nonlinear_solver_fails: 22
         initial_step_size: 0.0000038381494276795106
-        final_step_size: 5227948052.846298
+        final_step_size: 5636682847.540523
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
-        number_of_rhs_evals: 984
-        number_of_jac_mul_evals: 57
+        number_of_rhs_evals: 983
+        number_of_jac_mul_evals: 54
         number_of_mass_evals: 0
         number_of_mass_matrix_evals: 0
-        number_of_jacobian_matrix_evals: 19
+        number_of_jacobian_matrix_evals: 18
         "###);
     }
 
@@ -408,15 +408,15 @@ mod tests {
         ---
         number_of_linear_solver_setups: 65
         number_of_steps: 205
-        number_of_error_test_failures: 12
-        number_of_nonlinear_solver_iterations: 591
-        number_of_nonlinear_solver_fails: 5
+        number_of_error_test_failures: 10
+        number_of_nonlinear_solver_iterations: 593
+        number_of_nonlinear_solver_fails: 7
         initial_step_size: 0.0000019982428436469115
-        final_step_size: 1.0775215291906979
+        final_step_size: 1.0781694150073
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
-        number_of_rhs_evals: 593
+        number_of_rhs_evals: 595
         number_of_jac_mul_evals: 60
         number_of_mass_evals: 0
         number_of_mass_matrix_evals: 0
@@ -434,15 +434,15 @@ mod tests {
         ---
         number_of_linear_solver_setups: 65
         number_of_steps: 205
-        number_of_error_test_failures: 12
-        number_of_nonlinear_solver_iterations: 591
-        number_of_nonlinear_solver_fails: 5
+        number_of_error_test_failures: 10
+        number_of_nonlinear_solver_iterations: 593
+        number_of_nonlinear_solver_fails: 7
         initial_step_size: 0.0000019982428436469115
-        final_step_size: 1.0775215291906979
+        final_step_size: 1.0781694150073
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---
-        number_of_rhs_evals: 593
+        number_of_rhs_evals: 595
         number_of_jac_mul_evals: 16
         number_of_mass_evals: 0
         number_of_mass_matrix_evals: 0
@@ -458,13 +458,13 @@ mod tests {
         test_ode_solver(&mut s, rs, problem.clone(), soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 16
-        number_of_steps: 59
-        number_of_error_test_failures: 4
+        number_of_linear_solver_setups: 14
+        number_of_steps: 58
+        number_of_error_test_failures: 2
         number_of_nonlinear_solver_iterations: 159
         number_of_nonlinear_solver_fails: 0
         initial_step_size: 0.0025148668593658707
-        final_step_size: 0.19573299396674515
+        final_step_size: 0.19566316816600493
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
         ---

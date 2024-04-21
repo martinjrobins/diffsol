@@ -14,6 +14,7 @@ pub fn robertson<M: Matrix + 'static>(
         .rtol(1e-4)
         .atol([1.0e-8, 1.0e-6, 1.0e-6])
         .use_coloring(use_coloring)
+        .constant_mass(true)
         .build_ode_with_mass(
             //*      dy1/dt = -.04*y1 + 1.e4*y2*y3
             //*      dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*y2**2
@@ -31,10 +32,10 @@ pub fn robertson<M: Matrix + 'static>(
                     - M::T::from(2.0) * p[2] * x[1] * v[1];
                 y[2] = v[0] + v[1] + v[2];
             },
-            |x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V| {
-                y[0] = x[0];
-                y[1] = x[1];
-                y[2] = 0.0.into();
+            |x: &M::V, _p: &M::V, _t: M::T, beta: M::T, y: &mut M::V| {
+                y[0] = x[0] + beta * y[0];
+                y[1] = x[1] + beta * y[1];
+                y[2] = beta * y[2];
             },
             |_p: &M::V, _t: M::T| M::V::from_vec(vec![1.0.into(), 0.0.into(), 0.0.into()]),
         )
