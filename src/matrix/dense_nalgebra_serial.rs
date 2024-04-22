@@ -9,6 +9,7 @@ use crate::{scalar::Scale, IndexType, Scalar};
 use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU};
 
 use super::default_solver::DefaultSolver;
+use super::Dense;
 
 impl<T: Scalar> DefaultSolver for DMatrix<T> {
     type LS<C: LinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> = NalgebraLU<T, C>;
@@ -19,13 +20,16 @@ macro_rules! impl_matrix_common {
         impl<'a, T: Scalar> MatrixCommon for $matrix_type {
             type V = DVector<T>;
             type T = T;
+            type Sparsity = Dense;
 
-            fn ncols(&self) -> IndexType {
-                self.ncols()
+            fn sparsity(&self) -> &Self::Sparsity {
+                &Dense
             }
-
             fn nrows(&self) -> IndexType {
                 self.nrows()
+            }
+            fn ncols(&self) -> IndexType {
+                self.ncols()
             }
         }
     };
@@ -118,6 +122,9 @@ impl<T: Scalar> Matrix for DMatrix<T> {
     }
     fn copy_from(&mut self, other: &Self) {
         self.copy_from(other);
+    }
+    fn set_column(&mut self, j: IndexType, v: &Self::V) {
+        self.column_mut(j).copy_from(v);
     }
 }
 

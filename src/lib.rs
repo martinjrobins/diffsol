@@ -151,14 +151,14 @@ pub use linear_solver::sundials::SundialsLinearSolver;
 #[cfg(feature = "sundials")]
 pub use ode_solver::sundials::SundialsIda;
 
-use matrix::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
+use matrix::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, MatrixSparsity};
 pub use nonlinear_solver::newton::NewtonNonlinearSolver;
 use nonlinear_solver::NonLinearSolver;
 pub use ode_solver::{
     bdf::Bdf, builder::OdeBuilder, equations::OdeEquations, method::OdeSolverMethod,
     method::OdeSolverState, problem::OdeSolverProblem, sdirk::Sdirk, tableau::Tableau,
 };
-use op::NonLinearOp;
+use op::{NonLinearOp, LinearOp, closure::Closure, linear_closure::LinearClosure, Op};
 use scalar::{IndexType, Scalar, Scale};
 use solver::SolverProblem;
 use vector::{Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut};

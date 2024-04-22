@@ -1,6 +1,5 @@
 use crate::{
-    matrix::MatrixRef, ode_solver::equations::OdeEquations, scale, Matrix, OdeSolverProblem,
-    Vector, VectorRef,
+    matrix::{MatrixCommon, MatrixRef}, ode_solver::equations::OdeEquations, scale, LinearOp, Matrix, MatrixSparsity, OdeSolverProblem, Vector, VectorRef
 };
 use num_traits::Zero;
 use std::{
@@ -22,12 +21,13 @@ pub struct BdfCallable<Eqn: OdeEquations> {
     mass_jac: RefCell<Eqn::M>,
     jacobian_is_stale: RefCell<bool>,
     number_of_jac_evals: RefCell<usize>,
+    sparsity: <Eqn::M as MatrixCommon>::Sparsity,
 }
 
 impl<Eqn: OdeEquations> BdfCallable<Eqn> {
     pub fn new(ode_problem: &OdeSolverProblem<Eqn>) -> Self {
         let eqn = ode_problem.eqn.clone();
-        let n = ode_problem.eqn.nstates();
+        let n = ode_problem.eqn.rhs().nstates();
         let c = RefCell::new(Eqn::T::zero());
         let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n));
         let rhs_jac = RefCell::new(Eqn::M::zeros(n, n));
@@ -36,10 +36,14 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
         let number_of_jac_evals = RefCell::new(0);
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n));
 
+        let mass_sparsity = LinearOp::sparsity(eqn.mass());
+        let rhs_jac_sparsity = NonLinearOp::sparsity(eqn.rhs());
+        let sparsity = mass_sparsity.union(rhs_jac_sparsity).unwrap();
+
         let mass_jac = if eqn.is_mass_constant() {
-            RefCell::new(eqn.mass_matrix(Eqn::T::zero()))
+            RefCell::new(eqn.mass().matrix(Eqn::T::zero()))
         } else {
-            RefCell::new(Eqn::M::zeros(n, n))
+            RefCell::new(<Eqn::M as Matrix>::zeros(n, n))
         };
 
         Self {
@@ -52,8 +56,11 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
             jacobian_is_stale,
             number_of_jac_evals,
             tmp,
+            sparsity,
         }
     }
+
+    
 
     #[cfg(test)]
     fn set_c_direct(&mut self, c: Eqn::T) {
@@ -98,13 +105,13 @@ impl<Eqn: OdeEquations> Op for BdfCallable<Eqn> {
     type T = Eqn::T;
     type M = Eqn::M;
     fn nstates(&self) -> usize {
-        self.eqn.nstates()
+        self.eqn.rhs().nstates()
     }
     fn nout(&self) -> usize {
-        self.eqn.nstates()
+        self.eqn.rhs().nstates()
     }
     fn nparams(&self) -> usize {
-        self.eqn.nparams()
+        self.eqn.rhs().nparams()
     }
 }
 
@@ -119,41 +126,46 @@ where
         let psi_neg_y0_ref = self.psi_neg_y0.borrow();
         let psi_neg_y0 = psi_neg_y0_ref.deref();
 
-        self.eqn.rhs_inplace(t, x, y);
+        self.eqn.rhs().call_inplace(x, t, y);
 
         let mut tmp = self.tmp.borrow_mut();
         tmp.copy_from(x);
         tmp.add_assign(psi_neg_y0);
         let c = *self.c.borrow().deref();
         // y = M tmp - c * y
-        self.eqn.mass_inplace(t, &tmp, -c, y);
+        self.eqn.mass().gemv_inplace(&tmp, t, -c, y);
     }
     // (M - c * f'(y)) v
     fn jac_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
-        self.eqn.rhs_jac_inplace(t, x, v, y);
+        self.eqn.rhs().jac_mul_inplace(x, t, v, y);
         let c = *self.c.borrow().deref();
         // y = Mv - c y
-        self.eqn.mass_inplace(t, v, -c, y);
+        self.eqn.mass().gemv_inplace(v, t, -c, y);
     }
 
-    fn jacobian(&self, x: &Eqn::V, t: Eqn::T) -> Eqn::M {
+    fn sparsity(&self) -> &<Self::M as MatrixCommon>::Sparsity {
+        &self.sparsity
+    }
+
+    fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         if *self.jacobian_is_stale.borrow() {
-            let rhs_jac = self.eqn.jacobian_matrix(x, t);
+            let rhs_jac = self.rhs_jac.borrow_mut();
+            self.eqn.rhs().jacobian_inplace(x, t, &mut rhs_jac);
             let c = *self.c.borrow().deref();
             if self.eqn.is_mass_constant() {
                 let mass_jac = self.mass_jac.borrow();
-                self.jac.replace(mass_jac.deref() - &rhs_jac * scale(c));
+                let jac = self.jac.borrow_mut();
+                jac.scale_add_and_assign(mass_jac.deref(), -c, rhs_jac.deref());
             } else {
-                let mass_jac = self.eqn.mass_matrix(t);
-                self.jac.replace(&mass_jac - &rhs_jac * scale(c));
-                self.mass_jac.replace(mass_jac);
+                let mass_jac = self.mass_jac.borrow_mut();
+                self.eqn.mass().matrix_inplace(t, &mut mass_jac);
+                let jac = self.jac.borrow_mut();
+                jac.scale_add_and_assign(mass_jac.deref(), -c, rhs_jac.deref());
             }
-            self.rhs_jac.replace(rhs_jac);
             self.jacobian_is_stale.replace(false);
         }
         let number_of_jac_evals = *self.number_of_jac_evals.borrow() + 1;
         self.number_of_jac_evals.replace(number_of_jac_evals);
-        self.jac.borrow().clone()
     }
 }
 

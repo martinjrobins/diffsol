@@ -1,10 +1,14 @@
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
+use num_traits::One;
+
+use crate::{scale, Vector};
 
 use super::{LinearOp, NonLinearOp, Op};
 
 pub struct LinearisedOp<C: NonLinearOp> {
     callable: Rc<C>,
     x: C::V,
+    tmp: RefCell<C::V>,
 }
 
 impl<C: NonLinearOp> LinearisedOp<C> {
@@ -12,6 +16,7 @@ impl<C: NonLinearOp> LinearisedOp<C> {
         Self {
             callable,
             x: x.clone(),
+            tmp: RefCell::new(C::V::zeros(callable.nstates())),
         }
     }
 }
@@ -35,7 +40,13 @@ impl<C: NonLinearOp> LinearOp for LinearisedOp<C> {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
         self.callable.jac_mul_inplace(&self.x, t, x, y);
     }
-    fn jacobian(&self, t: Self::T) -> Self::M {
-        self.callable.jacobian(&self.x, t)
+    fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
+        let tmp = self.tmp.borrow_mut();
+        tmp.copy_from(y);
+        self.callable.jac_mul_inplace(&self.x, t, x, y);
+        y.axpy(beta, &tmp, Self::T::one());
+    }
+    fn sparsity(&self) -> &<Self::M as crate::matrix::Matrix>::Sparsity {
+        self.callable.sparsity()
     }
 }

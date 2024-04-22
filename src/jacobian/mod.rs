@@ -1,6 +1,6 @@
 use crate::vector::Vector;
 use crate::Scalar;
-use crate::{matrix::DenseMatrix, op::NonLinearOp, VectorViewMut};
+use crate::{matrix::DenseMatrix, op::NonLinearOp, VectorViewMut, MatrixSparsity, Matrix};
 use num_traits::{One, Zero};
 
 use self::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy};
@@ -30,46 +30,6 @@ pub fn find_non_zeros<F: NonLinearOp + ?Sized>(op: &F, x: &F::V, t: F::T) -> Vec
     triplets
 }
 
-/// Find the non-zero entries of the Jacobian matrix of a non-linear operator.
-/// This is used in the default `jacobian` method of the `NonLinearOp` and `LinearOp` traits.
-pub fn find_non_zero_entries<F: NonLinearOp + ?Sized>(
-    op: &F,
-    x: &F::V,
-    t: F::T,
-) -> Vec<(usize, usize, F::T)> {
-    let mut v = F::V::zeros(op.nstates());
-    let mut col = F::V::zeros(op.nout());
-    let mut triplets = Vec::with_capacity(op.nstates());
-    for j in 0..op.nstates() {
-        v[j] = F::T::one();
-        op.jac_mul_inplace(x, t, &v, &mut col);
-        for i in 0..op.nout() {
-            if col[i] != F::T::zero() {
-                triplets.push((i, j, col[i]));
-            }
-        }
-        v[j] = F::T::zero();
-    }
-    triplets
-}
-
-/// Calculate the dense Jacobian matrix of a non-linear operator, overwrites a given dense matrix `y`.
-pub fn jacobian_dense<F: NonLinearOp + ?Sized>(op: &F, x: &F::V, t: F::T, y: &mut F::M)
-where
-    F::M: DenseMatrix,
-{
-    let mut v = F::V::zeros(op.nstates());
-    let mut col = F::V::zeros(op.nout());
-    for j in 0..op.nstates() {
-        v[j] = F::T::one();
-        // TODO: should be able to just give col_dest here!
-        op.jac_mul_inplace(x, t, &v, &mut col);
-        let mut col_dest = y.column_mut(j);
-        col_dest.copy_from(&col);
-        v[j] = F::T::zero();
-    }
-}
-
 pub struct JacobianColoring {
     cols_per_color: Vec<Vec<usize>>,
     ij_per_color: Vec<Vec<(usize, usize)>>,
@@ -77,7 +37,7 @@ pub struct JacobianColoring {
 
 impl JacobianColoring {
     pub fn new<F: NonLinearOp>(op: &F, x: &F::V, t: F::T) -> Self {
-        let non_zeros = op.find_non_zeros(x, t);
+        let non_zeros = op.sparsity().indices();
         let ncols = op.nstates();
         let graph = nonzeros2graph(non_zeros.as_slice(), ncols);
         let coloring = color_graph_greedy(&graph);
@@ -129,6 +89,7 @@ impl JacobianColoring {
 mod tests {
     use std::rc::Rc;
 
+    use crate::matrix::MatrixSparsity;
     use crate::op::Op;
     use crate::{
         jacobian::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy},
@@ -172,7 +133,7 @@ mod tests {
             let op = helper_triplets2op(triplets.as_slice(), 2, 2);
             let x = DVector::from_vec(vec![1.0, 1.0]);
             let t = 0.0;
-            let non_zeros = op.find_non_zeros(&x, t);
+            let non_zeros = op.sparsity().indices();
             let expect = triplets
                 .iter()
                 .map(|(i, j, _v)| (*i, *j))
@@ -195,7 +156,7 @@ mod tests {
             let x = DVector::from_vec(vec![1.0, 1.0]);
             let t = 0.0;
 
-            let non_zeros = op.find_non_zeros(&x, t);
+            let non_zeros = op.sparsity().indices();
             let ncols = op.nstates();
             let graph = nonzeros2graph(non_zeros.as_slice(), ncols);
             let coloring = color_graph_greedy(&graph);

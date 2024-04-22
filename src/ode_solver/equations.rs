@@ -2,9 +2,7 @@ use num_traits::Zero;
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    jacobian::{find_non_zero_entries, JacobianColoring},
-    op::{closure::Closure, linear_closure::LinearClosure, Op},
-    Matrix, NonLinearOp, Vector, VectorIndex,
+    jacobian::{find_non_zero_entries, JacobianColoring}, scalar::Scalar, Closure, LinearClosure, LinearOp, Matrix, MatrixSparsity, NonLinearOp, Op, Vector, VectorIndex
 };
 use num_traits::One;
 use serde::Serialize;
@@ -44,67 +42,26 @@ impl OdeEquationsStatistics {
 /// $$
 ///
 /// The ODE equations are defined by the right-hand side function $F(t, y, p)$, the initial condition $y_0(t_0, p)$, and the mass matrix $M$.
-pub trait OdeEquations: Op {
+pub trait OdeEquations {
+    type T: Scalar;
+    type V: Vector<T = Self::T>;
+    type M: Matrix<T = Self::T, V = Self::V>;
+    type Mass: LinearOp<M = Self::M, V = Self::V, T = Self::T>;
+    type Rhs: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
+
+
     /// The parameters of the ODE equations are assumed to be constant. This function sets the parameters to the given value before solving the ODE.
     /// Note that `set_params` must always be called before calling any of the other functions in this trait.
     fn set_params(&mut self, p: Self::V);
 
-    /// calculates $F(t, y, p)$ where $y$ is given in `y` and stores the result in `rhs_y`. Note that the parameter vector $p$ is assumed to be
-    /// already provided via [Self::set_params()]
-    fn rhs_inplace(&self, t: Self::T, y: &Self::V, rhs_y: &mut Self::V);
-
-    /// calculates $y = J(x)v$, where $J(x)$ is the Jacobian matrix of the right-hand side function $F(t, y, p)$ at $y = x$. The result is stored in `y`.
-    fn rhs_jac_inplace(&self, t: Self::T, x: &Self::V, v: &Self::V, y: &mut Self::V);
+    fn rhs(&self) -> &Self::Rhs;
+    fn mass(&self) -> &Self::Mass;
 
     /// returns the initial condition, i.e. $y(t_0, p)$
     fn init(&self, t: Self::T) -> Self::V;
 
-    /// calculates the right-hand side function $F(t, y, p)$ where $y$ is given in `y`. The result is allocated and returned.
-    /// The default implementation calls [Self::rhs_inplace()] and allocates a new vector for the result.
-    fn rhs(&self, t: Self::T, y: &Self::V) -> Self::V {
-        let mut rhs_y = Self::V::zeros(self.nstates());
-        self.rhs_inplace(t, y, &mut rhs_y);
-        rhs_y
-    }
-
-    /// calculates $y = J(x)v$, where $J(x)$ is the Jacobian matrix of the right-hand side function $F(t, y, p)$ at $y = x$. The result is allocated and returned.
-    /// The default implementation calls [Self::rhs_jac_inplace()] and allocates a new vector for the result.
-    fn jac_mul(&self, t: Self::T, x: &Self::V, v: &Self::V) -> Self::V {
-        let mut rhs_jac_y = Self::V::zeros(self.nstates());
-        self.rhs_jac_inplace(t, x, v, &mut rhs_jac_y);
-        rhs_jac_y
-    }
-
-    /// calculate and return the jacobian matrix $J(x)$ of the right-hand side function $F(t, y, p)$ at $y = x$.
-    /// The default implementation calls [Self::rhs_jac_inplace()] and uses the jacobian calculation in [NonLinearOp].
-    fn jacobian_matrix(&self, x: &Self::V, t: Self::T) -> Self::M {
-        let rhs_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y_rhs: &mut Self::V| {
-            self.rhs_inplace(t, x, y_rhs);
-        };
-        let rhs_jac_inplace =
-            |x: &Self::V, _p: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V| {
-                self.rhs_jac_inplace(t, x, v, y);
-            };
-        let dummy_p = Rc::new(Self::V::zeros(0));
-        let closure = Closure::new(
-            rhs_inplace,
-            rhs_jac_inplace,
-            self.nstates(),
-            self.nstates(),
-            dummy_p,
-        );
-        closure.jacobian(x, t)
-    }
-
     fn is_mass_constant(&self) -> bool {
         true
-    }
-
-    /// calculate the action of the mass matrix $M$ on the vector $v$ at time $t$, i,e. $y = M(t)v + beta y$.
-    /// The default implementation assumes that the mass matrix is the identity matrix and returns $y = v$.
-    fn mass_inplace(&self, _t: Self::T, v: &Self::V, beta: Self::T, y: &mut Self::V) {
-        // assume identity mass matrix
-        y.axpy(Self::T::one(), v, beta);
     }
 
     /// For semi-explicit DAEs (with zeros on the diagonal of the mass matrix), this function
@@ -115,13 +72,6 @@ pub trait OdeEquations: Op {
     fn algebraic_indices(&self) -> <Self::V as Vector>::Index {
         // assume identity mass matrix
         <Self::V as Vector>::Index::zeros(0)
-    }
-
-    /// calculate and return the mass matrix $M(t)$ at time $t$.
-    /// The default implementation assumes that the mass matrix is the identity matrix and returns the identity matrix.
-    fn mass_matrix(&self, _t: Self::T) -> Self::M {
-        // assume identity mass matrix
-        Self::M::from_diagonal(&Self::V::from_element(self.nstates(), Self::T::one()))
     }
 
     /// calculate and return the statistics of the ODE equation object (i.e. how many times the right-hand side function was evaluated, how many times the jacobian was multiplied, etc.)
@@ -141,14 +91,11 @@ where
     H: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
     I: Fn(&M::V, M::T) -> M::V,
 {
-    rhs: F,
-    rhs_jac: G,
-    mass: H,
+    rhs: Closure<M, F, G>,
+    mass: LinearClosure<M, H>,
     init: I,
     p: Rc<M::V>,
     nstates: usize,
-    jacobian_coloring: Option<JacobianColoring>,
-    mass_coloring: Option<JacobianColoring>,
     statistics: RefCell<OdeEquationsStatistics>,
     mass_is_constant: bool,
 }

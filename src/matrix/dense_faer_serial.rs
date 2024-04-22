@@ -1,7 +1,7 @@
 use std::ops::{Mul, MulAssign};
 
 use super::default_solver::DefaultSolver;
-use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
+use super::{DenseMatrix, Dense, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 use crate::scalar::{IndexType, Scalar, Scale};
 use crate::{op::LinearOp, FaerLU};
 use anyhow::Result;
@@ -16,13 +16,16 @@ macro_rules! impl_matrix_common {
         impl<'a, T: Scalar> MatrixCommon for $mat_type {
             type T = T;
             type V = Col<T>;
+            type Sparsity = Dense;
 
-            fn ncols(&self) -> IndexType {
-                self.ncols()
+            fn sparsity(&self) -> &Self::Sparsity {
+                self.sparsity()
             }
-
             fn nrows(&self) -> IndexType {
                 self.nrows()
+            }
+            fn ncols(&self) -> IndexType {
+                self.ncols()
             }
         }
     };
@@ -128,6 +131,7 @@ impl<T: Scalar> DenseMatrix for Mat<T> {
     }
 }
 
+
 impl<T: Scalar> Matrix for Mat<T> {
     fn try_from_triplets(
         nrows: IndexType,
@@ -147,7 +151,7 @@ impl<T: Scalar> Matrix for Mat<T> {
         Self::zeros(nrows, ncols)
     }
     fn copy_from(&mut self, other: &Self) {
-        *self = other.clone();
+        self.copy_from(other);
     }
     fn from_diagonal(v: &Col<T>) -> Self {
         let dim = v.nrows();
@@ -155,5 +159,8 @@ impl<T: Scalar> Matrix for Mat<T> {
     }
     fn diagonal(&self) -> Self::V {
         self.diagonal().column_vector().to_owned()
+    }
+    fn set_column(&mut self, j: IndexType, v: &Self::V) {
+        self.column_mut(j).copy_from(v);
     }
 }

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{matrix::MatrixCommon, Matrix, Vector};
+use crate::{jacobian::{find_non_zeros, JacobianColoring}, matrix::{MatrixCommon, MatrixSparsity}, Matrix, Vector};
 
 use super::{LinearOp, Op};
 
@@ -11,6 +11,7 @@ where
         &<M as MatrixCommon>::V,
         &<M as MatrixCommon>::V,
         <M as MatrixCommon>::T,
+        <M as MatrixCommon>::T,
         &mut <M as MatrixCommon>::V,
     ),
 {
@@ -19,6 +20,8 @@ where
     nout: usize,
     nparams: usize,
     p: Rc<M::V>,
+    coloring: Option<JacobianColoring>,
+    sparsity: Option<M::Sparsity>,
 }
 
 impl<M, F> LinearClosure<M, F>
@@ -27,6 +30,7 @@ where
     F: Fn(
         &<M as MatrixCommon>::V,
         &<M as MatrixCommon>::V,
+        <M as MatrixCommon>::T,
         <M as MatrixCommon>::T,
         &mut <M as MatrixCommon>::V,
     ),
@@ -39,7 +43,15 @@ where
             nout,
             nparams,
             p,
+            coloring: None,
+            sparsity: None,
         }
+    }
+
+    pub fn calculate_sparsity(&mut self, y0: &M::V, t0: M::T) {
+        let non_zeros = find_non_zeros(self, y0, t0);
+        self.sparsity = Some(MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros).expect("invalid sparsity pattern"));
+        self.coloring = Some(JacobianColoring::new(self, y0, t0));
     }
 }
 
@@ -49,6 +61,7 @@ where
     F: Fn(
         &<M as MatrixCommon>::V,
         &<M as MatrixCommon>::V,
+        <M as MatrixCommon>::T,
         <M as MatrixCommon>::T,
         &mut <M as MatrixCommon>::V,
     ),
@@ -74,10 +87,14 @@ where
         &<M as MatrixCommon>::V,
         &<M as MatrixCommon>::V,
         <M as MatrixCommon>::T,
+        <M as MatrixCommon>::T,
         &mut <M as MatrixCommon>::V,
     ),
 {
-    fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
-        (self.func)(x, self.p.as_ref(), t, y)
+    fn gemv_inplace(&self, x: &M::V, t: M::T, beta: M::T, y: &mut M::V) {
+        (self.func)(x, self.p.as_ref(), t, beta, y)
+    }
+    fn sparsity(&self) -> &<Self::M as MatrixCommon>::Sparsity {
+        self.sparsity.as_ref().expect("sparsity not calculated")
     }
 }

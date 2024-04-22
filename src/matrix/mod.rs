@@ -21,11 +21,10 @@ pub mod sundials;
 pub trait MatrixCommon: Sized + Debug {
     type V: Vector<T = Self::T>;
     type T: Scalar;
+    type Sparsity: MatrixSparsity;
 
-    /// Get the number of columns of the matrix
+    fn sparsity(&self) -> &Self::Sparsity;
     fn nrows(&self) -> IndexType;
-
-    /// Get the number of rows of the matrix
     fn ncols(&self) -> IndexType;
 }
 
@@ -35,12 +34,16 @@ where
 {
     type T = M::T;
     type V = M::V;
+    type Sparsity = M::Sparsity;
 
+    fn sparsity(&self) -> &Self::Sparsity {
+        (*self).sparsity()
+    }
     fn ncols(&self) -> IndexType {
-        M::ncols(self)
+        (*self).ncols()
     }
     fn nrows(&self) -> IndexType {
-        M::nrows(self)
+        (*self).nrows()
     }
 }
 
@@ -50,12 +53,16 @@ where
 {
     type T = M::T;
     type V = M::V;
+    type Sparsity = M::Sparsity;
 
+    fn sparsity(&self) -> &Self::Sparsity {
+        (*self).sparsity()
+    }
     fn ncols(&self) -> IndexType {
-        M::ncols(self)
+        (*self).ncols()
     }
     fn nrows(&self) -> IndexType {
-        M::nrows(self)
+        (*self).nrows()
     }
 }
 
@@ -117,10 +124,47 @@ pub trait MatrixView<'a>:
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V);
 }
 
+pub trait MatrixSparsity: Clone {
+    fn is_sparse(&self) -> bool;
+    fn try_from_indices(nrows: IndexType, ncols: IndexType, indices: Vec<(IndexType, IndexType)>) -> Result<Self>;
+    fn indices(&self) -> Vec<(IndexType, IndexType)>;
+    fn union(&self, other: &Self) -> Result<Self>;
+    fn new_diagonal(n: IndexType) -> Self;
+}
+
+#[derive(Clone)]
+pub struct Dense;
+
+impl MatrixSparsity for Dense {
+    fn is_sparse(&self) -> bool {
+        false
+    }
+
+    fn try_from_indices(nrows: IndexType, ncols: IndexType, _indices: Vec<(IndexType, IndexType)>) -> Result<Self> {
+        if nrows == 0 || ncols == 0 {
+            return Err(anyhow::anyhow!("Cannot create a matrix with zero rows or columns"));
+        }
+        Ok(Dense)
+    }
+
+    fn indices(&self) -> Vec<(IndexType, IndexType)> {
+        Vec::new()
+    }
+
+    fn union(&self, other: &Self) -> Result<Self> {
+        Ok(Dense)
+    }
+
+    fn new_diagonal(n: IndexType) -> Self {
+        Dense
+    }
+}
+
 /// A base matrix trait (including sparse and dense matrices)
 pub trait Matrix:
     for<'a> MatrixOpsByValue<&'a Self, Self> + Mul<Scale<Self::T>, Output = Self> + Clone
 {
+    
     /// Extract the diagonal of the matrix as an owned vector
     fn diagonal(&self) -> Self::V;
 
@@ -135,6 +179,13 @@ pub trait Matrix:
 
     /// Create a new diagonal matrix from a [Vector] holding the diagonal elements
     fn from_diagonal(v: &Self::V) -> Self;
+
+    fn set_column(&mut self, j: IndexType, v: &Self::V);
+
+
+    /// Perform the assignment self = x + beta * y where x and y are matrices and beta is a scalar
+    /// Panics if the sparsity of self, x, and y do not match (i.e. sparsity of self must be the union of the sparsity of x and y)
+    fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self);
 
     /// Create a new matrix from a vector of triplets (i, j, value) where i and j are the row and column indices of the value
     fn try_from_triplets(

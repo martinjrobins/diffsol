@@ -18,7 +18,7 @@ use crate::{
     IndexType, Scale, SundialsLinearSolver, Vector,
 };
 
-use super::{default_solver::DefaultSolver, Matrix, MatrixCommon};
+use super::{default_solver::DefaultSolver, Dense, Matrix, MatrixCommon};
 use anyhow::anyhow;
 
 #[derive(Debug)]
@@ -88,6 +88,11 @@ impl DefaultSolver for SundialsMatrix {
 impl MatrixCommon for SundialsMatrix {
     type V = SundialsVector;
     type T = realtype;
+    type Sparsity = Dense;
+
+    fn sparsity(&self) -> &Self::Sparsity {
+        &Dense
+    }
 
     fn nrows(&self) -> crate::IndexType {
         unsafe { SUNDenseMatrix_Rows(self.sm).try_into().unwrap() }
@@ -227,6 +232,8 @@ impl_scalar_assign_op!(MulAssign, mul_assign, *);
 impl_scalar_assign_op!(DivAssign, div_assign, /);
 
 impl Matrix for SundialsMatrix {
+    
+
     fn diagonal(&self) -> Self::V {
         let n = min(self.nrows(), self.ncols());
         let mut v = SundialsVector::new_serial(n);

@@ -1,16 +1,21 @@
-use std::ops::Mul;
+use std::{collections::HashSet, ops::Mul};
 
 use anyhow::Result;
 use nalgebra::DVector;
-use nalgebra_sparse::{CooMatrix, CscMatrix};
+use nalgebra_sparse::{pattern::SparsityPattern, CooMatrix, CscMatrix};
 
 use crate::{scalar::Scale, IndexType, Scalar};
 
-use super::{Matrix, MatrixCommon};
+use super::{Matrix, MatrixCommon, MatrixSparsity};
 
 impl<T: Scalar> MatrixCommon for CscMatrix<T> {
     type V = DVector<T>;
     type T = T;
+    type Sparsity = SparsityPattern;
+
+    fn sparsity(&self) -> &Self::Sparsity {
+        self.sparsity()
+    }
 
     fn ncols(&self) -> IndexType {
         self.ncols()
@@ -24,6 +29,82 @@ impl<T: Scalar> Mul<Scale<T>> for CscMatrix<T> {
     type Output = CscMatrix<T>;
     fn mul(self, rhs: Scale<T>) -> Self::Output {
         self * rhs.value()
+    }
+}
+
+impl MatrixSparsity for SparsityPattern {
+    fn is_sparse(&self) -> bool {
+        true
+    }
+
+    fn indices(&self) -> Vec<(IndexType, IndexType)> {
+        let mut indices = Vec::with_capacity(self.nnz() as usize);
+        for (j, &offset) in self.major_offsets().iter().enumerate() {
+            let next_offset = self.major_offsets().get(j + 1).copied().unwrap_or(self.minor_indices().len());
+            for i in offset..next_offset {
+                indices.push((self.minor_indices()[i], j));
+            }
+        }
+        indices
+    }
+
+    fn union(&self, other: &Self) -> Result<Self> {
+        let max_nnz = self.nnz().max(other.nnz());
+        let min_nnz = self.nnz().min(other.nnz());
+        let mut minor_indices = Vec::with_capacity(self.nnz() + max_nnz - min_nnz);
+        let mut major_offsets = Vec::with_capacity(self.major_dim());
+
+        // loop through columns, calculate union of rows
+        let mut offset = 0;
+        for j in 0..self.major_dim() {
+            let lane = self.lane(j);
+            let other_lane = other.lane(j);
+            let set: HashSet<usize> = HashSet::from_iter(lane.into_iter().chain(other_lane.into_iter()).cloned());
+            let mut set = set.into_iter().collect::<Vec<_>>();
+
+            major_offsets.push(offset);
+            offset += set.len();
+
+            minor_indices.append(&mut set);
+        }
+        SparsityPattern::try_from_offsets_and_indices(self.major_dim(), self.minor_dim(), major_offsets, minor_indices).map_err(anyhow::Error::new)
+    }
+
+    fn try_from_indices(nrows: IndexType, ncols: IndexType, indices: Vec<(IndexType, IndexType)>) -> Result<Self> {
+        // use a CSC sparsity pattern (so cols are major, rows are minor)
+        let major_dim = ncols;
+        let minor_dim = nrows;
+
+        // sort indices by major index
+        let mut indices = indices;
+        indices.sort_unstable_by_key(|&(_, j)| j);
+
+        // split into major offsets and minor indices
+        let mut curr_col = 0;
+        let mut major_offsets = Vec::with_capacity(major_dim + 1);
+        let mut minor_indices = Vec::with_capacity(indices.len());
+        for (i, j) in indices {
+            while curr_col < j {
+                major_offsets.push(minor_indices.len());
+                curr_col += 1;
+            }
+            minor_indices.push(i);
+        }
+        major_offsets.push(minor_indices.len());
+
+        SparsityPattern::try_from_offsets_and_indices(major_dim, minor_dim, major_offsets, minor_indices).map_err(anyhow::Error::new)
+    }
+
+    fn new_diagonal(n: IndexType) -> Self {
+        let mut major_offsets = Vec::with_capacity(n + 1);
+        let mut minor_indices = Vec::with_capacity(n);
+        for i in 0..n {
+            major_offsets.push(i);
+            minor_indices.push(i);
+        }
+        major_offsets.push(n);
+        SparsityPattern::try_from_offsets_and_indices(n, n, major_offsets, minor_indices).unwrap()
+    
     }
 }
 
@@ -66,5 +147,12 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
             ret[i] = v;
         }
         ret
+    }
+    fn set_column(&mut self, j: IndexType, v: &Self::V) {
+        let mut col = self.col_mut(j);
+        let (row_indices, values) = col.rows_and_values_mut();
+        for (&mut i, mut d) in row_indices.iter_mut().zip(v.iter()) {
+            *d = v[i];
+        }
     }
 }
