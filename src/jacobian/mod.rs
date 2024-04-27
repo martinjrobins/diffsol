@@ -1,6 +1,6 @@
 use crate::vector::Vector;
 use crate::Scalar;
-use crate::op::NonLinearOp;
+use crate::{matrix::MatrixSparsity, op::NonLinearOp, Matrix, VectorIndex};
 use num_traits::{One, Zero};
 
 use self::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy};
@@ -30,56 +30,65 @@ pub fn find_non_zeros<F: NonLinearOp + ?Sized>(op: &F, x: &F::V, t: F::T) -> Vec
     triplets
 }
 
-pub struct JacobianColoring {
-    cols_per_color: Vec<Vec<usize>>,
-    ij_per_color: Vec<Vec<(usize, usize)>>,
+pub struct JacobianColoring<S: MatrixSparsity> {
+    dst_indices_per_color: Vec<S::Index>,
+    src_indices_per_color: Vec<<S::V as Vector>::Index>,
+    input_indices_per_color: Vec<<S::V as Vector>::Index>,
 }
 
-impl JacobianColoring {
+impl<S: MatrixSparsity> JacobianColoring<S> {
     pub fn new<F: NonLinearOp>(op: &F, x: &F::V, t: F::T) -> Self {
         let non_zeros = op.sparsity().indices();
         let ncols = op.nstates();
         let graph = nonzeros2graph(non_zeros.as_slice(), ncols);
         let coloring = color_graph_greedy(&graph);
         let max_color = coloring.iter().max().copied().unwrap_or(0);
-        let mut cols_per_color = vec![Vec::new(); max_color];
-        let mut ij_per_color = vec![Vec::new(); max_color];
+        let mut data_indices_per_color = vec![Vec::new(); max_color];
+        let sparsity = op.sparsity();
+        let dst_indices_per_color = Vec::new();
+        let src_indices_per_color = Vec::new();
+        let input_indices_per_color = Vec::new();
         for c in 1..=max_color {
+            let rows = Vec::new();
+            let cols = Vec::new();
             for (i, j) in non_zeros.iter() {
                 if coloring[*j] == c {
-                    cols_per_color[c - 1].push(*j);
-                    ij_per_color[c - 1].push((*i, *j));
+                    rows.push(*i);
+                    cols.push(*j);
                 }
             }
+            let dst_indices = sparsity.get_index(rows.as_slice(), cols.as_slice());
+            let src_indices = <S::V as Vector>::Index::from_slice(rows.as_slice());
+            let input_indices = <S::V as Vector>::Index::from_slice(cols.as_slice());
+            dst_indices_per_color.push(dst_indices);
+            src_indices_per_color.push(src_indices);
+            input_indices_per_color.push(input_indices);
         }
         Self {
-            cols_per_color,
-            ij_per_color,
+            dst_indices_per_color,
+            src_indices_per_color,
+            input_indices_per_color,
         }
     }
 
-    pub fn find_non_zero_entries<F: NonLinearOp>(
+    pub fn jacobian_inplace<F: NonLinearOp>(
         &self,
         op: &F,
         x: &F::V,
         t: F::T,
+        y: &mut F::M,
     ) -> Vec<(usize, usize, F::T)> {
         let mut triplets = Vec::with_capacity(op.nstates());
         let mut v = F::V::zeros(op.nstates());
         let mut col = F::V::zeros(op.nout());
-        for (cols, ijs) in self.cols_per_color.iter().zip(self.ij_per_color.iter()) {
-            for j in cols {
-                v[*j] = F::T::one();
-            }
+        for c in 0..self.dst_indices_per_color.len() {
+            let input = self.input_indices_per_color[c];
+            let dst_indices = self.dst_indices_per_color[c];
+            let src_indices = self.src_indices_per_color[c];
+            v.assign_at_indices(input, F::T::one());
             op.jac_mul_inplace(x, t, &v, &mut col);
-            for (i, j) in ijs {
-                if col[*i] != F::T::zero() {
-                    triplets.push((*i, *j, col[*i]));
-                }
-            }
-            for j in cols {
-                v[*j] = F::T::zero();
-            }
+            y.set_data_with_indices(dst_indices, src_indices, &col);
+            v.assign_at_indices(input, F::T::one());
         }
         triplets
     }

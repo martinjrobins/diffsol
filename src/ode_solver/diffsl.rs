@@ -173,6 +173,20 @@ impl LinearOp for DiffSlMass<'_> {
         // y = tmp + beta * y
         y.axpy(1.0, &tmp, beta);
     }
+
+    fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
+        let mass_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y: &mut Self::V| {
+            self.mass_inplace(t, x, Self::T::zero(), y);
+        };
+        let dummy_p = Rc::new(V::zeros(0));
+        let op = LinearClosure::<M, _>::new(mass_inplace, self.nstates, self.nstates, dummy_p);
+        let triplets = if let Some(coloring) = &self.mass_coloring {
+            coloring.find_non_zero_entries(&op, &self.init(t), t)
+        } else {
+            find_non_zero_entries(&op, &self.init(t), t)
+        };
+        Self::M::try_from_triplets(self.nstates(), self.nout(), triplets).unwrap()
+    }
 }
 
 impl OdeEquations for DiffSl {
@@ -196,7 +210,7 @@ impl OdeEquations for DiffSl {
     }
 
     fn algebraic_indices(&self) -> <Self::V as Vector>::Index {
-        let mut ids = vec![0.; self.nstates()];
+        let mut ids = vec![0.; self.rhs().nstates()];
         self.compiler.set_id(ids.as_mut_slice());
         let mut indices = Vec::new();
         for (i, id) in ids.iter().enumerate() {
@@ -207,19 +221,7 @@ impl OdeEquations for DiffSl {
         <Self::V as Vector>::Index::from_vec(indices)
     }
 
-    fn mass_matrix(&self, t: Self::T) -> Self::M {
-        let mass_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y: &mut Self::V| {
-            self.mass_inplace(t, x, Self::T::zero(), y);
-        };
-        let dummy_p = Rc::new(V::zeros(0));
-        let op = LinearClosure::<M, _>::new(mass_inplace, self.nstates, self.nstates, dummy_p);
-        let triplets = if let Some(coloring) = &self.mass_coloring {
-            coloring.find_non_zero_entries(&op, &self.init(t), t)
-        } else {
-            find_non_zero_entries(&op, &self.init(t), t)
-        };
-        Self::M::try_from_triplets(self.nstates(), self.nout(), triplets).unwrap()
-    }
+    fn mass_matrix(&self, t: Self::T) -> Self::M {}
 
     fn jacobian_matrix(&self, x: &Self::V, t: Self::T) -> Self::M {
         let rhs_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y_rhs: &mut Self::V| {

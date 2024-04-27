@@ -18,6 +18,7 @@ pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    fn from_slice(slice: &[IndexType]) -> Self;
 }
 
 pub trait VectorCommon: Sized + Debug {
@@ -150,6 +151,7 @@ pub trait Vector:
         result.gather_from(self, indices);
         result
     }
+    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T);
     fn gather_from(&mut self, other: &Self, indices: &Self::Index);
     fn scatter_from(&mut self, other: &Self, indices: &Self::Index);
     fn assert_eq_st(&self, other: &Self, tol: Self::T) {
