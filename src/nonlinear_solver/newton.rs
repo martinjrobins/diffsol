@@ -1,7 +1,4 @@
-use crate::{
-    op::{linearise::LinearisedOp, NonLinearOp},
-    LinearSolver, NonLinearSolver, SolverProblem, Vector,
-};
+use crate::{op::NonLinearOp, LinearSolver, NonLinearSolver, SolverProblem, Vector};
 use anyhow::{anyhow, Result};
 use std::ops::SubAssign;
 
@@ -9,14 +6,15 @@ use super::{Convergence, ConvergenceStatus};
 
 pub struct NewtonNonlinearSolver<C: NonLinearOp> {
     convergence: Option<Convergence<C>>,
-    linear_solver: Box<dyn LinearSolver<LinearisedOp<C>>>,
+    linear_solver: Box<dyn LinearSolver<C>>,
     problem: Option<SolverProblem<C>>,
     max_iter: usize,
     niter: usize,
+    is_jacobian_set: bool,
 }
 
 impl<C: NonLinearOp> NewtonNonlinearSolver<C> {
-    pub fn new<S: LinearSolver<LinearisedOp<C>> + 'static>(linear_solver: S) -> Self {
+    pub fn new<S: LinearSolver<C> + 'static>(linear_solver: S) -> Self {
         let linear_solver = Box::new(linear_solver);
         Self {
             problem: None,
@@ -24,9 +22,10 @@ impl<C: NonLinearOp> NewtonNonlinearSolver<C> {
             linear_solver,
             max_iter: 100,
             niter: 0,
+            is_jacobian_set: false,
         }
     }
-    pub fn linear_solver(&self) -> &dyn LinearSolver<LinearisedOp<C>> {
+    pub fn linear_solver(&self) -> &dyn LinearSolver<C> {
         self.linear_solver.as_ref()
     }
 }
@@ -41,36 +40,33 @@ impl<C: NonLinearOp> NonLinearSolver<C> for NewtonNonlinearSolver<C> {
     fn niter(&self) -> usize {
         self.niter
     }
-    fn set_problem(&mut self, problem: SolverProblem<C>) {
-        self.problem = Some(problem);
-        if self.linear_solver.problem().is_some() {
-            self.linear_solver.take_problem();
-        }
+    fn problem(&self) -> &SolverProblem<C> {
+        self.problem
+            .as_ref()
+            .expect("NewtonNonlinearSolver::problem() called before set_problem")
+    }
+    fn set_problem(&mut self, problem: &SolverProblem<C>) {
+        self.problem = Some(problem.clone());
+        self.linear_solver.set_problem(problem);
         let problem = self.problem.as_ref().unwrap();
         self.convergence = Some(Convergence::new(problem, self.max_iter));
+        self.is_jacobian_set = false;
     }
 
-    fn reset(&mut self) {
-        if self.linear_solver.problem().is_some() {
-            self.linear_solver.take_problem();
-        }
+    fn reset_jacobian(&mut self, x: &C::V, t: C::T) {
+        self.linear_solver.set_linearisation(x, t);
+        self.is_jacobian_set = true;
     }
 
-    fn problem(&self) -> Option<&SolverProblem<C>> {
-        self.problem.as_ref()
-    }
-    fn problem_mut(&mut self) -> Option<&mut SolverProblem<C>> {
-        self.problem.as_mut()
-    }
-
-    fn take_problem(&mut self) -> Option<SolverProblem<C>> {
-        Option::take(&mut self.problem)
-    }
-
-    fn solve_in_place(&mut self, xn: &mut C::V) -> Result<()> {
+    fn solve_in_place(&mut self, xn: &mut C::V, t: C::T) -> Result<()> {
         if self.convergence.is_none() || self.problem.is_none() {
             return Err(anyhow!(
                 "NewtonNonlinearSolver::solve() called before set_problem"
+            ));
+        }
+        if !self.is_jacobian_set {
+            return Err(anyhow!(
+                "NewtonNonlinearSolver::solve() called before reset_jacobian"
             ));
         }
         if xn.len() != self.problem.as_ref().unwrap().f.nstates() {
@@ -80,13 +76,10 @@ impl<C: NonLinearOp> NonLinearSolver<C> for NewtonNonlinearSolver<C> {
         let problem = self.problem.as_ref().unwrap();
         convergence.reset(xn);
         let mut tmp = xn.clone();
-        if self.linear_solver.problem().is_none() {
-            self.linear_solver.set_problem(problem.linearise(xn));
-        };
         self.niter = 0;
         loop {
             self.niter += 1;
-            problem.f.call_inplace(xn, problem.t, &mut tmp);
+            problem.f.call_inplace(xn, t, &mut tmp);
             //tmp = f_at_n
 
             self.linear_solver.solve_in_place(&mut tmp)?;

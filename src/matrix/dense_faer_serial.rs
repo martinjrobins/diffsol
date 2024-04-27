@@ -1,14 +1,16 @@
 use std::ops::{Mul, MulAssign};
 
 use super::default_solver::DefaultSolver;
-use super::{DenseMatrix, Dense, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
+use super::{Dense, DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
+use crate::op::NonLinearOp;
 use crate::scalar::{IndexType, Scalar, Scale};
-use crate::{op::LinearOp, FaerLU};
+use crate::FaerLU;
 use anyhow::Result;
 use faer::{linalg::matmul::matmul, Col, ColMut, ColRef, Mat, MatMut, MatRef, Parallelism};
+use faer::{unzipped, zipped};
 
 impl<T: Scalar> DefaultSolver for Mat<T> {
-    type LS<C: LinearOp<M = Mat<T>, V = Col<T>, T = T>> = FaerLU<T, C>;
+    type LS<C: NonLinearOp<M = Mat<T>, V = Col<T>, T = T>> = FaerLU<T, C>;
 }
 
 macro_rules! impl_matrix_common {
@@ -131,7 +133,6 @@ impl<T: Scalar> DenseMatrix for Mat<T> {
     }
 }
 
-
 impl<T: Scalar> Matrix for Mat<T> {
     fn try_from_triplets(
         nrows: IndexType,
@@ -162,5 +163,9 @@ impl<T: Scalar> Matrix for Mat<T> {
     }
     fn set_column(&mut self, j: IndexType, v: &Self::V) {
         self.column_mut(j).copy_from(v);
+    }
+
+    fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
+        zipped!(self, y).for_each(|unzipped!(mut x, y)| x.write(x.read() + beta * y.read()));
     }
 }

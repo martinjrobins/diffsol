@@ -5,8 +5,9 @@ use anyhow::Result;
 use diffsl::execution::Compiler;
 
 use crate::{
-    jacobian::{find_non_zero_entries, JacobianColoring},
-    op::{closure::Closure, linear_closure::LinearClosure, Op},
+    jacobian::JacobianColoring,
+    matrix::MatrixCommon,
+    op::{closure::Closure, linear_closure::LinearClosure, LinearOp, NonLinearOp, Op},
     vector::Vector,
     Matrix, OdeEquations,
 };
@@ -65,13 +66,17 @@ impl DiffSl {
                     y.as_mut_slice(),
                 );
             };
-            let mass_inplace = |x: &V, _p: &V, t: T, y: &mut V| {
+            let mass_inplace = |x: &V, _p: &V, t: T, beta: T, y: &mut V| {
+                let mut tmp = tmp.borrow_mut();
                 compiler.mass(
                     t,
                     x.as_slice(),
                     data.borrow_mut().as_mut_slice(),
-                    y.as_mut_slice(),
+                    tmp.as_mut_slice(),
                 );
+
+                // y = tmp + beta * y
+                y.axpy(1.0, &tmp, beta);
             };
             let t0 = 0.;
             let mut y0 = V::zeros(nstates);
@@ -105,47 +110,89 @@ impl DiffSl {
     }
 }
 
-impl Op for DiffSl {
-    type V = V;
-    type T = T;
-    type M = M;
-    fn nstates(&self) -> usize {
-        self.nstates
+struct DiffSlRhs<'a>(&'a DiffSl);
+struct DiffSlMass<'a>(&'a DiffSl);
+
+macro_rules! impl_op_for_diffsl {
+    ($name:ident) => {
+        impl Op for $name<'_> {
+            type M = M;
+            type T = T;
+            type V = V;
+
+            fn nstates(&self) -> usize {
+                self.0.nstates
+            }
+            fn nout(&self) -> usize {
+                self.0.nstates
+            }
+            fn nparams(&self) -> usize {
+                self.0.nparams
+            }
+        }
+    };
+}
+
+impl_op_for_diffsl!(DiffSlRhs);
+impl_op_for_diffsl!(DiffSlMass);
+
+impl NonLinearOp for DiffSlRhs<'_> {
+    fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
+        self.0.compiler.rhs(
+            t,
+            y.as_slice(),
+            self.0.data.borrow_mut().as_mut_slice(),
+            y.as_mut_slice(),
+        );
     }
-    fn nout(&self) -> usize {
-        self.nout
+
+    fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        let mut dummy_rhs = Self::V::zeros(self.nstates());
+        self.0.compiler.rhs_grad(
+            t,
+            x.as_slice(),
+            v.as_slice(),
+            self.0.data.borrow_mut().as_mut_slice(),
+            self.0.ddata.borrow_mut().as_mut_slice(),
+            dummy_rhs.as_mut_slice(),
+            y.as_mut_slice(),
+        );
     }
-    fn nparams(&self) -> usize {
-        self.nparams
+}
+
+impl LinearOp for DiffSlMass<'_> {
+    fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
+        let mut tmp = self.0.tmp.borrow_mut();
+        self.0.compiler.mass(
+            t,
+            v.as_slice(),
+            self.0.data.borrow_mut().as_mut_slice(),
+            tmp.as_mut_slice(),
+        );
+
+        // y = tmp + beta * y
+        y.axpy(1.0, &tmp, beta);
     }
 }
 
 impl OdeEquations for DiffSl {
+    type M = M;
+    type T = T;
+    type V = V;
+    type Mass = DiffSlMass<'static>;
+    type Rhs = DiffSlRhs<'static>;
+
+    fn rhs(&self) -> &Self::Rhs {
+        &DiffSlRhs(self)
+    }
+
+    fn mass(&self) -> &Self::Mass {
+        &DiffSlMass(self)
+    }
+
     fn set_params(&mut self, p: Self::V) {
         self.compiler
             .set_inputs(p.as_slice(), self.data.borrow_mut().as_mut_slice());
-    }
-
-    fn rhs_inplace(&self, t: Self::T, y: &Self::V, rhs_y: &mut Self::V) {
-        self.compiler.rhs(
-            t,
-            y.as_slice(),
-            self.data.borrow_mut().as_mut_slice(),
-            rhs_y.as_mut_slice(),
-        );
-    }
-
-    fn rhs_jac_inplace(&self, t: Self::T, x: &Self::V, v: &Self::V, y: &mut Self::V) {
-        let mut dummy_rhs = Self::V::zeros(self.nstates());
-        self.compiler.rhs_grad(
-            t,
-            x.as_slice(),
-            v.as_slice(),
-            self.data.borrow_mut().as_mut_slice(),
-            self.ddata.borrow_mut().as_mut_slice(),
-            dummy_rhs.as_mut_slice(),
-            y.as_mut_slice(),
-        );
     }
 
     fn algebraic_indices(&self) -> <Self::V as Vector>::Index {
@@ -204,18 +251,7 @@ impl OdeEquations for DiffSl {
             .set_u0(ret_y.as_mut_slice(), self.data.borrow_mut().as_mut_slice());
         ret_y
     }
-    fn mass_inplace(&self, t: Self::T, v: &Self::V, beta: Self::T, y: &mut Self::V) {
-        let mut tmp = self.tmp.borrow_mut();
-        self.compiler.mass(
-            t,
-            v.as_slice(),
-            self.data.borrow_mut().as_mut_slice(),
-            tmp.as_mut_slice(),
-        );
-
-        // y = tmp + beta * y
-        y.axpy(1.0, &tmp, beta);
-    }
+    fn mass_inplace(&self, t: Self::T, v: &Self::V, beta: Self::T, y: &mut Self::V) {}
 }
 
 #[cfg(test)]

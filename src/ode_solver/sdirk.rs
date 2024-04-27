@@ -298,7 +298,7 @@ where
                         let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
                         callable.set_jacobian_is_stale();
                     }
-                    self.nonlinear_solver.reset();
+                    self.nonlinear_solver.reset_jacobian();
                     updated_jacobian = true;
 
                     let mut dy = if i == 0 {
@@ -332,7 +332,7 @@ where
                     callable.set_h(state.h);
 
                     // reset nonlinear's linear solver problem as lu factorisation has changed
-                    self.nonlinear_solver.reset();
+                    self.nonlinear_solver.reset_jacobian();
                     continue 'step;
                 };
 
@@ -398,7 +398,7 @@ where
             callable.set_h(state.h);
 
             // reset nonlinear's linear solver problem as lu factorisation has changed
-            self.nonlinear_solver.reset();
+            self.nonlinear_solver.reset_jacobian();
 
             // test error is within tolerance
             if error_norm <= Eqn::T::from(1.0) {

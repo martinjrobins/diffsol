@@ -40,7 +40,11 @@ impl MatrixSparsity for SparsityPattern {
     fn indices(&self) -> Vec<(IndexType, IndexType)> {
         let mut indices = Vec::with_capacity(self.nnz() as usize);
         for (j, &offset) in self.major_offsets().iter().enumerate() {
-            let next_offset = self.major_offsets().get(j + 1).copied().unwrap_or(self.minor_indices().len());
+            let next_offset = self
+                .major_offsets()
+                .get(j + 1)
+                .copied()
+                .unwrap_or(self.minor_indices().len());
             for i in offset..next_offset {
                 indices.push((self.minor_indices()[i], j));
             }
@@ -59,7 +63,8 @@ impl MatrixSparsity for SparsityPattern {
         for j in 0..self.major_dim() {
             let lane = self.lane(j);
             let other_lane = other.lane(j);
-            let set: HashSet<usize> = HashSet::from_iter(lane.into_iter().chain(other_lane.into_iter()).cloned());
+            let set: HashSet<usize> =
+                HashSet::from_iter(lane.into_iter().chain(other_lane.into_iter()).cloned());
             let mut set = set.into_iter().collect::<Vec<_>>();
 
             major_offsets.push(offset);
@@ -67,10 +72,20 @@ impl MatrixSparsity for SparsityPattern {
 
             minor_indices.append(&mut set);
         }
-        SparsityPattern::try_from_offsets_and_indices(self.major_dim(), self.minor_dim(), major_offsets, minor_indices).map_err(anyhow::Error::new)
+        SparsityPattern::try_from_offsets_and_indices(
+            self.major_dim(),
+            self.minor_dim(),
+            major_offsets,
+            minor_indices,
+        )
+        .map_err(anyhow::Error::new)
     }
 
-    fn try_from_indices(nrows: IndexType, ncols: IndexType, indices: Vec<(IndexType, IndexType)>) -> Result<Self> {
+    fn try_from_indices(
+        nrows: IndexType,
+        ncols: IndexType,
+        indices: Vec<(IndexType, IndexType)>,
+    ) -> Result<Self> {
         // use a CSC sparsity pattern (so cols are major, rows are minor)
         let major_dim = ncols;
         let minor_dim = nrows;
@@ -92,7 +107,13 @@ impl MatrixSparsity for SparsityPattern {
         }
         major_offsets.push(minor_indices.len());
 
-        SparsityPattern::try_from_offsets_and_indices(major_dim, minor_dim, major_offsets, minor_indices).map_err(anyhow::Error::new)
+        SparsityPattern::try_from_offsets_and_indices(
+            major_dim,
+            minor_dim,
+            major_offsets,
+            minor_indices,
+        )
+        .map_err(anyhow::Error::new)
     }
 
     fn new_diagonal(n: IndexType) -> Self {
@@ -104,7 +125,6 @@ impl MatrixSparsity for SparsityPattern {
         }
         major_offsets.push(n);
         SparsityPattern::try_from_offsets_and_indices(n, n, major_offsets, minor_indices).unwrap()
-    
     }
 }
 
@@ -154,5 +174,8 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
         for (&mut i, mut d) in row_indices.iter_mut().zip(v.iter()) {
             *d = v[i];
         }
+    }
+    fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
+        *self = x + y * beta;
     }
 }

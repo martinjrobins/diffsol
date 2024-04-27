@@ -12,7 +12,7 @@ use sundials_sys::{
 
 use crate::{
     ode_solver::sundials::sundials_check,
-    op::LinearOp,
+    op::NonLinearOp,
     scalar::scale,
     vector::sundials::{get_suncontext, SundialsVector},
     IndexType, Scale, SundialsLinearSolver, Vector,
@@ -81,7 +81,7 @@ impl Display for SundialsMatrix {
 }
 
 impl DefaultSolver for SundialsMatrix {
-    type LS<C: LinearOp<M = SundialsMatrix, V = SundialsVector, T = realtype>> =
+    type LS<C: NonLinearOp<M = SundialsMatrix, V = SundialsVector, T = realtype>> =
         SundialsLinearSolver<C>;
 }
 
@@ -232,8 +232,6 @@ impl_scalar_assign_op!(MulAssign, mul_assign, *);
 impl_scalar_assign_op!(DivAssign, div_assign, /);
 
 impl Matrix for SundialsMatrix {
-    
-
     fn diagonal(&self) -> Self::V {
         let n = min(self.nrows(), self.ncols());
         let mut v = SundialsVector::new_serial(n);
@@ -248,6 +246,21 @@ impl Matrix for SundialsMatrix {
         if ret != 0 {
             panic!("Error copying matrix");
         }
+    }
+
+    fn set_column(&mut self, j: IndexType, v: &Self::V) {
+        let n = self.nrows();
+        if v.len() != n {
+            panic!("Vector length does not match matrix size");
+        }
+        for i in 0..n {
+            self[(i, j)] = v[i];
+        }
+    }
+
+    fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
+        self.copy_from(y);
+        sundials_check(unsafe { SUNMatScaleAdd(beta, self.sm, x.sm) });
     }
 
     fn zeros(nrows: IndexType, ncols: IndexType) -> Self {

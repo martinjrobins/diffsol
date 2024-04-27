@@ -1,5 +1,5 @@
-use std::{cell::RefCell, rc::Rc};
 use num_traits::One;
+use std::{cell::RefCell, rc::Rc};
 
 use crate::{scale, Vector};
 
@@ -9,15 +9,30 @@ pub struct LinearisedOp<C: NonLinearOp> {
     callable: Rc<C>,
     x: C::V,
     tmp: RefCell<C::V>,
+    x_is_set: bool,
 }
 
 impl<C: NonLinearOp> LinearisedOp<C> {
-    pub fn new(callable: Rc<C>, x: &C::V) -> Self {
+    pub fn new(callable: Rc<C>) -> Self {
         Self {
             callable,
-            x: x.clone(),
+            x: C::V::zeros(callable.nstates()),
             tmp: RefCell::new(C::V::zeros(callable.nstates())),
+            x_is_set: false,
         }
+    }
+
+    pub fn set_x(&mut self, x: &C::V) {
+        self.x.copy_from(x);
+        self.x_is_set = true;
+    }
+
+    pub fn unset_x(&mut self) {
+        self.x_is_set = false;
+    }
+
+    pub fn x_is_set(&self) -> bool {
+        self.x_is_set
     }
 }
 

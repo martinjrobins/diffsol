@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use core::panic;
 use num_traits::{One, Pow};
 use std::rc::Rc;
@@ -18,44 +18,24 @@ impl<V> NonLinearSolveSolution<V> {
 
 /// A solver for the nonlinear problem `F(x) = 0`.
 pub trait NonLinearSolver<C: Op> {
+    /// Get the problem to be solved.
+    fn problem(&self) -> &SolverProblem<C>;
+
     /// Set the problem to be solved, any previous problem is discarded.
-    fn set_problem(&mut self, problem: SolverProblem<C>);
+    fn set_problem(&mut self, problem: &SolverProblem<C>);
 
-    /// Get a reference to the current problem, if any.
-    fn problem(&self) -> Option<&SolverProblem<C>>;
+    /// Reset the approximation of the Jacobian matrix.
+    fn reset_jacobian(&mut self, x: &C::V, t: C::T);
 
-    /// Get a mutable reference to the current problem, if any.
-    fn problem_mut(&mut self) -> Option<&mut SolverProblem<C>>;
-
-    /// Take the current problem, if any, and return it.
-    /// Any internal state of the solver is reset, and `set_problem`
-    /// must be called before solving the problem again.
-    fn take_problem(&mut self) -> Option<SolverProblem<C>>;
-
-    /// Reset the solver to its initial state.
-    fn reset(&mut self) {
-        if let Some(problem) = self.take_problem() {
-            self.set_problem(problem);
-        }
-    }
-
-    /// Set the time for the problem, if the op `C` has a time parameter.
-    fn set_time(&mut self, t: C::T) -> Result<()> {
-        self.problem_mut()
-            .ok_or_else(|| anyhow!("No problem set"))?
-            .t = t;
-        Ok(())
-    }
-
-    // Solve the problem `F(x) = 0` and return the solution `x`.
-    fn solve(&mut self, state: &C::V) -> Result<C::V> {
-        let mut state = state.clone();
-        self.solve_in_place(&mut state)?;
-        Ok(state)
+    // Solve the problem `F(x, t) = 0` for fixed t, and return the solution `x`.
+    fn solve(&mut self, x: &C::V, t: C::T) -> Result<C::V> {
+        let mut x = x.clone();
+        self.solve_in_place(&mut x, t)?;
+        Ok(x)
     }
 
     // Solve the problem `F(x) = 0` in place.
-    fn solve_in_place(&mut self, state: &mut C::V) -> Result<()>;
+    fn solve_in_place(&mut self, x: &mut C::V, t: C::T) -> Result<()>;
 
     // Set the maximum number of iterations for the solver.
     fn set_max_iter(&mut self, max_iter: usize);
@@ -200,8 +180,7 @@ pub mod tests {
         );
         let rtol = M::T::from(1e-6);
         let atol = M::V::from_vec(vec![1e-6.into(), 1e-6.into()]);
-        let t = M::T::zero();
-        let problem = SolverProblem::new(Rc::new(op), t, Rc::new(atol), rtol);
+        let problem = SolverProblem::new(Rc::new(op), Rc::new(atol), rtol);
         let solns = vec![NonLinearSolveSolution::new(
             M::V::from_vec(vec![2.1.into(), 2.1.into()]),
             M::V::from_vec(vec![2.0.into(), 2.0.into()]),
@@ -216,13 +195,11 @@ pub mod tests {
     ) where
         C: NonLinearOp,
     {
-        solver.set_problem(problem);
+        solver.set_problem(&problem);
+        let t = C::T::zero();
         for soln in solns {
-            let x = solver.solve(&soln.x0).unwrap();
-            let tol = {
-                let problem = solver.problem().unwrap();
-                soln.x.abs() * scale(problem.rtol) + problem.atol.as_ref()
-            };
+            let x = solver.solve(&soln.x0, t).unwrap();
+            let tol = { soln.x.abs() * scale(problem.rtol) + problem.atol.as_ref() };
             x.assert_eq(&soln.x, &tol);
         }
     }

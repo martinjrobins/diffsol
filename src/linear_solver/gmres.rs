@@ -32,14 +32,8 @@ impl<C: LinearOp> LinearSolver<C> for GMRES<C>
 where
     for<'b> &'b C::V: VectorRef<C::V>,
 {
-    fn problem(&self) -> Option<&SolverProblem<C>> {
-        todo!()
-    }
-    fn problem_mut(&mut self) -> Option<&mut SolverProblem<C>> {
-        todo!()
-    }
 
-    fn take_problem(&mut self) -> Option<SolverProblem<C>> {
+    fn set_linearisation(&mut self, x: &<C as crate::op::Op>::V, t: <C as crate::op::Op>::T) {
         todo!()
     }
 
@@ -47,7 +41,7 @@ where
         todo!()
     }
 
-    fn set_problem(&mut self, _problem: SolverProblem<C>) {
+    fn set_problem(&mut self, _problem: &SolverProblem<C>) {
         todo!()
     }
 }

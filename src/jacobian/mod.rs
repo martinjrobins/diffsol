@@ -1,6 +1,6 @@
 use crate::vector::Vector;
 use crate::Scalar;
-use crate::{matrix::DenseMatrix, op::NonLinearOp, VectorViewMut, MatrixSparsity, Matrix};
+use crate::op::NonLinearOp;
 use num_traits::{One, Zero};
 
 use self::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy};
@@ -89,7 +89,6 @@ impl JacobianColoring {
 mod tests {
     use std::rc::Rc;
 
-    use crate::matrix::MatrixSparsity;
     use crate::op::Op;
     use crate::{
         jacobian::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy},

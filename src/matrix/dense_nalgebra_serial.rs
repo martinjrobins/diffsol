@@ -1,9 +1,9 @@
-use std::ops::{Mul, MulAssign};
+use std::ops::{AddAssign, Mul, MulAssign};
 
 use anyhow::Result;
 use nalgebra::{DMatrix, DMatrixView, DMatrixViewMut, DVector, DVectorView, DVectorViewMut};
 
-use crate::op::LinearOp;
+use crate::op::NonLinearOp;
 use crate::{scalar::Scale, IndexType, Scalar};
 
 use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU};
@@ -12,7 +12,7 @@ use super::default_solver::DefaultSolver;
 use super::Dense;
 
 impl<T: Scalar> DefaultSolver for DMatrix<T> {
-    type LS<C: LinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> = NalgebraLU<T, C>;
+    type LS<C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> = NalgebraLU<T, C>;
 }
 
 macro_rules! impl_matrix_common {
@@ -125,6 +125,11 @@ impl<T: Scalar> Matrix for DMatrix<T> {
     }
     fn set_column(&mut self, j: IndexType, v: &Self::V) {
         self.column_mut(j).copy_from(v);
+    }
+    fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
+        self.copy_from(y);
+        self.mul_assign(beta);
+        self.add_assign(x);
     }
 }
 
