@@ -1,6 +1,4 @@
-use crate::{
-    Matrix, Scalar, Vector,
-};
+use crate::{matrix::MatrixCommon, Matrix, Scalar, Vector};
 
 use num_traits::{One, Zero};
 
@@ -45,7 +43,7 @@ pub trait NonLinearOp: Op {
         y
     }
 
-    /// Compute the Jacobian of the operator and store it in the matrix `y`. 
+    /// Compute the Jacobian of the operator and store it in the matrix `y`.
     /// `y` should have been previously initialised using the output of [`Self::sparsity`].
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         let mut v = Self::V::zeros(self.nstates());
@@ -59,7 +57,7 @@ pub trait NonLinearOp: Op {
     }
 
     /// Return the sparsity pattern of the Jacobian matrix. This should not vary with t or x
-    fn sparsity(&self) -> &<Self::M as Matrix>::Sparsity;
+    fn sparsity(&self) -> &<Self::M as MatrixCommon>::Sparsity;
 }
 
 pub trait LinearOp: Op {
@@ -75,7 +73,7 @@ pub trait LinearOp: Op {
         self.matrix_inplace(t, &mut y);
         y
     }
-    
+
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
         let mut v = Self::V::zeros(self.nstates());
         let mut col = Self::V::zeros(self.nout());

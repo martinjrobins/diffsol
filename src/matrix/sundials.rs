@@ -88,11 +88,6 @@ impl DefaultSolver for SundialsMatrix {
 impl MatrixCommon for SundialsMatrix {
     type V = SundialsVector;
     type T = realtype;
-    type Sparsity = Dense;
-
-    fn sparsity(&self) -> &Self::Sparsity {
-        &Dense
-    }
 
     fn nrows(&self) -> crate::IndexType {
         unsafe { SUNDenseMatrix_Rows(self.sm).try_into().unwrap() }

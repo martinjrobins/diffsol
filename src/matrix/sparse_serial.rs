@@ -11,11 +11,6 @@ use super::{Matrix, MatrixCommon, MatrixSparsity};
 impl<T: Scalar> MatrixCommon for CscMatrix<T> {
     type V = DVector<T>;
     type T = T;
-    type Sparsity = SparsityPattern;
-
-    fn sparsity(&self) -> &Self::Sparsity {
-        self.sparsity()
-    }
 
     fn ncols(&self) -> IndexType {
         self.ncols()
@@ -33,6 +28,27 @@ impl<T: Scalar> Mul<Scale<T>> for CscMatrix<T> {
 }
 
 impl MatrixSparsity for SparsityPattern {
+    type Index = Vec<IndexType>;
+
+    fn get_index(&self, rows: &[IndexType], cols: &[IndexType]) -> Self::Index {
+        let mut index = Vec::with_capacity(rows.len());
+        for (&i, &j) in rows.iter().zip(cols) {
+            let offset = self.major_offsets()[j];
+            let lane = self.lane(j);
+            let lane_i = lane.iter().position(|&x| x == i).unwrap();
+            index.push(offset + lane_i);
+        }
+        index
+    }
+
+    fn nrows(&self) -> IndexType {
+        self.minor_dim()
+    }
+
+    fn ncols(&self) -> IndexType {
+        self.major_dim()
+    }
+
     fn is_sparse(&self) -> bool {
         true
     }
@@ -129,6 +145,24 @@ impl MatrixSparsity for SparsityPattern {
 }
 
 impl<T: Scalar> Matrix for CscMatrix<T> {
+    type Sparsity = SparsityPattern;
+
+    fn sparsity(&self) -> &Self::Sparsity {
+        self.sparsity()
+    }
+
+    fn set_data_with_indices(
+        &self,
+        dst_indices: &<Self::Sparsity as MatrixSparsity>::Index,
+        src_indices: &<Self::V as crate::vector::Vector>::Index,
+        data: &Self::V,
+    ) {
+        let values = self.values();
+        for (&dst_i, &src_i) in dst_indices.iter().zip(src_indices.iter()) {
+            values[dst_i] = data[src_i];
+        }
+    }
+
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,

@@ -20,14 +20,11 @@ macro_rules! impl_matrix_common {
         impl<'a, T: Scalar> MatrixCommon for $matrix_type {
             type V = DVector<T>;
             type T = T;
-            type Sparsity = Dense;
 
-            fn sparsity(&self) -> &Self::Sparsity {
-                &Dense
-            }
             fn nrows(&self) -> IndexType {
                 self.nrows()
             }
+
             fn ncols(&self) -> IndexType {
                 self.ncols()
             }
@@ -96,6 +93,26 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
 }
 
 impl<T: Scalar> Matrix for DMatrix<T> {
+    type Sparsity = Dense;
+
+    fn sparsity(&self) -> &Self::Sparsity {
+        &Dense {
+            nrows: self.nrows(),
+            ncols: self.ncols(),
+        }
+    }
+
+    fn set_data_with_indices(
+        &self,
+        dst_indices: &<Self::Sparsity as super::MatrixSparsity>::Index,
+        src_indices: &<Self::V as crate::vector::Vector>::Index,
+        data: &Self::V,
+    ) {
+        for ((i, j), src_i) in dst_indices.iter().zip(src_indices.iter()) {
+            self[(*i, *j)] = data[*src_i];
+        }
+    }
+
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,

@@ -22,9 +22,7 @@ pub mod sundials;
 pub trait MatrixCommon: Sized + Debug {
     type V: Vector<T = Self::T>;
     type T: Scalar;
-    type Sparsity: MatrixSparsity<V = Self::V>;
 
-    fn sparsity(&self) -> &Self::Sparsity;
     fn nrows(&self) -> IndexType;
     fn ncols(&self) -> IndexType;
 }
@@ -35,16 +33,12 @@ where
 {
     type T = M::T;
     type V = M::V;
-    type Sparsity = M::Sparsity;
 
-    fn sparsity(&self) -> &Self::Sparsity {
-        (*self).sparsity()
+    fn nrows(&self) -> IndexType {
+        M::nrows(*self)
     }
     fn ncols(&self) -> IndexType {
-        (*self).ncols()
-    }
-    fn nrows(&self) -> IndexType {
-        (*self).nrows()
+        M::ncols(*self)
     }
 }
 
@@ -54,16 +48,12 @@ where
 {
     type T = M::T;
     type V = M::V;
-    type Sparsity = M::Sparsity;
 
-    fn sparsity(&self) -> &Self::Sparsity {
-        (*self).sparsity()
-    }
     fn ncols(&self) -> IndexType {
-        (*self).ncols()
+        M::ncols(*self)
     }
     fn nrows(&self) -> IndexType {
-        (*self).nrows()
+        M::nrows(*self)
     }
 }
 
@@ -127,8 +117,9 @@ pub trait MatrixView<'a>:
 
 pub trait MatrixSparsity: Clone {
     type Index;
-    type V: Vector;
 
+    fn nrows(&self) -> IndexType;
+    fn ncols(&self) -> IndexType;
     fn is_sparse(&self) -> bool;
     fn try_from_indices(
         nrows: IndexType,
@@ -142,11 +133,36 @@ pub trait MatrixSparsity: Clone {
 }
 
 #[derive(Clone)]
-pub struct Dense;
+pub struct Dense {
+    nrows: IndexType,
+    ncols: IndexType,
+}
 
 impl MatrixSparsity for Dense {
+    type Index = Vec<(IndexType, IndexType)>;
+
+    fn nrows(&self) -> IndexType {
+        self.nrows
+    }
+
+    fn ncols(&self) -> IndexType {
+        self.ncols
+    }
+
     fn is_sparse(&self) -> bool {
         false
+    }
+
+    fn get_index(&self, rows: &[IndexType], cols: &[IndexType]) -> Self::Index {
+        rows.iter()
+            .zip(cols.iter())
+            .map(|(i, j)| {
+                if i >= &self.nrows || j >= &self.ncols {
+                    panic!("Index out of bounds")
+                }
+                (*i, *j)
+            })
+            .collect()
     }
 
     fn try_from_indices(
@@ -159,7 +175,7 @@ impl MatrixSparsity for Dense {
                 "Cannot create a matrix with zero rows or columns"
             ));
         }
-        Ok(Dense)
+        Ok(Dense { nrows, ncols })
     }
 
     fn indices(&self) -> Vec<(IndexType, IndexType)> {
@@ -167,11 +183,16 @@ impl MatrixSparsity for Dense {
     }
 
     fn union(&self, other: &Self) -> Result<Self> {
-        Ok(Dense)
+        if self.nrows != other.nrows || self.ncols != other.ncols {
+            return Err(anyhow::anyhow!(
+                "Cannot union matrices with different shapes"
+            ));
+        }
+        Ok(self.clone())
     }
 
     fn new_diagonal(n: IndexType) -> Self {
-        Dense
+        Dense { nrows: n, ncols: n }
     }
 }
 
@@ -179,6 +200,10 @@ impl MatrixSparsity for Dense {
 pub trait Matrix:
     for<'a> MatrixOpsByValue<&'a Self, Self> + Mul<Scale<Self::T>, Output = Self> + Clone
 {
+    type Sparsity: MatrixSparsity;
+
+    fn sparsity(&self) -> &Self::Sparsity;
+
     /// Extract the diagonal of the matrix as an owned vector
     fn diagonal(&self) -> Self::V;
 
@@ -198,8 +223,8 @@ pub trait Matrix:
 
     fn set_data_with_indices(
         &self,
-        dst_indices: <Self::Sparsity as MatrixSparsity>::Index,
-        src_indices: <Self::V as Vector>::Index,
+        dst_indices: &<Self::Sparsity as MatrixSparsity>::Index,
+        src_indices: &<Self::V as Vector>::Index,
         data: &Self::V,
     );
 

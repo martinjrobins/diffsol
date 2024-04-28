@@ -1,9 +1,10 @@
 use std::ops::{Mul, MulAssign};
 
 use super::default_solver::DefaultSolver;
-use super::{Dense, DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
+use super::{Dense, DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixView, MatrixViewMut};
 use crate::op::NonLinearOp;
 use crate::scalar::{IndexType, Scalar, Scale};
+use crate::vector::Vector;
 use crate::FaerLU;
 use anyhow::Result;
 use faer::{linalg::matmul::matmul, Col, ColMut, ColRef, Mat, MatMut, MatRef, Parallelism};
@@ -18,11 +19,7 @@ macro_rules! impl_matrix_common {
         impl<'a, T: Scalar> MatrixCommon for $mat_type {
             type T = T;
             type V = Col<T>;
-            type Sparsity = Dense;
 
-            fn sparsity(&self) -> &Self::Sparsity {
-                self.sparsity()
-            }
             fn nrows(&self) -> IndexType {
                 self.nrows()
             }
@@ -134,6 +131,26 @@ impl<T: Scalar> DenseMatrix for Mat<T> {
 }
 
 impl<T: Scalar> Matrix for Mat<T> {
+    type Sparsity = Dense;
+
+    fn sparsity(&self) -> &Self::Sparsity {
+        &Dense {
+            nrows: self.nrows(),
+            ncols: self.ncols(),
+        }
+    }
+
+    fn set_data_with_indices(
+        &self,
+        dst_indices: &<Self::Sparsity as MatrixSparsity>::Index,
+        src_indices: &<Self::V as Vector>::Index,
+        data: &Self::V,
+    ) {
+        for ((i, j), src_i) in dst_indices.iter().zip(src_indices.iter()) {
+            self[(*i, *j)] = data[*src_i];
+        }
+    }
+
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,

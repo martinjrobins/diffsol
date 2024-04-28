@@ -1,3 +1,4 @@
+use crate::matrix::MatrixCommon;
 use crate::vector::Vector;
 use crate::Scalar;
 use crate::{matrix::MatrixSparsity, op::NonLinearOp, Matrix, VectorIndex};
@@ -30,14 +31,14 @@ pub fn find_non_zeros<F: NonLinearOp + ?Sized>(op: &F, x: &F::V, t: F::T) -> Vec
     triplets
 }
 
-pub struct JacobianColoring<S: MatrixSparsity> {
-    dst_indices_per_color: Vec<S::Index>,
-    src_indices_per_color: Vec<<S::V as Vector>::Index>,
-    input_indices_per_color: Vec<<S::V as Vector>::Index>,
+pub struct JacobianColoring<F: NonLinearOp> {
+    dst_indices_per_color: Vec<<<F::M as Matrix>::Sparsity as MatrixSparsity>::Index>,
+    src_indices_per_color: Vec<<F::V as Vector>::Index>,
+    input_indices_per_color: Vec<<F::V as Vector>::Index>,
 }
 
-impl<S: MatrixSparsity> JacobianColoring<S> {
-    pub fn new<F: NonLinearOp>(op: &F, x: &F::V, t: F::T) -> Self {
+impl<F: NonLinearOp> JacobianColoring<F> {
+    pub fn new(op: &F, x: &F::V, t: F::T) -> Self {
         let non_zeros = op.sparsity().indices();
         let ncols = op.nstates();
         let graph = nonzeros2graph(non_zeros.as_slice(), ncols);
@@ -45,12 +46,12 @@ impl<S: MatrixSparsity> JacobianColoring<S> {
         let max_color = coloring.iter().max().copied().unwrap_or(0);
         let mut data_indices_per_color = vec![Vec::new(); max_color];
         let sparsity = op.sparsity();
-        let dst_indices_per_color = Vec::new();
-        let src_indices_per_color = Vec::new();
-        let input_indices_per_color = Vec::new();
+        let mut dst_indices_per_color = Vec::new();
+        let mut src_indices_per_color = Vec::new();
+        let mut input_indices_per_color = Vec::new();
         for c in 1..=max_color {
-            let rows = Vec::new();
-            let cols = Vec::new();
+            let mut rows = Vec::new();
+            let mut cols = Vec::new();
             for (i, j) in non_zeros.iter() {
                 if coloring[*j] == c {
                     rows.push(*i);
@@ -58,8 +59,8 @@ impl<S: MatrixSparsity> JacobianColoring<S> {
                 }
             }
             let dst_indices = sparsity.get_index(rows.as_slice(), cols.as_slice());
-            let src_indices = <S::V as Vector>::Index::from_slice(rows.as_slice());
-            let input_indices = <S::V as Vector>::Index::from_slice(cols.as_slice());
+            let src_indices = <F::V as Vector>::Index::from_slice(rows.as_slice());
+            let input_indices = <F::V as Vector>::Index::from_slice(cols.as_slice());
             dst_indices_per_color.push(dst_indices);
             src_indices_per_color.push(src_indices);
             input_indices_per_color.push(input_indices);
@@ -71,7 +72,7 @@ impl<S: MatrixSparsity> JacobianColoring<S> {
         }
     }
 
-    pub fn jacobian_inplace<F: NonLinearOp>(
+    pub fn jacobian_inplace(
         &self,
         op: &F,
         x: &F::V,
@@ -82,9 +83,9 @@ impl<S: MatrixSparsity> JacobianColoring<S> {
         let mut v = F::V::zeros(op.nstates());
         let mut col = F::V::zeros(op.nout());
         for c in 0..self.dst_indices_per_color.len() {
-            let input = self.input_indices_per_color[c];
-            let dst_indices = self.dst_indices_per_color[c];
-            let src_indices = self.src_indices_per_color[c];
+            let input = &self.input_indices_per_color[c];
+            let dst_indices = &self.dst_indices_per_color[c];
+            let src_indices = &self.src_indices_per_color[c];
             v.assign_at_indices(input, F::T::one());
             op.jac_mul_inplace(x, t, &v, &mut col);
             y.set_data_with_indices(dst_indices, src_indices, &col);
@@ -102,6 +103,7 @@ mod tests {
     use crate::{
         jacobian::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy},
         op::{closure::Closure, NonLinearOp},
+        MatrixSparsity,
     };
     use nalgebra::{DMatrix, DVector};
 
