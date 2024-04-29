@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{jacobian::{find_non_zeros, JacobianColoring}, matrix::{MatrixCommon, MatrixSparsity}, Matrix, Vector};
+use crate::{jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring}, matrix::{MatrixCommon, MatrixSparsity}, Matrix, Vector};
 
 use super::{LinearOp, Op};
 
@@ -20,7 +20,7 @@ where
     nout: usize,
     nparams: usize,
     p: Rc<M::V>,
-    coloring: Option<JacobianColoring>,
+    coloring: Option<JacobianColoring<M>>,
     sparsity: Option<M::Sparsity>,
 }
 
@@ -49,7 +49,7 @@ where
     }
 
     pub fn calculate_sparsity(&mut self, y0: &M::V, t0: M::T) {
-        let non_zeros = find_non_zeros(self, y0, t0);
+        let non_zeros = find_non_zeros_linear(self, y0, t0);
         self.sparsity = Some(MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros).expect("invalid sparsity pattern"));
         self.coloring = Some(JacobianColoring::new(self, y0, t0));
     }
@@ -78,6 +78,9 @@ where
     fn nparams(&self) -> usize {
         self.nparams
     }
+    fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
+        self.sparsity.as_ref()
+    }
 }
 
 impl<M, F> LinearOp for LinearClosure<M, F>
@@ -93,8 +96,5 @@ where
 {
     fn gemv_inplace(&self, x: &M::V, t: M::T, beta: M::T, y: &mut M::V) {
         (self.func)(x, self.p.as_ref(), t, beta, y)
-    }
-    fn sparsity(&self) -> &<Self::M as MatrixCommon>::Sparsity {
-        self.sparsity.as_ref().expect("sparsity not calculated")
     }
 }

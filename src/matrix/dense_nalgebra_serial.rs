@@ -95,13 +95,6 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
 impl<T: Scalar> Matrix for DMatrix<T> {
     type Sparsity = Dense;
 
-    fn sparsity(&self) -> &Self::Sparsity {
-        &Dense {
-            nrows: self.nrows(),
-            ncols: self.ncols(),
-        }
-    }
-
     fn set_data_with_indices(
         &self,
         dst_indices: &<Self::Sparsity as super::MatrixSparsity>::Index,
@@ -147,6 +140,9 @@ impl<T: Scalar> Matrix for DMatrix<T> {
         self.copy_from(y);
         self.mul_assign(beta);
         self.add_assign(x);
+    }
+    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, sparsity: Option<&Self::Sparsity>) -> Self {
+        Self::zeros(nrows, ncols)
     }
 }
 

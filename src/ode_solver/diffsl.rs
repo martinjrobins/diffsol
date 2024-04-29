@@ -1,15 +1,12 @@
-use num_traits::Zero;
 use std::{cell::RefCell, rc::Rc};
 
 use anyhow::Result;
 use diffsl::execution::Compiler;
 
 use crate::{
-    jacobian::JacobianColoring,
-    matrix::MatrixCommon,
-    op::{closure::Closure, linear_closure::LinearClosure, LinearOp, NonLinearOp, Op},
-    vector::Vector,
-    Matrix, OdeEquations,
+    JacobianColoring,
+    op::{LinearOp, NonLinearOp, Op},
+    OdeEquations
 };
 
 pub type T = f64;
@@ -24,8 +21,8 @@ pub struct DiffSl {
     nstates: usize,
     nparams: usize,
     nout: usize,
-    jacobian_coloring: Option<JacobianColoring>,
-    mass_coloring: Option<JacobianColoring>,
+    rhs_coloring: Option<JacobianColoring<M>>,
+    mass_coloring: Option<JacobianColoring<M>>,
 }
 
 impl DiffSl {
@@ -43,65 +40,29 @@ impl DiffSl {
         let (nstates, nparams, nout, _ndata, _stop) = compiler.get_dims();
 
         let tmp = RefCell::new(V::zeros(nstates));
+        
 
-        let (jacobian_coloring, mass_coloring) = if use_coloring {
-            let rhs_inplace = |x: &V, _p: &V, t: T, y_rhs: &mut V| {
-                compiler.rhs(
-                    t,
-                    x.as_slice(),
-                    data.borrow_mut().as_mut_slice(),
-                    y_rhs.as_mut_slice(),
-                );
-            };
-
-            let rhs_jac_inplace = |x: &V, _p: &V, t: T, v: &V, y: &mut V| {
-                let mut dummy_rhs = V::zeros(nstates);
-                compiler.rhs_grad(
-                    t,
-                    x.as_slice(),
-                    v.as_slice(),
-                    data.borrow_mut().as_mut_slice(),
-                    ddata.borrow_mut().as_mut_slice(),
-                    dummy_rhs.as_mut_slice(),
-                    y.as_mut_slice(),
-                );
-            };
-            let mass_inplace = |x: &V, _p: &V, t: T, beta: T, y: &mut V| {
-                let mut tmp = tmp.borrow_mut();
-                compiler.mass(
-                    t,
-                    x.as_slice(),
-                    data.borrow_mut().as_mut_slice(),
-                    tmp.as_mut_slice(),
-                );
-
-                // y = tmp + beta * y
-                y.axpy(1.0, &tmp, beta);
-            };
-            let t0 = 0.;
-            let mut y0 = V::zeros(nstates);
-            compiler.set_u0(y0.as_mut_slice(), data.borrow_mut().as_mut_slice());
-
-            let op =
-                Closure::<M, _, _>::new(rhs_inplace, rhs_jac_inplace, nstates, nstates, p.clone());
-            let jacobian_coloring = Some(JacobianColoring::new(&op, &y0, t0));
-            let op = LinearClosure::<M, _>::new(mass_inplace, nstates, nstates, p.clone());
-            let mass_coloring = Some(JacobianColoring::new(&op, &y0, t0));
-            (jacobian_coloring, mass_coloring)
-        } else {
-            (None, None)
-        };
-        Ok(Self {
+        let mut ret = Self {
             compiler,
             data,
             ddata,
             nparams,
             nstates,
             nout,
-            jacobian_coloring,
-            mass_coloring,
             tmp,
-        })
+            rhs_coloring: None,
+            mass_coloring: None,
+        };
+
+        if use_coloring {
+            let t0 = 0.;
+            let mut y0 = V::zeros(nstates);
+            let rhs = DiffSlRhs(&ret);
+            let mass = DiffSlMass(&ret);
+            ret.rhs_coloring = Some(JacobianColoring::new(&rhs, &y0, t0));
+            ret.mass_coloring = Some(JacobianColoring::new(&mass, &y0, t0));
+        }
+        Ok(ret)
     }
     pub fn out(&self, t: T, y: &V) -> &[T] {
         self.compiler
@@ -112,6 +73,7 @@ impl DiffSl {
 
 struct DiffSlRhs<'a>(&'a DiffSl);
 struct DiffSlMass<'a>(&'a DiffSl);
+
 
 macro_rules! impl_op_for_diffsl {
     ($name:ident) => {
@@ -158,6 +120,15 @@ impl NonLinearOp for DiffSlRhs<'_> {
             y.as_mut_slice(),
         );
     }
+
+    fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        if let Some(coloring) = &self.0.rhs_coloring {
+            coloring.jacobian_inplace(self, x, t, y);
+        } else {
+            NonLinearOp::jacobian_inplace(self, x, t, y);
+        }
+    
+    }
 }
 
 impl LinearOp for DiffSlMass<'_> {
@@ -165,7 +136,7 @@ impl LinearOp for DiffSlMass<'_> {
         let mut tmp = self.0.tmp.borrow_mut();
         self.0.compiler.mass(
             t,
-            v.as_slice(),
+            x.as_slice(),
             self.0.data.borrow_mut().as_mut_slice(),
             tmp.as_mut_slice(),
         );
@@ -175,17 +146,12 @@ impl LinearOp for DiffSlMass<'_> {
     }
 
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
-        let mass_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y: &mut Self::V| {
-            self.mass_inplace(t, x, Self::T::zero(), y);
-        };
-        let dummy_p = Rc::new(V::zeros(0));
-        let op = LinearClosure::<M, _>::new(mass_inplace, self.nstates, self.nstates, dummy_p);
-        let triplets = if let Some(coloring) = &self.mass_coloring {
-            coloring.find_non_zero_entries(&op, &self.init(t), t)
+        if let Some(coloring) = &self.0.mass_coloring {
+            let dummy = V::zeros(0);
+            coloring.matrix_inplace(self, &dummy, t, y);
         } else {
-            find_non_zero_entries(&op, &self.init(t), t)
-        };
-        Self::M::try_from_triplets(self.nstates(), self.nout(), triplets).unwrap()
+            LinearOp::matrix_inplace(self, t, y);
+        }
     }
 }
 
@@ -193,15 +159,15 @@ impl OdeEquations for DiffSl {
     type M = M;
     type T = T;
     type V = V;
-    type Mass = DiffSlMass<'static>;
-    type Rhs = DiffSlRhs<'static>;
+    type Mass<'a> = DiffSlMass<'a>;
+    type Rhs<'a> = DiffSlRhs<'a>;
 
-    fn rhs(&self) -> &Self::Rhs {
-        &DiffSlRhs(self)
+    fn rhs(&self) -> Self::Rhs<'_> {
+        DiffSlRhs(self)
     }
 
-    fn mass(&self) -> &Self::Mass {
-        &DiffSlMass(self)
+    fn mass(&self) -> Self::Mass<'_> {
+        DiffSlMass(self)
     }
 
     fn set_params(&mut self, p: Self::V) {
@@ -209,51 +175,13 @@ impl OdeEquations for DiffSl {
             .set_inputs(p.as_slice(), self.data.borrow_mut().as_mut_slice());
     }
 
-    fn algebraic_indices(&self) -> <Self::V as Vector>::Index {
-        let mut ids = vec![0.; self.rhs().nstates()];
-        self.compiler.set_id(ids.as_mut_slice());
-        let mut indices = Vec::new();
-        for (i, id) in ids.iter().enumerate() {
-            if *id == 0. {
-                indices.push(i);
-            }
-        }
-        <Self::V as Vector>::Index::from_vec(indices)
-    }
-
-    fn mass_matrix(&self, t: Self::T) -> Self::M {}
-
-    fn jacobian_matrix(&self, x: &Self::V, t: Self::T) -> Self::M {
-        let rhs_inplace = |x: &Self::V, _p: &Self::V, t: Self::T, y_rhs: &mut Self::V| {
-            self.rhs_inplace(t, x, y_rhs);
-        };
-        let rhs_jac_inplace =
-            |x: &Self::V, _p: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V| {
-                self.rhs_jac_inplace(t, x, v, y);
-            };
-        let dummy_p = Rc::new(V::zeros(0));
-        let op = Closure::<M, _, _>::new(
-            rhs_inplace,
-            rhs_jac_inplace,
-            self.nstates,
-            self.nstates,
-            dummy_p,
-        );
-        let triplets = if let Some(coloring) = &self.jacobian_coloring {
-            coloring.find_non_zero_entries(&op, x, t)
-        } else {
-            find_non_zero_entries(&op, x, t)
-        };
-        Self::M::try_from_triplets(self.nstates(), self.nout(), triplets).unwrap()
-    }
 
     fn init(&self, _t: Self::T) -> Self::V {
-        let mut ret_y = Self::V::zeros(self.nstates());
+        let mut ret_y = Self::V::zeros(self.rhs().nstates());
         self.compiler
             .set_u0(ret_y.as_mut_slice(), self.data.borrow_mut().as_mut_slice());
         ret_y
     }
-    fn mass_inplace(&self, t: Self::T, v: &Self::V, beta: Self::T, y: &mut Self::V) {}
 }
 
 #[cfg(test)]
@@ -262,7 +190,7 @@ mod tests {
 
     use crate::{
         linear_solver::NalgebraLU, nonlinear_solver::newton::NewtonNonlinearSolver, Bdf,
-        OdeBuilder, OdeEquations, OdeSolverMethod, Vector,
+        OdeBuilder, OdeEquations, OdeSolverMethod, Vector, NonLinearOp, LinearOp
     };
 
     use super::DiffSl;
@@ -318,16 +246,16 @@ mod tests {
         let init = eqn.init(0.0);
         let init_expect = DVector::from_vec(vec![y0, 0.0]);
         init.assert_eq_st(&init_expect, 1e-10);
-        let rhs = eqn.rhs(0.0, &init);
+        let rhs = eqn.rhs().call(&init, 0.0);
         let rhs_expect = DVector::from_vec(vec![r * y0 * (1.0 - y0 / k), 2.0 * y0]);
         rhs.assert_eq_st(&rhs_expect, 1e-10);
         let v = DVector::from_vec(vec![1.0, 1.0]);
-        let rhs_jac = eqn.jac_mul(0.0, &init, &v);
+        let rhs_jac = eqn.rhs().jac_mul(&init, 0.0, &v);
         let rhs_jac_expect = DVector::from_vec(vec![r * (1.0 - y0 / k) - r * y0 / k, 1.0]);
         rhs_jac.assert_eq_st(&rhs_jac_expect, 1e-10);
         let mut mass_y = DVector::from_vec(vec![0.0, 0.0]);
         let v = DVector::from_vec(vec![1.0, 1.0]);
-        eqn.mass_inplace(0.0, &v, 1.0, &mut mass_y);
+        eqn.mass().call_inplace(&v, 0.0, &mut mass_y);
         let mass_y_expect = DVector::from_vec(vec![1.0, 0.0]);
         mass_y.assert_eq_st(&mass_y_expect, 1e-10);
 

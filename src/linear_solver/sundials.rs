@@ -8,6 +8,7 @@ use crate::{
     op::linearise::LinearisedOp,
     vector::sundials::{get_suncontext, SundialsVector},
     Matrix, NonLinearOp, Op, SolverProblem, SundialsMatrix,
+    LinearOp,
 };
 
 use super::LinearSolver;
@@ -79,7 +80,8 @@ where
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         let problem = self.problem.as_ref().expect("Problem not set");
         let linear_solver = self.linear_solver.expect("Linear solver not set");
-        problem.f.jacobian_inplace(x, t, matrix);
+        problem.f.set_x(x);
+        problem.f.matrix_inplace(t, matrix);
         sundials_check(unsafe { SUNLinSolSetup(linear_solver, matrix.sundials_matrix()) }).unwrap();
         self.is_setup = true;
     }

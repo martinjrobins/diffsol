@@ -4,7 +4,7 @@ use num_traits::Zero;
 use std::ops::MulAssign;
 use std::rc::Rc;
 
-use crate::linear_solver::LinearSolver;
+use crate::{LinearSolver, NonLinearOp, LinearOp};
 use crate::matrix::MatrixRef;
 use crate::op::linearise::LinearisedOp;
 use crate::vector::VectorRef;
@@ -62,7 +62,7 @@ where
 
     pub fn new(
         tableau: Tableau<M>,
-        linear_solver: impl LinearSolver<LinearisedOp<SdirkCallable<Eqn>>> + 'static,
+        linear_solver: impl LinearSolver<SdirkCallable<Eqn>> + 'static,
     ) -> Self {
         let mut nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         // set max iterations for nonlinear solver
@@ -186,7 +186,7 @@ where
         // compute first step based on alg in Hairer, Norsett, Wanner
         // Solving Ordinary Differential Equations I, Nonstiff Problems
         // Section II.4.2
-        let f0 = problem.eqn.rhs(state.t, &state.y);
+        let f0 = problem.eqn.rhs().call(&state.y, state.t);
         let hf0 = &f0 * scale(state.h);
 
         let mut tmp = f0.clone();
@@ -205,7 +205,7 @@ where
 
         let y1 = &state.y + hf0;
         let t1 = state.t + h0;
-        let f1 = problem.eqn.rhs(t1, &y1);
+        let f1 = problem.eqn.rhs().call(&y1, t1);
 
         let mut df = f1 - &f0;
         df *= scale(Eqn::T::one() / h0);
@@ -237,7 +237,7 @@ where
         let callable = Rc::new(SdirkCallable::new(problem, self.gamma));
         callable.set_h(state.h);
         let nonlinear_problem = SolverProblem::new_from_ode_problem(callable, problem);
-        self.nonlinear_solver.set_problem(nonlinear_problem);
+        self.nonlinear_solver.set_problem(&nonlinear_problem);
 
         // update statistics
         self.statistics = BdfStatistics::default();

@@ -27,8 +27,8 @@ mod tests {
     use crate::matrix::Matrix;
     use crate::nonlinear_solver::newton::NewtonNonlinearSolver;
     use crate::op::filter::FilterCallable;
-    use crate::op::ode_rhs::OdeRhs;
-    use crate::op::Op;
+    use crate::op::unit::UnitCallable;
+    use crate::op::{LinearOp, NonLinearOp, Op};
     use crate::scalar::scale;
     use crate::{NonLinearSolver, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState};
     use crate::{Sdirk, Tableau, Vector};
@@ -38,15 +38,16 @@ mod tests {
     use tests::test_models::dydt_y2::dydt_y2_problem;
     use tests::test_models::gaussian_decay::gaussian_decay_problem;
 
-    fn test_ode_solver<M, Eqn>(
+    fn test_ode_solver<'a, M, Eqn>(
         method: &mut impl OdeSolverMethod<Eqn>,
-        mut root_solver: impl NonLinearSolver<FilterCallable<OdeRhs<Eqn>>>,
+        mut root_solver: impl NonLinearSolver<FilterCallable<Eqn::Rhs<'a>>>,
         problem: OdeSolverProblem<Eqn>,
         solution: OdeSolverSolution<M::V>,
         override_tol: Option<M::T>,
     ) where
         M: Matrix + 'static,
         Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
+        Eqn: 'a,
     {
         let state = OdeSolverState::new_consistent(&problem, &mut root_solver).unwrap();
         method.set_problem(state, &problem);
@@ -476,35 +477,67 @@ mod tests {
         "###);
     }
 
-    pub struct TestEqn<M> {
+    pub struct TestEqnRhs<M> {
         _m: std::marker::PhantomData<M>,
     }
-    impl<M: Matrix> Op for TestEqn<M> {
-        type M = M;
+
+    impl<M: Matrix> Op for TestEqnRhs<M> {
         type T = M::T;
         type V = M::V;
+        type M = M;
 
         fn nout(&self) -> usize {
             1
         }
-
-        fn nstates(&self) -> usize {
-            1
-        }
-
         fn nparams(&self) -> usize {
-            1
+            0
+        }
+        fn nstates(&self) -> usize {
+            1   
         }
     }
-    impl<M: Matrix> OdeEquations for TestEqn<M> {
-        fn set_params(&mut self, _p: Self::V) {}
 
-        fn rhs_inplace(&self, _t: Self::T, _y: &Self::V, rhs_y: &mut Self::V) {
-            rhs_y[0] = M::T::zero();
+    impl<M: Matrix> NonLinearOp for TestEqnRhs<M> {
+        fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
+            y[0] = M::T::zero();
         }
 
-        fn rhs_jac_inplace(&self, _t: Self::T, _x: &Self::V, _v: &Self::V, y: &mut Self::V) {
+        fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
             y[0] = M::T::zero();
+        }
+    }
+
+    pub struct TestEqn<M: Matrix> {
+        rhs: TestEqnRhs<M>,
+        mass: UnitCallable<M>
+    }
+
+    impl<M: Matrix> TestEqn<M> {
+        pub fn new() -> Self {
+            Self {
+                rhs: TestEqnRhs {
+                    _m: std::marker::PhantomData,
+                },
+                mass: UnitCallable::new(1),
+            }
+        }
+    }
+    
+    impl<M: Matrix> OdeEquations for TestEqn<M> {
+        type T = M::T;
+        type V = M::V;
+        type M = M;
+        type Rhs<'a> = &'a TestEqnRhs<M> where Self: 'a;
+        type Mass<'a> = &'a UnitCallable<M> where Self: 'a;
+
+        fn set_params(&mut self, _p: Self::V) {}
+
+        fn rhs(&self) -> Self::Rhs<'_> {
+            &self.rhs
+        }
+
+        fn mass(&self) -> Self::Mass<'_> {
+            &self.mass
         }
 
         fn init(&self, _t: Self::T) -> Self::V {
@@ -512,11 +545,10 @@ mod tests {
         }
     }
 
+
     pub fn test_interpolate<M: Matrix, Method: OdeSolverMethod<TestEqn<M>>>(mut s: Method) {
         let problem = OdeSolverProblem::new(
-            TestEqn {
-                _m: std::marker::PhantomData,
-            },
+            TestEqn::new(),
             M::T::from(1e-6),
             M::V::from_element(1, M::T::from(1e-6)),
             M::T::zero(),
@@ -545,9 +577,7 @@ mod tests {
 
     pub fn test_take_state<M: Matrix, Method: OdeSolverMethod<TestEqn<M>>>(mut s: Method) {
         let problem = OdeSolverProblem::new(
-            TestEqn {
-                _m: std::marker::PhantomData,
-            },
+            TestEqn::new(),
             M::T::from(1e-6),
             M::V::from_element(1, M::T::from(1e-6)),
             M::T::zero(),

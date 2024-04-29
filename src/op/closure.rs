@@ -1,7 +1,7 @@
 use std::rc::Rc;
 use num_traits::One;
 
-use crate::{jacobian::{find_non_zeros, JacobianColoring}, matrix::MatrixSparsity, Matrix, Vector};
+use crate::{jacobian::{find_non_zeros_nonlinear, JacobianColoring}, matrix::MatrixSparsity, Matrix, Vector};
 
 use super::{NonLinearOp, Op};
 
@@ -17,7 +17,7 @@ where
     nout: usize,
     nparams: usize,
     p: Rc<M::V>,
-    coloring: Option<JacobianColoring>,
+    coloring: Option<JacobianColoring<M>>,
     sparsity: Option<M::Sparsity>,
 }
 
@@ -42,7 +42,7 @@ where
     }
 
     pub fn calculate_sparsity(&mut self, y0: &M::V, t0: M::T) {
-        let non_zeros = find_non_zeros(self, y0, t0);
+        let non_zeros = find_non_zeros_nonlinear(self, y0, t0);
         self.sparsity = Some(MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros).expect("invalid sparsity pattern"));
         self.coloring = Some(JacobianColoring::new(self, y0, t0));
     }
@@ -66,6 +66,9 @@ where
     fn nparams(&self) -> usize {
         self.nparams
     }
+    fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
+        self.sparsity.as_ref()
+    }
 }
 
 impl<M, F, G> NonLinearOp for Closure<M, F, G>
@@ -79,8 +82,5 @@ where
     }
     fn jac_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
         (self.jacobian_action)(x, self.p.as_ref(), t, v, y)
-    }
-    fn sparsity(&self) -> &<Self::M as Matrix>::Sparsity {
-        self.sparsity.as_ref().expect("sparsity pattern not calculated")
     }
 }

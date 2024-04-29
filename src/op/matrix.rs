@@ -25,13 +25,13 @@ impl<M: Matrix> Op for MatrixOp<M> {
     fn nparams(&self) -> usize {
         0
     }
+    fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
+        self.m.sparsity()
+    }
 }
 
 impl<M: Matrix> LinearOp for MatrixOp<M> {
     fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
         self.m.gemv(t, x, beta, y);
-    }
-    fn sparsity(&self) -> &<Self::M as Matrix>::Sparsity {
-        self.m.sparsity()
     }
 }

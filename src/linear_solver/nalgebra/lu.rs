@@ -3,7 +3,8 @@ use nalgebra::{DMatrix, DVector, Dyn};
 
 use crate::{
     op::{linearise::LinearisedOp, NonLinearOp},
-    LinearSolver, Op, Scalar, SolverProblem,
+    LinearSolver, Op, Scalar, SolverProblem, LinearOp,
+    Matrix,
 };
 
 /// A [LinearSolver] that uses the LU decomposition in the [`nalgebra` library](https://nalgebra.org/) to solve the linear system.
@@ -48,16 +49,16 @@ impl<T: Scalar, C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> LinearSol
     fn set_linearisation(&mut self, x: &<C as Op>::V, t: <C as Op>::T) {
         let problem = self.problem.as_ref().expect("Problem not set");
         let matrix = self.matrix.as_mut().expect("Matrix not set");
-        problem.f.jacobian_inplace(x, t, matrix);
+        problem.f.set_x(x);
+        problem.f.matrix_inplace(t, matrix);
         self.lu = Some(matrix.lu());
     }
 
     fn set_problem(&mut self, problem: &SolverProblem<C>) {
         let linearised_problem = problem.linearise();
-        let matrix = DMatrix::zeros(
-            linearised_problem.f.nstates(),
-            linearised_problem.f.nstates(),
-        );
+        let ncols = linearised_problem.f.nstates();
+        let nrows = linearised_problem.f.nout();
+        let matrix = C::M::new_from_sparsity(nrows, ncols, linearised_problem.f.sparsity());
         self.problem = Some(linearised_problem);
         self.matrix = Some(matrix);
     }

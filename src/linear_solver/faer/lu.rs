@@ -1,6 +1,6 @@
 use crate::{
     linear_solver::LinearSolver, op::linearise::LinearisedOp, solver::SolverProblem, NonLinearOp,
-    Op, Scalar,
+    Op, Scalar, Matrix, LinearOp,
 };
 use anyhow::Result;
 use faer::{linalg::solvers::FullPivLu, solvers::SpSolver, Col, Mat};
@@ -33,7 +33,8 @@ impl<T: Scalar, C: NonLinearOp<M = Mat<T>, V = Col<T>, T = T>> LinearSolver<C> f
     fn set_linearisation(&mut self, x: &C::V, t: C::T) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         let problem = self.problem.as_ref().expect("Problem not set");
-        problem.f.jacobian_inplace(x, t, matrix);
+        problem.f.set_x(x);
+        problem.f.matrix_inplace(t, matrix);
         self.lu = Some(matrix.full_piv_lu());
     }
 
@@ -48,10 +49,9 @@ impl<T: Scalar, C: NonLinearOp<M = Mat<T>, V = Col<T>, T = T>> LinearSolver<C> f
 
     fn set_problem(&mut self, problem: &SolverProblem<C>) {
         let linearised_problem = problem.linearise();
-        let matrix = Mat::zeros(
-            linearised_problem.f.nstates(),
-            linearised_problem.f.nstates(),
-        );
+        let ncols = linearised_problem.f.nstates();
+        let nrows = linearised_problem.f.nout();
+        let matrix = C::M::new_from_sparsity(nrows, ncols, linearised_problem.f.sparsity());
         self.problem = Some(linearised_problem);
         self.matrix = Some(matrix);
     }

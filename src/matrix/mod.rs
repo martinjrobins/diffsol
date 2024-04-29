@@ -2,7 +2,6 @@ use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
 use crate::scalar::Scale;
-use crate::vector::VectorIndex;
 use crate::{IndexType, Scalar, Vector};
 use anyhow::Result;
 use num_traits::{One, Zero};
@@ -202,7 +201,10 @@ pub trait Matrix:
 {
     type Sparsity: MatrixSparsity;
 
-    fn sparsity(&self) -> &Self::Sparsity;
+    /// Return sparsity information, None if the matrix is dense
+    fn sparsity(&self) -> Option<&Self::Sparsity> {
+        None
+    }
 
     /// Extract the diagonal of the matrix as an owned vector
     fn diagonal(&self) -> Self::V;
@@ -215,6 +217,9 @@ pub trait Matrix:
 
     /// Create a new matrix of shape `nrows` x `ncols` filled with zeros
     fn zeros(nrows: IndexType, ncols: IndexType) -> Self;
+
+    /// Create a new matrix from a sparsity pattern, the non-zero elements are not initialized
+    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, sparsity: Option<&Self::Sparsity>) -> Self;
 
     /// Create a new diagonal matrix from a [Vector] holding the diagonal elements
     fn from_diagonal(v: &Self::V) -> Self;

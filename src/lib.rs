@@ -159,6 +159,7 @@ pub use ode_solver::{
     method::OdeSolverState, problem::OdeSolverProblem, sdirk::Sdirk, tableau::Tableau,
 };
 use op::{NonLinearOp, LinearOp, closure::Closure, linear_closure::LinearClosure, Op};
+use jacobian::JacobianColoring;
 use scalar::{IndexType, Scalar, Scale};
 use solver::SolverProblem;
 use vector::{Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut};

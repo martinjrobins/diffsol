@@ -1,9 +1,10 @@
 use anyhow::Result;
 use std::rc::Rc;
+use num_traits::Zero;
 
 use crate::{
-    op::{filter::FilterCallable, ode_rhs::OdeRhs},
-    NonLinearSolver, OdeEquations, OdeSolverProblem, SolverProblem, Vector, VectorIndex,
+    op::{filter::FilterCallable},
+    NonLinearSolver, OdeEquations, OdeSolverProblem, SolverProblem, Vector, VectorIndex, LinearOp, Matrix,
 };
 
 /// Trait for ODE solver methods. This is the main user interface for the ODE solvers.
@@ -58,12 +59,15 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     }
 
     /// Reinitialise the solver state making it consistent with the algebraic constraints and solve the problem up to time `t`
-    fn make_consistent_and_solve<RS: NonLinearSolver<FilterCallable<OdeRhs<Eqn>>>>(
+    fn make_consistent_and_solve<'a, RS: NonLinearSolver<FilterCallable<Eqn::Rhs<'a>>>>(
         &mut self,
         problem: &OdeSolverProblem<Eqn>,
         t: Eqn::T,
         root_solver: &mut RS,
-    ) -> Result<Eqn::V> {
+    ) -> Result<Eqn::V> 
+        where
+            Eqn: 'a,
+    {
         let state = OdeSolverState::new_consistent(problem, root_solver)?;
         self.set_problem(state, problem);
         while self.state().unwrap().t <= t {
@@ -95,30 +99,31 @@ impl<V: Vector> OdeSolverState<V> {
     }
 
     /// Create a new solver state from an ODE problem, making the state consistent with the algebraic constraints.
-    pub fn new_consistent<Eqn, S>(
+    pub fn new_consistent<'a, Eqn, S>(
         ode_problem: &OdeSolverProblem<Eqn>,
         root_solver: &mut S,
     ) -> Result<Self>
     where
         Eqn: OdeEquations<T = V::T, V = V>,
-        S: NonLinearSolver<FilterCallable<OdeRhs<Eqn>>> + ?Sized,
+        S: NonLinearSolver<FilterCallable<Eqn::Rhs<'a>>> + ?Sized,
+        Eqn: 'a,
     {
         let t = ode_problem.t0;
         let h = ode_problem.h0;
-        let indices = ode_problem.eqn.algebraic_indices();
+        let mass_diagonal = ode_problem.eqn.mass().matrix(t).diagonal();
+        let indices = mass_diagonal.filter_indices(|x| x == Eqn::T::zero());
         let mut y = ode_problem.eqn.init(t);
         if indices.len() == 0 {
             return Ok(Self { y, t, h });
         }
         let mut y_filtered = y.filter(&indices);
         let atol = Rc::new(ode_problem.atol.as_ref().filter(&indices));
-        let rhs = Rc::new(OdeRhs::new(ode_problem.eqn.clone()));
+        let rhs = Rc::new(ode_problem.eqn.rhs());
         let f = Rc::new(FilterCallable::new(rhs, &y, indices));
         let rtol = ode_problem.rtol;
-        let init_problem = SolverProblem::new(f, t, atol, rtol);
-        root_solver.set_problem(init_problem);
-        root_solver.solve_in_place(&mut y_filtered)?;
-        let init_problem = root_solver.problem().unwrap();
+        let init_problem = SolverProblem::new(f, atol, rtol);
+        root_solver.set_problem(&init_problem);
+        root_solver.solve_in_place(&mut y_filtered, t)?;
         let indices = init_problem.f.indices();
         y.scatter_from(&y_filtered, indices);
         Ok(Self { y, t, h })

@@ -1,7 +1,7 @@
 use num_traits::One;
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{scale, Vector};
+use crate::{scale, Vector, Matrix};
 
 use super::{LinearOp, NonLinearOp, Op};
 
@@ -49,6 +49,9 @@ impl<C: NonLinearOp> Op for LinearisedOp<C> {
     fn nparams(&self) -> usize {
         self.callable.nparams()
     }
+    fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
+        self.callable.sparsity()
+    }
 }
 
 impl<C: NonLinearOp> LinearOp for LinearisedOp<C> {
@@ -60,8 +63,5 @@ impl<C: NonLinearOp> LinearOp for LinearisedOp<C> {
         tmp.copy_from(y);
         self.callable.jac_mul_inplace(&self.x, t, x, y);
         y.axpy(beta, &tmp, Self::T::one());
-    }
-    fn sparsity(&self) -> &<Self::M as crate::matrix::Matrix>::Sparsity {
-        self.callable.sparsity()
     }
 }

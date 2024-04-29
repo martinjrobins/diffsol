@@ -1,11 +1,11 @@
 use crate::{
     matrix::{MatrixCommon, MatrixRef},
     ode_solver::equations::OdeEquations,
-    LinearOp, Matrix, OdeSolverProblem, Vector, VectorRef,
+    LinearOp, Matrix, OdeSolverProblem, Vector, VectorRef, MatrixSparsity
 };
 use num_traits::Zero;
 use std::{
-    cell::RefCell,
+    cell::{Ref, RefCell},
     ops::{AddAssign, Deref, SubAssign},
     rc::Rc,
 };
@@ -22,7 +22,7 @@ pub struct BdfCallable<Eqn: OdeEquations> {
     mass_jac: RefCell<Eqn::M>,
     jacobian_is_stale: RefCell<bool>,
     number_of_jac_evals: RefCell<usize>,
-    sparsity: <Eqn::M as MatrixCommon>::Sparsity,
+    sparsity: Option<<Eqn::M as Matrix>::Sparsity>,
 }
 
 impl<Eqn: OdeEquations> BdfCallable<Eqn> {
@@ -31,20 +31,31 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
         let n = ode_problem.eqn.rhs().nstates();
         let c = RefCell::new(Eqn::T::zero());
         let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n));
-        let rhs_jac = RefCell::new(Eqn::M::zeros(n, n));
         let jacobian_is_stale = RefCell::new(true);
         let number_of_jac_evals = RefCell::new(0);
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n));
 
-        let mass_sparsity = LinearOp::sparsity(eqn.mass());
-        let rhs_jac_sparsity = NonLinearOp::sparsity(eqn.rhs());
-        let sparsity = mass_sparsity.union(rhs_jac_sparsity).unwrap();
-
-        let mass_jac = if eqn.is_mass_constant() {
-            RefCell::new(eqn.mass().matrix(Eqn::T::zero()))
+        // create the mass and rhs jacobians according to the sparsity pattern
+        let mass_sparsity = eqn.mass().sparsity();
+        let rhs_jac_sparsity = eqn.rhs().sparsity();
+        let rhs_jac = RefCell::new(Eqn::M::new_from_sparsity(n, n, rhs_jac_sparsity));
+        let sparsity = if let Some(rhs_jac_sparsity) = rhs_jac_sparsity {
+            if let Some(mass_sparsity) = mass_sparsity {
+                Some(mass_sparsity.union(rhs_jac_sparsity).unwrap())
+            } else {
+                None
+            }
         } else {
-            RefCell::new(<Eqn::M as Matrix>::zeros(n, n))
+            None
         };
+
+
+        // if mass is constant then pre-compute it
+        let mut mass_jac = Eqn::M::new_from_sparsity(n, n, mass_sparsity);
+        if eqn.is_mass_constant() {
+            eqn.mass().matrix_inplace(Eqn::T::zero(), &mut mass_jac);
+        }
+        let mass_jac = RefCell::new(mass_jac);
 
         Self {
             eqn,
@@ -103,6 +114,9 @@ impl<Eqn: OdeEquations> Op for BdfCallable<Eqn> {
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
     }
+    fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
+        self.sparsity.as_ref()
+    }
 }
 
 // callable to solve for F(y) = M (y' + psi) - f(y) = 0
@@ -133,9 +147,7 @@ where
         self.eqn.mass().gemv_inplace(v, t, -c, y);
     }
 
-    fn sparsity(&self) -> &<Self::M as MatrixCommon>::Sparsity {
-        &self.sparsity
-    }
+    
 
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         if *self.jacobian_is_stale.borrow() {

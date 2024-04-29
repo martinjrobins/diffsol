@@ -18,7 +18,7 @@ use crate::{
     IndexType, Scale, SundialsLinearSolver, Vector,
 };
 
-use super::{default_solver::DefaultSolver, Dense, Matrix, MatrixCommon};
+use super::{default_solver::DefaultSolver, Dense, Matrix, MatrixCommon, MatrixSparsity};
 use anyhow::anyhow;
 
 #[derive(Debug)]
@@ -227,6 +227,19 @@ impl_scalar_assign_op!(MulAssign, mul_assign, *);
 impl_scalar_assign_op!(DivAssign, div_assign, /);
 
 impl Matrix for SundialsMatrix {
+    type Sparsity = Dense;
+
+    fn set_data_with_indices(
+        &self,
+        dst_indices: &<Self::Sparsity as MatrixSparsity>::Index,
+        src_indices: &<Self::V as Vector>::Index,
+        data: &Self::V,
+    ) {
+        for ((i, j), src_i) in dst_indices.iter().zip(src_indices.iter()) {
+            self[(*i, *j)] = data[*src_i];
+        }
+    }
+
     fn diagonal(&self) -> Self::V {
         let n = min(self.nrows(), self.ncols());
         let mut v = SundialsVector::new_serial(n);
@@ -296,6 +309,10 @@ impl Matrix for SundialsMatrix {
         sundials_check(unsafe { SUNMatMatvec(a, x.sundials_vector(), tmp.sundials_vector()) })
             .unwrap();
         y.axpy(alpha, &tmp, beta);
+    }
+
+    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, sparsity: Option<&Self::Sparsity>) -> Self {
+        Self::new_dense(nrows, ncols)
     }
 }
 

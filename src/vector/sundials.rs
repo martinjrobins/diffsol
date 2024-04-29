@@ -105,6 +105,12 @@ impl Display for SundialsIndexVector {
     }
 }
 
+impl SundialsIndexVector {
+    pub fn iter(&self) -> impl Iterator<Item = &IndexType> {
+        self.0.iter()
+    }
+}
+
 impl Display for SundialsVector {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         for i in 0..self.len() {
