@@ -1,7 +1,6 @@
 use crate::{op::Op, solver::SolverProblem};
 use anyhow::Result;
 
-pub mod gmres;
 #[cfg(feature = "nalgebra")]
 pub mod nalgebra;
 
@@ -50,27 +49,28 @@ pub mod tests {
     use std::rc::Rc;
 
     use crate::{
-        linear_solver::FaerLU,
-        linear_solver::NalgebraLU,
-        op::{linear_closure::LinearClosure, LinearOp},
+        linear_solver::{FaerLU, NalgebraLU},
+        op::{closure::Closure, NonLinearOp},
         scalar::scale,
         vector::VectorRef,
         DenseMatrix, LinearSolver, SolverProblem, Vector,
     };
-    use num_traits::One;
+    use num_traits::{One, Zero};
 
     use super::LinearSolveSolution;
 
     fn linear_problem<M: DenseMatrix + 'static>() -> (
-        SolverProblem<impl LinearOp<M = M, V = M::V, T = M::T>>,
+        SolverProblem<impl NonLinearOp<M = M, V = M::V, T = M::T>>,
         Vec<LinearSolveSolution<M::V>>,
     ) {
         let diagonal = M::V::from_vec(vec![2.0.into(), 2.0.into()]);
-        let jac = M::from_diagonal(&diagonal);
+        let jac1 = M::from_diagonal(&diagonal);
+        let jac2 = M::from_diagonal(&diagonal);
         let p = Rc::new(M::V::zeros(0));
-        let op = Rc::new(LinearClosure::new(
-            // f = J * x + beta * y
-            move |x, _p, _t, beta, y| jac.gemv(M::T::one(), x, beta, y),
+        let op = Rc::new(Closure::new(
+            // f = J * x
+            move |x, _p, _t, y| jac1.gemv(M::T::one(), x, M::T::zero(), y),
+            move |_x, _p, _t, v, y| jac2.gemv(M::T::one(), v, M::T::zero(), y),
             2,
             2,
             p,
@@ -90,7 +90,7 @@ pub mod tests {
         problem: SolverProblem<C>,
         solns: Vec<LinearSolveSolution<C::V>>,
     ) where
-        C: LinearOp,
+        C: NonLinearOp,
         for<'a> &'a C::V: VectorRef<C::V>,
     {
         solver.set_problem(&problem);

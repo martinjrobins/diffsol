@@ -31,6 +31,9 @@ impl VectorIndex for DVector<IndexType> {
     fn len(&self) -> crate::IndexType {
         self.len()
     }
+    fn from_slice(slice: &[IndexType]) -> Self {
+        DVector::from_iterator(slice.len(), slice.iter().copied())
+    }
 }
 
 macro_rules! impl_vector_common {
@@ -175,6 +178,12 @@ impl<T: Scalar> Vector for DVector<T> {
         for (i, &index) in indices.iter().enumerate() {
             self[index] = other[i];
         }
+    }
+    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
+        for &index in indices.iter() {
+            self[index] = value;
+        }
+    
     }
 }
 

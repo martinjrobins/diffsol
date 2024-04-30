@@ -230,7 +230,7 @@ impl Matrix for SundialsMatrix {
     type Sparsity = Dense;
 
     fn set_data_with_indices(
-        &self,
+        &mut self,
         dst_indices: &<Self::Sparsity as MatrixSparsity>::Index,
         src_indices: &<Self::V as Vector>::Index,
         data: &Self::V,
@@ -311,7 +311,7 @@ impl Matrix for SundialsMatrix {
         y.axpy(alpha, &tmp, beta);
     }
 
-    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, sparsity: Option<&Self::Sparsity>) -> Self {
+    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, _sparsity: Option<&Self::Sparsity>) -> Self {
         Self::new_dense(nrows, ncols)
     }
 }

@@ -118,7 +118,7 @@ where
         let mut mass = LinearClosure::<M, _>::new(mass, nstates, nstates, p.clone());
         if calculate_sparsity {
             rhs.calculate_sparsity(&y0, t0);
-            mass.calculate_sparsity(&y0, t0);
+            mass.calculate_sparsity(t0);
         }
         Self {
             rhs,

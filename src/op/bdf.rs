@@ -1,11 +1,10 @@
 use crate::{
-    matrix::{MatrixCommon, MatrixRef},
-    ode_solver::equations::OdeEquations,
-    LinearOp, Matrix, OdeSolverProblem, Vector, VectorRef, MatrixSparsity
+    matrix::MatrixRef, ode_solver::equations::OdeEquations, LinearOp, Matrix, MatrixSparsity,
+    OdeSolverProblem, Vector, VectorRef,
 };
 use num_traits::Zero;
 use std::{
-    cell::{Ref, RefCell},
+    cell::RefCell,
     ops::{AddAssign, Deref, SubAssign},
     rc::Rc,
 };
@@ -48,7 +47,6 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
         } else {
             None
         };
-
 
         // if mass is constant then pre-compute it
         let mut mass_jac = Eqn::M::new_from_sparsity(n, n, mass_sparsity);
@@ -146,8 +144,6 @@ where
         // y = Mv - c y
         self.eqn.mass().gemv_inplace(v, t, -c, y);
     }
-
-    
 
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         if *self.jacobian_is_stale.borrow() {

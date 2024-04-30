@@ -34,7 +34,7 @@ pub fn find_non_zeros_nonlinear<F: NonLinearOp + ?Sized>(op: &F, x: &F::V, t: F:
 /// Find the non-zero entries of the matrix of a linear operator.
 /// This is used as the default `find_non_zeros` function for the `NonLinearOp` and `LinearOp` traits.
 /// Users can override this function with a more efficient and reliable implementation if desired.
-pub fn find_non_zeros_linear<F: LinearOp + ?Sized>(op: &F, x: &F::V, t: F::T) -> Vec<(usize, usize)> {
+pub fn find_non_zeros_linear<F: LinearOp + ?Sized>(op: &F, t: F::T) -> Vec<(usize, usize)> {
     let mut v = F::V::zeros(op.nstates());
     let mut col = F::V::zeros(op.nout());
     let mut triplets = Vec::with_capacity(op.nstates());
@@ -59,7 +59,7 @@ pub struct JacobianColoring<M: Matrix> {
 }
 
 impl<M: Matrix> JacobianColoring<M> {
-    pub fn new<F: Op<M=M>>(op: &F, x: &M::V, t: F::T) -> Self {
+    pub fn new<F: Op<M=M>>(op: &F) -> Self {
         let sparsity = op.sparsity().expect("Jacobian sparsity not defined, cannot use coloring");
         let non_zeros = sparsity.indices();
         let ncols = op.nstates();
@@ -99,7 +99,7 @@ impl<M: Matrix> JacobianColoring<M> {
         t: F::T,
         y: &mut F::M,
     ) -> Vec<(usize, usize, F::T)> {
-        let mut triplets = Vec::with_capacity(op.nstates());
+        let triplets = Vec::with_capacity(op.nstates());
         let mut v = F::V::zeros(op.nstates());
         let mut col = F::V::zeros(op.nout());
         for c in 0..self.dst_indices_per_color.len() {
@@ -117,11 +117,10 @@ impl<M: Matrix> JacobianColoring<M> {
     pub fn matrix_inplace<F: LinearOp<M=M, V=M::V, T=M::T>>(
         &self,
         op: &F,
-        x: &F::V,
         t: F::T,
         y: &mut F::M,
     ) -> Vec<(usize, usize, F::T)> {
-        let mut triplets = Vec::with_capacity(op.nstates());
+        let triplets = Vec::with_capacity(op.nstates());
         let mut v = F::V::zeros(op.nstates());
         let mut col = F::V::zeros(op.nout());
         for c in 0..self.dst_indices_per_color.len() {
@@ -183,8 +182,6 @@ mod tests {
         ];
         for triplets in test_triplets {
             let op = helper_triplets2op(triplets.as_slice(), 2, 2);
-            let x = DVector::from_vec(vec![1.0, 1.0]);
-            let t = 0.0;
             let non_zeros = op.sparsity().unwrap().indices();
             let expect = triplets
                 .iter()
@@ -205,8 +202,6 @@ mod tests {
         let expect = vec![vec![1, 1], vec![1, 2], vec![1, 1], vec![1, 2]];
         for (triplets, expect) in test_triplets.iter().zip(expect) {
             let op = helper_triplets2op(triplets.as_slice(), 2, 2);
-            let x = DVector::from_vec(vec![1.0, 1.0]);
-            let t = 0.0;
 
             let non_zeros = op.sparsity().unwrap().indices();
             let ncols = op.nstates();

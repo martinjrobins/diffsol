@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use anyhow::Result;
 use nalgebra::{DMatrix, DVector, Dyn};
 
@@ -47,11 +49,10 @@ impl<T: Scalar, C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> LinearSol
     }
 
     fn set_linearisation(&mut self, x: &<C as Op>::V, t: <C as Op>::T) {
-        let problem = self.problem.as_ref().expect("Problem not set");
+        Rc::<LinearisedOp<C>>::get_mut(&mut self.problem.as_mut().expect("Problem not set").f).unwrap().set_x(x);
         let matrix = self.matrix.as_mut().expect("Matrix not set");
-        problem.f.set_x(x);
-        problem.f.matrix_inplace(t, matrix);
-        self.lu = Some(matrix.lu());
+        self.problem.as_ref().unwrap().f.matrix_inplace(t, matrix);
+        self.lu = Some(matrix.clone().lu());
     }
 
     fn set_problem(&mut self, problem: &SolverProblem<C>) {

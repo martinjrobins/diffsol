@@ -144,6 +144,11 @@ impl<T: Scalar> Vector for Col<T> {
             self[index] = other[i];
         }
     }
+    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
+        for &index in indices {
+            self[index] = value;
+        }
+    }
 }
 
 impl VectorIndex for Vec<IndexType> {
@@ -152,6 +157,9 @@ impl VectorIndex for Vec<IndexType> {
     }
     fn len(&self) -> IndexType {
         self.len() as IndexType
+    }
+    fn from_slice(slice: &[IndexType]) -> Self {
+        slice.to_vec()
     }
 }
 

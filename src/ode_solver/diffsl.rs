@@ -55,12 +55,10 @@ impl DiffSl {
         };
 
         if use_coloring {
-            let t0 = 0.;
-            let mut y0 = V::zeros(nstates);
-            let rhs = DiffSlRhs(&ret);
-            let mass = DiffSlMass(&ret);
-            ret.rhs_coloring = Some(JacobianColoring::new(&rhs, &y0, t0));
-            ret.mass_coloring = Some(JacobianColoring::new(&mass, &y0, t0));
+            let rhs_coloring = JacobianColoring::new(&DiffSlRhs(&ret));
+            let mass_coloring = JacobianColoring::new(&DiffSlMass(&ret));
+            ret.rhs_coloring = Some(rhs_coloring);
+            ret.mass_coloring = Some(mass_coloring);
         }
         Ok(ret)
     }
@@ -102,7 +100,7 @@ impl NonLinearOp for DiffSlRhs<'_> {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
         self.0.compiler.rhs(
             t,
-            y.as_slice(),
+            x.as_slice(),
             self.0.data.borrow_mut().as_mut_slice(),
             y.as_mut_slice(),
         );
@@ -147,15 +145,15 @@ impl LinearOp for DiffSlMass<'_> {
 
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
         if let Some(coloring) = &self.0.mass_coloring {
-            let dummy = V::zeros(0);
-            coloring.matrix_inplace(self, &dummy, t, y);
+            coloring.matrix_inplace(self, t, y);
         } else {
             LinearOp::matrix_inplace(self, t, y);
         }
     }
 }
 
-impl OdeEquations for DiffSl {
+impl OdeEquations for DiffSl 
+{
     type M = M;
     type T = T;
     type V = V;

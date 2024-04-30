@@ -152,12 +152,12 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
     }
 
     fn set_data_with_indices(
-        &self,
+        &mut self,
         dst_indices: &<Self::Sparsity as MatrixSparsity>::Index,
         src_indices: &<Self::V as crate::vector::Vector>::Index,
         data: &Self::V,
     ) {
-        let values = self.values();
+        let values = self.values_mut();
         for (&dst_i, &src_i) in dst_indices.iter().zip(src_indices.iter()) {
             values[dst_i] = data[src_i];
         }
@@ -203,10 +203,15 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
         ret
     }
     fn set_column(&mut self, j: IndexType, v: &Self::V) {
+        // check v is the same length as the column
+        assert_eq!(v.len(), self.nrows());
+
         let mut col = self.col_mut(j);
-        let (row_indices, values) = col.rows_and_values_mut();
-        for (&mut i, mut d) in row_indices.iter_mut().zip(v.iter()) {
-            *d = v[i];
+        let (dst_row_indices, dst_values) = col.rows_and_values_mut();
+
+        // copy across the non-zero values
+        for (&dst_i, dst_v) in dst_row_indices.iter().zip(dst_values.iter_mut()) {
+            *dst_v = v[dst_i];
         }
     }
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {

@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use anyhow::Result;
 use sundials_sys::{
     realtype, SUNLinSolFree, SUNLinSolSetup, SUNLinSolSolve, SUNLinSol_Dense, SUNLinearSolver,
@@ -77,11 +79,10 @@ where
     }
 
     fn set_linearisation(&mut self, x: &Op::V, t: Op::T) {
+        Rc::<LinearisedOp<Op>>::get_mut(&mut self.problem.as_mut().expect("Problem not set").f).unwrap().set_x(x);
         let matrix = self.matrix.as_mut().expect("Matrix not set");
-        let problem = self.problem.as_ref().expect("Problem not set");
         let linear_solver = self.linear_solver.expect("Linear solver not set");
-        problem.f.set_x(x);
-        problem.f.matrix_inplace(t, matrix);
+        self.problem.as_ref().unwrap().f.matrix_inplace(t, matrix);
         sundials_check(unsafe { SUNLinSolSetup(linear_solver, matrix.sundials_matrix()) }).unwrap();
         self.is_setup = true;
     }

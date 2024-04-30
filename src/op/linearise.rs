@@ -1,7 +1,7 @@
 use num_traits::One;
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{scale, Vector, Matrix};
+use crate::{Vector, Matrix};
 
 use super::{LinearOp, NonLinearOp, Op};
 

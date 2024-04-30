@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use serde::Serialize;
+use num_traits::Zero;
 use std::{
     ffi::{c_int, c_long, c_void, CStr},
     rc::Rc,
@@ -15,8 +16,8 @@ use sundials_sys::{
 };
 
 use crate::{
-    scale, vector::sundials::get_suncontext, Matrix, OdeEquations, OdeSolverMethod,
-    OdeSolverProblem, OdeSolverState, SundialsMatrix, SundialsVector, Vector,
+    scale, vector::sundials::get_suncontext, Matrix, OdeEquations, OdeSolverMethod, Op,
+    OdeSolverProblem, OdeSolverState, SundialsMatrix, SundialsVector, Vector, NonLinearOp, LinearOp
 };
 
 pub fn sundials_check(retval: c_int) -> Result<()> {
@@ -101,6 +102,8 @@ where
     Eqn: OdeEquations<T = realtype, V = SundialsVector, M = SundialsMatrix>,
 {
     eqn: Rc<Eqn>,
+    rhs_jac: SundialsMatrix,
+    mass: SundialsMatrix,
 }
 
 impl<Eqn> SundialsData<Eqn>
@@ -108,7 +111,12 @@ where
     Eqn: OdeEquations<T = realtype, V = SundialsVector, M = SundialsMatrix>,
 {
     fn new(eqn: Rc<Eqn>) -> Self {
-        Self { eqn }
+        let n = eqn.rhs().nstates();
+        let rhs_jac_sparsity = eqn.rhs().sparsity();
+        let rhs_jac = SundialsMatrix::new_from_sparsity(n, n, rhs_jac_sparsity);
+        let mass_sparsity = eqn.mass().sparsity();
+        let mass = SundialsMatrix::new_from_sparsity(n, n, mass_sparsity);
+        Self { eqn, rhs_jac, mass }
     }
 }
 
@@ -143,9 +151,9 @@ where
         let mut rr = SundialsVector::new_not_owned(rr);
         // F(t, y, y') =  M y' - f(t, y)
         // rr = f(t, y)
-        data.eqn.rhs_inplace(t, &y, &mut rr);
+        data.eqn.rhs().call_inplace(&y, t, &mut rr);
         // rr = M y' - rr
-        data.eqn.mass_inplace(t, &yp, -1.0, &mut rr);
+        data.eqn.mass().gemv_inplace(&yp, t, -1.0, &mut rr);
         0
     }
 
@@ -167,9 +175,10 @@ where
         // jac = c_j * M - rhs_jac
         let y = SundialsVector::new_not_owned(y);
         let mut jac = SundialsMatrix::new_not_owned(jac);
-        jac.copy_from(&eqn.mass_matrix(t));
-        jac *= scale(c_j);
-        jac -= &eqn.jacobian_matrix(&y, t);
+        eqn.mass().matrix_inplace(t, &mut data.mass);
+        eqn.rhs().jacobian_inplace(&y, t, &mut data.rhs_jac);
+        data.rhs_jac *= scale(-1.0);
+        jac.scale_add_and_assign(&data.rhs_jac, c_j, &data.mass);
         0
     }
 
@@ -203,8 +212,9 @@ where
         if self.problem.is_none() {
             return Err(anyhow!("Problem not set"));
         }
-        let id = self.problem.as_ref().unwrap().eqn.algebraic_indices();
-        let number_of_states = self.problem.as_ref().unwrap().eqn.nstates();
+        let diag = self.problem.as_ref().unwrap().eqn.mass().matrix(t).diagonal();
+        let id = diag.filter_indices(|x| x == Eqn::T::zero());
+        let number_of_states = self.problem.as_ref().unwrap().eqn.rhs().nstates();
         // need to convert to realtype sundials vector
         let mut id_realtype = SundialsVector::new_serial(number_of_states);
         for i in 0..number_of_states {
@@ -261,7 +271,7 @@ where
         let state = self.state.as_ref().unwrap();
         self.problem = Some(problem.clone());
         let eqn = problem.eqn.as_ref();
-        let number_of_states = eqn.nstates();
+        let number_of_states = eqn.rhs().nstates();
         let ctx = *get_suncontext();
         let ida_mem = self.ida_mem;
 
@@ -356,7 +366,7 @@ where
         if t > state.t {
             return Err(anyhow!("Interpolation time is greater than current time"));
         }
-        let ret = SundialsVector::new_serial(self.data.as_ref().unwrap().eqn.nstates());
+        let ret = SundialsVector::new_serial(self.data.as_ref().unwrap().eqn.rhs().nstates());
         Self::check(unsafe { IDAGetDky(self.ida_mem, t, 0, ret.sundials_vector()) }).unwrap();
         Ok(ret)
     }

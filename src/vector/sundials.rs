@@ -431,6 +431,9 @@ impl VectorIndex for SundialsIndexVector {
     fn len(&self) -> IndexType {
         self.0.len() as IndexType
     }
+    fn from_slice(slice: &[IndexType]) -> Self {
+        Self(slice.to_vec())
+    }
 }
 
 impl Vector for SundialsVector {
@@ -532,6 +535,11 @@ impl Vector for SundialsVector {
     fn scatter_from(&mut self, other: &Self, indices: &Self::Index) {
         for i in 0..indices.len() {
             self[indices[i]] = other[i];
+        }
+    }
+    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
+        for i in 0..indices.len() {
+            self[indices[i]] = value;
         }
     }
 }

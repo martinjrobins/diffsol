@@ -96,7 +96,7 @@ impl<T: Scalar> Matrix for DMatrix<T> {
     type Sparsity = Dense;
 
     fn set_data_with_indices(
-        &self,
+        &mut self,
         dst_indices: &<Self::Sparsity as super::MatrixSparsity>::Index,
         src_indices: &<Self::V as crate::vector::Vector>::Index,
         data: &Self::V,
@@ -141,7 +141,7 @@ impl<T: Scalar> Matrix for DMatrix<T> {
         self.mul_assign(beta);
         self.add_assign(x);
     }
-    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, sparsity: Option<&Self::Sparsity>) -> Self {
+    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, _sparsity: Option<&Self::Sparsity>) -> Self {
         Self::zeros(nrows, ncols)
     }
 }

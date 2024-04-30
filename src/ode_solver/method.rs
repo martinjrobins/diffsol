@@ -1,10 +1,10 @@
 use anyhow::Result;
-use std::rc::Rc;
 use num_traits::Zero;
+use std::rc::Rc;
 
 use crate::{
-    op::{filter::FilterCallable},
-    NonLinearSolver, OdeEquations, OdeSolverProblem, SolverProblem, Vector, VectorIndex, LinearOp, Matrix,
+    op::filter::FilterCallable, LinearOp, Matrix, NonLinearSolver, OdeEquations, OdeSolverProblem,
+    SolverProblem, Vector, VectorIndex,
 };
 
 /// Trait for ODE solver methods. This is the main user interface for the ODE solvers.
@@ -59,17 +59,16 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     }
 
     /// Reinitialise the solver state making it consistent with the algebraic constraints and solve the problem up to time `t`
-    fn make_consistent_and_solve<'a, RS: NonLinearSolver<FilterCallable<Eqn::Rhs<'a>>>>(
+    fn make_consistent_and_solve<'a,  RS: NonLinearSolver<FilterCallable<Eqn::Rhs<'a>>>>(
         &mut self,
-        problem: &OdeSolverProblem<Eqn>,
+        problem: &'a OdeSolverProblem<Eqn>,
         t: Eqn::T,
         root_solver: &mut RS,
-    ) -> Result<Eqn::V> 
-        where
-            Eqn: 'a,
+    ) -> Result<Eqn::V>
+    where Eqn: 'a
     {
         let state = OdeSolverState::new_consistent(problem, root_solver)?;
-        self.set_problem(state, problem);
+        self.set_problem(state, &problem);
         while self.state().unwrap().t <= t {
             self.step()?;
         }
@@ -100,13 +99,12 @@ impl<V: Vector> OdeSolverState<V> {
 
     /// Create a new solver state from an ODE problem, making the state consistent with the algebraic constraints.
     pub fn new_consistent<'a, Eqn, S>(
-        ode_problem: &OdeSolverProblem<Eqn>,
+        ode_problem: &'a OdeSolverProblem<Eqn>,
         root_solver: &mut S,
     ) -> Result<Self>
     where
-        Eqn: OdeEquations<T = V::T, V = V>,
+        Eqn: OdeEquations<T = V::T, V = V> + 'a,
         S: NonLinearSolver<FilterCallable<Eqn::Rhs<'a>>> + ?Sized,
-        Eqn: 'a,
     {
         let t = ode_problem.t0;
         let h = ode_problem.h0;

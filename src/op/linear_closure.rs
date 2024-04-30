@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring}, matrix::{MatrixCommon, MatrixSparsity}, Matrix, Vector};
+use crate::{jacobian::{find_non_zeros_linear, JacobianColoring}, matrix::{MatrixCommon, MatrixSparsity}, Matrix, Vector};
 
 use super::{LinearOp, Op};
 
@@ -48,10 +48,10 @@ where
         }
     }
 
-    pub fn calculate_sparsity(&mut self, y0: &M::V, t0: M::T) {
-        let non_zeros = find_non_zeros_linear(self, y0, t0);
+    pub fn calculate_sparsity(&mut self, t0: M::T) {
+        let non_zeros = find_non_zeros_linear(self, t0);
         self.sparsity = Some(MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros).expect("invalid sparsity pattern"));
-        self.coloring = Some(JacobianColoring::new(self, y0, t0));
+        self.coloring = Some(JacobianColoring::new(self));
     }
 }
 

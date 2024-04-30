@@ -4,9 +4,8 @@ use num_traits::Zero;
 use std::ops::MulAssign;
 use std::rc::Rc;
 
-use crate::{LinearSolver, NonLinearOp, LinearOp};
+use crate::{LinearSolver, NonLinearOp};
 use crate::matrix::MatrixRef;
-use crate::op::linearise::LinearisedOp;
 use crate::vector::VectorRef;
 use crate::NewtonNonlinearSolver;
 use crate::Tableau;
@@ -273,11 +272,7 @@ where
             }
             for i in start..self.tableau.s() {
                 let t = state.t + self.tableau.c()[i] * state.h;
-                self.nonlinear_solver.set_time(t).unwrap();
-                {
-                    let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
-                    callable.set_phi(&self.diff.columns(0, i), y0, &self.a_rows[i]);
-                }
+                self.nonlinear_solver.problem().f.set_phi(&self.diff.columns(0, i), y0, &self.a_rows[i]);
 
                 let mut dy = if i == 0 {
                     self.diff.column(self.diff.ncols() - 1).into_owned()
@@ -289,16 +284,13 @@ where
                         / (self.tableau.c()[i - 1] - self.tableau.c()[i - 2]);
                     self.diff.column(i - 1) + df * scale(c)
                 };
-                let solve_result = self.nonlinear_solver.solve_in_place(&mut dy);
+                self.nonlinear_solver.reset_jacobian(&dy, t);
+                let solve_result = self.nonlinear_solver.solve_in_place(&mut dy, t);
 
                 // if we didn't update the jacobian and the solve failed, then we update the jacobian and try again
                 let solve_result = if solve_result.is_err() && !updated_jacobian {
                     // newton iteration did not converge, so update jacobian and try again
-                    {
-                        let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
-                        callable.set_jacobian_is_stale();
-                    }
-                    self.nonlinear_solver.reset_jacobian();
+                    self.nonlinear_solver.problem().f.set_jacobian_is_stale();
                     updated_jacobian = true;
 
                     let mut dy = if i == 0 {
@@ -311,8 +303,9 @@ where
                             / (self.tableau.c()[i - 1] - self.tableau.c()[i - 2]);
                         self.diff.column(i - 1) + df * scale(c)
                     };
+                    self.nonlinear_solver.reset_jacobian(&dy, t);
                     self.statistics.number_of_nonlinear_solver_fails += 1;
-                    self.nonlinear_solver.solve_in_place(&mut dy)
+                    self.nonlinear_solver.solve_in_place(&mut dy, t)
                 } else {
                     solve_result
                 };
@@ -328,11 +321,9 @@ where
                     }
 
                     // update h for new step size
-                    let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
-                    callable.set_h(state.h);
+                    self.nonlinear_solver.problem().f.set_h(state.h);
 
                     // reset nonlinear's linear solver problem as lu factorisation has changed
-                    self.nonlinear_solver.reset_jacobian();
                     continue 'step;
                 };
 
@@ -359,9 +350,7 @@ where
                 let y1_ref = self
                     .nonlinear_solver
                     .problem()
-                    .unwrap()
                     .f
-                    .as_ref()
                     .get_last_f_eval();
                 let ode_problem = self.problem.as_ref().unwrap();
                 let mut scale_y = y1_ref.abs() * scale(ode_problem.rtol);
@@ -394,11 +383,9 @@ where
             }
 
             // update c for new step size
-            let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
-            callable.set_h(state.h);
+            self.nonlinear_solver.problem().f.set_h(state.h);
 
             // reset nonlinear's linear solver problem as lu factorisation has changed
-            self.nonlinear_solver.reset_jacobian();
 
             // test error is within tolerance
             if error_norm <= Eqn::T::from(1.0) {
@@ -421,9 +408,7 @@ where
         let y1 = self
             .nonlinear_solver
             .problem()
-            .unwrap()
             .f
-            .as_ref()
             .get_last_f_eval();
         self.old_y.copy_from(&y1);
         std::mem::swap(&mut self.old_y, &mut state.y);
@@ -432,7 +417,6 @@ where
         self.statistics.number_of_linear_solver_setups = self
             .nonlinear_solver
             .problem()
-            .unwrap()
             .f
             .number_of_jac_evals();
         self.statistics.number_of_steps += 1;

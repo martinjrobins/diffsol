@@ -1,4 +1,4 @@
-use crate::{matrix::MatrixCommon, Matrix, Scalar, Vector};
+use crate::{Matrix, Scalar, Vector};
 
 use num_traits::{One, Zero};
 
@@ -61,7 +61,8 @@ pub trait NonLinearOp: Op {
     }
 
     fn jacobian(&self, x: &Self::V, t: Self::T) -> Self::M {
-        let mut y = Self::M::new_from_sparsity(self.sparsity());
+        let n = self.nstates();
+        let mut y = Self::M::new_from_sparsity(n, n, self.sparsity());
         self.jacobian_inplace(x, t, &mut y);
         y
     }

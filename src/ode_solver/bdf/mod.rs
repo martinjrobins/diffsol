@@ -413,7 +413,7 @@ where
 
         // loop until step is accepted
         let y_new = loop {
-            let y_new = y_predict.clone();
+            let mut y_new = y_predict.clone();
 
             // solve BDF equation using y0 as starting point
             let solver_result = self.nonlinear_solver.solve_in_place(&mut y_new, t_new);

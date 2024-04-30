@@ -28,7 +28,7 @@ mod tests {
     use crate::nonlinear_solver::newton::NewtonNonlinearSolver;
     use crate::op::filter::FilterCallable;
     use crate::op::unit::UnitCallable;
-    use crate::op::{LinearOp, NonLinearOp, Op};
+    use crate::op::{NonLinearOp, Op};
     use crate::scalar::scale;
     use crate::{NonLinearSolver, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState};
     use crate::{Sdirk, Tableau, Vector};

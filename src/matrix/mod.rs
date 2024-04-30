@@ -227,7 +227,7 @@ pub trait Matrix:
     fn set_column(&mut self, j: IndexType, v: &Self::V);
 
     fn set_data_with_indices(
-        &self,
+        &mut self,
         dst_indices: &<Self::Sparsity as MatrixSparsity>::Index,
         src_indices: &<Self::V as Vector>::Index,
         data: &Self::V,

@@ -134,7 +134,7 @@ impl<T: Scalar> Matrix for Mat<T> {
     type Sparsity = Dense;
 
     fn set_data_with_indices(
-        &self,
+        &mut self,
         dst_indices: &<Self::Sparsity as MatrixSparsity>::Index,
         src_indices: &<Self::V as Vector>::Index,
         data: &Self::V,
@@ -176,10 +176,10 @@ impl<T: Scalar> Matrix for Mat<T> {
     }
 
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
-        zipped!(self, y).for_each(|unzipped!(mut x, y)| x.write(x.read() + beta * y.read()));
+        zipped!(self, x, y).for_each(|unzipped!(mut s, x, y)| s.write(x.read() + beta * y.read()));
     }
 
-    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, sparsity: Option<&Self::Sparsity>) -> Self {
+    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, _sparsity: Option<&Self::Sparsity>) -> Self {
         Self::zeros(nrows, ncols)
     }
 }
