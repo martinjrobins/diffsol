@@ -268,7 +268,7 @@ impl Matrix for SundialsMatrix {
 
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
         self.copy_from(y);
-        sundials_check(unsafe { SUNMatScaleAdd(beta, self.sm, x.sm) });
+        sundials_check(unsafe { SUNMatScaleAdd(beta, self.sm, x.sm) }).unwrap();
     }
 
     fn zeros(nrows: IndexType, ncols: IndexType) -> Self {

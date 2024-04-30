@@ -4,18 +4,17 @@ use std::ops::SubAssign;
 
 use super::{Convergence, ConvergenceStatus};
 
-pub struct NewtonNonlinearSolver<C: NonLinearOp> {
+pub struct NewtonNonlinearSolver<C: NonLinearOp, Ls: LinearSolver<C>> {
     convergence: Option<Convergence<C>>,
-    linear_solver: Box<dyn LinearSolver<C>>,
+    linear_solver: Ls,
     problem: Option<SolverProblem<C>>,
     max_iter: usize,
     niter: usize,
     is_jacobian_set: bool,
 }
 
-impl<C: NonLinearOp> NewtonNonlinearSolver<C> {
-    pub fn new<S: LinearSolver<C> + 'static>(linear_solver: S) -> Self {
-        let linear_solver = Box::new(linear_solver);
+impl<C: NonLinearOp, Ls: LinearSolver<C>> NewtonNonlinearSolver<C, Ls> {
+    pub fn new(linear_solver: Ls) -> Self {
         Self {
             problem: None,
             convergence: None,
@@ -25,12 +24,12 @@ impl<C: NonLinearOp> NewtonNonlinearSolver<C> {
             is_jacobian_set: false,
         }
     }
-    pub fn linear_solver(&self) -> &dyn LinearSolver<C> {
-        self.linear_solver.as_ref()
+    pub fn linear_solver(&self) -> &Ls {
+        &self.linear_solver
     }
 }
 
-impl<C: NonLinearOp> NonLinearSolver<C> for NewtonNonlinearSolver<C> {
+impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinearSolver<C, Ls> {
     fn set_max_iter(&mut self, max_iter: usize) {
         self.max_iter = max_iter;
     }

@@ -277,12 +277,13 @@ impl OdeBuilder {
     #[cfg(feature = "diffsl")]
     pub fn build_diffsl(
         self,
-        source: &str,
-    ) -> Result<OdeSolverProblem<crate::ode_solver::diffsl::DiffSl>> {
+        context: &crate::ode_solver::diffsl::DiffSlContext,
+    ) -> Result<OdeSolverProblem<crate::ode_solver::diffsl::DiffSl<'_>>> {
         type V = crate::ode_solver::diffsl::V;
         type T = crate::ode_solver::diffsl::T;
         let p = Self::build_p::<V>(self.p);
-        let eqn = crate::ode_solver::diffsl::DiffSl::new(source, p, self.use_coloring)?;
+        let mut eqn = crate::ode_solver::diffsl::DiffSl::new(context, self.use_coloring);
+        eqn.set_params(p);
         let atol = Self::build_atol::<V>(self.atol, eqn.rhs().nstates())?;
         Ok(OdeSolverProblem::new(
             eqn,

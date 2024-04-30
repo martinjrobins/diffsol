@@ -23,6 +23,7 @@ pub struct SdirkCallable<Eqn: OdeEquations> {
     mass_jac: RefCell<Eqn::M>,
     jacobian_is_stale: RefCell<bool>,
     number_of_jac_evals: RefCell<usize>,
+    sparsity: Option<<Eqn::M as Matrix>::Sparsity>,
 }
 
 impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
@@ -40,11 +41,7 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
         let rhs_jac_sparsity = eqn.rhs().sparsity();
         let rhs_jac = RefCell::new(Eqn::M::new_from_sparsity(n, n, rhs_jac_sparsity));
         let sparsity = if let Some(rhs_jac_sparsity) = rhs_jac_sparsity {
-            if let Some(mass_sparsity) = mass_sparsity {
-                Some(mass_sparsity.union(rhs_jac_sparsity).unwrap())
-            } else {
-                None
-            }
+            mass_sparsity.map(|mass_sparsity| mass_sparsity.union(rhs_jac_sparsity).unwrap())
         } else {
             None
         };
@@ -63,6 +60,7 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
             h,
             rhs_jac,
             mass_jac,
+            sparsity,
             jacobian_is_stale,
             number_of_jac_evals,
             tmp,
@@ -124,6 +122,9 @@ impl<Eqn: OdeEquations> Op for SdirkCallable<Eqn> {
     }
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
+    }
+    fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
+        self.sparsity.as_ref()
     }
 }
 

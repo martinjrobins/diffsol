@@ -14,10 +14,12 @@ pub struct LinearisedOp<C: NonLinearOp> {
 
 impl<C: NonLinearOp> LinearisedOp<C> {
     pub fn new(callable: Rc<C>) -> Self {
+        let x = C::V::zeros(callable.nstates());
+        let tmp = RefCell::new(C::V::zeros(callable.nstates()));
         Self {
             callable,
-            x: C::V::zeros(callable.nstates()),
-            tmp: RefCell::new(C::V::zeros(callable.nstates())),
+            x,
+            tmp,
             x_is_set: false,
         }
     }
@@ -59,7 +61,7 @@ impl<C: NonLinearOp> LinearOp for LinearisedOp<C> {
         self.callable.jac_mul_inplace(&self.x, t, x, y);
     }
     fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
-        let tmp = self.tmp.borrow_mut();
+        let mut tmp = self.tmp.borrow_mut();
         tmp.copy_from(y);
         self.callable.jac_mul_inplace(&self.x, t, x, y);
         y.axpy(beta, &tmp, Self::T::one());

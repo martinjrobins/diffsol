@@ -59,16 +59,15 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     }
 
     /// Reinitialise the solver state making it consistent with the algebraic constraints and solve the problem up to time `t`
-    fn make_consistent_and_solve<'a,  RS: NonLinearSolver<FilterCallable<Eqn::Rhs<'a>>>>(
+    fn make_consistent_and_solve<RS: NonLinearSolver<FilterCallable<Eqn::Rhs>>>(
         &mut self,
-        problem: &'a OdeSolverProblem<Eqn>,
+        problem: &OdeSolverProblem<Eqn>,
         t: Eqn::T,
         root_solver: &mut RS,
     ) -> Result<Eqn::V>
-    where Eqn: 'a
     {
         let state = OdeSolverState::new_consistent(problem, root_solver)?;
-        self.set_problem(state, &problem);
+        self.set_problem(state, problem);
         while self.state().unwrap().t <= t {
             self.step()?;
         }
@@ -98,13 +97,13 @@ impl<V: Vector> OdeSolverState<V> {
     }
 
     /// Create a new solver state from an ODE problem, making the state consistent with the algebraic constraints.
-    pub fn new_consistent<'a, Eqn, S>(
-        ode_problem: &'a OdeSolverProblem<Eqn>,
+    pub fn new_consistent<Eqn, S>(
+        ode_problem: &OdeSolverProblem<Eqn>,
         root_solver: &mut S,
     ) -> Result<Self>
     where
-        Eqn: OdeEquations<T = V::T, V = V> + 'a,
-        S: NonLinearSolver<FilterCallable<Eqn::Rhs<'a>>> + ?Sized,
+        Eqn: OdeEquations<T = V::T, V = V>,
+        S: NonLinearSolver<FilterCallable<Eqn::Rhs>> + ?Sized,
     {
         let t = ode_problem.t0;
         let h = ode_problem.h0;
@@ -116,7 +115,7 @@ impl<V: Vector> OdeSolverState<V> {
         }
         let mut y_filtered = y.filter(&indices);
         let atol = Rc::new(ode_problem.atol.as_ref().filter(&indices));
-        let rhs = Rc::new(ode_problem.eqn.rhs());
+        let rhs = ode_problem.eqn.rhs().clone();
         let f = Rc::new(FilterCallable::new(rhs, &y, indices));
         let rtol = ode_problem.rtol;
         let init_problem = SolverProblem::new(f, atol, rtol);

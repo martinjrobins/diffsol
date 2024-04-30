@@ -112,7 +112,8 @@ where
 {
     fn new(eqn: Rc<Eqn>) -> Self {
         let n = eqn.rhs().nstates();
-        let rhs_jac_sparsity = eqn.rhs().sparsity();
+        let rhs = eqn.rhs();
+        let rhs_jac_sparsity = rhs.sparsity();
         let rhs_jac = SundialsMatrix::new_from_sparsity(n, n, rhs_jac_sparsity);
         let mass_sparsity = eqn.mass().sparsity();
         let mass = SundialsMatrix::new_from_sparsity(n, n, mass_sparsity);
@@ -169,7 +170,7 @@ where
         _tmp2: N_Vector,
         _tmp3: N_Vector,
     ) -> i32 {
-        let data = unsafe { &*(user_data as *const SundialsData<Eqn>) };
+        let data = unsafe { &mut *(user_data as *mut SundialsData<Eqn>) };
         let eqn = &data.eqn;
 
         // jac = c_j * M - rhs_jac

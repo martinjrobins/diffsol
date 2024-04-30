@@ -241,7 +241,7 @@ mod tests {
             )
             .unwrap();
 
-        let mut solver = Bdf::<M, _>::default();
+        let mut solver = Bdf::<M, _, _>::default();
 
         let t = 0.4;
         let y = solver.solve(&problem, t).unwrap();

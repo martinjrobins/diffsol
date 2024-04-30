@@ -25,16 +25,17 @@ use super::bdf::BdfStatistics;
 /// - The upper triangular part of the `a` matrix must be zero (i.e. not fully implicit).
 /// - The diagonal of the `a` matrix must be the same non-zero value for all rows (i.e. an SDIRK method), except for the first row which can be zero for ESDIRK methods.
 /// - The last row of the `a` matrix must be the same as the `b` vector, and the last element of the `c` vector must be 1 (i.e. a stiffly accurate method)
-pub struct Sdirk<M, Eqn>
+pub struct Sdirk<M, Eqn, LS>
 where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    LS: LinearSolver<SdirkCallable<Eqn>>,
     Eqn: OdeEquations,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
     for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
 {
     tableau: Tableau<M>,
     problem: Option<OdeSolverProblem<Eqn>>,
-    nonlinear_solver: NewtonNonlinearSolver<SdirkCallable<Eqn>>,
+    nonlinear_solver: NewtonNonlinearSolver<SdirkCallable<Eqn>, LS>,
     state: Option<OdeSolverState<Eqn::V>>,
     diff: M,
     gamma: Eqn::T,
@@ -47,8 +48,9 @@ where
     statistics: BdfStatistics<Eqn::T>,
 }
 
-impl<M, Eqn> Sdirk<M, Eqn>
+impl<M, Eqn, LS> Sdirk<M, Eqn, LS>
 where
+    LS: LinearSolver<SdirkCallable<Eqn>>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquations,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
@@ -61,7 +63,7 @@ where
 
     pub fn new(
         tableau: Tableau<M>,
-        linear_solver: impl LinearSolver<SdirkCallable<Eqn>> + 'static,
+        linear_solver: LS,
     ) -> Self {
         let mut nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         // set max iterations for nonlinear solver
@@ -161,8 +163,9 @@ where
     }
 }
 
-impl<M, Eqn> OdeSolverMethod<Eqn> for Sdirk<M, Eqn>
+impl<M, Eqn, LS> OdeSolverMethod<Eqn> for Sdirk<M, Eqn, LS>
 where
+    LS: LinearSolver<SdirkCallable<Eqn>>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquations,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,

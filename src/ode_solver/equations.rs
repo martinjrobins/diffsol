@@ -45,18 +45,15 @@ pub trait OdeEquations {
     type T: Scalar;
     type V: Vector<T = Self::T>;
     type M: Matrix<T = Self::T, V = Self::V>;
-    type Mass<'a>: LinearOp<M = Self::M, V = Self::V, T = Self::T>
-        where Self: 'a;
-    type Rhs<'a>: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>
-        where Self: 'a;
-
+    type Mass: LinearOp<M = Self::M, V = Self::V, T = Self::T>;
+    type Rhs: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
 
     /// The parameters of the ODE equations are assumed to be constant. This function sets the parameters to the given value before solving the ODE.
     /// Note that `set_params` must always be called before calling any of the other functions in this trait.
     fn set_params(&mut self, p: Self::V);
 
-    fn rhs(&self) -> Self::Rhs<'_>;
-    fn mass(&self) -> Self::Mass<'_>;
+    fn rhs(&self) -> &Rc<Self::Rhs>;
+    fn mass(&self) -> &Rc<Self::Mass>;
 
     /// returns the initial condition, i.e. $y(t_0, p)$
     fn init(&self, t: Self::T) -> Self::V;
@@ -82,11 +79,10 @@ where
     H: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
     I: Fn(&M::V, M::T) -> M::V,
 {
-    rhs: Closure<M, F, G>,
-    mass: LinearClosure<M, H>,
+    rhs: Rc<Closure<M, F, G>>,
+    mass: Rc<LinearClosure<M, H>>,
     init: I,
     p: Rc<M::V>,
-    nstates: usize,
     statistics: RefCell<OdeEquationsStatistics>,
     mass_is_constant: bool,
 }
@@ -120,12 +116,13 @@ where
             rhs.calculate_sparsity(&y0, t0);
             mass.calculate_sparsity(t0);
         }
+        let rhs = Rc::new(rhs);
+        let mass = Rc::new(mass);
         Self {
             rhs,
             mass,
             init,
             p: p.clone(),
-            nstates,
             statistics,
             mass_is_constant,
         }
@@ -145,13 +142,13 @@ where
     type T = M::T;
     type V = M::V;
     type M = M;
-    type Rhs<'a> = &'a Closure<M, F, G> where Self: 'a;
-    type Mass<'a> = &'a LinearClosure<M, H> where Self: 'a;
+    type Rhs = Closure<M, F, G>;
+    type Mass = LinearClosure<M, H>;
 
-    fn rhs(&self) -> Self::Rhs<'_> {
+    fn rhs(&self) -> &Rc<Self::Rhs> {
         &self.rhs
     }
-    fn mass(&self) -> Self::Mass<'_> {
+    fn mass(&self) -> &Rc<Self::Mass> {
         &self.mass
     }
     fn is_mass_constant(&self) -> bool {
@@ -182,11 +179,10 @@ where
     I: Fn(&M::V, M::T) -> M::V,
 {
 
-    rhs: Closure<M, F, G>,
-    mass: UnitCallable<M>,
+    rhs: Rc<Closure<M, F, G>>,
+    mass: Rc<UnitCallable<M>>,
     init: I,
     p: Rc<M::V>,
-    nstates: usize,
     statistics: RefCell<OdeEquationsStatistics>,
 }
 
@@ -208,12 +204,13 @@ where
             rhs.calculate_sparsity(&y0, t0);
         }
         let mass = UnitCallable::<M>::new(nstates);
+        let rhs = Rc::new(rhs);
+        let mass = Rc::new(mass);
         Self {
             rhs,
             mass,
             init,
             p: p.clone(),
-            nstates,
             statistics,
         }
     }
@@ -230,14 +227,14 @@ where
     type T = M::T;
     type V = M::V;
     type M = M;
-    type Rhs<'a> = &'a Closure<M, F, G> where Self: 'a;
-    type Mass<'a> = &'a UnitCallable<M> where Self: 'a;
+    type Rhs = Closure<M, F, G>;
+    type Mass = UnitCallable<M>;
 
-    fn mass(&self) -> Self::Mass<'_> {
+    fn mass(&self) -> &Rc<Self::Mass> {
         &self.mass
     }
 
-    fn rhs(&self) -> Self::Rhs<'_> {
+    fn rhs(&self) -> &Rc<Self::Rhs> {
         &self.rhs
     }
 

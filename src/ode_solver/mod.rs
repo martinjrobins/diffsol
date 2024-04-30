@@ -15,6 +15,8 @@ pub mod sundials;
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+
     use self::problem::OdeSolverSolution;
 
     use super::test_models::{
@@ -38,19 +40,18 @@ mod tests {
     use tests::test_models::dydt_y2::dydt_y2_problem;
     use tests::test_models::gaussian_decay::gaussian_decay_problem;
 
-    fn test_ode_solver<'a, M, Eqn>(
+    fn test_ode_solver<M, Eqn>(
         method: &mut impl OdeSolverMethod<Eqn>,
-        mut root_solver: impl NonLinearSolver<FilterCallable<Eqn::Rhs<'a>>>,
-        problem: OdeSolverProblem<Eqn>,
+        mut root_solver: impl NonLinearSolver<FilterCallable<Eqn::Rhs>>,
+        problem: &OdeSolverProblem<Eqn>,
         solution: OdeSolverSolution<M::V>,
         override_tol: Option<M::T>,
     ) where
-        M: Matrix + 'static,
+        M: Matrix,
         Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
-        Eqn: 'a,
     {
-        let state = OdeSolverState::new_consistent(&problem, &mut root_solver).unwrap();
-        method.set_problem(state, &problem);
+        let state = OdeSolverState::new_consistent(problem, &mut root_solver).unwrap();
+        method.set_problem(state, problem);
         for point in solution.solution_points.iter() {
             while method.state().unwrap().t < point.t {
                 method.step().unwrap();
@@ -86,7 +87,7 @@ mod tests {
         let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = exponential_decay_problem::<Mcpu>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, &problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 4
@@ -113,7 +114,7 @@ mod tests {
         let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = exponential_decay_problem::<Mcpu>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, &problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 2
@@ -139,7 +140,7 @@ mod tests {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = exponential_decay_problem::<Mcpu>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, &problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 16
@@ -166,7 +167,7 @@ mod tests {
         let mut s = crate::SundialsIda::default();
         let rs = NewtonNonlinearSolver::new(crate::SundialsLinearSolver::new_dense());
         let (problem, soln) = exponential_decay_problem::<crate::SundialsMatrix>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, &problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 16
@@ -192,7 +193,7 @@ mod tests {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = exponential_decay_with_algebraic_problem::<Mcpu>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, &problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 17
@@ -219,7 +220,7 @@ mod tests {
         let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson::<Mcpu>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, &problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 435
@@ -246,7 +247,7 @@ mod tests {
         let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson::<Mcpu>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, &problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 380
@@ -272,7 +273,7 @@ mod tests {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson::<Mcpu>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, &problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 106
@@ -299,7 +300,7 @@ mod tests {
         let mut s = crate::SundialsIda::default();
         let rs = NewtonNonlinearSolver::new(crate::SundialsLinearSolver::new_dense());
         let (problem, soln) = robertson::<crate::SundialsMatrix>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, &problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 59
@@ -325,7 +326,7 @@ mod tests {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson::<Mcpu>(true);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, &problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 106
@@ -352,7 +353,7 @@ mod tests {
         let mut s = Sdirk::new(tableau, LU::default());
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson_ode::<Mcpu>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, &problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 242
@@ -378,7 +379,7 @@ mod tests {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = robertson_ode::<Mcpu>(false);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, &problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 106
@@ -404,7 +405,7 @@ mod tests {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = dydt_y2_problem::<Mcpu>(false, 10);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, &problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 65
@@ -430,7 +431,7 @@ mod tests {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = dydt_y2_problem::<Mcpu>(true, 10);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, &problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 65
@@ -456,7 +457,7 @@ mod tests {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::new(LU::default());
         let (problem, soln) = gaussian_decay_problem::<Mcpu>(false, 10);
-        test_ode_solver(&mut s, rs, problem.clone(), soln, None);
+        test_ode_solver(&mut s, rs, &problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 14
@@ -498,27 +499,27 @@ mod tests {
     }
 
     impl<M: Matrix> NonLinearOp for TestEqnRhs<M> {
-        fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
+        fn call_inplace(&self, _x: &Self::V, _t: Self::T, y: &mut Self::V) {
             y[0] = M::T::zero();
         }
 
-        fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
             y[0] = M::T::zero();
         }
     }
 
     pub struct TestEqn<M: Matrix> {
-        rhs: TestEqnRhs<M>,
-        mass: UnitCallable<M>
+        rhs: Rc<TestEqnRhs<M>>,
+        mass: Rc<UnitCallable<M>>,
     }
 
     impl<M: Matrix> TestEqn<M> {
         pub fn new() -> Self {
             Self {
-                rhs: TestEqnRhs {
+                rhs: Rc::new(TestEqnRhs {
                     _m: std::marker::PhantomData,
-                },
-                mass: UnitCallable::new(1),
+                }),
+                mass: Rc::new(UnitCallable::new(1)),
             }
         }
     }
@@ -527,16 +528,16 @@ mod tests {
         type T = M::T;
         type V = M::V;
         type M = M;
-        type Rhs<'a> = &'a TestEqnRhs<M> where Self: 'a;
-        type Mass<'a> = &'a UnitCallable<M> where Self: 'a;
+        type Rhs = TestEqnRhs<M>;
+        type Mass = UnitCallable<M>;
 
         fn set_params(&mut self, _p: Self::V) {}
 
-        fn rhs(&self) -> Self::Rhs<'_> {
+        fn rhs(&self) -> &Rc<Self::Rhs> {
             &self.rhs
         }
 
-        fn mass(&self) -> Self::Mass<'_> {
+        fn mass(&self) -> &Rc<Self::Mass> {
             &self.mass
         }
 

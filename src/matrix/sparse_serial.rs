@@ -54,7 +54,7 @@ impl MatrixSparsity for SparsityPattern {
     }
 
     fn indices(&self) -> Vec<(IndexType, IndexType)> {
-        let mut indices = Vec::with_capacity(self.nnz() as usize);
+        let mut indices = Vec::with_capacity(self.nnz());
         for (j, &offset) in self.major_offsets().iter().enumerate() {
             let next_offset = self
                 .major_offsets()
@@ -80,7 +80,7 @@ impl MatrixSparsity for SparsityPattern {
             let lane = self.lane(j);
             let other_lane = other.lane(j);
             let set: HashSet<usize> =
-                HashSet::from_iter(lane.into_iter().chain(other_lane.into_iter()).cloned());
+                HashSet::from_iter(lane.iter().chain(other_lane.iter()).cloned());
             let mut set = set.into_iter().collect::<Vec<_>>();
 
             major_offsets.push(offset);

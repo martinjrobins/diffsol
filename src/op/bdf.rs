@@ -39,11 +39,7 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
         let rhs_jac_sparsity = eqn.rhs().sparsity();
         let rhs_jac = RefCell::new(Eqn::M::new_from_sparsity(n, n, rhs_jac_sparsity));
         let sparsity = if let Some(rhs_jac_sparsity) = rhs_jac_sparsity {
-            if let Some(mass_sparsity) = mass_sparsity {
-                Some(mass_sparsity.union(rhs_jac_sparsity).unwrap())
-            } else {
-                None
-            }
+            mass_sparsity.map(|mass_sparsity| mass_sparsity.union(rhs_jac_sparsity).unwrap())
         } else {
             None
         };
