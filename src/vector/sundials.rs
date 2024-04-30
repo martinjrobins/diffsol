@@ -475,6 +475,17 @@ impl Vector for SundialsVector {
             )
         };
     }
+    fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
+        unsafe {
+            N_VLinearSum(
+                alpha,
+                x.sundials_vector(),
+                beta,
+                self.sundials_vector(),
+                self.sundials_vector(),
+            )
+        };
+    }
     fn component_div_assign(&mut self, other: &Self) {
         unsafe {
             N_VDiv(

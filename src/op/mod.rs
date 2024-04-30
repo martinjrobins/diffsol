@@ -1,6 +1,7 @@
 use crate::{Matrix, Scalar, Vector};
 
 use num_traits::{One, Zero};
+use serde::Serialize;
 
 pub mod bdf;
 pub mod closure;
@@ -23,6 +24,39 @@ pub trait Op {
     /// Return sparsity information for the jacobian or matrix (if available)
     fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
         None
+    }
+
+    fn statistics(&self) -> OpStatistics {
+        OpStatistics::default()
+    }
+}
+
+#[derive(Default, Clone, Serialize)]
+pub struct OpStatistics {
+    pub number_of_calls: usize,
+    pub number_of_jac_muls: usize,
+    pub number_of_matrix_evals: usize,
+}
+
+impl OpStatistics {
+    pub fn new() -> Self {
+        Self {
+            number_of_jac_muls: 0,
+            number_of_calls: 0,
+            number_of_matrix_evals: 0,
+        }
+    }
+
+    pub fn increment_call(&mut self) {
+        self.number_of_calls += 1;
+    }
+
+    pub fn increment_jac_mul(&mut self) {
+        self.number_of_jac_muls += 1;
+    }
+
+    pub fn increment_matrix(&mut self) {
+        self.number_of_matrix_evals += 1;
     }
 }
 
@@ -50,6 +84,10 @@ pub trait NonLinearOp: Op {
     /// Compute the Jacobian of the operator and store it in the matrix `y`.
     /// `y` should have been previously initialised using the output of [`Self::sparsity`].
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        self._default_jacobian_inplace(x, t, y);
+    }
+
+    fn _default_jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         let mut v = Self::V::zeros(self.nstates());
         let mut col = Self::V::zeros(self.nout());
         for j in 0..self.nstates() {
@@ -88,6 +126,10 @@ pub trait LinearOp: Op {
     }
 
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
+        self._default_matrix_inplace(t, y);
+    }
+
+    fn _default_matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
         let mut v = Self::V::zeros(self.nstates());
         let mut col = Self::V::zeros(self.nout());
         for j in 0..self.nstates() {

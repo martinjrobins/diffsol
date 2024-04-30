@@ -142,6 +142,7 @@ pub trait Vector:
     fn copy_from_view(&mut self, other: &Self::View<'_>);
     fn from_vec(vec: Vec<Self::T>) -> Self;
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T);
+    fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T);
     fn add_scalar_mut(&mut self, scalar: Self::T);
     fn component_mul_assign(&mut self, other: &Self);
     fn component_div_assign(&mut self, other: &Self);

@@ -1,8 +1,9 @@
 use num_traits::Zero;
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 use crate::{
-    op::unit::UnitCallable, scalar::Scalar, Closure, LinearClosure, LinearOp, Matrix, NonLinearOp, Vector
+    op::unit::UnitCallable, scalar::Scalar, Closure, LinearClosure, LinearOp, Matrix, NonLinearOp,
+    Vector,
 };
 use serde::Serialize;
 
@@ -61,12 +62,6 @@ pub trait OdeEquations {
     fn is_mass_constant(&self) -> bool {
         true
     }
-
-    /// calculate and return the statistics of the ODE equation object (i.e. how many times the right-hand side function was evaluated, how many times the jacobian was multiplied, etc.)
-    /// The default implementation returns an empty statistics object.
-    fn get_statistics(&self) -> OdeEquationsStatistics {
-        OdeEquationsStatistics::new()
-    }
 }
 
 /// This struct implements the ODE equation trait [OdeEquations] for a given right-hand side function, jacobian function, mass matrix function, and initial condition function.
@@ -83,7 +78,6 @@ where
     mass: Rc<LinearClosure<M, H>>,
     init: I,
     p: Rc<M::V>,
-    statistics: RefCell<OdeEquationsStatistics>,
     mass_is_constant: bool,
 }
 
@@ -109,7 +103,6 @@ where
         let y0 = init(&p, M::T::zero());
         let nstates = y0.len();
         let p = Rc::new(p);
-        let statistics = RefCell::default();
         let mut rhs = Closure::<M, _, _>::new(rhs, rhs_jac, nstates, nstates, p.clone());
         let mut mass = LinearClosure::<M, _>::new(mass, nstates, nstates, p.clone());
         if calculate_sparsity {
@@ -123,12 +116,10 @@ where
             mass,
             init,
             p: p.clone(),
-            statistics,
             mass_is_constant,
         }
     }
 }
-
 
 impl<M, F, G, H, I> OdeEquations for OdeSolverEquations<M, F, G, H, I>
 where
@@ -138,7 +129,6 @@ where
     H: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
     I: Fn(&M::V, M::T) -> M::V,
 {
-
     type T = M::T;
     type V = M::V;
     type M = M;
@@ -162,10 +152,6 @@ where
     fn set_params(&mut self, p: Self::V) {
         self.p = Rc::new(p);
     }
-
-    fn get_statistics(&self) -> OdeEquationsStatistics {
-        self.statistics.borrow().clone()
-    }
 }
 
 /// This struct implements the ODE equation trait [OdeEquations] for a given right-hand side function, jacobian function, and initial condition function.
@@ -178,12 +164,10 @@ where
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     I: Fn(&M::V, M::T) -> M::V,
 {
-
     rhs: Rc<Closure<M, F, G>>,
     mass: Rc<UnitCallable<M>>,
     init: I,
     p: Rc<M::V>,
-    statistics: RefCell<OdeEquationsStatistics>,
 }
 
 impl<M, F, G, I> OdeSolverEquationsMassI<M, F, G, I>
@@ -193,12 +177,18 @@ where
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     I: Fn(&M::V, M::T) -> M::V,
 {
-    pub fn new_ode(rhs: F, rhs_jac: G, init: I, p: M::V, t0: M::T, calculate_sparsity: bool) -> Self {
+    pub fn new_ode(
+        rhs: F,
+        rhs_jac: G,
+        init: I,
+        p: M::V,
+        t0: M::T,
+        calculate_sparsity: bool,
+    ) -> Self {
         let y0 = init(&p, M::T::zero());
         let nstates = y0.len();
         let p = Rc::new(p);
 
-        let statistics = RefCell::default();
         let mut rhs = Closure::<M, _, _>::new(rhs, rhs_jac, nstates, nstates, p.clone());
         if calculate_sparsity {
             rhs.calculate_sparsity(&y0, t0);
@@ -211,11 +201,9 @@ where
             mass,
             init,
             p: p.clone(),
-            statistics,
         }
     }
 }
-
 
 impl<M, F, G, I> OdeEquations for OdeSolverEquationsMassI<M, F, G, I>
 where
@@ -250,11 +238,6 @@ where
     fn set_params(&mut self, p: Self::V) {
         self.p = Rc::new(p);
     }
-
-    
-    fn get_statistics(&self) -> OdeEquationsStatistics {
-        self.statistics.borrow().clone()
-    }
 }
 
 #[cfg(test)]
@@ -262,11 +245,11 @@ mod tests {
     use nalgebra::DVector;
 
     use crate::ode_solver::equations::OdeEquations;
-    use crate::NonLinearOp;
-    use crate::LinearOp;
     use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
     use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
     use crate::vector::Vector;
+    use crate::LinearOp;
+    use crate::NonLinearOp;
 
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;

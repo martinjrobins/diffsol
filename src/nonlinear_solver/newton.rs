@@ -59,14 +59,10 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
 
     fn solve_in_place(&mut self, xn: &mut C::V, t: C::T) -> Result<()> {
         if self.convergence.is_none() || self.problem.is_none() {
-            return Err(anyhow!(
-                "NewtonNonlinearSolver::solve() called before set_problem"
-            ));
+            panic!("NewtonNonlinearSolver::solve() called before set_problem");
         }
         if !self.is_jacobian_set {
-            return Err(anyhow!(
-                "NewtonNonlinearSolver::solve() called before reset_jacobian"
-            ));
+            self.reset_jacobian(xn, t);
         }
         if xn.len() != self.problem.as_ref().unwrap().f.nstates() {
             return Err(anyhow!("NewtonNonlinearSolver::solve() called with state of wrong size, expected {}, got {}", self.problem.as_ref().unwrap().f.nstates(), xn.len()));

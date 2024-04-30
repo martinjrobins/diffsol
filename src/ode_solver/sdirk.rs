@@ -12,7 +12,7 @@ use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
     DenseMatrix, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Vector,
-    VectorView, VectorViewMut,
+    VectorViewMut,
 };
 
 use super::bdf::BdfStatistics;
@@ -264,9 +264,11 @@ where
         let mut error = <Eqn::V as Vector>::zeros(n);
 
         let mut t1: Eqn::T;
+        let mut dy = <Eqn::V as Vector>::zeros(n);
 
         // loop until step is accepted
         'step: loop {
+
             // if start == 1, then we need to compute the first stage
             if start == 1 {
                 let mut hf = self.diff.column_mut(0);
@@ -277,17 +279,24 @@ where
                 let t = state.t + self.tableau.c()[i] * state.h;
                 self.nonlinear_solver.problem().f.set_phi(&self.diff.columns(0, i), y0, &self.a_rows[i]);
 
-                let mut dy = if i == 0 {
-                    self.diff.column(self.diff.ncols() - 1).into_owned()
+                
+
+                if i == 0 {
+                    dy.copy_from_view(&self.diff.column(self.diff.ncols() - 1));
                 } else if i == 1 {
-                    self.diff.column(i - 1).into_owned()
+                    dy.copy_from_view(&self.diff.column(i - 1));
                 } else {
-                    let df = self.diff.column(i - 1) - self.diff.column(i - 2);
                     let c = (self.tableau.c()[i] - self.tableau.c()[i - 2])
                         / (self.tableau.c()[i - 1] - self.tableau.c()[i - 2]);
-                    self.diff.column(i - 1) + df * scale(c)
-                };
-                self.nonlinear_solver.reset_jacobian(&dy, t);
+                    // dy = c1  + c * (c1 - c2)
+                    dy.copy_from_view(&self.diff.column(i - 1));
+                    dy.axpy_v(-c, &self.diff.column(i - 2), Eqn::T::one() + c);
+                }
+
+                // if we're at the start of the step, then we need to reset the jacobian
+                if i == start {
+                    self.nonlinear_solver.reset_jacobian(&dy, t);
+                }
                 let solve_result = self.nonlinear_solver.solve_in_place(&mut dy, t);
 
                 // if we didn't update the jacobian and the solve failed, then we update the jacobian and try again
@@ -296,16 +305,17 @@ where
                     self.nonlinear_solver.problem().f.set_jacobian_is_stale();
                     updated_jacobian = true;
 
-                    let mut dy = if i == 0 {
-                        self.diff.column(self.diff.ncols() - 1).into_owned()
+                    if i == 0 {
+                        dy.copy_from_view(&self.diff.column(self.diff.ncols() - 1));
                     } else if i == 1 {
-                        self.diff.column(i - 1).into_owned()
+                        dy.copy_from_view(&self.diff.column(i - 1));
                     } else {
-                        let df = self.diff.column(i - 1) - self.diff.column(i - 2);
                         let c = (self.tableau.c()[i] - self.tableau.c()[i - 2])
                             / (self.tableau.c()[i - 1] - self.tableau.c()[i - 2]);
-                        self.diff.column(i - 1) + df * scale(c)
-                    };
+                        // dy = c1  + c * (c1 - c2)
+                        dy.copy_from_view(&self.diff.column(i - 1));
+                        dy.axpy_v(-c, &self.diff.column(i - 2), Eqn::T::one() + c);
+                    }
                     self.nonlinear_solver.reset_jacobian(&dy, t);
                     self.statistics.number_of_nonlinear_solver_fails += 1;
                     self.nonlinear_solver.solve_in_place(&mut dy, t)

@@ -1,8 +1,8 @@
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use crate::{jacobian::{find_non_zeros_nonlinear, JacobianColoring}, matrix::MatrixSparsity, Matrix, Vector};
 
-use super::{NonLinearOp, Op};
+use super::{NonLinearOp, Op, OpStatistics};
 
 pub struct Closure<M, F, G>
 where
@@ -18,6 +18,7 @@ where
     p: Rc<M::V>,
     coloring: Option<JacobianColoring<M>>,
     sparsity: Option<M::Sparsity>,
+    statistics: RefCell<OpStatistics>,
 }
 
 impl<M, F, G> Closure<M, F, G>
@@ -35,6 +36,7 @@ where
             nout,
             nparams,
             p,
+            statistics: RefCell::new(OpStatistics::default()),
             coloring: None,
             sparsity: None,
         }
@@ -45,6 +47,7 @@ where
         self.sparsity = Some(MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros).expect("invalid sparsity pattern"));
         self.coloring = Some(JacobianColoring::new(self));
     }
+
 }
 
 impl<M, F, G> Op for Closure<M, F, G>
@@ -68,6 +71,9 @@ where
     fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
         self.sparsity.as_ref()
     }
+    fn statistics(&self) -> OpStatistics {
+        self.statistics.borrow().clone()
+    }
 }
 
 impl<M, F, G> NonLinearOp for Closure<M, F, G>
@@ -77,9 +83,19 @@ where
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
     fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
+        self.statistics.borrow_mut().increment_call();
         (self.func)(x, self.p.as_ref(), t, y)
     }
     fn jac_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
+        self.statistics.borrow_mut().increment_jac_mul();
         (self.jacobian_action)(x, self.p.as_ref(), t, v, y)
+    }
+    fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        self.statistics.borrow_mut().increment_matrix();
+        if let Some(coloring) = self.coloring.as_ref() {
+            coloring.jacobian_inplace(self, x, t, y);
+        } else {
+            self._default_jacobian_inplace(x, t, y);
+        }
     }
 }

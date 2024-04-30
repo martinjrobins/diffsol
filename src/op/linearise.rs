@@ -66,4 +66,7 @@ impl<C: NonLinearOp> LinearOp for LinearisedOp<C> {
         self.callable.jac_mul_inplace(&self.x, t, x, y);
         y.axpy(beta, &tmp, Self::T::one());
     }
+    fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
+        self.callable.jacobian_inplace(&self.x, t, y);
+    }
 }

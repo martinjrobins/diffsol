@@ -98,13 +98,11 @@ mod tests {
         initial_step_size: 0.1919383103666485
         final_step_size: 0.32116185769995603
         "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_rhs_evals: 18
-        number_of_jac_mul_evals: 2
-        number_of_mass_evals: 0
-        number_of_mass_matrix_evals: 0
-        number_of_jacobian_matrix_evals: 1
+        number_of_calls: 18
+        number_of_jac_muls: 2
+        number_of_matrix_evals: 1
         "###);
     }
 
@@ -125,13 +123,11 @@ mod tests {
         initial_step_size: 0.28998214001102113
         final_step_size: 0.8287576160727735
         "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_rhs_evals: 14
-        number_of_jac_mul_evals: 2
-        number_of_mass_evals: 0
-        number_of_mass_matrix_evals: 0
-        number_of_jacobian_matrix_evals: 1
+        number_of_calls: 14
+        number_of_jac_muls: 2
+        number_of_matrix_evals: 1
         "###);
     }
 
@@ -151,13 +147,11 @@ mod tests {
         initial_step_size: 0.011892071150027213
         final_step_size: 0.23215911532645564
         "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_rhs_evals: 56
-        number_of_jac_mul_evals: 2
-        number_of_mass_evals: 0
-        number_of_mass_matrix_evals: 0
-        number_of_jacobian_matrix_evals: 1
+        number_of_calls: 56
+        number_of_jac_muls: 2
+        number_of_matrix_evals: 1
         "###);
     }
 
@@ -178,13 +172,11 @@ mod tests {
         initial_step_size: 0.001
         final_step_size: 0.256
         "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_rhs_evals: 39
-        number_of_jac_mul_evals: 32
-        number_of_mass_evals: 0
-        number_of_mass_matrix_evals: 0
-        number_of_jacobian_matrix_evals: 16
+        number_of_calls: 39
+        number_of_jac_muls: 32
+        number_of_matrix_evals: 16
         "###);
     }
 
@@ -204,13 +196,11 @@ mod tests {
         initial_step_size: 0.004450050658086208
         final_step_size: 0.20995860176773154
         "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_rhs_evals: 62
-        number_of_jac_mul_evals: 4
-        number_of_mass_evals: 64
-        number_of_mass_matrix_evals: 2
-        number_of_jacobian_matrix_evals: 1
+        number_of_calls: 62
+        number_of_jac_muls: 4
+        number_of_matrix_evals: 1
         "###);
     }
 
@@ -231,7 +221,7 @@ mod tests {
         initial_step_size: 0.0011378590984747281
         final_step_size: 61530652710.46018
         "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
         number_of_rhs_evals: 3189
         number_of_jac_mul_evals: 40
@@ -258,7 +248,7 @@ mod tests {
         initial_step_size: 0.00619535739618413
         final_step_size: 58646462255.08058
         "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
         number_of_rhs_evals: 3513
         number_of_jac_mul_evals: 55
@@ -284,13 +274,11 @@ mod tests {
         initial_step_size: 0.0000045643545698038086
         final_step_size: 5435491162.573224
         "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_rhs_evals: 988
-        number_of_jac_mul_evals: 55
-        number_of_mass_evals: 991
-        number_of_mass_matrix_evals: 2
-        number_of_jacobian_matrix_evals: 18
+        number_of_calls: 988
+        number_of_jac_muls: 55
+        number_of_matrix_evals: 18
         "###);
     }
 
@@ -311,13 +299,11 @@ mod tests {
         initial_step_size: 0.001
         final_step_size: 11535117835.253025
         "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_rhs_evals: 507
-        number_of_jac_mul_evals: 178
-        number_of_mass_evals: 686
-        number_of_mass_matrix_evals: 60
-        number_of_jacobian_matrix_evals: 59
+        number_of_calls: 507
+        number_of_jac_muls: 178
+        number_of_matrix_evals: 59
         "###);
     }
 
@@ -337,7 +323,7 @@ mod tests {
         initial_step_size: 0.0000045643545698038086
         final_step_size: 5435491162.573224
         "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
         number_of_rhs_evals: 988
         number_of_jac_mul_evals: 58
@@ -364,7 +350,7 @@ mod tests {
         initial_step_size: 0.0010137172178872197
         final_step_size: 30691200423.745472
         "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
         number_of_rhs_evals: 2354
         number_of_jac_mul_evals: 39
@@ -390,13 +376,11 @@ mod tests {
         initial_step_size: 0.0000038381494276795106
         final_step_size: 5636682847.540523
         "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_rhs_evals: 983
-        number_of_jac_mul_evals: 54
-        number_of_mass_evals: 0
-        number_of_mass_matrix_evals: 0
-        number_of_jacobian_matrix_evals: 18
+        number_of_calls: 983
+        number_of_jac_muls: 54
+        number_of_matrix_evals: 18
         "###);
     }
 
@@ -416,13 +400,11 @@ mod tests {
         initial_step_size: 0.0000019982428436469115
         final_step_size: 1.0781694150073
         "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_rhs_evals: 595
-        number_of_jac_mul_evals: 60
-        number_of_mass_evals: 0
-        number_of_mass_matrix_evals: 0
-        number_of_jacobian_matrix_evals: 6
+        number_of_calls: 595
+        number_of_jac_muls: 60
+        number_of_matrix_evals: 6
         "###);
     }
 
@@ -434,21 +416,19 @@ mod tests {
         test_ode_solver(&mut s, rs, &problem, soln, None);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 65
-        number_of_steps: 205
-        number_of_error_test_failures: 10
-        number_of_nonlinear_solver_iterations: 593
-        number_of_nonlinear_solver_fails: 7
+        number_of_linear_solver_setups: 59
+        number_of_steps: 196
+        number_of_error_test_failures: 11
+        number_of_nonlinear_solver_iterations: 425
+        number_of_nonlinear_solver_fails: 2
         initial_step_size: 0.0000019982428436469115
-        final_step_size: 1.0781694150073
+        final_step_size: 1.0012225310200868
         "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_rhs_evals: 595
-        number_of_jac_mul_evals: 16
-        number_of_mass_evals: 0
-        number_of_mass_matrix_evals: 0
-        number_of_jacobian_matrix_evals: 6
+        number_of_calls: 427
+        number_of_jac_muls: 12
+        number_of_matrix_evals: 2
         "###);
     }
 
@@ -468,13 +448,11 @@ mod tests {
         initial_step_size: 0.0025148668593658707
         final_step_size: 0.19566316816600493
         "###);
-        insta::assert_yaml_snapshot!(problem.eqn.as_ref().get_statistics(), @r###"
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_rhs_evals: 161
-        number_of_jac_mul_evals: 10
-        number_of_mass_evals: 0
-        number_of_mass_matrix_evals: 0
-        number_of_jacobian_matrix_evals: 1
+        number_of_calls: 161
+        number_of_jac_muls: 10
+        number_of_matrix_evals: 1
         "###);
     }
 

@@ -156,8 +156,6 @@ where
                 y.scale_add_and_assign(mass_jac.deref(), -c, rhs_jac.deref());
             }
             self.jacobian_is_stale.replace(false);
-            let number_of_jac_evals = *self.number_of_jac_evals.borrow() + 1;
-            self.number_of_jac_evals.replace(number_of_jac_evals);
         } else {
             // only c has changed, so just do the addition
             let rhs_jac = self.rhs_jac.borrow();
@@ -165,6 +163,8 @@ where
             let c = *self.c.borrow().deref();
             y.scale_add_and_assign(mass_jac.deref(), -c, rhs_jac.deref());
         }
+        let number_of_jac_evals = *self.number_of_jac_evals.borrow() + 1;
+        self.number_of_jac_evals.replace(number_of_jac_evals);
     }
 }
 

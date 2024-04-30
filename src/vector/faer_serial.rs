@@ -116,6 +116,9 @@ impl<T: Scalar> Vector for Col<T> {
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {
         *self = &*self * faer::scale(beta) + x * faer::scale(alpha);
     }
+    fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
+        *self = &*self * faer::scale(beta) + x * faer::scale(alpha);
+    }
     fn exp(&self) -> Self {
         zipped!(self).map(|unzipped!(xi)| xi.exp())
     }
