@@ -4,7 +4,6 @@ use num_traits::Zero;
 use std::ops::MulAssign;
 use std::rc::Rc;
 
-use crate::{LinearSolver, NonLinearOp};
 use crate::matrix::MatrixRef;
 use crate::vector::VectorRef;
 use crate::NewtonNonlinearSolver;
@@ -14,6 +13,7 @@ use crate::{
     DenseMatrix, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Vector,
     VectorViewMut,
 };
+use crate::{LinearSolver, NonLinearOp};
 
 use super::bdf::BdfStatistics;
 
@@ -61,10 +61,7 @@ where
     const MAX_FACTOR: f64 = 10.0;
     const MIN_TIMESTEP: f64 = 1e-13;
 
-    pub fn new(
-        tableau: Tableau<M>,
-        linear_solver: LS,
-    ) -> Self {
+    pub fn new(tableau: Tableau<M>, linear_solver: LS) -> Self {
         let mut nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         // set max iterations for nonlinear solver
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
@@ -268,7 +265,6 @@ where
 
         // loop until step is accepted
         'step: loop {
-
             // if start == 1, then we need to compute the first stage
             if start == 1 {
                 let mut hf = self.diff.column_mut(0);
@@ -277,12 +273,14 @@ where
             }
             for i in start..self.tableau.s() {
                 let t = state.t + self.tableau.c()[i] * state.h;
-                self.nonlinear_solver.problem().f.set_phi(&self.diff.columns(0, i), y0, &self.a_rows[i]);
-
-                
+                self.nonlinear_solver.problem().f.set_phi(
+                    &self.diff.columns(0, i),
+                    y0,
+                    &self.a_rows[i],
+                );
 
                 if i == 0 {
-                    dy.copy_from_view(&self.diff.column(self.diff.ncols() - 1));
+                    dy *= scale(Eqn::T::zero());
                 } else if i == 1 {
                     dy.copy_from_view(&self.diff.column(i - 1));
                 } else {
@@ -306,7 +304,7 @@ where
                     updated_jacobian = true;
 
                     if i == 0 {
-                        dy.copy_from_view(&self.diff.column(self.diff.ncols() - 1));
+                        dy *= scale(Eqn::T::zero());
                     } else if i == 1 {
                         dy.copy_from_view(&self.diff.column(i - 1));
                     } else {
@@ -360,11 +358,7 @@ where
 
             // scale error and compute norm
             let scale_y = {
-                let y1_ref = self
-                    .nonlinear_solver
-                    .problem()
-                    .f
-                    .get_last_f_eval();
+                let y1_ref = self.nonlinear_solver.problem().f.get_last_f_eval();
                 let ode_problem = self.problem.as_ref().unwrap();
                 let mut scale_y = y1_ref.abs() * scale(ode_problem.rtol);
                 scale_y += ode_problem.atol.as_ref();
@@ -418,20 +412,13 @@ where
         self.old_f.mul_assign(scale(Eqn::T::one() / dt));
         std::mem::swap(&mut self.old_f, &mut self.f);
 
-        let y1 = self
-            .nonlinear_solver
-            .problem()
-            .f
-            .get_last_f_eval();
+        let y1 = self.nonlinear_solver.problem().f.get_last_f_eval();
         self.old_y.copy_from(&y1);
         std::mem::swap(&mut self.old_y, &mut state.y);
 
         // update statistics
-        self.statistics.number_of_linear_solver_setups = self
-            .nonlinear_solver
-            .problem()
-            .f
-            .number_of_jac_evals();
+        self.statistics.number_of_linear_solver_setups =
+            self.nonlinear_solver.problem().f.number_of_jac_evals();
         self.statistics.number_of_steps += 1;
         self.statistics.final_step_size = self.state.as_ref().unwrap().h;
 

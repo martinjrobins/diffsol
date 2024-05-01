@@ -176,7 +176,7 @@ where
             }
             self.jacobian_is_stale.replace(false);
         } else {
-            // only c has changed, so just do the addition
+            // only h has changed, so just do the addition
             let rhs_jac = self.rhs_jac.borrow();
             let mass_jac = self.mass_jac.borrow();
             y.scale_add_and_assign(mass_jac.deref(), -(c * h), rhs_jac.deref());
