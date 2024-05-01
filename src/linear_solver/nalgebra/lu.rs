@@ -5,8 +5,7 @@ use nalgebra::{DMatrix, DVector, Dyn};
 
 use crate::{
     op::{linearise::LinearisedOp, NonLinearOp},
-    LinearSolver, Op, Scalar, SolverProblem, LinearOp,
-    Matrix,
+    LinearOp, LinearSolver, Matrix, Op, Scalar, SolverProblem,
 };
 
 /// A [LinearSolver] that uses the LU decomposition in the [`nalgebra` library](https://nalgebra.org/) to solve the linear system.
@@ -49,7 +48,9 @@ impl<T: Scalar, C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> LinearSol
     }
 
     fn set_linearisation(&mut self, x: &<C as Op>::V, t: <C as Op>::T) {
-        Rc::<LinearisedOp<C>>::get_mut(&mut self.problem.as_mut().expect("Problem not set").f).unwrap().set_x(x);
+        Rc::<LinearisedOp<C>>::get_mut(&mut self.problem.as_mut().expect("Problem not set").f)
+            .unwrap()
+            .set_x(x);
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         self.problem.as_ref().unwrap().f.matrix_inplace(t, matrix);
         self.lu = Some(matrix.clone().lu());

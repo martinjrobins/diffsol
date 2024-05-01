@@ -94,6 +94,9 @@ pub mod tests {
         for<'a> &'a C::V: VectorRef<C::V>,
     {
         solver.set_problem(&problem);
+        let x = C::V::zeros(problem.f.nout());
+        let t = C::T::zero();
+        solver.set_linearisation(&x, t);
         for soln in solns {
             let x = solver.solve(&soln.b).unwrap();
             let tol = { &soln.x * scale(problem.rtol) + problem.atol.as_ref() };

@@ -1,7 +1,7 @@
 use crate::{
     matrix::{MatrixRef, MatrixView},
     ode_solver::equations::OdeEquations,
-    Matrix, MatrixSparsity, OdeSolverProblem, Vector, VectorRef, LinearOp
+    LinearOp, Matrix, MatrixSparsity, OdeSolverProblem, Vector, VectorRef,
 };
 use num_traits::{One, Zero};
 use std::{
@@ -164,7 +164,9 @@ where
         if *self.jacobian_is_stale.borrow() {
             // calculate the mass and rhs jacobians
             let mut rhs_jac = self.rhs_jac.borrow_mut();
-            self.eqn.rhs().jacobian_inplace(x, t, &mut rhs_jac);
+            self.set_tmp(x);
+            let tmp = self.tmp.borrow();
+            self.eqn.rhs().jacobian_inplace(&tmp, t, &mut rhs_jac);
 
             if self.eqn.is_mass_constant() {
                 let mass_jac = self.mass_jac.borrow();
@@ -189,12 +191,34 @@ where
 #[cfg(test)]
 mod tests {
     use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
+    use crate::ode_solver::test_models::robertson::robertson;
     use crate::op::NonLinearOp;
     use crate::vector::Vector;
+    use crate::Matrix;
 
     use super::SdirkCallable;
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;
+
+    #[test]
+    fn test_sdirk_robertson_jacobian() {
+        let (problem, _soln) = robertson::<Mcpu>(false);
+        let c = 0.1;
+        let h = 1.3;
+        let phi = Vcpu::from_vec(vec![1.1, 1.2, 1.3]);
+        let sdirk_callable = SdirkCallable::new(&problem, c);
+        sdirk_callable.set_h(h);
+        sdirk_callable.set_phi_direct(phi);
+        let t = 0.9;
+        let y = Vcpu::from_vec(vec![1.1, 1.2, 1.3]);
+
+        let v = Vcpu::from_vec(vec![2.0, 3.0, 4.0]);
+        let jac = sdirk_callable.jacobian(&y, t);
+        let jac_mul_v = sdirk_callable.jac_mul(&y, t, &v);
+        let mut jac_mul_v2 = Vcpu::from_vec(vec![0.0, 0.0, 0.0]);
+        jac.gemv(1.0, &v, 0.0, &mut jac_mul_v2);
+        jac_mul_v.assert_eq_st(&jac_mul_v2, 1e-10);
+    }
 
     #[test]
     fn test_sdirk_callable() {
@@ -237,7 +261,12 @@ mod tests {
 
         // J = M - c * h * f'(phi + c * y) = |1 0| - 0.1 * |-0.1 0| = |1.01 0|
         //                                   |0 1|         |0 -0.1|   |0 1.01|
-        let jac = sdirk_callable.jacobian(&y, t);
+        let mut jac = sdirk_callable.jacobian(&y, t);
+        assert_eq!(jac[(0, 0)], 1.01);
+        assert_eq!(jac[(0, 1)], 0.0);
+        assert_eq!(jac[(1, 0)], 0.0);
+        assert_eq!(jac[(1, 1)], 1.01);
+        sdirk_callable.jacobian_inplace(&y, t, &mut jac);
         assert_eq!(jac[(0, 0)], 1.01);
         assert_eq!(jac[(0, 1)], 0.0);
         assert_eq!(jac[(1, 0)], 0.0);

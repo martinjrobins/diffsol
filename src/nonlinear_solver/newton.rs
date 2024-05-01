@@ -65,7 +65,7 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
             self.reset_jacobian(xn, t);
         }
         if xn.len() != self.problem.as_ref().unwrap().f.nstates() {
-            return Err(anyhow!("NewtonNonlinearSolver::solve() called with state of wrong size, expected {}, got {}", self.problem.as_ref().unwrap().f.nstates(), xn.len()));
+            panic!("NewtonNonlinearSolver::solve() called with state of wrong size, expected {}, got {}", self.problem.as_ref().unwrap().f.nstates(), xn.len());
         }
         let convergence = self.convergence.as_mut().unwrap();
         let problem = self.problem.as_ref().unwrap();

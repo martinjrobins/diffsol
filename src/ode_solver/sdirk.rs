@@ -291,7 +291,6 @@ where
                     dy.axpy_v(-c, &self.diff.column(i - 2), Eqn::T::one() + c);
                 }
 
-                // if we're at the start of the step, then we need to reset the jacobian
                 if i == start {
                     self.nonlinear_solver.reset_jacobian(&dy, t);
                 }
