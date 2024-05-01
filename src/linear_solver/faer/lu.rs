@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use crate::{
-    linear_solver::LinearSolver, op::linearise::LinearisedOp, solver::SolverProblem, NonLinearOp,
-    Op, Scalar, Matrix, LinearOp,
+    linear_solver::LinearSolver, op::linearise::LinearisedOp, solver::SolverProblem, LinearOp,
+    Matrix, NonLinearOp, Op, Scalar,
 };
 use anyhow::Result;
 use faer::{linalg::solvers::FullPivLu, solvers::SpSolver, Col, Mat};
@@ -33,7 +33,9 @@ where
 
 impl<T: Scalar, C: NonLinearOp<M = Mat<T>, V = Col<T>, T = T>> LinearSolver<C> for LU<T, C> {
     fn set_linearisation(&mut self, x: &C::V, t: C::T) {
-        Rc::<LinearisedOp<C>>::get_mut(&mut self.problem.as_mut().expect("Problem not set").f).unwrap().set_x(x);
+        Rc::<LinearisedOp<C>>::get_mut(&mut self.problem.as_mut().expect("Problem not set").f)
+            .unwrap()
+            .set_x(x);
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         self.problem.as_ref().unwrap().f.matrix_inplace(t, matrix);
         self.lu = Some(matrix.full_piv_lu());

@@ -1,6 +1,10 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{jacobian::{find_non_zeros_linear, JacobianColoring}, matrix::{MatrixCommon, MatrixSparsity}, Matrix, Vector};
+use crate::{
+    jacobian::{find_non_zeros_linear, JacobianColoring},
+    matrix::{MatrixCommon, MatrixSparsity},
+    Matrix, Vector,
+};
 
 use super::{LinearOp, Op, OpStatistics};
 
@@ -52,10 +56,12 @@ where
 
     pub fn calculate_sparsity(&mut self, t0: M::T) {
         let non_zeros = find_non_zeros_linear(self, t0);
-        self.sparsity = Some(MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros).expect("invalid sparsity pattern"));
+        self.sparsity = Some(
+            MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros)
+                .expect("invalid sparsity pattern"),
+        );
         self.coloring = Some(JacobianColoring::new(self));
     }
-
 }
 
 impl<M, F> Op for LinearClosure<M, F>

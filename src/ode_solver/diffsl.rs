@@ -4,9 +4,8 @@ use anyhow::Result;
 use diffsl::execution::Compiler;
 
 use crate::{
-    JacobianColoring,
     op::{LinearOp, NonLinearOp, Op},
-    OdeEquations
+    JacobianColoring, OdeEquations,
 };
 
 pub type T = f64;
@@ -54,8 +53,6 @@ impl DiffSlContext {
     }
 }
 
-    
-
 pub struct DiffSl<'a> {
     context: &'a DiffSlContext,
     rhs: Rc<DiffSlRhs<'a>>,
@@ -66,11 +63,7 @@ impl<'a> DiffSl<'a> {
     pub fn new(context: &'a DiffSlContext, use_coloring: bool) -> Self {
         let rhs = Rc::new(DiffSlRhs::new(context, use_coloring));
         let mass = Rc::new(DiffSlMass::new(context, use_coloring));
-        Self {
-            context,
-            rhs,
-            mass,
-        }
+        Self { context, rhs, mass }
     }
 }
 
@@ -83,7 +76,6 @@ pub struct DiffSlMass<'a> {
     context: &'a DiffSlContext,
     coloring: Option<JacobianColoring<M>>,
 }
-
 
 macro_rules! impl_for_diffsl {
     ($name:ident) => {
@@ -101,12 +93,11 @@ macro_rules! impl_for_diffsl {
                 ret
             }
         }
-    }
+    };
 }
 
 impl_for_diffsl!(DiffSlRhs);
 impl_for_diffsl!(DiffSlMass);
-
 
 macro_rules! impl_op_for_diffsl {
     ($name:ident) => {
@@ -160,7 +151,6 @@ impl NonLinearOp for DiffSlRhs<'_> {
         } else {
             NonLinearOp::jacobian_inplace(self, x, t, y);
         }
-    
     }
 }
 
@@ -187,8 +177,7 @@ impl LinearOp for DiffSlMass<'_> {
     }
 }
 
-impl<'a> OdeEquations for DiffSl<'a> 
-{
+impl<'a> OdeEquations for DiffSl<'a> {
     type M = M;
     type T = T;
     type V = V;
@@ -204,15 +193,17 @@ impl<'a> OdeEquations for DiffSl<'a>
     }
 
     fn set_params(&mut self, p: Self::V) {
-        self.context.compiler
+        self.context
+            .compiler
             .set_inputs(p.as_slice(), self.context.data.borrow_mut().as_mut_slice());
     }
 
-
     fn init(&self, _t: Self::T) -> Self::V {
         let mut ret_y = Self::V::zeros(self.rhs().nstates());
-        self.context.compiler
-            .set_u0(ret_y.as_mut_slice(), self.context.data.borrow_mut().as_mut_slice());
+        self.context.compiler.set_u0(
+            ret_y.as_mut_slice(),
+            self.context.data.borrow_mut().as_mut_slice(),
+        );
         ret_y
     }
 }
@@ -222,8 +213,8 @@ mod tests {
     use nalgebra::DVector;
 
     use crate::{
-        linear_solver::NalgebraLU, nonlinear_solver::newton::NewtonNonlinearSolver, Bdf,
-        OdeBuilder, OdeEquations, OdeSolverMethod, Vector, NonLinearOp, LinearOp
+        linear_solver::NalgebraLU, nonlinear_solver::newton::NewtonNonlinearSolver, Bdf, LinearOp,
+        NonLinearOp, OdeBuilder, OdeEquations, OdeSolverMethod, Vector,
     };
 
     use super::{DiffSl, DiffSlContext};

@@ -217,7 +217,11 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
         *self = x + y * beta;
     }
-    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, sparsity: Option<&Self::Sparsity>) -> Self {
+    fn new_from_sparsity(
+        nrows: IndexType,
+        ncols: IndexType,
+        sparsity: Option<&Self::Sparsity>,
+    ) -> Self {
         if let Some(sparsity) = sparsity {
             let values = vec![T::zero(); sparsity.nnz()];
             CscMatrix::try_from_pattern_and_values(sparsity.clone(), values).unwrap()

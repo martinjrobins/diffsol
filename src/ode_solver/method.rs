@@ -64,8 +64,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         problem: &OdeSolverProblem<Eqn>,
         t: Eqn::T,
         root_solver: &mut RS,
-    ) -> Result<Eqn::V>
-    {
+    ) -> Result<Eqn::V> {
         let state = OdeSolverState::new_consistent(problem, root_solver)?;
         self.set_problem(state, problem);
         while self.state().unwrap().t <= t {

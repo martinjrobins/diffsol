@@ -1,6 +1,10 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{jacobian::{find_non_zeros_nonlinear, JacobianColoring}, matrix::MatrixSparsity, Matrix, Vector};
+use crate::{
+    jacobian::{find_non_zeros_nonlinear, JacobianColoring},
+    matrix::MatrixSparsity,
+    Matrix, Vector,
+};
 
 use super::{NonLinearOp, Op, OpStatistics};
 
@@ -44,10 +48,12 @@ where
 
     pub fn calculate_sparsity(&mut self, y0: &M::V, t0: M::T) {
         let non_zeros = find_non_zeros_nonlinear(self, y0, t0);
-        self.sparsity = Some(MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros).expect("invalid sparsity pattern"));
+        self.sparsity = Some(
+            MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros)
+                .expect("invalid sparsity pattern"),
+        );
         self.coloring = Some(JacobianColoring::new(self));
     }
-
 }
 
 impl<M, F, G> Op for Closure<M, F, G>

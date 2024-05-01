@@ -179,7 +179,11 @@ impl<T: Scalar> Matrix for Mat<T> {
         zipped!(self, x, y).for_each(|unzipped!(mut s, x, y)| s.write(x.read() + beta * y.read()));
     }
 
-    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, _sparsity: Option<&Self::Sparsity>) -> Self {
+    fn new_from_sparsity(
+        nrows: IndexType,
+        ncols: IndexType,
+        _sparsity: Option<&Self::Sparsity>,
+    ) -> Self {
         Self::zeros(nrows, ncols)
     }
 }

@@ -1,7 +1,7 @@
 use crate::op::{LinearOp, Op};
 use crate::vector::Vector;
 use crate::Scalar;
-use crate::{MatrixSparsity, op::NonLinearOp, Matrix, VectorIndex};
+use crate::{op::NonLinearOp, Matrix, MatrixSparsity, VectorIndex};
 use num_traits::{One, Zero};
 
 use self::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy};
@@ -13,7 +13,11 @@ pub mod greedy_coloring;
 /// Find the non-zero entries of the Jacobian matrix of a non-linear operator.
 /// This is used as the default `find_non_zeros` function for the `NonLinearOp` and `LinearOp` traits.
 /// Users can override this function with a more efficient and reliable implementation if desired.
-pub fn find_non_zeros_nonlinear<F: NonLinearOp + ?Sized>(op: &F, x: &F::V, t: F::T) -> Vec<(usize, usize)> {
+pub fn find_non_zeros_nonlinear<F: NonLinearOp + ?Sized>(
+    op: &F,
+    x: &F::V,
+    t: F::T,
+) -> Vec<(usize, usize)> {
     let mut v = F::V::zeros(op.nstates());
     let mut col = F::V::zeros(op.nout());
     let mut triplets = Vec::with_capacity(op.nstates());
@@ -59,8 +63,10 @@ pub struct JacobianColoring<M: Matrix> {
 }
 
 impl<M: Matrix> JacobianColoring<M> {
-    pub fn new<F: Op<M=M>>(op: &F) -> Self {
-        let sparsity = op.sparsity().expect("Jacobian sparsity not defined, cannot use coloring");
+    pub fn new<F: Op<M = M>>(op: &F) -> Self {
+        let sparsity = op
+            .sparsity()
+            .expect("Jacobian sparsity not defined, cannot use coloring");
         let non_zeros = sparsity.indices();
         let ncols = op.nstates();
         let graph = nonzeros2graph(non_zeros.as_slice(), ncols);
@@ -92,7 +98,7 @@ impl<M: Matrix> JacobianColoring<M> {
         }
     }
 
-    pub fn jacobian_inplace<F: NonLinearOp<M=M, V=M::V, T=M::T>>(
+    pub fn jacobian_inplace<F: NonLinearOp<M = M, V = M::V, T = M::T>>(
         &self,
         op: &F,
         x: &F::V,
@@ -114,7 +120,7 @@ impl<M: Matrix> JacobianColoring<M> {
         triplets
     }
 
-    pub fn matrix_inplace<F: LinearOp<M=M, V=M::V, T=M::T>>(
+    pub fn matrix_inplace<F: LinearOp<M = M, V = M::V, T = M::T>>(
         &self,
         op: &F,
         t: F::T,
@@ -140,6 +146,7 @@ impl<M: Matrix> JacobianColoring<M> {
 mod tests {
     use std::rc::Rc;
 
+    use crate::jacobian::find_non_zeros_nonlinear;
     use crate::op::Op;
     use crate::{
         jacobian::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy},
@@ -182,7 +189,7 @@ mod tests {
         ];
         for triplets in test_triplets {
             let op = helper_triplets2op(triplets.as_slice(), 2, 2);
-            let non_zeros = op.sparsity().unwrap().indices();
+            let non_zeros = find_non_zeros_nonlinear(&op, &DVector::zeros(2), 0.0);
             let expect = triplets
                 .iter()
                 .map(|(i, j, _v)| (*i, *j))
@@ -202,8 +209,7 @@ mod tests {
         let expect = vec![vec![1, 1], vec![1, 2], vec![1, 1], vec![1, 2]];
         for (triplets, expect) in test_triplets.iter().zip(expect) {
             let op = helper_triplets2op(triplets.as_slice(), 2, 2);
-
-            let non_zeros = op.sparsity().unwrap().indices();
+            let non_zeros = find_non_zeros_nonlinear(&op, &DVector::zeros(2), 0.0);
             let ncols = op.nstates();
             let graph = nonzeros2graph(non_zeros.as_slice(), ncols);
             let coloring = color_graph_greedy(&graph);

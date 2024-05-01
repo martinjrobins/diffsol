@@ -1,4 +1,4 @@
-use crate::{op::Op, vector::DefaultDenseMatrix, Matrix, OdeSolverProblem, Vector, OdeEquations};
+use crate::{op::Op, vector::DefaultDenseMatrix, Matrix, OdeEquations, OdeSolverProblem, Vector};
 use anyhow::Result;
 
 use super::equations::{OdeSolverEquations, OdeSolverEquationsMassI};

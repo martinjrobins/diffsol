@@ -141,7 +141,11 @@ impl<T: Scalar> Matrix for DMatrix<T> {
         self.mul_assign(beta);
         self.add_assign(x);
     }
-    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, _sparsity: Option<&Self::Sparsity>) -> Self {
+    fn new_from_sparsity(
+        nrows: IndexType,
+        ncols: IndexType,
+        _sparsity: Option<&Self::Sparsity>,
+    ) -> Self {
         Self::zeros(nrows, ncols)
     }
 }

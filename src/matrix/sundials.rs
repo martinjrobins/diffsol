@@ -311,7 +311,11 @@ impl Matrix for SundialsMatrix {
         y.axpy(alpha, &tmp, beta);
     }
 
-    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, _sparsity: Option<&Self::Sparsity>) -> Self {
+    fn new_from_sparsity(
+        nrows: IndexType,
+        ncols: IndexType,
+        _sparsity: Option<&Self::Sparsity>,
+    ) -> Self {
         Self::new_dense(nrows, ncols)
     }
 }

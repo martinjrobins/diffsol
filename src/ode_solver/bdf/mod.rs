@@ -61,7 +61,11 @@ impl<T: Scalar> Default for BdfStatistics<T> {
 /// \[1\] Byrne, G. D., & Hindmarsh, A. C. (1975). A polyalgorithm for the numerical solution of ordinary differential equations. ACM Transactions on Mathematical Software (TOMS), 1(1), 71-96.
 /// \[2\] Shampine, L. F., & Reichelt, M. W. (1997). The matlab ode suite. SIAM journal on scientific computing, 18(1), 1-22.
 /// \[3\] Virtanen, P., Gommers, R., Oliphant, T. E., Haberland, M., Reddy, T., Cournapeau, D., ... & Van Mulbregt, P. (2020). SciPy 1.0: fundamental algorithms for scientific computing in Python. Nature methods, 17(3), 261-272.
-pub struct Bdf<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations, Nls: NonLinearSolver<BdfCallable<Eqn>>> {
+pub struct Bdf<
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    Eqn: OdeEquations,
+    Nls: NonLinearSolver<BdfCallable<Eqn>>,
+> {
     nonlinear_solver: Nls,
     ode_problem: Option<OdeSolverProblem<Eqn>>,
     order: usize,
@@ -76,14 +80,12 @@ pub struct Bdf<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations, Nls: N
     state: Option<OdeSolverState<Eqn::V>>,
 }
 
-impl<Eqn> Default for Bdf<
-    <Eqn::V as DefaultDenseMatrix>::M, 
-    Eqn, 
-    NewtonNonlinearSolver<
-        BdfCallable<Eqn>, 
-        <Eqn::M as DefaultSolver>::LS<BdfCallable<Eqn>>
+impl<Eqn> Default
+    for Bdf<
+        <Eqn::V as DefaultDenseMatrix>::M,
+        Eqn,
+        NewtonNonlinearSolver<BdfCallable<Eqn>, <Eqn::M as DefaultSolver>::LS<BdfCallable<Eqn>>>,
     >
->
 where
     Eqn: OdeEquations,
     Eqn::M: DefaultSolver,
@@ -249,7 +251,8 @@ where
     }
 }
 
-impl<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations, Nls> OdeSolverMethod<Eqn> for Bdf<M, Eqn, Nls>
+impl<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations, Nls> OdeSolverMethod<Eqn>
+    for Bdf<M, Eqn, Nls>
 where
     Nls: NonLinearSolver<BdfCallable<Eqn>>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -456,7 +459,8 @@ where
                     } else {
                         // newton iteration did not converge, so update jacobian and try again
                         self.nonlinear_problem_op().set_jacobian_is_stale();
-                        self.nonlinear_solver.reset_jacobian(&y_predict, self.state.as_ref().unwrap().t);
+                        self.nonlinear_solver
+                            .reset_jacobian(&y_predict, self.state.as_ref().unwrap().t);
                         updated_jacobian = true;
                         // same prediction as last time
                     }

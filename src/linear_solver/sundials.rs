@@ -9,8 +9,7 @@ use crate::{
     ode_solver::sundials::sundials_check,
     op::linearise::LinearisedOp,
     vector::sundials::{get_suncontext, SundialsVector},
-    Matrix, NonLinearOp, Op, SolverProblem, SundialsMatrix,
-    LinearOp,
+    LinearOp, Matrix, NonLinearOp, Op, SolverProblem, SundialsMatrix,
 };
 
 use super::LinearSolver;
@@ -79,7 +78,9 @@ where
     }
 
     fn set_linearisation(&mut self, x: &Op::V, t: Op::T) {
-        Rc::<LinearisedOp<Op>>::get_mut(&mut self.problem.as_mut().expect("Problem not set").f).unwrap().set_x(x);
+        Rc::<LinearisedOp<Op>>::get_mut(&mut self.problem.as_mut().expect("Problem not set").f)
+            .unwrap()
+            .set_x(x);
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         let linear_solver = self.linear_solver.expect("Linear solver not set");
         self.problem.as_ref().unwrap().f.matrix_inplace(t, matrix);

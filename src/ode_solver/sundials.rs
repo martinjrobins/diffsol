@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
-use serde::Serialize;
 use num_traits::Zero;
+use serde::Serialize;
 use std::{
     ffi::{c_int, c_long, c_void, CStr},
     rc::Rc,
@@ -16,8 +16,8 @@ use sundials_sys::{
 };
 
 use crate::{
-    scale, vector::sundials::get_suncontext, Matrix, OdeEquations, OdeSolverMethod, Op,
-    OdeSolverProblem, OdeSolverState, SundialsMatrix, SundialsVector, Vector, NonLinearOp, LinearOp
+    scale, vector::sundials::get_suncontext, LinearOp, Matrix, NonLinearOp, OdeEquations,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, SundialsMatrix, SundialsVector, Vector,
 };
 
 pub fn sundials_check(retval: c_int) -> Result<()> {
@@ -213,7 +213,14 @@ where
         if self.problem.is_none() {
             return Err(anyhow!("Problem not set"));
         }
-        let diag = self.problem.as_ref().unwrap().eqn.mass().matrix(t).diagonal();
+        let diag = self
+            .problem
+            .as_ref()
+            .unwrap()
+            .eqn
+            .mass()
+            .matrix(t)
+            .diagonal();
         let id = diag.filter_indices(|x| x == Eqn::T::zero());
         let number_of_states = self.problem.as_ref().unwrap().eqn.rhs().nstates();
         // need to convert to realtype sundials vector

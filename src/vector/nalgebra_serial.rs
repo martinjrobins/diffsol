@@ -186,7 +186,6 @@ impl<T: Scalar> Vector for DVector<T> {
         for &index in indices.iter() {
             self[index] = value;
         }
-    
     }
 }
 

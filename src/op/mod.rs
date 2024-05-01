@@ -104,12 +104,7 @@ pub trait NonLinearOp: Op {
         self.jacobian_inplace(x, t, &mut y);
         y
     }
-
-    
 }
-
-
-
 
 pub trait LinearOp: Op {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
@@ -141,7 +136,6 @@ pub trait LinearOp: Op {
     }
 }
 
-
 pub trait ConstantOp: Op {
     fn call_inplace(&self, t: Self::T, y: &mut Self::V);
     fn call(&self, t: Self::T) -> Self::V {
@@ -154,7 +148,6 @@ pub trait ConstantOp: Op {
         y.copy_from(&zeros);
     }
 }
-
 
 impl<C: Op> Op for &C {
     type T = C::T;
@@ -169,7 +162,6 @@ impl<C: Op> Op for &C {
     fn nparams(&self) -> usize {
         C::nparams(*self)
     }
-
 }
 
 //impl <C: LinearOp> NonLinearOp for C {

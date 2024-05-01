@@ -219,7 +219,11 @@ pub trait Matrix:
     fn zeros(nrows: IndexType, ncols: IndexType) -> Self;
 
     /// Create a new matrix from a sparsity pattern, the non-zero elements are not initialized
-    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, sparsity: Option<&Self::Sparsity>) -> Self;
+    fn new_from_sparsity(
+        nrows: IndexType,
+        ncols: IndexType,
+        sparsity: Option<&Self::Sparsity>,
+    ) -> Self;
 
     /// Create a new diagonal matrix from a [Vector] holding the diagonal elements
     fn from_diagonal(v: &Self::V) -> Self;

@@ -43,6 +43,5 @@ impl<M: Matrix> Op for UnitCallable<M> {
 impl<M: Matrix> LinearOp for UnitCallable<M> {
     fn gemv_inplace(&self, x: &Self::V, _t: Self::T, beta: Self::T, y: &mut Self::V) {
         y.axpy(Self::T::one(), x, beta);
-        
     }
 }

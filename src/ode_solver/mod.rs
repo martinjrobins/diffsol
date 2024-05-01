@@ -466,7 +466,7 @@ mod tests {
             0
         }
         fn nstates(&self) -> usize {
-            1   
+            1
         }
     }
 
@@ -495,7 +495,7 @@ mod tests {
             }
         }
     }
-    
+
     impl<M: Matrix> OdeEquations for TestEqn<M> {
         type T = M::T;
         type V = M::V;
@@ -517,7 +517,6 @@ mod tests {
             M::V::from_element(1, M::T::zero())
         }
     }
-
 
     pub fn test_interpolate<M: Matrix, Method: OdeSolverMethod<TestEqn<M>>>(mut s: Method) {
         let problem = OdeSolverProblem::new(
