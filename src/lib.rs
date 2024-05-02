@@ -70,6 +70,7 @@
 //!
 //! The provided linear solvers are:
 //! - [NalgebraLU]: a direct solver that uses the LU decomposition implemented in the [nalgebra](https://nalgebra.org) library.
+//! - [FaerLU]: a direct solver that uses the LU decomposition implemented in the [faer](https://github.com/sarah-ek/faer-rs) library.
 //! - [SundialsLinearSolver]: a linear solver that uses the [sundials](https://computation.llnl.gov/projects/sundials) library (requires the `sundials` feature).
 //!
 //! The provided nonlinear solvers are:
@@ -90,6 +91,7 @@
 //!
 //! When solving ODEs, you will need to choose a matrix and vector type to use. DiffSol uses the following types:
 //! - [nalgebra::DMatrix] and [nalgebra::DVector] from the [nalgebra](https://nalgebra.org) library.
+//! - [faer::Mat] and [faer::Col] from the [faer](https://github.com/sarah-ek/faer-rs) library.
 //! - [SundialsMatrix] and [SundialsVector] from the [sundials](https://computation.llnl.gov/projects/sundials) library (requires the `sundials` feature).
 //!
 //! If you wish to use your own matrix and vector types, you will need to implement the following traits:
