@@ -4,8 +4,9 @@ use anyhow::Result;
 use diffsl::execution::Compiler;
 
 use crate::{
+    jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring},
     op::{LinearOp, NonLinearOp, Op},
-    JacobianColoring, OdeEquations,
+    OdeEquations,
 };
 
 pub type T = f64;
@@ -77,27 +78,38 @@ pub struct DiffSlMass<'a> {
     coloring: Option<JacobianColoring<M>>,
 }
 
-macro_rules! impl_for_diffsl {
-    ($name:ident) => {
-        impl<'a> $name<'a> {
-            pub fn new(context: &'a DiffSlContext, use_coloring: bool) -> Self {
-                let mut ret = Self {
-                    context,
-                    coloring: None,
-                };
+impl<'a> DiffSlRhs<'a> {
+    pub fn new(context: &'a DiffSlContext, use_coloring: bool) -> Self {
+        let mut ret = Self {
+            context,
+            coloring: None,
+        };
 
-                if use_coloring {
-                    let coloring = JacobianColoring::new(&ret);
-                    ret.coloring = Some(coloring);
-                }
-                ret
-            }
+        if use_coloring {
+            let x0 = V::zeros(context.nstates);
+            let t0 = 0.0;
+            let non_zeros = find_non_zeros_nonlinear(&ret, &x0, t0);
+            ret.coloring = Some(JacobianColoring::new_from_non_zeros(&ret, non_zeros));
         }
-    };
+        ret
+    }
 }
 
-impl_for_diffsl!(DiffSlRhs);
-impl_for_diffsl!(DiffSlMass);
+impl<'a> DiffSlMass<'a> {
+    pub fn new(context: &'a DiffSlContext, use_coloring: bool) -> Self {
+        let mut ret = Self {
+            context,
+            coloring: None,
+        };
+
+        if use_coloring {
+            let t0 = 0.0;
+            let non_zeros = find_non_zeros_linear(&ret, t0);
+            ret.coloring = Some(JacobianColoring::new_from_non_zeros(&ret, non_zeros));
+        }
+        ret
+    }
+}
 
 macro_rules! impl_op_for_diffsl {
     ($name:ident) => {

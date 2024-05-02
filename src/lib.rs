@@ -151,7 +151,6 @@ pub use linear_solver::sundials::SundialsLinearSolver;
 #[cfg(feature = "sundials")]
 pub use ode_solver::sundials::SundialsIda;
 
-use jacobian::JacobianColoring;
 use matrix::{DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixView, MatrixViewMut};
 pub use nonlinear_solver::newton::NewtonNonlinearSolver;
 use nonlinear_solver::NonLinearSolver;

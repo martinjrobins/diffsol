@@ -202,22 +202,24 @@ mod tests {
 
     #[test]
     fn test_sdirk_robertson_jacobian() {
-        let (problem, _soln) = robertson::<Mcpu>(false);
-        let c = 0.1;
-        let h = 1.3;
-        let phi = Vcpu::from_vec(vec![1.1, 1.2, 1.3]);
-        let sdirk_callable = SdirkCallable::new(&problem, c);
-        sdirk_callable.set_h(h);
-        sdirk_callable.set_phi_direct(phi);
-        let t = 0.9;
-        let y = Vcpu::from_vec(vec![1.1, 1.2, 1.3]);
+        for colored in [true, false] {
+            let (problem, _soln) = robertson::<Mcpu>(colored);
+            let c = 0.1;
+            let h = 1.3;
+            let phi = Vcpu::from_vec(vec![1.1, 1.2, 1.3]);
+            let sdirk_callable = SdirkCallable::new(&problem, c);
+            sdirk_callable.set_h(h);
+            sdirk_callable.set_phi_direct(phi);
+            let t = 0.9;
+            let y = Vcpu::from_vec(vec![1.1, 1.2, 1.3]);
 
-        let v = Vcpu::from_vec(vec![2.0, 3.0, 4.0]);
-        let jac = sdirk_callable.jacobian(&y, t);
-        let jac_mul_v = sdirk_callable.jac_mul(&y, t, &v);
-        let mut jac_mul_v2 = Vcpu::from_vec(vec![0.0, 0.0, 0.0]);
-        jac.gemv(1.0, &v, 0.0, &mut jac_mul_v2);
-        jac_mul_v.assert_eq_st(&jac_mul_v2, 1e-10);
+            let v = Vcpu::from_vec(vec![2.0, 3.0, 4.0]);
+            let jac = sdirk_callable.jacobian(&y, t);
+            let jac_mul_v = sdirk_callable.jac_mul(&y, t, &v);
+            let mut jac_mul_v2 = Vcpu::from_vec(vec![0.0, 0.0, 0.0]);
+            jac.gemv(1.0, &v, 0.0, &mut jac_mul_v2);
+            jac_mul_v.assert_eq_st(&jac_mul_v2, 1e-10);
+        }
     }
 
     #[test]
