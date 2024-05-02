@@ -18,6 +18,7 @@ pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    fn from_slice(slice: &[IndexType]) -> Self;
 }
 
 pub trait VectorCommon: Sized + Debug {
@@ -141,6 +142,7 @@ pub trait Vector:
     fn copy_from_view(&mut self, other: &Self::View<'_>);
     fn from_vec(vec: Vec<Self::T>) -> Self;
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T);
+    fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T);
     fn add_scalar_mut(&mut self, scalar: Self::T);
     fn component_mul_assign(&mut self, other: &Self);
     fn component_div_assign(&mut self, other: &Self);
@@ -150,6 +152,7 @@ pub trait Vector:
         result.gather_from(self, indices);
         result
     }
+    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T);
     fn gather_from(&mut self, other: &Self, indices: &Self::Index);
     fn scatter_from(&mut self, other: &Self, indices: &Self::Index);
     fn assert_eq_st(&self, other: &Self, tol: Self::T) {

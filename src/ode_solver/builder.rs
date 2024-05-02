@@ -1,4 +1,4 @@
-use crate::{op::Op, vector::DefaultDenseMatrix, Matrix, OdeSolverProblem, Vector};
+use crate::{op::Op, vector::DefaultDenseMatrix, Matrix, OdeEquations, OdeSolverProblem, Vector};
 use anyhow::Result;
 
 use super::equations::{OdeSolverEquations, OdeSolverEquationsMassI};
@@ -185,7 +185,7 @@ impl OdeBuilder {
             self.use_coloring,
             self.constant_mass,
         );
-        let atol = Self::build_atol(self.atol, eqn.nstates())?;
+        let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
         Ok(OdeSolverProblem::new(
             eqn,
             M::T::from(self.rtol),
@@ -245,7 +245,7 @@ impl OdeBuilder {
             M::T::from(self.t0),
             self.use_coloring,
         );
-        let atol = Self::build_atol(self.atol, eqn.nstates())?;
+        let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
         Ok(OdeSolverProblem::new(
             eqn,
             M::T::from(self.rtol),
@@ -277,13 +277,14 @@ impl OdeBuilder {
     #[cfg(feature = "diffsl")]
     pub fn build_diffsl(
         self,
-        source: &str,
-    ) -> Result<OdeSolverProblem<crate::ode_solver::diffsl::DiffSl>> {
+        context: &crate::ode_solver::diffsl::DiffSlContext,
+    ) -> Result<OdeSolverProblem<crate::ode_solver::diffsl::DiffSl<'_>>> {
         type V = crate::ode_solver::diffsl::V;
         type T = crate::ode_solver::diffsl::T;
         let p = Self::build_p::<V>(self.p);
-        let eqn = crate::ode_solver::diffsl::DiffSl::new(source, p, self.use_coloring)?;
-        let atol = Self::build_atol::<V>(self.atol, eqn.nstates())?;
+        let mut eqn = crate::ode_solver::diffsl::DiffSl::new(context, self.use_coloring);
+        eqn.set_params(p);
+        let atol = Self::build_atol::<V>(self.atol, eqn.rhs().nstates())?;
         Ok(OdeSolverProblem::new(
             eqn,
             T::from(self.rtol),

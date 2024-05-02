@@ -1,14 +1,17 @@
 use std::ops::{Mul, MulAssign};
 
 use super::default_solver::DefaultSolver;
-use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
+use super::{Dense, DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixView, MatrixViewMut};
+use crate::op::NonLinearOp;
 use crate::scalar::{IndexType, Scalar, Scale};
-use crate::{op::LinearOp, FaerLU};
+use crate::vector::Vector;
+use crate::FaerLU;
 use anyhow::Result;
 use faer::{linalg::matmul::matmul, Col, ColMut, ColRef, Mat, MatMut, MatRef, Parallelism};
+use faer::{unzipped, zipped};
 
 impl<T: Scalar> DefaultSolver for Mat<T> {
-    type LS<C: LinearOp<M = Mat<T>, V = Col<T>, T = T>> = FaerLU<T, C>;
+    type LS<C: NonLinearOp<M = Mat<T>, V = Col<T>, T = T>> = FaerLU<T, C>;
 }
 
 macro_rules! impl_matrix_common {
@@ -17,12 +20,11 @@ macro_rules! impl_matrix_common {
             type T = T;
             type V = Col<T>;
 
-            fn ncols(&self) -> IndexType {
-                self.ncols()
-            }
-
             fn nrows(&self) -> IndexType {
                 self.nrows()
+            }
+            fn ncols(&self) -> IndexType {
+                self.ncols()
             }
         }
     };
@@ -129,6 +131,19 @@ impl<T: Scalar> DenseMatrix for Mat<T> {
 }
 
 impl<T: Scalar> Matrix for Mat<T> {
+    type Sparsity = Dense;
+
+    fn set_data_with_indices(
+        &mut self,
+        dst_indices: &<Self::Sparsity as MatrixSparsity>::Index,
+        src_indices: &<Self::V as Vector>::Index,
+        data: &Self::V,
+    ) {
+        for ((i, j), src_i) in dst_indices.iter().zip(src_indices.iter()) {
+            self[(*i, *j)] = data[*src_i];
+        }
+    }
+
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,
@@ -147,7 +162,7 @@ impl<T: Scalar> Matrix for Mat<T> {
         Self::zeros(nrows, ncols)
     }
     fn copy_from(&mut self, other: &Self) {
-        *self = other.clone();
+        self.copy_from(other);
     }
     fn from_diagonal(v: &Col<T>) -> Self {
         let dim = v.nrows();
@@ -155,5 +170,20 @@ impl<T: Scalar> Matrix for Mat<T> {
     }
     fn diagonal(&self) -> Self::V {
         self.diagonal().column_vector().to_owned()
+    }
+    fn set_column(&mut self, j: IndexType, v: &Self::V) {
+        self.column_mut(j).copy_from(v);
+    }
+
+    fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
+        zipped!(self, x, y).for_each(|unzipped!(mut s, x, y)| s.write(x.read() + beta * y.read()));
+    }
+
+    fn new_from_sparsity(
+        nrows: IndexType,
+        ncols: IndexType,
+        _sparsity: Option<&Self::Sparsity>,
+    ) -> Self {
+        Self::zeros(nrows, ncols)
     }
 }

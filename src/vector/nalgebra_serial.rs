@@ -31,6 +31,9 @@ impl VectorIndex for DVector<IndexType> {
     fn len(&self) -> crate::IndexType {
         self.len()
     }
+    fn from_slice(slice: &[IndexType]) -> Self {
+        DVector::from_iterator(slice.len(), slice.iter().copied())
+    }
 }
 
 macro_rules! impl_vector_common {
@@ -151,6 +154,9 @@ impl<T: Scalar> Vector for DVector<T> {
     fn axpy(&mut self, alpha: T, x: &Self, beta: T) {
         self.axpy(alpha, x, beta);
     }
+    fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
+        self.axpy(alpha, x, beta);
+    }
     fn component_div_assign(&mut self, other: &Self) {
         self.component_div_assign(other);
     }
@@ -174,6 +180,11 @@ impl<T: Scalar> Vector for DVector<T> {
     fn scatter_from(&mut self, other: &Self, indices: &Self::Index) {
         for (i, &index) in indices.iter().enumerate() {
             self[index] = other[i];
+        }
+    }
+    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
+        for &index in indices.iter() {
+            self[index] = value;
         }
     }
 }

@@ -4,17 +4,16 @@ use num_traits::Zero;
 use std::ops::MulAssign;
 use std::rc::Rc;
 
-use crate::linear_solver::LinearSolver;
 use crate::matrix::MatrixRef;
-use crate::op::linearise::LinearisedOp;
 use crate::vector::VectorRef;
 use crate::NewtonNonlinearSolver;
 use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
     DenseMatrix, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Vector,
-    VectorView, VectorViewMut,
+    VectorViewMut,
 };
+use crate::{LinearSolver, NonLinearOp};
 
 use super::bdf::BdfStatistics;
 
@@ -26,16 +25,17 @@ use super::bdf::BdfStatistics;
 /// - The upper triangular part of the `a` matrix must be zero (i.e. not fully implicit).
 /// - The diagonal of the `a` matrix must be the same non-zero value for all rows (i.e. an SDIRK method), except for the first row which can be zero for ESDIRK methods.
 /// - The last row of the `a` matrix must be the same as the `b` vector, and the last element of the `c` vector must be 1 (i.e. a stiffly accurate method)
-pub struct Sdirk<M, Eqn>
+pub struct Sdirk<M, Eqn, LS>
 where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    LS: LinearSolver<SdirkCallable<Eqn>>,
     Eqn: OdeEquations,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
     for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
 {
     tableau: Tableau<M>,
     problem: Option<OdeSolverProblem<Eqn>>,
-    nonlinear_solver: NewtonNonlinearSolver<SdirkCallable<Eqn>>,
+    nonlinear_solver: NewtonNonlinearSolver<SdirkCallable<Eqn>, LS>,
     state: Option<OdeSolverState<Eqn::V>>,
     diff: M,
     gamma: Eqn::T,
@@ -48,8 +48,9 @@ where
     statistics: BdfStatistics<Eqn::T>,
 }
 
-impl<M, Eqn> Sdirk<M, Eqn>
+impl<M, Eqn, LS> Sdirk<M, Eqn, LS>
 where
+    LS: LinearSolver<SdirkCallable<Eqn>>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquations,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
@@ -60,10 +61,7 @@ where
     const MAX_FACTOR: f64 = 10.0;
     const MIN_TIMESTEP: f64 = 1e-13;
 
-    pub fn new(
-        tableau: Tableau<M>,
-        linear_solver: impl LinearSolver<LinearisedOp<SdirkCallable<Eqn>>> + 'static,
-    ) -> Self {
+    pub fn new(tableau: Tableau<M>, linear_solver: LS) -> Self {
         let mut nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         // set max iterations for nonlinear solver
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
@@ -162,8 +160,9 @@ where
     }
 }
 
-impl<M, Eqn> OdeSolverMethod<Eqn> for Sdirk<M, Eqn>
+impl<M, Eqn, LS> OdeSolverMethod<Eqn> for Sdirk<M, Eqn, LS>
 where
+    LS: LinearSolver<SdirkCallable<Eqn>>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquations,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
@@ -186,7 +185,7 @@ where
         // compute first step based on alg in Hairer, Norsett, Wanner
         // Solving Ordinary Differential Equations I, Nonstiff Problems
         // Section II.4.2
-        let f0 = problem.eqn.rhs(state.t, &state.y);
+        let f0 = problem.eqn.rhs().call(&state.y, state.t);
         let hf0 = &f0 * scale(state.h);
 
         let mut tmp = f0.clone();
@@ -205,7 +204,7 @@ where
 
         let y1 = &state.y + hf0;
         let t1 = state.t + h0;
-        let f1 = problem.eqn.rhs(t1, &y1);
+        let f1 = problem.eqn.rhs().call(&y1, t1);
 
         let mut df = f1 - &f0;
         df *= scale(Eqn::T::one() / h0);
@@ -237,7 +236,7 @@ where
         let callable = Rc::new(SdirkCallable::new(problem, self.gamma));
         callable.set_h(state.h);
         let nonlinear_problem = SolverProblem::new_from_ode_problem(callable, problem);
-        self.nonlinear_solver.set_problem(nonlinear_problem);
+        self.nonlinear_solver.set_problem(&nonlinear_problem);
 
         // update statistics
         self.statistics = BdfStatistics::default();
@@ -262,6 +261,7 @@ where
         let mut error = <Eqn::V as Vector>::zeros(n);
 
         let mut t1: Eqn::T;
+        let mut dy = <Eqn::V as Vector>::zeros(n);
 
         // loop until step is accepted
         'step: loop {
@@ -273,46 +273,49 @@ where
             }
             for i in start..self.tableau.s() {
                 let t = state.t + self.tableau.c()[i] * state.h;
-                self.nonlinear_solver.set_time(t).unwrap();
-                {
-                    let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
-                    callable.set_phi(&self.diff.columns(0, i), y0, &self.a_rows[i]);
-                }
+                self.nonlinear_solver.problem().f.set_phi(
+                    &self.diff.columns(0, i),
+                    y0,
+                    &self.a_rows[i],
+                );
 
-                let mut dy = if i == 0 {
-                    self.diff.column(self.diff.ncols() - 1).into_owned()
+                if i == 0 {
+                    dy *= scale(Eqn::T::zero());
                 } else if i == 1 {
-                    self.diff.column(i - 1).into_owned()
+                    dy.copy_from_view(&self.diff.column(i - 1));
                 } else {
-                    let df = self.diff.column(i - 1) - self.diff.column(i - 2);
                     let c = (self.tableau.c()[i] - self.tableau.c()[i - 2])
                         / (self.tableau.c()[i - 1] - self.tableau.c()[i - 2]);
-                    self.diff.column(i - 1) + df * scale(c)
-                };
-                let solve_result = self.nonlinear_solver.solve_in_place(&mut dy);
+                    // dy = c1  + c * (c1 - c2)
+                    dy.copy_from_view(&self.diff.column(i - 1));
+                    dy.axpy_v(-c, &self.diff.column(i - 2), Eqn::T::one() + c);
+                }
+
+                if i == start {
+                    self.nonlinear_solver.reset_jacobian(&dy, t);
+                }
+                let solve_result = self.nonlinear_solver.solve_in_place(&mut dy, t);
 
                 // if we didn't update the jacobian and the solve failed, then we update the jacobian and try again
                 let solve_result = if solve_result.is_err() && !updated_jacobian {
                     // newton iteration did not converge, so update jacobian and try again
-                    {
-                        let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
-                        callable.set_jacobian_is_stale();
-                    }
-                    self.nonlinear_solver.reset();
+                    self.nonlinear_solver.problem().f.set_jacobian_is_stale();
                     updated_jacobian = true;
 
-                    let mut dy = if i == 0 {
-                        self.diff.column(self.diff.ncols() - 1).into_owned()
+                    if i == 0 {
+                        dy *= scale(Eqn::T::zero());
                     } else if i == 1 {
-                        self.diff.column(i - 1).into_owned()
+                        dy.copy_from_view(&self.diff.column(i - 1));
                     } else {
-                        let df = self.diff.column(i - 1) - self.diff.column(i - 2);
                         let c = (self.tableau.c()[i] - self.tableau.c()[i - 2])
                             / (self.tableau.c()[i - 1] - self.tableau.c()[i - 2]);
-                        self.diff.column(i - 1) + df * scale(c)
-                    };
+                        // dy = c1  + c * (c1 - c2)
+                        dy.copy_from_view(&self.diff.column(i - 1));
+                        dy.axpy_v(-c, &self.diff.column(i - 2), Eqn::T::one() + c);
+                    }
+                    self.nonlinear_solver.reset_jacobian(&dy, t);
                     self.statistics.number_of_nonlinear_solver_fails += 1;
-                    self.nonlinear_solver.solve_in_place(&mut dy)
+                    self.nonlinear_solver.solve_in_place(&mut dy, t)
                 } else {
                     solve_result
                 };
@@ -328,11 +331,9 @@ where
                     }
 
                     // update h for new step size
-                    let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
-                    callable.set_h(state.h);
+                    self.nonlinear_solver.problem().f.set_h(state.h);
 
                     // reset nonlinear's linear solver problem as lu factorisation has changed
-                    self.nonlinear_solver.reset();
                     continue 'step;
                 };
 
@@ -356,13 +357,7 @@ where
 
             // scale error and compute norm
             let scale_y = {
-                let y1_ref = self
-                    .nonlinear_solver
-                    .problem()
-                    .unwrap()
-                    .f
-                    .as_ref()
-                    .get_last_f_eval();
+                let y1_ref = self.nonlinear_solver.problem().f.get_last_f_eval();
                 let ode_problem = self.problem.as_ref().unwrap();
                 let mut scale_y = y1_ref.abs() * scale(ode_problem.rtol);
                 scale_y += ode_problem.atol.as_ref();
@@ -394,11 +389,9 @@ where
             }
 
             // update c for new step size
-            let callable = self.nonlinear_solver.problem().unwrap().f.as_ref();
-            callable.set_h(state.h);
+            self.nonlinear_solver.problem().f.set_h(state.h);
 
             // reset nonlinear's linear solver problem as lu factorisation has changed
-            self.nonlinear_solver.reset();
 
             // test error is within tolerance
             if error_norm <= Eqn::T::from(1.0) {
@@ -418,23 +411,13 @@ where
         self.old_f.mul_assign(scale(Eqn::T::one() / dt));
         std::mem::swap(&mut self.old_f, &mut self.f);
 
-        let y1 = self
-            .nonlinear_solver
-            .problem()
-            .unwrap()
-            .f
-            .as_ref()
-            .get_last_f_eval();
+        let y1 = self.nonlinear_solver.problem().f.get_last_f_eval();
         self.old_y.copy_from(&y1);
         std::mem::swap(&mut self.old_y, &mut state.y);
 
         // update statistics
-        self.statistics.number_of_linear_solver_setups = self
-            .nonlinear_solver
-            .problem()
-            .unwrap()
-            .f
-            .number_of_jac_evals();
+        self.statistics.number_of_linear_solver_setups =
+            self.nonlinear_solver.problem().f.number_of_jac_evals();
         self.statistics.number_of_steps += 1;
         self.statistics.final_step_size = self.state.as_ref().unwrap().h;
 

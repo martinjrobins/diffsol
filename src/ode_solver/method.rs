@@ -1,9 +1,10 @@
 use anyhow::Result;
+use num_traits::Zero;
 use std::rc::Rc;
 
 use crate::{
-    op::{filter::FilterCallable, ode_rhs::OdeRhs},
-    NonLinearSolver, OdeEquations, OdeSolverProblem, SolverProblem, Vector, VectorIndex,
+    op::filter::FilterCallable, LinearOp, Matrix, NonLinearSolver, OdeEquations, OdeSolverProblem,
+    SolverProblem, Vector, VectorIndex,
 };
 
 /// Trait for ODE solver methods. This is the main user interface for the ODE solvers.
@@ -58,7 +59,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     }
 
     /// Reinitialise the solver state making it consistent with the algebraic constraints and solve the problem up to time `t`
-    fn make_consistent_and_solve<RS: NonLinearSolver<FilterCallable<OdeRhs<Eqn>>>>(
+    fn make_consistent_and_solve<RS: NonLinearSolver<FilterCallable<Eqn::Rhs>>>(
         &mut self,
         problem: &OdeSolverProblem<Eqn>,
         t: Eqn::T,
@@ -101,24 +102,24 @@ impl<V: Vector> OdeSolverState<V> {
     ) -> Result<Self>
     where
         Eqn: OdeEquations<T = V::T, V = V>,
-        S: NonLinearSolver<FilterCallable<OdeRhs<Eqn>>> + ?Sized,
+        S: NonLinearSolver<FilterCallable<Eqn::Rhs>> + ?Sized,
     {
         let t = ode_problem.t0;
         let h = ode_problem.h0;
-        let indices = ode_problem.eqn.algebraic_indices();
+        let mass_diagonal = ode_problem.eqn.mass().matrix(t).diagonal();
+        let indices = mass_diagonal.filter_indices(|x| x == Eqn::T::zero());
         let mut y = ode_problem.eqn.init(t);
         if indices.len() == 0 {
             return Ok(Self { y, t, h });
         }
         let mut y_filtered = y.filter(&indices);
         let atol = Rc::new(ode_problem.atol.as_ref().filter(&indices));
-        let rhs = Rc::new(OdeRhs::new(ode_problem.eqn.clone()));
+        let rhs = ode_problem.eqn.rhs().clone();
         let f = Rc::new(FilterCallable::new(rhs, &y, indices));
         let rtol = ode_problem.rtol;
-        let init_problem = SolverProblem::new(f, t, atol, rtol);
-        root_solver.set_problem(init_problem);
-        root_solver.solve_in_place(&mut y_filtered)?;
-        let init_problem = root_solver.problem().unwrap();
+        let init_problem = SolverProblem::new(f, atol, rtol);
+        root_solver.set_problem(&init_problem);
+        root_solver.solve_in_place(&mut y_filtered, t)?;
         let indices = init_problem.f.indices();
         y.scatter_from(&y_filtered, indices);
         Ok(Self { y, t, h })

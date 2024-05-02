@@ -105,6 +105,12 @@ impl Display for SundialsIndexVector {
     }
 }
 
+impl SundialsIndexVector {
+    pub fn iter(&self) -> impl Iterator<Item = &IndexType> {
+        self.0.iter()
+    }
+}
+
 impl Display for SundialsVector {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         for i in 0..self.len() {
@@ -425,6 +431,9 @@ impl VectorIndex for SundialsIndexVector {
     fn len(&self) -> IndexType {
         self.0.len() as IndexType
     }
+    fn from_slice(slice: &[IndexType]) -> Self {
+        Self(slice.to_vec())
+    }
 }
 
 impl Vector for SundialsVector {
@@ -456,6 +465,17 @@ impl Vector for SundialsVector {
         SundialsVectorViewMut(self)
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {
+        unsafe {
+            N_VLinearSum(
+                alpha,
+                x.sundials_vector(),
+                beta,
+                self.sundials_vector(),
+                self.sundials_vector(),
+            )
+        };
+    }
+    fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
         unsafe {
             N_VLinearSum(
                 alpha,
@@ -526,6 +546,11 @@ impl Vector for SundialsVector {
     fn scatter_from(&mut self, other: &Self, indices: &Self::Index) {
         for i in 0..indices.len() {
             self[indices[i]] = other[i];
+        }
+    }
+    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
+        for i in 0..indices.len() {
+            self[indices[i]] = value;
         }
     }
 }

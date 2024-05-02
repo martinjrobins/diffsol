@@ -116,6 +116,9 @@ impl<T: Scalar> Vector for Col<T> {
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {
         *self = &*self * faer::scale(beta) + x * faer::scale(alpha);
     }
+    fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
+        *self = &*self * faer::scale(beta) + x * faer::scale(alpha);
+    }
     fn exp(&self) -> Self {
         zipped!(self).map(|unzipped!(xi)| xi.exp())
     }
@@ -144,6 +147,11 @@ impl<T: Scalar> Vector for Col<T> {
             self[index] = other[i];
         }
     }
+    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
+        for &index in indices {
+            self[index] = value;
+        }
+    }
 }
 
 impl VectorIndex for Vec<IndexType> {
@@ -152,6 +160,9 @@ impl VectorIndex for Vec<IndexType> {
     }
     fn len(&self) -> IndexType {
         self.len() as IndexType
+    }
+    fn from_slice(slice: &[IndexType]) -> Self {
+        slice.to_vec()
     }
 }
 

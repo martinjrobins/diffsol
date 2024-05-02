@@ -1,6 +1,6 @@
 use crate::{
-    matrix::MatrixRef, ode_solver::equations::OdeEquations, scale, Matrix, OdeSolverProblem,
-    Vector, VectorRef,
+    matrix::MatrixRef, ode_solver::equations::OdeEquations, LinearOp, Matrix, MatrixSparsity,
+    OdeSolverProblem, Vector, VectorRef,
 };
 use num_traits::Zero;
 use std::{
@@ -17,41 +17,50 @@ pub struct BdfCallable<Eqn: OdeEquations> {
     psi_neg_y0: RefCell<Eqn::V>,
     c: RefCell<Eqn::T>,
     tmp: RefCell<Eqn::V>,
-    jac: RefCell<Eqn::M>,
     rhs_jac: RefCell<Eqn::M>,
     mass_jac: RefCell<Eqn::M>,
     jacobian_is_stale: RefCell<bool>,
     number_of_jac_evals: RefCell<usize>,
+    sparsity: Option<<Eqn::M as Matrix>::Sparsity>,
 }
 
 impl<Eqn: OdeEquations> BdfCallable<Eqn> {
     pub fn new(ode_problem: &OdeSolverProblem<Eqn>) -> Self {
         let eqn = ode_problem.eqn.clone();
-        let n = ode_problem.eqn.nstates();
+        let n = ode_problem.eqn.rhs().nstates();
         let c = RefCell::new(Eqn::T::zero());
         let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n));
-        let rhs_jac = RefCell::new(Eqn::M::zeros(n, n));
-        let jac = RefCell::new(Eqn::M::zeros(n, n));
         let jacobian_is_stale = RefCell::new(true);
         let number_of_jac_evals = RefCell::new(0);
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n));
 
-        let mass_jac = if eqn.is_mass_constant() {
-            RefCell::new(eqn.mass_matrix(Eqn::T::zero()))
+        // create the mass and rhs jacobians according to the sparsity pattern
+        let mass_sparsity = eqn.mass().sparsity();
+        let rhs_jac_sparsity = eqn.rhs().sparsity();
+        let rhs_jac = RefCell::new(Eqn::M::new_from_sparsity(n, n, rhs_jac_sparsity));
+        let sparsity = if let Some(rhs_jac_sparsity) = rhs_jac_sparsity {
+            mass_sparsity.map(|mass_sparsity| mass_sparsity.union(rhs_jac_sparsity).unwrap())
         } else {
-            RefCell::new(Eqn::M::zeros(n, n))
+            None
         };
+
+        // if mass is constant then pre-compute it
+        let mut mass_jac = Eqn::M::new_from_sparsity(n, n, mass_sparsity);
+        if eqn.is_mass_constant() {
+            eqn.mass().matrix_inplace(Eqn::T::zero(), &mut mass_jac);
+        }
+        let mass_jac = RefCell::new(mass_jac);
 
         Self {
             eqn,
             psi_neg_y0,
             c,
-            jac,
             rhs_jac,
             mass_jac,
             jacobian_is_stale,
             number_of_jac_evals,
             tmp,
+            sparsity,
         }
     }
 
@@ -73,13 +82,6 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
         for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
     {
         self.c.replace(h * alpha);
-        if !*self.jacobian_is_stale.borrow() {
-            let rhs_jac = self.rhs_jac.borrow();
-            let mass_jac = self.mass_jac.borrow();
-            let c = *self.c.borrow().deref();
-            self.jac
-                .replace(mass_jac.deref() - rhs_jac.deref() * scale(c));
-        }
     }
     pub fn set_psi_and_y0(&self, psi: Eqn::V, y0: &Eqn::V) {
         let mut new_psi_neg_y0 = psi;
@@ -98,13 +100,16 @@ impl<Eqn: OdeEquations> Op for BdfCallable<Eqn> {
     type T = Eqn::T;
     type M = Eqn::M;
     fn nstates(&self) -> usize {
-        self.eqn.nstates()
+        self.eqn.rhs().nstates()
     }
     fn nout(&self) -> usize {
-        self.eqn.nstates()
+        self.eqn.rhs().nstates()
     }
     fn nparams(&self) -> usize {
-        self.eqn.nparams()
+        self.eqn.rhs().nparams()
+    }
+    fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
+        self.sparsity.as_ref()
     }
 }
 
@@ -119,41 +124,47 @@ where
         let psi_neg_y0_ref = self.psi_neg_y0.borrow();
         let psi_neg_y0 = psi_neg_y0_ref.deref();
 
-        self.eqn.rhs_inplace(t, x, y);
+        self.eqn.rhs().call_inplace(x, t, y);
 
         let mut tmp = self.tmp.borrow_mut();
         tmp.copy_from(x);
         tmp.add_assign(psi_neg_y0);
         let c = *self.c.borrow().deref();
         // y = M tmp - c * y
-        self.eqn.mass_inplace(t, &tmp, -c, y);
+        self.eqn.mass().gemv_inplace(&tmp, t, -c, y);
     }
     // (M - c * f'(y)) v
     fn jac_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
-        self.eqn.rhs_jac_inplace(t, x, v, y);
+        self.eqn.rhs().jac_mul_inplace(x, t, v, y);
         let c = *self.c.borrow().deref();
         // y = Mv - c y
-        self.eqn.mass_inplace(t, v, -c, y);
+        self.eqn.mass().gemv_inplace(v, t, -c, y);
     }
 
-    fn jacobian(&self, x: &Eqn::V, t: Eqn::T) -> Eqn::M {
+    fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         if *self.jacobian_is_stale.borrow() {
-            let rhs_jac = self.eqn.jacobian_matrix(x, t);
+            // calculate the mass and rhs jacobians
+            let mut rhs_jac = self.rhs_jac.borrow_mut();
+            self.eqn.rhs().jacobian_inplace(x, t, &mut rhs_jac);
             let c = *self.c.borrow().deref();
             if self.eqn.is_mass_constant() {
                 let mass_jac = self.mass_jac.borrow();
-                self.jac.replace(mass_jac.deref() - &rhs_jac * scale(c));
+                y.scale_add_and_assign(mass_jac.deref(), -c, rhs_jac.deref());
             } else {
-                let mass_jac = self.eqn.mass_matrix(t);
-                self.jac.replace(&mass_jac - &rhs_jac * scale(c));
-                self.mass_jac.replace(mass_jac);
+                let mut mass_jac = self.mass_jac.borrow_mut();
+                self.eqn.mass().matrix_inplace(t, &mut mass_jac);
+                y.scale_add_and_assign(mass_jac.deref(), -c, rhs_jac.deref());
             }
-            self.rhs_jac.replace(rhs_jac);
             self.jacobian_is_stale.replace(false);
+        } else {
+            // only c has changed, so just do the addition
+            let rhs_jac = self.rhs_jac.borrow();
+            let mass_jac = self.mass_jac.borrow();
+            let c = *self.c.borrow().deref();
+            y.scale_add_and_assign(mass_jac.deref(), -c, rhs_jac.deref());
         }
         let number_of_jac_evals = *self.number_of_jac_evals.borrow() + 1;
         self.number_of_jac_evals.replace(number_of_jac_evals);
-        self.jac.borrow().clone()
     }
 }
 

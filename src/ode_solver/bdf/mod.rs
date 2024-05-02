@@ -11,9 +11,9 @@ use crate::{
     op::bdf::BdfCallable,
     scalar::scale,
     vector::DefaultDenseMatrix,
-    DenseMatrix, IndexType, MatrixViewMut, NewtonNonlinearSolver, NonLinearSolver, OdeSolverMethod,
-    OdeSolverProblem, OdeSolverState, Scalar, SolverProblem, Vector, VectorRef, VectorView,
-    VectorViewMut,
+    DenseMatrix, IndexType, MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Scalar, SolverProblem, Vector,
+    VectorRef, VectorView, VectorViewMut,
 };
 
 pub mod faer;
@@ -61,8 +61,12 @@ impl<T: Scalar> Default for BdfStatistics<T> {
 /// \[1\] Byrne, G. D., & Hindmarsh, A. C. (1975). A polyalgorithm for the numerical solution of ordinary differential equations. ACM Transactions on Mathematical Software (TOMS), 1(1), 71-96.
 /// \[2\] Shampine, L. F., & Reichelt, M. W. (1997). The matlab ode suite. SIAM journal on scientific computing, 18(1), 1-22.
 /// \[3\] Virtanen, P., Gommers, R., Oliphant, T. E., Haberland, M., Reddy, T., Cournapeau, D., ... & Van Mulbregt, P. (2020). SciPy 1.0: fundamental algorithms for scientific computing in Python. Nature methods, 17(3), 261-272.
-pub struct Bdf<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations> {
-    nonlinear_solver: Box<dyn NonLinearSolver<BdfCallable<Eqn>>>,
+pub struct Bdf<
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    Eqn: OdeEquations,
+    Nls: NonLinearSolver<BdfCallable<Eqn>>,
+> {
+    nonlinear_solver: Nls,
     ode_problem: Option<OdeSolverProblem<Eqn>>,
     order: usize,
     n_equal_steps: usize,
@@ -76,9 +80,14 @@ pub struct Bdf<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations> {
     state: Option<OdeSolverState<Eqn::V>>,
 }
 
-impl<Eqn> Default for Bdf<<Eqn::V as DefaultDenseMatrix>::M, Eqn>
+impl<Eqn> Default
+    for Bdf<
+        <Eqn::V as DefaultDenseMatrix>::M,
+        Eqn,
+        NewtonNonlinearSolver<BdfCallable<Eqn>, <Eqn::M as DefaultSolver>::LS<BdfCallable<Eqn>>>,
+    >
 where
-    Eqn: OdeEquations + 'static,
+    Eqn: OdeEquations,
     Eqn::M: DefaultSolver,
     Eqn::V: DefaultDenseMatrix,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -87,9 +96,7 @@ where
     fn default() -> Self {
         let n = 1;
         let linear_solver = Eqn::M::default_solver();
-        let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<Eqn>>::new(
-            linear_solver,
-        ));
+        let mut nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
         type M<V> = <V as DefaultDenseMatrix>::M;
         Self {
@@ -109,42 +116,11 @@ where
     }
 }
 
-impl<M, Eqn> Clone for Bdf<M, Eqn>
-where
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    Eqn: OdeEquations + 'static,
-    Eqn::M: DefaultSolver,
-    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
-    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-{
-    fn clone(&self) -> Self {
-        let n = self.diff.nrows();
-        let linear_solver = Eqn::M::default_solver();
-        let mut nonlinear_solver = Box::new(NewtonNonlinearSolver::<BdfCallable<Eqn>>::new(
-            linear_solver,
-        ));
-        nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
-        Self {
-            ode_problem: self.ode_problem.clone(),
-            nonlinear_solver,
-            order: self.order,
-            n_equal_steps: self.n_equal_steps,
-            diff: M::zeros(n, Self::MAX_ORDER + 3),
-            diff_tmp: M::zeros(n, Self::MAX_ORDER + 3),
-            gamma: self.gamma.clone(),
-            alpha: self.alpha.clone(),
-            error_const: self.error_const.clone(),
-            u: M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
-            statistics: self.statistics.clone(),
-            state: self.state.clone(),
-        }
-    }
-}
-
-impl<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations> Bdf<M, Eqn>
+impl<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations, Nls> Bdf<M, Eqn, Nls>
 where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+    Nls: NonLinearSolver<BdfCallable<Eqn>>,
 {
     const MAX_ORDER: IndexType = 5;
     const NEWTON_MAXITER: IndexType = 4;
@@ -156,8 +132,8 @@ where
         &self.statistics
     }
 
-    fn nonlinear_problem_op(&self) -> Option<&Rc<BdfCallable<Eqn>>> {
-        Some(&self.nonlinear_solver.as_ref().problem()?.f)
+    fn nonlinear_problem_op(&self) -> &Rc<BdfCallable<Eqn>> {
+        &self.nonlinear_solver.problem().f
     }
 
     fn _compute_r(order: usize, factor: Eqn::T) -> M {
@@ -210,11 +186,13 @@ where
         std::mem::swap(&mut self.diff, &mut self.diff_tmp);
 
         self.nonlinear_problem_op()
-            .unwrap()
             .set_c(self.state.as_ref().unwrap().h, self.alpha[self.order]);
 
         // reset nonlinear's linear solver problem as lu factorisation has changed
-        self.nonlinear_solver.as_mut().reset();
+        // use any x and t as they won't be used
+        let t = self.state.as_ref().unwrap().t;
+        let x = &self.state.as_ref().unwrap().y;
+        self.nonlinear_solver.reset_jacobian(x, t);
     }
 
     fn _update_differences(&mut self, d: &Eqn::V) {
@@ -240,7 +218,7 @@ where
         }
     }
 
-    fn _predict_forward(&mut self) -> Eqn::V {
+    fn _predict_forward(&mut self) -> (Eqn::V, Eqn::T) {
         let nstates = self.diff.nrows();
         // predict forward to new step (eq 2 in [1])
         let y_predict = {
@@ -260,8 +238,8 @@ where
             }
             new_psi *= scale(self.alpha[self.order]);
 
-            let callable = self.nonlinear_problem_op().unwrap();
-            callable.set_psi_and_y0(new_psi, &y_predict);
+            self.nonlinear_problem_op()
+                .set_psi_and_y0(new_psi, &y_predict);
         }
 
         // update time
@@ -269,13 +247,14 @@ where
             let state = self.state.as_ref().unwrap();
             state.t + state.h
         };
-        self.nonlinear_solver.as_mut().set_time(t_new).unwrap();
-        y_predict
+        (y_predict, t_new)
     }
 }
 
-impl<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations> OdeSolverMethod<Eqn> for Bdf<M, Eqn>
+impl<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations, Nls> OdeSolverMethod<Eqn>
+    for Bdf<M, Eqn, Nls>
 where
+    Nls: NonLinearSolver<BdfCallable<Eqn>>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
@@ -317,7 +296,7 @@ where
     fn set_problem(&mut self, state: OdeSolverState<Eqn::V>, problem: &OdeSolverProblem<Eqn>) {
         let mut state = state;
         self.ode_problem = Some(problem.clone());
-        let nstates = problem.eqn.nstates();
+        let nstates = problem.eqn.rhs().nstates();
         self.order = 1usize;
         self.n_equal_steps = 0;
         self.diff = M::zeros(nstates, Self::MAX_ORDER + 3);
@@ -354,11 +333,11 @@ where
         scale_factor *= scale(problem.rtol);
         scale_factor += problem.atol.as_ref();
 
-        let f0 = problem.eqn.rhs(state.t, &state.y);
+        let f0 = problem.eqn.rhs().call(&state.y, state.t);
         let hf0 = &f0 * scale(state.h);
         let y1 = &state.y + &hf0;
         let t1 = state.t + state.h;
-        let f1 = problem.eqn.rhs(t1, &y1);
+        let f1 = problem.eqn.rhs().call(&y1, t1);
 
         // store f1 in diff[1] for use in step size control
         self.diff.column_mut(1).copy_from(&hf0);
@@ -380,10 +359,7 @@ where
         bdf_callable.set_c(state.h, self.alpha[self.order]);
 
         let nonlinear_problem = SolverProblem::new_from_ode_problem(bdf_callable, problem);
-        self.nonlinear_solver
-            .as_mut()
-            .set_problem(nonlinear_problem);
-        let _test = self.nonlinear_problem_op().unwrap();
+        self.nonlinear_solver.set_problem(&nonlinear_problem);
 
         // setup U
         self.u = Self::_compute_r(self.order, Eqn::T::one());
@@ -409,14 +385,14 @@ where
         if self.state.is_none() {
             return Err(anyhow!("State not set"));
         }
-        let mut y_predict = self._predict_forward();
+        let (mut y_predict, mut t_new) = self._predict_forward();
 
         // loop until step is accepted
         let y_new = loop {
             let mut y_new = y_predict.clone();
 
             // solve BDF equation using y0 as starting point
-            let solver_result = self.nonlinear_solver.solve_in_place(&mut y_new);
+            let solver_result = self.nonlinear_solver.solve_in_place(&mut y_new, t_new);
             // update statistics
             self.statistics.number_of_nonlinear_solver_iterations += self.nonlinear_solver.niter();
             match solver_result {
@@ -463,7 +439,7 @@ where
                         }
 
                         // new prediction
-                        y_predict = self._predict_forward();
+                        (y_predict, t_new) = self._predict_forward();
 
                         // update statistics
                         self.statistics.number_of_error_test_failures += 1;
@@ -477,16 +453,14 @@ where
                         self._update_step_size(Eqn::T::from(0.3));
 
                         // new prediction
-                        y_predict = self._predict_forward();
+                        (y_predict, t_new) = self._predict_forward();
 
                         // update statistics
                     } else {
                         // newton iteration did not converge, so update jacobian and try again
-                        {
-                            let callable = self.nonlinear_problem_op().unwrap();
-                            callable.set_jacobian_is_stale();
-                        }
-                        self.nonlinear_solver.as_mut().reset();
+                        self.nonlinear_problem_op().set_jacobian_is_stale();
+                        self.nonlinear_solver
+                            .reset_jacobian(&y_predict, self.state.as_ref().unwrap().t);
                         updated_jacobian = true;
                         // same prediction as last time
                     }
@@ -503,7 +477,7 @@ where
 
         // update statistics
         self.statistics.number_of_linear_solver_setups =
-            self.nonlinear_problem_op().unwrap().number_of_jac_evals();
+            self.nonlinear_problem_op().number_of_jac_evals();
         self.statistics.number_of_steps += 1;
         self.statistics.final_step_size = self.state.as_ref().unwrap().h;
 

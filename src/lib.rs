@@ -79,7 +79,7 @@
 //!
 //! Via [OdeEquations], the user provides the action of the jacobian on a vector `J(x) v`. By default DiffSol uses this to generate a jacobian matrix for the ODE solver.
 //! Generally this requires `n` evaluations of the jacobian action for a system of size `n`, so it is often more efficient if the user can provide the jacobian matrix directly
-//! by implementing the [OdeEquations::jacobian_matrix] and the [OdeEquations::mass_matrix] (is applicable) functions.
+//! by implementing the [NonLinearOp::jacobian_inplace] and the [LinearOp::matrix_inplace] (if applicable) functions.
 //!
 //! DiffSol also provides an experimental feature to calculate sparse jacobians more efficiently by automatically detecting the sparsity pattern of the jacobian and using
 //! colouring \[1\] to reduce the number of jacobian evaluations. You can enable this feature by enabling [OdeBuilder::use_coloring()] option when building the ODE problem.
@@ -151,14 +151,14 @@ pub use linear_solver::sundials::SundialsLinearSolver;
 #[cfg(feature = "sundials")]
 pub use ode_solver::sundials::SundialsIda;
 
-use matrix::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
+use matrix::{DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixView, MatrixViewMut};
 pub use nonlinear_solver::newton::NewtonNonlinearSolver;
 use nonlinear_solver::NonLinearSolver;
 pub use ode_solver::{
     bdf::Bdf, builder::OdeBuilder, equations::OdeEquations, method::OdeSolverMethod,
     method::OdeSolverState, problem::OdeSolverProblem, sdirk::Sdirk, tableau::Tableau,
 };
-use op::NonLinearOp;
+use op::{closure::Closure, linear_closure::LinearClosure, LinearOp, NonLinearOp, Op};
 use scalar::{IndexType, Scalar, Scale};
 use solver::SolverProblem;
 use vector::{Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut};
@@ -240,7 +240,7 @@ mod tests {
             )
             .unwrap();
 
-        let mut solver = Bdf::<M, _>::default();
+        let mut solver = Bdf::<M, _, _>::default();
 
         let t = 0.4;
         let y = solver.solve(&problem, t).unwrap();

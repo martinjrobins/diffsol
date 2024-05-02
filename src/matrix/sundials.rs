@@ -12,13 +12,13 @@ use sundials_sys::{
 
 use crate::{
     ode_solver::sundials::sundials_check,
-    op::LinearOp,
+    op::NonLinearOp,
     scalar::scale,
     vector::sundials::{get_suncontext, SundialsVector},
     IndexType, Scale, SundialsLinearSolver, Vector,
 };
 
-use super::{default_solver::DefaultSolver, Matrix, MatrixCommon};
+use super::{default_solver::DefaultSolver, Dense, Matrix, MatrixCommon, MatrixSparsity};
 use anyhow::anyhow;
 
 #[derive(Debug)]
@@ -81,7 +81,7 @@ impl Display for SundialsMatrix {
 }
 
 impl DefaultSolver for SundialsMatrix {
-    type LS<C: LinearOp<M = SundialsMatrix, V = SundialsVector, T = realtype>> =
+    type LS<C: NonLinearOp<M = SundialsMatrix, V = SundialsVector, T = realtype>> =
         SundialsLinearSolver<C>;
 }
 
@@ -227,6 +227,19 @@ impl_scalar_assign_op!(MulAssign, mul_assign, *);
 impl_scalar_assign_op!(DivAssign, div_assign, /);
 
 impl Matrix for SundialsMatrix {
+    type Sparsity = Dense;
+
+    fn set_data_with_indices(
+        &mut self,
+        dst_indices: &<Self::Sparsity as MatrixSparsity>::Index,
+        src_indices: &<Self::V as Vector>::Index,
+        data: &Self::V,
+    ) {
+        for ((i, j), src_i) in dst_indices.iter().zip(src_indices.iter()) {
+            self[(*i, *j)] = data[*src_i];
+        }
+    }
+
     fn diagonal(&self) -> Self::V {
         let n = min(self.nrows(), self.ncols());
         let mut v = SundialsVector::new_serial(n);
@@ -241,6 +254,21 @@ impl Matrix for SundialsMatrix {
         if ret != 0 {
             panic!("Error copying matrix");
         }
+    }
+
+    fn set_column(&mut self, j: IndexType, v: &Self::V) {
+        let n = self.nrows();
+        if v.len() != n {
+            panic!("Vector length does not match matrix size");
+        }
+        for i in 0..n {
+            self[(i, j)] = v[i];
+        }
+    }
+
+    fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
+        self.copy_from(y);
+        sundials_check(unsafe { SUNMatScaleAdd(beta, self.sm, x.sm) }).unwrap();
     }
 
     fn zeros(nrows: IndexType, ncols: IndexType) -> Self {
@@ -281,6 +309,14 @@ impl Matrix for SundialsMatrix {
         sundials_check(unsafe { SUNMatMatvec(a, x.sundials_vector(), tmp.sundials_vector()) })
             .unwrap();
         y.axpy(alpha, &tmp, beta);
+    }
+
+    fn new_from_sparsity(
+        nrows: IndexType,
+        ncols: IndexType,
+        _sparsity: Option<&Self::Sparsity>,
+    ) -> Self {
+        Self::new_dense(nrows, ncols)
     }
 }
 

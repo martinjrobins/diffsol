@@ -1,17 +1,18 @@
-use std::ops::{Mul, MulAssign};
+use std::ops::{AddAssign, Mul, MulAssign};
 
 use anyhow::Result;
 use nalgebra::{DMatrix, DMatrixView, DMatrixViewMut, DVector, DVectorView, DVectorViewMut};
 
-use crate::op::LinearOp;
+use crate::op::NonLinearOp;
 use crate::{scalar::Scale, IndexType, Scalar};
 
 use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU};
 
 use super::default_solver::DefaultSolver;
+use super::Dense;
 
 impl<T: Scalar> DefaultSolver for DMatrix<T> {
-    type LS<C: LinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> = NalgebraLU<T, C>;
+    type LS<C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> = NalgebraLU<T, C>;
 }
 
 macro_rules! impl_matrix_common {
@@ -20,12 +21,12 @@ macro_rules! impl_matrix_common {
             type V = DVector<T>;
             type T = T;
 
-            fn ncols(&self) -> IndexType {
-                self.ncols()
-            }
-
             fn nrows(&self) -> IndexType {
                 self.nrows()
+            }
+
+            fn ncols(&self) -> IndexType {
+                self.ncols()
             }
         }
     };
@@ -92,6 +93,19 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
 }
 
 impl<T: Scalar> Matrix for DMatrix<T> {
+    type Sparsity = Dense;
+
+    fn set_data_with_indices(
+        &mut self,
+        dst_indices: &<Self::Sparsity as super::MatrixSparsity>::Index,
+        src_indices: &<Self::V as crate::vector::Vector>::Index,
+        data: &Self::V,
+    ) {
+        for ((i, j), src_i) in dst_indices.iter().zip(src_indices.iter()) {
+            self[(*i, *j)] = data[*src_i];
+        }
+    }
+
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,
@@ -118,6 +132,21 @@ impl<T: Scalar> Matrix for DMatrix<T> {
     }
     fn copy_from(&mut self, other: &Self) {
         self.copy_from(other);
+    }
+    fn set_column(&mut self, j: IndexType, v: &Self::V) {
+        self.column_mut(j).copy_from(v);
+    }
+    fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
+        self.copy_from(y);
+        self.mul_assign(beta);
+        self.add_assign(x);
+    }
+    fn new_from_sparsity(
+        nrows: IndexType,
+        ncols: IndexType,
+        _sparsity: Option<&Self::Sparsity>,
+    ) -> Self {
+        Self::zeros(nrows, ncols)
     }
 }
 

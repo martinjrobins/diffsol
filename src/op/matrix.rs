@@ -1,5 +1,4 @@
 use crate::matrix::Matrix;
-use num_traits::{One, Zero};
 
 use super::{LinearOp, Op};
 
@@ -26,13 +25,13 @@ impl<M: Matrix> Op for MatrixOp<M> {
     fn nparams(&self) -> usize {
         0
     }
+    fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
+        self.m.sparsity()
+    }
 }
 
 impl<M: Matrix> LinearOp for MatrixOp<M> {
-    fn call_inplace(&self, x: &Self::V, _t: Self::T, y: &mut Self::V) {
-        self.m.gemv(M::T::one(), x, M::T::zero(), y);
-    }
-    fn jacobian(&self, _t: Self::T) -> Self::M {
-        self.m.clone()
+    fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
+        self.m.gemv(t, x, beta, y);
     }
 }

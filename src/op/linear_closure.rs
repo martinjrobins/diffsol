@@ -1,8 +1,12 @@
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
-use crate::{matrix::MatrixCommon, Matrix, Vector};
+use crate::{
+    jacobian::{find_non_zeros_linear, JacobianColoring},
+    matrix::{MatrixCommon, MatrixSparsity},
+    Matrix, Vector,
+};
 
-use super::{LinearOp, Op};
+use super::{LinearOp, Op, OpStatistics};
 
 pub struct LinearClosure<M, F>
 where
@@ -10,6 +14,7 @@ where
     F: Fn(
         &<M as MatrixCommon>::V,
         &<M as MatrixCommon>::V,
+        <M as MatrixCommon>::T,
         <M as MatrixCommon>::T,
         &mut <M as MatrixCommon>::V,
     ),
@@ -19,6 +24,9 @@ where
     nout: usize,
     nparams: usize,
     p: Rc<M::V>,
+    coloring: Option<JacobianColoring<M>>,
+    sparsity: Option<M::Sparsity>,
+    statistics: RefCell<OpStatistics>,
 }
 
 impl<M, F> LinearClosure<M, F>
@@ -28,6 +36,7 @@ where
         &<M as MatrixCommon>::V,
         &<M as MatrixCommon>::V,
         <M as MatrixCommon>::T,
+        <M as MatrixCommon>::T,
         &mut <M as MatrixCommon>::V,
     ),
 {
@@ -36,10 +45,22 @@ where
         Self {
             func,
             nstates,
+            statistics: RefCell::new(OpStatistics::default()),
             nout,
             nparams,
             p,
+            coloring: None,
+            sparsity: None,
         }
+    }
+
+    pub fn calculate_sparsity(&mut self, t0: M::T) {
+        let non_zeros = find_non_zeros_linear(self, t0);
+        self.sparsity = Some(
+            MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
+                .expect("invalid sparsity pattern"),
+        );
+        self.coloring = Some(JacobianColoring::new_from_non_zeros(self, non_zeros));
     }
 }
 
@@ -49,6 +70,7 @@ where
     F: Fn(
         &<M as MatrixCommon>::V,
         &<M as MatrixCommon>::V,
+        <M as MatrixCommon>::T,
         <M as MatrixCommon>::T,
         &mut <M as MatrixCommon>::V,
     ),
@@ -65,6 +87,12 @@ where
     fn nparams(&self) -> usize {
         self.nparams
     }
+    fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
+        self.sparsity.as_ref()
+    }
+    fn statistics(&self) -> OpStatistics {
+        self.statistics.borrow().clone()
+    }
 }
 
 impl<M, F> LinearOp for LinearClosure<M, F>
@@ -74,10 +102,20 @@ where
         &<M as MatrixCommon>::V,
         &<M as MatrixCommon>::V,
         <M as MatrixCommon>::T,
+        <M as MatrixCommon>::T,
         &mut <M as MatrixCommon>::V,
     ),
 {
-    fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
-        (self.func)(x, self.p.as_ref(), t, y)
+    fn gemv_inplace(&self, x: &M::V, t: M::T, beta: M::T, y: &mut M::V) {
+        self.statistics.borrow_mut().increment_call();
+        (self.func)(x, self.p.as_ref(), t, beta, y)
+    }
+    fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
+        self.statistics.borrow_mut().increment_matrix();
+        if let Some(coloring) = &self.coloring {
+            coloring.matrix_inplace(self, t, y);
+        } else {
+            self._default_matrix_inplace(t, y);
+        }
     }
 }
