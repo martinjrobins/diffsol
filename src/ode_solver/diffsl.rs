@@ -161,7 +161,7 @@ impl NonLinearOp for DiffSlRhs<'_> {
         if let Some(coloring) = &self.coloring {
             coloring.jacobian_inplace(self, x, t, y);
         } else {
-            NonLinearOp::jacobian_inplace(self, x, t, y);
+            self._default_jacobian_inplace(x, t, y);
         }
     }
 }
@@ -184,7 +184,7 @@ impl LinearOp for DiffSlMass<'_> {
         if let Some(coloring) = &self.coloring {
             coloring.matrix_inplace(self, t, y);
         } else {
-            LinearOp::matrix_inplace(self, t, y);
+            self._default_matrix_inplace(t, y);
         }
     }
 }
