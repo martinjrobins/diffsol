@@ -23,7 +23,7 @@ pub trait LinearSolver<C: Op> {
     fn set_linearisation(&mut self, x: &C::V, t: C::T);
 
     /// Solve the problem `Ax = b` and return the solution `x`.
-    /// panics if [set_linearisation] has not been called previously
+    /// panics if [Self::set_linearisation] has not been called previously
     fn solve(&self, b: &C::V) -> Result<C::V> {
         let mut b = b.clone();
         self.solve_in_place(&mut b)?;

@@ -82,7 +82,7 @@ pub trait NonLinearOp: Op {
     }
 
     /// Compute the Jacobian of the operator and store it in the matrix `y`.
-    /// `y` should have been previously initialised using the output of [`Self::sparsity`].
+    /// `y` should have been previously initialised using the output of [`Op::sparsity`].
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         self._default_jacobian_inplace(x, t, y);
     }
