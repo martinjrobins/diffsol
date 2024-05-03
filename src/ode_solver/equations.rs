@@ -37,11 +37,14 @@ impl OdeEquationsStatistics {
 /// this is the trait that defines the ODE equations of the form
 ///
 /// $$
-///  M \frac{dy}{dt} = F(t, y, p)
-///  y(t_0) = y_0(t_0, p)
+///  M \frac{dy}{dt} = F(t, y)
+///  y(t_0) = y_0(t_0)
 /// $$
 ///
-/// The ODE equations are defined by the right-hand side function $F(t, y, p)$, the initial condition $y_0(t_0, p)$, and the mass matrix $M$.
+/// The ODE equations are defined by:
+/// - the right-hand side function `F(t, y)`, which is given as a [NonLinearOp] using the `Rhs` associated type and [Self::rhs] function,
+/// - the mass matrix `M` which is given as a [LinearOp] using the `Mass` associated type and the [Self::mass] function,
+/// - the initial condition `y_0(t_0)`, which is given using the [Self::init] function.
 pub trait OdeEquations {
     type T: Scalar;
     type V: Vector<T = Self::T>;
@@ -53,12 +56,16 @@ pub trait OdeEquations {
     /// Note that `set_params` must always be called before calling any of the other functions in this trait.
     fn set_params(&mut self, p: Self::V);
 
+    /// returns the right-hand side function `F(t, y)` as a [NonLinearOp]
     fn rhs(&self) -> &Rc<Self::Rhs>;
+
+    /// returns the mass matrix `M` as a [LinearOp]
     fn mass(&self) -> &Rc<Self::Mass>;
 
-    /// returns the initial condition, i.e. $y(t_0, p)$
+    /// returns the initial condition, i.e. `y(t)`, where `t` is the initial time
     fn init(&self, t: Self::T) -> Self::V;
 
+    /// returns true if the mass matrix is constant over time
     fn is_mass_constant(&self) -> bool {
         true
     }

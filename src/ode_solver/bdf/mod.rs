@@ -372,11 +372,6 @@ where
     }
 
     fn step(&mut self) -> Result<()> {
-        // we will try and use the old jacobian unless convergence of newton iteration
-        // fails
-        // tells callable to update rhs jacobian if the jacobian is requested (by nonlinear solver)
-        // initialise step size and try to make the step,
-        // iterate, reducing step size until error is in bounds
         let mut d: Eqn::V;
         let mut safety: Eqn::T;
         let mut error_norm: Eqn::T;
