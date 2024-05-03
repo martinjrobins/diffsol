@@ -13,7 +13,7 @@ pub mod matrix;
 pub mod sdirk;
 pub mod unit;
 
-/// Op is a trait for operators that, given a paramter vector `p`, operates on an input vector `x` to produce an output vector `y`. 
+/// Op is a trait for operators that, given a paramter vector `p`, operates on an input vector `x` to produce an output vector `y`.
 /// It defines the number of states (i.e. length of `x`), the number of outputs (i.e. length of `y`), and number of parameters (i.e. length of `p`) of the operator.
 /// It also defines the type of the scalar, vector, and matrices used in the operator.
 pub trait Op {
