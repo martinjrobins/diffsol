@@ -62,6 +62,11 @@ where
         );
         self.coloring = Some(JacobianColoring::new_from_non_zeros(self, non_zeros));
     }
+
+    pub fn set_params(&mut self, p: Rc<M::V>) {
+        assert_eq!(p.len(), self.nparams);
+        self.p = p;
+    }
 }
 
 impl<M, F> Op for LinearClosure<M, F>

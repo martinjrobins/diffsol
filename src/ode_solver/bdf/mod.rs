@@ -8,12 +8,12 @@ use serde::Serialize;
 
 use crate::{
     matrix::{default_solver::DefaultSolver, Matrix, MatrixRef},
-    op::bdf::BdfCallable,
+    op::{bdf::BdfCallable, filter::FilterCallable},
     scalar::scale,
     vector::DefaultDenseMatrix,
     DenseMatrix, IndexType, MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver,
-    OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Scalar, SolverProblem, Vector,
-    VectorRef, VectorView, VectorViewMut,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, RootFinder, Scalar,
+    SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
 };
 
 pub mod faer;
@@ -78,6 +78,7 @@ pub struct Bdf<
     error_const: Vec<Eqn::T>,
     statistics: BdfStatistics<Eqn::T>,
     state: Option<OdeSolverState<Eqn::V>>,
+    root_finder: RootFinder<Eqn>,
 }
 
 impl<Eqn> Default
@@ -99,6 +100,7 @@ where
         let mut nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
         type M<V> = <V as DefaultDenseMatrix>::M;
+        let root_finder = RootFinder::new();
         Self {
             ode_problem: None,
             nonlinear_solver,
@@ -112,6 +114,7 @@ where
             u: <M<Eqn::V> as Matrix>::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
             statistics: BdfStatistics::default(),
             state: None,
+            root_finder,
         }
     }
 }
@@ -198,6 +201,7 @@ where
     fn _update_differences(&mut self, d: &Eqn::V) {
         //update of difference equations can be done efficiently
         //by reusing d and D.
+        //we store the old differences in diff_tmp if required
         //
         //From first equation on page 4 of [1]:
         //d = y_n - y^0_n = D^{k + 1} y_n
@@ -206,8 +210,9 @@ where
         //D^{j + 1} y_n = D^{j} y_n - D^{j} y_{n - 1}
         //
         //Combining these gives the following algorithm
+        std::mem::swap(&mut self.diff, &mut self.diff_tmp);
         let order = self.order;
-        let d_minus_order_plus_one = d - self.diff.column(order + 1);
+        let d_minus_order_plus_one = d - self.diff_tmp.column(order + 1);
         self.diff
             .column_mut(order + 2)
             .copy_from(&d_minus_order_plus_one);
@@ -371,7 +376,7 @@ where
         self.state = Some(state);
     }
 
-    fn step(&mut self) -> Result<()> {
+    fn step(&mut self, tstop: Option<Eqn::T>) -> Result<OdeSolverStopReason> {
         let mut d: Eqn::V;
         let mut safety: Eqn::T;
         let mut error_norm: Eqn::T;
@@ -379,6 +384,14 @@ where
         let mut updated_jacobian = false;
         if self.state.is_none() {
             return Err(anyhow!("State not set"));
+        }
+        // setup root finder if required
+        if self.ode_problem.as_ref().unwrap().eqn.root().is_some() {
+            self.root_finder.set_g1(
+                self,
+                &self.state.as_ref().unwrap().y,
+                self.state.as_ref().unwrap().t,
+            );
         }
         let (mut y_predict, mut t_new) = self._predict_forward();
 
@@ -531,6 +544,38 @@ where
             }
             self._update_step_size(factor);
         }
-        Ok(())
+
+        // check for root within accepted step
+        if self.ode_problem.as_ref().unwrap().eqn.root().is_some() {
+            let ret = self.root_finder.set_g1(
+                self,
+                &self.state.as_ref().unwrap().y,
+                self.state.as_ref().unwrap().t,
+            );
+            if let Some(root) = ret {
+                return Ok(OdeSolverStopReason::RootFound(root));
+            }
+        }
+
+        // check if the we are at tstop
+        if let Some(tstop) = tstop {
+            let state = self.state.as_ref().unwrap();
+            let troundoff = 100.0 * Eqn::T::EPSILON * (state.t.abs() + state.h.abs());
+            if (state.t - tstop).abs() <= troundoff {
+                return Ok(OdeSolverStopReason::TimeReached);
+            }
+        }
+
+        // check if the next step will be beyond tstop, if so adjust the step size
+        if let Some(tstop) = tstop {
+            let state = self.state.as_ref().unwrap();
+            if state.t + state.h > tstop {
+                let factor = (tstop - state.t) / state.h;
+                self._update_step_size(factor);
+            }
+        }
+
+        // just a normal step, no roots or tstop reached
+        Ok(OdeSolverStopReason::InternalTimestep)
     }
 }

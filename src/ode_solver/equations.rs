@@ -1,5 +1,5 @@
 use num_traits::Zero;
-use std::rc::Rc;
+use std::{borrow::BorrowMut, rc::Rc};
 
 use crate::{
     op::unit::UnitCallable, scalar::Scalar, Closure, LinearClosure, LinearOp, Matrix, NonLinearOp,
@@ -51,6 +51,7 @@ pub trait OdeEquations {
     type M: Matrix<T = Self::T, V = Self::V>;
     type Mass: LinearOp<M = Self::M, V = Self::V, T = Self::T>;
     type Rhs: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
+    type Root: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
 
     /// The parameters of the ODE equations are assumed to be constant. This function sets the parameters to the given value before solving the ODE.
     /// Note that `set_params` must always be called before calling any of the other functions in this trait.
@@ -62,6 +63,10 @@ pub trait OdeEquations {
     /// returns the mass matrix `M` as a [LinearOp]
     fn mass(&self) -> &Rc<Self::Mass>;
 
+    fn root(&self) -> Option<&Rc<Self::Root>> {
+        None
+    }
+
     /// returns the initial condition, i.e. `y(t)`, where `t` is the initial time
     fn init(&self, t: Self::T) -> Self::V;
 
@@ -71,56 +76,49 @@ pub trait OdeEquations {
     }
 }
 
-/// This struct implements the ODE equation trait [OdeEquations] for a given right-hand side function, jacobian function, mass matrix function, and initial condition function.
-/// These functions are provided as closures, and the parameters are assumed to be constant.
-pub struct OdeSolverEquations<M, F, G, H, I>
+/// This struct implements the ODE equation trait [OdeEquations] for a given right-hand side op, mass op, optional root op, and initial condition function.
+pub struct OdeSolverEquations<M, Rhs, Mass, Root, I>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    Rhs: NonLinearOp<M = M, V = M::V, T = M::T>,
+    Mass: LinearOp<M = M, V = M::V, T = M::T>,
+    Root: NonLinearOp<M = M, V = M::V, T = M::T>,
     I: Fn(&M::V, M::T) -> M::V,
 {
-    rhs: Rc<Closure<M, F, G>>,
-    mass: Rc<LinearClosure<M, H>>,
+    rhs: Rc<Rhs>,
+    mass: Rc<Mass>,
+    root: Option<Rc<Root>>,
     init: I,
     p: Rc<M::V>,
     mass_is_constant: bool,
 }
 
-impl<M, F, G, H, I> OdeSolverEquations<M, F, G, H, I>
+impl<M, Rhs, Mass, Root, I> OdeSolverEquations<M, Rhs, Mass, Root, I>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    Rhs: NonLinearOp<M = M, V = M::V, T = M::T>,
+    Mass: LinearOp<M = M, V = M::V, T = M::T>,
+    Root: NonLinearOp<M = M, V = M::V, T = M::T>,
     I: Fn(&M::V, M::T) -> M::V,
 {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new_ode_with_mass(
-        rhs: F,
-        rhs_jac: G,
-        mass: H,
+    pub(crate) fn new(
+        rhs: Rhs,
+        mass: Mass,
+        root: Option<Root>,
         init: I,
         p: M::V,
         t0: M::T,
-        calculate_sparsity: bool,
         mass_is_constant: bool,
     ) -> Self {
-        let y0 = init(&p, M::T::zero());
-        let nstates = y0.len();
         let p = Rc::new(p);
-        let mut rhs = Closure::<M, _, _>::new(rhs, rhs_jac, nstates, nstates, p.clone());
-        let mut mass = LinearClosure::<M, _>::new(mass, nstates, nstates, p.clone());
-        if calculate_sparsity {
-            rhs.calculate_sparsity(&y0, t0);
-            mass.calculate_sparsity(t0);
-        }
         let rhs = Rc::new(rhs);
         let mass = Rc::new(mass);
+        let root = root.map(Rc::new);
         Self {
             rhs,
             mass,
+            root,
             init,
             p: p.clone(),
             mass_is_constant,
@@ -128,25 +126,29 @@ where
     }
 }
 
-impl<M, F, G, H, I> OdeEquations for OdeSolverEquations<M, F, G, H, I>
+impl<M, Rhs, Mass, Root, I> OdeEquations for OdeSolverEquations<M, Rhs, Mass, Root, I>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    Rhs: NonLinearOp<M = M, V = M::V, T = M::T>,
+    Mass: LinearOp<M = M, V = M::V, T = M::T>,
+    Root: NonLinearOp<M = M, V = M::V, T = M::T>,
     I: Fn(&M::V, M::T) -> M::V,
 {
     type T = M::T;
     type V = M::V;
     type M = M;
-    type Rhs = Closure<M, F, G>;
-    type Mass = LinearClosure<M, H>;
+    type Rhs = Rhs;
+    type Mass = Mass;
+    type Root = Root;
 
     fn rhs(&self) -> &Rc<Self::Rhs> {
         &self.rhs
     }
     fn mass(&self) -> &Rc<Self::Mass> {
         &self.mass
+    }
+    fn root(&self) -> Option<&Rc<Self::Root>> {
+        self.root.as_ref()
     }
     fn is_mass_constant(&self) -> bool {
         self.mass_is_constant
@@ -158,92 +160,9 @@ where
 
     fn set_params(&mut self, p: Self::V) {
         self.p = Rc::new(p);
-    }
-}
-
-/// This struct implements the ODE equation trait [OdeEquations] for a given right-hand side function, jacobian function, and initial condition function.
-/// These functions are provided as closures, and the parameters are assumed to be constant.
-/// The mass matrix is assumed to be the identity matrix.
-pub struct OdeSolverEquationsMassI<M, F, G, I>
-where
-    M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    I: Fn(&M::V, M::T) -> M::V,
-{
-    rhs: Rc<Closure<M, F, G>>,
-    mass: Rc<UnitCallable<M>>,
-    init: I,
-    p: Rc<M::V>,
-}
-
-impl<M, F, G, I> OdeSolverEquationsMassI<M, F, G, I>
-where
-    M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    I: Fn(&M::V, M::T) -> M::V,
-{
-    pub fn new_ode(
-        rhs: F,
-        rhs_jac: G,
-        init: I,
-        p: M::V,
-        t0: M::T,
-        calculate_sparsity: bool,
-    ) -> Self {
-        let y0 = init(&p, M::T::zero());
-        let nstates = y0.len();
-        let p = Rc::new(p);
-
-        let mut rhs = Closure::<M, _, _>::new(rhs, rhs_jac, nstates, nstates, p.clone());
-        if calculate_sparsity {
-            rhs.calculate_sparsity(&y0, t0);
-        }
-        let mass = UnitCallable::<M>::new(nstates);
-        let rhs = Rc::new(rhs);
-        let mass = Rc::new(mass);
-        Self {
-            rhs,
-            mass,
-            init,
-            p: p.clone(),
-        }
-    }
-}
-
-impl<M, F, G, I> OdeEquations for OdeSolverEquationsMassI<M, F, G, I>
-where
-    M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    I: Fn(&M::V, M::T) -> M::V,
-{
-    type T = M::T;
-    type V = M::V;
-    type M = M;
-    type Rhs = Closure<M, F, G>;
-    type Mass = UnitCallable<M>;
-
-    fn mass(&self) -> &Rc<Self::Mass> {
-        &self.mass
-    }
-
-    fn rhs(&self) -> &Rc<Self::Rhs> {
-        &self.rhs
-    }
-
-    fn is_mass_constant(&self) -> bool {
-        true
-    }
-
-    fn init(&self, t: Self::T) -> Self::V {
-        let p = self.p.as_ref();
-        (self.init)(p, t)
-    }
-
-    fn set_params(&mut self, p: Self::V) {
-        self.p = Rc::new(p);
+        Rc::<Rhs>::get_mut(&mut self.rhs).unwrap().set_params(self.p.clone());
+        Rc::<Mass>::get_mut(&mut self.mass).unwrap().set_params(self.p.clone());
+        self.root.as_mut_ref().map(|r| Rc::<Root>::get_mut(r).unwrap().set_params(self.p.clone()));
     }
 }
 

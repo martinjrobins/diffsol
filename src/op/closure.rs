@@ -46,6 +46,11 @@ where
         }
     }
 
+    pub fn set_params(&mut self, p: Rc<M::V>) {
+        assert_eq!(p.len(), self.nparams);
+        self.p = p;
+    }
+
     pub fn calculate_sparsity(&mut self, y0: &M::V, t0: M::T) {
         let non_zeros = find_non_zeros_nonlinear(self, y0, t0);
         self.sparsity = Some(

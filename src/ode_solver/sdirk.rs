@@ -1,3 +1,4 @@
+use anyhow::Result;
 use num_traits::One;
 use num_traits::Pow;
 use num_traits::Zero;
@@ -5,8 +6,10 @@ use std::ops::MulAssign;
 use std::rc::Rc;
 
 use crate::matrix::MatrixRef;
+use crate::nonlinear_solver::root::RootFinder;
 use crate::vector::VectorRef;
 use crate::NewtonNonlinearSolver;
+use crate::OdeSolverStopReason;
 use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
@@ -46,6 +49,7 @@ where
     f: Eqn::V,
     a_rows: Vec<Eqn::V>,
     statistics: BdfStatistics<Eqn::T>,
+    root_finder: RootFinder<Eqn>,
 }
 
 impl<M, Eqn, LS> Sdirk<M, Eqn, LS>
@@ -138,6 +142,7 @@ where
         let old_f = <Eqn::V as Vector>::zeros(n);
         let f = <Eqn::V as Vector>::zeros(n);
         let statistics = BdfStatistics::default();
+        let root_finder = RootFinder::new();
         Self {
             tableau,
             nonlinear_solver,
@@ -152,6 +157,7 @@ where
             old_f,
             f,
             statistics,
+            root_finder,
         }
     }
 
@@ -251,11 +257,17 @@ where
         self.problem = Some(problem.clone());
     }
 
-    fn step(&mut self) -> anyhow::Result<()> {
+    fn step(&mut self, tstop: Option<Eqn::T>) -> Result<OdeSolverStopReason> {
         // optionally do the first step
         let state = self.state.as_mut().unwrap();
         let n = state.y.len();
         let y0 = &state.y;
+
+        // setup root finder if required
+        if self.ode_problem.as_ref().unwrap().eqn.root().is_some() {
+            self.root_finder.set_g1(self, y0, state.t);
+        }
+
         let start = if self.is_sdirk { 0 } else { 1 };
         let mut updated_jacobian = false;
         let mut error = <Eqn::V as Vector>::zeros(n);
@@ -421,7 +433,38 @@ where
         self.statistics.number_of_steps += 1;
         self.statistics.final_step_size = self.state.as_ref().unwrap().h;
 
-        Ok(())
+        // check for root within accepted step
+        if self.ode_problem.as_ref().unwrap().eqn.root().is_some() {
+            let ret = self.root_finder.set_g1(
+                self,
+                &self.state.as_ref().unwrap().y,
+                self.state.as_ref().unwrap().t,
+            );
+            if let Some(root) = ret {
+                return Ok(OdeSolverStopReason::RootFound(root));
+            }
+        }
+
+        // check if the we are at tstop
+        if let Some(tstop) = tstop {
+            let state = self.state.as_ref().unwrap();
+            let troundoff = 100.0 * Eqn::T::EPSILON * (state.t.abs() + state.h.abs());
+            if (state.t - tstop).abs() <= troundoff {
+                return Ok(OdeSolverStopReason::TimeReached);
+            }
+        }
+
+        // check if the next step will be beyond tstop, if so adjust the step size
+        if let Some(tstop) = tstop {
+            let state = self.state.as_ref().unwrap();
+            if state.t + state.h > tstop {
+                let factor = (tstop - state.t) / state.h;
+                self._update_step_size(factor);
+            }
+        }
+
+        // just a normal step, no roots or tstop reached
+        Ok(OdeSolverStopReason::InternalTimestep)
     }
 
     fn interpolate(&self, t: <Eqn>::T) -> anyhow::Result<<Eqn>::V> {

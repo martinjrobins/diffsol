@@ -155,10 +155,11 @@ pub use ode_solver::sundials::SundialsIda;
 
 use matrix::{DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixView, MatrixViewMut};
 pub use nonlinear_solver::newton::NewtonNonlinearSolver;
-use nonlinear_solver::NonLinearSolver;
+use nonlinear_solver::{root::RootFinder, NonLinearSolver};
 pub use ode_solver::{
     bdf::Bdf, builder::OdeBuilder, equations::OdeEquations, method::OdeSolverMethod,
-    method::OdeSolverState, problem::OdeSolverProblem, sdirk::Sdirk, tableau::Tableau,
+    method::OdeSolverState, method::OdeSolverStopReason, problem::OdeSolverProblem, sdirk::Sdirk,
+    tableau::Tableau,
 };
 use op::{closure::Closure, linear_closure::LinearClosure, LinearOp, NonLinearOp, Op};
 use scalar::{IndexType, Scalar, Scale};

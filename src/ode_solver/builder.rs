@@ -1,7 +1,7 @@
-use crate::{op::Op, vector::DefaultDenseMatrix, Matrix, OdeEquations, OdeSolverProblem, Vector};
+use crate::{op::{closure::Closure, linear_closure::LinearClosure, unit::UnitCallable, Op}, vector::DefaultDenseMatrix, Matrix, OdeEquations, OdeSolverProblem, Vector};
 use anyhow::Result;
 
-use super::equations::{OdeSolverEquations, OdeSolverEquationsMassI};
+use super::equations::{OdeSolverEquations};
 
 /// Builder for ODE problems. Use methods to set parameters and then call one of the build methods when done.
 pub struct OdeBuilder {
@@ -166,7 +166,7 @@ impl OdeBuilder {
         rhs_jac: G,
         mass: H,
         init: I,
-    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, F, G, H, I>>>
+    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, Closure<M, F, G>, LinearClosure<M, H>, UnitCallable<M>, I>>>
     where
         M: Matrix,
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -175,10 +175,16 @@ impl OdeBuilder {
         I: Fn(&M::V, M::T) -> M::V,
     {
         let p = Self::build_p(self.p);
+        let t0 = M::T::from(self.t0);
+        let y0 = init(&p, t0);
+        let nstates = y0.len();
+        let rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p);
+        let mass = LinearClosure::new(mass, nstates, nstates, p);
+        let root = UnitCallable::new(nstates);
         let eqn = OdeSolverEquations::new_ode_with_mass(
             rhs,
-            rhs_jac,
             mass,
+            root,
             init,
             p,
             M::T::from(self.t0),
