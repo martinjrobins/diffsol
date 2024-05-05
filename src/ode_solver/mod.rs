@@ -54,7 +54,7 @@ mod tests {
         method.set_problem(state, problem);
         for point in solution.solution_points.iter() {
             while method.state().unwrap().t < point.t {
-                method.step().unwrap();
+                method.step(None).unwrap();
             }
 
             let soln = method.interpolate(point.t).unwrap();
@@ -500,6 +500,7 @@ mod tests {
         type M = M;
         type Rhs = TestEqnRhs<M>;
         type Mass = UnitCallable<M>;
+        type Root = UnitCallable<M>;
 
         fn set_params(&mut self, _p: Self::V) {}
 
@@ -509,6 +510,10 @@ mod tests {
 
         fn mass(&self) -> &Rc<Self::Mass> {
             &self.mass
+        }
+
+        fn root(&self) -> Option<&Rc<Self::Root>> {
+            None
         }
 
         fn init(&self, _t: Self::T) -> Self::V {
@@ -532,7 +537,7 @@ mod tests {
             .unwrap()
             .assert_eq_st(&state.y, M::T::from(1e-9));
         assert!(s.interpolate(t1).is_err());
-        s.step().unwrap();
+        s.step(None).unwrap();
         assert!(s.interpolate(s.state().unwrap().t).is_ok());
         assert!(s.interpolate(s.state().unwrap().t + t1).is_err());
     }
@@ -541,7 +546,7 @@ mod tests {
         assert!(s.state().is_none());
         assert!(s.problem().is_none());
         assert!(s.take_state().is_none());
-        assert!(s.step().is_err());
+        assert!(s.step(None).is_err());
         assert!(s.interpolate(M::T::one()).is_err());
     }
 
@@ -559,7 +564,7 @@ mod tests {
         state2.y.assert_eq_st(&state.y, M::T::from(1e-9));
         assert!(s.take_state().is_none());
         assert!(s.state().is_none());
-        assert!(s.step().is_err());
+        assert!(s.step(None).is_err());
         assert!(s.interpolate(M::T::one()).is_err());
     }
 }

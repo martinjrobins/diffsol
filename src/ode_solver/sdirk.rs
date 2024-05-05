@@ -1,4 +1,5 @@
 use anyhow::Result;
+use num_traits::abs;
 use num_traits::One;
 use num_traits::Pow;
 use num_traits::Zero;
@@ -13,7 +14,7 @@ use crate::OdeSolverStopReason;
 use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
-    DenseMatrix, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Vector,
+    DenseMatrix, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Scalar, Vector,
     VectorViewMut,
 };
 use crate::{LinearSolver, NonLinearOp};
@@ -257,15 +258,15 @@ where
         self.problem = Some(problem.clone());
     }
 
-    fn step(&mut self, tstop: Option<Eqn::T>) -> Result<OdeSolverStopReason> {
+    fn step(&mut self, tstop: Option<Eqn::T>) -> Result<OdeSolverStopReason<Eqn::T>> {
         // optionally do the first step
         let state = self.state.as_mut().unwrap();
         let n = state.y.len();
         let y0 = &state.y;
 
         // setup root finder if required
-        if self.ode_problem.as_ref().unwrap().eqn.root().is_some() {
-            self.root_finder.set_g1(self, y0, state.t);
+        if let Some(root_fn) = self.problem.as_ref().unwrap().eqn.root() {
+            self.root_finder.set_g0(root_fn.as_ref(), y0, state.t);
         }
 
         let start = if self.is_sdirk { 0 } else { 1 };
@@ -434,9 +435,10 @@ where
         self.statistics.final_step_size = self.state.as_ref().unwrap().h;
 
         // check for root within accepted step
-        if self.ode_problem.as_ref().unwrap().eqn.root().is_some() {
+        if let Some(root_fn) = self.problem.as_ref().unwrap().eqn.root() {
             let ret = self.root_finder.set_g1(
-                self,
+                &|t| self.interpolate(t),
+                root_fn.as_ref(),
                 &self.state.as_ref().unwrap().y,
                 self.state.as_ref().unwrap().t,
             );
@@ -448,18 +450,18 @@ where
         // check if the we are at tstop
         if let Some(tstop) = tstop {
             let state = self.state.as_ref().unwrap();
-            let troundoff = 100.0 * Eqn::T::EPSILON * (state.t.abs() + state.h.abs());
-            if (state.t - tstop).abs() <= troundoff {
-                return Ok(OdeSolverStopReason::TimeReached);
+            let troundoff = Eqn::T::from(100.0) * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
+            if abs(state.t - tstop) <= troundoff {
+                return Ok(OdeSolverStopReason::TstopReached);
             }
         }
 
         // check if the next step will be beyond tstop, if so adjust the step size
         if let Some(tstop) = tstop {
-            let state = self.state.as_ref().unwrap();
+            let state = self.state.as_mut().unwrap();
             if state.t + state.h > tstop {
                 let factor = (tstop - state.t) / state.h;
-                self._update_step_size(factor);
+                state.h *= factor;
             }
         }
 

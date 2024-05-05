@@ -1,10 +1,6 @@
-use num_traits::Zero;
-use std::{borrow::BorrowMut, rc::Rc};
+use std::rc::Rc;
 
-use crate::{
-    op::unit::UnitCallable, scalar::Scalar, Closure, LinearClosure, LinearOp, Matrix, NonLinearOp,
-    Vector,
-};
+use crate::{scalar::Scalar, LinearOp, Matrix, NonLinearOp, Vector};
 use serde::Serialize;
 
 #[derive(Clone, Debug, Serialize)]
@@ -103,24 +99,19 @@ where
 {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        rhs: Rhs,
-        mass: Mass,
-        root: Option<Root>,
+        rhs: Rc<Rhs>,
+        mass: Rc<Mass>,
+        root: Option<Rc<Root>>,
         init: I,
-        p: M::V,
-        t0: M::T,
+        p: Rc<M::V>,
         mass_is_constant: bool,
     ) -> Self {
-        let p = Rc::new(p);
-        let rhs = Rc::new(rhs);
-        let mass = Rc::new(mass);
-        let root = root.map(Rc::new);
         Self {
             rhs,
             mass,
             root,
             init,
-            p: p.clone(),
+            p,
             mass_is_constant,
         }
     }
@@ -160,9 +151,15 @@ where
 
     fn set_params(&mut self, p: Self::V) {
         self.p = Rc::new(p);
-        Rc::<Rhs>::get_mut(&mut self.rhs).unwrap().set_params(self.p.clone());
-        Rc::<Mass>::get_mut(&mut self.mass).unwrap().set_params(self.p.clone());
-        self.root.as_mut_ref().map(|r| Rc::<Root>::get_mut(r).unwrap().set_params(self.p.clone()));
+        Rc::<Rhs>::get_mut(&mut self.rhs)
+            .unwrap()
+            .set_params(self.p.clone());
+        Rc::<Mass>::get_mut(&mut self.mass)
+            .unwrap()
+            .set_params(self.p.clone());
+        self.root
+            .as_mut()
+            .map(|r| Rc::<Root>::get_mut(r).unwrap().set_params(self.p.clone()));
     }
 }
 

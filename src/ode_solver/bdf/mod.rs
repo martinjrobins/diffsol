@@ -3,12 +3,12 @@ use std::rc::Rc;
 
 use anyhow::{anyhow, Result};
 
-use num_traits::{One, Pow, Zero};
+use num_traits::{abs, One, Pow, Zero};
 use serde::Serialize;
 
 use crate::{
     matrix::{default_solver::DefaultSolver, Matrix, MatrixRef},
-    op::{bdf::BdfCallable, filter::FilterCallable},
+    op::bdf::BdfCallable,
     scalar::scale,
     vector::DefaultDenseMatrix,
     DenseMatrix, IndexType, MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver,
@@ -376,7 +376,7 @@ where
         self.state = Some(state);
     }
 
-    fn step(&mut self, tstop: Option<Eqn::T>) -> Result<OdeSolverStopReason> {
+    fn step(&mut self, tstop: Option<Eqn::T>) -> Result<OdeSolverStopReason<Eqn::T>> {
         let mut d: Eqn::V;
         let mut safety: Eqn::T;
         let mut error_norm: Eqn::T;
@@ -386,9 +386,10 @@ where
             return Err(anyhow!("State not set"));
         }
         // setup root finder if required
-        if self.ode_problem.as_ref().unwrap().eqn.root().is_some() {
-            self.root_finder.set_g1(
-                self,
+
+        if let Some(root_fn) = self.ode_problem.as_ref().unwrap().eqn.root() {
+            self.root_finder.set_g0(
+                root_fn.as_ref(),
                 &self.state.as_ref().unwrap().y,
                 self.state.as_ref().unwrap().t,
             );
@@ -546,9 +547,10 @@ where
         }
 
         // check for root within accepted step
-        if self.ode_problem.as_ref().unwrap().eqn.root().is_some() {
+        if let Some(root_fn) = self.ode_problem.as_ref().unwrap().eqn.root() {
             let ret = self.root_finder.set_g1(
-                self,
+                &|t| self.interpolate(t),
+                root_fn.as_ref(),
                 &self.state.as_ref().unwrap().y,
                 self.state.as_ref().unwrap().t,
             );
@@ -560,9 +562,9 @@ where
         // check if the we are at tstop
         if let Some(tstop) = tstop {
             let state = self.state.as_ref().unwrap();
-            let troundoff = 100.0 * Eqn::T::EPSILON * (state.t.abs() + state.h.abs());
-            if (state.t - tstop).abs() <= troundoff {
-                return Ok(OdeSolverStopReason::TimeReached);
+            let troundoff = Eqn::T::from(100.0) * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
+            if abs(state.t - tstop) <= troundoff {
+                return Ok(OdeSolverStopReason::TstopReached);
             }
         }
 

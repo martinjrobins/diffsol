@@ -51,7 +51,7 @@ impl<M: Matrix> NonLinearOp for UnitCallable<M> {
     fn call_inplace(&self, x: &Self::V, _t: Self::T, y: &mut Self::V) {
         y.copy_from(x);
     }
-    fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+    fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
         y.copy_from(v);
     }
 }

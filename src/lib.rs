@@ -161,7 +161,9 @@ pub use ode_solver::{
     method::OdeSolverState, method::OdeSolverStopReason, problem::OdeSolverProblem, sdirk::Sdirk,
     tableau::Tableau,
 };
-use op::{closure::Closure, linear_closure::LinearClosure, LinearOp, NonLinearOp, Op};
+use op::{
+    closure::Closure, linear_closure::LinearClosure, unit::UnitCallable, LinearOp, NonLinearOp, Op,
+};
 use scalar::{IndexType, Scalar, Scale};
 use solver::SolverProblem;
 use vector::{Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut};
@@ -210,7 +212,7 @@ mod tests {
         let state = OdeSolverState::new(&problem);
         solver.set_problem(state, &problem);
         while solver.state().unwrap().t <= t {
-            solver.step().unwrap();
+            solver.step(None).unwrap();
         }
         let y2 = solver.interpolate(t).unwrap();
 
@@ -251,7 +253,7 @@ mod tests {
         let state = OdeSolverState::new(&problem);
         solver.set_problem(state, &problem);
         while solver.state().unwrap().t <= t {
-            solver.step().unwrap();
+            solver.step(None).unwrap();
         }
         let y2 = solver.interpolate(t).unwrap();
 

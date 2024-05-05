@@ -553,6 +553,16 @@ impl Vector for SundialsVector {
             self[indices[i]] = value;
         }
     }
+    fn binary_fold<B, F>(&self, other: &Self, init: B, f: F) -> B
+    where
+        F: Fn(B, Self::T, Self::T, IndexType) -> B,
+    {
+        let mut acc = init;
+        for i in 0..self.len() {
+            acc = f(acc, self[i], other[i], i);
+        }
+        acc
+    }
 }
 
 #[cfg(test)]

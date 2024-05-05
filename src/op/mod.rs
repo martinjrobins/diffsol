@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use crate::{Matrix, Scalar, Vector};
 
 use num_traits::{One, Zero};
@@ -28,7 +30,14 @@ pub trait Op {
     fn nout(&self) -> usize;
 
     /// Return the number of parameters of the operator.
-    fn nparams(&self) -> usize;
+    fn nparams(&self) -> usize {
+        0
+    }
+
+    /// Set the parameters of the operator to the given value.
+    fn set_params(&mut self, p: Rc<Self::V>) {
+        assert_eq!(p.len(), self.nparams());
+    }
 
     /// Return sparsity information for the jacobian or matrix (if available)
     fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {

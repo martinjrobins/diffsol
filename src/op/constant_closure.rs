@@ -54,6 +54,10 @@ where
     fn nparams(&self) -> usize {
         self.nparams
     }
+    fn set_params(&mut self, p: Rc<M::V>) {
+        assert_eq!(p.len(), self.nparams);
+        self.p = p;
+    }
 }
 
 impl<M> ConstantOp for ConstantClosure<M>

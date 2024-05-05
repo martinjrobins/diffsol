@@ -3,13 +3,13 @@ use num_traits::Zero;
 use std::rc::Rc;
 
 use crate::{
-    op::filter::FilterCallable, scalar::IndexType, LinearOp, Matrix, NonLinearSolver, OdeEquations,
+    op::filter::FilterCallable, scalar::Scalar, LinearOp, Matrix, NonLinearSolver, OdeEquations,
     OdeSolverProblem, SolverProblem, Vector, VectorIndex,
 };
 
-pub enum OdeSolverStopReason {
+pub enum OdeSolverStopReason<T: Scalar> {
     InternalTimestep,
-    RootFound,
+    RootFound(T),
     TstopReached,
 }
 
@@ -45,7 +45,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     /// - `InternalTimestep`: The solver has taken a step forward in time, the internal state of the solver is at time self.state().t
     /// - `RootFound(t_root)`: The solver has found a root at time `t_root`. Note that the internal state of the solver is at the internal time step `self.state().t`, *not* at time `t_root`.
     /// - `TstopReached`: The solver has reached the stop time, the internal state of the solver is at time `tstop`, which is the same as `self.state().t`
-    fn step(&mut self, tstop: Option<Eqn::T>) -> Result<OdeSolverStopReason>;
+    fn step(&mut self, tstop: Option<Eqn::T>) -> Result<OdeSolverStopReason<Eqn::T>>;
 
     /// Interpolate the solution at a given time. This time should be between the current time and the last solver time step
     fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V>;
@@ -63,9 +63,9 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         let state = OdeSolverState::new(problem);
         self.set_problem(state, problem);
         while self.state().unwrap().t <= t {
-            self.step()?;
+            self.step(Some(t))?;
         }
-        self.interpolate(t)
+        Ok(self.state().unwrap().y.clone())
     }
 
     /// Reinitialise the solver state making it consistent with the algebraic constraints and solve the problem up to time `t`
@@ -78,9 +78,9 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         let state = OdeSolverState::new_consistent(problem, root_solver)?;
         self.set_problem(state, problem);
         while self.state().unwrap().t <= t {
-            self.step()?;
+            self.step(Some(t))?;
         }
-        self.interpolate(t)
+        Ok(self.state().unwrap().y.clone())
     }
 }
 

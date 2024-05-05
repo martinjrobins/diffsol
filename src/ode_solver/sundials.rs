@@ -8,16 +8,17 @@ use std::{
 use sundials_sys::{
     realtype, IDACalcIC, IDACreate, IDAFree, IDAGetDky, IDAGetIntegratorStats,
     IDAGetNonlinSolvStats, IDAGetReturnFlagName, IDAInit, IDASVtolerances, IDASetId, IDASetJacFn,
-    IDASetLinearSolver, IDASetUserData, IDASolve, N_Vector, SUNLinSolFree, SUNLinSolInitialize,
-    SUNLinSol_Dense, SUNLinearSolver, SUNMatrix, IDA_CONSTR_FAIL, IDA_CONV_FAIL, IDA_ERR_FAIL,
-    IDA_ILL_INPUT, IDA_LINIT_FAIL, IDA_LSETUP_FAIL, IDA_LSOLVE_FAIL, IDA_MEM_NULL, IDA_ONE_STEP,
-    IDA_REP_RES_ERR, IDA_RES_FAIL, IDA_ROOT_RETURN, IDA_RTFUNC_FAIL, IDA_SUCCESS, IDA_TOO_MUCH_ACC,
-    IDA_TOO_MUCH_WORK, IDA_TSTOP_RETURN, IDA_YA_YDP_INIT,
+    IDASetLinearSolver, IDASetStopTime, IDASetUserData, IDASolve, N_Vector, SUNLinSolFree,
+    SUNLinSolInitialize, SUNLinSol_Dense, SUNLinearSolver, SUNMatrix, IDA_CONSTR_FAIL,
+    IDA_CONV_FAIL, IDA_ERR_FAIL, IDA_ILL_INPUT, IDA_LINIT_FAIL, IDA_LSETUP_FAIL, IDA_LSOLVE_FAIL,
+    IDA_MEM_NULL, IDA_ONE_STEP, IDA_REP_RES_ERR, IDA_RES_FAIL, IDA_ROOT_RETURN, IDA_RTFUNC_FAIL,
+    IDA_SUCCESS, IDA_TOO_MUCH_ACC, IDA_TOO_MUCH_WORK, IDA_TSTOP_RETURN, IDA_YA_YDP_INIT,
 };
 
 use crate::{
     scale, vector::sundials::get_suncontext, LinearOp, Matrix, NonLinearOp, OdeEquations,
-    OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, SundialsMatrix, SundialsVector, Vector,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, SundialsMatrix,
+    SundialsVector, Vector,
 };
 
 pub fn sundials_check(retval: c_int) -> Result<()> {
@@ -325,10 +326,14 @@ where
         Self::check(unsafe { IDASetJacFn(ida_mem, Some(Self::jacobian)) }).unwrap();
     }
 
-    fn step(&mut self) -> Result<()> {
+    fn step(&mut self, tstop: Option<Eqn::T>) -> Result<OdeSolverStopReason<Eqn::T>> {
         let state = self.state.as_mut().ok_or(anyhow!("State not set"))?;
         if self.problem.is_none() {
             return Err(anyhow!("Problem not set"));
+        }
+        let itask = IDA_ONE_STEP;
+        if let Some(tstop) = tstop {
+            Self::check(unsafe { IDASetStopTime(self.ida_mem, tstop) }).unwrap();
         }
         let retval = unsafe {
             IDASolve(
@@ -337,7 +342,7 @@ where
                 &mut state.t as *mut realtype,
                 state.y.sundials_vector(),
                 self.yp.sundials_vector(),
-                IDA_ONE_STEP,
+                itask,
             )
         };
 
@@ -346,9 +351,9 @@ where
 
         // check return value
         match retval {
-            IDA_SUCCESS => Ok(()),
-            IDA_TSTOP_RETURN => Ok(()),
-            IDA_ROOT_RETURN => Ok(()),
+            IDA_SUCCESS => Ok(OdeSolverStopReason::InternalTimestep),
+            IDA_TSTOP_RETURN => Ok(OdeSolverStopReason::TstopReached),
+            IDA_ROOT_RETURN => Ok(OdeSolverStopReason::RootFound(state.t)),
             IDA_MEM_NULL => Err(anyhow!("The ida_mem argument was NULL.")),
             IDA_ILL_INPUT => Err(anyhow!("One of the inputs to IDASolve() was illegal, or some other input to the solver was either illegal or missing.")),
             IDA_TOO_MUCH_WORK => Err(anyhow!("The solver took mxstep internal steps but could not reach tout.")),

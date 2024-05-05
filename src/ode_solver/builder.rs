@@ -1,7 +1,12 @@
-use crate::{op::{closure::Closure, linear_closure::LinearClosure, unit::UnitCallable, Op}, vector::DefaultDenseMatrix, Matrix, OdeEquations, OdeSolverProblem, Vector};
+use std::rc::Rc;
+
+use crate::{
+    vector::DefaultDenseMatrix, Closure, LinearClosure, Matrix, OdeEquations, OdeSolverProblem, Op,
+    UnitCallable, Vector,
+};
 use anyhow::Result;
 
-use super::equations::{OdeSolverEquations};
+use super::equations::OdeSolverEquations;
 
 /// Builder for ODE problems. Use methods to set parameters and then call one of the build methods when done.
 pub struct OdeBuilder {
@@ -166,7 +171,11 @@ impl OdeBuilder {
         rhs_jac: G,
         mass: H,
         init: I,
-    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, Closure<M, F, G>, LinearClosure<M, H>, UnitCallable<M>, I>>>
+    ) -> Result<
+        OdeSolverProblem<
+            OdeSolverEquations<M, Closure<M, F, G>, LinearClosure<M, H>, UnitCallable<M>, I>,
+        >,
+    >
     where
         M: Matrix,
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -174,23 +183,19 @@ impl OdeBuilder {
         H: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
         I: Fn(&M::V, M::T) -> M::V,
     {
-        let p = Self::build_p(self.p);
+        let p = Rc::new(Self::build_p(self.p));
         let t0 = M::T::from(self.t0);
         let y0 = init(&p, t0);
         let nstates = y0.len();
-        let rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p);
-        let mass = LinearClosure::new(mass, nstates, nstates, p);
-        let root = UnitCallable::new(nstates);
-        let eqn = OdeSolverEquations::new_ode_with_mass(
-            rhs,
-            mass,
-            root,
-            init,
-            p,
-            M::T::from(self.t0),
-            self.use_coloring,
-            self.constant_mass,
-        );
+        let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
+        let mut mass = LinearClosure::new(mass, nstates, nstates, p.clone());
+        if self.use_coloring {
+            rhs.calculate_sparsity(&y0, t0);
+            mass.calculate_sparsity(t0);
+        }
+        let mass = Rc::new(mass);
+        let rhs = Rc::new(rhs);
+        let eqn = OdeSolverEquations::new(rhs, mass, None, init, p, self.constant_mass);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
         Ok(OdeSolverProblem::new(
             eqn,
@@ -235,22 +240,28 @@ impl OdeBuilder {
         rhs: F,
         rhs_jac: G,
         init: I,
-    ) -> Result<OdeSolverProblem<OdeSolverEquationsMassI<M, F, G, I>>>
+    ) -> Result<
+        OdeSolverProblem<
+            OdeSolverEquations<M, Closure<M, F, G>, UnitCallable<M>, UnitCallable<M>, I>,
+        >,
+    >
     where
         M: Matrix,
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
         G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
         I: Fn(&M::V, M::T) -> M::V,
     {
-        let p = Self::build_p(self.p);
-        let eqn = OdeSolverEquationsMassI::new_ode(
-            rhs,
-            rhs_jac,
-            init,
-            p,
-            M::T::from(self.t0),
-            self.use_coloring,
-        );
+        let p = Rc::new(Self::build_p(self.p));
+        let t0 = M::T::from(self.t0);
+        let y0 = init(&p, t0);
+        let nstates = y0.len();
+        let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
+        let mass = Rc::new(UnitCallable::new(nstates));
+        if self.use_coloring {
+            rhs.calculate_sparsity(&y0, t0);
+        }
+        let rhs = Rc::new(rhs);
+        let eqn = OdeSolverEquations::new(rhs, mass, None, init, p, self.use_coloring);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
         Ok(OdeSolverProblem::new(
             eqn,
@@ -268,7 +279,17 @@ impl OdeBuilder {
         rhs: F,
         rhs_jac: G,
         init: I,
-    ) -> Result<OdeSolverProblem<OdeSolverEquationsMassI<V::M, F, G, I>>>
+    ) -> Result<
+        OdeSolverProblem<
+            OdeSolverEquations<
+                V::M,
+                Closure<V::M, F, G>,
+                UnitCallable<V::M>,
+                UnitCallable<V::M>,
+                I,
+            >,
+        >,
+    >
     where
         V: Vector + DefaultDenseMatrix,
         F: Fn(&V, &V, V::T, &mut V),

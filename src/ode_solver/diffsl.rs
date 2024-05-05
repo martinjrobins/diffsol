@@ -58,14 +58,25 @@ pub struct DiffSl<'a> {
     context: &'a DiffSlContext,
     rhs: Rc<DiffSlRhs<'a>>,
     mass: Rc<DiffSlMass<'a>>,
+    root: Rc<DiffSlRoot<'a>>,
 }
 
 impl<'a> DiffSl<'a> {
     pub fn new(context: &'a DiffSlContext, use_coloring: bool) -> Self {
         let rhs = Rc::new(DiffSlRhs::new(context, use_coloring));
         let mass = Rc::new(DiffSlMass::new(context, use_coloring));
-        Self { context, rhs, mass }
+        let root = Rc::new(DiffSlRoot::new(context));
+        Self {
+            context,
+            rhs,
+            mass,
+            root,
+        }
     }
+}
+
+pub struct DiffSlRoot<'a> {
+    context: &'a DiffSlContext,
 }
 
 pub struct DiffSlRhs<'a> {
@@ -76,6 +87,12 @@ pub struct DiffSlRhs<'a> {
 pub struct DiffSlMass<'a> {
     context: &'a DiffSlContext,
     coloring: Option<JacobianColoring<M>>,
+}
+
+impl<'a> DiffSlRoot<'a> {
+    pub fn new(context: &'a DiffSlContext) -> Self {
+        Self { context }
+    }
 }
 
 impl<'a> DiffSlRhs<'a> {
@@ -133,6 +150,22 @@ macro_rules! impl_op_for_diffsl {
 
 impl_op_for_diffsl!(DiffSlRhs);
 impl_op_for_diffsl!(DiffSlMass);
+impl_op_for_diffsl!(DiffSlRoot);
+
+impl NonLinearOp for DiffSlRoot<'_> {
+    fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
+        self.context.compiler.calc_stop(
+            t,
+            x.as_slice(),
+            self.context.data.borrow_mut().as_mut_slice(),
+            y.as_mut_slice(),
+        );
+    }
+
+    fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
+        y.fill(0.0);
+    }
+}
 
 impl NonLinearOp for DiffSlRhs<'_> {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
@@ -195,6 +228,7 @@ impl<'a> OdeEquations for DiffSl<'a> {
     type V = V;
     type Mass = DiffSlMass<'a>;
     type Rhs = DiffSlRhs<'a>;
+    type Root = DiffSlRoot<'a>;
 
     fn rhs(&self) -> &Rc<Self::Rhs> {
         &self.rhs
@@ -202,6 +236,10 @@ impl<'a> OdeEquations for DiffSl<'a> {
 
     fn mass(&self) -> &Rc<Self::Mass> {
         &self.mass
+    }
+
+    fn root(&self) -> Option<&Rc<Self::Root>> {
+        Some(&self.root)
     }
 
     fn set_params(&mut self, p: Self::V) {
