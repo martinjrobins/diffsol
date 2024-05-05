@@ -7,13 +7,7 @@ use num_traits::{abs, One, Pow, Zero};
 use serde::Serialize;
 
 use crate::{
-    matrix::{default_solver::DefaultSolver, Matrix, MatrixRef},
-    op::bdf::BdfCallable,
-    scalar::scale,
-    vector::DefaultDenseMatrix,
-    DenseMatrix, IndexType, MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver,
-    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, RootFinder, Scalar,
-    SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
+    matrix::{default_solver::DefaultSolver, Matrix, MatrixRef}, nonlinear_solver::root::RootFinder, op::bdf::BdfCallable, scalar::scale, vector::DefaultDenseMatrix, DenseMatrix, IndexType, MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut
 };
 
 pub mod faer;
@@ -78,7 +72,8 @@ pub struct Bdf<
     error_const: Vec<Eqn::T>,
     statistics: BdfStatistics<Eqn::T>,
     state: Option<OdeSolverState<Eqn::V>>,
-    root_finder: RootFinder<Eqn>,
+    tstop: Option<Eqn::T>,
+    root_finder: Option<RootFinder<Eqn>>,
 }
 
 impl<Eqn> Default
@@ -100,7 +95,6 @@ where
         let mut nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
         type M<V> = <V as DefaultDenseMatrix>::M;
-        let root_finder = RootFinder::new();
         Self {
             ode_problem: None,
             nonlinear_solver,
@@ -114,7 +108,8 @@ where
             u: <M<Eqn::V> as Matrix>::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
             statistics: BdfStatistics::default(),
             state: None,
-            root_finder,
+            tstop: None,
+            root_finder: None,
         }
     }
 }
@@ -254,6 +249,22 @@ where
         };
         (y_predict, t_new)
     }
+
+    fn handle_tstop(&mut self, tstop: Eqn::T) -> Option<OdeSolverStopReason<Eqn::T>> {
+        // check if the we are at tstop
+        let state = self.state.as_ref().unwrap();
+        let troundoff = Eqn::T::from(100.0) * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
+        if abs(state.t - tstop) <= troundoff {
+            return Some(OdeSolverStopReason::TstopReached);
+        }
+
+        // check if the next step will be beyond tstop, if so adjust the step size
+        if state.t + state.h > tstop {
+            let factor = (tstop - state.t) / state.h;
+            self._update_step_size(factor);
+        }
+        None
+    }
 }
 
 impl<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations, Nls> OdeSolverMethod<Eqn>
@@ -374,9 +385,13 @@ where
 
         // store state
         self.state = Some(state);
+        if let Some(_root_fn) = problem.eqn.root() {
+            let state = self.state.as_ref().unwrap();
+            self.root_finder = Some(RootFinder::new(state.y.len()));
+        }
     }
 
-    fn step(&mut self, tstop: Option<Eqn::T>) -> Result<OdeSolverStopReason<Eqn::T>> {
+    fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>> {
         let mut d: Eqn::V;
         let mut safety: Eqn::T;
         let mut error_norm: Eqn::T;
@@ -387,14 +402,15 @@ where
         }
         // setup root finder if required
 
-        if let Some(root_fn) = self.ode_problem.as_ref().unwrap().eqn.root() {
-            self.root_finder.set_g0(
-                root_fn.as_ref(),
-                &self.state.as_ref().unwrap().y,
-                self.state.as_ref().unwrap().t,
-            );
-        }
         let (mut y_predict, mut t_new) = self._predict_forward();
+
+
+        if let Some(root_fn) = self.problem().unwrap().eqn.root() {
+            let state = self.state.as_ref().unwrap();
+            self.root_finder.as_ref().unwrap().set_g0(root_fn.as_ref(), &state.y, state.t);
+        }
+
+
 
         // loop until step is accepted
         let y_new = loop {
@@ -547,8 +563,8 @@ where
         }
 
         // check for root within accepted step
-        if let Some(root_fn) = self.ode_problem.as_ref().unwrap().eqn.root() {
-            let ret = self.root_finder.set_g1(
+        if let Some(root_fn) = self.problem().as_ref().unwrap().eqn.root() {
+            let ret = self.root_finder.as_ref().unwrap().set_g1(
                 &|t| self.interpolate(t),
                 root_fn.as_ref(),
                 &self.state.as_ref().unwrap().y,
@@ -559,25 +575,22 @@ where
             }
         }
 
-        // check if the we are at tstop
-        if let Some(tstop) = tstop {
-            let state = self.state.as_ref().unwrap();
-            let troundoff = Eqn::T::from(100.0) * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
-            if abs(state.t - tstop) <= troundoff {
-                return Ok(OdeSolverStopReason::TstopReached);
+
+        if let Some(tstop) = self.tstop {
+            if let Some(reason) = self.handle_tstop(tstop) {
+                return Ok(reason);
             }
         }
 
-        // check if the next step will be beyond tstop, if so adjust the step size
-        if let Some(tstop) = tstop {
-            let state = self.state.as_ref().unwrap();
-            if state.t + state.h > tstop {
-                let factor = (tstop - state.t) / state.h;
-                self._update_step_size(factor);
-            }
-        }
 
         // just a normal step, no roots or tstop reached
         Ok(OdeSolverStopReason::InternalTimestep)
+    }
+
+    fn set_stop_time(&mut self, tstop: <Eqn as OdeEquations>::T) {
+        self.tstop = Some(tstop);
+        if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop) {
+            self.tstop = None;
+        }
     }
 }

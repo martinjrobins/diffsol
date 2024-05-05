@@ -212,7 +212,7 @@ mod tests {
         let state = OdeSolverState::new(&problem);
         solver.set_problem(state, &problem);
         while solver.state().unwrap().t <= t {
-            solver.step(None).unwrap();
+            solver.step().unwrap();
         }
         let y2 = solver.interpolate(t).unwrap();
 
@@ -253,7 +253,7 @@ mod tests {
         let state = OdeSolverState::new(&problem);
         solver.set_problem(state, &problem);
         while solver.state().unwrap().t <= t {
-            solver.step(None).unwrap();
+            solver.step().unwrap();
         }
         let y2 = solver.interpolate(t).unwrap();
 

@@ -173,7 +173,7 @@ impl OdeBuilder {
         init: I,
     ) -> Result<
         OdeSolverProblem<
-            OdeSolverEquations<M, Closure<M, F, G>, LinearClosure<M, H>, UnitCallable<M>, I>,
+            OdeSolverEquations<M, Closure<M, F, G>, I, LinearClosure<M, H>>,
         >,
     >
     where
@@ -235,6 +235,7 @@ impl OdeBuilder {
     ///        |p, _t| DVector::from_element(1, 0.1),
     ///    );
     /// ```
+    #[allow(clippy::type_complexity)]
     pub fn build_ode<M, F, G, I>(
         self,
         rhs: F,
@@ -242,7 +243,7 @@ impl OdeBuilder {
         init: I,
     ) -> Result<
         OdeSolverProblem<
-            OdeSolverEquations<M, Closure<M, F, G>, UnitCallable<M>, UnitCallable<M>, I>,
+            OdeSolverEquations<M, Closure<M, F, G>, I>,
         >,
     >
     where
@@ -284,8 +285,6 @@ impl OdeBuilder {
             OdeSolverEquations<
                 V::M,
                 Closure<V::M, F, G>,
-                UnitCallable<V::M>,
-                UnitCallable<V::M>,
                 I,
             >,
         >,

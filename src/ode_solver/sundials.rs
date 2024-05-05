@@ -326,15 +326,16 @@ where
         Self::check(unsafe { IDASetJacFn(ida_mem, Some(Self::jacobian)) }).unwrap();
     }
 
-    fn step(&mut self, tstop: Option<Eqn::T>) -> Result<OdeSolverStopReason<Eqn::T>> {
+    fn set_stop_time(&mut self, tstop: Eqn::T) {
+        Self::check(unsafe { IDASetStopTime(self.ida_mem, tstop) }).unwrap();
+    }
+
+    fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>> {
         let state = self.state.as_mut().ok_or(anyhow!("State not set"))?;
         if self.problem.is_none() {
             return Err(anyhow!("Problem not set"));
         }
         let itask = IDA_ONE_STEP;
-        if let Some(tstop) = tstop {
-            Self::check(unsafe { IDASetStopTime(self.ida_mem, tstop) }).unwrap();
-        }
         let retval = unsafe {
             IDASolve(
                 self.ida_mem,

@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use crate::{
     op::filter::FilterCallable, scalar::Scalar, LinearOp, Matrix, NonLinearSolver, OdeEquations,
-    OdeSolverProblem, SolverProblem, Vector, VectorIndex,
+    OdeSolverProblem, SolverProblem, Vector, VectorIndex
 };
 
 pub enum OdeSolverStopReason<T: Scalar> {
@@ -44,8 +44,12 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     /// The return value is a `Result` containing the reason for stopping the solver, possible reasons are:
     /// - `InternalTimestep`: The solver has taken a step forward in time, the internal state of the solver is at time self.state().t
     /// - `RootFound(t_root)`: The solver has found a root at time `t_root`. Note that the internal state of the solver is at the internal time step `self.state().t`, *not* at time `t_root`.
-    /// - `TstopReached`: The solver has reached the stop time, the internal state of the solver is at time `tstop`, which is the same as `self.state().t`
-    fn step(&mut self, tstop: Option<Eqn::T>) -> Result<OdeSolverStopReason<Eqn::T>>;
+    /// - `TstopReached`: The solver has reached the stop time set by [Self::set_stop_time], the internal state of the solver is at time `tstop`, which is the same as `self.state().t`
+    fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>>;
+
+    /// Set a stop time for the solver. The solver will stop when the internal time reaches this time. 
+    /// Once it stops, the stop time is unset.
+    fn set_stop_time(&mut self, tstop: Eqn::T);
 
     /// Interpolate the solution at a given time. This time should be between the current time and the last solver time step
     fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V>;
@@ -62,8 +66,11 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     fn solve(&mut self, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Result<Eqn::V> {
         let state = OdeSolverState::new(problem);
         self.set_problem(state, problem);
-        while self.state().unwrap().t <= t {
-            self.step(Some(t))?;
+        self.set_stop_time(t);
+        loop {
+            if let OdeSolverStopReason::TstopReached = self.step()? {
+                break
+            }
         }
         Ok(self.state().unwrap().y.clone())
     }
@@ -77,8 +84,11 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     ) -> Result<Eqn::V> {
         let state = OdeSolverState::new_consistent(problem, root_solver)?;
         self.set_problem(state, problem);
-        while self.state().unwrap().t <= t {
-            self.step(Some(t))?;
+        self.set_stop_time(t);
+        loop {
+            if let OdeSolverStopReason::TstopReached = self.step()? {
+                break
+            }
         }
         Ok(self.state().unwrap().y.clone())
     }
