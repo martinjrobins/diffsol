@@ -14,7 +14,6 @@ pub struct RootFinder<Eqn: OdeEquations> {
     gmid: RefCell<Eqn::V>,
 }
 
-
 impl<Eqn: OdeEquations> RootFinder<Eqn> {
     pub fn new(n: usize) -> Self {
         Self {
@@ -27,22 +26,19 @@ impl<Eqn: OdeEquations> RootFinder<Eqn> {
 
     /// Set the lower boundary of the root search.
     /// This function should be called first after [Self::new]
-    pub fn set_g0(
-        &self,
-        root_fn: &impl NonLinearOp<V = Eqn::V, T = Eqn::T>,
-        y: &Eqn::V,
-        t: Eqn::T,
-    ) {
+    pub fn init(&self, root_fn: &impl NonLinearOp<V = Eqn::V, T = Eqn::T>, y: &Eqn::V, t: Eqn::T) {
         root_fn.call_inplace(y, t, &mut self.g0.borrow_mut());
         self.t0.replace(t);
     }
 
     /// Set the upper boundary of the root search and checks for a zero crossing.
     /// If a zero crossing is found, the index of the crossing is returned
-    /// This function should be called after [Self::set_g0]
+    ///
+    /// This function assumes that g0 and t0 have already beeen set via [Self::init]
+    /// or previous iterations of [Self::check_root]
     ///
     /// We find the root of a function using the method proposed by Sundials docs (https://sundials.readthedocs.io/en/latest/cvode/Mathematics_link.html#rootfinding)
-    pub fn set_g1(
+    pub fn check_root(
         &self,
         interpolate: &impl Fn(Eqn::T) -> Result<Eqn::V>,
         root_fn: &impl NonLinearOp<V = Eqn::V, T = Eqn::T>,
@@ -67,10 +63,13 @@ impl<Eqn: OdeEquations> RootFinder<Eqn> {
                 }
                 acc
             };
-        let (rootfnd, _gfracmax, imax) = (*g0).binary_fold(g1, (false, Eqn::T::zero(), -1), sign_change_fn);
+        let (rootfnd, _gfracmax, imax) =
+            (*g0).binary_fold(g1, (false, Eqn::T::zero(), -1), sign_change_fn);
 
         // if no sign change we don't need to find the root
         if imax < 0 {
+            // setup g0 for next iteration
+            std::mem::swap(g0, g1);
             return if rootfnd {
                 // found a root at the upper boundary and no other sign change, return the root
                 Some(t)
@@ -93,8 +92,7 @@ impl<Eqn: OdeEquations> RootFinder<Eqn> {
         let five = Eqn::T::from(5.0);
         let pntone = Eqn::T::from(0.1);
         while abs(t1 - t0) <= tol {
-            let mut t_mid =
-                t1 - (t1 - t0) * g1[imax] / (g1[imax] - alpha * g0[imax]);
+            let mut t_mid = t1 - (t1 - t0) * g1[imax] / (g1[imax] - alpha * g0[imax]);
 
             // adjust t_mid away from the boundaries
             if abs(t_mid - t0) < half * tol {
@@ -119,7 +117,8 @@ impl<Eqn: OdeEquations> RootFinder<Eqn> {
             let ymid = interpolate(t_mid).unwrap();
             root_fn.call_inplace(&ymid, t_mid, gmid);
 
-            let (rootfnd, _gfracmax, imax_i32) = (*g0).binary_fold(gmid, (false, Eqn::T::zero(), -1), sign_change_fn);
+            let (rootfnd, _gfracmax, imax_i32) =
+                (*g0).binary_fold(gmid, (false, Eqn::T::zero(), -1), sign_change_fn);
             let lower = imax_i32 >= 0;
             imax = IndexType::try_from(imax_i32).unwrap();
 
@@ -128,6 +127,9 @@ impl<Eqn: OdeEquations> RootFinder<Eqn> {
                 t1 = t_mid;
                 std::mem::swap(g1, gmid);
             } else if rootfnd {
+                // we are returning so make sure g0 is set for next iteration
+                root_fn.call_inplace(y, t, g0);
+
                 // No sign change in (tlo,tmid), but g = 0 at tmid; return root tmid.
                 return Some(t_mid);
             } else {
@@ -148,6 +150,8 @@ impl<Eqn: OdeEquations> RootFinder<Eqn> {
             }
             i += 1;
         }
+        // we are returning so make sure g0 is set for next iteration
+        root_fn.call_inplace(y, t, g0);
         Some(t1)
     }
 }

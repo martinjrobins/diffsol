@@ -7,10 +7,10 @@ use std::ops::MulAssign;
 use std::rc::Rc;
 
 use crate::matrix::MatrixRef;
-use crate::RootFinder;
 use crate::vector::VectorRef;
 use crate::NewtonNonlinearSolver;
 use crate::OdeSolverStopReason;
+use crate::RootFinder;
 use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
@@ -275,9 +275,13 @@ where
         self.old_y = state.y.clone();
         self.state = Some(state);
         self.problem = Some(problem.clone());
-        if let Some(_root_fn) = problem.eqn.root() {
+        if let Some(root_fn) = problem.eqn.root() {
             let state = self.state.as_ref().unwrap();
             self.root_finder = Some(RootFinder::new(state.y.len()));
+            self.root_finder
+                .as_ref()
+                .unwrap()
+                .init(root_fn.as_ref(), &state.y, state.t);
         }
     }
 
@@ -286,11 +290,6 @@ where
         let state = self.state.as_mut().unwrap();
         let n = state.y.len();
         let y0 = &state.y;
-
-        // setup root finder if required
-        if let Some(root_fn) = self.problem.as_ref().unwrap().eqn.root() {
-            self.root_finder.as_ref().unwrap().set_g0(root_fn.as_ref(), y0, state.t);
-        }
 
         let start = if self.is_sdirk { 0 } else { 1 };
         let mut updated_jacobian = false;
@@ -461,7 +460,7 @@ where
 
         // check for root within accepted step
         if let Some(root_fn) = self.problem.as_ref().unwrap().eqn.root() {
-            let ret = self.root_finder.as_ref().unwrap().set_g1(
+            let ret = self.root_finder.as_ref().unwrap().check_root(
                 &|t| self.interpolate(t),
                 root_fn.as_ref(),
                 &self.state.as_ref().unwrap().y,
@@ -475,7 +474,7 @@ where
         // check if the we are at tstop
         if let Some(tstop) = self.tstop {
             if let Some(reason) = self.handle_tstop(tstop) {
-                return Ok(reason)
+                return Ok(reason);
             }
         }
 

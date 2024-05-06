@@ -7,7 +7,14 @@ use num_traits::{abs, One, Pow, Zero};
 use serde::Serialize;
 
 use crate::{
-    matrix::{default_solver::DefaultSolver, Matrix, MatrixRef}, nonlinear_solver::root::RootFinder, op::bdf::BdfCallable, scalar::scale, vector::DefaultDenseMatrix, DenseMatrix, IndexType, MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut
+    matrix::{default_solver::DefaultSolver, Matrix, MatrixRef},
+    nonlinear_solver::root::RootFinder,
+    op::bdf::BdfCallable,
+    scalar::scale,
+    vector::DefaultDenseMatrix,
+    DenseMatrix, IndexType, MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar,
+    SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
 };
 
 pub mod faer;
@@ -385,9 +392,13 @@ where
 
         // store state
         self.state = Some(state);
-        if let Some(_root_fn) = problem.eqn.root() {
+        if let Some(root_fn) = problem.eqn.root() {
             let state = self.state.as_ref().unwrap();
             self.root_finder = Some(RootFinder::new(state.y.len()));
+            self.root_finder
+                .as_ref()
+                .unwrap()
+                .init(root_fn.as_ref(), &state.y, state.t);
         }
     }
 
@@ -403,14 +414,6 @@ where
         // setup root finder if required
 
         let (mut y_predict, mut t_new) = self._predict_forward();
-
-
-        if let Some(root_fn) = self.problem().unwrap().eqn.root() {
-            let state = self.state.as_ref().unwrap();
-            self.root_finder.as_ref().unwrap().set_g0(root_fn.as_ref(), &state.y, state.t);
-        }
-
-
 
         // loop until step is accepted
         let y_new = loop {
@@ -564,7 +567,7 @@ where
 
         // check for root within accepted step
         if let Some(root_fn) = self.problem().as_ref().unwrap().eqn.root() {
-            let ret = self.root_finder.as_ref().unwrap().set_g1(
+            let ret = self.root_finder.as_ref().unwrap().check_root(
                 &|t| self.interpolate(t),
                 root_fn.as_ref(),
                 &self.state.as_ref().unwrap().y,
@@ -575,13 +578,11 @@ where
             }
         }
 
-
         if let Some(tstop) = self.tstop {
             if let Some(reason) = self.handle_tstop(tstop) {
                 return Ok(reason);
             }
         }
-
 
         // just a normal step, no roots or tstop reached
         Ok(OdeSolverStopReason::InternalTimestep)
