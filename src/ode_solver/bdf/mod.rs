@@ -212,9 +212,8 @@ where
         //D^{j + 1} y_n = D^{j} y_n - D^{j} y_{n - 1}
         //
         //Combining these gives the following algorithm
-        std::mem::swap(&mut self.diff, &mut self.diff_tmp);
         let order = self.order;
-        let d_minus_order_plus_one = d - self.diff_tmp.column(order + 1);
+        let d_minus_order_plus_one = d - self.diff.column(order + 1);
         self.diff
             .column_mut(order + 2)
             .copy_from(&d_minus_order_plus_one);
