@@ -7,6 +7,7 @@ use serde::Serialize;
 
 pub mod bdf;
 pub mod closure;
+pub mod closure_no_jac;
 pub mod constant_closure;
 pub mod filter;
 pub mod linear_closure;

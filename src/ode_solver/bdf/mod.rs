@@ -80,7 +80,7 @@ pub struct Bdf<
     statistics: BdfStatistics<Eqn::T>,
     state: Option<OdeSolverState<Eqn::V>>,
     tstop: Option<Eqn::T>,
-    root_finder: Option<RootFinder<Eqn>>,
+    root_finder: Option<RootFinder<Eqn::V>>,
 }
 
 impl<Eqn> Default
@@ -203,7 +203,6 @@ where
     fn _update_differences(&mut self, d: &Eqn::V) {
         //update of difference equations can be done efficiently
         //by reusing d and D.
-        //we store the old differences in diff_tmp if required
         //
         //From first equation on page 4 of [1]:
         //d = y_n - y^0_n = D^{k + 1} y_n
@@ -256,20 +255,22 @@ where
         (y_predict, t_new)
     }
 
-    fn handle_tstop(&mut self, tstop: Eqn::T) -> Option<OdeSolverStopReason<Eqn::T>> {
+    fn handle_tstop(&mut self, tstop: Eqn::T) -> Result<Option<OdeSolverStopReason<Eqn::T>>> {
         // check if the we are at tstop
         let state = self.state.as_ref().unwrap();
         let troundoff = Eqn::T::from(100.0) * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
         if abs(state.t - tstop) <= troundoff {
-            return Some(OdeSolverStopReason::TstopReached);
+            return Ok(Some(OdeSolverStopReason::TstopReached));
+        } else if tstop < state.t - troundoff {
+            return Err(anyhow!("tstop is before current time"));
         }
 
         // check if the next step will be beyond tstop, if so adjust the step size
-        if state.t + state.h > tstop {
+        if state.t + state.h > tstop + troundoff {
             let factor = (tstop - state.t) / state.h;
             self._update_step_size(factor);
         }
-        None
+        Ok(None)
     }
 }
 
@@ -393,7 +394,7 @@ where
         self.state = Some(state);
         if let Some(root_fn) = problem.eqn.root() {
             let state = self.state.as_ref().unwrap();
-            self.root_finder = Some(RootFinder::new(state.y.len()));
+            self.root_finder = Some(RootFinder::new(root_fn.nout()));
             self.root_finder
                 .as_ref()
                 .unwrap()
@@ -410,7 +411,6 @@ where
         if self.state.is_none() {
             return Err(anyhow!("State not set"));
         }
-        // setup root finder if required
 
         let (mut y_predict, mut t_new) = self._predict_forward();
 
@@ -578,7 +578,7 @@ where
         }
 
         if let Some(tstop) = self.tstop {
-            if let Some(reason) = self.handle_tstop(tstop) {
+            if let Some(reason) = self.handle_tstop(tstop).unwrap() {
                 return Ok(reason);
             }
         }
@@ -587,10 +587,12 @@ where
         Ok(OdeSolverStopReason::InternalTimestep)
     }
 
-    fn set_stop_time(&mut self, tstop: <Eqn as OdeEquations>::T) {
+    fn set_stop_time(&mut self, tstop: <Eqn as OdeEquations>::T) -> Result<()> {
         self.tstop = Some(tstop);
-        if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop) {
+        if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
             self.tstop = None;
+            return Err(anyhow!("tstop is at or before current time t = {}", self.state.as_ref().unwrap().t));
         }
+        Ok(())
     }
 }

@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use crate::{
-    vector::DefaultDenseMatrix, Closure, LinearClosure, Matrix, OdeEquations, OdeSolverProblem, Op,
-    UnitCallable, Vector,
+    vector::DefaultDenseMatrix, Closure, ClosureNoJac, LinearClosure, Matrix, OdeEquations,
+    OdeSolverProblem, Op, UnitCallable, Vector,
 };
 use anyhow::Result;
 
@@ -171,11 +171,7 @@ impl OdeBuilder {
         rhs_jac: G,
         mass: H,
         init: I,
-    ) -> Result<
-        OdeSolverProblem<
-            OdeSolverEquations<M, Closure<M, F, G>, I, LinearClosure<M, H>>,
-        >,
-    >
+    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, Closure<M, F, G>, I, LinearClosure<M, H>>>>
     where
         M: Matrix,
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -241,11 +237,7 @@ impl OdeBuilder {
         rhs: F,
         rhs_jac: G,
         init: I,
-    ) -> Result<
-        OdeSolverProblem<
-            OdeSolverEquations<M, Closure<M, F, G>, I>,
-        >,
-    >
+    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, Closure<M, F, G>, I>>>
     where
         M: Matrix,
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -273,6 +265,48 @@ impl OdeBuilder {
         ))
     }
 
+    #[allow(clippy::type_complexity)]
+    pub fn build_ode_with_root<M, F, G, I, H>(
+        self,
+        rhs: F,
+        rhs_jac: G,
+        init: I,
+        root: H,
+        nroots: usize,
+    ) -> Result<
+        OdeSolverProblem<
+            OdeSolverEquations<M, Closure<M, F, G>, I, UnitCallable<M>, ClosureNoJac<M, H>>,
+        >,
+    >
+    where
+        M: Matrix,
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        H: Fn(&M::V, &M::V, M::T, &mut M::V),
+        I: Fn(&M::V, M::T) -> M::V,
+    {
+        let p = Rc::new(Self::build_p(self.p));
+        let t0 = M::T::from(self.t0);
+        let y0 = init(&p, t0);
+        let nstates = y0.len();
+        let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
+        let mass = Rc::new(UnitCallable::new(nstates));
+        let root = Rc::new(ClosureNoJac::new(root, nstates, nroots, p.clone()));
+        if self.use_coloring {
+            rhs.calculate_sparsity(&y0, t0);
+        }
+        let rhs = Rc::new(rhs);
+        let eqn = OdeSolverEquations::new(rhs, mass, Some(root), init, p, self.use_coloring);
+        let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
+        Ok(OdeSolverProblem::new(
+            eqn,
+            M::T::from(self.rtol),
+            atol,
+            M::T::from(self.t0),
+            M::T::from(self.h0),
+        ))
+    }
+
     /// Build an ODE problem using the default dense matrix (see [Self::build_ode]).
     #[allow(clippy::type_complexity)]
     pub fn build_ode_dense<V, F, G, I>(
@@ -280,15 +314,7 @@ impl OdeBuilder {
         rhs: F,
         rhs_jac: G,
         init: I,
-    ) -> Result<
-        OdeSolverProblem<
-            OdeSolverEquations<
-                V::M,
-                Closure<V::M, F, G>,
-                I,
-            >,
-        >,
-    >
+    ) -> Result<OdeSolverProblem<OdeSolverEquations<V::M, Closure<V::M, F, G>, I>>>
     where
         V: Vector + DefaultDenseMatrix,
         F: Fn(&V, &V, V::T, &mut V),

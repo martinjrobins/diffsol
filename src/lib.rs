@@ -162,7 +162,8 @@ pub use ode_solver::{
     tableau::Tableau,
 };
 use op::{
-    closure::Closure, linear_closure::LinearClosure, unit::UnitCallable, LinearOp, NonLinearOp, Op,
+    closure::Closure, closure_no_jac::ClosureNoJac, linear_closure::LinearClosure,
+    unit::UnitCallable, LinearOp, NonLinearOp, Op,
 };
 use scalar::{IndexType, Scalar, Scale};
 use solver::SolverProblem;

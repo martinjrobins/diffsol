@@ -326,8 +326,8 @@ where
         Self::check(unsafe { IDASetJacFn(ida_mem, Some(Self::jacobian)) }).unwrap();
     }
 
-    fn set_stop_time(&mut self, tstop: Eqn::T) {
-        Self::check(unsafe { IDASetStopTime(self.ida_mem, tstop) }).unwrap();
+    fn set_stop_time(&mut self, tstop: Eqn::T) -> Result<()> {
+        Self::check(unsafe { IDASetStopTime(self.ida_mem, tstop) })
     }
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>> {
