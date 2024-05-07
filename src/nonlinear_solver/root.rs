@@ -50,19 +50,18 @@ impl<V: Vector> RootFinder<V> {
         let gmid = &mut *self.gmid.borrow_mut();
         root_fn.call_inplace(y, t, g1);
 
-        let sign_change_fn =
-            |mut acc: (bool, V::T, i32), g0: V::T, g1: V::T, i: IndexType| {
-                if g1 == V::T::zero() {
-                    acc.0 = true;
-                } else if g0 * g1 < V::T::zero() {
-                    let gfrac = abs(g1 / (g1 - g0));
-                    if gfrac > acc.1 {
-                        acc.1 = gfrac;
-                        acc.2 = i32::try_from(i).unwrap();
-                    }
+        let sign_change_fn = |mut acc: (bool, V::T, i32), g0: V::T, g1: V::T, i: IndexType| {
+            if g1 == V::T::zero() {
+                acc.0 = true;
+            } else if g0 * g1 < V::T::zero() {
+                let gfrac = abs(g1 / (g1 - g0));
+                if gfrac > acc.1 {
+                    acc.1 = gfrac;
+                    acc.2 = i32::try_from(i).unwrap();
                 }
-                acc
-            };
+            }
+            acc
+        };
         let (rootfnd, _gfracmax, imax) =
             (*g0).binary_fold(g1, (false, V::T::zero(), -1), sign_change_fn);
 
@@ -157,22 +156,18 @@ impl<V: Vector> RootFinder<V> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
 
+    use crate::{ClosureNoJac, RootFinder, Vector};
     use anyhow::Result;
-    use crate::{ClosureNoJac, Vector, RootFinder};
-
 
     #[test]
     fn test_root() {
         type V = nalgebra::DVector<f64>;
         type M = nalgebra::DMatrix<f64>;
-        let interpolate = |t: f64| -> Result<V> {
-            Ok(Vector::from_vec(vec![t]))
-        };
+        let interpolate = |t: f64| -> Result<V> { Ok(Vector::from_vec(vec![t])) };
         let root_fn = ClosureNoJac::<M, _>::new(
             |y: &V, _p: &V, _t: f64, g: &mut V| {
                 g[0] = y[0] - 0.4;
@@ -185,18 +180,19 @@ mod tests {
         // check no root
         let root_finder = RootFinder::new(1);
         root_finder.init(&root_fn, &Vector::from_vec(vec![0.0]), 0.0);
-        let root = root_finder.check_root(&interpolate, &root_fn, &Vector::from_vec(vec![0.3]), 0.3);
+        let root =
+            root_finder.check_root(&interpolate, &root_fn, &Vector::from_vec(vec![0.3]), 0.3);
         assert_eq!(root, None);
 
         // check root
         let root_finder = RootFinder::new(1);
         root_finder.init(&root_fn, &Vector::from_vec(vec![0.0]), 0.0);
-        let root = root_finder.check_root(&interpolate, &root_fn, &Vector::from_vec(vec![1.3]), 1.3);
+        let root =
+            root_finder.check_root(&interpolate, &root_fn, &Vector::from_vec(vec![1.3]), 1.3);
         if let Some(root) = root {
             assert!((root - 0.4).abs() < 1e-10);
         } else {
             unreachable!();
         }
-
     }
 }

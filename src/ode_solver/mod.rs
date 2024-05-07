@@ -62,25 +62,20 @@ mod tests {
         for point in solution.solution_points.iter() {
             let soln = if use_tstop {
                 match method.set_stop_time(point.t) {
-                    Ok(_) => {
-                        loop {
-                            match method.step() {
-                                Ok(OdeSolverStopReason::RootFound(_)) => {
-                                    assert!(have_root);
-                                    return method.state().unwrap().y.clone();
-                                }
-                                Ok(OdeSolverStopReason::TstopReached) => {
-                                    break method.state().unwrap().y.clone()
-                                }
-                                _ => (),
+                    Ok(_) => loop {
+                        match method.step() {
+                            Ok(OdeSolverStopReason::RootFound(_)) => {
+                                assert!(have_root);
+                                return method.state().unwrap().y.clone();
                             }
+                            Ok(OdeSolverStopReason::TstopReached) => {
+                                break method.state().unwrap().y.clone()
+                            }
+                            _ => (),
                         }
-                    }
-                    Err(_) => {
-                        method.state().unwrap().y.clone()
-                    }
+                    },
+                    Err(_) => method.state().unwrap().y.clone(),
                 }
-                
             } else {
                 while method.state().unwrap().t < point.t {
                     if let OdeSolverStopReason::RootFound(t) = method.step().unwrap() {

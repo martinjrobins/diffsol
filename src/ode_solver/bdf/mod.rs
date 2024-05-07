@@ -593,7 +593,10 @@ where
         self.tstop = Some(tstop);
         if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
             self.tstop = None;
-            return Err(anyhow!("tstop is at or before current time t = {}", self.state.as_ref().unwrap().t));
+            return Err(anyhow!(
+                "tstop is at or before current time t = {}",
+                self.state.as_ref().unwrap().t
+            ));
         }
         Ok(())
     }

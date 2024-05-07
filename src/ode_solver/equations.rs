@@ -73,7 +73,7 @@ pub trait OdeEquations {
 }
 
 /// This struct implements the ODE equation trait [OdeEquations] for a given right-hand side op, mass op, optional root op, and initial condition function.
-pub struct OdeSolverEquations<M, Rhs, I, Mass=UnitCallable<M>, Root=UnitCallable<M>>
+pub struct OdeSolverEquations<M, Rhs, I, Mass = UnitCallable<M>, Root = UnitCallable<M>>
 where
     M: Matrix,
     Rhs: NonLinearOp<M = M, V = M::V, T = M::T>,
@@ -157,8 +157,9 @@ where
         Rc::<Mass>::get_mut(&mut self.mass)
             .unwrap()
             .set_params(self.p.clone());
-        if let Some(r) = self.root
-            .as_mut() { Rc::<Root>::get_mut(r).unwrap().set_params(self.p.clone()) }
+        if let Some(r) = self.root.as_mut() {
+            Rc::<Root>::get_mut(r).unwrap().set_params(self.p.clone())
+        }
     }
 }
 

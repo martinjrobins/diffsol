@@ -14,8 +14,8 @@ use crate::RootFinder;
 use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
-    DenseMatrix, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Scalar, Vector,
-    VectorViewMut, Op
+    DenseMatrix, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Scalar,
+    Vector, VectorViewMut,
 };
 use crate::{LinearSolver, NonLinearOp};
 
@@ -493,7 +493,10 @@ where
         self.tstop = Some(tstop);
         if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
             self.tstop = None;
-            return Err(anyhow::anyhow!("Stop time is at or before current time t = {}", self.state.as_ref().unwrap().t));
+            return Err(anyhow::anyhow!(
+                "Stop time is at or before current time t = {}",
+                self.state.as_ref().unwrap().t
+            ));
         }
         Ok(())
     }

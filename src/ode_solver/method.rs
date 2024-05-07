@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use crate::{
     op::filter::FilterCallable, scalar::Scalar, LinearOp, Matrix, NonLinearSolver, OdeEquations,
-    OdeSolverProblem, SolverProblem, Vector, VectorIndex
+    OdeSolverProblem, SolverProblem, Vector, VectorIndex,
 };
 
 pub enum OdeSolverStopReason<T: Scalar> {
@@ -47,7 +47,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     /// - `TstopReached`: The solver has reached the stop time set by [Self::set_stop_time], the internal state of the solver is at time `tstop`, which is the same as `self.state().t`
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>>;
 
-    /// Set a stop time for the solver. The solver will stop when the internal time reaches this time. 
+    /// Set a stop time for the solver. The solver will stop when the internal time reaches this time.
     /// Once it stops, the stop time is unset. If `tstop` is at or before the current internal time, an error is returned.
     fn set_stop_time(&mut self, tstop: Eqn::T) -> Result<()>;
 
@@ -69,7 +69,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         self.set_stop_time(t)?;
         loop {
             if let OdeSolverStopReason::TstopReached = self.step()? {
-                break
+                break;
             }
         }
         Ok(self.state().unwrap().y.clone())
@@ -87,7 +87,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         self.set_stop_time(t)?;
         loop {
             if let OdeSolverStopReason::TstopReached = self.step()? {
-                break
+                break;
             }
         }
         Ok(self.state().unwrap().y.clone())
