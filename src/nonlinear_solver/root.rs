@@ -37,7 +37,7 @@ impl<V: Vector> RootFinder<V> {
     /// This function assumes that g0 and t0 have already beeen set via [Self::init]
     /// or previous iterations of [Self::check_root]
     ///
-    /// We find the root of a function using the method proposed by Sundials docs (https://sundials.readthedocs.io/en/latest/cvode/Mathematics_link.html#rootfinding)
+    /// We find the root of a function using the method proposed by Sundials [docs](https://sundials.readthedocs.io/en/latest/cvode/Mathematics_link.html#rootfinding)
     pub fn check_root(
         &self,
         interpolate: &impl Fn(V::T) -> Result<V>,
