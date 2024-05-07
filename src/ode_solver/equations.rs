@@ -98,7 +98,7 @@ where
     I: Fn(&M::V, M::T) -> M::V,
 {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
+    pub fn new(
         rhs: Rc<Rhs>,
         mass: Rc<Mass>,
         root: Option<Rc<Root>>,
