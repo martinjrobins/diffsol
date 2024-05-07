@@ -533,7 +533,7 @@ mod tests {
     }
 
     impl<M: Matrix> NonLinearOp for TestEqnRhs<M> {
-        fn call_inplace(&self, _x: &Self::V, _t: Self::T, y: &mut Self::V) {
+        fn call_inplace(&self, _x: <Self::V as Vector>::View<'_>, _t: Self::T, y: <Self::V as Vector>::ViewMut<'_>) {
             y[0] = M::T::zero();
         }
 

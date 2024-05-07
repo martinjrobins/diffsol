@@ -84,10 +84,10 @@ impl<'a> SundialsVectorViewMut<'a> {
 pub struct SundialsVectorView<'a>(&'a SundialsVector);
 
 impl<'a> SundialsVectorView<'a> {
-    fn sundials_vector(&self) -> N_Vector {
+    pub fn sundials_vector(&self) -> N_Vector {
         self.0.sundials_vector()
     }
-    fn len(&self) -> IndexType {
+    pub fn len(&self) -> IndexType {
         unsafe { N_VGetLength_Serial(self.sundials_vector()) as IndexType }
     }
 }
@@ -458,10 +458,10 @@ impl Vector for SundialsVector {
     fn add_scalar_mut(&mut self, scalar: Self::T) {
         unsafe { N_VAddConst(self.sundials_vector(), scalar, self.sundials_vector()) }
     }
-    fn as_view(&self) -> Self::View<'_> {
+    fn view(&self) -> Self::View<'_> {
         SundialsVectorView(self)
     }
-    fn as_view_mut(&mut self) -> Self::ViewMut<'_> {
+    fn view_mut(&mut self) -> Self::ViewMut<'_> {
         SundialsVectorViewMut(self)
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {

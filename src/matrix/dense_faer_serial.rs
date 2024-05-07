@@ -2,7 +2,7 @@ use std::ops::{Mul, MulAssign};
 
 use super::default_solver::DefaultSolver;
 use super::{Dense, DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixView, MatrixViewMut};
-use crate::op::NonLinearOp;
+use crate::op::{NonLinearOp, VView, VViewMut};
 use crate::scalar::{IndexType, Scalar, Scale};
 use crate::vector::Vector;
 use crate::FaerLU;
@@ -155,7 +155,7 @@ impl<T: Scalar> Matrix for Mat<T> {
         }
         Ok(m)
     }
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
+    fn gemv(&self, alpha: Self::T, x: VView<'_, Self>, beta: Self::T, mut y: VViewMut<'_, Self>) {
         *y = faer::scale(alpha) * self * x + faer::scale(beta) * &*y;
     }
     fn zeros(nrows: IndexType, ncols: IndexType) -> Self {

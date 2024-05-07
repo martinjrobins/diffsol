@@ -12,7 +12,7 @@ use sundials_sys::{
 
 use crate::{
     ode_solver::sundials::sundials_check,
-    op::NonLinearOp,
+    op::{NonLinearOp, VView, VViewMut},
     scalar::scale,
     vector::sundials::{get_suncontext, SundialsVector},
     IndexType, Scale, SundialsLinearSolver, Vector,
@@ -302,7 +302,7 @@ impl Matrix for SundialsMatrix {
     }
 
     /// Perform a matrix-vector multiplication `y = alpha * self * x + beta * y`.
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
+    fn gemv(&self, alpha: Self::T, x: VView<'_, Self>, beta: Self::T, mut y: VViewMut<'_, Self>) {
         let a = self.sundials_matrix();
         let tmp = SundialsVector::new_serial(self.nrows());
         sundials_check(unsafe { SUNMatMatvecSetup(a) }).unwrap();

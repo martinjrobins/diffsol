@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
+use crate::op::{VView, VViewMut};
 use crate::scalar::Scale;
 use crate::{IndexType, Scalar, Vector};
 use anyhow::Result;
@@ -210,7 +211,7 @@ pub trait Matrix:
     fn diagonal(&self) -> Self::V;
 
     /// Perform a matrix-vector multiplication `y = self * x + beta * y`.
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V);
+    fn gemv(&self, alpha: Self::T, x: VView<'_, Self>, beta: Self::T, y: VViewMut<'_, Self>);
 
     /// Copy the contents of `other` into `self`
     fn copy_from(&mut self, other: &Self);

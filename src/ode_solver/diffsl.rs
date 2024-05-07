@@ -4,9 +4,7 @@ use anyhow::Result;
 use diffsl::execution::Compiler;
 
 use crate::{
-    jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring},
-    op::{LinearOp, NonLinearOp, Op},
-    OdeEquations,
+    jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring}, op::{LinearOp, NonLinearOp, Op}, vector::Vector, OdeEquations
 };
 
 pub type T = f64;
@@ -170,7 +168,7 @@ impl Op for DiffSlRoot<'_> {
 }
 
 impl NonLinearOp for DiffSlRoot<'_> {
-    fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
+    fn call_inplace(&self, x: <Self::V as Vector>::View<'_>, t: Self::T, y: <Self::V as Vector>::ViewMut<'_>) {
         self.context.compiler.calc_stop(
             t,
             x.as_slice(),
@@ -185,7 +183,7 @@ impl NonLinearOp for DiffSlRoot<'_> {
 }
 
 impl NonLinearOp for DiffSlRhs<'_> {
-    fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
+    fn call_inplace(&self, x: <Self::V as Vector>::View<'_>, t: Self::T, y: <Self::V as Vector>::ViewMut<'_>) {
         self.context.compiler.rhs(
             t,
             x.as_slice(),
@@ -217,7 +215,7 @@ impl NonLinearOp for DiffSlRhs<'_> {
 }
 
 impl LinearOp for DiffSlMass<'_> {
-    fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
+    fn gemv_inplace(&self, x: <Self::V as Vector>::View<'_>, t: Self::T, beta: Self::T, y: <Self::V as Vector>::ViewMut<'_>) {
         let mut tmp = self.context.tmp.borrow_mut();
         self.context.compiler.mass(
             t,
@@ -339,7 +337,7 @@ mod tests {
         let init = eqn.init(0.0);
         let init_expect = DVector::from_vec(vec![y0, 0.0]);
         init.assert_eq_st(&init_expect, 1e-10);
-        let rhs = eqn.rhs().call(&init, 0.0);
+        let rhs = eqn.rhs().call(Vector::view(&init), 0.0);
         let rhs_expect = DVector::from_vec(vec![r * y0 * (1.0 - y0 / k), 2.0 * y0]);
         rhs.assert_eq_st(&rhs_expect, 1e-10);
         let v = DVector::from_vec(vec![1.0, 1.0]);
@@ -348,7 +346,7 @@ mod tests {
         rhs_jac.assert_eq_st(&rhs_jac_expect, 1e-10);
         let mut mass_y = DVector::from_vec(vec![0.0, 0.0]);
         let v = DVector::from_vec(vec![1.0, 1.0]);
-        eqn.mass().call_inplace(&v, 0.0, &mut mass_y);
+        eqn.mass().call_inplace(Vector::view(&v), 0.0, Vector::view_mut(&mut mass_y));
         let mass_y_expect = DVector::from_vec(vec![1.0, 0.0]);
         mass_y.assert_eq_st(&mass_y_expect, 1e-10);
 

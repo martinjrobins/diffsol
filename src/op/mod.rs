@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{Matrix, Scalar, Vector};
+use crate::{matrix::MatrixCommon, Matrix, Scalar, Vector};
 
 use num_traits::{One, Zero};
 use serde::Serialize;
@@ -15,6 +15,9 @@ pub mod linearise;
 pub mod matrix;
 pub mod sdirk;
 pub mod unit;
+
+pub type VView<'a, M> = <<M as MatrixCommon>::V as Vector>::View<'a>;
+pub type VViewMut<'a, M> = <<M as MatrixCommon>::V as Vector>::ViewMut<'a>;
 
 /// Op is a trait for operators that, given a paramter vector `p`, operates on an input vector `x` to produce an output vector `y`.
 /// It defines the number of states (i.e. length of `x`), the number of outputs (i.e. length of `y`), and number of parameters (i.e. length of `p`) of the operator.
@@ -86,15 +89,15 @@ impl OpStatistics {
 // jac_mul_inplace method, which computes the product of the Jacobian with a given vector.
 pub trait NonLinearOp: Op {
     /// Compute the operator at a given state and time.
-    fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V);
+    fn call_inplace(&self, x: <Self::V as Vector>::View<'_>, t: Self::T, y: <Self::V as Vector>::ViewMut<'_>);
 
     /// Compute the product of the Jacobian with a given vector.
     fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V);
 
     /// Compute the operator at a given state and time, and return the result.
-    fn call(&self, x: &Self::V, t: Self::T) -> Self::V {
+    fn call(&self, x: <Self::V as Vector>::View<'_>, t: Self::T) -> Self::V {
         let mut y = Self::V::zeros(self.nout());
-        self.call_inplace(x, t, &mut y);
+        self.call_inplace(x, t, y.view_mut());
         y
     }
 
@@ -136,13 +139,13 @@ pub trait NonLinearOp: Op {
 /// calling the operator via a GEMV operation (i.e. `y = t * A * x + beta * y`), and for computing the matrix representation of the operator.
 pub trait LinearOp: Op {
     /// Compute the operator at a given state and time
-    fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
+    fn call_inplace(&self, x: <Self::V as Vector>::View<'_>, t: Self::T, y: <Self::V as Vector>::ViewMut<'_>) {
         let beta = Self::T::zero();
         self.gemv_inplace(x, t, beta, y);
     }
 
     /// Computer the operator via a GEMV operation (i.e. `y = t * A * x + beta * y`)
-    fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V);
+    fn gemv_inplace(&self, x: <Self::V as Vector>::View<'_>, t: Self::T, beta: Self::T, y: <Self::V as Vector>::ViewMut<'_>);
 
     /// Compute the matrix representation of the operator and return it.
     fn matrix(&self, t: Self::T) -> Self::M {
@@ -162,7 +165,7 @@ pub trait LinearOp: Op {
         let mut col = Self::V::zeros(self.nout());
         for j in 0..self.nstates() {
             v[j] = Self::T::one();
-            self.call_inplace(&v, t, &mut col);
+            self.call_inplace(v.view(), t, col.view_mut());
             y.set_column(j, &col);
             v[j] = Self::T::zero();
         }

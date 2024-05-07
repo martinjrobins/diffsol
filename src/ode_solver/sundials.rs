@@ -153,9 +153,9 @@ where
         let mut rr = SundialsVector::new_not_owned(rr);
         // F(t, y, y') =  M y' - f(t, y)
         // rr = f(t, y)
-        data.eqn.rhs().call_inplace(&y, t, &mut rr);
+        data.eqn.rhs().call_inplace(y.view(), t, rr.view_mut());
         // rr = M y' - rr
-        data.eqn.mass().gemv_inplace(&yp, t, -1.0, &mut rr);
+        data.eqn.mass().gemv_inplace(yp.view(), t, -1.0, rr.view_mut());
         0
     }
 

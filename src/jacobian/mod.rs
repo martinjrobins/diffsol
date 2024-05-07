@@ -46,7 +46,7 @@ pub fn find_non_zeros_linear<F: LinearOp + ?Sized>(op: &F, t: F::T) -> Vec<(usiz
     let mut triplets = Vec::with_capacity(op.nstates());
     for j in 0..op.nstates() {
         v[j] = F::T::NAN;
-        op.call_inplace(&v, t, &mut col);
+        op.call_inplace(v.view(), t, col.view_mut());
         for i in 0..op.nout() {
             if col[i].is_nan() {
                 triplets.push((i, j));
@@ -144,7 +144,7 @@ impl<M: Matrix> JacobianColoring<M> {
             let dst_indices = &self.dst_indices_per_color[c];
             let src_indices = &self.src_indices_per_color[c];
             v.assign_at_indices(input, F::T::one());
-            op.call_inplace(&v, t, &mut col);
+            op.call_inplace(v.view(), t, col.view_mut());
             y.set_data_with_indices(dst_indices, src_indices, &col);
             v.assign_at_indices(input, F::T::zero());
         }
@@ -165,7 +165,7 @@ mod tests {
         jacobian::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy},
         op::closure::Closure,
     };
-    use nalgebra::{DMatrix, DVector};
+    use nalgebra::{DMatrix, DVector, DVectorView, DVectorViewMut};
     use std::ops::MulAssign;
 
     fn helper_triplets2op_nonlinear(
@@ -175,17 +175,17 @@ mod tests {
     ) -> impl NonLinearOp<M = DMatrix<f64>, V = DVector<f64>, T = f64> + '_ {
         let nstates = ncols;
         let nout = nrows;
-        let f = move |x: &DVector<f64>, y: &mut DVector<f64>| {
+        let f = move |x: DVectorView<'_, f64>, mut y: DVectorViewMut<'_, f64>| {
             for (i, j, v) in triplets {
                 y[*i] += x[*j] * v;
             }
         };
         let mut ret = Closure::new(
-            move |x: &DVector<f64>, _p: &DVector<f64>, _t, y: &mut DVector<f64>| {
+            move |x: DVectorView<'_, f64>, _p: &DVector<f64>, _t, mut y: DVectorViewMut<'_, f64>| {
                 y.fill(0.0);
                 f(x, y);
             },
-            move |_x: &DVector<f64>, _p: &DVector<f64>, _t, v, y: &mut DVector<f64>| {
+            move |_x: DVectorView<'_, f64>, _p: &DVector<f64>, _t, v, mut y: DVectorViewMut<'_, f64>| {
                 y.fill(0.0);
                 f(v, y);
             },
@@ -302,7 +302,7 @@ mod tests {
             coloring.matrix_inplace(&op, t0, &mut jac);
             let mut gemv1 = V::zeros(n);
             let v = V::from_element(3, 1.0);
-            op.gemv_inplace(&v, t0, 0.0, &mut gemv1);
+            op.gemv_inplace(Vector::view(&v), t0, 0.0, Vector::view_mut(&mut gemv1));
             let mut gemv2 = V::zeros(n);
             jac.gemv(1.0, &v, 0.0, &mut gemv2);
             gemv1.assert_eq_st(&gemv2, 1e-10);

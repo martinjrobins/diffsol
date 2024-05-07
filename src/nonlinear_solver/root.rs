@@ -27,7 +27,7 @@ impl<V: Vector> RootFinder<V> {
     /// Set the lower boundary of the root search.
     /// This function should be called first after [Self::new]
     pub fn init(&self, root_fn: &impl NonLinearOp<V = V, T = V::T>, y: &V, t: V::T) {
-        root_fn.call_inplace(y, t, &mut self.g0.borrow_mut());
+        root_fn.call_inplace(y.view(), t, self.g0.borrow_mut().view_mut());
         self.t0.replace(t);
     }
 
@@ -48,7 +48,7 @@ impl<V: Vector> RootFinder<V> {
         let g1 = &mut *self.g1.borrow_mut();
         let g0 = &mut *self.g0.borrow_mut();
         let gmid = &mut *self.gmid.borrow_mut();
-        root_fn.call_inplace(y, t, g1);
+        root_fn.call_inplace(y.view(), t, g1.view_mut());
 
         let sign_change_fn = |mut acc: (bool, V::T, i32), g0: V::T, g1: V::T, i: IndexType| {
             if g1 == V::T::zero() {
@@ -115,7 +115,7 @@ impl<V: Vector> RootFinder<V> {
             }
 
             let ymid = interpolate(t_mid).unwrap();
-            root_fn.call_inplace(&ymid, t_mid, gmid);
+            root_fn.call_inplace(ymid.view(), t_mid, gmid.view_mut());
 
             let (rootfnd, _gfracmax, imax_i32) =
                 (*g0).binary_fold(gmid, (false, V::T::zero(), -1), sign_change_fn);
@@ -128,7 +128,7 @@ impl<V: Vector> RootFinder<V> {
                 std::mem::swap(g1, gmid);
             } else if rootfnd {
                 // we are returning so make sure g0 is set for next iteration
-                root_fn.call_inplace(y, t, g0);
+                root_fn.call_inplace(y.view(), t, g0.view_mut());
 
                 // No sign change in (tlo,tmid), but g = 0 at tmid; return root tmid.
                 return Some(t_mid);
@@ -151,7 +151,7 @@ impl<V: Vector> RootFinder<V> {
             i += 1;
         }
         // we are returning so make sure g0 is set for next iteration
-        root_fn.call_inplace(y, t, g0);
+        root_fn.call_inplace(y.view(), t, g0.view_mut());
         Some(t1)
     }
 }

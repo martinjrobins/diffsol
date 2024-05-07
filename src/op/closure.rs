@@ -6,13 +6,13 @@ use crate::{
     Matrix, Vector,
 };
 
-use super::{NonLinearOp, Op, OpStatistics};
+use super::{NonLinearOp, Op, OpStatistics, VView, VViewMut};
 
 pub struct Closure<M, F, G>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(VView<'_, M>, &M::V, M::T, VViewMut<'_, M>),
+    G: Fn(VView<'_, M>, &M::V, M::T, VView<'_, M>, VViewMut<'_, M>),
 {
     func: F,
     jacobian_action: G,
@@ -28,8 +28,8 @@ where
 impl<M, F, G> Closure<M, F, G>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(VView<'_, M>, &M::V, M::T, VViewMut<'_, M>),
+    G: Fn(VView<'_, M>, &M::V, M::T, VView<'_, M>, VViewMut<'_, M>),
 {
     pub fn new(func: F, jacobian_action: G, nstates: usize, nout: usize, p: Rc<M::V>) -> Self {
         let nparams = p.len();
@@ -59,8 +59,8 @@ where
 impl<M, F, G> Op for Closure<M, F, G>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(<M::V as Vector>::View<'_>, &M::V, M::T, <M::V as Vector>::ViewMut<'_>),
+    G: Fn(<M::V as Vector>::View<'_>, &M::V, M::T, <M::V as Vector>::View<'_>, <M::V as Vector>::ViewMut<'_>),
 {
     type V = M::V;
     type T = M::T;
@@ -89,10 +89,10 @@ where
 impl<M, F, G> NonLinearOp for Closure<M, F, G>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    F: Fn(VView<'_, M>, &M::V, M::T, VViewMut<'_, M>),
+    G: Fn(VView<'_, M>, &M::V, M::T, VView<'_, M>, VViewMut<'_, M>),
 {
-    fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
+    fn call_inplace(&self, x: <M::V as Vector>::View<'_>, t: M::T, y: <M::V as Vector>::ViewMut<'_>) {
         self.statistics.borrow_mut().increment_call();
         (self.func)(x, self.p.as_ref(), t, y)
     }

@@ -3,7 +3,7 @@ use std::ops::{AddAssign, Mul, MulAssign};
 use anyhow::Result;
 use nalgebra::{DMatrix, DMatrixView, DMatrixViewMut, DVector, DVectorView, DVectorViewMut};
 
-use crate::op::NonLinearOp;
+use crate::op::{NonLinearOp, VView, VViewMut};
 use crate::{scalar::Scale, IndexType, Scalar};
 
 use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU};
@@ -127,8 +127,8 @@ impl<T: Scalar> Matrix for DMatrix<T> {
         self.diagonal()
     }
 
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        y.gemv(alpha, self, x, beta);
+    fn gemv(&self, alpha: Self::T, x: VView<'_, Self>, beta: Self::T, mut y: VViewMut<'_, Self>) {
+        y.gemv(alpha, self, &x, beta);
     }
     fn copy_from(&mut self, other: &Self) {
         self.copy_from(other);

@@ -181,7 +181,7 @@ mod tests {
     fn ode_equation_test() {
         let (problem, _soln) = exponential_decay_problem::<Mcpu>(false);
         let y = DVector::from_vec(vec![1.0, 1.0]);
-        let rhs_y = problem.eqn.rhs().call(&y, 0.0);
+        let rhs_y = problem.eqn.rhs().call(Vector::view(&y), 0.0);
         let expect_rhs_y = DVector::from_vec(vec![-0.1, -0.1]);
         rhs_y.assert_eq_st(&expect_rhs_y, 1e-10);
         let jac_rhs_y = problem.eqn.rhs().jac_mul(&y, 0.0, &y);
@@ -203,7 +203,7 @@ mod tests {
     fn ode_with_mass_test() {
         let (problem, _soln) = exponential_decay_with_algebraic_problem::<Mcpu>(false);
         let y = DVector::from_vec(vec![1.0, 1.0, 1.0]);
-        let rhs_y = problem.eqn.rhs().call(&y, 0.0);
+        let rhs_y = problem.eqn.rhs().call(Vector::view(&y), 0.0);
         let expect_rhs_y = DVector::from_vec(vec![-0.1, -0.1, 0.0]);
         rhs_y.assert_eq_st(&expect_rhs_y, 1e-10);
         let jac_rhs_y = problem.eqn.rhs().jac_mul(&y, 0.0, &y);

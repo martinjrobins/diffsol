@@ -358,11 +358,11 @@ where
         scale_factor *= scale(problem.rtol);
         scale_factor += problem.atol.as_ref();
 
-        let f0 = problem.eqn.rhs().call(&state.y, state.t);
+        let f0 = problem.eqn.rhs().call(state.y.view(), state.t);
         let hf0 = &f0 * scale(state.h);
         let y1 = &state.y + &hf0;
         let t1 = state.t + state.h;
-        let f1 = problem.eqn.rhs().call(&y1, t1);
+        let f1 = problem.eqn.rhs().call(y1.view(), t1);
 
         // store f1 in diff[1] for use in step size control
         self.diff.column_mut(1).copy_from(&hf0);

@@ -4,7 +4,7 @@ use anyhow::Result;
 use nalgebra::DVector;
 use nalgebra_sparse::{pattern::SparsityPattern, CooMatrix, CscMatrix};
 
-use crate::{scalar::Scale, IndexType, Scalar};
+use crate::{op::{VView, VViewMut}, scalar::Scale, IndexType, Scalar};
 
 use super::{Matrix, MatrixCommon, MatrixSparsity};
 
@@ -180,7 +180,7 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
     fn copy_from(&mut self, other: &Self) {
         self.clone_from(other);
     }
-    fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
+    fn gemv(&self, alpha: Self::T, x: VView<'_, Self>, beta: Self::T, mut y: VViewMut<'_, Self>) {
         let mut tmp = self * x;
         tmp *= alpha;
         y.axpy(alpha, &tmp, beta);

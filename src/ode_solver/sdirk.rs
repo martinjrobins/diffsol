@@ -218,7 +218,7 @@ where
         // compute first step based on alg in Hairer, Norsett, Wanner
         // Solving Ordinary Differential Equations I, Nonstiff Problems
         // Section II.4.2
-        let f0 = problem.eqn.rhs().call(&state.y, state.t);
+        let f0 = problem.eqn.rhs().call(state.y.view(), state.t);
         let hf0 = &f0 * scale(state.h);
 
         let mut tmp = f0.clone();
@@ -237,7 +237,7 @@ where
 
         let y1 = &state.y + hf0;
         let t1 = state.t + h0;
-        let f1 = problem.eqn.rhs().call(&y1, t1);
+        let f1 = problem.eqn.rhs().call(y1.view(), t1);
 
         let mut df = f1 - &f0;
         df *= scale(Eqn::T::one() / h0);

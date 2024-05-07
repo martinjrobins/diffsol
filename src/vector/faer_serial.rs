@@ -89,10 +89,10 @@ impl<T: Scalar> Vector for Col<T> {
     fn abs(&self) -> Self {
         zipped!(self).map(|unzipped!(xi)| xi.faer_abs())
     }
-    fn as_view(&self) -> Self::View<'_> {
+    fn view(&self) -> Self::View<'_> {
         self.as_ref()
     }
-    fn as_view_mut(&mut self) -> Self::ViewMut<'_> {
+    fn view_mut(&mut self) -> Self::ViewMut<'_> {
         self.as_mut()
     }
     fn copy_from(&mut self, other: &Self) {
@@ -123,10 +123,10 @@ impl<T: Scalar> Vector for Col<T> {
         zipped!(self).map(|unzipped!(xi)| xi.exp())
     }
     fn component_mul_assign(&mut self, other: &Self) {
-        zipped!(self.as_mut(), other.as_view()).for_each(|unzipped!(mut s, o)| *s *= *o);
+        zipped!(self.as_mut(), other.view()).for_each(|unzipped!(mut s, o)| *s *= *o);
     }
     fn component_div_assign(&mut self, other: &Self) {
-        zipped!(self.as_mut(), other.as_view()).for_each(|unzipped!(mut s, o)| *s /= *o);
+        zipped!(self.as_mut(), other.view()).for_each(|unzipped!(mut s, o)| *s /= *o);
     }
     fn filter_indices<F: Fn(Self::T) -> bool>(&self, f: F) -> Self::Index {
         let mut indices = vec![];

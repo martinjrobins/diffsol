@@ -120,25 +120,25 @@ where
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
     // F(y) = M (y - y0 + psi) - c * f(y) = 0
-    fn call_inplace(&self, x: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
+    fn call_inplace(&self, x: <Eqn::V as Vector>::View<'_>, t: Eqn::T, y: <Eqn::V as Vector>::ViewMut<'_>) {
         let psi_neg_y0_ref = self.psi_neg_y0.borrow();
         let psi_neg_y0 = psi_neg_y0_ref.deref();
 
         self.eqn.rhs().call_inplace(x, t, y);
 
         let mut tmp = self.tmp.borrow_mut();
-        tmp.copy_from(x);
+        tmp.copy_from_view(&x);
         tmp.add_assign(psi_neg_y0);
         let c = *self.c.borrow().deref();
         // y = M tmp - c * y
-        self.eqn.mass().gemv_inplace(&tmp, t, -c, y);
+        self.eqn.mass().gemv_inplace(tmp.view(), t, -c, y);
     }
     // (M - c * f'(y)) v
     fn jac_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
         self.eqn.rhs().jac_mul_inplace(x, t, v, y);
         let c = *self.c.borrow().deref();
         // y = Mv - c y
-        self.eqn.mass().gemv_inplace(v, t, -c, y);
+        self.eqn.mass().gemv_inplace(v.view(), t, -c, y.view_mut());
     }
 
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
@@ -200,7 +200,7 @@ mod tests {
         //        |-0.1|
         //  i.e. F(y) = |1 0| |2.1| - 0.1 * |-0.1| =  |2.11|
         //              |0 1| |2.2|         |-0.1|    |2.21|
-        bdf_callable.call_inplace(&y, t, &mut y_out);
+        bdf_callable.call_inplace(Vector::view(&y), t, Vector::view_mut(&mut y_out));
         let y_out_expect = Vcpu::from_vec(vec![2.11, 2.21]);
         y_out.assert_eq_st(&y_out_expect, 1e-10);
 

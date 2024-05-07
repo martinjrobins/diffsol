@@ -3,7 +3,7 @@ use crate::scalar::Scale;
 use crate::{IndexType, Scalar};
 use num_traits::Zero;
 use std::fmt::Debug;
-use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Deref, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
 #[cfg(feature = "faer")]
 mod faer_serial;
@@ -100,6 +100,7 @@ pub trait VectorView<'a>:
     fn into_owned(self) -> Self::Owned;
 }
 
+
 pub trait Vector:
     VectorOpsByValue<Self>
     + for<'b> VectorOpsByValue<&'b Self>
@@ -136,8 +137,8 @@ pub trait Vector:
     fn zeros(nstates: usize) -> Self {
         Self::from_element(nstates, Self::T::zero())
     }
-    fn as_view(&self) -> Self::View<'_>;
-    fn as_view_mut(&mut self) -> Self::ViewMut<'_>;
+    fn view(&self) -> Self::View<'_>;
+    fn view_mut(&mut self) -> Self::ViewMut<'_>;
     fn copy_from(&mut self, other: &Self);
     fn copy_from_view(&mut self, other: &Self::View<'_>);
     fn from_vec(vec: Vec<Self::T>) -> Self;
