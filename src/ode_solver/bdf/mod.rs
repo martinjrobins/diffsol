@@ -260,8 +260,10 @@ where
         let state = self.state.as_ref().unwrap();
         let troundoff = Eqn::T::from(100.0) * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
         if abs(state.t - tstop) <= troundoff {
+            self.tstop = None;
             return Ok(Some(OdeSolverStopReason::TstopReached));
         } else if tstop < state.t - troundoff {
+            self.tstop = None;
             return Err(anyhow!("tstop is before current time"));
         }
 

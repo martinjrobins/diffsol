@@ -19,6 +19,7 @@ pub struct DiffSlContext {
     ddata: RefCell<Vec<T>>,
     tmp: RefCell<V>,
     nstates: usize,
+    nroots: usize,
     nparams: usize,
 }
 
@@ -34,7 +35,7 @@ impl DiffSlContext {
         compiler.set_inputs(p.as_slice(), data.as_mut_slice());
         let data = RefCell::new(data);
         let ddata = RefCell::new(ddata);
-        let (nstates, nparams, _nout, _ndata, _stop) = compiler.get_dims();
+        let (nstates, nparams, _nout, _ndata, nroots) = compiler.get_dims();
 
         let tmp = RefCell::new(V::zeros(nstates));
 
@@ -45,6 +46,7 @@ impl DiffSlContext {
             nparams,
             nstates,
             tmp,
+            nroots,
         })
     }
     pub fn out(&self, t: T, y: &V) -> &[T] {
@@ -150,7 +152,22 @@ macro_rules! impl_op_for_diffsl {
 
 impl_op_for_diffsl!(DiffSlRhs);
 impl_op_for_diffsl!(DiffSlMass);
-impl_op_for_diffsl!(DiffSlRoot);
+
+impl Op for DiffSlRoot<'_> {
+    type M = M;
+    type T = T;
+    type V = V;
+
+    fn nstates(&self) -> usize {
+        self.context.nstates
+    }
+    fn nout(&self) -> usize {
+        self.context.nroots
+    }
+    fn nparams(&self) -> usize {
+        self.context.nparams
+    }
+}
 
 impl NonLinearOp for DiffSlRoot<'_> {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
