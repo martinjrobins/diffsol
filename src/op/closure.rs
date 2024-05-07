@@ -74,6 +74,10 @@ where
     fn nparams(&self) -> usize {
         self.nparams
     }
+    fn set_params(&mut self, p: Rc<M::V>) {
+        assert_eq!(p.len(), self.nparams);
+        self.p = p;
+    }
     fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
         self.sparsity.as_ref()
     }

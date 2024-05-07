@@ -187,6 +187,16 @@ impl<T: Scalar> Vector for DVector<T> {
             self[index] = value;
         }
     }
+    fn binary_fold<B, F>(&self, other: &Self, init: B, f: F) -> B
+    where
+        F: Fn(B, Self::T, Self::T, IndexType) -> B,
+    {
+        let mut acc = init;
+        for (i, (x, y)) in self.iter().zip(other.iter()).enumerate() {
+            acc = f(acc, *x, *y, i);
+        }
+        acc
+    }
 }
 
 // tests

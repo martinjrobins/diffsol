@@ -137,6 +137,7 @@ impl<C: Op> Convergence<C> {
 }
 
 pub mod newton;
+pub mod root;
 
 //tests
 #[cfg(test)]

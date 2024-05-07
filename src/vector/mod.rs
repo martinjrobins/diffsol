@@ -147,6 +147,9 @@ pub trait Vector:
     fn component_mul_assign(&mut self, other: &Self);
     fn component_div_assign(&mut self, other: &Self);
     fn filter_indices<F: Fn(Self::T) -> bool>(&self, f: F) -> Self::Index;
+    fn binary_fold<B, F>(&self, other: &Self, init: B, f: F) -> B
+    where
+        F: Fn(B, Self::T, Self::T, IndexType) -> B;
     fn filter(&self, indices: &Self::Index) -> Self {
         let mut result = Self::zeros(indices.len());
         result.gather_from(self, indices);

@@ -1,3 +1,5 @@
+use anyhow::Result;
+use num_traits::abs;
 use num_traits::One;
 use num_traits::Pow;
 use num_traits::Zero;
@@ -7,11 +9,13 @@ use std::rc::Rc;
 use crate::matrix::MatrixRef;
 use crate::vector::VectorRef;
 use crate::NewtonNonlinearSolver;
+use crate::OdeSolverStopReason;
+use crate::RootFinder;
 use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
-    DenseMatrix, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Vector,
-    VectorViewMut,
+    DenseMatrix, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Scalar,
+    Vector, VectorViewMut,
 };
 use crate::{LinearSolver, NonLinearOp};
 
@@ -46,6 +50,8 @@ where
     f: Eqn::V,
     a_rows: Vec<Eqn::V>,
     statistics: BdfStatistics<Eqn::T>,
+    root_finder: Option<RootFinder<Eqn::V>>,
+    tstop: Option<Eqn::T>,
 }
 
 impl<M, Eqn, LS> Sdirk<M, Eqn, LS>
@@ -152,11 +158,38 @@ where
             old_f,
             f,
             statistics,
+            root_finder: None,
+            tstop: None,
         }
     }
 
     pub fn get_statistics(&self) -> &BdfStatistics<Eqn::T> {
         &self.statistics
+    }
+
+    fn handle_tstop(&mut self, tstop: Eqn::T) -> Result<Option<OdeSolverStopReason<Eqn::T>>> {
+        let state = self.state.as_mut().unwrap();
+
+        // check if the we are at tstop
+        let troundoff = Eqn::T::from(100.0) * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
+        if abs(state.t - tstop) <= troundoff {
+            self.tstop = None;
+            return Ok(Some(OdeSolverStopReason::TstopReached));
+        } else if tstop < state.t - troundoff {
+            return Err(anyhow::anyhow!(
+                "tstop = {} is less than current time t = {}",
+                tstop,
+                state.t
+            ));
+        }
+
+        // check if the next step will be beyond tstop, if so adjust the step size
+        if state.t + state.h > tstop + troundoff {
+            let factor = (tstop - state.t) / state.h;
+            state.h *= factor;
+            self.nonlinear_solver.problem().f.set_h(state.h);
+        }
+        Ok(None)
     }
 }
 
@@ -249,13 +282,22 @@ where
         self.old_y = state.y.clone();
         self.state = Some(state);
         self.problem = Some(problem.clone());
+        if let Some(root_fn) = problem.eqn.root() {
+            let state = self.state.as_ref().unwrap();
+            self.root_finder = Some(RootFinder::new(root_fn.nout()));
+            self.root_finder
+                .as_ref()
+                .unwrap()
+                .init(root_fn.as_ref(), &state.y, state.t);
+        }
     }
 
-    fn step(&mut self) -> anyhow::Result<()> {
+    fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>> {
         // optionally do the first step
         let state = self.state.as_mut().unwrap();
         let n = state.y.len();
         let y0 = &state.y;
+
         let start = if self.is_sdirk { 0 } else { 1 };
         let mut updated_jacobian = false;
         let mut error = <Eqn::V as Vector>::zeros(n);
@@ -411,9 +453,11 @@ where
         self.old_f.mul_assign(scale(Eqn::T::one() / dt));
         std::mem::swap(&mut self.old_f, &mut self.f);
 
-        let y1 = self.nonlinear_solver.problem().f.get_last_f_eval();
-        self.old_y.copy_from(&y1);
-        std::mem::swap(&mut self.old_y, &mut state.y);
+        {
+            let y1 = self.nonlinear_solver.problem().f.get_last_f_eval();
+            self.old_y.copy_from(&y1);
+            std::mem::swap(&mut self.old_y, &mut state.y);
+        }
 
         // update statistics
         self.statistics.number_of_linear_solver_setups =
@@ -421,6 +465,39 @@ where
         self.statistics.number_of_steps += 1;
         self.statistics.final_step_size = self.state.as_ref().unwrap().h;
 
+        // check for root within accepted step
+        if let Some(root_fn) = self.problem.as_ref().unwrap().eqn.root() {
+            let ret = self.root_finder.as_ref().unwrap().check_root(
+                &|t| self.interpolate(t),
+                root_fn.as_ref(),
+                &self.state.as_ref().unwrap().y,
+                self.state.as_ref().unwrap().t,
+            );
+            if let Some(root) = ret {
+                return Ok(OdeSolverStopReason::RootFound(root));
+            }
+        }
+
+        // check if the we are at tstop
+        if let Some(tstop) = self.tstop {
+            if let Some(reason) = self.handle_tstop(tstop).unwrap() {
+                return Ok(reason);
+            }
+        }
+
+        // just a normal step, no roots or tstop reached
+        Ok(OdeSolverStopReason::InternalTimestep)
+    }
+
+    fn set_stop_time(&mut self, tstop: <Eqn as OdeEquations>::T) -> Result<()> {
+        self.tstop = Some(tstop);
+        if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
+            self.tstop = None;
+            return Err(anyhow::anyhow!(
+                "Stop time is at or before current time t = {}",
+                self.state.as_ref().unwrap().t
+            ));
+        }
         Ok(())
     }
 

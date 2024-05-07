@@ -3,8 +3,9 @@
 use crate::{Matrix, Vector};
 use num_traits::One;
 
-use super::{LinearOp, Op};
+use super::{LinearOp, NonLinearOp, Op};
 
+/// A dummy operator that returns the input vector. Can be used either as a [NonLinearOp] or [LinearOp].
 pub struct UnitCallable<M: Matrix> {
     n: usize,
     _phantom: std::marker::PhantomData<M>,
@@ -43,5 +44,14 @@ impl<M: Matrix> Op for UnitCallable<M> {
 impl<M: Matrix> LinearOp for UnitCallable<M> {
     fn gemv_inplace(&self, x: &Self::V, _t: Self::T, beta: Self::T, y: &mut Self::V) {
         y.axpy(Self::T::one(), x, beta);
+    }
+}
+
+impl<M: Matrix> NonLinearOp for UnitCallable<M> {
+    fn call_inplace(&self, x: &Self::V, _t: Self::T, y: &mut Self::V) {
+        y.copy_from(x);
+    }
+    fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
+        y.copy_from(v);
     }
 }

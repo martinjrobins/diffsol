@@ -23,6 +23,10 @@ fn exponential_decay_init<M: Matrix>(_p: &M::V, _t: M::T) -> M::V {
     M::V::from_vec(vec![1.0.into(), 1.0.into()])
 }
 
+fn exponential_decay_root<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+    y[0] = x[0] - M::T::from(0.6);
+}
+
 pub fn exponential_decay_problem<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
@@ -41,7 +45,35 @@ pub fn exponential_decay_problem<M: Matrix + 'static>(
     let p = [M::T::from(0.1)];
     let mut soln = OdeSolverSolution::default();
     for i in 0..10 {
-        let t = M::T::from(i as f64 / 10.0);
+        let t = M::T::from(i as f64);
+        let y0: M::V = problem.eqn.init(M::T::zero());
+        let y = y0 * scale(M::T::exp(-p[0] * t));
+        soln.push(y, t);
+    }
+    (problem, soln)
+}
+
+pub fn exponential_decay_problem_with_root<M: Matrix + 'static>(
+    use_coloring: bool,
+) -> (
+    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverSolution<M::V>,
+) {
+    let problem = OdeBuilder::new()
+        .p([0.1])
+        .use_coloring(use_coloring)
+        .build_ode_with_root(
+            exponential_decay::<M>,
+            exponential_decay_jacobian::<M>,
+            exponential_decay_init::<M>,
+            exponential_decay_root::<M>,
+            1,
+        )
+        .unwrap();
+    let p = [M::T::from(0.1)];
+    let mut soln = OdeSolverSolution::default();
+    for i in 0..10 {
+        let t = M::T::from(i as f64);
         let y0: M::V = problem.eqn.init(M::T::zero());
         let y = y0 * scale(M::T::exp(-p[0] * t));
         soln.push(y, t);

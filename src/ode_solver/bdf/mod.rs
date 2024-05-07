@@ -3,17 +3,18 @@ use std::rc::Rc;
 
 use anyhow::{anyhow, Result};
 
-use num_traits::{One, Pow, Zero};
+use num_traits::{abs, One, Pow, Zero};
 use serde::Serialize;
 
 use crate::{
     matrix::{default_solver::DefaultSolver, Matrix, MatrixRef},
+    nonlinear_solver::root::RootFinder,
     op::bdf::BdfCallable,
     scalar::scale,
     vector::DefaultDenseMatrix,
     DenseMatrix, IndexType, MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver,
-    OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Scalar, SolverProblem, Vector,
-    VectorRef, VectorView, VectorViewMut,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar,
+    SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
 };
 
 pub mod faer;
@@ -78,6 +79,8 @@ pub struct Bdf<
     error_const: Vec<Eqn::T>,
     statistics: BdfStatistics<Eqn::T>,
     state: Option<OdeSolverState<Eqn::V>>,
+    tstop: Option<Eqn::T>,
+    root_finder: Option<RootFinder<Eqn::V>>,
 }
 
 impl<Eqn> Default
@@ -112,6 +115,8 @@ where
             u: <M<Eqn::V> as Matrix>::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
             statistics: BdfStatistics::default(),
             state: None,
+            tstop: None,
+            root_finder: None,
         }
     }
 }
@@ -249,6 +254,26 @@ where
         };
         (y_predict, t_new)
     }
+
+    fn handle_tstop(&mut self, tstop: Eqn::T) -> Result<Option<OdeSolverStopReason<Eqn::T>>> {
+        // check if the we are at tstop
+        let state = self.state.as_ref().unwrap();
+        let troundoff = Eqn::T::from(100.0) * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
+        if abs(state.t - tstop) <= troundoff {
+            self.tstop = None;
+            return Ok(Some(OdeSolverStopReason::TstopReached));
+        } else if tstop < state.t - troundoff {
+            self.tstop = None;
+            return Err(anyhow!("tstop is before current time"));
+        }
+
+        // check if the next step will be beyond tstop, if so adjust the step size
+        if state.t + state.h > tstop + troundoff {
+            let factor = (tstop - state.t) / state.h;
+            self._update_step_size(factor);
+        }
+        Ok(None)
+    }
 }
 
 impl<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations, Nls> OdeSolverMethod<Eqn>
@@ -369,9 +394,17 @@ where
 
         // store state
         self.state = Some(state);
+        if let Some(root_fn) = problem.eqn.root() {
+            let state = self.state.as_ref().unwrap();
+            self.root_finder = Some(RootFinder::new(root_fn.nout()));
+            self.root_finder
+                .as_ref()
+                .unwrap()
+                .init(root_fn.as_ref(), &state.y, state.t);
+        }
     }
 
-    fn step(&mut self) -> Result<()> {
+    fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>> {
         let mut d: Eqn::V;
         let mut safety: Eqn::T;
         let mut error_norm: Eqn::T;
@@ -380,6 +413,7 @@ where
         if self.state.is_none() {
             return Err(anyhow!("State not set"));
         }
+
         let (mut y_predict, mut t_new) = self._predict_forward();
 
         // loop until step is accepted
@@ -530,6 +564,39 @@ where
                 factor = Eqn::T::from(Self::MAX_FACTOR);
             }
             self._update_step_size(factor);
+        }
+
+        // check for root within accepted step
+        if let Some(root_fn) = self.problem().as_ref().unwrap().eqn.root() {
+            let ret = self.root_finder.as_ref().unwrap().check_root(
+                &|t| self.interpolate(t),
+                root_fn.as_ref(),
+                &self.state.as_ref().unwrap().y,
+                self.state.as_ref().unwrap().t,
+            );
+            if let Some(root) = ret {
+                return Ok(OdeSolverStopReason::RootFound(root));
+            }
+        }
+
+        if let Some(tstop) = self.tstop {
+            if let Some(reason) = self.handle_tstop(tstop).unwrap() {
+                return Ok(reason);
+            }
+        }
+
+        // just a normal step, no roots or tstop reached
+        Ok(OdeSolverStopReason::InternalTimestep)
+    }
+
+    fn set_stop_time(&mut self, tstop: <Eqn as OdeEquations>::T) -> Result<()> {
+        self.tstop = Some(tstop);
+        if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
+            self.tstop = None;
+            return Err(anyhow!(
+                "tstop is at or before current time t = {}",
+                self.state.as_ref().unwrap().t
+            ));
         }
         Ok(())
     }

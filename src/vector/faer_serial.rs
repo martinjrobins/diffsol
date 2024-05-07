@@ -137,6 +137,16 @@ impl<T: Scalar> Vector for Col<T> {
         }
         indices
     }
+    fn binary_fold<B, F>(&self, other: &Self, init: B, f: F) -> B
+    where
+        F: Fn(B, Self::T, Self::T, IndexType) -> B,
+    {
+        let mut acc = init;
+        for i in 0..self.len() {
+            acc = f(acc, self[i], other[i], i);
+        }
+        acc
+    }
     fn gather_from(&mut self, other: &Self, indices: &Self::Index) {
         for (i, &index) in indices.iter().enumerate() {
             self[i] = other[index];
