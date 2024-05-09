@@ -103,8 +103,8 @@ pub struct OdeSolverState<V: Vector> {
 }
 
 impl<V: Vector> OdeSolverState<V> {
-    /// Create a new solver state from an ODE problem. Note that this does not make the state consistent with the algebraic constraints.
-    /// If you need to make the state consistent, use `new_consistent` instead.
+    /// Create a new solver state from an ODE problem. Note that this does not make the state consistent with any algebraic constraints.
+    /// If you need to make the state consistent, use [Self::new_consistent].
     pub fn new<Eqn>(ode_problem: &OdeSolverProblem<Eqn>) -> Self
     where
         Eqn: OdeEquations<T = V::T, V = V>,
@@ -115,7 +115,8 @@ impl<V: Vector> OdeSolverState<V> {
         Self { y, t, h }
     }
 
-    /// Create a new solver state from an ODE problem, making the state consistent with the algebraic constraints.
+    /// Create a new solver state from an [OdeSolverProblem], making the state consistent with the algebraic constraints using a solver that implements [NonLinearSolver].
+    /// If there are no algebraic constraints, please use [Self::new] instead.
     pub fn new_consistent<Eqn, S>(
         ode_problem: &OdeSolverProblem<Eqn>,
         root_solver: &mut S,
