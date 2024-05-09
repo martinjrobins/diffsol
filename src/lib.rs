@@ -21,8 +21,8 @@
 //! ## DiffSL
 //!
 //! DiffSL is a domain-specific language for specifying differential equations <https://github.com/martinjrobins/diffsl>. It uses the LLVM compiler framwork
-//! to compile the equations to efficient machine code and uses the EnzymeAD library to compute the jacobian. 
-//! 
+//! to compile the equations to efficient machine code and uses the EnzymeAD library to compute the jacobian.
+//!
 //! You can use DiffSL with DiffSol using the [DiffSlContext] struct and [OdeBuilder::build_diffsl] method. You need to enable one of the `diffsl-llvm*` features
 //! corresponding to the version of LLVM you have installed. E.g. to use your LLVM 10 installation, enable the `diffsl-llvm10` feature.
 //!
@@ -33,7 +33,7 @@
 //! The [OdeBuilder] struct is the easiest way to create a problem, and can be used to create an ODE problem from a set of closures or the DiffSL language.
 //! However, if this is not suitable for your problem or you want more control over how your equations are implemented, you can use your own structs to define the problem and wrap them in an [OdeSolverEquations] struct.
 //! See the [OdeSolverEquations] struct for more information.
-//! 
+//!
 //! ## Jacobian and Mass matrix calculation
 //!
 //! Via an implementation of [OdeEquations], the user provides the action of the jacobian on a vector `J(x) v`. By default DiffSol uses this to generate a jacobian matrix for the ODE solver.

@@ -26,7 +26,7 @@ impl Default for OdeBuilder {
 }
 
 /// Builder for ODE problems. Use methods to set parameters and then call one of the build methods when done.
-/// 
+///
 /// # Example
 ///  
 /// ```rust
@@ -252,8 +252,8 @@ impl OdeBuilder {
     /// - `M`: Type that implements the `Matrix` trait. Often this must be provided explicitly (i.e. `type M = DMatrix<f64>; builder.build_ode::<M, _, _, _>`).
     ///
     /// # Example
-    /// 
-    /// 
+    ///
+    ///
     ///
     /// ```
     /// use diffsol::OdeBuilder;

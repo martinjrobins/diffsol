@@ -15,9 +15,9 @@ pub type M = nalgebra::DMatrix<T>;
 
 /// Context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
 /// This contains the compiled code and the data structures needed to evaluate the ODE equations.
-/// 
+///
 /// # Example
-/// 
+///
 /// ```rust
 /// use diffsol::{OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod, DiffSlContext};
 /// type M = nalgebra::DMatrix<f64>;
