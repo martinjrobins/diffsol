@@ -25,6 +25,43 @@ impl Default for OdeBuilder {
     }
 }
 
+/// Builder for ODE problems. Use methods to set parameters and then call one of the build methods when done.
+///
+/// # Example
+///  
+/// ```rust
+/// use diffsol::{OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod};
+/// type M = nalgebra::DMatrix<f64>;
+///
+/// let problem = OdeBuilder::new()
+///   .rtol(1e-6)
+///   .p([0.1])
+///   .build_ode::<M, _, _, _>(
+///     // dy/dt = -ay
+///     |x, p, t, y| {
+///       y[0] = -p[0] * x[0];
+///     },
+///     // Jv = -av
+///     |x, p, t, v, y| {
+///       y[0] = -p[0] * v[0];
+///     },
+///     // y(0) = 1
+///    |p, t| {
+///       nalgebra::DVector::from_vec(vec![1.0])
+///    },
+///   ).unwrap();
+///
+/// let mut solver = Bdf::default();
+/// let t = 0.4;
+/// let state = OdeSolverState::new(&problem);
+/// solver.set_problem(state, &problem);
+/// while solver.state().unwrap().t <= t {
+///     solver.step().unwrap();
+/// }
+/// let y = solver.interpolate(t);
+/// ```
+///
+
 impl OdeBuilder {
     /// Create a new builder with default parameters:
     /// - t0 = 0.0
@@ -216,6 +253,8 @@ impl OdeBuilder {
     ///
     /// # Example
     ///
+    ///
+    ///
     /// ```
     /// use diffsol::OdeBuilder;
     /// use nalgebra::DVector;
@@ -331,10 +370,11 @@ impl OdeBuilder {
         self,
         context: &crate::ode_solver::diffsl::DiffSlContext,
     ) -> Result<OdeSolverProblem<crate::ode_solver::diffsl::DiffSl<'_>>> {
-        type V = crate::ode_solver::diffsl::V;
-        type T = crate::ode_solver::diffsl::T;
+        use crate::ode_solver::diffsl;
+        type V = diffsl::V;
+        type T = diffsl::T;
         let p = Self::build_p::<V>(self.p);
-        let mut eqn = crate::ode_solver::diffsl::DiffSl::new(context, self.use_coloring);
+        let mut eqn = diffsl::DiffSl::new(context, self.use_coloring);
         eqn.set_params(p);
         let atol = Self::build_atol::<V>(self.atol, eqn.rhs().nstates())?;
         Ok(OdeSolverProblem::new(

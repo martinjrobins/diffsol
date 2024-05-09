@@ -73,6 +73,67 @@ pub trait OdeEquations {
 }
 
 /// This struct implements the ODE equation trait [OdeEquations] for a given right-hand side op, mass op, optional root op, and initial condition function.
+/// While the [crate::OdeBuilder] struct is the easiest way to define an ODE problem, occasionally a user might want to use their own structs that define the equations instead of closures or the DiffSL languave, and this can be done using [OdeSolverEquations].
+///
+/// The main traits that you need to implement are the [crate::Op] and [NonLinearOp] trait, which define a nonlinear operator or function `F` that maps an input vector `x` to an output vector `y`, (i.e. `y = F(x)`).
+/// Once you have implemented this trait, you can then pass an instance of your struct to the `rhs` argument of the [Self::new] method. Once you have created an instance of [OdeSolverEquations], you can then use [crate::OdeSolverProblem::new] to create a problem.
+///
+/// For example:
+///
+/// ```rust
+/// use std::rc::Rc;
+/// use diffsol::{Bdf, OdeSolverState, OdeSolverMethod, NonLinearOp, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable};
+/// type M = nalgebra::DMatrix<f64>;
+/// type V = nalgebra::DVector<f64>;
+///
+/// struct MyProblem;
+/// impl Op for MyProblem {
+///    type V = V;
+///    type T = f64;
+///    type M = M;
+///    fn nstates(&self) -> usize {
+///       1
+///    }
+///    fn nout(&self) -> usize {
+///       1
+///    }
+/// }
+///   
+/// impl NonLinearOp for MyProblem {
+///    fn call_inplace(&self, x: &V, _t: f64, y: &mut V) {
+///       y[0] = -0.1 * x[0];
+///   }
+///    fn jac_mul_inplace(&self, x: &V, _t: f64, v: &V, y: &mut V) {
+///      y[0] = -0.1 * v[0];
+///   }
+/// }
+///
+/// let rhs = Rc::new(MyProblem);
+///
+/// // we don't have a mass matrix, so we can use a unit operator which does nothing
+/// let mass = Rc::new(UnitCallable::new(1));
+/// let root: Option<Rc<UnitCallable<M>>> = None;
+/// let init = |p: &V, _t: f64| V::from_vec(vec![1.0]);
+/// let p = Rc::new(V::from_vec(vec![]));
+/// let mass_is_constant = true;
+/// let eqn = OdeSolverEquations::new(rhs, mass, root, init, p, mass_is_constant);
+///
+/// let rtol = 1e-6;
+/// let atol = V::from_vec(vec![1e-6]);
+/// let t0 = 0.0;
+/// let h0 = 0.1;
+/// let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0);
+///
+/// let mut solver = Bdf::default();
+/// let t = 0.4;
+/// let state = OdeSolverState::new(&problem);
+/// solver.set_problem(state, &problem);
+/// while solver.state().unwrap().t <= t {
+///    solver.step().unwrap();
+/// }
+/// let y = solver.interpolate(t);
+/// ```
+///
 pub struct OdeSolverEquations<M, Rhs, I, Mass = UnitCallable<M>, Root = UnitCallable<M>>
 where
     M: Matrix,

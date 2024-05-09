@@ -13,6 +13,37 @@ pub type T = f64;
 pub type V = nalgebra::DVector<T>;
 pub type M = nalgebra::DMatrix<T>;
 
+/// Context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
+/// This contains the compiled code and the data structures needed to evaluate the ODE equations.
+///
+/// # Example
+///
+/// ```rust
+/// use diffsol::{OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod, DiffSlContext};
+/// type M = nalgebra::DMatrix<f64>;
+///         
+/// // dy/dt = -ay
+/// // y(0) = 1
+/// let context = DiffSlContext::new("
+///     in = [a]
+///     a { 1 }
+///     u { 1.0 }
+///     F { -a*u }
+///     out { u }
+/// ").unwrap();
+/// let problem = OdeBuilder::new()
+///  .rtol(1e-6)
+///  .p([0.1])
+///  .build_diffsl(&context).unwrap();
+/// let mut solver = Bdf::default();
+/// let t = 0.4;
+/// let state = OdeSolverState::new(&problem);
+/// solver.set_problem(state, &problem);
+/// while solver.state().unwrap().t <= t {
+///    solver.step().unwrap();
+/// }
+/// let y = solver.interpolate(t);
+/// ```
 pub struct DiffSlContext {
     compiler: Compiler,
     data: RefCell<Vec<T>>,
@@ -24,19 +55,13 @@ pub struct DiffSlContext {
 }
 
 impl DiffSlContext {
-    pub fn new(text: &str, p: V) -> Result<Self> {
-        let p = Rc::new(p);
+    /// Create a new context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
+    /// The input parameters are not initialized and must be set using the [OdeEquations::set_params] function before solving the ODE.
+    pub fn new(text: &str) -> Result<Self> {
         let compiler = Compiler::from_discrete_str(text)?;
-        let mut data = compiler.get_new_data();
-
-        compiler.set_inputs(p.as_slice(), data.as_mut_slice());
-
-        let ddata = compiler.get_new_data();
-        compiler.set_inputs(p.as_slice(), data.as_mut_slice());
-        let data = RefCell::new(data);
-        let ddata = RefCell::new(ddata);
         let (nstates, nparams, _nout, _ndata, nroots) = compiler.get_dims();
-
+        let data = RefCell::new(compiler.get_new_data());
+        let ddata = RefCell::new(compiler.get_new_data());
         let tmp = RefCell::new(V::zeros(nstates));
 
         Ok(Self {
@@ -294,7 +319,7 @@ mod tests {
             F { -y }
             out { y }
         ";
-        let context = DiffSlContext::new(code, DVector::from_vec(vec![])).unwrap();
+        let context = DiffSlContext::new(code).unwrap();
         let problem = OdeBuilder::new().build_diffsl(&context).unwrap();
         let mut solver = Bdf::default();
         let _y = solver.solve(&problem, 1.0).unwrap();
@@ -330,9 +355,10 @@ mod tests {
 
         let k = 1.0;
         let r = 1.0;
+        let context = DiffSlContext::new(text).unwrap();
+        let mut eqn = DiffSl::new(&context, false);
         let p = DVector::from_vec(vec![r, k]);
-        let context = DiffSlContext::new(text, p.clone()).unwrap();
-        let eqn = DiffSl::new(&context, false);
+        eqn.set_params(p);
 
         // test that the initial values look ok
         let y0 = 0.1;
