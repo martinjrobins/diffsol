@@ -80,10 +80,10 @@ impl OpStatistics {
     }
 }
 
-// NonLinearOp is a trait that defines a nonlinear operator or function `F` that maps an input vector `x` to an output vector `y`, (i.e. `y = F(x, t)`). 
-// It extends the [Op] trait with methods for computing the operator and its Jacobian. 
+// NonLinearOp is a trait that defines a nonlinear operator or function `F` that maps an input vector `x` to an output vector `y`, (i.e. `y = F(x, t)`).
+// It extends the [Op] trait with methods for computing the operator and its Jacobian.
 //
-// The operator is defined by the [Self::call_inplace] method, which computes the function `F(x, t)` at a given state and time. 
+// The operator is defined by the [Self::call_inplace] method, which computes the function `F(x, t)` at a given state and time.
 // The Jacobian is defined by the [Self::jac_mul_inplace] method, which computes the product of the Jacobian with a given vector `J(x, t) * v`.
 pub trait NonLinearOp: Op {
     /// Compute the operator `F(x, t)` at a given state and time.
@@ -138,7 +138,7 @@ pub trait NonLinearOp: Op {
     }
 }
 
-/// LinearOp is a trait for linear operators (i.e. they only depend linearly on the input `x`), see [NonLinearOp] for a non-linear op. 
+/// LinearOp is a trait for linear operators (i.e. they only depend linearly on the input `x`), see [NonLinearOp] for a non-linear op.
 /// An example of a linear operator is a matrix-vector product `y = A(t) * x`, where `A(t)` is a matrix.
 /// It extends the [Op] trait with methods for calling the operator via a GEMV-like operation (i.e. `y = t * A * x + beta * y`), and for computing the matrix representation of the operator.
 pub trait LinearOp: Op {
@@ -206,7 +206,6 @@ impl<C: Op> Op for &C {
         C::nparams(*self)
     }
 }
-
 
 impl<C: NonLinearOp> NonLinearOp for &C {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {

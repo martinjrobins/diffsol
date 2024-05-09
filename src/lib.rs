@@ -10,7 +10,7 @@
 //!
 //! You will also need to choose a matrix type to use. DiffSol can use the [nalgebra](https://nalgebra.org) `DMatrix` type, the [faer](https://github.com/sarah-ek/faer-rs) `Mat` type, or any other type that implements the
 //! [Matrix] trait. You can also use the [sundials](https://computation.llnl.gov/projects/sundials) library for the matrix and vector types (see [SundialsMatrix]).
-//! 
+//!
 //! ## The solver
 //!
 //! To solve the problem, you need to choose a solver. DiffSol provides the following solvers:
@@ -48,15 +48,15 @@
 //! by also implementing the optional [NonLinearOp::jacobian_inplace] and the [LinearOp::matrix_inplace] (if applicable) functions.
 //!
 //! If this is not possible, DiffSol also provides an experimental feature to calculate sparse jacobians more efficiently by automatically detecting the sparsity pattern of the jacobian and using
-//! colouring \[1\] to reduce the number of jacobian evaluations. You can enable this feature by enabling [OdeBuilder::use_coloring()] option when building the ODE problem. 
-//! Note that if your implementation of [NonLinearOp::jac_mul_inplace] uses any control flow that depends on the input vector (e.g. an if statement that depends on the value of `x`), 
+//! colouring \[1\] to reduce the number of jacobian evaluations. You can enable this feature by enabling [OdeBuilder::use_coloring()] option when building the ODE problem.
+//! Note that if your implementation of [NonLinearOp::jac_mul_inplace] uses any control flow that depends on the input vector (e.g. an if statement that depends on the value of `x`),
 //! the sparsity detection may not be accurate and you may need to provide the jacobian matrix directly.
 //!
 //! \[1\] Gebremedhin, A. H., Manne, F., & Pothen, A. (2005). What color is your Jacobian? Graph coloring for computing derivatives. SIAM review, 47(4), 629-705.
-//! 
+//!
 //! ## Events / Root finding
-//! 
-//! DiffSol provides a simple way to detect user-provided events during the integration of the ODEs. You can use this by providing a closure that has a zero-crossing at the event you want to detect, using the [OdeBuilder::build_ode_with_root] builder, 
+//!
+//! DiffSol provides a simple way to detect user-provided events during the integration of the ODEs. You can use this by providing a closure that has a zero-crossing at the event you want to detect, using the [OdeBuilder::build_ode_with_root] builder,
 //! or by providing a [NonLinearOp] that has a zero-crossing at the event you want to detect. To use the root finding feature while integrating with the solver, you can use the return value of [OdeSolverMethod::step] to check if an event has been detected.
 //!
 //! ## Nonlinear and linear solvers
