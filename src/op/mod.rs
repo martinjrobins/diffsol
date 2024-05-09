@@ -80,38 +80,43 @@ impl OpStatistics {
     }
 }
 
-// NonLinearOp is a trait for non-linear operators. It extends the Op trait with methods for
-// computing the operator and its Jacobian. The operator is defined by the call_inplace method,
-// which computes the operator at a given state and time. The Jacobian is defined by the
-// jac_mul_inplace method, which computes the product of the Jacobian with a given vector.
+// NonLinearOp is a trait that defines a nonlinear operator or function `F` that maps an input vector `x` to an output vector `y`, (i.e. `y = F(x, t)`). 
+// It extends the [Op] trait with methods for computing the operator and its Jacobian. 
+//
+// The operator is defined by the [Self::call_inplace] method, which computes the function `F(x, t)` at a given state and time. 
+// The Jacobian is defined by the [Self::jac_mul_inplace] method, which computes the product of the Jacobian with a given vector `J(x, t) * v`.
 pub trait NonLinearOp: Op {
-    /// Compute the operator at a given state and time.
+    /// Compute the operator `F(x, t)` at a given state and time.
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V);
 
-    /// Compute the product of the Jacobian with a given vector.
+    /// Compute the product of the Jacobian with a given vector `J(x, t) * v`.
     fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V);
 
-    /// Compute the operator at a given state and time, and return the result.
+    /// Compute the operator `F(x, t)` at a given state and time, and return the result.
+    /// Use `[Self::call_inplace]` to for a non-allocating version.
     fn call(&self, x: &Self::V, t: Self::T) -> Self::V {
         let mut y = Self::V::zeros(self.nout());
         self.call_inplace(x, t, &mut y);
         y
     }
 
-    /// Compute the product of the Jacobian with a given vector, and return the result.
+    /// Compute the product of the Jacobian with a given vector `J(x, t) * v`, and return the result.
+    /// Use `[Self::jac_mul_inplace]` to for a non-allocating version.
     fn jac_mul(&self, x: &Self::V, t: Self::T, v: &Self::V) -> Self::V {
         let mut y = Self::V::zeros(self.nstates());
         self.jac_mul_inplace(x, t, v, &mut y);
         y
     }
 
-    /// Compute the Jacobian of the operator and store it in the matrix `y`.
+    /// Compute the Jacobian matrix `J(x, t)` of the operator and store it in the matrix `y`.
     /// `y` should have been previously initialised using the output of [`Op::sparsity`].
+    /// The default implementation of this method computes the Jacobian using [Self::jac_mul_inplace],
+    /// but it can be overriden for more efficient implementations.
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         self._default_jacobian_inplace(x, t, y);
     }
 
-    /// Default implementation of the Jacobian computation.
+    /// Default implementation of the Jacobian computation (this is the default for [Self::jacobian_inplace]).
     fn _default_jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         let mut v = Self::V::zeros(self.nstates());
         let mut col = Self::V::zeros(self.nout());
@@ -123,7 +128,8 @@ pub trait NonLinearOp: Op {
         }
     }
 
-    /// Compute the Jacobian of the operator and return it.
+    /// Compute the Jacobian matrix `J(x, t)` of the operator and return it.
+    /// See [Self::jacobian_inplace] for a non-allocating version.
     fn jacobian(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
         let mut y = Self::M::new_from_sparsity(n, n, self.sparsity());
@@ -132,31 +138,35 @@ pub trait NonLinearOp: Op {
     }
 }
 
-/// LinearOp is a trait for linear operators (i.e. they only depend linearly on the input `x`). It extends the Op trait with methods for
-/// calling the operator via a GEMV operation (i.e. `y = t * A * x + beta * y`), and for computing the matrix representation of the operator.
+/// LinearOp is a trait for linear operators (i.e. they only depend linearly on the input `x`), see [NonLinearOp] for a non-linear op. 
+/// An example of a linear operator is a matrix-vector product `y = A(t) * x`, where `A(t)` is a matrix.
+/// It extends the [Op] trait with methods for calling the operator via a GEMV-like operation (i.e. `y = t * A * x + beta * y`), and for computing the matrix representation of the operator.
 pub trait LinearOp: Op {
-    /// Compute the operator at a given state and time
+    /// Compute the operator `y = A(t) * x` at a given state and time, the default implementation uses [Self::gemv_inplace].
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
         let beta = Self::T::zero();
         self.gemv_inplace(x, t, beta, y);
     }
 
-    /// Computer the operator via a GEMV operation (i.e. `y = t * A * x + beta * y`)
+    /// Compute the operator via a GEMV operation (i.e. `y = A(t) * x + beta * y`)
     fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V);
 
-    /// Compute the matrix representation of the operator and return it.
+    /// Compute the matrix representation of the operator `A(t)` and return it.
+    /// See [Self::matrix_inplace] for a non-allocating version.
     fn matrix(&self, t: Self::T) -> Self::M {
         let mut y = Self::M::new_from_sparsity(self.nstates(), self.nstates(), self.sparsity());
         self.matrix_inplace(t, &mut y);
         y
     }
 
-    /// Compute the matrix representation of the operator and store it in the matrix `y`.
+    /// Compute the matrix representation of the operator `A(t)` and store it in the matrix `y`.
+    /// The default implementation of this method computes the matrix using [Self::gemv_inplace],
+    /// but it can be overriden for more efficient implementations.
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
         self._default_matrix_inplace(t, y);
     }
 
-    /// Default implementation of the matrix computation.
+    /// Default implementation of the matrix computation, see [Self::matrix_inplace].
     fn _default_matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
         let mut v = Self::V::zeros(self.nstates());
         let mut col = Self::V::zeros(self.nout());
@@ -197,21 +207,6 @@ impl<C: Op> Op for &C {
     }
 }
 
-//impl <C: LinearOp> NonLinearOp for C {
-//    fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
-//        C::call_inplace(self, x, t, y)
-//    }
-//    fn jac_mul_inplace(&self, _x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-//        C::call_inplace(self, v, t, y)
-//    }
-//    fn jacobian_inplace(&self, _x: &Self::V, t: Self::T, y: &mut Self::M) {
-//        C::matrix_inplace(self, t, y)
-//    }
-//    fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
-//        C::sparsity(self)
-//    }
-//
-//}
 
 impl<C: NonLinearOp> NonLinearOp for &C {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
