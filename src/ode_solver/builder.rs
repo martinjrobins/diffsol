@@ -262,11 +262,11 @@ impl OdeBuilder {
     ///
     ///
     /// // dy/dt = y
-    /// // y(0) = 1
+    /// // y(0) = 0.1
     /// let problem = OdeBuilder::new()
     ///    .build_ode::<M, _, _, _>(
-    ///        |x, _p, _t, y| y.copy_from(x),
-    ///        |x, _p, _t, v , y| y.copy_from(v),
+    ///        |x, _p, _t, y| y[0] = x[0],
+    ///        |x, _p, _t, v , y| y[0] = v[0],
     ///        |p, _t| DVector::from_element(1, 0.1),
     ///    );
     /// ```
@@ -303,6 +303,43 @@ impl OdeBuilder {
             M::T::from(self.h0),
         ))
     }
+
+    /// Build an ODE problem with an event.
+    ///
+    /// # Arguments
+    ///
+    /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
+    /// - `rhs_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
+    /// - `init`: Function of type Fn(p: &V, t: S) -> V that computes the initial state.
+    /// - `root`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the root function.
+    /// - `nroots`: Number of roots (i.e. number of elements in the `y` arg in `root`), an event is triggered when any of the roots changes sign.
+    ///
+    /// # Generic Arguments
+    ///
+    /// - `M`: Type that implements the `Matrix` trait. Often this must be provided explicitly (i.e. `type M = DMatrix<f64>; builder.build_ode::<M, _, _, _, _>`).
+    ///
+    /// # Example
+    ///
+    ///
+    ///
+    /// ```
+    /// use diffsol::OdeBuilder;
+    /// use nalgebra::DVector;
+    /// type M = nalgebra::DMatrix<f64>;
+    ///
+    ///
+    /// // dy/dt = y
+    /// // y(0) = 0.1
+    /// // event at y = 0.5
+    /// let problem = OdeBuilder::new()
+    ///    .build_ode_with_root::<M, _, _, _, _>(
+    ///        |x, _p, _t, y| y[0] = x[0],
+    ///        |x, _p, _t, v , y| y[0] = v[0],
+    ///        |p, _t| DVector::from_element(1, 0.1),
+    ///        |x, _p, _t, y| y[0] = x[0] - 0.5,
+    ///        1,
+    ///    );
+    /// ```
 
     #[allow(clippy::type_complexity)]
     pub fn build_ode_with_root<M, F, G, I, H>(

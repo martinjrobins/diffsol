@@ -10,13 +10,20 @@
 //!
 //! You will also need to choose a matrix type to use. DiffSol can use the [nalgebra](https://nalgebra.org) `DMatrix` type, the [faer](https://github.com/sarah-ek/faer-rs) `Mat` type, or any other type that implements the
 //! [Matrix] trait. You can also use the [sundials](https://computation.llnl.gov/projects/sundials) library for the matrix and vector types (see [SundialsMatrix]).
+//! 
+//! ## The solver
 //!
 //! To solve the problem, you need to choose a solver. DiffSol provides the following solvers:
 //! - A Backwards Difference Formulae [Bdf] solver, suitable for stiff problems and singular mass matrices.
 //! - A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver [Sdirk]. You can use your own butcher tableau using [Tableau] or use one of the provided ([Tableau::tr_bdf2], [Tableau::esdirk34]).
 //! - A BDF solver that wraps the IDA solver solver from the sundials library ([SundialsIda], requires the `sundials` feature).
 //!
-//! See the [OdeSolverMethod] trait for a more detailed description of the available methods on each solver.
+//! See the [OdeSolverMethod] trait for a more detailed description of the available methods on each solver. Possible workflows are:
+//! - Initialise the problem using [OdeSolverState::new] or [OdeSolverState::new_consistent], and then use [OdeSolverMethod::set_problem] to setup the solver with the problem and [OdeSolverState] instance.
+//! - Use the [OdeSolverMethod::step] method to step the solution forward in time with an internal time step chosen by the solver to meet the error tolerances.
+//! - Use the [OdeSolverMethod::interpolate] method to interpolate the solution between the last two time steps.
+//! - Use the [OdeSolverMethod::set_stop_time] method to stop the solver at a specific time (i.e. this will override the internal time step so that the solver stops at the specified time).
+//! - Alternatively, use the convenience functions [OdeSolverMethod::solve] and [OdeSolverMethod::make_consistent_and_solve] that will both initialise the problem and solve the problem up to a specific time.
 //!
 //! ## DiffSL
 //!
@@ -38,12 +45,19 @@
 //!
 //! Via an implementation of [OdeEquations], the user provides the action of the jacobian on a vector `J(x) v`. By default DiffSol uses this to generate a jacobian matrix for the ODE solver.
 //! Generally this requires `n` evaluations of the jacobian action for a system of size `n`, so it is often more efficient if the user can provide the jacobian matrix directly
-//! by implementing the [NonLinearOp::jacobian_inplace] and the [LinearOp::matrix_inplace] (if applicable) functions.
+//! by also implementing the optional [NonLinearOp::jacobian_inplace] and the [LinearOp::matrix_inplace] (if applicable) functions.
 //!
-//! DiffSol also provides an experimental feature to calculate sparse jacobians more efficiently by automatically detecting the sparsity pattern of the jacobian and using
-//! colouring \[1\] to reduce the number of jacobian evaluations. You can enable this feature by enabling [OdeBuilder::use_coloring()] option when building the ODE problem.
+//! If this is not possible, DiffSol also provides an experimental feature to calculate sparse jacobians more efficiently by automatically detecting the sparsity pattern of the jacobian and using
+//! colouring \[1\] to reduce the number of jacobian evaluations. You can enable this feature by enabling [OdeBuilder::use_coloring()] option when building the ODE problem. 
+//! Note that if your implementation of [NonLinearOp::jac_mul_inplace] uses any control flow that depends on the input vector (e.g. an if statement that depends on the value of `x`), 
+//! the sparsity detection may not be accurate and you may need to provide the jacobian matrix directly.
 //!
 //! \[1\] Gebremedhin, A. H., Manne, F., & Pothen, A. (2005). What color is your Jacobian? Graph coloring for computing derivatives. SIAM review, 47(4), 629-705.
+//! 
+//! ## Events / Root finding
+//! 
+//! DiffSol provides a simple way to detect user-provided events during the integration of the ODEs. You can use this by providing a closure that has a zero-crossing at the event you want to detect, using the [OdeBuilder::build_ode_with_root] builder, 
+//! or by providing a [NonLinearOp] that has a zero-crossing at the event you want to detect. To use the root finding feature while integrating with the solver, you can use the return value of [OdeSolverMethod::step] to check if an event has been detected.
 //!
 //! ## Nonlinear and linear solvers
 //!
