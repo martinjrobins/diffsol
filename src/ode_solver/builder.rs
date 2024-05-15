@@ -53,7 +53,7 @@ impl Default for OdeBuilder {
 ///
 /// let mut solver = Bdf::default();
 /// let t = 0.4;
-/// let state = OdeSolverState::new(&problem);
+/// let mut state = OdeSolverState::new(&problem, &solver).unwrap();
 /// solver.set_problem(state, &problem);
 /// while solver.state().unwrap().t <= t {
 ///     solver.step().unwrap();
