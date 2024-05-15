@@ -229,7 +229,7 @@ where
             return Err(anyhow!("Problem not set"));
         }
         if self.problem.as_ref().unwrap().eqn.mass().is_none() {
-            return Ok(())
+            return Ok(());
         }
         let diag = self
             .problem

@@ -58,7 +58,9 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
         } else if eqn.is_mass_constant() {
             // if mass is constant then pre-compute it
             let mut mass_jac = Eqn::M::new_from_sparsity(n, n, eqn.mass().unwrap().sparsity());
-            eqn.mass().unwrap().matrix_inplace(Eqn::T::zero(), &mut mass_jac);
+            eqn.mass()
+                .unwrap()
+                .matrix_inplace(Eqn::T::zero(), &mut mass_jac);
             mass_jac
         } else {
             // mass is not constant, so just create a matrix with the correct sparsity
