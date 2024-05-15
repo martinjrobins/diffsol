@@ -7,12 +7,13 @@ use std::{
 };
 use sundials_sys::{
     realtype, IDACalcIC, IDACreate, IDAFree, IDAGetDky, IDAGetIntegratorStats,
-    IDAGetNonlinSolvStats, IDAGetReturnFlagName, IDAInit, IDASVtolerances, IDASetId, IDASetJacFn,
-    IDASetLinearSolver, IDASetStopTime, IDASetUserData, IDASolve, N_Vector, SUNLinSolFree,
-    SUNLinSolInitialize, SUNLinSol_Dense, SUNLinearSolver, SUNMatrix, IDA_CONSTR_FAIL,
-    IDA_CONV_FAIL, IDA_ERR_FAIL, IDA_ILL_INPUT, IDA_LINIT_FAIL, IDA_LSETUP_FAIL, IDA_LSOLVE_FAIL,
-    IDA_MEM_NULL, IDA_ONE_STEP, IDA_REP_RES_ERR, IDA_RES_FAIL, IDA_ROOT_RETURN, IDA_RTFUNC_FAIL,
-    IDA_SUCCESS, IDA_TOO_MUCH_ACC, IDA_TOO_MUCH_WORK, IDA_TSTOP_RETURN, IDA_YA_YDP_INIT,
+    IDAGetNonlinSolvStats, IDAGetReturnFlagName, IDAInit, IDAReInit, IDASVtolerances, IDASetId,
+    IDASetJacFn, IDASetLinearSolver, IDASetStopTime, IDASetUserData, IDASolve, N_Vector,
+    SUNLinSolFree, SUNLinSolInitialize, SUNLinSol_Dense, SUNLinearSolver, SUNMatrix,
+    IDA_CONSTR_FAIL, IDA_CONV_FAIL, IDA_ERR_FAIL, IDA_ILL_INPUT, IDA_LINIT_FAIL, IDA_LSETUP_FAIL,
+    IDA_LSOLVE_FAIL, IDA_MEM_NULL, IDA_ONE_STEP, IDA_REP_RES_ERR, IDA_RES_FAIL, IDA_ROOT_RETURN,
+    IDA_RTFUNC_FAIL, IDA_SUCCESS, IDA_TOO_MUCH_ACC, IDA_TOO_MUCH_WORK, IDA_TSTOP_RETURN,
+    IDA_YA_YDP_INIT,
 };
 
 use crate::{
@@ -134,6 +135,7 @@ where
     jacobian: SundialsMatrix,
     statistics: SundialsStatistics,
     state: Option<OdeSolverState<Eqn::V>>,
+    is_state_modified: bool,
 }
 
 impl<Eqn> SundialsIda<Eqn>
@@ -203,6 +205,7 @@ where
             statistics: SundialsStatistics::new(),
             jacobian,
             state: None,
+            is_state_modified: false,
         }
     }
 
@@ -267,8 +270,17 @@ where
         self.problem.as_ref()
     }
 
-    fn state(&self) -> Option<&OdeSolverState<<Eqn>::V>> {
+    fn state(&self) -> Option<&OdeSolverState<Eqn::V>> {
         self.state.as_ref()
+    }
+
+    fn order(&self) -> usize {
+        1
+    }
+
+    fn state_mut(&mut self) -> Option<&mut OdeSolverState<Eqn::V>> {
+        self.is_state_modified = true;
+        self.state.as_mut()
     }
 
     fn take_state(&mut self) -> Option<OdeSolverState<<Eqn>::V>> {
@@ -290,7 +302,7 @@ where
             .unwrap();
 
         // initialize
-        self.yp = SundialsVector::zeros(number_of_states);
+        self.yp = <SundialsVector as Vector>::zeros(number_of_states);
         Self::check(unsafe {
             IDAInit(
                 ida_mem,
@@ -334,6 +346,17 @@ where
         let state = self.state.as_mut().ok_or(anyhow!("State not set"))?;
         if self.problem.is_none() {
             return Err(anyhow!("Problem not set"));
+        }
+        if self.is_state_modified {
+            // reinit as state has been modified
+            Self::check(unsafe {
+                IDAReInit(
+                    self.ida_mem,
+                    state.t,
+                    state.y.sundials_vector(),
+                    self.yp.sundials_vector(),
+                )
+            })?
         }
         let itask = IDA_ONE_STEP;
         let retval = unsafe {
@@ -389,7 +412,7 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
-        ode_solver::tests::{test_interpolate, test_no_set_problem, test_take_state},
+        ode_solver::tests::{test_interpolate, test_no_set_problem, test_state_mut},
         SundialsIda, SundialsMatrix,
     };
 
@@ -399,8 +422,8 @@ mod test {
         test_no_set_problem::<M, _>(SundialsIda::default())
     }
     #[test]
-    fn sundials_take_state() {
-        test_take_state::<M, _>(SundialsIda::default())
+    fn sundials_state_mut() {
+        test_state_mut::<M, _>(SundialsIda::default())
     }
     #[test]
     fn sundials_interpolate() {
