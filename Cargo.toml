@@ -38,20 +38,20 @@ anyhow = ">=1.0.77"
 num-traits = "0.2.17"
 ouroboros = "0.18.2"
 serde = { version = "1.0.196", features = ["derive"] }
-diffsl4-0 = { package = "diffsl", version = ">=0.1.2", features = ["llvm4-0"], optional = true }
-diffsl5-0 = { package = "diffsl", version = ">=0.1.2", features = ["llvm5-0"], optional = true }
-diffsl6-0 = { package = "diffsl", version = ">=0.1.2", features = ["llvm6-0"], optional = true }
-diffsl7-0 = { package = "diffsl", version = ">=0.1.2", features = ["llvm7-0"], optional = true }
-diffsl8-0 = { package = "diffsl", version = ">=0.1.2", features = ["llvm8-0"], optional = true }
-diffsl9-0 = { package = "diffsl", version = ">=0.1.2", features = ["llvm9-0"], optional = true }
-diffsl10-0 = { package = "diffsl", version = ">=0.1.2", features = ["llvm10-0"], optional = true }
-diffsl11-0 = { package = "diffsl", version = ">=0.1.2", features = ["llvm11-0"], optional = true }
-diffsl12-0 = { package = "diffsl", version = ">=0.1.2", features = ["llvm12-0"], optional = true }
-diffsl13-0 = { package = "diffsl", version = ">=0.1.2", features = ["llvm13-0"], optional = true }
-diffsl14-0 = { package = "diffsl", version = ">=0.1.2", features = ["llvm14-0"], optional = true }
-diffsl15-0 = { package = "diffsl", version = ">=0.1.2", features = ["llvm15-0"], optional = true }
-diffsl16-0 = { package = "diffsl", version = ">=0.1.2", features = ["llvm16-0"], optional = true }
-diffsl17-0 = { package = "diffsl", version = ">=0.1.2", features = ["llvm17-0"], optional = true }
+diffsl4-0 = { package = "diffsl", version = ">=0.1.4", features = ["llvm4-0"], optional = true }
+diffsl5-0 = { package = "diffsl", version = ">=0.1.4", features = ["llvm5-0"], optional = true }
+diffsl6-0 = { package = "diffsl", version = ">=0.1.4", features = ["llvm6-0"], optional = true }
+diffsl7-0 = { package = "diffsl", version = ">=0.1.4", features = ["llvm7-0"], optional = true }
+diffsl8-0 = { package = "diffsl", version = ">=0.1.4", features = ["llvm8-0"], optional = true }
+diffsl9-0 = { package = "diffsl", version = ">=0.1.4", features = ["llvm9-0"], optional = true }
+diffsl10-0 = { package = "diffsl", version = ">=0.1.4", features = ["llvm10-0"], optional = true }
+diffsl11-0 = { package = "diffsl", version = ">=0.1.4", features = ["llvm11-0"], optional = true }
+diffsl12-0 = { package = "diffsl", version = ">=0.1.4", features = ["llvm12-0"], optional = true }
+diffsl13-0 = { package = "diffsl", version = ">=0.1.4", features = ["llvm13-0"], optional = true }
+diffsl14-0 = { package = "diffsl", version = ">=0.1.4", features = ["llvm14-0"], optional = true }
+diffsl15-0 = { package = "diffsl", version = ">=0.1.4", features = ["llvm15-0"], optional = true }
+diffsl16-0 = { package = "diffsl", version = ">=0.1.4", features = ["llvm16-0"], optional = true }
+diffsl17-0 = { package = "diffsl", version = ">=0.1.4", features = ["llvm17-0"], optional = true }
 petgraph = "0.6.4"
 faer = "0.18.2"
 sundials-sys = { version = "0.4.0", features = ["ida", "static_libraries"], optional = true }

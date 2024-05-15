@@ -37,20 +37,35 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n));
 
         // create the mass and rhs jacobians according to the sparsity pattern
-        let mass_sparsity = eqn.mass().sparsity();
         let rhs_jac_sparsity = eqn.rhs().sparsity();
         let rhs_jac = RefCell::new(Eqn::M::new_from_sparsity(n, n, rhs_jac_sparsity));
         let sparsity = if let Some(rhs_jac_sparsity) = rhs_jac_sparsity {
-            mass_sparsity.map(|mass_sparsity| mass_sparsity.union(rhs_jac_sparsity).unwrap())
+            if let Some(mass) = eqn.mass() {
+                // have mass, use the union of the mass and rhs jacobians sparse patterns
+                Some(mass.sparsity().unwrap().union(rhs_jac_sparsity).unwrap())
+            } else {
+                // no mass, use the identity
+                let mass_sparsity = <Eqn::M as Matrix>::Sparsity::new_diagonal(n);
+                Some(mass_sparsity.union(rhs_jac_sparsity).unwrap())
+            }
         } else {
             None
         };
 
-        // if mass is constant then pre-compute it
-        let mut mass_jac = Eqn::M::new_from_sparsity(n, n, mass_sparsity);
-        if eqn.is_mass_constant() {
-            eqn.mass().matrix_inplace(Eqn::T::zero(), &mut mass_jac);
-        }
+        let mass_jac = if eqn.mass().is_none() {
+            // no mass matrix, so just use the identity
+            Eqn::M::from_diagonal(&Eqn::V::from_element(n, Eqn::T::one()))
+        } else if eqn.is_mass_constant() {
+            // if mass is constant then pre-compute it
+            let mut mass_jac = Eqn::M::new_from_sparsity(n, n, eqn.mass().unwrap().sparsity());
+            eqn.mass()
+                .unwrap()
+                .matrix_inplace(Eqn::T::zero(), &mut mass_jac);
+            mass_jac
+        } else {
+            // mass is not constant, so just create a matrix with the correct sparsity
+            Eqn::M::new_from_sparsity(n, n, eqn.mass().unwrap().sparsity())
+        };
         let mass_jac = RefCell::new(mass_jac);
 
         Self {
@@ -142,7 +157,11 @@ where
         self.eqn.rhs().call_inplace(&tmp, t, y);
 
         // y = Mx - h y
-        self.eqn.mass().gemv_inplace(x, t, -h, y);
+        if let Some(mass) = self.eqn.mass() {
+            mass.gemv_inplace(x, t, -h, y);
+        } else {
+            y.axpy(Eqn::T::one(), x, -h);
+        }
     }
     // (M - c * h * f'(phi + c * y)) v
     fn jac_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
@@ -154,7 +173,11 @@ where
         self.eqn.rhs().jac_mul_inplace(&tmp, t, v, y);
 
         // y = Mv - c h y
-        self.eqn.mass().gemv_inplace(v, t, -c * h, y);
+        if let Some(mass) = self.eqn.mass() {
+            mass.gemv_inplace(v, t, -c * h, y);
+        } else {
+            y.axpy(Eqn::T::one(), v, -c * h);
+        }
     }
 
     // M - c * h * f'(phi + c * y)
@@ -168,12 +191,12 @@ where
             let tmp = self.tmp.borrow();
             self.eqn.rhs().jacobian_inplace(&tmp, t, &mut rhs_jac);
 
-            if self.eqn.is_mass_constant() {
+            if self.eqn.is_mass_constant() || self.eqn.mass().is_none() {
                 let mass_jac = self.mass_jac.borrow();
                 y.scale_add_and_assign(mass_jac.deref(), -(c * h), rhs_jac.deref());
             } else {
                 let mut mass_jac = self.mass_jac.borrow_mut();
-                self.eqn.mass().matrix_inplace(t, &mut mass_jac);
+                self.eqn.mass().unwrap().matrix_inplace(t, &mut mass_jac);
                 y.scale_add_and_assign(mass_jac.deref(), -(c * h), rhs_jac.deref());
             }
             self.jacobian_is_stale.replace(false);

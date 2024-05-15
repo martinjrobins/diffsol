@@ -57,7 +57,7 @@ pub trait OdeEquations {
     fn rhs(&self) -> &Rc<Self::Rhs>;
 
     /// returns the mass matrix `M` as a [LinearOp]
-    fn mass(&self) -> &Rc<Self::Mass>;
+    fn mass(&self) -> Option<&Rc<Self::Mass>>;
 
     fn root(&self) -> Option<&Rc<Self::Root>> {
         None
@@ -110,8 +110,8 @@ pub trait OdeEquations {
 ///
 /// let rhs = Rc::new(MyProblem);
 ///
-/// // we don't have a mass matrix, so we can use a unit operator which does nothing
-/// let mass = Rc::new(UnitCallable::new(1));
+/// // we don't have a mass matrix or root function, so we can set to None
+/// let mass: Option<Rc<UnitCallable<M>>> = None;
 /// let root: Option<Rc<UnitCallable<M>>> = None;
 /// let init = |p: &V, _t: f64| V::from_vec(vec![1.0]);
 /// let p = Rc::new(V::from_vec(vec![]));
@@ -143,7 +143,7 @@ where
     I: Fn(&M::V, M::T) -> M::V,
 {
     rhs: Rc<Rhs>,
-    mass: Rc<Mass>,
+    mass: Option<Rc<Mass>>,
     root: Option<Rc<Root>>,
     init: I,
     p: Rc<M::V>,
@@ -161,7 +161,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         rhs: Rc<Rhs>,
-        mass: Rc<Mass>,
+        mass: Option<Rc<Mass>>,
         root: Option<Rc<Root>>,
         init: I,
         p: Rc<M::V>,
@@ -196,8 +196,8 @@ where
     fn rhs(&self) -> &Rc<Self::Rhs> {
         &self.rhs
     }
-    fn mass(&self) -> &Rc<Self::Mass> {
-        &self.mass
+    fn mass(&self) -> Option<&Rc<Self::Mass>> {
+        self.mass.as_ref()
     }
     fn root(&self) -> Option<&Rc<Self::Root>> {
         self.root.as_ref()
@@ -215,9 +215,9 @@ where
         Rc::<Rhs>::get_mut(&mut self.rhs)
             .unwrap()
             .set_params(self.p.clone());
-        Rc::<Mass>::get_mut(&mut self.mass)
-            .unwrap()
-            .set_params(self.p.clone());
+        if let Some(m) = self.mass.as_mut() {
+            Rc::<Mass>::get_mut(m).unwrap().set_params(self.p.clone());
+        }
         if let Some(r) = self.root.as_mut() {
             Rc::<Root>::get_mut(r).unwrap().set_params(self.p.clone())
         }
@@ -248,11 +248,7 @@ mod tests {
         let jac_rhs_y = problem.eqn.rhs().jac_mul(&y, 0.0, &y);
         let expect_jac_rhs_y = Vcpu::from_vec(vec![-0.1, -0.1]);
         jac_rhs_y.assert_eq_st(&expect_jac_rhs_y, 1e-10);
-        let mass = problem.eqn.mass().matrix(0.0);
-        assert_eq!(mass[(0, 0)], 1.0);
-        assert_eq!(mass[(1, 1)], 1.0);
-        assert_eq!(mass[(0, 1)], 0.);
-        assert_eq!(mass[(1, 0)], 0.);
+        assert!(problem.eqn.mass().is_none());
         let jac = problem.eqn.rhs().jacobian(&y, 0.0);
         assert_eq!(jac[(0, 0)], -0.1);
         assert_eq!(jac[(1, 1)], -0.1);
@@ -270,7 +266,7 @@ mod tests {
         let jac_rhs_y = problem.eqn.rhs().jac_mul(&y, 0.0, &y);
         let expect_jac_rhs_y = Vcpu::from_vec(vec![-0.1, -0.1, 0.0]);
         jac_rhs_y.assert_eq_st(&expect_jac_rhs_y, 1e-10);
-        let mass = problem.eqn.mass().matrix(0.0);
+        let mass = problem.eqn.mass().unwrap().matrix(0.0);
         assert_eq!(mass[(0, 0)], 1.);
         assert_eq!(mass[(1, 1)], 1.);
         assert_eq!(mass[(2, 2)], 0.);
