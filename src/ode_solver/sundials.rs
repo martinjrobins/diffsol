@@ -117,8 +117,13 @@ where
         let rhs = eqn.rhs();
         let rhs_jac_sparsity = rhs.sparsity();
         let rhs_jac = SundialsMatrix::new_from_sparsity(n, n, rhs_jac_sparsity);
-        let mass_sparsity = eqn.mass().sparsity();
-        let mass = SundialsMatrix::new_from_sparsity(n, n, mass_sparsity);
+        let mass = if let Some(mass) = eqn.mass() {
+            let mass_sparsity = mass.sparsity();
+            SundialsMatrix::new_from_sparsity(n, n, mass_sparsity)
+        } else {
+            let ones = SundialsVector::from_element(n, 1.0);
+            SundialsMatrix::from_diagonal(&ones)
+        };
         Self { eqn, rhs_jac, mass }
     }
 }
@@ -157,7 +162,11 @@ where
         // rr = f(t, y)
         data.eqn.rhs().call_inplace(&y, t, &mut rr);
         // rr = M y' - rr
-        data.eqn.mass().gemv_inplace(&yp, t, -1.0, &mut rr);
+        if let Some(mass) = data.eqn.mass() {
+            mass.gemv_inplace(&yp, t, -1.0, &mut rr);
+        } else {
+            rr.axpy(1.0, &yp, -1.0);
+        }
         0
     }
 
@@ -179,7 +188,9 @@ where
         // jac = c_j * M - rhs_jac
         let y = SundialsVector::new_not_owned(y);
         let mut jac = SundialsMatrix::new_not_owned(jac);
-        eqn.mass().matrix_inplace(t, &mut data.mass);
+        if let Some(mass) = eqn.mass() {
+            mass.matrix_inplace(t, &mut data.mass);
+        }
         eqn.rhs().jacobian_inplace(&y, t, &mut data.rhs_jac);
         data.rhs_jac *= scale(-1.0);
         jac.scale_add_and_assign(&data.rhs_jac, c_j, &data.mass);
@@ -217,12 +228,16 @@ where
         if self.problem.is_none() {
             return Err(anyhow!("Problem not set"));
         }
+        if self.problem.as_ref().unwrap().eqn.mass().is_none() {
+            return Ok(())
+        }
         let diag = self
             .problem
             .as_ref()
             .unwrap()
             .eqn
             .mass()
+            .unwrap()
             .matrix(t)
             .diagonal();
         let id = diag.filter_indices(|x| x == Eqn::T::zero());

@@ -226,7 +226,7 @@ impl OdeBuilder {
             rhs.calculate_sparsity(&y0, t0);
             mass.calculate_sparsity(t0);
         }
-        let mass = Rc::new(mass);
+        let mass = Some(Rc::new(mass));
         let rhs = Rc::new(rhs);
         let eqn = OdeSolverEquations::new(rhs, mass, None, init, p, self.constant_mass);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
@@ -288,12 +288,11 @@ impl OdeBuilder {
         let y0 = init(&p, t0);
         let nstates = y0.len();
         let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
-        let mass = Rc::new(UnitCallable::new(nstates));
         if self.use_coloring {
             rhs.calculate_sparsity(&y0, t0);
         }
         let rhs = Rc::new(rhs);
-        let eqn = OdeSolverEquations::new(rhs, mass, None, init, p, self.use_coloring);
+        let eqn = OdeSolverEquations::new(rhs, None, None, init, p, self.use_coloring);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
         Ok(OdeSolverProblem::new(
             eqn,
@@ -366,13 +365,12 @@ impl OdeBuilder {
         let y0 = init(&p, t0);
         let nstates = y0.len();
         let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
-        let mass = Rc::new(UnitCallable::new(nstates));
         let root = Rc::new(ClosureNoJac::new(root, nstates, nroots, p.clone()));
         if self.use_coloring {
             rhs.calculate_sparsity(&y0, t0);
         }
         let rhs = Rc::new(rhs);
-        let eqn = OdeSolverEquations::new(rhs, mass, Some(root), init, p, self.use_coloring);
+        let eqn = OdeSolverEquations::new(rhs, None, Some(root), init, p, self.use_coloring);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
         Ok(OdeSolverProblem::new(
             eqn,

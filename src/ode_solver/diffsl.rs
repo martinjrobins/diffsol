@@ -84,14 +84,14 @@ impl DiffSlContext {
 pub struct DiffSl<'a> {
     context: &'a DiffSlContext,
     rhs: Rc<DiffSlRhs<'a>>,
-    mass: Rc<DiffSlMass<'a>>,
+    mass: Option<Rc<DiffSlMass<'a>>>,
     root: Rc<DiffSlRoot<'a>>,
 }
 
 impl<'a> DiffSl<'a> {
     pub fn new(context: &'a DiffSlContext, use_coloring: bool) -> Self {
         let rhs = Rc::new(DiffSlRhs::new(context, use_coloring));
-        let mass = Rc::new(DiffSlMass::new(context, use_coloring));
+        let mass = DiffSlMass::new(context, use_coloring).map(Rc::new);
         let root = Rc::new(DiffSlRoot::new(context));
         Self {
             context,
@@ -140,7 +140,10 @@ impl<'a> DiffSlRhs<'a> {
 }
 
 impl<'a> DiffSlMass<'a> {
-    pub fn new(context: &'a DiffSlContext, use_coloring: bool) -> Self {
+    pub fn new(context: &'a DiffSlContext, use_coloring: bool) -> Option<Self> {
+        if !context.compiler.has_mass() {
+            return None;
+        }
         let mut ret = Self {
             context,
             coloring: None,
@@ -151,7 +154,7 @@ impl<'a> DiffSlMass<'a> {
             let non_zeros = find_non_zeros_linear(&ret, t0);
             ret.coloring = Some(JacobianColoring::new_from_non_zeros(&ret, non_zeros));
         }
-        ret
+        Some(ret)
     }
 }
 
@@ -276,8 +279,8 @@ impl<'a> OdeEquations for DiffSl<'a> {
         &self.rhs
     }
 
-    fn mass(&self) -> &Rc<Self::Mass> {
-        &self.mass
+    fn mass(&self) -> Option<&Rc<Self::Mass>> {
+        self.mass.as_ref()
     }
 
     fn root(&self) -> Option<&Rc<Self::Root>> {
@@ -374,7 +377,7 @@ mod tests {
         rhs_jac.assert_eq_st(&rhs_jac_expect, 1e-10);
         let mut mass_y = DVector::from_vec(vec![0.0, 0.0]);
         let v = DVector::from_vec(vec![1.0, 1.0]);
-        eqn.mass().call_inplace(&v, 0.0, &mut mass_y);
+        eqn.mass().unwrap().call_inplace(&v, 0.0, &mut mass_y);
         let mass_y_expect = DVector::from_vec(vec![1.0, 0.0]);
         mass_y.assert_eq_st(&mass_y_expect, 1e-10);
 

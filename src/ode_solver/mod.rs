@@ -130,7 +130,6 @@ mod tests {
 
     pub struct TestEqn<M: Matrix> {
         rhs: Rc<TestEqnRhs<M>>,
-        mass: Rc<UnitCallable<M>>,
     }
 
     impl<M: Matrix> TestEqn<M> {
@@ -139,7 +138,6 @@ mod tests {
                 rhs: Rc::new(TestEqnRhs {
                     _m: std::marker::PhantomData,
                 }),
-                mass: Rc::new(UnitCallable::new(1)),
             }
         }
     }
@@ -158,8 +156,8 @@ mod tests {
             &self.rhs
         }
 
-        fn mass(&self) -> &Rc<Self::Mass> {
-            &self.mass
+        fn mass(&self) -> Option<&Rc<Self::Mass>> {
+            None
         }
 
         fn root(&self) -> Option<&Rc<Self::Root>> {

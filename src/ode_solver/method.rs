@@ -169,7 +169,10 @@ impl<V: Vector> OdeSolverState<V> {
         Eqn: OdeEquations<T = V::T, V = V>,
         S: NonLinearSolver<FilterCallable<Eqn::Rhs>> + ?Sized,
     {
-        let mass_diagonal = ode_problem.eqn.mass().matrix(self.t).diagonal();
+        if ode_problem.eqn.mass().is_none() {
+            return Ok(());
+        }
+        let mass_diagonal = ode_problem.eqn.mass().unwrap().matrix(self.t).diagonal();
         let indices = mass_diagonal.filter_indices(|x| x == Eqn::T::zero());
         if indices.len() == 0 {
             return Ok(());
