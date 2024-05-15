@@ -45,7 +45,7 @@ mod tests {
         M: Matrix,
         Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
     {
-        let mut state = OdeSolverState::new(problem);
+        let mut state = OdeSolverState::new_without_initialise(problem);
         state.set_consistent(problem, &mut root_solver).unwrap();
         state.set_step_size(problem, method.order());
         method.set_problem(state, problem);
@@ -179,7 +179,7 @@ mod tests {
             M::T::zero(),
             M::T::one(),
         );
-        let state = OdeSolverState::new(&problem);
+        let state = OdeSolverState::new_without_initialise(&problem);
         s.set_problem(state.clone(), &problem);
         let t0 = M::T::zero();
         let t1 = M::T::one();
@@ -208,7 +208,7 @@ mod tests {
             M::T::zero(),
             M::T::one(),
         );
-        let state = OdeSolverState::new(&problem);
+        let state = OdeSolverState::new_without_initialise(&problem);
         s.set_problem(state.clone(), &problem);
         let state2 = s.state().unwrap();
         state2.y.assert_eq_st(&state.y, M::T::from(1e-9));
@@ -225,7 +225,7 @@ mod tests {
         s.solve(&problem, Eqn::T::from(1.0)).unwrap();
 
         // reinit using state_mut
-        let state = OdeSolverState::new(&problem);
+        let state = OdeSolverState::new_without_initialise(&problem);
         s.state_mut().unwrap().y.copy_from(&state.y);
         s.state_mut().unwrap().t = state.t;
 

@@ -141,6 +141,7 @@ pub use ode_solver::sundials::SundialsIda;
 #[cfg(feature = "diffsl")]
 pub use ode_solver::diffsl::DiffSlContext;
 
+pub use matrix::default_solver::DefaultSolver;
 use matrix::{DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixView, MatrixViewMut};
 pub use nonlinear_solver::newton::NewtonNonlinearSolver;
 use nonlinear_solver::{root::RootFinder, NonLinearSolver};
@@ -196,7 +197,7 @@ mod tests {
         let t = 0.4;
         let y = solver.solve(&problem, t).unwrap();
 
-        let state = OdeSolverState::new(&problem);
+        let state = OdeSolverState::new(&problem).unwrap();
         solver.set_problem(state, &problem);
         while solver.state().unwrap().t <= t {
             solver.step().unwrap();
@@ -237,7 +238,7 @@ mod tests {
         let t = 0.4;
         let y = solver.solve(&problem, t).unwrap();
 
-        let state = OdeSolverState::new(&problem);
+        let state = OdeSolverState::new(&problem).unwrap();
         solver.set_problem(state, &problem);
         while solver.state().unwrap().t <= t {
             solver.step().unwrap();
