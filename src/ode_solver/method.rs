@@ -29,7 +29,7 @@ pub enum OdeSolverStopReason<T: Scalar> {
 ///    Eqn: OdeEquations,
 ///    Eqn::M: DefaultSolver,
 /// {
-///     let state = OdeSolverState::new(problem).unwrap();
+///     let state = OdeSolverState::new(problem, solver).unwrap();
 ///     solver.set_problem(state, problem);
 ///     while solver.state().unwrap().t <= t {
 ///         solver.step().unwrap();
@@ -123,13 +123,14 @@ pub struct OdeSolverState<V: Vector> {
 impl<V: Vector> OdeSolverState<V> {
     /// Create a new solver state from an ODE problem.
     /// This function will make the state consistent with any algebraic constraints using a default nonlinear solver.
-    /// It will also set the initial step size based on a solver accuracy order of 4.
+    /// It will also set the initial step size based on the given solver.
     /// If you want to create a state without this default initialisation, use [Self::new_without_initialise] instead.
     /// You can then use [Self::set_consistent] and [Self::set_step_size] to set the state up if you need to.
-    pub fn new<Eqn>(ode_problem: &OdeSolverProblem<Eqn>) -> Result<Self>
+    pub fn new<Eqn, S>(ode_problem: &OdeSolverProblem<Eqn>, solver: &S) -> Result<Self>
     where
         Eqn: OdeEquations<T = V::T, V = V>,
         Eqn::M: DefaultSolver,
+        S: OdeSolverMethod<Eqn>,
     {
         let t = ode_problem.t0;
         let h = ode_problem.h0;
@@ -140,7 +141,7 @@ impl<V: Vector> OdeSolverState<V> {
         let ls = <Eqn::M as DefaultSolver>::default_solver();
         let mut root_solver = NewtonNonlinearSolver::new(ls);
         ret.set_consistent(ode_problem, &mut root_solver)?;
-        ret.set_step_size(ode_problem, 4);
+        ret.set_step_size(ode_problem, solver.order());
         Ok(ret)
     }
 

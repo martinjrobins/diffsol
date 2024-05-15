@@ -11,15 +11,19 @@
 //! You will also need to choose a matrix type to use. DiffSol can use the [nalgebra](https://nalgebra.org) `DMatrix` type, the [faer](https://github.com/sarah-ek/faer-rs) `Mat` type, or any other type that implements the
 //! [Matrix] trait. You can also use the [sundials](https://computation.llnl.gov/projects/sundials) library for the matrix and vector types (see [SundialsMatrix]).
 //!
+//! ## Initial state
+//!
+//! The solver state is held in [OdeSolverState], and contains a state vector, the gradient of the state vector, the time, and the step size. You can intitialise a new state using [OdeSolverState::new],
+//! or create an uninitialised state using [OdeSolverState::new_without_initialise] and intitialise it manually or using the [OdeSolverState::set_consistent] and [OdeSolverState::set_step_size] methods.
+//!
 //! ## The solver
 //!
-//! To solve the problem, you need to choose a solver. DiffSol provides the following solvers:
+//! To solve the problem given the initial state, you need to choose a solver. DiffSol provides the following solvers:
 //! - A Backwards Difference Formulae [Bdf] solver, suitable for stiff problems and singular mass matrices.
 //! - A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver [Sdirk]. You can use your own butcher tableau using [Tableau] or use one of the provided ([Tableau::tr_bdf2], [Tableau::esdirk34]).
 //! - A BDF solver that wraps the IDA solver solver from the sundials library ([SundialsIda], requires the `sundials` feature).
 //!
 //! See the [OdeSolverMethod] trait for a more detailed description of the available methods on each solver. Possible workflows are:
-//! - Initialise the problem using [OdeSolverState::new] or [OdeSolverState::new_consistent], and then use [OdeSolverMethod::set_problem] to setup the solver with the problem and [OdeSolverState] instance.
 //! - Use the [OdeSolverMethod::step] method to step the solution forward in time with an internal time step chosen by the solver to meet the error tolerances.
 //! - Use the [OdeSolverMethod::interpolate] method to interpolate the solution between the last two time steps.
 //! - Use the [OdeSolverMethod::set_stop_time] method to stop the solver at a specific time (i.e. this will override the internal time step so that the solver stops at the specified time).
@@ -197,7 +201,7 @@ mod tests {
         let t = 0.4;
         let y = solver.solve(&problem, t).unwrap();
 
-        let state = OdeSolverState::new(&problem).unwrap();
+        let state = OdeSolverState::new(&problem, &solver).unwrap();
         solver.set_problem(state, &problem);
         while solver.state().unwrap().t <= t {
             solver.step().unwrap();
@@ -238,7 +242,7 @@ mod tests {
         let t = 0.4;
         let y = solver.solve(&problem, t).unwrap();
 
-        let state = OdeSolverState::new(&problem).unwrap();
+        let state = OdeSolverState::new(&problem, &solver).unwrap();
         solver.set_problem(state, &problem);
         while solver.state().unwrap().t <= t {
             solver.step().unwrap();
