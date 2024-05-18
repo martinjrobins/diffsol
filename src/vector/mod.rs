@@ -136,6 +136,7 @@ pub trait Vector:
     fn zeros(nstates: usize) -> Self {
         Self::from_element(nstates, Self::T::zero())
     }
+    fn fill(&mut self, value: Self::T);
     fn as_view(&self) -> Self::View<'_>;
     fn as_view_mut(&mut self) -> Self::ViewMut<'_>;
     fn copy_from(&mut self, other: &Self);

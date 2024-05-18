@@ -95,19 +95,16 @@ pub trait NonLinearOp: Op {
 
     /// Compute the product of the gradient of F wrt a parameter vector p with a given vector `J_p(x, t) * v`.
     /// Note that the vector v is of size nparams() and the result is of size nstates().
-    /// Default implementation returns None, meaning that the operator does not depend on any parameters,
-    /// and panics if nparams() is not zero.
-    fn sens_mul_inplace(
-        &self,
-        _x: &Self::V,
-        _t: Self::T,
-        _v: &Self::V,
-        _y: &mut Self::V,
-    ) -> Option<()> {
+    /// Default implementation returns zero and panics if nparams() is not zero.
+    fn sens_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
         if self.nparams() != 0 {
             panic!("sens_mul_inplace not implemented for non-zero parameters");
         }
-        None
+        y.fill(Self::T::zero());
+    }
+
+    fn has_sens(&self) -> bool {
+        false
     }
 
     /// Compute the operator `F(x, t)` at a given state and time, and return the result.
@@ -128,10 +125,9 @@ pub trait NonLinearOp: Op {
 
     /// Compute the product of the gradient of F wrt a parameter vector p with a given vector `J_p(x, t) * v`, and return the result.
     /// Use `[Self::sens_mul_inplace]` to for a non-allocating version.
-    /// Note: assumes that [Self::sens_mul_inplace] returns Some.
     fn sens_mul(&self, x: &Self::V, t: Self::T, v: &Self::V) -> Self::V {
         let mut y = Self::V::zeros(self.nstates());
-        self.sens_mul_inplace(x, t, v, &mut y).unwrap();
+        self.sens_mul_inplace(x, t, v, &mut y);
         y
     }
 
@@ -178,7 +174,7 @@ pub trait NonLinearOp: Op {
         let mut col = Self::V::zeros(self.nout());
         for j in 0..self.nparams() {
             v[j] = Self::T::one();
-            self.sens_mul_inplace(x, t, &v, &mut col).unwrap();
+            self.sens_mul_inplace(x, t, &v, &mut col);
             y.set_column(j, &col);
             v[j] = Self::T::zero();
         }

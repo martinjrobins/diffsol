@@ -113,15 +113,11 @@ where
         self.statistics.borrow_mut().increment_jac_mul();
         (self.jacobian_action)(x, self.p.as_ref(), t, v, y)
     }
-    fn sens_mul_inplace(
-        &self,
-        x: &Self::V,
-        t: Self::T,
-        v: &Self::V,
-        y: &mut Self::V,
-    ) -> Option<()> {
+    fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         (self.sens_action)(x, self.p.as_ref(), t, v, y);
-        Some(())
+    }
+    fn has_sens(&self) -> bool {
+        true
     }
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         self.statistics.borrow_mut().increment_matrix();

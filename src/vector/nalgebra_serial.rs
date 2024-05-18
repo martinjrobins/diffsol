@@ -124,6 +124,9 @@ impl<T: Scalar> Vector for DVector<T> {
     fn abs(&self) -> Self {
         self.abs()
     }
+    fn fill(&mut self, value: T) {
+        self.fill(value);
+    }
     fn as_view(&self) -> Self::View<'_> {
         self.as_view()
     }

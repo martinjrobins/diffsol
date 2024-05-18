@@ -450,6 +450,9 @@ impl Vector for SundialsVector {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    fn fill(&mut self, value: Self::T) {
+        unsafe { N_VConst(value, self.sundials_vector()) }
+    }
     fn abs(&self) -> Self {
         let z = SundialsVector::new_clone(self);
         unsafe { N_VAbs(self.sundials_vector(), z.sundials_vector()) }

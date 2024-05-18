@@ -101,6 +101,9 @@ impl<T: Scalar> Vector for Col<T> {
     fn copy_from_view(&mut self, other: &Self::View<'_>) {
         self.copy_from(other)
     }
+    fn fill(&mut self, value: Self::T) {
+        self.fill(value);
+    }
     fn from_element(nstates: usize, value: Self::T) -> Self {
         Col::from_vec(vec![value; nstates])
     }

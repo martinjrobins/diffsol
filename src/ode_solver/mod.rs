@@ -176,7 +176,9 @@ mod tests {
             M::V::from_element(1, M::T::from(1e-6)),
             M::T::zero(),
             M::T::one(),
-        );
+            false,
+        )
+        .unwrap();
         let state = OdeSolverState::new_without_initialise(&problem);
         s.set_problem(state.clone(), &problem);
         let t0 = M::T::zero();
@@ -205,7 +207,9 @@ mod tests {
             M::V::from_element(1, M::T::from(1e-6)),
             M::T::zero(),
             M::T::one(),
-        );
+            false,
+        )
+        .unwrap();
         let state = OdeSolverState::new_without_initialise(&problem);
         s.set_problem(state.clone(), &problem);
         let state2 = s.state().unwrap();

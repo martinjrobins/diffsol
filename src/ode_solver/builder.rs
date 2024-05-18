@@ -17,6 +17,7 @@ pub struct OdeBuilder {
     p: Vec<f64>,
     use_coloring: bool,
     constant_mass: bool,
+    sensitivities: bool,
 }
 
 impl Default for OdeBuilder {
@@ -80,12 +81,18 @@ impl OdeBuilder {
             p: vec![],
             use_coloring: false,
             constant_mass: false,
+            sensitivities: false,
         }
     }
 
     /// Set the initial time.
     pub fn t0(mut self, t0: f64) -> Self {
         self.t0 = t0;
+        self
+    }
+
+    pub fn sensitivities(mut self, sensitivities: bool) -> Self {
+        self.sensitivities = sensitivities;
         self
     }
 
@@ -230,13 +237,14 @@ impl OdeBuilder {
         let rhs = Rc::new(rhs);
         let eqn = OdeSolverEquations::new(rhs, mass, None, init, p, self.constant_mass);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
-        Ok(OdeSolverProblem::new(
+        OdeSolverProblem::new(
             eqn,
             M::T::from(self.rtol),
             atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
-        ))
+            false,
+        )
     }
 
     #[allow(clippy::type_complexity)]
@@ -274,13 +282,14 @@ impl OdeBuilder {
         let rhs = Rc::new(rhs);
         let eqn = OdeSolverEquations::new(rhs, mass, None, init, p, self.constant_mass);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
-        Ok(OdeSolverProblem::new(
+        OdeSolverProblem::new(
             eqn,
             M::T::from(self.rtol),
             atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
-        ))
+            true,
+        )
     }
 
     /// Build an ODE problem with a mass matrix that is the identity matrix.
@@ -338,13 +347,14 @@ impl OdeBuilder {
         let rhs = Rc::new(rhs);
         let eqn = OdeSolverEquations::new(rhs, None, None, init, p, self.use_coloring);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
-        Ok(OdeSolverProblem::new(
+        OdeSolverProblem::new(
             eqn,
             M::T::from(self.rtol),
             atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
-        ))
+            false,
+        )
     }
 
     #[allow(clippy::type_complexity)]
@@ -373,13 +383,14 @@ impl OdeBuilder {
         let rhs = Rc::new(rhs);
         let eqn = OdeSolverEquations::new(rhs, None, None, init, p, self.use_coloring);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
-        Ok(OdeSolverProblem::new(
+        OdeSolverProblem::new(
             eqn,
             M::T::from(self.rtol),
             atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
-        ))
+            true,
+        )
     }
 
     /// Build an ODE problem with an event.
@@ -451,13 +462,14 @@ impl OdeBuilder {
         let rhs = Rc::new(rhs);
         let eqn = OdeSolverEquations::new(rhs, None, Some(root), init, p, self.use_coloring);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
-        Ok(OdeSolverProblem::new(
+        OdeSolverProblem::new(
             eqn,
             M::T::from(self.rtol),
             atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
-        ))
+            false,
+        )
     }
 
     /// Build an ODE problem using the default dense matrix (see [Self::build_ode]).
@@ -491,12 +503,13 @@ impl OdeBuilder {
         let mut eqn = diffsl::DiffSl::new(context, self.use_coloring);
         eqn.set_params(p);
         let atol = Self::build_atol::<V>(self.atol, eqn.rhs().nstates())?;
-        Ok(OdeSolverProblem::new(
+        OdeSolverProblem::new(
             eqn,
             T::from(self.rtol),
             atol,
             T::from(self.t0),
             T::from(self.h0),
-        ))
+            self.sensitivities,
+        )
     }
 }
