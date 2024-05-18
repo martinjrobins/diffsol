@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use crate::{
-    vector::DefaultDenseMatrix, Closure, ClosureNoJac, LinearClosure, Matrix, OdeEquations,
-    OdeSolverProblem, Op, UnitCallable, Vector,
+    op::closure_with_sens::ClosureWithSens, vector::DefaultDenseMatrix, Closure, ClosureNoJac,
+    LinearClosure, Matrix, OdeEquations, OdeSolverProblem, Op, UnitCallable, Vector,
 };
 use anyhow::Result;
 
@@ -239,6 +239,50 @@ impl OdeBuilder {
         ))
     }
 
+    #[allow(clippy::type_complexity)]
+    pub fn build_ode_with_mass_and_sens<M, F, G, H, I, J>(
+        self,
+        rhs: F,
+        rhs_jac: G,
+        rhs_sens: J,
+        mass: H,
+        init: I,
+    ) -> Result<
+        OdeSolverProblem<
+            OdeSolverEquations<M, ClosureWithSens<M, F, G, J>, I, LinearClosure<M, H>>,
+        >,
+    >
+    where
+        M: Matrix,
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        H: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+        I: Fn(&M::V, M::T) -> M::V,
+        J: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let p = Rc::new(Self::build_p(self.p));
+        let t0 = M::T::from(self.t0);
+        let y0 = init(&p, t0);
+        let nstates = y0.len();
+        let mut rhs = ClosureWithSens::new(rhs, rhs_jac, rhs_sens, nstates, nstates, p.clone());
+        let mut mass = LinearClosure::new(mass, nstates, nstates, p.clone());
+        if self.use_coloring {
+            rhs.calculate_sparsity(&y0, t0);
+            mass.calculate_sparsity(t0);
+        }
+        let mass = Some(Rc::new(mass));
+        let rhs = Rc::new(rhs);
+        let eqn = OdeSolverEquations::new(rhs, mass, None, init, p, self.constant_mass);
+        let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
+        Ok(OdeSolverProblem::new(
+            eqn,
+            M::T::from(self.rtol),
+            atol,
+            M::T::from(self.t0),
+            M::T::from(self.h0),
+        ))
+    }
+
     /// Build an ODE problem with a mass matrix that is the identity matrix.
     ///
     /// # Arguments
@@ -288,6 +332,41 @@ impl OdeBuilder {
         let y0 = init(&p, t0);
         let nstates = y0.len();
         let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
+        if self.use_coloring {
+            rhs.calculate_sparsity(&y0, t0);
+        }
+        let rhs = Rc::new(rhs);
+        let eqn = OdeSolverEquations::new(rhs, None, None, init, p, self.use_coloring);
+        let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
+        Ok(OdeSolverProblem::new(
+            eqn,
+            M::T::from(self.rtol),
+            atol,
+            M::T::from(self.t0),
+            M::T::from(self.h0),
+        ))
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub fn build_ode_with_sens<M, F, G, I, J>(
+        self,
+        rhs: F,
+        rhs_jac: G,
+        rhs_sens: J,
+        init: I,
+    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, ClosureWithSens<M, F, G, J>, I>>>
+    where
+        M: Matrix,
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        I: Fn(&M::V, M::T) -> M::V,
+        J: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let p = Rc::new(Self::build_p(self.p));
+        let t0 = M::T::from(self.t0);
+        let y0 = init(&p, t0);
+        let nstates = y0.len();
+        let mut rhs = ClosureWithSens::new(rhs, rhs_jac, rhs_sens, nstates, nstates, p.clone());
         if self.use_coloring {
             rhs.calculate_sparsity(&y0, t0);
         }

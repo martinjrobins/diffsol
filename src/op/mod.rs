@@ -8,6 +8,7 @@ use serde::Serialize;
 pub mod bdf;
 pub mod closure;
 pub mod closure_no_jac;
+pub mod closure_with_sens;
 pub mod constant_closure;
 pub mod filter;
 pub mod linear_closure;
@@ -92,6 +93,23 @@ pub trait NonLinearOp: Op {
     /// Compute the product of the Jacobian with a given vector `J(x, t) * v`.
     fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V);
 
+    /// Compute the product of the gradient of F wrt a parameter vector p with a given vector `J_p(x, t) * v`.
+    /// Note that the vector v is of size nparams() and the result is of size nstates().
+    /// Default implementation returns None, meaning that the operator does not depend on any parameters,
+    /// and panics if nparams() is not zero.
+    fn sens_mul_inplace(
+        &self,
+        _x: &Self::V,
+        _t: Self::T,
+        _v: &Self::V,
+        _y: &mut Self::V,
+    ) -> Option<()> {
+        if self.nparams() != 0 {
+            panic!("sens_mul_inplace not implemented for non-zero parameters");
+        }
+        None
+    }
+
     /// Compute the operator `F(x, t)` at a given state and time, and return the result.
     /// Use `[Self::call_inplace]` to for a non-allocating version.
     fn call(&self, x: &Self::V, t: Self::T) -> Self::V {
@@ -105,6 +123,15 @@ pub trait NonLinearOp: Op {
     fn jac_mul(&self, x: &Self::V, t: Self::T, v: &Self::V) -> Self::V {
         let mut y = Self::V::zeros(self.nstates());
         self.jac_mul_inplace(x, t, v, &mut y);
+        y
+    }
+
+    /// Compute the product of the gradient of F wrt a parameter vector p with a given vector `J_p(x, t) * v`, and return the result.
+    /// Use `[Self::sens_mul_inplace]` to for a non-allocating version.
+    /// Note: assumes that [Self::sens_mul_inplace] returns Some.
+    fn sens_mul(&self, x: &Self::V, t: Self::T, v: &Self::V) -> Self::V {
+        let mut y = Self::V::zeros(self.nstates());
+        self.sens_mul_inplace(x, t, v, &mut y).unwrap();
         y
     }
 
@@ -134,6 +161,36 @@ pub trait NonLinearOp: Op {
         let n = self.nstates();
         let mut y = Self::M::new_from_sparsity(n, n, self.sparsity());
         self.jacobian_inplace(x, t, &mut y);
+        y
+    }
+
+    /// Compute the gradient of the operator wrt a parameter vector p and store it in the matrix `y`.
+    /// `y` should have been previously initialised using the output of [`Op::sparsity`].
+    /// The default implementation of this method computes the gradient using [Self::sens_mul_inplace],
+    /// but it can be overriden for more efficient implementations.
+    fn sens_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        self._default_sens_inplace(x, t, y);
+    }
+
+    /// Default implementation of the gradient computation (this is the default for [Self::sens_inplace]).
+    fn _default_sens_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        let mut v = Self::V::zeros(self.nparams());
+        let mut col = Self::V::zeros(self.nout());
+        for j in 0..self.nparams() {
+            v[j] = Self::T::one();
+            self.sens_mul_inplace(x, t, &v, &mut col).unwrap();
+            y.set_column(j, &col);
+            v[j] = Self::T::zero();
+        }
+    }
+
+    /// Compute the gradient of the operator wrt a parameter vector p and return it.
+    /// See [Self::sens_inplace] for a non-allocating version.
+    fn sens(&self, x: &Self::V, t: Self::T) -> Self::M {
+        let n = self.nstates();
+        let m = self.nparams();
+        let mut y = Self::M::new_from_sparsity(n, m, self.sparsity());
+        self.sens_inplace(x, t, &mut y);
         y
     }
 }
