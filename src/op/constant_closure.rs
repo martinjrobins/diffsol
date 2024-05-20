@@ -4,32 +4,27 @@ use crate::{Matrix, Vector};
 
 use super::{ConstantOp, Op};
 
-type ConstFn<V, T> = dyn Fn(&V, T) -> V;
-
-pub struct ConstantClosure<M>
+pub struct ConstantClosure<M, I>
 where
     M: Matrix,
+    I: Fn(&M::V, M::T) -> M::V,
 {
-    func: Box<ConstFn<M::V, M::T>>,
+    func: I,
     nstates: usize,
     nout: usize,
     nparams: usize,
     p: Rc<M::V>,
 }
 
-impl<M> ConstantClosure<M>
+impl<M, I> ConstantClosure<M, I>
 where
     M: Matrix,
+    I: Fn(&M::V, M::T) -> M::V,
 {
-    pub fn new(
-        func: impl Fn(&M::V, M::T) -> M::V + 'static,
-        nstates: usize,
-        nout: usize,
-        p: Rc<M::V>,
-    ) -> Self {
+    pub fn new(func: I, nstates: usize, nout: usize, p: Rc<M::V>) -> Self {
         let nparams = p.len();
         Self {
-            func: Box::new(func),
+            func,
             nstates,
             nout,
             nparams,
@@ -38,9 +33,10 @@ where
     }
 }
 
-impl<M> Op for ConstantClosure<M>
+impl<M, I> Op for ConstantClosure<M, I>
 where
     M: Matrix,
+    I: Fn(&M::V, M::T) -> M::V,
 {
     type V = M::V;
     type T = M::T;
@@ -60,11 +56,15 @@ where
     }
 }
 
-impl<M> ConstantOp for ConstantClosure<M>
+impl<M, I> ConstantOp for ConstantClosure<M, I>
 where
     M: Matrix,
+    I: Fn(&M::V, M::T) -> M::V,
 {
-    fn call_inplace(&self, t: M::T, y: &mut M::V) {
-        y.copy_from(&(self.func)(self.p.as_ref(), t))
+    fn call_inplace(&self, t: Self::T, y: &mut Self::V) {
+        y.copy_from(&(self.func)(self.p.as_ref(), t));
+    }
+    fn call(&self, t: Self::T) -> Self::V {
+        (self.func)(self.p.as_ref(), t)
     }
 }

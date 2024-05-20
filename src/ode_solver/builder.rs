@@ -2,7 +2,8 @@ use std::rc::Rc;
 
 use crate::{
     op::closure_with_sens::ClosureWithSens, vector::DefaultDenseMatrix, Closure, ClosureNoJac,
-    LinearClosure, Matrix, OdeEquations, OdeSolverProblem, Op, UnitCallable, Vector,
+    ConstantClosure, LinearClosure, Matrix, OdeEquations, OdeSolverProblem, Op, UnitCallable,
+    Vector,
 };
 use anyhow::Result;
 
@@ -215,7 +216,7 @@ impl OdeBuilder {
         rhs_jac: G,
         mass: H,
         init: I,
-    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, Closure<M, F, G>, I, LinearClosure<M, H>>>>
+    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, Closure<M, F, G>, ConstantClosure<M, I>, LinearClosure<M, H>>>>
     where
         M: Matrix,
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -229,13 +230,15 @@ impl OdeBuilder {
         let nstates = y0.len();
         let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
         let mut mass = LinearClosure::new(mass, nstates, nstates, p.clone());
+        let init = ConstantClosure::new(init, nstates, nstates, p.clone());
         if self.use_coloring {
             rhs.calculate_sparsity(&y0, t0);
             mass.calculate_sparsity(t0);
         }
         let mass = Some(Rc::new(mass));
         let rhs = Rc::new(rhs);
-        let eqn = OdeSolverEquations::new(rhs, mass, None, init, p, self.constant_mass);
+        let init = Rc::new(init);
+        let eqn = OdeSolverEquations::new(rhs, mass, None, init, p);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
         OdeSolverProblem::new(
             eqn,
@@ -257,7 +260,7 @@ impl OdeBuilder {
         init: I,
     ) -> Result<
         OdeSolverProblem<
-            OdeSolverEquations<M, ClosureWithSens<M, F, G, J>, I, LinearClosure<M, H>>,
+            OdeSolverEquations<M, ClosureWithSens<M, F, G, J>, ConstantClosure<M, I>, LinearClosure<M, H>>,
         >,
     >
     where
@@ -274,13 +277,15 @@ impl OdeBuilder {
         let nstates = y0.len();
         let mut rhs = ClosureWithSens::new(rhs, rhs_jac, rhs_sens, nstates, nstates, p.clone());
         let mut mass = LinearClosure::new(mass, nstates, nstates, p.clone());
+        let init = ConstantClosure::new(init, nstates, nstates, p.clone());
         if self.use_coloring {
             rhs.calculate_sparsity(&y0, t0);
             mass.calculate_sparsity(t0);
         }
         let mass = Some(Rc::new(mass));
         let rhs = Rc::new(rhs);
-        let eqn = OdeSolverEquations::new(rhs, mass, None, init, p, self.constant_mass);
+        let init = Rc::new(init);
+        let eqn = OdeSolverEquations::new(rhs, mass, None, init, p);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
         OdeSolverProblem::new(
             eqn,
@@ -329,7 +334,7 @@ impl OdeBuilder {
         rhs: F,
         rhs_jac: G,
         init: I,
-    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, Closure<M, F, G>, I>>>
+    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, Closure<M, F, G>, ConstantClosure<M, I>>>>
     where
         M: Matrix,
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -341,11 +346,13 @@ impl OdeBuilder {
         let y0 = init(&p, t0);
         let nstates = y0.len();
         let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
+        let init = ConstantClosure::new(init, nstates, nstates, p.clone());
         if self.use_coloring {
             rhs.calculate_sparsity(&y0, t0);
         }
         let rhs = Rc::new(rhs);
-        let eqn = OdeSolverEquations::new(rhs, None, None, init, p, self.use_coloring);
+        let init = Rc::new(init);
+        let eqn = OdeSolverEquations::new(rhs, None, None, init, p);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
         OdeSolverProblem::new(
             eqn,
@@ -364,7 +371,7 @@ impl OdeBuilder {
         rhs_jac: G,
         rhs_sens: J,
         init: I,
-    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, ClosureWithSens<M, F, G, J>, I>>>
+    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, ClosureWithSens<M, F, G, J>, ConstantClosure<M, I>>>>
     where
         M: Matrix,
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -376,12 +383,14 @@ impl OdeBuilder {
         let t0 = M::T::from(self.t0);
         let y0 = init(&p, t0);
         let nstates = y0.len();
+        let init = ConstantClosure::new(init, nstates, nstates, p.clone());
         let mut rhs = ClosureWithSens::new(rhs, rhs_jac, rhs_sens, nstates, nstates, p.clone());
         if self.use_coloring {
             rhs.calculate_sparsity(&y0, t0);
         }
         let rhs = Rc::new(rhs);
-        let eqn = OdeSolverEquations::new(rhs, None, None, init, p, self.use_coloring);
+        let init = Rc::new(init);
+        let eqn = OdeSolverEquations::new(rhs, None, None, init, p);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
         OdeSolverProblem::new(
             eqn,
@@ -440,7 +449,7 @@ impl OdeBuilder {
         nroots: usize,
     ) -> Result<
         OdeSolverProblem<
-            OdeSolverEquations<M, Closure<M, F, G>, I, UnitCallable<M>, ClosureNoJac<M, H>>,
+            OdeSolverEquations<M, Closure<M, F, G>, ConstantClosure<M, I>, UnitCallable<M>, ClosureNoJac<M, H>>,
         >,
     >
     where
@@ -456,11 +465,13 @@ impl OdeBuilder {
         let nstates = y0.len();
         let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
         let root = Rc::new(ClosureNoJac::new(root, nstates, nroots, p.clone()));
+        let init = ConstantClosure::new(init, nstates, nstates, p.clone());
         if self.use_coloring {
             rhs.calculate_sparsity(&y0, t0);
         }
         let rhs = Rc::new(rhs);
-        let eqn = OdeSolverEquations::new(rhs, None, Some(root), init, p, self.use_coloring);
+        let init = Rc::new(init);
+        let eqn = OdeSolverEquations::new(rhs, None, Some(root), init, p);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
         OdeSolverProblem::new(
             eqn,
@@ -479,7 +490,7 @@ impl OdeBuilder {
         rhs: F,
         rhs_jac: G,
         init: I,
-    ) -> Result<OdeSolverProblem<OdeSolverEquations<V::M, Closure<V::M, F, G>, I>>>
+    ) -> Result<OdeSolverProblem<OdeSolverEquations<V::M, Closure<V::M, F, G>, ConstantClosure<V::M, I>>>>
     where
         V: Vector + DefaultDenseMatrix,
         F: Fn(&V, &V, V::T, &mut V),

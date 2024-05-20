@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{op::unit::UnitCallable, scalar::Scalar, LinearOp, Matrix, NonLinearOp, Vector};
+use crate::{op::{unit::UnitCallable, ConstantOp}, scalar::Scalar, LinearOp, Matrix, NonLinearOp, Vector};
 use serde::Serialize;
 
 #[derive(Clone, Debug, Serialize)]
@@ -48,6 +48,7 @@ pub trait OdeEquations {
     type Mass: LinearOp<M = Self::M, V = Self::V, T = Self::T>;
     type Rhs: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
     type Root: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
+    type Init: ConstantOp<M = Self::M, V = Self::V, T = Self::T>;
 
     /// The parameters of the ODE equations are assumed to be constant. This function sets the parameters to the given value before solving the ODE.
     /// Note that `set_params` must always be called before calling any of the other functions in this trait.
@@ -64,12 +65,7 @@ pub trait OdeEquations {
     }
 
     /// returns the initial condition, i.e. `y(t)`, where `t` is the initial time
-    fn init(&self, t: Self::T) -> Self::V;
-
-    /// returns true if the mass matrix is constant over time
-    fn is_mass_constant(&self) -> bool {
-        true
-    }
+    fn init(&self) -> &Rc<Self::Init>;
 }
 
 /// This struct implements the ODE equation trait [OdeEquations] for a given right-hand side op, mass op, optional root op, and initial condition function.
@@ -134,38 +130,36 @@ pub trait OdeEquations {
 /// let y = solver.interpolate(t);
 /// ```
 ///
-pub struct OdeSolverEquations<M, Rhs, I, Mass = UnitCallable<M>, Root = UnitCallable<M>>
+pub struct OdeSolverEquations<M, Rhs, Init, Mass = UnitCallable<M>, Root = UnitCallable<M>>
 where
     M: Matrix,
     Rhs: NonLinearOp<M = M, V = M::V, T = M::T>,
     Mass: LinearOp<M = M, V = M::V, T = M::T>,
     Root: NonLinearOp<M = M, V = M::V, T = M::T>,
-    I: Fn(&M::V, M::T) -> M::V,
+    Init: ConstantOp<M = M, V = M::V, T = M::T>,
 {
     rhs: Rc<Rhs>,
     mass: Option<Rc<Mass>>,
     root: Option<Rc<Root>>,
-    init: I,
+    init: Rc<Init>,
     p: Rc<M::V>,
-    mass_is_constant: bool,
 }
 
-impl<M, Rhs, Mass, Root, I> OdeSolverEquations<M, Rhs, I, Mass, Root>
+impl<M, Rhs, Init, Mass, Root> OdeSolverEquations<M, Rhs, Init, Mass, Root>
 where
     M: Matrix,
     Rhs: NonLinearOp<M = M, V = M::V, T = M::T>,
     Mass: LinearOp<M = M, V = M::V, T = M::T>,
     Root: NonLinearOp<M = M, V = M::V, T = M::T>,
-    I: Fn(&M::V, M::T) -> M::V,
+    Init: ConstantOp<M = M, V = M::V, T = M::T>,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         rhs: Rc<Rhs>,
         mass: Option<Rc<Mass>>,
         root: Option<Rc<Root>>,
-        init: I,
+        init: Rc<Init>,
         p: Rc<M::V>,
-        mass_is_constant: bool,
     ) -> Self {
         Self {
             rhs,
@@ -173,18 +167,17 @@ where
             root,
             init,
             p,
-            mass_is_constant,
         }
     }
 }
 
-impl<M, Rhs, Mass, Root, I> OdeEquations for OdeSolverEquations<M, Rhs, I, Mass, Root>
+impl<M, Rhs, Init, Mass, Root> OdeEquations for OdeSolverEquations<M, Rhs, Init, Mass, Root>
 where
     M: Matrix,
     Rhs: NonLinearOp<M = M, V = M::V, T = M::T>,
     Mass: LinearOp<M = M, V = M::V, T = M::T>,
     Root: NonLinearOp<M = M, V = M::V, T = M::T>,
-    I: Fn(&M::V, M::T) -> M::V,
+    Init: ConstantOp<M = M, V = M::V, T = M::T>,
 {
     type T = M::T;
     type V = M::V;
@@ -192,6 +185,7 @@ where
     type Rhs = Rhs;
     type Mass = Mass;
     type Root = Root;
+    type Init = Init;
 
     fn rhs(&self) -> &Rc<Self::Rhs> {
         &self.rhs
@@ -202,12 +196,8 @@ where
     fn root(&self) -> Option<&Rc<Self::Root>> {
         self.root.as_ref()
     }
-    fn is_mass_constant(&self) -> bool {
-        self.mass_is_constant
-    }
-    fn init(&self, t: Self::T) -> Self::V {
-        let p = self.p.as_ref();
-        (self.init)(p, t)
+    fn init(&self) -> &Rc<Self::Init> {
+        &self.init
     }
 
     fn set_params(&mut self, p: Self::V) {

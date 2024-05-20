@@ -153,9 +153,10 @@ pub use ode_solver::{
     bdf::Bdf, builder::OdeBuilder, equations::OdeEquations, equations::OdeSolverEquations,
     method::OdeSolverMethod, method::OdeSolverState, method::OdeSolverStopReason,
     problem::OdeSolverProblem, sdirk::Sdirk, tableau::Tableau,
+    sens_equations::SensEquations, sens_equations::SensRhs, sens_equations::SensInit
 };
-use op::{closure::Closure, closure_no_jac::ClosureNoJac, linear_closure::LinearClosure};
-pub use op::{unit::UnitCallable, LinearOp, NonLinearOp, Op};
+use op::{closure::Closure, closure_no_jac::ClosureNoJac, linear_closure::LinearClosure, constant_closure::ConstantClosure, init::InitOp};
+pub use op::{unit::UnitCallable, LinearOp, NonLinearOp, Op, ConstantOp};
 use scalar::{IndexType, Scalar, Scale};
 use solver::SolverProblem;
 use vector::{Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut};

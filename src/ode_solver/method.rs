@@ -3,9 +3,9 @@ use num_traits::{One, Pow, Zero};
 use std::rc::Rc;
 
 use crate::{
-    matrix::default_solver::DefaultSolver, op::filter::FilterCallable, scalar::Scalar, scale,
-    LinearOp, Matrix, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations,
-    OdeSolverProblem, SolverProblem, Vector, VectorIndex,
+    matrix::default_solver::DefaultSolver, scalar::Scalar, scale, ConstantOp, InitOp, LinearOp,
+    Matrix, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem,
+    Op, SensEquations, SolverProblem, Vector, VectorIndex,
 };
 
 pub enum OdeSolverStopReason<T: Scalar> {
@@ -77,29 +77,12 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     fn take_state(&mut self) -> Option<OdeSolverState<Eqn::V>>;
 
     /// Reinitialise the solver state and solve the problem up to time `t`
-    fn solve(&mut self, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Result<Eqn::V> {
-        let mut state = OdeSolverState::new_without_initialise(problem);
-        state.set_step_size(problem, self.order());
-        self.set_problem(state, problem);
-        self.set_stop_time(t)?;
-        loop {
-            if let OdeSolverStopReason::TstopReached = self.step()? {
-                break;
-            }
-        }
-        Ok(self.state().unwrap().y.clone())
-    }
-
-    /// Reinitialise the solver state making it consistent with the algebraic constraints and solve the problem up to time `t`
-    fn make_consistent_and_solve<RS: NonLinearSolver<FilterCallable<Eqn::Rhs>>>(
-        &mut self,
-        problem: &OdeSolverProblem<Eqn>,
-        t: Eqn::T,
-        root_solver: &mut RS,
-    ) -> Result<Eqn::V> {
-        let mut state = OdeSolverState::new_without_initialise(problem);
-        state.set_consistent(problem, root_solver)?;
-        state.set_step_size(problem, self.order());
+    fn solve(&mut self, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Result<Eqn::V>
+    where
+        Eqn::M: DefaultSolver,
+        Self: Sized,
+    {
+        let state = OdeSolverState::new(problem, self)?;
         self.set_problem(state, problem);
         self.set_stop_time(t)?;
         loop {
@@ -111,11 +94,20 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     }
 }
 
-/// State for the ODE solver, containing the current solution `y`, the current time `t`, and the current step size `h`.
+/// State for the ODE solver, containing:
+/// - the current solution `y`
+/// - the derivative of the solution wrt time `dy`
+/// - the current time `t`
+/// - the current step size `h`,
+/// - the sensitivity vectors `s`
+/// - the derivative of the sensitivity vectors wrt time `ds`
+///
 #[derive(Clone)]
 pub struct OdeSolverState<V: Vector> {
     pub y: V,
-    pub f: V,
+    pub dy: V,
+    pub s: Vec<V>,
+    pub ds: Vec<V>,
     pub t: V::T,
     pub h: V::T,
 }
@@ -132,15 +124,13 @@ impl<V: Vector> OdeSolverState<V> {
         Eqn::M: DefaultSolver,
         S: OdeSolverMethod<Eqn>,
     {
-        let t = ode_problem.t0;
-        let h = ode_problem.h0;
-        let y = ode_problem.eqn.init(t);
-        let f = ode_problem.eqn.rhs().call(&y, t);
-
-        let mut ret = Self { y, t, h, f };
-        let ls = <Eqn::M as DefaultSolver>::default_solver();
-        let mut root_solver = NewtonNonlinearSolver::new(ls);
+        let mut ret = Self::new_without_initialise(ode_problem);
+        let mut root_solver =
+            NewtonNonlinearSolver::new(<Eqn::M as DefaultSolver>::default_solver());
         ret.set_consistent(ode_problem, &mut root_solver)?;
+        let mut root_solver_sens =
+            NewtonNonlinearSolver::new(<Eqn::M as DefaultSolver>::default_solver());
+        ret.set_consistent_sens(ode_problem, &mut root_solver_sens)?;
         ret.set_step_size(ode_problem, solver.order());
         Ok(ret)
     }
@@ -154,9 +144,22 @@ impl<V: Vector> OdeSolverState<V> {
     {
         let t = ode_problem.t0;
         let h = ode_problem.h0;
-        let y = ode_problem.eqn.init(t);
-        let f = ode_problem.eqn.rhs().call(&y, t);
-        Self { y, t, h, f }
+        let y = ode_problem.eqn.init().call(t);
+        let dy = ode_problem.eqn.rhs().call(&y, t);
+        let s = Vec::new();
+        let ds = Vec::new();
+        let mut ret = Self { y, t, h, dy, s, ds };
+        if let Some(sens_equations) = ode_problem.eqn_sens.as_ref() {
+            sens_equations.init().update_state(&ret);
+            for i in 0..ode_problem.eqn.rhs().nparams() {
+                sens_equations.init().set_param_index(i);
+                let si = sens_equations.init().call(t);
+                let dsi = sens_equations.rhs().call(&ret.y, t);
+                ret.s.push(si);
+                ret.ds.push(dsi);
+            }
+        }
+        ret
     }
 
     /// Set the state to be consistent with the algebraic constraints of the problem.
@@ -167,26 +170,62 @@ impl<V: Vector> OdeSolverState<V> {
     ) -> Result<()>
     where
         Eqn: OdeEquations<T = V::T, V = V>,
-        S: NonLinearSolver<FilterCallable<Eqn::Rhs>> + ?Sized,
+        S: NonLinearSolver<InitOp<Eqn>> + ?Sized,
     {
         if ode_problem.eqn.mass().is_none() {
             return Ok(());
         }
-        let mass_diagonal = ode_problem.eqn.mass().unwrap().matrix(self.t).diagonal();
-        let indices = mass_diagonal.filter_indices(|x| x == Eqn::T::zero());
-        if indices.len() == 0 {
+        let f = Rc::new(InitOp::new(
+            &ode_problem.eqn,
+            ode_problem.t0,
+            &self.y,
+            &self.dy,
+        ));
+        let rtol = ode_problem.rtol;
+        let atol = ode_problem.atol.clone();
+        let init_problem = SolverProblem::new(f.clone(), atol, rtol);
+        root_solver.set_problem(&init_problem);
+        let mut y = f.y0.borrow().clone();
+        root_solver.solve_in_place(&mut y, self.t)?;
+        f.scatter_soln(&y, &mut self.y, &mut self.dy);
+        Ok(())
+    }
+
+    /// Set the sensitivity states to be consistent with the algebraic constraints of the problem.
+    pub fn set_consistent_sens<Eqn, S>(
+        &mut self,
+        ode_problem: &OdeSolverProblem<Eqn>,
+        root_solver: &mut S,
+    ) -> Result<()>
+    where
+        Eqn: OdeEquations<T = V::T, V = V>,
+        S: NonLinearSolver<InitOp<SensEquations<Eqn>>> + ?Sized,
+    {
+        if ode_problem.eqn.mass().is_none() {
             return Ok(());
         }
-        let mut y_filtered = self.y.filter(&indices);
-        let atol = Rc::new(ode_problem.atol.as_ref().filter(&indices));
-        let rhs = ode_problem.eqn.rhs().clone();
-        let f = Rc::new(FilterCallable::new(rhs, &self.y, indices));
-        let rtol = ode_problem.rtol;
-        let init_problem = SolverProblem::new(f, atol, rtol);
-        root_solver.set_problem(&init_problem);
-        root_solver.solve_in_place(&mut y_filtered, self.t)?;
-        let indices = init_problem.f.indices();
-        self.y.scatter_from(&y_filtered, indices);
+        if ode_problem.eqn_sens.is_none() {
+            return Ok(());
+        }
+        let eqn_sens = ode_problem.eqn_sens.as_ref().unwrap();
+        eqn_sens.init().update_state(self);
+        for i in 0..ode_problem.eqn.rhs().nparams() {
+            eqn_sens.init().set_param_index(i);
+            let f = Rc::new(InitOp::new(
+                eqn_sens,
+                ode_problem.t0,
+                &self.s[i],
+                &self.ds[i],
+            ));
+            root_solver.set_problem(&SolverProblem::new(
+                f.clone(),
+                ode_problem.atol.clone(),
+                ode_problem.rtol,
+            ));
+            let mut y = f.y0.borrow().clone();
+            root_solver.solve_in_place(&mut y, self.t)?;
+            f.scatter_soln(&y, &mut self.s[i], &mut self.ds[i]);
+        }
         Ok(())
     }
 
@@ -199,7 +238,7 @@ impl<V: Vector> OdeSolverState<V> {
     {
         let y0 = &self.y;
         let t0 = self.t;
-        let f0 = &self.f;
+        let f0 = &self.dy;
 
         let mut scale_factor = y0.abs();
         scale_factor *= scale(ode_problem.rtol);

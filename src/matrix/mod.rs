@@ -230,6 +230,8 @@ pub trait Matrix:
 
     fn set_column(&mut self, j: IndexType, v: &Self::V);
 
+    fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V);
+
     fn set_data_with_indices(
         &mut self,
         dst_indices: &<Self::Sparsity as MatrixSparsity>::Index,

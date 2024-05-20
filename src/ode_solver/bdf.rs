@@ -311,7 +311,7 @@ where
             self.diff_tmp = M::zeros(nstates, Self::MAX_ORDER + 3);
         }
         self.diff.column_mut(0).copy_from(&state.y);
-        self.diff.column_mut(1).copy_from(&state.f);
+        self.diff.column_mut(1).copy_from(&state.dy);
         self.diff.column_mut(1).mul_assign(scale(state.h));
 
         // setup U

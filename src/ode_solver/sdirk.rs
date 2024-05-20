@@ -225,7 +225,7 @@ where
         self.statistics.initial_step_size = state.h;
 
         self.diff = M::zeros(state.y.len(), self.tableau.s());
-        self.old_f = state.f.clone();
+        self.old_f = state.dy.clone();
         self.old_t = state.t;
         self.old_y = state.y.clone();
         self.state = Some(state);
@@ -261,7 +261,7 @@ where
             // if start == 1, then we need to compute the first stage
             if start == 1 {
                 let mut hf = self.diff.column_mut(0);
-                hf.copy_from(&state.f);
+                hf.copy_from(&state.dy);
                 hf *= scale(state.h);
             }
             for i in start..self.tableau.s() {
@@ -402,7 +402,7 @@ where
         self.old_f
             .copy_from_view(&self.diff.column(self.diff.ncols() - 1));
         self.old_f.mul_assign(scale(Eqn::T::one() / dt));
-        std::mem::swap(&mut self.old_f, &mut state.f);
+        std::mem::swap(&mut self.old_f, &mut state.dy);
 
         {
             let y1 = self.nonlinear_solver.problem().f.get_last_f_eval();

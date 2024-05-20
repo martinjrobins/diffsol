@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::rc::Rc;
 
-use crate::{vector::Vector, NonLinearOp, OdeEquations};
+use crate::{vector::Vector, NonLinearOp, OdeEquations, SensEquations};
 
 pub struct OdeSolverProblem<Eqn: OdeEquations> {
     pub eqn: Rc<Eqn>,
@@ -9,7 +9,7 @@ pub struct OdeSolverProblem<Eqn: OdeEquations> {
     pub atol: Rc<Eqn::V>,
     pub t0: Eqn::T,
     pub h0: Eqn::T,
-    pub with_sensitivity: bool,
+    pub eqn_sens: Option<Rc<SensEquations<Eqn>>>,
 }
 
 // impl clone
@@ -21,7 +21,7 @@ impl<Eqn: OdeEquations> Clone for OdeSolverProblem<Eqn> {
             atol: self.atol.clone(),
             t0: self.t0,
             h0: self.h0,
-            with_sensitivity: self.with_sensitivity,
+            eqn_sens: self.eqn_sens.clone(),
         }
     }
 }
@@ -46,13 +46,18 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
         if with_sensitivity && !eqn.rhs().has_sens() {
             anyhow::bail!("Sensitivity requested but equations do not support it");
         }
+        let eqn_sens = if with_sensitivity {
+            Some(Rc::new(SensEquations::new(&eqn)))
+        } else {
+            None
+        };
         Ok(Self {
             eqn,
             rtol,
             atol,
             t0,
             h0,
-            with_sensitivity,
+            eqn_sens,
         })
     }
 

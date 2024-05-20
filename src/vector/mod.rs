@@ -157,8 +157,19 @@ pub trait Vector:
         result
     }
     fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T);
+
+    // for i in 0..indices.len():
+    //  self[i] = value[indices[i]]
     fn gather_from(&mut self, other: &Self, indices: &Self::Index);
+
+    // for i in 0..indices.len():
+    //  self[indices[i]] = value[i]
     fn scatter_from(&mut self, other: &Self, indices: &Self::Index);
+
+    // for i in 0..indices.len():
+    //  self[indices[i]] = value[indices[i]]
+    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index);
+
     fn assert_eq_st(&self, other: &Self, tol: Self::T) {
         let tol = Self::from_element(self.len(), tol);
         self.assert_eq(other, &tol);
