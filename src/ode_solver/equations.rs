@@ -111,14 +111,14 @@ pub trait OdeEquations {
 /// let root: Option<Rc<UnitCallable<M>>> = None;
 /// let init = |p: &V, _t: f64| V::from_vec(vec![1.0]);
 /// let p = Rc::new(V::from_vec(vec![]));
-/// let mass_is_constant = true;
-/// let eqn = OdeSolverEquations::new(rhs, mass, root, init, p, mass_is_constant);
+/// let eqn = OdeSolverEquations::new(rhs, mass, root, init, p);
 ///
 /// let rtol = 1e-6;
 /// let atol = V::from_vec(vec![1e-6]);
 /// let t0 = 0.0;
 /// let h0 = 0.1;
-/// let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0);
+/// let with_sensitivity = false;
+/// let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, with_sensitivity).unwrap();
 ///
 /// let mut solver = Bdf::default();
 /// let t = 0.4;

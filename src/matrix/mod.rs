@@ -247,6 +247,9 @@ pub trait Matrix:
     fn combine_at_indices(ul: &Self, ur: &Self, ll: &Self, lr: &Self, indices: &<Self::V as Vector>::Index) -> Self {
         let n = ul.nrows() + ll.nrows();
         let m = ul.ncols() + ur.ncols();
+        if ul.ncols() != ll.ncols() || ur.ncols() != lr.ncols() || ul.nrows() != ur.nrows() || ll.nrows() != lr.nrows() {
+            panic!("Matrices must have the same shape");
+        }
         let mut triplets = Vec::new();
         let mut indices = indices.clone_as_vec();
         indices.sort();
@@ -257,17 +260,17 @@ pub trait Matrix:
             }
         }
         for (i, j, &v) in ur.triplet_iter() {
-            if !cat[i] && cat[j] {
+            if !cat[i] && cat[j + ul.ncols()] {
                 triplets.push((i, j + ul.ncols(), v));
             }
         }
         for (i, j, &v) in ll.triplet_iter() {
-            if cat[i] && !cat[j] {
+            if cat[i + ul.nrows()] && !cat[j] {
                 triplets.push((i + ul.nrows(), j, v));
             }
         }
         for (i, j, &v) in lr.triplet_iter() {
-            if cat[i] && cat[j] {
+            if cat[i + ul.nrows()] && cat[j + ul.ncols()] {
                 triplets.push((i + ul.nrows(), j + ul.ncols(), v));
             }
         }

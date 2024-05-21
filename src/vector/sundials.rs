@@ -446,11 +446,7 @@ impl Vector for SundialsVector {
     fn len(&self) -> IndexType {
         unsafe { N_VGetLength_Serial(self.sundials_vector()) as IndexType }
     }
-    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
-        for i in 0..indices.len() {
-            self[indices[i]] = other[indices[i]];
-        }
-    }
+    
     fn norm(&self) -> Self::T {
         let ones = SundialsVector::from_element(self.len(), 1.0);
         unsafe { N_VWL2Norm_Serial(self.sundials_vector(), ones.sundials_vector()) }

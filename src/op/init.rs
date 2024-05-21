@@ -41,9 +41,11 @@ impl<Eqn: OdeEquations> InitOp<Eqn> {
         let (m_u, _, _, _) = mass.split_at_indices(&algebraic_indices);
         let m_u = m_u * scale(-Eqn::T::one());
         let (_, dfdv, _, dgdv) = rhs_jac.split_at_indices(&algebraic_indices);
-        let zero = <Eqn::M as Matrix>::zeros(algebraic_indices.len(), n);
-        let jac = Eqn::M::combine_at_indices(&m_u, &dfdv, &zero, &dgdv, &algebraic_indices);
-        let neg_mass = Eqn::M::combine_at_indices(&m_u, &zero, &zero, &zero, &algebraic_indices);
+        let zero_ll = <Eqn::M as Matrix>::zeros(algebraic_indices.len(), n - algebraic_indices.len());
+        let zero_ur = <Eqn::M as Matrix>::zeros(n - algebraic_indices.len(), algebraic_indices.len());
+        let zero_lr = <Eqn::M as Matrix>::zeros(algebraic_indices.len(), algebraic_indices.len());
+        let jac = Eqn::M::combine_at_indices(&m_u, &dfdv, &zero_ll, &dgdv, &algebraic_indices);
+        let neg_mass = Eqn::M::combine_at_indices(&m_u, &zero_ur, &zero_ll, &zero_lr, &algebraic_indices);
 
         let mut y0 = y0.clone();
         y0.copy_from_indices(dy0, &algebraic_indices);
@@ -126,38 +128,53 @@ mod tests {
     #[test]
     fn test_initop() {
         let (problem, _soln) = exponential_decay_with_algebraic_problem::<Mcpu>(false);
-        let y0 = Vcpu::from_vec(vec![1.0, 2.0]);
-        let dy0 = Vcpu::from_vec(vec![3.0, 4.0]);
+        let y0 = Vcpu::from_vec(vec![1.0, 2.0, 3.0]);
+        let dy0 = Vcpu::from_vec(vec![4.0, 5.0, 6.0]);
         let t = 0.0;
         let initop = InitOp::new(&problem.eqn, t, &y0, &dy0);
         // check that the init function is correct
-        let mut y_out = Vcpu::from_vec(vec![0.0, 0.0]);
+        let mut y_out = Vcpu::from_vec(vec![0.0, 0.0, 0.0]);
 
         // -M_u du + f(u, v)
         // g(t, u, v)
-        // M = |1 0|
-        //     |0 0|
+        // M = |1 0 0|
+        //     |0 1 0|
+        //     |0 0 0|
+        //
         // y = |1| (u)
-        //     |2| (v)
-        // dy = |3| (du)
-        //      |4| (dv)
+        //     |2| (u)
+        //     |3| (v)
+        // dy = |4| (du)
+        //      |5| (du)
+        //      |6| (dv)
         // i.e. f(u, v) = -0.1 u = |-0.1| 
+        //                         |-0.2|
         //      g(u, v) = v - u = |1|
-        //      M_u = |1|
-        //  i.e. F(y) = |-1 * 3 + -0.1 * 1| = |-3.1|
+        //      M_u = |1 0|
+        //            |0 1|
+        //  i.e. F(y) = |-1 * 4 + -0.1 * 1| = |-4.1|
+        //              |-1 * 5 + -0.1 * 2|   |-5.2|
         //              |2 - 1|               |1|
-        initop.call_inplace(&y0, t, &mut y_out);
-        let y_out_expect = Vcpu::from_vec(vec![-3.1, 1.0]);
+        let du_v = Vcpu::from_vec(vec![dy0[0], dy0[1], y0[2]]);
+        initop.call_inplace(&du_v, t, &mut y_out);
+        let y_out_expect = Vcpu::from_vec(vec![-4.1, -5.2, 1.0]);
         y_out.assert_eq_st(&y_out_expect, 1e-10);
 
         // df/dv = |0|
+        //         |0|
         // dg/dv = |1|
-        // J = (-M_u, df/dv) = |-1 0|
-        //     (0,    dg/dv) = |0 1|
-        let jac = initop.jacobian(&y0, t);
+        // J = (-M_u, df/dv) = |-1 0 0|
+        //                   = |0 -1 0|
+        //     (0,    dg/dv) = |0 0 1|
+        let jac = initop.jacobian(&du_v, t);
         assert_eq!(jac[(0, 0)], -1.0);
         assert_eq!(jac[(0, 1)], 0.0);
+        assert_eq!(jac[(0, 2)], 0.0);
         assert_eq!(jac[(1, 0)], 0.0);
-        assert_eq!(jac[(1, 1)], 1.0);
+        assert_eq!(jac[(1, 1)], -1.0);
+        assert_eq!(jac[(1, 2)], 0.0);
+        assert_eq!(jac[(2, 0)], 0.0);
+        assert_eq!(jac[(2, 1)], 0.0);
+        assert_eq!(jac[(2, 2)], 1.0);
     }
 }

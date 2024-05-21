@@ -127,11 +127,6 @@ impl<T: Scalar> Vector for DVector<T> {
     fn abs(&self) -> Self {
         self.abs()
     }
-    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
-        for (i, &index) in indices.iter().enumerate() {
-            self[i] = other[index];
-        }
-    }
     fn fill(&mut self, value: T) {
         self.fill(value);
     }

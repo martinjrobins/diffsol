@@ -86,11 +86,6 @@ impl<T: Scalar> Vector for Col<T> {
     fn norm(&self) -> T {
         self.norm_l2()
     }
-    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
-        for (i, &index) in indices.iter().enumerate() {
-            self[index] = other[i];
-        }
-    }
     fn abs(&self) -> Self {
         zipped!(self).map(|unzipped!(xi)| xi.faer_abs())
     }
