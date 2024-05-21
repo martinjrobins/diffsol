@@ -1,6 +1,6 @@
 use crate::{
     matrix::Matrix, ode_solver::problem::OdeSolverSolution, scalar::scale, OdeBuilder,
-    OdeEquations, OdeSolverProblem, Vector,
+    OdeEquations, OdeSolverProblem, Vector, ConstantOp
 };
 use nalgebra::ComplexField;
 use num_traits::Zero;
@@ -46,7 +46,7 @@ pub fn exponential_decay_problem<M: Matrix + 'static>(
     let mut soln = OdeSolverSolution::default();
     for i in 0..10 {
         let t = M::T::from(i as f64);
-        let y0: M::V = problem.eqn.init(M::T::zero());
+        let y0: M::V = problem.eqn.init().call(M::T::zero());
         let y = y0 * scale(M::T::exp(-p[0] * t));
         soln.push(y, t);
     }
@@ -74,7 +74,7 @@ pub fn exponential_decay_problem_with_root<M: Matrix + 'static>(
     let mut soln = OdeSolverSolution::default();
     for i in 0..10 {
         let t = M::T::from(i as f64);
-        let y0: M::V = problem.eqn.init(M::T::zero());
+        let y0: M::V = problem.eqn.init().call(M::T::zero());
         let y = y0 * scale(M::T::exp(-p[0] * t));
         soln.push(y, t);
     }

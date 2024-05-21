@@ -1,6 +1,6 @@
 use crate::ode_solver::problem::OdeSolverSolution;
 use crate::OdeSolverProblem;
-use crate::{scalar::scale, DenseMatrix, OdeBuilder, OdeEquations, Vector};
+use crate::{scalar::scale, DenseMatrix, OdeBuilder, OdeEquations, Vector, ConstantOp};
 use num_traits::Pow;
 use num_traits::Zero;
 use std::ops::MulAssign;
@@ -41,7 +41,7 @@ pub fn gaussian_decay_problem<M: DenseMatrix + 'static>(
     for i in 0..10 {
         let t = M::T::from(i as f64 / 1.0);
         let px = M::V::from_vec(p.clone()) * scale(t.pow(2)) / scale(M::T::from(-2.0));
-        let mut y: M::V = problem.eqn.init(M::T::zero());
+        let mut y: M::V = problem.eqn.init().call(M::T::zero());
         y.component_mul_assign(&px.exp());
         soln.push(y, t);
     }

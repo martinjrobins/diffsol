@@ -6,7 +6,7 @@ use diffsl::execution::Compiler;
 use crate::{
     jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring},
     op::{LinearOp, NonLinearOp, Op},
-    OdeEquations,
+    ConstantOp, OdeEquations,
 };
 
 pub type T = f64;
@@ -86,6 +86,7 @@ pub struct DiffSl<'a> {
     rhs: Rc<DiffSlRhs<'a>>,
     mass: Option<Rc<DiffSlMass<'a>>>,
     root: Rc<DiffSlRoot<'a>>,
+    init: Rc<DiffSlInit<'a>>,
 }
 
 impl<'a> DiffSl<'a> {
@@ -93,11 +94,13 @@ impl<'a> DiffSl<'a> {
         let rhs = Rc::new(DiffSlRhs::new(context, use_coloring));
         let mass = DiffSlMass::new(context, use_coloring).map(Rc::new);
         let root = Rc::new(DiffSlRoot::new(context));
+        let init = Rc::new(DiffSlInit::new(context));
         Self {
             context,
             rhs,
             mass,
             root,
+            init,
         }
     }
 }
@@ -116,7 +119,17 @@ pub struct DiffSlMass<'a> {
     coloring: Option<JacobianColoring<M>>,
 }
 
+pub struct DiffSlInit<'a> {
+    context: &'a DiffSlContext,
+}
+
 impl<'a> DiffSlRoot<'a> {
+    pub fn new(context: &'a DiffSlContext) -> Self {
+        Self { context }
+    }
+}
+
+impl<'a> DiffSlInit<'a> {
     pub fn new(context: &'a DiffSlContext) -> Self {
         Self { context }
     }
@@ -180,6 +193,7 @@ macro_rules! impl_op_for_diffsl {
 
 impl_op_for_diffsl!(DiffSlRhs);
 impl_op_for_diffsl!(DiffSlMass);
+impl_op_for_diffsl!(DiffSlInit);
 
 impl Op for DiffSlRoot<'_> {
     type M = M;
@@ -194,6 +208,15 @@ impl Op for DiffSlRoot<'_> {
     }
     fn nparams(&self) -> usize {
         self.context.nparams
+    }
+}
+
+impl ConstantOp for DiffSlInit<'_> {
+    fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
+        self.context.compiler.set_u0(
+            y.as_mut_slice(),
+            self.context.data.borrow_mut().as_mut_slice(),
+        );
     }
 }
 
@@ -274,6 +297,7 @@ impl<'a> OdeEquations for DiffSl<'a> {
     type Mass = DiffSlMass<'a>;
     type Rhs = DiffSlRhs<'a>;
     type Root = DiffSlRoot<'a>;
+    type Init = DiffSlInit<'a>;
 
     fn rhs(&self) -> &Rc<Self::Rhs> {
         &self.rhs
@@ -293,13 +317,8 @@ impl<'a> OdeEquations for DiffSl<'a> {
             .set_inputs(p.as_slice(), self.context.data.borrow_mut().as_mut_slice());
     }
 
-    fn init(&self, _t: Self::T) -> Self::V {
-        let mut ret_y = Self::V::zeros(self.rhs().nstates());
-        self.context.compiler.set_u0(
-            ret_y.as_mut_slice(),
-            self.context.data.borrow_mut().as_mut_slice(),
-        );
-        ret_y
+    fn init(&self) -> &Rc<Self::Init> {
+        &self.init
     }
 }
 
@@ -308,8 +327,8 @@ mod tests {
     use nalgebra::DVector;
 
     use crate::{
-        linear_solver::NalgebraLU, nonlinear_solver::newton::NewtonNonlinearSolver, Bdf, LinearOp,
-        NonLinearOp, OdeBuilder, OdeEquations, OdeSolverMethod, Vector,
+        linear_solver::NalgebraLU, nonlinear_solver::newton::NewtonNonlinearSolver, Bdf,
+        ConstantOp, LinearOp, NonLinearOp, OdeBuilder, OdeEquations, OdeSolverMethod, Vector,
     };
 
     use super::{DiffSl, DiffSlContext};
@@ -365,7 +384,7 @@ mod tests {
 
         // test that the initial values look ok
         let y0 = 0.1;
-        let init = eqn.init(0.0);
+        let init = eqn.init().call(0.0);
         let init_expect = DVector::from_vec(vec![y0, 0.0]);
         init.assert_eq_st(&init_expect, 1e-10);
         let rhs = eqn.rhs().call(&init, 0.0);
@@ -384,11 +403,8 @@ mod tests {
         // solver a bit and check the state and output
         let problem = OdeBuilder::new().p([r, k]).build_diffsl(&context).unwrap();
         let mut solver = Bdf::default();
-        let mut root_solver = NewtonNonlinearSolver::new(NalgebraLU::default());
         let t = 1.0;
-        let state = solver
-            .make_consistent_and_solve(&problem, t, &mut root_solver)
-            .unwrap();
+        let state = solver.solve(&problem, t).unwrap();
         let y_expect = k / (1.0 + (k - y0) * (-r * t).exp() / y0);
         let z_expect = 2.0 * y_expect;
         let expected_state = DVector::from_vec(vec![y_expect, z_expect]);

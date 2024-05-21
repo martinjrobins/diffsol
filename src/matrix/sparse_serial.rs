@@ -163,6 +163,38 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
         }
     }
 
+    fn split_at_indices(&self, indices: &<Self::V as crate::vector::Vector>::Index) -> (Self, Self, Self, Self) {
+        let n = self.nrows();
+        if n != self.ncols() {
+            panic!("Matrix must be square");
+        }
+        let ni = indices.len();
+        let nni = n - ni;
+        let mut ur_triplets = Vec::new();
+        let mut ul_triplets = Vec::new();
+        let mut lr_triplets = Vec::new();
+        let mut ll_triplets = Vec::new();
+        let cat = (0..n).map(|i| indices.contains(i)).collect::<Vec<_>>();
+        for (i, j, &v) in self.triplet_iter() {
+            if !cat[i] && !cat[j] {
+                ul_triplets.push((i, j, v));
+            } else if !cat[i] && cat[j] {
+                ur_triplets.push((i, j - nni, v));
+            } else if cat[i] && !cat[j] {
+                ll_triplets.push((i - nni, j, v));
+            } else {
+                lr_triplets.push((i - nni, j - nni, v));
+            }
+        }
+        (
+            Self::try_from_triplets(nni, nni, ul_triplets).unwrap(),
+            Self::try_from_triplets(nni, ni, ur_triplets).unwrap(),
+            Self::try_from_triplets(ni, nni, ll_triplets).unwrap(),
+            Self::try_from_triplets(ni, ni, lr_triplets).unwrap(),
+        )
+
+    }
+
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,

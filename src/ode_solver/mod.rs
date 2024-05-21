@@ -23,10 +23,11 @@ mod tests {
     use super::*;
     use crate::matrix::Matrix;
     use crate::op::filter::FilterCallable;
+    use crate::op::init::InitOp;
     use crate::op::unit::UnitCallable;
     use crate::op::{NonLinearOp, Op};
     use crate::scalar::scale;
-    use crate::Vector;
+    use crate::{ConstantOp, DefaultSolver, Vector};
     use crate::{
         NonLinearSolver, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
         OdeSolverStopReason,
@@ -36,7 +37,7 @@ mod tests {
 
     pub fn test_ode_solver<M, Eqn>(
         method: &mut impl OdeSolverMethod<Eqn>,
-        mut root_solver: impl NonLinearSolver<FilterCallable<Eqn::Rhs>>,
+        mut root_solver: impl NonLinearSolver<InitOp<Eqn>>,
         problem: &OdeSolverProblem<Eqn>,
         solution: OdeSolverSolution<M::V>,
         override_tol: Option<M::T>,
@@ -99,6 +100,32 @@ mod tests {
         method.state().unwrap().y.clone()
     }
 
+    pub struct TestEqnInit<M> {
+        _m: std::marker::PhantomData<M>,
+    }
+
+    impl<M: Matrix> Op for TestEqnInit<M> {
+        type T = M::T;
+        type V = M::V;
+        type M = M;
+
+        fn nout(&self) -> usize {
+            1
+        }
+        fn nparams(&self) -> usize {
+            0
+        }
+        fn nstates(&self) -> usize {
+            1
+        }
+    }
+
+    impl<M: Matrix> ConstantOp for TestEqnInit<M> {
+        fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
+            y[0] = M::T::one();
+        }
+    }
+
     pub struct TestEqnRhs<M> {
         _m: std::marker::PhantomData<M>,
     }
@@ -131,12 +158,16 @@ mod tests {
 
     pub struct TestEqn<M: Matrix> {
         rhs: Rc<TestEqnRhs<M>>,
+        init: Rc<TestEqnInit<M>>,
     }
 
     impl<M: Matrix> TestEqn<M> {
         pub fn new() -> Self {
             Self {
                 rhs: Rc::new(TestEqnRhs {
+                    _m: std::marker::PhantomData,
+                }),
+                init: Rc::new(TestEqnInit {
                     _m: std::marker::PhantomData,
                 }),
             }
@@ -150,6 +181,7 @@ mod tests {
         type Rhs = TestEqnRhs<M>;
         type Mass = UnitCallable<M>;
         type Root = UnitCallable<M>;
+        type Init = TestEqnInit<M>;
 
         fn set_params(&mut self, _p: Self::V) {}
 
@@ -165,8 +197,8 @@ mod tests {
             None
         }
 
-        fn init(&self, _t: Self::T) -> Self::V {
-            M::V::from_element(1, M::T::zero())
+        fn init(&self) -> &Rc<Self::Init> {
+            &self.init
         }
     }
 
@@ -219,11 +251,16 @@ mod tests {
         assert_eq!(s.state().unwrap().y[0], M::T::from(std::f64::consts::PI));
     }
 
-    pub fn test_state_mut_on_problem<Eqn: OdeEquations, Method: OdeSolverMethod<Eqn>>(
+    pub fn test_state_mut_on_problem<Eqn, Method>(
         mut s: Method,
         problem: OdeSolverProblem<Eqn>,
         soln: OdeSolverSolution<Eqn::V>,
-    ) {
+    ) 
+    where
+        Eqn: OdeEquations,
+        Method: OdeSolverMethod<Eqn>,
+        Eqn::M: DefaultSolver
+    {
         // solve for a little bit
         s.solve(&problem, Eqn::T::from(1.0)).unwrap();
 

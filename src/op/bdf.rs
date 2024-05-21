@@ -53,13 +53,6 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
         let mass_jac = if eqn.mass().is_none() {
             // no mass matrix, so just use the identity
             Eqn::M::from_diagonal(&Eqn::V::from_element(n, Eqn::T::one()))
-        } else if eqn.is_mass_constant() {
-            // if mass is constant then pre-compute it
-            let mut mass_jac = Eqn::M::new_from_sparsity(n, n, eqn.mass().unwrap().sparsity());
-            eqn.mass()
-                .unwrap()
-                .matrix_inplace(Eqn::T::zero(), &mut mass_jac);
-            mass_jac
         } else {
             // mass is not constant, so just create a matrix with the correct sparsity
             Eqn::M::new_from_sparsity(n, n, eqn.mass().unwrap().sparsity())
@@ -172,7 +165,7 @@ where
             let mut rhs_jac = self.rhs_jac.borrow_mut();
             self.eqn.rhs().jacobian_inplace(x, t, &mut rhs_jac);
             let c = *self.c.borrow().deref();
-            if self.eqn.is_mass_constant() || self.eqn.mass().is_none() {
+            if self.eqn.mass().is_none() {
                 let mass_jac = self.mass_jac.borrow();
                 y.scale_add_and_assign(mass_jac.deref(), -c, rhs_jac.deref());
             } else {

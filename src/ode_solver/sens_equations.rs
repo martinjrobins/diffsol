@@ -62,7 +62,9 @@ where
 {
     fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
         y.fill(Eqn::T::zero());
-        self.init_sens.add_column_to_vector(self.index, y);
+        let init_sens = self.init_sens.borrow();
+        let index = *self.index.borrow();
+        init_sens.add_column_to_vector(index, y);
     }
 }
 
@@ -153,14 +155,19 @@ where
   Eqn: OdeEquations
 {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
-        self.eqn.rhs().jac_mul_inplace(&self.y, t, &x, y);
-        self.sens.add_column_to_vector(self.index, y);
+        let sy = self.y.borrow();
+        let sens = self.sens.borrow();
+        let index = *self.index.borrow();
+        self.eqn.rhs().jac_mul_inplace(&sy, t, &x, y);
+        sens.add_column_to_vector(index, y);
     }
-    fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        self.eqn.rhs().jac_mul_inplace(&self.y, t, v, y);
+    fn jac_mul_inplace(&self, _x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        let sy = self.y.borrow();
+        self.eqn.rhs().jac_mul_inplace(&sy, t, v, y);
     }
-    fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
-        self.eqn.rhs().jacobian_inplace(&self.y, t, y);
+    fn jacobian_inplace(&self, _x: &Self::V, t: Self::T, y: &mut Self::M) {
+        let sy = self.y.borrow();
+        self.eqn.rhs().jacobian_inplace(&sy, t, y);
     }
 }
 

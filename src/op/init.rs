@@ -1,11 +1,9 @@
 use crate::{
-    matrix::MatrixRef, ode_solver::equations::OdeEquations, LinearOp, Matrix, MatrixSparsity,
-    OdeSolverProblem, Vector, VectorRef,
+    ode_solver::equations::OdeEquations, LinearOp, Matrix, Vector,
 };
 use num_traits::{One, Zero};
 use std::{
     cell::RefCell,
-    ops::{AddAssign, Deref, SubAssign},
     rc::Rc,
 };
 
@@ -40,7 +38,7 @@ impl<Eqn: OdeEquations> InitOp<Eqn> {
         // note rhs_jac = (df/du df/dv)
         //                (dg/du dg/dv)
         // according to the algebraic indices.
-        let (mut m_u, _, _, _) = mass.split_at_indices(&algebraic_indices)
+        let (mut m_u, _, _, _) = mass.split_at_indices(&algebraic_indices);
         m_u *= -Eqn::T::one();
         let (dfdu, dfdv, _, dgdv) = rhs_jac.split_at_indices(&algebraic_indices);
         let zero = Eqn::M::zeros(algebraic_indices.len(), n);
@@ -116,55 +114,51 @@ impl<Eqn: OdeEquations> NonLinearOp for InitOp<Eqn>
 
 #[cfg(test)]
 mod tests {
-    use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
+    use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
+    use crate::op::init::InitOp;
     use crate::op::NonLinearOp;
     use crate::vector::Vector;
 
-    use super::BdfCallable;
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;
 
     #[test]
-    fn test_bdf_callable() {
-        let (problem, _soln) = exponential_decay_problem::<Mcpu>(false);
-        let mut bdf_callable = BdfCallable::new(&problem);
-        let c = 0.1;
-        let phi_neg_y0 = Vcpu::from_vec(vec![1.1, 1.2]);
-        bdf_callable.set_c_direct(c);
-        bdf_callable.set_psi_neg_y0_direct(phi_neg_y0);
-        // check that the bdf function is correct
-        let y = Vcpu::from_vec(vec![1.0, 1.0]);
+    fn test_initop() {
+        let (problem, _soln) = exponential_decay_with_algebraic_problem::<Mcpu>(false);
+        let problem = Rc::new(problem);
+        let y0 = Vcpu::from_vec(vec![1.0, 2.0]);
+        let dy0 = Vcpu::from_vec(vec![3.0, 4.0]);
         let t = 0.0;
+        let mut initop = InitOp::new(&problem, t, &y0, &dy0);
+        // check that the init function is correct
         let mut y_out = Vcpu::from_vec(vec![0.0, 0.0]);
 
-        // F(y) = M (y - y0 + psi) - c * f(y)
+        // -M_u du + f(u, v)
+        // g(t, u, v)
         // M = |1 0|
-        //     |0 1|
-        // y = |1|
-        //     |1|
-        // f(y) = |-0.1|
-        //        |-0.1|
-        //  i.e. F(y) = |1 0| |2.1| - 0.1 * |-0.1| =  |2.11|
-        //              |0 1| |2.2|         |-0.1|    |2.21|
-        bdf_callable.call_inplace(&y, t, &mut y_out);
-        let y_out_expect = Vcpu::from_vec(vec![2.11, 2.21]);
+        //     |0 0|
+        // y = |1| (u)
+        //     |2| (v)
+        // dy = |3| (du)
+        //      |4| (dv)
+        // i.e. f(u, v) = -0.1 u = |-0.1| 
+        //      g(u, v) = v - u = |1|
+        //      M_u = |1|
+        //  i.e. F(y) = |-1 * 3 + -0.1 * 1| = |-3.1|
+        //              |2 - 1|               |1|
+        initop.call_inplace(&y0, t, &mut y_out);
+        let y_out_expect = Vcpu::from_vec(vec![-3.1, 1.0]);
         y_out.assert_eq_st(&y_out_expect, 1e-10);
 
         let v = Vcpu::from_vec(vec![1.0, 1.0]);
-        // f'(y)v = |-0.1|
-        //          |-0.1|
-        // Mv - c * f'(y) v = |1 0| |1| - 0.1 * |-0.1| = |1.01|
-        //                    |0 1| |1|         |-0.1|   |1.01|
-        bdf_callable.jac_mul_inplace(&y, t, &v, &mut y_out);
-        let y_out_expect = Vcpu::from_vec(vec![1.01, 1.01]);
-        y_out.assert_eq_st(&y_out_expect, 1e-10);
-
-        // J = M - c * f'(y) = |1 0| - 0.1 * |-0.1 0| = |1.01 0|
-        //                     |0 1|         |0 -0.1|   |0 1.01|
-        let jac = bdf_callable.jacobian(&y, t);
-        assert_eq!(jac[(0, 0)], 1.01);
+        // df/dv = |0|
+        // dg/dv = |1|
+        // J = (-M_u, df/dv) = |-1 0|
+        //     (0,    dg/dv) = |0 1|
+        let jac = initop.jacobian(&y0, t);
+        assert_eq!(jac[(0, 0)], -1.0);
         assert_eq!(jac[(0, 1)], 0.0);
         assert_eq!(jac[(1, 0)], 0.0);
-        assert_eq!(jac[(1, 1)], 1.01);
+        assert_eq!(jac[(1, 1)], 1.0);
     }
 }

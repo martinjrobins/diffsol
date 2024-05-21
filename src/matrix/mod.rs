@@ -206,6 +206,12 @@ pub trait Matrix:
         None
     }
 
+    /// Split the current matrix into four submatrices at the given indices
+    fn split_at_indices(&self, indices: &<Self::V as Vector>::Index) -> (Self, Self, Self, Self);
+
+    /// Combine four matrices into a single matrix at the given indices
+    fn combine_at_indices(ul: &Self, ur: &Self, ll: &Self, lr: &Self, indices: &<Self::V as Vector>::Index) -> Self;
+
     /// Extract the diagonal of the matrix as an owned vector
     fn diagonal(&self) -> Self::V;
 
@@ -242,6 +248,8 @@ pub trait Matrix:
     /// Perform the assignment self = x + beta * y where x and y are matrices and beta is a scalar
     /// Panics if the sparsity of self, x, and y do not match (i.e. sparsity of self must be the union of the sparsity of x and y)
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self);
+
+    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)>;
 
     /// Create a new matrix from a vector of triplets (i, j, value) where i and j are the row and column indices of the value
     fn try_from_triplets(
