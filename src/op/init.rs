@@ -1,5 +1,5 @@
 use crate::{
-    ode_solver::equations::OdeEquations, LinearOp, Matrix, Vector,
+    ode_solver::equations::OdeEquations, scale, LinearOp, Matrix, Vector, VectorIndex
 };
 use num_traits::{One, Zero};
 use std::{
@@ -24,8 +24,8 @@ impl<Eqn: OdeEquations> InitOp<Eqn> {
         let mass_diagonal = eqn.mass().unwrap().matrix(t0).diagonal();
         let algebraic_indices = mass_diagonal.filter_indices(|x| x == Eqn::T::zero());
 
-        let mut rhs_jac = eqn.rhs().jacobian(&y0, t0);
-        let mut mass = eqn.mass().unwrap().matrix(t0);
+        let rhs_jac = eqn.rhs().jacobian(y0, t0);
+        let mass = eqn.mass().unwrap().matrix(t0);
 
         // equations are:
         // h(t, u, v, du) = 0
@@ -38,15 +38,15 @@ impl<Eqn: OdeEquations> InitOp<Eqn> {
         // note rhs_jac = (df/du df/dv)
         //                (dg/du dg/dv)
         // according to the algebraic indices.
-        let (mut m_u, _, _, _) = mass.split_at_indices(&algebraic_indices);
-        m_u *= -Eqn::T::one();
-        let (dfdu, dfdv, _, dgdv) = rhs_jac.split_at_indices(&algebraic_indices);
-        let zero = Eqn::M::zeros(algebraic_indices.len(), n);
+        let (m_u, _, _, _) = mass.split_at_indices(&algebraic_indices);
+        let m_u = m_u * scale(-Eqn::T::one());
+        let (_, dfdv, _, dgdv) = rhs_jac.split_at_indices(&algebraic_indices);
+        let zero = <Eqn::M as Matrix>::zeros(algebraic_indices.len(), n);
         let jac = Eqn::M::combine_at_indices(&m_u, &dfdv, &zero, &dgdv, &algebraic_indices);
         let neg_mass = Eqn::M::combine_at_indices(&m_u, &zero, &zero, &zero, &algebraic_indices);
 
         let mut y0 = y0.clone();
-        y0.copy_from_indices(&dy0, &algebraic_indices);
+        y0.copy_from_indices(dy0, &algebraic_indices);
         let y0 = RefCell::new(y0);
         Self {
             eqn,
@@ -61,7 +61,7 @@ impl<Eqn: OdeEquations> InitOp<Eqn> {
         let tmp = dy.clone();
         dy.copy_from(soln);
         dy.copy_from_indices(&tmp, &self.algebraic_indices);
-        y.copy_from_indices(&soln, &self.algebraic_indices);
+        y.copy_from_indices(soln, &self.algebraic_indices);
     }
 }
 
@@ -91,19 +91,19 @@ impl<Eqn: OdeEquations> NonLinearOp for InitOp<Eqn>
         // input x = (du, v)
         // self.y0 = (u, v)
         let mut y0 = self.y0.borrow_mut();
-        y0.copy_from_indices(&x, &self.algebraic_indices);
+        y0.copy_from_indices(x, &self.algebraic_indices);
 
         // y = (f; g)
         self.eqn.rhs().call_inplace(&y0, t, y);
 
 
         // y = -M x + y
-        self.neg_mass.gemv(Eqn::T::one(), &x, Eqn::T::one(), y);
+        self.neg_mass.gemv(Eqn::T::one(), x, Eqn::T::one(), y);
     }
 
     // J v
     fn jac_mul_inplace(&self, _x: &Eqn::V, _t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
-        self.jac.gemv(Eqn::T::one(), &v, Eqn::T::one(), y);
+        self.jac.gemv(Eqn::T::one(), v, Eqn::T::one(), y);
     }
 
     // M - c * f'(y)
@@ -114,6 +114,7 @@ impl<Eqn: OdeEquations> NonLinearOp for InitOp<Eqn>
 
 #[cfg(test)]
 mod tests {
+
     use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
     use crate::op::init::InitOp;
     use crate::op::NonLinearOp;
@@ -125,11 +126,10 @@ mod tests {
     #[test]
     fn test_initop() {
         let (problem, _soln) = exponential_decay_with_algebraic_problem::<Mcpu>(false);
-        let problem = Rc::new(problem);
         let y0 = Vcpu::from_vec(vec![1.0, 2.0]);
         let dy0 = Vcpu::from_vec(vec![3.0, 4.0]);
         let t = 0.0;
-        let mut initop = InitOp::new(&problem, t, &y0, &dy0);
+        let initop = InitOp::new(&problem.eqn, t, &y0, &dy0);
         // check that the init function is correct
         let mut y_out = Vcpu::from_vec(vec![0.0, 0.0]);
 
@@ -150,7 +150,6 @@ mod tests {
         let y_out_expect = Vcpu::from_vec(vec![-3.1, 1.0]);
         y_out.assert_eq_st(&y_out_expect, 1e-10);
 
-        let v = Vcpu::from_vec(vec![1.0, 1.0]);
         // df/dv = |0|
         // dg/dv = |1|
         // J = (-M_u, df/dv) = |-1 0|

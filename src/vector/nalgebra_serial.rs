@@ -34,6 +34,9 @@ impl VectorIndex for DVector<IndexType> {
     fn from_slice(slice: &[IndexType]) -> Self {
         DVector::from_iterator(slice.len(), slice.iter().copied())
     }
+    fn clone_as_vec(&self) -> Vec<IndexType> {
+        self.iter().copied().collect()
+    }
 }
 
 macro_rules! impl_vector_common {
@@ -123,6 +126,11 @@ impl<T: Scalar> Vector for DVector<T> {
     }
     fn abs(&self) -> Self {
         self.abs()
+    }
+    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
+        for (i, &index) in indices.iter().enumerate() {
+            self[i] = other[index];
+        }
     }
     fn fill(&mut self, value: T) {
         self.fill(value);

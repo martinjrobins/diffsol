@@ -22,7 +22,6 @@ mod tests {
 
     use super::*;
     use crate::matrix::Matrix;
-    use crate::op::filter::FilterCallable;
     use crate::op::init::InitOp;
     use crate::op::unit::UnitCallable;
     use crate::op::{NonLinearOp, Op};

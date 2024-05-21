@@ -2,7 +2,7 @@ use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
 use crate::scalar::Scale;
-use crate::{IndexType, Scalar, Vector};
+use crate::{IndexType, Scalar, Vector, VectorIndex};
 use anyhow::Result;
 use num_traits::{One, Zero};
 
@@ -197,7 +197,9 @@ impl MatrixSparsity for Dense {
 
 /// A base matrix trait (including sparse and dense matrices)
 pub trait Matrix:
-    for<'a> MatrixOpsByValue<&'a Self, Self> + Mul<Scale<Self::T>, Output = Self> + Clone
+    for<'a> MatrixOpsByValue<&'a Self, Self> 
+    + Mul<Scale<Self::T>, Output = Self> 
+    + Clone
 {
     type Sparsity: MatrixSparsity;
 
@@ -207,10 +209,70 @@ pub trait Matrix:
     }
 
     /// Split the current matrix into four submatrices at the given indices
-    fn split_at_indices(&self, indices: &<Self::V as Vector>::Index) -> (Self, Self, Self, Self);
+    fn split_at_indices(&self, indices: &<Self::V as crate::vector::Vector>::Index) -> (Self, Self, Self, Self) {
+        let n = self.nrows();
+        if n != self.ncols() {
+            panic!("Matrix must be square");
+        }
+        let ni = indices.len();
+        let nni = n - ni;
+        let mut indices = indices.clone_as_vec();
+        indices.sort();
+        let cat = (0..n).map(|i| indices.as_slice().binary_search(&i).is_ok()).collect::<Vec<_>>();
+        let mut ur_triplets = Vec::new();
+        let mut ul_triplets = Vec::new();
+        let mut lr_triplets = Vec::new();
+        let mut ll_triplets = Vec::new();
+        for (i, j, &v) in self.triplet_iter() {
+            if !cat[i] && !cat[j] {
+                ul_triplets.push((i, j, v));
+            } else if !cat[i] && cat[j] {
+                ur_triplets.push((i, j - nni, v));
+            } else if cat[i] && !cat[j] {
+                ll_triplets.push((i - nni, j, v));
+            } else {
+                lr_triplets.push((i - nni, j - nni, v));
+            }
+        }
+        (
+            Self::try_from_triplets(nni, nni, ul_triplets).unwrap(),
+            Self::try_from_triplets(nni, ni, ur_triplets).unwrap(),
+            Self::try_from_triplets(ni, nni, ll_triplets).unwrap(),
+            Self::try_from_triplets(ni, ni, lr_triplets).unwrap(),
+        )
+
+    }
 
     /// Combine four matrices into a single matrix at the given indices
-    fn combine_at_indices(ul: &Self, ur: &Self, ll: &Self, lr: &Self, indices: &<Self::V as Vector>::Index) -> Self;
+    fn combine_at_indices(ul: &Self, ur: &Self, ll: &Self, lr: &Self, indices: &<Self::V as Vector>::Index) -> Self {
+        let n = ul.nrows() + ll.nrows();
+        let m = ul.ncols() + ur.ncols();
+        let mut triplets = Vec::new();
+        let mut indices = indices.clone_as_vec();
+        indices.sort();
+        let cat = (0..n).map(|i| indices.as_slice().binary_search(&i).is_ok()).collect::<Vec<_>>();
+        for (i, j, &v) in ul.triplet_iter() {
+            if !cat[i] && !cat[j] {
+                triplets.push((i, j, v));
+            }
+        }
+        for (i, j, &v) in ur.triplet_iter() {
+            if !cat[i] && cat[j] {
+                triplets.push((i, j + ul.ncols(), v));
+            }
+        }
+        for (i, j, &v) in ll.triplet_iter() {
+            if cat[i] && !cat[j] {
+                triplets.push((i + ul.nrows(), j, v));
+            }
+        }
+        for (i, j, &v) in lr.triplet_iter() {
+            if cat[i] && cat[j] {
+                triplets.push((i + ul.nrows(), j + ul.ncols(), v));
+            }
+        }
+        Self::try_from_triplets(n, m, triplets).unwrap()
+    }
 
     /// Extract the diagonal of the matrix as an owned vector
     fn diagonal(&self) -> Self::V;

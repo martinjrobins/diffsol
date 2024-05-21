@@ -106,6 +106,16 @@ impl<T: Scalar> Matrix for DMatrix<T> {
         }
     }
 
+    fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
+        v.add_assign(&self.column(j));
+    }
+
+    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)> {
+        let n = self.ncols();
+        let m = self.nrows();
+        (0..m).flat_map(move |i| (0..n).map(move |j| (i, j, &self[(i, j)])))
+    }
+
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,

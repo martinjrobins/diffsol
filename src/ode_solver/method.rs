@@ -1,11 +1,10 @@
 use anyhow::Result;
-use num_traits::{One, Pow, Zero};
+use num_traits::{One, Pow};
 use std::rc::Rc;
 
 use crate::{
-    matrix::default_solver::DefaultSolver, scalar::Scalar, scale, ConstantOp, InitOp, LinearOp,
-    Matrix, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem,
-    Op, SensEquations, SolverProblem, Vector, VectorIndex,
+    matrix::default_solver::DefaultSolver, scalar::Scalar, scale, ConstantOp, InitOp, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem,
+    Op, SensEquations, SolverProblem, Vector,
 };
 
 pub enum OdeSolverStopReason<T: Scalar> {

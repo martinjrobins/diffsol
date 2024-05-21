@@ -434,6 +434,9 @@ impl VectorIndex for SundialsIndexVector {
     fn from_slice(slice: &[IndexType]) -> Self {
         Self(slice.to_vec())
     }
+    fn clone_as_vec(&self) -> Vec<IndexType> {
+        self.0.clone()
+    }
 }
 
 impl Vector for SundialsVector {
@@ -442,6 +445,11 @@ impl Vector for SundialsVector {
     type Index = SundialsIndexVector;
     fn len(&self) -> IndexType {
         unsafe { N_VGetLength_Serial(self.sundials_vector()) as IndexType }
+    }
+    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
+        for i in 0..indices.len() {
+            self[indices[i]] = other[indices[i]];
+        }
     }
     fn norm(&self) -> Self::T {
         let ones = SundialsVector::from_element(self.len(), 1.0);

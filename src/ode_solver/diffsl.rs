@@ -327,8 +327,8 @@ mod tests {
     use nalgebra::DVector;
 
     use crate::{
-        linear_solver::NalgebraLU, nonlinear_solver::newton::NewtonNonlinearSolver, Bdf,
-        ConstantOp, LinearOp, NonLinearOp, OdeBuilder, OdeEquations, OdeSolverMethod, Vector,
+        Bdf, OdeSolverMethod,
+        ConstantOp, LinearOp, NonLinearOp, OdeBuilder, OdeEquations, Vector,
     };
 
     use super::{DiffSl, DiffSlContext};

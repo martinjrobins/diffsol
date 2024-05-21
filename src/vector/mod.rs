@@ -15,6 +15,7 @@ pub mod sundials;
 pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug {
     fn zeros(len: IndexType) -> Self;
     fn len(&self) -> IndexType;
+    fn clone_as_vec(&self) -> Vec<IndexType>;
     fn is_empty(&self) -> bool {
         self.len() == 0
     }

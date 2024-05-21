@@ -158,7 +158,7 @@ where
         let sy = self.y.borrow();
         let sens = self.sens.borrow();
         let index = *self.index.borrow();
-        self.eqn.rhs().jac_mul_inplace(&sy, t, &x, y);
+        self.eqn.rhs().jac_mul_inplace(&sy, t, x, y);
         sens.add_column_to_vector(index, y);
     }
     fn jac_mul_inplace(&self, _x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
