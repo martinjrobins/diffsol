@@ -6,15 +6,17 @@ use anyhow::{anyhow, Result};
 use num_traits::{abs, One, Pow, Zero};
 use serde::Serialize;
 
+use crate::NonLinearOp;
 use crate::{
     matrix::{default_solver::DefaultSolver, Matrix, MatrixRef},
+    newton_iteration,
     nonlinear_solver::root::RootFinder,
     op::bdf::BdfCallable,
     scalar::scale,
     vector::DefaultDenseMatrix,
-    DenseMatrix, IndexType, MatrixViewMut, NewtonNonlinearSolver, NonLinearSolver, OdeSolverMethod,
-    OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar, SolverProblem, Vector,
-    VectorRef, VectorView, VectorViewMut,
+    Convergence, DenseMatrix, IndexType, MatrixViewMut, NewtonNonlinearSolver, NonLinearSolver,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar,
+    SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
 };
 
 use super::equations::OdeEquations;
@@ -69,6 +71,7 @@ pub struct Bdf<
     order: usize,
     n_equal_steps: usize,
     diff: M,
+    sdiff: Vec<M>,
     diff_tmp: M,
     u: M,
     alpha: Vec<Eqn::T>,
@@ -131,6 +134,7 @@ where
             n_equal_steps: 0,
             diff: <M<Eqn::V> as Matrix>::zeros(n, Self::MAX_ORDER + 3), //DMatrix::<T>::zeros(n, Self::MAX_ORDER + 3),
             diff_tmp: <M<Eqn::V> as Matrix>::zeros(n, Self::MAX_ORDER + 3),
+            sdiff: Vec::new(),
             gamma,
             alpha,
             error_const,
@@ -201,17 +205,11 @@ where
         self.n_equal_steps = 0;
 
         // update D using equations in section 3.2 of [1]
+        // TODO: think we can remove this line (done in initialise_to_first_order)
         self.u = Self::_compute_r(self.order, Eqn::T::one());
         let r = Self::_compute_r(self.order, factor);
         let ru = r.mat_mul(&self.u);
-        // D[0:order+1] = R * U * D[0:order+1]
-        {
-            let d_zero_order = self.diff.columns(0, self.order + 1);
-            let mut d_zero_order_tmp = self.diff_tmp.columns_mut(0, self.order + 1);
-            d_zero_order_tmp.gemm_vo(Eqn::T::one(), &d_zero_order, &ru, Eqn::T::zero());
-            // diff_sub = diff * RU
-        }
-        std::mem::swap(&mut self.diff, &mut self.diff_tmp);
+        Self::_update_diff_for_step_size(&ru, &mut self.diff, &mut self.diff_tmp, self.order);
 
         self.nonlinear_problem_op()
             .set_c(self.state.as_ref().unwrap().h, self.alpha[self.order]);
@@ -223,7 +221,36 @@ where
         self.nonlinear_solver.reset_jacobian(x, t);
     }
 
-    fn _update_differences(&mut self, d: &Eqn::V) {
+    fn _update_diff_for_step_size(ru: &M, diff: &mut M, diff_tmp: &mut M, order: usize) {
+        // D[0:order+1] = R * U * D[0:order+1]
+        {
+            let d_zero_order = diff.columns(0, order + 1);
+            let mut d_zero_order_tmp = diff_tmp.columns_mut(0, order + 1);
+            d_zero_order_tmp.gemm_vo(Eqn::T::one(), &d_zero_order, ru, Eqn::T::zero());
+            // diff_sub = diff * RU
+        }
+        std::mem::swap(diff, diff_tmp);
+    }
+
+    fn _update_sens_step_size(&mut self, factor: Eqn::T) {
+        //If step size h is changed then also need to update the terms in
+        //the first equation of page 9 of [1]:
+        //
+        //- constant c = h / (1-kappa) gamma_k term
+        //- lu factorisation of (M - c * J) used in newton iteration (same equation)
+
+        self.state.as_mut().unwrap().h *= factor;
+        self.n_equal_steps = 0;
+
+        // update D using equations in section 3.2 of [1]
+        let r = Self::_compute_r(self.order, factor);
+        let ru = r.mat_mul(&self.u);
+        for sdiff in self.sdiff.iter_mut() {
+            Self::_update_diff_for_step_size(&ru, sdiff, &mut self.diff_tmp, self.order);
+        }
+    }
+
+    fn _update_diff(order: usize, d: &Eqn::V, diff: &mut M) {
         //update of difference equations can be done efficiently
         //by reusing d and D.
         //
@@ -234,28 +261,38 @@ where
         //D^{j + 1} y_n = D^{j} y_n - D^{j} y_{n - 1}
         //
         //Combining these gives the following algorithm
-        let order = self.order;
-        let d_minus_order_plus_one = d - self.diff.column(order + 1);
-        self.diff
-            .column_mut(order + 2)
+        let d_minus_order_plus_one = d - diff.column(order + 1);
+        diff.column_mut(order + 2)
             .copy_from(&d_minus_order_plus_one);
-        self.diff.column_mut(order + 1).copy_from(d);
+        diff.column_mut(order + 1).copy_from(d);
         for i in (0..=order).rev() {
-            let tmp = self.diff.column(i + 1).into_owned();
-            self.diff.column_mut(i).add_assign(&tmp);
+            let tmp = diff.column(i + 1).into_owned();
+            diff.column_mut(i).add_assign(&tmp);
         }
     }
 
+    fn _update_differences(&mut self, d: &Eqn::V) {
+        Self::_update_diff(self.order, d, &mut self.diff);
+    }
+
+    fn _update_differences_sens(&mut self, ds: &[Eqn::V]) {
+        let order = self.order;
+        for (sdiff, s) in self.sdiff.iter_mut().zip(ds.iter()) {
+            Self::_update_diff(order, s, sdiff);
+        }
+    }
+
+    // predict forward to new step (eq 2 in [1])
+    fn _predict_using_diff(diff: &M, order: usize) -> Eqn::V {
+        let mut y_predict = Eqn::V::zeros(diff.nrows());
+        for i in 0..=order {
+            y_predict += diff.column(i);
+        }
+        y_predict
+    }
+
     fn _predict_forward(&mut self) -> (Eqn::V, Eqn::T) {
-        let nstates = self.diff.nrows();
-        // predict forward to new step (eq 2 in [1])
-        let y_predict = {
-            let mut y_predict = <Eqn::V as Vector>::zeros(nstates);
-            for i in 0..=self.order {
-                y_predict += self.diff.column(i);
-            }
-            y_predict
-        };
+        let y_predict = Self::_predict_using_diff(&self.diff, self.order);
 
         // update psi and c (h, D, y0 has changed)
         {
@@ -313,6 +350,18 @@ where
         self.diff.column_mut(0).copy_from(&state.y);
         self.diff.column_mut(1).copy_from(&state.dy);
         self.diff.column_mut(1).mul_assign(scale(state.h));
+        if self.ode_problem.as_ref().unwrap().eqn_sens.is_some() {
+            let nparams = self.ode_problem.as_ref().unwrap().eqn.rhs().nparams();
+            self.sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3); nparams];
+            for i in 0..nparams {
+                let sdiff = &mut self.sdiff[i];
+                let s = &state.s[i];
+                let ds = &state.ds[i];
+                sdiff.column_mut(0).copy_from(s);
+                sdiff.column_mut(1).copy_from(ds);
+                sdiff.column_mut(1).mul_assign(scale(state.h));
+            }
+        }
 
         // setup U
         self.u = Self::_compute_r(self.order, Eqn::T::one());
@@ -421,6 +470,8 @@ where
             self.initialise_to_first_order();
         }
 
+        let old_h = self.state.as_ref().unwrap().h;
+
         let (mut y_predict, mut t_new) = self._predict_forward();
 
         // loop until step is accepted
@@ -503,7 +554,6 @@ where
                 }
             };
         };
-
         // take the accepted step
         {
             let state = self.state.as_mut().unwrap();
@@ -518,6 +568,54 @@ where
         self.statistics.final_step_size = self.state.as_ref().unwrap().h;
 
         self._update_differences(&d);
+
+        // handle sensitivities
+        if self.ode_problem.as_ref().unwrap().eqn_sens.is_some() {
+            // make sure diffs are up to date
+            let h = self.state.as_ref().unwrap().h;
+            let t = self.state.as_ref().unwrap().t;
+            if old_h != h {
+                self._update_sens_step_size(h / old_h);
+            }
+
+            // predict sensitivities to new step
+            let mut ds = self
+                .sdiff
+                .iter()
+                .map(|sdiff| Self::_predict_using_diff(sdiff, self.order))
+                .collect::<Vec<_>>();
+
+            // update for new state
+            self.problem()
+                .as_ref()
+                .unwrap()
+                .eqn_sens
+                .as_ref()
+                .unwrap()
+                .rhs()
+                .update_state(self.state.as_ref().unwrap());
+
+            // reuse linear solver from nonlinear solver
+            let ls = |x: &mut Eqn::V| -> Result<()> {
+                self.nonlinear_solver.solve_linearised_in_place(x)
+            };
+
+            // solve for sensitivities equations discretised using BDF
+            let op =
+                BdfCallable::from_eqn(self.problem().as_ref().unwrap().eqn_sens.as_ref().unwrap());
+            let fun = |x: &Eqn::V, y: &mut Eqn::V| op.call_inplace(x, t, y);
+            let rtol = self.problem().as_ref().unwrap().rtol;
+            let atol = self.problem().as_ref().unwrap().atol.clone();
+            let maxiter = self.nonlinear_solver.max_iter();
+            let mut convergence = Convergence::new(rtol, atol, maxiter);
+            for (i, s) in ds.iter_mut().enumerate() {
+                op.eqn().as_ref().rhs().set_param_index(i);
+                let _niter = newton_iteration(s, fun, ls, &mut convergence)?;
+            }
+
+            // update differences for new step
+            self._update_differences_sens(&ds);
+        }
 
         // a change in order is only done after running at order k for k + 1 steps
         // (see page 83 of [2])

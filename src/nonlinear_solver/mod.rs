@@ -1,9 +1,6 @@
 use anyhow::Result;
-use core::panic;
-use num_traits::{One, Pow};
-use std::rc::Rc;
 
-use crate::{op::Op, scalar::scale, solver::SolverProblem, IndexType, Scalar, Vector};
+use crate::{op::Op, solver::SolverProblem};
 
 pub struct NonLinearSolveSolution<V> {
     pub x0: V,
@@ -34,8 +31,12 @@ pub trait NonLinearSolver<C: Op> {
         Ok(x)
     }
 
-    // Solve the problem `F(x) = 0` in place.
+    /// Solve the problem `F(x) = 0` in place.
     fn solve_in_place(&mut self, x: &mut C::V, t: C::T) -> Result<()>;
+
+    /// Solve the linearised problem `J * x = b`, where `J` was calculated using [Self::reset_jacobian].
+    /// The input `b` is provided in `x`, and the solution is returned in `x`.
+    fn solve_linearised_in_place(&self, x: &mut C::V) -> Result<()>;
 
     // Set the maximum number of iterations for the solver.
     fn set_max_iter(&mut self, max_iter: usize);
@@ -47,111 +48,25 @@ pub trait NonLinearSolver<C: Op> {
     fn niter(&self) -> usize;
 }
 
-struct Convergence<C: Op> {
-    rtol: C::T,
-    atol: Rc<C::V>,
-    tol: C::T,
-    max_iter: IndexType,
-    iter: IndexType,
-    scale: Option<C::V>,
-    old_norm: Option<C::T>,
-}
-
-enum ConvergenceStatus {
-    Converged,
-    Diverged,
-    Continue,
-    MaximumIterations,
-}
-
-impl<C: Op> Convergence<C> {
-    fn new(problem: &SolverProblem<C>, max_iter: IndexType) -> Self {
-        let rtol = problem.rtol;
-        let atol = problem.atol.clone();
-        let minimum_tol = C::T::from(10.0) * C::T::EPSILON / rtol;
-        let maximum_tol = C::T::from(0.03);
-        let mut tol = C::T::from(0.5) * rtol.pow(C::T::from(0.5));
-        if tol > maximum_tol {
-            tol = maximum_tol;
-        }
-        if tol < minimum_tol {
-            tol = minimum_tol;
-        }
-        Self {
-            rtol,
-            atol,
-            tol,
-            max_iter,
-            scale: None,
-            old_norm: None,
-            iter: 0,
-        }
-    }
-    fn reset(&mut self, y: &C::V) {
-        let mut scale = y.abs() * scale(self.rtol);
-        scale += self.atol.as_ref();
-        self.scale = Some(scale);
-        self.iter = 0;
-        self.old_norm = None;
-    }
-    fn check_new_iteration(&mut self, dy: &mut C::V) -> ConvergenceStatus {
-        if self.scale.is_none() {
-            panic!("Convergence::check_new_iteration() called before Convergence::reset()");
-        }
-        dy.component_div_assign(self.scale.as_ref().unwrap());
-        let norm = dy.norm();
-        // if norm is zero then we are done
-        if norm <= C::T::EPSILON {
-            return ConvergenceStatus::Converged;
-        }
-        if let Some(old_norm) = self.old_norm {
-            let rate = norm / old_norm;
-
-            if rate > C::T::from(1.0) {
-                return ConvergenceStatus::Diverged;
-            }
-
-            // if converged then break out of iteration successfully
-            if rate / (C::T::one() - rate) * norm < self.tol {
-                return ConvergenceStatus::Converged;
-            }
-
-            // if iteration is not going to converge in NEWTON_MAXITER
-            // (assuming the current rate), then abort
-            if rate.pow(i32::try_from(self.max_iter - self.iter).unwrap())
-                / (C::T::from(1.0) - rate)
-                * norm
-                > self.tol
-            {
-                return ConvergenceStatus::Diverged;
-            }
-        }
-        self.iter += 1;
-        self.old_norm = Some(norm);
-        if self.iter >= self.max_iter {
-            ConvergenceStatus::MaximumIterations
-        } else {
-            ConvergenceStatus::Continue
-        }
-    }
-}
-
+pub mod convergence;
 pub mod newton;
 pub mod root;
 
 //tests
 #[cfg(test)]
 pub mod tests {
+    use std::rc::Rc;
+
     use self::newton::NewtonNonlinearSolver;
     use crate::{
         linear_solver::nalgebra::lu::LU,
         matrix::MatrixCommon,
         op::{closure::Closure, NonLinearOp},
-        DenseMatrix,
+        scale, DenseMatrix, Vector,
     };
 
     use super::*;
-    use num_traits::Zero;
+    use num_traits::{One, Zero};
 
     pub fn get_square_problem<M>() -> (
         SolverProblem<impl NonLinearOp<M = M, V = M::V, T = M::T>>,

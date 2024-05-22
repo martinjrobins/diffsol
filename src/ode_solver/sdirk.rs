@@ -338,9 +338,7 @@ where
                 .gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), &mut error);
 
             // solve for  (M - h * c * J) * error = error_est as by Hosea, M. E., & Shampine, L. F. (1996). Analysis and implementation of TR-BDF2. Applied Numerical Mathematics, 20(1-2), 21-37.
-            self.nonlinear_solver
-                .linear_solver()
-                .solve_in_place(&mut error)?;
+            self.nonlinear_solver.solve_linearised_in_place(&mut error)?;
 
             // do not include algebraic variables in error calculation
             //let algebraic = self.problem.as_ref().unwrap().eqn.algebraic_indices();

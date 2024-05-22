@@ -148,15 +148,21 @@ pub use ode_solver::diffsl::DiffSlContext;
 pub use matrix::default_solver::DefaultSolver;
 use matrix::{DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixView, MatrixViewMut};
 pub use nonlinear_solver::newton::NewtonNonlinearSolver;
-use nonlinear_solver::{root::RootFinder, NonLinearSolver};
+use nonlinear_solver::{
+    convergence::Convergence, convergence::ConvergenceStatus, newton::newton_iteration,
+    root::RootFinder, NonLinearSolver,
+};
 pub use ode_solver::{
     bdf::Bdf, builder::OdeBuilder, equations::OdeEquations, equations::OdeSolverEquations,
     method::OdeSolverMethod, method::OdeSolverState, method::OdeSolverStopReason,
-    problem::OdeSolverProblem, sdirk::Sdirk, tableau::Tableau,
-    sens_equations::SensEquations, sens_equations::SensRhs, sens_equations::SensInit
+    problem::OdeSolverProblem, sdirk::Sdirk, sens_equations::SensEquations,
+    sens_equations::SensInit, sens_equations::SensRhs, tableau::Tableau,
 };
-use op::{closure::Closure, closure_no_jac::ClosureNoJac, linear_closure::LinearClosure, constant_closure::ConstantClosure, init::InitOp};
-pub use op::{unit::UnitCallable, LinearOp, NonLinearOp, Op, ConstantOp};
+use op::{
+    closure::Closure, closure_no_jac::ClosureNoJac, constant_closure::ConstantClosure,
+    init::InitOp, linear_closure::LinearClosure,
+};
+pub use op::{unit::UnitCallable, ConstantOp, LinearOp, NonLinearOp, Op};
 use scalar::{IndexType, Scalar, Scale};
 use solver::SolverProblem;
 use vector::{Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut};

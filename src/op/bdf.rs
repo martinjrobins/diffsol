@@ -25,6 +25,32 @@ pub struct BdfCallable<Eqn: OdeEquations> {
 }
 
 impl<Eqn: OdeEquations> BdfCallable<Eqn> {
+    pub fn from_eqn(eqn: &Rc<Eqn>) -> Self {
+        let eqn = eqn.clone();
+        let n = eqn.rhs().nstates();
+        let c = RefCell::new(Eqn::T::zero());
+        let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n));
+        let jacobian_is_stale = RefCell::new(true);
+        let number_of_jac_evals = RefCell::new(0);
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n));
+        let rhs_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0));
+        let mass_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0));
+        let sparsity = None;
+        Self {
+            eqn,
+            psi_neg_y0,
+            c,
+            rhs_jac,
+            mass_jac,
+            jacobian_is_stale,
+            number_of_jac_evals,
+            tmp,
+            sparsity,
+        }
+    }
+    pub fn eqn(&self) -> &Rc<Eqn> {
+        &self.eqn
+    }
     pub fn new(ode_problem: &OdeSolverProblem<Eqn>) -> Self {
         let eqn = ode_problem.eqn.clone();
         let n = ode_problem.eqn.rhs().nstates();
@@ -122,6 +148,8 @@ impl<Eqn: OdeEquations> Op for BdfCallable<Eqn> {
     }
 }
 
+// dF(y)/dp = dM/dp (y - y0 + psi) + Ms - c * df(y)/dp - c df(y)/dy s = 0
+// jac is M - c * df(y)/dy, same
 // callable to solve for F(y) = M (y' + psi) - f(y) = 0
 impl<Eqn: OdeEquations> NonLinearOp for BdfCallable<Eqn>
 where
