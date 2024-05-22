@@ -1,3 +1,4 @@
+use num_traits::Zero;
 use crate::{
     ode_solver::problem::OdeSolverSolution, Matrix, OdeBuilder, OdeEquations, OdeSolverProblem,
     Vector,
@@ -37,6 +38,7 @@ pub fn robertson_ode_with_sens<M: Matrix + 'static>(
                 y[2] = v[2] * x[1] * x[1];
             },
             |_p: &M::V, _t: M::T| M::V::from_vec(vec![1.0.into(), 0.0.into(), 0.0.into()]),
+            |_p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V| y.fill(M::T::zero()),
         )
         .unwrap();
 

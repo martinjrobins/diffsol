@@ -1,9 +1,9 @@
 use std::rc::Rc;
 
 use crate::{
-    op::closure_with_sens::ClosureWithSens, vector::DefaultDenseMatrix, Closure, ClosureNoJac,
-    ConstantClosure, LinearClosure, Matrix, OdeEquations, OdeSolverProblem, Op, UnitCallable,
-    Vector,
+    vector::DefaultDenseMatrix, Closure, ClosureNoJac, ClosureWithSens, ConstantClosure,
+    ConstantClosureWithSens, LinearClosure, LinearClosureWithSens, Matrix, OdeEquations,
+    OdeSolverProblem, Op, UnitCallable, Vector,
 };
 use anyhow::Result;
 
@@ -216,7 +216,11 @@ impl OdeBuilder {
         rhs_jac: G,
         mass: H,
         init: I,
-    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, Closure<M, F, G>, ConstantClosure<M, I>, LinearClosure<M, H>>>>
+    ) -> Result<
+        OdeSolverProblem<
+            OdeSolverEquations<M, Closure<M, F, G>, ConstantClosure<M, I>, LinearClosure<M, H>>,
+        >,
+    >
     where
         M: Matrix,
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -250,17 +254,24 @@ impl OdeBuilder {
         )
     }
 
-    #[allow(clippy::type_complexity)]
-    pub fn build_ode_with_mass_and_sens<M, F, G, H, I, J>(
+    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
+    pub fn build_ode_with_mass_and_sens<M, F, G, H, I, J, K, L>(
         self,
         rhs: F,
         rhs_jac: G,
         rhs_sens: J,
         mass: H,
+        mass_sens: L,
         init: I,
+        init_sens: K,
     ) -> Result<
         OdeSolverProblem<
-            OdeSolverEquations<M, ClosureWithSens<M, F, G, J>, ConstantClosure<M, I>, LinearClosure<M, H>>,
+            OdeSolverEquations<
+                M,
+                ClosureWithSens<M, F, G, J>,
+                ConstantClosureWithSens<M, I, K>,
+                LinearClosureWithSens<M, H, L>,
+            >,
         >,
     >
     where
@@ -270,14 +281,16 @@ impl OdeBuilder {
         H: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
         I: Fn(&M::V, M::T) -> M::V,
         J: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        K: Fn(&M::V, M::T, &M::V, &mut M::V),
+        L: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     {
         let p = Rc::new(Self::build_p(self.p));
         let t0 = M::T::from(self.t0);
         let y0 = init(&p, t0);
         let nstates = y0.len();
         let mut rhs = ClosureWithSens::new(rhs, rhs_jac, rhs_sens, nstates, nstates, p.clone());
-        let mut mass = LinearClosure::new(mass, nstates, nstates, p.clone());
-        let init = ConstantClosure::new(init, nstates, nstates, p.clone());
+        let mut mass = LinearClosureWithSens::new(mass, mass_sens, nstates, nstates, p.clone());
+        let init = ConstantClosureWithSens::new(init, init_sens, nstates, nstates, p.clone());
         if self.use_coloring {
             rhs.calculate_sparsity(&y0, t0);
             mass.calculate_sparsity(t0);
@@ -365,25 +378,29 @@ impl OdeBuilder {
     }
 
     #[allow(clippy::type_complexity)]
-    pub fn build_ode_with_sens<M, F, G, I, J>(
+    pub fn build_ode_with_sens<M, F, G, I, J, K>(
         self,
         rhs: F,
         rhs_jac: G,
         rhs_sens: J,
         init: I,
-    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, ClosureWithSens<M, F, G, J>, ConstantClosure<M, I>>>>
+        init_sens: K,
+    ) -> Result<
+        OdeSolverProblem<OdeSolverEquations<M, ClosureWithSens<M, F, G, J>, ConstantClosureWithSens<M, I, K>>>,
+    >
     where
         M: Matrix,
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
         G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
         I: Fn(&M::V, M::T) -> M::V,
         J: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        K: Fn(&M::V, M::T, &M::V, &mut M::V),
     {
         let p = Rc::new(Self::build_p(self.p));
         let t0 = M::T::from(self.t0);
         let y0 = init(&p, t0);
         let nstates = y0.len();
-        let init = ConstantClosure::new(init, nstates, nstates, p.clone());
+        let init = ConstantClosureWithSens::new(init, init_sens, nstates, nstates, p.clone());
         let mut rhs = ClosureWithSens::new(rhs, rhs_jac, rhs_sens, nstates, nstates, p.clone());
         if self.use_coloring {
             rhs.calculate_sparsity(&y0, t0);
@@ -449,7 +466,13 @@ impl OdeBuilder {
         nroots: usize,
     ) -> Result<
         OdeSolverProblem<
-            OdeSolverEquations<M, Closure<M, F, G>, ConstantClosure<M, I>, UnitCallable<M>, ClosureNoJac<M, H>>,
+            OdeSolverEquations<
+                M,
+                Closure<M, F, G>,
+                ConstantClosure<M, I>,
+                UnitCallable<M>,
+                ClosureNoJac<M, H>,
+            >,
         >,
     >
     where
@@ -490,7 +513,9 @@ impl OdeBuilder {
         rhs: F,
         rhs_jac: G,
         init: I,
-    ) -> Result<OdeSolverProblem<OdeSolverEquations<V::M, Closure<V::M, F, G>, ConstantClosure<V::M, I>>>>
+    ) -> Result<
+        OdeSolverProblem<OdeSolverEquations<V::M, Closure<V::M, F, G>, ConstantClosure<V::M, I>>>,
+    >
     where
         V: Vector + DefaultDenseMatrix,
         F: Fn(&V, &V, V::T, &mut V),

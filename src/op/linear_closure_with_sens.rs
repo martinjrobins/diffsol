@@ -8,12 +8,14 @@ use crate::{
 
 use super::{LinearOp, Op, OpStatistics};
 
-pub struct LinearClosure<M, F>
+pub struct LinearClosureWithSens<M, F, H>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
     func: F,
+    func_sens: H,
     nstates: usize,
     nout: usize,
     nparams: usize,
@@ -23,15 +25,17 @@ where
     statistics: RefCell<OpStatistics>,
 }
 
-impl<M, F> LinearClosure<M, F>
+impl<M, F, H> LinearClosureWithSens<M, F, H>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
-    pub fn new(func: F, nstates: usize, nout: usize, p: Rc<M::V>) -> Self {
+    pub fn new(func: F, func_sens: H, nstates: usize, nout: usize, p: Rc<M::V>) -> Self {
         let nparams = p.len();
         Self {
             func,
+            func_sens,
             nstates,
             statistics: RefCell::new(OpStatistics::default()),
             nout,
@@ -52,10 +56,11 @@ where
     }
 }
 
-impl<M, F> Op for LinearClosure<M, F>
+impl<M, F, H> Op for LinearClosureWithSens<M, F, H>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
     type V = M::V;
     type T = M::T;
@@ -82,10 +87,11 @@ where
     }
 }
 
-impl<M, F> LinearOp for LinearClosure<M, F>
+impl<M, F, H> LinearOp for LinearClosureWithSens<M, F, H>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
     fn gemv_inplace(&self, x: &M::V, t: M::T, beta: M::T, y: &mut M::V) {
         self.statistics.borrow_mut().increment_call();
@@ -98,5 +104,11 @@ where
         } else {
             self._default_matrix_inplace(t, y);
         }
+    }
+    fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        (self.func_sens)(self.p.as_ref(), x, t, v, y)
+    }
+    fn has_sens(&self) -> bool {
+        true
     }
 }

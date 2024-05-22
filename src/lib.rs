@@ -159,8 +159,9 @@ pub use ode_solver::{
     sens_equations::SensInit, sens_equations::SensRhs, tableau::Tableau,
 };
 use op::{
-    closure::Closure, closure_no_jac::ClosureNoJac, constant_closure::ConstantClosure,
-    init::InitOp, linear_closure::LinearClosure,
+    closure::Closure, closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,
+    constant_closure::ConstantClosure, constant_closure_with_sens::ConstantClosureWithSens,
+    init::InitOp, linear_closure::LinearClosure, linear_closure_with_sens::LinearClosureWithSens,
 };
 pub use op::{unit::UnitCallable, ConstantOp, LinearOp, NonLinearOp, Op};
 use scalar::{IndexType, Scalar, Scale};

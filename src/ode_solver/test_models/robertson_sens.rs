@@ -43,7 +43,13 @@ pub fn robertson_sens<M: Matrix + 'static>(
                 y[1] = x[1] + beta * y[1];
                 y[2] = beta * y[2];
             },
+            |_x: &M::V, _p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V| {
+                y.fill(M::T::zero());
+            },
             |_p: &M::V, _t: M::T| M::V::from_vec(vec![1.0.into(), 0.0.into(), 0.0.into()]),
+            |_p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V| {
+                y.fill(M::T::zero());
+            },
         )
         .unwrap();
 

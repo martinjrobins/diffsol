@@ -10,13 +10,15 @@ pub mod closure;
 pub mod closure_no_jac;
 pub mod closure_with_sens;
 pub mod constant_closure;
+pub mod constant_closure_with_sens;
 pub mod filter;
+pub mod init;
 pub mod linear_closure;
+pub mod linear_closure_with_sens;
 pub mod linearise;
 pub mod matrix;
 pub mod sdirk;
 pub mod unit;
-pub mod init;
 
 /// Op is a trait for operators that, given a paramter vector `p`, operates on an input vector `x` to produce an output vector `y`.
 /// It defines the number of states (i.e. length of `x`), the number of outputs (i.e. length of `y`), and number of parameters (i.e. length of `p`) of the operator.
@@ -137,7 +139,6 @@ pub trait NonLinearOp: Op {
         y
     }
 
-
     /// Compute the Jacobian matrix `J(x, t)` of the operator and store it in the matrix `y`.
     /// `y` should have been previously initialised using the output of [`Op::sparsity`].
     /// The default implementation of this method computes the Jacobian using [Self::jac_mul_inplace],
@@ -206,6 +207,10 @@ pub trait LinearOp: Op {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
         let beta = Self::T::zero();
         self.gemv_inplace(x, t, beta, y);
+    }
+
+    fn has_sens(&self) -> bool {
+        false
     }
 
     /// Compute the operator via a GEMV operation (i.e. `y = A(t) * x + beta * y`)
@@ -295,6 +300,10 @@ pub trait ConstantOp: Op {
         y
     }
 
+    fn has_sens(&self) -> bool {
+        false
+    }
+
     /// Compute the product of the gradient of F wrt a parameter vector p with a given vector `J_p(x, t) * v`.
     /// Note that the vector v is of size nparams() and the result is of size nstates().
     /// Default implementation returns zero and panics if nparams() is not zero.
@@ -319,7 +328,7 @@ pub trait ConstantOp: Op {
         let mut col = Self::V::zeros(self.nout());
         for j in 0..self.nparams() {
             v[j] = Self::T::one();
-            self.sens_mul_inplace( t, &v, &mut col);
+            self.sens_mul_inplace(t, &v, &mut col);
             y.set_column(j, &col);
             v[j] = Self::T::zero();
         }

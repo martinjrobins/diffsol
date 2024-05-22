@@ -275,37 +275,31 @@ where
         Self::_update_diff(self.order, d, &mut self.diff);
     }
 
-    fn _update_differences_sens(&mut self, ds: &[Eqn::V]) {
-        let order = self.order;
-        for (sdiff, s) in self.sdiff.iter_mut().zip(ds.iter()) {
-            Self::_update_diff(order, s, sdiff);
-        }
-    }
-
     // predict forward to new step (eq 2 in [1])
     fn _predict_using_diff(diff: &M, order: usize) -> Eqn::V {
-        let mut y_predict = Eqn::V::zeros(diff.nrows());
+        let mut y_predict = <Eqn::V as Vector>::zeros(diff.nrows());
         for i in 0..=order {
             y_predict += diff.column(i);
         }
         y_predict
     }
 
+    // update psi term as defined in second equation on page 9 of [1]
+    fn _calculate_psi(&self, diff: &M) -> Eqn::V {
+        let mut psi = diff.column(1) * scale(self.gamma[1]);
+        for (i, &gamma_i) in self.gamma.iter().enumerate().take(self.order + 1).skip(2) {
+            psi += diff.column(i) * scale(gamma_i);
+        }
+        psi *= scale(self.alpha[self.order]);
+        psi
+    }
+
     fn _predict_forward(&mut self) -> (Eqn::V, Eqn::T) {
         let y_predict = Self::_predict_using_diff(&self.diff, self.order);
 
         // update psi and c (h, D, y0 has changed)
-        {
-            // update psi term as defined in second equation on page 9 of [1]
-            let mut new_psi = self.diff.column(1) * scale(self.gamma[1]);
-            for (i, &gamma_i) in self.gamma.iter().enumerate().take(self.order + 1).skip(2) {
-                new_psi += self.diff.column(i) * scale(gamma_i)
-            }
-            new_psi *= scale(self.alpha[self.order]);
-
-            self.nonlinear_problem_op()
-                .set_psi_and_y0(new_psi, &y_predict);
-        }
+        let psi = self._calculate_psi(&self.diff);
+        self.nonlinear_problem_op().set_psi_and_y0(psi, &y_predict);
 
         // update time
         let t_new = {
@@ -578,13 +572,6 @@ where
                 self._update_sens_step_size(h / old_h);
             }
 
-            // predict sensitivities to new step
-            let mut ds = self
-                .sdiff
-                .iter()
-                .map(|sdiff| Self::_predict_using_diff(sdiff, self.order))
-                .collect::<Vec<_>>();
-
             // update for new state
             self.problem()
                 .as_ref()
@@ -600,21 +587,37 @@ where
                 self.nonlinear_solver.solve_linearised_in_place(x)
             };
 
-            // solve for sensitivities equations discretised using BDF
+            // construct bdf discretisation of sensitivity equations
             let op =
                 BdfCallable::from_eqn(self.problem().as_ref().unwrap().eqn_sens.as_ref().unwrap());
+            op.set_c(h, self.alpha[self.order]);
+
+            // solve for sensitivities equations discretised using BDF
             let fun = |x: &Eqn::V, y: &mut Eqn::V| op.call_inplace(x, t, y);
             let rtol = self.problem().as_ref().unwrap().rtol;
             let atol = self.problem().as_ref().unwrap().atol.clone();
             let maxiter = self.nonlinear_solver.max_iter();
             let mut convergence = Convergence::new(rtol, atol, maxiter);
-            for (i, s) in ds.iter_mut().enumerate() {
-                op.eqn().as_ref().rhs().set_param_index(i);
-                let _niter = newton_iteration(s, fun, ls, &mut convergence)?;
-            }
+            let nparams = self.problem().as_ref().unwrap().eqn.rhs().nparams();
+            for i in 0..nparams {
+                // predict forward to new step
+                let s_predict = Self::_predict_using_diff(&self.sdiff[i], self.order);
 
-            // update differences for new step
-            self._update_differences_sens(&ds);
+                // setup op
+                let psi = self._calculate_psi(&self.diff);
+                op.set_psi_and_y0(psi, &s_predict);
+                op.eqn().as_ref().rhs().set_param_index(i);
+
+                // solve
+                let s_new = &mut self.state.as_mut().unwrap().s[i];
+                s_new.copy_from(&s_predict);
+                let _niter = newton_iteration(s_new, fun, ls, &mut convergence)?;
+                let s_new = &*s_new;
+                let ds = s_new - &s_predict;
+
+                // update differences for new step
+                Self::_update_diff(self.order, &ds, &mut self.sdiff[i]);
+            }
         }
 
         // a change in order is only done after running at order k for k + 1 steps
@@ -711,13 +714,17 @@ where
 mod test {
     use crate::{
         ode_solver::{
-            test_models::dydt_y2::dydt_y2_problem,
-            test_models::exponential_decay::exponential_decay_problem,
-            test_models::exponential_decay::exponential_decay_problem_with_root,
-            test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem,
-            test_models::gaussian_decay::gaussian_decay_problem,
-            test_models::robertson::robertson,
-            test_models::robertson_ode::robertson_ode,
+            test_models::{
+                dydt_y2::dydt_y2_problem,
+                exponential_decay::{
+                    exponential_decay_problem, exponential_decay_problem_sens, exponential_decay_problem_with_root
+                },
+                exponential_decay_with_algebraic::{exponential_decay_with_algebraic_problem, exponential_decay_with_algebraic_problem_sens},
+                gaussian_decay::gaussian_decay_problem,
+                robertson::robertson,
+                robertson_ode::robertson_ode,
+                robertson_sens::robertson_sens,
+            },
             tests::{
                 test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut,
                 test_state_mut_on_problem,
@@ -799,6 +806,30 @@ mod test {
     }
 
     #[test]
+    fn bdf_test_nalgebra_exponential_decay_sens() {
+        let mut s = Bdf::default();
+        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
+        let (problem, soln) = exponential_decay_problem_sens::<M>(false);
+        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 8
+        number_of_steps: 25
+        number_of_error_test_failures: 0
+        number_of_nonlinear_solver_iterations: 50
+        number_of_nonlinear_solver_fails: 0
+        initial_step_size: 0.001189207115002721
+        final_step_size: 0.9861196765479318
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
+        ---
+        number_of_calls: 52
+        number_of_jac_muls: 2
+        number_of_matrix_evals: 1
+        "###);
+    }
+
+    #[test]
     fn test_bdf_nalgebra_exponential_decay_algebraic() {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
@@ -823,10 +854,58 @@ mod test {
     }
 
     #[test]
+    fn test_bdf_nalgebra_exponential_decay_algebraic_sens() {
+        let mut s = Bdf::default();
+        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
+        let (problem, soln) = exponential_decay_with_algebraic_problem_sens::<M>(false);
+        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 11
+        number_of_steps: 17
+        number_of_error_test_failures: 4
+        number_of_nonlinear_solver_iterations: 42
+        number_of_nonlinear_solver_fails: 0
+        initial_step_size: 0.00014907855910877986
+        final_step_size: 0.2008052778053449
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
+        ---
+        number_of_calls: 46
+        number_of_jac_muls: 6
+        number_of_matrix_evals: 2
+        "###);
+    }
+
+    #[test]
     fn test_bdf_nalgebra_robertson() {
         let mut s = Bdf::default();
         let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = robertson::<M>(false);
+        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 103
+        number_of_steps: 352
+        number_of_error_test_failures: 3
+        number_of_nonlinear_solver_iterations: 1003
+        number_of_nonlinear_solver_fails: 21
+        initial_step_size: 0.000000005427827356796531
+        final_step_size: 5943224095.574959
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
+        ---
+        number_of_calls: 1007
+        number_of_jac_muls: 57
+        number_of_matrix_evals: 19
+        "###);
+    }
+
+    #[test]
+    fn test_bdf_nalgebra_robertson_sens() {
+        let mut s = Bdf::default();
+        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
+        let (problem, soln) = robertson_sens::<M>(false);
         test_ode_solver(&mut s, rs, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---

@@ -88,6 +88,7 @@ impl<V: Vector> Convergence<V> {
                 return ConvergenceStatus::Diverged;
             }
         }
+        // TODO: at the moment need 2 iterations to check convergence, should be able to do it in 1?
         self.iter += 1;
         self.old_norm = Some(norm);
         if self.iter >= self.max_iter {
