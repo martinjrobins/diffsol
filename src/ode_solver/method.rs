@@ -220,7 +220,7 @@ impl<V: Vector> OdeSolverState<V> {
         }
 
         let eqn_sens = ode_problem.eqn_sens.as_ref().unwrap();
-        eqn_sens.rhs().update_state(self);
+        eqn_sens.rhs().update_state(&self.y, &self.dy, self.t);
         for i in 0..ode_problem.eqn.rhs().nparams() {
             eqn_sens.init().set_param_index(i);
             eqn_sens.rhs().set_param_index(i);
@@ -265,9 +265,8 @@ impl<V: Vector> OdeSolverState<V> {
         let t0 = self.t;
         let f0 = &self.dy;
 
-        let mut scale_factor = y0.abs();
-        scale_factor *= scale(ode_problem.rtol);
-        scale_factor += ode_problem.atol.as_ref();
+        let mut scale_factor = y0.clone();
+        Eqn::V::scale_by_tol(y0, ode_problem.rtol, ode_problem.atol.as_ref(), &mut scale_factor);
 
         let mut tmp = f0.clone();
         tmp.component_div_assign(&scale_factor);

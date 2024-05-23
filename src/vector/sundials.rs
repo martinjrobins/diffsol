@@ -397,10 +397,8 @@ impl_sub_view_owned!(SundialsVectorView, SundialsVector);
 impl<'a> VectorViewMut<'a> for SundialsVectorViewMut<'a> {
     type Owned = SundialsVector;
     type View = SundialsVectorView<'a>;
-    fn abs(&self) -> Self::Owned {
-        let z = SundialsVector::new_serial(self.len());
-        unsafe { N_VAbs(self.sundials_vector(), z.sundials_vector()) }
-        z
+    fn abs_to(&self, y: &mut Self::Owned) {
+        unsafe { N_VAbs(self.sundials_vector(), y.sundials_vector()) }
     }
     fn copy_from(&mut self, other: &Self::Owned) {
         unsafe { N_VScale(1.0, other.sundials_vector(), self.sundials_vector()) }
@@ -412,10 +410,8 @@ impl<'a> VectorViewMut<'a> for SundialsVectorViewMut<'a> {
 
 impl<'a> VectorView<'a> for SundialsVectorView<'a> {
     type Owned = SundialsVector;
-    fn abs(&self) -> Self::Owned {
-        let z = SundialsVector::new_serial(self.len());
-        unsafe { N_VAbs(self.sundials_vector(), z.sundials_vector()) }
-        z
+    fn abs_to(&self, y: &mut Self::Owned) {
+        unsafe { N_VAbs(self.sundials_vector(), y.sundials_vector()) }
     }
     fn into_owned(self) -> Self::Owned {
         let mut z = SundialsVector::new_serial(self.len());
@@ -457,10 +453,8 @@ impl Vector for SundialsVector {
     fn fill(&mut self, value: Self::T) {
         unsafe { N_VConst(value, self.sundials_vector()) }
     }
-    fn abs(&self) -> Self {
-        let z = SundialsVector::new_clone(self);
-        unsafe { N_VAbs(self.sundials_vector(), z.sundials_vector()) }
-        z
+    fn abs_to(&self, y: &mut Self) {
+        unsafe { N_VAbs(self.sundials_vector(), y.sundials_vector()) }
     }
     fn add_scalar_mut(&mut self, scalar: Self::T) {
         unsafe { N_VAddConst(self.sundials_vector(), scalar, self.sundials_vector()) }
@@ -617,7 +611,8 @@ mod tests {
         let mut v = SundialsVector::new_serial(2);
         v[0] = -1.0;
         v[1] = 2.0;
-        let v2 = v.abs();
+        let mut v2 = v.clone();
+        v.abs_to(&mut v2);
         assert_eq!(v2[0], 1.0);
         assert_eq!(v2[1], 2.0);
     }

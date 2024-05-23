@@ -2,7 +2,7 @@ use num_traits::{One, Zero};
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    ConstantOp, LinearOp, Matrix, MatrixSparsity, NonLinearOp, OdeEquations, OdeSolverState, Op,
+    ConstantOp, LinearOp, Matrix, MatrixSparsity, NonLinearOp, OdeEquations, Op,
     Vector,
 };
 
@@ -140,25 +140,25 @@ where
     }
 
     /// pre-compute S = f_p - M_p * dy/dt from the state
-    pub fn update_state(&self, state: &OdeSolverState<Eqn::V>) {
+    pub fn update_state(&self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T) {
         if self.rhs_sens.is_some() {
             let mut rhs_sens = self.rhs_sens.as_ref().unwrap().borrow_mut();
             let mut mass_sens = self.mass_sens.as_ref().unwrap().borrow_mut();
             let mut sens = self.sens.borrow_mut();
             self.eqn
                 .rhs()
-                .sens_inplace(&state.y, state.t, &mut rhs_sens);
+                .sens_inplace(y, t, &mut rhs_sens);
             self.eqn
                 .mass()
                 .unwrap()
-                .sens_inplace(&state.dy, state.t, &mut mass_sens);
+                .sens_inplace(dy, t, &mut mass_sens);
             sens.scale_add_and_assign(&rhs_sens, -Eqn::T::one(), &mass_sens);
         } else {
             let mut sens = self.sens.borrow_mut();
-            self.eqn.rhs().sens_inplace(&state.y, state.t, &mut sens);
+            self.eqn.rhs().sens_inplace(y, t, &mut sens);
         }
-        let mut y = self.y.borrow_mut();
-        y.copy_from(&state.y);
+        let mut state_y = self.y.borrow_mut();
+        state_y.copy_from(y);
     }
     pub fn set_param_index(&self, index: usize) {
         self.index.replace(index);
@@ -320,7 +320,7 @@ mod tests {
         // M_p = 0
         // so S = |-1.0|
         //        |-1.0|
-        sens_eqn.rhs.update_state(&state);
+        sens_eqn.rhs.update_state(&state.y, &state.dy, state.t);
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 2);
         assert_eq!(sens.ncols(), 1);
@@ -360,7 +360,7 @@ mod tests {
         // so S = |-0.1|
         //        |-0.1|
         //        | 0 |
-        sens_eqn.rhs.update_state(&state);
+        sens_eqn.rhs.update_state(&state.y, &state.dy, state.t);
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 3);
         assert_eq!(sens.ncols(), 1);
@@ -403,7 +403,7 @@ mod tests {
         //       | 0   0    0|
         // M_p = 0
         // so S = f_p
-        sens_eqn.rhs.update_state(&state);
+        sens_eqn.rhs.update_state(&state.y, &state.dy, state.t);
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 3);
         assert_eq!(sens.ncols(), 3);

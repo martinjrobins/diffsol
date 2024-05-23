@@ -255,6 +255,7 @@ where
 
         let mut t1: Eqn::T;
         let mut dy = <Eqn::V as Vector>::zeros(n);
+        let mut scale_y = <Eqn::V as Vector>::zeros(n);
 
         // loop until step is accepted
         'step: loop {
@@ -348,12 +349,10 @@ where
             //}
 
             // scale error and compute norm
-            let scale_y = {
+            {
                 let y1_ref = self.nonlinear_solver.problem().f.get_last_f_eval();
                 let ode_problem = self.problem.as_ref().unwrap();
-                let mut scale_y = y1_ref.abs() * scale(ode_problem.rtol);
-                scale_y += ode_problem.atol.as_ref();
-                scale_y
+                Eqn::V::scale_by_tol(&y1_ref, ode_problem.rtol, &ode_problem.atol, &mut scale_y);
             };
             error.component_div_assign(&scale_y);
             let error_norm = error.norm() / M::T::from((n as f64).sqrt());

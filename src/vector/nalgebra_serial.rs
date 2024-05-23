@@ -53,8 +53,8 @@ impl_vector_common!(DVectorViewMut<'a, T>);
 
 impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
     type Owned = DVector<T>;
-    fn abs(&self) -> DVector<T> {
-        self.abs()
+    fn abs_to(&self, y: &mut Self::Owned) {
+        y.zip_apply(self, |y, x| *y = x.abs());
     }
     fn into_owned(self) -> Self::Owned {
         self.into_owned()
@@ -96,8 +96,8 @@ impl_mul_assign_scale_vector!(DVectorViewMut<'a, T>);
 impl<'a, T: Scalar> VectorViewMut<'a> for DVectorViewMut<'a, T> {
     type Owned = DVector<T>;
     type View = DVectorView<'a, T>;
-    fn abs(&self) -> DVector<T> {
-        self.abs()
+    fn abs_to(&self, y: &mut Self::Owned) {
+        y.zip_apply(self, |y, x| *y = x.abs());
     }
     fn copy_from(&mut self, other: &Self::Owned) {
         self.copy_from(other);
@@ -124,8 +124,8 @@ impl<T: Scalar> Vector for DVector<T> {
     fn norm(&self) -> Self::T {
         self.norm()
     }
-    fn abs(&self) -> Self {
-        self.abs()
+    fn abs_to(&self, y: &mut Self) {
+        y.zip_apply(self, |y, x| *y = x.abs());
     }
     fn fill(&mut self, value: T) {
         self.fill(value);

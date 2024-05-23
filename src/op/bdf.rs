@@ -4,7 +4,7 @@ use crate::{
 };
 use num_traits::{One, Zero};
 use std::{
-    cell::RefCell,
+    cell::{Ref, RefCell},
     ops::{AddAssign, Deref, SubAssign},
     rc::Rc,
 };
@@ -107,6 +107,10 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
     #[cfg(test)]
     fn set_psi_neg_y0_direct(&mut self, psi_neg_y0: Eqn::V) {
         self.psi_neg_y0.replace(psi_neg_y0);
+    }
+
+    pub fn tmp(&self) -> Ref<Eqn::V> {
+        self.tmp.borrow()
     }
 
     pub fn number_of_jac_evals(&self) -> usize {

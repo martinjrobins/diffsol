@@ -1,7 +1,7 @@
 use num_traits::{One, Pow};
 use std::rc::Rc;
 
-use crate::{scalar::IndexType, scale, solver::SolverProblem, NonLinearOp, Scalar, Vector};
+use crate::{scalar::IndexType, solver::SolverProblem, NonLinearOp, Scalar, Vector};
 
 pub struct Convergence<V: Vector> {
     rtol: V::T,
@@ -9,7 +9,7 @@ pub struct Convergence<V: Vector> {
     tol: V::T,
     max_iter: IndexType,
     iter: IndexType,
-    scale: Option<V>,
+    scale: V,
     old_norm: Option<V::T>,
 }
 
@@ -39,28 +39,25 @@ impl<V: Vector> Convergence<V> {
         if tol < minimum_tol {
             tol = minimum_tol;
         }
+        let n = atol.len();
+        let scale = V::zeros(n);
         Self {
             rtol,
             atol,
             tol,
             max_iter,
-            scale: None,
+            scale,
             old_norm: None,
             iter: 0,
         }
     }
     pub fn reset(&mut self, y: &V) {
-        let mut scale = y.abs() * scale(self.rtol);
-        scale += self.atol.as_ref();
-        self.scale = Some(scale);
+        V::scale_by_tol(y, self.rtol, &self.atol, &mut self.scale);
         self.iter = 0;
         self.old_norm = None;
     }
     pub fn check_new_iteration(&mut self, dy: &mut V) -> ConvergenceStatus {
-        if self.scale.is_none() {
-            panic!("Convergence::check_new_iteration() called before Convergence::reset()");
-        }
-        dy.component_div_assign(self.scale.as_ref().unwrap());
+        dy.component_div_assign(&self.scale);
         let norm = dy.norm();
         // if norm is zero then we are done
         if norm <= V::T::EPSILON {

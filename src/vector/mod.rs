@@ -1,6 +1,6 @@
 use crate::matrix::DenseMatrix;
 use crate::scalar::Scale;
-use crate::{IndexType, Scalar};
+use crate::{scale, IndexType, Scalar};
 use num_traits::Zero;
 use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
@@ -83,7 +83,7 @@ pub trait VectorViewMut<'a>:
 {
     type Owned;
     type View;
-    fn abs(&self) -> Self::Owned;
+    fn abs_to(&self, y: &mut Self::Owned);
     fn copy_from(&mut self, other: &Self::Owned);
     fn copy_from_view(&mut self, other: &Self::View);
 }
@@ -97,7 +97,7 @@ pub trait VectorView<'a>:
     + Index<IndexType, Output = Self::T>
 {
     type Owned;
-    fn abs(&self) -> Self::Owned;
+    fn abs_to(&self, y: &mut Self::Owned);
     fn into_owned(self) -> Self::Owned;
 }
 
@@ -131,7 +131,12 @@ pub trait Vector:
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn abs(&self) -> Self;
+    fn abs_to(&self, y: &mut Self);
+    fn scale_by_tol(y: &Self, rtol: Self::T, atol: &Self, y_scale: &mut Self) {
+        y.abs_to(y_scale);
+        y_scale.mul_assign(scale(rtol));
+        y_scale.add_assign(atol);
+    } 
     fn exp(&self) -> Self;
     fn from_element(nstates: usize, value: Self::T) -> Self;
     fn zeros(nstates: usize) -> Self {

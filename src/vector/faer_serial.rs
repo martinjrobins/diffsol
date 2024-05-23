@@ -86,8 +86,8 @@ impl<T: Scalar> Vector for Col<T> {
     fn norm(&self) -> T {
         self.norm_l2()
     }
-    fn abs(&self) -> Self {
-        zipped!(self).map(|unzipped!(xi)| xi.faer_abs())
+    fn abs_to(&self, y: &mut Self) {
+        zipped!(self, y.as_mut()).for_each(|unzipped!(xi, mut yi)| *yi = xi.faer_abs());
     }
     fn as_view(&self) -> Self::View<'_> {
         self.as_ref()
@@ -196,8 +196,8 @@ impl_vector_common!(ColMut<'a, T>);
 
 impl<'a, T: Scalar> VectorView<'a> for ColRef<'a, T> {
     type Owned = Col<T>;
-    fn abs(&self) -> Col<T> {
-        zipped!(self).map(|unzipped!(xi)| xi.faer_abs())
+    fn abs_to(&self, y: &mut Self::Owned) {
+        zipped!(self, y.as_mut()).for_each(|unzipped!(xi, mut yi)| *yi = xi.faer_abs());
     }
     fn into_owned(self) -> Col<T> {
         self.to_owned()
@@ -207,8 +207,8 @@ impl<'a, T: Scalar> VectorView<'a> for ColRef<'a, T> {
 impl<'a, T: Scalar> VectorViewMut<'a> for ColMut<'a, T> {
     type Owned = Col<T>;
     type View = ColRef<'a, T>;
-    fn abs(&self) -> Col<T> {
-        zipped!(self).map(|unzipped!(xi)| xi.faer_abs())
+    fn abs_to(&self, y: &mut Self::Owned) {
+        zipped!(self, y.as_mut()).for_each(|unzipped!(xi, mut yi)| *yi = xi.faer_abs());
     }
     fn copy_from(&mut self, other: &Self::Owned) {
         self.copy_from(other);
@@ -227,7 +227,8 @@ mod tests {
     #[test]
     fn test_abs() {
         let v = Col::from_vec(vec![1.0, -2.0, 3.0]);
-        let v_abs = v.abs();
+        let mut v_abs = v.clone();
+        v.abs_to(&mut v_abs);
         assert_eq!(v_abs, Col::from_vec(vec![1.0, 2.0, 3.0]));
     }
 

@@ -24,7 +24,6 @@ mod tests {
     use crate::matrix::Matrix;
     use crate::op::unit::UnitCallable;
     use crate::op::{NonLinearOp, Op};
-    use crate::scalar::scale;
     use crate::{ConstantOp, DefaultSolver, Vector};
     use crate::{
         OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
@@ -87,10 +86,8 @@ mod tests {
             } else {
                 let mut error = soln.clone() - &point.state;
                 {
-                    let scale = {
-                        let problem = method.problem().unwrap();
-                        point.state.abs() * scale(problem.rtol) + problem.atol.as_ref()
-                    };
+                    let mut scale = point.state.clone();
+                    Eqn::V::scale_by_tol(&point.state, problem.rtol, &problem.atol, &mut scale);
                     error.component_div_assign(&scale);
                 }
                 let error_norm = error.norm() / M::T::from((point.state.len() as f64).sqrt());
@@ -106,10 +103,8 @@ mod tests {
                         let sens_soln = &sens_soln[j];
                         let mut error = sens_soln.clone() - &sens_point.state;
                         {
-                            let scale = {
-                                let problem = method.problem().unwrap();
-                                sens_point.state.abs() * scale(problem.rtol) + problem.atol.as_ref()
-                            };
+                            let mut scale = sens_point.state.clone();
+                            Eqn::V::scale_by_tol(&sens_point.state, problem.rtol, &problem.atol, &mut scale);
                             error.component_div_assign(&scale);
                         }
                         let error_norm =
@@ -302,10 +297,11 @@ mod tests {
             }
             let soln = s.interpolate(point.t).unwrap();
 
-            let scale = {
+            let mut scale = point.state.clone();
+            {
                 let problem = s.problem().unwrap();
-                point.state.abs() * scale(problem.rtol) + problem.atol.as_ref()
-            };
+                Eqn::V::scale_by_tol(&point.state, problem.rtol, &problem.atol, &mut scale);
+            }
             let mut error = soln.clone() - &point.state;
             error.component_div_assign(&scale);
             let error_norm = error.norm() / Eqn::T::from((point.state.len() as f64).sqrt());
