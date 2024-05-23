@@ -405,6 +405,73 @@ where
         error.component_div_assign(y_scale);
         error.norm()
     }
+
+    fn sensitivity_solve(&mut self, y_new: &Eqn::V, t_new: Eqn::T, mut error_norm: Eqn::T) -> Result<Eqn::T> {
+        let h = self.state.as_ref().unwrap().h;
+
+        // update for new state
+        {
+            let dy_new = self.nonlinear_problem_op().as_ref().tmp();
+            self.problem()
+                .as_ref()
+                .unwrap()
+                .eqn_sens
+                .as_ref()
+                .unwrap()
+                .rhs()
+                .update_state(&y_new, &dy_new, t_new);
+        }
+
+        // reuse linear solver from nonlinear solver
+        let ls = |x: &mut Eqn::V| -> Result<()> {
+            self.nonlinear_solver.solve_linearised_in_place(x)
+        };
+
+        // construct bdf discretisation of sensitivity equations
+        let op = BdfCallable::from_eqn(
+            self.problem().as_ref().unwrap().eqn_sens.as_ref().unwrap(),
+        );
+        op.set_c(h, self.alpha[self.order]);
+
+        // solve for sensitivities equations discretised using BDF
+        let fun = |x: &Eqn::V, y: &mut Eqn::V| op.call_inplace(x, t_new, y);
+        let rtol = self.problem().as_ref().unwrap().rtol;
+        let atol = self.problem().as_ref().unwrap().atol.clone();
+        let maxiter = self.nonlinear_solver.max_iter();
+        let mut convergence = Convergence::new(rtol, atol, maxiter); let nparams = self.problem().as_ref().unwrap().eqn.rhs().nparams();
+        for i in 0..nparams {
+            // predict forward to new step
+            let s_predict = Self::_predict_using_diff(&self.sdiff[i], self.order);
+
+            // setup op
+            let psi = self._calculate_psi(&self.sdiff[i]);
+            op.set_psi_and_y0(psi, &s_predict);
+            op.eqn().as_ref().rhs().set_param_index(i);
+
+            // solve
+            {
+                let s_new = &mut self.state.as_mut().unwrap().s[i];
+                s_new.copy_from(&s_predict);
+                let _niter = newton_iteration(s_new, fun, ls, &mut convergence)?;
+                let s_new = &*s_new;
+                self.s_deltas[i].copy_from(&(s_new - s_predict));
+            }
+
+            let s_new = &self.state.as_ref().unwrap().s[i];
+            let rtol = self.problem().as_ref().unwrap().rtol;
+            let atol = self.ode_problem.as_ref().unwrap().atol.as_ref();
+
+            Eqn::V::scale_by_tol(s_new, rtol, atol, &mut self.s_scales[i]);
+
+            error_norm += Self::error_norm(
+                &self.s_deltas[i],
+                self.error_const[self.order],
+                &self.s_scales[i],
+            );
+        }
+        error_norm /= Eqn::T::from(nparams as f64 + 1.0);
+        Ok(error_norm)
+    }
 }
 
 impl<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations, Nls> OdeSolverMethod<Eqn>
@@ -552,131 +619,61 @@ where
             let solver_result = self.nonlinear_solver.solve_in_place(&mut y_new, t_new);
             // update statistics
             self.statistics.number_of_nonlinear_solver_iterations += self.nonlinear_solver.niter();
-            match solver_result {
-                Ok(()) => {
-                    // test error is within tolerance
-                    // combine eq 3, 4 and 6 from [1] to obtain error
-                    // Note that error = C_k * h^{k+1} y^{k+1}
-                    // and d = D^{k+1} y_{n+1} \approx h^{k+1} y^{k+1}
-                    self.y_delta.copy_from(&y_new);
-                    self.y_delta -= &y_predict;
 
-                    // calculate error norm
-                    {
-                        let rtol = self.problem().as_ref().unwrap().rtol;
-                        let atol = self.ode_problem.as_ref().unwrap().atol.as_ref();
-                        Eqn::V::scale_by_tol(&y_new, rtol, atol, &mut self.y_scale);
-                    }
+            if solver_result.is_err() {
+                self.statistics.number_of_nonlinear_solver_fails += 1;
+                if updated_jacobian {
+                    // newton iteration did not converge, but jacobian has already been
+                    // evaluated so reduce step size by 0.3 (as per [1]) and try again
+                    self._update_step_size(Eqn::T::from(0.3));
 
-                    error_norm = Self::error_norm(
-                        &self.y_delta,
-                        self.error_const[self.order],
-                        &self.y_scale,
-                    );
+                    // new prediction
+                    (y_predict, t_new) = self._predict_forward();
 
-                    let maxiter = self.nonlinear_solver.max_iter() as f64;
-                    let niter = self.nonlinear_solver.niter() as f64;
-                    safety = Eqn::T::from(0.9 * (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter));
-
-                    // only bother doing sensitivity calculations if we might keep the step
-                    if self.ode_problem.as_ref().unwrap().eqn_sens.is_some()
-                        && error_norm <= Eqn::T::from(1.0)
-                    {
-                        let h = self.state.as_ref().unwrap().h;
-
-                        // update for new state
-                        {
-                            let dy_new = self.nonlinear_problem_op().as_ref().tmp();
-                            self.problem()
-                                .as_ref()
-                                .unwrap()
-                                .eqn_sens
-                                .as_ref()
-                                .unwrap()
-                                .rhs()
-                                .update_state(&y_new, &dy_new, t_new);
-                        }
-
-                        // reuse linear solver from nonlinear solver
-                        let ls = |x: &mut Eqn::V| -> Result<()> {
-                            self.nonlinear_solver.solve_linearised_in_place(x)
-                        };
-
-                        // construct bdf discretisation of sensitivity equations
-                        let op = BdfCallable::from_eqn(
-                            self.problem().as_ref().unwrap().eqn_sens.as_ref().unwrap(),
-                        );
-                        op.set_c(h, self.alpha[self.order]);
-
-                        // solve for sensitivities equations discretised using BDF
-                        let fun = |x: &Eqn::V, y: &mut Eqn::V| op.call_inplace(x, t_new, y);
-                        let rtol = self.problem().as_ref().unwrap().rtol;
-                        let atol = self.problem().as_ref().unwrap().atol.clone();
-                        let maxiter = 2 * self.nonlinear_solver.max_iter();
-                        let mut convergence = Convergence::new(rtol, atol, maxiter); let nparams = self.problem().as_ref().unwrap().eqn.rhs().nparams();
-                        for i in 0..nparams {
-                            // predict forward to new step
-                            let s_predict = Self::_predict_using_diff(&self.sdiff[i], self.order);
-
-                            // setup op
-                            let psi = self._calculate_psi(&self.sdiff[i]);
-                            op.set_psi_and_y0(psi, &s_predict);
-                            op.eqn().as_ref().rhs().set_param_index(i);
-
-                            // solve
-                            {
-                                let s_new = &mut self.state.as_mut().unwrap().s[i];
-                                s_new.copy_from(&s_predict);
-                                let _niter = newton_iteration(s_new, fun, ls, &mut convergence)?;
-                                let s_new = &*s_new;
-                                self.s_deltas[i].copy_from(&(s_new - s_predict));
-                            }
-
-                            let s_new = &self.state.as_ref().unwrap().s[i];
-                            let rtol = self.problem().as_ref().unwrap().rtol;
-                            let atol = self.ode_problem.as_ref().unwrap().atol.as_ref();
-
-                            Eqn::V::scale_by_tol(s_new, rtol, atol, &mut self.s_scales[i]);
-
-                            error_norm += Self::error_norm(
-                                &self.s_deltas[i],
-                                self.error_const[self.order],
-                                &self.s_scales[i],
-                            );
-                        }
-                        error_norm /= Eqn::T::from(nparams as f64 + 1.0);
-                    }
-
-                    if error_norm <= Eqn::T::from(1.0) {
-                        // step is accepted
-                        break y_new;
-                    } else {
-                        // step is rejected
-                        // calculate optimal step size factor as per eq 2.46 of [2]
-                        // and reduce step size and try again
-                        let order = self.order as f64;
-                        let mut factor =
-                            safety * error_norm.pow(Eqn::T::from(-1.0 / (order + 1.0)));
-                        if factor < Eqn::T::from(Self::MIN_FACTOR) {
-                            factor = Eqn::T::from(Self::MIN_FACTOR);
-                        }
-                        // todo, do we need to update the linear solver problem here since we converged?
-                        self._update_step_size(factor);
-
-                        // if step size too small, then fail
-                        let state = self.state.as_ref().unwrap();
-                        if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
-                            return Err(anyhow::anyhow!("Step size too small at t = {}", state.t));
-                        }
-
-                        // new prediction
-                        (y_predict, t_new) = self._predict_forward();
-
-                        // update statistics
-                        self.statistics.number_of_error_test_failures += 1;
-                    }
+                    // update statistics
+                } else {
+                    // newton iteration did not converge, so update jacobian and try again
+                    self.nonlinear_problem_op().set_jacobian_is_stale();
+                    self.nonlinear_solver
+                        .reset_jacobian(&y_predict, self.state.as_ref().unwrap().t);
+                    updated_jacobian = true;
+                    // same prediction as last time
                 }
-                Err(_e) => {
+                continue;
+            }
+
+            // calculate error norm
+            {
+                let rtol = self.problem().as_ref().unwrap().rtol;
+                let atol = self.ode_problem.as_ref().unwrap().atol.as_ref();
+                Eqn::V::scale_by_tol(&y_new, rtol, atol, &mut self.y_scale);
+            }
+
+            // test error is within tolerance
+            // combine eq 3, 4 and 6 from [1] to obtain error
+            // Note that error = C_k * h^{k+1} y^{k+1}
+            // and d = D^{k+1} y_{n+1} \approx h^{k+1} y^{k+1}
+            self.y_delta.copy_from(&y_new);
+            self.y_delta -= &y_predict;
+
+            
+
+            error_norm = Self::error_norm(
+                &self.y_delta,
+                self.error_const[self.order],
+                &self.y_scale,
+            );
+
+            let maxiter = self.nonlinear_solver.max_iter() as f64;
+            let niter = self.nonlinear_solver.niter() as f64;
+            safety = Eqn::T::from(0.9 * (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter));
+
+            // only bother doing sensitivity calculations if we might keep the step
+            if self.ode_problem.as_ref().unwrap().eqn_sens.is_some()
+                && error_norm <= Eqn::T::from(1.0)
+            {
+                let sens_solve_result = self.sensitivity_solve(&y_new, t_new, error_norm);
+                if sens_solve_result.is_err() {
                     self.statistics.number_of_nonlinear_solver_fails += 1;
                     if updated_jacobian {
                         // newton iteration did not converge, but jacobian has already been
@@ -695,8 +692,39 @@ where
                         updated_jacobian = true;
                         // same prediction as last time
                     }
+                    continue;
+                };
+                error_norm = sens_solve_result.unwrap();
+            }
+
+            if error_norm <= Eqn::T::from(1.0) {
+                // step is accepted
+                break y_new;
+            } else {
+                // step is rejected
+                // calculate optimal step size factor as per eq 2.46 of [2]
+                // and reduce step size and try again
+                let order = self.order as f64;
+                let mut factor =
+                    safety * error_norm.pow(Eqn::T::from(-1.0 / (order + 1.0)));
+                if factor < Eqn::T::from(Self::MIN_FACTOR) {
+                    factor = Eqn::T::from(Self::MIN_FACTOR);
                 }
-            };
+                // todo, do we need to update the linear solver problem here since we converged?
+                self._update_step_size(factor);
+
+                // if step size too small, then fail
+                let state = self.state.as_ref().unwrap();
+                if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
+                    return Err(anyhow::anyhow!("Step size too small at t = {}", state.t));
+                }
+
+                // new prediction
+                (y_predict, t_new) = self._predict_forward();
+
+                // update statistics
+                self.statistics.number_of_error_test_failures += 1;
+            }
         };
         // take the accepted step
         self.update_differences();
