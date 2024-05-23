@@ -4,9 +4,9 @@ pub mod equations;
 pub mod method;
 pub mod problem;
 pub mod sdirk;
+pub mod sens_equations;
 pub mod tableau;
 pub mod test_models;
-pub mod sens_equations;
 
 #[cfg(feature = "diffsl")]
 pub mod diffsl;
@@ -22,21 +22,18 @@ mod tests {
 
     use super::*;
     use crate::matrix::Matrix;
-    use crate::op::init::InitOp;
     use crate::op::unit::UnitCallable;
     use crate::op::{NonLinearOp, Op};
     use crate::scalar::scale;
     use crate::{ConstantOp, DefaultSolver, Vector};
     use crate::{
-        NonLinearSolver, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-        OdeSolverStopReason,
+        OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
     };
     use num_traits::One;
     use num_traits::Zero;
 
     pub fn test_ode_solver<M, Eqn>(
         method: &mut impl OdeSolverMethod<Eqn>,
-        mut root_solver: impl NonLinearSolver<InitOp<Eqn>>,
         problem: &OdeSolverProblem<Eqn>,
         solution: OdeSolverSolution<M::V>,
         override_tol: Option<M::T>,
@@ -45,14 +42,13 @@ mod tests {
     where
         M: Matrix,
         Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
+        Eqn::M: DefaultSolver,
     {
-        let mut state = OdeSolverState::new_without_initialise(problem);
-        state.set_consistent(problem, &mut root_solver).unwrap();
-        state.set_step_size(problem, method.order());
+        let state = OdeSolverState::new(problem, method).unwrap();
         method.set_problem(state, problem);
         let have_root = problem.eqn.as_ref().root().is_some();
-        for point in solution.solution_points.iter() {
-            let soln = if use_tstop {
+        for (i, point) in solution.solution_points.iter().enumerate() {
+            let (soln, sens_soln) = if use_tstop {
                 match method.set_stop_time(point.t) {
                     Ok(_) => loop {
                         match method.step() {
@@ -61,12 +57,18 @@ mod tests {
                                 return method.state().unwrap().y.clone();
                             }
                             Ok(OdeSolverStopReason::TstopReached) => {
-                                break method.state().unwrap().y.clone()
+                                break (
+                                    method.state().unwrap().y.clone(),
+                                    method.state().unwrap().s.clone(),
+                                );
                             }
                             _ => (),
                         }
                     },
-                    Err(_) => method.state().unwrap().y.clone(),
+                    Err(_) => (
+                        method.state().unwrap().y.clone(),
+                        method.state().unwrap().s.clone(),
+                    ),
                 }
             } else {
                 while method.state().unwrap().t < point.t {
@@ -75,18 +77,22 @@ mod tests {
                         return method.interpolate(t).unwrap();
                     }
                 }
-                method.interpolate(point.t).unwrap()
+                let soln = method.interpolate(point.t).unwrap();
+                let sens_soln = method.interpolate_sens(point.t).unwrap();
+                (soln, sens_soln)
             };
 
             if let Some(override_tol) = override_tol {
                 soln.assert_eq_st(&point.state, override_tol);
             } else {
-                let scale = {
-                    let problem = method.problem().unwrap();
-                    point.state.abs() * scale(problem.rtol) + problem.atol.as_ref()
-                };
                 let mut error = soln.clone() - &point.state;
-                error.component_div_assign(&scale);
+                {
+                    let scale = {
+                        let problem = method.problem().unwrap();
+                        point.state.abs() * scale(problem.rtol) + problem.atol.as_ref()
+                    };
+                    error.component_div_assign(&scale);
+                }
                 let error_norm = error.norm() / M::T::from((point.state.len() as f64).sqrt());
                 assert!(
                     error_norm < M::T::from(15.0),
@@ -94,6 +100,28 @@ mod tests {
                     error_norm,
                     point.t
                 );
+                if let Some(sens_soln_points) = &solution.sens_solution_points {
+                    for (j, sens_points) in sens_soln_points.iter().enumerate() {
+                        let sens_point = &sens_points[i];
+                        let sens_soln = &sens_soln[j];
+                        let mut error = sens_soln.clone() - &sens_point.state;
+                        {
+                            let scale = {
+                                let problem = method.problem().unwrap();
+                                sens_point.state.abs() * scale(problem.rtol) + problem.atol.as_ref()
+                            };
+                            error.component_div_assign(&scale);
+                        }
+                        let error_norm =
+                            error.norm() / M::T::from((sens_point.state.len() as f64).sqrt());
+                        assert!(
+                            error_norm < M::T::from(15.0),
+                            "error_norm: {} at t = {}",
+                            error_norm,
+                            point.t
+                        );
+                    }
+                }
             }
         }
         method.state().unwrap().y.clone()
@@ -254,11 +282,10 @@ mod tests {
         mut s: Method,
         problem: OdeSolverProblem<Eqn>,
         soln: OdeSolverSolution<Eqn::V>,
-    ) 
-    where
+    ) where
         Eqn: OdeEquations,
         Method: OdeSolverMethod<Eqn>,
-        Eqn::M: DefaultSolver
+        Eqn::M: DefaultSolver,
     {
         // solve for a little bit
         s.solve(&problem, Eqn::T::from(1.0)).unwrap();

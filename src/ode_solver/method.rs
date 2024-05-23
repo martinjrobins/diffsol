@@ -3,8 +3,9 @@ use num_traits::{One, Pow};
 use std::rc::Rc;
 
 use crate::{
-    matrix::default_solver::DefaultSolver, scalar::Scalar, scale, ConstantOp, InitOp, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem,
-    Op, SensEquations, SolverProblem, Vector,
+    matrix::default_solver::DefaultSolver, scalar::Scalar, scale, ConstantOp, InitOp,
+    NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, Op,
+    SensEquations, SolverProblem, Vector,
 };
 
 pub enum OdeSolverStopReason<T: Scalar> {
@@ -58,6 +59,9 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
 
     /// Interpolate the solution at a given time. This time should be between the current time and the last solver time step
     fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V>;
+
+    /// Interpolate the sensitivity vectors at a given time. This time should be between the current time and the last solver time step
+    fn interpolate_sens(&self, t: Eqn::T) -> Result<Vec<Eqn::V>>;
 
     /// Get the current state of the solver, if it exists
     fn state(&self) -> Option<&OdeSolverState<Eqn::V>>;
@@ -134,7 +138,8 @@ impl<V: Vector> OdeSolverState<V> {
         Ok(ret)
     }
 
-    /// Create a new solver state from an ODE problem, without any initialisation.
+    /// Create a new solver state from an ODE problem, without any initialisation apart from setting the initial time state vector y,
+    /// and if applicable the sensitivity vectors s.
     /// This is useful if you want to set up the state yourself, or if you want to use a different nonlinear solver to make the state consistent,
     /// or if you want to set the step size yourself or based on the exact order of the solver.
     pub fn new_without_initialise<Eqn>(ode_problem: &OdeSolverProblem<Eqn>) -> Self
@@ -144,24 +149,28 @@ impl<V: Vector> OdeSolverState<V> {
         let t = ode_problem.t0;
         let h = ode_problem.h0;
         let y = ode_problem.eqn.init().call(t);
-        let dy = ode_problem.eqn.rhs().call(&y, t);
-        let s = Vec::new();
-        let ds = Vec::new();
-        let mut ret = Self { y, t, h, dy, s, ds };
-        if let Some(sens_equations) = ode_problem.eqn_sens.as_ref() {
-            sens_equations.init().update_state(&ret);
-            for i in 0..ode_problem.eqn.rhs().nparams() {
-                sens_equations.init().set_param_index(i);
-                let si = sens_equations.init().call(t);
-                let dsi = sens_equations.rhs().call(&ret.y, t);
-                ret.s.push(si);
-                ret.ds.push(dsi);
+        let dy = V::zeros(y.len());
+        let nparams = ode_problem.eqn.rhs().nparams();
+        let (s, ds) = if ode_problem.eqn_sens.is_none() {
+            (vec![], vec![])
+        } else {
+            let eqn_sens = ode_problem.eqn_sens.as_ref().unwrap();
+            eqn_sens.init().update_state(t);
+            let mut s = Vec::with_capacity(nparams);
+            let mut ds = Vec::with_capacity(nparams);
+            for i in 0..nparams {
+                eqn_sens.init().set_param_index(i);
+                let si = eqn_sens.init().call(t);
+                let dsi = V::zeros(y.len());
+                s.push(si);
+                ds.push(dsi);
             }
-        }
-        ret
+            (s, ds)
+        };
+        Self { y, t, h, dy, s, ds }
     }
 
-    /// Set the state to be consistent with the algebraic constraints of the problem.
+    /// Calculate a consistent state and time derivative of the state, based on the equations of the problem.
     pub fn set_consistent<Eqn, S>(
         &mut self,
         ode_problem: &OdeSolverProblem<Eqn>,
@@ -171,6 +180,10 @@ impl<V: Vector> OdeSolverState<V> {
         Eqn: OdeEquations<T = V::T, V = V>,
         S: NonLinearSolver<InitOp<Eqn>> + ?Sized,
     {
+        ode_problem
+            .eqn
+            .rhs()
+            .call_inplace(&self.y, self.t, &mut self.dy);
         if ode_problem.eqn.mass().is_none() {
             return Ok(());
         }
@@ -190,7 +203,9 @@ impl<V: Vector> OdeSolverState<V> {
         Ok(())
     }
 
-    /// Set the sensitivity states to be consistent with the algebraic constraints of the problem.
+    /// Calculate the initial sensitivity vectors and their time derivatives, based on the equations of the problem.
+    /// Note that this function assumes that the state is already consistent with the algebraic constraints
+    /// (either via [Self::set_consistent] or by setting the state up manually).
     pub fn set_consistent_sens<Eqn, S>(
         &mut self,
         ode_problem: &OdeSolverProblem<Eqn>,
@@ -200,16 +215,27 @@ impl<V: Vector> OdeSolverState<V> {
         Eqn: OdeEquations<T = V::T, V = V>,
         S: NonLinearSolver<InitOp<SensEquations<Eqn>>> + ?Sized,
     {
-        if ode_problem.eqn.mass().is_none() {
-            return Ok(());
-        }
         if ode_problem.eqn_sens.is_none() {
             return Ok(());
         }
+
         let eqn_sens = ode_problem.eqn_sens.as_ref().unwrap();
-        eqn_sens.init().update_state(self);
+        eqn_sens.rhs().update_state(self);
         for i in 0..ode_problem.eqn.rhs().nparams() {
             eqn_sens.init().set_param_index(i);
+            eqn_sens.rhs().set_param_index(i);
+            eqn_sens
+                .rhs()
+                .call_inplace(&self.s[i], self.t, &mut self.ds[i]);
+        }
+
+        if ode_problem.eqn.mass().is_none() {
+            return Ok(());
+        }
+
+        for i in 0..ode_problem.eqn.rhs().nparams() {
+            eqn_sens.init().set_param_index(i);
+            eqn_sens.rhs().set_param_index(i);
             let f = Rc::new(InitOp::new(
                 eqn_sens,
                 ode_problem.t0,

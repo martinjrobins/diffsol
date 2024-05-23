@@ -31,9 +31,9 @@ where
             index,
         }
     }
-    pub fn update_state(&self, state: &OdeSolverState<Eqn::V>) {
+    pub fn update_state(&self, t: Eqn::T) {
         let mut init_sens = self.init_sens.borrow_mut();
-        self.eqn.init().sens_inplace(state.t, &mut init_sens);
+        self.eqn.init().sens_inplace(t, &mut init_sens);
     }
     pub fn set_param_index(&self, index: usize) {
         self.index.replace(index);
@@ -64,9 +64,9 @@ where
     Eqn: OdeEquations,
 {
     fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
-        y.fill(Eqn::T::zero());
         let init_sens = self.init_sens.borrow();
         let index = *self.index.borrow();
+        y.fill(Eqn::T::zero());
         init_sens.add_column_to_vector(index, y);
     }
 }
@@ -295,6 +295,7 @@ mod tests {
         ode_solver::test_models::{
             exponential_decay::exponential_decay_problem_sens,
             exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
+            robertson_sens::robertson_sens,
         },
         NonLinearOp, OdeSolverState, SensEquations, Vector,
     };
@@ -315,26 +316,26 @@ mod tests {
             h: 0.0,
         };
         // S = f_p - M_p * dy/dt
-        // f_p = -a (a = 0.1)
+        // f_p = -y (a = 0.1)
         // M_p = 0
-        // so S = |-0.1|
-        //        |-0.1|
+        // so S = |-1.0|
+        //        |-1.0|
         sens_eqn.rhs.update_state(&state);
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 2);
         assert_eq!(sens.ncols(), 1);
-        assert_eq!(sens[(0, 0)], -0.1);
-        assert_eq!(sens[(1, 0)], -0.1);
+        assert_eq!(sens[(0, 0)], -1.0);
+        assert_eq!(sens[(1, 0)], -1.0);
 
         // F(s, t)_i = J * s_i + S_i
         // J = |-a 0|
         //     |0 -a|
-        // F(s, t)_0 = |-a 0| |1| + |-0.1| = |-0.2|
-        //             |0 -a| |1|   |-0.1|   |-0.2|
+        // F(s, t)_0 = |-a 0| |1| + |-1.0| = |-1.1|
+        //             |0 -a| |2|   |-1.0|   |-1.2|
         sens_eqn.rhs.set_param_index(0);
-        let s = Vcpu::from_vec(vec![1.0, 1.0]);
+        let s = Vcpu::from_vec(vec![1.0, 2.0]);
         let f = sens_eqn.rhs.call(&s, state.t);
-        let f_expect = Vcpu::from_vec(vec![-0.2, -0.2]);
+        let f_expect = Vcpu::from_vec(vec![-1.1, -1.2]);
         f.assert_eq_st(&f_expect, 1e-10);
     }
 
@@ -352,8 +353,8 @@ mod tests {
         };
 
         // S = f_p - M_p * dy/dt
-        // f_p = |-a|
-        //       |-a|
+        // f_p = |-y|
+        //       |-y|
         //       | 0|
         // M_p = 0
         // so S = |-0.1|
@@ -363,21 +364,57 @@ mod tests {
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 3);
         assert_eq!(sens.ncols(), 1);
-        assert_eq!(sens[(0, 0)], -0.1);
-        assert_eq!(sens[(1, 0)], -0.1);
+        assert_eq!(sens[(0, 0)], -1.0);
+        assert_eq!(sens[(1, 0)], -1.0);
         assert_eq!(sens[(2, 0)], 0.0);
+        sens_eqn.rhs.y.borrow().assert_eq_st(&state.y, 1e-10);
 
         // F(s, t)_i = J * s_i + S_i
         // J = |-a 0 0|
         //     |0 -a 0|
         //     |0 0 0 |
-        // F(s, t)_0 = |-a 0 0| |1| + |-0.1| = |-0.2|
-        //             |0 -a 0| |1|   |-0.1|   |-0.2|
+        // F(s, t)_0 = |-a 0 0| |1| + |-1.0| = |-1.1|
+        //             |0 -a 0| |1|   |-1.0|   |-1.1|
         //             |0 0 0 | |1|   | 0  |   | 0 |
         sens_eqn.rhs.set_param_index(0);
+        assert_eq!(sens_eqn.rhs.index.borrow().clone(), 0);
         let s = Vcpu::from_vec(vec![1.0, 1.0, 1.0]);
         let f = sens_eqn.rhs.call(&s, state.t);
-        let f_expect = Vcpu::from_vec(vec![-0.2, -0.2, 0.0]);
+        let f_expect = Vcpu::from_vec(vec![-1.1, -1.1, 0.0]);
         f.assert_eq_st(&f_expect, 1e-10);
+    }
+
+    #[test]
+    fn test_rhs_robertson() {
+        let (problem, _soln) = robertson_sens::<Mcpu>(false);
+        let sens_eqn = SensEquations::new(&problem.eqn);
+        let state = OdeSolverState {
+            t: 0.0,
+            y: Vcpu::from_vec(vec![1.0, 2.0, 3.0]),
+            dy: Vcpu::from_vec(vec![1.0, 1.0, 1.0]),
+            s: Vec::new(),
+            ds: Vec::new(),
+            h: 0.0,
+        };
+
+        // S = f_p - M_p * dy/dt
+        // f_p = |-x0 x1*x2 0|
+        //       |x0 -x1*x2 -x1*x1|
+        //       | 0   0    0|
+        // M_p = 0
+        // so S = f_p
+        sens_eqn.rhs.update_state(&state);
+        let sens = sens_eqn.rhs.sens.borrow();
+        assert_eq!(sens.nrows(), 3);
+        assert_eq!(sens.ncols(), 3);
+        assert_eq!(sens[(0, 0)], -state.y[0]);
+        assert_eq!(sens[(0, 1)], state.y[1] * state.y[2]);
+        assert_eq!(sens[(0, 2)], 0.0);
+        assert_eq!(sens[(1, 0)], state.y[0]);
+        assert_eq!(sens[(1, 1)], -state.y[1] * state.y[2]);
+        assert_eq!(sens[(1, 2)], -state.y[1] * state.y[1]);
+        assert_eq!(sens[(2, 0)], 0.0);
+        assert_eq!(sens[(2, 1)], 0.0);
+        assert_eq!(sens[(2, 2)], 0.0);
     }
 }

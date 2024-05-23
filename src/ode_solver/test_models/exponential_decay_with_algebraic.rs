@@ -25,14 +25,14 @@ fn exponential_decay_with_algebraic<M: DenseMatrix>(
 
 #[allow(unused_mut)]
 fn exponential_decay_with_algebraic_sens<M: DenseMatrix>(
-    _x: &M::V,
-    p: &M::V,
+    x: &M::V,
+    _p: &M::V,
     _t: M::T,
     v: &M::V,
     mut y: &mut M::V,
 ) {
-    y.fill(v[0]);
-    y.mul_assign(scale(-p[0]));
+    y.copy_from(x);
+    y.mul_assign(scale(-v[0]));
     let nstates = y.len();
     y[nstates - 1] = M::T::zero();
 }
@@ -81,7 +81,12 @@ fn exponential_decay_with_algebraic_init<M: DenseMatrix>(_p: &M::V, _t: M::T) ->
     M::V::from_vec(vec![1.0.into(), 1.0.into(), 0.0.into()])
 }
 
-fn exponential_decay_with_algebraic_init_sens<M: DenseMatrix>(_p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V) {
+fn exponential_decay_with_algebraic_init_sens<M: DenseMatrix>(
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
     y.fill(M::T::zero());
 }
 
@@ -140,8 +145,9 @@ pub fn exponential_decay_with_algebraic_problem_sens<M: DenseMatrix + 'static>(
     for i in 0..10 {
         let t = M::T::from(i as f64 / 10.0);
         let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into(), 1.0.into()]);
-        let y: M::V = y0 * scale(M::T::exp(-p[0] * t));
-        soln.push(y, t);
+        let y: M::V = y0.clone() * scale(M::T::exp(-p[0] * t));
+        let yp = y0 * scale(-t * M::T::exp(-p[0] * t));
+        soln.push_sens(y, t, &[yp]);
     }
     (problem, soln)
 }

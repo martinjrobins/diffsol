@@ -205,7 +205,7 @@ where
         self.n_equal_steps = 0;
 
         // update D using equations in section 3.2 of [1]
-        // TODO: think we can remove this line (done in initialise_to_first_order)
+        // TODO: move this to whereever we change order
         self.u = Self::_compute_r(self.order, Eqn::T::one());
         let r = Self::_compute_r(self.order, factor);
         let ru = r.mat_mul(&self.u);
@@ -239,9 +239,6 @@ where
         //- constant c = h / (1-kappa) gamma_k term
         //- lu factorisation of (M - c * J) used in newton iteration (same equation)
 
-        self.state.as_mut().unwrap().h *= factor;
-        self.n_equal_steps = 0;
-
         // update D using equations in section 3.2 of [1]
         let r = Self::_compute_r(self.order, factor);
         let ru = r.mat_mul(&self.u);
@@ -269,10 +266,6 @@ where
             let tmp = diff.column(i + 1).into_owned();
             diff.column_mut(i).add_assign(&tmp);
         }
-    }
-
-    fn _update_differences(&mut self, d: &Eqn::V) {
-        Self::_update_diff(self.order, d, &mut self.diff);
     }
 
     // predict forward to new step (eq 2 in [1])
@@ -325,6 +318,9 @@ where
         if state.t + state.h > tstop + troundoff {
             let factor = (tstop - state.t) / state.h;
             self._update_step_size(factor);
+            if self.ode_problem.as_ref().unwrap().eqn_sens.is_some() {
+                self._update_sens_step_size(factor);
+            }
         }
         Ok(None)
     }
@@ -365,6 +361,19 @@ where
 
         self.is_state_modified = false;
     }
+
+    //interpolate solution at time values t* where t-h < t* < t
+    //definition of the interpolating polynomial can be found on page 7 of [1]
+    fn interpolate_from_diff(t: Eqn::T, diff: &M, t1: Eqn::T, h: Eqn::T, order: usize) -> Eqn::V {
+        let mut time_factor = Eqn::T::from(1.0);
+        let mut order_summation = diff.column(0).into_owned();
+        for i in 0..order {
+            let i_t = Eqn::T::from(i as f64);
+            time_factor *= (t - (t1 - h * i_t)) / (h * (Eqn::T::one() + i_t));
+            order_summation += diff.column(i + 1) * scale(time_factor);
+        }
+        order_summation
+    }
 }
 
 impl<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations, Nls> OdeSolverMethod<Eqn>
@@ -379,13 +388,8 @@ where
     }
 
     fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V> {
-        //interpolate solution at time values t* where t-h < t* < t
-        //
-        //definition of the interpolating polynomial can be found on page 7 of [1]
-
         // state must be set
         let state = self.state.as_ref().ok_or(anyhow!("State not set"))?;
-
         if self.is_state_modified {
             if t == state.t {
                 return Ok(state.y.clone());
@@ -393,20 +397,42 @@ where
                 return Err(anyhow::anyhow!("Interpolation time is not within the current step. Step size is zero after calling state_mut()"));
             }
         }
-
         // check that t is before the current time
         if t > state.t {
             return Err(anyhow!("Interpolation time is after current time"));
         }
 
-        let mut time_factor = Eqn::T::from(1.0);
-        let mut order_summation = self.diff.column(0).into_owned();
-        for i in 0..self.order {
-            let i_t = Eqn::T::from(i as f64);
-            time_factor *= (t - (state.t - state.h * i_t)) / (state.h * (Eqn::T::one() + i_t));
-            order_summation += self.diff.column(i + 1) * scale(time_factor);
+        Ok(Self::interpolate_from_diff(
+            t, &self.diff, state.t, state.h, self.order,
+        ))
+    }
+
+    fn interpolate_sens(&self, t: <Eqn as OdeEquations>::T) -> Result<Vec<Eqn::V>> {
+        // state must be set
+        let state = self.state.as_ref().ok_or(anyhow!("State not set"))?;
+        if self.is_state_modified {
+            if t == state.t {
+                return Ok(state.s.clone());
+            } else {
+                return Err(anyhow::anyhow!("Interpolation time is not within the current step. Step size is zero after calling state_mut()"));
+            }
         }
-        Ok(order_summation)
+        // check that t is before the current time
+        if t > state.t {
+            return Err(anyhow!("Interpolation time is after current time"));
+        }
+
+        let mut s = Vec::with_capacity(state.s.len());
+        for i in 0..state.s.len() {
+            s.push(Self::interpolate_from_diff(
+                t,
+                &self.sdiff[i],
+                state.t,
+                state.h,
+                self.order,
+            ));
+        }
+        Ok(s)
     }
 
     fn problem(&self) -> Option<&OdeSolverProblem<Eqn>> {
@@ -549,10 +575,14 @@ where
             };
         };
         // take the accepted step
+        Self::_update_diff(self.order, &d, &mut self.diff);
+
         {
             let state = self.state.as_mut().unwrap();
             state.y = y_new;
             state.t += state.h;
+            state.dy.copy_from_view(&self.diff.column(1));
+            state.dy *= scale(Eqn::T::one() / state.h);
         }
 
         // update statistics
@@ -560,8 +590,6 @@ where
             self.nonlinear_problem_op().number_of_jac_evals();
         self.statistics.number_of_steps += 1;
         self.statistics.final_step_size = self.state.as_ref().unwrap().h;
-
-        self._update_differences(&d);
 
         // handle sensitivities
         if self.ode_problem.as_ref().unwrap().eqn_sens.is_some() {
@@ -596,7 +624,7 @@ where
             let fun = |x: &Eqn::V, y: &mut Eqn::V| op.call_inplace(x, t, y);
             let rtol = self.problem().as_ref().unwrap().rtol;
             let atol = self.problem().as_ref().unwrap().atol.clone();
-            let maxiter = self.nonlinear_solver.max_iter();
+            let maxiter = 2 * self.nonlinear_solver.max_iter();
             let mut convergence = Convergence::new(rtol, atol, maxiter);
             let nparams = self.problem().as_ref().unwrap().eqn.rhs().nparams();
             for i in 0..nparams {
@@ -604,7 +632,7 @@ where
                 let s_predict = Self::_predict_using_diff(&self.sdiff[i], self.order);
 
                 // setup op
-                let psi = self._calculate_psi(&self.diff);
+                let psi = self._calculate_psi(&self.sdiff[i]);
                 op.set_psi_and_y0(psi, &s_predict);
                 op.eqn().as_ref().rhs().set_param_index(i);
 
@@ -672,6 +700,10 @@ where
                 factor = Eqn::T::from(Self::MAX_FACTOR);
             }
             self._update_step_size(factor);
+
+            if self.ode_problem.as_ref().unwrap().eqn_sens.is_some() {
+                self._update_sens_step_size(factor);
+            }
         }
 
         // check for root within accepted step
@@ -717,12 +749,17 @@ mod test {
             test_models::{
                 dydt_y2::dydt_y2_problem,
                 exponential_decay::{
-                    exponential_decay_problem, exponential_decay_problem_sens, exponential_decay_problem_with_root
+                    exponential_decay_problem, exponential_decay_problem_sens,
+                    exponential_decay_problem_with_root,
                 },
-                exponential_decay_with_algebraic::{exponential_decay_with_algebraic_problem, exponential_decay_with_algebraic_problem_sens},
+                exponential_decay_with_algebraic::{
+                    exponential_decay_with_algebraic_problem,
+                    exponential_decay_with_algebraic_problem_sens,
+                },
                 gaussian_decay::gaussian_decay_problem,
                 robertson::robertson,
                 robertson_ode::robertson_ode,
+                robertson_ode_with_sens::robertson_ode_with_sens,
                 robertson_sens::robertson_sens,
             },
             tests::{
@@ -730,7 +767,7 @@ mod test {
                 test_state_mut_on_problem,
             },
         },
-        Bdf, FaerLU, NalgebraLU, NewtonNonlinearSolver, OdeEquations, Op,
+        Bdf, OdeEquations, Op,
     };
 
     use num_traits::abs;
@@ -759,9 +796,8 @@ mod test {
     #[test]
     fn bdf_test_nalgebra_exponential_decay() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 8
@@ -784,9 +820,8 @@ mod test {
     fn bdf_test_faer_exponential_decay() {
         type M = faer::Mat<f64>;
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::new(FaerLU::default());
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 8
@@ -808,9 +843,8 @@ mod test {
     #[test]
     fn bdf_test_nalgebra_exponential_decay_sens() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = exponential_decay_problem_sens::<M>(false);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 8
@@ -832,9 +866,8 @@ mod test {
     #[test]
     fn test_bdf_nalgebra_exponential_decay_algebraic() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = exponential_decay_with_algebraic_problem::<M>(false);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 11
@@ -856,9 +889,8 @@ mod test {
     #[test]
     fn test_bdf_nalgebra_exponential_decay_algebraic_sens() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = exponential_decay_with_algebraic_problem_sens::<M>(false);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 11
@@ -880,9 +912,8 @@ mod test {
     #[test]
     fn test_bdf_nalgebra_robertson() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = robertson::<M>(false);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 103
@@ -904,9 +935,8 @@ mod test {
     #[test]
     fn test_bdf_nalgebra_robertson_sens() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = robertson_sens::<M>(false);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 103
@@ -928,9 +958,8 @@ mod test {
     #[test]
     fn test_bdf_nalgebra_robertson_colored() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = robertson::<M>(true);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 103
@@ -952,9 +981,31 @@ mod test {
     #[test]
     fn test_bdf_nalgebra_robertson_ode() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = robertson_ode::<M>(false);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 94
+        number_of_steps: 340
+        number_of_error_test_failures: 2
+        number_of_nonlinear_solver_iterations: 950
+        number_of_nonlinear_solver_fails: 15
+        initial_step_size: 0.000000004564240566951627
+        final_step_size: 6155729544.745563
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
+        ---
+        number_of_calls: 952
+        number_of_jac_muls: 48
+        number_of_matrix_evals: 16
+        "###);
+    }
+
+    #[test]
+    fn test_bdf_nalgebra_robertson_ode_sens() {
+        let mut s = Bdf::default();
+        let (problem, soln) = robertson_ode_with_sens::<M>(false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 94
@@ -976,9 +1027,8 @@ mod test {
     #[test]
     fn test_bdf_nalgebra_dydt_y2() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = dydt_y2_problem::<M>(false, 10);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 45
@@ -1000,9 +1050,8 @@ mod test {
     #[test]
     fn test_bdf_nalgebra_dydt_y2_colored() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = dydt_y2_problem::<M>(true, 10);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 45
@@ -1024,9 +1073,8 @@ mod test {
     #[test]
     fn test_bdf_nalgebra_gaussian_decay() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = gaussian_decay_problem::<M>(false, 10);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 16
@@ -1048,17 +1096,15 @@ mod test {
     #[test]
     fn test_tstop_bdf() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        test_ode_solver(&mut s, rs, &problem, soln, None, true);
+        test_ode_solver(&mut s, &problem, soln, None, true);
     }
 
     #[test]
     fn test_root_finder_bdf() {
         let mut s = Bdf::default();
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = exponential_decay_problem_with_root::<M>(false);
-        let y = test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        let y = test_ode_solver(&mut s, &problem, soln, None, false);
         assert!(abs(y[0] - 0.6) < 1e-6, "y[0] = {}", y[0]);
     }
 }

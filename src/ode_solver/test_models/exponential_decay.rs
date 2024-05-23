@@ -1,6 +1,6 @@
 use crate::{
-    matrix::Matrix, ode_solver::problem::OdeSolverSolution, scalar::scale, OdeBuilder,
-    OdeEquations, OdeSolverProblem, Vector, ConstantOp
+    matrix::Matrix, ode_solver::problem::OdeSolverSolution, scalar::scale, ConstantOp, OdeBuilder,
+    OdeEquations, OdeSolverProblem, Vector,
 };
 use nalgebra::ComplexField;
 use num_traits::Zero;
@@ -13,10 +13,10 @@ fn exponential_decay<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
     y.mul_assign(scale(-p[0]));
 }
 
-// df/dp v = -av (p = [a])
-fn exponential_decay_sens<M: Matrix>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
-    y.fill(v[0]);
-    y.mul_assign(scale(-p[0]));
+// df/dp v = -yv (p = [a])
+fn exponential_decay_sens<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+    y.copy_from(x);
+    y.mul_assign(scale(-v[0]));
 }
 
 // Jv = -av
@@ -113,9 +113,9 @@ pub fn exponential_decay_problem_sens<M: Matrix + 'static>(
     for i in 0..10 {
         let t = M::T::from(i as f64);
         let y0: M::V = problem.eqn.init().call(M::T::zero());
-        let y = y0 * scale(M::T::exp(-p[0] * t));
-        soln.push(y, t);
+        let y = y0.clone() * scale(M::T::exp(-p[0] * t));
+        let yp = y0 * scale(-t * M::T::exp(-p[0] * t));
+        soln.push_sens(y, t, &[yp]);
     }
     (problem, soln)
 }
-

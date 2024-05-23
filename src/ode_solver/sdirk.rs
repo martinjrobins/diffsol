@@ -338,7 +338,8 @@ where
                 .gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), &mut error);
 
             // solve for  (M - h * c * J) * error = error_est as by Hosea, M. E., & Shampine, L. F. (1996). Analysis and implementation of TR-BDF2. Applied Numerical Mathematics, 20(1-2), 21-37.
-            self.nonlinear_solver.solve_linearised_in_place(&mut error)?;
+            self.nonlinear_solver
+                .solve_linearised_in_place(&mut error)?;
 
             // do not include algebraic variables in error calculation
             //let algebraic = self.problem.as_ref().unwrap().eqn.algebraic_indices();
@@ -452,6 +453,13 @@ where
         Ok(())
     }
 
+    fn interpolate_sens(
+        &self,
+        _t: <Eqn as OdeEquations>::T,
+    ) -> Result<Vec<<Eqn as OdeEquations>::V>> {
+        unimplemented!()
+    }
+
     fn interpolate(&self, t: <Eqn>::T) -> anyhow::Result<<Eqn>::V> {
         if self.state.is_none() {
             return Err(anyhow!("State not set"));
@@ -536,7 +544,7 @@ mod test {
                 test_state_mut_on_problem,
             },
         },
-        NalgebraLU, NewtonNonlinearSolver, OdeEquations, Op, Sdirk, Tableau,
+        NalgebraLU, OdeEquations, Op, Sdirk, Tableau,
     };
 
     use num_traits::abs;
@@ -570,9 +578,8 @@ mod test {
     fn test_tr_bdf2_nalgebra_exponential_decay() {
         let tableau = Tableau::<M>::tr_bdf2();
         let mut s = Sdirk::new(tableau, NalgebraLU::default());
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 28
@@ -595,9 +602,8 @@ mod test {
     fn test_esdirk34_nalgebra_exponential_decay() {
         let tableau = Tableau::<M>::esdirk34();
         let mut s = Sdirk::new(tableau, NalgebraLU::default());
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 12
@@ -620,9 +626,8 @@ mod test {
     #[test]
     fn test_sundials_exponential_decay() {
         let mut s = crate::SundialsIda::default();
-        let rs = NewtonNonlinearSolver::new(crate::SundialsLinearSolver::new_dense());
         let (problem, soln) = exponential_decay_problem::<crate::SundialsMatrix>(false);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 18
@@ -645,9 +650,8 @@ mod test {
     fn test_tr_bdf2_nalgebra_robertson() {
         let tableau = Tableau::<M>::tr_bdf2();
         let mut s = Sdirk::new(tableau, NalgebraLU::default());
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = robertson::<M>(false);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 427
@@ -670,9 +674,8 @@ mod test {
     fn test_esdirk34_nalgebra_robertson() {
         let tableau = Tableau::<M>::esdirk34();
         let mut s = Sdirk::new(tableau, NalgebraLU::default());
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = robertson::<M>(false);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 212
@@ -695,9 +698,8 @@ mod test {
     #[test]
     fn test_sundials_robertson() {
         let mut s = crate::SundialsIda::default();
-        let rs = NewtonNonlinearSolver::new(crate::SundialsLinearSolver::new_dense());
         let (problem, soln) = robertson::<crate::SundialsMatrix>(false);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 59
@@ -720,9 +722,8 @@ mod test {
     fn test_tr_bdf2_nalgebra_robertson_ode() {
         let tableau = Tableau::<M>::tr_bdf2();
         let mut s = Sdirk::new(tableau, NalgebraLU::default());
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = robertson_ode::<M>(false);
-        test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 248
@@ -745,18 +746,16 @@ mod test {
     fn test_tstop_tr_bdf2() {
         let tableau = Tableau::<M>::tr_bdf2();
         let mut s = Sdirk::new(tableau, NalgebraLU::default());
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        test_ode_solver(&mut s, rs, &problem, soln, None, true);
+        test_ode_solver(&mut s, &problem, soln, None, true);
     }
 
     #[test]
     fn test_root_finder_tr_bdf2() {
         let tableau = Tableau::<M>::tr_bdf2();
         let mut s = Sdirk::new(tableau, NalgebraLU::default());
-        let rs = NewtonNonlinearSolver::new(NalgebraLU::default());
         let (problem, soln) = exponential_decay_problem_with_root::<M>(false);
-        let y = test_ode_solver(&mut s, rs, &problem, soln, None, false);
+        let y = test_ode_solver(&mut s, &problem, soln, None, false);
         assert!(abs(y[0] - 0.6) < 1e-6, "y[0] = {}", y[0]);
     }
 }

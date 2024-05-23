@@ -422,6 +422,13 @@ where
         Self::check(unsafe { IDAGetDky(self.ida_mem, t, 0, ret.sundials_vector()) }).unwrap();
         Ok(ret)
     }
+
+    fn interpolate_sens(
+        &self,
+        _t: <Eqn as OdeEquations>::T,
+    ) -> Result<Vec<<Eqn as OdeEquations>::V>> {
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]
