@@ -418,6 +418,23 @@ impl<'a> VectorView<'a> for SundialsVectorView<'a> {
         z.copy_from_view(&self);
         z
     }
+    fn norm(&self) -> Self::T {
+        let ones = SundialsVector::from_element(self.len(), 1.0);
+        unsafe { N_VWL2Norm_Serial(self.sundials_vector(), ones.sundials_vector()) }
+    }
+    fn error_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
+        let mut acc = 0.0;
+        if y.len() != self.len() || y.len() != atol.len() {
+            panic!("Vector lengths do not match");
+        }
+        for i in 0..self.len() {
+            let yi = y[i];
+            let ai = atol[i];
+            let xi = self[i];
+            acc += (xi / (yi * rtol + ai)).powi(2);
+        }
+        acc.sqrt() / self.len() as f64
+    }
 }
 
 impl VectorIndex for SundialsIndexVector {
@@ -442,7 +459,20 @@ impl Vector for SundialsVector {
     fn len(&self) -> IndexType {
         unsafe { N_VGetLength_Serial(self.sundials_vector()) as IndexType }
     }
-    
+    fn error_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
+        let mut acc = 0.0;
+        if y.len() != self.len() || y.len() != atol.len() {
+            panic!("Vector lengths do not match");
+        }
+        for i in 0..self.len() {
+            let yi = y[i];
+            let ai = atol[i];
+            let xi = self[i];
+            acc += (xi / (yi * rtol + ai)).powi(2);
+        }
+        acc.sqrt() / self.len() as f64
+    }
+
     fn norm(&self) -> Self::T {
         let ones = SundialsVector::from_element(self.len(), 1.0);
         unsafe { N_VWL2Norm_Serial(self.sundials_vector(), ones.sundials_vector()) }
@@ -726,5 +756,20 @@ mod tests {
         v[1] = 2.0;
         let norm = v.norm();
         assert_eq!(norm, (1.0_f64.powi(2) + 2.0_f64.powi(2)).sqrt());
+    }
+
+    #[test]
+    fn test_error_norm() {
+        let v = SundialsVector::from_vec(vec![1.0, -2.0, 3.0]);
+        let y = SundialsVector::from_vec(vec![1.0, 2.0, 3.0]);
+        let atol = SundialsVector::from_vec(vec![0.1, 0.2, 0.3]);
+        let rtol = 0.1;
+        let mut tmp = y.clone() * scale(rtol);
+        tmp += &atol;
+        let mut r = v.clone();
+        r.component_div_assign(&tmp);
+        let errorn_check = r.norm() / 3.0_f64;
+        assert_eq!(v.error_norm(&y, &atol, rtol), errorn_check);
+        assert_eq!(v.as_view().error_norm(&y, &atol, rtol), errorn_check);
     }
 }

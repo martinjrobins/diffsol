@@ -71,10 +71,8 @@ pub struct Bdf<
     order: usize,
     n_equal_steps: usize,
     diff: M,
-    y_scale: Eqn::V,
     y_delta: Eqn::V,
     sdiff: Vec<M>,
-    s_scales: Vec<Eqn::V>,
     s_deltas: Vec<Eqn::V>,
     diff_tmp: M,
     u: M,
@@ -139,8 +137,6 @@ where
             diff: <M<Eqn::V> as Matrix>::zeros(n, Self::MAX_ORDER + 3), //DMatrix::<T>::zeros(n, Self::MAX_ORDER + 3),
             diff_tmp: <M<Eqn::V> as Matrix>::zeros(n, Self::MAX_ORDER + 3),
             sdiff: Vec::new(),
-            y_scale: <Eqn::V as Vector>::zeros(n),
-            s_scales: Vec::new(),
             y_delta: <Eqn::V as Vector>::zeros(n),
             s_deltas: Vec::new(),
             gamma,
@@ -390,23 +386,12 @@ where
         order_summation
     }
 
-    fn error_norm(delta: &Eqn::V, error_const: Eqn::T, y_scale: &Eqn::V) -> Eqn::T {
-        let mut error = delta * scale(error_const);
-        error.component_div_assign(y_scale);
-        error.norm()
-    }
-
-    fn error_norm_from_view(
-        delta: <Eqn::V as Vector>::View<'_>,
-        error_const: Eqn::T,
-        y_scale: &Eqn::V,
-    ) -> Eqn::T {
-        let mut error = delta * scale(error_const);
-        error.component_div_assign(y_scale);
-        error.norm()
-    }
-
-    fn sensitivity_solve(&mut self, y_new: &Eqn::V, t_new: Eqn::T, mut error_norm: Eqn::T) -> Result<Eqn::T> {
+    fn sensitivity_solve(
+        &mut self,
+        y_new: &Eqn::V,
+        t_new: Eqn::T,
+        mut error_norm: Eqn::T,
+    ) -> Result<Eqn::T> {
         let h = self.state.as_ref().unwrap().h;
 
         // update for new state
@@ -419,18 +404,15 @@ where
                 .as_ref()
                 .unwrap()
                 .rhs()
-                .update_state(&y_new, &dy_new, t_new);
+                .update_state(y_new, &dy_new, t_new);
         }
 
         // reuse linear solver from nonlinear solver
-        let ls = |x: &mut Eqn::V| -> Result<()> {
-            self.nonlinear_solver.solve_linearised_in_place(x)
-        };
+        let ls =
+            |x: &mut Eqn::V| -> Result<()> { self.nonlinear_solver.solve_linearised_in_place(x) };
 
         // construct bdf discretisation of sensitivity equations
-        let op = BdfCallable::from_eqn(
-            self.problem().as_ref().unwrap().eqn_sens.as_ref().unwrap(),
-        );
+        let op = BdfCallable::from_eqn(self.problem().as_ref().unwrap().eqn_sens.as_ref().unwrap());
         op.set_c(h, self.alpha[self.order]);
 
         // solve for sensitivities equations discretised using BDF
@@ -438,7 +420,8 @@ where
         let rtol = self.problem().as_ref().unwrap().rtol;
         let atol = self.problem().as_ref().unwrap().atol.clone();
         let maxiter = self.nonlinear_solver.max_iter();
-        let mut convergence = Convergence::new(rtol, atol, maxiter); let nparams = self.problem().as_ref().unwrap().eqn.rhs().nparams();
+        let mut convergence = Convergence::new(rtol, atol, maxiter);
+        let nparams = self.problem().as_ref().unwrap().eqn.rhs().nparams();
         for i in 0..nparams {
             // predict forward to new step
             let s_predict = Self::_predict_using_diff(&self.sdiff[i], self.order);
@@ -452,7 +435,8 @@ where
             {
                 let s_new = &mut self.state.as_mut().unwrap().s[i];
                 s_new.copy_from(&s_predict);
-                let _niter = newton_iteration(s_new, fun, ls, &mut convergence)?;
+                let niter = newton_iteration(s_new, fun, ls, &mut convergence)?;
+                self.statistics.number_of_nonlinear_solver_iterations += niter;
                 let s_new = &*s_new;
                 self.s_deltas[i].copy_from(&(s_new - s_predict));
             }
@@ -461,13 +445,7 @@ where
             let rtol = self.problem().as_ref().unwrap().rtol;
             let atol = self.ode_problem.as_ref().unwrap().atol.as_ref();
 
-            Eqn::V::scale_by_tol(s_new, rtol, atol, &mut self.s_scales[i]);
-
-            error_norm += Self::error_norm(
-                &self.s_deltas[i],
-                self.error_const[self.order],
-                &self.s_scales[i],
-            );
+            error_norm += self.s_deltas[i].error_norm(s_new, atol, rtol);
         }
         error_norm /= Eqn::T::from(nparams as f64 + 1.0);
         Ok(error_norm)
@@ -575,7 +553,6 @@ where
         if self.diff.nrows() != nstates {
             self.diff = M::zeros(nstates, Self::MAX_ORDER + 3);
             self.diff_tmp = M::zeros(nstates, Self::MAX_ORDER + 3);
-            self.y_scale = <Eqn::V as Vector>::zeros(nstates);
             self.y_delta = <Eqn::V as Vector>::zeros(nstates);
         }
 
@@ -588,7 +565,6 @@ where
                 || self.sdiff[0].nrows() != nstates
             {
                 self.sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3); nparams];
-                self.s_scales = vec![<Eqn::V as Vector>::zeros(nstates); nparams];
                 self.s_deltas = vec![<Eqn::V as Vector>::zeros(nstates); nparams];
             }
         }
@@ -615,12 +591,47 @@ where
         let y_new = loop {
             let mut y_new = y_predict.clone();
 
+            // initialise error_norm to quieten the compiler
+            error_norm = Eqn::T::from(2.0);
+
             // solve BDF equation using y0 as starting point
-            let solver_result = self.nonlinear_solver.solve_in_place(&mut y_new, t_new);
+            let mut solve_result = self.nonlinear_solver.solve_in_place(&mut y_new, t_new);
             // update statistics
             self.statistics.number_of_nonlinear_solver_iterations += self.nonlinear_solver.niter();
 
-            if solver_result.is_err() {
+            // only calculate norm and sensitivities if solve was successful
+            if solve_result.is_ok() {
+                // test error is within tolerance
+                // combine eq 3, 4 and 6 from [1] to obtain error
+                // Note that error = C_k * h^{k+1} y^{k+1}
+                // and d = D^{k+1} y_{n+1} \approx h^{k+1} y^{k+1}
+                self.y_delta.copy_from(&y_new);
+                self.y_delta -= &y_predict;
+
+                // calculate error norm
+                {
+                    let rtol = self.problem().as_ref().unwrap().rtol;
+                    let atol = self.ode_problem.as_ref().unwrap().atol.as_ref();
+                    error_norm =
+                        self.y_delta.error_norm(&y_new, atol, rtol) * self.error_const[self.order];
+                }
+
+                // only bother doing sensitivity calculations if we might keep the step
+                if self.ode_problem.as_ref().unwrap().eqn_sens.is_some()
+                    && error_norm <= Eqn::T::from(1.0)
+                {
+                    error_norm = match self.sensitivity_solve(&y_new, t_new, error_norm) {
+                        Ok(en) => en,
+                        Err(_) => {
+                            solve_result = Err(anyhow!("Sensitivity solve failed"));
+                            Eqn::T::from(2.0)
+                        }
+                    }
+                }
+            }
+
+            // handle case where either nonlinear solve failed
+            if solve_result.is_err() {
                 self.statistics.number_of_nonlinear_solver_fails += 1;
                 if updated_jacobian {
                     // newton iteration did not converge, but jacobian has already been
@@ -642,61 +653,12 @@ where
                 continue;
             }
 
-            // calculate error norm
-            {
-                let rtol = self.problem().as_ref().unwrap().rtol;
-                let atol = self.ode_problem.as_ref().unwrap().atol.as_ref();
-                Eqn::V::scale_by_tol(&y_new, rtol, atol, &mut self.y_scale);
-            }
-
-            // test error is within tolerance
-            // combine eq 3, 4 and 6 from [1] to obtain error
-            // Note that error = C_k * h^{k+1} y^{k+1}
-            // and d = D^{k+1} y_{n+1} \approx h^{k+1} y^{k+1}
-            self.y_delta.copy_from(&y_new);
-            self.y_delta -= &y_predict;
-
-            
-
-            error_norm = Self::error_norm(
-                &self.y_delta,
-                self.error_const[self.order],
-                &self.y_scale,
-            );
-
+            // need to caulate safety even if step is accepted
             let maxiter = self.nonlinear_solver.max_iter() as f64;
             let niter = self.nonlinear_solver.niter() as f64;
             safety = Eqn::T::from(0.9 * (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter));
 
-            // only bother doing sensitivity calculations if we might keep the step
-            if self.ode_problem.as_ref().unwrap().eqn_sens.is_some()
-                && error_norm <= Eqn::T::from(1.0)
-            {
-                let sens_solve_result = self.sensitivity_solve(&y_new, t_new, error_norm);
-                if sens_solve_result.is_err() {
-                    self.statistics.number_of_nonlinear_solver_fails += 1;
-                    if updated_jacobian {
-                        // newton iteration did not converge, but jacobian has already been
-                        // evaluated so reduce step size by 0.3 (as per [1]) and try again
-                        self._update_step_size(Eqn::T::from(0.3));
-
-                        // new prediction
-                        (y_predict, t_new) = self._predict_forward();
-
-                        // update statistics
-                    } else {
-                        // newton iteration did not converge, so update jacobian and try again
-                        self.nonlinear_problem_op().set_jacobian_is_stale();
-                        self.nonlinear_solver
-                            .reset_jacobian(&y_predict, self.state.as_ref().unwrap().t);
-                        updated_jacobian = true;
-                        // same prediction as last time
-                    }
-                    continue;
-                };
-                error_norm = sens_solve_result.unwrap();
-            }
-
+            // do the error test
             if error_norm <= Eqn::T::from(1.0) {
                 // step is accepted
                 break y_new;
@@ -705,8 +667,7 @@ where
                 // calculate optimal step size factor as per eq 2.46 of [2]
                 // and reduce step size and try again
                 let order = self.order as f64;
-                let mut factor =
-                    safety * error_norm.pow(Eqn::T::from(-1.0 / (order + 1.0)));
+                let mut factor = safety * error_norm.pow(Eqn::T::from(-1.0 / (order + 1.0)));
                 if factor < Eqn::T::from(Self::MIN_FACTOR) {
                     factor = Eqn::T::from(Self::MIN_FACTOR);
                 }
@@ -748,39 +709,35 @@ where
         self.n_equal_steps += 1;
 
         if self.n_equal_steps > self.order {
+            let state = self.state.as_ref().unwrap();
+            let atol = self.problem().as_ref().unwrap().atol.as_ref();
+            let rtol = self.problem().as_ref().unwrap().rtol;
             let order = self.order;
             // similar to the optimal step size factor we calculated above for the current
             // order k, we need to calculate the optimal step size factors for orders
             // k-1 and k+1. To do this, we note that the error = C_k * D^{k+1} y_n
             let error_m_norm = if order > 1 {
-                let mut error_m_norm = Self::error_norm_from_view(
-                    self.diff.column(order),
-                    self.error_const[order - 1],
-                    &self.y_scale,
-                );
+                let mut error_m_norm = self.diff.column(order).error_norm(&state.y, atol, rtol)
+                    * self.error_const[order - 1];
                 for i in 0..self.sdiff.len() {
-                    error_m_norm += Self::error_norm_from_view(
-                        self.sdiff[i].column(order),
-                        self.error_const[order - 1],
-                        &self.s_scales[i],
-                    );
+                    error_m_norm += self.sdiff[i]
+                        .column(order)
+                        .error_norm(&state.s[i], atol, rtol)
+                        * self.error_const[order - 1];
                 }
                 error_m_norm / Eqn::T::from((self.sdiff.len() + 1) as f64)
             } else {
                 Eqn::T::INFINITY
             };
             let error_p_norm = if order < Self::MAX_ORDER {
-                let mut error_p_norm = Self::error_norm_from_view(
-                    self.diff.column(order + 2),
-                    self.error_const[order + 1],
-                    &self.y_scale,
-                );
+                let mut error_p_norm = self.diff.column(order + 2).error_norm(&state.y, atol, rtol)
+                    * self.error_const[order + 1];
                 for i in 0..self.sdiff.len() {
-                    error_p_norm += Self::error_norm_from_view(
-                        self.sdiff[i].column(order + 2),
-                        self.error_const[order + 1],
-                        &self.s_scales[i],
-                    );
+                    error_p_norm =
+                        self.sdiff[i]
+                            .column(order + 2)
+                            .error_norm(&state.s[i], atol, rtol)
+                            * self.error_const[order + 1];
                 }
                 error_p_norm / Eqn::T::from((self.sdiff.len() + 1) as f64)
             } else {

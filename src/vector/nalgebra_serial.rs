@@ -59,6 +59,22 @@ impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
     fn into_owned(self) -> Self::Owned {
         self.into_owned()
     }
+    fn norm(&self) -> T {
+        self.norm()
+    }
+    fn error_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
+        let mut acc = T::zero();
+        if y.len() != self.len() || y.len() != atol.len() {
+            panic!("Vector lengths do not match");
+        }
+        for i in 0..self.len() {
+            let yi = unsafe { y.get_unchecked(i) };
+            let ai = unsafe { atol.get_unchecked(i) };
+            let xi = unsafe { self.get_unchecked(i) };
+            acc += (*xi / (*yi * rtol + *ai)).powi(2);
+        }
+        acc.sqrt() / Self::T::from(self.len() as f64)
+    }
 }
 
 macro_rules! impl_mul_scale_vector {
@@ -123,6 +139,19 @@ impl<T: Scalar> Vector for DVector<T> {
     }
     fn norm(&self) -> Self::T {
         self.norm()
+    }
+    fn error_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
+        let mut acc = T::zero();
+        if y.len() != self.len() || y.len() != atol.len() {
+            panic!("Vector lengths do not match");
+        }
+        for i in 0..self.len() {
+            let yi = unsafe { y.get_unchecked(i) };
+            let ai = unsafe { atol.get_unchecked(i) };
+            let xi = unsafe { self.get_unchecked(i) };
+            acc += (*xi / (*yi * rtol + *ai)).powi(2);
+        }
+        acc.sqrt() / Self::T::from(self.len() as f64)
     }
     fn abs_to(&self, y: &mut Self) {
         y.zip_apply(self, |y, x| *y = x.abs());
@@ -215,5 +244,24 @@ mod tests {
         let v = DVector::from_vec(vec![1.0, -2.0, 3.0]);
         let v_abs = v.abs();
         assert_eq!(v_abs, DVector::from_vec(vec![1.0, 2.0, 3.0]));
+    }
+
+    #[test]
+    fn test_error_norm() {
+        let v = DVector::from_vec(vec![1.0, -2.0, 3.0]);
+        let y = DVector::from_vec(vec![1.0, 2.0, 3.0]);
+        let atol = DVector::from_vec(vec![0.1, 0.2, 0.3]);
+        let rtol = 0.1;
+        let mut tmp = y.clone() * rtol;
+        tmp += &atol;
+        let mut r = v.clone();
+        r.component_div_assign(&tmp);
+        let errorn_check = r.norm() / 3.0_f64;
+        assert_eq!(v.error_norm(&y, &atol, rtol), errorn_check);
+        let vview = v.as_view();
+        assert_eq!(
+            VectorView::error_norm(&vview, &y, &atol, rtol),
+            errorn_check
+        );
     }
 }

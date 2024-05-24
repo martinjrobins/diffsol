@@ -97,7 +97,9 @@ pub trait VectorView<'a>:
     + Index<IndexType, Output = Self::T>
 {
     type Owned;
+    fn error_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T;
     fn abs_to(&self, y: &mut Self::Owned);
+    fn norm(&self) -> Self::T;
     fn into_owned(self) -> Self::Owned;
 }
 
@@ -127,6 +129,7 @@ pub trait Vector:
         Self: 'a;
     type Index: VectorIndex;
     fn norm(&self) -> Self::T;
+    fn error_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T;
     fn len(&self) -> IndexType;
     fn is_empty(&self) -> bool {
         self.len() == 0
