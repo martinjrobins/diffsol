@@ -1,3 +1,4 @@
+use nalgebra::ComplexField;
 use num_traits::{One, Pow};
 use std::rc::Rc;
 
@@ -9,7 +10,6 @@ pub struct Convergence<V: Vector> {
     tol: V::T,
     max_iter: IndexType,
     iter: IndexType,
-    scale: V,
     old_norm: Option<V::T>,
 }
 
@@ -39,26 +39,21 @@ impl<V: Vector> Convergence<V> {
         if tol < minimum_tol {
             tol = minimum_tol;
         }
-        let n = atol.len();
-        let scale = V::zeros(n);
         Self {
             rtol,
             atol,
             tol,
             max_iter,
-            scale,
             old_norm: None,
             iter: 0,
         }
     }
-    pub fn reset(&mut self, y: &V) {
-        V::scale_by_tol(y, self.rtol, &self.atol, &mut self.scale);
+    pub fn reset(&mut self) {
         self.iter = 0;
         self.old_norm = None;
     }
-    pub fn check_new_iteration(&mut self, dy: &mut V) -> ConvergenceStatus {
-        dy.component_div_assign(&self.scale);
-        let norm = dy.norm();
+    pub fn check_new_iteration(&mut self, dy: &mut V, y: &V) -> ConvergenceStatus {
+        let norm = dy.squared_norm(y, &self.atol, self.rtol).sqrt();
         // if norm is zero then we are done
         if norm <= V::T::EPSILON {
             return ConvergenceStatus::Converged;

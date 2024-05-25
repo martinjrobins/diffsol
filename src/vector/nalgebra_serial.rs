@@ -62,7 +62,7 @@ impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
     fn norm(&self) -> T {
         self.norm()
     }
-    fn error_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
+    fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
         if y.len() != self.len() || y.len() != atol.len() {
             panic!("Vector lengths do not match");
@@ -73,7 +73,7 @@ impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
             let xi = unsafe { self.get_unchecked(i) };
             acc += (*xi / (*yi * rtol + *ai)).powi(2);
         }
-        acc.sqrt() / Self::T::from(self.len() as f64)
+        acc / Self::T::from(self.len() as f64)
     }
 }
 
@@ -140,7 +140,7 @@ impl<T: Scalar> Vector for DVector<T> {
     fn norm(&self) -> Self::T {
         self.norm()
     }
-    fn error_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
+    fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
         if y.len() != self.len() || y.len() != atol.len() {
             panic!("Vector lengths do not match");
@@ -151,7 +151,7 @@ impl<T: Scalar> Vector for DVector<T> {
             let xi = unsafe { self.get_unchecked(i) };
             acc += (*xi / (*yi * rtol + *ai)).powi(2);
         }
-        acc.sqrt() / Self::T::from(self.len() as f64)
+        acc / Self::T::from(self.len() as f64)
     }
     fn abs_to(&self, y: &mut Self) {
         y.zip_apply(self, |y, x| *y = x.abs());
@@ -256,11 +256,11 @@ mod tests {
         tmp += &atol;
         let mut r = v.clone();
         r.component_div_assign(&tmp);
-        let errorn_check = r.norm() / 3.0_f64;
-        assert_eq!(v.error_norm(&y, &atol, rtol), errorn_check);
+        let errorn_check = r.norm_squared() / 3.0;
+        assert_eq!(v.squared_norm(&y, &atol, rtol), errorn_check);
         let vview = v.as_view();
         assert_eq!(
-            VectorView::error_norm(&vview, &y, &atol, rtol),
+            VectorView::squared_norm(&vview, &y, &atol, rtol),
             errorn_check
         );
     }

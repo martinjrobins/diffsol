@@ -1,3 +1,4 @@
+use nalgebra::ComplexField;
 use std::rc::Rc;
 use std::{ops::AddAssign, ops::MulAssign, panic};
 
@@ -78,7 +79,7 @@ pub struct Bdf<
     u: M,
     alpha: Vec<Eqn::T>,
     gamma: Vec<Eqn::T>,
-    error_const: Vec<Eqn::T>,
+    error_const2: Vec<Eqn::T>,
     statistics: BdfStatistics<Eqn::T>,
     state: Option<OdeSolverState<Eqn::V>>,
     tstop: Option<Eqn::T>,
@@ -117,7 +118,7 @@ where
         ];
         let mut alpha = vec![Eqn::T::zero()];
         let mut gamma = vec![Eqn::T::zero()];
-        let mut error_const = vec![Eqn::T::one()];
+        let mut error_const2 = vec![Eqn::T::one()];
 
         #[allow(clippy::needless_range_loop)]
         for i in 1..=Self::MAX_ORDER {
@@ -126,7 +127,7 @@ where
             let one_over_i_plus_one = Eqn::T::one() / (i_t + Eqn::T::one());
             gamma.push(gamma[i - 1] + one_over_i);
             alpha.push(Eqn::T::one() / ((Eqn::T::one() - kappa[i]) * gamma[i]));
-            error_const.push(kappa[i] * gamma[i] + one_over_i_plus_one);
+            error_const2.push((kappa[i] * gamma[i] + one_over_i_plus_one).powi(2));
         }
 
         Self {
@@ -141,7 +142,7 @@ where
             s_deltas: Vec::new(),
             gamma,
             alpha,
-            error_const,
+            error_const2,
             u: <M<Eqn::V> as Matrix>::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
             statistics: BdfStatistics::default(),
             state: None,
@@ -445,7 +446,7 @@ where
             let rtol = self.problem().as_ref().unwrap().rtol;
             let atol = self.ode_problem.as_ref().unwrap().atol.as_ref();
 
-            error_norm += self.s_deltas[i].error_norm(s_new, atol, rtol);
+            error_norm += self.s_deltas[i].squared_norm(s_new, atol, rtol);
         }
         error_norm /= Eqn::T::from(nparams as f64 + 1.0);
         Ok(error_norm)
@@ -612,8 +613,8 @@ where
                 {
                     let rtol = self.problem().as_ref().unwrap().rtol;
                     let atol = self.ode_problem.as_ref().unwrap().atol.as_ref();
-                    error_norm =
-                        self.y_delta.error_norm(&y_new, atol, rtol) * self.error_const[self.order];
+                    error_norm = self.y_delta.squared_norm(&y_new, atol, rtol)
+                        * self.error_const2[self.order];
                 }
 
                 // only bother doing sensitivity calculations if we might keep the step
@@ -667,7 +668,7 @@ where
                 // calculate optimal step size factor as per eq 2.46 of [2]
                 // and reduce step size and try again
                 let order = self.order as f64;
-                let mut factor = safety * error_norm.pow(Eqn::T::from(-1.0 / (order + 1.0)));
+                let mut factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (order + 1.0)));
                 if factor < Eqn::T::from(Self::MIN_FACTOR) {
                     factor = Eqn::T::from(Self::MIN_FACTOR);
                 }
@@ -717,27 +718,31 @@ where
             // order k, we need to calculate the optimal step size factors for orders
             // k-1 and k+1. To do this, we note that the error = C_k * D^{k+1} y_n
             let error_m_norm = if order > 1 {
-                let mut error_m_norm = self.diff.column(order).error_norm(&state.y, atol, rtol)
-                    * self.error_const[order - 1];
+                let mut error_m_norm = self.diff.column(order).squared_norm(&state.y, atol, rtol)
+                    * self.error_const2[order - 1];
                 for i in 0..self.sdiff.len() {
-                    error_m_norm += self.sdiff[i]
-                        .column(order)
-                        .error_norm(&state.s[i], atol, rtol)
-                        * self.error_const[order - 1];
+                    error_m_norm +=
+                        self.sdiff[i]
+                            .column(order)
+                            .squared_norm(&state.s[i], atol, rtol)
+                            * self.error_const2[order - 1];
                 }
                 error_m_norm / Eqn::T::from((self.sdiff.len() + 1) as f64)
             } else {
                 Eqn::T::INFINITY
             };
             let error_p_norm = if order < Self::MAX_ORDER {
-                let mut error_p_norm = self.diff.column(order + 2).error_norm(&state.y, atol, rtol)
-                    * self.error_const[order + 1];
+                let mut error_p_norm = self
+                    .diff
+                    .column(order + 2)
+                    .squared_norm(&state.y, atol, rtol)
+                    * self.error_const2[order + 1];
                 for i in 0..self.sdiff.len() {
                     error_p_norm =
                         self.sdiff[i]
                             .column(order + 2)
-                            .error_norm(&state.s[i], atol, rtol)
-                            * self.error_const[order + 1];
+                            .squared_norm(&state.s[i], atol, rtol)
+                            * self.error_const2[order + 1];
                 }
                 error_p_norm / Eqn::T::from((self.sdiff.len() + 1) as f64)
             } else {
@@ -749,7 +754,7 @@ where
                 .into_iter()
                 .enumerate()
                 .map(|(i, error_norm)| {
-                    error_norm.pow(Eqn::T::from(-1.0 / (i as f64 + order as f64)))
+                    error_norm.pow(Eqn::T::from(-0.5 / (i as f64 + order as f64)))
                 })
                 .collect::<Vec<_>>();
 

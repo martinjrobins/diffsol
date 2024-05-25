@@ -86,7 +86,7 @@ impl<T: Scalar> Vector for Col<T> {
     fn norm(&self) -> T {
         self.norm_l2()
     }
-    fn error_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
+    fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
         if y.len() != self.len() || y.len() != atol.len() {
             panic!("Vector lengths do not match");
@@ -97,7 +97,7 @@ impl<T: Scalar> Vector for Col<T> {
             let xi = unsafe { self.read_unchecked(i) };
             acc += (xi / (yi * rtol + ai)).powi(2);
         }
-        acc.sqrt() / Self::T::from(self.len() as f64)
+        acc / Self::T::from(self.len() as f64)
     }
     fn abs_to(&self, y: &mut Self) {
         zipped!(self, y.as_mut()).for_each(|unzipped!(xi, mut yi)| *yi = xi.faer_abs());
@@ -218,7 +218,7 @@ impl<'a, T: Scalar> VectorView<'a> for ColRef<'a, T> {
     fn norm(&self) -> T {
         self.norm_l2()
     }
-    fn error_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
+    fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
         if y.len() != self.nrows() || y.nrows() != atol.nrows() {
             panic!("Vector lengths do not match");
@@ -229,7 +229,7 @@ impl<'a, T: Scalar> VectorView<'a> for ColRef<'a, T> {
             let xi = unsafe { self.read_unchecked(i) };
             acc += (xi / (yi * rtol + ai)).powi(2);
         }
-        acc.sqrt() / Self::T::from(self.nrows() as f64)
+        acc / Self::T::from(self.nrows() as f64)
     }
 }
 
@@ -288,8 +288,18 @@ mod tests {
         tmp += &atol;
         let mut r = v.clone();
         r.component_div_assign(&tmp);
-        let errorn_check = r.norm() / 3.0_f64;
-        assert_eq!(v.error_norm(&y, &atol, rtol), errorn_check);
-        assert_eq!(v.as_ref().error_norm(&y, &atol, rtol), errorn_check);
+        let errorn_check = r.squared_norm_l2() / 3.0;
+        assert!(
+            (v.squared_norm(&y, &atol, rtol) - errorn_check).abs() < 1e-10,
+            "{} vs {}",
+            v.squared_norm(&y, &atol, rtol),
+            errorn_check
+        );
+        assert!(
+            (v.as_ref().squared_norm(&y, &atol, rtol) - errorn_check).abs() < 1e-10,
+            "{} vs {}",
+            v.as_ref().squared_norm(&y, &atol, rtol),
+            errorn_check
+        );
     }
 }

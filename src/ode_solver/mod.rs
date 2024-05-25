@@ -19,6 +19,7 @@ mod tests {
     use std::rc::Rc;
 
     use self::problem::OdeSolverSolution;
+    use nalgebra::ComplexField;
 
     use super::*;
     use crate::matrix::Matrix;
@@ -84,13 +85,10 @@ mod tests {
             if let Some(override_tol) = override_tol {
                 soln.assert_eq_st(&point.state, override_tol);
             } else {
-                let mut error = soln.clone() - &point.state;
-                {
-                    let mut scale = point.state.clone();
-                    Eqn::V::scale_by_tol(&point.state, problem.rtol, &problem.atol, &mut scale);
-                    error.component_div_assign(&scale);
-                }
-                let error_norm = error.norm() / M::T::from((point.state.len() as f64).sqrt());
+                let error = soln.clone() - &point.state;
+                let error_norm = error
+                    .squared_norm(&point.state, &problem.atol, problem.rtol)
+                    .sqrt();
                 assert!(
                     error_norm < M::T::from(15.0),
                     "error_norm: {} at t = {}",
@@ -101,14 +99,10 @@ mod tests {
                     for (j, sens_points) in sens_soln_points.iter().enumerate() {
                         let sens_point = &sens_points[i];
                         let sens_soln = &sens_soln[j];
-                        let mut error = sens_soln.clone() - &sens_point.state;
-                        {
-                            let mut scale = sens_point.state.clone();
-                            Eqn::V::scale_by_tol(&sens_point.state, problem.rtol, &problem.atol, &mut scale);
-                            error.component_div_assign(&scale);
-                        }
-                        let error_norm =
-                            error.norm() / M::T::from((sens_point.state.len() as f64).sqrt());
+                        let error = sens_soln.clone() - &sens_point.state;
+                        let error_norm = error
+                            .squared_norm(&sens_point.state, &problem.atol, problem.rtol)
+                            .sqrt();
                         assert!(
                             error_norm < M::T::from(15.0),
                             "error_norm: {} at t = {}",
@@ -296,15 +290,10 @@ mod tests {
                 s.step().unwrap();
             }
             let soln = s.interpolate(point.t).unwrap();
-
-            let mut scale = point.state.clone();
-            {
-                let problem = s.problem().unwrap();
-                Eqn::V::scale_by_tol(&point.state, problem.rtol, &problem.atol, &mut scale);
-            }
-            let mut error = soln.clone() - &point.state;
-            error.component_div_assign(&scale);
-            let error_norm = error.norm() / Eqn::T::from((point.state.len() as f64).sqrt());
+            let error = soln.clone() - &point.state;
+            let error_norm = error
+                .squared_norm(&error, &problem.atol, problem.rtol)
+                .sqrt();
             assert!(
                 error_norm < Eqn::T::from(15.0),
                 "error_norm: {} at t = {}",

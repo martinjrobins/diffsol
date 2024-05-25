@@ -62,7 +62,7 @@ pub mod tests {
         linear_solver::nalgebra::lu::LU,
         matrix::MatrixCommon,
         op::{closure::Closure, NonLinearOp},
-        DenseMatrix, Vector,
+        scale, DenseMatrix, Vector,
     };
 
     use super::*;
@@ -115,8 +115,7 @@ pub mod tests {
         let t = C::T::zero();
         for soln in solns {
             let x = solver.solve(&soln.x0, t).unwrap();
-            let mut tol = x.clone();
-            C::V::scale_by_tol(&x, problem.rtol, &problem.atol, &mut tol);
+            let tol = x.clone() * scale(problem.rtol) + problem.atol.as_ref();
             x.assert_eq(&soln.x, &tol);
         }
     }

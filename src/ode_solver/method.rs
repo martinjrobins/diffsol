@@ -1,4 +1,5 @@
 use anyhow::Result;
+use nalgebra::ComplexField;
 use num_traits::{One, Pow};
 use std::rc::Rc;
 
@@ -257,6 +258,8 @@ impl<V: Vector> OdeSolverState<V> {
     /// compute size of first step based on alg in Hairer, Norsett, Wanner
     /// Solving Ordinary Differential Equations I, Nonstiff Problems
     /// Section II.4.2
+    /// Note: this assumes that the state is already consistent with the algebraic constraints
+    /// and y and dy are already set appropriately
     pub fn set_step_size<Eqn>(&mut self, ode_problem: &OdeSolverProblem<Eqn>, solver_order: usize)
     where
         Eqn: OdeEquations<T = V::T, V = V>,
@@ -265,16 +268,11 @@ impl<V: Vector> OdeSolverState<V> {
         let t0 = self.t;
         let f0 = &self.dy;
 
-        let mut scale_factor = y0.clone();
-        Eqn::V::scale_by_tol(y0, ode_problem.rtol, ode_problem.atol.as_ref(), &mut scale_factor);
+        let rtol = ode_problem.rtol;
+        let atol = ode_problem.atol.as_ref();
 
-        let mut tmp = f0.clone();
-        tmp.component_div_assign(&scale_factor);
-        let d0 = tmp.norm();
-
-        tmp = y0.clone();
-        tmp.component_div_assign(&scale_factor);
-        let d1 = f0.norm();
+        let d0 = y0.squared_norm(y0, atol, rtol).sqrt();
+        let d1 = f0.squared_norm(y0, atol, rtol).sqrt();
 
         let h0 = if d0 < Eqn::T::from(1e-5) || d1 < Eqn::T::from(1e-5) {
             Eqn::T::from(1e-6)
@@ -286,10 +284,8 @@ impl<V: Vector> OdeSolverState<V> {
         let t1 = t0 + h0;
         let f1 = ode_problem.eqn.rhs().call(&y1, t1);
 
-        let mut df = f1 - f0;
-        df *= scale(Eqn::T::one() / h0);
-        df.component_div_assign(&scale_factor);
-        let d2 = df.norm();
+        let df = f1 - f0;
+        let d2 = df.squared_norm(y0, atol, rtol).sqrt() / h0;
 
         let mut max_d = d2;
         if max_d < d1 {

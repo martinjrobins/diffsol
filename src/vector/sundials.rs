@@ -422,7 +422,7 @@ impl<'a> VectorView<'a> for SundialsVectorView<'a> {
         let ones = SundialsVector::from_element(self.len(), 1.0);
         unsafe { N_VWL2Norm_Serial(self.sundials_vector(), ones.sundials_vector()) }
     }
-    fn error_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
+    fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
         let mut acc = 0.0;
         if y.len() != self.len() || y.len() != atol.len() {
             panic!("Vector lengths do not match");
@@ -433,7 +433,7 @@ impl<'a> VectorView<'a> for SundialsVectorView<'a> {
             let xi = self[i];
             acc += (xi / (yi * rtol + ai)).powi(2);
         }
-        acc.sqrt() / self.len() as f64
+        acc / self.len() as f64
     }
 }
 
@@ -459,7 +459,7 @@ impl Vector for SundialsVector {
     fn len(&self) -> IndexType {
         unsafe { N_VGetLength_Serial(self.sundials_vector()) as IndexType }
     }
-    fn error_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
+    fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
         let mut acc = 0.0;
         if y.len() != self.len() || y.len() != atol.len() {
             panic!("Vector lengths do not match");
@@ -470,7 +470,7 @@ impl Vector for SundialsVector {
             let xi = self[i];
             acc += (xi / (yi * rtol + ai)).powi(2);
         }
-        acc.sqrt() / self.len() as f64
+        acc / self.len() as f64
     }
 
     fn norm(&self) -> Self::T {
@@ -768,8 +768,8 @@ mod tests {
         tmp += &atol;
         let mut r = v.clone();
         r.component_div_assign(&tmp);
-        let errorn_check = r.norm() / 3.0_f64;
-        assert_eq!(v.error_norm(&y, &atol, rtol), errorn_check);
-        assert_eq!(v.as_view().error_norm(&y, &atol, rtol), errorn_check);
+        let errorn_check = r.norm().powi(2) / 3.0;
+        assert_eq!(v.squared_norm(&y, &atol, rtol), errorn_check);
+        assert_eq!(v.as_view().squared_norm(&y, &atol, rtol), errorn_check);
     }
 }

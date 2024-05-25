@@ -27,6 +27,30 @@ pub struct SdirkCallable<Eqn: OdeEquations> {
 }
 
 impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
+    pub fn from_eqn(eqn: Rc<Eqn>, c: Eqn::T) -> Self {
+        let n = eqn.rhs().nstates();
+        let h = RefCell::new(Eqn::T::zero());
+        let phi = RefCell::new(<Eqn::V as Vector>::zeros(n));
+        let jacobian_is_stale = RefCell::new(false);
+        let number_of_jac_evals = RefCell::new(0);
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n));
+        let rhs_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0));
+        let mass_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0));
+        let sparsity = None;
+        Self {
+            eqn,
+            phi,
+            c,
+            h,
+            rhs_jac,
+            mass_jac,
+            jacobian_is_stale,
+            number_of_jac_evals,
+            tmp,
+            sparsity,
+        }
+    }
+
     pub fn new(ode_problem: &OdeSolverProblem<Eqn>, c: Eqn::T) -> Self {
         let eqn = ode_problem.eqn.clone();
         let n = ode_problem.eqn.rhs().nstates();
@@ -87,6 +111,9 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
     pub fn get_last_f_eval(&self) -> Ref<Eqn::V> {
         self.tmp.borrow()
     }
+    pub fn eqn(&self) -> &Rc<Eqn> {
+        &self.eqn
+    }
     #[allow(dead_code)]
     fn set_phi_direct(&self, phi: Eqn::V) {
         let mut phi_ref = self.phi.borrow_mut();
@@ -103,6 +130,9 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
         diff.gemv_o(Eqn::T::one(), a, Eqn::T::one(), &mut phi);
     }
 
+    
+
+    // tmp = phi + c * x
     fn set_tmp(&self, x: &Eqn::V) {
         let phi_ref = self.phi.borrow();
         let phi = phi_ref.deref();
