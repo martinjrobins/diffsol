@@ -22,7 +22,7 @@ DiffSol implements the following solvers:
 - A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver, suitable for moderately stiff problems and singular mass matrices. You can use your own butcher tableau or use one of the provided (`tr_bdf2` or `esdirk34`).
 - A BDF solver that wraps the IDA solver solver from the [Sundials library](https://github.com/LLNL/sundials) (requires the `sundials` feature). This is similar to the BDF solver above and is include for comparison purposes.
 
-All solvers feature adaptive step-size control to given tolerances, dense output, event handling and stepping to specific times. 
+All solvers feature adaptive step-size control to given tolerances, dense output, event handling, stepping to specific times and forward sensitivity analysis.
 For comparison, the BDF solvers are similar to MATLAB's `ode15s` solver or the `bdf` solver in SciPy's `solve_ivp` function. 
 The ESDIRK solver using the provided `tr_bdf2` tableau is similar to MATLAB's `ode23t` solver.
 
