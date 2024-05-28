@@ -254,6 +254,56 @@ impl OdeBuilder {
         )
     }
 
+    /// Build an ODE problem with a mass matrix and sensitivities.
+    ///
+    /// # Arguments
+    ///
+    /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
+    /// - `rhs_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
+    /// - `rhs_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the rhs wrt the parameters, with the vector v.
+    /// - `mass`: Function of type Fn(v: &V, p: &V, t: S, beta: S, y: &mut V) that computes a gemv multiplication of the mass matrix with the vector v (i.e. y = M * v + beta * y).
+    /// - `mass_sens`: Function of type Fn(v: &V, p: &V, t: S, y: &mut V) that computes the multiplication of the partial derivative of the mass matrix wrt the parameters, with the vector v.
+    /// - `init`: Function of type Fn(p: &V, t: S) -> V that computes the initial state.
+    /// - `init_sens`: Function of type Fn(p: &V, t: S, y: &mut V) that computes the multiplication of the partial derivative of the initial state wrt the parameters, with the vector v.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use diffsol::OdeBuilder;
+    /// use nalgebra::DVector;
+    /// type M = nalgebra::DMatrix<f64>;
+    ///
+    /// // dy/dt = a y
+    /// // 0 = z - y
+    /// // y(0) = 0.1
+    /// // z(0) = 0.1
+    /// let problem = OdeBuilder::new()
+    ///   .build_ode_with_mass_and_sens::<M, _, _, _, _, _, _, _>(
+    ///       |x, p, _t, y| {
+    ///           y[0] = p[0] * x[0];
+    ///           y[1] = x[1] - x[0];
+    ///       },
+    ///       |x, p, _t, v, y|  {
+    ///           y[0] = p[0] * v[0];
+    ///           y[1] = v[1] - v[0];
+    ///       },
+    ///       |x, _p, _t, v, y| {
+    ///           y[0] = v[0] * x[0];
+    ///           y[1] = 0.0;
+    ///       },
+    ///       |x, _p, _t, beta, y| {
+    ///           y[0] = x[0] + beta * y[0];
+    ///           y[1] = beta * y[1];
+    ///       },
+    ///       |x, p, t, v, y| {
+    ///           y.fill(0.0);
+    ///       },
+    ///       |p, _t| DVector::from_element(2, 0.1),
+    ///       |p, t, v, y| {
+    ///           y.fill(0.0);
+    ///       }
+    /// );
+    /// ```
     #[allow(clippy::type_complexity, clippy::too_many_arguments)]
     pub fn build_ode_with_mass_and_sens<M, F, G, H, I, J, K, L>(
         self,
@@ -378,6 +428,36 @@ impl OdeBuilder {
             self.sensitivities_error_control,
         )
     }
+
+    /// Build an ODE problem with a mass matrix that is the identity matrix and sensitivities.
+    ///
+    /// # Arguments
+    ///
+    /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
+    /// - `rhs_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
+    /// - `rhs_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the rhs wrt the parameters, with the vector v.
+    /// - `init`: Function of type Fn(p: &V, t: S) -> V that computes the initial state.
+    /// - `init_sens`: Function of type Fn(p: &V, t: S, y: &mut V) that computes the multiplication of the partial derivative of the initial state wrt the parameters, with the vector v.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use diffsol::OdeBuilder;
+    /// use nalgebra::DVector;
+    /// type M = nalgebra::DMatrix<f64>;
+    ///
+    ///
+    /// // dy/dt = a y
+    /// // y(0) = 0.1
+    /// let problem = OdeBuilder::new()
+    ///    .build_ode_with_sens::<M, _, _, _, _, _>(
+    ///        |x, p, _t, y| y[0] = p[0] * x[0],
+    ///        |x, p, _t, v, y| y[0] = p[0] * v[0],
+    ///        |x, p, _t, v, y| y[0] = v[0] * x[0],
+    ///        |p, _t| DVector::from_element(1, 0.1),
+    ///        |p, t, v, y| y.fill(0.0),
+    ///    );
+    /// ```
 
     #[allow(clippy::type_complexity)]
     pub fn build_ode_with_sens<M, F, G, I, J, K>(

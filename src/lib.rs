@@ -27,7 +27,7 @@
 //! - Use the [OdeSolverMethod::step] method to step the solution forward in time with an internal time step chosen by the solver to meet the error tolerances.
 //! - Use the [OdeSolverMethod::interpolate] method to interpolate the solution between the last two time steps.
 //! - Use the [OdeSolverMethod::set_stop_time] method to stop the solver at a specific time (i.e. this will override the internal time step so that the solver stops at the specified time).
-//! - Alternatively, use the convenience functions [OdeSolverMethod::solve] and [OdeSolverMethod::make_consistent_and_solve] that will both initialise the problem and solve the problem up to a specific time.
+//! - Alternatively, use the convenience function [OdeSolverMethod::solve]  that will both initialise the problem and solve the problem up to a specific time.
 //!
 //! ## DiffSL
 //!
@@ -62,6 +62,13 @@
 //!
 //! DiffSol provides a simple way to detect user-provided events during the integration of the ODEs. You can use this by providing a closure that has a zero-crossing at the event you want to detect, using the [OdeBuilder::build_ode_with_root] builder,
 //! or by providing a [NonLinearOp] that has a zero-crossing at the event you want to detect. To use the root finding feature while integrating with the solver, you can use the return value of [OdeSolverMethod::step] to check if an event has been detected.
+//!
+//! ## Forward Sensitivity Analysis
+//!
+//! DiffSol provides a way to compute the forward sensitivity of the solution with respect to the parameters. You can use this by using the [OdeBuilder::build_ode_with_sens] or [OdeBuilder::build_ode_with_mass_and_sens] builder functions.
+//! Note that by default the sensitivity equations are not included in the error control for the solvers, you can change this by using the [OdeBuilder::sensitivities_error_control] method.
+//!
+//! To obtain the sensitivity solution via interpolation, you can use the [OdeSolverMethod::interpolate_sens] method. Otherwise the sensitivity vectors are stored in the [OdeSolverState] struct.
 //!
 //! ## Nonlinear and linear solvers
 //!
