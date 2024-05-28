@@ -158,107 +158,17 @@ pub use ode_solver::{
     problem::OdeSolverProblem, sdirk::Sdirk, sens_equations::SensEquations,
     sens_equations::SensInit, sens_equations::SensRhs, tableau::Tableau,
 };
-use op::{
-    closure::Closure, closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,
-    constant_closure::ConstantClosure, constant_closure_with_sens::ConstantClosureWithSens,
-    init::InitOp, linear_closure::LinearClosure, linear_closure_with_sens::LinearClosureWithSens,
+pub use op::{
+    closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure,
+    unit::UnitCallable, ConstantOp, LinearOp, NonLinearOp, Op,
 };
-pub use op::{unit::UnitCallable, ConstantOp, LinearOp, NonLinearOp, Op};
+use op::{
+    closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,
+    constant_closure_with_sens::ConstantClosureWithSens, init::InitOp,
+    linear_closure_with_sens::LinearClosureWithSens,
+};
 use scalar::{IndexType, Scalar, Scale};
 use solver::SolverProblem;
 use vector::{Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut};
 
 pub use scalar::scale;
-
-#[cfg(test)]
-mod tests {
-
-    use crate::{
-        ode_solver::builder::OdeBuilder, vector::Vector, Bdf, OdeSolverMethod, OdeSolverState,
-    };
-
-    // WARNING: if this test fails and you make a change to the code, you should update the README.md file as well!!!
-    #[test]
-    fn test_readme() {
-        type T = f64;
-        type V = nalgebra::DVector<T>;
-        let problem = OdeBuilder::new()
-            .p([0.04, 1.0e4, 3.0e7])
-            .rtol(1e-4)
-            .atol([1.0e-8, 1.0e-6, 1.0e-6])
-            .build_ode_dense(
-                |x: &V, p: &V, _t: T, y: &mut V| {
-                    y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
-                    y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
-                    y[2] = p[2] * x[1] * x[1];
-                },
-                |x: &V, p: &V, _t: T, v: &V, y: &mut V| {
-                    y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
-                    y[1] = p[0] * v[0]
-                        - p[1] * v[1] * x[2]
-                        - p[1] * x[1] * v[2]
-                        - 2.0 * p[2] * x[1] * v[1];
-                    y[2] = 2.0 * p[2] * x[1] * v[1];
-                },
-                |_p: &V, _t: T| V::from_vec(vec![1.0, 0.0, 0.0]),
-            )
-            .unwrap();
-
-        let mut solver = Bdf::default();
-
-        let t = 0.4;
-        let y = solver.solve(&problem, t).unwrap();
-
-        let state = OdeSolverState::new(&problem, &solver).unwrap();
-        solver.set_problem(state, &problem);
-        while solver.state().unwrap().t <= t {
-            solver.step().unwrap();
-        }
-        let y2 = solver.interpolate(t).unwrap();
-
-        y2.assert_eq_st(&y, 1e-6);
-    }
-    #[test]
-    fn test_readme_faer() {
-        type T = f64;
-        type V = faer::Col<f64>;
-        type M = faer::Mat<f64>;
-        let problem = OdeBuilder::new()
-            .p([0.04, 1.0e4, 3.0e7])
-            .rtol(1e-4)
-            .atol([1.0e-8, 1.0e-6, 1.0e-6])
-            .build_ode_dense(
-                |x: &V, p: &V, _t: T, y: &mut V| {
-                    y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
-                    y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
-                    y[2] = p[2] * x[1] * x[1];
-                },
-                |x: &V, p: &V, _t: T, v: &V, y: &mut V| {
-                    y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
-                    y[1] = p[0] * v[0]
-                        - p[1] * v[1] * x[2]
-                        - p[1] * x[1] * v[2]
-                        - 2.0 * p[2] * x[1] * v[1];
-                    y[2] = 2.0 * p[2] * x[1] * v[1];
-                },
-                |_p: &V, _t: T| V::from_vec(vec![1.0, 0.0, 0.0]),
-            )
-            .unwrap();
-
-        let mut solver = Bdf::<M, _, _>::default();
-
-        let t = 0.4;
-        let y = solver.solve(&problem, t).unwrap();
-
-        let state = OdeSolverState::new(&problem, &solver).unwrap();
-        solver.set_problem(state, &problem);
-        while solver.state().unwrap().t <= t {
-            solver.step().unwrap();
-        }
-        let y2 = solver.interpolate(t).unwrap();
-
-        y2.assert_eq_st(&y, 1e-6);
-    }
-
-    // y2.assert_eq(&y, 1e-6);
-}

@@ -78,7 +78,7 @@ pub trait OdeEquations {
 ///
 /// ```rust
 /// use std::rc::Rc;
-/// use diffsol::{Bdf, OdeSolverState, OdeSolverMethod, NonLinearOp, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable};
+/// use diffsol::{Bdf, OdeSolverState, OdeSolverMethod, NonLinearOp, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure};
 /// type M = nalgebra::DMatrix<f64>;
 /// type V = nalgebra::DVector<f64>;
 ///
@@ -95,6 +95,7 @@ pub trait OdeEquations {
 ///    }
 /// }
 ///   
+/// // implement rhs equations for the problem
 /// impl NonLinearOp for MyProblem {
 ///    fn call_inplace(&self, x: &V, _t: f64, y: &mut V) {
 ///       y[0] = -0.1 * x[0];
@@ -103,13 +104,18 @@ pub trait OdeEquations {
 ///      y[0] = -0.1 * v[0];
 ///   }
 /// }
+/// 
 ///
 /// let rhs = Rc::new(MyProblem);
+/// 
+/// // use the provided constant closure to define the initial condition
+/// let init_fn = |p: &V, _t: f64| V::from_vec(vec![1.0]);
+/// let init = Rc::new(ConstantClosure::new(init_fn, Rc::new(V::from_vec(vec![]))));
 ///
 /// // we don't have a mass matrix or root function, so we can set to None
 /// let mass: Option<Rc<UnitCallable<M>>> = None;
 /// let root: Option<Rc<UnitCallable<M>>> = None;
-/// let init = |p: &V, _t: f64| V::from_vec(vec![1.0]);
+/// 
 /// let p = Rc::new(V::from_vec(vec![]));
 /// let eqn = OdeSolverEquations::new(rhs, mass, root, init, p);
 ///
@@ -118,7 +124,8 @@ pub trait OdeEquations {
 /// let t0 = 0.0;
 /// let h0 = 0.1;
 /// let with_sensitivity = false;
-/// let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, with_sensitivity).unwrap();
+/// let sensitivity_error_control = false;
+/// let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, with_sensitivity, sensitivity_error_control).unwrap();
 ///
 /// let mut solver = Bdf::default();
 /// let t = 0.4;

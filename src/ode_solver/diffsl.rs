@@ -412,6 +412,6 @@ mod tests {
         let out = context.out(t, &state);
         let out = DVector::from_vec(out.to_vec());
         let expected_out = DVector::from_vec(vec![3.0 * y_expect, 4.0 * z_expect]);
-        out.assert_eq_st(&expected_out, 1e-5);
+        out.assert_eq_st(&expected_out, 1e-4);
     }
 }

@@ -1,4 +1,5 @@
 use std::rc::Rc;
+use num_traits::Zero;
 
 use crate::{Matrix, Vector};
 
@@ -21,8 +22,11 @@ where
     M: Matrix,
     I: Fn(&M::V, M::T) -> M::V,
 {
-    pub fn new(func: I, nstates: usize, nout: usize, p: Rc<M::V>) -> Self {
+    pub fn new(func: I, p: Rc<M::V>) -> Self {
         let nparams = p.len();
+        let y0 = (func)(p.as_ref(), M::T::zero());
+        let nstates = y0.len();
+        let nout = nstates;
         Self {
             func,
             nstates,

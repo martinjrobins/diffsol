@@ -233,7 +233,7 @@ impl OdeBuilder {
         let nstates = y0.len();
         let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
         let mut mass = LinearClosure::new(mass, nstates, nstates, p.clone());
-        let init = ConstantClosure::new(init, nstates, nstates, p.clone());
+        let init = ConstantClosure::new(init, p.clone());
         if self.use_coloring {
             rhs.calculate_sparsity(&y0, t0);
             mass.calculate_sparsity(t0);
@@ -360,7 +360,7 @@ impl OdeBuilder {
         let y0 = init(&p, t0);
         let nstates = y0.len();
         let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
-        let init = ConstantClosure::new(init, nstates, nstates, p.clone());
+        let init = ConstantClosure::new(init, p.clone());
         if self.use_coloring {
             rhs.calculate_sparsity(&y0, t0);
         }
@@ -491,7 +491,7 @@ impl OdeBuilder {
         let nstates = y0.len();
         let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
         let root = Rc::new(ClosureNoJac::new(root, nstates, nroots, p.clone()));
-        let init = ConstantClosure::new(init, nstates, nstates, p.clone());
+        let init = ConstantClosure::new(init, p.clone());
         if self.use_coloring {
             rhs.calculate_sparsity(&y0, t0);
         }

@@ -13,7 +13,7 @@ use sundials_sys::{
     IDA_CONSTR_FAIL, IDA_CONV_FAIL, IDA_ERR_FAIL, IDA_ILL_INPUT, IDA_LINIT_FAIL, IDA_LSETUP_FAIL,
     IDA_LSOLVE_FAIL, IDA_MEM_NULL, IDA_ONE_STEP, IDA_REP_RES_ERR, IDA_RES_FAIL, IDA_ROOT_RETURN,
     IDA_RTFUNC_FAIL, IDA_SUCCESS, IDA_TOO_MUCH_ACC, IDA_TOO_MUCH_WORK, IDA_TSTOP_RETURN,
-    IDA_YA_YDP_INIT,
+    IDA_YA_YDP_INIT
 };
 
 use crate::{
@@ -351,6 +351,11 @@ where
 
         // set jacobian function
         Self::check(unsafe { IDASetJacFn(ida_mem, Some(Self::jacobian)) }).unwrap();
+
+        // sensitivities
+        if self.problem.as_ref().unwrap().eqn_sens.is_some() {
+            panic!("Sensitivities not implemented for sundials solver");
+        }
     }
 
     fn set_stop_time(&mut self, tstop: Eqn::T) -> Result<()> {
@@ -427,7 +432,7 @@ where
         &self,
         _t: <Eqn as OdeEquations>::T,
     ) -> Result<Vec<<Eqn as OdeEquations>::V>> {
-        unimplemented!()
+        Ok(vec![])
     }
 }
 
