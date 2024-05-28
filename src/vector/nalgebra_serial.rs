@@ -71,7 +71,7 @@ impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
             let yi = unsafe { y.get_unchecked(i) };
             let ai = unsafe { atol.get_unchecked(i) };
             let xi = unsafe { self.get_unchecked(i) };
-            acc += (*xi / (*yi * rtol + *ai)).powi(2);
+            acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
         }
         acc / Self::T::from(self.len() as f64)
     }
@@ -149,7 +149,7 @@ impl<T: Scalar> Vector for DVector<T> {
             let yi = unsafe { y.get_unchecked(i) };
             let ai = unsafe { atol.get_unchecked(i) };
             let xi = unsafe { self.get_unchecked(i) };
-            acc += (*xi / (*yi * rtol + *ai)).powi(2);
+            acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
         }
         acc / Self::T::from(self.len() as f64)
     }

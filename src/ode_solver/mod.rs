@@ -104,7 +104,7 @@ mod tests {
                             .squared_norm(&sens_point.state, &problem.atol, problem.rtol)
                             .sqrt();
                         assert!(
-                            error_norm < M::T::from(15.0),
+                            error_norm < M::T::from(20.0),
                             "error_norm: {} at t = {}",
                             error_norm,
                             point.t

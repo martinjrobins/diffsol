@@ -217,7 +217,7 @@ where
         }
     }
 
-    fn solve_for_sensitivities(&mut self, t: Eqn::T) -> Result<()> {
+    fn solve_for_sensitivities(&mut self, i: usize, t: Eqn::T) -> Result<()> {
         // update for new state
         {
             self.problem()
@@ -254,21 +254,55 @@ where
         let maxiter = self.nonlinear_solver.max_iter();
         let mut convergence = Convergence::new(rtol, atol, maxiter);
         let nparams = self.problem().as_ref().unwrap().eqn.rhs().nparams();
-        for i in 0..nparams {
-            let s0 = &self.state.as_ref().unwrap().s[i];
-            op.set_phi(&self.sdiff[i].columns(0, i), s0, &self.a_rows[i]);
-            op.eqn().as_ref().rhs().set_param_index(i);
-            let ds = &mut self.old_f_sens[i];
-            Self::predict_stage(i, &self.sdiff[i], ds, &self.tableau);
+        for j in 0..nparams {
+            let s0 = &self.state.as_ref().unwrap().s[j];
+            op.set_phi(&self.sdiff[j].columns(0, i), s0, &self.a_rows[i]);
+            op.eqn().as_ref().rhs().set_param_index(j);
+            let ds = &mut self.old_f_sens[j];
+            Self::predict_stage(i, &self.sdiff[j], ds, &self.tableau);
 
             // solve
             {
                 let niter = newton_iteration(ds, fun, ls, &mut convergence)?;
-                self.old_y_sens[i].copy_from(&op.get_last_f_eval());
+                self.old_y_sens[j].copy_from(&op.get_last_f_eval());
                 self.statistics.number_of_nonlinear_solver_iterations += niter;
             }
         }
         Ok(())
+    }
+
+    fn interpolate_from_diff(y0: &Eqn::V, beta_f: &Eqn::V, diff: &M) -> Eqn::V {
+        // ret = old_y + sum_{i=0}^{s_star-1} beta[i] * diff[:, i]
+        let mut ret = y0.clone();
+        diff
+            .gemv(Eqn::T::one(), beta_f, Eqn::T::one(), &mut ret);
+        ret
+    }
+
+    fn interpolate_beta_function(theta: Eqn::T, beta: &M) -> Eqn::V {
+        let poly_order = beta.ncols();
+        let s_star = beta.nrows();
+        let mut thetav = Vec::with_capacity(poly_order);
+        thetav.push(theta);
+        for i in 1..poly_order {
+            thetav.push(theta * thetav[i - 1]);
+        }
+        // beta_poly = beta * thetav
+        let thetav = Eqn::V::from_vec(thetav);
+        let mut beta_f = <Eqn::V as Vector>::zeros(s_star);
+        beta.gemv(Eqn::T::one(), &thetav, Eqn::T::zero(), &mut beta_f);
+        beta_f
+    }
+
+    fn interpolate_hermite(theta: Eqn::T, u0: &Eqn::V, u1: &Eqn::V, diff: &M) -> Eqn::V {
+        let hf0 = diff.column(0);
+        let hf1 = diff.column(diff.ncols() - 1);
+        u0 * scale(Eqn::T::from(1.0) - theta)
+            + u1 * scale(theta)
+            + ((u1 - u0) * scale(Eqn::T::from(1.0) - Eqn::T::from(2.0) * theta)
+                + hf0 * scale(theta - Eqn::T::from(1.0))
+                + hf1 * scale(theta))
+                * scale(theta * (theta - Eqn::T::from(1.0)))
     }
 }
 
@@ -336,6 +370,9 @@ where
 
         let start = if self.is_sdirk { 0 } else { 1 };
         let mut updated_jacobian = false;
+
+        // dont' reset jacobian for the first attempt at the step
+        let mut second_step_attempt = false;
         let mut error = <Eqn::V as Vector>::zeros(n);
 
         let mut t1: Eqn::T;
@@ -346,10 +383,23 @@ where
             let h = self.state.as_ref().unwrap().h;
             // if start == 1, then we need to compute the first stage
             if start == 1 {
-                let mut hf = self.diff.column_mut(0);
-                hf.copy_from(&self.state.as_ref().unwrap().dy);
-                hf *= scale(h);
+                {
+                    let mut hf = self.diff.column_mut(0);
+                    hf.copy_from(&self.state.as_ref().unwrap().dy);
+                    hf *= scale(h);
+                }
+
+                // sensitivities too
+                if self.problem().as_ref().unwrap().eqn_sens.is_some() {
+                    for (diff, dy) in self.sdiff.iter_mut().zip(self.state.as_ref().unwrap().ds.iter())
+                    {
+                        let mut hf = diff.column_mut(0);
+                        hf.copy_from(dy);
+                        hf *= scale(h);
+                    }
+                }
             }
+            
             for i in start..self.tableau.s() {
                 let t = t0 + self.tableau.c()[i] * h;
                 self.nonlinear_solver.problem().f.set_phi(
@@ -360,10 +410,16 @@ where
 
                 Self::predict_stage(i, &self.diff, &mut self.old_f, &self.tableau);
 
-                if i == start {
-                    // always reset jacobian because we change the step size after every step
+                // if we're attempting the step again, then we need to reset the jacobian
+                // as h has changed or jacobian needs to be recalculated
+                if i == start && second_step_attempt {
+                    // have to do it here cause phi needs to be set first
                     self.nonlinear_solver.reset_jacobian(&self.old_f, t);
                 }
+
+                // always reset jacobian if step is attempted again
+                second_step_attempt = true;
+
                 let mut solve_result = self.nonlinear_solver.solve_in_place(&mut self.old_f, t);
                 self.statistics.number_of_nonlinear_solver_iterations +=
                     self.nonlinear_solver.niter();
@@ -374,40 +430,33 @@ where
                     self.old_y
                         .copy_from(&self.nonlinear_solver.problem().f.get_last_f_eval());
                     if self.problem().as_ref().unwrap().eqn_sens.is_some() {
-                        solve_result = self.solve_for_sensitivities(t);
+                        solve_result = self.solve_for_sensitivities(i, t);
                     }
                 }
 
-                // if we didn't update the jacobian and the solve failed, then we update the jacobian and try again
-                let solve_result = if solve_result.is_err() && !updated_jacobian {
-                    // newton iteration did not converge, so update jacobian and try again
-                    self.nonlinear_solver.problem().f.set_jacobian_is_stale();
-                    updated_jacobian = true;
-
-                    Self::predict_stage(i, &self.diff, &mut self.old_f, &self.tableau);
-
-                    self.nonlinear_solver.reset_jacobian(&self.old_f, t);
-                    self.statistics.number_of_nonlinear_solver_fails += 1;
-                    self.nonlinear_solver.solve_in_place(&mut self.old_f, t)
-                } else {
-                    solve_result
-                };
-
+                // handle solve failure
                 if solve_result.is_err() {
-                    let state = self.state.as_mut().unwrap();
-                    // newton iteration did not converge, so we reduce step size and try again
-                    self.statistics.number_of_nonlinear_solver_fails += 1;
-                    state.h *= Eqn::T::from(0.3);
+                    if !updated_jacobian {
+                        // newton iteration did not converge, so update jacobian and try again
+                        self.nonlinear_solver.problem().f.set_jacobian_is_stale();
+                        updated_jacobian = true;
+                        self.statistics.number_of_nonlinear_solver_fails += 1;
 
-                    // if step size too small, then fail
-                    if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
-                        return Err(anyhow::anyhow!("Step size too small at t = {}", state.t));
+                    } else {
+                        // newton iteration did not converge and jacobian has been updated, so we reduce step size and try again
+                        let state = self.state.as_mut().unwrap();
+                        self.statistics.number_of_nonlinear_solver_fails += 1;
+                        state.h *= Eqn::T::from(0.3);
+
+                        // if step size too small, then fail
+                        if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
+                            return Err(anyhow::anyhow!("Step size too small at t = {}", state.t));
+                        }
+
+                        // update h for new step size
+                        self.nonlinear_solver.problem().f.set_h(state.h);
                     }
-
-                    // update h for new step size
-                    self.nonlinear_solver.problem().f.set_h(state.h);
-
-                    // reset nonlinear's linear solver problem as lu factorisation has changed
+                    // try again....
                     continue 'step;
                 };
 
@@ -415,8 +464,8 @@ where
                 self.diff.column_mut(i).copy_from(&self.old_f);
 
                 if self.problem().as_ref().unwrap().eqn_sens.is_some() {
-                    for diff in self.sdiff.iter_mut() {
-                        diff.column_mut(i).copy_from(&self.old_f_sens[i]);
+                    for (diff, old_f_sens) in self.sdiff.iter_mut().zip(self.old_f_sens.iter()) {
+                        diff.column_mut(i).copy_from(old_f_sens);
                     }
                 }
             }
@@ -472,8 +521,6 @@ where
             // update c for new step size
             self.nonlinear_solver.problem().f.set_h(state.h);
 
-            // reset nonlinear's linear solver problem as lu factorisation has changed
-
             // test error is within tolerance
             if error_norm <= Eqn::T::from(1.0) {
                 break 'step;
@@ -481,6 +528,9 @@ where
             // step is rejected, factor reduces step size, so we try again with the smaller step size
             self.statistics.number_of_error_test_failures += 1;
         }
+
+        //setup jacobian for next step (h was changed so jacobian needs to be recalculated)
+        self.nonlinear_solver.reset_jacobian(&self.old_f, t1);
 
         // take the step
         let state = self.state.as_mut().unwrap();
@@ -548,9 +598,46 @@ where
 
     fn interpolate_sens(
         &self,
-        _t: <Eqn as OdeEquations>::T,
+        t: <Eqn as OdeEquations>::T,
     ) -> Result<Vec<<Eqn as OdeEquations>::V>> {
-        Ok(vec![])
+        if self.state.is_none() {
+            return Err(anyhow!("State not set"));
+        }
+        let state = self.state.as_ref().unwrap();
+
+        if self.is_state_mutated {
+            if t == state.t {
+                return Ok(state.s.clone());
+            } else {
+                return Err(anyhow::anyhow!("Interpolation time is not within the current step. Step size is zero after calling state_mut()"));
+            }
+        }
+
+        // check that t is within the current step
+        if t > state.t || t < self.old_t {
+            return Err(anyhow::anyhow!(
+                "Interpolation time is not within the current step"
+            ));
+        }
+        let dt = state.t - self.old_t;
+        let theta = if dt == Eqn::T::zero() {
+            Eqn::T::one()
+        } else {
+            (t - self.old_t) / dt
+        };
+
+        if let Some(beta) = self.tableau.beta() {
+            let beta_f = Self::interpolate_beta_function(theta, beta);
+            let ret = self.old_y_sens.iter().zip(self.sdiff.iter()).map(|(y, diff)| {
+                Self::interpolate_from_diff(y, &beta_f, diff)
+            }).collect();
+            Ok(ret)
+        } else {
+            let ret = self.old_y_sens.iter().zip(state.s.iter()).zip(self.sdiff.iter()).map(|((s0, s1), diff)| {
+                Self::interpolate_hermite(theta, s0, s1, diff)
+            }).collect();
+            Ok(ret)
+        }
     }
 
     fn interpolate(&self, t: <Eqn>::T) -> anyhow::Result<<Eqn>::V> {
@@ -581,34 +668,11 @@ where
         };
 
         if let Some(beta) = self.tableau.beta() {
-            let poly_order = beta.ncols();
-            let s_star = beta.nrows();
-            let mut thetav = Vec::with_capacity(poly_order);
-            thetav.push(theta);
-            for i in 1..poly_order {
-                thetav.push(theta * thetav[i - 1]);
-            }
-            // beta_poly = beta * thetav
-            let thetav = Eqn::V::from_vec(thetav);
-            let mut beta_f = <Eqn::V as Vector>::zeros(s_star);
-            beta.gemv(Eqn::T::one(), &thetav, Eqn::T::zero(), &mut beta_f);
-
-            // ret = old_y + sum_{i=0}^{s_star-1} beta[i] * diff[:, i]
-            let mut ret = self.old_y.clone();
-            self.diff
-                .gemv(Eqn::T::one(), &beta_f, Eqn::T::one(), &mut ret);
+            let beta_f = Self::interpolate_beta_function(theta, beta);
+            let ret = Self::interpolate_from_diff(&self.old_y, &beta_f, &self.diff);
             Ok(ret)
         } else {
-            let hf0 = self.diff.column(0);
-            let hf1 = self.diff.column(self.diff.ncols() - 1);
-            let u0 = &self.old_y;
-            let u1 = &state.y;
-            let ret = u0 * scale(Eqn::T::from(1.0) - theta)
-                + u1 * scale(theta)
-                + ((u1 - u0) * scale(Eqn::T::from(1.0) - Eqn::T::from(2.0) * theta)
-                    + hf0 * scale(theta - Eqn::T::from(1.0))
-                    + hf1 * scale(theta))
-                    * scale(theta * (theta - Eqn::T::from(1.0)));
+            let ret = Self::interpolate_hermite(theta, &self.old_y, &state.y, &self.diff);
             Ok(ret)
         }
     }
@@ -628,9 +692,9 @@ mod test {
     use crate::{
         ode_solver::{
             test_models::{
-                exponential_decay::exponential_decay_problem,
-                exponential_decay::exponential_decay_problem_with_root, robertson::robertson,
-                robertson_ode::robertson_ode,
+                exponential_decay::{exponential_decay_problem, exponential_decay_problem_sens, exponential_decay_problem_with_root},
+                robertson::robertson,
+                robertson_ode::robertson_ode, robertson_sens::robertson_sens,
             },
             tests::{
                 test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut,
@@ -692,10 +756,58 @@ mod test {
     }
 
     #[test]
+    fn test_tr_bdf2_nalgebra_exponential_decay_sens() {
+        let tableau = Tableau::<M>::tr_bdf2();
+        let mut s = Sdirk::new(tableau, NalgebraLU::default());
+        let (problem, soln) = exponential_decay_problem_sens::<M>(false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 28
+        number_of_steps: 28
+        number_of_error_test_failures: 0
+        number_of_nonlinear_solver_iterations: 0
+        number_of_nonlinear_solver_fails: 0
+        initial_step_size: 0.011224620483093733
+        final_step_size: 0.37808462088748845
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
+        ---
+        number_of_calls: 114
+        number_of_jac_muls: 2
+        number_of_matrix_evals: 1
+        "###);
+    }
+
+    #[test]
     fn test_esdirk34_nalgebra_exponential_decay() {
         let tableau = Tableau::<M>::esdirk34();
         let mut s = Sdirk::new(tableau, NalgebraLU::default());
         let (problem, soln) = exponential_decay_problem::<M>(false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 12
+        number_of_steps: 12
+        number_of_error_test_failures: 0
+        number_of_nonlinear_solver_iterations: 0
+        number_of_nonlinear_solver_fails: 0
+        initial_step_size: 0.034484882412482154
+        final_step_size: 0.9398383410208245
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
+        ---
+        number_of_calls: 74
+        number_of_jac_muls: 2
+        number_of_matrix_evals: 1
+        "###);
+    }
+
+    #[test]
+    fn test_esdirk34_nalgebra_exponential_decay_sens() {
+        let tableau = Tableau::<M>::esdirk34();
+        let mut s = Sdirk::new(tableau, NalgebraLU::default());
+        let (problem, soln) = exponential_decay_problem_sens::<M>(false);
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
@@ -764,10 +876,58 @@ mod test {
     }
 
     #[test]
+    fn test_tr_bdf2_nalgebra_robertson_sens() {
+        let tableau = Tableau::<M>::tr_bdf2();
+        let mut s = Sdirk::new(tableau, NalgebraLU::default());
+        let (problem, soln) = robertson_sens::<M>(false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 427
+        number_of_steps: 412
+        number_of_error_test_failures: 3
+        number_of_nonlinear_solver_iterations: 0
+        number_of_nonlinear_solver_fails: 12
+        initial_step_size: 0.0000030885218897033307
+        final_step_size: 35655827121.9909
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
+        ---
+        number_of_calls: 3064
+        number_of_jac_muls: 42
+        number_of_matrix_evals: 14
+        "###);
+    }
+
+    #[test]
     fn test_esdirk34_nalgebra_robertson() {
         let tableau = Tableau::<M>::esdirk34();
         let mut s = Sdirk::new(tableau, NalgebraLU::default());
         let (problem, soln) = robertson::<M>(false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 212
+        number_of_steps: 193
+        number_of_error_test_failures: 1
+        number_of_nonlinear_solver_iterations: 0
+        number_of_nonlinear_solver_fails: 18
+        initial_step_size: 0.00007367379016174295
+        final_step_size: 44328923924.83207
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
+        ---
+        number_of_calls: 2479
+        number_of_jac_muls: 60
+        number_of_matrix_evals: 20
+        "###);
+    }
+
+    #[test]
+    fn test_esdirk34_nalgebra_robertson_sens() {
+        let tableau = Tableau::<M>::esdirk34();
+        let mut s = Sdirk::new(tableau, NalgebraLU::default());
+        let (problem, soln) = robertson_sens::<M>(false);
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---

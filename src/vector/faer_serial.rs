@@ -95,7 +95,7 @@ impl<T: Scalar> Vector for Col<T> {
             let yi = unsafe { y.read_unchecked(i) };
             let ai = unsafe { atol.read_unchecked(i) };
             let xi = unsafe { self.read_unchecked(i) };
-            acc += (xi / (yi * rtol + ai)).powi(2);
+            acc += (xi / (yi.abs() * rtol + ai)).powi(2);
         }
         acc / Self::T::from(self.len() as f64)
     }
@@ -227,7 +227,7 @@ impl<'a, T: Scalar> VectorView<'a> for ColRef<'a, T> {
             let yi = unsafe { y.read_unchecked(i) };
             let ai = unsafe { atol.read_unchecked(i) };
             let xi = unsafe { self.read_unchecked(i) };
-            acc += (xi / (yi * rtol + ai)).powi(2);
+            acc += (xi / (yi.abs() * rtol + ai)).powi(2);
         }
         acc / Self::T::from(self.nrows() as f64)
     }

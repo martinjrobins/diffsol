@@ -431,7 +431,7 @@ impl<'a> VectorView<'a> for SundialsVectorView<'a> {
             let yi = y[i];
             let ai = atol[i];
             let xi = self[i];
-            acc += (xi / (yi * rtol + ai)).powi(2);
+            acc += (xi / (yi.abs() * rtol + ai)).powi(2);
         }
         acc / self.len() as f64
     }
@@ -468,7 +468,7 @@ impl Vector for SundialsVector {
             let yi = y[i];
             let ai = atol[i];
             let xi = self[i];
-            acc += (xi / (yi * rtol + ai)).powi(2);
+            acc += (xi / (yi.abs() * rtol + ai)).powi(2);
         }
         acc / self.len() as f64
     }
@@ -769,7 +769,7 @@ mod tests {
         let mut r = v.clone();
         r.component_div_assign(&tmp);
         let errorn_check = r.norm().powi(2) / 3.0;
-        assert_eq!(v.squared_norm(&y, &atol, rtol), errorn_check);
-        assert_eq!(v.as_view().squared_norm(&y, &atol, rtol), errorn_check);
+        assert!((v.squared_norm(&y, &atol, rtol) - errorn_check).abs() < 1e-10);
+        assert!((v.as_view().squared_norm(&y, &atol, rtol) - errorn_check).abs() < 1e-10);
     }
 }

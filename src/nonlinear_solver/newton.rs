@@ -13,7 +13,6 @@ pub fn newton_iteration<V: Vector>(
     convergence.reset();
     let mut tmp = xn.clone();
     let mut niter = 0;
-    let x0 = xn.clone();
     loop {
         niter += 1;
         fun(xn, &mut tmp);
@@ -25,7 +24,7 @@ pub fn newton_iteration<V: Vector>(
         xn.sub_assign(&tmp);
         // xn = xn + delta_n
 
-        let res = convergence.check_new_iteration(&mut tmp, &x0);
+        let res = convergence.check_new_iteration(&mut tmp, xn);
         match res {
             ConvergenceStatus::Continue => continue,
             ConvergenceStatus::Converged => return Ok(niter),
