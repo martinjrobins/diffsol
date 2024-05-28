@@ -307,31 +307,5 @@ impl<V: Vector> OdeSolverState<V> {
         if self.h > h1 {
             self.h = h1;
         }
-
-        // update initial step size based on function
-        //let mut scale_factor = state.y.abs();
-        //scale_factor *= scale(problem.rtol);
-        //scale_factor += problem.atol.as_ref();
-
-        //let f0 = problem.eqn.rhs().call(&state.y, state.t);
-        //let hf0 = &f0 * scale(state.h);
-        //let y1 = &state.y + &hf0;
-        //let t1 = state.t + state.h;
-        //let f1 = problem.eqn.rhs().call(&y1, t1);
-
-        //// store f1 in diff[1] for use in step size control
-        //self.diff.column_mut(1).copy_from(&hf0);
-
-        //let mut df = f1 - f0;
-        //df.component_div_assign(&scale_factor);
-        //let d2 = df.norm();
-
-        //let one_over_order_plus_one =
-        //    Eqn::T::one() / (Eqn::T::from(self.order as f64) + Eqn::T::one());
-        //let mut new_h = state.h * d2.pow(-one_over_order_plus_one);
-        //if new_h > Eqn::T::from(100.0) * state.h {
-        //    new_h = Eqn::T::from(100.0) * state.h;
-        //}
-        //state.h = new_h;
     }
 }
