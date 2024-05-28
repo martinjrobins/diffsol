@@ -197,9 +197,7 @@ impl MatrixSparsity for Dense {
 
 /// A base matrix trait (including sparse and dense matrices)
 pub trait Matrix:
-    for<'a> MatrixOpsByValue<&'a Self, Self> 
-    + Mul<Scale<Self::T>, Output = Self> 
-    + Clone
+    for<'a> MatrixOpsByValue<&'a Self, Self> + Mul<Scale<Self::T>, Output = Self> + Clone
 {
     type Sparsity: MatrixSparsity;
 
@@ -209,7 +207,10 @@ pub trait Matrix:
     }
 
     /// Split the current matrix into four submatrices at the given indices
-    fn split_at_indices(&self, indices: &<Self::V as crate::vector::Vector>::Index) -> (Self, Self, Self, Self) {
+    fn split_at_indices(
+        &self,
+        indices: &<Self::V as crate::vector::Vector>::Index,
+    ) -> (Self, Self, Self, Self) {
         let n = self.nrows();
         if n != self.ncols() {
             panic!("Matrix must be square");
@@ -218,7 +219,9 @@ pub trait Matrix:
         let nni = n - ni;
         let mut indices = indices.clone_as_vec();
         indices.sort();
-        let cat = (0..n).map(|i| indices.as_slice().binary_search(&i).is_ok()).collect::<Vec<_>>();
+        let cat = (0..n)
+            .map(|i| indices.as_slice().binary_search(&i).is_ok())
+            .collect::<Vec<_>>();
         let mut ur_triplets = Vec::new();
         let mut ul_triplets = Vec::new();
         let mut lr_triplets = Vec::new();
@@ -240,20 +243,31 @@ pub trait Matrix:
             Self::try_from_triplets(ni, nni, ll_triplets).unwrap(),
             Self::try_from_triplets(ni, ni, lr_triplets).unwrap(),
         )
-
     }
 
     /// Combine four matrices into a single matrix at the given indices
-    fn combine_at_indices(ul: &Self, ur: &Self, ll: &Self, lr: &Self, indices: &<Self::V as Vector>::Index) -> Self {
+    fn combine_at_indices(
+        ul: &Self,
+        ur: &Self,
+        ll: &Self,
+        lr: &Self,
+        indices: &<Self::V as Vector>::Index,
+    ) -> Self {
         let n = ul.nrows() + ll.nrows();
         let m = ul.ncols() + ur.ncols();
-        if ul.ncols() != ll.ncols() || ur.ncols() != lr.ncols() || ul.nrows() != ur.nrows() || ll.nrows() != lr.nrows() {
+        if ul.ncols() != ll.ncols()
+            || ur.ncols() != lr.ncols()
+            || ul.nrows() != ur.nrows()
+            || ll.nrows() != lr.nrows()
+        {
             panic!("Matrices must have the same shape");
         }
         let mut triplets = Vec::new();
         let mut indices = indices.clone_as_vec();
         indices.sort();
-        let cat = (0..n).map(|i| indices.as_slice().binary_search(&i).is_ok()).collect::<Vec<_>>();
+        let cat = (0..n)
+            .map(|i| indices.as_slice().binary_search(&i).is_ok())
+            .collect::<Vec<_>>();
         for (i, j, &v) in ul.triplet_iter() {
             if !cat[i] && !cat[j] {
                 triplets.push((i, j, v));

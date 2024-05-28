@@ -1,4 +1,4 @@
-use std::ops::{Mul, MulAssign, AddAssign};
+use std::ops::{AddAssign, Mul, MulAssign};
 
 use super::default_solver::DefaultSolver;
 use super::{Dense, DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixView, MatrixViewMut};
@@ -149,8 +149,7 @@ impl<T: Scalar> Matrix for Mat<T> {
     }
 
     fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)> {
-        (0..self.nrows())
-            .flat_map(move |i| (0..self.ncols()).map(move |j| (i, j, &self[(i, j)])))
+        (0..self.nrows()).flat_map(move |i| (0..self.ncols()).map(move |j| (i, j, &self[(i, j)])))
     }
 
     fn try_from_triplets(

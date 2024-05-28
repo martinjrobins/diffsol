@@ -1,5 +1,5 @@
-use std::rc::Rc;
 use num_traits::Zero;
+use std::rc::Rc;
 
 use crate::{Matrix, Vector};
 

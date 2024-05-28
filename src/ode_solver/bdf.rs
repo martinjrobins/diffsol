@@ -7,7 +7,6 @@ use anyhow::{anyhow, Result};
 use num_traits::{abs, One, Pow, Zero};
 use serde::Serialize;
 
-use crate::{NonLinearOp, SensEquations};
 use crate::{
     matrix::{default_solver::DefaultSolver, Matrix, MatrixRef},
     newton_iteration,
@@ -19,6 +18,7 @@ use crate::{
     OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar,
     SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
 };
+use crate::{NonLinearOp, SensEquations};
 
 use super::equations::OdeEquations;
 
@@ -565,7 +565,12 @@ where
         if self.ode_problem.as_ref().unwrap().eqn_sens.is_some() {
             let nparams = self.ode_problem.as_ref().unwrap().eqn.rhs().nparams();
             self.s_op = Some(BdfCallable::from_eqn(
-                self.ode_problem.as_ref().unwrap().eqn_sens.as_ref().unwrap(),
+                self.ode_problem
+                    .as_ref()
+                    .unwrap()
+                    .eqn_sens
+                    .as_ref()
+                    .unwrap(),
             ));
 
             if self.sdiff.is_empty()

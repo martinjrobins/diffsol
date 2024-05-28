@@ -1,10 +1,7 @@
 use num_traits::{One, Zero};
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{
-    ConstantOp, LinearOp, Matrix, MatrixSparsity, NonLinearOp, OdeEquations, Op,
-    Vector,
-};
+use crate::{ConstantOp, LinearOp, Matrix, MatrixSparsity, NonLinearOp, OdeEquations, Op, Vector};
 
 pub struct SensInit<Eqn>
 where
@@ -145,13 +142,8 @@ where
             let mut rhs_sens = self.rhs_sens.as_ref().unwrap().borrow_mut();
             let mut mass_sens = self.mass_sens.as_ref().unwrap().borrow_mut();
             let mut sens = self.sens.borrow_mut();
-            self.eqn
-                .rhs()
-                .sens_inplace(y, t, &mut rhs_sens);
-            self.eqn
-                .mass()
-                .unwrap()
-                .sens_inplace(dy, t, &mut mass_sens);
+            self.eqn.rhs().sens_inplace(y, t, &mut rhs_sens);
+            self.eqn.mass().unwrap().sens_inplace(dy, t, &mut mass_sens);
             sens.scale_add_and_assign(&rhs_sens, -Eqn::T::one(), &mass_sens);
         } else {
             let mut sens = self.sens.borrow_mut();

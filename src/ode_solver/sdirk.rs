@@ -268,8 +268,7 @@ where
     fn interpolate_from_diff(y0: &Eqn::V, beta_f: &Eqn::V, diff: &M) -> Eqn::V {
         // ret = old_y + sum_{i=0}^{s_star-1} beta[i] * diff[:, i]
         let mut ret = y0.clone();
-        diff
-            .gemv(Eqn::T::one(), beta_f, Eqn::T::one(), &mut ret);
+        diff.gemv(Eqn::T::one(), beta_f, Eqn::T::one(), &mut ret);
         ret
     }
 
@@ -389,7 +388,10 @@ where
 
                 // sensitivities too
                 if self.problem().as_ref().unwrap().eqn_sens.is_some() {
-                    for (diff, dy) in self.sdiff.iter_mut().zip(self.state.as_ref().unwrap().ds.iter())
+                    for (diff, dy) in self
+                        .sdiff
+                        .iter_mut()
+                        .zip(self.state.as_ref().unwrap().ds.iter())
                     {
                         let mut hf = diff.column_mut(0);
                         hf.copy_from(dy);
@@ -397,7 +399,7 @@ where
                     }
                 }
             }
-            
+
             for i in start..self.tableau.s() {
                 let t = t0 + self.tableau.c()[i] * h;
                 self.nonlinear_solver.problem().f.set_phi(
@@ -439,7 +441,6 @@ where
                         self.nonlinear_solver.problem().f.set_jacobian_is_stale();
                         updated_jacobian = true;
                         self.statistics.number_of_nonlinear_solver_fails += 1;
-
                     } else {
                         // newton iteration did not converge and jacobian has been updated, so we reduce step size and try again
                         let state = self.state.as_mut().unwrap();
@@ -481,7 +482,9 @@ where
             let mut error_norm = error.squared_norm(&self.old_y, atol, rtol);
 
             // sensitivity errors
-            if self.problem().as_ref().unwrap().eqn_sens.is_some() && self.problem().as_ref().unwrap().sens_error_control {
+            if self.problem().as_ref().unwrap().eqn_sens.is_some()
+                && self.problem().as_ref().unwrap().sens_error_control
+            {
                 for i in 0..self.sdiff.len() {
                     self.sdiff[i].gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), &mut error);
                     self.nonlinear_solver
@@ -626,14 +629,21 @@ where
 
         if let Some(beta) = self.tableau.beta() {
             let beta_f = Self::interpolate_beta_function(theta, beta);
-            let ret = self.old_y_sens.iter().zip(self.sdiff.iter()).map(|(y, diff)| {
-                Self::interpolate_from_diff(y, &beta_f, diff)
-            }).collect();
+            let ret = self
+                .old_y_sens
+                .iter()
+                .zip(self.sdiff.iter())
+                .map(|(y, diff)| Self::interpolate_from_diff(y, &beta_f, diff))
+                .collect();
             Ok(ret)
         } else {
-            let ret = self.old_y_sens.iter().zip(state.s.iter()).zip(self.sdiff.iter()).map(|((s0, s1), diff)| {
-                Self::interpolate_hermite(theta, s0, s1, diff)
-            }).collect();
+            let ret = self
+                .old_y_sens
+                .iter()
+                .zip(state.s.iter())
+                .zip(self.sdiff.iter())
+                .map(|((s0, s1), diff)| Self::interpolate_hermite(theta, s0, s1, diff))
+                .collect();
             Ok(ret)
         }
     }
@@ -690,9 +700,13 @@ mod test {
     use crate::{
         ode_solver::{
             test_models::{
-                exponential_decay::{exponential_decay_problem, exponential_decay_problem_sens, exponential_decay_problem_with_root},
+                exponential_decay::{
+                    exponential_decay_problem, exponential_decay_problem_sens,
+                    exponential_decay_problem_with_root,
+                },
                 robertson::robertson,
-                robertson_ode::robertson_ode, robertson_sens::robertson_sens,
+                robertson_ode::robertson_ode,
+                robertson_sens::robertson_sens,
             },
             tests::{
                 test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut,
@@ -824,7 +838,6 @@ mod test {
         number_of_matrix_evals: 1
         "###);
     }
-
 
     #[test]
     fn test_tr_bdf2_nalgebra_robertson() {

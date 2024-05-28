@@ -13,7 +13,7 @@ use sundials_sys::{
     IDA_CONSTR_FAIL, IDA_CONV_FAIL, IDA_ERR_FAIL, IDA_ILL_INPUT, IDA_LINIT_FAIL, IDA_LSETUP_FAIL,
     IDA_LSOLVE_FAIL, IDA_MEM_NULL, IDA_ONE_STEP, IDA_REP_RES_ERR, IDA_RES_FAIL, IDA_ROOT_RETURN,
     IDA_RTFUNC_FAIL, IDA_SUCCESS, IDA_TOO_MUCH_ACC, IDA_TOO_MUCH_WORK, IDA_TSTOP_RETURN,
-    IDA_YA_YDP_INIT
+    IDA_YA_YDP_INIT,
 };
 
 use crate::{
@@ -439,8 +439,11 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
-        ode_solver::{test_models::{exponential_decay::exponential_decay_problem, robertson::robertson}, tests::{test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut}},
-        SundialsIda, SundialsMatrix, OdeEquations, Op,
+        ode_solver::{
+            test_models::{exponential_decay::exponential_decay_problem, robertson::robertson},
+            tests::{test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut},
+        },
+        OdeEquations, Op, SundialsIda, SundialsMatrix,
     };
 
     type M = SundialsMatrix;

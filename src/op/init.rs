@@ -1,11 +1,6 @@
-use crate::{
-    ode_solver::equations::OdeEquations, scale, LinearOp, Matrix, Vector, VectorIndex
-};
+use crate::{ode_solver::equations::OdeEquations, scale, LinearOp, Matrix, Vector, VectorIndex};
 use num_traits::{One, Zero};
-use std::{
-    cell::RefCell,
-    rc::Rc,
-};
+use std::{cell::RefCell, rc::Rc};
 
 use super::{NonLinearOp, Op};
 
@@ -43,11 +38,14 @@ impl<Eqn: OdeEquations> InitOp<Eqn> {
         let (m_u, _, _, _) = mass.split_at_indices(&algebraic_indices);
         let m_u = m_u * scale(-Eqn::T::one());
         let (_, dfdv, _, dgdv) = rhs_jac.split_at_indices(&algebraic_indices);
-        let zero_ll = <Eqn::M as Matrix>::zeros(algebraic_indices.len(), n - algebraic_indices.len());
-        let zero_ur = <Eqn::M as Matrix>::zeros(n - algebraic_indices.len(), algebraic_indices.len());
+        let zero_ll =
+            <Eqn::M as Matrix>::zeros(algebraic_indices.len(), n - algebraic_indices.len());
+        let zero_ur =
+            <Eqn::M as Matrix>::zeros(n - algebraic_indices.len(), algebraic_indices.len());
         let zero_lr = <Eqn::M as Matrix>::zeros(algebraic_indices.len(), algebraic_indices.len());
         let jac = Eqn::M::combine_at_indices(&m_u, &dfdv, &zero_ll, &dgdv, &algebraic_indices);
-        let neg_mass = Eqn::M::combine_at_indices(&m_u, &zero_ur, &zero_ll, &zero_lr, &algebraic_indices);
+        let neg_mass =
+            Eqn::M::combine_at_indices(&m_u, &zero_ur, &zero_ll, &zero_lr, &algebraic_indices);
 
         let mut y0 = y0.clone();
         y0.copy_from_indices(dy0, &algebraic_indices);
@@ -87,8 +85,7 @@ impl<Eqn: OdeEquations> Op for InitOp<Eqn> {
     }
 }
 
-impl<Eqn: OdeEquations> NonLinearOp for InitOp<Eqn>
-{
+impl<Eqn: OdeEquations> NonLinearOp for InitOp<Eqn> {
     // -M_u du + f(u, v)
     // g(t, u, v)
     fn call_inplace(&self, x: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
@@ -99,7 +96,6 @@ impl<Eqn: OdeEquations> NonLinearOp for InitOp<Eqn>
 
         // y = (f; g)
         self.eqn.rhs().call_inplace(&y0, t, y);
-
 
         // y = -M x + y
         self.neg_mass.gemv(Eqn::T::one(), x, Eqn::T::one(), y);
@@ -149,7 +145,7 @@ mod tests {
         // dy = |4| (du)
         //      |5| (du)
         //      |6| (dv)
-        // i.e. f(u, v) = -0.1 u = |-0.1| 
+        // i.e. f(u, v) = -0.1 u = |-0.1|
         //                         |-0.2|
         //      g(u, v) = v - u = |1|
         //      M_u = |1 0|

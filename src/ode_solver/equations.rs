@@ -1,6 +1,10 @@
 use std::rc::Rc;
 
-use crate::{op::{unit::UnitCallable, ConstantOp}, scalar::Scalar, LinearOp, Matrix, NonLinearOp, Vector};
+use crate::{
+    op::{unit::UnitCallable, ConstantOp},
+    scalar::Scalar,
+    LinearOp, Matrix, NonLinearOp, Vector,
+};
 use serde::Serialize;
 
 #[derive(Clone, Debug, Serialize)]
@@ -104,10 +108,10 @@ pub trait OdeEquations {
 ///      y[0] = -0.1 * v[0];
 ///   }
 /// }
-/// 
+///
 ///
 /// let rhs = Rc::new(MyProblem);
-/// 
+///
 /// // use the provided constant closure to define the initial condition
 /// let init_fn = |p: &V, _t: f64| V::from_vec(vec![1.0]);
 /// let init = Rc::new(ConstantClosure::new(init_fn, Rc::new(V::from_vec(vec![]))));
@@ -115,7 +119,7 @@ pub trait OdeEquations {
 /// // we don't have a mass matrix or root function, so we can set to None
 /// let mass: Option<Rc<UnitCallable<M>>> = None;
 /// let root: Option<Rc<UnitCallable<M>>> = None;
-/// 
+///
 /// let p = Rc::new(V::from_vec(vec![]));
 /// let eqn = OdeSolverEquations::new(rhs, mass, root, init, p);
 ///

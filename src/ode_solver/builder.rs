@@ -250,7 +250,7 @@ impl OdeBuilder {
             M::T::from(self.t0),
             M::T::from(self.h0),
             false,
-            self.sensitivities_error_control
+            self.sensitivities_error_control,
         )
     }
 
@@ -307,7 +307,7 @@ impl OdeBuilder {
             M::T::from(self.t0),
             M::T::from(self.h0),
             true,
-            self.sensitivities_error_control
+            self.sensitivities_error_control,
         )
     }
 
@@ -375,7 +375,7 @@ impl OdeBuilder {
             M::T::from(self.t0),
             M::T::from(self.h0),
             false,
-            self.sensitivities_error_control
+            self.sensitivities_error_control,
         )
     }
 
@@ -388,7 +388,9 @@ impl OdeBuilder {
         init: I,
         init_sens: K,
     ) -> Result<
-        OdeSolverProblem<OdeSolverEquations<M, ClosureWithSens<M, F, G, J>, ConstantClosureWithSens<M, I, K>>>,
+        OdeSolverProblem<
+            OdeSolverEquations<M, ClosureWithSens<M, F, G, J>, ConstantClosureWithSens<M, I, K>>,
+        >,
     >
     where
         M: Matrix,
@@ -418,7 +420,7 @@ impl OdeBuilder {
             M::T::from(self.t0),
             M::T::from(self.h0),
             true,
-            self.sensitivities_error_control
+            self.sensitivities_error_control,
         )
     }
 
@@ -506,7 +508,7 @@ impl OdeBuilder {
             M::T::from(self.t0),
             M::T::from(self.h0),
             false,
-            self.sensitivities_error_control
+            self.sensitivities_error_control,
         )
     }
 
@@ -550,7 +552,7 @@ impl OdeBuilder {
             T::from(self.t0),
             T::from(self.h0),
             self.sensitivities,
-            self.sensitivities_error_control
+            self.sensitivities_error_control,
         )
     }
 }

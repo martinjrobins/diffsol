@@ -130,8 +130,6 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
         diff.gemv_o(Eqn::T::one(), a, Eqn::T::one(), &mut phi);
     }
 
-    
-
     // tmp = phi + c * x
     fn set_tmp(&self, x: &Eqn::V) {
         let phi_ref = self.phi.borrow();

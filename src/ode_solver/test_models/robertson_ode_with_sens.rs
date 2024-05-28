@@ -1,8 +1,8 @@
-use num_traits::Zero;
 use crate::{
     ode_solver::problem::OdeSolverSolution, Matrix, OdeBuilder, OdeEquations, OdeSolverProblem,
     Vector,
 };
+use num_traits::Zero;
 
 pub fn robertson_ode_with_sens<M: Matrix + 'static>(
     use_coloring: bool,
