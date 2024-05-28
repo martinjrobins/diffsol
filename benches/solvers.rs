@@ -42,10 +42,7 @@ mod robertson_ode {
 }
 
 mod robertson {
-    use diffsol::{
-        ode_solver::test_models::robertson::robertson, Bdf,
-        OdeSolverMethod,
-    };
+    use diffsol::{ode_solver::test_models::robertson::robertson, Bdf, OdeSolverMethod};
 
     #[divan::bench]
     fn bdf() {
