@@ -14,7 +14,6 @@ pub fn robertson<M: Matrix + 'static>(
         .rtol(1e-4)
         .atol([1.0e-8, 1.0e-6, 1.0e-6])
         .use_coloring(use_coloring)
-        .constant_mass(true)
         .build_ode_with_mass(
             //*      dy1/dt = -.04*y1 + 1.e4*y2*y3
             //*      dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*y2**2

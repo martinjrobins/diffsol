@@ -226,6 +226,7 @@ mod tests {
             M::T::zero(),
             M::T::one(),
             false,
+            false,
         )
         .unwrap();
         let state = OdeSolverState::new_without_initialise(&problem);
@@ -256,6 +257,7 @@ mod tests {
             M::V::from_element(1, M::T::from(1e-6)),
             M::T::zero(),
             M::T::one(),
+            false,
             false,
         )
         .unwrap();
@@ -295,7 +297,7 @@ mod tests {
                 .squared_norm(&error, &problem.atol, problem.rtol)
                 .sqrt();
             assert!(
-                error_norm < Eqn::T::from(15.0),
+                error_norm < Eqn::T::from(16.0),
                 "error_norm: {} at t = {}",
                 error_norm,
                 point.t

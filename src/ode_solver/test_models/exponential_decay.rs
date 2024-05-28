@@ -100,6 +100,7 @@ pub fn exponential_decay_problem_sens<M: Matrix + 'static>(
     let problem = OdeBuilder::new()
         .p([0.1])
         .use_coloring(use_coloring)
+        .sensitivities_error_control(true)
         .build_ode_with_sens(
             exponential_decay::<M>,
             exponential_decay_jacobian::<M>,

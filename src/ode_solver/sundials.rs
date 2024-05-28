@@ -434,8 +434,8 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
-        ode_solver::tests::{test_interpolate, test_no_set_problem, test_state_mut},
-        SundialsIda, SundialsMatrix,
+        ode_solver::{test_models::{exponential_decay::exponential_decay_problem, robertson::robertson}, tests::{test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut}},
+        SundialsIda, SundialsMatrix, OdeEquations, Op,
     };
 
     type M = SundialsMatrix;
@@ -450,5 +450,51 @@ mod test {
     #[test]
     fn sundials_interpolate() {
         test_interpolate::<M, _>(SundialsIda::default())
+    }
+
+    #[test]
+    fn test_sundials_exponential_decay() {
+        let mut s = crate::SundialsIda::default();
+        let (problem, soln) = exponential_decay_problem::<crate::SundialsMatrix>(false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 18
+        number_of_steps: 43
+        number_of_error_test_failures: 3
+        number_of_nonlinear_solver_iterations: 63
+        number_of_nonlinear_solver_fails: 0
+        initial_step_size: 0.001
+        final_step_size: 0.7770043351266953
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
+        ---
+        number_of_calls: 65
+        number_of_jac_muls: 36
+        number_of_matrix_evals: 18
+        "###);
+    }
+
+    #[test]
+    fn test_sundials_robertson() {
+        let mut s = crate::SundialsIda::default();
+        let (problem, soln) = robertson::<crate::SundialsMatrix>(false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 59
+        number_of_steps: 355
+        number_of_error_test_failures: 15
+        number_of_nonlinear_solver_iterations: 506
+        number_of_nonlinear_solver_fails: 5
+        initial_step_size: 0.001
+        final_step_size: 11535117835.253025
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
+        ---
+        number_of_calls: 510
+        number_of_jac_muls: 180
+        number_of_matrix_evals: 60
+        "###);
     }
 }

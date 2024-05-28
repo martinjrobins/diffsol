@@ -100,7 +100,6 @@ pub fn exponential_decay_with_algebraic_problem<M: DenseMatrix + 'static>(
     let problem = OdeBuilder::new()
         .p([0.1])
         .use_coloring(use_coloring)
-        .constant_mass(true)
         .build_ode_with_mass(
             exponential_decay_with_algebraic::<M>,
             exponential_decay_with_algebraic_jacobian::<M>,
@@ -129,7 +128,7 @@ pub fn exponential_decay_with_algebraic_problem_sens<M: DenseMatrix + 'static>(
     let problem = OdeBuilder::new()
         .p([0.1])
         .use_coloring(use_coloring)
-        .constant_mass(true)
+        .sensitivities_error_control(true)
         .build_ode_with_mass_and_sens(
             exponential_decay_with_algebraic::<M>,
             exponential_decay_with_algebraic_jacobian::<M>,

@@ -10,6 +10,7 @@ pub struct OdeSolverProblem<Eqn: OdeEquations> {
     pub t0: Eqn::T,
     pub h0: Eqn::T,
     pub eqn_sens: Option<Rc<SensEquations<Eqn>>>,
+    pub sens_error_control: bool,
 }
 
 // impl clone
@@ -22,6 +23,7 @@ impl<Eqn: OdeEquations> Clone for OdeSolverProblem<Eqn> {
             t0: self.t0,
             h0: self.h0,
             eqn_sens: self.eqn_sens.clone(),
+            sens_error_control: self.sens_error_control,
         }
     }
 }
@@ -40,6 +42,7 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
         t0: Eqn::T,
         h0: Eqn::T,
         with_sensitivity: bool,
+        sens_error_control: bool,
     ) -> Result<Self> {
         let eqn = Rc::new(eqn);
         let atol = Rc::new(atol);
@@ -64,6 +67,7 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
             t0,
             h0,
             eqn_sens,
+            sens_error_control,
         })
     }
 
