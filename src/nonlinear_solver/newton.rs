@@ -1,11 +1,42 @@
-use crate::{op::NonLinearOp, LinearSolver, NonLinearSolver, SolverProblem, Vector};
+use crate::{
+    op::NonLinearOp, Convergence, ConvergenceStatus, LinearSolver, NonLinearSolver, SolverProblem,
+    Vector,
+};
 use anyhow::{anyhow, Result};
-use std::ops::SubAssign;
 
-use super::{Convergence, ConvergenceStatus};
+pub fn newton_iteration<V: Vector>(
+    xn: &mut V,
+    fun: impl Fn(&V, &mut V),
+    linear_solver: impl Fn(&mut V) -> Result<()>,
+    convergence: &mut Convergence<V>,
+) -> Result<usize> {
+    convergence.reset();
+    let mut tmp = xn.clone();
+    let mut niter = 0;
+    loop {
+        niter += 1;
+        fun(xn, &mut tmp);
+        //tmp = f_at_n
+
+        linear_solver(&mut tmp)?;
+        //tmp = -delta_n
+
+        xn.sub_assign(&tmp);
+        // xn = xn + delta_n
+
+        let res = convergence.check_new_iteration(&mut tmp, xn);
+        match res {
+            ConvergenceStatus::Continue => continue,
+            ConvergenceStatus::Converged => return Ok(niter),
+            ConvergenceStatus::Diverged => break,
+            ConvergenceStatus::MaximumIterations => break,
+        }
+    }
+    Err(anyhow!("Newton iteration did not converge"))
+}
 
 pub struct NewtonNonlinearSolver<C: NonLinearOp, Ls: LinearSolver<C>> {
-    convergence: Option<Convergence<C>>,
+    convergence: Option<Convergence<C::V>>,
     linear_solver: Ls,
     problem: Option<SolverProblem<C>>,
     max_iter: usize,
@@ -23,9 +54,6 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NewtonNonlinearSolver<C, Ls> {
             niter: 0,
             is_jacobian_set: false,
         }
-    }
-    pub fn linear_solver(&self) -> &Ls {
-        &self.linear_solver
     }
 }
 
@@ -48,13 +76,17 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
         self.problem = Some(problem.clone());
         self.linear_solver.set_problem(problem);
         let problem = self.problem.as_ref().unwrap();
-        self.convergence = Some(Convergence::new(problem, self.max_iter));
+        self.convergence = Some(Convergence::new_from_problem(problem, self.max_iter));
         self.is_jacobian_set = false;
     }
 
     fn reset_jacobian(&mut self, x: &C::V, t: C::T) {
         self.linear_solver.set_linearisation(x, t);
         self.is_jacobian_set = true;
+    }
+
+    fn solve_linearised_in_place(&self, x: &mut C::V) -> Result<()> {
+        self.linear_solver.solve_in_place(x)
     }
 
     fn solve_in_place(&mut self, xn: &mut C::V, t: C::T) -> Result<()> {
@@ -67,30 +99,11 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
         if xn.len() != self.problem.as_ref().unwrap().f.nstates() {
             panic!("NewtonNonlinearSolver::solve() called with state of wrong size, expected {}, got {}", self.problem.as_ref().unwrap().f.nstates(), xn.len());
         }
-        let convergence = self.convergence.as_mut().unwrap();
+        let linear_solver = |x: &mut C::V| self.linear_solver.solve_in_place(x);
         let problem = self.problem.as_ref().unwrap();
-        convergence.reset(xn);
-        let mut tmp = xn.clone();
-        self.niter = 0;
-        loop {
-            self.niter += 1;
-            problem.f.call_inplace(xn, t, &mut tmp);
-            //tmp = f_at_n
-
-            self.linear_solver.solve_in_place(&mut tmp)?;
-            //tmp = -delta_n
-
-            xn.sub_assign(&tmp);
-            // xn = xn + delta_n
-
-            let res = convergence.check_new_iteration(&mut tmp);
-            match res {
-                ConvergenceStatus::Continue => continue,
-                ConvergenceStatus::Converged => return Ok(()),
-                ConvergenceStatus::Diverged => break,
-                ConvergenceStatus::MaximumIterations => break,
-            }
-        }
-        Err(anyhow!("Newton iteration did not converge"))
+        let fun = |x: &C::V, y: &mut C::V| problem.f.call_inplace(x, t, y);
+        let convergence = self.convergence.as_mut().unwrap();
+        self.niter = newton_iteration(xn, fun, linear_solver, convergence)?;
+        Ok(())
     }
 }

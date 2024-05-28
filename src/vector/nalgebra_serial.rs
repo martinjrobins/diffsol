@@ -34,6 +34,9 @@ impl VectorIndex for DVector<IndexType> {
     fn from_slice(slice: &[IndexType]) -> Self {
         DVector::from_iterator(slice.len(), slice.iter().copied())
     }
+    fn clone_as_vec(&self) -> Vec<IndexType> {
+        self.iter().copied().collect()
+    }
 }
 
 macro_rules! impl_vector_common {
@@ -50,11 +53,27 @@ impl_vector_common!(DVectorViewMut<'a, T>);
 
 impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
     type Owned = DVector<T>;
-    fn abs(&self) -> DVector<T> {
-        self.abs()
+    fn abs_to(&self, y: &mut Self::Owned) {
+        y.zip_apply(self, |y, x| *y = x.abs());
     }
     fn into_owned(self) -> Self::Owned {
         self.into_owned()
+    }
+    fn norm(&self) -> T {
+        self.norm()
+    }
+    fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
+        let mut acc = T::zero();
+        if y.len() != self.len() || y.len() != atol.len() {
+            panic!("Vector lengths do not match");
+        }
+        for i in 0..self.len() {
+            let yi = unsafe { y.get_unchecked(i) };
+            let ai = unsafe { atol.get_unchecked(i) };
+            let xi = unsafe { self.get_unchecked(i) };
+            acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
+        }
+        acc / Self::T::from(self.len() as f64)
     }
 }
 
@@ -93,8 +112,8 @@ impl_mul_assign_scale_vector!(DVectorViewMut<'a, T>);
 impl<'a, T: Scalar> VectorViewMut<'a> for DVectorViewMut<'a, T> {
     type Owned = DVector<T>;
     type View = DVectorView<'a, T>;
-    fn abs(&self) -> DVector<T> {
-        self.abs()
+    fn abs_to(&self, y: &mut Self::Owned) {
+        y.zip_apply(self, |y, x| *y = x.abs());
     }
     fn copy_from(&mut self, other: &Self::Owned) {
         self.copy_from(other);
@@ -121,8 +140,24 @@ impl<T: Scalar> Vector for DVector<T> {
     fn norm(&self) -> Self::T {
         self.norm()
     }
-    fn abs(&self) -> Self {
-        self.abs()
+    fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
+        let mut acc = T::zero();
+        if y.len() != self.len() || y.len() != atol.len() {
+            panic!("Vector lengths do not match");
+        }
+        for i in 0..self.len() {
+            let yi = unsafe { y.get_unchecked(i) };
+            let ai = unsafe { atol.get_unchecked(i) };
+            let xi = unsafe { self.get_unchecked(i) };
+            acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
+        }
+        acc / Self::T::from(self.len() as f64)
+    }
+    fn abs_to(&self, y: &mut Self) {
+        y.zip_apply(self, |y, x| *y = x.abs());
+    }
+    fn fill(&mut self, value: T) {
+        self.fill(value);
     }
     fn as_view(&self) -> Self::View<'_> {
         self.as_view()
@@ -209,5 +244,24 @@ mod tests {
         let v = DVector::from_vec(vec![1.0, -2.0, 3.0]);
         let v_abs = v.abs();
         assert_eq!(v_abs, DVector::from_vec(vec![1.0, 2.0, 3.0]));
+    }
+
+    #[test]
+    fn test_error_norm() {
+        let v = DVector::from_vec(vec![1.0, -2.0, 3.0]);
+        let y = DVector::from_vec(vec![1.0, 2.0, 3.0]);
+        let atol = DVector::from_vec(vec![0.1, 0.2, 0.3]);
+        let rtol = 0.1;
+        let mut tmp = y.clone() * rtol;
+        tmp += &atol;
+        let mut r = v.clone();
+        r.component_div_assign(&tmp);
+        let errorn_check = r.norm_squared() / 3.0;
+        assert_eq!(v.squared_norm(&y, &atol, rtol), errorn_check);
+        let vview = v.as_view();
+        assert_eq!(
+            VectorView::squared_norm(&vview, &y, &atol, rtol),
+            errorn_check
+        );
     }
 }

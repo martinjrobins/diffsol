@@ -20,3 +20,4 @@ Cargo.lock
 /Cargo.lock
 
 .vscode
+*pending-snap

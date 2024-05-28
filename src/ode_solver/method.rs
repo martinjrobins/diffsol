@@ -1,11 +1,12 @@
 use anyhow::Result;
-use num_traits::{One, Pow, Zero};
+use nalgebra::ComplexField;
+use num_traits::{One, Pow};
 use std::rc::Rc;
 
 use crate::{
-    matrix::default_solver::DefaultSolver, op::filter::FilterCallable, scalar::Scalar, scale,
-    LinearOp, Matrix, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations,
-    OdeSolverProblem, SolverProblem, Vector, VectorIndex,
+    matrix::default_solver::DefaultSolver, scalar::Scalar, scale, ConstantOp, InitOp,
+    NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, Op,
+    SensEquations, SolverProblem, Vector,
 };
 
 pub enum OdeSolverStopReason<T: Scalar> {
@@ -60,6 +61,9 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     /// Interpolate the solution at a given time. This time should be between the current time and the last solver time step
     fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V>;
 
+    /// Interpolate the sensitivity vectors at a given time. This time should be between the current time and the last solver time step
+    fn interpolate_sens(&self, t: Eqn::T) -> Result<Vec<Eqn::V>>;
+
     /// Get the current state of the solver, if it exists
     fn state(&self) -> Option<&OdeSolverState<Eqn::V>>;
 
@@ -77,29 +81,12 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     fn take_state(&mut self) -> Option<OdeSolverState<Eqn::V>>;
 
     /// Reinitialise the solver state and solve the problem up to time `t`
-    fn solve(&mut self, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Result<Eqn::V> {
-        let mut state = OdeSolverState::new_without_initialise(problem);
-        state.set_step_size(problem, self.order());
-        self.set_problem(state, problem);
-        self.set_stop_time(t)?;
-        loop {
-            if let OdeSolverStopReason::TstopReached = self.step()? {
-                break;
-            }
-        }
-        Ok(self.state().unwrap().y.clone())
-    }
-
-    /// Reinitialise the solver state making it consistent with the algebraic constraints and solve the problem up to time `t`
-    fn make_consistent_and_solve<RS: NonLinearSolver<FilterCallable<Eqn::Rhs>>>(
-        &mut self,
-        problem: &OdeSolverProblem<Eqn>,
-        t: Eqn::T,
-        root_solver: &mut RS,
-    ) -> Result<Eqn::V> {
-        let mut state = OdeSolverState::new_without_initialise(problem);
-        state.set_consistent(problem, root_solver)?;
-        state.set_step_size(problem, self.order());
+    fn solve(&mut self, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Result<Eqn::V>
+    where
+        Eqn::M: DefaultSolver,
+        Self: Sized,
+    {
+        let state = OdeSolverState::new(problem, self)?;
         self.set_problem(state, problem);
         self.set_stop_time(t)?;
         loop {
@@ -111,11 +98,20 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     }
 }
 
-/// State for the ODE solver, containing the current solution `y`, the current time `t`, and the current step size `h`.
+/// State for the ODE solver, containing:
+/// - the current solution `y`
+/// - the derivative of the solution wrt time `dy`
+/// - the current time `t`
+/// - the current step size `h`,
+/// - the sensitivity vectors `s`
+/// - the derivative of the sensitivity vectors wrt time `ds`
+///
 #[derive(Clone)]
 pub struct OdeSolverState<V: Vector> {
     pub y: V,
-    pub f: V,
+    pub dy: V,
+    pub s: Vec<V>,
+    pub ds: Vec<V>,
     pub t: V::T,
     pub h: V::T,
 }
@@ -132,20 +128,19 @@ impl<V: Vector> OdeSolverState<V> {
         Eqn::M: DefaultSolver,
         S: OdeSolverMethod<Eqn>,
     {
-        let t = ode_problem.t0;
-        let h = ode_problem.h0;
-        let y = ode_problem.eqn.init(t);
-        let f = ode_problem.eqn.rhs().call(&y, t);
-
-        let mut ret = Self { y, t, h, f };
-        let ls = <Eqn::M as DefaultSolver>::default_solver();
-        let mut root_solver = NewtonNonlinearSolver::new(ls);
+        let mut ret = Self::new_without_initialise(ode_problem);
+        let mut root_solver =
+            NewtonNonlinearSolver::new(<Eqn::M as DefaultSolver>::default_solver());
         ret.set_consistent(ode_problem, &mut root_solver)?;
+        let mut root_solver_sens =
+            NewtonNonlinearSolver::new(<Eqn::M as DefaultSolver>::default_solver());
+        ret.set_consistent_sens(ode_problem, &mut root_solver_sens)?;
         ret.set_step_size(ode_problem, solver.order());
         Ok(ret)
     }
 
-    /// Create a new solver state from an ODE problem, without any initialisation.
+    /// Create a new solver state from an ODE problem, without any initialisation apart from setting the initial time state vector y,
+    /// and if applicable the sensitivity vectors s.
     /// This is useful if you want to set up the state yourself, or if you want to use a different nonlinear solver to make the state consistent,
     /// or if you want to set the step size yourself or based on the exact order of the solver.
     pub fn new_without_initialise<Eqn>(ode_problem: &OdeSolverProblem<Eqn>) -> Self
@@ -154,12 +149,29 @@ impl<V: Vector> OdeSolverState<V> {
     {
         let t = ode_problem.t0;
         let h = ode_problem.h0;
-        let y = ode_problem.eqn.init(t);
-        let f = ode_problem.eqn.rhs().call(&y, t);
-        Self { y, t, h, f }
+        let y = ode_problem.eqn.init().call(t);
+        let dy = V::zeros(y.len());
+        let nparams = ode_problem.eqn.rhs().nparams();
+        let (s, ds) = if ode_problem.eqn_sens.is_none() {
+            (vec![], vec![])
+        } else {
+            let eqn_sens = ode_problem.eqn_sens.as_ref().unwrap();
+            eqn_sens.init().update_state(t);
+            let mut s = Vec::with_capacity(nparams);
+            let mut ds = Vec::with_capacity(nparams);
+            for i in 0..nparams {
+                eqn_sens.init().set_param_index(i);
+                let si = eqn_sens.init().call(t);
+                let dsi = V::zeros(y.len());
+                s.push(si);
+                ds.push(dsi);
+            }
+            (s, ds)
+        };
+        Self { y, t, h, dy, s, ds }
     }
 
-    /// Set the state to be consistent with the algebraic constraints of the problem.
+    /// Calculate a consistent state and time derivative of the state, based on the equations of the problem.
     pub fn set_consistent<Eqn, S>(
         &mut self,
         ode_problem: &OdeSolverProblem<Eqn>,
@@ -167,51 +179,100 @@ impl<V: Vector> OdeSolverState<V> {
     ) -> Result<()>
     where
         Eqn: OdeEquations<T = V::T, V = V>,
-        S: NonLinearSolver<FilterCallable<Eqn::Rhs>> + ?Sized,
+        S: NonLinearSolver<InitOp<Eqn>> + ?Sized,
     {
+        ode_problem
+            .eqn
+            .rhs()
+            .call_inplace(&self.y, self.t, &mut self.dy);
         if ode_problem.eqn.mass().is_none() {
             return Ok(());
         }
-        let mass_diagonal = ode_problem.eqn.mass().unwrap().matrix(self.t).diagonal();
-        let indices = mass_diagonal.filter_indices(|x| x == Eqn::T::zero());
-        if indices.len() == 0 {
+        let f = Rc::new(InitOp::new(
+            &ode_problem.eqn,
+            ode_problem.t0,
+            &self.y,
+            &self.dy,
+        ));
+        let rtol = ode_problem.rtol;
+        let atol = ode_problem.atol.clone();
+        let init_problem = SolverProblem::new(f.clone(), atol, rtol);
+        root_solver.set_problem(&init_problem);
+        let mut y = f.y0.borrow().clone();
+        root_solver.solve_in_place(&mut y, self.t)?;
+        f.scatter_soln(&y, &mut self.y, &mut self.dy);
+        Ok(())
+    }
+
+    /// Calculate the initial sensitivity vectors and their time derivatives, based on the equations of the problem.
+    /// Note that this function assumes that the state is already consistent with the algebraic constraints
+    /// (either via [Self::set_consistent] or by setting the state up manually).
+    pub fn set_consistent_sens<Eqn, S>(
+        &mut self,
+        ode_problem: &OdeSolverProblem<Eqn>,
+        root_solver: &mut S,
+    ) -> Result<()>
+    where
+        Eqn: OdeEquations<T = V::T, V = V>,
+        S: NonLinearSolver<InitOp<SensEquations<Eqn>>> + ?Sized,
+    {
+        if ode_problem.eqn_sens.is_none() {
             return Ok(());
         }
-        let mut y_filtered = self.y.filter(&indices);
-        let atol = Rc::new(ode_problem.atol.as_ref().filter(&indices));
-        let rhs = ode_problem.eqn.rhs().clone();
-        let f = Rc::new(FilterCallable::new(rhs, &self.y, indices));
-        let rtol = ode_problem.rtol;
-        let init_problem = SolverProblem::new(f, atol, rtol);
-        root_solver.set_problem(&init_problem);
-        root_solver.solve_in_place(&mut y_filtered, self.t)?;
-        let indices = init_problem.f.indices();
-        self.y.scatter_from(&y_filtered, indices);
+
+        let eqn_sens = ode_problem.eqn_sens.as_ref().unwrap();
+        eqn_sens.rhs().update_state(&self.y, &self.dy, self.t);
+        for i in 0..ode_problem.eqn.rhs().nparams() {
+            eqn_sens.init().set_param_index(i);
+            eqn_sens.rhs().set_param_index(i);
+            eqn_sens
+                .rhs()
+                .call_inplace(&self.s[i], self.t, &mut self.ds[i]);
+        }
+
+        if ode_problem.eqn.mass().is_none() {
+            return Ok(());
+        }
+
+        for i in 0..ode_problem.eqn.rhs().nparams() {
+            eqn_sens.init().set_param_index(i);
+            eqn_sens.rhs().set_param_index(i);
+            let f = Rc::new(InitOp::new(
+                eqn_sens,
+                ode_problem.t0,
+                &self.s[i],
+                &self.ds[i],
+            ));
+            root_solver.set_problem(&SolverProblem::new(
+                f.clone(),
+                ode_problem.atol.clone(),
+                ode_problem.rtol,
+            ));
+            let mut y = f.y0.borrow().clone();
+            root_solver.solve_in_place(&mut y, self.t)?;
+            f.scatter_soln(&y, &mut self.s[i], &mut self.ds[i]);
+        }
         Ok(())
     }
 
     /// compute size of first step based on alg in Hairer, Norsett, Wanner
     /// Solving Ordinary Differential Equations I, Nonstiff Problems
     /// Section II.4.2
+    /// Note: this assumes that the state is already consistent with the algebraic constraints
+    /// and y and dy are already set appropriately
     pub fn set_step_size<Eqn>(&mut self, ode_problem: &OdeSolverProblem<Eqn>, solver_order: usize)
     where
         Eqn: OdeEquations<T = V::T, V = V>,
     {
         let y0 = &self.y;
         let t0 = self.t;
-        let f0 = &self.f;
+        let f0 = &self.dy;
 
-        let mut scale_factor = y0.abs();
-        scale_factor *= scale(ode_problem.rtol);
-        scale_factor += ode_problem.atol.as_ref();
+        let rtol = ode_problem.rtol;
+        let atol = ode_problem.atol.as_ref();
 
-        let mut tmp = f0.clone();
-        tmp.component_div_assign(&scale_factor);
-        let d0 = tmp.norm();
-
-        tmp = y0.clone();
-        tmp.component_div_assign(&scale_factor);
-        let d1 = f0.norm();
+        let d0 = y0.squared_norm(y0, atol, rtol).sqrt();
+        let d1 = f0.squared_norm(y0, atol, rtol).sqrt();
 
         let h0 = if d0 < Eqn::T::from(1e-5) || d1 < Eqn::T::from(1e-5) {
             Eqn::T::from(1e-6)
@@ -223,10 +284,8 @@ impl<V: Vector> OdeSolverState<V> {
         let t1 = t0 + h0;
         let f1 = ode_problem.eqn.rhs().call(&y1, t1);
 
-        let mut df = f1 - f0;
-        df *= scale(Eqn::T::one() / h0);
-        df.component_div_assign(&scale_factor);
-        let d2 = df.norm();
+        let df = f1 - f0;
+        let d2 = df.squared_norm(y0, atol, rtol).sqrt() / h0;
 
         let mut max_d = d2;
         if max_d < d1 {
@@ -248,31 +307,5 @@ impl<V: Vector> OdeSolverState<V> {
         if self.h > h1 {
             self.h = h1;
         }
-
-        // update initial step size based on function
-        //let mut scale_factor = state.y.abs();
-        //scale_factor *= scale(problem.rtol);
-        //scale_factor += problem.atol.as_ref();
-
-        //let f0 = problem.eqn.rhs().call(&state.y, state.t);
-        //let hf0 = &f0 * scale(state.h);
-        //let y1 = &state.y + &hf0;
-        //let t1 = state.t + state.h;
-        //let f1 = problem.eqn.rhs().call(&y1, t1);
-
-        //// store f1 in diff[1] for use in step size control
-        //self.diff.column_mut(1).copy_from(&hf0);
-
-        //let mut df = f1 - f0;
-        //df.component_div_assign(&scale_factor);
-        //let d2 = df.norm();
-
-        //let one_over_order_plus_one =
-        //    Eqn::T::one() / (Eqn::T::from(self.order as f64) + Eqn::T::one());
-        //let mut new_h = state.h * d2.pow(-one_over_order_plus_one);
-        //if new_h > Eqn::T::from(100.0) * state.h {
-        //    new_h = Eqn::T::from(100.0) * state.h;
-        //}
-        //state.h = new_h;
     }
 }

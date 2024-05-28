@@ -2,8 +2,9 @@ use crate::{
     matrix::Matrix, ode_solver::problem::OdeSolverSolution, OdeBuilder, OdeEquations,
     OdeSolverProblem, Vector,
 };
+use num_traits::Zero;
 
-pub fn robertson<M: Matrix + 'static>(
+pub fn robertson_sens<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
@@ -14,7 +15,8 @@ pub fn robertson<M: Matrix + 'static>(
         .rtol(1e-4)
         .atol([1.0e-8, 1.0e-6, 1.0e-6])
         .use_coloring(use_coloring)
-        .build_ode_with_mass(
+        .sensitivities_error_control(true)
+        .build_ode_with_mass_and_sens(
             //*      dy1/dt = -.04*y1 + 1.e4*y2*y3
             //*      dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*y2**2
             //*         0   = y1 + y2 + y3 - 1
@@ -31,12 +33,23 @@ pub fn robertson<M: Matrix + 'static>(
                     - M::T::from(2.0) * p[2] * x[1] * v[1];
                 y[2] = v[0] + v[1] + v[2];
             },
+            |x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
+                y[0] = -v[0] * x[0] + v[1] * x[1] * x[2];
+                y[1] = v[0] * x[0] - v[1] * x[1] * x[2] - v[2] * x[1] * x[1];
+                y[2] = M::T::zero();
+            },
             |x: &M::V, _p: &M::V, _t: M::T, beta: M::T, y: &mut M::V| {
                 y[0] = x[0] + beta * y[0];
                 y[1] = x[1] + beta * y[1];
                 y[2] = beta * y[2];
             },
+            |_x: &M::V, _p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V| {
+                y.fill(M::T::zero());
+            },
             |_p: &M::V, _t: M::T| M::V::from_vec(vec![1.0.into(), 0.0.into(), 0.0.into()]),
+            |_p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V| {
+                y.fill(M::T::zero());
+            },
         )
         .unwrap();
 

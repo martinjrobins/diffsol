@@ -163,6 +163,17 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
         }
     }
 
+    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)> {
+        self.triplet_iter()
+    }
+
+    fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
+        let col = self.col(j);
+        for (&i, &val) in col.row_indices().iter().zip(col.values().iter()) {
+            v[i] += val;
+        }
+    }
+
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,

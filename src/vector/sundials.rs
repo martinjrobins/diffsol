@@ -397,10 +397,8 @@ impl_sub_view_owned!(SundialsVectorView, SundialsVector);
 impl<'a> VectorViewMut<'a> for SundialsVectorViewMut<'a> {
     type Owned = SundialsVector;
     type View = SundialsVectorView<'a>;
-    fn abs(&self) -> Self::Owned {
-        let z = SundialsVector::new_serial(self.len());
-        unsafe { N_VAbs(self.sundials_vector(), z.sundials_vector()) }
-        z
+    fn abs_to(&self, y: &mut Self::Owned) {
+        unsafe { N_VAbs(self.sundials_vector(), y.sundials_vector()) }
     }
     fn copy_from(&mut self, other: &Self::Owned) {
         unsafe { N_VScale(1.0, other.sundials_vector(), self.sundials_vector()) }
@@ -412,15 +410,30 @@ impl<'a> VectorViewMut<'a> for SundialsVectorViewMut<'a> {
 
 impl<'a> VectorView<'a> for SundialsVectorView<'a> {
     type Owned = SundialsVector;
-    fn abs(&self) -> Self::Owned {
-        let z = SundialsVector::new_serial(self.len());
-        unsafe { N_VAbs(self.sundials_vector(), z.sundials_vector()) }
-        z
+    fn abs_to(&self, y: &mut Self::Owned) {
+        unsafe { N_VAbs(self.sundials_vector(), y.sundials_vector()) }
     }
     fn into_owned(self) -> Self::Owned {
         let mut z = SundialsVector::new_serial(self.len());
         z.copy_from_view(&self);
         z
+    }
+    fn norm(&self) -> Self::T {
+        let ones = SundialsVector::from_element(self.len(), 1.0);
+        unsafe { N_VWL2Norm_Serial(self.sundials_vector(), ones.sundials_vector()) }
+    }
+    fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
+        let mut acc = 0.0;
+        if y.len() != self.len() || y.len() != atol.len() {
+            panic!("Vector lengths do not match");
+        }
+        for i in 0..self.len() {
+            let yi = y[i];
+            let ai = atol[i];
+            let xi = self[i];
+            acc += (xi / (yi.abs() * rtol + ai)).powi(2);
+        }
+        acc / self.len() as f64
     }
 }
 
@@ -434,6 +447,9 @@ impl VectorIndex for SundialsIndexVector {
     fn from_slice(slice: &[IndexType]) -> Self {
         Self(slice.to_vec())
     }
+    fn clone_as_vec(&self) -> Vec<IndexType> {
+        self.0.clone()
+    }
 }
 
 impl Vector for SundialsVector {
@@ -443,6 +459,20 @@ impl Vector for SundialsVector {
     fn len(&self) -> IndexType {
         unsafe { N_VGetLength_Serial(self.sundials_vector()) as IndexType }
     }
+    fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
+        let mut acc = 0.0;
+        if y.len() != self.len() || y.len() != atol.len() {
+            panic!("Vector lengths do not match");
+        }
+        for i in 0..self.len() {
+            let yi = y[i];
+            let ai = atol[i];
+            let xi = self[i];
+            acc += (xi / (yi.abs() * rtol + ai)).powi(2);
+        }
+        acc / self.len() as f64
+    }
+
     fn norm(&self) -> Self::T {
         let ones = SundialsVector::from_element(self.len(), 1.0);
         unsafe { N_VWL2Norm_Serial(self.sundials_vector(), ones.sundials_vector()) }
@@ -450,10 +480,11 @@ impl Vector for SundialsVector {
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn abs(&self) -> Self {
-        let z = SundialsVector::new_clone(self);
-        unsafe { N_VAbs(self.sundials_vector(), z.sundials_vector()) }
-        z
+    fn fill(&mut self, value: Self::T) {
+        unsafe { N_VConst(value, self.sundials_vector()) }
+    }
+    fn abs_to(&self, y: &mut Self) {
+        unsafe { N_VAbs(self.sundials_vector(), y.sundials_vector()) }
     }
     fn add_scalar_mut(&mut self, scalar: Self::T) {
         unsafe { N_VAddConst(self.sundials_vector(), scalar, self.sundials_vector()) }
@@ -610,7 +641,8 @@ mod tests {
         let mut v = SundialsVector::new_serial(2);
         v[0] = -1.0;
         v[1] = 2.0;
-        let v2 = v.abs();
+        let mut v2 = v.clone();
+        v.abs_to(&mut v2);
         assert_eq!(v2[0], 1.0);
         assert_eq!(v2[1], 2.0);
     }
@@ -724,5 +756,20 @@ mod tests {
         v[1] = 2.0;
         let norm = v.norm();
         assert_eq!(norm, (1.0_f64.powi(2) + 2.0_f64.powi(2)).sqrt());
+    }
+
+    #[test]
+    fn test_error_norm() {
+        let v = SundialsVector::from_vec(vec![1.0, -2.0, 3.0]);
+        let y = SundialsVector::from_vec(vec![1.0, 2.0, 3.0]);
+        let atol = SundialsVector::from_vec(vec![0.1, 0.2, 0.3]);
+        let rtol = 0.1;
+        let mut tmp = y.clone() * scale(rtol);
+        tmp += &atol;
+        let mut r = v.clone();
+        r.component_div_assign(&tmp);
+        let errorn_check = r.norm().powi(2) / 3.0;
+        assert!((v.squared_norm(&y, &atol, rtol) - errorn_check).abs() < 1e-10);
+        assert!((v.as_view().squared_norm(&y, &atol, rtol) - errorn_check).abs() < 1e-10);
     }
 }

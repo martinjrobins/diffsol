@@ -4,7 +4,7 @@ use crate::{
 };
 use num_traits::{One, Zero};
 use std::{
-    cell::RefCell,
+    cell::{Ref, RefCell},
     ops::{AddAssign, Deref, SubAssign},
     rc::Rc,
 };
@@ -25,6 +25,32 @@ pub struct BdfCallable<Eqn: OdeEquations> {
 }
 
 impl<Eqn: OdeEquations> BdfCallable<Eqn> {
+    pub fn from_eqn(eqn: &Rc<Eqn>) -> Self {
+        let eqn = eqn.clone();
+        let n = eqn.rhs().nstates();
+        let c = RefCell::new(Eqn::T::zero());
+        let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n));
+        let jacobian_is_stale = RefCell::new(true);
+        let number_of_jac_evals = RefCell::new(0);
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n));
+        let rhs_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0));
+        let mass_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0));
+        let sparsity = None;
+        Self {
+            eqn,
+            psi_neg_y0,
+            c,
+            rhs_jac,
+            mass_jac,
+            jacobian_is_stale,
+            number_of_jac_evals,
+            tmp,
+            sparsity,
+        }
+    }
+    pub fn eqn(&self) -> &Rc<Eqn> {
+        &self.eqn
+    }
     pub fn new(ode_problem: &OdeSolverProblem<Eqn>) -> Self {
         let eqn = ode_problem.eqn.clone();
         let n = ode_problem.eqn.rhs().nstates();
@@ -53,13 +79,6 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
         let mass_jac = if eqn.mass().is_none() {
             // no mass matrix, so just use the identity
             Eqn::M::from_diagonal(&Eqn::V::from_element(n, Eqn::T::one()))
-        } else if eqn.is_mass_constant() {
-            // if mass is constant then pre-compute it
-            let mut mass_jac = Eqn::M::new_from_sparsity(n, n, eqn.mass().unwrap().sparsity());
-            eqn.mass()
-                .unwrap()
-                .matrix_inplace(Eqn::T::zero(), &mut mass_jac);
-            mass_jac
         } else {
             // mass is not constant, so just create a matrix with the correct sparsity
             Eqn::M::new_from_sparsity(n, n, eqn.mass().unwrap().sparsity())
@@ -88,6 +107,10 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
     #[cfg(test)]
     fn set_psi_neg_y0_direct(&mut self, psi_neg_y0: Eqn::V) {
         self.psi_neg_y0.replace(psi_neg_y0);
+    }
+
+    pub fn tmp(&self) -> Ref<Eqn::V> {
+        self.tmp.borrow()
     }
 
     pub fn number_of_jac_evals(&self) -> usize {
@@ -129,6 +152,8 @@ impl<Eqn: OdeEquations> Op for BdfCallable<Eqn> {
     }
 }
 
+// dF(y)/dp = dM/dp (y - y0 + psi) + Ms - c * df(y)/dp - c df(y)/dy s = 0
+// jac is M - c * df(y)/dy, same
 // callable to solve for F(y) = M (y' + psi) - f(y) = 0
 impl<Eqn: OdeEquations> NonLinearOp for BdfCallable<Eqn>
 where
@@ -172,7 +197,7 @@ where
             let mut rhs_jac = self.rhs_jac.borrow_mut();
             self.eqn.rhs().jacobian_inplace(x, t, &mut rhs_jac);
             let c = *self.c.borrow().deref();
-            if self.eqn.is_mass_constant() || self.eqn.mass().is_none() {
+            if self.eqn.mass().is_none() {
                 let mass_jac = self.mass_jac.borrow();
                 y.scale_add_and_assign(mass_jac.deref(), -c, rhs_jac.deref());
             } else {

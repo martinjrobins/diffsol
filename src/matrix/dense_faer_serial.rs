@@ -1,4 +1,4 @@
-use std::ops::{Mul, MulAssign};
+use std::ops::{AddAssign, Mul, MulAssign};
 
 use super::default_solver::DefaultSolver;
 use super::{Dense, DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixView, MatrixViewMut};
@@ -142,6 +142,14 @@ impl<T: Scalar> Matrix for Mat<T> {
         for ((i, j), src_i) in dst_indices.iter().zip(src_indices.iter()) {
             self[(*i, *j)] = data[*src_i];
         }
+    }
+
+    fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
+        v.add_assign(&self.column(j));
+    }
+
+    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)> {
+        (0..self.nrows()).flat_map(move |i| (0..self.ncols()).map(move |j| (i, j, &self[(i, j)])))
     }
 
     fn try_from_triplets(

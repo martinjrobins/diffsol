@@ -2,9 +2,9 @@ use std::ops::{Div, Mul, MulAssign};
 
 use faer::{unzipped, zipped, Col, ColMut, ColRef, Mat};
 
-use crate::{scalar::Scale, IndexType, Scalar};
+use crate::{scalar::Scale, IndexType, Scalar, Vector};
 
-use crate::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
+use crate::{VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
 use super::DefaultDenseMatrix;
 
@@ -86,8 +86,21 @@ impl<T: Scalar> Vector for Col<T> {
     fn norm(&self) -> T {
         self.norm_l2()
     }
-    fn abs(&self) -> Self {
-        zipped!(self).map(|unzipped!(xi)| xi.faer_abs())
+    fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
+        let mut acc = T::zero();
+        if y.len() != self.len() || y.len() != atol.len() {
+            panic!("Vector lengths do not match");
+        }
+        for i in 0..self.len() {
+            let yi = unsafe { y.read_unchecked(i) };
+            let ai = unsafe { atol.read_unchecked(i) };
+            let xi = unsafe { self.read_unchecked(i) };
+            acc += (xi / (yi.abs() * rtol + ai)).powi(2);
+        }
+        acc / Self::T::from(self.len() as f64)
+    }
+    fn abs_to(&self, y: &mut Self) {
+        zipped!(self, y.as_mut()).for_each(|unzipped!(xi, mut yi)| *yi = xi.faer_abs());
     }
     fn as_view(&self) -> Self::View<'_> {
         self.as_ref()
@@ -100,6 +113,9 @@ impl<T: Scalar> Vector for Col<T> {
     }
     fn copy_from_view(&mut self, other: &Self::View<'_>) {
         self.copy_from(other)
+    }
+    fn fill(&mut self, value: Self::T) {
+        self.fill(value);
     }
     fn from_element(nstates: usize, value: Self::T) -> Self {
         Col::from_vec(vec![value; nstates])
@@ -174,6 +190,9 @@ impl VectorIndex for Vec<IndexType> {
     fn from_slice(slice: &[IndexType]) -> Self {
         slice.to_vec()
     }
+    fn clone_as_vec(&self) -> Vec<IndexType> {
+        self.clone()
+    }
 }
 
 macro_rules! impl_vector_common {
@@ -190,19 +209,35 @@ impl_vector_common!(ColMut<'a, T>);
 
 impl<'a, T: Scalar> VectorView<'a> for ColRef<'a, T> {
     type Owned = Col<T>;
-    fn abs(&self) -> Col<T> {
-        zipped!(self).map(|unzipped!(xi)| xi.faer_abs())
+    fn abs_to(&self, y: &mut Self::Owned) {
+        zipped!(self, y.as_mut()).for_each(|unzipped!(xi, mut yi)| *yi = xi.faer_abs());
     }
     fn into_owned(self) -> Col<T> {
         self.to_owned()
+    }
+    fn norm(&self) -> T {
+        self.norm_l2()
+    }
+    fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
+        let mut acc = T::zero();
+        if y.len() != self.nrows() || y.nrows() != atol.nrows() {
+            panic!("Vector lengths do not match");
+        }
+        for i in 0..self.nrows() {
+            let yi = unsafe { y.read_unchecked(i) };
+            let ai = unsafe { atol.read_unchecked(i) };
+            let xi = unsafe { self.read_unchecked(i) };
+            acc += (xi / (yi.abs() * rtol + ai)).powi(2);
+        }
+        acc / Self::T::from(self.nrows() as f64)
     }
 }
 
 impl<'a, T: Scalar> VectorViewMut<'a> for ColMut<'a, T> {
     type Owned = Col<T>;
     type View = ColRef<'a, T>;
-    fn abs(&self) -> Col<T> {
-        zipped!(self).map(|unzipped!(xi)| xi.faer_abs())
+    fn abs_to(&self, y: &mut Self::Owned) {
+        zipped!(self, y.as_mut()).for_each(|unzipped!(xi, mut yi)| *yi = xi.faer_abs());
     }
     fn copy_from(&mut self, other: &Self::Owned) {
         self.copy_from(other);
@@ -221,7 +256,8 @@ mod tests {
     #[test]
     fn test_abs() {
         let v = Col::from_vec(vec![1.0, -2.0, 3.0]);
-        let v_abs = v.abs();
+        let mut v_abs = v.clone();
+        v.abs_to(&mut v_abs);
         assert_eq!(v_abs, Col::from_vec(vec![1.0, 2.0, 3.0]));
     }
 
@@ -240,5 +276,30 @@ mod tests {
         let r = Col::from_vec(vec![2.0, -4.0, 6.0]);
         v.mul_assign(s);
         assert_eq!(v, r);
+    }
+
+    #[test]
+    fn test_error_norm() {
+        let v = Col::from_vec(vec![1.0, -2.0, 3.0]);
+        let y = Col::from_vec(vec![1.0, 2.0, 3.0]);
+        let atol = Col::from_vec(vec![0.1, 0.2, 0.3]);
+        let rtol = 0.1;
+        let mut tmp = y.clone() * scale(rtol);
+        tmp += &atol;
+        let mut r = v.clone();
+        r.component_div_assign(&tmp);
+        let errorn_check = r.squared_norm_l2() / 3.0;
+        assert!(
+            (v.squared_norm(&y, &atol, rtol) - errorn_check).abs() < 1e-10,
+            "{} vs {}",
+            v.squared_norm(&y, &atol, rtol),
+            errorn_check
+        );
+        assert!(
+            (v.as_ref().squared_norm(&y, &atol, rtol) - errorn_check).abs() < 1e-10,
+            "{} vs {}",
+            v.as_ref().squared_norm(&y, &atol, rtol),
+            errorn_check
+        );
     }
 }

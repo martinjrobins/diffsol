@@ -42,27 +42,20 @@ mod robertson_ode {
 }
 
 mod robertson {
-    use diffsol::{
-        linear_solver::NalgebraLU, ode_solver::test_models::robertson::robertson, Bdf,
-        NewtonNonlinearSolver, OdeSolverMethod,
-    };
+    use diffsol::{ode_solver::test_models::robertson::robertson, Bdf, OdeSolverMethod};
 
     #[divan::bench]
     fn bdf() {
         let mut s = Bdf::default();
         let (problem, _soln) = robertson::<nalgebra::DMatrix<f64>>(false);
-        let mut root = NewtonNonlinearSolver::new(NalgebraLU::default());
-        let _y = s.make_consistent_and_solve(&problem, 4.0000e+10, &mut root);
+        let _y = s.solve(&problem, 4.0000e+10);
     }
 
     #[cfg(feature = "sundials")]
     #[divan::bench]
     fn sundials() {
-        use diffsol::SundialsLinearSolver;
-
         let mut s = diffsol::SundialsIda::default();
         let (problem, _soln) = robertson::<diffsol::SundialsMatrix>(false);
-        let mut root = NewtonNonlinearSolver::new(SundialsLinearSolver::new_dense());
-        let _y = s.make_consistent_and_solve(&problem, 4.0000e+10, &mut root);
+        let _y = s.solve(&problem, 4.0000e+10);
     }
 }

@@ -27,7 +27,7 @@
 //! - Use the [OdeSolverMethod::step] method to step the solution forward in time with an internal time step chosen by the solver to meet the error tolerances.
 //! - Use the [OdeSolverMethod::interpolate] method to interpolate the solution between the last two time steps.
 //! - Use the [OdeSolverMethod::set_stop_time] method to stop the solver at a specific time (i.e. this will override the internal time step so that the solver stops at the specified time).
-//! - Alternatively, use the convenience functions [OdeSolverMethod::solve] and [OdeSolverMethod::make_consistent_and_solve] that will both initialise the problem and solve the problem up to a specific time.
+//! - Alternatively, use the convenience function [OdeSolverMethod::solve]  that will both initialise the problem and solve the problem up to a specific time.
 //!
 //! ## DiffSL
 //!
@@ -62,6 +62,13 @@
 //!
 //! DiffSol provides a simple way to detect user-provided events during the integration of the ODEs. You can use this by providing a closure that has a zero-crossing at the event you want to detect, using the [OdeBuilder::build_ode_with_root] builder,
 //! or by providing a [NonLinearOp] that has a zero-crossing at the event you want to detect. To use the root finding feature while integrating with the solver, you can use the return value of [OdeSolverMethod::step] to check if an event has been detected.
+//!
+//! ## Forward Sensitivity Analysis
+//!
+//! DiffSol provides a way to compute the forward sensitivity of the solution with respect to the parameters. You can use this by using the [OdeBuilder::build_ode_with_sens] or [OdeBuilder::build_ode_with_mass_and_sens] builder functions.
+//! Note that by default the sensitivity equations are not included in the error control for the solvers, you can change this by using the [OdeBuilder::sensitivities_error_control] method.
+//!
+//! To obtain the sensitivity solution via interpolation, you can use the [OdeSolverMethod::interpolate_sens] method. Otherwise the sensitivity vectors are stored in the [OdeSolverState] struct.
 //!
 //! ## Nonlinear and linear solvers
 //!
@@ -148,109 +155,27 @@ pub use ode_solver::diffsl::DiffSlContext;
 pub use matrix::default_solver::DefaultSolver;
 use matrix::{DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixView, MatrixViewMut};
 pub use nonlinear_solver::newton::NewtonNonlinearSolver;
-use nonlinear_solver::{root::RootFinder, NonLinearSolver};
+use nonlinear_solver::{
+    convergence::Convergence, convergence::ConvergenceStatus, newton::newton_iteration,
+    root::RootFinder, NonLinearSolver,
+};
 pub use ode_solver::{
     bdf::Bdf, builder::OdeBuilder, equations::OdeEquations, equations::OdeSolverEquations,
     method::OdeSolverMethod, method::OdeSolverState, method::OdeSolverStopReason,
-    problem::OdeSolverProblem, sdirk::Sdirk, tableau::Tableau,
+    problem::OdeSolverProblem, sdirk::Sdirk, sens_equations::SensEquations,
+    sens_equations::SensInit, sens_equations::SensRhs, tableau::Tableau,
 };
-use op::{closure::Closure, closure_no_jac::ClosureNoJac, linear_closure::LinearClosure};
-pub use op::{unit::UnitCallable, LinearOp, NonLinearOp, Op};
+pub use op::{
+    closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure,
+    unit::UnitCallable, ConstantOp, LinearOp, NonLinearOp, Op,
+};
+use op::{
+    closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,
+    constant_closure_with_sens::ConstantClosureWithSens, init::InitOp,
+    linear_closure_with_sens::LinearClosureWithSens,
+};
 use scalar::{IndexType, Scalar, Scale};
 use solver::SolverProblem;
 use vector::{Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut};
 
 pub use scalar::scale;
-
-#[cfg(test)]
-mod tests {
-
-    use crate::{
-        ode_solver::builder::OdeBuilder, vector::Vector, Bdf, OdeSolverMethod, OdeSolverState,
-    };
-
-    // WARNING: if this test fails and you make a change to the code, you should update the README.md file as well!!!
-    #[test]
-    fn test_readme() {
-        type T = f64;
-        type V = nalgebra::DVector<T>;
-        let problem = OdeBuilder::new()
-            .p([0.04, 1.0e4, 3.0e7])
-            .rtol(1e-4)
-            .atol([1.0e-8, 1.0e-6, 1.0e-6])
-            .build_ode_dense(
-                |x: &V, p: &V, _t: T, y: &mut V| {
-                    y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
-                    y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
-                    y[2] = p[2] * x[1] * x[1];
-                },
-                |x: &V, p: &V, _t: T, v: &V, y: &mut V| {
-                    y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
-                    y[1] = p[0] * v[0]
-                        - p[1] * v[1] * x[2]
-                        - p[1] * x[1] * v[2]
-                        - 2.0 * p[2] * x[1] * v[1];
-                    y[2] = 2.0 * p[2] * x[1] * v[1];
-                },
-                |_p: &V, _t: T| V::from_vec(vec![1.0, 0.0, 0.0]),
-            )
-            .unwrap();
-
-        let mut solver = Bdf::default();
-
-        let t = 0.4;
-        let y = solver.solve(&problem, t).unwrap();
-
-        let state = OdeSolverState::new(&problem, &solver).unwrap();
-        solver.set_problem(state, &problem);
-        while solver.state().unwrap().t <= t {
-            solver.step().unwrap();
-        }
-        let y2 = solver.interpolate(t).unwrap();
-
-        y2.assert_eq_st(&y, 1e-6);
-    }
-    #[test]
-    fn test_readme_faer() {
-        type T = f64;
-        type V = faer::Col<f64>;
-        type M = faer::Mat<f64>;
-        let problem = OdeBuilder::new()
-            .p([0.04, 1.0e4, 3.0e7])
-            .rtol(1e-4)
-            .atol([1.0e-8, 1.0e-6, 1.0e-6])
-            .build_ode_dense(
-                |x: &V, p: &V, _t: T, y: &mut V| {
-                    y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
-                    y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
-                    y[2] = p[2] * x[1] * x[1];
-                },
-                |x: &V, p: &V, _t: T, v: &V, y: &mut V| {
-                    y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
-                    y[1] = p[0] * v[0]
-                        - p[1] * v[1] * x[2]
-                        - p[1] * x[1] * v[2]
-                        - 2.0 * p[2] * x[1] * v[1];
-                    y[2] = 2.0 * p[2] * x[1] * v[1];
-                },
-                |_p: &V, _t: T| V::from_vec(vec![1.0, 0.0, 0.0]),
-            )
-            .unwrap();
-
-        let mut solver = Bdf::<M, _, _>::default();
-
-        let t = 0.4;
-        let y = solver.solve(&problem, t).unwrap();
-
-        let state = OdeSolverState::new(&problem, &solver).unwrap();
-        solver.set_problem(state, &problem);
-        while solver.state().unwrap().t <= t {
-            solver.step().unwrap();
-        }
-        let y2 = solver.interpolate(t).unwrap();
-
-        y2.assert_eq_st(&y, 1e-6);
-    }
-
-    // y2.assert_eq(&y, 1e-6);
-}

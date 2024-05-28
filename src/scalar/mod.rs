@@ -17,7 +17,7 @@ pub trait Scalar:
     + From<f64>
     + Display
     + SimdRealField
-    + ComplexField
+    + ComplexField<RealField = Self>
     + Copy
     + ClosedSub
     + From<f64>

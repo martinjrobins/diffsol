@@ -240,6 +240,19 @@ impl Matrix for SundialsMatrix {
         }
     }
 
+    fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
+        let n = self.nrows();
+        for i in 0..n {
+            v[i] += self[(i, j)];
+        }
+    }
+
+    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)> {
+        let n = self.ncols();
+        let m = self.nrows();
+        (0..m).flat_map(move |i| (0..n).map(move |j| (i, j, &self[(i, j)])))
+    }
+
     fn diagonal(&self) -> Self::V {
         let n = min(self.nrows(), self.ncols());
         let mut v = SundialsVector::new_serial(n);

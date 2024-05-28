@@ -15,6 +15,7 @@ pub mod sundials;
 pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug {
     fn zeros(len: IndexType) -> Self;
     fn len(&self) -> IndexType;
+    fn clone_as_vec(&self) -> Vec<IndexType>;
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -82,7 +83,7 @@ pub trait VectorViewMut<'a>:
 {
     type Owned;
     type View;
-    fn abs(&self) -> Self::Owned;
+    fn abs_to(&self, y: &mut Self::Owned);
     fn copy_from(&mut self, other: &Self::Owned);
     fn copy_from_view(&mut self, other: &Self::View);
 }
@@ -96,7 +97,9 @@ pub trait VectorView<'a>:
     + Index<IndexType, Output = Self::T>
 {
     type Owned;
-    fn abs(&self) -> Self::Owned;
+    fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T;
+    fn abs_to(&self, y: &mut Self::Owned);
+    fn norm(&self) -> Self::T;
     fn into_owned(self) -> Self::Owned;
 }
 
@@ -126,16 +129,18 @@ pub trait Vector:
         Self: 'a;
     type Index: VectorIndex;
     fn norm(&self) -> Self::T;
+    fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T;
     fn len(&self) -> IndexType;
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn abs(&self) -> Self;
+    fn abs_to(&self, y: &mut Self);
     fn exp(&self) -> Self;
     fn from_element(nstates: usize, value: Self::T) -> Self;
     fn zeros(nstates: usize) -> Self {
         Self::from_element(nstates, Self::T::zero())
     }
+    fn fill(&mut self, value: Self::T);
     fn as_view(&self) -> Self::View<'_>;
     fn as_view_mut(&mut self) -> Self::ViewMut<'_>;
     fn copy_from(&mut self, other: &Self);
@@ -156,8 +161,23 @@ pub trait Vector:
         result
     }
     fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T);
+
+    // for i in 0..indices.len():
+    //  self[i] = value[indices[i]]
     fn gather_from(&mut self, other: &Self, indices: &Self::Index);
+
+    // for i in 0..indices.len():
+    //  self[indices[i]] = value[i]
     fn scatter_from(&mut self, other: &Self, indices: &Self::Index);
+
+    // for i in 0..indices.len():
+    //  self[indices[i]] = value[indices[i]]
+    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
+        for i in 0..indices.len() {
+            self[indices[i]] = other[indices[i]];
+        }
+    }
+
     fn assert_eq_st(&self, other: &Self, tol: Self::T) {
         let tol = Self::from_element(self.len(), tol);
         self.assert_eq(other, &tol);
