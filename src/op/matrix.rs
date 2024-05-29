@@ -25,7 +25,7 @@ impl<M: Matrix> Op for MatrixOp<M> {
     fn nparams(&self) -> usize {
         0
     }
-    fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
+    fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
         self.m.sparsity()
     }
 }

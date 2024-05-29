@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::{
     linear_solver::LinearSolver, op::linearise::LinearisedOp, solver::SolverProblem, LinearOp,
-    Matrix, NonLinearOp, Op, Scalar, MatrixSparsityRef
+    Matrix, NonLinearOp, Op, Scalar,
 };
 use anyhow::Result;
 use faer::{linalg::solvers::FullPivLu, solvers::SpSolver, Col, Mat};
@@ -54,7 +54,7 @@ impl<T: Scalar, C: NonLinearOp<M = Mat<T>, V = Col<T>, T = T>> LinearSolver<C> f
         let linearised_problem = problem.linearise();
         let ncols = linearised_problem.f.nstates();
         let nrows = linearised_problem.f.nout();
-        let matrix = C::M::new_from_sparsity(nrows, ncols, linearised_problem.f.sparsity().map(|s| s.to_owned()));
+        let matrix = C::M::new_from_sparsity(nrows, ncols, linearised_problem.f.sparsity());
         self.problem = Some(linearised_problem);
         self.matrix = Some(matrix);
     }

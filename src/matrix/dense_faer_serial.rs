@@ -1,10 +1,10 @@
 use std::ops::{AddAssign, Mul, MulAssign};
 
 use super::default_solver::DefaultSolver;
-use super::{Dense, DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixView, MatrixViewMut};
+use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 use crate::op::NonLinearOp;
 use crate::scalar::{IndexType, Scalar, Scale};
-use crate::vector::Vector;
+use crate::{Vector, Dense, DenseRef};
 use crate::FaerLU;
 use anyhow::Result;
 use faer::{linalg::matmul::matmul, Col, ColMut, ColRef, Mat, MatMut, MatRef, Parallelism};
@@ -131,16 +131,24 @@ impl<T: Scalar> DenseMatrix for Mat<T> {
 }
 
 impl<T: Scalar> Matrix for Mat<T> {
-    type Sparsity = Dense;
+    type Sparsity = Dense<Self>;
+    type SparsityRef<'a> = DenseRef<'a, Self>;
+
+    fn sparsity(&self) -> Option<Self::SparsityRef<'_>> {
+        None
+    }
 
     fn set_data_with_indices(
         &mut self,
-        dst_indices: &<Self::Sparsity as MatrixSparsity>::Index,
+        dst_indices: &<Self::V as Vector>::Index,
         src_indices: &<Self::V as Vector>::Index,
-        data: &Self::V,
-    ) {
-        for ((i, j), src_i) in dst_indices.iter().zip(src_indices.iter()) {
-            self[(*i, *j)] = data[*src_i];
+        data: & Self::V,
+    )
+    {
+        for (dst_i, src_i) in dst_indices.iter().zip(src_indices.iter()) {
+            let i = dst_i % self.nrows();
+            let j = dst_i / self.nrows();
+            self[(i, j)] = data[*src_i];
         }
     }
 
@@ -187,11 +195,7 @@ impl<T: Scalar> Matrix for Mat<T> {
         zipped!(self, x, y).for_each(|unzipped!(mut s, x, y)| s.write(x.read() + beta * y.read()));
     }
 
-    fn new_from_sparsity(
-        nrows: IndexType,
-        ncols: IndexType,
-        _sparsity: Option<&Self::Sparsity>,
-    ) -> Self {
+    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, _sparsity: Option<Self::Sparsity>) -> Self {
         Self::zeros(nrows, ncols)
     }
 }

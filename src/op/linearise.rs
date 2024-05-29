@@ -51,7 +51,7 @@ impl<C: NonLinearOp> Op for LinearisedOp<C> {
     fn nparams(&self) -> usize {
         self.callable.nparams()
     }
-    fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
+    fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
         self.callable.sparsity()
     }
 }

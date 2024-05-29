@@ -5,6 +5,8 @@ use crate::scalar::Scale;
 use crate::{IndexType, Scalar, Vector, VectorIndex};
 use anyhow::Result;
 use num_traits::{One, Zero};
+use sparsity::{MatrixSparsity, MatrixSparsityRef};
+
 
 #[cfg(feature = "nalgebra")]
 mod dense_nalgebra_serial;
@@ -12,8 +14,12 @@ mod dense_nalgebra_serial;
 #[cfg(feature = "faer")]
 mod dense_faer_serial;
 
+#[cfg(feature = "faer")]
+mod sparse_faer;
+
 pub mod default_solver;
 mod sparse_serial;
+pub mod sparsity;
 
 #[cfg(feature = "sundials")]
 pub mod sundials;
@@ -114,97 +120,17 @@ pub trait MatrixView<'a>:
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V);
 }
 
-pub trait MatrixSparsity: Clone {
-    type Index;
 
-    fn nrows(&self) -> IndexType;
-    fn ncols(&self) -> IndexType;
-    fn is_sparse(&self) -> bool;
-    fn try_from_indices(
-        nrows: IndexType,
-        ncols: IndexType,
-        indices: Vec<(IndexType, IndexType)>,
-    ) -> Result<Self>;
-    fn indices(&self) -> Vec<(IndexType, IndexType)>;
-    fn union(&self, other: &Self) -> Result<Self>;
-    fn new_diagonal(n: IndexType) -> Self;
-    fn get_index(&self, rows: &[IndexType], cols: &[IndexType]) -> Self::Index;
-}
-
-#[derive(Clone)]
-pub struct Dense {
-    nrows: IndexType,
-    ncols: IndexType,
-}
-
-impl MatrixSparsity for Dense {
-    type Index = Vec<(IndexType, IndexType)>;
-
-    fn nrows(&self) -> IndexType {
-        self.nrows
-    }
-
-    fn ncols(&self) -> IndexType {
-        self.ncols
-    }
-
-    fn is_sparse(&self) -> bool {
-        false
-    }
-
-    fn get_index(&self, rows: &[IndexType], cols: &[IndexType]) -> Self::Index {
-        rows.iter()
-            .zip(cols.iter())
-            .map(|(i, j)| {
-                if i >= &self.nrows || j >= &self.ncols {
-                    panic!("Index out of bounds")
-                }
-                (*i, *j)
-            })
-            .collect()
-    }
-
-    fn try_from_indices(
-        nrows: IndexType,
-        ncols: IndexType,
-        _indices: Vec<(IndexType, IndexType)>,
-    ) -> Result<Self> {
-        if nrows == 0 || ncols == 0 {
-            return Err(anyhow::anyhow!(
-                "Cannot create a matrix with zero rows or columns"
-            ));
-        }
-        Ok(Dense { nrows, ncols })
-    }
-
-    fn indices(&self) -> Vec<(IndexType, IndexType)> {
-        Vec::new()
-    }
-
-    fn union(&self, other: &Self) -> Result<Self> {
-        if self.nrows != other.nrows || self.ncols != other.ncols {
-            return Err(anyhow::anyhow!(
-                "Cannot union matrices with different shapes"
-            ));
-        }
-        Ok(self.clone())
-    }
-
-    fn new_diagonal(n: IndexType) -> Self {
-        Dense { nrows: n, ncols: n }
-    }
-}
 
 /// A base matrix trait (including sparse and dense matrices)
 pub trait Matrix:
-    for<'a> MatrixOpsByValue<&'a Self, Self> + Mul<Scale<Self::T>, Output = Self> + Clone
+    MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone
 {
-    type Sparsity: MatrixSparsity;
+    type Sparsity: MatrixSparsity<Self>;
+    type SparsityRef<'a>: MatrixSparsityRef<'a, Self> where Self: 'a;
 
-    /// Return sparsity information, None if the matrix is dense
-    fn sparsity(&self) -> Option<&Self::Sparsity> {
-        None
-    }
+    /// Return sparsity information (None if the matrix is dense)
+    fn sparsity(&self) -> Option<Self::SparsityRef<'_>>;
 
     /// Split the current matrix into four submatrices at the given indices
     fn split_at_indices(
@@ -304,11 +230,7 @@ pub trait Matrix:
     fn zeros(nrows: IndexType, ncols: IndexType) -> Self;
 
     /// Create a new matrix from a sparsity pattern, the non-zero elements are not initialized
-    fn new_from_sparsity(
-        nrows: IndexType,
-        ncols: IndexType,
-        sparsity: Option<&Self::Sparsity>,
-    ) -> Self;
+    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, sparsity: Option<Self::Sparsity>) -> Self;
 
     /// Create a new diagonal matrix from a [Vector] holding the diagonal elements
     fn from_diagonal(v: &Self::V) -> Self;
@@ -319,10 +241,10 @@ pub trait Matrix:
 
     fn set_data_with_indices(
         &mut self,
-        dst_indices: &<Self::Sparsity as MatrixSparsity>::Index,
+        dst_indices: &<Self::V as Vector>::Index,
         src_indices: &<Self::V as Vector>::Index,
         data: &Self::V,
-    );
+    ); 
 
     /// Perform the assignment self = x + beta * y where x and y are matrices and beta is a scalar
     /// Panics if the sparsity of self, x, and y do not match (i.e. sparsity of self must be the union of the sparsity of x and y)

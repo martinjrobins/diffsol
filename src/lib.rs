@@ -153,7 +153,10 @@ pub use ode_solver::sundials::SundialsIda;
 pub use ode_solver::diffsl::DiffSlContext;
 
 pub use matrix::default_solver::DefaultSolver;
-use matrix::{DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixView, MatrixViewMut};
+use matrix::{
+    sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef, DenseMatrix, Matrix,
+    MatrixCommon, MatrixView, MatrixViewMut, MatrixRef
+};
 pub use nonlinear_solver::newton::NewtonNonlinearSolver;
 use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus, newton::newton_iteration,

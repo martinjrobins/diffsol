@@ -4,9 +4,12 @@ use anyhow::Result;
 use nalgebra::DVector;
 use nalgebra_sparse::{pattern::SparsityPattern, CooMatrix, CscMatrix};
 
-use crate::{scalar::Scale, IndexType, Scalar};
+use crate::{scalar::Scale, vector::Vector, IndexType, Scalar};
 
-use super::{Matrix, MatrixCommon, MatrixSparsity};
+use super::{
+    sparsity::{MatrixSparsity, MatrixSparsityRef},
+    Matrix, MatrixCommon,
+};
 
 impl<T: Scalar> MatrixCommon for CscMatrix<T> {
     type V = DVector<T>;
@@ -27,18 +30,38 @@ impl<T: Scalar> Mul<Scale<T>> for CscMatrix<T> {
     }
 }
 
-impl MatrixSparsity for SparsityPattern {
-    type Index = Vec<IndexType>;
+impl<T: Scalar> MatrixSparsity<CscMatrix<T>> for SparsityPattern {
 
-    fn get_index(&self, rows: &[IndexType], cols: &[IndexType]) -> Self::Index {
-        let mut index = Vec::with_capacity(rows.len());
-        for (&i, &j) in rows.iter().zip(cols) {
-            let offset = self.major_offsets()[j];
+    fn union(self, other: &SparsityPattern) -> Result<SparsityPattern> {
+        let max_nnz = self.nnz().max(other.nnz());
+        let min_nnz = self.nnz().min(other.nnz());
+        let mut minor_indices = Vec::with_capacity(self.nnz() + max_nnz - min_nnz);
+        let mut major_offsets = Vec::with_capacity(self.major_dim());
+
+        // loop through columns, calculate union of rows
+        let mut offset = 0;
+        for j in 0..self.major_dim() {
             let lane = self.lane(j);
-            let lane_i = lane.iter().position(|&x| x == i).unwrap();
-            index.push(offset + lane_i);
+            let other_lane = other.lane(j);
+            let set: HashSet<usize> =
+                HashSet::from_iter(lane.iter().chain(other_lane.iter()).cloned());
+            let mut set = set.into_iter().collect::<Vec<_>>();
+
+            major_offsets.push(offset);
+            offset += set.len();
+
+            minor_indices.append(&mut set);
         }
-        index
+        SparsityPattern::try_from_offsets_and_indices(
+            self.major_dim(),
+            self.minor_dim(),
+            major_offsets,
+            minor_indices,
+        )
+        .map_err(anyhow::Error::new)
+    }
+    fn as_ref(&self) -> &SparsityPattern {
+        self
     }
 
     fn nrows(&self) -> IndexType {
@@ -66,35 +89,6 @@ impl MatrixSparsity for SparsityPattern {
             }
         }
         indices
-    }
-
-    fn union(&self, other: &Self) -> Result<Self> {
-        let max_nnz = self.nnz().max(other.nnz());
-        let min_nnz = self.nnz().min(other.nnz());
-        let mut minor_indices = Vec::with_capacity(self.nnz() + max_nnz - min_nnz);
-        let mut major_offsets = Vec::with_capacity(self.major_dim());
-
-        // loop through columns, calculate union of rows
-        let mut offset = 0;
-        for j in 0..self.major_dim() {
-            let lane = self.lane(j);
-            let other_lane = other.lane(j);
-            let set: HashSet<usize> =
-                HashSet::from_iter(lane.iter().chain(other_lane.iter()).cloned());
-            let mut set = set.into_iter().collect::<Vec<_>>();
-
-            major_offsets.push(offset);
-            offset += set.len();
-
-            minor_indices.append(&mut set);
-        }
-        SparsityPattern::try_from_offsets_and_indices(
-            self.major_dim(),
-            self.minor_dim(),
-            major_offsets,
-            minor_indices,
-        )
-        .map_err(anyhow::Error::new)
     }
 
     fn try_from_indices(
@@ -144,17 +138,65 @@ impl MatrixSparsity for SparsityPattern {
     }
 }
 
+impl<'a, T: Scalar> MatrixSparsityRef<'a, CscMatrix<T>> for &'a SparsityPattern {
+    fn to_owned(&self) -> SparsityPattern {
+        SparsityPattern::clone(self)
+    }
+
+    fn get_index(&self, rows: &[IndexType], cols: &[IndexType]) -> DVector<IndexType> {
+        let mut index = DVector::<IndexType>::zeros(rows.len());
+        #[allow(unused_mut)]
+        for ((&i, &j), mut ii) in rows.iter().zip(cols.iter()).zip(index.iter_mut()) {
+            let offset = self.major_offsets()[j];
+            let lane = self.lane(j);
+            let lane_i = lane.iter().position(|&x| x == i).unwrap();
+            *ii = offset + lane_i;
+        }
+        index
+    }
+
+    fn nrows(&self) -> IndexType {
+        self.minor_dim()
+    }
+
+    fn ncols(&self) -> IndexType {
+        self.major_dim()
+    }
+
+    fn is_sparse(&self) -> bool {
+        true
+    }
+
+    fn indices(&self) -> Vec<(IndexType, IndexType)> {
+        let mut indices = Vec::with_capacity(self.nnz());
+        for (j, &offset) in self.major_offsets().iter().enumerate() {
+            let next_offset = self
+                .major_offsets()
+                .get(j + 1)
+                .copied()
+                .unwrap_or(self.minor_indices().len());
+            for i in offset..next_offset {
+                indices.push((self.minor_indices()[i], j));
+            }
+        }
+        indices
+    }
+
+    
+}
+
 impl<T: Scalar> Matrix for CscMatrix<T> {
     type Sparsity = SparsityPattern;
+    type SparsityRef<'a> = &'a SparsityPattern;
 
-    fn sparsity(&self) -> Option<&Self::Sparsity> {
+    fn sparsity(&self) -> Option<Self::SparsityRef<'_>> {
         Some(self.pattern())
     }
 
     fn set_data_with_indices(
         &mut self,
-        dst_indices: &<Self::Sparsity as MatrixSparsity>::Index,
-        src_indices: &<Self::V as crate::vector::Vector>::Index,
+        dst_indices: &<Self::V as Vector>::Index,
+        src_indices: &<Self::V as Vector>::Index,
         data: &Self::V,
     ) {
         let values = self.values_mut();
@@ -228,16 +270,11 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
         *self = x + y * beta;
     }
-    fn new_from_sparsity(
-        nrows: IndexType,
-        ncols: IndexType,
-        sparsity: Option<&Self::Sparsity>,
-    ) -> Self {
-        if let Some(sparsity) = sparsity {
-            let values = vec![T::zero(); sparsity.nnz()];
-            CscMatrix::try_from_pattern_and_values(sparsity.clone(), values).unwrap()
-        } else {
-            CscMatrix::zeros(nrows, ncols)
-        }
+    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, sparsity: Option<Self::Sparsity>) -> Self {
+        let sparsity = sparsity.expect("Sparsity pattern required to create a sparse matrix");
+        assert_eq!(sparsity.minor_dim(), nrows);
+        assert_eq!(sparsity.major_dim(), ncols);
+        let values = vec![T::zero(); sparsity.nnz()];
+        CscMatrix::try_from_pattern_and_values(sparsity.clone(), values).unwrap()
     }
 }

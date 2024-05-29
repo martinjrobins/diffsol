@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::op::{LinearOp, Op};
 use crate::vector::Vector;
 use crate::Scalar;
-use crate::{op::NonLinearOp, Matrix, MatrixSparsity, VectorIndex};
+use crate::{op::NonLinearOp, Matrix, MatrixSparsityRef, VectorIndex};
 use num_traits::{One, Zero};
 
 use self::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy};
@@ -59,7 +59,7 @@ pub fn find_non_zeros_linear<F: LinearOp + ?Sized>(op: &F, t: F::T) -> Vec<(usiz
 }
 
 pub struct JacobianColoring<M: Matrix> {
-    dst_indices_per_color: Vec<<M::Sparsity as MatrixSparsity>::Index>,
+    dst_indices_per_color: Vec<<M::V as Vector>::Index>,
     src_indices_per_color: Vec<<M::V as Vector>::Index>,
     input_indices_per_color: Vec<<M::V as Vector>::Index>,
 }
