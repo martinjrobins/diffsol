@@ -4,8 +4,8 @@ use super::default_solver::DefaultSolver;
 use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 use crate::op::NonLinearOp;
 use crate::scalar::{IndexType, Scalar, Scale};
-use crate::{Vector, Dense, DenseRef};
 use crate::FaerLU;
+use crate::{Dense, DenseRef, Vector};
 use anyhow::Result;
 use faer::{linalg::matmul::matmul, Col, ColMut, ColRef, Mat, MatMut, MatRef, Parallelism};
 use faer::{unzipped, zipped};
@@ -142,9 +142,8 @@ impl<T: Scalar> Matrix for Mat<T> {
         &mut self,
         dst_indices: &<Self::V as Vector>::Index,
         src_indices: &<Self::V as Vector>::Index,
-        data: & Self::V,
-    )
-    {
+        data: &Self::V,
+    ) {
         for (dst_i, src_i) in dst_indices.iter().zip(src_indices.iter()) {
             let i = dst_i % self.nrows();
             let j = dst_i / self.nrows();
@@ -195,7 +194,11 @@ impl<T: Scalar> Matrix for Mat<T> {
         zipped!(self, x, y).for_each(|unzipped!(mut s, x, y)| s.write(x.read() + beta * y.read()));
     }
 
-    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, _sparsity: Option<Self::Sparsity>) -> Self {
+    fn new_from_sparsity(
+        nrows: IndexType,
+        ncols: IndexType,
+        _sparsity: Option<Self::Sparsity>,
+    ) -> Self {
         Self::zeros(nrows, ncols)
     }
 }

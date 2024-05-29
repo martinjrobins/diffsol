@@ -31,7 +31,6 @@ impl<T: Scalar> Mul<Scale<T>> for CscMatrix<T> {
 }
 
 impl<T: Scalar> MatrixSparsity<CscMatrix<T>> for SparsityPattern {
-
     fn union(self, other: &SparsityPattern) -> Result<SparsityPattern> {
         let max_nnz = self.nnz().max(other.nnz());
         let min_nnz = self.nnz().min(other.nnz());
@@ -181,8 +180,6 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, CscMatrix<T>> for &'a SparsityPattern 
         }
         indices
     }
-
-    
 }
 
 impl<T: Scalar> Matrix for CscMatrix<T> {
@@ -270,7 +267,11 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
         *self = x + y * beta;
     }
-    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, sparsity: Option<Self::Sparsity>) -> Self {
+    fn new_from_sparsity(
+        nrows: IndexType,
+        ncols: IndexType,
+        sparsity: Option<Self::Sparsity>,
+    ) -> Self {
         let sparsity = sparsity.expect("Sparsity pattern required to create a sparse matrix");
         assert_eq!(sparsity.minor_dim(), nrows);
         assert_eq!(sparsity.major_dim(), ncols);

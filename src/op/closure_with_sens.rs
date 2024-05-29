@@ -2,8 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     jacobian::{find_non_zeros_nonlinear, JacobianColoring},
-    MatrixSparsity,
-    Matrix, Vector,
+    Matrix, MatrixSparsity, Vector,
 };
 
 use super::{NonLinearOp, Op, OpStatistics};

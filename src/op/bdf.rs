@@ -1,6 +1,6 @@
 use crate::{
-    MatrixSparsityRef, MatrixRef, ode_solver::equations::OdeEquations, LinearOp, Matrix, MatrixSparsity,
-    OdeSolverProblem, Vector, VectorRef,
+    ode_solver::equations::OdeEquations, LinearOp, Matrix, MatrixRef, MatrixSparsity,
+    MatrixSparsityRef, OdeSolverProblem, Vector, VectorRef,
 };
 use num_traits::{One, Zero};
 use std::{
@@ -62,11 +62,21 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
 
         // create the mass and rhs jacobians according to the sparsity pattern
         let rhs_jac_sparsity = eqn.rhs().sparsity();
-        let rhs_jac = RefCell::new(Eqn::M::new_from_sparsity(n, n, rhs_jac_sparsity.map(|s| s.to_owned())));
+        let rhs_jac = RefCell::new(Eqn::M::new_from_sparsity(
+            n,
+            n,
+            rhs_jac_sparsity.map(|s| s.to_owned()),
+        ));
         let sparsity = if let Some(rhs_jac_sparsity) = eqn.rhs().sparsity() {
             if let Some(mass) = eqn.mass() {
                 // have mass, use the union of the mass and rhs jacobians sparse patterns
-                Some(mass.sparsity().unwrap().to_owned().union(rhs_jac_sparsity).unwrap())
+                Some(
+                    mass.sparsity()
+                        .unwrap()
+                        .to_owned()
+                        .union(rhs_jac_sparsity)
+                        .unwrap(),
+                )
             } else {
                 // no mass, use the identity
                 let mass_sparsity = <Eqn::M as Matrix>::Sparsity::new_diagonal(n);

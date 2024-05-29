@@ -18,7 +18,11 @@ use crate::{
     IndexType, Scale, SundialsLinearSolver, Vector,
 };
 
-use super::{default_solver::DefaultSolver, sparsity::{Dense, DenseRef}, Matrix, MatrixCommon};
+use super::{
+    default_solver::DefaultSolver,
+    sparsity::{Dense, DenseRef},
+    Matrix, MatrixCommon,
+};
 use anyhow::anyhow;
 
 #[derive(Debug)]

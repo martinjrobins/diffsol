@@ -1,7 +1,9 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    jacobian::{find_non_zeros_linear, JacobianColoring}, matrix::sparsity::MatrixSparsity, Matrix, Vector
+    jacobian::{find_non_zeros_linear, JacobianColoring},
+    matrix::sparsity::MatrixSparsity,
+    Matrix, Vector,
 };
 
 use super::{LinearOp, Op, OpStatistics};

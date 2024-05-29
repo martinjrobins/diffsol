@@ -7,7 +7,6 @@ use anyhow::Result;
 use num_traits::{One, Zero};
 use sparsity::{MatrixSparsity, MatrixSparsityRef};
 
-
 #[cfg(feature = "nalgebra")]
 mod dense_nalgebra_serial;
 
@@ -120,14 +119,12 @@ pub trait MatrixView<'a>:
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V);
 }
 
-
-
 /// A base matrix trait (including sparse and dense matrices)
-pub trait Matrix:
-    MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone
-{
+pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone {
     type Sparsity: MatrixSparsity<Self>;
-    type SparsityRef<'a>: MatrixSparsityRef<'a, Self> where Self: 'a;
+    type SparsityRef<'a>: MatrixSparsityRef<'a, Self>
+    where
+        Self: 'a;
 
     /// Return sparsity information (None if the matrix is dense)
     fn sparsity(&self) -> Option<Self::SparsityRef<'_>>;
@@ -230,7 +227,11 @@ pub trait Matrix:
     fn zeros(nrows: IndexType, ncols: IndexType) -> Self;
 
     /// Create a new matrix from a sparsity pattern, the non-zero elements are not initialized
-    fn new_from_sparsity(nrows: IndexType, ncols: IndexType, sparsity: Option<Self::Sparsity>) -> Self;
+    fn new_from_sparsity(
+        nrows: IndexType,
+        ncols: IndexType,
+        sparsity: Option<Self::Sparsity>,
+    ) -> Self;
 
     /// Create a new diagonal matrix from a [Vector] holding the diagonal elements
     fn from_diagonal(v: &Self::V) -> Self;
@@ -244,7 +245,7 @@ pub trait Matrix:
         dst_indices: &<Self::V as Vector>::Index,
         src_indices: &<Self::V as Vector>::Index,
         data: &Self::V,
-    ); 
+    );
 
     /// Perform the assignment self = x + beta * y where x and y are matrices and beta is a scalar
     /// Panics if the sparsity of self, x, and y do not match (i.e. sparsity of self must be the union of the sparsity of x and y)

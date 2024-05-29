@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{MatrixSparsityRef, Matrix, Scalar, Vector};
+use crate::{Matrix, MatrixSparsityRef, Scalar, Vector};
 
 use num_traits::{One, Zero};
 use serde::Serialize;

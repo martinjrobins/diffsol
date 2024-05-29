@@ -39,8 +39,10 @@ impl<T: Scalar> MatrixCommon for SparseColMat<T> {
 }
 
 impl<T: Scalar> MatrixSparsity<SparseColMat<T>> for SymbolicSparseColMat<IndexType> {
-    
-    fn union(self, other: SymbolicSparseColMatRef<IndexType>) -> Result<SymbolicSparseColMat<IndexType>> {
+    fn union(
+        self,
+        other: SymbolicSparseColMatRef<IndexType>,
+    ) -> Result<SymbolicSparseColMat<IndexType>> {
         union_symbolic(self.as_ref(), other).map_err(anyhow::Error::new)
     }
 
@@ -89,8 +91,9 @@ impl<T: Scalar> MatrixSparsity<SparseColMat<T>> for SymbolicSparseColMat<IndexTy
     }
 }
 
-impl<'a, T: Scalar> MatrixSparsityRef<'a, SparseColMat<T>> for SymbolicSparseColMatRef<'a, IndexType> {
-
+impl<'a, T: Scalar> MatrixSparsityRef<'a, SparseColMat<T>>
+    for SymbolicSparseColMatRef<'a, IndexType>
+{
     fn to_owned(&self) -> SymbolicSparseColMat<IndexType> {
         self.to_owned().unwrap()
     }
@@ -116,8 +119,6 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, SparseColMat<T>> for SymbolicSparseCol
         indices
     }
 
-    
-
     fn get_index(
         &self,
         rows: &[IndexType],
@@ -129,7 +130,12 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, SparseColMat<T>> for SymbolicSparseCol
         for (&i, &j) in rows.iter().zip(cols.iter()) {
             let col_ptr = col_ptrs[j];
             let next_col_ptr = col_ptrs[j + 1];
-            for (ii, &ri) in row_indices.iter().enumerate().take(next_col_ptr).skip(col_ptr) {
+            for (ii, &ri) in row_indices
+                .iter()
+                .enumerate()
+                .take(next_col_ptr)
+                .skip(col_ptr)
+            {
                 if ri == i {
                     indices.push(ii);
                     break;
@@ -244,7 +250,11 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
         });
     }
 
-    fn new_from_sparsity(ncols: IndexType, nrows: IndexType, sparsity: Option<Self::Sparsity>) -> Self {
+    fn new_from_sparsity(
+        ncols: IndexType,
+        nrows: IndexType,
+        sparsity: Option<Self::Sparsity>,
+    ) -> Self {
         let sparsity = sparsity.expect("Sparsity pattern required for sparse matrix");
         assert_eq!(sparsity.nrows(), nrows);
         assert_eq!(sparsity.ncols(), ncols);

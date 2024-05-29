@@ -57,7 +57,6 @@ impl<'a, M: Matrix> DenseRef<'a, M> {
 }
 
 impl<M: Matrix> MatrixSparsity<M> for Dense<M> {
-
     fn union(self, other: M::SparsityRef<'_>) -> Result<M::Sparsity> {
         if self.nrows() != other.nrows() || self.ncols() != other.ncols() {
             return Err(anyhow::anyhow!(
@@ -106,7 +105,6 @@ impl<M: Matrix> MatrixSparsity<M> for Dense<M> {
 }
 
 impl<'a, M: Matrix<Sparsity = Dense<M>>> MatrixSparsityRef<'a, M> for DenseRef<'a, M> {
-
     fn to_owned(&self) -> M::Sparsity {
         Dense::new(self.nrows(), self.ncols())
     }
@@ -140,6 +138,4 @@ impl<'a, M: Matrix<Sparsity = Dense<M>>> MatrixSparsityRef<'a, M> for DenseRef<'
     fn indices(&self) -> Vec<(IndexType, IndexType)> {
         Vec::new()
     }
-
-    
 }

@@ -1,7 +1,10 @@
 use num_traits::{One, Zero};
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{matrix::sparsity::MatrixSparsityRef, ConstantOp, LinearOp, Matrix, NonLinearOp, OdeEquations, Op, Vector, MatrixSparsity};
+use crate::{
+    matrix::sparsity::MatrixSparsityRef, ConstantOp, LinearOp, Matrix, MatrixSparsity, NonLinearOp,
+    OdeEquations, Op, Vector,
+};
 
 pub struct SensInit<Eqn>
 where
@@ -19,7 +22,11 @@ where
     pub fn new(eqn: &Rc<Eqn>) -> Self {
         let nstates = eqn.rhs().nstates();
         let nparams = eqn.rhs().nparams();
-        let init_sens = Eqn::M::new_from_sparsity(nstates, nparams, eqn.init().sparsity_sens().map(|s| s.to_owned()));
+        let init_sens = Eqn::M::new_from_sparsity(
+            nstates,
+            nparams,
+            eqn.init().sparsity_sens().map(|s| s.to_owned()),
+        );
         let init_sens = RefCell::new(init_sens);
         let index = RefCell::new(0);
         Self {
@@ -100,11 +107,19 @@ where
     pub fn new(eqn: &Rc<Eqn>) -> Self {
         let nstates = eqn.rhs().nstates();
         let nparams = eqn.rhs().nparams();
-        let rhs_sens = Eqn::M::new_from_sparsity(nstates, nparams, eqn.rhs().sparsity_sens().map(|s| s.to_owned()));
+        let rhs_sens = Eqn::M::new_from_sparsity(
+            nstates,
+            nparams,
+            eqn.rhs().sparsity_sens().map(|s| s.to_owned()),
+        );
         let y = RefCell::new(<Eqn::V as Vector>::zeros(nstates));
         let index = RefCell::new(0);
         if let Some(mass) = eqn.mass() {
-            let mass_sens = Eqn::M::new_from_sparsity(nstates, nparams, mass.sparsity_sens().map(|s| s.to_owned()));
+            let mass_sens = Eqn::M::new_from_sparsity(
+                nstates,
+                nparams,
+                mass.sparsity_sens().map(|s| s.to_owned()),
+            );
             let sens = if rhs_sens.sparsity().is_some() && mass_sens.sparsity().is_some() {
                 // union of sparsity patterns
                 let sparsity = rhs_sens

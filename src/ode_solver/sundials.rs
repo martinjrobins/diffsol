@@ -17,7 +17,9 @@ use sundials_sys::{
 };
 
 use crate::{
-    matrix::sparsity::MatrixSparsityRef, scale, vector::sundials::get_suncontext, LinearOp, Matrix, NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, SundialsMatrix, SundialsVector, Vector
+    matrix::sparsity::MatrixSparsityRef, scale, vector::sundials::get_suncontext, LinearOp, Matrix,
+    NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+    OdeSolverStopReason, Op, SundialsMatrix, SundialsVector, Vector,
 };
 
 pub fn sundials_check(retval: c_int) -> Result<()> {
