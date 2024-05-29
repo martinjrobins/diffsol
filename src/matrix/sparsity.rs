@@ -9,7 +9,7 @@ use super::Matrix;
 pub trait MatrixSparsity<M: Matrix>: Sized {
     fn nrows(&self) -> IndexType;
     fn ncols(&self) -> IndexType;
-    fn is_sparse(&self) -> bool;
+    fn is_sparse() -> bool;
     fn try_from_indices(
         nrows: IndexType,
         ncols: IndexType,
@@ -24,7 +24,7 @@ pub trait MatrixSparsity<M: Matrix>: Sized {
 pub trait MatrixSparsityRef<'a, M: Matrix> {
     fn nrows(&self) -> IndexType;
     fn ncols(&self) -> IndexType;
-    fn is_sparse(&self) -> bool;
+    fn is_sparse() -> bool;
     fn indices(&self) -> Vec<(IndexType, IndexType)>;
     fn to_owned(&self) -> M::Sparsity;
     fn get_index(&self, rows: &[IndexType], cols: &[IndexType]) -> <M::V as Vector>::Index;
@@ -56,18 +56,21 @@ impl<'a, M: Matrix> DenseRef<'a, M> {
     }
 }
 
-impl<M: Matrix> MatrixSparsity<M> for Dense<M> {
+impl<M> MatrixSparsity<M> for Dense<M> 
+where 
+    for <'a> M: Matrix<Sparsity = Dense<M>, SparsityRef<'a> = DenseRef<'a, M>> + 'a
+{
     fn union(self, other: M::SparsityRef<'_>) -> Result<M::Sparsity> {
         if self.nrows() != other.nrows() || self.ncols() != other.ncols() {
             return Err(anyhow::anyhow!(
                 "Cannot union matrices with different shapes"
             ));
         }
-        unimplemented!()
+        Ok(Self::new(self.nrows(), self.ncols()))
     }
 
     fn as_ref(&self) -> M::SparsityRef<'_> {
-        unimplemented!()
+        DenseRef::new(self)
     }
 
     fn nrows(&self) -> IndexType {
@@ -78,7 +81,7 @@ impl<M: Matrix> MatrixSparsity<M> for Dense<M> {
         self.ncols
     }
 
-    fn is_sparse(&self) -> bool {
+    fn is_sparse() -> bool {
         false
     }
 
@@ -104,20 +107,22 @@ impl<M: Matrix> MatrixSparsity<M> for Dense<M> {
     }
 }
 
-impl<'a, M: Matrix<Sparsity = Dense<M>>> MatrixSparsityRef<'a, M> for DenseRef<'a, M> {
+impl<'a, M> MatrixSparsityRef<'a, M> for DenseRef<'a, M> 
+where M: Matrix<Sparsity = Dense<M>, SparsityRef<'a> = Self> + 'a
+{
     fn to_owned(&self) -> M::Sparsity {
         Dense::new(self.nrows(), self.ncols())
     }
 
     fn nrows(&self) -> IndexType {
-        self.dense.nrows()
+        self.dense.nrows
     }
 
     fn ncols(&self) -> IndexType {
-        self.dense.ncols()
+        self.dense.ncols
     }
 
-    fn is_sparse(&self) -> bool {
+    fn is_sparse() -> bool {
         false
     }
 

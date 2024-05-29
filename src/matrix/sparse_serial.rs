@@ -71,7 +71,7 @@ impl<T: Scalar> MatrixSparsity<CscMatrix<T>> for SparsityPattern {
         self.major_dim()
     }
 
-    fn is_sparse(&self) -> bool {
+    fn is_sparse() -> bool {
         true
     }
 
@@ -162,7 +162,7 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, CscMatrix<T>> for &'a SparsityPattern 
         self.major_dim()
     }
 
-    fn is_sparse(&self) -> bool {
+    fn is_sparse() -> bool {
         true
     }
 

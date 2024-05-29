@@ -58,7 +58,7 @@ impl<T: Scalar> MatrixSparsity<SparseColMat<T>> for SymbolicSparseColMat<IndexTy
         self.ncols()
     }
 
-    fn is_sparse(&self) -> bool {
+    fn is_sparse() -> bool {
         true
     }
 
@@ -105,7 +105,7 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, SparseColMat<T>>
         self.ncols()
     }
 
-    fn is_sparse(&self) -> bool {
+    fn is_sparse() -> bool {
         true
     }
 
