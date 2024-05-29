@@ -10,7 +10,7 @@ use faer::sparse::ops::{ternary_op_assign_into, union_symbolic};
 use faer::sparse::{SymbolicSparseColMat, SymbolicSparseColMatRef};
 use faer::Col;
 
-struct SparseColMat<T: Scalar>(faer::sparse::SparseColMat<IndexType, T>);
+pub struct SparseColMat<T: Scalar>(faer::sparse::SparseColMat<IndexType, T>);
 
 impl<T: Scalar> Debug for SparseColMat<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

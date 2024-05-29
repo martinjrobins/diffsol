@@ -14,7 +14,7 @@ mod dense_nalgebra_serial;
 mod dense_faer_serial;
 
 #[cfg(feature = "faer")]
-mod sparse_faer;
+pub mod sparse_faer;
 
 pub mod default_solver;
 mod sparse_serial;

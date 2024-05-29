@@ -137,6 +137,8 @@ pub mod vector;
 use linear_solver::LinearSolver;
 pub use linear_solver::{FaerLU, NalgebraLU};
 
+pub use matrix::sparse_faer::SparseColMat;
+
 #[cfg(feature = "sundials")]
 pub use matrix::sundials::SundialsMatrix;
 

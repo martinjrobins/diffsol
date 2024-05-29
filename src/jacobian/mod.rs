@@ -156,86 +156,96 @@ mod tests {
     use std::rc::Rc;
 
     use crate::jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring};
+    use crate::matrix::sparsity::MatrixSparsityRef;
     use crate::matrix::Matrix;
     use crate::op::linear_closure::LinearClosure;
     use crate::op::{LinearOp, Op};
     use crate::vector::Vector;
-    use crate::NonLinearOp;
     use crate::{
         jacobian::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy},
         op::closure::Closure,
     };
-    use nalgebra::{DMatrix, DVector};
+    use crate::{scale, NonLinearOp, SparseColMat};
+    use nalgebra::DMatrix;
+    use num_traits::{One, Zero};
     use std::ops::MulAssign;
 
-    fn helper_triplets2op_nonlinear(
-        triplets: &[(usize, usize, f64)],
+    fn helper_triplets2op_nonlinear<'a, M: Matrix + 'a>(
+        triplets: &'a [(usize, usize, M::T)],
         nrows: usize,
         ncols: usize,
-    ) -> impl NonLinearOp<M = DMatrix<f64>, V = DVector<f64>, T = f64> + '_ {
+    ) -> impl NonLinearOp<M = M, V = M::V, T = M::T> + '_ {
         let nstates = ncols;
         let nout = nrows;
-        let f = move |x: &DVector<f64>, y: &mut DVector<f64>| {
+        let f = move |x: &M::V, y: &mut M::V| {
             for (i, j, v) in triplets {
-                y[*i] += x[*j] * v;
+                y[*i] += x[*j] * *v;
             }
         };
         let mut ret = Closure::new(
-            move |x: &DVector<f64>, _p: &DVector<f64>, _t, y: &mut DVector<f64>| {
-                y.fill(0.0);
+            move |x: &M::V, _p: &M::V, _t, y: &mut M::V| {
+                y.fill(M::T::zero());
                 f(x, y);
             },
-            move |_x: &DVector<f64>, _p: &DVector<f64>, _t, v, y: &mut DVector<f64>| {
-                y.fill(0.0);
+            move |_x: &M::V, _p: &M::V, _t, v, y: &mut M::V| {
+                y.fill(M::T::zero());
                 f(v, y);
             },
             nstates,
             nout,
-            Rc::new(DVector::zeros(0)),
+            Rc::new(M::V::zeros(0)),
         );
-        let y0 = DVector::zeros(nstates);
-        let t0 = 0.0;
+        let y0 = M::V::zeros(nstates);
+        let t0 = M::T::zero();
         ret.calculate_sparsity(&y0, t0);
         ret
     }
 
-    fn helper_triplets2op_linear(
-        triplets: &[(usize, usize, f64)],
+    fn helper_triplets2op_linear<'a, M: Matrix + 'a>(
+        triplets: &'a [(usize, usize, M::T)],
         nrows: usize,
         ncols: usize,
-    ) -> impl LinearOp<M = DMatrix<f64>, V = DVector<f64>, T = f64> + '_ {
+    ) -> impl LinearOp<M = M, V = M::V, T = M::T> + '_ {
         let nstates = ncols;
         let nout = nrows;
-        let f = move |x: &DVector<f64>, y: &mut DVector<f64>| {
+        let f = move |x: &M::V, y: &mut M::V| {
             for (i, j, v) in triplets {
-                y[*i] += x[*j] * v;
+                y[*i] += x[*j] * *v;
             }
         };
         let mut ret = LinearClosure::new(
-            move |x: &DVector<f64>, _p: &DVector<f64>, _t, beta, y: &mut DVector<f64>| {
-                y.mul_assign(beta);
+            move |x: &M::V, _p: &M::V, _t, beta, y: &mut M::V| {
+                y.mul_assign(scale(beta));
                 f(x, y);
             },
             nstates,
             nout,
-            Rc::new(DVector::zeros(0)),
+            Rc::new(M::V::zeros(0)),
         );
-        let t0 = 0.0;
+        let t0 = M::T::zero();
         ret.calculate_sparsity(t0);
         ret
     }
 
-    #[test]
-    fn find_non_zeros() {
+    fn find_non_zeros<M: Matrix>() {
         let test_triplets = vec![
-            vec![(0, 0, 1.0), (1, 1, 1.0)],
-            vec![(0, 0, 1.0), (0, 1, 1.0), (1, 1, 1.0)],
-            vec![(1, 1, 1.0)],
-            vec![(0, 0, 1.0), (1, 0, 1.0), (0, 1, 1.0), (1, 1, 1.0)],
+            vec![(0, 0, M::T::one()), (1, 1, M::T::one())],
+            vec![
+                (0, 0, M::T::one()),
+                (0, 1, M::T::one()),
+                (1, 1, M::T::one()),
+            ],
+            vec![(1, 1, M::T::one())],
+            vec![
+                (0, 0, M::T::one()),
+                (1, 0, M::T::one()),
+                (0, 1, M::T::one()),
+                (1, 1, M::T::one()),
+            ],
         ];
         for triplets in test_triplets {
-            let op = helper_triplets2op_nonlinear(triplets.as_slice(), 2, 2);
-            let non_zeros = find_non_zeros_nonlinear(&op, &DVector::zeros(2), 0.0);
+            let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), 2, 2);
+            let non_zeros = find_non_zeros_nonlinear(&op, &M::V::zeros(2), M::T::zero());
             let expect = triplets
                 .iter()
                 .map(|(i, j, _v)| (*i, *j))
@@ -245,17 +255,35 @@ mod tests {
     }
 
     #[test]
-    fn build_coloring() {
+    fn find_non_zeros_dmatrix() {
+        find_non_zeros::<DMatrix<f64>>();
+    }
+
+    #[test]
+    fn find_non_zeros_faer_sparse() {
+        find_non_zeros::<SparseColMat<f64>>();
+    }
+
+    fn build_coloring<M: Matrix>() {
         let test_triplets = [
-            vec![(0, 0, 1.0), (1, 1, 1.0)],
-            vec![(0, 0, 1.0), (0, 1, 1.0), (1, 1, 1.0)],
-            vec![(1, 1, 1.0)],
-            vec![(0, 0, 1.0), (1, 0, 1.0), (0, 1, 1.0), (1, 1, 1.0)],
+            vec![(0, 0, M::T::one()), (1, 1, M::T::one())],
+            vec![
+                (0, 0, M::T::one()),
+                (0, 1, M::T::one()),
+                (1, 1, M::T::one()),
+            ],
+            vec![(1, 1, M::T::one())],
+            vec![
+                (0, 0, M::T::one()),
+                (1, 0, M::T::one()),
+                (0, 1, M::T::one()),
+                (1, 1, M::T::one()),
+            ],
         ];
         let expect = vec![vec![1, 1], vec![1, 2], vec![1, 1], vec![1, 2]];
         for (triplets, expect) in test_triplets.iter().zip(expect) {
-            let op = helper_triplets2op_nonlinear(triplets.as_slice(), 2, 2);
-            let non_zeros = find_non_zeros_nonlinear(&op, &DVector::zeros(2), 0.0);
+            let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), 2, 2);
+            let non_zeros = find_non_zeros_nonlinear(&op, &M::V::zeros(2), M::T::zero());
             let ncols = op.nstates();
             let graph = nonzeros2graph(non_zeros.as_slice(), ncols);
             let coloring = color_graph_greedy(&graph);
@@ -265,47 +293,73 @@ mod tests {
     }
 
     #[test]
-    fn matrix_coloring() {
+    fn build_coloring_dmatrix() {
+        build_coloring::<DMatrix<f64>>();
+    }
+
+    #[test]
+    fn build_coloring_faer_sparse() {
+        build_coloring::<SparseColMat<f64>>();
+    }
+
+    fn matrix_coloring<M: Matrix>() {
         let test_triplets = vec![
-            vec![(0, 0, 1.0), (1, 1, 1.0), (2, 2, 1.0)],
-            vec![(0, 0, 1.0), (1, 1, 1.0)],
-            vec![(0, 0, 0.9), (1, 0, 2.0), (1, 1, 1.1), (2, 2, 1.4)],
+            vec![
+                (0, 0, M::T::one()),
+                (1, 1, M::T::one()),
+                (2, 2, M::T::one()),
+            ],
+            vec![(0, 0, M::T::one()), (1, 1, M::T::one())],
+            vec![
+                (0, 0, M::T::from(0.9)),
+                (1, 0, M::T::from(2.0)),
+                (1, 1, M::T::from(1.1)),
+                (2, 2, M::T::from(1.4)),
+            ],
         ];
-        type V = DVector<f64>;
-        type M = DMatrix<f64>;
         let n = 3;
 
         // test nonlinear functions
         for triplets in test_triplets.iter() {
-            let op = helper_triplets2op_nonlinear(triplets.as_slice(), n, n);
-            let y0 = V::zeros(n);
-            let t0 = 0.0;
+            let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), n, n);
+            let y0 = M::V::zeros(n);
+            let t0 = M::T::zero();
             let non_zeros = find_non_zeros_nonlinear(&op, &y0, t0);
             let coloring = JacobianColoring::new_from_non_zeros(&op, non_zeros);
-            let mut jac = M::zeros(3, 3);
+            let mut jac = M::new_from_sparsity(3, 3, op.sparsity().map(|s| s.to_owned()));
             coloring.jacobian_inplace(&op, &y0, t0, &mut jac);
-            let mut gemv1 = V::zeros(n);
-            let v = V::from_element(3, 1.0);
+            let mut gemv1 = M::V::zeros(n);
+            let v = M::V::from_element(3, M::T::one());
             op.jac_mul_inplace(&y0, t0, &v, &mut gemv1);
-            let mut gemv2 = V::zeros(n);
-            jac.gemv(1.0, &v, 0.0, &mut gemv2);
-            gemv1.assert_eq_st(&gemv2, 1e-10);
+            let mut gemv2 = M::V::zeros(n);
+            jac.gemv(M::T::one(), &v, M::T::zero(), &mut gemv2);
+            gemv1.assert_eq_st(&gemv2, M::T::from(1e-10));
         }
 
         // test linear functions
         for triplets in test_triplets {
-            let op = helper_triplets2op_linear(triplets.as_slice(), n, n);
-            let t0 = 0.0;
+            let op = helper_triplets2op_linear::<M>(triplets.as_slice(), n, n);
+            let t0 = M::T::zero();
             let non_zeros = find_non_zeros_linear(&op, t0);
             let coloring = JacobianColoring::new_from_non_zeros(&op, non_zeros);
-            let mut jac = M::zeros(3, 3);
+            let mut jac = M::new_from_sparsity(3, 3, op.sparsity().map(|s| s.to_owned()));
             coloring.matrix_inplace(&op, t0, &mut jac);
-            let mut gemv1 = V::zeros(n);
-            let v = V::from_element(3, 1.0);
-            op.gemv_inplace(&v, t0, 0.0, &mut gemv1);
-            let mut gemv2 = V::zeros(n);
-            jac.gemv(1.0, &v, 0.0, &mut gemv2);
-            gemv1.assert_eq_st(&gemv2, 1e-10);
+            let mut gemv1 = M::V::zeros(n);
+            let v = M::V::from_element(3, M::T::one());
+            op.gemv_inplace(&v, t0, M::T::zero(), &mut gemv1);
+            let mut gemv2 = M::V::zeros(n);
+            jac.gemv(M::T::one(), &v, M::T::zero(), &mut gemv2);
+            gemv1.assert_eq_st(&gemv2, M::T::from(1e-10));
         }
+    }
+
+    #[test]
+    fn matrix_coloring_dmatrix() {
+        matrix_coloring::<DMatrix<f64>>();
+    }
+
+    #[test]
+    fn matrix_coloring_faer_sparse() {
+        matrix_coloring::<SparseColMat<f64>>();
     }
 }
