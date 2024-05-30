@@ -8,7 +8,7 @@ use num_traits::{abs, One, Pow, Zero};
 use serde::Serialize;
 
 use crate::{
-    matrix::{default_solver::DefaultSolver, Matrix, MatrixRef},
+    matrix::{default_solver::DefaultSolver, MatrixRef},
     newton_iteration,
     nonlinear_solver::root::RootFinder,
     op::bdf::BdfCallable,
@@ -102,11 +102,27 @@ where
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
     fn default() -> Self {
-        let n = 1;
         let linear_solver = Eqn::M::default_solver();
-        let mut nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
+        let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
+        Self::new(nonlinear_solver)
+    }
+}
+
+impl<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations, Nls> Bdf<M, Eqn, Nls>
+where
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+    Nls: NonLinearSolver<BdfCallable<Eqn>>,
+{
+    const MAX_ORDER: IndexType = 5;
+    const NEWTON_MAXITER: IndexType = 4;
+    const MIN_FACTOR: f64 = 0.2;
+    const MAX_FACTOR: f64 = 10.0;
+    const MIN_TIMESTEP: f64 = 1e-32;
+
+    fn new(mut nonlinear_solver: Nls) -> Self {
+        let n = 1;
         nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
-        type M<V> = <V as DefaultDenseMatrix>::M;
 
         // kappa values for difference orders, taken from Table 1 of [1]
         let kappa = [
@@ -137,15 +153,15 @@ where
             nonlinear_solver,
             order: 1,
             n_equal_steps: 0,
-            diff: <M<Eqn::V> as Matrix>::zeros(n, Self::MAX_ORDER + 3), //DMatrix::<T>::zeros(n, Self::MAX_ORDER + 3),
-            diff_tmp: <M<Eqn::V> as Matrix>::zeros(n, Self::MAX_ORDER + 3),
+            diff: M::zeros(n, Self::MAX_ORDER + 3), //DMatrix::<T>::zeros(n, Self::MAX_ORDER + 3),
+            diff_tmp: M::zeros(n, Self::MAX_ORDER + 3),
             sdiff: Vec::new(),
-            y_delta: <Eqn::V as Vector>::zeros(n),
+            y_delta: Eqn::V::zeros(n),
             s_deltas: Vec::new(),
             gamma,
             alpha,
             error_const2,
-            u: <M<Eqn::V> as Matrix>::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+            u: M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
             statistics: BdfStatistics::default(),
             state: None,
             tstop: None,
@@ -153,19 +169,6 @@ where
             is_state_modified: false,
         }
     }
-}
-
-impl<M: DenseMatrix<T = Eqn::T, V = Eqn::V>, Eqn: OdeEquations, Nls> Bdf<M, Eqn, Nls>
-where
-    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
-    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-    Nls: NonLinearSolver<BdfCallable<Eqn>>,
-{
-    const MAX_ORDER: IndexType = 5;
-    const NEWTON_MAXITER: IndexType = 4;
-    const MIN_FACTOR: f64 = 0.2;
-    const MAX_FACTOR: f64 = 10.0;
-    const MIN_TIMESTEP: f64 = 1e-32;
 
     pub fn get_statistics(&self) -> &BdfStatistics<Eqn::T> {
         &self.statistics
@@ -852,9 +855,10 @@ mod test {
                 test_state_mut_on_problem,
             },
         },
-        Bdf, OdeEquations, Op,
+        Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquations, Op, SparseColMat,
     };
 
+    use faer::Mat;
     use num_traits::abs;
 
     type M = nalgebra::DMatrix<f64>;
@@ -899,6 +903,15 @@ mod test {
         number_of_jac_muls: 2
         number_of_matrix_evals: 1
         "###);
+    }
+
+    #[test]
+    fn bdf_test_faer_sparse_exponential_decay() {
+        let linear_solver = FaerSparseLU::default();
+        let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
+        let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
+        let (problem, soln) = exponential_decay_problem::<SparseColMat<f64>>(false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
     #[test]
@@ -972,6 +985,15 @@ mod test {
     }
 
     #[test]
+    fn bdf_test_faer_sparse_exponential_decay_algebraic() {
+        let linear_solver = FaerSparseLU::default();
+        let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
+        let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
+        let (problem, soln) = exponential_decay_with_algebraic_problem::<SparseColMat<f64>>(false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+    }
+
+    #[test]
     fn test_bdf_nalgebra_exponential_decay_algebraic_sens() {
         let mut s = Bdf::default();
         let (problem, soln) = exponential_decay_with_algebraic_problem_sens::<M>(false);
@@ -1015,6 +1037,15 @@ mod test {
         number_of_jac_muls: 57
         number_of_matrix_evals: 19
         "###);
+    }
+
+    #[test]
+    fn bdf_test_faer_sparse_robertson() {
+        let linear_solver = FaerSparseLU::default();
+        let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
+        let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
+        let (problem, soln) = robertson::<SparseColMat<f64>>(false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
     #[test]

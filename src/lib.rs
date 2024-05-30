@@ -135,7 +135,7 @@ pub mod solver;
 pub mod vector;
 
 use linear_solver::LinearSolver;
-pub use linear_solver::{FaerLU, NalgebraLU};
+pub use linear_solver::{FaerLU, NalgebraLU, faer::sparse_lu::FaerSparseLU};
 
 pub use matrix::sparse_faer::SparseColMat;
 

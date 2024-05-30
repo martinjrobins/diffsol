@@ -3,12 +3,14 @@ use std::ops::Mul;
 
 use super::sparsity::MatrixSparsityRef;
 use super::{Matrix, MatrixCommon, MatrixSparsity};
-use crate::scalar::{IndexType, Scalar, Scale};
+use crate::{DefaultSolver, FaerSparseLU, IndexType, NonLinearOp, Scalar, Scale};
 use crate::vector::Vector;
 use anyhow::Result;
 use faer::sparse::ops::{ternary_op_assign_into, union_symbolic};
 use faer::sparse::{SymbolicSparseColMat, SymbolicSparseColMatRef};
 use faer::Col;
+
+
 
 pub struct SparseColMat<T: Scalar>(faer::sparse::SparseColMat<IndexType, T>);
 
@@ -24,6 +26,16 @@ impl<T: Scalar> Clone for SparseColMat<T> {
         let values = self.0.values().to_vec();
         Self(faer::sparse::SparseColMat::new(sparsity, values))
     }
+}
+
+impl<T: Scalar> SparseColMat<T> {
+    pub fn faer(&self) -> &faer::sparse::SparseColMat<IndexType, T> {
+        &self.0
+    }
+}
+
+impl<T: Scalar> DefaultSolver for SparseColMat<T> {
+    type LS<C: NonLinearOp<M = SparseColMat<T>, V = Col<T>, T = T>> = FaerSparseLU<T, C>;
 }
 
 impl<T: Scalar> MatrixCommon for SparseColMat<T> {
@@ -154,6 +166,14 @@ impl<T: Scalar> Mul<Scale<T>> for SparseColMat<T> {
             v.mul_assign(rhs.value());
         }
         self
+    }
+}
+
+impl<T: Scalar> Mul<Scale<T>> for &SparseColMat<T> {
+    type Output = SparseColMat<T>;
+
+    fn mul(self, rhs: Scale<T>) -> Self::Output {
+        self.clone() * rhs
     }
 }
 

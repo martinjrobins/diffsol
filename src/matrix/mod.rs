@@ -76,16 +76,8 @@ pub trait MatrixMutOpsByValue<Rhs = Self>: MatrixCommon + AddAssign<Rhs> + SubAs
 impl<M, Rhs> MatrixMutOpsByValue<Rhs> for M where M: MatrixCommon + AddAssign<Rhs> + SubAssign<Rhs> {}
 
 /// A trait allowing for references to implement matrix operations
-pub trait MatrixRef<M: MatrixCommon>:
-    MatrixOpsByValue<M, M> + for<'a> MatrixOpsByValue<&'a M, M> + Mul<Scale<M::T>, Output = M>
-{
-}
-
-impl<RefT, M: MatrixCommon> MatrixRef<M> for RefT where
-    RefT:
-        MatrixOpsByValue<M, M> + for<'a> MatrixOpsByValue<&'a M, M> + Mul<Scale<M::T>, Output = M>
-{
-}
+pub trait MatrixRef<M: MatrixCommon>: Mul<Scale<M::T>, Output = M> {}
+impl<RefT, M: MatrixCommon> MatrixRef<M> for RefT where RefT: Mul<Scale<M::T>, Output = M> {}
 
 /// A mutable view of a dense matrix [Matrix]
 pub trait MatrixViewMut<'a>:
@@ -121,6 +113,7 @@ pub trait MatrixView<'a>:
 
 /// A base matrix trait (including sparse and dense matrices)
 pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone {
+    
     type Sparsity: MatrixSparsity<Self>;
     type SparsityRef<'a>: MatrixSparsityRef<'a, Self>
     where
@@ -128,6 +121,10 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone {
 
     /// Return sparsity information (None if the matrix is dense)
     fn sparsity(&self) -> Option<Self::SparsityRef<'_>>;
+
+    fn is_sparse() -> bool {
+        Self::zeros(1, 1).sparsity().is_some()
+    }
 
     /// Split the current matrix into four submatrices at the given indices
     fn split_at_indices(

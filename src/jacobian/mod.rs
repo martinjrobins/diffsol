@@ -13,8 +13,6 @@ pub mod graph;
 pub mod greedy_coloring;
 
 /// Find the non-zero entries of the Jacobian matrix of a non-linear operator.
-/// This is used as the default `find_non_zeros` function for the `NonLinearOp` and `LinearOp` traits.
-/// Users can override this function with a more efficient and reliable implementation if desired.
 pub fn find_non_zeros_nonlinear<F: NonLinearOp + ?Sized>(
     op: &F,
     x: &F::V,
@@ -38,8 +36,6 @@ pub fn find_non_zeros_nonlinear<F: NonLinearOp + ?Sized>(
 }
 
 /// Find the non-zero entries of the matrix of a linear operator.
-/// This is used as the default `find_non_zeros` function for the `NonLinearOp` and `LinearOp` traits.
-/// Users can override this function with a more efficient and reliable implementation if desired.
 pub fn find_non_zeros_linear<F: LinearOp + ?Sized>(op: &F, t: F::T) -> Vec<(usize, usize)> {
     let mut v = F::V::zeros(op.nstates());
     let mut col = F::V::zeros(op.nout());

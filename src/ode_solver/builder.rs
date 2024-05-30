@@ -135,6 +135,7 @@ impl OdeBuilder {
     }
 
     /// Set whether to use coloring when computing the Jacobian.
+    /// This is always true if matrix type is sparse, but can be set to true for dense matrices as well.
     /// This can speed up the computation of the Jacobian for large sparse systems.
     /// However, it relys on the sparsity of the Jacobian being constant,
     /// and for certain systems it may detect the wrong sparsity pattern.
@@ -234,7 +235,7 @@ impl OdeBuilder {
         let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
         let mut mass = LinearClosure::new(mass, nstates, nstates, p.clone());
         let init = ConstantClosure::new(init, p.clone());
-        if self.use_coloring {
+        if self.use_coloring || M::is_sparse() {
             rhs.calculate_sparsity(&y0, t0);
             mass.calculate_sparsity(t0);
         }
@@ -341,7 +342,7 @@ impl OdeBuilder {
         let mut rhs = ClosureWithSens::new(rhs, rhs_jac, rhs_sens, nstates, nstates, p.clone());
         let mut mass = LinearClosureWithSens::new(mass, mass_sens, nstates, nstates, p.clone());
         let init = ConstantClosureWithSens::new(init, init_sens, nstates, nstates, p.clone());
-        if self.use_coloring {
+        if self.use_coloring || M::is_sparse() {
             rhs.calculate_sparsity(&y0, t0);
             mass.calculate_sparsity(t0);
         }
@@ -411,7 +412,7 @@ impl OdeBuilder {
         let nstates = y0.len();
         let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
         let init = ConstantClosure::new(init, p.clone());
-        if self.use_coloring {
+        if self.use_coloring || M::is_sparse() {
             rhs.calculate_sparsity(&y0, t0);
         }
         let rhs = Rc::new(rhs);
@@ -486,7 +487,7 @@ impl OdeBuilder {
         let nstates = y0.len();
         let init = ConstantClosureWithSens::new(init, init_sens, nstates, nstates, p.clone());
         let mut rhs = ClosureWithSens::new(rhs, rhs_jac, rhs_sens, nstates, nstates, p.clone());
-        if self.use_coloring {
+        if self.use_coloring || M::is_sparse() {
             rhs.calculate_sparsity(&y0, t0);
         }
         let rhs = Rc::new(rhs);
@@ -574,7 +575,7 @@ impl OdeBuilder {
         let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
         let root = Rc::new(ClosureNoJac::new(root, nstates, nroots, p.clone()));
         let init = ConstantClosure::new(init, p.clone());
-        if self.use_coloring {
+        if self.use_coloring || M::is_sparse() {
             rhs.calculate_sparsity(&y0, t0);
         }
         let rhs = Rc::new(rhs);
