@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     jacobian::{find_non_zeros_linear, JacobianColoring},
-    matrix::MatrixSparsity,
+    matrix::sparsity::MatrixSparsity,
     Matrix, Vector,
 };
 
@@ -79,8 +79,8 @@ where
         assert_eq!(p.len(), self.nparams);
         self.p = p;
     }
-    fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
-        self.sparsity.as_ref()
+    fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
+        self.sparsity.as_ref().map(|s| s.as_ref())
     }
     fn statistics(&self) -> OpStatistics {
         self.statistics.borrow().clone()

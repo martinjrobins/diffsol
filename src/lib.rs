@@ -135,7 +135,9 @@ pub mod solver;
 pub mod vector;
 
 use linear_solver::LinearSolver;
-pub use linear_solver::{FaerLU, NalgebraLU};
+pub use linear_solver::{faer::sparse_lu::FaerSparseLU, FaerLU, NalgebraLU};
+
+pub use matrix::sparse_faer::SparseColMat;
 
 #[cfg(feature = "sundials")]
 pub use matrix::sundials::SundialsMatrix;
@@ -153,7 +155,10 @@ pub use ode_solver::sundials::SundialsIda;
 pub use ode_solver::diffsl::DiffSlContext;
 
 pub use matrix::default_solver::DefaultSolver;
-use matrix::{DenseMatrix, Matrix, MatrixCommon, MatrixSparsity, MatrixView, MatrixViewMut};
+use matrix::{
+    sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
+    DenseMatrix, Matrix, MatrixCommon, MatrixRef, MatrixView, MatrixViewMut,
+};
 pub use nonlinear_solver::newton::NewtonNonlinearSolver;
 use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus, newton::newton_iteration,

@@ -1,6 +1,6 @@
 use crate::{
-    matrix::MatrixRef, ode_solver::equations::OdeEquations, LinearOp, Matrix, MatrixSparsity,
-    OdeSolverProblem, Vector, VectorRef,
+    ode_solver::equations::OdeEquations, LinearOp, Matrix, MatrixRef, MatrixSparsity,
+    MatrixSparsityRef, OdeSolverProblem, Vector, VectorRef,
 };
 use num_traits::{One, Zero};
 use std::{
@@ -62,11 +62,21 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
 
         // create the mass and rhs jacobians according to the sparsity pattern
         let rhs_jac_sparsity = eqn.rhs().sparsity();
-        let rhs_jac = RefCell::new(Eqn::M::new_from_sparsity(n, n, rhs_jac_sparsity));
-        let sparsity = if let Some(rhs_jac_sparsity) = rhs_jac_sparsity {
+        let rhs_jac = RefCell::new(Eqn::M::new_from_sparsity(
+            n,
+            n,
+            rhs_jac_sparsity.map(|s| s.to_owned()),
+        ));
+        let sparsity = if let Some(rhs_jac_sparsity) = eqn.rhs().sparsity() {
             if let Some(mass) = eqn.mass() {
                 // have mass, use the union of the mass and rhs jacobians sparse patterns
-                Some(mass.sparsity().unwrap().union(rhs_jac_sparsity).unwrap())
+                Some(
+                    mass.sparsity()
+                        .unwrap()
+                        .to_owned()
+                        .union(rhs_jac_sparsity)
+                        .unwrap(),
+                )
             } else {
                 // no mass, use the identity
                 let mass_sparsity = <Eqn::M as Matrix>::Sparsity::new_diagonal(n);
@@ -81,7 +91,7 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
             Eqn::M::from_diagonal(&Eqn::V::from_element(n, Eqn::T::one()))
         } else {
             // mass is not constant, so just create a matrix with the correct sparsity
-            Eqn::M::new_from_sparsity(n, n, eqn.mass().unwrap().sparsity())
+            Eqn::M::new_from_sparsity(n, n, eqn.mass().unwrap().sparsity().map(|s| s.to_owned()))
         };
 
         let mass_jac = RefCell::new(mass_jac);
@@ -147,8 +157,8 @@ impl<Eqn: OdeEquations> Op for BdfCallable<Eqn> {
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
     }
-    fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
-        self.sparsity.as_ref()
+    fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
+        self.sparsity.as_ref().map(|s| s.as_ref())
     }
 }
 

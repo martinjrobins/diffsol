@@ -4,12 +4,13 @@ use anyhow::Result;
 use nalgebra::{DMatrix, DMatrixView, DMatrixViewMut, DVector, DVectorView, DVectorViewMut};
 
 use crate::op::NonLinearOp;
+use crate::vector::Vector;
 use crate::{scalar::Scale, IndexType, Scalar};
 
 use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU};
 
 use super::default_solver::DefaultSolver;
-use super::Dense;
+use super::sparsity::{Dense, DenseRef};
 
 impl<T: Scalar> DefaultSolver for DMatrix<T> {
     type LS<C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> = NalgebraLU<T, C>;
@@ -93,16 +94,23 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
 }
 
 impl<T: Scalar> Matrix for DMatrix<T> {
-    type Sparsity = Dense;
+    type Sparsity = Dense<Self>;
+    type SparsityRef<'a> = DenseRef<'a, Self>;
+
+    fn sparsity(&self) -> Option<Self::SparsityRef<'_>> {
+        None
+    }
 
     fn set_data_with_indices(
         &mut self,
-        dst_indices: &<Self::Sparsity as super::MatrixSparsity>::Index,
-        src_indices: &<Self::V as crate::vector::Vector>::Index,
+        dst_indices: &<Self::V as Vector>::Index,
+        src_indices: &<Self::V as Vector>::Index,
         data: &Self::V,
     ) {
-        for ((i, j), src_i) in dst_indices.iter().zip(src_indices.iter()) {
-            self[(*i, *j)] = data[*src_i];
+        for (dst_i, src_i) in dst_indices.iter().zip(src_indices.iter()) {
+            let i = dst_i % self.nrows();
+            let j = dst_i / self.nrows();
+            self[(i, j)] = data[*src_i];
         }
     }
 
@@ -154,7 +162,7 @@ impl<T: Scalar> Matrix for DMatrix<T> {
     fn new_from_sparsity(
         nrows: IndexType,
         ncols: IndexType,
-        _sparsity: Option<&Self::Sparsity>,
+        _sparsity: Option<Self::Sparsity>,
     ) -> Self {
         Self::zeros(nrows, ncols)
     }

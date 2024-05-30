@@ -1,6 +1,6 @@
 use crate::{
-    ode_solver::problem::OdeSolverSolution, scalar::scale, DenseMatrix, OdeBuilder, OdeEquations,
-    OdeSolverProblem, Vector,
+    matrix::Matrix, ode_solver::problem::OdeSolverSolution, scalar::scale, OdeBuilder,
+    OdeEquations, OdeSolverProblem, Vector,
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};
@@ -11,12 +11,7 @@ use std::ops::MulAssign;
 // 0 = z - y
 // remove warning about unused mut
 #[allow(unused_mut)]
-fn exponential_decay_with_algebraic<M: DenseMatrix>(
-    x: &M::V,
-    p: &M::V,
-    _t: M::T,
-    mut y: &mut M::V,
-) {
+fn exponential_decay_with_algebraic<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, mut y: &mut M::V) {
     y.copy_from(x);
     y.mul_assign(scale(-p[0]));
     let nstates = y.len();
@@ -24,7 +19,7 @@ fn exponential_decay_with_algebraic<M: DenseMatrix>(
 }
 
 #[allow(unused_mut)]
-fn exponential_decay_with_algebraic_sens<M: DenseMatrix>(
+fn exponential_decay_with_algebraic_sens<M: Matrix>(
     x: &M::V,
     _p: &M::V,
     _t: M::T,
@@ -39,7 +34,7 @@ fn exponential_decay_with_algebraic_sens<M: DenseMatrix>(
 
 // Jv = [[-av, 0], [-1, 1]]v = [-av, -v[0] + v[1]]
 #[allow(unused_mut)]
-fn exponential_decay_with_algebraic_jacobian<M: DenseMatrix>(
+fn exponential_decay_with_algebraic_jacobian<M: Matrix>(
     _x: &M::V,
     p: &M::V,
     _t: M::T,
@@ -54,7 +49,7 @@ fn exponential_decay_with_algebraic_jacobian<M: DenseMatrix>(
 
 // y = Mx + beta * y = | 1 0 | | x[0] | + beta | y[0] |
 //                     | 0 0 | | x[1] |         | y[1] |
-fn exponential_decay_with_algebraic_mass<M: DenseMatrix>(
+fn exponential_decay_with_algebraic_mass<M: Matrix>(
     x: &M::V,
     _p: &M::V,
     _t: M::T,
@@ -67,7 +62,7 @@ fn exponential_decay_with_algebraic_mass<M: DenseMatrix>(
     y[nstates - 1] = yn;
 }
 
-fn exponential_decay_with_algebraic_mass_sens<M: DenseMatrix>(
+fn exponential_decay_with_algebraic_mass_sens<M: Matrix>(
     _x: &M::V,
     _p: &M::V,
     _t: M::T,
@@ -77,11 +72,11 @@ fn exponential_decay_with_algebraic_mass_sens<M: DenseMatrix>(
     y.fill(M::T::zero());
 }
 
-fn exponential_decay_with_algebraic_init<M: DenseMatrix>(_p: &M::V, _t: M::T) -> M::V {
+fn exponential_decay_with_algebraic_init<M: Matrix>(_p: &M::V, _t: M::T) -> M::V {
     M::V::from_vec(vec![1.0.into(), 1.0.into(), 0.0.into()])
 }
 
-fn exponential_decay_with_algebraic_init_sens<M: DenseMatrix>(
+fn exponential_decay_with_algebraic_init_sens<M: Matrix>(
     _p: &M::V,
     _t: M::T,
     _v: &M::V,
@@ -90,7 +85,7 @@ fn exponential_decay_with_algebraic_init_sens<M: DenseMatrix>(
     y.fill(M::T::zero());
 }
 
-pub fn exponential_decay_with_algebraic_problem<M: DenseMatrix + 'static>(
+pub fn exponential_decay_with_algebraic_problem<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
@@ -118,7 +113,7 @@ pub fn exponential_decay_with_algebraic_problem<M: DenseMatrix + 'static>(
     (problem, soln)
 }
 
-pub fn exponential_decay_with_algebraic_problem_sens<M: DenseMatrix + 'static>(
+pub fn exponential_decay_with_algebraic_problem_sens<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,

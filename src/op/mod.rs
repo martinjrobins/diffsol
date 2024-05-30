@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{Matrix, Scalar, Vector};
+use crate::{Matrix, MatrixSparsityRef, Scalar, Vector};
 
 use num_traits::{One, Zero};
 use serde::Serialize;
@@ -45,12 +45,12 @@ pub trait Op {
     }
 
     /// Return sparsity information for the jacobian or matrix (if available)
-    fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
+    fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
         None
     }
 
     /// Return sparsity information for the sensitivity of the operator wrt a parameter vector p (if available)
-    fn sparsity_sens(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
+    fn sparsity_sens(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
         None
     }
 
@@ -163,7 +163,7 @@ pub trait NonLinearOp: Op {
     /// See [Self::jacobian_inplace] for a non-allocating version.
     fn jacobian(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
-        let mut y = Self::M::new_from_sparsity(n, n, self.sparsity());
+        let mut y = Self::M::new_from_sparsity(n, n, self.sparsity().map(|s| s.to_owned()));
         self.jacobian_inplace(x, t, &mut y);
         y
     }
@@ -193,7 +193,7 @@ pub trait NonLinearOp: Op {
     fn sens(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
         let m = self.nparams();
-        let mut y = Self::M::new_from_sparsity(n, m, self.sparsity_sens());
+        let mut y = Self::M::new_from_sparsity(n, m, self.sparsity_sens().map(|s| s.to_owned()));
         self.sens_inplace(x, t, &mut y);
         y
     }
@@ -237,7 +237,11 @@ pub trait LinearOp: Op {
     /// Compute the matrix representation of the operator `A(t)` and return it.
     /// See [Self::matrix_inplace] for a non-allocating version.
     fn matrix(&self, t: Self::T) -> Self::M {
-        let mut y = Self::M::new_from_sparsity(self.nstates(), self.nstates(), self.sparsity());
+        let mut y = Self::M::new_from_sparsity(
+            self.nstates(),
+            self.nstates(),
+            self.sparsity().map(|s| s.to_owned()),
+        );
         self.matrix_inplace(t, &mut y);
         y
     }
@@ -286,7 +290,7 @@ pub trait LinearOp: Op {
     fn sens(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
         let m = self.nparams();
-        let mut y = Self::M::new_from_sparsity(n, m, self.sparsity_sens());
+        let mut y = Self::M::new_from_sparsity(n, m, self.sparsity_sens().map(|s| s.to_owned()));
         self.sens_inplace(x, t, &mut y);
         y
     }
@@ -339,7 +343,7 @@ pub trait ConstantOp: Op {
     fn sens(&self, t: Self::T) -> Self::M {
         let n = self.nstates();
         let m = self.nparams();
-        let mut y = Self::M::new_from_sparsity(n, m, self.sparsity_sens());
+        let mut y = Self::M::new_from_sparsity(n, m, self.sparsity_sens().map(|s| s.to_owned()));
         self.sens_inplace(t, &mut y);
         y
     }

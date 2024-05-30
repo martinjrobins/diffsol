@@ -17,9 +17,9 @@ use sundials_sys::{
 };
 
 use crate::{
-    scale, vector::sundials::get_suncontext, LinearOp, Matrix, NonLinearOp, OdeEquations,
-    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, SundialsMatrix,
-    SundialsVector, Vector,
+    matrix::sparsity::MatrixSparsityRef, scale, vector::sundials::get_suncontext, LinearOp, Matrix,
+    NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+    OdeSolverStopReason, Op, SundialsMatrix, SundialsVector, Vector,
 };
 
 pub fn sundials_check(retval: c_int) -> Result<()> {
@@ -115,10 +115,10 @@ where
     fn new(eqn: Rc<Eqn>) -> Self {
         let n = eqn.rhs().nstates();
         let rhs = eqn.rhs();
-        let rhs_jac_sparsity = rhs.sparsity();
+        let rhs_jac_sparsity = rhs.sparsity().map(|s| MatrixSparsityRef::to_owned(&s));
         let rhs_jac = SundialsMatrix::new_from_sparsity(n, n, rhs_jac_sparsity);
         let mass = if let Some(mass) = eqn.mass() {
-            let mass_sparsity = mass.sparsity();
+            let mass_sparsity = mass.sparsity().map(|s| MatrixSparsityRef::to_owned(&s));
             SundialsMatrix::new_from_sparsity(n, n, mass_sparsity)
         } else {
             let ones = SundialsVector::from_element(n, 1.0);

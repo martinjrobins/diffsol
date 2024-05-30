@@ -80,7 +80,7 @@ impl<Eqn: OdeEquations> Op for InitOp<Eqn> {
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
     }
-    fn sparsity(&self) -> Option<&<Self::M as Matrix>::Sparsity> {
+    fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
         self.jac.sparsity()
     }
 }

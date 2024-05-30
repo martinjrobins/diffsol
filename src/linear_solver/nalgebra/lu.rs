@@ -4,6 +4,7 @@ use anyhow::Result;
 use nalgebra::{DMatrix, DVector, Dyn};
 
 use crate::{
+    matrix::sparsity::MatrixSparsityRef,
     op::{linearise::LinearisedOp, NonLinearOp},
     LinearOp, LinearSolver, Matrix, Op, Scalar, SolverProblem,
 };
@@ -60,7 +61,11 @@ impl<T: Scalar, C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> LinearSol
         let linearised_problem = problem.linearise();
         let ncols = linearised_problem.f.nstates();
         let nrows = linearised_problem.f.nout();
-        let matrix = C::M::new_from_sparsity(nrows, ncols, linearised_problem.f.sparsity());
+        let matrix = C::M::new_from_sparsity(
+            nrows,
+            ncols,
+            linearised_problem.f.sparsity().map(|s| s.to_owned()),
+        );
         self.problem = Some(linearised_problem);
         self.matrix = Some(matrix);
     }
