@@ -56,9 +56,9 @@ impl<'a, M: Matrix> DenseRef<'a, M> {
     }
 }
 
-impl<M> MatrixSparsity<M> for Dense<M> 
-where 
-    for <'a> M: Matrix<Sparsity = Dense<M>, SparsityRef<'a> = DenseRef<'a, M>> + 'a
+impl<M> MatrixSparsity<M> for Dense<M>
+where
+    for<'a> M: Matrix<Sparsity = Dense<M>, SparsityRef<'a> = DenseRef<'a, M>> + 'a,
 {
     fn union(self, other: M::SparsityRef<'_>) -> Result<M::Sparsity> {
         if self.nrows() != other.nrows() || self.ncols() != other.ncols() {
@@ -107,8 +107,9 @@ where
     }
 }
 
-impl<'a, M> MatrixSparsityRef<'a, M> for DenseRef<'a, M> 
-where M: Matrix<Sparsity = Dense<M>, SparsityRef<'a> = Self> + 'a
+impl<'a, M> MatrixSparsityRef<'a, M> for DenseRef<'a, M>
+where
+    M: Matrix<Sparsity = Dense<M>, SparsityRef<'a> = Self> + 'a,
 {
     fn to_owned(&self) -> M::Sparsity {
         Dense::new(self.nrows(), self.ncols())

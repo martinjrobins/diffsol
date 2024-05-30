@@ -1,7 +1,9 @@
 use std::rc::Rc;
 
 use crate::{
-    linear_solver::LinearSolver, matrix::sparsity::MatrixSparsityRef, op::linearise::LinearisedOp, scalar::IndexType, solver::SolverProblem, LinearOp, Matrix, NonLinearOp, Op, Scalar, SparseColMat
+    linear_solver::LinearSolver, matrix::sparsity::MatrixSparsityRef, op::linearise::LinearisedOp,
+    scalar::IndexType, solver::SolverProblem, LinearOp, Matrix, NonLinearOp, Op, Scalar,
+    SparseColMat,
 };
 use anyhow::Result;
 use faer::{solvers::SpSolver, sparse::linalg::solvers::Lu, Col};
@@ -31,7 +33,9 @@ where
     }
 }
 
-impl<T: Scalar, C: NonLinearOp<M = SparseColMat<T>, V = Col<T>, T = T>> LinearSolver<C> for FaerSparseLU<T, C> {
+impl<T: Scalar, C: NonLinearOp<M = SparseColMat<T>, V = Col<T>, T = T>> LinearSolver<C>
+    for FaerSparseLU<T, C>
+{
     fn set_linearisation(&mut self, x: &C::V, t: C::T) {
         Rc::<LinearisedOp<C>>::get_mut(&mut self.problem.as_mut().expect("Problem not set").f)
             .unwrap()
@@ -54,7 +58,14 @@ impl<T: Scalar, C: NonLinearOp<M = SparseColMat<T>, V = Col<T>, T = T>> LinearSo
         let linearised_problem = problem.linearise();
         let ncols = linearised_problem.f.nstates();
         let nrows = linearised_problem.f.nout();
-        let matrix = C::M::new_from_sparsity(nrows, ncols, linearised_problem.f.sparsity().map(|s| MatrixSparsityRef::<SparseColMat<T>>::to_owned(&s)));
+        let matrix = C::M::new_from_sparsity(
+            nrows,
+            ncols,
+            linearised_problem
+                .f
+                .sparsity()
+                .map(|s| MatrixSparsityRef::<SparseColMat<T>>::to_owned(&s)),
+        );
         self.problem = Some(linearised_problem);
         self.matrix = Some(matrix);
     }

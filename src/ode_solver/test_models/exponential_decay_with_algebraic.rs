@@ -1,5 +1,6 @@
 use crate::{
-    matrix::Matrix, ode_solver::problem::OdeSolverSolution, scalar::scale, OdeBuilder, OdeEquations, OdeSolverProblem, Vector
+    matrix::Matrix, ode_solver::problem::OdeSolverSolution, scalar::scale, OdeBuilder,
+    OdeEquations, OdeSolverProblem, Vector,
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};
@@ -10,12 +11,7 @@ use std::ops::MulAssign;
 // 0 = z - y
 // remove warning about unused mut
 #[allow(unused_mut)]
-fn exponential_decay_with_algebraic<M: Matrix>(
-    x: &M::V,
-    p: &M::V,
-    _t: M::T,
-    mut y: &mut M::V,
-) {
+fn exponential_decay_with_algebraic<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, mut y: &mut M::V) {
     y.copy_from(x);
     y.mul_assign(scale(-p[0]));
     let nstates = y.len();

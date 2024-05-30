@@ -3,14 +3,12 @@ use std::ops::Mul;
 
 use super::sparsity::MatrixSparsityRef;
 use super::{Matrix, MatrixCommon, MatrixSparsity};
-use crate::{DefaultSolver, FaerSparseLU, IndexType, NonLinearOp, Scalar, Scale};
 use crate::vector::Vector;
+use crate::{DefaultSolver, FaerSparseLU, IndexType, NonLinearOp, Scalar, Scale};
 use anyhow::Result;
 use faer::sparse::ops::{ternary_op_assign_into, union_symbolic};
 use faer::sparse::{SymbolicSparseColMat, SymbolicSparseColMatRef};
 use faer::Col;
-
-
 
 pub struct SparseColMat<T: Scalar>(faer::sparse::SparseColMat<IndexType, T>);
 
