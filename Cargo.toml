@@ -34,7 +34,6 @@ diffsl-llvm17 = ["diffsl17-0", "diffsl"]
 [dependencies]
 nalgebra = ">=0.32"
 nalgebra-sparse = ">=0.9"
-anyhow = ">=1.0.77"
 num-traits = "0.2.17"
 ouroboros = "0.18.2"
 serde = { version = "1.0.196", features = ["derive"] }
@@ -55,6 +54,7 @@ diffsl17-0 = { package = "diffsl", version = ">=0.1.5", features = ["llvm17-0"],
 petgraph = "0.6.4"
 faer = "0.18.2"
 sundials-sys = { version = "0.4.0", features = ["ida", "static_libraries"], optional = true }
+thiserror = "1.0.61"
 
 
 [dev-dependencies]

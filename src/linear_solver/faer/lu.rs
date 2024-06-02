@@ -4,8 +4,9 @@ use crate::{
     linear_solver::LinearSolver, op::linearise::LinearisedOp, solver::SolverProblem, LinearOp,
     Matrix, MatrixSparsityRef, NonLinearOp, Op, Scalar,
 };
-use anyhow::Result;
 use faer::{linalg::solvers::FullPivLu, solvers::SpSolver, Col, Mat};
+
+use crate::errors::PSError;
 /// A [LinearSolver] that uses the LU decomposition in the [`faer`](https://github.com/sarah-ek/faer-rs) library to solve the linear system.
 pub struct LU<T, C>
 where
@@ -41,9 +42,9 @@ impl<T: Scalar, C: NonLinearOp<M = Mat<T>, V = Col<T>, T = T>> LinearSolver<C> f
         self.lu = Some(matrix.full_piv_lu());
     }
 
-    fn solve_in_place(&self, x: &mut C::V) -> Result<()> {
+    fn solve_in_place(&self, x: &mut C::V) -> Result<(), PSError> {
         if self.lu.is_none() {
-            return Err(anyhow::anyhow!("LU not initialized"));
+            return Err(PSError::LuNotInitialized);
         }
         let lu = self.lu.as_ref().unwrap();
         lu.solve_in_place(x);

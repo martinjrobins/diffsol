@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use anyhow::Result;
 use nalgebra::{DMatrix, DVector, Dyn};
 
 use crate::{
@@ -8,6 +7,8 @@ use crate::{
     op::{linearise::LinearisedOp, NonLinearOp},
     LinearOp, LinearSolver, Matrix, Op, Scalar, SolverProblem,
 };
+
+use crate::errors::PSError;
 
 /// A [LinearSolver] that uses the LU decomposition in the [`nalgebra` library](https://nalgebra.org/) to solve the linear system.
 pub struct LU<T, C>
@@ -37,14 +38,14 @@ where
 impl<T: Scalar, C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> LinearSolver<C>
     for LU<T, C>
 {
-    fn solve_in_place(&self, state: &mut C::V) -> Result<()> {
+    fn solve_in_place(&self, state: &mut C::V) -> Result<(), PSError> {
         if self.lu.is_none() {
-            return Err(anyhow::anyhow!("LU not initialized"));
+            return Err(PSError::LuNotInitialized);
         }
         let lu = self.lu.as_ref().unwrap();
         match lu.solve_mut(state) {
             true => Ok(()),
-            false => Err(anyhow::anyhow!("LU solve failed")),
+            false => Err(PSError::LuFailed),
         }
     }
 

@@ -1,11 +1,10 @@
 use std::rc::Rc;
 
 use crate::{
-    linear_solver::LinearSolver, matrix::sparsity::MatrixSparsityRef, op::linearise::LinearisedOp,
-    scalar::IndexType, solver::SolverProblem, LinearOp, Matrix, NonLinearOp, Op, Scalar,
-    SparseColMat,
+    errors::PSError, linear_solver::LinearSolver, matrix::sparsity::MatrixSparsityRef,
+    op::linearise::LinearisedOp, scalar::IndexType, solver::SolverProblem, LinearOp, Matrix,
+    NonLinearOp, Op, Scalar, SparseColMat,
 };
-use anyhow::Result;
 use faer::{solvers::SpSolver, sparse::linalg::solvers::Lu, Col};
 
 /// A [LinearSolver] that uses the LU decomposition in the [`faer`](https://github.com/sarah-ek/faer-rs) library to solve the linear system.
@@ -45,9 +44,9 @@ impl<T: Scalar, C: NonLinearOp<M = SparseColMat<T>, V = Col<T>, T = T>> LinearSo
         self.lu = Some(matrix.faer().sp_lu().unwrap());
     }
 
-    fn solve_in_place(&self, x: &mut C::V) -> Result<()> {
+    fn solve_in_place(&self, x: &mut C::V) -> Result<(), PSError> {
         if self.lu.is_none() {
-            return Err(anyhow::anyhow!("LU not initialized"));
+            return Err(PSError::LuNotInitialized);
         }
         let lu = self.lu.as_ref().unwrap();
         lu.solve_in_place(x);

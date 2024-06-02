@@ -1,4 +1,3 @@
-use anyhow::Result;
 use nalgebra::ComplexField;
 use num_traits::{One, Pow};
 use std::rc::Rc;
@@ -8,6 +7,8 @@ use crate::{
     NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, Op,
     SensEquations, SolverProblem, Vector,
 };
+
+use crate::errors::PSError;
 
 pub enum OdeSolverStopReason<T: Scalar> {
     InternalTimestep,
@@ -52,17 +53,17 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     /// - `InternalTimestep`: The solver has taken a step forward in time, the internal state of the solver is at time self.state().t
     /// - `RootFound(t_root)`: The solver has found a root at time `t_root`. Note that the internal state of the solver is at the internal time step `self.state().t`, *not* at time `t_root`.
     /// - `TstopReached`: The solver has reached the stop time set by [Self::set_stop_time], the internal state of the solver is at time `tstop`, which is the same as `self.state().t`
-    fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>>;
+    fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, PSError>;
 
     /// Set a stop time for the solver. The solver will stop when the internal time reaches this time.
     /// Once it stops, the stop time is unset. If `tstop` is at or before the current internal time, an error is returned.
-    fn set_stop_time(&mut self, tstop: Eqn::T) -> Result<()>;
+    fn set_stop_time(&mut self, tstop: Eqn::T) -> Result<(), PSError>;
 
     /// Interpolate the solution at a given time. This time should be between the current time and the last solver time step
-    fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V>;
+    fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V, PSError>;
 
     /// Interpolate the sensitivity vectors at a given time. This time should be between the current time and the last solver time step
-    fn interpolate_sens(&self, t: Eqn::T) -> Result<Vec<Eqn::V>>;
+    fn interpolate_sens(&self, t: Eqn::T) -> Result<Vec<Eqn::V>, PSError>;
 
     /// Get the current state of the solver, if it exists
     fn state(&self) -> Option<&OdeSolverState<Eqn::V>>;
@@ -81,7 +82,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     fn take_state(&mut self) -> Option<OdeSolverState<Eqn::V>>;
 
     /// Reinitialise the solver state and solve the problem up to time `t`
-    fn solve(&mut self, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Result<Eqn::V>
+    fn solve(&mut self, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Result<Eqn::V, PSError>
     where
         Eqn::M: DefaultSolver,
         Self: Sized,
@@ -122,7 +123,7 @@ impl<V: Vector> OdeSolverState<V> {
     /// It will also set the initial step size based on the given solver.
     /// If you want to create a state without this default initialisation, use [Self::new_without_initialise] instead.
     /// You can then use [Self::set_consistent] and [Self::set_step_size] to set the state up if you need to.
-    pub fn new<Eqn, S>(ode_problem: &OdeSolverProblem<Eqn>, solver: &S) -> Result<Self>
+    pub fn new<Eqn, S>(ode_problem: &OdeSolverProblem<Eqn>, solver: &S) -> Result<Self, PSError>
     where
         Eqn: OdeEquations<T = V::T, V = V>,
         Eqn::M: DefaultSolver,
@@ -176,7 +177,7 @@ impl<V: Vector> OdeSolverState<V> {
         &mut self,
         ode_problem: &OdeSolverProblem<Eqn>,
         root_solver: &mut S,
-    ) -> Result<()>
+    ) -> Result<(), PSError>
     where
         Eqn: OdeEquations<T = V::T, V = V>,
         S: NonLinearSolver<InitOp<Eqn>> + ?Sized,
@@ -211,7 +212,7 @@ impl<V: Vector> OdeSolverState<V> {
         &mut self,
         ode_problem: &OdeSolverProblem<Eqn>,
         root_solver: &mut S,
-    ) -> Result<()>
+    ) -> Result<(), PSError>
     where
         Eqn: OdeEquations<T = V::T, V = V>,
         S: NonLinearSolver<InitOp<SensEquations<Eqn>>> + ?Sized,
