@@ -1,15 +1,14 @@
 use crate::{
-    op::NonLinearOp, Convergence, ConvergenceStatus, LinearSolver, NonLinearSolver, SolverProblem,
-    Vector,
+    errors::PSError, op::NonLinearOp, Convergence, ConvergenceStatus, LinearSolver,
+    NonLinearSolver, SolverProblem, Vector,
 };
-use anyhow::{anyhow, Result};
 
 pub fn newton_iteration<V: Vector>(
     xn: &mut V,
     fun: impl Fn(&V, &mut V),
-    linear_solver: impl Fn(&mut V) -> Result<()>,
+    linear_solver: impl Fn(&mut V) -> Result<(), PSError>,
     convergence: &mut Convergence<V>,
-) -> Result<usize> {
+) -> Result<usize, PSError> {
     convergence.reset();
     let mut tmp = xn.clone();
     let mut niter = 0;
@@ -32,7 +31,7 @@ pub fn newton_iteration<V: Vector>(
             ConvergenceStatus::MaximumIterations => break,
         }
     }
-    Err(anyhow!("Newton iteration did not converge"))
+    Err(PSError::MaxIterReached)
 }
 
 pub struct NewtonNonlinearSolver<C: NonLinearOp, Ls: LinearSolver<C>> {
@@ -85,11 +84,11 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
         self.is_jacobian_set = true;
     }
 
-    fn solve_linearised_in_place(&self, x: &mut C::V) -> Result<()> {
+    fn solve_linearised_in_place(&self, x: &mut C::V) -> Result<(), PSError> {
         self.linear_solver.solve_in_place(x)
     }
 
-    fn solve_in_place(&mut self, xn: &mut C::V, t: C::T) -> Result<()> {
+    fn solve_in_place(&mut self, xn: &mut C::V, t: C::T) -> Result<(), PSError> {
         if self.convergence.is_none() || self.problem.is_none() {
             panic!("NewtonNonlinearSolver::solve() called before set_problem");
         }

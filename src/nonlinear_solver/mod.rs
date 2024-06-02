@@ -1,6 +1,4 @@
-use anyhow::Result;
-
-use crate::{op::Op, solver::SolverProblem};
+use crate::{errors::PSError, op::Op, solver::SolverProblem};
 
 pub struct NonLinearSolveSolution<V> {
     pub x0: V,
@@ -25,18 +23,18 @@ pub trait NonLinearSolver<C: Op> {
     fn reset_jacobian(&mut self, x: &C::V, t: C::T);
 
     // Solve the problem `F(x, t) = 0` for fixed t, and return the solution `x`.
-    fn solve(&mut self, x: &C::V, t: C::T) -> Result<C::V> {
+    fn solve(&mut self, x: &C::V, t: C::T) -> Result<C::V, PSError> {
         let mut x = x.clone();
         self.solve_in_place(&mut x, t)?;
         Ok(x)
     }
 
     /// Solve the problem `F(x) = 0` in place.
-    fn solve_in_place(&mut self, x: &mut C::V, t: C::T) -> Result<()>;
+    fn solve_in_place(&mut self, x: &mut C::V, t: C::T) -> Result<(), PSError>;
 
     /// Solve the linearised problem `J * x = b`, where `J` was calculated using [Self::reset_jacobian].
     /// The input `b` is provided in `x`, and the solution is returned in `x`.
-    fn solve_linearised_in_place(&self, x: &mut C::V) -> Result<()>;
+    fn solve_linearised_in_place(&self, x: &mut C::V) -> Result<(), PSError>;
 
     // Set the maximum number of iterations for the solver.
     fn set_max_iter(&mut self, max_iter: usize);

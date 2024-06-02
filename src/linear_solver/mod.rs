@@ -1,5 +1,4 @@
 use crate::{op::Op, solver::SolverProblem};
-use anyhow::Result;
 
 #[cfg(feature = "nalgebra")]
 pub mod nalgebra;
@@ -10,6 +9,7 @@ pub mod faer;
 #[cfg(feature = "sundials")]
 pub mod sundials;
 
+use crate::errors::PSError;
 pub use faer::lu::LU as FaerLU;
 pub use nalgebra::lu::LU as NalgebraLU;
 
@@ -24,13 +24,13 @@ pub trait LinearSolver<C: Op> {
 
     /// Solve the problem `Ax = b` and return the solution `x`.
     /// panics if [Self::set_linearisation] has not been called previously
-    fn solve(&self, b: &C::V) -> Result<C::V> {
+    fn solve(&self, b: &C::V) -> Result<C::V, PSError> {
         let mut b = b.clone();
         self.solve_in_place(&mut b)?;
         Ok(b)
     }
 
-    fn solve_in_place(&self, b: &mut C::V) -> Result<()>;
+    fn solve_in_place(&self, b: &mut C::V) -> Result<(), PSError>;
 }
 
 pub struct LinearSolveSolution<V> {

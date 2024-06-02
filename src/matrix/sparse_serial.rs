@@ -1,6 +1,5 @@
 use std::{collections::HashSet, ops::Mul};
 
-use anyhow::Result;
 use nalgebra::DVector;
 use nalgebra_sparse::{pattern::SparsityPattern, CooMatrix, CscMatrix};
 
@@ -8,7 +7,7 @@ use crate::{scalar::Scale, vector::Vector, IndexType, Scalar};
 
 use super::{
     sparsity::{MatrixSparsity, MatrixSparsityRef},
-    Matrix, MatrixCommon,
+    Matrix, MatrixCommon, PSError,
 };
 
 impl<T: Scalar> MatrixCommon for CscMatrix<T> {
@@ -31,7 +30,7 @@ impl<T: Scalar> Mul<Scale<T>> for CscMatrix<T> {
 }
 
 impl<T: Scalar> MatrixSparsity<CscMatrix<T>> for SparsityPattern {
-    fn union(self, other: &SparsityPattern) -> Result<SparsityPattern> {
+    fn union(self, other: &SparsityPattern) -> Result<SparsityPattern, PSError> {
         let max_nnz = self.nnz().max(other.nnz());
         let min_nnz = self.nnz().min(other.nnz());
         let mut minor_indices = Vec::with_capacity(self.nnz() + max_nnz - min_nnz);
@@ -57,7 +56,11 @@ impl<T: Scalar> MatrixSparsity<CscMatrix<T>> for SparsityPattern {
             major_offsets,
             minor_indices,
         )
-        .map_err(anyhow::Error::new)
+        .map_err(
+            |err: nalgebra_sparse::pattern::SparsityPatternFormatError| PSError::Unknown {
+                e: err.to_string(),
+            },
+        )
     }
     fn as_ref(&self) -> &SparsityPattern {
         self
@@ -94,7 +97,7 @@ impl<T: Scalar> MatrixSparsity<CscMatrix<T>> for SparsityPattern {
         nrows: IndexType,
         ncols: IndexType,
         indices: Vec<(IndexType, IndexType)>,
-    ) -> Result<Self> {
+    ) -> Result<Self, PSError> {
         // use a CSC sparsity pattern (so cols are major, rows are minor)
         let major_dim = ncols;
         let minor_dim = nrows;
@@ -122,7 +125,7 @@ impl<T: Scalar> MatrixSparsity<CscMatrix<T>> for SparsityPattern {
             major_offsets,
             minor_indices,
         )
-        .map_err(anyhow::Error::new)
+        .map_err(|err| PSError::Unknown { e: err.to_string() })
     }
 
     fn new_diagonal(n: IndexType) -> Self {
@@ -217,7 +220,7 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
         nrows: IndexType,
         ncols: IndexType,
         triplets: Vec<(IndexType, IndexType, T)>,
-    ) -> Result<Self> {
+    ) -> Result<Self, PSError> {
         let mut coo = CooMatrix::new(nrows, ncols);
         for (i, j, v) in triplets {
             coo.push(i, j, v);

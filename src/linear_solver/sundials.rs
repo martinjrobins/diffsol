@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use anyhow::Result;
 use sundials_sys::{
     realtype, SUNLinSolFree, SUNLinSolSetup, SUNLinSolSolve, SUNLinSol_Dense, SUNLinearSolver,
 };

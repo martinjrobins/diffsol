@@ -1,11 +1,10 @@
 use std::rc::Rc;
 
 use crate::{
-    vector::DefaultDenseMatrix, Closure, ClosureNoJac, ClosureWithSens, ConstantClosure,
-    ConstantClosureWithSens, LinearClosure, LinearClosureWithSens, Matrix, OdeEquations,
-    OdeSolverProblem, Op, UnitCallable, Vector,
+    errors::PSError, vector::DefaultDenseMatrix, Closure, ClosureNoJac, ClosureWithSens,
+    ConstantClosure, ConstantClosureWithSens, LinearClosure, LinearClosureWithSens, Matrix,
+    OdeEquations, OdeSolverProblem, Op, UnitCallable, Vector,
 };
-use anyhow::Result;
 
 use super::equations::OdeSolverEquations;
 
@@ -144,13 +143,11 @@ impl OdeBuilder {
         self
     }
 
-    fn build_atol<V: Vector>(atol: Vec<f64>, nstates: usize) -> Result<V> {
+    fn build_atol<V: Vector>(atol: Vec<f64>, nstates: usize) -> Result<V, PSError> {
         if atol.len() == 1 {
             Ok(V::from_element(nstates, V::T::from(atol[0])))
         } else if atol.len() != nstates {
-            Err(anyhow::anyhow!(
-                "atol must have length 1 or equal to the number of states"
-            ))
+            Err(PSError::AbsoluteToleranceLengthMismatch)
         } else {
             let mut v = V::zeros(nstates);
             for (i, &a) in atol.iter().enumerate() {
@@ -220,6 +217,7 @@ impl OdeBuilder {
         OdeSolverProblem<
             OdeSolverEquations<M, Closure<M, F, G>, ConstantClosure<M, I>, LinearClosure<M, H>>,
         >,
+        PSError,
     >
     where
         M: Matrix,
@@ -324,6 +322,7 @@ impl OdeBuilder {
                 LinearClosureWithSens<M, H, L>,
             >,
         >,
+        PSError,
     >
     where
         M: Matrix,
@@ -399,7 +398,10 @@ impl OdeBuilder {
         rhs: F,
         rhs_jac: G,
         init: I,
-    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, Closure<M, F, G>, ConstantClosure<M, I>>>>
+    ) -> Result<
+        OdeSolverProblem<OdeSolverEquations<M, Closure<M, F, G>, ConstantClosure<M, I>>>,
+        PSError,
+    >
     where
         M: Matrix,
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -472,6 +474,7 @@ impl OdeBuilder {
         OdeSolverProblem<
             OdeSolverEquations<M, ClosureWithSens<M, F, G, J>, ConstantClosureWithSens<M, I, K>>,
         >,
+        PSError,
     >
     where
         M: Matrix,
@@ -560,6 +563,7 @@ impl OdeBuilder {
                 ClosureNoJac<M, H>,
             >,
         >,
+        PSError,
     >
     where
         M: Matrix,
@@ -602,6 +606,7 @@ impl OdeBuilder {
         init: I,
     ) -> Result<
         OdeSolverProblem<OdeSolverEquations<V::M, Closure<V::M, F, G>, ConstantClosure<V::M, I>>>,
+        PSError,
     >
     where
         V: Vector + DefaultDenseMatrix,

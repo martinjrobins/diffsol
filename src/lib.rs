@@ -124,6 +124,7 @@ pub extern crate diffsl8_0 as diffsl;
 #[cfg(feature = "diffsl-llvm9")]
 pub extern crate diffsl9_0 as diffsl;
 
+pub mod errors;
 pub mod jacobian;
 pub mod linear_solver;
 pub mod matrix;

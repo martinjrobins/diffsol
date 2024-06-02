@@ -1,5 +1,3 @@
-use anyhow::anyhow;
-use anyhow::Result;
 use num_traits::abs;
 use num_traits::One;
 use num_traits::Pow;
@@ -7,6 +5,7 @@ use num_traits::Zero;
 use std::ops::MulAssign;
 use std::rc::Rc;
 
+use crate::errors::PSError;
 use crate::matrix::MatrixRef;
 use crate::nonlinear_solver::convergence::Convergence;
 use crate::nonlinear_solver::newton::newton_iteration;
@@ -181,7 +180,10 @@ where
         &self.statistics
     }
 
-    fn handle_tstop(&mut self, tstop: Eqn::T) -> Result<Option<OdeSolverStopReason<Eqn::T>>> {
+    fn handle_tstop(
+        &mut self,
+        tstop: Eqn::T,
+    ) -> Result<Option<OdeSolverStopReason<Eqn::T>>, PSError> {
         let state = self.state.as_mut().unwrap();
 
         // check if the we are at tstop
@@ -190,11 +192,10 @@ where
             self.tstop = None;
             return Ok(Some(OdeSolverStopReason::TstopReached));
         } else if tstop < state.t - troundoff {
-            return Err(anyhow::anyhow!(
-                "tstop = {} is less than current time t = {}",
-                tstop,
-                state.t
-            ));
+            return Err(PSError::StopBeforeCurrentTime {
+                tstop: tstop.into(),
+                t: state.t.into(),
+            });
         }
 
         // check if the next step will be beyond tstop, if so adjust the step size
@@ -220,7 +221,7 @@ where
         }
     }
 
-    fn solve_for_sensitivities(&mut self, i: usize, t: Eqn::T) -> Result<()> {
+    fn solve_for_sensitivities(&mut self, i: usize, t: Eqn::T) -> Result<(), PSError> {
         // update for new state
         {
             self.problem()
@@ -234,8 +235,9 @@ where
         }
 
         // reuse linear solver from nonlinear solver
-        let ls =
-            |x: &mut Eqn::V| -> Result<()> { self.nonlinear_solver.solve_linearised_in_place(x) };
+        let ls = |x: &mut Eqn::V| -> Result<(), PSError> {
+            self.nonlinear_solver.solve_linearised_in_place(x)
+        };
 
         // construct bdf discretisation of sensitivity equations
         let op = self.s_op.as_ref().unwrap();
@@ -358,10 +360,10 @@ where
         }
     }
 
-    fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>> {
+    fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, PSError> {
         // optionally do the first step
         if self.state.is_none() {
-            return Err(anyhow!("State not set"));
+            return Err(PSError::StateNotSet);
         }
         let n = self.state.as_ref().unwrap().y.len();
 
@@ -449,7 +451,7 @@ where
 
                         // if step size too small, then fail
                         if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
-                            return Err(anyhow::anyhow!("Step size too small at t = {}", state.t));
+                            return Err(PSError::StepSizeTooSmall { t: state.t.into() });
                         }
 
                         // update h for new step size
@@ -516,7 +518,7 @@ where
 
             // if step size too small, then fail
             if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
-                return Err(anyhow::anyhow!("Step size too small at t = {}", state.t));
+                return Err(PSError::StepSizeTooSmall { t: state.t.into() });
             }
 
             // update c for new step size
@@ -585,14 +587,16 @@ where
         Ok(OdeSolverStopReason::InternalTimestep)
     }
 
-    fn set_stop_time(&mut self, tstop: <Eqn as OdeEquations>::T) -> Result<()> {
+    fn set_stop_time(&mut self, tstop: <Eqn as OdeEquations>::T) -> Result<(), PSError> {
         self.tstop = Some(tstop);
         if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
-            self.tstop = None;
-            return Err(anyhow::anyhow!(
-                "Stop time is at or before current time t = {}",
-                self.state.as_ref().unwrap().t
-            ));
+            return {
+                self.tstop = None;
+                Err(PSError::StopBeforeCurrentTime {
+                    tstop: tstop.into(),
+                    t: self.state.as_ref().unwrap().t.into(),
+                })
+            };
         }
         Ok(())
     }
@@ -600,9 +604,9 @@ where
     fn interpolate_sens(
         &self,
         t: <Eqn as OdeEquations>::T,
-    ) -> Result<Vec<<Eqn as OdeEquations>::V>> {
+    ) -> Result<Vec<<Eqn as OdeEquations>::V>, PSError> {
         if self.state.is_none() {
-            return Err(anyhow!("State not set"));
+            return Err(PSError::StateNotSet);
         }
         let state = self.state.as_ref().unwrap();
 
@@ -610,15 +614,13 @@ where
             if t == state.t {
                 return Ok(state.s.clone());
             } else {
-                return Err(anyhow::anyhow!("Interpolation time is not within the current step. Step size is zero after calling state_mut()"));
+                return Err(PSError::InterpolationOutsideCurrentStep);
             }
         }
 
         // check that t is within the current step
         if t > state.t || t < self.old_t {
-            return Err(anyhow::anyhow!(
-                "Interpolation time is not within the current step"
-            ));
+            return Err(PSError::InterpolationOutsideCurrentStep);
         }
         let dt = state.t - self.old_t;
         let theta = if dt == Eqn::T::zero() {
@@ -648,9 +650,9 @@ where
         }
     }
 
-    fn interpolate(&self, t: <Eqn>::T) -> anyhow::Result<<Eqn>::V> {
+    fn interpolate(&self, t: <Eqn>::T) -> Result<<Eqn>::V, PSError> {
         if self.state.is_none() {
-            return Err(anyhow!("State not set"));
+            return Err(PSError::StateNotSet);
         }
         let state = self.state.as_ref().unwrap();
 
@@ -658,15 +660,13 @@ where
             if t == state.t {
                 return Ok(state.y.clone());
             } else {
-                return Err(anyhow::anyhow!("Interpolation time is not within the current step. Step size is zero after calling state_mut()"));
+                return Err(PSError::InterpolationOutsideCurrentStep);
             }
         }
 
         // check that t is within the current step
         if t > state.t || t < self.old_t {
-            return Err(anyhow::anyhow!(
-                "Interpolation time is not within the current step"
-            ));
+            return Err(PSError::InterpolationOutsideCurrentStep);
         }
         let dt = state.t - self.old_t;
         let theta = if dt == Eqn::T::zero() {

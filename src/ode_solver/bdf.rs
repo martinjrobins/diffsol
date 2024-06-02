@@ -2,8 +2,6 @@ use nalgebra::ComplexField;
 use std::rc::Rc;
 use std::{ops::AddAssign, ops::MulAssign, panic};
 
-use anyhow::{anyhow, Result};
-
 use num_traits::{abs, One, Pow, Zero};
 use serde::Serialize;
 
@@ -21,6 +19,7 @@ use crate::{
 use crate::{NonLinearOp, SensEquations};
 
 use super::equations::OdeEquations;
+use crate::errors::PSError;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct BdfStatistics<T: Scalar> {
@@ -327,7 +326,10 @@ where
         (y_predict, t_new)
     }
 
-    fn handle_tstop(&mut self, tstop: Eqn::T) -> Result<Option<OdeSolverStopReason<Eqn::T>>> {
+    fn handle_tstop(
+        &mut self,
+        tstop: Eqn::T,
+    ) -> Result<Option<OdeSolverStopReason<Eqn::T>>, PSError> {
         // check if the we are at tstop
         let state = self.state.as_ref().unwrap();
         let troundoff = Eqn::T::from(100.0) * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
@@ -336,7 +338,10 @@ where
             return Ok(Some(OdeSolverStopReason::TstopReached));
         } else if tstop < state.t - troundoff {
             self.tstop = None;
-            return Err(anyhow!("tstop is before current time"));
+            return Err(PSError::StopBeforeCurrentTime {
+                tstop: tstop.into(),
+                t: state.t.into(),
+            });
         }
 
         // check if the next step will be beyond tstop, if so adjust the step size
@@ -397,7 +402,7 @@ where
         y_new: &Eqn::V,
         t_new: Eqn::T,
         mut error_norm: Eqn::T,
-    ) -> Result<Eqn::T> {
+    ) -> Result<Eqn::T, PSError> {
         let h = self.state.as_ref().unwrap().h;
 
         // update for new state
@@ -414,8 +419,9 @@ where
         }
 
         // reuse linear solver from nonlinear solver
-        let ls =
-            |x: &mut Eqn::V| -> Result<()> { self.nonlinear_solver.solve_linearised_in_place(x) };
+        let ls = |x: &mut Eqn::V| -> Result<(), PSError> {
+            self.nonlinear_solver.solve_linearised_in_place(x)
+        };
 
         // construct bdf discretisation of sensitivity equations
         let op = self.s_op.as_ref().unwrap();
@@ -471,19 +477,19 @@ where
         self.order
     }
 
-    fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V> {
+    fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V, PSError> {
         // state must be set
-        let state = self.state.as_ref().ok_or(anyhow!("State not set"))?;
+        let state = self.state.as_ref().ok_or(PSError::StateNotSet)?;
         if self.is_state_modified {
             if t == state.t {
                 return Ok(state.y.clone());
             } else {
-                return Err(anyhow::anyhow!("Interpolation time is not within the current step. Step size is zero after calling state_mut()"));
+                return Err(PSError::InterpolationOutsideCurrentStep);
             }
         }
         // check that t is before the current time
         if t > state.t {
-            return Err(anyhow!("Interpolation time is after current time"));
+            return Err(PSError::InterpolationBeforeCurrentTime);
         }
 
         Ok(Self::interpolate_from_diff(
@@ -491,19 +497,19 @@ where
         ))
     }
 
-    fn interpolate_sens(&self, t: <Eqn as OdeEquations>::T) -> Result<Vec<Eqn::V>> {
+    fn interpolate_sens(&self, t: <Eqn as OdeEquations>::T) -> Result<Vec<Eqn::V>, PSError> {
         // state must be set
-        let state = self.state.as_ref().ok_or(anyhow!("State not set"))?;
+        let state = self.state.as_ref().ok_or(PSError::StateNotSet)?;
         if self.is_state_modified {
             if t == state.t {
                 return Ok(state.s.clone());
             } else {
-                return Err(anyhow::anyhow!("Interpolation time is not within the current step. Step size is zero after calling state_mut()"));
+                return Err(PSError::InterpolationOutsideCurrentStep);
             }
         }
         // check that t is before the current time
         if t > state.t {
-            return Err(anyhow!("Interpolation time is after current time"));
+            return Err(PSError::InterpolationBeforeCurrentTime);
         }
 
         let mut s = Vec::with_capacity(state.s.len());
@@ -589,12 +595,12 @@ where
         self.initialise_to_first_order();
     }
 
-    fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>> {
+    fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, PSError> {
         let mut safety: Eqn::T;
         let mut error_norm: Eqn::T;
         let mut updated_jacobian = false;
         if self.state.is_none() {
-            return Err(anyhow!("State not set"));
+            return Err(PSError::StateNotSet);
         }
 
         if self.is_state_modified {
@@ -639,7 +645,7 @@ where
                     error_norm = match self.sensitivity_solve(&y_new, t_new, error_norm) {
                         Ok(en) => en,
                         Err(_) => {
-                            solve_result = Err(anyhow!("Sensitivity solve failed"));
+                            solve_result = Err(PSError::SensitivityError);
                             Eqn::T::from(2.0)
                         }
                     }
@@ -693,7 +699,7 @@ where
                 // if step size too small, then fail
                 let state = self.state.as_ref().unwrap();
                 if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
-                    return Err(anyhow::anyhow!("Step size too small at t = {}", state.t));
+                    return Err(PSError::StepSizeTooSmall { t: state.t.into() });
                 }
 
                 // new prediction
@@ -817,14 +823,16 @@ where
         Ok(OdeSolverStopReason::InternalTimestep)
     }
 
-    fn set_stop_time(&mut self, tstop: <Eqn as OdeEquations>::T) -> Result<()> {
+    fn set_stop_time(&mut self, tstop: <Eqn as OdeEquations>::T) -> Result<(), PSError> {
         self.tstop = Some(tstop);
         if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
-            self.tstop = None;
-            return Err(anyhow!(
-                "tstop is at or before current time t = {}",
-                self.state.as_ref().unwrap().t
-            ));
+            return {
+                self.tstop = None;
+                Err(PSError::StopBeforeCurrentTime {
+                    tstop: tstop.into(),
+                    t: self.state.as_ref().unwrap().t.into(),
+                })
+            };
         }
         Ok(())
     }
