@@ -320,9 +320,13 @@ where
         Self::_predict_using_diff(&mut self.y_predict, &self.diff, self.order);
 
         // update psi and c (h, D, y0 has changed)
-        let psi = self._calculate_psi(&self.diff);
-        self.nonlinear_problem_op()
-            .set_psi_and_y0(psi, &self.y_predict);
+        self.nonlinear_problem_op().set_psi_and_y0(
+            &self.diff,
+            self.gamma.as_slice(),
+            self.alpha.as_slice(),
+            self.order,
+            &self.y_predict,
+        );
 
         // update time
         let t_new = {
@@ -434,8 +438,13 @@ where
             Self::_predict_using_diff(&mut self.s_predict, &self.sdiff[i], self.order);
 
             // setup op
-            let psi = self._calculate_psi(&self.sdiff[i]);
-            op.set_psi_and_y0(psi, &self.s_predict);
+            op.set_psi_and_y0(
+                &self.sdiff[i],
+                self.gamma.as_slice(),
+                self.alpha.as_slice(),
+                self.order,
+                &self.s_predict,
+            );
             op.eqn().as_ref().rhs().set_param_index(i);
 
             // solve

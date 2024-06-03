@@ -1,6 +1,5 @@
 use diffsol::{ode_solver::test_models::robertson::robertson, Bdf, OdeSolverMethod};
 
-
 fn main() {
     let mut s = Bdf::default();
     let (problem, _soln) = robertson::<nalgebra::DMatrix<f64>>(false);
