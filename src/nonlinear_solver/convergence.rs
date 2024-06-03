@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use crate::{scalar::IndexType, solver::SolverProblem, NonLinearOp, Scalar, Vector};
 
+#[derive(Clone)]
 pub struct Convergence<V: Vector> {
     rtol: V::T,
     atol: Rc<V>,
@@ -34,13 +35,12 @@ impl<V: Vector> Convergence<V> {
     }
     pub fn new_from_problem<C: NonLinearOp<V = V, T = V::T>>(
         problem: &SolverProblem<C>,
-        max_iter: IndexType,
     ) -> Self {
         let rtol = problem.rtol;
         let atol = problem.atol.clone();
-        Self::new(rtol, atol, max_iter)
+        Self::new(rtol, atol)
     }
-    pub fn new(rtol: V::T, atol: Rc<V>, max_iter: usize) -> Self {
+    pub fn new(rtol: V::T, atol: Rc<V>) -> Self {
         let minimum_tol = V::T::from(10.0) * V::T::EPSILON / rtol;
         let maximum_tol = V::T::from(0.03);
         let mut tol = V::T::from(0.5) * rtol.pow(V::T::from(0.5));
@@ -54,7 +54,7 @@ impl<V: Vector> Convergence<V> {
             rtol,
             atol,
             tol,
-            max_iter,
+            max_iter: 10,
             old_norm: None,
             old_eta: None,
             niter: 0,
@@ -80,7 +80,7 @@ impl<V: Vector> Convergence<V> {
             let rate = norm / old_norm;
 
             // check if iteration is diverging
-            if rate > V::T::from(1.0) {
+            if rate > V::T::from(0.9) {
                 return ConvergenceStatus::Diverged;
             }
 

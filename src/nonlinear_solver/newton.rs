@@ -9,12 +9,10 @@ pub fn newton_iteration<V: Vector>(
     fun: impl Fn(&V, &mut V),
     linear_solver: impl Fn(&mut V) -> Result<()>,
     convergence: &mut Convergence<V>,
-) -> Result<usize> {
+) -> Result<()> {
     convergence.reset();
     let mut tmp = xn.clone();
-    let mut niter = 0;
     loop {
-        niter += 1;
         fun(xn, &mut tmp);
         //tmp = f_at_n
 
@@ -27,7 +25,7 @@ pub fn newton_iteration<V: Vector>(
         let res = convergence.check_new_iteration(&mut tmp, xn);
         match res {
             ConvergenceStatus::Continue => continue,
-            ConvergenceStatus::Converged => return Ok(niter),
+            ConvergenceStatus::Converged => return Ok(()),
             ConvergenceStatus::Diverged => break,
             ConvergenceStatus::MaximumIterations => break,
         }
@@ -39,8 +37,6 @@ pub struct NewtonNonlinearSolver<C: NonLinearOp, Ls: LinearSolver<C>> {
     convergence: Option<Convergence<C::V>>,
     linear_solver: Ls,
     problem: Option<SolverProblem<C>>,
-    max_iter: usize,
-    niter: usize,
     is_jacobian_set: bool,
 }
 
@@ -50,8 +46,6 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NewtonNonlinearSolver<C, Ls> {
             problem: None,
             convergence: None,
             linear_solver,
-            max_iter: 100,
-            niter: 0,
             is_jacobian_set: false,
         }
     }
@@ -79,7 +73,7 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
         self.problem = Some(problem.clone());
         self.linear_solver.set_problem(problem);
         let problem = self.problem.as_ref().unwrap();
-        self.convergence = Some(Convergence::new_from_problem(problem, self.max_iter));
+        self.convergence = Some(Convergence::new_from_problem(problem));
         self.is_jacobian_set = false;
     }
 
@@ -106,7 +100,6 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
         let problem = self.problem.as_ref().unwrap();
         let fun = |x: &C::V, y: &mut C::V| problem.f.call_inplace(x, t, y);
         let convergence = self.convergence.as_mut().unwrap();
-        self.niter = newton_iteration(xn, fun, linear_solver, convergence)?;
-        Ok(())
+        newton_iteration(xn, fun, linear_solver, convergence)
     }
 }

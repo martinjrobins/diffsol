@@ -14,7 +14,7 @@ use crate::{
     op::bdf::BdfCallable,
     scalar::scale,
     vector::DefaultDenseMatrix,
-    Convergence, DenseMatrix, IndexType, MatrixViewMut, NewtonNonlinearSolver, NonLinearSolver,
+    DenseMatrix, IndexType, MatrixViewMut, NewtonNonlinearSolver, NonLinearSolver,
     OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar,
     SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
 };
@@ -429,8 +429,7 @@ where
         let fun = |x: &Eqn::V, y: &mut Eqn::V| op.call_inplace(x, t_new, y);
         let rtol = self.problem().as_ref().unwrap().rtol;
         let atol = self.problem().as_ref().unwrap().atol.clone();
-        let maxiter = self.nonlinear_solver.convergence().max_iter();
-        let mut convergence = Convergence::new(rtol, atol.clone(), maxiter);
+        let mut convergence = self.nonlinear_solver.convergence().clone();
         let nparams = self.problem().as_ref().unwrap().eqn.rhs().nparams();
         for i in 0..nparams {
             // predict forward to new step
@@ -450,8 +449,8 @@ where
             {
                 let s_new = &mut self.state.as_mut().unwrap().s[i];
                 s_new.copy_from(&self.s_predict);
-                let niter = newton_iteration(s_new, fun, ls, &mut convergence)?;
-                self.statistics.number_of_nonlinear_solver_iterations += niter;
+                newton_iteration(s_new, fun, ls, &mut convergence)?;
+                self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
                 let s_new = &*s_new;
                 self.s_deltas[i].copy_from(s_new);
                 self.s_deltas[i] -= &self.s_predict;

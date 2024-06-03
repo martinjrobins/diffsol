@@ -8,7 +8,6 @@ use std::ops::MulAssign;
 use std::rc::Rc;
 
 use crate::matrix::MatrixRef;
-use crate::nonlinear_solver::convergence::Convergence;
 use crate::nonlinear_solver::newton::newton_iteration;
 use crate::vector::VectorRef;
 use crate::LinearSolver;
@@ -241,10 +240,7 @@ where
 
         // solve for sensitivities equations discretised using sdirk equation
         let fun = |x: &Eqn::V, y: &mut Eqn::V| op.call_inplace(x, t, y);
-        let rtol = self.problem().as_ref().unwrap().rtol;
-        let atol = self.problem().as_ref().unwrap().atol.clone();
-        let maxiter = self.nonlinear_solver.convergence().max_iter();
-        let mut convergence = Convergence::new(rtol, atol, maxiter);
+        let mut convergence = self.nonlinear_solver.convergence().clone();
         let nparams = self.problem().as_ref().unwrap().eqn.rhs().nparams();
         for j in 0..nparams {
             let s0 = &self.state.as_ref().unwrap().s[j];
@@ -255,9 +251,9 @@ where
 
             // solve
             {
-                let niter = newton_iteration(ds, fun, ls, &mut convergence)?;
+                newton_iteration(ds, fun, ls, &mut convergence)?;
                 self.old_y_sens[j].copy_from(&op.get_last_f_eval());
-                self.statistics.number_of_nonlinear_solver_iterations += niter;
+                self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
             }
         }
         Ok(())
@@ -379,7 +375,7 @@ where
         // loop until step is accepted
         'step: loop {
             // subsequent steps can use an eta from the previous step, so we reset it here
-            //self.nonlinear_solver.convergence_mut().reset_saved_eta();
+            self.nonlinear_solver.convergence_mut().reset_saved_eta();
 
             let t0 = self.state.as_ref().unwrap().t;
             let h = self.state.as_ref().unwrap().h;
