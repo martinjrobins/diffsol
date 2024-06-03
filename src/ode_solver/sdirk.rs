@@ -379,7 +379,7 @@ where
         // loop until step is accepted
         'step: loop {
             // subsequent steps can use an eta from the previous step, so we reset it here
-            self.nonlinear_solver.convergence_mut().reset_saved_eta();
+            //self.nonlinear_solver.convergence_mut().reset_saved_eta();
 
             let t0 = self.state.as_ref().unwrap().t;
             let h = self.state.as_ref().unwrap().h;

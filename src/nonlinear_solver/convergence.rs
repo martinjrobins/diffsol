@@ -76,7 +76,7 @@ impl<V: Vector> Convergence<V> {
         if norm <= V::T::EPSILON {
             return ConvergenceStatus::Converged;
         }
-        let eta = if let Some(old_norm) = self.old_norm {
+        if let Some(old_norm) = self.old_norm {
             let rate = norm / old_norm;
 
             // check if iteration is diverging
@@ -84,7 +84,18 @@ impl<V: Vector> Convergence<V> {
                 return ConvergenceStatus::Diverged;
             }
 
-            // if iteration is not going to converge in NEWTON_MAXITER
+            let eta = rate / (V::T::one() - rate);
+
+            // check if iteration is converging
+            if eta * norm < self.tol {
+                // store eta for next step is required
+                if self.save_eta {
+                    self.old_eta = Some(eta);
+                }
+                return ConvergenceStatus::Converged;
+            }
+
+            // if iteration is not going to converge in max_iter
             // (assuming the current rate), then abort
             if rate.pow(i32::try_from(self.max_iter - self.niter).unwrap())
                 / (V::T::from(1.0) - rate)
@@ -94,25 +105,13 @@ impl<V: Vector> Convergence<V> {
                 return ConvergenceStatus::Diverged;
             }
 
-            Some(rate / (V::T::one() - rate))
         } else if let Some(mut eta) = self.old_eta {
             if eta < V::T::EPSILON {
                 eta = V::T::EPSILON;
             }
-            Some(eta.pow(V::T::from(0.8)))
-        } else {
-            // no rate or eta, just test directly
-            if norm <= self.tol {
-                return ConvergenceStatus::Converged;
-            }
-            None
-        };
+            let eta = eta.pow(V::T::from(0.8));
 
-        // store norm for next iteration
-        self.old_norm = Some(norm);
-
-        // check if converged
-        if let Some(eta) = eta {
+            // check if iteration is converging
             if eta * norm < self.tol {
                 // store eta for next step is required
                 if self.save_eta {
@@ -120,8 +119,17 @@ impl<V: Vector> Convergence<V> {
                 }
                 return ConvergenceStatus::Converged;
             }
-        }
+        } else {
+            // no rate or eta, just test directly
+            if norm <= self.tol {
+                return ConvergenceStatus::Converged;
+            }
+        };
 
+        // we havn't converged, so store norm for next iteration
+        self.old_norm = Some(norm);
+
+        // increment iteration counter and check if we have reached the maximum
         self.niter += 1;
         if self.niter >= self.max_iter {
             ConvergenceStatus::MaximumIterations
