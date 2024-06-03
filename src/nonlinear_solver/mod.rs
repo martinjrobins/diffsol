@@ -1,4 +1,5 @@
 use anyhow::Result;
+use convergence::Convergence;
 
 use crate::{op::Op, solver::SolverProblem};
 
@@ -17,6 +18,10 @@ impl<V> NonLinearSolveSolution<V> {
 pub trait NonLinearSolver<C: Op> {
     /// Get the problem to be solved.
     fn problem(&self) -> &SolverProblem<C>;
+
+    fn convergence(&self) -> &Convergence<C::V>;
+
+    fn convergence_mut(&mut self) -> &mut Convergence<C::V>;
 
     /// Set the problem to be solved, any previous problem is discarded.
     fn set_problem(&mut self, problem: &SolverProblem<C>);
@@ -37,15 +42,6 @@ pub trait NonLinearSolver<C: Op> {
     /// Solve the linearised problem `J * x = b`, where `J` was calculated using [Self::reset_jacobian].
     /// The input `b` is provided in `x`, and the solution is returned in `x`.
     fn solve_linearised_in_place(&self, x: &mut C::V) -> Result<()>;
-
-    // Set the maximum number of iterations for the solver.
-    fn set_max_iter(&mut self, max_iter: usize);
-
-    // Get the maximum number of iterations for the solver.
-    fn max_iter(&self) -> usize;
-
-    // Get the number of iterations taken by the solver on the last call to `solve`.
-    fn niter(&self) -> usize;
 }
 
 pub mod convergence;

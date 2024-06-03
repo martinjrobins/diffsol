@@ -58,15 +58,18 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NewtonNonlinearSolver<C, Ls> {
 }
 
 impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinearSolver<C, Ls> {
-    fn set_max_iter(&mut self, max_iter: usize) {
-        self.max_iter = max_iter;
+    fn convergence(&self) -> &Convergence<C::V> {
+        self.convergence
+            .as_ref()
+            .expect("NewtonNonlinearSolver::convergence() called before set_problem")
     }
-    fn max_iter(&self) -> usize {
-        self.max_iter
+
+    fn convergence_mut(&mut self) -> &mut Convergence<C::V> {
+        self.convergence
+            .as_mut()
+            .expect("NewtonNonlinearSolver::convergence_mut() called before set_problem")
     }
-    fn niter(&self) -> usize {
-        self.niter
-    }
+    
     fn problem(&self) -> &SolverProblem<C> {
         self.problem
             .as_ref()

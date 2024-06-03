@@ -76,9 +76,7 @@ where
     const MIN_TIMESTEP: f64 = 1e-13;
 
     pub fn new(tableau: Tableau<M>, linear_solver: LS) -> Self {
-        let mut nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
-        // set max iterations for nonlinear solver
-        nonlinear_solver.set_max_iter(Self::NEWTON_MAXITER);
+        let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
 
         // check that the upper triangular part of a is zero
         let s = tableau.s();
@@ -245,7 +243,7 @@ where
         let fun = |x: &Eqn::V, y: &mut Eqn::V| op.call_inplace(x, t, y);
         let rtol = self.problem().as_ref().unwrap().rtol;
         let atol = self.problem().as_ref().unwrap().atol.clone();
-        let maxiter = self.nonlinear_solver.max_iter();
+        let maxiter = self.nonlinear_solver.convergence().max_iter();
         let mut convergence = Convergence::new(rtol, atol, maxiter);
         let nparams = self.problem().as_ref().unwrap().eqn.rhs().nparams();
         for j in 0..nparams {
@@ -326,6 +324,9 @@ where
         let nonlinear_problem = SolverProblem::new_from_ode_problem(callable, problem);
         self.nonlinear_solver.set_problem(&nonlinear_problem);
 
+        // set max iterations for nonlinear solver
+        self.nonlinear_solver.convergence_mut().set_max_iter(Self::NEWTON_MAXITER);
+
         // update statistics
         self.statistics = BdfStatistics::default();
         self.statistics.initial_step_size = state.h;
@@ -374,8 +375,12 @@ where
 
         let mut t1: Eqn::T;
 
+
         // loop until step is accepted
         'step: loop {
+            // subsequent steps can use an eta from the previous step, so we reset it here
+            self.nonlinear_solver.convergence_mut().reset_saved_eta();
+
             let t0 = self.state.as_ref().unwrap().t;
             let h = self.state.as_ref().unwrap().h;
             // if start == 1, then we need to compute the first stage
@@ -422,7 +427,7 @@ where
 
                 let mut solve_result = self.nonlinear_solver.solve_in_place(&mut self.old_f, t);
                 self.statistics.number_of_nonlinear_solver_iterations +=
-                    self.nonlinear_solver.niter();
+                    self.nonlinear_solver.convergence().niter();
 
                 // only calculate sensitivities if the solve succeeded
                 if solve_result.is_ok() {
@@ -497,8 +502,8 @@ where
 
             // adjust step size based on error
             // TODO: if factor close to 1 we shouldn't do this, think there is an alg in the textbook...
-            let maxiter = self.nonlinear_solver.max_iter() as f64;
-            let niter = self.nonlinear_solver.niter() as f64;
+            let maxiter = self.nonlinear_solver.convergence().max_iter() as f64;
+            let niter = self.nonlinear_solver.convergence().niter() as f64;
             let safety = Eqn::T::from(0.9 * (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter));
             let order = self.tableau.order() as f64;
             let mut factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (order + 1.0)));
@@ -943,17 +948,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 243
-        number_of_steps: 230
+        number_of_linear_solver_setups: 235
+        number_of_steps: 222
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 2383
+        number_of_nonlinear_solver_iterations: 1782
         number_of_nonlinear_solver_fails: 12
         initial_step_size: 0.00046734995811969143
-        final_step_size: 59513072650.62326
+        final_step_size: 57196716703.832214
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 2322
+        number_of_calls: 2242
         number_of_jac_muls: 39
         number_of_matrix_evals: 13
         "###);

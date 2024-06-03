@@ -9,9 +9,10 @@ pub struct Convergence<V: Vector> {
     atol: Rc<V>,
     tol: V::T,
     max_iter: IndexType,
-    iter: IndexType,
+    niter: IndexType,
     old_norm: Option<V::T>,
     old_eta: Option<V::T>,
+    save_eta: bool,
 }
 
 pub enum ConvergenceStatus {
@@ -22,6 +23,15 @@ pub enum ConvergenceStatus {
 }
 
 impl<V: Vector> Convergence<V> {
+    pub fn max_iter(&self) -> IndexType {
+        self.max_iter
+    }
+    pub fn set_max_iter(&mut self, value: IndexType) {
+        self.max_iter = value;
+    }
+    pub fn niter(&self) -> IndexType {
+        self.niter
+    }
     pub fn new_from_problem<C: NonLinearOp<V = V, T = V::T>>(
         problem: &SolverProblem<C>,
         max_iter: IndexType,
@@ -47,12 +57,18 @@ impl<V: Vector> Convergence<V> {
             max_iter,
             old_norm: None,
             old_eta: None,
-            iter: 0,
+            niter: 0,
+            save_eta: false,
         }
     }
     pub fn reset(&mut self) {
-        self.iter = 0;
+        self.niter = 0;
         self.old_norm = None;
+    }
+
+    pub fn reset_saved_eta(&mut self) {
+        self.save_eta = true;
+        self.old_eta = None;
     }
     pub fn check_new_iteration(&mut self, dy: &mut V, y: &V) -> ConvergenceStatus {
         let norm = dy.squared_norm(y, &self.atol, self.rtol).sqrt();
@@ -70,7 +86,7 @@ impl<V: Vector> Convergence<V> {
 
             // if iteration is not going to converge in NEWTON_MAXITER
             // (assuming the current rate), then abort
-            if rate.pow(i32::try_from(self.max_iter - self.iter).unwrap())
+            if rate.pow(i32::try_from(self.max_iter - self.niter).unwrap())
                 / (V::T::from(1.0) - rate)
                 * norm
                 > self.tol
@@ -80,12 +96,15 @@ impl<V: Vector> Convergence<V> {
 
             Some(rate / (V::T::one() - rate))
         } else if let Some(mut eta) = self.old_eta {
-            let uround = V::T::EPSILON;
-            if eta < uround {
-                eta = uround;
+            if eta < V::T::EPSILON {
+                eta = V::T::EPSILON;
             }
             Some(eta.pow(V::T::from(0.8)))
         } else {
+            // no rate or eta, just test directly
+            if norm <= self.tol {
+                return ConvergenceStatus::Converged;
+            }
             None
         };
 
@@ -95,14 +114,16 @@ impl<V: Vector> Convergence<V> {
         // check if converged
         if let Some(eta) = eta {
             if eta * norm < self.tol {
-                // store eta for next step
-                self.old_eta = Some(eta);
+                // store eta for next step is required
+                if self.save_eta {
+                    self.old_eta = Some(eta);
+                }
                 return ConvergenceStatus::Converged;
             }
         }
 
-        self.iter += 1;
-        if self.iter >= self.max_iter {
+        self.niter += 1;
+        if self.niter >= self.max_iter {
             ConvergenceStatus::MaximumIterations
         } else {
             ConvergenceStatus::Continue
