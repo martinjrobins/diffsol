@@ -73,6 +73,8 @@ pub struct Bdf<
     n_equal_steps: usize,
     diff: M,
     y_delta: Eqn::V,
+    y_predict: Eqn::V,
+    s_predict: Eqn::V,
     sdiff: Vec<M>,
     s_op: Option<BdfCallable<SensEquations<Eqn>>>,
     s_deltas: Vec<Eqn::V>,
@@ -157,6 +159,8 @@ where
             diff_tmp: M::zeros(n, Self::MAX_ORDER + 3),
             sdiff: Vec::new(),
             y_delta: Eqn::V::zeros(n),
+            y_predict: Eqn::V::zeros(n),
+            s_predict: Eqn::V::zeros(n),
             s_deltas: Vec::new(),
             gamma,
             alpha,
@@ -294,16 +298,16 @@ where
     }
 
     // predict forward to new step (eq 2 in [1])
-    fn _predict_using_diff(diff: &M, order: usize) -> Eqn::V {
-        let mut y_predict = <Eqn::V as Vector>::zeros(diff.nrows());
+    fn _predict_using_diff(y_predict: &mut Eqn::V, diff: &M, order: usize) {
+        y_predict.fill(Eqn::T::zero());
         for i in 0..=order {
-            y_predict += diff.column(i);
+            y_predict.add_assign(diff.column(i));
         }
-        y_predict
     }
 
     // update psi term as defined in second equation on page 9 of [1]
     fn _calculate_psi(&self, diff: &M) -> Eqn::V {
+        // TODO: allocation done here, should be avoided
         let mut psi = diff.column(1) * scale(self.gamma[1]);
         for (i, &gamma_i) in self.gamma.iter().enumerate().take(self.order + 1).skip(2) {
             psi += diff.column(i) * scale(gamma_i);
@@ -312,19 +316,20 @@ where
         psi
     }
 
-    fn _predict_forward(&mut self) -> (Eqn::V, Eqn::T) {
-        let y_predict = Self::_predict_using_diff(&self.diff, self.order);
+    fn _predict_forward(&mut self) -> Eqn::T {
+        Self::_predict_using_diff(&mut self.y_predict, &self.diff, self.order);
 
         // update psi and c (h, D, y0 has changed)
         let psi = self._calculate_psi(&self.diff);
-        self.nonlinear_problem_op().set_psi_and_y0(psi, &y_predict);
+        self.nonlinear_problem_op()
+            .set_psi_and_y0(psi, &self.y_predict);
 
         // update time
         let t_new = {
             let state = self.state.as_ref().unwrap();
             state.t + state.h
         };
-        (y_predict, t_new)
+        t_new
     }
 
     fn handle_tstop(&mut self, tstop: Eqn::T) -> Result<Option<OdeSolverStopReason<Eqn::T>>> {
@@ -392,17 +397,13 @@ where
         order_summation
     }
 
-    fn sensitivity_solve(
-        &mut self,
-        y_new: &Eqn::V,
-        t_new: Eqn::T,
-        mut error_norm: Eqn::T,
-    ) -> Result<Eqn::T> {
+    fn sensitivity_solve(&mut self, t_new: Eqn::T, mut error_norm: Eqn::T) -> Result<Eqn::T> {
         let h = self.state.as_ref().unwrap().h;
 
         // update for new state
         {
             let dy_new = self.nonlinear_problem_op().as_ref().tmp();
+            let y_new = &self.state.as_ref().unwrap().y;
             self.problem()
                 .as_ref()
                 .unwrap()
@@ -430,21 +431,22 @@ where
         let nparams = self.problem().as_ref().unwrap().eqn.rhs().nparams();
         for i in 0..nparams {
             // predict forward to new step
-            let s_predict = Self::_predict_using_diff(&self.sdiff[i], self.order);
+            Self::_predict_using_diff(&mut self.s_predict, &self.sdiff[i], self.order);
 
             // setup op
             let psi = self._calculate_psi(&self.sdiff[i]);
-            op.set_psi_and_y0(psi, &s_predict);
+            op.set_psi_and_y0(psi, &self.s_predict);
             op.eqn().as_ref().rhs().set_param_index(i);
 
             // solve
             {
                 let s_new = &mut self.state.as_mut().unwrap().s[i];
-                s_new.copy_from(&s_predict);
+                s_new.copy_from(&self.s_predict);
                 let niter = newton_iteration(s_new, fun, ls, &mut convergence)?;
                 self.statistics.number_of_nonlinear_solver_iterations += niter;
                 let s_new = &*s_new;
-                self.s_deltas[i].copy_from(&(s_new - &s_predict));
+                self.s_deltas[i].copy_from(s_new);
+                self.s_deltas[i] -= &self.s_predict;
             }
 
             let s_new = &self.state.as_ref().unwrap().s[i];
@@ -562,6 +564,7 @@ where
             self.diff = M::zeros(nstates, Self::MAX_ORDER + 3);
             self.diff_tmp = M::zeros(nstates, Self::MAX_ORDER + 3);
             self.y_delta = <Eqn::V as Vector>::zeros(nstates);
+            self.y_predict = <Eqn::V as Vector>::zeros(nstates);
         }
 
         // allocate internal state for sensitivities
@@ -582,6 +585,7 @@ where
             {
                 self.sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3); nparams];
                 self.s_deltas = vec![<Eqn::V as Vector>::zeros(nstates); nparams];
+                self.s_predict = <Eqn::V as Vector>::zeros(nstates);
             }
         }
 
@@ -601,17 +605,19 @@ where
             self.initialise_to_first_order();
         }
 
-        let (mut y_predict, mut t_new) = self._predict_forward();
+        let mut t_new = self._predict_forward();
 
         // loop until step is accepted
-        let y_new = loop {
-            let mut y_new = y_predict.clone();
+        loop {
+            self.state.as_mut().unwrap().y.copy_from(&self.y_predict);
 
             // initialise error_norm to quieten the compiler
             error_norm = Eqn::T::from(2.0);
 
             // solve BDF equation using y0 as starting point
-            let mut solve_result = self.nonlinear_solver.solve_in_place(&mut y_new, t_new);
+            let mut solve_result = self
+                .nonlinear_solver
+                .solve_in_place(&mut self.state.as_mut().unwrap().y, t_new);
             // update statistics
             self.statistics.number_of_nonlinear_solver_iterations += self.nonlinear_solver.niter();
 
@@ -621,22 +627,24 @@ where
                 // combine eq 3, 4 and 6 from [1] to obtain error
                 // Note that error = C_k * h^{k+1} y^{k+1}
                 // and d = D^{k+1} y_{n+1} \approx h^{k+1} y^{k+1}
-                self.y_delta.copy_from(&y_new);
-                self.y_delta -= &y_predict;
+                self.y_delta.copy_from(&self.state.as_ref().unwrap().y);
+                self.y_delta -= &self.y_predict;
 
                 // calculate error norm
                 {
                     let rtol = self.problem().as_ref().unwrap().rtol;
                     let atol = self.ode_problem.as_ref().unwrap().atol.as_ref();
-                    error_norm = self.y_delta.squared_norm(&y_new, atol, rtol)
-                        * self.error_const2[self.order];
+                    error_norm =
+                        self.y_delta
+                            .squared_norm(&self.state.as_mut().unwrap().y, atol, rtol)
+                            * self.error_const2[self.order];
                 }
 
                 // only bother doing sensitivity calculations if we might keep the step
                 if self.ode_problem.as_ref().unwrap().eqn_sens.is_some()
                     && error_norm <= Eqn::T::from(1.0)
                 {
-                    error_norm = match self.sensitivity_solve(&y_new, t_new, error_norm) {
+                    error_norm = match self.sensitivity_solve(t_new, error_norm) {
                         Ok(en) => en,
                         Err(_) => {
                             solve_result = Err(anyhow!("Sensitivity solve failed"));
@@ -655,14 +663,14 @@ where
                     self._update_step_size(Eqn::T::from(0.3));
 
                     // new prediction
-                    (y_predict, t_new) = self._predict_forward();
+                    t_new = self._predict_forward();
 
                     // update statistics
                 } else {
                     // newton iteration did not converge, so update jacobian and try again
                     self.nonlinear_problem_op().set_jacobian_is_stale();
                     self.nonlinear_solver
-                        .reset_jacobian(&y_predict, self.state.as_ref().unwrap().t);
+                        .reset_jacobian(&self.y_predict, self.state.as_ref().unwrap().t);
                     updated_jacobian = true;
                     // same prediction as last time
                 }
@@ -677,7 +685,7 @@ where
             // do the error test
             if error_norm <= Eqn::T::from(1.0) {
                 // step is accepted
-                break y_new;
+                break;
             } else {
                 // step is rejected
                 // calculate optimal step size factor as per eq 2.46 of [2]
@@ -687,7 +695,6 @@ where
                 if factor < Eqn::T::from(Self::MIN_FACTOR) {
                     factor = Eqn::T::from(Self::MIN_FACTOR);
                 }
-                // todo, do we need to update the linear solver problem here since we converged?
                 self._update_step_size(factor);
 
                 // if step size too small, then fail
@@ -697,18 +704,18 @@ where
                 }
 
                 // new prediction
-                (y_predict, t_new) = self._predict_forward();
+                t_new = self._predict_forward();
 
                 // update statistics
                 self.statistics.number_of_error_test_failures += 1;
             }
-        };
+        }
         // take the accepted step
         self.update_differences();
 
         {
             let state = self.state.as_mut().unwrap();
-            state.y = y_new;
+            // state.y is already set to y_new
             state.t += state.h;
             state.dy.copy_from_view(&self.diff.column(1));
             state.dy *= scale(Eqn::T::one() / state.h);
