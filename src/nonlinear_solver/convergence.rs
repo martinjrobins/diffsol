@@ -11,6 +11,7 @@ pub struct Convergence<V: Vector> {
     max_iter: IndexType,
     iter: IndexType,
     old_norm: Option<V::T>,
+    old_eta: Option<V::T>,
 }
 
 pub enum ConvergenceStatus {
@@ -45,6 +46,7 @@ impl<V: Vector> Convergence<V> {
             tol,
             max_iter,
             old_norm: None,
+            old_eta: None,
             iter: 0,
         }
     }
@@ -58,16 +60,12 @@ impl<V: Vector> Convergence<V> {
         if norm <= V::T::EPSILON {
             return ConvergenceStatus::Converged;
         }
-        if let Some(old_norm) = self.old_norm {
+        let eta = if let Some(old_norm) = self.old_norm {
             let rate = norm / old_norm;
 
+            // check if iteration is diverging
             if rate > V::T::from(1.0) {
                 return ConvergenceStatus::Diverged;
-            }
-
-            // if converged then break out of iteration successfully
-            if rate / (V::T::one() - rate) * norm < self.tol {
-                return ConvergenceStatus::Converged;
             }
 
             // if iteration is not going to converge in NEWTON_MAXITER
@@ -79,10 +77,31 @@ impl<V: Vector> Convergence<V> {
             {
                 return ConvergenceStatus::Diverged;
             }
-        }
-        // TODO: at the moment need 2 iterations to check convergence, should be able to do it in 1?
-        self.iter += 1;
+
+            Some(rate / (V::T::one() - rate))
+        } else if let Some(mut eta) = self.old_eta {
+            let uround = V::T::EPSILON;
+            if eta < uround {
+                eta = uround;
+            }
+            Some(eta.pow(V::T::from(0.8)))
+        } else {
+            None
+        };
+
+        // store norm for next iteration
         self.old_norm = Some(norm);
+
+        // check if converged
+        if let Some(eta) = eta {
+            if eta * norm < self.tol {
+                // store eta for next step
+                self.old_eta = Some(eta);
+                return ConvergenceStatus::Converged;
+            }
+        }
+
+        self.iter += 1;
         if self.iter >= self.max_iter {
             ConvergenceStatus::MaximumIterations
         } else {
