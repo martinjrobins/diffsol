@@ -1,8 +1,9 @@
 use crate::{
-    ode_solver::equations::OdeEquations, LinearOp, Matrix, MatrixRef, MatrixSparsity,
-    MatrixSparsityRef, OdeSolverProblem, Vector, VectorRef,
+    matrix::DenseMatrix, ode_solver::equations::OdeEquations, scale, LinearOp, Matrix, MatrixRef,
+    MatrixSparsity, MatrixSparsityRef, OdeSolverProblem, Vector, VectorRef,
 };
 use num_traits::{One, Zero};
+use std::ops::MulAssign;
 use std::{
     cell::{Ref, RefCell},
     ops::{AddAssign, Deref, SubAssign},
@@ -132,12 +133,23 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
     {
         self.c.replace(h * alpha);
     }
-    pub fn set_psi_and_y0(&self, psi: Eqn::V, y0: &Eqn::V) {
-        let mut new_psi_neg_y0 = psi;
+    pub fn set_psi_and_y0<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
+        &self,
+        diff: &M,
+        gamma: &[Eqn::T],
+        alpha: &[Eqn::T],
+        order: usize,
+        y0: &Eqn::V,
+    ) {
+        let mut psi = self.psi_neg_y0.borrow_mut();
+        psi.axpy_v(gamma[1], &diff.column(1), Eqn::T::zero());
+        for (i, &gamma_i) in gamma.iter().enumerate().take(order + 1).skip(2) {
+            psi.axpy_v(gamma_i, &diff.column(i), Eqn::T::one());
+        }
+        psi.mul_assign(scale(alpha[order]));
 
         // now negate y0
-        new_psi_neg_y0.sub_assign(y0);
-        self.psi_neg_y0.replace(new_psi_neg_y0);
+        psi.sub_assign(y0);
     }
     pub fn set_jacobian_is_stale(&self) {
         self.jacobian_is_stale.replace(true);
