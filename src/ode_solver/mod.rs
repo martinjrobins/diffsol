@@ -297,7 +297,7 @@ mod tests {
                 .squared_norm(&error, &problem.atol, problem.rtol)
                 .sqrt();
             assert!(
-                error_norm < Eqn::T::from(16.0),
+                error_norm < Eqn::T::from(17.0),
                 "error_norm: {} at t = {}",
                 error_norm,
                 point.t

@@ -6,15 +6,15 @@ use anyhow::{anyhow, Result};
 
 pub fn newton_iteration<V: Vector>(
     xn: &mut V,
+    error_y: &V,
     fun: impl Fn(&V, &mut V),
     linear_solver: impl Fn(&mut V) -> Result<()>,
     convergence: &mut Convergence<V>,
-) -> Result<usize> {
+) -> Result<()> {
     convergence.reset();
+    // todo: remove this allocation
     let mut tmp = xn.clone();
-    let mut niter = 0;
     loop {
-        niter += 1;
         fun(xn, &mut tmp);
         //tmp = f_at_n
 
@@ -24,10 +24,10 @@ pub fn newton_iteration<V: Vector>(
         xn.sub_assign(&tmp);
         // xn = xn + delta_n
 
-        let res = convergence.check_new_iteration(&mut tmp, xn);
+        let res = convergence.check_new_iteration(&mut tmp, error_y);
         match res {
             ConvergenceStatus::Continue => continue,
-            ConvergenceStatus::Converged => return Ok(niter),
+            ConvergenceStatus::Converged => return Ok(()),
             ConvergenceStatus::Diverged => break,
             ConvergenceStatus::MaximumIterations => break,
         }
@@ -39,8 +39,6 @@ pub struct NewtonNonlinearSolver<C: NonLinearOp, Ls: LinearSolver<C>> {
     convergence: Option<Convergence<C::V>>,
     linear_solver: Ls,
     problem: Option<SolverProblem<C>>,
-    max_iter: usize,
-    niter: usize,
     is_jacobian_set: bool,
 }
 
@@ -50,23 +48,24 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NewtonNonlinearSolver<C, Ls> {
             problem: None,
             convergence: None,
             linear_solver,
-            max_iter: 100,
-            niter: 0,
             is_jacobian_set: false,
         }
     }
 }
 
 impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinearSolver<C, Ls> {
-    fn set_max_iter(&mut self, max_iter: usize) {
-        self.max_iter = max_iter;
+    fn convergence(&self) -> &Convergence<C::V> {
+        self.convergence
+            .as_ref()
+            .expect("NewtonNonlinearSolver::convergence() called before set_problem")
     }
-    fn max_iter(&self) -> usize {
-        self.max_iter
+
+    fn convergence_mut(&mut self) -> &mut Convergence<C::V> {
+        self.convergence
+            .as_mut()
+            .expect("NewtonNonlinearSolver::convergence_mut() called before set_problem")
     }
-    fn niter(&self) -> usize {
-        self.niter
-    }
+
     fn problem(&self) -> &SolverProblem<C> {
         self.problem
             .as_ref()
@@ -76,7 +75,7 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
         self.problem = Some(problem.clone());
         self.linear_solver.set_problem(problem);
         let problem = self.problem.as_ref().unwrap();
-        self.convergence = Some(Convergence::new_from_problem(problem, self.max_iter));
+        self.convergence = Some(Convergence::new_from_problem(problem));
         self.is_jacobian_set = false;
     }
 
@@ -89,7 +88,7 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
         self.linear_solver.solve_in_place(x)
     }
 
-    fn solve_in_place(&mut self, xn: &mut C::V, t: C::T) -> Result<()> {
+    fn solve_in_place(&mut self, xn: &mut C::V, t: C::T, error_y: &C::V) -> Result<()> {
         if self.convergence.is_none() || self.problem.is_none() {
             panic!("NewtonNonlinearSolver::solve() called before set_problem");
         }
@@ -103,7 +102,6 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
         let problem = self.problem.as_ref().unwrap();
         let fun = |x: &C::V, y: &mut C::V| problem.f.call_inplace(x, t, y);
         let convergence = self.convergence.as_mut().unwrap();
-        self.niter = newton_iteration(xn, fun, linear_solver, convergence)?;
-        Ok(())
+        newton_iteration(xn, error_y, fun, linear_solver, convergence)
     }
 }

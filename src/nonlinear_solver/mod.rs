@@ -1,4 +1,5 @@
 use anyhow::Result;
+use convergence::Convergence;
 
 use crate::{op::Op, solver::SolverProblem};
 
@@ -18,6 +19,10 @@ pub trait NonLinearSolver<C: Op> {
     /// Get the problem to be solved.
     fn problem(&self) -> &SolverProblem<C>;
 
+    fn convergence(&self) -> &Convergence<C::V>;
+
+    fn convergence_mut(&mut self) -> &mut Convergence<C::V>;
+
     /// Set the problem to be solved, any previous problem is discarded.
     fn set_problem(&mut self, problem: &SolverProblem<C>);
 
@@ -25,27 +30,18 @@ pub trait NonLinearSolver<C: Op> {
     fn reset_jacobian(&mut self, x: &C::V, t: C::T);
 
     // Solve the problem `F(x, t) = 0` for fixed t, and return the solution `x`.
-    fn solve(&mut self, x: &C::V, t: C::T) -> Result<C::V> {
+    fn solve(&mut self, x: &C::V, t: C::T, error_y: &C::V) -> Result<C::V> {
         let mut x = x.clone();
-        self.solve_in_place(&mut x, t)?;
+        self.solve_in_place(&mut x, t, error_y)?;
         Ok(x)
     }
 
     /// Solve the problem `F(x) = 0` in place.
-    fn solve_in_place(&mut self, x: &mut C::V, t: C::T) -> Result<()>;
+    fn solve_in_place(&mut self, x: &mut C::V, t: C::T, error_y: &C::V) -> Result<()>;
 
     /// Solve the linearised problem `J * x = b`, where `J` was calculated using [Self::reset_jacobian].
     /// The input `b` is provided in `x`, and the solution is returned in `x`.
     fn solve_linearised_in_place(&self, x: &mut C::V) -> Result<()>;
-
-    // Set the maximum number of iterations for the solver.
-    fn set_max_iter(&mut self, max_iter: usize);
-
-    // Get the maximum number of iterations for the solver.
-    fn max_iter(&self) -> usize;
-
-    // Get the number of iterations taken by the solver on the last call to `solve`.
-    fn niter(&self) -> usize;
 }
 
 pub mod convergence;
@@ -114,7 +110,7 @@ pub mod tests {
         solver.set_problem(&problem);
         let t = C::T::zero();
         for soln in solns {
-            let x = solver.solve(&soln.x0, t).unwrap();
+            let x = solver.solve(&soln.x0, t, &soln.x0).unwrap();
             let tol = x.clone() * scale(problem.rtol) + problem.atol.as_ref();
             x.assert_eq(&soln.x, &tol);
         }
