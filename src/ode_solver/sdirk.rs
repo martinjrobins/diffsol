@@ -827,13 +827,13 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 25
-        number_of_steps: 24
+        number_of_linear_solver_setups: 22
+        number_of_steps: 21
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 144
+        number_of_nonlinear_solver_iterations: 126
         number_of_nonlinear_solver_fails: 0
         initial_step_size: 0.02114742526881128
-        final_step_size: 0.45011840186167146
+        final_step_size: 0.6112213632926735
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -875,13 +875,13 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 513
-        number_of_steps: 496
+        number_of_linear_solver_setups: 260
+        number_of_steps: 241
         number_of_error_test_failures: 4
-        number_of_nonlinear_solver_iterations: 5575
-        number_of_nonlinear_solver_fails: 12
+        number_of_nonlinear_solver_iterations: 3499
+        number_of_nonlinear_solver_fails: 14
         initial_step_size: 0.0005245814253712257
-        final_step_size: 13447330356.24147
+        final_step_size: 15107754734.860895
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -923,13 +923,13 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 322
-        number_of_steps: 282
-        number_of_error_test_failures: 15
-        number_of_nonlinear_solver_iterations: 5144
-        number_of_nonlinear_solver_fails: 24
+        number_of_linear_solver_setups: 173
+        number_of_steps: 148
+        number_of_error_test_failures: 1
+        number_of_nonlinear_solver_iterations: 3703
+        number_of_nonlinear_solver_fails: 23
         initial_step_size: 0.0034662483959892352
-        final_step_size: 21142100887.874195
+        final_step_size: 18844556849.47017
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
