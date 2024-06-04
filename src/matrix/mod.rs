@@ -284,6 +284,9 @@ pub trait DenseMatrix:
     /// Perform a matrix-matrix multiplication `self = alpha * a * b + beta * self`, where `alpha` and `beta` are scalars, and `a` and `b` are matrices
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T);
 
+    /// Performs an axpy operation on two columns of the matrix `M[:, i] = alpha * M[:, j] + M[:, i]`
+    fn column_axpy(&mut self, alpha: Self::T, j: IndexType, beta: Self::T, i: IndexType);
+
     /// Get a matrix view of the columns starting at `start` and ending at `start + ncols`
     fn columns(&self, start: IndexType, ncols: IndexType) -> Self::View<'_>;
 

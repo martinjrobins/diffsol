@@ -1,7 +1,10 @@
 use std::ops::{AddAssign, Mul, MulAssign};
 
 use anyhow::Result;
-use nalgebra::{DMatrix, DMatrixView, DMatrixViewMut, DVector, DVectorView, DVectorViewMut};
+use nalgebra::{
+    DMatrix, DMatrixView, DMatrixViewMut, DVector, DVectorView, DVectorViewMut, RawStorage,
+    RawStorageMut,
+};
 
 use crate::op::NonLinearOp;
 use crate::vector::Vector;
@@ -189,5 +192,44 @@ impl<T: Scalar> DenseMatrix for DMatrix<T> {
     }
     fn columns(&self, start: IndexType, ncols: IndexType) -> Self::View<'_> {
         self.columns(start, ncols)
+    }
+    fn column_axpy(&mut self, alpha: Self::T, j: IndexType, beta: Self::T, i: IndexType) {
+        if i > self.ncols() {
+            panic!("Column index out of bounds");
+        }
+        if j > self.ncols() {
+            panic!("Column index out of bounds");
+        }
+        if i == j {
+            panic!("Column index cannot be the same");
+        }
+        for k in 0..self.nrows() {
+            let value = unsafe {
+                beta * *self.data.get_unchecked(k, i) + alpha * *self.data.get_unchecked(k, j)
+            };
+            unsafe {
+                *self.data.get_unchecked_mut(k, i) = value;
+            };
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_column_axpy() {
+        // M = [1 2]
+        //     [3 4]
+        let mut a = DMatrix::from_row_slice(2, 2, &[1.0, 2.0, 3.0, 4.0]);
+        // op is M(:, 1) = 2 * M(:, 0) + M(:, 1)
+        a.column_axpy(2.0, 0, 1.0, 1);
+        // M = [1 4]
+        //     [3 10]
+        assert_eq!(a[(0, 0)], 1.0);
+        assert_eq!(a[(0, 1)], 4.0);
+        assert_eq!(a[(1, 0)], 3.0);
+        assert_eq!(a[(1, 1)], 10.0);
     }
 }

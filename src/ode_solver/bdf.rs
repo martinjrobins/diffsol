@@ -291,8 +291,7 @@ where
             .copy_from(&d_minus_order_plus_one);
         diff.column_mut(order + 1).copy_from(d);
         for i in (0..=order).rev() {
-            let tmp = diff.column(i + 1).into_owned();
-            diff.column_mut(i).add_assign(&tmp);
+            diff.column_axpy(Eqn::T::one(), i + 1, Eqn::T::one(), i);
         }
     }
 
