@@ -251,7 +251,7 @@ where
 
             // solve
             {
-                newton_iteration(ds, s0, fun, ls, &mut convergence)?;
+                newton_iteration(ds, &mut self.old_y_sens[j], s0, fun, ls, &mut convergence)?;
                 self.old_y_sens[j].copy_from(&op.get_last_f_eval());
                 self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
             }

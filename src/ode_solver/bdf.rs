@@ -304,17 +304,6 @@ where
         }
     }
 
-    // update psi term as defined in second equation on page 9 of [1]
-    fn _calculate_psi(&self, diff: &M) -> Eqn::V {
-        // TODO: allocation done here, should be avoided
-        let mut psi = diff.column(1) * scale(self.gamma[1]);
-        for (i, &gamma_i) in self.gamma.iter().enumerate().take(self.order + 1).skip(2) {
-            psi += diff.column(i) * scale(gamma_i);
-        }
-        psi *= scale(self.alpha[self.order]);
-        psi
-    }
-
     fn _predict_forward(&mut self) -> Eqn::T {
         Self::_predict_using_diff(&mut self.y_predict, &self.diff, self.order);
 
@@ -449,7 +438,14 @@ where
             {
                 let s_new = &mut self.state.as_mut().unwrap().s[i];
                 s_new.copy_from(&self.s_predict);
-                newton_iteration(s_new, &self.s_predict, fun, ls, &mut convergence)?;
+                newton_iteration(
+                    s_new,
+                    &mut self.s_deltas[i],
+                    &self.s_predict,
+                    fun,
+                    ls,
+                    &mut convergence,
+                )?;
                 self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
                 let s_new = &*s_new;
                 self.s_deltas[i].copy_from(s_new);
