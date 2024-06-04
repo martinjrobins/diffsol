@@ -6,11 +6,13 @@ use anyhow::{anyhow, Result};
 
 pub fn newton_iteration<V: Vector>(
     xn: &mut V,
+    error_y: &V,
     fun: impl Fn(&V, &mut V),
     linear_solver: impl Fn(&mut V) -> Result<()>,
     convergence: &mut Convergence<V>,
 ) -> Result<()> {
     convergence.reset();
+    // todo: remove this allocation
     let mut tmp = xn.clone();
     loop {
         fun(xn, &mut tmp);
@@ -22,7 +24,7 @@ pub fn newton_iteration<V: Vector>(
         xn.sub_assign(&tmp);
         // xn = xn + delta_n
 
-        let res = convergence.check_new_iteration(&mut tmp, xn);
+        let res = convergence.check_new_iteration(&mut tmp, error_y);
         match res {
             ConvergenceStatus::Continue => continue,
             ConvergenceStatus::Converged => return Ok(()),
@@ -63,7 +65,7 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
             .as_mut()
             .expect("NewtonNonlinearSolver::convergence_mut() called before set_problem")
     }
-    
+
     fn problem(&self) -> &SolverProblem<C> {
         self.problem
             .as_ref()
@@ -86,7 +88,7 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
         self.linear_solver.solve_in_place(x)
     }
 
-    fn solve_in_place(&mut self, xn: &mut C::V, t: C::T) -> Result<()> {
+    fn solve_in_place(&mut self, xn: &mut C::V, t: C::T, error_y: &C::V) -> Result<()> {
         if self.convergence.is_none() || self.problem.is_none() {
             panic!("NewtonNonlinearSolver::solve() called before set_problem");
         }
@@ -100,6 +102,6 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
         let problem = self.problem.as_ref().unwrap();
         let fun = |x: &C::V, y: &mut C::V| problem.f.call_inplace(x, t, y);
         let convergence = self.convergence.as_mut().unwrap();
-        newton_iteration(xn, fun, linear_solver, convergence)
+        newton_iteration(xn, error_y, fun, linear_solver, convergence)
     }
 }

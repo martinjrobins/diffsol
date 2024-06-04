@@ -199,7 +199,8 @@ impl<V: Vector> OdeSolverState<V> {
         let init_problem = SolverProblem::new(f.clone(), atol, rtol);
         root_solver.set_problem(&init_problem);
         let mut y = f.y0.borrow().clone();
-        root_solver.solve_in_place(&mut y, self.t)?;
+        let yerr = f.y0.borrow().clone();
+        root_solver.solve_in_place(&mut y, self.t, &yerr)?;
         f.scatter_soln(&y, &mut self.y, &mut self.dy);
         Ok(())
     }
@@ -249,7 +250,8 @@ impl<V: Vector> OdeSolverState<V> {
                 ode_problem.rtol,
             ));
             let mut y = f.y0.borrow().clone();
-            root_solver.solve_in_place(&mut y, self.t)?;
+            let yerr = f.y0.borrow().clone();
+            root_solver.solve_in_place(&mut y, self.t, &yerr)?;
             f.scatter_soln(&y, &mut self.s[i], &mut self.ds[i]);
         }
         Ok(())

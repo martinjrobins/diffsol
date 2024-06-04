@@ -30,14 +30,14 @@ pub trait NonLinearSolver<C: Op> {
     fn reset_jacobian(&mut self, x: &C::V, t: C::T);
 
     // Solve the problem `F(x, t) = 0` for fixed t, and return the solution `x`.
-    fn solve(&mut self, x: &C::V, t: C::T) -> Result<C::V> {
+    fn solve(&mut self, x: &C::V, t: C::T, error_y: &C::V) -> Result<C::V> {
         let mut x = x.clone();
-        self.solve_in_place(&mut x, t)?;
+        self.solve_in_place(&mut x, t, error_y)?;
         Ok(x)
     }
 
     /// Solve the problem `F(x) = 0` in place.
-    fn solve_in_place(&mut self, x: &mut C::V, t: C::T) -> Result<()>;
+    fn solve_in_place(&mut self, x: &mut C::V, t: C::T, error_y: &C::V) -> Result<()>;
 
     /// Solve the linearised problem `J * x = b`, where `J` was calculated using [Self::reset_jacobian].
     /// The input `b` is provided in `x`, and the solution is returned in `x`.
@@ -110,7 +110,7 @@ pub mod tests {
         solver.set_problem(&problem);
         let t = C::T::zero();
         for soln in solns {
-            let x = solver.solve(&soln.x0, t).unwrap();
+            let x = solver.solve(&soln.x0, t, &soln.x0).unwrap();
             let tol = x.clone() * scale(problem.rtol) + problem.atol.as_ref();
             x.assert_eq(&soln.x, &tol);
         }
