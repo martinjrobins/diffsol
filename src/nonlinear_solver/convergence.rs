@@ -61,6 +61,7 @@ impl<V: Vector> Convergence<V> {
     }
 
     pub fn check_new_iteration(&mut self, dy: &mut V, y: &V) -> ConvergenceStatus {
+        self.niter += 1;
         let norm = dy.squared_norm(y, &self.atol, self.rtol).sqrt();
         // if norm is zero then we are done
         if norm <= V::T::EPSILON {
@@ -100,8 +101,7 @@ impl<V: Vector> Convergence<V> {
         // we havn't converged, so store norm for next iteration
         self.old_norm = Some(norm);
 
-        // increment iteration counter and check if we have reached the maximum
-        self.niter += 1;
+        // check if we have reached the maximum
         if self.niter >= self.max_iter {
             ConvergenceStatus::MaximumIterations
         } else {

@@ -909,17 +909,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 7
-        number_of_steps: 23
+        number_of_linear_solver_setups: 8
+        number_of_steps: 24
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 23
+        number_of_nonlinear_solver_iterations: 48
         number_of_nonlinear_solver_fails: 0
         initial_step_size: 0.0004472135954999579
-        final_step_size: 1.042171191983627
+        final_step_size: 1.0495832193802719
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 48
+        number_of_calls: 50
         number_of_jac_muls: 2
         number_of_matrix_evals: 1
         "###);
@@ -942,17 +942,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 7
-        number_of_steps: 23
+        number_of_linear_solver_setups: 8
+        number_of_steps: 24
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 23
+        number_of_nonlinear_solver_iterations: 48
         number_of_nonlinear_solver_fails: 0
         initial_step_size: 0.0004472135954999579
-        final_step_size: 1.042171191983627
+        final_step_size: 1.0495832194316053
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 48
+        number_of_calls: 50
         number_of_jac_muls: 2
         number_of_matrix_evals: 1
         "###);
@@ -965,18 +965,18 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 16
+        number_of_linear_solver_setups: 11
         number_of_steps: 35
-        number_of_error_test_failures: 8
-        number_of_nonlinear_solver_iterations: 86
+        number_of_error_test_failures: 3
+        number_of_nonlinear_solver_iterations: 152
         number_of_nonlinear_solver_fails: 0
         initial_step_size: 0.0004472135954999579
-        final_step_size: 0.3312311541765934
+        final_step_size: 0.6073669970195585
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 88
-        number_of_jac_muls: 89
+        number_of_calls: 78
+        number_of_jac_muls: 79
         number_of_matrix_evals: 1
         "###);
     }
@@ -988,17 +988,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 10
+        number_of_linear_solver_setups: 9
         number_of_steps: 16
-        number_of_error_test_failures: 3
-        number_of_nonlinear_solver_iterations: 18
+        number_of_error_test_failures: 2
+        number_of_nonlinear_solver_iterations: 35
         number_of_nonlinear_solver_fails: 0
         initial_step_size: 0.000024564241080624082
-        final_step_size: 0.299249817791594
+        final_step_size: 0.2499270217876601
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 41
+        number_of_calls: 39
         number_of_jac_muls: 6
         number_of_matrix_evals: 2
         "###);
@@ -1020,18 +1020,18 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 18
+        number_of_linear_solver_setups: 14
         number_of_steps: 22
-        number_of_error_test_failures: 11
-        number_of_nonlinear_solver_iterations: 59
+        number_of_error_test_failures: 7
+        number_of_nonlinear_solver_iterations: 108
         number_of_nonlinear_solver_fails: 0
         initial_step_size: 0.000024564241080624082
-        final_step_size: 0.14397343490666156
+        final_step_size: 0.14331742113071982
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 67
-        number_of_jac_muls: 71
+        number_of_calls: 59
+        number_of_jac_muls: 65
         number_of_matrix_evals: 3
         "###);
     }
@@ -1043,19 +1043,19 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 81
-        number_of_steps: 281
+        number_of_linear_solver_setups: 88
+        number_of_steps: 303
         number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 438
-        number_of_nonlinear_solver_fails: 15
+        number_of_nonlinear_solver_iterations: 720
+        number_of_nonlinear_solver_fails: 18
         initial_step_size: 0.000012014877942697947
-        final_step_size: 15917105165.396292
+        final_step_size: 16632097003.61984
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 739
-        number_of_jac_muls: 51
-        number_of_matrix_evals: 17
+        number_of_calls: 724
+        number_of_jac_muls: 57
+        number_of_matrix_evals: 19
         "###);
     }
 
@@ -1075,19 +1075,19 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 349
-        number_of_steps: 429
-        number_of_error_test_failures: 216
-        number_of_nonlinear_solver_iterations: 1965
-        number_of_nonlinear_solver_fails: 64
+        number_of_linear_solver_setups: 242
+        number_of_steps: 415
+        number_of_error_test_failures: 122
+        number_of_nonlinear_solver_iterations: 3672
+        number_of_nonlinear_solver_fails: 52
         initial_step_size: 0.000012014877942697947
-        final_step_size: 2311276641.355914
+        final_step_size: 2829045053.375061
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 1446
-        number_of_jac_muls: 3251
-        number_of_matrix_evals: 57
+        number_of_calls: 1192
+        number_of_jac_muls: 2663
+        number_of_matrix_evals: 46
         "###);
     }
 
@@ -1098,19 +1098,19 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 81
-        number_of_steps: 281
+        number_of_linear_solver_setups: 88
+        number_of_steps: 303
         number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 438
-        number_of_nonlinear_solver_fails: 15
+        number_of_nonlinear_solver_iterations: 720
+        number_of_nonlinear_solver_fails: 18
         initial_step_size: 0.000012014877942697947
-        final_step_size: 15917105165.396292
+        final_step_size: 16632097003.61984
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 739
-        number_of_jac_muls: 54
-        number_of_matrix_evals: 17
+        number_of_calls: 724
+        number_of_jac_muls: 60
+        number_of_matrix_evals: 19
         "###);
     }
 
@@ -1121,19 +1121,19 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 81
-        number_of_steps: 280
-        number_of_error_test_failures: 3
-        number_of_nonlinear_solver_iterations: 434
-        number_of_nonlinear_solver_fails: 14
+        number_of_linear_solver_setups: 89
+        number_of_steps: 301
+        number_of_error_test_failures: 1
+        number_of_nonlinear_solver_iterations: 705
+        number_of_nonlinear_solver_fails: 20
         initial_step_size: 0.00001010330147394336
-        final_step_size: 17326081515.686485
+        final_step_size: 9813911674.202143
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 733
-        number_of_jac_muls: 45
-        number_of_matrix_evals: 15
+        number_of_calls: 707
+        number_of_jac_muls: 57
+        number_of_matrix_evals: 19
         "###);
     }
 
@@ -1144,19 +1144,19 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 169
-        number_of_steps: 408
-        number_of_error_test_failures: 42
-        number_of_nonlinear_solver_iterations: 1577
-        number_of_nonlinear_solver_fails: 56
+        number_of_linear_solver_setups: 154
+        number_of_steps: 378
+        number_of_error_test_failures: 32
+        number_of_nonlinear_solver_iterations: 2864
+        number_of_nonlinear_solver_fails: 57
         initial_step_size: 0.00001010330147394336
-        final_step_size: 3755106204.078941
+        final_step_size: 4982037749.624483
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 1042
-        number_of_jac_muls: 2411
-        number_of_matrix_evals: 35
+        number_of_calls: 946
+        number_of_jac_muls: 2051
+        number_of_matrix_evals: 36
         "###);
     }
 
@@ -1167,17 +1167,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 34
-        number_of_steps: 145
+        number_of_linear_solver_setups: 36
+        number_of_steps: 154
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 223
+        number_of_nonlinear_solver_iterations: 354
         number_of_nonlinear_solver_fails: 3
         initial_step_size: 0.000003544494634084706
-        final_step_size: 1.1925399787212845
+        final_step_size: 1.1011224179466996
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 373
+        number_of_calls: 356
         number_of_jac_muls: 40
         number_of_matrix_evals: 4
         "###);
@@ -1190,17 +1190,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 34
-        number_of_steps: 145
+        number_of_linear_solver_setups: 36
+        number_of_steps: 154
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 223
+        number_of_nonlinear_solver_iterations: 354
         number_of_nonlinear_solver_fails: 3
         initial_step_size: 0.000003544494634084706
-        final_step_size: 1.1925399787212845
+        final_step_size: 1.1011224179466996
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 373
+        number_of_calls: 356
         number_of_jac_muls: 14
         number_of_matrix_evals: 4
         "###);
@@ -1213,17 +1213,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 15
-        number_of_steps: 48
-        number_of_error_test_failures: 5
-        number_of_nonlinear_solver_iterations: 57
+        number_of_linear_solver_setups: 13
+        number_of_steps: 49
+        number_of_error_test_failures: 2
+        number_of_nonlinear_solver_iterations: 107
         number_of_nonlinear_solver_fails: 0
         initial_step_size: 0.00009999999999999999
-        final_step_size: 0.28289013471528246
+        final_step_size: 0.33184440573977225
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 112
+        number_of_calls: 109
         number_of_jac_muls: 10
         number_of_matrix_evals: 1
         "###);
