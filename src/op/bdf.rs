@@ -141,6 +141,7 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
         order: usize,
         y0: &Eqn::V,
     ) {
+        // update psi term as defined in second equation on page 9 of [1]
         let mut psi = self.psi_neg_y0.borrow_mut();
         psi.axpy_v(gamma[1], &diff.column(1), Eqn::T::zero());
         for (i, &gamma_i) in gamma.iter().enumerate().take(order + 1).skip(2) {

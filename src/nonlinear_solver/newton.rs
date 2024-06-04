@@ -6,25 +6,24 @@ use anyhow::{anyhow, Result};
 
 pub fn newton_iteration<V: Vector>(
     xn: &mut V,
+    tmp: &mut V,
     error_y: &V,
     fun: impl Fn(&V, &mut V),
     linear_solver: impl Fn(&mut V) -> Result<()>,
     convergence: &mut Convergence<V>,
 ) -> Result<()> {
     convergence.reset();
-    // todo: remove this allocation
-    let mut tmp = xn.clone();
     loop {
-        fun(xn, &mut tmp);
+        fun(xn, tmp);
         //tmp = f_at_n
 
-        linear_solver(&mut tmp)?;
+        linear_solver(tmp)?;
         //tmp = -delta_n
 
-        xn.sub_assign(&tmp);
+        xn.sub_assign(&*tmp);
         // xn = xn + delta_n
 
-        let res = convergence.check_new_iteration(&mut tmp, error_y);
+        let res = convergence.check_new_iteration(tmp, error_y);
         match res {
             ConvergenceStatus::Continue => continue,
             ConvergenceStatus::Converged => return Ok(()),
@@ -40,6 +39,7 @@ pub struct NewtonNonlinearSolver<C: NonLinearOp, Ls: LinearSolver<C>> {
     linear_solver: Ls,
     problem: Option<SolverProblem<C>>,
     is_jacobian_set: bool,
+    tmp: C::V,
 }
 
 impl<C: NonLinearOp, Ls: LinearSolver<C>> NewtonNonlinearSolver<C, Ls> {
@@ -49,6 +49,7 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NewtonNonlinearSolver<C, Ls> {
             convergence: None,
             linear_solver,
             is_jacobian_set: false,
+            tmp: C::V::zeros(0),
         }
     }
 }
@@ -77,6 +78,7 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
         let problem = self.problem.as_ref().unwrap();
         self.convergence = Some(Convergence::new_from_problem(problem));
         self.is_jacobian_set = false;
+        self.tmp = C::V::zeros(problem.f.nstates());
     }
 
     fn reset_jacobian(&mut self, x: &C::V, t: C::T) {
@@ -102,6 +104,6 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
         let problem = self.problem.as_ref().unwrap();
         let fun = |x: &C::V, y: &mut C::V| problem.f.call_inplace(x, t, y);
         let convergence = self.convergence.as_mut().unwrap();
-        newton_iteration(xn, error_y, fun, linear_solver, convergence)
+        newton_iteration(xn, &mut self.tmp, error_y, fun, linear_solver, convergence)
     }
 }
