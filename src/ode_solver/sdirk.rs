@@ -493,7 +493,7 @@ where
                     // todo: here too
                     //self.nonlinear_solver
                     //    .solve_linearised_in_place(&mut error)?;
-                    let sens_error_norm = error.squared_norm(&self.old_y, atol, rtol);
+                    let sens_error_norm = error.squared_norm(&self.old_y_sens[i], atol, rtol);
                     error_norm += sens_error_norm;
                 }
                 error_norm /= Eqn::T::from((self.sdiff.len() + 1) as f64);
