@@ -128,6 +128,23 @@ impl<T: Scalar> DenseMatrix for Mat<T> {
     fn columns(&self, start: usize, nrows: usize) -> MatRef<'_, T> {
         self.get(0..self.nrows(), start..nrows)
     }
+
+    fn column_axpy(&mut self, alpha: Self::T, j: IndexType, beta: Self::T, i: IndexType) {
+        if i > self.ncols() {
+            panic!("Column index out of bounds");
+        }
+        if j > self.ncols() {
+            panic!("Column index out of bounds");
+        }
+        if i == j {
+            panic!("Column index cannot be the same");
+        }
+        for k in 0..self.nrows() {
+            let value =
+                unsafe { beta * self.read_unchecked(k, i) + alpha * self.read_unchecked(k, j) };
+            unsafe { self.write_unchecked(k, i, value) };
+        }
+    }
 }
 
 impl<T: Scalar> Matrix for Mat<T> {
@@ -200,5 +217,30 @@ impl<T: Scalar> Matrix for Mat<T> {
         _sparsity: Option<Self::Sparsity>,
     ) -> Self {
         Self::zeros(nrows, ncols)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_column_axpy() {
+        // M = [1 2]
+        //     [3 4]
+        let mut a = Mat::zeros(2, 2);
+        a[(0, 0)] = 1.0;
+        a[(0, 1)] = 2.0;
+        a[(1, 0)] = 3.0;
+        a[(1, 1)] = 4.0;
+
+        // op is M(:, 1) = 2 * M(:, 0) + M(:, 1)
+        a.column_axpy(2.0, 0, 1.0, 1);
+        // M = [1 4]
+        //     [3 10]
+        assert_eq!(a[(0, 0)], 1.0);
+        assert_eq!(a[(0, 1)], 4.0);
+        assert_eq!(a[(1, 0)], 3.0);
+        assert_eq!(a[(1, 1)], 10.0);
     }
 }
