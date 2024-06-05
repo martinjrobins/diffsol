@@ -21,3 +21,5 @@ Cargo.lock
 
 .vscode
 *pending-snap
+perf.data*
+flamegraph.svg

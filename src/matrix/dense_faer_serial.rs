@@ -7,7 +7,10 @@ use crate::scalar::{IndexType, Scalar, Scale};
 use crate::FaerLU;
 use crate::{Dense, DenseRef, Vector};
 use anyhow::Result;
-use faer::{linalg::matmul::matmul, Col, ColMut, ColRef, Mat, MatMut, MatRef, Parallelism};
+use faer::{
+    linalg::matmul::matmul, mat::As2D, mat::As2DMut, Col, ColMut, ColRef, Mat, MatMut, MatRef,
+    Parallelism,
+};
 use faer::{unzipped, zipped};
 
 impl<T: Scalar> DefaultSolver for Mat<T> {
@@ -61,7 +64,14 @@ impl<'a, T: Scalar> MatrixView<'a> for MatRef<'a, T> {
     type Owned = Mat<T>;
 
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        *y = faer::scale(alpha) * self * x + faer::scale(beta) * &*y;
+        matmul(
+            y.as_2d_mut(),
+            self.as_2d_ref(),
+            x.as_2d_ref(),
+            Some(beta),
+            alpha,
+            Parallelism::None,
+        );
     }
     fn gemv_v(
         &self,
@@ -70,7 +80,14 @@ impl<'a, T: Scalar> MatrixView<'a> for MatRef<'a, T> {
         beta: Self::T,
         y: &mut Self::V,
     ) {
-        *y = faer::scale(alpha) * self * x + faer::scale(beta) * &*y;
+        matmul(
+            y.as_2d_mut(),
+            self.as_2d_ref(),
+            x.as_2d_ref(),
+            Some(beta),
+            alpha,
+            Parallelism::None,
+        );
     }
 }
 
@@ -188,7 +205,14 @@ impl<T: Scalar> Matrix for Mat<T> {
         Ok(m)
     }
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        *y = faer::scale(alpha) * self * x + faer::scale(beta) * &*y;
+        matmul(
+            y.as_2d_mut(),
+            self.as_2d_ref(),
+            x.as_2d_ref(),
+            Some(beta),
+            alpha,
+            Parallelism::None,
+        );
     }
     fn zeros(nrows: IndexType, ncols: IndexType) -> Self {
         Self::zeros(nrows, ncols)

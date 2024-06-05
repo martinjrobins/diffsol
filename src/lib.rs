@@ -154,10 +154,10 @@ pub use ode_solver::sundials::SundialsIda;
 #[cfg(feature = "diffsl")]
 pub use ode_solver::diffsl::DiffSlContext;
 
-pub use matrix::default_solver::DefaultSolver;
+pub use matrix::{default_solver::DefaultSolver, Matrix};
 use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
-    DenseMatrix, Matrix, MatrixCommon, MatrixRef, MatrixView, MatrixViewMut,
+    DenseMatrix, MatrixCommon, MatrixRef, MatrixView, MatrixViewMut,
 };
 pub use nonlinear_solver::newton::NewtonNonlinearSolver;
 use nonlinear_solver::{
@@ -181,6 +181,7 @@ use op::{
 };
 use scalar::{IndexType, Scalar, Scale};
 use solver::SolverProblem;
+pub use vector::DefaultDenseMatrix;
 use vector::{Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut};
 
 pub use scalar::scale;
