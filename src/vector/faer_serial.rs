@@ -130,10 +130,12 @@ impl<T: Scalar> Vector for Col<T> {
         zipped!(self.as_mut()).for_each(|unzipped!(mut s)| *s += scalar)
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {
-        zipped!(self.as_mut(), x.as_view()).for_each(|unzipped!(mut si, xi)| si.write(si.read() * beta + xi.read() * alpha));
+        zipped!(self.as_mut(), x.as_view())
+            .for_each(|unzipped!(mut si, xi)| si.write(si.read() * beta + xi.read() * alpha));
     }
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
-        zipped!(self.as_mut(), x).for_each(|unzipped!(mut si, xi)| si.write(si.read() * beta + xi.read() * alpha));
+        zipped!(self.as_mut(), x)
+            .for_each(|unzipped!(mut si, xi)| si.write(si.read() * beta + xi.read() * alpha));
     }
     fn exp(&self) -> Self {
         zipped!(self).map(|unzipped!(xi)| xi.exp())

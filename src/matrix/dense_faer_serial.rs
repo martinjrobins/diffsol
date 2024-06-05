@@ -7,7 +7,10 @@ use crate::scalar::{IndexType, Scalar, Scale};
 use crate::FaerLU;
 use crate::{Dense, DenseRef, Vector};
 use anyhow::Result;
-use faer::{linalg::matmul::matmul, Col, ColMut, ColRef, Mat, MatMut, MatRef, Parallelism, mat::As2DMut, mat::As2D};
+use faer::{
+    linalg::matmul::matmul, mat::As2D, mat::As2DMut, Col, ColMut, ColRef, Mat, MatMut, MatRef,
+    Parallelism,
+};
 use faer::{unzipped, zipped};
 
 impl<T: Scalar> DefaultSolver for Mat<T> {
