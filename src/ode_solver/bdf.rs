@@ -864,6 +864,7 @@ mod test {
                 robertson_ode::robertson_ode,
                 robertson_ode_with_sens::robertson_ode_with_sens,
                 robertson_sens::robertson_sens,
+                head2d::head2d_problem,
             },
             tests::{
                 test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut,
@@ -1222,6 +1223,15 @@ mod test {
         number_of_jac_muls: 10
         number_of_matrix_evals: 1
         "###);
+    }
+
+    #[test]
+    fn test_bdf_faer_sparse_heat2d() {
+        let linear_solver = FaerSparseLU::default();
+        let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
+        let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
+        let (problem, soln) = head2d_problem::<SparseColMat<f64>, 10>();
+        test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
     #[test]
