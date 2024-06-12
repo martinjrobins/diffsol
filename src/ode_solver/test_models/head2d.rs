@@ -7,8 +7,8 @@
 //while for each boundary point, it is res_i = u_i.
 
 use crate::{
-    ode_solver::problem::OdeSolverSolution, Matrix, OdeBuilder, OdeEquations, OdeSolverProblem,
-    Vector,
+    ode_solver::problem::OdeSolverSolution, scalar::Scalar, Matrix, OdeBuilder, OdeEquations,
+    OdeSolverProblem, Vector,
 };
 use num_traits::{One, Zero};
 
@@ -32,6 +32,26 @@ fn heat2d_rhs<M: Matrix, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, y: &
     }
 }
 
+fn heat2d_jac_mul<M: Matrix, const MGRID: usize>(_x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+    // Initialize y to x, to take care of boundary equations.
+    y.copy_from(v);
+    let mm = M::T::from(MGRID as f64);
+
+    let dx = M::T::one() / (mm - M::T::one());
+    let coeff = M::T::one() / (dx * dx);
+
+    // Loop over interior points; set y = (central difference).
+    for j in 1..MGRID - 1 {
+        let offset = MGRID * j;
+        for i in 1..MGRID - 1 {
+            let loc = offset + i;
+            y[loc] = coeff
+                * (v[loc - 1] + v[loc + 1] + v[loc - MGRID] + v[loc + MGRID]
+                    - M::T::from(4.0) * v[loc]);
+        }
+    }
+}
+
 /* Jacobian matrix setup for MGRID>=4  */
 fn heat2d_jacobian<M: Matrix, const MGRID: usize>() -> M {
     /* total num of nonzero elements */
@@ -41,7 +61,7 @@ fn heat2d_jacobian<M: Matrix, const MGRID: usize>() -> M {
     let four = M::T::from(4.0);
 
     let dx = M::T::one() / (mm - M::T::one());
-    let beta = -four / (dx * dx);
+    let beta = four / (dx * dx);
 
     let mut colptrs = vec![0; MGRID * MGRID + 1];
     let mut rowvals = vec![0; total];
@@ -412,18 +432,41 @@ fn heat2d_mass<M: Matrix, const MGRID: usize>(
     }
 }
 
+fn pde_solution<T: Scalar>(x: T, y: T, t: T, max_terms: usize) -> T {
+    let mut u = T::zero();
+    let pi = T::from(std::f64::consts::PI);
+    let four = T::from(4.0);
+    let two = T::from(2.0);
+    let sixteen = T::from(16.0);
+
+    for n in 1..=max_terms {
+        let nt = T::from(n as f64);
+        for m in 1..=max_terms {
+            let mt = T::from(m as f64);
+            let ii = (-pi * mt * (pi * mt).sin() - two * (pi * mt).cos() + two)
+                / (pi.powi(3) * mt.powi(3));
+            let jj = (-pi * nt * (pi * nt).sin() - two * (pi * nt).cos() + two)
+                / (pi.powi(3) * nt.powi(3));
+            let coefficient = four * sixteen * ii * jj;
+
+            let sin_term = (nt * pi * x).sin() * (mt * pi * y).sin();
+            let exp_term = ((-(nt * pi).powi(2) - (mt * pi).powi(2)) * t).exp();
+
+            u += coefficient * sin_term * exp_term;
+        }
+    }
+
+    u
+}
+
 pub fn head2d_problem<M: Matrix + 'static, const MGRID: usize>() -> (
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
-    let jac = heat2d_jacobian::<M, MGRID>();
-    let jac_mul = move |_x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
-        jac.gemv(M::T::one(), v, M::T::zero(), y);
-    };
     let problem = OdeBuilder::new()
         .build_ode_with_mass(
             heat2d_rhs::<M, MGRID>,
-            jac_mul,
+            heat2d_jac_mul::<M, MGRID>,
             heat2d_mass::<M, MGRID>,
             heat2d_init::<M, MGRID>,
         )
@@ -445,23 +488,38 @@ pub fn head2d_problem<M: Matrix + 'static, const MGRID: usize>() -> (
         (vec![0.0], 10.24),
     ];
     for (values, time) in data {
-        soln.push(
-            M::V::from_vec(values.into_iter().map(|v| v.into()).collect()),
-            time.into(),
-        );
+        let time = M::T::from(time);
+        let mut soln_at_t = Vec::with_capacity(MGRID * MGRID);
+        let mut max_u = M::T::zero();
+        for i in 0..MGRID {
+            for j in 0..MGRID {
+                let x = M::T::from(i as f64) / M::T::from(MGRID as f64 - 1.0);
+                let y = M::T::from(j as f64) / M::T::from(MGRID as f64 - 1.0);
+                let u = pde_solution(x, y, time, 100);
+                if u > max_u {
+                    max_u = u;
+                }
+                soln_at_t.push(u);
+            }
+        }
+        //assert!((M::T::from(values[0]) - max_u).abs() < M::T::from(1e-2));
+        soln.push(M::V::from_vec(soln_at_t), time);
     }
     (problem, soln)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::LinearOp;
+    use crate::{LinearOp, ConstantOp, NonLinearOp};
 
     use super::*;
 
     #[test]
     fn test_jacobian() {
-        let jac = heat2d_jacobian::<nalgebra::DMatrix<f64>, 10>();
+        //let jac = heat2d_jacobian::<nalgebra::DMatrix<f64>, 10>();
+        let (problem, _soln) = head2d_problem::<nalgebra::DMatrix<f64>, 10>();
+        let u0 = problem.eqn.init().call(0.0);
+        let jac = problem.eqn.rhs().jacobian(&u0, 0.0);
         insta::assert_yaml_snapshot!(jac.to_string());
     }
 
@@ -470,5 +528,10 @@ mod tests {
         let (problem, _soln) = head2d_problem::<nalgebra::DMatrix<f64>, 10>();
         let mass = problem.eqn.mass().unwrap().matrix(0.0);
         insta::assert_yaml_snapshot!(mass.to_string());
+    }
+
+    #[test]
+    fn test_soln() {
+        let (_problem, _soln) = head2d_problem::<nalgebra::DMatrix<f64>, 10>();
     }
 }

@@ -141,19 +141,40 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone {
         let cat = (0..n)
             .map(|i| indices.as_slice().binary_search(&i).is_ok())
             .collect::<Vec<_>>();
+        let mut upper_indices = Vec::with_capacity(n);
+        let mut lower_indices = Vec::with_capacity(n);
+        let mut upper_acc = 0;
+        let mut lower_acc = 0;
+        for c in cat.iter() {
+            lower_indices.push(lower_acc);
+            upper_indices.push(upper_acc);
+            if *c {
+                lower_acc += 1;
+            } else {
+                upper_acc += 1;
+            }
+        }
         let mut ur_triplets = Vec::new();
         let mut ul_triplets = Vec::new();
         let mut lr_triplets = Vec::new();
         let mut ll_triplets = Vec::new();
         for (i, j, &v) in self.triplet_iter() {
             if !cat[i] && !cat[j] {
-                ul_triplets.push((i, j, v));
+                let ii = upper_indices[i];
+                let jj = upper_indices[j];
+                ul_triplets.push((ii, jj, v));
             } else if !cat[i] && cat[j] {
-                ur_triplets.push((i, j - nni, v));
+                let ii = upper_indices[i];
+                let jj = lower_indices[j];
+                ur_triplets.push((ii, jj, v));
             } else if cat[i] && !cat[j] {
-                ll_triplets.push((i - nni, j, v));
+                let ii = lower_indices[i];
+                let jj = upper_indices[j];
+                ll_triplets.push((ii, jj, v));
             } else {
-                lr_triplets.push((i - nni, j - nni, v));
+                let ii = lower_indices[i];
+                let jj = lower_indices[j];
+                lr_triplets.push((ii, jj, v));
             }
         }
         (
@@ -187,25 +208,42 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone {
         let cat = (0..n)
             .map(|i| indices.as_slice().binary_search(&i).is_ok())
             .collect::<Vec<_>>();
-        for (i, j, &v) in ul.triplet_iter() {
-            if !cat[i] && !cat[j] {
-                triplets.push((i, j, v));
+        let mut upper_indices = Vec::with_capacity(n);
+        let mut lower_indices = Vec::with_capacity(n);
+        let mut upper_indices_short = Vec::with_capacity(n - indices.len());
+        let mut lower_indices_short = Vec::with_capacity(indices.len());
+        let mut upper_acc = 0;
+        let mut lower_acc = 0;
+        for (i, c) in cat.iter().enumerate() {
+            lower_indices.push(lower_acc);
+            upper_indices.push(upper_acc);
+            if *c {
+                lower_indices_short.push(i);
+                lower_acc += 1;
+            } else {
+                upper_indices_short.push(i);
+                upper_acc += 1;
             }
+        }
+        for (i, j, &v) in ul.triplet_iter() {
+            let ii = upper_indices_short[i];
+            let jj = upper_indices_short[j];
+            triplets.push((ii, jj, v));
         }
         for (i, j, &v) in ur.triplet_iter() {
-            if !cat[i] && cat[j + ul.ncols()] {
-                triplets.push((i, j + ul.ncols(), v));
-            }
+            let ii = upper_indices_short[i];
+            let jj = lower_indices_short[j];
+            triplets.push((ii, jj, v));
         }
         for (i, j, &v) in ll.triplet_iter() {
-            if cat[i + ul.nrows()] && !cat[j] {
-                triplets.push((i + ul.nrows(), j, v));
-            }
+            let ii = lower_indices_short[i];
+            let jj = upper_indices_short[j];
+            triplets.push((ii, jj, v));
         }
         for (i, j, &v) in lr.triplet_iter() {
-            if cat[i + ul.nrows()] && cat[j + ul.ncols()] {
-                triplets.push((i + ul.nrows(), j + ul.ncols(), v));
-            }
+            let ii = lower_indices_short[i];
+            let jj = lower_indices_short[j];
+            triplets.push((ii, jj, v));
         }
         Self::try_from_triplets(n, m, triplets).unwrap()
     }
@@ -308,3 +346,52 @@ pub trait DenseMatrix:
         ret
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::SparseColMat;
+    use super::*;
+
+    #[test]
+    fn test_split_combine_at_indices() {
+        let triplets = vec![
+                (0, 0, 1.0),
+                (1, 0, 5.0),
+                (2, 0, 9.0),
+                (3, 0, 13.0),
+                (0, 1, 2.0),
+                (1, 1, 6.0),
+                (2, 1, 10.0),
+                (3, 1, 14.0),
+                (0, 2, 3.0),
+                (1, 2, 7.0),
+                (2, 2, 11.0),
+                (3, 2, 15.0),
+                (0, 3, 4.0),
+                (1, 3, 8.0),
+                (2, 3, 12.0),
+                (3, 3, 16.0),
+            ];
+        let m = SparseColMat::try_from_triplets(
+            4,
+            4,
+            triplets.clone(),
+        )
+        .unwrap();
+        let indices = vec![0, 2];
+        let (ul, ur, ll, lr) = m.split_at_indices(&indices);
+        let ul_triplets = vec![(0, 0, 6.0), (1, 0, 14.0), (0, 1, 8.0), (1, 1, 16.0)];
+        let ur_triplets = vec![(0, 0, 5.0), (1, 0, 13.0), (0, 1, 7.0), (1, 1, 15.0)];
+        let ll_triplets = vec![(0, 0, 2.0), (1, 0, 10.0), (0, 1, 4.0), (1, 1, 12.0)];
+        let lr_triplets = vec![(0, 0, 1.0), (1, 0, 9.0), (0, 1, 3.0), (1, 1, 11.0)];
+        assert_eq!(ul_triplets, ul.triplet_iter().map(|(i, j, v)| (i, j, *v)).collect::<Vec<_>>());
+        assert_eq!(ur_triplets, ur.triplet_iter().map(|(i, j, v)| (i, j, *v)).collect::<Vec<_>>());
+        assert_eq!(ll_triplets, ll.triplet_iter().map(|(i, j, v)| (i, j, *v)).collect::<Vec<_>>());
+        assert_eq!(lr_triplets, lr.triplet_iter().map(|(i, j, v)| (i, j, *v)).collect::<Vec<_>>());
+
+        let mat = SparseColMat::combine_at_indices(&ul, &ur, &ll, &lr, &indices);
+        assert_eq!(triplets, mat.triplet_iter().map(|(i, j, v)| (i, j, *v)).collect::<Vec<_>>());
+    }
+}
+
+
