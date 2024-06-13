@@ -1,8 +1,13 @@
 use crate::{
-    matrix::Matrix, ode_solver::problem::OdeSolverSolution, DiffSlContext, OdeBuilder, OdeEquations, OdeSolverProblem, Vector
+    matrix::Matrix, ode_solver::problem::OdeSolverSolution, DiffSlContext, OdeBuilder,
+    OdeEquations, OdeSolverProblem, Vector,
 };
 
-pub fn robertson_diffsl<M: Matrix<T = f64> + 'static>(context: &mut DiffSlContext<M>, use_coloring: bool) -> (
+#[cfg(feature = "diffsl")]
+pub fn robertson_diffsl<M: Matrix<T = f64> + 'static>(
+    context: &mut DiffSlContext<M>,
+    use_coloring: bool,
+) -> (
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
     OdeSolverSolution<M::V>,
 ) {
@@ -21,12 +26,12 @@ pub fn robertson_diffsl<M: Matrix<T = f64> + 'static>(context: &mut DiffSlContex
             dydt = 0,
             dzdt = 0,
         }
-        F_i {
+        M_i {
             dxdt,
             dydt,
             0,
         }
-        G_i {
+        F_i {
             -k1 * x + k2 * y * z,
             k1 * x - k2 * y * z - k3 * y * y,
             1 - x - y - z,
@@ -36,7 +41,7 @@ pub fn robertson_diffsl<M: Matrix<T = f64> + 'static>(context: &mut DiffSlContex
             y,
             z,
         }";
-    
+
     context.recompile(code).unwrap();
 
     let problem = OdeBuilder::new()
@@ -44,8 +49,12 @@ pub fn robertson_diffsl<M: Matrix<T = f64> + 'static>(context: &mut DiffSlContex
         .rtol(1e-4)
         .atol([1.0e-8, 1.0e-6, 1.0e-6])
         .use_coloring(use_coloring)
-        .build_diffsl(context).unwrap();
-    (problem, soln())
+        .build_diffsl(context)
+        .unwrap();
+    let mut soln = soln::<M::V>();
+    soln.rtol = problem.rtol;
+    soln.atol = problem.atol.as_ref().clone();
+    (problem, soln)
 }
 
 pub fn robertson<M: Matrix + 'static>(
@@ -84,7 +93,6 @@ pub fn robertson<M: Matrix + 'static>(
             |_p: &M::V, _t: M::T| M::V::from_vec(vec![1.0.into(), 0.0.into(), 0.0.into()]),
         )
         .unwrap();
-
 
     (problem, soln())
 }

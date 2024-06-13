@@ -679,7 +679,7 @@ impl OdeBuilder {
     pub fn build_diffsl<M>(
         self,
         context: &crate::ode_solver::diffsl::DiffSlContext<M>,
-    ) -> Result<OdeSolverProblem<crate::ode_solver::diffsl::DiffSl<'_, M>>> 
+    ) -> Result<OdeSolverProblem<crate::ode_solver::diffsl::DiffSl<'_, M>>>
     where
         M: Matrix<T = crate::ode_solver::diffsl::T>,
     {

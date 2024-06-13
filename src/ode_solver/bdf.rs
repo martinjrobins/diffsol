@@ -861,7 +861,7 @@ mod test {
                 },
                 gaussian_decay::gaussian_decay_problem,
                 heat2d::head2d_problem,
-                robertson::robertson,
+                robertson::{robertson, robertson_diffsl},
                 robertson_ode::robertson_ode,
                 robertson_ode_with_sens::robertson_ode_with_sens,
                 robertson_sens::robertson_sens,
@@ -871,7 +871,7 @@ mod test {
                 test_state_mut_on_problem,
             },
         },
-        Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquations, Op, SparseColMat,
+        Bdf, DiffSlContext, FaerSparseLU, NewtonNonlinearSolver, OdeEquations, Op, SparseColMat,
     };
 
     use faer::Mat;
@@ -1061,6 +1061,14 @@ mod test {
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
         let (problem, soln) = robertson::<SparseColMat<f64>>(false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+    }
+
+    #[test]
+    fn bdf_test_nalgebra_diffsl_robertson() {
+        let mut context = DiffSlContext::default();
+        let mut s = Bdf::default();
+        let (problem, soln) = robertson_diffsl::<M>(&mut context, false);
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 

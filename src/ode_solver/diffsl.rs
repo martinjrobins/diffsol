@@ -4,7 +4,9 @@ use anyhow::Result;
 use diffsl::execution::Compiler;
 
 use crate::{
-    jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring}, op::{LinearOp, NonLinearOp, Op}, ConstantOp, Matrix, OdeEquations, Vector
+    jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring},
+    op::{LinearOp, NonLinearOp, Op},
+    ConstantOp, Matrix, OdeEquations, Vector,
 };
 
 pub type T = f64;
@@ -89,11 +91,14 @@ impl<M: Matrix<T = T>> DiffSlContext<M> {
 
 impl<M: Matrix<T = T>> Default for DiffSlContext<M> {
     fn default() -> Self {
-        Self::new("
+        Self::new(
+            "
             u { y = 1 }
             F { -y }
             out { y }
-        ").unwrap()
+        ",
+        )
+        .unwrap()
     }
 }
 
