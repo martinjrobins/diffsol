@@ -6,12 +6,10 @@ use diffsl::execution::Compiler;
 use crate::{
     jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring},
     op::{LinearOp, NonLinearOp, Op},
-    ConstantOp, OdeEquations,
+    ConstantOp, Matrix, OdeEquations, Vector,
 };
 
 pub type T = f64;
-pub type V = nalgebra::DVector<T>;
-pub type M = nalgebra::DMatrix<T>;
 
 /// Context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
 /// This contains the compiled code and the data structures needed to evaluate the ODE equations.
@@ -20,11 +18,10 @@ pub type M = nalgebra::DMatrix<T>;
 ///
 /// ```rust
 /// use diffsol::{OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod, DiffSlContext};
-/// type M = nalgebra::DMatrix<f64>;
 ///         
 /// // dy/dt = -ay
 /// // y(0) = 1
-/// let context = DiffSlContext::new("
+/// let context = DiffSlContext::<nalgebra::DMatrix<f64>>::new("
 ///     in = [a]
 ///     a { 1 }
 ///     u { 1.0 }
@@ -44,18 +41,18 @@ pub type M = nalgebra::DMatrix<T>;
 /// }
 /// let y = solver.interpolate(t);
 /// ```
-pub struct DiffSlContext {
+pub struct DiffSlContext<M: Matrix<T = T>> {
     compiler: Compiler,
-    data: RefCell<Vec<T>>,
-    ddata: RefCell<Vec<T>>,
-    tmp: RefCell<V>,
+    data: RefCell<Vec<M::T>>,
+    ddata: RefCell<Vec<M::T>>,
+    tmp: RefCell<M::V>,
     nstates: usize,
     nroots: usize,
     nparams: usize,
     nout: usize,
 }
 
-impl DiffSlContext {
+impl<M: Matrix<T = T>> DiffSlContext<M> {
     /// Create a new context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
     /// The input parameters are not initialized and must be set using the [OdeEquations::set_params] function before solving the ODE.
     pub fn new(text: &str) -> Result<Self> {
@@ -63,7 +60,7 @@ impl DiffSlContext {
         let (nstates, nparams, nout, _ndata, nroots) = compiler.get_dims();
         let data = RefCell::new(compiler.get_new_data());
         let ddata = RefCell::new(compiler.get_new_data());
-        let tmp = RefCell::new(V::zeros(nstates));
+        let tmp = RefCell::new(M::V::zeros(nstates));
 
         Ok(Self {
             compiler,
@@ -76,24 +73,45 @@ impl DiffSlContext {
             nout,
         })
     }
-    pub fn out(&self, t: T, y: &V) -> &[T] {
-        self.compiler
-            .calc_out(t, y.as_slice(), self.data.borrow_mut().as_mut_slice());
-        self.compiler.get_out(self.data.borrow().as_slice())
+
+    pub fn recompile(&mut self, text: &str) -> Result<()> {
+        self.compiler = Compiler::from_discrete_str(text)?;
+        let (nstates, nparams, nout, _ndata, nroots) = self.compiler.get_dims();
+        self.data = RefCell::new(self.compiler.get_new_data());
+        self.ddata = RefCell::new(self.compiler.get_new_data());
+        self.tmp = RefCell::new(M::V::zeros(nstates));
+        self.nparams = nparams;
+        self.nstates = nstates;
+        self.nout = nout;
+        self.nroots = nroots;
+        Ok(())
     }
 }
 
-pub struct DiffSl<'a> {
-    context: &'a DiffSlContext,
-    rhs: Rc<DiffSlRhs<'a>>,
-    mass: Option<Rc<DiffSlMass<'a>>>,
-    root: Rc<DiffSlRoot<'a>>,
-    init: Rc<DiffSlInit<'a>>,
-    out: Rc<DiffSlOut<'a>>,
+impl<M: Matrix<T = T>> Default for DiffSlContext<M> {
+    fn default() -> Self {
+        Self::new(
+            "
+            u { y = 1 }
+            F { -y }
+            out { y }
+        ",
+        )
+        .unwrap()
+    }
 }
 
-impl<'a> DiffSl<'a> {
-    pub fn new(context: &'a DiffSlContext, use_coloring: bool) -> Self {
+pub struct DiffSl<'a, M: Matrix<T = T>> {
+    context: &'a DiffSlContext<M>,
+    rhs: Rc<DiffSlRhs<'a, M>>,
+    mass: Option<Rc<DiffSlMass<'a, M>>>,
+    root: Rc<DiffSlRoot<'a, M>>,
+    init: Rc<DiffSlInit<'a, M>>,
+    out: Rc<DiffSlOut<'a, M>>,
+}
+
+impl<'a, M: Matrix<T = T>> DiffSl<'a, M> {
+    pub fn new(context: &'a DiffSlContext<M>, use_coloring: bool) -> Self {
         let rhs = Rc::new(DiffSlRhs::new(context, use_coloring));
         let mass = DiffSlMass::new(context, use_coloring).map(Rc::new);
         let root = Rc::new(DiffSlRoot::new(context));
@@ -110,55 +128,55 @@ impl<'a> DiffSl<'a> {
     }
 }
 
-pub struct DiffSlRoot<'a> {
-    context: &'a DiffSlContext,
+pub struct DiffSlRoot<'a, M: Matrix<T = T>> {
+    context: &'a DiffSlContext<M>,
 }
 
-pub struct DiffSlOut<'a> {
-    context: &'a DiffSlContext,
+pub struct DiffSlOut<'a, M: Matrix<T = T>> {
+    context: &'a DiffSlContext<M>,
 }
 
-pub struct DiffSlRhs<'a> {
-    context: &'a DiffSlContext,
+pub struct DiffSlRhs<'a, M: Matrix<T = T>> {
+    context: &'a DiffSlContext<M>,
     coloring: Option<JacobianColoring<M>>,
 }
 
-pub struct DiffSlMass<'a> {
-    context: &'a DiffSlContext,
+pub struct DiffSlMass<'a, M: Matrix<T = T>> {
+    context: &'a DiffSlContext<M>,
     coloring: Option<JacobianColoring<M>>,
 }
 
-pub struct DiffSlInit<'a> {
-    context: &'a DiffSlContext,
+pub struct DiffSlInit<'a, M: Matrix<T = T>> {
+    context: &'a DiffSlContext<M>,
 }
 
-impl<'a> DiffSlOut<'a> {
-    pub fn new(context: &'a DiffSlContext) -> Self {
+impl<'a, M: Matrix<T = T>> DiffSlOut<'a, M> {
+    pub fn new(context: &'a DiffSlContext<M>) -> Self {
         Self { context }
     }
 }
 
-impl<'a> DiffSlRoot<'a> {
-    pub fn new(context: &'a DiffSlContext) -> Self {
+impl<'a, M: Matrix<T = T>> DiffSlRoot<'a, M> {
+    pub fn new(context: &'a DiffSlContext<M>) -> Self {
         Self { context }
     }
 }
 
-impl<'a> DiffSlInit<'a> {
-    pub fn new(context: &'a DiffSlContext) -> Self {
+impl<'a, M: Matrix<T = T>> DiffSlInit<'a, M> {
+    pub fn new(context: &'a DiffSlContext<M>) -> Self {
         Self { context }
     }
 }
 
-impl<'a> DiffSlRhs<'a> {
-    pub fn new(context: &'a DiffSlContext, use_coloring: bool) -> Self {
+impl<'a, M: Matrix<T = T>> DiffSlRhs<'a, M> {
+    pub fn new(context: &'a DiffSlContext<M>, use_coloring: bool) -> Self {
         let mut ret = Self {
             context,
             coloring: None,
         };
 
         if use_coloring {
-            let x0 = V::zeros(context.nstates);
+            let x0 = M::V::zeros(context.nstates);
             let t0 = 0.0;
             let non_zeros = find_non_zeros_nonlinear(&ret, &x0, t0);
             ret.coloring = Some(JacobianColoring::new_from_non_zeros(&ret, non_zeros));
@@ -167,8 +185,8 @@ impl<'a> DiffSlRhs<'a> {
     }
 }
 
-impl<'a> DiffSlMass<'a> {
-    pub fn new(context: &'a DiffSlContext, use_coloring: bool) -> Option<Self> {
+impl<'a, M: Matrix<T = T>> DiffSlMass<'a, M> {
+    pub fn new(context: &'a DiffSlContext<M>, use_coloring: bool) -> Option<Self> {
         if !context.compiler.has_mass() {
             return None;
         }
@@ -188,10 +206,10 @@ impl<'a> DiffSlMass<'a> {
 
 macro_rules! impl_op_for_diffsl {
     ($name:ident) => {
-        impl Op for $name<'_> {
+        impl<M: Matrix<T = T>> Op for $name<'_, M> {
             type M = M;
             type T = T;
-            type V = V;
+            type V = M::V;
 
             fn nstates(&self) -> usize {
                 self.context.nstates
@@ -211,10 +229,10 @@ impl_op_for_diffsl!(DiffSlRhs);
 impl_op_for_diffsl!(DiffSlMass);
 impl_op_for_diffsl!(DiffSlInit);
 
-impl Op for DiffSlRoot<'_> {
+impl<M: Matrix<T = T>> Op for DiffSlRoot<'_, M> {
     type M = M;
     type T = T;
-    type V = V;
+    type V = M::V;
 
     fn nstates(&self) -> usize {
         self.context.nstates
@@ -228,10 +246,10 @@ impl Op for DiffSlRoot<'_> {
     }
 }
 
-impl Op for DiffSlOut<'_> {
+impl<M: Matrix<T = T>> Op for DiffSlOut<'_, M> {
     type M = M;
     type T = T;
-    type V = V;
+    type V = M::V;
 
     fn nstates(&self) -> usize {
         self.context.nstates
@@ -244,7 +262,7 @@ impl Op for DiffSlOut<'_> {
     }
 }
 
-impl ConstantOp for DiffSlInit<'_> {
+impl<M: Matrix<T = T>> ConstantOp for DiffSlInit<'_, M> {
     fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
         self.context.compiler.set_u0(
             y.as_mut_slice(),
@@ -253,7 +271,7 @@ impl ConstantOp for DiffSlInit<'_> {
     }
 }
 
-impl NonLinearOp for DiffSlRoot<'_> {
+impl<M: Matrix<T = T>> NonLinearOp for DiffSlRoot<'_, M> {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
         self.context.compiler.calc_stop(
             t,
@@ -268,7 +286,7 @@ impl NonLinearOp for DiffSlRoot<'_> {
     }
 }
 
-impl NonLinearOp for DiffSlOut<'_> {
+impl<M: Matrix<T = T>> NonLinearOp for DiffSlOut<'_, M> {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
         self.context.compiler.calc_out(
             t,
@@ -297,7 +315,7 @@ impl NonLinearOp for DiffSlOut<'_> {
     }
 }
 
-impl NonLinearOp for DiffSlRhs<'_> {
+impl<M: Matrix<T = T>> NonLinearOp for DiffSlRhs<'_, M> {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
         self.context.compiler.rhs(
             t,
@@ -329,7 +347,7 @@ impl NonLinearOp for DiffSlRhs<'_> {
     }
 }
 
-impl LinearOp for DiffSlMass<'_> {
+impl<M: Matrix<T = T>> LinearOp for DiffSlMass<'_, M> {
     fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
         let mut tmp = self.context.tmp.borrow_mut();
         self.context.compiler.mass(
@@ -352,15 +370,15 @@ impl LinearOp for DiffSlMass<'_> {
     }
 }
 
-impl<'a> OdeEquations for DiffSl<'a> {
+impl<'a, M: Matrix<T = T>> OdeEquations for DiffSl<'a, M> {
     type M = M;
     type T = T;
-    type V = V;
-    type Mass = DiffSlMass<'a>;
-    type Rhs = DiffSlRhs<'a>;
-    type Root = DiffSlRoot<'a>;
-    type Init = DiffSlInit<'a>;
-    type Out = DiffSlOut<'a>;
+    type V = M::V;
+    type Mass = DiffSlMass<'a, M>;
+    type Rhs = DiffSlRhs<'a, M>;
+    type Root = DiffSlRoot<'a, M>;
+    type Init = DiffSlInit<'a, M>;
+    type Out = DiffSlOut<'a, M>;
 
     fn rhs(&self) -> &Rc<Self::Rhs> {
         &self.rhs
@@ -407,7 +425,7 @@ mod tests {
             F { -y }
             out { y }
         ";
-        let context = DiffSlContext::new(code).unwrap();
+        let context = DiffSlContext::<nalgebra::DMatrix<f64>>::new(code).unwrap();
         let problem = OdeBuilder::new().build_diffsl(&context).unwrap();
         let mut solver = Bdf::default();
         let _y = solver.solve(&problem, 1.0).unwrap();
@@ -443,7 +461,7 @@ mod tests {
 
         let k = 1.0;
         let r = 1.0;
-        let context = DiffSlContext::new(text).unwrap();
+        let context = DiffSlContext::<nalgebra::DMatrix<f64>>::new(text).unwrap();
         let mut eqn = DiffSl::new(&context, false);
         let p = DVector::from_vec(vec![r, k]);
         eqn.set_params(p);
@@ -475,8 +493,7 @@ mod tests {
         let z_expect = 2.0 * y_expect;
         let expected_state = DVector::from_vec(vec![y_expect, z_expect]);
         state.assert_eq_st(&expected_state, 1e-5);
-        let out = context.out(t, &state);
-        let out = DVector::from_vec(out.to_vec());
+        let out = eqn.out().unwrap().call(&state, t);
         let expected_out = DVector::from_vec(vec![3.0 * y_expect, 4.0 * z_expect]);
         out.assert_eq_st(&expected_out, 1e-4);
     }

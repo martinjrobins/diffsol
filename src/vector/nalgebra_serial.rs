@@ -140,6 +140,15 @@ impl<T: Scalar> Vector for DVector<T> {
     fn norm(&self) -> Self::T {
         self.norm()
     }
+    fn as_slice(&self) -> &[Self::T] {
+        self.as_slice()
+    }
+    fn as_mut_slice(&mut self) -> &mut [Self::T] {
+        self.as_mut_slice()
+    }
+    fn copy_from_slice(&mut self, slice: &[Self::T]) {
+        self.copy_from_slice(slice);
+    }
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
         if y.len() != self.len() || y.len() != atol.len() {

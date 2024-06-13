@@ -1064,6 +1064,16 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
+    #[cfg(feature = "diffsl")]
+    #[test]
+    fn bdf_test_nalgebra_diffsl_robertson() {
+        let mut context = crate::DiffSlContext::default();
+        let mut s = Bdf::default();
+        let (problem, soln) =
+            crate::ode_solver::test_models::robertson::robertson_diffsl::<M>(&mut context, false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+    }
+
     #[test]
     fn test_bdf_nalgebra_robertson_sens() {
         let mut s = Bdf::default();

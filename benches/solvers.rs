@@ -1,7 +1,9 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use diffsol::{
     ode_solver::test_models::{
-        exponential_decay::exponential_decay_problem, heat2d::head2d_problem, robertson::robertson,
+        exponential_decay::exponential_decay_problem,
+        heat2d::head2d_problem,
+        robertson::{robertson, robertson_diffsl},
     },
     SparseColMat,
 };
@@ -30,6 +32,14 @@ fn criterion_benchmark(c: &mut Criterion) {
         let (problem, soln) = robertson::<nalgebra::DMatrix<f64>>(false);
         b.iter(|| benchmarks::bdf(&problem, soln.solution_points.last().unwrap().t))
     });
+
+    #[cfg(feature = "diffsl")]
+    c.bench_function("nalgebra_bdf_diffsl_robertson", |b| {
+        let mut context = diffsol::DiffSlContext::default();
+        let (problem, soln) = robertson_diffsl::<nalgebra::DMatrix<f64>>(&mut context, false);
+        b.iter(|| benchmarks::bdf(&problem, soln.solution_points.last().unwrap().t))
+    });
+
     c.bench_function("nalgebra_esdirk34_robertson", |b| {
         let (problem, soln) = robertson::<nalgebra::DMatrix<f64>>(false);
         b.iter(|| benchmarks::esdirk34(&problem, soln.solution_points.last().unwrap().t))

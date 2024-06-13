@@ -86,6 +86,16 @@ impl<T: Scalar> Vector for Col<T> {
     fn norm(&self) -> T {
         self.norm_l2()
     }
+    fn as_mut_slice(&mut self) -> &mut [Self::T] {
+        self.as_slice_mut()
+    }
+    fn as_slice(&self) -> &[Self::T] {
+        self.as_slice()
+    }
+    fn copy_from_slice(&mut self, slice: &[Self::T]) {
+        let v = faer::col::from_slice(slice);
+        self.copy_from(v);
+    }
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
         if y.len() != self.len() || y.len() != atol.len() {

@@ -676,23 +676,24 @@ impl OdeBuilder {
     /// Build an ODE problem using the DiffSL language (requires the `diffsl` feature).
     /// The source code is provided as a string, please see the [DiffSL documentation](https://martinjrobins.github.io/diffsl/) for more information.
     #[cfg(feature = "diffsl")]
-    pub fn build_diffsl(
+    pub fn build_diffsl<M>(
         self,
-        context: &crate::ode_solver::diffsl::DiffSlContext,
-    ) -> Result<OdeSolverProblem<crate::ode_solver::diffsl::DiffSl<'_>>> {
+        context: &crate::ode_solver::diffsl::DiffSlContext<M>,
+    ) -> Result<OdeSolverProblem<crate::ode_solver::diffsl::DiffSl<'_, M>>>
+    where
+        M: Matrix<T = crate::ode_solver::diffsl::T>,
+    {
         use crate::ode_solver::diffsl;
-        type V = diffsl::V;
-        type T = diffsl::T;
-        let p = Self::build_p::<V>(self.p);
+        let p = Self::build_p::<M::V>(self.p);
         let mut eqn = diffsl::DiffSl::new(context, self.use_coloring);
         eqn.set_params(p);
-        let atol = Self::build_atol::<V>(self.atol, eqn.rhs().nstates())?;
+        let atol = Self::build_atol::<M::V>(self.atol, eqn.rhs().nstates())?;
         OdeSolverProblem::new(
             eqn,
-            T::from(self.rtol),
+            self.rtol,
             atol,
-            T::from(self.t0),
-            T::from(self.h0),
+            self.t0,
+            self.h0,
             self.sensitivities,
             self.sensitivities_error_control,
         )

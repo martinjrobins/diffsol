@@ -3,6 +3,60 @@ use crate::{
     OdeSolverProblem, Vector,
 };
 
+#[cfg(feature = "diffsl")]
+pub fn robertson_diffsl<M: Matrix<T = f64> + 'static>(
+    context: &mut crate::DiffSlContext<M>,
+    use_coloring: bool,
+) -> (
+    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
+    OdeSolverSolution<M::V>,
+) {
+    let code = "
+        in = [k1, k2, k3]
+        k1 { 0.04 }
+        k2 { 10000 }
+        k3 { 30000000 }
+        u_i {
+            x = 1,
+            y = 0,
+            z = 0,
+        }
+        dudt_i {
+            dxdt = 1,
+            dydt = 0,
+            dzdt = 0,
+        }
+        M_i {
+            dxdt,
+            dydt,
+            0,
+        }
+        F_i {
+            -k1 * x + k2 * y * z,
+            k1 * x - k2 * y * z - k3 * y * y,
+            1 - x - y - z,
+        }
+        out_i {
+            x,
+            y,
+            z,
+        }";
+
+    context.recompile(code).unwrap();
+
+    let problem = OdeBuilder::new()
+        .p([0.04, 1.0e4, 3.0e7])
+        .rtol(1e-4)
+        .atol([1.0e-8, 1.0e-6, 1.0e-6])
+        .use_coloring(use_coloring)
+        .build_diffsl(context)
+        .unwrap();
+    let mut soln = soln::<M::V>();
+    soln.rtol = problem.rtol;
+    soln.atol = problem.atol.as_ref().clone();
+    (problem, soln)
+}
+
 pub fn robertson<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
@@ -40,6 +94,10 @@ pub fn robertson<M: Matrix + 'static>(
         )
         .unwrap();
 
+    (problem, soln())
+}
+
+fn soln<V: Vector>() -> OdeSolverSolution<V> {
     let mut soln = OdeSolverSolution::default();
     let data = vec![
         (vec![1.0, 0.0, 0.0], 0.0),
@@ -59,12 +117,11 @@ pub fn robertson<M: Matrix + 'static>(
 
     for (values, time) in data {
         soln.push(
-            M::V::from_vec(values.into_iter().map(|v| v.into()).collect()),
+            V::from_vec(values.into_iter().map(|v| v.into()).collect()),
             time.into(),
         );
     }
-
-    (problem, soln)
+    soln
 }
 
 /* -----------------------------------------------------------------

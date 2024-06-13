@@ -143,8 +143,11 @@ pub trait Vector:
     fn fill(&mut self, value: Self::T);
     fn as_view(&self) -> Self::View<'_>;
     fn as_view_mut(&mut self) -> Self::ViewMut<'_>;
+    fn as_slice(&self) -> &[Self::T];
+    fn as_mut_slice(&mut self) -> &mut [Self::T];
     fn copy_from(&mut self, other: &Self);
     fn copy_from_view(&mut self, other: &Self::View<'_>);
+    fn copy_from_slice(&mut self, slice: &[Self::T]);
     fn from_vec(vec: Vec<Self::T>) -> Self;
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T);
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T);
