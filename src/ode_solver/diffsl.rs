@@ -18,11 +18,10 @@ pub type T = f64;
 ///
 /// ```rust
 /// use diffsol::{OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod, DiffSlContext};
-/// type M = nalgebra::DMatrix<f64>;
 ///         
 /// // dy/dt = -ay
 /// // y(0) = 1
-/// let context = DiffSlContext::new("
+/// let context = DiffSlContext::<nalgebra::DMatrix<f64>>::new("
 ///     in = [a]
 ///     a { 1 }
 ///     u { 1.0 }
