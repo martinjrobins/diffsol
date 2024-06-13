@@ -707,7 +707,7 @@ mod test {
                 exponential_decay::{
                     exponential_decay_problem, exponential_decay_problem_sens,
                     exponential_decay_problem_with_root,
-                }, head2d::head2d_problem, robertson::robertson, robertson_ode::robertson_ode, robertson_sens::robertson_sens
+                }, heat2d::head2d_problem, robertson::robertson, robertson_ode::robertson_ode, robertson_sens::robertson_sens
             },
             tests::{
                 test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut,

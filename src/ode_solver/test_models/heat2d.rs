@@ -181,9 +181,12 @@ pub fn head2d_problem<M: Matrix + 'static, const MGRID: usize>() -> (
         )
         .unwrap();
 
-    let mut soln = OdeSolverSolution::default();
-    soln.rtol = M::T::from(1e-5);
-    soln.atol = M::V::from_element(1, M::T::from(1e-5));
+    let mut soln = OdeSolverSolution{
+        solution_points: Vec::new(),
+        sens_solution_points: None,
+        rtol: M::T::from(1e-5),
+        atol: M::V::from_element(1, M::T::from(1e-5)),
+    };
     let data = vec![
         (vec![9.75461e-01], 0.0),
         (vec![8.24056e-01], 0.01),
