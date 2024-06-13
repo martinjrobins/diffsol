@@ -181,7 +181,7 @@ pub fn head2d_problem<M: Matrix + 'static, const MGRID: usize>() -> (
         )
         .unwrap();
 
-    let mut soln = OdeSolverSolution{
+    let mut soln = OdeSolverSolution {
         solution_points: Vec::new(),
         sens_solution_points: None,
         rtol: M::T::from(1e-5),

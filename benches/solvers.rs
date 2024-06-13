@@ -1,7 +1,10 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use diffsol::{ode_solver::test_models::{
-    exponential_decay::exponential_decay_problem, heat2d::head2d_problem, robertson::robertson
-}, SparseColMat};
+use diffsol::{
+    ode_solver::test_models::{
+        exponential_decay::exponential_decay_problem, heat2d::head2d_problem, robertson::robertson,
+    },
+    SparseColMat,
+};
 
 fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("nalgebra_bdf_exponential_decay", |b| {
