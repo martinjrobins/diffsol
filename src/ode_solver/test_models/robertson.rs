@@ -1,11 +1,11 @@
 use crate::{
-    matrix::Matrix, ode_solver::problem::OdeSolverSolution, DiffSlContext, OdeBuilder,
-    OdeEquations, OdeSolverProblem, Vector,
+    matrix::Matrix, ode_solver::problem::OdeSolverSolution, OdeBuilder, OdeEquations,
+    OdeSolverProblem, Vector,
 };
 
 #[cfg(feature = "diffsl")]
 pub fn robertson_diffsl<M: Matrix<T = f64> + 'static>(
-    context: &mut DiffSlContext<M>,
+    context: &mut crate::DiffSlContext<M>,
     use_coloring: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
