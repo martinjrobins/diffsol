@@ -459,6 +459,26 @@ impl Vector for SundialsVector {
     fn len(&self) -> IndexType {
         unsafe { N_VGetLength_Serial(self.sundials_vector()) as IndexType }
     }
+    fn as_mut_slice(&mut self) -> &mut [Self::T] {
+        unsafe {
+            let ptr = N_VGetArrayPointer(self.sundials_vector());
+            std::slice::from_raw_parts_mut(ptr, self.len())
+        }
+    }
+    fn as_slice(&self) -> &[Self::T] {
+        unsafe {
+            let ptr = N_VGetArrayPointer(self.sundials_vector());
+            std::slice::from_raw_parts(ptr, self.len())
+        }
+    }
+    fn copy_from_slice(&mut self, slice: &[Self::T]) {
+        if slice.len() != self.len() {
+            panic!("Vector lengths do not match");
+        }
+        for i in 0..self.len() {
+            self[i] = slice[i];
+        }
+    }
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
         let mut acc = 0.0;
         if y.len() != self.len() || y.len() != atol.len() {
