@@ -279,6 +279,7 @@ where
     type Mass = Eqn::Mass;
     type Root = Eqn::Root;
     type Init = SensInit<Eqn>;
+    type Out = Eqn::Out;
 
     fn rhs(&self) -> &Rc<Self::Rhs> {
         &self.rhs
@@ -294,6 +295,9 @@ where
     }
     fn set_params(&mut self, _p: Self::V) {
         panic!("Not implemented for SensEquations");
+    }
+    fn out(&self) -> Option<&Rc<Self::Out>> {
+        self.eqn.out()
     }
 }
 

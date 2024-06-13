@@ -283,3 +283,20 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{Matrix, SparseColMat};
+    #[test]
+    fn test_triplet_iter() {
+        let triplets = vec![(0, 0, 1.0), (1, 0, 2.0), (2, 2, 3.0), (3, 2, 4.0)];
+        let mat = SparseColMat::<f64>::try_from_triplets(4, 3, triplets.clone()).unwrap();
+        let mut iter = mat.triplet_iter();
+        for triplet in triplets {
+            let (i, j, val) = iter.next().unwrap();
+            assert_eq!(i, triplet.0);
+            assert_eq!(j, triplet.1);
+            assert_eq!(*val, triplet.2);
+        }
+    }
+}

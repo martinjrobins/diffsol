@@ -242,7 +242,68 @@ impl OdeBuilder {
         let mass = Some(Rc::new(mass));
         let rhs = Rc::new(rhs);
         let init = Rc::new(init);
-        let eqn = OdeSolverEquations::new(rhs, mass, None, init, p);
+        let eqn = OdeSolverEquations::new(rhs, mass, None, init, None, p);
+        let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
+        OdeSolverProblem::new(
+            eqn,
+            M::T::from(self.rtol),
+            atol,
+            M::T::from(self.t0),
+            M::T::from(self.h0),
+            false,
+            self.sensitivities_error_control,
+        )
+    }
+
+    #[allow(clippy::type_complexity)]
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_ode_with_mass_and_out<M, F, G, H, I, J, K>(
+        self,
+        rhs: F,
+        rhs_jac: G,
+        mass: H,
+        init: I,
+        out: J,
+        out_jac: K,
+        nout: usize,
+    ) -> Result<
+        OdeSolverProblem<
+            OdeSolverEquations<
+                M,
+                Closure<M, F, G>,
+                ConstantClosure<M, I>,
+                LinearClosure<M, H>,
+                UnitCallable<M>,
+                Closure<M, J, K>,
+            >,
+        >,
+    >
+    where
+        M: Matrix,
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        H: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+        I: Fn(&M::V, M::T) -> M::V,
+        J: Fn(&M::V, &M::V, M::T, &mut M::V),
+        K: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let p = Rc::new(Self::build_p(self.p));
+        let t0 = M::T::from(self.t0);
+        let y0 = init(&p, t0);
+        let nstates = y0.len();
+        let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
+        let out = Closure::new(out, out_jac, nstates, nout, p.clone());
+        let mut mass = LinearClosure::new(mass, nstates, nstates, p.clone());
+        let init = ConstantClosure::new(init, p.clone());
+        if self.use_coloring || M::is_sparse() {
+            rhs.calculate_sparsity(&y0, t0);
+            mass.calculate_sparsity(t0);
+        }
+        let mass = Some(Rc::new(mass));
+        let rhs = Rc::new(rhs);
+        let init = Rc::new(init);
+        let out = Some(Rc::new(out));
+        let eqn = OdeSolverEquations::new(rhs, mass, None, init, out, p);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
         OdeSolverProblem::new(
             eqn,
@@ -349,7 +410,7 @@ impl OdeBuilder {
         let mass = Some(Rc::new(mass));
         let rhs = Rc::new(rhs);
         let init = Rc::new(init);
-        let eqn = OdeSolverEquations::new(rhs, mass, None, init, p);
+        let eqn = OdeSolverEquations::new(rhs, mass, None, init, None, p);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
         OdeSolverProblem::new(
             eqn,
@@ -417,7 +478,7 @@ impl OdeBuilder {
         }
         let rhs = Rc::new(rhs);
         let init = Rc::new(init);
-        let eqn = OdeSolverEquations::new(rhs, None, None, init, p);
+        let eqn = OdeSolverEquations::new(rhs, None, None, init, None, p);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
         OdeSolverProblem::new(
             eqn,
@@ -492,7 +553,7 @@ impl OdeBuilder {
         }
         let rhs = Rc::new(rhs);
         let init = Rc::new(init);
-        let eqn = OdeSolverEquations::new(rhs, None, None, init, p);
+        let eqn = OdeSolverEquations::new(rhs, None, None, init, None, p);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
         OdeSolverProblem::new(
             eqn,
@@ -580,7 +641,7 @@ impl OdeBuilder {
         }
         let rhs = Rc::new(rhs);
         let init = Rc::new(init);
-        let eqn = OdeSolverEquations::new(rhs, None, Some(root), init, p);
+        let eqn = OdeSolverEquations::new(rhs, None, Some(root), init, None, p);
         let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
         OdeSolverProblem::new(
             eqn,

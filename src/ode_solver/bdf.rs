@@ -860,6 +860,7 @@ mod test {
                     exponential_decay_with_algebraic_problem_sens,
                 },
                 gaussian_decay::gaussian_decay_problem,
+                heat2d::head2d_problem,
                 robertson::robertson,
                 robertson_ode::robertson_ode,
                 robertson_ode_with_sens::robertson_ode_with_sens,
@@ -1222,6 +1223,15 @@ mod test {
         number_of_jac_muls: 10
         number_of_matrix_evals: 1
         "###);
+    }
+
+    #[test]
+    fn test_bdf_faer_sparse_heat2d() {
+        let linear_solver = FaerSparseLU::default();
+        let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
+        let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
+        let (problem, soln) = head2d_problem::<SparseColMat<f64>, 10>();
+        test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
     #[test]

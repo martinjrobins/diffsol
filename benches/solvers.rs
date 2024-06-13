@@ -1,6 +1,9 @@
 use criterion::{criterion_group, criterion_main, Criterion};
-use diffsol::ode_solver::test_models::{
-    exponential_decay::exponential_decay_problem, robertson::robertson,
+use diffsol::{
+    ode_solver::test_models::{
+        exponential_decay::exponential_decay_problem, heat2d::head2d_problem, robertson::robertson,
+    },
+    SparseColMat,
 };
 
 fn criterion_benchmark(c: &mut Criterion) {
@@ -66,6 +69,42 @@ fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("faer_tr_bdf2_robertson", |b| {
         let (problem, soln) = robertson::<faer::Mat<f64>>(false);
         b.iter(|| benchmarks::tr_bdf2(&problem, soln.solution_points.last().unwrap().t))
+    });
+    c.bench_function("faer_sparse_bdf_heat2d_5", |b| {
+        let (problem, soln) = head2d_problem::<SparseColMat<f64>, 5>();
+        b.iter(|| benchmarks::bdf(&problem, soln.solution_points.last().unwrap().t))
+    });
+    c.bench_function("faer_sparse_tr_bdf2_heat2d_5", |b| {
+        let (problem, soln) = head2d_problem::<SparseColMat<f64>, 5>();
+        b.iter(|| benchmarks::tr_bdf2(&problem, soln.solution_points.last().unwrap().t))
+    });
+    c.bench_function("faer_sparse_esdirk34_heat2d_5", |b| {
+        let (problem, soln) = head2d_problem::<SparseColMat<f64>, 5>();
+        b.iter(|| benchmarks::esdirk34(&problem, soln.solution_points.last().unwrap().t))
+    });
+    c.bench_function("faer_sparse_bdf_heat2d_10", |b| {
+        let (problem, soln) = head2d_problem::<SparseColMat<f64>, 10>();
+        b.iter(|| benchmarks::bdf(&problem, soln.solution_points.last().unwrap().t))
+    });
+    c.bench_function("faer_sparse_tr_bdf2_heat2d_10", |b| {
+        let (problem, soln) = head2d_problem::<SparseColMat<f64>, 10>();
+        b.iter(|| benchmarks::tr_bdf2(&problem, soln.solution_points.last().unwrap().t))
+    });
+    c.bench_function("faer_sparse_esdirk34_heat2d_10", |b| {
+        let (problem, soln) = head2d_problem::<SparseColMat<f64>, 10>();
+        b.iter(|| benchmarks::esdirk34(&problem, soln.solution_points.last().unwrap().t))
+    });
+    c.bench_function("faer_sparse_bdf_heat2d_20", |b| {
+        let (problem, soln) = head2d_problem::<SparseColMat<f64>, 20>();
+        b.iter(|| benchmarks::bdf(&problem, soln.solution_points.last().unwrap().t))
+    });
+    c.bench_function("faer_sparse_tr_bdf2_heat2d_20", |b| {
+        let (problem, soln) = head2d_problem::<SparseColMat<f64>, 20>();
+        b.iter(|| benchmarks::tr_bdf2(&problem, soln.solution_points.last().unwrap().t))
+    });
+    c.bench_function("faer_sparse_esdirk34_heat2d_20", |b| {
+        let (problem, soln) = head2d_problem::<SparseColMat<f64>, 20>();
+        b.iter(|| benchmarks::esdirk34(&problem, soln.solution_points.last().unwrap().t))
     });
 }
 

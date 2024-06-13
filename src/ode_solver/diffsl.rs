@@ -52,6 +52,7 @@ pub struct DiffSlContext {
     nstates: usize,
     nroots: usize,
     nparams: usize,
+    nout: usize,
 }
 
 impl DiffSlContext {
@@ -59,7 +60,7 @@ impl DiffSlContext {
     /// The input parameters are not initialized and must be set using the [OdeEquations::set_params] function before solving the ODE.
     pub fn new(text: &str) -> Result<Self> {
         let compiler = Compiler::from_discrete_str(text)?;
-        let (nstates, nparams, _nout, _ndata, nroots) = compiler.get_dims();
+        let (nstates, nparams, nout, _ndata, nroots) = compiler.get_dims();
         let data = RefCell::new(compiler.get_new_data());
         let ddata = RefCell::new(compiler.get_new_data());
         let tmp = RefCell::new(V::zeros(nstates));
@@ -72,6 +73,7 @@ impl DiffSlContext {
             nstates,
             tmp,
             nroots,
+            nout,
         })
     }
     pub fn out(&self, t: T, y: &V) -> &[T] {
@@ -87,6 +89,7 @@ pub struct DiffSl<'a> {
     mass: Option<Rc<DiffSlMass<'a>>>,
     root: Rc<DiffSlRoot<'a>>,
     init: Rc<DiffSlInit<'a>>,
+    out: Rc<DiffSlOut<'a>>,
 }
 
 impl<'a> DiffSl<'a> {
@@ -95,17 +98,23 @@ impl<'a> DiffSl<'a> {
         let mass = DiffSlMass::new(context, use_coloring).map(Rc::new);
         let root = Rc::new(DiffSlRoot::new(context));
         let init = Rc::new(DiffSlInit::new(context));
+        let out = Rc::new(DiffSlOut::new(context));
         Self {
             context,
             rhs,
             mass,
             root,
             init,
+            out,
         }
     }
 }
 
 pub struct DiffSlRoot<'a> {
+    context: &'a DiffSlContext,
+}
+
+pub struct DiffSlOut<'a> {
     context: &'a DiffSlContext,
 }
 
@@ -121,6 +130,12 @@ pub struct DiffSlMass<'a> {
 
 pub struct DiffSlInit<'a> {
     context: &'a DiffSlContext,
+}
+
+impl<'a> DiffSlOut<'a> {
+    pub fn new(context: &'a DiffSlContext) -> Self {
+        Self { context }
+    }
 }
 
 impl<'a> DiffSlRoot<'a> {
@@ -181,6 +196,7 @@ macro_rules! impl_op_for_diffsl {
             fn nstates(&self) -> usize {
                 self.context.nstates
             }
+            #[allow(clippy::misnamed_getters)]
             fn nout(&self) -> usize {
                 self.context.nstates
             }
@@ -203,8 +219,25 @@ impl Op for DiffSlRoot<'_> {
     fn nstates(&self) -> usize {
         self.context.nstates
     }
+    #[allow(clippy::misnamed_getters)]
     fn nout(&self) -> usize {
         self.context.nroots
+    }
+    fn nparams(&self) -> usize {
+        self.context.nparams
+    }
+}
+
+impl Op for DiffSlOut<'_> {
+    type M = M;
+    type T = T;
+    type V = V;
+
+    fn nstates(&self) -> usize {
+        self.context.nstates
+    }
+    fn nout(&self) -> usize {
+        self.context.nout
     }
     fn nparams(&self) -> usize {
         self.context.nparams
@@ -232,6 +265,35 @@ impl NonLinearOp for DiffSlRoot<'_> {
 
     fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
         y.fill(0.0);
+    }
+}
+
+impl NonLinearOp for DiffSlOut<'_> {
+    fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
+        self.context.compiler.calc_out(
+            t,
+            x.as_slice(),
+            self.context.data.borrow_mut().as_mut_slice(),
+        );
+        let out = self
+            .context
+            .compiler
+            .get_out(self.context.data.borrow().as_slice());
+        y.copy_from_slice(out);
+    }
+    fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        self.context.compiler.calc_out_grad(
+            t,
+            x.as_slice(),
+            v.as_slice(),
+            self.context.data.borrow_mut().as_mut_slice(),
+            self.context.ddata.borrow_mut().as_mut_slice(),
+        );
+        let out_grad = self
+            .context
+            .compiler
+            .get_out(self.context.ddata.borrow().as_slice());
+        y.copy_from_slice(out_grad);
     }
 }
 
@@ -298,6 +360,7 @@ impl<'a> OdeEquations for DiffSl<'a> {
     type Rhs = DiffSlRhs<'a>;
     type Root = DiffSlRoot<'a>;
     type Init = DiffSlInit<'a>;
+    type Out = DiffSlOut<'a>;
 
     fn rhs(&self) -> &Rc<Self::Rhs> {
         &self.rhs
@@ -319,6 +382,10 @@ impl<'a> OdeEquations for DiffSl<'a> {
 
     fn init(&self) -> &Rc<Self::Init> {
         &self.init
+    }
+
+    fn out(&self) -> Option<&Rc<Self::Out>> {
+        Some(&self.out)
     }
 }
 

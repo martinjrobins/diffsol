@@ -81,14 +81,27 @@ mod tests {
                 let sens_soln = method.interpolate_sens(point.t).unwrap();
                 (soln, sens_soln)
             };
-
+            let soln = if let Some(out) = problem.eqn.out() {
+                out.call(&soln, point.t)
+            } else {
+                soln
+            };
+            assert_eq!(
+                soln.len(),
+                point.state.len(),
+                "soln.len() != point.state.len()"
+            );
             if let Some(override_tol) = override_tol {
                 soln.assert_eq_st(&point.state, override_tol);
             } else {
+                let (rtol, atol) = if problem.eqn.out().is_some() {
+                    // problem rtol and atol is on the state, so just use solution tolerance here
+                    (solution.rtol, &solution.atol)
+                } else {
+                    (problem.rtol, problem.atol.as_ref())
+                };
                 let error = soln.clone() - &point.state;
-                let error_norm = error
-                    .squared_norm(&point.state, &problem.atol, problem.rtol)
-                    .sqrt();
+                let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
                 assert!(
                     error_norm < M::T::from(15.0),
                     "error_norm: {} at t = {}",
@@ -100,9 +113,7 @@ mod tests {
                         let sens_point = &sens_points[i];
                         let sens_soln = &sens_soln[j];
                         let error = sens_soln.clone() - &sens_point.state;
-                        let error_norm = error
-                            .squared_norm(&sens_point.state, &problem.atol, problem.rtol)
-                            .sqrt();
+                        let error_norm = error.squared_norm(&sens_point.state, atol, rtol).sqrt();
                         assert!(
                             error_norm < M::T::from(20.0),
                             "error_norm: {} at t = {}",
@@ -198,6 +209,7 @@ mod tests {
         type Mass = UnitCallable<M>;
         type Root = UnitCallable<M>;
         type Init = TestEqnInit<M>;
+        type Out = UnitCallable<M>;
 
         fn set_params(&mut self, _p: Self::V) {}
 
@@ -215,6 +227,10 @@ mod tests {
 
         fn init(&self) -> &Rc<Self::Init> {
             &self.init
+        }
+
+        fn out(&self) -> Option<&Rc<Self::Out>> {
+            None
         }
     }
 

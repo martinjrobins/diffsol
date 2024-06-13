@@ -708,6 +708,7 @@ mod test {
                     exponential_decay_problem, exponential_decay_problem_sens,
                     exponential_decay_problem_with_root,
                 },
+                heat2d::head2d_problem,
                 robertson::robertson,
                 robertson_ode::robertson_ode,
                 robertson_sens::robertson_sens,
@@ -717,9 +718,10 @@ mod test {
                 test_state_mut_on_problem,
             },
         },
-        NalgebraLU, OdeEquations, Op, Sdirk, Tableau,
+        FaerSparseLU, NalgebraLU, OdeEquations, Op, Sdirk, SparseColMat, Tableau,
     };
 
+    use faer::Mat;
     use num_traits::abs;
 
     type M = nalgebra::DMatrix<f64>;
@@ -961,6 +963,14 @@ mod test {
         number_of_jac_muls: 30
         number_of_matrix_evals: 10
         "###);
+    }
+
+    #[test]
+    fn test_tr_bdf2_faer_sparse_heat2d() {
+        let tableau = Tableau::<Mat<f64>>::tr_bdf2();
+        let mut s = Sdirk::new(tableau, FaerSparseLU::default());
+        let (problem, soln) = head2d_problem::<SparseColMat<f64>, 10>();
+        test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
     #[test]
