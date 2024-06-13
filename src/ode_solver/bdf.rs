@@ -860,11 +860,11 @@ mod test {
                     exponential_decay_with_algebraic_problem_sens,
                 },
                 gaussian_decay::gaussian_decay_problem,
+                head2d::head2d_problem,
                 robertson::robertson,
                 robertson_ode::robertson_ode,
                 robertson_ode_with_sens::robertson_ode_with_sens,
                 robertson_sens::robertson_sens,
-                head2d::head2d_problem,
             },
             tests::{
                 test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut,

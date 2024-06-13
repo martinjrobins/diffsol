@@ -32,7 +32,13 @@ fn heat2d_rhs<M: Matrix, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, y: &
     }
 }
 
-fn heat2d_jac_mul<M: Matrix, const MGRID: usize>(_x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+fn heat2d_jac_mul<M: Matrix, const MGRID: usize>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    v: &M::V,
+    y: &mut M::V,
+) {
     // Initialize y to x, to take care of boundary equations.
     y.copy_from(v);
     let mm = M::T::from(MGRID as f64);
@@ -50,332 +56,6 @@ fn heat2d_jac_mul<M: Matrix, const MGRID: usize>(_x: &M::V, _p: &M::V, _t: M::T,
                     - M::T::from(4.0) * v[loc]);
         }
     }
-}
-
-/* Jacobian matrix setup for MGRID>=4  */
-fn heat2d_jacobian<M: Matrix, const MGRID: usize>() -> M {
-    /* total num of nonzero elements */
-    let total = 4 * MGRID + 8 * (MGRID - 2) + (MGRID - 4) * (MGRID + 4 * (MGRID - 2));
-    let one = M::T::one();
-    let mm = M::T::from(MGRID as f64);
-    let four = M::T::from(4.0);
-
-    let dx = M::T::one() / (mm - M::T::one());
-    let beta = four / (dx * dx);
-
-    let mut colptrs = vec![0; MGRID * MGRID + 1];
-    let mut rowvals = vec![0; total];
-    let mut data = vec![M::T::zero(); total];
-    //
-    //-----------------------------------------------
-    // set up number of elements in each column
-    //-----------------------------------------------
-    //
-    //
-    /**** first column block ****/
-    colptrs[0] = 0;
-    colptrs[1] = 1;
-    /* count by twos in the middle  */
-    for i in 2..MGRID {
-        colptrs[i] = colptrs[i - 1] + 2;
-    }
-    colptrs[MGRID] = 2 * MGRID - 2;
-
-    /**** second column block ****/
-    colptrs[MGRID + 1] = 2 * MGRID;
-    colptrs[MGRID + 2] = 2 * MGRID + 3;
-    /* count by fours in the middle */
-    for i in 0..MGRID - 4 {
-        colptrs[MGRID + 3 + i] = colptrs[MGRID + 3 + i - 1] + 4;
-    }
-    colptrs[2 * MGRID - 1] = 2 * MGRID + 4 * (MGRID - 2) - 2;
-    colptrs[2 * MGRID] = 2 * MGRID + 4 * (MGRID - 2);
-
-    /**** repeated (MGRID-4 times) middle column blocks ****/
-    let mut repeat = 0;
-    for _i in 0..MGRID - 4 {
-        colptrs[2 * MGRID + 1 + repeat] = colptrs[2 * MGRID + 1 + repeat - 1] + 2;
-        colptrs[2 * MGRID + 1 + repeat + 1] = colptrs[2 * MGRID + 1 + repeat] + 4;
-
-        /* count by fives in the middle */
-        for j in 0..MGRID - 4 {
-            colptrs[2 * MGRID + 1 + repeat + 2 + j] = colptrs[2 * MGRID + 1 + repeat + 1 + j] + 5;
-        }
-        colptrs[2 * MGRID + 1 + repeat + (MGRID - 4) + 2] =
-            colptrs[2 * MGRID + 1 + repeat + (MGRID - 4) + 1] + 4;
-
-        colptrs[2 * MGRID + 1 + repeat + (MGRID - 4) + 3] =
-            colptrs[2 * MGRID + 1 + repeat + (MGRID - 4) + 2] + 2;
-
-        repeat += MGRID; /* shift that accounts for accumulated number of columns */
-    }
-
-    /**** last-1 column block ****/
-    colptrs[MGRID * MGRID - 2 * MGRID + 1] = total - 2 * MGRID - 4 * (MGRID - 2) + 2;
-    colptrs[MGRID * MGRID - 2 * MGRID + 2] = total - 2 * MGRID - 4 * (MGRID - 2) + 5;
-    for i in 0..MGRID - 4 {
-        colptrs[MGRID * MGRID - 2 * MGRID + 3 + i] =
-            colptrs[MGRID * MGRID - 2 * MGRID + 3 + i - 1] + 4;
-    }
-    colptrs[MGRID * MGRID - MGRID - 1] = total - 2 * MGRID;
-    colptrs[MGRID * MGRID - MGRID] = total - 2 * MGRID + 2;
-
-    /**** last column block ****/
-    colptrs[MGRID * MGRID - MGRID + 1] = total - MGRID - (MGRID - 2) + 1;
-    for i in 0..MGRID - 2 {
-        colptrs[MGRID * MGRID - MGRID + 2 + i] = colptrs[MGRID * MGRID - MGRID + 2 + i - 1] + 2;
-    }
-    colptrs[MGRID * MGRID - 1] = total - 1;
-    colptrs[MGRID * MGRID] = total;
-
-    //
-    //-----------------------------------------------
-    // set up data stored
-    //-----------------------------------------------
-    //
-
-    /**** first column block ****/
-    data[0] = one;
-    /* alternating pattern in data, separate loop for each pattern  */
-    #[allow(clippy::needless_range_loop)]
-    for i in 1..MGRID + (MGRID - 2) {
-        data[i] = one;
-    }
-    for i in (2..MGRID + (MGRID - 2) - 1).step_by(2) {
-        data[i] = -one / (dx * dx);
-    }
-
-    /**** second column block ****/
-    data[MGRID + MGRID - 2] = one;
-    data[MGRID + MGRID - 1] = -one / (dx * dx);
-    data[MGRID + MGRID] = beta;
-    data[MGRID + MGRID + 1] = -one / (dx * dx);
-    data[MGRID + MGRID + 2] = -one / (dx * dx);
-
-    /* middle data elements */
-    for i in 0..(MGRID - 4) {
-        data[MGRID + MGRID + 3 + 4 * i] = -one / (dx * dx);
-    }
-    for i in 0..(MGRID - 4) {
-        data[MGRID + MGRID + 4 + 4 * i] = beta;
-    }
-    for i in 0..(MGRID - 4) {
-        data[MGRID + MGRID + 5 + 4 * i] = -one / (dx * dx);
-    }
-    for i in 0..(MGRID - 4) {
-        data[MGRID + MGRID + 6 + 4 * i] = -one / (dx * dx);
-    }
-    data[2 * MGRID + 4 * (MGRID - 2) - 5] = -one / (dx * dx);
-    data[2 * MGRID + 4 * (MGRID - 2) - 4] = beta;
-    data[2 * MGRID + 4 * (MGRID - 2) - 3] = -one / (dx * dx);
-    data[2 * MGRID + 4 * (MGRID - 2) - 2] = -one / (dx * dx);
-    data[2 * MGRID + 4 * (MGRID - 2) - 1] = one;
-
-    /**** repeated (MGRID-4 times) middle column blocks ****/
-    let mut repeat = 0;
-    for _i in 0..MGRID - 4 {
-        data[2 * MGRID + 4 * (MGRID - 2) + repeat] = one;
-        data[2 * MGRID + 4 * (MGRID - 2) + repeat + 1] = -one / (dx * dx);
-
-        data[2 * MGRID + 4 * (MGRID - 2) + repeat + 2] = -one / (dx * dx);
-        data[2 * MGRID + 4 * (MGRID - 2) + repeat + 3] = beta;
-        data[2 * MGRID + 4 * (MGRID - 2) + repeat + 4] = -one / (dx * dx);
-        data[2 * MGRID + 4 * (MGRID - 2) + repeat + 5] = -one / (dx * dx);
-
-        /* 5 in 5*j chosen since there are 5 elements in each column */
-        /* this column loops MGRID-4 times within the outer loop */
-        for j in 0..MGRID - 4 {
-            data[2 * MGRID + 4 * (MGRID - 2) + repeat + 6 + 5 * j] = -one / (dx * dx);
-            data[2 * MGRID + 4 * (MGRID - 2) + repeat + 7 + 5 * j] = -one / (dx * dx);
-            data[2 * MGRID + 4 * (MGRID - 2) + repeat + 8 + 5 * j] = beta;
-            data[2 * MGRID + 4 * (MGRID - 2) + repeat + 9 + 5 * j] = -one / (dx * dx);
-            data[2 * MGRID + 4 * (MGRID - 2) + repeat + 10 + 5 * j] = -one / (dx * dx);
-        }
-
-        data[2 * MGRID + 4 * (MGRID - 2) + repeat + (MGRID - 4) * 5 + 6] = -one / (dx * dx);
-        data[2 * MGRID + 4 * (MGRID - 2) + repeat + (MGRID - 4) * 5 + 7] = -one / (dx * dx);
-        data[2 * MGRID + 4 * (MGRID - 2) + repeat + (MGRID - 4) * 5 + 8] = beta;
-        data[2 * MGRID + 4 * (MGRID - 2) + repeat + (MGRID - 4) * 5 + 9] = -one / (dx * dx);
-
-        data[2 * MGRID + 4 * (MGRID - 2) + repeat + (MGRID - 4) * 5 + 10] = -one / (dx * dx);
-        data[2 * MGRID + 4 * (MGRID - 2) + repeat + (MGRID - 4) * 5 + 11] = one;
-
-        repeat += MGRID + 4 * (MGRID - 2); /* shift that accounts for accumulated columns and elements */
-    }
-
-    /**** last-1 column block ****/
-    data[total - 6 * (MGRID - 2) - 4] = one;
-    data[total - 6 * (MGRID - 2) - 3] = -one / (dx * dx);
-    data[total - 6 * (MGRID - 2) - 2] = -one / (dx * dx);
-    data[total - 6 * (MGRID - 2) - 1] = beta;
-    data[total - 6 * (MGRID - 2)] = -one / (dx * dx);
-
-    /* middle data elements */
-    for i in 0..MGRID - 4 {
-        data[total - 6 * (MGRID - 2) + 1 + 4 * i] = -one / (dx * dx);
-    }
-    for i in 0..MGRID - 4 {
-        data[total - 6 * (MGRID - 2) + 2 + 4 * i] = -one / (dx * dx);
-    }
-    for i in 0..MGRID - 4 {
-        data[total - 6 * (MGRID - 2) + 3 + 4 * i] = beta;
-    }
-    for i in 0..MGRID - 4 {
-        data[total - 6 * (MGRID - 2) + 4 + 4 * i] = -one / (dx * dx);
-    }
-    data[total - 2 * (MGRID - 2) - 7] = -one / (dx * dx);
-    data[total - 2 * (MGRID - 2) - 6] = -one / (dx * dx);
-    data[total - 2 * (MGRID - 2) - 5] = beta;
-    data[total - 2 * (MGRID - 2) - 4] = -one / (dx * dx);
-    data[total - 2 * (MGRID - 2) - 3] = one;
-
-    /**** last column block ****/
-    data[total - 2 * (MGRID - 2) - 2] = one;
-    /* alternating pattern in data, separate loop for each pattern  */
-    for i in (total - 2 * (MGRID - 2) - 1..total - 2).step_by(2) {
-        data[i] = -one / (dx * dx);
-    }
-    for i in (total - 2 * (MGRID - 2)..total - 1).step_by(2) {
-        data[i] = one;
-    }
-    data[total - 1] = one;
-
-    /*
-     *-----------------------------------------------
-     * row values
-     *-----------------------------------------------
-     */
-
-    /**** first block ****/
-    rowvals[0] = 0;
-    /* alternating pattern in data, separate loop for each pattern */
-    for i in (1..MGRID + (MGRID - 2)).step_by(2) {
-        rowvals[i] = (i + 1) / 2;
-    }
-    for i in (2..MGRID + (MGRID - 2) - 1).step_by(2) {
-        /* i+1 unnecessary here */
-        rowvals[i] = i / 2 + MGRID;
-    }
-
-    /**** second column block ****/
-    rowvals[MGRID + MGRID - 2] = MGRID;
-    rowvals[MGRID + MGRID - 1] = MGRID + 1;
-    rowvals[MGRID + MGRID] = MGRID + 1;
-    rowvals[MGRID + MGRID + 1] = MGRID + 2;
-    rowvals[MGRID + MGRID + 2] = 2 * MGRID + 1;
-
-    /* middle row values */
-    for i in 0..MGRID - 4 {
-        rowvals[MGRID + MGRID + 3 + 4 * i] = MGRID + 1 + i;
-    }
-    for i in 0..MGRID - 4 {
-        rowvals[MGRID + MGRID + 4 + 4 * i] = MGRID + 2 + i;
-    }
-    for i in 0..MGRID - 4 {
-        rowvals[MGRID + MGRID + 5 + 4 * i] = MGRID + 3 + i;
-    }
-    for i in 0..MGRID - 4 {
-        rowvals[MGRID + MGRID + 6 + 4 * i] = 2 * MGRID + 2 + i;
-    }
-    rowvals[2 * MGRID + 4 * (MGRID - 2) - 5] = MGRID + (MGRID - 2) - 1;
-    rowvals[2 * MGRID + 4 * (MGRID - 2) - 4] = MGRID + (MGRID - 2); /* starting from here, add two diag patterns */
-    rowvals[2 * MGRID + 4 * (MGRID - 2) - 3] = 2 * MGRID + (MGRID - 2);
-    rowvals[2 * MGRID + 4 * (MGRID - 2) - 2] = MGRID + (MGRID - 2);
-    rowvals[2 * MGRID + 4 * (MGRID - 2) - 1] = MGRID + (MGRID - 2) + 1;
-
-    /**** repeated (MGRID-4 times) middle column blocks ****/
-    let mut repeat = 0;
-    for i in 0..MGRID - 4 {
-        rowvals[2 * MGRID + 4 * (MGRID - 2) + repeat] = MGRID + (MGRID - 2) + 2 + MGRID * i;
-        rowvals[2 * MGRID + 4 * (MGRID - 2) + repeat + 1] = MGRID + (MGRID - 2) + 2 + MGRID * i + 1;
-
-        rowvals[2 * MGRID + 4 * (MGRID - 2) + repeat + 2] =
-            MGRID + (MGRID - 2) + 2 + MGRID * i + 1 - MGRID;
-        rowvals[2 * MGRID + 4 * (MGRID - 2) + repeat + 3] = MGRID + (MGRID - 2) + 2 + MGRID * i + 1;
-        rowvals[2 * MGRID + 4 * (MGRID - 2) + repeat + 4] = MGRID + (MGRID - 2) + 2 + MGRID * i + 2; /* *this */
-        rowvals[2 * MGRID + 4 * (MGRID - 2) + repeat + 5] =
-            MGRID + (MGRID - 2) + 2 + MGRID * i + 1 + MGRID;
-
-        /* 5 in 5*j chosen since there are 5 elements in each column */
-        /* column repeats MGRID-4 times within the outer loop */
-        for j in 0..MGRID - 4 {
-            rowvals[2 * MGRID + 4 * (MGRID - 2) + repeat + 6 + 5 * j] =
-                MGRID + (MGRID - 2) + 2 + MGRID * i + 1 - MGRID + 1 + j;
-            rowvals[2 * MGRID + 4 * (MGRID - 2) + repeat + 7 + 5 * j] =
-                MGRID + (MGRID - 2) + 2 + MGRID * i + 1 + j;
-            rowvals[2 * MGRID + 4 * (MGRID - 2) + repeat + 8 + 5 * j] =
-                MGRID + (MGRID - 2) + 2 + MGRID * i + 2 + j;
-            rowvals[2 * MGRID + 4 * (MGRID - 2) + repeat + 9 + 5 * j] =
-                MGRID + (MGRID - 2) + 2 + MGRID * i + 2 + 1 + j;
-            rowvals[2 * MGRID + 4 * (MGRID - 2) + repeat + 10 + 5 * j] =
-                MGRID + (MGRID - 2) + 2 + MGRID * i + 1 + MGRID + 1 + j;
-        }
-
-        rowvals[2 * MGRID + 4 * (MGRID - 2) + repeat + (MGRID - 4) * 5 + 6] =
-            MGRID + (MGRID - 2) + 2 + MGRID * i - 2;
-        rowvals[2 * MGRID + 4 * (MGRID - 2) + repeat + (MGRID - 4) * 5 + 7] =
-            MGRID + (MGRID - 2) + 2 + MGRID * i - 2 + MGRID - 1;
-        rowvals[2 * MGRID + 4 * (MGRID - 2) + repeat + (MGRID - 4) * 5 + 8] =
-            MGRID + (MGRID - 2) + 2 + MGRID * i - 2 + MGRID; /* *this+MGRID */
-        rowvals[2 * MGRID + 4 * (MGRID - 2) + repeat + (MGRID - 4) * 5 + 9] =
-            MGRID + (MGRID - 2) + 2 + MGRID * i - 2 + 2 * MGRID;
-
-        rowvals[2 * MGRID + 4 * (MGRID - 2) + repeat + (MGRID - 4) * 5 + 10] =
-            MGRID + (MGRID - 2) + 2 + MGRID * i - 2 + MGRID;
-        rowvals[2 * MGRID + 4 * (MGRID - 2) + repeat + (MGRID - 4) * 5 + 11] =
-            MGRID + (MGRID - 2) + 2 + MGRID * i - 2 + MGRID + 1;
-
-        repeat += MGRID + 4 * (MGRID - 2); /* shift that accounts for accumulated columns and elements */
-    }
-
-    /**** last-1 column block ****/
-    rowvals[total - 6 * (MGRID - 2) - 4] = MGRID * MGRID - 1 - 2 * (MGRID - 1) - 1;
-    rowvals[total - 6 * (MGRID - 2) - 3] = MGRID * MGRID - 1 - 2 * (MGRID - 1); /* starting with this as base */
-    rowvals[total - 6 * (MGRID - 2) - 2] = MGRID * MGRID - 1 - 2 * (MGRID - 1) - MGRID;
-    rowvals[total - 6 * (MGRID - 2) - 1] = MGRID * MGRID - 1 - 2 * (MGRID - 1);
-    rowvals[total - 6 * (MGRID - 2)] = MGRID * MGRID - 1 - 2 * (MGRID - 1) + 1;
-    /* middle row values */
-    for i in 0..MGRID - 4 {
-        rowvals[total - 6 * (MGRID - 2) + 1 + 4 * i] =
-            MGRID * MGRID - 1 - 2 * (MGRID - 1) - MGRID + 1 + i;
-    }
-    for i in 0..MGRID - 4 {
-        rowvals[total - 6 * (MGRID - 2) + 2 + 4 * i] = MGRID * MGRID - 1 - 2 * (MGRID - 1) + i;
-    }
-    for i in 0..MGRID - 4 {
-        rowvals[total - 6 * (MGRID - 2) + 3 + 4 * i] = MGRID * MGRID - 1 - 2 * (MGRID - 1) + 1 + i;
-        /*copied above*/
-    }
-    for i in 0..MGRID - 4 {
-        rowvals[total - 6 * (MGRID - 2) + 4 + 4 * i] = MGRID * MGRID - 1 - 2 * (MGRID - 1) + 2 + i;
-    }
-    rowvals[total - 2 * (MGRID - 2) - 7] = MGRID * MGRID - 2 * MGRID - 2;
-    rowvals[total - 2 * (MGRID - 2) - 6] = MGRID * MGRID - MGRID - 3;
-    rowvals[total - 2 * (MGRID - 2) - 5] = MGRID * MGRID - MGRID - 2;
-    rowvals[total - 2 * (MGRID - 2) - 4] = MGRID * MGRID - MGRID - 2;
-    rowvals[total - 2 * (MGRID - 2) - 3] = MGRID * MGRID - MGRID - 1;
-
-    /* last column block */
-    rowvals[total - 2 * (MGRID - 2) - 2] = MGRID * MGRID - MGRID;
-    /* alternating pattern in data, separate loop for each pattern  */
-    for i in 0..MGRID - 2 {
-        rowvals[total - 2 * (MGRID - 2) - 1 + 2 * i] = MGRID * MGRID - 2 * MGRID + 1 + i;
-    }
-    for i in 0..MGRID - 2 {
-        rowvals[total - 2 * (MGRID - 2) + 2 * i] = MGRID * MGRID - MGRID + 1 + i;
-    }
-    rowvals[total - 1] = MGRID * MGRID - 1;
-
-    let mut triplets = Vec::with_capacity(total);
-    for (j, cptr) in colptrs.windows(2).enumerate() {
-        let start = cptr[0];
-        let end = cptr[1];
-        for i in start..end {
-            triplets.push((rowvals[i], j, data[i]));
-        }
-    }
-
-    M::try_from_triplets(MGRID * MGRID, MGRID * MGRID, triplets).unwrap()
 }
 
 fn heat2d_init<M: Matrix, const MGRID: usize>(_p: &M::V, _t: M::T) -> M::V {
@@ -397,7 +77,7 @@ fn heat2d_init<M: Matrix, const MGRID: usize>(_p: &M::V, _t: M::T) -> M::V {
         }
     }
 
-    /* Finally, set values of u, up, and id at boundary points. */
+    /* Finally, set values of u at boundary points. */
     for j in 0..MGRID {
         let offset = MGRID * j;
         for i in 0..MGRID {
@@ -432,7 +112,31 @@ fn heat2d_mass<M: Matrix, const MGRID: usize>(
     }
 }
 
-fn pde_solution<T: Scalar>(x: T, y: T, t: T, max_terms: usize) -> T {
+fn heat2d_out<M: Matrix, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+    let mut max_y = M::T::zero();
+    for j in 0..MGRID {
+        let offset = MGRID * j;
+        for i in 0..MGRID {
+            let loc = offset + i;
+            if x[loc] > max_y {
+                max_y = x[loc];
+            }
+        }
+    }
+    y[0] = max_y;
+}
+
+fn heat2d_out_jac_mul<M: Matrix, const MGRID: usize>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    _y: &mut M::V,
+) {
+    unimplemented!()
+}
+
+fn _pde_solution<T: Scalar>(x: T, y: T, t: T, max_terms: usize) -> T {
     let mut u = T::zero();
     let pi = T::from(std::f64::consts::PI);
     let four = T::from(4.0);
@@ -464,15 +168,22 @@ pub fn head2d_problem<M: Matrix + 'static, const MGRID: usize>() -> (
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::new()
-        .build_ode_with_mass(
+        .rtol(1e-7)
+        .atol([1e-7])
+        .build_ode_with_mass_and_out(
             heat2d_rhs::<M, MGRID>,
             heat2d_jac_mul::<M, MGRID>,
             heat2d_mass::<M, MGRID>,
             heat2d_init::<M, MGRID>,
+            heat2d_out::<M, MGRID>,
+            heat2d_out_jac_mul::<M, MGRID>,
+            1,
         )
         .unwrap();
 
     let mut soln = OdeSolverSolution::default();
+    soln.rtol = M::T::from(1e-5);
+    soln.atol = M::V::from_element(1, M::T::from(1e-5));
     let data = vec![
         (vec![9.75461e-01], 0.0),
         (vec![8.24056e-01], 0.01),
@@ -488,29 +199,33 @@ pub fn head2d_problem<M: Matrix + 'static, const MGRID: usize>() -> (
         (vec![0.0], 10.24),
     ];
     for (values, time) in data {
-        let time = M::T::from(time);
-        let mut soln_at_t = Vec::with_capacity(MGRID * MGRID);
-        let mut max_u = M::T::zero();
-        for i in 0..MGRID {
-            for j in 0..MGRID {
-                let x = M::T::from(i as f64) / M::T::from(MGRID as f64 - 1.0);
-                let y = M::T::from(j as f64) / M::T::from(MGRID as f64 - 1.0);
-                let u = pde_solution(x, y, time, 100);
-                if u > max_u {
-                    max_u = u;
-                }
-                soln_at_t.push(u);
-            }
-        }
+        //let time = M::T::from(time);
+        //let mut soln_at_t = Vec::with_capacity(MGRID * MGRID);
+        //let mut max_u = M::T::zero();
+        //let one = M::T::one();
+        //let dx = one / (M::T::from(MGRID as f64) - one);
+        //for j in 0..MGRID {
+        //    let y = dx * M::T::from(j as f64);
+        //    for i in 0..MGRID {
+        //        let x = dx * M::T::from(i as f64);
+        //        let u = pde_solution(x, y, time, 100);
+        //        if u > max_u {
+        //            max_u = u;
+        //        }
+        //        soln_at_t.push(u);
+        //    }
+        //}
         //assert!((M::T::from(values[0]) - max_u).abs() < M::T::from(1e-2));
-        soln.push(M::V::from_vec(soln_at_t), time);
+        let values = M::V::from_vec(values.iter().map(|v| M::T::from(*v)).collect::<Vec<_>>());
+        let time = M::T::from(time);
+        soln.push(values, time);
     }
     (problem, soln)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{LinearOp, ConstantOp, NonLinearOp};
+    use crate::{ConstantOp, LinearOp, NonLinearOp};
 
     use super::*;
 

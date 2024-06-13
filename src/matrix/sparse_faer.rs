@@ -286,7 +286,7 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{SparseColMat, Matrix};
+    use crate::{Matrix, SparseColMat};
     #[test]
     fn test_triplet_iter() {
         let triplets = vec![(0, 0, 1.0), (1, 0, 2.0), (2, 2, 3.0), (3, 2, 4.0)];

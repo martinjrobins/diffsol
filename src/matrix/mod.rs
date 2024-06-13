@@ -349,49 +349,67 @@ pub trait DenseMatrix:
 
 #[cfg(test)]
 mod tests {
-    use crate::SparseColMat;
     use super::*;
+    use crate::SparseColMat;
 
     #[test]
     fn test_split_combine_at_indices() {
         let triplets = vec![
-                (0, 0, 1.0),
-                (1, 0, 5.0),
-                (2, 0, 9.0),
-                (3, 0, 13.0),
-                (0, 1, 2.0),
-                (1, 1, 6.0),
-                (2, 1, 10.0),
-                (3, 1, 14.0),
-                (0, 2, 3.0),
-                (1, 2, 7.0),
-                (2, 2, 11.0),
-                (3, 2, 15.0),
-                (0, 3, 4.0),
-                (1, 3, 8.0),
-                (2, 3, 12.0),
-                (3, 3, 16.0),
-            ];
-        let m = SparseColMat::try_from_triplets(
-            4,
-            4,
-            triplets.clone(),
-        )
-        .unwrap();
+            (0, 0, 1.0),
+            (1, 0, 5.0),
+            (2, 0, 9.0),
+            (3, 0, 13.0),
+            (0, 1, 2.0),
+            (1, 1, 6.0),
+            (2, 1, 10.0),
+            (3, 1, 14.0),
+            (0, 2, 3.0),
+            (1, 2, 7.0),
+            (2, 2, 11.0),
+            (3, 2, 15.0),
+            (0, 3, 4.0),
+            (1, 3, 8.0),
+            (2, 3, 12.0),
+            (3, 3, 16.0),
+        ];
+        let m = SparseColMat::try_from_triplets(4, 4, triplets.clone()).unwrap();
         let indices = vec![0, 2];
         let (ul, ur, ll, lr) = m.split_at_indices(&indices);
         let ul_triplets = vec![(0, 0, 6.0), (1, 0, 14.0), (0, 1, 8.0), (1, 1, 16.0)];
         let ur_triplets = vec![(0, 0, 5.0), (1, 0, 13.0), (0, 1, 7.0), (1, 1, 15.0)];
         let ll_triplets = vec![(0, 0, 2.0), (1, 0, 10.0), (0, 1, 4.0), (1, 1, 12.0)];
         let lr_triplets = vec![(0, 0, 1.0), (1, 0, 9.0), (0, 1, 3.0), (1, 1, 11.0)];
-        assert_eq!(ul_triplets, ul.triplet_iter().map(|(i, j, v)| (i, j, *v)).collect::<Vec<_>>());
-        assert_eq!(ur_triplets, ur.triplet_iter().map(|(i, j, v)| (i, j, *v)).collect::<Vec<_>>());
-        assert_eq!(ll_triplets, ll.triplet_iter().map(|(i, j, v)| (i, j, *v)).collect::<Vec<_>>());
-        assert_eq!(lr_triplets, lr.triplet_iter().map(|(i, j, v)| (i, j, *v)).collect::<Vec<_>>());
+        assert_eq!(
+            ul_triplets,
+            ul.triplet_iter()
+                .map(|(i, j, v)| (i, j, *v))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            ur_triplets,
+            ur.triplet_iter()
+                .map(|(i, j, v)| (i, j, *v))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            ll_triplets,
+            ll.triplet_iter()
+                .map(|(i, j, v)| (i, j, *v))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            lr_triplets,
+            lr.triplet_iter()
+                .map(|(i, j, v)| (i, j, *v))
+                .collect::<Vec<_>>()
+        );
 
         let mat = SparseColMat::combine_at_indices(&ul, &ur, &ll, &lr, &indices);
-        assert_eq!(triplets, mat.triplet_iter().map(|(i, j, v)| (i, j, *v)).collect::<Vec<_>>());
+        assert_eq!(
+            triplets,
+            mat.triplet_iter()
+                .map(|(i, j, v)| (i, j, *v))
+                .collect::<Vec<_>>()
+        );
     }
 }
-
-

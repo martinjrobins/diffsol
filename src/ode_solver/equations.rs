@@ -53,6 +53,7 @@ pub trait OdeEquations {
     type Rhs: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
     type Root: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
     type Init: ConstantOp<M = Self::M, V = Self::V, T = Self::T>;
+    type Out: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
 
     /// The parameters of the ODE equations are assumed to be constant. This function sets the parameters to the given value before solving the ODE.
     /// Note that `set_params` must always be called before calling any of the other functions in this trait.
@@ -65,6 +66,10 @@ pub trait OdeEquations {
     fn mass(&self) -> Option<&Rc<Self::Mass>>;
 
     fn root(&self) -> Option<&Rc<Self::Root>> {
+        None
+    }
+
+    fn out(&self) -> Option<&Rc<Self::Out>> {
         None
     }
 
@@ -116,12 +121,13 @@ pub trait OdeEquations {
 /// let init_fn = |p: &V, _t: f64| V::from_vec(vec![1.0]);
 /// let init = Rc::new(ConstantClosure::new(init_fn, Rc::new(V::from_vec(vec![]))));
 ///
-/// // we don't have a mass matrix or root function, so we can set to None
+/// // we don't have a mass matrix, root or output functions, so we can set to None
 /// let mass: Option<Rc<UnitCallable<M>>> = None;
 /// let root: Option<Rc<UnitCallable<M>>> = None;
+/// let out: Option<Rc<UnitCallable<M>>> = None;
 ///
 /// let p = Rc::new(V::from_vec(vec![]));
-/// let eqn = OdeSolverEquations::new(rhs, mass, root, init, p);
+/// let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p);
 ///
 /// let rtol = 1e-6;
 /// let atol = V::from_vec(vec![1e-6]);
@@ -141,28 +147,37 @@ pub trait OdeEquations {
 /// let y = solver.interpolate(t);
 /// ```
 ///
-pub struct OdeSolverEquations<M, Rhs, Init, Mass = UnitCallable<M>, Root = UnitCallable<M>>
-where
+pub struct OdeSolverEquations<
+    M,
+    Rhs,
+    Init,
+    Mass = UnitCallable<M>,
+    Root = UnitCallable<M>,
+    Out = UnitCallable<M>,
+> where
     M: Matrix,
     Rhs: NonLinearOp<M = M, V = M::V, T = M::T>,
     Mass: LinearOp<M = M, V = M::V, T = M::T>,
     Root: NonLinearOp<M = M, V = M::V, T = M::T>,
     Init: ConstantOp<M = M, V = M::V, T = M::T>,
+    Out: NonLinearOp<M = M, V = M::V, T = M::T>,
 {
     rhs: Rc<Rhs>,
     mass: Option<Rc<Mass>>,
     root: Option<Rc<Root>>,
     init: Rc<Init>,
+    out: Option<Rc<Out>>,
     p: Rc<M::V>,
 }
 
-impl<M, Rhs, Init, Mass, Root> OdeSolverEquations<M, Rhs, Init, Mass, Root>
+impl<M, Rhs, Init, Mass, Root, Out> OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
 where
     M: Matrix,
     Rhs: NonLinearOp<M = M, V = M::V, T = M::T>,
     Mass: LinearOp<M = M, V = M::V, T = M::T>,
     Root: NonLinearOp<M = M, V = M::V, T = M::T>,
     Init: ConstantOp<M = M, V = M::V, T = M::T>,
+    Out: NonLinearOp<M = M, V = M::V, T = M::T>,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -170,6 +185,7 @@ where
         mass: Option<Rc<Mass>>,
         root: Option<Rc<Root>>,
         init: Rc<Init>,
+        out: Option<Rc<Out>>,
         p: Rc<M::V>,
     ) -> Self {
         Self {
@@ -177,18 +193,21 @@ where
             mass,
             root,
             init,
+            out,
             p,
         }
     }
 }
 
-impl<M, Rhs, Init, Mass, Root> OdeEquations for OdeSolverEquations<M, Rhs, Init, Mass, Root>
+impl<M, Rhs, Init, Mass, Root, Out> OdeEquations
+    for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
 where
     M: Matrix,
     Rhs: NonLinearOp<M = M, V = M::V, T = M::T>,
     Mass: LinearOp<M = M, V = M::V, T = M::T>,
     Root: NonLinearOp<M = M, V = M::V, T = M::T>,
     Init: ConstantOp<M = M, V = M::V, T = M::T>,
+    Out: NonLinearOp<M = M, V = M::V, T = M::T>,
 {
     type T = M::T;
     type V = M::V;
@@ -197,6 +216,7 @@ where
     type Mass = Mass;
     type Root = Root;
     type Init = Init;
+    type Out = Out;
 
     fn rhs(&self) -> &Rc<Self::Rhs> {
         &self.rhs
@@ -211,6 +231,10 @@ where
         &self.init
     }
 
+    fn out(&self) -> Option<&Rc<Self::Out>> {
+        self.out.as_ref()
+    }
+
     fn set_params(&mut self, p: Self::V) {
         self.p = Rc::new(p);
         Rc::<Rhs>::get_mut(&mut self.rhs)
@@ -221,6 +245,9 @@ where
         }
         if let Some(r) = self.root.as_mut() {
             Rc::<Root>::get_mut(r).unwrap().set_params(self.p.clone())
+        }
+        if let Some(o) = self.out.as_mut() {
+            Rc::<Out>::get_mut(o).unwrap().set_params(self.p.clone())
         }
     }
 }

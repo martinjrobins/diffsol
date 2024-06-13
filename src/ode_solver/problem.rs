@@ -87,6 +87,8 @@ pub struct OdeSolverSolutionPoint<V: Vector> {
 pub struct OdeSolverSolution<V: Vector> {
     pub solution_points: Vec<OdeSolverSolutionPoint<V>>,
     pub sens_solution_points: Option<Vec<Vec<OdeSolverSolutionPoint<V>>>>,
+    pub rtol: V::T,
+    pub atol: V,
 }
 
 impl<V: Vector> OdeSolverSolution<V> {
@@ -131,6 +133,8 @@ impl<V: Vector> Default for OdeSolverSolution<V> {
         Self {
             solution_points: Vec::new(),
             sens_solution_points: None,
+            rtol: V::T::from(1e-6),
+            atol: V::from_element(1, V::T::from(1e-6)),
         }
     }
 }
