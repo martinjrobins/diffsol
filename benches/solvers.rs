@@ -116,6 +116,36 @@ fn criterion_benchmark(c: &mut Criterion) {
         let (problem, soln) = head2d_problem::<SparseColMat<f64>, 20>();
         b.iter(|| benchmarks::esdirk34(&problem, soln.solution_points.last().unwrap().t))
     });
+
+    #[cfg(feature = "diffsl")]
+    c.bench_function("faer_sparse_bdf_diffsl_heat2d_5", |b| {
+        let mut context = diffsol::DiffSlContext::default();
+        let (problem, soln) = diffsol::ode_solver::test_models::heat2d::heat2d_diffsl::<
+            SparseColMat<f64>,
+            5,
+        >(&mut context);
+        b.iter(|| benchmarks::bdf(&problem, soln.solution_points.last().unwrap().t))
+    });
+
+    #[cfg(feature = "diffsl")]
+    c.bench_function("faer_sparse_bdf_diffsl_heat2d_10", |b| {
+        let mut context = diffsol::DiffSlContext::default();
+        let (problem, soln) = diffsol::ode_solver::test_models::heat2d::heat2d_diffsl::<
+            SparseColMat<f64>,
+            10,
+        >(&mut context);
+        b.iter(|| benchmarks::bdf(&problem, soln.solution_points.last().unwrap().t))
+    });
+
+    #[cfg(feature = "diffsl")]
+    c.bench_function("faer_sparse_bdf_diffsl_heat2d_20", |b| {
+        let mut context = diffsol::DiffSlContext::default();
+        let (problem, soln) = diffsol::ode_solver::test_models::heat2d::heat2d_diffsl::<
+            SparseColMat<f64>,
+            20,
+        >(&mut context);
+        b.iter(|| benchmarks::bdf(&problem, soln.solution_points.last().unwrap().t))
+    });
 }
 
 criterion_group!(benches, criterion_benchmark);

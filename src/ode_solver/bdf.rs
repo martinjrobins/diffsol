@@ -1244,6 +1244,20 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
+    #[cfg(feature = "diffsl")]
+    #[test]
+    fn test_bdf_faer_sparse_heat2d_diffsl() {
+        let linear_solver = FaerSparseLU::default();
+        let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
+        let mut context = crate::DiffSlContext::default();
+        let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
+        let (problem, soln) = crate::ode_solver::test_models::heat2d::heat2d_diffsl::<
+            SparseColMat<f64>,
+            10,
+        >(&mut context);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+    }
+
     #[test]
     fn test_tstop_bdf() {
         let mut s = Bdf::default();

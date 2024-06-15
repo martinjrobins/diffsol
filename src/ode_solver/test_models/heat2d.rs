@@ -7,10 +7,96 @@
 //while for each boundary point, it is res_i = u_i.
 
 use crate::{
-    ode_solver::problem::OdeSolverSolution, scalar::Scalar, Matrix, OdeBuilder, OdeEquations,
-    OdeSolverProblem, Vector,
+    ode_solver::problem::OdeSolverSolution, scalar::Scalar, ConstantOp, LinearOp, Matrix,
+    NonLinearOp, OdeBuilder, OdeEquations, OdeSolverProblem, Vector,
 };
+use nalgebra::ComplexField;
 use num_traits::{One, Zero};
+
+#[cfg(feature = "diffsl")]
+pub fn heat2d_diffsl<M: Matrix<T = f64> + 'static, const MGRID: usize>(
+    context: &mut crate::DiffSlContext<M>,
+) -> (
+    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
+    OdeSolverSolution<M::V>,
+) {
+
+    let (problem, _soln) = head2d_problem::<M, MGRID>();
+    let u0 = problem.eqn.init().call(0.0);
+    let jac = problem.eqn.rhs().jacobian(&u0, 0.0);
+    let mass = problem.eqn.mass().unwrap().matrix(0.0);
+    let init = problem.eqn.init().call(0.0);
+    let init_diffsl = init
+        .as_slice()
+        .iter()
+        .map(|v| format!("            {}", *v))
+        .collect::<Vec<_>>()
+        .join(",\n");
+    let jac_diffsl = jac
+        .triplet_iter()
+        .map(|(i, j, v)| format!("            ({}, {}): {}", i, j, *v))
+        .collect::<Vec<_>>()
+        .join(",\n");
+
+    let mass_ones= mass
+        .triplet_iter()
+        .map(|(i, _j, _v)| i)
+        .collect::<Vec<_>>();
+    let mut mass_diffsl = Vec::new();
+    for i in 0..MGRID*MGRID {
+        // check if i in mass_ones
+        if mass_ones.contains(&i) {
+            mass_diffsl.push(format!("            ({}, {}): 1", i, i));
+        } else {
+            mass_diffsl.push(format!("            ({}, {}): 0", i, i));
+        }
+    }
+    let mass_diffsl = mass_diffsl.join(",\n");
+
+    let code = format!(
+        "
+        in = []
+        D_ij {{
+{}
+        }}
+        Mass_ij {{
+{}
+        }}
+        init_i {{
+{}
+        }}
+        u_i {{
+            y = init_i,
+        }}
+        dudt_i {{
+            (0:{n}): dydt = 0,
+        }}
+        M_i {{
+            Mass_ij * dydt_j,
+        }}
+        F_i {{
+            D_ij * y_j,
+        }}
+        out_i {{
+            {dx2} * y_j * y_j,
+        }}",
+        jac_diffsl,
+        mass_diffsl,
+        init_diffsl,
+        n = MGRID * MGRID,
+        dx2 = (1.0 / (MGRID as f64 - 1.0)).powi(2),
+    );
+
+    context.recompile(code.as_str()).unwrap();
+
+    let problem = OdeBuilder::new()
+        .rtol(1e-7)
+        .atol([1e-7])
+        .build_diffsl(context)
+        .unwrap();
+    let soln = soln::<M>();
+    (problem, soln)
+}
 
 fn heat2d_rhs<M: Matrix, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
     // Initialize y to x, to take care of boundary equations.
@@ -113,17 +199,9 @@ fn heat2d_mass<M: Matrix, const MGRID: usize>(
 }
 
 fn heat2d_out<M: Matrix, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
-    let mut max_y = M::T::zero();
-    for j in 0..MGRID {
-        let offset = MGRID * j;
-        for i in 0..MGRID {
-            let loc = offset + i;
-            if x[loc] > max_y {
-                max_y = x[loc];
-            }
-        }
-    }
-    y[0] = max_y;
+    let dx = M::T::one() / (M::T::from(MGRID as f64) - M::T::one());
+    let norm = x.norm();
+    y[0] = (norm * dx).powi(2);
 }
 
 fn heat2d_out_jac_mul<M: Matrix, const MGRID: usize>(
@@ -181,6 +259,10 @@ pub fn head2d_problem<M: Matrix + 'static, const MGRID: usize>() -> (
         )
         .unwrap();
 
+    (problem, soln::<M>())
+}
+
+fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
     let mut soln = OdeSolverSolution {
         solution_points: Vec::new(),
         sens_solution_points: None,
@@ -188,42 +270,25 @@ pub fn head2d_problem<M: Matrix + 'static, const MGRID: usize>() -> (
         atol: M::V::from_element(1, M::T::from(1e-5)),
     };
     let data = vec![
-        (vec![9.75461e-01], 0.0),
-        (vec![8.24056e-01], 0.01),
-        (vec![6.88097e-01], 0.02),
-        (vec![4.70961e-01], 0.04),
-        (vec![2.16312e-01], 0.08),
-        (vec![4.53210e-02], 0.16),
-        (vec![1.98864e-03], 0.32),
-        (vec![3.83238e-06], 0.64),
-        (vec![0.0], 1.28),
-        (vec![0.0], 2.56),
-        (vec![0.0], 5.12),
-        (vec![0.0], 10.24),
+        (vec![0.28435774340267284], 0.0),
+        (vec![0.19195491512700597], 0.01),
+        (vec![0.12979676270145094], 0.02),
+        (vec![0.05939666913561712], 0.04),
+        (vec![0.012441804151214689], 0.08),
+        (vec![0.0005459318925793768], 0.16),
+        (vec![1.05130465235137e-6], 0.32),
+        (vec![3.983888966577838e-12], 0.64),
+        (vec![7.015395128730499e-16], 1.28),
+        (vec![5.06965159341517e-17], 2.56),
+        (vec![1.735145399301106e-18], 5.12),
+        (vec![3.259034338585213e-17], 10.24),
     ];
     for (values, time) in data {
-        //let time = M::T::from(time);
-        //let mut soln_at_t = Vec::with_capacity(MGRID * MGRID);
-        //let mut max_u = M::T::zero();
-        //let one = M::T::one();
-        //let dx = one / (M::T::from(MGRID as f64) - one);
-        //for j in 0..MGRID {
-        //    let y = dx * M::T::from(j as f64);
-        //    for i in 0..MGRID {
-        //        let x = dx * M::T::from(i as f64);
-        //        let u = pde_solution(x, y, time, 100);
-        //        if u > max_u {
-        //            max_u = u;
-        //        }
-        //        soln_at_t.push(u);
-        //    }
-        //}
-        //assert!((M::T::from(values[0]) - max_u).abs() < M::T::from(1e-2));
         let values = M::V::from_vec(values.iter().map(|v| M::T::from(*v)).collect::<Vec<_>>());
         let time = M::T::from(time);
         soln.push(values, time);
     }
-    (problem, soln)
+    soln
 }
 
 #[cfg(test)]
@@ -246,6 +311,22 @@ mod tests {
         let (problem, _soln) = head2d_problem::<nalgebra::DMatrix<f64>, 10>();
         let mass = problem.eqn.mass().unwrap().matrix(0.0);
         insta::assert_yaml_snapshot!(mass.to_string());
+    }
+
+
+    #[cfg(feature = "diffsl")]
+    #[test]
+    fn test_mass_diffsl() {
+        use faer::Col;
+        use crate::SparseColMat;
+
+        let mut context = crate::DiffSlContext::default();
+        let (problem, _soln) = heat2d_diffsl::<SparseColMat<f64>, 5>(&mut context);
+        let u = Col::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0]);
+        let mut y = Col::zeros(25);
+        problem.eqn.mass().unwrap().call_inplace(&u, 0.0, &mut y);
+        let expect = Col::from_vec(vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 8.0, 9.0, 0.0, 0.0, 12.0, 13.0, 14.0, 0.0, 0.0, 17.0, 18.0, 19.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        y.assert_eq_st(&expect, 1.0e-10);
     }
 
     #[test]

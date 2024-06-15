@@ -104,9 +104,11 @@ mod tests {
                 let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
                 assert!(
                     error_norm < M::T::from(15.0),
-                    "error_norm: {} at t = {}",
+                    "error_norm: {} at t = {}. soln: {:?}, expected: {:?}",
                     error_norm,
-                    point.t
+                    point.t,
+                    soln,
+                    point.state
                 );
                 if let Some(sens_soln_points) = &solution.sens_solution_points {
                     for (j, sens_points) in sens_soln_points.iter().enumerate() {
