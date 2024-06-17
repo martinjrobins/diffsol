@@ -7,3 +7,4 @@ pub mod robertson;
 pub mod robertson_ode;
 pub mod robertson_ode_with_sens;
 pub mod robertson_sens;
+pub mod foodweb;
