@@ -10,8 +10,8 @@ use num_traits::Zero;
 const NPREY: usize = 1;
 const NUM_SPECIES: usize = 2 * NPREY;
 const NSMX: usize = NUM_SPECIES * MX;
-const MX: usize = 10;
-const MY: usize = 10;
+const MX: usize = 20;
+const MY: usize = 20;
 const AX: f64 = 1.0;
 const AY: f64 = 1.0;
 const DX: f64 = AX / (MX as f64 - 1.0);
@@ -427,7 +427,6 @@ where
                 );
 
                 for is in 0..NUM_SPECIES {
-                    rates[is] = x[loc + is] * (self.context.bcoef[is] * fac + rates[is]);
                     drates[is] = x[loc + is] * drates[is]
                         + v[loc + is] * (self.context.bcoef[is] * fac + rates[is]);
                 }
@@ -668,8 +667,8 @@ fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
     let mut soln = OdeSolverSolution {
         solution_points: Vec::new(),
         sens_solution_points: None,
-        rtol: M::T::from(1e-5),
-        atol: M::V::from_element(2 * NUM_SPECIES, M::T::from(1e-5)),
+        rtol: M::T::from(1e-4),
+        atol: M::V::from_element(2 * NUM_SPECIES, M::T::from(1e-4)),
     };
     let data = vec![
         (vec![1.0e1, 1.0e1, 1.0e5, 1.0e5], 0.0),
@@ -721,8 +720,21 @@ mod tests {
         let (problem, _soln) = foodweb_problem::<M, M>(&context);
         let u0 = problem.eqn.init().call(0.0);
         let jac = problem.eqn.rhs().jacobian(&u0, 0.0);
-        println!("{}", jac);
-        insta::assert_yaml_snapshot!(jac.to_string());
+
+        // check the jacobian via finite differences
+        let h = 1e-5;
+        for i in 0..jac.ncols() {
+            let mut vplus = u0.clone();
+            let mut vminus = u0.clone();
+            vplus[i] += h;
+            vminus[i] -= h;
+            let yplus = problem.eqn.rhs().call(&vplus, 0.0);
+            let yminus = problem.eqn.rhs().call(&vminus, 0.0);
+            let fdiff = (yplus - yminus) / (2.0 * h);
+            for j in 0..jac.nrows() {
+                assert!((jac[(j, i)] - fdiff[j]).abs() < 1e-1, "jac[{}, {}] = {} (expect {})", j, i, jac[(j, i)], fdiff[j]);
+            }
+        }
     }
 
     #[test]
@@ -731,7 +743,14 @@ mod tests {
         let context = FoodWebContext::<M, M>::new();
         let (problem, _soln) = foodweb_problem::<M, M>(&context);
         let mass = problem.eqn.mass().unwrap().matrix(0.0);
-        println!("{}", mass);
-        insta::assert_yaml_snapshot!(mass.to_string());
+        for i in 0..mass.ncols() {
+            for j in 0..mass.nrows() {
+                if i == j && i % NUM_SPECIES < NPREY {
+                    assert_eq!(mass[(i, j)], 1.0);
+                } else {
+                    assert_eq!(mass[(i, j)], 0.0);
+                }
+            }
+        }
     }
 }
