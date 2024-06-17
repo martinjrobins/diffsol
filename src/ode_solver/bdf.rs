@@ -1265,7 +1265,7 @@ mod test {
         let linear_solver = FaerSparseLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
-        let (problem, soln) = foodweb_problem::<Mat<f64>, SparseColMat<f64>>(&foodweb_context);
+        let (problem, soln) = foodweb_problem::<Mat<f64>, SparseColMat<f64>, 10>(&foodweb_context);
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
