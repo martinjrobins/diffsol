@@ -2,11 +2,13 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use diffsol::{
     ode_solver::test_models::{
         exponential_decay::exponential_decay_problem,
+        foodweb::{foodweb_problem, FoodWebContext},
         heat2d::head2d_problem,
         robertson::{robertson, robertson_diffsl},
     },
     SparseColMat,
 };
+use faer::Mat;
 
 fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("nalgebra_bdf_exponential_decay", |b| {
@@ -80,6 +82,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         let (problem, soln) = robertson::<faer::Mat<f64>>(false);
         b.iter(|| benchmarks::tr_bdf2(&problem, soln.solution_points.last().unwrap().t))
     });
+
     c.bench_function("faer_sparse_bdf_heat2d_5", |b| {
         let (problem, soln) = head2d_problem::<SparseColMat<f64>, 5>();
         b.iter(|| benchmarks::bdf(&problem, soln.solution_points.last().unwrap().t))
@@ -141,6 +144,57 @@ fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("faer_sparse_bdf_diffsl_heat2d_20", |b| {
         let mut context = diffsol::DiffSlContext::default();
         let (problem, soln) = diffsol::ode_solver::test_models::heat2d::heat2d_diffsl::<
+            SparseColMat<f64>,
+            20,
+        >(&mut context);
+        b.iter(|| benchmarks::bdf(&problem, soln.solution_points.last().unwrap().t))
+    });
+
+    c.bench_function("faer_sparse_bdf_foodweb_5", |b| {
+        let context = FoodWebContext::default();
+        let (problem, soln) = foodweb_problem::<Mat<f64>, SparseColMat<f64>, 5>(&context);
+        b.iter(|| benchmarks::bdf(&problem, soln.solution_points.last().unwrap().t))
+    });
+
+    c.bench_function("faer_sparse_bdf_foodweb_10", |b| {
+        let context = FoodWebContext::default();
+        let (problem, soln) = foodweb_problem::<Mat<f64>, SparseColMat<f64>, 10>(&context);
+        b.iter(|| benchmarks::bdf(&problem, soln.solution_points.last().unwrap().t))
+    });
+
+    c.bench_function("faer_sparse_bdf_foodweb_20", |b| {
+        let context = FoodWebContext::default();
+        let (problem, soln) = foodweb_problem::<Mat<f64>, SparseColMat<f64>, 20>(&context);
+        b.iter(|| benchmarks::bdf(&problem, soln.solution_points.last().unwrap().t))
+    });
+
+    #[cfg(feature = "diffsl")]
+    c.bench_function("faer_sparse_bdf_diffsl_foodweb_5", |b| {
+        let mut context = diffsol::DiffSlContext::default();
+        let (problem, soln) = diffsol::ode_solver::test_models::foodweb::foodweb_diffsl::<
+            Mat<f64>,
+            SparseColMat<f64>,
+            5,
+        >(&mut context);
+        b.iter(|| benchmarks::bdf(&problem, soln.solution_points.last().unwrap().t))
+    });
+
+    #[cfg(feature = "diffsl")]
+    c.bench_function("faer_sparse_bdf_diffsl_foodweb_10", |b| {
+        let mut context = diffsol::DiffSlContext::default();
+        let (problem, soln) = diffsol::ode_solver::test_models::foodweb::foodweb_diffsl::<
+            Mat<f64>,
+            SparseColMat<f64>,
+            10,
+        >(&mut context);
+        b.iter(|| benchmarks::bdf(&problem, soln.solution_points.last().unwrap().t))
+    });
+
+    #[cfg(feature = "diffsl")]
+    c.bench_function("faer_sparse_bdf_diffsl_foodweb_20", |b| {
+        let mut context = diffsol::DiffSlContext::default();
+        let (problem, soln) = diffsol::ode_solver::test_models::foodweb::foodweb_diffsl::<
+            Mat<f64>,
             SparseColMat<f64>,
             20,
         >(&mut context);

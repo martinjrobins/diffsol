@@ -103,11 +103,8 @@ where
         b_i {{
             (1.0 + ALPHA * xx_i * yy_i + BETA * sin(4.0 * PI * xx_i) * sin(4.0 * PI * yy_i))
         }}
-        xyfactor_i {{
-            pow(16.0 * xx_i * (1.0 - xx_i) * yy_i * (1.0 - yy_i), 2)
-        }}
         u_i {{
-            c1 = 10.0 + xyfactor_i,
+            c1 = 10.0 + pow(16.0 * xx_i * (1.0 - xx_i) * yy_i * (1.0 - yy_i), 2),
             ({n}:{n2}): c2 = 1.0e5,
         }}
         dudt_i {{
@@ -115,7 +112,7 @@ where
             ({n}:{n2}): dc2dt = 0,
         }}
         M_i {{
-            dc1dt_j,
+            dc1dt_i,
             ({n}:{n2}): 0,
         }}
         c1diff_i {{
@@ -130,8 +127,8 @@ where
         }}
         out_i {{
             tl_j * c1_j,
-            tl_j * c2_j,
             br_j * c1_j,
+            tl_j * c2_j,
             br_j * c2_j,
         }}",
         diff_diffsl,
@@ -141,8 +138,6 @@ where
         n1 = NX * NX - 1,
         n2 = 2 * NX * NX,
     );
-
-    println!("{}", code);
 
     diffsl_context.recompile(code.as_str()).unwrap();
 
@@ -868,7 +863,7 @@ where
     #[allow(unused_mut)]
     fn call_inplace(&self, x: &M::V, _t: M::T, mut y: &mut M::V) {
         let nsmx: usize = NX;
-        let dx = AY / (NX as f64 - 1.0);
+        let dx = AX / (NX as f64 - 1.0);
         let dy = AY / (NX as f64 - 1.0);
         let cox = M::T::from(1.0 / dx.powi(2));
         let coy = M::T::from(1.0 / dy.powi(2));
@@ -905,7 +900,7 @@ where
     #[allow(unused_mut)]
     fn jac_mul_inplace(&self, _x: &M::V, _t: M::T, v: &M::V, mut y: &mut M::V) {
         let nsmx: usize = NX;
-        let dx = AY / (NX as f64 - 1.0);
+        let dx = AX / (NX as f64 - 1.0);
         let dy = AY / (NX as f64 - 1.0);
         let cox = M::T::from(1.0 / dx.powi(2));
         let coy = M::T::from(1.0 / dy.powi(2));
@@ -1065,6 +1060,76 @@ mod tests {
                     i,
                     jac[(j, i)],
                     fdiff[j]
+                );
+            }
+        }
+    }
+
+    #[cfg(feature = "diffsl")]
+    #[test]
+    fn test_diffsl() {
+        type M = nalgebra::DMatrix<f64>;
+        const NX: usize = 10;
+        let context = FoodWebContext::<M, M, NX>::new();
+        let (problem, _soln) = foodweb_problem::<M, M, NX>(&context);
+        let u0 = problem.eqn.init().call(0.0);
+        let jac = problem.eqn.rhs().jacobian(&u0, 0.0);
+        let y0 = problem.eqn.rhs().call(&u0, 0.0);
+
+        let mut diffsl_context = crate::DiffSlContext::<M>::default();
+        let (problem_diffsl, _soln) = foodweb_diffsl::<M, M, NX>(&mut diffsl_context);
+        let u0_diffsl = problem_diffsl.eqn.init().call(0.0);
+        for i in 0..u0.len() {
+            let i_diffsl = if i % NUM_SPECIES >= NPREY {
+                NX * NX + i / NUM_SPECIES
+            } else {
+                i / NUM_SPECIES
+            };
+            assert!(
+                ((u0[i] - u0_diffsl[i_diffsl]) / u0[i]).abs() < 1e-3,
+                "u0[{}] = {} (expect {})",
+                i,
+                u0[i],
+                u0_diffsl[i_diffsl]
+            );
+        }
+
+        let y0_diffsl = problem_diffsl.eqn.rhs().call(&u0_diffsl, 0.0);
+        for i in 0..y0.len() {
+            let i_diffsl = if i % NUM_SPECIES >= NPREY {
+                NX * NX + i / NUM_SPECIES
+            } else {
+                i / NUM_SPECIES
+            };
+            assert!(
+                ((y0[i] - y0_diffsl[i_diffsl]) / y0[i]).abs() < 1e-3,
+                "y0[{}] = {} (expect {})",
+                i,
+                y0[i],
+                y0_diffsl[i_diffsl]
+            );
+        }
+
+        let jac_diffsl = problem_diffsl.eqn.rhs().jacobian(&u0_diffsl, 0.0);
+        for i in 0..jac.ncols() {
+            for j in 0..jac.nrows() {
+                let i_diffsl = if i % NUM_SPECIES >= NPREY {
+                    NX * NX + i / NUM_SPECIES
+                } else {
+                    i / NUM_SPECIES
+                };
+                let j_diffsl = if j % NUM_SPECIES >= NPREY {
+                    NX * NX + j / NUM_SPECIES
+                } else {
+                    j / NUM_SPECIES
+                };
+                assert!(
+                    (jac[(j, i)] - jac_diffsl[(j_diffsl, i_diffsl)]).abs() < 1e-3,
+                    "jac[{}, {}] = {} (expect {})",
+                    j,
+                    i,
+                    jac[(j, i)],
+                    jac_diffsl[(j_diffsl, i_diffsl)]
                 );
             }
         }
