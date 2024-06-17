@@ -850,13 +850,22 @@ mod test {
     use crate::{
         ode_solver::{
             test_models::{
-                dydt_y2::dydt_y2_problem, exponential_decay::{
+                dydt_y2::dydt_y2_problem,
+                exponential_decay::{
                     exponential_decay_problem, exponential_decay_problem_sens,
                     exponential_decay_problem_with_root,
-                }, exponential_decay_with_algebraic::{
+                },
+                exponential_decay_with_algebraic::{
                     exponential_decay_with_algebraic_problem,
                     exponential_decay_with_algebraic_problem_sens,
-                }, foodweb::{foodweb_problem, FoodWebContext}, gaussian_decay::gaussian_decay_problem, heat2d::head2d_problem, robertson::robertson, robertson_ode::robertson_ode, robertson_ode_with_sens::robertson_ode_with_sens, robertson_sens::robertson_sens
+                },
+                foodweb::{foodweb_problem, FoodWebContext},
+                gaussian_decay::gaussian_decay_problem,
+                heat2d::head2d_problem,
+                robertson::robertson,
+                robertson_ode::robertson_ode,
+                robertson_ode_with_sens::robertson_ode_with_sens,
+                robertson_sens::robertson_sens,
             },
             tests::{
                 test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut,
@@ -1041,7 +1050,7 @@ mod test {
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 724
+        number_of_calls: 723
         number_of_jac_muls: 57
         number_of_matrix_evals: 19
         "###);
@@ -1083,8 +1092,8 @@ mod test {
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 1192
-        number_of_jac_muls: 2663
+        number_of_calls: 1191
+        number_of_jac_muls: 2662
         number_of_matrix_evals: 46
         "###);
     }
@@ -1106,7 +1115,7 @@ mod test {
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 724
+        number_of_calls: 723
         number_of_jac_muls: 60
         number_of_matrix_evals: 19
         "###);

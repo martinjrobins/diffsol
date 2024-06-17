@@ -20,7 +20,6 @@ pub fn heat2d_diffsl<M: Matrix<T = f64> + 'static, const MGRID: usize>(
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
     OdeSolverSolution<M::V>,
 ) {
-
     let (problem, _soln) = head2d_problem::<M, MGRID>();
     let u0 = problem.eqn.init().call(0.0);
     let jac = problem.eqn.rhs().jacobian(&u0, 0.0);
@@ -38,12 +37,9 @@ pub fn heat2d_diffsl<M: Matrix<T = f64> + 'static, const MGRID: usize>(
         .collect::<Vec<_>>()
         .join(",\n");
 
-    let mass_ones= mass
-        .triplet_iter()
-        .map(|(i, _j, _v)| i)
-        .collect::<Vec<_>>();
+    let mass_ones = mass.triplet_iter().map(|(i, _j, _v)| i).collect::<Vec<_>>();
     let mut mass_diffsl = Vec::new();
-    for i in 0..MGRID*MGRID {
+    for i in 0..MGRID * MGRID {
         // check if i in mass_ones
         if mass_ones.contains(&i) {
             mass_diffsl.push(format!("            ({}, {}): 1", i, i));
@@ -313,19 +309,24 @@ mod tests {
         insta::assert_yaml_snapshot!(mass.to_string());
     }
 
-
     #[cfg(feature = "diffsl")]
     #[test]
     fn test_mass_diffsl() {
-        use faer::Col;
         use crate::SparseColMat;
+        use faer::Col;
 
         let mut context = crate::DiffSlContext::default();
         let (problem, _soln) = heat2d_diffsl::<SparseColMat<f64>, 5>(&mut context);
-        let u = Col::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0]);
+        let u = Col::from_vec(vec![
+            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
+            17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0,
+        ]);
         let mut y = Col::zeros(25);
         problem.eqn.mass().unwrap().call_inplace(&u, 0.0, &mut y);
-        let expect = Col::from_vec(vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 8.0, 9.0, 0.0, 0.0, 12.0, 13.0, 14.0, 0.0, 0.0, 17.0, 18.0, 19.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let expect = Col::from_vec(vec![
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 8.0, 9.0, 0.0, 0.0, 12.0, 13.0, 14.0, 0.0, 0.0,
+            17.0, 18.0, 19.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ]);
         y.assert_eq_st(&expect, 1.0e-10);
     }
 

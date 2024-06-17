@@ -1,13 +1,17 @@
 use std::rc::Rc;
 
-use crate::{find_non_zeros_linear, find_non_zeros_nonlinear, ode_solver::problem::OdeSolverSolution, ConstantOp, DenseMatrix, JacobianColoring, LinearOp, Matrix, MatrixSparsity, NonLinearOp, OdeEquations, OdeSolverProblem, Op, UnitCallable, Vector};
+use crate::{
+    find_non_zeros_linear, find_non_zeros_nonlinear, ode_solver::problem::OdeSolverSolution,
+    ConstantOp, DenseMatrix, JacobianColoring, LinearOp, Matrix, MatrixSparsity, NonLinearOp,
+    OdeEquations, OdeSolverProblem, Op, UnitCallable, Vector,
+};
 use num_traits::Zero;
 
 const NPREY: usize = 1;
 const NUM_SPECIES: usize = 2 * NPREY;
 const NSMX: usize = NUM_SPECIES * MX;
-const MX: usize = 20;
-const MY: usize = 20;
+const MX: usize = 10;
+const MY: usize = 10;
 const AX: f64 = 1.0;
 const AY: f64 = 1.0;
 const DX: f64 = AX / (MX as f64 - 1.0);
@@ -23,18 +27,17 @@ const DPRED: f64 = 0.05;
 const ALPHA: f64 = 50.0;
 const BETA: f64 = 1000.0;
 
-pub struct FoodWebContext<MD, M> 
+pub struct FoodWebContext<MD, M>
 where
     MD: DenseMatrix,
     M: Matrix<V = MD::V, T = MD::T>,
 {
-  acoef: MD,
-  bcoef: M::V,
-  cox: M::V,
-  coy: M::V,
-  nstates: usize,
+    acoef: MD,
+    bcoef: M::V,
+    cox: M::V,
+    coy: M::V,
+    nstates: usize,
 }
-
 
 // Following is the description of this model from the Sundials examples:
 //
@@ -91,8 +94,6 @@ where
  * The PDEs are discretized by central differencing on a MX by MY
  * mesh.
  *
- * The DAE system is solved by IDA using the SPGMR linear solver.
- * Output is printed at t = 0, .001, .01, .1, .4, .7, 1.
  * -----------------------------------------------------------------
  * References:
  * [1] Peter N. Brown and Alan C. Hindmarsh,
@@ -110,7 +111,7 @@ where
  *     Algebraic Systems, SIAM J. Sci. Comput., 19 (1998),
  *     pp. 1495-1512.
  * -----------------------------------------------------------------*/
-impl<MD, M> FoodWebContext<MD, M> 
+impl<MD, M> FoodWebContext<MD, M>
 where
     MD: DenseMatrix,
     M: Matrix<V = MD::V, T = MD::T>,
@@ -123,7 +124,6 @@ where
         let nstates = NUM_SPECIES * MX * MY;
 
         for i in 0..NPREY {
-
             for j in 0..NPREY {
                 acoef[(i, NPREY + j)] = M::T::from(-GG);
                 acoef[(i + NPREY, j)] = M::T::from(EE);
@@ -149,11 +149,10 @@ where
             coy,
             nstates,
         }
-
-  }
+    }
 }
 
-impl<MD, M> Default for FoodWebContext<MD, M> 
+impl<MD, M> Default for FoodWebContext<MD, M>
 where
     MD: DenseMatrix,
     M: Matrix<V = MD::V, T = MD::T>,
@@ -163,12 +162,12 @@ where
     }
 }
 
-struct FoodWebInit<'a, MD, M> 
+struct FoodWebInit<'a, MD, M>
 where
     MD: DenseMatrix,
     M: Matrix<V = MD::V, T = MD::T>,
 {
-  pub context: &'a FoodWebContext<MD, M>,
+    pub context: &'a FoodWebContext<MD, M>,
 }
 
 // macro for bringing in constants from Context
@@ -209,21 +208,16 @@ macro_rules! impl_op {
             }
         }
     };
-
 }
 
 context_consts!(FoodWebInit);
 impl_op!(FoodWebInit);
-
-
 
 impl<'a, MD, M> ConstantOp for FoodWebInit<'a, MD, M>
 where
     MD: DenseMatrix,
     M: Matrix<V = MD::V, T = MD::T>,
 {
-    
-
     fn call_inplace(&self, _t: M::T, y: &mut M::V) {
         /* Loop over grid, load cc values and id values. */
         for jy in 0..MY {
@@ -244,37 +238,23 @@ where
                 }
             }
         }
-
-
-        /* Set c' for predators to 0. */
-        for jy in 0..MY {
-            let yloc = NSMX * jy;
-            for jx in 0..MX {
-                let loc = yloc + NUM_SPECIES * jx;
-                for is in NPREY..NUM_SPECIES {
-                    y[loc + is] = M::T::zero();
-                }
-            }
-        }
-
     }
 }
 
-struct FoodWebRhs<'a, MD, M> 
+struct FoodWebRhs<'a, MD, M>
 where
     MD: DenseMatrix,
     M: Matrix<V = MD::V, T = MD::T>,
 {
-  pub context: &'a FoodWebContext<MD, M>,
-  pub sparsity: Option<M::Sparsity>,
-  pub coloring: Option<JacobianColoring<M>>,
+    pub context: &'a FoodWebContext<MD, M>,
+    pub sparsity: Option<M::Sparsity>,
+    pub coloring: Option<JacobianColoring<M>>,
 }
 
-
-impl<'a, MD, M> FoodWebRhs<'a, MD, M> 
+impl<'a, MD, M> FoodWebRhs<'a, MD, M>
 where
     MD: DenseMatrix + 'a,
-    M: Matrix<V = MD::V, T = MD::T>,    
+    M: Matrix<V = MD::V, T = MD::T>,
 {
     pub fn new(context: &'a FoodWebContext<MD, M>, y0: &M::V, t0: M::T) -> Self {
         let mut ret = Self {
@@ -283,13 +263,15 @@ where
             coloring: None,
         };
         let non_zeros = find_non_zeros_nonlinear(&ret, y0, t0);
-        ret.sparsity = Some(MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone()).unwrap());
+        ret.sparsity = Some(
+            MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone()).unwrap(),
+        );
         ret.coloring = Some(JacobianColoring::new_from_non_zeros(&ret, non_zeros));
         ret
     }
 }
 
-impl<'a, MD, M> Op for FoodWebRhs<'a, MD, M> 
+impl<'a, MD, M> Op for FoodWebRhs<'a, MD, M>
 where
     MD: DenseMatrix + 'a,
     M: Matrix<V = MD::V, T = MD::T>,
@@ -312,37 +294,48 @@ where
     }
 }
 
-
-impl<'a, MD, M> NonLinearOp for FoodWebRhs<'a, MD, M> 
+impl<'a, MD, M> NonLinearOp for FoodWebRhs<'a, MD, M>
 where
     MD: DenseMatrix + 'a,
     M: Matrix<V = MD::V, T = MD::T>,
 {
     /*
-    * Fweb: Rate function for the food-web problem.
-    * This routine computes the right-hand sides of the system equations,
-    * consisting of the diffusion term and interaction term.
-    * The interaction term is computed by the function WebRates.
-    */
+     * Fweb: Rate function for the food-web problem.
+     * This routine computes the right-hand sides of the system equations,
+     * consisting of the diffusion term and interaction term.
+     * The interaction term is computed by the function WebRates.
+     */
     fn call_inplace(&self, x: &M::V, _t: M::T, y: &mut M::V) {
         let mut rates = [M::T::zero(); NUM_SPECIES];
         /* Loop over grid points, evaluate interaction vector (length ns),
-            form diffusion difference terms, and load crate.                    */
+        form diffusion difference terms, and load crate.                    */
         for jy in 0..MY {
             let yy = jy as f64 * DY;
-            let idyu = if jy != MY - 1 { NSMX as i32 } else { -(NSMX as i32) };
+            let idyu = if jy != MY - 1 {
+                NSMX as i32
+            } else {
+                -(NSMX as i32)
+            };
             let idyl = if jy != 0 { NSMX as i32 } else { -(NSMX as i32) };
 
             for jx in 0..MX {
                 let xx = jx as f64 * DX;
-                let idxu = if jx != MX - 1 { NUM_SPECIES as i32 } else { -(NUM_SPECIES as i32) };
-                let idxl = if jx != 0 { NUM_SPECIES as i32 } else { -(NUM_SPECIES as i32) };
+                let idxu = if jx != MX - 1 {
+                    NUM_SPECIES as i32
+                } else {
+                    -(NUM_SPECIES as i32)
+                };
+                let idxl = if jx != 0 {
+                    NUM_SPECIES as i32
+                } else {
+                    -(NUM_SPECIES as i32)
+                };
                 let loc = NUM_SPECIES * jx + NSMX * jy;
 
                 /*
-                * WebRates: Evaluate reaction rates at a given spatial point.
-                * At a given (x,y), evaluate the array of ns reaction terms R.
-                */
+                 * WebRates: Evaluate reaction rates at a given spatial point.
+                 * At a given (x,y), evaluate the array of ns reaction terms R.
+                 */
                 for (is, rate) in rates.iter_mut().enumerate().take(NUM_SPECIES) {
                     let mut dp = M::T::zero();
                     for js in 0..NUM_SPECIES {
@@ -350,7 +343,12 @@ where
                     }
                     *rate = dp;
                 }
-                let fac = M::T::from(1.0 + ALPHA * xx * yy + BETA * (4.0 * std::f64::consts::PI * xx).sin() * (4.0 * std::f64::consts::PI * yy).sin());
+                let fac = M::T::from(
+                    1.0 + ALPHA * xx * yy
+                        + BETA
+                            * (4.0 * std::f64::consts::PI * xx).sin()
+                            * (4.0 * std::f64::consts::PI * yy).sin(),
+                );
 
                 for is in 0..NUM_SPECIES {
                     rates[is] = x[loc + is] * (self.context.bcoef[is] * fac + rates[is]);
@@ -359,16 +357,21 @@ where
                 /* Loop over species, do differencing, load crate segment. */
                 for is in 0..NUM_SPECIES {
                     /* Differencing in y. */
-                    let dcyli = x[loc + is] - x[(loc as i32 - idyl + is as i32) as usize];
-                    let dcyui = x[(loc as i32 + idyu + is as i32) as usize] - x[loc + is];
+                    let dcyli =
+                        x[loc + is] - x[usize::try_from(loc as i32 - idyl + is as i32).unwrap()];
+                    let dcyui =
+                        x[usize::try_from(loc as i32 + idyu + is as i32).unwrap()] - x[loc + is];
 
                     /* Differencing in x. */
-                    let dcxli = x[loc + is] - x[(loc as i32 - idxl + is as i32) as usize];
-                    let dcxui = x[(loc as i32 + idxu + is as i32) as usize] - x[loc + is];
+                    let dcxli =
+                        x[loc + is] - x[usize::try_from(loc as i32 - idxl + is as i32).unwrap()];
+                    let dcxui =
+                        x[usize::try_from(loc as i32 + idxu + is as i32).unwrap()] - x[loc + is];
 
                     /* Compute the crate values at (xx,yy). */
-                    y[loc + is] = self.context.coy[is] * (dcyui - dcyli) + self.context.cox[is] * (dcxui - dcxli) +
-                        rates[is];
+                    y[loc + is] = self.context.coy[is] * (dcyui - dcyli)
+                        + self.context.cox[is] * (dcxui - dcxli)
+                        + rates[is];
                 }
             }
         }
@@ -378,22 +381,34 @@ where
         let mut rates = [M::T::zero(); NUM_SPECIES];
         let mut drates = [M::T::zero(); NUM_SPECIES];
         /* Loop over grid points, evaluate interaction vector (length ns),
-            form diffusion difference terms, and load crate.                    */
+        form diffusion difference terms, and load crate.                    */
         for jy in 0..MY {
             let yy = jy as f64 * DY;
-            let idyu = if jy != MY - 1 { NSMX as i32 } else { -(NSMX as i32) };
+            let idyu = if jy != MY - 1 {
+                NSMX as i32
+            } else {
+                -(NSMX as i32)
+            };
             let idyl = if jy != 0 { NSMX as i32 } else { -(NSMX as i32) };
 
             for jx in 0..MX {
                 let xx = jx as f64 * DX;
-                let idxu = if jx != MX - 1 { NUM_SPECIES as i32 } else { -(NUM_SPECIES as i32) };
-                let idxl = if jx != 0 { NUM_SPECIES as i32 } else { -(NUM_SPECIES as i32) };
+                let idxu = if jx != MX - 1 {
+                    NUM_SPECIES as i32
+                } else {
+                    -(NUM_SPECIES as i32)
+                };
+                let idxl = if jx != 0 {
+                    NUM_SPECIES as i32
+                } else {
+                    -(NUM_SPECIES as i32)
+                };
                 let loc = NUM_SPECIES * jx + NSMX * jy;
 
                 /*
-                * WebRates: Evaluate reaction rates at a given spatial point.
-                * At a given (x,y), evaluate the array of ns reaction terms R.
-                */
+                 * WebRates: Evaluate reaction rates at a given spatial point.
+                 * At a given (x,y), evaluate the array of ns reaction terms R.
+                 */
                 for is in 0..NUM_SPECIES {
                     let mut ddp = M::T::zero();
                     let mut dp = M::T::zero();
@@ -404,45 +419,54 @@ where
                     rates[is] = dp;
                     drates[is] = ddp;
                 }
-                let fac = M::T::from(1.0 + ALPHA * xx * yy + BETA * (4.0 * std::f64::consts::PI * xx).sin() * (4.0 * std::f64::consts::PI * yy).sin());
+                let fac = M::T::from(
+                    1.0 + ALPHA * xx * yy
+                        + BETA
+                            * (4.0 * std::f64::consts::PI * xx).sin()
+                            * (4.0 * std::f64::consts::PI * yy).sin(),
+                );
 
                 for is in 0..NUM_SPECIES {
                     rates[is] = x[loc + is] * (self.context.bcoef[is] * fac + rates[is]);
-                    drates[is] = x[loc + is] * drates[is] + v[loc + is] * (self.context.bcoef[is] * fac + rates[is]);
+                    drates[is] = x[loc + is] * drates[is]
+                        + v[loc + is] * (self.context.bcoef[is] * fac + rates[is]);
                 }
 
                 /* Loop over species, do differencing, load crate segment. */
                 for is in 0..NUM_SPECIES {
                     /* Differencing in y. */
-                    let dcyli = v[loc + is] - v[(loc as i32 - idyl + is as i32) as usize];
-                    let dcyui = v[(loc as i32 + idyu + is as i32) as usize] - v[loc + is];
+                    let dcyli =
+                        v[loc + is] - v[usize::try_from(loc as i32 - idyl + is as i32).unwrap()];
+                    let dcyui =
+                        v[usize::try_from(loc as i32 + idyu + is as i32).unwrap()] - v[loc + is];
 
                     /* Differencing in x. */
-                    let dcxli = v[loc + is] - v[(loc as i32 - idxl + is as i32) as usize];
-                    let dcxui = v[(loc as i32 + idxu + is as i32) as usize] - v[loc + is];
+                    let dcxli =
+                        v[loc + is] - v[usize::try_from(loc as i32 - idxl + is as i32).unwrap()];
+                    let dcxui =
+                        v[usize::try_from(loc as i32 + idxu + is as i32).unwrap()] - v[loc + is];
 
                     /* Compute the crate values at (xx,yy). */
-                    y[loc + is] = self.context.coy[is] * (dcyui - dcyli) + self.context.cox[is] * (dcxui - dcxli) +
-                        drates[is];
+                    y[loc + is] = self.context.coy[is] * (dcyui - dcyli)
+                        + self.context.cox[is] * (dcxui - dcxli)
+                        + drates[is];
                 }
             }
         }
     }
-           
 }
 
-
-struct FoodWebMass<'a, MD, M> 
+struct FoodWebMass<'a, MD, M>
 where
     MD: DenseMatrix,
     M: Matrix<V = MD::V, T = MD::T>,
 {
-  pub context: &'a FoodWebContext<MD, M>,
-  pub sparsity: Option<M::Sparsity>,
-  pub coloring: Option<JacobianColoring<M>>,
+    pub context: &'a FoodWebContext<MD, M>,
+    pub sparsity: Option<M::Sparsity>,
+    pub coloring: Option<JacobianColoring<M>>,
 }
 
-impl<'a, MD, M> FoodWebMass<'a, MD, M> 
+impl<'a, MD, M> FoodWebMass<'a, MD, M>
 where
     MD: DenseMatrix + 'a,
     M: Matrix<V = MD::V, T = MD::T>,
@@ -454,12 +478,13 @@ where
             coloring: None,
         };
         let non_zeros = find_non_zeros_linear(&ret, t0);
-        ret.sparsity = Some(MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone()).unwrap());
+        ret.sparsity = Some(
+            MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone()).unwrap(),
+        );
         ret.coloring = Some(JacobianColoring::new_from_non_zeros(&ret, non_zeros));
         ret
     }
 }
-
 
 impl<'a, MD, M> Op for FoodWebMass<'a, MD, M>
 where
@@ -484,16 +509,15 @@ where
     }
 }
 
-impl<'a, MD, M> LinearOp for FoodWebMass<'a, MD, M> 
+impl<'a, MD, M> LinearOp for FoodWebMass<'a, MD, M>
 where
     MD: DenseMatrix + 'a,
     M: Matrix<V = MD::V, T = MD::T>,
 {
     #[allow(unused_mut)]
     fn gemv_inplace(&self, x: &Self::V, _t: Self::T, beta: Self::T, mut y: &mut Self::V) {
-
         /* Loop over all grid points, setting residual values appropriately
-            for differential or algebraic components.                        */
+        for differential or algebraic components.                        */
         for jy in 0..MY {
             let yloc = NSMX * jy;
             for jx in 0..MX {
@@ -507,7 +531,6 @@ where
                 }
             }
         }
-        
     }
 }
 
@@ -572,12 +595,10 @@ where
             y[2 * is] = v[loc_tl + is];
             y[2 * is + 1] = v[loc_br + is];
         }
-    
     }
 }
 
-
-struct FoodWeb<'a, MD, M> 
+struct FoodWeb<'a, MD, M>
 where
     MD: DenseMatrix,
     M: Matrix<V = MD::V, T = MD::T>,
@@ -588,7 +609,7 @@ where
     pub out: Rc<FoodWebOut<'a, MD, M>>,
 }
 
-impl<'a, MD, M> FoodWeb<'a, MD, M> 
+impl<'a, MD, M> FoodWeb<'a, MD, M>
 where
     MD: DenseMatrix,
     M: Matrix<V = MD::V, T = MD::T>,
@@ -614,7 +635,7 @@ where
     }
 }
 
-impl<'a, MD, M> OdeEquations for FoodWeb<'a, MD, M> 
+impl<'a, MD, M> OdeEquations for FoodWeb<'a, MD, M>
 where
     MD: DenseMatrix,
     M: Matrix<V = MD::V, T = MD::T>,
@@ -640,8 +661,7 @@ where
     fn out(&self) -> Option<&Rc<Self::Out>> {
         Some(&self.out)
     }
-    fn set_params(&mut self, _p: Self::V) {
-    }
+    fn set_params(&mut self, _p: Self::V) {}
 }
 
 fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
@@ -668,12 +688,13 @@ fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
     soln
 }
 
-
-pub fn foodweb_problem<MD, M>(context: &FoodWebContext<MD, M>) -> (
+pub fn foodweb_problem<MD, M>(
+    context: &FoodWebContext<MD, M>,
+) -> (
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
     OdeSolverSolution<M::V>,
-) 
-where 
+)
+where
     MD: DenseMatrix,
     M: Matrix<V = MD::V, T = MD::T>,
 {
@@ -685,4 +706,32 @@ where
     let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, false, false).unwrap();
     let soln = soln::<M>();
     (problem, soln)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{ConstantOp, LinearOp, NonLinearOp};
+
+    use super::*;
+
+    #[test]
+    fn test_jacobian() {
+        type M = nalgebra::DMatrix<f64>;
+        let context = FoodWebContext::<M, M>::new();
+        let (problem, _soln) = foodweb_problem::<M, M>(&context);
+        let u0 = problem.eqn.init().call(0.0);
+        let jac = problem.eqn.rhs().jacobian(&u0, 0.0);
+        println!("{}", jac);
+        insta::assert_yaml_snapshot!(jac.to_string());
+    }
+
+    #[test]
+    fn test_mass() {
+        type M = nalgebra::DMatrix<f64>;
+        let context = FoodWebContext::<M, M>::new();
+        let (problem, _soln) = foodweb_problem::<M, M>(&context);
+        let mass = problem.eqn.mass().unwrap().matrix(0.0);
+        println!("{}", mass);
+        insta::assert_yaml_snapshot!(mass.to_string());
+    }
 }
