@@ -188,11 +188,7 @@ impl<V: Vector> OdeSolverState<V> {
         if ode_problem.eqn.mass().is_none() {
             return Ok(());
         }
-        let f = Rc::new(InitOp::new(
-            &ode_problem.eqn,
-            ode_problem.t0,
-            &self.y,
-        ));
+        let f = Rc::new(InitOp::new(&ode_problem.eqn, ode_problem.t0, &self.y));
         let rtol = ode_problem.rtol;
         let atol = ode_problem.atol.clone();
         let init_problem = SolverProblem::new(f.clone(), atol, rtol);
@@ -238,11 +234,7 @@ impl<V: Vector> OdeSolverState<V> {
         for i in 0..ode_problem.eqn.rhs().nparams() {
             eqn_sens.init().set_param_index(i);
             eqn_sens.rhs().set_param_index(i);
-            let f = Rc::new(InitOp::new(
-                eqn_sens,
-                ode_problem.t0,
-                &self.s[i],
-            ));
+            let f = Rc::new(InitOp::new(eqn_sens, ode_problem.t0, &self.s[i]));
             root_solver.set_problem(&SolverProblem::new(
                 f.clone(),
                 ode_problem.atol.clone(),
