@@ -1,9 +1,9 @@
 use std::rc::Rc;
 
-use crate::{ConstantOp, DenseMatrix, LinearOp, Matrix, NonLinearOp, OdeEquations, Op, UnitCallable, Vector};
+use crate::{find_non_zeros_linear, find_non_zeros_nonlinear, ode_solver::problem::OdeSolverSolution, ConstantOp, DenseMatrix, JacobianColoring, LinearOp, Matrix, MatrixSparsity, NonLinearOp, OdeEquations, OdeSolverProblem, Op, UnitCallable, Vector};
 use num_traits::Zero;
 
-const NPREY: usize = 3;
+const NPREY: usize = 1;
 const NUM_SPECIES: usize = 2 * NPREY;
 const NSMX: usize = NUM_SPECIES * MX;
 const MX: usize = 20;
@@ -23,7 +23,7 @@ const DPRED: f64 = 0.05;
 const ALPHA: f64 = 50.0;
 const BETA: f64 = 1000.0;
 
-struct FoodWebContext<MD, M> 
+pub struct FoodWebContext<MD, M> 
 where
     MD: DenseMatrix,
     M: Matrix<V = MD::V, T = MD::T>,
@@ -115,7 +115,7 @@ where
     MD: DenseMatrix,
     M: Matrix<V = MD::V, T = MD::T>,
 {
-    fn new() -> Self {
+    pub fn new() -> Self {
         let mut acoef = MD::zeros(NUM_SPECIES, NUM_SPECIES);
         let mut bcoef = M::V::zeros(NUM_SPECIES);
         let mut cox = M::V::zeros(NUM_SPECIES);
@@ -151,6 +151,16 @@ where
         }
 
   }
+}
+
+impl<MD, M> Default for FoodWebContext<MD, M> 
+where
+    MD: DenseMatrix,
+    M: Matrix<V = MD::V, T = MD::T>,
+{
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 struct FoodWebInit<'a, MD, M> 
@@ -214,7 +224,7 @@ where
 {
     
 
-    fn call_inplace(&self, t: M::T, y: &mut M::V) {
+    fn call_inplace(&self, _t: M::T, y: &mut M::V) {
         /* Loop over grid, load cc values and id values. */
         for jy in 0..MY {
             let yy = jy as f64 * DY;
@@ -256,10 +266,52 @@ where
     M: Matrix<V = MD::V, T = MD::T>,
 {
   pub context: &'a FoodWebContext<MD, M>,
+  pub sparsity: Option<M::Sparsity>,
+  pub coloring: Option<JacobianColoring<M>>,
 }
 
-context_consts!(FoodWebRhs);
-impl_op!(FoodWebRhs);
+
+impl<'a, MD, M> FoodWebRhs<'a, MD, M> 
+where
+    MD: DenseMatrix + 'a,
+    M: Matrix<V = MD::V, T = MD::T>,    
+{
+    pub fn new(context: &'a FoodWebContext<MD, M>, y0: &M::V, t0: M::T) -> Self {
+        let mut ret = Self {
+            context,
+            sparsity: None,
+            coloring: None,
+        };
+        let non_zeros = find_non_zeros_nonlinear(&ret, y0, t0);
+        ret.sparsity = Some(MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone()).unwrap());
+        ret.coloring = Some(JacobianColoring::new_from_non_zeros(&ret, non_zeros));
+        ret
+    }
+}
+
+impl<'a, MD, M> Op for FoodWebRhs<'a, MD, M> 
+where
+    MD: DenseMatrix + 'a,
+    M: Matrix<V = MD::V, T = MD::T>,
+{
+    type M = M;
+    type V = M::V;
+    type T = M::T;
+
+    fn nout(&self) -> usize {
+        self.context.nstates
+    }
+    fn nparams(&self) -> usize {
+        0
+    }
+    fn nstates(&self) -> usize {
+        self.context.nstates
+    }
+    fn sparsity(&self) -> Option<M::SparsityRef<'_>> {
+        self.sparsity.as_ref().map(|s| s.as_ref())
+    }
+}
+
 
 impl<'a, MD, M> NonLinearOp for FoodWebRhs<'a, MD, M> 
 where
@@ -291,12 +343,12 @@ where
                 * WebRates: Evaluate reaction rates at a given spatial point.
                 * At a given (x,y), evaluate the array of ns reaction terms R.
                 */
-                for is in 0..NUM_SPECIES {
+                for (is, rate) in rates.iter_mut().enumerate().take(NUM_SPECIES) {
                     let mut dp = M::T::zero();
                     for js in 0..NUM_SPECIES {
                         dp += self.context.acoef[(is, js)] * x[loc + js];
                     }
-                    rates[is] = dp;
+                    *rate = dp;
                 }
                 let fac = M::T::from(1.0 + ALPHA * xx * yy + BETA * (4.0 * std::f64::consts::PI * xx).sin() * (4.0 * std::f64::consts::PI * yy).sin());
 
@@ -322,7 +374,7 @@ where
         }
     }
 
-    fn jac_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
+    fn jac_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
         let mut rates = [M::T::zero(); NUM_SPECIES];
         let mut drates = [M::T::zero(); NUM_SPECIES];
         /* Loop over grid points, evaluate interaction vector (length ns),
@@ -379,22 +431,65 @@ where
            
 }
 
+
 struct FoodWebMass<'a, MD, M> 
 where
     MD: DenseMatrix,
     M: Matrix<V = MD::V, T = MD::T>,
 {
   pub context: &'a FoodWebContext<MD, M>,
+  pub sparsity: Option<M::Sparsity>,
+  pub coloring: Option<JacobianColoring<M>>,
 }
 
-context_consts!(FoodWebMass);
-impl_op!(FoodWebMass);
+impl<'a, MD, M> FoodWebMass<'a, MD, M> 
+where
+    MD: DenseMatrix + 'a,
+    M: Matrix<V = MD::V, T = MD::T>,
+{
+    pub fn new(context: &'a FoodWebContext<MD, M>, t0: M::T) -> Self {
+        let mut ret = Self {
+            context,
+            sparsity: None,
+            coloring: None,
+        };
+        let non_zeros = find_non_zeros_linear(&ret, t0);
+        ret.sparsity = Some(MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone()).unwrap());
+        ret.coloring = Some(JacobianColoring::new_from_non_zeros(&ret, non_zeros));
+        ret
+    }
+}
+
+
+impl<'a, MD, M> Op for FoodWebMass<'a, MD, M>
+where
+    MD: DenseMatrix,
+    M: Matrix<V = MD::V, T = MD::T>,
+{
+    type M = M;
+    type V = M::V;
+    type T = M::T;
+
+    fn nout(&self) -> usize {
+        self.context.nstates
+    }
+    fn nparams(&self) -> usize {
+        0
+    }
+    fn nstates(&self) -> usize {
+        self.context.nstates
+    }
+    fn sparsity(&self) -> Option<M::SparsityRef<'_>> {
+        self.sparsity.as_ref().map(|s| s.as_ref())
+    }
+}
 
 impl<'a, MD, M> LinearOp for FoodWebMass<'a, MD, M> 
 where
     MD: DenseMatrix + 'a,
     M: Matrix<V = MD::V, T = MD::T>,
 {
+    #[allow(unused_mut)]
     fn gemv_inplace(&self, x: &Self::V, _t: Self::T, beta: Self::T, mut y: &mut Self::V) {
 
         /* Loop over all grid points, setting residual values appropriately
@@ -451,6 +546,7 @@ where
     MD: DenseMatrix,
     M: Matrix<V = MD::V, T = MD::T>,
 {
+    #[allow(unused_mut)]
     fn call_inplace(&self, x: &M::V, _t: M::T, mut y: &mut M::V) {
         let jx_tl = 0;
         let jy_tl = 0;
@@ -464,7 +560,8 @@ where
         }
     }
 
-    fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, mut y: &mut Self::V) {
+    #[allow(unused_mut)]
+    fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, mut y: &mut Self::V) {
         let jx_tl = 0;
         let jy_tl = 0;
         let jx_br = MX - 1;
@@ -489,6 +586,32 @@ where
     pub mass: Rc<FoodWebMass<'a, MD, M>>,
     pub init: Rc<FoodWebInit<'a, MD, M>>,
     pub out: Rc<FoodWebOut<'a, MD, M>>,
+}
+
+impl<'a, MD, M> FoodWeb<'a, MD, M> 
+where
+    MD: DenseMatrix,
+    M: Matrix<V = MD::V, T = MD::T>,
+{
+    pub fn new(context: &'a FoodWebContext<MD, M>, t0: M::T) -> Self {
+        let init = FoodWebInit::new(context);
+        let y0 = init.call(t0);
+        let rhs = FoodWebRhs::new(context, &y0, t0);
+        let mass = FoodWebMass::new(context, t0);
+        let out = FoodWebOut::new(context);
+
+        let init = Rc::new(init);
+        let rhs = Rc::new(rhs);
+        let mass = Rc::new(mass);
+        let out = Rc::new(out);
+
+        Self {
+            rhs,
+            mass,
+            init,
+            out,
+        }
+    }
 }
 
 impl<'a, MD, M> OdeEquations for FoodWeb<'a, MD, M> 
@@ -519,4 +642,47 @@ where
     }
     fn set_params(&mut self, _p: Self::V) {
     }
+}
+
+fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
+    let mut soln = OdeSolverSolution {
+        solution_points: Vec::new(),
+        sens_solution_points: None,
+        rtol: M::T::from(1e-5),
+        atol: M::V::from_element(2 * NUM_SPECIES, M::T::from(1e-5)),
+    };
+    let data = vec![
+        (vec![1.0e1, 1.0e1, 1.0e5, 1.0e5], 0.0),
+        (vec![1.0318e1, 1.0827e1, 1.0319e5, 1.0822e5], 1.0e-3),
+        (vec![1.6189e2, 1.9735e2, 1.6189e6, 1.9735e6], 1.0e-2),
+        (vec![2.4019e2, 2.7072e2, 2.4019e6, 2.7072e6], 1.0e-1),
+        (vec![2.4019e2, 2.7072e2, 2.4019e6, 2.7072e6], 4.0e-1),
+        (vec![2.4019e2, 2.7072e2, 2.4019e6, 2.7072e6], 7.0e-1),
+        (vec![2.4019e2, 2.7072e2, 2.4019e6, 2.7072e6], 1.0),
+    ];
+    for (values, time) in data {
+        let values = M::V::from_vec(values.iter().map(|v| M::T::from(*v)).collect::<Vec<_>>());
+        let time = M::T::from(time);
+        soln.push(values, time);
+    }
+    soln
+}
+
+
+pub fn foodweb_problem<MD, M>(context: &FoodWebContext<MD, M>) -> (
+    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
+    OdeSolverSolution<M::V>,
+) 
+where 
+    MD: DenseMatrix,
+    M: Matrix<V = MD::V, T = MD::T>,
+{
+    let rtol = M::T::from(1e-5);
+    let atol = M::V::from_element(NUM_SPECIES * MX * MY, M::T::from(1e-5));
+    let t0 = M::T::zero();
+    let h0 = M::T::from(1.0);
+    let eqn = FoodWeb::new(context, t0);
+    let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, false, false).unwrap();
+    let soln = soln::<M>();
+    (problem, soln)
 }

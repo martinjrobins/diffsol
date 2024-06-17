@@ -179,6 +179,7 @@ use op::{
     constant_closure_with_sens::ConstantClosureWithSens, init::InitOp,
     linear_closure_with_sens::LinearClosureWithSens,
 };
+pub use jacobian::{JacobianColoring, find_non_zeros_linear, find_non_zeros_nonlinear};
 use scalar::{IndexType, Scalar, Scale};
 use solver::SolverProblem;
 pub use vector::DefaultDenseMatrix;
