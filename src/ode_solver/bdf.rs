@@ -1269,6 +1269,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
+    #[cfg(feature = "diffsl")]
+    #[test]
+    fn test_bdf_faer_sparse_foodweb_diffsl() {
+        let mut context = crate::DiffSlContext::default();
+        let linear_solver = FaerSparseLU::default();
+        let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
+        let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
+        let (problem, soln) = crate::ode_solver::test_models::foodweb::foodweb_diffsl::<Mat<f64>, SparseColMat<f64>, 10>(&mut context);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+    }
+
     #[test]
     fn test_tstop_bdf() {
         let mut s = Bdf::default();

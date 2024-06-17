@@ -22,6 +22,139 @@ const DPRED: f64 = 0.05;
 const ALPHA: f64 = 50.0;
 const BETA: f64 = 1000.0;
 
+#[cfg(feature = "diffsl")]
+pub fn foodweb_diffsl<MD, M, const NX: usize>(
+    diffsl_context: &mut crate::DiffSlContext<M>,
+) -> (
+    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
+    OdeSolverSolution<M::V>,
+)
+where
+    MD: DenseMatrix<T = f64>,
+    M: Matrix<V = MD::V, T = MD::T>,
+{
+    use crate::OdeBuilder;
+
+    let context = FoodWebContext::<MD, M, NX>::default();
+    let (problem, _soln) = foodweb_problem::<MD, M, NX>(&context);
+    let u0 = problem.eqn.init().call(0.0);
+    let diffop = FoodWebDiff::<M, NX>::new(&u0, 0.0);
+    let diff = diffop.jacobian(&u0, 0.0);
+    let diff_diffsl = diff
+        .triplet_iter()
+        .map(|(i, j, v)| format!("            ({}, {}): {}", i, j, *v))
+        .collect::<Vec<_>>()
+        .join(",\n");
+
+    let mut xx = M::V::zeros(NX * NX);
+    let mut yy = M::V::zeros(NX * NX);
+    for jy in 0..NX {
+        let y = jy as f64 * AY / (NX as f64 - 1.0);
+        for jx in 0..NX {
+            let x = jx as f64 * AX / (NX as f64 - 1.0);
+            let loc = jx + NX * jy;
+            xx[loc] = x;
+            yy[loc] = y;
+        }
+    }
+    let xx_diffsl = xx
+        .as_slice()
+        .iter()
+        .map(|v| format!("            {}", v))
+        .collect::<Vec<_>>()
+        .join(",\n");
+    let yy_diffsl = yy
+        .as_slice()
+        .iter()
+        .map(|v| format!("            {}", v))
+        .collect::<Vec<_>>()
+        .join(",\n");
+
+    let code = format!(
+        "
+        in = []
+        AA {{ 1.0 }}
+        EE {{ 10000.0 }}
+        GG {{ 0.5e-6 }}
+        BB {{ 1.0 }}
+        ALPHA {{ 50.0 }}
+        BETA {{ 1000.0 }}
+        PI {{ 3.141592653589793 }}
+        DPREY {{ 1.0 }}
+        DPRED {{ 0.05 }}
+
+        D_ij {{
+{}
+        }}
+        xx_i {{
+{}
+        }}
+        yy_i {{
+{}
+        }}
+        tl_i {{ 
+            (0): 1.0, 
+            (1:{n}): 0.0,
+        }}
+        br_i {{ 
+            (0:{n1}): 0.0, 
+            ({n1}): 1.0,
+        }}
+        b_i {{
+            (1.0 + ALPHA * xx_i * yy_i + BETA * sin(4.0 * PI * xx_i) * sin(4.0 * PI * yy_i))
+        }}
+        xyfactor_i {{
+            pow(16.0 * xx_i * (1.0 - xx_i) * yy_i * (1.0 - yy_i), 2)
+        }}
+        u_i {{
+            c1 = 10.0 + xyfactor_i,
+            ({n}:{n2}): c2 = 1.0e5,
+        }}
+        dudt_i {{
+            (0:{n}): dc1dt = 0,
+            ({n}:{n2}): dc2dt = 0,
+        }}
+        M_i {{
+            dc1dt_j,
+            ({n}:{n2}): 0,
+        }}
+        c1diff_i {{
+            DPREY * D_ij * c1_j,
+        }}
+        c2diff_i {{
+            DPRED * D_ij * c2_j,
+        }}
+        F_i {{
+            c1diff_i + c1_i * (BB * b_i - AA * c1_i - GG * c2_i),
+            c2diff_i + c2_i * (-BB * b_i + EE * c1_i - AA * c2_i),
+        }}
+        out_i {{
+            tl_j * c1_j,
+            tl_j * c2_j,
+            br_j * c1_j,
+            br_j * c2_j,
+        }}",
+        diff_diffsl,
+        xx_diffsl,
+        yy_diffsl,
+        n = NX * NX,
+        n1 = NX * NX - 1,
+        n2 = 2 * NX * NX,
+    );
+
+    println!("{}", code);
+
+    diffsl_context.recompile(code.as_str()).unwrap();
+
+    let problem = OdeBuilder::new()
+        .rtol(1e-5)
+        .atol([1e-5])
+        .build_diffsl(diffsl_context)
+        .unwrap();
+    let soln = soln::<M>();
+    (problem, soln)
+}
+
 pub struct FoodWebContext<MD, M, const NX: usize>
 where
     MD: DenseMatrix,
@@ -678,6 +811,133 @@ where
         Some(&self.out)
     }
     fn set_params(&mut self, _p: Self::V) {}
+}
+
+struct FoodWebDiff<M, const NX: usize>
+where
+    M: Matrix,
+{
+    pub sparsity: Option<M::Sparsity>,
+    pub coloring: Option<JacobianColoring<M>>,
+}
+
+impl<M, const NX: usize> FoodWebDiff<M, NX>
+where
+    M: Matrix,
+{
+    pub fn new(y0: &M::V, t0: M::T) -> Self {
+        let mut ret = Self {
+            sparsity: None,
+            coloring: None,
+        };
+        let non_zeros = find_non_zeros_nonlinear(&ret, y0, t0);
+        ret.sparsity = Some(
+            MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone()).unwrap(),
+        );
+        ret.coloring = Some(JacobianColoring::new_from_non_zeros(&ret, non_zeros));
+        ret
+    }
+}
+
+impl<M, const NX: usize> Op for FoodWebDiff<M, NX>
+where
+    M: Matrix,
+{
+    type M = M;
+    type V = M::V;
+    type T = M::T;
+
+    fn nout(&self) -> usize {
+        NX * NX
+    }
+    fn nparams(&self) -> usize {
+        0
+    }
+    fn nstates(&self) -> usize {
+        NX * NX
+    }
+    fn sparsity(&self) -> Option<M::SparsityRef<'_>> {
+        self.sparsity.as_ref().map(|s| s.as_ref())
+    }
+}
+
+impl<M, const NX: usize> NonLinearOp for FoodWebDiff<M, NX>
+where
+    M: Matrix,
+{
+    #[allow(unused_mut)]
+    fn call_inplace(&self, x: &M::V, _t: M::T, mut y: &mut M::V) {
+        let nsmx: usize = NX;
+        let dx = AY / (NX as f64 - 1.0);
+        let dy = AY / (NX as f64 - 1.0);
+        let cox = M::T::from(1.0 / dx.powi(2));
+        let coy = M::T::from(1.0 / dy.powi(2));
+
+        /* Loop over grid points, evaluate interaction vector (length ns),
+        form diffusion difference terms, and load crate.                    */
+        for jy in 0..NX {
+            let idyu = if jy != NX - 1 {
+                nsmx as i32
+            } else {
+                -(nsmx as i32)
+            };
+            let idyl = if jy != 0 { nsmx as i32 } else { -(nsmx as i32) };
+
+            for jx in 0..NX {
+                let idxu = if jx != NX - 1 { 1 } else { -1 };
+                let idxl = if jx != 0 { 1 } else { -1 };
+                let loc = jx + nsmx * jy;
+
+                /* Differencing in y. */
+                let dcyli = x[loc] - x[usize::try_from(loc as i32 - idyl).unwrap()];
+                let dcyui = x[usize::try_from(loc as i32 + idyu).unwrap()] - x[loc];
+
+                /* Differencing in x. */
+                let dcxli = x[loc] - x[usize::try_from(loc as i32 - idxl).unwrap()];
+                let dcxui = x[usize::try_from(loc as i32 + idxu).unwrap()] - x[loc];
+
+                /* Compute the crate values at (xx,yy). */
+                y[loc] = coy * (dcyui - dcyli) + cox * (dcxui - dcxli);
+            }
+        }
+    }
+
+    #[allow(unused_mut)]
+    fn jac_mul_inplace(&self, _x: &M::V, _t: M::T, v: &M::V, mut y: &mut M::V) {
+        let nsmx: usize = NX;
+        let dx = AY / (NX as f64 - 1.0);
+        let dy = AY / (NX as f64 - 1.0);
+        let cox = M::T::from(1.0 / dx.powi(2));
+        let coy = M::T::from(1.0 / dy.powi(2));
+
+        /* Loop over grid points, evaluate interaction vector (length ns),
+        form diffusion difference terms, and load crate.                    */
+        for jy in 0..NX {
+            let idyu = if jy != NX - 1 {
+                nsmx as i32
+            } else {
+                -(nsmx as i32)
+            };
+            let idyl = if jy != 0 { nsmx as i32 } else { -(nsmx as i32) };
+
+            for jx in 0..NX {
+                let idxu = if jx != NX - 1 { 1 } else { -1 };
+                let idxl = if jx != 0 { 1 } else { -1 };
+                let loc = jx + nsmx * jy;
+
+                /* Differencing in y. */
+                let dcyli = v[loc] - v[usize::try_from(loc as i32 - idyl).unwrap()];
+                let dcyui = v[usize::try_from(loc as i32 + idyu).unwrap()] - v[loc];
+
+                /* Differencing in x. */
+                let dcxli = v[loc] - v[usize::try_from(loc as i32 - idxl).unwrap()];
+                let dcxui = v[usize::try_from(loc as i32 + idxu).unwrap()] - v[loc];
+
+                /* Compute the crate values at (xx,yy). */
+                y[loc] = coy * (dcyui - dcyli) + cox * (dcxui - dcxli);
+            }
+        }
+    }
 }
 
 fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
