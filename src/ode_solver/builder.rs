@@ -685,7 +685,7 @@ impl OdeBuilder {
     {
         use crate::ode_solver::diffsl;
         let p = Self::build_p::<M::V>(self.p);
-        let mut eqn = diffsl::DiffSl::new(context, self.use_coloring);
+        let mut eqn = diffsl::DiffSl::new(context, self.use_coloring || M::is_sparse());
         eqn.set_params(p);
         let atol = Self::build_atol::<M::V>(self.atol, eqn.rhs().nstates())?;
         OdeSolverProblem::new(

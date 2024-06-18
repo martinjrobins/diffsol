@@ -500,7 +500,7 @@ mod test {
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 510
+        number_of_calls: 509
         number_of_jac_muls: 180
         number_of_matrix_evals: 60
         "###);

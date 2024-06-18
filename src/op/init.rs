@@ -15,7 +15,7 @@ pub struct InitOp<Eqn: OdeEquations> {
 }
 
 impl<Eqn: OdeEquations> InitOp<Eqn> {
-    pub fn new(eqn: &Rc<Eqn>, t0: Eqn::T, y0: &Eqn::V, dy0: &Eqn::V) -> Self {
+    pub fn new(eqn: &Rc<Eqn>, t0: Eqn::T, y0: &Eqn::V) -> Self {
         let eqn = eqn.clone();
         let n = eqn.rhs().nstates();
         let mass_diagonal = eqn.mass().unwrap().matrix(t0).diagonal();
@@ -47,8 +47,7 @@ impl<Eqn: OdeEquations> InitOp<Eqn> {
         let neg_mass =
             Eqn::M::combine_at_indices(&m_u, &zero_ur, &zero_ll, &zero_lr, &algebraic_indices);
 
-        let mut y0 = y0.clone();
-        y0.copy_from_indices(dy0, &algebraic_indices);
+        let y0 = y0.clone();
         let y0 = RefCell::new(y0);
         Self {
             eqn,
@@ -129,7 +128,7 @@ mod tests {
         let y0 = Vcpu::from_vec(vec![1.0, 2.0, 3.0]);
         let dy0 = Vcpu::from_vec(vec![4.0, 5.0, 6.0]);
         let t = 0.0;
-        let initop = InitOp::new(&problem.eqn, t, &y0, &dy0);
+        let initop = InitOp::new(&problem.eqn, t, &y0);
         // check that the init function is correct
         let mut y_out = Vcpu::from_vec(vec![0.0, 0.0, 0.0]);
 

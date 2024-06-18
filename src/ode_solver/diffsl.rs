@@ -5,6 +5,7 @@ use diffsl::execution::Compiler;
 
 use crate::{
     jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring},
+    matrix::sparsity::MatrixSparsity,
     op::{LinearOp, NonLinearOp, Op},
     ConstantOp, Matrix, OdeEquations, Vector,
 };
@@ -139,11 +140,13 @@ pub struct DiffSlOut<'a, M: Matrix<T = T>> {
 pub struct DiffSlRhs<'a, M: Matrix<T = T>> {
     context: &'a DiffSlContext<M>,
     coloring: Option<JacobianColoring<M>>,
+    sparsity: Option<M::Sparsity>,
 }
 
 pub struct DiffSlMass<'a, M: Matrix<T = T>> {
     context: &'a DiffSlContext<M>,
     coloring: Option<JacobianColoring<M>>,
+    sparsity: Option<M::Sparsity>,
 }
 
 pub struct DiffSlInit<'a, M: Matrix<T = T>> {
@@ -173,12 +176,17 @@ impl<'a, M: Matrix<T = T>> DiffSlRhs<'a, M> {
         let mut ret = Self {
             context,
             coloring: None,
+            sparsity: None,
         };
 
         if use_coloring {
             let x0 = M::V::zeros(context.nstates);
             let t0 = 0.0;
             let non_zeros = find_non_zeros_nonlinear(&ret, &x0, t0);
+            ret.sparsity = Some(
+                MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone())
+                    .expect("invalid sparsity pattern"),
+            );
             ret.coloring = Some(JacobianColoring::new_from_non_zeros(&ret, non_zeros));
         }
         ret
@@ -193,11 +201,16 @@ impl<'a, M: Matrix<T = T>> DiffSlMass<'a, M> {
         let mut ret = Self {
             context,
             coloring: None,
+            sparsity: None,
         };
 
         if use_coloring {
             let t0 = 0.0;
             let non_zeros = find_non_zeros_linear(&ret, t0);
+            ret.sparsity = Some(
+                MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone())
+                    .expect("invalid sparsity pattern"),
+            );
             ret.coloring = Some(JacobianColoring::new_from_non_zeros(&ret, non_zeros));
         }
         Some(ret)
@@ -221,13 +234,32 @@ macro_rules! impl_op_for_diffsl {
             fn nparams(&self) -> usize {
                 self.context.nparams
             }
+            fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
+                self.sparsity.as_ref().map(|s| s.as_ref())
+            }
         }
     };
 }
 
 impl_op_for_diffsl!(DiffSlRhs);
 impl_op_for_diffsl!(DiffSlMass);
-impl_op_for_diffsl!(DiffSlInit);
+
+impl<M: Matrix<T = T>> Op for DiffSlInit<'_, M> {
+    type M = M;
+    type T = T;
+    type V = M::V;
+
+    fn nstates(&self) -> usize {
+        self.context.nstates
+    }
+    #[allow(clippy::misnamed_getters)]
+    fn nout(&self) -> usize {
+        self.context.nstates
+    }
+    fn nparams(&self) -> usize {
+        self.context.nparams
+    }
+}
 
 impl<M: Matrix<T = T>> Op for DiffSlRoot<'_, M> {
     type M = M;
@@ -393,9 +425,17 @@ impl<'a, M: Matrix<T = T>> OdeEquations for DiffSl<'a, M> {
     }
 
     fn set_params(&mut self, p: Self::V) {
+        // set the parameters in data
         self.context
             .compiler
             .set_inputs(p.as_slice(), self.context.data.borrow_mut().as_mut_slice());
+
+        // set_u0 will calculate all the constants in the equations based on the params
+        let mut dummy = M::V::zeros(self.context.nstates);
+        self.context.compiler.set_u0(
+            dummy.as_mut_slice(),
+            self.context.data.borrow_mut().as_mut_slice(),
+        );
     }
 
     fn init(&self) -> &Rc<Self::Init> {

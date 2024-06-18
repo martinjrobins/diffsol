@@ -188,18 +188,14 @@ impl<V: Vector> OdeSolverState<V> {
         if ode_problem.eqn.mass().is_none() {
             return Ok(());
         }
-        let f = Rc::new(InitOp::new(
-            &ode_problem.eqn,
-            ode_problem.t0,
-            &self.y,
-            &self.dy,
-        ));
+        let f = Rc::new(InitOp::new(&ode_problem.eqn, ode_problem.t0, &self.y));
         let rtol = ode_problem.rtol;
         let atol = ode_problem.atol.clone();
         let init_problem = SolverProblem::new(f.clone(), atol, rtol);
         root_solver.set_problem(&init_problem);
-        let mut y = f.y0.borrow().clone();
-        let yerr = f.y0.borrow().clone();
+        let mut y = self.dy.clone();
+        y.copy_from_indices(&self.y, &init_problem.f.algebraic_indices);
+        let yerr = y.clone();
         root_solver.solve_in_place(&mut y, self.t, &yerr)?;
         f.scatter_soln(&y, &mut self.y, &mut self.dy);
         Ok(())
@@ -238,19 +234,16 @@ impl<V: Vector> OdeSolverState<V> {
         for i in 0..ode_problem.eqn.rhs().nparams() {
             eqn_sens.init().set_param_index(i);
             eqn_sens.rhs().set_param_index(i);
-            let f = Rc::new(InitOp::new(
-                eqn_sens,
-                ode_problem.t0,
-                &self.s[i],
-                &self.ds[i],
-            ));
+            let f = Rc::new(InitOp::new(eqn_sens, ode_problem.t0, &self.s[i]));
             root_solver.set_problem(&SolverProblem::new(
                 f.clone(),
                 ode_problem.atol.clone(),
                 ode_problem.rtol,
             ));
-            let mut y = f.y0.borrow().clone();
-            let yerr = f.y0.borrow().clone();
+
+            let mut y = self.ds[i].clone();
+            y.copy_from_indices(&self.y, &f.algebraic_indices);
+            let yerr = y.clone();
             root_solver.solve_in_place(&mut y, self.t, &yerr)?;
             f.scatter_soln(&y, &mut self.s[i], &mut self.ds[i]);
         }

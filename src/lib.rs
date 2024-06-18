@@ -154,6 +154,7 @@ pub use ode_solver::sundials::SundialsIda;
 #[cfg(feature = "diffsl")]
 pub use ode_solver::diffsl::DiffSlContext;
 
+pub use jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring};
 pub use matrix::{default_solver::DefaultSolver, Matrix};
 use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
