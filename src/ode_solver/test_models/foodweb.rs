@@ -813,7 +813,6 @@ where
     M: Matrix,
 {
     pub sparsity: Option<M::Sparsity>,
-    pub coloring: Option<JacobianColoring<M>>,
 }
 
 impl<M, const NX: usize> FoodWebDiff<M, NX>
@@ -823,13 +822,11 @@ where
     pub fn new(y0: &M::V, t0: M::T) -> Self {
         let mut ret = Self {
             sparsity: None,
-            coloring: None,
         };
         let non_zeros = find_non_zeros_nonlinear(&ret, y0, t0);
         ret.sparsity = Some(
             MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone()).unwrap(),
         );
-        ret.coloring = Some(JacobianColoring::new_from_non_zeros(&ret, non_zeros));
         ret
     }
 }
