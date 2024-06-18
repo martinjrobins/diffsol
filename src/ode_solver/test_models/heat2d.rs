@@ -7,11 +7,14 @@
 //while for each boundary point, it is res_i = u_i.
 
 use crate::{
-    ode_solver::problem::OdeSolverSolution, scalar::Scalar, ConstantOp, LinearOp, Matrix,
-    NonLinearOp, OdeBuilder, OdeEquations, OdeSolverProblem, Vector,
+    ode_solver::problem::OdeSolverSolution, scalar::Scalar, Matrix, OdeBuilder, OdeEquations,
+    OdeSolverProblem, Vector,
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};
+
+#[cfg(feature = "diffsl")]
+use crate::{ConstantOp, LinearOp, NonLinearOp};
 
 #[cfg(feature = "diffsl")]
 pub fn heat2d_diffsl<M: Matrix<T = f64> + 'static, const MGRID: usize>(

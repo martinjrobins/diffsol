@@ -808,6 +808,7 @@ where
     fn set_params(&mut self, _p: Self::V) {}
 }
 
+#[cfg(feature = "diffsl")]
 struct FoodWebDiff<M, const NX: usize>
 where
     M: Matrix,
@@ -815,14 +816,13 @@ where
     pub sparsity: Option<M::Sparsity>,
 }
 
+#[cfg(feature = "diffsl")]
 impl<M, const NX: usize> FoodWebDiff<M, NX>
 where
     M: Matrix,
 {
     pub fn new(y0: &M::V, t0: M::T) -> Self {
-        let mut ret = Self {
-            sparsity: None,
-        };
+        let mut ret = Self { sparsity: None };
         let non_zeros = find_non_zeros_nonlinear(&ret, y0, t0);
         ret.sparsity = Some(
             MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone()).unwrap(),
@@ -831,6 +831,7 @@ where
     }
 }
 
+#[cfg(feature = "diffsl")]
 impl<M, const NX: usize> Op for FoodWebDiff<M, NX>
 where
     M: Matrix,
@@ -853,6 +854,7 @@ where
     }
 }
 
+#[cfg(feature = "diffsl")]
 impl<M, const NX: usize> NonLinearOp for FoodWebDiff<M, NX>
 where
     M: Matrix,
