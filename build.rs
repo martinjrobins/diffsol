@@ -24,11 +24,11 @@ fn compile_benches() -> Vec<String> {
 }
 
 fn main() {
-    // print out all env vars
-    for (key, value) in env::vars() {
-        println!("{}: {}", key, value);
+    // return if we are not using the sundials feature
+    if !cfg!(feature = "sundials") {
+        return;
     }
-
+    
     // compile sundials benches
     let mut files = compile_benches();
     files.push("benches/sundials_benches.rs".to_string());
