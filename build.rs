@@ -28,7 +28,7 @@ fn main() {
     if !cfg!(feature = "sundials") {
         return;
     }
-    
+
     // compile sundials benches
     let mut files = compile_benches();
     files.push("benches/sundials_benches.rs".to_string());
