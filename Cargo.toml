@@ -68,7 +68,7 @@ name = "solvers"
 harness = false
 
 [package.metadata.docs.rs]
-features = ["sundials", "diffsl-llvm12"]
+features = ["diffsl-llvm12"]
 
 [profile.profiling]
 inherits = "release"
