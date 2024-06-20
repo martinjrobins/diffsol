@@ -56,13 +56,19 @@ jobs:
       uses: KyleMayes/install-llvm-action@v1
       with:
         version: "14.0"
+    - name: Set features variable and install dependencies
+      run: |
+        if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+          echo "ADDITIONAL_FEATURES_FLAGS=--features sundials" >> $GITHUB_ENV
+          apt-get install -y libsuitesparse-dev
+        else
+          echo "ADDITIONAL_FEATURES_FLAGS=" >> $GITHUB_ENV
+        fi
     - name: Run tests - default features
       run: cargo test --verbose 
-    - name: Run tests - sundials features
-      run: cargo test --verbose --features sundials
-    - name: Run tests - sundials and diffsl features
-      run: cargo test --verbose --features diffsl-llvm14 --features sundials
+    - name: Run tests - all features
+      run: cargo test --verbose --features diffsl-llvm14 ${{ env.ADDITIONAL_FEATURES_FLAGS }}
     - name: Clippy - all features
-      run: cargo clippy --verbose --features diffsl-llvm14 --features sundials
+      run: cargo clippy --verbose --features diffsl-llvm14 ${{ env.ADDITIONAL_FEATURES_FLAGS }}
     - name: Docs - all features
       run: cargo rustdoc --features diffsl-llvm14 --features sundials
