@@ -71,4 +71,4 @@ jobs:
     - name: Clippy - all features
       run: cargo clippy --verbose --features diffsl-llvm14 ${{ env.ADDITIONAL_FEATURES_FLAGS }}
     - name: Docs - all features
-      run: cargo rustdoc --features diffsl-llvm14 --features sundials
+      run: cargo rustdoc --features diffsl-llvm14 ${{ env.ADDITIONAL_FEATURES_FLAGS }}
