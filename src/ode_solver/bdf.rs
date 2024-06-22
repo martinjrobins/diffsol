@@ -122,8 +122,8 @@ where
     const NEWTON_MAXITER: IndexType = 4;
     const MIN_FACTOR: f64 = 0.5;
     const MAX_FACTOR: f64 = 2.1;
-    const MAX_THRESHOLD : f64 = 2.0;
-    const MIN_THRESHOLD : f64 = 0.9;
+    const MAX_THRESHOLD: f64 = 2.0;
+    const MIN_THRESHOLD: f64 = 0.9;
     const MIN_TIMESTEP: f64 = 1e-32;
 
     fn new(nonlinear_solver: Nls) -> Self {
@@ -240,10 +240,12 @@ where
 
         self.nonlinear_problem_op()
             .set_c(self.state.as_ref().unwrap().h, self.alpha[self.order]);
-        
+
         // if step_size has changed sufficiently then update the jacobian
         let h1 = self.state.as_ref().unwrap().h;
-        if !self.updated_jacobian && (h1 / self.h0 < Eqn::T::from(3.0/5.0) || h1 / self.h0 > Eqn::T::from(5.0/3.0)) {
+        if !self.updated_jacobian
+            && (h1 / self.h0 < Eqn::T::from(3.0 / 5.0) || h1 / self.h0 > Eqn::T::from(5.0 / 3.0))
+        {
             self.nonlinear_problem_op().set_jacobian_is_stale();
             self.updated_jacobian = true;
         }
@@ -617,7 +619,7 @@ where
         if self.state.is_none() {
             return Err(anyhow!("State not set"));
         }
-        
+
         self.updated_jacobian = false;
         self.h0 = self.state.as_ref().unwrap().h;
 
@@ -824,11 +826,15 @@ where
             if factor < Eqn::T::from(Self::MIN_FACTOR) {
                 factor = Eqn::T::from(Self::MIN_FACTOR);
             }
-            if factor >= Eqn::T::from(Self::MAX_THRESHOLD) || factor < Eqn::T::from(Self::MIN_THRESHOLD) || max_index == 0 || max_index == 2 {
+            if factor >= Eqn::T::from(Self::MAX_THRESHOLD)
+                || factor < Eqn::T::from(Self::MIN_THRESHOLD)
+                || max_index == 0
+                || max_index == 2
+            {
                 self._update_step_size(factor);
             }
         }
-        
+
         // check for root within accepted step
         if let Some(root_fn) = self.problem().as_ref().unwrap().eqn.root() {
             let ret = self.root_finder.as_ref().unwrap().check_root(
