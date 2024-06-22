@@ -120,8 +120,10 @@ where
 {
     const MAX_ORDER: IndexType = 5;
     const NEWTON_MAXITER: IndexType = 4;
-    const MIN_FACTOR: f64 = 0.2;
-    const MAX_FACTOR: f64 = 10.0;
+    const MIN_FACTOR: f64 = 0.5;
+    const MAX_FACTOR: f64 = 2.1;
+    const MAX_THRESHOLD : f64 = 2.0;
+    const MIN_THRESHOLD : f64 = 0.9;
     const MIN_TIMESTEP: f64 = 1e-32;
 
     fn new(nonlinear_solver: Nls) -> Self {
@@ -819,7 +821,12 @@ where
             if factor > Eqn::T::from(Self::MAX_FACTOR) {
                 factor = Eqn::T::from(Self::MAX_FACTOR);
             }
-            self._update_step_size(factor);
+            if factor < Eqn::T::from(Self::MIN_FACTOR) {
+                factor = Eqn::T::from(Self::MIN_FACTOR);
+            }
+            if factor >= Eqn::T::from(Self::MAX_THRESHOLD) || factor < Eqn::T::from(Self::MIN_THRESHOLD) || max_index == 0 || max_index == 2 {
+                self._update_step_size(factor);
+            }
         }
         
         // check for root within accepted step
