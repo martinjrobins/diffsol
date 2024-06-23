@@ -2,8 +2,8 @@ use std::rc::Rc;
 
 use crate::{
     find_non_zeros_linear, find_non_zeros_nonlinear, ode_solver::problem::OdeSolverSolution,
-    ConstantOp, JacobianColoring, LinearOp, Matrix, MatrixSparsity, NonLinearOp,
-    OdeEquations, OdeSolverProblem, Op, UnitCallable, Vector,
+    ConstantOp, JacobianColoring, LinearOp, Matrix, MatrixSparsity, NonLinearOp, OdeEquations,
+    OdeSolverProblem, Op, UnitCallable, Vector,
 };
 use num_traits::Zero;
 
@@ -30,7 +30,7 @@ pub fn foodweb_diffsl<M, const NX: usize>(
     OdeSolverSolution<M::V>,
 )
 where
-    M: Matrix<T=f64>,
+    M: Matrix<T = f64>,
 {
     use crate::OdeBuilder;
 
@@ -153,10 +153,10 @@ pub struct FoodWebContext<M, const NX: usize>
 where
     M: Matrix,
 {
-    acoef: Vec<M::V>,
-    bcoef: M::V,
-    cox: M::V,
-    coy: M::V,
+    acoef: [[M::T; NUM_SPECIES]; NUM_SPECIES],
+    bcoef: [M::T; NUM_SPECIES],
+    cox: [M::T; NUM_SPECIES],
+    coy: [M::T; NUM_SPECIES],
     nstates: usize,
 }
 
@@ -240,10 +240,10 @@ where
     const DY: f64 = AY / (NX as f64 - 1.0);
 
     pub fn new() -> Self {
-        let mut acoef = vec![M::V::zeros(NUM_SPECIES); NUM_SPECIES];
-        let mut bcoef = M::V::zeros(NUM_SPECIES);
-        let mut cox = M::V::zeros(NUM_SPECIES);
-        let mut coy = M::V::zeros(NUM_SPECIES);
+        let mut acoef = [[M::T::zero(); NUM_SPECIES]; NUM_SPECIES];
+        let mut bcoef = [M::T::zero(); NUM_SPECIES];
+        let mut cox = [M::T::zero(); NUM_SPECIES];
+        let mut coy = [M::T::zero(); NUM_SPECIES];
         let nstates = NUM_SPECIES * NX * NX;
 
         for i in 0..NPREY {
@@ -455,6 +455,10 @@ where
                     -(NUM_SPECIES as i32)
                 };
                 let loc = NUM_SPECIES * jx + nsmx * jy;
+                let locxu = (loc as i32 + idxu) as usize;
+                let locxl = (loc as i32 - idxl) as usize;
+                let locyu = (loc as i32 + idyu) as usize;
+                let locyl = (loc as i32 - idyl) as usize;
 
                 /*
                  * WebRates: Evaluate reaction rates at a given spatial point.
@@ -481,16 +485,12 @@ where
                 /* Loop over species, do differencing, load crate segment. */
                 for is in 0..NUM_SPECIES {
                     /* Differencing in y. */
-                    let dcyli =
-                        x[loc + is] - x[usize::try_from(loc as i32 - idyl + is as i32).unwrap()];
-                    let dcyui =
-                        x[usize::try_from(loc as i32 + idyu + is as i32).unwrap()] - x[loc + is];
+                    let dcyli = x[loc + is] - x[locyl + is];
+                    let dcyui = x[locyu + is] - x[loc + is];
 
                     /* Differencing in x. */
-                    let dcxli =
-                        x[loc + is] - x[usize::try_from(loc as i32 - idxl + is as i32).unwrap()];
-                    let dcxui =
-                        x[usize::try_from(loc as i32 + idxu + is as i32).unwrap()] - x[loc + is];
+                    let dcxli = x[loc + is] - x[locxl + is];
+                    let dcxui = x[locxu + is] - x[loc + is];
 
                     /* Compute the crate values at (xx,yy). */
                     y[loc + is] = self.context.coy[is] * (dcyui - dcyli)
@@ -533,6 +533,10 @@ where
                     -(NUM_SPECIES as i32)
                 };
                 let loc = NUM_SPECIES * jx + nsmx * jy;
+                let locxu = (loc as i32 + idxu) as usize;
+                let locxl = (loc as i32 - idxl) as usize;
+                let locyu = (loc as i32 + idyu) as usize;
+                let locyl = (loc as i32 - idyl) as usize;
 
                 /*
                  * WebRates: Evaluate reaction rates at a given spatial point.
@@ -563,16 +567,12 @@ where
                 /* Loop over species, do differencing, load crate segment. */
                 for is in 0..NUM_SPECIES {
                     /* Differencing in y. */
-                    let dcyli =
-                        v[loc + is] - v[usize::try_from(loc as i32 - idyl + is as i32).unwrap()];
-                    let dcyui =
-                        v[usize::try_from(loc as i32 + idyu + is as i32).unwrap()] - v[loc + is];
+                    let dcyli = v[loc + is] - v[locyl + is];
+                    let dcyui = v[locyu + is] - v[loc + is];
 
                     /* Differencing in x. */
-                    let dcxli =
-                        v[loc + is] - v[usize::try_from(loc as i32 - idxl + is as i32).unwrap()];
-                    let dcxui =
-                        v[usize::try_from(loc as i32 + idxu + is as i32).unwrap()] - v[loc + is];
+                    let dcxli = v[loc + is] - v[locxl + is];
+                    let dcxui = v[locxu + is] - v[loc + is];
 
                     /* Compute the crate values at (xx,yy). */
                     y[loc + is] = self.context.coy[is] * (dcyui - dcyli)
@@ -758,7 +758,7 @@ where
     }
 }
 
-impl<'a,  M, const NX: usize> OdeEquations for FoodWeb<'a, M, NX>
+impl<'a, M, const NX: usize> OdeEquations for FoodWeb<'a, M, NX>
 where
     M: Matrix,
 {
