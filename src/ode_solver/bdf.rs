@@ -1291,8 +1291,18 @@ mod test {
         let linear_solver = FaerSparseLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
-        let (problem, soln) = foodweb_problem::<Mat<f64>, SparseColMat<f64>, 10>(&foodweb_context);
+        let (problem, soln) = foodweb_problem::<SparseColMat<f64>, 10>(&foodweb_context);
         test_ode_solver(&mut s, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 38
+        number_of_steps: 145
+        number_of_error_test_failures: 0
+        number_of_nonlinear_solver_iterations: 306
+        number_of_nonlinear_solver_fails: 8
+        initial_step_size: 0.000000010582477991775095
+        final_step_size: 0.45978834357195764
+        "###);
     }
 
     #[cfg(feature = "diffsl")]
@@ -1303,7 +1313,6 @@ mod test {
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
         let (problem, soln) = crate::ode_solver::test_models::foodweb::foodweb_diffsl::<
-            Mat<f64>,
             SparseColMat<f64>,
             10,
         >(&mut context);

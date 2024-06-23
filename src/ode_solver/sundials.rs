@@ -438,12 +438,12 @@ where
 
 #[cfg(test)]
 mod test {
+
     use crate::{
         ode_solver::{
-            test_models::{exponential_decay::exponential_decay_problem, robertson::robertson},
+            test_models::{exponential_decay::exponential_decay_problem, foodweb::{foodweb_problem, FoodWebContext}, robertson::robertson},
             tests::{test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut},
-        },
-        OdeEquations, Op, SundialsIda, SundialsMatrix,
+        }, OdeEquations, Op, SundialsIda, SundialsMatrix
     };
 
     type M = SundialsMatrix;
@@ -503,6 +503,24 @@ mod test {
         number_of_calls: 509
         number_of_jac_muls: 180
         number_of_matrix_evals: 60
+        "###);
+    }
+    
+    #[test]
+    fn test_sundials_foodweb() {
+        let foodweb_context = FoodWebContext::default();
+        let mut s = crate::SundialsIda::default();
+        let (problem, soln) = foodweb_problem::<crate::SundialsMatrix, 10>(&foodweb_context);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 42
+        number_of_steps: 256
+        number_of_error_test_failures: 9
+        number_of_nonlinear_solver_iterations: 458
+        number_of_nonlinear_solver_fails: 11
+        initial_step_size: 0.001
+        final_step_size: 1.8099338983079056
         "###);
     }
 }

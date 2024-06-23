@@ -8,7 +8,6 @@ use diffsol::{
     },
     SparseColMat,
 };
-use faer::Mat;
 mod sundials_benches;
 
 fn criterion_benchmark(c: &mut Criterion) {
@@ -143,6 +142,14 @@ fn criterion_benchmark(c: &mut Criterion) {
         nalgebra::DMatrix<f64>
     );
 
+    bench_diffsl!(
+        nalgebra_bdf_diffsl_robertson,
+        bdf,
+        robertson,
+        robertson_diffsl,
+        nalgebra::DMatrix<f64>
+    );
+
     macro_rules! bench_wsize {
         ($name:ident, $solver:ident, $model:ident, $model_problem:ident, $matrix:ty, $size:expr) => {
             c.bench_function(stringify!($name), |b| {
@@ -226,10 +233,10 @@ fn criterion_benchmark(c: &mut Criterion) {
     );
 
     macro_rules! bench_foodweb {
-        ($name:ident, $solver:ident, $model:ident, $model_problem:ident, $matrix_dense:ty, $matrix:ty, $size:expr) => {
+        ($name:ident, $solver:ident, $model:ident, $model_problem:ident, $matrix:ty, $size:expr) => {
             c.bench_function(stringify!($name), |b| {
                 let context = FoodWebContext::default();
-                let (problem, soln) = $model_problem::<$matrix_dense, $matrix, $size>(&context);
+                let (problem, soln) = $model_problem::<$matrix, $size>(&context);
                 b.iter(|| benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t))
             });
         };
@@ -240,7 +247,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         bdf,
         foodweb,
         foodweb_problem,
-        Mat<f64>,
         SparseColMat<f64>,
         5
     );
@@ -249,7 +255,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         bdf,
         foodweb,
         foodweb_problem,
-        Mat<f64>,
         SparseColMat<f64>,
         10
     );
@@ -258,7 +263,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         bdf,
         foodweb,
         foodweb_problem,
-        Mat<f64>,
         SparseColMat<f64>,
         20
     );
@@ -267,7 +271,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         tr_bdf2,
         foodweb,
         foodweb_problem,
-        Mat<f64>,
         SparseColMat<f64>,
         5
     );
@@ -276,7 +279,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         tr_bdf2,
         foodweb,
         foodweb_problem,
-        Mat<f64>,
         SparseColMat<f64>,
         10
     );
@@ -285,7 +287,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         tr_bdf2,
         foodweb,
         foodweb_problem,
-        Mat<f64>,
         SparseColMat<f64>,
         20
     );
@@ -294,7 +295,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         esdirk34,
         foodweb,
         foodweb_problem,
-        Mat<f64>,
         SparseColMat<f64>,
         5
     );
@@ -303,7 +303,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         esdirk34,
         foodweb,
         foodweb_problem,
-        Mat<f64>,
         SparseColMat<f64>,
         10
     );
@@ -312,7 +311,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         esdirk34,
         foodweb,
         foodweb_problem,
-        Mat<f64>,
         SparseColMat<f64>,
         20
     );
@@ -376,13 +374,12 @@ fn criterion_benchmark(c: &mut Criterion) {
     bench_sundials!(sundials_roberts_dns, idaRoberts_dns);
 
     macro_rules! bench_diffsl_foodweb {
-        ($name:ident, $solver:ident, $model:ident, $model_problem:ident, $matrix_dense:ty, $matrix:ty, $size:expr) => {
+        ($name:ident, $solver:ident, $model:ident, $model_problem:ident, $matrix:ty, $size:expr) => {
             #[cfg(feature = "diffsl")]
             c.bench_function(stringify!($name), |b| {
                 b.iter(|| {
                     let mut context = diffsol::DiffSlContext::default();
                     let (problem, soln) = diffsol::ode_solver::test_models::$model::$model_problem::<
-                        $matrix_dense,
                         $matrix,
                         $size,
                     >(&mut context);
@@ -397,7 +394,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         bdf,
         foodweb,
         foodweb_diffsl,
-        Mat<f64>,
         SparseColMat<f64>,
         5
     );
@@ -406,7 +402,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         bdf,
         foodweb,
         foodweb_diffsl,
-        Mat<f64>,
         SparseColMat<f64>,
         10
     );
@@ -415,7 +410,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         bdf,
         foodweb,
         foodweb_diffsl,
-        Mat<f64>,
         SparseColMat<f64>,
         20
     );
