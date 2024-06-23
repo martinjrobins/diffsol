@@ -6,9 +6,11 @@ fn compile_benches() -> Vec<String> {
         "benches/idaFoodWeb_bnd_5.c",
         "benches/idaFoodWeb_bnd_10.c",
         "benches/idaFoodWeb_bnd_20.c",
+        "benches/idaFoodWeb_bnd_30.c",
         "benches/idaHeat2d_bnd_5.c",
         "benches/idaHeat2d_bnd_10.c",
         "benches/idaHeat2d_bnd_20.c",
+        "benches/idaHeat2d_bnd_30.c",
         "benches/idaRoberts_dns.c",
     ];
     let includes = [

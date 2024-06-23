@@ -16,13 +16,13 @@ problems = [
     {
         "name": "heat2d",
         "reference_name": "heat2d_klu",
-        "arg": [5, 10, 20],
+        "arg": [5, 10, 20, 30],
         "solvers": ["faer_sparse_esdirk", "faer_sparse_tr_bdf2", "faer_sparse_bdf"]
     },
     {
         "name": "foodweb",
         "reference_name": "foodweb_bnd",
-        "arg": [5, 10, 20],
+        "arg": [5, 10, 20, 30],
         "solvers": ["faer_sparse_esdirk", "faer_sparse_tr_bdf2", "faer_sparse_bdf"]
     },
 ]
@@ -67,7 +67,7 @@ for problem in problems:
             ax = ax3
         if problem['arg'] is None:
             # plot a horizontal line
-            ax.plot([5, 20], [y, y], label=label)
+            ax.plot([5, 30], [y, y], label=label)
         else:
             ax.plot(problem['arg'], y, label=label)
 for ax in [ax1, ax2, ax3]:
