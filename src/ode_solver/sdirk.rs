@@ -71,7 +71,9 @@ where
 {
     const NEWTON_MAXITER: usize = 10;
     const MIN_FACTOR: f64 = 0.2;
+    const MIN_THRESHOLD: f64 = 1.0;
     const MAX_FACTOR: f64 = 10.0;
+    const MAX_THRESHOLD: f64 = 1.2;
     const MIN_TIMESTEP: f64 = 1e-13;
 
     pub fn new(tableau: Tableau<M>, linear_solver: LS) -> Self {
@@ -358,12 +360,12 @@ where
     }
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>> {
-        // optionally do the first step
         if self.state.is_none() {
             return Err(anyhow!("State not set"));
         }
         let n = self.state.as_ref().unwrap().y.len();
 
+        // optionally do the first step
         let start = if self.is_sdirk { 0 } else { 1 };
         let mut updated_jacobian = false;
 
@@ -371,13 +373,14 @@ where
         let mut second_step_attempt = false;
         let mut error = <Eqn::V as Vector>::zeros(n);
 
-        let mut t1: Eqn::T;
+        let mut factor: Eqn::T;
 
         // loop until step is accepted
         'step: loop {
             let t0 = self.state.as_ref().unwrap().t;
             let h = self.state.as_ref().unwrap().h;
             // if start == 1, then we need to compute the first stage
+            // from the last stage of the previous step
             if start == 1 {
                 {
                     let mut hf = self.diff.column_mut(0);
@@ -476,8 +479,11 @@ where
 
             // solve for  (M - h * c * J) * error = error_est as by Hosea, M. E., & Shampine, L. F. (1996). Analysis and implementation of TR-BDF2. Applied Numerical Mathematics, 20(1-2), 21-37.
             // todo: this is failing if h is too small, perhaps only do it for sufficiently large h?
-            //self.nonlinear_solver
-            //    .solve_linearised_in_place(&mut error)?;
+            // todo: this seems to just make it slower, so removing....
+            //if self.state.as_ref().unwrap().h > Eqn::T::from(1e-10) {
+            //    self.nonlinear_solver
+            //        .solve_linearised_in_place(&mut error)?;
+            //}
 
             // compute error norm
             let atol = self.problem().as_ref().unwrap().atol.as_ref();
@@ -505,7 +511,7 @@ where
             let niter = self.nonlinear_solver.convergence().niter() as f64;
             let safety = Eqn::T::from(0.9 * (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter));
             let order = self.tableau.order() as f64;
-            let mut factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (order + 1.0)));
+            factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (order + 1.0)));
             if factor < Eqn::T::from(Self::MIN_FACTOR) {
                 factor = Eqn::T::from(Self::MIN_FACTOR);
             }
@@ -515,16 +521,13 @@ where
 
             // adjust step size for next step
             let state = self.state.as_mut().unwrap();
-            t1 = state.t + state.h;
-            state.h *= factor;
+            //t1 = state.t + state.h;
+            //state.h *= factor;
 
             // if step size too small, then fail
             if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
                 return Err(anyhow::anyhow!("Step size too small at t = {}", state.t));
             }
-
-            // update c for new step size
-            self.nonlinear_solver.problem().f.set_h(state.h);
 
             // test error is within tolerance
             if error_norm <= Eqn::T::from(1.0) {
@@ -532,29 +535,38 @@ where
             }
             // step is rejected, factor reduces step size, so we try again with the smaller step size
             self.statistics.number_of_error_test_failures += 1;
-        }
+            state.h *= factor;
 
-        //setup jacobian for next step (h was changed so jacobian needs to be recalculated)
-        self.nonlinear_solver.reset_jacobian(&self.old_f, t1);
+            // update c for new step size
+            self.nonlinear_solver.problem().f.set_h(state.h);
+        }
 
         // take the step
         let state = self.state.as_mut().unwrap();
-        let dt = t1 - state.t;
         self.old_t = state.t;
-        state.t = t1;
+        state.t += state.h;
 
         // last stage is the solution and is the same as old_f
         // todo: can we get rid of old_f and just use diff?
-        self.old_f.mul_assign(scale(Eqn::T::one() / dt));
+        self.old_f.mul_assign(scale(Eqn::T::one() / state.h));
         std::mem::swap(&mut self.old_f, &mut state.dy);
 
         // old_y already has the new y soln
         std::mem::swap(&mut self.old_y, &mut state.y);
 
         for i in 0..self.sdiff.len() {
-            self.old_f_sens[i].mul_assign(scale(Eqn::T::one() / dt));
+            self.old_f_sens[i].mul_assign(scale(Eqn::T::one() / state.h));
             std::mem::swap(&mut self.old_f_sens[i], &mut state.ds[i]);
             std::mem::swap(&mut self.old_y_sens[i], &mut state.s[i]);
+        }
+
+        // see if we want to update the step size
+        if factor >= Eqn::T::from(Self::MAX_THRESHOLD) || factor < Eqn::T::from(Self::MIN_THRESHOLD)
+        {
+            state.h *= factor;
+            self.nonlinear_solver.problem().f.set_h(state.h);
+            //setup jacobian for next step (h was changed so jacobian needs to be recalculated)
+            self.nonlinear_solver.reset_jacobian(&self.old_f, state.t);
         }
 
         self.is_state_mutated = false;
