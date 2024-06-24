@@ -59,6 +59,7 @@ sundials-sys = { git = "https://github.com/martinjrobins/sundials-sys.git", vers
 [dev-dependencies]
 insta = { version = "1.34.0", features = ["yaml"] }
 criterion = { version = "0.4" }
+seq-macro = "0.3.5"
 
 [build-dependencies]
 cc = "1.0.99"
