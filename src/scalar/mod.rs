@@ -3,7 +3,7 @@ use std::{
     ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign},
 };
 
-use nalgebra::{ClosedAdd, ClosedDiv, ClosedMul, ClosedSub, ComplexField, SimdRealField};
+use nalgebra::{ComplexField, SimdRealField};
 use num_traits::{Pow, Signed};
 
 use crate::vector::VectorView;
@@ -19,11 +19,7 @@ pub trait Scalar:
     + SimdRealField
     + ComplexField<RealField = Self>
     + Copy
-    + ClosedSub
     + From<f64>
-    + ClosedMul
-    + ClosedDiv
-    + ClosedAdd
     + Signed
     + Into<f64>
     + PartialOrd

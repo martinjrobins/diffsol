@@ -32,9 +32,9 @@ diffsl-llvm16 = ["diffsl16-0", "diffsl"]
 diffsl-llvm17 = ["diffsl17-0", "diffsl"]
 
 [dependencies]
-nalgebra = ">=0.32"
-nalgebra-sparse = ">=0.9"
-anyhow = ">=1.0.77"
+nalgebra = "0.33"
+nalgebra-sparse = "0.10"
+anyhow = "1.0.86"
 num-traits = "0.2.17"
 ouroboros = "0.18.2"
 serde = { version = "1.0.196", features = ["derive"] }
