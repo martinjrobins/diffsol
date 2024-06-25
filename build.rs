@@ -14,7 +14,7 @@ fn compile_benches() -> Vec<String> {
         "benches/idaRoberts_dns.c",
     ];
     let includes = [
-        format!("{}", env::var("DEP_SUNDIALS_KLU_INCLUDE").unwrap()),
+        env::var("DEP_SUNDIALS_KLU_INCLUDE").unwrap().to_string(),
         format!("{}/include", env::var("DEP_SUNDIALS_ROOT").unwrap()),
     ];
     let libname = "sundials_benches";

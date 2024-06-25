@@ -1,7 +1,18 @@
 use std::{cell::RefCell, rc::Rc};
 
 use anyhow::Result;
-use suitesparse_sys::{klu_l_analyze, klu_l_common, klu_l_defaults, klu_l_solve, klu_l_factor};
+
+#[cfg(target_pointer_width = "32")]
+use suitesparse_sys::{klu_analyze, klu_common, klu_defaults, klu_solve, klu_factor, klu_free_symbolic, klu_free_numeric, klu_symbolic, klu_numeric};
+
+#[cfg(target_pointer_width = "32")]
+type KluIndextype = i32;
+
+#[cfg(target_pointer_width = "64")]
+use suitesparse_sys::{klu_l_analyze as klu_analyze, klu_l_common as klu_common, klu_l_defaults as klu_defaults, klu_l_solve as klu_solve, klu_l_factor as klu_factor, klu_l_symbolic as klu_symbolic, klu_l_free_symbolic as klu_free_symbolic, klu_l_free_numeric as klu_free_numeric, klu_l_numeric as klu_numeric};
+
+#[cfg(target_pointer_width = "64")]
+type KluIndextype = i64;
 
 use crate::{linear_solver::LinearSolver, matrix::MatrixCommon, op::linearise::LinearisedOp, scalar::IndexType, vector::Vector, LinearOp, Matrix, MatrixSparsityRef, NonLinearOp, Op, SolverProblem};
 
@@ -16,14 +27,14 @@ trait VectorKLU: Vector {
 }
 
 struct KluSymbolic {
-    inner: *mut suitesparse_sys::klu_l_symbolic,
-    common: *mut suitesparse_sys::klu_l_common,
+    inner: *mut klu_symbolic,
+    common: *mut klu_common,
 }
 
 impl KluSymbolic {
-    fn try_from_matrix(mat: &mut impl MatrixKLU, common: *mut klu_l_common) -> Result<Self> {
+    fn try_from_matrix(mat: &mut impl MatrixKLU, common: *mut klu_common) -> Result<Self> {
         let n = mat.nrows() as i64;
-        let inner = unsafe { klu_l_analyze(n, mat.column_pointers_mut().as_mut_ptr() as *mut i64, mat.row_indices_mut().as_mut_ptr() as *mut i64, common) };
+        let inner = unsafe { klu_analyze(n, mat.column_pointers_mut().as_mut_ptr() as *mut KluIndextype, mat.row_indices_mut().as_mut_ptr() as *mut KluIndextype, common) };
         if inner.is_null() {
             return Err(anyhow::anyhow!("KLU failed to analyze"));
         };
@@ -36,19 +47,19 @@ impl KluSymbolic {
 impl Drop for KluSymbolic {
     fn drop(&mut self) {
         unsafe {
-            klu_free_l_symbolic(&mut self.inner, self.common);
+            klu_free_symbolic(&mut self.inner, self.common);
         }
     }
 }
 
 struct KluNumeric {
-    inner: *mut klu_l_numeric,
-    common: *mut klu_l_common,
+    inner: *mut klu_numeric,
+    common: *mut klu_common,
 }
 
 impl KluNumeric {
     fn try_from_symbolic(symbolic: &mut KluSymbolic, mat: &mut impl MatrixKLU) -> Result<Self> {
-        let inner = unsafe { klu_l_factor( mat.column_pointers_mut().as_mut_ptr() as *mut i64, mat.row_indices_mut().as_mut_ptr() as *mut i64, mat.values_mut().as_mut_ptr(), symbolic.inner, symbolic.common) };
+        let inner = unsafe { klu_factor( mat.column_pointers_mut().as_mut_ptr() as *mut KluIndextype, mat.row_indices_mut().as_mut_ptr() as *mut KluIndextype, mat.values_mut().as_mut_ptr(), symbolic.inner, symbolic.common) };
         if inner.is_null() {
             return Err(anyhow::anyhow!("KLU failed to factorize"));
         };
@@ -62,25 +73,25 @@ impl KluNumeric {
 impl Drop for KluNumeric {
     fn drop(&mut self) {
         unsafe {
-            suitesparse_sys::klu_free_numeric(&mut self.inner, self.common);
+            klu_free_numeric(&mut self.inner, self.common);
         }
     }
 }
 
 struct KluCommon {
-    inner: suitesparse_sys::klu_l_common,
+    inner: klu_common,
 }
 
 impl Default for KluCommon {
     fn default() -> Self {
-        let mut inner = suitesparse_sys::klu_l_common::default();
-        unsafe { klu_l_defaults(&mut inner) };
+        let mut inner = klu_common::default();
+        unsafe { klu_defaults(&mut inner) };
         Self { inner }
     }
 }
 
 impl KluCommon {
-    fn as_mut(&mut self) -> *mut suitesparse_sys::klu_l_common {
+    fn as_mut(&mut self) -> *mut klu_common {
         &mut self.inner
     }
 }
@@ -138,7 +149,7 @@ where
         }
         let klu_numeric = self.klu_numeric.as_ref().unwrap();
         let klu_symbolic = self.klu_symbolic.as_ref().unwrap();
-        let n = self.matrix.as_ref().unwrap().nrows() as i32;
+        let n = self.matrix.as_ref().unwrap().nrows() as KluIndextype;
         let mut klu_common= self.klu_common.borrow_mut();
         unsafe { klu_solve(klu_symbolic.inner, klu_numeric.inner, n, 1, x.values_mut(), klu_common.as_mut()) };
         Ok(())
