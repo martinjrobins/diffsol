@@ -126,7 +126,7 @@ where
     const MIN_THRESHOLD: f64 = 0.9;
     const MIN_TIMESTEP: f64 = 1e-32;
 
-    fn new(nonlinear_solver: Nls) -> Self {
+    pub fn new(nonlinear_solver: Nls) -> Self {
         let n = 1;
 
         // kappa values for difference orders, taken from Table 1 of [1]
@@ -898,7 +898,7 @@ mod test {
                 test_state_mut_on_problem,
             },
         },
-        Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquations, Op, SparseColMat,
+        Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquations, Op, SparseColMat, KLU,
     };
 
     use faer::Mat;
@@ -1085,6 +1085,15 @@ mod test {
     #[test]
     fn bdf_test_faer_sparse_robertson() {
         let linear_solver = FaerSparseLU::default();
+        let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
+        let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
+        let (problem, soln) = robertson::<SparseColMat<f64>>(false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+    }
+
+    #[test]
+    fn bdf_test_faer_sparse_ku_robertson() {
+        let linear_solver = KLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
         let (problem, soln) = robertson::<SparseColMat<f64>>(false);
