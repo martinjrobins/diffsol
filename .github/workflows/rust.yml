@@ -25,7 +25,7 @@ jobs:
 
   unit-tests:
     name: Tests - ${{ matrix.os }} - ${{ matrix.toolchain }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
         matrix:
           toolchain:

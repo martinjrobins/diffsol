@@ -14,7 +14,7 @@ fn compile_benches() -> Vec<String> {
         "benches/idaRoberts_dns.c",
     ];
     let includes = [
-        env::var("DEP_SUNDIALS_KLU_INCLUDE").unwrap(),
+        format!("{}", env::var("DEP_SUNDIALS_KLU_INCLUDE").unwrap()),
         format!("{}/include", env::var("DEP_SUNDIALS_ROOT").unwrap()),
     ];
     let libname = "sundials_benches";
@@ -26,7 +26,7 @@ fn compile_benches() -> Vec<String> {
 }
 
 fn main() {
-    // return if we are not using the sundials feature
+    // return if we are not using the sundials and suitesparse features
     if !cfg!(feature = "sundials") {
         return;
     }

@@ -151,13 +151,11 @@ fn criterion_benchmark(c: &mut Criterion) {
     );
 
     macro_rules! bench_wsize {
-        ($name:ident, $solver:ident, $model:ident, $model_problem:ident, $matrix:ty) => {
-            seq!(N in [5, 10, 20, 30] {
-                c.bench_function(stringify!($name, "_", N), |b| {
-                    let (problem, soln) = $model_problem::<$matrix, N>();
-                    b.iter(|| benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t))
-                });
-            });
+        ($name:ident, $solver:ident, $model:ident, $model_problem:ident, $matrix:ty, $($N:expr),+) => {
+            $(c.bench_function(concat!(stringify!($name), "_", $N), |b| {
+                let (problem, soln) = $model_problem::<$matrix, $N>();
+                b.iter(|| benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t))
+            });)+
         };
     }
 
@@ -167,6 +165,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         heat2d,
         head2d_problem,
         SparseColMat<f64>,
+        5, 10, 20, 30
     );
     bench_wsize!(
         faer_sparse_tr_bdf2_heat2d,
@@ -174,6 +173,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         heat2d,
         head2d_problem,
         SparseColMat<f64>,
+        5, 10, 20, 30
     );
     bench_wsize!(
         faer_sparse_esdirk_heat2d,
@@ -181,17 +181,16 @@ fn criterion_benchmark(c: &mut Criterion) {
         heat2d,
         head2d_problem,
         SparseColMat<f64>,
+        5, 10, 20, 30
     );
 
     macro_rules! bench_foodweb {
-        ($name:ident, $solver:ident, $model:ident, $model_problem:ident, $matrix:ty) => {
-            seq!(N in [5, 10, 20, 30] {
-                c.bench_function(stringify!($name, "_", N), |b| {
-                    let context = FoodWebContext::default();
-                    let (problem, soln) = $model_problem::<$matrix, N>(&context);
-                    b.iter(|| benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t))
-                });
-            });
+        ($name:ident, $solver:ident, $model:ident, $model_problem:ident, $matrix:ty, $($N:expr),+) => {
+            $(c.bench_function(concat!(stringify!($name), "_", $N), |b| {
+                let context = FoodWebContext::default();
+                let (problem, soln) = $model_problem::<$matrix, $N>(&context);
+                b.iter(|| benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t))
+            });)+
         };
     }
 
@@ -201,6 +200,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         foodweb,
         foodweb_problem,
         SparseColMat<f64>,
+        5, 10, 20, 30
     );
     bench_foodweb!(
         faer_sparse_tr_bdf2_foodweb,
@@ -208,6 +208,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         foodweb,
         foodweb_problem,
         SparseColMat<f64>,
+        5, 10, 20, 30
     );
     bench_foodweb!(
         faer_sparse_esdirk_foodweb,
@@ -215,21 +216,20 @@ fn criterion_benchmark(c: &mut Criterion) {
         foodweb,
         foodweb_problem,
         SparseColMat<f64>,
+        5, 10, 20, 30
     );
 
     macro_rules! bench_diffsl_wsize {
-        ($name:ident, $solver:ident, $model:ident, $model_problem:ident, $matrix:ty) => {
-            seq!(N in [5, 10, 20, 30] {
-                #[cfg(feature = "diffsl")]
-                c.bench_function(stringify!($name, "_", N), |b| {
-                    let mut context = diffsol::DiffSlContext::default();
-                    let (problem, soln) = diffsol::ode_solver::test_models::$model::$model_problem::<
-                        $matrix,
-                        N,
-                    >(&mut context);
-                    b.iter(|| benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t))
-                });
-            });
+        ($name:ident, $solver:ident, $model:ident, $model_problem:ident, $matrix:ty, $($N:expr),+) => {
+            $(#[cfg(feature = "diffsl")]
+            c.bench_function(stringify!($name, "_", $N), |b| {
+                let mut context = diffsol::DiffSlContext::default();
+                let (problem, soln) = diffsol::ode_solver::test_models::$model::$model_problem::<
+                    $matrix,
+                    $N,
+                >(&mut context);
+                b.iter(|| benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t))
+            });)+
         };
     }
     bench_diffsl_wsize!(
@@ -238,6 +238,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         heat2d,
         heat2d_diffsl,
         SparseColMat<f64>,
+        5, 10, 20, 30
     );
 
     macro_rules! bench_sundials {
@@ -261,52 +262,27 @@ fn criterion_benchmark(c: &mut Criterion) {
     bench_sundials!(sundials_roberts_dns, idaRoberts_dns);
 
     macro_rules! bench_diffsl_foodweb {
-        ($name:ident, $solver:ident, $model:ident, $model_problem:ident, $matrix:ty, $size:expr) => {
-            #[cfg(feature = "diffsl")]
-            c.bench_function(stringify!($name), |b| {
-                b.iter(|| {
-                    let mut context = diffsol::DiffSlContext::default();
-                    let (problem, soln) = diffsol::ode_solver::test_models::$model::$model_problem::<
-                        $matrix,
-                        $size,
-                    >(&mut context);
-                    benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t);
-                })
-            });
+        ($name:ident, $solver:ident, $model:ident, $model_problem:ident, $matrix:ty, $($N:expr),+) => {
+            $(#[cfg(feature = "diffsl")]
+            c.bench_function(concat!(stringify!($name), "_", $N), |b| {
+                let mut context = diffsol::DiffSlContext::default();
+                let (problem, soln) = diffsol::ode_solver::test_models::$model::$model_problem::<
+                    $matrix,
+                    $N,
+                >(&mut context);
+                b.iter(|| benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t))
+            });)+
+            
         };
     }
 
     bench_diffsl_foodweb!(
-        faer_sparse_bdf_diffsl_foodweb_5,
+        faer_sparse_bdf_diffsl_foodweb,
         bdf,
         foodweb,
         foodweb_diffsl,
         SparseColMat<f64>,
-        5
-    );
-    bench_diffsl_foodweb!(
-        faer_sparse_bdf_diffsl_foodweb_10,
-        bdf,
-        foodweb,
-        foodweb_diffsl,
-        SparseColMat<f64>,
-        10
-    );
-    bench_diffsl_foodweb!(
-        faer_sparse_bdf_diffsl_foodweb_20,
-        bdf,
-        foodweb,
-        foodweb_diffsl,
-        SparseColMat<f64>,
-        20
-    );
-    bench_diffsl_foodweb!(
-        faer_sparse_bdf_diffsl_foodweb_30,
-        bdf,
-        foodweb,
-        foodweb_diffsl,
-        SparseColMat<f64>,
-        30
+        5, 10, 20, 30
     );
 }
 
