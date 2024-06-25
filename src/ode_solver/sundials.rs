@@ -441,9 +441,14 @@ mod test {
 
     use crate::{
         ode_solver::{
-            test_models::{exponential_decay::exponential_decay_problem, foodweb::{foodweb_problem, FoodWebContext}, robertson::robertson},
+            test_models::{
+                exponential_decay::exponential_decay_problem,
+                foodweb::{foodweb_problem, FoodWebContext},
+                robertson::robertson,
+            },
             tests::{test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut},
-        }, OdeEquations, Op, SundialsIda, SundialsMatrix
+        },
+        OdeEquations, Op, SundialsIda, SundialsMatrix,
     };
 
     type M = SundialsMatrix;
@@ -505,7 +510,7 @@ mod test {
         number_of_matrix_evals: 60
         "###);
     }
-    
+
     #[test]
     fn test_sundials_foodweb() {
         let foodweb_context = FoodWebContext::default();

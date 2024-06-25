@@ -165,7 +165,10 @@ fn criterion_benchmark(c: &mut Criterion) {
         heat2d,
         head2d_problem,
         SparseColMat<f64>,
-        5, 10, 20, 30
+        5,
+        10,
+        20,
+        30
     );
     bench_wsize!(
         faer_sparse_tr_bdf2_heat2d,
@@ -173,7 +176,10 @@ fn criterion_benchmark(c: &mut Criterion) {
         heat2d,
         head2d_problem,
         SparseColMat<f64>,
-        5, 10, 20, 30
+        5,
+        10,
+        20,
+        30
     );
     bench_wsize!(
         faer_sparse_esdirk_heat2d,
@@ -181,7 +187,10 @@ fn criterion_benchmark(c: &mut Criterion) {
         heat2d,
         head2d_problem,
         SparseColMat<f64>,
-        5, 10, 20, 30
+        5,
+        10,
+        20,
+        30
     );
 
     macro_rules! bench_foodweb {
@@ -200,7 +209,10 @@ fn criterion_benchmark(c: &mut Criterion) {
         foodweb,
         foodweb_problem,
         SparseColMat<f64>,
-        5, 10, 20, 30
+        5,
+        10,
+        20,
+        30
     );
     bench_foodweb!(
         faer_sparse_tr_bdf2_foodweb,
@@ -208,7 +220,10 @@ fn criterion_benchmark(c: &mut Criterion) {
         foodweb,
         foodweb_problem,
         SparseColMat<f64>,
-        5, 10, 20, 30
+        5,
+        10,
+        20,
+        30
     );
     bench_foodweb!(
         faer_sparse_esdirk_foodweb,
@@ -216,7 +231,10 @@ fn criterion_benchmark(c: &mut Criterion) {
         foodweb,
         foodweb_problem,
         SparseColMat<f64>,
-        5, 10, 20, 30
+        5,
+        10,
+        20,
+        30
     );
 
     macro_rules! bench_diffsl_wsize {
@@ -238,7 +256,10 @@ fn criterion_benchmark(c: &mut Criterion) {
         heat2d,
         heat2d_diffsl,
         SparseColMat<f64>,
-        5, 10, 20, 30
+        5,
+        10,
+        20,
+        30
     );
 
     macro_rules! bench_sundials {
@@ -272,7 +293,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                 >(&mut context);
                 b.iter(|| benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t))
             });)+
-            
+
         };
     }
 
@@ -282,7 +303,10 @@ fn criterion_benchmark(c: &mut Criterion) {
         foodweb,
         foodweb_diffsl,
         SparseColMat<f64>,
-        5, 10, 20, 30
+        5,
+        10,
+        20,
+        30
     );
 }
 

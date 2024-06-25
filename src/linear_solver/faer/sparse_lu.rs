@@ -6,7 +6,11 @@ use crate::{
     SparseColMat,
 };
 use anyhow::Result;
-use faer::{solvers::SpSolver, sparse::linalg::{solvers::Lu, solvers::SymbolicLu}, Col};
+use faer::{
+    solvers::SpSolver,
+    sparse::linalg::{solvers::Lu, solvers::SymbolicLu},
+    Col,
+};
 
 /// A [LinearSolver] that uses the LU decomposition in the [`faer`](https://github.com/sarah-ek/faer-rs) library to solve the linear system.
 pub struct FaerSparseLU<T, C>
@@ -45,7 +49,11 @@ impl<T: Scalar, C: NonLinearOp<M = SparseColMat<T>, V = Col<T>, T = T>> LinearSo
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         self.problem.as_ref().unwrap().f.matrix_inplace(t, matrix);
         self.lu = Some(
-            Lu::try_new_with_symbolic(self.lu_symbolic.as_ref().unwrap().clone(), matrix.faer().as_ref()).expect("Failed to factorise matrix"),
+            Lu::try_new_with_symbolic(
+                self.lu_symbolic.as_ref().unwrap().clone(),
+                matrix.faer().as_ref(),
+            )
+            .expect("Failed to factorise matrix"),
         )
     }
 
@@ -72,6 +80,9 @@ impl<T: Scalar, C: NonLinearOp<M = SparseColMat<T>, V = Col<T>, T = T>> LinearSo
         );
         self.problem = Some(linearised_problem);
         self.matrix = Some(matrix);
-        self.lu_symbolic = Some(SymbolicLu::try_new(self.matrix.as_ref().unwrap().faer().symbolic()).expect("Failed to create symbolic LU"));
+        self.lu_symbolic = Some(
+            SymbolicLu::try_new(self.matrix.as_ref().unwrap().faer().symbolic())
+                .expect("Failed to create symbolic LU"),
+        );
     }
 }
