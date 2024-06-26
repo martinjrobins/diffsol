@@ -23,7 +23,7 @@ problems = [
         "name": "foodweb",
         "reference_name": "foodweb_bnd",
         "arg": [5, 10, 20, 30],
-        "solvers": ["faer_sparse_esdirk", "faer_sparse_tr_bdf2", "faer_sparse_bdf"]
+        "solvers": ["faer_sparse_esdirk", "faer_sparse_tr_bdf2", "faer_sparse_bdf", "faer_sparse_esdirk_klu", "faer_sparse_tr_bdf2_klu", "faer_sparse_bdf_klu"]
     },
 ]
 estimates = {}
@@ -52,7 +52,7 @@ for problem in problems:
                 bench = json.load(f)
                 estimates[problem['name']][solver]['diffsol'].append(bench["mean"]["point_estimate"])
 
-fig = plt.figure(figsize=(10, 10))
+fig = plt.figure(figsize=(12, 12))
 ((ax1, ax2), (ax3, ax4)) = fig.subplots(2, 2, sharex=True, sharey=True)
 for problem in problems:
     reference = np.array(estimates[problem['name']]['reference'])
@@ -72,7 +72,12 @@ for problem in problems:
             ax.plot(problem['arg'], y, label=label)
 for ax in [ax1, ax2, ax3]:
     ax.set_yscale('log')
+    ax.set_ylabel("Time relative to sundials")
+    ax.set_xlabel("Problem size (grid size if applicable)")
     ax.legend()
+ax1.set_title("TR-BDF2 solver")
+ax2.set_title("ESDIRK solver")
+ax3.set_title("BDF solver")
 plt.savefig("benches.png")
         
     

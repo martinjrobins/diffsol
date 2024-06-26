@@ -197,6 +197,18 @@ fn criterion_benchmark(c: &mut Criterion) {
         30
     );
     bench_wsize!(
+        faer_sparse_bdf_heat2d_klu,
+        bdf,
+        KLU,
+        heat2d,
+        head2d_problem,
+        SparseColMat<f64>,
+        5,
+        10,
+        20,
+        30
+    );
+    bench_wsize!(
         faer_sparse_tr_bdf2_heat2d,
         tr_bdf2,
         FaerSparseLU,
@@ -209,9 +221,33 @@ fn criterion_benchmark(c: &mut Criterion) {
         30
     );
     bench_wsize!(
+        faer_sparse_tr_bdf2_heat2d_klu,
+        tr_bdf2,
+        KLU,
+        heat2d,
+        head2d_problem,
+        SparseColMat<f64>,
+        5,
+        10,
+        20,
+        30
+    );
+    bench_wsize!(
         faer_sparse_esdirk_heat2d,
         esdirk34,
         FaerSparseLU,
+        heat2d,
+        head2d_problem,
+        SparseColMat<f64>,
+        5,
+        10,
+        20,
+        30
+    );
+    bench_wsize!(
+        faer_sparse_esdirk_heat2d_klu,
+        esdirk34,
+        KLU,
         heat2d,
         head2d_problem,
         SparseColMat<f64>,
