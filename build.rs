@@ -2,24 +2,31 @@ use cc::Build;
 use std::env;
 
 fn compile_benches() -> Vec<String> {
+    let basedir = "benches/sundials/";
     let files = [
-        "benches/idaFoodWeb_bnd_5.c",
-        "benches/idaFoodWeb_bnd_10.c",
-        "benches/idaFoodWeb_bnd_20.c",
-        "benches/idaFoodWeb_bnd_30.c",
-        "benches/idaHeat2d_bnd_5.c",
-        "benches/idaHeat2d_bnd_10.c",
-        "benches/idaHeat2d_bnd_20.c",
-        "benches/idaHeat2d_bnd_30.c",
-        "benches/idaRoberts_dns.c",
+        "cvRoberts_block_klu.c",
+        "idaFoodWeb_bnd_5.c",
+        "idaFoodWeb_bnd_10.c",
+        "idaFoodWeb_bnd_20.c",
+        "idaFoodWeb_bnd_30.c",
+        "idaHeat2d_bnd_5.c",
+        "idaHeat2d_bnd_10.c",
+        "idaHeat2d_bnd_20.c",
+        "idaHeat2d_bnd_30.c",
+        "idaRoberts_dns.c",
     ];
+    let files = files
+        .iter()
+        .map(|f| format!("{}{}", basedir, f))
+        .collect::<Vec<_>>();
+
     let includes = [
         env::var("DEP_SUNDIALS_KLU_INCLUDE").unwrap().to_string(),
         format!("{}/include", env::var("DEP_SUNDIALS_ROOT").unwrap()),
     ];
     let libname = "sundials_benches";
     Build::new()
-        .files(files)
+        .files(files.clone())
         .includes(includes)
         .compile(libname);
     files.into_iter().map(|s| s.to_string()).collect()

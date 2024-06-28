@@ -2,36 +2,49 @@ use crate::{
     ode_solver::problem::OdeSolverSolution, Matrix, OdeBuilder, OdeEquations, OdeSolverProblem,
     Vector,
 };
+use num_traits::{Zero, One};
+
 
 pub fn robertson_ode<M: Matrix + 'static>(
     use_coloring: bool,
+    ngroups: usize,
 ) -> (
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
+    const N: usize = 3;
     let problem = OdeBuilder::new()
         .p([0.04, 1.0e4, 3.0e7])
         .rtol(1e-4)
-        .atol([1.0e-8, 1.0e-6, 1.0e-6])
+        .atol([1.0e-8, 1.0e-6, 1.0e-6].iter().cycle().take(ngroups * N).cloned().collect::<Vec<f64>>())
         .use_coloring(use_coloring)
         .build_ode(
             //     dy1/dt = -.04*y1 + 1.e4*y2*y3
             //*    dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*(y2)^2
             //*    dy3/dt = 3.e7*(y2)^2
-            |x: &M::V, p: &M::V, _t: M::T, y: &mut M::V| {
-                y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
-                y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
-                y[2] = p[2] * x[1] * x[1];
+            move |x: &M::V, p: &M::V, _t: M::T, y: &mut M::V| {
+                for ig in 0..ngroups {
+                    let i = ig * N;
+                    y[i] = -p[0] * x[i] + p[1] * x[i + 1] * x[i + 2];
+                    y[i + 1] = p[0] * x[i] - p[1] * x[i + 1] * x[i + 2] - p[2] * x[i + 1] * x[i + 1];
+                    y[i + 2] = p[2] * x[i + 1] * x[i + 1];
+                }
             },
-            |x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
-                y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
-                y[1] = p[0] * v[0]
-                    - p[1] * v[1] * x[2]
-                    - p[1] * x[1] * v[2]
-                    - M::T::from(2.0) * p[2] * x[1] * v[1];
-                y[2] = M::T::from(2.0) * p[2] * x[1] * v[1];
+            move |x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
+                for ig in 0..ngroups {
+                    let i = ig * N;
+                    y[i] = -p[0] * v[i] + p[1] * v[i + 1] * x[i + 2] + p[1] * x[i + 1] * v[i + 2];
+                    y[i + 1] = p[0] * v[i]
+                        - p[1] * v[i + 1] * x[i + 2]
+                        - p[1] * x[i + 1] * v[i + 2]
+                        - M::T::from(2.0) * p[2] * x[i + 1] * v[i + 1];
+                    y[i + 2] = M::T::from(2.0) * p[2] * x[i + 1] * v[i + 1];
+                }
             },
-            |_p: &M::V, _t: M::T| M::V::from_vec(vec![1.0.into(), 0.0.into(), 0.0.into()]),
+            move |_p: &M::V, _t: M::T| {
+                let init = [M::T::one(), M::T::zero(), M::T::zero()];
+                M::V::from_vec(init.iter().cycle().take(ngroups * N).cloned().collect())
+            },
         )
         .unwrap();
 
@@ -51,6 +64,19 @@ pub fn robertson_ode<M: Matrix + 'static>(
         (vec![5.258603e-07, 2.103442e-12, 9.999995e-01], 4.0000e+09),
         (vec![6.934511e-08, 2.773804e-13, 9.999999e-01], 4.0000e+10),
     ];
+    
+
+    // expand soln by number of groups
+    let data = data
+        .into_iter()
+        .map(|(values, time)| {
+            let mut newvalues = vec![];
+            for _ in 0..ngroups {
+                newvalues.extend_from_slice(values.as_slice());
+            }
+            (newvalues, time) 
+        })
+        .collect::<Vec<_>>();
 
     for (values, time) in data {
         soln.push(

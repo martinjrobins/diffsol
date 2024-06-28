@@ -5,6 +5,7 @@ use diffsol::{
         foodweb::{foodweb_problem, FoodWebContext},
         heat2d::head2d_problem,
         robertson::robertson,
+        robertson_ode::robertson_ode,
     },
     FaerLU, FaerSparseLU, NalgebraLU, SparseColMat, SundialsLinearSolver, KLU,
 };
@@ -136,6 +137,78 @@ fn criterion_benchmark(c: &mut Criterion) {
         robertson,
         robertson,
         faer::Mat<f64>
+    );
+    
+    macro_rules! bench_robertson_ode {
+        ($name:ident, $solver:ident, $linear_solver:ident, $model:ident, $model_problem:ident, $matrix:ty,  $($N:expr),+) => {
+            $(c.bench_function(concat!(stringify!($name), "_", $N), |b| {
+                b.iter(|| {
+                    let ls = $linear_solver::default();
+                    let (problem, soln) = $model_problem::<$matrix>(false, $N);
+                    benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t, ls);
+                })
+            });)+
+        };
+    }
+    
+    bench_robertson_ode!(
+        faer_sparse_bdf_robertson_ode,
+        bdf,
+        FaerSparseLU,
+        robertson_ode,
+        robertson_ode,
+        SparseColMat<f64>,
+        25, 100, 400, 900
+    );
+    
+    bench_robertson_ode!(
+        faer_sparse_bdf_klu_robertson_ode,
+        bdf,
+        KLU,
+        robertson_ode,
+        robertson_ode,
+        SparseColMat<f64>,
+        25, 100, 400, 900
+    );
+    
+    bench_robertson_ode!(
+        faer_sparse_tr_bdf2_robertson_ode,
+        tr_bdf2,
+        FaerSparseLU,
+        robertson_ode,
+        robertson_ode,
+        SparseColMat<f64>,
+        25, 100, 400, 900
+    );
+    
+    bench_robertson_ode!(
+        faer_sparse_tr_bdf2_klu_robertson_ode,
+        tr_bdf2,
+        KLU,
+        robertson_ode,
+        robertson_ode,
+        SparseColMat<f64>,
+        25, 100, 400, 900
+    );
+    
+    bench_robertson_ode!(
+        faer_sparse_esdirk_robertson_ode,
+        esdirk34,
+        FaerSparseLU,
+        robertson_ode,
+        robertson_ode,
+        SparseColMat<f64>,
+        25, 100, 400, 900
+    );
+    
+    bench_robertson_ode!(
+        faer_sparse_esdirk_klu_robertson_ode,
+        esdirk34,
+        KLU,
+        robertson_ode,
+        robertson_ode,
+        SparseColMat<f64>,
+        25, 100, 400, 900
     );
 
     macro_rules! bench_diffsl {
@@ -391,6 +464,17 @@ fn criterion_benchmark(c: &mut Criterion) {
     bench_sundials!(sundials_foodweb_bnd_20, idaFoodWeb_bnd_20);
     bench_sundials!(sundials_foodweb_bnd_30, idaFoodWeb_bnd_30);
     bench_sundials!(sundials_roberts_dns, idaRoberts_dns);
+    
+    macro_rules! bench_sundials_ngroups {
+        ($name:ident, $solver:ident, $($N:expr),+) => {
+            $(#[cfg(feature = "sundials")]
+            c.bench_function(concat!(stringify!($name), "_", $N), |b| {
+                b.iter(|| unsafe { sundials_benches::$solver($N) })
+            });)+
+        };
+    }
+    
+    bench_sundials_ngroups!(sundials_robertson_ode_klu, cvRoberts_block_klu, 25, 100, 400, 900);
 
     macro_rules! bench_diffsl_foodweb {
         ($name:ident, $solver:ident, $linear_solver:ident, $model:ident, $model_problem:ident, $matrix:ty, $($N:expr),+) => {

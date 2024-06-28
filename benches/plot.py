@@ -14,6 +14,12 @@ problems = [
         "solvers": ["faer_esdirk34", "faer_tr_bdf2", "faer_bdf", "nalgebra_esdirk34", "nalgebra_tr_bdf2", "nalgebra_bdf"],
     },
     {
+        "name": "robertson_ode",
+        "reference_name": "robertson_ode_klu",
+        "arg": [25, 100, 400, 900],
+        "solvers": ["faer_sparse_bdf", "faer_sparse_bdf_klu"],
+    },
+    {
         "name": "heat2d",
         "reference_name": "heat2d_klu",
         "arg": [5, 10, 20, 30],
@@ -68,6 +74,8 @@ for problem in problems:
         if problem['arg'] is None:
             # plot a horizontal line
             ax.plot([5, 30], [y, y], label=label)
+        elif 'robertson_ode' in problem['name']:
+            ax.plot(np.sqrt(problem['arg']), y, label=label)
         else:
             ax.plot(problem['arg'], y, label=label)
 for ax in [ax1, ax2, ax3]:

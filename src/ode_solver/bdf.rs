@@ -1159,7 +1159,7 @@ mod test {
     #[test]
     fn test_bdf_nalgebra_robertson_ode() {
         let mut s = Bdf::default();
-        let (problem, soln) = robertson_ode::<M>(false);
+        let (problem, soln) = robertson_ode::<M>(false, 3);
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
@@ -1168,13 +1168,13 @@ mod test {
         number_of_error_test_failures: 1
         number_of_nonlinear_solver_iterations: 645
         number_of_nonlinear_solver_fails: 1
-        initial_step_size: 0.00001010330147394336
-        final_step_size: 6646839438.818167
+        initial_step_size: 0.000010103301473943362
+        final_step_size: 6646839435.3384695
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
         number_of_calls: 647
-        number_of_jac_muls: 132
+        number_of_jac_muls: 396
         number_of_matrix_evals: 44
         "###);
     }

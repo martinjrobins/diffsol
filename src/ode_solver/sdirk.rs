@@ -957,7 +957,7 @@ mod test {
     fn test_tr_bdf2_nalgebra_robertson_ode() {
         let tableau = Tableau::<M>::tr_bdf2();
         let mut s = Sdirk::new(tableau, NalgebraLU::default());
-        let (problem, soln) = robertson_ode::<M>(false);
+        let (problem, soln) = robertson_ode::<M>(false, 1);
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
