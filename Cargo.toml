@@ -34,7 +34,7 @@ diffsl-llvm17 = ["diffsl17-0", "diffsl"]
 
 [dependencies]
 nalgebra = "0.33"
-nalgebra-sparse = "0.10"
+nalgebra-sparse = { version = "0.10", features = ["io"] }
 anyhow = "1.0.86"
 num-traits = "0.2.17"
 ouroboros = "0.18.2"

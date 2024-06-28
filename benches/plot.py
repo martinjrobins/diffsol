@@ -17,7 +17,7 @@ problems = [
         "name": "heat2d",
         "reference_name": "heat2d_klu",
         "arg": [5, 10, 20, 30],
-        "solvers": ["faer_sparse_esdirk", "faer_sparse_tr_bdf2", "faer_sparse_bdf"]
+        "solvers": ["faer_sparse_esdirk", "faer_sparse_tr_bdf2", "faer_sparse_bdf", "faer_sparse_esdirk_klu", "faer_sparse_tr_bdf2_klu", "faer_sparse_bdf_klu"]
     },
     {
         "name": "foodweb",
