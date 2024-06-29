@@ -442,9 +442,7 @@ mod test {
     use crate::{
         ode_solver::{
             test_models::{
-                exponential_decay::exponential_decay_problem,
-                foodweb::{foodweb_problem, FoodWebContext},
-                robertson::robertson,
+                exponential_decay::exponential_decay_problem, foodweb::{foodweb_problem, FoodWebContext}, heat2d::head2d_problem, robertson::robertson
             },
             tests::{test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut},
         },
@@ -527,5 +525,22 @@ mod test {
         initial_step_size: 0.001
         final_step_size: 1.8099338983079056
         "###);
+    }
+    #[test]
+    fn test_sundials_heat2d() {
+        let mut s = crate::SundialsIda::default();
+        let (problem, soln) = head2d_problem::<crate::SundialsMatrix, 10>();
+        test_ode_solver(&mut s, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 42
+        number_of_steps: 165
+        number_of_error_test_failures: 11
+        number_of_nonlinear_solver_iterations: 214
+        number_of_nonlinear_solver_fails: 0
+        initial_step_size: 0.001
+        final_step_size: 14.344174274682405
+        "###);
+
     }
 }

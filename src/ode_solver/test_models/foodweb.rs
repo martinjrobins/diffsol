@@ -23,17 +23,12 @@ const ALPHA: f64 = 50.0;
 const BETA: f64 = 1000.0;
 
 #[cfg(feature = "diffsl")]
-pub fn foodweb_diffsl<M, const NX: usize>(
+pub fn foodweb_diffsl_compile<M, const NX: usize>(
     diffsl_context: &mut crate::DiffSlContext<M>,
-) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
-    OdeSolverSolution<M::V>,
 )
 where
     M: Matrix<T = f64>,
 {
-    use crate::OdeBuilder;
-
     let context = FoodWebContext::<M, NX>::default();
     let (problem, _soln) = foodweb_problem::<M, NX>(&context);
     let u0 = problem.eqn.init().call(0.0);
@@ -139,6 +134,19 @@ where
     );
 
     diffsl_context.recompile(code.as_str()).unwrap();
+}
+
+#[cfg(feature = "diffsl")]
+pub fn foodweb_diffsl_problem<M>(
+    diffsl_context: &crate::DiffSlContext<M>,
+) -> (
+    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
+    OdeSolverSolution<M::V>,
+)
+where
+    M: Matrix<T = f64>,
+{
+    use crate::OdeBuilder;
 
     let problem = OdeBuilder::new()
         .rtol(1e-5)
@@ -1060,7 +1068,8 @@ mod tests {
         let y0 = problem.eqn.rhs().call(&u0, 0.0);
 
         let mut diffsl_context = crate::DiffSlContext::<M>::default();
-        let (problem_diffsl, _soln) = foodweb_diffsl::<M, NX>(&mut diffsl_context);
+        foodweb_diffsl_compile::<M, NX>(&mut diffsl_context);
+        let (problem_diffsl, _soln) = foodweb_diffsl_problem::<M>(&diffsl_context);
         let u0_diffsl = problem_diffsl.eqn.init().call(0.0);
         for i in 0..u0.len() {
             let i_diffsl = if i % NUM_SPECIES >= NPREY {

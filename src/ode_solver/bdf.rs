@@ -1103,10 +1103,12 @@ mod test {
     #[cfg(feature = "diffsl")]
     #[test]
     fn bdf_test_nalgebra_diffsl_robertson() {
+        use crate::ode_solver::test_models::robertson;
         let mut context = crate::DiffSlContext::default();
         let mut s = Bdf::default();
+        robertson::robertson_diffsl_compile(&mut context);
         let (problem, soln) =
-            crate::ode_solver::test_models::robertson::robertson_diffsl::<M>(&mut context, false);
+            robertson::robertson_diffsl_problem::<M>(&context, false);
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
@@ -1278,19 +1280,31 @@ mod test {
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
         let (problem, soln) = head2d_problem::<SparseColMat<f64>, 10>();
         test_ode_solver(&mut s, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 22
+        number_of_steps: 173
+        number_of_error_test_failures: 0
+        number_of_nonlinear_solver_iterations: 343
+        number_of_nonlinear_solver_fails: 0
+        initial_step_size: 0.000001899728593617067
+        final_step_size: 2.3474588403282626
+        "###);
+
     }
 
     #[cfg(feature = "diffsl")]
     #[test]
     fn test_bdf_faer_sparse_heat2d_diffsl() {
+        use crate::ode_solver::test_models::heat2d::{self, heat2d_diffsl_compile};
         let linear_solver = FaerSparseLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut context = crate::DiffSlContext::default();
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
-        let (problem, soln) = crate::ode_solver::test_models::heat2d::heat2d_diffsl::<
+        heat2d_diffsl_compile::<SparseColMat<f64>, 10>(&mut context);
+        let (problem, soln) = heat2d::heat2d_diffsl_problem::<
             SparseColMat<f64>,
-            10,
-        >(&mut context);
+        >(&context);
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
@@ -1317,14 +1331,15 @@ mod test {
     #[cfg(feature = "diffsl")]
     #[test]
     fn test_bdf_faer_sparse_foodweb_diffsl() {
+        use crate::ode_solver::test_models::foodweb;
         let mut context = crate::DiffSlContext::default();
         let linear_solver = FaerSparseLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
-        let (problem, soln) = crate::ode_solver::test_models::foodweb::foodweb_diffsl::<
+        foodweb::foodweb_diffsl_compile::<SparseColMat<f64>, 10>(&mut context);
+        let (problem, soln) = foodweb::foodweb_diffsl_problem::<
             SparseColMat<f64>,
-            10,
-        >(&mut context);
+        >(&context);
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
