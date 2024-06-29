@@ -1107,8 +1107,7 @@ mod test {
         let mut context = crate::DiffSlContext::default();
         let mut s = Bdf::default();
         robertson::robertson_diffsl_compile(&mut context);
-        let (problem, soln) =
-            robertson::robertson_diffsl_problem::<M>(&context, false);
+        let (problem, soln) = robertson::robertson_diffsl_problem::<M>(&context, false);
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
@@ -1290,7 +1289,12 @@ mod test {
         initial_step_size: 0.000001899728593617067
         final_step_size: 2.3474588403282626
         "###);
-
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
+        ---
+        number_of_calls: 346
+        number_of_jac_muls: 247
+        number_of_matrix_evals: 21
+        "###);
     }
 
     #[cfg(feature = "diffsl")]
@@ -1302,9 +1306,7 @@ mod test {
         let mut context = crate::DiffSlContext::default();
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
         heat2d_diffsl_compile::<SparseColMat<f64>, 10>(&mut context);
-        let (problem, soln) = heat2d::heat2d_diffsl_problem::<
-            SparseColMat<f64>,
-        >(&context);
+        let (problem, soln) = heat2d::heat2d_diffsl_problem::<SparseColMat<f64>>(&context);
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
@@ -1337,9 +1339,7 @@ mod test {
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
         foodweb::foodweb_diffsl_compile::<SparseColMat<f64>, 10>(&mut context);
-        let (problem, soln) = foodweb::foodweb_diffsl_problem::<
-            SparseColMat<f64>,
-        >(&context);
+        let (problem, soln) = foodweb::foodweb_diffsl_problem::<SparseColMat<f64>>(&context);
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 

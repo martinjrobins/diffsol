@@ -2,8 +2,7 @@ use crate::{
     ode_solver::problem::OdeSolverSolution, Matrix, OdeBuilder, OdeEquations, OdeSolverProblem,
     Vector,
 };
-use num_traits::{Zero, One};
-
+use num_traits::{One, Zero};
 
 pub fn robertson_ode<M: Matrix + 'static>(
     use_coloring: bool,
@@ -16,7 +15,14 @@ pub fn robertson_ode<M: Matrix + 'static>(
     let problem = OdeBuilder::new()
         .p([0.04, 1.0e4, 3.0e7])
         .rtol(1e-4)
-        .atol([1.0e-8, 1.0e-6, 1.0e-6].iter().cycle().take(ngroups * N).cloned().collect::<Vec<f64>>())
+        .atol(
+            [1.0e-8, 1.0e-6, 1.0e-6]
+                .iter()
+                .cycle()
+                .take(ngroups * N)
+                .cloned()
+                .collect::<Vec<f64>>(),
+        )
         .use_coloring(use_coloring)
         .build_ode(
             //     dy1/dt = -.04*y1 + 1.e4*y2*y3
@@ -26,7 +32,8 @@ pub fn robertson_ode<M: Matrix + 'static>(
                 for ig in 0..ngroups {
                     let i = ig * N;
                     y[i] = -p[0] * x[i] + p[1] * x[i + 1] * x[i + 2];
-                    y[i + 1] = p[0] * x[i] - p[1] * x[i + 1] * x[i + 2] - p[2] * x[i + 1] * x[i + 1];
+                    y[i + 1] =
+                        p[0] * x[i] - p[1] * x[i + 1] * x[i + 2] - p[2] * x[i + 1] * x[i + 1];
                     y[i + 2] = p[2] * x[i + 1] * x[i + 1];
                 }
             },
@@ -64,7 +71,6 @@ pub fn robertson_ode<M: Matrix + 'static>(
         (vec![5.258603e-07, 2.103442e-12, 9.999995e-01], 4.0000e+09),
         (vec![6.934511e-08, 2.773804e-13, 9.999999e-01], 4.0000e+10),
     ];
-    
 
     // expand soln by number of groups
     let data = data
@@ -74,7 +80,7 @@ pub fn robertson_ode<M: Matrix + 'static>(
             for _ in 0..ngroups {
                 newvalues.extend_from_slice(values.as_slice());
             }
-            (newvalues, time) 
+            (newvalues, time)
         })
         .collect::<Vec<_>>();
 

@@ -442,7 +442,10 @@ mod test {
     use crate::{
         ode_solver::{
             test_models::{
-                exponential_decay::exponential_decay_problem, foodweb::{foodweb_problem, FoodWebContext}, heat2d::head2d_problem, robertson::robertson
+                exponential_decay::exponential_decay_problem,
+                foodweb::{foodweb_problem, FoodWebContext},
+                heat2d::head2d_problem,
+                robertson::robertson,
             },
             tests::{test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut},
         },
@@ -541,6 +544,11 @@ mod test {
         initial_step_size: 0.001
         final_step_size: 14.344174274682405
         "###);
-
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
+        ---
+        number_of_calls: 217
+        number_of_jac_muls: 4300
+        number_of_matrix_evals: 43
+        "###);
     }
 }

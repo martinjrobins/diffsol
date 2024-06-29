@@ -23,9 +23,7 @@ const ALPHA: f64 = 50.0;
 const BETA: f64 = 1000.0;
 
 #[cfg(feature = "diffsl")]
-pub fn foodweb_diffsl_compile<M, const NX: usize>(
-    diffsl_context: &mut crate::DiffSlContext<M>,
-)
+pub fn foodweb_diffsl_compile<M, const NX: usize>(diffsl_context: &mut crate::DiffSlContext<M>)
 where
     M: Matrix<T = f64>,
 {

@@ -84,7 +84,6 @@ pub fn heat2d_diffsl_compile<M: Matrix<T = f64> + 'static, const MGRID: usize>(
     );
 
     context.recompile(code.as_str()).unwrap();
-    
 }
 
 #[cfg(feature = "diffsl")]
@@ -321,11 +320,11 @@ mod tests {
     #[cfg(feature = "diffsl")]
     #[test]
     fn test_mass_diffsl() {
-        use crate::{ode_solver::test_models::foodweb::foodweb_diffsl_compile, SparseColMat};
+        use crate::SparseColMat;
         use faer::Col;
 
         let mut context = crate::DiffSlContext::default();
-        foodweb_diffsl_compile::<SparseColMat<f64>, 5>(&mut context);
+        heat2d_diffsl_compile::<SparseColMat<f64>, 5>(&mut context);
         let (problem, _soln) = heat2d_diffsl_problem::<SparseColMat<f64>>(&context);
         let u = Col::from_vec(vec![
             1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
