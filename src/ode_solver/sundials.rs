@@ -42,8 +42,6 @@ pub struct SundialsStatistics {
     pub number_of_error_test_failures: usize,
     pub number_of_nonlinear_solver_iterations: usize,
     pub number_of_nonlinear_solver_fails: usize,
-    pub initial_step_size: realtype,
-    pub final_step_size: realtype,
 }
 
 impl SundialsStatistics {
@@ -54,8 +52,6 @@ impl SundialsStatistics {
             number_of_error_test_failures: 0,
             number_of_nonlinear_solver_iterations: 0,
             number_of_nonlinear_solver_fails: 0,
-            initial_step_size: 0.0,
-            final_step_size: 0.0,
         }
     }
     fn new_from_ida(ida_mem: *mut c_void) -> Result<Self> {
@@ -96,8 +92,6 @@ impl SundialsStatistics {
             number_of_error_test_failures: netfails.try_into().unwrap(),
             number_of_nonlinear_solver_iterations: nniters.try_into().unwrap(),
             number_of_nonlinear_solver_fails: nncfails.try_into().unwrap(),
-            initial_step_size: hinused,
-            final_step_size: hcur,
         })
     }
 }
@@ -493,8 +487,6 @@ mod test {
         number_of_error_test_failures: 3
         number_of_nonlinear_solver_iterations: 63
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.001
-        final_step_size: 0.7770043351266953
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -516,8 +508,6 @@ mod test {
         number_of_error_test_failures: 15
         number_of_nonlinear_solver_iterations: 506
         number_of_nonlinear_solver_fails: 1
-        initial_step_size: 0.001
-        final_step_size: 11535117835.253025
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -540,8 +530,6 @@ mod test {
         number_of_error_test_failures: 9
         number_of_nonlinear_solver_iterations: 458
         number_of_nonlinear_solver_fails: 1
-        initial_step_size: 0.001
-        final_step_size: 1.8099338983079056
         "###);
     }
     #[test]
@@ -556,8 +544,6 @@ mod test {
         number_of_error_test_failures: 11
         number_of_nonlinear_solver_iterations: 214
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.001
-        final_step_size: 14.344174274682405
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
