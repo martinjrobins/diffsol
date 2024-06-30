@@ -22,29 +22,13 @@ use crate::{NonLinearOp, SensEquations};
 
 use super::equations::OdeEquations;
 
-#[derive(Clone, Debug, Serialize)]
-pub struct BdfStatistics<T: Scalar> {
+#[derive(Clone, Debug, Serialize, Default)]
+pub struct BdfStatistics {
     pub number_of_linear_solver_setups: usize,
     pub number_of_steps: usize,
     pub number_of_error_test_failures: usize,
     pub number_of_nonlinear_solver_iterations: usize,
     pub number_of_nonlinear_solver_fails: usize,
-    pub initial_step_size: T,
-    pub final_step_size: T,
-}
-
-impl<T: Scalar> Default for BdfStatistics<T> {
-    fn default() -> Self {
-        Self {
-            number_of_linear_solver_setups: 0,
-            number_of_steps: 0,
-            number_of_error_test_failures: 0,
-            number_of_nonlinear_solver_iterations: 0,
-            number_of_nonlinear_solver_fails: 0,
-            initial_step_size: T::zero(),
-            final_step_size: T::zero(),
-        }
-    }
 }
 
 /// Implements a Backward Difference formula (BDF) implicit multistep integrator.
@@ -83,7 +67,7 @@ pub struct Bdf<
     alpha: Vec<Eqn::T>,
     gamma: Vec<Eqn::T>,
     error_const2: Vec<Eqn::T>,
-    statistics: BdfStatistics<Eqn::T>,
+    statistics: BdfStatistics,
     state: Option<OdeSolverState<Eqn::V>>,
     tstop: Option<Eqn::T>,
     root_finder: Option<RootFinder<Eqn::V>>,
@@ -179,7 +163,7 @@ where
         }
     }
 
-    pub fn get_statistics(&self) -> &BdfStatistics<Eqn::T> {
+    pub fn get_statistics(&self) -> &BdfStatistics {
         &self.statistics
     }
 
@@ -383,9 +367,6 @@ where
 
         // setup U
         self.u = Self::_compute_r(self.order, Eqn::T::one());
-
-        // update statistics
-        self.statistics.initial_step_size = state.h;
 
         self.is_state_modified = false;
     }
@@ -750,7 +731,6 @@ where
         self.statistics.number_of_linear_solver_setups =
             self.nonlinear_problem_op().number_of_jac_evals();
         self.statistics.number_of_steps += 1;
-        self.statistics.final_step_size = self.state.as_ref().unwrap().h;
 
         // a change in order is only done after running at order k for k + 1 steps
         // (see page 83 of [2])
@@ -937,8 +917,6 @@ mod test {
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 82
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.0004472135954999579
-        final_step_size: 0.7459469544772627
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -970,8 +948,6 @@ mod test {
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 82
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.0004472135954999579
-        final_step_size: 0.7459469544772627
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -993,8 +969,6 @@ mod test {
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 204
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.0004472135954999579
-        final_step_size: 0.35521283546536314
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1016,8 +990,6 @@ mod test {
         number_of_error_test_failures: 2
         number_of_nonlinear_solver_iterations: 71
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.000024564241080624082
-        final_step_size: 0.16384456065711456
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1048,8 +1020,6 @@ mod test {
         number_of_error_test_failures: 5
         number_of_nonlinear_solver_iterations: 163
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.000024564241080624082
-        final_step_size: 0.14646131420740696
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1071,8 +1041,6 @@ mod test {
         number_of_error_test_failures: 1
         number_of_nonlinear_solver_iterations: 651
         number_of_nonlinear_solver_fails: 1
-        initial_step_size: 0.000012014877942697947
-        final_step_size: 6681716520.984806
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1124,8 +1092,6 @@ mod test {
         number_of_error_test_failures: 42
         number_of_nonlinear_solver_iterations: 3022
         number_of_nonlinear_solver_fails: 4
-        initial_step_size: 0.000012014877942697947
-        final_step_size: 4361857202.2027445
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1147,8 +1113,6 @@ mod test {
         number_of_error_test_failures: 1
         number_of_nonlinear_solver_iterations: 651
         number_of_nonlinear_solver_fails: 1
-        initial_step_size: 0.000012014877942697947
-        final_step_size: 6681716520.984806
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1170,8 +1134,6 @@ mod test {
         number_of_error_test_failures: 1
         number_of_nonlinear_solver_iterations: 645
         number_of_nonlinear_solver_fails: 1
-        initial_step_size: 0.000010103301473943362
-        final_step_size: 6646839435.3384695
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1193,8 +1155,6 @@ mod test {
         number_of_error_test_failures: 14
         number_of_nonlinear_solver_iterations: 2510
         number_of_nonlinear_solver_fails: 1
-        initial_step_size: 0.00001010330147394336
-        final_step_size: 3124486954.147313
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1216,8 +1176,6 @@ mod test {
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 322
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.000003544494634084706
-        final_step_size: 1.452296693909289
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1239,8 +1197,6 @@ mod test {
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 322
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.000003544494634084706
-        final_step_size: 1.452296693909289
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1262,8 +1218,6 @@ mod test {
         number_of_error_test_failures: 1
         number_of_nonlinear_solver_iterations: 123
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.00009999999999999999
-        final_step_size: 0.26810801834071796
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1287,8 +1241,6 @@ mod test {
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 343
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.000001899728593617067
-        final_step_size: 2.3474588403282626
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1326,8 +1278,6 @@ mod test {
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 306
         number_of_nonlinear_solver_fails: 8
-        initial_step_size: 0.000000010582477991775095
-        final_step_size: 0.45978834357195764
         "###);
     }
 
