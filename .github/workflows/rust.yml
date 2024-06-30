@@ -26,16 +26,13 @@ jobs:
   unit-tests:
     name: Tests - ${{ matrix.os }} - ${{ matrix.toolchain }}
     runs-on: ${{ matrix.os }}
-    env:
-      CC: clang
-      CXX: clang++
     strategy:
         matrix:
           toolchain:
             - stable
           os:
             - ubuntu-latest
-            - macos-latest
+            - macos-13
             - windows-latest
           include:
             - toolchain: beta
