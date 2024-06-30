@@ -1,10 +1,3 @@
-use anyhow::{anyhow, Result};
-use num_traits::Zero;
-use serde::Serialize;
-use std::{
-    ffi::{c_int, c_long, c_void, CStr},
-    rc::Rc,
-};
 use crate::sundials_sys::{
     realtype, IDACalcIC, IDACreate, IDAFree, IDAGetDky, IDAGetIntegratorStats,
     IDAGetNonlinSolvStats, IDAGetReturnFlagName, IDAInit, IDAReInit, IDASVtolerances, IDASetId,
@@ -15,11 +8,18 @@ use crate::sundials_sys::{
     IDA_RTFUNC_FAIL, IDA_SUCCESS, IDA_TOO_MUCH_ACC, IDA_TOO_MUCH_WORK, IDA_TSTOP_RETURN,
     IDA_YA_YDP_INIT,
 };
+use anyhow::{anyhow, Result};
+use num_traits::Zero;
+use serde::Serialize;
+use std::{
+    ffi::{c_int, c_long, c_void, CStr},
+    rc::Rc,
+};
 
 use crate::{
-    matrix::sparsity::MatrixSparsityRef, scale, LinearOp, Matrix,
-    NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-    OdeSolverStopReason, Op, SundialsMatrix, SundialsVector, Vector,
+    matrix::sparsity::MatrixSparsityRef, scale, LinearOp, Matrix, NonLinearOp, OdeEquations,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, SundialsMatrix,
+    SundialsVector, Vector,
 };
 
 #[cfg(not(sundials_version_major = "5"))]
@@ -207,10 +207,10 @@ where
     pub fn new() -> Self {
         #[cfg(not(sundials_version_major = "5"))]
         let ida_mem = unsafe { IDACreate(*get_suncontext()) };
-        
+
         #[cfg(sundials_version_major = "5")]
         let ida_mem = unsafe { IDACreate() };
-        
+
         let yp = SundialsVector::new_serial(0);
         let jacobian = SundialsMatrix::new_dense(0, 0);
 
@@ -345,18 +345,18 @@ where
 
         self.linear_solver = unsafe {
             #[cfg(not(sundials_version_major = "5"))]
-            {SUNLinSol_Dense(
-                state.y.sundials_vector(),
-                self.jacobian.sundials_matrix(),
-                *get_suncontext()
-            )}
+            {
+                SUNLinSol_Dense(
+                    state.y.sundials_vector(),
+                    self.jacobian.sundials_matrix(),
+                    *get_suncontext(),
+                )
+            }
             #[cfg(sundials_version_major = "5")]
-            {SUNLinSol_Dense(
-                state.y.sundials_vector(),
-                self.jacobian.sundials_matrix(),
-            )}
+            {
+                SUNLinSol_Dense(state.y.sundials_vector(), self.jacobian.sundials_matrix())
+            }
         };
-        
 
         Self::check(unsafe { SUNLinSolInitialize(self.linear_solver) }).unwrap();
         Self::check(unsafe {

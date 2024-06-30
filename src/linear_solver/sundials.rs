@@ -1,15 +1,14 @@
 use std::rc::Rc;
 
-use anyhow::Result;
 use crate::sundials_sys::{
     realtype, SUNLinSolFree, SUNLinSolSetup, SUNLinSolSolve, SUNLinSol_Dense, SUNLinearSolver,
 };
+use anyhow::Result;
 
 use crate::{
-    ode_solver::sundials::sundials_check,
-    op::linearise::LinearisedOp,
-    vector::sundials::SundialsVector,
-    LinearOp, Matrix, NonLinearOp, Op, SolverProblem, SundialsMatrix,
+    ode_solver::sundials::sundials_check, op::linearise::LinearisedOp,
+    vector::sundials::SundialsVector, LinearOp, Matrix, NonLinearOp, Op, SolverProblem,
+    SundialsMatrix,
 };
 
 #[cfg(not(sundials_version_major = "5"))]

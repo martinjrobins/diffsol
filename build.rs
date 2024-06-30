@@ -2,7 +2,6 @@ use cc::Build;
 use std::io::Read;
 use std::{collections::HashSet, env, fs::File, io::BufReader, path::PathBuf};
 
-
 const LINK_SUNDIALS_LIBRARIES: &[&str] = &[
     "cvode",
     "ida",
@@ -156,31 +155,30 @@ fn generate_bindings(suitesparse: &Library, sundials: &Library) -> Result<PathBu
 fn get_sundials_version_major(bindings: PathBuf) -> Option<u32> {
     let b = File::open(bindings).expect("Couldn't read file bindings.rs!");
     let mut b = BufReader::new(b).bytes();
-    'version:
-    while b.find(|c| c.as_ref().is_ok_and(|&c| c == b'S')).is_some() {
+    'version: while b.find(|c| c.as_ref().is_ok_and(|&c| c == b'S')).is_some() {
         for c0 in "UNDIALS_VERSION_MAJOR".bytes() {
             match b.next() {
                 Some(Ok(c)) => {
                     if c != c0 {
-                        continue 'version
+                        continue 'version;
                     }
                 }
-                Some(Err(_)) | None => return None
+                Some(Err(_)) | None => return None,
             }
         }
         // Match " : u32 = 6"
         if b.find(|c| c.as_ref().is_ok_and(|&c| c == b'=')).is_some() {
             let is_not_digit = |c: &u8| !c.is_ascii_digit();
             let b = b.skip_while(|c| c.as_ref().is_ok_and(is_not_digit));
-            let v: Vec<_> =
-                b.map_while(|c| c.ok().filter(|c| c.is_ascii_digit()))
+            let v: Vec<_> = b
+                .map_while(|c| c.ok().filter(|c| c.is_ascii_digit()))
                 .collect();
             match String::from_utf8(v) {
                 Ok(v) => return v.parse().ok(),
-                Err(_) => return None
+                Err(_) => return None,
             }
         }
-        return None
+        return None;
     }
     None
 }
@@ -192,7 +190,7 @@ fn main() -> Result<(), String> {
     }
     let sundials = Library::new_sundials();
     let suitesparse = Library::new_suitesparse();
-    
+
     // generate sundials bindings
     let bindings_rs = generate_bindings(&suitesparse, &sundials)?;
     let major = get_sundials_version_major(bindings_rs).unwrap_or(5);
@@ -209,7 +207,6 @@ fn main() -> Result<(), String> {
     for name in files.into_iter() {
         println!("cargo:rerun-if-changed={}", name);
     }
-
 
     // link to sundials
     if let Some(dir) = sundials.lib.as_ref() {
