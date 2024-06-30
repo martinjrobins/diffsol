@@ -4,7 +4,7 @@ use std::{
     ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign},
 };
 
-use sundials_sys::{
+use crate::sundials_sys::{
     realtype, SUNDenseMatrix, SUNDenseMatrix_Cols, SUNDenseMatrix_Columns, SUNDenseMatrix_Rows,
     SUNMatClone, SUNMatCopy, SUNMatDestroy, SUNMatMatvec, SUNMatMatvecSetup, SUNMatScaleAdd,
     SUNMatZero, SUNMatrix,
@@ -14,9 +14,13 @@ use crate::{
     ode_solver::sundials::sundials_check,
     op::NonLinearOp,
     scalar::scale,
-    vector::sundials::{get_suncontext, SundialsVector},
+    vector::sundials::SundialsVector,
     IndexType, Scale, SundialsLinearSolver, Vector,
 };
+
+
+#[cfg(not(sundials_version_major = "5"))]
+use crate::vector::sundials::get_suncontext;
 
 use super::{
     default_solver::DefaultSolver,
@@ -33,8 +37,12 @@ pub struct SundialsMatrix {
 
 impl SundialsMatrix {
     pub fn new_dense(m: IndexType, n: IndexType) -> Self {
-        let ctx = get_suncontext();
-        let sm = unsafe { SUNDenseMatrix(m.try_into().unwrap(), n.try_into().unwrap(), *ctx) };
+        #[cfg(not(sundials_version_major = "5"))]
+        let sm = unsafe { SUNDenseMatrix(m.try_into().unwrap(), n.try_into().unwrap(), *get_suncontext()) };
+        
+        #[cfg(sundials_version_major = "5")]
+        let sm = unsafe { SUNDenseMatrix(m.try_into().unwrap(), n.try_into().unwrap()) };
+
         SundialsMatrix { sm, owned: true }
     }
     pub fn new_not_owned(sm: SUNMatrix) -> Self {

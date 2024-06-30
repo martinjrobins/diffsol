@@ -131,6 +131,9 @@ pub mod scalar;
 pub mod solver;
 pub mod vector;
 
+#[cfg(feature = "sundials")]
+pub mod sundials_sys;
+
 use linear_solver::LinearSolver;
 pub use linear_solver::{faer::sparse_lu::FaerSparseLU, FaerLU, NalgebraLU};
 
