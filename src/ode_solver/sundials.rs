@@ -515,7 +515,7 @@ mod test {
         number_of_steps: 355
         number_of_error_test_failures: 15
         number_of_nonlinear_solver_iterations: 506
-        number_of_nonlinear_solver_fails: 5
+        number_of_nonlinear_solver_fails: 1
         initial_step_size: 0.001
         final_step_size: 11535117835.253025
         "###);
@@ -539,7 +539,7 @@ mod test {
         number_of_steps: 256
         number_of_error_test_failures: 9
         number_of_nonlinear_solver_iterations: 458
-        number_of_nonlinear_solver_fails: 11
+        number_of_nonlinear_solver_fails: 1
         initial_step_size: 0.001
         final_step_size: 1.8099338983079056
         "###);

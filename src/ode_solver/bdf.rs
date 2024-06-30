@@ -898,7 +898,7 @@ mod test {
                 test_state_mut_on_problem,
             },
         },
-        Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquations, Op, SparseColMat, KLU,
+        Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquations, Op, SparseColMat,
     };
 
     use faer::Mat;
@@ -1091,9 +1091,10 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
+    #[cfg(feature = "suitesparse")]
     #[test]
     fn bdf_test_faer_sparse_ku_robertson() {
-        let linear_solver = KLU::default();
+        let linear_solver = crate::KLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
         let (problem, soln) = robertson::<SparseColMat<f64>>(false);

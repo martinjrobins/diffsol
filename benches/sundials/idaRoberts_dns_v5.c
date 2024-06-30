@@ -92,7 +92,7 @@ static int check_ans(N_Vector y, realtype t, realtype rtol, N_Vector atol);
  *--------------------------------------------------------------------
  */
 
-int main(void)
+int idaRoberts_dns(void)
 {
   void *mem;
   N_Vector yy, yp, avtol;

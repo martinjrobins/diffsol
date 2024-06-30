@@ -68,15 +68,15 @@ typedef struct {
 
 /* Prototypes of functions called by IDA */
 
-int heatres(realtype tres, N_Vector uu, N_Vector up, N_Vector resval, void *user_data);
+static int heatres(realtype tres, N_Vector uu, N_Vector up, N_Vector resval, void *user_data);
 
-int jacHeat(realtype tt,  realtype cj,
+static int jacHeat(realtype tt,  realtype cj,
 	    N_Vector yy, N_Vector yp, N_Vector resvec,
 	    SUNMatrix JJ, void *user_data,
 	    N_Vector tempv1, N_Vector tempv2, N_Vector tempv3);
 
 /* Exact same setup as jacHeat. Function needed for special case MGRID=3  */
-int jacHeat3(realtype tt,  realtype cj,
+static int jacHeat3(realtype tt,  realtype cj,
              N_Vector yy, N_Vector yp, N_Vector resvec,
              SUNMatrix JJ, void *user_data,
              N_Vector tempv1, N_Vector tempv2, N_Vector tempv3);
