@@ -47,7 +47,7 @@ jobs:
         echo "LLVM_SYS_140_PREFIX=C:\Program Files\LLVM" >> $GITHUB_ENV
     - name: echo env
       if: matrix.os == 'windows-latest'
-      run: echo $LLVM_SYS_140_PREFIX
+      run: echo "$LLVM_SYS_140_PREFIX"
     - uses: actions/checkout@v4
     - uses: actions/cache@v3.3.2
       with:
