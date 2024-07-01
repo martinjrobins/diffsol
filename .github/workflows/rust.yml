@@ -70,7 +70,9 @@ jobs:
         sudo apt-get install -y libsuitesparse-dev
     - name: Run tests - windows check
       if : matrix.os == 'windows-latest'
-      run: LLVM_SYS_140_PREFIX="C:\Program Files\LLVM" cargo test --verbose --features diffsl-llvm14
+      env:
+        LLVM_SYS_140_PREFIX: "C:\Program Files\LLVM"
+      run: cargo test --verbose --features diffsl-llvm14
     - name: Run tests - default features
       run: cargo test --verbose
     - name: Run tests - all features
