@@ -26,6 +26,8 @@ jobs:
   unit-tests:
     name: Tests - ${{ matrix.os }} - ${{ matrix.toolchain }}
     runs-on: ${{ matrix.os }}
+    env:
+      LLVM_SYS_140_PREFIX: $${ matrix.os == "windows-latest" && "C:\Program Files\LLVM" || ""}
     strategy:
         matrix:
           toolchain:
@@ -41,6 +43,8 @@ jobs:
               os: ubuntu-latest
 
     steps:
+    - name: echo env
+      run: echo ${{ env.LLVM_SYS_140_PREFIX }}
     - uses: actions/checkout@v4
     - uses: actions/cache@v3.3.2
       with:
