@@ -27,7 +27,7 @@ jobs:
     name: Tests - ${{ matrix.os }} - ${{ matrix.toolchain }}
     runs-on: ${{ matrix.os }}
     env:
-      LLVM_SYS_140_PREFIX: $${ matrix.os == "windows-latest" && "C:\Program Files\LLVM" || ""}
+      LLVM_SYS_140_PREFIX: "$${ matrix.os == 'windows-latest' && 'C:\Program Files\LLVM' || ''}"
     strategy:
         matrix:
           toolchain:
