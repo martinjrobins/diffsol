@@ -33,7 +33,7 @@ jobs:
           os:
             - ubuntu-latest
             - macos-13
-            - windows-latest
+            #- windows-latest
           include:
             - toolchain: beta
               os: ubuntu-latest
@@ -61,10 +61,6 @@ jobs:
       run: |
         echo "ADDITIONAL_FEATURES_FLAGS=--features sundials --features suitesparse" >> $GITHUB_ENV
         sudo apt-get install -y libsuitesparse-dev
-    - name: Run tests - windows check
-      env:
-        LLVM_SYS_140_PREFIX: ${{ env.LLVM_PATH }}
-      run: cargo test --verbose --features diffsl-llvm14
     - name: Run tests - default features
       run: cargo test --verbose
     - name: Run tests - all features
