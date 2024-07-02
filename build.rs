@@ -195,6 +195,7 @@ fn main() -> Result<(), String> {
     let bindings_rs = generate_bindings(&suitesparse, &sundials)?;
     let major = get_sundials_version_major(bindings_rs).unwrap_or(5);
     println!("cargo:rustc-cfg=sundials_version_major=\"{}\"", major);
+    println!("cargo::rustc-check-cfg=cfg(sundials_version_major, values(\"5\", \"6\", \"7\"))");
 
     // compile sundials benches
     let mut files = compile_benches(&sundials, &suitesparse);
