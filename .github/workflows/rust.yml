@@ -52,11 +52,11 @@ jobs:
       run: rustup default ${{ matrix.toolchain }} && rustup update ${{ matrix.toolchain }} --no-self-update && rustup component add clippy
     - name: Rust version
       run: rustc -Vv
-    #- name: Install LLVM and Clang (Ubuntu)
-    #  uses: KyleMayes/install-llvm-action@v2
-    #  if : matrix.os == 'ubuntu-latest'
-    #  with:
-    #    version: "14.0"
+    - name: Install LLVM and Clang (Ubuntu)
+      uses: KyleMayes/install-llvm-action@v2
+      if : matrix.os == 'ubuntu-latest'
+      with:
+        version: "14.0"
     - name: Install LLVM and Clang (macOS)
       if : matrix.os == 'macos-13'
       run: |
