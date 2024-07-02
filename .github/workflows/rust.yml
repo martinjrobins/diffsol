@@ -60,7 +60,7 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: |
         echo "ADDITIONAL_FEATURES_FLAGS=--features sundials --features suitesparse" >> $GITHUB_ENV
-        sudo apt-get install -y libsuitesparse-dev
+        sudo apt-get install -y libsuitesparse-dev libsundials-dev
     - name: Run tests - default features
       run: cargo test --verbose
     - name: Run tests - all features
