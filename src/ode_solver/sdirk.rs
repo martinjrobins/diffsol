@@ -55,7 +55,7 @@ where
     old_f: Eqn::V,
     old_f_sens: Vec<Eqn::V>,
     a_rows: Vec<Eqn::V>,
-    statistics: BdfStatistics<Eqn::T>,
+    statistics: BdfStatistics,
     root_finder: Option<RootFinder<Eqn::V>>,
     tstop: Option<Eqn::T>,
     is_state_mutated: bool,
@@ -71,7 +71,9 @@ where
 {
     const NEWTON_MAXITER: usize = 10;
     const MIN_FACTOR: f64 = 0.2;
+    const MIN_THRESHOLD: f64 = 1.0;
     const MAX_FACTOR: f64 = 10.0;
+    const MAX_THRESHOLD: f64 = 1.2;
     const MIN_TIMESTEP: f64 = 1e-13;
 
     pub fn new(tableau: Tableau<M>, linear_solver: LS) -> Self {
@@ -174,7 +176,7 @@ where
         }
     }
 
-    pub fn get_statistics(&self) -> &BdfStatistics<Eqn::T> {
+    pub fn get_statistics(&self) -> &BdfStatistics {
         &self.statistics
     }
 
@@ -327,7 +329,6 @@ where
 
         // update statistics
         self.statistics = BdfStatistics::default();
-        self.statistics.initial_step_size = state.h;
 
         let nstates = state.y.len();
         let nparams = problem.eqn.rhs().nparams();
@@ -358,12 +359,12 @@ where
     }
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>> {
-        // optionally do the first step
         if self.state.is_none() {
             return Err(anyhow!("State not set"));
         }
         let n = self.state.as_ref().unwrap().y.len();
 
+        // optionally do the first step
         let start = if self.is_sdirk { 0 } else { 1 };
         let mut updated_jacobian = false;
 
@@ -371,13 +372,14 @@ where
         let mut second_step_attempt = false;
         let mut error = <Eqn::V as Vector>::zeros(n);
 
-        let mut t1: Eqn::T;
+        let mut factor: Eqn::T;
 
         // loop until step is accepted
         'step: loop {
             let t0 = self.state.as_ref().unwrap().t;
             let h = self.state.as_ref().unwrap().h;
             // if start == 1, then we need to compute the first stage
+            // from the last stage of the previous step
             if start == 1 {
                 {
                     let mut hf = self.diff.column_mut(0);
@@ -476,8 +478,11 @@ where
 
             // solve for  (M - h * c * J) * error = error_est as by Hosea, M. E., & Shampine, L. F. (1996). Analysis and implementation of TR-BDF2. Applied Numerical Mathematics, 20(1-2), 21-37.
             // todo: this is failing if h is too small, perhaps only do it for sufficiently large h?
-            //self.nonlinear_solver
-            //    .solve_linearised_in_place(&mut error)?;
+            // todo: this seems to just make it slower, so removing....
+            //if self.state.as_ref().unwrap().h > Eqn::T::from(1e-10) {
+            //    self.nonlinear_solver
+            //        .solve_linearised_in_place(&mut error)?;
+            //}
 
             // compute error norm
             let atol = self.problem().as_ref().unwrap().atol.as_ref();
@@ -505,7 +510,7 @@ where
             let niter = self.nonlinear_solver.convergence().niter() as f64;
             let safety = Eqn::T::from(0.9 * (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter));
             let order = self.tableau.order() as f64;
-            let mut factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (order + 1.0)));
+            factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (order + 1.0)));
             if factor < Eqn::T::from(Self::MIN_FACTOR) {
                 factor = Eqn::T::from(Self::MIN_FACTOR);
             }
@@ -515,16 +520,13 @@ where
 
             // adjust step size for next step
             let state = self.state.as_mut().unwrap();
-            t1 = state.t + state.h;
-            state.h *= factor;
+            //t1 = state.t + state.h;
+            //state.h *= factor;
 
             // if step size too small, then fail
             if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
                 return Err(anyhow::anyhow!("Step size too small at t = {}", state.t));
             }
-
-            // update c for new step size
-            self.nonlinear_solver.problem().f.set_h(state.h);
 
             // test error is within tolerance
             if error_norm <= Eqn::T::from(1.0) {
@@ -532,29 +534,38 @@ where
             }
             // step is rejected, factor reduces step size, so we try again with the smaller step size
             self.statistics.number_of_error_test_failures += 1;
-        }
+            state.h *= factor;
 
-        //setup jacobian for next step (h was changed so jacobian needs to be recalculated)
-        self.nonlinear_solver.reset_jacobian(&self.old_f, t1);
+            // update c for new step size
+            self.nonlinear_solver.problem().f.set_h(state.h);
+        }
 
         // take the step
         let state = self.state.as_mut().unwrap();
-        let dt = t1 - state.t;
         self.old_t = state.t;
-        state.t = t1;
+        state.t += state.h;
 
         // last stage is the solution and is the same as old_f
         // todo: can we get rid of old_f and just use diff?
-        self.old_f.mul_assign(scale(Eqn::T::one() / dt));
+        self.old_f.mul_assign(scale(Eqn::T::one() / state.h));
         std::mem::swap(&mut self.old_f, &mut state.dy);
 
         // old_y already has the new y soln
         std::mem::swap(&mut self.old_y, &mut state.y);
 
         for i in 0..self.sdiff.len() {
-            self.old_f_sens[i].mul_assign(scale(Eqn::T::one() / dt));
+            self.old_f_sens[i].mul_assign(scale(Eqn::T::one() / state.h));
             std::mem::swap(&mut self.old_f_sens[i], &mut state.ds[i]);
             std::mem::swap(&mut self.old_y_sens[i], &mut state.s[i]);
+        }
+
+        // see if we want to update the step size
+        if factor >= Eqn::T::from(Self::MAX_THRESHOLD) || factor < Eqn::T::from(Self::MIN_THRESHOLD)
+        {
+            state.h *= factor;
+            self.nonlinear_solver.problem().f.set_h(state.h);
+            //setup jacobian for next step (h was changed so jacobian needs to be recalculated)
+            self.nonlinear_solver.reset_jacobian(&self.old_f, state.t);
         }
 
         self.is_state_mutated = false;
@@ -563,7 +574,6 @@ where
         self.statistics.number_of_linear_solver_setups =
             self.nonlinear_solver.problem().f.number_of_jac_evals();
         self.statistics.number_of_steps += 1;
-        self.statistics.final_step_size = self.state.as_ref().unwrap().h;
 
         // check for root within accepted step
         if let Some(root_fn) = self.problem.as_ref().unwrap().eqn.root() {
@@ -757,17 +767,15 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 30
-        number_of_steps: 29
+        number_of_linear_solver_setups: 4
+        number_of_steps: 31
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 116
+        number_of_nonlinear_solver_iterations: 124
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.005848035476425734
-        final_step_size: 0.3791729826141245
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 118
+        number_of_calls: 126
         number_of_jac_muls: 2
         number_of_matrix_evals: 1
         "###);
@@ -781,18 +789,16 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 59
-        number_of_steps: 58
+        number_of_linear_solver_setups: 7
+        number_of_steps: 63
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 464
+        number_of_nonlinear_solver_iterations: 504
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.005848035476425734
-        final_step_size: 0.2277933369990638
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 234
-        number_of_jac_muls: 235
+        number_of_calls: 254
+        number_of_jac_muls: 255
         number_of_matrix_evals: 1
         "###);
     }
@@ -805,13 +811,11 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 14
+        number_of_linear_solver_setups: 3
         number_of_steps: 13
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 78
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.02114742526881128
-        final_step_size: 0.9420340289953204
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -829,18 +833,16 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 23
-        number_of_steps: 22
+        number_of_linear_solver_setups: 6
+        number_of_steps: 24
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 264
+        number_of_nonlinear_solver_iterations: 288
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.02114742526881128
-        final_step_size: 0.5845519864472709
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 134
-        number_of_jac_muls: 135
+        number_of_calls: 146
+        number_of_jac_muls: 147
         number_of_matrix_evals: 1
         "###);
     }
@@ -853,19 +855,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 241
-        number_of_steps: 231
+        number_of_linear_solver_setups: 123
+        number_of_steps: 242
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 1867
-        number_of_nonlinear_solver_fails: 9
-        initial_step_size: 0.0005245814253712257
-        final_step_size: 27784228464.501045
+        number_of_nonlinear_solver_iterations: 1903
+        number_of_nonlinear_solver_fails: 10
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 1870
-        number_of_jac_muls: 33
-        number_of_matrix_evals: 11
+        number_of_calls: 1906
+        number_of_jac_muls: 36
+        number_of_matrix_evals: 12
         "###);
     }
 
@@ -877,19 +877,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 270
-        number_of_steps: 251
+        number_of_linear_solver_setups: 141
+        number_of_steps: 263
         number_of_error_test_failures: 3
-        number_of_nonlinear_solver_iterations: 5658
-        number_of_nonlinear_solver_fails: 15
-        initial_step_size: 0.0005245814253712257
-        final_step_size: 14715441996.917614
+        number_of_nonlinear_solver_iterations: 5775
+        number_of_nonlinear_solver_fails: 17
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 1852
-        number_of_jac_muls: 3901
-        number_of_matrix_evals: 19
+        number_of_calls: 1870
+        number_of_jac_muls: 4007
+        number_of_matrix_evals: 20
         "###);
     }
 
@@ -901,17 +899,15 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 156
-        number_of_steps: 139
+        number_of_linear_solver_setups: 112
+        number_of_steps: 143
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 1759
+        number_of_nonlinear_solver_iterations: 1784
         number_of_nonlinear_solver_fails: 16
-        initial_step_size: 0.0034662483959892352
-        final_step_size: 52423342323.27357
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 1762
+        number_of_calls: 1787
         number_of_jac_muls: 48
         number_of_matrix_evals: 16
         "###);
@@ -925,19 +921,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 176
-        number_of_steps: 153
+        number_of_linear_solver_setups: 126
+        number_of_steps: 159
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 5451
-        number_of_nonlinear_solver_fails: 22
-        initial_step_size: 0.0034662483959892352
-        final_step_size: 20181970335.558342
+        number_of_nonlinear_solver_iterations: 5614
+        number_of_nonlinear_solver_fails: 21
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 1844
-        number_of_jac_muls: 3718
-        number_of_matrix_evals: 24
+        number_of_calls: 1899
+        number_of_jac_muls: 3819
+        number_of_matrix_evals: 23
         "###);
     }
 
@@ -945,23 +939,21 @@ mod test {
     fn test_tr_bdf2_nalgebra_robertson_ode() {
         let tableau = Tableau::<M>::tr_bdf2();
         let mut s = Sdirk::new(tableau, NalgebraLU::default());
-        let (problem, soln) = robertson_ode::<M>(false);
+        let (problem, soln) = robertson_ode::<M>(false, 1);
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 241
-        number_of_steps: 231
+        number_of_linear_solver_setups: 124
+        number_of_steps: 242
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 1866
-        number_of_nonlinear_solver_fails: 9
-        initial_step_size: 0.00046734995811969143
-        final_step_size: 27106454568.6792
+        number_of_nonlinear_solver_iterations: 1904
+        number_of_nonlinear_solver_fails: 10
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 1868
-        number_of_jac_muls: 30
-        number_of_matrix_evals: 10
+        number_of_calls: 1906
+        number_of_jac_muls: 33
+        number_of_matrix_evals: 11
         "###);
     }
 

@@ -131,6 +131,9 @@ pub mod scalar;
 pub mod solver;
 pub mod vector;
 
+#[cfg(feature = "sundials")]
+pub mod sundials_sys;
+
 use linear_solver::LinearSolver;
 pub use linear_solver::{faer::sparse_lu::FaerSparseLU, FaerLU, NalgebraLU};
 
@@ -147,6 +150,9 @@ pub use linear_solver::sundials::SundialsLinearSolver;
 
 #[cfg(feature = "sundials")]
 pub use ode_solver::sundials::SundialsIda;
+
+#[cfg(feature = "suitesparse")]
+pub use linear_solver::suitesparse::klu::KLU;
 
 #[cfg(feature = "diffsl")]
 pub use ode_solver::diffsl::DiffSlContext;

@@ -23,3 +23,6 @@ Cargo.lock
 *pending-snap
 perf.data*
 flamegraph.svg
+*.png
+env/
+*.mtx

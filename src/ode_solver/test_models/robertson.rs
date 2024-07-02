@@ -4,12 +4,8 @@ use crate::{
 };
 
 #[cfg(feature = "diffsl")]
-pub fn robertson_diffsl<M: Matrix<T = f64> + 'static>(
+pub fn robertson_diffsl_compile<M: Matrix<T = f64> + 'static>(
     context: &mut crate::DiffSlContext<M>,
-    use_coloring: bool,
-) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
-    OdeSolverSolution<M::V>,
 ) {
     let code = "
         in = [k1, k2, k3]
@@ -43,7 +39,16 @@ pub fn robertson_diffsl<M: Matrix<T = f64> + 'static>(
         }";
 
     context.recompile(code).unwrap();
+}
 
+#[cfg(feature = "diffsl")]
+pub fn robertson_diffsl_problem<M: Matrix<T = f64> + 'static>(
+    context: &crate::DiffSlContext<M>,
+    use_coloring: bool,
+) -> (
+    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
+    OdeSolverSolution<M::V>,
+) {
     let problem = OdeBuilder::new()
         .p([0.04, 1.0e4, 3.0e7])
         .rtol(1e-4)

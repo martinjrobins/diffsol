@@ -1,11 +1,4 @@
-use anyhow::{anyhow, Result};
-use num_traits::Zero;
-use serde::Serialize;
-use std::{
-    ffi::{c_int, c_long, c_void, CStr},
-    rc::Rc,
-};
-use sundials_sys::{
+use crate::sundials_sys::{
     realtype, IDACalcIC, IDACreate, IDAFree, IDAGetDky, IDAGetIntegratorStats,
     IDAGetNonlinSolvStats, IDAGetReturnFlagName, IDAInit, IDAReInit, IDASVtolerances, IDASetId,
     IDASetJacFn, IDASetLinearSolver, IDASetStopTime, IDASetUserData, IDASolve, N_Vector,
@@ -15,12 +8,22 @@ use sundials_sys::{
     IDA_RTFUNC_FAIL, IDA_SUCCESS, IDA_TOO_MUCH_ACC, IDA_TOO_MUCH_WORK, IDA_TSTOP_RETURN,
     IDA_YA_YDP_INIT,
 };
+use anyhow::{anyhow, Result};
+use num_traits::Zero;
+use serde::Serialize;
+use std::{
+    ffi::{c_int, c_long, c_void, CStr},
+    rc::Rc,
+};
 
 use crate::{
-    matrix::sparsity::MatrixSparsityRef, scale, vector::sundials::get_suncontext, LinearOp, Matrix,
-    NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-    OdeSolverStopReason, Op, SundialsMatrix, SundialsVector, Vector,
+    matrix::sparsity::MatrixSparsityRef, scale, LinearOp, Matrix, NonLinearOp, OdeEquations,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, SundialsMatrix,
+    SundialsVector, Vector,
 };
+
+#[cfg(not(sundials_version_major = "5"))]
+use crate::vector::sundials::get_suncontext;
 
 pub fn sundials_check(retval: c_int) -> Result<()> {
     if retval < 0 {
@@ -39,8 +42,6 @@ pub struct SundialsStatistics {
     pub number_of_error_test_failures: usize,
     pub number_of_nonlinear_solver_iterations: usize,
     pub number_of_nonlinear_solver_fails: usize,
-    pub initial_step_size: realtype,
-    pub final_step_size: realtype,
 }
 
 impl SundialsStatistics {
@@ -51,8 +52,6 @@ impl SundialsStatistics {
             number_of_error_test_failures: 0,
             number_of_nonlinear_solver_iterations: 0,
             number_of_nonlinear_solver_fails: 0,
-            initial_step_size: 0.0,
-            final_step_size: 0.0,
         }
     }
     fn new_from_ida(ida_mem: *mut c_void) -> Result<Self> {
@@ -93,8 +92,6 @@ impl SundialsStatistics {
             number_of_error_test_failures: netfails.try_into().unwrap(),
             number_of_nonlinear_solver_iterations: nniters.try_into().unwrap(),
             number_of_nonlinear_solver_fails: nncfails.try_into().unwrap(),
-            initial_step_size: hinused,
-            final_step_size: hcur,
         })
     }
 }
@@ -202,8 +199,12 @@ where
     }
 
     pub fn new() -> Self {
-        let ctx = *get_suncontext();
-        let ida_mem = unsafe { IDACreate(ctx) };
+        #[cfg(not(sundials_version_major = "5"))]
+        let ida_mem = unsafe { IDACreate(*get_suncontext()) };
+
+        #[cfg(sundials_version_major = "5")]
+        let ida_mem = unsafe { IDACreate() };
+
         let yp = SundialsVector::new_serial(0);
         let jacobian = SundialsMatrix::new_dense(0, 0);
 
@@ -308,7 +309,6 @@ where
         self.problem = Some(problem.clone());
         let eqn = problem.eqn.as_ref();
         let number_of_states = eqn.rhs().nstates();
-        let ctx = *get_suncontext();
         let ida_mem = self.ida_mem;
 
         // set user data
@@ -336,13 +336,22 @@ where
 
         // linear solver
         self.jacobian = SundialsMatrix::new_dense(number_of_states, number_of_states);
+
         self.linear_solver = unsafe {
-            SUNLinSol_Dense(
-                state.y.sundials_vector(),
-                self.jacobian.sundials_matrix(),
-                ctx,
-            )
+            #[cfg(not(sundials_version_major = "5"))]
+            {
+                SUNLinSol_Dense(
+                    state.y.sundials_vector(),
+                    self.jacobian.sundials_matrix(),
+                    *get_suncontext(),
+                )
+            }
+            #[cfg(sundials_version_major = "5")]
+            {
+                SUNLinSol_Dense(state.y.sundials_vector(), self.jacobian.sundials_matrix())
+            }
         };
+
         Self::check(unsafe { SUNLinSolInitialize(self.linear_solver) }).unwrap();
         Self::check(unsafe {
             IDASetLinearSolver(ida_mem, self.linear_solver, self.jacobian.sundials_matrix())
@@ -438,9 +447,15 @@ where
 
 #[cfg(test)]
 mod test {
+
     use crate::{
         ode_solver::{
-            test_models::{exponential_decay::exponential_decay_problem, robertson::robertson},
+            test_models::{
+                exponential_decay::exponential_decay_problem,
+                foodweb::{foodweb_problem, FoodWebContext},
+                heat2d::head2d_problem,
+                robertson::robertson,
+            },
             tests::{test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut},
         },
         OdeEquations, Op, SundialsIda, SundialsMatrix,
@@ -472,8 +487,6 @@ mod test {
         number_of_error_test_failures: 3
         number_of_nonlinear_solver_iterations: 63
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.001
-        final_step_size: 0.7770043351266953
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -494,15 +507,49 @@ mod test {
         number_of_steps: 355
         number_of_error_test_failures: 15
         number_of_nonlinear_solver_iterations: 506
-        number_of_nonlinear_solver_fails: 5
-        initial_step_size: 0.001
-        final_step_size: 11535117835.253025
+        number_of_nonlinear_solver_fails: 1
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
         number_of_calls: 509
         number_of_jac_muls: 180
         number_of_matrix_evals: 60
+        "###);
+    }
+
+    #[test]
+    fn test_sundials_foodweb() {
+        let foodweb_context = FoodWebContext::default();
+        let mut s = crate::SundialsIda::default();
+        let (problem, soln) = foodweb_problem::<crate::SundialsMatrix, 10>(&foodweb_context);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 42
+        number_of_steps: 256
+        number_of_error_test_failures: 9
+        number_of_nonlinear_solver_iterations: 458
+        number_of_nonlinear_solver_fails: 1
+        "###);
+    }
+    #[test]
+    fn test_sundials_heat2d() {
+        let mut s = crate::SundialsIda::default();
+        let (problem, soln) = head2d_problem::<crate::SundialsMatrix, 10>();
+        test_ode_solver(&mut s, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 42
+        number_of_steps: 165
+        number_of_error_test_failures: 11
+        number_of_nonlinear_solver_iterations: 214
+        number_of_nonlinear_solver_fails: 0
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
+        ---
+        number_of_calls: 217
+        number_of_jac_muls: 4300
+        number_of_matrix_evals: 43
         "###);
     }
 }

@@ -22,29 +22,13 @@ use crate::{NonLinearOp, SensEquations};
 
 use super::equations::OdeEquations;
 
-#[derive(Clone, Debug, Serialize)]
-pub struct BdfStatistics<T: Scalar> {
+#[derive(Clone, Debug, Serialize, Default)]
+pub struct BdfStatistics {
     pub number_of_linear_solver_setups: usize,
     pub number_of_steps: usize,
     pub number_of_error_test_failures: usize,
     pub number_of_nonlinear_solver_iterations: usize,
     pub number_of_nonlinear_solver_fails: usize,
-    pub initial_step_size: T,
-    pub final_step_size: T,
-}
-
-impl<T: Scalar> Default for BdfStatistics<T> {
-    fn default() -> Self {
-        Self {
-            number_of_linear_solver_setups: 0,
-            number_of_steps: 0,
-            number_of_error_test_failures: 0,
-            number_of_nonlinear_solver_iterations: 0,
-            number_of_nonlinear_solver_fails: 0,
-            initial_step_size: T::zero(),
-            final_step_size: T::zero(),
-        }
-    }
 }
 
 /// Implements a Backward Difference formula (BDF) implicit multistep integrator.
@@ -83,7 +67,7 @@ pub struct Bdf<
     alpha: Vec<Eqn::T>,
     gamma: Vec<Eqn::T>,
     error_const2: Vec<Eqn::T>,
-    statistics: BdfStatistics<Eqn::T>,
+    statistics: BdfStatistics,
     state: Option<OdeSolverState<Eqn::V>>,
     tstop: Option<Eqn::T>,
     root_finder: Option<RootFinder<Eqn::V>>,
@@ -126,7 +110,7 @@ where
     const MIN_THRESHOLD: f64 = 0.9;
     const MIN_TIMESTEP: f64 = 1e-32;
 
-    fn new(nonlinear_solver: Nls) -> Self {
+    pub fn new(nonlinear_solver: Nls) -> Self {
         let n = 1;
 
         // kappa values for difference orders, taken from Table 1 of [1]
@@ -179,7 +163,7 @@ where
         }
     }
 
-    pub fn get_statistics(&self) -> &BdfStatistics<Eqn::T> {
+    pub fn get_statistics(&self) -> &BdfStatistics {
         &self.statistics
     }
 
@@ -383,9 +367,6 @@ where
 
         // setup U
         self.u = Self::_compute_r(self.order, Eqn::T::one());
-
-        // update statistics
-        self.statistics.initial_step_size = state.h;
 
         self.is_state_modified = false;
     }
@@ -750,7 +731,6 @@ where
         self.statistics.number_of_linear_solver_setups =
             self.nonlinear_problem_op().number_of_jac_evals();
         self.statistics.number_of_steps += 1;
-        self.statistics.final_step_size = self.state.as_ref().unwrap().h;
 
         // a change in order is only done after running at order k for k + 1 steps
         // (see page 83 of [2])
@@ -937,8 +917,6 @@ mod test {
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 82
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.0004472135954999579
-        final_step_size: 0.7459469544772627
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -970,8 +948,6 @@ mod test {
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 82
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.0004472135954999579
-        final_step_size: 0.7459469544772627
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -993,8 +969,6 @@ mod test {
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 204
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.0004472135954999579
-        final_step_size: 0.35521283546536314
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1016,8 +990,6 @@ mod test {
         number_of_error_test_failures: 2
         number_of_nonlinear_solver_iterations: 71
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.000024564241080624082
-        final_step_size: 0.16384456065711456
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1048,8 +1020,6 @@ mod test {
         number_of_error_test_failures: 5
         number_of_nonlinear_solver_iterations: 163
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.000024564241080624082
-        final_step_size: 0.14646131420740696
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1071,8 +1041,6 @@ mod test {
         number_of_error_test_failures: 1
         number_of_nonlinear_solver_iterations: 651
         number_of_nonlinear_solver_fails: 1
-        initial_step_size: 0.000012014877942697947
-        final_step_size: 6681716520.984806
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1091,13 +1059,24 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
+    #[cfg(feature = "suitesparse")]
+    #[test]
+    fn bdf_test_faer_sparse_ku_robertson() {
+        let linear_solver = crate::KLU::default();
+        let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
+        let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
+        let (problem, soln) = robertson::<SparseColMat<f64>>(false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+    }
+
     #[cfg(feature = "diffsl")]
     #[test]
     fn bdf_test_nalgebra_diffsl_robertson() {
+        use crate::ode_solver::test_models::robertson;
         let mut context = crate::DiffSlContext::default();
         let mut s = Bdf::default();
-        let (problem, soln) =
-            crate::ode_solver::test_models::robertson::robertson_diffsl::<M>(&mut context, false);
+        robertson::robertson_diffsl_compile(&mut context);
+        let (problem, soln) = robertson::robertson_diffsl_problem::<M>(&context, false);
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
@@ -1113,8 +1092,6 @@ mod test {
         number_of_error_test_failures: 42
         number_of_nonlinear_solver_iterations: 3022
         number_of_nonlinear_solver_fails: 4
-        initial_step_size: 0.000012014877942697947
-        final_step_size: 4361857202.2027445
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1136,8 +1113,6 @@ mod test {
         number_of_error_test_failures: 1
         number_of_nonlinear_solver_iterations: 651
         number_of_nonlinear_solver_fails: 1
-        initial_step_size: 0.000012014877942697947
-        final_step_size: 6681716520.984806
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1150,7 +1125,7 @@ mod test {
     #[test]
     fn test_bdf_nalgebra_robertson_ode() {
         let mut s = Bdf::default();
-        let (problem, soln) = robertson_ode::<M>(false);
+        let (problem, soln) = robertson_ode::<M>(false, 3);
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
@@ -1159,13 +1134,11 @@ mod test {
         number_of_error_test_failures: 1
         number_of_nonlinear_solver_iterations: 645
         number_of_nonlinear_solver_fails: 1
-        initial_step_size: 0.00001010330147394336
-        final_step_size: 6646839438.818167
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
         number_of_calls: 647
-        number_of_jac_muls: 132
+        number_of_jac_muls: 396
         number_of_matrix_evals: 44
         "###);
     }
@@ -1182,8 +1155,6 @@ mod test {
         number_of_error_test_failures: 14
         number_of_nonlinear_solver_iterations: 2510
         number_of_nonlinear_solver_fails: 1
-        initial_step_size: 0.00001010330147394336
-        final_step_size: 3124486954.147313
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1205,8 +1176,6 @@ mod test {
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 322
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.000003544494634084706
-        final_step_size: 1.452296693909289
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1228,8 +1197,6 @@ mod test {
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 322
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.000003544494634084706
-        final_step_size: 1.452296693909289
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1251,8 +1218,6 @@ mod test {
         number_of_error_test_failures: 1
         number_of_nonlinear_solver_iterations: 123
         number_of_nonlinear_solver_fails: 0
-        initial_step_size: 0.00009999999999999999
-        final_step_size: 0.26810801834071796
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
@@ -1269,19 +1234,32 @@ mod test {
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
         let (problem, soln) = head2d_problem::<SparseColMat<f64>, 10>();
         test_ode_solver(&mut s, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 22
+        number_of_steps: 173
+        number_of_error_test_failures: 0
+        number_of_nonlinear_solver_iterations: 343
+        number_of_nonlinear_solver_fails: 0
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
+        ---
+        number_of_calls: 346
+        number_of_jac_muls: 247
+        number_of_matrix_evals: 21
+        "###);
     }
 
     #[cfg(feature = "diffsl")]
     #[test]
     fn test_bdf_faer_sparse_heat2d_diffsl() {
+        use crate::ode_solver::test_models::heat2d::{self, heat2d_diffsl_compile};
         let linear_solver = FaerSparseLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut context = crate::DiffSlContext::default();
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
-        let (problem, soln) = crate::ode_solver::test_models::heat2d::heat2d_diffsl::<
-            SparseColMat<f64>,
-            10,
-        >(&mut context);
+        heat2d_diffsl_compile::<SparseColMat<f64>, 10>(&mut context);
+        let (problem, soln) = heat2d::heat2d_diffsl_problem::<SparseColMat<f64>>(&context);
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
@@ -1291,22 +1269,28 @@ mod test {
         let linear_solver = FaerSparseLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
-        let (problem, soln) = foodweb_problem::<Mat<f64>, SparseColMat<f64>, 10>(&foodweb_context);
+        let (problem, soln) = foodweb_problem::<SparseColMat<f64>, 10>(&foodweb_context);
         test_ode_solver(&mut s, &problem, soln, None, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 38
+        number_of_steps: 145
+        number_of_error_test_failures: 0
+        number_of_nonlinear_solver_iterations: 306
+        number_of_nonlinear_solver_fails: 8
+        "###);
     }
 
     #[cfg(feature = "diffsl")]
     #[test]
     fn test_bdf_faer_sparse_foodweb_diffsl() {
+        use crate::ode_solver::test_models::foodweb;
         let mut context = crate::DiffSlContext::default();
         let linear_solver = FaerSparseLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
-        let (problem, soln) = crate::ode_solver::test_models::foodweb::foodweb_diffsl::<
-            Mat<f64>,
-            SparseColMat<f64>,
-            10,
-        >(&mut context);
+        foodweb::foodweb_diffsl_compile::<SparseColMat<f64>, 10>(&mut context);
+        let (problem, soln) = foodweb::foodweb_diffsl_problem::<SparseColMat<f64>>(&context);
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 

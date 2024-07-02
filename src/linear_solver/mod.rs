@@ -10,6 +10,9 @@ pub mod faer;
 #[cfg(feature = "sundials")]
 pub mod sundials;
 
+#[cfg(feature = "suitesparse")]
+pub mod suitesparse;
+
 pub use faer::lu::LU as FaerLU;
 pub use nalgebra::lu::LU as NalgebraLU;
 
@@ -53,13 +56,13 @@ pub mod tests {
         op::{closure::Closure, NonLinearOp},
         scalar::scale,
         vector::VectorRef,
-        DenseMatrix, LinearSolver, SolverProblem, Vector,
+        LinearSolver, Matrix, SolverProblem, Vector,
     };
     use num_traits::{One, Zero};
 
     use super::LinearSolveSolution;
 
-    fn linear_problem<M: DenseMatrix + 'static>() -> (
+    pub fn linear_problem<M: Matrix + 'static>() -> (
         SolverProblem<impl NonLinearOp<M = M, V = M::V, T = M::T>>,
         Vec<LinearSolveSolution<M::V>>,
     ) {
@@ -67,14 +70,16 @@ pub mod tests {
         let jac1 = M::from_diagonal(&diagonal);
         let jac2 = M::from_diagonal(&diagonal);
         let p = Rc::new(M::V::zeros(0));
-        let op = Rc::new(Closure::new(
+        let mut op = Closure::new(
             // f = J * x
             move |x, _p, _t, y| jac1.gemv(M::T::one(), x, M::T::zero(), y),
             move |_x, _p, _t, v, y| jac2.gemv(M::T::one(), v, M::T::zero(), y),
             2,
             2,
             p,
-        ));
+        );
+        op.calculate_sparsity(&M::V::from_element(2, M::T::one()), M::T::zero());
+        let op = Rc::new(op);
         let rtol = M::T::from(1e-6);
         let atol = Rc::new(M::V::from_vec(vec![1e-6.into(), 1e-6.into()]));
         let problem = SolverProblem::new(op, atol, rtol);
