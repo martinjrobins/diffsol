@@ -107,6 +107,7 @@ impl<T: Scalar> MatrixSparsity<CscMatrix<T>> for SparsityPattern {
         let mut curr_col = 0;
         let mut major_offsets = Vec::with_capacity(major_dim + 1);
         let mut minor_indices = Vec::with_capacity(indices.len());
+        major_offsets.push(0);
         for (i, j) in indices {
             while curr_col < j {
                 major_offsets.push(minor_indices.len());
@@ -114,7 +115,10 @@ impl<T: Scalar> MatrixSparsity<CscMatrix<T>> for SparsityPattern {
             }
             minor_indices.push(i);
         }
-        major_offsets.push(minor_indices.len());
+        while curr_col < major_dim {
+            major_offsets.push(minor_indices.len());
+            curr_col += 1;
+        }
 
         SparsityPattern::try_from_offsets_and_indices(
             major_dim,

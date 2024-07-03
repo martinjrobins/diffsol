@@ -25,15 +25,15 @@ jobs:
 
   unit-tests:
     name: Tests - ${{ matrix.os }} - ${{ matrix.toolchain }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
         matrix:
           toolchain:
             - stable
           os:
             - ubuntu-latest
-            - macos-latest
-            - windows-latest
+            - macos-13
+            #- windows-latest
           include:
             - toolchain: beta
               os: ubuntu-latest
@@ -47,28 +47,32 @@ jobs:
         path: |
           ${{ env.CARGO_HOME }}
           target
-        key: unit-test-${{ runner.os }}-${{ matrix.toolchain}}
+        key: diffsol-${{ runner.os }}-${{ matrix.toolchain}}
     - name: Set up Rust
       run: rustup default ${{ matrix.toolchain }} && rustup update ${{ matrix.toolchain }} --no-self-update && rustup component add clippy
     - name: Rust version
       run: rustc -Vv
-    - name: Install LLVM and Clang
-      uses: KyleMayes/install-llvm-action@v1
+    - name: Install LLVM and Clang (Ubuntu)
+      uses: KyleMayes/install-llvm-action@v2
+      if : matrix.os == 'ubuntu-latest'
       with:
         version: "14.0"
-    - name: Set features variable and install dependencies
+    - name: Install LLVM and Clang (macOS)
+      if : matrix.os == 'macos-13'
       run: |
-        if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
-          echo "ADDITIONAL_FEATURES_FLAGS=--features sundials" >> $GITHUB_ENV
-          sudo apt-get install -y libsuitesparse-dev
-        else
-          echo "ADDITIONAL_FEATURES_FLAGS=" >> $GITHUB_ENV
-        fi
+        brew install llvm@14  
+        echo "LLVM_SYS_140_PREFIX=/usr/local/opt/llvm@14" >> $GITHUB_ENV
+        echo "LLVM_DIR=/usr/local/opt/llvm@14" >> $GITHUB_ENV
+    - name: Set features variable and install dependencies
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        echo "ADDITIONAL_FEATURES_FLAGS=--features sundials --features suitesparse" >> $GITHUB_ENV
+        sudo apt-get install -y libsuitesparse-dev libsundials-dev
     - name: Run tests - default features
-      run: cargo test --verbose 
+      run: cargo test --verbose
     - name: Run tests - all features
-      run: cargo test --verbose --features diffsl-llvm14 ${{ env.ADDITIONAL_FEATURES_FLAGS }}
+      run: cargo test --verbose --features diffsl-llvm14 ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
     - name: Clippy - all features
-      run: cargo clippy --verbose --features diffsl-llvm14 ${{ env.ADDITIONAL_FEATURES_FLAGS }}
+      run: cargo clippy --verbose --features diffsl-llvm14 ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}}
     - name: Docs - all features
-      run: cargo rustdoc --features diffsl-llvm14 ${{ env.ADDITIONAL_FEATURES_FLAGS }}
+      run: cargo rustdoc --features diffsl-llvm14 ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}}

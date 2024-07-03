@@ -1,16 +1,18 @@
 use std::rc::Rc;
 
-use anyhow::Result;
-use sundials_sys::{
+use crate::sundials_sys::{
     realtype, SUNLinSolFree, SUNLinSolSetup, SUNLinSolSolve, SUNLinSol_Dense, SUNLinearSolver,
 };
+use anyhow::Result;
 
 use crate::{
-    ode_solver::sundials::sundials_check,
-    op::linearise::LinearisedOp,
-    vector::sundials::{get_suncontext, SundialsVector},
-    LinearOp, Matrix, NonLinearOp, Op, SolverProblem, SundialsMatrix,
+    ode_solver::sundials::sundials_check, op::linearise::LinearisedOp,
+    vector::sundials::SundialsVector, LinearOp, Matrix, NonLinearOp, Op, SolverProblem,
+    SundialsMatrix,
 };
+
+#[cfg(not(sundials_version_major = "5"))]
+use crate::vector::sundials::get_suncontext;
 
 use super::LinearSolver;
 
@@ -69,9 +71,17 @@ where
             linearised_problem.f.nstates(),
         );
         let y0 = SundialsVector::new_serial(linearised_problem.f.nstates());
-        let ctx = *get_suncontext();
+
+        #[cfg(not(sundials_version_major = "5"))]
+        let linear_solver = {
+            let ctx = *get_suncontext();
+            unsafe { SUNLinSol_Dense(y0.sundials_vector(), matrix.sundials_matrix(), ctx) }
+        };
+
+        #[cfg(sundials_version_major = "5")]
         let linear_solver =
-            unsafe { SUNLinSol_Dense(y0.sundials_vector(), matrix.sundials_matrix(), ctx) };
+            unsafe { SUNLinSol_Dense(y0.sundials_vector(), matrix.sundials_matrix()) };
+
         self.matrix = Some(matrix);
         self.problem = Some(linearised_problem);
         self.linear_solver = Some(linear_solver);

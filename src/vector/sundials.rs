@@ -1,23 +1,28 @@
-use std::ffi::c_void;
+use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
-use std::ptr::{addr_of, addr_of_mut};
-use std::{fmt, ptr};
 
-use sundials_sys::{
+use crate::sundials_sys::{
     realtype, N_VAbs, N_VAddConst, N_VClone, N_VConst, N_VDestroy, N_VDiv, N_VGetArrayPointer,
     N_VGetLength_Serial, N_VLinearSum, N_VNew_Serial, N_VProd, N_VScale, N_VWL2Norm_Serial,
-    N_Vector, SUNContext, SUNContext_Create,
+    N_Vector,
 };
+
+#[cfg(not(sundials_version_major = "5"))]
+use crate::sundials_sys::{SUNContext, SUNContext_Create};
 
 use crate::{scale, IndexType, Scale};
 
 use super::{Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
+#[cfg(not(sundials_version_major = "5"))]
 static mut SUNCONTEXT: SUNContext = std::ptr::null_mut();
 
+#[cfg(not(sundials_version_major = "5"))]
 pub fn get_suncontext() -> &'static SUNContext {
-    let sun_comm_null: *mut c_void = ptr::null_mut::<c_void>();
+    use std::ffi::c_void;
+    use std::ptr::{addr_of, addr_of_mut};
+    let sun_comm_null: *mut c_void = std::ptr::null_mut::<c_void>();
     unsafe {
         if SUNCONTEXT.is_null() {
             SUNContext_Create(sun_comm_null, addr_of_mut!(SUNCONTEXT) as *mut SUNContext);
@@ -36,8 +41,15 @@ pub struct SundialsVector {
 
 impl SundialsVector {
     pub fn new_serial(len: usize) -> Self {
-        let ctx = get_suncontext();
-        let nv = unsafe { N_VNew_Serial(len as i64, *ctx) };
+        #[cfg(not(sundials_version_major = "5"))]
+        let nv = {
+            let ctx = get_suncontext();
+            unsafe { N_VNew_Serial(len as i32, *ctx) }
+        };
+
+        #[cfg(sundials_version_major = "5")]
+        let nv = unsafe { N_VNew_Serial(len as i64) };
+
         SundialsVector { nv, owned: true }
     }
     /// Create a new SundialsVector with the same length and type as the given vector.
