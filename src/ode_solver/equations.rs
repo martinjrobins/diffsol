@@ -44,6 +44,7 @@ impl OdeEquationsStatistics {
 /// The ODE equations are defined by:
 /// - the right-hand side function `F(t, y)`, which is given as a [NonLinearOp] using the `Rhs` associated type and [Self::rhs] function,
 /// - the initial condition `y_0(t_0)`, which is given using the [Self::init] function.
+/// 
 /// Optionally, the ODE equations can also include:
 /// - the mass matrix `M` which is given as a [LinearOp] using the `Mass` associated type and the [Self::mass] function,
 /// - the root function `G(t, y)` which is given as a [NonLinearOp] using the `Root` associated type and the [Self::root] function
