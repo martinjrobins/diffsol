@@ -7,6 +7,7 @@ pub mod sdirk;
 pub mod sens_equations;
 pub mod tableau;
 pub mod test_models;
+pub mod solution;
 
 #[cfg(feature = "diffsl")]
 pub mod diffsl;

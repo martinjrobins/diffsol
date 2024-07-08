@@ -173,6 +173,7 @@ pub use ode_solver::{
     method::OdeSolverMethod, method::OdeSolverState, method::OdeSolverStopReason,
     problem::OdeSolverProblem, sdirk::Sdirk, sens_equations::SensEquations,
     sens_equations::SensInit, sens_equations::SensRhs, tableau::Tableau,
+    solution::OdeSolution,
 };
 pub use op::{
     closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure,
