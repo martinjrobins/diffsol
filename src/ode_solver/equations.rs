@@ -43,8 +43,12 @@ impl OdeEquationsStatistics {
 ///
 /// The ODE equations are defined by:
 /// - the right-hand side function `F(t, y)`, which is given as a [NonLinearOp] using the `Rhs` associated type and [Self::rhs] function,
-/// - the mass matrix `M` which is given as a [LinearOp] using the `Mass` associated type and the [Self::mass] function,
 /// - the initial condition `y_0(t_0)`, which is given using the [Self::init] function.
+///
+/// Optionally, the ODE equations can also include:
+/// - the mass matrix `M` which is given as a [LinearOp] using the `Mass` associated type and the [Self::mass] function,
+/// - the root function `G(t, y)` which is given as a [NonLinearOp] using the `Root` associated type and the [Self::root] function
+/// - the output function `H(t, y)` which is given as a [NonLinearOp] using the `Out` associated type and the [Self::out] function
 pub trait OdeEquations {
     type T: Scalar;
     type V: Vector<T = Self::T>;
@@ -65,10 +69,12 @@ pub trait OdeEquations {
     /// returns the mass matrix `M` as a [LinearOp]
     fn mass(&self) -> Option<&Rc<Self::Mass>>;
 
+    /// returns the root function `G(t, y)` as a [NonLinearOp]
     fn root(&self) -> Option<&Rc<Self::Root>> {
         None
     }
 
+    /// returns the output function `H(t, y)` as a [NonLinearOp]
     fn out(&self) -> Option<&Rc<Self::Out>> {
         None
     }
@@ -122,6 +128,7 @@ pub trait OdeEquations {
 /// let init = Rc::new(ConstantClosure::new(init_fn, Rc::new(V::from_vec(vec![]))));
 ///
 /// // we don't have a mass matrix, root or output functions, so we can set to None
+/// // we still need to give a placeholder type for these, so we use the diffsol::UnitCallable type
 /// let mass: Option<Rc<UnitCallable<M>>> = None;
 /// let root: Option<Rc<UnitCallable<M>>> = None;
 /// let out: Option<Rc<UnitCallable<M>>> = None;

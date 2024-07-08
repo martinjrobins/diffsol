@@ -26,7 +26,7 @@
 //! - Use the [OdeSolverMethod::step] method to step the solution forward in time with an internal time step chosen by the solver to meet the error tolerances.
 //! - Use the [OdeSolverMethod::interpolate] method to interpolate the solution between the last two time steps.
 //! - Use the [OdeSolverMethod::set_stop_time] method to stop the solver at a specific time (i.e. this will override the internal time step so that the solver stops at the specified time).
-//! - Alternatively, use the convenience function [OdeSolverMethod::solve]  that will both initialise the problem and solve the problem up to a specific time.
+//! - Alternatively, use the convenience functions [OdeSolverMethod::solve] or [OdeSolverMethod::solve_dense] that will both initialise the problem and solve the problem up to a specific time or a sequence of times.
 //!
 //! ## DiffSL
 //!
@@ -44,18 +44,14 @@
 //! However, if this is not suitable for your problem or you want more control over how your equations are implemented, you can use your own structs to define the problem and wrap them in an [OdeSolverEquations] struct.
 //! See the [OdeSolverEquations] struct for more information.
 //!
-//! ## Jacobian and Mass matrix calculation
+//! ## Sparsity pattern for Jacobians and Mass matrices
 //!
 //! Via an implementation of [OdeEquations], the user provides the action of the jacobian on a vector `J(x) v`. By default DiffSol uses this to generate a jacobian matrix for the ODE solver.
-//! Generally this requires `n` evaluations of the jacobian action for a system of size `n`, so it is often more efficient if the user can provide the jacobian matrix directly
-//! by also implementing the optional [NonLinearOp::jacobian_inplace] and the [LinearOp::matrix_inplace] (if applicable) functions.
-//!
-//! If this is not possible, DiffSol also provides an experimental feature to calculate sparse jacobians more efficiently by automatically detecting the sparsity pattern of the jacobian and using
-//! colouring \[1\] to reduce the number of jacobian evaluations. You can enable this feature by enabling [OdeBuilder::use_coloring()] option when building the ODE problem.
-//! Note that if your implementation of [NonLinearOp::jac_mul_inplace] uses any control flow that depends on the input vector (e.g. an if statement that depends on the value of `x`),
-//! the sparsity detection may not be accurate and you may need to provide the jacobian matrix directly.
-//!
-//! \[1\] Gebremedhin, A. H., Manne, F., & Pothen, A. (2005). What color is your Jacobian? Graph coloring for computing derivatives. SIAM review, 47(4), 629-705.
+//! For sparse jacobians, DiffSol will attempt to detect the sparsity pattern of the jacobian using this function and use a sparse matrix representation internally.
+//! It attempts to determine the sparsity pattern of the jacobian (i.e. its non-zero values) by passing in `NaNs` for the input vector `x` and checking which elements
+//! of the output vector `J(x) v` are also `NaN`, using the fact that `NaN`s propagate through most operations. However, this method is not foolproof and will fail if,
+//! for example, your jacobian function uses any control flow that depends on the input vector. If this is the case, you can provide the jacobian matrix directly by
+//! implementing the optional [NonLinearOp::jacobian_inplace] and the [LinearOp::matrix_inplace] (if applicable) functions, or by providing a sparsity pattern using the [Op::sparsity] function.
 //!
 //! ## Events / Root finding
 //!
@@ -77,6 +73,7 @@
 //! The provided linear solvers are:
 //! - [NalgebraLU]: a direct solver that uses the LU decomposition implemented in the [nalgebra](https://nalgebra.org) library.
 //! - [FaerLU]: a direct solver that uses the LU decomposition implemented in the [faer](https://github.com/sarah-ek/faer-rs) library.
+//! - [FaerSparseLU]: a sparse direct solver that uses the sparse LU decomposition implemented in the [faer](https://github.com/sarah-ek/faer-rs).
 //!
 //! The provided nonlinear solvers are:
 //! - [NewtonNonlinearSolver]: a nonlinear solver that uses the Newton method.
@@ -86,6 +83,8 @@
 //! When solving ODEs, you will need to choose a matrix and vector type to use. DiffSol uses the following types:
 //! - [nalgebra::DMatrix] and [nalgebra::DVector] from the [nalgebra](https://nalgebra.org) library.
 //! - [faer::Mat] and [faer::Col] from the [faer](https://github.com/sarah-ek/faer-rs) library.
+//! - [nalgebra_sparse::CscMatrix] from the nalgebra-sparse library.
+//! - [SparseColMat], which is a thin wrapper around the [faer::sparse::SparseColMat] type from faer.
 //!
 //! If you wish to use your own matrix and vector types, you will need to implement the following traits:
 //! - For matrices: [Matrix], [MatrixView], [MatrixViewMut], [DenseMatrix], and [MatrixCommon].
@@ -172,7 +171,7 @@ pub use ode_solver::{
     bdf::Bdf, builder::OdeBuilder, equations::OdeEquations, equations::OdeSolverEquations,
     method::OdeSolverMethod, method::OdeSolverState, method::OdeSolverStopReason,
     problem::OdeSolverProblem, sdirk::Sdirk, sens_equations::SensEquations,
-    sens_equations::SensInit, sens_equations::SensRhs, tableau::Tableau,
+    sens_equations::SensInit, sens_equations::SensRhs, solution::OdeSolution, tableau::Tableau,
 };
 pub use op::{
     closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure,
