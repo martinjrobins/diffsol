@@ -1,6 +1,6 @@
 [package]
 name = "diffsol"
-version = "0.1.13"
+version = "0.1.14"
 edition = "2021"
 description = "A library for solving ordinary differential equations (ODEs) in Rust."
 license = "MIT"
@@ -70,7 +70,7 @@ name = "ode_solvers"
 harness = false
 
 [package.metadata.docs.rs]
-features = ["diffsl-llvm12"]
+features = ["diffsl-llvm15"]
 
 [profile.profiling]
 inherits = "release"
