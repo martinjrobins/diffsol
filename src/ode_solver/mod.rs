@@ -5,9 +5,9 @@ pub mod method;
 pub mod problem;
 pub mod sdirk;
 pub mod sens_equations;
+pub mod solution;
 pub mod tableau;
 pub mod test_models;
-pub mod solution;
 
 #[cfg(feature = "diffsl")]
 pub mod diffsl;

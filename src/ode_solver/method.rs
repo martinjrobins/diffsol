@@ -5,8 +5,8 @@ use std::rc::Rc;
 
 use crate::{
     matrix::default_solver::DefaultSolver, scalar::Scalar, scale, ConstantOp, InitOp,
-    NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, Op,
-    SensEquations, SolverProblem, Vector, OdeSolution,
+    NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolution,
+    OdeSolverProblem, Op, SensEquations, SolverProblem, Vector,
 };
 
 #[derive(Debug, PartialEq)]
@@ -82,9 +82,13 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     fn take_state(&mut self) -> Option<OdeSolverState<Eqn::V>>;
 
     /// Reinitialise the solver state and solve the problem up to time `final_time`
-    /// Returns a Vec of solution values at timepoints chosen by the solver. 
+    /// Returns a Vec of solution values at timepoints chosen by the solver.
     /// After the solver has finished, the internal state of the solver is at time `final_time`.
-    fn solve(&mut self, problem: &OdeSolverProblem<Eqn>, final_time: Eqn::T) -> Result<OdeSolution<Eqn::V>>
+    fn solve(
+        &mut self,
+        problem: &OdeSolverProblem<Eqn>,
+        final_time: Eqn::T,
+    ) -> Result<OdeSolution<Eqn::V>>
     where
         Eqn::M: DefaultSolver,
         Self: Sized,
@@ -96,24 +100,32 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
             y: vec![],
         };
         match problem.eqn.out() {
-            Some(out) => ret.y.push(out.call(&self.state().unwrap().y, self.state().unwrap().t)),
+            Some(out) => ret
+                .y
+                .push(out.call(&self.state().unwrap().y, self.state().unwrap().t)),
             None => ret.y.push(self.state().unwrap().y.clone()),
         }
         self.set_stop_time(final_time)?;
         while self.step()? != OdeSolverStopReason::TstopReached {
             ret.t.push(self.state().unwrap().t);
             match problem.eqn.out() {
-                Some(out) => ret.y.push(out.call(&self.state().unwrap().y, self.state().unwrap().t)),
+                Some(out) => ret
+                    .y
+                    .push(out.call(&self.state().unwrap().y, self.state().unwrap().t)),
                 None => ret.y.push(self.state().unwrap().y.clone()),
             }
         }
         Ok(ret)
     }
-    
+
     /// Reinitialise the solver state and solve the problem up to time `t_eval[t_eval.len()-1]`
-    /// Returns a Vec of solution values at timepoints given by `t_eval`. 
+    /// Returns a Vec of solution values at timepoints given by `t_eval`.
     /// After the solver has finished, the internal state of the solver is at time `t_eval[t_eval.len()-1]`.
-    fn solve_dense(&mut self, problem: &OdeSolverProblem<Eqn>, t_eval: &[Eqn::T]) -> Result<Vec<Eqn::V>>
+    fn solve_dense(
+        &mut self,
+        problem: &OdeSolverProblem<Eqn>,
+        t_eval: &[Eqn::T],
+    ) -> Result<Vec<Eqn::V>>
     where
         Eqn::M: DefaultSolver,
         Self: Sized,
@@ -127,7 +139,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         if t_eval.windows(2).any(|w| w[0] > w[1] || w[0] < t0) {
             return Err(anyhow::anyhow!("t_eval must be increasing and all values must be greater than or equal to the current time"));
         }
-        
+
         // do loop
         self.set_stop_time(t_eval[t_eval.len() - 1])?;
         let mut step_reason = OdeSolverStopReason::InternalTimestep;
@@ -141,7 +153,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
                 None => ret.push(y),
             }
         }
-        
+
         // do final step
         while step_reason != OdeSolverStopReason::TstopReached {
             step_reason = self.step()?;
