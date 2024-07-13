@@ -150,7 +150,7 @@ int idaRoberts_dns(void)
   t0 = ZERO;
   tout1 = RCONST(0.4);
 
-  PrintHeader(rtol, avtol, yy);
+  /*PrintHeader(rtol, avtol, yy);*/
 
   /* Call IDACreate and IDAInit to initialize IDA memory */
   mem = IDACreate(ctx);
@@ -212,7 +212,7 @@ int idaRoberts_dns(void)
 
     retval = IDASolve(mem, tout, &tret, yy, yp, IDA_NORMAL);
 
-    PrintOutput(mem, tret, yy);
+    /*PrintOutput(mem, tret, yy);*/
 
     if (check_retval(&retval, "IDASolve", 1))
       return (1);
@@ -221,7 +221,7 @@ int idaRoberts_dns(void)
     {
       retvalr = IDAGetRootInfo(mem, rootsfound);
       check_retval(&retvalr, "IDAGetRootInfo", 1);
-      PrintRootInfo(rootsfound[0], rootsfound[1]);
+      /*PrintRootInfo(rootsfound[0], rootsfound[1]);*/
     }
 
     if (retval == IDA_SUCCESS)

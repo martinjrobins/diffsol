@@ -189,19 +189,21 @@ int cvRoberts_block_klu(int ngroups)
 
   /* In loop, call CVode, print results, and test for error.
      Break out of loop when NOUT preset output times have been reached.  */
-  printf(" \nGroup of independent 3-species kinetics problems\n\n");
-  printf("number of groups = %lld\n\n", (long long int) ngroups);
+  /*printf(" \nGroup of independent 3-species kinetics problems\n\n");*/
+  /*printf("number of groups = %lld\n\n", (long long int) ngroups);*/
 
   iout = 0;  tout = T1;
   while(1) {
     retval = CVode(cvode_mem, tout, y, &t, CV_NORMAL);
 
+    /*
     for (groupj = 0; groupj < 1; groupj++) {
       printf("group %lld: ", (long long int) groupj);
       PrintOutput(t, Ith(y,1+GROUPSIZE*groupj),
                      Ith(y,2+GROUPSIZE*groupj),
                      Ith(y,3+GROUPSIZE*groupj));
     }
+    */
 
     if (check_retval(&retval, "CVode", 1)) break;
     if (retval == CV_SUCCESS) {
@@ -213,7 +215,7 @@ int cvRoberts_block_klu(int ngroups)
   }
 
   /* Print some final statistics */
-  PrintFinalStats(cvode_mem);
+  /*PrintFinalStats(cvode_mem);*/
 
   /* Free y and abstol vectors */
   N_VDestroy(y);

@@ -226,9 +226,9 @@ int FUNC_NAME(void)
     return (1);
 
   /* Print output heading. */
-  PrintHeader(rtol, atol);
+  /*PrintHeader(rtol, atol);*/
 
-  PrintOutput(mem, t0, uu);
+  /*PrintOutput(mem, t0, uu);*/
 
   /* Loop over output times, call IDASolve, and print results. */
 
@@ -239,7 +239,7 @@ int FUNC_NAME(void)
     if (check_retval(&retval, "IDASolve", 1))
       return (1);
 
-    PrintOutput(mem, tret, uu);
+    /*PrintOutput(mem, tret, uu);*/
   }
 
   /* Print remaining counters and free memory. */

@@ -16,7 +16,7 @@ pub fn robertson_ode<M: Matrix + 'static>(
         .p([0.04, 1.0e4, 3.0e7])
         .rtol(1e-4)
         .atol(
-            [1.0e-8, 1.0e-6, 1.0e-6]
+            [1.0e-8, 1.0e-14, 1.0e-6]
                 .iter()
                 .cycle()
                 .take(ngroups * N)

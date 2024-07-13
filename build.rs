@@ -126,6 +126,7 @@ fn compile_benches(sundials: &Library, suitesparse: &Library) -> Vec<String> {
     Build::new()
         .files(files.clone())
         .includes(includes)
+        .flag("-Wno-unused-function")
         .compile(libname);
     files.into_iter().map(|s| s.to_string()).collect()
 }
