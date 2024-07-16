@@ -197,9 +197,9 @@ int FUNC_NAME(void)
   if(check_retval(&retval, "IDACalcIC", 1)) return(1);
 
   /* Print output heading. */
-  PrintHeader(rtol, atol);
+  /*PrintHeader(rtol, atol);*/
 
-  PrintOutput(mem, t0, uu);
+  /*PrintOutput(mem, t0, uu);*/
 
 
   /* Loop over output times, call IDASolve, and print results. */
@@ -209,7 +209,7 @@ int FUNC_NAME(void)
     retval = IDASolve(mem, tout, &tret, uu, up, IDA_NORMAL);
     if(check_retval(&retval, "IDASolve", 1)) return(1);
 
-    PrintOutput(mem, tret, uu);
+    /*PrintOutput(mem, tret, uu);*/
 
   }
 
@@ -218,7 +218,7 @@ int FUNC_NAME(void)
   check_retval(&retval, "IDAGetNumErrTestFails", 1);
   retval = IDAGetNumNonlinSolvConvFails(mem, &ncfn);
   check_retval(&retval, "IDAGetNumNonlinSolvConvFails", 1);
-  printf("\n netf = %ld,   ncfn = %ld \n", netf, ncfn);
+  /*printf("\n netf = %ld,   ncfn = %ld \n", netf, ncfn);*/
 
   IDAFree(&mem);
   SUNLinSolFree(LS);

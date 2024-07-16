@@ -254,8 +254,8 @@ int FUNC_NAME(void)
 
   /* Print heading, basic parameters, and initial values. */
 
-  PrintHeader(mu, ml, rtol, atol);
-  PrintOutput(mem, cc, ZERO);
+  /*PrintHeader(mu, ml, rtol, atol);*/
+  /*PrintOutput(mem, cc, ZERO);*/
 
   /* Loop over iout, call IDASolve (normal mode), print selected output. */
 
@@ -264,7 +264,7 @@ int FUNC_NAME(void)
     retval = IDASolve(mem, tout, &tret, cc, cp, IDA_NORMAL);
     if(check_retval(&retval, "IDASolve", 1)) return(retval);
 
-    PrintOutput(mem, cc, tret);
+    /*PrintOutput(mem, cc, tret);*/
 
     if (iout < 3) tout *= TMULT; else tout += TADD;
 
@@ -272,7 +272,7 @@ int FUNC_NAME(void)
 
   /* Print final statistics and free memory. */
 
-  PrintFinalStats(mem);
+  /*PrintFinalStats(mem);*/
 
   /* Free memory */
 

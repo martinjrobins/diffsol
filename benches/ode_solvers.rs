@@ -451,6 +451,17 @@ fn criterion_benchmark(c: &mut Criterion) {
         30
     );
 
+    bench_diffsl_heat2d!(
+        faer_sparse_bdf_klu_diffsl_heat2d,
+        bdf,
+        KLU,
+        SparseColMat<f64>,
+        5,
+        10,
+        20,
+        30
+    );
+
     macro_rules! bench_sundials {
         ($name:ident, $solver:ident) => {
             #[cfg(feature = "sundials")]
@@ -512,6 +523,17 @@ fn criterion_benchmark(c: &mut Criterion) {
         faer_sparse_bdf_diffsl_foodweb,
         bdf,
         FaerSparseLU,
+        SparseColMat<f64>,
+        5,
+        10,
+        20,
+        30
+    );
+
+    bench_diffsl_foodweb!(
+        faer_sparse_bdf_klu_diffsl_foodweb,
+        bdf,
+        KLU,
         SparseColMat<f64>,
         5,
         10,
