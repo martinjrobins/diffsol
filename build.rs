@@ -221,5 +221,11 @@ fn main() -> Result<(), String> {
             library_type, lib_name
         );
     }
+    // link to klu
+    if let Some(dir) = suitesparse.lib.as_ref() {
+        println!("cargo:rustc-link-search=native={}", dir);
+        println!("cargo:rustc-env=LD_LIBRARY_PATH={}", dir);
+    }
+    println!("cargo:rustc-link-lib={}=klu", library_type);
     Ok(())
 }

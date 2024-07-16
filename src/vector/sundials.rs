@@ -44,7 +44,7 @@ impl SundialsVector {
         #[cfg(not(sundials_version_major = "5"))]
         let nv = {
             let ctx = get_suncontext();
-            unsafe { N_VNew_Serial(len as i32, *ctx) }
+            unsafe { N_VNew_Serial(len as i64, *ctx) }
         };
 
         #[cfg(sundials_version_major = "5")]
