@@ -35,7 +35,7 @@ There are a number of differences between the Sundials and DiffSol implementatio
   The Sundials CVODE solver has the problem defined as an ODE system and the mass is implicitly an identity matrix, and this is the same for the DiffSol implementation for the `robertson_ode` problem. 
 - In the Sundials examples that use a user-defined jacobian (`robertson`, `robertson_ode`, `heat2d`), the jacobian is provided as a sparse or dense matrix. In DiffSol the jacobian is provided as a function that multiplies the jacobian by a vector,
   so DiffSol needs to do additional work to generate a jacobian matrix from this function.
-- Generally the types of matrices and linear solver are matched between the two implementation (see details in the "Test Problems" section above). However, the `foodweb` problem is slightly different in that 
+- Generally the types of matrices and linear solver are matched between the two implementations (see details in the "Test Problems" section above). However, the `foodweb` problem is slightly different in that 
   it is solved in Sundials using a banded linear solver and banded matrices and the jacobian is calculated using finite differences.
   In DiffSol we use the KLU sparse linear solver and sparse matrices, and the jacobian is calculated using the jacobian function provided by the user.
 - The Sundials implementations make heavy use of indexing into arrays, as does the DiffSol implementations. In rust these indexes are bounds checked, which affects performance slightly but was not found to be a significant factor. 
@@ -82,5 +82,5 @@ The main difference between this plot and the previous for the Bdf solver is the
 This difference is minimal, and can be seen most clearly for the small `robertson` problem where the DiffSl implementation is just above 1.0 times the speed of the Sundials implementation, while the rust closure implementation is about 0.9.
 However, for larger systems the DiffSl is actually faster, which is probably due to the fact that the rust closures bound-check the array indexing, while the DiffSl implementation does not.
 
-This plot demonstrates that a DiffSL implementation can be comparible in speed to a hand-written rust or C implementation, but much more easily wrapped and used from a high-level language like Python or R, where the equations can be passed down
+This plot demonstrates that a DiffSL implementation can be comparable in speed to a hand-written rust or C implementation, but much more easily wrapped and used from a high-level language like Python or R, where the equations can be passed down
 to the rust solver as a simple string and then JIT compiled at runtime.
