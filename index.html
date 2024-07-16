@@ -184,25 +184,25 @@ Lawrence Livermore National Laboratory.</p>
 <h2 id="test-problems"><a class="header" href="#test-problems">Test Problems</a></h2>
 <p>To choose the test problems we have used several of the examples provided in the Sundials library. The problems are:</p>
 <ul>
-<li><code>robertson</code> : A stiff DAE system with 3 equations (2 differential and 1 algebraic). In the Sundials examples this example is part of the IDA examples
-and is contained in the file <code>ida/serial/idaRoberts_dns.c</code>. In Sundials the problem is solved using the Sundials dense linear solver, in DiffSol we use the
+<li><code>robertson</code> : A stiff DAE system with 3 equations (2 differential and 1 algebraic). In Sundials this is part of the IDA examples
+and is contained in the file <code>ida/serial/idaRoberts_dns.c</code>. In Sundials the problem is solved using the Sundials dense linear solver and <code>Sunmatrix_Dense</code>, in DiffSol we use the
 dense LU linear solver, dense matrices and vectors from the <a href="https://nalgebra.org">nalgebra</a> library.</li>
 <li><code>robertson_ode</code>: The same problem as <code>robertson</code> but in the form of an ODE. This problem has a variable size implemented
-by duplicating the 3 original equations \(n^2\) times, where \(n^2\) is the size input parameter. In Sundials problem is solved using the KLU sparse linear solver and the Sunmatrix_Sparse matrix, and in DiffSol we use the
+by duplicating the 3 original equations \(n^2\) times, where \(n\) is the size input parameter. In Sundials problem is solved using the KLU sparse linear solver and the <code>Sunmatrix_Sparse</code> matrix, and in DiffSol we use the
 same KLU solver from the <a href="https://github.com/DrTimothyAldenDavis/SuiteSparse">SuiteSparse</a> library along with the <a href="https://github.com/sarah-ek/faer-rs">faer</a> sparse matrix.
 This example is part of the Sundials CVODE examples and is contained in the file <code>cvode/serial/cvRoberts_block_klu.c</code>.</li>
 <li><code>heat2d</code>: A 2D heat DAE problem with boundary conditions imposed via algebraic equations. The size \(n\) input parameter sets the number of grid points along each dimension, so the
-total number of equations is \(n^2\) This example is part of the IDA examples and is contained in the file <code>ida/serial/idaHeat2D_klu.c</code>.
+total number of equations is \(n^2\). This is part of the IDA examples and is contained in the file <code>ida/serial/idaHeat2D_klu.c</code>.
 In Sundials this problem is solved using the KLU sparse linear solver and the Sunmatrix_Sparse matrix, and in DiffSol we use the same KLU solver along with the faer sparse matrix.</li>
 <li><code>foodweb</code>: A predator-prey problem with diffusion on a 2D grid. The size \(n\) input parameter sets the number of grid points along each dimension and we have 2 species, so the
-total number of equations is \(2n^2\) This example is part of the IDA examples and is contained in the file <code>ida/serial/idaFoodWeb_bnd.c</code>.
-In Sundials the problem is solved using a banded linear solver and the Sunmatrix_Band matrix. DiffSol does not have a banded linear solver, so we use the KLU solver for this problem along with the faer sparse matrix.</li>
+total number of equations is \(2n^2\) This is part of the IDA examples and is contained in the file <code>ida/serial/idaFoodWeb_bnd.c</code>.
+In Sundials the problem is solved using a banded linear solver and the <code>Sunmatrix_Band</code> matrix. DiffSol does not have a banded linear solver, so we use the KLU solver for this problem along with the faer sparse matrix.</li>
 </ul>
 <h2 id="method"><a class="header" href="#method">Method</a></h2>
-<p>In each case we have taken the example files from the Sundials library using version 6.7.0, compiling and linking them against the same version of the code.
+<p>In each case we have taken the example files from the Sundials library at version 6.7.0, compiling and linking them against the same version of the code.
 We have made minimal modifications to the files to remove all <code>printf</code> output and to change the <code>main</code> functions to named functions to allow them to be called from rust.
-We have then implemented the same problem in Rust using the DiffSol library, porting the residual functions defined in the Sundials examples to DiffSol-compatible functions representing the rhs, mass matrix and jacobian multiplication functions for the problem.
-We have used the outputs published by the Sundials examples as the reference outputs for the tests to ensure that the implementations are equivalent.
+We have then implemented the same problem in Rust using the DiffSol library, porting the residual functions defined in the Sundials examples to DiffSol-compatible functions representing the RHS, mass matrix and jacobian multiplication functions for the problem.
+We have used the outputs published in the Sundials examples as the reference outputs for the tests to ensure that the implementations are equivalent.
 The relative and absolute tolerances for the solvers were set to the same values in both implementations.</p>
 <p>There are a number of differences between the Sundials and DiffSol implementations that may affect the performance of the solvers. The main differences are:</p>
 <ul>
@@ -213,23 +213,23 @@ so DiffSol needs to do additional work to generate a jacobian matrix from this f
 <li>Generally the types of matrices and linear solver are matched between the two implementations (see details in the "Test Problems" section above). However, the <code>foodweb</code> problem is slightly different in that
 it is solved in Sundials using a banded linear solver and banded matrices and the jacobian is calculated using finite differences.
 In DiffSol we use the KLU sparse linear solver and sparse matrices, and the jacobian is calculated using the jacobian function provided by the user.</li>
-<li>The Sundials implementations make heavy use of indexing into arrays, as does the DiffSol implementations. In rust these indexes are bounds checked, which affects performance slightly but was not found to be a significant factor.</li>
+<li>The Sundials implementations make heavy use of indexing into arrays, as does the DiffSol implementations. In Rust these indexing is bounds checked, which affects performance slightly but was not found to be a significant factor.</li>
 </ul>
 <p>Finally, we have also implemented the <code>robertson</code>, <code>heat2d</code> and <code>foodweb</code>
 problems in the DiffSl language. For the <code>heat2d</code> and <code>foodweb</code> problems we
-wrote out the diffusion matrix and mass matrix from the rust implementations and
+wrote out the diffusion matrix and mass matrix from the Rust implementations and
 wrote the rest of the model by hand. For the <code>robertson</code> problem we wrote the
 entire model by hand.</p>
 <h2 id="results"><a class="header" href="#results">Results</a></h2>
 <p>These results were generated using DiffSol v0.1.15.</p>
 <p>The performance of each implementation was timed and includes all setup and solve time. The exception to this is for the DiffSl implementations, where the JIT compilation for the model was not included in the timings
 (since the compilation time for the C and Rust code was also not included).
-We have presented the results in the following graphs, where the x-axis is the size of the problem $n$ and the y-axis is the time taken to solve the problem relative to the time taken by the Sundials implementation
+We have presented the results in the following graphs, where the x-axis is the size of the problem \(n\) and the y-axis is the time taken to solve the problem relative to the time taken by the Sundials implementation
 (so \(10^0\) is the same time as Sundials, \(10^1\) is 10 times slower etc.)</p>
 <h3 id="bdf-solver"><a class="header" href="#bdf-solver">Bdf solver</a></h3>
 <p><img src="./images/benchmarks/bench_bdf.svg" alt="Bdf" /></p>
 <p>The BDF solver is the same method as that used by the Sundials IDA and CVODE solvers so we expect the performance to be largely similar, and this is generally the case.
-There are differences due to the implementation details for each library, and the differences in the implementations for the linear solvers and matrices discussed above.</p>
+There are differences due to the implementation details for each library, and the differences in the implementations for the linear solvers and matrices as discussed above.</p>
 <p>For the small, dense, stiff <code>robertson</code> problem the DiffSol implementation is very close and only slightly faster than Sundials (about 0.9).</p>
 <p>For the sparse <code>heat2d</code> problem the DiffSol implementation is slower than Sundials for smaller problems (about 2) but the performance improves significantly for larger problems until it is at about 0.3.
 Since this improvement for larger systems is not seen in <code>foodweb</code> or <code>robertson_ode</code> problems, it is likely due to the fact that the <code>heat2d</code> problem has a constant jacobian matrix and the DiffSol implementation has an advantage in this case.</p>
@@ -239,10 +239,10 @@ It is again slower for small systems (about 1.5) and the performance improves fo
 due to these factors, but is likely due to the differences in how the jacobian is calculated (in Sundials it is provided directly, but DiffSol is required to calculate it from the jacobian multiplication function).</p>
 <h3 id="bdf--diffsl"><a class="header" href="#bdf--diffsl">Bdf + DiffSl</a></h3>
 <p><img src="./images/benchmarks/bench_bdf_diffsl.svg" alt="Bdf + DiffSl" /></p>
-<p>The main difference between this plot and the previous for the Bdf solver is the use of the DiffSl implementation rather than rust closures. The trends in each case are mostly the same, but the DiffSl implementation is slightly slower than the rust closures for most problems.
+<p>The main difference between this plot and the previous for the Bdf solver is the use of the DiffSl implementation rather than Rust closures. The trends in each case are mostly the same, but the DiffSl implementation is slightly slower than the rust closures for most problems.
 This difference is minimal, and can be seen most clearly for the small <code>robertson</code> problem where the DiffSl implementation is just above 1.0 times the speed of the Sundials implementation, while the rust closure implementation is about 0.9.
 However, for larger systems the DiffSl is actually faster, which is probably due to the fact that the rust closures bound-check the array indexing, while the DiffSl implementation does not.</p>
-<p>This plot demonstrates that a DiffSL implementation can be comparable in speed to a hand-written rust or C implementation, but much more easily wrapped and used from a high-level language like Python or R, where the equations can be passed down
+<p>This plot demonstrates that a DiffSL implementation can be comparable in speed to a hand-written Rust or C implementation, but much more easily wrapped and used from a high-level language like Python or R, where the equations can be passed down
 to the rust solver as a simple string and then JIT compiled at runtime.</p>
 
                     </main>
