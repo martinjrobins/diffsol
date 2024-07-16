@@ -1,0 +1,294 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>DiffSol</title>
+        <meta name="robots" content="noindex">
+
+
+        <!-- Custom HTML head -->
+        
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+        <!-- MathJax -->
+        <script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+    </head>
+    <body class="sidebar-visible no-js">
+    <div id="body-container">
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('light')
+            html.classList.add(theme);
+            var body = document.querySelector('body');
+            body.classList.remove('no-js')
+            body.classList.add('js');
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var body = document.querySelector('body');
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            body.classList.remove('sidebar-visible');
+            body.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item expanded "><a href="benchmarks.html"><strong aria-hidden="true">1.</strong> Benchmarks</a></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <!-- Track and set sidebar scroll position -->
+        <script>
+            var sidebarScrollbox = document.querySelector('#sidebar .sidebar-scrollbox');
+            sidebarScrollbox.addEventListener('click', function(e) {
+                if (e.target.tagName === 'A') {
+                    sessionStorage.setItem('sidebar-scroll', sidebarScrollbox.scrollTop);
+                }
+            }, { passive: true });
+            var sidebarScrollTop = sessionStorage.getItem('sidebar-scroll');
+            sessionStorage.removeItem('sidebar-scroll');
+            if (sidebarScrollTop) {
+                // preserve sidebar scroll position when navigating via links within sidebar
+                sidebarScrollbox.scrollTop = sidebarScrollTop;
+            } else {
+                // scroll sidebar to current active section when navigating via "next/previous chapter" buttons
+                var activeSection = document.querySelector('#sidebar .active');
+                if (activeSection) {
+                    activeSection.scrollIntoView({ block: 'center' });
+                }
+            }
+        </script>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">DiffSol</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="benchmarks"><a class="header" href="#benchmarks">Benchmarks</a></h1>
+<p>The goal of this chapter is to compare the performance of the DiffSol
+implementation with other similar ode solver libraries. To begin with we have
+focused on comparing against the popular
+<a href="https://github.com/LLNL/sundials">Sundials</a> solver suite, developed by the
+Lawrence Livermore National Laboratory.</p>
+<h2 id="test-problems"><a class="header" href="#test-problems">Test Problems</a></h2>
+<p>To choose the test problems we have used several of the examples provided in the Sundials library. The problems are:</p>
+<ul>
+<li><code>robertson</code> : A stiff DAE system with 3 equations (2 differential and 1 algebraic). In the Sundials examples this example is part of the IDA examples
+and is contained in the file <code>ida/serial/idaRoberts_dns.c</code>. In Sundials the problem is solved using the Sundials dense linear solver, in DiffSol we use the
+dense LU linear solver, dense matrices and vectors from the <a href="https://nalgebra.org">nalgebra</a> library.</li>
+<li><code>robertson_ode</code>: The same problem as <code>robertson</code> but in the form of an ODE. This problem has a variable size implemented
+by duplicating the 3 original equations \(n^2\) times, where \(n^2\) is the size input parameter. In Sundials problem is solved using the KLU sparse linear solver and the Sunmatrix_Sparse matrix, and in DiffSol we use the
+same KLU solver from the <a href="https://github.com/DrTimothyAldenDavis/SuiteSparse">SuiteSparse</a> library along with the <a href="https://github.com/sarah-ek/faer-rs">faer</a> sparse matrix.
+This example is part of the Sundials CVODE examples and is contained in the file <code>cvode/serial/cvRoberts_block_klu.c</code>.</li>
+<li><code>heat2d</code>: A 2D heat DAE problem with boundary conditions imposed via algebraic equations. The size \(n\) input parameter sets the number of grid points along each dimension, so the
+total number of equations is \(n^2\) This example is part of the IDA examples and is contained in the file <code>ida/serial/idaHeat2D_klu.c</code>.
+In Sundials this problem is solved using the KLU sparse linear solver and the Sunmatrix_Sparse matrix, and in DiffSol we use the same KLU solver along with the faer sparse matrix.</li>
+<li><code>foodweb</code>: A predator-prey problem with diffusion on a 2D grid. The size \(n\) input parameter sets the number of grid points along each dimension and we have 2 species, so the
+total number of equations is \(2n^2\) This example is part of the IDA examples and is contained in the file <code>ida/serial/idaFoodWeb_bnd.c</code>.
+In Sundials the problem is solved using a banded linear solver and the Sunmatrix_Band matrix. DiffSol does not have a banded linear solver, so we use the KLU solver for this problem along with the faer sparse matrix.</li>
+</ul>
+<h2 id="method"><a class="header" href="#method">Method</a></h2>
+<p>In each case we have taken the example files from the Sundials library using version 6.7.0, compiling and linking them against the same version of the code.
+We have made minimal modifications to the files to remove all <code>printf</code> output and to change the <code>main</code> functions to named functions to allow them to be called from rust.
+We have then implemented the same problem in Rust using the DiffSol library, porting the residual functions defined in the Sundials examples to DiffSol-compatible functions representing the rhs, mass matrix and jacobian multiplication functions for the problem.
+We have used the outputs published by the Sundials examples as the reference outputs for the tests to ensure that the implementations are equivalent.
+The relative and absolute tolerances for the solvers were set to the same values in both implementations.</p>
+<p>There are a number of differences between the Sundials and DiffSol implementations that may affect the performance of the solvers. The main differences are:</p>
+<ul>
+<li>The Sundials IDA solver has the problem defined as a general DAE system, while the DiffSol solver has access to the RHS and mass matrix functions separately.
+The Sundials CVODE solver has the problem defined as an ODE system and the mass is implicitly an identity matrix, and this is the same for the DiffSol implementation for the <code>robertson_ode</code> problem.</li>
+<li>In the Sundials examples that use a user-defined jacobian (<code>robertson</code>, <code>robertson_ode</code>, <code>heat2d</code>), the jacobian is provided as a sparse or dense matrix. In DiffSol the jacobian is provided as a function that multiplies the jacobian by a vector,
+so DiffSol needs to do additional work to generate a jacobian matrix from this function.</li>
+<li>Generally the types of matrices and linear solver are matched between the two implementations (see details in the "Test Problems" section above). However, the <code>foodweb</code> problem is slightly different in that
+it is solved in Sundials using a banded linear solver and banded matrices and the jacobian is calculated using finite differences.
+In DiffSol we use the KLU sparse linear solver and sparse matrices, and the jacobian is calculated using the jacobian function provided by the user.</li>
+<li>The Sundials implementations make heavy use of indexing into arrays, as does the DiffSol implementations. In rust these indexes are bounds checked, which affects performance slightly but was not found to be a significant factor.</li>
+</ul>
+<p>Finally, we have also implemented the <code>robertson</code>, <code>heat2d</code> and <code>foodweb</code>
+problems in the DiffSl language. For the <code>heat2d</code> and <code>foodweb</code> problems we
+wrote out the diffusion matrix and mass matrix from the rust implementations and
+wrote the rest of the model by hand. For the <code>robertson</code> problem we wrote the
+entire model by hand.</p>
+<h2 id="results"><a class="header" href="#results">Results</a></h2>
+<p>These results were generated using DiffSol v0.1.15.</p>
+<p>The performance of each implementation was timed and includes all setup and solve time. The exception to this is for the DiffSl implementations, where the JIT compilation for the model was not included in the timings
+(since the compilation time for the C and Rust code was also not included).
+We have presented the results in the following graphs, where the x-axis is the size of the problem $n$ and the y-axis is the time taken to solve the problem relative to the time taken by the Sundials implementation
+(so \(10^0\) is the same time as Sundials, \(10^1\) is 10 times slower etc.)</p>
+<h3 id="bdf-solver"><a class="header" href="#bdf-solver">Bdf solver</a></h3>
+<p><img src="./images/benchmarks/bench_bdf.svg" alt="Bdf" /></p>
+<p>The BDF solver is the same method as that used by the Sundials IDA and CVODE solvers so we expect the performance to be largely similar, and this is generally the case.
+There are differences due to the implementation details for each library, and the differences in the implementations for the linear solvers and matrices discussed above.</p>
+<p>For the small, dense, stiff <code>robertson</code> problem the DiffSol implementation is very close and only slightly faster than Sundials (about 0.9).</p>
+<p>For the sparse <code>heat2d</code> problem the DiffSol implementation is slower than Sundials for smaller problems (about 2) but the performance improves significantly for larger problems until it is at about 0.3.
+Since this improvement for larger systems is not seen in <code>foodweb</code> or <code>robertson_ode</code> problems, it is likely due to the fact that the <code>heat2d</code> problem has a constant jacobian matrix and the DiffSol implementation has an advantage in this case.</p>
+<p>For the <code>foodweb</code> problem the DiffSol implementation is generally quite close to IDA.
+It is again slower for small systems (about 1.5) and the performance improves for medium systems until it reaches a value of 0.7, but then performance starts to slowly decrease for larger systems until it is about 1.0</p>
+<p>For the <code>robertson_ode</code> problem the DiffSol implementation is generally slower then the Sundials CVODE implementation and is about 1.5 - 1.9 the time taken by Sundials. Since the same method and linear solver is used in both cases the cause of this discrepancy is not
+due to these factors, but is likely due to the differences in how the jacobian is calculated (in Sundials it is provided directly, but DiffSol is required to calculate it from the jacobian multiplication function).</p>
+<h3 id="bdf--diffsl"><a class="header" href="#bdf--diffsl">Bdf + DiffSl</a></h3>
+<p><img src="./images/benchmarks/bench_bdf_diffsl.svg" alt="Bdf + DiffSl" /></p>
+<p>The main difference between this plot and the previous for the Bdf solver is the use of the DiffSl implementation rather than rust closures. The trends in each case are mostly the same, but the DiffSl implementation is slightly slower than the rust closures for most problems.
+This difference is minimal, and can be seen most clearly for the small <code>robertson</code> problem where the DiffSl implementation is just above 1.0 times the speed of the Sundials implementation, while the rust closure implementation is about 0.9.
+However, for larger systems the DiffSl is actually faster, which is probably due to the fact that the rust closures bound-check the array indexing, while the DiffSl implementation does not.</p>
+<p>This plot demonstrates that a DiffSL implementation can be comparable in speed to a hand-written rust or C implementation, but much more easily wrapped and used from a high-level language like Python or R, where the equations can be passed down
+to the rust solver as a simple string and then JIT compiled at runtime.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="elasticlunr.min.js"></script>
+        <script src="mark.min.js"></script>
+        <script src="searcher.js"></script>
+
+        <script src="clipboard.min.js"></script>
+        <script src="highlight.js"></script>
+        <script src="book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+        <script>
+        window.addEventListener('load', function() {
+            MathJax.Hub.Register.StartupHook('End', function() {
+                window.setTimeout(window.print, 100);
+            });
+        });
+        </script>
+
+    </div>
+    </body>
+</html>
