@@ -455,7 +455,6 @@ mod test {
                 foodweb::{foodweb_problem, FoodWebContext},
                 heat2d::head2d_problem,
                 robertson::robertson,
-                robertson_ode::robertson_ode,
             },
             tests::{test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut},
         },

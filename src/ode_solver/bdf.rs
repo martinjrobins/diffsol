@@ -1129,17 +1129,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 59
-        number_of_steps: 320
+        number_of_linear_solver_setups: 78
+        number_of_steps: 409
         number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 645
-        number_of_nonlinear_solver_fails: 1
+        number_of_nonlinear_solver_iterations: 857
+        number_of_nonlinear_solver_fails: 2
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 647
-        number_of_jac_muls: 396
-        number_of_matrix_evals: 44
+        number_of_calls: 859
+        number_of_jac_muls: 459
+        number_of_matrix_evals: 51
         "###);
     }
 

@@ -27,7 +27,8 @@ To choose the test problems we have used several of the examples provided in the
 In each case we have taken the example files from the Sundials library using version 6.7.0, compiling and linking them against the same version of the code. 
 We have made minimal modifications to the files to remove all `printf` output and to change the `main` functions to named functions to allow them to be called from rust.
 We have then implemented the same problem in Rust using the DiffSol library, porting the residual functions defined in the Sundials examples to DiffSol-compatible functions representing the rhs, mass matrix and jacobian multiplication functions for the problem.
-We have used the outputs published by the Sundials examples as the reference outputs for the tests to ensure that the implementations are equivalent.
+We have used the outputs published by the Sundials examples as the reference outputs for the tests to ensure that the implementations are equivalent. 
+The relative and absolute tolerances for the solvers were set to the same values in both implementations.
 
 There are a number of differences between the Sundials and DiffSol implementations that may affect the performance of the solvers. The main differences are:
 - The Sundials IDA solver has the problem defined as a general DAE system, while the DiffSol solver has access to the RHS and mass matrix functions separately.
