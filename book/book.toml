@@ -7,3 +7,9 @@ title = "DiffSol"
 
 [output.html]
 mathjax-support = true
+
+[preprocessor.keeper]
+command = "mdbook-keeper"
+manifest_dir = ".."
+externs = ["diffsol", "nalgebra"]
+
