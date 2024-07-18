@@ -174,31 +174,23 @@ pub use scalar::scale;
 
 #[test]
 fn test() {
-    use crate::OdeBuilder;
-    use nalgebra::DVector;
+    use crate::{OdeBuilder, Bdf, OdeSolverMethod, DiffSlContext};
     type M = nalgebra::DMatrix<f64>;
-    use crate::{OdeSolverMethod, OdeSolverStopReason, OdeSolverState, Bdf};
 
+            
+    let context = DiffSlContext::<M>::new("
+        in = [r, k]
+        r { 1.0 }
+        k { 1.0 }
+        u { 0.1 }
+        F { r * u * (1.0 - u / k) }
+        out { u }
+    ").unwrap();
     let problem = OdeBuilder::new()
-        .p(vec![1.0, 10.0])
-        .build_ode_with_root::<M, _, _, _, _>(
-            |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-            |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-            |_p, _t| DVector::from_element(1, 0.1),
-            |x, _p, _t, y| y[0] = x[0] - 0.5,
-            1,
-        ).unwrap();
+    .rtol(1e-6)
+    .p([1.0, 10.0])
+    .build_diffsl(&context).unwrap();
     let mut solver = Bdf::default();
-    let state = OdeSolverState::new(&problem, &solver).unwrap();
-    solver.set_problem(state, &problem);
-    let t = loop {
-        match solver.step() {
-            Ok(OdeSolverStopReason::InternalTimestep) => continue,
-            Ok(OdeSolverStopReason::TstopReached) => panic!("We didn't set a stop time"),
-            Ok(OdeSolverStopReason::RootFound(t)) => break t,
-            Err(e) => panic!("Solver failed to converge: {}", e),
-        }
-    };
-    println!("Root found at t = {}", t);
-    let _soln = &solver.state().unwrap().y;
+    let t = 0.4;
+    let _soln = solver.solve(&problem, t).unwrap();
 }
