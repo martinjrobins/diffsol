@@ -170,27 +170,3 @@ pub use vector::DefaultDenseMatrix;
 use vector::{Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut};
 
 pub use scalar::scale;
-
-
-#[test]
-fn test() {
-    use crate::{OdeBuilder, Bdf, OdeSolverMethod, DiffSlContext};
-    type M = nalgebra::DMatrix<f64>;
-
-            
-    let context = DiffSlContext::<M>::new("
-        in = [r, k]
-        r { 1.0 }
-        k { 1.0 }
-        u { 0.1 }
-        F { r * u * (1.0 - u / k) }
-        out { u }
-    ").unwrap();
-    let problem = OdeBuilder::new()
-    .rtol(1e-6)
-    .p([1.0, 10.0])
-    .build_diffsl(&context).unwrap();
-    let mut solver = Bdf::default();
-    let t = 0.4;
-    let _soln = solver.solve(&problem, t).unwrap();
-}
