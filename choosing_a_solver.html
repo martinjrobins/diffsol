@@ -3,8 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Page not found - DiffSol</title>
-        <base href="/">
+        <title>Choosing a solver - DiffSol</title>
 
 
         <!-- Custom HTML head -->
@@ -91,7 +90,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded "><a href="specifying_the_problem.html"><strong aria-hidden="true">1.</strong> Specifying the problem</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="ode_equations.html"><strong aria-hidden="true">1.1.</strong> ODE equations</a></li><li class="chapter-item expanded "><a href="mass_matrix.html"><strong aria-hidden="true">1.2.</strong> Mass matrix</a></li><li class="chapter-item expanded "><a href="root_finding.html"><strong aria-hidden="true">1.3.</strong> Root finding</a></li><li class="chapter-item expanded "><a href="custom_problem_structs.html"><strong aria-hidden="true">1.4.</strong> Custom Problem Structs</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="non_linear_functions.html"><strong aria-hidden="true">1.4.1.</strong> Non-linear functions</a></li><li class="chapter-item expanded "><a href="constant_functions.html"><strong aria-hidden="true">1.4.2.</strong> Constant functions</a></li><li class="chapter-item expanded "><a href="linear_functions.html"><strong aria-hidden="true">1.4.3.</strong> Linear functions</a></li><li class="chapter-item expanded "><a href="putting_it_all_together.html"><strong aria-hidden="true">1.4.4.</strong> Putting it all together</a></li></ol></li><li class="chapter-item expanded "><a href="diffsl.html"><strong aria-hidden="true">1.5.</strong> DiffSL</a></li><li class="chapter-item expanded "><a href="sparse_problems.html"><strong aria-hidden="true">1.6.</strong> Sparse problems</a></li></ol></li><li class="chapter-item expanded "><a href="choosing_a_solver.html"><strong aria-hidden="true">2.</strong> Choosing a solver</a></li><li class="chapter-item expanded "><a href="initialisation.html"><strong aria-hidden="true">3.</strong> Initialisation</a></li><li class="chapter-item expanded "><a href="solving_the_problem.html"><strong aria-hidden="true">4.</strong> Solving the problem</a></li><li class="chapter-item expanded "><a href="benchmarks.html"><strong aria-hidden="true">5.</strong> Benchmarks</a></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded "><a href="specifying_the_problem.html"><strong aria-hidden="true">1.</strong> Specifying the problem</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="ode_equations.html"><strong aria-hidden="true">1.1.</strong> ODE equations</a></li><li class="chapter-item expanded "><a href="mass_matrix.html"><strong aria-hidden="true">1.2.</strong> Mass matrix</a></li><li class="chapter-item expanded "><a href="root_finding.html"><strong aria-hidden="true">1.3.</strong> Root finding</a></li><li class="chapter-item expanded "><a href="custom_problem_structs.html"><strong aria-hidden="true">1.4.</strong> Custom Problem Structs</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="non_linear_functions.html"><strong aria-hidden="true">1.4.1.</strong> Non-linear functions</a></li><li class="chapter-item expanded "><a href="constant_functions.html"><strong aria-hidden="true">1.4.2.</strong> Constant functions</a></li><li class="chapter-item expanded "><a href="linear_functions.html"><strong aria-hidden="true">1.4.3.</strong> Linear functions</a></li><li class="chapter-item expanded "><a href="putting_it_all_together.html"><strong aria-hidden="true">1.4.4.</strong> Putting it all together</a></li></ol></li><li class="chapter-item expanded "><a href="diffsl.html"><strong aria-hidden="true">1.5.</strong> DiffSL</a></li><li class="chapter-item expanded "><a href="sparse_problems.html"><strong aria-hidden="true">1.6.</strong> Sparse problems</a></li></ol></li><li class="chapter-item expanded "><a href="choosing_a_solver.html" class="active"><strong aria-hidden="true">2.</strong> Choosing a solver</a></li><li class="chapter-item expanded "><a href="initialisation.html"><strong aria-hidden="true">3.</strong> Initialisation</a></li><li class="chapter-item expanded "><a href="solving_the_problem.html"><strong aria-hidden="true">4.</strong> Solving the problem</a></li><li class="chapter-item expanded "><a href="benchmarks.html"><strong aria-hidden="true">5.</strong> Benchmarks</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -176,14 +175,63 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="document-not-found-404"><a class="header" href="#document-not-found-404">Document not found (404)</a></h1>
-<p>This URL is invalid, sorry. Please use the navigation bar or search to continue.</p>
+                        <h1 id="choosing-a-solver"><a class="header" href="#choosing-a-solver">Choosing a solver</a></h1>
+<p>Once you have defined the problem, you need to create a solver to solve the problem. The available solvers are:</p>
+<ul>
+<li><a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/bdf/struct.Bdf.html"><code>diffsol::Bdf</code></a>: A Backwards Difference Formulae solver, suitable for stiff problems and singular mass matrices.</li>
+<li><a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/sdirk/struct.Sdirk.html"><code>diffsol::Sdirk</code></a> A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver. You can define your own butcher tableau using <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/tableau/struct.Tableau.html"><code>Tableau</code></a> or use one of the pre-defined tableaues.</li>
+</ul>
+<p>Each of these solvers has a number of generic arguments, for example the <code>Bdf</code> solver has three generic arguments:</p>
+<ul>
+<li><code>M</code>: The matrix type used to define the problem.</li>
+<li><code>Eqn</code>: The type of the equations struct that defines the problem.</li>
+<li><code>Nls</code>: The type of the non-linear solver used to solve the implicit equations in the solver.</li>
+</ul>
+<p>In normal use cases, Rust can infer these from your code so you don't need to specify these explicitly. The <code>Bdf</code> solver implements the <code>Default</code> trait so can be easily created using:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::{OdeBuilder, OdeSolverState};
+</span><span class="boring">use nalgebra::DVector;
+</span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
+</span>use diffsol::Bdf;
+<span class="boring">fn main() {
+</span><span class="boring">
+</span><span class="boring">  let problem = OdeBuilder::new()
+</span><span class="boring">    .p(vec![1.0, 10.0])
+</span><span class="boring">    .build_ode::&lt;M, _, _, _&gt;(
+</span><span class="boring">       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
+</span><span class="boring">       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
+</span><span class="boring">       |_p, _t| DVector::from_element(1, 0.1),
+</span><span class="boring">    ).unwrap();
+</span>let solver = Bdf::default();
+<span class="boring">  let _state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
+</span><span class="boring">}</span></code></pre></pre>
+<p>The <code>Sdirk</code> solver requires a tableu to be specified so you can use its <code>new</code> method to create a new solver, for example using the <code>tr_bdf2</code> tableau:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::{OdeBuilder, OdeSolverState};
+</span><span class="boring">use nalgebra::DVector;
+</span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
+</span>use diffsol::{Sdirk, Tableau, NalgebraLU};
+<span class="boring">fn main() {
+</span><span class="boring">  let problem = OdeBuilder::new()
+</span><span class="boring">    .p(vec![1.0, 10.0])
+</span><span class="boring">    .build_ode::&lt;M, _, _, _&gt;(
+</span><span class="boring">       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
+</span><span class="boring">       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
+</span><span class="boring">       |_p, _t| DVector::from_element(1, 0.1),
+</span><span class="boring">    ).unwrap();
+</span>let solver = Sdirk::new(Tableau::&lt;M&gt;::tr_bdf2(), NalgebraLU::default());
+<span class="boring">  let _state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
+</span><span class="boring">}</span></code></pre></pre>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="sparse_problems.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
 
+                            <a rel="next prefetch" href="initialisation.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
 
                         <div style="clear: both"></div>
                     </nav>
@@ -191,7 +239,13 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="sparse_problems.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
 
+                    <a rel="next prefetch" href="initialisation.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
             </nav>
 
         </div>

@@ -3,8 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Page not found - DiffSol</title>
-        <base href="/">
+        <title>Constant functions - DiffSol</title>
 
 
         <!-- Custom HTML head -->
@@ -91,7 +90,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded "><a href="specifying_the_problem.html"><strong aria-hidden="true">1.</strong> Specifying the problem</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="ode_equations.html"><strong aria-hidden="true">1.1.</strong> ODE equations</a></li><li class="chapter-item expanded "><a href="mass_matrix.html"><strong aria-hidden="true">1.2.</strong> Mass matrix</a></li><li class="chapter-item expanded "><a href="root_finding.html"><strong aria-hidden="true">1.3.</strong> Root finding</a></li><li class="chapter-item expanded "><a href="custom_problem_structs.html"><strong aria-hidden="true">1.4.</strong> Custom Problem Structs</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="non_linear_functions.html"><strong aria-hidden="true">1.4.1.</strong> Non-linear functions</a></li><li class="chapter-item expanded "><a href="constant_functions.html"><strong aria-hidden="true">1.4.2.</strong> Constant functions</a></li><li class="chapter-item expanded "><a href="linear_functions.html"><strong aria-hidden="true">1.4.3.</strong> Linear functions</a></li><li class="chapter-item expanded "><a href="putting_it_all_together.html"><strong aria-hidden="true">1.4.4.</strong> Putting it all together</a></li></ol></li><li class="chapter-item expanded "><a href="diffsl.html"><strong aria-hidden="true">1.5.</strong> DiffSL</a></li><li class="chapter-item expanded "><a href="sparse_problems.html"><strong aria-hidden="true">1.6.</strong> Sparse problems</a></li></ol></li><li class="chapter-item expanded "><a href="choosing_a_solver.html"><strong aria-hidden="true">2.</strong> Choosing a solver</a></li><li class="chapter-item expanded "><a href="initialisation.html"><strong aria-hidden="true">3.</strong> Initialisation</a></li><li class="chapter-item expanded "><a href="solving_the_problem.html"><strong aria-hidden="true">4.</strong> Solving the problem</a></li><li class="chapter-item expanded "><a href="benchmarks.html"><strong aria-hidden="true">5.</strong> Benchmarks</a></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded "><a href="specifying_the_problem.html"><strong aria-hidden="true">1.</strong> Specifying the problem</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="ode_equations.html"><strong aria-hidden="true">1.1.</strong> ODE equations</a></li><li class="chapter-item expanded "><a href="mass_matrix.html"><strong aria-hidden="true">1.2.</strong> Mass matrix</a></li><li class="chapter-item expanded "><a href="root_finding.html"><strong aria-hidden="true">1.3.</strong> Root finding</a></li><li class="chapter-item expanded "><a href="custom_problem_structs.html"><strong aria-hidden="true">1.4.</strong> Custom Problem Structs</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="non_linear_functions.html"><strong aria-hidden="true">1.4.1.</strong> Non-linear functions</a></li><li class="chapter-item expanded "><a href="constant_functions.html" class="active"><strong aria-hidden="true">1.4.2.</strong> Constant functions</a></li><li class="chapter-item expanded "><a href="linear_functions.html"><strong aria-hidden="true">1.4.3.</strong> Linear functions</a></li><li class="chapter-item expanded "><a href="putting_it_all_together.html"><strong aria-hidden="true">1.4.4.</strong> Putting it all together</a></li></ol></li><li class="chapter-item expanded "><a href="diffsl.html"><strong aria-hidden="true">1.5.</strong> DiffSL</a></li><li class="chapter-item expanded "><a href="sparse_problems.html"><strong aria-hidden="true">1.6.</strong> Sparse problems</a></li></ol></li><li class="chapter-item expanded "><a href="choosing_a_solver.html"><strong aria-hidden="true">2.</strong> Choosing a solver</a></li><li class="chapter-item expanded "><a href="initialisation.html"><strong aria-hidden="true">3.</strong> Initialisation</a></li><li class="chapter-item expanded "><a href="solving_the_problem.html"><strong aria-hidden="true">4.</strong> Solving the problem</a></li><li class="chapter-item expanded "><a href="benchmarks.html"><strong aria-hidden="true">5.</strong> Benchmarks</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -176,14 +175,60 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="document-not-found-404"><a class="header" href="#document-not-found-404">Document not found (404)</a></h1>
-<p>This URL is invalid, sorry. Please use the navigation bar or search to continue.</p>
+                        <h1 id="constant-functions"><a class="header" href="#constant-functions">Constant functions</a></h1>
+<p>Now we've implemented the rhs function, but how about the initial condition? We can implement the <code>ConstantOp</code> trait to specify the initial condition. Since this is quite similar to the <code>NonLinearOp</code> trait, we will do it all in one go.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
+</span>use diffsol::{Op, ConstantOp};
+
+<span class="boring">type T = f64;
+</span><span class="boring">type V = nalgebra::DVector&lt;T&gt;;
+</span><span class="boring">type M = nalgebra::DMatrix&lt;T&gt;;
+</span><span class="boring">
+</span>struct MyInit {}
+
+impl Op for MyInit {
+    type T = T;
+    type V = V;
+    type M = M;
+    fn nstates(&amp;self) -&gt; usize {
+        1
+    }
+    fn nout(&amp;self) -&gt; usize {
+        1
+    }
+}
+
+impl ConstantOp for MyInit {
+    fn call_inplace(&amp;self, _t: T, y: &amp;mut V) {
+        y[0] = 0.1;
+    }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Again, we can use the <a href="https://docs.rs/diffsol/latest/diffsol/op/constant_closure/struct.ConstantClosure.html"><code>ConstantClosure</code></a> struct to implement the <code>ConstantOp</code> trait for us if it's not neccessary to use our own struct.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
+</span><span class="boring">use std::rc::Rc;
+</span>use diffsol::ConstantClosure;
+
+<span class="boring">type T = f64;
+</span><span class="boring">type V = nalgebra::DVector&lt;T&gt;;
+</span><span class="boring">type M = nalgebra::DMatrix&lt;T&gt;;
+</span><span class="boring">
+</span>let p = Rc::new(V::from_vec(vec![1.0, 10.0]));
+let init_fn = |_p: &amp;V, _t: T| V::from_element(1, 0.1);
+let init = Rc::new(ConstantClosure::&lt;M, _&gt;::new(init_fn, p.clone()));
+<span class="boring">}</span></code></pre></pre>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="non_linear_functions.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
 
+                            <a rel="next prefetch" href="linear_functions.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
 
                         <div style="clear: both"></div>
                     </nav>
@@ -191,7 +236,13 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="non_linear_functions.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
 
+                    <a rel="next prefetch" href="linear_functions.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
             </nav>
 
         </div>
