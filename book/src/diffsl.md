@@ -11,7 +11,7 @@ For more detail on the syntax of DiffSL see the [DiffSL book](https://martinjrob
 The main struct that is used to specify a problem in DiffSL is the [`DiffSlContext`](https://docs.rs/diffsol/latest/diffsol/ode_solver/diffsl/struct.DiffSlContext.html) struct. Creating this struct
 Just-In-Time (JIT) compiles your DiffSL code into a form that can be executed efficiently by DiffSol. 
 
-```rust
+```rust, ignore
 # fn main() {
 use diffsol::DiffSlContext;
 type M = nalgebra::DMatrix<f64>;
@@ -27,8 +27,10 @@ let context = DiffSlContext::<M>::new("
 # }
 ```
 
+Once you have created the `DiffSlContext` struct you can use it to create a problem using the `build_diffsl` method on the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html) struct.
 
-```rust
+
+```rust, ignore
 # fn main() {
 # use diffsol::DiffSlContext;
 use diffsol::{OdeBuilder, Bdf, OdeSolverMethod};
