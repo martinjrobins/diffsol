@@ -1,3 +1,17 @@
 # Summary
 
+- [Specifying the problem](./specifying_the_problem.md)
+  - [ODE equations](./ode_equations.md)
+  - [Mass matrix](./mass_matrix.md)
+  - [Root finding](./root_finding.md)
+  - [Custom Problem Structs](./custom_problem_structs.md)
+    - [Non-linear functions](./non_linear_functions.md)
+    - [Constant functions](./constant_functions.md)
+    - [Linear functions](./linear_functions.md)
+    - [Putting it all together](./putting_it_all_together.md)
+  - [DiffSL](./diffsl.md)
+  - [Sparse problems](./sparse_problems.md)
+- [Choosing a solver](./choosing_a_solver.md)
+- [Initialisation](./initialisation.md)
+- [Solving the problem](./solving_the_problem.md)
 - [Benchmarks](./benchmarks.md)
