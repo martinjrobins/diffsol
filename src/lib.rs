@@ -175,28 +175,30 @@ pub use scalar::scale;
 #[test]
 fn test() {
     use crate::OdeBuilder;
-    use nalgebra::{DMatrix, DVector};
-    type M = DMatrix<f64>;
-    type V = DVector<f64>;
+    use nalgebra::DVector;
+    type M = nalgebra::DMatrix<f64>;
+    use crate::{OdeSolverMethod, OdeSolverStopReason, OdeSolverState, Bdf};
 
     let problem = OdeBuilder::new()
-        .t0(0.0)
-        .rtol(1e-6)
-        .atol([1e-6])
         .p(vec![1.0, 10.0])
-        .build_ode_with_mass::<M, _, _, _, _>(
-        |x, p, _t, y| {
-            y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
-            y[1] = x[0] - x[1];
-        },
-        |x, p, _t, v , y| {
-            y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]);
-            y[1] = v[0] - v[1];
-        },
-        |v, _p, _t, beta, y| {
-            y[0] = v[0] + beta * y[0];
-            y[1] *= beta;
-        },
-        |_p, _t| V::from_element(2, 0.1),
+        .build_ode_with_root::<M, _, _, _, _>(
+            |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
+            |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
+            |_p, _t| DVector::from_element(1, 0.1),
+            |x, _p, _t, y| y[0] = x[0] - 0.5,
+            1,
         ).unwrap();
+    let mut solver = Bdf::default();
+    let state = OdeSolverState::new(&problem, &solver).unwrap();
+    solver.set_problem(state, &problem);
+    let t = loop {
+        match solver.step() {
+            Ok(OdeSolverStopReason::InternalTimestep) => continue,
+            Ok(OdeSolverStopReason::TstopReached) => panic!("We didn't set a stop time"),
+            Ok(OdeSolverStopReason::RootFound(t)) => break t,
+            Err(e) => panic!("Solver failed to converge: {}", e),
+        }
+    };
+    println!("Root found at t = {}", t);
+    let _soln = &solver.state().unwrap().y;
 }
