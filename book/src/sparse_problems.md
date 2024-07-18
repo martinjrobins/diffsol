@@ -8,7 +8,6 @@ Since this system is sparse, we choose a sparse matrix type to represent the jac
 ```rust
 # fn main() {
 use diffsol::OdeBuilder;
-use nalgebra::DVector;
 type M = diffsol::SparseColMat<f64>;
 type V = faer::Col<f64>;
 
@@ -28,7 +27,7 @@ let problem = OdeBuilder::new()
            y[i] = p[0] * v[i] * (1.0 - 2.0 * x[i] / p[1]);
          }
        },
-       |_p, _t| V::from_element(10, 0.1),
+       |_p, _t| V::from_fn(10, |_| 0.1),
     ).unwrap();
 # }
 ```
@@ -40,8 +39,10 @@ guess the sparsity pattern of the jacobian matrix and use this to efficiently ge
 To illustrate this, we can calculate the jacobian matrix from the `rhs` function contained in the `problem` object:
 
 ```rust
-# use crate::OdeBuilder;
-# type M = crate::SparseColMat<f64>;
+# use diffsol::OdeBuilder;
+use diffsol::{OdeEquations, NonLinearOp, Matrix, ConstantOp};
+
+# type M = diffsol::SparseColMat<f64>;
 # type V = faer::Col<f64>;
 #
 # fn main() {
@@ -61,7 +62,7 @@ To illustrate this, we can calculate the jacobian matrix from the `rhs` function
 #        y[i] = p[0] * v[i] * (1.0 - 2.0 * x[i] / p[1]);
 #      }
 #    },
-#    |_p, _t| V::from_element(100, 0.1)
+#    |_p, _t| V::from_fn(10, |_| 0.1),
 #    ).unwrap();
 let t0 = problem.t0;
 let y0 = problem.eqn.init().call(t0);
@@ -92,52 +93,49 @@ with a `NaN` value at each index. The output of this function (i.e. which elemen
 Due to the fact that for IEEE 754 floating point numbers, `NaN` is propagated through most operations, this method is able to detect which output elements are dependent on which input elements.
 
 However, this method is not foolproof, and it may fail to detect the correct sparsity pattern in some cases, particularly if values of `v` are used in control-flow statements. 
-If DiffSol does not detect the correct sparsity pattern, you can manually specify the sparsity pattern. To do this, you need
+If DiffSol does not detect the correct sparsity pattern, you can manually specify the jacobian. To do this, you need
 to implement the [`diffsol::NonLinearOp`](https://docs.rs/diffsol/latest/diffsol/op/trait.NonLinearOp.html) trait for the rhs function. 
 This is described in more detail in the ["Custom Problem Structs"](./custom_problem_structs.md) section, but is illustrated below. 
-Note that here we use DiffSol's [`JacobianColoring`](https://docs.rs/diffsol/latest/diffsol/jacobian_coloring/struct.JacobianColoring.html) struct 
-to calculate the jacobian matrix. Alternativly, we could have simply stored a `SparseColMat` in the `MyProblem` struct and calculated the jacobian matrix directly.
 
 ```rust
-#fn main() {
+# fn main() {
 use std::rc::Rc;
-use faer::sparse::{SymbolicSparseColMat, SymbolicSparseColMatRef};
-use crate::{NonLinearOp, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure, JacobianColoring};
+use faer::sparse::{SparseColMat, SymbolicSparseColMatRef};
+use diffsol::{NonLinearOp, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure};
 
 type T = f64;
 type V = faer::Col<T>;
-type M = crate::SparseColMat<T>;
+type M = diffsol::SparseColMat<T>;
 
 struct MyProblem {
-  sparsity: SymbolicSparseColMat<usize>,
-  coloring: Option<JacobianColoring<M>>,
-  p: V,
+  jacobian: SparseColMat<usize, T>,
+  p: Rc<V>,
 }
+
 impl MyProblem {
-  fn new(p: V) -> Self {
-    let col_ptrs = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-    let row_indices = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-    let sparsity = SymbolicSparseColMat::new_checked(10, 10, col_ptrs, None, row_indices);
-    let non_zeros = vec![(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7), (8, 8), (9, 9)];
-    let mut ret = MyProblem { sparsity, p, coloring: None };
-    let coloring = JacobianColoring::new_from_non_zeros(&ret, non_zeros);
-    ret.coloring = Some(coloring);
-    ret
+  fn new(p: Rc<V>) -> Self {
+    let mut triplets = Vec::new();
+    for i in 0..10 {
+      triplets.push((i, i, 1.0));
+    }
+    let jacobian = SparseColMat::try_new_from_triplets(10, 10, triplets.as_slice()).unwrap();
+    MyProblem { p, jacobian }
   }
 }
+
 impl Op for MyProblem {
- type T = T;
- type V = V;
- type M = M;
- fn nstates(&self) -> usize {
-  10
- }
- fn nout(&self) -> usize {
-  10
- }
- fn sparsity(&self) -> Option<SymbolicSparseColMatRef<usize>> {
-  Some(self.sparsity.as_ref())
- }
+  type T = T;
+  type V = V;
+  type M = M;
+  fn nstates(&self) -> usize {
+    10
+  }
+  fn nout(&self) -> usize {
+    10
+  }
+  fn sparsity(&self) -> Option<SymbolicSparseColMatRef<usize>> {
+    Some(self.jacobian.symbolic())
+  }
 }
   
 impl NonLinearOp for MyProblem {
@@ -151,16 +149,21 @@ impl NonLinearOp for MyProblem {
       y[i] = self.p[0] * v[i] * (1.0 - 2.0 * x[i] / self.p[1]);
     }
   }
-  fn jacobian_inplace(&self, x: &V, t: T, y: &mut M) {
-     self.coloring.as_ref().unwrap().jacobian_inplace(self, x, t, y);
-  } 
+  fn jacobian_inplace(&self, x: &Self::V, _t: Self::T, y: &mut Self::M) {
+    for i in 0..10 {
+      let row = y.faer().row_indices()[i];
+      y.faer_mut().values_mut()[i] = self.p[0] * (1.0 - 2.0 * x[row] / self.p[1]);
+    }
+  }
 }
 
-let rhs = Rc::new(MyProblem::new(V::from_vec(vec![1.0, 10.0])));
+let p = [1.0, 10.0];
+let p = Rc::new(V::from_fn(p.len(), |i| p[i]));
+let rhs = Rc::new(MyProblem::new(p.clone()));
 
 // use the provided constant closure to define the initial condition
-let init_fn = |_p: &V, _t: T| V::from_element(10, 0.1);
-let init = Rc::new(ConstantClosure::new(init_fn, Rc::new(V::from_vec(vec![]))));
+let init_fn = |_p: &V, _t: T| V::from_fn(10, |_| 0.1);
+let init = Rc::new(ConstantClosure::new(init_fn, p.clone()));
 
 // we don't have a mass matrix, root or output functions, so we can set to None
 // we still need to give a placeholder type for these, so we use the diffsol::UnitCallable type
@@ -168,10 +171,10 @@ let mass: Option<Rc<UnitCallable<M>>> = None;
 let root: Option<Rc<UnitCallable<M>>> = None;
 let out: Option<Rc<UnitCallable<M>>> = None;
 
-let p = Rc::new(V::from_vec(vec![]));
-let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p);
+let p = Rc::new(V::zeros(0));
+let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p.clone());
 let rtol = 1e-6;
-let atol = V::from_element(10, 1e-6);
+let atol = V::from_fn(10, |_| 1e-6);
 let t0 = 0.0;
 let h0 = 1.0;
 let _problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, false, false).unwrap();

@@ -115,7 +115,6 @@ pub mod vector;
 #[cfg(feature = "sundials")]
 pub mod sundials_sys;
 
-use jacobian::coloring;
 use linear_solver::LinearSolver;
 pub use linear_solver::{faer::sparse_lu::FaerSparseLU, FaerLU, NalgebraLU};
 
@@ -176,29 +175,26 @@ pub use scalar::scale;
 #[test]
 fn test() {
     use std::rc::Rc;
-    use faer::sparse::{SymbolicSparseColMat, SymbolicSparseColMatRef};
-    use crate::{NonLinearOp, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure, JacobianColoring};
+    use faer::sparse::{SparseColMat, SymbolicSparseColMatRef};
+    use crate::{NonLinearOp, OdeEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure};
     
     type T = f64;
     type V = faer::Col<T>;
     type M = crate::SparseColMat<T>;
 
     struct MyProblem {
-        sparsity: SymbolicSparseColMat<usize>,
-        coloring: Option<JacobianColoring<M>>,
+        jacobian: SparseColMat<usize, T>,
         p: V,
 
     }
     impl MyProblem {
         fn new(p: V) -> Self {
-            let col_ptrs = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-            let row_indices = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-            let sparsity = SymbolicSparseColMat::new_checked(10, 10, col_ptrs, None, row_indices);
-            let non_zeros = vec![(0, 0), (1, 1), (2, 2), (3, 3), (4, 4), (5, 5), (6, 6), (7, 7), (8, 8), (9, 9)];
-            let mut ret = MyProblem { sparsity, p, coloring: None };
-            let coloring = JacobianColoring::new_from_non_zeros(&ret, non_zeros);
-            ret.coloring = Some(coloring);
-            ret
+            let mut triplets = Vec::new();
+            for i in 0..10 {
+                triplets.push((i, i, 1.0));
+            }
+            let jacobian = SparseColMat::try_new_from_triplets(10, 10, triplets.as_slice()).unwrap();
+            MyProblem { p, jacobian }
         }
     }
     impl Op for MyProblem {
@@ -212,7 +208,7 @@ fn test() {
           10
        }
        fn sparsity(&self) -> Option<SymbolicSparseColMatRef<usize>> {
-          Some(self.sparsity.as_ref())
+          Some(self.jacobian.symbolic())
        }
     }
       
@@ -227,8 +223,11 @@ fn test() {
                 y[i] = self.p[0] * v[i] * (1.0 - 2.0 * x[i] / self.p[1]);
             }
         }
-        fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
-           self.coloring.as_ref().unwrap().jacobian_inplace(self, x, t, y);
+        fn jacobian_inplace(&self, x: &Self::V, _t: Self::T, y: &mut Self::M) {
+            for i in 0..10 {
+                let row = y.faer().row_indices()[i];
+                y.faer_mut().values_mut()[i] = self.p[0] * (1.0 - 2.0 * x[row] / self.p[1]);
+            }
         } 
     }
 

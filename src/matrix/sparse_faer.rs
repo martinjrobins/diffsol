@@ -30,6 +30,9 @@ impl<T: Scalar> SparseColMat<T> {
     pub fn faer(&self) -> &faer::sparse::SparseColMat<IndexType, T> {
         &self.0
     }
+    pub fn faer_mut(&mut self) -> &mut faer::sparse::SparseColMat<IndexType, T> {
+        &mut self.0
+    }
 }
 
 impl<T: Scalar> DefaultSolver for SparseColMat<T> {
