@@ -1,62 +1,38 @@
 # Specifying the problem
 
-The simplest way to create a new ode problem in Rust is to use the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html) struct. 
-You can set the initial time, initial step size, relative tolerance, absolute tolerance, and parameters, or leave them at their default values. 
-Then, call one of the `build_*` functions to create a new problem, for example the [`build_ode`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.build_ode)
-function can be used to create an ODE problem of the form \\(dy/dt = f(t, y, p)\\), where \\(y\\) is the state vector, \\(t\\) is the time, and \\(p\\) are the parameters.
+Most of the DiffSol user-facing API revolves around specifying the problem you want to solve, thus a large part of this book will be dedicated to explaining how to specify a problem. 
 
-Below is an example of how to create a new ODE problem using the `OdeBuilder` struct. 
-The specific problem we will solve is the logistic equation 
+## ODE equations
 
-\\[\frac{dy}{dt} = r y (1 - y/K),\\] 
+The class of ODE equations that DiffSol can solve are of the form
 
-where \\(r\\) is the growth rate and \\(K\\) is the carrying capacity. 
-To specify the problem, we need to provide the \\(dy/dt\\) function \\(f(y, p, t)\\), 
-and the jacobian of \\(f\\) multiplied by a vector \\(v\\) function, which we will call \\(f'(y, p, t, v)\\). That is
+\\[M(t) \frac{dy}{dt} = f(t, y, p),\\]
+\\[y(t_0) = y_0(t_0, p),\\]
+\\[z(t) = g(t, y, p),\\]
 
-\\[f(y, p, t) = r y (1 - y/K),\\]
-\\[f'(y, p, t, v) = rv (1 - 2y/K),\\]
+where:
+- \\(f(t, y, p)\\) is the right-hand side of the ODE, 
+- \\(y\\) is the state vector, 
+- \\(p\\) are the parameters, 
+- \\(t\\) is the time.
+- \\(y_0(t_0, p)\\) is the initial state vector at time \\(t_0\\). 
+- \\(M(t)\\) is the mass matrix (this is optional, and is implicitly the identity matrix if not specified),
+- \\(g(t, y, p)\\) is an output function that can be used to calculate additional outputs from the state vector (this is optional, and is implicitly \\(g(t, y, p) = y\\) if not specified).
 
-and the initial state 
+The user can also optionally specify a root function \\(r(t, y, p)\\) that can be used to find the time at which a root occurs.
 
-\\[y_0(p, t) = 0.1\\]
+## DiffSol problem APIs
 
-This can be done using the following code:
+DiffSol has three main APIs for specifying problems:
+- The [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html) struct, where the user can specify the functions above using Rust closures.
+  This is the easiest API to use from Rust, and is the recommended API for most users.
+- The [`OdeEquations`](https://docs.rs/diffsol/latest/diffsol/ode_solver/equations/trait.OdeEquations.html) trait 
+  where the user can implement the functions above on their own structs.
+  This API is more flexible than the `OdeBuilder` API, but is more complex to use. It is useful if you have custom data structures and code that you want to use to evaluate
+  your functions that does not fit within the `OdeBuilder` API.
+- The [`DiffSlContext`](https://docs.rs/diffsol/latest/diffsol/ode_solver/diffsl/struct.DiffSlContext.html) struct, where the user can specify the functions above using the [DiffSl](https://martinjrobins.github.io/diffsl/)
+  Domain Specific Language (DSL). This API requires a local LLVM installation, and is behind a feature flag, but has the best API if you want to use DiffSL from a higher-level language like Python or R
+  while still having the performance of Rust.
 
-```rust
-# fn main() {
-use diffsol::OdeBuilder;
-use nalgebra::DVector;
-type M = nalgebra::DMatrix<f64>;
 
-let problem = OdeBuilder::new()
-    .t0(0.0)
-    .rtol(1e-6)
-    .atol([1e-6])
-    .p(vec![1.0, 10.0])
-    .build_ode::<M, _, _, _>(
-       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-       |_p, _t| DVector::from_element(1, 0.1),
-    ).unwrap();
-# }
-```
-
-Each `build_*` method requires the user to specify what matrix type they wish to use to define and solve the model (the other types are inferred from the closure types). 
-Here we use the `nalgebra::DMatrix<f64>` type, which is a dense matrix type from the [nalgebra](https://nalgebra.org) crate. Other options are:
-- `faer::Mat<T>` from [faer](https://github.com/sarah-ek/faer-rs), which is a dense matrix type.
-- `diffsol::SparseColMat<T>`, which is a thin wrapper around `faer::sparse::SparseColMat<T>`, a sparse compressed sparse column matrix type.
-    
-Each of these matrix types have an associated vector type that is used to represent the vectors in the problem (i.e. the state vector \\(y\\), the parameter vector \\(p\\), and the gradient vector \\(v\\)).
-You can see in the example above that the `DVector` type is explicitly used to create the initial state vector in the third closure.
-For these matrix types the associated vector type is:
-- `nalgebra::DVector<T>` for `nalgebra::DMatrix<T>`.
-- `faer::Col<T>` for `faer::Mat<T>`.
-- `faer::Coll<T>` for `diffsol::SparseColMat<T>`.
-
-The arguments to the `build_ode` method are the equations that define the problem. 
-The first closure is the function \\(f(y, p, t)\\) this is implemented as a closure that takes the time `t`, 
-the parameter vector `p`, the state vector `y`, and a mutable reference that the closure can use to place the result (i.e. the derivative of the state vector \\(f(y, p, t)\\)).
-The second closure is similar in structure in defines the jacobian multiplied by a vector \\(v\\) function \\(f'(y, p, t, v)\\).
-The third closure returns the initial state vector \\(y_0(p, t)\\), this is done so that diffsol can infer the size of the state vector.
 

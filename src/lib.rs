@@ -174,81 +174,29 @@ pub use scalar::scale;
 
 #[test]
 fn test() {
-    use std::rc::Rc;
-    use faer::sparse::{SparseColMat, SymbolicSparseColMatRef};
-    use crate::{NonLinearOp, OdeEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure};
-    
-    type T = f64;
-    type V = faer::Col<T>;
-    type M = crate::SparseColMat<T>;
+    use crate::OdeBuilder;
+    use nalgebra::{DMatrix, DVector};
+    type M = DMatrix<f64>;
+    type V = DVector<f64>;
 
-    struct MyProblem {
-        jacobian: SparseColMat<usize, T>,
-        p: V,
-
-    }
-    impl MyProblem {
-        fn new(p: V) -> Self {
-            let mut triplets = Vec::new();
-            for i in 0..10 {
-                triplets.push((i, i, 1.0));
-            }
-            let jacobian = SparseColMat::try_new_from_triplets(10, 10, triplets.as_slice()).unwrap();
-            MyProblem { p, jacobian }
-        }
-    }
-    impl Op for MyProblem {
-       type T = T;
-       type V = V;
-       type M = M;
-       fn nstates(&self) -> usize {
-          10
-       }
-       fn nout(&self) -> usize {
-          10
-       }
-       fn sparsity(&self) -> Option<SymbolicSparseColMatRef<usize>> {
-          Some(self.jacobian.symbolic())
-       }
-    }
-      
-    impl NonLinearOp for MyProblem {
-        fn call_inplace(&self, x: &V, _t: T, y: &mut V) {
-            for i in 0..10 {
-                y[i] = self.p[0] * x[i] * (1.0 - x[i] / self.p[1]);
-            }
-        }
-       fn jac_mul_inplace(&self, x: &V, _t: T, v: &V, y: &mut V) {
-            for i in 0..10 {
-                y[i] = self.p[0] * v[i] * (1.0 - 2.0 * x[i] / self.p[1]);
-            }
-        }
-        fn jacobian_inplace(&self, x: &Self::V, _t: Self::T, y: &mut Self::M) {
-            for i in 0..10 {
-                let row = y.faer().row_indices()[i];
-                y.faer_mut().values_mut()[i] = self.p[0] * (1.0 - 2.0 * x[row] / self.p[1]);
-            }
-        } 
-    }
-
-    let rhs = Rc::new(MyProblem::new(V::from_vec(vec![1.0, 10.0])));
-
-    // use the provided constant closure to define the initial condition
-    let init_fn = |_p: &V, _t: T| V::from_element(10, 0.1);
-    let init = Rc::new(ConstantClosure::new(init_fn, Rc::new(V::from_vec(vec![]))));
-
-    // we don't have a mass matrix, root or output functions, so we can set to None
-    // we still need to give a placeholder type for these, so we use the diffsol::UnitCallable type
-    let mass: Option<Rc<UnitCallable<M>>> = None;
-    let root: Option<Rc<UnitCallable<M>>> = None;
-    let out: Option<Rc<UnitCallable<M>>> = None;
-
-    let p = Rc::new(V::from_vec(vec![]));
-    let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p);
-    let rtol = 1e-6;
-    let atol = V::from_element(10, 1e-6);
-    let t0 = 0.0;
-    let h0 = 1.0;
-    let _problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, false, false).unwrap();
-
+    let problem = OdeBuilder::new()
+        .t0(0.0)
+        .rtol(1e-6)
+        .atol([1e-6])
+        .p(vec![1.0, 10.0])
+        .build_ode_with_mass::<M, _, _, _, _>(
+        |x, p, _t, y| {
+            y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
+            y[1] = x[0] - x[1];
+        },
+        |x, p, _t, v , y| {
+            y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]);
+            y[1] = v[0] - v[1];
+        },
+        |v, _p, _t, beta, y| {
+            y[0] = v[0] + beta * y[0];
+            y[1] *= beta;
+        },
+        |_p, _t| V::from_element(2, 0.1),
+        ).unwrap();
 }

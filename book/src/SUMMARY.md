@@ -1,6 +1,7 @@
 # Summary
 
 - [Specifying the problem](./specifying_the_problem.md)
+  - [ODE equations](./ode_equations.md)
   - [Mass matrix](./mass_matrix.md)
   - [Root finding](./root_finding.md)
   - [Outputs](./outputs.md)
