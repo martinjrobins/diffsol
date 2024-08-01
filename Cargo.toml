@@ -14,7 +14,7 @@ repository = "https://github.com/martinjrobins/diffsol"
 default = ["nalgebra", "faer"]
 faer = []
 nalgebra = []
-sundials = ["suitesparse_sys"]
+sundials = ["suitesparse_sys", "bindgen", "cc"]
 suitesparse = ["suitesparse_sys"]
 diffsl = []
 diffsl-llvm13 = ["diffsl13-0", "diffsl"]
@@ -44,8 +44,8 @@ insta = { version = "1.34.0", features = ["yaml"] }
 criterion = { version = "0.4" }
 
 [build-dependencies]
-bindgen = "0.69.4"
-cc = "1.0.99"
+bindgen = { version = "0.69.4", optional = true }
+cc = { version = "1.0.99", optional = true }
 
 [[bench]]
 name = "ode_solvers"
