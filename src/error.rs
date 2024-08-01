@@ -1,5 +1,5 @@
+use faer::sparse::CreationError;
 use thiserror::Error;
-use faer::sparse::CreationError as CreationError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum DiffsolError {
@@ -65,7 +65,6 @@ pub enum OdeSolverError {
     InvalidTEval,
 }
 
-
 /// Possible errors that can occur when solving a non-linear problem
 #[derive(Error, Debug)]
 pub enum MatrixError {
@@ -77,5 +76,4 @@ pub enum MatrixError {
     MatrixShapeError,
     #[error("Other error: {0}")]
     Other(String),
-
 }

@@ -258,8 +258,9 @@ where
 
             // solve
             {
-                let result = newton_iteration(ds, &mut self.old_y_sens[j], s0, fun, ls, &mut convergence)
-                    .map_err(|e| DiffsolError::from(e));
+                let result =
+                    newton_iteration(ds, &mut self.old_y_sens[j], s0, fun, ls, &mut convergence)
+                        .map_err(|e| DiffsolError::from(e));
                 match result {
                     Err(e) => {
                         return Err(e);

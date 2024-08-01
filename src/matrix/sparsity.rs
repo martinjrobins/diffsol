@@ -1,5 +1,7 @@
 use crate::{
-    error::{DiffsolError, MatrixError}, scalar::IndexType, vector::{Vector, VectorIndex}
+    error::{DiffsolError, MatrixError},
+    scalar::IndexType,
+    vector::{Vector, VectorIndex},
 };
 
 use super::Matrix;

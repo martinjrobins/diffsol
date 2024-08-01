@@ -3,9 +3,11 @@ use num_traits::{One, Pow};
 use std::rc::Rc;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError}, matrix::default_solver::DefaultSolver, scalar::Scalar, scale, ConstantOp,
-    InitOp, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem,
-    Op, SensEquations, SolverProblem, Vector,
+    error::{DiffsolError, OdeSolverError},
+    matrix::default_solver::DefaultSolver,
+    scalar::Scalar,
+    scale, ConstantOp, InitOp, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations,
+    OdeSolverProblem, Op, SensEquations, SolverProblem, Vector,
 };
 
 #[derive(Debug, PartialEq)]
@@ -184,7 +186,10 @@ impl<V: Vector> OdeSolverState<V> {
     /// It will also set the initial step size based on the given solver.
     /// If you want to create a state without this default initialisation, use [Self::new_without_initialise] instead.
     /// You can then use [Self::set_consistent] and [Self::set_step_size] to set the state up if you need to.
-    pub fn new<Eqn, S>(ode_problem: &OdeSolverProblem<Eqn>, solver: &S) -> Result<Self, DiffsolError>
+    pub fn new<Eqn, S>(
+        ode_problem: &OdeSolverProblem<Eqn>,
+        solver: &S,
+    ) -> Result<Self, DiffsolError>
     where
         Eqn: OdeEquations<T = V::T, V = V>,
         Eqn::M: DefaultSolver,

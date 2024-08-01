@@ -1,7 +1,9 @@
 use std::cell::RefCell;
 
 use crate::{
-    error::DiffsolError, scalar::{IndexType, Scalar}, NonLinearOp, Vector
+    error::DiffsolError,
+    scalar::{IndexType, Scalar},
+    NonLinearOp, Vector,
 };
 
 use num_traits::{abs, One, Zero};

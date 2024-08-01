@@ -222,7 +222,9 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
     ) -> Result<Self, DiffsolError> {
         match faer::sparse::SparseColMat::try_new_from_triplets(nrows, ncols, triplets.as_slice()) {
             Ok(mat) => Ok(Self(mat)),
-            Err(e) => Err(DiffsolError::from(MatrixError::FailedToCreateMatrixFromTriplets(e))),
+            Err(e) => Err(DiffsolError::from(
+                MatrixError::FailedToCreateMatrixFromTriplets(e),
+            )),
         }
     }
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
