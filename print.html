@@ -91,7 +91,7 @@
 
         <nav id="sidebar" class="sidebar" aria-label="Table of contents">
             <div class="sidebar-scrollbox">
-                <ol class="chapter"><li class="chapter-item expanded "><a href="specifying_the_problem.html"><strong aria-hidden="true">1.</strong> Specifying the problem</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="ode_equations.html"><strong aria-hidden="true">1.1.</strong> ODE equations</a></li><li class="chapter-item expanded "><a href="mass_matrix.html"><strong aria-hidden="true">1.2.</strong> Mass matrix</a></li><li class="chapter-item expanded "><a href="root_finding.html"><strong aria-hidden="true">1.3.</strong> Root finding</a></li><li class="chapter-item expanded "><a href="custom_problem_structs.html"><strong aria-hidden="true">1.4.</strong> Custom Problem Structs</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="non_linear_functions.html"><strong aria-hidden="true">1.4.1.</strong> Non-linear functions</a></li><li class="chapter-item expanded "><a href="constant_functions.html"><strong aria-hidden="true">1.4.2.</strong> Constant functions</a></li><li class="chapter-item expanded "><a href="linear_functions.html"><strong aria-hidden="true">1.4.3.</strong> Linear functions</a></li><li class="chapter-item expanded "><a href="putting_it_all_together.html"><strong aria-hidden="true">1.4.4.</strong> Putting it all together</a></li></ol></li><li class="chapter-item expanded "><a href="diffsl.html"><strong aria-hidden="true">1.5.</strong> DiffSL</a></li><li class="chapter-item expanded "><a href="sparse_problems.html"><strong aria-hidden="true">1.6.</strong> Sparse problems</a></li></ol></li><li class="chapter-item expanded "><a href="choosing_a_solver.html"><strong aria-hidden="true">2.</strong> Choosing a solver</a></li><li class="chapter-item expanded "><a href="initialisation.html"><strong aria-hidden="true">3.</strong> Initialisation</a></li><li class="chapter-item expanded "><a href="solving_the_problem.html"><strong aria-hidden="true">4.</strong> Solving the problem</a></li><li class="chapter-item expanded "><a href="benchmarks.html"><strong aria-hidden="true">5.</strong> Benchmarks</a></li></ol>
+                <ol class="chapter"><li class="chapter-item expanded "><a href="specifying_the_problem.html"><strong aria-hidden="true">1.</strong> Specifying the problem</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="ode_equations.html"><strong aria-hidden="true">1.1.</strong> ODE equations</a></li><li class="chapter-item expanded "><a href="mass_matrix.html"><strong aria-hidden="true">1.2.</strong> Mass matrix</a></li><li class="chapter-item expanded "><a href="root_finding.html"><strong aria-hidden="true">1.3.</strong> Root finding</a></li><li class="chapter-item expanded "><a href="forward_sensitivity.html"><strong aria-hidden="true">1.4.</strong> Forward Sensitivity</a></li><li class="chapter-item expanded "><a href="custom_problem_structs.html"><strong aria-hidden="true">1.5.</strong> Custom Problem Structs</a></li><li><ol class="section"><li class="chapter-item expanded "><a href="non_linear_functions.html"><strong aria-hidden="true">1.5.1.</strong> Non-linear functions</a></li><li class="chapter-item expanded "><a href="constant_functions.html"><strong aria-hidden="true">1.5.2.</strong> Constant functions</a></li><li class="chapter-item expanded "><a href="linear_functions.html"><strong aria-hidden="true">1.5.3.</strong> Linear functions</a></li><li class="chapter-item expanded "><a href="putting_it_all_together.html"><strong aria-hidden="true">1.5.4.</strong> Putting it all together</a></li></ol></li><li class="chapter-item expanded "><a href="diffsl.html"><strong aria-hidden="true">1.6.</strong> DiffSL</a></li><li class="chapter-item expanded "><a href="sparse_problems.html"><strong aria-hidden="true">1.7.</strong> Sparse problems</a></li></ol></li><li class="chapter-item expanded "><a href="choosing_a_solver.html"><strong aria-hidden="true">2.</strong> Choosing a solver</a></li><li class="chapter-item expanded "><a href="initialisation.html"><strong aria-hidden="true">3.</strong> Initialisation</a></li><li class="chapter-item expanded "><a href="solving_the_problem.html"><strong aria-hidden="true">4.</strong> Solving the problem</a></li><li class="chapter-item expanded "><a href="benchmarks.html"><strong aria-hidden="true">5.</strong> Benchmarks</a></li></ol>
             </div>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -364,6 +364,90 @@ let t = loop {
 };
 println!("Root found at t = {}", t);
 let _soln = &amp;solver.state().unwrap().y;
+<span class="boring">}</span></code></pre></pre>
+<div style="break-before: page; page-break-before: always;"></div><h1 id="forward-sensitivity"><a class="header" href="#forward-sensitivity">Forward Sensitivity</a></h1>
+<p>In this section we will discuss how to compute the forward sensitivity of the solution of an ODE problem. The forward sensitivity is the derivative of the solution with respect to the parameters of the problem. This is useful for many applications, such as parameter estimation, optimal control, and uncertainty quantification.</p>
+<h2 id="specifying-the-sensitivity-problem"><a class="header" href="#specifying-the-sensitivity-problem">Specifying the sensitivity problem</a></h2>
+<p>We will again use the example of the logistic growth equation, but this time we will compute the sensitivity of the solution \(y\) with respect to the parameters \(r\) and \(K\) (i.e. \(\frac{dy}{dr}\) and \(\frac{dy}{dK}\)).
+The logistic growth equation is:</p>
+<p>\[\frac{dy}{dt} = r y (1 - y/K),\]
+\[y(0) = 0.1\]</p>
+<p>Recall from <a href="ode_equations.html">ODE equations</a> that we also need to provide the jacobian of the right hand side of the ODE with respect to the state vector \(y\) and the gradient vector \(v\), which we will call \(J\). This is:</p>
+<p>\[J v = \begin{bmatrix} r v (1 - 2 y/K) \end{bmatrix}.\]</p>
+<p>Using the logistic growth equation above, we can compute the partial derivative of the right hand side of the ODE with respect to the vector \([r, K]\) multiplied by a vector \(v = [v_r, v_K]\), which we will call \(J_p v\). This is:</p>
+<p>\[J_p v = v_r y (1 - y/K) + v_K r y^2 / K^2 .\]</p>
+<p>We also need the partial derivative of the initial state vector with respect to the parameters multiplied by a vector \(v\), which we will call \(J_{y_0} v\). Since the initial state vector is constant, this is just zero</p>
+<p>\[J_{y_0} v = 0.\]</p>
+<p>We can then use the <code>OdeBuilder</code> struct to specify the sensitivity problem. The <code>build_ode_with_sens</code> method is used to create a new problem that includes the sensitivity equations.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
+</span>use diffsol::OdeBuilder;
+use nalgebra::DVector;
+type M = nalgebra::DMatrix&lt;f64&gt;;
+
+let problem = OdeBuilder::new()
+    .p(vec![1.0, 10.0])
+    .build_ode_with_sens::&lt;M, _, _, _, _, _&gt;(
+      |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
+      |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
+      |x, p, _t, v, y| y[0] = v[0] * x[0] * (1.0 - x[0] / p[1]) 
+        + v[1] * p[0] * x[0] * x[0] / (p[1] * p[1]),
+      |_p, _t| DVector::from_element(1, 0.1),
+      |_p, _t, _v, y| y[0] = 0.0,
+    ).unwrap();
+<span class="boring">}</span></code></pre></pre>
+<h2 id="solving-the-sensitivity-problem"><a class="header" href="#solving-the-sensitivity-problem">Solving the sensitivity problem</a></h2>
+<p>Once the sensitivity problem has been specified, we can solve it using the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html"><code>OdeSolverMethod</code></a> trait.
+Lets imagine we want to solve the sensitivity problem up to a time \(t_o = 10\). We can use the <code>OdeSolverMethod</code> trait to solve the problem as normal, stepping forward in time until we reach \(t_o\).</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
+</span><span class="boring">use diffsol::OdeBuilder;
+</span><span class="boring">use nalgebra::DVector;
+</span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
+</span>use diffsol::{OdeSolverMethod, OdeSolverState, Bdf};
+
+<span class="boring">let problem = OdeBuilder::new()
+</span><span class="boring">    .p(vec![1.0, 10.0])
+</span><span class="boring">    .build_ode_with_sens::&lt;M, _, _, _, _, _&gt;(
+</span><span class="boring">      |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
+</span><span class="boring">      |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
+</span><span class="boring">      |x, p, _t, v, y| y[0] = v[0] * x[0] * (1.0 - x[0] / p[1]) + v[1] * p[0] * x[0] * x[0] / (p[1] * p[1]),
+</span><span class="boring">      |_p, _t| DVector::from_element(1, 0.1),
+</span><span class="boring">      |_p, _t, _v, y| y[0] = 0.0,
+</span><span class="boring">    ).unwrap();
+</span>let mut solver = Bdf::default();
+let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
+solver.set_problem(state, &amp;problem);
+let t_o = 10.0;
+while solver.state().unwrap().t &lt; t_o {
+    solver.step().unwrap();
+}
+<span class="boring">}</span></code></pre></pre>
+<p>We can then obtain the sensitivity vectors at time \(t_o\) using the <code>interpolate_sens</code> method on the <code>OdeSolverMethod</code> trait.
+This method returns a <code>Vec&lt;DVector&lt;f64&gt;&gt;</code> where each element of the vector is the sensitivity vector for element \(i\) of the parameter vector at time \(t_o\).
+If we need the sensitivity at the current internal time step, we can get this from the <code>s</code> field of the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/struct.OdeSolverState.html"><code>OdeSolverState</code></a> struct.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
+</span><span class="boring">use diffsol::OdeBuilder;
+</span><span class="boring">use nalgebra::DVector;
+</span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
+</span><span class="boring">use diffsol::{OdeSolverMethod, OdeSolverState, Bdf};
+</span><span class="boring">
+</span><span class="boring">let problem = OdeBuilder::new()
+</span><span class="boring">    .p(vec![1.0, 10.0])
+</span><span class="boring">    .build_ode_with_sens::&lt;M, _, _, _, _, _&gt;(
+</span><span class="boring">      |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
+</span><span class="boring">      |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
+</span><span class="boring">      |x, p, _t, v, y| y[0] = v[0] * x[0] * (1.0 - x[0] / p[1]) + v[1] * p[0] * x[0] * x[0] / (p[1] * p[1]),
+</span><span class="boring">      |_p, _t| DVector::from_element(1, 0.1),
+</span><span class="boring">      |_p, _t, _v, y| y[0] = 0.0,
+</span><span class="boring">    ).unwrap();
+</span><span class="boring">let mut solver = Bdf::default();
+</span><span class="boring">let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
+</span><span class="boring">solver.set_problem(state, &amp;problem);
+</span><span class="boring">let t_o = 10.0;
+</span><span class="boring">while solver.state().unwrap().t &lt; t_o {
+</span><span class="boring">    solver.step().unwrap();
+</span><span class="boring">}
+</span>let sens_at_t_o = solver.interpolate_sens(t_o).unwrap();
+let sens_at_internal_step = &amp;solver.state().as_ref().unwrap().s;
 <span class="boring">}</span></code></pre></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="custom-problem-structs"><a class="header" href="#custom-problem-structs">Custom Problem Structs</a></h1>
 <p>While the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct is a convenient way to specify the problem, it may not be suitable in all cases.
@@ -1013,7 +1097,8 @@ let _soln = solver.interpolate(t_o).unwrap();
 <span class="boring">}</span></code></pre></pre>
 <p>The second way is to use the <code>set_stop_time</code> method on the <code>OdeSolverMethod</code> trait to stop the solver at a specific time, this will override the internal time step so that the solver stops at the specified time.
 Note that this can be less efficient if you wish to continue stepping forward after the specified time, as the solver will need to be re-initialised.
-The enum returned by <code>step</code> will indicate when the solver has stopped at the specified time.</p>
+The enum returned by <code>step</code> will indicate when the solver has stopped at the specified time.
+Once the solver has stopped at the specified time, you can get the current state of the solution using the <code>state</code> method on the solver, which returns an <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/struct.OdeSolverState.html"><code>OdeSolverState</code></a> struct.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::OdeBuilder;
 </span><span class="boring">use nalgebra::DVector;
 </span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
@@ -1043,7 +1128,7 @@ loop {
 let _soln = &amp;solver.state().unwrap().y;
 <span class="boring">}</span></code></pre></pre>
 <p>DiffSol also has two convenience functions <code>solve</code> and <code>solve_dense</code> on the <code>OdeSolverMethod</code> trait. <code>solve</code> will initialise the problem and solve the problem up to a specified time, returning the solution at all the
-internal timesteps used by the solver. This function returns a <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/solution/struct.OdeSolution.html"><code>OdeSolution</code></a> struct that contains both a <code>Vec</code> of
+internal timesteps used by the solver. This function returns a tuple that contains a <code>Vec</code> of
 the solution at each timestep, and a <code>Vec</code> of the times at each timestep.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::OdeBuilder;
 </span><span class="boring">use nalgebra::DVector;
@@ -1059,7 +1144,7 @@ the solution at each timestep, and a <code>Vec</code> of the times at each times
 </span><span class="boring">       |_p, _t| DVector::from_element(1, 0.1),
 </span><span class="boring">    ).unwrap();
 </span>let mut solver = Bdf::default();
-let _soln = solver.solve(&amp;problem, 10.0).unwrap();
+let (ys, ts) = solver.solve(&amp;problem, 10.0).unwrap();
 <span class="boring">}</span></code></pre></pre>
 <p><code>solve_dense</code> will initialise the problem and solve the problem, returning the solution at a <code>Vec</code> of times provided by the user. This function returns a <code>Vec&lt;V&gt;</code>, where <code>V</code> is the vector type used to define the problem.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::OdeBuilder;
