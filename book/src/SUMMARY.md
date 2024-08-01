@@ -4,6 +4,7 @@
   - [ODE equations](./ode_equations.md)
   - [Mass matrix](./mass_matrix.md)
   - [Root finding](./root_finding.md)
+  - [Forward Sensitivity](./forward_sensitivity.md)
   - [Custom Problem Structs](./custom_problem_structs.md)
     - [Non-linear functions](./non_linear_functions.md)
     - [Constant functions](./constant_functions.md)
