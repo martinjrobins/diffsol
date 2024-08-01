@@ -83,7 +83,6 @@ pub trait VectorViewMut<'a>:
 {
     type Owned;
     type View;
-    fn abs_to(&self, y: &mut Self::Owned);
     fn copy_from(&mut self, other: &Self::Owned);
     fn copy_from_view(&mut self, other: &Self::View);
 }
@@ -98,7 +97,6 @@ pub trait VectorView<'a>:
 {
     type Owned;
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T;
-    fn abs_to(&self, y: &mut Self::Owned);
     fn norm(&self) -> Self::T;
     fn into_owned(self) -> Self::Owned;
 }
@@ -134,13 +132,14 @@ pub trait Vector:
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn abs_to(&self, y: &mut Self);
-    fn exp(&self) -> Self;
+    fn map_inplace(&mut self, f: impl Fn(Self::T) -> Self::T);
     fn from_element(nstates: usize, value: Self::T) -> Self;
     fn zeros(nstates: usize) -> Self {
         Self::from_element(nstates, Self::T::zero())
     }
-    fn fill(&mut self, value: Self::T);
+    fn fill(&mut self, value: Self::T) {
+        self.map_inplace(|_| value);
+    }
     fn as_view(&self) -> Self::View<'_>;
     fn as_view_mut(&mut self) -> Self::ViewMut<'_>;
     fn as_slice(&self) -> &[Self::T];
@@ -158,29 +157,16 @@ pub trait Vector:
     fn binary_fold<B, F>(&self, other: &Self, init: B, f: F) -> B
     where
         F: Fn(B, Self::T, Self::T, IndexType) -> B;
-    fn filter(&self, indices: &Self::Index) -> Self {
-        let mut result = Self::zeros(indices.len());
-        result.gather_from(self, indices);
-        result
+    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
+        for i in 0..indices.len() {
+            self[indices[i]] = value;
+        }
     }
-    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T);
-
-    // for i in 0..indices.len():
-    //  self[i] = value[indices[i]]
-    fn gather_from(&mut self, other: &Self, indices: &Self::Index);
-
-    // for i in 0..indices.len():
-    //  self[indices[i]] = value[i]
-    fn scatter_from(&mut self, other: &Self, indices: &Self::Index);
-
-    // for i in 0..indices.len():
-    //  self[indices[i]] = value[indices[i]]
     fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
         for i in 0..indices.len() {
             self[indices[i]] = other[indices[i]];
         }
     }
-
     fn assert_eq_st(&self, other: &Self, tol: Self::T) {
         let tol = Self::from_element(self.len(), tol);
         self.assert_eq(other, &tol);

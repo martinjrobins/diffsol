@@ -109,9 +109,6 @@ impl<T: Scalar> Vector for Col<T> {
         }
         acc / Self::T::from(self.len() as f64)
     }
-    fn abs_to(&self, y: &mut Self) {
-        zipped!(self, y.as_mut()).for_each(|unzipped!(xi, mut yi)| *yi = xi.faer_abs());
-    }
     fn as_view(&self) -> Self::View<'_> {
         self.as_ref()
     }
@@ -147,8 +144,8 @@ impl<T: Scalar> Vector for Col<T> {
         zipped!(self.as_mut(), x)
             .for_each(|unzipped!(mut si, xi)| si.write(si.read() * beta + xi.read() * alpha));
     }
-    fn exp(&self) -> Self {
-        zipped!(self).map(|unzipped!(xi)| xi.exp())
+    fn map_inplace(&mut self, f: impl Fn(Self::T) -> Self::T) {
+        zipped!(self.as_mut()).for_each(|unzipped!(mut xi)| xi.write(f(*xi)));
     }
     fn component_mul_assign(&mut self, other: &Self) {
         zipped!(self.as_mut(), other.as_view()).for_each(|unzipped!(mut s, o)| *s *= *o);
@@ -174,21 +171,6 @@ impl<T: Scalar> Vector for Col<T> {
             acc = f(acc, self[i], other[i], i);
         }
         acc
-    }
-    fn gather_from(&mut self, other: &Self, indices: &Self::Index) {
-        for (i, &index) in indices.iter().enumerate() {
-            self[i] = other[index];
-        }
-    }
-    fn scatter_from(&mut self, other: &Self, indices: &Self::Index) {
-        for (i, &index) in indices.iter().enumerate() {
-            self[index] = other[i];
-        }
-    }
-    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
-        for &index in indices {
-            self[index] = value;
-        }
     }
 }
 
@@ -221,9 +203,6 @@ impl_vector_common!(ColMut<'a, T>);
 
 impl<'a, T: Scalar> VectorView<'a> for ColRef<'a, T> {
     type Owned = Col<T>;
-    fn abs_to(&self, y: &mut Self::Owned) {
-        zipped!(self, y.as_mut()).for_each(|unzipped!(xi, mut yi)| *yi = xi.faer_abs());
-    }
     fn into_owned(self) -> Col<T> {
         self.to_owned()
     }
@@ -248,9 +227,6 @@ impl<'a, T: Scalar> VectorView<'a> for ColRef<'a, T> {
 impl<'a, T: Scalar> VectorViewMut<'a> for ColMut<'a, T> {
     type Owned = Col<T>;
     type View = ColRef<'a, T>;
-    fn abs_to(&self, y: &mut Self::Owned) {
-        zipped!(self, y.as_mut()).for_each(|unzipped!(xi, mut yi)| *yi = xi.faer_abs());
-    }
     fn copy_from(&mut self, other: &Self::Owned) {
         self.copy_from(other);
     }
@@ -264,14 +240,6 @@ impl<'a, T: Scalar> VectorViewMut<'a> for ColMut<'a, T> {
 mod tests {
     use super::*;
     use crate::scalar::scale;
-
-    #[test]
-    fn test_abs() {
-        let v = Col::from_vec(vec![1.0, -2.0, 3.0]);
-        let mut v_abs = v.clone();
-        v.abs_to(&mut v_abs);
-        assert_eq!(v_abs, Col::from_vec(vec![1.0, 2.0, 3.0]));
-    }
 
     #[test]
     fn test_mult() {
