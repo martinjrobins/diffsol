@@ -137,7 +137,9 @@ pub trait Vector:
     fn zeros(nstates: usize) -> Self {
         Self::from_element(nstates, Self::T::zero())
     }
-    fn fill(&mut self, value: Self::T);
+    fn fill(&mut self, value: Self::T) {
+        self.map_inplace(|_| value);
+    }
     fn as_view(&self) -> Self::View<'_>;
     fn as_view_mut(&mut self) -> Self::ViewMut<'_>;
     fn as_slice(&self) -> &[Self::T];
