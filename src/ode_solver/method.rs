@@ -5,8 +5,8 @@ use std::rc::Rc;
 
 use crate::{
     matrix::default_solver::DefaultSolver, scalar::Scalar, scale, ConstantOp, InitOp,
-    NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations,
-    OdeSolverProblem, Op, SensEquations, SolverProblem, Vector,
+    NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, Op,
+    SensEquations, SolverProblem, Vector,
 };
 
 #[derive(Debug, PartialEq)]
@@ -84,7 +84,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     /// Reinitialise the solver state and solve the problem up to time `final_time`
     /// Returns a Vec of solution values at timepoints chosen by the solver.
     /// After the solver has finished, the internal state of the solver is at time `final_time`.
-    #[allow(clippy::type_complexity)] 
+    #[allow(clippy::type_complexity)]
     fn solve(
         &mut self,
         problem: &OdeSolverProblem<Eqn>,
@@ -106,8 +106,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         while self.step()? != OdeSolverStopReason::TstopReached {
             t.push(self.state().unwrap().t);
             match problem.eqn.out() {
-                Some(out) => y
-                    .push(out.call(&self.state().unwrap().y, self.state().unwrap().t)),
+                Some(out) => y.push(out.call(&self.state().unwrap().y, self.state().unwrap().t)),
                 None => y.push(self.state().unwrap().y.clone()),
             }
         }
