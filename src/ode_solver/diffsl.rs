@@ -528,8 +528,8 @@ mod tests {
         let problem = OdeBuilder::new().p([r, k]).build_diffsl(&context).unwrap();
         let mut solver = Bdf::default();
         let t = 1.0;
-        let soln = solver.solve(&problem, t).unwrap();
-        for (y, t) in soln.y.iter().zip(soln.t.iter()) {
+        let (ys, ts) = solver.solve(&problem, t).unwrap();
+        for (y, t) in ys.iter().zip(ts.iter()) {
             let y_expect = k / (1.0 + (k - y0) * (-r * t).exp() / y0);
             let z_expect = 2.0 * y_expect;
             let expected_out = DVector::from_vec(vec![3.0 * y_expect, 4.0 * z_expect]);
