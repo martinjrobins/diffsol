@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use crate::{
     matrix::default_solver::DefaultSolver, scalar::Scalar, scale, ConstantOp, InitOp,
-    NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolution,
+    NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations,
     OdeSolverProblem, Op, SensEquations, SolverProblem, Vector,
 };
 
@@ -84,38 +84,34 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     /// Reinitialise the solver state and solve the problem up to time `final_time`
     /// Returns a Vec of solution values at timepoints chosen by the solver.
     /// After the solver has finished, the internal state of the solver is at time `final_time`.
+    #[allow(clippy::type_complexity)] 
     fn solve(
         &mut self,
         problem: &OdeSolverProblem<Eqn>,
         final_time: Eqn::T,
-    ) -> Result<OdeSolution<Eqn::V>>
+    ) -> Result<(Vec<Eqn::V>, Vec<Eqn::T>)>
     where
         Eqn::M: DefaultSolver,
         Self: Sized,
     {
         let state = OdeSolverState::new(problem, self)?;
         self.set_problem(state, problem);
-        let mut ret = OdeSolution {
-            t: vec![self.state().unwrap().t],
-            y: vec![],
-        };
+        let mut t = vec![self.state().unwrap().t];
+        let mut y = vec![];
         match problem.eqn.out() {
-            Some(out) => ret
-                .y
-                .push(out.call(&self.state().unwrap().y, self.state().unwrap().t)),
-            None => ret.y.push(self.state().unwrap().y.clone()),
+            Some(out) => y.push(out.call(&self.state().unwrap().y, self.state().unwrap().t)),
+            None => y.push(self.state().unwrap().y.clone()),
         }
         self.set_stop_time(final_time)?;
         while self.step()? != OdeSolverStopReason::TstopReached {
-            ret.t.push(self.state().unwrap().t);
+            t.push(self.state().unwrap().t);
             match problem.eqn.out() {
-                Some(out) => ret
-                    .y
+                Some(out) => y
                     .push(out.call(&self.state().unwrap().y, self.state().unwrap().t)),
-                None => ret.y.push(self.state().unwrap().y.clone()),
+                None => y.push(self.state().unwrap().y.clone()),
             }
         }
-        Ok(ret)
+        Ok((y, t))
     }
 
     /// Reinitialise the solver state and solve the problem up to time `t_eval[t_eval.len()-1]`
