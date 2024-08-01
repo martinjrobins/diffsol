@@ -1,9 +1,9 @@
 use crate::ode_solver::problem::OdeSolverSolution;
 use crate::OdeSolverProblem;
 use crate::{scalar::scale, ConstantOp, DenseMatrix, OdeBuilder, OdeEquations, Vector};
+use nalgebra::ComplexField;
 use num_traits::Pow;
 use num_traits::Zero;
-use nalgebra::ComplexField;
 use std::ops::MulAssign;
 
 // dy/dt = -aty (p = [a])
