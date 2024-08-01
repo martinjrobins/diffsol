@@ -53,9 +53,6 @@ impl_vector_common!(DVectorViewMut<'a, T>);
 
 impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
     type Owned = DVector<T>;
-    fn abs_to(&self, y: &mut Self::Owned) {
-        y.zip_apply(self, |y, x| *y = x.abs());
-    }
     fn into_owned(self) -> Self::Owned {
         self.into_owned()
     }
@@ -112,9 +109,6 @@ impl_mul_assign_scale_vector!(DVectorViewMut<'a, T>);
 impl<'a, T: Scalar> VectorViewMut<'a> for DVectorViewMut<'a, T> {
     type Owned = DVector<T>;
     type View = DVectorView<'a, T>;
-    fn abs_to(&self, y: &mut Self::Owned) {
-        y.zip_apply(self, |y, x| *y = x.abs());
-    }
     fn copy_from(&mut self, other: &Self::Owned) {
         self.copy_from(other);
     }
@@ -162,9 +156,6 @@ impl<T: Scalar> Vector for DVector<T> {
         }
         acc / Self::T::from(self.len() as f64)
     }
-    fn abs_to(&self, y: &mut Self) {
-        y.zip_apply(self, |y, x| *y = x.abs());
-    }
     fn fill(&mut self, value: T) {
         self.fill(value);
     }
@@ -177,8 +168,8 @@ impl<T: Scalar> Vector for DVector<T> {
     fn copy_from(&mut self, other: &Self) {
         self.copy_from(other);
     }
-    fn exp(&self) -> Self {
-        self.map(|x| x.exp())
+    fn map_inplace(&mut self, f: impl Fn(Self::T) -> Self::T) {
+        self.iter_mut().for_each(|x| *x = f(*x));
     }
     fn copy_from_view(&mut self, other: &Self::View<'_>) {
         self.copy_from(other);
@@ -215,21 +206,6 @@ impl<T: Scalar> Vector for DVector<T> {
             }
         }
         Self::Index::from_vec(indices)
-    }
-    fn gather_from(&mut self, other: &Self, indices: &Self::Index) {
-        for (i, &index) in indices.iter().enumerate() {
-            self[i] = other[index];
-        }
-    }
-    fn scatter_from(&mut self, other: &Self, indices: &Self::Index) {
-        for (i, &index) in indices.iter().enumerate() {
-            self[index] = other[i];
-        }
-    }
-    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
-        for &index in indices.iter() {
-            self[index] = value;
-        }
     }
     fn binary_fold<B, F>(&self, other: &Self, init: B, f: F) -> B
     where

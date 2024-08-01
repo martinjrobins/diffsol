@@ -11,7 +11,6 @@ pub mod closure_no_jac;
 pub mod closure_with_sens;
 pub mod constant_closure;
 pub mod constant_closure_with_sens;
-pub mod filter;
 pub mod init;
 pub mod linear_closure;
 pub mod linear_closure_with_sens;

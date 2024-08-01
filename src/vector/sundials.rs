@@ -3,7 +3,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
 use crate::sundials_sys::{
-    realtype, N_VAbs, N_VAddConst, N_VClone, N_VConst, N_VDestroy, N_VDiv, N_VGetArrayPointer,
+    realtype, N_VAddConst, N_VClone, N_VConst, N_VDestroy, N_VDiv, N_VGetArrayPointer,
     N_VGetLength_Serial, N_VLinearSum, N_VNew_Serial, N_VProd, N_VScale, N_VWL2Norm_Serial,
     N_Vector,
 };
@@ -409,9 +409,6 @@ impl_sub_view_owned!(SundialsVectorView, SundialsVector);
 impl<'a> VectorViewMut<'a> for SundialsVectorViewMut<'a> {
     type Owned = SundialsVector;
     type View = SundialsVectorView<'a>;
-    fn abs_to(&self, y: &mut Self::Owned) {
-        unsafe { N_VAbs(self.sundials_vector(), y.sundials_vector()) }
-    }
     fn copy_from(&mut self, other: &Self::Owned) {
         unsafe { N_VScale(1.0, other.sundials_vector(), self.sundials_vector()) }
     }
@@ -422,9 +419,6 @@ impl<'a> VectorViewMut<'a> for SundialsVectorViewMut<'a> {
 
 impl<'a> VectorView<'a> for SundialsVectorView<'a> {
     type Owned = SundialsVector;
-    fn abs_to(&self, y: &mut Self::Owned) {
-        unsafe { N_VAbs(self.sundials_vector(), y.sundials_vector()) }
-    }
     fn into_owned(self) -> Self::Owned {
         let mut z = SundialsVector::new_serial(self.len());
         z.copy_from_view(&self);
@@ -515,9 +509,6 @@ impl Vector for SundialsVector {
     fn fill(&mut self, value: Self::T) {
         unsafe { N_VConst(value, self.sundials_vector()) }
     }
-    fn abs_to(&self, y: &mut Self) {
-        unsafe { N_VAbs(self.sundials_vector(), y.sundials_vector()) }
-    }
     fn add_scalar_mut(&mut self, scalar: Self::T) {
         unsafe { N_VAddConst(self.sundials_vector(), scalar, self.sundials_vector()) }
     }
@@ -573,12 +564,10 @@ impl Vector for SundialsVector {
     fn copy_from_view(&mut self, other: &Self::View<'_>) {
         unsafe { N_VScale(1.0, other.sundials_vector(), self.sundials_vector()) }
     }
-    fn exp(&self) -> Self {
-        let mut z = SundialsVector::new_clone(self);
+    fn map_inplace(&mut self, f: impl Fn(Self::T) -> Self::T) {
         for i in 0..self.len() {
-            z[i] = self[i].exp();
+            self[i] = f(self[i]);
         }
-        z
     }
     fn filter_indices<F: Fn(Self::T) -> bool>(&self, f: F) -> Self::Index {
         let mut indices = vec![];
@@ -600,21 +589,6 @@ impl Vector for SundialsVector {
             v[i] = x;
         }
         v
-    }
-    fn gather_from(&mut self, other: &Self, indices: &Self::Index) {
-        for i in 0..indices.len() {
-            self[i] = other[indices[i]];
-        }
-    }
-    fn scatter_from(&mut self, other: &Self, indices: &Self::Index) {
-        for i in 0..indices.len() {
-            self[indices[i]] = other[i];
-        }
-    }
-    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
-        for i in 0..indices.len() {
-            self[indices[i]] = value;
-        }
     }
     fn binary_fold<B, F>(&self, other: &Self, init: B, f: F) -> B
     where
@@ -669,17 +643,6 @@ mod tests {
     }
 
     #[test]
-    fn test_abs() {
-        let mut v = SundialsVector::new_serial(2);
-        v[0] = -1.0;
-        v[1] = 2.0;
-        let mut v2 = v.clone();
-        v.abs_to(&mut v2);
-        assert_eq!(v2[0], 1.0);
-        assert_eq!(v2[1], 2.0);
-    }
-
-    #[test]
     fn test_axpy() {
         let mut v = SundialsVector::new_serial(2);
         v[0] = 1.0;
@@ -720,13 +683,13 @@ mod tests {
     }
 
     #[test]
-    fn test_exp() {
+    fn test_map() {
         let mut v = SundialsVector::new_serial(2);
         v[0] = 1.0;
         v[1] = 2.0;
-        let v2 = v.exp();
-        assert_eq!(v2[0], 1.0_f64.exp());
-        assert_eq!(v2[1], 2.0_f64.exp());
+        v.map_inplace(f64::exp);
+        assert_eq!(v[0], 1.0_f64.exp());
+        assert_eq!(v[1], 2.0_f64.exp());
     }
 
     #[test]
@@ -737,24 +700,6 @@ mod tests {
         let indices = v.filter_indices(|x| x > 1.0);
         assert_eq!(indices.len(), 1);
         assert_eq!(indices[0], 1);
-    }
-
-    #[test]
-    fn test_gather_scatter() {
-        let mut v = SundialsVector::new_serial(3);
-        v[0] = 1.0;
-        v[1] = 2.0;
-        v[2] = 3.0;
-        let mut v2 = SundialsVector::new_serial(2);
-        v2.gather_from(&v, &SundialsIndexVector(vec![0, 2]));
-        assert_eq!(v2[0], 1.0);
-        assert_eq!(v2[1], 3.0);
-        v2[0] = 4.0;
-        v2[1] = 5.0;
-        v.scatter_from(&v2, &SundialsIndexVector(vec![0, 2]));
-        assert_eq!(v[0], 4.0);
-        assert_eq!(v[1], 2.0);
-        assert_eq!(v[2], 5.0);
     }
 
     #[test]
