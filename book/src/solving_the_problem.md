@@ -64,6 +64,7 @@ let _soln = solver.interpolate(t_o).unwrap();
 The second way is to use the `set_stop_time` method on the `OdeSolverMethod` trait to stop the solver at a specific time, this will override the internal time step so that the solver stops at the specified time.
 Note that this can be less efficient if you wish to continue stepping forward after the specified time, as the solver will need to be re-initialised.
 The enum returned by `step` will indicate when the solver has stopped at the specified time.
+Once the solver has stopped at the specified time, you can get the current state of the solution using the `state` method on the solver, which returns an [`OdeSolverState`](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/struct.OdeSolverState.html) struct.
 
 ```rust
 # use diffsol::OdeBuilder;
@@ -97,7 +98,7 @@ let _soln = &solver.state().unwrap().y;
 ```
 
 DiffSol also has two convenience functions `solve` and `solve_dense` on the `OdeSolverMethod` trait. `solve` will initialise the problem and solve the problem up to a specified time, returning the solution at all the 
-internal timesteps used by the solver. This function returns a [`OdeSolution`](https://docs.rs/diffsol/latest/diffsol/ode_solver/solution/struct.OdeSolution.html) struct that contains both a `Vec` of 
+internal timesteps used by the solver. This function returns a tuple that contains a `Vec` of 
 the solution at each timestep, and a `Vec` of the times at each timestep.
 
 ```rust
@@ -115,7 +116,7 @@ use diffsol::{OdeSolverMethod, Bdf};
 #        |_p, _t| DVector::from_element(1, 0.1),
 #     ).unwrap();
 let mut solver = Bdf::default();
-let _soln = solver.solve(&problem, 10.0).unwrap();
+let (ys, ts) = solver.solve(&problem, 10.0).unwrap();
 # }
 ```
 
