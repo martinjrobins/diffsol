@@ -1,9 +1,8 @@
+use nalgebra::{DMatrix, DVector, Dyn};
 use std::rc::Rc;
 
-use anyhow::Result;
-use nalgebra::{DMatrix, DVector, Dyn};
-
 use crate::{
+    error::{DiffsolError, LinearSolverError},
     matrix::sparsity::MatrixSparsityRef,
     op::{linearise::LinearisedOp, NonLinearOp},
     LinearOp, LinearSolver, Matrix, Op, Scalar, SolverProblem,
@@ -37,14 +36,14 @@ where
 impl<T: Scalar, C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> LinearSolver<C>
     for LU<T, C>
 {
-    fn solve_in_place(&self, state: &mut C::V) -> Result<()> {
+    fn solve_in_place(&self, state: &mut C::V) -> Result<(), DiffsolError> {
         if self.lu.is_none() {
-            return Err(anyhow::anyhow!("LU not initialized"));
+            return Err(DiffsolError::from(LinearSolverError::LuNotInitialized));
         }
         let lu = self.lu.as_ref().unwrap();
         match lu.solve_mut(state) {
             true => Ok(()),
-            false => Err(anyhow::anyhow!("LU solve failed")),
+            false => Err(DiffsolError::from(LinearSolverError::LuSolveFailed)),
         }
     }
 

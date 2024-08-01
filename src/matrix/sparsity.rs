@@ -1,8 +1,6 @@
 use crate::{
-    scalar::IndexType,
-    vector::{Vector, VectorIndex},
+    error::{DiffsolError, MatrixError}, scalar::IndexType, vector::{Vector, VectorIndex}
 };
-use anyhow::Result;
 
 use super::Matrix;
 
@@ -14,9 +12,9 @@ pub trait MatrixSparsity<M: Matrix>: Sized {
         nrows: IndexType,
         ncols: IndexType,
         indices: Vec<(IndexType, IndexType)>,
-    ) -> Result<Self>;
+    ) -> Result<Self, DiffsolError>;
     fn indices(&self) -> Vec<(IndexType, IndexType)>;
-    fn union(self, other: M::SparsityRef<'_>) -> Result<M::Sparsity>;
+    fn union(self, other: M::SparsityRef<'_>) -> Result<M::Sparsity, DiffsolError>;
     fn new_diagonal(n: IndexType) -> Self;
     fn as_ref(&self) -> M::SparsityRef<'_>;
 }
@@ -60,11 +58,9 @@ impl<M> MatrixSparsity<M> for Dense<M>
 where
     for<'a> M: Matrix<Sparsity = Dense<M>, SparsityRef<'a> = DenseRef<'a, M>> + 'a,
 {
-    fn union(self, other: M::SparsityRef<'_>) -> Result<M::Sparsity> {
+    fn union(self, other: M::SparsityRef<'_>) -> Result<M::Sparsity, DiffsolError> {
         if self.nrows() != other.nrows() || self.ncols() != other.ncols() {
-            return Err(anyhow::anyhow!(
-                "Cannot union matrices with different shapes"
-            ));
+            return Err(DiffsolError::from(MatrixError::UnionIncompatibleShapes));
         }
         Ok(Self::new(self.nrows(), self.ncols()))
     }
@@ -89,11 +85,9 @@ where
         nrows: IndexType,
         ncols: IndexType,
         _indices: Vec<(IndexType, IndexType)>,
-    ) -> Result<Self> {
+    ) -> Result<Self, DiffsolError> {
         if nrows == 0 || ncols == 0 {
-            return Err(anyhow::anyhow!(
-                "Cannot create a matrix with zero rows or columns"
-            ));
+            return Err(DiffsolError::from(MatrixError::MatrixShapeError));
         }
         Ok(Dense::new(nrows, ncols))
     }

@@ -1,6 +1,5 @@
 use std::{cell::RefCell, rc::Rc};
 
-use anyhow::Result;
 use diffsl::execution::Compiler;
 
 use crate::{

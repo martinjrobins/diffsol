@@ -1,11 +1,8 @@
 use std::rc::Rc;
 
 use crate::{
-    vector::DefaultDenseMatrix, Closure, ClosureNoJac, ClosureWithSens, ConstantClosure,
-    ConstantClosureWithSens, LinearClosure, LinearClosureWithSens, Matrix, OdeEquations,
-    OdeSolverProblem, Op, UnitCallable, Vector,
+    error::{DiffsolError, OdeSolverError}, vector::DefaultDenseMatrix, Closure, ClosureNoJac, ClosureWithSens, ConstantClosure, ConstantClosureWithSens, LinearClosure, LinearClosureWithSens, Matrix, OdeEquations, OdeSolverProblem, Op, UnitCallable, Vector
 };
-use anyhow::Result;
 
 use super::equations::OdeSolverEquations;
 
@@ -144,13 +141,11 @@ impl OdeBuilder {
         self
     }
 
-    fn build_atol<V: Vector>(atol: Vec<f64>, nstates: usize) -> Result<V> {
+    fn build_atol<V: Vector>(atol: Vec<f64>, nstates: usize) -> Result<V, DiffsolError> {
         if atol.len() == 1 {
             Ok(V::from_element(nstates, V::T::from(atol[0])))
         } else if atol.len() != nstates {
-            Err(anyhow::anyhow!(
-                "atol must have length 1 or equal to the number of states"
-            ))
+            Err(DiffsolError::from(OdeSolverError::AtolLengthMismatch))
         } else {
             let mut v = V::zeros(nstates);
             for (i, &a) in atol.iter().enumerate() {
@@ -219,7 +214,7 @@ impl OdeBuilder {
     ) -> Result<
         OdeSolverProblem<
             OdeSolverEquations<M, Closure<M, F, G>, ConstantClosure<M, I>, LinearClosure<M, H>>,
-        >,
+        >, DiffsolError
     >
     where
         M: Matrix,
@@ -276,7 +271,7 @@ impl OdeBuilder {
                 UnitCallable<M>,
                 Closure<M, J, K>,
             >,
-        >,
+        >, DiffsolError
     >
     where
         M: Matrix,
@@ -384,7 +379,7 @@ impl OdeBuilder {
                 ConstantClosureWithSens<M, I, K>,
                 LinearClosureWithSens<M, H, L>,
             >,
-        >,
+        >, DiffsolError
     >
     where
         M: Matrix,
@@ -460,7 +455,7 @@ impl OdeBuilder {
         rhs: F,
         rhs_jac: G,
         init: I,
-    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, Closure<M, F, G>, ConstantClosure<M, I>>>>
+    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, Closure<M, F, G>, ConstantClosure<M, I>>>, DiffsolError>
     where
         M: Matrix,
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -532,7 +527,7 @@ impl OdeBuilder {
     ) -> Result<
         OdeSolverProblem<
             OdeSolverEquations<M, ClosureWithSens<M, F, G, J>, ConstantClosureWithSens<M, I, K>>,
-        >,
+        >, DiffsolError
     >
     where
         M: Matrix,
@@ -620,7 +615,7 @@ impl OdeBuilder {
                 UnitCallable<M>,
                 ClosureNoJac<M, H>,
             >,
-        >,
+        >, DiffsolError
     >
     where
         M: Matrix,
@@ -662,7 +657,7 @@ impl OdeBuilder {
         rhs_jac: G,
         init: I,
     ) -> Result<
-        OdeSolverProblem<OdeSolverEquations<V::M, Closure<V::M, F, G>, ConstantClosure<V::M, I>>>,
+        OdeSolverProblem<OdeSolverEquations<V::M, Closure<V::M, F, G>, ConstantClosure<V::M, I>>>, DiffsolError
     >
     where
         V: Vector + DefaultDenseMatrix,

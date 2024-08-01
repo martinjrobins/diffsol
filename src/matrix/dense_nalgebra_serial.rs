@@ -1,6 +1,5 @@
 use std::ops::{AddAssign, Mul, MulAssign};
 
-use anyhow::Result;
 use nalgebra::{
     DMatrix, DMatrixView, DMatrixViewMut, DVector, DVectorView, DVectorViewMut, RawStorage,
     RawStorageMut,
@@ -10,10 +9,10 @@ use crate::op::NonLinearOp;
 use crate::vector::Vector;
 use crate::{scalar::Scale, IndexType, Scalar};
 
-use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU};
-
 use super::default_solver::DefaultSolver;
 use super::sparsity::{Dense, DenseRef};
+use crate::error::DiffsolError;
+use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU};
 
 impl<T: Scalar> DefaultSolver for DMatrix<T> {
     type LS<C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> = NalgebraLU<T, C>;
@@ -131,7 +130,7 @@ impl<T: Scalar> Matrix for DMatrix<T> {
         nrows: IndexType,
         ncols: IndexType,
         triplets: Vec<(IndexType, IndexType, T)>,
-    ) -> Result<Self> {
+    ) -> Result<Self, DiffsolError> {
         let mut m = Self::zeros(nrows, ncols);
         for (i, j, v) in triplets {
             m[(i, j)] = v;

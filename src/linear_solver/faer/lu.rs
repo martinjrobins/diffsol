@@ -1,10 +1,11 @@
+use crate::error::LinearSolverError;
 use std::rc::Rc;
 
 use crate::{
-    linear_solver::LinearSolver, op::linearise::LinearisedOp, solver::SolverProblem, LinearOp,
-    Matrix, MatrixSparsityRef, NonLinearOp, Op, Scalar,
+    error::DiffsolError, linear_solver::LinearSolver, op::linearise::LinearisedOp,
+    solver::SolverProblem, LinearOp, Matrix, MatrixSparsityRef, NonLinearOp, Op, Scalar,
 };
-use anyhow::Result;
+
 use faer::{linalg::solvers::FullPivLu, solvers::SpSolver, Col, Mat};
 /// A [LinearSolver] that uses the LU decomposition in the [`faer`](https://github.com/sarah-ek/faer-rs) library to solve the linear system.
 pub struct LU<T, C>
@@ -41,9 +42,10 @@ impl<T: Scalar, C: NonLinearOp<M = Mat<T>, V = Col<T>, T = T>> LinearSolver<C> f
         self.lu = Some(matrix.full_piv_lu());
     }
 
-    fn solve_in_place(&self, x: &mut C::V) -> Result<()> {
+    fn solve_in_place(&self, x: &mut C::V) -> Result<(), DiffsolError> {
         if self.lu.is_none() {
-            return Err(anyhow::anyhow!("LU not initialized"));
+            let error = LinearSolverError::LuNotInitialized;
+            return Err(DiffsolError::from(error))?;
         }
         let lu = self.lu.as_ref().unwrap();
         lu.solve_in_place(x);

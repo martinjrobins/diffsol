@@ -3,7 +3,6 @@ use std::rc::Rc;
 use crate::sundials_sys::{
     realtype, SUNLinSolFree, SUNLinSolSetup, SUNLinSolSolve, SUNLinSol_Dense, SUNLinearSolver,
 };
-use anyhow::Result;
 
 use crate::{
     ode_solver::sundials::sundials_check, op::linearise::LinearisedOp,

@@ -1,7 +1,5 @@
 use std::{cell::RefCell, rc::Rc};
 
-use anyhow::Result;
-
 use faer::Col;
 
 #[cfg(target_pointer_width = "32")]

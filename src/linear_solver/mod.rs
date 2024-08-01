@@ -1,5 +1,4 @@
-use crate::{op::Op, solver::SolverProblem};
-use anyhow::Result;
+use crate::{error::DiffsolError, op::Op, solver::SolverProblem};
 
 #[cfg(feature = "nalgebra")]
 pub mod nalgebra;
@@ -27,13 +26,13 @@ pub trait LinearSolver<C: Op> {
 
     /// Solve the problem `Ax = b` and return the solution `x`.
     /// panics if [Self::set_linearisation] has not been called previously
-    fn solve(&self, b: &C::V) -> Result<C::V> {
+    fn solve(&self, b: &C::V) -> Result<C::V, DiffsolError> {
         let mut b = b.clone();
         self.solve_in_place(&mut b)?;
         Ok(b)
     }
 
-    fn solve_in_place(&self, b: &mut C::V) -> Result<()>;
+    fn solve_in_place(&self, b: &mut C::V) -> Result<(), DiffsolError>;
 }
 
 pub struct LinearSolveSolution<V> {

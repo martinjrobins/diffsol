@@ -1,10 +1,9 @@
 use std::cell::RefCell;
 
 use crate::{
-    scalar::{IndexType, Scalar},
-    NonLinearOp, Vector,
+    error::DiffsolError, scalar::{IndexType, Scalar}, NonLinearOp, Vector
 };
-use anyhow::Result;
+
 use num_traits::{abs, One, Zero};
 
 pub struct RootFinder<V: Vector> {
@@ -40,7 +39,7 @@ impl<V: Vector> RootFinder<V> {
     /// We find the root of a function using the method proposed by Sundials [docs](https://sundials.readthedocs.io/en/latest/cvode/Mathematics_link.html#rootfinding)
     pub fn check_root(
         &self,
-        interpolate: &impl Fn(V::T) -> Result<V>,
+        interpolate: &impl Fn(V::T) -> Result<V, DiffsolError>,
         root_fn: &impl NonLinearOp<V = V, T = V::T>,
         y: &V,
         t: V::T,
@@ -160,14 +159,13 @@ impl<V: Vector> RootFinder<V> {
 mod tests {
     use std::rc::Rc;
 
-    use crate::{ClosureNoJac, RootFinder, Vector};
-    use anyhow::Result;
+    use crate::{error::DiffsolError, ClosureNoJac, RootFinder, Vector};
 
     #[test]
     fn test_root() {
         type V = nalgebra::DVector<f64>;
         type M = nalgebra::DMatrix<f64>;
-        let interpolate = |t: f64| -> Result<V> { Ok(Vector::from_vec(vec![t])) };
+        let interpolate = |t: f64| -> Result<V, DiffsolError> { Ok(Vector::from_vec(vec![t])) };
         let root_fn = ClosureNoJac::<M, _>::new(
             |y: &V, _p: &V, _t: f64, g: &mut V| {
                 g[0] = y[0] - 0.4;

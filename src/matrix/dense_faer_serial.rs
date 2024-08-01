@@ -2,11 +2,12 @@ use std::ops::{AddAssign, Mul, MulAssign};
 
 use super::default_solver::DefaultSolver;
 use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
+use crate::error::DiffsolError;
 use crate::op::NonLinearOp;
 use crate::scalar::{IndexType, Scalar, Scale};
 use crate::FaerLU;
 use crate::{Dense, DenseRef, Vector};
-use anyhow::Result;
+
 use faer::{
     linalg::matmul::matmul, mat::As2D, mat::As2DMut, Col, ColMut, ColRef, Mat, MatMut, MatRef,
     Parallelism,
@@ -197,7 +198,7 @@ impl<T: Scalar> Matrix for Mat<T> {
         nrows: IndexType,
         ncols: IndexType,
         triplets: Vec<(IndexType, IndexType, T)>,
-    ) -> Result<Self> {
+    ) -> Result<Self, DiffsolError> {
         let mut m = Self::zeros(nrows, ncols);
         for (i, j, v) in triplets {
             m[(i, j)] = v;

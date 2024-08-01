@@ -1,7 +1,10 @@
-use anyhow::{Context, Result};
 use std::rc::Rc;
 
-use crate::{vector::Vector, ConstantOp, LinearOp, NonLinearOp, OdeEquations, SensEquations};
+use crate::{
+    error::{DiffsolError, OdeSolverError},
+    vector::Vector,
+    ConstantOp, LinearOp, NonLinearOp, OdeEquations, SensEquations,
+};
 
 pub struct OdeSolverProblem<Eqn: OdeEquations> {
     pub eqn: Rc<Eqn>,
@@ -43,7 +46,7 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
         h0: Eqn::T,
         with_sensitivity: bool,
         sens_error_control: bool,
-    ) -> Result<Self> {
+    ) -> Result<Self, DiffsolError> {
         let eqn = Rc::new(eqn);
         let atol = Rc::new(atol);
         let mass_has_sens = if let Some(mass) = eqn.mass() {
@@ -53,7 +56,7 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
         };
         let eqn_has_sens = eqn.rhs().has_sens() && eqn.init().has_sens() && mass_has_sens;
         if with_sensitivity && !eqn_has_sens {
-            anyhow::bail!("Sensitivity requested but equations do not support it");
+            return Err(DiffsolError::from(OdeSolverError::SensitivityNotSupported));
         }
         let eqn_sens = if with_sensitivity {
             Some(Rc::new(SensEquations::new(&eqn)))
@@ -71,8 +74,10 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
         })
     }
 
-    pub fn set_params(&mut self, p: Eqn::V) -> Result<()> {
-        let eqn = Rc::get_mut(&mut self.eqn).context("Failed to get mutable reference to equations, is there a solver created with this problem?")?;
+    pub fn set_params(&mut self, p: Eqn::V) -> Result<(), DiffsolError> {
+        let eqn = Rc::get_mut(&mut self.eqn).ok_or(DiffsolError::from(
+            OdeSolverError::FailedToGetMutableReference,
+        ))?;
         eqn.set_params(p);
         Ok(())
     }
