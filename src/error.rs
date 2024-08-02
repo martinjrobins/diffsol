@@ -79,7 +79,7 @@ pub enum OdeSolverError {
     SundialsError(String),
     #[error("Problem not set")]
     ProblemNotSet,
-    #[error("Other error: {0}")]
+    #[error("Error: {0}")]
     Other(String),
 }
 
