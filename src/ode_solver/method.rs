@@ -110,6 +110,14 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
                 None => y.push(self.state().unwrap().y.clone()),
             }
         }
+
+        // store the final step
+        t.push(self.state().unwrap().t);
+        match problem.eqn.out() {
+            Some(out) => y.push(out.call(&self.state().unwrap().y, self.state().unwrap().t)),
+            None => y.push(self.state().unwrap().y.clone()),
+        }
+        
         Ok((y, t))
     }
 
