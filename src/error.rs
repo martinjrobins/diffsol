@@ -31,7 +31,7 @@ pub enum LinearSolverError {
     KluFailedToAnalyze,
     #[error("KLU failed to factorize")]
     KluFailedToFactorize,
-    #[error("Other error: {0}")]
+    #[error("Error: {0}")]
     Other(String),
 }
 
