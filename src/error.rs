@@ -94,7 +94,7 @@ pub enum MatrixError {
     MatrixShapeError,
     #[error("Index out of bounds")]
     IndexOutOfBounds,
-    #[error("Other error: {0}")]
+    #[error("Error: {0}")]
     Other(String),
 }
 
