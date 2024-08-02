@@ -19,7 +19,7 @@ use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
     DenseMatrix, NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op,
-    Scalar, Vector, VectorViewMut,
+    Scalar, Vector, VectorViewMut, JacobianUpdate
 };
 
 use super::bdf::BdfStatistics;
@@ -59,7 +59,7 @@ where
     root_finder: Option<RootFinder<Eqn::V>>,
     tstop: Option<Eqn::T>,
     is_state_mutated: bool,
-    steps_since_jacobian_update: usize,
+    jacobian_update: JacobianUpdate<Eqn::T>,
 }
 
 impl<M, Eqn, LS> Sdirk<M, Eqn, LS>
@@ -72,11 +72,8 @@ where
 {
     const NEWTON_MAXITER: usize = 10;
     const MIN_FACTOR: f64 = 0.2;
-    const MIN_THRESHOLD: f64 = 1.0;
     const MAX_FACTOR: f64 = 10.0;
-    const MAX_THRESHOLD: f64 = 1.2;
     const MIN_TIMESTEP: f64 = 1e-13;
-    const UPDATE_JACOBIAN_AFTER_N_STEPS: usize = 50;
 
     pub fn new(tableau: Tableau<M>, linear_solver: LS) -> Self {
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
@@ -175,7 +172,7 @@ where
             root_finder: None,
             tstop: None,
             is_state_mutated: false,
-            steps_since_jacobian_update: 0,
+            jacobian_update: JacobianUpdate::default(),
         }
     }
 
@@ -311,15 +308,20 @@ where
         // update h for new step size
         self.nonlinear_solver.problem().f.set_h(new_h);
 
+        if self.jacobian_update.check_rhs_jacobian_update() {
+            self.nonlinear_solver.problem().f.set_jacobian_is_stale();
+            self.nonlinear_solver.reset_jacobian(&self.old_f, self.state.as_ref().unwrap().t);
+            self.jacobian_update.update_rhs_jacobian();
+            self.jacobian_update.update_jacobian(new_h);
+        } else if self.jacobian_update.check_jacobian_update(new_h) {
+            self.nonlinear_solver.reset_jacobian(&self.old_f, self.state.as_ref().unwrap().t);
+            self.jacobian_update.update_jacobian(new_h);
+        }
+
         // update state
         self.state.as_mut().unwrap().h = new_h;
 
         Ok(())
-    }
-
-    fn _set_jacobian_stale(&mut self) {
-        self.steps_since_jacobian_update = 0;
-        self.nonlinear_solver.problem().f.set_jacobian_is_stale();
     }
 }
 
@@ -347,7 +349,8 @@ where
         // setup linear solver for first step
         let callable = Rc::new(SdirkCallable::new(problem, self.gamma));
         callable.set_h(state.h);
-        self.steps_since_jacobian_update = 0;
+        self.jacobian_update.update_jacobian(state.h);
+        self.jacobian_update.update_rhs_jacobian();
         let nonlinear_problem = SolverProblem::new_from_ode_problem(callable, problem);
         self.nonlinear_solver.set_problem(&nonlinear_problem);
 
@@ -398,7 +401,6 @@ where
         let mut updated_jacobian = false;
 
         // dont' reset jacobian for the first attempt at the step
-        let mut second_step_attempt = false;
         let mut error = <Eqn::V as Vector>::zeros(n);
 
         let mut factor: Eqn::T;
@@ -440,16 +442,6 @@ where
 
                 Self::predict_stage(i, &self.diff, &mut self.old_f, &self.tableau);
 
-                // if we're attempting the step again, then we need to reset the jacobian
-                // as h has changed or jacobian needs to be recalculated
-                if i == start && second_step_attempt {
-                    // have to do it here cause phi needs to be set first
-                    self.nonlinear_solver.reset_jacobian(&self.old_f, t);
-                }
-
-                // always reset jacobian if step is attempted again
-                second_step_attempt = true;
-
                 let mut solve_result = self.nonlinear_solver.solve_in_place(
                     &mut self.old_f,
                     t,
@@ -473,7 +465,10 @@ where
                     self.statistics.number_of_nonlinear_solver_fails += 1;
                     if !updated_jacobian {
                         // newton iteration did not converge, so update jacobian and try again
-                        self._set_jacobian_stale();
+                        self.nonlinear_solver.problem().f.set_jacobian_is_stale();
+                        self.nonlinear_solver.reset_jacobian(&self.old_f, t);
+                        self.jacobian_update.update_rhs_jacobian();
+                        self.jacobian_update.update_jacobian(h);
                         updated_jacobian = true;
                     } else {
                         // newton iteration did not converge and jacobian has been updated, so we reduce step size and try again
@@ -526,26 +521,13 @@ where
                 factor = Eqn::T::from(Self::MAX_FACTOR);
             }
 
-            // adjust step size for next step
-            let state = self.state.as_mut().unwrap();
-            //t1 = state.t + state.h;
-            //state.h *= factor;
-
-            // if step size too small, then fail
-            if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
-                return Err(anyhow::anyhow!("Step size too small at t = {}", state.t));
-            }
-
             // test error is within tolerance
             if error_norm <= Eqn::T::from(1.0) {
                 break 'step;
             }
             // step is rejected, factor reduces step size, so we try again with the smaller step size
             self.statistics.number_of_error_test_failures += 1;
-            state.h *= factor;
-
-            // update c for new step size
-            self.nonlinear_solver.problem().f.set_h(state.h);
+            self._update_step_size(factor)?;
         }
 
         // take the step
@@ -569,24 +551,8 @@ where
             }
         }
 
-        // see if we want to update the step size or jacobian
-        {
-            let update_step_size = factor >= Eqn::T::from(Self::MAX_THRESHOLD)
-                || factor < Eqn::T::from(Self::MIN_THRESHOLD);
-            let update_jacobian =
-                self.steps_since_jacobian_update >= Self::UPDATE_JACOBIAN_AFTER_N_STEPS;
-
-            if update_jacobian {
-                self._update_step_size(factor)?;
-                self._set_jacobian_stale();
-                self.nonlinear_solver
-                    .reset_jacobian(&self.old_f, self.state.as_ref().unwrap().t);
-            } else if update_step_size {
-                self._update_step_size(factor)?;
-                self.nonlinear_solver
-                    .reset_jacobian(&self.old_f, self.state.as_ref().unwrap().t);
-            }
-        }
+        // update step size for next step
+        self._update_step_size(factor)?;
 
         self.is_state_mutated = false;
 
@@ -594,7 +560,7 @@ where
         self.statistics.number_of_linear_solver_setups =
             self.nonlinear_solver.problem().f.number_of_jac_evals();
         self.statistics.number_of_steps += 1;
-        self.steps_since_jacobian_update += 1;
+        self.jacobian_update.step();
 
         // check for root within accepted step
         if let Some(root_fn) = self.problem.as_ref().unwrap().eqn.root() {
