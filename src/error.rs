@@ -38,7 +38,7 @@ pub enum LinearSolverError {
 /// Possible errors that can occur when solving a non-linear problem
 #[derive(Error, Debug)]
 pub enum NonLinearSolverError {
-    #[error("Newton did not converge")]
+    #[error("Newton iterations did not converge")]
     NewtonDidNotConverge,
     #[error("LU solve failed")]
     LuSolveFailed,
