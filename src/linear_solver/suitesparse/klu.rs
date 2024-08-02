@@ -66,7 +66,10 @@ struct KluSymbolic {
 }
 
 impl KluSymbolic {
-    fn try_from_matrix(mat: &mut impl MatrixKLU, common: *mut klu_common) -> Result<Self, DiffsolError> {
+    fn try_from_matrix(
+        mat: &mut impl MatrixKLU,
+        common: *mut klu_common,
+    ) -> Result<Self, DiffsolError> {
         let n = mat.nrows() as i64;
         let inner = unsafe {
             klu_analyze(
@@ -97,7 +100,10 @@ struct KluNumeric {
 }
 
 impl KluNumeric {
-    fn try_from_symbolic(symbolic: &mut KluSymbolic, mat: &mut impl MatrixKLU) -> Result<Self, DiffsolError> {
+    fn try_from_symbolic(
+        symbolic: &mut KluSymbolic,
+        mat: &mut impl MatrixKLU,
+    ) -> Result<Self, DiffsolError> {
         let inner = unsafe {
             klu_factor(
                 mat.column_pointers_mut_ptr(),
@@ -192,7 +198,7 @@ where
         .ok();
     }
 
-    fn solve_in_place(&self, x: &mut C::V) -> Result<(),> {
+    fn solve_in_place(&self, x: &mut C::V) -> Result<()> {
         if self.klu_numeric.is_none() {
             return Err(linear_solver_error!(LuNotInitialized));
         }

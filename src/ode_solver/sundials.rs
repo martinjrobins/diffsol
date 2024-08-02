@@ -28,7 +28,9 @@ pub fn sundials_check(retval: c_int) -> Result<()> {
     if retval < 0 {
         let char_ptr = unsafe { IDAGetReturnFlagName(i64::from(retval)) };
         let c_str = unsafe { CStr::from_ptr(char_ptr) };
-        Err(ode_solver_error!(SundialsError(c_str.to_str().unwrap().to_string())))
+        Err(ode_solver_error!(SundialsError(
+            c_str.to_str().unwrap().to_string()
+        )))
     } else {
         Ok(())
     }
