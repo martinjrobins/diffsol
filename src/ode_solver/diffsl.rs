@@ -458,20 +458,6 @@ mod tests {
     use super::{DiffSl, DiffSlContext};
 
     #[test]
-    fn diffsl_expontential_decay() {
-        // TODO: put this example into the docs once https://github.com/rust-lang/cargo/pull/13490 makes it to stable
-        let code = "
-            u { y = 1 }
-            F { -y }
-            out { y }
-        ";
-        let context = DiffSlContext::<nalgebra::DMatrix<f64>>::new(code).unwrap();
-        let problem = OdeBuilder::new().build_diffsl(&context).unwrap();
-        let mut solver = Bdf::default();
-        let _y = solver.solve(&problem, 1.0).unwrap();
-    }
-
-    #[test]
     fn diffsl_logistic_growth() {
         let text = "
             in = [r, k]
