@@ -16,20 +16,20 @@ use std::{
 };
 
 use crate::{
-    matrix::sparsity::MatrixSparsityRef, scale, LinearOp, Matrix, NonLinearOp, OdeEquations,
-    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, SundialsMatrix,
-    SundialsVector, Vector,
+    error::*, matrix::sparsity::MatrixSparsityRef, ode_solver_error, other_error, scale, LinearOp,
+    Matrix, NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+    OdeSolverStopReason, Op, SundialsMatrix, SundialsVector, Vector,
 };
 
 #[cfg(not(sundials_version_major = "5"))]
 use crate::vector::sundials::get_suncontext;
 
-pub fn sundials_check(retval: c_int) -> Result<()> {
+pub fn sundials_check(retval: c_int) -> Result<(), DiffsolError> {
     if retval < 0 {
         let char_ptr = unsafe { IDAGetReturnFlagName(i64::from(retval)) };
         let c_str = unsafe { CStr::from_ptr(char_ptr) };
-        Err(ode_solver_error!(SundialsError(
-            c_str.to_str().unwrap().to_string()
+        Err(DiffsolError::from(OdeSolverError::SundialsError(
+            c_str.to_str().unwrap().to_string(),
         )))
     } else {
         Ok(())
@@ -55,7 +55,7 @@ impl SundialsStatistics {
             number_of_nonlinear_solver_fails: 0,
         }
     }
-    fn new_from_ida(ida_mem: *mut c_void) -> Result<Self> {
+    fn new_from_ida(ida_mem: *mut c_void) -> Result<Self, DiffsolError> {
         let mut nsteps: c_long = 0;
         let mut nrevals: c_long = 0;
         let mut nlinsetups: c_long = 0;
@@ -195,7 +195,7 @@ where
         0
     }
 
-    fn check(retval: c_int) -> Result<()> {
+    fn check(retval: c_int) -> Result<(), DiffsolError> {
         sundials_check(retval)
     }
 
@@ -368,7 +368,7 @@ where
         }
     }
 
-    fn set_stop_time(&mut self, tstop: Eqn::T) -> Result<()> {
+    fn set_stop_time(&mut self, tstop: Eqn::T) -> Result<(), DiffsolError> {
         Self::check(unsafe { IDASetStopTime(self.ida_mem, tstop) })
     }
 
@@ -441,7 +441,7 @@ where
     fn interpolate_sens(
         &self,
         _t: <Eqn as OdeEquations>::T,
-    ) -> Result<Vec<<Eqn as OdeEquations>::V>> {
+    ) -> Result<Vec<<Eqn as OdeEquations>::V>, DiffsolError> {
         Ok(vec![])
     }
 }

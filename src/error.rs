@@ -76,7 +76,7 @@ pub enum OdeSolverError {
     #[error("t_eval must be increasing and all values must be greater than or equal to the current time")]
     InvalidTEval,
     #[error("Sundials error: {0}")]
-    Sundials(String),
+    SundialsError(String),
     #[error("Problem not set")]
     ProblemNotSet,
     #[error("Other error: {0}")]
