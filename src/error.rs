@@ -1,6 +1,9 @@
 use faer::sparse::CreationError;
 use thiserror::Error;
 
+/// Custom error type for Diffsol
+///
+/// This error type is used to wrap all possible errors that can occur when using Diffsol
 #[derive(thiserror::Error, Debug)]
 pub enum DiffsolError {
     #[error("Linear solver error: {0}")]
@@ -18,25 +21,26 @@ pub enum DiffsolError {
 /// Possible errors that can occur when solving a linear problem
 #[derive(Error, Debug)]
 pub enum LinearSolverError {
-    #[error("template")]
-    Template,
     #[error("LU not initialized")]
     LuNotInitialized,
     #[error("LU solve failed")]
     LuSolveFailed,
+    #[error("Other error: {0}")]
+    Other(String),
 }
 
 /// Possible errors that can occur when solving a non-linear problem
 #[derive(Error, Debug)]
 pub enum NonLinearSolverError {
-    #[error("template")]
-    Template,
     #[error("Newton did not converge")]
     NewtonDidNotConverge,
     #[error("LU solve failed")]
     LuSolveFailed,
+    #[error("Other error: {0}")]
+    Other(String),
 }
 
+/// Possible errors that can occur when solving an ODE
 #[derive(Debug, Error)]
 pub enum OdeSolverError {
     #[error(
@@ -63,9 +67,11 @@ pub enum OdeSolverError {
     AtolLengthMismatch,
     #[error("t_eval must be increasing and all values must be greater than or equal to the current time")]
     InvalidTEval,
+    #[error("Other error: {0}")]
+    Other(String),
 }
 
-/// Possible errors that can occur when solving a non-linear problem
+/// Possible errors for matrix operations
 #[derive(Error, Debug)]
 pub enum MatrixError {
     #[error("Failed to create matrix from triplets: {0}")]

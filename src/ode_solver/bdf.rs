@@ -872,7 +872,7 @@ where
         self.tstop = Some(tstop);
         if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
             let error = OdeSolverError::StopTimeBeforeCurrentTime {
-                stop_time: self.tstop.unwrap().into(),
+                stop_time: tstop.into(),
                 state_time: self.state.as_ref().unwrap().t.into(),
             };
             self.tstop = None;
