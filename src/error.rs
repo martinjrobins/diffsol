@@ -14,7 +14,7 @@ pub enum DiffsolError {
     OdeSolverError(#[from] OdeSolverError),
     #[error("Matrix error: {0}")]
     MatrixError(#[from] MatrixError),
-    #[error("Other error: {0}")]
+    #[error("Error: {0}")]
     Other(String),
 }
 
