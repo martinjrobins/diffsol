@@ -59,7 +59,7 @@ where
     root_finder: Option<RootFinder<Eqn::V>>,
     tstop: Option<Eqn::T>,
     is_state_mutated: bool,
-    h0: Eqn::T,
+    steps_since_jacobian_update: usize,
 }
 
 impl<M, Eqn, LS> Sdirk<M, Eqn, LS>
@@ -76,6 +76,7 @@ where
     const MAX_FACTOR: f64 = 10.0;
     const MAX_THRESHOLD: f64 = 1.2;
     const MIN_TIMESTEP: f64 = 1e-13;
+    const UPDATE_JACOBIAN_AFTER_N_STEPS: usize = 50;
 
     pub fn new(tableau: Tableau<M>, linear_solver: LS) -> Self {
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
@@ -174,7 +175,7 @@ where
             root_finder: None,
             tstop: None,
             is_state_mutated: false,
-            h0: Eqn::T::one(),
+            steps_since_jacobian_update: 0,
         }
     }
 
@@ -317,7 +318,7 @@ where
     }
 
     fn _set_jacobian_stale(&mut self) {
-        self.h0 = self.state.as_ref().unwrap().h;
+        self.steps_since_jacobian_update = 0;
         self.nonlinear_solver.problem().f.set_jacobian_is_stale();
     }
 }
@@ -346,7 +347,7 @@ where
         // setup linear solver for first step
         let callable = Rc::new(SdirkCallable::new(problem, self.gamma));
         callable.set_h(state.h);
-        self.h0 = state.h;
+        self.steps_since_jacobian_update = 0;
         let nonlinear_problem = SolverProblem::new_from_ode_problem(callable, problem);
         self.nonlinear_solver.set_problem(&nonlinear_problem);
 
@@ -568,24 +569,23 @@ where
             }
         }
 
-        // see if we want to update the step size
-        if factor >= Eqn::T::from(Self::MAX_THRESHOLD) || factor < Eqn::T::from(Self::MIN_THRESHOLD)
+        // see if we want to update the step size or jacobian
         {
-            self._update_step_size(factor)?;
+            let update_step_size = factor >= Eqn::T::from(Self::MAX_THRESHOLD)
+                || factor < Eqn::T::from(Self::MIN_THRESHOLD);
+            let update_jacobian =
+                self.steps_since_jacobian_update >= Self::UPDATE_JACOBIAN_AFTER_N_STEPS;
 
-            let state = self.state.as_ref().unwrap();
-            let h = state.h;
-            let t = state.t;
-
-            // if step_size has changed sufficiently then update the jacobian
-            if !updated_jacobian
-                && (h / self.h0 < Eqn::T::from(3.0 / 5.0) || h / self.h0 > Eqn::T::from(5.0 / 3.0))
-            {
+            if update_jacobian {
+                self._update_step_size(factor)?;
                 self._set_jacobian_stale();
+                self.nonlinear_solver
+                    .reset_jacobian(&self.old_f, self.state.as_ref().unwrap().t);
+            } else if update_step_size {
+                self._update_step_size(factor)?;
+                self.nonlinear_solver
+                    .reset_jacobian(&self.old_f, self.state.as_ref().unwrap().t);
             }
-
-            //setup jacobian for next step (h was changed so jacobian needs to be recalculated)
-            self.nonlinear_solver.reset_jacobian(&self.old_f, t);
         }
 
         self.is_state_mutated = false;
@@ -594,6 +594,7 @@ where
         self.statistics.number_of_linear_solver_setups =
             self.nonlinear_solver.problem().f.number_of_jac_evals();
         self.statistics.number_of_steps += 1;
+        self.steps_since_jacobian_update += 1;
 
         // check for root within accepted step
         if let Some(root_fn) = self.problem.as_ref().unwrap().eqn.root() {
