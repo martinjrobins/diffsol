@@ -7,8 +7,15 @@ use diffsol::{
         robertson::robertson,
         robertson_ode::robertson_ode,
     },
-    FaerLU, FaerSparseLU, NalgebraLU, SparseColMat, SundialsLinearSolver, KLU,
+    FaerLU, FaerSparseLU, NalgebraLU, SparseColMat,
 };
+
+#[cfg(feature = "sundials")]
+use diffsol::SundialsLinearSolver;
+
+#[cfg(feature = "suitesparse")]
+use diffsol::KLU;
+
 mod sundials_benches;
 
 fn criterion_benchmark(c: &mut Criterion) {
@@ -164,6 +171,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         900
     );
 
+    #[cfg(feature = "suitesparse")]
     bench_robertson_ode!(
         faer_sparse_bdf_klu_robertson_ode,
         bdf,
@@ -190,6 +198,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         900
     );
 
+    #[cfg(feature = "suitesparse")]
     bench_robertson_ode!(
         faer_sparse_tr_bdf2_klu_robertson_ode,
         tr_bdf2,
@@ -216,6 +225,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         900
     );
 
+    #[cfg(feature = "suitesparse")]
     bench_robertson_ode!(
         faer_sparse_esdirk_klu_robertson_ode,
         esdirk34,
@@ -276,6 +286,8 @@ fn criterion_benchmark(c: &mut Criterion) {
         20,
         30
     );
+
+    #[cfg(feature = "suitesparse")]
     bench_wsize!(
         faer_sparse_bdf_klu_heat2d,
         bdf,
@@ -288,6 +300,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         20,
         30
     );
+
     bench_wsize!(
         faer_sparse_tr_bdf2_heat2d,
         tr_bdf2,
@@ -300,6 +313,8 @@ fn criterion_benchmark(c: &mut Criterion) {
         20,
         30
     );
+
+    #[cfg(feature = "suitesparse")]
     bench_wsize!(
         faer_sparse_tr_bdf2_klu_heat2d,
         tr_bdf2,
@@ -324,6 +339,8 @@ fn criterion_benchmark(c: &mut Criterion) {
         20,
         30
     );
+
+    #[cfg(feature = "suitesparse")]
     bench_wsize!(
         faer_sparse_esdirk_klu_heat2d,
         esdirk34,
@@ -362,6 +379,8 @@ fn criterion_benchmark(c: &mut Criterion) {
         20,
         30
     );
+
+    #[cfg(feature = "suitesparse")]
     bench_foodweb!(
         faer_sparse_bdf_klu_foodweb,
         bdf,
@@ -386,6 +405,8 @@ fn criterion_benchmark(c: &mut Criterion) {
         20,
         30
     );
+
+    #[cfg(feature = "suitesparse")]
     bench_foodweb!(
         faer_sparse_tr_bdf2_klu_foodweb,
         tr_bdf2,
@@ -410,6 +431,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         20,
         30
     );
+    #[cfg(feature = "suitesparse")]
     bench_foodweb!(
         faer_sparse_esdirk_klu_foodweb,
         esdirk34,
@@ -451,6 +473,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         30
     );
 
+    #[cfg(feature = "suitesparse")]
     bench_diffsl_heat2d!(
         faer_sparse_bdf_klu_diffsl_heat2d,
         bdf,
@@ -530,6 +553,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         30
     );
 
+    #[cfg(feature = "suitesparse")]
     bench_diffsl_foodweb!(
         faer_sparse_bdf_klu_diffsl_foodweb,
         bdf,
