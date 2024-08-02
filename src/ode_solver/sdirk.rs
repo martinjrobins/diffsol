@@ -301,7 +301,10 @@ where
 
         // if step size too small, then fail
         if new_h < Eqn::T::from(Self::MIN_TIMESTEP) {
-            return Err(anyhow::anyhow!("Step size too small at t = {}", self.state.as_ref().unwrap().t));
+            return Err(anyhow::anyhow!(
+                "Step size too small at t = {}",
+                self.state.as_ref().unwrap().t
+            ));
         }
 
         // update h for new step size
