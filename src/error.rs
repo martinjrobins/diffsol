@@ -42,7 +42,7 @@ pub enum NonLinearSolverError {
     NewtonDidNotConverge,
     #[error("LU solve failed")]
     LuSolveFailed,
-    #[error("Other error: {0}")]
+    #[error("Error: {0}")]
     Other(String),
 }
 
