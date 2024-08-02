@@ -117,7 +117,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
             Some(out) => y.push(out.call(&self.state().unwrap().y, self.state().unwrap().t)),
             None => y.push(self.state().unwrap().y.clone()),
         }
-        
+
         Ok((y, t))
     }
 
