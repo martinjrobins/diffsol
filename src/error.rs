@@ -4,7 +4,7 @@ use thiserror::Error;
 /// Custom error type for Diffsol
 ///
 /// This error type is used to wrap all possible errors that can occur when using Diffsol
-#[derive(thiserror::Error, Debug)]
+#[derive(Error, Debug)]
 pub enum DiffsolError {
     #[error("Linear solver error: {0}")]
     LinearSolverError(#[from] LinearSolverError),
