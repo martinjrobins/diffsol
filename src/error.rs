@@ -124,7 +124,7 @@ macro_rules! ode_solver_error {
         DiffsolError::from(OdeSolverError::$variant)
     };
     ($variant:ident, $($arg:tt)*) => {
-        DiffsolError::from(OdeSolverError::$variant($($arg)*))
+        DiffsolError::from(OdeSolverError::$variant($($arg)*.to_string()))
     };
 }
 

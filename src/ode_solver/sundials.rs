@@ -16,8 +16,8 @@ use std::{
 };
 
 use crate::{
-    error::*, matrix::sparsity::MatrixSparsityRef, ode_solver_error, other_error, scale, LinearOp,
-    Matrix, NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+    error::*, matrix::sparsity::MatrixSparsityRef, ode_solver_error, scale, LinearOp, Matrix,
+    NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
     OdeSolverStopReason, Op, SundialsMatrix, SundialsVector, Vector,
 };
 
@@ -408,20 +408,20 @@ where
             IDA_SUCCESS => Ok(OdeSolverStopReason::InternalTimestep),
             IDA_TSTOP_RETURN => Ok(OdeSolverStopReason::TstopReached),
             IDA_ROOT_RETURN => Ok(OdeSolverStopReason::RootFound(state.t)),
-            IDA_MEM_NULL => Err(other_error!("The ida_mem argument was NULL.")),
-            IDA_ILL_INPUT => Err(other_error!("One of the inputs to IDASolve() was illegal, or some other input to the solver was either illegal or missing.")),
-            IDA_TOO_MUCH_WORK => Err(other_error!("The solver took mxstep internal steps but could not reach tout.")),
-            IDA_TOO_MUCH_ACC => Err(other_error!("The solver could not satisfy the accuracy demanded by the user for some internal step.")),
-            IDA_ERR_FAIL => Err(other_error!("Error test failures occurred too many times (MXNEF = 10) during one internal time step or occurred with.")),
-            IDA_CONV_FAIL => Err(other_error!("Convergence test failures occurred too many times (MXNCF = 10) during one internal time step or occurred with.")),
-            IDA_LINIT_FAIL => Err(other_error!("The linear solver’s initialization function failed.")),
-            IDA_LSETUP_FAIL => Err(other_error!("The linear solver’s setup function failed in an unrecoverable manner.")),
-            IDA_LSOLVE_FAIL => Err(other_error!("The linear solver’s solve function failed in an unrecoverable manner.")),
-            IDA_CONSTR_FAIL => Err(other_error!("The inequality constraints were violated and the solver was unable to recover.")),
-            IDA_REP_RES_ERR => Err(other_error!("The user’s residual function repeatedly returned a recoverable error flag, but the solver was unable to recover.")),
-            IDA_RES_FAIL => Err(other_error!("The user’s residual function returned a nonrecoverable error flag.")),
-            IDA_RTFUNC_FAIL => Err(other_error!("The rootfinding function failed.")),
-            _ => Err(other_error!("Unknown error")),
+            IDA_MEM_NULL => Err(ode_solver_error!(SundialsError, "The ida_mem argument was NULL.")),
+            IDA_ILL_INPUT => Err(ode_solver_error!(SundialsError, "One of the inputs to IDASolve() was illegal, or some other input to the solver was either illegal or missing.")),
+            IDA_TOO_MUCH_WORK => Err(ode_solver_error!(SundialsError, "The solver took mxstep internal steps but could not reach tout.")),
+            IDA_TOO_MUCH_ACC => Err(ode_solver_error!(SundialsError, "The solver could not satisfy the accuracy demanded by the user for some internal step.")),
+            IDA_ERR_FAIL => Err(ode_solver_error!(SundialsError, "Error test failures occurred too many times (MXNEF = 10) during one internal time step or occurred with.")),
+            IDA_CONV_FAIL => Err(ode_solver_error!(SundialsError, "Convergence test failures occurred too many times (MXNCF = 10) during one internal time step or occurred with.")),
+            IDA_LINIT_FAIL => Err(ode_solver_error!(SundialsError, "The linear solver’s initialization function failed.")),
+            IDA_LSETUP_FAIL => Err(ode_solver_error!(SundialsError, "The linear solver’s setup function failed in an unrecoverable manner.")),
+            IDA_LSOLVE_FAIL => Err(ode_solver_error!(SundialsError, "The linear solver’s solve function failed in an unrecoverable manner.")),
+            IDA_CONSTR_FAIL => Err(ode_solver_error!(SundialsError, "The inequality constraints were violated and the solver was unable to recover.")),
+            IDA_REP_RES_ERR => Err(ode_solver_error!(SundialsError, "The user’s residual function repeatedly returned a recoverable error flag, but the solver was unable to recover.")),
+            IDA_RES_FAIL => Err(ode_solver_error!(SundialsError, "The user’s residual function returned a nonrecoverable error flag.")),
+            IDA_RTFUNC_FAIL => Err(ode_solver_error!(SundialsError, "The rootfinding function failed.")),
+            _ => Err(ode_solver_error!(SundialsError, "Unknown error")),
         }
     }
 

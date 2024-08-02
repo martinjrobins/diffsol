@@ -5,7 +5,7 @@ use crate::sundials_sys::{
 };
 
 use crate::{
-    error::*, linear_solver_error, ode_solver::sundials::sundials_check, ode_solver_error,
+    error::*, linear_solver_error, ode_solver::sundials::sundials_check,
     op::linearise::LinearisedOp, vector::sundials::SundialsVector, LinearOp, Matrix, NonLinearOp,
     Op, SolverProblem, SundialsMatrix,
 };
