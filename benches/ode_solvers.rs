@@ -7,7 +7,7 @@ use diffsol::{
         robertson::robertson,
         robertson_ode::robertson_ode,
     },
-    FaerLU, FaerSparseLU, NalgebraLU, SparseColMat
+    FaerLU, FaerSparseLU, NalgebraLU, SparseColMat,
 };
 
 #[cfg(feature = "sundials")]
