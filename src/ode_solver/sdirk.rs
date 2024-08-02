@@ -9,6 +9,7 @@ use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
 use crate::matrix::MatrixRef;
 use crate::nonlinear_solver::newton::newton_iteration;
+use crate::ode_solver_error;
 use crate::vector::VectorRef;
 use crate::LinearSolver;
 use crate::NewtonNonlinearSolver;
@@ -373,7 +374,7 @@ where
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
         if self.state.is_none() {
-            return Err(DiffsolError::from(OdeSolverError::StateNotSet));
+            return Err(ode_solver_error!(StateNotSet));
         }
         let n = self.state.as_ref().unwrap().y.len();
 
@@ -634,7 +635,7 @@ where
         t: <Eqn as OdeEquations>::T,
     ) -> Result<Vec<<Eqn as OdeEquations>::V>, DiffsolError> {
         if self.state.is_none() {
-            return Err(DiffsolError::from(OdeSolverError::StateNotSet));
+            return Err(ode_solver_error!(StateNotSet));
         }
         let state = self.state.as_ref().unwrap();
 
@@ -642,17 +643,13 @@ where
             if t == state.t {
                 return Ok(state.s.clone());
             } else {
-                return Err(DiffsolError::from(
-                    OdeSolverError::InterpolationTimeOutsideCurrentStep,
-                ));
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
         }
 
         // check that t is within the current step
         if t > state.t || t < self.old_t {
-            return Err(DiffsolError::from(
-                OdeSolverError::InterpolationTimeOutsideCurrentStep,
-            ));
+            return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
         }
         let dt = state.t - self.old_t;
         let theta = if dt == Eqn::T::zero() {
@@ -684,7 +681,7 @@ where
 
     fn interpolate(&self, t: <Eqn>::T) -> Result<<Eqn>::V, DiffsolError> {
         if self.state.is_none() {
-            return Err(DiffsolError::from(OdeSolverError::StateNotSet));
+            return Err(ode_solver_error!(StateNotSet));
         }
         let state = self.state.as_ref().unwrap();
 
@@ -692,17 +689,13 @@ where
             if t == state.t {
                 return Ok(state.y.clone());
             } else {
-                return Err(DiffsolError::from(
-                    OdeSolverError::InterpolationTimeOutsideCurrentStep,
-                ));
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
         }
 
         // check that t is within the current step
         if t > state.t || t < self.old_t {
-            return Err(DiffsolError::from(
-                OdeSolverError::InterpolationTimeOutsideCurrentStep,
-            ));
+            return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
         }
         let dt = state.t - self.old_t;
         let theta = if dt == Eqn::T::zero() {

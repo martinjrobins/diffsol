@@ -83,3 +83,50 @@ pub enum MatrixError {
     #[error("Other error: {0}")]
     Other(String),
 }
+
+#[macro_export]
+macro_rules! linear_solver_error {
+    ($variant:ident) => {
+        DiffsolError::from(LinearSolverError::$variant)
+    };
+    ($variant:ident, $($arg:tt)*) => {
+        DiffsolError::from(LinearSolverError::$variant($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! non_linear_solver_error {
+    ($variant:ident) => {
+        DiffsolError::from(NonLinearSolverError::$variant)
+    };
+    ($variant:ident, $($arg:tt)*) => {
+        DiffsolError::from(NonLinearSolverError::$variant($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! ode_solver_error {
+    ($variant:ident) => {
+        DiffsolError::from(OdeSolverError::$variant)
+    };
+    ($variant:ident, $($arg:tt)*) => {
+        DiffsolError::from(OdeSolverError::$variant($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! matrix_error {
+    ($variant:ident) => {
+        DiffsolError::from(MatrixError::$variant)
+    };
+    ($variant:ident, $($arg:tt)*) => {
+        DiffsolError::from(MatrixError::$variant($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! other_error {
+    ($msg:expr) => {
+        DiffsolError::Other($msg.to_string())
+    };
+}

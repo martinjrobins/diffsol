@@ -1,5 +1,6 @@
 use crate::{
     error::{DiffsolError, NonLinearSolverError},
+    non_linear_solver_error,
     op::NonLinearOp,
     Convergence, ConvergenceStatus, LinearSolver, NonLinearSolver, SolverProblem, Vector,
 };
@@ -31,9 +32,7 @@ pub fn newton_iteration<V: Vector>(
             ConvergenceStatus::MaximumIterations => break,
         }
     }
-    Err(DiffsolError::from(
-        NonLinearSolverError::NewtonDidNotConverge,
-    ))
+    Err(non_linear_solver_error!(NewtonDidNotConverge))
 }
 
 pub struct NewtonNonlinearSolver<C: NonLinearOp, Ls: LinearSolver<C>> {

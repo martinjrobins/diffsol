@@ -18,7 +18,7 @@ use crate::{
     OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar, SolverProblem, Vector,
     VectorRef, VectorView, VectorViewMut,
 };
-use crate::{NonLinearOp, SensEquations};
+use crate::{ode_solver_error, NonLinearOp, SensEquations};
 
 use super::equations::OdeEquations;
 
@@ -486,26 +486,18 @@ where
 
     fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
         // state must be set
-        let state = self
-            .state
-            .as_ref()
-            .ok_or(DiffsolError::from(OdeSolverError::StateNotSet))?;
+        let state = self.state.as_ref().ok_or(ode_solver_error!(StateNotSet))?;
         if self.is_state_modified {
             if t == state.t {
                 return Ok(state.y.clone());
             } else {
-                return Err(DiffsolError::from(
-                    OdeSolverError::InterpolationTimeOutsideCurrentStep,
-                ));
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
         }
         // check that t is before the current time
         if t > state.t {
-            return Err(DiffsolError::from(
-                OdeSolverError::InterpolationTimeAfterCurrentTime,
-            ));
+            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
         }
-
         Ok(Self::interpolate_from_diff(
             t, &self.diff, state.t, state.h, self.order,
         ))
@@ -513,24 +505,17 @@ where
 
     fn interpolate_sens(&self, t: <Eqn as OdeEquations>::T) -> Result<Vec<Eqn::V>, DiffsolError> {
         // state must be set
-        let state = self
-            .state
-            .as_ref()
-            .ok_or(DiffsolError::from(OdeSolverError::StateNotSet))?;
+        let state = self.state.as_ref().ok_or(ode_solver_error!(StateNotSet))?;
         if self.is_state_modified {
             if t == state.t {
                 return Ok(state.s.clone());
             } else {
-                return Err(DiffsolError::from(
-                    OdeSolverError::InterpolationTimeOutsideCurrentStep,
-                ));
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
         }
         // check that t is before the current time
         if t > state.t {
-            return Err(DiffsolError::from(
-                OdeSolverError::InterpolationTimeAfterCurrentTime,
-            ));
+            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
         }
 
         let mut s = Vec::with_capacity(state.s.len());
@@ -625,7 +610,7 @@ where
         let mut safety: Eqn::T;
         let mut error_norm: Eqn::T;
         if self.state.is_none() {
-            return Err(DiffsolError::from(OdeSolverError::StateNotSet));
+            return Err(ode_solver_error!(StateNotSet));
         }
 
         self.updated_jacobian = false;
@@ -680,8 +665,7 @@ where
                     error_norm = match self.sensitivity_solve(t_new, error_norm) {
                         Ok(en) => en,
                         Err(_) => {
-                            solve_result =
-                                Err(DiffsolError::from(OdeSolverError::SensitivitySolveFailed));
+                            solve_result = Err(ode_solver_error!(SensitivitySolveFailed));
                             Eqn::T::from(2.0)
                         }
                     }

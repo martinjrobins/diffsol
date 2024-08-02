@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
+    ode_solver_error,
     vector::DefaultDenseMatrix,
     Closure, ClosureNoJac, ClosureWithSens, ConstantClosure, ConstantClosureWithSens,
     LinearClosure, LinearClosureWithSens, Matrix, OdeEquations, OdeSolverProblem, Op, UnitCallable,
@@ -149,7 +150,7 @@ impl OdeBuilder {
         if atol.len() == 1 {
             Ok(V::from_element(nstates, V::T::from(atol[0])))
         } else if atol.len() != nstates {
-            Err(DiffsolError::from(OdeSolverError::AtolLengthMismatch))
+            Err(ode_solver_error!(AtolLengthMismatch))
         } else {
             let mut v = V::zeros(nstates);
             for (i, &a) in atol.iter().enumerate() {

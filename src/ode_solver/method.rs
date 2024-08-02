@@ -5,6 +5,7 @@ use std::rc::Rc;
 use crate::{
     error::{DiffsolError, OdeSolverError},
     matrix::default_solver::DefaultSolver,
+    ode_solver_error,
     scalar::Scalar,
     scale, ConstantOp, InitOp, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations,
     OdeSolverProblem, Op, SensEquations, SolverProblem, Vector,
@@ -141,7 +142,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         // check t_eval is increasing and all values are greater than or equal to the current time
         let t0 = self.state().unwrap().t;
         if t_eval.windows(2).any(|w| w[0] > w[1] || w[0] < t0) {
-            return Err(DiffsolError::from(OdeSolverError::InvalidTEval));
+            return Err(ode_solver_error!(InvalidTEval));
         }
 
         // do loop

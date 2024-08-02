@@ -3,6 +3,7 @@ use std::rc::Rc;
 use crate::{
     error::{DiffsolError, LinearSolverError},
     linear_solver::LinearSolver,
+    linear_solver_error,
     matrix::sparsity::MatrixSparsityRef,
     op::linearise::LinearisedOp,
     scalar::IndexType,
@@ -63,8 +64,7 @@ impl<T: Scalar, C: NonLinearOp<M = SparseColMat<T>, V = Col<T>, T = T>> LinearSo
 
     fn solve_in_place(&self, x: &mut C::V) -> Result<(), DiffsolError> {
         if self.lu.is_none() {
-            let error = LinearSolverError::LuNotInitialized;
-            return Err(DiffsolError::from(error));
+            return Err(linear_solver_error!(LuNotInitialized))?;
         }
         let lu = self.lu.as_ref().unwrap();
         lu.solve_in_place(x);

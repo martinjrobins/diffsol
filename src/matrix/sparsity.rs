@@ -1,5 +1,6 @@
 use crate::{
     error::{DiffsolError, MatrixError},
+    matrix_error,
     scalar::IndexType,
     vector::{Vector, VectorIndex},
 };
@@ -62,7 +63,7 @@ where
 {
     fn union(self, other: M::SparsityRef<'_>) -> Result<M::Sparsity, DiffsolError> {
         if self.nrows() != other.nrows() || self.ncols() != other.ncols() {
-            return Err(DiffsolError::from(MatrixError::UnionIncompatibleShapes));
+            return Err(matrix_error!(UnionIncompatibleShapes));
         }
         Ok(Self::new(self.nrows(), self.ncols()))
     }
@@ -89,7 +90,7 @@ where
         _indices: Vec<(IndexType, IndexType)>,
     ) -> Result<Self, DiffsolError> {
         if nrows == 0 || ncols == 0 {
-            return Err(DiffsolError::from(MatrixError::MatrixShapeError));
+            return Err(matrix_error!(MatrixShapeError));
         }
         Ok(Dense::new(nrows, ncols))
     }

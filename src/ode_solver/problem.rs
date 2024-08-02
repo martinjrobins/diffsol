@@ -2,6 +2,7 @@ use std::rc::Rc;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
+    ode_solver_error,
     vector::Vector,
     ConstantOp, LinearOp, NonLinearOp, OdeEquations, SensEquations,
 };
@@ -56,7 +57,7 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
         };
         let eqn_has_sens = eqn.rhs().has_sens() && eqn.init().has_sens() && mass_has_sens;
         if with_sensitivity && !eqn_has_sens {
-            return Err(DiffsolError::from(OdeSolverError::SensitivityNotSupported));
+            return Err(ode_solver_error!(SensitivityNotSupported));
         }
         let eqn_sens = if with_sensitivity {
             Some(Rc::new(SensEquations::new(&eqn)))
@@ -75,9 +76,8 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
     }
 
     pub fn set_params(&mut self, p: Eqn::V) -> Result<(), DiffsolError> {
-        let eqn = Rc::get_mut(&mut self.eqn).ok_or(DiffsolError::from(
-            OdeSolverError::FailedToGetMutableReference,
-        ))?;
+        let eqn =
+            Rc::get_mut(&mut self.eqn).ok_or(ode_solver_error!(FailedToGetMutableReference))?;
         eqn.set_params(p);
         Ok(())
     }
