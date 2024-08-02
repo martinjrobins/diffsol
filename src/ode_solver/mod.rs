@@ -1,13 +1,13 @@
 pub mod bdf;
 pub mod builder;
 pub mod equations;
+pub mod jacobian_update;
 pub mod method;
 pub mod problem;
 pub mod sdirk;
 pub mod sens_equations;
 pub mod tableau;
 pub mod test_models;
-pub mod jacobian_update;
 
 #[cfg(feature = "diffsl")]
 pub mod diffsl;

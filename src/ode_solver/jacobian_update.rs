@@ -1,10 +1,18 @@
 use crate::Scalar;
 
+pub enum SolverState {
+    StepSuccess,
+    FirstConvergenceFail,
+    SecondConvergenceFail,
+    ErrorTestFail,
+}
+
 pub struct JacobianUpdate<T: Scalar> {
     steps_since_jacobian_eval: usize,
     steps_since_rhs_jacobian_eval: usize,
     h_at_last_jacobian_update: T,
     threshold_to_update_jacobian: T,
+    threshold_to_update_rhs_jacobian: T,
     update_jacobian_after_steps: usize,
     update_rhs_jacobian_after_steps: usize,
 }
@@ -16,6 +24,7 @@ impl<T: Scalar> JacobianUpdate<T> {
             steps_since_rhs_jacobian_eval: 0,
             h_at_last_jacobian_update: T::one(),
             threshold_to_update_jacobian: T::from(0.3),
+            threshold_to_update_rhs_jacobian: T::from(0.2),
             update_jacobian_after_steps: 20,
             update_rhs_jacobian_after_steps: 50,
         }
@@ -35,19 +44,31 @@ impl<T: Scalar> JacobianUpdate<T> {
         self.steps_since_rhs_jacobian_eval += 1;
     }
 
-    pub fn check_jacobian_update(&mut self, h: T) -> bool {
-        if self.steps_since_jacobian_eval >= self.update_jacobian_after_steps 
-            || (h / self.h_at_last_jacobian_update - T::one()).abs() > self.threshold_to_update_jacobian {
-            return true;
+    pub fn check_jacobian_update(&mut self, h: T, state: &SolverState) -> bool {
+        match state {
+            SolverState::StepSuccess => {
+                self.steps_since_jacobian_eval >= self.update_jacobian_after_steps
+                    || (h / self.h_at_last_jacobian_update - T::one()).abs()
+                        > self.threshold_to_update_jacobian
+            }
+            SolverState::FirstConvergenceFail => true,
+            SolverState::SecondConvergenceFail => true,
+            SolverState::ErrorTestFail => true,
         }
-        false
     }
-    
-    pub fn check_rhs_jacobian_update(&mut self) -> bool {
-        if self.steps_since_rhs_jacobian_eval >= self.update_rhs_jacobian_after_steps {
-            return true;
+
+    pub fn check_rhs_jacobian_update(&mut self, h: T, state: &SolverState) -> bool {
+        match state {
+            SolverState::StepSuccess => {
+                self.steps_since_rhs_jacobian_eval >= self.update_rhs_jacobian_after_steps
+            }
+            SolverState::FirstConvergenceFail => {
+                (h / self.h_at_last_jacobian_update - T::one()).abs()
+                    < self.threshold_to_update_rhs_jacobian
+            }
+            SolverState::SecondConvergenceFail => self.steps_since_rhs_jacobian_eval > 0,
+            SolverState::ErrorTestFail => false,
         }
-        false
     }
 }
 
@@ -56,6 +77,3 @@ impl<T: Scalar> Default for JacobianUpdate<T> {
         Self::new()
     }
 }
-
-
-    

@@ -18,11 +18,12 @@ use crate::SensEquations;
 use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
-    DenseMatrix, NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op,
-    Scalar, Vector, VectorViewMut, JacobianUpdate
+    DenseMatrix, JacobianUpdate, NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem,
+    OdeSolverState, Op, Scalar, Vector, VectorViewMut,
 };
 
 use super::bdf::BdfStatistics;
+use super::jacobian_update::SolverState;
 
 /// A singly diagonally implicit Runge-Kutta method. Can optionally have an explicit first stage for ESDIRK methods.
 /// The particular method is defined by the [Tableau] used to create the solver.
@@ -294,7 +295,21 @@ where
                 * scale(theta * (theta - Eqn::T::from(1.0)))
     }
 
-    fn _update_step_size(&mut self, factor: Eqn::T) -> Result<()> {
+    fn _jacobian_updates(&mut self, h: Eqn::T, state: SolverState) {
+        if self.jacobian_update.check_rhs_jacobian_update(h, &state) {
+            self.nonlinear_solver.problem().f.set_jacobian_is_stale();
+            self.nonlinear_solver
+                .reset_jacobian(&self.old_f, self.state.as_ref().unwrap().t);
+            self.jacobian_update.update_rhs_jacobian();
+            self.jacobian_update.update_jacobian(h);
+        } else if self.jacobian_update.check_jacobian_update(h, &state) {
+            self.nonlinear_solver
+                .reset_jacobian(&self.old_f, self.state.as_ref().unwrap().t);
+            self.jacobian_update.update_jacobian(h);
+        }
+    }
+
+    fn _update_step_size(&mut self, factor: Eqn::T) -> Result<Eqn::T> {
         let new_h = self.state.as_ref().unwrap().h * factor;
 
         // if step size too small, then fail
@@ -308,20 +323,10 @@ where
         // update h for new step size
         self.nonlinear_solver.problem().f.set_h(new_h);
 
-        if self.jacobian_update.check_rhs_jacobian_update() {
-            self.nonlinear_solver.problem().f.set_jacobian_is_stale();
-            self.nonlinear_solver.reset_jacobian(&self.old_f, self.state.as_ref().unwrap().t);
-            self.jacobian_update.update_rhs_jacobian();
-            self.jacobian_update.update_jacobian(new_h);
-        } else if self.jacobian_update.check_jacobian_update(new_h) {
-            self.nonlinear_solver.reset_jacobian(&self.old_f, self.state.as_ref().unwrap().t);
-            self.jacobian_update.update_jacobian(new_h);
-        }
-
         // update state
         self.state.as_mut().unwrap().h = new_h;
 
-        Ok(())
+        Ok(new_h)
     }
 }
 
@@ -465,14 +470,12 @@ where
                     self.statistics.number_of_nonlinear_solver_fails += 1;
                     if !updated_jacobian {
                         // newton iteration did not converge, so update jacobian and try again
-                        self.nonlinear_solver.problem().f.set_jacobian_is_stale();
-                        self.nonlinear_solver.reset_jacobian(&self.old_f, t);
-                        self.jacobian_update.update_rhs_jacobian();
-                        self.jacobian_update.update_jacobian(h);
                         updated_jacobian = true;
+                        self._jacobian_updates(h, SolverState::FirstConvergenceFail);
                     } else {
                         // newton iteration did not converge and jacobian has been updated, so we reduce step size and try again
-                        self._update_step_size(Eqn::T::from(0.3))?;
+                        let new_h = self._update_step_size(Eqn::T::from(0.3))?;
+                        self._jacobian_updates(new_h, SolverState::SecondConvergenceFail);
                     }
                     // try again....
                     continue 'step;
@@ -527,7 +530,8 @@ where
             }
             // step is rejected, factor reduces step size, so we try again with the smaller step size
             self.statistics.number_of_error_test_failures += 1;
-            self._update_step_size(factor)?;
+            let new_h = self._update_step_size(factor)?;
+            self._jacobian_updates(new_h, SolverState::ErrorTestFail);
         }
 
         // take the step
@@ -552,7 +556,8 @@ where
         }
 
         // update step size for next step
-        self._update_step_size(factor)?;
+        let new_h = self._update_step_size(factor)?;
+        self._jacobian_updates(new_h, SolverState::StepSuccess);
 
         self.is_state_mutated = false;
 
@@ -842,15 +847,15 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 96
-        number_of_steps: 233
+        number_of_linear_solver_setups: 97
+        number_of_steps: 234
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 1944
-        number_of_nonlinear_solver_fails: 10
+        number_of_nonlinear_solver_iterations: 1965
+        number_of_nonlinear_solver_fails: 13
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 1947
+        number_of_calls: 1968
         number_of_jac_muls: 36
         number_of_matrix_evals: 12
         "###);
@@ -864,17 +869,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 119
-        number_of_steps: 248
+        number_of_linear_solver_setups: 115
+        number_of_steps: 245
         number_of_error_test_failures: 3
-        number_of_nonlinear_solver_iterations: 4971
-        number_of_nonlinear_solver_fails: 42
+        number_of_nonlinear_solver_iterations: 4990
+        number_of_nonlinear_solver_fails: 37
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 1554
-        number_of_jac_muls: 3629
-        number_of_matrix_evals: 41
+        number_of_calls: 1581
+        number_of_jac_muls: 3569
+        number_of_matrix_evals: 28
         "###);
     }
 
@@ -886,17 +891,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 88
-        number_of_steps: 138
+        number_of_linear_solver_setups: 87
+        number_of_steps: 137
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 1788
+        number_of_nonlinear_solver_iterations: 1773
         number_of_nonlinear_solver_fails: 15
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 1791
-        number_of_jac_muls: 48
-        number_of_matrix_evals: 16
+        number_of_calls: 1776
+        number_of_jac_muls: 45
+        number_of_matrix_evals: 15
         "###);
     }
 
@@ -908,17 +913,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 125
-        number_of_steps: 157
-        number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 5153
-        number_of_nonlinear_solver_fails: 51
+        number_of_linear_solver_setups: 123
+        number_of_steps: 156
+        number_of_error_test_failures: 2
+        number_of_nonlinear_solver_iterations: 5194
+        number_of_nonlinear_solver_fails: 49
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 1664
-        number_of_jac_muls: 3731
-        number_of_matrix_evals: 45
+        number_of_calls: 1695
+        number_of_jac_muls: 3719
+        number_of_matrix_evals: 38
         "###);
     }
 
@@ -930,17 +935,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 106
-        number_of_steps: 303
+        number_of_linear_solver_setups: 113
+        number_of_steps: 304
         number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 2550
-        number_of_nonlinear_solver_fails: 12
+        number_of_nonlinear_solver_iterations: 2601
+        number_of_nonlinear_solver_fails: 15
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 2552
-        number_of_jac_muls: 45
-        number_of_matrix_evals: 15
+        number_of_calls: 2603
+        number_of_jac_muls: 39
+        number_of_matrix_evals: 13
         "###);
     }
 

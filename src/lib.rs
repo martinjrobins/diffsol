@@ -149,13 +149,13 @@ use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus, newton::newton_iteration,
     root::RootFinder, NonLinearSolver,
 };
+use ode_solver::jacobian_update::JacobianUpdate;
 pub use ode_solver::{
     bdf::Bdf, builder::OdeBuilder, equations::OdeEquations, equations::OdeSolverEquations,
     method::OdeSolverMethod, method::OdeSolverState, method::OdeSolverStopReason,
     problem::OdeSolverProblem, sdirk::Sdirk, sens_equations::SensEquations,
     sens_equations::SensInit, sens_equations::SensRhs, tableau::Tableau,
 };
-use ode_solver::jacobian_update::JacobianUpdate;
 pub use op::{
     closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure,
     unit::UnitCallable, ConstantOp, LinearOp, NonLinearOp, Op,
