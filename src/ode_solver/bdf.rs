@@ -208,8 +208,6 @@ where
         self.n_equal_steps = 0;
 
         // update D using equations in section 3.2 of [1]
-        // TODO: move this to whereever we change order
-        self.u = Self::_compute_r(self.order, Eqn::T::one());
         let r = Self::_compute_r(self.order, factor);
         let ru = r.mat_mul(&self.u);
         Self::_update_diff_for_step_size(&ru, &mut self.diff, &mut self.diff_tmp, self.order);
@@ -793,10 +791,16 @@ where
                 .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
                 .unwrap()
                 .0;
-            if max_index == 0 {
-                self.order -= 1;
-            } else {
-                self.order += max_index - 1;
+
+            // if order changes then we need to update the U matrix
+            self.order = match max_index {
+                0 => order - 1,
+                1 => order,
+                2 => order + 1,
+                _ => unreachable!(),
+            };
+            if max_index != 1 {
+                self.u = Self::_compute_r(self.order, Eqn::T::one());
             }
 
             let mut factor = safety * factors[max_index];
