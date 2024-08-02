@@ -25,6 +25,12 @@ pub enum LinearSolverError {
     LuNotInitialized,
     #[error("LU solve failed")]
     LuSolveFailed,
+    #[error("Linear solver not setup")]
+    LinearSolverNotSetup,
+    #[error("KLU failed to analyze")]
+    KluFailedToAnalyze,
+    #[error("KLU failed to factorize")]
+    KluFailedToFactorize,
     #[error("Other error: {0}")]
     Other(String),
 }
@@ -53,6 +59,8 @@ pub enum OdeSolverError {
     InterpolationTimeAfterCurrentTime,
     #[error("Interpolation time is not within the current step. Step size is zero after calling state_mut()")]
     InterpolationTimeOutsideCurrentStep,
+    #[error("Interpolation time is greater than current time")]
+    InterpolationTimeGreaterThanCurrentTime,
     #[error("State not set")]
     StateNotSet,
     #[error("Sensitivity solve failed")]
@@ -67,6 +75,10 @@ pub enum OdeSolverError {
     AtolLengthMismatch,
     #[error("t_eval must be increasing and all values must be greater than or equal to the current time")]
     InvalidTEval,
+    #[error("Sundials error: {0}")]
+    Sundials(String),
+    #[error("Problem not set")]
+    ProblemNotSet,
     #[error("Other error: {0}")]
     Other(String),
 }
@@ -80,6 +92,8 @@ pub enum MatrixError {
     UnionIncompatibleShapes,
     #[error("Cannot create a matrix with zero rows or columns")]
     MatrixShapeError,
+    #[error("Index out of bounds")]
+    IndexOutOfBounds,
     #[error("Other error: {0}")]
     Other(String),
 }

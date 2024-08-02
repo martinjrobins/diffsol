@@ -66,7 +66,7 @@ struct KluSymbolic {
 }
 
 impl KluSymbolic {
-    fn try_from_matrix(mat: &mut impl MatrixKLU, common: *mut klu_common) -> Result<Self> {
+    fn try_from_matrix(mat: &mut impl MatrixKLU, common: *mut klu_common) -> Result<Self, DiffsolError> {
         let n = mat.nrows() as i64;
         let inner = unsafe {
             klu_analyze(
@@ -77,7 +77,7 @@ impl KluSymbolic {
             )
         };
         if inner.is_null() {
-            return Err(anyhow::anyhow!("KLU failed to analyze"));
+            return Err(linear_solver_error!(KluFailedToAnalyze));
         };
         Ok(Self { inner, common })
     }
@@ -97,7 +97,7 @@ struct KluNumeric {
 }
 
 impl KluNumeric {
-    fn try_from_symbolic(symbolic: &mut KluSymbolic, mat: &mut impl MatrixKLU) -> Result<Self> {
+    fn try_from_symbolic(symbolic: &mut KluSymbolic, mat: &mut impl MatrixKLU) -> Result<Self, DiffsolError> {
         let inner = unsafe {
             klu_factor(
                 mat.column_pointers_mut_ptr(),
@@ -108,7 +108,7 @@ impl KluNumeric {
             )
         };
         if inner.is_null() {
-            return Err(anyhow::anyhow!("KLU failed to factorize"));
+            return Err(linear_solver_error!(KluFailedToFactorize));
         };
         Ok(Self {
             inner,
@@ -192,9 +192,9 @@ where
         .ok();
     }
 
-    fn solve_in_place(&self, x: &mut C::V) -> Result<()> {
+    fn solve_in_place(&self, x: &mut C::V) -> Result<(),> {
         if self.klu_numeric.is_none() {
-            return Err(anyhow::anyhow!("LU not initialized"));
+            return Err(linear_solver_error!(LuNotInitialized));
         }
         let klu_numeric = self.klu_numeric.as_ref().unwrap();
         let klu_symbolic = self.klu_symbolic.as_ref().unwrap();

@@ -23,7 +23,6 @@ use super::{
     sparsity::{Dense, DenseRef},
     Matrix, MatrixCommon,
 };
-use anyhow::anyhow;
 
 #[derive(Debug)]
 pub struct SundialsMatrix {
@@ -324,11 +323,11 @@ impl Matrix for SundialsMatrix {
         nrows: crate::IndexType,
         ncols: crate::IndexType,
         triplets: Vec<(crate::IndexType, crate::IndexType, Self::T)>,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, DiffsolError> {
         let mut m = Self::zeros(nrows, ncols);
         for (i, j, val) in triplets {
             if i >= nrows || j >= ncols {
-                return Err(anyhow!("Index out of bounds"));
+                return Err(matrix_error!(IndexOutOfBounds));
             }
             m[(i, j)] = val;
         }

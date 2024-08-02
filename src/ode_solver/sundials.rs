@@ -8,7 +8,6 @@ use crate::sundials_sys::{
     IDA_RTFUNC_FAIL, IDA_SUCCESS, IDA_TOO_MUCH_ACC, IDA_TOO_MUCH_WORK, IDA_TSTOP_RETURN,
     IDA_YA_YDP_INIT,
 };
-use anyhow::{anyhow, Result};
 use num_traits::Zero;
 use serde::Serialize;
 use std::{
@@ -29,7 +28,7 @@ pub fn sundials_check(retval: c_int) -> Result<()> {
     if retval < 0 {
         let char_ptr = unsafe { IDAGetReturnFlagName(i64::from(retval)) };
         let c_str = unsafe { CStr::from_ptr(char_ptr) };
-        Err(anyhow!("Sundials Error Name: {}", c_str.to_str()?))
+        Err(ode_solver_error!(SundialsError(c_str.to_str().unwrap().to_string())))
     } else {
         Ok(())
     }
@@ -225,9 +224,9 @@ where
         &self.statistics
     }
 
-    pub fn calc_ic(&mut self, t: realtype) -> Result<()> {
+    pub fn calc_ic(&mut self, t: realtype) -> Result<(), DiffsolError> {
         if self.problem.is_none() {
-            return Err(anyhow!("Problem not set"));
+            return Err(ode_solver_error!(ProblemNotSet));
         }
         if self.problem.as_ref().unwrap().eqn.mass().is_none() {
             return Ok(());
@@ -371,10 +370,10 @@ where
         Self::check(unsafe { IDASetStopTime(self.ida_mem, tstop) })
     }
 
-    fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>> {
-        let state = self.state.as_mut().ok_or(anyhow!("State not set"))?;
+    fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
+        let state = self.state.as_mut().ok_or(ode_solver_error!(StateNotSet))?;
         if self.problem.is_none() {
-            return Err(anyhow!("Problem not set"));
+            return Err(ode_solver_error!(ProblemNotSet));
         }
         if self.is_state_modified {
             // reinit as state has been modified
@@ -407,30 +406,30 @@ where
             IDA_SUCCESS => Ok(OdeSolverStopReason::InternalTimestep),
             IDA_TSTOP_RETURN => Ok(OdeSolverStopReason::TstopReached),
             IDA_ROOT_RETURN => Ok(OdeSolverStopReason::RootFound(state.t)),
-            IDA_MEM_NULL => Err(anyhow!("The ida_mem argument was NULL.")),
-            IDA_ILL_INPUT => Err(anyhow!("One of the inputs to IDASolve() was illegal, or some other input to the solver was either illegal or missing.")),
-            IDA_TOO_MUCH_WORK => Err(anyhow!("The solver took mxstep internal steps but could not reach tout.")),
-            IDA_TOO_MUCH_ACC => Err(anyhow!("The solver could not satisfy the accuracy demanded by the user for some internal step.")),
-            IDA_ERR_FAIL => Err(anyhow!("Error test failures occurred too many times (MXNEF = 10) during one internal time step or occurred with.")),
-            IDA_CONV_FAIL => Err(anyhow!("Convergence test failures occurred too many times (MXNCF = 10) during one internal time step or occurred with.")),
-            IDA_LINIT_FAIL => Err(anyhow!("The linear solver’s initialization function failed.")),
-            IDA_LSETUP_FAIL => Err(anyhow!("The linear solver’s setup function failed in an unrecoverable manner.")),
-            IDA_LSOLVE_FAIL => Err(anyhow!("The linear solver’s solve function failed in an unrecoverable manner.")),
-            IDA_CONSTR_FAIL => Err(anyhow!("The inequality constraints were violated and the solver was unable to recover.")),
-            IDA_REP_RES_ERR => Err(anyhow!("The user’s residual function repeatedly returned a recoverable error flag, but the solver was unable to recover.")),
-            IDA_RES_FAIL => Err(anyhow!("The user’s residual function returned a nonrecoverable error flag.")),
-            IDA_RTFUNC_FAIL => Err(anyhow!("The rootfinding function failed.")),
-            _ => Err(anyhow!("Unknown error")),
+            IDA_MEM_NULL => Err(other_error!("The ida_mem argument was NULL.")),
+            IDA_ILL_INPUT => Err(other_error!("One of the inputs to IDASolve() was illegal, or some other input to the solver was either illegal or missing.")),
+            IDA_TOO_MUCH_WORK => Err(other_error!("The solver took mxstep internal steps but could not reach tout.")),
+            IDA_TOO_MUCH_ACC => Err(other_error!("The solver could not satisfy the accuracy demanded by the user for some internal step.")),
+            IDA_ERR_FAIL => Err(other_error!("Error test failures occurred too many times (MXNEF = 10) during one internal time step or occurred with.")),
+            IDA_CONV_FAIL => Err(other_error!("Convergence test failures occurred too many times (MXNCF = 10) during one internal time step or occurred with.")),
+            IDA_LINIT_FAIL => Err(other_error!("The linear solver’s initialization function failed.")),
+            IDA_LSETUP_FAIL => Err(other_error!("The linear solver’s setup function failed in an unrecoverable manner.")),
+            IDA_LSOLVE_FAIL => Err(other_error!("The linear solver’s solve function failed in an unrecoverable manner.")),
+            IDA_CONSTR_FAIL => Err(other_error!("The inequality constraints were violated and the solver was unable to recover.")),
+            IDA_REP_RES_ERR => Err(other_error!("The user’s residual function repeatedly returned a recoverable error flag, but the solver was unable to recover.")),
+            IDA_RES_FAIL => Err(other_error!("The user’s residual function returned a nonrecoverable error flag.")),
+            IDA_RTFUNC_FAIL => Err(other_error!("The rootfinding function failed.")),
+            _ => Err(other_error!("Unknown error")),
         }
     }
 
-    fn interpolate(&self, t: <Eqn>::T) -> Result<Eqn::V> {
+    fn interpolate(&self, t: <Eqn>::T) -> Result<Eqn::V, DiffsolError> {
         if self.data.is_none() {
-            return Err(anyhow!("Problem not set"));
+            return Err(ode_solver_error!(ProblemNotSet));
         }
-        let state = self.state.as_ref().ok_or(anyhow!("State not set"))?;
+        let state = self.state.as_ref().ok_or(ode_solver_error!(StateNotSet))?;
         if t > state.t {
-            return Err(anyhow!("Interpolation time is greater than current time"));
+            return Err(ode_solver_error!(InterpolationTimeGreaterThanCurrentTime));
         }
         let ret = SundialsVector::new_serial(self.data.as_ref().unwrap().eqn.rhs().nstates());
         Self::check(unsafe { IDAGetDky(self.ida_mem, t, 0, ret.sundials_vector()) }).unwrap();
