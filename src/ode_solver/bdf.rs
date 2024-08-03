@@ -1,6 +1,6 @@
-use nalgebra::ComplexField;
 use std::rc::Rc;
 use std::{ops::AddAssign, ops::MulAssign, panic};
+use nalgebra::ComplexField;
 
 use anyhow::{anyhow, Result};
 
@@ -14,13 +14,14 @@ use crate::{
     op::bdf::BdfCallable,
     scalar::scale,
     vector::DefaultDenseMatrix,
-    DenseMatrix, IndexType, MatrixViewMut, NewtonNonlinearSolver, NonLinearSolver, OdeSolverMethod,
-    OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar, SolverProblem, Vector,
-    VectorRef, VectorView, VectorViewMut,
+    DenseMatrix, IndexType, JacobianUpdate, MatrixViewMut, NewtonNonlinearSolver, NonLinearSolver,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar,
+    SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
 };
 use crate::{NonLinearOp, SensEquations};
 
 use super::equations::OdeEquations;
+use super::jacobian_update::SolverState;
 
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct BdfStatistics {
@@ -58,6 +59,7 @@ pub struct Bdf<
     diff: M,
     y_delta: Eqn::V,
     y_predict: Eqn::V,
+    t_predict: Eqn::T,
     s_predict: Eqn::V,
     sdiff: Vec<M>,
     s_op: Option<BdfCallable<SensEquations<Eqn>>>,
@@ -72,8 +74,7 @@ pub struct Bdf<
     tstop: Option<Eqn::T>,
     root_finder: Option<RootFinder<Eqn::V>>,
     is_state_modified: bool,
-    h0: Eqn::T,
-    updated_jacobian: bool,
+    jacobian_update: JacobianUpdate<Eqn::T>,
 }
 
 impl<Eqn> Default
@@ -147,6 +148,7 @@ where
             sdiff: Vec::new(),
             y_delta: Eqn::V::zeros(n),
             y_predict: Eqn::V::zeros(n),
+            t_predict: Eqn::T::zero(),
             s_predict: Eqn::V::zeros(n),
             s_deltas: Vec::new(),
             gamma,
@@ -158,8 +160,7 @@ where
             tstop: None,
             root_finder: None,
             is_state_modified: false,
-            updated_jacobian: false,
-            h0: Eqn::T::zero(),
+            jacobian_update: JacobianUpdate::default(),
         }
     }
 
@@ -197,14 +198,32 @@ where
         r
     }
 
-    fn _update_step_size(&mut self, factor: Eqn::T) {
+    fn _jacobian_updates(&mut self, c: Eqn::T, state: SolverState) {
+        if self.jacobian_update.check_rhs_jacobian_update(c, &state) {
+            self.nonlinear_solver.problem().f.set_jacobian_is_stale();
+            self.nonlinear_solver.reset_jacobian(
+                &self.y_predict,
+                self.t_predict,
+            );
+            self.jacobian_update.update_rhs_jacobian();
+            self.jacobian_update.update_jacobian(c);
+        } else if self.jacobian_update.check_jacobian_update(c, &state) {
+            self.nonlinear_solver.reset_jacobian(
+                &self.y_predict,
+                self.t_predict,
+            );
+            self.jacobian_update.update_jacobian(c);
+        }
+    }
+
+    fn _update_step_size(&mut self, factor: Eqn::T) -> Result<Eqn::T> {
         //If step size h is changed then also need to update the terms in
         //the first equation of page 9 of [1]:
         //
         //- constant c = h / (1-kappa) gamma_k term
         //- lu factorisation of (M - c * J) used in newton iteration (same equation)
 
-        self.state.as_mut().unwrap().h *= factor;
+        let new_h = factor * self.state.as_ref().unwrap().h;
         self.n_equal_steps = 0;
 
         // update D using equations in section 3.2 of [1]
@@ -221,22 +240,16 @@ where
         }
 
         self.nonlinear_problem_op()
-            .set_c(self.state.as_ref().unwrap().h, self.alpha[self.order]);
+            .set_c(new_h, self.alpha[self.order]);
 
-        // if step_size has changed sufficiently then update the jacobian
-        let h1 = self.state.as_ref().unwrap().h;
-        if !self.updated_jacobian
-            && (h1 / self.h0 < Eqn::T::from(3.0 / 5.0) || h1 / self.h0 > Eqn::T::from(5.0 / 3.0))
-        {
-            self.nonlinear_problem_op().set_jacobian_is_stale();
-            self.updated_jacobian = true;
+        self.state.as_mut().unwrap().h = new_h;
+
+        // if step size too small, then fail
+        let state = self.state.as_ref().unwrap();
+        if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
+            return Err(anyhow::anyhow!("Step size too small at t = {}", state.t));
         }
-
-        // reset nonlinear's linear solver problem as lu factorisation has changed
-        // use any x and t as they won't be used
-        let t = self.state.as_ref().unwrap().t;
-        let x = &self.state.as_ref().unwrap().y;
-        self.nonlinear_solver.reset_jacobian(x, t);
+        Ok(new_h)
     }
 
     fn _update_diff_for_step_size(ru: &M, diff: &mut M, diff_tmp: &mut M, order: usize) {
@@ -300,7 +313,7 @@ where
         }
     }
 
-    fn _predict_forward(&mut self) -> Eqn::T {
+    fn _predict_forward(&mut self) {
         Self::_predict_using_diff(&mut self.y_predict, &self.diff, self.order);
 
         // update psi and c (h, D, y0 has changed)
@@ -317,7 +330,7 @@ where
             let state = self.state.as_ref().unwrap();
             state.t + state.h
         };
-        t_new
+        self.t_predict = t_new;
     }
 
     fn handle_tstop(&mut self, tstop: Eqn::T) -> Result<Option<OdeSolverStopReason<Eqn::T>>> {
@@ -335,7 +348,8 @@ where
         // check if the next step will be beyond tstop, if so adjust the step size
         if state.t + state.h > tstop + troundoff {
             let factor = (tstop - state.t) / state.h;
-            self._update_step_size(factor);
+            // update step size ignoring the possible "step size too small" error
+            _ = self._update_step_size(factor);
         }
         Ok(None)
     }
@@ -599,26 +613,25 @@ where
             return Err(anyhow!("State not set"));
         }
 
-        self.updated_jacobian = false;
-        self.h0 = self.state.as_ref().unwrap().h;
+        let mut convergence_fail = false;
 
         if self.is_state_modified {
             self.initialise_to_first_order();
         }
 
-        let mut t_new = self._predict_forward();
+        self._predict_forward();
 
         // loop until step is accepted
         loop {
-            self.state.as_mut().unwrap().y.copy_from(&self.y_predict);
+            self.y_delta.copy_from(&self.y_predict);
 
             // initialise error_norm to quieten the compiler
             error_norm = Eqn::T::from(2.0);
 
             // solve BDF equation using y0 as starting point
             let mut solve_result = self.nonlinear_solver.solve_in_place(
-                &mut self.state.as_mut().unwrap().y,
-                t_new,
+                &mut self.y_delta,
+                self.t_predict,
                 &self.y_predict,
             );
             // update statistics
@@ -631,7 +644,6 @@ where
                 // combine eq 3, 4 and 6 from [1] to obtain error
                 // Note that error = C_k * h^{k+1} y^{k+1}
                 // and d = D^{k+1} y_{n+1} \approx h^{k+1} y^{k+1}
-                self.y_delta.copy_from(&self.state.as_ref().unwrap().y);
                 self.y_delta -= &self.y_predict;
 
                 // calculate error norm
@@ -648,7 +660,7 @@ where
                 if self.ode_problem.as_ref().unwrap().eqn_sens.is_some()
                     && error_norm <= Eqn::T::from(1.0)
                 {
-                    error_norm = match self.sensitivity_solve(t_new, error_norm) {
+                    error_norm = match self.sensitivity_solve(self.t_predict, error_norm) {
                         Ok(en) => en,
                         Err(_) => {
                             solve_result = Err(anyhow!("Sensitivity solve failed"));
@@ -661,21 +673,23 @@ where
             // handle case where either nonlinear solve failed
             if solve_result.is_err() {
                 self.statistics.number_of_nonlinear_solver_fails += 1;
-                if self.updated_jacobian {
+                if convergence_fail {
                     // newton iteration did not converge, but jacobian has already been
                     // evaluated so reduce step size by 0.3 (as per [1]) and try again
-                    self._update_step_size(Eqn::T::from(0.3));
+                    let new_h = self._update_step_size(Eqn::T::from(0.3))?;
+                    self._jacobian_updates(new_h * self.alpha[self.order], SolverState::SecondConvergenceFail);
 
                     // new prediction
-                    t_new = self._predict_forward();
+                    self._predict_forward();
 
                     // update statistics
                 } else {
                     // newton iteration did not converge, so update jacobian and try again
-                    self.nonlinear_problem_op().set_jacobian_is_stale();
-                    self.nonlinear_solver
-                        .reset_jacobian(&self.y_predict, self.state.as_ref().unwrap().t);
-                    self.updated_jacobian = true;
+                    self._jacobian_updates(
+                        self.state.as_ref().unwrap().h * self.alpha[self.order],
+                        SolverState::FirstConvergenceFail,
+                    );
+                    convergence_fail = true;
                     // same prediction as last time
                 }
                 continue;
@@ -699,16 +713,11 @@ where
                 if factor < Eqn::T::from(Self::MIN_FACTOR) {
                     factor = Eqn::T::from(Self::MIN_FACTOR);
                 }
-                self._update_step_size(factor);
-
-                // if step size too small, then fail
-                let state = self.state.as_ref().unwrap();
-                if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
-                    return Err(anyhow::anyhow!("Step size too small at t = {}", state.t));
-                }
+                let new_h = self._update_step_size(factor)?;
+                self._jacobian_updates(new_h * self.alpha[self.order], SolverState::ErrorTestFail);
 
                 // new prediction
-                t_new = self._predict_forward();
+                self._predict_forward();
 
                 // update statistics
                 self.statistics.number_of_error_test_failures += 1;
@@ -719,8 +728,8 @@ where
 
         {
             let state = self.state.as_mut().unwrap();
-            // state.y is already set to y_new
-            state.t += state.h;
+            state.y.copy_from(&self.y_predict);
+            state.t = self.t_predict;
             state.dy.copy_from_view(&self.diff.column(1));
             state.dy *= scale(Eqn::T::one() / state.h);
         }
@@ -729,6 +738,7 @@ where
         self.statistics.number_of_linear_solver_setups =
             self.nonlinear_problem_op().number_of_jac_evals();
         self.statistics.number_of_steps += 1;
+        self.jacobian_update.step();
 
         // a change in order is only done after running at order k for k + 1 steps
         // (see page 83 of [2])
@@ -815,7 +825,8 @@ where
                 || max_index == 0
                 || max_index == 2
             {
-                self._update_step_size(factor);
+                let new_h = self._update_step_size(factor)?;
+                self._jacobian_updates(new_h * self.alpha[self.order], SolverState::StepSuccess);
             }
         }
 
