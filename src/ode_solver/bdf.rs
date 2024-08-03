@@ -1,6 +1,6 @@
+use nalgebra::ComplexField;
 use std::rc::Rc;
 use std::{ops::AddAssign, ops::MulAssign, panic};
-use nalgebra::ComplexField;
 
 use anyhow::{anyhow, Result};
 
@@ -199,19 +199,17 @@ where
     }
 
     fn _jacobian_updates(&mut self, c: Eqn::T, state: SolverState) {
+        let y = &self.state.as_ref().unwrap().y;
+        let t = self.state.as_ref().unwrap().t;
+        //let y = &self.y_predict;
+        //let t = self.t_predict;
         if self.jacobian_update.check_rhs_jacobian_update(c, &state) {
             self.nonlinear_solver.problem().f.set_jacobian_is_stale();
-            self.nonlinear_solver.reset_jacobian(
-                &self.y_predict,
-                self.t_predict,
-            );
+            self.nonlinear_solver.reset_jacobian(y, t);
             self.jacobian_update.update_rhs_jacobian();
             self.jacobian_update.update_jacobian(c);
         } else if self.jacobian_update.check_jacobian_update(c, &state) {
-            self.nonlinear_solver.reset_jacobian(
-                &self.y_predict,
-                self.t_predict,
-            );
+            self.nonlinear_solver.reset_jacobian(y, t);
             self.jacobian_update.update_jacobian(c);
         }
     }
@@ -677,7 +675,10 @@ where
                     // newton iteration did not converge, but jacobian has already been
                     // evaluated so reduce step size by 0.3 (as per [1]) and try again
                     let new_h = self._update_step_size(Eqn::T::from(0.3))?;
-                    self._jacobian_updates(new_h * self.alpha[self.order], SolverState::SecondConvergenceFail);
+                    self._jacobian_updates(
+                        new_h * self.alpha[self.order],
+                        SolverState::SecondConvergenceFail,
+                    );
 
                     // new prediction
                     self._predict_forward();
