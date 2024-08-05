@@ -88,7 +88,7 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
     }
 
     fn solve_linearised_in_place(&self, x: &mut C::V) -> Result<(), DiffsolError> {
-        self.linear_solver.solve_in_place(x).into()
+        self.linear_solver.solve_in_place(x)
     }
 
     fn solve_in_place(

@@ -23,9 +23,13 @@ use suitesparse_sys::{
 type KluIndextype = i64;
 
 use crate::{
-    error::DiffsolError, linear_solver::LinearSolver, linear_solver_error, matrix::MatrixCommon,
-    op::linearise::LinearisedOp, vector::Vector, LinearOp, Matrix, MatrixSparsityRef, NonLinearOp,
-    Op, SolverProblem, SparseColMat,
+    error::{DiffsolError, LinearSolverError},
+    linear_solver::LinearSolver,
+    linear_solver_error,
+    matrix::MatrixCommon,
+    op::linearise::LinearisedOp,
+    vector::Vector,
+    LinearOp, Matrix, MatrixSparsityRef, NonLinearOp, Op, SolverProblem, SparseColMat,
 };
 
 trait MatrixKLU: Matrix<T = f64> {
