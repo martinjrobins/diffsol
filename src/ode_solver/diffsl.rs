@@ -1,9 +1,9 @@
 use std::{cell::RefCell, rc::Rc};
 
-use anyhow::Result;
 use diffsl::execution::Compiler;
 
 use crate::{
+    error::DiffsolError,
     jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring},
     matrix::sparsity::MatrixSparsity,
     op::{LinearOp, NonLinearOp, Op},
@@ -56,8 +56,9 @@ pub struct DiffSlContext<M: Matrix<T = T>> {
 impl<M: Matrix<T = T>> DiffSlContext<M> {
     /// Create a new context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
     /// The input parameters are not initialized and must be set using the [OdeEquations::set_params] function before solving the ODE.
-    pub fn new(text: &str) -> Result<Self> {
-        let compiler = Compiler::from_discrete_str(text)?;
+    pub fn new(text: &str) -> Result<Self, DiffsolError> {
+        let compiler =
+            Compiler::from_discrete_str(text).map_err(|e| DiffsolError::Other(e.to_string()))?;
         let (nstates, nparams, nout, _ndata, nroots) = compiler.get_dims();
         let data = RefCell::new(compiler.get_new_data());
         let ddata = RefCell::new(compiler.get_new_data());
@@ -75,8 +76,9 @@ impl<M: Matrix<T = T>> DiffSlContext<M> {
         })
     }
 
-    pub fn recompile(&mut self, text: &str) -> Result<()> {
-        self.compiler = Compiler::from_discrete_str(text)?;
+    pub fn recompile(&mut self, text: &str) -> Result<(), DiffsolError> {
+        self.compiler =
+            Compiler::from_discrete_str(text).map_err(|e| DiffsolError::Other(e.to_string()))?;
         let (nstates, nparams, nout, _ndata, nroots) = self.compiler.get_dims();
         self.data = RefCell::new(self.compiler.get_new_data());
         self.ddata = RefCell::new(self.compiler.get_new_data());

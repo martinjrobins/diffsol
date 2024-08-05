@@ -1,9 +1,10 @@
 use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
+use crate::error::DiffsolError;
 use crate::scalar::Scale;
 use crate::{IndexType, Scalar, Vector, VectorIndex};
-use anyhow::Result;
+
 use num_traits::{One, Zero};
 use sparsity::{MatrixSparsity, MatrixSparsityRef};
 
@@ -292,7 +293,7 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone {
         nrows: IndexType,
         ncols: IndexType,
         triplets: Vec<(IndexType, IndexType, Self::T)>,
-    ) -> Result<Self>;
+    ) -> Result<Self, DiffsolError>;
 }
 
 /// A dense column-major matrix. The assumption is that the underlying matrix is stored in column-major order, so functions for taking columns views are efficient

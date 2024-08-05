@@ -3,12 +3,11 @@ use std::rc::Rc;
 use crate::sundials_sys::{
     realtype, SUNLinSolFree, SUNLinSolSetup, SUNLinSolSolve, SUNLinSol_Dense, SUNLinearSolver,
 };
-use anyhow::Result;
 
 use crate::{
-    ode_solver::sundials::sundials_check, op::linearise::LinearisedOp,
-    vector::sundials::SundialsVector, LinearOp, Matrix, NonLinearOp, Op, SolverProblem,
-    SundialsMatrix,
+    error::*, linear_solver_error, ode_solver::sundials::sundials_check,
+    op::linearise::LinearisedOp, vector::sundials::SundialsVector, LinearOp, Matrix, NonLinearOp,
+    Op, SolverProblem, SundialsMatrix,
 };
 
 #[cfg(not(sundials_version_major = "5"))]
@@ -98,9 +97,9 @@ where
         self.is_setup = true;
     }
 
-    fn solve_in_place(&self, b: &mut Op::V) -> Result<()> {
+    fn solve_in_place(&self, b: &mut Op::V) -> Result<(), DiffsolError> {
         if !self.is_setup {
-            return Err(anyhow::anyhow!("Linear solver not setup"));
+            return Err(linear_solver_error!(LinearSolverNotSetup));
         }
         let linear_solver = self.linear_solver.expect("Linear solver not set");
         let matrix = self.matrix.as_ref().expect("Matrix not set");

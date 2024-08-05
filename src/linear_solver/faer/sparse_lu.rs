@@ -1,11 +1,16 @@
 use std::rc::Rc;
 
 use crate::{
-    linear_solver::LinearSolver, matrix::sparsity::MatrixSparsityRef, op::linearise::LinearisedOp,
-    scalar::IndexType, solver::SolverProblem, LinearOp, Matrix, NonLinearOp, Op, Scalar,
-    SparseColMat,
+    error::{DiffsolError, LinearSolverError},
+    linear_solver::LinearSolver,
+    linear_solver_error,
+    matrix::sparsity::MatrixSparsityRef,
+    op::linearise::LinearisedOp,
+    scalar::IndexType,
+    solver::SolverProblem,
+    LinearOp, Matrix, NonLinearOp, Op, Scalar, SparseColMat,
 };
-use anyhow::Result;
+
 use faer::{
     solvers::SpSolver,
     sparse::linalg::{solvers::Lu, solvers::SymbolicLu},
@@ -57,9 +62,9 @@ impl<T: Scalar, C: NonLinearOp<M = SparseColMat<T>, V = Col<T>, T = T>> LinearSo
         )
     }
 
-    fn solve_in_place(&self, x: &mut C::V) -> Result<()> {
+    fn solve_in_place(&self, x: &mut C::V) -> Result<(), DiffsolError> {
         if self.lu.is_none() {
-            return Err(anyhow::anyhow!("LU not initialized"));
+            return Err(linear_solver_error!(LuNotInitialized))?;
         }
         let lu = self.lu.as_ref().unwrap();
         lu.solve_in_place(x);

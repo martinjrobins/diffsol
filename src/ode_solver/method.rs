@@ -1,12 +1,14 @@
-use anyhow::Result;
 use nalgebra::ComplexField;
 use num_traits::{One, Pow};
 use std::rc::Rc;
 
 use crate::{
-    matrix::default_solver::DefaultSolver, scalar::Scalar, scale, ConstantOp, InitOp,
-    NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, Op,
-    SensEquations, SolverProblem, Vector,
+    error::{DiffsolError, OdeSolverError},
+    matrix::default_solver::DefaultSolver,
+    ode_solver_error,
+    scalar::Scalar,
+    scale, ConstantOp, InitOp, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations,
+    OdeSolverProblem, Op, SensEquations, SolverProblem, Vector,
 };
 
 #[derive(Debug, PartialEq)]
@@ -53,17 +55,17 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     /// - `InternalTimestep`: The solver has taken a step forward in time, the internal state of the solver is at time self.state().t
     /// - `RootFound(t_root)`: The solver has found a root at time `t_root`. Note that the internal state of the solver is at the internal time step `self.state().t`, *not* at time `t_root`.
     /// - `TstopReached`: The solver has reached the stop time set by [Self::set_stop_time], the internal state of the solver is at time `tstop`, which is the same as `self.state().t`
-    fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>>;
+    fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError>;
 
     /// Set a stop time for the solver. The solver will stop when the internal time reaches this time.
     /// Once it stops, the stop time is unset. If `tstop` is at or before the current internal time, an error is returned.
-    fn set_stop_time(&mut self, tstop: Eqn::T) -> Result<()>;
+    fn set_stop_time(&mut self, tstop: Eqn::T) -> Result<(), DiffsolError>;
 
     /// Interpolate the solution at a given time. This time should be between the current time and the last solver time step
-    fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V>;
+    fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError>;
 
     /// Interpolate the sensitivity vectors at a given time. This time should be between the current time and the last solver time step
-    fn interpolate_sens(&self, t: Eqn::T) -> Result<Vec<Eqn::V>>;
+    fn interpolate_sens(&self, t: Eqn::T) -> Result<Vec<Eqn::V>, DiffsolError>;
 
     /// Get the current state of the solver, if it exists
     fn state(&self) -> Option<&OdeSolverState<Eqn::V>>;
@@ -89,7 +91,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         &mut self,
         problem: &OdeSolverProblem<Eqn>,
         final_time: Eqn::T,
-    ) -> Result<(Vec<Eqn::V>, Vec<Eqn::T>)>
+    ) -> Result<(Vec<Eqn::V>, Vec<Eqn::T>), DiffsolError>
     where
         Eqn::M: DefaultSolver,
         Self: Sized,
@@ -128,7 +130,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         &mut self,
         problem: &OdeSolverProblem<Eqn>,
         t_eval: &[Eqn::T],
-    ) -> Result<Vec<Eqn::V>>
+    ) -> Result<Vec<Eqn::V>, DiffsolError>
     where
         Eqn::M: DefaultSolver,
         Self: Sized,
@@ -140,7 +142,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         // check t_eval is increasing and all values are greater than or equal to the current time
         let t0 = self.state().unwrap().t;
         if t_eval.windows(2).any(|w| w[0] > w[1] || w[0] < t0) {
-            return Err(anyhow::anyhow!("t_eval must be increasing and all values must be greater than or equal to the current time"));
+            return Err(ode_solver_error!(InvalidTEval));
         }
 
         // do loop
@@ -193,7 +195,10 @@ impl<V: Vector> OdeSolverState<V> {
     /// It will also set the initial step size based on the given solver.
     /// If you want to create a state without this default initialisation, use [Self::new_without_initialise] instead.
     /// You can then use [Self::set_consistent] and [Self::set_step_size] to set the state up if you need to.
-    pub fn new<Eqn, S>(ode_problem: &OdeSolverProblem<Eqn>, solver: &S) -> Result<Self>
+    pub fn new<Eqn, S>(
+        ode_problem: &OdeSolverProblem<Eqn>,
+        solver: &S,
+    ) -> Result<Self, DiffsolError>
     where
         Eqn: OdeEquations<T = V::T, V = V>,
         Eqn::M: DefaultSolver,
@@ -247,7 +252,7 @@ impl<V: Vector> OdeSolverState<V> {
         &mut self,
         ode_problem: &OdeSolverProblem<Eqn>,
         root_solver: &mut S,
-    ) -> Result<()>
+    ) -> Result<(), DiffsolError>
     where
         Eqn: OdeEquations<T = V::T, V = V>,
         S: NonLinearSolver<InitOp<Eqn>> + ?Sized,
@@ -279,7 +284,7 @@ impl<V: Vector> OdeSolverState<V> {
         &mut self,
         ode_problem: &OdeSolverProblem<Eqn>,
         root_solver: &mut S,
-    ) -> Result<()>
+    ) -> Result<(), DiffsolError>
     where
         Eqn: OdeEquations<T = V::T, V = V>,
         S: NonLinearSolver<InitOp<SensEquations<Eqn>>> + ?Sized,

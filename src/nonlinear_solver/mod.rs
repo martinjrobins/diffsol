@@ -1,7 +1,5 @@
-use anyhow::Result;
+use crate::{error::DiffsolError, op::Op, solver::SolverProblem};
 use convergence::Convergence;
-
-use crate::{op::Op, solver::SolverProblem};
 
 pub struct NonLinearSolveSolution<V> {
     pub x0: V,
@@ -30,18 +28,19 @@ pub trait NonLinearSolver<C: Op> {
     fn reset_jacobian(&mut self, x: &C::V, t: C::T);
 
     // Solve the problem `F(x, t) = 0` for fixed t, and return the solution `x`.
-    fn solve(&mut self, x: &C::V, t: C::T, error_y: &C::V) -> Result<C::V> {
+    fn solve(&mut self, x: &C::V, t: C::T, error_y: &C::V) -> Result<C::V, DiffsolError> {
         let mut x = x.clone();
         self.solve_in_place(&mut x, t, error_y)?;
         Ok(x)
     }
 
     /// Solve the problem `F(x) = 0` in place.
-    fn solve_in_place(&mut self, x: &mut C::V, t: C::T, error_y: &C::V) -> Result<()>;
+    fn solve_in_place(&mut self, x: &mut C::V, t: C::T, error_y: &C::V)
+        -> Result<(), DiffsolError>;
 
     /// Solve the linearised problem `J * x = b`, where `J` was calculated using [Self::reset_jacobian].
     /// The input `b` is provided in `x`, and the solution is returned in `x`.
-    fn solve_linearised_in_place(&self, x: &mut C::V) -> Result<()>;
+    fn solve_linearised_in_place(&self, x: &mut C::V) -> Result<(), DiffsolError>;
 }
 
 pub mod convergence;
