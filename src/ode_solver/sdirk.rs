@@ -259,11 +259,7 @@ where
 
             // solve
             {
-                let result =
-                    newton_iteration(ds, &mut self.old_y_sens[j], s0, fun, ls, &mut convergence);
-                if let Err(e) = result {
-                    return Err(e);
-                }
+                newton_iteration(ds, &mut self.old_y_sens[j], s0, fun, ls, &mut convergence)?;
                 self.old_y_sens[j].copy_from(&op.get_last_f_eval());
                 self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
             }
