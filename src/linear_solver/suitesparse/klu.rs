@@ -23,8 +23,9 @@ use suitesparse_sys::{
 type KluIndextype = i64;
 
 use crate::{
-    linear_solver::LinearSolver, matrix::MatrixCommon, op::linearise::LinearisedOp, vector::Vector,
-    LinearOp, Matrix, MatrixSparsityRef, NonLinearOp, Op, SolverProblem, SparseColMat,
+    error::DiffsolError, linear_solver::LinearSolver, linear_solver_error, matrix::MatrixCommon,
+    op::linearise::LinearisedOp, vector::Vector, LinearOp, Matrix, MatrixSparsityRef, NonLinearOp,
+    Op, SolverProblem, SparseColMat,
 };
 
 trait MatrixKLU: Matrix<T = f64> {
@@ -198,7 +199,7 @@ where
         .ok();
     }
 
-    fn solve_in_place(&self, x: &mut C::V) -> Result<()> {
+    fn solve_in_place(&self, x: &mut C::V) -> Result<(), DiffsolError> {
         if self.klu_numeric.is_none() {
             return Err(linear_solver_error!(LuNotInitialized));
         }
