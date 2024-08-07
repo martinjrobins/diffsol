@@ -214,7 +214,7 @@ where
         }
     }
 
-    fn _update_step_size(&mut self, factor: Eqn::T) -> Result<Eqn::T> {
+    fn _update_step_size(&mut self, factor: Eqn::T) -> Result<Eqn::T, DiffsolError> {
         //If step size h is changed then also need to update the terms in
         //the first equation of page 9 of [1]:
         //
@@ -245,7 +245,9 @@ where
         // if step size too small, then fail
         let state = self.state.as_ref().unwrap();
         if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
-            return Err(anyhow::anyhow!("Step size too small at t = {}", state.t));
+            return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
+                time: state.t.into(),
+            }));
         }
         Ok(new_h)
     }
