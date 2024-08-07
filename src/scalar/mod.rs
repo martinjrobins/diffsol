@@ -3,28 +3,24 @@ use std::{
     ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign},
 };
 
-use nalgebra::{ComplexField, SimdRealField};
-use num_traits::{Pow, Signed};
-
 use crate::vector::VectorView;
-
 pub trait Scalar:
     nalgebra::Scalar
     + faer::Entity
     + faer::ComplexField
     + faer::SimpleEntity
     + faer::RealField
+    + nalgebra::SimdRealField
+    + nalgebra::ComplexField<RealField = Self>
+    + num_traits::Signed
+    + num_traits::Pow<Self, Output = Self>
+    + num_traits::Pow<i32, Output = Self>
     + From<f64>
     + Display
-    + SimdRealField
-    + ComplexField<RealField = Self>
     + Copy
     + From<f64>
-    + Signed
     + Into<f64>
     + PartialOrd
-    + Pow<Self, Output = Self>
-    + Pow<i32, Output = Self>
 {
     const EPSILON: Self;
     const INFINITY: Self;

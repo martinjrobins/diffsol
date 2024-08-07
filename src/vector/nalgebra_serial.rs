@@ -169,7 +169,7 @@ impl<T: Scalar> Vector for DVector<T> {
         self.copy_from(other);
     }
     fn map_inplace(&mut self, f: impl Fn(Self::T) -> Self::T) {
-        self.iter_mut().for_each(|x| *x = f(*x));
+        self.iter_mut().for_each(|x: &mut _| *x = f(*x));
     }
     fn copy_from_view(&mut self, other: &Self::View<'_>) {
         self.copy_from(other);

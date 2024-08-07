@@ -149,6 +149,7 @@ use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus, newton::newton_iteration,
     root::RootFinder, NonLinearSolver,
 };
+use ode_solver::jacobian_update::JacobianUpdate;
 pub use ode_solver::{
     bdf::Bdf, builder::OdeBuilder, equations::OdeEquations, equations::OdeSolverEquations,
     method::OdeSolverMethod, method::OdeSolverState, method::OdeSolverStopReason,

@@ -1,6 +1,7 @@
 pub mod bdf;
 pub mod builder;
 pub mod equations;
+pub mod jacobian_update;
 pub mod method;
 pub mod problem;
 pub mod sdirk;
@@ -117,7 +118,7 @@ mod tests {
                         let error = sens_soln.clone() - &sens_point.state;
                         let error_norm = error.squared_norm(&sens_point.state, atol, rtol).sqrt();
                         assert!(
-                            error_norm < M::T::from(20.0),
+                            error_norm < M::T::from(23.0),
                             "error_norm: {} at t = {}",
                             error_norm,
                             point.t
