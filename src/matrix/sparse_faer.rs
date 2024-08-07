@@ -3,9 +3,10 @@ use std::ops::Mul;
 
 use super::sparsity::MatrixSparsityRef;
 use super::{Matrix, MatrixCommon, MatrixSparsity};
+use crate::error::{DiffsolError, MatrixError};
 use crate::vector::Vector;
 use crate::{DefaultSolver, FaerSparseLU, IndexType, NonLinearOp, Scalar, Scale};
-use anyhow::Result;
+
 use faer::sparse::ops::{ternary_op_assign_into, union_symbolic};
 use faer::sparse::{SymbolicSparseColMat, SymbolicSparseColMatRef};
 use faer::Col;
@@ -55,8 +56,8 @@ impl<T: Scalar> MatrixSparsity<SparseColMat<T>> for SymbolicSparseColMat<IndexTy
     fn union(
         self,
         other: SymbolicSparseColMatRef<IndexType>,
-    ) -> Result<SymbolicSparseColMat<IndexType>> {
-        union_symbolic(self.as_ref(), other).map_err(anyhow::Error::new)
+    ) -> Result<SymbolicSparseColMat<IndexType>, DiffsolError> {
+        union_symbolic(self.as_ref(), other).map_err(|e| DiffsolError::Other(e.to_string()))
     }
 
     fn as_ref(&self) -> SymbolicSparseColMatRef<IndexType> {
@@ -96,10 +97,10 @@ impl<T: Scalar> MatrixSparsity<SparseColMat<T>> for SymbolicSparseColMat<IndexTy
         nrows: IndexType,
         ncols: IndexType,
         indices: Vec<(IndexType, IndexType)>,
-    ) -> Result<Self> {
+    ) -> Result<Self, DiffsolError> {
         match Self::try_new_from_indices(nrows, ncols, indices.as_slice()) {
             Ok((sparsity, _)) => Ok(sparsity),
-            Err(e) => Err(anyhow::anyhow!("Failed to create sparsity pattern: {}", e)),
+            Err(e) => Err(DiffsolError::Other(e.to_string())),
         }
     }
 }
@@ -218,12 +219,11 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
         nrows: IndexType,
         ncols: IndexType,
         triplets: Vec<(IndexType, IndexType, T)>,
-    ) -> Result<Self> {
+    ) -> Result<Self, DiffsolError> {
         match faer::sparse::SparseColMat::try_new_from_triplets(nrows, ncols, triplets.as_slice()) {
             Ok(mat) => Ok(Self(mat)),
-            Err(e) => Err(anyhow::anyhow!(
-                "Failed to create matrix from triplets: {}",
-                e
+            Err(e) => Err(DiffsolError::from(
+                MatrixError::FailedToCreateMatrixFromTriplets(e),
             )),
         }
     }

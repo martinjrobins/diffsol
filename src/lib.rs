@@ -171,3 +171,5 @@ pub use vector::DefaultDenseMatrix;
 use vector::{Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut};
 
 pub use scalar::scale;
+
+pub mod error;

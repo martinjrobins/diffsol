@@ -2,7 +2,7 @@ use nalgebra::ComplexField;
 use std::rc::Rc;
 use std::{ops::AddAssign, ops::MulAssign, panic};
 
-use anyhow::{anyhow, Result};
+use crate::error::{DiffsolError, OdeSolverError};
 
 use num_traits::{abs, One, Pow, Zero};
 use serde::Serialize;
@@ -18,7 +18,7 @@ use crate::{
     OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar,
     SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
 };
-use crate::{NonLinearOp, SensEquations};
+use crate::{ode_solver_error, NonLinearOp, SensEquations};
 
 use super::equations::OdeEquations;
 use super::jacobian_update::SolverState;
@@ -331,7 +331,10 @@ where
         self.t_predict = t_new;
     }
 
-    fn handle_tstop(&mut self, tstop: Eqn::T) -> Result<Option<OdeSolverStopReason<Eqn::T>>> {
+    fn handle_tstop(
+        &mut self,
+        tstop: Eqn::T,
+    ) -> Result<Option<OdeSolverStopReason<Eqn::T>>, DiffsolError> {
         // check if the we are at tstop
         let state = self.state.as_ref().unwrap();
         let troundoff = Eqn::T::from(100.0) * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
@@ -339,8 +342,13 @@ where
             self.tstop = None;
             return Ok(Some(OdeSolverStopReason::TstopReached));
         } else if tstop < state.t - troundoff {
+            let error = OdeSolverError::StopTimeBeforeCurrentTime {
+                stop_time: self.tstop.unwrap().into(),
+                state_time: state.t.into(),
+            };
             self.tstop = None;
-            return Err(anyhow!("tstop is before current time"));
+
+            return Err(DiffsolError::from(error));
         }
 
         // check if the next step will be beyond tstop, if so adjust the step size
@@ -394,7 +402,11 @@ where
         order_summation
     }
 
-    fn sensitivity_solve(&mut self, t_new: Eqn::T, mut error_norm: Eqn::T) -> Result<Eqn::T> {
+    fn sensitivity_solve(
+        &mut self,
+        t_new: Eqn::T,
+        mut error_norm: Eqn::T,
+    ) -> Result<Eqn::T, DiffsolError> {
         let h = self.state.as_ref().unwrap().h;
 
         // update for new state
@@ -412,8 +424,9 @@ where
         }
 
         // reuse linear solver from nonlinear solver
-        let ls =
-            |x: &mut Eqn::V| -> Result<()> { self.nonlinear_solver.solve_linearised_in_place(x) };
+        let ls = |x: &mut Eqn::V| -> Result<(), DiffsolError> {
+            self.nonlinear_solver.solve_linearised_in_place(x)
+        };
 
         // construct bdf discretisation of sensitivity equations
         let op = self.s_op.as_ref().unwrap();
@@ -481,39 +494,38 @@ where
         self.order
     }
 
-    fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V> {
+    fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
         // state must be set
-        let state = self.state.as_ref().ok_or(anyhow!("State not set"))?;
+        let state = self.state.as_ref().ok_or(ode_solver_error!(StateNotSet))?;
         if self.is_state_modified {
             if t == state.t {
                 return Ok(state.y.clone());
             } else {
-                return Err(anyhow::anyhow!("Interpolation time is not within the current step. Step size is zero after calling state_mut()"));
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
         }
         // check that t is before the current time
         if t > state.t {
-            return Err(anyhow!("Interpolation time is after current time"));
+            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
         }
-
         Ok(Self::interpolate_from_diff(
             t, &self.diff, state.t, state.h, self.order,
         ))
     }
 
-    fn interpolate_sens(&self, t: <Eqn as OdeEquations>::T) -> Result<Vec<Eqn::V>> {
+    fn interpolate_sens(&self, t: <Eqn as OdeEquations>::T) -> Result<Vec<Eqn::V>, DiffsolError> {
         // state must be set
-        let state = self.state.as_ref().ok_or(anyhow!("State not set"))?;
+        let state = self.state.as_ref().ok_or(ode_solver_error!(StateNotSet))?;
         if self.is_state_modified {
             if t == state.t {
                 return Ok(state.s.clone());
             } else {
-                return Err(anyhow::anyhow!("Interpolation time is not within the current step. Step size is zero after calling state_mut()"));
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
         }
         // check that t is before the current time
         if t > state.t {
-            return Err(anyhow!("Interpolation time is after current time"));
+            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
         }
 
         let mut s = Vec::with_capacity(state.s.len());
@@ -604,11 +616,11 @@ where
         self.initialise_to_first_order();
     }
 
-    fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>> {
+    fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
         let mut safety: Eqn::T;
         let mut error_norm: Eqn::T;
         if self.state.is_none() {
-            return Err(anyhow!("State not set"));
+            return Err(ode_solver_error!(StateNotSet));
         }
 
         let mut convergence_fail = false;
@@ -661,7 +673,7 @@ where
                     error_norm = match self.sensitivity_solve(self.t_predict, error_norm) {
                         Ok(en) => en,
                         Err(_) => {
-                            solve_result = Err(anyhow!("Sensitivity solve failed"));
+                            solve_result = Err(ode_solver_error!(SensitivitySolveFailed));
                             Eqn::T::from(2.0)
                         }
                     }
@@ -834,7 +846,7 @@ where
         // check for root within accepted step
         if let Some(root_fn) = self.problem().as_ref().unwrap().eqn.root() {
             let ret = self.root_finder.as_ref().unwrap().check_root(
-                &|t| self.interpolate(t),
+                &|t: <Eqn as OdeEquations>::T| self.interpolate(t),
                 root_fn.as_ref(),
                 &self.state.as_ref().unwrap().y,
                 self.state.as_ref().unwrap().t,
@@ -854,14 +866,15 @@ where
         Ok(OdeSolverStopReason::InternalTimestep)
     }
 
-    fn set_stop_time(&mut self, tstop: <Eqn as OdeEquations>::T) -> Result<()> {
+    fn set_stop_time(&mut self, tstop: <Eqn as OdeEquations>::T) -> Result<(), DiffsolError> {
         self.tstop = Some(tstop);
         if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
+            let error = OdeSolverError::StopTimeBeforeCurrentTime {
+                stop_time: tstop.into(),
+                state_time: self.state.as_ref().unwrap().t.into(),
+            };
             self.tstop = None;
-            return Err(anyhow!(
-                "tstop is at or before current time t = {}",
-                self.state.as_ref().unwrap().t
-            ));
+            return Err(DiffsolError::from(error));
         }
         Ok(())
     }

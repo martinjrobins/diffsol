@@ -1,6 +1,6 @@
 [package]
 name = "diffsol"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "A library for solving ordinary differential equations (ODEs) in Rust."
 license = "MIT"
@@ -26,7 +26,6 @@ diffsl-llvm17 = ["diffsl17-0", "diffsl"]
 [dependencies]
 nalgebra = "0.33"
 nalgebra-sparse = { version = "0.10", features = ["io"] }
-anyhow = "1.0.86"
 num-traits = "0.2.17"
 ouroboros = "0.18.2"
 serde = { version = "1.0.196", features = ["derive"] }
@@ -38,6 +37,7 @@ diffsl17-0 = { package = "diffsl", version = "=0.1.9", features = ["llvm17-0"], 
 petgraph = "0.6.4"
 faer = "0.18.2"
 suitesparse_sys = { version = "0.1.3", optional = true }
+thiserror = "1.0.63"
 
 [dev-dependencies]
 insta = { version = "1.34.0", features = ["yaml"] }
