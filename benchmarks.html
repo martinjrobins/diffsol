@@ -221,7 +221,7 @@ wrote out the diffusion matrix and mass matrix from the Rust implementations and
 wrote the rest of the model by hand. For the <code>robertson</code> problem we wrote the
 entire model by hand.</p>
 <h2 id="results"><a class="header" href="#results">Results</a></h2>
-<p>These results were generated using DiffSol v0.1.15.</p>
+<p>These results were generated using DiffSol v0.2.1.</p>
 <p>The performance of each implementation was timed and includes all setup and solve time. The exception to this is for the DiffSl implementations, where the JIT compilation for the model was not included in the timings
 (since the compilation time for the C and Rust code was also not included).
 We have presented the results in the following graphs, where the x-axis is the size of the problem \(n\) and the y-axis is the time taken to solve the problem relative to the time taken by the Sundials implementation
