@@ -48,7 +48,7 @@ entire model by hand.
 
 ## Results
 
-These results were generated using DiffSol v0.1.15.
+These results were generated using DiffSol v0.2.1.
 
 The performance of each implementation was timed and includes all setup and solve time. The exception to this is for the DiffSl implementations, where the JIT compilation for the model was not included in the timings 
 (since the compilation time for the C and Rust code was also not included). 
