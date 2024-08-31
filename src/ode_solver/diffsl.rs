@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use diffsl::execution::Compiler;
+use diffsl::{Compiler, execution::module::CodegenModule};
 
 use crate::{
     error::DiffsolError,
@@ -42,8 +42,8 @@ pub type T = f64;
 /// }
 /// let y = solver.interpolate(t);
 /// ```
-pub struct DiffSlContext<M: Matrix<T = T>> {
-    compiler: Compiler,
+pub struct DiffSlContext<M: Matrix<T = T>, CG: CodegenModule> {
+    compiler: Compiler<CG>,
     data: RefCell<Vec<M::T>>,
     ddata: RefCell<Vec<M::T>>,
     tmp: RefCell<M::V>,
@@ -53,7 +53,7 @@ pub struct DiffSlContext<M: Matrix<T = T>> {
     nout: usize,
 }
 
-impl<M: Matrix<T = T>> DiffSlContext<M> {
+impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
     /// Create a new context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
     /// The input parameters are not initialized and must be set using the [OdeEquations::set_params] function before solving the ODE.
     pub fn new(text: &str) -> Result<Self, DiffsolError> {
@@ -91,7 +91,7 @@ impl<M: Matrix<T = T>> DiffSlContext<M> {
     }
 }
 
-impl<M: Matrix<T = T>> Default for DiffSlContext<M> {
+impl<M: Matrix<T = T>, CG: CodegenModule> Default for DiffSlContext<M, CG> {
     fn default() -> Self {
         Self::new(
             "
@@ -104,17 +104,17 @@ impl<M: Matrix<T = T>> Default for DiffSlContext<M> {
     }
 }
 
-pub struct DiffSl<'a, M: Matrix<T = T>> {
-    context: &'a DiffSlContext<M>,
-    rhs: Rc<DiffSlRhs<'a, M>>,
-    mass: Option<Rc<DiffSlMass<'a, M>>>,
-    root: Rc<DiffSlRoot<'a, M>>,
-    init: Rc<DiffSlInit<'a, M>>,
-    out: Rc<DiffSlOut<'a, M>>,
+pub struct DiffSl<'a, M: Matrix<T = T>, CG: CodegenModule> {
+    context: &'a DiffSlContext<M, CG>,
+    rhs: Rc<DiffSlRhs<'a, M, CG>>,
+    mass: Option<Rc<DiffSlMass<'a, M, CG>>>,
+    root: Rc<DiffSlRoot<'a, M, CG>>,
+    init: Rc<DiffSlInit<'a, M, CG>>,
+    out: Rc<DiffSlOut<'a, M, CG>>,
 }
 
-impl<'a, M: Matrix<T = T>> DiffSl<'a, M> {
-    pub fn new(context: &'a DiffSlContext<M>, use_coloring: bool) -> Self {
+impl<'a, M: Matrix<T = T>, CG: CodegenModule> DiffSl<'a, M, CG> {
+    pub fn new(context: &'a DiffSlContext<M, CG>, use_coloring: bool) -> Self {
         let rhs = Rc::new(DiffSlRhs::new(context, use_coloring));
         let mass = DiffSlMass::new(context, use_coloring).map(Rc::new);
         let root = Rc::new(DiffSlRoot::new(context));
@@ -131,50 +131,50 @@ impl<'a, M: Matrix<T = T>> DiffSl<'a, M> {
     }
 }
 
-pub struct DiffSlRoot<'a, M: Matrix<T = T>> {
-    context: &'a DiffSlContext<M>,
+pub struct DiffSlRoot<'a, M: Matrix<T = T>, CG: CodegenModule> {
+    context: &'a DiffSlContext<M, CG>,
 }
 
-pub struct DiffSlOut<'a, M: Matrix<T = T>> {
-    context: &'a DiffSlContext<M>,
+pub struct DiffSlOut<'a, M: Matrix<T = T>, CG: CodegenModule> {
+    context: &'a DiffSlContext<M, CG>,
 }
 
-pub struct DiffSlRhs<'a, M: Matrix<T = T>> {
-    context: &'a DiffSlContext<M>,
+pub struct DiffSlRhs<'a, M: Matrix<T = T>, CG: CodegenModule> {
+    context: &'a DiffSlContext<M, CG>,
     coloring: Option<JacobianColoring<M>>,
     sparsity: Option<M::Sparsity>,
 }
 
-pub struct DiffSlMass<'a, M: Matrix<T = T>> {
-    context: &'a DiffSlContext<M>,
+pub struct DiffSlMass<'a, M: Matrix<T = T>, CG: CodegenModule> {
+    context: &'a DiffSlContext<M, CG>,
     coloring: Option<JacobianColoring<M>>,
     sparsity: Option<M::Sparsity>,
 }
 
-pub struct DiffSlInit<'a, M: Matrix<T = T>> {
-    context: &'a DiffSlContext<M>,
+pub struct DiffSlInit<'a, M: Matrix<T = T>, CG: CodegenModule> {
+    context: &'a DiffSlContext<M, CG>,
 }
 
-impl<'a, M: Matrix<T = T>> DiffSlOut<'a, M> {
-    pub fn new(context: &'a DiffSlContext<M>) -> Self {
+impl<'a, M: Matrix<T = T>, CG: CodegenModule> DiffSlOut<'a, M, CG> {
+    pub fn new(context: &'a DiffSlContext<M, CG>) -> Self {
         Self { context }
     }
 }
 
-impl<'a, M: Matrix<T = T>> DiffSlRoot<'a, M> {
-    pub fn new(context: &'a DiffSlContext<M>) -> Self {
+impl<'a, M: Matrix<T = T>, CG: CodegenModule> DiffSlRoot<'a, M, CG> {
+    pub fn new(context: &'a DiffSlContext<M, CG>) -> Self {
         Self { context }
     }
 }
 
-impl<'a, M: Matrix<T = T>> DiffSlInit<'a, M> {
-    pub fn new(context: &'a DiffSlContext<M>) -> Self {
+impl<'a, M: Matrix<T = T>, CG: CodegenModule> DiffSlInit<'a, M, CG> {
+    pub fn new(context: &'a DiffSlContext<M, CG>) -> Self {
         Self { context }
     }
 }
 
-impl<'a, M: Matrix<T = T>> DiffSlRhs<'a, M> {
-    pub fn new(context: &'a DiffSlContext<M>, use_coloring: bool) -> Self {
+impl<'a, M: Matrix<T = T>, CG: CodegenModule> DiffSlRhs<'a, M, CG> {
+    pub fn new(context: &'a DiffSlContext<M, CG>, use_coloring: bool) -> Self {
         let mut ret = Self {
             context,
             coloring: None,
@@ -195,8 +195,8 @@ impl<'a, M: Matrix<T = T>> DiffSlRhs<'a, M> {
     }
 }
 
-impl<'a, M: Matrix<T = T>> DiffSlMass<'a, M> {
-    pub fn new(context: &'a DiffSlContext<M>, use_coloring: bool) -> Option<Self> {
+impl<'a, M: Matrix<T = T>, CG: CodegenModule> DiffSlMass<'a, M, CG> {
+    pub fn new(context: &'a DiffSlContext<M, CG>, use_coloring: bool) -> Option<Self> {
         if !context.compiler.has_mass() {
             return None;
         }
@@ -221,7 +221,7 @@ impl<'a, M: Matrix<T = T>> DiffSlMass<'a, M> {
 
 macro_rules! impl_op_for_diffsl {
     ($name:ident) => {
-        impl<M: Matrix<T = T>> Op for $name<'_, M> {
+        impl<M: Matrix<T = T>, CG: CodegenModule> Op for $name<'_, M, CG> {
             type M = M;
             type T = T;
             type V = M::V;
@@ -246,7 +246,7 @@ macro_rules! impl_op_for_diffsl {
 impl_op_for_diffsl!(DiffSlRhs);
 impl_op_for_diffsl!(DiffSlMass);
 
-impl<M: Matrix<T = T>> Op for DiffSlInit<'_, M> {
+impl<M: Matrix<T = T>, CG: CodegenModule> Op for DiffSlInit<'_, M, CG> {
     type M = M;
     type T = T;
     type V = M::V;
@@ -263,7 +263,7 @@ impl<M: Matrix<T = T>> Op for DiffSlInit<'_, M> {
     }
 }
 
-impl<M: Matrix<T = T>> Op for DiffSlRoot<'_, M> {
+impl<M: Matrix<T = T>, CG: CodegenModule> Op for DiffSlRoot<'_, M, CG> {
     type M = M;
     type T = T;
     type V = M::V;
@@ -280,7 +280,7 @@ impl<M: Matrix<T = T>> Op for DiffSlRoot<'_, M> {
     }
 }
 
-impl<M: Matrix<T = T>> Op for DiffSlOut<'_, M> {
+impl<M: Matrix<T = T>, CG: CodegenModule> Op for DiffSlOut<'_, M, CG> {
     type M = M;
     type T = T;
     type V = M::V;
@@ -296,7 +296,7 @@ impl<M: Matrix<T = T>> Op for DiffSlOut<'_, M> {
     }
 }
 
-impl<M: Matrix<T = T>> ConstantOp for DiffSlInit<'_, M> {
+impl<M: Matrix<T = T>, CG: CodegenModule> ConstantOp for DiffSlInit<'_, M, CG> {
     fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
         self.context.compiler.set_u0(
             y.as_mut_slice(),
@@ -305,7 +305,7 @@ impl<M: Matrix<T = T>> ConstantOp for DiffSlInit<'_, M> {
     }
 }
 
-impl<M: Matrix<T = T>> NonLinearOp for DiffSlRoot<'_, M> {
+impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlRoot<'_, M, CG> {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
         self.context.compiler.calc_stop(
             t,
@@ -320,7 +320,7 @@ impl<M: Matrix<T = T>> NonLinearOp for DiffSlRoot<'_, M> {
     }
 }
 
-impl<M: Matrix<T = T>> NonLinearOp for DiffSlOut<'_, M> {
+impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlOut<'_, M, CG> {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
         self.context.compiler.calc_out(
             t,
@@ -349,7 +349,7 @@ impl<M: Matrix<T = T>> NonLinearOp for DiffSlOut<'_, M> {
     }
 }
 
-impl<M: Matrix<T = T>> NonLinearOp for DiffSlRhs<'_, M> {
+impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlRhs<'_, M, CG> {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
         self.context.compiler.rhs(
             t,
@@ -381,7 +381,7 @@ impl<M: Matrix<T = T>> NonLinearOp for DiffSlRhs<'_, M> {
     }
 }
 
-impl<M: Matrix<T = T>> LinearOp for DiffSlMass<'_, M> {
+impl<M: Matrix<T = T>, CG: CodegenModule> LinearOp for DiffSlMass<'_, M, CG> {
     fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
         let mut tmp = self.context.tmp.borrow_mut();
         self.context.compiler.mass(
@@ -404,15 +404,15 @@ impl<M: Matrix<T = T>> LinearOp for DiffSlMass<'_, M> {
     }
 }
 
-impl<'a, M: Matrix<T = T>> OdeEquations for DiffSl<'a, M> {
+impl<'a, M: Matrix<T = T>, CG: CodegenModule> OdeEquations for DiffSl<'a, M, CG> {
     type M = M;
     type T = T;
     type V = M::V;
-    type Mass = DiffSlMass<'a, M>;
-    type Rhs = DiffSlRhs<'a, M>;
-    type Root = DiffSlRoot<'a, M>;
-    type Init = DiffSlInit<'a, M>;
-    type Out = DiffSlOut<'a, M>;
+    type Mass = DiffSlMass<'a, M, CG>;
+    type Rhs = DiffSlRhs<'a, M, CG>;
+    type Root = DiffSlRoot<'a, M, CG>;
+    type Init = DiffSlInit<'a, M, CG>;
+    type Out = DiffSlOut<'a, M, CG>;
 
     fn rhs(&self) -> &Rc<Self::Rhs> {
         &self.rhs
@@ -451,6 +451,7 @@ impl<'a, M: Matrix<T = T>> OdeEquations for DiffSl<'a, M> {
 
 #[cfg(test)]
 mod tests {
+    use diffsl::{execution::module::CodegenModule, CraneliftModule};
     use nalgebra::DVector;
 
     use crate::{
@@ -460,7 +461,17 @@ mod tests {
     use super::{DiffSl, DiffSlContext};
 
     #[test]
-    fn diffsl_logistic_growth() {
+    fn diffsl_logistic_growth_cranelift() {
+        diffsl_logistic_growth::<CraneliftModule>();
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn diffsl_logistic_growth_llvm() {
+        diffsl_logistic_growth::<diffsl::LlvmModule>();
+    }
+
+    fn diffsl_logistic_growth<CG: CodegenModule>() {
         let text = "
             in = [r, k]
             r { 1 }
@@ -489,7 +500,7 @@ mod tests {
 
         let k = 1.0;
         let r = 1.0;
-        let context = DiffSlContext::<nalgebra::DMatrix<f64>>::new(text).unwrap();
+        let context = DiffSlContext::<nalgebra::DMatrix<f64>, CG>::new(text).unwrap();
         let mut eqn = DiffSl::new(&context, false);
         let p = DVector::from_vec(vec![r, k]);
         eqn.set_params(p);

@@ -682,15 +682,16 @@ impl OdeBuilder {
         self.build_ode(rhs, rhs_jac, init)
     }
 
-    /// Build an ODE problem using the DiffSL language (requires the `diffsl` feature).
+    /// Build an ODE problem using the DiffSL language (requires either the `diffsl-cranelift` or `diffls-llvm` features).
     /// The source code is provided as a string, please see the [DiffSL documentation](https://martinjrobins.github.io/diffsl/) for more information.
     #[cfg(feature = "diffsl")]
-    pub fn build_diffsl<M>(
+    pub fn build_diffsl<M, CG>(
         self,
-        context: &crate::ode_solver::diffsl::DiffSlContext<M>,
-    ) -> Result<OdeSolverProblem<crate::ode_solver::diffsl::DiffSl<'_, M>>, DiffsolError>
+        context: &crate::ode_solver::diffsl::DiffSlContext<M, CG>,
+    ) -> Result<OdeSolverProblem<crate::ode_solver::diffsl::DiffSl<'_, M, CG>>, DiffsolError>
     where
         M: Matrix<T = crate::ode_solver::diffsl::T>,
+        CG: diffsl::execution::module::CodegenModule
     {
         use crate::ode_solver::diffsl;
         let p = Self::build_p::<M::V>(self.p);

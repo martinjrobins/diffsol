@@ -16,12 +16,14 @@ faer = []
 nalgebra = []
 sundials = ["suitesparse_sys", "bindgen", "cc"]
 suitesparse = ["suitesparse_sys"]
+diffsl-cranelift = ["diffsl-no-llvm", "diffsl"]
 diffsl = []
-diffsl-llvm13 = ["diffsl13-0", "diffsl"]
-diffsl-llvm14 = ["diffsl14-0", "diffsl"]
-diffsl-llvm15 = ["diffsl15-0", "diffsl"]
-diffsl-llvm16 = ["diffsl16-0", "diffsl"]
-diffsl-llvm17 = ["diffsl17-0", "diffsl"]
+diffsl-llvm = []
+diffsl-llvm13 = ["diffsl13-0", "diffsl-llvm", "diffsl"]
+diffsl-llvm14 = ["diffsl14-0", "diffsl-llvm", "diffsl"]
+diffsl-llvm15 = ["diffsl15-0", "diffsl-llvm", "diffsl"]
+diffsl-llvm16 = ["diffsl16-0", "diffsl-llvm", "diffsl"]
+diffsl-llvm17 = ["diffsl17-0", "diffsl-llvm", "diffsl"]
 
 [dependencies]
 nalgebra = "0.33"
@@ -29,11 +31,12 @@ nalgebra-sparse = { version = "0.10", features = ["io"] }
 num-traits = "0.2.17"
 ouroboros = "0.18.2"
 serde = { version = "1.0.196", features = ["derive"] }
-diffsl13-0 = { package = "diffsl", version = "=0.1.9", features = ["llvm13-0"], optional = true }
-diffsl14-0 = { package = "diffsl", version = "=0.1.9", features = ["llvm14-0"], optional = true }
-diffsl15-0 = { package = "diffsl", version = "=0.1.9", features = ["llvm15-0"], optional = true }
-diffsl16-0 = { package = "diffsl", version = "=0.1.9", features = ["llvm16-0"], optional = true }
-diffsl17-0 = { package = "diffsl", version = "=0.1.9", features = ["llvm17-0"], optional = true }
+diffsl-no-llvm = { package = "diffsl", version = "=0.2.0", optional = true }
+diffsl13-0 = { package = "diffsl", version = "=0.2.0", features = ["llvm13-0"], optional = true }
+diffsl14-0 = { package = "diffsl", version = "=0.2.0", features = ["llvm14-0"], optional = true }
+diffsl15-0 = { package = "diffsl", version = "=0.2.0", features = ["llvm15-0"], optional = true }
+diffsl16-0 = { package = "diffsl", version = "=0.2.0", features = ["llvm16-0"], optional = true }
+diffsl17-0 = { package = "diffsl", version = "=0.2.0", features = ["llvm17-0"], optional = true }
 petgraph = "0.6.4"
 faer = "0.18.2"
 suitesparse_sys = { version = "0.1.3", optional = true }
