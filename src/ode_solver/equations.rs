@@ -84,10 +84,15 @@ pub trait OdeEquations {
 }
 
 /// This struct implements the ODE equation trait [OdeEquations] for a given right-hand side op, mass op, optional root op, and initial condition function.
-/// While the [crate::OdeBuilder] struct is the easiest way to define an ODE problem, occasionally a user might want to use their own structs that define the equations instead of closures or the DiffSL languave, and this can be done using [OdeSolverEquations].
 ///
-/// The main traits that you need to implement are the [crate::Op] and [NonLinearOp] trait, which define a nonlinear operator or function `F` that maps an input vector `x` to an output vector `y`, (i.e. `y = F(x)`).
-/// Once you have implemented this trait, you can then pass an instance of your struct to the `rhs` argument of the [Self::new] method. Once you have created an instance of [OdeSolverEquations], you can then use [crate::OdeSolverProblem::new] to create a problem.
+/// While the [crate::OdeBuilder] struct is the easiest way to define an ODE problem,
+/// occasionally a user might want to use their own structs that define the equations instead of closures or the DiffSL languave,
+/// and this can be done using [OdeSolverEquations].
+///
+/// The main traits that you need to implement are the [crate::Op] and [NonLinearOp] trait,
+/// which define a nonlinear operator or function `F` that maps an input vector `x` to an output vector `y`, (i.e. `y = F(x)`).
+/// Once you have implemented this trait, you can then pass an instance of your struct to the `rhs` argument of the [Self::new] method.
+/// Once you have created an instance of [OdeSolverEquations], you can then use [crate::OdeSolverProblem::new] to create a problem.
 ///
 /// For example:
 ///

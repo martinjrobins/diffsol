@@ -27,6 +27,7 @@ use super::bdf::BdfStatistics;
 use super::jacobian_update::SolverState;
 
 /// A singly diagonally implicit Runge-Kutta method. Can optionally have an explicit first stage for ESDIRK methods.
+///
 /// The particular method is defined by the [Tableau] used to create the solver.
 /// If the `beta` matrix of the [Tableau] is present this is used for interpolation, otherwise hermite interpolation is used.
 ///

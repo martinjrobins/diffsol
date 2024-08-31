@@ -33,6 +33,7 @@ pub struct BdfStatistics {
 }
 
 /// Implements a Backward Difference formula (BDF) implicit multistep integrator.
+///
 /// The basic algorithm is derived in \[1\]. This
 /// particular implementation follows that implemented in the Matlab routine ode15s
 /// described in \[2\] and the SciPy implementation
@@ -1100,14 +1101,16 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
-    #[cfg(feature = "diffsl")]
+    #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_test_nalgebra_diffsl_robertson() {
+        use diffsl::LlvmModule;
+
         use crate::ode_solver::test_models::robertson;
         let mut context = crate::DiffSlContext::default();
         let mut s = Bdf::default();
         robertson::robertson_diffsl_compile(&mut context);
-        let (problem, soln) = robertson::robertson_diffsl_problem::<M>(&context, false);
+        let (problem, soln) = robertson::robertson_diffsl_problem::<M, LlvmModule>(&context, false);
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
@@ -1281,16 +1284,18 @@ mod test {
         "###);
     }
 
-    #[cfg(feature = "diffsl")]
+    #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn test_bdf_faer_sparse_heat2d_diffsl() {
+        use diffsl::LlvmModule;
+
         use crate::ode_solver::test_models::heat2d::{self, heat2d_diffsl_compile};
         let linear_solver = FaerSparseLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut context = crate::DiffSlContext::default();
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
-        heat2d_diffsl_compile::<SparseColMat<f64>, 10>(&mut context);
-        let (problem, soln) = heat2d::heat2d_diffsl_problem::<SparseColMat<f64>>(&context);
+        heat2d_diffsl_compile::<SparseColMat<f64>, LlvmModule, 10>(&mut context);
+        let (problem, soln) = heat2d::heat2d_diffsl_problem(&context);
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
@@ -1312,16 +1317,18 @@ mod test {
         "###);
     }
 
-    #[cfg(feature = "diffsl")]
+    #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn test_bdf_faer_sparse_foodweb_diffsl() {
+        use diffsl::LlvmModule;
+
         use crate::ode_solver::test_models::foodweb;
         let mut context = crate::DiffSlContext::default();
         let linear_solver = FaerSparseLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
-        foodweb::foodweb_diffsl_compile::<SparseColMat<f64>, 10>(&mut context);
-        let (problem, soln) = foodweb::foodweb_diffsl_problem::<SparseColMat<f64>>(&context);
+        foodweb::foodweb_diffsl_compile::<SparseColMat<f64>, LlvmModule, 10>(&mut context);
+        let (problem, soln) = foodweb::foodweb_diffsl_problem(&context);
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 

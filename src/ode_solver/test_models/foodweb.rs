@@ -23,9 +23,11 @@ const ALPHA: f64 = 50.0;
 const BETA: f64 = 1000.0;
 
 #[cfg(feature = "diffsl")]
-pub fn foodweb_diffsl_compile<M, const NX: usize>(diffsl_context: &mut crate::DiffSlContext<M>)
-where
+pub fn foodweb_diffsl_compile<M, CG, const NX: usize>(
+    diffsl_context: &mut crate::DiffSlContext<M, CG>,
+) where
     M: Matrix<T = f64>,
+    CG: diffsl::execution::module::CodegenModule,
 {
     let context = FoodWebContext::<M, NX>::default();
     let (problem, _soln) = foodweb_problem::<M, NX>(&context);
@@ -135,14 +137,15 @@ where
 }
 
 #[cfg(feature = "diffsl")]
-pub fn foodweb_diffsl_problem<M>(
-    diffsl_context: &crate::DiffSlContext<M>,
+pub fn foodweb_diffsl_problem<M, CG>(
+    diffsl_context: &crate::DiffSlContext<M, CG>,
 ) -> (
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
     OdeSolverSolution<M::V>,
 )
 where
     M: Matrix<T = f64>,
+    CG: diffsl::execution::module::CodegenModule,
 {
     use crate::OdeBuilder;
 
@@ -1054,20 +1057,22 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "diffsl")]
+    #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn test_diffsl() {
+        use diffsl::LlvmModule;
+
         type M = nalgebra::DMatrix<f64>;
         const NX: usize = 10;
         let context = FoodWebContext::<M, NX>::new();
-        let (problem, _soln) = foodweb_problem::<M, NX>(&context);
+        let (problem, _soln) = foodweb_problem(&context);
         let u0 = problem.eqn.init().call(0.0);
         let jac = problem.eqn.rhs().jacobian(&u0, 0.0);
         let y0 = problem.eqn.rhs().call(&u0, 0.0);
 
-        let mut diffsl_context = crate::DiffSlContext::<M>::default();
-        foodweb_diffsl_compile::<M, NX>(&mut diffsl_context);
-        let (problem_diffsl, _soln) = foodweb_diffsl_problem::<M>(&diffsl_context);
+        let mut diffsl_context = crate::DiffSlContext::default();
+        foodweb_diffsl_compile::<M, LlvmModule, NX>(&mut diffsl_context);
+        let (problem_diffsl, _soln) = foodweb_diffsl_problem(&diffsl_context);
         let u0_diffsl = problem_diffsl.eqn.init().call(0.0);
         for i in 0..u0.len() {
             let i_diffsl = if i % NUM_SPECIES >= NPREY {

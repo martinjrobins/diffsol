@@ -19,6 +19,8 @@ pub mod matrix;
 pub mod sdirk;
 pub mod unit;
 
+/// A generic operator trait.
+///
 /// Op is a trait for operators that, given a paramter vector `p`, operates on an input vector `x` to produce an output vector `y`.
 /// It defines the number of states (i.e. length of `x`), the number of outputs (i.e. length of `y`), and number of parameters (i.e. length of `p`) of the operator.
 /// It also defines the type of the scalar, vector, and matrices used in the operator.
@@ -199,6 +201,7 @@ pub trait NonLinearOp: Op {
 }
 
 /// LinearOp is a trait for linear operators (i.e. they only depend linearly on the input `x`), see [NonLinearOp] for a non-linear op.
+///
 /// An example of a linear operator is a matrix-vector product `y = A(t) * x`, where `A(t)` is a matrix.
 /// It extends the [Op] trait with methods for calling the operator via a GEMV-like operation (i.e. `y = t * A * x + beta * y`), and for computing the matrix representation of the operator.
 pub trait LinearOp: Op {

@@ -4,6 +4,8 @@ use petgraph::graph::NodeIndex;
 
 use super::graph::Graph;
 
+/// Greedy graph coloring algorithm.
+///
 /// Find a coloring of a given input graph such that
 /// no two vertices connected by an edge have the same
 /// color using greedy approach. The number of colors
