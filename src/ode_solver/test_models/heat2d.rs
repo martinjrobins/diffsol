@@ -17,8 +17,12 @@ use num_traits::{One, Zero};
 use crate::{ConstantOp, LinearOp, NonLinearOp};
 
 #[cfg(feature = "diffsl")]
-pub fn heat2d_diffsl_compile<M: Matrix<T = f64> + 'static, const MGRID: usize>(
-    context: &mut crate::DiffSlContext<M>,
+pub fn heat2d_diffsl_compile<
+    M: Matrix<T = f64> + 'static,
+    CG: diffsl::execution::module::CodegenModule,
+    const MGRID: usize,
+>(
+    context: &mut crate::DiffSlContext<M, CG>,
 ) {
     let (problem, _soln) = head2d_problem::<M, MGRID>();
     let u0 = problem.eqn.init().call(0.0);
@@ -87,8 +91,11 @@ pub fn heat2d_diffsl_compile<M: Matrix<T = f64> + 'static, const MGRID: usize>(
 }
 
 #[cfg(feature = "diffsl")]
-pub fn heat2d_diffsl_problem<M: Matrix<T = f64> + 'static>(
-    context: &crate::DiffSlContext<M>,
+pub fn heat2d_diffsl_problem<
+    M: Matrix<T = f64> + 'static,
+    CG: diffsl::execution::module::CodegenModule,
+>(
+    context: &crate::DiffSlContext<M, CG>,
 ) -> (
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
     OdeSolverSolution<M::V>,
@@ -321,11 +328,12 @@ mod tests {
     #[test]
     fn test_mass_diffsl() {
         use crate::SparseColMat;
+        use diffsl::CraneliftModule;
         use faer::Col;
 
         let mut context = crate::DiffSlContext::default();
-        heat2d_diffsl_compile::<SparseColMat<f64>, 5>(&mut context);
-        let (problem, _soln) = heat2d_diffsl_problem::<SparseColMat<f64>>(&context);
+        heat2d_diffsl_compile::<SparseColMat<f64>, CraneliftModule, 5>(&mut context);
+        let (problem, _soln) = heat2d_diffsl_problem(&context);
         let u = Col::from_vec(vec![
             1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
             17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0,

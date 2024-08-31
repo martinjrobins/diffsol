@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use diffsl::{Compiler, execution::module::CodegenModule};
+use diffsl::{execution::module::CodegenModule, Compiler};
 
 use crate::{
     error::DiffsolError,
@@ -14,15 +14,18 @@ pub type T = f64;
 
 /// Context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
 /// This contains the compiled code and the data structures needed to evaluate the ODE equations.
+/// Note that the example below uses the LLVM backend (requires one of the `diffsl-llvm` features),
+/// but the Cranelift backend can also be used using
+/// `diffsl::CraneliftModule` instead of `diffsl::LlvmModule` (requires `diffsl-cranelift` feature).
 ///
 /// # Example
 ///
 /// ```rust
-/// use diffsol::{OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod, DiffSlContext};
+/// use diffsol::{OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod, DiffSlContext, diffsl::LlvmModule};
 ///         
 /// // dy/dt = -ay
 /// // y(0) = 1
-/// let context = DiffSlContext::<nalgebra::DMatrix<f64>>::new("
+/// let context = DiffSlContext::<nalgebra::DMatrix<f64>, LlvmModule>::new("
 ///     in = [a]
 ///     a { 1 }
 ///     u { 1.0 }

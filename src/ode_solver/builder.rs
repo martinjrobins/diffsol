@@ -691,7 +691,7 @@ impl OdeBuilder {
     ) -> Result<OdeSolverProblem<crate::ode_solver::diffsl::DiffSl<'_, M, CG>>, DiffsolError>
     where
         M: Matrix<T = crate::ode_solver::diffsl::T>,
-        CG: diffsl::execution::module::CodegenModule
+        CG: diffsl::execution::module::CodegenModule,
     {
         use crate::ode_solver::diffsl;
         let p = Self::build_p::<M::V>(self.p);
