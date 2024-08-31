@@ -33,6 +33,7 @@ pub struct BdfStatistics {
 }
 
 /// Implements a Backward Difference formula (BDF) implicit multistep integrator.
+///
 /// The basic algorithm is derived in \[1\]. This
 /// particular implementation follows that implemented in the Matlab routine ode15s
 /// described in \[2\] and the SciPy implementation

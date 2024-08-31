@@ -19,6 +19,7 @@ pub enum OdeSolverStopReason<T: Scalar> {
 }
 
 /// Trait for ODE solver methods. This is the main user interface for the ODE solvers.
+///
 /// The solver is responsible for stepping the solution (given in the `OdeSolverState`), and interpolating the solution at a given time.
 /// However, the solver does not own the state, so the user is responsible for creating and managing the state. If the user
 /// wants to change the state, they should call `set_problem` again.

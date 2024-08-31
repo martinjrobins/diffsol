@@ -213,6 +213,8 @@ where
         self.eqn.rhs().jacobian_inplace(&state_y, t, y);
     }
 }
+/// Sensitivity equations for ODEs
+///
 /// Sensitivity equations are linear:
 /// M * ds/dt = J * s + f_p - M_p * dy/dt
 /// s(0) = dy(0)/dp

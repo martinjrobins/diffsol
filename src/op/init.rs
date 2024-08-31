@@ -4,6 +4,8 @@ use std::{cell::RefCell, rc::Rc};
 
 use super::{NonLinearOp, Op};
 
+/// Consistent initial conditions for an ODE system.
+///
 /// We calculate consistent initial conditions following the approach of
 /// Brown, P. N., Hindmarsh, A. C., & Petzold, L. R. (1998). Consistent initial condition calculation for differential-algebraic systems. SIAM Journal on Scientific Computing, 19(5), 1495-1512.
 pub struct InitOp<Eqn: OdeEquations> {
