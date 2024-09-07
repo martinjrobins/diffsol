@@ -532,21 +532,21 @@ mod tests {
         let mut solver = Bdf::default();
         let t = 1.0;
         let (ys, ts) = solver.solve(&problem, t).unwrap();
-        for (y, t) in ys.iter().zip(ts.iter()) {
+        for (i, t) in ts.iter().enumerate() {
             let y_expect = k / (1.0 + (k - y0) * (-r * t).exp() / y0);
             let z_expect = 2.0 * y_expect;
             let expected_out = DVector::from_vec(vec![3.0 * y_expect, 4.0 * z_expect]);
-            y.assert_eq_st(&expected_out, 1e-4);
+            ys.column(i).into_owned().assert_eq_st(&expected_out, 1e-4);
         }
 
         // do it again with some explicit t_evals
         let t_evals = vec![0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0];
         let ys = solver.solve_dense(&problem, &t_evals).unwrap();
-        for (y, t) in ys.iter().zip(t_evals.iter()) {
+        for (i, t) in t_evals.iter().enumerate() {
             let y_expect = k / (1.0 + (k - y0) * (-r * t).exp() / y0);
             let z_expect = 2.0 * y_expect;
             let expected_out = DVector::from_vec(vec![3.0 * y_expect, 4.0 * z_expect]);
-            y.assert_eq_st(&expected_out, 1e-4);
+            ys.column(i).into_owned().assert_eq_st(&expected_out, 1e-4);
         }
     }
 }
