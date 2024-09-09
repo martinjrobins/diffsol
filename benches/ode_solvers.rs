@@ -1,13 +1,8 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use diffsol::{
     ode_solver::test_models::{
-        exponential_decay::exponential_decay_problem,
-        foodweb::{foodweb_problem, FoodWebContext},
-        heat2d::head2d_problem,
-        robertson::robertson,
-        robertson_ode::robertson_ode,
-    },
-    FaerLU, FaerSparseLU, NalgebraLU, SparseColMat,
+        exponential_decay::exponential_decay_problem, foodweb::foodweb_problem, heat2d::head2d_problem, robertson::robertson, robertson_ode::robertson_ode, foodweb::FoodWebContext,
+    }, FaerLU, FaerSparseLU, NalgebraLU, SparseColMat
 };
 
 #[cfg(feature = "sundials")]

@@ -92,7 +92,7 @@
 //!
 
 #[cfg(feature = "diffsl-cranelift")]
-pub extern crate diffsl;
+pub extern crate diffsl_no_llvm as diffsl;
 #[cfg(feature = "diffsl-llvm13")]
 pub extern crate diffsl13_0 as diffsl;
 #[cfg(feature = "diffsl-llvm14")]

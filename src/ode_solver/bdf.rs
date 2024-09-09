@@ -891,7 +891,7 @@ mod test {
                 dydt_y2::dydt_y2_problem,
                 exponential_decay::{
                     exponential_decay_problem, exponential_decay_problem_sens,
-                    exponential_decay_problem_with_root,
+                    exponential_decay_problem_with_root, negative_exponential_decay_problem,
                 },
                 exponential_decay_with_algebraic::{
                     exponential_decay_with_algebraic_problem,
@@ -936,6 +936,14 @@ mod test {
         let s = Bdf::default();
         test_state_mut_on_problem(s, p, soln);
     }
+    
+    #[test]
+    fn bdf_test_nalgebra_negative_exponential_decay() {
+        let mut s = Bdf::default();
+        let (problem, soln) = negative_exponential_decay_problem::<M>(false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+    }
+     
 
     #[test]
     fn bdf_test_nalgebra_exponential_decay() {

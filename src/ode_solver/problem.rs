@@ -94,6 +94,7 @@ pub struct OdeSolverSolution<V: Vector> {
     pub sens_solution_points: Option<Vec<Vec<OdeSolverSolutionPoint<V>>>>,
     pub rtol: V::T,
     pub atol: V,
+    pub negative_time: bool,
 }
 
 impl<V: Vector> OdeSolverSolution<V> {
@@ -105,10 +106,18 @@ impl<V: Vector> OdeSolverSolution<V> {
             .insert(index, OdeSolverSolutionPoint { state, t });
     }
     fn get_index(&self, t: V::T) -> usize {
-        self.solution_points
-            .iter()
-            .position(|x| x.t > t)
-            .unwrap_or(self.solution_points.len())
+        if self.negative_time {
+            return self
+                .solution_points
+                .iter()
+                .position(|x| x.t < t)
+                .unwrap_or(self.solution_points.len());
+        } else {
+            self.solution_points
+                .iter()
+                .position(|x| x.t > t)
+                .unwrap_or(self.solution_points.len())
+        }
     }
     pub fn push_sens(&mut self, state: V, t: V::T, sens: &[V]) {
         // find the index to insert the new point keeping the times sorted
@@ -140,6 +149,7 @@ impl<V: Vector> Default for OdeSolverSolution<V> {
             sens_solution_points: None,
             rtol: V::T::from(1e-6),
             atol: V::from_element(1, V::T::from(1e-6)),
+            negative_time: false,
         }
     }
 }
