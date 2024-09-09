@@ -87,8 +87,6 @@ mod tests {
             } else {
                 soln
             };
-            println!("t = {}", point.t);
-            println!("soln = {:?}", soln);
             assert_eq!(
                 soln.len(),
                 point.state.len(),
