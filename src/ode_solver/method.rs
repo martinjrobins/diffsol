@@ -7,8 +7,9 @@ use crate::{
     matrix::default_solver::DefaultSolver,
     ode_solver_error,
     scalar::Scalar,
-    scale, ConstantOp, InitOp, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations,
-    OdeSolverProblem, Op, SensEquations, SolverProblem, Vector,
+    scale, ConstantOp, DefaultDenseMatrix, DenseMatrix, InitOp, Matrix, MatrixCommon,
+    NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, Op,
+    SensEquations, SolverProblem, Vector, VectorViewMut,
 };
 
 #[derive(Debug, PartialEq)]
@@ -92,35 +93,69 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         &mut self,
         problem: &OdeSolverProblem<Eqn>,
         final_time: Eqn::T,
-    ) -> Result<(Vec<Eqn::V>, Vec<Eqn::T>), DiffsolError>
+    ) -> Result<(<Eqn::V as DefaultDenseMatrix>::M, Vec<Eqn::T>), DiffsolError>
     where
         Eqn::M: DefaultSolver,
+        Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
         let state = OdeSolverState::new(problem, self)?;
         self.set_problem(state, problem);
         let mut t = vec![self.state().unwrap().t];
-        let mut y = vec![];
-        match problem.eqn.out() {
-            Some(out) => y.push(out.call(&self.state().unwrap().y, self.state().unwrap().t)),
-            None => y.push(self.state().unwrap().y.clone()),
+        let nstates = problem.eqn.rhs().nstates();
+        let ntimes_guess = std::cmp::max(
+            10,
+            ((final_time - self.state().unwrap().t).abs() / self.state().unwrap().h)
+                .into()
+                .ceil() as usize,
+        );
+        let mut y = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, ntimes_guess);
+        {
+            let mut y_i = y.column_mut(0);
+            match problem.eqn.out() {
+                Some(out) => {
+                    y_i.copy_from(&out.call(&self.state().unwrap().y, self.state().unwrap().t))
+                }
+                None => y_i.copy_from(&self.state().unwrap().y),
+            }
         }
         self.set_stop_time(final_time)?;
         while self.step()? != OdeSolverStopReason::TstopReached {
             t.push(self.state().unwrap().t);
+            let mut y_i = {
+                let max_i = y.ncols();
+                let curr_i = t.len() - 1;
+                if curr_i >= max_i {
+                    y = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, max_i * 2);
+                }
+                y.column_mut(curr_i)
+            };
             match problem.eqn.out() {
-                Some(out) => y.push(out.call(&self.state().unwrap().y, self.state().unwrap().t)),
-                None => y.push(self.state().unwrap().y.clone()),
+                Some(out) => {
+                    y_i.copy_from(&out.call(&self.state().unwrap().y, self.state().unwrap().t))
+                }
+                None => y_i.copy_from(&self.state().unwrap().y),
             }
         }
 
         // store the final step
         t.push(self.state().unwrap().t);
-        match problem.eqn.out() {
-            Some(out) => y.push(out.call(&self.state().unwrap().y, self.state().unwrap().t)),
-            None => y.push(self.state().unwrap().y.clone()),
+        {
+            let mut y_i = {
+                let max_i = y.ncols();
+                let curr_i = t.len() - 1;
+                if curr_i >= max_i {
+                    y = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, max_i + 1);
+                }
+                y.column_mut(curr_i)
+            };
+            match problem.eqn.out() {
+                Some(out) => {
+                    y_i.copy_from(&out.call(&self.state().unwrap().y, self.state().unwrap().t))
+                }
+                None => y_i.copy_from(&self.state().unwrap().y),
+            }
         }
-
         Ok((y, t))
     }
 
@@ -131,14 +166,16 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         &mut self,
         problem: &OdeSolverProblem<Eqn>,
         t_eval: &[Eqn::T],
-    ) -> Result<Vec<Eqn::V>, DiffsolError>
+    ) -> Result<<Eqn::V as DefaultDenseMatrix>::M, DiffsolError>
     where
         Eqn::M: DefaultSolver,
+        Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
         let state = OdeSolverState::new(problem, self)?;
         self.set_problem(state, problem);
-        let mut ret = vec![];
+        let nstates = problem.eqn.rhs().nstates();
+        let mut ret = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, t_eval.len());
 
         // check t_eval is increasing and all values are greater than or equal to the current time
         let t0 = self.state().unwrap().t;
@@ -149,14 +186,15 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         // do loop
         self.set_stop_time(t_eval[t_eval.len() - 1])?;
         let mut step_reason = OdeSolverStopReason::InternalTimestep;
-        for t in t_eval.iter().take(t_eval.len() - 1) {
+        for (i, t) in t_eval.iter().take(t_eval.len() - 1).enumerate() {
             while self.state().unwrap().t < *t {
                 step_reason = self.step()?;
             }
             let y = self.interpolate(*t)?;
+            let mut y_out = ret.column_mut(i);
             match problem.eqn.out() {
-                Some(out) => ret.push(out.call(&y, *t)),
-                None => ret.push(y),
+                Some(out) => y_out.copy_from(&out.call(&y, *t)),
+                None => y_out.copy_from(&y),
             }
         }
 
@@ -164,9 +202,14 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         while step_reason != OdeSolverStopReason::TstopReached {
             step_reason = self.step()?;
         }
-        match problem.eqn.out() {
-            Some(out) => ret.push(out.call(&self.state().unwrap().y, self.state().unwrap().t)),
-            None => ret.push(self.state().unwrap().y.clone()),
+        {
+            let mut y_out = ret.column_mut(t_eval.len() - 1);
+            match problem.eqn.out() {
+                Some(out) => {
+                    y_out.copy_from(&out.call(&self.state().unwrap().y, self.state().unwrap().t))
+                }
+                None => y_out.copy_from(&self.state().unwrap().y),
+            }
         }
         Ok(ret)
     }

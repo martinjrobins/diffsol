@@ -8,9 +8,6 @@ use diffsol::{
     FaerLU, FaerSparseLU, NalgebraLU, SparseColMat,
 };
 
-#[cfg(feature = "sundials")]
-use diffsol::SundialsLinearSolver;
-
 #[cfg(feature = "suitesparse")]
 use diffsol::KLU;
 
@@ -53,15 +50,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         exponential_decay_problem,
         nalgebra::DMatrix<f64>
     );
-    #[cfg(feature = "sundials")]
-    bench!(
-        sundials_exponential_decay,
-        sundials,
-        SundialsLinearSolver,
-        exponential_decay,
-        exponential_decay_problem,
-        diffsol::SundialsMatrix
-    );
     bench!(
         nalgebra_bdf_robertson,
         bdf,
@@ -85,15 +73,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         robertson,
         robertson,
         nalgebra::DMatrix<f64>
-    );
-    #[cfg(feature = "sundials")]
-    bench!(
-        sundials_robertson,
-        sundials,
-        SundialsLinearSolver,
-        robertson,
-        robertson,
-        diffsol::SundialsMatrix
     );
     bench!(
         faer_bdf_exponential_decay,
@@ -623,20 +602,6 @@ mod benchmarks {
     {
         let tableau = Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::tr_bdf2();
         let mut s = Sdirk::new(tableau, linear_solver);
-        let _y = s.solve(problem, t);
-    }
-
-    #[cfg(feature = "sundials")]
-    pub fn sundials<Eqn>(
-        problem: &OdeSolverProblem<Eqn>,
-        t: Eqn::T,
-        _ls: impl LinearSolver<Eqn::Rhs>,
-    ) where
-        Eqn: OdeEquations<M = diffsol::SundialsMatrix, V = diffsol::SundialsVector, T = f64>,
-    {
-        use diffsol::SundialsIda;
-
-        let mut s = SundialsIda::default();
         let _y = s.solve(problem, t);
     }
 }

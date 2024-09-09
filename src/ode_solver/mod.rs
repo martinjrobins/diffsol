@@ -26,7 +26,7 @@ mod tests {
     use crate::matrix::Matrix;
     use crate::op::unit::UnitCallable;
     use crate::op::{NonLinearOp, Op};
-    use crate::{ConstantOp, DefaultSolver, Vector};
+    use crate::{ConstantOp, DefaultDenseMatrix, DefaultSolver, Vector};
     use crate::{
         OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
     };
@@ -296,6 +296,7 @@ mod tests {
         Eqn: OdeEquations,
         Method: OdeSolverMethod<Eqn>,
         Eqn::M: DefaultSolver,
+        Eqn::V: DefaultDenseMatrix,
     {
         // solve for a little bit
         s.solve(&problem, Eqn::T::from(1.0)).unwrap();
