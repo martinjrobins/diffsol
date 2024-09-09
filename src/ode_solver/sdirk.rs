@@ -629,7 +629,9 @@ where
 
         // check that t is within the current step depending on the direction
         let is_forward = state.h > Eqn::T::zero();
-        if (is_forward && (t > state.t || t < self.old_t)) || (!is_forward && (t < state.t || t > self.old_t)) {
+        if (is_forward && (t > state.t || t < self.old_t))
+            || (!is_forward && (t < state.t || t > self.old_t))
+        {
             return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
         }
         let dt = state.t - self.old_t;
@@ -676,7 +678,9 @@ where
 
         // check that t is within the current step depending on the direction
         let is_forward = state.h > Eqn::T::zero();
-        if (is_forward && (t > state.t || t < self.old_t)) || (!is_forward && (t < state.t || t > self.old_t)) {
+        if (is_forward && (t > state.t || t < self.old_t))
+            || (!is_forward && (t < state.t || t > self.old_t))
+        {
             return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
         }
 

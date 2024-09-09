@@ -38,7 +38,7 @@ fn exponential_decay_root<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V
 }
 
 pub fn negative_exponential_decay_problem<M: Matrix + 'static>(
-    use_coloring: bool
+    use_coloring: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
@@ -71,7 +71,7 @@ pub fn negative_exponential_decay_problem<M: Matrix + 'static>(
 }
 
 pub fn exponential_decay_problem<M: Matrix + 'static>(
-    use_coloring: bool
+    use_coloring: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,

@@ -351,10 +351,10 @@ impl<V: Vector> OdeSolverState<V> {
         } else {
             Eqn::T::from(0.01) * (d0 / d1)
         };
-        
+
         // make sure we preserve the sign of h0
         let is_neg_h = ode_problem.h0 < Eqn::T::zero();
-        
+
         let f1 = if is_neg_h {
             let y1 = f0.clone() * scale(-h0) + y0;
             let t1 = t0 - h0;
@@ -388,7 +388,7 @@ impl<V: Vector> OdeSolverState<V> {
         if self.h > h1 {
             self.h = h1;
         }
-        
+
         if is_neg_h {
             self.h = -self.h;
         }
