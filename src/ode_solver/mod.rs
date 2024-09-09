@@ -72,7 +72,7 @@ mod tests {
                     ),
                 }
             } else {
-                while method.state().unwrap().t < point.t {
+                while method.state().unwrap().t.abs() < point.t.abs() {
                     if let OdeSolverStopReason::RootFound(t) = method.step().unwrap() {
                         assert!(have_root);
                         return method.interpolate(t).unwrap();

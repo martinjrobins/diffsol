@@ -245,7 +245,7 @@ where
 
         // if step size too small, then fail
         let state = self.state.as_ref().unwrap();
-        if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
+        if state.h.abs() < Eqn::T::from(Self::MIN_TIMESTEP) {
             return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
                 time: state.t.into(),
             }));
@@ -507,8 +507,9 @@ where
                 return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
         }
-        // check that t is before the current time
-        if t > state.t {
+        // check that t is before/after the current time depending on the direction
+        let is_forward = state.h > Eqn::T::zero();
+        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
             return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
         }
         Ok(Self::interpolate_from_diff(
@@ -526,8 +527,9 @@ where
                 return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
         }
-        // check that t is before the current time
-        if t > state.t {
+        // check that t is before/after the current time depending on the direction
+        let is_forward = state.h > Eqn::T::zero();
+        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
             return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
         }
 
