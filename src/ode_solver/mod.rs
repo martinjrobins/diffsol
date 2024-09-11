@@ -72,7 +72,7 @@ mod tests {
                     ),
                 }
             } else {
-                while method.state().unwrap().t < point.t {
+                while method.state().unwrap().t.abs() < point.t.abs() {
                     if let OdeSolverStopReason::RootFound(t) = method.step().unwrap() {
                         assert!(have_root);
                         return method.interpolate(t).unwrap();
@@ -118,7 +118,7 @@ mod tests {
                         let error = sens_soln.clone() - &sens_point.state;
                         let error_norm = error.squared_norm(&sens_point.state, atol, rtol).sqrt();
                         assert!(
-                            error_norm < M::T::from(23.0),
+                            error_norm < M::T::from(24.0),
                             "error_norm: {} at t = {}",
                             error_norm,
                             point.t

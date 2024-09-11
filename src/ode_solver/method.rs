@@ -1,5 +1,5 @@
 use nalgebra::ComplexField;
-use num_traits::{One, Pow};
+use num_traits::{One, Pow, Zero};
 use std::rc::Rc;
 
 use crate::{
@@ -395,12 +395,21 @@ impl<V: Vector> OdeSolverState<V> {
             Eqn::T::from(0.01) * (d0 / d1)
         };
 
-        let y1 = f0.clone() * scale(h0) + y0;
-        let t1 = t0 + h0;
-        let f1 = ode_problem.eqn.rhs().call(&y1, t1);
+        // make sure we preserve the sign of h0
+        let is_neg_h = ode_problem.h0 < Eqn::T::zero();
+
+        let f1 = if is_neg_h {
+            let y1 = f0.clone() * scale(-h0) + y0;
+            let t1 = t0 - h0;
+            ode_problem.eqn.rhs().call(&y1, t1)
+        } else {
+            let y1 = f0.clone() * scale(h0) + y0;
+            let t1 = t0 + h0;
+            ode_problem.eqn.rhs().call(&y1, t1)
+        };
 
         let df = f1 - f0;
-        let d2 = df.squared_norm(y0, atol, rtol).sqrt() / h0;
+        let d2 = df.squared_norm(y0, atol, rtol).sqrt() / h0.abs();
 
         let mut max_d = d2;
         if max_d < d1 {
@@ -421,6 +430,10 @@ impl<V: Vector> OdeSolverState<V> {
         self.h = Eqn::T::from(100.0) * h0;
         if self.h > h1 {
             self.h = h1;
+        }
+
+        if is_neg_h {
+            self.h = -self.h;
         }
     }
 }

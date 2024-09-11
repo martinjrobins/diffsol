@@ -1,10 +1,8 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use diffsol::{
     ode_solver::test_models::{
-        exponential_decay::exponential_decay_problem,
-        foodweb::{foodweb_problem, FoodWebContext},
-        heat2d::head2d_problem,
-        robertson::robertson,
+        exponential_decay::exponential_decay_problem, foodweb::foodweb_problem,
+        foodweb::FoodWebContext, heat2d::head2d_problem, robertson::robertson,
         robertson_ode::robertson_ode,
     },
     FaerLU, FaerSparseLU, NalgebraLU, SparseColMat,

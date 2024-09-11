@@ -337,7 +337,7 @@ mod tests {
         sens_eqn.rhs.update_state(&state.y, &state.dy, state.t);
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 2);
-        assert_eq!(sens.ncols(), 1);
+        assert_eq!(sens.ncols(), 2);
         assert_eq!(sens[(0, 0)], -1.0);
         assert_eq!(sens[(1, 0)], -1.0);
 

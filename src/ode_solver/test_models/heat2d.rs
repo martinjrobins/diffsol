@@ -279,6 +279,7 @@ fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
         sens_solution_points: None,
         rtol: M::T::from(1e-5),
         atol: M::V::from_element(1, M::T::from(1e-5)),
+        negative_time: false,
     };
     let data = vec![
         (vec![0.28435774340267284], 0.0),

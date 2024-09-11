@@ -320,7 +320,7 @@ where
         let new_h = self.state.as_ref().unwrap().h * factor;
 
         // if step size too small, then fail
-        if new_h < Eqn::T::from(Self::MIN_TIMESTEP) {
+        if abs(new_h) < Eqn::T::from(Self::MIN_TIMESTEP) {
             return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
                 time: self.state.as_ref().unwrap().t.into(),
             }));
@@ -627,8 +627,11 @@ where
             }
         }
 
-        // check that t is within the current step
-        if t > state.t || t < self.old_t {
+        // check that t is within the current step depending on the direction
+        let is_forward = state.h > Eqn::T::zero();
+        if (is_forward && (t > state.t || t < self.old_t))
+            || (!is_forward && (t < state.t || t > self.old_t))
+        {
             return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
         }
         let dt = state.t - self.old_t;
@@ -673,10 +676,14 @@ where
             }
         }
 
-        // check that t is within the current step
-        if t > state.t || t < self.old_t {
+        // check that t is within the current step depending on the direction
+        let is_forward = state.h > Eqn::T::zero();
+        if (is_forward && (t > state.t || t < self.old_t))
+            || (!is_forward && (t < state.t || t > self.old_t))
+        {
             return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
         }
+
         let dt = state.t - self.old_t;
         let theta = if dt == Eqn::T::zero() {
             Eqn::T::one()
@@ -711,7 +718,7 @@ mod test {
             test_models::{
                 exponential_decay::{
                     exponential_decay_problem, exponential_decay_problem_sens,
-                    exponential_decay_problem_with_root,
+                    exponential_decay_problem_with_root, negative_exponential_decay_problem,
                 },
                 heat2d::head2d_problem,
                 robertson::robertson,
@@ -755,6 +762,14 @@ mod test {
     }
 
     #[test]
+    fn sdirk_test_nalgebra_negative_exponential_decay() {
+        let tableau = Tableau::<M>::esdirk34();
+        let mut s = Sdirk::<M, _, _>::new(tableau, NalgebraLU::default());
+        let (problem, soln) = negative_exponential_decay_problem::<M>(false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
+    }
+
+    #[test]
     fn test_tr_bdf2_nalgebra_exponential_decay() {
         let tableau = Tableau::<M>::tr_bdf2();
         let mut s = Sdirk::new(tableau, NalgebraLU::default());
@@ -785,15 +800,15 @@ mod test {
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 7
-        number_of_steps: 58
+        number_of_steps: 55
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 464
+        number_of_nonlinear_solver_iterations: 550
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 234
-        number_of_jac_muls: 237
+        number_of_calls: 222
+        number_of_jac_muls: 336
         number_of_matrix_evals: 2
         "###);
     }
@@ -829,15 +844,15 @@ mod test {
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 5
-        number_of_steps: 22
+        number_of_steps: 21
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 283
+        number_of_nonlinear_solver_iterations: 333
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 134
-        number_of_jac_muls: 154
+        number_of_calls: 128
+        number_of_jac_muls: 211
         number_of_matrix_evals: 1
         "###);
     }

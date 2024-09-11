@@ -245,7 +245,7 @@ where
 
         // if step size too small, then fail
         let state = self.state.as_ref().unwrap();
-        if state.h < Eqn::T::from(Self::MIN_TIMESTEP) {
+        if state.h.abs() < Eqn::T::from(Self::MIN_TIMESTEP) {
             return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
                 time: state.t.into(),
             }));
@@ -507,8 +507,9 @@ where
                 return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
         }
-        // check that t is before the current time
-        if t > state.t {
+        // check that t is before/after the current time depending on the direction
+        let is_forward = state.h > Eqn::T::zero();
+        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
             return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
         }
         Ok(Self::interpolate_from_diff(
@@ -526,8 +527,9 @@ where
                 return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
         }
-        // check that t is before the current time
-        if t > state.t {
+        // check that t is before/after the current time depending on the direction
+        let is_forward = state.h > Eqn::T::zero();
+        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
             return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
         }
 
@@ -891,7 +893,7 @@ mod test {
                 dydt_y2::dydt_y2_problem,
                 exponential_decay::{
                     exponential_decay_problem, exponential_decay_problem_sens,
-                    exponential_decay_problem_with_root,
+                    exponential_decay_problem_with_root, negative_exponential_decay_problem,
                 },
                 exponential_decay_with_algebraic::{
                     exponential_decay_with_algebraic_problem,
@@ -935,6 +937,13 @@ mod test {
         let (p, soln) = exponential_decay_problem::<M>(false);
         let s = Bdf::default();
         test_state_mut_on_problem(s, p, soln);
+    }
+
+    #[test]
+    fn bdf_test_nalgebra_negative_exponential_decay() {
+        let mut s = Bdf::default();
+        let (problem, soln) = negative_exponential_decay_problem::<M>(false);
+        test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
     #[test]
@@ -996,17 +1005,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 10
-        number_of_steps: 57
+        number_of_linear_solver_setups: 12
+        number_of_steps: 55
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 204
+        number_of_nonlinear_solver_iterations: 273
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 92
-        number_of_jac_muls: 117
-        number_of_matrix_evals: 1
+        number_of_calls: 110
+        number_of_jac_muls: 171
+        number_of_matrix_evals: 2
         "###);
     }
 
