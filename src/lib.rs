@@ -153,9 +153,9 @@ use nonlinear_solver::{
 };
 use ode_solver::jacobian_update::JacobianUpdate;
 pub use ode_solver::{
-    bdf::Bdf, builder::OdeBuilder, equations::OdeEquations, equations::OdeSolverEquations,
-    method::OdeSolverMethod, method::OdeSolverState, method::OdeSolverStopReason,
-    problem::OdeSolverProblem, sdirk::Sdirk, sens_equations::SensEquations,
+    bdf::Bdf, bdf_state::BdfState, builder::OdeBuilder, equations::OdeEquations, equations::OdeSolverEquations,
+    method::OdeSolverMethod, state::OdeSolverState, method::OdeSolverStopReason,
+    problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::SdirkState, sens_equations::SensEquations,
     sens_equations::SensInit, sens_equations::SensRhs, tableau::Tableau,
 };
 pub use op::{

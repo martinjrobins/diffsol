@@ -15,6 +15,7 @@ use crate::LinearSolver;
 use crate::NewtonNonlinearSolver;
 use crate::OdeSolverStopReason;
 use crate::RootFinder;
+use crate::SdirkState;
 use crate::SensEquations;
 use crate::Tableau;
 use crate::{
@@ -46,9 +47,7 @@ where
     tableau: Tableau<M>,
     problem: Option<OdeSolverProblem<Eqn>>,
     nonlinear_solver: NewtonNonlinearSolver<SdirkCallable<Eqn>, LS>,
-    state: Option<OdeSolverState<Eqn::V>>,
-    diff: M,
-    sdiff: Vec<M>,
+    state: Option<SdirkState<Eqn::V, M>>,
     gamma: Eqn::T,
     is_sdirk: bool,
     s_op: Option<SdirkCallable<SensEquations<Eqn>>>,
@@ -146,23 +145,18 @@ where
         }
 
         let n = 1;
-        let s = tableau.s();
-        let diff = M::zeros(n, s);
         let old_t = Eqn::T::zero();
         let old_y = <Eqn::V as Vector>::zeros(n);
         let old_f = <Eqn::V as Vector>::zeros(n);
         let statistics = BdfStatistics::default();
         let old_f_sens = Vec::new();
-        let sdiff = Vec::new();
         let old_y_sens = Vec::new();
         Self {
             old_y_sens,
             old_f_sens,
-            sdiff,
             tableau,
             nonlinear_solver,
             state: None,
-            diff,
             problem: None,
             s_op: None,
             gamma,
@@ -352,11 +346,11 @@ where
         self.tableau.order()
     }
 
-    fn take_state(&mut self) -> Option<OdeSolverState<Eqn::V>> {
+    fn take_state(&mut self) -> Option<SdirkState<Eqn::V, M>> {
         Option::take(&mut self.state)
     }
 
-    fn set_problem(&mut self, state: OdeSolverState<<Eqn>::V>, problem: &OdeSolverProblem<Eqn>) {
+    fn set_problem(&mut self, state: SdirkState<Eqn::V, M>, problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError> {
         // setup linear solver for first step
         let callable = Rc::new(SdirkCallable::new(problem, self.gamma));
         callable.set_h(state.h);
@@ -376,7 +370,6 @@ where
         let nstates = state.y.len();
         let nparams = problem.eqn.rhs().nparams();
         if problem.eqn_sens.is_some() {
-            self.sdiff = vec![M::zeros(nstates, self.tableau.s()); nparams];
             self.old_f_sens = vec![<Eqn::V as Vector>::zeros(nstates); nparams];
             self.old_y_sens = vec![<Eqn::V as Vector>::zeros(nstates); nparams];
             self.s_op = Some(SdirkCallable::from_eqn(
@@ -385,10 +378,12 @@ where
             ));
         }
 
-        self.diff = M::zeros(nstates, self.tableau.s());
         self.old_f = state.dy.clone();
         self.old_t = state.t;
         self.old_y = state.y.clone();
+
+        state.order = self.tableau.s();
+        state.set_problem(problem);
         self.state = Some(state);
         self.problem = Some(problem.clone());
         if let Some(root_fn) = problem.eqn.root() {

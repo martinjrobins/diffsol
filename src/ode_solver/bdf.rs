@@ -1,6 +1,6 @@
 use nalgebra::ComplexField;
 use std::rc::Rc;
-use std::{ops::AddAssign, ops::MulAssign, panic};
+use std::ops::AddAssign;
 
 use crate::error::{DiffsolError, OdeSolverError};
 
@@ -8,6 +8,7 @@ use num_traits::{abs, One, Pow, Zero};
 use serde::Serialize;
 
 use crate::{
+    BdfState,
     matrix::{default_solver::DefaultSolver, MatrixRef},
     newton_iteration,
     nonlinear_solver::root::RootFinder,
@@ -55,14 +56,11 @@ pub struct Bdf<
 > {
     nonlinear_solver: Nls,
     ode_problem: Option<OdeSolverProblem<Eqn>>,
-    order: usize,
     n_equal_steps: usize,
-    diff: M,
     y_delta: Eqn::V,
     y_predict: Eqn::V,
     t_predict: Eqn::T,
     s_predict: Eqn::V,
-    sdiff: Vec<M>,
     s_op: Option<BdfCallable<SensEquations<Eqn>>>,
     s_deltas: Vec<Eqn::V>,
     diff_tmp: M,
@@ -71,7 +69,7 @@ pub struct Bdf<
     gamma: Vec<Eqn::T>,
     error_const2: Vec<Eqn::T>,
     statistics: BdfStatistics,
-    state: Option<OdeSolverState<Eqn::V>>,
+    state: Option<BdfState<Eqn::V, M>>,
     tstop: Option<Eqn::T>,
     root_finder: Option<RootFinder<Eqn::V>>,
     is_state_modified: bool,
@@ -104,7 +102,6 @@ where
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
     Nls: NonLinearSolver<BdfCallable<Eqn>>,
 {
-    const MAX_ORDER: IndexType = 5;
     const NEWTON_MAXITER: IndexType = 4;
     const MIN_FACTOR: f64 = 0.5;
     const MAX_FACTOR: f64 = 2.1;
@@ -128,8 +125,10 @@ where
         let mut gamma = vec![Eqn::T::zero()];
         let mut error_const2 = vec![Eqn::T::one()];
 
+        let max_order: usize = BdfState::<Eqn::V, M>::MAX_ORDER;
+
         #[allow(clippy::needless_range_loop)]
-        for i in 1..=Self::MAX_ORDER {
+        for i in 1..= max_order {
             let i_t = Eqn::T::from(i as f64);
             let one_over_i = Eqn::T::one() / i_t;
             let one_over_i_plus_one = Eqn::T::one() / (i_t + Eqn::T::one());
@@ -142,11 +141,8 @@ where
             s_op: None,
             ode_problem: None,
             nonlinear_solver,
-            order: 1,
             n_equal_steps: 0,
-            diff: M::zeros(n, Self::MAX_ORDER + 3), //DMatrix::<T>::zeros(n, Self::MAX_ORDER + 3),
-            diff_tmp: M::zeros(n, Self::MAX_ORDER + 3),
-            sdiff: Vec::new(),
+            diff_tmp: M::zeros(n, max_order + 3),
             y_delta: Eqn::V::zeros(n),
             y_predict: Eqn::V::zeros(n),
             t_predict: Eqn::T::zero(),
@@ -155,7 +151,7 @@ where
             gamma,
             alpha,
             error_const2,
-            u: M::zeros(Self::MAX_ORDER + 1, Self::MAX_ORDER + 1),
+            u: M::zeros(max_order + 1, max_order + 1),
             statistics: BdfStatistics::default(),
             state: None,
             tstop: None,
@@ -226,20 +222,24 @@ where
         self.n_equal_steps = 0;
 
         // update D using equations in section 3.2 of [1]
-        let r = Self::_compute_r(self.order, factor);
+        let order = self.state.as_ref().unwrap().order;
+        let r = Self::_compute_r(order, factor);
         let ru = r.mat_mul(&self.u);
-        Self::_update_diff_for_step_size(&ru, &mut self.diff, &mut self.diff_tmp, self.order);
-        for i in 0..self.sdiff.len() {
-            Self::_update_diff_for_step_size(
-                &ru,
-                &mut self.sdiff[i],
-                &mut self.diff_tmp,
-                self.order,
-            );
+        {
+            let state = self.state.as_mut().unwrap();
+            Self::_update_diff_for_step_size(&ru, &mut state.diff, &mut self.diff_tmp, order);
+            for i in 0..state.sdiff.len() {
+                Self::_update_diff_for_step_size(
+                    &ru,
+                    &mut state.sdiff[i],
+                    &mut self.diff_tmp,
+                    order,
+                );
+            }
         }
 
         self.nonlinear_problem_op()
-            .set_c(new_h, self.alpha[self.order]);
+            .set_c(new_h, self.alpha[order]);
 
         self.state.as_mut().unwrap().h = new_h;
 
@@ -272,17 +272,21 @@ where
         //- lu factorisation of (M - c * J) used in newton iteration (same equation)
 
         // update D using equations in section 3.2 of [1]
-        let r = Self::_compute_r(self.order, factor);
+        let order = self.state.as_ref().unwrap().order;
+        let r = Self::_compute_r(order, factor);
         let ru = r.mat_mul(&self.u);
-        for sdiff in self.sdiff.iter_mut() {
-            Self::_update_diff_for_step_size(&ru, sdiff, &mut self.diff_tmp, self.order);
+        let state = self.state.as_mut().unwrap();
+        for sdiff in state.sdiff.iter_mut() {
+            Self::_update_diff_for_step_size(&ru, sdiff, &mut self.diff_tmp, order);
         }
     }
 
     fn update_differences(&mut self) {
-        Self::_update_diff(self.order, &self.y_delta, &mut self.diff);
-        for i in 0..self.sdiff.len() {
-            Self::_update_diff(self.order, &self.s_deltas[i], &mut self.sdiff[i]);
+        let order = self.state.as_ref().unwrap().order;
+        let state = self.state.as_mut().unwrap();
+        Self::_update_diff(order, &self.y_delta, &mut state.diff);
+        for i in 0..state.sdiff.len() {
+            Self::_update_diff(order, &self.s_deltas[i], &mut state.sdiff[i]);
         }
     }
 
@@ -315,22 +319,20 @@ where
     }
 
     fn _predict_forward(&mut self) {
-        Self::_predict_using_diff(&mut self.y_predict, &self.diff, self.order);
+        let state = self.state.as_ref().unwrap();
+        Self::_predict_using_diff(&mut self.y_predict, &state.diff, state.order);
 
         // update psi and c (h, D, y0 has changed)
         self.nonlinear_problem_op().set_psi_and_y0(
-            &self.diff,
+            &state.diff,
             self.gamma.as_slice(),
             self.alpha.as_slice(),
-            self.order,
+            state.order,
             &self.y_predict,
         );
 
         // update time
-        let t_new = {
-            let state = self.state.as_ref().unwrap();
-            state.t + state.h
-        };
+        let t_new = state.t + state.h;
         self.t_predict = t_new;
     }
 
@@ -364,31 +366,9 @@ where
     }
 
     fn initialise_to_first_order(&mut self) {
-        if self.state.as_ref().unwrap().y.len() != self.problem().unwrap().eqn.rhs().nstates() {
-            panic!("State vector length does not match number of states in problem");
-        }
-        let state = self.state.as_ref().unwrap();
-        self.order = 1usize;
         self.n_equal_steps = 0;
-
-        self.diff.column_mut(0).copy_from(&state.y);
-        self.diff.column_mut(1).copy_from(&state.dy);
-        self.diff.column_mut(1).mul_assign(scale(state.h));
-        if self.ode_problem.as_ref().unwrap().eqn_sens.is_some() {
-            let nparams = self.ode_problem.as_ref().unwrap().eqn.rhs().nparams();
-            for i in 0..nparams {
-                let sdiff = &mut self.sdiff[i];
-                let s = &state.s[i];
-                let ds = &state.ds[i];
-                sdiff.column_mut(0).copy_from(s);
-                sdiff.column_mut(1).copy_from(ds);
-                sdiff.column_mut(1).mul_assign(scale(state.h));
-            }
-        }
-
-        // setup U
-        self.u = Self::_compute_r(self.order, Eqn::T::one());
-
+        self.state.as_mut().unwrap().initialise_diff_to_first_order();
+        self.u = Self::_compute_r(1, Eqn::T::one());
         self.is_state_modified = false;
     }
 
@@ -411,12 +391,13 @@ where
         mut error_norm: Eqn::T,
     ) -> Result<Eqn::T, DiffsolError> {
         let h = self.state.as_ref().unwrap().h;
+        let order = self.state.as_ref().unwrap().order;
 
         // update for new state
         {
             let dy_new = self.nonlinear_problem_op().as_ref().tmp();
             let y_new = &self.y_predict;
-            self.problem()
+            self.ode_problem
                 .as_ref()
                 .unwrap()
                 .eqn_sens
@@ -433,7 +414,7 @@ where
 
         // construct bdf discretisation of sensitivity equations
         let op = self.s_op.as_ref().unwrap();
-        op.set_c(h, self.alpha[self.order]);
+        op.set_c(h, self.alpha[order]);
 
         // solve for sensitivities equations discretised using BDF
         let fun = |x: &Eqn::V, y: &mut Eqn::V| op.call_inplace(x, t_new, y);
@@ -442,18 +423,22 @@ where
         let mut convergence = self.nonlinear_solver.convergence().clone();
         let nparams = self.problem().as_ref().unwrap().eqn.rhs().nparams();
         for i in 0..nparams {
-            // predict forward to new step
-            Self::_predict_using_diff(&mut self.s_predict, &self.sdiff[i], self.order);
+            // setup
+            {
+                let state = self.state.as_ref().unwrap();
+                // predict forward to new step
+                Self::_predict_using_diff(&mut self.s_predict, &state.sdiff[i], order);
 
-            // setup op
-            op.set_psi_and_y0(
-                &self.sdiff[i],
-                self.gamma.as_slice(),
-                self.alpha.as_slice(),
-                self.order,
-                &self.s_predict,
-            );
-            op.eqn().as_ref().rhs().set_param_index(i);
+                // setup op
+                op.set_psi_and_y0(
+                    &state.sdiff[i],
+                    self.gamma.as_slice(),
+                    self.alpha.as_slice(),
+                    order,
+                    &self.s_predict,
+                );
+                op.eqn().as_ref().rhs().set_param_index(i);
+            }
 
             // solve
             {
@@ -493,8 +478,10 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
+    type State = BdfState<Eqn::V, M>;
+
     fn order(&self) -> usize {
-        self.order
+        self.state.as_ref().map_or(1, |state| state.order)
     }
 
     fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
@@ -513,7 +500,7 @@ where
             return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
         }
         Ok(Self::interpolate_from_diff(
-            t, &self.diff, state.t, state.h, self.order,
+            t, &state.diff, state.t, state.h, state.order,
         ))
     }
 
@@ -537,10 +524,10 @@ where
         for i in 0..state.s.len() {
             s.push(Self::interpolate_from_diff(
                 t,
-                &self.sdiff[i],
+                &state.sdiff[i],
                 state.t,
                 state.h,
-                self.order,
+                state.order,
             ));
         }
         Ok(s)
@@ -550,24 +537,34 @@ where
         self.ode_problem.as_ref()
     }
 
-    fn state(&self) -> Option<&OdeSolverState<Eqn::V>> {
+    fn state(&self) -> Option<&BdfState<Eqn::V, M>> {
         self.state.as_ref()
     }
-    fn take_state(&mut self) -> Option<OdeSolverState<Eqn::V>> {
+    fn take_state(&mut self) -> Option<BdfState<Eqn::V, M>> {
         Option::take(&mut self.state)
     }
 
-    fn state_mut(&mut self) -> Option<&mut OdeSolverState<Eqn::V>> {
+    fn state_mut(&mut self) -> Option<&mut BdfState<Eqn::V, M>> {
         self.is_state_modified = true;
         self.state.as_mut()
     }
 
-    fn set_problem(&mut self, state: OdeSolverState<Eqn::V>, problem: &OdeSolverProblem<Eqn>) {
-        self.ode_problem = Some(problem.clone());
+    fn checkpoint(&mut self) -> Result<Self::State, DiffsolError> {
+        if self.state.is_none() {
+            return Err(ode_solver_error!(StateNotSet));
+        }
+        // reset jacobian next step
+        self.nonlinear_solver.problem().f.set_jacobian_is_stale();
 
+        Ok(self.state.as_ref().unwrap().clone())
+    }
+
+    fn set_problem(&mut self, mut state: BdfState<Eqn::V, M>, problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError> {
+        self.ode_problem = Some(problem.clone());
+        
         // setup linear solver for first step
         let bdf_callable = Rc::new(BdfCallable::new(problem));
-        bdf_callable.set_c(state.h, self.alpha[self.order]);
+        bdf_callable.set_c(state.h, self.alpha[state.order]);
 
         let nonlinear_problem = SolverProblem::new_from_ode_problem(bdf_callable, problem);
         self.nonlinear_solver.set_problem(&nonlinear_problem);
@@ -575,10 +572,8 @@ where
             .convergence_mut()
             .set_max_iter(Self::NEWTON_MAXITER);
 
-        // store state and setup root solver
-        self.state = Some(state);
+        // setup root solver
         if let Some(root_fn) = problem.eqn.root() {
-            let state = self.state.as_ref().unwrap();
             self.root_finder = Some(RootFinder::new(root_fn.nout()));
             self.root_finder
                 .as_ref()
@@ -586,11 +581,10 @@ where
                 .init(root_fn.as_ref(), &state.y, state.t);
         }
 
-        // allocate internal state
+        // (re)allocate internal state
         let nstates = problem.eqn.rhs().nstates();
-        if self.diff.nrows() != nstates {
-            self.diff = M::zeros(nstates, Self::MAX_ORDER + 3);
-            self.diff_tmp = M::zeros(nstates, Self::MAX_ORDER + 3);
+        if self.diff_tmp.nrows() != nstates {
+            self.diff_tmp = M::zeros(nstates, BdfState::<Eqn::V, M>::MAX_ORDER + 3);
             self.y_delta = <Eqn::V as Vector>::zeros(nstates);
             self.y_predict = <Eqn::V as Vector>::zeros(nstates);
         }
@@ -607,18 +601,24 @@ where
                     .unwrap(),
             ));
 
-            if self.sdiff.is_empty()
-                || self.sdiff.len() != nparams
-                || self.sdiff[0].nrows() != nstates
+            if self.s_deltas.is_empty()
+                || self.s_deltas.len() != nparams
+                || self.s_deltas[0].len() != nstates
             {
-                self.sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3); nparams];
                 self.s_deltas = vec![<Eqn::V as Vector>::zeros(nstates); nparams];
                 self.s_predict = <Eqn::V as Vector>::zeros(nstates);
             }
         }
 
-        // initialise solver to first order
-        self.initialise_to_first_order();
+        // init U matrix
+        self.u = Self::_compute_r(state.order, Eqn::T::one());
+        self.is_state_modified = false;
+
+        // initialise state and store it
+        state.set_problem(problem)?;
+        self.state = Some(state);
+        Ok(())
+
     }
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
@@ -638,6 +638,7 @@ where
 
         // loop until step is accepted
         loop {
+            let order = self.state.as_ref().unwrap().order;
             self.y_delta.copy_from(&self.y_predict);
 
             // initialise error_norm to quieten the compiler
@@ -668,7 +669,7 @@ where
                     error_norm =
                         self.y_delta
                             .squared_norm(&self.state.as_mut().unwrap().y, atol, rtol)
-                            * self.error_const2[self.order];
+                            * self.error_const2[order];
                 }
 
                 // only bother doing sensitivity calculations if we might keep the step
@@ -693,7 +694,7 @@ where
                     // evaluated so reduce step size by 0.3 (as per [1]) and try again
                     let new_h = self._update_step_size(Eqn::T::from(0.3))?;
                     self._jacobian_updates(
-                        new_h * self.alpha[self.order],
+                        new_h * self.alpha[order],
                         SolverState::SecondConvergenceFail,
                     );
 
@@ -704,7 +705,7 @@ where
                 } else {
                     // newton iteration did not converge, so update jacobian and try again
                     self._jacobian_updates(
-                        self.state.as_ref().unwrap().h * self.alpha[self.order],
+                        self.state.as_ref().unwrap().h * self.alpha[order],
                         SolverState::FirstConvergenceFail,
                     );
                     convergence_fail = true;
@@ -726,13 +727,12 @@ where
                 // step is rejected
                 // calculate optimal step size factor as per eq 2.46 of [2]
                 // and reduce step size and try again
-                let order = self.order as f64;
-                let mut factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (order + 1.0)));
+                let mut factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (order as f64 + 1.0)));
                 if factor < Eqn::T::from(Self::MIN_FACTOR) {
                     factor = Eqn::T::from(Self::MIN_FACTOR);
                 }
                 let new_h = self._update_step_size(factor)?;
-                self._jacobian_updates(new_h * self.alpha[self.order], SolverState::ErrorTestFail);
+                self._jacobian_updates(new_h * self.alpha[order], SolverState::ErrorTestFail);
 
                 // new prediction
                 self._predict_forward();
@@ -748,7 +748,7 @@ where
             let state = self.state.as_mut().unwrap();
             state.y.copy_from(&self.y_predict);
             state.t = self.t_predict;
-            state.dy.copy_from_view(&self.diff.column(1));
+            state.dy.copy_from_view(&state.diff.column(1));
             state.dy *= scale(Eqn::T::one() / state.h);
         }
 
@@ -762,54 +762,56 @@ where
         // (see page 83 of [2])
         self.n_equal_steps += 1;
 
-        if self.n_equal_steps > self.order {
-            let state = self.state.as_ref().unwrap();
-            let atol = self.problem().as_ref().unwrap().atol.as_ref();
-            let rtol = self.problem().as_ref().unwrap().rtol;
-            let order = self.order;
-            // similar to the optimal step size factor we calculated above for the current
-            // order k, we need to calculate the optimal step size factors for orders
-            // k-1 and k+1. To do this, we note that the error = C_k * D^{k+1} y_n
-            let error_m_norm = if order > 1 {
-                let mut error_m_norm = self.diff.column(order).squared_norm(&state.y, atol, rtol)
-                    * self.error_const2[order - 1];
-                for i in 0..self.sdiff.len() {
-                    error_m_norm +=
-                        self.sdiff[i]
-                            .column(order)
-                            .squared_norm(&state.s[i], atol, rtol)
-                            * self.error_const2[order - 1];
-                }
-                error_m_norm / Eqn::T::from((self.sdiff.len() + 1) as f64)
-            } else {
-                Eqn::T::INFINITY
-            };
-            let error_p_norm = if order < Self::MAX_ORDER {
-                let mut error_p_norm = self
-                    .diff
-                    .column(order + 2)
-                    .squared_norm(&state.y, atol, rtol)
-                    * self.error_const2[order + 1];
-                for i in 0..self.sdiff.len() {
-                    error_p_norm =
-                        self.sdiff[i]
-                            .column(order + 2)
-                            .squared_norm(&state.s[i], atol, rtol)
-                            * self.error_const2[order + 1];
-                }
-                error_p_norm / Eqn::T::from((self.sdiff.len() + 1) as f64)
-            } else {
-                Eqn::T::INFINITY
-            };
+        if self.n_equal_steps > self.state.as_ref().unwrap().order {
+            let factors = {
+                let state = self.state.as_mut().unwrap();
+                let atol = self.ode_problem.as_ref().unwrap().atol.as_ref();
+                let rtol = self.ode_problem.as_ref().unwrap().rtol;
+                let order = state.order;
+                // similar to the optimal step size factor we calculated above for the current
+                // order k, we need to calculate the optimal step size factors for orders
+                // k-1 and k+1. To do this, we note that the error = C_k * D^{k+1} y_n
+                let error_m_norm = if order > 1 {
+                    let mut error_m_norm = state.diff.column(order).squared_norm(&state.y, atol, rtol)
+                        * self.error_const2[order - 1];
+                    for i in 0..state.sdiff.len() {
+                        error_m_norm +=
+                            state.sdiff[i]
+                                .column(order)
+                                .squared_norm(&state.s[i], atol, rtol)
+                                * self.error_const2[order - 1];
+                    }
+                    error_m_norm / Eqn::T::from((state.sdiff.len() + 1) as f64)
+                } else {
+                    Eqn::T::INFINITY
+                };
+                let error_p_norm = if order < BdfState::<Eqn::V, M>::MAX_ORDER {
+                    let mut error_p_norm = state
+                        .diff
+                        .column(order + 2)
+                        .squared_norm(&state.y, atol, rtol)
+                        * self.error_const2[order + 1];
+                    for i in 0..state.sdiff.len() {
+                        error_p_norm =
+                            state.sdiff[i]
+                                .column(order + 2)
+                                .squared_norm(&state.s[i], atol, rtol)
+                                * self.error_const2[order + 1];
+                    }
+                    error_p_norm / Eqn::T::from((state.sdiff.len() + 1) as f64)
+                } else {
+                    Eqn::T::INFINITY
+                };
 
-            let error_norms = [error_m_norm, error_norm, error_p_norm];
-            let factors = error_norms
-                .into_iter()
-                .enumerate()
-                .map(|(i, error_norm)| {
-                    error_norm.pow(Eqn::T::from(-0.5 / (i as f64 + order as f64)))
-                })
-                .collect::<Vec<_>>();
+                let error_norms = [error_m_norm, error_norm, error_p_norm];
+                error_norms
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, error_norm)| {
+                        error_norm.pow(Eqn::T::from(-0.5 / (i as f64 + order as f64)))
+                    })
+                    .collect::<Vec<_>>()
+            };
 
             // now we have the three factors for orders k-1, k and k+1, pick the maximum in
             // order to maximise the resultant step size
@@ -820,16 +822,20 @@ where
                 .unwrap()
                 .0;
 
-            // if order changes then we need to update the U matrix
-            self.order = match max_index {
-                0 => order - 1,
-                1 => order,
-                2 => order + 1,
-                _ => unreachable!(),
+            // update order and update the U matrix
+            let order = {
+                let mut order = self.state.as_mut().unwrap().order;
+                order = match max_index {
+                    0 => order - 1,
+                    1 => order,
+                    2 => order + 1,
+                    _ => unreachable!(),
+                };
+                if max_index != 1 {
+                    self.u = Self::_compute_r(order, Eqn::T::one());
+                }
+                order
             };
-            if max_index != 1 {
-                self.u = Self::_compute_r(self.order, Eqn::T::one());
-            }
 
             let mut factor = safety * factors[max_index];
             if factor > Eqn::T::from(Self::MAX_FACTOR) {
@@ -844,7 +850,7 @@ where
                 || max_index == 2
             {
                 let new_h = self._update_step_size(factor)?;
-                self._jacobian_updates(new_h * self.alpha[self.order], SolverState::StepSuccess);
+                self._jacobian_updates(new_h * self.alpha[order], SolverState::StepSuccess);
             }
         }
 
