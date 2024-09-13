@@ -170,7 +170,7 @@ mod tests {
         triplets: &'a [(usize, usize, M::T)],
         nrows: usize,
         ncols: usize,
-    ) -> impl NonLinearOp<M = M, V = M::V, T = M::T> + '_ {
+    ) -> impl NonLinearOp<M = M, V = M::V, T = M::T> + 'a {
         let nstates = ncols;
         let nout = nrows;
         let f = move |x: &M::V, y: &mut M::V| {
@@ -201,7 +201,7 @@ mod tests {
         triplets: &'a [(usize, usize, M::T)],
         nrows: usize,
         ncols: usize,
-    ) -> impl LinearOp<M = M, V = M::V, T = M::T> + '_ {
+    ) -> impl LinearOp<M = M, V = M::V, T = M::T> + 'a {
         let nstates = ncols;
         let nout = nrows;
         let f = move |x: &M::V, y: &mut M::V| {
