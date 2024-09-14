@@ -99,7 +99,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         Self: Sized,
     {
         let state = OdeSolverState::new(problem, self)?;
-        self.set_problem(state, problem);
+        self.set_problem(state, problem)?;
         let mut ret_t = vec![self.state().unwrap().t()];
         let nstates = problem.eqn.rhs().nstates();
         let ntimes_guess = std::cmp::max(
@@ -115,7 +115,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
                 Some(out) => {
                     y_i.copy_from(&out.call(self.state().unwrap().y(), self.state().unwrap().t()))
                 }
-                None => y_i.copy_from(&self.state().unwrap().y()),
+                None => y_i.copy_from(self.state().unwrap().y()),
             }
         }
         self.set_stop_time(final_time)?;
@@ -133,7 +133,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
                 Some(out) => {
                     y_i.copy_from(&out.call(self.state().unwrap().y(), self.state().unwrap().t()))
                 }
-                None => y_i.copy_from(&self.state().unwrap().y()),
+                None => y_i.copy_from(self.state().unwrap().y()),
             }
         }
 
@@ -152,7 +152,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
                 Some(out) => {
                     y_i.copy_from(&out.call(self.state().unwrap().y(), self.state().unwrap().t()))
                 }
-                None => y_i.copy_from(&self.state().unwrap().y()),
+                None => y_i.copy_from(self.state().unwrap().y()),
             }
         }
         Ok((ret_y, ret_t))
@@ -172,7 +172,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         Self: Sized,
     {
         let state = OdeSolverState::new(problem, self)?;
-        self.set_problem(state, problem);
+        self.set_problem(state, problem)?;
         let nstates = problem.eqn.rhs().nstates();
         let mut ret = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, t_eval.len());
 

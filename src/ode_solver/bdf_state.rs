@@ -88,6 +88,9 @@ where
     fn ds(&self) -> &[V] {
         self.ds.as_slice()
     }
+    fn s_ds_mut(&mut self) -> (&mut [V], &mut [V]) {
+        (&mut self.s, &mut self.ds)
+    }
     fn y(&self) -> &V {
         &self.y
     }
@@ -102,6 +105,10 @@ where
 
     fn dy_mut(&mut self) -> &mut V {
         &mut self.dy
+    }
+    
+    fn y_dy_mut(&mut self) -> (&mut V, &mut V) {
+        (&mut self.y, &mut self.dy)
     }
 
     fn t(&self) -> V::T {

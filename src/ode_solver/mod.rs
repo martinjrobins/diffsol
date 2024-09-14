@@ -49,7 +49,7 @@ mod tests {
         Eqn::M: DefaultSolver,
     {
         let state = OdeSolverState::new(problem, method).unwrap();
-        method.set_problem(state, problem);
+        method.set_problem(state, problem).unwrap();
         let have_root = problem.eqn.as_ref().root().is_some();
         for (i, point) in solution.solution_points.iter().enumerate() {
             let (soln, sens_soln) = if use_tstop {
@@ -252,7 +252,7 @@ mod tests {
         )
         .unwrap();
         let state = Method::State::new_without_initialise(&problem);
-        s.set_problem(state.clone(), &problem);
+        s.set_problem(state.clone(), &problem).unwrap();
         let t0 = M::T::zero();
         let t1 = M::T::one();
         s.interpolate(t0)
@@ -284,9 +284,9 @@ mod tests {
         )
         .unwrap();
         let state = Method::State::new_without_initialise(&problem);
-        s.set_problem(state.clone(), &problem);
+        s.set_problem(state.clone(), &problem).unwrap();
         let state2 = s.state().unwrap();
-        state2.y().assert_eq_st(&state.y(), M::T::from(1e-9));
+        state2.y().assert_eq_st(state.y(), M::T::from(1e-9));
         s.state_mut().unwrap().y_mut()[0] = M::T::from(std::f64::consts::PI);
         assert_eq!(s.state_mut().unwrap().y_mut()[0], M::T::from(std::f64::consts::PI));
     }
@@ -306,7 +306,7 @@ mod tests {
 
         // reinit using state_mut
         let state = Method::State::new_without_initialise(&problem);
-        s.state_mut().unwrap().y_mut().copy_from(&state.y());
+        s.state_mut().unwrap().y_mut().copy_from(state.y());
         *s.state_mut().unwrap().t_mut() = state.t();
 
         // solve and check against solution

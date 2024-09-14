@@ -47,7 +47,9 @@ where
     tableau: Tableau<M>,
     problem: Option<OdeSolverProblem<Eqn>>,
     nonlinear_solver: NewtonNonlinearSolver<SdirkCallable<Eqn>, LS>,
-    state: Option<SdirkState<Eqn::V, M>>,
+    state: Option<SdirkState<Eqn::V>>,
+    diff: M,
+    sdiff: Vec<M>,
     gamma: Eqn::T,
     is_sdirk: bool,
     s_op: Option<SdirkCallable<SensEquations<Eqn>>>,
@@ -151,9 +153,13 @@ where
         let statistics = BdfStatistics::default();
         let old_f_sens = Vec::new();
         let old_y_sens = Vec::new();
+        let diff = M::zeros(n, s);
+        let sdiff = Vec::new();
         Self {
             old_y_sens,
             old_f_sens,
+            diff,
+            sdiff,
             tableau,
             nonlinear_solver,
             state: None,
@@ -338,6 +344,8 @@ where
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
     for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
 {
+    type State = SdirkState<Eqn::V>;
+
     fn problem(&self) -> Option<&OdeSolverProblem<Eqn>> {
         self.problem.as_ref()
     }
@@ -346,11 +354,18 @@ where
         self.tableau.order()
     }
 
-    fn take_state(&mut self) -> Option<SdirkState<Eqn::V, M>> {
+    fn take_state(&mut self) -> Option<SdirkState<Eqn::V>> {
         Option::take(&mut self.state)
     }
+    
+    fn checkpoint(&mut self) -> Result<Self::State, DiffsolError> {
+        if self.state.is_none() {
+            return Err(ode_solver_error!(StateNotSet));
+        }
+        Ok(self.state.as_ref().unwrap().clone())
+    }
 
-    fn set_problem(&mut self, state: SdirkState<Eqn::V, M>, problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError> {
+    fn set_problem(&mut self, mut state: SdirkState<Eqn::V>, problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError> {
         // setup linear solver for first step
         let callable = Rc::new(SdirkCallable::new(problem, self.gamma));
         callable.set_h(state.h);
@@ -367,23 +382,38 @@ where
         // update statistics
         self.statistics = BdfStatistics::default();
 
+
+        state.check_consistent_with_problem(problem)?;
+        
         let nstates = state.y.len();
-        let nparams = problem.eqn.rhs().nparams();
+        let order = self.tableau.s();
+        if self.diff.nrows() != nstates || self.diff.ncols() != order {
+            self.diff = M::zeros(nstates, order);
+        }
         if problem.eqn_sens.is_some() {
-            self.old_f_sens = vec![<Eqn::V as Vector>::zeros(nstates); nparams];
-            self.old_y_sens = vec![<Eqn::V as Vector>::zeros(nstates); nparams];
-            self.s_op = Some(SdirkCallable::from_eqn(
-                problem.eqn_sens.as_ref().unwrap().clone(),
-                self.gamma,
-            ));
+            
+            state.check_sens_consistent_with_problem(problem)?;
+            let nparams = problem.eqn.rhs().nparams();
+            if 
+                self.sdiff.len() != nparams ||
+                self.sdiff[0].nrows() != nstates ||
+                self.sdiff[0].ncols() != order
+            {
+                self.sdiff = vec![M::zeros(nstates, order); nparams];
+                self.old_f_sens = vec![<Eqn::V as Vector>::zeros(nstates); nparams];
+                self.old_y_sens = vec![<Eqn::V as Vector>::zeros(nstates); nparams];
+                self.s_op = Some(SdirkCallable::from_eqn(
+                    problem.eqn_sens.as_ref().unwrap().clone(),
+                    self.gamma,
+                ));
+            }
         }
 
         self.old_f = state.dy.clone();
         self.old_t = state.t;
         self.old_y = state.y.clone();
 
-        state.order = self.tableau.s();
-        state.set_problem(problem);
+        state.set_problem(problem)?;
         self.state = Some(state);
         self.problem = Some(problem.clone());
         if let Some(root_fn) = problem.eqn.root() {
@@ -394,6 +424,7 @@ where
                 .unwrap()
                 .init(root_fn.as_ref(), &state.y, state.t);
         }
+        Ok(())
     }
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
@@ -419,8 +450,9 @@ where
             // from the last stage of the previous step
             if start == 1 {
                 {
+                    let state = self.state.as_ref().unwrap();
                     let mut hf = self.diff.column_mut(0);
-                    hf.copy_from(&self.state.as_ref().unwrap().dy);
+                    hf.copy_from(&state.dy);
                     hf *= scale(h);
                 }
 
@@ -696,11 +728,11 @@ where
         }
     }
 
-    fn state(&self) -> Option<&OdeSolverState<Eqn::V>> {
+    fn state(&self) -> Option<&SdirkState<Eqn::V>> {
         self.state.as_ref()
     }
 
-    fn state_mut(&mut self) -> Option<&mut OdeSolverState<Eqn::V>> {
+    fn state_mut(&mut self) -> Option<&mut SdirkState<Eqn::V>> {
         self.is_state_mutated = true;
         self.state.as_mut()
     }

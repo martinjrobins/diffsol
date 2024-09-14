@@ -1,6 +1,8 @@
 use std::rc::Rc;
+use num_traits::{Zero, One, Pow};
+use nalgebra::ComplexField;
 
-use crate::{error::DiffsolError, nonlinear_solver::NonLinearSolver, op::init::InitOp, scale, solver::SolverProblem, DefaultSolver, NewtonNonlinearSolver, OdeEquations, OdeSolverMethod, OdeSolverProblem, SensEquations, Vector};
+use crate::{error::DiffsolError, nonlinear_solver::NonLinearSolver, ode_solver_error, InitOp, scale, solver::SolverProblem, ConstantOp, DefaultSolver, NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, Op, SensEquations, Vector, error::OdeSolverError};
 
 /// State for the ODE solver, containing:
 /// - the current solution `y`
@@ -15,16 +17,45 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     fn y_mut(&mut self) -> &mut V;
     fn dy(&self) -> &V;
     fn dy_mut(&mut self) -> &mut V;
+    fn y_dy_mut(&mut self) -> (&mut V, &mut V);
     fn s(&self) -> &[V];
     fn s_mut(&mut self) -> &mut [V];
     fn ds(&self) -> &[V];
     fn ds_mut(&mut self) -> &mut [V];
+    fn s_ds_mut(&mut self) -> (&mut [V], &mut [V]);
     fn t(&self) -> V::T;
     fn t_mut(&mut self) -> &mut V::T;
     fn h(&self) -> V::T;
     fn h_mut(&mut self) -> &mut V::T;
     fn new_internal_state(y: V, dy: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T) -> Self;
     fn set_problem<Eqn: OdeEquations>(&mut self, ode_problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError>;
+    
+    fn check_consistent_with_problem<Eqn: OdeEquations>(&self, problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError> {
+        if self.y().len() != problem.eqn.rhs().nstates() {
+            return Err(ode_solver_error!(StateProblemMismatch));
+        }
+        if self.dy().len() != problem.eqn.rhs().nstates() {
+            return Err(ode_solver_error!(StateProblemMismatch));
+        }
+        Ok(())
+    }
+    
+    fn check_sens_consistent_with_problem<Eqn: OdeEquations>(&self, problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError> {
+        if self.s().len() != problem.eqn_sens.as_ref().unwrap().rhs().nparams() {
+            return Err(ode_solver_error!(StateProblemMismatch));
+        }
+        if !self.s().is_empty() && self.s()[0].len() != problem.eqn.rhs().nstates() {
+            return Err(ode_solver_error!(StateProblemMismatch));
+        }
+        if self.ds().len() != problem.eqn_sens.as_ref().unwrap().rhs().nparams() {
+            return Err(ode_solver_error!(StateProblemMismatch));
+        }
+        if !self.ds().is_empty() && self.ds()[0].len() != problem.eqn.rhs().nstates() {
+            return Err(ode_solver_error!(StateProblemMismatch));
+        }
+        Ok(())
+    }
+        
 
     /// Create a new solver state from an ODE problem.
     /// This function will make the state consistent with any algebraic constraints using a default nonlinear solver.
@@ -93,23 +124,25 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         Eqn: OdeEquations<T = V::T, V = V>,
         S: NonLinearSolver<InitOp<Eqn>> + ?Sized,
     {
+        let t = self.t();
+        let (y, dy) = self.y_dy_mut();
         ode_problem
             .eqn
             .rhs()
-            .call_inplace(self.y, self.t, self.dy_mut);
+            .call_inplace(y, t, dy);
         if ode_problem.eqn.mass().is_none() {
             return Ok(());
         }
-        let f = Rc::new(InitOp::new(&ode_problem.eqn, ode_problem.t0, &self.y));
+        let f = Rc::new(InitOp::new(&ode_problem.eqn, ode_problem.t0, y));
         let rtol = ode_problem.rtol;
         let atol = ode_problem.atol.clone();
         let init_problem = SolverProblem::new(f.clone(), atol, rtol);
         root_solver.set_problem(&init_problem);
-        let mut y = self.dy.clone();
-        y.copy_from_indices(&self.y, &init_problem.f.algebraic_indices);
-        let yerr = y.clone();
-        root_solver.solve_in_place(&mut y, self.t, &yerr)?;
-        f.scatter_soln(&y, &mut self.y, &mut self.dy);
+        let mut y_tmp = dy.clone();
+        y_tmp.copy_from_indices(y, &init_problem.f.algebraic_indices);
+        let yerr = y_tmp.clone();
+        root_solver.solve_in_place(&mut y_tmp, t, &yerr)?;
+        f.scatter_soln(&y_tmp, y, dy);
         Ok(())
     }
 
@@ -130,13 +163,15 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         }
 
         let eqn_sens = ode_problem.eqn_sens.as_ref().unwrap();
-        eqn_sens.rhs().update_state(&self.y, &self.dy, self.t);
+        eqn_sens.rhs().update_state(self.y(), self.dy(), self.t());
+        let t = self.t();
+        let (s, ds) = self.s_ds_mut();
         for i in 0..ode_problem.eqn.rhs().nparams() {
             eqn_sens.init().set_param_index(i);
             eqn_sens.rhs().set_param_index(i);
             eqn_sens
                 .rhs()
-                .call_inplace(&self.s[i], self.t, &mut self.ds[i]);
+                .call_inplace(&s[i], t, &mut ds[i]);
         }
 
         if ode_problem.eqn.mass().is_none() {
@@ -146,18 +181,19 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         for i in 0..ode_problem.eqn.rhs().nparams() {
             eqn_sens.init().set_param_index(i);
             eqn_sens.rhs().set_param_index(i);
-            let f = Rc::new(InitOp::new(eqn_sens, ode_problem.t0, &self.s[i]));
+            let f = Rc::new(InitOp::new(eqn_sens, ode_problem.t0, &self.s()[i]));
             root_solver.set_problem(&SolverProblem::new(
                 f.clone(),
                 ode_problem.atol.clone(),
                 ode_problem.rtol,
             ));
 
-            let mut y = self.ds[i].clone();
-            y.copy_from_indices(&self.y, &f.algebraic_indices);
+            let mut y = self.ds()[i].clone();
+            y.copy_from_indices(self.y(), &f.algebraic_indices);
             let yerr = y.clone();
-            root_solver.solve_in_place(&mut y, self.t, &yerr)?;
-            f.scatter_soln(&y, &mut self.s[i], &mut self.ds[i]);
+            root_solver.solve_in_place(&mut y, self.t(), &yerr)?;
+            let (s, ds) = self.s_ds_mut();
+            f.scatter_soln(&y, &mut s[i], &mut ds[i]);
         }
         Ok(())
     }
@@ -171,9 +207,9 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     where
         Eqn: OdeEquations<T = V::T, V = V>,
     {
-        let y0 = self.y;
-        let t0 = self.t;
-        let f0 = self.dy;
+        let y0 = self.y();
+        let t0 = self.t();
+        let f0 = self.dy();
 
         let rtol = ode_problem.rtol;
         let atol = ode_problem.atol.as_ref();
@@ -219,13 +255,13 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
                 .pow(Eqn::T::one() / Eqn::T::from(1.0 + solver_order as f64))
         };
 
-        self.h = Eqn::T::from(100.0) * h0;
-        if self.h > h1 {
-            self.h = h1;
+        *self.h_mut() = Eqn::T::from(100.0) * h0;
+        if self.h() > h1 {
+            *self.h_mut() = h1;
         }
 
         if is_neg_h {
-            self.h = -self.h;
+            *self.h_mut() = -self.h();
         }
     }
 }
