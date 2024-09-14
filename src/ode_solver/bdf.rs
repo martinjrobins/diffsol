@@ -367,7 +367,7 @@ where
 
     fn initialise_to_first_order(&mut self) {
         self.n_equal_steps = 0;
-        self.state.as_mut().unwrap().initialise_diff_to_first_order();
+        self.state.as_mut().unwrap().initialise_diff_to_first_order(self.ode_problem.as_ref().unwrap().eqn_sens.is_some());
         self.u = Self::_compute_r(1, Eqn::T::one());
         self.is_state_modified = false;
     }
@@ -561,6 +561,8 @@ where
 
     fn set_problem(&mut self, mut state: BdfState<Eqn::V, M>, problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError> {
         self.ode_problem = Some(problem.clone());
+
+        state.check_consistent_with_problem(problem)?;
         
         // setup linear solver for first step
         let bdf_callable = Rc::new(BdfCallable::new(problem));
@@ -591,6 +593,7 @@ where
 
         // allocate internal state for sensitivities
         if self.ode_problem.as_ref().unwrap().eqn_sens.is_some() {
+            state.check_sens_consistent_with_problem(problem)?;
             let nparams = self.ode_problem.as_ref().unwrap().eqn.rhs().nparams();
             self.s_op = Some(BdfCallable::from_eqn(
                 self.ode_problem
@@ -601,11 +604,12 @@ where
                     .unwrap(),
             ));
 
-            if self.s_deltas.is_empty()
-                || self.s_deltas.len() != nparams
-                || self.s_deltas[0].len() != nstates
+            if self.s_deltas.len() != nparams
+               || self.s_deltas[0].len() != nstates
             {
                 self.s_deltas = vec![<Eqn::V as Vector>::zeros(nstates); nparams];
+            }
+            if self.s_predict.len() != nstates {
                 self.s_predict = <Eqn::V as Vector>::zeros(nstates);
             }
         }
@@ -824,17 +828,18 @@ where
 
             // update order and update the U matrix
             let order = {
-                let mut order = self.state.as_mut().unwrap().order;
-                order = match max_index {
-                    0 => order - 1,
-                    1 => order,
-                    2 => order + 1,
+                let old_order= self.state.as_ref().unwrap().order;
+                let new_order = match max_index {
+                    0 => old_order - 1,
+                    1 => old_order,
+                    2 => old_order + 1,
                     _ => unreachable!(),
                 };
+                self.state.as_mut().unwrap().order = new_order;
                 if max_index != 1 {
-                    self.u = Self::_compute_r(order, Eqn::T::one());
+                    self.u = Self::_compute_r(new_order, Eqn::T::one());
                 }
-                order
+                new_order
             };
 
             let mut factor = safety * factors[max_index];

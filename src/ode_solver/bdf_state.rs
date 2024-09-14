@@ -1,5 +1,5 @@
 use std::ops::MulAssign;
-use crate::{error::DiffsolError, error::OdeSolverError, ode_solver_error, scalar::IndexType, scale, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Vector, VectorViewMut};
+use crate::{error::DiffsolError, scalar::IndexType, scale, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Vector, VectorViewMut};
 
 #[derive(Clone)]
 pub struct BdfState<
@@ -24,20 +24,22 @@ where
 {
     pub(crate) const MAX_ORDER: IndexType = 5;
 
-    pub fn initialise_diff_to_first_order(&mut self) {
+    pub fn initialise_diff_to_first_order(&mut self, has_sens: bool) {
         self.order = 1usize;
 
         self.diff.column_mut(0).copy_from(&self.y);
         self.diff.column_mut(1).copy_from(&self.dy);
         self.diff.column_mut(1).mul_assign(scale(self.h));
         let nparams = self.s.len();
-        for i in 0..nparams {
-            let sdiff = &mut self.sdiff[i];
-            let s = &self.s[i];
-            let ds = &self.ds[i];
-            sdiff.column_mut(0).copy_from(s);
-            sdiff.column_mut(1).copy_from(ds);
-            sdiff.column_mut(1).mul_assign(scale(self.h));
+        if has_sens {
+            for i in 0..nparams {
+                let sdiff = &mut self.sdiff[i];
+                let s = &self.s[i];
+                let ds = &self.ds[i];
+                sdiff.column_mut(0).copy_from(s);
+                sdiff.column_mut(1).copy_from(ds);
+                sdiff.column_mut(1).mul_assign(scale(self.h));
+            }
         }
     }
 }
@@ -51,13 +53,13 @@ where
         let not_initialised = self.diff.ncols() == 0;
         let nstates = ode_problem.eqn.rhs().nstates();
         let nparams = ode_problem.eqn.rhs().nparams();
+        let has_sens = ode_problem.eqn_sens.is_some();
         if not_initialised {
             self.diff = M::zeros(nstates, Self::MAX_ORDER + 3);
-            self.sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3); nparams];
-            self.initialise_diff_to_first_order();
-        }
-        if self.diff.nrows() != nstates || self.sdiff[0].nrows() != nstates || self.sdiff.len() != nparams {
-            return Err(ode_solver_error!(StateProblemMismatch));
+            if has_sens {
+                self.sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3); nparams];
+            }
+            self.initialise_diff_to_first_order(has_sens);
         }
         Ok(())
     }
