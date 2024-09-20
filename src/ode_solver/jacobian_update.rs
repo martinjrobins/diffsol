@@ -5,6 +5,7 @@ pub enum SolverState {
     FirstConvergenceFail,
     SecondConvergenceFail,
     ErrorTestFail,
+    Checkpoint,
 }
 
 pub struct JacobianUpdate<T: Scalar> {
@@ -54,6 +55,7 @@ impl<T: Scalar> JacobianUpdate<T> {
             SolverState::FirstConvergenceFail => true,
             SolverState::SecondConvergenceFail => true,
             SolverState::ErrorTestFail => true,
+            SolverState::Checkpoint => true,
         }
     }
 
@@ -68,6 +70,7 @@ impl<T: Scalar> JacobianUpdate<T> {
             }
             SolverState::SecondConvergenceFail => self.steps_since_rhs_jacobian_eval > 0,
             SolverState::ErrorTestFail => false,
+            SolverState::Checkpoint => true,
         }
     }
 }

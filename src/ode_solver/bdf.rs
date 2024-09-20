@@ -558,8 +558,10 @@ where
         if self.state.is_none() {
             return Err(ode_solver_error!(StateNotSet));
         }
-        // reset jacobian next step
-        self.nonlinear_solver.problem().f.set_jacobian_is_stale();
+        self._jacobian_updates(
+            self.state.as_ref().unwrap().h * self.alpha[self.state.as_ref().unwrap().order],
+               SolverState::Checkpoint,
+        );
 
         Ok(self.state.as_ref().unwrap().clone())
     }
