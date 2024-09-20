@@ -24,6 +24,7 @@ mod tests {
 
     use self::problem::OdeSolverSolution;
     use nalgebra::ComplexField;
+    use problem::OdeSolverSolutionPoint;
 
     use super::*;
     use crate::matrix::Matrix;
@@ -290,6 +291,58 @@ mod tests {
         s.state_mut().unwrap().y_mut()[0] = M::T::from(std::f64::consts::PI);
         assert_eq!(s.state_mut().unwrap().y_mut()[0], M::T::from(std::f64::consts::PI));
     }
+
+    fn check_soln<V: Vector>(soln: &V, point: &OdeSolverSolutionPoint<V>, rtol: V::T, atol: &V) {
+        let error = soln.clone() - &point.state;
+        let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
+        assert!(
+            error_norm < V::T::from(15.0),
+            "error_norm: {} at t = {}. soln: {:?}, expected: {:?}",
+            error_norm,
+            point.t,
+            soln,
+            point.state
+        );
+    }
+    
+    pub fn test_checkpointing<M, Method, Problem>(mut solver1: Method, mut solver2: Method, problem: OdeSolverProblem<Problem>, soln: OdeSolverSolution<M::V>) 
+    where 
+        M: Matrix + DefaultSolver,
+        Method: OdeSolverMethod<Problem>,
+        Problem: OdeEquations<M = M, T = M::T, V = M::V>,
+    {
+        let state = OdeSolverState::new(&problem, &solver1).unwrap();
+        solver1.set_problem(state, &problem).unwrap();
+        let half_i = soln.solution_points.len() / 2;
+        let half_t = soln.solution_points[half_i].t;
+        while solver1.state().unwrap().t() <= half_t {
+            solver1.step().unwrap();
+        }
+        let checkpoint = solver1.checkpoint().unwrap();
+        solver2.set_problem(checkpoint, &problem).unwrap();
+
+        // try and interpolate on the new solver
+        let half_y = solver2.interpolate(half_t).unwrap();
+        check_soln(&half_y, &soln.solution_points[half_i], problem.rtol, &problem.atol);
+        
+        // try and interpolate on the old solver
+        let half_y = solver1.interpolate(half_t).unwrap();
+        check_soln(&half_y, &soln.solution_points[half_i], problem.rtol, &problem.atol);
+        
+        // carry on solving with both solvers, they should produce the same results
+        for point in soln.solution_points.iter().skip(half_i) {
+            while solver2.state().unwrap().t() < point.t {
+                solver1.step().unwrap();
+                solver2.step().unwrap();
+                assert_eq!(solver1.state().unwrap().t(), solver2.state().unwrap().t());
+                solver1.state().unwrap().y().assert_eq_st(solver2.state().unwrap().y(), problem.rtol);
+            }
+            let soln = solver2.interpolate(point.t).unwrap();
+            check_soln(&soln, point, problem.rtol, &problem.atol);
+        }
+    }
+
+
 
     pub fn test_state_mut_on_problem<Eqn, Method>(
         mut s: Method,

@@ -919,8 +919,7 @@ mod test {
                 robertson_sens::robertson_sens,
             },
             tests::{
-                test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut,
-                test_state_mut_on_problem,
+                test_checkpointing, test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut, test_state_mut_on_problem
             },
         },
         Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquations, Op, SparseColMat,
@@ -985,6 +984,12 @@ mod test {
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
         let (problem, soln) = exponential_decay_problem::<SparseColMat<f64>>(false);
         test_ode_solver(&mut s, &problem, soln, None, false);
+    }
+    
+    #[test]
+    fn bdf_test_checkpointing() {
+        let (problem, soln) = exponential_decay_problem::<M>(false);
+        test_checkpointing(Bdf::default(), Bdf::default(), problem, soln);
     }
 
     #[test]
