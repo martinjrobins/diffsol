@@ -560,7 +560,7 @@ where
         }
         self._jacobian_updates(
             self.state.as_ref().unwrap().h * self.alpha[self.state.as_ref().unwrap().order],
-               SolverState::Checkpoint,
+            SolverState::Checkpoint,
         );
 
         Ok(self.state.as_ref().unwrap().clone())
