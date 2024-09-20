@@ -357,7 +357,7 @@ where
     fn take_state(&mut self) -> Option<SdirkState<Eqn::V>> {
         Option::take(&mut self.state)
     }
-    
+
     fn checkpoint(&mut self) -> Result<Self::State, DiffsolError> {
         if self.state.is_none() {
             return Err(ode_solver_error!(StateNotSet));
@@ -365,7 +365,11 @@ where
         Ok(self.state.as_ref().unwrap().clone())
     }
 
-    fn set_problem(&mut self, mut state: SdirkState<Eqn::V>, problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError> {
+    fn set_problem(
+        &mut self,
+        mut state: SdirkState<Eqn::V>,
+        problem: &OdeSolverProblem<Eqn>,
+    ) -> Result<(), DiffsolError> {
         // setup linear solver for first step
         let callable = Rc::new(SdirkCallable::new(problem, self.gamma));
         callable.set_h(state.h);
@@ -382,26 +386,23 @@ where
         // update statistics
         self.statistics = BdfStatistics::default();
 
-
         state.check_consistent_with_problem(problem)?;
-        
+
         let nstates = state.y.len();
         let order = self.tableau.s();
         if self.diff.nrows() != nstates || self.diff.ncols() != order {
             self.diff = M::zeros(nstates, order);
         }
         if problem.eqn_sens.is_some() {
-            
             state.check_sens_consistent_with_problem(problem)?;
             let nparams = problem.eqn.rhs().nparams();
-            if 
-                self.sdiff.len() != nparams ||
-                self.sdiff[0].nrows() != nstates ||
-                self.sdiff[0].ncols() != order
+            if self.sdiff.len() != nparams
+                || self.sdiff[0].nrows() != nstates
+                || self.sdiff[0].ncols() != order
             {
                 self.sdiff = vec![M::zeros(nstates, order); nparams];
                 self.old_f_sens = vec![<Eqn::V as Vector>::zeros(nstates); nparams];
-                self.old_y_sens = vec![<Eqn::V as Vector>::zeros(nstates); nparams];
+                self.old_y_sens = state.s.clone();
                 self.s_op = Some(SdirkCallable::from_eqn(
                     problem.eqn_sens.as_ref().unwrap().clone(),
                     self.gamma,
@@ -753,8 +754,8 @@ mod test {
                 robertson_sens::robertson_sens,
             },
             tests::{
-                test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut,
-                test_state_mut_on_problem,
+                test_checkpointing, test_interpolate, test_no_set_problem, test_ode_solver,
+                test_state_mut, test_state_mut_on_problem,
             },
         },
         FaerSparseLU, NalgebraLU, OdeEquations, Op, Sdirk, SparseColMat, Tableau,
@@ -778,6 +779,15 @@ mod test {
     fn sdirk_test_interpolate() {
         let tableau = Tableau::<M>::tr_bdf2();
         test_interpolate::<M, _>(Sdirk::<M, _, _>::new(tableau, NalgebraLU::default()));
+    }
+
+    #[test]
+    fn sdirk_test_checkpointing() {
+        let tableau = Tableau::<M>::tr_bdf2();
+        let s1 = Sdirk::<M, _, _>::new(tableau.clone(), NalgebraLU::default());
+        let s2 = Sdirk::<M, _, _>::new(tableau, NalgebraLU::default());
+        let (problem, soln) = exponential_decay_problem::<M>(false);
+        test_checkpointing(s1, s2, problem, soln);
     }
 
     #[test]

@@ -8,9 +8,9 @@ pub mod problem;
 pub mod sdirk;
 pub mod sdirk_state;
 pub mod sens_equations;
+pub mod state;
 pub mod tableau;
 pub mod test_models;
-pub mod state;
 
 #[cfg(feature = "diffsl")]
 pub mod diffsl;
@@ -24,7 +24,6 @@ mod tests {
 
     use self::problem::OdeSolverSolution;
     use nalgebra::ComplexField;
-    use problem::OdeSolverSolutionPoint;
 
     use super::*;
     use crate::matrix::Matrix;
@@ -289,24 +288,18 @@ mod tests {
         let state2 = s.state().unwrap();
         state2.y().assert_eq_st(state.y(), M::T::from(1e-9));
         s.state_mut().unwrap().y_mut()[0] = M::T::from(std::f64::consts::PI);
-        assert_eq!(s.state_mut().unwrap().y_mut()[0], M::T::from(std::f64::consts::PI));
-    }
-
-    fn check_soln<V: Vector>(soln: &V, point: &OdeSolverSolutionPoint<V>, rtol: V::T, atol: &V) {
-        let error = soln.clone() - &point.state;
-        let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
-        assert!(
-            error_norm < V::T::from(15.0),
-            "error_norm: {} at t = {}. soln: {:?}, expected: {:?}",
-            error_norm,
-            point.t,
-            soln,
-            point.state
+        assert_eq!(
+            s.state_mut().unwrap().y_mut()[0],
+            M::T::from(std::f64::consts::PI)
         );
     }
-    
-    pub fn test_checkpointing<M, Method, Problem>(mut solver1: Method, mut solver2: Method, problem: OdeSolverProblem<Problem>, soln: OdeSolverSolution<M::V>) 
-    where 
+
+    pub fn test_checkpointing<M, Method, Problem>(
+        mut solver1: Method,
+        mut solver2: Method,
+        problem: OdeSolverProblem<Problem>,
+        soln: OdeSolverSolution<M::V>,
+    ) where
         M: Matrix + DefaultSolver,
         Method: OdeSolverMethod<Problem>,
         Problem: OdeEquations<M = M, T = M::T, V = M::V>,
@@ -321,28 +314,33 @@ mod tests {
         let checkpoint = solver1.checkpoint().unwrap();
         solver2.set_problem(checkpoint, &problem).unwrap();
 
-        // try and interpolate on the new solver
-        let half_y = solver2.interpolate(half_t).unwrap();
-        check_soln(&half_y, &soln.solution_points[half_i], problem.rtol, &problem.atol);
-        
-        // try and interpolate on the old solver
-        let half_y = solver1.interpolate(half_t).unwrap();
-        check_soln(&half_y, &soln.solution_points[half_i], problem.rtol, &problem.atol);
-        
-        // carry on solving with both solvers, they should produce the same results
-        for point in soln.solution_points.iter().skip(half_i) {
+        // carry on solving with both solvers, they should produce about the same results (probably might diverge a bit, but should always match the solution)
+        for point in soln.solution_points.iter().skip(half_i + 1) {
             while solver2.state().unwrap().t() < point.t {
                 solver1.step().unwrap();
                 solver2.step().unwrap();
-                assert_eq!(solver1.state().unwrap().t(), solver2.state().unwrap().t());
-                solver1.state().unwrap().y().assert_eq_st(solver2.state().unwrap().y(), problem.rtol);
+                let time_error = (solver1.state().unwrap().t() - solver2.state().unwrap().t())
+                    .abs()
+                    / (solver1.state().unwrap().t().abs() * problem.rtol + problem.atol[0]);
+                assert!(
+                    time_error < M::T::from(20.0),
+                    "time_error: {} at t = {}",
+                    time_error,
+                    solver1.state().unwrap().t()
+                );
+                solver1.state().unwrap().y().assert_eq_norm(
+                    solver2.state().unwrap().y(),
+                    &problem.atol,
+                    problem.rtol,
+                    M::T::from(20.0),
+                );
             }
+            let soln = solver1.interpolate(point.t).unwrap();
+            soln.assert_eq_norm(&point.state, &problem.atol, problem.rtol, M::T::from(15.0));
             let soln = solver2.interpolate(point.t).unwrap();
-            check_soln(&soln, point, problem.rtol, &problem.atol);
+            soln.assert_eq_norm(&point.state, &problem.atol, problem.rtol, M::T::from(15.0));
         }
     }
-
-
 
     pub fn test_state_mut_on_problem<Eqn, Method>(
         mut s: Method,

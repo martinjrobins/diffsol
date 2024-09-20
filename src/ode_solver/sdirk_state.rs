@@ -10,29 +10,21 @@ pub struct SdirkState<V: Vector> {
     pub(crate) h: V::T,
 }
 
-impl<V> SdirkState<V>
-where 
-    V: Vector
-{
-}
+impl<V> SdirkState<V> where V: Vector {}
 
 impl<V> OdeSolverState<V> for SdirkState<V>
-where 
+where
     V: Vector,
 {
-    fn set_problem<Eqn: OdeEquations>(&mut self, _ode_problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError> {
+    fn set_problem<Eqn: OdeEquations>(
+        &mut self,
+        _ode_problem: &OdeSolverProblem<Eqn>,
+    ) -> Result<(), DiffsolError> {
         Ok(())
     }
 
     fn new_internal_state(y: V, dy: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T) -> Self {
-        Self {
-            y,
-            dy,
-            s,
-            ds,
-            t,
-            h,
-        }
+        Self { y, dy, s, ds, t, h }
     }
 
     fn s(&self) -> &[V] {
@@ -65,7 +57,7 @@ where
     fn dy_mut(&mut self) -> &mut V {
         &mut self.dy
     }
-    
+
     fn y_dy_mut(&mut self) -> (&mut V, &mut V) {
         (&mut self.y, &mut self.dy)
     }

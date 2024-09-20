@@ -1,7 +1,9 @@
 use nalgebra::ComplexField;
 
 use crate::{
-    error::DiffsolError, matrix::default_solver::DefaultSolver, ode_solver_error, scalar::Scalar, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, VectorViewMut, error::OdeSolverError
+    error::DiffsolError, error::OdeSolverError, matrix::default_solver::DefaultSolver,
+    ode_solver_error, scalar::Scalar, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon,
+    NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, VectorViewMut,
 };
 
 #[derive(Debug, PartialEq)]
@@ -44,7 +46,11 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     /// Set the problem to solve, this performs any initialisation required by the solver. Call this before calling `step` or `solve`.
     /// The solver takes ownership of the initial state given by `state`, this is assumed to be consistent with any algebraic constraints,
     /// and the time step `h` is assumed to be set appropriately for the problem
-    fn set_problem(&mut self, state: Self::State, problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError>;
+    fn set_problem(
+        &mut self,
+        state: Self::State,
+        problem: &OdeSolverProblem<Eqn>,
+    ) -> Result<(), DiffsolError>;
 
     /// Take a checkpoint of the current state of the solver, returning it to the user. This is useful if you want to use this
     /// state in another solver or problem but want to keep this solver active. If you don't need to use this solver again, you can use `take_state` instead.
@@ -125,7 +131,8 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
                 let max_i = ret_y.ncols();
                 let curr_i = ret_t.len() - 1;
                 if curr_i >= max_i {
-                    ret_y = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, max_i * 2);
+                    ret_y =
+                        <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, max_i * 2);
                 }
                 ret_y.column_mut(curr_i)
             };
@@ -144,7 +151,8 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
                 let max_i = ret_y.ncols();
                 let curr_i = ret_t.len() - 1;
                 if curr_i >= max_i {
-                    ret_y = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, max_i + 1);
+                    ret_y =
+                        <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, max_i + 1);
                 }
                 ret_y.column_mut(curr_i)
             };

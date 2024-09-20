@@ -1,11 +1,11 @@
+use crate::{
+    error::DiffsolError, scalar::IndexType, scale, DenseMatrix, OdeEquations, OdeSolverProblem,
+    OdeSolverState, Op, Vector, VectorViewMut,
+};
 use std::ops::MulAssign;
-use crate::{error::DiffsolError, scalar::IndexType, scale, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Vector, VectorViewMut};
 
 #[derive(Clone)]
-pub struct BdfState<
-    V: Vector,
-    M: DenseMatrix<T = V::T, V = V>,
-> {
+pub struct BdfState<V: Vector, M: DenseMatrix<T = V::T, V = V>> {
     pub(crate) order: usize,
     pub(crate) diff: M,
     pub(crate) sdiff: Vec<M>,
@@ -18,7 +18,7 @@ pub struct BdfState<
 }
 
 impl<V, M> BdfState<V, M>
-where 
+where
     V: Vector,
     M: DenseMatrix<T = V::T, V = V>,
 {
@@ -45,11 +45,14 @@ where
 }
 
 impl<V, M> OdeSolverState<V> for BdfState<V, M>
-where 
+where
     V: Vector,
     M: DenseMatrix<T = V::T, V = V>,
 {
-    fn set_problem<Eqn: OdeEquations>(&mut self, ode_problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError> {
+    fn set_problem<Eqn: OdeEquations>(
+        &mut self,
+        ode_problem: &OdeSolverProblem<Eqn>,
+    ) -> Result<(), DiffsolError> {
         let not_initialised = self.diff.ncols() == 0;
         let nstates = ode_problem.eqn.rhs().nstates();
         let nparams = ode_problem.eqn.rhs().nparams();
@@ -108,7 +111,7 @@ where
     fn dy_mut(&mut self) -> &mut V {
         &mut self.dy
     }
-    
+
     fn y_dy_mut(&mut self) -> (&mut V, &mut V) {
         (&mut self.y, &mut self.dy)
     }

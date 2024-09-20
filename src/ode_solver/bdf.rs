@@ -1,6 +1,6 @@
 use nalgebra::ComplexField;
-use std::rc::Rc;
 use std::ops::AddAssign;
+use std::rc::Rc;
 
 use crate::error::{DiffsolError, OdeSolverError};
 
@@ -8,16 +8,15 @@ use num_traits::{abs, One, Pow, Zero};
 use serde::Serialize;
 
 use crate::{
-    BdfState,
     matrix::{default_solver::DefaultSolver, MatrixRef},
     newton_iteration,
     nonlinear_solver::root::RootFinder,
     op::bdf::BdfCallable,
     scalar::scale,
     vector::DefaultDenseMatrix,
-    DenseMatrix, IndexType, JacobianUpdate, MatrixViewMut, NewtonNonlinearSolver, NonLinearSolver,
-    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar,
-    SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
+    BdfState, DenseMatrix, IndexType, JacobianUpdate, MatrixViewMut, NewtonNonlinearSolver,
+    NonLinearSolver, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op,
+    Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
 };
 use crate::{ode_solver_error, NonLinearOp, SensEquations};
 
@@ -128,7 +127,7 @@ where
         let max_order: usize = BdfState::<Eqn::V, M>::MAX_ORDER;
 
         #[allow(clippy::needless_range_loop)]
-        for i in 1..= max_order {
+        for i in 1..=max_order {
             let i_t = Eqn::T::from(i as f64);
             let one_over_i = Eqn::T::one() / i_t;
             let one_over_i_plus_one = Eqn::T::one() / (i_t + Eqn::T::one());
@@ -238,8 +237,7 @@ where
             }
         }
 
-        self.nonlinear_problem_op()
-            .set_c(new_h, self.alpha[order]);
+        self.nonlinear_problem_op().set_c(new_h, self.alpha[order]);
 
         self.state.as_mut().unwrap().h = new_h;
 
@@ -367,7 +365,10 @@ where
 
     fn initialise_to_first_order(&mut self) {
         self.n_equal_steps = 0;
-        self.state.as_mut().unwrap().initialise_diff_to_first_order(self.ode_problem.as_ref().unwrap().eqn_sens.is_some());
+        self.state
+            .as_mut()
+            .unwrap()
+            .initialise_diff_to_first_order(self.ode_problem.as_ref().unwrap().eqn_sens.is_some());
         self.u = Self::_compute_r(1, Eqn::T::one());
         self.is_state_modified = false;
     }
@@ -500,7 +501,11 @@ where
             return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
         }
         Ok(Self::interpolate_from_diff(
-            t, &state.diff, state.t, state.h, state.order,
+            t,
+            &state.diff,
+            state.t,
+            state.h,
+            state.order,
         ))
     }
 
@@ -559,11 +564,15 @@ where
         Ok(self.state.as_ref().unwrap().clone())
     }
 
-    fn set_problem(&mut self, mut state: BdfState<Eqn::V, M>, problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError> {
+    fn set_problem(
+        &mut self,
+        mut state: BdfState<Eqn::V, M>,
+        problem: &OdeSolverProblem<Eqn>,
+    ) -> Result<(), DiffsolError> {
         self.ode_problem = Some(problem.clone());
 
         state.check_consistent_with_problem(problem)?;
-        
+
         // setup linear solver for first step
         let bdf_callable = Rc::new(BdfCallable::new(problem));
         bdf_callable.set_c(state.h, self.alpha[state.order]);
@@ -604,9 +613,7 @@ where
                     .unwrap(),
             ));
 
-            if self.s_deltas.len() != nparams
-               || self.s_deltas[0].len() != nstates
-            {
+            if self.s_deltas.len() != nparams || self.s_deltas[0].len() != nstates {
                 self.s_deltas = vec![<Eqn::V as Vector>::zeros(nstates); nparams];
             }
             if self.s_predict.len() != nstates {
@@ -622,7 +629,6 @@ where
         state.set_problem(problem)?;
         self.state = Some(state);
         Ok(())
-
     }
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
@@ -776,8 +782,9 @@ where
                 // order k, we need to calculate the optimal step size factors for orders
                 // k-1 and k+1. To do this, we note that the error = C_k * D^{k+1} y_n
                 let error_m_norm = if order > 1 {
-                    let mut error_m_norm = state.diff.column(order).squared_norm(&state.y, atol, rtol)
-                        * self.error_const2[order - 1];
+                    let mut error_m_norm =
+                        state.diff.column(order).squared_norm(&state.y, atol, rtol)
+                            * self.error_const2[order - 1];
                     for i in 0..state.sdiff.len() {
                         error_m_norm +=
                             state.sdiff[i]
@@ -828,7 +835,7 @@ where
 
             // update order and update the U matrix
             let order = {
-                let old_order= self.state.as_ref().unwrap().order;
+                let old_order = self.state.as_ref().unwrap().order;
                 let new_order = match max_index {
                     0 => old_order - 1,
                     1 => old_order,
@@ -919,7 +926,8 @@ mod test {
                 robertson_sens::robertson_sens,
             },
             tests::{
-                test_checkpointing, test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut, test_state_mut_on_problem
+                test_checkpointing, test_interpolate, test_no_set_problem, test_ode_solver,
+                test_state_mut, test_state_mut_on_problem,
             },
         },
         Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquations, Op, SparseColMat,
@@ -985,7 +993,7 @@ mod test {
         let (problem, soln) = exponential_decay_problem::<SparseColMat<f64>>(false);
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
-    
+
     #[test]
     fn bdf_test_checkpointing() {
         let (problem, soln) = exponential_decay_problem::<M>(false);

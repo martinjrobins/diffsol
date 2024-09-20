@@ -1,8 +1,13 @@
-use std::rc::Rc;
-use num_traits::{Zero, One, Pow};
 use nalgebra::ComplexField;
+use num_traits::{One, Pow, Zero};
+use std::rc::Rc;
 
-use crate::{error::DiffsolError, nonlinear_solver::NonLinearSolver, ode_solver_error, InitOp, scale, solver::SolverProblem, ConstantOp, DefaultSolver, NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, Op, SensEquations, Vector, error::OdeSolverError};
+use crate::{
+    error::DiffsolError, error::OdeSolverError, nonlinear_solver::NonLinearSolver,
+    ode_solver_error, scale, solver::SolverProblem, ConstantOp, DefaultSolver, InitOp,
+    NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, Op,
+    SensEquations, Vector,
+};
 
 /// State for the ODE solver, containing:
 /// - the current solution `y`
@@ -28,9 +33,15 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     fn h(&self) -> V::T;
     fn h_mut(&mut self) -> &mut V::T;
     fn new_internal_state(y: V, dy: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T) -> Self;
-    fn set_problem<Eqn: OdeEquations>(&mut self, ode_problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError>;
-    
-    fn check_consistent_with_problem<Eqn: OdeEquations>(&self, problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError> {
+    fn set_problem<Eqn: OdeEquations>(
+        &mut self,
+        ode_problem: &OdeSolverProblem<Eqn>,
+    ) -> Result<(), DiffsolError>;
+
+    fn check_consistent_with_problem<Eqn: OdeEquations>(
+        &self,
+        problem: &OdeSolverProblem<Eqn>,
+    ) -> Result<(), DiffsolError> {
         if self.y().len() != problem.eqn.rhs().nstates() {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
@@ -39,8 +50,11 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         }
         Ok(())
     }
-    
-    fn check_sens_consistent_with_problem<Eqn: OdeEquations>(&self, problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError> {
+
+    fn check_sens_consistent_with_problem<Eqn: OdeEquations>(
+        &self,
+        problem: &OdeSolverProblem<Eqn>,
+    ) -> Result<(), DiffsolError> {
         if self.s().len() != problem.eqn_sens.as_ref().unwrap().rhs().nparams() {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
@@ -55,21 +69,17 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         }
         Ok(())
     }
-        
 
     /// Create a new solver state from an ODE problem.
     /// This function will make the state consistent with any algebraic constraints using a default nonlinear solver.
     /// It will also set the initial step size based on the given solver.
     /// If you want to create a state without this default initialisation, use [Self::new_without_initialise] instead.
     /// You can then use [Self::set_consistent] and [Self::set_step_size] to set the state up if you need to.
-    fn new<Eqn, S>(
-        ode_problem: &OdeSolverProblem<Eqn>,
-        solver: &S,
-    ) -> Result<Self, DiffsolError>
+    fn new<Eqn, S>(ode_problem: &OdeSolverProblem<Eqn>, solver: &S) -> Result<Self, DiffsolError>
     where
         Eqn: OdeEquations<T = V::T, V = V>,
         Eqn::M: DefaultSolver,
-        S: OdeSolverMethod<Eqn> 
+        S: OdeSolverMethod<Eqn>,
     {
         let mut ret = Self::new_without_initialise(ode_problem);
         let mut root_solver =
@@ -126,10 +136,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     {
         let t = self.t();
         let (y, dy) = self.y_dy_mut();
-        ode_problem
-            .eqn
-            .rhs()
-            .call_inplace(y, t, dy);
+        ode_problem.eqn.rhs().call_inplace(y, t, dy);
         if ode_problem.eqn.mass().is_none() {
             return Ok(());
         }
@@ -169,9 +176,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         for i in 0..ode_problem.eqn.rhs().nparams() {
             eqn_sens.init().set_param_index(i);
             eqn_sens.rhs().set_param_index(i);
-            eqn_sens
-                .rhs()
-                .call_inplace(&s[i], t, &mut ds[i]);
+            eqn_sens.rhs().call_inplace(&s[i], t, &mut ds[i]);
         }
 
         if ode_problem.eqn.mass().is_none() {

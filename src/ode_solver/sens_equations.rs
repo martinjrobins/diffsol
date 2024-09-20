@@ -310,7 +310,8 @@ mod tests {
             exponential_decay::exponential_decay_problem_sens,
             exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
             robertson_sens::robertson_sens,
-        }, NonLinearOp, SdirkState, SensEquations, Vector
+        },
+        NonLinearOp, SdirkState, SensEquations, Vector,
     };
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;
