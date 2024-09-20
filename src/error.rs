@@ -74,6 +74,8 @@ pub enum OdeSolverError {
     #[error("atol must have length 1 or equal to the number of states")]
     AtolLengthMismatch,
     #[error("t_eval must be increasing and all values must be greater than or equal to the current time")]
+    StateProblemMismatch,
+    #[error("State is not consistent with the problem equations")]
     InvalidTEval,
     #[error("Sundials error: {0}")]
     SundialsError(String),

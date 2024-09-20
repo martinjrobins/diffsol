@@ -1,11 +1,14 @@
 pub mod bdf;
+pub mod bdf_state;
 pub mod builder;
 pub mod equations;
 pub mod jacobian_update;
 pub mod method;
 pub mod problem;
 pub mod sdirk;
+pub mod sdirk_state;
 pub mod sens_equations;
+pub mod state;
 pub mod tableau;
 pub mod test_models;
 
@@ -46,7 +49,7 @@ mod tests {
         Eqn::M: DefaultSolver,
     {
         let state = OdeSolverState::new(problem, method).unwrap();
-        method.set_problem(state, problem);
+        method.set_problem(state, problem).unwrap();
         let have_root = problem.eqn.as_ref().root().is_some();
         for (i, point) in solution.solution_points.iter().enumerate() {
             let (soln, sens_soln) = if use_tstop {
@@ -55,24 +58,24 @@ mod tests {
                         match method.step() {
                             Ok(OdeSolverStopReason::RootFound(_)) => {
                                 assert!(have_root);
-                                return method.state().unwrap().y.clone();
+                                return method.state().unwrap().y().clone();
                             }
                             Ok(OdeSolverStopReason::TstopReached) => {
                                 break (
-                                    method.state().unwrap().y.clone(),
-                                    method.state().unwrap().s.clone(),
+                                    method.state().unwrap().y().clone(),
+                                    method.state().unwrap().s().to_vec(),
                                 );
                             }
                             _ => (),
                         }
                     },
                     Err(_) => (
-                        method.state().unwrap().y.clone(),
-                        method.state().unwrap().s.clone(),
+                        method.state().unwrap().y().clone(),
+                        method.state().unwrap().s().to_vec(),
                     ),
                 }
             } else {
-                while method.state().unwrap().t.abs() < point.t.abs() {
+                while method.state().unwrap().t().abs() < point.t.abs() {
                     if let OdeSolverStopReason::RootFound(t) = method.step().unwrap() {
                         assert!(have_root);
                         return method.interpolate(t).unwrap();
@@ -127,7 +130,7 @@ mod tests {
                 }
             }
         }
-        method.state().unwrap().y.clone()
+        method.state().unwrap().y().clone()
     }
 
     pub struct TestEqnInit<M> {
@@ -248,17 +251,17 @@ mod tests {
             false,
         )
         .unwrap();
-        let state = OdeSolverState::new_without_initialise(&problem);
-        s.set_problem(state.clone(), &problem);
+        let state = Method::State::new_without_initialise(&problem);
+        s.set_problem(state.clone(), &problem).unwrap();
         let t0 = M::T::zero();
         let t1 = M::T::one();
         s.interpolate(t0)
             .unwrap()
-            .assert_eq_st(&state.y, M::T::from(1e-9));
+            .assert_eq_st(state.y(), M::T::from(1e-9));
         assert!(s.interpolate(t1).is_err());
         s.step().unwrap();
-        assert!(s.interpolate(s.state().unwrap().t).is_ok());
-        assert!(s.interpolate(s.state().unwrap().t + t1).is_err());
+        assert!(s.interpolate(s.state().unwrap().t()).is_ok());
+        assert!(s.interpolate(s.state().unwrap().t() + t1).is_err());
     }
 
     pub fn test_no_set_problem<M: Matrix, Method: OdeSolverMethod<TestEqn<M>>>(mut s: Method) {
@@ -280,12 +283,63 @@ mod tests {
             false,
         )
         .unwrap();
-        let state = OdeSolverState::new_without_initialise(&problem);
-        s.set_problem(state.clone(), &problem);
+        let state = Method::State::new_without_initialise(&problem);
+        s.set_problem(state.clone(), &problem).unwrap();
         let state2 = s.state().unwrap();
-        state2.y.assert_eq_st(&state.y, M::T::from(1e-9));
-        s.state_mut().unwrap().y[0] = M::T::from(std::f64::consts::PI);
-        assert_eq!(s.state().unwrap().y[0], M::T::from(std::f64::consts::PI));
+        state2.y().assert_eq_st(state.y(), M::T::from(1e-9));
+        s.state_mut().unwrap().y_mut()[0] = M::T::from(std::f64::consts::PI);
+        assert_eq!(
+            s.state_mut().unwrap().y_mut()[0],
+            M::T::from(std::f64::consts::PI)
+        );
+    }
+
+    pub fn test_checkpointing<M, Method, Problem>(
+        mut solver1: Method,
+        mut solver2: Method,
+        problem: OdeSolverProblem<Problem>,
+        soln: OdeSolverSolution<M::V>,
+    ) where
+        M: Matrix + DefaultSolver,
+        Method: OdeSolverMethod<Problem>,
+        Problem: OdeEquations<M = M, T = M::T, V = M::V>,
+    {
+        let state = OdeSolverState::new(&problem, &solver1).unwrap();
+        solver1.set_problem(state, &problem).unwrap();
+        let half_i = soln.solution_points.len() / 2;
+        let half_t = soln.solution_points[half_i].t;
+        while solver1.state().unwrap().t() <= half_t {
+            solver1.step().unwrap();
+        }
+        let checkpoint = solver1.checkpoint().unwrap();
+        solver2.set_problem(checkpoint, &problem).unwrap();
+
+        // carry on solving with both solvers, they should produce about the same results (probably might diverge a bit, but should always match the solution)
+        for point in soln.solution_points.iter().skip(half_i + 1) {
+            while solver2.state().unwrap().t() < point.t {
+                solver1.step().unwrap();
+                solver2.step().unwrap();
+                let time_error = (solver1.state().unwrap().t() - solver2.state().unwrap().t())
+                    .abs()
+                    / (solver1.state().unwrap().t().abs() * problem.rtol + problem.atol[0]);
+                assert!(
+                    time_error < M::T::from(20.0),
+                    "time_error: {} at t = {}",
+                    time_error,
+                    solver1.state().unwrap().t()
+                );
+                solver1.state().unwrap().y().assert_eq_norm(
+                    solver2.state().unwrap().y(),
+                    &problem.atol,
+                    problem.rtol,
+                    M::T::from(20.0),
+                );
+            }
+            let soln = solver1.interpolate(point.t).unwrap();
+            soln.assert_eq_norm(&point.state, &problem.atol, problem.rtol, M::T::from(15.0));
+            let soln = solver2.interpolate(point.t).unwrap();
+            soln.assert_eq_norm(&point.state, &problem.atol, problem.rtol, M::T::from(15.0));
+        }
     }
 
     pub fn test_state_mut_on_problem<Eqn, Method>(
@@ -302,13 +356,13 @@ mod tests {
         s.solve(&problem, Eqn::T::from(1.0)).unwrap();
 
         // reinit using state_mut
-        let state = OdeSolverState::new_without_initialise(&problem);
-        s.state_mut().unwrap().y.copy_from(&state.y);
-        s.state_mut().unwrap().t = state.t;
+        let state = Method::State::new_without_initialise(&problem);
+        s.state_mut().unwrap().y_mut().copy_from(state.y());
+        *s.state_mut().unwrap().t_mut() = state.t();
 
         // solve and check against solution
         for point in soln.solution_points.iter() {
-            while s.state().unwrap().t < point.t {
+            while s.state().unwrap().t() < point.t {
                 s.step().unwrap();
             }
             let soln = s.interpolate(point.t).unwrap();

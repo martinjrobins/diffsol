@@ -1,6 +1,7 @@
 use crate::matrix::DenseMatrix;
 use crate::scalar::Scale;
 use crate::{IndexType, Scalar};
+use nalgebra::ComplexField;
 use num_traits::Zero;
 use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
@@ -171,6 +172,18 @@ pub trait Vector:
         let tol = Self::from_element(self.len(), tol);
         self.assert_eq(other, &tol);
     }
+    fn assert_eq_norm(&self, other: &Self, atol: &Self, rtol: Self::T, factor: Self::T) {
+        let error = self.clone() - other.clone();
+        let error_norm = error.squared_norm(other, atol, rtol).sqrt();
+        assert!(
+            error_norm < factor,
+            "error_norm: {}. self: {:?}, other: {:?}",
+            error_norm,
+            self,
+            other
+        );
+    }
+
     fn assert_eq(&self, other: &Self, tol: &Self) {
         assert_eq!(
             self.len(),

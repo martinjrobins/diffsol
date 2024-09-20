@@ -311,7 +311,7 @@ mod tests {
             exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
             robertson_sens::robertson_sens,
         },
-        NonLinearOp, OdeSolverState, SensEquations, Vector,
+        NonLinearOp, SdirkState, SensEquations, Vector,
     };
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;
@@ -321,7 +321,7 @@ mod tests {
         // dy/dt = -ay (p = [a])
         let (problem, _soln) = exponential_decay_problem_sens::<Mcpu>(false);
         let sens_eqn = SensEquations::new(&problem.eqn);
-        let state = OdeSolverState {
+        let state = SdirkState {
             t: 0.0,
             y: Vcpu::from_vec(vec![1.0, 1.0]),
             dy: Vcpu::from_vec(vec![1.0, 1.0]),
@@ -357,7 +357,7 @@ mod tests {
     fn test_rhs_exponential_algebraic() {
         let (problem, _soln) = exponential_decay_with_algebraic_problem_sens::<Mcpu>(false);
         let sens_eqn = SensEquations::new(&problem.eqn);
-        let state = OdeSolverState {
+        let state = SdirkState {
             t: 0.0,
             y: Vcpu::from_vec(vec![1.0, 1.0, 1.0]),
             dy: Vcpu::from_vec(vec![1.0, 1.0, 1.0]),
@@ -402,7 +402,7 @@ mod tests {
     fn test_rhs_robertson() {
         let (problem, _soln) = robertson_sens::<Mcpu>(false);
         let sens_eqn = SensEquations::new(&problem.eqn);
-        let state = OdeSolverState {
+        let state = SdirkState {
             t: 0.0,
             y: Vcpu::from_vec(vec![1.0, 2.0, 3.0]),
             dy: Vcpu::from_vec(vec![1.0, 1.0, 1.0]),

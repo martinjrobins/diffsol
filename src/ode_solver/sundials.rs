@@ -1,12 +1,15 @@
-use crate::sundials_sys::{
-    realtype, IDACalcIC, IDACreate, IDAFree, IDAGetDky, IDAGetIntegratorStats,
-    IDAGetNonlinSolvStats, IDAGetReturnFlagName, IDAInit, IDAReInit, IDASVtolerances, IDASetId,
-    IDASetJacFn, IDASetLinearSolver, IDASetStopTime, IDASetUserData, IDASolve, N_Vector,
-    SUNLinSolFree, SUNLinSolInitialize, SUNLinSol_Dense, SUNLinearSolver, SUNMatrix,
-    IDA_CONSTR_FAIL, IDA_CONV_FAIL, IDA_ERR_FAIL, IDA_ILL_INPUT, IDA_LINIT_FAIL, IDA_LSETUP_FAIL,
-    IDA_LSOLVE_FAIL, IDA_MEM_NULL, IDA_ONE_STEP, IDA_REP_RES_ERR, IDA_RES_FAIL, IDA_ROOT_RETURN,
-    IDA_RTFUNC_FAIL, IDA_SUCCESS, IDA_TOO_MUCH_ACC, IDA_TOO_MUCH_WORK, IDA_TSTOP_RETURN,
-    IDA_YA_YDP_INIT,
+use crate::{
+    sundials_sys::{
+        realtype, IDACalcIC, IDACreate, IDAFree, IDAGetDky, IDAGetIntegratorStats,
+        IDAGetNonlinSolvStats, IDAGetReturnFlagName, IDAInit, IDAReInit, IDASVtolerances, IDASetId,
+        IDASetJacFn, IDASetLinearSolver, IDASetStopTime, IDASetUserData, IDASolve, N_Vector,
+        SUNLinSolFree, SUNLinSolInitialize, SUNLinSol_Dense, SUNLinearSolver, SUNMatrix,
+        IDA_CONSTR_FAIL, IDA_CONV_FAIL, IDA_ERR_FAIL, IDA_ILL_INPUT, IDA_LINIT_FAIL,
+        IDA_LSETUP_FAIL, IDA_LSOLVE_FAIL, IDA_MEM_NULL, IDA_ONE_STEP, IDA_REP_RES_ERR,
+        IDA_RES_FAIL, IDA_ROOT_RETURN, IDA_RTFUNC_FAIL, IDA_SUCCESS, IDA_TOO_MUCH_ACC,
+        IDA_TOO_MUCH_WORK, IDA_TSTOP_RETURN, IDA_YA_YDP_INIT,
+    },
+    SdirkState,
 };
 use num_traits::Zero;
 use serde::Serialize;
@@ -17,8 +20,8 @@ use std::{
 
 use crate::{
     error::*, matrix::sparsity::MatrixSparsityRef, ode_solver_error, scale, LinearOp, Matrix,
-    NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-    OdeSolverStopReason, Op, SundialsMatrix, SundialsVector, Vector,
+    NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverStopReason, Op,
+    SundialsMatrix, SundialsVector, Vector,
 };
 
 #[cfg(not(sundials_version_major = "5"))]
@@ -137,7 +140,7 @@ where
     yp: SundialsVector,
     jacobian: SundialsMatrix,
     statistics: SundialsStatistics,
-    state: Option<OdeSolverState<Eqn::V>>,
+    state: Option<SdirkState<Eqn::V>>,
     is_state_modified: bool,
 }
 
@@ -283,11 +286,20 @@ impl<Eqn> OdeSolverMethod<Eqn> for SundialsIda<Eqn>
 where
     Eqn: OdeEquations<T = realtype, V = SundialsVector, M = SundialsMatrix>,
 {
+    type State = SdirkState<Eqn::V>;
+
+    fn checkpoint(&mut self) -> Result<Self::State, DiffsolError> {
+        self.state
+            .as_ref()
+            .cloned()
+            .ok_or(ode_solver_error!(StateNotSet))
+    }
+
     fn problem(&self) -> Option<&OdeSolverProblem<Eqn>> {
         self.problem.as_ref()
     }
 
-    fn state(&self) -> Option<&OdeSolverState<Eqn::V>> {
+    fn state(&self) -> Option<&Self::State> {
         self.state.as_ref()
     }
 
@@ -295,16 +307,20 @@ where
         1
     }
 
-    fn state_mut(&mut self) -> Option<&mut OdeSolverState<Eqn::V>> {
+    fn state_mut(&mut self) -> Option<&mut Self::State> {
         self.is_state_modified = true;
         self.state.as_mut()
     }
 
-    fn take_state(&mut self) -> Option<OdeSolverState<<Eqn>::V>> {
+    fn take_state(&mut self) -> Option<Self::State> {
         Option::take(&mut self.state)
     }
 
-    fn set_problem(&mut self, state: OdeSolverState<Eqn::V>, problem: &OdeSolverProblem<Eqn>) {
+    fn set_problem(
+        &mut self,
+        state: Self::State,
+        problem: &OdeSolverProblem<Eqn>,
+    ) -> Result<(), DiffsolError> {
         self.state = Some(state);
         let state = self.state.as_ref().unwrap();
         self.problem = Some(problem.clone());
@@ -366,6 +382,7 @@ where
         if self.problem.as_ref().unwrap().eqn_sens.is_some() {
             panic!("Sensitivities not implemented for sundials solver");
         }
+        Ok(())
     }
 
     fn set_stop_time(&mut self, tstop: Eqn::T) -> Result<(), DiffsolError> {

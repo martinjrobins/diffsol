@@ -21,6 +21,7 @@ use num_traits::{One, Zero};
 ///
 /// For continous extension methods, the beta matrix is also included.
 ///
+#[derive(Clone)]
 pub struct Tableau<M: DenseMatrix> {
     a: M,
     b: M::V,
