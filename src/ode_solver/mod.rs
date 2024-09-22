@@ -8,9 +8,11 @@ pub mod problem;
 pub mod sdirk;
 pub mod sdirk_state;
 pub mod sens_equations;
+//pub mod adjoint_equations;
 pub mod state;
 pub mod tableau;
 pub mod test_models;
+pub mod checkpointing;
 
 #[cfg(feature = "diffsl")]
 pub mod diffsl;

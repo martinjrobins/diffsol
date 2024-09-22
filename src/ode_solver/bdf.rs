@@ -32,6 +32,16 @@ pub struct BdfStatistics {
     pub number_of_nonlinear_solver_fails: usize,
 }
 
+// notes quadrature.
+// ndf formula rearranged to [2]:
+// (1 - kappa) * gamma_k * (y_{n+1} - y^0_{n+1}) + (\sum_{m=1}^k gamma_m * y^m_n) - h * F(t_{n+1}, y_{n+1}) = 0 (1)
+// where d = y_{n+1} - y^0_{n+1}
+// and y^0_{n+1} = \sum_{m=0}^k y^m_n
+//
+// 1. use (1) to calculate d explicitly
+// 2. use d to update the differences matrix
+// 3. use d to calculate the predicted solution y_{n+1}
+
 /// Implements a Backward Difference formula (BDF) implicit multistep integrator.
 ///
 /// The basic algorithm is derived in \[1\]. This
