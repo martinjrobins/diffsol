@@ -52,7 +52,14 @@ where
 
     }
         
-    pub fn interpolate(&self, t: V::T) -> V {
+    pub fn interpolate(&self, t: V::T, y: &mut V) -> Option<()> {
+        if t < self.ts[0] || t > self.ts[self.ts.len() - 1] {
+            return None;
+        }
+        if t == self.ts[0] {
+            y.copy_from(&self.ys[0]);
+            return Some(());
+        }
         let idx = self.ts.iter().position(|&t0| t0 > t).unwrap_or(self.ts.len() - 1);
         let t0 = self.ts[idx - 1];
         let t1 = self.ts[idx];
@@ -63,15 +70,13 @@ where
         let f0 = &self.ydots[idx - 1];
         let f1 = &self.ydots[idx];
         
-        let mut y = u0.clone();
-        y.axpy(V::T::from(1.0) - theta, u1, theta);
-        
-        let mut y = u1.clone() - u0;
+        y.copy_from(u0);
+        y.axpy(V::T::one(), u1, -V::T::one());
         y.axpy(h * (theta - V::T::from(1.0)), f0, V::T::one() - V::T::from(2.0) * theta);
         y.axpy(h * theta, f1,V::T::one());
         y.axpy(V::T::from(1.0) - theta, u0, theta * (theta - V::T::from(1.0)));
         y.axpy(theta, u1, V::T::one());
-        y
+        Some(())
     }
 }
 
@@ -81,8 +86,8 @@ where
     Eqn: OdeEquations,
 {
     checkpoints: Vec<Method::State>,
-    segment_start_idx: usize,
     segment: HermiteInterpolator<Eqn::V>,
+    previous_segment: Option<HermiteInterpolator<Eqn::V>>,
     solver: Method,
     pub(crate) problem: OdeSolverProblem<Eqn>,
 }
@@ -92,28 +97,33 @@ where
     Method: OdeSolverMethod<Eqn>,
     Eqn: OdeEquations,
 {
-    pub fn new(problem: &OdeSolverProblem<Eqn>, solver: Method, checkpoints: Vec<Method::State>) -> Self {
+    pub fn new(problem: &OdeSolverProblem<Eqn>, mut solver: Method, start_idx: usize, checkpoints: Vec<Method::State>) -> Self {
+        if checkpoints.len() < 2 {
+            panic!("Checkpoints must have at least 2 elements");
+        }
+        if start_idx >= checkpoints.len() - 1 {
+            panic!("start_idx must be less than checkpoints.len() - 1");
+        }
+        let mut segment = HermiteInterpolator::default();
+        segment.reset(problem, &mut solver, &checkpoints[start_idx], &checkpoints[start_idx]).unwrap();
         Checkpointing {
-            segment_start_idx: checkpoints.len() - 1,
             checkpoints,
-            segment: HermiteInterpolator::default(),
+            segment,
+            previous_segment: None,
             solver,
             problem: problem.clone(),
         }
     }
     
-    pub fn interpolate(&mut self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
-        // if we've only got a single checkpoint and t is same as that checkpoint, return it
-        if self.checkpoints.len() == 1 {
-            if t == self.checkpoints[0].t() {
-                return Ok(self.checkpoints[0].y().clone());
-            } else {
-                return Err(other_error!("t is not the same as the checkpoint"));
-            }
+    pub fn interpolate(&mut self, t: Eqn::T, y: &mut Eqn::V) -> Result<(), DiffsolError> {
+        if self.segment.interpolate(t, y).is_some() {
+            return Ok(());
         }
-        // if t is in current segment, interpolate
-        if t >= self.checkpoints[self.segment_start_idx].t() && t <= self.checkpoints[self.segment_start_idx + 1].t() {
-            return Ok(self.segment.interpolate(t));
+
+        if let Some(previous_segment) = self.previous_segment.as_ref() {
+            if previous_segment.interpolate(t, y).is_some() {
+                return Ok(());
+            }
         }
 
         // if t is before first segment or after last segment, return error
@@ -123,16 +133,21 @@ where
 
         // else find idx of segment
         let idx = self.checkpoints.iter().skip(1).position(|state| state.t() > t).expect("t is not in checkpoints");
-        self.segment.reset(&self.problem, &mut self.solver, &self.checkpoints[idx], &self.checkpoints[idx + 1])?;
-        Ok(self.segment.interpolate(t))
+        if self.previous_segment.is_none() {
+            self.previous_segment = Some(HermiteInterpolator::default());
+        }
+        self.previous_segment.as_mut().unwrap().reset(&self.problem, &mut self.solver, &self.checkpoints[idx], &self.checkpoints[idx + 1])?;
+        std::mem::swap(&mut self.segment, self.previous_segment.as_mut().unwrap());
+        self.segment.interpolate(t, y).unwrap();
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use nalgebra::DMatrix;
+    use nalgebra::{DMatrix, DVector};
 
-    use crate::{ode_solver::test_models::robertson::robertson, Bdf, BdfState, OdeSolverMethod, OdeSolverState, Vector};
+    use crate::{ode_solver::test_models::robertson::robertson, Bdf, BdfState, OdeSolverMethod, OdeSolverState, Vector, OdeEquations, Op};
 
     use super::Checkpointing;
 
@@ -156,10 +171,11 @@ mod tests {
         if i % n_steps != 0 {
             checkpoints.push(solver.checkpoint().unwrap());
         }
-        let mut checkpointer = Checkpointing::new(&problem, solver, checkpoints);
+        let mut checkpointer = Checkpointing::new(&problem, solver, checkpoints.len() - 2, checkpoints);
+        let mut y = DVector::zeros(problem.eqn.rhs().nstates());
         for point in soln.solution_points.iter().rev() {
-            let interp = checkpointer.interpolate(point.t).unwrap();
-            interp.assert_eq_norm(&point.state, &problem.atol, problem.rtol, 10.0);
+            checkpointer.interpolate(point.t, &mut y).unwrap();
+            y.assert_eq_norm(&point.state, &problem.atol, problem.rtol, 10.0);
         }
     }
 }

@@ -86,7 +86,7 @@ where
                 g_x_sparsity.map(|s| s.to_owned()),
             )
         } else {
-            Eqn::M::zeros(0, 0)
+            <Eqn::M as Matrix>::zeros(0, 0)
         };
         let x = <Eqn::V as Vector>::zeros(eqn.rhs().nstates());
         let index = None;
@@ -99,19 +99,21 @@ where
         }
     }
 
+    fn update_x(&self, t: Eqn::T) {
+        let mut checkpointer = self.checkpointer.borrow_mut();
+        let mut x = self.x.borrow_mut();
+        checkpointer.interpolate(t, &mut x).unwrap();
+    }
+
     /// precompute S = g^T_x(x,t) and the state x(t) from t
     pub fn update_state(&self, t: Eqn::T) {
-        let mut checkpointer = self.checkpointer.borrow_mut();
-        let check_x = checkpointer.interpolate(t).unwrap();
-
         // update -g_x^T
         if let Some(g) = self.eqn.out() {
+            self.update_x(t);
+            let x = self.x.borrow();
             let mut g_x = self.g_x.borrow_mut();
-            g.adjoint_inplace(&check_x, t, &mut g_x);
+            g.adjoint_inplace(&x, t, &mut g_x);
         }
-
-        let mut x = self.x.borrow_mut();
-        x.copy_from(&check_x);
     }
     pub fn set_param_index(&self, index: Option<usize>) {
         if index.is_some() && self.eqn.out().is_none() {
@@ -152,8 +154,9 @@ where
     /// F(λ, x, t) = -f^T_x(x, t) λ - g^T_x(x,t)
     fn call_inplace(&self, lambda: &Self::V, t: Self::T, y: &mut Self::V) {
         // y = -f^T_x(x, t) λ
-        let x_ref= self.x.borrow();
-        self.eqn.rhs().jac_transpose_mul_inplace(&x_ref, t, lambda, y);
+        self.update_x(t);
+        let x = self.x.borrow();
+        self.eqn.rhs().jac_transpose_mul_inplace(&x, t, lambda, y);
 
         // y = -f^T_x(x, t) λ - g^T_x(x,t)
         let g_x_ref = self.g_x.borrow();
@@ -164,11 +167,14 @@ where
     }
     // J = -f^T_x(x, t)
     fn jac_mul_inplace(&self, _x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        let x_ref = self.x.borrow();
-        self.eqn.rhs().jac_transpose_mul_inplace(&x_ref, t, v, y);
+        self.update_x(t);
+        let x = self.x.borrow();
+        self.eqn.rhs().jac_transpose_mul_inplace(&x, t, v, y);
     }
-    fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
-        self.eqn.rhs().adjoint_inplace(x, t, y);
+    fn jacobian_inplace(&self, _x: &Self::V, t: Self::T, y: &mut Self::M) {
+        self.update_x(t);
+        let x = self.x.borrow();
+        self.eqn.rhs().adjoint_inplace(&x, t, y);
     }
 }
 /// Sensitivity equations for ODEs
@@ -290,7 +296,7 @@ mod tests {
             ds: Vec::new(),
             h: 0.0,
         };
-        let checkpointer = Checkpointing::new(&problem, solver, vec![state.clone()]);
+        let checkpointer = Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()]);
         let adj_eqn = AdjointEquations::new(&problem.eqn, checkpointer);
 
         // f_x^T = |-a 0|
@@ -352,7 +358,7 @@ mod tests {
             ds: Vec::new(),
             h: 0.0,
         };
-        let checkpointer = Checkpointing::new(&problem, solver, vec![state.clone()]);
+        let checkpointer = Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()]);
         let adj_eqn = AdjointEquations::new(&problem.eqn, checkpointer);
 
         // f_x^T = |-a 0|
