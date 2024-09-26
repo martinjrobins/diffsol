@@ -7,6 +7,7 @@ use serde::Serialize;
 
 pub mod bdf;
 pub mod closure;
+pub mod closure_with_adjoint;
 pub mod closure_no_jac;
 pub mod closure_with_sens;
 pub mod constant_closure;
@@ -50,6 +51,11 @@ pub trait Op {
         None
     }
 
+    /// Return sparsity information for the jacobian or matrix (if available)
+    fn sparsity_adjoint(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
+        None
+    }
+
     /// Return sparsity information for the sensitivity of the operator wrt a parameter vector p (if available)
     fn sparsity_sens(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
         None
@@ -66,6 +72,7 @@ pub struct OpStatistics {
     pub number_of_calls: usize,
     pub number_of_jac_muls: usize,
     pub number_of_matrix_evals: usize,
+    pub number_of_jac_adj_muls: usize,
 }
 
 impl OpStatistics {
@@ -74,6 +81,7 @@ impl OpStatistics {
             number_of_jac_muls: 0,
             number_of_calls: 0,
             number_of_matrix_evals: 0,
+            number_of_jac_adj_muls: 0,
         }
     }
 
@@ -83,6 +91,10 @@ impl OpStatistics {
 
     pub fn increment_jac_mul(&mut self) {
         self.number_of_jac_muls += 1;
+    }
+
+    pub fn increment_jac_adj_mul(&mut self) {
+        self.number_of_jac_adj_muls += 1;
     }
 
     pub fn increment_matrix(&mut self) {
@@ -101,6 +113,13 @@ pub trait NonLinearOp: Op {
 
     /// Compute the product of the Jacobian with a given vector `J(x, t) * v`.
     fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V);
+
+    /// Compute the product of the transpose of the Jacobian with a given vector `-J(x, t)^T * v`.
+    /// The default implementation fails with a panic, as this method is not implemented by default
+    /// and should be implemented by the user if needed.
+    fn jac_transpose_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, _y: &mut Self::V) {
+        panic!("jac_transpose_mul_inplace not implemented");
+    }
 
     /// Compute the product of the gradient of F wrt a parameter vector p with a given vector `J_p(x, t) * v`.
     /// Note that the vector v is of size nparams() and the result is of size nstates().
@@ -166,6 +185,35 @@ pub trait NonLinearOp: Op {
         let n = self.nstates();
         let mut y = Self::M::new_from_sparsity(n, n, self.sparsity().map(|s| s.to_owned()));
         self.jacobian_inplace(x, t, &mut y);
+        y
+    }
+
+    /// Compute the Adjoint matrix `-J^T(x, t)` of the operator and store it in the matrix `y`.
+    /// `y` should have been previously initialised using the output of [`Op::sparsity`].
+    /// The default implementation of this method computes the Jacobian using [Self::jac_transpose_mul_inplace],
+    /// but it can be overriden for more efficient implementations.
+    fn adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        self._default_adjoint_inplace(x, t, y);
+    }
+
+    /// Default implementation of the Adjoint computation (this is the default for [Self::adjoint_inplace]).
+    fn _default_adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        let mut v = Self::V::zeros(self.nstates());
+        let mut col = Self::V::zeros(self.nout());
+        for j in 0..self.nstates() {
+            v[j] = Self::T::one();
+            self.jac_transpose_mul_inplace(x, t, &v, &mut col);
+            y.set_column(j, &col);
+            v[j] = Self::T::zero();
+        }
+    }
+
+    /// Compute the Adjoint matrix `-J^T(x, t)` of the operator and return it.
+    /// See [Self::adjoint_inplace] for a non-allocating version.
+    fn adjoint(&self, x: &Self::V, t: Self::T) -> Self::M {
+        let n = self.nstates();
+        let mut y = Self::M::new_from_sparsity(n, n, self.sparsity_adjoint().map(|s| s.to_owned()));
+        self.adjoint_inplace(x, t, &mut y);
         y
     }
 

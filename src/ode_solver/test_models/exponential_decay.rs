@@ -1,10 +1,9 @@
 use crate::{
-    matrix::Matrix, ode_solver::problem::OdeSolverSolution, scalar::scale, ConstantOp, OdeBuilder,
-    OdeEquations, OdeSolverProblem, Vector,
+    matrix::Matrix, ode_solver::problem::OdeSolverSolution, op::closure_with_adjoint::ClosureWithAdjoint, scalar::scale, ConstantClosure, ConstantOp, OdeBuilder, OdeEquations, OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector
 };
 use nalgebra::ComplexField;
 use num_traits::Zero;
-use std::ops::MulAssign;
+use std::{ops::MulAssign, rc::Rc};
 
 // exponential decay problem
 // dy/dt = -ay (p = [a])
@@ -25,6 +24,12 @@ fn exponential_decay_jacobian<M: Matrix>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V
     y.mul_assign(scale(-p[0]));
 }
 
+// -J^Tv = av
+fn exponential_decay_jacobian_adjoint<M: Matrix>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+    y.copy_from(v);
+    y.mul_assign(scale(p[0]));
+}
+
 fn exponential_decay_init<M: Matrix>(p: &M::V, _t: M::T) -> M::V {
     M::V::from_vec(vec![p[1], p[1]])
 }
@@ -35,6 +40,31 @@ fn exponential_decay_init_sens<M: Matrix>(_p: &M::V, _t: M::T, _v: &M::V, y: &mu
 
 fn exponential_decay_root<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
     y[0] = x[0] - M::T::from(0.6);
+}
+
+/// g_1 = 1 * x_1  +  2 * x_2
+/// g_2 = 3 * x_1  +  4 * x_2
+fn exponential_decay_out<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+    y[0] = M::T::from(1.0) * x[0] + M::T::from(2.0) * x[1];
+    y[1] = M::T::from(3.0) * x[0] + M::T::from(4.0) * x[1];
+}
+
+/// J = |1 2| 
+///     |3 4|
+/// Jv = |1 2| |v_1| = |v_1 + 2v_2|
+///     |3 4| |v_2|   |3v_1 + 4v_2|
+fn exponential_decay_out_sens<M: Matrix>(_x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+    y[0] = v[0] + M::T::from(2.0) * v[1];
+    y[1] = M::T::from(3.0) * v[0] + M::T::from(4.0) * v[1];
+}
+
+/// J = |1 2|
+///    |3 4|
+/// -J^T v = |1 3| |v_1| = |-v_1 - 3v_2|
+///         |2 4| |v_2|   |-2v_1 - 4v_2|
+fn exponential_decay_out_adjoint<M: Matrix>(_x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+    y[0] = -v[0] - M::T::from(3.0) * v[1];
+    y[1] = -M::T::from(2.0) * v[0] - M::T::from(4.0) * v[1];
 }
 
 pub fn negative_exponential_decay_problem<M: Matrix + 'static>(
@@ -128,6 +158,61 @@ pub fn exponential_decay_problem_with_root<M: Matrix + 'static>(
         soln.push(y, t);
     }
     (problem, soln)
+}
+
+pub fn exponential_decay_problem_adjoint<M: Matrix>()  -> (
+    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverSolution<M::V>,
+) {
+    let k = M::T::from(0.1);
+    let y0 = M::T::from(1.0);
+    let t0 = M::T::from(0.0);
+    let h0 = M::T::from(1.0);
+    let p = Rc::new(M::V::from_vec(vec![k, y0]));
+    let init = exponential_decay_init::<M>;
+    let y0 = init(&p, t0);
+    let nstates = y0.len();
+    let rhs = exponential_decay::<M>;
+    let rhs_jac = exponential_decay_jacobian::<M>;
+    let rhs_adj_jac = exponential_decay_jacobian_adjoint::<M>;
+    let mut rhs = ClosureWithAdjoint::new(rhs, rhs_jac, rhs_adj_jac, nstates, nstates, p.clone());
+    let nout = 2;
+    let out = exponential_decay_out::<M>;
+    let out_jac= exponential_decay_out_sens::<M>;
+    let out_jac_adj = exponential_decay_out_adjoint::<M>;
+    let mut out = ClosureWithAdjoint::new(out, out_jac, out_jac_adj, nstates, nout, p.clone());
+    let init = exponential_decay_init::<M>;
+    let init = ConstantClosure::new(init, p.clone());
+    if M::is_sparse() {
+        rhs.calculate_sparsity(&y0, t0);
+        out.calculate_sparsity(&y0, t0);
+    }
+    let rhs = Rc::new(rhs);
+    let init = Rc::new(init);
+    let out = Some(Rc::new(out));
+    let mass: Option<Rc<UnitCallable<M>>> = None;
+    let root: Option<Rc<UnitCallable<M>>> = None;
+    let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p.clone());
+    let rtol = M::T::from(1e-6);
+    let atol = M::V::from_element(nstates, M::T::from(1e-6));
+    let problem = OdeSolverProblem::new(
+        eqn,
+        rtol,
+        atol,
+        t0,
+        h0,
+        false,
+        false,
+    ).unwrap();
+    let mut soln = OdeSolverSolution::default();
+    for i in 0..10 {
+        let t = M::T::from(i as f64);
+        let y0: M::V = problem.eqn.init().call(M::T::zero());
+        let y = y0 * scale(M::T::exp(-p[0] * t));
+        soln.push(y, t);
+    }
+    (problem, soln)
+
 }
 
 pub fn exponential_decay_problem_sens<M: Matrix + 'static>(

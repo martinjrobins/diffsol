@@ -1,4 +1,5 @@
-use crate::{error::DiffsolError, other_error, scale, vector::VectorRef, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Vector};
+use num_traits::One;
+use crate::{error::DiffsolError, other_error, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Vector};
 
 pub struct HermiteInterpolator<V> 
 where 
@@ -25,7 +26,6 @@ where
 impl<V> HermiteInterpolator<V>
 where 
     V: Vector,
-    for<'a> &'a V: VectorRef<V>,
 {
     pub fn reset<Eqn, Method, State>(&mut self, problem: &OdeSolverProblem<Eqn>, solver: &mut Method, state0: &State, state1: &State) -> Result<(), DiffsolError> 
     where 
@@ -62,14 +62,16 @@ where
         let u1 = &self.ys[idx];
         let f0 = &self.ydots[idx - 1];
         let f1 = &self.ydots[idx];
-
-        u0 * scale(V::T::from(1.0) - theta)
-            + u1 * scale(theta)
-            + ((u1 - u0) * scale(V::T::from(1.0) - V::T::from(2.0) * theta)
-                + f0 * scale(h * (theta - V::T::from(1.0)))
-                + f1 * scale(h * theta))
-                * scale(theta * (theta - V::T::from(1.0)))
-
+        
+        let mut y = u0.clone();
+        y.axpy(V::T::from(1.0) - theta, u1, theta);
+        
+        let mut y = u1.clone() - u0;
+        y.axpy(h * (theta - V::T::from(1.0)), f0, V::T::one() - V::T::from(2.0) * theta);
+        y.axpy(h * theta, f1,V::T::one());
+        y.axpy(V::T::from(1.0) - theta, u0, theta * (theta - V::T::from(1.0)));
+        y.axpy(theta, u1, V::T::one());
+        y
     }
 }
 
@@ -82,14 +84,13 @@ where
     segment_start_idx: usize,
     segment: HermiteInterpolator<Eqn::V>,
     solver: Method,
-    problem: OdeSolverProblem<Eqn>,
+    pub(crate) problem: OdeSolverProblem<Eqn>,
 }
 
 impl<Eqn, Method> Checkpointing<Eqn, Method> 
 where 
     Method: OdeSolverMethod<Eqn>,
     Eqn: OdeEquations,
-    for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
 {
     pub fn new(problem: &OdeSolverProblem<Eqn>, solver: Method, checkpoints: Vec<Method::State>) -> Self {
         Checkpointing {
@@ -102,6 +103,14 @@ where
     }
     
     pub fn interpolate(&mut self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
+        // if we've only got a single checkpoint and t is same as that checkpoint, return it
+        if self.checkpoints.len() == 1 {
+            if t == self.checkpoints[0].t() {
+                return Ok(self.checkpoints[0].y().clone());
+            } else {
+                return Err(other_error!("t is not the same as the checkpoint"));
+            }
+        }
         // if t is in current segment, interpolate
         if t >= self.checkpoints[self.segment_start_idx].t() && t <= self.checkpoints[self.segment_start_idx + 1].t() {
             return Ok(self.segment.interpolate(t));

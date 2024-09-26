@@ -213,7 +213,7 @@ where
         self.eqn.rhs().jacobian_inplace(&state_y, t, y);
     }
 }
-/// Sensitivity equations for ODEs
+/// Sensitivity & adjoint equations for ODEs
 ///
 /// Sensitivity equations are linear:
 /// M * ds/dt = J * s + f_p - M_p * dy/dt
@@ -226,7 +226,7 @@ where
 ///  s is the sensitivity
 ///  f_p is the partial derivative of the right-hand side with respect to the parameters
 ///  dy(0)/dp is the partial derivative of the state at the initial time wrt the parameters
-///
+/// 
 pub struct SensEquations<Eqn>
 where
     Eqn: OdeEquations,

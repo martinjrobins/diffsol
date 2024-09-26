@@ -157,7 +157,7 @@ pub use ode_solver::{
     equations::OdeSolverEquations, method::OdeSolverMethod, method::OdeSolverStopReason,
     problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::SdirkState,
     sens_equations::SensEquations, sens_equations::SensInit, sens_equations::SensRhs,
-    state::OdeSolverState, tableau::Tableau,
+    state::OdeSolverState, tableau::Tableau, checkpointing::Checkpointing
 };
 pub use op::{
     closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure,
