@@ -108,12 +108,11 @@ where
     /// precompute S = g^T_x(x,t) and the state x(t) from t
     pub fn update_state(&self, t: Eqn::T) {
         // update -g_x^T
-        if let Some(g) = self.eqn.out() {
-            self.update_x(t);
-            let x = self.x.borrow();
-            let mut g_x = self.g_x.borrow_mut();
-            g.adjoint_inplace(&x, t, &mut g_x);
-        }
+        let g = self.eqn.out().expect("Cannot call update_state without output");
+        self.update_x(t);
+        let x = self.x.borrow();
+        let mut g_x = self.g_x.borrow_mut();
+        g.adjoint_inplace(&x, t, &mut g_x);
     }
     pub fn set_param_index(&self, index: Option<usize>) {
         if index.is_some() && self.eqn.out().is_none() {
