@@ -51,6 +51,10 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
         }
     }
 
+    pub fn eqn_mut(&mut self) -> &mut Rc<Eqn> {
+        &mut self.eqn
+    }
+
     pub fn new(ode_problem: &OdeSolverProblem<Eqn>, c: Eqn::T) -> Self {
         let eqn = ode_problem.eqn.clone();
         let n = ode_problem.eqn.rhs().nstates();

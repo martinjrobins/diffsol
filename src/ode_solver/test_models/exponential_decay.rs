@@ -203,6 +203,8 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>()  -> (
         h0,
         false,
         false,
+        false,
+        false,
     ).unwrap();
     let mut soln = OdeSolverSolution::default();
     for i in 0..10 {

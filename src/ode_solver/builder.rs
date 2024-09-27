@@ -253,6 +253,8 @@ impl OdeBuilder {
             M::T::from(self.h0),
             false,
             self.sensitivities_error_control,
+            false,
+            false,
         )
     }
 
@@ -315,6 +317,8 @@ impl OdeBuilder {
             M::T::from(self.h0),
             false,
             self.sensitivities_error_control,
+            false,
+            false,
         )
     }
 
@@ -423,6 +427,8 @@ impl OdeBuilder {
             M::T::from(self.h0),
             true,
             self.sensitivities_error_control,
+            false,
+            false,
         )
     }
 
@@ -494,6 +500,8 @@ impl OdeBuilder {
             M::T::from(self.h0),
             false,
             self.sensitivities_error_control,
+            false,
+            false,
         )
     }
 
@@ -570,6 +578,8 @@ impl OdeBuilder {
             M::T::from(self.h0),
             true,
             self.sensitivities_error_control,
+            false,
+            false,
         )
     }
 
@@ -659,6 +669,8 @@ impl OdeBuilder {
             M::T::from(self.h0),
             false,
             self.sensitivities_error_control,
+            false,
+            false,
         )
     }
 
@@ -706,6 +718,8 @@ impl OdeBuilder {
             self.h0,
             self.sensitivities,
             self.sensitivities_error_control,
+            false,
+            false,
         )
     }
 }

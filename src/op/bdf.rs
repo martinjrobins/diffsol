@@ -26,7 +26,7 @@ pub struct BdfCallable<Eqn: OdeEquations> {
 }
 
 impl<Eqn: OdeEquations> BdfCallable<Eqn> {
-    pub fn from_eqn(eqn: &Rc<Eqn>) -> Self {
+    pub fn from_sensitivity_eqn(eqn: &Rc<Eqn>) -> Self {
         let eqn = eqn.clone();
         let n = eqn.rhs().nstates();
         let c = RefCell::new(Eqn::T::zero());
@@ -48,6 +48,9 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
             tmp,
             sparsity,
         }
+    }
+    pub fn eqn_mut(&mut self) -> &mut Rc<Eqn> {
+        &mut self.eqn
     }
     pub fn eqn(&self) -> &Rc<Eqn> {
         &self.eqn

@@ -9,7 +9,6 @@ use serde::Serialize;
 
 use crate::{
     matrix::{default_solver::DefaultSolver, MatrixRef},
-    newton_iteration,
     nonlinear_solver::root::RootFinder,
     op::bdf::BdfCallable,
     scalar::scale,
@@ -18,7 +17,7 @@ use crate::{
     NonLinearSolver, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op,
     Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
 };
-use crate::{ode_solver_error, NonLinearOp, SensEquations};
+use crate::{ode_solver_error, SensEquations};
 
 use super::equations::OdeEquations;
 use super::jacobian_update::SolverState;
@@ -378,7 +377,7 @@ where
         self.state
             .as_mut()
             .unwrap()
-            .initialise_diff_to_first_order(self.ode_problem.as_ref().unwrap().eqn_sens.is_some());
+            .initialise_diff_to_first_order(self.ode_problem.as_ref().unwrap().with_sensitivity);
         self.u = Self::_compute_r(1, Eqn::T::one());
         self.is_state_modified = false;
     }
@@ -406,32 +405,22 @@ where
 
         // update for new state
         {
-            let dy_new = self.nonlinear_problem_op().as_ref().tmp();
+            let dy_new = self.nonlinear_solver.problem().f.tmp();
             let y_new = &self.y_predict;
-            self.ode_problem
-                .as_ref()
-                .unwrap()
-                .eqn_sens
-                .as_ref()
-                .unwrap()
-                .rhs()
-                .update_state(y_new, &dy_new, t_new);
+            Rc::get_mut(self.s_op.as_mut().unwrap().eqn_mut()).unwrap().update_rhs_state(
+                y_new,
+                &dy_new,
+                t_new,
+            );
         }
-
-        // reuse linear solver from nonlinear solver
-        let ls = |x: &mut Eqn::V| -> Result<(), DiffsolError> {
-            self.nonlinear_solver.solve_linearised_in_place(x)
-        };
 
         // construct bdf discretisation of sensitivity equations
         let op = self.s_op.as_ref().unwrap();
         op.set_c(h, self.alpha[order]);
 
         // solve for sensitivities equations discretised using BDF
-        let fun = |x: &Eqn::V, y: &mut Eqn::V| op.call_inplace(x, t_new, y);
         let rtol = self.problem().as_ref().unwrap().rtol;
         let atol = self.problem().as_ref().unwrap().atol.clone();
-        let mut convergence = self.nonlinear_solver.convergence().clone();
         let nparams = self.problem().as_ref().unwrap().eqn.rhs().nparams();
         for i in 0..nparams {
             // setup
@@ -455,15 +444,8 @@ where
             {
                 let s_new = &mut self.state.as_mut().unwrap().s[i];
                 s_new.copy_from(&self.s_predict);
-                newton_iteration(
-                    s_new,
-                    &mut self.s_deltas[i],
-                    &self.s_predict,
-                    fun,
-                    ls,
-                    &mut convergence,
-                )?;
-                self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
+                self.nonlinear_solver.solve_other_in_place(op, s_new, t_new, &self.s_predict)?;
+                self.statistics.number_of_nonlinear_solver_iterations += self.nonlinear_solver.convergence().niter();
                 let s_new = &*s_new;
                 self.s_deltas[i].copy_from(s_new);
                 self.s_deltas[i] -= &self.s_predict;
@@ -613,17 +595,11 @@ where
         }
 
         // allocate internal state for sensitivities
-        if self.ode_problem.as_ref().unwrap().eqn_sens.is_some() {
+        if state.h > Eqn::T::zero() && self.ode_problem.as_ref().unwrap().with_sensitivity {
             state.check_sens_consistent_with_problem(problem)?;
             let nparams = self.ode_problem.as_ref().unwrap().eqn.rhs().nparams();
-            self.s_op = Some(BdfCallable::from_eqn(
-                self.ode_problem
-                    .as_ref()
-                    .unwrap()
-                    .eqn_sens
-                    .as_ref()
-                    .unwrap(),
-            ));
+            let eqn_sens = Rc::new(SensEquations::new(&self.ode_problem.as_ref().unwrap().eqn));
+            self.s_op = Some(BdfCallable::from_sensitivity_eqn(&eqn_sens));
 
             if self.s_deltas.len() != nparams || self.s_deltas[0].len() != nstates {
                 self.s_deltas = vec![<Eqn::V as Vector>::zeros(nstates); nparams];
@@ -631,6 +607,8 @@ where
             if self.s_predict.len() != nstates {
                 self.s_predict = <Eqn::V as Vector>::zeros(nstates);
             }
+        } else if state.h > Eqn::T::zero() && self.ode_problem.as_ref().unwrap().with_adjoint {
+            unimplemented!();
         }
 
         // init U matrix
@@ -695,7 +673,7 @@ where
                 }
 
                 // only bother doing sensitivity calculations if we might keep the step
-                if self.ode_problem.as_ref().unwrap().eqn_sens.is_some()
+                if self.s_op.is_some()
                     && error_norm <= Eqn::T::from(1.0)
                 {
                     error_norm = match self.sensitivity_solve(self.t_predict, error_norm) {

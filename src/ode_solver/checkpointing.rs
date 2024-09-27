@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use num_traits::One;
 use crate::{error::DiffsolError, other_error, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Vector};
 
@@ -86,9 +88,9 @@ where
     Eqn: OdeEquations,
 {
     checkpoints: Vec<Method::State>,
-    segment: HermiteInterpolator<Eqn::V>,
-    previous_segment: Option<HermiteInterpolator<Eqn::V>>,
-    solver: Method,
+    segment: RefCell<HermiteInterpolator<Eqn::V>>,
+    previous_segment: RefCell<Option<HermiteInterpolator<Eqn::V>>>,
+    solver: RefCell<Method>,
     pub(crate) problem: OdeSolverProblem<Eqn>,
 }
 
@@ -106,21 +108,26 @@ where
         }
         let mut segment = HermiteInterpolator::default();
         segment.reset(problem, &mut solver, &checkpoints[start_idx], &checkpoints[start_idx]).unwrap();
+        let segment = RefCell::new(segment);
+        let previous_segment = RefCell::new(None);
+        let solver = RefCell::new(solver);
         Checkpointing {
             checkpoints,
             segment,
-            previous_segment: None,
+            previous_segment,
             solver,
             problem: problem.clone(),
         }
     }
     
-    pub fn interpolate(&mut self, t: Eqn::T, y: &mut Eqn::V) -> Result<(), DiffsolError> {
-        if self.segment.interpolate(t, y).is_some() {
+    pub fn interpolate(&self, t: Eqn::T, y: &mut Eqn::V) -> Result<(), DiffsolError> {
+        let mut segment = self.segment.borrow_mut();
+        if segment.interpolate(t, y).is_some() {
             return Ok(());
         }
 
-        if let Some(previous_segment) = self.previous_segment.as_ref() {
+        let mut previous_segment = self.previous_segment.borrow_mut();
+        if let Some(previous_segment) = previous_segment.as_ref() {
             if previous_segment.interpolate(t, y).is_some() {
                 return Ok(());
             }
@@ -133,12 +140,13 @@ where
 
         // else find idx of segment
         let idx = self.checkpoints.iter().skip(1).position(|state| state.t() > t).expect("t is not in checkpoints");
-        if self.previous_segment.is_none() {
-            self.previous_segment = Some(HermiteInterpolator::default());
+        if previous_segment.is_none() {
+            self.previous_segment.replace(Some(HermiteInterpolator::default()));
         }
-        self.previous_segment.as_mut().unwrap().reset(&self.problem, &mut self.solver, &self.checkpoints[idx], &self.checkpoints[idx + 1])?;
-        std::mem::swap(&mut self.segment, self.previous_segment.as_mut().unwrap());
-        self.segment.interpolate(t, y).unwrap();
+        let mut solver = self.solver.borrow_mut();
+        previous_segment.as_mut().unwrap().reset(&self.problem, &mut *solver, &self.checkpoints[idx], &self.checkpoints[idx + 1])?;
+        std::mem::swap(&mut *segment, previous_segment.as_mut().unwrap());
+        segment.interpolate(t, y).unwrap();
         Ok(())
     }
 }

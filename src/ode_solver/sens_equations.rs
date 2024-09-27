@@ -11,8 +11,8 @@ where
     Eqn: OdeEquations,
 {
     eqn: Rc<Eqn>,
-    init_sens: RefCell<Eqn::M>,
-    index: RefCell<usize>,
+    init_sens: Eqn::M,
+    index: usize,
 }
 
 impl<Eqn> SensInit<Eqn>
@@ -27,20 +27,18 @@ where
             nparams,
             eqn.init().sparsity_sens().map(|s| s.to_owned()),
         );
-        let init_sens = RefCell::new(init_sens);
-        let index = RefCell::new(0);
+        let index = 0;
         Self {
             eqn: eqn.clone(),
             init_sens,
             index,
         }
     }
-    pub fn update_state(&self, t: Eqn::T) {
-        let mut init_sens = self.init_sens.borrow_mut();
-        self.eqn.init().sens_inplace(t, &mut init_sens);
+    pub fn update_state(&mut self, t: Eqn::T) {
+        self.eqn.init().sens_inplace(t, &mut self.init_sens);
     }
-    pub fn set_param_index(&self, index: usize) {
-        self.index.replace(index);
+    pub fn set_param_index(&mut self, index: usize) {
+        self.index = index;
     }
 }
 
@@ -68,10 +66,8 @@ where
     Eqn: OdeEquations,
 {
     fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
-        let init_sens = self.init_sens.borrow();
-        let index = *self.index.borrow();
         y.fill(Eqn::T::zero());
-        init_sens.add_column_to_vector(index, y);
+        self.init_sens.add_column_to_vector(self.index, y);
     }
 }
 
@@ -104,7 +100,17 @@ impl<Eqn> SensRhs<Eqn>
 where
     Eqn: OdeEquations,
 {
-    pub fn new(eqn: &Rc<Eqn>) -> Self {
+    pub fn new(eqn: &Rc<Eqn>, allocate: bool) -> Self {
+        if !allocate {
+            return Self {
+                eqn: eqn.clone(),
+                sens: RefCell::new(<Eqn::M as Matrix>::zeros(0, 0)),
+                rhs_sens: None,
+                mass_sens: None,
+                y: RefCell::new(Eqn::V::zeros(0)),
+                index: RefCell::new(0),
+            };
+        }
         let nstates = eqn.rhs().nstates();
         let nparams = eqn.rhs().nparams();
         let rhs_sens = Eqn::M::new_from_sparsity(
@@ -153,7 +159,7 @@ where
     }
 
     /// pre-compute S = f_p - M_p * dy/dt from the state
-    pub fn update_state(&self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T) {
+    pub fn update_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T) {
         if self.rhs_sens.is_some() {
             let mut rhs_sens = self.rhs_sens.as_ref().unwrap().borrow_mut();
             let mut mass_sens = self.mass_sens.as_ref().unwrap().borrow_mut();
@@ -240,14 +246,33 @@ impl<Eqn> SensEquations<Eqn>
 where
     Eqn: OdeEquations,
 {
-    pub fn new(eqn: &Rc<Eqn>) -> Self {
-        let rhs = Rc::new(SensRhs::new(eqn));
+    pub(crate) fn new(eqn: &Rc<Eqn>) -> Self {
+        let rhs = Rc::new(SensRhs::new(eqn, true));
         let init = Rc::new(SensInit::new(eqn));
         Self {
             rhs,
             init,
             eqn: eqn.clone(),
         }
+    }
+    pub(crate) fn new_no_rhs(eqn: &Rc<Eqn>) -> Self {
+        let rhs = Rc::new(SensRhs::new(eqn, false));
+        let init = Rc::new(SensInit::new(eqn));
+        Self {
+            rhs,
+            init,
+            eqn: eqn.clone(),
+        }
+    }
+    pub(crate) fn update_rhs_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T) {
+        Rc::get_mut(&mut self.rhs).unwrap().update_state(y, dy, t);
+    }
+    pub(crate) fn update_init_state(&mut self, t: Eqn::T) {
+        Rc::get_mut(&mut self.init).unwrap().update_state(t);
+    }
+    pub(crate) fn set_param_index(&mut self, index: usize) {
+        Rc::get_mut(&mut self.rhs).unwrap().set_param_index(index);
+        Rc::get_mut(&mut self.init).unwrap().set_param_index(index);
     }
 }
 
@@ -320,7 +345,7 @@ mod tests {
     fn test_rhs_exponential() {
         // dy/dt = -ay (p = [a])
         let (problem, _soln) = exponential_decay_problem_sens::<Mcpu>(false);
-        let sens_eqn = SensEquations::new(&problem.eqn);
+        let mut sens_eqn = SensEquations::new(&problem.eqn);
         let state = SdirkState {
             t: 0.0,
             y: Vcpu::from_vec(vec![1.0, 1.0]),
@@ -334,7 +359,7 @@ mod tests {
         // M_p = 0
         // so S = |-1.0|
         //        |-1.0|
-        sens_eqn.rhs.update_state(&state.y, &state.dy, state.t);
+        sens_eqn.update_rhs_state(&state.y, &state.dy, state.t);
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 2);
         assert_eq!(sens.ncols(), 2);
@@ -356,7 +381,7 @@ mod tests {
     #[test]
     fn test_rhs_exponential_algebraic() {
         let (problem, _soln) = exponential_decay_with_algebraic_problem_sens::<Mcpu>(false);
-        let sens_eqn = SensEquations::new(&problem.eqn);
+        let mut sens_eqn = SensEquations::new(&problem.eqn);
         let state = SdirkState {
             t: 0.0,
             y: Vcpu::from_vec(vec![1.0, 1.0, 1.0]),
@@ -374,7 +399,7 @@ mod tests {
         // so S = |-0.1|
         //        |-0.1|
         //        | 0 |
-        sens_eqn.rhs.update_state(&state.y, &state.dy, state.t);
+        sens_eqn.update_rhs_state(&state.y, &state.dy, state.t);
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 3);
         assert_eq!(sens.ncols(), 1);
@@ -401,7 +426,7 @@ mod tests {
     #[test]
     fn test_rhs_robertson() {
         let (problem, _soln) = robertson_sens::<Mcpu>(false);
-        let sens_eqn = SensEquations::new(&problem.eqn);
+        let mut sens_eqn = SensEquations::new(&problem.eqn);
         let state = SdirkState {
             t: 0.0,
             y: Vcpu::from_vec(vec![1.0, 2.0, 3.0]),
@@ -417,7 +442,7 @@ mod tests {
         //       | 0   0    0|
         // M_p = 0
         // so S = f_p
-        sens_eqn.rhs.update_state(&state.y, &state.dy, state.t);
+        sens_eqn.update_rhs_state(&state.y, &state.dy, state.t);
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 3);
         assert_eq!(sens.ncols(), 3);

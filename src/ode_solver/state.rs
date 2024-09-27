@@ -55,13 +55,13 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         &self,
         problem: &OdeSolverProblem<Eqn>,
     ) -> Result<(), DiffsolError> {
-        if self.s().len() != problem.eqn_sens.as_ref().unwrap().rhs().nparams() {
+        if self.s().len() != problem.eqn.rhs().nparams() {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
         if !self.s().is_empty() && self.s()[0].len() != problem.eqn.rhs().nstates() {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
-        if self.ds().len() != problem.eqn_sens.as_ref().unwrap().rhs().nparams() {
+        if self.ds().len() != problem.eqn.rhs().nparams() {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
         if !self.ds().is_empty() && self.ds()[0].len() != problem.eqn.rhs().nstates() {
@@ -105,15 +105,15 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let y = ode_problem.eqn.init().call(t);
         let dy = V::zeros(y.len());
         let nparams = ode_problem.eqn.rhs().nparams();
-        let (s, ds) = if ode_problem.eqn_sens.is_none() {
+        let (s, ds) = if !ode_problem.with_sensitivity {
             (vec![], vec![])
         } else {
-            let eqn_sens = ode_problem.eqn_sens.as_ref().unwrap();
-            eqn_sens.init().update_state(t);
+            let mut eqn_sens = SensEquations::new_no_rhs(&ode_problem.eqn);
+            eqn_sens.update_init_state(t);
             let mut s = Vec::with_capacity(nparams);
             let mut ds = Vec::with_capacity(nparams);
             for i in 0..nparams {
-                eqn_sens.init().set_param_index(i);
+                eqn_sens.set_param_index(i);
                 let si = eqn_sens.init().call(t);
                 let dsi = V::zeros(y.len());
                 s.push(si);
@@ -165,17 +165,16 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         Eqn: OdeEquations<T = V::T, V = V>,
         S: NonLinearSolver<InitOp<SensEquations<Eqn>>> + ?Sized,
     {
-        if ode_problem.eqn_sens.is_none() {
+        if !ode_problem.with_sensitivity {
             return Ok(());
         }
 
-        let eqn_sens = ode_problem.eqn_sens.as_ref().unwrap();
-        eqn_sens.rhs().update_state(self.y(), self.dy(), self.t());
+        let mut eqn_sens = Rc::new(SensEquations::new(&ode_problem.eqn));
+        Rc::get_mut(&mut eqn_sens).unwrap().update_rhs_state(self.y(), self.dy(), self.t());
         let t = self.t();
         let (s, ds) = self.s_ds_mut();
         for i in 0..ode_problem.eqn.rhs().nparams() {
-            eqn_sens.init().set_param_index(i);
-            eqn_sens.rhs().set_param_index(i);
+            Rc::get_mut(&mut eqn_sens).unwrap().set_param_index(i);
             eqn_sens.rhs().call_inplace(&s[i], t, &mut ds[i]);
         }
 
@@ -184,9 +183,8 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         }
 
         for i in 0..ode_problem.eqn.rhs().nparams() {
-            eqn_sens.init().set_param_index(i);
-            eqn_sens.rhs().set_param_index(i);
-            let f = Rc::new(InitOp::new(eqn_sens, ode_problem.t0, &self.s()[i]));
+            Rc::get_mut(&mut eqn_sens).unwrap().set_param_index(i);
+            let f = Rc::new(InitOp::new(&eqn_sens, ode_problem.t0, &self.s()[i]));
             root_solver.set_problem(&SolverProblem::new(
                 f.clone(),
                 ode_problem.atol.clone(),

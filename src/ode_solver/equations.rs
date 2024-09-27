@@ -83,6 +83,7 @@ pub trait OdeEquations {
     fn init(&self) -> &Rc<Self::Init>;
 }
 
+
 /// This struct implements the ODE equation trait [OdeEquations] for a given right-hand side op, mass op, optional root op, and initial condition function.
 ///
 /// While the [crate::OdeBuilder] struct is the easiest way to define an ODE problem,

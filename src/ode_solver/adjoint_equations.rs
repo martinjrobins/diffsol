@@ -66,10 +66,10 @@ where
     Method: OdeSolverMethod<Eqn>,
 {
     eqn: Rc<Eqn>,
-    checkpointer: RefCell<Checkpointing<Eqn, Method>>,
-    g_x: RefCell<Eqn::M>,
-    x: RefCell<Eqn::V>,
-    index: RefCell<Option<usize>>,
+    checkpointer: Checkpointing<Eqn, Method>,
+    g_x: Option<Eqn::M>,
+    tmp: RefCell<Eqn::V>,
+    index: Option<usize>,
 }
 
 impl<Eqn, Method> AdjointRhs<Eqn, Method>
@@ -77,48 +77,51 @@ where
     Eqn: OdeEquations,
     Method: OdeSolverMethod<Eqn>,
 {
-    pub fn new(eqn: &Rc<Eqn>, checkpointer: Checkpointing<Eqn, Method>) -> Self {
-        let g_x = if let Some(g) = eqn.out() {
-            let g_x_sparsity = g.sparsity_adjoint();
-            Eqn::M::new_from_sparsity(
-                g.nout(),
-                g.nstates(),
-                g_x_sparsity.map(|s| s.to_owned()),
-            )
+    pub fn new(eqn: &Rc<Eqn>, checkpointer: Checkpointing<Eqn, Method>, with_out: bool) -> Self {
+        let (g_x, index) = if with_out {
+            let g_x = if let Some(g) = eqn.out() {
+                let g_x_sparsity = g.sparsity_adjoint();
+                Eqn::M::new_from_sparsity(
+                    g.nout(),
+                    g.nstates(),
+                    g_x_sparsity.map(|s| s.to_owned()),
+                )
+            } else {
+                panic!("Cannot call AdjointRhs::new with output without output");
+            };
+            (Some(g_x), Some(0))
         } else {
-            <Eqn::M as Matrix>::zeros(0, 0)
+            (None, None)
         };
-        let x = <Eqn::V as Vector>::zeros(eqn.rhs().nstates());
-        let index = None;
+
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(eqn.rhs().nstates()));
         Self {
             eqn: eqn.clone(),
-            g_x: RefCell::new(g_x),
-            checkpointer: RefCell::new(checkpointer),
-            x: RefCell::new(x),
-            index: RefCell::new(index),
+            g_x,
+            checkpointer,
+            tmp,
+            index,
         }
     }
 
-    fn update_x(&self, t: Eqn::T) {
-        let mut checkpointer = self.checkpointer.borrow_mut();
-        let mut x = self.x.borrow_mut();
-        checkpointer.interpolate(t, &mut x).unwrap();
+    fn update_tmp(&self, t: Eqn::T) {
+        let mut x = self.tmp.borrow_mut();
+        self.checkpointer.interpolate(t, &mut x).unwrap();
     }
 
     /// precompute S = g^T_x(x,t) and the state x(t) from t
-    pub fn update_state(&self, t: Eqn::T) {
+    pub fn update_state(&mut self, t: Eqn::T) {
         // update -g_x^T
         let g = self.eqn.out().expect("Cannot call update_state without output");
-        self.update_x(t);
-        let x = self.x.borrow();
-        let mut g_x = self.g_x.borrow_mut();
-        g.adjoint_inplace(&x, t, &mut g_x);
+        self.update_tmp(t);
+        let tmp = self.tmp.borrow();
+        let g_x = self.g_x.as_mut().expect("Cannot call update_state without output");
+        g.adjoint_inplace(&tmp, t, g_x);
     }
-    pub fn set_param_index(&self, index: Option<usize>) {
-        if index.is_some() && self.eqn.out().is_none() {
-            panic!("Cannot set parameter index for problem without output");
-        }
-        self.index.replace(index);
+
+    pub fn set_out_index(&mut self, new_index: usize) {
+        let index = self.index.as_mut().expect("Cannot set parameter index without output");
+        *index = new_index;
     }
 }
 
@@ -153,27 +156,26 @@ where
     /// F(λ, x, t) = -f^T_x(x, t) λ - g^T_x(x,t)
     fn call_inplace(&self, lambda: &Self::V, t: Self::T, y: &mut Self::V) {
         // y = -f^T_x(x, t) λ
-        self.update_x(t);
-        let x = self.x.borrow();
-        self.eqn.rhs().jac_transpose_mul_inplace(&x, t, lambda, y);
+        self.update_tmp(t);
+        let tmp = self.tmp.borrow();
+
+        self.eqn.rhs().jac_transpose_mul_inplace(&tmp, t, lambda, y);
 
         // y = -f^T_x(x, t) λ - g^T_x(x,t)
-        let g_x_ref = self.g_x.borrow();
-        let index_ref = self.index.borrow();
-        if let Some(index_ref) = *index_ref {
-            g_x_ref.add_column_to_vector(index_ref, y);
+        if let (Some(g_x), Some(index)) = (&self.g_x, self.index) {
+            g_x.add_column_to_vector(index, y);
         }
     }
     // J = -f^T_x(x, t)
     fn jac_mul_inplace(&self, _x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        self.update_x(t);
-        let x = self.x.borrow();
-        self.eqn.rhs().jac_transpose_mul_inplace(&x, t, v, y);
+        self.update_tmp(t);
+        let tmp = self.tmp.borrow();
+        self.eqn.rhs().jac_transpose_mul_inplace(&tmp, t, v, y);
     }
     fn jacobian_inplace(&self, _x: &Self::V, t: Self::T, y: &mut Self::M) {
-        self.update_x(t);
-        let x = self.x.borrow();
-        self.eqn.rhs().adjoint_inplace(&x, t, y);
+        self.update_tmp(t);
+        let tmp = self.tmp.borrow();
+        self.eqn.rhs().adjoint_inplace(&tmp, t, y);
     }
 }
 /// Sensitivity equations for ODEs
@@ -205,14 +207,21 @@ where
     Eqn: OdeEquations,
     Method: OdeSolverMethod<Eqn>,
 {
-    pub fn new(eqn: &Rc<Eqn>, checkpointer: Checkpointing<Eqn, Method>) -> Self {
-        let rhs = Rc::new(AdjointRhs::new(eqn, checkpointer));
+    pub(crate) fn new(eqn: &Rc<Eqn>, checkpointer: Checkpointing<Eqn, Method>, with_out: bool) -> Self {
+        let rhs = Rc::new(AdjointRhs::new(eqn, checkpointer, with_out));
         let init = Rc::new(AdjointInit::new(eqn));
         Self {
             rhs,
             init,
             eqn: eqn.clone(),
         }
+    }
+    pub(crate) fn set_out_index(&mut self, index: usize) {
+        Rc::get_mut(&mut self.rhs).unwrap().set_out_index(index);
+    }
+
+    pub(crate) fn update_rhs_state(&mut self, t: Eqn::T) {
+        Rc::get_mut(&mut self.rhs).unwrap().update_state(t);
     }
 }
 
@@ -296,7 +305,7 @@ mod tests {
             h: 0.0,
         };
         let checkpointer = Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()]);
-        let adj_eqn = AdjointEquations::new(&problem.eqn, checkpointer);
+        let mut adj_eqn = AdjointEquations::new(&problem.eqn, checkpointer, true);
 
         // f_x^T = |-a 0|
         //         |0 -a|
@@ -312,8 +321,8 @@ mod tests {
         // S = -g^T_x(x,t)
         // so S = |-1 -3|
         //        |-2 -4|
-        adj_eqn.rhs.update_state(state.t);
-        let sens = adj_eqn.rhs.g_x.borrow();
+        adj_eqn.update_rhs_state(state.t);
+        let sens = adj_eqn.rhs.g_x.as_ref().unwrap();
         assert_eq!(sens.nrows(), 2);
         assert_eq!(sens.ncols(), 2);
         assert_eq!(sens[(0, 0)], -1.0);
@@ -326,13 +335,15 @@ mod tests {
         //       |0 -a|
         // F(s, t)_0 =  |a 0| |1| - |1.0| = |a - 1| = |-0.9|
         //              |0 a| |2|   |2.0|   |2a - 2| = |-1.8|
-        adj_eqn.rhs.set_param_index(Some(0));
+        adj_eqn.set_out_index(0);
         let v = Vcpu::from_vec(vec![1.0, 2.0]);
         let f = adj_eqn.rhs.call(&v, state.t);
         let f_expect = Vcpu::from_vec(vec![-0.9, -1.8]);
         f.assert_eq_st(&f_expect, 1e-10);
 
-        adj_eqn.rhs.set_param_index(None);
+        let solver = Sdirk::<Mcpu, _, _>::new(Tableau::esdirk34(), NalgebraLU::default());
+        let checkpointer = Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()]);
+        let adj_eqn = AdjointEquations::new(&problem.eqn, checkpointer, true);
         // F(λ, x, t) = -f^T_x(x, t) λ
         // f_x = |-a 0|
         //       |0 -a|
@@ -358,7 +369,7 @@ mod tests {
             h: 0.0,
         };
         let checkpointer = Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()]);
-        let adj_eqn = AdjointEquations::new(&problem.eqn, checkpointer);
+        let mut adj_eqn = AdjointEquations::new(&problem.eqn, checkpointer, true);
 
         // f_x^T = |-a 0|
         //         |0 -a|
@@ -379,8 +390,8 @@ mod tests {
         // S = -g^T_x(x,t)
         // so S = |-1 -3|
         //        |-2 -4|
-        adj_eqn.rhs.update_state(state.t);
-        let sens = adj_eqn.rhs.g_x.borrow();
+        adj_eqn.update_rhs_state(state.t);
+        let sens = adj_eqn.rhs.g_x.as_ref().unwrap();
         assert_eq!(sens.nrows(), 2);
         assert_eq!(sens.ncols(), 2);
         for (i, j, v) in sens.triplet_iter() {
@@ -398,7 +409,7 @@ mod tests {
         //       |0 -a|
         // F(s, t)_0 =  |a 0| |1| - |1.0| = |a - 1| = |-0.9|
         //              |0 a| |2|   |2.0|   |2a - 2| = |-1.8|
-        adj_eqn.rhs.set_param_index(Some(0));
+        adj_eqn.set_out_index(0);
         let v = faer::Col::from_vec(vec![1.0, 2.0]);
         let f = adj_eqn.rhs.call(&v, state.t);
         let f_expect = faer::Col::from_vec(vec![-0.9, -1.8]);

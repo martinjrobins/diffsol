@@ -148,7 +148,7 @@ use matrix::{
 };
 pub use nonlinear_solver::newton::NewtonNonlinearSolver;
 use nonlinear_solver::{
-    convergence::Convergence, convergence::ConvergenceStatus, newton::newton_iteration,
+    convergence::Convergence, convergence::ConvergenceStatus,
     root::RootFinder, NonLinearSolver,
 };
 use ode_solver::jacobian_update::JacobianUpdate;

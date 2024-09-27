@@ -1,4 +1,4 @@
-use crate::{error::DiffsolError, op::Op, solver::SolverProblem};
+use crate::{error::DiffsolError, op::Op, solver::SolverProblem, NonLinearOp};
 use convergence::Convergence;
 
 pub struct NonLinearSolveSolution<V> {
@@ -36,6 +36,10 @@ pub trait NonLinearSolver<C: Op> {
 
     /// Solve the problem `F(x) = 0` in place.
     fn solve_in_place(&mut self, x: &mut C::V, t: C::T, error_y: &C::V)
+        -> Result<(), DiffsolError>;
+    
+    /// Solve the problem `G(x) = 0` in place, where the jacobian of `G` is assumed to be the same as `F`.
+    fn solve_other_in_place(&mut self, g: impl NonLinearOp<M=C::M, V=C::V, T=C::T>, x: &mut C::V, t: C::T, error_y: &C::V)
         -> Result<(), DiffsolError>;
 
     /// Solve the linearised problem `J * x = b`, where `J` was calculated using [Self::reset_jacobian].

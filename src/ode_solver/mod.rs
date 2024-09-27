@@ -251,6 +251,8 @@ mod tests {
             M::T::one(),
             false,
             false,
+            false,
+            false,
         )
         .unwrap();
         let state = Method::State::new_without_initialise(&problem);
@@ -281,6 +283,8 @@ mod tests {
             M::V::from_element(1, M::T::from(1e-6)),
             M::T::zero(),
             M::T::one(),
+            false,
+            false,
             false,
             false,
         )

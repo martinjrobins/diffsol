@@ -8,7 +8,6 @@ use std::rc::Rc;
 use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
 use crate::matrix::MatrixRef;
-use crate::nonlinear_solver::newton::newton_iteration;
 use crate::ode_solver_error;
 use crate::vector::VectorRef;
 use crate::LinearSolver;
@@ -20,7 +19,7 @@ use crate::SensEquations;
 use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
-    DenseMatrix, JacobianUpdate, NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem,
+    DenseMatrix, JacobianUpdate, OdeEquations, OdeSolverMethod, OdeSolverProblem,
     OdeSolverState, Op, Scalar, Vector, VectorViewMut,
 };
 
@@ -229,28 +228,18 @@ where
     fn solve_for_sensitivities(&mut self, i: usize, t: Eqn::T) -> Result<(), DiffsolError> {
         // update for new state
         {
-            self.problem()
-                .as_ref()
-                .unwrap()
-                .eqn_sens
-                .as_ref()
-                .unwrap()
-                .rhs()
-                .update_state(&self.old_y, &self.old_f, t);
+            Rc::get_mut(self.s_op.as_mut().unwrap().eqn_mut()).unwrap().update_rhs_state(
+                &self.old_y,
+                &self.old_f,
+                t,
+            );
         }
-
-        // reuse linear solver from nonlinear solver
-        let ls = |x: &mut Eqn::V| -> Result<(), DiffsolError> {
-            self.nonlinear_solver.solve_linearised_in_place(x)
-        };
 
         // construct bdf discretisation of sensitivity equations
         let op = self.s_op.as_ref().unwrap();
         op.set_h(self.state.as_ref().unwrap().h);
 
         // solve for sensitivities equations discretised using sdirk equation
-        let fun = |x: &Eqn::V, y: &mut Eqn::V| op.call_inplace(x, t, y);
-        let mut convergence = self.nonlinear_solver.convergence().clone();
         let nparams = self.problem().as_ref().unwrap().eqn.rhs().nparams();
         for j in 0..nparams {
             let s0 = &self.state.as_ref().unwrap().s[j];
@@ -261,9 +250,13 @@ where
 
             // solve
             {
-                newton_iteration(ds, &mut self.old_y_sens[j], s0, fun, ls, &mut convergence)?;
+                self.nonlinear_solver.solve_other_in_place(op, ds, t, s0)?;
+
                 self.old_y_sens[j].copy_from(&op.get_last_f_eval());
-                self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
+                self.statistics.number_of_nonlinear_solver_iterations += self
+                    .nonlinear_solver
+                    .convergence()
+                    .niter();
             }
         }
         Ok(())
@@ -394,7 +387,7 @@ where
         if self.diff.nrows() != nstates || self.diff.ncols() != order {
             self.diff = M::zeros(nstates, order);
         }
-        if problem.eqn_sens.is_some() {
+        if state.h > Eqn::T::zero() && problem.with_sensitivity {
             state.check_sens_consistent_with_problem(problem)?;
             let nparams = problem.eqn.rhs().nparams();
             if self.sdiff.len() != nparams
@@ -404,8 +397,9 @@ where
                 self.sdiff = vec![M::zeros(nstates, order); nparams];
                 self.old_f_sens = vec![<Eqn::V as Vector>::zeros(nstates); nparams];
                 self.old_y_sens = state.s.clone();
+                let eqn_sens = Rc::new(SensEquations::new(&problem.eqn));
                 self.s_op = Some(SdirkCallable::from_eqn(
-                    problem.eqn_sens.as_ref().unwrap().clone(),
+                    eqn_sens,
                     self.gamma,
                 ));
             }
@@ -459,7 +453,7 @@ where
                 }
 
                 // sensitivities too
-                if self.problem().as_ref().unwrap().eqn_sens.is_some() {
+                if self.s_op.is_some() {
                     for (diff, dy) in self
                         .sdiff
                         .iter_mut()
@@ -495,7 +489,7 @@ where
                     // old_y now has the new y soln and old_f has the new dy soln
                     self.old_y
                         .copy_from(&self.nonlinear_solver.problem().f.get_last_f_eval());
-                    if self.problem().as_ref().unwrap().eqn_sens.is_some() {
+                    if self.s_op.is_some() {
                         solve_result = self.solve_for_sensitivities(i, t);
                     }
                 }
@@ -519,7 +513,7 @@ where
                 // update diff with solved dy
                 self.diff.column_mut(i).copy_from(&self.old_f);
 
-                if self.problem().as_ref().unwrap().eqn_sens.is_some() {
+                if self.s_op.is_some() {
                     for (diff, old_f_sens) in self.sdiff.iter_mut().zip(self.old_f_sens.iter()) {
                         diff.column_mut(i).copy_from(old_f_sens);
                     }
@@ -535,7 +529,7 @@ where
             let mut error_norm = error.squared_norm(&self.old_y, atol, rtol);
 
             // sensitivity errors
-            if self.problem().as_ref().unwrap().eqn_sens.is_some()
+            if self.s_op.is_some()
                 && self.problem().as_ref().unwrap().sens_error_control
             {
                 for i in 0..self.sdiff.len() {

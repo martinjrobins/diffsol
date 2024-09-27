@@ -102,6 +102,8 @@ impl OpStatistics {
     }
 }
 
+
+
 // NonLinearOp is a trait that defines a nonlinear operator or function `F` that maps an input vector `x` to an output vector `y`, (i.e. `y = F(x, t)`).
 // It extends the [Op] trait with methods for computing the operator and its Jacobian.
 //

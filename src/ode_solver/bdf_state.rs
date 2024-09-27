@@ -56,7 +56,7 @@ where
         let not_initialised = self.diff.ncols() == 0;
         let nstates = ode_problem.eqn.rhs().nstates();
         let nparams = ode_problem.eqn.rhs().nparams();
-        let has_sens = ode_problem.eqn_sens.is_some();
+        let has_sens = ode_problem.with_sensitivity;
         if not_initialised {
             self.diff = M::zeros(nstates, Self::MAX_ORDER + 3);
             if has_sens {
