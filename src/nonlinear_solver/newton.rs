@@ -52,7 +52,16 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NewtonNonlinearSolver<C, Ls> {
     }
 }
 
+impl<C: NonLinearOp, Ls: LinearSolver<C>> Default for NewtonNonlinearSolver<C, Ls> {
+    fn default() -> Self {
+        Self::new(Ls::default())
+    }
+}
+
 impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinearSolver<C, Ls> {
+
+    type SelfNewOp<C2: NonLinearOp<T=C::T, V=C::V, M=C::M>> = NewtonNonlinearSolver<C2, Ls::SelfNewOp<C2>>;
+
     fn convergence(&self) -> &Convergence<C::V> {
         self.convergence
             .as_ref()

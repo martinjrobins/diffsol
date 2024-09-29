@@ -70,6 +70,25 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         Ok(())
     }
 
+    fn check_adjoint_with_out_consistent_with_problem<Eqn: OdeEquations>(
+        &self,
+        problem: &OdeSolverProblem<Eqn>,
+    ) -> Result<(), DiffsolError> {
+        if self.s().len() != problem.eqn.out().unwrap().nout() {
+            return Err(ode_solver_error!(StateProblemMismatch));
+        }
+        if !self.s().is_empty() && self.s()[0].len() != problem.eqn.rhs().nstates() {
+            return Err(ode_solver_error!(StateProblemMismatch));
+        }
+        if self.ds().len() != problem.eqn.out().unwrap().nout() {
+            return Err(ode_solver_error!(StateProblemMismatch));
+        }
+        if !self.ds().is_empty() && self.ds()[0].len() != problem.eqn.rhs().nstates() {
+            return Err(ode_solver_error!(StateProblemMismatch));
+        }
+        Ok(())
+    }
+
     /// Create a new solver state from an ODE problem.
     /// This function will make the state consistent with any algebraic constraints using a default nonlinear solver.
     /// It will also set the initial step size based on the given solver.

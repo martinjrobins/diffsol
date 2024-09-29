@@ -66,9 +66,10 @@ where
     Method: OdeSolverMethod<Eqn>,
 {
     eqn: Rc<Eqn>,
-    checkpointer: Checkpointing<Eqn, Method>,
+    checkpointer: Rc<Checkpointing<Eqn, Method>>,
     g_x: Option<Eqn::M>,
     tmp: RefCell<Eqn::V>,
+    tmp_t: RefCell<Option<Eqn::T>>,
     index: Option<usize>,
 }
 
@@ -77,7 +78,7 @@ where
     Eqn: OdeEquations,
     Method: OdeSolverMethod<Eqn>,
 {
-    pub fn new(eqn: &Rc<Eqn>, checkpointer: Checkpointing<Eqn, Method>, with_out: bool) -> Self {
+    pub fn new(eqn: &Rc<Eqn>, checkpointer: Rc<Checkpointing<Eqn, Method>>, with_out: bool) -> Self {
         let (g_x, index) = if with_out {
             let g_x = if let Some(g) = eqn.out() {
                 let g_x_sparsity = g.sparsity_adjoint();
@@ -95,18 +96,27 @@ where
         };
 
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(eqn.rhs().nstates()));
+        let tmp_t = RefCell::new(None);
         Self {
             eqn: eqn.clone(),
             g_x,
             checkpointer,
             tmp,
             index,
+            tmp_t,
         }
     }
 
     fn update_tmp(&self, t: Eqn::T) {
+        let tmp_t = self.tmp_t.borrow();
+        if let Some(tmp_t) = *tmp_t {
+            if t == tmp_t {
+                return;
+            }
+        }
         let mut x = self.tmp.borrow_mut();
         self.checkpointer.interpolate(t, &mut x).unwrap();
+        self.tmp_t.replace(Some(t));
     }
 
     /// precompute S = g^T_x(x,t) and the state x(t) from t
@@ -178,19 +188,11 @@ where
         self.eqn.rhs().adjoint_inplace(&tmp, t, y);
     }
 }
-/// Sensitivity equations for ODEs
-///
-/// Sensitivity equations are linear:
-/// M * ds/dt = J * s + f_p - M_p * dy/dt
-/// s(0) = dy(0)/dp
-/// where
-///  M is the mass matrix
-///  M_p is the partial derivative of the mass matrix wrt the parameters
-///  dy/dt is the derivative of the state wrt time
-///  J is the Jacobian of the right-hand side
-///  s is the sensitivity
-///  f_p is the partial derivative of the right-hand side with respect to the parameters
-///  dy(0)/dp is the partial derivative of the state at the initial time wrt the parameters
+
+/// Adjoint equations for ODEs
+/// 
+/// M * dλ/dt = -f^T_x(x, t) λ - g^T_x(x,t)
+/// λ(T) = 0
 ///
 pub struct AdjointEquations<Eqn, Method>
 where
@@ -200,6 +202,7 @@ where
     eqn: Rc<Eqn>,
     rhs: Rc<AdjointRhs<Eqn, Method>>,
     init: Rc<AdjointInit<Eqn>>,
+    include_in_error_control: bool,
 }
 
 impl<Eqn, Method> AdjointEquations<Eqn, Method>
@@ -207,13 +210,14 @@ where
     Eqn: OdeEquations,
     Method: OdeSolverMethod<Eqn>,
 {
-    pub(crate) fn new(eqn: &Rc<Eqn>, checkpointer: Checkpointing<Eqn, Method>, with_out: bool) -> Self {
+    pub(crate) fn new(eqn: &Rc<Eqn>, checkpointer: Rc<Checkpointing<Eqn, Method>>, with_out: bool) -> Self {
         let rhs = Rc::new(AdjointRhs::new(eqn, checkpointer, with_out));
         let init = Rc::new(AdjointInit::new(eqn));
         Self {
             rhs,
             init,
             eqn: eqn.clone(),
+            include_in_error_control: false,
         }
     }
     pub(crate) fn set_out_index(&mut self, index: usize) {
@@ -222,6 +226,14 @@ where
 
     pub(crate) fn update_rhs_state(&mut self, t: Eqn::T) {
         Rc::get_mut(&mut self.rhs).unwrap().update_state(t);
+    }
+    
+    pub fn include_in_error_control(&self) -> bool {
+        self.include_in_error_control
+    }
+    
+    pub fn set_include_in_error_control(&mut self, include: bool) {
+        self.include_in_error_control = include;
     }
 }
 
@@ -281,6 +293,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+
     use crate::{
         ode_solver::{adjoint_equations::AdjointEquations, test_models::
             exponential_decay::exponential_decay_problem_adjoint
@@ -304,8 +318,19 @@ mod tests {
             ds: Vec::new(),
             h: 0.0,
         };
-        let checkpointer = Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()]);
-        let mut adj_eqn = AdjointEquations::new(&problem.eqn, checkpointer, true);
+        let checkpointer = Rc::new(Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()]));
+        let adj_eqn = AdjointEquations::new(&problem.eqn, checkpointer.clone(), false);
+        // F(λ, x, t) = -f^T_x(x, t) λ
+        // f_x = |-a 0|
+        //       |0 -a|
+        // F(s, t)_0 =  |a 0| |1| = |a| = |0.1|
+        //              |0 a| |2|   |2a| = |0.2|
+        let v = Vcpu::from_vec(vec![1.0, 2.0]);
+        let f = adj_eqn.rhs.call(&v, state.t);
+        let f_expect = Vcpu::from_vec(vec![0.1, 0.2]);
+        f.assert_eq_st(&f_expect, 1e-10);
+
+        let mut adj_eqn = AdjointEquations::new(&problem.eqn, checkpointer.clone(), true);
 
         // f_x^T = |-a 0|
         //         |0 -a|
@@ -336,22 +361,11 @@ mod tests {
         // F(s, t)_0 =  |a 0| |1| - |1.0| = |a - 1| = |-0.9|
         //              |0 a| |2|   |2.0|   |2a - 2| = |-1.8|
         adj_eqn.set_out_index(0);
-        let v = Vcpu::from_vec(vec![1.0, 2.0]);
         let f = adj_eqn.rhs.call(&v, state.t);
         let f_expect = Vcpu::from_vec(vec![-0.9, -1.8]);
         f.assert_eq_st(&f_expect, 1e-10);
 
-        let solver = Sdirk::<Mcpu, _, _>::new(Tableau::esdirk34(), NalgebraLU::default());
-        let checkpointer = Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()]);
-        let adj_eqn = AdjointEquations::new(&problem.eqn, checkpointer, true);
-        // F(λ, x, t) = -f^T_x(x, t) λ
-        // f_x = |-a 0|
-        //       |0 -a|
-        // F(s, t)_0 =  |a 0| |1| = |a| = |0.1|
-        //              |0 a| |2|   |2a| = |0.2|
-        let f = adj_eqn.rhs.call(&v, state.t);
-        let f_expect = Vcpu::from_vec(vec![0.1, 0.2]);
-        f.assert_eq_st(&f_expect, 1e-10);
+        
     }
 
     #[test]
@@ -368,7 +382,7 @@ mod tests {
             ds: Vec::new(),
             h: 0.0,
         };
-        let checkpointer = Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()]);
+        let checkpointer = Rc::new(Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()]));
         let mut adj_eqn = AdjointEquations::new(&problem.eqn, checkpointer, true);
 
         // f_x^T = |-a 0|

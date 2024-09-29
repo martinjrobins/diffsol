@@ -34,6 +34,69 @@ impl OdeEquationsStatistics {
     }
 }
 
+pub trait AugmentedOdeEquations<Eqn:OdeEquations>: OdeEquations<T=Eqn::T, V=Eqn::V, M=Eqn::M> {
+    fn update_rhs_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T);
+    fn update_init_state(&mut self, t: Eqn::T);
+    fn set_index(&mut self, index: usize);
+    fn max_index(&self) -> usize;
+    fn set_include_in_error_control(&mut self, include: bool);
+    fn include_in_error_control(&self) -> bool;
+}
+
+pub struct NoAug<Eqn:OdeEquations> {
+    _phantom: std::marker::PhantomData<Eqn>
+}
+
+impl<Eqn:OdeEquations> OdeEquations for NoAug<Eqn> {
+    type T = Eqn::T;
+    type V = Eqn::V;
+    type M = Eqn::M;
+    type Mass = Eqn::Mass;
+    type Rhs = Eqn::Rhs;
+    type Root = Eqn::Root;
+    type Init = Eqn::Init;
+    type Out = Eqn::Out;
+
+    fn set_params(&mut self, _p: Self::V) {
+        panic!("This should never be called")
+    }
+
+    fn rhs(&self) -> &Rc<Self::Rhs> {
+        panic!("This should never be called")
+    }
+
+    fn mass(&self) -> Option<&Rc<Self::Mass>> {
+        panic!("This should never be called")
+    }
+
+    fn root(&self) -> Option<&Rc<Self::Root>> {
+        panic!("This should never be called")
+    }
+
+    fn out(&self) -> Option<&Rc<Self::Out>> {
+        panic!("This should never be called")
+    }
+
+    fn init(&self) -> &Rc<Self::Init> {
+        panic!("This should never be called")
+    }
+}
+
+impl <Eqn:OdeEquations> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
+    fn update_rhs_state(&mut self, _y: &Eqn::V, _dy: &Eqn::V, _t: Eqn::T) { panic!("This should never be called") }
+    fn update_init_state(&mut self, _t: Eqn::T) { panic!("This should never be called") }
+    fn set_index(&mut self, _index: usize) { panic!("This should never be called") }
+    fn max_index(&self) -> usize {
+        panic!("This should never be called")
+    }
+    fn include_in_error_control(&self) -> bool {
+        panic!("This should never be called")
+    }
+    fn set_include_in_error_control(&mut self, _include: bool) {
+        panic!("This should never be called")
+    }
+}
+
 /// this is the trait that defines the ODE equations of the form
 ///
 /// $$

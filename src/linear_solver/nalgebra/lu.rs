@@ -2,14 +2,11 @@ use nalgebra::{DMatrix, DVector, Dyn};
 use std::rc::Rc;
 
 use crate::{
-    error::{DiffsolError, LinearSolverError},
-    linear_solver_error,
-    matrix::sparsity::MatrixSparsityRef,
-    op::{linearise::LinearisedOp, NonLinearOp},
-    LinearOp, LinearSolver, Matrix, Op, Scalar, SolverProblem,
+    error::{DiffsolError, LinearSolverError}, linear_solver_error, matrix::sparsity::MatrixSparsityRef, op::{linearise::LinearisedOp, NonLinearOp}, LinearOp, LinearSolver, Matrix, Op, Scalar, SolverProblem
 };
 
 /// A [LinearSolver] that uses the LU decomposition in the [`nalgebra` library](https://nalgebra.org/) to solve the linear system.
+#[derive(Clone)]
 pub struct LU<T, C>
 where
     T: Scalar,
@@ -34,9 +31,12 @@ where
     }
 }
 
+
 impl<T: Scalar, C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> LinearSolver<C>
     for LU<T, C>
 {
+    type SelfNewOp<C2: NonLinearOp<T = C::T, V = C::V, M = C::M>> = LU<T, C2>;
+
     fn solve_in_place(&self, state: &mut C::V) -> Result<(), DiffsolError> {
         if self.lu.is_none() {
             return Err(linear_solver_error!(LuNotInitialized))?;

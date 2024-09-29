@@ -20,7 +20,7 @@ use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
     DenseMatrix, JacobianUpdate, OdeEquations, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState, Op, Scalar, Vector, VectorViewMut,
+    OdeSolverState, Op, Scalar, Vector, VectorViewMut, AugmentedOdeEquations,
 };
 
 use super::bdf::BdfStatistics;
@@ -338,6 +338,7 @@ where
     for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
 {
     type State = SdirkState<Eqn::V>;
+    type SelfNewEqn<EqnNew: OdeEquations<V=Eqn::V, M=Eqn::M, T=Eqn::T>> = Sdirk<M, EqnNew, LS::SelfNewEqn<EqnNew>>;
 
     fn problem(&self) -> Option<&OdeSolverProblem<Eqn>> {
         self.problem.as_ref()
@@ -529,9 +530,7 @@ where
             let mut error_norm = error.squared_norm(&self.old_y, atol, rtol);
 
             // sensitivity errors
-            if self.s_op.is_some()
-                && self.problem().as_ref().unwrap().sens_error_control
-            {
+            if self.s_op.is_some() && self.s_op.as_ref().unwrap().eqn().include_in_error_control() {
                 for i in 0..self.sdiff.len() {
                     self.sdiff[i].gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), &mut error);
                     let sens_error_norm = error.squared_norm(&self.old_y_sens[i], atol, rtol);

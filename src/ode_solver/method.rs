@@ -1,9 +1,7 @@
 use nalgebra::ComplexField;
 
 use crate::{
-    error::DiffsolError, error::OdeSolverError, matrix::default_solver::DefaultSolver,
-    ode_solver_error, scalar::Scalar, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon,
-    NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, VectorViewMut,
+    error::OdeSolverError, error::DiffsolError, matrix::default_solver::DefaultSolver, ode_solver_error, scalar::Scalar, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, VectorViewMut
 };
 
 #[derive(Debug, PartialEq)]
@@ -37,8 +35,12 @@ pub enum OdeSolverStopReason<T: Scalar> {
 ///     solver.interpolate(t).unwrap()
 /// }
 /// ```
-pub trait OdeSolverMethod<Eqn: OdeEquations> {
+pub trait OdeSolverMethod<Eqn: OdeEquations> 
+where 
+    Self: Sized
+{
     type State: OdeSolverState<Eqn::V>;
+    type SelfNewEqn<EqnNew: OdeEquations<V=Eqn::V, M=Eqn::M, T=Eqn::T>>: OdeSolverMethod<EqnNew, State = Self::State>;
 
     /// Get the current problem if it has been set
     fn problem(&self) -> Option<&OdeSolverProblem<Eqn>>;
@@ -220,4 +222,17 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         }
         Ok(ret)
     }
+}
+
+pub trait AugmentedOdeSolverMethod<Eqn, AugmentedEqn>: OdeSolverMethod<Eqn> 
+where 
+    Eqn: OdeEquations,
+    AugmentedEqn: AugmentedOdeEquations<Eqn>,
+{
+    fn set_augmented_problem(
+        &mut self,
+        state: Self::State,
+        ode_problem: &OdeSolverProblem<Eqn>,
+        augmented_eqn: AugmentedEqn,
+    ) -> Result<(), DiffsolError>;
 }

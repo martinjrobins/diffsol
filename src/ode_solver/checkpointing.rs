@@ -179,7 +179,7 @@ mod tests {
         if i % n_steps != 0 {
             checkpoints.push(solver.checkpoint().unwrap());
         }
-        let mut checkpointer = Checkpointing::new(&problem, solver, checkpoints.len() - 2, checkpoints);
+        let checkpointer = Checkpointing::new(&problem, solver, checkpoints.len() - 2, checkpoints);
         let mut y = DVector::zeros(problem.eqn.rhs().nstates());
         for point in soln.solution_points.iter().rev() {
             checkpointer.interpolate(point.t, &mut y).unwrap();

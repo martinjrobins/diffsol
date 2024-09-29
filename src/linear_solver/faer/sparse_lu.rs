@@ -47,6 +47,9 @@ where
 impl<T: Scalar, C: NonLinearOp<M = SparseColMat<T>, V = Col<T>, T = T>> LinearSolver<C>
     for FaerSparseLU<T, C>
 {
+
+    type SelfNewOp<C2: NonLinearOp<T = C::T, V = C::V, M = C::M>> = FaerSparseLU<T, C2>;
+
     fn set_linearisation(&mut self, x: &C::V, t: C::T) {
         Rc::<LinearisedOp<C>>::get_mut(&mut self.problem.as_mut().expect("Problem not set").f)
             .unwrap()

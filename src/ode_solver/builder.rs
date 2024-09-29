@@ -19,8 +19,6 @@ pub struct OdeBuilder {
     atol: Vec<f64>,
     p: Vec<f64>,
     use_coloring: bool,
-    sensitivities: bool,
-    sensitivities_error_control: bool,
 }
 
 impl Default for OdeBuilder {
@@ -83,24 +81,12 @@ impl OdeBuilder {
             atol: vec![1e-6],
             p: vec![],
             use_coloring: false,
-            sensitivities: false,
-            sensitivities_error_control: false,
         }
     }
 
     /// Set the initial time.
     pub fn t0(mut self, t0: f64) -> Self {
         self.t0 = t0;
-        self
-    }
-
-    pub fn sensitivities(mut self, sensitivities: bool) -> Self {
-        self.sensitivities = sensitivities;
-        self
-    }
-
-    pub fn sensitivities_error_control(mut self, sensitivities_error_control: bool) -> Self {
-        self.sensitivities_error_control = sensitivities_error_control;
         self
     }
 
@@ -251,10 +237,6 @@ impl OdeBuilder {
             atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
-            false,
-            self.sensitivities_error_control,
-            false,
-            false,
         )
     }
 
@@ -315,10 +297,6 @@ impl OdeBuilder {
             atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
-            false,
-            self.sensitivities_error_control,
-            false,
-            false,
         )
     }
 
@@ -425,10 +403,6 @@ impl OdeBuilder {
             atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
-            true,
-            self.sensitivities_error_control,
-            false,
-            false,
         )
     }
 
@@ -498,10 +472,6 @@ impl OdeBuilder {
             atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
-            false,
-            self.sensitivities_error_control,
-            false,
-            false,
         )
     }
 
@@ -576,10 +546,6 @@ impl OdeBuilder {
             atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
-            true,
-            self.sensitivities_error_control,
-            false,
-            false,
         )
     }
 
@@ -667,10 +633,6 @@ impl OdeBuilder {
             atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
-            false,
-            self.sensitivities_error_control,
-            false,
-            false,
         )
     }
 
@@ -716,10 +678,6 @@ impl OdeBuilder {
             atol,
             self.t0,
             self.h0,
-            self.sensitivities,
-            self.sensitivities_error_control,
-            false,
-            false,
         )
     }
 }

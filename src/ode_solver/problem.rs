@@ -13,10 +13,6 @@ pub struct OdeSolverProblem<Eqn: OdeEquations> {
     pub atol: Rc<Eqn::V>,
     pub t0: Eqn::T,
     pub h0: Eqn::T,
-    pub sens_error_control: bool,
-    pub adjoint_error_control: bool,
-    pub with_sensitivity: bool,
-    pub with_adjoint: bool,
 }
 
 // impl clone
@@ -28,10 +24,6 @@ impl<Eqn: OdeEquations> Clone for OdeSolverProblem<Eqn> {
             atol: self.atol.clone(),
             t0: self.t0,
             h0: self.h0,
-            with_adjoint: self.with_adjoint,
-            with_sensitivity: self.with_sensitivity,
-            sens_error_control: self.sens_error_control,
-            adjoint_error_control: self.adjoint_error_control,
         }
     }
 }
@@ -49,33 +41,28 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
         atol: Eqn::V,
         t0: Eqn::T,
         h0: Eqn::T,
-        with_sensitivity: bool,
-        sens_error_control: bool,
-        with_adjoint: bool,
-        adjoint_error_control: bool,
     ) -> Result<Self, DiffsolError> {
         let eqn = Rc::new(eqn);
         let atol = Rc::new(atol);
-        let mass_has_sens = if let Some(mass) = eqn.mass() {
-            mass.has_sens()
-        } else {
-            true
-        };
-        let eqn_has_sens = eqn.rhs().has_sens() && eqn.init().has_sens() && mass_has_sens;
-        if with_sensitivity && !eqn_has_sens {
-            return Err(ode_solver_error!(SensitivityNotSupported));
-        }
         Ok(Self {
             eqn,
             rtol,
             atol,
             t0,
             h0,
-            with_sensitivity,
-            with_adjoint,
-            sens_error_control,
-            adjoint_error_control,
         })
+    }
+    
+    /// Create a new problem, identical to self but with a new equation, t0 and h0
+    pub fn into_new_eqn<Eqn2: OdeEquations<T=Eqn::T, V=Eqn::V, M=Eqn::M>>(self, eqn: Eqn2) -> OdeSolverProblem<Eqn2> {
+        let eqn = Rc::new(eqn);
+        OdeSolverProblem {
+            eqn,
+            rtol: self.rtol,
+            atol: self.atol,
+            t0: self.t0,
+            h0: self.h0,
+        }
     }
 
     pub fn set_params(&mut self, p: Eqn::V) -> Result<(), DiffsolError> {

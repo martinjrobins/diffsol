@@ -378,10 +378,6 @@ where
         // set jacobian function
         Self::check(unsafe { IDASetJacFn(ida_mem, Some(Self::jacobian)) }).unwrap();
 
-        // sensitivities
-        if self.problem.as_ref().unwrap().with_sensitivity {
-            panic!("Sensitivities not implemented for sundials solver");
-        }
         Ok(())
     }
 

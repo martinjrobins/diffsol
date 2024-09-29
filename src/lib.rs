@@ -155,9 +155,12 @@ use ode_solver::jacobian_update::JacobianUpdate;
 pub use ode_solver::{
     bdf::Bdf, bdf_state::BdfState, builder::OdeBuilder, equations::OdeEquations,
     equations::OdeSolverEquations, method::OdeSolverMethod, method::OdeSolverStopReason,
+    equations::AugmentedOdeEquations,
     problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::SdirkState,
     sens_equations::SensEquations, sens_equations::SensInit, sens_equations::SensRhs,
-    state::OdeSolverState, tableau::Tableau, checkpointing::Checkpointing
+    adjoint_equations::AdjointEquations, adjoint_equations::AdjointInit, adjoint_equations::AdjointRhs,
+    state::OdeSolverState, tableau::Tableau, checkpointing::Checkpointing,
+    equations::NoAug,
 };
 pub use op::{
     closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure,

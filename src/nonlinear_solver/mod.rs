@@ -13,7 +13,9 @@ impl<V> NonLinearSolveSolution<V> {
 }
 
 /// A solver for the nonlinear problem `F(x) = 0`.
-pub trait NonLinearSolver<C: Op> {
+pub trait NonLinearSolver<C: Op>: Default {
+    type SelfNewOp<C2: NonLinearOp<T=C::T, V=C::V, M=C::M>>: NonLinearSolver<C2>;
+
     /// Get the problem to be solved.
     fn problem(&self) -> &SolverProblem<C>;
 
