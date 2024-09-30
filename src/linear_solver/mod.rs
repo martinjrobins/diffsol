@@ -23,6 +23,9 @@ pub trait LinearSolver<C: Op>: Default {
     /// Any internal state of the solver is reset.
     fn set_problem(&mut self, problem: &SolverProblem<C>);
 
+    /// Clear the current problem, any internal state of the solver is reset.
+    fn clear_problem(&mut self);
+
     // sets the point at which the linearisation of the operator is evaluated
     fn set_linearisation(&mut self, x: &C::V, t: C::T);
 

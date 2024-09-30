@@ -244,6 +244,13 @@ where
         self.klu_symbolic = KluSymbolic::try_from_matrix(&mut matrix, klu_common.as_mut()).ok();
         self.matrix = Some(matrix);
     }
+
+    fn clear_problem(&mut self) {
+        self.problem = None;
+        self.matrix = None;
+        self.klu_symbolic = None;
+        self.klu_numeric = None;
+    }
 }
 
 #[cfg(test)]

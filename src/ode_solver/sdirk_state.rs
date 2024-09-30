@@ -22,6 +22,14 @@ where
     ) -> Result<(), DiffsolError> {
         Ok(())
     }
+    
+    fn set_augmented_problem<Eqn: OdeEquations, AugmentedEqn: crate::AugmentedOdeEquations<Eqn>>(
+            &mut self,
+            _ode_problem: &OdeSolverProblem<Eqn>,
+            _augmented_eqn: &AugmentedEqn,
+        ) -> Result<(), DiffsolError> {
+        Ok(())
+    }
 
     fn new_internal_state(y: V, dy: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T) -> Self {
         Self { y, dy, s, ds, t, h }

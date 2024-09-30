@@ -108,10 +108,12 @@ where
     }
 
     fn update_tmp(&self, t: Eqn::T) {
-        let tmp_t = self.tmp_t.borrow();
-        if let Some(tmp_t) = *tmp_t {
-            if t == tmp_t {
-                return;
+        {
+            let tmp_t = self.tmp_t.borrow();
+            if let Some(tmp_t) = *tmp_t {
+                if t == tmp_t {
+                    return;
+                }
             }
         }
         let mut x = self.tmp.borrow_mut();

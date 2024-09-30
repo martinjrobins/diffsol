@@ -4,7 +4,7 @@ use crate::{
     error::{DiffsolError, OdeSolverError},
     ode_solver_error,
     vector::Vector,
-    ConstantOp, LinearOp, NonLinearOp, OdeEquations, 
+    OdeEquations, 
 };
 
 pub struct OdeSolverProblem<Eqn: OdeEquations> {

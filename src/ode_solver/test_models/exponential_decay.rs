@@ -201,10 +201,6 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>()  -> (
         atol,
         t0,
         h0,
-        false,
-        false,
-        false,
-        false,
     ).unwrap();
     let mut soln = OdeSolverSolution::default();
     for i in 0..10 {
@@ -228,7 +224,6 @@ pub fn exponential_decay_problem_sens<M: Matrix + 'static>(
     let problem = OdeBuilder::new()
         .p([k, y0])
         .use_coloring(use_coloring)
-        .sensitivities_error_control(true)
         .build_ode_with_sens(
             exponential_decay::<M>,
             exponential_decay_jacobian::<M>,

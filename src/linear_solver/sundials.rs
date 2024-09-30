@@ -89,6 +89,13 @@ where
         self.linear_solver = Some(linear_solver);
     }
 
+    fn clear_problem(&mut self) {
+        self.problem = None;
+        self.matrix = None;
+        self.linear_solver = None;
+        self.is_setup = false;
+    }
+
     fn set_linearisation(&mut self, x: &Op::V, t: Op::T) {
         Rc::<LinearisedOp<Op>>::get_mut(&mut self.problem.as_mut().expect("Problem not set").f)
             .unwrap()

@@ -69,4 +69,10 @@ impl<T: Scalar, C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> LinearSol
         self.problem = Some(linearised_problem);
         self.matrix = Some(matrix);
     }
+
+    fn clear_problem(&mut self) {
+        self.problem = None;
+        self.matrix = None;
+        self.lu = None;
+    }
 }

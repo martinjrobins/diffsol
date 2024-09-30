@@ -93,4 +93,11 @@ impl<T: Scalar, C: NonLinearOp<M = SparseColMat<T>, V = Col<T>, T = T>> LinearSo
                 .expect("Failed to create symbolic LU"),
         );
     }
+
+    fn clear_problem(&mut self) {
+        self.problem = None;
+        self.matrix = None;
+        self.lu = None;
+        self.lu_symbolic = None;
+    }
 }

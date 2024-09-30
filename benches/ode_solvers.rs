@@ -546,15 +546,15 @@ criterion_group!(benches, criterion_benchmark);
 criterion_main!(benches);
 
 mod benchmarks {
-    use diffsol::linear_solver::LinearSolver;
     use diffsol::matrix::MatrixRef;
     use diffsol::op::bdf::BdfCallable;
     use diffsol::op::sdirk::SdirkCallable;
     use diffsol::vector::VectorRef;
     use diffsol::{
         Bdf, DefaultDenseMatrix, DefaultSolver, Matrix, NewtonNonlinearSolver, OdeEquations,
-        OdeSolverMethod, OdeSolverProblem, Sdirk, Tableau,
+        OdeSolverMethod, OdeSolverProblem, Sdirk, Tableau
     };
+    use diffsol::LinearSolver;
 
     // bdf
     pub fn bdf<Eqn>(

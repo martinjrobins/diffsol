@@ -117,7 +117,7 @@ pub mod vector;
 #[cfg(feature = "sundials")]
 pub mod sundials_sys;
 
-use linear_solver::LinearSolver;
+pub use linear_solver::LinearSolver;
 pub use linear_solver::{faer::sparse_lu::FaerSparseLU, FaerLU, NalgebraLU};
 
 pub use matrix::sparse_faer::SparseColMat;
@@ -146,17 +146,17 @@ use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
     DenseMatrix, MatrixCommon, MatrixRef, MatrixView, MatrixViewMut,
 };
-pub use nonlinear_solver::newton::NewtonNonlinearSolver;
+pub use nonlinear_solver::{newton::NewtonNonlinearSolver, NonLinearSolver};
 use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus,
-    root::RootFinder, NonLinearSolver,
+    root::RootFinder
 };
 use ode_solver::jacobian_update::JacobianUpdate;
 pub use ode_solver::{
-    bdf::Bdf, bdf_state::BdfState, builder::OdeBuilder, equations::OdeEquations,
+    bdf::BdfAug, bdf::Bdf, bdf::BdfAdj, bdf_state::BdfState, builder::OdeBuilder, equations::OdeEquations,
     equations::OdeSolverEquations, method::OdeSolverMethod, method::OdeSolverStopReason,
     equations::AugmentedOdeEquations,
-    problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::SdirkState,
+    problem::OdeSolverProblem, sdirk::SdirkAug, sdirk::Sdirk, sdirk::SdirkAdj, sdirk_state::SdirkState,
     sens_equations::SensEquations, sens_equations::SensInit, sens_equations::SensRhs,
     adjoint_equations::AdjointEquations, adjoint_equations::AdjointInit, adjoint_equations::AdjointRhs,
     state::OdeSolverState, tableau::Tableau, checkpointing::Checkpointing,

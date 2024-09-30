@@ -1,7 +1,7 @@
 use nalgebra::ComplexField;
 
 use crate::{
-    error::OdeSolverError, error::DiffsolError, matrix::default_solver::DefaultSolver, ode_solver_error, scalar::Scalar, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, VectorViewMut
+    error::{DiffsolError, OdeSolverError}, matrix::default_solver::DefaultSolver, ode_solver_error, scalar::Scalar, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, SensEquations, VectorViewMut
 };
 
 #[derive(Debug, PartialEq)]
@@ -40,7 +40,6 @@ where
     Self: Sized
 {
     type State: OdeSolverState<Eqn::V>;
-    type SelfNewEqn<EqnNew: OdeEquations<V=Eqn::V, M=Eqn::M, T=Eqn::T>>: OdeSolverMethod<EqnNew, State = Self::State>;
 
     /// Get the current problem if it has been set
     fn problem(&self) -> Option<&OdeSolverProblem<Eqn>>;
@@ -235,4 +234,18 @@ where
         ode_problem: &OdeSolverProblem<Eqn>,
         augmented_eqn: AugmentedEqn,
     ) -> Result<(), DiffsolError>;
+}
+
+pub trait SensitivitiesOdeSolverMethod<Eqn>: AugmentedOdeSolverMethod<Eqn, SensEquations<Eqn>>
+where 
+    Eqn: OdeEquations,
+{
+    fn set_problem_with_sensitivities(
+        &mut self,
+        state: Self::State,
+        problem: &OdeSolverProblem<Eqn>,
+    ) -> Result<(), DiffsolError> {
+        let augmented_eqn = SensEquations::new(&problem.eqn);
+        self.set_augmented_problem(state, problem, augmented_eqn)
+    }
 }

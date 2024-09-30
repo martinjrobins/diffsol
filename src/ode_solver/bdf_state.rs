@@ -1,6 +1,5 @@
 use crate::{
-    error::DiffsolError, scalar::IndexType, scale, DenseMatrix, OdeEquations, OdeSolverProblem,
-    OdeSolverState, Op, Vector, VectorViewMut,
+    error::DiffsolError, scalar::IndexType, scale, AugmentedOdeEquations, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Vector, VectorViewMut
 };
 use std::ops::MulAssign;
 
@@ -24,22 +23,22 @@ where
 {
     pub(crate) const MAX_ORDER: IndexType = 5;
 
-    pub fn initialise_diff_to_first_order(&mut self, has_sens: bool) {
+    pub fn initialise_diff_to_first_order(&mut self) {
         self.order = 1usize;
-
         self.diff.column_mut(0).copy_from(&self.y);
         self.diff.column_mut(1).copy_from(&self.dy);
         self.diff.column_mut(1).mul_assign(scale(self.h));
-        let nparams = self.s.len();
-        if has_sens {
-            for i in 0..nparams {
-                let sdiff = &mut self.sdiff[i];
-                let s = &self.s[i];
-                let ds = &self.ds[i];
-                sdiff.column_mut(0).copy_from(s);
-                sdiff.column_mut(1).copy_from(ds);
-                sdiff.column_mut(1).mul_assign(scale(self.h));
-            }
+    }
+    
+    pub fn initialise_sdiff_to_first_order(&mut self) {
+        let naug = self.sdiff.len();
+        for i in 0..naug {
+            let sdiff = &mut self.sdiff[i];
+            let s = &self.s[i];
+            let ds = &self.ds[i];
+            sdiff.column_mut(0).copy_from(s);
+            sdiff.column_mut(1).copy_from(ds);
+            sdiff.column_mut(1).mul_assign(scale(self.h));
         }
     }
 }
@@ -53,19 +52,29 @@ where
         &mut self,
         ode_problem: &OdeSolverProblem<Eqn>,
     ) -> Result<(), DiffsolError> {
-        let not_initialised = self.diff.ncols() == 0;
         let nstates = ode_problem.eqn.rhs().nstates();
-        let nparams = ode_problem.eqn.rhs().nparams();
-        let has_sens = ode_problem.with_sensitivity;
-        if not_initialised {
+        if self.diff.nrows() != nstates {
             self.diff = M::zeros(nstates, Self::MAX_ORDER + 3);
-            if has_sens {
-                self.sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3); nparams];
-            }
-            self.initialise_diff_to_first_order(has_sens);
+            self.initialise_diff_to_first_order();
         }
         Ok(())
     }
+    
+    fn set_augmented_problem<Eqn: OdeEquations, AugmentedEqn: AugmentedOdeEquations<Eqn>>(
+        &mut self,
+        ode_problem: &OdeSolverProblem<Eqn>,
+        augmented_eqn: &AugmentedEqn,
+    ) -> Result<(), DiffsolError> {
+        let naug = augmented_eqn.max_index();
+        let nstates = ode_problem.eqn.rhs().nstates();
+        if self.sdiff.len() != naug || self.sdiff[0].nrows() != nstates {
+            self.sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3); naug];
+            self.initialise_sdiff_to_first_order();
+        }
+        Ok(())
+    }
+
+
 
     fn new_internal_state(y: V, dy: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T) -> Self {
         Self {

@@ -2,8 +2,7 @@ use num_traits::{One, Zero};
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    matrix::sparsity::MatrixSparsityRef, ConstantOp, LinearOp, Matrix, MatrixSparsity, NonLinearOp,
-    OdeEquations, Op, Vector,
+    matrix::sparsity::MatrixSparsityRef, AugmentedOdeEquations, ConstantOp, LinearOp, Matrix, MatrixSparsity, NonLinearOp, OdeEquations, Op, Vector
 };
 
 pub struct SensInit<Eqn>
@@ -107,7 +106,7 @@ where
                 sens: RefCell::new(<Eqn::M as Matrix>::zeros(0, 0)),
                 rhs_sens: None,
                 mass_sens: None,
-                y: RefCell::new(Eqn::V::zeros(0)),
+                y: RefCell::new(<Eqn::V as Vector>::zeros(0)),
                 index: RefCell::new(0),
             };
         }
@@ -235,11 +234,21 @@ where
 /// 
 pub struct SensEquations<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquations
 {
     eqn: Rc<Eqn>,
     rhs: Rc<SensRhs<Eqn>>,
     init: Rc<SensInit<Eqn>>,
+    include_in_error_control: bool,
+}
+
+impl<Eqn> std::fmt::Debug for SensEquations<Eqn>
+where
+    Eqn: OdeEquations,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SensEquations")
+    }
 }
 
 impl<Eqn> SensEquations<Eqn>
@@ -253,6 +262,7 @@ where
             rhs,
             init,
             eqn: eqn.clone(),
+            include_in_error_control: false,
         }
     }
     pub(crate) fn new_no_rhs(eqn: &Rc<Eqn>) -> Self {
@@ -262,18 +272,10 @@ where
             rhs,
             init,
             eqn: eqn.clone(),
+            include_in_error_control: false,
         }
     }
-    pub(crate) fn update_rhs_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T) {
-        Rc::get_mut(&mut self.rhs).unwrap().update_state(y, dy, t);
-    }
-    pub(crate) fn update_init_state(&mut self, t: Eqn::T) {
-        Rc::get_mut(&mut self.init).unwrap().update_state(t);
-    }
-    pub(crate) fn set_param_index(&mut self, index: usize) {
-        Rc::get_mut(&mut self.rhs).unwrap().set_param_index(index);
-        Rc::get_mut(&mut self.init).unwrap().set_param_index(index);
-    }
+    
 }
 
 impl<Eqn> Op for SensEquations<Eqn>
@@ -328,6 +330,28 @@ where
     }
 }
 
+impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for SensEquations<Eqn>  {
+    fn include_in_error_control(&self) -> bool {
+        self.include_in_error_control
+    }
+    fn set_include_in_error_control(&mut self, include: bool) {
+        self.include_in_error_control = include;
+    }
+    fn max_index(&self) -> usize {
+        self.nparams()
+    }
+    fn update_rhs_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T) {
+        Rc::get_mut(&mut self.rhs).unwrap().update_state(y, dy, t);
+    }
+    fn update_init_state(&mut self, t: Eqn::T) {
+        Rc::get_mut(&mut self.init).unwrap().update_state(t);
+    }
+    fn set_index(&mut self, index: usize) {
+        Rc::get_mut(&mut self.rhs).unwrap().set_param_index(index);
+        Rc::get_mut(&mut self.init).unwrap().set_param_index(index);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::{
@@ -336,6 +360,7 @@ mod tests {
             exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
             robertson_sens::robertson_sens,
         },
+        AugmentedOdeEquations,
         NonLinearOp, SdirkState, SensEquations, Vector,
     };
     type Mcpu = nalgebra::DMatrix<f64>;

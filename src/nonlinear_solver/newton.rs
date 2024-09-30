@@ -88,6 +88,13 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
         self.tmp = C::V::zeros(problem.f.nstates());
     }
 
+    fn clear_problem(&mut self) {
+        self.problem = None;
+        self.convergence = None;
+        self.linear_solver.clear_problem();
+        self.is_jacobian_set = false;
+    }
+
     fn reset_jacobian(&mut self, x: &C::V, t: C::T) {
         self.linear_solver.set_linearisation(x, t);
         self.is_jacobian_set = true;

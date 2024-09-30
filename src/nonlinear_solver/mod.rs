@@ -26,6 +26,9 @@ pub trait NonLinearSolver<C: Op>: Default {
     /// Set the problem to be solved, any previous problem is discarded.
     fn set_problem(&mut self, problem: &SolverProblem<C>);
 
+    /// Clear the problem to be solved.
+    fn clear_problem(&mut self);
+
     /// Reset the approximation of the Jacobian matrix.
     fn reset_jacobian(&mut self, x: &C::V, t: C::T);
 
