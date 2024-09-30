@@ -121,15 +121,19 @@ where
     }
     
     pub fn interpolate(&self, t: Eqn::T, y: &mut Eqn::V) -> Result<(), DiffsolError> {
-        let mut segment = self.segment.borrow_mut();
-        if segment.interpolate(t, y).is_some() {
-            return Ok(());
+        {
+            let segment = self.segment.borrow();
+            if segment.interpolate(t, y).is_some() {
+                return Ok(());
+            }
         }
 
-        let mut previous_segment = self.previous_segment.borrow_mut();
-        if let Some(previous_segment) = previous_segment.as_ref() {
-            if previous_segment.interpolate(t, y).is_some() {
-                return Ok(());
+        {
+            let previous_segment = self.previous_segment.borrow();
+            if let Some(previous_segment) = previous_segment.as_ref() {
+                if previous_segment.interpolate(t, y).is_some() {
+                    return Ok(());
+                }
             }
         }
 
@@ -140,10 +144,12 @@ where
 
         // else find idx of segment
         let idx = self.checkpoints.iter().skip(1).position(|state| state.t() > t).expect("t is not in checkpoints");
-        if previous_segment.is_none() {
+        if self.previous_segment.borrow().is_none() {
             self.previous_segment.replace(Some(HermiteInterpolator::default()));
         }
         let mut solver = self.solver.borrow_mut();
+        let mut previous_segment = self.previous_segment.borrow_mut();
+        let mut segment = self.segment.borrow_mut();
         previous_segment.as_mut().unwrap().reset(&self.problem, &mut *solver, &self.checkpoints[idx], &self.checkpoints[idx + 1])?;
         std::mem::swap(&mut *segment, previous_segment.as_mut().unwrap());
         segment.interpolate(t, y).unwrap();

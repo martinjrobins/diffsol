@@ -265,17 +265,6 @@ where
             include_in_error_control: false,
         }
     }
-    pub(crate) fn new_no_rhs(eqn: &Rc<Eqn>) -> Self {
-        let rhs = Rc::new(SensRhs::new(eqn, false));
-        let init = Rc::new(SensInit::new(eqn));
-        Self {
-            rhs,
-            init,
-            eqn: eqn.clone(),
-            include_in_error_control: false,
-        }
-    }
-    
 }
 
 impl<Eqn> Op for SensEquations<Eqn>
