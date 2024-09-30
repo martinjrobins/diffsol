@@ -209,9 +209,7 @@ pub trait OdeEquations {
 /// let atol = V::from_vec(vec![1e-6]);
 /// let t0 = 0.0;
 /// let h0 = 0.1;
-/// let with_sensitivity = false;
-/// let sensitivity_error_control = false;
-/// let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, with_sensitivity, sensitivity_error_control).unwrap();
+/// let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0).unwrap();
 ///
 /// let mut solver = Bdf::default();
 /// let t = 0.4;

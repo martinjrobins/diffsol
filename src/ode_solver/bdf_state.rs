@@ -1,5 +1,5 @@
 use crate::{
-    error::DiffsolError, scalar::IndexType, scale, AugmentedOdeEquations, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Vector, VectorViewMut
+    error::DiffsolError, ode_solver_error, scalar::IndexType, scale, AugmentedOdeEquations, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Vector, VectorViewMut, error::OdeSolverError,
 };
 use std::ops::MulAssign;
 
@@ -14,6 +14,8 @@ pub struct BdfState<V: Vector, M: DenseMatrix<T = V::T, V = V>> {
     pub(crate) ds: Vec<V>,
     pub(crate) t: V::T,
     pub(crate) h: V::T,
+    pub(crate) diff_initialised: bool,
+    pub(crate) sdiff_initialised: bool,
 }
 
 impl<V, M> BdfState<V, M>
@@ -28,6 +30,7 @@ where
         self.diff.column_mut(0).copy_from(&self.y);
         self.diff.column_mut(1).copy_from(&self.dy);
         self.diff.column_mut(1).mul_assign(scale(self.h));
+        self.diff_initialised = true;
     }
     
     pub fn initialise_sdiff_to_first_order(&mut self) {
@@ -40,6 +43,7 @@ where
             sdiff.column_mut(1).copy_from(ds);
             sdiff.column_mut(1).mul_assign(scale(self.h));
         }
+        self.sdiff_initialised = true;
     }
 }
 
@@ -54,7 +58,9 @@ where
     ) -> Result<(), DiffsolError> {
         let nstates = ode_problem.eqn.rhs().nstates();
         if self.diff.nrows() != nstates {
-            self.diff = M::zeros(nstates, Self::MAX_ORDER + 3);
+            return Err(ode_solver_error!(StateProblemMismatch));
+        }
+        if !self.diff_initialised {
             self.initialise_diff_to_first_order();
         }
         Ok(())
@@ -68,7 +74,9 @@ where
         let naug = augmented_eqn.max_index();
         let nstates = ode_problem.eqn.rhs().nstates();
         if self.sdiff.len() != naug || self.sdiff[0].nrows() != nstates {
-            self.sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3); naug];
+            return Err(ode_solver_error!(StateProblemMismatch));
+        }
+        if !self.sdiff_initialised {
             self.initialise_sdiff_to_first_order();
         }
         Ok(())
@@ -76,17 +84,22 @@ where
 
 
 
-    fn new_internal_state(y: V, dy: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T) -> Self {
+    fn new_internal_state(y: V, dy: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T, naug: usize) -> Self {
+        let nstates = y.len();
+        let diff = M::zeros(nstates, Self::MAX_ORDER + 3);
+        let sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3); naug];
         Self {
             order: 1,
-            diff: M::zeros(0, 0),
-            sdiff: Vec::new(),
+            diff,
+            sdiff,
             y,
             dy,
             s,
             ds,
             t,
             h,
+            diff_initialised: false,
+            sdiff_initialised: false,
         }
     }
 

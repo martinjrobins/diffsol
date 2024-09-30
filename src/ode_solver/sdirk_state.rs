@@ -31,7 +31,7 @@ where
         Ok(())
     }
 
-    fn new_internal_state(y: V, dy: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T) -> Self {
+    fn new_internal_state(y: V, dy: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T, _naug: usize) -> Self {
         Self { y, dy, s, ds, t, h }
     }
 

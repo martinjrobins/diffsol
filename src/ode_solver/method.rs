@@ -244,8 +244,10 @@ where
         &mut self,
         state: Self::State,
         problem: &OdeSolverProblem<Eqn>,
+        include_in_error_control: bool,
     ) -> Result<(), DiffsolError> {
-        let augmented_eqn = SensEquations::new(&problem.eqn);
+        let mut augmented_eqn = SensEquations::new(&problem.eqn);
+        augmented_eqn.set_include_in_error_control(include_in_error_control);
         self.set_augmented_problem(state, problem, augmented_eqn)
     }
 }

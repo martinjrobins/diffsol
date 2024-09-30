@@ -31,7 +31,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     fn t_mut(&mut self) -> &mut V::T;
     fn h(&self) -> V::T;
     fn h_mut(&mut self) -> &mut V::T;
-    fn new_internal_state(y: V, dy: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T) -> Self;
+    fn new_internal_state(y: V, dy: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T, naug: usize) -> Self;
     fn set_problem<Eqn: OdeEquations>(
         &mut self,
         ode_problem: &OdeSolverProblem<Eqn>,
@@ -137,7 +137,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let y = ode_problem.eqn.init().call(t);
         let dy = V::zeros(y.len());
         let (s, ds) = (vec![], vec![]);
-        Self::new_internal_state(y, dy, s, ds, t, h)
+        Self::new_internal_state(y, dy, s, ds, t, h, 0)
     }
     
     fn new_without_initialise_augmented<Eqn, AugmentedEqn>(ode_problem: &OdeSolverProblem<Eqn>, augmented_eqn: &mut AugmentedEqn) -> Self
@@ -161,7 +161,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
             s.push(si);
             ds.push(dsi);
         }
-        Self::new_internal_state(y, dy, s, ds, t, h)
+        Self::new_internal_state(y, dy, s, ds, t, h, naug)
     }
 
     /// Calculate a consistent state and time derivative of the state, based on the equations of the problem.

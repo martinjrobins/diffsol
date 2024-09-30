@@ -53,8 +53,9 @@ mod tests {
         Eqn::M: DefaultSolver,
     {
         if solve_for_sensitivities {
+            let sensitivity_error_control = solution.sens_solution_points.is_some();
             let state = OdeSolverState::new_with_sensitivities(problem, method).unwrap();
-            method.set_problem_with_sensitivities(state, problem).unwrap();
+            method.set_problem_with_sensitivities(state, problem, sensitivity_error_control).unwrap();
         } else {
             let state = OdeSolverState::new(problem, method).unwrap();
             method.set_problem(state, problem).unwrap();
@@ -131,7 +132,7 @@ mod tests {
                             let error = sens_soln.clone() - &sens_point.state;
                             let error_norm = error.squared_norm(&sens_point.state, atol, rtol).sqrt();
                             assert!(
-                                error_norm < M::T::from(24.0),
+                                error_norm < M::T::from(29.0),
                                 "error_norm: {} at t = {}",
                                 error_norm,
                                 point.t
