@@ -11,6 +11,8 @@ use super::method::SensitivitiesOdeSolverMethod;
 /// State for the ODE solver, containing:
 /// - the current solution `y`
 /// - the derivative of the solution wrt time `dy`
+/// - the current integral of the output function `g`
+/// - the current derivative of the integral of the output function wrt time `dg`
 /// - the current time `t`
 /// - the current step size `h`,
 /// - the sensitivity vectors `s`
@@ -21,7 +23,12 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     fn y_mut(&mut self) -> &mut V;
     fn dy(&self) -> &V;
     fn dy_mut(&mut self) -> &mut V;
+    fn g(&self) -> &V;
+    fn g_mut(&mut self) -> &mut V;
+    fn dg(&self) -> &V;
+    fn dg_mut(&mut self) -> &mut V;
     fn y_dy_mut(&mut self) -> (&mut V, &mut V);
+    fn y_g_mut(&mut self) -> (&mut V, &mut V);
     fn s(&self) -> &[V];
     fn s_mut(&mut self) -> &mut [V];
     fn ds(&self) -> &[V];
@@ -31,7 +38,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     fn t_mut(&mut self) -> &mut V::T;
     fn h(&self) -> V::T;
     fn h_mut(&mut self) -> &mut V::T;
-    fn new_internal_state(y: V, dy: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T, naug: usize) -> Self;
+    fn new_internal_state(y: V, dy: V, g: V, dg: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T, naug: usize) -> Self;
     fn set_problem<Eqn: OdeEquations>(
         &mut self,
         ode_problem: &OdeSolverProblem<Eqn>,
@@ -105,7 +112,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let augmented_eqn = SensEquations::new(&ode_problem.eqn);
         Self::new_with_augmented(ode_problem, augmented_eqn, solver).map(|(state, _)| state)
     }
-    
+
     fn new_with_augmented<Eqn, AugmentedEqn, S>(ode_problem: &OdeSolverProblem<Eqn>, mut augmented_eqn: AugmentedEqn, solver: &S) -> Result<(Self, AugmentedEqn), DiffsolError>
     where
         Eqn: OdeEquations<T = V::T, V = V>,
@@ -137,7 +144,12 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let y = ode_problem.eqn.init().call(t);
         let dy = V::zeros(y.len());
         let (s, ds) = (vec![], vec![]);
-        Self::new_internal_state(y, dy, s, ds, t, h, 0)
+        let (dg, g) = if let Some(out) = ode_problem.eqn.out() {
+            (out.call(&y, t), V::zeros(out.nout()))
+        } else {
+            (V::zeros(0), V::zeros(0))
+        };
+        Self::new_internal_state(y, dy, g, dg, s, ds, t, h, 0)
     }
     
     fn new_without_initialise_augmented<Eqn, AugmentedEqn>(ode_problem: &OdeSolverProblem<Eqn>, augmented_eqn: &mut AugmentedEqn) -> Self
@@ -161,7 +173,12 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
             s.push(si);
             ds.push(dsi);
         }
-        Self::new_internal_state(y, dy, s, ds, t, h, naug)
+        let (g, dg) = if let Some(out) = ode_problem.eqn.out() {
+            (out.call(&y, t), V::zeros(out.nout()))
+        } else {
+            (V::zeros(0), V::zeros(0))
+        };
+        Self::new_internal_state(y, dy, g, dg, s, ds, t, h, naug)
     }
 
     /// Calculate a consistent state and time derivative of the state, based on the equations of the problem.
@@ -190,6 +207,10 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let yerr = y_tmp.clone();
         root_solver.solve_in_place(&mut y_tmp, t, &yerr)?;
         f.scatter_soln(&y_tmp, y, dy);
+        if let Some(out) = ode_problem.eqn.out() {
+            let (y, g) = self.y_g_mut();
+            out.call_inplace(y, t, g);
+        }
         Ok(())
     }
 

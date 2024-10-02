@@ -53,18 +53,6 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
         })
     }
     
-    /// Create a new problem, identical to self but with a new equation, t0 and h0
-    pub fn into_new_eqn<Eqn2: OdeEquations<T=Eqn::T, V=Eqn::V, M=Eqn::M>>(self, eqn: Eqn2) -> OdeSolverProblem<Eqn2> {
-        let eqn = Rc::new(eqn);
-        OdeSolverProblem {
-            eqn,
-            rtol: self.rtol,
-            atol: self.atol,
-            t0: self.t0,
-            h0: self.h0,
-        }
-    }
-
     pub fn set_params(&mut self, p: Eqn::V) -> Result<(), DiffsolError> {
         let eqn =
             Rc::get_mut(&mut self.eqn).ok_or(ode_solver_error!(FailedToGetMutableReference))?;

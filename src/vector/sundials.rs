@@ -415,6 +415,17 @@ impl<'a> VectorViewMut<'a> for SundialsVectorViewMut<'a> {
     fn copy_from_view(&mut self, other: &Self::View) {
         unsafe { N_VScale(1.0, other.sundials_vector(), self.sundials_vector()) }
     }
+    fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
+        unsafe {
+            N_VLinearSum(
+                alpha,
+                x.sundials_vector(),
+                beta,
+                self.sundials_vector(),
+                self.sundials_vector(),
+            )
+        };
+    }
 }
 
 impl<'a> VectorView<'a> for SundialsVectorView<'a> {

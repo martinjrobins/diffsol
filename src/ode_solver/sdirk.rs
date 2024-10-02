@@ -21,7 +21,7 @@ use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
     DenseMatrix, JacobianUpdate, OdeEquations, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState, Op, Scalar, Vector, VectorViewMut, AugmentedOdeEquations, 
+    OdeSolverState, Op, Scalar, Vector, VectorViewMut, AugmentedOdeEquations, NonLinearOp
 };
 
 use super::bdf::BdfStatistics;
@@ -65,6 +65,8 @@ where
     state: Option<SdirkState<Eqn::V>>,
     diff: M,
     sdiff: Vec<M>,
+    gdiff: M,
+    old_g: Eqn::V,
     gamma: Eqn::T,
     is_sdirk: bool,
     s_op: Option<SdirkCallable<AugmentedEqn>>,
@@ -165,15 +167,18 @@ where
         let n = 1;
         let old_t = Eqn::T::zero();
         let old_y = <Eqn::V as Vector>::zeros(n);
+        let old_g = <Eqn::V as Vector>::zeros(n);
         let old_f = <Eqn::V as Vector>::zeros(n);
         let statistics = BdfStatistics::default();
         let old_f_sens = Vec::new();
         let old_y_sens = Vec::new();
         let diff = M::zeros(n, s);
         let sdiff = Vec::new();
+        let gdiff = M::zeros(n, s);
         Self {
             old_y_sens,
             old_f_sens,
+            old_g,
             diff,
             sdiff,
             tableau,
@@ -181,6 +186,7 @@ where
             state: None,
             problem: None,
             s_op: None,
+            gdiff,
             gamma,
             is_sdirk,
             old_t,
@@ -404,11 +410,22 @@ where
         if self.diff.nrows() != nstates || self.diff.ncols() != order {
             self.diff = M::zeros(nstates, order);
         }
+        let nout = if let Some(out) = problem.eqn.out() {
+            out.nout()
+        } else {
+            0
+        };
+        if self.gdiff.nrows() != nout || self.gdiff.ncols() != order {
+            self.gdiff = M::zeros(nout, order);
+        }
         
 
         self.old_f = state.dy.clone();
         self.old_t = state.t;
         self.old_y = state.y.clone();
+        if problem.eqn.out().is_some() {
+            self.old_g = state.g.clone();
+        }
 
         state.set_problem(problem)?;
         self.state = Some(state);
@@ -514,6 +531,12 @@ where
                 // update diff with solved dy
                 self.diff.column_mut(i).copy_from(&self.old_f);
 
+                // calculate dg and store in gdiff
+                if let Some(out) = self.problem.as_ref().unwrap().eqn.out() {
+                    out.call_inplace(&self.old_y, t, &mut self.state.as_mut().unwrap().dg);
+                    self.gdiff.column_mut(i).axpy(h, &self.state.as_mut().unwrap().dg, Eqn::T::zero());   
+                }
+
                 if self.s_op.is_some() {
                     for (diff, old_f_sens) in self.sdiff.iter_mut().zip(self.old_f_sens.iter()) {
                         diff.column_mut(i).copy_from(old_f_sens);
@@ -580,6 +603,13 @@ where
                 self.old_f_sens[i].mul_assign(scale(Eqn::T::one() / state.h));
                 std::mem::swap(&mut self.old_f_sens[i], &mut state.ds[i]);
                 std::mem::swap(&mut self.old_y_sens[i], &mut state.s[i]);
+            }
+
+            // integrate output function
+            if self.problem.as_ref().unwrap().eqn.out().is_some() {
+                self.old_g.copy_from(&state.g);
+                self.gdiff
+                    .gemv(Eqn::T::one(), self.tableau.b(), Eqn::T::one(), &mut state.g);
             }
         }
 
@@ -719,6 +749,45 @@ where
             Ok(ret)
         } else {
             let ret = Self::interpolate_hermite(theta, &self.old_y, &state.y, &self.diff);
+            Ok(ret)
+        }
+    }
+    
+    fn interpolate_out(&self, t: <Eqn>::T) -> Result<<Eqn>::V, DiffsolError> {
+        if self.state.is_none() {
+            return Err(ode_solver_error!(StateNotSet));
+        }
+        let state = self.state.as_ref().unwrap();
+
+        if self.is_state_mutated {
+            if t == state.t {
+                return Ok(state.g.clone());
+            } else {
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+            }
+        }
+
+        // check that t is within the current step depending on the direction
+        let is_forward = state.h > Eqn::T::zero();
+        if (is_forward && (t > state.t || t < self.old_t))
+            || (!is_forward && (t < state.t || t > self.old_t))
+        {
+            return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+        }
+
+        let dt = state.t - self.old_t;
+        let theta = if dt == Eqn::T::zero() {
+            Eqn::T::one()
+        } else {
+            (t - self.old_t) / dt
+        };
+
+        if let Some(beta) = self.tableau.beta() {
+            let beta_f = Self::interpolate_beta_function(theta, beta);
+            let ret = Self::interpolate_from_diff(&self.old_g, &beta_f, &self.gdiff);
+            Ok(ret)
+        } else {
+            let ret = Self::interpolate_hermite(theta, &self.old_g, &state.g, &self.gdiff);
             Ok(ret)
         }
     }

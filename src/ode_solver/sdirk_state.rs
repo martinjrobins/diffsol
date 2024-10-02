@@ -4,6 +4,8 @@ use crate::{error::DiffsolError, OdeEquations, OdeSolverProblem, OdeSolverState,
 pub struct SdirkState<V: Vector> {
     pub(crate) y: V,
     pub(crate) dy: V,
+    pub(crate) g: V,
+    pub(crate) dg: V,
     pub(crate) s: Vec<V>,
     pub(crate) ds: Vec<V>,
     pub(crate) t: V::T,
@@ -31,8 +33,24 @@ where
         Ok(())
     }
 
-    fn new_internal_state(y: V, dy: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T, _naug: usize) -> Self {
-        Self { y, dy, s, ds, t, h }
+    fn new_internal_state(y: V, dy: V, g: V, dg: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T, _naug: usize) -> Self {
+        Self { y, dy, g, dg, s, ds, t, h }
+    }
+
+    fn g(&self) -> &V {
+        &self.g
+    }
+    fn g_mut(&mut self) -> &mut V {
+        &mut self.g
+    }
+    fn dg(&self) -> &V {
+        &self.dg
+    }
+    fn dg_mut(&mut self) -> &mut V {
+        &mut self.dg
+    }
+    fn y_g_mut(&mut self) -> (&mut V, &mut V) {
+        (&mut self.y, &mut self.g)
     }
 
     fn s(&self) -> &[V] {

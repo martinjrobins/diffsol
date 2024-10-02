@@ -8,14 +8,18 @@ pub struct BdfState<V: Vector, M: DenseMatrix<T = V::T, V = V>> {
     pub(crate) order: usize,
     pub(crate) diff: M,
     pub(crate) sdiff: Vec<M>,
+    pub(crate) gdiff: M,
     pub(crate) y: V,
     pub(crate) dy: V,
+    pub(crate) g: V,
+    pub(crate) dg: V,
     pub(crate) s: Vec<V>,
     pub(crate) ds: Vec<V>,
     pub(crate) t: V::T,
     pub(crate) h: V::T,
     pub(crate) diff_initialised: bool,
     pub(crate) sdiff_initialised: bool,
+    pub(crate) gdiff_initialised: bool,
 }
 
 impl<V, M> BdfState<V, M>
@@ -45,6 +49,13 @@ where
         }
         self.sdiff_initialised = true;
     }
+
+    pub fn initialise_gdiff_to_first_order(&mut self) {
+        self.gdiff.column_mut(0).copy_from(&self.g);
+        self.gdiff.column_mut(1).copy_from(&self.dg);
+        self.gdiff.column_mut(1).mul_assign(scale(self.h));
+        self.gdiff_initialised = true;
+    }
 }
 
 impl<V, M> OdeSolverState<V> for BdfState<V, M>
@@ -60,8 +71,19 @@ where
         if self.diff.nrows() != nstates {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
+        let nout = if let Some(out) = ode_problem.eqn.out() {
+            out.nout()
+        } else {
+            0
+        };
+        if self.gdiff.nrows() != nout {
+            return Err(ode_solver_error!(StateProblemMismatch));
+        }
         if !self.diff_initialised {
             self.initialise_diff_to_first_order();
+        }
+        if !self.gdiff_initialised {
+            self.initialise_gdiff_to_first_order();
         }
         Ok(())
     }
@@ -84,25 +106,46 @@ where
 
 
 
-    fn new_internal_state(y: V, dy: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T, naug: usize) -> Self {
+    fn new_internal_state(y: V, dy: V, g: V, dg: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T, naug: usize) -> Self {
         let nstates = y.len();
+        let nout = g.len();
         let diff = M::zeros(nstates, Self::MAX_ORDER + 3);
         let sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3); naug];
+        let gdiff = M::zeros(nout, Self::MAX_ORDER + 3);
         Self {
             order: 1,
             diff,
             sdiff,
+            gdiff,
             y,
             dy,
+            g,
+            dg,
             s,
             ds,
             t,
             h,
             diff_initialised: false,
             sdiff_initialised: false,
+            gdiff_initialised: false,
         }
     }
 
+    fn g_mut(&mut self) -> &mut V {
+        &mut self.g
+    }
+    fn dg_mut(&mut self) -> &mut V {
+        &mut self.dg
+    }
+    fn y_g_mut(&mut self) -> (&mut V, &mut V) {
+        (&mut self.y, &mut self.g)
+    }
+    fn g(&self) -> &V {
+        &self.g
+    }
+    fn dg(&self) -> &V {
+        &self.dg
+    }
     fn s(&self) -> &[V] {
         self.s.as_slice()
     }

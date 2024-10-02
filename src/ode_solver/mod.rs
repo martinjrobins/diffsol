@@ -25,7 +25,7 @@ mod tests {
     use std::rc::Rc;
 
     use self::problem::OdeSolverSolution;
-    use method::SensitivitiesOdeSolverMethod;
+    use method::{AdjointOdeSolverMethod, SensitivitiesOdeSolverMethod};
     use nalgebra::ComplexField;
 
     use super::*;
@@ -218,6 +218,71 @@ mod tests {
             }
         }
         method.state().unwrap().y().clone()
+    }
+    
+    pub fn test_ode_solver_adjoint<M, Eqn, Method>(
+        method: &mut Method,
+        problem: &OdeSolverProblem<Eqn>,
+        solution: OdeSolverSolution<M::V>,
+    ) -> Method::AdjointSolver 
+        where 
+            M: Matrix,
+            Method: AdjointOdeSolverMethod<Eqn>,
+            Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
+            Eqn::M: DefaultSolver,
+    {
+        let state = OdeSolverState::new(problem, method).unwrap();
+        method.set_problem(state, problem).unwrap();
+        let t0 = solution.solution_points.first().unwrap().t;
+        let t1 = solution.solution_points.last().unwrap().t;
+        method.set_stop_time(t1).unwrap();
+        let mut nsteps = 0;
+        let (rtol, atol) = (solution.rtol, &solution.atol);
+        let mut checkpoints = vec![method.checkpoint().unwrap()];
+        for point in solution.solution_points.iter() {
+            while method.state().unwrap().t().abs() < point.t.abs() {
+                method.step().unwrap();
+                nsteps += 1;
+                if nsteps > 50 {
+                    checkpoints.push(method.checkpoint().unwrap());
+                    nsteps = 0;
+                }
+            }
+            let soln = method.interpolate_out(point.t).unwrap();
+            // problem rtol and atol is on the state, so just use solution tolerance here
+            let error = soln.clone() - &point.state;
+            let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
+            assert!(
+                error_norm < M::T::from(15.0),
+                "error_norm: {} at t = {}. soln: {:?}, expected: {:?}",
+                error_norm,
+                point.t,
+                soln,
+                point.state
+            );
+        }
+        checkpoints.push(method.checkpoint().unwrap());
+        let mut adjoint_solver = method.new_adjoint_solver(checkpoints).unwrap();
+        adjoint_solver.set_stop_time(t0).unwrap();
+        while adjoint_solver.state().unwrap().t().abs() > t0 {
+            adjoint_solver.step().unwrap();
+        }
+        let solns = adjoint_solver.state().unwrap().s().to_vec();
+        let points = solution.sens_solution_points.as_ref().unwrap().iter().map(|x| &x[0]).collect::<Vec<_>>();
+        for (soln, point) in solns.iter().zip(points.iter()) {
+            let error = soln.clone() - &point.state;
+            let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
+            assert!(
+                error_norm < M::T::from(15.0),
+                "error_norm: {} at t = {}. soln: {:?}, expected: {:?}",
+                error_norm,
+                point.t,
+                soln,
+                point.state
+            );
+        }
+        adjoint_solver
+
     }
 
     pub struct TestEqnInit<M> {

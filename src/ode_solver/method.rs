@@ -1,7 +1,7 @@
 use nalgebra::ComplexField;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError}, matrix::default_solver::DefaultSolver, ode_solver_error, scalar::Scalar, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, SensEquations, VectorViewMut
+    error::{DiffsolError, OdeSolverError}, matrix::default_solver::DefaultSolver, ode_solver_error, scalar::Scalar, AdjointEquations, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, SensEquations, VectorViewMut
 };
 
 #[derive(Debug, PartialEq)]
@@ -84,6 +84,9 @@ where
 
     /// Interpolate the solution at a given time. This time should be between the current time and the last solver time step
     fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError>;
+    
+    /// Interpolate the integral of the output function at a given time. This time should be between the current time and the last solver time step
+    fn interpolate_out(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError>;
 
     /// Interpolate the sensitivity vectors at a given time. This time should be between the current time and the last solver time step
     fn interpolate_sens(&self, t: Eqn::T) -> Result<Vec<Eqn::V>, DiffsolError>;
@@ -250,4 +253,13 @@ where
         augmented_eqn.set_include_in_error_control(include_in_error_control);
         self.set_augmented_problem(state, problem, augmented_eqn)
     }
+}
+
+pub trait AdjointOdeSolverMethod<Eqn>: OdeSolverMethod<Eqn>
+where 
+    Eqn: OdeEquations,
+{
+    type AdjointSolver: AugmentedOdeSolverMethod<AdjointEquations<Eqn, Self>, AdjointEquations<Eqn, Self>>;
+
+    fn new_adjoint_solver(&self, checkpoints: Vec<Self::State>) -> Result<Self::AdjointSolver, DiffsolError>;
 }

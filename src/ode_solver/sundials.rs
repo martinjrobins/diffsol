@@ -451,11 +451,15 @@ where
         Ok(ret)
     }
 
+    fn interpolate_out(&self, _t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
+        unimplemented!()
+    }
+
     fn interpolate_sens(
         &self,
         _t: <Eqn as OdeEquations>::T,
     ) -> Result<Vec<<Eqn as OdeEquations>::V>, DiffsolError> {
-        Ok(vec![])
+        unimplemented!()
     }
 }
 

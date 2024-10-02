@@ -16,11 +16,11 @@ use crate::{
     BdfState, DenseMatrix, IndexType, JacobianUpdate, MatrixViewMut, NewtonNonlinearSolver,
     OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op,
     Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
-    AugmentedOdeEquations, NonLinearSolver,
+    AugmentedOdeEquations, NonLinearSolver, NonLinearOp, Checkpointing, InitOp,
 };
 use crate::ode_solver_error;
 
-use super::{equations::OdeEquations, method::{AugmentedOdeSolverMethod, SensitivitiesOdeSolverMethod}};
+use super::{equations::OdeEquations, method::{AdjointOdeSolverMethod, AugmentedOdeSolverMethod, SensitivitiesOdeSolverMethod}};
 use super::jacobian_update::SolverState;
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -95,6 +95,7 @@ pub struct BdfAug<
     s_predict: Eqn::V,
     s_op: Option<BdfCallable<AugmentedEqn>>,
     s_deltas: Vec<Eqn::V>,
+    g_delta: Eqn::V,
     diff_tmp: M,
     u: M,
     alpha: Vec<Eqn::T>,
@@ -185,6 +186,7 @@ where
             t_predict: Eqn::T::zero(),
             s_predict: Eqn::V::zeros(n),
             s_deltas: Vec::new(),
+            g_delta: Eqn::V::zeros(n),
             gamma,
             alpha,
             error_const2,
@@ -273,6 +275,9 @@ where
                     order,
                 );
             }
+            if self.ode_problem.as_ref().unwrap().eqn.out().is_some() {
+                Self::_update_diff_for_step_size(&ru, &mut state.gdiff, &mut self.diff_tmp, order);
+            }
         }
 
         self.nonlinear_problem_op().set_c(new_h, self.alpha[order]);
@@ -300,29 +305,15 @@ where
         std::mem::swap(diff, diff_tmp);
     }
 
-    fn _update_sens_step_size(&mut self, factor: Eqn::T) {
-        //If step size h is changed then also need to update the terms in
-        //the first equation of page 9 of [1]:
-        //
-        //- constant c = h / (1-kappa) gamma_k term
-        //- lu factorisation of (M - c * J) used in newton iteration (same equation)
-
-        // update D using equations in section 3.2 of [1]
-        let order = self.state.as_ref().unwrap().order;
-        let r = Self::_compute_r(order, factor);
-        let ru = r.mat_mul(&self.u);
-        let state = self.state.as_mut().unwrap();
-        for sdiff in state.sdiff.iter_mut() {
-            Self::_update_diff_for_step_size(&ru, sdiff, &mut self.diff_tmp, order);
-        }
-    }
-
     fn update_differences(&mut self) {
         let order = self.state.as_ref().unwrap().order;
         let state = self.state.as_mut().unwrap();
         Self::_update_diff(order, &self.y_delta, &mut state.diff);
         for i in 0..state.sdiff.len() {
             Self::_update_diff(order, &self.s_deltas[i], &mut state.sdiff[i]);
+        }
+        if self.ode_problem.as_ref().unwrap().eqn.out().is_some() {
+            Self::_update_diff(order, &self.g_delta, &mut state.gdiff);
         }
     }
 
@@ -410,6 +401,10 @@ where
         if self.s_op.is_some() {
             self.state.as_mut().unwrap().initialise_sdiff_to_first_order();
         }
+        if self.ode_problem.as_ref().unwrap().eqn.out().is_some() {
+            self.state.as_mut().unwrap().initialise_gdiff_to_first_order();
+        }
+
         self.u = Self::_compute_r(1, Eqn::T::one());
         self.is_state_modified = false;
     }
@@ -536,6 +531,30 @@ where
             state.order,
         ))
     }
+    
+    fn interpolate_out(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
+        // state must be set
+        let state = self.state.as_ref().ok_or(ode_solver_error!(StateNotSet))?;
+        if self.is_state_modified {
+            if t == state.t {
+                return Ok(state.g.clone());
+            } else {
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+            }
+        }
+        // check that t is before/after the current time depending on the direction
+        let is_forward = state.h > Eqn::T::zero();
+        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
+            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
+        }
+        Ok(Self::interpolate_from_diff(
+            t,
+            &state.gdiff,
+            state.t,
+            state.h,
+            state.order,
+        ))
+    }
 
     fn interpolate_sens(&self, t: <Eqn as OdeEquations>::T) -> Result<Vec<Eqn::V>, DiffsolError> {
         // state must be set
@@ -628,6 +647,15 @@ where
             self.diff_tmp = M::zeros(nstates, BdfState::<Eqn::V, M>::MAX_ORDER + 3);
             self.y_delta = <Eqn::V as Vector>::zeros(nstates);
             self.y_predict = <Eqn::V as Vector>::zeros(nstates);
+        }
+
+        let nout = if let Some(out) = problem.eqn.out() {
+            out.nout()
+        } else {
+            0
+        };
+        if self.g_delta.len() != nout {
+            self.g_delta = <Eqn::V as Vector>::zeros(nout);
         }
 
         // init U matrix
@@ -733,6 +761,8 @@ where
                 continue;
             }
 
+            
+
             // need to caulate safety even if step is accepted
             let maxiter = self.nonlinear_solver.convergence().max_iter() as f64;
             let niter = self.nonlinear_solver.convergence().niter() as f64;
@@ -760,6 +790,15 @@ where
                 self.statistics.number_of_error_test_failures += 1;
             }
         }
+
+        // integrate output function
+        if let Some(out) = self.ode_problem.as_ref().unwrap().eqn.out() {
+            let state = self.state.as_mut().unwrap();
+            out.call_inplace(&self.y_predict, self.t_predict, &mut state.dg);
+            self.nonlinear_solver.problem().f.integrate_out(&state.dg, &state.gdiff, self.gamma.as_slice(), self.alpha.as_slice(), state.order, &mut self.g_delta);
+            state.g.axpy(Eqn::T::one(), &self.g_delta, Eqn::T::one());
+        }
+
         // take the accepted step
         self.update_differences();
 
@@ -949,6 +988,50 @@ where
     }
 }
 
+impl<M, Eqn, Nls, AugmentedEqn> AdjointOdeSolverMethod<Eqn> for BdfAug<M, Eqn, Nls, AugmentedEqn>
+where 
+    Eqn: OdeEquations,
+    AugmentedEqn: AugmentedOdeEquations<Eqn>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    Nls: NonLinearSolver<BdfCallable<Eqn>>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+{
+    type AdjointSolver = BdfAug<M, AdjointEquations<Eqn, Self>, Nls::SelfNewOp<BdfCallable<AdjointEquations<Eqn, Self>>>, AdjointEquations<Eqn, Self>>;
+
+    fn new_adjoint_solver(&self, checkpoints: Vec<Self::State>) -> Result<Self::AdjointSolver, DiffsolError> {
+        // construct checkpointing
+        let checkpointer_nls = Nls::default();
+        let checkpointer_solver = Self::new(checkpointer_nls);
+        let problem = self.ode_problem.as_ref().unwrap();
+        let checkpointer = Rc::new(Checkpointing::new(problem, checkpointer_solver, checkpoints.len() - 2, checkpoints));
+
+        // construct adjoint equations and problem
+        let new_eqn = AdjointEquations::new(&problem.eqn, checkpointer.clone(), false);
+        let mut new_augmented_eqn = AdjointEquations::new(&problem.eqn, checkpointer, true);
+        let adj_problem = OdeSolverProblem {
+            eqn: Rc::new(new_eqn),
+            rtol: problem.rtol,
+            atol: problem.atol.clone(),
+            t0: self.state.as_ref().unwrap().t,
+            h0: -self.state.as_ref().unwrap().h,
+        };
+
+        // initialise adjoint state
+        let mut state = Self::State::new_without_initialise_augmented(&adj_problem, &mut new_augmented_eqn);
+        let mut init_nls = Nls::SelfNewOp::<InitOp::<AdjointEquations::<Eqn, Self>>>::default();
+        let new_augmented_eqn = state.set_consistent_augmented(&adj_problem, new_augmented_eqn, &mut init_nls)?;
+
+        // create adjoint solver
+        let adjoint_nls = Nls::SelfNewOp::<BdfCallable::<AdjointEquations::<Eqn, Self>>>::default();
+        let mut adjoint_solver = Self::AdjointSolver::new(adjoint_nls);
+
+        // setup the solver
+        adjoint_solver.set_augmented_problem(state, &adj_problem, new_augmented_eqn)?;
+        Ok(adjoint_solver)
+    }
+}
+
 
 
 
@@ -959,8 +1042,7 @@ mod test {
             test_models::{
                 dydt_y2::dydt_y2_problem,
                 exponential_decay::{
-                    exponential_decay_problem, exponential_decay_problem_sens,
-                    exponential_decay_problem_with_root, negative_exponential_decay_problem,
+                    exponential_decay_problem, exponential_decay_problem_adjoint, exponential_decay_problem_sens, exponential_decay_problem_with_root, negative_exponential_decay_problem
                 },
                 exponential_decay_with_algebraic::{
                     exponential_decay_with_algebraic_problem,
@@ -976,10 +1058,10 @@ mod test {
             },
             tests::{
                 test_checkpointing, test_interpolate, test_no_set_problem, test_ode_solver,
-                test_state_mut, test_state_mut_on_problem,
+                test_state_mut, test_state_mut_on_problem, test_ode_solver_adjoint,
             },
         },
-        Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquations, Op, SparseColMat,
+        Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquations, Op, SparseColMat, OdeSolverMethod
     };
 
     use faer::Mat;
@@ -1093,6 +1175,18 @@ mod test {
         number_of_matrix_evals: 1
         number_of_jac_adj_muls: 0
         "###);
+    }
+
+    #[test]
+    fn bdf_test_nalgebra_exponential_decay_adjoint() {
+        let mut s = Bdf::default();
+        let (problem, soln) = exponential_decay_problem_adjoint::<M>();
+        let adjoint_solver = test_ode_solver_adjoint(&mut s, &problem, soln);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###""###);
+        insta::assert_yaml_snapshot!(s.problem().as_ref().unwrap().eqn.rhs().statistics(), @r###""###);
+        insta::assert_yaml_snapshot!(adjoint_solver.get_statistics(), @r###""###);
+        insta::assert_yaml_snapshot!(adjoint_solver.problem().as_ref().unwrap().eqn.rhs().statistics(), @r###""###);
+
     }
 
     #[test]

@@ -107,7 +107,7 @@ where
             panic!("start_idx must be less than checkpoints.len() - 1");
         }
         let mut segment = HermiteInterpolator::default();
-        segment.reset(problem, &mut solver, &checkpoints[start_idx], &checkpoints[start_idx]).unwrap();
+        segment.reset(problem, &mut solver, &checkpoints[start_idx], &checkpoints[start_idx + 1]).unwrap();
         let segment = RefCell::new(segment);
         let previous_segment = RefCell::new(None);
         let solver = RefCell::new(solver);

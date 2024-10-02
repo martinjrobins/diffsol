@@ -86,6 +86,7 @@ pub trait VectorViewMut<'a>:
     type View;
     fn copy_from(&mut self, other: &Self::Owned);
     fn copy_from_view(&mut self, other: &Self::View);
+    fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T);
 }
 
 pub trait VectorView<'a>:

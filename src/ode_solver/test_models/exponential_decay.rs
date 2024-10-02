@@ -202,12 +202,21 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>()  -> (
         t0,
         h0,
     ).unwrap();
-    let mut soln = OdeSolverSolution::default();
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.as_ref().clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
+    let t0 = M::T::from(0.0);
+    let t1 = M::T::from(10.0);
     for i in 0..10 {
         let t = M::T::from(i as f64);
         let y0: M::V = problem.eqn.init().call(M::T::zero());
-        let y = y0 * scale(M::T::exp(-p[0] * t));
-        soln.push(y, t);
+        let g = y0.clone() * scale((M::T::exp(-p[0] * t) - M::T::exp(-p[0] * t0)) / p[0]);
+        let g = M::V::from_vec(vec![-g[0] - M::T::from(2.0) * g[1], -M::T::from(3.0) * g[0] - M::T::from(4.0) * g[1]]);
+        let gp = y0 * scale((M::T::exp(-p[0] * t1) - M::T::exp(-p[0] * t)) / (p[0] * p[0]) - (t * M::T::exp(-p[0] * t) - t1 * M::T::exp(-p[0] * t1)) / p[0]);
+        let gp = M::V::from_vec(vec![gp[0] + M::T::from(2.0) * gp[1], M::T::from(3.0) * gp[0] + M::T::from(4.0) * gp[1]]);
+        soln.push_sens(g, t, &[gp]);
     }
     (problem, soln)
 
@@ -243,3 +252,4 @@ pub fn exponential_decay_problem_sens<M: Matrix + 'static>(
     }
     (problem, soln)
 }
+

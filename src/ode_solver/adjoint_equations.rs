@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 
 
 use crate::{
-    matrix::sparsity::MatrixSparsityRef, Checkpointing, ConstantOp, NonLinearOp, OdeEquations, OdeSolverMethod, Op, Vector, Matrix
+    matrix::sparsity::MatrixSparsityRef, Checkpointing, ConstantOp, NonLinearOp, OdeEquations, OdeSolverMethod, Op, Vector, Matrix, AugmentedOdeEquations
 };
 
 pub struct AdjointInit<Eqn>
@@ -222,20 +222,16 @@ where
             include_in_error_control: false,
         }
     }
-    pub(crate) fn set_out_index(&mut self, index: usize) {
-        Rc::get_mut(&mut self.rhs).unwrap().set_out_index(index);
-    }
+    
+}
 
-    pub(crate) fn update_rhs_state(&mut self, t: Eqn::T) {
-        Rc::get_mut(&mut self.rhs).unwrap().update_state(t);
-    }
-    
-    pub fn include_in_error_control(&self) -> bool {
-        self.include_in_error_control
-    }
-    
-    pub fn set_include_in_error_control(&mut self, include: bool) {
-        self.include_in_error_control = include;
+impl<Eqn, Method> std::fmt::Debug for AdjointEquations<Eqn, Method>
+where
+    Eqn: OdeEquations,
+    Method: OdeSolverMethod<Eqn>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AdjointEquations").finish()
     }
 }
 
@@ -293,6 +289,37 @@ where
     }
 }
 
+
+impl<Eqn, Method> AugmentedOdeEquations<AdjointEquations<Eqn, Method>> for AdjointEquations<Eqn, Method> 
+where
+    Eqn: OdeEquations,
+    Method: OdeSolverMethod<Eqn>,
+{
+    
+    fn max_index(&self) -> usize {
+        self.eqn.out().map(|o| o.nout()).unwrap_or(0)
+    }
+    
+    fn set_index(&mut self, index: usize) {
+        Rc::get_mut(&mut self.rhs).unwrap().set_out_index(index);
+    }
+
+    fn update_rhs_state(&mut self, _y: &Eqn::V, _dy: &Eqn::V, t: Eqn::T) {
+        Rc::get_mut(&mut self.rhs).unwrap().update_state(t);
+    }
+    
+    fn include_in_error_control(&self) -> bool {
+        self.include_in_error_control
+    }
+    
+    fn set_include_in_error_control(&mut self, include: bool) {
+        self.include_in_error_control = include;
+    }
+    
+    fn update_init_state(&mut self, _t: <Eqn as OdeEquations>::T) {
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
@@ -301,7 +328,7 @@ mod tests {
         ode_solver::{adjoint_equations::AdjointEquations, test_models::
             exponential_decay::exponential_decay_problem_adjoint
         }, Checkpointing, FaerSparseLU, NalgebraLU, NonLinearOp, Sdirk, SdirkState, SparseColMat, Tableau, Vector,
-        MatrixCommon, Matrix
+        MatrixCommon, Matrix, AugmentedOdeEquations
     };
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;
@@ -316,6 +343,8 @@ mod tests {
             t: 0.0,
             y: Vcpu::from_vec(vec![1.0, 1.0]),
             dy: Vcpu::from_vec(vec![1.0, 1.0]),
+            g: Vcpu::zeros(0),
+            dg: Vcpu::zeros(0),
             s: Vec::new(),
             ds: Vec::new(),
             h: 0.0,
@@ -348,7 +377,7 @@ mod tests {
         // S = -g^T_x(x,t)
         // so S = |-1 -3|
         //        |-2 -4|
-        adj_eqn.update_rhs_state(state.t);
+        adj_eqn.update_rhs_state(&state.y, &state.y, state.t);
         let sens = adj_eqn.rhs.g_x.as_ref().unwrap();
         assert_eq!(sens.nrows(), 2);
         assert_eq!(sens.ncols(), 2);
@@ -360,9 +389,9 @@ mod tests {
         // F(λ, x, t) = -f^T_x(x, t) λ - g^T_x(x,t)
         // f_x = |-a 0|
         //       |0 -a|
-        // F(s, t)_0 =  |a 0| |1| - |1.0| = |a - 1| = |-0.9|
+        // F(s, t)_0 =  |a 0| |1| - |1.0| = | a - 1| = |-0.9|
         //              |0 a| |2|   |2.0|   |2a - 2| = |-1.8|
-        adj_eqn.set_out_index(0);
+        adj_eqn.set_index(0);
         let f = adj_eqn.rhs.call(&v, state.t);
         let f_expect = Vcpu::from_vec(vec![-0.9, -1.8]);
         f.assert_eq_st(&f_expect, 1e-10);
@@ -380,6 +409,8 @@ mod tests {
             t: 0.0,
             y: faer::Col::from_vec(vec![1.0, 1.0]),
             dy: faer::Col::from_vec(vec![1.0, 1.0]),
+            g: faer::Col::zeros(0),
+            dg: faer::Col::zeros(0),
             s: Vec::new(),
             ds: Vec::new(),
             h: 0.0,
@@ -406,7 +437,7 @@ mod tests {
         // S = -g^T_x(x,t)
         // so S = |-1 -3|
         //        |-2 -4|
-        adj_eqn.update_rhs_state(state.t);
+        adj_eqn.update_rhs_state(&state.y, &state.dy, state.t);
         let sens = adj_eqn.rhs.g_x.as_ref().unwrap();
         assert_eq!(sens.nrows(), 2);
         assert_eq!(sens.ncols(), 2);
@@ -425,7 +456,7 @@ mod tests {
         //       |0 -a|
         // F(s, t)_0 =  |a 0| |1| - |1.0| = |a - 1| = |-0.9|
         //              |0 a| |2|   |2.0|   |2a - 2| = |-1.8|
-        adj_eqn.set_out_index(0);
+        adj_eqn.set_index(0);
         let v = faer::Col::from_vec(vec![1.0, 2.0]);
         let f = adj_eqn.rhs.call(&v, state.t);
         let f_expect = faer::Col::from_vec(vec![-0.9, -1.8]);
