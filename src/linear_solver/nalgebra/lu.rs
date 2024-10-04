@@ -2,7 +2,11 @@ use nalgebra::{DMatrix, DVector, Dyn};
 use std::rc::Rc;
 
 use crate::{
-    error::{DiffsolError, LinearSolverError}, linear_solver_error, matrix::sparsity::MatrixSparsityRef, op::{linearise::LinearisedOp, NonLinearOp}, LinearOp, LinearSolver, Matrix, Op, Scalar, SolverProblem
+    error::{DiffsolError, LinearSolverError},
+    linear_solver_error,
+    matrix::sparsity::MatrixSparsityRef,
+    op::{linearise::LinearisedOp, NonLinearOp},
+    LinearOp, LinearSolver, Matrix, Op, Scalar, SolverProblem,
 };
 
 /// A [LinearSolver] that uses the LU decomposition in the [`nalgebra` library](https://nalgebra.org/) to solve the linear system.
@@ -30,7 +34,6 @@ where
         }
     }
 }
-
 
 impl<T: Scalar, C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> LinearSolver<C>
     for LU<T, C>

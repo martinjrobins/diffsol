@@ -33,7 +33,6 @@ where
 }
 
 impl<T: Scalar, C: NonLinearOp<M = Mat<T>, V = Col<T>, T = T>> LinearSolver<C> for LU<T, C> {
-
     type SelfNewOp<C2: NonLinearOp<T = C::T, V = C::V, M = C::M>> = LU<T, C2>;
 
     fn set_linearisation(&mut self, x: &C::V, t: C::T) {

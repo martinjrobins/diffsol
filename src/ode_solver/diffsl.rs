@@ -4,7 +4,8 @@ use diffsl::{execution::module::CodegenModule, Compiler};
 
 use crate::{
     error::DiffsolError,
-    jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring},
+    find_jacobian_non_zeros, find_matrix_non_zeros,
+    jacobian::JacobianColoring,
     matrix::sparsity::MatrixSparsity,
     op::{LinearOp, NonLinearOp, Op},
     ConstantOp, Matrix, OdeEquations, Vector,
@@ -188,7 +189,7 @@ impl<'a, M: Matrix<T = T>, CG: CodegenModule> DiffSlRhs<'a, M, CG> {
         if use_coloring {
             let x0 = M::V::zeros(context.nstates);
             let t0 = 0.0;
-            let non_zeros = find_non_zeros_nonlinear(&ret, &x0, t0);
+            let non_zeros = find_jacobian_non_zeros(&ret, &x0, t0);
             ret.sparsity = Some(
                 MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone())
                     .expect("invalid sparsity pattern"),
@@ -212,7 +213,7 @@ impl<'a, M: Matrix<T = T>, CG: CodegenModule> DiffSlMass<'a, M, CG> {
 
         if use_coloring {
             let t0 = 0.0;
-            let non_zeros = find_non_zeros_linear(&ret, t0);
+            let non_zeros = find_matrix_non_zeros(&ret, t0);
             ret.sparsity = Some(
                 MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone())
                     .expect("invalid sparsity pattern"),

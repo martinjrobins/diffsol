@@ -14,7 +14,7 @@ impl<V> NonLinearSolveSolution<V> {
 
 /// A solver for the nonlinear problem `F(x) = 0`.
 pub trait NonLinearSolver<C: Op>: Default {
-    type SelfNewOp<C2: NonLinearOp<T=C::T, V=C::V, M=C::M>>: NonLinearSolver<C2>;
+    type SelfNewOp<C2: NonLinearOp<T = C::T, V = C::V, M = C::M>>: NonLinearSolver<C2>;
 
     /// Get the problem to be solved.
     fn problem(&self) -> &SolverProblem<C>;
@@ -42,10 +42,15 @@ pub trait NonLinearSolver<C: Op>: Default {
     /// Solve the problem `F(x) = 0` in place.
     fn solve_in_place(&mut self, x: &mut C::V, t: C::T, error_y: &C::V)
         -> Result<(), DiffsolError>;
-    
+
     /// Solve the problem `G(x) = 0` in place, where the jacobian of `G` is assumed to be the same as `F`.
-    fn solve_other_in_place(&mut self, g: impl NonLinearOp<M=C::M, V=C::V, T=C::T>, x: &mut C::V, t: C::T, error_y: &C::V)
-        -> Result<(), DiffsolError>;
+    fn solve_other_in_place(
+        &mut self,
+        g: impl NonLinearOp<M = C::M, V = C::V, T = C::T>,
+        x: &mut C::V,
+        t: C::T,
+        error_y: &C::V,
+    ) -> Result<(), DiffsolError>;
 
     /// Solve the linearised problem `J * x = b`, where `J` was calculated using [Self::reset_jacobian].
     /// The input `b` is provided in `x`, and the solution is returned in `x`.

@@ -34,8 +34,10 @@ impl OdeEquationsStatistics {
     }
 }
 
-pub trait AugmentedOdeEquations<Eqn:OdeEquations>: OdeEquations<T=Eqn::T, V=Eqn::V, M=Eqn::M> {
-    fn update_rhs_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T);
+pub trait AugmentedOdeEquations<Eqn: OdeEquations>:
+    OdeEquations<T = Eqn::T, V = Eqn::V, M = Eqn::M>
+{
+    fn update_rhs_out_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T);
     fn update_init_state(&mut self, t: Eqn::T);
     fn set_index(&mut self, index: usize);
     fn max_index(&self) -> usize;
@@ -43,11 +45,11 @@ pub trait AugmentedOdeEquations<Eqn:OdeEquations>: OdeEquations<T=Eqn::T, V=Eqn:
     fn include_in_error_control(&self) -> bool;
 }
 
-pub struct NoAug<Eqn:OdeEquations> {
-    _phantom: std::marker::PhantomData<Eqn>
+pub struct NoAug<Eqn: OdeEquations> {
+    _phantom: std::marker::PhantomData<Eqn>,
 }
 
-impl<Eqn:OdeEquations> OdeEquations for NoAug<Eqn> {
+impl<Eqn: OdeEquations> OdeEquations for NoAug<Eqn> {
     type T = Eqn::T;
     type V = Eqn::V;
     type M = Eqn::M;
@@ -82,10 +84,16 @@ impl<Eqn:OdeEquations> OdeEquations for NoAug<Eqn> {
     }
 }
 
-impl <Eqn:OdeEquations> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
-    fn update_rhs_state(&mut self, _y: &Eqn::V, _dy: &Eqn::V, _t: Eqn::T) { panic!("This should never be called") }
-    fn update_init_state(&mut self, _t: Eqn::T) { panic!("This should never be called") }
-    fn set_index(&mut self, _index: usize) { panic!("This should never be called") }
+impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
+    fn update_rhs_out_state(&mut self, _y: &Eqn::V, _dy: &Eqn::V, _t: Eqn::T) {
+        panic!("This should never be called")
+    }
+    fn update_init_state(&mut self, _t: Eqn::T) {
+        panic!("This should never be called")
+    }
+    fn set_index(&mut self, _index: usize) {
+        panic!("This should never be called")
+    }
     fn max_index(&self) -> usize {
         panic!("This should never be called")
     }
@@ -145,7 +153,6 @@ pub trait OdeEquations {
     /// returns the initial condition, i.e. `y(t)`, where `t` is the initial time
     fn init(&self) -> &Rc<Self::Init>;
 }
-
 
 /// This struct implements the ODE equation trait [OdeEquations] for a given right-hand side op, mass op, optional root op, and initial condition function.
 ///

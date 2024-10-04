@@ -1,5 +1,8 @@
 use crate::{
-    error::{DiffsolError, NonLinearSolverError}, non_linear_solver_error, op::NonLinearOp, Convergence, ConvergenceStatus, LinearSolver, NonLinearSolver, Op, SolverProblem, Vector
+    error::{DiffsolError, NonLinearSolverError},
+    non_linear_solver_error,
+    op::NonLinearOp,
+    Convergence, ConvergenceStatus, LinearSolver, NonLinearSolver, Op, SolverProblem, Vector,
 };
 
 pub fn newton_iteration<V: Vector>(
@@ -59,8 +62,8 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> Default for NewtonNonlinearSolver<C, L
 }
 
 impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinearSolver<C, Ls> {
-
-    type SelfNewOp<C2: NonLinearOp<T=C::T, V=C::V, M=C::M>> = NewtonNonlinearSolver<C2, Ls::SelfNewOp<C2>>;
+    type SelfNewOp<C2: NonLinearOp<T = C::T, V = C::V, M = C::M>> =
+        NewtonNonlinearSolver<C2, Ls::SelfNewOp<C2>>;
 
     fn convergence(&self) -> &Convergence<C::V> {
         self.convergence
@@ -125,9 +128,14 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
         let convergence = self.convergence.as_mut().unwrap();
         newton_iteration(xn, &mut self.tmp, error_y, fun, linear_solver, convergence)
     }
-    
-    fn solve_other_in_place(&mut self, g: impl NonLinearOp<M=C::M, V=C::V, T=C::T>, xn: &mut <C as Op>::V, t: <C as Op>::T, error_y: &<C as Op>::V)
-            -> Result<(), DiffsolError> {
+
+    fn solve_other_in_place(
+        &mut self,
+        g: impl NonLinearOp<M = C::M, V = C::V, T = C::T>,
+        xn: &mut <C as Op>::V,
+        t: <C as Op>::T,
+        error_y: &<C as Op>::V,
+    ) -> Result<(), DiffsolError> {
         if self.convergence.is_none() || self.problem.is_none() {
             panic!("NewtonNonlinearSolver::solve() called before set_problem");
         }

@@ -27,11 +27,14 @@ pub struct BdfCallable<Eqn: OdeEquations> {
 
 impl<Eqn: OdeEquations> BdfCallable<Eqn> {
     // g - y0 = c * dg - psi
-    pub fn integrate_out<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(&self, dg: &Eqn::V, diff: &M,
+    pub fn integrate_out<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
+        &self,
+        dg: &Eqn::V,
+        diff: &M,
         gamma: &[Eqn::T],
         alpha: &[Eqn::T],
         order: usize,
-        d: &mut Eqn::V
+        d: &mut Eqn::V,
     ) {
         self.set_psi(diff, gamma, alpha, order, d);
         let c = self.c.borrow();
@@ -147,8 +150,14 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
     {
         self.c.replace(h * alpha);
     }
-    fn set_psi<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(&self, diff: &M, gamma: &[Eqn::T], alpha: &[Eqn::T], order: usize, psi: &mut Eqn::V)
-    {
+    fn set_psi<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
+        &self,
+        diff: &M,
+        gamma: &[Eqn::T],
+        alpha: &[Eqn::T],
+        order: usize,
+        psi: &mut Eqn::V,
+    ) {
         // update psi term as defined in second equation on page 9 of [1]
         psi.axpy_v(gamma[1], &diff.column(1), Eqn::T::zero());
         for (i, &gamma_i) in gamma.iter().enumerate().take(order + 1).skip(2) {

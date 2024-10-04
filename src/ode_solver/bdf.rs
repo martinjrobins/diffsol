@@ -2,26 +2,32 @@ use nalgebra::ComplexField;
 use std::ops::AddAssign;
 use std::rc::Rc;
 
-use crate::{error::{DiffsolError, OdeSolverError}, AdjointEquations, SensEquations};
+use crate::{
+    error::{DiffsolError, OdeSolverError},
+    AdjointEquations, SensEquations,
+};
 
 use num_traits::{abs, One, Pow, Zero};
 use serde::Serialize;
 
+use crate::ode_solver_error;
 use crate::{
     matrix::{default_solver::DefaultSolver, MatrixRef},
     nonlinear_solver::root::RootFinder,
     op::bdf::BdfCallable,
     scalar::scale,
     vector::DefaultDenseMatrix,
-    BdfState, DenseMatrix, IndexType, JacobianUpdate, MatrixViewMut, NewtonNonlinearSolver,
-    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op,
-    Scalar, SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
-    AugmentedOdeEquations, NonLinearSolver, NonLinearOp, Checkpointing, InitOp,
+    AugmentedOdeEquations, BdfState, Checkpointing, DenseMatrix, IndexType, InitOp, JacobianUpdate,
+    MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeSolverMethod,
+    OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar, SolverProblem, Vector,
+    VectorRef, VectorView, VectorViewMut,
 };
-use crate::ode_solver_error;
 
-use super::{equations::OdeEquations, method::{AdjointOdeSolverMethod, AugmentedOdeSolverMethod, SensitivitiesOdeSolverMethod}};
 use super::jacobian_update::SolverState;
+use super::{
+    equations::OdeEquations,
+    method::{AdjointOdeSolverMethod, AugmentedOdeSolverMethod, SensitivitiesOdeSolverMethod},
+};
 
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct BdfStatistics {
@@ -32,27 +38,22 @@ pub struct BdfStatistics {
     pub number_of_nonlinear_solver_fails: usize,
 }
 
-pub type Bdf<M, Eqn, Nls> = BdfAug<
-    M,
-    Eqn,
-    Nls,
-    SensEquations<Eqn>>;
+pub type Bdf<M, Eqn, Nls> = BdfAug<M, Eqn, Nls, SensEquations<Eqn>>;
 pub type BdfAdj<M, Eqn, Nls> = BdfAug<
     M,
     AdjointEquations<Eqn, Bdf<M, Eqn, Nls>>,
     Nls,
-    AdjointEquations<Eqn, Bdf<M, Eqn, Nls>>>;
+    AdjointEquations<Eqn, Bdf<M, Eqn, Nls>>,
+>;
 impl<M, Eqn, Nls> SensitivitiesOdeSolverMethod<Eqn> for Bdf<M, Eqn, Nls>
-where 
+where
     Eqn: OdeEquations,
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V>, 
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
     Nls: NonLinearSolver<BdfCallable<Eqn>>,
-    {}
-
-
-
+{
+}
 
 // notes quadrature.
 // ndf formula rearranged to [2]:
@@ -114,7 +115,7 @@ impl<Eqn, AugmentedEqn> Default
         <Eqn::V as DefaultDenseMatrix>::M,
         Eqn,
         NewtonNonlinearSolver<BdfCallable<Eqn>, <Eqn::M as DefaultSolver>::LS<BdfCallable<Eqn>>>,
-        AugmentedEqn
+        AugmentedEqn,
     >
 where
     Eqn: OdeEquations,
@@ -135,7 +136,7 @@ impl<M, Eqn, Nls, AugmentedEqn> BdfAug<M, Eqn, Nls, AugmentedEqn>
 where
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
     Eqn: OdeEquations,
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V>, 
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
     Nls: NonLinearSolver<BdfCallable<Eqn>>,
@@ -373,7 +374,9 @@ where
         if abs(state.t - tstop) <= troundoff {
             self.tstop = None;
             return Ok(Some(OdeSolverStopReason::TstopReached));
-        } else if tstop < state.t - troundoff {
+        } else if (state.h > M::T::zero() && tstop < state.t - troundoff)
+            || (state.h < M::T::zero() && tstop > state.t + troundoff)
+        {
             let error = OdeSolverError::StopTimeBeforeCurrentTime {
                 stop_time: self.tstop.unwrap().into(),
                 state_time: state.t.into(),
@@ -384,7 +387,9 @@ where
         }
 
         // check if the next step will be beyond tstop, if so adjust the step size
-        if state.t + state.h > tstop + troundoff {
+        if (state.h > M::T::zero() && state.t + state.h > tstop + troundoff)
+            || (state.h < M::T::zero() && state.t + state.h < tstop - troundoff)
+        {
             let factor = (tstop - state.t) / state.h;
             // update step size ignoring the possible "step size too small" error
             _ = self._update_step_size(factor);
@@ -399,10 +404,16 @@ where
             .unwrap()
             .initialise_diff_to_first_order();
         if self.s_op.is_some() {
-            self.state.as_mut().unwrap().initialise_sdiff_to_first_order();
+            self.state
+                .as_mut()
+                .unwrap()
+                .initialise_sdiff_to_first_order();
         }
         if self.ode_problem.as_ref().unwrap().eqn.out().is_some() {
-            self.state.as_mut().unwrap().initialise_gdiff_to_first_order();
+            self.state
+                .as_mut()
+                .unwrap()
+                .initialise_gdiff_to_first_order();
         }
 
         self.u = Self::_compute_r(1, Eqn::T::one());
@@ -435,11 +446,9 @@ where
             let dy_new = self.nonlinear_solver.problem().f.tmp();
             let y_new = &self.y_predict;
             let op = self.s_op.as_mut().unwrap();
-            Rc::get_mut(op.eqn_mut()).unwrap().update_rhs_state(
-                y_new,
-                &dy_new,
-                t_new,
-            );
+            Rc::get_mut(op.eqn_mut())
+                .unwrap()
+                .update_rhs_out_state(y_new, &dy_new, t_new);
 
             // construct bdf discretisation of sensitivity equations
             op.set_c(h, self.alpha[order]);
@@ -473,8 +482,10 @@ where
                 let s_new = &mut self.state.as_mut().unwrap().s[i];
                 s_new.copy_from(&self.s_predict);
                 let op = self.s_op.as_ref().unwrap();
-                self.nonlinear_solver.solve_other_in_place(op, s_new, t_new, &self.s_predict)?;
-                self.statistics.number_of_nonlinear_solver_iterations += self.nonlinear_solver.convergence().niter();
+                self.nonlinear_solver
+                    .solve_other_in_place(op, s_new, t_new, &self.s_predict)?;
+                self.statistics.number_of_nonlinear_solver_iterations +=
+                    self.nonlinear_solver.convergence().niter();
                 let s_new = &*s_new;
                 self.s_deltas[i].copy_from(s_new);
                 self.s_deltas[i] -= &self.s_predict;
@@ -531,7 +542,7 @@ where
             state.order,
         ))
     }
-    
+
     fn interpolate_out(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
         // state must be set
         let state = self.state.as_ref().ok_or(ode_solver_error!(StateNotSet))?;
@@ -720,9 +731,7 @@ where
                 }
 
                 // only bother doing sensitivity calculations if we might keep the step
-                if self.s_op.is_some()
-                    && error_norm <= Eqn::T::from(1.0)
-                {
+                if self.s_op.is_some() && error_norm <= Eqn::T::from(1.0) {
                     error_norm = match self.sensitivity_solve(self.t_predict, error_norm) {
                         Ok(en) => en,
                         Err(_) => {
@@ -761,8 +770,6 @@ where
                 continue;
             }
 
-            
-
             // need to caulate safety even if step is accepted
             let maxiter = self.nonlinear_solver.convergence().max_iter() as f64;
             let niter = self.nonlinear_solver.convergence().niter() as f64;
@@ -795,7 +802,14 @@ where
         if let Some(out) = self.ode_problem.as_ref().unwrap().eqn.out() {
             let state = self.state.as_mut().unwrap();
             out.call_inplace(&self.y_predict, self.t_predict, &mut state.dg);
-            self.nonlinear_solver.problem().f.integrate_out(&state.dg, &state.gdiff, self.gamma.as_slice(), self.alpha.as_slice(), state.order, &mut self.g_delta);
+            self.nonlinear_solver.problem().f.integrate_out(
+                &state.dg,
+                &state.gdiff,
+                self.gamma.as_slice(),
+                self.alpha.as_slice(),
+                state.order,
+                &mut self.g_delta,
+            );
             state.g.axpy(Eqn::T::one(), &self.g_delta, Eqn::T::one());
         }
 
@@ -951,7 +965,8 @@ where
     }
 }
 
-impl<M, Eqn, Nls, AugmentedEqn> AugmentedOdeSolverMethod<Eqn, AugmentedEqn> for BdfAug<M, Eqn, Nls, AugmentedEqn>
+impl<M, Eqn, Nls, AugmentedEqn> AugmentedOdeSolverMethod<Eqn, AugmentedEqn>
+    for BdfAug<M, Eqn, Nls, AugmentedEqn>
 where
     Eqn: OdeEquations,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
@@ -969,9 +984,12 @@ where
         state.check_sens_consistent_with_problem(problem, &augmented_eqn)?;
 
         self.set_problem(state, problem)?;
-        
-        self.state.as_mut().unwrap().set_augmented_problem(problem, &augmented_eqn)?;
-        
+
+        self.state
+            .as_mut()
+            .unwrap()
+            .set_augmented_problem(problem, &augmented_eqn)?;
+
         // allocate internal state for sensitivities
         let naug = augmented_eqn.max_index();
         let nstates = problem.eqn.rhs().nstates();
@@ -989,7 +1007,7 @@ where
 }
 
 impl<M, Eqn, Nls, AugmentedEqn> AdjointOdeSolverMethod<Eqn> for BdfAug<M, Eqn, Nls, AugmentedEqn>
-where 
+where
     Eqn: OdeEquations,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
@@ -997,14 +1015,27 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
-    type AdjointSolver = BdfAug<M, AdjointEquations<Eqn, Self>, Nls::SelfNewOp<BdfCallable<AdjointEquations<Eqn, Self>>>, AdjointEquations<Eqn, Self>>;
+    type AdjointSolver = BdfAug<
+        M,
+        AdjointEquations<Eqn, Self>,
+        Nls::SelfNewOp<BdfCallable<AdjointEquations<Eqn, Self>>>,
+        AdjointEquations<Eqn, Self>,
+    >;
 
-    fn new_adjoint_solver(&self, checkpoints: Vec<Self::State>) -> Result<Self::AdjointSolver, DiffsolError> {
+    fn new_adjoint_solver(
+        &self,
+        checkpoints: Vec<Self::State>,
+    ) -> Result<Self::AdjointSolver, DiffsolError> {
         // construct checkpointing
         let checkpointer_nls = Nls::default();
         let checkpointer_solver = Self::new(checkpointer_nls);
         let problem = self.ode_problem.as_ref().unwrap();
-        let checkpointer = Rc::new(Checkpointing::new(problem, checkpointer_solver, checkpoints.len() - 2, checkpoints));
+        let checkpointer = Rc::new(Checkpointing::new(
+            problem,
+            checkpointer_solver,
+            checkpoints.len() - 2,
+            checkpoints,
+        ));
 
         // construct adjoint equations and problem
         let new_eqn = AdjointEquations::new(&problem.eqn, checkpointer.clone(), false);
@@ -1018,12 +1049,14 @@ where
         };
 
         // initialise adjoint state
-        let mut state = Self::State::new_without_initialise_augmented(&adj_problem, &mut new_augmented_eqn);
-        let mut init_nls = Nls::SelfNewOp::<InitOp::<AdjointEquations::<Eqn, Self>>>::default();
-        let new_augmented_eqn = state.set_consistent_augmented(&adj_problem, new_augmented_eqn, &mut init_nls)?;
+        let mut state =
+            Self::State::new_without_initialise_augmented(&adj_problem, &mut new_augmented_eqn);
+        let mut init_nls = Nls::SelfNewOp::<InitOp<AdjointEquations<Eqn, Self>>>::default();
+        let new_augmented_eqn =
+            state.set_consistent_augmented(&adj_problem, new_augmented_eqn, &mut init_nls)?;
 
         // create adjoint solver
-        let adjoint_nls = Nls::SelfNewOp::<BdfCallable::<AdjointEquations::<Eqn, Self>>>::default();
+        let adjoint_nls = Nls::SelfNewOp::<BdfCallable<AdjointEquations<Eqn, Self>>>::default();
         let mut adjoint_solver = Self::AdjointSolver::new(adjoint_nls);
 
         // setup the solver
@@ -1032,9 +1065,6 @@ where
     }
 }
 
-
-
-
 #[cfg(test)]
 mod test {
     use crate::{
@@ -1042,7 +1072,9 @@ mod test {
             test_models::{
                 dydt_y2::dydt_y2_problem,
                 exponential_decay::{
-                    exponential_decay_problem, exponential_decay_problem_adjoint, exponential_decay_problem_sens, exponential_decay_problem_with_root, negative_exponential_decay_problem
+                    exponential_decay_problem, exponential_decay_problem_adjoint,
+                    exponential_decay_problem_sens, exponential_decay_problem_with_root,
+                    negative_exponential_decay_problem,
                 },
                 exponential_decay_with_algebraic::{
                     exponential_decay_with_algebraic_problem,
@@ -1052,16 +1084,16 @@ mod test {
                 gaussian_decay::gaussian_decay_problem,
                 heat2d::head2d_problem,
                 robertson::robertson,
+                robertson::robertson_sens,
                 robertson_ode::robertson_ode,
                 robertson_ode_with_sens::robertson_ode_with_sens,
-                robertson_sens::robertson_sens,
             },
             tests::{
                 test_checkpointing, test_interpolate, test_no_set_problem, test_ode_solver,
-                test_state_mut, test_state_mut_on_problem, test_ode_solver_adjoint,
+                test_ode_solver_adjoint, test_state_mut, test_state_mut_on_problem,
             },
         },
-        Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquations, Op, SparseColMat, OdeSolverMethod
+        Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquations, OdeSolverMethod, Op, SparseColMat,
     };
 
     use faer::Mat;
@@ -1186,7 +1218,6 @@ mod test {
         insta::assert_yaml_snapshot!(s.problem().as_ref().unwrap().eqn.rhs().statistics(), @r###""###);
         insta::assert_yaml_snapshot!(adjoint_solver.get_statistics(), @r###""###);
         insta::assert_yaml_snapshot!(adjoint_solver.problem().as_ref().unwrap().eqn.rhs().statistics(), @r###""###);
-
     }
 
     #[test]
@@ -1223,7 +1254,7 @@ mod test {
     #[test]
     fn test_bdf_nalgebra_exponential_decay_algebraic_sens() {
         let mut s = Bdf::default();
-        let (problem, soln) = exponential_decay_with_algebraic_problem_sens::<M>(false);
+        let (problem, soln) = exponential_decay_with_algebraic_problem_sens::<M>();
         test_ode_solver(&mut s, &problem, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
@@ -1292,14 +1323,15 @@ mod test {
         let mut context = crate::DiffSlContext::default();
         let mut s = Bdf::default();
         robertson::robertson_diffsl_compile(&mut context);
-        let (problem, soln) = robertson::robertson_diffsl_problem::<M, LlvmModule>(&context, false, false);
+        let (problem, soln) =
+            robertson::robertson_diffsl_problem::<M, LlvmModule>(&context, false, false);
         test_ode_solver(&mut s, &problem, soln, None, false);
     }
 
     #[test]
     fn test_bdf_nalgebra_robertson_sens() {
         let mut s = Bdf::default();
-        let (problem, soln) = robertson_sens::<M>(false);
+        let (problem, soln) = robertson_sens::<M>();
         test_ode_solver(&mut s, &problem, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---

@@ -5,8 +5,7 @@ use crate::{
     ode_solver_error,
     vector::DefaultDenseMatrix,
     Closure, ClosureNoJac, ClosureWithSens, ConstantClosure, ConstantClosureWithSens,
-    LinearClosure, LinearClosureWithSens, Matrix, OdeEquations, OdeSolverProblem, Op, UnitCallable,
-    Vector,
+    LinearClosure, Matrix, OdeEquations, OdeSolverProblem, Op, UnitCallable, Vector,
 };
 
 use super::equations::OdeSolverEquations;
@@ -300,112 +299,6 @@ impl OdeBuilder {
         )
     }
 
-    /// Build an ODE problem with a mass matrix and sensitivities.
-    ///
-    /// # Arguments
-    ///
-    /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
-    /// - `rhs_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
-    /// - `rhs_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the rhs wrt the parameters, with the vector v.
-    /// - `mass`: Function of type Fn(v: &V, p: &V, t: S, beta: S, y: &mut V) that computes a gemv multiplication of the mass matrix with the vector v (i.e. y = M * v + beta * y).
-    /// - `mass_sens`: Function of type Fn(v: &V, p: &V, t: S, y: &mut V) that computes the multiplication of the partial derivative of the mass matrix wrt the parameters, with the vector v.
-    /// - `init`: Function of type Fn(p: &V, t: S) -> V that computes the initial state.
-    /// - `init_sens`: Function of type Fn(p: &V, t: S, y: &mut V) that computes the multiplication of the partial derivative of the initial state wrt the parameters, with the vector v.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use diffsol::OdeBuilder;
-    /// use nalgebra::DVector;
-    /// type M = nalgebra::DMatrix<f64>;
-    ///
-    /// // dy/dt = a y
-    /// // 0 = z - y
-    /// // y(0) = 0.1
-    /// // z(0) = 0.1
-    /// let problem = OdeBuilder::new()
-    ///   .build_ode_with_mass_and_sens::<M, _, _, _, _, _, _, _>(
-    ///       |x, p, _t, y| {
-    ///           y[0] = p[0] * x[0];
-    ///           y[1] = x[1] - x[0];
-    ///       },
-    ///       |x, p, _t, v, y|  {
-    ///           y[0] = p[0] * v[0];
-    ///           y[1] = v[1] - v[0];
-    ///       },
-    ///       |x, _p, _t, v, y| {
-    ///           y[0] = v[0] * x[0];
-    ///           y[1] = 0.0;
-    ///       },
-    ///       |x, _p, _t, beta, y| {
-    ///           y[0] = x[0] + beta * y[0];
-    ///           y[1] = beta * y[1];
-    ///       },
-    ///       |x, p, t, v, y| {
-    ///           y.fill(0.0);
-    ///       },
-    ///       |p, _t| DVector::from_element(2, 0.1),
-    ///       |p, t, v, y| {
-    ///           y.fill(0.0);
-    ///       }
-    /// );
-    /// ```
-    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
-    pub fn build_ode_with_mass_and_sens<M, F, G, H, I, J, K, L>(
-        self,
-        rhs: F,
-        rhs_jac: G,
-        rhs_sens: J,
-        mass: H,
-        mass_sens: L,
-        init: I,
-        init_sens: K,
-    ) -> Result<
-        OdeSolverProblem<
-            OdeSolverEquations<
-                M,
-                ClosureWithSens<M, F, G, J>,
-                ConstantClosureWithSens<M, I, K>,
-                LinearClosureWithSens<M, H, L>,
-            >,
-        >,
-        DiffsolError,
-    >
-    where
-        M: Matrix,
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
-        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        H: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
-        I: Fn(&M::V, M::T) -> M::V,
-        J: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-        K: Fn(&M::V, M::T, &M::V, &mut M::V),
-        L: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    {
-        let p = Rc::new(Self::build_p(self.p));
-        let t0 = M::T::from(self.t0);
-        let y0 = init(&p, t0);
-        let nstates = y0.len();
-        let mut rhs = ClosureWithSens::new(rhs, rhs_jac, rhs_sens, nstates, nstates, p.clone());
-        let mut mass = LinearClosureWithSens::new(mass, mass_sens, nstates, nstates, p.clone());
-        let init = ConstantClosureWithSens::new(init, init_sens, nstates, nstates, p.clone());
-        if self.use_coloring || M::is_sparse() {
-            rhs.calculate_sparsity(&y0, t0);
-            mass.calculate_sparsity(t0);
-        }
-        let mass = Some(Rc::new(mass));
-        let rhs = Rc::new(rhs);
-        let init = Rc::new(init);
-        let eqn = OdeSolverEquations::new(rhs, mass, None, init, None, p);
-        let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
-        OdeSolverProblem::new(
-            eqn,
-            M::T::from(self.rtol),
-            atol,
-            M::T::from(self.t0),
-            M::T::from(self.h0),
-        )
-    }
-
     /// Build an ODE problem with a mass matrix that is the identity matrix.
     ///
     /// # Arguments
@@ -534,7 +427,8 @@ impl OdeBuilder {
         let init = ConstantClosureWithSens::new(init, init_sens, nstates, nstates, p.clone());
         let mut rhs = ClosureWithSens::new(rhs, rhs_jac, rhs_sens, nstates, nstates, p.clone());
         if self.use_coloring || M::is_sparse() {
-            rhs.calculate_sparsity(&y0, t0);
+            rhs.calculate_jacobian_sparsity(&y0, t0);
+            rhs.calculate_sens_sparsity(&y0, t0);
         }
         let rhs = Rc::new(rhs);
         let init = Rc::new(init);
@@ -672,12 +566,6 @@ impl OdeBuilder {
         let mut eqn = diffsl::DiffSl::new(context, self.use_coloring || M::is_sparse());
         eqn.set_params(p);
         let atol = Self::build_atol::<M::V>(self.atol, eqn.rhs().nstates())?;
-        OdeSolverProblem::new(
-            eqn,
-            self.rtol,
-            atol,
-            self.t0,
-            self.h0,
-        )
+        OdeSolverProblem::new(eqn, self.rtol, atol, self.t0, self.h0)
     }
 }

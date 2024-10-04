@@ -140,27 +140,28 @@ pub use linear_solver::suitesparse::klu::KLU;
 #[cfg(feature = "diffsl")]
 pub use ode_solver::diffsl::DiffSlContext;
 
-pub use jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring};
+pub use jacobian::{
+    find_adjoint_non_zeros, find_jacobian_non_zeros, find_matrix_non_zeros,
+    find_sens_adjoint_non_zeros, find_sens_non_zeros, JacobianColoring,
+};
 pub use matrix::{default_solver::DefaultSolver, Matrix};
 use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
     DenseMatrix, MatrixCommon, MatrixRef, MatrixView, MatrixViewMut,
 };
-pub use nonlinear_solver::{newton::NewtonNonlinearSolver, NonLinearSolver};
 use nonlinear_solver::{
-    convergence::Convergence, convergence::ConvergenceStatus,
-    root::RootFinder
+    convergence::Convergence, convergence::ConvergenceStatus, root::RootFinder,
 };
+pub use nonlinear_solver::{newton::NewtonNonlinearSolver, NonLinearSolver};
 use ode_solver::jacobian_update::JacobianUpdate;
 pub use ode_solver::{
-    bdf::BdfAug, bdf::Bdf, bdf::BdfAdj, bdf_state::BdfState, builder::OdeBuilder, equations::OdeEquations,
-    equations::OdeSolverEquations, method::OdeSolverMethod, method::OdeSolverStopReason,
-    equations::AugmentedOdeEquations,
-    problem::OdeSolverProblem, sdirk::SdirkAug, sdirk::Sdirk, sdirk::SdirkAdj, sdirk_state::SdirkState,
-    sens_equations::SensEquations, sens_equations::SensInit, sens_equations::SensRhs,
-    adjoint_equations::AdjointEquations, adjoint_equations::AdjointInit, adjoint_equations::AdjointRhs,
-    state::OdeSolverState, tableau::Tableau, checkpointing::Checkpointing,
-    equations::NoAug,
+    adjoint_equations::AdjointEquations, adjoint_equations::AdjointInit,
+    adjoint_equations::AdjointRhs, bdf::Bdf, bdf::BdfAdj, bdf::BdfAug, bdf_state::BdfState,
+    builder::OdeBuilder, checkpointing::Checkpointing, equations::AugmentedOdeEquations,
+    equations::NoAug, equations::OdeEquations, equations::OdeSolverEquations,
+    method::OdeSolverMethod, method::OdeSolverStopReason, problem::OdeSolverProblem, sdirk::Sdirk,
+    sdirk::SdirkAdj, sdirk::SdirkAug, sdirk_state::SdirkState, sens_equations::SensEquations,
+    sens_equations::SensInit, sens_equations::SensRhs, state::OdeSolverState, tableau::Tableau,
 };
 pub use op::{
     closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure,

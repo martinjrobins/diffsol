@@ -1,22 +1,27 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    jacobian::{find_non_zeros_nonlinear, JacobianColoring},
+    jacobian::{
+        find_adjoint_non_zeros, find_jacobian_non_zeros, find_sens_adjoint_non_zeros,
+        JacobianColoring,
+    },
     Matrix, MatrixSparsity, Vector,
 };
 
 use super::{NonLinearOp, Op, OpStatistics};
 
-pub struct ClosureWithAdjoint<M, F, G, H>
+pub struct ClosureWithAdjoint<M, F, G, H, I>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
     func: F,
     jacobian_action: G,
     jacobian_adjoint_action: H,
+    sens_adjoint_action: I,
     nstates: usize,
     nout: usize,
     nparams: usize,
@@ -25,22 +30,34 @@ where
     sparsity: Option<M::Sparsity>,
     sparsity_adjoint: Option<M::Sparsity>,
     coloring_adjoint: Option<JacobianColoring<M>>,
+    sens_sparsity: Option<M::Sparsity>,
+    coloring_sens_adjoint: Option<JacobianColoring<M>>,
     statistics: RefCell<OpStatistics>,
 }
 
-impl<M, F, G, H> ClosureWithAdjoint<M, F, G, H>
+impl<M, F, G, H, I> ClosureWithAdjoint<M, F, G, H, I>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
-    pub fn new(func: F, jacobian_action: G, jacobian_adjoint_action: H, nstates: usize, nout: usize, p: Rc<M::V>) -> Self {
+    pub fn new(
+        func: F,
+        jacobian_action: G,
+        jacobian_adjoint_action: H,
+        sens_adjoint_action: I,
+        nstates: usize,
+        nout: usize,
+        p: Rc<M::V>,
+    ) -> Self {
         let nparams = p.len();
         Self {
             func,
             jacobian_action,
             jacobian_adjoint_action,
+            sens_adjoint_action,
             nstates,
             nout,
             nparams,
@@ -50,31 +67,46 @@ where
             sparsity: None,
             sparsity_adjoint: None,
             coloring_adjoint: None,
+            sens_sparsity: None,
+            coloring_sens_adjoint: None,
         }
     }
 
-    pub fn calculate_sparsity(&mut self, y0: &M::V, t0: M::T) {
-        let non_zeros = find_non_zeros_nonlinear(self, y0, t0);
+    pub fn calculate_jacobian_sparsity(&mut self, y0: &M::V, t0: M::T) {
+        let non_zeros = find_jacobian_non_zeros(self, y0, t0);
         self.sparsity = Some(
             MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
                 .expect("invalid sparsity pattern"),
         );
-        let non_zeros_t = non_zeros.iter().map(|(i, j)| (*j, *i)).collect::<Vec<_>>();
         self.coloring = Some(JacobianColoring::new_from_non_zeros(self, non_zeros));
+    }
+
+    pub fn calculate_adjoint_sparsity(&mut self, y0: &M::V, t0: M::T) {
+        let non_zeros = find_adjoint_non_zeros(self, y0, t0);
         self.sparsity_adjoint = Some(
-            MatrixSparsity::try_from_indices(self.nstates, self.nout, non_zeros_t.clone())
+            MatrixSparsity::try_from_indices(self.nstates, self.nout, non_zeros.clone())
                 .expect("invalid sparsity pattern"),
         );
-        self.coloring_adjoint = Some(JacobianColoring::new_from_non_zeros(self, non_zeros_t));
+        self.coloring_adjoint = Some(JacobianColoring::new_from_non_zeros(self, non_zeros));
+    }
+
+    pub fn calculate_sens_adjoint_sparsity(&mut self, y0: &M::V, t0: M::T) {
+        let non_zeros = find_sens_adjoint_non_zeros(self, y0, t0);
+        self.sens_sparsity = Some(
+            MatrixSparsity::try_from_indices(self.nstates, self.nparams, non_zeros.clone())
+                .expect("invalid sparsity pattern"),
+        );
+        self.coloring_sens_adjoint = Some(JacobianColoring::new_from_non_zeros(self, non_zeros));
     }
 }
 
-impl<M, F, G, H> Op for ClosureWithAdjoint<M, F, G, H>
+impl<M, F, G, H, I> Op for ClosureWithAdjoint<M, F, G, H, I>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
     type V = M::V;
     type T = M::T;
@@ -98,17 +130,21 @@ where
     fn sparsity_adjoint(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
         self.sparsity_adjoint.as_ref().map(|s| s.as_ref())
     }
+    fn sparsity_sens_adjoint(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
+        self.sens_sparsity.as_ref().map(|s| s.as_ref())
+    }
     fn statistics(&self) -> OpStatistics {
         self.statistics.borrow().clone()
     }
 }
 
-impl<M, F, G, H> NonLinearOp for ClosureWithAdjoint<M, F, G, H>
+impl<M, F, G, H, I> NonLinearOp for ClosureWithAdjoint<M, F, G, H, I>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
     fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
         self.statistics.borrow_mut().increment_call();
@@ -128,6 +164,23 @@ where
             coloring.jacobian_inplace(self, x, t, y);
         } else {
             self._default_jacobian_inplace(x, t, y);
+        }
+    }
+    fn adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        if let Some(coloring) = self.coloring_adjoint.as_ref() {
+            coloring.adjoint_inplace(self, x, t, y);
+        } else {
+            self._default_adjoint_inplace(x, t, y);
+        }
+    }
+    fn sens_transpose_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
+        (self.sens_adjoint_action)(_x, self.p.as_ref(), _t, _v, y);
+    }
+    fn sens_adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        if let Some(coloring) = self.coloring_sens_adjoint.as_ref() {
+            coloring.sens_adjoint_inplace(self, x, t, y);
+        } else {
+            self._default_sens_adjoint_inplace(x, t, y);
         }
     }
 }

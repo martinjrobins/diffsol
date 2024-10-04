@@ -4,7 +4,7 @@ use crate::{
     error::{DiffsolError, OdeSolverError},
     ode_solver_error,
     vector::Vector,
-    OdeEquations, 
+    OdeEquations,
 };
 
 pub struct OdeSolverProblem<Eqn: OdeEquations> {
@@ -52,7 +52,7 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
             h0,
         })
     }
-    
+
     pub fn set_params(&mut self, p: Eqn::V) -> Result<(), DiffsolError> {
         let eqn =
             Rc::get_mut(&mut self.eqn).ok_or(ode_solver_error!(FailedToGetMutableReference))?;

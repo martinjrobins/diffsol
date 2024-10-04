@@ -1,19 +1,22 @@
 use std::cell::RefCell;
 
+use crate::{
+    error::DiffsolError, other_error, OdeEquations, OdeSolverMethod, OdeSolverProblem,
+    OdeSolverState, Vector,
+};
 use num_traits::One;
-use crate::{error::DiffsolError, other_error, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Vector};
 
-pub struct HermiteInterpolator<V> 
-where 
-    V: Vector, 
+pub struct HermiteInterpolator<V>
+where
+    V: Vector,
 {
     ys: Vec<V>,
     ydots: Vec<V>,
     ts: Vec<V::T>,
 }
 
-impl<V> Default for HermiteInterpolator<V> 
-where 
+impl<V> Default for HermiteInterpolator<V>
+where
     V: Vector,
 {
     fn default() -> Self {
@@ -26,16 +29,21 @@ where
 }
 
 impl<V> HermiteInterpolator<V>
-where 
+where
     V: Vector,
 {
-    pub fn reset<Eqn, Method, State>(&mut self, problem: &OdeSolverProblem<Eqn>, solver: &mut Method, state0: &State, state1: &State) -> Result<(), DiffsolError> 
-    where 
+    pub fn reset<Eqn, Method, State>(
+        &mut self,
+        problem: &OdeSolverProblem<Eqn>,
+        solver: &mut Method,
+        state0: &State,
+        state1: &State,
+    ) -> Result<(), DiffsolError>
+    where
         Eqn: OdeEquations<V = V, T = V::T>,
         Method: OdeSolverMethod<Eqn, State = State>,
         State: OdeSolverState<V>,
     {
-
         self.ys.clear();
         self.ydots.clear();
         self.ts.clear();
@@ -47,13 +55,13 @@ where
         while solver.state().as_ref().unwrap().t() < state1.t() {
             solver.step()?;
             self.ys.push(solver.state().as_ref().unwrap().y().clone());
-            self.ydots.push(solver.state().as_ref().unwrap().dy().clone());
+            self.ydots
+                .push(solver.state().as_ref().unwrap().dy().clone());
             self.ts.push(solver.state().as_ref().unwrap().t());
         }
         Ok(())
-
     }
-        
+
     pub fn interpolate(&self, t: V::T, y: &mut V) -> Option<()> {
         if t < self.ts[0] || t > self.ts[self.ts.len() - 1] {
             return None;
@@ -62,7 +70,11 @@ where
             y.copy_from(&self.ys[0]);
             return Some(());
         }
-        let idx = self.ts.iter().position(|&t0| t0 > t).unwrap_or(self.ts.len() - 1);
+        let idx = self
+            .ts
+            .iter()
+            .position(|&t0| t0 > t)
+            .unwrap_or(self.ts.len() - 1);
         let t0 = self.ts[idx - 1];
         let t1 = self.ts[idx];
         let h = t1 - t0;
@@ -71,19 +83,27 @@ where
         let u1 = &self.ys[idx];
         let f0 = &self.ydots[idx - 1];
         let f1 = &self.ydots[idx];
-        
+
         y.copy_from(u0);
         y.axpy(V::T::one(), u1, -V::T::one());
-        y.axpy(h * (theta - V::T::from(1.0)), f0, V::T::one() - V::T::from(2.0) * theta);
-        y.axpy(h * theta, f1,V::T::one());
-        y.axpy(V::T::from(1.0) - theta, u0, theta * (theta - V::T::from(1.0)));
+        y.axpy(
+            h * (theta - V::T::from(1.0)),
+            f0,
+            V::T::one() - V::T::from(2.0) * theta,
+        );
+        y.axpy(h * theta, f1, V::T::one());
+        y.axpy(
+            V::T::from(1.0) - theta,
+            u0,
+            theta * (theta - V::T::from(1.0)),
+        );
         y.axpy(theta, u1, V::T::one());
         Some(())
     }
 }
 
-pub struct Checkpointing<Eqn, Method> 
-where 
+pub struct Checkpointing<Eqn, Method>
+where
     Method: OdeSolverMethod<Eqn>,
     Eqn: OdeEquations,
 {
@@ -94,12 +114,17 @@ where
     pub(crate) problem: OdeSolverProblem<Eqn>,
 }
 
-impl<Eqn, Method> Checkpointing<Eqn, Method> 
-where 
+impl<Eqn, Method> Checkpointing<Eqn, Method>
+where
     Method: OdeSolverMethod<Eqn>,
     Eqn: OdeEquations,
 {
-    pub fn new(problem: &OdeSolverProblem<Eqn>, mut solver: Method, start_idx: usize, checkpoints: Vec<Method::State>) -> Self {
+    pub fn new(
+        problem: &OdeSolverProblem<Eqn>,
+        mut solver: Method,
+        start_idx: usize,
+        checkpoints: Vec<Method::State>,
+    ) -> Self {
         if checkpoints.len() < 2 {
             panic!("Checkpoints must have at least 2 elements");
         }
@@ -107,7 +132,14 @@ where
             panic!("start_idx must be less than checkpoints.len() - 1");
         }
         let mut segment = HermiteInterpolator::default();
-        segment.reset(problem, &mut solver, &checkpoints[start_idx], &checkpoints[start_idx + 1]).unwrap();
+        segment
+            .reset(
+                problem,
+                &mut solver,
+                &checkpoints[start_idx],
+                &checkpoints[start_idx + 1],
+            )
+            .unwrap();
         let segment = RefCell::new(segment);
         let previous_segment = RefCell::new(None);
         let solver = RefCell::new(solver);
@@ -119,7 +151,7 @@ where
             problem: problem.clone(),
         }
     }
-    
+
     pub fn interpolate(&self, t: Eqn::T, y: &mut Eqn::V) -> Result<(), DiffsolError> {
         {
             let segment = self.segment.borrow();
@@ -143,14 +175,25 @@ where
         }
 
         // else find idx of segment
-        let idx = self.checkpoints.iter().skip(1).position(|state| state.t() > t).expect("t is not in checkpoints");
+        let idx = self
+            .checkpoints
+            .iter()
+            .skip(1)
+            .position(|state| state.t() > t)
+            .expect("t is not in checkpoints");
         if self.previous_segment.borrow().is_none() {
-            self.previous_segment.replace(Some(HermiteInterpolator::default()));
+            self.previous_segment
+                .replace(Some(HermiteInterpolator::default()));
         }
         let mut solver = self.solver.borrow_mut();
         let mut previous_segment = self.previous_segment.borrow_mut();
         let mut segment = self.segment.borrow_mut();
-        previous_segment.as_mut().unwrap().reset(&self.problem, &mut *solver, &self.checkpoints[idx], &self.checkpoints[idx + 1])?;
+        previous_segment.as_mut().unwrap().reset(
+            &self.problem,
+            &mut *solver,
+            &self.checkpoints[idx],
+            &self.checkpoints[idx + 1],
+        )?;
         std::mem::swap(&mut *segment, previous_segment.as_mut().unwrap());
         segment.interpolate(t, y).unwrap();
         Ok(())
@@ -161,7 +204,10 @@ where
 mod tests {
     use nalgebra::{DMatrix, DVector};
 
-    use crate::{ode_solver::test_models::robertson::robertson, Bdf, BdfState, OdeSolverMethod, OdeSolverState, Vector, OdeEquations, Op};
+    use crate::{
+        ode_solver::test_models::robertson::robertson, Bdf, BdfState, OdeEquations,
+        OdeSolverMethod, OdeSolverState, Op, Vector,
+    };
 
     use super::Checkpointing;
 

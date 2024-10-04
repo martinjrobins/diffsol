@@ -474,7 +474,9 @@ mod test {
                 heat2d::head2d_problem,
                 robertson::robertson,
             },
-            tests::{test_interpolate, test_no_set_problem, test_ode_solver_no_sens, test_state_mut},
+            tests::{
+                test_interpolate, test_no_set_problem, test_ode_solver_no_sens, test_state_mut,
+            },
         },
         OdeEquations, Op, SundialsIda, SundialsMatrix,
     };

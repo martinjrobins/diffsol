@@ -1,7 +1,12 @@
 use nalgebra::ComplexField;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError}, matrix::default_solver::DefaultSolver, ode_solver_error, scalar::Scalar, AdjointEquations, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, SensEquations, VectorViewMut
+    error::{DiffsolError, OdeSolverError},
+    matrix::default_solver::DefaultSolver,
+    ode_solver_error,
+    scalar::Scalar,
+    AdjointEquations, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon,
+    NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, SensEquations, VectorViewMut,
 };
 
 #[derive(Debug, PartialEq)]
@@ -35,9 +40,9 @@ pub enum OdeSolverStopReason<T: Scalar> {
 ///     solver.interpolate(t).unwrap()
 /// }
 /// ```
-pub trait OdeSolverMethod<Eqn: OdeEquations> 
-where 
-    Self: Sized
+pub trait OdeSolverMethod<Eqn: OdeEquations>
+where
+    Self: Sized,
 {
     type State: OdeSolverState<Eqn::V>;
 
@@ -84,7 +89,7 @@ where
 
     /// Interpolate the solution at a given time. This time should be between the current time and the last solver time step
     fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError>;
-    
+
     /// Interpolate the integral of the output function at a given time. This time should be between the current time and the last solver time step
     fn interpolate_out(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError>;
 
@@ -226,8 +231,8 @@ where
     }
 }
 
-pub trait AugmentedOdeSolverMethod<Eqn, AugmentedEqn>: OdeSolverMethod<Eqn> 
-where 
+pub trait AugmentedOdeSolverMethod<Eqn, AugmentedEqn>: OdeSolverMethod<Eqn>
+where
     Eqn: OdeEquations,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
 {
@@ -239,8 +244,9 @@ where
     ) -> Result<(), DiffsolError>;
 }
 
-pub trait SensitivitiesOdeSolverMethod<Eqn>: AugmentedOdeSolverMethod<Eqn, SensEquations<Eqn>>
-where 
+pub trait SensitivitiesOdeSolverMethod<Eqn>:
+    AugmentedOdeSolverMethod<Eqn, SensEquations<Eqn>>
+where
     Eqn: OdeEquations,
 {
     fn set_problem_with_sensitivities(
@@ -256,10 +262,16 @@ where
 }
 
 pub trait AdjointOdeSolverMethod<Eqn>: OdeSolverMethod<Eqn>
-where 
+where
     Eqn: OdeEquations,
 {
-    type AdjointSolver: AugmentedOdeSolverMethod<AdjointEquations<Eqn, Self>, AdjointEquations<Eqn, Self>>;
+    type AdjointSolver: AugmentedOdeSolverMethod<
+        AdjointEquations<Eqn, Self>,
+        AdjointEquations<Eqn, Self>,
+    >;
 
-    fn new_adjoint_solver(&self, checkpoints: Vec<Self::State>) -> Result<Self::AdjointSolver, DiffsolError>;
+    fn new_adjoint_solver(
+        &self,
+        checkpoints: Vec<Self::State>,
+    ) -> Result<Self::AdjointSolver, DiffsolError>;
 }

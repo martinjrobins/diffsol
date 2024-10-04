@@ -1,6 +1,8 @@
+pub mod adjoint_equations;
 pub mod bdf;
 pub mod bdf_state;
 pub mod builder;
+pub mod checkpointing;
 pub mod equations;
 pub mod jacobian_update;
 pub mod method;
@@ -8,11 +10,9 @@ pub mod problem;
 pub mod sdirk;
 pub mod sdirk_state;
 pub mod sens_equations;
-pub mod adjoint_equations;
 pub mod state;
 pub mod tableau;
 pub mod test_models;
-pub mod checkpointing;
 
 #[cfg(feature = "diffsl")]
 pub mod diffsl;
@@ -55,7 +55,9 @@ mod tests {
         if solve_for_sensitivities {
             let sensitivity_error_control = solution.sens_solution_points.is_some();
             let state = OdeSolverState::new_with_sensitivities(problem, method).unwrap();
-            method.set_problem_with_sensitivities(state, problem, sensitivity_error_control).unwrap();
+            method
+                .set_problem_with_sensitivities(state, problem, sensitivity_error_control)
+                .unwrap();
         } else {
             let state = OdeSolverState::new(problem, method).unwrap();
             method.set_problem(state, problem).unwrap();
@@ -130,7 +132,8 @@ mod tests {
                             let sens_point = &sens_points[i];
                             let sens_soln = &sens_soln[j];
                             let error = sens_soln.clone() - &sens_point.state;
-                            let error_norm = error.squared_norm(&sens_point.state, atol, rtol).sqrt();
+                            let error_norm =
+                                error.squared_norm(&sens_point.state, atol, rtol).sqrt();
                             assert!(
                                 error_norm < M::T::from(29.0),
                                 "error_norm: {} at t = {}",
@@ -219,17 +222,17 @@ mod tests {
         }
         method.state().unwrap().y().clone()
     }
-    
+
     pub fn test_ode_solver_adjoint<M, Eqn, Method>(
         method: &mut Method,
         problem: &OdeSolverProblem<Eqn>,
         solution: OdeSolverSolution<M::V>,
-    ) -> Method::AdjointSolver 
-        where 
-            M: Matrix,
-            Method: AdjointOdeSolverMethod<Eqn>,
-            Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
-            Eqn::M: DefaultSolver,
+    ) -> Method::AdjointSolver
+    where
+        M: Matrix,
+        Method: AdjointOdeSolverMethod<Eqn>,
+        Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
+        Eqn::M: DefaultSolver,
     {
         let state = OdeSolverState::new(problem, method).unwrap();
         method.set_problem(state, problem).unwrap();
@@ -268,7 +271,13 @@ mod tests {
             adjoint_solver.step().unwrap();
         }
         let solns = adjoint_solver.state().unwrap().s().to_vec();
-        let points = solution.sens_solution_points.as_ref().unwrap().iter().map(|x| &x[0]).collect::<Vec<_>>();
+        let points = solution
+            .sens_solution_points
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|x| &x[0])
+            .collect::<Vec<_>>();
         for (soln, point) in solns.iter().zip(points.iter()) {
             let error = soln.clone() - &point.state;
             let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
@@ -282,7 +291,6 @@ mod tests {
             );
         }
         adjoint_solver
-
     }
 
     pub struct TestEqnInit<M> {

@@ -1,9 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{
-    jacobian::{find_non_zeros_nonlinear, JacobianColoring},
-    Matrix, MatrixSparsity, Vector,
-};
+use crate::{find_jacobian_non_zeros, jacobian::JacobianColoring, Matrix, MatrixSparsity, Vector};
 
 use super::{NonLinearOp, Op, OpStatistics};
 
@@ -46,7 +43,7 @@ where
     }
 
     pub fn calculate_sparsity(&mut self, y0: &M::V, t0: M::T) {
-        let non_zeros = find_non_zeros_nonlinear(self, y0, t0);
+        let non_zeros = find_jacobian_non_zeros(self, y0, t0);
         self.sparsity = Some(
             MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
                 .expect("invalid sparsity pattern"),

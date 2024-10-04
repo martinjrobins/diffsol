@@ -8,6 +8,8 @@ pub struct SdirkState<V: Vector> {
     pub(crate) dg: V,
     pub(crate) s: Vec<V>,
     pub(crate) ds: Vec<V>,
+    pub(crate) sg: Vec<V>,
+    pub(crate) dsg: Vec<V>,
     pub(crate) t: V::T,
     pub(crate) h: V::T,
 }
@@ -24,17 +26,53 @@ where
     ) -> Result<(), DiffsolError> {
         Ok(())
     }
-    
+
     fn set_augmented_problem<Eqn: OdeEquations, AugmentedEqn: crate::AugmentedOdeEquations<Eqn>>(
-            &mut self,
-            _ode_problem: &OdeSolverProblem<Eqn>,
-            _augmented_eqn: &AugmentedEqn,
-        ) -> Result<(), DiffsolError> {
+        &mut self,
+        _ode_problem: &OdeSolverProblem<Eqn>,
+        _augmented_eqn: &AugmentedEqn,
+    ) -> Result<(), DiffsolError> {
         Ok(())
     }
 
-    fn new_internal_state(y: V, dy: V, g: V, dg: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T, _naug: usize) -> Self {
-        Self { y, dy, g, dg, s, ds, t, h }
+    fn new_internal_state(
+        y: V,
+        dy: V,
+        g: V,
+        dg: V,
+        s: Vec<V>,
+        ds: Vec<V>,
+        sg: Vec<V>,
+        dsg: Vec<V>,
+        t: <V>::T,
+        h: <V>::T,
+        _naug: usize,
+    ) -> Self {
+        Self {
+            y,
+            dy,
+            g,
+            dg,
+            s,
+            ds,
+            sg,
+            dsg,
+            t,
+            h,
+        }
+    }
+
+    fn sg(&self) -> &[V] {
+        self.sg.as_slice()
+    }
+    fn sg_mut(&mut self) -> &mut [V] {
+        &mut self.sg
+    }
+    fn dsg(&self) -> &[V] {
+        self.dsg.as_slice()
+    }
+    fn dsg_mut(&mut self) -> &mut [V] {
+        &mut self.dsg
     }
 
     fn g(&self) -> &V {

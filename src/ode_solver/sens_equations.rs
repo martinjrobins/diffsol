@@ -2,7 +2,8 @@ use num_traits::{One, Zero};
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    matrix::sparsity::MatrixSparsityRef, AugmentedOdeEquations, ConstantOp, LinearOp, Matrix, MatrixSparsity, NonLinearOp, OdeEquations, Op, Vector
+    matrix::sparsity::MatrixSparsityRef, AugmentedOdeEquations, ConstantOp, LinearOp, Matrix,
+    MatrixSparsity, NonLinearOp, OdeEquations, Op, Vector,
 };
 
 pub struct SensInit<Eqn>
@@ -231,10 +232,10 @@ where
 ///  s is the sensitivity
 ///  f_p is the partial derivative of the right-hand side with respect to the parameters
 ///  dy(0)/dp is the partial derivative of the state at the initial time wrt the parameters
-/// 
+///
 pub struct SensEquations<Eqn>
 where
-    Eqn: OdeEquations
+    Eqn: OdeEquations,
 {
     eqn: Rc<Eqn>,
     rhs: Rc<SensRhs<Eqn>>,
@@ -306,7 +307,7 @@ where
         self.eqn.mass()
     }
     fn root(&self) -> Option<&Rc<Self::Root>> {
-        self.eqn.root()
+        None
     }
     fn init(&self) -> &Rc<Self::Init> {
         &self.init
@@ -315,11 +316,11 @@ where
         panic!("Not implemented for SensEquations");
     }
     fn out(&self) -> Option<&Rc<Self::Out>> {
-        self.eqn.out()
+        None
     }
 }
 
-impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for SensEquations<Eqn>  {
+impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for SensEquations<Eqn> {
     fn include_in_error_control(&self) -> bool {
         self.include_in_error_control
     }
@@ -329,7 +330,7 @@ impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for SensEquations<Eqn>  {
     fn max_index(&self) -> usize {
         self.nparams()
     }
-    fn update_rhs_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T) {
+    fn update_rhs_out_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T) {
         Rc::get_mut(&mut self.rhs).unwrap().update_state(y, dy, t);
     }
     fn update_init_state(&mut self, t: Eqn::T) {
@@ -347,10 +348,9 @@ mod tests {
         ode_solver::test_models::{
             exponential_decay::exponential_decay_problem_sens,
             exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
-            robertson_sens::robertson_sens,
+            robertson::robertson_sens,
         },
-        AugmentedOdeEquations,
-        NonLinearOp, SdirkState, SensEquations, Vector,
+        AugmentedOdeEquations, NonLinearOp, SdirkState, SensEquations, Vector,
     };
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;
@@ -366,6 +366,8 @@ mod tests {
             dy: Vcpu::from_vec(vec![1.0, 1.0]),
             g: Vcpu::zeros(0),
             dg: Vcpu::zeros(0),
+            sg: Vec::new(),
+            dsg: Vec::new(),
             s: Vec::new(),
             ds: Vec::new(),
             h: 0.0,
@@ -375,7 +377,7 @@ mod tests {
         // M_p = 0
         // so S = |-1.0|
         //        |-1.0|
-        sens_eqn.update_rhs_state(&state.y, &state.dy, state.t);
+        sens_eqn.update_rhs_out_state(&state.y, &state.dy, state.t);
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 2);
         assert_eq!(sens.ncols(), 2);
@@ -396,7 +398,7 @@ mod tests {
 
     #[test]
     fn test_rhs_exponential_algebraic() {
-        let (problem, _soln) = exponential_decay_with_algebraic_problem_sens::<Mcpu>(false);
+        let (problem, _soln) = exponential_decay_with_algebraic_problem_sens::<Mcpu>();
         let mut sens_eqn = SensEquations::new(&problem.eqn);
         let state = SdirkState {
             t: 0.0,
@@ -404,6 +406,8 @@ mod tests {
             dy: Vcpu::from_vec(vec![1.0, 1.0, 1.0]),
             g: Vcpu::zeros(0),
             dg: Vcpu::zeros(0),
+            sg: Vec::new(),
+            dsg: Vec::new(),
             s: Vec::new(),
             ds: Vec::new(),
             h: 0.0,
@@ -417,7 +421,7 @@ mod tests {
         // so S = |-0.1|
         //        |-0.1|
         //        | 0 |
-        sens_eqn.update_rhs_state(&state.y, &state.dy, state.t);
+        sens_eqn.update_rhs_out_state(&state.y, &state.dy, state.t);
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 3);
         assert_eq!(sens.ncols(), 1);
@@ -443,7 +447,7 @@ mod tests {
 
     #[test]
     fn test_rhs_robertson() {
-        let (problem, _soln) = robertson_sens::<Mcpu>(false);
+        let (problem, _soln) = robertson_sens::<Mcpu>();
         let mut sens_eqn = SensEquations::new(&problem.eqn);
         let state = SdirkState {
             t: 0.0,
@@ -451,6 +455,8 @@ mod tests {
             dy: Vcpu::from_vec(vec![1.0, 1.0, 1.0]),
             g: Vcpu::zeros(0),
             dg: Vcpu::zeros(0),
+            sg: Vec::new(),
+            dsg: Vec::new(),
             s: Vec::new(),
             ds: Vec::new(),
             h: 0.0,
@@ -462,7 +468,7 @@ mod tests {
         //       | 0   0    0|
         // M_p = 0
         // so S = f_p
-        sens_eqn.update_rhs_state(&state.y, &state.dy, state.t);
+        sens_eqn.update_rhs_out_state(&state.y, &state.dy, state.t);
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 3);
         assert_eq!(sens.ncols(), 3);

@@ -12,47 +12,58 @@ pub mod coloring;
 pub mod graph;
 pub mod greedy_coloring;
 
-/// Find the non-zero entries of the Jacobian matrix of a non-linear operator.
-pub fn find_non_zeros_nonlinear<F: NonLinearOp + ?Sized>(
-    op: &F,
-    x: &F::V,
-    t: F::T,
-) -> Vec<(usize, usize)> {
-    let mut v = F::V::zeros(op.nstates());
-    let mut col = F::V::zeros(op.nout());
-    let mut triplets = Vec::with_capacity(op.nstates());
-    for j in 0..op.nstates() {
-        v[j] = F::T::NAN;
-        op.jac_mul_inplace(x, t, &v, &mut col);
-        for i in 0..op.nout() {
-            if col[i].is_nan() {
-                triplets.push((i, j));
+macro_rules! gen_find_non_zeros_nonlinear {
+    ($name:ident, $op_fn:ident) => {
+        /// Find the non-zero entries of the $name matrix of a non-linear operator.
+        pub fn $name<F: NonLinearOp + ?Sized>(op: &F, x: &F::V, t: F::T) -> Vec<(usize, usize)> {
+            let mut v = F::V::zeros(op.nstates());
+            let mut col = F::V::zeros(op.nout());
+            let mut triplets = Vec::with_capacity(op.nstates());
+            for j in 0..op.nstates() {
+                v[j] = F::T::NAN;
+                op.$op_fn(x, t, &v, &mut col);
+                for i in 0..op.nout() {
+                    if col[i].is_nan() {
+                        triplets.push((i, j));
+                    }
+                    col[i] = F::T::zero();
+                }
+                v[j] = F::T::zero();
             }
-            col[i] = F::T::zero();
+            triplets
         }
-        v[j] = F::T::zero();
-    }
-    triplets
+    };
 }
 
-/// Find the non-zero entries of the matrix of a linear operator.
-pub fn find_non_zeros_linear<F: LinearOp + ?Sized>(op: &F, t: F::T) -> Vec<(usize, usize)> {
-    let mut v = F::V::zeros(op.nstates());
-    let mut col = F::V::zeros(op.nout());
-    let mut triplets = Vec::with_capacity(op.nstates());
-    for j in 0..op.nstates() {
-        v[j] = F::T::NAN;
-        op.call_inplace(&v, t, &mut col);
-        for i in 0..op.nout() {
-            if col[i].is_nan() {
-                triplets.push((i, j));
+gen_find_non_zeros_nonlinear!(find_jacobian_non_zeros, jac_mul_inplace);
+gen_find_non_zeros_nonlinear!(find_adjoint_non_zeros, jac_transpose_mul_inplace);
+gen_find_non_zeros_nonlinear!(find_sens_non_zeros, sens_mul_inplace);
+gen_find_non_zeros_nonlinear!(find_sens_adjoint_non_zeros, sens_transpose_mul_inplace);
+
+macro_rules! gen_find_non_zeros_linear {
+    ($name:ident, $op_fn:ident) => {
+        /// Find the non-zero entries of the $name matrix of a non-linear operator.
+        pub fn $name<F: LinearOp + ?Sized>(op: &F, t: F::T) -> Vec<(usize, usize)> {
+            let mut v = F::V::zeros(op.nstates());
+            let mut col = F::V::zeros(op.nout());
+            let mut triplets = Vec::with_capacity(op.nstates());
+            for j in 0..op.nstates() {
+                v[j] = F::T::NAN;
+                op.$op_fn(&v, t, &mut col);
+                for i in 0..op.nout() {
+                    if col[i].is_nan() {
+                        triplets.push((i, j));
+                    }
+                    col[i] = F::T::zero();
+                }
+                v[j] = F::T::zero();
             }
-            col[i] = F::T::zero();
+            triplets
         }
-        v[j] = F::T::zero();
-    }
-    triplets
+    };
 }
+
+gen_find_non_zeros_linear!(find_matrix_non_zeros, call_inplace);
 
 pub struct JacobianColoring<M: Matrix> {
     dst_indices_per_color: Vec<<M::V as Vector>::Index>,
@@ -127,6 +138,46 @@ impl<M: Matrix> JacobianColoring<M> {
         }
     }
 
+    pub fn adjoint_inplace<F: NonLinearOp<M = M, V = M::V, T = M::T>>(
+        &self,
+        op: &F,
+        x: &F::V,
+        t: F::T,
+        y: &mut F::M,
+    ) {
+        let mut v = F::V::zeros(op.nstates());
+        let mut col = F::V::zeros(op.nout());
+        for c in 0..self.dst_indices_per_color.len() {
+            let input = &self.input_indices_per_color[c];
+            let dst_indices = &self.dst_indices_per_color[c];
+            let src_indices = &self.src_indices_per_color[c];
+            v.assign_at_indices(input, F::T::one());
+            op.jac_transpose_mul_inplace(x, t, &v, &mut col);
+            y.set_data_with_indices(dst_indices, src_indices, &col);
+            v.assign_at_indices(input, F::T::zero());
+        }
+    }
+
+    pub fn sens_adjoint_inplace<F: NonLinearOp<M = M, V = M::V, T = M::T>>(
+        &self,
+        op: &F,
+        x: &F::V,
+        t: F::T,
+        y: &mut F::M,
+    ) {
+        let mut v = F::V::zeros(op.nstates());
+        let mut col = F::V::zeros(op.nout());
+        for c in 0..self.dst_indices_per_color.len() {
+            let input = &self.input_indices_per_color[c];
+            let dst_indices = &self.dst_indices_per_color[c];
+            let src_indices = &self.src_indices_per_color[c];
+            v.assign_at_indices(input, F::T::one());
+            op.sens_transpose_mul_inplace(x, t, &v, &mut col);
+            y.set_data_with_indices(dst_indices, src_indices, &col);
+            v.assign_at_indices(input, F::T::zero());
+        }
+    }
+
     pub fn matrix_inplace<F: LinearOp<M = M, V = M::V, T = M::T>>(
         &self,
         op: &F,
@@ -151,7 +202,7 @@ impl<M: Matrix> JacobianColoring<M> {
 mod tests {
     use std::rc::Rc;
 
-    use crate::jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring};
+    use crate::jacobian::{find_jacobian_non_zeros, JacobianColoring};
     use crate::matrix::sparsity::MatrixSparsityRef;
     use crate::matrix::Matrix;
     use crate::op::linear_closure::LinearClosure;
@@ -165,6 +216,8 @@ mod tests {
     use nalgebra::DMatrix;
     use num_traits::{One, Zero};
     use std::ops::MulAssign;
+
+    use super::find_matrix_non_zeros;
 
     fn helper_triplets2op_nonlinear<'a, M: Matrix + 'a>(
         triplets: &'a [(usize, usize, M::T)],
@@ -241,7 +294,7 @@ mod tests {
         ];
         for triplets in test_triplets {
             let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), 2, 2);
-            let non_zeros = find_non_zeros_nonlinear(&op, &M::V::zeros(2), M::T::zero());
+            let non_zeros = find_jacobian_non_zeros(&op, &M::V::zeros(2), M::T::zero());
             let expect = triplets
                 .iter()
                 .map(|(i, j, _v)| (*i, *j))
@@ -279,7 +332,7 @@ mod tests {
         let expect = vec![vec![1, 1], vec![1, 2], vec![1, 1], vec![1, 2]];
         for (triplets, expect) in test_triplets.iter().zip(expect) {
             let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), 2, 2);
-            let non_zeros = find_non_zeros_nonlinear(&op, &M::V::zeros(2), M::T::zero());
+            let non_zeros = find_jacobian_non_zeros(&op, &M::V::zeros(2), M::T::zero());
             let ncols = op.nstates();
             let graph = nonzeros2graph(non_zeros.as_slice(), ncols);
             let coloring = color_graph_greedy(&graph);
@@ -320,7 +373,7 @@ mod tests {
             let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), n, n);
             let y0 = M::V::zeros(n);
             let t0 = M::T::zero();
-            let non_zeros = find_non_zeros_nonlinear(&op, &y0, t0);
+            let non_zeros = find_jacobian_non_zeros(&op, &y0, t0);
             let coloring = JacobianColoring::new_from_non_zeros(&op, non_zeros);
             let mut jac = M::new_from_sparsity(3, 3, op.sparsity().map(|s| s.to_owned()));
             coloring.jacobian_inplace(&op, &y0, t0, &mut jac);
@@ -336,7 +389,7 @@ mod tests {
         for triplets in test_triplets {
             let op = helper_triplets2op_linear::<M>(triplets.as_slice(), n, n);
             let t0 = M::T::zero();
-            let non_zeros = find_non_zeros_linear(&op, t0);
+            let non_zeros = find_matrix_non_zeros(&op, t0);
             let coloring = JacobianColoring::new_from_non_zeros(&op, non_zeros);
             let mut jac = M::new_from_sparsity(3, 3, op.sparsity().map(|s| s.to_owned()));
             coloring.matrix_inplace(&op, t0, &mut jac);

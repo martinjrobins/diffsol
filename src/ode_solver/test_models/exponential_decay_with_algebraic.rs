@@ -1,10 +1,17 @@
 use crate::{
-    matrix::Matrix, ode_solver::problem::OdeSolverSolution, scalar::scale, OdeBuilder,
-    OdeEquations, OdeSolverProblem, Vector,
+    matrix::Matrix,
+    ode_solver::problem::OdeSolverSolution,
+    op::{
+        closure_with_sens::ClosureWithSens, constant_closure_with_sens::ConstantClosureWithSens,
+        linear_closure_with_sens::LinearClosureWithSens,
+    },
+    scalar::scale,
+    ConstantOp, OdeBuilder, OdeEquations, OdeSolverEquations, OdeSolverProblem, UnitCallable,
+    Vector,
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};
-use std::ops::MulAssign;
+use std::{ops::MulAssign, rc::Rc};
 
 // exponential decay problem with algebraic constraint
 // dy/dt = -ay
@@ -113,26 +120,60 @@ pub fn exponential_decay_with_algebraic_problem<M: Matrix + 'static>(
     (problem, soln)
 }
 
-pub fn exponential_decay_with_algebraic_problem_sens<M: Matrix + 'static>(
-    use_coloring: bool,
-) -> (
+pub fn exponential_decay_with_algebraic_problem_sens<M: Matrix + 'static>() -> (
     OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
-    let p = M::V::from_vec(vec![0.1.into()]);
-    let problem = OdeBuilder::new()
-        .p([0.1])
-        .use_coloring(use_coloring)
-        .build_ode_with_mass_and_sens(
-            exponential_decay_with_algebraic::<M>,
-            exponential_decay_with_algebraic_jacobian::<M>,
-            exponential_decay_with_algebraic_sens::<M>,
-            exponential_decay_with_algebraic_mass::<M>,
-            exponential_decay_with_algebraic_mass_sens::<M>,
-            exponential_decay_with_algebraic_init::<M>,
-            exponential_decay_with_algebraic_init_sens::<M>,
-        )
-        .unwrap();
+    let p = Rc::new(M::V::from_vec(vec![0.1.into()]));
+    let mut rhs = ClosureWithSens::new(
+        exponential_decay_with_algebraic::<M>,
+        exponential_decay_with_algebraic_jacobian::<M>,
+        exponential_decay_with_algebraic_sens::<M>,
+        3,
+        3,
+        p.clone(),
+    );
+    let mut mass = LinearClosureWithSens::new(
+        exponential_decay_with_algebraic_mass::<M>,
+        exponential_decay_with_algebraic_mass_sens::<M>,
+        3,
+        3,
+        p.clone(),
+    );
+    let init = ConstantClosureWithSens::new(
+        exponential_decay_with_algebraic_init::<M>,
+        exponential_decay_with_algebraic_init_sens::<M>,
+        3,
+        3,
+        p.clone(),
+    );
+    let t0 = M::T::zero();
+
+    if M::is_sparse() {
+        let y0 = init.call(t0);
+        rhs.calculate_jacobian_sparsity(&y0, t0);
+        rhs.calculate_sens_sparsity(&y0, t0);
+        mass.calculate_sparsity(t0);
+    }
+
+    let out: Option<Rc<UnitCallable<M>>> = None;
+    let root: Option<Rc<UnitCallable<M>>> = None;
+    let eqn = OdeSolverEquations::new(
+        Rc::new(rhs),
+        Some(Rc::new(mass)),
+        root,
+        Rc::new(init),
+        out,
+        p.clone(),
+    );
+    let problem = OdeSolverProblem::new(
+        eqn,
+        M::T::from(1e-6),
+        M::V::from_element(3, M::T::from(1e-6)),
+        t0,
+        M::T::from(1.0),
+    )
+    .unwrap();
 
     let mut soln = OdeSolverSolution::default();
     for i in 0..10 {

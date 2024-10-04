@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    jacobian::{find_non_zeros_nonlinear, JacobianColoring},
+    jacobian::{find_jacobian_non_zeros, find_sens_non_zeros, JacobianColoring},
     Matrix, MatrixSparsity, Vector,
 };
 
@@ -22,7 +22,9 @@ where
     nparams: usize,
     p: Rc<M::V>,
     coloring: Option<JacobianColoring<M>>,
+    sens_coloring: Option<JacobianColoring<M>>,
     sparsity: Option<M::Sparsity>,
+    sens_sparsity: Option<M::Sparsity>,
     statistics: RefCell<OpStatistics>,
 }
 
@@ -53,16 +55,26 @@ where
             statistics: RefCell::new(OpStatistics::default()),
             coloring: None,
             sparsity: None,
+            sens_coloring: None,
+            sens_sparsity: None,
         }
     }
 
-    pub fn calculate_sparsity(&mut self, y0: &M::V, t0: M::T) {
-        let non_zeros = find_non_zeros_nonlinear(self, y0, t0);
+    pub fn calculate_jacobian_sparsity(&mut self, y0: &M::V, t0: M::T) {
+        let non_zeros = find_jacobian_non_zeros(self, y0, t0);
         self.sparsity = Some(
             MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
                 .expect("invalid sparsity pattern"),
         );
         self.coloring = Some(JacobianColoring::new_from_non_zeros(self, non_zeros));
+    }
+    pub fn calculate_sens_sparsity(&mut self, y0: &M::V, t0: M::T) {
+        let non_zeros = find_sens_non_zeros(self, y0, t0);
+        self.sens_sparsity = Some(
+            MatrixSparsity::try_from_indices(self.nout(), self.nparams, non_zeros.clone())
+                .expect("invalid sparsity pattern"),
+        );
+        self.sens_coloring = Some(JacobianColoring::new_from_non_zeros(self, non_zeros));
     }
 }
 
@@ -92,6 +104,9 @@ where
     fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
         self.sparsity.as_ref().map(|x| x.as_ref())
     }
+    fn sparsity_sens(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
+        self.sens_sparsity.as_ref().map(|x| x.as_ref())
+    }
     fn statistics(&self) -> OpStatistics {
         self.statistics.borrow().clone()
     }
@@ -115,15 +130,19 @@ where
     fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         (self.sens_action)(x, self.p.as_ref(), t, v, y);
     }
-    fn has_sens(&self) -> bool {
-        true
-    }
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         self.statistics.borrow_mut().increment_matrix();
         if let Some(coloring) = self.coloring.as_ref() {
             coloring.jacobian_inplace(self, x, t, y);
         } else {
             self._default_jacobian_inplace(x, t, y);
+        }
+    }
+    fn sens_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        if let Some(coloring) = self.sens_coloring.as_ref() {
+            coloring.jacobian_inplace(self, x, t, y);
+        } else {
+            self._default_sens_inplace(x, t, y);
         }
     }
 }

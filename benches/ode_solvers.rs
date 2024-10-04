@@ -550,11 +550,11 @@ mod benchmarks {
     use diffsol::op::bdf::BdfCallable;
     use diffsol::op::sdirk::SdirkCallable;
     use diffsol::vector::VectorRef;
+    use diffsol::LinearSolver;
     use diffsol::{
         Bdf, DefaultDenseMatrix, DefaultSolver, Matrix, NewtonNonlinearSolver, OdeEquations,
-        OdeSolverMethod, OdeSolverProblem, Sdirk, Tableau
+        OdeSolverMethod, OdeSolverProblem, Sdirk, Tableau,
     };
-    use diffsol::LinearSolver;
 
     // bdf
     pub fn bdf<Eqn>(

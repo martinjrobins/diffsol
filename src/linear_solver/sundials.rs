@@ -63,7 +63,6 @@ impl<Op> LinearSolver<Op> for SundialsLinearSolver<Op>
 where
     Op: NonLinearOp<M = SundialsMatrix, V = SundialsVector, T = realtype>,
 {
-
     type SelfNewOp<C2: NonLinearOp<T = Op::T, V = Op::V, M = Op::M>> = SundialsLinearSolver<C2>;
 
     fn set_problem(&mut self, problem: &SolverProblem<Op>) {

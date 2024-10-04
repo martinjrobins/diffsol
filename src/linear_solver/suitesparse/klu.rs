@@ -168,7 +168,6 @@ where
     matrix: Option<M>,
 }
 
-
 impl<M, C> Default for KLU<M, C>
 where
     M: Matrix,
@@ -186,7 +185,6 @@ where
         }
     }
 }
-
 
 impl<M, C> LinearSolver<C> for KLU<M, C>
 where

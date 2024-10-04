@@ -1,5 +1,7 @@
 use crate::{
-    error::DiffsolError, ode_solver_error, scalar::IndexType, scale, AugmentedOdeEquations, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Vector, VectorViewMut, error::OdeSolverError,
+    error::DiffsolError, error::OdeSolverError, ode_solver_error, scalar::IndexType, scale,
+    AugmentedOdeEquations, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Vector,
+    VectorViewMut,
 };
 use std::ops::MulAssign;
 
@@ -9,17 +11,21 @@ pub struct BdfState<V: Vector, M: DenseMatrix<T = V::T, V = V>> {
     pub(crate) diff: M,
     pub(crate) sdiff: Vec<M>,
     pub(crate) gdiff: M,
+    pub(crate) sgdiff: Vec<M>,
     pub(crate) y: V,
     pub(crate) dy: V,
     pub(crate) g: V,
     pub(crate) dg: V,
     pub(crate) s: Vec<V>,
     pub(crate) ds: Vec<V>,
+    pub(crate) sg: Vec<V>,
+    pub(crate) dsg: Vec<V>,
     pub(crate) t: V::T,
     pub(crate) h: V::T,
     pub(crate) diff_initialised: bool,
     pub(crate) sdiff_initialised: bool,
     pub(crate) gdiff_initialised: bool,
+    pub(crate) sgdiff_initialised: bool,
 }
 
 impl<V, M> BdfState<V, M>
@@ -36,7 +42,7 @@ where
         self.diff.column_mut(1).mul_assign(scale(self.h));
         self.diff_initialised = true;
     }
-    
+
     pub fn initialise_sdiff_to_first_order(&mut self) {
         let naug = self.sdiff.len();
         for i in 0..naug {
@@ -55,6 +61,19 @@ where
         self.gdiff.column_mut(1).copy_from(&self.dg);
         self.gdiff.column_mut(1).mul_assign(scale(self.h));
         self.gdiff_initialised = true;
+    }
+
+    pub fn initialise_sgdiff_to_first_order(&mut self) {
+        let naug = self.sgdiff.len();
+        for i in 0..naug {
+            let sgdiff = &mut self.sgdiff[i];
+            let sg = &self.sg[i];
+            let dsg = &self.dsg[i];
+            sgdiff.column_mut(0).copy_from(sg);
+            sgdiff.column_mut(1).copy_from(dsg);
+            sgdiff.column_mut(1).mul_assign(scale(self.h));
+        }
+        self.sgdiff_initialised = true;
     }
 }
 
@@ -87,7 +106,7 @@ where
         }
         Ok(())
     }
-    
+
     fn set_augmented_problem<Eqn: OdeEquations, AugmentedEqn: AugmentedOdeEquations<Eqn>>(
         &mut self,
         ode_problem: &OdeSolverProblem<Eqn>,
@@ -101,33 +120,51 @@ where
         if !self.sdiff_initialised {
             self.initialise_sdiff_to_first_order();
         }
+        if !self.sgdiff_initialised {
+            self.initialise_sgdiff_to_first_order();
+        }
         Ok(())
     }
 
-
-
-    fn new_internal_state(y: V, dy: V, g: V, dg: V, s: Vec<V>, ds: Vec<V>, t: <V>::T, h: <V>::T, naug: usize) -> Self {
+    fn new_internal_state(
+        y: V,
+        dy: V,
+        g: V,
+        dg: V,
+        s: Vec<V>,
+        ds: Vec<V>,
+        sg: Vec<V>,
+        dsg: Vec<V>,
+        t: <V>::T,
+        h: <V>::T,
+        naug: usize,
+    ) -> Self {
         let nstates = y.len();
         let nout = g.len();
         let diff = M::zeros(nstates, Self::MAX_ORDER + 3);
         let sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3); naug];
         let gdiff = M::zeros(nout, Self::MAX_ORDER + 3);
+        let sgdiff = vec![M::zeros(nout, Self::MAX_ORDER + 3); naug];
         Self {
             order: 1,
             diff,
             sdiff,
             gdiff,
+            sgdiff,
             y,
             dy,
             g,
             dg,
             s,
             ds,
+            sg,
+            dsg,
             t,
             h,
             diff_initialised: false,
             sdiff_initialised: false,
             gdiff_initialised: false,
+            sgdiff_initialised: false,
         }
     }
 
@@ -137,6 +174,20 @@ where
     fn dg_mut(&mut self) -> &mut V {
         &mut self.dg
     }
+
+    fn sg(&self) -> &[V] {
+        self.sg.as_slice()
+    }
+    fn sg_mut(&mut self) -> &mut [V] {
+        &mut self.sg
+    }
+    fn dsg_mut(&mut self) -> &mut [V] {
+        &mut self.dsg
+    }
+    fn dsg(&self) -> &[V] {
+        self.dsg.as_slice()
+    }
+
     fn y_g_mut(&mut self) -> (&mut V, &mut V) {
         (&mut self.y, &mut self.g)
     }

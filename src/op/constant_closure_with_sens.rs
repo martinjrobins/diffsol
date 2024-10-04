@@ -76,7 +76,4 @@ where
     fn sens_mul_inplace(&self, t: Self::T, v: &Self::V, y: &mut Self::V) {
         (self.func_sens)(self.p.as_ref(), t, v, y);
     }
-    fn has_sens(&self) -> bool {
-        true
-    }
 }
