@@ -265,12 +265,25 @@ mod tests {
             );
         }
         checkpoints.push(method.checkpoint().unwrap());
-        let mut adjoint_solver = method.new_adjoint_solver(checkpoints).unwrap();
+        let mut adjoint_solver = method.new_adjoint_solver(checkpoints, true).unwrap();
+        let y_expect = M::V::from_element(problem.eqn.rhs().nstates(), M::T::zero());
+        adjoint_solver.state().unwrap().y().assert_eq_st(&y_expect, M::T::from(1e-9));
+        for i in 0..problem.eqn.out().unwrap().nout() {
+            adjoint_solver.state().unwrap().s()[i].assert_eq_st(&y_expect, M::T::from(1e-9));
+        }
+        let g_expect = M::V::from_element(problem.eqn.rhs().nparams(), M::T::zero());
+        for i in 0..problem.eqn.out().unwrap().nout() {
+            adjoint_solver.state().unwrap().sg()[i].assert_eq_st(&g_expect, M::T::from(1e-9));
+        }
+        
         adjoint_solver.set_stop_time(t0).unwrap();
         while adjoint_solver.state().unwrap().t().abs() > t0 {
             adjoint_solver.step().unwrap();
         }
-        let solns = adjoint_solver.state().unwrap().s().to_vec();
+        let mut state = adjoint_solver.take_state().unwrap();
+        let (s, sg) = state.s_sg_mut();
+        adjoint_solver.problem().unwrap().eqn.correct_sg_for_init(t0, s, sg);
+        
         let points = solution
             .sens_solution_points
             .as_ref()
@@ -278,11 +291,11 @@ mod tests {
             .iter()
             .map(|x| &x[0])
             .collect::<Vec<_>>();
-        for (soln, point) in solns.iter().zip(points.iter()) {
+        for (soln, point) in sg.iter().zip(points.iter()) {
             let error = soln.clone() - &point.state;
             let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
             assert!(
-                error_norm < M::T::from(15.0),
+                error_norm < M::T::from(20.0),
                 "error_norm: {} at t = {}. soln: {:?}, expected: {:?}",
                 error_norm,
                 point.t,

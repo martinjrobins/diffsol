@@ -38,6 +38,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     fn s_mut(&mut self) -> &mut [V];
     fn sg(&self) -> &[V];
     fn sg_mut(&mut self) -> &mut [V];
+    fn s_sg_mut(&mut self) -> (&mut [V], &mut [V]);
     fn ds(&self) -> &[V];
     fn ds_mut(&mut self) -> &mut [V];
     fn dsg(&self) -> &[V];

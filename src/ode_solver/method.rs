@@ -273,5 +273,6 @@ where
     fn new_adjoint_solver(
         &self,
         checkpoints: Vec<Self::State>,
+        include_in_error_control: bool,
     ) -> Result<Self::AdjointSolver, DiffsolError>;
 }

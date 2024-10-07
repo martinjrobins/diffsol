@@ -5,7 +5,7 @@ use crate::{
     ode_solver::problem::OdeSolverSolution,
     op::{closure_with_sens::ClosureWithSens, constant_closure_with_sens::ConstantClosureWithSens},
     LinearClosureWithSens, OdeBuilder, OdeEquations, OdeSolverEquations, OdeSolverProblem,
-    UnitCallable, Vector,
+    UnitCallable, Vector, ConstantOp,
 };
 use num_traits::Zero;
 

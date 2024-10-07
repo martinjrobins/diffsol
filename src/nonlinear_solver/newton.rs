@@ -117,7 +117,7 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
             panic!("NewtonNonlinearSolver::solve() called before set_problem");
         }
         if !self.is_jacobian_set {
-            self.reset_jacobian(xn, t);
+            panic!("NewtonNonlinearSolver::solve_in_place() called before reset_jacobian");
         }
         if xn.len() != self.problem.as_ref().unwrap().f.nstates() {
             panic!("NewtonNonlinearSolver::solve() called with state of wrong size, expected {}, got {}", self.problem.as_ref().unwrap().f.nstates(), xn.len());

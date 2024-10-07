@@ -140,11 +140,14 @@ where
         naug: usize,
     ) -> Self {
         let nstates = y.len();
-        let nout = g.len();
         let diff = M::zeros(nstates, Self::MAX_ORDER + 3);
         let sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3); naug];
-        let gdiff = M::zeros(nout, Self::MAX_ORDER + 3);
-        let sgdiff = vec![M::zeros(nout, Self::MAX_ORDER + 3); naug];
+        let gdiff = M::zeros(g.len(), Self::MAX_ORDER + 3);
+        let sgdiff = if naug > 0 {
+            vec![M::zeros(sg[0].len(), Self::MAX_ORDER + 3); naug]
+        } else {
+            Vec::new()
+        };
         Self {
             order: 1,
             diff,
@@ -186,6 +189,9 @@ where
     }
     fn dsg(&self) -> &[V] {
         self.dsg.as_slice()
+    }
+    fn s_sg_mut(&mut self) -> (&mut [V], &mut [V]) {
+        (self.s.as_mut_slice(), self.sg.as_mut_slice())
     }
 
     fn y_g_mut(&mut self) -> (&mut V, &mut V) {

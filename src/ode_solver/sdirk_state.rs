@@ -90,6 +90,9 @@ where
     fn y_g_mut(&mut self) -> (&mut V, &mut V) {
         (&mut self.y, &mut self.g)
     }
+    fn s_sg_mut(&mut self) -> (&mut [V], &mut [V]) {
+        (self.s.as_mut_slice(), self.sg.as_mut_slice())
+    }
 
     fn s(&self) -> &[V] {
         self.s.as_slice()

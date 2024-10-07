@@ -142,7 +142,7 @@ pub use ode_solver::diffsl::DiffSlContext;
 
 pub use jacobian::{
     find_adjoint_non_zeros, find_jacobian_non_zeros, find_matrix_non_zeros,
-    find_sens_adjoint_non_zeros, find_sens_non_zeros, JacobianColoring,
+    find_sens_adjoint_non_zeros, find_sens_non_zeros, find_transpose_non_zeros, JacobianColoring,
 };
 pub use matrix::{default_solver::DefaultSolver, Matrix};
 use matrix::{
@@ -155,7 +155,7 @@ use nonlinear_solver::{
 pub use nonlinear_solver::{newton::NewtonNonlinearSolver, NonLinearSolver};
 use ode_solver::jacobian_update::JacobianUpdate;
 pub use ode_solver::{
-    adjoint_equations::AdjointEquations, adjoint_equations::AdjointInit,
+    adjoint_equations::AdjointEquations, adjoint_equations::AdjointInit, adjoint_equations::AdjointContext,
     adjoint_equations::AdjointRhs, bdf::Bdf, bdf::BdfAdj, bdf::BdfAug, bdf_state::BdfState,
     builder::OdeBuilder, checkpointing::Checkpointing, equations::AugmentedOdeEquations,
     equations::NoAug, equations::OdeEquations, equations::OdeSolverEquations,
@@ -164,7 +164,7 @@ pub use ode_solver::{
     sens_equations::SensInit, sens_equations::SensRhs, state::OdeSolverState, tableau::Tableau,
 };
 pub use op::{
-    closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure,
+    closure::Closure, constant_closure::ConstantClosure, constant_closure_with_adjoint::ConstantClosureWithAdjoint, linear_closure::LinearClosure,
     unit::UnitCallable, ConstantOp, LinearOp, NonLinearOp, Op,
 };
 use op::{

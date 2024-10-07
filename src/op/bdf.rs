@@ -26,6 +26,11 @@ pub struct BdfCallable<Eqn: OdeEquations> {
 }
 
 impl<Eqn: OdeEquations> BdfCallable<Eqn> {
+
+    // F(y) = M (y - y0 + psi) - c * f(y) = 0
+    // M = I
+    // dg = f(y)
+    // g - y0 + psi = c * dg
     // g - y0 = c * dg - psi
     pub fn integrate_out<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
         &self,

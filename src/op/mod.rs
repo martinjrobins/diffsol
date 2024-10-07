@@ -19,6 +19,8 @@ pub mod linearise;
 pub mod matrix;
 pub mod sdirk;
 pub mod unit;
+pub mod linear_closure_with_adjoint;
+pub mod constant_closure_with_adjoint;
 
 /// A generic operator trait.
 ///
@@ -132,7 +134,7 @@ pub trait NonLinearOp: Op {
         panic!("sens_mul_inplace not implemented");
     }
 
-    /// Compute the product of the tramspose of the gradient of F wrt a parameter vector p with a given vector `J_p(x, t)^T * v`.
+    /// Compute the product of the negative tramspose of the gradient of F wrt a parameter vector p with a given vector `-J_p(x, t)^T * v`.
     fn sens_transpose_mul_inplace(
         &self,
         _x: &Self::V,
@@ -255,7 +257,7 @@ pub trait NonLinearOp: Op {
         y
     }
 
-    /// Compute the transpose of the gradient of the operator wrt a parameter vector p and store it in the matrix `y`.
+    /// Compute the negative transpose of the gradient of the operator wrt a parameter vector p and store it in the matrix `y`.
     /// `y` should have been previously initialised using the output of [`Op::sens_adjoint_sparsity`].
     /// The default implementation of this method computes the gradient using [Self::sens_transpose_mul_inplace],
     /// but it can be overriden for more efficient implementations.
@@ -275,7 +277,7 @@ pub trait NonLinearOp: Op {
         }
     }
 
-    /// Compute the transpose of the gradient of the operator wrt a parameter vector p and return it.
+    /// Compute the negative transpose of the gradient of the operator wrt a parameter vector p and return it.
     /// See [Self::sens_adjoint_inplace] for a non-allocating version.
     fn sens_adjoint(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
@@ -297,8 +299,20 @@ pub trait LinearOp: Op {
         self.gemv_inplace(x, t, beta, y);
     }
 
+    /// Compute the negative transpose of the operator `y = -A(t)^T * x` at a given state and time, the default implementation uses [Self::gemv_transpose_inplace].
+    fn call_transpose_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
+        let beta = Self::T::zero();
+        self.gemv_transpose_inplace(x, t, beta, y);
+    }
+
     /// Compute the operator via a GEMV operation (i.e. `y = A(t) * x + beta * y`)
     fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V);
+
+    /// Compute the negative transpose of the operator via a GEMV operation (i.e. `y = -A(t)^T * x + beta * y`)
+    fn gemv_transpose_inplace(&self, _x: &Self::V, _t: Self::T, _beta: Self::T, _y: &mut Self::V) {
+        panic!("gemv_transpose_inplace not implemented");
+    }
+
 
     /// Compute the product of the gradient of F wrt a parameter vector p with a given vector `J_p(t) * x * v`.
     /// Note that the vector v is of size nparams() and the result is of size nstates().
@@ -346,6 +360,25 @@ pub trait LinearOp: Op {
         }
     }
 
+    /// Compute the matrix representation of the transpose of the operator `A(t)^T` and store it in the matrix `y`.
+    /// The default implementation of this method computes the matrix using [Self::gemv_transpose_inplace],
+    /// but it can be overriden for more efficient implementations.
+    fn transpose_inplace(&self, t: Self::T, y: &mut Self::M) {
+        self._default_transpose_inplace(t, y);
+    }
+
+    /// Default implementation of the tranpose computation, see [Self::transpose_inplace].
+    fn _default_transpose_inplace(&self, t: Self::T, y: &mut Self::M) {
+        let mut v = Self::V::zeros(self.nstates());
+        let mut col = Self::V::zeros(self.nout());
+        for j in 0..self.nstates() {
+            v[j] = Self::T::one();
+            self.call_transpose_inplace(&v, t, &mut col);
+            y.set_column(j, &col);
+            v[j] = Self::T::zero();
+        }
+    }
+
     /// Compute the gradient of the operator wrt a parameter vector p and store it in the matrix `y`.
     /// `y` should have been previously initialised using the output of [`Op::sparsity`].
     /// The default implementation of this method computes the gradient using [Self::sens_mul_inplace],
@@ -387,9 +420,14 @@ pub trait ConstantOp: Op {
 
     /// Compute the product of the gradient of F wrt a parameter vector p with a given vector `J_p(x, t) * v`.
     /// Note that the vector v is of size nparams() and the result is of size nstates().
-    /// Default implementation returns zero and panics if nparams() is not zero.
     fn sens_mul_inplace(&self, _t: Self::T, _v: &Self::V, _y: &mut Self::V) {
         panic!("sens_mul_inplace not implemented");
+    }
+
+    /// Compute the product of the transpose of the gradient of F wrt a parameter vector p with a given vector `-J_p^T(x, t) * v`.
+    /// Note that the vector v is of size nstates() and the result is of size nparam().
+    fn sens_mul_transpose_inplace(&self, _t: Self::T, _v: &Self::V, _y: &mut Self::V) {
+        panic!("sens_mul_transpose_inplace not implemented");
     }
 
     /// Compute the gradient of the operator wrt a parameter vector p and store it in the matrix `y`.

@@ -1,10 +1,11 @@
 use nalgebra::ComplexField;
 use std::ops::AddAssign;
 use std::rc::Rc;
+use std::cell::RefCell;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
-    AdjointEquations, SensEquations,
+    AdjointEquations, SensEquations, AdjointContext
 };
 
 use num_traits::{abs, One, Pow, Zero};
@@ -91,12 +92,13 @@ pub struct BdfAug<
     ode_problem: Option<OdeSolverProblem<Eqn>>,
     n_equal_steps: usize,
     y_delta: Eqn::V,
+    g_delta: Eqn::V,
     y_predict: Eqn::V,
     t_predict: Eqn::T,
     s_predict: Eqn::V,
     s_op: Option<BdfCallable<AugmentedEqn>>,
     s_deltas: Vec<Eqn::V>,
-    g_delta: Eqn::V,
+    sg_deltas: Vec<Eqn::V>,
     diff_tmp: M,
     u: M,
     alpha: Vec<Eqn::T>,
@@ -108,6 +110,7 @@ pub struct BdfAug<
     root_finder: Option<RootFinder<Eqn::V>>,
     is_state_modified: bool,
     jacobian_update: JacobianUpdate<Eqn::T>,
+    is_adjoint: bool,
 }
 
 impl<Eqn, AugmentedEqn> Default
@@ -187,6 +190,7 @@ where
             t_predict: Eqn::T::zero(),
             s_predict: Eqn::V::zeros(n),
             s_deltas: Vec::new(),
+            sg_deltas: Vec::new(),
             g_delta: Eqn::V::zeros(n),
             gamma,
             alpha,
@@ -198,6 +202,7 @@ where
             root_finder: None,
             is_state_modified: false,
             jacobian_update: JacobianUpdate::default(),
+            is_adjoint: false,
         }
     }
 
@@ -268,16 +273,14 @@ where
         {
             let state = self.state.as_mut().unwrap();
             Self::_update_diff_for_step_size(&ru, &mut state.diff, &mut self.diff_tmp, order);
-            for i in 0..state.sdiff.len() {
-                Self::_update_diff_for_step_size(
-                    &ru,
-                    &mut state.sdiff[i],
-                    &mut self.diff_tmp,
-                    order,
-                );
+            for diff in state.sdiff.iter_mut() {
+                Self::_update_diff_for_step_size(&ru, diff, &mut self.diff_tmp, order);
             }
             if self.ode_problem.as_ref().unwrap().eqn.out().is_some() {
                 Self::_update_diff_for_step_size(&ru, &mut state.gdiff, &mut self.diff_tmp, order);
+            }
+            for diff in state.sgdiff.iter_mut() {
+                Self::_update_diff_for_step_size(&ru, diff, &mut self.diff_tmp, order);
             }
         }
 
@@ -306,15 +309,59 @@ where
         std::mem::swap(diff, diff_tmp);
     }
 
-    fn update_differences(&mut self) {
+    fn update_differences_and_integrate_out(&mut self) {
         let order = self.state.as_ref().unwrap().order;
         let state = self.state.as_mut().unwrap();
+
+        // update differences
         Self::_update_diff(order, &self.y_delta, &mut state.diff);
-        for i in 0..state.sdiff.len() {
-            Self::_update_diff(order, &self.s_deltas[i], &mut state.sdiff[i]);
-        }
-        if self.ode_problem.as_ref().unwrap().eqn.out().is_some() {
+
+        // integrate output function
+        if let Some(out) = self.ode_problem.as_ref().unwrap().eqn.out() {
+            out.call_inplace(&self.y_predict, self.t_predict, &mut state.dg);
+            self.nonlinear_solver.problem().f.integrate_out(
+                &state.dg,
+                &state.gdiff,
+                self.gamma.as_slice(),
+                self.alpha.as_slice(),
+                state.order,
+                &mut self.g_delta,
+            );
+            Self::_predict_using_diff(&mut state.g, &state.gdiff, order);
+            state.g.axpy(Eqn::T::one(), &self.g_delta, Eqn::T::one());
+
+            // update output difference
             Self::_update_diff(order, &self.g_delta, &mut state.gdiff);
+        }
+
+        // do the same for sensitivities
+        if self.s_op.is_some() {
+            for i in 0..self.s_op.as_ref().unwrap().eqn().max_index() {
+                Rc::get_mut(self.s_op.as_mut().unwrap().eqn_mut()).unwrap().set_index(i);
+                let op = self.s_op.as_ref().unwrap();
+
+                // update sensitivity differences
+                Self::_update_diff(order, &self.s_deltas[i], &mut state.sdiff[i]);
+
+                // integrate sensitivity output equations
+                if let Some(out) = op.eqn().out() {
+                    out.call_inplace(&state.s[i], self.t_predict, &mut state.dsg[i]);
+                    self.nonlinear_solver.problem().f.integrate_out(
+                        &state.dsg[i],
+                        &state.sgdiff[i],
+                        self.gamma.as_slice(),
+                        self.alpha.as_slice(),
+                        state.order,
+                        &mut self.sg_deltas[i],
+                    );
+                    Self::_predict_using_diff(&mut state.sg[i], &state.sgdiff[i], order);
+                    state.sg[i].axpy(Eqn::T::one(), &self.sg_deltas[i], Eqn::T::one());
+
+                    // update sensitivity output difference
+                    Self::_update_diff(order, &self.sg_deltas[i], &mut state.sgdiff[i]);
+                }
+
+            }
         }
     }
 
@@ -403,18 +450,26 @@ where
             .as_mut()
             .unwrap()
             .initialise_diff_to_first_order();
-        if self.s_op.is_some() {
-            self.state
-                .as_mut()
-                .unwrap()
-                .initialise_sdiff_to_first_order();
-        }
+
         if self.ode_problem.as_ref().unwrap().eqn.out().is_some() {
             self.state
                 .as_mut()
                 .unwrap()
                 .initialise_gdiff_to_first_order();
         }
+        if self.s_op.is_some() {
+            self.state
+                .as_mut()
+                .unwrap()
+                .initialise_sdiff_to_first_order();
+            if self.s_op.as_ref().unwrap().eqn().out().is_some() {
+                self.state
+                    .as_mut()
+                    .unwrap()
+                    .initialise_sgdiff_to_first_order();
+            }
+        }
+        
 
         self.u = Self::_compute_r(1, Eqn::T::one());
         self.is_state_modified = false;
@@ -440,12 +495,12 @@ where
     ) -> Result<Eqn::T, DiffsolError> {
         let h = self.state.as_ref().unwrap().h;
         let order = self.state.as_ref().unwrap().order;
+        let op = self.s_op.as_mut().unwrap();
 
         // update for new state
         {
             let dy_new = self.nonlinear_solver.problem().f.tmp();
             let y_new = &self.y_predict;
-            let op = self.s_op.as_mut().unwrap();
             Rc::get_mut(op.eqn_mut())
                 .unwrap()
                 .update_rhs_out_state(y_new, &dy_new, t_new);
@@ -455,10 +510,8 @@ where
         }
 
         // solve for sensitivities equations discretised using BDF
-        let rtol = self.problem().as_ref().unwrap().rtol;
-        let atol = self.problem().as_ref().unwrap().atol.clone();
-        let nparams = self.problem().as_ref().unwrap().eqn.rhs().nparams();
-        for i in 0..nparams {
+        let naug = op.eqn().max_index();
+        for i in 0..naug {
             // setup
             {
                 let state = self.state.as_ref().unwrap();
@@ -466,7 +519,6 @@ where
                 Self::_predict_using_diff(&mut self.s_predict, &state.sdiff[i], order);
 
                 // setup op
-                let op = self.s_op.as_mut().unwrap();
                 op.set_psi_and_y0(
                     &state.sdiff[i],
                     self.gamma.as_slice(),
@@ -481,9 +533,8 @@ where
             {
                 let s_new = &mut self.state.as_mut().unwrap().s[i];
                 s_new.copy_from(&self.s_predict);
-                let op = self.s_op.as_ref().unwrap();
                 self.nonlinear_solver
-                    .solve_other_in_place(op, s_new, t_new, &self.s_predict)?;
+                    .solve_other_in_place(&*op, s_new, t_new, &self.s_predict)?;
                 self.statistics.number_of_nonlinear_solver_iterations +=
                     self.nonlinear_solver.convergence().niter();
                 let s_new = &*s_new;
@@ -493,12 +544,14 @@ where
 
             let s_new = &self.state.as_ref().unwrap().s[i];
 
-            if self.s_op.as_ref().unwrap().eqn().include_in_error_control() {
-                error_norm += self.s_deltas[i].squared_norm(s_new, atol.as_ref(), rtol);
+            if op.eqn().include_in_error_control() {
+                let rtol = self.ode_problem.as_ref().unwrap().rtol;
+                let atol = self.ode_problem.as_ref().unwrap().atol.as_ref();
+                error_norm += self.s_deltas[i].squared_norm(s_new, atol, rtol);
             }
         }
-        if self.s_op.as_ref().unwrap().eqn().include_in_error_control() {
-            error_norm /= Eqn::T::from(nparams as f64 + 1.0);
+        if op.eqn().include_in_error_control() {
+            error_norm /= Eqn::T::from(naug as f64 + 1.0);
         }
         Ok(error_norm)
     }
@@ -642,6 +695,7 @@ where
         self.nonlinear_solver
             .convergence_mut()
             .set_max_iter(Self::NEWTON_MAXITER);
+        self.nonlinear_solver.reset_jacobian(&state.y, state.t);
 
         // setup root solver
         if let Some(root_fn) = problem.eqn.root() {
@@ -798,23 +852,8 @@ where
             }
         }
 
-        // integrate output function
-        if let Some(out) = self.ode_problem.as_ref().unwrap().eqn.out() {
-            let state = self.state.as_mut().unwrap();
-            out.call_inplace(&self.y_predict, self.t_predict, &mut state.dg);
-            self.nonlinear_solver.problem().f.integrate_out(
-                &state.dg,
-                &state.gdiff,
-                self.gamma.as_slice(),
-                self.alpha.as_slice(),
-                state.order,
-                &mut self.g_delta,
-            );
-            state.g.axpy(Eqn::T::one(), &self.g_delta, Eqn::T::one());
-        }
-
         // take the accepted step
-        self.update_differences();
+        self.update_differences_and_integrate_out();
 
         {
             let state = self.state.as_mut().unwrap();
@@ -1002,6 +1041,11 @@ where
         if self.s_predict.len() != nstates {
             self.s_predict = <Eqn::V as Vector>::zeros(nstates);
         }
+        if let Some(out) = self.s_op.as_ref().unwrap().eqn().out() {
+            if self.sg_deltas.len() != naug || self.sg_deltas[0].len() != out.nout() {
+                self.sg_deltas = vec![<Eqn::V as Vector>::zeros(out.nout()); naug];
+            }
+        }
         Ok(())
     }
 }
@@ -1025,21 +1069,24 @@ where
     fn new_adjoint_solver(
         &self,
         checkpoints: Vec<Self::State>,
+        include_in_error_control: bool,
     ) -> Result<Self::AdjointSolver, DiffsolError> {
         // construct checkpointing
         let checkpointer_nls = Nls::default();
         let checkpointer_solver = Self::new(checkpointer_nls);
         let problem = self.ode_problem.as_ref().unwrap();
-        let checkpointer = Rc::new(Checkpointing::new(
+        let checkpointer = Checkpointing::new(
             problem,
             checkpointer_solver,
             checkpoints.len() - 2,
             checkpoints,
-        ));
+        );
 
         // construct adjoint equations and problem
-        let new_eqn = AdjointEquations::new(&problem.eqn, checkpointer.clone(), false);
-        let mut new_augmented_eqn = AdjointEquations::new(&problem.eqn, checkpointer, true);
+        let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
+        let new_eqn = AdjointEquations::new(&problem.eqn, context.clone(), false);
+        let mut new_augmented_eqn = AdjointEquations::new(&problem.eqn, context, true);
+        new_augmented_eqn.set_include_in_error_control(include_in_error_control);
         let adj_problem = OdeSolverProblem {
             eqn: Rc::new(new_eqn),
             rtol: problem.rtol,
@@ -1214,10 +1261,36 @@ mod test {
         let mut s = Bdf::default();
         let (problem, soln) = exponential_decay_problem_adjoint::<M>();
         let adjoint_solver = test_ode_solver_adjoint(&mut s, &problem, soln);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###""###);
-        insta::assert_yaml_snapshot!(s.problem().as_ref().unwrap().eqn.rhs().statistics(), @r###""###);
-        insta::assert_yaml_snapshot!(adjoint_solver.get_statistics(), @r###""###);
-        insta::assert_yaml_snapshot!(adjoint_solver.problem().as_ref().unwrap().eqn.rhs().statistics(), @r###""###);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 12
+        number_of_steps: 41
+        number_of_error_test_failures: 0
+        number_of_nonlinear_solver_iterations: 82
+        number_of_nonlinear_solver_fails: 0
+        "###);
+        insta::assert_yaml_snapshot!(s.problem().as_ref().unwrap().eqn.rhs().statistics(), @r###"
+        ---
+        number_of_calls: 166
+        number_of_jac_muls: 8
+        number_of_matrix_evals: 4
+        number_of_jac_adj_muls: 254
+        "###);
+        insta::assert_yaml_snapshot!(adjoint_solver.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 18
+        number_of_steps: 41
+        number_of_error_test_failures: 9
+        number_of_nonlinear_solver_iterations: 250
+        number_of_nonlinear_solver_fails: 0
+        "###);
+        insta::assert_yaml_snapshot!(s.problem().as_ref().unwrap().eqn.rhs().statistics(), @r###"
+        ---
+        number_of_calls: 0
+        number_of_jac_muls: 0
+        number_of_matrix_evals: 0
+        number_of_jac_adj_muls: 0
+        "###);
     }
 
     #[test]

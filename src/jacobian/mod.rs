@@ -64,6 +64,7 @@ macro_rules! gen_find_non_zeros_linear {
 }
 
 gen_find_non_zeros_linear!(find_matrix_non_zeros, call_inplace);
+gen_find_non_zeros_linear!(find_transpose_non_zeros, call_transpose_inplace);
 
 pub struct JacobianColoring<M: Matrix> {
     dst_indices_per_color: Vec<<M::V as Vector>::Index>,
