@@ -63,6 +63,8 @@ impl<Op> LinearSolver<Op> for SundialsLinearSolver<Op>
 where
     Op: NonLinearOp<M = SundialsMatrix, V = SundialsVector, T = realtype>,
 {
+    type SelfNewOp<C2: NonLinearOp<T = Op::T, V = Op::V, M = Op::M>> = SundialsLinearSolver<C2>;
+
     fn set_problem(&mut self, problem: &SolverProblem<Op>) {
         let linearised_problem = problem.linearise();
         let matrix = SundialsMatrix::zeros(
@@ -84,6 +86,13 @@ where
         self.matrix = Some(matrix);
         self.problem = Some(linearised_problem);
         self.linear_solver = Some(linear_solver);
+    }
+
+    fn clear_problem(&mut self) {
+        self.problem = None;
+        self.matrix = None;
+        self.linear_solver = None;
+        self.is_setup = false;
     }
 
     fn set_linearisation(&mut self, x: &Op::V, t: Op::T) {

@@ -1,12 +1,14 @@
 use crate::{
     matrix::{MatrixRef, MatrixView},
     ode_solver::equations::OdeEquations,
-    LinearOp, Matrix, MatrixSparsity, MatrixSparsityRef, OdeSolverProblem, Vector, VectorRef,
+    scale, LinearOp, Matrix, MatrixSparsity, MatrixSparsityRef, OdeSolverProblem, Vector,
+    VectorRef,
 };
 use num_traits::{One, Zero};
 use std::{
     cell::{Ref, RefCell},
     ops::Deref,
+    ops::MulAssign,
     rc::Rc,
 };
 
@@ -27,6 +29,11 @@ pub struct SdirkCallable<Eqn: OdeEquations> {
 }
 
 impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
+    //  y = h g(phi + c * y_s)
+    pub fn integrate_out(&self, ys: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
+        self.eqn.out().unwrap().call_inplace(ys, t, y);
+        y.mul_assign(scale(*(self.h.borrow())));
+    }
     pub fn from_eqn(eqn: Rc<Eqn>, c: Eqn::T) -> Self {
         let n = eqn.rhs().nstates();
         let h = RefCell::new(Eqn::T::zero());
@@ -49,6 +56,10 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
             tmp,
             sparsity,
         }
+    }
+
+    pub fn eqn_mut(&mut self) -> &mut Rc<Eqn> {
+        &mut self.eqn
     }
 
     pub fn new(ode_problem: &OdeSolverProblem<Eqn>, c: Eqn::T) -> Self {

@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::{
-    find_non_zeros_linear, find_non_zeros_nonlinear, ode_solver::problem::OdeSolverSolution,
+    find_jacobian_non_zeros, find_matrix_non_zeros, ode_solver::problem::OdeSolverSolution,
     ConstantOp, JacobianColoring, LinearOp, Matrix, MatrixSparsity, NonLinearOp, OdeEquations,
     OdeSolverProblem, Op, UnitCallable, Vector,
 };
@@ -392,7 +392,7 @@ where
             sparsity: None,
             coloring: None,
         };
-        let non_zeros = find_non_zeros_nonlinear(&ret, y0, t0);
+        let non_zeros = find_jacobian_non_zeros(&ret, y0, t0);
         ret.sparsity = Some(
             MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone()).unwrap(),
         );
@@ -619,7 +619,7 @@ where
             sparsity: None,
             coloring: None,
         };
-        let non_zeros = find_non_zeros_linear(&ret, t0);
+        let non_zeros = find_matrix_non_zeros(&ret, t0);
         ret.sparsity = Some(
             MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone()).unwrap(),
         );
@@ -817,7 +817,7 @@ where
 {
     pub fn new(y0: &M::V, t0: M::T) -> Self {
         let mut ret = Self { sparsity: None };
-        let non_zeros = find_non_zeros_nonlinear(&ret, y0, t0);
+        let non_zeros = find_jacobian_non_zeros(&ret, y0, t0);
         ret.sparsity = Some(
             MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone()).unwrap(),
         );
@@ -1015,7 +1015,7 @@ where
     let t0 = M::T::zero();
     let h0 = M::T::from(1.0);
     let eqn = FoodWeb::new(context, t0);
-    let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, false, false).unwrap();
+    let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0).unwrap();
     let soln = soln::<M>();
     (problem, soln)
 }

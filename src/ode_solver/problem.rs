@@ -4,7 +4,7 @@ use crate::{
     error::{DiffsolError, OdeSolverError},
     ode_solver_error,
     vector::Vector,
-    ConstantOp, LinearOp, NonLinearOp, OdeEquations, SensEquations,
+    OdeEquations,
 };
 
 pub struct OdeSolverProblem<Eqn: OdeEquations> {
@@ -13,8 +13,6 @@ pub struct OdeSolverProblem<Eqn: OdeEquations> {
     pub atol: Rc<Eqn::V>,
     pub t0: Eqn::T,
     pub h0: Eqn::T,
-    pub eqn_sens: Option<Rc<SensEquations<Eqn>>>,
-    pub sens_error_control: bool,
 }
 
 // impl clone
@@ -26,8 +24,6 @@ impl<Eqn: OdeEquations> Clone for OdeSolverProblem<Eqn> {
             atol: self.atol.clone(),
             t0: self.t0,
             h0: self.h0,
-            eqn_sens: self.eqn_sens.clone(),
-            sens_error_control: self.sens_error_control,
         }
     }
 }
@@ -45,33 +41,15 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
         atol: Eqn::V,
         t0: Eqn::T,
         h0: Eqn::T,
-        with_sensitivity: bool,
-        sens_error_control: bool,
     ) -> Result<Self, DiffsolError> {
         let eqn = Rc::new(eqn);
         let atol = Rc::new(atol);
-        let mass_has_sens = if let Some(mass) = eqn.mass() {
-            mass.has_sens()
-        } else {
-            true
-        };
-        let eqn_has_sens = eqn.rhs().has_sens() && eqn.init().has_sens() && mass_has_sens;
-        if with_sensitivity && !eqn_has_sens {
-            return Err(ode_solver_error!(SensitivityNotSupported));
-        }
-        let eqn_sens = if with_sensitivity {
-            Some(Rc::new(SensEquations::new(&eqn)))
-        } else {
-            None
-        };
         Ok(Self {
             eqn,
             rtol,
             atol,
             t0,
             h0,
-            eqn_sens,
-            sens_error_control,
         })
     }
 

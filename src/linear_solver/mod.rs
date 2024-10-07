@@ -1,4 +1,4 @@
-use crate::{error::DiffsolError, op::Op, solver::SolverProblem};
+use crate::{error::DiffsolError, op::Op, solver::SolverProblem, NonLinearOp};
 
 #[cfg(feature = "nalgebra")]
 pub mod nalgebra;
@@ -16,10 +16,15 @@ pub use faer::lu::LU as FaerLU;
 pub use nalgebra::lu::LU as NalgebraLU;
 
 /// A solver for the linear problem `Ax = b`, where `A` is a linear operator that is obtained by taking the linearisation of a nonlinear operator `C`
-pub trait LinearSolver<C: Op> {
+pub trait LinearSolver<C: Op>: Default {
+    type SelfNewOp<C2: NonLinearOp<T = C::T, V = C::V, M = C::M>>: LinearSolver<C2>;
+
     /// Set the problem to be solved, any previous problem is discarded.
     /// Any internal state of the solver is reset.
     fn set_problem(&mut self, problem: &SolverProblem<C>);
+
+    /// Clear the current problem, any internal state of the solver is reset.
+    fn clear_problem(&mut self);
 
     // sets the point at which the linearisation of the operator is evaluated
     fn set_linearisation(&mut self, x: &C::V, t: C::T);

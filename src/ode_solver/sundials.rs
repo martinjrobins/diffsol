@@ -378,10 +378,6 @@ where
         // set jacobian function
         Self::check(unsafe { IDASetJacFn(ida_mem, Some(Self::jacobian)) }).unwrap();
 
-        // sensitivities
-        if self.problem.as_ref().unwrap().eqn_sens.is_some() {
-            panic!("Sensitivities not implemented for sundials solver");
-        }
         Ok(())
     }
 
@@ -455,11 +451,15 @@ where
         Ok(ret)
     }
 
+    fn interpolate_out(&self, _t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
+        unimplemented!()
+    }
+
     fn interpolate_sens(
         &self,
         _t: <Eqn as OdeEquations>::T,
     ) -> Result<Vec<<Eqn as OdeEquations>::V>, DiffsolError> {
-        Ok(vec![])
+        unimplemented!()
     }
 }
 
@@ -474,7 +474,9 @@ mod test {
                 heat2d::head2d_problem,
                 robertson::robertson,
             },
-            tests::{test_interpolate, test_no_set_problem, test_ode_solver, test_state_mut},
+            tests::{
+                test_interpolate, test_no_set_problem, test_ode_solver_no_sens, test_state_mut,
+            },
         },
         OdeEquations, Op, SundialsIda, SundialsMatrix,
     };
@@ -497,7 +499,7 @@ mod test {
     fn test_sundials_exponential_decay() {
         let mut s = crate::SundialsIda::default();
         let (problem, soln) = exponential_decay_problem::<crate::SundialsMatrix>(false);
-        test_ode_solver(&mut s, &problem, soln, None, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 18
@@ -518,7 +520,7 @@ mod test {
     fn test_sundials_robertson() {
         let mut s = crate::SundialsIda::default();
         let (problem, soln) = robertson::<crate::SundialsMatrix>(false);
-        test_ode_solver(&mut s, &problem, soln, None, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 59
@@ -540,7 +542,7 @@ mod test {
         let foodweb_context = FoodWebContext::default();
         let mut s = crate::SundialsIda::default();
         let (problem, soln) = foodweb_problem::<crate::SundialsMatrix, 10>(&foodweb_context);
-        test_ode_solver(&mut s, &problem, soln, None, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 42
@@ -554,7 +556,7 @@ mod test {
     fn test_sundials_heat2d() {
         let mut s = crate::SundialsIda::default();
         let (problem, soln) = head2d_problem::<crate::SundialsMatrix, 10>();
-        test_ode_solver(&mut s, &problem, soln, None, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 42

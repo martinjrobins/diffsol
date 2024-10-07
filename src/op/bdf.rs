@@ -26,7 +26,26 @@ pub struct BdfCallable<Eqn: OdeEquations> {
 }
 
 impl<Eqn: OdeEquations> BdfCallable<Eqn> {
-    pub fn from_eqn(eqn: &Rc<Eqn>) -> Self {
+
+    // F(y) = M (y - y0 + psi) - c * f(y) = 0
+    // M = I
+    // dg = f(y)
+    // g - y0 + psi = c * dg
+    // g - y0 = c * dg - psi
+    pub fn integrate_out<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
+        &self,
+        dg: &Eqn::V,
+        diff: &M,
+        gamma: &[Eqn::T],
+        alpha: &[Eqn::T],
+        order: usize,
+        d: &mut Eqn::V,
+    ) {
+        self.set_psi(diff, gamma, alpha, order, d);
+        let c = self.c.borrow();
+        d.axpy(*c, dg, -Eqn::T::one());
+    }
+    pub fn from_sensitivity_eqn(eqn: &Rc<Eqn>) -> Self {
         let eqn = eqn.clone();
         let n = eqn.rhs().nstates();
         let c = RefCell::new(Eqn::T::zero());
@@ -48,6 +67,9 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
             tmp,
             sparsity,
         }
+    }
+    pub fn eqn_mut(&mut self) -> &mut Rc<Eqn> {
+        &mut self.eqn
     }
     pub fn eqn(&self) -> &Rc<Eqn> {
         &self.eqn
@@ -133,6 +155,21 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
     {
         self.c.replace(h * alpha);
     }
+    fn set_psi<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
+        &self,
+        diff: &M,
+        gamma: &[Eqn::T],
+        alpha: &[Eqn::T],
+        order: usize,
+        psi: &mut Eqn::V,
+    ) {
+        // update psi term as defined in second equation on page 9 of [1]
+        psi.axpy_v(gamma[1], &diff.column(1), Eqn::T::zero());
+        for (i, &gamma_i) in gamma.iter().enumerate().take(order + 1).skip(2) {
+            psi.axpy_v(gamma_i, &diff.column(i), Eqn::T::one());
+        }
+        psi.mul_assign(scale(alpha[order]));
+    }
     pub fn set_psi_and_y0<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
         &self,
         diff: &M,
@@ -141,13 +178,8 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
         order: usize,
         y0: &Eqn::V,
     ) {
-        // update psi term as defined in second equation on page 9 of [1]
         let mut psi = self.psi_neg_y0.borrow_mut();
-        psi.axpy_v(gamma[1], &diff.column(1), Eqn::T::zero());
-        for (i, &gamma_i) in gamma.iter().enumerate().take(order + 1).skip(2) {
-            psi.axpy_v(gamma_i, &diff.column(i), Eqn::T::one());
-        }
-        psi.mul_assign(scale(alpha[order]));
+        self.set_psi(diff, gamma, alpha, order, &mut psi);
 
         // now negate y0
         psi.sub_assign(y0);

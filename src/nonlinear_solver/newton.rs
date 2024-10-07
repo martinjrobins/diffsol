@@ -2,7 +2,7 @@ use crate::{
     error::{DiffsolError, NonLinearSolverError},
     non_linear_solver_error,
     op::NonLinearOp,
-    Convergence, ConvergenceStatus, LinearSolver, NonLinearSolver, SolverProblem, Vector,
+    Convergence, ConvergenceStatus, LinearSolver, NonLinearSolver, Op, SolverProblem, Vector,
 };
 
 pub fn newton_iteration<V: Vector>(
@@ -55,7 +55,16 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NewtonNonlinearSolver<C, Ls> {
     }
 }
 
+impl<C: NonLinearOp, Ls: LinearSolver<C>> Default for NewtonNonlinearSolver<C, Ls> {
+    fn default() -> Self {
+        Self::new(Ls::default())
+    }
+}
+
 impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinearSolver<C, Ls> {
+    type SelfNewOp<C2: NonLinearOp<T = C::T, V = C::V, M = C::M>> =
+        NewtonNonlinearSolver<C2, Ls::SelfNewOp<C2>>;
+
     fn convergence(&self) -> &Convergence<C::V> {
         self.convergence
             .as_ref()
@@ -82,6 +91,13 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
         self.tmp = C::V::zeros(problem.f.nstates());
     }
 
+    fn clear_problem(&mut self) {
+        self.problem = None;
+        self.convergence = None;
+        self.linear_solver.clear_problem();
+        self.is_jacobian_set = false;
+    }
+
     fn reset_jacobian(&mut self, x: &C::V, t: C::T) {
         self.linear_solver.set_linearisation(x, t);
         self.is_jacobian_set = true;
@@ -101,7 +117,7 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
             panic!("NewtonNonlinearSolver::solve() called before set_problem");
         }
         if !self.is_jacobian_set {
-            self.reset_jacobian(xn, t);
+            panic!("NewtonNonlinearSolver::solve_in_place() called before reset_jacobian");
         }
         if xn.len() != self.problem.as_ref().unwrap().f.nstates() {
             panic!("NewtonNonlinearSolver::solve() called with state of wrong size, expected {}, got {}", self.problem.as_ref().unwrap().f.nstates(), xn.len());
@@ -109,6 +125,28 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
         let linear_solver = |x: &mut C::V| self.linear_solver.solve_in_place(x);
         let problem = self.problem.as_ref().unwrap();
         let fun = |x: &C::V, y: &mut C::V| problem.f.call_inplace(x, t, y);
+        let convergence = self.convergence.as_mut().unwrap();
+        newton_iteration(xn, &mut self.tmp, error_y, fun, linear_solver, convergence)
+    }
+
+    fn solve_other_in_place(
+        &mut self,
+        g: impl NonLinearOp<M = C::M, V = C::V, T = C::T>,
+        xn: &mut <C as Op>::V,
+        t: <C as Op>::T,
+        error_y: &<C as Op>::V,
+    ) -> Result<(), DiffsolError> {
+        if self.convergence.is_none() || self.problem.is_none() {
+            panic!("NewtonNonlinearSolver::solve() called before set_problem");
+        }
+        if !self.is_jacobian_set {
+            panic!("NewtonNonlinearSolver::solve_other_in_place() called before reset_jacobian");
+        }
+        if xn.len() != g.nstates() {
+            panic!("NewtonNonlinearSolver::solve() called with state of wrong size, expected {}, got {}", g.nstates(), xn.len());
+        }
+        let linear_solver = |x: &mut C::V| self.linear_solver.solve_in_place(x);
+        let fun = |x: &C::V, y: &mut C::V| g.call_inplace(x, t, y);
         let convergence = self.convergence.as_mut().unwrap();
         newton_iteration(xn, &mut self.tmp, error_y, fun, linear_solver, convergence)
     }

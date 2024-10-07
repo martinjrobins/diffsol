@@ -1,34 +1,38 @@
+use num_traits::Zero;
 use std::rc::Rc;
 
 use crate::{Matrix, Vector};
 
 use super::{ConstantOp, Op};
 
-pub struct ConstantClosureWithSens<M, I, J>
+pub struct ConstantClosureWithAdjoint<M, I, J>
 where
     M: Matrix,
     I: Fn(&M::V, M::T) -> M::V,
     J: Fn(&M::V, M::T, &M::V, &mut M::V),
 {
     func: I,
-    func_sens: J,
+    func_sens_adjoint: J,
     nstates: usize,
     nout: usize,
     nparams: usize,
     p: Rc<M::V>,
 }
 
-impl<M, I, J> ConstantClosureWithSens<M, I, J>
+impl<M, I, J> ConstantClosureWithAdjoint<M, I, J>
 where
     M: Matrix,
     I: Fn(&M::V, M::T) -> M::V,
     J: Fn(&M::V, M::T, &M::V, &mut M::V),
 {
-    pub fn new(func: I, func_sens: J, nstates: usize, nout: usize, p: Rc<M::V>) -> Self {
+    pub fn new(func: I, func_sens_adjoint: J, p: Rc<M::V>) -> Self {
         let nparams = p.len();
+        let y0 = (func)(p.as_ref(), M::T::zero());
+        let nstates = y0.len();
+        let nout = nstates;
         Self {
             func,
-            func_sens,
+            func_sens_adjoint,
             nstates,
             nout,
             nparams,
@@ -37,7 +41,7 @@ where
     }
 }
 
-impl<M, I, J> Op for ConstantClosureWithSens<M, I, J>
+impl<M, I, J> Op for ConstantClosureWithAdjoint<M, I, J>
 where
     M: Matrix,
     I: Fn(&M::V, M::T) -> M::V,
@@ -61,7 +65,7 @@ where
     }
 }
 
-impl<M, I, J> ConstantOp for ConstantClosureWithSens<M, I, J>
+impl<M, I, J> ConstantOp for ConstantClosureWithAdjoint<M, I, J>
 where
     M: Matrix,
     I: Fn(&M::V, M::T) -> M::V,
@@ -73,7 +77,7 @@ where
     fn call(&self, t: Self::T) -> Self::V {
         (self.func)(self.p.as_ref(), t)
     }
-    fn sens_mul_inplace(&self, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        (self.func_sens)(self.p.as_ref(), t, v, y);
+    fn sens_mul_transpose_inplace(&self, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        (self.func_sens_adjoint)(self.p.as_ref(), t, v, y);
     }
 }

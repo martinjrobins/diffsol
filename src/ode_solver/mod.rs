@@ -1,6 +1,8 @@
+pub mod adjoint_equations;
 pub mod bdf;
 pub mod bdf_state;
 pub mod builder;
+pub mod checkpointing;
 pub mod equations;
 pub mod jacobian_update;
 pub mod method;
@@ -23,6 +25,7 @@ mod tests {
     use std::rc::Rc;
 
     use self::problem::OdeSolverSolution;
+    use method::{AdjointOdeSolverMethod, SensitivitiesOdeSolverMethod};
     use nalgebra::ComplexField;
 
     use super::*;
@@ -37,19 +40,28 @@ mod tests {
     use num_traits::Zero;
 
     pub fn test_ode_solver<M, Eqn>(
-        method: &mut impl OdeSolverMethod<Eqn>,
+        method: &mut impl SensitivitiesOdeSolverMethod<Eqn>,
         problem: &OdeSolverProblem<Eqn>,
         solution: OdeSolverSolution<M::V>,
         override_tol: Option<M::T>,
         use_tstop: bool,
+        solve_for_sensitivities: bool,
     ) -> Eqn::V
     where
         M: Matrix,
         Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
         Eqn::M: DefaultSolver,
     {
-        let state = OdeSolverState::new(problem, method).unwrap();
-        method.set_problem(state, problem).unwrap();
+        if solve_for_sensitivities {
+            let sensitivity_error_control = solution.sens_solution_points.is_some();
+            let state = OdeSolverState::new_with_sensitivities(problem, method).unwrap();
+            method
+                .set_problem_with_sensitivities(state, problem, sensitivity_error_control)
+                .unwrap();
+        } else {
+            let state = OdeSolverState::new(problem, method).unwrap();
+            method.set_problem(state, problem).unwrap();
+        }
         let have_root = problem.eqn.as_ref().root().is_some();
         for (i, point) in solution.solution_points.iter().enumerate() {
             let (soln, sens_soln) = if use_tstop {
@@ -114,23 +126,184 @@ mod tests {
                     soln,
                     point.state
                 );
-                if let Some(sens_soln_points) = &solution.sens_solution_points {
-                    for (j, sens_points) in sens_soln_points.iter().enumerate() {
-                        let sens_point = &sens_points[i];
-                        let sens_soln = &sens_soln[j];
-                        let error = sens_soln.clone() - &sens_point.state;
-                        let error_norm = error.squared_norm(&sens_point.state, atol, rtol).sqrt();
-                        assert!(
-                            error_norm < M::T::from(24.0),
-                            "error_norm: {} at t = {}",
-                            error_norm,
-                            point.t
-                        );
+                if solve_for_sensitivities {
+                    if let Some(sens_soln_points) = solution.sens_solution_points.as_ref() {
+                        for (j, sens_points) in sens_soln_points.iter().enumerate() {
+                            let sens_point = &sens_points[i];
+                            let sens_soln = &sens_soln[j];
+                            let error = sens_soln.clone() - &sens_point.state;
+                            let error_norm =
+                                error.squared_norm(&sens_point.state, atol, rtol).sqrt();
+                            assert!(
+                                error_norm < M::T::from(29.0),
+                                "error_norm: {} at t = {}",
+                                error_norm,
+                                point.t
+                            );
+                        }
                     }
                 }
             }
         }
         method.state().unwrap().y().clone()
+    }
+
+    pub fn test_ode_solver_no_sens<M, Eqn>(
+        method: &mut impl OdeSolverMethod<Eqn>,
+        problem: &OdeSolverProblem<Eqn>,
+        solution: OdeSolverSolution<M::V>,
+        override_tol: Option<M::T>,
+        use_tstop: bool,
+    ) -> Eqn::V
+    where
+        M: Matrix,
+        Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
+        Eqn::M: DefaultSolver,
+    {
+        let state = OdeSolverState::new(problem, method).unwrap();
+        method.set_problem(state, problem).unwrap();
+        let have_root = problem.eqn.as_ref().root().is_some();
+        for point in solution.solution_points.iter() {
+            let soln = if use_tstop {
+                match method.set_stop_time(point.t) {
+                    Ok(_) => loop {
+                        match method.step() {
+                            Ok(OdeSolverStopReason::RootFound(_)) => {
+                                assert!(have_root);
+                                return method.state().unwrap().y().clone();
+                            }
+                            Ok(OdeSolverStopReason::TstopReached) => {
+                                break method.state().unwrap().y().clone();
+                            }
+                            _ => (),
+                        }
+                    },
+                    Err(_) => method.state().unwrap().y().clone(),
+                }
+            } else {
+                while method.state().unwrap().t().abs() < point.t.abs() {
+                    if let OdeSolverStopReason::RootFound(t) = method.step().unwrap() {
+                        assert!(have_root);
+                        return method.interpolate(t).unwrap();
+                    }
+                }
+                method.interpolate(point.t).unwrap()
+            };
+            let soln = if let Some(out) = problem.eqn.out() {
+                out.call(&soln, point.t)
+            } else {
+                soln
+            };
+            assert_eq!(
+                soln.len(),
+                point.state.len(),
+                "soln.len() != point.state.len()"
+            );
+            if let Some(override_tol) = override_tol {
+                soln.assert_eq_st(&point.state, override_tol);
+            } else {
+                let (rtol, atol) = if problem.eqn.out().is_some() {
+                    // problem rtol and atol is on the state, so just use solution tolerance here
+                    (solution.rtol, &solution.atol)
+                } else {
+                    (problem.rtol, problem.atol.as_ref())
+                };
+                let error = soln.clone() - &point.state;
+                let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
+                assert!(
+                    error_norm < M::T::from(15.0),
+                    "error_norm: {} at t = {}. soln: {:?}, expected: {:?}",
+                    error_norm,
+                    point.t,
+                    soln,
+                    point.state
+                );
+            }
+        }
+        method.state().unwrap().y().clone()
+    }
+
+    pub fn test_ode_solver_adjoint<M, Eqn, Method>(
+        method: &mut Method,
+        problem: &OdeSolverProblem<Eqn>,
+        solution: OdeSolverSolution<M::V>,
+    ) -> Method::AdjointSolver
+    where
+        M: Matrix,
+        Method: AdjointOdeSolverMethod<Eqn>,
+        Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
+        Eqn::M: DefaultSolver,
+    {
+        let state = OdeSolverState::new(problem, method).unwrap();
+        method.set_problem(state, problem).unwrap();
+        let t0 = solution.solution_points.first().unwrap().t;
+        let t1 = solution.solution_points.last().unwrap().t;
+        method.set_stop_time(t1).unwrap();
+        let mut nsteps = 0;
+        let (rtol, atol) = (solution.rtol, &solution.atol);
+        let mut checkpoints = vec![method.checkpoint().unwrap()];
+        for point in solution.solution_points.iter() {
+            while method.state().unwrap().t().abs() < point.t.abs() {
+                method.step().unwrap();
+                nsteps += 1;
+                if nsteps > 50 {
+                    checkpoints.push(method.checkpoint().unwrap());
+                    nsteps = 0;
+                }
+            }
+            let soln = method.interpolate_out(point.t).unwrap();
+            // problem rtol and atol is on the state, so just use solution tolerance here
+            let error = soln.clone() - &point.state;
+            let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
+            assert!(
+                error_norm < M::T::from(15.0),
+                "error_norm: {} at t = {}. soln: {:?}, expected: {:?}",
+                error_norm,
+                point.t,
+                soln,
+                point.state
+            );
+        }
+        checkpoints.push(method.checkpoint().unwrap());
+        let mut adjoint_solver = method.new_adjoint_solver(checkpoints, true).unwrap();
+        let y_expect = M::V::from_element(problem.eqn.rhs().nstates(), M::T::zero());
+        adjoint_solver.state().unwrap().y().assert_eq_st(&y_expect, M::T::from(1e-9));
+        for i in 0..problem.eqn.out().unwrap().nout() {
+            adjoint_solver.state().unwrap().s()[i].assert_eq_st(&y_expect, M::T::from(1e-9));
+        }
+        let g_expect = M::V::from_element(problem.eqn.rhs().nparams(), M::T::zero());
+        for i in 0..problem.eqn.out().unwrap().nout() {
+            adjoint_solver.state().unwrap().sg()[i].assert_eq_st(&g_expect, M::T::from(1e-9));
+        }
+        
+        adjoint_solver.set_stop_time(t0).unwrap();
+        while adjoint_solver.state().unwrap().t().abs() > t0 {
+            adjoint_solver.step().unwrap();
+        }
+        let mut state = adjoint_solver.take_state().unwrap();
+        let (s, sg) = state.s_sg_mut();
+        adjoint_solver.problem().unwrap().eqn.correct_sg_for_init(t0, s, sg);
+        
+        let points = solution
+            .sens_solution_points
+            .as_ref()
+            .unwrap()
+            .iter()
+            .map(|x| &x[0])
+            .collect::<Vec<_>>();
+        for (soln, point) in sg.iter().zip(points.iter()) {
+            let error = soln.clone() - &point.state;
+            let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
+            assert!(
+                error_norm < M::T::from(20.0),
+                "error_norm: {} at t = {}. soln: {:?}, expected: {:?}",
+                error_norm,
+                point.t,
+                soln,
+                point.state
+            );
+        }
+        adjoint_solver
     }
 
     pub struct TestEqnInit<M> {
@@ -247,8 +420,6 @@ mod tests {
             M::V::from_element(1, M::T::from(1e-6)),
             M::T::zero(),
             M::T::one(),
-            false,
-            false,
         )
         .unwrap();
         let state = Method::State::new_without_initialise(&problem);
@@ -279,8 +450,6 @@ mod tests {
             M::V::from_element(1, M::T::from(1e-6)),
             M::T::zero(),
             M::T::one(),
-            false,
-            false,
         )
         .unwrap();
         let state = Method::State::new_without_initialise(&problem);

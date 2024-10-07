@@ -33,6 +33,8 @@ where
 }
 
 impl<T: Scalar, C: NonLinearOp<M = Mat<T>, V = Col<T>, T = T>> LinearSolver<C> for LU<T, C> {
+    type SelfNewOp<C2: NonLinearOp<T = C::T, V = C::V, M = C::M>> = LU<T, C2>;
+
     fn set_linearisation(&mut self, x: &C::V, t: C::T) {
         Rc::<LinearisedOp<C>>::get_mut(&mut self.problem.as_mut().expect("Problem not set").f)
             .unwrap()
@@ -62,5 +64,11 @@ impl<T: Scalar, C: NonLinearOp<M = Mat<T>, V = Col<T>, T = T>> LinearSolver<C> f
         );
         self.problem = Some(linearised_problem);
         self.matrix = Some(matrix);
+    }
+
+    fn clear_problem(&mut self) {
+        self.problem = None;
+        self.matrix = None;
+        self.lu = None;
     }
 }

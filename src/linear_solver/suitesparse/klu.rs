@@ -109,6 +109,7 @@ impl KluNumeric {
         symbolic: &mut KluSymbolic,
         mat: &mut impl MatrixKLU,
     ) -> Result<Self, DiffsolError> {
+        // TODO: there is also klu_refactor which is faster and reuses inner
         let inner = unsafe {
             klu_factor(
                 mat.column_pointers_mut_ptr(),
@@ -136,6 +137,7 @@ impl Drop for KluNumeric {
     }
 }
 
+#[derive(Clone)]
 struct KluCommon {
     inner: klu_common,
 }
@@ -190,6 +192,8 @@ where
     M::V: VectorKLU,
     C: NonLinearOp<M = M, V = M::V, T = M::T>,
 {
+    type SelfNewOp<C2: NonLinearOp<T = C::T, V = C::V, M = C::M>> = KLU<M, C2>;
+
     fn set_linearisation(&mut self, x: &C::V, t: C::T) {
         Rc::<LinearisedOp<C>>::get_mut(&mut self.problem.as_mut().expect("Problem not set").f)
             .unwrap()
@@ -237,6 +241,13 @@ where
         let mut klu_common = self.klu_common.borrow_mut();
         self.klu_symbolic = KluSymbolic::try_from_matrix(&mut matrix, klu_common.as_mut()).ok();
         self.matrix = Some(matrix);
+    }
+
+    fn clear_problem(&mut self) {
+        self.problem = None;
+        self.matrix = None;
+        self.klu_symbolic = None;
+        self.klu_numeric = None;
     }
 }
 

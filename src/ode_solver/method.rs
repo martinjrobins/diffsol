@@ -1,9 +1,12 @@
 use nalgebra::ComplexField;
 
 use crate::{
-    error::DiffsolError, error::OdeSolverError, matrix::default_solver::DefaultSolver,
-    ode_solver_error, scalar::Scalar, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon,
-    NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, VectorViewMut,
+    error::{DiffsolError, OdeSolverError},
+    matrix::default_solver::DefaultSolver,
+    ode_solver_error,
+    scalar::Scalar,
+    AdjointEquations, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon,
+    NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, SensEquations, VectorViewMut,
 };
 
 #[derive(Debug, PartialEq)]
@@ -37,7 +40,10 @@ pub enum OdeSolverStopReason<T: Scalar> {
 ///     solver.interpolate(t).unwrap()
 /// }
 /// ```
-pub trait OdeSolverMethod<Eqn: OdeEquations> {
+pub trait OdeSolverMethod<Eqn: OdeEquations>
+where
+    Self: Sized,
+{
     type State: OdeSolverState<Eqn::V>;
 
     /// Get the current problem if it has been set
@@ -83,6 +89,9 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
 
     /// Interpolate the solution at a given time. This time should be between the current time and the last solver time step
     fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError>;
+
+    /// Interpolate the integral of the output function at a given time. This time should be between the current time and the last solver time step
+    fn interpolate_out(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError>;
 
     /// Interpolate the sensitivity vectors at a given time. This time should be between the current time and the last solver time step
     fn interpolate_sens(&self, t: Eqn::T) -> Result<Vec<Eqn::V>, DiffsolError>;
@@ -220,4 +229,50 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         }
         Ok(ret)
     }
+}
+
+pub trait AugmentedOdeSolverMethod<Eqn, AugmentedEqn>: OdeSolverMethod<Eqn>
+where
+    Eqn: OdeEquations,
+    AugmentedEqn: AugmentedOdeEquations<Eqn>,
+{
+    fn set_augmented_problem(
+        &mut self,
+        state: Self::State,
+        ode_problem: &OdeSolverProblem<Eqn>,
+        augmented_eqn: AugmentedEqn,
+    ) -> Result<(), DiffsolError>;
+}
+
+pub trait SensitivitiesOdeSolverMethod<Eqn>:
+    AugmentedOdeSolverMethod<Eqn, SensEquations<Eqn>>
+where
+    Eqn: OdeEquations,
+{
+    fn set_problem_with_sensitivities(
+        &mut self,
+        state: Self::State,
+        problem: &OdeSolverProblem<Eqn>,
+        include_in_error_control: bool,
+    ) -> Result<(), DiffsolError> {
+        let mut augmented_eqn = SensEquations::new(&problem.eqn);
+        augmented_eqn.set_include_in_error_control(include_in_error_control);
+        self.set_augmented_problem(state, problem, augmented_eqn)
+    }
+}
+
+pub trait AdjointOdeSolverMethod<Eqn>: OdeSolverMethod<Eqn>
+where
+    Eqn: OdeEquations,
+{
+    type AdjointSolver: AugmentedOdeSolverMethod<
+        AdjointEquations<Eqn, Self>,
+        AdjointEquations<Eqn, Self>,
+    >;
+
+    fn new_adjoint_solver(
+        &self,
+        checkpoints: Vec<Self::State>,
+        include_in_error_control: bool,
+    ) -> Result<Self::AdjointSolver, DiffsolError>;
 }
