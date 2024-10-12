@@ -1390,8 +1390,8 @@ mod test {
         let mut s = Bdf::default();
         robertson::robertson_diffsl_compile(&mut context);
         let (problem, soln) =
-            robertson::robertson_diffsl_problem::<M, LlvmModule>(&context, false, false);
-        test_ode_solver(&mut s, &problem, soln, None, false);
+            robertson::robertson_diffsl_problem::<M, LlvmModule>(&context, false);
+        test_ode_solver(&mut s, &problem, soln, None, false, false);
     }
 
     #[test]

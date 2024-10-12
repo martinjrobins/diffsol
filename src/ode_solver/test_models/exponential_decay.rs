@@ -89,21 +89,6 @@ fn exponential_decay_out<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V)
 }
 
 /// J = |1 2|
-///     |3 4|
-/// Jv = |1 2| |v_1| = |v_1 + 2v_2|
-///     |3 4| |v_2|   |3v_1 + 4v_2|
-fn exponential_decay_out_jac_mul<M: Matrix>(
-    _x: &M::V,
-    _p: &M::V,
-    _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
-) {
-    y[0] = v[0] + M::T::from(2.0) * v[1];
-    y[1] = M::T::from(3.0) * v[0] + M::T::from(4.0) * v[1];
-}
-
-/// J = |1 2|
 ///    |3 4|
 /// -J^T v = |-1 -3| |v_1| = |-v_1 - 3v_2|
 ///         |-2 -4| |v_2|   |-2v_1 - 4v_2|
