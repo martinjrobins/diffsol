@@ -21,7 +21,7 @@ use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
     AugmentedOdeEquations, DenseMatrix, JacobianUpdate, NonLinearOp, OdeEquations, OdeSolverMethod,
-    OdeSolverProblem, OdeSolverState, Op, Scalar, Vector, VectorViewMut,
+    OdeSolverProblem, OdeSolverState, Op, Scalar, Vector, VectorViewMut, StateRef, StateRefMut,
 };
 
 use super::bdf::BdfStatistics;
@@ -380,7 +380,7 @@ where
         if self.state.is_none() {
             return Err(ode_solver_error!(StateNotSet));
         }
-        self._jacobian_updates(self.state.as_ref().unwrap().h(), SolverState::Checkpoint);
+        self._jacobian_updates(self.state.as_ref().unwrap().h, SolverState::Checkpoint);
         Ok(self.state.as_ref().unwrap().clone())
     }
 
@@ -401,6 +401,7 @@ where
         self.nonlinear_solver
             .convergence_mut()
             .set_max_iter(Self::NEWTON_MAXITER);
+        self.nonlinear_solver.reset_jacobian(&state.y, state.t);
 
         // update statistics
         self.statistics = BdfStatistics::default();
@@ -412,19 +413,19 @@ where
         if self.diff.nrows() != nstates || self.diff.ncols() != order {
             self.diff = M::zeros(nstates, order);
         }
-        let nout = if let Some(out) = problem.eqn.out() {
-            out.nout()
+        let gdiff_rows = if problem.integrate_out {
+            problem.eqn.out().unwrap().nout()
         } else {
             0
         };
-        if self.gdiff.nrows() != nout || self.gdiff.ncols() != order {
-            self.gdiff = M::zeros(nout, order);
+        if self.gdiff.nrows() != gdiff_rows || self.gdiff.ncols() != order {
+            self.gdiff = M::zeros(gdiff_rows, order);
         }
 
         self.old_f = state.dy.clone();
         self.old_t = state.t;
         self.old_y = state.y.clone();
-        if problem.eqn.out().is_some() {
+        if problem.integrate_out {
             self.old_g = state.g.clone();
         }
 
@@ -533,7 +534,8 @@ where
                 self.diff.column_mut(i).copy_from(&self.old_f);
 
                 // calculate dg and store in gdiff
-                if let Some(out) = self.problem.as_ref().unwrap().eqn.out() {
+                if self.problem.as_ref().unwrap().integrate_out {
+                    let out = self.problem.as_ref().unwrap().eqn.out().unwrap();
                     out.call_inplace(&self.old_y, t, &mut self.state.as_mut().unwrap().dg);
                     self.gdiff.column_mut(i).axpy(
                         h,
@@ -611,7 +613,7 @@ where
             }
 
             // integrate output function
-            if self.problem.as_ref().unwrap().eqn.out().is_some() {
+            if self.problem.as_ref().unwrap().integrate_out {
                 self.old_g.copy_from(&state.g);
                 self.gdiff
                     .gemv(Eqn::T::one(), self.tableau.b(), Eqn::T::one(), &mut state.g);
@@ -797,13 +799,13 @@ where
         }
     }
 
-    fn state(&self) -> Option<&SdirkState<Eqn::V>> {
-        self.state.as_ref()
+    fn state(&self) -> Option<StateRef<Eqn::V>> {
+        self.state.as_ref().map(|s| s.as_ref())
     }
 
-    fn state_mut(&mut self) -> Option<&mut SdirkState<Eqn::V>> {
+    fn state_mut(&mut self) -> Option<StateRefMut<Eqn::V>> {
         self.is_state_mutated = true;
-        self.state.as_mut()
+        self.state.as_mut().map(|s| s.as_mut())
     }
 }
 

@@ -9,7 +9,7 @@ use crate::{
         IDA_RES_FAIL, IDA_ROOT_RETURN, IDA_RTFUNC_FAIL, IDA_SUCCESS, IDA_TOO_MUCH_ACC,
         IDA_TOO_MUCH_WORK, IDA_TSTOP_RETURN, IDA_YA_YDP_INIT,
     },
-    SdirkState,
+    SdirkState, StateRef, StateRefMut,
 };
 use num_traits::Zero;
 use serde::Serialize;
@@ -21,7 +21,7 @@ use std::{
 use crate::{
     error::*, matrix::sparsity::MatrixSparsityRef, ode_solver_error, scale, LinearOp, Matrix,
     NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverStopReason, Op,
-    SundialsMatrix, SundialsVector, Vector,
+    SundialsMatrix, SundialsVector, Vector, OdeSolverState
 };
 
 #[cfg(not(sundials_version_major = "5"))]
@@ -299,17 +299,17 @@ where
         self.problem.as_ref()
     }
 
-    fn state(&self) -> Option<&Self::State> {
-        self.state.as_ref()
+    fn state(&self) -> Option<StateRef<Eqn::V>> {
+        self.state.as_ref().map(|s| s.as_ref())
     }
 
     fn order(&self) -> usize {
         1
     }
 
-    fn state_mut(&mut self) -> Option<&mut Self::State> {
+    fn state_mut(&mut self) -> Option<StateRefMut<Eqn::V>> {
         self.is_state_modified = true;
-        self.state.as_mut()
+        self.state.as_mut().map(|s| s.as_mut())
     }
 
     fn take_state(&mut self) -> Option<Self::State> {

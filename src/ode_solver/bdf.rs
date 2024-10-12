@@ -4,8 +4,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError},
-    AdjointEquations, SensEquations, AdjointContext
+    error::{DiffsolError, OdeSolverError}, AdjointContext, AdjointEquations, SensEquations, StateRef, StateRefMut
 };
 
 use num_traits::{abs, One, Pow, Zero};
@@ -110,7 +109,6 @@ pub struct BdfAug<
     root_finder: Option<RootFinder<Eqn::V>>,
     is_state_modified: bool,
     jacobian_update: JacobianUpdate<Eqn::T>,
-    is_adjoint: bool,
 }
 
 impl<Eqn, AugmentedEqn> Default
@@ -202,7 +200,6 @@ where
             root_finder: None,
             is_state_modified: false,
             jacobian_update: JacobianUpdate::default(),
-            is_adjoint: false,
         }
     }
 
@@ -276,7 +273,7 @@ where
             for diff in state.sdiff.iter_mut() {
                 Self::_update_diff_for_step_size(&ru, diff, &mut self.diff_tmp, order);
             }
-            if self.ode_problem.as_ref().unwrap().eqn.out().is_some() {
+            if self.ode_problem.as_ref().unwrap().integrate_out {
                 Self::_update_diff_for_step_size(&ru, &mut state.gdiff, &mut self.diff_tmp, order);
             }
             for diff in state.sgdiff.iter_mut() {
@@ -317,7 +314,8 @@ where
         Self::_update_diff(order, &self.y_delta, &mut state.diff);
 
         // integrate output function
-        if let Some(out) = self.ode_problem.as_ref().unwrap().eqn.out() {
+        if self.ode_problem.as_ref().unwrap().integrate_out {
+            let out = self.ode_problem.as_ref().unwrap().eqn.out().unwrap();
             out.call_inplace(&self.y_predict, self.t_predict, &mut state.dg);
             self.nonlinear_solver.problem().f.integrate_out(
                 &state.dg,
@@ -344,7 +342,8 @@ where
                 Self::_update_diff(order, &self.s_deltas[i], &mut state.sdiff[i]);
 
                 // integrate sensitivity output equations
-                if let Some(out) = op.eqn().out() {
+                if op.eqn().integrate_out() {
+                    let out = op.eqn().out().unwrap();
                     out.call_inplace(&state.s[i], self.t_predict, &mut state.dsg[i]);
                     self.nonlinear_solver.problem().f.integrate_out(
                         &state.dsg[i],
@@ -451,7 +450,7 @@ where
             .unwrap()
             .initialise_diff_to_first_order();
 
-        if self.ode_problem.as_ref().unwrap().eqn.out().is_some() {
+        if self.ode_problem.as_ref().unwrap().integrate_out {
             self.state
                 .as_mut()
                 .unwrap()
@@ -462,7 +461,7 @@ where
                 .as_mut()
                 .unwrap()
                 .initialise_sdiff_to_first_order();
-            if self.s_op.as_ref().unwrap().eqn().out().is_some() {
+            if self.s_op.as_ref().unwrap().eqn().integrate_out() {
                 self.state
                     .as_mut()
                     .unwrap()
@@ -653,16 +652,16 @@ where
         self.ode_problem.as_ref()
     }
 
-    fn state(&self) -> Option<&BdfState<Eqn::V, M>> {
-        self.state.as_ref()
+    fn state(&self) -> Option<StateRef<Eqn::V>> {
+        self.state.as_ref().map(|state| state.as_ref())
     }
     fn take_state(&mut self) -> Option<BdfState<Eqn::V, M>> {
         Option::take(&mut self.state)
     }
 
-    fn state_mut(&mut self) -> Option<&mut BdfState<Eqn::V, M>> {
+    fn state_mut(&mut self) -> Option<StateRefMut<Eqn::V>> {
         self.is_state_modified = true;
-        self.state.as_mut()
+        self.state.as_mut().map(|state| state.as_mut())
     }
 
     fn checkpoint(&mut self) -> Result<Self::State, DiffsolError> {
@@ -1093,11 +1092,12 @@ where
             atol: problem.atol.clone(),
             t0: self.state.as_ref().unwrap().t,
             h0: -self.state.as_ref().unwrap().h,
+            integrate_out: false,
         };
 
         // initialise adjoint state
         let mut state =
-            Self::State::new_without_initialise_augmented(&adj_problem, &mut new_augmented_eqn);
+            Self::State::new_without_initialise_augmented(&adj_problem, &mut new_augmented_eqn)?;
         let mut init_nls = Nls::SelfNewOp::<InitOp<AdjointEquations<Eqn, Self>>>::default();
         let new_augmented_eqn =
             state.set_consistent_augmented(&adj_problem, new_augmented_eqn, &mut init_nls)?;
@@ -1283,13 +1283,6 @@ mod test {
         number_of_error_test_failures: 9
         number_of_nonlinear_solver_iterations: 250
         number_of_nonlinear_solver_fails: 0
-        "###);
-        insta::assert_yaml_snapshot!(s.problem().as_ref().unwrap().eqn.rhs().statistics(), @r###"
-        ---
-        number_of_calls: 0
-        number_of_jac_muls: 0
-        number_of_matrix_evals: 0
-        number_of_jac_adj_muls: 0
         "###);
     }
 

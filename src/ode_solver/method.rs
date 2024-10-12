@@ -1,12 +1,7 @@
 use nalgebra::ComplexField;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError},
-    matrix::default_solver::DefaultSolver,
-    ode_solver_error,
-    scalar::Scalar,
-    AdjointEquations, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon,
-    NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, SensEquations, VectorViewMut,
+    error::{DiffsolError, OdeSolverError}, matrix::default_solver::DefaultSolver, ode_solver_error, scalar::Scalar, AdjointEquations, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut, VectorViewMut
 };
 
 #[derive(Debug, PartialEq)]
@@ -69,12 +64,12 @@ where
     fn take_state(&mut self) -> Option<Self::State>;
 
     /// Get the current state of the solver, if it exists
-    fn state(&self) -> Option<&Self::State>;
+    fn state(&self) -> Option<StateRef<Eqn::V>>;
 
     /// Get a mutable reference to the current state of the solver, if it exists
     /// Note that calling this will cause the next call to `step` to perform some reinitialisation to take into
     /// account the mutated state, this could be expensive for multi-step methods.
-    fn state_mut(&mut self) -> Option<&mut Self::State>;
+    fn state_mut(&mut self) -> Option<StateRefMut<Eqn::V>>;
 
     /// Step the solution forward by one step, altering the internal state of the solver.
     /// The return value is a `Result` containing the reason for stopping the solver, possible reasons are:
@@ -115,11 +110,11 @@ where
     {
         let state = OdeSolverState::new(problem, self)?;
         self.set_problem(state, problem)?;
-        let mut ret_t = vec![self.state().unwrap().t()];
+        let mut ret_t = vec![self.state().unwrap().t];
         let nstates = problem.eqn.rhs().nstates();
         let ntimes_guess = std::cmp::max(
             10,
-            ((final_time - self.state().unwrap().t()).abs() / self.state().unwrap().h())
+            ((final_time - self.state().unwrap().t).abs() / self.state().unwrap().h)
                 .into()
                 .ceil() as usize,
         );
@@ -128,14 +123,14 @@ where
             let mut y_i = ret_y.column_mut(0);
             match problem.eqn.out() {
                 Some(out) => {
-                    y_i.copy_from(&out.call(self.state().unwrap().y(), self.state().unwrap().t()))
+                    y_i.copy_from(&out.call(self.state().unwrap().y, self.state().unwrap().t))
                 }
-                None => y_i.copy_from(self.state().unwrap().y()),
+                None => y_i.copy_from(self.state().unwrap().y),
             }
         }
         self.set_stop_time(final_time)?;
         while self.step()? != OdeSolverStopReason::TstopReached {
-            ret_t.push(self.state().unwrap().t());
+            ret_t.push(self.state().unwrap().t);
             let mut y_i = {
                 let max_i = ret_y.ncols();
                 let curr_i = ret_t.len() - 1;
@@ -147,14 +142,14 @@ where
             };
             match problem.eqn.out() {
                 Some(out) => {
-                    y_i.copy_from(&out.call(self.state().unwrap().y(), self.state().unwrap().t()))
+                    y_i.copy_from(&out.call(self.state().unwrap().y, self.state().unwrap().t))
                 }
-                None => y_i.copy_from(self.state().unwrap().y()),
+                None => y_i.copy_from(self.state().unwrap().y),
             }
         }
 
         // store the final step
-        ret_t.push(self.state().unwrap().t());
+        ret_t.push(self.state().unwrap().t);
         {
             let mut y_i = {
                 let max_i = ret_y.ncols();
@@ -167,9 +162,9 @@ where
             };
             match problem.eqn.out() {
                 Some(out) => {
-                    y_i.copy_from(&out.call(self.state().unwrap().y(), self.state().unwrap().t()))
+                    y_i.copy_from(&out.call(self.state().unwrap().y, self.state().unwrap().t))
                 }
-                None => y_i.copy_from(self.state().unwrap().y()),
+                None => y_i.copy_from(self.state().unwrap().y),
             }
         }
         Ok((ret_y, ret_t))
@@ -194,7 +189,7 @@ where
         let mut ret = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, t_eval.len());
 
         // check t_eval is increasing and all values are greater than or equal to the current time
-        let t0 = self.state().unwrap().t();
+        let t0 = self.state().unwrap().t;
         if t_eval.windows(2).any(|w| w[0] > w[1] || w[0] < t0) {
             return Err(ode_solver_error!(InvalidTEval));
         }
@@ -203,7 +198,7 @@ where
         self.set_stop_time(t_eval[t_eval.len() - 1])?;
         let mut step_reason = OdeSolverStopReason::InternalTimestep;
         for (i, t) in t_eval.iter().take(t_eval.len() - 1).enumerate() {
-            while self.state().unwrap().t() < *t {
+            while self.state().unwrap().t < *t {
                 step_reason = self.step()?;
             }
             let y = self.interpolate(*t)?;
@@ -222,9 +217,9 @@ where
             let mut y_out = ret.column_mut(t_eval.len() - 1);
             match problem.eqn.out() {
                 Some(out) => {
-                    y_out.copy_from(&out.call(self.state().unwrap().y(), self.state().unwrap().t()))
+                    y_out.copy_from(&out.call(self.state().unwrap().y, self.state().unwrap().t))
                 }
-                None => y_out.copy_from(self.state().unwrap().y()),
+                None => y_out.copy_from(self.state().unwrap().y),
             }
         }
         Ok(ret)

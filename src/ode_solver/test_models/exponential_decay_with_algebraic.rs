@@ -172,6 +172,7 @@ pub fn exponential_decay_with_algebraic_problem_sens<M: Matrix + 'static>() -> (
         M::V::from_element(3, M::T::from(1e-6)),
         t0,
         M::T::from(1.0),
+        false,
     )
     .unwrap();
 

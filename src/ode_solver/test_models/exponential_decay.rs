@@ -281,7 +281,8 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>() -> (
     let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p.clone());
     let rtol = M::T::from(1e-6);
     let atol = M::V::from_element(nstates, M::T::from(1e-6));
-    let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0).unwrap();
+    let integrate_out = true;
+    let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, integrate_out).unwrap();
     let mut soln = OdeSolverSolution {
         atol: problem.atol.as_ref().clone(),
         rtol: problem.rtol,

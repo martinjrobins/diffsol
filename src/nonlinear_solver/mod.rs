@@ -122,6 +122,7 @@ pub mod tests {
     {
         solver.set_problem(&problem);
         let t = C::T::zero();
+        solver.reset_jacobian(&solns[0].x0, t);
         for soln in solns {
             let x = solver.solve(&soln.x0, t, &soln.x0).unwrap();
             let tol = x.clone() * scale(problem.rtol) + problem.atol.as_ref();

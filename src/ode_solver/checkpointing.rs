@@ -44,20 +44,22 @@ where
         Method: OdeSolverMethod<Eqn, State = State>,
         State: OdeSolverState<V>,
     {
+        let state0_ref = state0.as_ref();
+        let state1_ref = state1.as_ref();
         self.ys.clear();
         self.ydots.clear();
         self.ts.clear();
-        self.ys.push(state0.y().clone());
-        self.ydots.push(state0.dy().clone());
-        self.ts.push(state0.t());
+        self.ys.push(state0_ref.y.clone());
+        self.ydots.push(state0_ref.dy.clone());
+        self.ts.push(state0_ref.t);
 
         solver.set_problem(state0.clone(), problem)?;
-        while solver.state().as_ref().unwrap().t() < state1.t() {
+        while solver.state().unwrap().t < state1_ref.t {
             solver.step()?;
-            self.ys.push(solver.state().as_ref().unwrap().y().clone());
+            self.ys.push(solver.state().unwrap().y.clone());
             self.ydots
-                .push(solver.state().as_ref().unwrap().dy().clone());
-            self.ts.push(solver.state().as_ref().unwrap().t());
+                .push(solver.state().unwrap().dy.clone());
+            self.ts.push(solver.state().unwrap().t);
         }
         Ok(())
     }
@@ -170,7 +172,7 @@ where
         }
 
         // if t is before first segment or after last segment, return error
-        if t < self.checkpoints[0].t() || t > self.checkpoints[self.checkpoints.len() - 1].t() {
+        if t < self.checkpoints[0].as_ref().t || t > self.checkpoints[self.checkpoints.len() - 1].as_ref().t {
             return Err(other_error!("t is outside of the checkpoints"));
         }
 
@@ -179,7 +181,7 @@ where
             .checkpoints
             .iter()
             .skip(1)
-            .position(|state| state.t() > t)
+            .position(|state| state.as_ref().t > t)
             .expect("t is not in checkpoints");
         if self.previous_segment.borrow().is_none() {
             self.previous_segment
@@ -221,7 +223,7 @@ mod tests {
         solver.set_problem(state0.clone(), &problem).unwrap();
         let mut checkpoints = vec![state0];
         let mut i = 0;
-        while solver.state().as_ref().unwrap().t() < t_final {
+        while solver.state().unwrap().t < t_final {
             solver.step().unwrap();
             i += 1;
             if i % n_steps == 0 {

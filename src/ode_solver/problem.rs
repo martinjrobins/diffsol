@@ -13,6 +13,7 @@ pub struct OdeSolverProblem<Eqn: OdeEquations> {
     pub atol: Rc<Eqn::V>,
     pub t0: Eqn::T,
     pub h0: Eqn::T,
+    pub integrate_out: bool,
 }
 
 // impl clone
@@ -24,6 +25,7 @@ impl<Eqn: OdeEquations> Clone for OdeSolverProblem<Eqn> {
             atol: self.atol.clone(),
             t0: self.t0,
             h0: self.h0,
+            integrate_out: self.integrate_out,
         }
     }
 }
@@ -41,6 +43,7 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
         atol: Eqn::V,
         t0: Eqn::T,
         h0: Eqn::T,
+        integrate_out: bool,
     ) -> Result<Self, DiffsolError> {
         let eqn = Rc::new(eqn);
         let atol = Rc::new(atol);
@@ -50,6 +53,7 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
             atol,
             t0,
             h0,
+            integrate_out,
         })
     }
 

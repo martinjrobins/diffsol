@@ -454,9 +454,15 @@ where
 
     fn update_rhs_out_state(&mut self, _y: &Eqn::V, _dy: &Eqn::V, _t: Eqn::T) {
     }
+    
+    fn integrate_out(&self) -> bool {
+        true
+    }
+    
+    fn set_integrate_out(&mut self, _integrate_out: bool) {
+        panic!("Not implemented for AdjointEquations");
+    }
 
-    
-    
     fn include_in_error_control(&self) -> bool {
         self.include_in_error_control
     }

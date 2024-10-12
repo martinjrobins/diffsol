@@ -327,6 +327,12 @@ impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for SensEquations<Eqn> {
     fn set_include_in_error_control(&mut self, include: bool) {
         self.include_in_error_control = include;
     }
+    fn set_integrate_out(&mut self, _integrate_out: bool) {
+        panic!("Not implemented for SensEquations");
+    }
+    fn integrate_out(&self) -> bool {
+        false
+    }
     fn max_index(&self) -> usize {
         self.nparams()
     }

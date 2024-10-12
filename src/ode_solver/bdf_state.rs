@@ -1,9 +1,9 @@
 use crate::{
-    error::DiffsolError, error::OdeSolverError, ode_solver_error, scalar::IndexType, scale,
-    AugmentedOdeEquations, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Vector,
-    VectorViewMut,
+    error::{DiffsolError, OdeSolverError}, ode_solver_error, scalar::IndexType, scale, AugmentedOdeEquations, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut, Vector, VectorViewMut
 };
 use std::ops::MulAssign;
+
+use super::state::StateCommon;
 
 #[derive(Clone)]
 pub struct BdfState<V: Vector, M: DenseMatrix<T = V::T, V = V>> {
@@ -90,12 +90,16 @@ where
         if self.diff.nrows() != nstates {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
-        let nout = if let Some(out) = ode_problem.eqn.out() {
-            out.nout()
+        let expected_gdiff_len= if let Some(out) = ode_problem.eqn.out() {
+            if ode_problem.integrate_out {
+                out.nout()
+            } else {
+                0
+            }
         } else {
             0
         };
-        if self.gdiff.nrows() != nout {
+        if self.gdiff.nrows() != expected_gdiff_len {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
         if !self.diff_initialised {
@@ -117,6 +121,18 @@ where
         if self.sdiff.len() != naug || self.sdiff[0].nrows() != nstates {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
+        let (sgdiff_len, sgdiff_size) = if let Some(_out) = augmented_eqn.out() {
+            if augmented_eqn.integrate_out() {
+                (naug, augmented_eqn.out().unwrap().nout())
+            } else {
+                (0, 0)
+            }
+        } else {
+            (0, 0)
+        };
+        if self.sgdiff.len() != sgdiff_len || (sgdiff_len > 0 && self.sgdiff[0].nrows() != sgdiff_size) {
+            return Err(ode_solver_error!(StateProblemMismatch));
+        }
         if !self.sdiff_initialised {
             self.initialise_sdiff_to_first_order();
         }
@@ -126,25 +142,16 @@ where
         Ok(())
     }
 
-    fn new_internal_state(
-        y: V,
-        dy: V,
-        g: V,
-        dg: V,
-        s: Vec<V>,
-        ds: Vec<V>,
-        sg: Vec<V>,
-        dsg: Vec<V>,
-        t: <V>::T,
-        h: <V>::T,
-        naug: usize,
+    fn new_from_common(
+        state: super::state::StateCommon<V>,
     ) -> Self {
+        let StateCommon { y, dy, g, dg, s, ds, sg, dsg, t, h } = state;
         let nstates = y.len();
         let diff = M::zeros(nstates, Self::MAX_ORDER + 3);
-        let sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3); naug];
+        let sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3); s.len()];
         let gdiff = M::zeros(g.len(), Self::MAX_ORDER + 3);
-        let sgdiff = if naug > 0 {
-            vec![M::zeros(sg[0].len(), Self::MAX_ORDER + 3); naug]
+        let sgdiff = if !sg.is_empty() {
+            vec![M::zeros(sg[0].len(), Self::MAX_ORDER + 3); sg.len()]
         } else {
             Vec::new()
         };
@@ -170,87 +177,51 @@ where
             sgdiff_initialised: false,
         }
     }
+    
 
-    fn g_mut(&mut self) -> &mut V {
-        &mut self.g
-    }
-    fn dg_mut(&mut self) -> &mut V {
-        &mut self.dg
-    }
-
-    fn sg(&self) -> &[V] {
-        self.sg.as_slice()
-    }
-    fn sg_mut(&mut self) -> &mut [V] {
-        &mut self.sg
-    }
-    fn dsg_mut(&mut self) -> &mut [V] {
-        &mut self.dsg
-    }
-    fn dsg(&self) -> &[V] {
-        self.dsg.as_slice()
-    }
-    fn s_sg_mut(&mut self) -> (&mut [V], &mut [V]) {
-        (self.s.as_mut_slice(), self.sg.as_mut_slice())
+    fn into_common(self) -> StateCommon<V> {
+        StateCommon {
+            y: self.y,
+            dy: self.dy,
+            g: self.g,
+            dg: self.dg,
+            s: self.s,
+            ds: self.ds,
+            sg: self.sg,
+            dsg: self.dsg,
+            t: self.t,
+            h: self.h,
+        }
     }
 
-    fn y_g_mut(&mut self) -> (&mut V, &mut V) {
-        (&mut self.y, &mut self.g)
+    fn as_ref(&self) -> StateRef<V> {
+        StateRef {
+            y: &self.y,
+            dy: &self.dy,
+            g: &self.g,
+            dg: &self.dg,
+            s: &self.s,
+            ds: &self.ds,
+            sg: &self.sg,
+            dsg: &self.dsg,
+            t: self.t,
+            h: self.h,
+        }
     }
-    fn g(&self) -> &V {
-        &self.g
+    
+    fn as_mut(&mut self) -> StateRefMut<V> {
+        StateRefMut {
+            y: &mut self.y,
+            dy: &mut self.dy,
+            g: &mut self.g,
+            dg: &mut self.dg,
+            s: &mut self.s,
+            ds: &mut self.ds,
+            sg: &mut self.sg,
+            dsg: &mut self.dsg,
+            t: &mut self.t,
+            h: &mut self.h,
+        }
     }
-    fn dg(&self) -> &V {
-        &self.dg
-    }
-    fn s(&self) -> &[V] {
-        self.s.as_slice()
-    }
-    fn s_mut(&mut self) -> &mut [V] {
-        &mut self.s
-    }
-    fn ds_mut(&mut self) -> &mut [V] {
-        &mut self.ds
-    }
-    fn ds(&self) -> &[V] {
-        self.ds.as_slice()
-    }
-    fn s_ds_mut(&mut self) -> (&mut [V], &mut [V]) {
-        (&mut self.s, &mut self.ds)
-    }
-    fn y(&self) -> &V {
-        &self.y
-    }
-
-    fn y_mut(&mut self) -> &mut V {
-        &mut self.y
-    }
-
-    fn dy(&self) -> &V {
-        &self.dy
-    }
-
-    fn dy_mut(&mut self) -> &mut V {
-        &mut self.dy
-    }
-
-    fn y_dy_mut(&mut self) -> (&mut V, &mut V) {
-        (&mut self.y, &mut self.dy)
-    }
-
-    fn t(&self) -> V::T {
-        self.t
-    }
-
-    fn t_mut(&mut self) -> &mut V::T {
-        &mut self.t
-    }
-
-    fn h(&self) -> V::T {
-        self.h
-    }
-
-    fn h_mut(&mut self) -> &mut V::T {
-        &mut self.h
-    }
+    
 }

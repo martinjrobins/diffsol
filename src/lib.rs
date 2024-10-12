@@ -163,6 +163,7 @@ pub use ode_solver::{
     sdirk::SdirkAdj, sdirk::SdirkAug, sdirk_state::SdirkState, sens_equations::SensEquations,
     sens_equations::SensInit, sens_equations::SensRhs, state::OdeSolverState, tableau::Tableau,
 };
+pub use ode_solver::state::{StateRef, StateRefMut};
 pub use op::{
     closure::Closure, constant_closure::ConstantClosure, constant_closure_with_adjoint::ConstantClosureWithAdjoint, linear_closure::LinearClosure,
     unit::UnitCallable, ConstantOp, LinearOp, NonLinearOp, Op,

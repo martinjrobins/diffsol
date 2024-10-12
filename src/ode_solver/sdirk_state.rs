@@ -1,4 +1,6 @@
-use crate::{error::DiffsolError, OdeEquations, OdeSolverProblem, OdeSolverState, Vector};
+use crate::{error::DiffsolError, OdeEquations, OdeSolverProblem, OdeSolverState, StateRef, StateRefMut, Vector};
+
+use super::state::StateCommon;
 
 #[derive(Clone)]
 pub struct SdirkState<V: Vector> {
@@ -34,114 +36,67 @@ where
     ) -> Result<(), DiffsolError> {
         Ok(())
     }
-
-    fn new_internal_state(
-        y: V,
-        dy: V,
-        g: V,
-        dg: V,
-        s: Vec<V>,
-        ds: Vec<V>,
-        sg: Vec<V>,
-        dsg: Vec<V>,
-        t: <V>::T,
-        h: <V>::T,
-        _naug: usize,
+    
+    fn new_from_common(
+        state: StateCommon<V>,
     ) -> Self {
         Self {
-            y,
-            dy,
-            g,
-            dg,
-            s,
-            ds,
-            sg,
-            dsg,
-            t,
-            h,
+            y: state.y,
+            dy: state.dy,
+            g: state.g,
+            dg: state.dg,
+            s: state.s,
+            ds: state.ds,
+            sg: state.sg,
+            dsg: state.dsg,
+            t: state.t,
+            h: state.h,
+        }
+    }
+    
+    fn into_common(self) -> StateCommon<V> {
+        StateCommon {
+            y: self.y,
+            dy: self.dy,
+            g: self.g,
+            dg: self.dg,
+            s: self.s,
+            ds: self.ds,
+            sg: self.sg,
+            dsg: self.dsg,
+            t: self.t,
+            h: self.h,
         }
     }
 
-    fn sg(&self) -> &[V] {
-        self.sg.as_slice()
-    }
-    fn sg_mut(&mut self) -> &mut [V] {
-        &mut self.sg
-    }
-    fn dsg(&self) -> &[V] {
-        self.dsg.as_slice()
-    }
-    fn dsg_mut(&mut self) -> &mut [V] {
-        &mut self.dsg
-    }
-
-    fn g(&self) -> &V {
-        &self.g
-    }
-    fn g_mut(&mut self) -> &mut V {
-        &mut self.g
-    }
-    fn dg(&self) -> &V {
-        &self.dg
-    }
-    fn dg_mut(&mut self) -> &mut V {
-        &mut self.dg
-    }
-    fn y_g_mut(&mut self) -> (&mut V, &mut V) {
-        (&mut self.y, &mut self.g)
-    }
-    fn s_sg_mut(&mut self) -> (&mut [V], &mut [V]) {
-        (self.s.as_mut_slice(), self.sg.as_mut_slice())
+    fn as_mut(&mut self) -> StateRefMut<V> {
+        StateRefMut {
+            y: &mut self.y,
+            dy: &mut self.dy,
+            g: &mut self.g,
+            dg: &mut self.dg,
+            s: &mut self.s,
+            ds: &mut self.ds,
+            sg: &mut self.sg,
+            dsg: &mut self.dsg,
+            t: &mut self.t,
+            h: &mut self.h,
+        }
+    } 
+    
+    fn as_ref(&self) -> StateRef<V> {
+        StateRef {
+            y: &self.y,
+            dy: &self.dy,
+            g: &self.g,
+            dg: &self.dg,
+            s: &self.s,
+            ds: &self.ds,
+            sg: &self.sg,
+            dsg: &self.dsg,
+            t: self.t,
+            h: self.h,
+        }
     }
 
-    fn s(&self) -> &[V] {
-        self.s.as_slice()
-    }
-    fn s_mut(&mut self) -> &mut [V] {
-        &mut self.s
-    }
-    fn ds_mut(&mut self) -> &mut [V] {
-        &mut self.ds
-    }
-    fn ds(&self) -> &[V] {
-        self.ds.as_slice()
-    }
-    fn s_ds_mut(&mut self) -> (&mut [V], &mut [V]) {
-        (&mut self.s, &mut self.ds)
-    }
-    fn y(&self) -> &V {
-        &self.y
-    }
-
-    fn y_mut(&mut self) -> &mut V {
-        &mut self.y
-    }
-
-    fn dy(&self) -> &V {
-        &self.dy
-    }
-
-    fn dy_mut(&mut self) -> &mut V {
-        &mut self.dy
-    }
-
-    fn y_dy_mut(&mut self) -> (&mut V, &mut V) {
-        (&mut self.y, &mut self.dy)
-    }
-
-    fn t(&self) -> V::T {
-        self.t
-    }
-
-    fn t_mut(&mut self) -> &mut V::T {
-        &mut self.t
-    }
-
-    fn h(&self) -> V::T {
-        self.h
-    }
-
-    fn h_mut(&mut self) -> &mut V::T {
-        &mut self.h
-    }
 }

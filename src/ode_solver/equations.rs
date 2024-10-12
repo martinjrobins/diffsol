@@ -43,6 +43,8 @@ pub trait AugmentedOdeEquations<Eqn: OdeEquations>:
     fn max_index(&self) -> usize;
     fn set_include_in_error_control(&mut self, include: bool);
     fn include_in_error_control(&self) -> bool;
+    fn set_integrate_out(&mut self, integrate_out: bool);
+    fn integrate_out(&self) -> bool;
 }
 
 pub struct NoAug<Eqn: OdeEquations> {
@@ -93,6 +95,12 @@ impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
     }
     fn set_index(&mut self, _index: usize) {
         panic!("This should never be called")
+    }
+    fn set_integrate_out(&mut self, _integrate_out: bool) {
+        panic!("This should never be called")
+    }
+    fn integrate_out(&self) -> bool {
+        true
     }
     fn max_index(&self) -> usize {
         panic!("This should never be called")

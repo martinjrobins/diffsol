@@ -18,6 +18,7 @@ pub struct OdeBuilder {
     atol: Vec<f64>,
     p: Vec<f64>,
     use_coloring: bool,
+    integrate_out: bool,
 }
 
 impl Default for OdeBuilder {
@@ -80,12 +81,20 @@ impl OdeBuilder {
             atol: vec![1e-6],
             p: vec![],
             use_coloring: false,
+            integrate_out: false,
         }
     }
 
     /// Set the initial time.
     pub fn t0(mut self, t0: f64) -> Self {
         self.t0 = t0;
+        self
+    }
+    
+    /// Set whether to integrate the output.
+    /// If true, the output will be integrated using the same method as the ODE.
+    pub fn integrate_out(mut self, integrate_out: bool) -> Self {
+        self.integrate_out = integrate_out;
         self
     }
 
@@ -236,6 +245,7 @@ impl OdeBuilder {
             atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
+            self.integrate_out,
         )
     }
 
@@ -296,6 +306,7 @@ impl OdeBuilder {
             atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
+            self.integrate_out,
         )
     }
 
@@ -365,6 +376,7 @@ impl OdeBuilder {
             atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
+            self.integrate_out,
         )
     }
 
@@ -440,6 +452,7 @@ impl OdeBuilder {
             atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
+            self.integrate_out,
         )
     }
 
@@ -527,6 +540,7 @@ impl OdeBuilder {
             atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
+            self.integrate_out,
         )
     }
 
@@ -566,6 +580,6 @@ impl OdeBuilder {
         let mut eqn = diffsl::DiffSl::new(context, self.use_coloring || M::is_sparse());
         eqn.set_params(p);
         let atol = Self::build_atol::<M::V>(self.atol, eqn.rhs().nstates())?;
-        OdeSolverProblem::new(eqn, self.rtol, atol, self.t0, self.h0)
+        OdeSolverProblem::new(eqn, self.rtol, atol, self.t0, self.h0, self.integrate_out)
     }
 }
