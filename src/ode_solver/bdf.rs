@@ -1401,17 +1401,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 189
-        number_of_steps: 496
+        number_of_linear_solver_setups: 191
+        number_of_steps: 506
         number_of_error_test_failures: 7
-        number_of_nonlinear_solver_iterations: 3740
+        number_of_nonlinear_solver_iterations: 3747
         number_of_nonlinear_solver_fails: 101
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 1205
-        number_of_jac_muls: 3008
-        number_of_matrix_evals: 88
+        number_of_calls: 1203
+        number_of_jac_muls: 3016
+        number_of_matrix_evals: 87
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -1467,17 +1467,17 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 188
-        number_of_steps: 482
-        number_of_error_test_failures: 9
-        number_of_nonlinear_solver_iterations: 3578
-        number_of_nonlinear_solver_fails: 101
+        number_of_linear_solver_setups: 171
+        number_of_steps: 463
+        number_of_error_test_failures: 7
+        number_of_nonlinear_solver_iterations: 3497
+        number_of_nonlinear_solver_fails: 88
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
         ---
-        number_of_calls: 1154
-        number_of_jac_muls: 2887
-        number_of_matrix_evals: 86
+        number_of_calls: 1123
+        number_of_jac_muls: 2771
+        number_of_matrix_evals: 74
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -1597,10 +1597,10 @@ mod test {
         test_ode_solver(&mut s, &problem, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
-        number_of_linear_solver_setups: 40
-        number_of_steps: 148
+        number_of_linear_solver_setups: 41
+        number_of_steps: 149
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 330
+        number_of_nonlinear_solver_iterations: 332
         number_of_nonlinear_solver_fails: 14
         "###);
     }

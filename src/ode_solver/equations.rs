@@ -224,13 +224,14 @@ pub trait OdeEquations {
 /// let atol = V::from_vec(vec![1e-6]);
 /// let t0 = 0.0;
 /// let h0 = 0.1;
-/// let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0).unwrap();
+/// let integrate_out = false;
+/// let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, integrate_out).unwrap();
 ///
 /// let mut solver = Bdf::default();
 /// let t = 0.4;
 /// let state = OdeSolverState::new(&problem, &solver).unwrap();
 /// solver.set_problem(state, &problem);
-/// while solver.state().unwrap().t() <= t {
+/// while solver.state().unwrap().t <= t {
 ///    solver.step().unwrap();
 /// }
 /// let y = solver.interpolate(t);

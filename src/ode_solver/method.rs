@@ -29,7 +29,7 @@ pub enum OdeSolverStopReason<T: Scalar> {
 /// {
 ///     let state = OdeSolverState::new(problem, solver).unwrap();
 ///     solver.set_problem(state, problem);
-///     while solver.state().unwrap().t() <= t {
+///     while solver.state().unwrap().t <= t {
 ///         solver.step().unwrap();
 ///     }
 ///     solver.interpolate(t).unwrap()
