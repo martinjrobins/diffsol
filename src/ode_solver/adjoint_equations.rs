@@ -4,12 +4,13 @@ use std::{cell::RefCell, rc::Rc, ops::AddAssign, ops::SubAssign};
 
 
 use crate::{
-    Checkpointing, ConstantOp, NonLinearOp, OdeEquations, OdeSolverMethod, Op, Vector, Matrix, AugmentedOdeEquations, LinearOp
+    op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, Checkpointing, ConstantOp, LinearOp, Matrix, NonLinearOp, OdeEquations, OdeSolverMethod, Op, Vector, OdeEquationsAdjoint, NonLinearOpAdjoint, NonLinearOpSensAdjoint, ConstantOpSensAdjoint
+
 };
 
 pub struct AdjointContext<Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
     checkpointer: Checkpointing<Eqn, Method>,
@@ -21,7 +22,7 @@ where
 
 impl <Eqn, Method> AdjointContext<Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
     pub fn new(checkpointer: Checkpointing<Eqn, Method>) -> Self {
@@ -65,14 +66,14 @@ where
 
 pub struct AdjointInit<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
 {
     eqn: Rc<Eqn>,
 }
 
 impl<Eqn> AdjointInit<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
 {
     pub fn new(eqn: &Rc<Eqn>) -> Self {
         Self {
@@ -83,7 +84,7 @@ where
 
 impl<Eqn> Op for AdjointInit<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
 {
     type T = Eqn::T;
     type V = Eqn::V;
@@ -102,7 +103,7 @@ where
 
 impl<Eqn> ConstantOp for AdjointInit<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
 {
     fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
         y.fill(Eqn::T::zero());
@@ -119,7 +120,7 @@ where
 /// We need the current state x(t), which is obtained from the checkpointed forward solve at the current time step.
 pub struct AdjointRhs<Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
     eqn: Rc<Eqn>,
@@ -130,7 +131,7 @@ where
 
 impl<Eqn, Method> AdjointRhs<Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
     pub fn new(eqn: &Rc<Eqn>, context: Rc<RefCell<AdjointContext<Eqn, Method>>>, with_out: bool) -> Self {
@@ -147,7 +148,7 @@ where
 
 impl<Eqn, Method> Op for AdjointRhs<Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
     type T = Eqn::T;
@@ -170,7 +171,7 @@ where
 
 impl<Eqn, Method> NonLinearOp for AdjointRhs<Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
     /// F(λ, x, t) = -f^T_x(x, t) λ - g^T_x(x,t)
@@ -190,6 +191,14 @@ where
             y.add_assign(&*tmp);
         }
     }
+    
+}
+
+impl<Eqn, Method> NonLinearOpJacobian for AdjointRhs<Eqn, Method>
+where
+    Eqn: OdeEquationsAdjoint,
+    Method: OdeSolverMethod<Eqn>,
+{
     // J = -f^T_x(x, t)
     fn jac_mul_inplace(&self, _x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         self.context.borrow_mut().set_state(t);
@@ -215,7 +224,7 @@ where
 /// We need the current state x(t), which is obtained from the checkpointed forward solve at the current time step.
 pub struct AdjointOut<Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
     eqn: Rc<Eqn>,
@@ -226,7 +235,7 @@ where
 
 impl<Eqn, Method> AdjointOut<Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
     pub fn new(eqn: &Rc<Eqn>, context: Rc<RefCell<AdjointContext<Eqn, Method>>>, with_out: bool) -> Self {
@@ -243,7 +252,7 @@ where
 
 impl<Eqn, Method> Op for AdjointOut<Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
     type T = Eqn::T;
@@ -266,7 +275,7 @@ where
 
 impl<Eqn, Method> NonLinearOp for AdjointOut<Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
     /// F(λ, x, t) = -g_p(x, t) - λ^T f_p(x, t) 
@@ -283,6 +292,14 @@ where
             y.add_assign(&*tmp);
         }
     }
+    
+}
+
+impl<Eqn, Method> NonLinearOpJacobian for AdjointOut<Eqn, Method> 
+where 
+    Eqn: OdeEquationsAdjoint,
+    Method: OdeSolverMethod<Eqn>,
+{
     // J = -f_p(x, t)
     fn jac_mul_inplace(&self, _x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         self.context.borrow_mut().set_state(t);
@@ -299,6 +316,7 @@ where
 }
 
 
+
 /// Adjoint equations for ODEs
 /// 
 /// M * dλ/dt = -f^T_x(x, t) λ - g^T_x(x,t)
@@ -307,7 +325,7 @@ where
 ///
 pub struct AdjointEquations<Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
     eqn: Rc<Eqn>,
@@ -322,7 +340,7 @@ where
 
 impl<Eqn, Method> AdjointEquations<Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
     pub(crate) fn new(eqn: &Rc<Eqn>, context: Rc<RefCell<AdjointContext<Eqn, Method>>>, with_out: bool) -> Self {
@@ -375,7 +393,7 @@ where
 
 impl<Eqn, Method> std::fmt::Debug for AdjointEquations<Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -385,7 +403,7 @@ where
 
 impl<Eqn, Method> Op for AdjointEquations<Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
     type T = Eqn::T;
@@ -405,7 +423,7 @@ where
 
 impl<Eqn, Method> OdeEquations for AdjointEquations<Eqn, Method>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
     type T = Eqn::T;
@@ -440,7 +458,7 @@ where
 
 impl<Eqn, Method> AugmentedOdeEquations<AdjointEquations<Eqn, Method>> for AdjointEquations<Eqn, Method> 
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
     
@@ -482,7 +500,8 @@ mod tests {
     use crate::{
         ode_solver::{adjoint_equations::AdjointEquations, test_models::
             exponential_decay::exponential_decay_problem_adjoint
-        }, AdjointContext, AugmentedOdeEquations, Checkpointing, FaerSparseLU, Matrix, MatrixCommon, NalgebraLU, NonLinearOp, Sdirk, SdirkState, SparseColMat, Tableau, Vector
+        }, AdjointContext, AugmentedOdeEquations, Checkpointing, FaerSparseLU, Matrix, MatrixCommon, NalgebraLU, NonLinearOp, Sdirk, SdirkState, SparseColMat, Tableau, Vector,
+        NonLinearOpJacobian
     };
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;

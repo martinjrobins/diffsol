@@ -2,10 +2,10 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     jacobian::{find_jacobian_non_zeros, find_sens_non_zeros, JacobianColoring},
-    Matrix, MatrixSparsity, Vector,
+    Matrix, MatrixSparsity, Vector,NonLinearOp, NonLinearOpJacobian, NonLinearOpSens, Op
 };
 
-use super::{NonLinearOp, Op, OpStatistics};
+use super::OpStatistics;
 
 pub struct ClosureWithSens<M, F, G, H>
 where
@@ -123,12 +123,18 @@ where
         self.statistics.borrow_mut().increment_call();
         (self.func)(x, self.p.as_ref(), t, y)
     }
+}
+
+impl<M, F, G, H> NonLinearOpJacobian for ClosureWithSens<M, F, G, H>
+where
+    M: Matrix,
+    F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+{
     fn jac_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
         self.statistics.borrow_mut().increment_jac_mul();
         (self.jacobian_action)(x, self.p.as_ref(), t, v, y)
-    }
-    fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        (self.sens_action)(x, self.p.as_ref(), t, v, y);
     }
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         self.statistics.borrow_mut().increment_matrix();
@@ -138,6 +144,19 @@ where
             self._default_jacobian_inplace(x, t, y);
         }
     }
+}
+
+impl<M, F, G, H> NonLinearOpSens for ClosureWithSens<M, F, G, H>
+where
+    M: Matrix,
+    F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+{
+    fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        (self.sens_action)(x, self.p.as_ref(), t, v, y);
+    }
+    
     fn sens_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         if let Some(coloring) = self.sens_coloring.as_ref() {
             coloring.jacobian_inplace(self, x, t, y);

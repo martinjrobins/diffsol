@@ -1,18 +1,19 @@
 use num_traits::One;
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{Matrix, Vector};
+use crate::{Matrix, Vector, LinearOp, NonLinearOp, Op, LinearOpMatrix};
 
-use super::{LinearOp, NonLinearOp, Op};
+use super::nonlinear_op::NonLinearOpJacobian;
 
-pub struct LinearisedOp<C: NonLinearOp> {
+
+pub struct LinearisedOp<C: NonLinearOpJacobian> {
     callable: Rc<C>,
     x: C::V,
     tmp: RefCell<C::V>,
     x_is_set: bool,
 }
 
-impl<C: NonLinearOp> LinearisedOp<C> {
+impl<C: NonLinearOpJacobian> LinearisedOp<C> {
     pub fn new(callable: Rc<C>) -> Self {
         let x = C::V::zeros(callable.nstates());
         let tmp = RefCell::new(C::V::zeros(callable.nstates()));
@@ -38,7 +39,7 @@ impl<C: NonLinearOp> LinearisedOp<C> {
     }
 }
 
-impl<C: NonLinearOp> Op for LinearisedOp<C> {
+impl<C: NonLinearOpJacobian> Op for LinearisedOp<C> {
     type V = C::V;
     type T = C::T;
     type M = C::M;
@@ -56,7 +57,7 @@ impl<C: NonLinearOp> Op for LinearisedOp<C> {
     }
 }
 
-impl<C: NonLinearOp> LinearOp for LinearisedOp<C> {
+impl<C: NonLinearOpJacobian> LinearOp for LinearisedOp<C> {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
         self.callable.jac_mul_inplace(&self.x, t, x, y);
     }
@@ -66,6 +67,10 @@ impl<C: NonLinearOp> LinearOp for LinearisedOp<C> {
         self.callable.jac_mul_inplace(&self.x, t, x, y);
         y.axpy(beta, &tmp, Self::T::one());
     }
+    
+}
+
+impl<C: NonLinearOpJacobian> LinearOpMatrix for LinearisedOp<C> {
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
         self.callable.jacobian_inplace(&self.x, t, y);
     }

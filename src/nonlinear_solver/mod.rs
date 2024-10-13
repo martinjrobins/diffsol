@@ -1,4 +1,4 @@
-use crate::{error::DiffsolError, op::Op, solver::SolverProblem, NonLinearOp};
+use crate::{error::DiffsolError, op::Op, solver::SolverProblem, NonLinearOpJacobian};
 use convergence::Convergence;
 
 pub struct NonLinearSolveSolution<V> {
@@ -14,7 +14,7 @@ impl<V> NonLinearSolveSolution<V> {
 
 /// A solver for the nonlinear problem `F(x) = 0`.
 pub trait NonLinearSolver<C: Op>: Default {
-    type SelfNewOp<C2: NonLinearOp<T = C::T, V = C::V, M = C::M>>: NonLinearSolver<C2>;
+    type SelfNewOp<C2: NonLinearOpJacobian<T = C::T, V = C::V, M = C::M>>: NonLinearSolver<C2>;
 
     /// Get the problem to be solved.
     fn problem(&self) -> &SolverProblem<C>;
@@ -70,8 +70,8 @@ pub mod tests {
     use crate::{
         linear_solver::nalgebra::lu::LU,
         matrix::MatrixCommon,
-        op::{closure::Closure, NonLinearOp},
-        scale, DenseMatrix, Vector,
+        op::closure::Closure,
+        scale, DenseMatrix, Vector, NonLinearOp
     };
 
     use super::*;

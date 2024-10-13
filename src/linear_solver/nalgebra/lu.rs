@@ -5,8 +5,9 @@ use crate::{
     error::{DiffsolError, LinearSolverError},
     linear_solver_error,
     matrix::sparsity::MatrixSparsityRef,
-    op::{linearise::LinearisedOp, NonLinearOp},
-    LinearOp, LinearSolver, Matrix, Op, Scalar, SolverProblem,
+    op::linearise::LinearisedOp,
+    NonLinearOpJacobian,
+    LinearOpMatrix, LinearSolver, Matrix, Op, Scalar, SolverProblem,
 };
 
 /// A [LinearSolver] that uses the LU decomposition in the [`nalgebra` library](https://nalgebra.org/) to solve the linear system.
@@ -14,7 +15,7 @@ use crate::{
 pub struct LU<T, C>
 where
     T: Scalar,
-    C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>,
+    C: NonLinearOpJacobian<M = DMatrix<T>, V = DVector<T>, T = T>,
 {
     matrix: Option<DMatrix<T>>,
     lu: Option<nalgebra::LU<T, Dyn, Dyn>>,
@@ -24,7 +25,7 @@ where
 impl<T, C> Default for LU<T, C>
 where
     T: Scalar,
-    C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>,
+    C: NonLinearOpJacobian<M = DMatrix<T>, V = DVector<T>, T = T>,
 {
     fn default() -> Self {
         Self {
@@ -35,10 +36,10 @@ where
     }
 }
 
-impl<T: Scalar, C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> LinearSolver<C>
+impl<T: Scalar, C: NonLinearOpJacobian<M = DMatrix<T>, V = DVector<T>, T = T>> LinearSolver<C>
     for LU<T, C>
 {
-    type SelfNewOp<C2: NonLinearOp<T = C::T, V = C::V, M = C::M>> = LU<T, C2>;
+    type SelfNewOp<C2: NonLinearOpJacobian<T = C::T, V = C::V, M = C::M>> = LU<T, C2>;
 
     fn solve_in_place(&self, state: &mut C::V) -> Result<(), DiffsolError> {
         if self.lu.is_none() {

@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError}, AdjointContext, AdjointEquations, SensEquations, StateRef, StateRefMut
+    error::{DiffsolError, OdeSolverError}, AdjointContext, AdjointEquations, OdeEquationsAdjoint, SensEquations, StateRef, StateRefMut
 };
 
 use num_traits::{abs, One, Pow, Zero};
@@ -21,6 +21,7 @@ use crate::{
     MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeSolverMethod,
     OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar, SolverProblem, Vector,
     VectorRef, VectorView, VectorViewMut,
+    OdeEquationsImplicit,
 };
 
 use super::jacobian_update::SolverState;
@@ -47,7 +48,7 @@ pub type BdfAdj<M, Eqn, Nls> = BdfAug<
 >;
 impl<M, Eqn, Nls> SensitivitiesOdeSolverMethod<Eqn> for Bdf<M, Eqn, Nls>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsImplicit,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
@@ -83,9 +84,9 @@ where
 /// \[3\] Virtanen, P., Gommers, R., Oliphant, T. E., Haberland, M., Reddy, T., Cournapeau, D., ... & Van Mulbregt, P. (2020). SciPy 1.0: fundamental algorithms for scientific computing in Python. Nature methods, 17(3), 261-272.
 pub struct BdfAug<
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsImplicit,
     Nls: NonLinearSolver<BdfCallable<Eqn>>,
-    AugmentedEqn: AugmentedOdeEquations<Eqn>,
+    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit
 > {
     nonlinear_solver: Nls,
     ode_problem: Option<OdeSolverProblem<Eqn>>,
@@ -119,8 +120,8 @@ impl<Eqn, AugmentedEqn> Default
         AugmentedEqn,
     >
 where
-    Eqn: OdeEquations,
-    AugmentedEqn: AugmentedOdeEquations<Eqn>,
+    Eqn: OdeEquationsImplicit,
+    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
     Eqn::M: DefaultSolver,
     Eqn::V: DefaultDenseMatrix,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -135,8 +136,8 @@ where
 
 impl<M, Eqn, Nls, AugmentedEqn> BdfAug<M, Eqn, Nls, AugmentedEqn>
 where
-    AugmentedEqn: AugmentedOdeEquations<Eqn>,
-    Eqn: OdeEquations,
+    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
+    Eqn: OdeEquationsImplicit,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
@@ -558,8 +559,8 @@ where
 
 impl<M, Eqn, Nls, AugmentedEqn> OdeSolverMethod<Eqn> for BdfAug<M, Eqn, Nls, AugmentedEqn>
 where
-    Eqn: OdeEquations,
-    AugmentedEqn: AugmentedOdeEquations<Eqn>,
+    Eqn: OdeEquationsImplicit,
+    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Nls: NonLinearSolver<BdfCallable<Eqn>>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -1006,8 +1007,8 @@ where
 impl<M, Eqn, Nls, AugmentedEqn> AugmentedOdeSolverMethod<Eqn, AugmentedEqn>
     for BdfAug<M, Eqn, Nls, AugmentedEqn>
 where
-    Eqn: OdeEquations,
-    AugmentedEqn: AugmentedOdeEquations<Eqn>,
+    Eqn: OdeEquationsImplicit,
+    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Nls: NonLinearSolver<BdfCallable<Eqn>>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -1051,8 +1052,8 @@ where
 
 impl<M, Eqn, Nls, AugmentedEqn> AdjointOdeSolverMethod<Eqn> for BdfAug<M, Eqn, Nls, AugmentedEqn>
 where
-    Eqn: OdeEquations,
-    AugmentedEqn: AugmentedOdeEquations<Eqn>,
+    Eqn: OdeEquationsAdjoint,
+    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsAdjoint,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Nls: NonLinearSolver<BdfCallable<Eqn>>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -1140,7 +1141,7 @@ mod test {
                 test_ode_solver_adjoint, test_state_mut, test_state_mut_on_problem,
             },
         },
-        Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquations, OdeSolverMethod, Op, SparseColMat,
+        Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquationsImplicit, OdeSolverMethod, Op, SparseColMat,
     };
 
     use faer::Mat;

@@ -1,6 +1,5 @@
-use crate::matrix::Matrix;
+use crate::{Matrix, LinearOp, Op};
 
-use super::{LinearOp, Op};
 
 pub struct MatrixOp<M: Matrix> {
     m: M,

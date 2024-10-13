@@ -1,4 +1,4 @@
-use crate::{error::DiffsolError, op::Op, solver::SolverProblem, NonLinearOp};
+use crate::{error::DiffsolError, op::Op, solver::SolverProblem, NonLinearOpJacobian};
 
 #[cfg(feature = "nalgebra")]
 pub mod nalgebra;
@@ -17,7 +17,7 @@ pub use nalgebra::lu::LU as NalgebraLU;
 
 /// A solver for the linear problem `Ax = b`, where `A` is a linear operator that is obtained by taking the linearisation of a nonlinear operator `C`
 pub trait LinearSolver<C: Op>: Default {
-    type SelfNewOp<C2: NonLinearOp<T = C::T, V = C::V, M = C::M>>: LinearSolver<C2>;
+    type SelfNewOp<C2: NonLinearOpJacobian<T = C::T, V = C::V, M = C::M>>: LinearSolver<C2>;
 
     /// Set the problem to be solved, any previous problem is discarded.
     /// Any internal state of the solver is reset.
@@ -57,7 +57,8 @@ pub mod tests {
 
     use crate::{
         linear_solver::{FaerLU, NalgebraLU},
-        op::{closure::Closure, NonLinearOp},
+        op::closure::Closure,
+        NonLinearOpJacobian,
         scalar::scale,
         vector::VectorRef,
         LinearSolver, Matrix, SolverProblem, Vector,
@@ -67,7 +68,7 @@ pub mod tests {
     use super::LinearSolveSolution;
 
     pub fn linear_problem<M: Matrix + 'static>() -> (
-        SolverProblem<impl NonLinearOp<M = M, V = M::V, T = M::T>>,
+        SolverProblem<impl NonLinearOpJacobian<M = M, V = M::V, T = M::T>>,
         Vec<LinearSolveSolution<M::V>>,
     ) {
         let diagonal = M::V::from_vec(vec![2.0.into(), 2.0.into()]);
@@ -99,7 +100,7 @@ pub mod tests {
         problem: SolverProblem<C>,
         solns: Vec<LinearSolveSolution<C::V>>,
     ) where
-        C: NonLinearOp,
+        C: NonLinearOpJacobian,
         for<'a> &'a C::V: VectorRef<C::V>,
     {
         solver.set_problem(&problem);

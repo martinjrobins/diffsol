@@ -8,7 +8,8 @@ use crate::{
     op::linearise::LinearisedOp,
     scalar::IndexType,
     solver::SolverProblem,
-    LinearOp, Matrix, NonLinearOp, Op, Scalar, SparseColMat,
+    LinearOpMatrix, Matrix, NonLinearOpJacobian, Op, Scalar, SparseColMat,
+
 };
 
 use faer::{
@@ -21,7 +22,7 @@ use faer::{
 pub struct FaerSparseLU<T, C>
 where
     T: Scalar,
-    C: NonLinearOp<M = SparseColMat<T>, V = Col<T>, T = T>,
+    C: NonLinearOpJacobian<M = SparseColMat<T>, V = Col<T>, T = T>,
 {
     lu: Option<Lu<IndexType, T>>,
     lu_symbolic: Option<SymbolicLu<IndexType>>,
@@ -32,7 +33,7 @@ where
 impl<T, C> Default for FaerSparseLU<T, C>
 where
     T: Scalar,
-    C: NonLinearOp<M = SparseColMat<T>, V = Col<T>, T = T>,
+    C: NonLinearOpJacobian<M = SparseColMat<T>, V = Col<T>, T = T>,
 {
     fn default() -> Self {
         Self {
@@ -44,10 +45,10 @@ where
     }
 }
 
-impl<T: Scalar, C: NonLinearOp<M = SparseColMat<T>, V = Col<T>, T = T>> LinearSolver<C>
+impl<T: Scalar, C: NonLinearOpJacobian<M = SparseColMat<T>, V = Col<T>, T = T>> LinearSolver<C>
     for FaerSparseLU<T, C>
 {
-    type SelfNewOp<C2: NonLinearOp<T = C::T, V = C::V, M = C::M>> = FaerSparseLU<T, C2>;
+    type SelfNewOp<C2: NonLinearOpJacobian<T = C::T, V = C::V, M = C::M>> = FaerSparseLU<T, C2>;
 
     fn set_linearisation(&mut self, x: &C::V, t: C::T) {
         Rc::<LinearisedOp<C>>::get_mut(&mut self.problem.as_mut().expect("Problem not set").f)

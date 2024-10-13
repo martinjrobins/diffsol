@@ -1,9 +1,7 @@
 use num_traits::Zero;
 use std::rc::Rc;
 
-use crate::{Matrix, Vector};
-
-use super::{ConstantOp, Op};
+use crate::{Matrix, Vector, ConstantOp, Op};
 
 pub struct ConstantClosure<M, I>
 where

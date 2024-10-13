@@ -31,8 +31,7 @@ mod tests {
     use super::*;
     use crate::matrix::Matrix;
     use crate::op::unit::UnitCallable;
-    use crate::op::{NonLinearOp, Op};
-    use crate::{ConstantOp, DefaultDenseMatrix, DefaultSolver, Vector};
+    use crate::{ConstantOp, DefaultDenseMatrix, DefaultSolver, Vector, NonLinearOp, Op};
     use crate::{
         OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
     };

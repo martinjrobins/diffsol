@@ -1,9 +1,7 @@
 use std::rc::Rc;
 
 use crate::{
-    op::{unit::UnitCallable, ConstantOp},
-    scalar::Scalar,
-    LinearOp, Matrix, NonLinearOp, Vector,
+    op::constant_op::ConstantOpSensAdjoint, ConstantOp, LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint, Scalar, UnitCallable, Vector, NonLinearOpSensAdjoint, NonLinearOpJacobian, LinearOpMatrix
 };
 use serde::Serialize;
 
@@ -161,6 +159,24 @@ pub trait OdeEquations {
     /// returns the initial condition, i.e. `y(t)`, where `t` is the initial time
     fn init(&self) -> &Rc<Self::Init>;
 }
+
+pub trait OdeEquationsImplicit: 
+    OdeEquations<
+        Rhs: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T>,
+        Mass: LinearOpMatrix<M = Self::M, V = Self::V, T = Self::T>,
+    >
+{}
+
+
+pub trait OdeEquationsAdjoint: 
+    OdeEquationsImplicit<
+        Rhs: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T> + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T>,
+        Init: ConstantOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T>,
+        Out: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T> + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T>
+    >
+{}
+
+impl<T: OdeEquationsAdjoint> OdeEquationsImplicit for T {}
 
 /// This struct implements the ODE equation trait [OdeEquations] for a given right-hand side op, mass op, optional root op, and initial condition function.
 ///
@@ -341,6 +357,26 @@ where
         }
     }
 }
+
+impl <M, Rhs, Init, Mass, Root, Out> OdeEquationsImplicit for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
+where
+    M: Matrix,
+    Rhs: NonLinearOpJacobian<M = M, V = M::V, T = M::T>,
+    Init: ConstantOp<M = M, V = M::V, T = M::T>,
+    Root: NonLinearOp<M = M, V = M::V, T = M::T>,
+    Mass: LinearOpMatrix<M = M, V = M::V, T = M::T>,
+    Out: NonLinearOp<M = M, V = M::V, T = M::T>,
+{}
+
+impl <M, Rhs, Init, Mass, Root, Out> OdeEquationsAdjoint for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
+where
+    M: Matrix,
+    Rhs: NonLinearOpJacobian<M = M, V = M::V, T = M::T> + NonLinearOpAdjoint<M = M, V = M::V, T = M::T> + NonLinearOpSensAdjoint<M = M, V = M::V, T = M::T>,
+    Init: ConstantOpSensAdjoint<M = M, V = M::V, T = M::T>,
+    Root: NonLinearOp<M = M, V = M::V, T = M::T>,
+    Mass: LinearOpMatrix<M = M, V = M::V, T = M::T>,
+    Out: NonLinearOpAdjoint<M = M, V = M::V, T = M::T> + NonLinearOpSensAdjoint<M = M, V = M::V, T = M::T>,
+{}
 
 #[cfg(test)]
 mod tests {

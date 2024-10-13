@@ -1,7 +1,7 @@
 use crate::{
     matrix::Matrix, ode_solver::problem::OdeSolverSolution,
     op::closure_with_adjoint::ClosureWithAdjoint, scalar::scale, ConstantOp,
-    OdeBuilder, OdeEquations, OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector, ConstantClosureWithAdjoint
+    OdeBuilder, OdeEquations, OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector, ConstantClosureWithAdjoint, OdeEquationsAdjoint
 };
 use nalgebra::ComplexField;
 use num_traits::{Zero, One};
@@ -215,7 +215,7 @@ pub fn exponential_decay_problem_with_root<M: Matrix + 'static>(
 }
 
 pub fn exponential_decay_problem_adjoint<M: Matrix>() -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsAdjoint<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
     let k = M::T::from(0.1);

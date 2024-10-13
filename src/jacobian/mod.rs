@@ -1,9 +1,6 @@
 use std::collections::HashSet;
 
-use crate::op::{LinearOp, Op};
-use crate::vector::Vector;
-use crate::Scalar;
-use crate::{op::NonLinearOp, Matrix, MatrixSparsityRef, VectorIndex};
+use crate::{NonLinearOp, Matrix, MatrixSparsityRef, VectorIndex, LinearOp, Op, Vector, Scalar, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint};
 use num_traits::{One, Zero};
 
 use self::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy};
@@ -13,9 +10,9 @@ pub mod graph;
 pub mod greedy_coloring;
 
 macro_rules! gen_find_non_zeros_nonlinear {
-    ($name:ident, $op_fn:ident) => {
+    ($name:ident, $op_fn:ident, $op_trait:ident) => {
         /// Find the non-zero entries of the $name matrix of a non-linear operator.
-        pub fn $name<F: NonLinearOp + ?Sized>(op: &F, x: &F::V, t: F::T) -> Vec<(usize, usize)> {
+        pub fn $name<F: NonLinearOp + $op_trait + ?Sized>(op: &F, x: &F::V, t: F::T) -> Vec<(usize, usize)> {
             let mut v = F::V::zeros(op.nstates());
             let mut col = F::V::zeros(op.nout());
             let mut triplets = Vec::with_capacity(op.nstates());
@@ -35,10 +32,10 @@ macro_rules! gen_find_non_zeros_nonlinear {
     };
 }
 
-gen_find_non_zeros_nonlinear!(find_jacobian_non_zeros, jac_mul_inplace);
-gen_find_non_zeros_nonlinear!(find_adjoint_non_zeros, jac_transpose_mul_inplace);
-gen_find_non_zeros_nonlinear!(find_sens_non_zeros, sens_mul_inplace);
-gen_find_non_zeros_nonlinear!(find_sens_adjoint_non_zeros, sens_transpose_mul_inplace);
+gen_find_non_zeros_nonlinear!(find_jacobian_non_zeros, jac_mul_inplace, NonLinearOpJacobian);
+gen_find_non_zeros_nonlinear!(find_adjoint_non_zeros, jac_transpose_mul_inplace, NonLinearOpAdjoint);
+gen_find_non_zeros_nonlinear!(find_sens_non_zeros, sens_mul_inplace, NonLinearOpSens);
+gen_find_non_zeros_nonlinear!(find_sens_adjoint_non_zeros, sens_transpose_mul_inplace, NonLinearOpSensAdjoint);
 
 macro_rules! gen_find_non_zeros_linear {
     ($name:ident, $op_fn:ident) => {
@@ -119,7 +116,7 @@ impl<M: Matrix> JacobianColoring<M> {
     //    Self::new_from_non_zeros(op, non_zeros)
     //}
 
-    pub fn jacobian_inplace<F: NonLinearOp<M = M, V = M::V, T = M::T>>(
+    pub fn jacobian_inplace<F: NonLinearOpJacobian<M = M, V = M::V, T = M::T>>(
         &self,
         op: &F,
         x: &F::V,
@@ -139,7 +136,7 @@ impl<M: Matrix> JacobianColoring<M> {
         }
     }
 
-    pub fn adjoint_inplace<F: NonLinearOp<M = M, V = M::V, T = M::T>>(
+    pub fn adjoint_inplace<F: NonLinearOpAdjoint<M = M, V = M::V, T = M::T>>(
         &self,
         op: &F,
         x: &F::V,
@@ -159,7 +156,7 @@ impl<M: Matrix> JacobianColoring<M> {
         }
     }
 
-    pub fn sens_adjoint_inplace<F: NonLinearOp<M = M, V = M::V, T = M::T>>(
+    pub fn sens_adjoint_inplace<F: NonLinearOpSensAdjoint<M = M, V = M::V, T = M::T>>(
         &self,
         op: &F,
         x: &F::V,
@@ -207,13 +204,13 @@ mod tests {
     use crate::matrix::sparsity::MatrixSparsityRef;
     use crate::matrix::Matrix;
     use crate::op::linear_closure::LinearClosure;
-    use crate::op::{LinearOp, Op};
     use crate::vector::Vector;
     use crate::{
         jacobian::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy},
         op::closure::Closure,
+        LinearOp, Op,
     };
-    use crate::{scale, NonLinearOp, SparseColMat};
+    use crate::{scale, NonLinearOpJacobian, SparseColMat};
     use nalgebra::DMatrix;
     use num_traits::{One, Zero};
     use std::ops::MulAssign;
@@ -224,7 +221,7 @@ mod tests {
         triplets: &'a [(usize, usize, M::T)],
         nrows: usize,
         ncols: usize,
-    ) -> impl NonLinearOp<M = M, V = M::V, T = M::T> + 'a {
+    ) -> impl NonLinearOpJacobian<M = M, V = M::V, T = M::T> + 'a {
         let nstates = ncols;
         let nout = nrows;
         let f = move |x: &M::V, y: &mut M::V| {

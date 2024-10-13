@@ -1,8 +1,7 @@
 use std::rc::Rc;
 
-use crate::{Matrix, Vector};
+use crate::{Matrix, Vector, ConstantOp, Op, ConstantOpSens};
 
-use super::{ConstantOp, Op};
 
 pub struct ConstantClosureWithSens<M, I, J>
 where
@@ -73,6 +72,14 @@ where
     fn call(&self, t: Self::T) -> Self::V {
         (self.func)(self.p.as_ref(), t)
     }
+}
+
+impl<M, I, J> ConstantOpSens for ConstantClosureWithSens<M, I, J>
+where
+    M: Matrix,
+    I: Fn(&M::V, M::T) -> M::V,
+    J: Fn(&M::V, M::T, &M::V, &mut M::V),
+{
     fn sens_mul_inplace(&self, t: Self::T, v: &Self::V, y: &mut Self::V) {
         (self.func_sens)(self.p.as_ref(), t, v, y);
     }

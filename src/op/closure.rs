@@ -1,8 +1,8 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{find_jacobian_non_zeros, jacobian::JacobianColoring, Matrix, MatrixSparsity, Vector};
+use crate::{find_jacobian_non_zeros, jacobian::JacobianColoring, Matrix, MatrixSparsity, Vector, NonLinearOp, Op, NonLinearOpJacobian};
 
-use super::{NonLinearOp, Op, OpStatistics};
+use super::OpStatistics;
 
 pub struct Closure<M, F, G>
 where
@@ -92,6 +92,14 @@ where
         self.statistics.borrow_mut().increment_call();
         (self.func)(x, self.p.as_ref(), t, y)
     }
+}
+
+impl<M, F, G> NonLinearOpJacobian for Closure<M, F, G>
+where
+    M: Matrix,
+    F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+{
     fn jac_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
         self.statistics.borrow_mut().increment_jac_mul();
         (self.jacobian_action)(x, self.p.as_ref(), t, v, y)

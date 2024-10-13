@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use crate::{
     error::DiffsolError, linear_solver::LinearSolver, op::linearise::LinearisedOp,
-    solver::SolverProblem, LinearOp, Matrix, MatrixSparsityRef, NonLinearOp, Op, Scalar,
+    solver::SolverProblem, Matrix, LinearOpMatrix, MatrixSparsityRef, Op, Scalar, NonLinearOpJacobian
 };
 
 use faer::{linalg::solvers::FullPivLu, solvers::SpSolver, Col, Mat};
@@ -11,7 +11,7 @@ use faer::{linalg::solvers::FullPivLu, solvers::SpSolver, Col, Mat};
 pub struct LU<T, C>
 where
     T: Scalar,
-    C: NonLinearOp<M = Mat<T>, V = Col<T>, T = T>,
+    C: NonLinearOpJacobian<M = Mat<T>, V = Col<T>, T = T>,
 {
     lu: Option<FullPivLu<T>>,
     problem: Option<SolverProblem<LinearisedOp<C>>>,
@@ -21,7 +21,7 @@ where
 impl<T, C> Default for LU<T, C>
 where
     T: Scalar,
-    C: NonLinearOp<M = Mat<T>, V = Col<T>, T = T>,
+    C: NonLinearOpJacobian<M = Mat<T>, V = Col<T>, T = T>,
 {
     fn default() -> Self {
         Self {
@@ -32,8 +32,8 @@ where
     }
 }
 
-impl<T: Scalar, C: NonLinearOp<M = Mat<T>, V = Col<T>, T = T>> LinearSolver<C> for LU<T, C> {
-    type SelfNewOp<C2: NonLinearOp<T = C::T, V = C::V, M = C::M>> = LU<T, C2>;
+impl<T: Scalar, C: NonLinearOpJacobian<M = Mat<T>, V = Col<T>, T = T>> LinearSolver<C> for LU<T, C> {
+    type SelfNewOp<C2: NonLinearOpJacobian<T = C::T, V = C::V, M = C::M>> = LU<T, C2>;
 
     fn set_linearisation(&mut self, x: &C::V, t: C::T) {
         Rc::<LinearisedOp<C>>::get_mut(&mut self.problem.as_mut().expect("Problem not set").f)

@@ -6,7 +6,7 @@ use crate::sundials_sys::{
 
 use crate::{
     error::*, linear_solver_error, ode_solver::sundials::sundials_check,
-    op::linearise::LinearisedOp, vector::sundials::SundialsVector, LinearOp, Matrix, NonLinearOp,
+    op::linearise::LinearisedOp, vector::sundials::SundialsVector, LinearOpMatrix, Matrix, NonLinearOpJacobian,
     Op, SolverProblem, SundialsMatrix,
 };
 
@@ -17,7 +17,7 @@ use super::LinearSolver;
 
 pub struct SundialsLinearSolver<Op>
 where
-    Op: NonLinearOp<M = SundialsMatrix, V = SundialsVector, T = realtype>,
+    Op: NonLinearOpJacobian<M = SundialsMatrix, V = SundialsVector, T = realtype>,
 {
     linear_solver: Option<SUNLinearSolver>,
     problem: Option<SolverProblem<LinearisedOp<Op>>>,
@@ -27,7 +27,7 @@ where
 
 impl<Op> Default for SundialsLinearSolver<Op>
 where
-    Op: NonLinearOp<M = SundialsMatrix, V = SundialsVector, T = realtype>,
+    Op: NonLinearOpJacobian<M = SundialsMatrix, V = SundialsVector, T = realtype>,
 {
     fn default() -> Self {
         Self::new_dense()
@@ -36,7 +36,7 @@ where
 
 impl<Op> SundialsLinearSolver<Op>
 where
-    Op: NonLinearOp<M = SundialsMatrix, V = SundialsVector, T = realtype>,
+    Op: NonLinearOpJacobian<M = SundialsMatrix, V = SundialsVector, T = realtype>,
 {
     pub fn new_dense() -> Self {
         Self {
@@ -50,7 +50,7 @@ where
 
 impl<Op> Drop for SundialsLinearSolver<Op>
 where
-    Op: NonLinearOp<M = SundialsMatrix, V = SundialsVector, T = realtype>,
+    Op: NonLinearOpJacobian<M = SundialsMatrix, V = SundialsVector, T = realtype>,
 {
     fn drop(&mut self) {
         if let Some(linear_solver) = self.linear_solver {
@@ -61,9 +61,9 @@ where
 
 impl<Op> LinearSolver<Op> for SundialsLinearSolver<Op>
 where
-    Op: NonLinearOp<M = SundialsMatrix, V = SundialsVector, T = realtype>,
+    Op: NonLinearOpJacobian<M = SundialsMatrix, V = SundialsVector, T = realtype>,
 {
-    type SelfNewOp<C2: NonLinearOp<T = Op::T, V = Op::V, M = Op::M>> = SundialsLinearSolver<C2>;
+    type SelfNewOp<C2: NonLinearOpJacobian<T = Op::T, V = Op::V, M = Op::M>> = SundialsLinearSolver<C2>;
 
     fn set_problem(&mut self, problem: &SolverProblem<Op>) {
         let linearised_problem = problem.linearise();

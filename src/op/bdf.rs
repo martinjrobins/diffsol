@@ -1,6 +1,6 @@
 use crate::{
-    matrix::DenseMatrix, ode_solver::equations::OdeEquations, scale, LinearOp, Matrix, MatrixRef,
-    MatrixSparsity, MatrixSparsityRef, OdeSolverProblem, Vector, VectorRef,
+    matrix::DenseMatrix, ode_solver::equations::OdeEquationsImplicit, scale, LinearOp, Matrix, MatrixRef,
+    MatrixSparsity, MatrixSparsityRef, OdeSolverProblem, Vector, VectorRef, NonLinearOp, Op, NonLinearOpJacobian
 };
 use num_traits::{One, Zero};
 use std::ops::MulAssign;
@@ -10,10 +10,8 @@ use std::{
     rc::Rc,
 };
 
-use super::{NonLinearOp, Op};
-
 // callable to solve for F(y) = M (y' + psi) - c * f(y) = 0
-pub struct BdfCallable<Eqn: OdeEquations> {
+pub struct BdfCallable<Eqn: OdeEquationsImplicit> {
     eqn: Rc<Eqn>,
     psi_neg_y0: RefCell<Eqn::V>,
     c: RefCell<Eqn::T>,
@@ -25,7 +23,7 @@ pub struct BdfCallable<Eqn: OdeEquations> {
     sparsity: Option<<Eqn::M as Matrix>::Sparsity>,
 }
 
-impl<Eqn: OdeEquations> BdfCallable<Eqn> {
+impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
 
     // F(y) = M (y - y0 + psi) - c * f(y) = 0
     // M = I
@@ -189,7 +187,7 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
     }
 }
 
-impl<Eqn: OdeEquations> Op for BdfCallable<Eqn> {
+impl<Eqn: OdeEquationsImplicit> Op for BdfCallable<Eqn> {
     type V = Eqn::V;
     type T = Eqn::T;
     type M = Eqn::M;
@@ -210,7 +208,7 @@ impl<Eqn: OdeEquations> Op for BdfCallable<Eqn> {
 // dF(y)/dp = dM/dp (y - y0 + psi) + Ms - c * df(y)/dp - c df(y)/dy s = 0
 // jac is M - c * df(y)/dy, same
 // callable to solve for F(y) = M (y' + psi) - f(y) = 0
-impl<Eqn: OdeEquations> NonLinearOp for BdfCallable<Eqn>
+impl<Eqn: OdeEquationsImplicit> NonLinearOp for BdfCallable<Eqn>
 where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
@@ -233,6 +231,14 @@ where
             y.axpy(Eqn::T::one(), &tmp, -c);
         }
     }
+    
+}
+
+impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for BdfCallable<Eqn>
+where
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+{
     // (M - c * f'(y)) v
     fn jac_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
         self.eqn.rhs().jac_mul_inplace(x, t, v, y);

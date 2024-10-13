@@ -1,7 +1,7 @@
 use crate::{
     error::{DiffsolError, NonLinearSolverError},
     non_linear_solver_error,
-    op::NonLinearOp,
+    NonLinearOpJacobian,
     Convergence, ConvergenceStatus, LinearSolver, NonLinearSolver, Op, SolverProblem, Vector,
 };
 
@@ -35,7 +35,7 @@ pub fn newton_iteration<V: Vector>(
     Err(non_linear_solver_error!(NewtonDidNotConverge))
 }
 
-pub struct NewtonNonlinearSolver<C: NonLinearOp, Ls: LinearSolver<C>> {
+pub struct NewtonNonlinearSolver<C: NonLinearOpJacobian, Ls: LinearSolver<C>> {
     convergence: Option<Convergence<C::V>>,
     linear_solver: Ls,
     problem: Option<SolverProblem<C>>,
@@ -43,7 +43,7 @@ pub struct NewtonNonlinearSolver<C: NonLinearOp, Ls: LinearSolver<C>> {
     tmp: C::V,
 }
 
-impl<C: NonLinearOp, Ls: LinearSolver<C>> NewtonNonlinearSolver<C, Ls> {
+impl<C: NonLinearOpJacobian, Ls: LinearSolver<C>> NewtonNonlinearSolver<C, Ls> {
     pub fn new(linear_solver: Ls) -> Self {
         Self {
             problem: None,
@@ -55,14 +55,14 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NewtonNonlinearSolver<C, Ls> {
     }
 }
 
-impl<C: NonLinearOp, Ls: LinearSolver<C>> Default for NewtonNonlinearSolver<C, Ls> {
+impl<C: NonLinearOpJacobian, Ls: LinearSolver<C>> Default for NewtonNonlinearSolver<C, Ls> {
     fn default() -> Self {
         Self::new(Ls::default())
     }
 }
 
-impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinearSolver<C, Ls> {
-    type SelfNewOp<C2: NonLinearOp<T = C::T, V = C::V, M = C::M>> =
+impl<C: NonLinearOpJacobian, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinearSolver<C, Ls> {
+    type SelfNewOp<C2: NonLinearOpJacobian<T = C::T, V = C::V, M = C::M>> =
         NewtonNonlinearSolver<C2, Ls::SelfNewOp<C2>>;
 
     fn convergence(&self) -> &Convergence<C::V> {
@@ -131,7 +131,7 @@ impl<C: NonLinearOp, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinear
 
     fn solve_other_in_place(
         &mut self,
-        g: impl NonLinearOp<M = C::M, V = C::V, T = C::T>,
+        g: impl NonLinearOpJacobian<M = C::M, V = C::V, T = C::T>,
         xn: &mut <C as Op>::V,
         t: <C as Op>::T,
         error_y: &<C as Op>::V,

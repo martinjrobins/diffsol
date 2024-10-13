@@ -1,9 +1,8 @@
 // unit is a callable that returns returns the input vector
 
-use crate::{Matrix, Vector};
+use crate::{Matrix, Vector, LinearOp, NonLinearOp, Op, NonLinearOpJacobian};
 use num_traits::One;
 
-use super::{LinearOp, NonLinearOp, Op};
 
 /// A dummy operator that returns the input vector. Can be used either as a [NonLinearOp] or [LinearOp].
 pub struct UnitCallable<M: Matrix> {
@@ -51,6 +50,9 @@ impl<M: Matrix> NonLinearOp for UnitCallable<M> {
     fn call_inplace(&self, x: &Self::V, _t: Self::T, y: &mut Self::V) {
         y.copy_from(x);
     }
+}
+
+impl<M: Matrix> NonLinearOpJacobian for UnitCallable<M> {
     fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
         y.copy_from(v);
     }

@@ -3,12 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 use diffsl::{execution::module::CodegenModule, Compiler};
 
 use crate::{
-    error::DiffsolError,
-    find_jacobian_non_zeros, find_matrix_non_zeros,
-    jacobian::JacobianColoring,
-    matrix::sparsity::MatrixSparsity,
-    op::{LinearOp, NonLinearOp, Op},
-    ConstantOp, Matrix, OdeEquations, Vector,
+    error::DiffsolError, find_jacobian_non_zeros, find_matrix_non_zeros, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity, op::nonlinear_op::NonLinearOpJacobian, ConstantOp, LinearOp, Matrix, NonLinearOp, OdeEquations, Op, Vector, LinearOpMatrix
 };
 
 pub type T = f64;
@@ -319,11 +314,15 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlRoot<'_, M, CG> 
             y.as_mut_slice(),
         );
     }
+}
 
+impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpJacobian for DiffSlRoot<'_, M, CG> {
     fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
         y.fill(0.0);
     }
 }
+
+
 
 impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlOut<'_, M, CG> {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
@@ -338,6 +337,10 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlOut<'_, M, CG> {
             .get_out(self.context.data.borrow().as_slice());
         y.copy_from_slice(out);
     }
+    
+}
+
+impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpJacobian for DiffSlOut<'_, M, CG> {
     fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         self.context.compiler.calc_out_grad(
             t,
@@ -363,7 +366,9 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlRhs<'_, M, CG> {
             y.as_mut_slice(),
         );
     }
+}
 
+impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpJacobian for DiffSlRhs<'_, M, CG> {
     fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         let mut dummy_rhs = Self::V::zeros(self.nstates());
         self.context.compiler.rhs_grad(
@@ -399,7 +404,9 @@ impl<M: Matrix<T = T>, CG: CodegenModule> LinearOp for DiffSlMass<'_, M, CG> {
         // y = tmp + beta * y
         y.axpy(1.0, &tmp, beta);
     }
+}
 
+impl<M: Matrix<T = T>, CG: CodegenModule> LinearOpMatrix for DiffSlMass<'_, M, CG> {
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
         if let Some(coloring) = &self.coloring {
             coloring.matrix_inplace(self, t, y);
@@ -407,6 +414,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> LinearOp for DiffSlMass<'_, M, CG> {
             self._default_matrix_inplace(t, y);
         }
     }
+    
 }
 
 impl<'a, M: Matrix<T = T>, CG: CodegenModule> OdeEquations for DiffSl<'a, M, CG> {

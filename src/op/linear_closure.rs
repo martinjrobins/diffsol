@@ -2,10 +2,10 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     find_matrix_non_zeros, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity, Matrix,
-    Vector,
+    Vector, LinearOp, Op, LinearOpMatrix
 };
 
-use super::{LinearOp, Op, OpStatistics};
+use super::OpStatistics;
 
 pub struct LinearClosure<M, F>
 where
@@ -90,6 +90,14 @@ where
         self.statistics.borrow_mut().increment_call();
         (self.func)(x, self.p.as_ref(), t, beta, y)
     }
+    
+}
+
+impl<M, F> LinearOpMatrix for LinearClosure<M, F>
+where
+    M: Matrix,
+    F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+{
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
         self.statistics.borrow_mut().increment_matrix();
         if let Some(coloring) = &self.coloring {
@@ -98,4 +106,5 @@ where
             self._default_matrix_inplace(t, y);
         }
     }
+
 }

@@ -6,9 +6,10 @@ use crate::{
         JacobianColoring,
     },
     Matrix, MatrixSparsity, Vector,
+    NonLinearOp, Op, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSensAdjoint,
 };
 
-use super::{NonLinearOp, Op, OpStatistics};
+use super::OpStatistics;
 
 pub struct ClosureWithAdjoint<M, F, G, H, I>
 where
@@ -150,13 +151,19 @@ where
         self.statistics.borrow_mut().increment_call();
         (self.func)(x, self.p.as_ref(), t, y)
     }
+}
+
+impl<M, F, G, H, I> NonLinearOpJacobian for ClosureWithAdjoint<M, F, G, H, I>
+where 
+    M: Matrix,
+    F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+{
     fn jac_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
         self.statistics.borrow_mut().increment_jac_mul();
         (self.jacobian_action)(x, self.p.as_ref(), t, v, y)
-    }
-    fn jac_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        self.statistics.borrow_mut().increment_jac_adj_mul();
-        (self.jacobian_adjoint_action)(x, self.p.as_ref(), t, v, y);
     }
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         self.statistics.borrow_mut().increment_matrix();
@@ -166,6 +173,21 @@ where
             self._default_jacobian_inplace(x, t, y);
         }
     }
+}
+
+impl<M, F, G, H, I> NonLinearOpAdjoint for ClosureWithAdjoint<M, F, G, H, I>
+where 
+    M: Matrix,
+    F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+{
+    fn jac_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        self.statistics.borrow_mut().increment_jac_adj_mul();
+        (self.jacobian_adjoint_action)(x, self.p.as_ref(), t, v, y);
+    }
+    
     fn adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         if let Some(coloring) = self.coloring_adjoint.as_ref() {
             coloring.adjoint_inplace(self, x, t, y);
@@ -173,6 +195,16 @@ where
             self._default_adjoint_inplace(x, t, y);
         }
     }
+}
+
+impl<M, F, G, H, I> NonLinearOpSensAdjoint for ClosureWithAdjoint<M, F, G, H, I>
+where 
+    M: Matrix,
+    F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+{
     fn sens_transpose_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
         (self.sens_adjoint_action)(_x, self.p.as_ref(), _t, _v, y);
     }
@@ -184,3 +216,4 @@ where
         }
     }
 }
+

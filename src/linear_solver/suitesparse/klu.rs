@@ -29,7 +29,7 @@ use crate::{
     matrix::MatrixCommon,
     op::linearise::LinearisedOp,
     vector::Vector,
-    LinearOp, Matrix, MatrixSparsityRef, NonLinearOp, Op, SolverProblem, SparseColMat,
+    LinearOpMatrix, Matrix, MatrixSparsityRef, NonLinearOpJacobian, Op, SolverProblem, SparseColMat,
 };
 
 trait MatrixKLU: Matrix<T = f64> {
@@ -159,7 +159,7 @@ impl KluCommon {
 pub struct KLU<M, C>
 where
     M: Matrix,
-    C: NonLinearOp<M = M, V = M::V, T = M::T>,
+    C: NonLinearOpJacobian<M = M, V = M::V, T = M::T>,
 {
     klu_common: RefCell<KluCommon>,
     klu_symbolic: Option<KluSymbolic>,
@@ -171,7 +171,7 @@ where
 impl<M, C> Default for KLU<M, C>
 where
     M: Matrix,
-    C: NonLinearOp<M = M, V = M::V, T = M::T>,
+    C: NonLinearOpJacobian<M = M, V = M::V, T = M::T>,
 {
     fn default() -> Self {
         let klu_common = KluCommon::default();
@@ -190,9 +190,9 @@ impl<M, C> LinearSolver<C> for KLU<M, C>
 where
     M: MatrixKLU,
     M::V: VectorKLU,
-    C: NonLinearOp<M = M, V = M::V, T = M::T>,
+    C: NonLinearOpJacobian<M = M, V = M::V, T = M::T>,
 {
-    type SelfNewOp<C2: NonLinearOp<T = C::T, V = C::V, M = C::M>> = KLU<M, C2>;
+    type SelfNewOp<C2: NonLinearOpJacobian<T = C::T, V = C::V, M = C::M>> = KLU<M, C2>;
 
     fn set_linearisation(&mut self, x: &C::V, t: C::T) {
         Rc::<LinearisedOp<C>>::get_mut(&mut self.problem.as_mut().expect("Problem not set").f)
