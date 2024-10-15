@@ -23,9 +23,9 @@ use crate::SensEquations;
 use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
-    AugmentedOdeEquations, DenseMatrix, JacobianUpdate, NonLinearOp, OdeEquations,
-    OdeEquationsImplicit, OdeEquationsSens, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op,
-    Scalar, StateRef, StateRefMut, Vector, VectorViewMut,
+    AugmentedOdeEquations, DenseMatrix, JacobianUpdate, NonLinearOp, OdeEquations, OdeSolverMethod,
+    OdeSolverProblem, OdeSolverState, Op, Scalar, Vector, VectorViewMut, StateRef, StateRefMut,
+    OdeEquationsSens, OdeEquationsImplicit
 };
 
 use super::bdf::BdfStatistics;
@@ -59,10 +59,10 @@ where
 /// - The upper triangular part of the `a` matrix must be zero (i.e. not fully implicit).
 /// - The diagonal of the `a` matrix must be the same non-zero value for all rows (i.e. an SDIRK method), except for the first row which can be zero for ESDIRK methods.
 /// - The last row of the `a` matrix must be the same as the `b` vector, and the last element of the `c` vector must be 1 (i.e. a stiffly accurate method)
-pub struct Sdirk<M, Eqn, LS, AugmentedEqn = NoAug<Eqn>>
+pub struct Sdirk<M, Eqn, LS, AugmentedEqn=NoAug<Eqn>>
 where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    LS: LinearSolver<SdirkCallable<Eqn>>,
+    LS: LinearSolver<Eqn::M>,
     Eqn: OdeEquationsImplicit,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
@@ -70,7 +70,8 @@ where
 {
     tableau: Tableau<M>,
     problem: Option<OdeSolverProblem<Eqn>>,
-    nonlinear_solver: NewtonNonlinearSolver<SdirkCallable<Eqn>, LS>,
+    nonlinear_solver: NewtonNonlinearSolver<Eqn::M, LS>,
+    op: Option<SdirkCallable<Eqn>>,
     state: Option<SdirkState<Eqn::V>>,
     diff: M,
     sdiff: Vec<M>,
@@ -92,13 +93,7 @@ where
     jacobian_update: JacobianUpdate<Eqn::T>,
 }
 
-impl<Eqn>
-    Sdirk<
-        <Eqn::V as DefaultDenseMatrix>::M,
-        Eqn,
-        <Eqn::M as DefaultSolver>::LS<SdirkCallable<Eqn>>,
-        NoAug<Eqn>,
-    >
+impl<Eqn> Sdirk<<Eqn::V as DefaultDenseMatrix>::M, Eqn, <Eqn::M as DefaultSolver>::LS, NoAug<Eqn>>
 where
     Eqn: OdeEquationsImplicit,
     Eqn::M: DefaultSolver,
@@ -106,6 +101,7 @@ where
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
     for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
 {
+
     pub fn tr_bdf2() -> Self {
         let tableau = Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::tr_bdf2();
         let linear_solver = Eqn::M::default_solver();
@@ -118,13 +114,7 @@ where
     }
 }
 
-impl<Eqn>
-    Sdirk<
-        <Eqn::V as DefaultDenseMatrix>::M,
-        Eqn,
-        <Eqn::M as DefaultSolver>::LS<SdirkCallable<Eqn>>,
-        SensEquations<Eqn>,
-    >
+impl<Eqn> Sdirk<<Eqn::V as DefaultDenseMatrix>::M, Eqn, <Eqn::M as DefaultSolver>::LS, SensEquations<Eqn>>
 where
     Eqn: OdeEquationsSens,
     Eqn::M: DefaultSolver,
@@ -132,6 +122,7 @@ where
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
     for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
 {
+
     pub fn tr_bdf2_with_sensitivities() -> Self {
         let tableau = Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::tr_bdf2();
         let linear_solver = Eqn::M::default_solver();
@@ -146,7 +137,7 @@ where
 
 impl<M, Eqn, LS> Sdirk<M, Eqn, LS, NoAug<Eqn>>
 where
-    LS: LinearSolver<SdirkCallable<Eqn>>,
+    LS: LinearSolver<Eqn::M>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquationsImplicit,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
@@ -159,7 +150,7 @@ where
 
 impl<M, Eqn, LS> Sdirk<M, Eqn, LS, SensEquations<Eqn>>
 where
-    LS: LinearSolver<SdirkCallable<Eqn>>,
+    LS: LinearSolver<Eqn::M>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquationsSens,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
@@ -172,7 +163,7 @@ where
 
 impl<M, Eqn, LS, AugmentedEqn> Sdirk<M, Eqn, LS, AugmentedEqn>
 where
-    LS: LinearSolver<SdirkCallable<Eqn>>,
+    LS: LinearSolver<Eqn::M>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquationsImplicit,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
@@ -270,6 +261,7 @@ where
             sdiff,
             tableau,
             nonlinear_solver,
+            op: None,
             state: None,
             problem: None,
             s_op: None,
@@ -436,7 +428,7 @@ where
 
 impl<M, Eqn, AugmentedEqn, LS> OdeSolverMethod<Eqn> for Sdirk<M, Eqn, LS, AugmentedEqn>
 where
-    LS: LinearSolver<SdirkCallable<Eqn>>,
+    LS: LinearSolver<Eqn::M>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquationsImplicit,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
@@ -475,8 +467,9 @@ where
         callable.set_h(state.h);
         self.jacobian_update.update_jacobian(state.h);
         self.jacobian_update.update_rhs_jacobian();
-        let nonlinear_problem = SolverProblem::new_from_ode_problem(callable, problem);
+        let nonlinear_problem = SolverProblem::new_from_ode_problem(callable.clone(), problem);
         self.nonlinear_solver.set_problem(&nonlinear_problem);
+        self.op = Some(callable);
 
         // set max iterations for nonlinear solver
         self.nonlinear_solver
@@ -939,8 +932,7 @@ mod test {
                 robertson_ode::robertson_ode,
             },
             tests::{
-                test_checkpointing, test_interpolate, test_no_set_problem, test_ode_solver,
-                test_ode_solver_no_sens, test_state_mut, test_state_mut_on_problem,
+                test_checkpointing, test_interpolate, test_no_set_problem, test_ode_solver, test_ode_solver_no_sens, test_state_mut, test_state_mut_on_problem
             },
         },
         OdeEquations, Op, Sdirk, SparseColMat,

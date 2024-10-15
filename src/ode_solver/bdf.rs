@@ -22,7 +22,7 @@ use crate::{
     AugmentedOdeEquations, BdfState, Checkpointing, DenseMatrix, IndexType, InitOp, JacobianUpdate,
     MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquationsImplicit,
     OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar,
-    SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
+    Vector, VectorRef, VectorView, VectorViewMut,
 };
 
 use super::jacobian_update::SolverState;
@@ -49,7 +49,7 @@ where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-    Nls: NonLinearSolver<BdfCallable<Eqn>>,
+    Nls: NonLinearSolver<Eqn::M>,
 {
 }
 
@@ -82,11 +82,12 @@ where
 pub struct Bdf<
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquationsImplicit,
-    Nls: NonLinearSolver<BdfCallable<Eqn>>,
+    Nls: NonLinearSolver<Eqn::M>,
     AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit = NoAug<Eqn>,
 > {
     nonlinear_solver: Nls,
     ode_problem: Option<OdeSolverProblem<Eqn>>,
+    op: Option<Rc<BdfCallable<Eqn>>>,
     n_equal_steps: usize,
     y_delta: Eqn::V,
     g_delta: Eqn::V,
@@ -113,7 +114,7 @@ impl<Eqn> Default
     for Bdf<
         <Eqn::V as DefaultDenseMatrix>::M,
         Eqn,
-        NewtonNonlinearSolver<BdfCallable<Eqn>, <Eqn::M as DefaultSolver>::LS<BdfCallable<Eqn>>>,
+        NewtonNonlinearSolver<Eqn::M, <Eqn::M as DefaultSolver>::LS>,
         NoAug<Eqn>,
     >
 where
@@ -134,7 +135,7 @@ impl<Eqn>
     Bdf<
         <Eqn::V as DefaultDenseMatrix>::M,
         Eqn,
-        NewtonNonlinearSolver<BdfCallable<Eqn>, <Eqn::M as DefaultSolver>::LS<BdfCallable<Eqn>>>,
+        NewtonNonlinearSolver<Eqn::M, <Eqn::M as DefaultSolver>::LS>,
         SensEquations<Eqn>,
     >
 where
@@ -158,7 +159,7 @@ where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-    Nls: NonLinearSolver<BdfCallable<Eqn>>,
+    Nls: NonLinearSolver<Eqn::M>,
 {
     const NEWTON_MAXITER: IndexType = 4;
     const MIN_FACTOR: f64 = 0.5;
@@ -197,6 +198,7 @@ where
 
         Self {
             s_op: None,
+            op: None,
             ode_problem: None,
             nonlinear_solver,
             n_equal_steps: 0,
@@ -223,10 +225,6 @@ where
 
     pub fn get_statistics(&self) -> &BdfStatistics {
         &self.statistics
-    }
-
-    fn nonlinear_problem_op(&self) -> &Rc<BdfCallable<Eqn>> {
-        &self.nonlinear_solver.problem().f
     }
 
     fn _compute_r(order: usize, factor: Eqn::T) -> M {
@@ -261,7 +259,7 @@ where
         //let y = &self.y_predict;
         //let t = self.t_predict;
         if self.jacobian_update.check_rhs_jacobian_update(c, &state) {
-            self.nonlinear_solver.problem().f.set_jacobian_is_stale();
+            self.op.unwrap().set_jacobian_is_stale();
             self.nonlinear_solver.reset_jacobian(y, t);
             self.jacobian_update.update_rhs_jacobian();
             self.jacobian_update.update_jacobian(c);

@@ -182,7 +182,6 @@ use op::{
     linear_closure_with_sens::LinearClosureWithSens,
 };
 use scalar::{IndexType, Scalar, Scale};
-use solver::SolverProblem;
 pub use vector::DefaultDenseMatrix;
 use vector::{Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut};
 

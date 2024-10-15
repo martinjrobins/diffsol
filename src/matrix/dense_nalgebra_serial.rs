@@ -5,7 +5,7 @@ use nalgebra::{
     RawStorageMut,
 };
 
-use crate::{scalar::Scale, IndexType, NonLinearOpJacobian, Scalar, Vector};
+use crate::{scalar::Scale, IndexType, Scalar, Vector};
 
 use super::default_solver::DefaultSolver;
 use super::sparsity::{Dense, DenseRef};
@@ -13,7 +13,7 @@ use crate::error::DiffsolError;
 use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU};
 
 impl<T: Scalar> DefaultSolver for DMatrix<T> {
-    type LS<C: NonLinearOpJacobian<M = DMatrix<T>, V = DVector<T>, T = T>> = NalgebraLU<T, C>;
+    type LS = NalgebraLU<T>;
 }
 
 macro_rules! impl_matrix_common {

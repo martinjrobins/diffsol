@@ -5,7 +5,7 @@ use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 use crate::error::DiffsolError;
 use crate::scalar::{IndexType, Scalar, Scale};
 use crate::FaerLU;
-use crate::{Dense, DenseRef, NonLinearOpJacobian, Vector};
+use crate::{Dense, DenseRef, Vector};
 
 use faer::{
     linalg::matmul::matmul, mat::As2D, mat::As2DMut, Col, ColMut, ColRef, Mat, MatMut, MatRef,
@@ -14,7 +14,7 @@ use faer::{
 use faer::{unzipped, zipped};
 
 impl<T: Scalar> DefaultSolver for Mat<T> {
-    type LS<C: NonLinearOpJacobian<M = Mat<T>, V = Col<T>, T = T>> = FaerLU<T, C>;
+    type LS = FaerLU<T>;
 }
 
 macro_rules! impl_matrix_common {
