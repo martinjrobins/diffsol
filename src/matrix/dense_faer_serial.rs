@@ -5,7 +5,7 @@ use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 use crate::error::DiffsolError;
 use crate::scalar::{IndexType, Scalar, Scale};
 use crate::FaerLU;
-use crate::{Dense, DenseRef, Vector, NonLinearOpJacobian};
+use crate::{Dense, DenseRef, NonLinearOpJacobian, Vector};
 
 use faer::{
     linalg::matmul::matmul, mat::As2D, mat::As2DMut, Col, ColMut, ColRef, Mat, MatMut, MatRef,

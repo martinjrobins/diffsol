@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use crate::{
     error::DiffsolError, linear_solver::LinearSolver, op::linearise::LinearisedOp,
-    solver::SolverProblem, Matrix, LinearOpMatrix, MatrixSparsityRef, Op, Scalar, NonLinearOpJacobian
+    solver::SolverProblem, LinearOp, Matrix, MatrixSparsityRef, NonLinearOpJacobian, Op, Scalar,
 };
 
 use faer::{linalg::solvers::FullPivLu, solvers::SpSolver, Col, Mat};
@@ -32,7 +32,9 @@ where
     }
 }
 
-impl<T: Scalar, C: NonLinearOpJacobian<M = Mat<T>, V = Col<T>, T = T>> LinearSolver<C> for LU<T, C> {
+impl<T: Scalar, C: NonLinearOpJacobian<M = Mat<T>, V = Col<T>, T = T>> LinearSolver<C>
+    for LU<T, C>
+{
     type SelfNewOp<C2: NonLinearOpJacobian<T = C::T, V = C::V, M = C::M>> = LU<T, C2>;
 
     fn set_linearisation(&mut self, x: &C::V, t: C::T) {

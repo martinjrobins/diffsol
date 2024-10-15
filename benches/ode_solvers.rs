@@ -552,8 +552,8 @@ mod benchmarks {
     use diffsol::vector::VectorRef;
     use diffsol::LinearSolver;
     use diffsol::{
-        Bdf, DefaultDenseMatrix, DefaultSolver, Matrix, NewtonNonlinearSolver, OdeEquations,
-        OdeSolverMethod, OdeSolverProblem, Sdirk, Tableau,
+        Bdf, DefaultDenseMatrix, DefaultSolver, Matrix, NewtonNonlinearSolver,
+        OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Sdirk, Tableau,
     };
 
     // bdf
@@ -562,7 +562,7 @@ mod benchmarks {
         t: Eqn::T,
         ls: impl LinearSolver<BdfCallable<Eqn>>,
     ) where
-        Eqn: OdeEquations,
+        Eqn: OdeEquationsImplicit,
         Eqn::M: Matrix + DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
         for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
@@ -570,7 +570,8 @@ mod benchmarks {
     {
         let nls = NewtonNonlinearSolver::new(ls);
         let mut s = Bdf::<<Eqn::V as DefaultDenseMatrix>::M, _, _>::new(nls);
-        let _y = s.solve(problem, t);
+        let state = OdeSolverState::new(problem, &s).unwrap();
+        let _y = s.solve(problem, state, t);
     }
 
     pub fn esdirk34<Eqn>(
@@ -578,7 +579,7 @@ mod benchmarks {
         t: Eqn::T,
         linear_solver: impl LinearSolver<SdirkCallable<Eqn>>,
     ) where
-        Eqn: OdeEquations,
+        Eqn: OdeEquationsImplicit,
         Eqn::M: Matrix + DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
         for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
@@ -586,7 +587,8 @@ mod benchmarks {
     {
         let tableau = Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::esdirk34();
         let mut s = Sdirk::new(tableau, linear_solver);
-        let _y = s.solve(problem, t);
+        let state = OdeSolverState::new(problem, &s).unwrap();
+        let _y = s.solve(problem, state, t);
     }
 
     pub fn tr_bdf2<Eqn>(
@@ -594,7 +596,7 @@ mod benchmarks {
         t: Eqn::T,
         linear_solver: impl LinearSolver<SdirkCallable<Eqn>>,
     ) where
-        Eqn: OdeEquations,
+        Eqn: OdeEquationsImplicit,
         Eqn::M: Matrix + DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
         for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
@@ -602,6 +604,7 @@ mod benchmarks {
     {
         let tableau = Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::tr_bdf2();
         let mut s = Sdirk::new(tableau, linear_solver);
-        let _y = s.solve(problem, t);
+        let state = OdeSolverState::new(problem, &s).unwrap();
+        let _y = s.solve(problem, state, t);
     }
 }

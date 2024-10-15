@@ -31,9 +31,10 @@ mod tests {
     use super::*;
     use crate::matrix::Matrix;
     use crate::op::unit::UnitCallable;
-    use crate::{ConstantOp, DefaultDenseMatrix, DefaultSolver, Vector, NonLinearOp, Op};
+    use crate::{ConstantOp, DefaultDenseMatrix, DefaultSolver, NonLinearOp, Op, Vector};
     use crate::{
-        OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
+        NonLinearOpJacobian, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit,
+        OdeEquationsSens, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
     };
     use num_traits::One;
     use num_traits::Zero;
@@ -48,7 +49,7 @@ mod tests {
     ) -> Eqn::V
     where
         M: Matrix,
-        Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
+        Eqn: OdeEquationsSens<M = M, T = M::T, V = M::V>,
         Eqn::M: DefaultSolver,
     {
         if solve_for_sensitivities {
@@ -156,7 +157,7 @@ mod tests {
     ) -> Eqn::V
     where
         M: Matrix,
-        Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
+        Eqn: OdeEquationsImplicit<M = M, T = M::T, V = M::V>,
         Eqn::M: DefaultSolver,
     {
         let state = OdeSolverState::new(problem, method).unwrap();
@@ -230,7 +231,7 @@ mod tests {
     where
         M: Matrix,
         Method: AdjointOdeSolverMethod<Eqn>,
-        Eqn: OdeEquations<M = M, T = M::T, V = M::V>,
+        Eqn: OdeEquationsAdjoint<M = M, T = M::T, V = M::V>,
         Eqn::M: DefaultSolver,
     {
         let state = OdeSolverState::new(problem, method).unwrap();
@@ -266,7 +267,11 @@ mod tests {
         checkpoints.push(method.checkpoint().unwrap());
         let mut adjoint_solver = method.new_adjoint_solver(checkpoints, true).unwrap();
         let y_expect = M::V::from_element(problem.eqn.rhs().nstates(), M::T::zero());
-        adjoint_solver.state().unwrap().y.assert_eq_st(&y_expect, M::T::from(1e-9));
+        adjoint_solver
+            .state()
+            .unwrap()
+            .y
+            .assert_eq_st(&y_expect, M::T::from(1e-9));
         for i in 0..problem.eqn.out().unwrap().nout() {
             adjoint_solver.state().unwrap().s[i].assert_eq_st(&y_expect, M::T::from(1e-9));
         }
@@ -274,15 +279,19 @@ mod tests {
         for i in 0..problem.eqn.out().unwrap().nout() {
             adjoint_solver.state().unwrap().sg[i].assert_eq_st(&g_expect, M::T::from(1e-9));
         }
-        
+
         adjoint_solver.set_stop_time(t0).unwrap();
         while adjoint_solver.state().unwrap().t.abs() > t0 {
             adjoint_solver.step().unwrap();
         }
         let mut state = adjoint_solver.take_state().unwrap();
         let state_mut = state.as_mut();
-        adjoint_solver.problem().unwrap().eqn.correct_sg_for_init(t0, state_mut.s, state_mut.sg);
-        
+        adjoint_solver
+            .problem()
+            .unwrap()
+            .eqn
+            .correct_sg_for_init(t0, state_mut.s, state_mut.sg);
+
         let points = solution
             .sens_solution_points
             .as_ref()
@@ -355,7 +364,9 @@ mod tests {
         fn call_inplace(&self, _x: &Self::V, _t: Self::T, y: &mut Self::V) {
             y[0] = M::T::zero();
         }
+    }
 
+    impl<M: Matrix> NonLinearOpJacobian for TestEqnRhs<M> {
         fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
             y[0] = M::T::zero();
         }
@@ -472,7 +483,7 @@ mod tests {
     ) where
         M: Matrix + DefaultSolver,
         Method: OdeSolverMethod<Problem>,
-        Problem: OdeEquations<M = M, T = M::T, V = M::V>,
+        Problem: OdeEquationsImplicit<M = M, T = M::T, V = M::V>,
     {
         let state = OdeSolverState::new(&problem, &solver1).unwrap();
         solver1.set_problem(state, &problem).unwrap();
@@ -489,8 +500,7 @@ mod tests {
             while solver2.state().unwrap().t < point.t {
                 solver1.step().unwrap();
                 solver2.step().unwrap();
-                let time_error = (solver1.state().unwrap().t - solver2.state().unwrap().t)
-                    .abs()
+                let time_error = (solver1.state().unwrap().t - solver2.state().unwrap().t).abs()
                     / (solver1.state().unwrap().t.abs() * problem.rtol + problem.atol[0]);
                 assert!(
                     time_error < M::T::from(20.0),
@@ -517,13 +527,14 @@ mod tests {
         problem: OdeSolverProblem<Eqn>,
         soln: OdeSolverSolution<Eqn::V>,
     ) where
-        Eqn: OdeEquations,
+        Eqn: OdeEquationsImplicit,
         Method: OdeSolverMethod<Eqn>,
         Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
     {
         // solve for a little bit
-        s.solve(&problem, Eqn::T::from(1.0)).unwrap();
+        let state = OdeSolverState::new(&problem, &s).unwrap();
+        s.solve(&problem, state, Eqn::T::from(1.0)).unwrap();
 
         // reinit using state_mut
         let state = Method::State::new_without_initialise(&problem).unwrap();

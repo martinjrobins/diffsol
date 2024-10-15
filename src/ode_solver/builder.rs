@@ -90,7 +90,7 @@ impl OdeBuilder {
         self.t0 = t0;
         self
     }
-    
+
     /// Set whether to integrate the output.
     /// If true, the output will be integrated using the same method as the ODE.
     pub fn integrate_out(mut self, integrate_out: bool) -> Self {

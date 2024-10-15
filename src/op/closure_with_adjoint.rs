@@ -5,8 +5,8 @@ use crate::{
         find_adjoint_non_zeros, find_jacobian_non_zeros, find_sens_adjoint_non_zeros,
         JacobianColoring,
     },
-    Matrix, MatrixSparsity, Vector,
-    NonLinearOp, Op, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSensAdjoint,
+    Matrix, MatrixSparsity, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian,
+    NonLinearOpSensAdjoint, Op, Vector,
 };
 
 use super::OpStatistics;
@@ -154,7 +154,7 @@ where
 }
 
 impl<M, F, G, H, I> NonLinearOpJacobian for ClosureWithAdjoint<M, F, G, H, I>
-where 
+where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
@@ -176,7 +176,7 @@ where
 }
 
 impl<M, F, G, H, I> NonLinearOpAdjoint for ClosureWithAdjoint<M, F, G, H, I>
-where 
+where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
@@ -187,7 +187,7 @@ where
         self.statistics.borrow_mut().increment_jac_adj_mul();
         (self.jacobian_adjoint_action)(x, self.p.as_ref(), t, v, y);
     }
-    
+
     fn adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         if let Some(coloring) = self.coloring_adjoint.as_ref() {
             coloring.adjoint_inplace(self, x, t, y);
@@ -198,7 +198,7 @@ where
 }
 
 impl<M, F, G, H, I> NonLinearOpSensAdjoint for ClosureWithAdjoint<M, F, G, H, I>
-where 
+where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
@@ -216,4 +216,3 @@ where
         }
     }
 }
-

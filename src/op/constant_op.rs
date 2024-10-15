@@ -1,5 +1,5 @@
 use super::Op;
-use crate::{Vector, Matrix, MatrixSparsityRef};
+use crate::{Matrix, MatrixSparsityRef, Vector};
 use num_traits::{One, Zero};
 
 pub trait ConstantOp: Op {
@@ -45,7 +45,6 @@ pub trait ConstantOpSens: ConstantOp {
         self.sens_inplace(t, &mut y);
         y
     }
-
 }
 
 pub trait ConstantOpSensAdjoint: ConstantOp {

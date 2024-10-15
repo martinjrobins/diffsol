@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{Matrix, Vector, NonLinearOp, Op};
+use crate::{Matrix, NonLinearOp, Op, Vector};
 
 use super::OpStatistics;
 

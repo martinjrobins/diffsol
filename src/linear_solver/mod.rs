@@ -58,10 +58,9 @@ pub mod tests {
     use crate::{
         linear_solver::{FaerLU, NalgebraLU},
         op::closure::Closure,
-        NonLinearOpJacobian,
         scalar::scale,
         vector::VectorRef,
-        LinearSolver, Matrix, SolverProblem, Vector,
+        LinearSolver, Matrix, NonLinearOpJacobian, SolverProblem, Vector,
     };
     use num_traits::{One, Zero};
 

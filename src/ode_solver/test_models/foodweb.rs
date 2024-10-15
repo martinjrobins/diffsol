@@ -2,8 +2,9 @@ use std::rc::Rc;
 
 use crate::{
     find_jacobian_non_zeros, find_matrix_non_zeros, ode_solver::problem::OdeSolverSolution,
-    ConstantOp, JacobianColoring, LinearOp, Matrix, MatrixSparsity, NonLinearOp, OdeEquations,
-    OdeSolverProblem, Op, UnitCallable, Vector,
+    ConstantOp, JacobianColoring, LinearOp, Matrix, MatrixSparsity, NonLinearOp,
+    NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeSolverProblem, Op, UnitCallable,
+    Vector,
 };
 use num_traits::Zero;
 
@@ -509,7 +510,12 @@ where
             }
         }
     }
+}
 
+impl<'a, M, const NX: usize> NonLinearOpJacobian for FoodWebRhs<'a, M, NX>
+where
+    M: Matrix,
+{
     #[allow(unused_mut)]
     fn jac_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, mut y: &mut M::V) {
         let nsmx: usize = NUM_SPECIES * NX;
@@ -721,7 +727,12 @@ where
             y[2 * is + 1] = x[loc_br + is];
         }
     }
+}
 
+impl<'a, M, const NX: usize> NonLinearOpJacobian for FoodWebOut<'a, M, NX>
+where
+    M: Matrix,
+{
     #[allow(unused_mut)]
     fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, mut y: &mut Self::V) {
         let nsmx: usize = NUM_SPECIES * NX;
@@ -889,7 +900,13 @@ where
             }
         }
     }
+}
 
+#[cfg(feature = "diffsl")]
+impl<M, const NX: usize> NonLinearOpJacobian for FoodWebDiff<M, NX>
+where
+    M: Matrix,
+{
     #[allow(unused_mut)]
     fn jac_mul_inplace(&self, _x: &M::V, _t: M::T, v: &M::V, mut y: &mut M::V) {
         let nsmx: usize = NX;
@@ -1004,7 +1021,7 @@ fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
 pub fn foodweb_problem<M, const NX: usize>(
     context: &FoodWebContext<M, NX>,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T> + '_>,
     OdeSolverSolution<M::V>,
 )
 where

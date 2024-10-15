@@ -5,7 +5,7 @@ use nalgebra::{
     RawStorageMut,
 };
 
-use crate::{scalar::Scale, IndexType, Scalar, NonLinearOpJacobian, Vector};
+use crate::{scalar::Scale, IndexType, NonLinearOpJacobian, Scalar, Vector};
 
 use super::default_solver::DefaultSolver;
 use super::sparsity::{Dense, DenseRef};

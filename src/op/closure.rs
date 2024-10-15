@@ -1,6 +1,9 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{find_jacobian_non_zeros, jacobian::JacobianColoring, Matrix, MatrixSparsity, Vector, NonLinearOp, Op, NonLinearOpJacobian};
+use crate::{
+    find_jacobian_non_zeros, jacobian::JacobianColoring, Matrix, MatrixSparsity, NonLinearOp,
+    NonLinearOpJacobian, Op, Vector,
+};
 
 use super::OpStatistics;
 

@@ -1,5 +1,9 @@
 use crate::{
-    error::{DiffsolError, OdeSolverError}, ode_solver_error, scalar::IndexType, scale, AugmentedOdeEquations, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut, Vector, VectorViewMut
+    error::{DiffsolError, OdeSolverError},
+    ode_solver_error,
+    scalar::IndexType,
+    scale, AugmentedOdeEquations, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op,
+    StateRef, StateRefMut, Vector, VectorViewMut,
 };
 use std::ops::MulAssign;
 
@@ -90,7 +94,7 @@ where
         if self.diff.nrows() != nstates {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
-        let expected_gdiff_len= if let Some(out) = ode_problem.eqn.out() {
+        let expected_gdiff_len = if let Some(out) = ode_problem.eqn.out() {
             if ode_problem.integrate_out {
                 out.nout()
             } else {
@@ -130,7 +134,9 @@ where
         } else {
             (0, 0)
         };
-        if self.sgdiff.len() != sgdiff_len || (sgdiff_len > 0 && self.sgdiff[0].nrows() != sgdiff_size) {
+        if self.sgdiff.len() != sgdiff_len
+            || (sgdiff_len > 0 && self.sgdiff[0].nrows() != sgdiff_size)
+        {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
         if !self.sdiff_initialised {
@@ -142,10 +148,19 @@ where
         Ok(())
     }
 
-    fn new_from_common(
-        state: super::state::StateCommon<V>,
-    ) -> Self {
-        let StateCommon { y, dy, g, dg, s, ds, sg, dsg, t, h } = state;
+    fn new_from_common(state: super::state::StateCommon<V>) -> Self {
+        let StateCommon {
+            y,
+            dy,
+            g,
+            dg,
+            s,
+            ds,
+            sg,
+            dsg,
+            t,
+            h,
+        } = state;
         let nstates = y.len();
         let diff = M::zeros(nstates, Self::MAX_ORDER + 3);
         let sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3); s.len()];
@@ -177,7 +192,6 @@ where
             sgdiff_initialised: false,
         }
     }
-    
 
     fn into_common(self) -> StateCommon<V> {
         StateCommon {
@@ -208,7 +222,7 @@ where
             h: self.h,
         }
     }
-    
+
     fn as_mut(&mut self) -> StateRefMut<V> {
         StateRefMut {
             y: &mut self.y,
@@ -223,5 +237,4 @@ where
             h: &mut self.h,
         }
     }
-    
 }

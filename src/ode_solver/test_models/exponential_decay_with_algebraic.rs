@@ -6,8 +6,8 @@ use crate::{
         linear_closure_with_sens::LinearClosureWithSens,
     },
     scalar::scale,
-    ConstantOp, OdeBuilder, OdeEquations, OdeSolverEquations, OdeSolverProblem, UnitCallable,
-    Vector,
+    ConstantOp, OdeBuilder, OdeEquationsImplicit, OdeEquationsSens, OdeSolverEquations,
+    OdeSolverProblem, UnitCallable, Vector,
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};
@@ -95,7 +95,7 @@ fn exponential_decay_with_algebraic_init_sens<M: Matrix>(
 pub fn exponential_decay_with_algebraic_problem<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
     let p = M::V::from_vec(vec![0.1.into()]);
@@ -121,7 +121,7 @@ pub fn exponential_decay_with_algebraic_problem<M: Matrix + 'static>(
 }
 
 pub fn exponential_decay_with_algebraic_problem_sens<M: Matrix + 'static>() -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
     let p = Rc::new(M::V::from_vec(vec![0.1.into()]));

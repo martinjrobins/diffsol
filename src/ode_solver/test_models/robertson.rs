@@ -4,8 +4,8 @@ use crate::{
     matrix::Matrix,
     ode_solver::problem::OdeSolverSolution,
     op::{closure_with_sens::ClosureWithSens, constant_closure_with_sens::ConstantClosureWithSens},
-    LinearClosureWithSens, OdeBuilder, OdeEquations, OdeSolverEquations, OdeSolverProblem,
-    UnitCallable, Vector, ConstantOp,
+    ConstantOp, LinearClosureWithSens, OdeBuilder, OdeEquationsImplicit, OdeEquationsSens,
+    OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector,
 };
 use num_traits::Zero;
 
@@ -117,7 +117,7 @@ fn robertson_init_sens<M: Matrix>(_p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V) 
 pub fn robertson<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::new()
@@ -164,7 +164,7 @@ fn soln<V: Vector>() -> OdeSolverSolution<V> {
 }
 
 pub fn robertson_sens<M: Matrix + 'static>() -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
     let p = Rc::new(M::V::from_vec(vec![
@@ -215,15 +215,7 @@ pub fn robertson_sens<M: Matrix + 'static>() -> (
     );
     let rtol = M::T::from(1e-4);
     let atol = M::V::from_vec(vec![M::T::from(1e-8), M::T::from(1e-6), M::T::from(1e-6)]);
-    let problem = OdeSolverProblem::new(
-        eqn,
-        rtol,
-        atol,
-        t0,
-        M::T::from(1.0),
-        false,
-    )
-    .unwrap();
+    let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, M::T::from(1.0), false).unwrap();
 
     let mut soln = OdeSolverSolution::default();
     let data = vec![

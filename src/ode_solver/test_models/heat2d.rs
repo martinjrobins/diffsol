@@ -7,14 +7,14 @@
 //while for each boundary point, it is res_i = u_i.
 
 use crate::{
-    ode_solver::problem::OdeSolverSolution, scalar::Scalar, Matrix, OdeBuilder, OdeEquations,
-    OdeSolverProblem, Vector,
+    ode_solver::problem::OdeSolverSolution, scalar::Scalar, Matrix, OdeBuilder,
+    OdeEquationsImplicit, OdeSolverProblem, Vector,
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};
 
 #[cfg(feature = "diffsl")]
-use crate::{ConstantOp, LinearOp, NonLinearOp};
+use crate::{ConstantOp, LinearOp, NonLinearOpJacobian, OdeEquations};
 
 #[cfg(feature = "diffsl")]
 pub fn heat2d_diffsl_compile<
@@ -97,7 +97,7 @@ pub fn heat2d_diffsl_problem<
 >(
     context: &crate::DiffSlContext<M, CG>,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
+    OdeSolverProblem<impl crate::OdeEquations<M = M, V = M::V, T = M::T> + '_>,
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::new()
@@ -253,7 +253,7 @@ fn _pde_solution<T: Scalar>(x: T, y: T, t: T, max_terms: usize) -> T {
 }
 
 pub fn head2d_problem<M: Matrix + 'static, const MGRID: usize>() -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::new()
@@ -305,7 +305,7 @@ fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ConstantOp, LinearOp, NonLinearOp};
+    use crate::{ConstantOp, LinearOp, NonLinearOpJacobian, OdeEquations};
 
     use super::*;
 

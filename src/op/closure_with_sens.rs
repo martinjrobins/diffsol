@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     jacobian::{find_jacobian_non_zeros, find_sens_non_zeros, JacobianColoring},
-    Matrix, MatrixSparsity, Vector,NonLinearOp, NonLinearOpJacobian, NonLinearOpSens, Op
+    Matrix, MatrixSparsity, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens, Op, Vector,
 };
 
 use super::OpStatistics;
@@ -156,7 +156,7 @@ where
     fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         (self.sens_action)(x, self.p.as_ref(), t, v, y);
     }
-    
+
     fn sens_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         if let Some(coloring) = self.sens_coloring.as_ref() {
             coloring.jacobian_inplace(self, x, t, y);

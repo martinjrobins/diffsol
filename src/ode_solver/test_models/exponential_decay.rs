@@ -1,10 +1,11 @@
 use crate::{
     matrix::Matrix, ode_solver::problem::OdeSolverSolution,
-    op::closure_with_adjoint::ClosureWithAdjoint, scalar::scale, ConstantOp,
-    OdeBuilder, OdeEquations, OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector, ConstantClosureWithAdjoint, OdeEquationsAdjoint
+    op::closure_with_adjoint::ClosureWithAdjoint, scalar::scale, ConstantClosureWithAdjoint,
+    ConstantOp, OdeBuilder, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit,
+    OdeEquationsSens, OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector,
 };
 use nalgebra::ComplexField;
-use num_traits::{Zero, One};
+use num_traits::{One, Zero};
 use std::{ops::MulAssign, rc::Rc};
 
 // exponential decay problem
@@ -124,7 +125,7 @@ fn exponential_decay_out_sens_adj<M: Matrix>(
 pub fn negative_exponential_decay_problem<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
     let h = -1.0;
@@ -157,7 +158,7 @@ pub fn negative_exponential_decay_problem<M: Matrix + 'static>(
 pub fn exponential_decay_problem<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
     let h = 1.0;
@@ -187,7 +188,7 @@ pub fn exponential_decay_problem<M: Matrix + 'static>(
 pub fn exponential_decay_problem_with_root<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
     let k = 0.1;
@@ -253,7 +254,11 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>() -> (
         nout,
         p.clone(),
     );
-    let init = ConstantClosureWithAdjoint::new(exponential_decay_init::<M>, exponential_decay_init_sens_adjoint::<M>, p.clone());
+    let init = ConstantClosureWithAdjoint::new(
+        exponential_decay_init::<M>,
+        exponential_decay_init_sens_adjoint::<M>,
+        p.clone(),
+    );
     if M::is_sparse() {
         rhs.calculate_jacobian_sparsity(&y0, t0);
         rhs.calculate_adjoint_sparsity(&y0, t0);
@@ -283,7 +288,13 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>() -> (
             -g[0] - M::T::from(2.0) * g[1],
             -M::T::from(3.0) * g[0] - M::T::from(4.0) * g[1],
         ]);
-        let dydk = y0.clone() * scale(M::T::exp(-p[0]*(t1 + t0)) * (M::T::exp(t0*p[0]) * (p[0] * t1 + M::T::one()) - M::T::exp(t1*p[0]) * (p[0] * t0 + M::T::one())) / (p[0]*p[0]));
+        let dydk = y0.clone()
+            * scale(
+                M::T::exp(-p[0] * (t1 + t0))
+                    * (M::T::exp(t0 * p[0]) * (p[0] * t1 + M::T::one())
+                        - M::T::exp(t1 * p[0]) * (p[0] * t0 + M::T::one()))
+                    / (p[0] * p[0]),
+            );
         let dydy0 = (M::T::exp(-p[0] * t0) - M::T::exp(-p[0] * t1)) / p[0];
         let dg1dk = dydk[0] + M::T::from(2.0) * dydk[1];
         let dg2dk = M::T::from(3.0) * dydk[0] + M::T::from(4.0) * dydk[1];
@@ -299,7 +310,7 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>() -> (
 pub fn exponential_decay_problem_sens<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
     let k = 0.1;

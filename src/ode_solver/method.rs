@@ -1,7 +1,13 @@
 use nalgebra::ComplexField;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError}, matrix::default_solver::DefaultSolver, ode_solver_error, scalar::Scalar, AdjointEquations, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut, VectorViewMut
+    error::{DiffsolError, OdeSolverError},
+    matrix::default_solver::DefaultSolver,
+    ode_solver_error,
+    scalar::Scalar,
+    AdjointEquations, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon,
+    NonLinearOp, OdeEquations, OdeEquationsAdjoint, OdeEquationsSens, OdeSolverProblem,
+    OdeSolverState, Op, SensEquations, StateRef, StateRefMut, VectorViewMut,
 };
 
 #[derive(Debug, PartialEq)]
@@ -20,11 +26,11 @@ pub enum OdeSolverStopReason<T: Scalar> {
 /// # Example
 ///
 /// ```
-/// use diffsol::{ OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeEquations, DefaultSolver };
+/// use diffsol::{ OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeEquationsImplicit, DefaultSolver };
 ///
 /// fn solve_ode<Eqn>(solver: &mut impl OdeSolverMethod<Eqn>, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Eqn::V
 /// where
-///    Eqn: OdeEquations,
+///    Eqn: OdeEquationsImplicit,
 ///    Eqn::M: DefaultSolver,
 /// {
 ///     let state = OdeSolverState::new(problem, solver).unwrap();
@@ -94,13 +100,14 @@ where
     /// Get the current order of accuracy of the solver (e.g. explict euler method is first-order)
     fn order(&self) -> usize;
 
-    /// Reinitialise the solver state and solve the problem up to time `final_time`
+    /// Using the provided state, solve the problem up to time `final_time`
     /// Returns a Vec of solution values at timepoints chosen by the solver.
     /// After the solver has finished, the internal state of the solver is at time `final_time`.
     #[allow(clippy::type_complexity)]
     fn solve(
         &mut self,
         problem: &OdeSolverProblem<Eqn>,
+        state: Self::State,
         final_time: Eqn::T,
     ) -> Result<(<Eqn::V as DefaultDenseMatrix>::M, Vec<Eqn::T>), DiffsolError>
     where
@@ -108,7 +115,6 @@ where
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
-        let state = OdeSolverState::new(problem, self)?;
         self.set_problem(state, problem)?;
         let mut ret_t = vec![self.state().unwrap().t];
         let nstates = problem.eqn.rhs().nstates();
@@ -170,12 +176,13 @@ where
         Ok((ret_y, ret_t))
     }
 
-    /// Reinitialise the solver state and solve the problem up to time `t_eval[t_eval.len()-1]`
+    /// Using the provided state, solve the problem up to time `t_eval[t_eval.len()-1]`
     /// Returns a Vec of solution values at timepoints given by `t_eval`.
     /// After the solver has finished, the internal state of the solver is at time `t_eval[t_eval.len()-1]`.
     fn solve_dense(
         &mut self,
         problem: &OdeSolverProblem<Eqn>,
+        state: Self::State,
         t_eval: &[Eqn::T],
     ) -> Result<<Eqn::V as DefaultDenseMatrix>::M, DiffsolError>
     where
@@ -183,7 +190,6 @@ where
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
-        let state = OdeSolverState::new(problem, self)?;
         self.set_problem(state, problem)?;
         let nstates = problem.eqn.rhs().nstates();
         let mut ret = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, t_eval.len());
@@ -242,7 +248,7 @@ where
 pub trait SensitivitiesOdeSolverMethod<Eqn>:
     AugmentedOdeSolverMethod<Eqn, SensEquations<Eqn>>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsSens,
 {
     fn set_problem_with_sensitivities(
         &mut self,
@@ -258,7 +264,7 @@ where
 
 pub trait AdjointOdeSolverMethod<Eqn>: OdeSolverMethod<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsAdjoint,
 {
     type AdjointSolver: AugmentedOdeSolverMethod<
         AdjointEquations<Eqn, Self>,

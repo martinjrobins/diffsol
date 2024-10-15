@@ -1,6 +1,7 @@
 use crate::{
-    matrix::DenseMatrix, ode_solver::equations::OdeEquationsImplicit, scale, LinearOp, Matrix, MatrixRef,
-    MatrixSparsity, MatrixSparsityRef, OdeSolverProblem, Vector, VectorRef, NonLinearOp, Op, NonLinearOpJacobian
+    matrix::DenseMatrix, ode_solver::equations::OdeEquationsImplicit, scale, LinearOp, Matrix,
+    MatrixRef, MatrixSparsity, MatrixSparsityRef, NonLinearOp, NonLinearOpJacobian,
+    OdeSolverProblem, Op, Vector, VectorRef,
 };
 use num_traits::{One, Zero};
 use std::ops::MulAssign;
@@ -24,7 +25,6 @@ pub struct BdfCallable<Eqn: OdeEquationsImplicit> {
 }
 
 impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
-
     // F(y) = M (y - y0 + psi) - c * f(y) = 0
     // M = I
     // dg = f(y)
@@ -231,7 +231,6 @@ where
             y.axpy(Eqn::T::one(), &tmp, -c);
         }
     }
-    
 }
 
 impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for BdfCallable<Eqn>
@@ -282,8 +281,8 @@ where
 #[cfg(test)]
 mod tests {
     use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
-    use crate::op::NonLinearOp;
     use crate::vector::Vector;
+    use crate::{NonLinearOp, NonLinearOpJacobian};
 
     use super::BdfCallable;
     type Mcpu = nalgebra::DMatrix<f64>;

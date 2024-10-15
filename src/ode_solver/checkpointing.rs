@@ -57,8 +57,7 @@ where
         while solver.state().unwrap().t < state1_ref.t {
             solver.step()?;
             self.ys.push(solver.state().unwrap().y.clone());
-            self.ydots
-                .push(solver.state().unwrap().dy.clone());
+            self.ydots.push(solver.state().unwrap().dy.clone());
             self.ts.push(solver.state().unwrap().t);
         }
         Ok(())
@@ -172,7 +171,9 @@ where
         }
 
         // if t is before first segment or after last segment, return error
-        if t < self.checkpoints[0].as_ref().t || t > self.checkpoints[self.checkpoints.len() - 1].as_ref().t {
+        if t < self.checkpoints[0].as_ref().t
+            || t > self.checkpoints[self.checkpoints.len() - 1].as_ref().t
+        {
             return Err(other_error!("t is outside of the checkpoints"));
         }
 

@@ -6,8 +6,8 @@ use crate::sundials_sys::{
 
 use crate::{
     error::*, linear_solver_error, ode_solver::sundials::sundials_check,
-    op::linearise::LinearisedOp, vector::sundials::SundialsVector, LinearOpMatrix, Matrix, NonLinearOpJacobian,
-    Op, SolverProblem, SundialsMatrix,
+    op::linearise::LinearisedOp, vector::sundials::SundialsVector, LinearOp, Matrix,
+    NonLinearOpJacobian, Op, SolverProblem, SundialsMatrix,
 };
 
 #[cfg(not(sundials_version_major = "5"))]
@@ -63,7 +63,8 @@ impl<Op> LinearSolver<Op> for SundialsLinearSolver<Op>
 where
     Op: NonLinearOpJacobian<M = SundialsMatrix, V = SundialsVector, T = realtype>,
 {
-    type SelfNewOp<C2: NonLinearOpJacobian<T = Op::T, V = Op::V, M = Op::M>> = SundialsLinearSolver<C2>;
+    type SelfNewOp<C2: NonLinearOpJacobian<T = Op::T, V = Op::V, M = Op::M>> =
+        SundialsLinearSolver<C2>;
 
     fn set_problem(&mut self, problem: &SolverProblem<Op>) {
         let linearised_problem = problem.linearise();

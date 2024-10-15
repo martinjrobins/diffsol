@@ -1,5 +1,5 @@
 use super::Op;
-use crate::{Vector, Matrix, MatrixSparsityRef};
+use crate::{Matrix, MatrixSparsityRef, Vector};
 use num_traits::{One, Zero};
 
 /// LinearOp is a trait for linear operators (i.e. they only depend linearly on the input `x`), see [NonLinearOp] for a non-linear op.
@@ -13,22 +13,9 @@ pub trait LinearOp: Op {
         self.gemv_inplace(x, t, beta, y);
     }
 
-    /// Compute the negative transpose of the operator `y = -A(t)^T * x` at a given state and time, the default implementation uses [Self::gemv_transpose_inplace].
-    fn call_transpose_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
-        let beta = Self::T::zero();
-        self.gemv_transpose_inplace(x, t, beta, y);
-    }
-
     /// Compute the operator via a GEMV operation (i.e. `y = A(t) * x + beta * y`)
     fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V);
 
-    /// Compute the negative transpose of the operator via a GEMV operation (i.e. `y = -A(t)^T * x + beta * y`)
-    fn gemv_transpose_inplace(&self, _x: &Self::V, _t: Self::T, _beta: Self::T, _y: &mut Self::V) {
-        panic!("gemv_transpose_inplace not implemented");
-    }
-}
-
-pub trait LinearOpMatrix: LinearOp {
     /// Compute the matrix representation of the operator `A(t)` and return it.
     /// See [Self::matrix_inplace] for a non-allocating version.
     fn matrix(&self, t: Self::T) -> Self::M {
@@ -59,10 +46,18 @@ pub trait LinearOpMatrix: LinearOp {
             v[j] = Self::T::zero();
         }
     }
-
 }
 
 pub trait LinearOpTranspose: LinearOp {
+    /// Compute the negative transpose of the operator via a GEMV operation (i.e. `y = -A(t)^T * x + beta * y`)
+    fn gemv_transpose_inplace(&self, _x: &Self::V, _t: Self::T, _beta: Self::T, _y: &mut Self::V);
+
+    /// Compute the negative transpose of the operator `y = -A(t)^T * x` at a given state and time, the default implementation uses [Self::gemv_transpose_inplace].
+    fn call_transpose_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
+        let beta = Self::T::zero();
+        self.gemv_transpose_inplace(x, t, beta, y);
+    }
+
     /// Compute the matrix representation of the transpose of the operator `A(t)^T` and store it in the matrix `y`.
     /// The default implementation of this method computes the matrix using [Self::gemv_transpose_inplace],
     /// but it can be overriden for more efficient implementations.
@@ -126,5 +121,4 @@ pub trait LinearOpSens: LinearOp {
         self.sens_inplace(x, t, &mut y);
         y
     }
-
 }

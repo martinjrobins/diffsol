@@ -1,6 +1,9 @@
 use std::collections::HashSet;
 
-use crate::{NonLinearOp, Matrix, MatrixSparsityRef, VectorIndex, LinearOp, Op, Vector, Scalar, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint};
+use crate::{
+    LinearOp, LinearOpTranspose, Matrix, MatrixSparsityRef, NonLinearOp, NonLinearOpAdjoint,
+    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Op, Scalar, Vector, VectorIndex,
+};
 use num_traits::{One, Zero};
 
 use self::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy};
@@ -12,7 +15,11 @@ pub mod greedy_coloring;
 macro_rules! gen_find_non_zeros_nonlinear {
     ($name:ident, $op_fn:ident, $op_trait:ident) => {
         /// Find the non-zero entries of the $name matrix of a non-linear operator.
-        pub fn $name<F: NonLinearOp + $op_trait + ?Sized>(op: &F, x: &F::V, t: F::T) -> Vec<(usize, usize)> {
+        pub fn $name<F: NonLinearOp + $op_trait + ?Sized>(
+            op: &F,
+            x: &F::V,
+            t: F::T,
+        ) -> Vec<(usize, usize)> {
             let mut v = F::V::zeros(op.nstates());
             let mut col = F::V::zeros(op.nout());
             let mut triplets = Vec::with_capacity(op.nstates());
@@ -32,15 +39,27 @@ macro_rules! gen_find_non_zeros_nonlinear {
     };
 }
 
-gen_find_non_zeros_nonlinear!(find_jacobian_non_zeros, jac_mul_inplace, NonLinearOpJacobian);
-gen_find_non_zeros_nonlinear!(find_adjoint_non_zeros, jac_transpose_mul_inplace, NonLinearOpAdjoint);
+gen_find_non_zeros_nonlinear!(
+    find_jacobian_non_zeros,
+    jac_mul_inplace,
+    NonLinearOpJacobian
+);
+gen_find_non_zeros_nonlinear!(
+    find_adjoint_non_zeros,
+    jac_transpose_mul_inplace,
+    NonLinearOpAdjoint
+);
 gen_find_non_zeros_nonlinear!(find_sens_non_zeros, sens_mul_inplace, NonLinearOpSens);
-gen_find_non_zeros_nonlinear!(find_sens_adjoint_non_zeros, sens_transpose_mul_inplace, NonLinearOpSensAdjoint);
+gen_find_non_zeros_nonlinear!(
+    find_sens_adjoint_non_zeros,
+    sens_transpose_mul_inplace,
+    NonLinearOpSensAdjoint
+);
 
 macro_rules! gen_find_non_zeros_linear {
-    ($name:ident, $op_fn:ident) => {
+    ($name:ident, $op_fn:ident $(, $op_trait:tt )?) => {
         /// Find the non-zero entries of the $name matrix of a non-linear operator.
-        pub fn $name<F: LinearOp + ?Sized>(op: &F, t: F::T) -> Vec<(usize, usize)> {
+        pub fn $name<F: LinearOp + ?Sized $(+ $op_trait)?>(op: &F, t: F::T) -> Vec<(usize, usize)> {
             let mut v = F::V::zeros(op.nstates());
             let mut col = F::V::zeros(op.nout());
             let mut triplets = Vec::with_capacity(op.nstates());
@@ -61,7 +80,11 @@ macro_rules! gen_find_non_zeros_linear {
 }
 
 gen_find_non_zeros_linear!(find_matrix_non_zeros, call_inplace);
-gen_find_non_zeros_linear!(find_transpose_non_zeros, call_transpose_inplace);
+gen_find_non_zeros_linear!(
+    find_transpose_non_zeros,
+    call_transpose_inplace,
+    LinearOpTranspose
+);
 
 pub struct JacobianColoring<M: Matrix> {
     dst_indices_per_color: Vec<<M::V as Vector>::Index>,

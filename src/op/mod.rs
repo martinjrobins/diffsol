@@ -1,9 +1,8 @@
 use std::rc::Rc;
 
-use crate::{Matrix, MatrixSparsityRef, Scalar, Vector, LinearOp, NonLinearOp};
+use crate::{LinearOp, Matrix, NonLinearOp, Scalar, Vector};
 
 use nonlinear_op::NonLinearOpJacobian;
-use num_traits::{One, Zero};
 use serde::Serialize;
 
 pub mod bdf;
@@ -12,19 +11,19 @@ pub mod closure_no_jac;
 pub mod closure_with_adjoint;
 pub mod closure_with_sens;
 pub mod constant_closure;
+pub mod constant_closure_with_adjoint;
 pub mod constant_closure_with_sens;
+pub mod constant_op;
 pub mod init;
 pub mod linear_closure;
+pub mod linear_closure_with_adjoint;
 pub mod linear_closure_with_sens;
+pub mod linear_op;
 pub mod linearise;
 pub mod matrix;
+pub mod nonlinear_op;
 pub mod sdirk;
 pub mod unit;
-pub mod linear_closure_with_adjoint;
-pub mod constant_closure_with_adjoint;
-pub mod linear_op;
-pub mod constant_op;
-pub mod nonlinear_op;
 
 /// A generic operator trait.
 ///
@@ -112,12 +111,6 @@ impl OpStatistics {
         self.number_of_matrix_evals += 1;
     }
 }
-
-
-
-
-
-
 
 impl<C: Op> Op for &C {
     type T = C::T;

@@ -1,8 +1,8 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    find_matrix_non_zeros, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity, Matrix,
-    Vector, LinearOp, Op, LinearOpSens, LinearOpMatrix
+    find_matrix_non_zeros, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity, LinearOp,
+    LinearOpSens, Matrix, Op, Vector,
 };
 
 use super::OpStatistics;
@@ -96,14 +96,6 @@ where
         self.statistics.borrow_mut().increment_call();
         (self.func)(x, self.p.as_ref(), t, beta, y)
     }
-}
-
-impl<M, F, H> LinearOpMatrix for LinearClosureWithSens<M, F, H>
-where
-    M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-{
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
         self.statistics.borrow_mut().increment_matrix();
         if let Some(coloring) = &self.coloring {
@@ -113,7 +105,7 @@ where
         }
     }
 }
-    
+
 impl<M, F, H> LinearOpSens for LinearClosureWithSens<M, F, H>
 where
     M: Matrix,

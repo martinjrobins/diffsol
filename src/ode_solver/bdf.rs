@@ -1,10 +1,12 @@
 use nalgebra::ComplexField;
+use std::cell::RefCell;
 use std::ops::AddAssign;
 use std::rc::Rc;
-use std::cell::RefCell;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError}, AdjointContext, AdjointEquations, OdeEquationsAdjoint, SensEquations, StateRef, StateRefMut
+    error::{DiffsolError, OdeSolverError},
+    AdjointContext, AdjointEquations, NoAug, OdeEquationsAdjoint, OdeEquationsSens, SensEquations,
+    StateRef, StateRefMut,
 };
 
 use num_traits::{abs, One, Pow, Zero};
@@ -18,10 +20,9 @@ use crate::{
     scalar::scale,
     vector::DefaultDenseMatrix,
     AugmentedOdeEquations, BdfState, Checkpointing, DenseMatrix, IndexType, InitOp, JacobianUpdate,
-    MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeSolverMethod,
-    OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar, SolverProblem, Vector,
-    VectorRef, VectorView, VectorViewMut,
-    OdeEquationsImplicit,
+    MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquationsImplicit,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar,
+    SolverProblem, Vector, VectorRef, VectorView, VectorViewMut,
 };
 
 use super::jacobian_update::SolverState;
@@ -39,16 +40,12 @@ pub struct BdfStatistics {
     pub number_of_nonlinear_solver_fails: usize,
 }
 
-pub type Bdf<M, Eqn, Nls> = BdfAug<M, Eqn, Nls, SensEquations<Eqn>>;
-pub type BdfAdj<M, Eqn, Nls> = BdfAug<
-    M,
-    AdjointEquations<Eqn, Bdf<M, Eqn, Nls>>,
-    Nls,
-    AdjointEquations<Eqn, Bdf<M, Eqn, Nls>>,
->;
-impl<M, Eqn, Nls> SensitivitiesOdeSolverMethod<Eqn> for Bdf<M, Eqn, Nls>
+pub type BdfSens<M, Eqn, Nls> = Bdf<M, Eqn, Nls, SensEquations<Eqn>>;
+pub type BdfAdj<M, Eqn, Nls> =
+    Bdf<M, AdjointEquations<Eqn, Bdf<M, Eqn, Nls>>, Nls, AdjointEquations<Eqn, Bdf<M, Eqn, Nls>>>;
+impl<M, Eqn, Nls> SensitivitiesOdeSolverMethod<Eqn> for BdfSens<M, Eqn, Nls>
 where
-    Eqn: OdeEquationsImplicit,
+    Eqn: OdeEquationsSens,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
@@ -82,11 +79,11 @@ where
 /// \[1\] Byrne, G. D., & Hindmarsh, A. C. (1975). A polyalgorithm for the numerical solution of ordinary differential equations. ACM Transactions on Mathematical Software (TOMS), 1(1), 71-96.
 /// \[2\] Shampine, L. F., & Reichelt, M. W. (1997). The matlab ode suite. SIAM journal on scientific computing, 18(1), 1-22.
 /// \[3\] Virtanen, P., Gommers, R., Oliphant, T. E., Haberland, M., Reddy, T., Cournapeau, D., ... & Van Mulbregt, P. (2020). SciPy 1.0: fundamental algorithms for scientific computing in Python. Nature methods, 17(3), 261-272.
-pub struct BdfAug<
+pub struct Bdf<
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquationsImplicit,
     Nls: NonLinearSolver<BdfCallable<Eqn>>,
-    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit
+    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit = NoAug<Eqn>,
 > {
     nonlinear_solver: Nls,
     ode_problem: Option<OdeSolverProblem<Eqn>>,
@@ -112,16 +109,15 @@ pub struct BdfAug<
     jacobian_update: JacobianUpdate<Eqn::T>,
 }
 
-impl<Eqn, AugmentedEqn> Default
-    for BdfAug<
+impl<Eqn> Default
+    for Bdf<
         <Eqn::V as DefaultDenseMatrix>::M,
         Eqn,
         NewtonNonlinearSolver<BdfCallable<Eqn>, <Eqn::M as DefaultSolver>::LS<BdfCallable<Eqn>>>,
-        AugmentedEqn,
+        NoAug<Eqn>,
     >
 where
     Eqn: OdeEquationsImplicit,
-    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
     Eqn::M: DefaultSolver,
     Eqn::V: DefaultDenseMatrix,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -134,7 +130,28 @@ where
     }
 }
 
-impl<M, Eqn, Nls, AugmentedEqn> BdfAug<M, Eqn, Nls, AugmentedEqn>
+impl<Eqn>
+    Bdf<
+        <Eqn::V as DefaultDenseMatrix>::M,
+        Eqn,
+        NewtonNonlinearSolver<BdfCallable<Eqn>, <Eqn::M as DefaultSolver>::LS<BdfCallable<Eqn>>>,
+        SensEquations<Eqn>,
+    >
+where
+    Eqn: OdeEquationsSens,
+    Eqn::M: DefaultSolver,
+    Eqn::V: DefaultDenseMatrix,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+{
+    pub fn with_sensitivities() -> Self {
+        let linear_solver = Eqn::M::default_solver();
+        let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
+        Self::new(nonlinear_solver)
+    }
+}
+
+impl<M, Eqn, Nls, AugmentedEqn> Bdf<M, Eqn, Nls, AugmentedEqn>
 where
     AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
     Eqn: OdeEquationsImplicit,
@@ -336,7 +353,9 @@ where
         // do the same for sensitivities
         if self.s_op.is_some() {
             for i in 0..self.s_op.as_ref().unwrap().eqn().max_index() {
-                Rc::get_mut(self.s_op.as_mut().unwrap().eqn_mut()).unwrap().set_index(i);
+                Rc::get_mut(self.s_op.as_mut().unwrap().eqn_mut())
+                    .unwrap()
+                    .set_index(i);
                 let op = self.s_op.as_ref().unwrap();
 
                 // update sensitivity differences
@@ -360,7 +379,6 @@ where
                     // update sensitivity output difference
                     Self::_update_diff(order, &self.sg_deltas[i], &mut state.sgdiff[i]);
                 }
-
             }
         }
     }
@@ -469,7 +487,6 @@ where
                     .initialise_sgdiff_to_first_order();
             }
         }
-        
 
         self.u = Self::_compute_r(1, Eqn::T::one());
         self.is_state_modified = false;
@@ -557,7 +574,7 @@ where
     }
 }
 
-impl<M, Eqn, Nls, AugmentedEqn> OdeSolverMethod<Eqn> for BdfAug<M, Eqn, Nls, AugmentedEqn>
+impl<M, Eqn, Nls, AugmentedEqn> OdeSolverMethod<Eqn> for Bdf<M, Eqn, Nls, AugmentedEqn>
 where
     Eqn: OdeEquationsImplicit,
     AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
@@ -1005,7 +1022,7 @@ where
 }
 
 impl<M, Eqn, Nls, AugmentedEqn> AugmentedOdeSolverMethod<Eqn, AugmentedEqn>
-    for BdfAug<M, Eqn, Nls, AugmentedEqn>
+    for Bdf<M, Eqn, Nls, AugmentedEqn>
 where
     Eqn: OdeEquationsImplicit,
     AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
@@ -1050,7 +1067,7 @@ where
     }
 }
 
-impl<M, Eqn, Nls, AugmentedEqn> AdjointOdeSolverMethod<Eqn> for BdfAug<M, Eqn, Nls, AugmentedEqn>
+impl<M, Eqn, Nls, AugmentedEqn> AdjointOdeSolverMethod<Eqn> for Bdf<M, Eqn, Nls, AugmentedEqn>
 where
     Eqn: OdeEquationsAdjoint,
     AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsAdjoint,
@@ -1059,7 +1076,7 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
-    type AdjointSolver = BdfAug<
+    type AdjointSolver = Bdf<
         M,
         AdjointEquations<Eqn, Self>,
         Nls::SelfNewOp<BdfCallable<AdjointEquations<Eqn, Self>>>,
@@ -1131,17 +1148,17 @@ mod test {
                 foodweb::{foodweb_problem, FoodWebContext},
                 gaussian_decay::gaussian_decay_problem,
                 heat2d::head2d_problem,
-                robertson::robertson,
-                robertson::robertson_sens,
+                robertson::{robertson, robertson_sens},
                 robertson_ode::robertson_ode,
                 robertson_ode_with_sens::robertson_ode_with_sens,
             },
             tests::{
                 test_checkpointing, test_interpolate, test_no_set_problem, test_ode_solver,
-                test_ode_solver_adjoint, test_state_mut, test_state_mut_on_problem,
+                test_ode_solver_adjoint, test_ode_solver_no_sens, test_state_mut,
+                test_state_mut_on_problem,
             },
         },
-        Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquationsImplicit, OdeSolverMethod, Op, SparseColMat,
+        Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquations, OdeSolverMethod, Op, SparseColMat,
     };
 
     use faer::Mat;
@@ -1172,14 +1189,14 @@ mod test {
     fn bdf_test_nalgebra_negative_exponential_decay() {
         let mut s = Bdf::default();
         let (problem, soln) = negative_exponential_decay_problem::<M>(false);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
     }
 
     #[test]
     fn bdf_test_nalgebra_exponential_decay() {
         let mut s = Bdf::default();
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 11
@@ -1203,7 +1220,7 @@ mod test {
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
         let (problem, soln) = exponential_decay_problem::<SparseColMat<f64>>(false);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
     }
 
     #[test]
@@ -1217,7 +1234,7 @@ mod test {
         type M = faer::Mat<f64>;
         let mut s = Bdf::default();
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 11
@@ -1237,7 +1254,7 @@ mod test {
 
     #[test]
     fn bdf_test_nalgebra_exponential_decay_sens() {
-        let mut s = Bdf::default();
+        let mut s = Bdf::with_sensitivities();
         let (problem, soln) = exponential_decay_problem_sens::<M>(false);
         test_ode_solver(&mut s, &problem, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -1291,7 +1308,7 @@ mod test {
     fn test_bdf_nalgebra_exponential_decay_algebraic() {
         let mut s = Bdf::default();
         let (problem, soln) = exponential_decay_with_algebraic_problem::<M>(false);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 16
@@ -1315,12 +1332,12 @@ mod test {
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
         let (problem, soln) = exponential_decay_with_algebraic_problem::<SparseColMat<f64>>(false);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
     }
 
     #[test]
     fn test_bdf_nalgebra_exponential_decay_algebraic_sens() {
-        let mut s = Bdf::default();
+        let mut s = Bdf::with_sensitivities();
         let (problem, soln) = exponential_decay_with_algebraic_problem_sens::<M>();
         test_ode_solver(&mut s, &problem, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -1344,7 +1361,7 @@ mod test {
     fn test_bdf_nalgebra_robertson() {
         let mut s = Bdf::default();
         let (problem, soln) = robertson::<M>(false);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 79
@@ -1368,7 +1385,7 @@ mod test {
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
         let (problem, soln) = robertson::<SparseColMat<f64>>(false);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
     }
 
     #[cfg(feature = "suitesparse")]
@@ -1378,7 +1395,7 @@ mod test {
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
         let (problem, soln) = robertson::<SparseColMat<f64>>(false);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
     }
 
     #[cfg(feature = "diffsl-llvm")]
@@ -1390,14 +1407,13 @@ mod test {
         let mut context = crate::DiffSlContext::default();
         let mut s = Bdf::default();
         robertson::robertson_diffsl_compile(&mut context);
-        let (problem, soln) =
-            robertson::robertson_diffsl_problem::<M, LlvmModule>(&context, false);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        let (problem, soln) = robertson::robertson_diffsl_problem::<M, LlvmModule>(&context, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
     }
 
     #[test]
     fn test_bdf_nalgebra_robertson_sens() {
-        let mut s = Bdf::default();
+        let mut s = Bdf::with_sensitivities();
         let (problem, soln) = robertson_sens::<M>();
         test_ode_solver(&mut s, &problem, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -1421,7 +1437,7 @@ mod test {
     fn test_bdf_nalgebra_robertson_colored() {
         let mut s = Bdf::default();
         let (problem, soln) = robertson::<M>(true);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 79
@@ -1443,7 +1459,7 @@ mod test {
     fn test_bdf_nalgebra_robertson_ode() {
         let mut s = Bdf::default();
         let (problem, soln) = robertson_ode::<M>(false, 3);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 90
@@ -1463,7 +1479,7 @@ mod test {
 
     #[test]
     fn test_bdf_nalgebra_robertson_ode_sens() {
-        let mut s = Bdf::default();
+        let mut s = Bdf::with_sensitivities();
         let (problem, soln) = robertson_ode_with_sens::<M>(false);
         test_ode_solver(&mut s, &problem, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -1487,7 +1503,7 @@ mod test {
     fn test_bdf_nalgebra_dydt_y2() {
         let mut s = Bdf::default();
         let (problem, soln) = dydt_y2_problem::<M>(false, 10);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 30
@@ -1509,7 +1525,7 @@ mod test {
     fn test_bdf_nalgebra_dydt_y2_colored() {
         let mut s = Bdf::default();
         let (problem, soln) = dydt_y2_problem::<M>(true, 10);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 30
@@ -1531,7 +1547,7 @@ mod test {
     fn test_bdf_nalgebra_gaussian_decay() {
         let mut s = Bdf::default();
         let (problem, soln) = gaussian_decay_problem::<M>(false, 10);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 14
@@ -1555,7 +1571,7 @@ mod test {
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
         let (problem, soln) = head2d_problem::<SparseColMat<f64>, 10>();
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 21
@@ -1595,7 +1611,7 @@ mod test {
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
         let (problem, soln) = foodweb_problem::<SparseColMat<f64>, 10>(&foodweb_context);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 41
@@ -1625,14 +1641,14 @@ mod test {
     fn test_tstop_bdf() {
         let mut s = Bdf::default();
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        test_ode_solver(&mut s, &problem, soln, None, true, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, true);
     }
 
     #[test]
     fn test_root_finder_bdf() {
         let mut s = Bdf::default();
         let (problem, soln) = exponential_decay_problem_with_root::<M>(false);
-        let y = test_ode_solver(&mut s, &problem, soln, None, false, false);
+        let y = test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         assert!(abs(y[0] - 0.6) < 1e-6, "y[0] = {}", y[0]);
     }
 }

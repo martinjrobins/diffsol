@@ -1,8 +1,7 @@
 use crate::{
     error::{DiffsolError, NonLinearSolverError},
-    non_linear_solver_error,
-    NonLinearOpJacobian,
-    Convergence, ConvergenceStatus, LinearSolver, NonLinearSolver, Op, SolverProblem, Vector,
+    non_linear_solver_error, Convergence, ConvergenceStatus, LinearSolver, NonLinearOp,
+    NonLinearOpJacobian, NonLinearSolver, Op, SolverProblem, Vector,
 };
 
 pub fn newton_iteration<V: Vector>(
@@ -61,7 +60,9 @@ impl<C: NonLinearOpJacobian, Ls: LinearSolver<C>> Default for NewtonNonlinearSol
     }
 }
 
-impl<C: NonLinearOpJacobian, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonNonlinearSolver<C, Ls> {
+impl<C: NonLinearOpJacobian, Ls: LinearSolver<C>> NonLinearSolver<C>
+    for NewtonNonlinearSolver<C, Ls>
+{
     type SelfNewOp<C2: NonLinearOpJacobian<T = C::T, V = C::V, M = C::M>> =
         NewtonNonlinearSolver<C2, Ls::SelfNewOp<C2>>;
 
@@ -131,7 +132,7 @@ impl<C: NonLinearOpJacobian, Ls: LinearSolver<C>> NonLinearSolver<C> for NewtonN
 
     fn solve_other_in_place(
         &mut self,
-        g: impl NonLinearOpJacobian<M = C::M, V = C::V, T = C::T>,
+        g: impl NonLinearOp<M = C::M, V = C::V, T = C::T>,
         xn: &mut <C as Op>::V,
         t: <C as Op>::T,
         error_y: &<C as Op>::V,

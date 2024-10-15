@@ -1,11 +1,10 @@
-use num_traits::{Zero, One};
-use std::{cell::RefCell, rc::Rc, ops::AddAssign, ops::SubAssign};
-
-
+use num_traits::{One, Zero};
+use std::{cell::RefCell, ops::AddAssign, ops::SubAssign, rc::Rc};
 
 use crate::{
-    op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, Checkpointing, ConstantOp, LinearOp, Matrix, NonLinearOp, OdeEquations, OdeSolverMethod, Op, Vector, OdeEquationsAdjoint, NonLinearOpAdjoint, NonLinearOpSensAdjoint, ConstantOpSensAdjoint
-
+    op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, Checkpointing, ConstantOp,
+    ConstantOpSensAdjoint, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint,
+    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint, OdeSolverMethod, Op, Vector,
 };
 
 pub struct AdjointContext<Eqn, Method>
@@ -20,7 +19,7 @@ where
     col: Eqn::V,
 }
 
-impl <Eqn, Method> AdjointContext<Eqn, Method>
+impl<Eqn, Method> AdjointContext<Eqn, Method>
 where
     Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
@@ -76,9 +75,7 @@ where
     Eqn: OdeEquationsAdjoint,
 {
     pub fn new(eqn: &Rc<Eqn>) -> Self {
-        Self {
-            eqn: eqn.clone(),
-        }
+        Self { eqn: eqn.clone() }
     }
 }
 
@@ -111,12 +108,12 @@ where
 }
 
 /// Right-hand side of the adjoint equations is:
-/// 
+///
 /// F(λ, x, t) = -f^T_x(x, t) λ - g^T_x(x,t)
 ///
-/// f_x is the partial derivative of the right-hand side with respect to the state vector. 
+/// f_x is the partial derivative of the right-hand side with respect to the state vector.
 /// g_x is the partial derivative of the functional g with respect to the state vector.
-/// 
+///
 /// We need the current state x(t), which is obtained from the checkpointed forward solve at the current time step.
 pub struct AdjointRhs<Eqn, Method>
 where
@@ -134,7 +131,11 @@ where
     Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
-    pub fn new(eqn: &Rc<Eqn>, context: Rc<RefCell<AdjointContext<Eqn, Method>>>, with_out: bool) -> Self {
+    pub fn new(
+        eqn: &Rc<Eqn>,
+        context: Rc<RefCell<AdjointContext<Eqn, Method>>>,
+        with_out: bool,
+    ) -> Self {
         let tmp_n = if with_out { eqn.rhs().nstates() } else { 0 };
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(tmp_n));
         Self {
@@ -187,11 +188,13 @@ where
         if self.with_out {
             let col = context.col();
             let mut tmp = self.tmp.borrow_mut();
-            self.eqn.out().unwrap().jac_transpose_mul_inplace(x, t, col, &mut tmp);
+            self.eqn
+                .out()
+                .unwrap()
+                .jac_transpose_mul_inplace(x, t, col, &mut tmp);
             y.add_assign(&*tmp);
         }
     }
-    
 }
 
 impl<Eqn, Method> NonLinearOpJacobian for AdjointRhs<Eqn, Method>
@@ -215,12 +218,12 @@ where
 }
 
 /// Output of the adjoint equations is:
-/// 
-/// F(λ, x, t) = -g_p^T(x, t) - f_p^T(x, t) λ 
-/// 
+///
+/// F(λ, x, t) = -g_p^T(x, t) - f_p^T(x, t) λ
+///
 /// f_p is the partial derivative of the right-hand side with respect to the parameter vector
 /// g_p is the partial derivative of the functional g with respect to the parameter vector
-/// 
+///
 /// We need the current state x(t), which is obtained from the checkpointed forward solve at the current time step.
 pub struct AdjointOut<Eqn, Method>
 where
@@ -238,7 +241,11 @@ where
     Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
-    pub fn new(eqn: &Rc<Eqn>, context: Rc<RefCell<AdjointContext<Eqn, Method>>>, with_out: bool) -> Self {
+    pub fn new(
+        eqn: &Rc<Eqn>,
+        context: Rc<RefCell<AdjointContext<Eqn, Method>>>,
+        with_out: bool,
+    ) -> Self {
         let tmp_n = if with_out { eqn.rhs().nparams() } else { 0 };
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(tmp_n));
         Self {
@@ -278,7 +285,7 @@ where
     Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
-    /// F(λ, x, t) = -g_p(x, t) - λ^T f_p(x, t) 
+    /// F(λ, x, t) = -g_p(x, t) - λ^T f_p(x, t)
     fn call_inplace(&self, lambda: &Self::V, t: Self::T, y: &mut Self::V) {
         self.context.borrow_mut().set_state(t);
         let context = self.context.borrow();
@@ -288,15 +295,17 @@ where
         if self.with_out {
             let col = context.col();
             let mut tmp = self.tmp.borrow_mut();
-            self.eqn.out().unwrap().sens_transpose_mul_inplace(x, t, col, &mut tmp);
+            self.eqn
+                .out()
+                .unwrap()
+                .sens_transpose_mul_inplace(x, t, col, &mut tmp);
             y.add_assign(&*tmp);
         }
     }
-    
 }
 
-impl<Eqn, Method> NonLinearOpJacobian for AdjointOut<Eqn, Method> 
-where 
+impl<Eqn, Method> NonLinearOpJacobian for AdjointOut<Eqn, Method>
+where
     Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
@@ -315,13 +324,11 @@ where
     }
 }
 
-
-
 /// Adjoint equations for ODEs
-/// 
+///
 /// M * dλ/dt = -f^T_x(x, t) λ - g^T_x(x,t)
 /// λ(T) = 0
-/// g(λ, x, t) = -g_p(x, t) - λ^T f_p(x, t) 
+/// g(λ, x, t) = -g_p(x, t) - λ^T f_p(x, t)
 ///
 pub struct AdjointEquations<Eqn, Method>
 where
@@ -343,7 +350,11 @@ where
     Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
-    pub(crate) fn new(eqn: &Rc<Eqn>, context: Rc<RefCell<AdjointContext<Eqn, Method>>>, with_out: bool) -> Self {
+    pub(crate) fn new(
+        eqn: &Rc<Eqn>,
+        context: Rc<RefCell<AdjointContext<Eqn, Method>>>,
+        with_out: bool,
+    ) -> Self {
         let rhs = Rc::new(AdjointRhs::new(eqn, context.clone(), with_out));
         let init = Rc::new(AdjointInit::new(eqn));
         let out = if with_out {
@@ -379,16 +390,16 @@ where
             if let Some(mass) = self.eqn.mass() {
                 let mut tmp2 = self.tmp2.borrow_mut();
                 mass.call_transpose_inplace(s_i, t, &mut tmp2);
-                self.eqn.init().sens_mul_transpose_inplace(t, &tmp2, &mut tmp);
+                self.eqn
+                    .init()
+                    .sens_mul_transpose_inplace(t, &tmp2, &mut tmp);
                 sg_i.add_assign(&*tmp);
-
             } else {
                 self.eqn.init().sens_mul_transpose_inplace(t, s_i, &mut tmp);
                 sg_i.sub_assign(&*tmp);
             }
         }
     }
-    
 }
 
 impl<Eqn, Method> std::fmt::Debug for AdjointEquations<Eqn, Method>
@@ -455,28 +466,26 @@ where
     }
 }
 
-
-impl<Eqn, Method> AugmentedOdeEquations<AdjointEquations<Eqn, Method>> for AdjointEquations<Eqn, Method> 
+impl<Eqn, Method> AugmentedOdeEquations<AdjointEquations<Eqn, Method>>
+    for AdjointEquations<Eqn, Method>
 where
     Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
-    
     fn max_index(&self) -> usize {
         self.eqn.out().map(|o| o.nout()).unwrap_or(0)
     }
-    
+
     fn set_index(&mut self, index: usize) {
         self.context.borrow_mut().set_index(index);
     }
 
-    fn update_rhs_out_state(&mut self, _y: &Eqn::V, _dy: &Eqn::V, _t: Eqn::T) {
-    }
-    
+    fn update_rhs_out_state(&mut self, _y: &Eqn::V, _dy: &Eqn::V, _t: Eqn::T) {}
+
     fn integrate_out(&self) -> bool {
         true
     }
-    
+
     fn set_integrate_out(&mut self, _integrate_out: bool) {
         panic!("Not implemented for AdjointEquations");
     }
@@ -484,13 +493,12 @@ where
     fn include_in_error_control(&self) -> bool {
         self.include_in_error_control
     }
-    
+
     fn set_include_in_error_control(&mut self, include: bool) {
         self.include_in_error_control = include;
     }
-    
-    fn update_init_state(&mut self, _t: <Eqn as OdeEquations>::T) {
-    }
+
+    fn update_init_state(&mut self, _t: <Eqn as OdeEquations>::T) {}
 }
 
 #[cfg(test)]
@@ -498,10 +506,13 @@ mod tests {
     use std::{cell::RefCell, rc::Rc};
 
     use crate::{
-        ode_solver::{adjoint_equations::AdjointEquations, test_models::
-            exponential_decay::exponential_decay_problem_adjoint
-        }, AdjointContext, AugmentedOdeEquations, Checkpointing, FaerSparseLU, Matrix, MatrixCommon, NalgebraLU, NonLinearOp, Sdirk, SdirkState, SparseColMat, Tableau, Vector,
-        NonLinearOpJacobian
+        ode_solver::{
+            adjoint_equations::AdjointEquations,
+            test_models::exponential_decay::exponential_decay_problem_adjoint,
+        },
+        AdjointContext, AugmentedOdeEquations, Checkpointing, FaerSparseLU, Matrix, MatrixCommon,
+        NalgebraLU, NonLinearOp, NonLinearOpJacobian, Sdirk, SdirkState, SparseColMat, Tableau,
+        Vector,
     };
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;
@@ -524,7 +535,8 @@ mod tests {
             ds: Vec::new(),
             h: 0.0,
         };
-        let checkpointer = Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()]);
+        let checkpointer =
+            Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()]);
         let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
         let adj_eqn = AdjointEquations::new(&problem.eqn, context.clone(), false);
         // F(λ, x, t) = -f^T_x(x, t) λ
@@ -547,7 +559,7 @@ mod tests {
         assert_eq!(adjoint.ncols(), 2);
         assert_eq!(adjoint[(0, 0)], 0.1);
         assert_eq!(adjoint[(1, 1)], 0.1);
-        
+
         // g_x = |1 2|
         //       |3 4|
         // S = -g^T_x(x,t)
@@ -558,7 +570,7 @@ mod tests {
         //         |0   0 |
         // g_p = |0 0|
         //       |0 0|
-        // g(λ, x, t) = -g_p(x, t) - λ^T f_p(x, t) 
+        // g(λ, x, t) = -g_p(x, t) - λ^T f_p(x, t)
         //            = |1  1| |1| + |0| = |3|
         //              |0  0| |2|  |0|  = |0|
         adj_eqn.set_index(0);
@@ -574,8 +586,6 @@ mod tests {
         let f = adj_eqn.rhs.call(&v, state.t);
         let f_expect = Vcpu::from_vec(vec![-0.9, -1.8]);
         f.assert_eq_st(&f_expect, 1e-10);
-
-        
     }
 
     #[test]
@@ -583,7 +593,8 @@ mod tests {
         // dy/dt = -ay (p = [a])
         // a = 0.1
         let (problem, _soln) = exponential_decay_problem_adjoint::<SparseColMat<f64>>();
-        let solver = Sdirk::<faer::Mat<f64>, _, _>::new(Tableau::esdirk34(), FaerSparseLU::default());
+        let solver =
+            Sdirk::<faer::Mat<f64>, _, _>::new(Tableau::esdirk34(), FaerSparseLU::default());
         let state = SdirkState {
             t: 0.0,
             y: faer::Col::from_vec(vec![1.0, 1.0]),
@@ -596,7 +607,8 @@ mod tests {
             ds: Vec::new(),
             h: 0.0,
         };
-        let checkpointer = Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()]);
+        let checkpointer =
+            Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()]);
         let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
         let mut adj_eqn = AdjointEquations::new(&problem.eqn, context, true);
 
@@ -613,7 +625,7 @@ mod tests {
                 assert_eq!(*v, 0.0);
             }
         }
-        
+
         // g_x = |1 2|
         //       |3 4|
         // S = -g^T_x(x,t)

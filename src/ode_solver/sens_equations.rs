@@ -2,13 +2,14 @@ use num_traits::{One, Zero};
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    matrix::sparsity::MatrixSparsityRef, AugmentedOdeEquations, ConstantOp, LinearOp, Matrix,
-    MatrixSparsity, NonLinearOp, OdeEquations, Op, Vector,
+    matrix::sparsity::MatrixSparsityRef, op::nonlinear_op::NonLinearOpJacobian,
+    AugmentedOdeEquations, ConstantOp, ConstantOpSens, LinearOpSens, Matrix, MatrixSparsity,
+    NonLinearOp, NonLinearOpSens, OdeEquations, OdeEquationsSens, Op, Vector,
 };
 
 pub struct SensInit<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsSens,
 {
     eqn: Rc<Eqn>,
     init_sens: Eqn::M,
@@ -17,7 +18,7 @@ where
 
 impl<Eqn> SensInit<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsSens,
 {
     pub fn new(eqn: &Rc<Eqn>) -> Self {
         let nstates = eqn.rhs().nstates();
@@ -44,7 +45,7 @@ where
 
 impl<Eqn> Op for SensInit<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsSens,
 {
     type T = Eqn::T;
     type V = Eqn::V;
@@ -63,7 +64,7 @@ where
 
 impl<Eqn> ConstantOp for SensInit<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsSens,
 {
     fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
         y.fill(Eqn::T::zero());
@@ -98,7 +99,7 @@ where
 
 impl<Eqn> SensRhs<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsSens,
 {
     pub fn new(eqn: &Rc<Eqn>, allocate: bool) -> Self {
         if !allocate {
@@ -181,7 +182,7 @@ where
 
 impl<Eqn> Op for SensRhs<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsSens,
 {
     type T = Eqn::T;
     type V = Eqn::V;
@@ -200,7 +201,7 @@ where
 
 impl<Eqn> NonLinearOp for SensRhs<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsSens,
 {
     /// the ith column of function F(s, t) is evaluated as J * s_i + S_i, where s_i is the ith column of the sensitivity matrix
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
@@ -210,6 +211,12 @@ where
         self.eqn.rhs().jac_mul_inplace(&state_y, t, x, y);
         sens.add_column_to_vector(index, y);
     }
+}
+
+impl<Eqn> NonLinearOpJacobian for SensRhs<Eqn>
+where
+    Eqn: OdeEquationsSens,
+{
     fn jac_mul_inplace(&self, _x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         let state_y = self.y.borrow();
         self.eqn.rhs().jac_mul_inplace(&state_y, t, v, y);
@@ -219,6 +226,7 @@ where
         self.eqn.rhs().jacobian_inplace(&state_y, t, y);
     }
 }
+
 /// Sensitivity & adjoint equations for ODEs
 ///
 /// Sensitivity equations are linear:
@@ -235,7 +243,7 @@ where
 ///
 pub struct SensEquations<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsSens,
 {
     eqn: Rc<Eqn>,
     rhs: Rc<SensRhs<Eqn>>,
@@ -245,7 +253,7 @@ where
 
 impl<Eqn> std::fmt::Debug for SensEquations<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsSens,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "SensEquations")
@@ -254,7 +262,7 @@ where
 
 impl<Eqn> SensEquations<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsSens,
 {
     pub(crate) fn new(eqn: &Rc<Eqn>) -> Self {
         let rhs = Rc::new(SensRhs::new(eqn, true));
@@ -270,7 +278,7 @@ where
 
 impl<Eqn> Op for SensEquations<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsSens,
 {
     type T = Eqn::T;
     type V = Eqn::V;
@@ -289,7 +297,7 @@ where
 
 impl<Eqn> OdeEquations for SensEquations<Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsSens,
 {
     type T = Eqn::T;
     type V = Eqn::V;
@@ -320,7 +328,7 @@ where
     }
 }
 
-impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for SensEquations<Eqn> {
+impl<Eqn: OdeEquationsSens> AugmentedOdeEquations<Eqn> for SensEquations<Eqn> {
     fn include_in_error_control(&self) -> bool {
         self.include_in_error_control
     }

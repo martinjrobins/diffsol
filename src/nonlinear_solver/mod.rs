@@ -1,4 +1,4 @@
-use crate::{error::DiffsolError, op::Op, solver::SolverProblem, NonLinearOpJacobian};
+use crate::{error::DiffsolError, op::Op, solver::SolverProblem, NonLinearOp, NonLinearOpJacobian};
 use convergence::Convergence;
 
 pub struct NonLinearSolveSolution<V> {
@@ -68,17 +68,15 @@ pub mod tests {
 
     use self::newton::NewtonNonlinearSolver;
     use crate::{
-        linear_solver::nalgebra::lu::LU,
-        matrix::MatrixCommon,
-        op::closure::Closure,
-        scale, DenseMatrix, Vector, NonLinearOp
+        linear_solver::nalgebra::lu::LU, matrix::MatrixCommon, op::closure::Closure, scale,
+        DenseMatrix, NonLinearOp, Vector,
     };
 
     use super::*;
     use num_traits::{One, Zero};
 
     pub fn get_square_problem<M>() -> (
-        SolverProblem<impl NonLinearOp<M = M, V = M::V, T = M::T>>,
+        SolverProblem<impl NonLinearOpJacobian<M = M, V = M::V, T = M::T>>,
         Vec<NonLinearSolveSolution<M::V>>,
     )
     where

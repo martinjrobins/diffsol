@@ -1,7 +1,9 @@
 use std::rc::Rc;
 
 use crate::{
-    op::constant_op::ConstantOpSensAdjoint, ConstantOp, LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint, Scalar, UnitCallable, Vector, NonLinearOpSensAdjoint, NonLinearOpJacobian, LinearOpMatrix
+    op::{constant_op::ConstantOpSensAdjoint, linear_op::LinearOpTranspose},
+    ConstantOp, ConstantOpSens, LinearOp, LinearOpSens, Matrix, NonLinearOp, NonLinearOpAdjoint,
+    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar, UnitCallable, Vector,
 };
 use serde::Serialize;
 
@@ -43,6 +45,18 @@ pub trait AugmentedOdeEquations<Eqn: OdeEquations>:
     fn include_in_error_control(&self) -> bool;
     fn set_integrate_out(&mut self, integrate_out: bool);
     fn integrate_out(&self) -> bool;
+}
+
+pub trait AugmentedOdeEquationsImplicit<Eqn: OdeEquations>:
+    AugmentedOdeEquations<Eqn> + OdeEquationsImplicit<T = Eqn::T, V = Eqn::V, M = Eqn::M>
+{
+}
+
+impl<Aug, Eqn> AugmentedOdeEquationsImplicit<Eqn> for Aug
+where
+    Aug: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit<T = Eqn::T, V = Eqn::V, M = Eqn::M>,
+    Eqn: OdeEquations,
+{
 }
 
 pub struct NoAug<Eqn: OdeEquations> {
@@ -160,23 +174,57 @@ pub trait OdeEquations {
     fn init(&self) -> &Rc<Self::Init>;
 }
 
-pub trait OdeEquationsImplicit: 
-    OdeEquations<
-        Rhs: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T>,
-        Mass: LinearOpMatrix<M = Self::M, V = Self::V, T = Self::T>,
-    >
-{}
+pub trait OdeEquationsImplicit:
+    OdeEquations<Rhs: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T>>
+{
+}
 
+impl<T> OdeEquationsImplicit for T where
+    T: OdeEquations<Rhs: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T>>
+{
+}
 
-pub trait OdeEquationsAdjoint: 
+pub trait OdeEquationsSens:
     OdeEquationsImplicit<
-        Rhs: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T> + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T>,
-        Init: ConstantOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T>,
-        Out: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T> + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T>
-    >
-{}
+    Rhs: NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T>,
+    Init: ConstantOpSens<M = Self::M, V = Self::V, T = Self::T>,
+    Mass: LinearOpSens<M = Self::M, V = Self::V, T = Self::T>,
+>
+{
+}
 
-impl<T: OdeEquationsAdjoint> OdeEquationsImplicit for T {}
+impl<T> OdeEquationsSens for T where
+    T: OdeEquationsImplicit<
+        Rhs: NonLinearOpSens<M = T::M, V = T::V, T = T::T>,
+        Init: ConstantOpSens<M = T::M, V = T::V, T = T::T>,
+        Mass: LinearOpSens<M = T::M, V = T::V, T = T::T>,
+    >
+{
+}
+
+pub trait OdeEquationsAdjoint:
+    OdeEquationsImplicit<
+    Rhs: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T>
+             + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T>,
+    Init: ConstantOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T>,
+    Out: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T>
+             + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T>,
+    Mass: LinearOpTranspose<M = Self::M, V = Self::V, T = Self::T>,
+>
+{
+}
+
+impl<T> OdeEquationsAdjoint for T where
+    T: OdeEquationsImplicit<
+        Rhs: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T>
+                 + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T>,
+        Init: ConstantOpSensAdjoint<M = T::M, V = T::V, T = T::T>,
+        Out: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T>
+                 + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T>,
+        Mass: LinearOpTranspose<M = T::M, V = T::V, T = T::T>,
+    >
+{
+}
 
 /// This struct implements the ODE equation trait [OdeEquations] for a given right-hand side op, mass op, optional root op, and initial condition function.
 ///
@@ -193,7 +241,7 @@ impl<T: OdeEquationsAdjoint> OdeEquationsImplicit for T {}
 ///
 /// ```rust
 /// use std::rc::Rc;
-/// use diffsol::{Bdf, OdeSolverState, OdeSolverMethod, NonLinearOp, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure};
+/// use diffsol::{Bdf, OdeSolverState, OdeSolverMethod, NonLinearOp, NonLinearOpJacobian, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure};
 /// type M = nalgebra::DMatrix<f64>;
 /// type V = nalgebra::DVector<f64>;
 ///
@@ -215,6 +263,8 @@ impl<T: OdeEquationsAdjoint> OdeEquationsImplicit for T {}
 ///    fn call_inplace(&self, x: &V, _t: f64, y: &mut V) {
 ///       y[0] = -0.1 * x[0];
 ///   }
+/// }
+/// impl NonLinearOpJacobian for MyProblem {
 ///    fn jac_mul_inplace(&self, x: &V, _t: f64, v: &V, y: &mut V) {
 ///      y[0] = -0.1 * v[0];
 ///   }
@@ -358,26 +408,6 @@ where
     }
 }
 
-impl <M, Rhs, Init, Mass, Root, Out> OdeEquationsImplicit for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
-where
-    M: Matrix,
-    Rhs: NonLinearOpJacobian<M = M, V = M::V, T = M::T>,
-    Init: ConstantOp<M = M, V = M::V, T = M::T>,
-    Root: NonLinearOp<M = M, V = M::V, T = M::T>,
-    Mass: LinearOpMatrix<M = M, V = M::V, T = M::T>,
-    Out: NonLinearOp<M = M, V = M::V, T = M::T>,
-{}
-
-impl <M, Rhs, Init, Mass, Root, Out> OdeEquationsAdjoint for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
-where
-    M: Matrix,
-    Rhs: NonLinearOpJacobian<M = M, V = M::V, T = M::T> + NonLinearOpAdjoint<M = M, V = M::V, T = M::T> + NonLinearOpSensAdjoint<M = M, V = M::V, T = M::T>,
-    Init: ConstantOpSensAdjoint<M = M, V = M::V, T = M::T>,
-    Root: NonLinearOp<M = M, V = M::V, T = M::T>,
-    Mass: LinearOpMatrix<M = M, V = M::V, T = M::T>,
-    Out: NonLinearOpAdjoint<M = M, V = M::V, T = M::T> + NonLinearOpSensAdjoint<M = M, V = M::V, T = M::T>,
-{}
-
 #[cfg(test)]
 mod tests {
     use nalgebra::DVector;
@@ -386,8 +416,7 @@ mod tests {
     use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
     use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
     use crate::vector::Vector;
-    use crate::LinearOp;
-    use crate::NonLinearOp;
+    use crate::{LinearOp, NonLinearOp, NonLinearOpJacobian};
 
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;

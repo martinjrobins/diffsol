@@ -1,10 +1,9 @@
 use num_traits::One;
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{Matrix, Vector, LinearOp, NonLinearOp, Op, LinearOpMatrix};
+use crate::{LinearOp, Matrix, Op, Vector};
 
 use super::nonlinear_op::NonLinearOpJacobian;
-
 
 pub struct LinearisedOp<C: NonLinearOpJacobian> {
     callable: Rc<C>,
@@ -67,10 +66,6 @@ impl<C: NonLinearOpJacobian> LinearOp for LinearisedOp<C> {
         self.callable.jac_mul_inplace(&self.x, t, x, y);
         y.axpy(beta, &tmp, Self::T::one());
     }
-    
-}
-
-impl<C: NonLinearOpJacobian> LinearOpMatrix for LinearisedOp<C> {
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
         self.callable.jacobian_inplace(&self.x, t, y);
     }

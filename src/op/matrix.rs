@@ -1,5 +1,4 @@
-use crate::{Matrix, LinearOp, Op};
-
+use crate::{LinearOp, Matrix, Op};
 
 pub struct MatrixOp<M: Matrix> {
     m: M,

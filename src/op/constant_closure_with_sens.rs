@@ -1,7 +1,6 @@
 use std::rc::Rc;
 
-use crate::{Matrix, Vector, ConstantOp, Op, ConstantOpSens};
-
+use crate::{ConstantOp, ConstantOpSens, Matrix, Op, Vector};
 
 pub struct ConstantClosureWithSens<M, I, J>
 where

@@ -1,9 +1,7 @@
 use num_traits::Zero;
 use std::rc::Rc;
 
-use crate::{Matrix, Vector, ConstantOp, Op, ConstantOpSensAdjoint};
-
-
+use crate::{ConstantOp, ConstantOpSensAdjoint, Matrix, Op, Vector};
 
 pub struct ConstantClosureWithAdjoint<M, I, J>
 where
@@ -77,7 +75,6 @@ where
     fn call(&self, t: Self::T) -> Self::V {
         (self.func)(self.p.as_ref(), t)
     }
-    
 }
 
 impl<M, I, J> ConstantOpSensAdjoint for ConstantClosureWithAdjoint<M, I, J>

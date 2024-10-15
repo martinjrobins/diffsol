@@ -1,6 +1,6 @@
 use crate::{
-    ode_solver::problem::OdeSolverSolution, scalar::scale, DenseMatrix, OdeBuilder, OdeEquations,
-    OdeSolverProblem, Vector,
+    ode_solver::problem::OdeSolverSolution, scalar::scale, DenseMatrix, OdeBuilder,
+    OdeEquationsImplicit, OdeSolverProblem, Vector,
 };
 use num_traits::One;
 use std::ops::MulAssign;
@@ -22,7 +22,7 @@ pub fn dydt_y2_problem<M: DenseMatrix + 'static>(
     use_coloring: bool,
     size: usize,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
     let size2 = size;

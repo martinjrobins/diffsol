@@ -20,8 +20,8 @@ use std::{
 
 use crate::{
     error::*, matrix::sparsity::MatrixSparsityRef, ode_solver_error, scale, LinearOp, Matrix,
-    NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverStopReason, Op,
-    SundialsMatrix, SundialsVector, Vector, OdeSolverState
+    NonLinearOp, NonLinearOpJacobian, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem,
+    OdeSolverState, OdeSolverStopReason, Op, SundialsMatrix, SundialsVector, Vector,
 };
 
 #[cfg(not(sundials_version_major = "5"))]
@@ -102,7 +102,7 @@ impl SundialsStatistics {
 
 struct SundialsData<Eqn>
 where
-    Eqn: OdeEquations<T = realtype, V = SundialsVector, M = SundialsMatrix>,
+    Eqn: OdeEquationsImplicit<T = realtype, V = SundialsVector, M = SundialsMatrix>,
 {
     eqn: Rc<Eqn>,
     rhs_jac: SundialsMatrix,
@@ -111,7 +111,7 @@ where
 
 impl<Eqn> SundialsData<Eqn>
 where
-    Eqn: OdeEquations<T = realtype, V = SundialsVector, M = SundialsMatrix>,
+    Eqn: OdeEquationsImplicit<T = realtype, V = SundialsVector, M = SundialsMatrix>,
 {
     fn new(eqn: Rc<Eqn>) -> Self {
         let n = eqn.rhs().nstates();
@@ -131,7 +131,7 @@ where
 
 pub struct SundialsIda<Eqn>
 where
-    Eqn: OdeEquations<T = realtype, V = SundialsVector, M = SundialsMatrix>,
+    Eqn: OdeEquationsImplicit<T = realtype, V = SundialsVector, M = SundialsMatrix>,
 {
     ida_mem: *mut c_void,
     linear_solver: SUNLinearSolver,
@@ -146,7 +146,7 @@ where
 
 impl<Eqn> SundialsIda<Eqn>
 where
-    Eqn: OdeEquations<T = realtype, V = SundialsVector, M = SundialsMatrix>,
+    Eqn: OdeEquationsImplicit<T = realtype, V = SundialsVector, M = SundialsMatrix>,
 {
     extern "C" fn residual(
         t: realtype,
@@ -263,7 +263,7 @@ where
 
 impl<Eqn> Default for SundialsIda<Eqn>
 where
-    Eqn: OdeEquations<T = realtype, V = SundialsVector, M = SundialsMatrix>,
+    Eqn: OdeEquationsImplicit<T = realtype, V = SundialsVector, M = SundialsMatrix>,
 {
     fn default() -> Self {
         Self::new()
@@ -272,7 +272,7 @@ where
 
 impl<Eqn> Drop for SundialsIda<Eqn>
 where
-    Eqn: OdeEquations<T = realtype, V = SundialsVector, M = SundialsMatrix>,
+    Eqn: OdeEquationsImplicit<T = realtype, V = SundialsVector, M = SundialsMatrix>,
 {
     fn drop(&mut self) {
         if !self.linear_solver.is_null() {
@@ -284,7 +284,7 @@ where
 
 impl<Eqn> OdeSolverMethod<Eqn> for SundialsIda<Eqn>
 where
-    Eqn: OdeEquations<T = realtype, V = SundialsVector, M = SundialsMatrix>,
+    Eqn: OdeEquationsImplicit<T = realtype, V = SundialsVector, M = SundialsMatrix>,
 {
     type State = SdirkState<Eqn::V>;
 
@@ -455,10 +455,7 @@ where
         unimplemented!()
     }
 
-    fn interpolate_sens(
-        &self,
-        _t: <Eqn as OdeEquations>::T,
-    ) -> Result<Vec<<Eqn as OdeEquations>::V>, DiffsolError> {
+    fn interpolate_sens(&self, _t: Eqn::T) -> Result<Vec<Eqn::V>, DiffsolError> {
         unimplemented!()
     }
 }

@@ -8,8 +8,7 @@ use crate::{
     op::linearise::LinearisedOp,
     scalar::IndexType,
     solver::SolverProblem,
-    LinearOpMatrix, Matrix, NonLinearOpJacobian, Op, Scalar, SparseColMat,
-
+    LinearOp, Matrix, NonLinearOpJacobian, Op, Scalar, SparseColMat,
 };
 
 use faer::{

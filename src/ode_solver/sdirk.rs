@@ -11,8 +11,11 @@ use crate::matrix::MatrixRef;
 use crate::ode_solver_error;
 use crate::vector::VectorRef;
 use crate::AdjointEquations;
+use crate::DefaultDenseMatrix;
+use crate::DefaultSolver;
 use crate::LinearSolver;
 use crate::NewtonNonlinearSolver;
+use crate::NoAug;
 use crate::OdeSolverStopReason;
 use crate::RootFinder;
 use crate::SdirkState;
@@ -20,8 +23,9 @@ use crate::SensEquations;
 use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
-    AugmentedOdeEquations, DenseMatrix, JacobianUpdate, NonLinearOp, OdeEquations, OdeSolverMethod,
-    OdeSolverProblem, OdeSolverState, Op, Scalar, Vector, VectorViewMut, StateRef, StateRefMut,
+    AugmentedOdeEquations, DenseMatrix, JacobianUpdate, NonLinearOp, OdeEquations,
+    OdeEquationsImplicit, OdeEquationsSens, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op,
+    Scalar, StateRef, StateRefMut, Vector, VectorViewMut,
 };
 
 use super::bdf::BdfStatistics;
@@ -30,18 +34,17 @@ use super::method::AugmentedOdeSolverMethod;
 use super::method::SensitivitiesOdeSolverMethod;
 
 // make a few convenience type aliases
-pub type Sdirk<M, Eqn, LS> = SdirkAug<M, Eqn, LS, SensEquations<Eqn>>;
-pub type SdirkAdj<M, Eqn, LS> = SdirkAug<
+pub type SdirkAdj<M, Eqn, LS> = Sdirk<
     M,
     AdjointEquations<Eqn, Sdirk<M, Eqn, LS>>,
     LS,
     AdjointEquations<Eqn, Sdirk<M, Eqn, LS>>,
 >;
-impl<M, Eqn, LS> SensitivitiesOdeSolverMethod<Eqn> for Sdirk<M, Eqn, LS>
+impl<M, Eqn, LS> SensitivitiesOdeSolverMethod<Eqn> for Sdirk<M, Eqn, LS, SensEquations<Eqn>>
 where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     LS: LinearSolver<SdirkCallable<Eqn>>,
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsSens,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
     for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
 {
@@ -56,11 +59,11 @@ where
 /// - The upper triangular part of the `a` matrix must be zero (i.e. not fully implicit).
 /// - The diagonal of the `a` matrix must be the same non-zero value for all rows (i.e. an SDIRK method), except for the first row which can be zero for ESDIRK methods.
 /// - The last row of the `a` matrix must be the same as the `b` vector, and the last element of the `c` vector must be 1 (i.e. a stiffly accurate method)
-pub struct SdirkAug<M, Eqn, LS, AugmentedEqn>
+pub struct Sdirk<M, Eqn, LS, AugmentedEqn = NoAug<Eqn>>
 where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     LS: LinearSolver<SdirkCallable<Eqn>>,
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsImplicit,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
     for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
@@ -89,11 +92,89 @@ where
     jacobian_update: JacobianUpdate<Eqn::T>,
 }
 
-impl<M, Eqn, AugmentedEqn, LS> SdirkAug<M, Eqn, LS, AugmentedEqn>
+impl<Eqn>
+    Sdirk<
+        <Eqn::V as DefaultDenseMatrix>::M,
+        Eqn,
+        <Eqn::M as DefaultSolver>::LS<SdirkCallable<Eqn>>,
+        NoAug<Eqn>,
+    >
+where
+    Eqn: OdeEquationsImplicit,
+    Eqn::M: DefaultSolver,
+    Eqn::V: DefaultDenseMatrix,
+    for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
+    for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
+{
+    pub fn tr_bdf2() -> Self {
+        let tableau = Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::tr_bdf2();
+        let linear_solver = Eqn::M::default_solver();
+        Self::new(tableau, linear_solver)
+    }
+    pub fn esdirk34() -> Self {
+        let tableau = Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::esdirk34();
+        let linear_solver = Eqn::M::default_solver();
+        Self::new(tableau, linear_solver)
+    }
+}
+
+impl<Eqn>
+    Sdirk<
+        <Eqn::V as DefaultDenseMatrix>::M,
+        Eqn,
+        <Eqn::M as DefaultSolver>::LS<SdirkCallable<Eqn>>,
+        SensEquations<Eqn>,
+    >
+where
+    Eqn: OdeEquationsSens,
+    Eqn::M: DefaultSolver,
+    Eqn::V: DefaultDenseMatrix,
+    for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
+    for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
+{
+    pub fn tr_bdf2_with_sensitivities() -> Self {
+        let tableau = Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::tr_bdf2();
+        let linear_solver = Eqn::M::default_solver();
+        Self::new_common(tableau, linear_solver)
+    }
+    pub fn esdirk34_with_sensitivities() -> Self {
+        let tableau = Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::esdirk34();
+        let linear_solver = Eqn::M::default_solver();
+        Self::new_common(tableau, linear_solver)
+    }
+}
+
+impl<M, Eqn, LS> Sdirk<M, Eqn, LS, NoAug<Eqn>>
 where
     LS: LinearSolver<SdirkCallable<Eqn>>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsImplicit,
+    for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
+    for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
+{
+    pub fn new(tableau: Tableau<M>, linear_solver: LS) -> Self {
+        Self::new_common(tableau, linear_solver)
+    }
+}
+
+impl<M, Eqn, LS> Sdirk<M, Eqn, LS, SensEquations<Eqn>>
+where
+    LS: LinearSolver<SdirkCallable<Eqn>>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    Eqn: OdeEquationsSens,
+    for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
+    for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
+{
+    pub fn new_with_sensitivities(tableau: Tableau<M>, linear_solver: LS) -> Self {
+        Self::new_common(tableau, linear_solver)
+    }
+}
+
+impl<M, Eqn, LS, AugmentedEqn> Sdirk<M, Eqn, LS, AugmentedEqn>
+where
+    LS: LinearSolver<SdirkCallable<Eqn>>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    Eqn: OdeEquationsImplicit,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
     for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
@@ -103,7 +184,7 @@ where
     const MAX_FACTOR: f64 = 10.0;
     const MIN_TIMESTEP: f64 = 1e-13;
 
-    pub fn new(tableau: Tableau<M>, linear_solver: LS) -> Self {
+    fn new_common(tableau: Tableau<M>, linear_solver: LS) -> Self {
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
 
         // check that the upper triangular part of a is zero
@@ -353,11 +434,11 @@ where
     }
 }
 
-impl<M, Eqn, AugmentedEqn, LS> OdeSolverMethod<Eqn> for SdirkAug<M, Eqn, LS, AugmentedEqn>
+impl<M, Eqn, AugmentedEqn, LS> OdeSolverMethod<Eqn> for Sdirk<M, Eqn, LS, AugmentedEqn>
 where
     LS: LinearSolver<SdirkCallable<Eqn>>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsImplicit,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
     for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
@@ -810,11 +891,11 @@ where
 }
 
 impl<M, Eqn, AugmentedEqn, LS> AugmentedOdeSolverMethod<Eqn, AugmentedEqn>
-    for SdirkAug<M, Eqn, LS, AugmentedEqn>
+    for Sdirk<M, Eqn, LS, AugmentedEqn>
 where
     LS: LinearSolver<SdirkCallable<Eqn>>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsImplicit,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
     for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
@@ -854,43 +935,37 @@ mod test {
                     exponential_decay_problem_with_root, negative_exponential_decay_problem,
                 },
                 heat2d::head2d_problem,
-                robertson::robertson,
-                robertson::robertson_sens,
+                robertson::{robertson, robertson_sens},
                 robertson_ode::robertson_ode,
             },
             tests::{
                 test_checkpointing, test_interpolate, test_no_set_problem, test_ode_solver,
-                test_state_mut, test_state_mut_on_problem,
+                test_ode_solver_no_sens, test_state_mut, test_state_mut_on_problem,
             },
         },
-        FaerSparseLU, NalgebraLU, OdeEquations, Op, Sdirk, SparseColMat, Tableau,
+        OdeEquations, Op, Sdirk, SparseColMat,
     };
 
-    use faer::Mat;
     use num_traits::abs;
 
     type M = nalgebra::DMatrix<f64>;
     #[test]
     fn sdirk_no_set_problem() {
-        let tableau = Tableau::<M>::tr_bdf2();
-        test_no_set_problem::<M, _>(Sdirk::<M, _, _>::new(tableau, NalgebraLU::default()));
+        test_no_set_problem::<M, _>(Sdirk::tr_bdf2());
     }
     #[test]
     fn sdirk_state_mut() {
-        let tableau = Tableau::<M>::tr_bdf2();
-        test_state_mut::<M, _>(Sdirk::<M, _, _>::new(tableau, NalgebraLU::default()));
+        test_state_mut::<M, _>(Sdirk::tr_bdf2());
     }
     #[test]
     fn sdirk_test_interpolate() {
-        let tableau = Tableau::<M>::tr_bdf2();
-        test_interpolate::<M, _>(Sdirk::<M, _, _>::new(tableau, NalgebraLU::default()));
+        test_interpolate::<M, _>(Sdirk::tr_bdf2());
     }
 
     #[test]
     fn sdirk_test_checkpointing() {
-        let tableau = Tableau::<M>::tr_bdf2();
-        let s1 = Sdirk::<M, _, _>::new(tableau.clone(), NalgebraLU::default());
-        let s2 = Sdirk::<M, _, _>::new(tableau, NalgebraLU::default());
+        let s1 = Sdirk::tr_bdf2();
+        let s2 = Sdirk::tr_bdf2();
         let (problem, soln) = exponential_decay_problem::<M>(false);
         test_checkpointing(s1, s2, problem, soln);
     }
@@ -898,25 +973,22 @@ mod test {
     #[test]
     fn sdirk_test_state_mut_exponential_decay() {
         let (p, soln) = exponential_decay_problem::<M>(false);
-        let tableau = Tableau::<M>::tr_bdf2();
-        let s = Sdirk::<M, _, _>::new(tableau, NalgebraLU::default());
+        let s = Sdirk::tr_bdf2();
         test_state_mut_on_problem(s, p, soln);
     }
 
     #[test]
     fn sdirk_test_nalgebra_negative_exponential_decay() {
-        let tableau = Tableau::<M>::esdirk34();
-        let mut s = Sdirk::<M, _, _>::new(tableau, NalgebraLU::default());
+        let mut s = Sdirk::esdirk34();
         let (problem, soln) = negative_exponential_decay_problem::<M>(false);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
     }
 
     #[test]
     fn test_tr_bdf2_nalgebra_exponential_decay() {
-        let tableau = Tableau::<M>::tr_bdf2();
-        let mut s = Sdirk::new(tableau, NalgebraLU::default());
+        let mut s = Sdirk::tr_bdf2();
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 4
@@ -936,8 +1008,7 @@ mod test {
 
     #[test]
     fn test_tr_bdf2_nalgebra_exponential_decay_sens() {
-        let tableau = Tableau::<M>::tr_bdf2();
-        let mut s = Sdirk::new(tableau, NalgebraLU::default());
+        let mut s = Sdirk::tr_bdf2_with_sensitivities();
         let (problem, soln) = exponential_decay_problem_sens::<M>(false);
         test_ode_solver(&mut s, &problem, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -959,10 +1030,9 @@ mod test {
 
     #[test]
     fn test_esdirk34_nalgebra_exponential_decay() {
-        let tableau = Tableau::<M>::esdirk34();
-        let mut s = Sdirk::new(tableau, NalgebraLU::default());
+        let mut s = Sdirk::esdirk34();
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 3
@@ -982,8 +1052,7 @@ mod test {
 
     #[test]
     fn test_esdirk34_nalgebra_exponential_decay_sens() {
-        let tableau = Tableau::<M>::esdirk34();
-        let mut s = Sdirk::new(tableau, NalgebraLU::default());
+        let mut s = Sdirk::esdirk34_with_sensitivities();
         let (problem, soln) = exponential_decay_problem_sens::<M>(false);
         test_ode_solver(&mut s, &problem, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -1005,10 +1074,9 @@ mod test {
 
     #[test]
     fn test_tr_bdf2_nalgebra_robertson() {
-        let tableau = Tableau::<M>::tr_bdf2();
-        let mut s = Sdirk::new(tableau, NalgebraLU::default());
+        let mut s = Sdirk::tr_bdf2();
         let (problem, soln) = robertson::<M>(false);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 97
@@ -1028,8 +1096,7 @@ mod test {
 
     #[test]
     fn test_tr_bdf2_nalgebra_robertson_sens() {
-        let tableau = Tableau::<M>::tr_bdf2();
-        let mut s = Sdirk::new(tableau, NalgebraLU::default());
+        let mut s = Sdirk::tr_bdf2_with_sensitivities();
         let (problem, soln) = robertson_sens::<M>();
         test_ode_solver(&mut s, &problem, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -1051,10 +1118,9 @@ mod test {
 
     #[test]
     fn test_esdirk34_nalgebra_robertson() {
-        let tableau = Tableau::<M>::esdirk34();
-        let mut s = Sdirk::new(tableau, NalgebraLU::default());
+        let mut s = Sdirk::esdirk34();
         let (problem, soln) = robertson::<M>(false);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 100
@@ -1074,8 +1140,7 @@ mod test {
 
     #[test]
     fn test_esdirk34_nalgebra_robertson_sens() {
-        let tableau = Tableau::<M>::esdirk34();
-        let mut s = Sdirk::new(tableau, NalgebraLU::default());
+        let mut s = Sdirk::esdirk34_with_sensitivities();
         let (problem, soln) = robertson_sens::<M>();
         test_ode_solver(&mut s, &problem, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -1097,10 +1162,9 @@ mod test {
 
     #[test]
     fn test_tr_bdf2_nalgebra_robertson_ode() {
-        let tableau = Tableau::<M>::tr_bdf2();
-        let mut s = Sdirk::new(tableau, NalgebraLU::default());
+        let mut s = Sdirk::tr_bdf2();
         let (problem, soln) = robertson_ode::<M>(false, 1);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
         number_of_linear_solver_setups: 113
@@ -1120,26 +1184,23 @@ mod test {
 
     #[test]
     fn test_tr_bdf2_faer_sparse_heat2d() {
-        let tableau = Tableau::<Mat<f64>>::tr_bdf2();
-        let mut s = Sdirk::new(tableau, FaerSparseLU::default());
+        let mut s = Sdirk::tr_bdf2();
         let (problem, soln) = head2d_problem::<SparseColMat<f64>, 10>();
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
     }
 
     #[test]
     fn test_tstop_tr_bdf2() {
-        let tableau = Tableau::<M>::tr_bdf2();
-        let mut s = Sdirk::new(tableau, NalgebraLU::default());
+        let mut s = Sdirk::tr_bdf2();
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        test_ode_solver(&mut s, &problem, soln, None, true, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, true);
     }
 
     #[test]
     fn test_root_finder_tr_bdf2() {
-        let tableau = Tableau::<M>::tr_bdf2();
-        let mut s = Sdirk::new(tableau, NalgebraLU::default());
+        let mut s = Sdirk::tr_bdf2();
         let (problem, soln) = exponential_decay_problem_with_root::<M>(false);
-        let y = test_ode_solver(&mut s, &problem, soln, None, false, false);
+        let y = test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         assert!(abs(y[0] - 0.6) < 1e-6, "y[0] = {}", y[0]);
     }
 }

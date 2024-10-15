@@ -29,7 +29,7 @@ use crate::{
     matrix::MatrixCommon,
     op::linearise::LinearisedOp,
     vector::Vector,
-    LinearOpMatrix, Matrix, MatrixSparsityRef, NonLinearOpJacobian, Op, SolverProblem, SparseColMat,
+    LinearOp, Matrix, MatrixSparsityRef, NonLinearOpJacobian, Op, SolverProblem, SparseColMat,
 };
 
 trait MatrixKLU: Matrix<T = f64> {

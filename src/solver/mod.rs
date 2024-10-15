@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::{
     op::{linearise::LinearisedOp, Op},
-    IndexType, NonLinearOp, OdeEquations, OdeSolverProblem,
+    IndexType, NonLinearOpJacobian, OdeEquations, OdeSolverProblem,
 };
 
 pub struct SolverStatistics {
@@ -53,7 +53,7 @@ impl<C: Op> SolverProblem<C> {
     }
 }
 
-impl<C: NonLinearOp> SolverProblem<C> {
+impl<C: NonLinearOpJacobian> SolverProblem<C> {
     /// Create a new solver problem from a nonlinear operator that solves for the linearised operator.
     /// That is, if the original function is $f(t, y)$, this function creates a new problem $f'$ that solves $f' = J(x) v$, where $J(x)$ is the Jacobian of $f$ at $x$.
     pub fn linearise(&self) -> SolverProblem<LinearisedOp<C>> {

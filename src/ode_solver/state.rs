@@ -7,8 +7,9 @@ use crate::{
     nonlinear_solver::NonLinearSolver,
     ode_solver_error, scale,
     solver::SolverProblem,
-    AugmentedOdeEquations, ConstantOp, DefaultSolver, InitOp, NewtonNonlinearSolver, NonLinearOp,
-    OdeEquations, OdeSolverMethod, OdeSolverProblem, Op, SensEquations, Vector,
+    AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp, DefaultSolver, InitOp,
+    NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeEquationsImplicit, OdeEquationsSens,
+    OdeSolverMethod, OdeSolverProblem, Op, SensEquations, Vector,
 };
 
 use super::method::SensitivitiesOdeSolverMethod;
@@ -90,9 +91,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     fn as_ref(&self) -> StateRef<V>;
     fn as_mut(&mut self) -> StateRefMut<V>;
     fn into_common(self) -> StateCommon<V>;
-    fn new_from_common(
-        state: StateCommon<V>,
-    ) -> Self;
+    fn new_from_common(state: StateCommon<V>) -> Self;
 
     fn set_problem<Eqn: OdeEquations>(
         &mut self,
@@ -149,7 +148,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     /// You can then use [Self::set_consistent] and [Self::set_step_size] to set the state up if you need to.
     fn new<Eqn, S>(ode_problem: &OdeSolverProblem<Eqn>, solver: &S) -> Result<Self, DiffsolError>
     where
-        Eqn: OdeEquations<T = V::T, V = V>,
+        Eqn: OdeEquationsImplicit<T = V::T, V = V>,
         Eqn::M: DefaultSolver,
         S: OdeSolverMethod<Eqn>,
     {
@@ -166,7 +165,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         solver: &S,
     ) -> Result<Self, DiffsolError>
     where
-        Eqn: OdeEquations<T = V::T, V = V>,
+        Eqn: OdeEquationsSens<T = V::T, V = V>,
         Eqn::M: DefaultSolver,
         S: SensitivitiesOdeSolverMethod<Eqn>,
     {
@@ -180,8 +179,8 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         solver: &S,
     ) -> Result<(Self, AugmentedEqn), DiffsolError>
     where
-        Eqn: OdeEquations<T = V::T, V = V>,
-        AugmentedEqn: AugmentedOdeEquations<Eqn> + std::fmt::Debug,
+        Eqn: OdeEquationsImplicit<T = V::T, V = V>,
+        AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> + std::fmt::Debug,
         Eqn::M: DefaultSolver,
         S: OdeSolverMethod<Eqn>,
     {
@@ -201,7 +200,9 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     /// and if applicable the sensitivity vectors s.
     /// This is useful if you want to set up the state yourself, or if you want to use a different nonlinear solver to make the state consistent,
     /// or if you want to set the step size yourself or based on the exact order of the solver.
-    fn new_without_initialise<Eqn>(ode_problem: &OdeSolverProblem<Eqn>) -> Result<Self, DiffsolError>
+    fn new_without_initialise<Eqn>(
+        ode_problem: &OdeSolverProblem<Eqn>,
+    ) -> Result<Self, DiffsolError>
     where
         Eqn: OdeEquations<T = V::T, V = V>,
     {
@@ -211,7 +212,10 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let dy = V::zeros(y.len());
         let (s, ds) = (vec![], vec![]);
         let (dg, g) = if ode_problem.integrate_out {
-            let out = ode_problem.eqn.out().ok_or(ode_solver_error!(StateProblemMismatch))?;
+            let out = ode_problem
+                .eqn
+                .out()
+                .ok_or(ode_solver_error!(StateProblemMismatch))?;
             (out.call(&y, t), V::zeros(out.nout()))
         } else {
             (V::zeros(0), V::zeros(0))
@@ -259,7 +263,9 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
             let mut dsg = Vec::with_capacity(naug);
             for i in 0..naug {
                 augmented_eqn.set_index(i);
-                let out = augmented_eqn.out().ok_or(ode_solver_error!(StateProblemMismatch))?;
+                let out = augmented_eqn
+                    .out()
+                    .ok_or(ode_solver_error!(StateProblemMismatch))?;
                 let dsgi = out.call(&state.s[i], state.t);
                 let sgi = V::zeros(out.nout());
                 sg.push(sgi);
@@ -281,11 +287,14 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         root_solver: &mut S,
     ) -> Result<(), DiffsolError>
     where
-        Eqn: OdeEquations<T = V::T, V = V>,
+        Eqn: OdeEquationsImplicit<T = V::T, V = V>,
         S: NonLinearSolver<InitOp<Eqn>>,
     {
         let state = self.as_mut();
-        ode_problem.eqn.rhs().call_inplace(state.y, *state.t, state.dy);
+        ode_problem
+            .eqn
+            .rhs()
+            .call_inplace(state.y, *state.t, state.dy);
         if ode_problem.eqn.mass().is_none() {
             return Ok(());
         }
@@ -313,8 +322,8 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         root_solver: &mut S,
     ) -> Result<AugmentedEqn, DiffsolError>
     where
-        Eqn: OdeEquations<T = V::T, V = V>,
-        AugmentedEqn: AugmentedOdeEquations<Eqn> + std::fmt::Debug,
+        Eqn: OdeEquationsImplicit<T = V::T, V = V>,
+        AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> + std::fmt::Debug,
         S: NonLinearSolver<InitOp<AugmentedEqn>>,
     {
         let state = self.as_mut();
@@ -322,7 +331,9 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let naug = augmented_eqn.max_index();
         for i in 0..naug {
             augmented_eqn.set_index(i);
-            augmented_eqn.rhs().call_inplace(&state.s[i], *state.t, &mut state.ds[i]);
+            augmented_eqn
+                .rhs()
+                .call_inplace(&state.s[i], *state.t, &mut state.ds[i]);
         }
 
         if ode_problem.eqn.mass().is_none() {
@@ -411,7 +422,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
             (h0, h1)
         };
 
-        let state= self.as_mut();
+        let state = self.as_mut();
         *state.h = Eqn::T::from(100.0) * h0;
         if *state.h > h1 {
             *state.h = h1;

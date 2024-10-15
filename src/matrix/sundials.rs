@@ -11,8 +11,9 @@ use crate::sundials_sys::{
 };
 
 use crate::{
-    error::*, matrix_error, ode_solver::sundials::sundials_check, NonLinearOpJacobian, scalar::scale,
-    vector::sundials::SundialsVector, IndexType, Scale, SundialsLinearSolver, Vector,
+    error::*, matrix_error, ode_solver::sundials::sundials_check, scalar::scale,
+    vector::sundials::SundialsVector, IndexType, NonLinearOpJacobian, Scale, SundialsLinearSolver,
+    Vector,
 };
 
 #[cfg(not(sundials_version_major = "5"))]

@@ -6,8 +6,7 @@ use crate::{
     linear_solver_error,
     matrix::sparsity::MatrixSparsityRef,
     op::linearise::LinearisedOp,
-    NonLinearOpJacobian,
-    LinearOpMatrix, LinearSolver, Matrix, Op, Scalar, SolverProblem,
+    LinearOp, LinearSolver, Matrix, NonLinearOpJacobian, Op, Scalar, SolverProblem,
 };
 
 /// A [LinearSolver] that uses the LU decomposition in the [`nalgebra` library](https://nalgebra.org/) to solve the linear system.

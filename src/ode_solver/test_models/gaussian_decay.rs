@@ -1,6 +1,8 @@
 use crate::ode_solver::problem::OdeSolverSolution;
 use crate::OdeSolverProblem;
-use crate::{scalar::scale, ConstantOp, DenseMatrix, OdeBuilder, OdeEquations, Vector};
+use crate::{
+    scalar::scale, ConstantOp, DenseMatrix, OdeBuilder, OdeEquations, OdeEquationsImplicit, Vector,
+};
 use nalgebra::ComplexField;
 use num_traits::Pow;
 use num_traits::Zero;
@@ -24,7 +26,7 @@ pub fn gaussian_decay_problem<M: DenseMatrix + 'static>(
     use_coloring: bool,
     size: usize,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
     let size2 = size;

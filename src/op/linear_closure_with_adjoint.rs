@@ -1,8 +1,8 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    find_matrix_non_zeros, find_transpose_non_zeros, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity, Matrix,
-    Vector, LinearOp, LinearOpMatrix, LinearOpTranspose, Op,
+    find_matrix_non_zeros, find_transpose_non_zeros, jacobian::JacobianColoring,
+    matrix::sparsity::MatrixSparsity, LinearOp, LinearOpTranspose, Matrix, Op, Vector,
 };
 
 use super::OpStatistics;
@@ -111,17 +111,7 @@ where
         self.statistics.borrow_mut().increment_call();
         (self.func)(x, self.p.as_ref(), t, beta, y)
     }
-    fn gemv_transpose_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
-        (self.func_adjoint)(x, self.p.as_ref(), t, beta, y)
-    }
-}
 
-impl<M, F, G> LinearOpMatrix for LinearClosureWithAdjoint<M, F, G>
-where
-    M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
-{
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
         self.statistics.borrow_mut().increment_matrix();
         if let Some(coloring) = &self.coloring {
@@ -138,6 +128,9 @@ where
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
 {
+    fn gemv_transpose_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
+        (self.func_adjoint)(x, self.p.as_ref(), t, beta, y)
+    }
     fn transpose_inplace(&self, t: Self::T, y: &mut Self::M) {
         if let Some(coloring) = &self.coloring_adjoint {
             coloring.matrix_inplace(self, t, y);

@@ -3,7 +3,10 @@ use std::{cell::RefCell, rc::Rc};
 use diffsl::{execution::module::CodegenModule, Compiler};
 
 use crate::{
-    error::DiffsolError, find_jacobian_non_zeros, find_matrix_non_zeros, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity, op::nonlinear_op::NonLinearOpJacobian, ConstantOp, LinearOp, Matrix, NonLinearOp, OdeEquations, Op, Vector, LinearOpMatrix
+    error::DiffsolError, find_jacobian_non_zeros, find_matrix_non_zeros,
+    jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
+    op::nonlinear_op::NonLinearOpJacobian, ConstantOp, LinearOp, Matrix, NonLinearOp, OdeEquations,
+    Op, Vector,
 };
 
 pub type T = f64;
@@ -322,8 +325,6 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpJacobian for DiffSlRoot<'_,
     }
 }
 
-
-
 impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlOut<'_, M, CG> {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
         self.context.compiler.calc_out(
@@ -337,7 +338,6 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlOut<'_, M, CG> {
             .get_out(self.context.data.borrow().as_slice());
         y.copy_from_slice(out);
     }
-    
 }
 
 impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpJacobian for DiffSlOut<'_, M, CG> {
@@ -404,9 +404,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> LinearOp for DiffSlMass<'_, M, CG> {
         // y = tmp + beta * y
         y.axpy(1.0, &tmp, beta);
     }
-}
 
-impl<M: Matrix<T = T>, CG: CodegenModule> LinearOpMatrix for DiffSlMass<'_, M, CG> {
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
         if let Some(coloring) = &self.coloring {
             coloring.matrix_inplace(self, t, y);
@@ -414,7 +412,6 @@ impl<M: Matrix<T = T>, CG: CodegenModule> LinearOpMatrix for DiffSlMass<'_, M, C
             self._default_matrix_inplace(t, y);
         }
     }
-    
 }
 
 impl<'a, M: Matrix<T = T>, CG: CodegenModule> OdeEquations for DiffSl<'a, M, CG> {
@@ -468,7 +465,8 @@ mod tests {
     use nalgebra::DVector;
 
     use crate::{
-        Bdf, ConstantOp, LinearOp, NonLinearOp, OdeBuilder, OdeEquations, OdeSolverMethod, Vector,
+        Bdf, ConstantOp, LinearOp, NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations,
+        OdeSolverMethod, OdeSolverState, Vector,
     };
 
     use super::{DiffSl, DiffSlContext};
@@ -540,7 +538,8 @@ mod tests {
         let problem = OdeBuilder::new().p([r, k]).build_diffsl(&context).unwrap();
         let mut solver = Bdf::default();
         let t = 1.0;
-        let (ys, ts) = solver.solve(&problem, t).unwrap();
+        let state = OdeSolverState::new(&problem, &solver).unwrap();
+        let (ys, ts) = solver.solve(&problem, state, t).unwrap();
         for (i, t) in ts.iter().enumerate() {
             let y_expect = k / (1.0 + (k - y0) * (-r * t).exp() / y0);
             let z_expect = 2.0 * y_expect;
@@ -550,7 +549,8 @@ mod tests {
 
         // do it again with some explicit t_evals
         let t_evals = vec![0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0];
-        let ys = solver.solve_dense(&problem, &t_evals).unwrap();
+        let state = OdeSolverState::new(&problem, &solver).unwrap();
+        let ys = solver.solve_dense(&problem, state, &t_evals).unwrap();
         for (i, t) in t_evals.iter().enumerate() {
             let y_expect = k / (1.0 + (k - y0) * (-r * t).exp() / y0);
             let z_expect = 2.0 * y_expect;

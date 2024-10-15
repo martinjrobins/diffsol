@@ -1,4 +1,7 @@
-use crate::{error::DiffsolError, OdeEquations, OdeSolverProblem, OdeSolverState, StateRef, StateRefMut, Vector};
+use crate::{
+    error::DiffsolError, OdeEquations, OdeSolverProblem, OdeSolverState, StateRef, StateRefMut,
+    Vector,
+};
 
 use super::state::StateCommon;
 
@@ -36,10 +39,8 @@ where
     ) -> Result<(), DiffsolError> {
         Ok(())
     }
-    
-    fn new_from_common(
-        state: StateCommon<V>,
-    ) -> Self {
+
+    fn new_from_common(state: StateCommon<V>) -> Self {
         Self {
             y: state.y,
             dy: state.dy,
@@ -53,7 +54,7 @@ where
             h: state.h,
         }
     }
-    
+
     fn into_common(self) -> StateCommon<V> {
         StateCommon {
             y: self.y,
@@ -82,8 +83,8 @@ where
             t: &mut self.t,
             h: &mut self.h,
         }
-    } 
-    
+    }
+
     fn as_ref(&self) -> StateRef<V> {
         StateRef {
             y: &self.y,
@@ -98,5 +99,4 @@ where
             h: self.h,
         }
     }
-
 }
