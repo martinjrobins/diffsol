@@ -1,10 +1,9 @@
-use num_traits::{One, Zero};
+use num_traits::Zero;
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     matrix::sparsity::MatrixSparsityRef, op::nonlinear_op::NonLinearOpJacobian,
-    AugmentedOdeEquations, ConstantOp, ConstantOpSens, LinearOpSens, Matrix, MatrixSparsity,
-    NonLinearOp, NonLinearOpSens, OdeEquations, OdeEquationsSens, Op, Vector,
+    AugmentedOdeEquations, ConstantOp, ConstantOpSens, Matrix, NonLinearOp, NonLinearOpSens, OdeEquations, OdeEquationsSens, Op, Vector,
 };
 
 pub struct SensInit<Eqn>
@@ -72,9 +71,9 @@ where
     }
 }
 
-/// Right-hand side of the sensitivity equations is:
+/// Right-hand side of the sensitivity equations is (we assume M_p = 0):
 ///
-/// F(s, t) = J * s + f_p - M_p * dy/dt
+/// F(s, t) = J * s + f_p
 ///
 /// f_p is the partial derivative of the right-hand side with respect to the parameters,
 /// this is constant and can be precomputed. It is a matrix of size nstates x nparams.
@@ -82,7 +81,7 @@ where
 /// M_p * dy/dt is the partial derivative of the mass matrix wrt the parameters,
 /// multiplied by the derivative of the state wrt time. It is a matrix of size nstates x nparams.
 ///
-/// Strategy is to pre-compute S = f_p - M_p * dy/dt from the state at given time step and store it in a matrix using [Self::update_state].
+/// Strategy is to pre-compute S = f_p from the state at given time step and store it in a matrix using [Self::update_state].
 /// Then the ith column of function F(s, t) is evaluated as J * s_i + S_i, where s_i is the ith column of the sensitivity matrix
 /// and S_i is the ith column of the matrix S. The column to evaluate is set using [Self::set_param_index].
 pub struct SensRhs<Eqn>
@@ -91,8 +90,6 @@ where
 {
     eqn: Rc<Eqn>,
     sens: RefCell<Eqn::M>,
-    rhs_sens: Option<RefCell<Eqn::M>>,
-    mass_sens: Option<RefCell<Eqn::M>>,
     y: RefCell<Eqn::V>,
     index: RefCell<usize>,
 }
@@ -106,8 +103,6 @@ where
             return Self {
                 eqn: eqn.clone(),
                 sens: RefCell::new(<Eqn::M as Matrix>::zeros(0, 0)),
-                rhs_sens: None,
-                mass_sens: None,
                 y: RefCell::new(<Eqn::V as Vector>::zeros(0)),
                 index: RefCell::new(0),
             };
@@ -121,57 +116,18 @@ where
         );
         let y = RefCell::new(<Eqn::V as Vector>::zeros(nstates));
         let index = RefCell::new(0);
-        if let Some(mass) = eqn.mass() {
-            let mass_sens = Eqn::M::new_from_sparsity(
-                nstates,
-                nparams,
-                mass.sparsity_sens().map(|s| s.to_owned()),
-            );
-            let sens = if rhs_sens.sparsity().is_some() && mass_sens.sparsity().is_some() {
-                // union of sparsity patterns
-                let sparsity = rhs_sens
-                    .sparsity()
-                    .unwrap()
-                    .to_owned()
-                    .union(mass_sens.sparsity().unwrap())
-                    .unwrap();
-                Eqn::M::new_from_sparsity(nstates, nparams, Some(sparsity))
-            } else {
-                Eqn::M::new_from_sparsity(nstates, nparams, None)
-            };
-            Self {
-                eqn: eqn.clone(),
-                sens: RefCell::new(sens),
-                rhs_sens: Some(RefCell::new(rhs_sens)),
-                mass_sens: Some(RefCell::new(mass_sens)),
-                y,
-                index,
-            }
-        } else {
-            Self {
-                eqn: eqn.clone(),
-                sens: RefCell::new(rhs_sens),
-                rhs_sens: None,
-                mass_sens: None,
-                y,
-                index,
-            }
+        Self {
+            eqn: eqn.clone(),
+            sens: RefCell::new(rhs_sens),
+            y,
+            index,
         }
     }
 
-    /// pre-compute S = f_p - M_p * dy/dt from the state
-    pub fn update_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T) {
-        if self.rhs_sens.is_some() {
-            let mut rhs_sens = self.rhs_sens.as_ref().unwrap().borrow_mut();
-            let mut mass_sens = self.mass_sens.as_ref().unwrap().borrow_mut();
-            let mut sens = self.sens.borrow_mut();
-            self.eqn.rhs().sens_inplace(y, t, &mut rhs_sens);
-            self.eqn.mass().unwrap().sens_inplace(dy, t, &mut mass_sens);
-            sens.scale_add_and_assign(&rhs_sens, -Eqn::T::one(), &mass_sens);
-        } else {
-            let mut sens = self.sens.borrow_mut();
-            self.eqn.rhs().sens_inplace(y, t, &mut sens);
-        }
+    /// pre-compute S = f_p from the state
+    pub fn update_state(&mut self, y: &Eqn::V, _dy: &Eqn::V, t: Eqn::T) {
+        let mut sens = self.sens.borrow_mut();
+        self.eqn.rhs().sens_inplace(y, t, &mut sens);
         let mut state_y = self.y.borrow_mut();
         state_y.copy_from(y);
     }
@@ -227,10 +183,10 @@ where
     }
 }
 
-/// Sensitivity & adjoint equations for ODEs
+/// Sensitivity & adjoint equations for ODEs (we assume M_p = 0):
 ///
 /// Sensitivity equations are linear:
-/// M * ds/dt = J * s + f_p - M_p * dy/dt
+/// M * ds/dt = J * s + f_p
 /// s(0) = dy(0)/dp
 /// where
 ///  M is the mass matrix

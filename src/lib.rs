@@ -179,7 +179,6 @@ pub use op::{
 use op::{
     closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,
     constant_closure_with_sens::ConstantClosureWithSens, init::InitOp,
-    linear_closure_with_sens::LinearClosureWithSens,
 };
 use scalar::{IndexType, Scalar, Scale};
 pub use vector::DefaultDenseMatrix;

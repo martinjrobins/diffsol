@@ -4,8 +4,8 @@ use crate::{
     matrix::Matrix,
     ode_solver::problem::OdeSolverSolution,
     op::{closure_with_sens::ClosureWithSens, constant_closure_with_sens::ConstantClosureWithSens},
-    ConstantOp, LinearClosureWithSens, OdeBuilder, OdeEquationsImplicit, OdeEquationsSens,
-    OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector,
+    ConstantOp, OdeBuilder, OdeEquationsImplicit, OdeEquationsSens,
+    OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector, LinearClosure
 };
 use num_traits::Zero;
 
@@ -90,6 +90,7 @@ fn robertson_jac_mul<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut 
         - M::T::from(2.0) * p[2] * x[1] * v[1];
     y[2] = v[0] + v[1] + v[2];
 }
+
 fn robertson_sens_mul<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
     y[0] = -v[0] * x[0] + v[1] * x[1] * x[2];
     y[1] = v[0] * x[0] - v[1] * x[1] * x[2] - v[2] * x[1] * x[1];
@@ -100,10 +101,6 @@ fn robertson_mass<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, beta: M::T, y: &mut 
     y[0] = x[0] + beta * y[0];
     y[1] = x[1] + beta * y[1];
     y[2] = beta * y[2];
-}
-
-fn robertson_mass_sens<M: Matrix>(_x: &M::V, _p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V) {
-    y.fill(M::T::zero());
 }
 
 fn robertson_init<M: Matrix>(_p: &M::V, _t: M::T) -> M::V {
@@ -180,9 +177,8 @@ pub fn robertson_sens<M: Matrix + 'static>() -> (
         3,
         p.clone(),
     );
-    let mut mass = LinearClosureWithSens::new(
+    let mut mass = LinearClosure::new(
         robertson_mass::<M>,
-        robertson_mass_sens::<M>,
         3,
         3,
         p.clone(),

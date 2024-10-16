@@ -17,7 +17,6 @@ pub mod constant_op;
 pub mod init;
 pub mod linear_closure;
 pub mod linear_closure_with_adjoint;
-pub mod linear_closure_with_sens;
 pub mod linear_op;
 pub mod linearise;
 pub mod matrix;

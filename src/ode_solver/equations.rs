@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use crate::{
     op::{constant_op::ConstantOpSensAdjoint, linear_op::LinearOpTranspose},
-    ConstantOp, ConstantOpSens, LinearOp, LinearOpSens, Matrix, NonLinearOp, NonLinearOpAdjoint,
+    ConstantOp, ConstantOpSens, LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint,
     NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar, UnitCallable, Vector,
 };
 use serde::Serialize;
@@ -188,7 +188,6 @@ pub trait OdeEquationsSens:
     OdeEquationsImplicit<
     Rhs: NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T>,
     Init: ConstantOpSens<M = Self::M, V = Self::V, T = Self::T>,
-    Mass: LinearOpSens<M = Self::M, V = Self::V, T = Self::T>,
 >
 {
 }
@@ -197,7 +196,6 @@ impl<T> OdeEquationsSens for T where
     T: OdeEquationsImplicit<
         Rhs: NonLinearOpSens<M = T::M, V = T::V, T = T::T>,
         Init: ConstantOpSens<M = T::M, V = T::V, T = T::T>,
-        Mass: LinearOpSens<M = T::M, V = T::V, T = T::T>,
     >
 {
 }
