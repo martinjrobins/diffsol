@@ -158,7 +158,7 @@ pub use ode_solver::state::{StateRef, StateRefMut};
 pub use ode_solver::{
     adjoint_equations::AdjointContext, adjoint_equations::AdjointEquations,
     adjoint_equations::AdjointInit, adjoint_equations::AdjointRhs, bdf::Bdf, bdf::BdfAdj,
-    bdf_state::BdfState, builder::OdeBuilder, checkpointing::Checkpointing,
+    bdf_state::BdfState, builder::OdeBuilder, checkpointing::Checkpointing, checkpointing::HermiteInterpolator,
     equations::AugmentedOdeEquations, equations::AugmentedOdeEquationsImplicit, equations::NoAug,
     equations::OdeEquations, equations::OdeEquationsAdjoint, equations::OdeEquationsImplicit,
     equations::OdeEquationsSens, equations::OdeSolverEquations, method::OdeSolverMethod,

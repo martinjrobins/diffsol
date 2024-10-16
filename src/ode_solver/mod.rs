@@ -25,6 +25,7 @@ mod tests {
     use std::rc::Rc;
 
     use self::problem::OdeSolverSolution;
+    use checkpointing::HermiteInterpolator;
     use method::{AdjointOdeSolverMethod, SensitivitiesOdeSolverMethod};
     use nalgebra::ComplexField;
 
@@ -242,13 +243,22 @@ mod tests {
         let mut nsteps = 0;
         let (rtol, atol) = (solution.rtol, &solution.atol);
         let mut checkpoints = vec![method.checkpoint().unwrap()];
+        let mut ts = Vec::new();
+        let mut ys = Vec::new();
+        let mut ydots = Vec::new();
         for point in solution.solution_points.iter() {
             while method.state().unwrap().t.abs() < point.t.abs() {
+                ts.push(method.state().unwrap().t);
+                ys.push(method.state().unwrap().y.clone());
+                ydots.push(method.state().unwrap().dy.clone());
                 method.step().unwrap();
                 nsteps += 1;
-                if nsteps > 50 {
+                if nsteps > 50 && method.state().unwrap().t.abs() < t1.abs() {
                     checkpoints.push(method.checkpoint().unwrap());
                     nsteps = 0;
+                    ts.clear();
+                    ys.clear();
+                    ydots.clear();
                 }
             }
             let soln = method.interpolate_out(point.t).unwrap();
@@ -264,17 +274,18 @@ mod tests {
                 point.state
             );
         }
+        ts.push(method.state().unwrap().t);
+        ys.push(method.state().unwrap().y.clone());
+        ydots.push(method.state().unwrap().dy.clone());
         checkpoints.push(method.checkpoint().unwrap());
-        let mut adjoint_solver = method.new_adjoint_solver(checkpoints, true).unwrap();
+        let last_segment = HermiteInterpolator::new(ys, ydots, ts);
+        let mut adjoint_solver = method.new_adjoint_solver(checkpoints, last_segment, true).unwrap();
         let y_expect = M::V::from_element(problem.eqn.rhs().nstates(), M::T::zero());
         adjoint_solver
             .state()
             .unwrap()
             .y
             .assert_eq_st(&y_expect, M::T::from(1e-9));
-        //for i in 0..problem.eqn.out().unwrap().nout() {
-        //    adjoint_solver.state().unwrap().s[i].assert_eq_st(&y_expect, M::T::from(1e-9));
-        //}
         let g_expect = M::V::from_element(problem.eqn.rhs().nparams(), M::T::zero());
         for i in 0..problem.eqn.out().unwrap().nout() {
             adjoint_solver.state().unwrap().sg[i].assert_eq_st(&g_expect, M::T::from(1e-9));

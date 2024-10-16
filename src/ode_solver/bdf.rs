@@ -6,7 +6,7 @@ use std::rc::Rc;
 use crate::{
     error::{DiffsolError, OdeSolverError},
     AdjointContext, AdjointEquations, NoAug, OdeEquationsAdjoint, OdeEquationsSens, SensEquations,
-    StateRef, StateRefMut,
+    StateRef, StateRefMut, HermiteInterpolator
 };
 
 use num_traits::{abs, One, Pow, Zero};
@@ -1094,6 +1094,7 @@ where
     fn new_adjoint_solver(
         &self,
         checkpoints: Vec<Self::State>,
+        last_segment: HermiteInterpolator<Eqn::V>,
         include_in_error_control: bool,
     ) -> Result<Self::AdjointSolver, DiffsolError> {
         // construct checkpointing
@@ -1105,6 +1106,7 @@ where
             checkpointer_solver,
             checkpoints.len() - 2,
             checkpoints,
+            Some(last_segment),
         );
 
         // construct adjoint equations and problem
@@ -1298,9 +1300,9 @@ mod test {
         "###);
         insta::assert_yaml_snapshot!(s.problem().as_ref().unwrap().eqn.rhs().statistics(), @r###"
         ---
-        number_of_calls: 166
-        number_of_jac_muls: 8
-        number_of_matrix_evals: 4
+        number_of_calls: 84
+        number_of_jac_muls: 6
+        number_of_matrix_evals: 3
         number_of_jac_adj_muls: 254
         "###);
         insta::assert_yaml_snapshot!(adjoint_solver.get_statistics(), @r###"
@@ -1328,9 +1330,9 @@ mod test {
         "###);
         insta::assert_yaml_snapshot!(s.problem().as_ref().unwrap().eqn.rhs().statistics(), @r###"
         ---
-        number_of_calls: 210
-        number_of_jac_muls: 21
-        number_of_matrix_evals: 7
+        number_of_calls: 208
+        number_of_jac_muls: 18
+        number_of_matrix_evals: 6
         number_of_jac_adj_muls: 201
         "###);
         insta::assert_yaml_snapshot!(adjoint_solver.get_statistics(), @r###"

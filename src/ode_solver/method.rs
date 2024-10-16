@@ -10,6 +10,8 @@ use crate::{
     OdeSolverState, Op, SensEquations, StateRef, StateRefMut, VectorViewMut,
 };
 
+use super::checkpointing::HermiteInterpolator;
+
 #[derive(Debug, PartialEq)]
 pub enum OdeSolverStopReason<T: Scalar> {
     InternalTimestep,
@@ -274,6 +276,7 @@ where
     fn new_adjoint_solver(
         &self,
         checkpoints: Vec<Self::State>,
+        last_segment: HermiteInterpolator<Eqn::V>,
         include_in_error_control: bool,
     ) -> Result<Self::AdjointSolver, DiffsolError>;
 }

@@ -590,7 +590,7 @@ mod tests {
             h: 0.0,
         };
         let checkpointer =
-            Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()]);
+            Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()], None);
         let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
         let adj_eqn = AdjointEquations::new(&problem.eqn, context.clone(), false);
         // F(λ, x, t) = -f^T_x(x, t) λ
@@ -662,7 +662,7 @@ mod tests {
             h: 0.0,
         };
         let checkpointer =
-            Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()]);
+            Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()], None);
         let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
         let mut adj_eqn = AdjointEquations::new(&problem.eqn, context, true);
 
