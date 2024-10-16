@@ -22,7 +22,7 @@ use crate::SdirkState;
 use crate::SensEquations;
 use crate::Tableau;
 use crate::{
-    nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, solver::SolverProblem,
+    nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale,
     AugmentedOdeEquations, DenseMatrix, JacobianUpdate, NonLinearOp, OdeEquations, OdeSolverMethod,
     OdeSolverProblem, OdeSolverState, Op, Scalar, Vector, VectorViewMut, StateRef, StateRefMut,
     OdeEquationsSens, OdeEquationsImplicit
@@ -43,7 +43,7 @@ pub type SdirkAdj<M, Eqn, LS> = Sdirk<
 impl<M, Eqn, LS> SensitivitiesOdeSolverMethod<Eqn> for Sdirk<M, Eqn, LS, SensEquations<Eqn>>
 where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    LS: LinearSolver<SdirkCallable<Eqn>>,
+    LS: LinearSolver<Eqn::M>,
     Eqn: OdeEquationsSens,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
     for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
@@ -308,7 +308,7 @@ where
         if state.t + state.h > tstop + troundoff {
             let factor = (tstop - state.t) / state.h;
             state.h *= factor;
-            self.nonlinear_solver.problem().f.set_h(state.h);
+            self.op.as_mut().unwrap().set_h(state.h);
         }
         Ok(None)
     }
@@ -350,7 +350,7 @@ where
 
             // solve
             let op = self.s_op.as_ref().unwrap();
-            self.nonlinear_solver.solve_other_in_place(op, ds, t, s0)?;
+            self.nonlinear_solver.solve_in_place(op, ds, t, s0)?;
 
             self.old_y_sens[j].copy_from(&op.get_last_f_eval());
             self.statistics.number_of_nonlinear_solver_iterations +=
@@ -394,14 +394,14 @@ where
 
     fn _jacobian_updates(&mut self, h: Eqn::T, state: SolverState) {
         if self.jacobian_update.check_rhs_jacobian_update(h, &state) {
-            self.nonlinear_solver.problem().f.set_jacobian_is_stale();
+            self.op.as_mut().unwrap().set_jacobian_is_stale();
             self.nonlinear_solver
-                .reset_jacobian(&self.old_f, self.state.as_ref().unwrap().t);
+                .reset_jacobian(self.op.as_ref().unwrap(), &self.old_f, self.state.as_ref().unwrap().t);
             self.jacobian_update.update_rhs_jacobian();
             self.jacobian_update.update_jacobian(h);
         } else if self.jacobian_update.check_jacobian_update(h, &state) {
             self.nonlinear_solver
-                .reset_jacobian(&self.old_f, self.state.as_ref().unwrap().t);
+                .reset_jacobian(self.op.as_ref().unwrap(), &self.old_f, self.state.as_ref().unwrap().t);
             self.jacobian_update.update_jacobian(h);
         }
     }
@@ -417,7 +417,7 @@ where
         }
 
         // update h for new step size
-        self.nonlinear_solver.problem().f.set_h(new_h);
+        self.op.as_mut().unwrap().set_h(new_h);
 
         // update state
         self.state.as_mut().unwrap().h = new_h;
@@ -463,19 +463,18 @@ where
         problem: &OdeSolverProblem<Eqn>,
     ) -> Result<(), DiffsolError> {
         // setup linear solver for first step
-        let callable = Rc::new(SdirkCallable::new(problem, self.gamma));
+        let callable = SdirkCallable::new(problem, self.gamma);
         callable.set_h(state.h);
         self.jacobian_update.update_jacobian(state.h);
         self.jacobian_update.update_rhs_jacobian();
-        let nonlinear_problem = SolverProblem::new_from_ode_problem(callable.clone(), problem);
-        self.nonlinear_solver.set_problem(&nonlinear_problem);
-        self.op = Some(callable);
+        self.nonlinear_solver.set_problem(&callable, problem.rtol, problem.atol.clone());
 
         // set max iterations for nonlinear solver
         self.nonlinear_solver
             .convergence_mut()
             .set_max_iter(Self::NEWTON_MAXITER);
-        self.nonlinear_solver.reset_jacobian(&state.y, state.t);
+        self.nonlinear_solver.reset_jacobian(&callable, &state.y, state.t);
+        self.op = Some(callable);
 
         // update statistics
         self.statistics = BdfStatistics::default();
@@ -562,7 +561,7 @@ where
 
             for i in start..self.tableau.s() {
                 let t = t0 + self.tableau.c()[i] * h;
-                self.nonlinear_solver.problem().f.set_phi(
+                self.op.as_mut().unwrap().set_phi(
                     &self.diff.columns(0, i),
                     &self.state.as_ref().unwrap().y,
                     &self.a_rows[i],
@@ -571,6 +570,7 @@ where
                 Self::predict_stage(i, &self.diff, &mut self.old_f, &self.tableau);
 
                 let mut solve_result = self.nonlinear_solver.solve_in_place(
+                    self.op.as_ref().unwrap(),
                     &mut self.old_f,
                     t,
                     &self.state.as_ref().unwrap().y,
@@ -582,7 +582,7 @@ where
                 if solve_result.is_ok() {
                     // old_y now has the new y soln and old_f has the new dy soln
                     self.old_y
-                        .copy_from(&self.nonlinear_solver.problem().f.get_last_f_eval());
+                        .copy_from(&self.op.as_ref().unwrap().get_last_f_eval());
                     if self.s_op.is_some() {
                         solve_result = self.solve_for_sensitivities(i, t);
                     }
@@ -702,7 +702,7 @@ where
 
         // update statistics
         self.statistics.number_of_linear_solver_setups =
-            self.nonlinear_solver.problem().f.number_of_jac_evals();
+            self.op.as_ref().unwrap().number_of_jac_evals();
         self.statistics.number_of_steps += 1;
         self.jacobian_update.step();
 
@@ -886,7 +886,7 @@ where
 impl<M, Eqn, AugmentedEqn, LS> AugmentedOdeSolverMethod<Eqn, AugmentedEqn>
     for Sdirk<M, Eqn, LS, AugmentedEqn>
 where
-    LS: LinearSolver<SdirkCallable<Eqn>>,
+    LS: LinearSolver<Eqn::M>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquationsImplicit,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,

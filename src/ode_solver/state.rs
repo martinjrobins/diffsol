@@ -6,7 +6,6 @@ use crate::{
     error::{DiffsolError, OdeSolverError},
     nonlinear_solver::NonLinearSolver,
     ode_solver_error, scale,
-    solver::SolverProblem,
     AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp, DefaultSolver, InitOp,
     NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeEquationsImplicit, OdeEquationsSens,
     OdeSolverMethod, OdeSolverProblem, Op, SensEquations, Vector,
@@ -288,7 +287,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     ) -> Result<(), DiffsolError>
     where
         Eqn: OdeEquationsImplicit<T = V::T, V = V>,
-        S: NonLinearSolver<InitOp<Eqn>>,
+        S: NonLinearSolver<Eqn::M>,
     {
         let state = self.as_mut();
         ode_problem
@@ -298,16 +297,15 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         if ode_problem.eqn.mass().is_none() {
             return Ok(());
         }
-        let f = Rc::new(InitOp::new(&ode_problem.eqn, ode_problem.t0, state.y));
+        let f = InitOp::new(&ode_problem.eqn, ode_problem.t0, state.y);
         let rtol = ode_problem.rtol;
         let atol = ode_problem.atol.clone();
-        let init_problem = SolverProblem::new(f.clone(), atol, rtol);
-        root_solver.set_problem(&init_problem);
+        root_solver.set_problem(&f, rtol, atol);
         let mut y_tmp = state.dy.clone();
-        y_tmp.copy_from_indices(state.y, &init_problem.f.algebraic_indices);
+        y_tmp.copy_from_indices(state.y, &f.algebraic_indices);
         let yerr = y_tmp.clone();
-        root_solver.reset_jacobian(&y_tmp, *state.t);
-        root_solver.solve_in_place(&mut y_tmp, *state.t, &yerr)?;
+        root_solver.reset_jacobian(&f, &y_tmp, *state.t);
+        root_solver.solve_in_place(&f, &mut y_tmp, *state.t, &yerr)?;
         f.scatter_soln(&y_tmp, state.y, state.dy);
         Ok(())
     }
@@ -324,7 +322,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     where
         Eqn: OdeEquationsImplicit<T = V::T, V = V>,
         AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> + std::fmt::Debug,
-        S: NonLinearSolver<InitOp<AugmentedEqn>>,
+        S: NonLinearSolver<AugmentedEqn::M>,
     {
         let state = self.as_mut();
         augmented_eqn.update_rhs_out_state(state.y, state.dy, *state.t);
@@ -344,20 +342,15 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
 
         for i in 0..naug {
             Rc::get_mut(&mut augmented_eqn_rc).unwrap().set_index(i);
-            let f = Rc::new(InitOp::new(&augmented_eqn_rc, ode_problem.t0, &state.s[i]));
-            root_solver.set_problem(&SolverProblem::new(
-                f.clone(),
-                ode_problem.atol.clone(),
-                ode_problem.rtol,
-            ));
+            let f = InitOp::new(&augmented_eqn_rc, ode_problem.t0, &state.s[i]);
+            root_solver.set_problem(&f, ode_problem.rtol, ode_problem.atol.clone());
 
             let mut y = state.ds[i].clone();
             y.copy_from_indices(state.y, &f.algebraic_indices);
             let yerr = y.clone();
-            root_solver.reset_jacobian(&y, *state.t);
-            root_solver.solve_in_place(&mut y, *state.t, &yerr)?;
+            root_solver.reset_jacobian(&f, &y, *state.t);
+            root_solver.solve_in_place(&f, &mut y, *state.t, &yerr)?;
             f.scatter_soln(&y, &mut state.s[i], &mut state.ds[i]);
-            root_solver.clear_problem();
         }
         Ok(Rc::try_unwrap(augmented_eqn_rc).unwrap())
     }

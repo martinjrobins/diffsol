@@ -4,7 +4,7 @@ use std::rc::Rc;
 use crate::{
     error::{DiffsolError, NonLinearSolverError},
     non_linear_solver_error, Convergence, ConvergenceStatus, LinearSolver,
-    NonLinearOpJacobian, NonLinearSolver, Vector, Matrix,
+    NonLinearOpJacobian, NonLinearSolver, Vector, Matrix, NonLinearOp
 };
 
 pub fn newton_iteration<V: Vector>(
@@ -91,7 +91,7 @@ impl<M: Matrix, Ls: LinearSolver<M>> NonLinearSolver<M> for NewtonNonlinearSolve
         self.linear_solver.solve_in_place(x)
     }
 
-    fn solve_in_place<C:  NonLinearOpJacobian<V=M::V, T=M::T, M=M>>(
+    fn solve_in_place<C:  NonLinearOp<V=M::V, T=M::T, M=M>>(
         &mut self,
         op: &C,
         xn: &mut M::V,

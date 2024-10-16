@@ -19,7 +19,7 @@ use crate::{
     op::bdf::BdfCallable,
     scalar::scale,
     vector::DefaultDenseMatrix,
-    AugmentedOdeEquations, BdfState, Checkpointing, DenseMatrix, IndexType, InitOp, JacobianUpdate,
+    AugmentedOdeEquations, BdfState, Checkpointing, DenseMatrix, IndexType, JacobianUpdate,
     MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquationsImplicit,
     OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar,
     Vector, VectorRef, VectorView, VectorViewMut,
@@ -87,7 +87,7 @@ pub struct Bdf<
 > {
     nonlinear_solver: Nls,
     ode_problem: Option<OdeSolverProblem<Eqn>>,
-    op: Option<Rc<BdfCallable<Eqn>>>,
+    op: Option<BdfCallable<Eqn>>,
     n_equal_steps: usize,
     y_delta: Eqn::V,
     g_delta: Eqn::V,
@@ -259,12 +259,12 @@ where
         //let y = &self.y_predict;
         //let t = self.t_predict;
         if self.jacobian_update.check_rhs_jacobian_update(c, &state) {
-            self.op.unwrap().set_jacobian_is_stale();
-            self.nonlinear_solver.reset_jacobian(y, t);
+            self.op.as_mut().unwrap().set_jacobian_is_stale();
+            self.nonlinear_solver.reset_jacobian(self.op.as_ref().unwrap(), y, t);
             self.jacobian_update.update_rhs_jacobian();
             self.jacobian_update.update_jacobian(c);
         } else if self.jacobian_update.check_jacobian_update(c, &state) {
-            self.nonlinear_solver.reset_jacobian(y, t);
+            self.nonlinear_solver.reset_jacobian(self.op.as_ref().unwrap(), y, t);
             self.jacobian_update.update_jacobian(c);
         }
     }
@@ -297,7 +297,7 @@ where
             }
         }
 
-        self.nonlinear_problem_op().set_c(new_h, self.alpha[order]);
+        self.op.as_mut().unwrap().set_c(new_h, self.alpha[order]);
 
         self.state.as_mut().unwrap().h = new_h;
 
@@ -333,7 +333,7 @@ where
         if self.ode_problem.as_ref().unwrap().integrate_out {
             let out = self.ode_problem.as_ref().unwrap().eqn.out().unwrap();
             out.call_inplace(&self.y_predict, self.t_predict, &mut state.dg);
-            self.nonlinear_solver.problem().f.integrate_out(
+            self.op.as_ref().unwrap().integrate_out(
                 &state.dg,
                 &state.gdiff,
                 self.gamma.as_slice(),
@@ -363,7 +363,7 @@ where
                 if op.eqn().integrate_out() {
                     let out = op.eqn().out().unwrap();
                     out.call_inplace(&state.s[i], self.t_predict, &mut state.dsg[i]);
-                    self.nonlinear_solver.problem().f.integrate_out(
+                    self.op.as_ref().unwrap().integrate_out(
                         &state.dsg[i],
                         &state.sgdiff[i],
                         self.gamma.as_slice(),
@@ -414,7 +414,7 @@ where
         Self::_predict_using_diff(&mut self.y_predict, &state.diff, state.order);
 
         // update psi and c (h, D, y0 has changed)
-        self.nonlinear_problem_op().set_psi_and_y0(
+        self.op.as_mut().unwrap().set_psi_and_y0(
             &state.diff,
             self.gamma.as_slice(),
             self.alpha.as_slice(),
@@ -514,7 +514,7 @@ where
 
         // update for new state
         {
-            let dy_new = self.nonlinear_solver.problem().f.tmp();
+            let dy_new = self.op.as_ref().unwrap().tmp();
             let y_new = &self.y_predict;
             Rc::get_mut(op.eqn_mut())
                 .unwrap()
@@ -549,7 +549,7 @@ where
                 let s_new = &mut self.state.as_mut().unwrap().s[i];
                 s_new.copy_from(&self.s_predict);
                 self.nonlinear_solver
-                    .solve_other_in_place(&*op, s_new, t_new, &self.s_predict)?;
+                    .solve_in_place(&*op, s_new, t_new, &self.s_predict)?;
                 self.statistics.number_of_nonlinear_solver_iterations +=
                     self.nonlinear_solver.convergence().niter();
                 let s_new = &*s_new;
@@ -577,7 +577,7 @@ where
     Eqn: OdeEquationsImplicit,
     AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    Nls: NonLinearSolver<BdfCallable<Eqn>>,
+    Nls: NonLinearSolver<Eqn::M>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
@@ -702,15 +702,15 @@ where
         state.check_consistent_with_problem(problem)?;
 
         // setup linear solver for first step
-        let bdf_callable = Rc::new(BdfCallable::new(problem));
+        let bdf_callable = BdfCallable::new(problem);
         bdf_callable.set_c(state.h, self.alpha[state.order]);
 
-        let nonlinear_problem = SolverProblem::new_from_ode_problem(bdf_callable, problem);
-        self.nonlinear_solver.set_problem(&nonlinear_problem);
+        self.nonlinear_solver.set_problem(&bdf_callable, problem.rtol, problem.atol.clone());
         self.nonlinear_solver
             .convergence_mut()
             .set_max_iter(Self::NEWTON_MAXITER);
-        self.nonlinear_solver.reset_jacobian(&state.y, state.t);
+        self.nonlinear_solver.reset_jacobian(&bdf_callable, &state.y, state.t);
+        self.op = Some(bdf_callable);
 
         // setup root solver
         if let Some(root_fn) = problem.eqn.root() {
@@ -773,6 +773,7 @@ where
 
             // solve BDF equation using y0 as starting point
             let mut solve_result = self.nonlinear_solver.solve_in_place(
+                self.op.as_ref().unwrap(),
                 &mut self.y_delta,
                 self.t_predict,
                 &self.y_predict,
@@ -880,7 +881,7 @@ where
 
         // update statistics
         self.statistics.number_of_linear_solver_setups =
-            self.nonlinear_problem_op().number_of_jac_evals();
+            self.op.as_ref().unwrap().number_of_jac_evals();
         self.statistics.number_of_steps += 1;
         self.jacobian_update.step();
 
@@ -1025,7 +1026,7 @@ where
     Eqn: OdeEquationsImplicit,
     AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    Nls: NonLinearSolver<BdfCallable<Eqn>>,
+    Nls: NonLinearSolver<Eqn::M>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
@@ -1070,14 +1071,14 @@ where
     Eqn: OdeEquationsAdjoint,
     AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsAdjoint,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    Nls: NonLinearSolver<BdfCallable<Eqn>>,
+    Nls: NonLinearSolver<Eqn::M>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
     type AdjointSolver = Bdf<
         M,
         AdjointEquations<Eqn, Self>,
-        Nls::SelfNewOp<BdfCallable<AdjointEquations<Eqn, Self>>>,
+        Nls,
         AdjointEquations<Eqn, Self>,
     >;
 
@@ -1114,12 +1115,12 @@ where
         // initialise adjoint state
         let mut state =
             Self::State::new_without_initialise_augmented(&adj_problem, &mut new_augmented_eqn)?;
-        let mut init_nls = Nls::SelfNewOp::<InitOp<AdjointEquations<Eqn, Self>>>::default();
+        let mut init_nls = Nls::default();
         let new_augmented_eqn =
             state.set_consistent_augmented(&adj_problem, new_augmented_eqn, &mut init_nls)?;
 
         // create adjoint solver
-        let adjoint_nls = Nls::SelfNewOp::<BdfCallable<AdjointEquations<Eqn, Self>>>::default();
+        let adjoint_nls = Nls::default();
         let mut adjoint_solver = Self::AdjointSolver::new(adjoint_nls);
 
         // setup the solver

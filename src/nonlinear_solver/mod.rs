@@ -1,7 +1,7 @@
 
 use std::rc::Rc;
 
-use crate::{error::DiffsolError, Matrix, NonLinearOpJacobian};
+use crate::{error::DiffsolError, Matrix, NonLinearOpJacobian, NonLinearOp};
 use convergence::Convergence;
 
 pub struct NonLinearSolveSolution<V> {
@@ -36,7 +36,7 @@ pub trait NonLinearSolver<M: Matrix>: Default {
     }
 
     /// Solve the problem `F(x) = 0` in place.
-    fn solve_in_place<C:  NonLinearOpJacobian<V=M::V, T=M::T, M=M>>(&mut self, op: &C, x: &mut C::V, t: C::T, error_y: &C::V)
+    fn solve_in_place<C:  NonLinearOp<V=M::V, T=M::T, M=M>>(&mut self, op: &C, x: &mut C::V, t: C::T, error_y: &C::V)
         -> Result<(), DiffsolError>;
 
     /// Solve the linearised problem `J * x = b`, where `J` was calculated using [Self::reset_jacobian].

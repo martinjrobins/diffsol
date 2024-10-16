@@ -547,8 +547,6 @@ criterion_main!(benches);
 
 mod benchmarks {
     use diffsol::matrix::MatrixRef;
-    use diffsol::op::bdf::BdfCallable;
-    use diffsol::op::sdirk::SdirkCallable;
     use diffsol::vector::VectorRef;
     use diffsol::LinearSolver;
     use diffsol::{
@@ -560,7 +558,7 @@ mod benchmarks {
     pub fn bdf<Eqn>(
         problem: &OdeSolverProblem<Eqn>,
         t: Eqn::T,
-        ls: impl LinearSolver<BdfCallable<Eqn>>,
+        ls: impl LinearSolver<Eqn::M>,
     ) where
         Eqn: OdeEquationsImplicit,
         Eqn::M: Matrix + DefaultSolver,
@@ -577,7 +575,7 @@ mod benchmarks {
     pub fn esdirk34<Eqn>(
         problem: &OdeSolverProblem<Eqn>,
         t: Eqn::T,
-        linear_solver: impl LinearSolver<SdirkCallable<Eqn>>,
+        linear_solver: impl LinearSolver<Eqn::M>,
     ) where
         Eqn: OdeEquationsImplicit,
         Eqn::M: Matrix + DefaultSolver,
@@ -594,7 +592,7 @@ mod benchmarks {
     pub fn tr_bdf2<Eqn>(
         problem: &OdeSolverProblem<Eqn>,
         t: Eqn::T,
-        linear_solver: impl LinearSolver<SdirkCallable<Eqn>>,
+        linear_solver: impl LinearSolver<Eqn::M>,
     ) where
         Eqn: OdeEquationsImplicit,
         Eqn::M: Matrix + DefaultSolver,
