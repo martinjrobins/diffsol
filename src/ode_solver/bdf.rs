@@ -1091,19 +1091,19 @@ where
 {
     type AdjointSolver = Bdf<M, AdjointEquations<Eqn, Self>, Nls, AdjointEquations<Eqn, Self>>;
 
-    fn new_adjoint_solver(
-        &self,
+    fn into_adjoint_solver(
+        self,
         checkpoints: Vec<Self::State>,
         last_segment: HermiteInterpolator<Eqn::V>,
         include_in_error_control: bool,
     ) -> Result<Self::AdjointSolver, DiffsolError> {
+        let problem = self.ode_problem.as_ref().unwrap().clone();
+        let t = self.state.as_ref().unwrap().t;
+        let h = self.state.as_ref().unwrap().h;
+
         // construct checkpointing
-        let checkpointer_nls = Nls::default();
-        let checkpointer_solver = Self::new(checkpointer_nls);
-        let problem = self.ode_problem.as_ref().unwrap();
         let checkpointer = Checkpointing::new(
-            problem,
-            checkpointer_solver,
+            self,
             checkpoints.len() - 2,
             checkpoints,
             Some(last_segment),
@@ -1117,9 +1117,9 @@ where
         let adj_problem = OdeSolverProblem {
             eqn: Rc::new(new_eqn),
             rtol: problem.rtol,
-            atol: problem.atol.clone(),
-            t0: self.state.as_ref().unwrap().t,
-            h0: -self.state.as_ref().unwrap().h,
+            atol: problem.atol,
+            t0: t,
+            h0: -h,
             integrate_out: false,
         };
 
@@ -1169,7 +1169,7 @@ mod test {
                 test_state_mut_on_problem,
             },
         },
-        Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquations, OdeSolverMethod, Op, SparseColMat,
+        Bdf, FaerSparseLU, NewtonNonlinearSolver, OdeEquations, Op, SparseColMat,
     };
 
     use faer::Mat;
@@ -1287,18 +1287,10 @@ mod test {
 
     #[test]
     fn bdf_test_nalgebra_exponential_decay_adjoint() {
-        let mut s = Bdf::default();
+        let s = Bdf::default();
         let (problem, soln) = exponential_decay_problem_adjoint::<M>();
-        let adjoint_solver = test_ode_solver_adjoint(&mut s, &problem, soln);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
-        number_of_linear_solver_setups: 12
-        number_of_steps: 41
-        number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 82
-        number_of_nonlinear_solver_fails: 0
-        "###);
-        insta::assert_yaml_snapshot!(s.problem().as_ref().unwrap().eqn.rhs().statistics(), @r###"
+        let adjoint_solver = test_ode_solver_adjoint(s, &problem, soln);
+        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         ---
         number_of_calls: 84
         number_of_jac_muls: 6
@@ -1317,18 +1309,10 @@ mod test {
 
     #[test]
     fn bdf_test_nalgebra_exponential_decay_algebraic_adjoint() {
-        let mut s = Bdf::default();
+        let s = Bdf::default();
         let (problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>();
-        let adjoint_solver = test_ode_solver_adjoint(&mut s, &problem, soln);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
-        number_of_linear_solver_setups: 20
-        number_of_steps: 52
-        number_of_error_test_failures: 2
-        number_of_nonlinear_solver_iterations: 103
-        number_of_nonlinear_solver_fails: 0
-        "###);
-        insta::assert_yaml_snapshot!(s.problem().as_ref().unwrap().eqn.rhs().statistics(), @r###"
+        let adjoint_solver = test_ode_solver_adjoint(s, &problem, soln);
+        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         ---
         number_of_calls: 208
         number_of_jac_muls: 18

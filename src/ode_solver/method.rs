@@ -273,8 +273,8 @@ where
         AdjointEquations<Eqn, Self>,
     >;
 
-    fn new_adjoint_solver(
-        &self,
+    fn into_adjoint_solver(
+        self,
         checkpoints: Vec<Self::State>,
         last_segment: HermiteInterpolator<Eqn::V>,
         include_in_error_control: bool,

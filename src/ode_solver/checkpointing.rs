@@ -124,22 +124,25 @@ where
     Eqn: OdeEquations,
 {
     pub fn new(
-        problem: &OdeSolverProblem<Eqn>,
         mut solver: Method,
         start_idx: usize,
         checkpoints: Vec<Method::State>,
         segment: Option<HermiteInterpolator<Eqn::V>>,
     ) -> Self {
+        if solver.problem().is_none() {
+            panic!("Solver must have a problem set");
+        }
         if checkpoints.len() < 2 {
             panic!("Checkpoints must have at least 2 elements");
         }
         if start_idx >= checkpoints.len() - 1 {
             panic!("start_idx must be less than checkpoints.len() - 1");
         }
+        let problem = solver.problem().unwrap().clone();
         let segment = segment.unwrap_or_else(|| {
             let mut segment = HermiteInterpolator::default();
             segment.reset(
-                problem,
+                &problem,
                 &mut solver,
                 &checkpoints[start_idx],
                 &checkpoints[start_idx + 1],
@@ -154,7 +157,7 @@ where
             segment,
             previous_segment,
             solver,
-            problem: problem.clone(),
+            problem,
         }
     }
 
@@ -247,7 +250,7 @@ mod tests {
         }
         checkpoints.push(solver.checkpoint().unwrap());
         let segment = HermiteInterpolator::new(ys, ydots, ts);
-        let checkpointer = Checkpointing::new(&problem, solver, checkpoints.len() - 2, checkpoints, Some(segment));
+        let checkpointer = Checkpointing::new(solver, checkpoints.len() - 2, checkpoints, Some(segment));
         let mut y = DVector::zeros(problem.eqn.rhs().nstates());
         for point in soln.solution_points.iter().rev() {
             checkpointer.interpolate(point.t, &mut y).unwrap();

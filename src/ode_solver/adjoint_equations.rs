@@ -566,7 +566,7 @@ mod tests {
         },
         AdjointContext, AugmentedOdeEquations, Checkpointing, FaerSparseLU, Matrix, MatrixCommon,
         NalgebraLU, NonLinearOp, NonLinearOpJacobian, Sdirk, SdirkState, SparseColMat, Tableau,
-        Vector,
+        Vector, OdeSolverMethod
     };
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;
@@ -576,7 +576,7 @@ mod tests {
         // dy/dt = -ay (p = [a])
         // a = 0.1
         let (problem, _soln) = exponential_decay_problem_adjoint::<Mcpu>();
-        let solver = Sdirk::<Mcpu, _, _>::new(Tableau::esdirk34(), NalgebraLU::default());
+        let mut solver = Sdirk::<Mcpu, _, _>::new(Tableau::esdirk34(), NalgebraLU::default());
         let state = SdirkState {
             t: 0.0,
             y: Vcpu::from_vec(vec![1.0, 1.0]),
@@ -589,8 +589,9 @@ mod tests {
             ds: Vec::new(),
             h: 0.0,
         };
+        solver.set_problem(state.clone(), &problem).unwrap();
         let checkpointer =
-            Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()], None);
+            Checkpointing::new(solver, 0, vec![state.clone(), state.clone()], None);
         let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
         let adj_eqn = AdjointEquations::new(&problem.eqn, context.clone(), false);
         // F(λ, x, t) = -f^T_x(x, t) λ
@@ -647,7 +648,7 @@ mod tests {
         // dy/dt = -ay (p = [a])
         // a = 0.1
         let (problem, _soln) = exponential_decay_problem_adjoint::<SparseColMat<f64>>();
-        let solver =
+        let mut solver =
             Sdirk::<faer::Mat<f64>, _, _>::new(Tableau::esdirk34(), FaerSparseLU::default());
         let state = SdirkState {
             t: 0.0,
@@ -661,8 +662,9 @@ mod tests {
             ds: Vec::new(),
             h: 0.0,
         };
+        solver.set_problem(state.clone(), &problem).unwrap();
         let checkpointer =
-            Checkpointing::new(&problem, solver, 0, vec![state.clone(), state.clone()], None);
+            Checkpointing::new(solver, 0, vec![state.clone(), state.clone()], None);
         let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
         let mut adj_eqn = AdjointEquations::new(&problem.eqn, context, true);
 

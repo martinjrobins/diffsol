@@ -225,7 +225,7 @@ mod tests {
     }
 
     pub fn test_ode_solver_adjoint<M, Eqn, Method>(
-        method: &mut Method,
+        mut method: Method,
         problem: &OdeSolverProblem<Eqn>,
         solution: OdeSolverSolution<M::V>,
     ) -> Method::AdjointSolver
@@ -235,7 +235,7 @@ mod tests {
         Eqn: OdeEquationsAdjoint<M = M, T = M::T, V = M::V>,
         Eqn::M: DefaultSolver,
     {
-        let state = OdeSolverState::new(problem, method).unwrap();
+        let state = OdeSolverState::new(problem, &method).unwrap();
         method.set_problem(state, problem).unwrap();
         let t0 = solution.solution_points.first().unwrap().t;
         let t1 = solution.solution_points.last().unwrap().t;
@@ -279,7 +279,7 @@ mod tests {
         ydots.push(method.state().unwrap().dy.clone());
         checkpoints.push(method.checkpoint().unwrap());
         let last_segment = HermiteInterpolator::new(ys, ydots, ts);
-        let mut adjoint_solver = method.new_adjoint_solver(checkpoints, last_segment, true).unwrap();
+        let mut adjoint_solver = method.into_adjoint_solver(checkpoints, last_segment, true).unwrap();
         let y_expect = M::V::from_element(problem.eqn.rhs().nstates(), M::T::zero());
         adjoint_solver
             .state()
