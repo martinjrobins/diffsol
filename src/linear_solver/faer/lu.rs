@@ -3,8 +3,8 @@ use std::rc::Rc;
 use crate::{error::LinearSolverError, linear_solver_error};
 
 use crate::{
-    error::DiffsolError, linear_solver::LinearSolver,
-    Matrix, MatrixSparsityRef, NonLinearOpJacobian, Scalar,
+    error::DiffsolError, linear_solver::LinearSolver, Matrix, MatrixSparsityRef,
+    NonLinearOpJacobian, Scalar,
 };
 
 use faer::{linalg::solvers::FullPivLu, solvers::SpSolver, Col, Mat};
@@ -30,8 +30,12 @@ where
 }
 
 impl<T: Scalar> LinearSolver<Mat<T>> for LU<T> {
-
-    fn set_linearisation<C: NonLinearOpJacobian<T=T, V=Col<T>, M=Mat<T>>>(&mut self, op: &C, x: &Col<T>, t: T) {
+    fn set_linearisation<C: NonLinearOpJacobian<T = T, V = Col<T>, M = Mat<T>>>(
+        &mut self,
+        op: &C,
+        x: &Col<T>,
+        t: T,
+    ) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         op.jacobian_inplace(x, t, matrix);
         self.lu = Some(matrix.full_piv_lu());
@@ -46,14 +50,15 @@ impl<T: Scalar> LinearSolver<Mat<T>> for LU<T> {
         Ok(())
     }
 
-    fn set_problem<C: NonLinearOpJacobian<T=T, V=Col<T>, M=Mat<T>>>(&mut self, op: &C, _rtol: T, _atol: Rc<Col<T>>) {
+    fn set_problem<C: NonLinearOpJacobian<T = T, V = Col<T>, M = Mat<T>>>(
+        &mut self,
+        op: &C,
+        _rtol: T,
+        _atol: Rc<Col<T>>,
+    ) {
         let ncols = op.nstates();
         let nrows = op.nout();
-        let matrix = C::M::new_from_sparsity(
-            nrows,
-            ncols,
-            op.sparsity().map(|s| s.to_owned()),
-        );
+        let matrix = C::M::new_from_sparsity(nrows, ncols, op.sparsity().map(|s| s.to_owned()));
         self.matrix = Some(matrix);
     }
 }

@@ -1,4 +1,3 @@
-
 use std::rc::Rc;
 
 use crate::sundials_sys::{
@@ -7,8 +6,7 @@ use crate::sundials_sys::{
 
 use crate::{
     error::*, linear_solver_error, ode_solver::sundials::sundials_check,
-    vector::sundials::SundialsVector, Matrix,
-    NonLinearOpJacobian, SundialsMatrix,
+    vector::sundials::SundialsVector, Matrix, NonLinearOpJacobian, SundialsMatrix,
 };
 
 #[cfg(not(sundials_version_major = "5"))]
@@ -16,22 +14,19 @@ use crate::vector::sundials::get_suncontext;
 
 use super::LinearSolver;
 
-pub struct SundialsLinearSolver
-{
+pub struct SundialsLinearSolver {
     linear_solver: Option<SUNLinearSolver>,
     is_setup: bool,
     matrix: Option<SundialsMatrix>,
 }
 
-impl Default for SundialsLinearSolver
-{
+impl Default for SundialsLinearSolver {
     fn default() -> Self {
         Self::new_dense()
     }
 }
 
-impl SundialsLinearSolver
-{
+impl SundialsLinearSolver {
     pub fn new_dense() -> Self {
         Self {
             linear_solver: None,
@@ -41,8 +36,7 @@ impl SundialsLinearSolver
     }
 }
 
-impl Drop for SundialsLinearSolver
-{
+impl Drop for SundialsLinearSolver {
     fn drop(&mut self) {
         if let Some(linear_solver) = self.linear_solver {
             unsafe { SUNLinSolFree(linear_solver) };
@@ -50,14 +44,14 @@ impl Drop for SundialsLinearSolver
     }
 }
 
-impl LinearSolver<SundialsMatrix> for SundialsLinearSolver
-{
-
-    fn set_problem<C: NonLinearOpJacobian<T=realtype, V=SundialsVector, M=SundialsMatrix>>(&mut self, op: &C, _rtol: realtype, _atol: Rc<SundialsVector>) {
-        let matrix = SundialsMatrix::zeros(
-            op.nstates(),
-            op.nstates(),
-        );
+impl LinearSolver<SundialsMatrix> for SundialsLinearSolver {
+    fn set_problem<C: NonLinearOpJacobian<T = realtype, V = SundialsVector, M = SundialsMatrix>>(
+        &mut self,
+        op: &C,
+        _rtol: realtype,
+        _atol: Rc<SundialsVector>,
+    ) {
+        let matrix = SundialsMatrix::zeros(op.nstates(), op.nstates());
         let y0 = SundialsVector::new_serial(op.nstates());
 
         #[cfg(not(sundials_version_major = "5"))]
@@ -74,7 +68,14 @@ impl LinearSolver<SundialsMatrix> for SundialsLinearSolver
         self.linear_solver = Some(linear_solver);
     }
 
-    fn set_linearisation<C: NonLinearOpJacobian<T=realtype, V=SundialsVector, M=SundialsMatrix>>(&mut self, op: &C, x: &SundialsVector, t: realtype) {
+    fn set_linearisation<
+        C: NonLinearOpJacobian<T = realtype, V = SundialsVector, M = SundialsMatrix>,
+    >(
+        &mut self,
+        op: &C,
+        x: &SundialsVector,
+        t: realtype,
+    ) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         let linear_solver = self.linear_solver.expect("Linear solver not set");
         op.jacobian_inplace(x, t, matrix);

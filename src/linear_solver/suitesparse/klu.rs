@@ -187,8 +187,12 @@ where
     M: MatrixKLU,
     M::V: VectorKLU,
 {
-
-    fn set_linearisation<C: NonLinearOpJacobian<T=M::T, V=M::V, M=M>>(&mut self, op: &C, x: &M::V, t: M::T) {
+    fn set_linearisation<C: NonLinearOpJacobian<T = M::T, V = M::V, M = M>>(
+        &mut self,
+        op: &C,
+        x: &M::V,
+        t: M::T,
+    ) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         op.jacobian_inplace(x, t, matrix);
         self.klu_numeric = KluNumeric::try_from_symbolic(
@@ -219,14 +223,15 @@ where
         Ok(())
     }
 
-    fn set_problem<C: NonLinearOpJacobian<T=M::T, V=M::V, M=M>>(&mut self, op: &C, _rtol: M::T, _atol: Rc<M::V>) {
+    fn set_problem<C: NonLinearOpJacobian<T = M::T, V = M::V, M = M>>(
+        &mut self,
+        op: &C,
+        _rtol: M::T,
+        _atol: Rc<M::V>,
+    ) {
         let ncols = op.nstates();
         let nrows = op.nout();
-        let mut matrix = C::M::new_from_sparsity(
-            nrows,
-            ncols,
-            op.sparsity().map(|s| s.to_owned()),
-        );
+        let mut matrix = C::M::new_from_sparsity(nrows, ncols, op.sparsity().map(|s| s.to_owned()));
         let mut klu_common = self.klu_common.borrow_mut();
         self.klu_symbolic = KluSymbolic::try_from_matrix(&mut matrix, klu_common.as_mut()).ok();
         self.matrix = Some(matrix);

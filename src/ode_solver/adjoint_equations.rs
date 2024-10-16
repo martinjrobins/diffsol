@@ -3,8 +3,8 @@ use std::{cell::RefCell, ops::AddAssign, ops::SubAssign, rc::Rc};
 
 use crate::{
     op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, Checkpointing, ConstantOp,
-    ConstantOpSensAdjoint, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint, OdeSolverMethod, Op, Vector, LinearOp
+    ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint,
+    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint, OdeSolverMethod, Op, Vector,
 };
 
 pub struct AdjointContext<Eqn, Method>
@@ -103,9 +103,12 @@ where
     Eqn: OdeEquationsAdjoint,
 {
     fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
-        self.eqn.mass().unwrap().gemv_transpose_inplace(x, t, beta, y);
+        self.eqn
+            .mass()
+            .unwrap()
+            .gemv_transpose_inplace(x, t, beta, y);
     }
-    
+
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
         self.eqn.mass().unwrap().transpose_inplace(t, y);
     }

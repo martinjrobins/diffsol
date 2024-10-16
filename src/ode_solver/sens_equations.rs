@@ -3,7 +3,8 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     matrix::sparsity::MatrixSparsityRef, op::nonlinear_op::NonLinearOpJacobian,
-    AugmentedOdeEquations, ConstantOp, ConstantOpSens, Matrix, NonLinearOp, NonLinearOpSens, OdeEquations, OdeEquationsSens, Op, Vector,
+    AugmentedOdeEquations, ConstantOp, ConstantOpSens, Matrix, NonLinearOp, NonLinearOpSens,
+    OdeEquations, OdeEquationsSens, Op, Vector,
 };
 
 pub struct SensInit<Eqn>

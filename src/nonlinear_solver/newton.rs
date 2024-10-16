@@ -1,10 +1,9 @@
-
 use std::rc::Rc;
 
 use crate::{
     error::{DiffsolError, NonLinearSolverError},
-    non_linear_solver_error, Convergence, ConvergenceStatus, LinearSolver,
-    NonLinearOpJacobian, NonLinearSolver, Vector, Matrix, NonLinearOp
+    non_linear_solver_error, Convergence, ConvergenceStatus, LinearSolver, Matrix, NonLinearOp,
+    NonLinearOpJacobian, NonLinearSolver, Vector,
 };
 
 pub fn newton_iteration<V: Vector>(
@@ -61,8 +60,7 @@ impl<M: Matrix, Ls: LinearSolver<M>> Default for NewtonNonlinearSolver<M, Ls> {
     }
 }
 
-impl<M: Matrix, Ls: LinearSolver<M>> NonLinearSolver<M> for NewtonNonlinearSolver<M, Ls>
-{
+impl<M: Matrix, Ls: LinearSolver<M>> NonLinearSolver<M> for NewtonNonlinearSolver<M, Ls> {
     fn convergence(&self) -> &Convergence<M::V> {
         self.convergence
             .as_ref()
@@ -75,14 +73,24 @@ impl<M: Matrix, Ls: LinearSolver<M>> NonLinearSolver<M> for NewtonNonlinearSolve
             .expect("NewtonNonlinearSolver::convergence_mut() called before set_problem")
     }
 
-    fn set_problem<C:  NonLinearOpJacobian<V=M::V, T=M::T, M=M>>(&mut self, op: &C, rtol: M::T, atol: Rc<M::V>) {
+    fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
+        &mut self,
+        op: &C,
+        rtol: M::T,
+        atol: Rc<M::V>,
+    ) {
         self.linear_solver.set_problem(op, rtol, atol.clone());
         self.convergence = Some(Convergence::new(rtol, atol));
         self.is_jacobian_set = false;
         self.tmp = C::V::zeros(op.nstates());
     }
 
-    fn reset_jacobian<C:  NonLinearOpJacobian<V=M::V, T=M::T, M=M>>(&mut self, op: &C, x: &C::V, t: C::T) {
+    fn reset_jacobian<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
+        &mut self,
+        op: &C,
+        x: &C::V,
+        t: C::T,
+    ) {
         self.linear_solver.set_linearisation(op, x, t);
         self.is_jacobian_set = true;
     }
@@ -91,7 +99,7 @@ impl<M: Matrix, Ls: LinearSolver<M>> NonLinearSolver<M> for NewtonNonlinearSolve
         self.linear_solver.solve_in_place(x)
     }
 
-    fn solve_in_place<C:  NonLinearOp<V=M::V, T=M::T, M=M>>(
+    fn solve_in_place<C: NonLinearOp<V = M::V, T = M::T, M = M>>(
         &mut self,
         op: &C,
         xn: &mut M::V,

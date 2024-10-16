@@ -5,10 +5,9 @@ use std::rc::Rc;
 use crate::{
     error::{DiffsolError, OdeSolverError},
     nonlinear_solver::NonLinearSolver,
-    ode_solver_error, scale,
-    AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp, DefaultSolver, InitOp,
-    NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeEquationsImplicit, OdeEquationsSens,
-    OdeSolverMethod, OdeSolverProblem, Op, SensEquations, Vector,
+    ode_solver_error, scale, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp,
+    DefaultSolver, InitOp, NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeEquationsImplicit,
+    OdeEquationsSens, OdeSolverMethod, OdeSolverProblem, Op, SensEquations, Vector,
 };
 
 use super::method::SensitivitiesOdeSolverMethod;

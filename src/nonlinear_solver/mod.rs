@@ -1,7 +1,6 @@
-
 use std::rc::Rc;
 
-use crate::{error::DiffsolError, Matrix, NonLinearOpJacobian, NonLinearOp};
+use crate::{error::DiffsolError, Matrix, NonLinearOp, NonLinearOpJacobian};
 use convergence::Convergence;
 
 pub struct NonLinearSolveSolution<V> {
@@ -17,27 +16,47 @@ impl<V> NonLinearSolveSolution<V> {
 
 /// A solver for the nonlinear problem `F(x) = 0`.
 pub trait NonLinearSolver<M: Matrix>: Default {
-
     fn convergence(&self) -> &Convergence<M::V>;
 
     fn convergence_mut(&mut self) -> &mut Convergence<M::V>;
 
     /// Set the problem to be solved, any previous problem is discarded.
-    fn set_problem<C:  NonLinearOpJacobian<V=M::V, T=M::T, M=M>>(&mut self, op: &C, rtol: M::T, atol: Rc<M::V>);
+    fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
+        &mut self,
+        op: &C,
+        rtol: M::T,
+        atol: Rc<M::V>,
+    );
 
     /// Reset the approximation of the Jacobian matrix.
-    fn reset_jacobian<C:  NonLinearOpJacobian<V=M::V, T=M::T, M=M>>(&mut self, op: &C, x: &M::V, t: M::T);
+    fn reset_jacobian<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
+        &mut self,
+        op: &C,
+        x: &M::V,
+        t: M::T,
+    );
 
     // Solve the problem `F(x, t) = 0` for fixed t, and return the solution `x`.
-    fn solve<C:  NonLinearOpJacobian<V=M::V, T=M::T, M=M>>(&mut self, op: &C, x: &M::V, t: M::T, error_y: &M::V) -> Result<M::V, DiffsolError> {
+    fn solve<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
+        &mut self,
+        op: &C,
+        x: &M::V,
+        t: M::T,
+        error_y: &M::V,
+    ) -> Result<M::V, DiffsolError> {
         let mut x = x.clone();
         self.solve_in_place(op, &mut x, t, error_y)?;
         Ok(x)
     }
 
     /// Solve the problem `F(x) = 0` in place.
-    fn solve_in_place<C:  NonLinearOp<V=M::V, T=M::T, M=M>>(&mut self, op: &C, x: &mut C::V, t: C::T, error_y: &C::V)
-        -> Result<(), DiffsolError>;
+    fn solve_in_place<C: NonLinearOp<V = M::V, T = M::T, M = M>>(
+        &mut self,
+        op: &C,
+        x: &mut C::V,
+        t: C::T,
+        error_y: &C::V,
+    ) -> Result<(), DiffsolError>;
 
     /// Solve the linearised problem `J * x = b`, where `J` was calculated using [Self::reset_jacobian].
     /// The input `b` is provided in `x`, and the solution is returned in `x`.
@@ -65,7 +84,7 @@ pub mod tests {
     #[allow(clippy::type_complexity)]
     pub fn get_square_problem<M>() -> (
         impl NonLinearOpJacobian<M = M, V = M::V, T = M::T>,
-        M::T, 
+        M::T,
         Rc<M::V>,
         Vec<NonLinearSolveSolution<M::V>>,
     )

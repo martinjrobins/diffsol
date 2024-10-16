@@ -555,11 +555,8 @@ mod benchmarks {
     };
 
     // bdf
-    pub fn bdf<Eqn>(
-        problem: &OdeSolverProblem<Eqn>,
-        t: Eqn::T,
-        ls: impl LinearSolver<Eqn::M>,
-    ) where
+    pub fn bdf<Eqn>(problem: &OdeSolverProblem<Eqn>, t: Eqn::T, ls: impl LinearSolver<Eqn::M>)
+    where
         Eqn: OdeEquationsImplicit,
         Eqn::M: Matrix + DefaultSolver,
         Eqn::V: DefaultDenseMatrix,

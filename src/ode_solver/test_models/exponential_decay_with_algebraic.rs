@@ -1,8 +1,14 @@
 use crate::{
-    LinearClosure,
-    matrix::Matrix, ode_solver::problem::OdeSolverSolution, op::{
-        closure_with_sens::ClosureWithSens, constant_closure_with_sens::ConstantClosureWithSens, linear_closure_with_adjoint::LinearClosureWithAdjoint,
-    }, scalar::scale, ClosureWithAdjoint, ConstantClosureWithAdjoint, ConstantOp, OdeBuilder, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsSens, OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector
+    matrix::Matrix,
+    ode_solver::problem::OdeSolverSolution,
+    op::{
+        closure_with_sens::ClosureWithSens, constant_closure_with_sens::ConstantClosureWithSens,
+        linear_closure_with_adjoint::LinearClosureWithAdjoint,
+    },
+    scalar::scale,
+    ClosureWithAdjoint, ConstantClosureWithAdjoint, ConstantOp, LinearClosure, OdeBuilder,
+    OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsSens, OdeSolverEquations,
+    OdeSolverProblem, UnitCallable, Vector,
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};
@@ -87,7 +93,6 @@ fn exponential_decay_with_algebraic_adjoint<M: Matrix>(
     y[2] = -v[2];
 }
 
-
 // y = Mx + beta * y = | 1 0 | | x[0] | + beta | y[0] |
 //                     | 0 0 | | x[1] |         | y[1] |
 fn exponential_decay_with_algebraic_mass<M: Matrix>(
@@ -102,7 +107,6 @@ fn exponential_decay_with_algebraic_mass<M: Matrix>(
     y.axpy(M::T::one(), x, beta);
     y[nstates - 1] = yn;
 }
-
 
 // y = M^T x + beta * y = | 1 0 | | x[0] | + beta | y[0] |
 //                        | 0 0 | | x[1] |         | y[1] |
@@ -142,12 +146,7 @@ fn exponential_decay_with_algebraic_init_sens_adjoint<M: Matrix>(
 }
 
 // out(x) = | a * x[2] |
-fn exponential_decay_with_algebraic_out<M: Matrix>(
-    x: &M::V,
-    p: &M::V,
-    _t: M::T,
-    y: &mut M::V,
-) {
+fn exponential_decay_with_algebraic_out<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
     y[0] = p[0] * x[2];
 }
 
@@ -177,7 +176,6 @@ fn exponential_decay_with_algebraic_out_jac_adj_mul<M: Matrix>(
     y.fill(M::T::zero());
     y[2] = -p[0] * v[0];
 }
-
 
 // J = | x[2] |
 // Jv = | x[2]v[0] |
@@ -289,7 +287,7 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: Matrix + 'static>() -
     let rhs = Rc::new(rhs);
     let init = Rc::new(init);
     let out = Some(Rc::new(out));
-    
+
     let root: Option<Rc<UnitCallable<M>>> = None;
     let mass = Some(Rc::new(mass));
     let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p.clone());
@@ -315,7 +313,6 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: Matrix + 'static>() -
         soln.push_sens(g, t, &[dg]);
     }
     (problem, soln)
-
 }
 
 pub fn exponential_decay_with_algebraic_problem_sens<M: Matrix + 'static>() -> (
@@ -331,12 +328,7 @@ pub fn exponential_decay_with_algebraic_problem_sens<M: Matrix + 'static>() -> (
         3,
         p.clone(),
     );
-    let mut mass = LinearClosure::new(
-        exponential_decay_with_algebraic_mass::<M>,
-        3,
-        3,
-        p.clone(),
-    );
+    let mut mass = LinearClosure::new(exponential_decay_with_algebraic_mass::<M>, 3, 3, p.clone());
     let init = ConstantClosureWithSens::new(
         exponential_decay_with_algebraic_init::<M>,
         exponential_decay_with_algebraic_init_sens::<M>,

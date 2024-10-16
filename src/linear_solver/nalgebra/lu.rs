@@ -32,7 +32,6 @@ where
 }
 
 impl<T: Scalar> LinearSolver<DMatrix<T>> for LU<T> {
-
     fn solve_in_place(&self, state: &mut DVector<T>) -> Result<(), DiffsolError> {
         if self.lu.is_none() {
             return Err(linear_solver_error!(LuNotInitialized))?;
@@ -44,21 +43,26 @@ impl<T: Scalar> LinearSolver<DMatrix<T>> for LU<T> {
         }
     }
 
-    fn set_linearisation<C: NonLinearOpJacobian<T=T, V=DVector<T>, M=DMatrix<T>>>(&mut self, op: &C, x: &DVector<T>, t: T) {
+    fn set_linearisation<C: NonLinearOpJacobian<T = T, V = DVector<T>, M = DMatrix<T>>>(
+        &mut self,
+        op: &C,
+        x: &DVector<T>,
+        t: T,
+    ) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         op.jacobian_inplace(x, t, matrix);
         self.lu = Some(matrix.clone().lu());
     }
 
-    fn set_problem<C: NonLinearOpJacobian<T=T, V=DVector<T>, M=DMatrix<T>>>(&mut self, op: &C, _rtol: T, _atol: Rc<DVector<T>>) {
+    fn set_problem<C: NonLinearOpJacobian<T = T, V = DVector<T>, M = DMatrix<T>>>(
+        &mut self,
+        op: &C,
+        _rtol: T,
+        _atol: Rc<DVector<T>>,
+    ) {
         let ncols = op.nstates();
         let nrows = op.nout();
-        let matrix = C::M::new_from_sparsity(
-            nrows,
-            ncols,
-            op.sparsity().map(|s| s.to_owned()),
-        );
+        let matrix = C::M::new_from_sparsity(nrows, ncols, op.sparsity().map(|s| s.to_owned()));
         self.matrix = Some(matrix);
     }
-
 }

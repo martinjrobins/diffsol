@@ -4,8 +4,8 @@ use crate::{
     matrix::Matrix,
     ode_solver::problem::OdeSolverSolution,
     op::{closure_with_sens::ClosureWithSens, constant_closure_with_sens::ConstantClosureWithSens},
-    ConstantOp, OdeBuilder, OdeEquationsImplicit, OdeEquationsSens,
-    OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector, LinearClosure
+    ConstantOp, LinearClosure, OdeBuilder, OdeEquationsImplicit, OdeEquationsSens,
+    OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector,
 };
 use num_traits::Zero;
 
@@ -177,12 +177,7 @@ pub fn robertson_sens<M: Matrix + 'static>() -> (
         3,
         p.clone(),
     );
-    let mut mass = LinearClosure::new(
-        robertson_mass::<M>,
-        3,
-        3,
-        p.clone(),
-    );
+    let mut mass = LinearClosure::new(robertson_mass::<M>, 3, 3, p.clone());
     let init = ConstantClosureWithSens::new(
         robertson_init::<M>,
         robertson_init_sens::<M>,

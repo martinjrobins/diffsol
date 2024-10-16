@@ -1,4 +1,3 @@
-
 use std::rc::Rc;
 
 use crate::{
@@ -39,10 +38,13 @@ where
     }
 }
 
-impl<T: Scalar> LinearSolver<SparseColMat<T>> for FaerSparseLU<T>
-{
-
-    fn set_linearisation<C: NonLinearOpJacobian<T=T, V=Col<T>, M=SparseColMat<T>>>(&mut self, op: &C, x: &Col<T>, t: T) {
+impl<T: Scalar> LinearSolver<SparseColMat<T>> for FaerSparseLU<T> {
+    fn set_linearisation<C: NonLinearOpJacobian<T = T, V = Col<T>, M = SparseColMat<T>>>(
+        &mut self,
+        op: &C,
+        x: &Col<T>,
+        t: T,
+    ) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         op.jacobian_inplace(x, t, matrix);
         self.lu = Some(
@@ -63,14 +65,18 @@ impl<T: Scalar> LinearSolver<SparseColMat<T>> for FaerSparseLU<T>
         Ok(())
     }
 
-    fn set_problem<C: NonLinearOpJacobian<T=T, V=Col<T>, M=SparseColMat<T>>>(&mut self, op: &C, _rtol: T, _atol: Rc<Col<T>>) {
+    fn set_problem<C: NonLinearOpJacobian<T = T, V = Col<T>, M = SparseColMat<T>>>(
+        &mut self,
+        op: &C,
+        _rtol: T,
+        _atol: Rc<Col<T>>,
+    ) {
         let ncols = op.nstates();
         let nrows = op.nout();
         let matrix = C::M::new_from_sparsity(
             nrows,
             ncols,
-            op 
-                .sparsity()
+            op.sparsity()
                 .map(|s| MatrixSparsityRef::<SparseColMat<T>>::to_owned(&s)),
         );
         self.matrix = Some(matrix);

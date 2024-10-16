@@ -1,4 +1,3 @@
-
 use std::rc::Rc;
 
 use crate::{error::DiffsolError, Matrix, NonLinearOpJacobian};
@@ -22,11 +21,21 @@ pub use nalgebra::lu::LU as NalgebraLU;
 pub trait LinearSolver<M: Matrix>: Default {
     // sets the point at which the linearisation of the operator is evaluated
     // the operator is assumed to have the same sparsity as that given to [Self::set_problem]
-    fn set_linearisation<C: NonLinearOpJacobian<V=M::V, T=M::T, M=M>>(&mut self, op: &C, x: &M::V, t: M::T);
+    fn set_linearisation<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
+        &mut self,
+        op: &C,
+        x: &M::V,
+        t: M::T,
+    );
 
     /// Set the problem to be solved, any previous problem is discarded.
     /// Any internal state of the solver is reset.
-    fn set_problem<C:  NonLinearOpJacobian<V=M::V, T=M::T, M=M>>(&mut self, op: &C, rtol: M::T, atol: Rc<M::V>);
+    fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
+        &mut self,
+        op: &C,
+        rtol: M::T,
+        atol: Rc<M::V>,
+    );
 
     /// Solve the problem `Ax = b` and return the solution `x`.
     /// panics if [Self::set_linearisation] has not been called previously

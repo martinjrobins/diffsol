@@ -21,8 +21,8 @@ use crate::{
     vector::DefaultDenseMatrix,
     AugmentedOdeEquations, BdfState, Checkpointing, DenseMatrix, IndexType, JacobianUpdate,
     MatrixViewMut, NewtonNonlinearSolver, NonLinearOp, NonLinearSolver, OdeEquationsImplicit,
-    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar,
-    Vector, VectorRef, VectorView, VectorViewMut,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar, Vector,
+    VectorRef, VectorView, VectorViewMut,
 };
 
 use super::jacobian_update::SolverState;
@@ -264,11 +264,13 @@ where
         //let t = self.t_predict;
         if self.jacobian_update.check_rhs_jacobian_update(c, &state) {
             self.op.as_mut().unwrap().set_jacobian_is_stale();
-            self.nonlinear_solver.reset_jacobian(self.op.as_ref().unwrap(), y, t);
+            self.nonlinear_solver
+                .reset_jacobian(self.op.as_ref().unwrap(), y, t);
             self.jacobian_update.update_rhs_jacobian();
             self.jacobian_update.update_jacobian(c);
         } else if self.jacobian_update.check_jacobian_update(c, &state) {
-            self.nonlinear_solver.reset_jacobian(self.op.as_ref().unwrap(), y, t);
+            self.nonlinear_solver
+                .reset_jacobian(self.op.as_ref().unwrap(), y, t);
             self.jacobian_update.update_jacobian(c);
         }
     }
@@ -709,11 +711,13 @@ where
         let bdf_callable = BdfCallable::new(problem);
         bdf_callable.set_c(state.h, self.alpha[state.order]);
 
-        self.nonlinear_solver.set_problem(&bdf_callable, problem.rtol, problem.atol.clone());
+        self.nonlinear_solver
+            .set_problem(&bdf_callable, problem.rtol, problem.atol.clone());
         self.nonlinear_solver
             .convergence_mut()
             .set_max_iter(Self::NEWTON_MAXITER);
-        self.nonlinear_solver.reset_jacobian(&bdf_callable, &state.y, state.t);
+        self.nonlinear_solver
+            .reset_jacobian(&bdf_callable, &state.y, state.t);
         self.op = Some(bdf_callable);
 
         // setup root solver
@@ -1085,12 +1089,7 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
-    type AdjointSolver = Bdf<
-        M,
-        AdjointEquations<Eqn, Self>,
-        Nls,
-        AdjointEquations<Eqn, Self>,
-    >;
+    type AdjointSolver = Bdf<M, AdjointEquations<Eqn, Self>, Nls, AdjointEquations<Eqn, Self>>;
 
     fn new_adjoint_solver(
         &self,
@@ -1151,7 +1150,9 @@ mod test {
                     negative_exponential_decay_problem,
                 },
                 exponential_decay_with_algebraic::{
-                    exponential_decay_with_algebraic_adjoint_problem, exponential_decay_with_algebraic_problem, exponential_decay_with_algebraic_problem_sens
+                    exponential_decay_with_algebraic_adjoint_problem,
+                    exponential_decay_with_algebraic_problem,
+                    exponential_decay_with_algebraic_problem_sens,
                 },
                 foodweb::{foodweb_problem, FoodWebContext},
                 gaussian_decay::gaussian_decay_problem,
@@ -1311,7 +1312,7 @@ mod test {
         number_of_nonlinear_solver_fails: 0
         "###);
     }
-    
+
     #[test]
     fn bdf_test_nalgebra_exponential_decay_algebraic_adjoint() {
         let mut s = Bdf::default();

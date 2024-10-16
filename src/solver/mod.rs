@@ -1,6 +1,4 @@
-use crate::{
-    IndexType
-};
+use crate::IndexType;
 
 pub struct SolverStatistics {
     pub niter: IndexType,
