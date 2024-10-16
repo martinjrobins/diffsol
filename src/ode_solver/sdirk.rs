@@ -25,7 +25,7 @@ use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, AugmentedOdeEquations,
     DenseMatrix, JacobianUpdate, NonLinearOp, OdeEquations, OdeEquationsImplicit, OdeEquationsSens,
     OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Scalar, StateRef, StateRefMut, Vector,
-    VectorViewMut,
+    VectorViewMut, OdeEquationsAdjoint, AdjointOdeSolverMethod
 };
 
 use super::bdf::BdfStatistics;
@@ -925,6 +925,25 @@ where
     }
 }
 
+impl<M, Eqn, LS, AugmentedEqn> AdjointOdeSolverMethod<Eqn> for Sdirk<M, Eqn, LS, AugmentedEqn>
+
+where
+    Eqn: OdeEquationsAdjoint,
+    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsAdjoint,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    LS: LinearSolver<Eqn::M>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+{
+    type AdjointSolver = Sdirk<M, AdjointEquations<Eqn, Self>, LS, AdjointEquations<Eqn, Self>>;
+
+    fn new_adjoint_solver(&self) -> Self::AdjointSolver {
+        let tableau = self.tableau.clone();
+        let linear_solver = LS::default();
+        Self::AdjointSolver::new_common(tableau, linear_solver)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::{
@@ -933,14 +952,16 @@ mod test {
                 exponential_decay::{
                     exponential_decay_problem, exponential_decay_problem_sens,
                     exponential_decay_problem_with_root, negative_exponential_decay_problem,
+                    exponential_decay_problem_adjoint,
                 },
+                exponential_decay_with_algebraic::exponential_decay_with_algebraic_adjoint_problem,
                 heat2d::head2d_problem,
                 robertson::{robertson, robertson_sens},
                 robertson_ode::robertson_ode,
             },
             tests::{
                 test_checkpointing, test_interpolate, test_no_set_problem, test_ode_solver,
-                test_ode_solver_no_sens, test_state_mut, test_state_mut_on_problem,
+                test_ode_solver_no_sens, test_state_mut, test_state_mut_on_problem, test_ode_solver_adjoint
             },
         },
         OdeEquations, Op, Sdirk, SparseColMat,
@@ -1069,6 +1090,50 @@ mod test {
         number_of_jac_muls: 201
         number_of_matrix_evals: 1
         number_of_jac_adj_muls: 0
+        "###);
+    }
+
+    #[test]
+    fn sdirk_test_esdirk34_exponential_decay_adjoint() {
+        let s = Sdirk::esdirk34();
+        let (problem, soln) = exponential_decay_problem_adjoint::<M>();
+        let adjoint_solver = test_ode_solver_adjoint(s, &problem, soln);
+        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
+        ---
+        number_of_calls: 84
+        number_of_jac_muls: 6
+        number_of_matrix_evals: 3
+        number_of_jac_adj_muls: 254
+        "###);
+        insta::assert_yaml_snapshot!(adjoint_solver.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 18
+        number_of_steps: 41
+        number_of_error_test_failures: 9
+        number_of_nonlinear_solver_iterations: 250
+        number_of_nonlinear_solver_fails: 0
+        "###);
+    }
+
+    #[test]
+    fn sdirk_test_esdirk34_exponential_decay_algebraic_adjoint() {
+        let s = Sdirk::esdirk34();
+        let (problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>();
+        let adjoint_solver = test_ode_solver_adjoint(s, &problem, soln);
+        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
+        ---
+        number_of_calls: 208
+        number_of_jac_muls: 18
+        number_of_matrix_evals: 6
+        number_of_jac_adj_muls: 201
+        "###);
+        insta::assert_yaml_snapshot!(adjoint_solver.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 29
+        number_of_steps: 54
+        number_of_error_test_failures: 13
+        number_of_nonlinear_solver_iterations: 189
+        number_of_nonlinear_solver_fails: 0
         "###);
     }
 

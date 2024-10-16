@@ -271,7 +271,7 @@ where
         State = Self::State,
     >;
 
-    fn new_adjoint_solver() -> Self::AdjointSolver;
+    fn new_adjoint_solver(&self) -> Self::AdjointSolver;
 
     fn into_adjoint_solver(
         self,
@@ -282,6 +282,8 @@ where
     where 
         Eqn::M: DefaultSolver
     {
+        // create the adjoint solver
+        let mut adjoint_solver = self.new_adjoint_solver();
 
         let problem = self.problem().ok_or(ode_solver_error!(ProblemNotSet))?.clone();
         let t = self.state().unwrap().t;
@@ -316,8 +318,7 @@ where
         let new_augmented_eqn =
             state.set_consistent_augmented(&adj_problem, new_augmented_eqn, &mut init_nls)?;
 
-        // create the solver
-        let mut adjoint_solver = Self::new_adjoint_solver();
+        // set the adjoint problem
         adjoint_solver.set_augmented_problem(state, &adj_problem, new_augmented_eqn)?;
         Ok(adjoint_solver)
 

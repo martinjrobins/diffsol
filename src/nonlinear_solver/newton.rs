@@ -52,6 +52,9 @@ impl<M: Matrix, Ls: LinearSolver<M>> NewtonNonlinearSolver<M, Ls> {
             tmp: M::V::zeros(0),
         }
     }
+    pub fn linear_solver(&self) -> &Ls {
+        &self.linear_solver
+    }
 }
 
 impl<M: Matrix, Ls: LinearSolver<M>> Default for NewtonNonlinearSolver<M, Ls> {

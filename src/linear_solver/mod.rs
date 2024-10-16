@@ -30,6 +30,7 @@ pub trait LinearSolver<M: Matrix>: Default {
 
     /// Set the problem to be solved, any previous problem is discarded.
     /// Any internal state of the solver is reset.
+    /// This function will normally set the sparsity pattern of the matrix to be solved.
     fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
         &mut self,
         op: &C,

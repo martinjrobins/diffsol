@@ -1090,7 +1090,7 @@ where
 {
     type AdjointSolver = Bdf<M, AdjointEquations<Eqn, Self>, Nls, AdjointEquations<Eqn, Self>>;
 
-    fn new_adjoint_solver() -> Self::AdjointSolver {
+    fn new_adjoint_solver(&self) -> Self::AdjointSolver {
         let adjoint_nls = Nls::default();
         Self::AdjointSolver::new(adjoint_nls)
     }

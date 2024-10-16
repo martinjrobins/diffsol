@@ -161,7 +161,7 @@ pub use ode_solver::{
     bdf_state::BdfState, builder::OdeBuilder, checkpointing::Checkpointing, checkpointing::HermiteInterpolator,
     equations::AugmentedOdeEquations, equations::AugmentedOdeEquationsImplicit, equations::NoAug,
     equations::OdeEquations, equations::OdeEquationsAdjoint, equations::OdeEquationsImplicit,
-    equations::OdeEquationsSens, equations::OdeSolverEquations, method::OdeSolverMethod,
+    equations::OdeEquationsSens, equations::OdeSolverEquations, method::OdeSolverMethod, method::AdjointOdeSolverMethod, method::SensitivitiesOdeSolverMethod,
     method::OdeSolverStopReason, problem::OdeSolverProblem, sdirk::Sdirk, sdirk::SdirkAdj,
     sdirk_state::SdirkState, sens_equations::SensEquations, sens_equations::SensInit,
     sens_equations::SensRhs, state::OdeSolverState, tableau::Tableau,
