@@ -1,13 +1,10 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use nalgebra::ComplexField;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError},
-    matrix::default_solver::DefaultSolver,
-    ode_solver_error,
-    scalar::Scalar,
-    AdjointEquations, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon,
-    NonLinearOp, OdeEquations, OdeEquationsAdjoint, OdeEquationsSens, OdeSolverProblem,
-    OdeSolverState, Op, SensEquations, StateRef, StateRefMut, VectorViewMut,
+    error::{DiffsolError, OdeSolverError}, matrix::default_solver::DefaultSolver, ode_solver_error, scalar::Scalar, AdjointContext, AdjointEquations, AugmentedOdeEquations, Checkpointing, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon, NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeEquationsAdjoint, OdeEquationsSens, OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut, VectorViewMut
 };
 
 use super::checkpointing::HermiteInterpolator;
@@ -271,12 +268,58 @@ where
     type AdjointSolver: AugmentedOdeSolverMethod<
         AdjointEquations<Eqn, Self>,
         AdjointEquations<Eqn, Self>,
+        State = Self::State,
     >;
+
+    fn new_adjoint_solver() -> Self::AdjointSolver;
 
     fn into_adjoint_solver(
         self,
         checkpoints: Vec<Self::State>,
         last_segment: HermiteInterpolator<Eqn::V>,
         include_in_error_control: bool,
-    ) -> Result<Self::AdjointSolver, DiffsolError>;
+    ) -> Result<Self::AdjointSolver, DiffsolError> 
+    where 
+        Eqn::M: DefaultSolver
+    {
+
+        let problem = self.problem().ok_or(ode_solver_error!(ProblemNotSet))?.clone();
+        let t = self.state().unwrap().t;
+        let h = self.state().unwrap().h;
+
+        // construct checkpointing
+        let checkpointer = Checkpointing::new(
+            self,
+            checkpoints.len() - 2,
+            checkpoints,
+            Some(last_segment),
+        );
+
+        // construct adjoint equations and problem
+        let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
+        let new_eqn = AdjointEquations::new(&problem.eqn, context.clone(), false);
+        let mut new_augmented_eqn = AdjointEquations::new(&problem.eqn, context, true);
+        new_augmented_eqn.set_include_in_error_control(include_in_error_control);
+        let adj_problem = OdeSolverProblem {
+            eqn: Rc::new(new_eqn),
+            rtol: problem.rtol,
+            atol: problem.atol,
+            t0: t,
+            h0: -h,
+            integrate_out: false,
+        };
+
+        // initialise adjoint state
+        let mut state =
+            Self::State::new_without_initialise_augmented(&adj_problem, &mut new_augmented_eqn)?;
+        let mut init_nls = NewtonNonlinearSolver::<Eqn::M, <Eqn::M as DefaultSolver>::LS>::default();
+        let new_augmented_eqn =
+            state.set_consistent_augmented(&adj_problem, new_augmented_eqn, &mut init_nls)?;
+
+        // create the solver
+        let mut adjoint_solver = Self::new_adjoint_solver();
+        adjoint_solver.set_augmented_problem(state, &adj_problem, new_augmented_eqn)?;
+        Ok(adjoint_solver)
+
+    }
 }
