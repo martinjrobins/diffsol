@@ -172,7 +172,7 @@ pub use op::nonlinear_op::{
     NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint,
 };
 pub use op::{
-    closure::Closure, constant_closure::ConstantClosure,
+    closure::Closure, constant_closure::ConstantClosure, closure_with_adjoint::ClosureWithAdjoint,
     constant_closure_with_adjoint::ConstantClosureWithAdjoint, linear_closure::LinearClosure,
     unit::UnitCallable, Op,
 };

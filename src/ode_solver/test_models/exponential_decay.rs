@@ -91,6 +91,21 @@ fn exponential_decay_out<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V)
 
 /// J = |1 2|
 ///    |3 4|
+/// J v = |1 2| |v_1| = |v_1 + 2v_2|
+///       |3 4| |v_2|   |3v_1 + 4v_2|
+fn exponential_decay_out_jac_mul<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    v: &M::V,
+    y: &mut M::V,
+) {
+    y[0] = v[0] + M::T::from(2.0) * v[1];
+    y[1] = M::T::from(3.0) * v[0] + M::T::from(4.0) * v[1];
+}
+
+/// J = |1 2|
+///    |3 4|
 /// -J^T v = |-1 -3| |v_1| = |-v_1 - 3v_2|
 ///         |-2 -4| |v_2|   |-2v_1 - 4v_2|
 fn exponential_decay_out_adj_mul<M: Matrix>(
@@ -106,9 +121,9 @@ fn exponential_decay_out_adj_mul<M: Matrix>(
 
 /// J = |0 0|
 ///     |0 0|
-fn exponential_decay_out_sens<M: Matrix>(_x: &M::V, _p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V) {
-    y.fill(M::T::zero());
-}
+//fn exponential_decay_out_sens<M: Matrix>(_x: &M::V, _p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V) {
+//    y.fill(M::T::zero());
+//}
 
 /// J = |0 0|
 ///     |0 0|
@@ -242,7 +257,7 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>() -> (
     );
     let nout = 2;
     let out = exponential_decay_out::<M>;
-    let out_jac = exponential_decay_out_sens::<M>;
+    let out_jac = exponential_decay_out_jac_mul::<M>;
     let out_jac_adj = exponential_decay_out_adj_mul::<M>;
     let out_sens_adj = exponential_decay_out_sens_adj::<M>;
     let out = ClosureWithAdjoint::new(
@@ -283,10 +298,10 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>() -> (
     for i in 0..10 {
         let t = M::T::from(i as f64);
         let y0: M::V = problem.eqn.init().call(M::T::zero());
-        let g = y0.clone() * scale((M::T::exp(-p[0] * t) - M::T::exp(-p[0] * t0)) / p[0]);
+        let g = y0.clone() * scale((M::T::exp(-p[0] * t0) - M::T::exp(-p[0] * t)) / p[0]);
         let g = M::V::from_vec(vec![
-            -g[0] - M::T::from(2.0) * g[1],
-            -M::T::from(3.0) * g[0] - M::T::from(4.0) * g[1],
+            g[0] + M::T::from(2.0) * g[1],
+            M::T::from(3.0) * g[0] + M::T::from(4.0) * g[1],
         ]);
         let dydk = y0.clone()
             * scale(

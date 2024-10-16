@@ -62,6 +62,7 @@ pub mod tests {
     use super::*;
     use num_traits::{One, Zero};
 
+    #[allow(clippy::type_complexity)]
     pub fn get_square_problem<M>() -> (
         impl NonLinearOpJacobian<M = M, V = M::V, T = M::T>,
         M::T, 

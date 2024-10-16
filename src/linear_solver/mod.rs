@@ -65,6 +65,7 @@ pub mod tests {
 
     use super::LinearSolveSolution;
 
+    #[allow(clippy::type_complexity)]
     pub fn linear_problem<M: Matrix + 'static>() -> (
         impl NonLinearOpJacobian<M = M, V = M::V, T = M::T>,
         M::T,

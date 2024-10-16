@@ -4,7 +4,7 @@ use std::{cell::RefCell, ops::AddAssign, ops::SubAssign, rc::Rc};
 use crate::{
     op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, Checkpointing, ConstantOp,
     ConstantOpSensAdjoint, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint, OdeSolverMethod, Op, Vector,
+    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint, OdeSolverMethod, Op, Vector, LinearOp
 };
 
 pub struct AdjointContext<Eqn, Method>
@@ -26,7 +26,7 @@ where
 {
     pub fn new(checkpointer: Checkpointing<Eqn, Method>) -> Self {
         let x = <Eqn::V as Vector>::zeros(checkpointer.problem.eqn.rhs().nstates());
-        let mut col = <Eqn::V as Vector>::zeros(checkpointer.problem.eqn.rhs().nout());
+        let mut col = <Eqn::V as Vector>::zeros(checkpointer.problem.eqn.out().unwrap().nout());
         let index = 0;
         col[0] = Eqn::T::one();
         Self {
@@ -60,6 +60,54 @@ where
         self.col[self.index] = Eqn::T::zero();
         self.index = index;
         self.col[self.index] = Eqn::T::one();
+    }
+}
+
+pub struct AdjointMass<Eqn>
+where
+    Eqn: OdeEquationsAdjoint,
+{
+    eqn: Rc<Eqn>,
+}
+
+impl<Eqn> AdjointMass<Eqn>
+where
+    Eqn: OdeEquationsAdjoint,
+{
+    pub fn new(eqn: &Rc<Eqn>) -> Self {
+        Self { eqn: eqn.clone() }
+    }
+}
+
+impl<Eqn> Op for AdjointMass<Eqn>
+where
+    Eqn: OdeEquationsAdjoint,
+{
+    type T = Eqn::T;
+    type V = Eqn::V;
+    type M = Eqn::M;
+
+    fn nstates(&self) -> usize {
+        self.eqn.rhs().nstates()
+    }
+    fn nout(&self) -> usize {
+        self.eqn.rhs().nstates()
+    }
+    fn nparams(&self) -> usize {
+        self.eqn.rhs().nparams()
+    }
+}
+
+impl<Eqn> LinearOp for AdjointMass<Eqn>
+where
+    Eqn: OdeEquationsAdjoint,
+{
+    fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
+        self.eqn.mass().unwrap().gemv_transpose_inplace(x, t, beta, y);
+    }
+    
+    fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
+        self.eqn.mass().unwrap().transpose_inplace(t, y);
     }
 }
 
@@ -338,6 +386,7 @@ where
     eqn: Rc<Eqn>,
     rhs: Rc<AdjointRhs<Eqn, Method>>,
     out: Option<Rc<AdjointOut<Eqn, Method>>>,
+    mass: Option<Rc<AdjointMass<Eqn>>>,
     context: Rc<RefCell<AdjointContext<Eqn, Method>>>,
     tmp: RefCell<Eqn::V>,
     tmp2: RefCell<Eqn::V>,
@@ -370,11 +419,13 @@ where
         let tmp2 = if with_out {
             RefCell::new(<Eqn::V as Vector>::zeros(0))
         } else {
-            RefCell::new(<Eqn::V as Vector>::zeros(eqn.rhs().nparams()))
+            RefCell::new(<Eqn::V as Vector>::zeros(eqn.rhs().nstates()))
         };
+        let mass = eqn.mass().map(|_m| Rc::new(AdjointMass::new(eqn)));
         Self {
             rhs,
             init,
+            mass,
             context,
             out,
             tmp,
@@ -393,7 +444,7 @@ where
                 self.eqn
                     .init()
                     .sens_mul_transpose_inplace(t, &tmp2, &mut tmp);
-                sg_i.add_assign(&*tmp);
+                sg_i.sub_assign(&*tmp);
             } else {
                 self.eqn.init().sens_mul_transpose_inplace(t, s_i, &mut tmp);
                 sg_i.sub_assign(&*tmp);
@@ -441,7 +492,7 @@ where
     type V = Eqn::V;
     type M = Eqn::M;
     type Rhs = AdjointRhs<Eqn, Method>;
-    type Mass = Eqn::Mass;
+    type Mass = AdjointMass<Eqn>;
     type Root = Eqn::Root;
     type Init = AdjointInit<Eqn>;
     type Out = AdjointOut<Eqn, Method>;
@@ -450,7 +501,7 @@ where
         &self.rhs
     }
     fn mass(&self) -> Option<&Rc<Self::Mass>> {
-        self.eqn.mass()
+        self.mass.as_ref()
     }
     fn root(&self) -> Option<&Rc<Self::Root>> {
         None

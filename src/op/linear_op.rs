@@ -49,10 +49,10 @@ pub trait LinearOp: Op {
 }
 
 pub trait LinearOpTranspose: LinearOp {
-    /// Compute the negative transpose of the operator via a GEMV operation (i.e. `y = -A(t)^T * x + beta * y`)
+    /// Compute the transpose of the operator via a GEMV operation (i.e. `y = A(t)^T * x + beta * y`)
     fn gemv_transpose_inplace(&self, _x: &Self::V, _t: Self::T, _beta: Self::T, _y: &mut Self::V);
 
-    /// Compute the negative transpose of the operator `y = -A(t)^T * x` at a given state and time, the default implementation uses [Self::gemv_transpose_inplace].
+    /// Compute the transpose of the operator `y = A(t)^T * x` at a given state and time, the default implementation uses [Self::gemv_transpose_inplace].
     fn call_transpose_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
         let beta = Self::T::zero();
         self.gemv_transpose_inplace(x, t, beta, y);

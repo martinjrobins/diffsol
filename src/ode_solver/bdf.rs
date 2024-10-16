@@ -98,6 +98,8 @@ pub struct Bdf<
     s_deltas: Vec<Eqn::V>,
     sg_deltas: Vec<Eqn::V>,
     diff_tmp: M,
+    gdiff_tmp: M,
+    sgdiff_tmp: M,
     u: M,
     alpha: Vec<Eqn::T>,
     gamma: Vec<Eqn::T>,
@@ -203,6 +205,8 @@ where
             nonlinear_solver,
             n_equal_steps: 0,
             diff_tmp: M::zeros(n, max_order + 3),
+            gdiff_tmp: M::zeros(n, max_order + 3),
+            sgdiff_tmp: M::zeros(n, max_order + 3),
             y_delta: Eqn::V::zeros(n),
             y_predict: Eqn::V::zeros(n),
             t_predict: Eqn::T::zero(),
@@ -290,10 +294,10 @@ where
                 Self::_update_diff_for_step_size(&ru, diff, &mut self.diff_tmp, order);
             }
             if self.ode_problem.as_ref().unwrap().integrate_out {
-                Self::_update_diff_for_step_size(&ru, &mut state.gdiff, &mut self.diff_tmp, order);
+                Self::_update_diff_for_step_size(&ru, &mut state.gdiff, &mut self.gdiff_tmp, order);
             }
             for diff in state.sgdiff.iter_mut() {
-                Self::_update_diff_for_step_size(&ru, diff, &mut self.diff_tmp, order);
+                Self::_update_diff_for_step_size(&ru, diff, &mut self.sgdiff_tmp, order);
             }
         }
 
@@ -737,6 +741,9 @@ where
         if self.g_delta.len() != nout {
             self.g_delta = <Eqn::V as Vector>::zeros(nout);
         }
+        if self.gdiff_tmp.nrows() != nout {
+            self.gdiff_tmp = M::zeros(nout, BdfState::<Eqn::V, M>::MAX_ORDER + 3);
+        }
 
         // init U matrix
         self.u = Self::_compute_r(state.order, Eqn::T::one());
@@ -1061,6 +1068,9 @@ where
             if self.sg_deltas.len() != naug || self.sg_deltas[0].len() != out.nout() {
                 self.sg_deltas = vec![<Eqn::V as Vector>::zeros(out.nout()); naug];
             }
+            if self.sgdiff_tmp.nrows() != out.nout() {
+                self.sgdiff_tmp = M::zeros(out.nout(), BdfState::<Eqn::V, M>::MAX_ORDER + 3);
+            }
         }
         Ok(())
     }
@@ -1141,8 +1151,7 @@ mod test {
                     negative_exponential_decay_problem,
                 },
                 exponential_decay_with_algebraic::{
-                    exponential_decay_with_algebraic_problem,
-                    exponential_decay_with_algebraic_problem_sens,
+                    exponential_decay_with_algebraic_adjoint_problem, exponential_decay_with_algebraic_problem, exponential_decay_with_algebraic_problem_sens
                 },
                 foodweb::{foodweb_problem, FoodWebContext},
                 gaussian_decay::gaussian_decay_problem,
@@ -1299,6 +1308,36 @@ mod test {
         number_of_steps: 41
         number_of_error_test_failures: 9
         number_of_nonlinear_solver_iterations: 250
+        number_of_nonlinear_solver_fails: 0
+        "###);
+    }
+    
+    #[test]
+    fn bdf_test_nalgebra_exponential_decay_algebraic_adjoint() {
+        let mut s = Bdf::default();
+        let (problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>();
+        let adjoint_solver = test_ode_solver_adjoint(&mut s, &problem, soln);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 20
+        number_of_steps: 52
+        number_of_error_test_failures: 2
+        number_of_nonlinear_solver_iterations: 103
+        number_of_nonlinear_solver_fails: 0
+        "###);
+        insta::assert_yaml_snapshot!(s.problem().as_ref().unwrap().eqn.rhs().statistics(), @r###"
+        ---
+        number_of_calls: 210
+        number_of_jac_muls: 21
+        number_of_matrix_evals: 7
+        number_of_jac_adj_muls: 201
+        "###);
+        insta::assert_yaml_snapshot!(adjoint_solver.get_statistics(), @r###"
+        ---
+        number_of_linear_solver_setups: 29
+        number_of_steps: 54
+        number_of_error_test_failures: 13
+        number_of_nonlinear_solver_iterations: 189
         number_of_nonlinear_solver_fails: 0
         "###);
     }
