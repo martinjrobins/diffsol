@@ -5,7 +5,7 @@ use super::sparsity::MatrixSparsityRef;
 use super::{Matrix, MatrixCommon, MatrixSparsity};
 use crate::error::{DiffsolError, MatrixError};
 use crate::vector::Vector;
-use crate::{DefaultSolver, FaerSparseLU, IndexType, NonLinearOp, Scalar, Scale};
+use crate::{DefaultSolver, FaerSparseLU, IndexType, Scalar, Scale};
 
 use faer::sparse::ops::{ternary_op_assign_into, union_symbolic};
 use faer::sparse::{SymbolicSparseColMat, SymbolicSparseColMatRef};
@@ -37,7 +37,7 @@ impl<T: Scalar> SparseColMat<T> {
 }
 
 impl<T: Scalar> DefaultSolver for SparseColMat<T> {
-    type LS<C: NonLinearOp<M = SparseColMat<T>, V = Col<T>, T = T>> = FaerSparseLU<T, C>;
+    type LS = FaerSparseLU<T>;
 }
 
 impl<T: Scalar> MatrixCommon for SparseColMat<T> {

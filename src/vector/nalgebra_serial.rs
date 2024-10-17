@@ -115,6 +115,9 @@ impl<'a, T: Scalar> VectorViewMut<'a> for DVectorViewMut<'a, T> {
     fn copy_from_view(&mut self, other: &Self::View) {
         self.copy_from(other);
     }
+    fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
+        self.axpy(alpha, x, beta);
+    }
 }
 
 impl<T: Scalar> Div<Scale<T>> for DVector<T> {

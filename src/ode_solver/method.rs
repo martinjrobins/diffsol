@@ -1,10 +1,13 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use nalgebra::ComplexField;
 
 use crate::{
-    error::DiffsolError, error::OdeSolverError, matrix::default_solver::DefaultSolver,
-    ode_solver_error, scalar::Scalar, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon,
-    NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, VectorViewMut,
+    error::{DiffsolError, OdeSolverError}, matrix::default_solver::DefaultSolver, ode_solver_error, scalar::Scalar, AdjointContext, AdjointEquations, AugmentedOdeEquations, Checkpointing, DefaultDenseMatrix, DenseMatrix, Matrix, MatrixCommon, NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeEquationsAdjoint, OdeEquationsSens, OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut, VectorViewMut
 };
+
+use super::checkpointing::HermiteInterpolator;
 
 #[derive(Debug, PartialEq)]
 pub enum OdeSolverStopReason<T: Scalar> {
@@ -22,22 +25,25 @@ pub enum OdeSolverStopReason<T: Scalar> {
 /// # Example
 ///
 /// ```
-/// use diffsol::{ OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeEquations, DefaultSolver };
+/// use diffsol::{ OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeEquationsImplicit, DefaultSolver };
 ///
 /// fn solve_ode<Eqn>(solver: &mut impl OdeSolverMethod<Eqn>, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Eqn::V
 /// where
-///    Eqn: OdeEquations,
+///    Eqn: OdeEquationsImplicit,
 ///    Eqn::M: DefaultSolver,
 /// {
 ///     let state = OdeSolverState::new(problem, solver).unwrap();
 ///     solver.set_problem(state, problem);
-///     while solver.state().unwrap().t() <= t {
+///     while solver.state().unwrap().t <= t {
 ///         solver.step().unwrap();
 ///     }
 ///     solver.interpolate(t).unwrap()
 /// }
 /// ```
-pub trait OdeSolverMethod<Eqn: OdeEquations> {
+pub trait OdeSolverMethod<Eqn: OdeEquations>
+where
+    Self: Sized,
+{
     type State: OdeSolverState<Eqn::V>;
 
     /// Get the current problem if it has been set
@@ -63,12 +69,12 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     fn take_state(&mut self) -> Option<Self::State>;
 
     /// Get the current state of the solver, if it exists
-    fn state(&self) -> Option<&Self::State>;
+    fn state(&self) -> Option<StateRef<Eqn::V>>;
 
     /// Get a mutable reference to the current state of the solver, if it exists
     /// Note that calling this will cause the next call to `step` to perform some reinitialisation to take into
     /// account the mutated state, this could be expensive for multi-step methods.
-    fn state_mut(&mut self) -> Option<&mut Self::State>;
+    fn state_mut(&mut self) -> Option<StateRefMut<Eqn::V>>;
 
     /// Step the solution forward by one step, altering the internal state of the solver.
     /// The return value is a `Result` containing the reason for stopping the solver, possible reasons are:
@@ -84,19 +90,23 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
     /// Interpolate the solution at a given time. This time should be between the current time and the last solver time step
     fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError>;
 
+    /// Interpolate the integral of the output function at a given time. This time should be between the current time and the last solver time step
+    fn interpolate_out(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError>;
+
     /// Interpolate the sensitivity vectors at a given time. This time should be between the current time and the last solver time step
     fn interpolate_sens(&self, t: Eqn::T) -> Result<Vec<Eqn::V>, DiffsolError>;
 
     /// Get the current order of accuracy of the solver (e.g. explict euler method is first-order)
     fn order(&self) -> usize;
 
-    /// Reinitialise the solver state and solve the problem up to time `final_time`
+    /// Using the provided state, solve the problem up to time `final_time`
     /// Returns a Vec of solution values at timepoints chosen by the solver.
     /// After the solver has finished, the internal state of the solver is at time `final_time`.
     #[allow(clippy::type_complexity)]
     fn solve(
         &mut self,
         problem: &OdeSolverProblem<Eqn>,
+        state: Self::State,
         final_time: Eqn::T,
     ) -> Result<(<Eqn::V as DefaultDenseMatrix>::M, Vec<Eqn::T>), DiffsolError>
     where
@@ -104,13 +114,12 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
-        let state = OdeSolverState::new(problem, self)?;
         self.set_problem(state, problem)?;
-        let mut ret_t = vec![self.state().unwrap().t()];
+        let mut ret_t = vec![self.state().unwrap().t];
         let nstates = problem.eqn.rhs().nstates();
         let ntimes_guess = std::cmp::max(
             10,
-            ((final_time - self.state().unwrap().t()).abs() / self.state().unwrap().h())
+            ((final_time - self.state().unwrap().t).abs() / self.state().unwrap().h)
                 .into()
                 .ceil() as usize,
         );
@@ -119,14 +128,14 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
             let mut y_i = ret_y.column_mut(0);
             match problem.eqn.out() {
                 Some(out) => {
-                    y_i.copy_from(&out.call(self.state().unwrap().y(), self.state().unwrap().t()))
+                    y_i.copy_from(&out.call(self.state().unwrap().y, self.state().unwrap().t))
                 }
-                None => y_i.copy_from(self.state().unwrap().y()),
+                None => y_i.copy_from(self.state().unwrap().y),
             }
         }
         self.set_stop_time(final_time)?;
         while self.step()? != OdeSolverStopReason::TstopReached {
-            ret_t.push(self.state().unwrap().t());
+            ret_t.push(self.state().unwrap().t);
             let mut y_i = {
                 let max_i = ret_y.ncols();
                 let curr_i = ret_t.len() - 1;
@@ -138,14 +147,14 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
             };
             match problem.eqn.out() {
                 Some(out) => {
-                    y_i.copy_from(&out.call(self.state().unwrap().y(), self.state().unwrap().t()))
+                    y_i.copy_from(&out.call(self.state().unwrap().y, self.state().unwrap().t))
                 }
-                None => y_i.copy_from(self.state().unwrap().y()),
+                None => y_i.copy_from(self.state().unwrap().y),
             }
         }
 
         // store the final step
-        ret_t.push(self.state().unwrap().t());
+        ret_t.push(self.state().unwrap().t);
         {
             let mut y_i = {
                 let max_i = ret_y.ncols();
@@ -158,20 +167,21 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
             };
             match problem.eqn.out() {
                 Some(out) => {
-                    y_i.copy_from(&out.call(self.state().unwrap().y(), self.state().unwrap().t()))
+                    y_i.copy_from(&out.call(self.state().unwrap().y, self.state().unwrap().t))
                 }
-                None => y_i.copy_from(self.state().unwrap().y()),
+                None => y_i.copy_from(self.state().unwrap().y),
             }
         }
         Ok((ret_y, ret_t))
     }
 
-    /// Reinitialise the solver state and solve the problem up to time `t_eval[t_eval.len()-1]`
+    /// Using the provided state, solve the problem up to time `t_eval[t_eval.len()-1]`
     /// Returns a Vec of solution values at timepoints given by `t_eval`.
     /// After the solver has finished, the internal state of the solver is at time `t_eval[t_eval.len()-1]`.
     fn solve_dense(
         &mut self,
         problem: &OdeSolverProblem<Eqn>,
+        state: Self::State,
         t_eval: &[Eqn::T],
     ) -> Result<<Eqn::V as DefaultDenseMatrix>::M, DiffsolError>
     where
@@ -179,13 +189,12 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
-        let state = OdeSolverState::new(problem, self)?;
         self.set_problem(state, problem)?;
         let nstates = problem.eqn.rhs().nstates();
         let mut ret = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, t_eval.len());
 
         // check t_eval is increasing and all values are greater than or equal to the current time
-        let t0 = self.state().unwrap().t();
+        let t0 = self.state().unwrap().t;
         if t_eval.windows(2).any(|w| w[0] > w[1] || w[0] < t0) {
             return Err(ode_solver_error!(InvalidTEval));
         }
@@ -194,7 +203,7 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
         self.set_stop_time(t_eval[t_eval.len() - 1])?;
         let mut step_reason = OdeSolverStopReason::InternalTimestep;
         for (i, t) in t_eval.iter().take(t_eval.len() - 1).enumerate() {
-            while self.state().unwrap().t() < *t {
+            while self.state().unwrap().t < *t {
                 step_reason = self.step()?;
             }
             let y = self.interpolate(*t)?;
@@ -213,11 +222,105 @@ pub trait OdeSolverMethod<Eqn: OdeEquations> {
             let mut y_out = ret.column_mut(t_eval.len() - 1);
             match problem.eqn.out() {
                 Some(out) => {
-                    y_out.copy_from(&out.call(self.state().unwrap().y(), self.state().unwrap().t()))
+                    y_out.copy_from(&out.call(self.state().unwrap().y, self.state().unwrap().t))
                 }
-                None => y_out.copy_from(self.state().unwrap().y()),
+                None => y_out.copy_from(self.state().unwrap().y),
             }
         }
         Ok(ret)
+    }
+}
+
+pub trait AugmentedOdeSolverMethod<Eqn, AugmentedEqn>: OdeSolverMethod<Eqn>
+where
+    Eqn: OdeEquations,
+    AugmentedEqn: AugmentedOdeEquations<Eqn>,
+{
+    fn set_augmented_problem(
+        &mut self,
+        state: Self::State,
+        ode_problem: &OdeSolverProblem<Eqn>,
+        augmented_eqn: AugmentedEqn,
+    ) -> Result<(), DiffsolError>;
+}
+
+pub trait SensitivitiesOdeSolverMethod<Eqn>:
+    AugmentedOdeSolverMethod<Eqn, SensEquations<Eqn>>
+where
+    Eqn: OdeEquationsSens,
+{
+    fn set_problem_with_sensitivities(
+        &mut self,
+        state: Self::State,
+        problem: &OdeSolverProblem<Eqn>,
+        include_in_error_control: bool,
+    ) -> Result<(), DiffsolError> {
+        let mut augmented_eqn = SensEquations::new(&problem.eqn);
+        augmented_eqn.set_include_in_error_control(include_in_error_control);
+        self.set_augmented_problem(state, problem, augmented_eqn)
+    }
+}
+
+pub trait AdjointOdeSolverMethod<Eqn>: OdeSolverMethod<Eqn>
+where
+    Eqn: OdeEquationsAdjoint,
+{
+    type AdjointSolver: AugmentedOdeSolverMethod<
+        AdjointEquations<Eqn, Self>,
+        AdjointEquations<Eqn, Self>,
+        State = Self::State,
+    >;
+
+    fn new_adjoint_solver(&self) -> Self::AdjointSolver;
+
+    fn into_adjoint_solver(
+        self,
+        checkpoints: Vec<Self::State>,
+        last_segment: HermiteInterpolator<Eqn::V>,
+        include_in_error_control: bool,
+    ) -> Result<Self::AdjointSolver, DiffsolError> 
+    where 
+        Eqn::M: DefaultSolver
+    {
+        // create the adjoint solver
+        let mut adjoint_solver = self.new_adjoint_solver();
+
+        let problem = self.problem().ok_or(ode_solver_error!(ProblemNotSet))?.clone();
+        let t = self.state().unwrap().t;
+        let h = self.state().unwrap().h;
+
+        // construct checkpointing
+        let checkpointer = Checkpointing::new(
+            self,
+            checkpoints.len() - 2,
+            checkpoints,
+            Some(last_segment),
+        );
+
+        // construct adjoint equations and problem
+        let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
+        let new_eqn = AdjointEquations::new(&problem.eqn, context.clone(), false);
+        let mut new_augmented_eqn = AdjointEquations::new(&problem.eqn, context, true);
+        new_augmented_eqn.set_include_in_error_control(include_in_error_control);
+        let adj_problem = OdeSolverProblem {
+            eqn: Rc::new(new_eqn),
+            rtol: problem.rtol,
+            atol: problem.atol,
+            t0: t,
+            h0: -h,
+            integrate_out: false,
+        };
+
+        // initialise adjoint state
+        let mut state =
+            Self::State::new_without_initialise_augmented(&adj_problem, &mut new_augmented_eqn)?;
+        let mut init_nls = NewtonNonlinearSolver::<Eqn::M, <Eqn::M as DefaultSolver>::LS>::default();
+        let new_augmented_eqn =
+            state.set_consistent_augmented(&adj_problem, new_augmented_eqn, &mut init_nls)?;
+
+        // set the adjoint problem
+        adjoint_solver.set_augmented_problem(state, &adj_problem, new_augmented_eqn)?;
+        Ok(adjoint_solver)
+
     }
 }

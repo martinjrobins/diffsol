@@ -1,41 +1,42 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    jacobian::{find_non_zeros_linear, JacobianColoring},
-    matrix::sparsity::MatrixSparsity,
-    Matrix, Vector,
+    find_matrix_non_zeros, find_transpose_non_zeros, jacobian::JacobianColoring,
+    matrix::sparsity::MatrixSparsity, LinearOp, LinearOpTranspose, Matrix, Op, Vector,
 };
 
-use super::{LinearOp, Op, OpStatistics};
+use super::OpStatistics;
 
-pub struct LinearClosureWithSens<M, F, H>
+pub struct LinearClosureWithAdjoint<M, F, G>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
 {
     func: F,
-    func_sens: H,
+    func_adjoint: G,
     nstates: usize,
     nout: usize,
     nparams: usize,
     p: Rc<M::V>,
     coloring: Option<JacobianColoring<M>>,
     sparsity: Option<M::Sparsity>,
+    coloring_adjoint: Option<JacobianColoring<M>>,
+    sparsity_adjoint: Option<M::Sparsity>,
     statistics: RefCell<OpStatistics>,
 }
 
-impl<M, F, H> LinearClosureWithSens<M, F, H>
+impl<M, F, G> LinearClosureWithAdjoint<M, F, G>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
 {
-    pub fn new(func: F, func_sens: H, nstates: usize, nout: usize, p: Rc<M::V>) -> Self {
+    pub fn new(func: F, func_adjoint: G, nstates: usize, nout: usize, p: Rc<M::V>) -> Self {
         let nparams = p.len();
         Self {
             func,
-            func_sens,
+            func_adjoint,
             nstates,
             statistics: RefCell::new(OpStatistics::default()),
             nout,
@@ -43,24 +44,34 @@ where
             p,
             coloring: None,
             sparsity: None,
+            coloring_adjoint: None,
+            sparsity_adjoint: None,
         }
     }
 
     pub fn calculate_sparsity(&mut self, t0: M::T) {
-        let non_zeros = find_non_zeros_linear(self, t0);
+        let non_zeros = find_matrix_non_zeros(self, t0);
         self.sparsity = Some(
             MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
                 .expect("invalid sparsity pattern"),
         );
         self.coloring = Some(JacobianColoring::new_from_non_zeros(self, non_zeros));
     }
+    pub fn calculate_adjoint_sparsity(&mut self, t0: M::T) {
+        let non_zeros = find_transpose_non_zeros(self, t0);
+        self.sparsity_adjoint = Some(
+            MatrixSparsity::try_from_indices(self.nstates, self.nout, non_zeros.clone())
+                .expect("invalid sparsity pattern"),
+        );
+        self.coloring_adjoint = Some(JacobianColoring::new_from_non_zeros(self, non_zeros));
+    }
 }
 
-impl<M, F, H> Op for LinearClosureWithSens<M, F, H>
+impl<M, F, G> Op for LinearClosureWithAdjoint<M, F, G>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
 {
     type V = M::V;
     type T = M::T;
@@ -82,21 +93,25 @@ where
     fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
         self.sparsity.as_ref().map(|s| s.as_ref())
     }
+    fn sparsity_adjoint(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
+        self.sparsity_adjoint.as_ref().map(|s| s.as_ref())
+    }
     fn statistics(&self) -> OpStatistics {
         self.statistics.borrow().clone()
     }
 }
 
-impl<M, F, H> LinearOp for LinearClosureWithSens<M, F, H>
+impl<M, F, G> LinearOp for LinearClosureWithAdjoint<M, F, G>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
 {
     fn gemv_inplace(&self, x: &M::V, t: M::T, beta: M::T, y: &mut M::V) {
         self.statistics.borrow_mut().increment_call();
         (self.func)(x, self.p.as_ref(), t, beta, y)
     }
+
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
         self.statistics.borrow_mut().increment_matrix();
         if let Some(coloring) = &self.coloring {
@@ -105,10 +120,22 @@ where
             self._default_matrix_inplace(t, y);
         }
     }
-    fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        (self.func_sens)(self.p.as_ref(), x, t, v, y)
+}
+
+impl<M, F, G> LinearOpTranspose for LinearClosureWithAdjoint<M, F, G>
+where
+    M: Matrix,
+    F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+    G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+{
+    fn gemv_transpose_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
+        (self.func_adjoint)(x, self.p.as_ref(), t, beta, y)
     }
-    fn has_sens(&self) -> bool {
-        true
+    fn transpose_inplace(&self, t: Self::T, y: &mut Self::M) {
+        if let Some(coloring) = &self.coloring_adjoint {
+            coloring.matrix_inplace(self, t, y);
+        } else {
+            self._default_transpose_inplace(t, y);
+        }
     }
 }

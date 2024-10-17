@@ -2,7 +2,7 @@ use nalgebra::ComplexField;
 use num_traits::{One, Pow};
 use std::rc::Rc;
 
-use crate::{scalar::IndexType, solver::SolverProblem, NonLinearOp, Scalar, Vector};
+use crate::{scalar::IndexType, Scalar, Vector};
 
 #[derive(Clone)]
 pub struct Convergence<V: Vector> {
@@ -30,11 +30,6 @@ impl<V: Vector> Convergence<V> {
     }
     pub fn niter(&self) -> IndexType {
         self.niter
-    }
-    pub fn new_from_problem<C: NonLinearOp<V = V, T = V::T>>(problem: &SolverProblem<C>) -> Self {
-        let rtol = problem.rtol;
-        let atol = problem.atol.clone();
-        Self::new(rtol, atol)
     }
     pub fn new(rtol: V::T, atol: Rc<V>) -> Self {
         let minimum_tol = V::T::from(10.0) * V::T::EPSILON / rtol;

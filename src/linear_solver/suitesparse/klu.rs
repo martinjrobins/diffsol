@@ -1,4 +1,5 @@
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use faer::Col;
 
@@ -27,9 +28,8 @@ use crate::{
     linear_solver::LinearSolver,
     linear_solver_error,
     matrix::MatrixCommon,
-    op::linearise::LinearisedOp,
     vector::Vector,
-    LinearOp, Matrix, MatrixSparsityRef, NonLinearOp, Op, SolverProblem, SparseColMat,
+    Matrix, MatrixSparsityRef, NonLinearOpJacobian, SparseColMat,
 };
 
 trait MatrixKLU: Matrix<T = f64> {
@@ -109,6 +109,7 @@ impl KluNumeric {
         symbolic: &mut KluSymbolic,
         mat: &mut impl MatrixKLU,
     ) -> Result<Self, DiffsolError> {
+        // TODO: there is also klu_refactor which is faster and reuses inner
         let inner = unsafe {
             klu_factor(
                 mat.column_pointers_mut_ptr(),
@@ -136,6 +137,7 @@ impl Drop for KluNumeric {
     }
 }
 
+#[derive(Clone)]
 struct KluCommon {
     inner: klu_common,
 }
@@ -154,22 +156,19 @@ impl KluCommon {
     }
 }
 
-pub struct KLU<M, C>
+pub struct KLU<M>
 where
     M: Matrix,
-    C: NonLinearOp<M = M, V = M::V, T = M::T>,
 {
     klu_common: RefCell<KluCommon>,
     klu_symbolic: Option<KluSymbolic>,
     klu_numeric: Option<KluNumeric>,
-    problem: Option<SolverProblem<LinearisedOp<C>>>,
     matrix: Option<M>,
 }
 
-impl<M, C> Default for KLU<M, C>
+impl<M> Default for KLU<M>
 where
     M: Matrix,
-    C: NonLinearOp<M = M, V = M::V, T = M::T>,
 {
     fn default() -> Self {
         let klu_common = KluCommon::default();
@@ -178,24 +177,24 @@ where
             klu_common,
             klu_numeric: None,
             klu_symbolic: None,
-            problem: None,
             matrix: None,
         }
     }
 }
 
-impl<M, C> LinearSolver<C> for KLU<M, C>
+impl<M> LinearSolver<M> for KLU<M>
 where
     M: MatrixKLU,
     M::V: VectorKLU,
-    C: NonLinearOp<M = M, V = M::V, T = M::T>,
 {
-    fn set_linearisation(&mut self, x: &C::V, t: C::T) {
-        Rc::<LinearisedOp<C>>::get_mut(&mut self.problem.as_mut().expect("Problem not set").f)
-            .unwrap()
-            .set_x(x);
+    fn set_linearisation<C: NonLinearOpJacobian<T = M::T, V = M::V, M = M>>(
+        &mut self,
+        op: &C,
+        x: &M::V,
+        t: M::T,
+    ) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
-        self.problem.as_ref().unwrap().f.matrix_inplace(t, matrix);
+        op.jacobian_inplace(x, t, matrix);
         self.klu_numeric = KluNumeric::try_from_symbolic(
             self.klu_symbolic.as_mut().expect("Symbolic not set"),
             matrix,
@@ -203,7 +202,7 @@ where
         .ok();
     }
 
-    fn solve_in_place(&self, x: &mut C::V) -> Result<(), DiffsolError> {
+    fn solve_in_place(&self, x: &mut M::V) -> Result<(), DiffsolError> {
         if self.klu_numeric.is_none() {
             return Err(linear_solver_error!(LuNotInitialized));
         }
@@ -224,16 +223,15 @@ where
         Ok(())
     }
 
-    fn set_problem(&mut self, problem: &SolverProblem<C>) {
-        let linearised_problem = problem.linearise();
-        let ncols = linearised_problem.f.nstates();
-        let nrows = linearised_problem.f.nout();
-        let mut matrix = C::M::new_from_sparsity(
-            nrows,
-            ncols,
-            linearised_problem.f.sparsity().map(|s| s.to_owned()),
-        );
-        self.problem = Some(linearised_problem);
+    fn set_problem<C: NonLinearOpJacobian<T = M::T, V = M::V, M = M>>(
+        &mut self,
+        op: &C,
+        _rtol: M::T,
+        _atol: Rc<M::V>,
+    ) {
+        let ncols = op.nstates();
+        let nrows = op.nout();
+        let mut matrix = C::M::new_from_sparsity(nrows, ncols, op.sparsity().map(|s| s.to_owned()));
         let mut klu_common = self.klu_common.borrow_mut();
         self.klu_symbolic = KluSymbolic::try_from_matrix(&mut matrix, klu_common.as_mut()).ok();
         self.matrix = Some(matrix);
@@ -251,8 +249,8 @@ mod tests {
 
     #[test]
     fn test_klu() {
-        let (p, solns) = linear_problem::<SparseColMat<f64>>();
+        let (op, rtol, atol, solns) = linear_problem::<SparseColMat<f64>>();
         let s = KLU::default();
-        test_linear_solver(s, p, solns);
+        test_linear_solver(s, op, rtol, atol, solns);
     }
 }

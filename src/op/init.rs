@@ -1,4 +1,6 @@
-use crate::{ode_solver::equations::OdeEquations, scale, LinearOp, Matrix, Vector, VectorIndex};
+use crate::{
+    scale, LinearOp, Matrix, NonLinearOpJacobian, OdeEquationsImplicit, Vector, VectorIndex,
+};
 use num_traits::{One, Zero};
 use std::{cell::RefCell, rc::Rc};
 
@@ -8,7 +10,7 @@ use super::{NonLinearOp, Op};
 ///
 /// We calculate consistent initial conditions following the approach of
 /// Brown, P. N., Hindmarsh, A. C., & Petzold, L. R. (1998). Consistent initial condition calculation for differential-algebraic systems. SIAM Journal on Scientific Computing, 19(5), 1495-1512.
-pub struct InitOp<Eqn: OdeEquations> {
+pub struct InitOp<Eqn: OdeEquationsImplicit> {
     eqn: Rc<Eqn>,
     jac: Eqn::M,
     pub y0: RefCell<Eqn::V>,
@@ -16,7 +18,7 @@ pub struct InitOp<Eqn: OdeEquations> {
     neg_mass: Eqn::M,
 }
 
-impl<Eqn: OdeEquations> InitOp<Eqn> {
+impl<Eqn: OdeEquationsImplicit> InitOp<Eqn> {
     pub fn new(eqn: &Rc<Eqn>, t0: Eqn::T, y0: &Eqn::V) -> Self {
         let eqn = eqn.clone();
         let n = eqn.rhs().nstates();
@@ -68,7 +70,7 @@ impl<Eqn: OdeEquations> InitOp<Eqn> {
     }
 }
 
-impl<Eqn: OdeEquations> Op for InitOp<Eqn> {
+impl<Eqn: OdeEquationsImplicit> Op for InitOp<Eqn> {
     type V = Eqn::V;
     type T = Eqn::T;
     type M = Eqn::M;
@@ -86,7 +88,7 @@ impl<Eqn: OdeEquations> Op for InitOp<Eqn> {
     }
 }
 
-impl<Eqn: OdeEquations> NonLinearOp for InitOp<Eqn> {
+impl<Eqn: OdeEquationsImplicit> NonLinearOp for InitOp<Eqn> {
     // -M_u du + f(u, v)
     // g(t, u, v)
     fn call_inplace(&self, x: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
@@ -101,7 +103,9 @@ impl<Eqn: OdeEquations> NonLinearOp for InitOp<Eqn> {
         // y = -M x + y
         self.neg_mass.gemv(Eqn::T::one(), x, Eqn::T::one(), y);
     }
+}
 
+impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for InitOp<Eqn> {
     // J v
     fn jac_mul_inplace(&self, _x: &Eqn::V, _t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
         self.jac.gemv(Eqn::T::one(), v, Eqn::T::one(), y);
@@ -118,8 +122,8 @@ mod tests {
 
     use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
     use crate::op::init::InitOp;
-    use crate::op::NonLinearOp;
     use crate::vector::Vector;
+    use crate::{NonLinearOp, NonLinearOpJacobian};
 
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;

@@ -1,10 +1,10 @@
-use crate::{LinearSolver, NonLinearOp};
+use crate::LinearSolver;
 
 use super::Matrix;
 
 pub trait DefaultSolver: Matrix {
-    type LS<C: NonLinearOp<M = Self, V = Self::V, T = Self::T>>: LinearSolver<C> + Default;
-    fn default_solver<C: NonLinearOp<M = Self, V = Self::V, T = Self::T>>() -> Self::LS<C> {
+    type LS: LinearSolver<Self> + Default;
+    fn default_solver() -> Self::LS {
         Self::LS::default()
     }
 }

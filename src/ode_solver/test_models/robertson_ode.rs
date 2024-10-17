@@ -1,6 +1,6 @@
 use crate::{
-    ode_solver::problem::OdeSolverSolution, Matrix, OdeBuilder, OdeEquations, OdeSolverProblem,
-    Vector,
+    ode_solver::problem::OdeSolverSolution, Matrix, OdeBuilder, OdeEquationsImplicit,
+    OdeSolverProblem, Vector,
 };
 use num_traits::{One, Zero};
 
@@ -8,7 +8,7 @@ pub fn robertson_ode<M: Matrix + 'static>(
     use_coloring: bool,
     ngroups: usize,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
     const N: usize = 3;

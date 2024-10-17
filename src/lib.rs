@@ -117,7 +117,7 @@ pub mod vector;
 #[cfg(feature = "sundials")]
 pub mod sundials_sys;
 
-use linear_solver::LinearSolver;
+pub use linear_solver::LinearSolver;
 pub use linear_solver::{faer::sparse_lu::FaerSparseLU, FaerLU, NalgebraLU};
 
 pub use matrix::sparse_faer::SparseColMat;
@@ -140,36 +140,47 @@ pub use linear_solver::suitesparse::klu::KLU;
 #[cfg(feature = "diffsl")]
 pub use ode_solver::diffsl::DiffSlContext;
 
-pub use jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring};
+pub use jacobian::{
+    find_adjoint_non_zeros, find_jacobian_non_zeros, find_matrix_non_zeros,
+    find_sens_adjoint_non_zeros, find_sens_non_zeros, find_transpose_non_zeros, JacobianColoring,
+};
 pub use matrix::{default_solver::DefaultSolver, Matrix};
 use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
     DenseMatrix, MatrixCommon, MatrixRef, MatrixView, MatrixViewMut,
 };
-pub use nonlinear_solver::newton::NewtonNonlinearSolver;
 use nonlinear_solver::{
-    convergence::Convergence, convergence::ConvergenceStatus, newton::newton_iteration,
-    root::RootFinder, NonLinearSolver,
+    convergence::Convergence, convergence::ConvergenceStatus, root::RootFinder,
 };
+pub use nonlinear_solver::{newton::NewtonNonlinearSolver, NonLinearSolver};
 use ode_solver::jacobian_update::JacobianUpdate;
+pub use ode_solver::state::{StateRef, StateRefMut};
 pub use ode_solver::{
-    bdf::Bdf, bdf_state::BdfState, builder::OdeBuilder, equations::OdeEquations,
-    equations::OdeSolverEquations, method::OdeSolverMethod, method::OdeSolverStopReason,
-    problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::SdirkState,
-    sens_equations::SensEquations, sens_equations::SensInit, sens_equations::SensRhs,
-    state::OdeSolverState, tableau::Tableau,
+    adjoint_equations::AdjointContext, adjoint_equations::AdjointEquations,
+    adjoint_equations::AdjointInit, adjoint_equations::AdjointRhs, bdf::Bdf, bdf::BdfAdj,
+    bdf_state::BdfState, builder::OdeBuilder, checkpointing::Checkpointing, checkpointing::HermiteInterpolator,
+    equations::AugmentedOdeEquations, equations::AugmentedOdeEquationsImplicit, equations::NoAug,
+    equations::OdeEquations, equations::OdeEquationsAdjoint, equations::OdeEquationsImplicit,
+    equations::OdeEquationsSens, equations::OdeSolverEquations, method::OdeSolverMethod, method::AdjointOdeSolverMethod, method::SensitivitiesOdeSolverMethod,
+    method::OdeSolverStopReason, problem::OdeSolverProblem, sdirk::Sdirk, sdirk::SdirkAdj,
+    sdirk_state::SdirkState, sens_equations::SensEquations, sens_equations::SensInit,
+    sens_equations::SensRhs, state::OdeSolverState, tableau::Tableau,
+};
+use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
+use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};
+pub use op::nonlinear_op::{
+    NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint,
 };
 pub use op::{
-    closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure,
-    unit::UnitCallable, ConstantOp, LinearOp, NonLinearOp, Op,
+    closure::Closure, closure_with_adjoint::ClosureWithAdjoint, constant_closure::ConstantClosure,
+    constant_closure_with_adjoint::ConstantClosureWithAdjoint, linear_closure::LinearClosure,
+    unit::UnitCallable, Op,
 };
 use op::{
     closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,
     constant_closure_with_sens::ConstantClosureWithSens, init::InitOp,
-    linear_closure_with_sens::LinearClosureWithSens,
 };
 use scalar::{IndexType, Scalar, Scale};
-use solver::SolverProblem;
 pub use vector::DefaultDenseMatrix;
 use vector::{Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut};
 

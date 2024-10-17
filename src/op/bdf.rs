@@ -1,6 +1,7 @@
 use crate::{
-    matrix::DenseMatrix, ode_solver::equations::OdeEquations, scale, LinearOp, Matrix, MatrixRef,
-    MatrixSparsity, MatrixSparsityRef, OdeSolverProblem, Vector, VectorRef,
+    matrix::DenseMatrix, ode_solver::equations::OdeEquationsImplicit, scale, LinearOp, Matrix,
+    MatrixRef, MatrixSparsity, MatrixSparsityRef, NonLinearOp, NonLinearOpJacobian,
+    OdeSolverProblem, Op, Vector, VectorRef,
 };
 use num_traits::{One, Zero};
 use std::ops::MulAssign;
@@ -10,10 +11,8 @@ use std::{
     rc::Rc,
 };
 
-use super::{NonLinearOp, Op};
-
 // callable to solve for F(y) = M (y' + psi) - c * f(y) = 0
-pub struct BdfCallable<Eqn: OdeEquations> {
+pub struct BdfCallable<Eqn: OdeEquationsImplicit> {
     eqn: Rc<Eqn>,
     psi_neg_y0: RefCell<Eqn::V>,
     c: RefCell<Eqn::T>,
@@ -25,8 +24,26 @@ pub struct BdfCallable<Eqn: OdeEquations> {
     sparsity: Option<<Eqn::M as Matrix>::Sparsity>,
 }
 
-impl<Eqn: OdeEquations> BdfCallable<Eqn> {
-    pub fn from_eqn(eqn: &Rc<Eqn>) -> Self {
+impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
+    // F(y) = M (y - y0 + psi) - c * f(y) = 0
+    // M = I
+    // dg = f(y)
+    // g - y0 + psi = c * dg
+    // g - y0 = c * dg - psi
+    pub fn integrate_out<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
+        &self,
+        dg: &Eqn::V,
+        diff: &M,
+        gamma: &[Eqn::T],
+        alpha: &[Eqn::T],
+        order: usize,
+        d: &mut Eqn::V,
+    ) {
+        self.set_psi(diff, gamma, alpha, order, d);
+        let c = self.c.borrow();
+        d.axpy(*c, dg, -Eqn::T::one());
+    }
+    pub fn from_sensitivity_eqn(eqn: &Rc<Eqn>) -> Self {
         let eqn = eqn.clone();
         let n = eqn.rhs().nstates();
         let c = RefCell::new(Eqn::T::zero());
@@ -48,6 +65,9 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
             tmp,
             sparsity,
         }
+    }
+    pub fn eqn_mut(&mut self) -> &mut Rc<Eqn> {
+        &mut self.eqn
     }
     pub fn eqn(&self) -> &Rc<Eqn> {
         &self.eqn
@@ -133,6 +153,21 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
     {
         self.c.replace(h * alpha);
     }
+    fn set_psi<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
+        &self,
+        diff: &M,
+        gamma: &[Eqn::T],
+        alpha: &[Eqn::T],
+        order: usize,
+        psi: &mut Eqn::V,
+    ) {
+        // update psi term as defined in second equation on page 9 of [1]
+        psi.axpy_v(gamma[1], &diff.column(1), Eqn::T::zero());
+        for (i, &gamma_i) in gamma.iter().enumerate().take(order + 1).skip(2) {
+            psi.axpy_v(gamma_i, &diff.column(i), Eqn::T::one());
+        }
+        psi.mul_assign(scale(alpha[order]));
+    }
     pub fn set_psi_and_y0<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
         &self,
         diff: &M,
@@ -141,13 +176,8 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
         order: usize,
         y0: &Eqn::V,
     ) {
-        // update psi term as defined in second equation on page 9 of [1]
         let mut psi = self.psi_neg_y0.borrow_mut();
-        psi.axpy_v(gamma[1], &diff.column(1), Eqn::T::zero());
-        for (i, &gamma_i) in gamma.iter().enumerate().take(order + 1).skip(2) {
-            psi.axpy_v(gamma_i, &diff.column(i), Eqn::T::one());
-        }
-        psi.mul_assign(scale(alpha[order]));
+        self.set_psi(diff, gamma, alpha, order, &mut psi);
 
         // now negate y0
         psi.sub_assign(y0);
@@ -157,7 +187,7 @@ impl<Eqn: OdeEquations> BdfCallable<Eqn> {
     }
 }
 
-impl<Eqn: OdeEquations> Op for BdfCallable<Eqn> {
+impl<Eqn: OdeEquationsImplicit> Op for BdfCallable<Eqn> {
     type V = Eqn::V;
     type T = Eqn::T;
     type M = Eqn::M;
@@ -178,7 +208,7 @@ impl<Eqn: OdeEquations> Op for BdfCallable<Eqn> {
 // dF(y)/dp = dM/dp (y - y0 + psi) + Ms - c * df(y)/dp - c df(y)/dy s = 0
 // jac is M - c * df(y)/dy, same
 // callable to solve for F(y) = M (y' + psi) - f(y) = 0
-impl<Eqn: OdeEquations> NonLinearOp for BdfCallable<Eqn>
+impl<Eqn: OdeEquationsImplicit> NonLinearOp for BdfCallable<Eqn>
 where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
@@ -201,6 +231,13 @@ where
             y.axpy(Eqn::T::one(), &tmp, -c);
         }
     }
+}
+
+impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for BdfCallable<Eqn>
+where
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+{
     // (M - c * f'(y)) v
     fn jac_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
         self.eqn.rhs().jac_mul_inplace(x, t, v, y);
@@ -244,8 +281,8 @@ where
 #[cfg(test)]
 mod tests {
     use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
-    use crate::op::NonLinearOp;
     use crate::vector::Vector;
+    use crate::{NonLinearOp, NonLinearOpJacobian};
 
     use super::BdfCallable;
     type Mcpu = nalgebra::DMatrix<f64>;

@@ -233,6 +233,10 @@ impl<'a, T: Scalar> VectorViewMut<'a> for ColMut<'a, T> {
     fn copy_from_view(&mut self, other: &Self::View) {
         self.copy_from(other);
     }
+    fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
+        zipped!(self.as_mut(), x.as_view())
+            .for_each(|unzipped!(mut si, xi)| si.write(si.read() * beta + xi.read() * alpha));
+    }
 }
 
 // tests
