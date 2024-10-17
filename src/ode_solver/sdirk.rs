@@ -294,7 +294,8 @@ where
         if abs(state.t - tstop) <= troundoff {
             self.tstop = None;
             return Ok(Some(OdeSolverStopReason::TstopReached));
-        } else if tstop < state.t - troundoff {
+        } else if (state.h > M::T::zero() && tstop < state.t - troundoff)
+            || (state.h < M::T::zero() && tstop > state.t + troundoff) {
             return Err(DiffsolError::from(
                 OdeSolverError::StopTimeBeforeCurrentTime {
                     stop_time: tstop.into(),
@@ -304,7 +305,8 @@ where
         }
 
         // check if the next step will be beyond tstop, if so adjust the step size
-        if state.t + state.h > tstop + troundoff {
+        if (state.h > M::T::zero() && state.t + state.h > tstop + troundoff)
+            || (state.h < M::T::zero() && state.t + state.h < tstop - troundoff) {
             let factor = (tstop - state.t) / state.h;
             state.h *= factor;
             self.op.as_mut().unwrap().set_h(state.h);
@@ -563,6 +565,14 @@ where
                         hf.copy_from(dy);
                         hf *= scale(h);
                     }
+                }
+                
+                // output function
+                if self.problem.as_ref().unwrap().integrate_out {
+                    let state = self.state.as_ref().unwrap();
+                    let mut hf = self.gdiff.column_mut(0);
+                    hf.copy_from(&state.dg);
+                    hf *= scale(h);
                 }
             }
 
