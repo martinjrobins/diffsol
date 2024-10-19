@@ -5,7 +5,7 @@ use crate::{
     ode_solver_error,
     vector::DefaultDenseMatrix,
     Closure, ClosureNoJac, ClosureWithSens, ConstantClosure, ConstantClosureWithSens,
-    LinearClosure, Matrix, OdeEquations, OdeSolverProblem, Op, UnitCallable, Vector,
+    LinearClosure, Matrix, OdeSolverProblem, UnitCallable, Vector,
 };
 
 use super::equations::OdeSolverEquations;
@@ -16,6 +16,12 @@ pub struct OdeBuilder {
     h0: f64,
     rtol: f64,
     atol: Vec<f64>,
+    sens_atol: Option<Vec<f64>>,
+    sens_rtol: Option<f64>,
+    out_rtol: Option<f64>,
+    out_atol: Option<Vec<f64>>,
+    param_rtol: Option<f64>,
+    param_atol: Option<Vec<f64>>,
     p: Vec<f64>,
     use_coloring: bool,
     integrate_out: bool,
@@ -82,12 +88,60 @@ impl OdeBuilder {
             p: vec![],
             use_coloring: false,
             integrate_out: false,
+            out_rtol: None,
+            out_atol: None,
+            param_rtol: None,
+            param_atol: None,
+            sens_atol: None,
+            sens_rtol: None,
         }
     }
 
     /// Set the initial time.
     pub fn t0(mut self, t0: f64) -> Self {
         self.t0 = t0;
+        self
+    }
+
+    pub fn sens_rtol(mut self, sens_rtol: Option<f64>) -> Self {
+        self.sens_rtol = sens_rtol;
+        self
+    }
+
+    pub fn sens_atol<V, T>(mut self, sens_atol: Option<V>) -> Self
+    where
+        V: IntoIterator<Item = T>,
+        f64: From<T>,
+    {
+        self.sens_atol = sens_atol.map(|atol| atol.into_iter().map(|x| f64::from(x)).collect());
+        self
+    }
+
+    pub fn out_rtol(mut self, out_rtol: Option<f64>) -> Self {
+        self.out_rtol = out_rtol;
+        self
+    }
+
+    pub fn out_atol<V, T>(mut self, out_atol: Option<V>) -> Self
+    where
+        V: IntoIterator<Item = T>,
+        f64: From<T>,
+    {
+        self.out_atol = out_atol.map(|atol| atol.into_iter().map(|x| f64::from(x)).collect());
+        self
+    }
+
+    pub fn param_rtol(mut self, param_rtol: Option<f64>) -> Self {
+        self.param_rtol = param_rtol;
+        self
+    }
+
+    pub fn param_atol<V, T>(mut self, param_atol: Option<V>) -> Self
+    where
+        V: IntoIterator<Item = T>,
+        f64: From<T>,
+    {
+        self.param_atol = param_atol.map(|atol| atol.into_iter().map(|x| f64::from(x)).collect());
         self
     }
 
@@ -140,11 +194,19 @@ impl OdeBuilder {
         self
     }
 
-    fn build_atol<V: Vector>(atol: Vec<f64>, nstates: usize) -> Result<V, DiffsolError> {
+    fn build_atol<V: Vector>(atol: Vec<f64>, nstates: usize, ty: &str) -> Result<V, DiffsolError> {
         if atol.len() == 1 {
             Ok(V::from_element(nstates, V::T::from(atol[0])))
         } else if atol.len() != nstates {
-            Err(ode_solver_error!(AtolLengthMismatch))
+            Err(ode_solver_error!(
+                BuilderError,
+                format!(
+                    "Invalid number of {} absolute tolerances. Expected 1 or {}, got {}.",
+                    ty,
+                    nstates,
+                    atol.len()
+                )
+            ))
         } else {
             let mut v = V::zeros(nstates);
             for (i, &a) in atol.iter().enumerate() {
@@ -152,6 +214,37 @@ impl OdeBuilder {
             }
             Ok(v)
         }
+    }
+
+    fn build_atols<V: Vector>(
+        atol: Vec<f64>,
+        sens_atol: Option<Vec<f64>>,
+        out_atol: Option<Vec<f64>>,
+        param_atol: Option<Vec<f64>>,
+        nstates: usize,
+        nout: Option<usize>,
+        nparam: usize,
+    ) -> Result<(V, Option<V>, Option<V>, Option<V>), DiffsolError> {
+        if out_atol.is_some() && nout.is_none() {
+            return Err(ode_solver_error!(
+                BuilderError,
+                "Output absolute tolerance provided, but output equation not defined.".to_string()
+            ));
+        }
+        let atol = Self::build_atol(atol, nstates, "states")?;
+        let out_atol = match out_atol {
+            Some(out_atol) => Some(Self::build_atol(out_atol, nout.unwrap(), "output")?),
+            None => None,
+        };
+        let param_atol = match param_atol {
+            Some(param_atol) => Some(Self::build_atol(param_atol, nparam, "parameters")?),
+            None => None,
+        };
+        let sens_atol = match sens_atol {
+            Some(sens_atol) => Some(Self::build_atol(sens_atol, nstates, "sensitivity")?),
+            None => None,
+        };
+        Ok((atol, sens_atol, out_atol, param_atol))
     }
 
     fn build_p<V: Vector>(p: Vec<f64>) -> V {
@@ -237,12 +330,27 @@ impl OdeBuilder {
         let mass = Some(Rc::new(mass));
         let rhs = Rc::new(rhs);
         let init = Rc::new(init);
+        let nparams = p.len();
+        let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
+            self.atol,
+            self.sens_atol,
+            self.out_atol,
+            self.param_atol,
+            nstates,
+            None,
+            nparams,
+        )?;
         let eqn = OdeSolverEquations::new(rhs, mass, None, init, None, p);
-        let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
         OdeSolverProblem::new(
             eqn,
             M::T::from(self.rtol),
             atol,
+            self.sens_rtol.map(M::T::from),
+            sens_atol,
+            self.out_rtol.map(M::T::from),
+            out_atol,
+            self.param_rtol.map(M::T::from),
+            param_atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
             self.integrate_out,
@@ -286,6 +394,7 @@ impl OdeBuilder {
         let t0 = M::T::from(self.t0);
         let y0 = init(&p, t0);
         let nstates = y0.len();
+        let nparams = p.len();
         let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
         let out = Closure::new(out, out_jac, nstates, nout, p.clone());
         let mut mass = LinearClosure::new(mass, nstates, nstates, p.clone());
@@ -299,11 +408,25 @@ impl OdeBuilder {
         let init = Rc::new(init);
         let out = Some(Rc::new(out));
         let eqn = OdeSolverEquations::new(rhs, mass, None, init, out, p);
-        let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
+        let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
+            self.atol,
+            self.sens_atol,
+            self.out_atol,
+            self.param_atol,
+            nstates,
+            Some(nout),
+            nparams,
+        )?;
         OdeSolverProblem::new(
             eqn,
             M::T::from(self.rtol),
             atol,
+            self.sens_rtol.map(M::T::from),
+            sens_atol,
+            self.out_rtol.map(M::T::from),
+            out_atol,
+            self.param_rtol.map(M::T::from),
+            param_atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
             self.integrate_out,
@@ -368,12 +491,27 @@ impl OdeBuilder {
         }
         let rhs = Rc::new(rhs);
         let init = Rc::new(init);
+        let nparams = p.len();
         let eqn = OdeSolverEquations::new(rhs, None, None, init, None, p);
-        let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
+        let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
+            self.atol,
+            self.sens_atol,
+            self.out_atol,
+            self.param_atol,
+            nstates,
+            None,
+            nparams,
+        )?;
         OdeSolverProblem::new(
             eqn,
             M::T::from(self.rtol),
             atol,
+            self.sens_rtol.map(M::T::from),
+            sens_atol,
+            self.out_rtol.map(M::T::from),
+            out_atol,
+            self.param_rtol.map(M::T::from),
+            param_atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
             self.integrate_out,
@@ -444,12 +582,27 @@ impl OdeBuilder {
         }
         let rhs = Rc::new(rhs);
         let init = Rc::new(init);
+        let nparams = p.len();
         let eqn = OdeSolverEquations::new(rhs, None, None, init, None, p);
-        let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
+        let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
+            self.atol,
+            self.sens_atol,
+            self.out_atol,
+            self.param_atol,
+            nstates,
+            None,
+            nparams,
+        )?;
         OdeSolverProblem::new(
             eqn,
             M::T::from(self.rtol),
             atol,
+            self.sens_rtol.map(M::T::from),
+            sens_atol,
+            self.out_rtol.map(M::T::from),
+            out_atol,
+            self.param_rtol.map(M::T::from),
+            param_atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
             self.integrate_out,
@@ -532,12 +685,27 @@ impl OdeBuilder {
         }
         let rhs = Rc::new(rhs);
         let init = Rc::new(init);
+        let nparams = p.len();
         let eqn = OdeSolverEquations::new(rhs, None, Some(root), init, None, p);
-        let atol = Self::build_atol(self.atol, eqn.rhs().nstates())?;
+        let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
+            self.atol,
+            self.sens_atol,
+            self.out_atol,
+            self.param_atol,
+            nstates,
+            None,
+            nparams,
+        )?;
         OdeSolverProblem::new(
             eqn,
             M::T::from(self.rtol),
             atol,
+            self.sens_rtol.map(M::T::from),
+            sens_atol,
+            self.out_rtol.map(M::T::from),
+            out_atol,
+            self.param_rtol.map(M::T::from),
+            param_atol,
             M::T::from(self.t0),
             M::T::from(self.h0),
             self.integrate_out,
@@ -576,10 +744,35 @@ impl OdeBuilder {
         CG: diffsl::execution::module::CodegenModule,
     {
         use crate::ode_solver::diffsl;
+        use crate::{OdeEquations, Op};
         let p = Self::build_p::<M::V>(self.p);
+        let nparams = p.len();
         let mut eqn = diffsl::DiffSl::new(context, self.use_coloring || M::is_sparse());
+        let nstates = eqn.rhs().nstates();
+        let nout = eqn.out().map(|out| out.nout());
         eqn.set_params(p);
-        let atol = Self::build_atol::<M::V>(self.atol, eqn.rhs().nstates())?;
-        OdeSolverProblem::new(eqn, self.rtol, atol, self.t0, self.h0, self.integrate_out)
+        let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
+            self.atol,
+            self.sens_atol,
+            self.out_atol,
+            self.param_atol,
+            nstates,
+            nout,
+            nparams,
+        )?;
+        OdeSolverProblem::new(
+            eqn,
+            self.rtol,
+            atol,
+            self.sens_rtol.map(M::T::from),
+            sens_atol,
+            self.out_rtol.map(M::T::from),
+            out_atol,
+            self.param_rtol.map(M::T::from),
+            param_atol,
+            self.t0,
+            self.h0,
+            self.integrate_out,
+        )
     }
 }

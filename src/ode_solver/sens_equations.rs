@@ -4,7 +4,7 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     matrix::sparsity::MatrixSparsityRef, op::nonlinear_op::NonLinearOpJacobian,
     AugmentedOdeEquations, ConstantOp, ConstantOpSens, Matrix, NonLinearOp, NonLinearOpSens,
-    OdeEquations, OdeEquationsSens, Op, Vector,
+    OdeEquations, OdeEquationsSens, OdeSolverProblem, Op, Vector,
 };
 
 pub struct SensInit<Eqn>
@@ -205,7 +205,8 @@ where
     eqn: Rc<Eqn>,
     rhs: Rc<SensRhs<Eqn>>,
     init: Rc<SensInit<Eqn>>,
-    include_in_error_control: bool,
+    atol: Option<Rc<Eqn::V>>,
+    rtol: Option<Eqn::T>,
 }
 
 impl<Eqn> std::fmt::Debug for SensEquations<Eqn>
@@ -221,14 +222,18 @@ impl<Eqn> SensEquations<Eqn>
 where
     Eqn: OdeEquationsSens,
 {
-    pub(crate) fn new(eqn: &Rc<Eqn>) -> Self {
+    pub(crate) fn new(problem: &OdeSolverProblem<Eqn>) -> Self {
+        let eqn = &problem.eqn;
+        let rtol = problem.sens_rtol;
+        let atol = problem.sens_atol.clone();
         let rhs = Rc::new(SensRhs::new(eqn, true));
         let init = Rc::new(SensInit::new(eqn));
         Self {
             rhs,
             init,
             eqn: eqn.clone(),
-            include_in_error_control: false,
+            rtol,
+            atol,
         }
     }
 }
@@ -287,17 +292,24 @@ where
 
 impl<Eqn: OdeEquationsSens> AugmentedOdeEquations<Eqn> for SensEquations<Eqn> {
     fn include_in_error_control(&self) -> bool {
-        self.include_in_error_control
+        self.rtol.is_some() && self.atol.is_some()
     }
-    fn set_include_in_error_control(&mut self, include: bool) {
-        self.include_in_error_control = include;
-    }
-    fn set_integrate_out(&mut self, _integrate_out: bool) {
-        panic!("Not implemented for SensEquations");
-    }
-    fn integrate_out(&self) -> bool {
+    fn include_out_in_error_control(&self) -> bool {
         false
     }
+    fn rtol(&self) -> Option<Eqn::T> {
+        self.rtol
+    }
+    fn atol(&self) -> Option<&Rc<Eqn::V>> {
+        self.atol.as_ref()
+    }
+    fn out_atol(&self) -> Option<&Rc<Eqn::V>> {
+        None
+    }
+    fn out_rtol(&self) -> Option<Eqn::T> {
+        None
+    }
+
     fn max_index(&self) -> usize {
         self.nparams()
     }
@@ -330,7 +342,7 @@ mod tests {
     fn test_rhs_exponential() {
         // dy/dt = -ay (p = [a])
         let (problem, _soln) = exponential_decay_problem_sens::<Mcpu>(false);
-        let mut sens_eqn = SensEquations::new(&problem.eqn);
+        let mut sens_eqn = SensEquations::new(&problem);
         let state = SdirkState {
             t: 0.0,
             y: Vcpu::from_vec(vec![1.0, 1.0]),
@@ -370,7 +382,7 @@ mod tests {
     #[test]
     fn test_rhs_exponential_algebraic() {
         let (problem, _soln) = exponential_decay_with_algebraic_problem_sens::<Mcpu>();
-        let mut sens_eqn = SensEquations::new(&problem.eqn);
+        let mut sens_eqn = SensEquations::new(&problem);
         let state = SdirkState {
             t: 0.0,
             y: Vcpu::from_vec(vec![1.0, 1.0, 1.0]),
@@ -419,7 +431,7 @@ mod tests {
     #[test]
     fn test_rhs_robertson() {
         let (problem, _soln) = robertson_sens::<Mcpu>();
-        let mut sens_eqn = SensEquations::new(&problem.eqn);
+        let mut sens_eqn = SensEquations::new(&problem);
         let state = SdirkState {
             t: 0.0,
             y: Vcpu::from_vec(vec![1.0, 2.0, 3.0]),

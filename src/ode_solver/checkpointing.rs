@@ -141,12 +141,14 @@ where
         let problem = solver.problem().unwrap().clone();
         let segment = segment.unwrap_or_else(|| {
             let mut segment = HermiteInterpolator::default();
-            segment.reset(
-                &problem,
-                &mut solver,
-                &checkpoints[start_idx],
-                &checkpoints[start_idx + 1],
-            ).unwrap();
+            segment
+                .reset(
+                    &problem,
+                    &mut solver,
+                    &checkpoints[start_idx],
+                    &checkpoints[start_idx + 1],
+                )
+                .unwrap();
             segment
         });
         let segment = RefCell::new(segment);
@@ -250,7 +252,8 @@ mod tests {
         }
         checkpoints.push(solver.checkpoint().unwrap());
         let segment = HermiteInterpolator::new(ys, ydots, ts);
-        let checkpointer = Checkpointing::new(solver, checkpoints.len() - 2, checkpoints, Some(segment));
+        let checkpointer =
+            Checkpointing::new(solver, checkpoints.len() - 2, checkpoints, Some(segment));
         let mut y = DVector::zeros(problem.eqn.rhs().nstates());
         for point in soln.solution_points.iter().rev() {
             checkpointer.interpolate(point.t, &mut y).unwrap();

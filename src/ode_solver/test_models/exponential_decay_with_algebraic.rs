@@ -293,8 +293,28 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: Matrix + 'static>() -
     let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p.clone());
     let rtol = M::T::from(1e-6);
     let atol = M::V::from_element(nstates, M::T::from(1e-6));
+    let out_rtol = Some(M::T::from(1e-6));
+    let out_atol = Some(M::V::from_element(nout, M::T::from(1e-6)));
+    let param_rtol = Some(M::T::from(1e-6));
+    let param_atol = Some(M::V::from_element(1, M::T::from(1e-6)));
+    let sens_atol = Some(M::V::from_element(nstates, M::T::from(1e-6)));
+    let sens_rtol = Some(M::T::from(1e-6));
     let integrate_out = true;
-    let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, integrate_out).unwrap();
+    let problem = OdeSolverProblem::new(
+        eqn,
+        rtol,
+        atol,
+        sens_rtol,
+        sens_atol,
+        out_rtol,
+        out_atol,
+        param_rtol,
+        param_atol,
+        t0,
+        h0,
+        integrate_out,
+    )
+    .unwrap();
     let atol_out = M::V::from_element(nout, M::T::from(1e-6));
     let mut soln = OdeSolverSolution {
         atol: atol_out,
@@ -355,10 +375,18 @@ pub fn exponential_decay_with_algebraic_problem_sens<M: Matrix + 'static>() -> (
         out,
         p.clone(),
     );
+    let sens_rtol = Some(M::T::from(1e-6));
+    let sens_atol = Some(M::V::from_element(3, M::T::from(1e-6)));
     let problem = OdeSolverProblem::new(
         eqn,
         M::T::from(1e-6),
         M::V::from_element(3, M::T::from(1e-6)),
+        sens_rtol,
+        sens_atol,
+        None,
+        None,
+        None,
+        None,
         t0,
         M::T::from(1.0),
         false,

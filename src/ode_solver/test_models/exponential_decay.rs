@@ -286,8 +286,28 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>() -> (
     let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p.clone());
     let rtol = M::T::from(1e-6);
     let atol = M::V::from_element(nstates, M::T::from(1e-6));
+    let out_rtol = Some(M::T::from(1e-6));
+    let out_atol = Some(M::V::from_element(nout, M::T::from(1e-6)));
+    let param_rtol = Some(M::T::from(1e-6));
+    let param_atol = Some(M::V::from_element(p.len(), M::T::from(1e-6)));
+    let sens_rtol = Some(M::T::from(1e-6));
+    let sens_atol = Some(M::V::from_element(nstates, M::T::from(1e-6)));
     let integrate_out = true;
-    let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, integrate_out).unwrap();
+    let problem = OdeSolverProblem::new(
+        eqn,
+        rtol,
+        atol,
+        sens_rtol,
+        sens_atol,
+        out_rtol,
+        out_atol,
+        param_rtol,
+        param_atol,
+        t0,
+        h0,
+        integrate_out,
+    )
+    .unwrap();
     let mut soln = OdeSolverSolution {
         atol: problem.atol.as_ref().clone(),
         rtol: problem.rtol,
@@ -332,6 +352,8 @@ pub fn exponential_decay_problem_sens<M: Matrix + 'static>(
     let y0 = 1.0;
     let problem = OdeBuilder::new()
         .p([k, y0])
+        .sens_rtol(Some(1e-6))
+        .sens_atol(Some([1e-6, 1e-6]))
         .use_coloring(use_coloring)
         .build_ode_with_sens(
             exponential_decay::<M>,

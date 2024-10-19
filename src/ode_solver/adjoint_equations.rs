@@ -4,7 +4,8 @@ use std::{cell::RefCell, ops::AddAssign, ops::SubAssign, rc::Rc};
 use crate::{
     op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, Checkpointing, ConstantOp,
     ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint, OdeSolverMethod, Op, Vector,
+    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint, OdeSolverMethod, OdeSolverProblem,
+    Op, Vector,
 };
 
 pub struct AdjointContext<Eqn, Method>
@@ -394,7 +395,10 @@ where
     tmp: RefCell<Eqn::V>,
     tmp2: RefCell<Eqn::V>,
     init: Rc<AdjointInit<Eqn>>,
-    include_in_error_control: bool,
+    atol: Option<Rc<Eqn::V>>,
+    rtol: Option<Eqn::T>,
+    out_rtol: Option<Eqn::T>,
+    out_atol: Option<Rc<Eqn::V>>,
 }
 
 impl<Eqn, Method> AdjointEquations<Eqn, Method>
@@ -403,14 +407,15 @@ where
     Method: OdeSolverMethod<Eqn>,
 {
     pub(crate) fn new(
-        eqn: &Rc<Eqn>,
+        problem: &OdeSolverProblem<Eqn>,
         context: Rc<RefCell<AdjointContext<Eqn, Method>>>,
         with_out: bool,
     ) -> Self {
-        let rhs = Rc::new(AdjointRhs::new(eqn, context.clone(), with_out));
-        let init = Rc::new(AdjointInit::new(eqn));
+        let eqn = problem.eqn.clone();
+        let rhs = Rc::new(AdjointRhs::new(&eqn, context.clone(), with_out));
+        let init = Rc::new(AdjointInit::new(&eqn));
         let out = if with_out {
-            Some(Rc::new(AdjointOut::new(eqn, context.clone(), with_out)))
+            Some(Rc::new(AdjointOut::new(&eqn, context.clone(), with_out)))
         } else {
             None
         };
@@ -424,7 +429,19 @@ where
         } else {
             RefCell::new(<Eqn::V as Vector>::zeros(eqn.rhs().nstates()))
         };
-        let mass = eqn.mass().map(|_m| Rc::new(AdjointMass::new(eqn)));
+        let atol = if with_out {
+            problem.sens_atol.clone()
+        } else {
+            None
+        };
+        let rtol = if with_out { problem.sens_rtol } else { None };
+        let out_atol = if with_out {
+            problem.out_atol.clone()
+        } else {
+            None
+        };
+        let out_rtol = if with_out { problem.out_rtol } else { None };
+        let mass = eqn.mass().map(|_m| Rc::new(AdjointMass::new(&eqn)));
         Self {
             rhs,
             init,
@@ -433,8 +450,11 @@ where
             out,
             tmp,
             tmp2,
-            eqn: eqn.clone(),
-            include_in_error_control: false,
+            eqn,
+            atol,
+            rtol,
+            out_rtol,
+            out_atol,
         }
     }
 
@@ -526,6 +546,26 @@ where
     Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
+    fn include_in_error_control(&self) -> bool {
+        self.atol.is_some() && self.rtol.is_some()
+    }
+    fn include_out_in_error_control(&self) -> bool {
+        self.out_atol.is_some() && self.out_rtol.is_some()
+    }
+
+    fn atol(&self) -> Option<&Rc<Eqn::V>> {
+        self.atol.as_ref()
+    }
+    fn out_atol(&self) -> Option<&Rc<Eqn::V>> {
+        self.out_atol.as_ref()
+    }
+    fn out_rtol(&self) -> Option<Eqn::T> {
+        self.out_rtol
+    }
+    fn rtol(&self) -> Option<Eqn::T> {
+        self.rtol
+    }
+
     fn max_index(&self) -> usize {
         self.eqn.out().map(|o| o.nout()).unwrap_or(0)
     }
@@ -535,22 +575,6 @@ where
     }
 
     fn update_rhs_out_state(&mut self, _y: &Eqn::V, _dy: &Eqn::V, _t: Eqn::T) {}
-
-    fn integrate_out(&self) -> bool {
-        true
-    }
-
-    fn set_integrate_out(&mut self, _integrate_out: bool) {
-        panic!("Not implemented for AdjointEquations");
-    }
-
-    fn include_in_error_control(&self) -> bool {
-        self.include_in_error_control
-    }
-
-    fn set_include_in_error_control(&mut self, include: bool) {
-        self.include_in_error_control = include;
-    }
 
     fn update_init_state(&mut self, _t: <Eqn as OdeEquations>::T) {}
 }
@@ -565,8 +589,8 @@ mod tests {
             test_models::exponential_decay::exponential_decay_problem_adjoint,
         },
         AdjointContext, AugmentedOdeEquations, Checkpointing, FaerSparseLU, Matrix, MatrixCommon,
-        NalgebraLU, NonLinearOp, NonLinearOpJacobian, Sdirk, SdirkState, SparseColMat, Tableau,
-        Vector, OdeSolverMethod
+        NalgebraLU, NonLinearOp, NonLinearOpJacobian, OdeSolverMethod, Sdirk, SdirkState,
+        SparseColMat, Tableau, Vector,
     };
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;
@@ -590,10 +614,9 @@ mod tests {
             h: 0.0,
         };
         solver.set_problem(state.clone(), &problem).unwrap();
-        let checkpointer =
-            Checkpointing::new(solver, 0, vec![state.clone(), state.clone()], None);
+        let checkpointer = Checkpointing::new(solver, 0, vec![state.clone(), state.clone()], None);
         let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
-        let adj_eqn = AdjointEquations::new(&problem.eqn, context.clone(), false);
+        let adj_eqn = AdjointEquations::new(&problem, context.clone(), false);
         // F(λ, x, t) = -f^T_x(x, t) λ
         // f_x = |-a 0|
         //       |0 -a|
@@ -604,7 +627,7 @@ mod tests {
         let f_expect = Vcpu::from_vec(vec![0.1, 0.2]);
         f.assert_eq_st(&f_expect, 1e-10);
 
-        let mut adj_eqn = AdjointEquations::new(&problem.eqn, context.clone(), true);
+        let mut adj_eqn = AdjointEquations::new(&problem, context.clone(), true);
 
         // f_x^T = |-a 0|
         //         |0 -a|
@@ -663,10 +686,9 @@ mod tests {
             h: 0.0,
         };
         solver.set_problem(state.clone(), &problem).unwrap();
-        let checkpointer =
-            Checkpointing::new(solver, 0, vec![state.clone(), state.clone()], None);
+        let checkpointer = Checkpointing::new(solver, 0, vec![state.clone(), state.clone()], None);
         let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
-        let mut adj_eqn = AdjointEquations::new(&problem.eqn, context, true);
+        let mut adj_eqn = AdjointEquations::new(&problem, context, true);
 
         // f_x^T = |-a 0|
         //         |0 -a|

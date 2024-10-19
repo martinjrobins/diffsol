@@ -167,7 +167,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         Eqn::M: DefaultSolver,
         S: SensitivitiesOdeSolverMethod<Eqn>,
     {
-        let augmented_eqn = SensEquations::new(&ode_problem.eqn);
+        let augmented_eqn = SensEquations::new(ode_problem);
         Self::new_with_augmented(ode_problem, augmented_eqn, solver).map(|(state, _)| state)
     }
 
@@ -256,7 +256,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         }
         state.s = s;
         state.ds = ds;
-        let (dsg, sg) = if augmented_eqn.integrate_out() {
+        let (dsg, sg) = if augmented_eqn.out().is_some() {
             let mut sg = Vec::with_capacity(naug);
             let mut dsg = Vec::with_capacity(naug);
             for i in 0..naug {

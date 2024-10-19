@@ -126,8 +126,8 @@ where
             return Err(ode_solver_error!(StateProblemMismatch));
         }
         let (sgdiff_len, sgdiff_size) = if let Some(_out) = augmented_eqn.out() {
-            if augmented_eqn.integrate_out() {
-                (naug, augmented_eqn.out().unwrap().nout())
+            if let Some(out) = augmented_eqn.out() {
+                (naug, out.nout())
             } else {
                 (0, 0)
             }

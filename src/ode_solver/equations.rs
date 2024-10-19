@@ -41,10 +41,12 @@ pub trait AugmentedOdeEquations<Eqn: OdeEquations>:
     fn update_init_state(&mut self, t: Eqn::T);
     fn set_index(&mut self, index: usize);
     fn max_index(&self) -> usize;
-    fn set_include_in_error_control(&mut self, include: bool);
     fn include_in_error_control(&self) -> bool;
-    fn set_integrate_out(&mut self, integrate_out: bool);
-    fn integrate_out(&self) -> bool;
+    fn include_out_in_error_control(&self) -> bool;
+    fn rtol(&self) -> Option<Eqn::T>;
+    fn atol(&self) -> Option<&Rc<Eqn::V>>;
+    fn out_rtol(&self) -> Option<Eqn::T>;
+    fn out_atol(&self) -> Option<&Rc<Eqn::V>>;
 }
 
 pub trait AugmentedOdeEquationsImplicit<Eqn: OdeEquations>:
@@ -108,19 +110,25 @@ impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
     fn set_index(&mut self, _index: usize) {
         panic!("This should never be called")
     }
-    fn set_integrate_out(&mut self, _integrate_out: bool) {
+    fn atol(&self) -> Option<&Rc<<Eqn as OdeEquations>::V>> {
         panic!("This should never be called")
     }
-    fn integrate_out(&self) -> bool {
-        true
+    fn include_out_in_error_control(&self) -> bool {
+        panic!("This should never be called")
+    }
+    fn out_atol(&self) -> Option<&Rc<<Eqn as OdeEquations>::V>> {
+        panic!("This should never be called")
+    }
+    fn out_rtol(&self) -> Option<<Eqn as OdeEquations>::T> {
+        panic!("This should never be called")
+    }
+    fn rtol(&self) -> Option<<Eqn as OdeEquations>::T> {
+        panic!("This should never be called")
     }
     fn max_index(&self) -> usize {
         panic!("This should never be called")
     }
     fn include_in_error_control(&self) -> bool {
-        panic!("This should never be called")
-    }
-    fn set_include_in_error_control(&mut self, _include: bool) {
         panic!("This should never be called")
     }
 }
@@ -286,10 +294,17 @@ impl<T> OdeEquationsAdjoint for T where
 ///
 /// let rtol = 1e-6;
 /// let atol = V::from_vec(vec![1e-6]);
+/// let out_rtol = None;
+/// let out_atol = None;
+/// let sens_atol = None;
+/// let sens_rtol = None;
+/// let param_atol = None;
+/// let param_rtol = None;
+///
 /// let t0 = 0.0;
 /// let h0 = 0.1;
 /// let integrate_out = false;
-/// let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, integrate_out).unwrap();
+/// let problem = OdeSolverProblem::new(eqn, rtol, atol, sens_rtol, sens_atol, out_rtol, out_atol, param_rtol, param_atol, t0, h0, integrate_out).unwrap();
 ///
 /// let mut solver = Bdf::default();
 /// let t = 0.4;

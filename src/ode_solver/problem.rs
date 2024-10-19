@@ -14,6 +14,12 @@ pub struct OdeSolverProblem<Eqn: OdeEquations> {
     pub t0: Eqn::T,
     pub h0: Eqn::T,
     pub integrate_out: bool,
+    pub sens_rtol: Option<Eqn::T>,
+    pub sens_atol: Option<Rc<Eqn::V>>,
+    pub out_rtol: Option<Eqn::T>,
+    pub out_atol: Option<Rc<Eqn::V>>,
+    pub param_rtol: Option<Eqn::T>,
+    pub param_atol: Option<Rc<Eqn::V>>,
 }
 
 // impl clone
@@ -26,6 +32,12 @@ impl<Eqn: OdeEquations> Clone for OdeSolverProblem<Eqn> {
             t0: self.t0,
             h0: self.h0,
             integrate_out: self.integrate_out,
+            out_atol: self.out_atol.clone(),
+            out_rtol: self.out_rtol,
+            param_atol: self.param_atol.clone(),
+            param_rtol: self.param_rtol,
+            sens_atol: self.sens_atol.clone(),
+            sens_rtol: self.sens_rtol,
         }
     }
 }
@@ -37,20 +49,38 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
     pub fn default_atol(nstates: usize) -> Eqn::V {
         Eqn::V::from_element(nstates, Eqn::T::from(1e-6))
     }
+    pub fn output_in_error_control(&self) -> bool {
+        self.out_rtol.is_some() && self.out_atol.is_some()
+    }
     pub fn new(
         eqn: Eqn,
         rtol: Eqn::T,
         atol: Eqn::V,
+        sens_rtol: Option<Eqn::T>,
+        sens_atol: Option<Eqn::V>,
+        out_rtol: Option<Eqn::T>,
+        out_atol: Option<Eqn::V>,
+        param_rtol: Option<Eqn::T>,
+        param_atol: Option<Eqn::V>,
         t0: Eqn::T,
         h0: Eqn::T,
         integrate_out: bool,
     ) -> Result<Self, DiffsolError> {
         let eqn = Rc::new(eqn);
         let atol = Rc::new(atol);
+        let out_atol = out_atol.map(Rc::new);
+        let param_atol = param_atol.map(Rc::new);
+        let sens_atol = sens_atol.map(Rc::new);
         Ok(Self {
             eqn,
             rtol,
             atol,
+            out_atol,
+            out_rtol,
+            param_atol,
+            param_rtol,
+            sens_atol,
+            sens_rtol,
             t0,
             h0,
             integrate_out,

@@ -71,8 +71,8 @@ pub enum OdeSolverError {
     SensitivityNotSupported,
     #[error("Failed to get mutable reference to equations, is there a solver created with this problem?")]
     FailedToGetMutableReference,
-    #[error("atol must have length 1 or equal to the number of states")]
-    AtolLengthMismatch,
+    #[error("Builder error: {0}")]
+    BuilderError(String),
     #[error("t_eval must be increasing and all values must be greater than or equal to the current time")]
     StateProblemMismatch,
     #[error("State is not consistent with the problem equations")]

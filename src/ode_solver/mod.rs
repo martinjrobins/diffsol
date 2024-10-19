@@ -54,10 +54,9 @@ mod tests {
         Eqn::M: DefaultSolver,
     {
         if solve_for_sensitivities {
-            let sensitivity_error_control = solution.sens_solution_points.is_some();
             let state = OdeSolverState::new_with_sensitivities(problem, method).unwrap();
             method
-                .set_problem_with_sensitivities(state, problem, sensitivity_error_control)
+                .set_problem_with_sensitivities(state, problem)
                 .unwrap();
         } else {
             let state = OdeSolverState::new(problem, method).unwrap();
@@ -279,7 +278,9 @@ mod tests {
         ydots.push(method.state().unwrap().dy.clone());
         checkpoints.push(method.checkpoint().unwrap());
         let last_segment = HermiteInterpolator::new(ys, ydots, ts);
-        let mut adjoint_solver = method.into_adjoint_solver(checkpoints, last_segment, true).unwrap();
+        let mut adjoint_solver = method
+            .into_adjoint_solver(checkpoints, last_segment)
+            .unwrap();
         let y_expect = M::V::from_element(problem.eqn.rhs().nstates(), M::T::zero());
         adjoint_solver
             .state()
@@ -314,7 +315,7 @@ mod tests {
             let error = soln.clone() - &point.state;
             let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
             assert!(
-                error_norm < M::T::from(70.0),
+                error_norm < M::T::from(15.0),
                 "error_norm: {} at t = {}. soln: {:?}, expected: {:?}",
                 error_norm,
                 point.t,
@@ -439,6 +440,12 @@ mod tests {
             TestEqn::new(),
             M::T::from(1e-6),
             M::V::from_element(1, M::T::from(1e-6)),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
             M::T::zero(),
             M::T::one(),
             false,
@@ -470,6 +477,12 @@ mod tests {
             TestEqn::new(),
             M::T::from(1e-6),
             M::V::from_element(1, M::T::from(1e-6)),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
             M::T::zero(),
             M::T::one(),
             false,

@@ -1032,7 +1032,10 @@ where
     let t0 = M::T::zero();
     let h0 = M::T::from(1.0);
     let eqn = FoodWeb::new(context, t0);
-    let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, false).unwrap();
+    let problem = OdeSolverProblem::new(
+        eqn, rtol, atol, None, None, None, None, None, None, t0, h0, false,
+    )
+    .unwrap();
     let soln = soln::<M>();
     (problem, soln)
 }
