@@ -5,7 +5,7 @@ use crate::{
     ode_solver_error,
     vector::DefaultDenseMatrix,
     Closure, ClosureNoJac, ClosureWithSens, ConstantClosure, ConstantClosureWithSens,
-    LinearClosure, Matrix, OdeSolverProblem, UnitCallable, Vector,
+    LinearClosure, Matrix, OdeEquations, OdeSolverProblem, Op, UnitCallable, Vector,
 };
 
 use super::equations::OdeSolverEquations;
@@ -732,6 +732,39 @@ impl OdeBuilder {
         self.build_ode(rhs, rhs_jac, init)
     }
 
+    /// Build an ODE problem from a set of equations
+    pub fn build_from_eqn<Eqn>(self, eqn: Eqn) -> Result<OdeSolverProblem<Eqn>, DiffsolError>
+    where
+        Eqn: OdeEquations,
+    {
+        let nparams = eqn.rhs().nparams();
+        let nstates = eqn.rhs().nstates();
+        let nout = eqn.out().map(|out| out.nout());
+        let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
+            self.atol,
+            self.sens_atol,
+            self.out_atol,
+            self.param_atol,
+            nstates,
+            nout,
+            nparams,
+        )?;
+        OdeSolverProblem::new(
+            eqn,
+            Eqn::T::from(self.rtol),
+            atol,
+            self.sens_rtol.map(Eqn::T::from),
+            sens_atol,
+            self.out_rtol.map(Eqn::T::from),
+            out_atol,
+            self.param_rtol.map(Eqn::T::from),
+            param_atol,
+            Eqn::T::from(self.t0),
+            Eqn::T::from(self.h0),
+            self.integrate_out,
+        )
+    }
+
     /// Build an ODE problem using the DiffSL language (requires either the `diffsl-cranelift` or `diffls-llvm` features).
     /// The source code is provided as a string, please see the [DiffSL documentation](https://martinjrobins.github.io/diffsl/) for more information.
     #[cfg(feature = "diffsl")]
@@ -744,7 +777,6 @@ impl OdeBuilder {
         CG: diffsl::execution::module::CodegenModule,
     {
         use crate::ode_solver::diffsl;
-        use crate::{OdeEquations, Op};
         let p = Self::build_p::<M::V>(self.p);
         let nparams = p.len();
         let mut eqn = diffsl::DiffSl::new(context, self.use_coloring || M::is_sparse());

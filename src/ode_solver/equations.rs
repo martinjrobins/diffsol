@@ -247,7 +247,7 @@ impl<T> OdeEquationsAdjoint for T where
 ///
 /// ```rust
 /// use std::rc::Rc;
-/// use diffsol::{Bdf, OdeSolverState, OdeSolverMethod, NonLinearOp, NonLinearOpJacobian, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure};
+/// use diffsol::{Bdf, OdeSolverState, OdeSolverMethod, NonLinearOp, NonLinearOpJacobian, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure, OdeBuilder};
 /// type M = nalgebra::DMatrix<f64>;
 /// type V = nalgebra::DVector<f64>;
 ///
@@ -292,19 +292,7 @@ impl<T> OdeEquationsAdjoint for T where
 /// let p = Rc::new(V::from_vec(vec![]));
 /// let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p);
 ///
-/// let rtol = 1e-6;
-/// let atol = V::from_vec(vec![1e-6]);
-/// let out_rtol = None;
-/// let out_atol = None;
-/// let sens_atol = None;
-/// let sens_rtol = None;
-/// let param_atol = None;
-/// let param_rtol = None;
-///
-/// let t0 = 0.0;
-/// let h0 = 0.1;
-/// let integrate_out = false;
-/// let problem = OdeSolverProblem::new(eqn, rtol, atol, sens_rtol, sens_atol, out_rtol, out_atol, param_rtol, param_atol, t0, h0, integrate_out).unwrap();
+/// let problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
 ///
 /// let mut solver = Bdf::default();
 /// let t = 0.4;
