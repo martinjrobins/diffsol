@@ -1668,7 +1668,7 @@ mod test {
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
         heat2d_diffsl_compile::<SparseColMat<f64>, LlvmModule, 10>(&mut context);
         let (problem, soln) = heat2d::heat2d_diffsl_problem(&context);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
     }
 
     #[test]
@@ -1701,7 +1701,7 @@ mod test {
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
         foodweb::foodweb_diffsl_compile::<SparseColMat<f64>, LlvmModule, 10>(&mut context);
         let (problem, soln) = foodweb::foodweb_diffsl_problem(&context);
-        test_ode_solver(&mut s, &problem, soln, None, false, false);
+        test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
     }
 
     #[test]

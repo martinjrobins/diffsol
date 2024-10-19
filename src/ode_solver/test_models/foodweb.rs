@@ -141,7 +141,7 @@ pub fn foodweb_diffsl_compile<M, CG, const NX: usize>(
 pub fn foodweb_diffsl_problem<M, CG>(
     diffsl_context: &crate::DiffSlContext<M, CG>,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T> + '_>,
     OdeSolverSolution<M::V>,
 )
 where

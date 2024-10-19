@@ -97,7 +97,7 @@ pub fn heat2d_diffsl_problem<
 >(
     context: &crate::DiffSlContext<M, CG>,
 ) -> (
-    OdeSolverProblem<impl crate::OdeEquations<M = M, V = M::V, T = M::T> + '_>,
+    OdeSolverProblem<impl crate::OdeEquationsImplicit<M = M, V = M::V, T = M::T> + '_>,
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::new()
