@@ -342,7 +342,7 @@ macro_rules! impl_op {
 context_consts!(FoodWebInit);
 impl_op!(FoodWebInit);
 
-impl<'a, M, const NX: usize> ConstantOp for FoodWebInit<'a, M, NX>
+impl<M, const NX: usize> ConstantOp for FoodWebInit<'_, M, NX>
 where
     M: Matrix,
 {
@@ -402,7 +402,7 @@ where
     }
 }
 
-impl<'a, M, const NX: usize> Op for FoodWebRhs<'a, M, NX>
+impl<M, const NX: usize> Op for FoodWebRhs<'_, M, NX>
 where
     M: Matrix,
 {
@@ -424,7 +424,7 @@ where
     }
 }
 
-impl<'a, M, const NX: usize> NonLinearOp for FoodWebRhs<'a, M, NX>
+impl<M, const NX: usize> NonLinearOp for FoodWebRhs<'_, M, NX>
 where
     M: Matrix,
 {
@@ -512,7 +512,7 @@ where
     }
 }
 
-impl<'a, M, const NX: usize> NonLinearOpJacobian for FoodWebRhs<'a, M, NX>
+impl<M, const NX: usize> NonLinearOpJacobian for FoodWebRhs<'_, M, NX>
 where
     M: Matrix,
 {
@@ -634,7 +634,7 @@ where
     }
 }
 
-impl<'a, M, const NX: usize> Op for FoodWebMass<'a, M, NX>
+impl<M, const NX: usize> Op for FoodWebMass<'_, M, NX>
 where
     M: Matrix,
 {
@@ -656,7 +656,7 @@ where
     }
 }
 
-impl<'a, M, const NX: usize> LinearOp for FoodWebMass<'a, M, NX>
+impl<M, const NX: usize> LinearOp for FoodWebMass<'_, M, NX>
 where
     M: Matrix,
 {
@@ -690,7 +690,7 @@ where
 
 context_consts!(FoodWebOut);
 
-impl<'a, M, const NX: usize> Op for FoodWebOut<'a, M, NX>
+impl<M, const NX: usize> Op for FoodWebOut<'_, M, NX>
 where
     M: Matrix,
 {
@@ -709,7 +709,7 @@ where
     }
 }
 
-impl<'a, M, const NX: usize> NonLinearOp for FoodWebOut<'a, M, NX>
+impl<M, const NX: usize> NonLinearOp for FoodWebOut<'_, M, NX>
 where
     M: Matrix,
 {
@@ -729,7 +729,7 @@ where
     }
 }
 
-impl<'a, M, const NX: usize> NonLinearOpJacobian for FoodWebOut<'a, M, NX>
+impl<M, const NX: usize> NonLinearOpJacobian for FoodWebOut<'_, M, NX>
 where
     M: Matrix,
 {
@@ -1018,6 +1018,7 @@ fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
     soln
 }
 
+#[allow(clippy::type_complexity)]
 pub fn foodweb_problem<M, const NX: usize>(
     context: &FoodWebContext<M, NX>,
 ) -> (

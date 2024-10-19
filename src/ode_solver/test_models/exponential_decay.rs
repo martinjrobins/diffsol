@@ -121,12 +121,6 @@ fn exponential_decay_out_adj_mul<M: Matrix>(
 
 /// J = |0 0|
 ///     |0 0|
-//fn exponential_decay_out_sens<M: Matrix>(_x: &M::V, _p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V) {
-//    y.fill(M::T::zero());
-//}
-
-/// J = |0 0|
-///     |0 0|
 fn exponential_decay_out_sens_adj<M: Matrix>(
     _x: &M::V,
     _p: &M::V,
@@ -137,6 +131,7 @@ fn exponential_decay_out_sens_adj<M: Matrix>(
     y.fill(M::T::zero());
 }
 
+#[allow(clippy::type_complexity)]
 pub fn negative_exponential_decay_problem<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
@@ -170,6 +165,7 @@ pub fn negative_exponential_decay_problem<M: Matrix + 'static>(
     (problem, soln)
 }
 
+#[allow(clippy::type_complexity)]
 pub fn exponential_decay_problem<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
@@ -200,6 +196,7 @@ pub fn exponential_decay_problem<M: Matrix + 'static>(
     (problem, soln)
 }
 
+#[allow(clippy::type_complexity)]
 pub fn exponential_decay_problem_with_root<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
@@ -230,6 +227,7 @@ pub fn exponential_decay_problem_with_root<M: Matrix + 'static>(
     (problem, soln)
 }
 
+#[allow(clippy::type_complexity)]
 pub fn exponential_decay_problem_adjoint<M: Matrix>() -> (
     OdeSolverProblem<impl OdeEquationsAdjoint<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
@@ -342,6 +340,7 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>() -> (
     (problem, soln)
 }
 
+#[allow(clippy::type_complexity)]
 pub fn exponential_decay_problem_sens<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (

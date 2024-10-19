@@ -4,6 +4,7 @@ use crate::{
 };
 use num_traits::Zero;
 
+#[allow(clippy::type_complexity)]
 pub fn robertson_ode_with_sens<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (

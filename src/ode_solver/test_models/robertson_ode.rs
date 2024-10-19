@@ -4,6 +4,7 @@ use crate::{
 };
 use num_traits::{One, Zero};
 
+#[allow(clippy::type_complexity)]
 pub fn robertson_ode<M: Matrix + 'static>(
     use_coloring: bool,
     ngroups: usize,

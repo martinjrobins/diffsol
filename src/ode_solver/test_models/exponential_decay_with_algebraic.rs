@@ -200,6 +200,7 @@ fn exponential_decay_with_algebraic_out_sens_adj<M: Matrix>(
     y[0] = -x[2] * v[0];
 }
 
+#[allow(clippy::type_complexity)]
 pub fn exponential_decay_with_algebraic_problem<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
@@ -228,6 +229,7 @@ pub fn exponential_decay_with_algebraic_problem<M: Matrix + 'static>(
     (problem, soln)
 }
 
+#[allow(clippy::type_complexity)]
 pub fn exponential_decay_with_algebraic_adjoint_problem<M: Matrix + 'static>() -> (
     OdeSolverProblem<impl OdeEquationsAdjoint<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
@@ -335,6 +337,7 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: Matrix + 'static>() -
     (problem, soln)
 }
 
+#[allow(clippy::type_complexity)]
 pub fn exponential_decay_with_algebraic_problem_sens<M: Matrix + 'static>() -> (
     OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,

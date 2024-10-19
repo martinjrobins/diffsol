@@ -252,6 +252,7 @@ fn _pde_solution<T: Scalar>(x: T, y: T, t: T, max_terms: usize) -> T {
     u
 }
 
+#[allow(clippy::type_complexity)]
 pub fn head2d_problem<M: Matrix + 'static, const MGRID: usize>() -> (
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,

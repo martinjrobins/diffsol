@@ -27,14 +27,14 @@ pub trait VectorCommon: Sized + Debug {
     type T: Scalar;
 }
 
-impl<'a, V> VectorCommon for &'a V
+impl<V> VectorCommon for &V
 where
     V: VectorCommon,
 {
     type T = V::T;
 }
 
-impl<'a, V> VectorCommon for &'a mut V
+impl<V> VectorCommon for &mut V
 where
     V: VectorCommon,
 {

@@ -58,7 +58,7 @@ macro_rules! impl_mul_scale {
 impl_mul_scale!(DMatrixView<'a, T>);
 impl_mul_scale!(DMatrix<T>);
 
-impl<'a, T: Scalar> MulAssign<Scale<T>> for DMatrixViewMut<'a, T> {
+impl<T: Scalar> MulAssign<Scale<T>> for DMatrixViewMut<'_, T> {
     fn mul_assign(&mut self, rhs: Scale<T>) {
         *self *= rhs.value();
     }

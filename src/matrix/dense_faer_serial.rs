@@ -53,7 +53,7 @@ impl_mul_scale!(MatRef<'a, T>);
 impl_mul_scale!(Mat<T>);
 impl_mul_scale!(&Mat<T>);
 
-impl<'a, T: Scalar> MulAssign<Scale<T>> for MatMut<'a, T> {
+impl<T: Scalar> MulAssign<Scale<T>> for MatMut<'_, T> {
     fn mul_assign(&mut self, rhs: Scale<T>) {
         let scale: faer::Scale<T> = rhs.into();
         *self *= scale;

@@ -68,7 +68,6 @@ impl Default for OdeBuilder {
 /// let y = solver.interpolate(t);
 /// ```
 ///
-
 impl OdeBuilder {
     /// Create a new builder with default parameters:
     /// - t0 = 0.0
@@ -217,6 +216,7 @@ impl OdeBuilder {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn build_atols<V: Vector>(
         atol: Vec<f64>,
         sens_atol: Option<Vec<f64>>,
@@ -542,7 +542,6 @@ impl OdeBuilder {
     ///        |p, t, v, y| y.fill(0.0),
     ///    );
     /// ```
-
     #[allow(clippy::type_complexity)]
     pub fn build_ode_with_sens<M, F, G, I, J, K>(
         self,
@@ -640,7 +639,6 @@ impl OdeBuilder {
     ///        1,
     ///    );
     /// ```
-
     #[allow(clippy::type_complexity)]
     pub fn build_ode_with_root<M, F, G, I, H>(
         self,

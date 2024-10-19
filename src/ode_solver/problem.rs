@@ -55,7 +55,8 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
             && self.out_rtol.is_some()
             && self.out_atol.is_some()
     }
-    pub fn new(
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
         eqn: Eqn,
         rtol: Eqn::T,
         atol: Eqn::V,
@@ -122,11 +123,10 @@ impl<V: Vector> OdeSolverSolution<V> {
     }
     fn get_index(&self, t: V::T) -> usize {
         if self.negative_time {
-            return self
-                .solution_points
+            self.solution_points
                 .iter()
                 .position(|x| x.t < t)
-                .unwrap_or(self.solution_points.len());
+                .unwrap_or(self.solution_points.len())
         } else {
             self.solution_points
                 .iter()

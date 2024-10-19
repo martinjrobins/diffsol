@@ -111,6 +111,7 @@ fn robertson_init_sens<M: Matrix>(_p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V) 
     y.fill(M::T::zero());
 }
 
+#[allow(clippy::type_complexity)]
 pub fn robertson<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
@@ -160,6 +161,7 @@ fn soln<V: Vector>() -> OdeSolverSolution<V> {
     soln
 }
 
+#[allow(clippy::type_complexity)]
 pub fn robertson_sens<M: Matrix + 'static>() -> (
     OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,

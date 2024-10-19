@@ -22,6 +22,7 @@ fn gaussian_decay_jacobian<M: DenseMatrix>(_x: &M::V, p: &M::V, t: M::T, v: &M::
     y.mul_assign(scale(-t));
 }
 
+#[allow(clippy::type_complexity)]
 pub fn gaussian_decay_problem<M: DenseMatrix + 'static>(
     use_coloring: bool,
     size: usize,
