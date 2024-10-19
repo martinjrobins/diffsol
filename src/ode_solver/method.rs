@@ -181,8 +181,12 @@ where
         Self: Sized,
     {
         self.set_problem(state, problem)?;
-        let nstates = problem.eqn.rhs().nstates();
-        let mut ret = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, t_eval.len());
+        let nrows = if problem.eqn.out().is_some() {
+            problem.eqn.out().unwrap().nout()
+        } else {
+            problem.eqn.rhs().nstates()
+        };
+        let mut ret = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nrows, t_eval.len());
 
         // check t_eval is increasing and all values are greater than or equal to the current time
         let t0 = self.state().unwrap().t;
