@@ -122,7 +122,7 @@ where
         Self: Sized,
     {
         self.set_problem(state, problem)?;
-        let mut ret_t = vec![self.state().unwrap().t];
+        let mut ret_t = Vec::new();
         let nstates = problem.eqn.rhs().nstates();
         let ntimes_guess = std::cmp::max(
             10,
@@ -131,18 +131,8 @@ where
                 .ceil() as usize,
         );
         let mut ret_y = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, ntimes_guess);
-        {
-            let mut y_i = ret_y.column_mut(0);
-            match problem.eqn.out() {
-                Some(out) => {
-                    y_i.copy_from(&out.call(self.state().unwrap().y, self.state().unwrap().t))
-                }
-                None => y_i.copy_from(self.state().unwrap().y),
-            }
-        }
-        self.set_stop_time(final_time)?;
-        while self.step()? != OdeSolverStopReason::TstopReached {
-            ret_t.push(self.state().unwrap().t);
+        let mut write_out = |t: Eqn::T, y: &Eqn::V| {
+            ret_t.push(t);
             let mut y_i = {
                 let max_i = ret_y.ncols();
                 let curr_i = ret_t.len() - 1;
@@ -154,31 +144,21 @@ where
             };
             match problem.eqn.out() {
                 Some(out) => {
-                    y_i.copy_from(&out.call(self.state().unwrap().y, self.state().unwrap().t))
+                    y_i.copy_from(&out.call(y, t))
                 }
-                None => y_i.copy_from(self.state().unwrap().y),
+                None => y_i.copy_from(y),
             }
+        };
+
+        // do the main loop
+        write_out(self.state().unwrap().t, self.state().unwrap().y);
+        self.set_stop_time(final_time)?;
+        while self.step()? != OdeSolverStopReason::TstopReached {
+            write_out(self.state().unwrap().t, self.state().unwrap().y);
         }
 
         // store the final step
-        ret_t.push(self.state().unwrap().t);
-        {
-            let mut y_i = {
-                let max_i = ret_y.ncols();
-                let curr_i = ret_t.len() - 1;
-                if curr_i >= max_i {
-                    ret_y =
-                        <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, max_i + 1);
-                }
-                ret_y.column_mut(curr_i)
-            };
-            match problem.eqn.out() {
-                Some(out) => {
-                    y_i.copy_from(&out.call(self.state().unwrap().y, self.state().unwrap().t))
-                }
-                None => y_i.copy_from(self.state().unwrap().y),
-            }
-        }
+        write_out(self.state().unwrap().t, self.state().unwrap().y);
         Ok((ret_y, ret_t))
     }
 
@@ -331,4 +311,45 @@ where
         adjoint_solver.set_augmented_problem(state, &adj_problem, new_augmented_eqn)?;
         Ok(adjoint_solver)
     }
+}
+
+
+#[cfg(test)]
+mod test {
+    use crate::{ode_solver::test_models::exponential_decay::exponential_decay_problem, scale, Bdf, OdeSolverMethod, OdeSolverState, Vector};
+
+    #[test]
+    fn test_solve() {
+        let mut s = Bdf::default();
+        let (problem, _soln) = exponential_decay_problem::<nalgebra::DMatrix<f64>>(false);
+
+        let k = 0.1;
+        let y0 = nalgebra::DVector::from_vec(vec![1.0, 1.0]);
+        let expect = |t: f64| {
+            &y0 * scale(f64::exp(-k * t))
+        };
+        let state = OdeSolverState::new(&problem, &s).unwrap();
+        let (y, t) = s.solve(&problem, state, 10.0).unwrap();
+        assert!((t[0] - 0.0).abs() < 1e-10);
+        assert!((t[t.len() - 1] - 10.0).abs() < 1e-10);
+        for (i, t_i) in t.iter().enumerate() {
+            let y_i = y.column(i).into_owned();
+            y_i.assert_eq_norm(&expect(*t_i), problem.atol.as_ref(), problem.rtol, 15.0);
+        }
+    }
+
+    #[test]
+    fn test_dense_solve() {
+        let mut s = Bdf::default();
+        let (problem, soln) = exponential_decay_problem::<nalgebra::DMatrix<f64>>(false);
+
+        let state = OdeSolverState::new(&problem, &s).unwrap();
+        let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
+        let y = s.solve_dense(&problem, state, t_eval.as_slice()).unwrap();
+        for (i, soln_pt) in soln.solution_points.iter().enumerate() {
+            let y_i = y.column(i).into_owned();
+            y_i.assert_eq_norm(&soln_pt.state, problem.atol.as_ref(), problem.rtol, 15.0);
+        }
+    }
+
 }
