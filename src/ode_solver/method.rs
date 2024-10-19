@@ -1,15 +1,13 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use nalgebra::ComplexField;
-
 use crate::{
     error::{DiffsolError, OdeSolverError},
     matrix::default_solver::DefaultSolver,
     ode_solver_error,
     scalar::Scalar,
     AdjointContext, AdjointEquations, AugmentedOdeEquations, Checkpointing, DefaultDenseMatrix,
-    DenseMatrix, Matrix, MatrixCommon, NewtonNonlinearSolver, NonLinearOp, OdeEquations,
+    DenseMatrix, Matrix, NewtonNonlinearSolver, NonLinearOp, OdeEquations,
     OdeEquationsAdjoint, OdeEquationsSens, OdeSolverProblem, OdeSolverState, Op, SensEquations,
     StateRef, StateRefMut, VectorViewMut,
 };
@@ -123,34 +121,19 @@ where
     {
         self.set_problem(state, problem)?;
         let mut ret_t = Vec::new();
+        let mut ret_y = Vec::new();
         let nstates = problem.eqn.rhs().nstates();
-        let ntimes_guess = std::cmp::max(
-            10,
-            ((final_time - self.state().unwrap().t).abs() / self.state().unwrap().h)
-                .into()
-                .ceil() as usize,
-        );
-        let mut ret_y = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, ntimes_guess);
         let mut write_out = |t: Eqn::T, y: &Eqn::V, g: &Eqn::V| {
             ret_t.push(t);
-            let mut y_i = {
-                let max_i = ret_y.ncols();
-                let curr_i = ret_t.len() - 1;
-                if curr_i >= max_i {
-                    ret_y =
-                        <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, max_i * 2);
-                }
-                ret_y.column_mut(curr_i)
-            };
             match problem.eqn.out() {
                 Some(out) => {
                     if problem.integrate_out {
-                        y_i.copy_from(g);
+                        ret_y.push(g.clone());
                     } else {
-                        y_i.copy_from(&out.call(y, t))
+                        ret_y.push(out.call(y, t));
                     }
                 }
-                None => y_i.copy_from(y),
+                None => ret_y.push(y.clone()),
             }
         };
 
@@ -175,7 +158,12 @@ where
             self.state().unwrap().y,
             self.state().unwrap().g,
         );
-        Ok((ret_y, ret_t))
+        let ntimes= ret_t.len();
+        let mut ret_y_matrix = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, ntimes);
+        for (i, y) in ret_y.iter().enumerate() {
+            ret_y_matrix.column_mut(i).copy_from(y);
+        }
+        Ok((ret_y_matrix, ret_t))
     }
 
     /// Using the provided state, solve the problem up to time `t_eval[t_eval.len()-1]`
