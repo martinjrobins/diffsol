@@ -83,7 +83,7 @@ impl Drop for SundialsVector {
 #[derive(Debug)]
 pub struct SundialsVectorViewMut<'a>(&'a mut SundialsVector);
 
-impl<'a> SundialsVectorViewMut<'a> {
+impl SundialsVectorViewMut<'_> {
     fn sundials_vector(&self) -> N_Vector {
         self.0.sundials_vector()
     }
@@ -95,7 +95,7 @@ impl<'a> SundialsVectorViewMut<'a> {
 #[derive(Debug)]
 pub struct SundialsVectorView<'a>(&'a SundialsVector);
 
-impl<'a> SundialsVectorView<'a> {
+impl SundialsVectorView<'_> {
     fn sundials_vector(&self) -> N_Vector {
         self.0.sundials_vector()
     }
@@ -157,11 +157,11 @@ impl VectorCommon for SundialsVector {
     type T = realtype;
 }
 
-impl<'a> VectorCommon for SundialsVectorView<'a> {
+impl VectorCommon for SundialsVectorView<'_> {
     type T = realtype;
 }
 
-impl<'a> VectorCommon for SundialsVectorViewMut<'a> {
+impl VectorCommon for SundialsVectorViewMut<'_> {
     type T = realtype;
 }
 

@@ -137,6 +137,7 @@ pub fn foodweb_diffsl_compile<M, CG, const NX: usize>(
     diffsl_context.recompile(code.as_str()).unwrap();
 }
 
+#[allow(clippy::type_complexity)]
 #[cfg(feature = "diffsl")]
 pub fn foodweb_diffsl_problem<M, CG>(
     diffsl_context: &crate::DiffSlContext<M, CG>,

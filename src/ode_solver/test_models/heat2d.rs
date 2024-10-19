@@ -90,6 +90,7 @@ pub fn heat2d_diffsl_compile<
     context.recompile(code.as_str()).unwrap();
 }
 
+#[allow(clippy::type_complexity)]
 #[cfg(feature = "diffsl")]
 pub fn heat2d_diffsl_problem<
     M: Matrix<T = f64> + 'static,

@@ -50,6 +50,7 @@ pub fn robertson_diffsl_compile<
     context.recompile(code).unwrap();
 }
 
+#[allow(clippy::type_complexity)]
 #[cfg(feature = "diffsl")]
 pub fn robertson_diffsl_problem<
     M: Matrix<T = f64> + 'static,
