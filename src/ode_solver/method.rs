@@ -7,9 +7,9 @@ use crate::{
     ode_solver_error,
     scalar::Scalar,
     AdjointContext, AdjointEquations, AugmentedOdeEquations, Checkpointing, DefaultDenseMatrix,
-    DenseMatrix, Matrix, NewtonNonlinearSolver, NonLinearOp, OdeEquations,
-    OdeEquationsAdjoint, OdeEquationsSens, OdeSolverProblem, OdeSolverState, Op, SensEquations,
-    StateRef, StateRefMut, VectorViewMut,
+    DenseMatrix, Matrix, NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeEquationsAdjoint,
+    OdeEquationsSens, OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut,
+    VectorViewMut,
 };
 
 use super::checkpointing::HermiteInterpolator;
@@ -158,8 +158,9 @@ where
             self.state().unwrap().y,
             self.state().unwrap().g,
         );
-        let ntimes= ret_t.len();
-        let mut ret_y_matrix = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, ntimes);
+        let ntimes = ret_t.len();
+        let mut ret_y_matrix =
+            <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nstates, ntimes);
         for (i, y) in ret_y.iter().enumerate() {
             ret_y_matrix.column_mut(i).copy_from(y);
         }
