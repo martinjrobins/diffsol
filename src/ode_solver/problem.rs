@@ -50,7 +50,10 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
         Eqn::V::from_element(nstates, Eqn::T::from(1e-6))
     }
     pub fn output_in_error_control(&self) -> bool {
-        self.out_rtol.is_some() && self.out_atol.is_some()
+        self.integrate_out
+            && self.eqn.out().is_some()
+            && self.out_rtol.is_some()
+            && self.out_atol.is_some()
     }
     pub fn new(
         eqn: Eqn,

@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::{
     error::{DiffsolError, OdeSolverError},
     ode_solver_error,
@@ -7,6 +5,7 @@ use crate::{
     Closure, ClosureNoJac, ClosureWithSens, ConstantClosure, ConstantClosureWithSens,
     LinearClosure, Matrix, OdeEquations, OdeSolverProblem, Op, UnitCallable, Vector,
 };
+use std::rc::Rc;
 
 use super::equations::OdeSolverEquations;
 
@@ -80,20 +79,22 @@ impl OdeBuilder {
     /// - use_coloring = false
     /// - constant_mass = false
     pub fn new() -> Self {
+        let default_atol = vec![1e-6];
+        let default_rtol = 1e-6;
         Self {
             t0: 0.0,
             h0: 1.0,
-            rtol: 1e-6,
-            atol: vec![1e-6],
+            rtol: default_rtol,
+            atol: default_atol.clone(),
             p: vec![],
             use_coloring: false,
             integrate_out: false,
-            out_rtol: None,
-            out_atol: None,
-            param_rtol: None,
-            param_atol: None,
-            sens_atol: None,
-            sens_rtol: None,
+            out_rtol: Some(default_rtol),
+            out_atol: Some(default_atol.clone()),
+            param_rtol: Some(default_rtol),
+            param_atol: Some(default_atol.clone()),
+            sens_atol: Some(default_atol),
+            sens_rtol: Some(default_rtol),
         }
     }
 
@@ -225,15 +226,9 @@ impl OdeBuilder {
         nout: Option<usize>,
         nparam: usize,
     ) -> Result<(V, Option<V>, Option<V>, Option<V>), DiffsolError> {
-        if out_atol.is_some() && nout.is_none() {
-            return Err(ode_solver_error!(
-                BuilderError,
-                "Output absolute tolerance provided, but output equation not defined.".to_string()
-            ));
-        }
         let atol = Self::build_atol(atol, nstates, "states")?;
         let out_atol = match out_atol {
-            Some(out_atol) => Some(Self::build_atol(out_atol, nout.unwrap(), "output")?),
+            Some(out_atol) => Some(Self::build_atol(out_atol, nout.unwrap_or(0), "output")?),
             None => None,
         };
         let param_atol = match param_atol {

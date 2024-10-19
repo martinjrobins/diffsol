@@ -550,8 +550,7 @@ where
 
         // dont' reset jacobian for the first attempt at the step
         let mut error = <Eqn::V as Vector>::zeros(n);
-        let out_error_control = self.problem().as_ref().unwrap().out_rtol.is_some()
-            && self.problem().as_ref().unwrap().out_atol.is_some();
+        let out_error_control = self.problem().as_ref().unwrap().output_in_error_control();
         let mut out_error = if out_error_control {
             <Eqn::V as Vector>::zeros(self.problem().as_ref().unwrap().eqn.out().unwrap().nout())
         } else {

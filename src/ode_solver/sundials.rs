@@ -510,6 +510,7 @@ mod test {
         number_of_calls: 65
         number_of_jac_muls: 36
         number_of_matrix_evals: 18
+        number_of_jac_adj_muls: 0
         "###);
     }
 
@@ -531,6 +532,7 @@ mod test {
         number_of_calls: 509
         number_of_jac_muls: 180
         number_of_matrix_evals: 60
+        number_of_jac_adj_muls: 0
         "###);
     }
 
@@ -567,6 +569,7 @@ mod test {
         number_of_calls: 217
         number_of_jac_muls: 4300
         number_of_matrix_evals: 43
+        number_of_jac_adj_muls: 0
         "###);
     }
 }

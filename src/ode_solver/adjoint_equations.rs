@@ -550,7 +550,7 @@ where
         self.atol.is_some() && self.rtol.is_some()
     }
     fn include_out_in_error_control(&self) -> bool {
-        self.out_atol.is_some() && self.out_rtol.is_some()
+        self.out().is_some() && self.out_atol.is_some() && self.out_rtol.is_some()
     }
 
     fn atol(&self) -> Option<&Rc<Eqn::V>> {
