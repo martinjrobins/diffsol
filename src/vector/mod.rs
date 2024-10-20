@@ -27,14 +27,14 @@ pub trait VectorCommon: Sized + Debug {
     type T: Scalar;
 }
 
-impl<'a, V> VectorCommon for &'a V
+impl<V> VectorCommon for &V
 where
     V: VectorCommon,
 {
     type T = V::T;
 }
 
-impl<'a, V> VectorCommon for &'a mut V
+impl<V> VectorCommon for &mut V
 where
     V: VectorCommon,
 {
@@ -86,6 +86,7 @@ pub trait VectorViewMut<'a>:
     type View;
     fn copy_from(&mut self, other: &Self::Owned);
     fn copy_from_view(&mut self, other: &Self::View);
+    fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T);
 }
 
 pub trait VectorView<'a>:

@@ -1,8 +1,8 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{Matrix, Vector};
+use crate::{Matrix, NonLinearOp, Op, Vector};
 
-use super::{NonLinearOp, Op, OpStatistics};
+use super::OpStatistics;
 
 pub struct ClosureNoJac<M, F>
 where
@@ -69,8 +69,5 @@ where
     fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
         self.statistics.borrow_mut().increment_call();
         (self.func)(x, self.p.as_ref(), t, y)
-    }
-    fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, _y: &mut Self::V) {
-        unimplemented!()
     }
 }

@@ -32,7 +32,7 @@ pub trait MatrixCommon: Sized + Debug {
     fn ncols(&self) -> IndexType;
 }
 
-impl<'a, M> MatrixCommon for &'a M
+impl<M> MatrixCommon for &M
 where
     M: MatrixCommon,
 {
@@ -47,7 +47,7 @@ where
     }
 }
 
-impl<'a, M> MatrixCommon for &'a mut M
+impl<M> MatrixCommon for &mut M
 where
     M: MatrixCommon,
 {

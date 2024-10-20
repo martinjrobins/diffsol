@@ -16,6 +16,8 @@
 //! The solver state is held in [OdeSolverState], and contains a state vector, the gradient of the state vector, the time, and the step size. You can intitialise a new state using [OdeSolverState::new],
 //! or create an uninitialised state using [OdeSolverState::new_without_initialise] and intitialise it manually or using the [OdeSolverState::set_consistent] and [OdeSolverState::set_step_size] methods.
 //!
+//! To view the state within a solver, you can use the [OdeSolverMethod::state] or [OdeSolverMethod::state_mut] methods. These will return references to the state using either the [StateRef] or [StateRefMut] structs
+//!
 //! ## The solver
 //!
 //! To solve the problem given the initial state, you need to choose a solver. DiffSol provides the following solvers:
@@ -46,12 +48,13 @@
 //!
 //! ## Sparsity pattern for Jacobians and Mass matrices
 //!
-//! Via an implementation of [OdeEquations], the user provides the action of the jacobian on a vector `J(x) v`. By default DiffSol uses this to generate a jacobian matrix for the ODE solver.
+//! Via an implementation of [OdeEquationsImplicit], the user provides the action of the jacobian on a vector `J(x) v`. By default DiffSol uses this to generate a jacobian matrix for the ODE solver.
 //! For sparse jacobians, DiffSol will attempt to detect the sparsity pattern of the jacobian using this function and use a sparse matrix representation internally.
 //! It attempts to determine the sparsity pattern of the jacobian (i.e. its non-zero values) by passing in `NaNs` for the input vector `x` and checking which elements
 //! of the output vector `J(x) v` are also `NaN`, using the fact that `NaN`s propagate through most operations. However, this method is not foolproof and will fail if,
 //! for example, your jacobian function uses any control flow that depends on the input vector. If this is the case, you can provide the jacobian matrix directly by
-//! implementing the optional [NonLinearOp::jacobian_inplace] and the [LinearOp::matrix_inplace] (if applicable) functions, or by providing a sparsity pattern using the [Op::sparsity] function.
+//! implementing the optional [NonLinearOpJacobian::jacobian_inplace] and the [LinearOp::matrix_inplace] (if applicable) functions,
+//! or by providing a sparsity pattern using the [Op::sparsity] function.
 //!
 //! ## Events / Root finding
 //!
@@ -60,15 +63,47 @@
 //!
 //! ## Forward Sensitivity Analysis
 //!
-//! DiffSol provides a way to compute the forward sensitivity of the solution with respect to the parameters. You can use this by using the [OdeBuilder::build_ode_with_sens] or [OdeBuilder::build_ode_with_mass_and_sens] builder functions.
-//! Note that by default the sensitivity equations are not included in the error control for the solvers, you can change this by using the [OdeBuilder::sensitivities_error_control] method.
+//! DiffSol provides a way to compute the forward sensitivity of the solution with respect to the parameters. To use this your equations struct must implement the [OdeEquationsSens] trait.
+//! Note that by default the sensitivity equations are included in the error control for the solvers, you can change this by setting tolerances using the [OdeBuilder::sens_atol] and [[OdeBuilder::sens_rtol]] methods.
+//! You will also need to use [SensitivitiesOdeSolverMethod::set_problem_with_sensitivities] to set the problem with sensitivities.
 //!
 //! To obtain the sensitivity solution via interpolation, you can use the [OdeSolverMethod::interpolate_sens] method. Otherwise the sensitivity vectors are stored in the [OdeSolverState] struct.
+//!
+//! ## Checkpointing
+//!
+//! You can checkpoint the solver at a set of times using the [OdeSolverMethod::checkpoint] method. This will store the state of the solver at the given times, and subsequently use the [OdeSolverMethod::set_problem]
+//! method to restore the solver to the state at the given time.
+//!
+//! ## Interpolation
+//!
+//! The [HermiteInterpolator] struct provides a way to interpolate a solution between a sequence of steps. If the number of steps in your solution is too large to fit in memory,
+//! you can instead use checkpointing to store the solution at a reduced set of times and dynamically interpolate between these checkpoints using the [Checkpointing] struct
+//! (at the cost of recomputing the solution between the checkpoints).  
+//!
+//! ## Quadrature and Output functions
+//!
+//! The [OdeSolverEquations::Out] associated type can be used to define an output function. DiffSol will optionally integrate this function over the solution trajectory by
+//! using the [OdeBuilder::integrate_out] method. By default, the output integration is added to the error control of the solver, and the tolerances can be
+//! adjusted using the [OdeBuilder::out_atol] and [OdeBuilder::out_rtol] methods. It can be removed from the error control by setting the tolerances to `None`.
+//!
+//! ## Adjoint Sensitivity Analysis
+//!
+//! If you require the partial gradient of the output function with respect to the parameters and your parameter vector is sufficiently large, then it is more efficient
+//! to use the adjoint sensitivity method. This method uses a lagrange multiplier to derive a set of adjoint ode equations that are solved backwards in time,
+//! and then used to compute the sensitivities of the output function. Checkpointing is typically used to store the forward solution at a set of times as theses are required
+//! to solve the adjoint equations.
+//!
+//! To use the adjoint sensitivity method, your equations struct must implement the [OdeEquationsAdjoint] trait. When you compute the forward solution, use checkpointing
+//! to store the solution at a set of times. From this you should obtain a `Vec<OdeSolverState>` (that can be the start and end of the solution), and
+//! a [HermiteInterpolator] that can be used to interpolate the solution between the last two checkpoints. You can then use the [AdjointOdeSolverMethod::into_adjoint_solver]
+//! method to create an adjoint solver from the forward solver, and then use this solver to step the adjoint equations backwards in time. Once the adjoint equations have been solved,
+//! the sensitivities of the output function will be stored in the [StateRef::sg] field of the adjoint solver state. If your parameters are used to calculate the initial conditions
+//! of the forward problem, then you will need to use the [AdjointEquations::correct_sg_for_init] method to correct the sensitivities for the initial conditions.
 //!
 //! ## Nonlinear and linear solvers
 //!
 //! DiffSol provides generic nonlinear and linear solvers that are used internally by the ODE solver. You can use the solvers provided by DiffSol, or implement your own following the provided traits.
-//! The linear solver trait is [LinearSolver], and the nonlinear solver trait is [NonLinearSolver]. The [SolverProblem] struct is used to define the problem to solve.
+//! The linear solver trait is [LinearSolver], and the nonlinear solver trait is [NonLinearSolver].
 //!
 //! The provided linear solvers are:
 //! - [NalgebraLU]: a direct solver that uses the LU decomposition implemented in the [nalgebra](https://nalgebra.org) library.
@@ -117,7 +152,7 @@ pub mod vector;
 #[cfg(feature = "sundials")]
 pub mod sundials_sys;
 
-use linear_solver::LinearSolver;
+pub use linear_solver::LinearSolver;
 pub use linear_solver::{faer::sparse_lu::FaerSparseLU, FaerLU, NalgebraLU};
 
 pub use matrix::sparse_faer::SparseColMat;
@@ -140,36 +175,48 @@ pub use linear_solver::suitesparse::klu::KLU;
 #[cfg(feature = "diffsl")]
 pub use ode_solver::diffsl::DiffSlContext;
 
-pub use jacobian::{find_non_zeros_linear, find_non_zeros_nonlinear, JacobianColoring};
+pub use jacobian::{
+    find_adjoint_non_zeros, find_jacobian_non_zeros, find_matrix_non_zeros,
+    find_sens_adjoint_non_zeros, find_sens_non_zeros, find_transpose_non_zeros, JacobianColoring,
+};
 pub use matrix::{default_solver::DefaultSolver, Matrix};
 use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
     DenseMatrix, MatrixCommon, MatrixRef, MatrixView, MatrixViewMut,
 };
-pub use nonlinear_solver::newton::NewtonNonlinearSolver;
 use nonlinear_solver::{
-    convergence::Convergence, convergence::ConvergenceStatus, newton::newton_iteration,
-    root::RootFinder, NonLinearSolver,
+    convergence::Convergence, convergence::ConvergenceStatus, root::RootFinder,
 };
+pub use nonlinear_solver::{newton::NewtonNonlinearSolver, NonLinearSolver};
 use ode_solver::jacobian_update::JacobianUpdate;
+pub use ode_solver::state::{StateRef, StateRefMut};
 pub use ode_solver::{
-    bdf::Bdf, bdf_state::BdfState, builder::OdeBuilder, equations::OdeEquations,
-    equations::OdeSolverEquations, method::OdeSolverMethod, method::OdeSolverStopReason,
-    problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::SdirkState,
-    sens_equations::SensEquations, sens_equations::SensInit, sens_equations::SensRhs,
-    state::OdeSolverState, tableau::Tableau,
+    adjoint_equations::AdjointContext, adjoint_equations::AdjointEquations,
+    adjoint_equations::AdjointInit, adjoint_equations::AdjointRhs, bdf::Bdf, bdf::BdfAdj,
+    bdf_state::BdfState, builder::OdeBuilder, checkpointing::Checkpointing,
+    checkpointing::HermiteInterpolator, equations::AugmentedOdeEquations,
+    equations::AugmentedOdeEquationsImplicit, equations::NoAug, equations::OdeEquations,
+    equations::OdeEquationsAdjoint, equations::OdeEquationsImplicit, equations::OdeEquationsSens,
+    equations::OdeSolverEquations, method::AdjointOdeSolverMethod, method::OdeSolverMethod,
+    method::OdeSolverStopReason, method::SensitivitiesOdeSolverMethod, problem::OdeSolverProblem,
+    sdirk::Sdirk, sdirk::SdirkAdj, sdirk_state::SdirkState, sens_equations::SensEquations,
+    sens_equations::SensInit, sens_equations::SensRhs, state::OdeSolverState, tableau::Tableau,
+};
+use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
+use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};
+pub use op::nonlinear_op::{
+    NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint,
 };
 pub use op::{
-    closure::Closure, constant_closure::ConstantClosure, linear_closure::LinearClosure,
-    unit::UnitCallable, ConstantOp, LinearOp, NonLinearOp, Op,
+    closure::Closure, closure_with_adjoint::ClosureWithAdjoint, constant_closure::ConstantClosure,
+    constant_closure_with_adjoint::ConstantClosureWithAdjoint, linear_closure::LinearClosure,
+    unit::UnitCallable, Op,
 };
 use op::{
     closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,
     constant_closure_with_sens::ConstantClosureWithSens, init::InitOp,
-    linear_closure_with_sens::LinearClosureWithSens,
 };
 use scalar::{IndexType, Scalar, Scale};
-use solver::SolverProblem;
 pub use vector::DefaultDenseMatrix;
 use vector::{Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut};
 

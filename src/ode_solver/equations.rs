@@ -1,9 +1,9 @@
 use std::rc::Rc;
 
 use crate::{
-    op::{unit::UnitCallable, ConstantOp},
-    scalar::Scalar,
-    LinearOp, Matrix, NonLinearOp, Vector,
+    op::{constant_op::ConstantOpSensAdjoint, linear_op::LinearOpTranspose},
+    ConstantOp, ConstantOpSens, LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint,
+    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar, UnitCallable, Vector,
 };
 use serde::Serialize;
 
@@ -31,6 +31,105 @@ impl OdeEquationsStatistics {
             number_of_mass_matrix_evals: 0,
             number_of_jacobian_matrix_evals: 0,
         }
+    }
+}
+
+pub trait AugmentedOdeEquations<Eqn: OdeEquations>:
+    OdeEquations<T = Eqn::T, V = Eqn::V, M = Eqn::M>
+{
+    fn update_rhs_out_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T);
+    fn update_init_state(&mut self, t: Eqn::T);
+    fn set_index(&mut self, index: usize);
+    fn max_index(&self) -> usize;
+    fn include_in_error_control(&self) -> bool;
+    fn include_out_in_error_control(&self) -> bool;
+    fn rtol(&self) -> Option<Eqn::T>;
+    fn atol(&self) -> Option<&Rc<Eqn::V>>;
+    fn out_rtol(&self) -> Option<Eqn::T>;
+    fn out_atol(&self) -> Option<&Rc<Eqn::V>>;
+}
+
+pub trait AugmentedOdeEquationsImplicit<Eqn: OdeEquations>:
+    AugmentedOdeEquations<Eqn> + OdeEquationsImplicit<T = Eqn::T, V = Eqn::V, M = Eqn::M>
+{
+}
+
+impl<Aug, Eqn> AugmentedOdeEquationsImplicit<Eqn> for Aug
+where
+    Aug: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit<T = Eqn::T, V = Eqn::V, M = Eqn::M>,
+    Eqn: OdeEquations,
+{
+}
+
+pub struct NoAug<Eqn: OdeEquations> {
+    _phantom: std::marker::PhantomData<Eqn>,
+}
+
+impl<Eqn: OdeEquations> OdeEquations for NoAug<Eqn> {
+    type T = Eqn::T;
+    type V = Eqn::V;
+    type M = Eqn::M;
+    type Mass = Eqn::Mass;
+    type Rhs = Eqn::Rhs;
+    type Root = Eqn::Root;
+    type Init = Eqn::Init;
+    type Out = Eqn::Out;
+
+    fn set_params(&mut self, _p: Self::V) {
+        panic!("This should never be called")
+    }
+
+    fn rhs(&self) -> &Rc<Self::Rhs> {
+        panic!("This should never be called")
+    }
+
+    fn mass(&self) -> Option<&Rc<Self::Mass>> {
+        panic!("This should never be called")
+    }
+
+    fn root(&self) -> Option<&Rc<Self::Root>> {
+        panic!("This should never be called")
+    }
+
+    fn out(&self) -> Option<&Rc<Self::Out>> {
+        panic!("This should never be called")
+    }
+
+    fn init(&self) -> &Rc<Self::Init> {
+        panic!("This should never be called")
+    }
+}
+
+impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
+    fn update_rhs_out_state(&mut self, _y: &Eqn::V, _dy: &Eqn::V, _t: Eqn::T) {
+        panic!("This should never be called")
+    }
+    fn update_init_state(&mut self, _t: Eqn::T) {
+        panic!("This should never be called")
+    }
+    fn set_index(&mut self, _index: usize) {
+        panic!("This should never be called")
+    }
+    fn atol(&self) -> Option<&Rc<<Eqn as OdeEquations>::V>> {
+        panic!("This should never be called")
+    }
+    fn include_out_in_error_control(&self) -> bool {
+        panic!("This should never be called")
+    }
+    fn out_atol(&self) -> Option<&Rc<<Eqn as OdeEquations>::V>> {
+        panic!("This should never be called")
+    }
+    fn out_rtol(&self) -> Option<<Eqn as OdeEquations>::T> {
+        panic!("This should never be called")
+    }
+    fn rtol(&self) -> Option<<Eqn as OdeEquations>::T> {
+        panic!("This should never be called")
+    }
+    fn max_index(&self) -> usize {
+        panic!("This should never be called")
+    }
+    fn include_in_error_control(&self) -> bool {
+        panic!("This should never be called")
     }
 }
 
@@ -83,6 +182,56 @@ pub trait OdeEquations {
     fn init(&self) -> &Rc<Self::Init>;
 }
 
+pub trait OdeEquationsImplicit:
+    OdeEquations<Rhs: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T>>
+{
+}
+
+impl<T> OdeEquationsImplicit for T where
+    T: OdeEquations<Rhs: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T>>
+{
+}
+
+pub trait OdeEquationsSens:
+    OdeEquationsImplicit<
+    Rhs: NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T>,
+    Init: ConstantOpSens<M = Self::M, V = Self::V, T = Self::T>,
+>
+{
+}
+
+impl<T> OdeEquationsSens for T where
+    T: OdeEquationsImplicit<
+        Rhs: NonLinearOpSens<M = T::M, V = T::V, T = T::T>,
+        Init: ConstantOpSens<M = T::M, V = T::V, T = T::T>,
+    >
+{
+}
+
+pub trait OdeEquationsAdjoint:
+    OdeEquationsImplicit<
+    Rhs: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T>
+             + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T>,
+    Init: ConstantOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T>,
+    Out: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T>
+             + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T>,
+    Mass: LinearOpTranspose<M = Self::M, V = Self::V, T = Self::T>,
+>
+{
+}
+
+impl<T> OdeEquationsAdjoint for T where
+    T: OdeEquationsImplicit<
+        Rhs: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T>
+                 + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T>,
+        Init: ConstantOpSensAdjoint<M = T::M, V = T::V, T = T::T>,
+        Out: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T>
+                 + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T>,
+        Mass: LinearOpTranspose<M = T::M, V = T::V, T = T::T>,
+    >
+{
+}
+
 /// This struct implements the ODE equation trait [OdeEquations] for a given right-hand side op, mass op, optional root op, and initial condition function.
 ///
 /// While the [crate::OdeBuilder] struct is the easiest way to define an ODE problem,
@@ -92,13 +241,13 @@ pub trait OdeEquations {
 /// The main traits that you need to implement are the [crate::Op] and [NonLinearOp] trait,
 /// which define a nonlinear operator or function `F` that maps an input vector `x` to an output vector `y`, (i.e. `y = F(x)`).
 /// Once you have implemented this trait, you can then pass an instance of your struct to the `rhs` argument of the [Self::new] method.
-/// Once you have created an instance of [OdeSolverEquations], you can then use [crate::OdeSolverProblem::new] to create a problem.
+/// Once you have created an instance of [OdeSolverEquations], you can then use [crate::OdeBuilder::build_from_eqn] to create a problem.
 ///
 /// For example:
 ///
 /// ```rust
 /// use std::rc::Rc;
-/// use diffsol::{Bdf, OdeSolverState, OdeSolverMethod, NonLinearOp, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure};
+/// use diffsol::{Bdf, OdeSolverState, OdeSolverMethod, NonLinearOp, NonLinearOpJacobian, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure, OdeBuilder};
 /// type M = nalgebra::DMatrix<f64>;
 /// type V = nalgebra::DVector<f64>;
 ///
@@ -120,6 +269,8 @@ pub trait OdeEquations {
 ///    fn call_inplace(&self, x: &V, _t: f64, y: &mut V) {
 ///       y[0] = -0.1 * x[0];
 ///   }
+/// }
+/// impl NonLinearOpJacobian for MyProblem {
 ///    fn jac_mul_inplace(&self, x: &V, _t: f64, v: &V, y: &mut V) {
 ///      y[0] = -0.1 * v[0];
 ///   }
@@ -141,19 +292,13 @@ pub trait OdeEquations {
 /// let p = Rc::new(V::from_vec(vec![]));
 /// let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p);
 ///
-/// let rtol = 1e-6;
-/// let atol = V::from_vec(vec![1e-6]);
-/// let t0 = 0.0;
-/// let h0 = 0.1;
-/// let with_sensitivity = false;
-/// let sensitivity_error_control = false;
-/// let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, with_sensitivity, sensitivity_error_control).unwrap();
+/// let problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
 ///
 /// let mut solver = Bdf::default();
 /// let t = 0.4;
 /// let state = OdeSolverState::new(&problem, &solver).unwrap();
 /// solver.set_problem(state, &problem);
-/// while solver.state().unwrap().t() <= t {
+/// while solver.state().unwrap().t <= t {
 ///    solver.step().unwrap();
 /// }
 /// let y = solver.interpolate(t);
@@ -272,8 +417,7 @@ mod tests {
     use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
     use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
     use crate::vector::Vector;
-    use crate::LinearOp;
-    use crate::NonLinearOp;
+    use crate::{LinearOp, NonLinearOp, NonLinearOpJacobian};
 
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;

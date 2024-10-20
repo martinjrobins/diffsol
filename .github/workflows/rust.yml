@@ -37,8 +37,6 @@ jobs:
           include:
             - toolchain: beta
               os: ubuntu-latest
-            - toolchain: nightly
-              os: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4

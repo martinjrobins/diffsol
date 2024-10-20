@@ -1,11 +1,11 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    jacobian::{find_non_zeros_nonlinear, JacobianColoring},
-    Matrix, MatrixSparsity, Vector,
+    find_jacobian_non_zeros, jacobian::JacobianColoring, Matrix, MatrixSparsity, NonLinearOp,
+    NonLinearOpJacobian, Op, Vector,
 };
 
-use super::{NonLinearOp, Op, OpStatistics};
+use super::OpStatistics;
 
 pub struct Closure<M, F, G>
 where
@@ -46,7 +46,7 @@ where
     }
 
     pub fn calculate_sparsity(&mut self, y0: &M::V, t0: M::T) {
-        let non_zeros = find_non_zeros_nonlinear(self, y0, t0);
+        let non_zeros = find_jacobian_non_zeros(self, y0, t0);
         self.sparsity = Some(
             MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
                 .expect("invalid sparsity pattern"),
@@ -95,6 +95,14 @@ where
         self.statistics.borrow_mut().increment_call();
         (self.func)(x, self.p.as_ref(), t, y)
     }
+}
+
+impl<M, F, G> NonLinearOpJacobian for Closure<M, F, G>
+where
+    M: Matrix,
+    F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+{
     fn jac_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
         self.statistics.borrow_mut().increment_jac_mul();
         (self.jacobian_action)(x, self.p.as_ref(), t, v, y)

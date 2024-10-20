@@ -1,9 +1,10 @@
 use std::rc::Rc;
 
 use crate::{
-    find_non_zeros_linear, find_non_zeros_nonlinear, ode_solver::problem::OdeSolverSolution,
-    ConstantOp, JacobianColoring, LinearOp, Matrix, MatrixSparsity, NonLinearOp, OdeEquations,
-    OdeSolverProblem, Op, UnitCallable, Vector,
+    find_jacobian_non_zeros, find_matrix_non_zeros, ode_solver::problem::OdeSolverSolution,
+    ConstantOp, JacobianColoring, LinearOp, Matrix, MatrixSparsity, NonLinearOp,
+    NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeSolverProblem, Op, UnitCallable,
+    Vector,
 };
 use num_traits::Zero;
 
@@ -136,11 +137,12 @@ pub fn foodweb_diffsl_compile<M, CG, const NX: usize>(
     diffsl_context.recompile(code.as_str()).unwrap();
 }
 
+#[allow(clippy::type_complexity)]
 #[cfg(feature = "diffsl")]
 pub fn foodweb_diffsl_problem<M, CG>(
     diffsl_context: &crate::DiffSlContext<M, CG>,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T> + '_>,
     OdeSolverSolution<M::V>,
 )
 where
@@ -341,7 +343,7 @@ macro_rules! impl_op {
 context_consts!(FoodWebInit);
 impl_op!(FoodWebInit);
 
-impl<'a, M, const NX: usize> ConstantOp for FoodWebInit<'a, M, NX>
+impl<M, const NX: usize> ConstantOp for FoodWebInit<'_, M, NX>
 where
     M: Matrix,
 {
@@ -392,7 +394,7 @@ where
             sparsity: None,
             coloring: None,
         };
-        let non_zeros = find_non_zeros_nonlinear(&ret, y0, t0);
+        let non_zeros = find_jacobian_non_zeros(&ret, y0, t0);
         ret.sparsity = Some(
             MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone()).unwrap(),
         );
@@ -401,7 +403,7 @@ where
     }
 }
 
-impl<'a, M, const NX: usize> Op for FoodWebRhs<'a, M, NX>
+impl<M, const NX: usize> Op for FoodWebRhs<'_, M, NX>
 where
     M: Matrix,
 {
@@ -423,7 +425,7 @@ where
     }
 }
 
-impl<'a, M, const NX: usize> NonLinearOp for FoodWebRhs<'a, M, NX>
+impl<M, const NX: usize> NonLinearOp for FoodWebRhs<'_, M, NX>
 where
     M: Matrix,
 {
@@ -509,7 +511,12 @@ where
             }
         }
     }
+}
 
+impl<M, const NX: usize> NonLinearOpJacobian for FoodWebRhs<'_, M, NX>
+where
+    M: Matrix,
+{
     #[allow(unused_mut)]
     fn jac_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, mut y: &mut M::V) {
         let nsmx: usize = NUM_SPECIES * NX;
@@ -619,7 +626,7 @@ where
             sparsity: None,
             coloring: None,
         };
-        let non_zeros = find_non_zeros_linear(&ret, t0);
+        let non_zeros = find_matrix_non_zeros(&ret, t0);
         ret.sparsity = Some(
             MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone()).unwrap(),
         );
@@ -628,7 +635,7 @@ where
     }
 }
 
-impl<'a, M, const NX: usize> Op for FoodWebMass<'a, M, NX>
+impl<M, const NX: usize> Op for FoodWebMass<'_, M, NX>
 where
     M: Matrix,
 {
@@ -650,7 +657,7 @@ where
     }
 }
 
-impl<'a, M, const NX: usize> LinearOp for FoodWebMass<'a, M, NX>
+impl<M, const NX: usize> LinearOp for FoodWebMass<'_, M, NX>
 where
     M: Matrix,
 {
@@ -684,7 +691,7 @@ where
 
 context_consts!(FoodWebOut);
 
-impl<'a, M, const NX: usize> Op for FoodWebOut<'a, M, NX>
+impl<M, const NX: usize> Op for FoodWebOut<'_, M, NX>
 where
     M: Matrix,
 {
@@ -703,7 +710,7 @@ where
     }
 }
 
-impl<'a, M, const NX: usize> NonLinearOp for FoodWebOut<'a, M, NX>
+impl<M, const NX: usize> NonLinearOp for FoodWebOut<'_, M, NX>
 where
     M: Matrix,
 {
@@ -721,7 +728,12 @@ where
             y[2 * is + 1] = x[loc_br + is];
         }
     }
+}
 
+impl<M, const NX: usize> NonLinearOpJacobian for FoodWebOut<'_, M, NX>
+where
+    M: Matrix,
+{
     #[allow(unused_mut)]
     fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, mut y: &mut Self::V) {
         let nsmx: usize = NUM_SPECIES * NX;
@@ -817,7 +829,7 @@ where
 {
     pub fn new(y0: &M::V, t0: M::T) -> Self {
         let mut ret = Self { sparsity: None };
-        let non_zeros = find_non_zeros_nonlinear(&ret, y0, t0);
+        let non_zeros = find_jacobian_non_zeros(&ret, y0, t0);
         ret.sparsity = Some(
             MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone()).unwrap(),
         );
@@ -889,7 +901,13 @@ where
             }
         }
     }
+}
 
+#[cfg(feature = "diffsl")]
+impl<M, const NX: usize> NonLinearOpJacobian for FoodWebDiff<M, NX>
+where
+    M: Matrix,
+{
     #[allow(unused_mut)]
     fn jac_mul_inplace(&self, _x: &M::V, _t: M::T, v: &M::V, mut y: &mut M::V) {
         let nsmx: usize = NX;
@@ -1001,10 +1019,11 @@ fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
     soln
 }
 
+#[allow(clippy::type_complexity)]
 pub fn foodweb_problem<M, const NX: usize>(
     context: &FoodWebContext<M, NX>,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T> + '_>,
     OdeSolverSolution<M::V>,
 )
 where
@@ -1015,7 +1034,10 @@ where
     let t0 = M::T::zero();
     let h0 = M::T::from(1.0);
     let eqn = FoodWeb::new(context, t0);
-    let problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, false, false).unwrap();
+    let problem = OdeSolverProblem::new(
+        eqn, rtol, atol, None, None, None, None, None, None, t0, h0, false,
+    )
+    .unwrap();
     let soln = soln::<M>();
     (problem, soln)
 }

@@ -3,7 +3,6 @@ use std::ops::{AddAssign, Mul, MulAssign};
 use super::default_solver::DefaultSolver;
 use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 use crate::error::DiffsolError;
-use crate::op::NonLinearOp;
 use crate::scalar::{IndexType, Scalar, Scale};
 use crate::FaerLU;
 use crate::{Dense, DenseRef, Vector};
@@ -15,7 +14,7 @@ use faer::{
 use faer::{unzipped, zipped};
 
 impl<T: Scalar> DefaultSolver for Mat<T> {
-    type LS<C: NonLinearOp<M = Mat<T>, V = Col<T>, T = T>> = FaerLU<T, C>;
+    type LS = FaerLU<T>;
 }
 
 macro_rules! impl_matrix_common {
@@ -54,7 +53,7 @@ impl_mul_scale!(MatRef<'a, T>);
 impl_mul_scale!(Mat<T>);
 impl_mul_scale!(&Mat<T>);
 
-impl<'a, T: Scalar> MulAssign<Scale<T>> for MatMut<'a, T> {
+impl<T: Scalar> MulAssign<Scale<T>> for MatMut<'_, T> {
     fn mul_assign(&mut self, rhs: Scale<T>) {
         let scale: faer::Scale<T> = rhs.into();
         *self *= scale;

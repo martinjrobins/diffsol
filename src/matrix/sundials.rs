@@ -11,7 +11,7 @@ use crate::sundials_sys::{
 };
 
 use crate::{
-    error::*, matrix_error, ode_solver::sundials::sundials_check, op::NonLinearOp, scalar::scale,
+    error::*, matrix_error, ode_solver::sundials::sundials_check, scalar::scale,
     vector::sundials::SundialsVector, IndexType, Scale, SundialsLinearSolver, Vector,
 };
 
@@ -94,8 +94,7 @@ impl Display for SundialsMatrix {
 }
 
 impl DefaultSolver for SundialsMatrix {
-    type LS<C: NonLinearOp<M = SundialsMatrix, V = SundialsVector, T = realtype>> =
-        SundialsLinearSolver<C>;
+    type LS = SundialsLinearSolver;
 }
 
 impl MatrixCommon for SundialsMatrix {

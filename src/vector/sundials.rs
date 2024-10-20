@@ -44,7 +44,7 @@ impl SundialsVector {
         #[cfg(not(sundials_version_major = "5"))]
         let nv = {
             let ctx = get_suncontext();
-            unsafe { N_VNew_Serial(len as i64, *ctx) }
+            unsafe { N_VNew_Serial(len as i32, *ctx) }
         };
 
         #[cfg(sundials_version_major = "5")]
@@ -83,7 +83,7 @@ impl Drop for SundialsVector {
 #[derive(Debug)]
 pub struct SundialsVectorViewMut<'a>(&'a mut SundialsVector);
 
-impl<'a> SundialsVectorViewMut<'a> {
+impl SundialsVectorViewMut<'_> {
     fn sundials_vector(&self) -> N_Vector {
         self.0.sundials_vector()
     }
@@ -95,7 +95,7 @@ impl<'a> SundialsVectorViewMut<'a> {
 #[derive(Debug)]
 pub struct SundialsVectorView<'a>(&'a SundialsVector);
 
-impl<'a> SundialsVectorView<'a> {
+impl SundialsVectorView<'_> {
     fn sundials_vector(&self) -> N_Vector {
         self.0.sundials_vector()
     }
@@ -157,11 +157,11 @@ impl VectorCommon for SundialsVector {
     type T = realtype;
 }
 
-impl<'a> VectorCommon for SundialsVectorView<'a> {
+impl VectorCommon for SundialsVectorView<'_> {
     type T = realtype;
 }
 
-impl<'a> VectorCommon for SundialsVectorViewMut<'a> {
+impl VectorCommon for SundialsVectorViewMut<'_> {
     type T = realtype;
 }
 
@@ -414,6 +414,17 @@ impl<'a> VectorViewMut<'a> for SundialsVectorViewMut<'a> {
     }
     fn copy_from_view(&mut self, other: &Self::View) {
         unsafe { N_VScale(1.0, other.sundials_vector(), self.sundials_vector()) }
+    }
+    fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
+        unsafe {
+            N_VLinearSum(
+                alpha,
+                x.sundials_vector(),
+                beta,
+                self.sundials_vector(),
+                self.sundials_vector(),
+            )
+        };
     }
 }
 

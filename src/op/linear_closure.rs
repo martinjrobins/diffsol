@@ -1,12 +1,11 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    jacobian::{find_non_zeros_linear, JacobianColoring},
-    matrix::sparsity::MatrixSparsity,
-    Matrix, Vector,
+    find_matrix_non_zeros, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity, LinearOp,
+    Matrix, Op, Vector,
 };
 
-use super::{LinearOp, Op, OpStatistics};
+use super::OpStatistics;
 
 pub struct LinearClosure<M, F>
 where
@@ -43,7 +42,7 @@ where
     }
 
     pub fn calculate_sparsity(&mut self, t0: M::T) {
-        let non_zeros = find_non_zeros_linear(self, t0);
+        let non_zeros = find_matrix_non_zeros(self, t0);
         self.sparsity = Some(
             MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
                 .expect("invalid sparsity pattern"),
@@ -91,6 +90,7 @@ where
         self.statistics.borrow_mut().increment_call();
         (self.func)(x, self.p.as_ref(), t, beta, y)
     }
+
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
         self.statistics.borrow_mut().increment_matrix();
         if let Some(coloring) = &self.coloring {

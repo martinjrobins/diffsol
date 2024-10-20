@@ -1,12 +1,14 @@
 use crate::{
     matrix::{MatrixRef, MatrixView},
     ode_solver::equations::OdeEquations,
-    LinearOp, Matrix, MatrixSparsity, MatrixSparsityRef, OdeSolverProblem, Vector, VectorRef,
+    scale, LinearOp, Matrix, MatrixSparsity, MatrixSparsityRef, NonLinearOpJacobian,
+    OdeEquationsImplicit, OdeSolverProblem, Vector, VectorRef,
 };
 use num_traits::{One, Zero};
 use std::{
     cell::{Ref, RefCell},
     ops::Deref,
+    ops::MulAssign,
     rc::Rc,
 };
 
@@ -27,6 +29,11 @@ pub struct SdirkCallable<Eqn: OdeEquations> {
 }
 
 impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
+    //  y = h g(phi + c * y_s)
+    pub fn integrate_out(&self, ys: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
+        self.eqn.out().unwrap().call_inplace(ys, t, y);
+        y.mul_assign(scale(*(self.h.borrow())));
+    }
     pub fn from_eqn(eqn: Rc<Eqn>, c: Eqn::T) -> Self {
         let n = eqn.rhs().nstates();
         let h = RefCell::new(Eqn::T::zero());
@@ -49,6 +56,10 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
             tmp,
             sparsity,
         }
+    }
+
+    pub fn eqn_mut(&mut self) -> &mut Rc<Eqn> {
+        &mut self.eqn
     }
 
     pub fn new(ode_problem: &OdeSolverProblem<Eqn>, c: Eqn::T) -> Self {
@@ -193,6 +204,13 @@ where
             y.axpy(Eqn::T::one(), x, -h);
         }
     }
+}
+
+impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for SdirkCallable<Eqn>
+where
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+{
     // (M - c * h * f'(phi + c * y)) v
     fn jac_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
         self.set_tmp(x);
@@ -245,9 +263,9 @@ where
 mod tests {
     use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
     use crate::ode_solver::test_models::robertson::robertson;
-    use crate::op::NonLinearOp;
     use crate::vector::Vector;
     use crate::Matrix;
+    use crate::{NonLinearOp, NonLinearOpJacobian};
 
     use super::SdirkCallable;
     type Mcpu = nalgebra::DMatrix<f64>;

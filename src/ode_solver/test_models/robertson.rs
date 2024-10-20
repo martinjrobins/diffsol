@@ -1,7 +1,13 @@
+use std::rc::Rc;
+
 use crate::{
-    matrix::Matrix, ode_solver::problem::OdeSolverSolution, OdeBuilder, OdeEquations,
-    OdeSolverProblem, Vector,
+    matrix::Matrix,
+    ode_solver::problem::OdeSolverSolution,
+    op::{closure_with_sens::ClosureWithSens, constant_closure_with_sens::ConstantClosureWithSens},
+    ConstantOp, LinearClosure, OdeBuilder, OdeEquationsImplicit, OdeEquationsSens,
+    OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector,
 };
+use num_traits::Zero;
 
 #[cfg(feature = "diffsl")]
 pub fn robertson_diffsl_compile<
@@ -44,6 +50,7 @@ pub fn robertson_diffsl_compile<
     context.recompile(code).unwrap();
 }
 
+#[allow(clippy::type_complexity)]
 #[cfg(feature = "diffsl")]
 pub fn robertson_diffsl_problem<
     M: Matrix<T = f64> + 'static,
@@ -52,7 +59,7 @@ pub fn robertson_diffsl_problem<
     context: &crate::DiffSlContext<M, CG>,
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T> + '_>,
+    OdeSolverProblem<impl crate::OdeEquationsImplicit<M = M, V = M::V, T = M::T> + '_>,
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::new()
@@ -68,10 +75,48 @@ pub fn robertson_diffsl_problem<
     (problem, soln)
 }
 
+//*      dy1/dt = -.04*y1 + 1.e4*y2*y3
+//*      dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*y2**2
+//*         0   = y1 + y2 + y3 - 1
+fn robertson_rhs<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
+    y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
+    y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
+    y[2] = x[0] + x[1] + x[2] - M::T::from(1.0);
+}
+fn robertson_jac_mul<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+    y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
+    y[1] = p[0] * v[0]
+        - p[1] * v[1] * x[2]
+        - p[1] * x[1] * v[2]
+        - M::T::from(2.0) * p[2] * x[1] * v[1];
+    y[2] = v[0] + v[1] + v[2];
+}
+
+fn robertson_sens_mul<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+    y[0] = -v[0] * x[0] + v[1] * x[1] * x[2];
+    y[1] = v[0] * x[0] - v[1] * x[1] * x[2] - v[2] * x[1] * x[1];
+    y[2] = M::T::zero();
+}
+
+fn robertson_mass<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, beta: M::T, y: &mut M::V) {
+    y[0] = x[0] + beta * y[0];
+    y[1] = x[1] + beta * y[1];
+    y[2] = beta * y[2];
+}
+
+fn robertson_init<M: Matrix>(_p: &M::V, _t: M::T) -> M::V {
+    M::V::from_vec(vec![1.0.into(), 0.0.into(), 0.0.into()])
+}
+
+fn robertson_init_sens<M: Matrix>(_p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V) {
+    y.fill(M::T::zero());
+}
+
+#[allow(clippy::type_complexity)]
 pub fn robertson<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::new()
@@ -80,28 +125,10 @@ pub fn robertson<M: Matrix + 'static>(
         .atol([1.0e-8, 1.0e-6, 1.0e-6])
         .use_coloring(use_coloring)
         .build_ode_with_mass(
-            //*      dy1/dt = -.04*y1 + 1.e4*y2*y3
-            //*      dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*y2**2
-            //*         0   = y1 + y2 + y3 - 1
-            |x: &M::V, p: &M::V, _t: M::T, y: &mut M::V| {
-                y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
-                y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
-                y[2] = x[0] + x[1] + x[2] - M::T::from(1.0);
-            },
-            |x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
-                y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
-                y[1] = p[0] * v[0]
-                    - p[1] * v[1] * x[2]
-                    - p[1] * x[1] * v[2]
-                    - M::T::from(2.0) * p[2] * x[1] * v[1];
-                y[2] = v[0] + v[1] + v[2];
-            },
-            |x: &M::V, _p: &M::V, _t: M::T, beta: M::T, y: &mut M::V| {
-                y[0] = x[0] + beta * y[0];
-                y[1] = x[1] + beta * y[1];
-                y[2] = beta * y[2];
-            },
-            |_p: &M::V, _t: M::T| M::V::from_vec(vec![1.0.into(), 0.0.into(), 0.0.into()]),
+            robertson_rhs::<M>,
+            robertson_jac_mul::<M>,
+            robertson_mass::<M>,
+            robertson_init::<M>,
         )
         .unwrap();
 
@@ -133,6 +160,96 @@ fn soln<V: Vector>() -> OdeSolverSolution<V> {
         );
     }
     soln
+}
+
+#[allow(clippy::type_complexity)]
+pub fn robertson_sens<M: Matrix + 'static>() -> (
+    OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T>>,
+    OdeSolverSolution<M::V>,
+) {
+    let p = Rc::new(M::V::from_vec(vec![
+        M::T::from(0.04),
+        M::T::from(1.0e4),
+        M::T::from(3.0e7),
+    ]));
+    let mut rhs = ClosureWithSens::new(
+        robertson_rhs::<M>,
+        robertson_jac_mul::<M>,
+        robertson_sens_mul::<M>,
+        3,
+        3,
+        p.clone(),
+    );
+    let mut mass = LinearClosure::new(robertson_mass::<M>, 3, 3, p.clone());
+    let init = ConstantClosureWithSens::new(
+        robertson_init::<M>,
+        robertson_init_sens::<M>,
+        3,
+        3,
+        p.clone(),
+    );
+    let t0 = M::T::zero();
+
+    if M::is_sparse() {
+        let y0 = init.call(t0);
+        rhs.calculate_jacobian_sparsity(&y0, t0);
+        rhs.calculate_sens_sparsity(&y0, t0);
+        mass.calculate_sparsity(t0);
+    }
+
+    let out: Option<Rc<UnitCallable<M>>> = None;
+    let root: Option<Rc<UnitCallable<M>>> = None;
+    let eqn = OdeSolverEquations::new(
+        Rc::new(rhs),
+        Some(Rc::new(mass)),
+        root,
+        Rc::new(init),
+        out,
+        p.clone(),
+    );
+    let rtol = M::T::from(1e-4);
+    let atol = M::V::from_vec(vec![M::T::from(1e-8), M::T::from(1e-6), M::T::from(1e-6)]);
+    let problem = OdeSolverProblem::new(
+        eqn,
+        rtol,
+        atol,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        t0,
+        M::T::from(1.0),
+        false,
+    )
+    .unwrap();
+
+    let mut soln = OdeSolverSolution::default();
+    let data = vec![
+        (vec![1.0, 0.0, 0.0], 0.0),
+        (vec![9.8517e-01, 3.3864e-05, 1.4794e-02], 0.4),
+        (vec![9.0553e-01, 2.2406e-05, 9.4452e-02], 4.0),
+        (vec![7.1579e-01, 9.1838e-06, 2.8420e-01], 40.0),
+        (vec![4.5044e-01, 3.2218e-06, 5.4956e-01], 400.0),
+        (vec![1.8320e-01, 8.9444e-07, 8.1680e-01], 4000.0),
+        (vec![3.8992e-02, 1.6221e-07, 9.6101e-01], 40000.0),
+        (vec![4.9369e-03, 1.9842e-08, 9.9506e-01], 400000.0),
+        (vec![5.1674e-04, 2.0684e-09, 9.9948e-01], 4000000.0),
+        (vec![5.2009e-05, 2.0805e-10, 9.9995e-01], 4.0000e+07),
+        (vec![5.2012e-06, 2.0805e-11, 9.9999e-01], 4.0000e+08),
+        (vec![5.1850e-07, 2.0740e-12, 1.0000e+00], 4.0000e+09),
+        (vec![4.8641e-08, 1.9456e-13, 1.0000e+00], 4.0000e+10),
+    ];
+
+    for (values, time) in data {
+        soln.push(
+            M::V::from_vec(values.into_iter().map(|v| v.into()).collect()),
+            time.into(),
+        );
+    }
+
+    (problem, soln)
 }
 
 /* -----------------------------------------------------------------

@@ -1,13 +1,14 @@
 use crate::{
-    ode_solver::problem::OdeSolverSolution, Matrix, OdeBuilder, OdeEquations, OdeSolverProblem,
+    ode_solver::problem::OdeSolverSolution, Matrix, OdeBuilder, OdeEquationsSens, OdeSolverProblem,
     Vector,
 };
 use num_traits::Zero;
 
+#[allow(clippy::type_complexity)]
 pub fn robertson_ode_with_sens<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::new()

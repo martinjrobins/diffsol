@@ -5,9 +5,7 @@ use nalgebra::{
     RawStorageMut,
 };
 
-use crate::op::NonLinearOp;
-use crate::vector::Vector;
-use crate::{scalar::Scale, IndexType, Scalar};
+use crate::{scalar::Scale, IndexType, Scalar, Vector};
 
 use super::default_solver::DefaultSolver;
 use super::sparsity::{Dense, DenseRef};
@@ -15,7 +13,7 @@ use crate::error::DiffsolError;
 use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU};
 
 impl<T: Scalar> DefaultSolver for DMatrix<T> {
-    type LS<C: NonLinearOp<M = DMatrix<T>, V = DVector<T>, T = T>> = NalgebraLU<T, C>;
+    type LS = NalgebraLU<T>;
 }
 
 macro_rules! impl_matrix_common {
@@ -60,7 +58,7 @@ macro_rules! impl_mul_scale {
 impl_mul_scale!(DMatrixView<'a, T>);
 impl_mul_scale!(DMatrix<T>);
 
-impl<'a, T: Scalar> MulAssign<Scale<T>> for DMatrixViewMut<'a, T> {
+impl<T: Scalar> MulAssign<Scale<T>> for DMatrixViewMut<'_, T> {
     fn mul_assign(&mut self, rhs: Scale<T>) {
         *self *= rhs.value();
     }

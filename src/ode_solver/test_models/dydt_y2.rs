@@ -1,6 +1,6 @@
 use crate::{
-    ode_solver::problem::OdeSolverSolution, scalar::scale, DenseMatrix, OdeBuilder, OdeEquations,
-    OdeSolverProblem, Vector,
+    ode_solver::problem::OdeSolverSolution, scalar::scale, DenseMatrix, OdeBuilder,
+    OdeEquationsImplicit, OdeSolverProblem, Vector,
 };
 use num_traits::One;
 use std::ops::MulAssign;
@@ -18,11 +18,12 @@ fn rhs_jac<M: DenseMatrix>(x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V
     y.mul_assign(scale(M::T::from(2.)));
 }
 
+#[allow(clippy::type_complexity)]
 pub fn dydt_y2_problem<M: DenseMatrix + 'static>(
     use_coloring: bool,
     size: usize,
 ) -> (
-    OdeSolverProblem<impl OdeEquations<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
     let size2 = size;
