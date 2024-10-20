@@ -17,19 +17,22 @@ problems = [
         "name": "robertson_ode",
         "reference_name": "robertson_ode_klu",
         "arg": [25, 100, 400, 900],
-        "solvers": ["faer_sparse_bdf_klu"],
+        #"solvers": ["faer_sparse_bdf_klu"],
+        "solvers": ["faer_sparse_bdf"],
     },
     {
         "name": "heat2d",
         "reference_name": "heat2d_klu",
         "arg": [5, 10, 20, 30],
-        "solvers": ["faer_sparse_esdirk_klu", "faer_sparse_tr_bdf2_klu", "faer_sparse_bdf_klu", "faer_sparse_bdf_klu_diffsl"]
+        "solvers": ["faer_sparse_esdirk", "faer_sparse_tr_bdf2", "faer_sparse_bdf", "faer_sparse_bdf", "faer_sparse_bdf_diffsl"]
+        #"solvers": ["faer_sparse_esdirk_klu", "faer_sparse_tr_bdf2_klu", "faer_sparse_bdf_klu", "faer_sparse_bdf_klu_diffsl"]
     },
     {
         "name": "foodweb",
         "reference_name": "foodweb_bnd",
         "arg": [5, 10, 20, 30],
-        "solvers": ["faer_sparse_esdirk_klu", "faer_sparse_tr_bdf2_klu", "faer_sparse_bdf_klu", "faer_sparse_bdf_klu_diffsl"]
+        "solvers": ["faer_sparse_esdirk", "faer_sparse_tr_bdf2", "faer_sparse_bdf", "faer_sparse_bdf_diffsl"]
+        #"solvers": ["faer_sparse_esdirk_klu", "faer_sparse_tr_bdf2_klu", "faer_sparse_bdf_klu", "faer_sparse_bdf_klu_diffsl"]
     },
 ]
 estimates = {}
@@ -116,5 +119,9 @@ basedir = "book/src/images/benchmarks"
 fig1.savefig(f"{basedir}/bench_tr_bdf2_esdirk.svg")
 fig2.savefig(f"{basedir}/bench_bdf.svg")
 fig3.savefig(f"{basedir}/bench_bdf_diffsl.svg")
+basedir = "."
+fig1.savefig(f"{basedir}/bench_tr_bdf2_esdirk.png")
+fig2.savefig(f"{basedir}/bench_bdf.png")
+fig3.savefig(f"{basedir}/bench_bdf_diffsl.png")
         
     

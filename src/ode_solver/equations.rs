@@ -241,7 +241,7 @@ impl<T> OdeEquationsAdjoint for T where
 /// The main traits that you need to implement are the [crate::Op] and [NonLinearOp] trait,
 /// which define a nonlinear operator or function `F` that maps an input vector `x` to an output vector `y`, (i.e. `y = F(x)`).
 /// Once you have implemented this trait, you can then pass an instance of your struct to the `rhs` argument of the [Self::new] method.
-/// Once you have created an instance of [OdeSolverEquations], you can then use [crate::OdeSolverProblem::new] to create a problem.
+/// Once you have created an instance of [OdeSolverEquations], you can then use [crate::OdeBuilder::build_from_eqn] to create a problem.
 ///
 /// For example:
 ///

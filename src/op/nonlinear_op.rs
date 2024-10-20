@@ -78,7 +78,7 @@ pub trait NonLinearOpSensAdjoint: NonLinearOp {
     }
 
     /// Compute the negative transpose of the gradient of the operator wrt a parameter vector p and store it in the matrix `y`.
-    /// `y` should have been previously initialised using the output of [`Op::sens_adjoint_sparsity`].
+    /// `y` should have been previously initialised using the output of [`Op::sparsity_sens_adjoint`].
     /// The default implementation of this method computes the gradient using [Self::sens_transpose_mul_inplace],
     /// but it can be overriden for more efficient implementations.
     fn sens_adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {

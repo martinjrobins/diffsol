@@ -2,7 +2,7 @@ use super::Op;
 use crate::{Matrix, MatrixSparsityRef, Vector};
 use num_traits::{One, Zero};
 
-/// LinearOp is a trait for linear operators (i.e. they only depend linearly on the input `x`), see [NonLinearOp] for a non-linear op.
+/// LinearOp is a trait for linear operators (i.e. they only depend linearly on the input `x`), see [crate::NonLinearOp] for a non-linear op.
 ///
 /// An example of a linear operator is a matrix-vector product `y = A(t) * x`, where `A(t)` is a matrix.
 /// It extends the [Op] trait with methods for calling the operator via a GEMV-like operation (i.e. `y = t * A * x + beta * y`), and for computing the matrix representation of the operator.
