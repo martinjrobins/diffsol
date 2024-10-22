@@ -510,11 +510,11 @@ type M = nalgebra::DMatrix&lt;T&gt;;
     }
 }
 <span class="boring">}</span></code></pre></pre>
-<p>Next we implement the <code>NonLinearOp</code> trait for our struct. This trait specifies the functions that will be used to evaluate the rhs function and the jacobian multiplied by a vector.</p>
+<p>Next we implement the <code>NonLinearOp</code> and <code>NonLinearOpJacobian</code> trait for our struct. This trait specifies the functions that will be used to evaluate the rhs function and the jacobian multiplied by a vector.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
 </span><span class="boring">use std::rc::Rc;
 </span>use diffsol::{
-  NonLinearOp, OdeSolverEquations, OdeSolverProblem, 
+  NonLinearOp, NonLinearOpJacobian, OdeSolverEquations, OdeSolverProblem, 
   Op, UnitCallable, ConstantClosure
 };
 
@@ -548,6 +548,8 @@ type M = nalgebra::DMatrix&lt;T&gt;;
     fn call_inplace(&amp;self, x: &amp;V, _t: T, y: &amp;mut V) {
         y[0] = self.p[0] * x[0] * (1.0 - x[0] / self.p[1]);
     }
+}
+impl NonLinearOpJacobian for MyProblem {
     fn jac_mul_inplace(&amp;self, x: &amp;V, _t: T, v: &amp;V, y: &amp;mut V) {
         y[0] = self.p[0] * v[0] * (1.0 - 2.0 * x[0] / self.p[1]);
     }
@@ -694,11 +696,11 @@ let out: Option&lt;Rc&lt;UnitCallable&lt;M&gt;&gt;&gt; = None;
 <span class="boring">}</span></code></pre></pre>
 <h2 id="creating-the-equations"><a class="header" href="#creating-the-equations">Creating the equations</a></h2>
 <p>Now we have variables <code>rhs</code> and <code>init</code> that are structs implementing the required traits, and <code>mass</code>, <code>root</code>, and <code>out</code> set to <code>None</code>. Using these, we can create the <code>OdeSolverEquations</code> struct,
-and then provide it to the <code>OdeSolverProblem</code> struct to create the problem.</p>
+and then provide it to the <code>OdeBuilder</code> struct to create the problem.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
 </span><span class="boring">use std::rc::Rc;
-</span><span class="boring">use diffsol::{NonLinearOp, OdeSolverProblem, Op, UnitCallable, ConstantClosure};
-</span>use diffsol::OdeSolverEquations;
+</span><span class="boring">use diffsol::{NonLinearOp, NonLinearOpJacobian, OdeSolverProblem, Op, UnitCallable, ConstantClosure};
+</span>use diffsol::{OdeSolverEquations, OdeBuilder};
 
 <span class="boring">type T = f64;
 </span><span class="boring">type V = nalgebra::DVector&lt;T&gt;;
@@ -730,6 +732,8 @@ and then provide it to the <code>OdeSolverProblem</code> struct to create the pr
 </span><span class="boring">    fn call_inplace(&amp;self, x: &amp;V, _t: T, y: &amp;mut V) {
 </span><span class="boring">        y[0] = self.p[0] * x[0] * (1.0 - x[0] / self.p[1]);
 </span><span class="boring">    }
+</span><span class="boring">}
+</span><span class="boring">impl NonLinearOpJacobian for MyProblem {
 </span><span class="boring">    fn jac_mul_inplace(&amp;self, x: &amp;V, _t: T, v: &amp;V, y: &amp;mut V) {
 </span><span class="boring">        y[0] = self.p[0] * v[0] * (1.0 - 2.0 * x[0] / self.p[1]);
 </span><span class="boring">    }
@@ -751,15 +755,7 @@ and then provide it to the <code>OdeSolverProblem</code> struct to create the pr
 </span><span class="boring">
 </span><span class="boring">let p = Rc::new(V::zeros(0));
 </span>let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p.clone());
-let rtol = 1e-6;
-let atol = V::from_element(1, 1e-6);
-let t0 = 0.0;
-let h0 = 1.0;
-let with_sensitivity = false;
-let sens_error_control = false;
-let _problem = OdeSolverProblem::new(
-    eqn, rtol, atol, t0, h0, with_sensitivity, sens_error_control
-).unwrap();
+let _problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
 <span class="boring">}</span></code></pre></pre>
 <p>Note the last two arguments to <code>OdeSolverProblem::new</code> are for sensitivity analysis which we will turn off for now.</p>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="diffsl"><a class="header" href="#diffsl">DiffSL</a></h1>
@@ -839,7 +835,7 @@ DiffSol will use this function to generate a jacobian matrix, and since we have 
 guess the sparsity pattern of the jacobian matrix and use this to efficiently generate the jacobian matrix.</p>
 <p>To illustrate this, we can calculate the jacobian matrix from the <code>rhs</code> function contained in the <code>problem</code> object:</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::OdeBuilder;
-</span>use diffsol::{OdeEquations, NonLinearOp, Matrix, ConstantOp};
+</span>use diffsol::{OdeEquations, NonLinearOp, NonLinearOpJacobian, Matrix, ConstantOp};
 
 <span class="boring">type M = diffsol::SparseColMat&lt;f64&gt;;
 </span><span class="boring">type V = faer::Col&lt;f64&gt;;
@@ -892,7 +888,7 @@ This is described in more detail in the <a href="./custom_problem_structs.html">
 <pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
 </span>use std::rc::Rc;
 use faer::sparse::{SparseColMat, SymbolicSparseColMatRef};
-use diffsol::{NonLinearOp, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure};
+use diffsol::{NonLinearOp, NonLinearOpJacobian, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure, OdeBuilder};
 
 type T = f64;
 type V = faer::Col&lt;T&gt;;
@@ -935,7 +931,10 @@ impl NonLinearOp for MyProblem {
       y[i] = self.p[0] * x[i] * (1.0 - x[i] / self.p[1]);
     }
   }
- fn jac_mul_inplace(&amp;self, x: &amp;V, _t: T, v: &amp;V, y: &amp;mut V) {
+ 
+}
+impl NonLinearOpJacobian for MyProblem {
+  fn jac_mul_inplace(&amp;self, x: &amp;V, _t: T, v: &amp;V, y: &amp;mut V) {
     for i in 0..10 {
       y[i] = self.p[0] * v[i] * (1.0 - 2.0 * x[i] / self.p[1]);
     }
@@ -946,6 +945,7 @@ impl NonLinearOp for MyProblem {
       y.faer_mut().values_mut()[i] = self.p[0] * (1.0 - 2.0 * x[row] / self.p[1]);
     }
   }
+
 }
 
 let p = [1.0, 10.0];
@@ -964,11 +964,7 @@ let out: Option&lt;Rc&lt;UnitCallable&lt;M&gt;&gt;&gt; = None;
 
 let p = Rc::new(V::zeros(0));
 let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p.clone());
-let rtol = 1e-6;
-let atol = V::from_fn(10, |_| 1e-6);
-let t0 = 0.0;
-let h0 = 1.0;
-let _problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, false, false).unwrap();
+let _problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
 <span class="boring">}</span></code></pre></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="choosing-a-solver"><a class="header" href="#choosing-a-solver">Choosing a solver</a></h1>
 <p>Once you have defined the problem, you need to create a solver to solve the problem. The available solvers are:</p>
@@ -983,10 +979,10 @@ let _problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, false, false).unwr
 <li><code>Nls</code>: The type of the non-linear solver used to solve the implicit equations in the solver.</li>
 </ul>
 <p>In normal use cases, Rust can infer these from your code so you don't need to specify these explicitly. The <code>Bdf</code> solver implements the <code>Default</code> trait so can be easily created using:</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::{OdeBuilder, OdeSolverState};
+<pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::OdeBuilder;
 </span><span class="boring">use nalgebra::DVector;
 </span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
-</span>use diffsol::Bdf;
+</span>use diffsol::{Bdf, OdeSolverState, OdeSolverMethod};
 <span class="boring">fn main() {
 </span><span class="boring">
 </span><span class="boring">  let problem = OdeBuilder::new()
@@ -996,14 +992,15 @@ let _problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, false, false).unwr
 </span><span class="boring">       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
 </span><span class="boring">       |_p, _t| DVector::from_element(1, 0.1),
 </span><span class="boring">    ).unwrap();
-</span>let solver = Bdf::default();
-<span class="boring">  let _state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
-</span><span class="boring">}</span></code></pre></pre>
+</span>let mut solver = Bdf::default();
+let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
+solver.set_problem(state, &amp;problem);
+<span class="boring">}</span></code></pre></pre>
 <p>The <code>Sdirk</code> solver requires a tableu to be specified so you can use its <code>new</code> method to create a new solver, for example using the <code>tr_bdf2</code> tableau:</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::{OdeBuilder, OdeSolverState};
+<pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::{OdeBuilder};
 </span><span class="boring">use nalgebra::DVector;
 </span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
-</span>use diffsol::{Sdirk, Tableau, NalgebraLU};
+</span>use diffsol::{Sdirk, Tableau, NalgebraLU, OdeSolverState, OdeSolverMethod};
 <span class="boring">fn main() {
 </span><span class="boring">  let problem = OdeBuilder::new()
 </span><span class="boring">    .p(vec![1.0, 10.0])
@@ -1012,9 +1009,27 @@ let _problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, false, false).unwr
 </span><span class="boring">       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
 </span><span class="boring">       |_p, _t| DVector::from_element(1, 0.1),
 </span><span class="boring">    ).unwrap();
-</span>let solver = Sdirk::new(Tableau::&lt;M&gt;::tr_bdf2(), NalgebraLU::default());
-<span class="boring">  let _state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
-</span><span class="boring">}</span></code></pre></pre>
+</span>let mut solver = Sdirk::new(Tableau::&lt;M&gt;::tr_bdf2(), NalgebraLU::default());
+let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
+solver.set_problem(state, &amp;problem);
+<span class="boring">}</span></code></pre></pre>
+<p>You can also use one of the helper functions to create a SDIRK solver with a pre-defined tableau, which will create it with the default linear solver:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::{OdeBuilder};
+</span><span class="boring">use nalgebra::DVector;
+</span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
+</span>use diffsol::{Sdirk, Tableau, NalgebraLU, OdeSolverState, OdeSolverMethod};
+<span class="boring">fn main() {
+</span><span class="boring">  let problem = OdeBuilder::new()
+</span><span class="boring">    .p(vec![1.0, 10.0])
+</span><span class="boring">    .build_ode::&lt;M, _, _, _&gt;(
+</span><span class="boring">       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
+</span><span class="boring">       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
+</span><span class="boring">       |_p, _t| DVector::from_element(1, 0.1),
+</span><span class="boring">    ).unwrap();
+</span>let mut solver = Sdirk::tr_bdf2();
+let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
+solver.set_problem(state, &amp;problem);
+<span class="boring">}</span></code></pre></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="initialisation"><a class="header" href="#initialisation">Initialisation</a></h1>
 <p>Before you can solve the problem, you need to generate an intitial state for the solution. DiffSol uses the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/struct.OdeSolverState.html"><code>OdeSolverState</code></a>
 struct to hold the current state of the solution, this is a struct that contains the state vector, the gradient of the state vector, the time, and the current step size.</p>
@@ -1127,13 +1142,13 @@ loop {
 }
 let _soln = &amp;solver.state().unwrap().y;
 <span class="boring">}</span></code></pre></pre>
-<p>DiffSol also has two convenience functions <code>solve</code> and <code>solve_dense</code> on the <code>OdeSolverMethod</code> trait. <code>solve</code> will initialise the problem and solve the problem up to a specified time, returning the solution at all the
+<p>DiffSol also has two convenience functions <code>solve</code> and <code>solve_dense</code> on the <code>OdeSolverMethod</code> trait. <code>solve</code> solve the problem from an initial state up to a specified time, returning the solution at all the
 internal timesteps used by the solver. This function returns a tuple that contains a <code>Vec</code> of
 the solution at each timestep, and a <code>Vec</code> of the times at each timestep.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::OdeBuilder;
 </span><span class="boring">use nalgebra::DVector;
 </span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
-</span>use diffsol::{OdeSolverMethod, Bdf};
+</span>use diffsol::{OdeSolverMethod, Bdf, OdeSolverState};
 
 <span class="boring">fn main() {
 </span><span class="boring">  let problem = OdeBuilder::new()
@@ -1144,13 +1159,14 @@ the solution at each timestep, and a <code>Vec</code> of the times at each times
 </span><span class="boring">       |_p, _t| DVector::from_element(1, 0.1),
 </span><span class="boring">    ).unwrap();
 </span>let mut solver = Bdf::default();
-let (ys, ts) = solver.solve(&amp;problem, 10.0).unwrap();
+let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
+let (ys, ts) = solver.solve(&amp;problem, state, 10.0).unwrap();
 <span class="boring">}</span></code></pre></pre>
-<p><code>solve_dense</code> will initialise the problem and solve the problem, returning the solution at a <code>Vec</code> of times provided by the user. This function returns a <code>Vec&lt;V&gt;</code>, where <code>V</code> is the vector type used to define the problem.</p>
+<p><code>solve_dense</code> will solve a problem from an initial state, returning the solution at a <code>Vec</code> of times provided by the user. This function returns a <code>Vec&lt;V&gt;</code>, where <code>V</code> is the vector type used to define the problem.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::OdeBuilder;
 </span><span class="boring">use nalgebra::DVector;
 </span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
-</span>use diffsol::{OdeSolverMethod, Bdf};
+</span>use diffsol::{OdeSolverMethod, Bdf, OdeSolverState};
 
 <span class="boring">fn main() {
 </span><span class="boring">  let problem = OdeBuilder::new()
@@ -1162,7 +1178,8 @@ let (ys, ts) = solver.solve(&amp;problem, 10.0).unwrap();
 </span><span class="boring">    ).unwrap();
 </span>let mut solver = Bdf::default();
 let times = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
-let _soln = solver.solve_dense(&amp;problem, &amp;times).unwrap();
+let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
+let _soln = solver.solve_dense(&amp;problem, state, &amp;times).unwrap();
 <span class="boring">}</span></code></pre></pre>
 <div style="break-before: page; page-break-before: always;"></div><h1 id="benchmarks"><a class="header" href="#benchmarks">Benchmarks</a></h1>
 <p>The goal of this chapter is to compare the performance of the DiffSol

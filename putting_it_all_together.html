@@ -201,11 +201,11 @@ let out: Option&lt;Rc&lt;UnitCallable&lt;M&gt;&gt;&gt; = None;
 <span class="boring">}</span></code></pre></pre>
 <h2 id="creating-the-equations"><a class="header" href="#creating-the-equations">Creating the equations</a></h2>
 <p>Now we have variables <code>rhs</code> and <code>init</code> that are structs implementing the required traits, and <code>mass</code>, <code>root</code>, and <code>out</code> set to <code>None</code>. Using these, we can create the <code>OdeSolverEquations</code> struct,
-and then provide it to the <code>OdeSolverProblem</code> struct to create the problem.</p>
+and then provide it to the <code>OdeBuilder</code> struct to create the problem.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
 </span><span class="boring">use std::rc::Rc;
-</span><span class="boring">use diffsol::{NonLinearOp, OdeSolverProblem, Op, UnitCallable, ConstantClosure};
-</span>use diffsol::OdeSolverEquations;
+</span><span class="boring">use diffsol::{NonLinearOp, NonLinearOpJacobian, OdeSolverProblem, Op, UnitCallable, ConstantClosure};
+</span>use diffsol::{OdeSolverEquations, OdeBuilder};
 
 <span class="boring">type T = f64;
 </span><span class="boring">type V = nalgebra::DVector&lt;T&gt;;
@@ -237,6 +237,8 @@ and then provide it to the <code>OdeSolverProblem</code> struct to create the pr
 </span><span class="boring">    fn call_inplace(&amp;self, x: &amp;V, _t: T, y: &amp;mut V) {
 </span><span class="boring">        y[0] = self.p[0] * x[0] * (1.0 - x[0] / self.p[1]);
 </span><span class="boring">    }
+</span><span class="boring">}
+</span><span class="boring">impl NonLinearOpJacobian for MyProblem {
 </span><span class="boring">    fn jac_mul_inplace(&amp;self, x: &amp;V, _t: T, v: &amp;V, y: &amp;mut V) {
 </span><span class="boring">        y[0] = self.p[0] * v[0] * (1.0 - 2.0 * x[0] / self.p[1]);
 </span><span class="boring">    }
@@ -258,15 +260,7 @@ and then provide it to the <code>OdeSolverProblem</code> struct to create the pr
 </span><span class="boring">
 </span><span class="boring">let p = Rc::new(V::zeros(0));
 </span>let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p.clone());
-let rtol = 1e-6;
-let atol = V::from_element(1, 1e-6);
-let t0 = 0.0;
-let h0 = 1.0;
-let with_sensitivity = false;
-let sens_error_control = false;
-let _problem = OdeSolverProblem::new(
-    eqn, rtol, atol, t0, h0, with_sensitivity, sens_error_control
-).unwrap();
+let _problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
 <span class="boring">}</span></code></pre></pre>
 <p>Note the last two arguments to <code>OdeSolverProblem::new</code> are for sensitivity analysis which we will turn off for now.</p>
 

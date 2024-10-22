@@ -221,11 +221,11 @@ type M = nalgebra::DMatrix&lt;T&gt;;
     }
 }
 <span class="boring">}</span></code></pre></pre>
-<p>Next we implement the <code>NonLinearOp</code> trait for our struct. This trait specifies the functions that will be used to evaluate the rhs function and the jacobian multiplied by a vector.</p>
+<p>Next we implement the <code>NonLinearOp</code> and <code>NonLinearOpJacobian</code> trait for our struct. This trait specifies the functions that will be used to evaluate the rhs function and the jacobian multiplied by a vector.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
 </span><span class="boring">use std::rc::Rc;
 </span>use diffsol::{
-  NonLinearOp, OdeSolverEquations, OdeSolverProblem, 
+  NonLinearOp, NonLinearOpJacobian, OdeSolverEquations, OdeSolverProblem, 
   Op, UnitCallable, ConstantClosure
 };
 
@@ -259,6 +259,8 @@ type M = nalgebra::DMatrix&lt;T&gt;;
     fn call_inplace(&amp;self, x: &amp;V, _t: T, y: &amp;mut V) {
         y[0] = self.p[0] * x[0] * (1.0 - x[0] / self.p[1]);
     }
+}
+impl NonLinearOpJacobian for MyProblem {
     fn jac_mul_inplace(&amp;self, x: &amp;V, _t: T, v: &amp;V, y: &amp;mut V) {
         y[0] = self.p[0] * v[0] * (1.0 - 2.0 * x[0] / self.p[1]);
     }

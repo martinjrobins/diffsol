@@ -188,10 +188,10 @@
 <li><code>Nls</code>: The type of the non-linear solver used to solve the implicit equations in the solver.</li>
 </ul>
 <p>In normal use cases, Rust can infer these from your code so you don't need to specify these explicitly. The <code>Bdf</code> solver implements the <code>Default</code> trait so can be easily created using:</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::{OdeBuilder, OdeSolverState};
+<pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::OdeBuilder;
 </span><span class="boring">use nalgebra::DVector;
 </span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
-</span>use diffsol::Bdf;
+</span>use diffsol::{Bdf, OdeSolverState, OdeSolverMethod};
 <span class="boring">fn main() {
 </span><span class="boring">
 </span><span class="boring">  let problem = OdeBuilder::new()
@@ -201,14 +201,15 @@
 </span><span class="boring">       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
 </span><span class="boring">       |_p, _t| DVector::from_element(1, 0.1),
 </span><span class="boring">    ).unwrap();
-</span>let solver = Bdf::default();
-<span class="boring">  let _state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
-</span><span class="boring">}</span></code></pre></pre>
+</span>let mut solver = Bdf::default();
+let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
+solver.set_problem(state, &amp;problem);
+<span class="boring">}</span></code></pre></pre>
 <p>The <code>Sdirk</code> solver requires a tableu to be specified so you can use its <code>new</code> method to create a new solver, for example using the <code>tr_bdf2</code> tableau:</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::{OdeBuilder, OdeSolverState};
+<pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::{OdeBuilder};
 </span><span class="boring">use nalgebra::DVector;
 </span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
-</span>use diffsol::{Sdirk, Tableau, NalgebraLU};
+</span>use diffsol::{Sdirk, Tableau, NalgebraLU, OdeSolverState, OdeSolverMethod};
 <span class="boring">fn main() {
 </span><span class="boring">  let problem = OdeBuilder::new()
 </span><span class="boring">    .p(vec![1.0, 10.0])
@@ -217,9 +218,27 @@
 </span><span class="boring">       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
 </span><span class="boring">       |_p, _t| DVector::from_element(1, 0.1),
 </span><span class="boring">    ).unwrap();
-</span>let solver = Sdirk::new(Tableau::&lt;M&gt;::tr_bdf2(), NalgebraLU::default());
-<span class="boring">  let _state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
-</span><span class="boring">}</span></code></pre></pre>
+</span>let mut solver = Sdirk::new(Tableau::&lt;M&gt;::tr_bdf2(), NalgebraLU::default());
+let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
+solver.set_problem(state, &amp;problem);
+<span class="boring">}</span></code></pre></pre>
+<p>You can also use one of the helper functions to create a SDIRK solver with a pre-defined tableau, which will create it with the default linear solver:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::{OdeBuilder};
+</span><span class="boring">use nalgebra::DVector;
+</span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
+</span>use diffsol::{Sdirk, Tableau, NalgebraLU, OdeSolverState, OdeSolverMethod};
+<span class="boring">fn main() {
+</span><span class="boring">  let problem = OdeBuilder::new()
+</span><span class="boring">    .p(vec![1.0, 10.0])
+</span><span class="boring">    .build_ode::&lt;M, _, _, _&gt;(
+</span><span class="boring">       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
+</span><span class="boring">       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
+</span><span class="boring">       |_p, _t| DVector::from_element(1, 0.1),
+</span><span class="boring">    ).unwrap();
+</span>let mut solver = Sdirk::tr_bdf2();
+let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
+solver.set_problem(state, &amp;problem);
+<span class="boring">}</span></code></pre></pre>
 
                     </main>
 
