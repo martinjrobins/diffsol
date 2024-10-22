@@ -8,7 +8,7 @@ use crate::FaerLU;
 use crate::{Dense, DenseRef, Vector};
 
 use faer::{
-    linalg::matmul::matmul, mat::As2D, mat::As2DMut, Col, ColMut, ColRef, Mat, MatMut, MatRef,
+    linalg::matmul::matmul, mat::As2D, Col, ColMut, ColRef, Mat, MatMut, MatRef,
     Parallelism,
 };
 use faer::{unzipped, zipped};
