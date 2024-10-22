@@ -33,13 +33,13 @@ let out: Option<Rc<UnitCallable<M>>> = None;
 ## Creating the equations
 
 Now we have variables `rhs` and `init` that are structs implementing the required traits, and `mass`, `root`, and `out` set to `None`. Using these, we can create the `OdeSolverEquations` struct,
-and then provide it to the `OdeSolverProblem` struct to create the problem. 
+and then provide it to the `OdeBuilder` struct to create the problem. 
 
 ```rust
 # fn main() {
 # use std::rc::Rc;
-# use diffsol::{NonLinearOp, OdeSolverProblem, Op, UnitCallable, ConstantClosure};
-use diffsol::OdeSolverEquations;
+# use diffsol::{NonLinearOp, NonLinearOpJacobian, OdeSolverProblem, Op, UnitCallable, ConstantClosure};
+use diffsol::{OdeSolverEquations, OdeBuilder};
 
 # type T = f64;
 # type V = nalgebra::DVector<T>;
@@ -71,6 +71,8 @@ use diffsol::OdeSolverEquations;
 #     fn call_inplace(&self, x: &V, _t: T, y: &mut V) {
 #         y[0] = self.p[0] * x[0] * (1.0 - x[0] / self.p[1]);
 #     }
+# }
+# impl NonLinearOpJacobian for MyProblem {
 #     fn jac_mul_inplace(&self, x: &V, _t: T, v: &V, y: &mut V) {
 #         y[0] = self.p[0] * v[0] * (1.0 - 2.0 * x[0] / self.p[1]);
 #     }
@@ -92,15 +94,7 @@ use diffsol::OdeSolverEquations;
 # 
 # let p = Rc::new(V::zeros(0));
 let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p.clone());
-let rtol = 1e-6;
-let atol = V::from_element(1, 1e-6);
-let t0 = 0.0;
-let h0 = 1.0;
-let with_sensitivity = false;
-let sens_error_control = false;
-let _problem = OdeSolverProblem::new(
-    eqn, rtol, atol, t0, h0, with_sensitivity, sens_error_control
-).unwrap();
+let _problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
 # }
 ```
 

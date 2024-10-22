@@ -202,8 +202,8 @@ pub use ode_solver::{
     sdirk::Sdirk, sdirk::SdirkAdj, sdirk_state::SdirkState, sens_equations::SensEquations,
     sens_equations::SensInit, sens_equations::SensRhs, state::OdeSolverState, tableau::Tableau,
 };
-use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
-use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};
+pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
+pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};
 pub use op::nonlinear_op::{
     NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint,
 };
