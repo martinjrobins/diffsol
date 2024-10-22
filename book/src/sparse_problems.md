@@ -40,7 +40,7 @@ To illustrate this, we can calculate the jacobian matrix from the `rhs` function
 
 ```rust
 # use diffsol::OdeBuilder;
-use diffsol::{OdeEquations, NonLinearOp, Matrix, ConstantOp};
+use diffsol::{OdeEquations, NonLinearOp, NonLinearOpJacobian, Matrix, ConstantOp};
 
 # type M = diffsol::SparseColMat<f64>;
 # type V = faer::Col<f64>;
@@ -101,7 +101,7 @@ This is described in more detail in the ["Custom Problem Structs"](./custom_prob
 # fn main() {
 use std::rc::Rc;
 use faer::sparse::{SparseColMat, SymbolicSparseColMatRef};
-use diffsol::{NonLinearOp, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure};
+use diffsol::{NonLinearOp, NonLinearOpJacobian, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure, OdeBuilder};
 
 type T = f64;
 type V = faer::Col<T>;
@@ -144,7 +144,10 @@ impl NonLinearOp for MyProblem {
       y[i] = self.p[0] * x[i] * (1.0 - x[i] / self.p[1]);
     }
   }
- fn jac_mul_inplace(&self, x: &V, _t: T, v: &V, y: &mut V) {
+ 
+}
+impl NonLinearOpJacobian for MyProblem {
+  fn jac_mul_inplace(&self, x: &V, _t: T, v: &V, y: &mut V) {
     for i in 0..10 {
       y[i] = self.p[0] * v[i] * (1.0 - 2.0 * x[i] / self.p[1]);
     }
@@ -155,6 +158,7 @@ impl NonLinearOp for MyProblem {
       y.faer_mut().values_mut()[i] = self.p[0] * (1.0 - 2.0 * x[row] / self.p[1]);
     }
   }
+
 }
 
 let p = [1.0, 10.0];
@@ -173,11 +177,7 @@ let out: Option<Rc<UnitCallable<M>>> = None;
 
 let p = Rc::new(V::zeros(0));
 let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p.clone());
-let rtol = 1e-6;
-let atol = V::from_fn(10, |_| 1e-6);
-let t0 = 0.0;
-let h0 = 1.0;
-let _problem = OdeSolverProblem::new(eqn, rtol, atol, t0, h0, false, false).unwrap();
+let _problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
 # }
 ```
 

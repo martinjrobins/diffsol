@@ -56,13 +56,13 @@ impl Op for MyProblem {
 # }
 ```
 
-Next we implement the `NonLinearOp` trait for our struct. This trait specifies the functions that will be used to evaluate the rhs function and the jacobian multiplied by a vector.
+Next we implement the `NonLinearOp` and `NonLinearOpJacobian` trait for our struct. This trait specifies the functions that will be used to evaluate the rhs function and the jacobian multiplied by a vector.
 
 ```rust
 # fn main() {
 # use std::rc::Rc;
 use diffsol::{
-  NonLinearOp, OdeSolverEquations, OdeSolverProblem, 
+  NonLinearOp, NonLinearOpJacobian, OdeSolverEquations, OdeSolverProblem, 
   Op, UnitCallable, ConstantClosure
 };
 
@@ -96,6 +96,8 @@ impl NonLinearOp for MyProblem {
     fn call_inplace(&self, x: &V, _t: T, y: &mut V) {
         y[0] = self.p[0] * x[0] * (1.0 - x[0] / self.p[1]);
     }
+}
+impl NonLinearOpJacobian for MyProblem {
     fn jac_mul_inplace(&self, x: &V, _t: T, v: &V, y: &mut V) {
         y[0] = self.p[0] * v[0] * (1.0 - 2.0 * x[0] / self.p[1]);
     }

@@ -97,7 +97,7 @@ let _soln = &solver.state().unwrap().y;
 # }
 ```
 
-DiffSol also has two convenience functions `solve` and `solve_dense` on the `OdeSolverMethod` trait. `solve` will initialise the problem and solve the problem up to a specified time, returning the solution at all the 
+DiffSol also has two convenience functions `solve` and `solve_dense` on the `OdeSolverMethod` trait. `solve` solve the problem from an initial state up to a specified time, returning the solution at all the 
 internal timesteps used by the solver. This function returns a tuple that contains a `Vec` of 
 the solution at each timestep, and a `Vec` of the times at each timestep.
 
@@ -105,7 +105,7 @@ the solution at each timestep, and a `Vec` of the times at each timestep.
 # use diffsol::OdeBuilder;
 # use nalgebra::DVector;
 # type M = nalgebra::DMatrix<f64>;
-use diffsol::{OdeSolverMethod, Bdf};
+use diffsol::{OdeSolverMethod, Bdf, OdeSolverState};
 
 # fn main() {
 #   let problem = OdeBuilder::new()
@@ -116,17 +116,18 @@ use diffsol::{OdeSolverMethod, Bdf};
 #        |_p, _t| DVector::from_element(1, 0.1),
 #     ).unwrap();
 let mut solver = Bdf::default();
-let (ys, ts) = solver.solve(&problem, 10.0).unwrap();
+let state = OdeSolverState::new(&problem, &solver).unwrap();
+let (ys, ts) = solver.solve(&problem, state, 10.0).unwrap();
 # }
 ```
 
-`solve_dense` will initialise the problem and solve the problem, returning the solution at a `Vec` of times provided by the user. This function returns a `Vec<V>`, where `V` is the vector type used to define the problem.
+`solve_dense` will solve a problem from an initial state, returning the solution at a `Vec` of times provided by the user. This function returns a `Vec<V>`, where `V` is the vector type used to define the problem.
 
 ```rust
 # use diffsol::OdeBuilder;
 # use nalgebra::DVector;
 # type M = nalgebra::DMatrix<f64>;
-use diffsol::{OdeSolverMethod, Bdf};
+use diffsol::{OdeSolverMethod, Bdf, OdeSolverState};
 
 # fn main() {
 #   let problem = OdeBuilder::new()
@@ -138,6 +139,7 @@ use diffsol::{OdeSolverMethod, Bdf};
 #     ).unwrap();
 let mut solver = Bdf::default();
 let times = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
-let _soln = solver.solve_dense(&problem, &times).unwrap();
+let state = OdeSolverState::new(&problem, &solver).unwrap();
+let _soln = solver.solve_dense(&problem, state, &times).unwrap();
 # }
 ```
