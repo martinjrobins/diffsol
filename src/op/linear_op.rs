@@ -46,6 +46,10 @@ pub trait LinearOp: Op {
             v[j] = Self::T::zero();
         }
     }
+    
+    fn sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        None
+    }
 }
 
 pub trait LinearOpTranspose: LinearOp {
@@ -75,6 +79,9 @@ pub trait LinearOpTranspose: LinearOp {
             y.set_column(j, &col);
             v[j] = Self::T::zero();
         }
+    }
+    fn transpose_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        None
     }
 }
 

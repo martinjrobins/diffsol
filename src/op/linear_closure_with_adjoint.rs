@@ -90,12 +90,7 @@ where
         assert_eq!(p.len(), self.nparams);
         self.p = p;
     }
-    fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
-        self.sparsity.as_ref().map(|s| s.as_ref())
-    }
-    fn sparsity_adjoint(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
-        self.sparsity_adjoint.as_ref().map(|s| s.as_ref())
-    }
+    
     fn statistics(&self) -> OpStatistics {
         self.statistics.borrow().clone()
     }
@@ -120,6 +115,9 @@ where
             self._default_matrix_inplace(t, y);
         }
     }
+    fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
+        self.sparsity.as_ref().map(|s| s.as_ref())
+    }
 }
 
 impl<M, F, G> LinearOpTranspose for LinearClosureWithAdjoint<M, F, G>
@@ -137,5 +135,9 @@ where
         } else {
             self._default_transpose_inplace(t, y);
         }
+    }
+    
+    fn transpose_sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
+        self.sparsity_adjoint.as_ref().map(|s| s.as_ref())
     }
 }

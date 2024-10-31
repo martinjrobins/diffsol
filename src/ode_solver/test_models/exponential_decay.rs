@@ -276,11 +276,9 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>() -> (
         rhs.calculate_jacobian_sparsity(&y0, t0);
         rhs.calculate_adjoint_sparsity(&y0, t0);
     }
-    let rhs = Rc::new(rhs);
-    let init = Rc::new(init);
-    let out = Some(Rc::new(out));
-    let mass: Option<Rc<UnitCallable<M>>> = None;
-    let root: Option<Rc<UnitCallable<M>>> = None;
+    let out = Some(out);
+    let mass: Option<UnitCallable<M>> = None;
+    let root: Option<UnitCallable<M>> = None;
     let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p.clone());
     let rtol = M::T::from(1e-6);
     let atol = M::V::from_element(nstates, M::T::from(1e-6));

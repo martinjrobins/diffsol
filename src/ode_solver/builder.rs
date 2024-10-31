@@ -322,9 +322,7 @@ impl OdeBuilder {
             rhs.calculate_sparsity(&y0, t0);
             mass.calculate_sparsity(t0);
         }
-        let mass = Some(Rc::new(mass));
-        let rhs = Rc::new(rhs);
-        let init = Rc::new(init);
+        let mass = Some(mass);
         let nparams = p.len();
         let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
             self.atol,
@@ -398,10 +396,8 @@ impl OdeBuilder {
             rhs.calculate_sparsity(&y0, t0);
             mass.calculate_sparsity(t0);
         }
-        let mass = Some(Rc::new(mass));
-        let rhs = Rc::new(rhs);
-        let init = Rc::new(init);
-        let out = Some(Rc::new(out));
+        let mass = Some(mass);
+        let out = Some(out);
         let eqn = OdeSolverEquations::new(rhs, mass, None, init, out, p);
         let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
             self.atol,
@@ -484,8 +480,6 @@ impl OdeBuilder {
         if self.use_coloring || M::is_sparse() {
             rhs.calculate_sparsity(&y0, t0);
         }
-        let rhs = Rc::new(rhs);
-        let init = Rc::new(init);
         let nparams = p.len();
         let eqn = OdeSolverEquations::new(rhs, None, None, init, None, p);
         let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
@@ -574,8 +568,6 @@ impl OdeBuilder {
             rhs.calculate_jacobian_sparsity(&y0, t0);
             rhs.calculate_sens_sparsity(&y0, t0);
         }
-        let rhs = Rc::new(rhs);
-        let init = Rc::new(init);
         let nparams = p.len();
         let eqn = OdeSolverEquations::new(rhs, None, None, init, None, p);
         let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
@@ -671,13 +663,11 @@ impl OdeBuilder {
         let y0 = init(&p, t0);
         let nstates = y0.len();
         let mut rhs = Closure::new(rhs, rhs_jac, nstates, nstates, p.clone());
-        let root = Rc::new(ClosureNoJac::new(root, nstates, nroots, p.clone()));
+        let root = ClosureNoJac::new(root, nstates, nroots, p.clone());
         let init = ConstantClosure::new(init, p.clone());
         if self.use_coloring || M::is_sparse() {
             rhs.calculate_sparsity(&y0, t0);
         }
-        let rhs = Rc::new(rhs);
-        let init = Rc::new(init);
         let nparams = p.len();
         let eqn = OdeSolverEquations::new(rhs, None, Some(root), init, None, p);
         let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
@@ -754,49 +744,6 @@ impl OdeBuilder {
             param_atol,
             Eqn::T::from(self.t0),
             Eqn::T::from(self.h0),
-            self.integrate_out,
-        )
-    }
-
-    /// Build an ODE problem using the DiffSL language (requires either the `diffsl-cranelift` or `diffls-llvm` features).
-    /// The source code is provided as a string, please see the [DiffSL documentation](https://martinjrobins.github.io/diffsl/) for more information.
-    #[cfg(feature = "diffsl")]
-    pub fn build_diffsl<M, CG>(
-        self,
-        context: &crate::ode_solver::diffsl::DiffSlContext<M, CG>,
-    ) -> Result<OdeSolverProblem<crate::ode_solver::diffsl::DiffSl<'_, M, CG>>, DiffsolError>
-    where
-        M: Matrix<T = crate::ode_solver::diffsl::T>,
-        CG: diffsl::execution::module::CodegenModule,
-    {
-        use crate::ode_solver::diffsl;
-        let p = Self::build_p::<M::V>(self.p);
-        let nparams = p.len();
-        let mut eqn = diffsl::DiffSl::new(context, self.use_coloring || M::is_sparse());
-        let nstates = eqn.rhs().nstates();
-        let nout = eqn.out().map(|out| out.nout());
-        eqn.set_params(p);
-        let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
-            self.atol,
-            self.sens_atol,
-            self.out_atol,
-            self.param_atol,
-            nstates,
-            nout,
-            nparams,
-        )?;
-        OdeSolverProblem::new(
-            eqn,
-            self.rtol,
-            atol,
-            self.sens_rtol.map(M::T::from),
-            sens_atol,
-            self.out_rtol.map(M::T::from),
-            out_atol,
-            self.param_rtol.map(M::T::from),
-            param_atol,
-            self.t0,
-            self.h0,
             self.integrate_out,
         )
     }

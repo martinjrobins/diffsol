@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use crate::{
-    LinearOp, LinearOpTranspose, Matrix, MatrixSparsityRef, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Op, Scalar, Vector, VectorIndex,
+    LinearOp, LinearOpTranspose, Matrix, MatrixSparsity, NonLinearOp, NonLinearOpAdjoint,
+    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar, Vector, VectorIndex,
 };
 use num_traits::{One, Zero};
 
@@ -93,11 +93,9 @@ pub struct JacobianColoring<M: Matrix> {
 }
 
 impl<M: Matrix> JacobianColoring<M> {
-    pub fn new_from_non_zeros<F: Op<M = M>>(op: &F, non_zeros: Vec<(usize, usize)>) -> Self {
-        let sparsity = op
-            .sparsity()
-            .expect("Jacobian sparsity not defined, cannot use coloring");
-        let ncols = op.nstates();
+    pub fn new_from_sparsity(sparsity: & impl MatrixSparsity<M>) -> Self {
+        let ncols = sparsity.ncols();
+        let non_zeros = sparsity.indices();
         let graph = nonzeros2graph(non_zeros.as_slice(), ncols);
         let coloring = color_graph_greedy(&graph);
         let max_color = coloring.iter().max().copied().unwrap_or(0);
@@ -224,7 +222,6 @@ mod tests {
     use std::rc::Rc;
 
     use crate::jacobian::{find_jacobian_non_zeros, JacobianColoring};
-    use crate::matrix::sparsity::MatrixSparsityRef;
     use crate::matrix::Matrix;
     use crate::op::linear_closure::LinearClosure;
     use crate::vector::Vector;
@@ -237,8 +234,6 @@ mod tests {
     use nalgebra::DMatrix;
     use num_traits::{One, Zero};
     use std::ops::MulAssign;
-
-    use super::find_matrix_non_zeros;
 
     fn helper_triplets2op_nonlinear<'a, M: Matrix + 'a>(
         triplets: &'a [(usize, usize, M::T)],
@@ -394,9 +389,8 @@ mod tests {
             let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), n, n);
             let y0 = M::V::zeros(n);
             let t0 = M::T::zero();
-            let non_zeros = find_jacobian_non_zeros(&op, &y0, t0);
-            let coloring = JacobianColoring::new_from_non_zeros(&op, non_zeros);
-            let mut jac = M::new_from_sparsity(3, 3, op.sparsity().map(|s| s.to_owned()));
+            let coloring = JacobianColoring::new_from_sparsity(&op.jacobian_sparsity().unwrap());
+            let mut jac = M::new_from_sparsity(3, 3, op.jacobian_sparsity());
             coloring.jacobian_inplace(&op, &y0, t0, &mut jac);
             let mut gemv1 = M::V::zeros(n);
             let v = M::V::from_element(3, M::T::one());
@@ -410,9 +404,8 @@ mod tests {
         for triplets in test_triplets {
             let op = helper_triplets2op_linear::<M>(triplets.as_slice(), n, n);
             let t0 = M::T::zero();
-            let non_zeros = find_matrix_non_zeros(&op, t0);
-            let coloring = JacobianColoring::new_from_non_zeros(&op, non_zeros);
-            let mut jac = M::new_from_sparsity(3, 3, op.sparsity().map(|s| s.to_owned()));
+            let coloring = JacobianColoring::new_from_sparsity(&op.sparsity().unwrap());
+            let mut jac = M::new_from_sparsity(3, 3, op.sparsity());
             coloring.matrix_inplace(&op, t0, &mut jac);
             let mut gemv1 = M::V::zeros(n);
             let v = M::V::from_element(3, M::T::one());

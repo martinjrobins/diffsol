@@ -5,7 +5,6 @@ use nalgebra::{DMatrix, DVector, Dyn};
 use crate::{
     error::{DiffsolError, LinearSolverError},
     linear_solver_error,
-    matrix::sparsity::MatrixSparsityRef,
     LinearSolver, Matrix, NonLinearOpJacobian, Scalar,
 };
 
@@ -62,7 +61,7 @@ impl<T: Scalar> LinearSolver<DMatrix<T>> for LU<T> {
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();
-        let matrix = C::M::new_from_sparsity(nrows, ncols, op.sparsity().map(|s| s.to_owned()));
+        let matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity());
         self.matrix = Some(matrix);
     }
 }

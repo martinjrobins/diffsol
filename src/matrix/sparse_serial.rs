@@ -138,13 +138,6 @@ impl<T: Scalar> MatrixSparsity<CscMatrix<T>> for SparsityPattern {
         major_offsets.push(n);
         SparsityPattern::try_from_offsets_and_indices(n, n, major_offsets, minor_indices).unwrap()
     }
-}
-
-impl<'a, T: Scalar> MatrixSparsityRef<'a, CscMatrix<T>> for &'a SparsityPattern {
-    fn to_owned(&self) -> SparsityPattern {
-        SparsityPattern::clone(self)
-    }
-
     fn get_index(&self, rows: &[IndexType], cols: &[IndexType]) -> DVector<IndexType> {
         let mut index = DVector::<IndexType>::zeros(rows.len());
         #[allow(unused_mut)]
@@ -156,6 +149,14 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, CscMatrix<T>> for &'a SparsityPattern 
         }
         index
     }
+}
+
+impl<'a, T: Scalar> MatrixSparsityRef<'a, CscMatrix<T>> for &'a SparsityPattern {
+    fn to_owned(&self) -> SparsityPattern {
+        SparsityPattern::clone(self)
+    }
+
+    
 
     fn nrows(&self) -> IndexType {
         self.minor_dim()

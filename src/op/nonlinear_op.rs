@@ -58,9 +58,12 @@ pub trait NonLinearOpSens: NonLinearOp {
     fn sens(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
         let m = self.nparams();
-        let mut y = Self::M::new_from_sparsity(n, m, self.sparsity_sens().map(|s| s.to_owned()));
+        let mut y = Self::M::new_from_sparsity(n, m, self.sens_sparsity().map(|s| s.to_owned()));
         self.sens_inplace(x, t, &mut y);
         y
+    }
+    fn sens_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        None
     }
 }
 pub trait NonLinearOpSensAdjoint: NonLinearOp {
@@ -95,6 +98,10 @@ pub trait NonLinearOpSensAdjoint: NonLinearOp {
             y.set_column(j, &col);
             v[j] = Self::T::zero();
         }
+    }
+    
+    fn sens_adjoint_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        None
     }
 }
 pub trait NonLinearOpAdjoint: NonLinearOp {
@@ -131,6 +138,10 @@ pub trait NonLinearOpAdjoint: NonLinearOp {
         self.adjoint_inplace(x, t, &mut y);
         y
     }
+    /// Return sparsity information (if available)
+    fn adjoint_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        None
+    }
 }
 pub trait NonLinearOpJacobian: NonLinearOp {
     /// Compute the product of the Jacobian with a given vector `J(x, t) * v`.
@@ -151,6 +162,11 @@ pub trait NonLinearOpJacobian: NonLinearOp {
         let mut y = Self::M::new_from_sparsity(n, n, self.sparsity().map(|s| s.to_owned()));
         self.jacobian_inplace(x, t, &mut y);
         y
+    }
+    
+    /// Return sparsity information (if available)
+    fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        None
     }
 
     /// Compute the Jacobian matrix `J(x, t)` of the operator and store it in the matrix `y`.

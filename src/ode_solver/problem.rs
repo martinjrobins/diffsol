@@ -94,7 +94,7 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
     pub fn set_params(&mut self, p: Eqn::V) -> Result<(), DiffsolError> {
         let eqn =
             Rc::get_mut(&mut self.eqn).ok_or(ode_solver_error!(FailedToGetMutableReference))?;
-        eqn.set_params(p);
+        eqn.set_params(Rc::new(p));
         Ok(())
     }
 }

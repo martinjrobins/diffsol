@@ -17,7 +17,7 @@ nalgebra = []
 sundials = ["suitesparse_sys", "bindgen", "cc"]
 suitesparse = ["suitesparse_sys"]
 diffsl-cranelift = ["diffsl-no-llvm", "diffsl"]
-diffsl = []
+diffsl = [ ]
 diffsl-llvm = []
 diffsl-llvm13 = ["diffsl13-0", "diffsl-llvm", "diffsl"]
 diffsl-llvm14 = ["diffsl14-0", "diffsl-llvm", "diffsl"]
@@ -29,7 +29,6 @@ diffsl-llvm17 = ["diffsl17-0", "diffsl-llvm", "diffsl"]
 nalgebra = "0.33"
 nalgebra-sparse = { version = "0.10", features = ["io"] }
 num-traits = "0.2.17"
-ouroboros = "0.18.2"
 serde = { version = "1.0.196", features = ["derive"] }
 diffsl-no-llvm = { package = "diffsl", version = "=0.2.0", optional = true }
 diffsl13-0 = { package = "diffsl", version = "=0.2.0", features = ["llvm13-0"], optional = true }

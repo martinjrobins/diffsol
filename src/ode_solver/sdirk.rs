@@ -533,7 +533,7 @@ where
             self.root_finder
                 .as_ref()
                 .unwrap()
-                .init(root_fn.as_ref(), &state.y, state.t);
+                .init(&root_fn, &state.y, state.t);
         }
         Ok(())
     }
@@ -828,7 +828,7 @@ where
         if let Some(root_fn) = self.problem.as_ref().unwrap().eqn.root() {
             let ret = self.root_finder.as_ref().unwrap().check_root(
                 &|t| self.interpolate(t),
-                root_fn.as_ref(),
+                &root_fn,
                 &self.state.as_ref().unwrap().y,
                 self.state.as_ref().unwrap().t,
             );
@@ -848,7 +848,7 @@ where
         Ok(OdeSolverStopReason::InternalTimestep)
     }
 
-    fn set_stop_time(&mut self, tstop: <Eqn as OdeEquations>::T) -> Result<(), DiffsolError> {
+    fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
         self.tstop = Some(tstop);
         if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
             let error = OdeSolverError::StopTimeBeforeCurrentTime {
@@ -863,8 +863,8 @@ where
 
     fn interpolate_sens(
         &self,
-        t: <Eqn as OdeEquations>::T,
-    ) -> Result<Vec<<Eqn as OdeEquations>::V>, DiffsolError> {
+        t: <Eqn as Op>::T,
+    ) -> Result<Vec<<Eqn as Op>::V>, DiffsolError> {
         if self.state.is_none() {
             return Err(ode_solver_error!(StateNotSet));
         }

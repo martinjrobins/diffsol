@@ -3,9 +3,7 @@ use std::ops::AddAssign;
 use std::rc::Rc;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError},
-    AdjointEquations, NoAug, OdeEquationsAdjoint, OdeEquationsSens, SensEquations, StateRef,
-    StateRefMut,
+    error::{DiffsolError, OdeSolverError}, AdjointEquations, AugmentedOdeEquationsImplicit, NoAug, OdeEquationsAdjoint, OdeEquationsSens, SensEquations, StateRef, StateRefMut
 };
 
 use num_traits::{abs, One, Pow, Zero};
@@ -25,10 +23,7 @@ use crate::{
 };
 
 use super::jacobian_update::SolverState;
-use super::{
-    equations::OdeEquations,
-    method::{AdjointOdeSolverMethod, AugmentedOdeSolverMethod, SensitivitiesOdeSolverMethod},
-};
+use super::method::{AdjointOdeSolverMethod, AugmentedOdeSolverMethod, SensitivitiesOdeSolverMethod};
 
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct BdfStatistics {
@@ -82,7 +77,7 @@ pub struct Bdf<
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquationsImplicit,
     Nls: NonLinearSolver<Eqn::M>,
-    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit = NoAug<Eqn>,
+    AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> = NoAug<Eqn>,
 > {
     nonlinear_solver: Nls,
     ode_problem: Option<OdeSolverProblem<Eqn>>,
@@ -758,7 +753,7 @@ where
         ))
     }
 
-    fn interpolate_sens(&self, t: <Eqn as OdeEquations>::T) -> Result<Vec<Eqn::V>, DiffsolError> {
+    fn interpolate_sens(&self, t: <Eqn as Op>::T) -> Result<Vec<Eqn::V>, DiffsolError> {
         // state must be set
         let state = self.state.as_ref().ok_or(ode_solver_error!(StateNotSet))?;
         if self.is_state_modified {
@@ -843,7 +838,7 @@ where
             self.root_finder
                 .as_ref()
                 .unwrap()
-                .init(root_fn.as_ref(), &state.y, state.t);
+                .init(&root_fn, &state.y, state.t);
         }
 
         // (re)allocate internal state
@@ -1082,8 +1077,8 @@ where
         // check for root within accepted step
         if let Some(root_fn) = self.problem().as_ref().unwrap().eqn.root() {
             let ret = self.root_finder.as_ref().unwrap().check_root(
-                &|t: <Eqn as OdeEquations>::T| self.interpolate(t),
-                root_fn.as_ref(),
+                &|t: <Eqn as Op>::T| self.interpolate(t),
+                &root_fn,
                 &self.state.as_ref().unwrap().y,
                 self.state.as_ref().unwrap().t,
             );
@@ -1102,7 +1097,7 @@ where
         Ok(OdeSolverStopReason::InternalTimestep)
     }
 
-    fn set_stop_time(&mut self, tstop: <Eqn as OdeEquations>::T) -> Result<(), DiffsolError> {
+    fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
         self.tstop = Some(tstop);
         if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
             let error = OdeSolverError::StopTimeBeforeCurrentTime {
@@ -1168,7 +1163,7 @@ where
 impl<M, Eqn, Nls, AugmentedEqn> AdjointOdeSolverMethod<Eqn> for Bdf<M, Eqn, Nls, AugmentedEqn>
 where
     Eqn: OdeEquationsAdjoint,
-    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsAdjoint,
+    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Nls: NonLinearSolver<Eqn::M>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,

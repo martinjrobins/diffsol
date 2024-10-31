@@ -4,7 +4,6 @@ use crate::{
     error::{DiffsolError, LinearSolverError},
     linear_solver::LinearSolver,
     linear_solver_error,
-    matrix::sparsity::MatrixSparsityRef,
     scalar::IndexType,
     Matrix, NonLinearOpJacobian, Scalar, SparseColMat,
 };
@@ -76,8 +75,7 @@ impl<T: Scalar> LinearSolver<SparseColMat<T>> for FaerSparseLU<T> {
         let matrix = C::M::new_from_sparsity(
             nrows,
             ncols,
-            op.sparsity()
-                .map(|s| MatrixSparsityRef::<SparseColMat<T>>::to_owned(&s)),
+            op.jacobian_sparsity()
         );
         self.matrix = Some(matrix);
         self.lu_symbolic = Some(

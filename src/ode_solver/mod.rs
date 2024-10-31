@@ -36,6 +36,7 @@ mod tests {
     use crate::{
         NonLinearOpJacobian, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit,
         OdeEquationsSens, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
+        OdeEquationsRef, op::OpStatistics,
     };
     use num_traits::One;
     use num_traits::Zero;
@@ -402,38 +403,55 @@ mod tests {
         }
     }
 
-    impl<M: Matrix> OdeEquations for TestEqn<M> {
+    impl<M: Matrix> Op for TestEqn<M> {
         type T = M::T;
         type V = M::V;
         type M = M;
-        type Rhs = TestEqnRhs<M>;
-        type Mass = UnitCallable<M>;
-        type Root = UnitCallable<M>;
-        type Init = TestEqnInit<M>;
-        type Out = UnitCallable<M>;
+        fn set_params(&mut self, _p: Rc<Self::V>) {}
+        fn nout(&self) -> usize {
+            1
+        }
+        fn nparams(&self) -> usize {
+            0
+        }
+        fn nstates(&self) -> usize {
+            1
+        }
+        fn statistics(&self) -> crate::op::OpStatistics {
+            OpStatistics::default()
+        }
+    }
 
-        fn set_params(&mut self, _p: Self::V) {}
+    impl<'a, M: Matrix> OdeEquationsRef<'a> for TestEqn<M> {
+        type Rhs = &'a TestEqnRhs<M>;
+        type Mass = &'a UnitCallable<M>;
+        type Root = &'a UnitCallable<M>;
+        type Init = &'a TestEqnInit<M>;
+        type Out = &'a UnitCallable<M>;
+    }
 
-        fn rhs(&self) -> &Rc<Self::Rhs> {
+    impl<M: Matrix> OdeEquations for TestEqn<M> {
+        fn rhs(&self) -> &TestEqnRhs<M> {
             &self.rhs
         }
 
-        fn mass(&self) -> Option<&Rc<Self::Mass>> {
+        fn mass(&self) -> Option<&UnitCallable<M>> {
             None
         }
 
-        fn root(&self) -> Option<&Rc<Self::Root>> {
+        fn root(&self) -> Option<&UnitCallable<M>> {
             None
         }
 
-        fn init(&self) -> &Rc<Self::Init> {
+        fn init(&self) -> &TestEqnInit<M> {
             &self.init
         }
 
-        fn out(&self) -> Option<&Rc<Self::Out>> {
+        fn out(&self) -> Option<&UnitCallable<M>> {
             None
         }
     }
+
 
     pub fn test_interpolate<M: Matrix, Method: OdeSolverMethod<TestEqn<M>>>(mut s: Method) {
         let problem = OdeSolverProblem::new(

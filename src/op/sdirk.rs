@@ -179,9 +179,7 @@ impl<Eqn: OdeEquations> Op for SdirkCallable<Eqn> {
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
     }
-    fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
-        self.sparsity.as_ref().map(|s| s.as_ref())
-    }
+    
 }
 
 impl<Eqn: OdeEquations> NonLinearOp for SdirkCallable<Eqn>
@@ -256,6 +254,9 @@ where
         }
         let number_of_jac_evals = *self.number_of_jac_evals.borrow() + 1;
         self.number_of_jac_evals.replace(number_of_jac_evals);
+    }
+    fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        self.sparsity.as_ref().map(|s| s.as_ref())
     }
 }
 

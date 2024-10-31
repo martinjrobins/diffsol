@@ -420,9 +420,6 @@ where
     fn nstates(&self) -> usize {
         self.context.nstates
     }
-    fn sparsity(&self) -> Option<M::SparsityRef<'_>> {
-        self.sparsity.as_ref().map(|s| s.as_ref())
-    }
 }
 
 impl<M, const NX: usize> NonLinearOp for FoodWebRhs<'_, M, NX>
@@ -605,6 +602,9 @@ where
             self._default_jacobian_inplace(x, t, y);
         }
     }
+    fn jacobian_sparsity(&self) -> Option<M::Sparsity> {
+        self.sparsity.as_ref().map(|s| s.as_ref())
+    }
 }
 
 struct FoodWebMass<'a, M, const NX: usize>
@@ -652,9 +652,7 @@ where
     fn nstates(&self) -> usize {
         self.context.nstates
     }
-    fn sparsity(&self) -> Option<M::SparsityRef<'_>> {
-        self.sparsity.as_ref().map(|s| s.as_ref())
-    }
+    
 }
 
 impl<M, const NX: usize> LinearOp for FoodWebMass<'_, M, NX>
@@ -679,6 +677,9 @@ where
                 }
             }
         }
+    }
+    fn sparsity(&self) -> Option<M::SparsityRef<'_>> {
+        self.sparsity.as_ref().map(|s| s.as_ref())
     }
 }
 
@@ -855,9 +856,7 @@ where
     fn nstates(&self) -> usize {
         NX * NX
     }
-    fn sparsity(&self) -> Option<M::SparsityRef<'_>> {
-        self.sparsity.as_ref().map(|s| s.as_ref())
-    }
+    
 }
 
 #[cfg(feature = "diffsl")]
@@ -943,6 +942,9 @@ where
                 y[loc] = coy * (dcyui - dcyli) + cox * (dcxui - dcxli);
             }
         }
+    }
+    fn jacobian_sparsity(&self) -> Option<M::Sparsity> {
+        self.sparsity.as_ref().map(|&s| s.clone())
     }
 }
 

@@ -82,7 +82,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n));
 
         // create the mass and rhs jacobians according to the sparsity pattern
-        let rhs_jac_sparsity = eqn.rhs().sparsity();
+        let rhs_jac_sparsity = eqn.rhs().jacobian_sparsity();
         let rhs_jac = RefCell::new(Eqn::M::new_from_sparsity(
             n,
             n,
@@ -200,9 +200,7 @@ impl<Eqn: OdeEquationsImplicit> Op for BdfCallable<Eqn> {
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
     }
-    fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
-        self.sparsity.as_ref().map(|s| s.as_ref())
-    }
+    
 }
 
 // dF(y)/dp = dM/dp (y - y0 + psi) + Ms - c * df(y)/dp - c df(y)/dy s = 0
@@ -275,6 +273,9 @@ where
         }
         let number_of_jac_evals = *self.number_of_jac_evals.borrow() + 1;
         self.number_of_jac_evals.replace(number_of_jac_evals);
+    }
+    fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
+        self.sparsity.as_ref().map(|s| s.as_ref())
     }
 }
 

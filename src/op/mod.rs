@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use crate::{LinearOp, Matrix, NonLinearOp, Scalar, Vector};
+use crate::{ConstantOp, LinearOp, Matrix, NonLinearOp, Scalar, Vector};
 
 use nonlinear_op::NonLinearOpJacobian;
 use serde::Serialize;
@@ -50,31 +50,12 @@ pub trait Op {
         assert_eq!(p.len(), self.nparams());
     }
 
-    /// Return sparsity information for the jacobian or matrix (if available)
-    fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
-        None
-    }
-
-    /// Return sparsity information for the jacobian or matrix (if available)
-    fn sparsity_adjoint(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
-        None
-    }
-
-    /// Return sparsity information for the sensitivity of the operator wrt a parameter vector p (if available)
-    fn sparsity_sens(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
-        None
-    }
-
-    /// Return sparsity information for the sensitivity of the operator wrt a parameter vector p (if available)
-    fn sparsity_sens_adjoint(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
-        None
-    }
-
     /// Return statistics about the operator (e.g. how many times it was called, how many times the jacobian was computed, etc.)
     fn statistics(&self) -> OpStatistics {
         OpStatistics::default()
     }
 }
+
 
 #[derive(Default, Clone, Serialize)]
 pub struct OpStatistics {
@@ -139,10 +120,25 @@ impl<C: NonLinearOpJacobian> NonLinearOpJacobian for &C {
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         C::jacobian_inplace(*self, x, t, y)
     }
+    fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        C::jacobian_sparsity(*self)
+    }
 }
 
 impl<C: LinearOp> LinearOp for &C {
     fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
         C::gemv_inplace(*self, x, t, beta, y)
+    }
+    fn sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        C::sparsity(*self)
+    }
+    fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
+        C::matrix_inplace(*self, t, y)
+    }
+}
+
+impl<C: ConstantOp> ConstantOp for &C {
+    fn call_inplace(&self, t: Self::T, y: &mut Self::V) {
+        C::call_inplace(*self, t, y)
     }
 }

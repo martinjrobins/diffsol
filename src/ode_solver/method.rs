@@ -397,7 +397,6 @@ where
 pub trait AugmentedOdeSolverMethod<Eqn, AugmentedEqn>: OdeSolverMethod<Eqn>
 where
     Eqn: OdeEquations,
-    AugmentedEqn: AugmentedOdeEquations<Eqn>,
 {
     fn set_augmented_problem(
         &mut self,
@@ -410,7 +409,7 @@ where
 pub trait SensitivitiesOdeSolverMethod<Eqn>:
     AugmentedOdeSolverMethod<Eqn, SensEquations<Eqn>>
 where
-    Eqn: OdeEquationsSens,
+    Eqn: OdeEquationsSens
 {
     fn set_problem_with_sensitivities(
         &mut self,
@@ -424,7 +423,7 @@ where
 
 pub trait AdjointOdeSolverMethod<Eqn>: OdeSolverMethod<Eqn>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquationsAdjoint
 {
     type AdjointSolver: AugmentedOdeSolverMethod<
         AdjointEquations<Eqn, Self>,

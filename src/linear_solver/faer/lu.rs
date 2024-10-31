@@ -3,7 +3,7 @@ use std::rc::Rc;
 use crate::{error::LinearSolverError, linear_solver_error};
 
 use crate::{
-    error::DiffsolError, linear_solver::LinearSolver, Matrix, MatrixSparsityRef,
+    error::DiffsolError, linear_solver::LinearSolver, Matrix,
     NonLinearOpJacobian, Scalar,
 };
 
@@ -58,7 +58,7 @@ impl<T: Scalar> LinearSolver<Mat<T>> for LU<T> {
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();
-        let matrix = C::M::new_from_sparsity(nrows, ncols, op.sparsity().map(|s| s.to_owned()));
+        let matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity());
         self.matrix = Some(matrix);
     }
 }
