@@ -141,7 +141,7 @@ where
     let problem = OdeBuilder::new()
         .rtol(1e-5)
         .atol([1e-5])
-        .build_from_eqn(Rc::new(eqn))
+        .build_from_eqn(eqn)
         .unwrap();
     let soln = soln::<M>();
     (problem, soln)

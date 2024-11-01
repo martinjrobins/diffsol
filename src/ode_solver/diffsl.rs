@@ -21,7 +21,7 @@ pub type T = f64;
 /// # Example
 ///
 /// ```rust
-/// use diffsol::{OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod, DiffSlContext, diffsl::LlvmModule};
+/// use diffsol::{OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod, DiffSlContext, DiffSl, diffsl::LlvmModule};
 ///         
 /// // dy/dt = -ay
 /// // y(0) = 1
@@ -32,10 +32,11 @@ pub type T = f64;
 ///     F { -a*u }
 ///     out { u }
 /// ").unwrap();
+/// let eqn = DiffSl::from_context(context);
 /// let problem = OdeBuilder::new()
 ///  .rtol(1e-6)
 ///  .p([0.1])
-///  .build_diffsl(&context).unwrap();
+///  .build_from_eqn(eqn).unwrap();
 /// let mut solver = Bdf::default();
 /// let t = 0.4;
 /// let state = OdeSolverState::new(&problem, &solver).unwrap();
@@ -136,14 +137,15 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSl<M, CG> {
             ret.rhs_coloring = Some(coloring);
             ret.rhs_sparsity = Some(sparsity);
 
-            let op = ret.mass().unwrap();
-            let non_zeros = find_matrix_non_zeros(&op, t0);
-            let sparsity =
-                M::Sparsity::try_from_indices(op.nout(), op.nstates(), non_zeros.clone())
-                    .expect("invalid sparsity pattern");
-            let coloring = JacobianColoring::new(&sparsity, &non_zeros);
-            ret.mass_coloring = Some(coloring);
-            ret.mass_sparsity = Some(sparsity);
+            if let Some(op) = ret.mass() {
+                let non_zeros = find_matrix_non_zeros(&op, t0);
+                let sparsity =
+                    M::Sparsity::try_from_indices(op.nout(), op.nstates(), non_zeros.clone())
+                        .expect("invalid sparsity pattern");
+                let coloring = JacobianColoring::new(&sparsity, &non_zeros);
+                ret.mass_coloring = Some(coloring);
+                ret.mass_sparsity = Some(sparsity);
+            }
         }
         ret
     }
@@ -395,7 +397,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> OdeEquations for DiffSl<M, CG> {
     }
 
     fn mass(&self) -> Option<DiffSlMass<'_, M, CG>> {
-        Some(DiffSlMass(self))
+        self.context.compiler.has_mass().then_some(DiffSlMass(self))
     }
 
     fn root(&self) -> Option<DiffSlRoot<'_, M, CG>> {
@@ -466,8 +468,8 @@ mod tests {
         let k = 1.0;
         let r = 1.0;
         let context = DiffSlContext::<nalgebra::DMatrix<f64>, CG>::new(text).unwrap();
-        let mut eqn = DiffSl::from_context(context);
         let p = DVector::from_vec(vec![r, k]);
+        let mut eqn = DiffSl::from_context(context);
         eqn.set_params(Rc::new(p));
 
         // test that the initial values look ok
@@ -489,10 +491,7 @@ mod tests {
         mass_y.assert_eq_st(&mass_y_expect, 1e-10);
 
         // solver a bit and check the state and output
-        let problem = OdeBuilder::new()
-            .p([r, k])
-            .build_from_eqn(Rc::new(eqn))
-            .unwrap();
+        let problem = OdeBuilder::new().p([r, k]).build_from_eqn(eqn).unwrap();
         let mut solver = Bdf::default();
         let t = 1.0;
         let state = OdeSolverState::new(&problem, &solver).unwrap();

@@ -721,7 +721,7 @@ impl OdeBuilder {
     }
 
     /// Build an ODE problem from a set of equations
-    pub fn build_from_eqn<Eqn>(self, eqn: Rc<Eqn>) -> Result<OdeSolverProblem<Eqn>, DiffsolError>
+    pub fn build_from_eqn<Eqn>(self, mut eqn: Eqn) -> Result<OdeSolverProblem<Eqn>, DiffsolError>
     where
         Eqn: OdeEquations,
     {
@@ -737,8 +737,10 @@ impl OdeBuilder {
             nout,
             nparams,
         )?;
+        let p = Rc::new(Self::build_p(self.p));
+        eqn.set_params(p);
         OdeSolverProblem::new(
-            eqn,
+            Rc::new(eqn),
             Eqn::T::from(self.rtol),
             atol,
             self.sens_rtol.map(Eqn::T::from),

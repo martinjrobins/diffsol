@@ -95,7 +95,7 @@ pub fn heat2d_diffsl_problem<
     let problem = OdeBuilder::new()
         .rtol(1e-7)
         .atol([1e-7])
-        .build_from_eqn(std::rc::Rc::new(eqn))
+        .build_from_eqn(eqn)
         .unwrap();
     let soln = soln::<M>();
     (problem, soln)

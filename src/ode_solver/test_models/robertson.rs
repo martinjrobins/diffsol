@@ -56,7 +56,7 @@ pub fn robertson_diffsl_problem<
         .p([0.04, 1.0e4, 3.0e7])
         .rtol(1e-4)
         .atol([1.0e-8, 1.0e-6, 1.0e-6])
-        .build_from_eqn(Rc::new(eqn))
+        .build_from_eqn(eqn)
         .unwrap();
     let mut soln = soln::<M::V>();
     soln.rtol = problem.rtol;

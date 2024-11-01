@@ -332,7 +332,7 @@ impl<T> OdeEquationsAdjoint for T where
 /// let p = Rc::new(V::from_vec(vec![]));
 /// let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p);
 ///
-/// let problem = OdeBuilder::new().build_from_eqn(Rc::new(eqn)).unwrap();
+/// let problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
 ///
 /// let mut solver = Bdf::default();
 /// let t = 0.4;
