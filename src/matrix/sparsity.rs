@@ -138,8 +138,6 @@ where
         false
     }
 
-    
-
     fn indices(&self) -> Vec<(IndexType, IndexType)> {
         Vec::new()
     }

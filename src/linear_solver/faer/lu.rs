@@ -3,8 +3,7 @@ use std::rc::Rc;
 use crate::{error::LinearSolverError, linear_solver_error};
 
 use crate::{
-    error::DiffsolError, linear_solver::LinearSolver, Matrix,
-    NonLinearOpJacobian, Scalar,
+    error::DiffsolError, linear_solver::LinearSolver, Matrix, NonLinearOpJacobian, Scalar,
 };
 
 use faer::{linalg::solvers::FullPivLu, solvers::SpSolver, Col, Mat};

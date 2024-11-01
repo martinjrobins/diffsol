@@ -239,7 +239,12 @@ impl OdeBuilder {
             Some(sens_atol) => Some(Self::build_atol(sens_atol, nstates, "sensitivity")?),
             None => None,
         };
-        Ok((Rc::new(atol), sens_atol.map(Rc::new), out_atol.map(Rc::new), param_atol.map(Rc::new)))
+        Ok((
+            Rc::new(atol),
+            sens_atol.map(Rc::new),
+            out_atol.map(Rc::new),
+            param_atol.map(Rc::new),
+        ))
     }
 
     fn build_p<V: Vector>(p: Vec<f64>) -> V {

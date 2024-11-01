@@ -1,4 +1,4 @@
-use crate::{LinearOp, Matrix, Op, MatrixSparsityRef};
+use crate::{LinearOp, Matrix, MatrixSparsityRef, Op};
 
 pub struct MatrixOp<M: Matrix> {
     m: M,
@@ -23,7 +23,6 @@ impl<M: Matrix> Op for MatrixOp<M> {
     fn nparams(&self) -> usize {
         0
     }
-    
 }
 
 impl<M: Matrix> LinearOp for MatrixOp<M> {

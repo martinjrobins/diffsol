@@ -1,5 +1,6 @@
 use crate::{
-    scale, LinearOp, Matrix, NonLinearOpJacobian, OdeEquationsImplicit, Vector, VectorIndex, MatrixSparsityRef
+    scale, LinearOp, Matrix, MatrixSparsityRef, NonLinearOpJacobian, OdeEquationsImplicit, Vector,
+    VectorIndex,
 };
 use num_traits::{One, Zero};
 use std::{cell::RefCell, rc::Rc};
@@ -83,7 +84,6 @@ impl<Eqn: OdeEquationsImplicit> Op for InitOp<Eqn> {
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
     }
-    
 }
 
 impl<Eqn: OdeEquationsImplicit> NonLinearOp for InitOp<Eqn> {
@@ -113,7 +113,7 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for InitOp<Eqn> {
     fn jacobian_inplace(&self, _x: &Self::V, _t: Self::T, y: &mut Self::M) {
         y.copy_from(&self.jac);
     }
-    
+
     fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
         self.jac.sparsity().map(|x| x.to_owned())
     }

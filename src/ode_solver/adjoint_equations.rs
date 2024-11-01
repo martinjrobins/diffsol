@@ -1,11 +1,15 @@
 use num_traits::{One, Zero};
-use std::{cell::RefCell, ops::{AddAssign, SubAssign}, rc::Rc};
+use std::{
+    cell::RefCell,
+    ops::{AddAssign, SubAssign},
+    rc::Rc,
+};
 
 use crate::{
     op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, Checkpointing, ConstantOp,
     ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint, OdeSolverMethod, OdeSolverProblem,
-    Op, Vector, OdeEquationsRef
+    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint, OdeEquationsRef, OdeSolverMethod,
+    OdeSolverProblem, Op, Vector,
 };
 
 pub struct AdjointContext<Eqn, Method>
@@ -217,7 +221,6 @@ where
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
     }
-    
 }
 
 impl<Eqn, Method> NonLinearOp for AdjointRhs<Eqn, Method>
@@ -328,7 +331,6 @@ where
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
     }
-    
 }
 
 impl<Eqn, Method> NonLinearOp for AdjointOut<Eqn, Method>
@@ -508,7 +510,6 @@ where
     }
 }
 
-
 impl<'a, Eqn, Method> OdeEquationsRef<'a> for AdjointEquations<Eqn, Method>
 where
     Eqn: OdeEquationsAdjoint,
@@ -521,9 +522,8 @@ where
     type Out = &'a AdjointOut<Eqn, Method>;
 }
 
-
-impl<Eqn, Method> OdeEquations for AdjointEquations<Eqn, Method> 
-where 
+impl<Eqn, Method> OdeEquations for AdjointEquations<Eqn, Method>
+where
     Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {

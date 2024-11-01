@@ -3,8 +3,8 @@ use std::rc::Rc;
 use crate::{
     find_jacobian_non_zeros, find_matrix_non_zeros, ode_solver::problem::OdeSolverSolution,
     ConstantOp, JacobianColoring, LinearOp, Matrix, MatrixSparsity, NonLinearOp,
-    NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeSolverProblem, Op, UnitCallable,
-    Vector, OdeEquationsRef
+    NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsRef, OdeSolverProblem, Op,
+    UnitCallable, Vector,
 };
 use num_traits::Zero;
 
@@ -32,7 +32,7 @@ where
     M: Matrix<T = f64>,
     CG: diffsl::execution::module::CodegenModule,
 {
-    use crate::{OdeBuilder, DiffSl, DiffSlContext};
+    use crate::{DiffSl, DiffSlContext, OdeBuilder};
 
     let (problem, _soln) = foodweb_problem::<M, NX>();
     let u0 = problem.eqn.init().call(0.0);
@@ -374,7 +374,7 @@ where
     M: Matrix,
 {
     pub fn new(foodweb: &'a FoodWeb<M, NX>) -> Self {
-       Self { foodweb }
+        Self { foodweb }
     }
 }
 
@@ -615,7 +615,6 @@ where
     fn nstates(&self) -> usize {
         self.foodweb.context.nstates
     }
-    
 }
 
 impl<M, const NX: usize> LinearOp for FoodWebMass<'_, M, NX>
@@ -745,20 +744,27 @@ where
         ret.rhs_sparsity = Some(
             MatrixSparsity::try_from_indices(rhs.nout(), rhs.nstates(), non_zeros.clone()).unwrap(),
         );
-        ret.rhs_coloring = Some(JacobianColoring::new(ret.rhs_sparsity.as_ref().unwrap(), &non_zeros));
+        ret.rhs_coloring = Some(JacobianColoring::new(
+            ret.rhs_sparsity.as_ref().unwrap(),
+            &non_zeros,
+        ));
 
         let mass = FoodWebMass::new(&ret);
         let non_zeros = find_matrix_non_zeros(&mass, t0);
         ret.mass_sparsity = Some(
-            MatrixSparsity::try_from_indices(mass.nout(), mass.nstates(), non_zeros.clone()).unwrap(),
+            MatrixSparsity::try_from_indices(mass.nout(), mass.nstates(), non_zeros.clone())
+                .unwrap(),
         );
-        ret.mass_coloring = Some(JacobianColoring::new(ret.mass_sparsity.as_ref().unwrap(), &non_zeros));
+        ret.mass_coloring = Some(JacobianColoring::new(
+            ret.mass_sparsity.as_ref().unwrap(),
+            &non_zeros,
+        ));
         ret
     }
 }
 
-impl<M, const NX: usize> Op for FoodWeb<M, NX> 
-where 
+impl<M, const NX: usize> Op for FoodWeb<M, NX>
+where
     M: Matrix,
 {
     type M = M;
@@ -846,7 +852,6 @@ where
     fn nstates(&self) -> usize {
         NX * NX
     }
-    
 }
 
 #[cfg(feature = "diffsl")]
@@ -1026,7 +1031,18 @@ where
     let context = FoodWebContext::<M, NX>::new();
     let eqn = FoodWeb::new(context, t0);
     let problem = OdeSolverProblem::new(
-        Rc::new(eqn), rtol, Rc::new(atol), None, None, None, None, None, None, t0, h0, false,
+        Rc::new(eqn),
+        rtol,
+        Rc::new(atol),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        t0,
+        h0,
+        false,
     )
     .unwrap();
     let soln = soln::<M>();

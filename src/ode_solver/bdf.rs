@@ -3,7 +3,9 @@ use std::ops::AddAssign;
 use std::rc::Rc;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError}, AdjointEquations, AugmentedOdeEquationsImplicit, NoAug, OdeEquationsAdjoint, OdeEquationsSens, SensEquations, StateRef, StateRefMut
+    error::{DiffsolError, OdeSolverError},
+    AdjointEquations, AugmentedOdeEquationsImplicit, NoAug, OdeEquationsAdjoint, OdeEquationsSens,
+    SensEquations, StateRef, StateRefMut,
 };
 
 use num_traits::{abs, One, Pow, Zero};
@@ -23,7 +25,9 @@ use crate::{
 };
 
 use super::jacobian_update::SolverState;
-use super::method::{AdjointOdeSolverMethod, AugmentedOdeSolverMethod, SensitivitiesOdeSolverMethod};
+use super::method::{
+    AdjointOdeSolverMethod, AugmentedOdeSolverMethod, SensitivitiesOdeSolverMethod,
+};
 
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct BdfStatistics {
@@ -1688,7 +1692,8 @@ mod test {
         let linear_solver = FaerSparseLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
-        let (problem, soln) = foodweb::foodweb_diffsl_problem::<SparseColMat<f64>, LlvmModule, 10>();
+        let (problem, soln) =
+            foodweb::foodweb_diffsl_problem::<SparseColMat<f64>, LlvmModule, 10>();
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
     }
 

@@ -74,8 +74,7 @@ pub trait NonLinearOpSensAdjoint: NonLinearOp {
     /// See [Self::sens_adjoint_inplace] for a non-allocating version.
     fn sens_adjoint(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
-        let mut y =
-            Self::M::new_from_sparsity(n, n, self.sens_adjoint_sparsity());
+        let mut y = Self::M::new_from_sparsity(n, n, self.sens_adjoint_sparsity());
         self.sens_adjoint_inplace(x, t, &mut y);
         y
     }
@@ -99,7 +98,7 @@ pub trait NonLinearOpSensAdjoint: NonLinearOp {
             v[j] = Self::T::zero();
         }
     }
-    
+
     fn sens_adjoint_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
         None
     }
@@ -163,7 +162,7 @@ pub trait NonLinearOpJacobian: NonLinearOp {
         self.jacobian_inplace(x, t, &mut y);
         y
     }
-    
+
     /// Return sparsity information (if available)
     fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
         None

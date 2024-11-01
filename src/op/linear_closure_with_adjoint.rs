@@ -55,7 +55,10 @@ where
             MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
                 .expect("invalid sparsity pattern"),
         );
-        self.coloring = Some(JacobianColoring::new(self.sparsity.as_ref().unwrap(), &non_zeros));
+        self.coloring = Some(JacobianColoring::new(
+            self.sparsity.as_ref().unwrap(),
+            &non_zeros,
+        ));
     }
     pub fn calculate_adjoint_sparsity(&mut self, t0: M::T) {
         let non_zeros = find_transpose_non_zeros(self, t0);
@@ -64,7 +67,8 @@ where
                 .expect("invalid sparsity pattern"),
         );
         self.coloring_adjoint = Some(JacobianColoring::new(
-            self.sparsity_adjoint.as_ref().unwrap(), &non_zeros,
+            self.sparsity_adjoint.as_ref().unwrap(),
+            &non_zeros,
         ));
     }
 }
@@ -92,7 +96,7 @@ where
         assert_eq!(p.len(), self.nparams);
         self.p = p;
     }
-    
+
     fn statistics(&self) -> OpStatistics {
         self.statistics.borrow().clone()
     }
@@ -138,7 +142,7 @@ where
             self._default_transpose_inplace(t, y);
         }
     }
-    
+
     fn transpose_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
         self.sparsity_adjoint.clone()
     }

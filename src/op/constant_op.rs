@@ -59,8 +59,7 @@ pub trait ConstantOpSensAdjoint: ConstantOp {
     /// See [Self::sens_adjoint_inplace] for a non-allocating version.
     fn sens_adjoint(&self, t: Self::T) -> Self::M {
         let n = self.nstates();
-        let mut y =
-            Self::M::new_from_sparsity(n, n, self.sens_adjoint_sparsity());
+        let mut y = Self::M::new_from_sparsity(n, n, self.sens_adjoint_sparsity());
         self.sens_adjoint_inplace(t, &mut y);
         y
     }
@@ -84,7 +83,7 @@ pub trait ConstantOpSensAdjoint: ConstantOp {
             v[j] = Self::T::zero();
         }
     }
-    
+
     fn sens_adjoint_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
         None
     }

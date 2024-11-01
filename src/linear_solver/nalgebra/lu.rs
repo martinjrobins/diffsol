@@ -4,8 +4,7 @@ use nalgebra::{DMatrix, DVector, Dyn};
 
 use crate::{
     error::{DiffsolError, LinearSolverError},
-    linear_solver_error,
-    LinearSolver, Matrix, NonLinearOpJacobian, Scalar,
+    linear_solver_error, LinearSolver, Matrix, NonLinearOpJacobian, Scalar,
 };
 
 /// A [LinearSolver] that uses the LU decomposition in the [`nalgebra` library](https://nalgebra.org/) to solve the linear system.

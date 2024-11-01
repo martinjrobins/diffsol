@@ -24,8 +24,7 @@ pub fn heat2d_diffsl_problem<
 >() -> (
     OdeSolverProblem<impl crate::OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
-)
-{
+) {
     use crate::{DiffSl, DiffSlContext};
 
     let (problem, _soln) = head2d_problem::<M, MGRID>();
@@ -101,7 +100,6 @@ pub fn heat2d_diffsl_problem<
     let soln = soln::<M>();
     (problem, soln)
 }
-
 
 fn heat2d_rhs<M: Matrix, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
     // Initialize y to x, to take care of boundary equations.

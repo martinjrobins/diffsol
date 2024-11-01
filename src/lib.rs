@@ -173,7 +173,7 @@ pub use ode_solver::sundials::SundialsIda;
 pub use linear_solver::suitesparse::klu::KLU;
 
 #[cfg(feature = "diffsl")]
-pub use ode_solver::diffsl::{DiffSlContext, DiffSl};
+pub use ode_solver::diffsl::{DiffSl, DiffSlContext};
 
 pub use jacobian::{
     find_adjoint_non_zeros, find_jacobian_non_zeros, find_matrix_non_zeros,
@@ -195,12 +195,13 @@ pub use ode_solver::{
     adjoint_equations::AdjointInit, adjoint_equations::AdjointRhs, bdf::Bdf, bdf::BdfAdj,
     bdf_state::BdfState, builder::OdeBuilder, checkpointing::Checkpointing,
     checkpointing::HermiteInterpolator, equations::AugmentedOdeEquations,
-    equations::AugmentedOdeEquationsImplicit, equations::NoAug, equations::OdeEquations, equations::OdeEquationsRef,
-    equations::OdeEquationsAdjoint, equations::OdeEquationsImplicit, equations::OdeEquationsSens,
-    equations::OdeSolverEquations, method::AdjointOdeSolverMethod, method::OdeSolverMethod,
-    method::OdeSolverStopReason, method::SensitivitiesOdeSolverMethod, problem::OdeSolverProblem,
-    sdirk::Sdirk, sdirk::SdirkAdj, sdirk_state::SdirkState, sens_equations::SensEquations,
-    sens_equations::SensInit, sens_equations::SensRhs, state::OdeSolverState, tableau::Tableau,
+    equations::AugmentedOdeEquationsImplicit, equations::NoAug, equations::OdeEquations,
+    equations::OdeEquationsAdjoint, equations::OdeEquationsImplicit, equations::OdeEquationsRef,
+    equations::OdeEquationsSens, equations::OdeSolverEquations, method::AdjointOdeSolverMethod,
+    method::OdeSolverMethod, method::OdeSolverStopReason, method::SensitivitiesOdeSolverMethod,
+    problem::OdeSolverProblem, sdirk::Sdirk, sdirk::SdirkAdj, sdirk_state::SdirkState,
+    sens_equations::SensEquations, sens_equations::SensInit, sens_equations::SensRhs,
+    state::OdeSolverState, tableau::Tableau,
 };
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};

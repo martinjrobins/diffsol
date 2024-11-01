@@ -2,7 +2,9 @@ use num_traits::Zero;
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, ConstantOp, ConstantOpSens, Matrix, NonLinearOp, NonLinearOpSens, OdeEquations, OdeEquationsRef, OdeEquationsSens, OdeSolverProblem, Op, Vector,
+    op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, ConstantOp, ConstantOpSens,
+    Matrix, NonLinearOp, NonLinearOpSens, OdeEquations, OdeEquationsRef, OdeEquationsSens,
+    OdeSolverProblem, Op, Vector,
 };
 
 pub struct SensInit<Eqn>
@@ -21,11 +23,7 @@ where
     pub fn new(eqn: &Rc<Eqn>) -> Self {
         let nstates = eqn.rhs().nstates();
         let nparams = eqn.rhs().nparams();
-        let init_sens = Eqn::M::new_from_sparsity(
-            nstates,
-            nparams,
-            eqn.init().sens_sparsity(),
-        );
+        let init_sens = Eqn::M::new_from_sparsity(nstates, nparams, eqn.init().sens_sparsity());
         let index = 0;
         Self {
             eqn: eqn.clone(),

@@ -103,7 +103,7 @@ impl<T: Scalar> MatrixSparsity<SparseColMat<T>> for SymbolicSparseColMat<IndexTy
             Err(e) => Err(DiffsolError::Other(e.to_string())),
         }
     }
-    
+
     fn get_index(
         &self,
         rows: &[IndexType],
@@ -158,8 +158,6 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, SparseColMat<T>>
         }
         indices
     }
-
-    
 }
 
 impl<T: Scalar> Mul<Scale<T>> for SparseColMat<T> {

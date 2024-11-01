@@ -93,7 +93,7 @@ pub struct JacobianColoring<M: Matrix> {
 }
 
 impl<M: Matrix> JacobianColoring<M> {
-    pub fn new(sparsity: & impl MatrixSparsity<M>, non_zeros: &[(usize, usize)]) -> Self {
+    pub fn new(sparsity: &impl MatrixSparsity<M>, non_zeros: &[(usize, usize)]) -> Self {
         let ncols = sparsity.ncols();
         let graph = nonzeros2graph(non_zeros, ncols);
         let coloring = color_graph_greedy(&graph);

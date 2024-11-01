@@ -19,9 +19,9 @@ use std::{
 };
 
 use crate::{
-    error::*, ode_solver_error, scale, LinearOp, Matrix,
-    NonLinearOp, NonLinearOpJacobian, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState, OdeSolverStopReason, Op, SundialsMatrix, SundialsVector, Vector,
+    error::*, ode_solver_error, scale, LinearOp, Matrix, NonLinearOp, NonLinearOpJacobian,
+    OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
+    Op, SundialsMatrix, SundialsVector, Vector,
 };
 
 #[cfg(not(sundials_version_major = "5"))]
@@ -465,10 +465,8 @@ mod test {
     use crate::{
         ode_solver::{
             test_models::{
-                exponential_decay::exponential_decay_problem,
-                foodweb::foodweb_problem,
-                heat2d::head2d_problem,
-                robertson::robertson,
+                exponential_decay::exponential_decay_problem, foodweb::foodweb_problem,
+                heat2d::head2d_problem, robertson::robertson,
             },
             tests::{
                 test_interpolate, test_no_set_problem, test_ode_solver_no_sens, test_state_mut,

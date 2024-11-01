@@ -32,12 +32,12 @@ mod tests {
     use super::*;
     use crate::matrix::Matrix;
     use crate::op::unit::UnitCallable;
-    use crate::{ConstantOp, DefaultDenseMatrix, DefaultSolver, NonLinearOp, Op, Vector};
     use crate::{
-        NonLinearOpJacobian, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit,
-        OdeEquationsSens, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
-        OdeEquationsRef, op::OpStatistics,
+        op::OpStatistics, NonLinearOpJacobian, OdeEquations, OdeEquationsAdjoint,
+        OdeEquationsImplicit, OdeEquationsRef, OdeEquationsSens, OdeSolverMethod, OdeSolverProblem,
+        OdeSolverState, OdeSolverStopReason,
     };
+    use crate::{ConstantOp, DefaultDenseMatrix, DefaultSolver, NonLinearOp, Op, Vector};
     use num_traits::One;
     use num_traits::Zero;
 
@@ -451,7 +451,6 @@ mod tests {
             None
         }
     }
-
 
     pub fn test_interpolate<M: Matrix, Method: OdeSolverMethod<TestEqn<M>>>(mut s: Method) {
         let problem = OdeSolverProblem::new(

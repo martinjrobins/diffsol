@@ -1,8 +1,8 @@
 use crate::{
     matrix::{MatrixRef, MatrixView},
     ode_solver::equations::OdeEquations,
-    scale, LinearOp, Matrix, MatrixSparsity, NonLinearOpJacobian,
-    OdeEquationsImplicit, OdeSolverProblem, Vector, VectorRef,
+    scale, LinearOp, Matrix, MatrixSparsity, NonLinearOpJacobian, OdeEquationsImplicit,
+    OdeSolverProblem, Vector, VectorRef,
 };
 use num_traits::{One, Zero};
 use std::{
@@ -81,11 +81,7 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
             if let Some(mass) = eqn.mass() {
                 if let Some(mass_sparsity) = mass.sparsity() {
                     // have mass, use the union of the mass and rhs jacobians sparse patterns
-                    Some(
-                        mass_sparsity
-                            .union(rhs_jac_sparsity.as_ref())
-                            .unwrap(),
-                    )
+                    Some(mass_sparsity.union(rhs_jac_sparsity.as_ref()).unwrap())
                 } else {
                     // no mass sparsity, panic!
                     panic!("Mass matrix must have a sparsity pattern if the rhs jacobian has a sparsity pattern")
@@ -182,7 +178,6 @@ impl<Eqn: OdeEquations> Op for SdirkCallable<Eqn> {
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
     }
-    
 }
 
 impl<Eqn: OdeEquationsImplicit> NonLinearOp for SdirkCallable<Eqn>

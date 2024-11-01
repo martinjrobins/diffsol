@@ -156,8 +156,6 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, CscMatrix<T>> for &'a SparsityPattern 
         SparsityPattern::clone(self)
     }
 
-    
-
     fn nrows(&self) -> IndexType {
         self.minor_dim()
     }

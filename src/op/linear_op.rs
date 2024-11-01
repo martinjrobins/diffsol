@@ -19,11 +19,7 @@ pub trait LinearOp: Op {
     /// Compute the matrix representation of the operator `A(t)` and return it.
     /// See [Self::matrix_inplace] for a non-allocating version.
     fn matrix(&self, t: Self::T) -> Self::M {
-        let mut y = Self::M::new_from_sparsity(
-            self.nstates(),
-            self.nstates(),
-            self.sparsity(),
-        );
+        let mut y = Self::M::new_from_sparsity(self.nstates(), self.nstates(), self.sparsity());
         self.matrix_inplace(t, &mut y);
         y
     }
@@ -46,7 +42,7 @@ pub trait LinearOp: Op {
             v[j] = Self::T::zero();
         }
     }
-    
+
     fn sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
         None
     }

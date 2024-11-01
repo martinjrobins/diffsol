@@ -51,7 +51,6 @@ impl<C: NonLinearOpJacobian> Op for LinearisedOp<C> {
     fn nparams(&self) -> usize {
         self.callable.nparams()
     }
-    
 }
 
 impl<C: NonLinearOpJacobian> LinearOp for LinearisedOp<C> {

@@ -1,6 +1,9 @@
 use std::rc::Rc;
 
-use crate::{ConstantOp, ConstantOpSens, LinearOp, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar, Vector, ConstantOpSensAdjoint};
+use crate::{
+    ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
+    NonLinearOp, NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar, Vector,
+};
 
 use nonlinear_op::NonLinearOpJacobian;
 use serde::Serialize;
@@ -55,7 +58,6 @@ pub trait Op {
         OpStatistics::default()
     }
 }
-
 
 #[derive(Default, Clone, Serialize)]
 pub struct OpStatistics {
@@ -164,7 +166,6 @@ impl<C: NonLinearOpSensAdjoint> NonLinearOpSensAdjoint for &C {
         C::sens_adjoint_sparsity(*self)
     }
 }
-
 
 impl<C: LinearOp> LinearOp for &C {
     fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {

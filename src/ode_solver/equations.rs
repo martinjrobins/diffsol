@@ -1,7 +1,9 @@
 use std::rc::Rc;
 
 use crate::{
-    op::{constant_op::ConstantOpSensAdjoint, linear_op::LinearOpTranspose}, ConstantOp, ConstantOpSens, LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Op, UnitCallable
+    op::{constant_op::ConstantOpSensAdjoint, linear_op::LinearOpTranspose},
+    ConstantOp, ConstantOpSens, LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint,
+    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Op, UnitCallable,
 };
 use serde::Serialize;
 
@@ -63,14 +65,14 @@ pub struct NoAug<Eqn: OdeEquations> {
     _phantom: std::marker::PhantomData<Eqn>,
 }
 
-impl<Eqn> Op for NoAug<Eqn> 
-where 
-    Eqn: OdeEquations
+impl<Eqn> Op for NoAug<Eqn>
+where
+    Eqn: OdeEquations,
 {
     type T = Eqn::T;
     type V = Eqn::V;
     type M = Eqn::M;
-    
+
     fn nout(&self) -> usize {
         panic!("This should never be called")
     }
@@ -178,12 +180,11 @@ pub trait OdeEquationsRef<'a, ImplicitBounds: Sealed = Bounds<&'a Self>>: Op {
 
 // seal the trait so that users must use the provided default type for ImplicitBounds
 mod sealed {
-	pub trait Sealed: Sized {}
-	pub struct Bounds<T>(T);
-	impl<T> Sealed for Bounds<T> {}
+    pub trait Sealed: Sized {}
+    pub struct Bounds<T>(T);
+    impl<T> Sealed for Bounds<T> {}
 }
 use sealed::{Bounds, Sealed};
-
 
 /// this is the trait that defines the ODE equations of the form
 ///
@@ -201,7 +202,6 @@ use sealed::{Bounds, Sealed};
 /// - the root function `G(t, y)` which is given as a [NonLinearOp] using the `Root` associated type and the [Self::root] function
 /// - the output function `H(t, y)` which is given as a [NonLinearOp] using the `Out` associated type and the [Self::out] function
 pub trait OdeEquations: for<'a> OdeEquationsRef<'a> {
-
     /// returns the right-hand side function `F(t, y)` as a [NonLinearOp]
     fn rhs(&self) -> <Self as OdeEquationsRef<'_>>::Rhs;
 
@@ -234,9 +234,9 @@ impl<T> OdeEquationsImplicit for T where
 
 pub trait OdeEquationsSens:
     OdeEquationsImplicit<
-        Rhs: NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T>,
-        Init: ConstantOpSens<M = Self::M, V = Self::V, T = Self::T>,
-    >
+    Rhs: NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T>,
+    Init: ConstantOpSens<M = Self::M, V = Self::V, T = Self::T>,
+>
 {
 }
 
@@ -386,15 +386,14 @@ where
     }
 }
 
-impl<M, Rhs, Init, Mass, Root, Out> Op for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out> 
-where 
+impl<M, Rhs, Init, Mass, Root, Out> Op for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
+where
     M: Matrix,
     Init: Op<M = M, V = M::V, T = M::T>,
     Rhs: Op<M = M, V = M::V, T = M::T>,
     Mass: Op<M = M, V = M::V, T = M::T>,
     Root: Op<M = M, V = M::V, T = M::T>,
     Out: Op<M = M, V = M::V, T = M::T>,
-
 {
     type T = M::T;
     type V = M::V;
@@ -428,7 +427,8 @@ where
     }
 }
 
-impl<'a, M, Rhs, Init, Mass, Root, Out> OdeEquationsRef<'a> for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out> 
+impl<'a, M, Rhs, Init, Mass, Root, Out> OdeEquationsRef<'a>
+    for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
 where
     M: Matrix,
     Rhs: NonLinearOp<M = M, V = M::V, T = M::T>,
@@ -443,7 +443,6 @@ where
     type Init = &'a Init;
     type Out = &'a Out;
 }
-
 
 impl<M, Rhs, Init, Mass, Root, Out> OdeEquations
     for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>

@@ -72,11 +72,7 @@ impl<T: Scalar> LinearSolver<SparseColMat<T>> for FaerSparseLU<T> {
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();
-        let matrix = C::M::new_from_sparsity(
-            nrows,
-            ncols,
-            op.jacobian_sparsity()
-        );
+        let matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity());
         self.matrix = Some(matrix);
         self.lu_symbolic = Some(
             SymbolicLu::try_new(self.matrix.as_ref().unwrap().faer().symbolic())

@@ -368,14 +368,7 @@ pub fn exponential_decay_with_algebraic_problem_sens<M: Matrix + 'static>() -> (
 
     let out: Option<UnitCallable<M>> = None;
     let root: Option<UnitCallable<M>> = None;
-    let eqn = OdeSolverEquations::new(
-        rhs,
-        Some(mass),
-        root,
-        init,
-        out,
-        p.clone(),
-    );
+    let eqn = OdeSolverEquations::new(rhs, Some(mass), root, init, out, p.clone());
     let sens_rtol = Some(M::T::from(1e-6));
     let sens_atol = Some(Rc::new(M::V::from_element(3, M::T::from(1e-6))));
     let problem = OdeSolverProblem::new(

@@ -23,9 +23,9 @@ use crate::SensEquations;
 use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, AdjointOdeSolverMethod,
-    AugmentedOdeEquations, DenseMatrix, JacobianUpdate, NonLinearOp, 
+    AugmentedOdeEquations, AugmentedOdeEquationsImplicit, DenseMatrix, JacobianUpdate, NonLinearOp,
     OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsSens, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState, Op, Scalar, StateRef, StateRefMut, Vector, VectorViewMut, AugmentedOdeEquationsImplicit
+    OdeSolverState, Op, Scalar, StateRef, StateRefMut, Vector, VectorViewMut,
 };
 
 use super::bdf::BdfStatistics;
@@ -861,10 +861,7 @@ where
         Ok(())
     }
 
-    fn interpolate_sens(
-        &self,
-        t: <Eqn as Op>::T,
-    ) -> Result<Vec<<Eqn as Op>::V>, DiffsolError> {
+    fn interpolate_sens(&self, t: <Eqn as Op>::T) -> Result<Vec<<Eqn as Op>::V>, DiffsolError> {
         if self.state.is_none() {
             return Err(ode_solver_error!(StateNotSet));
         }

@@ -1,7 +1,7 @@
 use crate::{
     matrix::DenseMatrix, ode_solver::equations::OdeEquationsImplicit, scale, LinearOp, Matrix,
-    MatrixRef, MatrixSparsity, NonLinearOp, NonLinearOpJacobian,
-    OdeSolverProblem, Op, Vector, VectorRef,
+    MatrixRef, MatrixSparsity, NonLinearOp, NonLinearOpJacobian, OdeSolverProblem, Op, Vector,
+    VectorRef,
 };
 use num_traits::{One, Zero};
 use std::ops::MulAssign;
@@ -92,9 +92,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
             if let Some(mass) = eqn.mass() {
                 if let Some(mass_sparsity) = mass.sparsity() {
                     // have mass, use the union of the mass and rhs jacobians sparse patterns
-                    Some(
-                        mass_sparsity.union(rhs_jac_sparsity.as_ref()).unwrap(),
-                    )
+                    Some(mass_sparsity.union(rhs_jac_sparsity.as_ref()).unwrap())
                 } else {
                     // no mass sparsity, panic
                     panic!("Mass matrix must have a sparsity pattern if the rhs jacobian has a sparsity pattern");
@@ -201,7 +199,6 @@ impl<Eqn: OdeEquationsImplicit> Op for BdfCallable<Eqn> {
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
     }
-    
 }
 
 // dF(y)/dp = dM/dp (y - y0 + psi) + Ms - c * df(y)/dp - c df(y)/dy s = 0

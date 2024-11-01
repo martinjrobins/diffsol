@@ -3,7 +3,10 @@ use std::{cell::RefCell, rc::Rc};
 use diffsl::{execution::module::CodegenModule, Compiler};
 
 use crate::{
-    error::DiffsolError, find_jacobian_non_zeros, find_matrix_non_zeros, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity, op::nonlinear_op::NonLinearOpJacobian, ConstantOp, LinearOp, Matrix, NonLinearOp, OdeEquations, OdeEquationsRef, Op, Vector
+    error::DiffsolError, find_jacobian_non_zeros, find_matrix_non_zeros,
+    jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
+    op::nonlinear_op::NonLinearOpJacobian, ConstantOp, LinearOp, Matrix, NonLinearOp, OdeEquations,
+    OdeEquationsRef, Op, Vector,
 };
 
 pub type T = f64;
@@ -110,7 +113,6 @@ pub struct DiffSl<M: Matrix<T = T>, CG: CodegenModule> {
     mass_coloring: Option<JacobianColoring<M>>,
     rhs_sparsity: Option<M::Sparsity>,
     rhs_coloring: Option<JacobianColoring<M>>,
-    
 }
 
 impl<M: Matrix<T = T>, CG: CodegenModule> DiffSl<M, CG> {
@@ -127,15 +129,17 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSl<M, CG> {
             let t0 = 0.0;
             let x0 = M::V::zeros(op.nstates());
             let non_zeros = find_jacobian_non_zeros(&op, &x0, t0);
-            let sparsity = M::Sparsity::try_from_indices(op.nout(), op.nstates(), non_zeros.clone())
+            let sparsity =
+                M::Sparsity::try_from_indices(op.nout(), op.nstates(), non_zeros.clone())
                     .expect("invalid sparsity pattern");
             let coloring = JacobianColoring::new(&sparsity, &non_zeros);
             ret.rhs_coloring = Some(coloring);
             ret.rhs_sparsity = Some(sparsity);
-            
+
             let op = ret.mass().unwrap();
             let non_zeros = find_matrix_non_zeros(&op, t0);
-            let sparsity = M::Sparsity::try_from_indices(op.nout(), op.nstates(), non_zeros.clone())
+            let sparsity =
+                M::Sparsity::try_from_indices(op.nout(), op.nstates(), non_zeros.clone())
                     .expect("invalid sparsity pattern");
             let coloring = JacobianColoring::new(&sparsity, &non_zeros);
             ret.mass_coloring = Some(coloring);
@@ -150,7 +154,6 @@ pub struct DiffSlOut<'a, M: Matrix<T = T>, CG: CodegenModule>(&'a DiffSl<M, CG>)
 pub struct DiffSlRhs<'a, M: Matrix<T = T>, CG: CodegenModule>(&'a DiffSl<M, CG>);
 pub struct DiffSlMass<'a, M: Matrix<T = T>, CG: CodegenModule>(&'a DiffSl<M, CG>);
 pub struct DiffSlInit<'a, M: Matrix<T = T>, CG: CodegenModule>(&'a DiffSl<M, CG>);
-
 
 macro_rules! impl_op_for_diffsl {
     ($name:ident) => {
@@ -169,7 +172,6 @@ macro_rules! impl_op_for_diffsl {
             fn nparams(&self) -> usize {
                 self.0.context.nparams
             }
-            
         }
     };
 }
@@ -261,7 +263,8 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlOut<'_, M, CG> {
             self.0.context.data.borrow_mut().as_mut_slice(),
         );
         let out = self
-            .0.context
+            .0
+            .context
             .compiler
             .get_out(self.0.context.data.borrow().as_slice());
         y.copy_from_slice(out);
@@ -278,12 +281,12 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpJacobian for DiffSlOut<'_, 
             self.0.context.ddata.borrow_mut().as_mut_slice(),
         );
         let out_grad = self
-            .0.context
+            .0
+            .context
             .compiler
             .get_out(self.0.context.ddata.borrow().as_slice());
         y.copy_from_slice(out_grad);
     }
-    
 }
 
 impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlRhs<'_, M, CG> {
@@ -417,7 +420,7 @@ mod tests {
 
     use crate::{
         Bdf, ConstantOp, LinearOp, NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations,
-        OdeSolverMethod, OdeSolverState, Vector, Op
+        OdeSolverMethod, OdeSolverState, Op, Vector,
     };
 
     use super::{DiffSl, DiffSlContext};
@@ -432,7 +435,6 @@ mod tests {
     fn diffsl_logistic_growth_llvm() {
         diffsl_logistic_growth::<diffsl::LlvmModule>();
     }
-    
 
     fn diffsl_logistic_growth<CG: CodegenModule>() {
         let text = "
@@ -487,7 +489,10 @@ mod tests {
         mass_y.assert_eq_st(&mass_y_expect, 1e-10);
 
         // solver a bit and check the state and output
-        let problem = OdeBuilder::new().p([r, k]).build_from_eqn(Rc::new(eqn)).unwrap();
+        let problem = OdeBuilder::new()
+            .p([r, k])
+            .build_from_eqn(Rc::new(eqn))
+            .unwrap();
         let mut solver = Bdf::default();
         let t = 1.0;
         let state = OdeSolverState::new(&problem, &solver).unwrap();

@@ -16,8 +16,7 @@ pub fn robertson_diffsl_problem<
 >() -> (
     OdeSolverProblem<impl crate::OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
-) 
-{
+) {
     use crate::{DiffSl, DiffSlContext};
 
     let code = "
@@ -189,14 +188,7 @@ pub fn robertson_sens<M: Matrix + 'static>() -> (
 
     let out: Option<UnitCallable<M>> = None;
     let root: Option<UnitCallable<M>> = None;
-    let eqn = OdeSolverEquations::new(
-        rhs,
-        Some(mass),
-        root,
-        init,
-        out,
-        p.clone(),
-    );
+    let eqn = OdeSolverEquations::new(rhs, Some(mass), root, init, out, p.clone());
     let rtol = M::T::from(1e-4);
     let atol = M::V::from_vec(vec![M::T::from(1e-8), M::T::from(1e-6), M::T::from(1e-6)]);
     let problem = OdeSolverProblem::new(

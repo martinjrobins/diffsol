@@ -79,7 +79,10 @@ where
             MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
                 .expect("invalid sparsity pattern"),
         );
-        self.coloring = Some(JacobianColoring::new(self.sparsity.as_ref().unwrap(), &non_zeros));
+        self.coloring = Some(JacobianColoring::new(
+            self.sparsity.as_ref().unwrap(),
+            &non_zeros,
+        ));
     }
 
     pub fn calculate_adjoint_sparsity(&mut self, y0: &M::V, t0: M::T) {
@@ -88,7 +91,10 @@ where
             MatrixSparsity::try_from_indices(self.nstates, self.nout, non_zeros.clone())
                 .expect("invalid sparsity pattern"),
         );
-        self.coloring_adjoint = Some(JacobianColoring::new(self.sparsity_adjoint.as_ref().unwrap(), &non_zeros));
+        self.coloring_adjoint = Some(JacobianColoring::new(
+            self.sparsity_adjoint.as_ref().unwrap(),
+            &non_zeros,
+        ));
     }
 
     pub fn calculate_sens_adjoint_sparsity(&mut self, y0: &M::V, t0: M::T) {
@@ -97,7 +103,10 @@ where
             MatrixSparsity::try_from_indices(self.nstates, self.nparams, non_zeros.clone())
                 .expect("invalid sparsity pattern"),
         );
-        self.coloring_sens_adjoint = Some(JacobianColoring::new(self.sens_sparsity.as_ref().unwrap(), &non_zeros));
+        self.coloring_sens_adjoint = Some(JacobianColoring::new(
+            self.sens_sparsity.as_ref().unwrap(),
+            &non_zeros,
+        ));
     }
 }
 
@@ -125,7 +134,7 @@ where
         assert_eq!(p.len(), self.nparams);
         self.p = p;
     }
-    
+
     fn statistics(&self) -> OpStatistics {
         self.statistics.borrow().clone()
     }
@@ -168,7 +177,6 @@ where
     fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
         self.sparsity.clone()
     }
-    
 }
 
 impl<M, F, G, H, I> NonLinearOpAdjoint for ClosureWithAdjoint<M, F, G, H, I>
@@ -194,7 +202,6 @@ where
     fn adjoint_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
         self.sparsity_adjoint.clone()
     }
-    
 }
 
 impl<M, F, G, H, I> NonLinearOpSensAdjoint for ClosureWithAdjoint<M, F, G, H, I>
