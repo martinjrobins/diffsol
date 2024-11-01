@@ -51,7 +51,10 @@ where
             MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
                 .expect("invalid sparsity pattern"),
         );
-        self.coloring = Some(JacobianColoring::new_from_non_zeros(self, non_zeros));
+        self.coloring = Some(JacobianColoring::new(
+            self.sparsity.as_ref().unwrap(),
+            &non_zeros,
+        ));
     }
 }
 
@@ -77,9 +80,7 @@ where
         assert_eq!(p.len(), self.nparams);
         self.p = p;
     }
-    fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
-        self.sparsity.as_ref().map(|s| s.as_ref())
-    }
+
     fn statistics(&self) -> OpStatistics {
         self.statistics.borrow().clone()
     }
@@ -114,5 +115,8 @@ where
         } else {
             self._default_jacobian_inplace(x, t, y);
         }
+    }
+    fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        self.sparsity.clone()
     }
 }

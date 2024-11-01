@@ -4,8 +4,8 @@ use std::rc::Rc;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
-    AdjointEquations, NoAug, OdeEquationsAdjoint, OdeEquationsSens, SensEquations, StateRef,
-    StateRefMut,
+    AdjointEquations, AugmentedOdeEquationsImplicit, NoAug, OdeEquationsAdjoint, OdeEquationsSens,
+    SensEquations, StateRef, StateRefMut,
 };
 
 use num_traits::{abs, One, Pow, Zero};
@@ -25,9 +25,8 @@ use crate::{
 };
 
 use super::jacobian_update::SolverState;
-use super::{
-    equations::OdeEquations,
-    method::{AdjointOdeSolverMethod, AugmentedOdeSolverMethod, SensitivitiesOdeSolverMethod},
+use super::method::{
+    AdjointOdeSolverMethod, AugmentedOdeSolverMethod, SensitivitiesOdeSolverMethod,
 };
 
 #[derive(Clone, Debug, Serialize, Default)]
@@ -82,7 +81,7 @@ pub struct Bdf<
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquationsImplicit,
     Nls: NonLinearSolver<Eqn::M>,
-    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit = NoAug<Eqn>,
+    AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> = NoAug<Eqn>,
 > {
     nonlinear_solver: Nls,
     ode_problem: Option<OdeSolverProblem<Eqn>>,
@@ -758,7 +757,7 @@ where
         ))
     }
 
-    fn interpolate_sens(&self, t: <Eqn as OdeEquations>::T) -> Result<Vec<Eqn::V>, DiffsolError> {
+    fn interpolate_sens(&self, t: <Eqn as Op>::T) -> Result<Vec<Eqn::V>, DiffsolError> {
         // state must be set
         let state = self.state.as_ref().ok_or(ode_solver_error!(StateNotSet))?;
         if self.is_state_modified {
@@ -843,7 +842,7 @@ where
             self.root_finder
                 .as_ref()
                 .unwrap()
-                .init(root_fn.as_ref(), &state.y, state.t);
+                .init(&root_fn, &state.y, state.t);
         }
 
         // (re)allocate internal state
@@ -1082,8 +1081,8 @@ where
         // check for root within accepted step
         if let Some(root_fn) = self.problem().as_ref().unwrap().eqn.root() {
             let ret = self.root_finder.as_ref().unwrap().check_root(
-                &|t: <Eqn as OdeEquations>::T| self.interpolate(t),
-                root_fn.as_ref(),
+                &|t: <Eqn as Op>::T| self.interpolate(t),
+                &root_fn,
                 &self.state.as_ref().unwrap().y,
                 self.state.as_ref().unwrap().t,
             );
@@ -1102,7 +1101,7 @@ where
         Ok(OdeSolverStopReason::InternalTimestep)
     }
 
-    fn set_stop_time(&mut self, tstop: <Eqn as OdeEquations>::T) -> Result<(), DiffsolError> {
+    fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
         self.tstop = Some(tstop);
         if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
             let error = OdeSolverError::StopTimeBeforeCurrentTime {
@@ -1168,7 +1167,7 @@ where
 impl<M, Eqn, Nls, AugmentedEqn> AdjointOdeSolverMethod<Eqn> for Bdf<M, Eqn, Nls, AugmentedEqn>
 where
     Eqn: OdeEquationsAdjoint,
-    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsAdjoint,
+    AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Nls: NonLinearSolver<Eqn::M>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -1198,7 +1197,7 @@ mod test {
                     exponential_decay_with_algebraic_problem,
                     exponential_decay_with_algebraic_problem_sens,
                 },
-                foodweb::{foodweb_problem, FoodWebContext},
+                foodweb::foodweb_problem,
                 gaussian_decay::gaussian_decay_problem,
                 heat2d::head2d_problem,
                 robertson::{robertson, robertson_sens},
@@ -1251,7 +1250,6 @@ mod test {
         let (problem, soln) = exponential_decay_problem::<M>(false);
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
         number_of_linear_solver_setups: 11
         number_of_steps: 47
         number_of_error_test_failures: 0
@@ -1259,7 +1257,6 @@ mod test {
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
-        ---
         number_of_calls: 84
         number_of_jac_muls: 2
         number_of_matrix_evals: 1
@@ -1289,7 +1286,6 @@ mod test {
         let (problem, soln) = exponential_decay_problem::<M>(false);
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
         number_of_linear_solver_setups: 11
         number_of_steps: 47
         number_of_error_test_failures: 0
@@ -1297,7 +1293,6 @@ mod test {
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
-        ---
         number_of_calls: 84
         number_of_jac_muls: 2
         number_of_matrix_evals: 1
@@ -1311,7 +1306,6 @@ mod test {
         let (problem, soln) = exponential_decay_problem_sens::<M>(false);
         test_ode_solver(&mut s, &problem, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
         number_of_linear_solver_setups: 11
         number_of_steps: 44
         number_of_error_test_failures: 0
@@ -1319,7 +1313,6 @@ mod test {
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
-        ---
         number_of_calls: 87
         number_of_jac_muls: 136
         number_of_matrix_evals: 1
@@ -1333,14 +1326,12 @@ mod test {
         let (problem, soln) = exponential_decay_problem_adjoint::<M>();
         let adjoint_solver = test_ode_solver_adjoint(s, &problem, soln);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        ---
         number_of_calls: 84
         number_of_jac_muls: 6
         number_of_matrix_evals: 3
         number_of_jac_adj_muls: 492
         "###);
         insta::assert_yaml_snapshot!(adjoint_solver.get_statistics(), @r###"
-        ---
         number_of_linear_solver_setups: 24
         number_of_steps: 86
         number_of_error_test_failures: 12
@@ -1355,14 +1346,12 @@ mod test {
         let (problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>();
         let adjoint_solver = test_ode_solver_adjoint(s, &problem, soln);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        ---
         number_of_calls: 190
         number_of_jac_muls: 24
         number_of_matrix_evals: 8
         number_of_jac_adj_muls: 278
         "###);
         insta::assert_yaml_snapshot!(adjoint_solver.get_statistics(), @r###"
-        ---
         number_of_linear_solver_setups: 32
         number_of_steps: 74
         number_of_error_test_failures: 15
@@ -1377,7 +1366,6 @@ mod test {
         let (problem, soln) = exponential_decay_with_algebraic_problem::<M>(false);
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
         number_of_linear_solver_setups: 20
         number_of_steps: 41
         number_of_error_test_failures: 4
@@ -1385,7 +1373,6 @@ mod test {
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
-        ---
         number_of_calls: 83
         number_of_jac_muls: 6
         number_of_matrix_evals: 2
@@ -1408,7 +1395,6 @@ mod test {
         let (problem, soln) = exponential_decay_with_algebraic_problem_sens::<M>();
         test_ode_solver(&mut s, &problem, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
         number_of_linear_solver_setups: 18
         number_of_steps: 43
         number_of_error_test_failures: 3
@@ -1416,7 +1402,6 @@ mod test {
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
-        ---
         number_of_calls: 71
         number_of_jac_muls: 100
         number_of_matrix_evals: 3
@@ -1430,7 +1415,6 @@ mod test {
         let (problem, soln) = robertson::<M>(false);
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
         number_of_linear_solver_setups: 77
         number_of_steps: 316
         number_of_error_test_failures: 3
@@ -1438,7 +1422,6 @@ mod test {
         number_of_nonlinear_solver_fails: 19
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
-        ---
         number_of_calls: 725
         number_of_jac_muls: 60
         number_of_matrix_evals: 20
@@ -1471,10 +1454,8 @@ mod test {
         use diffsl::LlvmModule;
 
         use crate::ode_solver::test_models::robertson;
-        let mut context = crate::DiffSlContext::default();
         let mut s = Bdf::default();
-        robertson::robertson_diffsl_compile(&mut context);
-        let (problem, soln) = robertson::robertson_diffsl_problem::<M, LlvmModule>(&context, false);
+        let (problem, soln) = robertson::robertson_diffsl_problem::<M, LlvmModule>();
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
     }
 
@@ -1484,7 +1465,6 @@ mod test {
         let (problem, soln) = robertson_sens::<M>();
         test_ode_solver(&mut s, &problem, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
         number_of_linear_solver_setups: 160
         number_of_steps: 410
         number_of_error_test_failures: 4
@@ -1492,7 +1472,6 @@ mod test {
         number_of_nonlinear_solver_fails: 81
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
-        ---
         number_of_calls: 996
         number_of_jac_muls: 2495
         number_of_matrix_evals: 71
@@ -1506,7 +1485,6 @@ mod test {
         let (problem, soln) = robertson::<M>(true);
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
         number_of_linear_solver_setups: 77
         number_of_steps: 316
         number_of_error_test_failures: 3
@@ -1514,7 +1492,6 @@ mod test {
         number_of_nonlinear_solver_fails: 19
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
-        ---
         number_of_calls: 725
         number_of_jac_muls: 63
         number_of_matrix_evals: 20
@@ -1528,7 +1505,6 @@ mod test {
         let (problem, soln) = robertson_ode::<M>(false, 3);
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
         number_of_linear_solver_setups: 86
         number_of_steps: 416
         number_of_error_test_failures: 1
@@ -1536,7 +1512,6 @@ mod test {
         number_of_nonlinear_solver_fails: 15
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
-        ---
         number_of_calls: 913
         number_of_jac_muls: 162
         number_of_matrix_evals: 18
@@ -1550,7 +1525,6 @@ mod test {
         let (problem, soln) = robertson_ode_with_sens::<M>(false);
         test_ode_solver(&mut s, &problem, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
         number_of_linear_solver_setups: 112
         number_of_steps: 467
         number_of_error_test_failures: 2
@@ -1558,7 +1532,6 @@ mod test {
         number_of_nonlinear_solver_fails: 49
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
-        ---
         number_of_calls: 1041
         number_of_jac_muls: 2672
         number_of_matrix_evals: 45
@@ -1572,7 +1545,6 @@ mod test {
         let (problem, soln) = dydt_y2_problem::<M>(false, 10);
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
         number_of_linear_solver_setups: 27
         number_of_steps: 161
         number_of_error_test_failures: 0
@@ -1580,7 +1552,6 @@ mod test {
         number_of_nonlinear_solver_fails: 3
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
-        ---
         number_of_calls: 357
         number_of_jac_muls: 50
         number_of_matrix_evals: 5
@@ -1594,7 +1565,6 @@ mod test {
         let (problem, soln) = dydt_y2_problem::<M>(true, 10);
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
         number_of_linear_solver_setups: 27
         number_of_steps: 161
         number_of_error_test_failures: 0
@@ -1602,7 +1572,6 @@ mod test {
         number_of_nonlinear_solver_fails: 3
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
-        ---
         number_of_calls: 357
         number_of_jac_muls: 15
         number_of_matrix_evals: 5
@@ -1616,7 +1585,6 @@ mod test {
         let (problem, soln) = gaussian_decay_problem::<M>(false, 10);
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
         number_of_linear_solver_setups: 14
         number_of_steps: 66
         number_of_error_test_failures: 1
@@ -1624,7 +1592,6 @@ mod test {
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
-        ---
         number_of_calls: 132
         number_of_jac_muls: 20
         number_of_matrix_evals: 2
@@ -1640,7 +1607,6 @@ mod test {
         let (problem, soln) = head2d_problem::<SparseColMat<f64>, 10>();
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
         number_of_linear_solver_setups: 21
         number_of_steps: 167
         number_of_error_test_failures: 0
@@ -1648,7 +1614,6 @@ mod test {
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.as_ref().rhs().statistics(), @r###"
-        ---
         number_of_calls: 333
         number_of_jac_muls: 128
         number_of_matrix_evals: 4
@@ -1661,26 +1626,22 @@ mod test {
     fn test_bdf_faer_sparse_heat2d_diffsl() {
         use diffsl::LlvmModule;
 
-        use crate::ode_solver::test_models::heat2d::{self, heat2d_diffsl_compile};
+        use crate::ode_solver::test_models::heat2d;
         let linear_solver = FaerSparseLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
-        let mut context = crate::DiffSlContext::default();
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
-        heat2d_diffsl_compile::<SparseColMat<f64>, LlvmModule, 10>(&mut context);
-        let (problem, soln) = heat2d::heat2d_diffsl_problem(&context);
+        let (problem, soln) = heat2d::heat2d_diffsl_problem::<SparseColMat<f64>, LlvmModule, 10>();
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
     }
 
     #[test]
     fn test_bdf_faer_sparse_foodweb() {
-        let foodweb_context = FoodWebContext::default();
         let linear_solver = FaerSparseLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
-        let (problem, soln) = foodweb_problem::<SparseColMat<f64>, 10>(&foodweb_context);
+        let (problem, soln) = foodweb_problem::<SparseColMat<f64>, 10>();
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        ---
         number_of_linear_solver_setups: 45
         number_of_steps: 161
         number_of_error_test_failures: 2
@@ -1695,12 +1656,11 @@ mod test {
         use diffsl::LlvmModule;
 
         use crate::ode_solver::test_models::foodweb;
-        let mut context = crate::DiffSlContext::default();
         let linear_solver = FaerSparseLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
-        foodweb::foodweb_diffsl_compile::<SparseColMat<f64>, LlvmModule, 10>(&mut context);
-        let (problem, soln) = foodweb::foodweb_diffsl_problem(&context);
+        let (problem, soln) =
+            foodweb::foodweb_diffsl_problem::<SparseColMat<f64>, LlvmModule, 10>();
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
     }
 

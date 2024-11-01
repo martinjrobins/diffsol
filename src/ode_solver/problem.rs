@@ -57,24 +57,19 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
     }
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        eqn: Eqn,
+        eqn: Rc<Eqn>,
         rtol: Eqn::T,
-        atol: Eqn::V,
+        atol: Rc<Eqn::V>,
         sens_rtol: Option<Eqn::T>,
-        sens_atol: Option<Eqn::V>,
+        sens_atol: Option<Rc<Eqn::V>>,
         out_rtol: Option<Eqn::T>,
-        out_atol: Option<Eqn::V>,
+        out_atol: Option<Rc<Eqn::V>>,
         param_rtol: Option<Eqn::T>,
-        param_atol: Option<Eqn::V>,
+        param_atol: Option<Rc<Eqn::V>>,
         t0: Eqn::T,
         h0: Eqn::T,
         integrate_out: bool,
     ) -> Result<Self, DiffsolError> {
-        let eqn = Rc::new(eqn);
-        let atol = Rc::new(atol);
-        let out_atol = out_atol.map(Rc::new);
-        let param_atol = param_atol.map(Rc::new);
-        let sens_atol = sens_atol.map(Rc::new);
         Ok(Self {
             eqn,
             rtol,
@@ -94,7 +89,7 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
     pub fn set_params(&mut self, p: Eqn::V) -> Result<(), DiffsolError> {
         let eqn =
             Rc::get_mut(&mut self.eqn).ok_or(ode_solver_error!(FailedToGetMutableReference))?;
-        eqn.set_params(p);
+        eqn.set_params(Rc::new(p));
         Ok(())
     }
 }

@@ -29,7 +29,7 @@ use crate::{
     linear_solver_error,
     matrix::MatrixCommon,
     vector::Vector,
-    Matrix, MatrixSparsityRef, NonLinearOpJacobian, SparseColMat,
+    Matrix, NonLinearOpJacobian, SparseColMat,
 };
 
 trait MatrixKLU: Matrix<T = f64> {
@@ -231,7 +231,7 @@ where
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();
-        let mut matrix = C::M::new_from_sparsity(nrows, ncols, op.sparsity().map(|s| s.to_owned()));
+        let mut matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity());
         let mut klu_common = self.klu_common.borrow_mut();
         self.klu_symbolic = KluSymbolic::try_from_matrix(&mut matrix, klu_common.as_mut()).ok();
         self.matrix = Some(matrix);

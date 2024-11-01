@@ -6,10 +6,10 @@ use crate::{
     matrix::default_solver::DefaultSolver,
     ode_solver_error,
     scalar::Scalar,
-    AdjointContext, AdjointEquations, AugmentedOdeEquations, Checkpointing, DefaultDenseMatrix,
-    DenseMatrix, Matrix, NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeEquationsAdjoint,
-    OdeEquationsSens, OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut,
-    Vector, VectorViewMut,
+    AdjointContext, AdjointEquations, Checkpointing, DefaultDenseMatrix, DenseMatrix, Matrix,
+    NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeEquationsAdjoint, OdeEquationsSens,
+    OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut, Vector,
+    VectorViewMut,
 };
 
 use super::checkpointing::HermiteInterpolator;
@@ -397,7 +397,6 @@ where
 pub trait AugmentedOdeSolverMethod<Eqn, AugmentedEqn>: OdeSolverMethod<Eqn>
 where
     Eqn: OdeEquations,
-    AugmentedEqn: AugmentedOdeEquations<Eqn>,
 {
     fn set_augmented_problem(
         &mut self,

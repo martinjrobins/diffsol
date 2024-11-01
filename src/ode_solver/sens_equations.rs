@@ -2,9 +2,9 @@ use num_traits::Zero;
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    matrix::sparsity::MatrixSparsityRef, op::nonlinear_op::NonLinearOpJacobian,
-    AugmentedOdeEquations, ConstantOp, ConstantOpSens, Matrix, NonLinearOp, NonLinearOpSens,
-    OdeEquations, OdeEquationsSens, OdeSolverProblem, Op, Vector,
+    op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, ConstantOp, ConstantOpSens,
+    Matrix, NonLinearOp, NonLinearOpSens, OdeEquations, OdeEquationsRef, OdeEquationsSens,
+    OdeSolverProblem, Op, Vector,
 };
 
 pub struct SensInit<Eqn>
@@ -23,11 +23,7 @@ where
     pub fn new(eqn: &Rc<Eqn>) -> Self {
         let nstates = eqn.rhs().nstates();
         let nparams = eqn.rhs().nparams();
-        let init_sens = Eqn::M::new_from_sparsity(
-            nstates,
-            nparams,
-            eqn.init().sparsity_sens().map(|s| s.to_owned()),
-        );
+        let init_sens = Eqn::M::new_from_sparsity(nstates, nparams, eqn.init().sens_sparsity());
         let index = 0;
         Self {
             eqn: eqn.clone(),
@@ -113,7 +109,7 @@ where
         let rhs_sens = Eqn::M::new_from_sparsity(
             nstates,
             nparams,
-            eqn.rhs().sparsity_sens().map(|s| s.to_owned()),
+            eqn.rhs().sens_sparsity().map(|s| s.to_owned()),
         );
         let y = RefCell::new(<Eqn::V as Vector>::zeros(nstates));
         let index = RefCell::new(0);
@@ -257,35 +253,34 @@ where
     }
 }
 
+impl<'a, Eqn> OdeEquationsRef<'a> for SensEquations<Eqn>
+where
+    Eqn: OdeEquationsSens,
+{
+    type Rhs = &'a SensRhs<Eqn>;
+    type Mass = <Eqn as OdeEquationsRef<'a>>::Mass;
+    type Root = <Eqn as OdeEquationsRef<'a>>::Root;
+    type Init = &'a SensInit<Eqn>;
+    type Out = <Eqn as OdeEquationsRef<'a>>::Out;
+}
+
 impl<Eqn> OdeEquations for SensEquations<Eqn>
 where
     Eqn: OdeEquationsSens,
 {
-    type T = Eqn::T;
-    type V = Eqn::V;
-    type M = Eqn::M;
-    type Rhs = SensRhs<Eqn>;
-    type Mass = Eqn::Mass;
-    type Root = Eqn::Root;
-    type Init = SensInit<Eqn>;
-    type Out = Eqn::Out;
-
-    fn rhs(&self) -> &Rc<Self::Rhs> {
+    fn rhs(&self) -> &SensRhs<Eqn> {
         &self.rhs
     }
-    fn mass(&self) -> Option<&Rc<Self::Mass>> {
+    fn mass(&self) -> Option<<Eqn as OdeEquationsRef<'_>>::Mass> {
         self.eqn.mass()
     }
-    fn root(&self) -> Option<&Rc<Self::Root>> {
+    fn root(&self) -> Option<<Eqn as OdeEquationsRef<'_>>::Root> {
         None
     }
-    fn init(&self) -> &Rc<Self::Init> {
+    fn init(&self) -> &SensInit<Eqn> {
         &self.init
     }
-    fn set_params(&mut self, _p: Self::V) {
-        panic!("Not implemented for SensEquations");
-    }
-    fn out(&self) -> Option<&Rc<Self::Out>> {
+    fn out(&self) -> Option<<Eqn as OdeEquationsRef<'_>>::Out> {
         None
     }
 }

@@ -51,9 +51,6 @@ impl<C: NonLinearOpJacobian> Op for LinearisedOp<C> {
     fn nparams(&self) -> usize {
         self.callable.nparams()
     }
-    fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
-        self.callable.sparsity()
-    }
 }
 
 impl<C: NonLinearOpJacobian> LinearOp for LinearisedOp<C> {
@@ -68,5 +65,8 @@ impl<C: NonLinearOpJacobian> LinearOp for LinearisedOp<C> {
     }
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
         self.callable.jacobian_inplace(&self.x, t, y);
+    }
+    fn sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        self.callable.jacobian_sparsity()
     }
 }

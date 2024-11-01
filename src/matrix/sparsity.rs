@@ -7,7 +7,7 @@ use crate::{
 
 use super::Matrix;
 
-pub trait MatrixSparsity<M: Matrix>: Sized {
+pub trait MatrixSparsity<M: Matrix>: Sized + Clone {
     fn nrows(&self) -> IndexType;
     fn ncols(&self) -> IndexType;
     fn is_sparse() -> bool;
@@ -20,6 +20,7 @@ pub trait MatrixSparsity<M: Matrix>: Sized {
     fn union(self, other: M::SparsityRef<'_>) -> Result<M::Sparsity, DiffsolError>;
     fn new_diagonal(n: IndexType) -> Self;
     fn as_ref(&self) -> M::SparsityRef<'_>;
+    fn get_index(&self, rows: &[IndexType], cols: &[IndexType]) -> <M::V as Vector>::Index;
 }
 
 pub trait MatrixSparsityRef<'a, M: Matrix> {
@@ -28,9 +29,9 @@ pub trait MatrixSparsityRef<'a, M: Matrix> {
     fn is_sparse() -> bool;
     fn indices(&self) -> Vec<(IndexType, IndexType)>;
     fn to_owned(&self) -> M::Sparsity;
-    fn get_index(&self, rows: &[IndexType], cols: &[IndexType]) -> <M::V as Vector>::Index;
 }
 
+#[derive(Clone)]
 pub struct Dense<M: Matrix> {
     nrows: IndexType,
     ncols: IndexType,
@@ -102,6 +103,19 @@ where
     fn new_diagonal(n: IndexType) -> Self {
         Dense::new(n, n)
     }
+    fn get_index(&self, rows: &[IndexType], cols: &[IndexType]) -> <M::V as Vector>::Index {
+        let indices: Vec<_> = rows
+            .iter()
+            .zip(cols.iter())
+            .map(|(i, j)| {
+                if i >= &self.nrows() || j >= &self.ncols() {
+                    panic!("Index out of bounds")
+                }
+                j * self.nrows() + i
+            })
+            .collect();
+        <M::V as Vector>::Index::from_slice(indices.as_slice())
+    }
 }
 
 impl<'a, M> MatrixSparsityRef<'a, M> for DenseRef<'a, M>
@@ -122,20 +136,6 @@ where
 
     fn is_sparse() -> bool {
         false
-    }
-
-    fn get_index(&self, rows: &[IndexType], cols: &[IndexType]) -> <M::V as Vector>::Index {
-        let indices: Vec<_> = rows
-            .iter()
-            .zip(cols.iter())
-            .map(|(i, j)| {
-                if i >= &self.nrows() || j >= &self.ncols() {
-                    panic!("Index out of bounds")
-                }
-                j * self.nrows() + i
-            })
-            .collect();
-        <M::V as Vector>::Index::from_slice(indices.as_slice())
     }
 
     fn indices(&self) -> Vec<(IndexType, IndexType)> {

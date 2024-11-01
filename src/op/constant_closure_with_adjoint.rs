@@ -83,7 +83,7 @@ where
     I: Fn(&M::V, M::T) -> M::V,
     J: Fn(&M::V, M::T, &M::V, &mut M::V),
 {
-    fn sens_mul_transpose_inplace(&self, t: Self::T, v: &Self::V, y: &mut Self::V) {
+    fn sens_transpose_mul_inplace(&self, t: Self::T, v: &Self::V, y: &mut Self::V) {
         (self.func_sens_adjoint)(self.p.as_ref(), t, v, y);
     }
 }

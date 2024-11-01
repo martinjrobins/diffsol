@@ -6,7 +6,7 @@
 //! ## Solving ODEs
 //!
 //! The simplest way to create a new problem is to use the [OdeBuilder] struct. You can set the initial time, initial step size, relative tolerance, absolute tolerance, and parameters,
-//! or leave them at their default values. Then, call one of the `build_*` functions (e.g. [OdeBuilder::build_ode], [OdeBuilder::build_ode_with_mass], [OdeBuilder::build_diffsl]) to create a [OdeSolverProblem].
+//! or leave them at their default values. Then, call one of the `build_*` functions (e.g. [OdeBuilder::build_ode], [OdeBuilder::build_ode_with_mass], [OdeBuilder::build_from_eqn]) to create a [OdeSolverProblem].
 //!
 //! You will also need to choose a matrix type to use. DiffSol can use the [nalgebra](https://nalgebra.org) `DMatrix` type, the [faer](https://github.com/sarah-ek/faer-rs) `Mat` type, or any other type that implements the
 //! [Matrix] trait.
@@ -35,7 +35,7 @@
 //! DiffSL is a domain-specific language for specifying differential equations <https://github.com/martinjrobins/diffsl>. It uses the LLVM compiler framwork
 //! to compile the equations to efficient machine code and uses the EnzymeAD library to compute the jacobian.
 //!
-//! You can use DiffSL with DiffSol using the [DiffSlContext] struct and [OdeBuilder::build_diffsl] method. You need to enable one of the `diffsl-llvm*` features
+//! You can use DiffSL with DiffSol using the [DiffSlContext] and [DiffSl] structs and [OdeBuilder::build_from_eqn] method. You need to enable one of the `diffsl-llvm*` features
 //! corresponding to the version of LLVM you have installed. E.g. to use your LLVM 10 installation, enable the `diffsl-llvm10` feature.
 //!
 //! For more information on the DiffSL language, see the [DiffSL documentation](https://martinjrobins.github.io/diffsl/)
@@ -54,7 +54,7 @@
 //! of the output vector `J(x) v` are also `NaN`, using the fact that `NaN`s propagate through most operations. However, this method is not foolproof and will fail if,
 //! for example, your jacobian function uses any control flow that depends on the input vector. If this is the case, you can provide the jacobian matrix directly by
 //! implementing the optional [NonLinearOpJacobian::jacobian_inplace] and the [LinearOp::matrix_inplace] (if applicable) functions,
-//! or by providing a sparsity pattern using the [Op::sparsity] function.
+//! or by providing a sparsity pattern using the [NonLinearOpJacobian::jacobian_sparsity] and [LinearOp::sparsity] functions.
 //!
 //! ## Events / Root finding
 //!
@@ -173,7 +173,7 @@ pub use ode_solver::sundials::SundialsIda;
 pub use linear_solver::suitesparse::klu::KLU;
 
 #[cfg(feature = "diffsl")]
-pub use ode_solver::diffsl::DiffSlContext;
+pub use ode_solver::diffsl::{DiffSl, DiffSlContext};
 
 pub use jacobian::{
     find_adjoint_non_zeros, find_jacobian_non_zeros, find_matrix_non_zeros,
@@ -196,11 +196,12 @@ pub use ode_solver::{
     bdf_state::BdfState, builder::OdeBuilder, checkpointing::Checkpointing,
     checkpointing::HermiteInterpolator, equations::AugmentedOdeEquations,
     equations::AugmentedOdeEquationsImplicit, equations::NoAug, equations::OdeEquations,
-    equations::OdeEquationsAdjoint, equations::OdeEquationsImplicit, equations::OdeEquationsSens,
-    equations::OdeSolverEquations, method::AdjointOdeSolverMethod, method::OdeSolverMethod,
-    method::OdeSolverStopReason, method::SensitivitiesOdeSolverMethod, problem::OdeSolverProblem,
-    sdirk::Sdirk, sdirk::SdirkAdj, sdirk_state::SdirkState, sens_equations::SensEquations,
-    sens_equations::SensInit, sens_equations::SensRhs, state::OdeSolverState, tableau::Tableau,
+    equations::OdeEquationsAdjoint, equations::OdeEquationsImplicit, equations::OdeEquationsRef,
+    equations::OdeEquationsSens, equations::OdeSolverEquations, method::AdjointOdeSolverMethod,
+    method::OdeSolverMethod, method::OdeSolverStopReason, method::SensitivitiesOdeSolverMethod,
+    problem::OdeSolverProblem, sdirk::Sdirk, sdirk::SdirkAdj, sdirk_state::SdirkState,
+    sens_equations::SensEquations, sens_equations::SensInit, sens_equations::SensRhs,
+    state::OdeSolverState, tableau::Tableau,
 };
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};

@@ -1,16 +1,20 @@
 use num_traits::{One, Zero};
-use std::{cell::RefCell, ops::AddAssign, ops::SubAssign, rc::Rc};
+use std::{
+    cell::RefCell,
+    ops::{AddAssign, SubAssign},
+    rc::Rc,
+};
 
 use crate::{
     op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, Checkpointing, ConstantOp,
     ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint, OdeSolverMethod, OdeSolverProblem,
-    Op, Vector,
+    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint, OdeEquationsRef, OdeSolverMethod,
+    OdeSolverProblem, Op, Vector,
 };
 
 pub struct AdjointContext<Eqn, Method>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
     Method: OdeSolverMethod<Eqn>,
 {
     checkpointer: Checkpointing<Eqn, Method>,
@@ -169,7 +173,7 @@ where
 /// We need the current state x(t), which is obtained from the checkpointed forward solve at the current time step.
 pub struct AdjointRhs<Eqn, Method>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
     Method: OdeSolverMethod<Eqn>,
 {
     eqn: Rc<Eqn>,
@@ -180,7 +184,7 @@ where
 
 impl<Eqn, Method> AdjointRhs<Eqn, Method>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
     Method: OdeSolverMethod<Eqn>,
 {
     pub fn new(
@@ -216,9 +220,6 @@ where
     }
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
-    }
-    fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
-        self.eqn.rhs().sparsity_adjoint()
     }
 }
 
@@ -266,6 +267,9 @@ where
         let context = self.context.borrow();
         let x = context.state();
         self.eqn.rhs().adjoint_inplace(x, t, y);
+    }
+    fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        self.eqn.rhs().adjoint_sparsity()
     }
 }
 
@@ -327,9 +331,6 @@ where
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
     }
-    fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
-        self.eqn.rhs().sparsity_sens_adjoint()
-    }
 }
 
 impl<Eqn, Method> NonLinearOp for AdjointOut<Eqn, Method>
@@ -374,6 +375,9 @@ where
         let x = context.state();
         self.eqn.rhs().sens_adjoint_inplace(x, t, y);
     }
+    fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        self.eqn.rhs().sens_adjoint_sparsity()
+    }
 }
 
 /// Adjoint equations for ODEs
@@ -388,9 +392,9 @@ where
     Method: OdeSolverMethod<Eqn>,
 {
     eqn: Rc<Eqn>,
-    rhs: Rc<AdjointRhs<Eqn, Method>>,
-    out: Option<Rc<AdjointOut<Eqn, Method>>>,
-    mass: Option<Rc<AdjointMass<Eqn>>>,
+    rhs: AdjointRhs<Eqn, Method>,
+    out: Option<AdjointOut<Eqn, Method>>,
+    mass: Option<AdjointMass<Eqn>>,
     context: Rc<RefCell<AdjointContext<Eqn, Method>>>,
     tmp: RefCell<Eqn::V>,
     tmp2: RefCell<Eqn::V>,
@@ -412,10 +416,10 @@ where
         with_out: bool,
     ) -> Self {
         let eqn = problem.eqn.clone();
-        let rhs = Rc::new(AdjointRhs::new(&eqn, context.clone(), with_out));
+        let rhs = AdjointRhs::new(&eqn, context.clone(), with_out);
         let init = Rc::new(AdjointInit::new(&eqn));
         let out = if with_out {
-            Some(Rc::new(AdjointOut::new(&eqn, context.clone(), with_out)))
+            Some(AdjointOut::new(&eqn, context.clone(), with_out))
         } else {
             None
         };
@@ -441,7 +445,7 @@ where
             None
         };
         let out_rtol = if with_out { problem.out_rtol } else { None };
-        let mass = eqn.mass().map(|_m| Rc::new(AdjointMass::new(&eqn)));
+        let mass = eqn.mass().map(|_m| AdjointMass::new(&eqn));
         Self {
             rhs,
             init,
@@ -466,10 +470,10 @@ where
                 mass.call_transpose_inplace(s_i, t, &mut tmp2);
                 self.eqn
                     .init()
-                    .sens_mul_transpose_inplace(t, &tmp2, &mut tmp);
+                    .sens_transpose_mul_inplace(t, &tmp2, &mut tmp);
                 sg_i.sub_assign(&*tmp);
             } else {
-                self.eqn.init().sens_mul_transpose_inplace(t, s_i, &mut tmp);
+                self.eqn.init().sens_transpose_mul_inplace(t, s_i, &mut tmp);
                 sg_i.sub_assign(&*tmp);
             }
         }
@@ -506,36 +510,36 @@ where
     }
 }
 
+impl<'a, Eqn, Method> OdeEquationsRef<'a> for AdjointEquations<Eqn, Method>
+where
+    Eqn: OdeEquationsAdjoint,
+    Method: OdeSolverMethod<Eqn>,
+{
+    type Rhs = &'a AdjointRhs<Eqn, Method>;
+    type Mass = &'a AdjointMass<Eqn>;
+    type Root = <Eqn as OdeEquationsRef<'a>>::Root;
+    type Init = &'a AdjointInit<Eqn>;
+    type Out = &'a AdjointOut<Eqn, Method>;
+}
+
 impl<Eqn, Method> OdeEquations for AdjointEquations<Eqn, Method>
 where
     Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<Eqn>,
 {
-    type T = Eqn::T;
-    type V = Eqn::V;
-    type M = Eqn::M;
-    type Rhs = AdjointRhs<Eqn, Method>;
-    type Mass = AdjointMass<Eqn>;
-    type Root = Eqn::Root;
-    type Init = AdjointInit<Eqn>;
-    type Out = AdjointOut<Eqn, Method>;
-
-    fn rhs(&self) -> &Rc<Self::Rhs> {
+    fn rhs(&self) -> &AdjointRhs<Eqn, Method> {
         &self.rhs
     }
-    fn mass(&self) -> Option<&Rc<Self::Mass>> {
+    fn mass(&self) -> Option<&AdjointMass<Eqn>> {
         self.mass.as_ref()
     }
-    fn root(&self) -> Option<&Rc<Self::Root>> {
+    fn root(&self) -> Option<<Eqn as OdeEquationsRef<'_>>::Root> {
         None
     }
-    fn init(&self) -> &Rc<Self::Init> {
+    fn init(&self) -> &AdjointInit<Eqn> {
         &self.init
     }
-    fn set_params(&mut self, _p: Self::V) {
-        panic!("Not implemented for SensEquations");
-    }
-    fn out(&self) -> Option<&Rc<Self::Out>> {
+    fn out(&self) -> Option<&AdjointOut<Eqn, Method>> {
         self.out.as_ref()
     }
 }
@@ -576,7 +580,7 @@ where
 
     fn update_rhs_out_state(&mut self, _y: &Eqn::V, _dy: &Eqn::V, _t: Eqn::T) {}
 
-    fn update_init_state(&mut self, _t: <Eqn as OdeEquations>::T) {}
+    fn update_init_state(&mut self, _t: <Eqn as Op>::T) {}
 }
 
 #[cfg(test)]

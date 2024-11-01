@@ -3,7 +3,7 @@ use std::rc::Rc;
 use crate::{
     op::{constant_op::ConstantOpSensAdjoint, linear_op::LinearOpTranspose},
     ConstantOp, ConstantOpSens, LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar, UnitCallable, Vector,
+    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Op, UnitCallable,
 };
 use serde::Serialize;
 
@@ -49,7 +49,7 @@ pub trait AugmentedOdeEquations<Eqn: OdeEquations>:
     fn out_atol(&self) -> Option<&Rc<Eqn::V>>;
 }
 
-pub trait AugmentedOdeEquationsImplicit<Eqn: OdeEquations>:
+pub trait AugmentedOdeEquationsImplicit<Eqn: OdeEquationsImplicit>:
     AugmentedOdeEquations<Eqn> + OdeEquationsImplicit<T = Eqn::T, V = Eqn::V, M = Eqn::M>
 {
 }
@@ -57,7 +57,7 @@ pub trait AugmentedOdeEquationsImplicit<Eqn: OdeEquations>:
 impl<Aug, Eqn> AugmentedOdeEquationsImplicit<Eqn> for Aug
 where
     Aug: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit<T = Eqn::T, V = Eqn::V, M = Eqn::M>,
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsImplicit,
 {
 }
 
@@ -65,42 +65,63 @@ pub struct NoAug<Eqn: OdeEquations> {
     _phantom: std::marker::PhantomData<Eqn>,
 }
 
-impl<Eqn: OdeEquations> OdeEquations for NoAug<Eqn> {
+impl<Eqn> Op for NoAug<Eqn>
+where
+    Eqn: OdeEquations,
+{
     type T = Eqn::T;
     type V = Eqn::V;
     type M = Eqn::M;
-    type Mass = Eqn::Mass;
-    type Rhs = Eqn::Rhs;
-    type Root = Eqn::Root;
-    type Init = Eqn::Init;
-    type Out = Eqn::Out;
 
-    fn set_params(&mut self, _p: Self::V) {
+    fn nout(&self) -> usize {
+        panic!("This should never be called")
+    }
+    fn nparams(&self) -> usize {
+        panic!("This should never be called")
+    }
+    fn nstates(&self) -> usize {
+        panic!("This should never be called")
+    }
+    fn statistics(&self) -> crate::op::OpStatistics {
         panic!("This should never be called")
     }
 
-    fn rhs(&self) -> &Rc<Self::Rhs> {
-        panic!("This should never be called")
-    }
-
-    fn mass(&self) -> Option<&Rc<Self::Mass>> {
-        panic!("This should never be called")
-    }
-
-    fn root(&self) -> Option<&Rc<Self::Root>> {
-        panic!("This should never be called")
-    }
-
-    fn out(&self) -> Option<&Rc<Self::Out>> {
-        panic!("This should never be called")
-    }
-
-    fn init(&self) -> &Rc<Self::Init> {
+    fn set_params(&mut self, _p: Rc<Self::V>) {
         panic!("This should never be called")
     }
 }
 
-impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
+impl<'a, Eqn: OdeEquations> OdeEquationsRef<'a> for NoAug<Eqn> {
+    type Mass = <Eqn as OdeEquationsRef<'a>>::Mass;
+    type Rhs = <Eqn as OdeEquationsRef<'a>>::Rhs;
+    type Root = <Eqn as OdeEquationsRef<'a>>::Root;
+    type Init = <Eqn as OdeEquationsRef<'a>>::Init;
+    type Out = <Eqn as OdeEquationsRef<'a>>::Out;
+}
+
+impl<Eqn: OdeEquations> OdeEquations for NoAug<Eqn> {
+    fn rhs(&self) -> <Self as OdeEquationsRef<'_>>::Rhs {
+        panic!("This should never be called")
+    }
+
+    fn mass(&self) -> Option<<Self as OdeEquationsRef<'_>>::Mass> {
+        panic!("This should never be called")
+    }
+
+    fn root(&self) -> Option<<Self as OdeEquationsRef<'_>>::Root> {
+        panic!("This should never be called")
+    }
+
+    fn out(&self) -> Option<<Self as OdeEquationsRef<'_>>::Out> {
+        panic!("This should never be called")
+    }
+
+    fn init(&self) -> <Self as OdeEquationsRef<'_>>::Init {
+        panic!("This should never be called")
+    }
+}
+
+impl<Eqn: OdeEquationsImplicit> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
     fn update_rhs_out_state(&mut self, _y: &Eqn::V, _dy: &Eqn::V, _t: Eqn::T) {
         panic!("This should never be called")
     }
@@ -110,19 +131,19 @@ impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
     fn set_index(&mut self, _index: usize) {
         panic!("This should never be called")
     }
-    fn atol(&self) -> Option<&Rc<<Eqn as OdeEquations>::V>> {
+    fn atol(&self) -> Option<&Rc<<Eqn as Op>::V>> {
         panic!("This should never be called")
     }
     fn include_out_in_error_control(&self) -> bool {
         panic!("This should never be called")
     }
-    fn out_atol(&self) -> Option<&Rc<<Eqn as OdeEquations>::V>> {
+    fn out_atol(&self) -> Option<&Rc<<Eqn as Op>::V>> {
         panic!("This should never be called")
     }
-    fn out_rtol(&self) -> Option<<Eqn as OdeEquations>::T> {
+    fn out_rtol(&self) -> Option<<Eqn as Op>::T> {
         panic!("This should never be called")
     }
-    fn rtol(&self) -> Option<<Eqn as OdeEquations>::T> {
+    fn rtol(&self) -> Option<<Eqn as Op>::T> {
         panic!("This should never be called")
     }
     fn max_index(&self) -> usize {
@@ -133,6 +154,38 @@ impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
     }
 }
 
+/// this is the reference trait that defines the ODE equations of the form, this is used to define the ODE equations for a given lifetime.
+/// See [OdeEquations] for the main trait that defines the ODE equations.
+///
+/// $$
+///  M \frac{dy}{dt} = F(t, y)
+///  y(t_0) = y_0(t_0)
+/// $$
+///
+/// The ODE equations are defined by:
+/// - the right-hand side function `F(t, y)`, which is given as a [NonLinearOp] using the `Rhs` associated type and [OdeEquations::rhs] function,
+/// - the initial condition `y_0(t_0)`, which is given as a [ConstantOp] using the `Init` associated type and [OdeEquations::init] function.
+///
+/// Optionally, the ODE equations can also include:
+/// - the mass matrix `M` which is given as a [LinearOp] using the `Mass` associated type and the [OdeEquations::mass] function,
+/// - the root function `G(t, y)` which is given as a [NonLinearOp] using the `Root` associated type and the [OdeEquations::root] function
+/// - the output function `H(t, y)` which is given as a [NonLinearOp] using the `Out` associated type and the [OdeEquations::out] function
+pub trait OdeEquationsRef<'a, ImplicitBounds: Sealed = Bounds<&'a Self>>: Op {
+    type Mass: LinearOp<M = Self::M, V = Self::V, T = Self::T>;
+    type Rhs: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
+    type Root: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
+    type Init: ConstantOp<M = Self::M, V = Self::V, T = Self::T>;
+    type Out: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
+}
+
+// seal the trait so that users must use the provided default type for ImplicitBounds
+mod sealed {
+    pub trait Sealed: Sized {}
+    pub struct Bounds<T>(T);
+    impl<T> Sealed for Bounds<T> {}
+}
+use sealed::{Bounds, Sealed};
+
 /// this is the trait that defines the ODE equations of the form
 ///
 /// $$
@@ -141,45 +194,32 @@ impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
 /// $$
 ///
 /// The ODE equations are defined by:
-/// - the right-hand side function `F(t, y)`, which is given as a [NonLinearOp] using the `Rhs` associated type and [Self::rhs] function,
-/// - the initial condition `y_0(t_0)`, which is given using the [Self::init] function.
+/// - the right-hand side function `F(t, y)`, which is given as a [NonLinearOp] using the `Rhs` associated type and [OdeEquations::rhs] function,
+/// - the initial condition `y_0(t_0)`, which is given as a [ConstantOp] using the `Init` associated type and [OdeEquations::init] function.
 ///
 /// Optionally, the ODE equations can also include:
-/// - the mass matrix `M` which is given as a [LinearOp] using the `Mass` associated type and the [Self::mass] function,
-/// - the root function `G(t, y)` which is given as a [NonLinearOp] using the `Root` associated type and the [Self::root] function
-/// - the output function `H(t, y)` which is given as a [NonLinearOp] using the `Out` associated type and the [Self::out] function
-pub trait OdeEquations {
-    type T: Scalar;
-    type V: Vector<T = Self::T>;
-    type M: Matrix<T = Self::T, V = Self::V>;
-    type Mass: LinearOp<M = Self::M, V = Self::V, T = Self::T>;
-    type Rhs: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
-    type Root: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
-    type Init: ConstantOp<M = Self::M, V = Self::V, T = Self::T>;
-    type Out: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
-
-    /// The parameters of the ODE equations are assumed to be constant. This function sets the parameters to the given value before solving the ODE.
-    /// Note that `set_params` must always be called before calling any of the other functions in this trait.
-    fn set_params(&mut self, p: Self::V);
-
+/// - the mass matrix `M` which is given as a [LinearOp] using the `Mass` associated type and the [OdeEquations::mass] function,
+/// - the root function `G(t, y)` which is given as a [NonLinearOp] using the `Root` associated type and the [OdeEquations::root] function
+/// - the output function `H(t, y)` which is given as a [NonLinearOp] using the `Out` associated type and the [OdeEquations::out] function
+pub trait OdeEquations: for<'a> OdeEquationsRef<'a> {
     /// returns the right-hand side function `F(t, y)` as a [NonLinearOp]
-    fn rhs(&self) -> &Rc<Self::Rhs>;
+    fn rhs(&self) -> <Self as OdeEquationsRef<'_>>::Rhs;
 
     /// returns the mass matrix `M` as a [LinearOp]
-    fn mass(&self) -> Option<&Rc<Self::Mass>>;
+    fn mass(&self) -> Option<<Self as OdeEquationsRef<'_>>::Mass>;
 
     /// returns the root function `G(t, y)` as a [NonLinearOp]
-    fn root(&self) -> Option<&Rc<Self::Root>> {
+    fn root(&self) -> Option<<Self as OdeEquationsRef<'_>>::Root> {
         None
     }
 
     /// returns the output function `H(t, y)` as a [NonLinearOp]
-    fn out(&self) -> Option<&Rc<Self::Out>> {
+    fn out(&self) -> Option<<Self as OdeEquationsRef<'_>>::Out> {
         None
     }
 
     /// returns the initial condition, i.e. `y(t)`, where `t` is the initial time
-    fn init(&self) -> &Rc<Self::Init>;
+    fn init(&self) -> <Self as OdeEquationsRef<'_>>::Init;
 }
 
 pub trait OdeEquationsImplicit:
@@ -277,17 +317,17 @@ impl<T> OdeEquationsAdjoint for T where
 /// }
 ///
 ///
-/// let rhs = Rc::new(MyProblem);
+/// let rhs = MyProblem;
 ///
 /// // use the provided constant closure to define the initial condition
 /// let init_fn = |p: &V, _t: f64| V::from_vec(vec![1.0]);
-/// let init = Rc::new(ConstantClosure::new(init_fn, Rc::new(V::from_vec(vec![]))));
+/// let init = ConstantClosure::new(init_fn, Rc::new(V::from_vec(vec![])));
 ///
 /// // we don't have a mass matrix, root or output functions, so we can set to None
 /// // we still need to give a placeholder type for these, so we use the diffsol::UnitCallable type
-/// let mass: Option<Rc<UnitCallable<M>>> = None;
-/// let root: Option<Rc<UnitCallable<M>>> = None;
-/// let out: Option<Rc<UnitCallable<M>>> = None;
+/// let mass: Option<UnitCallable<M>> = None;
+/// let root: Option<UnitCallable<M>> = None;
+/// let out: Option<UnitCallable<M>> = None;
 ///
 /// let p = Rc::new(V::from_vec(vec![]));
 /// let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p);
@@ -313,36 +353,26 @@ pub struct OdeSolverEquations<
     Out = UnitCallable<M>,
 > where
     M: Matrix,
-    Rhs: NonLinearOp<M = M, V = M::V, T = M::T>,
-    Mass: LinearOp<M = M, V = M::V, T = M::T>,
-    Root: NonLinearOp<M = M, V = M::V, T = M::T>,
-    Init: ConstantOp<M = M, V = M::V, T = M::T>,
-    Out: NonLinearOp<M = M, V = M::V, T = M::T>,
 {
-    rhs: Rc<Rhs>,
-    mass: Option<Rc<Mass>>,
-    root: Option<Rc<Root>>,
-    init: Rc<Init>,
-    out: Option<Rc<Out>>,
+    rhs: Rhs,
+    mass: Option<Mass>,
+    root: Option<Root>,
+    init: Init,
+    out: Option<Out>,
     p: Rc<M::V>,
 }
 
 impl<M, Rhs, Init, Mass, Root, Out> OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
 where
     M: Matrix,
-    Rhs: NonLinearOp<M = M, V = M::V, T = M::T>,
-    Mass: LinearOp<M = M, V = M::V, T = M::T>,
-    Root: NonLinearOp<M = M, V = M::V, T = M::T>,
-    Init: ConstantOp<M = M, V = M::V, T = M::T>,
-    Out: NonLinearOp<M = M, V = M::V, T = M::T>,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        rhs: Rc<Rhs>,
-        mass: Option<Rc<Mass>>,
-        root: Option<Rc<Root>>,
-        init: Rc<Init>,
-        out: Option<Rc<Out>>,
+        rhs: Rhs,
+        mass: Option<Mass>,
+        root: Option<Root>,
+        init: Init,
+        out: Option<Out>,
         p: Rc<M::V>,
     ) -> Self {
         Self {
@@ -356,6 +386,64 @@ where
     }
 }
 
+impl<M, Rhs, Init, Mass, Root, Out> Op for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
+where
+    M: Matrix,
+    Init: Op<M = M, V = M::V, T = M::T>,
+    Rhs: Op<M = M, V = M::V, T = M::T>,
+    Mass: Op<M = M, V = M::V, T = M::T>,
+    Root: Op<M = M, V = M::V, T = M::T>,
+    Out: Op<M = M, V = M::V, T = M::T>,
+{
+    type T = M::T;
+    type V = M::V;
+    type M = M;
+    fn nstates(&self) -> usize {
+        self.init.nstates()
+    }
+    fn nout(&self) -> usize {
+        self.rhs.nout()
+    }
+    fn nparams(&self) -> usize {
+        self.rhs.nparams()
+    }
+    fn statistics(&self) -> crate::op::OpStatistics {
+        self.rhs.statistics()
+    }
+    fn set_params(&mut self, p: Rc<Self::V>) {
+        self.rhs.set_params(p.clone());
+        self.init.set_params(p.clone());
+        if let Some(mass) = self.mass.as_mut() {
+            mass.set_params(p.clone());
+        }
+        if let Some(root) = self.root.as_mut() {
+            root.set_params(p.clone());
+        }
+
+        if let Some(out) = self.out.as_mut() {
+            out.set_params(p.clone());
+        }
+        self.p = p;
+    }
+}
+
+impl<'a, M, Rhs, Init, Mass, Root, Out> OdeEquationsRef<'a>
+    for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
+where
+    M: Matrix,
+    Rhs: NonLinearOp<M = M, V = M::V, T = M::T>,
+    Mass: LinearOp<M = M, V = M::V, T = M::T>,
+    Root: NonLinearOp<M = M, V = M::V, T = M::T>,
+    Init: ConstantOp<M = M, V = M::V, T = M::T>,
+    Out: NonLinearOp<M = M, V = M::V, T = M::T>,
+{
+    type Rhs = &'a Rhs;
+    type Mass = &'a Mass;
+    type Root = &'a Root;
+    type Init = &'a Init;
+    type Out = &'a Out;
+}
+
 impl<M, Rhs, Init, Mass, Root, Out> OdeEquations
     for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
 where
@@ -366,46 +454,21 @@ where
     Init: ConstantOp<M = M, V = M::V, T = M::T>,
     Out: NonLinearOp<M = M, V = M::V, T = M::T>,
 {
-    type T = M::T;
-    type V = M::V;
-    type M = M;
-    type Rhs = Rhs;
-    type Mass = Mass;
-    type Root = Root;
-    type Init = Init;
-    type Out = Out;
-
-    fn rhs(&self) -> &Rc<Self::Rhs> {
+    fn rhs(&self) -> &Rhs {
         &self.rhs
     }
-    fn mass(&self) -> Option<&Rc<Self::Mass>> {
+    fn mass(&self) -> Option<&Mass> {
         self.mass.as_ref()
     }
-    fn root(&self) -> Option<&Rc<Self::Root>> {
+    fn root(&self) -> Option<&Root> {
         self.root.as_ref()
     }
-    fn init(&self) -> &Rc<Self::Init> {
+    fn init(&self) -> &Init {
         &self.init
     }
 
-    fn out(&self) -> Option<&Rc<Self::Out>> {
+    fn out(&self) -> Option<&Out> {
         self.out.as_ref()
-    }
-
-    fn set_params(&mut self, p: Self::V) {
-        self.p = Rc::new(p);
-        Rc::<Rhs>::get_mut(&mut self.rhs)
-            .unwrap()
-            .set_params(self.p.clone());
-        if let Some(m) = self.mass.as_mut() {
-            Rc::<Mass>::get_mut(m).unwrap().set_params(self.p.clone());
-        }
-        if let Some(r) = self.root.as_mut() {
-            Rc::<Root>::get_mut(r).unwrap().set_params(self.p.clone())
-        }
-        if let Some(o) = self.out.as_mut() {
-            Rc::<Out>::get_mut(o).unwrap().set_params(self.p.clone())
-        }
     }
 }
 

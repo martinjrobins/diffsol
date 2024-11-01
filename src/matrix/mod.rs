@@ -113,7 +113,7 @@ pub trait MatrixView<'a>:
 }
 
 /// A base matrix trait (including sparse and dense matrices)
-pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone {
+pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 'static {
     type Sparsity: MatrixSparsity<Self>;
     type SparsityRef<'a>: MatrixSparsityRef<'a, Self>
     where

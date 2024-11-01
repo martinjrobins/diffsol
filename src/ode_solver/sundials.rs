@@ -19,9 +19,9 @@ use std::{
 };
 
 use crate::{
-    error::*, matrix::sparsity::MatrixSparsityRef, ode_solver_error, scale, LinearOp, Matrix,
-    NonLinearOp, NonLinearOpJacobian, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState, OdeSolverStopReason, Op, SundialsMatrix, SundialsVector, Vector,
+    error::*, ode_solver_error, scale, LinearOp, Matrix, NonLinearOp, NonLinearOpJacobian,
+    OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
+    Op, SundialsMatrix, SundialsVector, Vector,
 };
 
 #[cfg(not(sundials_version_major = "5"))]
@@ -115,17 +115,16 @@ where
 {
     fn new(eqn: Rc<Eqn>) -> Self {
         let n = eqn.rhs().nstates();
-        let rhs = eqn.rhs();
-        let rhs_jac_sparsity = rhs.sparsity().map(|s| MatrixSparsityRef::to_owned(&s));
+        let rhs_jac_sparsity = eqn.rhs().jacobian_sparsity();
         let rhs_jac = SundialsMatrix::new_from_sparsity(n, n, rhs_jac_sparsity);
         let mass = if let Some(mass) = eqn.mass() {
-            let mass_sparsity = mass.sparsity().map(|s| MatrixSparsityRef::to_owned(&s));
+            let mass_sparsity = mass.sparsity();
             SundialsMatrix::new_from_sparsity(n, n, mass_sparsity)
         } else {
             let ones = SundialsVector::from_element(n, 1.0);
             SundialsMatrix::from_diagonal(&ones)
         };
-        Self { eqn, rhs_jac, mass }
+        Self { rhs_jac, mass, eqn }
     }
 }
 
@@ -466,10 +465,8 @@ mod test {
     use crate::{
         ode_solver::{
             test_models::{
-                exponential_decay::exponential_decay_problem,
-                foodweb::{foodweb_problem, FoodWebContext},
-                heat2d::head2d_problem,
-                robertson::robertson,
+                exponential_decay::exponential_decay_problem, foodweb::foodweb_problem,
+                heat2d::head2d_problem, robertson::robertson,
             },
             tests::{
                 test_interpolate, test_no_set_problem, test_ode_solver_no_sens, test_state_mut,
@@ -538,9 +535,8 @@ mod test {
 
     #[test]
     fn test_sundials_foodweb() {
-        let foodweb_context = FoodWebContext::default();
         let mut s = crate::SundialsIda::default();
-        let (problem, soln) = foodweb_problem::<crate::SundialsMatrix, 10>(&foodweb_context);
+        let (problem, soln) = foodweb_problem::<crate::SundialsMatrix, 10>();
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---

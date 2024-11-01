@@ -103,6 +103,32 @@ impl<T: Scalar> MatrixSparsity<SparseColMat<T>> for SymbolicSparseColMat<IndexTy
             Err(e) => Err(DiffsolError::Other(e.to_string())),
         }
     }
+
+    fn get_index(
+        &self,
+        rows: &[IndexType],
+        cols: &[IndexType],
+    ) -> <<SparseColMat<T> as MatrixCommon>::V as Vector>::Index {
+        let col_ptrs = self.col_ptrs();
+        let row_indices = self.row_indices();
+        let mut indices = Vec::with_capacity(rows.len());
+        for (&i, &j) in rows.iter().zip(cols.iter()) {
+            let col_ptr = col_ptrs[j];
+            let next_col_ptr = col_ptrs[j + 1];
+            for (ii, &ri) in row_indices
+                .iter()
+                .enumerate()
+                .take(next_col_ptr)
+                .skip(col_ptr)
+            {
+                if ri == i {
+                    indices.push(ii);
+                    break;
+                }
+            }
+        }
+        indices
+    }
 }
 
 impl<'a, T: Scalar> MatrixSparsityRef<'a, SparseColMat<T>>
@@ -128,32 +154,6 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, SparseColMat<T>>
         for col_i in 0..self.ncols() {
             for row_j in self.col_range(col_i) {
                 indices.push((row_j, col_i));
-            }
-        }
-        indices
-    }
-
-    fn get_index(
-        &self,
-        rows: &[IndexType],
-        cols: &[IndexType],
-    ) -> <<SparseColMat<T> as MatrixCommon>::V as Vector>::Index {
-        let col_ptrs = self.col_ptrs();
-        let row_indices = self.row_indices();
-        let mut indices = Vec::with_capacity(rows.len());
-        for (&i, &j) in rows.iter().zip(cols.iter()) {
-            let col_ptr = col_ptrs[j];
-            let next_col_ptr = col_ptrs[j + 1];
-            for (ii, &ri) in row_indices
-                .iter()
-                .enumerate()
-                .take(next_col_ptr)
-                .skip(col_ptr)
-            {
-                if ri == i {
-                    indices.push(ii);
-                    break;
-                }
             }
         }
         indices

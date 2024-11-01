@@ -1,5 +1,5 @@
 use super::Op;
-use crate::{Matrix, MatrixSparsityRef, Vector};
+use crate::{Matrix, Vector};
 use num_traits::{One, Zero};
 
 // NonLinearOp is a trait that defines a nonlinear operator or function `F` that maps an input vector `x` to an output vector `y`, (i.e. `y = F(x, t)`).
@@ -34,7 +34,7 @@ pub trait NonLinearOpSens: NonLinearOp {
     }
 
     /// Compute the gradient of the operator wrt a parameter vector p and store it in the matrix `y`.
-    /// `y` should have been previously initialised using the output of [`Op::sparsity`].
+    /// `y` should have been previously initialised using the output of [Self::sens_sparsity].
     /// The default implementation of this method computes the gradient using [Self::sens_mul_inplace],
     /// but it can be overriden for more efficient implementations.
     fn sens_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
@@ -58,9 +58,12 @@ pub trait NonLinearOpSens: NonLinearOp {
     fn sens(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
         let m = self.nparams();
-        let mut y = Self::M::new_from_sparsity(n, m, self.sparsity_sens().map(|s| s.to_owned()));
+        let mut y = Self::M::new_from_sparsity(n, m, self.sens_sparsity());
         self.sens_inplace(x, t, &mut y);
         y
+    }
+    fn sens_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        None
     }
 }
 pub trait NonLinearOpSensAdjoint: NonLinearOp {
@@ -71,14 +74,13 @@ pub trait NonLinearOpSensAdjoint: NonLinearOp {
     /// See [Self::sens_adjoint_inplace] for a non-allocating version.
     fn sens_adjoint(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
-        let mut y =
-            Self::M::new_from_sparsity(n, n, self.sparsity_sens_adjoint().map(|s| s.to_owned()));
+        let mut y = Self::M::new_from_sparsity(n, n, self.sens_adjoint_sparsity());
         self.sens_adjoint_inplace(x, t, &mut y);
         y
     }
 
     /// Compute the negative transpose of the gradient of the operator wrt a parameter vector p and store it in the matrix `y`.
-    /// `y` should have been previously initialised using the output of [`Op::sparsity_sens_adjoint`].
+    /// `y` should have been previously initialised using the output of [Self::sens_adjoint_sparsity].
     /// The default implementation of this method computes the gradient using [Self::sens_transpose_mul_inplace],
     /// but it can be overriden for more efficient implementations.
     fn sens_adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
@@ -96,6 +98,10 @@ pub trait NonLinearOpSensAdjoint: NonLinearOp {
             v[j] = Self::T::zero();
         }
     }
+
+    fn sens_adjoint_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        None
+    }
 }
 pub trait NonLinearOpAdjoint: NonLinearOp {
     /// Compute the product of the transpose of the Jacobian with a given vector `-J(x, t)^T * v`.
@@ -104,7 +110,7 @@ pub trait NonLinearOpAdjoint: NonLinearOp {
     fn jac_transpose_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, _y: &mut Self::V);
 
     /// Compute the Adjoint matrix `-J^T(x, t)` of the operator and store it in the matrix `y`.
-    /// `y` should have been previously initialised using the output of [`Op::sparsity`].
+    /// `y` should have been previously initialised using the output of [`Self::adjoint_sparsity`].
     /// The default implementation of this method computes the Jacobian using [Self::jac_transpose_mul_inplace],
     /// but it can be overriden for more efficient implementations.
     fn adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
@@ -127,9 +133,13 @@ pub trait NonLinearOpAdjoint: NonLinearOp {
     /// See [Self::adjoint_inplace] for a non-allocating version.
     fn adjoint(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
-        let mut y = Self::M::new_from_sparsity(n, n, self.sparsity_adjoint().map(|s| s.to_owned()));
+        let mut y = Self::M::new_from_sparsity(n, n, self.adjoint_sparsity());
         self.adjoint_inplace(x, t, &mut y);
         y
+    }
+    /// Return sparsity information (if available)
+    fn adjoint_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        None
     }
 }
 pub trait NonLinearOpJacobian: NonLinearOp {
@@ -148,13 +158,18 @@ pub trait NonLinearOpJacobian: NonLinearOp {
     /// See [Self::jacobian_inplace] for a non-allocating version.
     fn jacobian(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
-        let mut y = Self::M::new_from_sparsity(n, n, self.sparsity().map(|s| s.to_owned()));
+        let mut y = Self::M::new_from_sparsity(n, n, self.jacobian_sparsity());
         self.jacobian_inplace(x, t, &mut y);
         y
     }
 
+    /// Return sparsity information (if available)
+    fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        None
+    }
+
     /// Compute the Jacobian matrix `J(x, t)` of the operator and store it in the matrix `y`.
-    /// `y` should have been previously initialised using the output of [`Op::sparsity`].
+    /// `y` should have been previously initialised using the output of [Self::jacobian_sparsity].
     /// The default implementation of this method computes the Jacobian using [Self::jac_mul_inplace],
     /// but it can be overriden for more efficient implementations.
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {

@@ -1,5 +1,5 @@
 use super::Op;
-use crate::{Matrix, MatrixSparsityRef, Vector};
+use crate::{Matrix, Vector};
 use num_traits::{One, Zero};
 
 /// LinearOp is a trait for linear operators (i.e. they only depend linearly on the input `x`), see [crate::NonLinearOp] for a non-linear op.
@@ -19,11 +19,7 @@ pub trait LinearOp: Op {
     /// Compute the matrix representation of the operator `A(t)` and return it.
     /// See [Self::matrix_inplace] for a non-allocating version.
     fn matrix(&self, t: Self::T) -> Self::M {
-        let mut y = Self::M::new_from_sparsity(
-            self.nstates(),
-            self.nstates(),
-            self.sparsity().map(|s| s.to_owned()),
-        );
+        let mut y = Self::M::new_from_sparsity(self.nstates(), self.nstates(), self.sparsity());
         self.matrix_inplace(t, &mut y);
         y
     }
@@ -45,6 +41,10 @@ pub trait LinearOp: Op {
             y.set_column(j, &col);
             v[j] = Self::T::zero();
         }
+    }
+
+    fn sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        None
     }
 }
 
@@ -76,6 +76,9 @@ pub trait LinearOpTranspose: LinearOp {
             v[j] = Self::T::zero();
         }
     }
+    fn transpose_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        None
+    }
 }
 
 pub trait LinearOpSens: LinearOp {
@@ -93,7 +96,7 @@ pub trait LinearOpSens: LinearOp {
     }
 
     /// Compute the gradient of the operator wrt a parameter vector p and store it in the matrix `y`.
-    /// `y` should have been previously initialised using the output of [`Op::sparsity`].
+    /// `y` should have been previously initialised using the output of [Self::sens_sparsity].
     /// The default implementation of this method computes the gradient using [Self::sens_mul_inplace],
     /// but it can be overriden for more efficient implementations.
     fn sens_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
@@ -117,8 +120,12 @@ pub trait LinearOpSens: LinearOp {
     fn sens(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
         let m = self.nparams();
-        let mut y = Self::M::new_from_sparsity(n, m, self.sparsity_sens().map(|s| s.to_owned()));
+        let mut y = Self::M::new_from_sparsity(n, m, self.sens_sparsity());
         self.sens_inplace(x, t, &mut y);
         y
+    }
+
+    fn sens_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        None
     }
 }

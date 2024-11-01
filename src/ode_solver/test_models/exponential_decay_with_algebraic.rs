@@ -286,24 +286,22 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: Matrix + 'static>() -
         mass.calculate_sparsity(t0);
         mass.calculate_adjoint_sparsity(t0);
     }
-    let rhs = Rc::new(rhs);
-    let init = Rc::new(init);
-    let out = Some(Rc::new(out));
+    let out = Some(out);
 
-    let root: Option<Rc<UnitCallable<M>>> = None;
-    let mass = Some(Rc::new(mass));
+    let root: Option<UnitCallable<M>> = None;
+    let mass = Some(mass);
     let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p.clone());
     let rtol = M::T::from(1e-6);
-    let atol = M::V::from_element(nstates, M::T::from(1e-6));
+    let atol = Rc::new(M::V::from_element(nstates, M::T::from(1e-6)));
     let out_rtol = Some(M::T::from(1e-6));
-    let out_atol = Some(M::V::from_element(nout, M::T::from(1e-6)));
+    let out_atol = Some(Rc::new(M::V::from_element(nout, M::T::from(1e-6))));
     let param_rtol = Some(M::T::from(1e-6));
-    let param_atol = Some(M::V::from_element(1, M::T::from(1e-6)));
-    let sens_atol = Some(M::V::from_element(nstates, M::T::from(1e-6)));
+    let param_atol = Some(Rc::new(M::V::from_element(1, M::T::from(1e-6))));
+    let sens_atol = Some(Rc::new(M::V::from_element(nstates, M::T::from(1e-6))));
     let sens_rtol = Some(M::T::from(1e-6));
     let integrate_out = true;
     let problem = OdeSolverProblem::new(
-        eqn,
+        Rc::new(eqn),
         rtol,
         atol,
         sens_rtol,
@@ -368,22 +366,15 @@ pub fn exponential_decay_with_algebraic_problem_sens<M: Matrix + 'static>() -> (
         mass.calculate_sparsity(t0);
     }
 
-    let out: Option<Rc<UnitCallable<M>>> = None;
-    let root: Option<Rc<UnitCallable<M>>> = None;
-    let eqn = OdeSolverEquations::new(
-        Rc::new(rhs),
-        Some(Rc::new(mass)),
-        root,
-        Rc::new(init),
-        out,
-        p.clone(),
-    );
+    let out: Option<UnitCallable<M>> = None;
+    let root: Option<UnitCallable<M>> = None;
+    let eqn = OdeSolverEquations::new(rhs, Some(mass), root, init, out, p.clone());
     let sens_rtol = Some(M::T::from(1e-6));
-    let sens_atol = Some(M::V::from_element(3, M::T::from(1e-6)));
+    let sens_atol = Some(Rc::new(M::V::from_element(3, M::T::from(1e-6))));
     let problem = OdeSolverProblem::new(
-        eqn,
+        Rc::new(eqn),
         M::T::from(1e-6),
-        M::V::from_element(3, M::T::from(1e-6)),
+        Rc::new(M::V::from_element(3, M::T::from(1e-6))),
         sens_rtol,
         sens_atol,
         None,

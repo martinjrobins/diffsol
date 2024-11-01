@@ -1,6 +1,9 @@
 use std::rc::Rc;
 
-use crate::{LinearOp, Matrix, NonLinearOp, Scalar, Vector};
+use crate::{
+    ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
+    NonLinearOp, NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar, Vector,
+};
 
 use nonlinear_op::NonLinearOpJacobian;
 use serde::Serialize;
@@ -48,26 +51,6 @@ pub trait Op {
     /// Set the parameters of the operator to the given value.
     fn set_params(&mut self, p: Rc<Self::V>) {
         assert_eq!(p.len(), self.nparams());
-    }
-
-    /// Return sparsity information for the jacobian or matrix (if available)
-    fn sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
-        None
-    }
-
-    /// Return sparsity information for the jacobian or matrix (if available)
-    fn sparsity_adjoint(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
-        None
-    }
-
-    /// Return sparsity information for the sensitivity of the operator wrt a parameter vector p (if available)
-    fn sparsity_sens(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
-        None
-    }
-
-    /// Return sparsity information for the sensitivity of the operator wrt a parameter vector p (if available)
-    fn sparsity_sens_adjoint(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
-        None
     }
 
     /// Return statistics about the operator (e.g. how many times it was called, how many times the jacobian was computed, etc.)
@@ -124,6 +107,9 @@ impl<C: Op> Op for &C {
     fn nparams(&self) -> usize {
         C::nparams(*self)
     }
+    fn statistics(&self) -> OpStatistics {
+        C::statistics(*self)
+    }
 }
 
 impl<C: NonLinearOp> NonLinearOp for &C {
@@ -139,10 +125,98 @@ impl<C: NonLinearOpJacobian> NonLinearOpJacobian for &C {
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         C::jacobian_inplace(*self, x, t, y)
     }
+    fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        C::jacobian_sparsity(*self)
+    }
+}
+
+impl<C: NonLinearOpAdjoint> NonLinearOpAdjoint for &C {
+    fn adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        C::adjoint_inplace(*self, x, t, y)
+    }
+    fn adjoint_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        C::adjoint_sparsity(*self)
+    }
+    fn jac_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        C::jac_transpose_mul_inplace(*self, x, t, v, y)
+    }
+}
+
+impl<C: NonLinearOpSens> NonLinearOpSens for &C {
+    fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        C::sens_mul_inplace(*self, x, t, v, y)
+    }
+    fn sens_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        C::sens_inplace(*self, x, t, y)
+    }
+
+    fn sens_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        C::sens_sparsity(*self)
+    }
+}
+
+impl<C: NonLinearOpSensAdjoint> NonLinearOpSensAdjoint for &C {
+    fn sens_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        C::sens_transpose_mul_inplace(*self, x, t, v, y)
+    }
+    fn sens_adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        C::sens_adjoint_inplace(*self, x, t, y)
+    }
+    fn sens_adjoint_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        C::sens_adjoint_sparsity(*self)
+    }
 }
 
 impl<C: LinearOp> LinearOp for &C {
     fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
         C::gemv_inplace(*self, x, t, beta, y)
+    }
+    fn sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        C::sparsity(*self)
+    }
+    fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
+        C::matrix_inplace(*self, t, y)
+    }
+}
+
+impl<C: LinearOpTranspose> LinearOpTranspose for &C {
+    fn gemv_transpose_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
+        C::gemv_transpose_inplace(*self, x, t, beta, y)
+    }
+    fn transpose_inplace(&self, t: Self::T, y: &mut Self::M) {
+        C::transpose_inplace(*self, t, y)
+    }
+    fn transpose_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        C::transpose_sparsity(*self)
+    }
+}
+
+impl<C: ConstantOp> ConstantOp for &C {
+    fn call_inplace(&self, t: Self::T, y: &mut Self::V) {
+        C::call_inplace(*self, t, y)
+    }
+}
+
+impl<C: ConstantOpSens> ConstantOpSens for &C {
+    fn sens_mul_inplace(&self, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        C::sens_mul_inplace(*self, t, v, y)
+    }
+    fn sens_inplace(&self, t: Self::T, y: &mut Self::M) {
+        C::sens_inplace(*self, t, y)
+    }
+    fn sens_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        C::sens_sparsity(*self)
+    }
+}
+
+impl<C: ConstantOpSensAdjoint> ConstantOpSensAdjoint for &C {
+    fn sens_transpose_mul_inplace(&self, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        C::sens_transpose_mul_inplace(*self, t, v, y)
+    }
+    fn sens_adjoint_inplace(&self, t: Self::T, y: &mut Self::M) {
+        C::sens_adjoint_inplace(*self, t, y)
+    }
+    fn sens_adjoint_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        C::sens_adjoint_sparsity(*self)
     }
 }
