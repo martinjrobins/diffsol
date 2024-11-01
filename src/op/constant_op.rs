@@ -17,7 +17,7 @@ pub trait ConstantOpSens: ConstantOp {
     fn sens_mul_inplace(&self, _t: Self::T, _v: &Self::V, _y: &mut Self::V);
 
     /// Compute the gradient of the operator wrt a parameter vector p and store it in the matrix `y`.
-    /// `y` should have been previously initialised using the output of [`Op::sparsity`].
+    /// `y` should have been previously initialised using the output of [Self::sens_sparsity].
     /// The default implementation of this method computes the gradient using [Self::sens_mul_inplace],
     /// but it can be overriden for more efficient implementations.
     fn sens_inplace(&self, t: Self::T, y: &mut Self::M) {
@@ -65,7 +65,7 @@ pub trait ConstantOpSensAdjoint: ConstantOp {
     }
 
     /// Compute the negative transpose of the gradient of the operator wrt a parameter vector p and store it in the matrix `y`.
-    /// `y` should have been previously initialised using the output of [`Op::sparsity_sens_adjoint`].
+    /// `y` should have been previously initialised using the output of [Self::sens_adjoint_sparsity].
     /// The default implementation of this method computes the gradient using [Self::sens_transpose_mul_inplace],
     /// but it can be overriden for more efficient implementations.
     fn sens_adjoint_inplace(&self, t: Self::T, y: &mut Self::M) {

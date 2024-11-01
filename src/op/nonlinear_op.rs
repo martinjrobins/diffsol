@@ -34,7 +34,7 @@ pub trait NonLinearOpSens: NonLinearOp {
     }
 
     /// Compute the gradient of the operator wrt a parameter vector p and store it in the matrix `y`.
-    /// `y` should have been previously initialised using the output of [`Op::sparsity`].
+    /// `y` should have been previously initialised using the output of [Self::sens_sparsity].
     /// The default implementation of this method computes the gradient using [Self::sens_mul_inplace],
     /// but it can be overriden for more efficient implementations.
     fn sens_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
@@ -80,7 +80,7 @@ pub trait NonLinearOpSensAdjoint: NonLinearOp {
     }
 
     /// Compute the negative transpose of the gradient of the operator wrt a parameter vector p and store it in the matrix `y`.
-    /// `y` should have been previously initialised using the output of [`Op::sparsity_sens_adjoint`].
+    /// `y` should have been previously initialised using the output of [Self::sens_adjoint_sparsity].
     /// The default implementation of this method computes the gradient using [Self::sens_transpose_mul_inplace],
     /// but it can be overriden for more efficient implementations.
     fn sens_adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
@@ -110,7 +110,7 @@ pub trait NonLinearOpAdjoint: NonLinearOp {
     fn jac_transpose_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, _y: &mut Self::V);
 
     /// Compute the Adjoint matrix `-J^T(x, t)` of the operator and store it in the matrix `y`.
-    /// `y` should have been previously initialised using the output of [`Op::sparsity`].
+    /// `y` should have been previously initialised using the output of [`Self::adjoint_sparsity`].
     /// The default implementation of this method computes the Jacobian using [Self::jac_transpose_mul_inplace],
     /// but it can be overriden for more efficient implementations.
     fn adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
@@ -169,7 +169,7 @@ pub trait NonLinearOpJacobian: NonLinearOp {
     }
 
     /// Compute the Jacobian matrix `J(x, t)` of the operator and store it in the matrix `y`.
-    /// `y` should have been previously initialised using the output of [`Op::sparsity`].
+    /// `y` should have been previously initialised using the output of [Self::jacobian_sparsity].
     /// The default implementation of this method computes the Jacobian using [Self::jac_mul_inplace],
     /// but it can be overriden for more efficient implementations.
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {

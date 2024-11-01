@@ -163,13 +163,13 @@ impl<Eqn: OdeEquationsImplicit> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
 /// $$
 ///
 /// The ODE equations are defined by:
-/// - the right-hand side function `F(t, y)`, which is given as a [NonLinearOp] using the `Rhs` associated type and [Self::rhs] function,
-/// - the initial condition `y_0(t_0)`, which is given using the [Self::init] function.
+/// - the right-hand side function `F(t, y)`, which is given as a [NonLinearOp] using the `Rhs` associated type and [OdeEquations::rhs] function,
+/// - the initial condition `y_0(t_0)`, which is given as a [ConstantOp] using the `Init` associated type and [OdeEquations::init] function.
 ///
 /// Optionally, the ODE equations can also include:
-/// - the mass matrix `M` which is given as a [LinearOp] using the `Mass` associated type and the [Self::mass] function,
-/// - the root function `G(t, y)` which is given as a [NonLinearOp] using the `Root` associated type and the [Self::root] function
-/// - the output function `H(t, y)` which is given as a [NonLinearOp] using the `Out` associated type and the [Self::out] function
+/// - the mass matrix `M` which is given as a [LinearOp] using the `Mass` associated type and the [OdeEquations::mass] function,
+/// - the root function `G(t, y)` which is given as a [NonLinearOp] using the `Root` associated type and the [OdeEquations::root] function
+/// - the output function `H(t, y)` which is given as a [NonLinearOp] using the `Out` associated type and the [OdeEquations::out] function
 pub trait OdeEquationsRef<'a, ImplicitBounds: Sealed = Bounds<&'a Self>>: Op {
     type Mass: LinearOp<M = Self::M, V = Self::V, T = Self::T>;
     type Rhs: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
@@ -194,13 +194,13 @@ use sealed::{Bounds, Sealed};
 /// $$
 ///
 /// The ODE equations are defined by:
-/// - the right-hand side function `F(t, y)`, which is given as a [NonLinearOp] using the `Rhs` associated type and [Self::rhs] function,
-/// - the initial condition `y_0(t_0)`, which is given using the [Self::init] function.
+/// - the right-hand side function `F(t, y)`, which is given as a [NonLinearOp] using the `Rhs` associated type and [OdeEquations::rhs] function,
+/// - the initial condition `y_0(t_0)`, which is given as a [ConstantOp] using the `Init` associated type and [OdeEquations::init] function.
 ///
 /// Optionally, the ODE equations can also include:
-/// - the mass matrix `M` which is given as a [LinearOp] using the `Mass` associated type and the [Self::mass] function,
-/// - the root function `G(t, y)` which is given as a [NonLinearOp] using the `Root` associated type and the [Self::root] function
-/// - the output function `H(t, y)` which is given as a [NonLinearOp] using the `Out` associated type and the [Self::out] function
+/// - the mass matrix `M` which is given as a [LinearOp] using the `Mass` associated type and the [OdeEquations::mass] function,
+/// - the root function `G(t, y)` which is given as a [NonLinearOp] using the `Root` associated type and the [OdeEquations::root] function
+/// - the output function `H(t, y)` which is given as a [NonLinearOp] using the `Out` associated type and the [OdeEquations::out] function
 pub trait OdeEquations: for<'a> OdeEquationsRef<'a> {
     /// returns the right-hand side function `F(t, y)` as a [NonLinearOp]
     fn rhs(&self) -> <Self as OdeEquationsRef<'_>>::Rhs;

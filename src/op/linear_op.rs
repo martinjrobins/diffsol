@@ -96,7 +96,7 @@ pub trait LinearOpSens: LinearOp {
     }
 
     /// Compute the gradient of the operator wrt a parameter vector p and store it in the matrix `y`.
-    /// `y` should have been previously initialised using the output of [`Op::sparsity`].
+    /// `y` should have been previously initialised using the output of [Self::sens_sparsity].
     /// The default implementation of this method computes the gradient using [Self::sens_mul_inplace],
     /// but it can be overriden for more efficient implementations.
     fn sens_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
