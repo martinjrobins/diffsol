@@ -173,7 +173,7 @@ pub use ode_solver::sundials::SundialsIda;
 pub use linear_solver::suitesparse::klu::KLU;
 
 #[cfg(feature = "diffsl")]
-pub use ode_solver::diffsl::DiffSlContext;
+pub use ode_solver::diffsl::{DiffSlContext, DiffSl};
 
 pub use jacobian::{
     find_adjoint_non_zeros, find_jacobian_non_zeros, find_matrix_non_zeros,

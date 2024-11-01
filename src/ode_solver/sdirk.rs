@@ -23,9 +23,9 @@ use crate::SensEquations;
 use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, AdjointOdeSolverMethod,
-    AugmentedOdeEquations, DenseMatrix, JacobianUpdate, NonLinearOp, OdeEquations,
+    AugmentedOdeEquations, DenseMatrix, JacobianUpdate, NonLinearOp, 
     OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsSens, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState, Op, Scalar, StateRef, StateRefMut, Vector, VectorViewMut,
+    OdeSolverState, Op, Scalar, StateRef, StateRefMut, Vector, VectorViewMut, AugmentedOdeEquationsImplicit
 };
 
 use super::bdf::BdfStatistics;
@@ -166,7 +166,7 @@ where
     LS: LinearSolver<Eqn::M>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquationsImplicit,
-    AugmentedEqn: AugmentedOdeEquations<Eqn>,
+    AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
     for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
 {
@@ -451,7 +451,7 @@ where
     LS: LinearSolver<Eqn::M>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquationsImplicit,
-    AugmentedEqn: AugmentedOdeEquations<Eqn>,
+    AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
     for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
 {
@@ -1007,7 +1007,7 @@ where
     LS: LinearSolver<Eqn::M>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquationsImplicit,
-    AugmentedEqn: AugmentedOdeEquations<Eqn>,
+    AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
     for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
     for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
 {

@@ -17,13 +17,17 @@ use num_traits::{One, Zero};
 use crate::{ConstantOp, LinearOp, NonLinearOpJacobian, OdeEquations};
 
 #[cfg(feature = "diffsl")]
-pub fn heat2d_diffsl_compile<
-    M: Matrix<T = f64> + 'static,
+pub fn heat2d_diffsl_problem<
+    M: Matrix<T = f64>,
     CG: diffsl::execution::module::CodegenModule,
     const MGRID: usize,
->(
-    context: &mut crate::DiffSlContext<M, CG>,
-) {
+>() -> (
+    OdeSolverProblem<impl crate::OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
+    OdeSolverSolution<M::V>,
+)
+{
+    use crate::{DiffSl, DiffSlContext};
+
     let (problem, _soln) = head2d_problem::<M, MGRID>();
     let u0 = problem.eqn.init().call(0.0);
     let jac = problem.eqn.rhs().jacobian(&u0, 0.0);
@@ -87,28 +91,17 @@ pub fn heat2d_diffsl_compile<
         dx2 = (1.0 / (MGRID as f64 - 1.0)).powi(2),
     );
 
-    context.recompile(code.as_str()).unwrap();
-}
-
-#[allow(clippy::type_complexity)]
-#[cfg(feature = "diffsl")]
-pub fn heat2d_diffsl_problem<
-    M: Matrix<T = f64> + 'static,
-    CG: diffsl::execution::module::CodegenModule,
->(
-    context: &crate::DiffSlContext<M, CG>,
-) -> (
-    OdeSolverProblem<impl crate::OdeEquationsImplicit<M = M, V = M::V, T = M::T> + '_>,
-    OdeSolverSolution<M::V>,
-) {
+    let context: DiffSlContext<M, CG> = DiffSlContext::new(code.as_str()).unwrap();
+    let eqn = DiffSl::from_context(context);
     let problem = OdeBuilder::new()
         .rtol(1e-7)
         .atol([1e-7])
-        .build_diffsl(context)
+        .build_from_eqn(std::rc::Rc::new(eqn))
         .unwrap();
     let soln = soln::<M>();
     (problem, soln)
 }
+
 
 fn heat2d_rhs<M: Matrix, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
     // Initialize y to x, to take care of boundary equations.
@@ -334,9 +327,7 @@ mod tests {
         use diffsl::CraneliftModule;
         use faer::Col;
 
-        let mut context = crate::DiffSlContext::default();
-        heat2d_diffsl_compile::<SparseColMat<f64>, CraneliftModule, 5>(&mut context);
-        let (problem, _soln) = heat2d_diffsl_problem(&context);
+        let (problem, _soln) = heat2d_diffsl_problem::<SparseColMat<f64>, CraneliftModule, 5>();
         let u = Col::from_vec(vec![
             1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
             17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0,

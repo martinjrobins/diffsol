@@ -1,6 +1,6 @@
 use crate::{
     matrix::DenseMatrix, ode_solver::equations::OdeEquationsImplicit, scale, LinearOp, Matrix,
-    MatrixRef, MatrixSparsity, MatrixSparsityRef, NonLinearOp, NonLinearOpJacobian,
+    MatrixRef, MatrixSparsity, NonLinearOp, NonLinearOpJacobian,
     OdeSolverProblem, Op, Vector, VectorRef,
 };
 use num_traits::{One, Zero};
@@ -88,20 +88,21 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
             n,
             rhs_jac_sparsity.map(|s| s.to_owned()),
         ));
-        let sparsity = if let Some(rhs_jac_sparsity) = eqn.rhs().sparsity() {
+        let sparsity = if let Some(rhs_jac_sparsity) = eqn.rhs().jacobian_sparsity() {
             if let Some(mass) = eqn.mass() {
-                // have mass, use the union of the mass and rhs jacobians sparse patterns
-                Some(
-                    mass.sparsity()
-                        .unwrap()
-                        .to_owned()
-                        .union(rhs_jac_sparsity)
-                        .unwrap(),
-                )
+                if let Some(mass_sparsity) = mass.sparsity() {
+                    // have mass, use the union of the mass and rhs jacobians sparse patterns
+                    Some(
+                        mass_sparsity.union(rhs_jac_sparsity.as_ref()).unwrap(),
+                    )
+                } else {
+                    // no mass sparsity, panic
+                    panic!("Mass matrix must have a sparsity pattern if the rhs jacobian has a sparsity pattern");
+                }
             } else {
                 // no mass, use the identity
                 let mass_sparsity = <Eqn::M as Matrix>::Sparsity::new_diagonal(n);
-                Some(mass_sparsity.union(rhs_jac_sparsity).unwrap())
+                Some(mass_sparsity.union(rhs_jac_sparsity.as_ref()).unwrap())
             }
         } else {
             None
@@ -274,8 +275,8 @@ where
         let number_of_jac_evals = *self.number_of_jac_evals.borrow() + 1;
         self.number_of_jac_evals.replace(number_of_jac_evals);
     }
-    fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::SparsityRef<'_>> {
-        self.sparsity.as_ref().map(|s| s.as_ref())
+    fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        self.sparsity.clone()
     }
 }
 

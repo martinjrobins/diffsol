@@ -2,7 +2,7 @@ use num_traits::Zero;
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, ConstantOp, ConstantOpSens, Matrix, NonLinearOp, NonLinearOpSens, OdeEquations, OdeEquationsRef, OdeEquationsSens, OdeSolverProblem, Op, Vector
+    op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, ConstantOp, ConstantOpSens, Matrix, NonLinearOp, NonLinearOpSens, OdeEquations, OdeEquationsRef, OdeEquationsSens, OdeSolverProblem, Op, Vector,
 };
 
 pub struct SensInit<Eqn>

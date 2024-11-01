@@ -1,4 +1,4 @@
-use crate::{LinearOp, Matrix, Op};
+use crate::{LinearOp, Matrix, Op, MatrixSparsityRef};
 
 pub struct MatrixOp<M: Matrix> {
     m: M,
@@ -31,6 +31,6 @@ impl<M: Matrix> LinearOp for MatrixOp<M> {
         self.m.gemv(t, x, beta, y);
     }
     fn sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
-        self.m.sparsity()
+        self.m.sparsity().map(|s| s.to_owned())
     }
 }

@@ -1,5 +1,5 @@
 use super::Op;
-use crate::{Matrix, MatrixSparsityRef, Vector};
+use crate::{Matrix, Vector};
 use num_traits::{One, Zero};
 
 // NonLinearOp is a trait that defines a nonlinear operator or function `F` that maps an input vector `x` to an output vector `y`, (i.e. `y = F(x, t)`).
@@ -58,7 +58,7 @@ pub trait NonLinearOpSens: NonLinearOp {
     fn sens(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
         let m = self.nparams();
-        let mut y = Self::M::new_from_sparsity(n, m, self.sens_sparsity().map(|s| s.to_owned()));
+        let mut y = Self::M::new_from_sparsity(n, m, self.sens_sparsity());
         self.sens_inplace(x, t, &mut y);
         y
     }
@@ -75,7 +75,7 @@ pub trait NonLinearOpSensAdjoint: NonLinearOp {
     fn sens_adjoint(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
         let mut y =
-            Self::M::new_from_sparsity(n, n, self.sparsity_sens_adjoint().map(|s| s.to_owned()));
+            Self::M::new_from_sparsity(n, n, self.sens_adjoint_sparsity());
         self.sens_adjoint_inplace(x, t, &mut y);
         y
     }
@@ -134,7 +134,7 @@ pub trait NonLinearOpAdjoint: NonLinearOp {
     /// See [Self::adjoint_inplace] for a non-allocating version.
     fn adjoint(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
-        let mut y = Self::M::new_from_sparsity(n, n, self.sparsity_adjoint().map(|s| s.to_owned()));
+        let mut y = Self::M::new_from_sparsity(n, n, self.adjoint_sparsity());
         self.adjoint_inplace(x, t, &mut y);
         y
     }
@@ -159,7 +159,7 @@ pub trait NonLinearOpJacobian: NonLinearOp {
     /// See [Self::jacobian_inplace] for a non-allocating version.
     fn jacobian(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
-        let mut y = Self::M::new_from_sparsity(n, n, self.sparsity().map(|s| s.to_owned()));
+        let mut y = Self::M::new_from_sparsity(n, n, self.jacobian_sparsity());
         self.jacobian_inplace(x, t, &mut y);
         y
     }

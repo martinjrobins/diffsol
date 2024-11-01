@@ -468,10 +468,10 @@ where
                 mass.call_transpose_inplace(s_i, t, &mut tmp2);
                 self.eqn
                     .init()
-                    .sens_mul_transpose_inplace(t, &tmp2, &mut tmp);
+                    .sens_transpose_mul_inplace(t, &tmp2, &mut tmp);
                 sg_i.sub_assign(&*tmp);
             } else {
-                self.eqn.init().sens_mul_transpose_inplace(t, s_i, &mut tmp);
+                self.eqn.init().sens_transpose_mul_inplace(t, s_i, &mut tmp);
                 sg_i.sub_assign(&*tmp);
             }
         }
@@ -508,54 +508,6 @@ where
     }
 }
 
-//trait Op {}
-//trait SuperOp: Op {}
-//
-//
-//// https://sabrinajewson.org/blog/the-better-alternative-to-lifetime-gats#
-//trait EqnRef<'a, ImplicitBounds: Sealed = Bounds<&'a Self>> {
-//    type Rhs: Op;
-//}
-//
-//mod sealed {
-//	pub trait Sealed: Sized {}
-//	pub struct Bounds<T>(T);
-//	impl<T> Sealed for Bounds<T> {}
-//}
-//use sealed::{Bounds, Sealed};
-//
-//trait Eqn: for <'a> EqnRef<'a> {}
-//
-//trait SuperEqn: Eqn<Rhs: SuperOp> {}
-//
-//impl<T> SuperEqn for T where T: Eqn<Rhs: SuperOp> {}
-//
-//struct DefaultEqn<T: Eqn> {
-//    _a: PhantomData<T>,
-//}
-//
-//impl<'a, T: Eqn> EqnRef<'a> for DefaultEqn<T> {
-//    type Rhs = <T as EqnRef<'a>>::Rhs;
-//}
-//
-//impl<T: Eqn> Eqn for DefaultEqn<T> 
-//{
-//}
-//
-//struct Solver<T: SuperEqn, T2: SuperEqn = DefaultEqn<T>> {
-//    _a: PhantomData<T>,
-//    _b: PhantomData<T2>,
-//}
-//
-//impl<T: SuperEqn> Solver<T> 
-//{
-//    fn new() -> Self {
-//        Self {
-//            _a: PhantomData,
-//            _b: PhantomData,
-//        }
-//    }
-//}
 
 impl<'a, Eqn, Method> OdeEquationsRef<'a> for AdjointEquations<Eqn, Method>
 where

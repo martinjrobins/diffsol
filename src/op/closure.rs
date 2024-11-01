@@ -51,7 +51,7 @@ where
             MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
                 .expect("invalid sparsity pattern"),
         );
-        self.coloring = Some(JacobianColoring::new_from_sparsity(self.sparsity.as_ref().unwrap()));
+        self.coloring = Some(JacobianColoring::new(self.sparsity.as_ref().unwrap(), &non_zeros));
     }
 }
 

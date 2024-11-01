@@ -1,7 +1,7 @@
 use crate::{
     matrix::{MatrixRef, MatrixView},
     ode_solver::equations::OdeEquations,
-    scale, LinearOp, Matrix, MatrixSparsity, MatrixSparsityRef, NonLinearOpJacobian,
+    scale, LinearOp, Matrix, MatrixSparsity, NonLinearOpJacobian,
     OdeEquationsImplicit, OdeSolverProblem, Vector, VectorRef,
 };
 use num_traits::{One, Zero};
@@ -28,7 +28,7 @@ pub struct SdirkCallable<Eqn: OdeEquations> {
     sparsity: Option<<Eqn::M as Matrix>::Sparsity>,
 }
 
-impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
+impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
     //  y = h g(phi + c * y_s)
     pub fn integrate_out(&self, ys: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
         self.eqn.out().unwrap().call_inplace(ys, t, y);
@@ -75,22 +75,25 @@ impl<Eqn: OdeEquations> SdirkCallable<Eqn> {
         let rhs_jac = RefCell::new(Eqn::M::new_from_sparsity(
             n,
             n,
-            eqn.rhs().sparsity().map(|s| s.to_owned()),
+            eqn.rhs().jacobian_sparsity(),
         ));
-        let sparsity = if let Some(rhs_jac_sparsity) = eqn.rhs().sparsity() {
+        let sparsity = if let Some(rhs_jac_sparsity) = eqn.rhs().jacobian_sparsity() {
             if let Some(mass) = eqn.mass() {
-                // have mass, use the union of the mass and rhs jacobians sparse patterns
-                Some(
-                    mass.sparsity()
-                        .unwrap()
-                        .to_owned()
-                        .union(rhs_jac_sparsity)
-                        .unwrap(),
-                )
+                if let Some(mass_sparsity) = mass.sparsity() {
+                    // have mass, use the union of the mass and rhs jacobians sparse patterns
+                    Some(
+                        mass_sparsity
+                            .union(rhs_jac_sparsity.as_ref())
+                            .unwrap(),
+                    )
+                } else {
+                    // no mass sparsity, panic!
+                    panic!("Mass matrix must have a sparsity pattern if the rhs jacobian has a sparsity pattern")
+                }
             } else {
                 // no mass, use the identity
                 let mass_sparsity = <Eqn::M as Matrix>::Sparsity::new_diagonal(n);
-                Some(mass_sparsity.union(rhs_jac_sparsity).unwrap())
+                Some(mass_sparsity.union(rhs_jac_sparsity.as_ref()).unwrap())
             }
         } else {
             None
@@ -182,7 +185,7 @@ impl<Eqn: OdeEquations> Op for SdirkCallable<Eqn> {
     
 }
 
-impl<Eqn: OdeEquations> NonLinearOp for SdirkCallable<Eqn>
+impl<Eqn: OdeEquationsImplicit> NonLinearOp for SdirkCallable<Eqn>
 where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
@@ -256,7 +259,7 @@ where
         self.number_of_jac_evals.replace(number_of_jac_evals);
     }
     fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
-        self.sparsity.as_ref().map(|s| s.as_ref())
+        self.sparsity.clone()
     }
 }
 

@@ -93,10 +93,9 @@ pub struct JacobianColoring<M: Matrix> {
 }
 
 impl<M: Matrix> JacobianColoring<M> {
-    pub fn new_from_sparsity(sparsity: & impl MatrixSparsity<M>) -> Self {
+    pub fn new(sparsity: & impl MatrixSparsity<M>, non_zeros: &[(usize, usize)]) -> Self {
         let ncols = sparsity.ncols();
-        let non_zeros = sparsity.indices();
-        let graph = nonzeros2graph(non_zeros.as_slice(), ncols);
+        let graph = nonzeros2graph(non_zeros, ncols);
         let coloring = color_graph_greedy(&graph);
         let max_color = coloring.iter().max().copied().unwrap_or(0);
         let mut dst_indices_per_color = Vec::new();
@@ -389,7 +388,11 @@ mod tests {
             let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), n, n);
             let y0 = M::V::zeros(n);
             let t0 = M::T::zero();
-            let coloring = JacobianColoring::new_from_sparsity(&op.jacobian_sparsity().unwrap());
+            let nonzeros = triplets
+                .iter()
+                .map(|(i, j, _v)| (*i, *j))
+                .collect::<Vec<_>>();
+            let coloring = JacobianColoring::new(&op.jacobian_sparsity().unwrap(), &nonzeros);
             let mut jac = M::new_from_sparsity(3, 3, op.jacobian_sparsity());
             coloring.jacobian_inplace(&op, &y0, t0, &mut jac);
             let mut gemv1 = M::V::zeros(n);
@@ -404,7 +407,11 @@ mod tests {
         for triplets in test_triplets {
             let op = helper_triplets2op_linear::<M>(triplets.as_slice(), n, n);
             let t0 = M::T::zero();
-            let coloring = JacobianColoring::new_from_sparsity(&op.sparsity().unwrap());
+            let nonzeros = triplets
+                .iter()
+                .map(|(i, j, _v)| (*i, *j))
+                .collect::<Vec<_>>();
+            let coloring = JacobianColoring::new(&op.sparsity().unwrap(), &nonzeros);
             let mut jac = M::new_from_sparsity(3, 3, op.sparsity());
             coloring.matrix_inplace(&op, t0, &mut jac);
             let mut gemv1 = M::V::zeros(n);

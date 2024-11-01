@@ -281,16 +281,16 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>() -> (
     let root: Option<UnitCallable<M>> = None;
     let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p.clone());
     let rtol = M::T::from(1e-6);
-    let atol = M::V::from_element(nstates, M::T::from(1e-6));
+    let atol = Rc::new(M::V::from_element(nstates, M::T::from(1e-6)));
     let out_rtol = Some(M::T::from(1e-6));
-    let out_atol = Some(M::V::from_element(nout, M::T::from(1e-6)));
+    let out_atol = Some(Rc::new(M::V::from_element(nout, M::T::from(1e-6))));
     let param_rtol = Some(M::T::from(1e-6));
-    let param_atol = Some(M::V::from_element(p.len(), M::T::from(1e-6)));
+    let param_atol = Some(Rc::new(M::V::from_element(p.len(), M::T::from(1e-6))));
     let sens_rtol = Some(M::T::from(1e-6));
-    let sens_atol = Some(M::V::from_element(nstates, M::T::from(1e-6)));
+    let sens_atol = Some(Rc::new(M::V::from_element(nstates, M::T::from(1e-6))));
     let integrate_out = true;
     let problem = OdeSolverProblem::new(
-        eqn,
+        Rc::new(eqn),
         rtol,
         atol,
         sens_rtol,

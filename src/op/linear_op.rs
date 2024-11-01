@@ -1,5 +1,5 @@
 use super::Op;
-use crate::{Matrix, MatrixSparsityRef, Vector};
+use crate::{Matrix, Vector};
 use num_traits::{One, Zero};
 
 /// LinearOp is a trait for linear operators (i.e. they only depend linearly on the input `x`), see [crate::NonLinearOp] for a non-linear op.
@@ -22,7 +22,7 @@ pub trait LinearOp: Op {
         let mut y = Self::M::new_from_sparsity(
             self.nstates(),
             self.nstates(),
-            self.sparsity().map(|s| s.to_owned()),
+            self.sparsity(),
         );
         self.matrix_inplace(t, &mut y);
         y
@@ -124,8 +124,12 @@ pub trait LinearOpSens: LinearOp {
     fn sens(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
         let m = self.nparams();
-        let mut y = Self::M::new_from_sparsity(n, m, self.sparsity_sens().map(|s| s.to_owned()));
+        let mut y = Self::M::new_from_sparsity(n, m, self.sens_sparsity());
         self.sens_inplace(x, t, &mut y);
         y
+    }
+
+    fn sens_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        None
     }
 }

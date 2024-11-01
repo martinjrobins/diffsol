@@ -6,7 +6,7 @@ use crate::{
     matrix::default_solver::DefaultSolver,
     ode_solver_error,
     scalar::Scalar,
-    AdjointContext, AdjointEquations, AugmentedOdeEquations, Checkpointing, DefaultDenseMatrix,
+    AdjointContext, AdjointEquations, Checkpointing, DefaultDenseMatrix,
     DenseMatrix, Matrix, NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeEquationsAdjoint,
     OdeEquationsSens, OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut,
     Vector, VectorViewMut,

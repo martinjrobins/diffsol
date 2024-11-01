@@ -455,9 +455,9 @@ mod tests {
 
     pub fn test_interpolate<M: Matrix, Method: OdeSolverMethod<TestEqn<M>>>(mut s: Method) {
         let problem = OdeSolverProblem::new(
-            TestEqn::new(),
+            Rc::new(TestEqn::new()),
             M::T::from(1e-6),
-            M::V::from_element(1, M::T::from(1e-6)),
+            Rc::new(M::V::from_element(1, M::T::from(1e-6))),
             None,
             None,
             None,
@@ -492,9 +492,9 @@ mod tests {
 
     pub fn test_state_mut<M: Matrix, Method: OdeSolverMethod<TestEqn<M>>>(mut s: Method) {
         let problem = OdeSolverProblem::new(
-            TestEqn::new(),
+            Rc::new(TestEqn::new()),
             M::T::from(1e-6),
-            M::V::from_element(1, M::T::from(1e-6)),
+            Rc::new(M::V::from_element(1, M::T::from(1e-6))),
             None,
             None,
             None,

@@ -1193,7 +1193,7 @@ mod test {
                     exponential_decay_with_algebraic_problem,
                     exponential_decay_with_algebraic_problem_sens,
                 },
-                foodweb::{foodweb_problem, FoodWebContext},
+                foodweb::foodweb_problem,
                 gaussian_decay::gaussian_decay_problem,
                 heat2d::head2d_problem,
                 robertson::{robertson, robertson_sens},
@@ -1466,10 +1466,8 @@ mod test {
         use diffsl::LlvmModule;
 
         use crate::ode_solver::test_models::robertson;
-        let mut context = crate::DiffSlContext::default();
         let mut s = Bdf::default();
-        robertson::robertson_diffsl_compile(&mut context);
-        let (problem, soln) = robertson::robertson_diffsl_problem::<M, LlvmModule>(&context, false);
+        let (problem, soln) = robertson::robertson_diffsl_problem::<M, LlvmModule>();
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
     }
 
@@ -1656,23 +1654,20 @@ mod test {
     fn test_bdf_faer_sparse_heat2d_diffsl() {
         use diffsl::LlvmModule;
 
-        use crate::ode_solver::test_models::heat2d::{self, heat2d_diffsl_compile};
+        use crate::ode_solver::test_models::heat2d;
         let linear_solver = FaerSparseLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
-        let mut context = crate::DiffSlContext::default();
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
-        heat2d_diffsl_compile::<SparseColMat<f64>, LlvmModule, 10>(&mut context);
-        let (problem, soln) = heat2d::heat2d_diffsl_problem(&context);
+        let (problem, soln) = heat2d::heat2d_diffsl_problem::<SparseColMat<f64>, LlvmModule, 10>();
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
     }
 
     #[test]
     fn test_bdf_faer_sparse_foodweb() {
-        let foodweb_context = FoodWebContext::default();
         let linear_solver = FaerSparseLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
-        let (problem, soln) = foodweb_problem::<SparseColMat<f64>, 10>(&foodweb_context);
+        let (problem, soln) = foodweb_problem::<SparseColMat<f64>, 10>();
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---
@@ -1690,12 +1685,10 @@ mod test {
         use diffsl::LlvmModule;
 
         use crate::ode_solver::test_models::foodweb;
-        let mut context = crate::DiffSlContext::default();
         let linear_solver = FaerSparseLU::default();
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
         let mut s = Bdf::<Mat<f64>, _, _>::new(nonlinear_solver);
-        foodweb::foodweb_diffsl_compile::<SparseColMat<f64>, LlvmModule, 10>(&mut context);
-        let (problem, soln) = foodweb::foodweb_diffsl_problem(&context);
+        let (problem, soln) = foodweb::foodweb_diffsl_problem::<SparseColMat<f64>, LlvmModule, 10>();
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
     }
 

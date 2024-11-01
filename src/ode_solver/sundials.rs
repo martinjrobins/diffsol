@@ -19,7 +19,7 @@ use std::{
 };
 
 use crate::{
-    error::*, matrix::sparsity::MatrixSparsityRef, ode_solver_error, scale, LinearOp, Matrix,
+    error::*, ode_solver_error, scale, LinearOp, Matrix,
     NonLinearOp, NonLinearOpJacobian, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem,
     OdeSolverState, OdeSolverStopReason, Op, SundialsMatrix, SundialsVector, Vector,
 };
@@ -466,7 +466,7 @@ mod test {
         ode_solver::{
             test_models::{
                 exponential_decay::exponential_decay_problem,
-                foodweb::{foodweb_problem, FoodWebContext},
+                foodweb::foodweb_problem,
                 heat2d::head2d_problem,
                 robertson::robertson,
             },
@@ -537,9 +537,8 @@ mod test {
 
     #[test]
     fn test_sundials_foodweb() {
-        let foodweb_context = FoodWebContext::default();
         let mut s = crate::SundialsIda::default();
-        let (problem, soln) = foodweb_problem::<crate::SundialsMatrix, 10>(&foodweb_context);
+        let (problem, soln) = foodweb_problem::<crate::SundialsMatrix, 10>();
         test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         ---

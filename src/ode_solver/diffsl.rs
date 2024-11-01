@@ -129,7 +129,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSl<M, CG> {
             let non_zeros = find_jacobian_non_zeros(&op, &x0, t0);
             let sparsity = M::Sparsity::try_from_indices(op.nout(), op.nstates(), non_zeros.clone())
                     .expect("invalid sparsity pattern");
-            let coloring = JacobianColoring::new_from_sparsity(&sparsity);
+            let coloring = JacobianColoring::new(&sparsity, &non_zeros);
             ret.rhs_coloring = Some(coloring);
             ret.rhs_sparsity = Some(sparsity);
             
@@ -137,7 +137,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSl<M, CG> {
             let non_zeros = find_matrix_non_zeros(&op, t0);
             let sparsity = M::Sparsity::try_from_indices(op.nout(), op.nstates(), non_zeros.clone())
                     .expect("invalid sparsity pattern");
-            let coloring = JacobianColoring::new_from_sparsity(&sparsity);
+            let coloring = JacobianColoring::new(&sparsity, &non_zeros);
             ret.mass_coloring = Some(coloring);
             ret.mass_sparsity = Some(sparsity);
         }
@@ -319,7 +319,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpJacobian for DiffSlRhs<'_, 
         }
     }
     fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
-        self.0.rhs_sparsity.as_ref().map(|s| s.clone())
+        self.0.rhs_sparsity.clone()
     }
 }
 
@@ -345,7 +345,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> LinearOp for DiffSlMass<'_, M, CG> {
         }
     }
     fn sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
-        self.0.mass_sparsity.as_ref().map(|s| s.clone())
+        self.0.mass_sparsity.clone()
     }
 }
 
@@ -487,7 +487,7 @@ mod tests {
         mass_y.assert_eq_st(&mass_y_expect, 1e-10);
 
         // solver a bit and check the state and output
-        let problem = OdeBuilder::new().p([r, k]).build_from_eqn(eqn).unwrap();
+        let problem = OdeBuilder::new().p([r, k]).build_from_eqn(Rc::new(eqn)).unwrap();
         let mut solver = Bdf::default();
         let t = 1.0;
         let state = OdeSolverState::new(&problem, &solver).unwrap();

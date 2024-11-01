@@ -317,22 +317,22 @@ impl<T> OdeEquationsAdjoint for T where
 /// }
 ///
 ///
-/// let rhs = Rc::new(MyProblem);
+/// let rhs = MyProblem;
 ///
 /// // use the provided constant closure to define the initial condition
 /// let init_fn = |p: &V, _t: f64| V::from_vec(vec![1.0]);
-/// let init = Rc::new(ConstantClosure::new(init_fn, Rc::new(V::from_vec(vec![]))));
+/// let init = ConstantClosure::new(init_fn, Rc::new(V::from_vec(vec![])));
 ///
 /// // we don't have a mass matrix, root or output functions, so we can set to None
 /// // we still need to give a placeholder type for these, so we use the diffsol::UnitCallable type
-/// let mass: Option<Rc<UnitCallable<M>>> = None;
-/// let root: Option<Rc<UnitCallable<M>>> = None;
-/// let out: Option<Rc<UnitCallable<M>>> = None;
+/// let mass: Option<UnitCallable<M>> = None;
+/// let root: Option<UnitCallable<M>> = None;
+/// let out: Option<UnitCallable<M>> = None;
 ///
 /// let p = Rc::new(V::from_vec(vec![]));
 /// let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p);
 ///
-/// let problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
+/// let problem = OdeBuilder::new().build_from_eqn(Rc::new(eqn)).unwrap();
 ///
 /// let mut solver = Bdf::default();
 /// let t = 0.4;
@@ -391,6 +391,9 @@ where
     M: Matrix,
     Init: Op<M = M, V = M::V, T = M::T>,
     Rhs: Op<M = M, V = M::V, T = M::T>,
+    Mass: Op<M = M, V = M::V, T = M::T>,
+    Root: Op<M = M, V = M::V, T = M::T>,
+    Out: Op<M = M, V = M::V, T = M::T>,
 
 {
     type T = M::T;
@@ -407,6 +410,21 @@ where
     }
     fn statistics(&self) -> crate::op::OpStatistics {
         self.rhs.statistics()
+    }
+    fn set_params(&mut self, p: Rc<Self::V>) {
+        self.rhs.set_params(p.clone());
+        self.init.set_params(p.clone());
+        if let Some(mass) = self.mass.as_mut() {
+            mass.set_params(p.clone());
+        }
+        if let Some(root) = self.root.as_mut() {
+            root.set_params(p.clone());
+        }
+
+        if let Some(out) = self.out.as_mut() {
+            out.set_params(p.clone());
+        }
+        self.p = p;
     }
 }
 

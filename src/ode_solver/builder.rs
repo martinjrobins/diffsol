@@ -225,7 +225,7 @@ impl OdeBuilder {
         nstates: usize,
         nout: Option<usize>,
         nparam: usize,
-    ) -> Result<(V, Option<V>, Option<V>, Option<V>), DiffsolError> {
+    ) -> Result<(Rc<V>, Option<Rc<V>>, Option<Rc<V>>, Option<Rc<V>>), DiffsolError> {
         let atol = Self::build_atol(atol, nstates, "states")?;
         let out_atol = match out_atol {
             Some(out_atol) => Some(Self::build_atol(out_atol, nout.unwrap_or(0), "output")?),
@@ -239,7 +239,7 @@ impl OdeBuilder {
             Some(sens_atol) => Some(Self::build_atol(sens_atol, nstates, "sensitivity")?),
             None => None,
         };
-        Ok((atol, sens_atol, out_atol, param_atol))
+        Ok((Rc::new(atol), sens_atol.map(Rc::new), out_atol.map(Rc::new), param_atol.map(Rc::new)))
     }
 
     fn build_p<V: Vector>(p: Vec<f64>) -> V {
@@ -335,7 +335,7 @@ impl OdeBuilder {
         )?;
         let eqn = OdeSolverEquations::new(rhs, mass, None, init, None, p);
         OdeSolverProblem::new(
-            eqn,
+            Rc::new(eqn),
             M::T::from(self.rtol),
             atol,
             self.sens_rtol.map(M::T::from),
@@ -409,7 +409,7 @@ impl OdeBuilder {
             nparams,
         )?;
         OdeSolverProblem::new(
-            eqn,
+            Rc::new(eqn),
             M::T::from(self.rtol),
             atol,
             self.sens_rtol.map(M::T::from),
@@ -492,7 +492,7 @@ impl OdeBuilder {
             nparams,
         )?;
         OdeSolverProblem::new(
-            eqn,
+            Rc::new(eqn),
             M::T::from(self.rtol),
             atol,
             self.sens_rtol.map(M::T::from),
@@ -580,7 +580,7 @@ impl OdeBuilder {
             nparams,
         )?;
         OdeSolverProblem::new(
-            eqn,
+            Rc::new(eqn),
             M::T::from(self.rtol),
             atol,
             self.sens_rtol.map(M::T::from),
@@ -680,7 +680,7 @@ impl OdeBuilder {
             nparams,
         )?;
         OdeSolverProblem::new(
-            eqn,
+            Rc::new(eqn),
             M::T::from(self.rtol),
             atol,
             self.sens_rtol.map(M::T::from),
@@ -716,7 +716,7 @@ impl OdeBuilder {
     }
 
     /// Build an ODE problem from a set of equations
-    pub fn build_from_eqn<Eqn>(self, eqn: Eqn) -> Result<OdeSolverProblem<Eqn>, DiffsolError>
+    pub fn build_from_eqn<Eqn>(self, eqn: Rc<Eqn>) -> Result<OdeSolverProblem<Eqn>, DiffsolError>
     where
         Eqn: OdeEquations,
     {

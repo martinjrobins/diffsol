@@ -2,7 +2,7 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use diffsol::{
     ode_solver::test_models::{
         exponential_decay::exponential_decay_problem, foodweb::foodweb_problem,
-        foodweb::FoodWebContext, heat2d::head2d_problem, robertson::robertson,
+        heat2d::head2d_problem, robertson::robertson,
         robertson_ode::robertson_ode,
     },
     FaerLU, FaerSparseLU, NalgebraLU, SparseColMat,
@@ -222,10 +222,8 @@ fn criterion_benchmark(c: &mut Criterion) {
             c.bench_function(stringify!($name), |b| {
                 use diffsol::diffsl::LlvmModule;
                 use diffsol::ode_solver::test_models::robertson::*;
-                let mut context = diffsol::DiffSlContext::default();
-                robertson_diffsl_compile::<$matrix, LlvmModule>(&mut context);
                 b.iter(|| {
-                    let (problem, soln) = robertson_diffsl_problem(&mut context, false);
+                    let (problem, soln) = robertson_diffsl_problem::<$matrix, LlvmModule>();
                     let ls = $linear_solver::default();
                     benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t, ls)
                 })
@@ -336,8 +334,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         ($name:ident, $solver:ident, $linear_solver:ident, $model:ident, $model_problem:ident, $matrix:ty, $($N:expr),+) => {
             $(c.bench_function(concat!(stringify!($name), "_", $N), |b| {
                 b.iter(|| {
-                    let context = FoodWebContext::default();
-                    let (problem, soln) = $model_problem::<$matrix, $N>(&context);
+                    let (problem, soln) = $model_problem::<$matrix, $N>();
                     let ls = $linear_solver::default();
                     benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t, ls)
                 })
@@ -429,10 +426,8 @@ fn criterion_benchmark(c: &mut Criterion) {
             c.bench_function(concat!(stringify!($name), "_", $N), |b| {
                 use diffsol::ode_solver::test_models::heat2d::*;
                 use diffsol::diffsl::LlvmModule;
-                let mut context = diffsol::DiffSlContext::default();
-                heat2d_diffsl_compile::<$matrix, LlvmModule, $N>(&mut context);
                 b.iter(|| {
-                    let (problem, soln) = heat2d_diffsl_problem(&mut context);
+                    let (problem, soln) = heat2d_diffsl_problem::<$matrix, LlvmModule, $N>();
                     let ls = $linear_solver::default();
                     benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t, ls)
                 })
@@ -506,10 +501,8 @@ fn criterion_benchmark(c: &mut Criterion) {
             c.bench_function(concat!(stringify!($name), "_", $N), |b| {
                 use diffsol::ode_solver::test_models::foodweb::*;
                 use diffsol::diffsl::LlvmModule;
-                let mut context = diffsol::DiffSlContext::default();
-                foodweb_diffsl_compile::<$matrix, LlvmModule, $N>(&mut context);
                 b.iter(|| {
-                    let (problem, soln) = foodweb_diffsl_problem(&mut context);
+                    let (problem, soln) = foodweb_diffsl_problem::<$matrix, LlvmModule, $N>();
                     let ls = $linear_solver::default();
                     benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t, ls)
                 })

@@ -10,12 +10,16 @@ use crate::{
 use num_traits::Zero;
 
 #[cfg(feature = "diffsl")]
-pub fn robertson_diffsl_compile<
-    M: Matrix<T = f64> + 'static,
+pub fn robertson_diffsl_problem<
+    M: Matrix<T = f64>,
     CG: diffsl::execution::module::CodegenModule,
->(
-    context: &mut crate::DiffSlContext<M, CG>,
-) {
+>() -> (
+    OdeSolverProblem<impl crate::OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
+    OdeSolverSolution<M::V>,
+) 
+{
+    use crate::{DiffSl, DiffSlContext};
+
     let code = "
         in = [k1, k2, k3]
         k1 { 0.04 }
@@ -47,27 +51,13 @@ pub fn robertson_diffsl_compile<
             z,
         }";
 
-    context.recompile(code).unwrap();
-}
-
-#[allow(clippy::type_complexity)]
-#[cfg(feature = "diffsl")]
-pub fn robertson_diffsl_problem<
-    M: Matrix<T = f64> + 'static,
-    CG: diffsl::execution::module::CodegenModule,
->(
-    context: &crate::DiffSlContext<M, CG>,
-    use_coloring: bool,
-) -> (
-    OdeSolverProblem<impl crate::OdeEquationsImplicit<M = M, V = M::V, T = M::T> + '_>,
-    OdeSolverSolution<M::V>,
-) {
+    let context = DiffSlContext::<M, CG>::new(code).unwrap();
+    let eqn = DiffSl::from_context(context);
     let problem = OdeBuilder::new()
         .p([0.04, 1.0e4, 3.0e7])
         .rtol(1e-4)
         .atol([1.0e-8, 1.0e-6, 1.0e-6])
-        .use_coloring(use_coloring)
-        .build_diffsl(context)
+        .build_from_eqn(Rc::new(eqn))
         .unwrap();
     let mut soln = soln::<M::V>();
     soln.rtol = problem.rtol;
@@ -197,22 +187,22 @@ pub fn robertson_sens<M: Matrix + 'static>() -> (
         mass.calculate_sparsity(t0);
     }
 
-    let out: Option<Rc<UnitCallable<M>>> = None;
-    let root: Option<Rc<UnitCallable<M>>> = None;
+    let out: Option<UnitCallable<M>> = None;
+    let root: Option<UnitCallable<M>> = None;
     let eqn = OdeSolverEquations::new(
-        Rc::new(rhs),
-        Some(Rc::new(mass)),
+        rhs,
+        Some(mass),
         root,
-        Rc::new(init),
+        init,
         out,
         p.clone(),
     );
     let rtol = M::T::from(1e-4);
     let atol = M::V::from_vec(vec![M::T::from(1e-8), M::T::from(1e-6), M::T::from(1e-6)]);
     let problem = OdeSolverProblem::new(
-        eqn,
+        Rc::new(eqn),
         rtol,
-        atol,
+        Rc::new(atol),
         None,
         None,
         None,

@@ -68,6 +68,6 @@ impl<C: NonLinearOpJacobian> LinearOp for LinearisedOp<C> {
         self.callable.jacobian_inplace(&self.x, t, y);
     }
     fn sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
-        self.callable.sparsity()
+        self.callable.jacobian_sparsity()
     }
 }
