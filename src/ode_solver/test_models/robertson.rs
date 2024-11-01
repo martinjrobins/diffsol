@@ -10,6 +10,7 @@ use crate::{
 use num_traits::Zero;
 
 #[cfg(feature = "diffsl")]
+#[allow(clippy::type_complexity)]
 pub fn robertson_diffsl_problem<
     M: Matrix<T = f64>,
     CG: diffsl::execution::module::CodegenModule,

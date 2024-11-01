@@ -17,6 +17,7 @@ use num_traits::{One, Zero};
 use crate::{ConstantOp, LinearOp, NonLinearOpJacobian, OdeEquations};
 
 #[cfg(feature = "diffsl")]
+#[allow(clippy::type_complexity)]
 pub fn heat2d_diffsl_problem<
     M: Matrix<T = f64>,
     CG: diffsl::execution::module::CodegenModule,
