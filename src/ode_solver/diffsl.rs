@@ -117,6 +117,10 @@ pub struct DiffSl<M: Matrix<T = T>, CG: CodegenModule> {
 }
 
 impl<M: Matrix<T = T>, CG: CodegenModule> DiffSl<M, CG> {
+    pub fn compile(code: &str) -> Result<Self, DiffsolError> {
+        let context = DiffSlContext::<M, CG>::new(code)?;
+        Ok(Self::from_context(context))
+    }
     pub fn from_context(context: DiffSlContext<M, CG>) -> Self {
         let mut ret = Self {
             context,
