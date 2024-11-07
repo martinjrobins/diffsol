@@ -11,12 +11,13 @@ For more detail on the syntax of DiffSL see the [DiffSL book](https://martinjrob
 The main struct that is used to specify a problem in DiffSL is the [`DiffSlContext`](https://docs.rs/diffsol/latest/diffsol/ode_solver/diffsl/struct.DiffSlContext.html) struct. Creating this struct
 Just-In-Time (JIT) compiles your DiffSL code into a form that can be executed efficiently by DiffSol. 
 
-```rust, ignore
+```rust
 # fn main() {
-use diffsol::DiffSlContext;
+use diffsol::{DiffSl, CraneliftModule};
 type M = nalgebra::DMatrix<f64>;
+type CG = CraneliftModule;
         
-let context = DiffSlContext::<M>::new("
+let eqn = DiffSl::<M, CG>::compile("
     in = [r, k]
     r { 1.0 }
     k { 1.0 }
@@ -30,14 +31,15 @@ let context = DiffSlContext::<M>::new("
 Once you have created the `DiffSlContext` struct you can use it to create a problem using the `build_diffsl` method on the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html) struct.
 
 
-```rust, ignore
+```rust
 # fn main() {
-# use diffsol::DiffSlContext;
-use diffsol::{OdeBuilder, Bdf, OdeSolverMethod};
+# use diffsol::{DiffSl, CraneliftModule};
+use diffsol::{OdeBuilder, Bdf, OdeSolverMethod, OdeSolverState};
 # type M = nalgebra::DMatrix<f64>;
+# type CG = CraneliftModule;
 
         
-# let context = DiffSlContext::<M>::new("
+# let eqn = DiffSl::<M, CG>::compile("
 #     in = [r, k]
 #     r { 1.0 }
 #     k { 1.0 }
@@ -48,9 +50,10 @@ use diffsol::{OdeBuilder, Bdf, OdeSolverMethod};
 let problem = OdeBuilder::new()
 .rtol(1e-6)
 .p([1.0, 10.0])
-.build_diffsl(&context).unwrap();
+.build_from_eqn(eqn).unwrap();
 let mut solver = Bdf::default();
 let t = 0.4;
-let _soln = solver.solve(&problem, t).unwrap();
+let state = OdeSolverState::new(&problem, &solver).unwrap();
+let _soln = solver.solve(&problem, state, t).unwrap();
 # }
 ```

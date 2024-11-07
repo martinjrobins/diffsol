@@ -13,5 +13,5 @@ command = "mdbook-keeper"
 manifest_dir = ".."
 externs = ["diffsol", "nalgebra", "faer"]
 # is_workspace = true
-# build_features = ["diffsl-llvm16"]
+build_features = ["diffsl-cranelift"]
 

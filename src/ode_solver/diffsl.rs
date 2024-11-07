@@ -21,18 +21,17 @@ pub type T = f64;
 /// # Example
 ///
 /// ```rust
-/// use diffsol::{OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod, DiffSlContext, DiffSl, diffsl::LlvmModule};
+/// use diffsol::{OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod, DiffSl, diffsl::LlvmModule};
 ///         
 /// // dy/dt = -ay
 /// // y(0) = 1
-/// let context = DiffSlContext::<nalgebra::DMatrix<f64>, LlvmModule>::new("
+/// let eqn = DiffSl::<nalgebra::DMatrix<f64>, LlvmModule>::compile("
 ///     in = [a]
 ///     a { 1 }
 ///     u { 1.0 }
 ///     F { -a*u }
 ///     out { u }
 /// ").unwrap();
-/// let eqn = DiffSl::from_context(context);
 /// let problem = OdeBuilder::new()
 ///  .rtol(1e-6)
 ///  .p([0.1])
@@ -117,6 +116,10 @@ pub struct DiffSl<M: Matrix<T = T>, CG: CodegenModule> {
 }
 
 impl<M: Matrix<T = T>, CG: CodegenModule> DiffSl<M, CG> {
+    pub fn compile(code: &str) -> Result<Self, DiffsolError> {
+        let context = DiffSlContext::<M, CG>::new(code)?;
+        Ok(Self::from_context(context))
+    }
     pub fn from_context(context: DiffSlContext<M, CG>) -> Self {
         let mut ret = Self {
             context,

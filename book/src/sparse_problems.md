@@ -100,8 +100,8 @@ This is described in more detail in the ["Custom Problem Structs"](./custom_prob
 ```rust
 # fn main() {
 use std::rc::Rc;
-use faer::sparse::{SparseColMat, SymbolicSparseColMatRef};
-use diffsol::{NonLinearOp, NonLinearOpJacobian, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure, OdeBuilder};
+use faer::sparse::{SparseColMat, SymbolicSparseColMat};
+use diffsol::{NonLinearOp, NonLinearOpJacobian, OdeSolverEquations, Op, UnitCallable, ConstantClosure, OdeBuilder};
 
 type T = f64;
 type V = faer::Col<T>;
@@ -133,8 +133,8 @@ impl Op for MyProblem {
   fn nout(&self) -> usize {
     10
   }
-  fn sparsity(&self) -> Option<SymbolicSparseColMatRef<usize>> {
-    Some(self.jacobian.symbolic())
+  fn nparams(&self) -> usize {
+      2
   }
 }
   
@@ -144,6 +144,7 @@ impl NonLinearOp for MyProblem {
       y[i] = self.p[0] * x[i] * (1.0 - x[i] / self.p[1]);
     }
   }
+  
  
 }
 impl NonLinearOpJacobian for MyProblem {
@@ -158,26 +159,27 @@ impl NonLinearOpJacobian for MyProblem {
       y.faer_mut().values_mut()[i] = self.p[0] * (1.0 - 2.0 * x[row] / self.p[1]);
     }
   }
-
+  fn jacobian_sparsity(&self) -> Option<SymbolicSparseColMat<usize>> {
+    Some(self.jacobian.symbolic().to_owned().unwrap())
+  }
 }
 
-let p = [1.0, 10.0];
-let p = Rc::new(V::from_fn(p.len(), |i| p[i]));
-let rhs = Rc::new(MyProblem::new(p.clone()));
+let p_slice = [1.0, 10.0];
+let p = Rc::new(V::from_fn(p_slice.len(), |i| p_slice[i]));
+let rhs = MyProblem::new(p.clone());
 
 // use the provided constant closure to define the initial condition
 let init_fn = |_p: &V, _t: T| V::from_fn(10, |_| 0.1);
-let init = Rc::new(ConstantClosure::new(init_fn, p.clone()));
+let init = ConstantClosure::new(init_fn, p.clone());
 
 // we don't have a mass matrix, root or output functions, so we can set to None
 // we still need to give a placeholder type for these, so we use the diffsol::UnitCallable type
-let mass: Option<Rc<UnitCallable<M>>> = None;
-let root: Option<Rc<UnitCallable<M>>> = None;
-let out: Option<Rc<UnitCallable<M>>> = None;
+let mass: Option<UnitCallable<M>> = None;
+let root: Option<UnitCallable<M>> = None;
+let out: Option<UnitCallable<M>> = None;
 
-let p = Rc::new(V::zeros(0));
-let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p.clone());
-let _problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
+let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p);
+let _problem = OdeBuilder::new().p(p_slice).build_from_eqn(eqn).unwrap();
 # }
 ```
 
