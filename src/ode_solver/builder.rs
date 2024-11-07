@@ -747,7 +747,7 @@ impl OdeBuilder {
                 )
             ));
         }
-                    
+
         let p = Rc::new(Self::build_p(self.p));
         eqn.set_params(p);
         OdeSolverProblem::new(
