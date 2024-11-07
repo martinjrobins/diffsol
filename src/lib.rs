@@ -139,9 +139,9 @@ pub extern crate diffsl17_0 as diffsl;
 #[cfg(feature = "diffsl-cranelift")]
 pub extern crate diffsl_no_llvm as diffsl;
 #[cfg(feature = "diffsl-cranelift")]
-pub use diffsl::CraneliftModule; 
+pub use diffsl::CraneliftModule;
 #[cfg(feature = "diffsl-llvm")]
-pub use diffsl::LlvmModule; 
+pub use diffsl::LlvmModule;
 
 pub mod jacobian;
 pub mod linear_solver;
