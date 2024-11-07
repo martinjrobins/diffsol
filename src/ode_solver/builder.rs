@@ -737,6 +737,17 @@ impl OdeBuilder {
             nout,
             nparams,
         )?;
+        if self.p.len() != nparams {
+            return Err(ode_solver_error!(
+                BuilderError,
+                format!(
+                    "Number of parameters on builder does not match number of parameters in equations. Expected {}, got {}.",
+                    nparams,
+                    self.p.len()
+                )
+            ));
+        }
+                    
         let p = Rc::new(Self::build_p(self.p));
         eqn.set_params(p);
         OdeSolverProblem::new(

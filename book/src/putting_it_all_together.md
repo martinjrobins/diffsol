@@ -21,12 +21,11 @@ We can specify the missing arguments like so:
 # type V = nalgebra::DVector<T>;
 # type M = nalgebra::DMatrix<T>;
 #
-use std::rc::Rc;
 use diffsol::UnitCallable;
 
-let mass: Option<Rc<UnitCallable<M>>> = None;
-let root: Option<Rc<UnitCallable<M>>> = None;
-let out: Option<Rc<UnitCallable<M>>> = None;
+let mass: Option<UnitCallable<M>> = None;
+let root: Option<UnitCallable<M>> = None;
+let out: Option<UnitCallable<M>> = None;
 # }
 ```
 
@@ -38,7 +37,7 @@ and then provide it to the `OdeBuilder` struct to create the problem.
 ```rust
 # fn main() {
 # use std::rc::Rc;
-# use diffsol::{NonLinearOp, NonLinearOpJacobian, OdeSolverProblem, Op, UnitCallable, ConstantClosure};
+# use diffsol::{NonLinearOp, NonLinearOpJacobian, Op, UnitCallable, ConstantClosure};
 use diffsol::{OdeSolverEquations, OdeBuilder};
 
 # type T = f64;
@@ -65,6 +64,9 @@ use diffsol::{OdeSolverEquations, OdeBuilder};
 #     fn nout(&self) -> usize {
 #         1
 #     }
+#     fn nparams(&self) -> usize {
+#         2
+#     }
 # }
 # 
 # impl NonLinearOp for MyProblem {
@@ -79,23 +81,22 @@ use diffsol::{OdeSolverEquations, OdeBuilder};
 # }
 # 
 # 
-# let p = Rc::new(V::from_vec(vec![1.0, 10.0]));
-# let rhs = Rc::new(MyProblem::new(p.clone()));
+# let p_slice = [1.0, 10.0];
+# let p = Rc::new(V::from_vec(p_slice.to_vec()));
+# let rhs = MyProblem::new(p.clone());
 # 
 # // use the provided constant closure to define the initial condition
 # let init_fn = |_p: &V, _t: T| V::from_element(1, 0.1);
-# let init = Rc::new(ConstantClosure::new(init_fn, p.clone()));
+# let init = ConstantClosure::new(init_fn, p.clone());
 # 
 # // we don't have a mass matrix, root or output functions, so we can set to None
 # // we still need to give a placeholder type for these, so we use the diffsol::UnitCallable type
-# let mass: Option<Rc<UnitCallable<M>>> = None;
-# let root: Option<Rc<UnitCallable<M>>> = None;
-# let out: Option<Rc<UnitCallable<M>>> = None;
+# let mass: Option<UnitCallable<M>> = None;
+# let root: Option<UnitCallable<M>> = None;
+# let out: Option<UnitCallable<M>> = None;
 # 
 # let p = Rc::new(V::zeros(0));
 let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p.clone());
-let _problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
+let _problem = OdeBuilder::new().p(p_slice).build_from_eqn(eqn).unwrap();
 # }
 ```
-
-Note the last two arguments to `OdeSolverProblem::new` are for sensitivity analysis which we will turn off for now.
