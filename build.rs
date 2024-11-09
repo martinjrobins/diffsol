@@ -188,54 +188,52 @@ mod if_sundials {
     }
 }
 
-#[cfg(feature = "sundials")]
 fn main() -> Result<(), String> {
-    use if_sundials::*;
+    #[cfg(feature = "sundials")]
+    {
+        use if_sundials::*;
+        // return if we are not using the sundials features
+        if !cfg!(feature = "sundials") {
+            return Ok(());
+        }
+        let sundials = Library::new_sundials();
+        let suitesparse = Library::new_suitesparse();
 
-    // return if we are not using the sundials features
-    if !cfg!(feature = "sundials") {
-        return Ok(());
-    }
-    let sundials = Library::new_sundials();
-    let suitesparse = Library::new_suitesparse();
+        // generate sundials bindings
+        let bindings_rs = generate_bindings(&suitesparse, &sundials)?;
+        let major = get_sundials_version_major(bindings_rs).unwrap_or(5);
+        println!("cargo:rustc-cfg=sundials_version_major=\"{}\"", major);
+        println!("cargo::rustc-check-cfg=cfg(sundials_version_major, values(\"5\", \"6\", \"7\"))");
 
-    // generate sundials bindings
-    let bindings_rs = generate_bindings(&suitesparse, &sundials)?;
-    let major = get_sundials_version_major(bindings_rs).unwrap_or(5);
-    println!("cargo:rustc-cfg=sundials_version_major=\"{}\"", major);
-    println!("cargo::rustc-check-cfg=cfg(sundials_version_major, values(\"5\", \"6\", \"7\"))");
+        // compile sundials benches
+        let mut files = compile_benches(&sundials, &suitesparse);
+        files.push("benches/sundials_benches.rs".to_string());
+        files.push("build.rs".to_string());
+        files.push("benches/idaHeat2d_klu_v5.c".to_string());
+        files.push("benches/idaHeat2d_klu_v6.c".to_string());
+        files.push("benches/idaFoodWeb_bnd_v5.c".to_string());
+        files.push("benches/idaFoodWeb_bnd_v6.c".to_string());
+        for name in files.into_iter() {
+            println!("cargo:rerun-if-changed={}", name);
+        }
 
-    // compile sundials benches
-    let mut files = compile_benches(&sundials, &suitesparse);
-    files.push("benches/sundials_benches.rs".to_string());
-    files.push("build.rs".to_string());
-    files.push("benches/idaHeat2d_klu_v5.c".to_string());
-    files.push("benches/idaHeat2d_klu_v6.c".to_string());
-    files.push("benches/idaFoodWeb_bnd_v5.c".to_string());
-    files.push("benches/idaFoodWeb_bnd_v6.c".to_string());
-    for name in files.into_iter() {
-        println!("cargo:rerun-if-changed={}", name);
+        // link to sundials
+        if let Some(dir) = sundials.lib.as_ref() {
+            println!("cargo:rustc-link-search=native={}", dir);
+        }
+        let library_type = "dylib";
+        for lib_name in LINK_SUNDIALS_LIBRARIES {
+            println!(
+                "cargo:rustc-link-lib={}=sundials_{}",
+                library_type, lib_name
+            );
+        }
+        // link to klu
+        if let Some(dir) = suitesparse.lib.as_ref() {
+            println!("cargo:rustc-link-search=native={}", dir);
+            println!("cargo:rustc-env=LD_LIBRARY_PATH={}", dir);
+        }
+        println!("cargo:rustc-link-lib={}=klu", library_type);
     }
-
-    // link to sundials
-    if let Some(dir) = sundials.lib.as_ref() {
-        println!("cargo:rustc-link-search=native={}", dir);
-    }
-    let library_type = "dylib";
-    for lib_name in LINK_SUNDIALS_LIBRARIES {
-        println!(
-            "cargo:rustc-link-lib={}=sundials_{}",
-            library_type, lib_name
-        );
-    }
-    // link to klu
-    if let Some(dir) = suitesparse.lib.as_ref() {
-        println!("cargo:rustc-link-search=native={}", dir);
-        println!("cargo:rustc-env=LD_LIBRARY_PATH={}", dir);
-    }
-    println!("cargo:rustc-link-lib={}=klu", library_type);
     Ok(())
 }
-
-#[cfg(not(feature = "sundials"))]
-fn main() {}

@@ -13,7 +13,7 @@ mod nalgebra_serial;
 #[cfg(feature = "sundials")]
 pub mod sundials;
 
-pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug {
+pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug + Clone {
     fn zeros(len: IndexType) -> Self;
     fn len(&self) -> IndexType;
     fn clone_as_vec(&self) -> Vec<IndexType>;

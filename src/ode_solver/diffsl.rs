@@ -16,12 +16,12 @@ pub type T = f64;
 /// This contains the compiled code and the data structures needed to evaluate the ODE equations.
 /// Note that the example below uses the LLVM backend (requires one of the `diffsl-llvm` features),
 /// but the Cranelift backend can also be used using
-/// `diffsl::CraneliftModule` instead of `diffsl::LlvmModule` (requires `diffsl-cranelift` feature).
+/// `diffsl::CraneliftModule` instead of `diffsl::LlvmModule`.
 ///
 /// # Example
 ///
 /// ```rust
-/// use diffsol::{OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod, DiffSl, diffsl::LlvmModule};
+/// use diffsol::{OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod, DiffSl, LlvmModule};
 ///         
 /// // dy/dt = -ay
 /// // y(0) = 1
@@ -45,6 +45,7 @@ pub type T = f64;
 /// }
 /// let y = solver.interpolate(t);
 /// ```
+#[derive(Clone)]
 pub struct DiffSlContext<M: Matrix<T = T>, CG: CodegenModule> {
     compiler: Compiler<CG>,
     data: RefCell<Vec<M::T>>,
@@ -53,6 +54,7 @@ pub struct DiffSlContext<M: Matrix<T = T>, CG: CodegenModule> {
     nstates: usize,
     nroots: usize,
     nparams: usize,
+    has_mass: bool,
     nout: usize,
 }
 
@@ -62,7 +64,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
     pub fn new(text: &str) -> Result<Self, DiffsolError> {
         let compiler =
             Compiler::from_discrete_str(text).map_err(|e| DiffsolError::Other(e.to_string()))?;
-        let (nstates, nparams, nout, _ndata, nroots) = compiler.get_dims();
+        let (nstates, nparams, nout, _ndata, nroots, has_mass) = compiler.get_dims();
         let data = RefCell::new(compiler.get_new_data());
         let ddata = RefCell::new(compiler.get_new_data());
         let tmp = RefCell::new(M::V::zeros(nstates));
@@ -76,13 +78,14 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
             tmp,
             nroots,
             nout,
+            has_mass,
         })
     }
 
     pub fn recompile(&mut self, text: &str) -> Result<(), DiffsolError> {
         self.compiler =
             Compiler::from_discrete_str(text).map_err(|e| DiffsolError::Other(e.to_string()))?;
-        let (nstates, nparams, nout, _ndata, nroots) = self.compiler.get_dims();
+        let (nstates, nparams, nout, _ndata, nroots, has_mass) = self.compiler.get_dims();
         self.data = RefCell::new(self.compiler.get_new_data());
         self.ddata = RefCell::new(self.compiler.get_new_data());
         self.tmp = RefCell::new(M::V::zeros(nstates));
@@ -90,6 +93,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
         self.nstates = nstates;
         self.nout = nout;
         self.nroots = nroots;
+        self.has_mass = has_mass;
         Ok(())
     }
 }
@@ -107,6 +111,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> Default for DiffSlContext<M, CG> {
     }
 }
 
+#[derive(Clone)]
 pub struct DiffSl<M: Matrix<T = T>, CG: CodegenModule> {
     context: DiffSlContext<M, CG>,
     mass_sparsity: Option<M::Sparsity>,
@@ -400,7 +405,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> OdeEquations for DiffSl<M, CG> {
     }
 
     fn mass(&self) -> Option<DiffSlMass<'_, M, CG>> {
-        self.context.compiler.has_mass().then_some(DiffSlMass(self))
+        self.context.has_mass.then_some(DiffSlMass(self))
     }
 
     fn root(&self) -> Option<DiffSlRoot<'_, M, CG>> {

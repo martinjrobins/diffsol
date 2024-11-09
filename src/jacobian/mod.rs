@@ -86,6 +86,7 @@ gen_find_non_zeros_linear!(
     LinearOpTranspose
 );
 
+#[derive(Clone)]
 pub struct JacobianColoring<M: Matrix> {
     dst_indices_per_color: Vec<<M::V as Vector>::Index>,
     src_indices_per_color: Vec<<M::V as Vector>::Index>,
