@@ -1,8 +1,7 @@
 # Summary
 - [Modelling with ODEs](./primer/modelling_with_odes.md)
-  - [First Order ODEs](./primer/first_order_odes.md)
+  - [Explicit First Order ODEs](./primer/first_order_odes.md)
     - [Example: Population Dynamics](./primer/population_dynamics.md)
-    - [Example: Infectious Disease](./primer/infectious_disease.md)
   - [Higher Order ODEs](./primer/higher_order_odes.md)
     - [Example: Spring-mass systems](./primer/spring_mass_systems.md)
   - [Discrete Events](./primer/discrete_events.md)

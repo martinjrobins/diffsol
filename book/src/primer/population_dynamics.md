@@ -64,10 +64,14 @@ Let's solve this system of ODEs using the DiffSol crate. We will use the [DiffSL
 ```rust
 # fn main() {
 # use std::fs;
-use diffsol::{DiffSl, CraneliftModule, OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod};
-use plotly::{Plot, Scatter, common::Mode, layout::Layout, layout::Axis};
+use diffsol::{
+    DiffSl, CraneliftModule, OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod
+};
+use plotly::{
+    Plot, Scatter, common::Mode, layout::Layout, layout::Axis
+};
 type M = nalgebra::DMatrix<f64>;
-type CG = CraneliftModule; // use LlvmModule for LLVM, this has a faster runtime but requires LLVM to be installed
+type CG = CraneliftModule;
         
 let eqn = DiffSl::<M, CG>::compile("
     a { 2.0/3.0 } b { 4.0/3.0 } c { 1.0 } d { 1.0 }
@@ -101,14 +105,13 @@ let layout = Layout::new()
     .x_axis(Axis::new().title("t"))
     .y_axis(Axis::new().title("population"));
 plot.set_layout(layout);
-
 let plot_html = plot.to_inline_html(Some("prey-predator"));
 # fs::write("../src/primer/images/prey-predator.html", plot_html).expect("Unable to write file");
 # }
 ```
 {{#include images/prey-predator.html}}
 
-A phase plane plot of the predator-prey system is a useful visualisation of the dynamics of the system. This plot shows the prey population on the x-axis and the predator population on the y-axis. Trajectories in the phase plane represent the evolution of the populations over time. Lets refrase the equations to introduce a new parameter \\(y_0\\) which is the initial predator and prey population. We can then plot the phase plane for different values of \\(y_0\\) to see how the system behaves for different initial conditions.
+A phase plane plot of the predator-prey system is a useful visualisation of the dynamics of the system. This plot shows the prey population on the x-axis and the predator population on the y-axis. Trajectories in the phase plane represent the evolution of the populations over time. Lets reframe the equations to introduce a new parameter \\(y_0\\) which is the initial predator and prey population. We can then plot the phase plane for different values of \\(y_0\\) to see how the system behaves for different initial conditions.
 
 Our initial conditions are now:
 
@@ -121,10 +124,14 @@ so we can solve this system for different values of \\(y_0\\) and plot the phase
 ```rust
 # fn main() {
 # use std::fs;
-use diffsol::{DiffSl, CraneliftModule, OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod};
-use plotly::{Plot, Scatter, common::Mode, layout::Layout, layout::Axis};
+use diffsol::{
+    DiffSl, CraneliftModule, OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod
+};
+use plotly::{
+    Plot, Scatter, common::Mode, layout::Layout, layout::Axis
+};
 type M = nalgebra::DMatrix<f64>;
-type CG = CraneliftModule; // use LlvmModule for LLVM, this has a faster runtime but requires LLVM to be installed
+type CG = CraneliftModule;
         
 let eqn = DiffSl::<M, CG>::compile("
     in = [ y0 ]
@@ -140,33 +147,35 @@ let eqn = DiffSl::<M, CG>::compile("
     }
 ").unwrap();
 
-let mut plot = Plot::new();
+let mut problem = OdeBuilder::new().p([1.0]).build_from_eqn(eqn).unwrap();
+let mut solver = Bdf::default();
 
-for y0 in 1..6.map(f64::from) {
-    let problem = OdeBuilder::new()
-        .p([y0])
-        .build_from_eqn(eqn.clone()).unwrap();
-    let mut solver = Bdf::default();
+let mut plot = Plot::new();
+for y0 in (1..6).map(f64::from) {
+    problem.set_params(nalgebra::DVector::from_element(1, y0)).unwrap();
+    
     let state = OdeSolverState::new(&problem, &solver).unwrap();
-    let (ys, ts) = solver.solve(&problem, state, 40.0).unwrap();
+    let (ys, _ts) = solver.solve(&problem, state, 40.0).unwrap();
 
     let prey: Vec<_> = ys.row(0).into_iter().copied().collect();
     let predator: Vec<_> = ys.row(1).into_iter().copied().collect();
-    let time: Vec<_> = ts.into_iter().collect();
 
-    let phase = Scatter::new(prey, predator).mode(Mode::Lines).name(format!("y0 = {}", y0));
+    let phase = Scatter::new(prey, predator)
+        .mode(Mode::Lines).name(format!("y0 = {}", y0));
     plot.add_trace(phase);
+
+    // release problem and state to set new parameters in the next iteration
+    solver.take_state().unwrap();
 }
 
 let layout = Layout::new()
     .x_axis(Axis::new().title("x"))
     .y_axis(Axis::new().title("y"));
 plot.set_layout(layout);
-
 let plot_html = plot.to_inline_html(Some("prey-predator2"));
 # fs::write("../src/primer/images/prey-predator2.html", plot_html).expect("Unable to write file");
 # }
 ```
-{{#include images/prey-predator.html}}
+{{#include images/prey-predator2.html}}
 
 

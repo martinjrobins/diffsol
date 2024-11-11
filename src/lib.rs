@@ -126,7 +126,6 @@
 //! - For vectors: [Vector], [VectorIndex], [VectorView], [VectorViewMut], and [VectorCommon].
 //!
 
-
 #[cfg(feature = "diffsl")]
 pub use diffsl::CraneliftModule;
 #[cfg(feature = "diffsl-llvm")]

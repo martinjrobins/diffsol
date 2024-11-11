@@ -1,4 +1,4 @@
-# First Order ODEs
+# Explicit First Order ODEs
 
 Ordinary Differential Equations (ODEs) are sometimes called rate equations because they describe how the *rate of change* of a system depends on its current *state*. For example, lets assume we wish to model the growth of a population of cells within a petri dish. We could define the *state* of the system as the concentration of cells in the dish, and assign this state to a variable \\(c\\). The *rate of change* of the system would then be the rate at which the concentration of cells changes with time, which we could denote as \\(\frac{dc}{dt}\\). We know that our cells will grow at a rate proportional to the current concentration of cells, so we could write this as:
 
@@ -30,11 +30,13 @@ k_2 c_2
 \\]
 
 
-By defining a new *vector* of state variables \\(\mathbf{y} = [c_1, c_2]\\) and a a function \\(\mathbf{f}(\mathbf{y}, t) = \begin{bmatrix} k_1 c_1 \\\\ k_2 c_2 \end{bmatrix}\\), we are left with the general form of a first order ODE system:
+By defining a new *vector* of state variables \\(\mathbf{y} = [c_1, c_2]\\) and a a function \\(\mathbf{f}(\mathbf{y}, t) = \begin{bmatrix} k_1 c_1 \\\\ k_2 c_2 \end{bmatrix}\\), we are left with the standard form of a *explicit* first order ODE system:
 
 \\[
 \frac{d\mathbf{y}}{dt} = \mathbf{f}(\mathbf{y}, t)
 \\]
+
+This is an explicit equation for the derivative of the state, \\(\frac{d\mathbf{y}}{dt}\\), as a function of only of the state variables \\(\mathbf{y}\\) and of time \\(t\\).
 
 We need one more piece of information to solve this system of ODEs: the initial conditions for the populations at time \\(t = 0\\). For example, if we started with a concentration of 10 for the first population and 5 for the second population, we would write:
 
@@ -43,4 +45,4 @@ We need one more piece of information to solve this system of ODEs: the initial 
 \\]
 
 
-When using ODE solver libraries like DiffSol, users are required to provide their ODEs in the form of a set of first order ODEs. Given both the system of ODEs and the initial conditions, the solver can then integrate the equations forward in time to find the solution \\(\mathbf{y}(t)\\). This is the general process for solving ODEs, so it is important to know how to translate your problem into a set of first order ODEs, and thus to the general form of a first order ODE system shown above. In the next two sections, we will look at two examples of first order ODE systems: population dynamics and infectious disease, and solve them using DiffSol.
+Many ODE solver libraries, like DiffSol, require users to provide their ODEs in the form of a set of explicit first order ODEs. Given both the system of ODEs and the initial conditions, the solver can then integrate the equations forward in time to find the solution \\(\mathbf{y}(t)\\). This is the general process for solving ODEs, so it is important to know how to translate your problem into a set of first order ODEs, and thus to the general form of a explicit first order ODE system shown above. In the next two sections, we will look at two examples of first order ODE systems: population dynamics and infectious disease, and solve them using DiffSol.

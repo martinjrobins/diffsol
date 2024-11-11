@@ -45,7 +45,6 @@ pub type T = f64;
 /// }
 /// let y = solver.interpolate(t);
 /// ```
-#[derive(Clone)]
 pub struct DiffSlContext<M: Matrix<T = T>, CG: CodegenModule> {
     compiler: Compiler<CG>,
     data: RefCell<Vec<M::T>>,
@@ -111,7 +110,6 @@ impl<M: Matrix<T = T>, CG: CodegenModule> Default for DiffSlContext<M, CG> {
     }
 }
 
-#[derive(Clone)]
 pub struct DiffSl<M: Matrix<T = T>, CG: CodegenModule> {
     context: DiffSlContext<M, CG>,
     mass_sparsity: Option<M::Sparsity>,

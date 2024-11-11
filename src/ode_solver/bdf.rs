@@ -794,6 +794,9 @@ where
         self.state.as_ref().map(|state| state.as_ref())
     }
     fn take_state(&mut self) -> Option<BdfState<Eqn::V, M>> {
+        self.ode_problem = None;
+        self.op = None;
+        self.s_op = None;
         Option::take(&mut self.state)
     }
 
@@ -1206,7 +1209,7 @@ mod test {
             },
             tests::{
                 test_checkpointing, test_interpolate, test_no_set_problem, test_ode_solver,
-                test_ode_solver_adjoint, test_ode_solver_no_sens, test_state_mut,
+                test_ode_solver_adjoint, test_ode_solver_no_sens, test_param_sweep, test_state_mut,
                 test_state_mut_on_problem,
             },
         },
@@ -1677,5 +1680,16 @@ mod test {
         let (problem, soln) = exponential_decay_problem_with_root::<M>(false);
         let y = test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         assert!(abs(y[0] - 0.6) < 1e-6, "y[0] = {}", y[0]);
+    }
+
+    #[test]
+    fn test_param_sweep_bdf() {
+        let s = Bdf::default();
+        let (problem, _soln) = exponential_decay_problem::<M>(false);
+        let mut ps = Vec::new();
+        for y0 in (1..10).map(f64::from) {
+            ps.push(nalgebra::DVector::<f64>::from_vec(vec![0.1, y0]));
+        }
+        test_param_sweep(s, problem, ps);
     }
 }
