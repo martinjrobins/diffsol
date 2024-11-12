@@ -14,37 +14,6 @@ pub type T = f64;
 /// Context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
 ///
 /// This contains the compiled code and the data structures needed to evaluate the ODE equations.
-/// Note that the example below uses the LLVM backend can also be used (requires one of the `diffsl-llvm*` features)
-/// but the Cranelift backend (requires the `diffsl` feature),
-/// can also be used (requires one of the `diffsl-llvm*` features).
-///
-/// # Example
-///
-/// ```rust
-/// use diffsol::{OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod, DiffSl, LlvmModule};
-///         
-/// // dy/dt = -ay
-/// // y(0) = 1
-/// let eqn = DiffSl::<nalgebra::DMatrix<f64>, LlvmModule>::compile("
-///     in = [a]
-///     a { 1 }
-///     u { 1.0 }
-///     F { -a*u }
-///     out { u }
-/// ").unwrap();
-/// let problem = OdeBuilder::new()
-///  .rtol(1e-6)
-///  .p([0.1])
-///  .build_from_eqn(eqn).unwrap();
-/// let mut solver = Bdf::default();
-/// let t = 0.4;
-/// let state = OdeSolverState::new(&problem, &solver).unwrap();
-/// solver.set_problem(state, &problem);
-/// while solver.state().unwrap().t <= t {
-///    solver.step().unwrap();
-/// }
-/// let y = solver.interpolate(t);
-/// ```
 pub struct DiffSlContext<M: Matrix<T = T>, CG: CodegenModule> {
     compiler: Compiler<CG>,
     data: RefCell<Vec<M::T>>,
