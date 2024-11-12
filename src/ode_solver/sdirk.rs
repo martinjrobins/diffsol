@@ -547,6 +547,23 @@ where
         }
         let n = self.state.as_ref().unwrap().y.len();
 
+        if self.is_state_mutated {
+            // reinitalise root finder if needed
+            if let Some(root_fn) = self.problem.as_ref().unwrap().eqn.root() {
+                let state = self.state.as_ref().unwrap();
+                self.root_finder
+                    .as_ref()
+                    .unwrap()
+                    .init(&root_fn, &state.y, state.t);
+            }
+            // reinitialise tstop if needed
+            if let Some(t_stop) = self.tstop {
+                self.set_stop_time(t_stop)?;
+            }
+
+            self.is_state_mutated = false;
+        }
+
         // optionally do the first step
         let start = if self.is_sdirk { 0 } else { 1 };
         let mut updated_jacobian = false;
@@ -818,8 +835,6 @@ where
         // update step size for next step
         let new_h = self._update_step_size(factor)?;
         self._jacobian_updates(new_h, SolverState::StepSuccess);
-
-        self.is_state_mutated = false;
 
         // update statistics
         self.statistics.number_of_linear_solver_setups =
@@ -1375,5 +1390,23 @@ mod test {
             ps.push(nalgebra::DVector::<f64>::from_vec(vec![0.1, y0]));
         }
         test_param_sweep(s, problem, ps);
+    }
+
+    #[cfg(feature = "diffsl")]
+    #[test]
+    fn test_ball_bounce_tr_bdf2() {
+        type M = nalgebra::DMatrix<f64>;
+        type LS = crate::NalgebraLU<f64>;
+        type Eqn = crate::DiffSl<M, crate::CraneliftModule>;
+        let s = Sdirk::<M, Eqn, LS>::tr_bdf2();
+        let (x, v, t) = crate::ode_solver::tests::test_ball_bounce(s);
+        let expected_x = [6.375884661615263];
+        let expected_v = [0.6878538646461059];
+        let expected_t = [2.5];
+        for (i, ((x, v), t)) in x.iter().zip(v.iter()).zip(t.iter()).enumerate() {
+            assert!((x - expected_x[i]).abs() < 1e-4);
+            assert!((v - expected_v[i]).abs() < 1e-4);
+            assert!((t - expected_t[i]).abs() < 1e-4);
+        }
     }
 }

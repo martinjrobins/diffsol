@@ -1707,75 +1707,27 @@ mod test {
         test_param_sweep(s, problem, ps);
     }
 
+    #[cfg(feature = "diffsl")]
     #[test]
-    fn test_test() {
-        use crate::{
-            Bdf, CraneliftModule, DiffSl, OdeBuilder, OdeSolverMethod, OdeSolverState,
-            OdeSolverStopReason,
-        };
+    fn test_ball_bounce_bdf() {
         type M = nalgebra::DMatrix<f64>;
-        type CG = CraneliftModule;
+        type LS = crate::NalgebraLU<f64>;
+        type Nls = crate::NewtonNonlinearSolver<M, LS>;
+        type Eqn = crate::DiffSl<M, crate::CraneliftModule>;
+        let s = Bdf::<M, Eqn, Nls>::default();
+        let (x, v, t) = crate::ode_solver::tests::test_ball_bounce(s);
 
-        let eqn = DiffSl::<M, CG>::compile(
-            "
-    g { 9.81 } h { 10.0 }
-    u_i {
-        x = h,
-        v = 0,
-    }
-    F_i {
-        v,
-        -g,
-    }
-    stop {
-        x,
-    }
-",
-        )
-        .unwrap();
-
-        let e = 0.8;
-        let problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
-        let mut solver = Bdf::default();
-        let state = OdeSolverState::new(&problem, &solver).unwrap();
-        solver.set_problem(state, &problem).unwrap();
-
-        let mut x = Vec::new();
-        let mut v = Vec::new();
-        let mut t = Vec::new();
-        let final_time = 5.0;
-
-        // save the initial state
-        x.push(solver.state().unwrap().y[0]);
-        v.push(solver.state().unwrap().y[1]);
-        t.push(0.0);
-
-        // solve and apply the remaining doses
-        solver.set_stop_time(final_time).unwrap();
-        loop {
-            match solver.step() {
-                Ok(OdeSolverStopReason::InternalTimestep) => (),
-                Ok(OdeSolverStopReason::RootFound(t)) => {
-                    // get the state when the event occurred
-                    let mut y = solver.interpolate(t).unwrap();
-
-                    // update the velocity of the ball
-                    y[1] *= -e;
-
-                    // make sure the ball is above the ground
-                    y[0] = y[0].max(f64::EPSILON);
-
-                    // set the state to the updated state
-                    solver.state_mut().unwrap().y.copy_from(&y);
-                    solver.state_mut().unwrap().dy[0] = y[1];
-                    *solver.state_mut().unwrap().t = t;
-                }
-                Ok(OdeSolverStopReason::TstopReached) => break,
-                Err(_) => panic!("unexpected solver error"),
-            }
-            x.push(solver.state().unwrap().y[0]);
-            v.push(solver.state().unwrap().y[1]);
-            t.push(solver.state().unwrap().t);
+        let expected_x = [
+            0.003751514915514589,
+            0.00750117409999241,
+            0.015370589755655079,
+        ];
+        let expected_v = [11.202428570923361, 11.19914432101355, 11.192247396202946];
+        let expected_t = [1.4281779078441663, 1.4285126937676944, 1.4292157442071036];
+        for (i, ((x, v), t)) in x.iter().zip(v.iter()).zip(t.iter()).enumerate() {
+            assert!((x - expected_x[i]).abs() < 1e-4);
+            assert!((v - expected_v[i]).abs() < 1e-4);
+            assert!((t - expected_t[i]).abs() < 1e-4);
         }
     }
 }
