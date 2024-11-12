@@ -3,30 +3,31 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Custom Problem Structs - DiffSol</title>
+        <title>Linear functions - DiffSol</title>
 
 
         <!-- Custom HTML head -->
+        <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
 
         <meta name="description" content="">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="favicon.svg">
-        <link rel="shortcut icon" href="favicon.png">
-        <link rel="stylesheet" href="css/variables.css">
-        <link rel="stylesheet" href="css/general.css">
-        <link rel="stylesheet" href="css/chrome.css">
-        <link rel="stylesheet" href="css/print.css" media="print">
+        <link rel="icon" href="../../favicon.svg">
+        <link rel="shortcut icon" href="../../favicon.png">
+        <link rel="stylesheet" href="../../css/variables.css">
+        <link rel="stylesheet" href="../../css/general.css">
+        <link rel="stylesheet" href="../../css/chrome.css">
+        <link rel="stylesheet" href="../../css/print.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
-        <link rel="stylesheet" href="fonts/fonts.css">
+        <link rel="stylesheet" href="../../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../../fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="highlight.css">
-        <link rel="stylesheet" href="tomorrow-night.css">
-        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" href="../../highlight.css">
+        <link rel="stylesheet" href="../../tomorrow-night.css">
+        <link rel="stylesheet" href="../../ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
 
@@ -35,11 +36,11 @@
 
         <!-- Provide site root to javascript -->
         <script>
-            var path_to_root = "";
+            var path_to_root = "../../";
             var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc.js"></script>
+        <script src="../../toc.js"></script>
     </head>
     <body>
     <div id="body-container">
@@ -91,7 +92,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
             </noscript>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -125,7 +126,7 @@
                     <h1 class="menu-title">DiffSol</h1>
 
                     <div class="right-buttons">
-                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
 
@@ -154,31 +155,69 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="custom-problem-structs"><a class="header" href="#custom-problem-structs">Custom Problem Structs</a></h1>
-<p>While the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct is a convenient way to specify the problem, it may not be suitable in all cases.
-Often users will want to provide their own struct that can hold custom data structures and methods for evaluating the right-hand side of the ODE, the jacobian, and other functions.</p>
-<h2 id="traits"><a class="header" href="#traits">Traits</a></h2>
-<p>To use a custom struct to specify a problem, the primary goal is to implement the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/equations/trait.OdeEquations.html"><code>OdeEquations</code></a> trait.
-This trait has a number of associated traits that need to be implemented in order to specify each function, depending on if they are:</p>
-<ul>
-<li>Non-linear functions. In this case the <a href="https://docs.rs/diffsol/latest/diffsol/op/trait.NonLinearOp.html"><code>NonLinearOp</code></a> trait needs to be implemented.</li>
-<li>Linear functions. In this case the <a href="https://docs.rs/diffsol/latest/diffsol/op/trait.LinearOp.html"><code>LinearOp</code></a> trait needs to be implemented.</li>
-<li>Constant functions. In this case the <a href="https://docs.rs/diffsol/latest/diffsol/op/trait.ConstantOp.html"><code>ConstantOp</code></a> trait needs to be implemented.</li>
-</ul>
-<p>Additionally, each function needs to implement the base operation trait <a href="https://docs.rs/diffsol/latest/diffsol/op/trait.Op.html"><code>Op</code></a>.</p>
-<h2 id="odesolverequations-struct"><a class="header" href="#odesolverequations-struct">OdeSolverEquations struct</a></h2>
-<p>The <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/equations/struct.OdeSolverEquations.html"><code>OdeSolverEquations</code></a> struct is a convenience struct that already implements the <code>OdeEquations</code> trait, and can be used as a base struct for custom problem structs.
-It is not neccessary to use this struct, but it can be useful to reduce boilerplate code. The example below will use this struct, but if it does not fit your use case, you can implement the <code>OdeEquations</code> trait directly.</p>
+                        <h1 id="linear-functions"><a class="header" href="#linear-functions">Linear functions</a></h1>
+<p>Naturally, we can also implement the <code>LinearOp</code> trait if we want to include a mass matrix in our model. A common use case for implementing this trait is to store the mass matrix in a custom struct, like so:</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
+</span>use diffsol::{Op, LinearOp};
+
+<span class="boring">type T = f64;
+</span><span class="boring">type V = nalgebra::DVector&lt;T&gt;;
+</span><span class="boring">type M = nalgebra::DMatrix&lt;T&gt;;
+</span><span class="boring">
+</span>struct MyMass {
+  mass: M,
+}
+
+impl MyMass {
+  fn new() -&gt; Self {
+      let mass = M::from_element(1, 1, 1.0);
+      Self { mass }
+  }
+}
+
+impl Op for MyMass {
+  type T = T;
+  type V = V;
+  type M = M;
+  fn nstates(&amp;self) -&gt; usize {
+      1
+  }
+  fn nout(&amp;self) -&gt; usize {
+      1
+  }
+}
+
+impl LinearOp for MyMass {
+  fn gemv_inplace(&amp;self, x: &amp;V, _t: T, beta: T, y: &amp;mut V) {
+      y.gemv(1.0, &amp;self.mass, x, beta)
+  }
+}
+<span class="boring">}</span></code></pre></pre>
+<p>Alternatively, we can use the <a href="https://docs.rs/diffsol/latest/diffsol/op/linear_closure/struct.LinearClosure.html"><code>LinearClosure</code></a> struct to implement the <code>LinearOp</code> trait for us.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
+</span><span class="boring">use std::rc::Rc;
+</span>use diffsol::LinearClosure;
+
+<span class="boring">type T = f64;
+</span><span class="boring">type V = nalgebra::DVector&lt;T&gt;;
+</span><span class="boring">type M = nalgebra::DMatrix&lt;T&gt;;
+</span><span class="boring">
+</span><span class="boring">let p = Rc::new(V::from_vec(vec![1.0, 10.0]));
+</span>let mass_fn = |v: &amp;V, _p: &amp;V, _t: T, beta: T, y: &amp;mut V| {
+    y[0] = v[0] + beta * y[0];
+};
+let mass = Rc::new(LinearClosure::&lt;M, _&gt;::new(mass_fn, 1, 1, p.clone()));
+<span class="boring">}</span></code></pre></pre>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="forward_sensitivity.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../../specify/custom/constant_functions.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="non_linear_functions.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../../specify/custom/putting_it_all_together.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -188,11 +227,11 @@ It is not neccessary to use this struct, but it can be useful to reduce boilerpl
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="forward_sensitivity.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../../specify/custom/constant_functions.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="non_linear_functions.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../../specify/custom/putting_it_all_together.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
@@ -207,13 +246,13 @@ It is not neccessary to use this struct, but it can be useful to reduce boilerpl
         </script>
 
 
-        <script src="elasticlunr.min.js"></script>
-        <script src="mark.min.js"></script>
-        <script src="searcher.js"></script>
+        <script src="../../elasticlunr.min.js"></script>
+        <script src="../../mark.min.js"></script>
+        <script src="../../searcher.js"></script>
 
-        <script src="clipboard.min.js"></script>
-        <script src="highlight.js"></script>
-        <script src="book.js"></script>
+        <script src="../../clipboard.min.js"></script>
+        <script src="../../highlight.js"></script>
+        <script src="../../book.js"></script>
 
         <!-- Custom JS scripts -->
 

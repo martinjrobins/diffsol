@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Choosing a solver - DiffSol</title>
+        <title>Forward Sensitivity - DiffSol</title>
 
 
         <!-- Custom HTML head -->
@@ -13,21 +13,21 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="favicon.svg">
-        <link rel="shortcut icon" href="favicon.png">
-        <link rel="stylesheet" href="css/variables.css">
-        <link rel="stylesheet" href="css/general.css">
-        <link rel="stylesheet" href="css/chrome.css">
-        <link rel="stylesheet" href="css/print.css" media="print">
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
-        <link rel="stylesheet" href="fonts/fonts.css">
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="highlight.css">
-        <link rel="stylesheet" href="tomorrow-night.css">
-        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
 
@@ -36,11 +36,11 @@
 
         <!-- Provide site root to javascript -->
         <script>
-            var path_to_root = "";
+            var path_to_root = "../";
             var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc.js"></script>
+        <script src="../toc.js"></script>
     </head>
     <body>
     <div id="body-container">
@@ -92,7 +92,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
             </noscript>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -126,7 +126,7 @@
                     <h1 class="menu-title">DiffSol</h1>
 
                     <div class="right-buttons">
-                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
 
@@ -155,80 +155,100 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="choosing-a-solver"><a class="header" href="#choosing-a-solver">Choosing a solver</a></h1>
-<p>Once you have defined the problem, you need to create a solver to solve the problem. The available solvers are:</p>
-<ul>
-<li><a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/bdf/struct.Bdf.html"><code>diffsol::Bdf</code></a>: A Backwards Difference Formulae solver, suitable for stiff problems and singular mass matrices.</li>
-<li><a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/sdirk/struct.Sdirk.html"><code>diffsol::Sdirk</code></a> A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver. You can define your own butcher tableau using <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/tableau/struct.Tableau.html"><code>Tableau</code></a> or use one of the pre-defined tableaues.</li>
-</ul>
-<p>Each of these solvers has a number of generic arguments, for example the <code>Bdf</code> solver has three generic arguments:</p>
-<ul>
-<li><code>M</code>: The matrix type used to define the problem.</li>
-<li><code>Eqn</code>: The type of the equations struct that defines the problem.</li>
-<li><code>Nls</code>: The type of the non-linear solver used to solve the implicit equations in the solver.</li>
-</ul>
-<p>In normal use cases, Rust can infer these from your code so you don't need to specify these explicitly. The <code>Bdf</code> solver implements the <code>Default</code> trait so can be easily created using:</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::OdeBuilder;
+                        <h1 id="forward-sensitivity"><a class="header" href="#forward-sensitivity">Forward Sensitivity</a></h1>
+<p>In this section we will discuss how to compute the forward sensitivity of the solution of an ODE problem. The forward sensitivity is the derivative of the solution with respect to the parameters of the problem. This is useful for many applications, such as parameter estimation, optimal control, and uncertainty quantification.</p>
+<h2 id="specifying-the-sensitivity-problem"><a class="header" href="#specifying-the-sensitivity-problem">Specifying the sensitivity problem</a></h2>
+<p>We will again use the example of the logistic growth equation, but this time we will compute the sensitivity of the solution \(y\) with respect to the parameters \(r\) and \(K\) (i.e. \(\frac{dy}{dr}\) and \(\frac{dy}{dK}\)).
+The logistic growth equation is:</p>
+<p>\[\frac{dy}{dt} = r y (1 - y/K),\]
+\[y(0) = 0.1\]</p>
+<p>Recall from <a href="ode_equations.html">ODE equations</a> that we also need to provide the jacobian of the right hand side of the ODE with respect to the state vector \(y\) and the gradient vector \(v\), which we will call \(J\). This is:</p>
+<p>\[J v = \begin{bmatrix} r v (1 - 2 y/K) \end{bmatrix}.\]</p>
+<p>Using the logistic growth equation above, we can compute the partial derivative of the right hand side of the ODE with respect to the vector \([r, K]\) multiplied by a vector \(v = [v_r, v_K]\), which we will call \(J_p v\). This is:</p>
+<p>\[J_p v = v_r y (1 - y/K) + v_K r y^2 / K^2 .\]</p>
+<p>We also need the partial derivative of the initial state vector with respect to the parameters multiplied by a vector \(v\), which we will call \(J_{y_0} v\). Since the initial state vector is constant, this is just zero</p>
+<p>\[J_{y_0} v = 0.\]</p>
+<p>We can then use the <code>OdeBuilder</code> struct to specify the sensitivity problem. The <code>build_ode_with_sens</code> method is used to create a new problem that includes the sensitivity equations.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
+</span>use diffsol::OdeBuilder;
+use nalgebra::DVector;
+type M = nalgebra::DMatrix&lt;f64&gt;;
+
+let problem = OdeBuilder::new()
+    .p(vec![1.0, 10.0])
+    .build_ode_with_sens::&lt;M, _, _, _, _, _&gt;(
+      |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
+      |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
+      |x, p, _t, v, y| y[0] = v[0] * x[0] * (1.0 - x[0] / p[1]) 
+        + v[1] * p[0] * x[0] * x[0] / (p[1] * p[1]),
+      |_p, _t| DVector::from_element(1, 0.1),
+      |_p, _t, _v, y| y[0] = 0.0,
+    ).unwrap();
+<span class="boring">}</span></code></pre></pre>
+<h2 id="solving-the-sensitivity-problem"><a class="header" href="#solving-the-sensitivity-problem">Solving the sensitivity problem</a></h2>
+<p>Once the sensitivity problem has been specified, we can solve it using the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html"><code>OdeSolverMethod</code></a> trait.
+Lets imagine we want to solve the sensitivity problem up to a time \(t_o = 10\). We can use the <code>OdeSolverMethod</code> trait to solve the problem as normal, stepping forward in time until we reach \(t_o\).</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
+</span><span class="boring">use diffsol::OdeBuilder;
 </span><span class="boring">use nalgebra::DVector;
 </span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
-</span>use diffsol::{Bdf, OdeSolverState, OdeSolverMethod};
-<span class="boring">fn main() {
-</span><span class="boring">
-</span><span class="boring">  let problem = OdeBuilder::new()
+</span>use diffsol::{OdeSolverMethod, OdeSolverState, Bdf};
+
+<span class="boring">let problem = OdeBuilder::new()
 </span><span class="boring">    .p(vec![1.0, 10.0])
-</span><span class="boring">    .build_ode::&lt;M, _, _, _&gt;(
-</span><span class="boring">       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-</span><span class="boring">       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-</span><span class="boring">       |_p, _t| DVector::from_element(1, 0.1),
+</span><span class="boring">    .build_ode_with_sens::&lt;M, _, _, _, _, _&gt;(
+</span><span class="boring">      |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
+</span><span class="boring">      |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
+</span><span class="boring">      |x, p, _t, v, y| y[0] = v[0] * x[0] * (1.0 - x[0] / p[1]) + v[1] * p[0] * x[0] * x[0] / (p[1] * p[1]),
+</span><span class="boring">      |_p, _t| DVector::from_element(1, 0.1),
+</span><span class="boring">      |_p, _t, _v, y| y[0] = 0.0,
 </span><span class="boring">    ).unwrap();
 </span>let mut solver = Bdf::default();
 let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
 solver.set_problem(state, &amp;problem);
+let t_o = 10.0;
+while solver.state().unwrap().t &lt; t_o {
+    solver.step().unwrap();
+}
 <span class="boring">}</span></code></pre></pre>
-<p>The <code>Sdirk</code> solver requires a tableu to be specified so you can use its <code>new</code> method to create a new solver, for example using the <code>tr_bdf2</code> tableau:</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::{OdeBuilder};
+<p>We can then obtain the sensitivity vectors at time \(t_o\) using the <code>interpolate_sens</code> method on the <code>OdeSolverMethod</code> trait.
+This method returns a <code>Vec&lt;DVector&lt;f64&gt;&gt;</code> where each element of the vector is the sensitivity vector for element \(i\) of the parameter vector at time \(t_o\).
+If we need the sensitivity at the current internal time step, we can get this from the <code>s</code> field of the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/struct.OdeSolverState.html"><code>OdeSolverState</code></a> struct.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
+</span><span class="boring">use diffsol::OdeBuilder;
 </span><span class="boring">use nalgebra::DVector;
 </span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
-</span>use diffsol::{Sdirk, Tableau, NalgebraLU, OdeSolverState, OdeSolverMethod};
-<span class="boring">fn main() {
-</span><span class="boring">  let problem = OdeBuilder::new()
+</span><span class="boring">use diffsol::{OdeSolverMethod, OdeSolverState, Bdf};
+</span><span class="boring">
+</span><span class="boring">let problem = OdeBuilder::new()
 </span><span class="boring">    .p(vec![1.0, 10.0])
-</span><span class="boring">    .build_ode::&lt;M, _, _, _&gt;(
-</span><span class="boring">       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-</span><span class="boring">       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-</span><span class="boring">       |_p, _t| DVector::from_element(1, 0.1),
+</span><span class="boring">    .build_ode_with_sens::&lt;M, _, _, _, _, _&gt;(
+</span><span class="boring">      |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
+</span><span class="boring">      |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
+</span><span class="boring">      |x, p, _t, v, y| y[0] = v[0] * x[0] * (1.0 - x[0] / p[1]) + v[1] * p[0] * x[0] * x[0] / (p[1] * p[1]),
+</span><span class="boring">      |_p, _t| DVector::from_element(1, 0.1),
+</span><span class="boring">      |_p, _t, _v, y| y[0] = 0.0,
 </span><span class="boring">    ).unwrap();
-</span>let mut solver = Sdirk::new(Tableau::&lt;M&gt;::tr_bdf2(), NalgebraLU::default());
-let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
-solver.set_problem(state, &amp;problem);
-<span class="boring">}</span></code></pre></pre>
-<p>You can also use one of the helper functions to create a SDIRK solver with a pre-defined tableau, which will create it with the default linear solver:</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::{OdeBuilder};
-</span><span class="boring">use nalgebra::DVector;
-</span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
-</span>use diffsol::{Sdirk, Tableau, NalgebraLU, OdeSolverState, OdeSolverMethod};
-<span class="boring">fn main() {
-</span><span class="boring">  let problem = OdeBuilder::new()
-</span><span class="boring">    .p(vec![1.0, 10.0])
-</span><span class="boring">    .build_ode::&lt;M, _, _, _&gt;(
-</span><span class="boring">       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-</span><span class="boring">       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-</span><span class="boring">       |_p, _t| DVector::from_element(1, 0.1),
-</span><span class="boring">    ).unwrap();
-</span>let mut solver = Sdirk::tr_bdf2();
-let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
-solver.set_problem(state, &amp;problem);
+</span><span class="boring">let mut solver = Bdf::default();
+</span><span class="boring">let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
+</span><span class="boring">solver.set_problem(state, &amp;problem);
+</span><span class="boring">let t_o = 10.0;
+</span><span class="boring">while solver.state().unwrap().t &lt; t_o {
+</span><span class="boring">    solver.step().unwrap();
+</span><span class="boring">}
+</span>let sens_at_t_o = solver.interpolate_sens(t_o).unwrap();
+let sens_at_internal_step = &amp;solver.state().as_ref().unwrap().s;
 <span class="boring">}</span></code></pre></pre>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="specify/sparse_problems.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../specify/root_finding.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="initialisation.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../specify/custom/custom_problem_structs.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -238,11 +258,11 @@ solver.set_problem(state, &amp;problem);
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="specify/sparse_problems.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../specify/root_finding.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="initialisation.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../specify/custom/custom_problem_structs.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
@@ -257,13 +277,13 @@ solver.set_problem(state, &amp;problem);
         </script>
 
 
-        <script src="elasticlunr.min.js"></script>
-        <script src="mark.min.js"></script>
-        <script src="searcher.js"></script>
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
 
-        <script src="clipboard.min.js"></script>
-        <script src="highlight.js"></script>
-        <script src="book.js"></script>
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
 
         <!-- Custom JS scripts -->
 

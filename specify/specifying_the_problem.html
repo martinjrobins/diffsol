@@ -3,30 +3,31 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Mass matrix - DiffSol</title>
+        <title>DiffSol APIs for specifying problems - DiffSol</title>
 
 
         <!-- Custom HTML head -->
+        <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
 
         <meta name="description" content="">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="favicon.svg">
-        <link rel="shortcut icon" href="favicon.png">
-        <link rel="stylesheet" href="css/variables.css">
-        <link rel="stylesheet" href="css/general.css">
-        <link rel="stylesheet" href="css/chrome.css">
-        <link rel="stylesheet" href="css/print.css" media="print">
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
-        <link rel="stylesheet" href="fonts/fonts.css">
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="highlight.css">
-        <link rel="stylesheet" href="tomorrow-night.css">
-        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
 
@@ -35,11 +36,11 @@
 
         <!-- Provide site root to javascript -->
         <script>
-            var path_to_root = "";
+            var path_to_root = "../";
             var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc.js"></script>
+        <script src="../toc.js"></script>
     </head>
     <body>
     <div id="body-container">
@@ -91,7 +92,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
             </noscript>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -125,7 +126,7 @@
                     <h1 class="menu-title">DiffSol</h1>
 
                     <div class="right-buttons">
-                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
 
@@ -154,62 +155,46 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="mass-matrix"><a class="header" href="#mass-matrix">Mass matrix</a></h1>
-<p>In some cases, it is necessary to include a mass matrix in the problem, such that the problem is of the form</p>
-<p>\[M(t) \frac{dy}{dt} = f(t, y, p).\]</p>
-<p>A mass matrix is useful for PDE discretisation that lead to a non-identity mass matrix, or for DAE problems that can be transformed into ODEs with a singular mass matrix.
-Diffsol can handle singular and non-singular mass matrices, and the mass matrix can be time-dependent.</p>
-<h2 id="example"><a class="header" href="#example">Example</a></h2>
-<p>To illustrate the addition of a mass matrix to a problem, we will once again take the logistic equation, but this time we will add an additional variable that is set via an algebraic equation.
-This system is written as</p>
-<p>\[\frac{dy}{dt} = r y (1 - y/K),\]
-\[0 = y - z,\]</p>
-<p>where \(z\) is the additional variable with a solution \(z = y\). When this system is put in the form \(M(t) \frac{dy}{dt} = f(t, y, p)\), the mass matrix is</p>
-<p>\[M(t) = \begin{bmatrix} 1 &amp; 0 \\ 0 &amp; 0 \end{bmatrix}.\]</p>
-<p>Like the Jacobian, the DiffSol builder does not require the full mass matrix, instead users can provide a function that gives a GEMV (General Matrix-Vector) product of the mass matrix with a vector.</p>
-<p>\[m(\mathbf{v}, \mathbf{p}, t, \beta, \mathbf{y}) = M(p, t) \mathbf{v} + \beta \mathbf{y}. \]</p>
-<p>Thus, to specify this problem using DiffSol, we can use the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct and provide the functions:</p>
-<p>\[f(\mathbf{y}, \mathbf{p}, t) = \begin{bmatrix} r y_0 (1 - y_0/K) \\ y_0 - y_1 \end{bmatrix},\]
-\[f'(\mathbf{y}, \mathbf{p}, t, \mathbf{v}) = \begin{bmatrix} r v_0 (1 - 2 y_0/K) \\ v_0 - v_1 \end{bmatrix},\]
-\[m(\mathbf{v}, \mathbf{p}, t, \beta, \mathbf{y}) = \begin{bmatrix} v_0 + \beta y_0 \\ \beta y_1 \end{bmatrix}.\]</p>
-<p>where \(f\) is the right-hand side of the ODE, \(f'\) is the Jacobian of \(f\) multiplied by a vector, and \(m\) is the mass matrix multiplied by a vector.</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
-</span>use diffsol::OdeBuilder;
-use nalgebra::{DMatrix, DVector};
-type M = DMatrix&lt;f64&gt;;
-type V = DVector&lt;f64&gt;;
-
-let problem = OdeBuilder::new()
-    .t0(0.0)
-    .rtol(1e-6)
-    .atol([1e-6])
-    .p(vec![1.0, 10.0])
-    .build_ode_with_mass::&lt;M, _, _, _, _&gt;(
-    |x, p, _t, y| {
-        y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
-        y[1] = x[0] - x[1];
-    },
-    |x, p, _t, v , y| {
-        y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]);
-        y[1] = v[0] - v[1];
-    },
-    |v, _p, _t, beta, y| {
-        y[0] = v[0] + beta * y[0];
-        y[1] *= beta;
-    },
-    |_p, _t| V::from_element(2, 0.1),
-    ).unwrap();
-<span class="boring">}</span></code></pre></pre>
+                        <h1 id="diffsol-apis-for-specifying-problems"><a class="header" href="#diffsol-apis-for-specifying-problems">DiffSol APIs for specifying problems</a></h1>
+<p>Most of the DiffSol user-facing API revolves around specifying the problem you want to solve, thus a large part of this book will be dedicated to explaining how to specify a problem. All the examples presented in <a href="../primer/modelling_with_odes.html">the primer</a> used the DiffSL DSL to specify the problem, but DiffSol also provides a pure Rust API for specifying problems. This API is sometimes more verbose than the DSL, but is more flexible, more performant, and easier to use if you have a model already written in Rust or another language that you can easily port or call from Rust.</p>
+<h2 id="ode-equations"><a class="header" href="#ode-equations">ODE equations</a></h2>
+<p>The class of ODE equations that DiffSol can solve are of the form</p>
+<p>\[M(t) \frac{dy}{dt} = f(t, y, p),\]
+\[y(t_0) = y_0(t_0, p),\]
+\[z(t) = g(t, y, p),\]</p>
+<p>where:</p>
+<ul>
+<li>\(f(t, y, p)\) is the right-hand side of the ODE,</li>
+<li>\(y\) is the state vector,</li>
+<li>\(p\) are the parameters,</li>
+<li>\(t\) is the time.</li>
+<li>\(y_0(t_0, p)\) is the initial state vector at time \(t_0\).</li>
+<li>\(M(t)\) is the mass matrix (this is optional, and is implicitly the identity matrix if not specified),</li>
+<li>\(g(t, y, p)\) is an output function that can be used to calculate additional outputs from the state vector (this is optional, and is implicitly \(g(t, y, p) = y\) if not specified).</li>
+</ul>
+<p>The user can also optionally specify a root function \(r(t, y, p)\) that can be used to find the time at which a root occurs.</p>
+<h2 id="diffsol-problem-apis"><a class="header" href="#diffsol-problem-apis">DiffSol problem APIs</a></h2>
+<p>DiffSol has three main APIs for specifying problems:</p>
+<ul>
+<li>The <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct, where the user can specify the functions above using Rust closures.
+This is the easiest API to use from Rust, and is the recommended API for most users.</li>
+<li>The <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/equations/trait.OdeEquations.html"><code>OdeEquations</code></a> trait
+where the user can implement the functions above on their own structs.
+This API is more flexible than the <code>OdeBuilder</code> API, but is more complex to use. It is useful if you have custom data structures and code that you want to use to evaluate
+your functions that does not fit within the <code>OdeBuilder</code> API.</li>
+<li>The <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/diffsl/struct.DiffSlContext.html"><code>DiffSlContext</code></a> struct, where the user can specify the functions above using the <a href="https://martinjrobins.github.io/diffsl/">DiffSL</a>
+Domain Specific Language (DSL). This API is behind a feature flag (<code>diffsl</code> if you want to use the slower cranelift backend, <code>diffsl-llvm*</code> if you want to use the faster LLVM backend), but has the best API if you want to use DiffSL from a higher-level language like Python or R while still having similar performance.</li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="ode_equations.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../primer/electrical_circuits.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="root_finding.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../specify/ode_equations.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -219,11 +204,11 @@ let problem = OdeBuilder::new()
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="ode_equations.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../primer/electrical_circuits.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="root_finding.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../specify/ode_equations.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
@@ -238,13 +223,13 @@ let problem = OdeBuilder::new()
         </script>
 
 
-        <script src="elasticlunr.min.js"></script>
-        <script src="mark.min.js"></script>
-        <script src="searcher.js"></script>
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
 
-        <script src="clipboard.min.js"></script>
-        <script src="highlight.js"></script>
-        <script src="book.js"></script>
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
 
         <!-- Custom JS scripts -->
 

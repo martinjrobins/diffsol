@@ -3,30 +3,31 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>DiffSL - DiffSol</title>
+        <title>Modelling with ODEs - DiffSol</title>
 
 
         <!-- Custom HTML head -->
+        <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
 
         <meta name="description" content="">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="favicon.svg">
-        <link rel="shortcut icon" href="favicon.png">
-        <link rel="stylesheet" href="css/variables.css">
-        <link rel="stylesheet" href="css/general.css">
-        <link rel="stylesheet" href="css/chrome.css">
-        <link rel="stylesheet" href="css/print.css" media="print">
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
-        <link rel="stylesheet" href="fonts/fonts.css">
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="highlight.css">
-        <link rel="stylesheet" href="tomorrow-night.css">
-        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
 
@@ -35,11 +36,11 @@
 
         <!-- Provide site root to javascript -->
         <script>
-            var path_to_root = "";
+            var path_to_root = "../";
             var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc.js"></script>
+        <script src="../toc.js"></script>
     </head>
     <body>
     <div id="body-container">
@@ -91,7 +92,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
             </noscript>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -125,7 +126,7 @@
                     <h1 class="menu-title">DiffSol</h1>
 
                     <div class="right-buttons">
-                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
 
@@ -154,63 +155,39 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="diffsl"><a class="header" href="#diffsl">DiffSL</a></h1>
-<p>Thus far we have used Rust code to specify the problem we want to solve. This is fine if you are using DiffSol from Rust, but what if you want to use DiffSol from a higher-level language like Python or R?
-For this usecase we have designed a Domain Specific Language (DSL) called DiffSL that can be used to specify the problem. DiffSL is not a general purpose language but is tightly constrained to
-the specification of a system of ordinary differential equations. It features a relativly simple syntax that consists of writing a series of tensors (dense or sparse) that represent the equations of the system.
-For more detail on the syntax of DiffSL see the <a href="https://martinjrobins.github.io/diffsl/">DiffSL book</a>. This section will focus on how to use DiffSL to specify a problem in DiffSol.</p>
-<h2 id="diffsl-context"><a class="header" href="#diffsl-context">DiffSL Context</a></h2>
-<p>The main struct that is used to specify a problem in DiffSL is the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/diffsl/struct.DiffSlContext.html"><code>DiffSlContext</code></a> struct. Creating this struct
-Just-In-Time (JIT) compiles your DiffSL code into a form that can be executed efficiently by DiffSol.</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
-</span>use diffsol::{DiffSl, CraneliftModule};
-type M = nalgebra::DMatrix&lt;f64&gt;;
-type CG = CraneliftModule;
-        
-let eqn = DiffSl::&lt;M, CG&gt;::compile("
-    in = [r, k]
-    r { 1.0 }
-    k { 1.0 }
-    u { 0.1 }
-    F { r * u * (1.0 - u / k) }
-    out { u }
-").unwrap();
-<span class="boring">}</span></code></pre></pre>
-<p>Once you have created the <code>DiffSlContext</code> struct you can use it to create a problem using the <code>build_diffsl</code> method on the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct.</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
-</span><span class="boring">use diffsol::{DiffSl, CraneliftModule};
-</span>use diffsol::{OdeBuilder, Bdf, OdeSolverMethod, OdeSolverState};
-<span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
-</span><span class="boring">type CG = CraneliftModule;
-</span>
-        
-<span class="boring">let eqn = DiffSl::&lt;M, CG&gt;::compile("
-</span><span class="boring">    in = [r, k]
-</span><span class="boring">    r { 1.0 }
-</span><span class="boring">    k { 1.0 }
-</span><span class="boring">    u { 0.1 }
-</span><span class="boring">    F { r * u * (1.0 - u / k) }
-</span><span class="boring">    out { u }
-</span><span class="boring">").unwrap();
-</span>let problem = OdeBuilder::new()
-.rtol(1e-6)
-.p([1.0, 10.0])
-.build_from_eqn(eqn).unwrap();
-let mut solver = Bdf::default();
-let t = 0.4;
-let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
-let _soln = solver.solve(&amp;problem, state, t).unwrap();
-<span class="boring">}</span></code></pre></pre>
+                        <h1 id="modelling-with-odes"><a class="header" href="#modelling-with-odes">Modelling with ODEs</a></h1>
+<p>Ordinary Differential Equations (ODEs) are a powerful tool for modelling a wide range of physical systems. Unlike purely data-driven models, ODEs are based on the underlying physics, biology, or chemistry of the system being modelled. This makes them particularly useful for predicting the behaviour of a system under conditions that have not been observed before. In this section, we will introduce the basics of ODE modelling, and illustrate their use with a series of examples written using the DiffSol crate.</p>
+<p>The topics covered in this section are:</p>
+<ul>
+<li><a href="./primer/first_order_odes.html">First Order ODEs</a>: First order ODEs are the simplest type of ODE. Any ODE system can be written as a set of first order ODEs, so libraries like DiffSol are designed such that the user provides their equations in this form.
+<ul>
+<li><a href="./primer/population_dynamics.html">Example: Population Dynamics</a>: A simple example of a first order ODE system, modelling the interaction of predator and prey populations.</li>
+</ul>
+</li>
+<li><a href="./primer/higher_order_odes.html">Higher Order ODEs</a>: Higher order ODEs are ODEs that involve derivatives of order higher than one. These can be converted to a system of first order ODEs, which is the form that DiffSol expects.
+<ul>
+<li><a href="./primer/spring_mass_systems.html">Example: Spring-mass systems</a>: A simple example of a higher order ODE system, modelling the motion of a damped spring-mass system.</li>
+</ul>
+</li>
+<li><a href="./primer/discrete_events.html">Discrete Events</a>: Discrete events are events that occur at specific times or when the system is in a particular state, rather than continuously. These can be modelled using ODEs by treating the events as changes in the system's state. DiffSol provides an API to detect and handle these events.
+<ul>
+<li><a href="./primer/compartmental_models_of_drug_delivery.html">Example: Compartmental models of Drug Delivery</a>: Pharmacokinetic models are a common example of systems with discrete events, where the drug is absorbed, distributed, metabolised, and excreted by the body. The drug is often administered at discrete times, and the model must account for this.</li>
+<li><a href="./primer/bouncing_ball.html">Example: Bouncing Ball</a>: A simple example of a system where the discrete event occurs when the ball hits the ground, instead of a specific time.</li>
+</ul>
+</li>
+<li><a href="./primer/the_mass_matrix.html">DAEs via the Mass Matrix</a>: Differential Algebraic Equations (DAEs) are a generalisation of ODEs that include algebraic equations as well as differential equations. DiffSol can solve DAEs by treating them as ODEs with a mass matrix. This section explains how to use the mass matrix to solve DAEs.
+<ul>
+<li><a href="./primer/electrical_circuits.html">Example: Electrical Circuits</a>: Electrical circuits are a common example of DAEs, here we will model a simple low-pass LRC filter circuit.</li>
+</ul>
+</li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="putting_it_all_together.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
-                                <i class="fa fa-angle-left"></i>
-                            </a>
 
-                            <a rel="next prefetch" href="sparse_problems.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../primer/first_order_odes.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -220,11 +197,8 @@ let _soln = solver.solve(&amp;problem, state, t).unwrap();
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="putting_it_all_together.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
-                        <i class="fa fa-angle-left"></i>
-                    </a>
 
-                    <a rel="next prefetch" href="sparse_problems.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../primer/first_order_odes.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
@@ -239,13 +213,13 @@ let _soln = solver.solve(&amp;problem, state, t).unwrap();
         </script>
 
 
-        <script src="elasticlunr.min.js"></script>
-        <script src="mark.min.js"></script>
-        <script src="searcher.js"></script>
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
 
-        <script src="clipboard.min.js"></script>
-        <script src="highlight.js"></script>
-        <script src="book.js"></script>
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
 
         <!-- Custom JS scripts -->
 

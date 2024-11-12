@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Initialisation - DiffSol</title>
+        <title>Discrete Events - DiffSol</title>
 
 
         <!-- Custom HTML head -->
@@ -13,21 +13,21 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="favicon.svg">
-        <link rel="shortcut icon" href="favicon.png">
-        <link rel="stylesheet" href="css/variables.css">
-        <link rel="stylesheet" href="css/general.css">
-        <link rel="stylesheet" href="css/chrome.css">
-        <link rel="stylesheet" href="css/print.css" media="print">
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
-        <link rel="stylesheet" href="fonts/fonts.css">
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="highlight.css">
-        <link rel="stylesheet" href="tomorrow-night.css">
-        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
 
@@ -36,11 +36,11 @@
 
         <!-- Provide site root to javascript -->
         <script>
-            var path_to_root = "";
+            var path_to_root = "../";
             var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc.js"></script>
+        <script src="../toc.js"></script>
     </head>
     <body>
     <div id="body-container">
@@ -92,7 +92,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
             </noscript>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -126,7 +126,7 @@
                     <h1 class="menu-title">DiffSol</h1>
 
                     <div class="right-buttons">
-                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
 
@@ -155,43 +155,21 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="initialisation"><a class="header" href="#initialisation">Initialisation</a></h1>
-<p>Before you can solve the problem, you need to generate an intitial state for the solution. DiffSol uses the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/struct.OdeSolverState.html"><code>OdeSolverState</code></a>
-struct to hold the current state of the solution, this is a struct that contains the state vector, the gradient of the state vector, the time, and the current step size.</p>
-<p>You can create a new state for an ODE problem using the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/struct.OdeSolverState.html#method.new"><code>OdeSolverState::new</code></a> method,
-which takes as arguments the problem and solver instances.
-This method uses the \(y_0(p, t)\) closure to generate an intial state vector, and the \(f(y, p, t)\) closure to generate the gradient of the state vector. It will also set the time to the initial time
-given by the <code>OdeSolverProblem</code> struct, and will guess a suitable step size based on the initial state vector and the gradient of the state vector. If you want to set the step size manually or have
-more control over the initialisation of the state, you can use the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/struct.OdeSolverState.html#method.new_without_initialise"><code>OdeSolverState::new_without_initialise</code></a> method.</p>
-<p>Once the state is created then you can use the state and the problem to initialise the solver in preparation for solving the problem.</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">use diffsol::OdeBuilder;
-</span><span class="boring">use nalgebra::DVector;
-</span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
-</span>use diffsol::{OdeSolverState, OdeSolverMethod, Bdf};
-
-<span class="boring">fn main() {
-</span><span class="boring">
-</span><span class="boring">  let problem = OdeBuilder::new()
-</span><span class="boring">    .p(vec![1.0, 10.0])
-</span><span class="boring">    .build_ode::&lt;M, _, _, _&gt;(
-</span><span class="boring">       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-</span><span class="boring">       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-</span><span class="boring">       |_p, _t| DVector::from_element(1, 0.1),
-</span><span class="boring">    ).unwrap();
-</span>let mut solver = Bdf::default();
-let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
-solver.set_problem(state, &amp;problem);
-<span class="boring">}</span></code></pre></pre>
+                        <h1 id="discrete-events"><a class="header" href="#discrete-events">Discrete Events</a></h1>
+<p>ODEs describe the continuous evolution of a system over time, but many systems also involve discrete events that occur at specific times. For example, in a compartmental model of drug delivery, the administration of a drug is a discrete event that occurs at a specific time. In a bouncing ball model, the collision of the ball with the ground is a discrete event that changes the state of the system. It is normally difficult to model these events using ODEs alone, as they require a different approach to handle the discontinuities in the system. While we can represent discrete events mathematically using delta functions, many ODE solvers are not designed to handle these discontinuities, and may produce inaccurate results or fail to converge during the integration.</p>
+<p>DiffSol provides a way to model discrete events in a system of ODEs by maintaining an internal state of each solver that can be updated when a discrete event occurs. Each solver has an internal state that holds information such as the current time \(t\), the current state of the system \(\mathbf{y}\), and other solver-specific information. When a discrete event occurs, the user can update the internal state of the solver to reflect the change in the system, and then continue the integration of the ODEs as normal.</p>
+<p>DiffSol also provides a way to stop the integration of the ODEs, either at a specific time or when a specific condition is met. This can be useful for modelling systems with discrete events, as it allows the user to control the integration of the ODEs and to handle the events in a flexible way.</p>
+<p>The <a href="../solving_the_problem.html">Solving the Problem</a> and <a href="../specify/root_finding.html">Root Finding</a> sections provides an introduction to the API for solving ODEs and detecting events with DiffSol. In the next two sections, we will look at two examples of systems with discrete events: compartmental models of drug delivery and bouncing ball models, and solve them using DiffSol using this API.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="choosing_a_solver.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../primer/spring_mass_systems.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="solving_the_problem.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../primer/compartmental_models_of_drug_delivery.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -201,11 +179,11 @@ solver.set_problem(state, &amp;problem);
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="choosing_a_solver.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../primer/spring_mass_systems.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="solving_the_problem.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../primer/compartmental_models_of_drug_delivery.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
@@ -220,13 +198,13 @@ solver.set_problem(state, &amp;problem);
         </script>
 
 
-        <script src="elasticlunr.min.js"></script>
-        <script src="mark.min.js"></script>
-        <script src="searcher.js"></script>
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
 
-        <script src="clipboard.min.js"></script>
-        <script src="highlight.js"></script>
-        <script src="book.js"></script>
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
 
         <!-- Custom JS scripts -->
 

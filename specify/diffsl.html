@@ -3,30 +3,31 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>ODE equations - DiffSol</title>
+        <title>DiffSL - DiffSol</title>
 
 
         <!-- Custom HTML head -->
+        <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
 
         <meta name="description" content="">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="favicon.svg">
-        <link rel="shortcut icon" href="favicon.png">
-        <link rel="stylesheet" href="css/variables.css">
-        <link rel="stylesheet" href="css/general.css">
-        <link rel="stylesheet" href="css/chrome.css">
-        <link rel="stylesheet" href="css/print.css" media="print">
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
-        <link rel="stylesheet" href="fonts/fonts.css">
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="highlight.css">
-        <link rel="stylesheet" href="tomorrow-night.css">
-        <link rel="stylesheet" href="ayu-highlight.css">
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
 
@@ -35,11 +36,11 @@
 
         <!-- Provide site root to javascript -->
         <script>
-            var path_to_root = "";
+            var path_to_root = "../";
             var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc.js"></script>
+        <script src="../toc.js"></script>
     </head>
     <body>
     <div id="body-container">
@@ -91,7 +92,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
             </noscript>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -125,7 +126,7 @@
                     <h1 class="menu-title">DiffSol</h1>
 
                     <div class="right-buttons">
-                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
 
@@ -154,67 +155,62 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="ode-equations"><a class="header" href="#ode-equations">ODE equations</a></h1>
-<p>The simplest way to create a new ode problem in Rust is to use the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct.
-You can set the initial time, initial step size, relative tolerance, absolute tolerance, and parameters, or leave them at their default values.
-Then, call one of the <code>build_*</code> functions to create a new problem, for example the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.build_ode"><code>build_ode</code></a>
-function can be used to create an ODE problem of the form \(dy/dt = f(t, y, p)\), where \(y\) is the state vector, \(t\) is the time, and \(p\) are the parameters.</p>
-<p>Below is an example of how to create a new ODE problem using the <code>OdeBuilder</code> struct.
-The specific problem we will solve is the logistic equation</p>
-<p>\[\frac{dy}{dt} = r y (1 - y/K),\]</p>
-<p>where \(r\) is the growth rate and \(K\) is the carrying capacity.
-To specify the problem, we need to provide the \(dy/dt\) function \(f(y, p, t)\),
-and the jacobian of \(f\) multiplied by a vector \(v\) function, which we will call \(f'(y, p, t, v)\). That is</p>
-<p>\[f(y, p, t) = r y (1 - y/K),\]
-\[f'(y, p, t, v) = rv (1 - 2y/K),\]</p>
-<p>and the initial state</p>
-<p>\[y_0(p, t) = 0.1\]</p>
-<p>This can be done using the following code:</p>
+                        <h1 id="diffsl"><a class="header" href="#diffsl">DiffSL</a></h1>
+<p>Thus far we have used Rust code to specify the problem we want to solve. This is fine if you are using DiffSol from Rust, but what if you want to use DiffSol from a higher-level language like Python or R?
+For this usecase we have designed a Domain Specific Language (DSL) called DiffSL that can be used to specify the problem. DiffSL is not a general purpose language but is tightly constrained to
+the specification of a system of ordinary differential equations. It features a relatively simple syntax that consists of writing a series of tensors (dense or sparse) that represent the equations of the system.
+For more detail on the syntax of DiffSL see the <a href="https://martinjrobins.github.io/diffsl/">DiffSL book</a>. This section will focus on how to use DiffSL to specify a problem in DiffSol.</p>
+<h2 id="diffsl-context"><a class="header" href="#diffsl-context">DiffSL Context</a></h2>
+<p>The main struct that is used to specify a problem in DiffSL is the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/diffsl/struct.DiffSl.html"><code>DiffSl</code></a> struct. Creating this struct
+Just-In-Time (JIT) compiles your DiffSL code into a form that can be executed efficiently by DiffSol.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
-</span>use diffsol::OdeBuilder;
-use nalgebra::DVector;
+</span>use diffsol::{DiffSl, CraneliftModule};
 type M = nalgebra::DMatrix&lt;f64&gt;;
-
-let problem = OdeBuilder::new()
-    .t0(0.0)
-    .rtol(1e-6)
-    .atol([1e-6])
-    .p(vec![1.0, 10.0])
-    .build_ode::&lt;M, _, _, _&gt;(
-       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-       |_p, _t| DVector::from_element(1, 0.1),
-    ).unwrap();
+type CG = CraneliftModule;
+        
+let eqn = DiffSl::&lt;M, CG&gt;::compile("
+    in = [r, k]
+    r { 1.0 }
+    k { 1.0 }
+    u { 0.1 }
+    F { r * u * (1.0 - u / k) }
+").unwrap();
 <span class="boring">}</span></code></pre></pre>
-<p>Each <code>build_*</code> method requires the user to specify what matrix type they wish to use to define and solve the model (the other types are inferred from the closure types).
-Here we use the <code>nalgebra::DMatrix&lt;f64&gt;</code> type, which is a dense matrix type from the <a href="https://nalgebra.org">nalgebra</a> crate. Other options are:</p>
-<ul>
-<li><code>faer::Mat&lt;T&gt;</code> from <a href="https://github.com/sarah-ek/faer-rs">faer</a>, which is a dense matrix type.</li>
-<li><code>diffsol::SparseColMat&lt;T&gt;</code>, which is a thin wrapper around <code>faer::sparse::SparseColMat&lt;T&gt;</code>, a sparse compressed sparse column matrix type.</li>
-</ul>
-<p>Each of these matrix types have an associated vector type that is used to represent the vectors in the problem (i.e. the state vector \(y\), the parameter vector \(p\), and the gradient vector \(v\)).
-You can see in the example above that the <code>DVector</code> type is explicitly used to create the initial state vector in the third closure.
-For these matrix types the associated vector type is:</p>
-<ul>
-<li><code>nalgebra::DVector&lt;T&gt;</code> for <code>nalgebra::DMatrix&lt;T&gt;</code>.</li>
-<li><code>faer::Col&lt;T&gt;</code> for <code>faer::Mat&lt;T&gt;</code>.</li>
-<li><code>faer::Coll&lt;T&gt;</code> for <code>diffsol::SparseColMat&lt;T&gt;</code>.</li>
-</ul>
-<p>The arguments to the <code>build_ode</code> method are the equations that define the problem.
-The first closure is the function \(f(y, p, t)\) this is implemented as a closure that takes the time <code>t</code>,
-the parameter vector <code>p</code>, the state vector <code>y</code>, and a mutable reference that the closure can use to place the result (i.e. the derivative of the state vector \(f(y, p, t)\)).
-The second closure is similar in structure in defines the jacobian multiplied by a vector \(v\) function \(f'(y, p, t, v)\).
-The third closure returns the initial state vector \(y_0(p, t)\), this is done so that diffsol can infer the size of the state vector.</p>
+<p>The <code>CG</code> parameter specifies the backend that you want to use to compile the DiffSL code. The <code>CraneliftModule</code> backend is the default backend and is behind the <code>diffsl</code> feature flag. If you want to use the faster LLVM backend you can use the <code>LlvmModule</code> backend, which is behind one of the <code>diffsl-llvm*</code> feature flags, depending on the version of LLVM you have installed.</p>
+<p>Once you have created the <code>DiffSl</code> struct you can use it to create a problem using the <code>build_from_eqn</code> method on the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct.</p>
+<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
+</span><span class="boring">use diffsol::{DiffSl, CraneliftModule};
+</span>use diffsol::{OdeBuilder, Bdf, OdeSolverMethod, OdeSolverState};
+<span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
+</span><span class="boring">type CG = CraneliftModule;
+</span>
+        
+<span class="boring">let eqn = DiffSl::&lt;M, CG&gt;::compile("
+</span><span class="boring">    in = [r, k]
+</span><span class="boring">    r { 1.0 }
+</span><span class="boring">    k { 1.0 }
+</span><span class="boring">    u { 0.1 }
+</span><span class="boring">    F { r * u * (1.0 - u / k) }
+</span><span class="boring">").unwrap();
+</span>let problem = OdeBuilder::new()
+.rtol(1e-6)
+.p([1.0, 10.0])
+.build_from_eqn(eqn).unwrap();
+let mut solver = Bdf::default();
+let t = 0.4;
+let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
+let _soln = solver.solve(&amp;problem, state, t).unwrap();
+<span class="boring">}</span></code></pre></pre>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="specifying_the_problem.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../specify/custom/putting_it_all_together.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="mass_matrix.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../specify/sparse_problems.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -224,11 +220,11 @@ The third closure returns the initial state vector \(y_0(p, t)\), this is done s
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="specifying_the_problem.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../specify/custom/putting_it_all_together.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="mass_matrix.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../specify/sparse_problems.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
@@ -243,13 +239,13 @@ The third closure returns the initial state vector \(y_0(p, t)\), this is done s
         </script>
 
 
-        <script src="elasticlunr.min.js"></script>
-        <script src="mark.min.js"></script>
-        <script src="searcher.js"></script>
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
 
-        <script src="clipboard.min.js"></script>
-        <script src="highlight.js"></script>
-        <script src="book.js"></script>
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
 
         <!-- Custom JS scripts -->
 
