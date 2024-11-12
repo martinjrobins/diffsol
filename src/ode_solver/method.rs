@@ -308,11 +308,10 @@ where
         while adjoint_solver.step()? != OdeSolverStopReason::TstopReached {}
 
         // correct the adjoint solution for the initial conditions
+        let adjoint_problem = adjoint_solver.problem().unwrap().clone();
         let mut state = adjoint_solver.take_state().unwrap();
         let state_mut = state.as_mut();
-        adjoint_solver
-            .problem()
-            .unwrap()
+        adjoint_problem
             .eqn
             .correct_sg_for_init(t0, state_mut.s, state_mut.sg);
 

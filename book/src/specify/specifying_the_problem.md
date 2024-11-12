@@ -1,6 +1,6 @@
-# Specifying the problem
+# DiffSol APIs for specifying problems
 
-Most of the DiffSol user-facing API revolves around specifying the problem you want to solve, thus a large part of this book will be dedicated to explaining how to specify a problem. 
+Most of the DiffSol user-facing API revolves around specifying the problem you want to solve, thus a large part of this book will be dedicated to explaining how to specify a problem. All the examples presented in [the primer](../primer/modelling_with_odes.md) used the DiffSL DSL to specify the problem, but DiffSol also provides a pure Rust API for specifying problems. This API is sometimes more verbose than the DSL, but is more flexible, more performant, and easier to use if you have a model already written in Rust or another language that you can easily port or call from Rust.
 
 ## ODE equations
 
@@ -30,9 +30,8 @@ DiffSol has three main APIs for specifying problems:
   where the user can implement the functions above on their own structs.
   This API is more flexible than the `OdeBuilder` API, but is more complex to use. It is useful if you have custom data structures and code that you want to use to evaluate
   your functions that does not fit within the `OdeBuilder` API.
-- The [`DiffSlContext`](https://docs.rs/diffsol/latest/diffsol/ode_solver/diffsl/struct.DiffSlContext.html) struct, where the user can specify the functions above using the [DiffSl](https://martinjrobins.github.io/diffsl/)
-  Domain Specific Language (DSL). This API requires a local LLVM installation, and is behind a feature flag, but has the best API if you want to use DiffSL from a higher-level language like Python or R
-  while still having the performance of Rust.
+- The [`DiffSlContext`](https://docs.rs/diffsol/latest/diffsol/ode_solver/diffsl/struct.DiffSlContext.html) struct, where the user can specify the functions above using the [DiffSL](https://martinjrobins.github.io/diffsl/)
+  Domain Specific Language (DSL). This API is behind a feature flag (`diffsl` if you want to use the slower cranelift backend, `diffsl-llvm*` if you want to use the faster LLVM backend), but has the best API if you want to use DiffSL from a higher-level language like Python or R while still having similar performance.
 
 
 

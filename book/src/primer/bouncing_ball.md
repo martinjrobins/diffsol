@@ -1,6 +1,6 @@
 # Example: Bouncing Ball
 
-Modelling a bouncing ball is a simple and intuitive example of a system with discrete events. The ball is dropped from a height \\(h\\) and bounces off the ground with a coefficient of restitution \\(e\\). When the ball hits the ground, its velocity is reversed and scaled by the coefficient of restitution, and the ball continues to fall until it hits the ground again. This process repeats until the ball comes to rest.
+Modelling a bouncing ball is a simple and intuitive example of a system with discrete events. The ball is dropped from a height \\(h\\) and bounces off the ground with a coefficient of restitution \\(e\\). When the ball hits the ground, its velocity is reversed and scaled by the coefficient of restitution, and the ball rises and then continues to fall until it hits the ground again. This process repeats until halted.
 
 The second order ODE that describes the motion of the ball is given by:
 

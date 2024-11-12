@@ -14,9 +14,9 @@ pub type T = f64;
 /// Context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
 ///
 /// This contains the compiled code and the data structures needed to evaluate the ODE equations.
-/// Note that the example below uses the LLVM backend (requires one of the `diffsl-llvm` features),
-/// but the Cranelift backend can also be used using
-/// `diffsl::CraneliftModule` instead of `diffsl::LlvmModule`.
+/// Note that the example below uses the LLVM backend can also be used (requires one of the `diffsl-llvm*` features)
+/// but the Cranelift backend (requires the `diffsl` feature),
+/// can also be used (requires one of the `diffsl-llvm*` features).
 ///
 /// # Example
 ///
