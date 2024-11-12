@@ -794,6 +794,9 @@ where
         self.state.as_ref().map(|state| state.as_ref())
     }
     fn take_state(&mut self) -> Option<BdfState<Eqn::V, M>> {
+        self.ode_problem = None;
+        self.op = None;
+        self.s_op = None;
         Option::take(&mut self.state)
     }
 
@@ -889,7 +892,21 @@ where
         let mut convergence_fail = false;
 
         if self.is_state_modified {
+            // reinitalise root finder if needed
+            if let Some(root_fn) = problem.eqn.root() {
+                let state = self.state.as_ref().unwrap();
+                self.root_finder
+                    .as_ref()
+                    .unwrap()
+                    .init(&root_fn, &state.y, state.t);
+            }
+            // reinitialise diff matrix
             self.initialise_to_first_order();
+
+            // reinitialise tstop if needed
+            if let Some(t_stop) = self.tstop {
+                self.set_stop_time(t_stop)?;
+            }
         }
 
         self._predict_forward();
@@ -1206,7 +1223,7 @@ mod test {
             },
             tests::{
                 test_checkpointing, test_interpolate, test_no_set_problem, test_ode_solver,
-                test_ode_solver_adjoint, test_ode_solver_no_sens, test_state_mut,
+                test_ode_solver_adjoint, test_ode_solver_no_sens, test_param_sweep, test_state_mut,
                 test_state_mut_on_problem,
             },
         },
@@ -1677,5 +1694,40 @@ mod test {
         let (problem, soln) = exponential_decay_problem_with_root::<M>(false);
         let y = test_ode_solver_no_sens(&mut s, &problem, soln, None, false);
         assert!(abs(y[0] - 0.6) < 1e-6, "y[0] = {}", y[0]);
+    }
+
+    #[test]
+    fn test_param_sweep_bdf() {
+        let s = Bdf::default();
+        let (problem, _soln) = exponential_decay_problem::<M>(false);
+        let mut ps = Vec::new();
+        for y0 in (1..10).map(f64::from) {
+            ps.push(nalgebra::DVector::<f64>::from_vec(vec![0.1, y0]));
+        }
+        test_param_sweep(s, problem, ps);
+    }
+
+    #[cfg(feature = "diffsl")]
+    #[test]
+    fn test_ball_bounce_bdf() {
+        type M = nalgebra::DMatrix<f64>;
+        type LS = crate::NalgebraLU<f64>;
+        type Nls = crate::NewtonNonlinearSolver<M, LS>;
+        type Eqn = crate::DiffSl<M, crate::CraneliftModule>;
+        let s = Bdf::<M, Eqn, Nls>::default();
+        let (x, v, t) = crate::ode_solver::tests::test_ball_bounce(s);
+
+        let expected_x = [
+            0.003751514915514589,
+            0.00750117409999241,
+            0.015370589755655079,
+        ];
+        let expected_v = [11.202428570923361, 11.19914432101355, 11.192247396202946];
+        let expected_t = [1.4281779078441663, 1.4285126937676944, 1.4292157442071036];
+        for (i, ((x, v), t)) in x.iter().zip(v.iter()).zip(t.iter()).enumerate() {
+            assert!((x - expected_x[i]).abs() < 1e-4);
+            assert!((v - expected_v[i]).abs() < 1e-4);
+            assert!((t - expected_t[i]).abs() < 1e-4);
+        }
     }
 }

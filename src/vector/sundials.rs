@@ -104,7 +104,7 @@ impl SundialsVectorView<'_> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SundialsIndexVector(Vec<IndexType>);
 
 impl Display for SundialsIndexVector {

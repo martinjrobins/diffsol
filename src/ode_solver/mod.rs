@@ -33,9 +33,10 @@ mod tests {
     use crate::matrix::Matrix;
     use crate::op::unit::UnitCallable;
     use crate::{
-        op::OpStatistics, NonLinearOpJacobian, OdeEquations, OdeEquationsAdjoint,
-        OdeEquationsImplicit, OdeEquationsRef, OdeEquationsSens, OdeSolverMethod, OdeSolverProblem,
-        OdeSolverState, OdeSolverStopReason,
+        op::OpStatistics, CraneliftModule, DenseMatrix, DiffSl, MatrixCommon, NonLinearOpJacobian,
+        OdeBuilder, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsRef,
+        OdeEquationsSens, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
+        VectorView,
     };
     use crate::{ConstantOp, DefaultDenseMatrix, DefaultSolver, NonLinearOp, Op, Vector};
     use num_traits::One;
@@ -297,11 +298,10 @@ mod tests {
         while adjoint_solver.state().unwrap().t.abs() > t0 {
             adjoint_solver.step().unwrap();
         }
+        let adjoint_problem = adjoint_solver.problem().unwrap().clone();
         let mut state = adjoint_solver.take_state().unwrap();
         let state_mut = state.as_mut();
-        adjoint_solver
-            .problem()
-            .unwrap()
+        adjoint_problem
             .eqn
             .correct_sg_for_init(t0, state_mut.s, state_mut.sg);
 
@@ -516,6 +516,86 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "diffsl")]
+    pub fn test_ball_bounce<M, Method>(mut solver: Method) -> (Vec<f64>, Vec<f64>, Vec<f64>)
+    where
+        M: Matrix<T = f64>,
+        M: DefaultSolver<T = f64>,
+        M::V: DefaultDenseMatrix<T = f64>,
+        Method: OdeSolverMethod<DiffSl<M, CraneliftModule>>,
+    {
+        let eqn = DiffSl::compile(
+            "
+            g { 9.81 } h { 10.0 }
+            u_i {
+                x = h,
+                v = 0,
+            }
+            F_i {
+                v,
+                -g,
+            }
+            stop {
+                x,
+            }
+        ",
+        )
+        .unwrap();
+
+        let e = 0.8;
+        let problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
+        let state = OdeSolverState::new(&problem, &solver).unwrap();
+        solver.set_problem(state, &problem).unwrap();
+
+        let final_time = 2.5;
+
+        // solve and apply the remaining doses
+        solver.set_stop_time(final_time).unwrap();
+        loop {
+            match solver.step() {
+                Ok(OdeSolverStopReason::InternalTimestep) => (),
+                Ok(OdeSolverStopReason::RootFound(t)) => {
+                    // get the state when the event occurred
+                    let mut y = solver.interpolate(t).unwrap();
+
+                    // update the velocity of the ball
+                    y[1] *= -e;
+
+                    // make sure the ball is above the ground
+                    y[0] = y[0].max(f64::EPSILON);
+
+                    // set the state to the updated state
+                    solver.state_mut().unwrap().y.copy_from(&y);
+                    solver.state_mut().unwrap().dy[0] = y[1];
+                    *solver.state_mut().unwrap().t = t;
+
+                    break;
+                }
+                Ok(OdeSolverStopReason::TstopReached) => break,
+                Err(_) => panic!("unexpected solver error"),
+            }
+        }
+        // do three more steps after the 1st bound and many sure they are correct
+        let mut x = vec![];
+        let mut v = vec![];
+        let mut t = vec![];
+        for _ in 0..3 {
+            let ret = solver.step();
+            x.push(solver.state().unwrap().y[0]);
+            v.push(solver.state().unwrap().y[1]);
+            t.push(solver.state().unwrap().t);
+            match ret {
+                Ok(OdeSolverStopReason::InternalTimestep) => (),
+                Ok(OdeSolverStopReason::RootFound(_)) => {
+                    panic!("should be an internal timestep but found a root")
+                }
+                Ok(OdeSolverStopReason::TstopReached) => break,
+                _ => panic!("should be an internal timestep"),
+            }
+        }
+        (x, v, t)
+    }
+
     pub fn test_checkpointing<M, Method, Problem>(
         mut solver1: Method,
         mut solver2: Method,
@@ -560,6 +640,35 @@ mod tests {
             soln.assert_eq_norm(&point.state, &problem.atol, problem.rtol, M::T::from(15.0));
             let soln = solver2.interpolate(point.t).unwrap();
             soln.assert_eq_norm(&point.state, &problem.atol, problem.rtol, M::T::from(15.0));
+        }
+    }
+
+    pub fn test_param_sweep<Method, Eqn>(
+        mut s: Method,
+        mut problem: OdeSolverProblem<Eqn>,
+        ps: Vec<Eqn::V>,
+    ) where
+        Method: OdeSolverMethod<Eqn>,
+        Eqn: OdeEquationsImplicit,
+        Eqn::M: DefaultSolver,
+        Eqn::V: DefaultDenseMatrix,
+    {
+        let mut old_soln = None;
+        for p in ps {
+            problem.set_params(p).unwrap();
+            let state = OdeSolverState::new(&problem, &s).unwrap();
+            let (ys, _ts) = s.solve(&problem, state, Eqn::T::from(10.0)).unwrap();
+            // check that the new solution is different from the old one
+            if let Some(old_soln) = &mut old_soln {
+                let new_soln = ys.column(ys.ncols() - 1).into_owned();
+                let diff = (new_soln - &*old_soln)
+                    .squared_norm(old_soln, &problem.atol, problem.rtol)
+                    .sqrt();
+                assert!(diff > Eqn::T::from(1.0e-6), "diff: {}", diff);
+            }
+            old_soln = Some(ys.column(ys.ncols() - 1).into_owned());
+            s.take_state().unwrap();
+            assert!(s.problem().is_none());
         }
     }
 

@@ -126,19 +126,7 @@
 //! - For vectors: [Vector], [VectorIndex], [VectorView], [VectorViewMut], and [VectorCommon].
 //!
 
-#[cfg(feature = "diffsl-llvm13")]
-pub extern crate diffsl13_0 as diffsl;
-#[cfg(feature = "diffsl-llvm14")]
-pub extern crate diffsl14_0 as diffsl;
-#[cfg(feature = "diffsl-llvm15")]
-pub extern crate diffsl15_0 as diffsl;
-#[cfg(feature = "diffsl-llvm16")]
-pub extern crate diffsl16_0 as diffsl;
-#[cfg(feature = "diffsl-llvm17")]
-pub extern crate diffsl17_0 as diffsl;
-#[cfg(feature = "diffsl-cranelift")]
-pub extern crate diffsl_no_llvm as diffsl;
-#[cfg(feature = "diffsl-cranelift")]
+#[cfg(feature = "diffsl")]
 pub use diffsl::CraneliftModule;
 #[cfg(feature = "diffsl-llvm")]
 pub use diffsl::LlvmModule;

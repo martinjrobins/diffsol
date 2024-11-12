@@ -10,8 +10,8 @@ mathjax-support = true
 
 [preprocessor.keeper]
 command = "mdbook-keeper"
-manifest_dir = ".."
-externs = ["diffsol", "nalgebra", "faer"]
+manifest_dir = "."
+externs = ["diffsol", "nalgebra", "faer", "plotly"]
 # is_workspace = true
-build_features = ["diffsl-cranelift"]
+# build_features = ["plotly"]
 
