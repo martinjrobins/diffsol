@@ -1,11 +1,7 @@
 use std::rc::Rc;
 
 use crate::{
-    matrix::Matrix,
-    ode_solver::problem::OdeSolverSolution,
-    op::{closure_with_sens::ClosureWithSens, constant_closure_with_sens::ConstantClosureWithSens},
-    ConstantOp, LinearClosure, OdeBuilder, OdeEquationsImplicit, OdeEquationsSens,
-    OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector,
+    matrix::Matrix, ode_solver::problem::OdeSolverSolution, op::{closure_with_sens::ClosureWithSens, constant_closure_with_sens::ConstantClosureWithSens}, ConstantOp, LinearClosure, LinearSolver, OdeBuilder, OdeEquationsImplicit, OdeEquationsSens, OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector
 };
 use num_traits::Zero;
 
@@ -103,7 +99,7 @@ fn robertson_init_sens<M: Matrix>(_p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V) 
 }
 
 #[allow(clippy::type_complexity)]
-pub fn robertson<M: Matrix + 'static>(
+pub fn robertson<M: Matrix, LS: LinearSolver<M>>(
     use_coloring: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,

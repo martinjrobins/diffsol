@@ -11,7 +11,7 @@ use crate::sundials_sys::{
 };
 
 use crate::{
-    error::*, matrix_error, ode_solver::sundials::sundials_check, scalar::scale,
+    error::*, matrix_error, linear_solver::sundials::sundials_check, scalar::scale,
     vector::sundials::SundialsVector, IndexType, Scale, SundialsLinearSolver, Vector,
 };
 

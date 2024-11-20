@@ -1,9 +1,7 @@
 use std::rc::Rc;
 
 use crate::{
-    error::{DiffsolError, NonLinearSolverError},
-    non_linear_solver_error, Convergence, ConvergenceStatus, LinearSolver, Matrix, NonLinearOp,
-    NonLinearOpJacobian, NonLinearSolver, Vector,
+    error::{DiffsolError, NonLinearSolverError}, non_linear_solver_error, Convergence, ConvergenceStatus, DefaultSolver, LinearSolver, Matrix, NonLinearOp, NonLinearOpJacobian, NonLinearSolver, Vector
 };
 
 pub fn newton_iteration<V: Vector>(
@@ -36,14 +34,14 @@ pub fn newton_iteration<V: Vector>(
     Err(non_linear_solver_error!(NewtonDidNotConverge))
 }
 
-pub struct NewtonNonlinearSolver<M: Matrix, Ls: LinearSolver<M>> {
+pub struct NewtonNonlinearSolver<M: Matrix + DefaultSolver, Ls: LinearSolver<M> = <M as DefaultSolver>::LS> {
     convergence: Option<Convergence<M::V>>,
     linear_solver: Ls,
     is_jacobian_set: bool,
     tmp: M::V,
 }
 
-impl<M: Matrix, Ls: LinearSolver<M>> NewtonNonlinearSolver<M, Ls> {
+impl<M: Matrix + DefaultSolver, Ls: LinearSolver<M>> NewtonNonlinearSolver<M, Ls> {
     pub fn new(linear_solver: Ls) -> Self {
         Self {
             convergence: None,
@@ -57,13 +55,13 @@ impl<M: Matrix, Ls: LinearSolver<M>> NewtonNonlinearSolver<M, Ls> {
     }
 }
 
-impl<M: Matrix, Ls: LinearSolver<M>> Default for NewtonNonlinearSolver<M, Ls> {
+impl<M: Matrix + DefaultSolver, Ls: LinearSolver<M>> Default for NewtonNonlinearSolver<M, Ls> {
     fn default() -> Self {
         Self::new(Ls::default())
     }
 }
 
-impl<M: Matrix, Ls: LinearSolver<M>> NonLinearSolver<M> for NewtonNonlinearSolver<M, Ls> {
+impl<M: Matrix + DefaultSolver, Ls: LinearSolver<M>> NonLinearSolver<M> for NewtonNonlinearSolver<M, Ls> {
     fn convergence(&self) -> &Convergence<M::V> {
         self.convergence
             .as_ref()

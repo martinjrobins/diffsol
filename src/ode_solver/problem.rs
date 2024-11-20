@@ -1,13 +1,13 @@
 use std::rc::Rc;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError},
-    ode_solver_error,
-    vector::Vector,
-    OdeEquations,
+    error::{DiffsolError, OdeSolverError}, ode_solver_error, vector::Vector, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, Bdf, BdfState, DefaultDenseMatrix, DefaultSolver, LinearSolver, MatrixRef, NewtonNonlinearSolver, OdeEquations, OdeEquationsImplicit, OdeEquationsSens, OdeSolverState, Sdirk, SdirkState, SensEquations, Tableau, VectorRef, Op, DenseMatrix
 };
 
-pub struct OdeSolverProblem<Eqn: OdeEquations> {
+pub struct OdeSolverProblem<Eqn> 
+where
+    Eqn: OdeEquations,
+{
     pub eqn: Rc<Eqn>,
     pub rtol: Eqn::T,
     pub atol: Rc<Eqn::V>,
@@ -23,7 +23,10 @@ pub struct OdeSolverProblem<Eqn: OdeEquations> {
 }
 
 // impl clone
-impl<Eqn: OdeEquations> Clone for OdeSolverProblem<Eqn> {
+impl<Eqn> Clone for OdeSolverProblem<Eqn> 
+where
+        Eqn: OdeEquations, 
+{
     fn clone(&self) -> Self {
         Self {
             eqn: self.eqn.clone(),
@@ -42,7 +45,47 @@ impl<Eqn: OdeEquations> Clone for OdeSolverProblem<Eqn> {
     }
 }
 
-impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
+macro_rules! sdirk_solver_from_tableau {
+        ($state:ident, $state_sens:ident, $method:ident, $method_sens:ident, $tableau:ident) => {
+
+            pub fn $state(&self) -> Result<SdirkState<Eqn::V>, DiffsolError>
+            where 
+                Eqn: OdeEquationsImplicit,
+            {
+                self.sdirk_state(Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau())
+            }
+
+            pub fn $state_sens<DM: DenseMatrix>(&self) -> Result<SdirkState<Eqn::V>, DiffsolError>
+            where 
+                Eqn: OdeEquationsSens,
+            {
+                self.sdirk_state_sens(Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau())
+            }
+
+            pub fn $method<LS: LinearSolver<Eqn::M>>(&self, state: SdirkState<Eqn::V>) -> Result<Sdirk<'_, <Eqn::V as DefaultDenseMatrix>::M, Eqn, LS>, DiffsolError>
+            where 
+                Eqn: OdeEquationsImplicit,
+                for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+                for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+            {
+                self.sdirk_solver(state, Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau())
+            }
+
+            pub fn $method_sens<LS: LinearSolver<Eqn::M>>(&self, state: SdirkState<Eqn::V>) -> Result<Sdirk<'_, <Eqn::V as DefaultDenseMatrix>::M, Eqn, LS>, DiffsolError>
+            where 
+                Eqn: OdeEquationsSens,
+                for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+                for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+            {
+                self.sdirk_solver(state, Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau())
+            }
+        };
+    }
+
+impl<Eqn> OdeSolverProblem<Eqn> 
+where
+    Eqn: OdeEquations, 
+{
     pub fn default_rtol() -> Eqn::T {
         Eqn::T::from(1e-6)
     }
@@ -92,6 +135,94 @@ impl<Eqn: OdeEquations> OdeSolverProblem<Eqn> {
         eqn.set_params(Rc::new(p));
         Ok(())
     }
+}
+
+impl<Eqn> OdeSolverProblem<Eqn> 
+where
+    Eqn: OdeEquations, 
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
+{
+    pub fn bdf_state<LS: LinearSolver<Eqn::M>>(&self) -> Result<BdfState<Eqn::V, <Eqn::V as DefaultDenseMatrix>::M>, DiffsolError>
+    where 
+        Eqn: OdeEquationsImplicit,
+    {
+        BdfState::new::<LS, Eqn>(self, 1)
+    }
+
+    pub fn bdf_state_sens<LS: LinearSolver<Eqn::M>>(&self) -> Result<BdfState<Eqn::V, <Eqn::V as DefaultDenseMatrix>::M>, DiffsolError>
+    where 
+        Eqn: OdeEquationsSens,
+    {
+        BdfState::new_with_sensitivities::<LS, Eqn>(self, 1)
+    }
+
+    pub fn bdf_solver<LS: LinearSolver<Eqn::M>>(&self, state: BdfState<Eqn::V, <Eqn::V as DefaultDenseMatrix>::M>) -> Result<Bdf<'_, <Eqn::V as DefaultDenseMatrix>::M, Eqn, NewtonNonlinearSolver<Eqn::M, LS>>, DiffsolError>
+    where 
+        Eqn: OdeEquationsImplicit,
+        for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+        for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+    {
+        let newton_solver = NewtonNonlinearSolver::new(LS::default());
+        Bdf::new(self, state, newton_solver)
+    }
+
+    pub(crate) fn bdf_solver_aug<LS: LinearSolver<Eqn::M>, Aug: AugmentedOdeEquationsImplicit<Eqn>>(&self, state: BdfState<Eqn::V, <Eqn::V as DefaultDenseMatrix>::M>, aug_eqn: Aug) -> Result<Bdf<'_, <Eqn::V as DefaultDenseMatrix>::M, Eqn, NewtonNonlinearSolver<Eqn::M, LS>, Aug>, DiffsolError>
+    where 
+        Eqn: OdeEquationsImplicit,
+        for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+        for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+    {
+        let newton_solver = NewtonNonlinearSolver::new(LS::default());
+        Bdf::new_augmented(state, self, aug_eqn, newton_solver)
+    }
+
+    pub fn bdf_solver_sens<LS: LinearSolver<Eqn::M>>(&self, state: BdfState<Eqn::V, <Eqn::V as DefaultDenseMatrix>::M>) -> Result<Bdf<'_, <Eqn::V as DefaultDenseMatrix>::M, Eqn, NewtonNonlinearSolver<Eqn::M, LS>, SensEquations<Eqn>>, DiffsolError>
+    where 
+        Eqn: OdeEquationsSens,
+        for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+        for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+    {
+        let sens_eqn = SensEquations::new(self);
+        self.bdf_solver_aug(state, sens_eqn)
+    }
+    
+    pub fn sdirk_state<DM: DenseMatrix>(&self, tableau: Tableau<DM>) -> Result<SdirkState<Eqn::V>, DiffsolError>
+    where 
+        Eqn: OdeEquationsImplicit,
+    {
+        SdirkState::new(self, tableau.order())
+    }
+
+    pub fn sdirk_state_sens<DM: DenseMatrix>(&self, tableau: Tableau<DM>) -> Result<SdirkState<Eqn::V>, DiffsolError>
+    where 
+        Eqn: OdeEquationsSens,
+    {
+        SdirkState::new_with_sensitivities(self, tableau.order())
+    }
+
+    pub fn sdirk_solver<LS: LinearSolver<Eqn::M>, DM: DenseMatrix<V=Eqn::V, T=Eqn::T>>(&self, state: SdirkState<Eqn::V>, tableau: Tableau<DM>) -> Result<Sdirk<'_, DM, Eqn, LS>, DiffsolError>
+    where 
+        Eqn: OdeEquationsImplicit,
+        for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+        for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+    {
+        let linear_solver = LS::default();
+        Sdirk::new(self, state, tableau, linear_solver)
+    }
+
+    pub fn sdirk_solver_sens<LS: LinearSolver<Eqn::M>, DM: DenseMatrix<V=Eqn::V, T=Eqn::T>>(&self, state: SdirkState<Eqn::V>, tableau: Tableau<DM>) -> Result<Sdirk<'_, DM, Eqn, LS>, DiffsolError>
+    where 
+        Eqn: OdeEquationsSens,
+        for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+        for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+    {
+        let linear_solver = LS::default();
+        Sdirk::new(self, state, tableau, linear_solver)
+    }
+
+    sdirk_solver_from_tableau!(tr_bdf2_state, tr_bdf2_state_sens, tr_bdf2_solver, tr_bdf2_solver_sens, tr_bdf2);
+    sdirk_solver_from_tableau!(esdirk34_state, esdirk34_state_sens, esdirk34_solver, esdirk34_solver_sens, esdirk34);
+    
 }
 
 #[derive(Debug, Clone)]

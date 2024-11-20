@@ -158,9 +158,6 @@ pub use vector::sundials::SundialsVector;
 #[cfg(feature = "sundials")]
 pub use linear_solver::sundials::SundialsLinearSolver;
 
-#[cfg(feature = "sundials")]
-pub use ode_solver::sundials::SundialsIda;
-
 #[cfg(feature = "suitesparse")]
 pub use linear_solver::suitesparse::klu::KLU;
 
@@ -184,14 +181,14 @@ use ode_solver::jacobian_update::JacobianUpdate;
 pub use ode_solver::state::{StateRef, StateRefMut};
 pub use ode_solver::{
     adjoint_equations::AdjointContext, adjoint_equations::AdjointEquations,
-    adjoint_equations::AdjointInit, adjoint_equations::AdjointRhs, bdf::Bdf, bdf::BdfAdj,
+    adjoint_equations::AdjointInit, adjoint_equations::AdjointRhs, bdf::Bdf,
     bdf_state::BdfState, builder::OdeBuilder, checkpointing::Checkpointing,
     checkpointing::HermiteInterpolator, equations::AugmentedOdeEquations,
     equations::AugmentedOdeEquationsImplicit, equations::NoAug, equations::OdeEquations,
     equations::OdeEquationsAdjoint, equations::OdeEquationsImplicit, equations::OdeEquationsRef,
     equations::OdeEquationsSens, equations::OdeSolverEquations, method::AdjointOdeSolverMethod,
-    method::OdeSolverMethod, method::OdeSolverStopReason, method::SensitivitiesOdeSolverMethod,
-    problem::OdeSolverProblem, sdirk::Sdirk, sdirk::SdirkAdj, sdirk_state::SdirkState,
+    method::OdeSolverMethod, method::OdeSolverStopReason, 
+    problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::SdirkState,
     sens_equations::SensEquations, sens_equations::SensInit, sens_equations::SensRhs,
     state::OdeSolverState, tableau::Tableau,
 };
