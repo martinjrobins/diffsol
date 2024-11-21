@@ -151,7 +151,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     {
         let mut ret = Self::new_without_initialise(ode_problem)?;
         let mut root_solver =
-            NewtonNonlinearSolver::new(LS::default_solver());
+            NewtonNonlinearSolver::new(LS::default());
         ret.set_consistent(ode_problem, &mut root_solver)?;
         ret.set_step_size(ode_problem, solver_order);
         Ok(ret)
@@ -166,10 +166,10 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         LS: LinearSolver<Eqn::M>,
     {
         let augmented_eqn = SensEquations::new(ode_problem);
-        Self::new_with_augmented(ode_problem, augmented_eqn, solver_order).map(|(state, _)| state)
+        Self::new_with_augmented::<LS, _, _>(ode_problem, augmented_eqn, solver_order).map(|(state, _)| state)
     }
 
-    fn new_with_augmented<Eqn, AugmentedEqn>(
+    fn new_with_augmented<LS, Eqn, AugmentedEqn>(
         ode_problem: &OdeSolverProblem<Eqn>,
         mut augmented_eqn: AugmentedEqn,
         solver_order: usize,
@@ -177,11 +177,11 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     where
         Eqn: OdeEquationsImplicit<T = V::T, V = V>,
         AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> + std::fmt::Debug,
-        Eqn::M: DefaultSolver,
+        LS: LinearSolver<Eqn::M>,
     {
         let mut ret = Self::new_without_initialise_augmented(ode_problem, &mut augmented_eqn)?;
         let mut root_solver =
-            NewtonNonlinearSolver::new(<Eqn::M as DefaultSolver>::default_solver());
+            NewtonNonlinearSolver::new(LS::default());
         ret.set_consistent(ode_problem, &mut root_solver)?;
         let mut root_solver_sens =
             NewtonNonlinearSolver::new(<Eqn::M as DefaultSolver>::default_solver());

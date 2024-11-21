@@ -213,19 +213,20 @@ mod tests {
     use nalgebra::{DMatrix, DVector};
 
     use crate::{
-        ode_solver::test_models::robertson::robertson, OdeEquations,
-        OdeSolverMethod, OdeSolverState, Op, Vector,
+        ode_solver::test_models::robertson::robertson, NalgebraLU, OdeEquations, OdeSolverMethod, OdeSolverState, Op, Vector
     };
 
     use super::{Checkpointing, HermiteInterpolator};
 
     #[test]
     fn test_checkpointing() {
-        let (problem, soln) = robertson::<DMatrix<f64>>(false);
+        type M = DMatrix<f64>;
+        type LS = NalgebraLU<f64>;
+        let (problem, soln) = robertson::<M>(false);
         let t_final = soln.solution_points.last().unwrap().t;
         let n_steps = 30;
-        let state0 = problem.bdf_state().unwrap();
-        let solver = problem.bdf_solver(state0).unwrap();
+        let state0 = problem.bdf_state::<LS>().unwrap();
+        let mut solver = problem.bdf_solver::<LS>(state0.clone()).unwrap();
         let mut checkpoints = vec![state0];
         let mut i = 0;
         let mut ys = Vec::new();

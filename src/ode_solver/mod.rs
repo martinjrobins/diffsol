@@ -33,7 +33,7 @@ mod tests {
         op::OpStatistics, CraneliftModule, DenseMatrix, DiffSl, MatrixCommon, NonLinearOpJacobian,
         OdeBuilder, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsRef,
         OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
-        VectorView,
+        VectorView, AdjointEquations,
     };
     use crate::{ConstantOp, DefaultDenseMatrix, DefaultSolver, NonLinearOp, Op, Vector};
     use num_traits::One;
@@ -138,14 +138,15 @@ mod tests {
         method.state().y.clone()
     }
 
-    pub fn test_ode_solver_adjoint<'a, M, Eqn, Method>(
+    pub fn test_ode_solver_adjoint<'a, 'b, M, Eqn, Method>(
         method: Method,
         solution: OdeSolverSolution<M::V>,
-    ) -> Method::AdjointSolver
+    ) -> (Method::DefaultAdjointSolver<'b>, OdeSolverProblem<AdjointEquations<'a, Eqn, Method>>)
     where
         M: Matrix,
         Method: AdjointOdeSolverMethod<'a, Eqn>,
         Eqn: OdeEquationsAdjoint<M = M, T = M::T, V = M::V>,
+        Eqn::V: DefaultDenseMatrix<T = M::T>,
         Eqn::M: DefaultSolver,
     {
         let t0 = solution.solution_points.first().unwrap().t;
@@ -190,9 +191,10 @@ mod tests {
         ydots.push(method.state().dy.clone());
         checkpoints.push(method.checkpoint());
         let last_segment = HermiteInterpolator::new(ys, ydots, ts);
-        let mut adjoint_solver = method
-            .into_adjoint_solver(checkpoints, last_segment)
+        let (adjoint_problem, adjoint_equations) = method
+            .into_adjoint_problem(checkpoints, last_segment)
             .unwrap();
+        let mut adjoint_solver = adjoint_problem.default_solver(adjoint_equations).unwrap();
         let y_expect = M::V::from_element(method.problem().eqn.rhs().nstates(), M::T::zero());
         adjoint_solver
             .state()
@@ -233,7 +235,7 @@ mod tests {
                 point.state
             );
         }
-        adjoint_solver
+        (adjoint_solver, adjoint_problem)
     }
 
     pub struct TestEqnInit<M> {
@@ -424,7 +426,7 @@ mod tests {
         M: DefaultSolver<T = f64>,
         M::V: DefaultDenseMatrix<T = f64>,
         Method: OdeSolverMethod<'a, DiffSl<M, CraneliftModule>>,
-        F: FnOnce(&OdeSolverProblem<DiffSl<M, CraneliftModule>>) -> Method,  
+        F: FnOnce(&'a OdeSolverProblem<DiffSl<M, CraneliftModule>>) -> Method,  
     {
         let eqn = DiffSl::compile(
             "
@@ -446,7 +448,7 @@ mod tests {
 
         let e = 0.8;
         let problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
-        let solver = f(&problem);
+        let mut solver = f(&problem);
 
         let final_time = 2.5;
 
@@ -541,22 +543,23 @@ mod tests {
         }
     }
 
-    pub fn test_param_sweep<Method, Eqn, F>(
+    pub fn test_param_sweep<'a, Method, Eqn, F>(
         f: F,
         mut problem: OdeSolverProblem<Eqn>,
         ps: Vec<Eqn::V>,
     ) where
-        for <'a> Method: OdeSolverMethod<'a, Eqn>,
-        Eqn: OdeEquationsImplicit,
+        Method: OdeSolverMethod<'a, Eqn>,
+        Eqn: OdeEquationsImplicit + 'a,
         Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
-        F: Fn(&OdeSolverProblem<Eqn>) -> Method,  
+        F: Fn(&'a OdeSolverProblem<Eqn>, Option<Method::State>) -> Method,  
 
     {
         let mut old_soln = None;
+        let mut state = None;
         for p in ps {
             problem.set_params(p).unwrap();
-            let s = f(&problem);
+            let mut s = f(&problem, state);
             let (ys, _ts) = s.solve(Eqn::T::from(10.0)).unwrap();
             // check that the new solution is different from the old one
             if let Some(old_soln) = &mut old_soln {
@@ -567,6 +570,7 @@ mod tests {
                 assert!(diff > Eqn::T::from(1.0e-6), "diff: {}", diff);
             }
             old_soln = Some(ys.column(ys.ncols() - 1).into_owned());
+            state = Some(s.into_state());
         }
     }
 

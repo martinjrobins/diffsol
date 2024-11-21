@@ -107,11 +107,11 @@ where
     {
         let mut ret_t = Vec::new();
         let mut ret_y = Vec::new();
-        let mut write_out = |t: Eqn::T, y: &Eqn::V, g: &Eqn::V| {
+        fn write_out<Eqn: OdeEquations>(p: &OdeSolverProblem<Eqn>, ret_y: &mut Vec<Eqn::V>, ret_t: &mut Vec<Eqn::T>, t: Eqn::T, y: &Eqn::V, g: &Eqn::V) {
             ret_t.push(t);
-            match self.problem().eqn.out() {
+            match p.eqn.out() {
                 Some(out) => {
-                    if self.problem().integrate_out {
+                    if p.integrate_out {
                         ret_y.push(g.clone());
                     } else {
                         ret_y.push(out.call(y, t));
@@ -119,10 +119,13 @@ where
                 }
                 None => ret_y.push(y.clone()),
             }
-        };
+        }
 
         // do the main loop
         write_out(
+            self.problem(),
+            &mut ret_y,
+            &mut ret_t,
             self.state().t,
             self.state().y,
             self.state().g,
@@ -130,6 +133,9 @@ where
         self.set_stop_time(final_time)?;
         while self.step()? != OdeSolverStopReason::TstopReached {
             write_out(
+                self.problem(),
+                &mut ret_y,
+                &mut ret_t,
                 self.state().t,
                 self.state().y,
                 self.state().g,
@@ -138,6 +144,9 @@ where
 
         // store the final step
         write_out(
+            self.problem(),
+            &mut ret_y,
+            &mut ret_t,
             self.state().t,
             self.state().y,
             self.state().g,
@@ -177,17 +186,26 @@ where
             return Err(ode_solver_error!(InvalidTEval));
         }
 
-        let mut write_out = |i: usize, y: Option<&Eqn::V>, g: Option<&Eqn::V>| {
-            let mut y_out = ret.column_mut(i);
+        fn write_out<Eqn: OdeEquations>(
+            p: &OdeSolverProblem<Eqn>,
+            y_out: &mut <Eqn::V as DefaultDenseMatrix>::M,
+            t_eval: &[Eqn::T],
+            i: usize,
+            y: Option<&Eqn::V>,
+            g: Option<&Eqn::V>) 
+        where
+            Eqn::V: DefaultDenseMatrix
+        {
+            let mut y_out = y_out.column_mut(i);
             if let Some(g) = g {
                 y_out.copy_from(g);
             } else if let Some(y) = y {
-                match self.problem().eqn.out() {
+                match p.eqn.out() {
                     Some(out) => y_out.copy_from(&out.call(y, t_eval[i])),
                     None => y_out.copy_from(y),
                 }
             }
-        };
+        }
 
         // do loop
         self.set_stop_time(t_eval[t_eval.len() - 1])?;
@@ -198,10 +216,11 @@ where
             }
             if self.problem().integrate_out {
                 let g = self.interpolate_out(*t)?;
-                write_out(i, None, Some(&g));
+
+                write_out(self.problem(), &mut ret, t_eval, i, None, Some(&g));
             } else {
                 let y = self.interpolate(*t)?;
-                write_out(i, Some(&y), None);
+                write_out(self.problem(), &mut ret, t_eval, i, Some(&y), None);
             }
         }
 
@@ -210,9 +229,9 @@ where
             step_reason = self.step()?;
         }
         if self.problem().integrate_out {
-            write_out(t_eval.len() - 1, None, Some(self.state().g));
+            write_out(self.problem(), &mut ret, t_eval, t_eval.len() - 1, None, Some(self.state().g));
         } else {
-            write_out(t_eval.len() - 1, Some(self.state().y), None);
+            write_out(self.problem(), &mut ret, t_eval, t_eval.len() - 1, Some(self.state().y), None);
         }
         Ok(ret)
     }
@@ -281,7 +300,8 @@ where
 
         // construct the adjoint solver
         let last_segment = HermiteInterpolator::new(ys, ydots, ts);
-        let mut adjoint_solver = self.into_adjoint_solver(checkpoints, last_segment)?;
+        let (adjoint_problem, adjoint_aug_eqn) = self.into_adjoint_problem(checkpoints, last_segment)?;
+        let mut adjoint_solver = Self::default_adjoint_solver(&adjoint_problem, adjoint_aug_eqn)?;
 
         // solve the adjoint problem
         adjoint_solver.set_stop_time(t0).unwrap();
@@ -382,25 +402,29 @@ where
     Eqn: OdeEquationsSens + 'a,
 {
 }
-impl<'a, T> SensitivitiesOdeSolverMethod<'a, T> for T where T: AugmentedOdeSolverMethod<'a, T, SensEquations<T>> {}
 
 pub trait AdjointOdeSolverMethod<'a, Eqn>: OdeSolverMethod<'a, Eqn>
 where
     Eqn: OdeEquationsAdjoint + 'a,
     Self: 'a,
 {
-    type AdjointSolver: AugmentedOdeSolverMethod<
-        'a,
+    type DefaultAdjointSolver<'b>: AugmentedOdeSolverMethod<
+        'b,
         AdjointEquations<'a, Eqn, Self>,
         AdjointEquations<'a, Eqn, Self>,
         State = Self::State,
-    >;
+    > where 'a: 'b;
 
-    fn into_adjoint_solver(
+    fn default_adjoint_solver<'b>(
+        problem: &'b OdeSolverProblem<AdjointEquations<'a, Eqn, Self>>,
+        aug_eqn: AdjointEquations<'a, Eqn, Self>,
+    ) -> Result<Self::DefaultAdjointSolver<'b>, DiffsolError>;
+
+    fn into_adjoint_problem(
         self,
         checkpoints: Vec<Self::State>,
         last_segment: HermiteInterpolator<Eqn::V>,
-    ) -> Result<Self::AdjointSolver, DiffsolError>
+    ) -> Result<(OdeSolverProblem<AdjointEquations<'a, Eqn, Self>>, AdjointEquations<'a, Eqn, Self>), DiffsolError>
     where
         Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
@@ -417,11 +441,11 @@ where
         // construct adjoint equations and problem
         let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
         let new_eqn = AdjointEquations::new(problem, context.clone(), false);
-        let mut new_augmented_eqn = AdjointEquations::new(problem, context, true);
+        let new_augmented_eqn = AdjointEquations::new(problem, context, true);
         let adj_problem = OdeSolverProblem {
             eqn: Rc::new(new_eqn),
             rtol: problem.rtol,
-            atol: problem.atol,
+            atol: problem.atol.clone(),
             t0: t,
             h0: -h,
             integrate_out: false,
@@ -433,17 +457,7 @@ where
             param_atol: None,
         };
 
-        // initialise adjoint state
-        let mut state =
-            Self::State::new_without_initialise_augmented(&adj_problem, &mut new_augmented_eqn)?;
-        let mut init_nls =
-            NewtonNonlinearSolver::<Eqn::M, <Eqn::M as DefaultSolver>::LS>::default();
-        let new_augmented_eqn =
-            state.set_consistent_augmented(&adj_problem, new_augmented_eqn, &mut init_nls)?;
-
-        // create the adjoint solver
-        let mut adjoint_solver = adj_problem.bdf_solver_aug(state, new_augmented_eqn)?;
-        Ok(adjoint_solver)
+        Ok((adj_problem, new_augmented_eqn))
     }
 }
 
@@ -453,20 +467,17 @@ mod test {
         ode_solver::test_models::exponential_decay::{
             exponential_decay_problem, exponential_decay_problem_adjoint,
             exponential_decay_problem_sens,
-        },
-        scale, Bdf, OdeSolverMethod, OdeSolverState, Vector,
+        }, scale, Bdf, NalgebraLU, OdeSolverMethod, OdeSolverState, Vector
     };
 
     #[test]
     fn test_solve() {
-        let mut s = Bdf::default();
         let (problem, _soln) = exponential_decay_problem::<nalgebra::DMatrix<f64>>(false);
+        let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let k = 0.1;
         let y0 = nalgebra::DVector::from_vec(vec![1.0, 1.0]);
         let expect = |t: f64| &y0 * scale(f64::exp(-k * t));
-        let state = problem.bdf_state();
-        let s = problem.bdf_solver(state);
         let (y, t) = s.solve(10.0).unwrap();
         assert!((t[0] - 0.0).abs() < 1e-10);
         assert!((t[t.len() - 1] - 10.0).abs() < 1e-10);
@@ -478,8 +489,8 @@ mod test {
 
     #[test]
     fn test_solve_integrate_out() {
-        let mut s = Bdf::default();
         let (problem, _soln) = exponential_decay_problem_adjoint::<nalgebra::DMatrix<f64>>();
+        let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let k = 0.1;
         let y0 = nalgebra::DVector::from_vec(vec![1.0, 1.0]);
@@ -491,8 +502,7 @@ mod test {
                 3.0 * g[0] + 4.0 * g[1],
             ])
         };
-        let state = OdeSolverState::new(&problem, &s).unwrap();
-        let (y, t) = s.solve(&problem, state, 10.0).unwrap();
+        let (y, t) = s.solve(10.0).unwrap();
         for (i, t_i) in t.iter().enumerate() {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&expect(*t_i), problem.atol.as_ref(), problem.rtol, 15.0);
@@ -501,12 +511,11 @@ mod test {
 
     #[test]
     fn test_dense_solve() {
-        let mut s = Bdf::default();
         let (problem, soln) = exponential_decay_problem::<nalgebra::DMatrix<f64>>(false);
+        let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
-        let state = OdeSolverState::new(&problem, &s).unwrap();
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
-        let y = s.solve_dense(&problem, state, t_eval.as_slice()).unwrap();
+        let y = s.solve_dense(t_eval.as_slice()).unwrap();
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&soln_pt.state, problem.atol.as_ref(), problem.rtol, 15.0);
@@ -515,12 +524,11 @@ mod test {
 
     #[test]
     fn test_dense_solve_integrate_out() {
-        let mut s = Bdf::default();
         let (problem, soln) = exponential_decay_problem_adjoint::<nalgebra::DMatrix<f64>>();
+        let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
-        let state = OdeSolverState::new(&problem, &s).unwrap();
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
-        let y = s.solve_dense(&problem, state, t_eval.as_slice()).unwrap();
+        let y = s.solve_dense(t_eval.as_slice()).unwrap();
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&soln_pt.state, problem.atol.as_ref(), problem.rtol, 15.0);
@@ -529,13 +537,12 @@ mod test {
 
     #[test]
     fn test_dense_solve_sensitivities() {
-        let mut s = Bdf::with_sensitivities();
         let (problem, soln) = exponential_decay_problem_sens::<nalgebra::DMatrix<f64>>(false);
+        let mut s = problem.bdf_sens::<NalgebraLU<f64>>().unwrap();
 
-        let state = OdeSolverState::new_with_sensitivities(&problem, &s).unwrap();
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
         let (y, sens) = s
-            .solve_dense_sensitivities(&problem, state, t_eval.as_slice())
+            .solve_dense_sensitivities(t_eval.as_slice())
             .unwrap();
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
@@ -556,12 +563,11 @@ mod test {
 
     #[test]
     fn test_solve_adjoint() {
-        let s = Bdf::default();
         let (problem, soln) = exponential_decay_problem_adjoint::<nalgebra::DMatrix<f64>>();
+        let s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
-        let state = OdeSolverState::new(&problem, &s).unwrap();
         let final_time = soln.solution_points[soln.solution_points.len() - 1].t;
-        let (g, gs_adj) = s.solve_adjoint(&problem, state, final_time, None).unwrap();
+        let (g, gs_adj) = s.solve_adjoint(final_time, None).unwrap();
         g.assert_eq_norm(
             &soln.solution_points[soln.solution_points.len() - 1].state,
             problem.out_atol.as_ref().unwrap(),

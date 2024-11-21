@@ -3,14 +3,18 @@ use crate::{
     ode_solver_error,
     scalar::IndexType,
     scale, AugmentedOdeEquations, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op,
-    StateRef, StateRefMut, Vector, VectorViewMut,
+    StateRef, StateRefMut, Vector, VectorViewMut, DefaultDenseMatrix
 };
 use std::ops::MulAssign;
 
 use super::state::StateCommon;
 
 #[derive(Clone)]
-pub struct BdfState<V: Vector, M: DenseMatrix<T = V::T, V = V>> {
+pub struct BdfState<V, M = <V as DefaultDenseMatrix>::M> 
+where 
+    V: Vector + DefaultDenseMatrix,
+    M: DenseMatrix<T = V::T, V = V>
+{
     pub(crate) order: usize,
     pub(crate) diff: M,
     pub(crate) sdiff: Vec<M>,
@@ -34,7 +38,7 @@ pub struct BdfState<V: Vector, M: DenseMatrix<T = V::T, V = V>> {
 
 impl<V, M> BdfState<V, M>
 where
-    V: Vector,
+    V: Vector + DefaultDenseMatrix,
     M: DenseMatrix<T = V::T, V = V>,
 {
     pub(crate) const MAX_ORDER: IndexType = 5;
@@ -83,7 +87,7 @@ where
 
 impl<V, M> OdeSolverState<V> for BdfState<V, M>
 where
-    V: Vector,
+    V: Vector + DefaultDenseMatrix,
     M: DenseMatrix<T = V::T, V = V>,
 {
     fn set_problem<Eqn: OdeEquations>(

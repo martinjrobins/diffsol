@@ -396,8 +396,7 @@ mod tests {
     use nalgebra::DVector;
 
     use crate::{
-        Bdf, ConstantOp, LinearOp, NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations,
-        OdeSolverMethod, OdeSolverState, Op, Vector,
+        ConstantOp, LinearOp, NalgebraLU, NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeSolverMethod, Op, Vector
     };
 
     use super::{DiffSl, DiffSlContext};
@@ -467,10 +466,9 @@ mod tests {
 
         // solver a bit and check the state and output
         let problem = OdeBuilder::new().p([r, k]).build_from_eqn(eqn).unwrap();
-        let mut solver = Bdf::default();
+        let mut solver = problem.bdf::<NalgebraLU<f64>>().unwrap();
         let t = 1.0;
-        let state = OdeSolverState::new(&problem, &solver).unwrap();
-        let (ys, ts) = solver.solve(&problem, state, t).unwrap();
+        let (ys, ts) = solver.solve(t).unwrap();
         for (i, t) in ts.iter().enumerate() {
             let y_expect = k / (1.0 + (k - y0) * (-r * t).exp() / y0);
             let z_expect = 2.0 * y_expect;
@@ -480,8 +478,8 @@ mod tests {
 
         // do it again with some explicit t_evals
         let t_evals = vec![0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0];
-        let state = OdeSolverState::new(&problem, &solver).unwrap();
-        let ys = solver.solve_dense(&problem, state, &t_evals).unwrap();
+        let mut solver = problem.bdf::<NalgebraLU<f64>>().unwrap();
+        let ys = solver.solve_dense(&t_evals).unwrap();
         for (i, t) in t_evals.iter().enumerate() {
             let y_expect = k / (1.0 + (k - y0) * (-r * t).exp() / y0);
             let z_expect = 2.0 * y_expect;

@@ -11,6 +11,7 @@ use crate::matrix::MatrixRef;
 use crate::ode_solver_error;
 use crate::vector::VectorRef;
 use crate::AdjointEquations;
+use crate::DefaultDenseMatrix;
 use crate::LinearSolver;
 use crate::NewtonNonlinearSolver;
 use crate::NoAug;
@@ -29,7 +30,7 @@ use super::bdf::BdfStatistics;
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
 
-impl<'a, M, Eqn, LS, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn> for Sdirk<'a, M, Eqn, LS, AugEqn>
+impl<'a, M, Eqn, LS, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn> for Sdirk<'a, Eqn, LS, M, AugEqn>
 where
     Eqn: OdeEquationsImplicit,
     AugEqn: AugmentedOdeEquationsImplicit<Eqn>,
@@ -39,13 +40,19 @@ where
 }
 
 
-impl<'a, M, Eqn, LS> AdjointOdeSolverMethod<'a, Eqn> for Sdirk<'a, M, Eqn, LS>
+impl<'a, M, Eqn, LS> AdjointOdeSolverMethod<'a, Eqn> for Sdirk<'a, Eqn, LS, M>
 where 
     Eqn: OdeEquationsAdjoint,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     LS: NonLinearSolver<Eqn::M>,
 {
-    type AdjointSolver = Sdirk<'a, M, AdjointEquations<'a, Eqn, Sdirk<'a, M, Eqn, LS>>, LS, AdjointEquations<'a, Eqn, Sdirk<'a, M, Eqn, LS>>>;
+    type DefaultAdjointSolver<'b> = Sdirk<'b, M, AdjointEquations<'a, Eqn, Sdirk<'a, M, Eqn, LS>>, LS, AdjointEquations<'a, Eqn, Sdirk<'a, M, Eqn, LS>>>;
+    fn default_adjoint_solver<'b>(
+            problem: &'b OdeSolverProblem<AdjointEquations<'a, Eqn, Self>>,
+            aug_eqn: AdjointEquations<'a, Eqn, Self>,
+        ) -> Result<Self::DefaultAdjointSolver<'b>, DiffsolError> {
+            Sdirk::new_augmented()
+    }
 }
 
 
@@ -58,11 +65,12 @@ where
 /// - The upper triangular part of the `a` matrix must be zero (i.e. not fully implicit).
 /// - The diagonal of the `a` matrix must be the same non-zero value for all rows (i.e. an SDIRK method), except for the first row which can be zero for ESDIRK methods.
 /// - The last row of the `a` matrix must be the same as the `b` vector, and the last element of the `c` vector must be 1 (i.e. a stiffly accurate method)
-pub struct Sdirk<'a, M, Eqn, LS, AugmentedEqn = NoAug<Eqn>>
+pub struct Sdirk<'a, Eqn, LS, M = <Eqn::V as DefaultDenseMatrix>::M, AugmentedEqn = NoAug<Eqn>>
 where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     LS: LinearSolver<Eqn::M>,
     Eqn: OdeEquationsImplicit,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
@@ -95,7 +103,7 @@ where
 
 
 
-impl<'a, M, Eqn, LS, AugmentedEqn> Sdirk<'a, M, Eqn, LS, AugmentedEqn>
+impl<'a, M, Eqn, LS, AugmentedEqn> Sdirk<'a, Eqn, LS, M, AugmentedEqn>
 where
     LS: LinearSolver<Eqn::M>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
@@ -438,7 +446,7 @@ where
     }
 }
 
-impl<'a, M, Eqn, AugmentedEqn, LS> OdeSolverMethod<'a, Eqn> for Sdirk<'a, M, Eqn, LS, AugmentedEqn>
+impl<'a, M, Eqn, AugmentedEqn, LS> OdeSolverMethod<'a, Eqn> for Sdirk<'a, Eqn, LS, M, AugmentedEqn>
 where
     LS: LinearSolver<Eqn::M>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
