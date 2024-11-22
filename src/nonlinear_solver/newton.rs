@@ -1,7 +1,9 @@
 use std::rc::Rc;
 
 use crate::{
-    error::{DiffsolError, NonLinearSolverError}, non_linear_solver_error, Convergence, ConvergenceStatus, LinearSolver, Matrix, NonLinearOp, NonLinearOpJacobian, NonLinearSolver, Vector
+    error::{DiffsolError, NonLinearSolverError},
+    non_linear_solver_error, Convergence, ConvergenceStatus, LinearSolver, Matrix, NonLinearOp,
+    NonLinearOpJacobian, NonLinearSolver, Vector,
 };
 
 pub fn newton_iteration<V: Vector>(

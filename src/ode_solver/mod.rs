@@ -29,9 +29,9 @@ mod tests {
     use crate::matrix::Matrix;
     use crate::op::unit::UnitCallable;
     use crate::{
-        op::OpStatistics, CraneliftModule, NonLinearOpJacobian,
-        OdeBuilder, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsRef,
-        OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, AdjointOdeSolverMethod,
+        op::OpStatistics, AdjointOdeSolverMethod, CraneliftModule, NonLinearOpJacobian, OdeBuilder,
+        OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsRef, OdeSolverMethod,
+        OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
     };
     use crate::{ConstantOp, DefaultDenseMatrix, DefaultSolver, NonLinearOp, Op, Vector};
     use num_traits::One;
@@ -61,18 +61,12 @@ mod tests {
                                 return method.state().y.clone();
                             }
                             Ok(OdeSolverStopReason::TstopReached) => {
-                                break (
-                                    method.state().y.clone(),
-                                    method.state().s.to_vec(),
-                                );
+                                break (method.state().y.clone(), method.state().s.to_vec());
                             }
                             _ => (),
                         }
                     },
-                    Err(_) => (
-                        method.state().y.clone(),
-                        method.state().s.to_vec(),
-                    ),
+                    Err(_) => (method.state().y.clone(), method.state().s.to_vec()),
                 }
             } else {
                 while method.state().t.abs() < point.t.abs() {
@@ -139,8 +133,7 @@ mod tests {
     pub fn test_ode_solver_adjoint<'a, 'b, M, Eqn, Method>(
         mut method: Method,
         solution: OdeSolverSolution<M::V>,
-    )
-    where
+    ) where
         M: Matrix,
         Method: AdjointOdeSolverMethod<'a, Eqn>,
         Eqn: OdeEquationsAdjoint<M = M, T = M::T, V = M::V> + 'a,
@@ -192,7 +185,9 @@ mod tests {
         let (adjoint_problem, adjoint_equations) = method
             .into_adjoint_problem(checkpoints, last_segment)
             .unwrap();
-        let mut adjoint_solver = method.default_adjoint_solver(&adjoint_problem, adjoint_equations).unwrap();
+        let mut adjoint_solver = method
+            .default_adjoint_solver(&adjoint_problem, adjoint_equations)
+            .unwrap();
         let y_expect = M::V::from_element(adjoint_problem.eqn.rhs().nstates(), M::T::zero());
         adjoint_solver
             .state()
@@ -396,14 +391,12 @@ mod tests {
         let state2 = s.state();
         state2.y.assert_eq_st(state.as_ref().y, M::T::from(1e-9));
         s.state_mut().y[0] = M::T::from(std::f64::consts::PI);
-        assert_eq!(
-            s.state_mut().y[0],
-            M::T::from(std::f64::consts::PI)
-        );
+        assert_eq!(s.state_mut().y[0], M::T::from(std::f64::consts::PI));
     }
 
     #[cfg(feature = "diffsl")]
-    pub fn test_ball_bounce_problem<M: Matrix<T=f64>>() -> OdeSolverProblem<crate::DiffSl<M, CraneliftModule>> {
+    pub fn test_ball_bounce_problem<M: Matrix<T = f64>>(
+    ) -> OdeSolverProblem<crate::DiffSl<M, CraneliftModule>> {
         let eqn = crate::DiffSl::compile(
             "
             g { 9.81 } h { 10.0 }
@@ -506,7 +499,8 @@ mod tests {
                 solver1.step().unwrap();
                 solver2.step().unwrap();
                 let time_error = (solver1.state().t - solver2.state().t).abs()
-                    / (solver1.state().t.abs() * solver1.problem().rtol + solver1.problem().atol[0]);
+                    / (solver1.state().t.abs() * solver1.problem().rtol
+                        + solver1.problem().atol[0]);
                 assert!(
                     time_error < M::T::from(20.0),
                     "time_error: {} at t = {}",
@@ -521,12 +515,21 @@ mod tests {
                 );
             }
             let soln = solver1.interpolate(point.t).unwrap();
-            soln.assert_eq_norm(&point.state, &solver1.problem().atol, solver1.problem().rtol, M::T::from(15.0));
+            soln.assert_eq_norm(
+                &point.state,
+                &solver1.problem().atol,
+                solver1.problem().rtol,
+                M::T::from(15.0),
+            );
             let soln = solver2.interpolate(point.t).unwrap();
-            soln.assert_eq_norm(&point.state, &solver1.problem().atol, solver1.problem().rtol, M::T::from(15.0));
+            soln.assert_eq_norm(
+                &point.state,
+                &solver1.problem().atol,
+                solver1.problem().rtol,
+                M::T::from(15.0),
+            );
         }
     }
-
 
     pub fn test_state_mut_on_problem<'a, Eqn, Method>(
         mut s: Method,

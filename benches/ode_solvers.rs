@@ -18,7 +18,10 @@ fn criterion_benchmark(c: &mut Criterion) {
             c.bench_function(stringify!($name), |b| {
                 b.iter(|| {
                     let (problem, soln) = $model_problem::<$matrix>(false);
-                    benchmarks::$solver::<_, $linear_solver<_>>(&problem, soln.solution_points.last().unwrap().t);
+                    benchmarks::$solver::<_, $linear_solver<_>>(
+                        &problem,
+                        soln.solution_points.last().unwrap().t,
+                    );
                 })
             });
         };
@@ -217,11 +220,14 @@ fn criterion_benchmark(c: &mut Criterion) {
         ($name:ident, $solver:ident, $linear_solver:ident, $matrix:ty) => {
             #[cfg(feature = "diffsl-llvm")]
             c.bench_function(stringify!($name), |b| {
-                use diffsol::LlvmModule;
                 use diffsol::ode_solver::test_models::robertson::*;
+                use diffsol::LlvmModule;
                 b.iter(|| {
                     let (problem, soln) = robertson_diffsl_problem::<$matrix, LlvmModule>();
-                    benchmarks::$solver::<_, $linear_solver<_>>(&problem, soln.solution_points.last().unwrap().t)
+                    benchmarks::$solver::<_, $linear_solver<_>>(
+                        &problem,
+                        soln.solution_points.last().unwrap().t,
+                    )
                 })
             });
         };
@@ -535,8 +541,8 @@ mod benchmarks {
     use diffsol::vector::VectorRef;
     use diffsol::LinearSolver;
     use diffsol::{
-        DefaultDenseMatrix, DefaultSolver, Matrix,
-        OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem,
+        DefaultDenseMatrix, DefaultSolver, Matrix, OdeEquationsImplicit, OdeSolverMethod,
+        OdeSolverProblem,
     };
 
     // bdf
@@ -553,10 +559,8 @@ mod benchmarks {
         let _y = s.solve(t);
     }
 
-    pub fn esdirk34<Eqn, LS>(
-        problem: &OdeSolverProblem<Eqn>,
-        t: Eqn::T,
-    ) where
+    pub fn esdirk34<Eqn, LS>(problem: &OdeSolverProblem<Eqn>, t: Eqn::T)
+    where
         Eqn: OdeEquationsImplicit,
         Eqn::M: Matrix + DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
@@ -568,10 +572,8 @@ mod benchmarks {
         let _y = s.solve(t);
     }
 
-    pub fn tr_bdf2<Eqn, LS>(
-        problem: &OdeSolverProblem<Eqn>,
-        t: Eqn::T,
-    ) where
+    pub fn tr_bdf2<Eqn, LS>(problem: &OdeSolverProblem<Eqn>, t: Eqn::T)
+    where
         Eqn: OdeEquationsImplicit,
         Eqn::M: Matrix + DefaultSolver,
         Eqn::V: DefaultDenseMatrix,

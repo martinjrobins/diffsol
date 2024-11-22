@@ -22,15 +22,16 @@ use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, AdjointOdeSolverMethod,
     AugmentedOdeEquations, AugmentedOdeEquationsImplicit, DenseMatrix, JacobianUpdate, NonLinearOp,
-    OdeEquationsAdjoint, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState, Op, Scalar, StateRef, StateRefMut, Vector, VectorViewMut,
+    OdeEquationsAdjoint, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+    Op, Scalar, StateRef, StateRefMut, Vector, VectorViewMut,
 };
 
 use super::bdf::BdfStatistics;
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
 
-impl<'a, M, Eqn, LS, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn> for Sdirk<'a, Eqn, LS, M, AugEqn>
+impl<'a, M, Eqn, LS, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
+    for Sdirk<'a, Eqn, LS, M, AugEqn>
 where
     Eqn: OdeEquationsImplicit,
     AugEqn: AugmentedOdeEquationsImplicit<Eqn>,
@@ -42,9 +43,8 @@ where
 {
 }
 
-
 impl<'a, M, Eqn, LS> AdjointOdeSolverMethod<'a, Eqn> for Sdirk<'a, Eqn, LS, M>
-where 
+where
     Eqn: OdeEquationsAdjoint,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     LS: LinearSolver<Eqn::M> + 'a,
@@ -54,18 +54,17 @@ where
 {
     type DefaultAdjointSolver<'b> = Sdirk<'b, AdjointEquations<'a, Eqn, Sdirk<'a, Eqn, LS, M>>, LS, M, AdjointEquations<'a, Eqn, Sdirk<'a, Eqn, LS, M>>> where 'a: 'b;
     fn default_adjoint_solver<'b>(
-            self,
-            problem: &'b OdeSolverProblem<AdjointEquations<'a, Eqn, Self>>,
-            aug_eqn: AdjointEquations<'a, Eqn, Self>,
-        ) -> Result<Self::DefaultAdjointSolver<'b>, DiffsolError> {
-            let tableau = self.tableau.clone();
-            let mut state = self.into_state();
-            let mut newton_solver = NewtonNonlinearSolver::<Eqn::M, LS>::default();
-            let aug_eqn = state.set_consistent_augmented(&problem, aug_eqn, &mut newton_solver)?;
-            Sdirk::new_augmented(&problem, state, tableau, LS::default(), aug_eqn)
+        self,
+        problem: &'b OdeSolverProblem<AdjointEquations<'a, Eqn, Self>>,
+        aug_eqn: AdjointEquations<'a, Eqn, Self>,
+    ) -> Result<Self::DefaultAdjointSolver<'b>, DiffsolError> {
+        let tableau = self.tableau.clone();
+        let mut state = self.into_state();
+        let mut newton_solver = NewtonNonlinearSolver::<Eqn::M, LS>::default();
+        let aug_eqn = state.set_consistent_augmented(&problem, aug_eqn, &mut newton_solver)?;
+        Sdirk::new_augmented(&problem, state, tableau, LS::default(), aug_eqn)
     }
 }
-
 
 /// A singly diagonally implicit Runge-Kutta method. Can optionally have an explicit first stage for ESDIRK methods.
 ///
@@ -76,8 +75,13 @@ where
 /// - The upper triangular part of the `a` matrix must be zero (i.e. not fully implicit).
 /// - The diagonal of the `a` matrix must be the same non-zero value for all rows (i.e. an SDIRK method), except for the first row which can be zero for ESDIRK methods.
 /// - The last row of the `a` matrix must be the same as the `b` vector, and the last element of the `c` vector must be 1 (i.e. a stiffly accurate method)
-pub struct Sdirk<'a, Eqn, LS, M = <<Eqn as Op>::V as DefaultDenseMatrix>::M, AugmentedEqn = NoAug<Eqn>>
-where
+pub struct Sdirk<
+    'a,
+    Eqn,
+    LS,
+    M = <<Eqn as Op>::V as DefaultDenseMatrix>::M,
+    AugmentedEqn = NoAug<Eqn>,
+> where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     LS: LinearSolver<Eqn::M>,
     Eqn: OdeEquationsImplicit,
@@ -110,7 +114,7 @@ where
     jacobian_update: JacobianUpdate<Eqn::T>,
 }
 
-impl<'a, M, Eqn, LS, AugmentedEqn> Clone for Sdirk<'a, Eqn, LS, M, AugmentedEqn> 
+impl<'a, M, Eqn, LS, AugmentedEqn> Clone for Sdirk<'a, Eqn, LS, M, AugmentedEqn>
 where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     LS: LinearSolver<Eqn::M>,
@@ -125,13 +129,11 @@ where
         let problem = self.problem;
         let mut nonlinear_solver = NewtonNonlinearSolver::new(LS::default());
         if let Some(op) = &op {
-            nonlinear_solver
-                .set_problem(&op, problem.rtol, problem.atol.clone());
+            nonlinear_solver.set_problem(&op, problem.rtol, problem.atol.clone());
             nonlinear_solver
                 .convergence_mut()
                 .set_max_iter(self.nonlinear_solver.convergence().max_iter());
-            nonlinear_solver
-                .reset_jacobian(&op, &self.state.y, self.state.t);
+            nonlinear_solver.reset_jacobian(&op, &self.state.y, self.state.t);
         }
         Self {
             tableau: self.tableau.clone(),
@@ -162,8 +164,6 @@ where
     }
 }
 
-
-
 impl<'a, M, Eqn, LS, AugmentedEqn> Sdirk<'a, Eqn, LS, M, AugmentedEqn>
 where
     LS: LinearSolver<Eqn::M>,
@@ -179,8 +179,12 @@ where
     const MAX_FACTOR: f64 = 10.0;
     const MIN_TIMESTEP: f64 = 1e-13;
 
-    pub fn new(problem: &'a OdeSolverProblem<Eqn>, mut state: SdirkState<Eqn::V>, tableau: Tableau<M>, linear_solver: LS) -> Result<Self, DiffsolError> {
-
+    pub fn new(
+        problem: &'a OdeSolverProblem<Eqn>,
+        mut state: SdirkState<Eqn::V>,
+        tableau: Tableau<M>,
+        linear_solver: LS,
+    ) -> Result<Self, DiffsolError> {
         // check that the upper triangular part of a is zero
         let s = tableau.s();
         for i in 0..s {
@@ -256,7 +260,9 @@ where
         nonlinear_solver.set_problem(&callable, problem.rtol, problem.atol.clone());
 
         // set max iterations for nonlinear solver
-        nonlinear_solver.convergence_mut().set_max_iter(Self::NEWTON_MAXITER);
+        nonlinear_solver
+            .convergence_mut()
+            .set_max_iter(Self::NEWTON_MAXITER);
         nonlinear_solver.reset_jacobian(&callable, &state.y, state.t);
         let op = Some(callable);
 
@@ -612,20 +618,12 @@ where
 
                 // sensitivities too
                 if self.s_op.is_some() {
-                    for (diff, dy) in self
-                        .sdiff
-                        .iter_mut()
-                        .zip(self.state.ds.iter())
-                    {
+                    for (diff, dy) in self.sdiff.iter_mut().zip(self.state.ds.iter()) {
                         let mut hf = diff.column_mut(0);
                         hf.copy_from(dy);
                         hf *= scale(h);
                     }
-                    for (diff, dg) in self
-                        .sgdiff
-                        .iter_mut()
-                        .zip(self.state.dsg.iter())
-                    {
+                    for (diff, dg) in self.sgdiff.iter_mut().zip(self.state.dsg.iter()) {
                         let mut hf = diff.column_mut(0);
                         hf.copy_from(dg);
                         hf *= scale(h);
@@ -693,11 +691,9 @@ where
                 if self.problem.integrate_out {
                     let out = self.problem.eqn.out().unwrap();
                     out.call_inplace(&self.old_y, t, &mut self.state.dg);
-                    self.gdiff.column_mut(i).axpy(
-                        h,
-                        &self.state.dg,
-                        Eqn::T::zero(),
-                    );
+                    self.gdiff
+                        .column_mut(i)
+                        .axpy(h, &self.state.dg, Eqn::T::zero());
                 }
 
                 if self.s_op.is_some() {
@@ -759,11 +755,8 @@ where
                         Eqn::T::zero(),
                         &mut sens_out_error,
                     );
-                    let sens_error_norm = sens_out_error.squared_norm(
-                        &self.state.sg[i],
-                        atol,
-                        rtol,
-                    );
+                    let sens_error_norm =
+                        sens_out_error.squared_norm(&self.state.sg[i], atol, rtol);
                     error_norm += sens_error_norm;
                     ncontributions += 1;
                 }
@@ -1005,7 +998,6 @@ where
     }
 }
 
-
 #[cfg(test)]
 mod test {
     use crate::{
@@ -1022,16 +1014,18 @@ mod test {
                 robertson_ode::robertson_ode,
             },
             tests::{
-                test_checkpointing, test_interpolate, test_ode_solver, test_ode_solver_adjoint, test_problem, test_state_mut, test_state_mut_on_problem
+                test_checkpointing, test_interpolate, test_ode_solver, test_ode_solver_adjoint,
+                test_problem, test_state_mut, test_state_mut_on_problem,
             },
-        }, FaerSparseLU, NalgebraLU, OdeEquations, Op, SparseColMat, OdeSolverMethod, Vector
+        },
+        FaerSparseLU, NalgebraLU, OdeEquations, OdeSolverMethod, Op, SparseColMat, Vector,
     };
 
     use num_traits::abs;
 
     type M = nalgebra::DMatrix<f64>;
     type LS = NalgebraLU<f64>;
-    
+
     #[test]
     fn sdirk_state_mut() {
         test_state_mut(test_problem::<M>().tr_bdf2::<LS>().unwrap());
@@ -1060,7 +1054,7 @@ mod test {
     fn sdirk_test_nalgebra_negative_exponential_decay() {
         let (problem, soln) = negative_exponential_decay_problem::<M>(false);
         let mut s = problem.esdirk34::<LS>().unwrap();
-        test_ode_solver(&mut s,  soln, None, false, false);
+        test_ode_solver(&mut s, soln, None, false, false);
     }
 
     #[test]
@@ -1087,7 +1081,7 @@ mod test {
     fn test_tr_bdf2_nalgebra_exponential_decay_sens() {
         let (problem, soln) = exponential_decay_problem_sens::<M>(false);
         let mut s = problem.tr_bdf2_sens::<LS>().unwrap();
-        test_ode_solver(&mut s,  soln, None, false, true);
+        test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 7
         number_of_steps: 52
@@ -1127,7 +1121,7 @@ mod test {
     fn test_esdirk34_nalgebra_exponential_decay_sens() {
         let (problem, soln) = exponential_decay_problem_sens::<M>(false);
         let mut s = problem.esdirk34_sens::<LS>().unwrap();
-        test_ode_solver(&mut s,  soln, None, false, true);
+        test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 5
         number_of_steps: 20
@@ -1253,7 +1247,7 @@ mod test {
     fn test_tr_bdf2_nalgebra_robertson_ode() {
         let (problem, soln) = robertson_ode::<M>(false, 1);
         let mut s = problem.tr_bdf2::<LS>().unwrap();
-        test_ode_solver(&mut s,  soln, None, false, false);
+        test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 113
         number_of_steps: 304
@@ -1273,7 +1267,7 @@ mod test {
     fn test_tr_bdf2_faer_sparse_heat2d() {
         let (problem, soln) = head2d_problem::<SparseColMat<f64>, 10>();
         let mut s = problem.tr_bdf2::<FaerSparseLU<f64>>().unwrap();
-        test_ode_solver(&mut s,  soln, None, false, false);
+        test_ode_solver(&mut s, soln, None, false, false);
     }
 
     #[test]
@@ -1313,7 +1307,9 @@ mod test {
             if let Some(old_soln) = &mut old_soln {
                 let new_soln = ys.column(ys.ncols() - 1).into_owned();
                 let error = new_soln - &*old_soln;
-                let diff = error.squared_norm(old_soln, &problem.atol, problem.rtol).sqrt();
+                let diff = error
+                    .squared_norm(old_soln, &problem.atol, problem.rtol)
+                    .sqrt();
                 assert!(diff > 1.0e-6, "diff: {}", diff);
             }
             old_soln = Some(ys.column(ys.ncols() - 1).into_owned());
@@ -1326,7 +1322,11 @@ mod test {
     fn test_ball_bounce_tr_bdf2() {
         type M = nalgebra::DMatrix<f64>;
         type LS = crate::NalgebraLU<f64>;
-        let (x, v, t) = crate::ode_solver::tests::test_ball_bounce(crate::ode_solver::tests::test_ball_bounce_problem::<M>().tr_bdf2::<LS>().unwrap());
+        let (x, v, t) = crate::ode_solver::tests::test_ball_bounce(
+            crate::ode_solver::tests::test_ball_bounce_problem::<M>()
+                .tr_bdf2::<LS>()
+                .unwrap(),
+        );
 
         let expected_x = [
             0.003751514915514589,

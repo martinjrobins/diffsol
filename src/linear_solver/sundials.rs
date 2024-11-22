@@ -1,12 +1,13 @@
 use std::rc::Rc;
 
 use crate::sundials_sys::{
-    realtype, SUNLinSolFree, SUNLinSolSetup, SUNLinSolSolve, SUNLinSol_Dense, SUNLinearSolver, IDAGetReturnFlagName, 
+    realtype, IDAGetReturnFlagName, SUNLinSolFree, SUNLinSolSetup, SUNLinSolSolve, SUNLinSol_Dense,
+    SUNLinearSolver,
 };
 
 use crate::{
-    error::*, linear_solver_error,
-    vector::sundials::SundialsVector, Matrix, NonLinearOpJacobian, SundialsMatrix,
+    error::*, linear_solver_error, vector::sundials::SundialsVector, Matrix, NonLinearOpJacobian,
+    SundialsMatrix,
 };
 use std::ffi::{c_int, CStr};
 

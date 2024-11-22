@@ -161,8 +161,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
     pub fn number_of_jac_evals(&self) -> usize {
         *self.number_of_jac_evals.borrow()
     }
-    pub fn set_c(&self, h: Eqn::T, alpha: Eqn::T)
-    {
+    pub fn set_c(&self, h: Eqn::T, alpha: Eqn::T) {
         self.c.replace(h * alpha);
     }
     fn set_psi<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
@@ -217,8 +216,7 @@ impl<Eqn: OdeEquationsImplicit> Op for BdfCallable<Eqn> {
 // dF(y)/dp = dM/dp (y - y0 + psi) + Ms - c * df(y)/dp - c df(y)/dy s = 0
 // jac is M - c * df(y)/dy, same
 // callable to solve for F(y) = M (y' + psi) - f(y) = 0
-impl<Eqn: OdeEquationsImplicit> NonLinearOp for BdfCallable<Eqn>
-{
+impl<Eqn: OdeEquationsImplicit> NonLinearOp for BdfCallable<Eqn> {
     // F(y) = M (y - y0 + psi) - c * f(y) = 0
     fn call_inplace(&self, x: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
         let psi_neg_y0_ref = self.psi_neg_y0.borrow();
@@ -239,8 +237,7 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOp for BdfCallable<Eqn>
     }
 }
 
-impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for BdfCallable<Eqn>
-{
+impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for BdfCallable<Eqn> {
     // (M - c * f'(y)) v
     fn jac_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
         self.eqn.rhs().jac_mul_inplace(x, t, v, y);

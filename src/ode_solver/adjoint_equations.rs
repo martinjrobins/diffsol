@@ -591,7 +591,9 @@ mod tests {
         ode_solver::{
             adjoint_equations::AdjointEquations,
             test_models::exponential_decay::exponential_decay_problem_adjoint,
-        }, AdjointContext, AugmentedOdeEquations, Checkpointing, FaerSparseLU, Matrix, MatrixCommon, NonLinearOp, NonLinearOpJacobian, SdirkState, SparseColMat, Vector
+        },
+        AdjointContext, AugmentedOdeEquations, Checkpointing, FaerSparseLU, Matrix, MatrixCommon,
+        NonLinearOp, NonLinearOpJacobian, SdirkState, SparseColMat, Vector,
     };
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;
@@ -684,7 +686,9 @@ mod tests {
             ds: Vec::new(),
             h: 0.0,
         };
-        let solver = problem.esdirk34_solver::<FaerSparseLU<f64>>(state.clone()).unwrap();
+        let solver = problem
+            .esdirk34_solver::<FaerSparseLU<f64>>(state.clone())
+            .unwrap();
         let checkpointer = Checkpointing::new(solver, 0, vec![state.clone(), state.clone()], None);
         let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
         let mut adj_eqn = AdjointEquations::new(&problem, context, true);

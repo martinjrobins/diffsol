@@ -2,7 +2,14 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError}, matrix::default_solver::DefaultSolver, ode_solver_error, scalar::Scalar, AdjointContext, AdjointEquations, AugmentedOdeEquations, Checkpointing, DefaultDenseMatrix, DenseMatrix, Matrix, NonLinearOp, OdeEquations, OdeEquationsAdjoint, OdeEquationsSens, OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut, Vector, VectorViewMut
+    error::{DiffsolError, OdeSolverError},
+    matrix::default_solver::DefaultSolver,
+    ode_solver_error,
+    scalar::Scalar,
+    AdjointContext, AdjointEquations, AugmentedOdeEquations, Checkpointing, DefaultDenseMatrix,
+    DenseMatrix, Matrix, NonLinearOp, OdeEquations, OdeEquationsAdjoint, OdeEquationsSens,
+    OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut, Vector,
+    VectorViewMut,
 };
 
 use super::checkpointing::HermiteInterpolator;
@@ -106,7 +113,14 @@ where
     {
         let mut ret_t = Vec::new();
         let mut ret_y = Vec::new();
-        fn write_out<Eqn: OdeEquations>(p: &OdeSolverProblem<Eqn>, ret_y: &mut Vec<Eqn::V>, ret_t: &mut Vec<Eqn::T>, t: Eqn::T, y: &Eqn::V, g: &Eqn::V) {
+        fn write_out<Eqn: OdeEquations>(
+            p: &OdeSolverProblem<Eqn>,
+            ret_y: &mut Vec<Eqn::V>,
+            ret_t: &mut Vec<Eqn::T>,
+            t: Eqn::T,
+            y: &Eqn::V,
+            g: &Eqn::V,
+        ) {
             ret_t.push(t);
             match p.eqn.out() {
                 Some(out) => {
@@ -170,7 +184,6 @@ where
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
-
         let nrows = if self.problem().eqn.out().is_some() {
             self.problem().eqn.out().unwrap().nout()
         } else {
@@ -190,9 +203,9 @@ where
             t_eval: &[Eqn::T],
             i: usize,
             y: Option<&Eqn::V>,
-            g: Option<&Eqn::V>) 
-        where
-            Eqn::V: DefaultDenseMatrix
+            g: Option<&Eqn::V>,
+        ) where
+            Eqn::V: DefaultDenseMatrix,
         {
             let mut y_out = y_out.column_mut(i);
             if let Some(g) = g {
@@ -227,9 +240,23 @@ where
             step_reason = self.step()?;
         }
         if self.problem().integrate_out {
-            write_out(self.problem(), &mut ret, t_eval, t_eval.len() - 1, None, Some(self.state().g));
+            write_out(
+                self.problem(),
+                &mut ret,
+                t_eval,
+                t_eval.len() - 1,
+                None,
+                Some(self.state().g),
+            );
         } else {
-            write_out(self.problem(), &mut ret, t_eval, t_eval.len() - 1, Some(self.state().y), None);
+            write_out(
+                self.problem(),
+                &mut ret,
+                t_eval,
+                t_eval.len() - 1,
+                Some(self.state().y),
+                None,
+            );
         }
         Ok(ret)
     }
@@ -298,8 +325,10 @@ where
 
         // construct the adjoint solver
         let last_segment = HermiteInterpolator::new(ys, ydots, ts);
-        let (adjoint_problem, adjoint_aug_eqn) = self.into_adjoint_problem(checkpoints, last_segment)?;
-        let mut adjoint_solver = Self::default_adjoint_solver(self, &adjoint_problem, adjoint_aug_eqn)?;
+        let (adjoint_problem, adjoint_aug_eqn) =
+            self.into_adjoint_problem(checkpoints, last_segment)?;
+        let mut adjoint_solver =
+            Self::default_adjoint_solver(self, &adjoint_problem, adjoint_aug_eqn)?;
 
         // solve the adjoint problem
         adjoint_solver.set_stop_time(t0).unwrap();
@@ -391,8 +420,9 @@ where
 pub trait AugmentedOdeSolverMethod<'a, Eqn, AugmentedEqn>: OdeSolverMethod<'a, Eqn>
 where
     Eqn: OdeEquations + 'a,
-    AugmentedEqn: AugmentedOdeEquations<Eqn>
-{}
+    AugmentedEqn: AugmentedOdeEquations<Eqn>,
+{
+}
 
 pub trait SensitivitiesOdeSolverMethod<'a, Eqn>:
     AugmentedOdeSolverMethod<'a, Eqn, SensEquations<Eqn>>
@@ -411,7 +441,9 @@ where
         AdjointEquations<'a, Eqn, Self>,
         AdjointEquations<'a, Eqn, Self>,
         State = Self::State,
-    > where 'a: 'b;
+    >
+    where
+        'a: 'b;
 
     fn default_adjoint_solver<'b>(
         self,
@@ -423,20 +455,29 @@ where
         &self,
         checkpoints: Vec<Self::State>,
         last_segment: HermiteInterpolator<Eqn::V>,
-    ) -> Result<(OdeSolverProblem<AdjointEquations<'a, Eqn, Self>>, AdjointEquations<'a, Eqn, Self>), DiffsolError>
+    ) -> Result<
+        (
+            OdeSolverProblem<AdjointEquations<'a, Eqn, Self>>,
+            AdjointEquations<'a, Eqn, Self>,
+        ),
+        DiffsolError,
+    >
     where
         Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
     {
-
         let problem = self.problem();
         let t = self.state().t;
         let h = self.state().h;
         let checkpointer_solver = self.clone();
 
         // construct checkpointing
-        let checkpointer =
-            Checkpointing::new(checkpointer_solver, checkpoints.len() - 2, checkpoints, Some(last_segment));
+        let checkpointer = Checkpointing::new(
+            checkpointer_solver,
+            checkpoints.len() - 2,
+            checkpoints,
+            Some(last_segment),
+        );
 
         // construct adjoint equations and problem
         let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
@@ -467,7 +508,8 @@ mod test {
         ode_solver::test_models::exponential_decay::{
             exponential_decay_problem, exponential_decay_problem_adjoint,
             exponential_decay_problem_sens,
-        }, scale, NalgebraLU, OdeSolverMethod, Vector
+        },
+        scale, NalgebraLU, OdeSolverMethod, Vector,
     };
 
     #[test]
@@ -541,9 +583,7 @@ mod test {
         let mut s = problem.bdf_sens::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
-        let (y, sens) = s
-            .solve_dense_sensitivities(t_eval.as_slice())
-            .unwrap();
+        let (y, sens) = s.solve_dense_sensitivities(t_eval.as_slice()).unwrap();
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&soln_pt.state, problem.atol.as_ref(), problem.rtol, 15.0);

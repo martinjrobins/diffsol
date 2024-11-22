@@ -2,18 +2,18 @@ use crate::{
     error::{DiffsolError, OdeSolverError},
     ode_solver_error,
     scalar::IndexType,
-    scale, AugmentedOdeEquations, DenseMatrix, OdeEquations, OdeSolverProblem, OdeSolverState, Op,
-    StateRef, StateRefMut, Vector, VectorViewMut, DefaultDenseMatrix
+    scale, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverProblem,
+    OdeSolverState, Op, StateRef, StateRefMut, Vector, VectorViewMut,
 };
 use std::ops::MulAssign;
 
 use super::state::StateCommon;
 
 #[derive(Clone)]
-pub struct BdfState<V, M = <V as DefaultDenseMatrix>::M> 
-where 
+pub struct BdfState<V, M = <V as DefaultDenseMatrix>::M>
+where
     V: Vector + DefaultDenseMatrix,
-    M: DenseMatrix<T = V::T, V = V>
+    M: DenseMatrix<T = V::T, V = V>,
 {
     pub(crate) order: usize,
     pub(crate) diff: M,
