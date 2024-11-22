@@ -60,7 +60,7 @@ where
     /// Note that this will force a reinitialisation of the internal Jacobian for the solver, if it has one.
     fn checkpoint(&mut self) -> Self::State;
 
-    /// Replace the current state of the solver with a new state. This will cause some reinitialisation to take into account the new state, this could be expensive for multi-step methods.
+    /// Replace the current state of the solver with a new state.
     fn set_state(&mut self, state: Self::State);
 
     /// Take the current state of the solver, if it exists, returning it to the user. This is useful if you want to use this

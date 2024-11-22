@@ -84,11 +84,11 @@ macro_rules! sdirk_solver_from_tableau {
         pub fn $method_solver_sens<LS: LinearSolver<Eqn::M>>(
             &self,
             state: SdirkState<Eqn::V>,
-        ) -> Result<Sdirk<'_, Eqn, LS>, DiffsolError>
+        ) -> Result<Sdirk<'_, Eqn, LS, <Eqn::V as DefaultDenseMatrix>::M, SensEquations<Eqn>>, DiffsolError>
         where
             Eqn: OdeEquationsSens,
         {
-            self.sdirk_solver(
+            self.sdirk_solver_sens(
                 state,
                 Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(),
             )
@@ -104,7 +104,7 @@ macro_rules! sdirk_solver_from_tableau {
 
         pub fn $method_sens<LS: LinearSolver<Eqn::M>>(
             &self,
-        ) -> Result<Sdirk<'_, Eqn, LS>, DiffsolError>
+        ) -> Result<Sdirk<'_, Eqn, LS, <Eqn::V as DefaultDenseMatrix>::M, SensEquations<Eqn>>, DiffsolError>
         where
             Eqn: OdeEquationsSens,
         {
@@ -300,16 +300,35 @@ where
         Sdirk::new(self, state, tableau, linear_solver)
     }
 
+    pub(crate) fn sdirk_solver_aug<
+        LS: LinearSolver<Eqn::M>,
+        DM: DenseMatrix<V = Eqn::V, T = Eqn::T>,
+        Aug: AugmentedOdeEquationsImplicit<Eqn>,
+    >(
+        &self,
+        state: SdirkState<Eqn::V>,
+        tableau: Tableau<DM>,
+        aug_eqn: Aug,
+    ) -> Result<
+        Sdirk<'_, Eqn, LS, DM, Aug>,
+        DiffsolError,
+    >
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        Sdirk::new_augmented(self, state, tableau, LS::default(), aug_eqn)
+    }
+
     pub fn sdirk_solver_sens<LS: LinearSolver<Eqn::M>, DM: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
         &self,
         state: SdirkState<Eqn::V>,
         tableau: Tableau<DM>,
-    ) -> Result<Sdirk<'_, Eqn, LS, DM>, DiffsolError>
+    ) -> Result<Sdirk<'_, Eqn, LS, DM, SensEquations<Eqn>>, DiffsolError>
     where
         Eqn: OdeEquationsSens,
     {
-        let linear_solver = LS::default();
-        Sdirk::new(self, state, tableau, linear_solver)
+        let sens_eqn = SensEquations::new(self);
+        self.sdirk_solver_aug::<LS, DM, _>(state, tableau, sens_eqn)
     }
 
     sdirk_solver_from_tableau!(

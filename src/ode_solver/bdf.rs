@@ -71,11 +71,13 @@ where
     fn default_adjoint_solver<'b>(
         self,
         problem: &'b OdeSolverProblem<AdjointEquations<'a, Eqn, Self>>,
-        aug_eqn: AdjointEquations<'a, Eqn, Self>,
+        mut aug_eqn: AdjointEquations<'a, Eqn, Self>,
     ) -> Result<Self::DefaultAdjointSolver<'b>, DiffsolError> {
-        let mut state = self.into_state();
-        let mut newton_solver = NewtonNonlinearSolver::<Eqn::M, LS>::default();
-        let aug_eqn = state.set_consistent_augmented(&problem, aug_eqn, &mut newton_solver)?;
+        let mut state =
+            Self::State::new_without_initialise_augmented(&problem, &mut aug_eqn)?;
+        let mut init_nls = NewtonNonlinearSolver::<Eqn::M, LS>::default();
+        let aug_eqn = state.set_consistent_augmented(&problem, aug_eqn, &mut init_nls)?;
+
         let newton_solver = NewtonNonlinearSolver::new(LS::default());
         Bdf::new_augmented(state, &problem, aug_eqn, newton_solver)
     }
@@ -160,7 +162,8 @@ where
             nonlinear_solver
                 .convergence_mut()
                 .set_max_iter(self.nonlinear_solver.convergence().max_iter());
-            nonlinear_solver.reset_jacobian(&op, &self.state.y, self.state.t);
+            nonlinear_solver
+                .reset_jacobian(&op, &self.state.y, self.state.t);
         }
         Self {
             nonlinear_solver: nonlinear_solver,
@@ -209,11 +212,7 @@ where
     const MIN_THRESHOLD: f64 = 0.9;
     const MIN_TIMESTEP: f64 = 1e-32;
 
-    pub fn new(
-        problem: &'a OdeSolverProblem<Eqn>,
-        state: BdfState<Eqn::V, M>,
-        mut nonlinear_solver: Nls,
-    ) -> Result<Self, DiffsolError> {
+    pub fn new(problem: &'a OdeSolverProblem<Eqn>, mut state: BdfState<Eqn::V, M>, mut nonlinear_solver: Nls) -> Result<Self, DiffsolError> {
         // kappa values for difference orders, taken from Table 1 of [1]
         let kappa = [
             Eqn::T::from(0.0),
@@ -245,12 +244,16 @@ where
         let bdf_callable = BdfCallable::new(problem);
         bdf_callable.set_c(state.h, alpha[state.order]);
 
-        nonlinear_solver.set_problem(&bdf_callable, problem.rtol, problem.atol.clone());
+        nonlinear_solver
+            .set_problem(&bdf_callable, problem.rtol, problem.atol.clone());
         nonlinear_solver
             .convergence_mut()
             .set_max_iter(Self::NEWTON_MAXITER);
-        nonlinear_solver.reset_jacobian(&bdf_callable, &state.y, state.t);
+        nonlinear_solver
+            .reset_jacobian(&bdf_callable, &state.y, state.t);
         let op = Some(bdf_callable);
+
+        state.set_problem(problem)?;
 
         // setup root solver
         let mut root_finder = None;
@@ -404,12 +407,7 @@ where
                 Self::_update_diff_for_step_size(&ru, diff, &mut self.diff_tmp, order);
             }
             if self.ode_problem.integrate_out {
-                Self::_update_diff_for_step_size(
-                    &ru,
-                    &mut self.state.gdiff,
-                    &mut self.gdiff_tmp,
-                    order,
-                );
+                Self::_update_diff_for_step_size(&ru, &mut self.state.gdiff, &mut self.gdiff_tmp, order);
             }
             for diff in self.state.sgdiff.iter_mut() {
                 Self::_update_diff_for_step_size(&ru, diff, &mut self.sgdiff_tmp, order);
@@ -640,7 +638,11 @@ where
         let mut ncontrib = 1;
         if output_in_error_control {
             let rtol = self.ode_problem.out_rtol.unwrap();
-            let atol = self.ode_problem.out_atol.as_ref().unwrap();
+            let atol = self
+                .ode_problem
+                .out_atol
+                .as_ref()
+                .unwrap();
             error_norm +=
                 self.g_delta.squared_norm(&state.g, atol, rtol) * self.error_const2[order];
             ncontrib += 1;
@@ -692,7 +694,11 @@ where
         let mut ncontrib = 1;
         if output_in_error_control {
             let rtol = self.ode_problem.out_rtol.unwrap();
-            let atol = self.ode_problem.out_atol.as_ref().unwrap();
+            let atol = self
+                .ode_problem
+                .out_atol
+                .as_ref()
+                .unwrap();
             error_norm += state
                 .gdiff
                 .column(order + 1)
@@ -801,9 +807,27 @@ where
     }
 
     fn set_state(&mut self, state: Self::State) {
+        let old_order = self.state.order;
         self.state = state;
-        self.is_state_modified = true;
+
+
+        if let Some(op) = self.op.as_mut() {
+            op.set_c(self.state.h, self.alpha[self.state.order]);
+        }
+            
+
+        // order might have changed
+        if self.state.order != old_order {
+            self.u = Self::_compute_r(self.state.order, Eqn::T::one());
+        }
+
+        // reinitialise jacobian updates as if a checkpoint was taken
+        self._jacobian_updates(
+            self.state.h * self.alpha[self.state.order],
+            SolverState::Checkpoint,
+        );
     }
+    
 
     fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
         // state must be set
@@ -1157,6 +1181,8 @@ where
     }
 }
 
+
+
 #[cfg(test)]
 mod test {
     use crate::{
@@ -1179,13 +1205,10 @@ mod test {
                 robertson::{robertson, robertson_sens},
                 robertson_ode::robertson_ode,
                 robertson_ode_with_sens::robertson_ode_with_sens,
-            },
-            tests::{
-                test_checkpointing, test_interpolate, test_ode_solver, test_ode_solver_adjoint,
-                test_problem, test_state_mut, test_state_mut_on_problem,
-            },
-        },
-        FaerLU, FaerSparseLU, OdeEquations, OdeSolverMethod, Op, SparseColMat, Vector,
+            }, tests::{
+                test_checkpointing, test_interpolate, test_ode_solver, test_ode_solver_adjoint, test_problem, test_state_mut, test_state_mut_on_problem
+            }
+        }, FaerLU, FaerSparseLU, OdeEquations, OdeSolverMethod, Op, SparseColMat, Vector
     };
 
     use num_traits::abs;
@@ -1196,6 +1219,7 @@ mod test {
     fn bdf_state_mut() {
         test_state_mut(test_problem::<M>().bdf::<LS>().unwrap());
     }
+
 
     #[test]
     fn bdf_test_interpolate() {
@@ -1247,7 +1271,7 @@ mod test {
     fn bdf_test_checkpointing() {
         let (problem, soln) = exponential_decay_problem::<M>(false);
         let solver1 = problem.bdf::<LS>().unwrap();
-        let solver2 = problem.bdf::<LS>().unwrap();
+        let solver2 =   problem.bdf::<LS>().unwrap();
         test_checkpointing(soln, solver1, solver2);
     }
 
@@ -1277,7 +1301,7 @@ mod test {
     fn bdf_test_nalgebra_exponential_decay_sens() {
         let (problem, soln) = exponential_decay_problem_sens::<M>(false);
         let mut s = problem.bdf_sens::<LS>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, true);
+        test_ode_solver(&mut s,  soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 11
         number_of_steps: 44
@@ -1323,7 +1347,7 @@ mod test {
     fn test_bdf_nalgebra_exponential_decay_algebraic() {
         let (problem, soln) = exponential_decay_with_algebraic_problem::<M>(false);
         let mut s = problem.bdf::<LS>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
+        test_ode_solver(&mut s,  soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 20
         number_of_steps: 41
@@ -1556,7 +1580,7 @@ mod test {
     fn test_bdf_faer_sparse_heat2d() {
         let (problem, soln) = head2d_problem::<SparseColMat<f64>, 10>();
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
+        test_ode_solver(&mut s,  soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 21
         number_of_steps: 167
@@ -1580,14 +1604,14 @@ mod test {
         use crate::ode_solver::test_models::heat2d;
         let (problem, soln) = heat2d::heat2d_diffsl_problem::<SparseColMat<f64>, LlvmModule, 10>();
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
+        test_ode_solver(&mut s,  soln, None, false, false);
     }
 
     #[test]
     fn test_bdf_faer_sparse_foodweb() {
         let (problem, soln) = foodweb_problem::<SparseColMat<f64>, 10>();
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
+        test_ode_solver(&mut s,  soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 45
         number_of_steps: 161
@@ -1633,26 +1657,18 @@ mod test {
         }
 
         let mut old_soln: Option<nalgebra::DVector<f64>> = None;
-        let mut state = None;
         for p in ps {
             problem.set_params(p).unwrap();
-            let mut s = if let Some(s) = state {
-                problem.bdf_solver::<LS>(s).unwrap()
-            } else {
-                problem.bdf::<LS>().unwrap()
-            };
+            let mut s = problem.bdf::<LS>().unwrap();
             let (ys, _ts) = s.solve(10.0).unwrap();
             // check that the new solution is different from the old one
             if let Some(old_soln) = &mut old_soln {
                 let new_soln = ys.column(ys.ncols() - 1).into_owned();
                 let error = new_soln - &*old_soln;
-                let diff = error
-                    .squared_norm(old_soln, &problem.atol, problem.rtol)
-                    .sqrt();
+                let diff = error.squared_norm(old_soln, &problem.atol, problem.rtol).sqrt();
                 assert!(diff > 1.0e-6, "diff: {}", diff);
             }
             old_soln = Some(ys.column(ys.ncols() - 1).into_owned());
-            state = Some(s.into_state());
         }
     }
 
@@ -1662,9 +1678,7 @@ mod test {
         use crate::ode_solver::tests::test_ball_bounce_problem;
         type M = nalgebra::DMatrix<f64>;
         type LS = crate::NalgebraLU<f64>;
-        let (x, v, t) = crate::ode_solver::tests::test_ball_bounce(
-            test_ball_bounce_problem::<M>().bdf::<LS>().unwrap(),
-        );
+        let (x, v, t) = crate::ode_solver::tests::test_ball_bounce(test_ball_bounce_problem::<M>().bdf::<LS>().unwrap());
 
         let expected_x = [
             0.003751514915514589,

@@ -194,8 +194,8 @@ mod tests {
             .y
             .assert_eq_st(&y_expect, M::T::from(1e-9));
         let g_expect = M::V::from_element(adjoint_problem.eqn.rhs().nparams(), M::T::zero());
-        for i in 0..adjoint_problem.eqn.out().unwrap().nout() {
-            adjoint_solver.state().sg[i].assert_eq_st(&g_expect, M::T::from(1e-9));
+        for sgi in adjoint_solver.state().sg.iter() {
+            sgi.assert_eq_st(&g_expect, M::T::from(1e-9));
         }
 
         adjoint_solver.set_stop_time(t0).unwrap();
