@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError}, ode_solver_error, vector::Vector, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, Bdf, BdfState, DefaultDenseMatrix, DefaultSolver, LinearSolver, MatrixRef, NewtonNonlinearSolver, OdeEquations, OdeEquationsImplicit, OdeEquationsSens, OdeSolverState, Sdirk, SdirkState, SensEquations, Tableau, VectorRef, Op, DenseMatrix
+    error::{DiffsolError, OdeSolverError}, ode_solver_error, vector::Vector, AugmentedOdeEquationsImplicit, Bdf, BdfState, DefaultDenseMatrix, LinearSolver, MatrixRef, NewtonNonlinearSolver, OdeEquations, OdeEquationsImplicit, OdeEquationsSens, OdeSolverState, Sdirk, SdirkState, SensEquations, Tableau, VectorRef, DenseMatrix
 };
 
 pub struct OdeSolverProblem<Eqn> 
@@ -46,7 +46,7 @@ where
 }
 
 macro_rules! sdirk_solver_from_tableau {
-        ($state:ident, $state_sens:ident, $method:ident, $method_solver:ident, $method_sens:ident, $tableau:ident) => {
+        ($state:ident, $state_sens:ident, $method:ident, $method_sens:ident, $method_solver:ident, $method_solver_sens:ident, $tableau:ident) => {
 
             pub fn $state<LS: LinearSolver<Eqn::M>>(&self) -> Result<SdirkState<Eqn::V>, DiffsolError>
             where 
@@ -69,7 +69,7 @@ macro_rules! sdirk_solver_from_tableau {
                 self.sdirk_solver(state, Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau())
             }
 
-            pub fn $method_sens<LS: LinearSolver<Eqn::M>>(&self, state: SdirkState<Eqn::V>) -> Result<Sdirk<'_, Eqn, LS>, DiffsolError>
+            pub fn $method_solver_sens<LS: LinearSolver<Eqn::M>>(&self, state: SdirkState<Eqn::V>) -> Result<Sdirk<'_, Eqn, LS>, DiffsolError>
             where 
                 Eqn: OdeEquationsSens,
             {
@@ -80,8 +80,16 @@ macro_rules! sdirk_solver_from_tableau {
             where 
                 Eqn: OdeEquationsImplicit,
             {
-                let state = self.$state()?;
-                self.$method_solver(state)
+                let state = self.$state::<LS>()?;
+                self.$method_solver::<LS>(state)
+            }
+
+            pub fn $method_sens<LS: LinearSolver<Eqn::M>>(&self) -> Result<Sdirk<'_, Eqn, LS>, DiffsolError>
+            where 
+                Eqn: OdeEquationsSens,
+            {
+                let state = self.$state_sens::<LS>()?;
+                self.$method_solver_sens::<LS>(state)
             }
         };
     }
@@ -232,8 +240,8 @@ where
         Sdirk::new(self, state, tableau, linear_solver)
     }
 
-    sdirk_solver_from_tableau!(tr_bdf2_state, tr_bdf2_state_sens, tr_bdf2, tr_bdf2_solver, tr_bdf2_solver_sens, tr_bdf2);
-    sdirk_solver_from_tableau!(esdirk34_state, esdirk34_state_sens, esdirk34, esdirk34_solver, esdirk34_solver_sens, esdirk34);
+    sdirk_solver_from_tableau!(tr_bdf2_state, tr_bdf2_state_sens, tr_bdf2, tr_bdf2_sens, tr_bdf2_solver, tr_bdf2_solver_sens, tr_bdf2);
+    sdirk_solver_from_tableau!(esdirk34_state, esdirk34_state_sens, esdirk34, esdirk34_sens, esdirk34_solver, esdirk34_solver_sens, esdirk34);
     
 }
 

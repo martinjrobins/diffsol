@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError}, matrix::default_solver::DefaultSolver, ode_solver_error, scalar::Scalar, AdjointContext, AdjointEquations, AugmentedOdeEquations, Checkpointing, DefaultDenseMatrix, DenseMatrix, Matrix, NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeEquationsAdjoint, OdeEquationsSens, OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut, Vector, VectorViewMut
+    error::{DiffsolError, OdeSolverError}, matrix::default_solver::DefaultSolver, ode_solver_error, scalar::Scalar, AdjointContext, AdjointEquations, AugmentedOdeEquations, Checkpointing, DefaultDenseMatrix, DenseMatrix, Matrix, NonLinearOp, OdeEquations, OdeEquationsAdjoint, OdeEquationsSens, OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut, Vector, VectorViewMut
 };
 
 use super::checkpointing::HermiteInterpolator;
@@ -38,7 +38,7 @@ pub enum OdeSolverStopReason<T: Scalar> {
 ///     solver.interpolate(t).unwrap()
 /// }
 /// ```
-pub trait OdeSolverMethod<'a, Eqn: OdeEquations>
+pub trait OdeSolverMethod<'a, Eqn: OdeEquations>: Clone
 where
     Self: Sized,
     Eqn: 'a,
@@ -101,7 +101,6 @@ where
         final_time: Eqn::T,
     ) -> Result<(<Eqn::V as DefaultDenseMatrix>::M, Vec<Eqn::T>), DiffsolError>
     where
-        Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
@@ -168,7 +167,6 @@ where
         t_eval: &[Eqn::T],
     ) -> Result<<Eqn::V as DefaultDenseMatrix>::M, DiffsolError>
     where
-        Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
@@ -301,7 +299,7 @@ where
         // construct the adjoint solver
         let last_segment = HermiteInterpolator::new(ys, ydots, ts);
         let (adjoint_problem, adjoint_aug_eqn) = self.into_adjoint_problem(checkpoints, last_segment)?;
-        let mut adjoint_solver = Self::default_adjoint_solver(&adjoint_problem, adjoint_aug_eqn)?;
+        let mut adjoint_solver = Self::default_adjoint_solver(self, &adjoint_problem, adjoint_aug_eqn)?;
 
         // solve the adjoint problem
         adjoint_solver.set_stop_time(t0).unwrap();
@@ -416,12 +414,13 @@ where
     > where 'a: 'b;
 
     fn default_adjoint_solver<'b>(
+        self,
         problem: &'b OdeSolverProblem<AdjointEquations<'a, Eqn, Self>>,
         aug_eqn: AdjointEquations<'a, Eqn, Self>,
     ) -> Result<Self::DefaultAdjointSolver<'b>, DiffsolError>;
 
     fn into_adjoint_problem(
-        self,
+        &self,
         checkpoints: Vec<Self::State>,
         last_segment: HermiteInterpolator<Eqn::V>,
     ) -> Result<(OdeSolverProblem<AdjointEquations<'a, Eqn, Self>>, AdjointEquations<'a, Eqn, Self>), DiffsolError>
@@ -433,10 +432,11 @@ where
         let problem = self.problem();
         let t = self.state().t;
         let h = self.state().h;
+        let checkpointer_solver = self.clone();
 
         // construct checkpointing
         let checkpointer =
-            Checkpointing::new(self, checkpoints.len() - 2, checkpoints, Some(last_segment));
+            Checkpointing::new(checkpointer_solver, checkpoints.len() - 2, checkpoints, Some(last_segment));
 
         // construct adjoint equations and problem
         let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
@@ -467,7 +467,7 @@ mod test {
         ode_solver::test_models::exponential_decay::{
             exponential_decay_problem, exponential_decay_problem_adjoint,
             exponential_decay_problem_sens,
-        }, scale, Bdf, NalgebraLU, OdeSolverMethod, OdeSolverState, Vector
+        }, scale, NalgebraLU, OdeSolverMethod, Vector
     };
 
     #[test]

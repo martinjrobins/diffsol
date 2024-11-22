@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::{
-    matrix::Matrix, ode_solver::problem::OdeSolverSolution, op::{closure_with_sens::ClosureWithSens, constant_closure_with_sens::ConstantClosureWithSens}, ConstantOp, LinearClosure, LinearSolver, OdeBuilder, OdeEquationsImplicit, OdeEquationsSens, OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector
+    matrix::Matrix, ode_solver::problem::OdeSolverSolution, op::{closure_with_sens::ClosureWithSens, constant_closure_with_sens::ConstantClosureWithSens}, ConstantOp, LinearClosure, OdeBuilder, OdeEquationsImplicit, OdeEquationsSens, OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector
 };
 use num_traits::Zero;
 

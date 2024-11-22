@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use crate::{
-    ode_solver::diffsl::T, ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, DefaultDenseMatrix, DefaultSolver, LinearOp, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar, Vector
+    ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar, Vector
 };
 
 use nonlinear_op::NonLinearOpJacobian;

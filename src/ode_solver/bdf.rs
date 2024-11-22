@@ -3,7 +3,7 @@ use std::ops::AddAssign;
 use std::rc::Rc;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError}, AdjointEquations, AugmentedOdeEquationsImplicit, DefaultDenseMatrix, LinearSolver, NewtonNonlinearSolver, NoAug, OdeEquationsAdjoint, StateRef, StateRefMut
+    error::{DiffsolError, OdeSolverError}, AdjointEquations, AugmentedOdeEquationsImplicit, DefaultDenseMatrix, LinearSolver, NewtonNonlinearSolver, NoAug, OdeEquationsAdjoint, SensEquations, StateRef, StateRefMut, OdeEquationsSens
 };
 
 use num_traits::{abs, One, Pow, Zero};
@@ -20,7 +20,7 @@ use crate::{
     OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar, Vector, VectorRef, VectorViewMut,
 };
 
-use super::{jacobian_update::SolverState, state};
+use super::{jacobian_update::SolverState, method::SensitivitiesOdeSolverMethod};
 use super::method::{
     AdjointOdeSolverMethod, AugmentedOdeSolverMethod
 };
@@ -46,6 +46,17 @@ where
 {
 }
 
+impl<'a, M, Eqn, LS> SensitivitiesOdeSolverMethod<'a, Eqn> for Bdf<'a, Eqn, NewtonNonlinearSolver<Eqn::M, LS>, M, SensEquations<Eqn>>
+where
+    Eqn: OdeEquationsSens,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+    Eqn::V: DefaultDenseMatrix,
+    LS: LinearSolver<Eqn::M>,
+{
+}
+
 
 impl<'a, M, Eqn, LS> AdjointOdeSolverMethod<'a, Eqn> for Bdf<'a, Eqn, NewtonNonlinearSolver<Eqn::M, LS>, M>
 where 
@@ -58,10 +69,13 @@ where
 {
     type DefaultAdjointSolver<'b> = Bdf<'b, AdjointEquations<'a, Eqn, Bdf<'a, Eqn, NewtonNonlinearSolver<Eqn::M, LS>, M>>, NewtonNonlinearSolver<Eqn::M, LS>, M, AdjointEquations<'a, Eqn, Bdf<'a, Eqn, NewtonNonlinearSolver<Eqn::M, LS>, M>>> where 'a: 'b;
     fn default_adjoint_solver<'b>(
+            self,
             problem: &'b OdeSolverProblem<AdjointEquations<'a, Eqn, Self>>,
             aug_eqn: AdjointEquations<'a, Eqn, Self>,
         ) -> Result<Self::DefaultAdjointSolver<'b>, DiffsolError> {
-        let (state, aug_eqn) = BdfState::new_with_augmented::<LS, _, _>(problem, aug_eqn, 1)?;
+        let mut state = self.into_state();
+        let mut newton_solver = NewtonNonlinearSolver::<Eqn::M, LS>::default();
+        let aug_eqn = state.set_consistent_augmented(&problem, aug_eqn, &mut newton_solver)?;
         let newton_solver = NewtonNonlinearSolver::new(LS::default());
         Bdf::new_augmented(state, &problem, aug_eqn, newton_solver)
     }
@@ -129,6 +143,57 @@ where
     root_finder: Option<RootFinder<Eqn::V>>,
     is_state_modified: bool,
     jacobian_update: JacobianUpdate<Eqn::T>,
+}
+
+impl<'a, M, Eqn, Nls, AugmentedEqn> Clone for  Bdf<'a, Eqn, Nls, M, AugmentedEqn> 
+where
+    Eqn: OdeEquationsImplicit,
+    Nls: NonLinearSolver<Eqn::M>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
+    Eqn::V: DefaultDenseMatrix,
+{
+    fn clone(&self) -> Self {
+        let op = self.op.clone();
+        let problem = self.ode_problem;
+        let mut nonlinear_solver = Nls::default();
+        if let Some(op) = &op {
+            nonlinear_solver
+                .set_problem(&op, problem.rtol, problem.atol.clone());
+            nonlinear_solver
+                .convergence_mut()
+                .set_max_iter(self.nonlinear_solver.convergence().max_iter());
+            nonlinear_solver
+                .reset_jacobian(&op, &self.state.y, self.state.t);
+        }
+        Self {
+            nonlinear_solver: nonlinear_solver,
+            ode_problem: problem,
+            op,
+            n_equal_steps: self.n_equal_steps,
+            y_delta: self.y_delta.clone(),
+            g_delta: self.g_delta.clone(),
+            y_predict: self.y_predict.clone(),
+            t_predict: self.t_predict,
+            s_predict: self.s_predict.clone(),
+            s_op: self.s_op.clone(),
+            s_deltas: self.s_deltas.clone(),
+            sg_deltas: self.sg_deltas.clone(),
+            diff_tmp: self.diff_tmp.clone(),
+            gdiff_tmp: self.gdiff_tmp.clone(),
+            sgdiff_tmp: self.sgdiff_tmp.clone(),
+            u: self.u.clone(),
+            alpha: self.alpha.clone(),
+            gamma: self.gamma.clone(),
+            error_const2: self.error_const2.clone(),
+            statistics: self.statistics.clone(),
+            state: self.state.clone(),
+            tstop: self.tstop,
+            root_finder: self.root_finder.clone(),
+            is_state_modified: self.is_state_modified,
+            jacobian_update: self.jacobian_update.clone(),
+        }
+    }
 }
 
 impl<'a, M, Eqn, Nls, AugmentedEqn> Bdf<'a, Eqn, Nls, M, AugmentedEqn>
@@ -1122,11 +1187,9 @@ mod test {
                 robertson_ode::robertson_ode,
                 robertson_ode_with_sens::robertson_ode_with_sens,
             }, tests::{
-                test_checkpointing, test_interpolate, test_ode_solver,
-                test_ode_solver_adjoint, test_param_sweep, test_state_mut,
-                test_state_mut_on_problem,
+                test_checkpointing, test_interpolate, test_ode_solver, test_ode_solver_adjoint, test_problem, test_state_mut, test_state_mut_on_problem
             }
-        }, FaerLU, FaerSparseLU, OdeEquations, Op, SparseColMat
+        }, FaerLU, FaerSparseLU, OdeEquations, Op, SparseColMat, OdeSolverMethod, Vector
     };
 
     use num_traits::abs;
@@ -1135,11 +1198,13 @@ mod test {
     type LS = crate::NalgebraLU<f64>;
     #[test]
     fn bdf_state_mut() {
-        test_state_mut::<M, _, _>(|p, s| p.bdf_solver::<LS>(s).unwrap());
+        test_state_mut(test_problem::<M>().bdf::<LS>().unwrap());
     }
+
+
     #[test]
     fn bdf_test_interpolate() {
-        test_interpolate::<M, _, _>(|p, s| p.bdf_solver::<LS>(s).unwrap())
+        test_interpolate(test_problem::<M>().bdf::<LS>().unwrap());
     }
 
     #[test]
@@ -1237,19 +1302,12 @@ mod test {
     fn bdf_test_nalgebra_exponential_decay_adjoint() {
         let (problem, soln) = exponential_decay_problem_adjoint::<M>();
         let s = problem.bdf::<LS>().unwrap();
-        let (adjoint_solver, adjoint_problem) = test_ode_solver_adjoint(s, soln);
+        test_ode_solver_adjoint(s, soln);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 84
         number_of_jac_muls: 6
         number_of_matrix_evals: 3
         number_of_jac_adj_muls: 492
-        "###);
-        insta::assert_yaml_snapshot!(adjoint_solver.get_statistics(), @r###"
-        number_of_linear_solver_setups: 24
-        number_of_steps: 86
-        number_of_error_test_failures: 12
-        number_of_nonlinear_solver_iterations: 486
-        number_of_nonlinear_solver_fails: 0
         "###);
     }
 
@@ -1257,19 +1315,12 @@ mod test {
     fn bdf_test_nalgebra_exponential_decay_algebraic_adjoint() {
         let (problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>();
         let s = problem.bdf::<LS>().unwrap();
-        let (adjoint_solver, _adjoint_problem) = test_ode_solver_adjoint(s, soln);
+        test_ode_solver_adjoint(s, soln);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 190
         number_of_jac_muls: 24
         number_of_matrix_evals: 8
         number_of_jac_adj_muls: 278
-        "###);
-        insta::assert_yaml_snapshot!(adjoint_solver.get_statistics(), @r###"
-        number_of_linear_solver_setups: 32
-        number_of_steps: 74
-        number_of_error_test_failures: 15
-        number_of_nonlinear_solver_iterations: 266
-        number_of_nonlinear_solver_fails: 0
         "###);
     }
 
@@ -1580,22 +1631,41 @@ mod test {
 
     #[test]
     fn test_param_sweep_bdf() {
-        let (problem, _soln) = exponential_decay_problem::<M>(false);
+        let (mut problem, _soln) = exponential_decay_problem::<M>(false);
         let mut ps = Vec::new();
         for y0 in (1..10).map(f64::from) {
             ps.push(nalgebra::DVector::<f64>::from_vec(vec![0.1, y0]));
         }
-        test_param_sweep(|p, opt_s| if let Some(s) = opt_s {p.bdf_solver::<LS>(s).unwrap()} else {p.bdf::<LS>().unwrap()}, problem, ps);
+
+        let mut old_soln: Option<nalgebra::DVector<f64>> = None;
+        let mut state = None;
+        for p in ps {
+            problem.set_params(p).unwrap();
+            let mut s = if let Some(s) = state {
+                problem.bdf_solver::<LS>(s).unwrap()
+            } else {
+                problem.bdf::<LS>().unwrap()
+            };
+            let (ys, _ts) = s.solve(10.0).unwrap();
+            // check that the new solution is different from the old one
+            if let Some(old_soln) = &mut old_soln {
+                let new_soln = ys.column(ys.ncols() - 1).into_owned();
+                let error = new_soln - &*old_soln;
+                let diff = error.squared_norm(old_soln, &problem.atol, problem.rtol).sqrt();
+                assert!(diff > 1.0e-6, "diff: {}", diff);
+            }
+            old_soln = Some(ys.column(ys.ncols() - 1).into_owned());
+            state = Some(s.into_state());
+        }
     }
 
     #[cfg(feature = "diffsl")]
     #[test]
     fn test_ball_bounce_bdf() {
+        use crate::ode_solver::tests::test_ball_bounce_problem;
         type M = nalgebra::DMatrix<f64>;
         type LS = crate::NalgebraLU<f64>;
-        type Nls = crate::NewtonNonlinearSolver<M, LS>;
-        type Eqn = crate::DiffSl<M, crate::CraneliftModule>;
-        let (x, v, t) = crate::ode_solver::tests::test_ball_bounce(|p| p.bdf::<LS>().unwrap());
+        let (x, v, t) = crate::ode_solver::tests::test_ball_bounce(test_ball_bounce_problem::<M>().bdf::<LS>().unwrap());
 
         let expected_x = [
             0.003751514915514589,

@@ -23,17 +23,15 @@ mod tests {
 
     use self::problem::OdeSolverSolution;
     use checkpointing::HermiteInterpolator;
-    use method::{AdjointOdeSolverMethod};
     use nalgebra::ComplexField;
 
     use super::*;
     use crate::matrix::Matrix;
     use crate::op::unit::UnitCallable;
     use crate::{
-        op::OpStatistics, CraneliftModule, DenseMatrix, DiffSl, MatrixCommon, NonLinearOpJacobian,
+        op::OpStatistics, CraneliftModule, NonLinearOpJacobian,
         OdeBuilder, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsRef,
-        OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
-        VectorView, AdjointEquations,
+        OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, AdjointOdeSolverMethod,
     };
     use crate::{ConstantOp, DefaultDenseMatrix, DefaultSolver, NonLinearOp, Op, Vector};
     use num_traits::One;
@@ -139,13 +137,13 @@ mod tests {
     }
 
     pub fn test_ode_solver_adjoint<'a, 'b, M, Eqn, Method>(
-        method: Method,
+        mut method: Method,
         solution: OdeSolverSolution<M::V>,
-    ) -> (Method::DefaultAdjointSolver<'b>, OdeSolverProblem<AdjointEquations<'a, Eqn, Method>>)
+    )
     where
         M: Matrix,
         Method: AdjointOdeSolverMethod<'a, Eqn>,
-        Eqn: OdeEquationsAdjoint<M = M, T = M::T, V = M::V>,
+        Eqn: OdeEquationsAdjoint<M = M, T = M::T, V = M::V> + 'a,
         Eqn::V: DefaultDenseMatrix<T = M::T>,
         Eqn::M: DefaultSolver,
     {
@@ -194,14 +192,14 @@ mod tests {
         let (adjoint_problem, adjoint_equations) = method
             .into_adjoint_problem(checkpoints, last_segment)
             .unwrap();
-        let mut adjoint_solver = adjoint_problem.default_solver(adjoint_equations).unwrap();
-        let y_expect = M::V::from_element(method.problem().eqn.rhs().nstates(), M::T::zero());
+        let mut adjoint_solver = method.default_adjoint_solver(&adjoint_problem, adjoint_equations).unwrap();
+        let y_expect = M::V::from_element(adjoint_problem.eqn.rhs().nstates(), M::T::zero());
         adjoint_solver
             .state()
             .y
             .assert_eq_st(&y_expect, M::T::from(1e-9));
-        let g_expect = M::V::from_element(method.problem().eqn.rhs().nparams(), M::T::zero());
-        for i in 0..method.problem().eqn.out().unwrap().nout() {
+        let g_expect = M::V::from_element(adjoint_problem.eqn.rhs().nparams(), M::T::zero());
+        for i in 0..adjoint_problem.eqn.out().unwrap().nout() {
             adjoint_solver.state().sg[i].assert_eq_st(&g_expect, M::T::from(1e-9));
         }
 
@@ -235,7 +233,6 @@ mod tests {
                 point.state
             );
         }
-        (adjoint_solver, adjoint_problem)
     }
 
     pub struct TestEqnInit<M> {
@@ -259,7 +256,7 @@ mod tests {
     }
 
     impl<M: Matrix> ConstantOp for TestEqnInit<M> {
-        fn call_inplace(&self, _t: Self::T, mut y: &mut Self::V) {
+        fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
             y[0] = M::T::one();
         }
     }
@@ -285,13 +282,13 @@ mod tests {
     }
 
     impl<M: Matrix> NonLinearOp for TestEqnRhs<M> {
-        fn call_inplace(&self, _x: &Self::V, _t: Self::T, mut y: &mut Self::V) {
+        fn call_inplace(&self, _x: &Self::V, _t: Self::T, y: &mut Self::V) {
             y[0] = M::T::zero();
         }
     }
 
     impl<M: Matrix> NonLinearOpJacobian for TestEqnRhs<M> {
-        fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, mut y: &mut Self::V) {
+        fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
             y[0] = M::T::zero();
         }
     }
@@ -363,8 +360,8 @@ mod tests {
         }
     }
 
-    pub fn test_interpolate<'a, M: Matrix, Method: OdeSolverMethod<'a, TestEqn<M>>, F: FnOnce(&'a OdeSolverProblem<TestEqn<M>>, Method::State) -> Method>(f: F) {
-        let problem = OdeSolverProblem::new(
+    pub fn test_problem<M: Matrix>() -> OdeSolverProblem<TestEqn<M>> {
+        OdeSolverProblem::new(
             Rc::new(TestEqn::new()),
             M::T::from(1e-6),
             Rc::new(M::V::from_element(1, M::T::from(1e-6))),
@@ -378,11 +375,13 @@ mod tests {
             M::T::one(),
             false,
         )
-        .unwrap();
-        let state = Method::State::new_without_initialise(&problem).unwrap();
-        let s = f(&problem, state.clone());
-        let t0 = M::T::zero();
-        let t1 = M::T::one();
+        .unwrap()
+    }
+
+    pub fn test_interpolate<'a, M: Matrix, Method: OdeSolverMethod<'a, TestEqn<M>>>(mut s: Method) {
+        let state = s.checkpoint();
+        let t0 = state.as_ref().t;
+        let t1 = t0 + M::T::from(1e6);
         s.interpolate(t0)
             .unwrap()
             .assert_eq_st(state.as_ref().y, M::T::from(1e-9));
@@ -392,24 +391,8 @@ mod tests {
         assert!(s.interpolate(s.state().t + t1).is_err());
     }
 
-    pub fn test_state_mut<'a, M: Matrix, Method: OdeSolverMethod<'a, TestEqn<M>>, F: FnOnce(&'a OdeSolverProblem<TestEqn<M>>, Method::State) -> Method>(f: F) {
-        let problem = OdeSolverProblem::new(
-            Rc::new(TestEqn::new()),
-            M::T::from(1e-6),
-            Rc::new(M::V::from_element(1, M::T::from(1e-6))),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            M::T::zero(),
-            M::T::one(),
-            false,
-        )
-        .unwrap();
-        let state = Method::State::new_without_initialise(&problem).unwrap();
-        let s = f(&problem, state);
+    pub fn test_state_mut<'a, M: Matrix, Method: OdeSolverMethod<'a, TestEqn<M>>>(mut s: Method) {
+        let state = s.checkpoint();
         let state2 = s.state();
         state2.y.assert_eq_st(state.as_ref().y, M::T::from(1e-9));
         s.state_mut().y[0] = M::T::from(std::f64::consts::PI);
@@ -420,15 +403,8 @@ mod tests {
     }
 
     #[cfg(feature = "diffsl")]
-    pub fn test_ball_bounce<'a, M, Method, F>(f: F) -> (Vec<f64>, Vec<f64>, Vec<f64>)
-    where
-        M: Matrix<T = f64>,
-        M: DefaultSolver<T = f64>,
-        M::V: DefaultDenseMatrix<T = f64>,
-        Method: OdeSolverMethod<'a, DiffSl<M, CraneliftModule>>,
-        F: FnOnce(&'a OdeSolverProblem<DiffSl<M, CraneliftModule>>) -> Method,  
-    {
-        let eqn = DiffSl::compile(
+    pub fn test_ball_bounce_problem<M: Matrix<T=f64>>() -> OdeSolverProblem<crate::DiffSl<M, CraneliftModule>> {
+        let eqn = crate::DiffSl::compile(
             "
             g { 9.81 } h { 10.0 }
             u_i {
@@ -445,10 +421,18 @@ mod tests {
         ",
         )
         .unwrap();
+        OdeBuilder::new().build_from_eqn(eqn).unwrap()
+    }
 
+    #[cfg(feature = "diffsl")]
+    pub fn test_ball_bounce<'a, M, Method>(mut solver: Method) -> (Vec<f64>, Vec<f64>, Vec<f64>)
+    where
+        M: Matrix<T = f64>,
+        M: DefaultSolver<T = f64>,
+        M::V: DefaultDenseMatrix<T = f64>,
+        Method: OdeSolverMethod<'a, crate::DiffSl<M, CraneliftModule>>,
+    {
         let e = 0.8;
-        let problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
-        let mut solver = f(&problem);
 
         let final_time = 2.5;
 
@@ -501,8 +485,8 @@ mod tests {
 
     pub fn test_checkpointing<'a, M, Method, Eqn>(
         soln: OdeSolverSolution<M::V>,
-        solver1: Method,
-        solver2: Method,
+        mut solver1: Method,
+        mut solver2: Method,
     ) where
         M: Matrix + DefaultSolver,
         Method: OdeSolverMethod<'a, Eqn>,
@@ -543,36 +527,6 @@ mod tests {
         }
     }
 
-    pub fn test_param_sweep<'a, Method, Eqn, F>(
-        f: F,
-        mut problem: OdeSolverProblem<Eqn>,
-        ps: Vec<Eqn::V>,
-    ) where
-        Method: OdeSolverMethod<'a, Eqn>,
-        Eqn: OdeEquationsImplicit + 'a,
-        Eqn::M: DefaultSolver,
-        Eqn::V: DefaultDenseMatrix,
-        F: Fn(&'a OdeSolverProblem<Eqn>, Option<Method::State>) -> Method,  
-
-    {
-        let mut old_soln = None;
-        let mut state = None;
-        for p in ps {
-            problem.set_params(p).unwrap();
-            let mut s = f(&problem, state);
-            let (ys, _ts) = s.solve(Eqn::T::from(10.0)).unwrap();
-            // check that the new solution is different from the old one
-            if let Some(old_soln) = &mut old_soln {
-                let new_soln = ys.column(ys.ncols() - 1).into_owned();
-                let diff = (new_soln - &*old_soln)
-                    .squared_norm(old_soln, &problem.atol, problem.rtol)
-                    .sqrt();
-                assert!(diff > Eqn::T::from(1.0e-6), "diff: {}", diff);
-            }
-            old_soln = Some(ys.column(ys.ncols() - 1).into_owned());
-            state = Some(s.into_state());
-        }
-    }
 
     pub fn test_state_mut_on_problem<'a, Eqn, Method>(
         mut s: Method,
@@ -580,13 +534,13 @@ mod tests {
     ) where
         Eqn: OdeEquationsImplicit + 'a,
         Method: OdeSolverMethod<'a, Eqn>,
+        Eqn::V: DefaultDenseMatrix,
     {
         // save state and solve for a little bit
         let state = s.checkpoint();
         s.solve(Eqn::T::from(1.0)).unwrap();
 
         // reinit using state_mut
-        let state = Method::State::new_without_initialise(s.problem()).unwrap();
         s.state_mut().y.copy_from(state.as_ref().y);
         *s.state_mut().t = state.as_ref().t;
 

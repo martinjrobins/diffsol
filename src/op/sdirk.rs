@@ -28,6 +28,23 @@ pub struct SdirkCallable<Eqn: OdeEquations> {
     sparsity: Option<<Eqn::M as Matrix>::Sparsity>,
 }
 
+impl<Eqn: OdeEquationsImplicit> Clone for SdirkCallable<Eqn> {
+    fn clone(&self) -> Self {
+        Self {
+            eqn: self.eqn.clone(),
+            c: self.c,
+            h: RefCell::new(*self.h.borrow()),
+            phi: RefCell::new(self.phi.borrow().clone()),
+            tmp: RefCell::new(self.tmp.borrow().clone()),
+            rhs_jac: RefCell::new(self.rhs_jac.borrow().clone()),
+            mass_jac: RefCell::new(self.mass_jac.borrow().clone()),
+            jacobian_is_stale: RefCell::new(*self.jacobian_is_stale.borrow()),
+            number_of_jac_evals: RefCell::new(*self.number_of_jac_evals.borrow()),
+            sparsity: self.sparsity.clone(),
+        }
+    }
+}
+
 impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
     //  y = h g(phi + c * y_s)
     pub fn integrate_out(&self, ys: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {

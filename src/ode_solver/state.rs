@@ -6,11 +6,10 @@ use crate::{
     error::{DiffsolError, OdeSolverError},
     nonlinear_solver::NonLinearSolver,
     ode_solver_error, scale, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp,
-    DefaultSolver, InitOp, NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeEquationsImplicit,
-    OdeEquationsSens, OdeSolverMethod, OdeSolverProblem, Op, SensEquations, Vector, LinearSolver,
+    InitOp, NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeEquationsImplicit,
+    OdeEquationsSens, OdeSolverProblem, Op, SensEquations, Vector, LinearSolver,
 };
 
-use super::method::SensitivitiesOdeSolverMethod;
 
 /// A state holding those variables that are common to all ODE solver states,
 /// can be used to create a new state for a specific solver.
@@ -184,7 +183,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
             NewtonNonlinearSolver::new(LS::default());
         ret.set_consistent(ode_problem, &mut root_solver)?;
         let mut root_solver_sens =
-            NewtonNonlinearSolver::new(<Eqn::M as DefaultSolver>::default_solver());
+            NewtonNonlinearSolver::new(LS::default());
         let augmented_eqn =
             ret.set_consistent_augmented(ode_problem, augmented_eqn, &mut root_solver_sens)?;
         ret.set_step_size(ode_problem, solver_order);

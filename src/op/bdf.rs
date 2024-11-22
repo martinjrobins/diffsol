@@ -1,7 +1,6 @@
 use crate::{
     matrix::DenseMatrix, ode_solver::equations::OdeEquationsImplicit, scale, LinearOp, Matrix,
-    MatrixRef, MatrixSparsity, NonLinearOp, NonLinearOpJacobian, OdeSolverProblem, Op, Vector,
-    VectorRef,
+    MatrixSparsity, NonLinearOp, NonLinearOpJacobian, OdeSolverProblem, Op, Vector,
 };
 use num_traits::{One, Zero};
 use std::ops::MulAssign;
@@ -22,6 +21,22 @@ pub struct BdfCallable<Eqn: OdeEquationsImplicit> {
     jacobian_is_stale: RefCell<bool>,
     number_of_jac_evals: RefCell<usize>,
     sparsity: Option<<Eqn::M as Matrix>::Sparsity>,
+}
+
+impl<Eqn: OdeEquationsImplicit> Clone for BdfCallable<Eqn> {
+    fn clone(&self) -> Self {
+        Self {
+            eqn: Rc::clone(&self.eqn),
+            psi_neg_y0: RefCell::new(self.psi_neg_y0.borrow().clone()),
+            c: RefCell::new(*self.c.borrow()),
+            tmp: RefCell::new(self.tmp.borrow().clone()),
+            rhs_jac: RefCell::new(self.rhs_jac.borrow().clone()),
+            mass_jac: RefCell::new(self.mass_jac.borrow().clone()),
+            jacobian_is_stale: RefCell::new(*self.jacobian_is_stale.borrow()),
+            number_of_jac_evals: RefCell::new(*self.number_of_jac_evals.borrow()),
+            sparsity: self.sparsity.clone(),
+        }
+    }
 }
 
 impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {

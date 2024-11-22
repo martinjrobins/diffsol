@@ -1,5 +1,5 @@
 use crate::{
-    matrix::Matrix, ode_solver::problem::OdeSolverSolution, op::closure_with_adjoint::ClosureWithAdjoint, scalar::scale, Closure, ConstantClosureWithAdjoint, ConstantOp, OdeBuilder, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsSens, OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector
+    matrix::Matrix, ode_solver::problem::OdeSolverSolution, op::closure_with_adjoint::ClosureWithAdjoint, scalar::scale, ConstantClosureWithAdjoint, ConstantOp, OdeBuilder, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsSens, OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};

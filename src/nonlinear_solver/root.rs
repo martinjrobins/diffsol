@@ -8,6 +8,7 @@ use crate::{
 
 use num_traits::{abs, One, Zero};
 
+#[derive(Clone)]
 pub struct RootFinder<V: Vector> {
     t0: RefCell<V::T>,
     g0: RefCell<V>,

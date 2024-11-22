@@ -8,6 +8,7 @@ pub enum SolverState {
     Checkpoint,
 }
 
+#[derive(Clone)]
 pub struct JacobianUpdate<T: Scalar> {
     steps_since_jacobian_eval: usize,
     steps_since_rhs_jacobian_eval: usize,

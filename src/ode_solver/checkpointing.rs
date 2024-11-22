@@ -213,7 +213,7 @@ mod tests {
     use nalgebra::{DMatrix, DVector};
 
     use crate::{
-        ode_solver::test_models::robertson::robertson, NalgebraLU, OdeEquations, OdeSolverMethod, OdeSolverState, Op, Vector
+        ode_solver::test_models::robertson::robertson, NalgebraLU, OdeEquations, OdeSolverMethod, Op, Vector
     };
 
     use super::{Checkpointing, HermiteInterpolator};
