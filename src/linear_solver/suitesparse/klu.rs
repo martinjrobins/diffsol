@@ -1,7 +1,5 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use faer::Col;
+use std::cell::RefCell;
 
 #[cfg(target_pointer_width = "32")]
 use suitesparse_sys::{
@@ -182,7 +180,7 @@ where
     }
 }
 
-impl<M> LinearSolver<M> for KLU<M>
+impl<'a, M> LinearSolver<'a, M> for KLU<M>
 where
     M: MatrixKLU,
     M::V: VectorKLU,
@@ -227,7 +225,7 @@ where
         &mut self,
         op: &C,
         _rtol: M::T,
-        _atol: Rc<M::V>,
+        _atol: &'a M::V,
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();
@@ -242,6 +240,7 @@ where
 mod tests {
     use crate::{
         linear_solver::tests::{linear_problem, test_linear_solver},
+        op::ParametrisedOp,
         SparseColMat,
     };
 
@@ -250,7 +249,9 @@ mod tests {
     #[test]
     fn test_klu() {
         let (op, rtol, atol, solns) = linear_problem::<SparseColMat<f64>>();
+        let p = faer::Col::zeros(0);
+        let op = ParametrisedOp::new(&op, &p);
         let s = KLU::default();
-        test_linear_solver(s, op, rtol, atol, solns);
+        test_linear_solver(s, op, rtol, &atol, solns);
     }
 }

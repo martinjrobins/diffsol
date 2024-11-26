@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::sundials_sys::{
     realtype, IDAGetReturnFlagName, SUNLinSolFree, SUNLinSolSetup, SUNLinSolSolve, SUNLinSol_Dense,
     SUNLinearSolver,
@@ -58,12 +56,12 @@ impl Drop for SundialsLinearSolver {
     }
 }
 
-impl LinearSolver<SundialsMatrix> for SundialsLinearSolver {
+impl<'a> LinearSolver<'a, SundialsMatrix> for SundialsLinearSolver {
     fn set_problem<C: NonLinearOpJacobian<T = realtype, V = SundialsVector, M = SundialsMatrix>>(
         &mut self,
         op: &C,
         _rtol: realtype,
-        _atol: Rc<SundialsVector>,
+        _atol: &'a SundialsVector,
     ) {
         let matrix = SundialsMatrix::zeros(op.nstates(), op.nstates());
         let y0 = SundialsVector::new_serial(op.nstates());

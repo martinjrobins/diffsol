@@ -31,14 +31,12 @@ pub fn gaussian_decay_problem<M: DenseMatrix + 'static>(
     OdeSolverSolution<M::V>,
 ) {
     let size2 = size;
-    let problem = OdeBuilder::new()
+    let problem = OdeBuilder::<M>::new()
         .p([0.1].repeat(size))
         .use_coloring(use_coloring)
-        .build_ode(
-            gaussian_decay::<M>,
-            gaussian_decay_jacobian::<M>,
-            move |_p, _t| M::V::from_vec([1.0.into()].repeat(size2)),
-        )
+        .rhs_implicit(gaussian_decay::<M>, gaussian_decay_jacobian::<M>)
+        .init(move |_p, _t| M::V::from_vec([1.0.into()].repeat(size2)))
+        .build()
         .unwrap();
     let p = [M::T::from(0.1)].repeat(size);
     let mut soln = OdeSolverSolution::default();

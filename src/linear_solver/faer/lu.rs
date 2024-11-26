@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::{error::LinearSolverError, linear_solver_error};
 
 use crate::{
@@ -28,7 +26,7 @@ where
     }
 }
 
-impl<T: Scalar> LinearSolver<Mat<T>> for LU<T> {
+impl<'a, T: Scalar> LinearSolver<'a, Mat<T>> for LU<T> {
     fn set_linearisation<C: NonLinearOpJacobian<T = T, V = Col<T>, M = Mat<T>>>(
         &mut self,
         op: &C,
@@ -53,7 +51,7 @@ impl<T: Scalar> LinearSolver<Mat<T>> for LU<T> {
         &mut self,
         op: &C,
         _rtol: T,
-        _atol: Rc<Col<T>>,
+        _atol: &'a Col<T>,
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();

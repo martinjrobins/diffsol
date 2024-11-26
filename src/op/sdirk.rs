@@ -1,22 +1,21 @@
 use crate::{
     matrix::{MatrixRef, MatrixView},
     ode_solver::equations::OdeEquations,
-    scale, LinearOp, Matrix, MatrixSparsity, NonLinearOpJacobian, OdeEquationsImplicit,
-    OdeSolverProblem, Vector, VectorRef,
+    scale, LinearOp, Matrix, MatrixSparsity, NonLinearOpJacobian, OdeEquationsImplicit, Vector,
+    VectorRef,
 };
 use num_traits::{One, Zero};
 use std::{
     cell::{Ref, RefCell},
     ops::Deref,
     ops::MulAssign,
-    rc::Rc,
 };
 
 use super::{NonLinearOp, Op};
 
 // callable to solve for F(y) = M (y) - h f(phi + a * y) = 0
 pub struct SdirkCallable<Eqn: OdeEquations> {
-    eqn: Rc<Eqn>,
+    eqn: Eqn,
     c: Eqn::T,
     h: RefCell<Eqn::T>,
     phi: RefCell<Eqn::V>,
@@ -28,10 +27,10 @@ pub struct SdirkCallable<Eqn: OdeEquations> {
     sparsity: Option<<Eqn::M as Matrix>::Sparsity>,
 }
 
-impl<Eqn: OdeEquationsImplicit> Clone for SdirkCallable<Eqn> {
-    fn clone(&self) -> Self {
+impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
+    pub fn clone_state(&self, eqn: Eqn) -> Self {
         Self {
-            eqn: self.eqn.clone(),
+            eqn,
             c: self.c,
             h: RefCell::new(*self.h.borrow()),
             phi: RefCell::new(self.phi.borrow().clone()),
@@ -43,15 +42,12 @@ impl<Eqn: OdeEquationsImplicit> Clone for SdirkCallable<Eqn> {
             sparsity: self.sparsity.clone(),
         }
     }
-}
-
-impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
     //  y = h g(phi + c * y_s)
     pub fn integrate_out(&self, ys: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
         self.eqn.out().unwrap().call_inplace(ys, t, y);
         y.mul_assign(scale(*(self.h.borrow())));
     }
-    pub fn from_eqn(eqn: Rc<Eqn>, c: Eqn::T) -> Self {
+    pub fn from_eqn(eqn: Eqn, c: Eqn::T) -> Self {
         let n = eqn.rhs().nstates();
         let h = RefCell::new(Eqn::T::zero());
         let phi = RefCell::new(<Eqn::V as Vector>::zeros(n));
@@ -75,13 +71,12 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
         }
     }
 
-    pub fn eqn_mut(&mut self) -> &mut Rc<Eqn> {
+    pub fn eqn_mut(&mut self) -> &mut Eqn {
         &mut self.eqn
     }
 
-    pub fn new(ode_problem: &OdeSolverProblem<Eqn>, c: Eqn::T) -> Self {
-        let eqn = ode_problem.eqn.clone();
-        let n = ode_problem.eqn.rhs().nstates();
+    pub fn new(eqn: Eqn, c: Eqn::T) -> Self {
+        let n = eqn.rhs().nstates();
         let h = RefCell::new(Eqn::T::zero());
         let phi = RefCell::new(<Eqn::V as Vector>::zeros(n));
         let jacobian_is_stale = RefCell::new(true);
@@ -147,7 +142,7 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
     pub fn get_last_f_eval(&self) -> Ref<Eqn::V> {
         self.tmp.borrow()
     }
-    pub fn eqn(&self) -> &Rc<Eqn> {
+    pub fn eqn(&self) -> &Eqn {
         &self.eqn
     }
     #[allow(dead_code)]
@@ -294,7 +289,7 @@ mod tests {
             let c = 0.1;
             let h = 1.3;
             let phi = Vcpu::from_vec(vec![1.1, 1.2, 1.3]);
-            let sdirk_callable = SdirkCallable::new(&problem, c);
+            let sdirk_callable = SdirkCallable::new(&problem.eqn, c);
             sdirk_callable.set_h(h);
             sdirk_callable.set_phi_direct(phi);
             let t = 0.9;
@@ -314,7 +309,7 @@ mod tests {
         let (problem, _soln) = exponential_decay_problem::<Mcpu>(false);
         let c = 0.1;
         let h = 1.0;
-        let sdirk_callable = SdirkCallable::new(&problem, c);
+        let sdirk_callable = SdirkCallable::new(&problem.eqn, c);
         sdirk_callable.set_h(h);
 
         let phi = Vcpu::from_vec(vec![1.1, 1.2]);

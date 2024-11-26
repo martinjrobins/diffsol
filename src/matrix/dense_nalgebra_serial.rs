@@ -13,7 +13,7 @@ use crate::error::DiffsolError;
 use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU};
 
 impl<T: Scalar> DefaultSolver for DMatrix<T> {
-    type LS = NalgebraLU<T>;
+    type LS<'a> = NalgebraLU<T>;
 }
 
 macro_rules! impl_matrix_common {

@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::{error::DiffsolError, Matrix, NonLinearOpJacobian};
 
 #[cfg(feature = "nalgebra")]
@@ -18,7 +16,7 @@ pub use faer::lu::LU as FaerLU;
 pub use nalgebra::lu::LU as NalgebraLU;
 
 /// A solver for the linear problem `Ax = b`, where `A` is a linear operator that is obtained by taking the linearisation of a nonlinear operator `C`
-pub trait LinearSolver<M: Matrix>: Default {
+pub trait LinearSolver<'a, M: Matrix>: Default {
     // sets the point at which the linearisation of the operator is evaluated
     // the operator is assumed to have the same sparsity as that given to [Self::set_problem]
     fn set_linearisation<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
@@ -35,7 +33,7 @@ pub trait LinearSolver<M: Matrix>: Default {
         &mut self,
         op: &C,
         rtol: M::T,
-        atol: Rc<M::V>,
+        atol: &'a M::V,
     );
 
     /// Solve the problem `Ax = b` and return the solution `x`.
@@ -62,11 +60,9 @@ impl<V> LinearSolveSolution<V> {
 
 #[cfg(test)]
 pub mod tests {
-    use std::rc::Rc;
-
     use crate::{
         linear_solver::{FaerLU, NalgebraLU},
-        op::closure::Closure,
+        op::{closure::Closure, ParametrisedOp},
         scalar::scale,
         vector::VectorRef,
         LinearSolver, Matrix, NonLinearOpJacobian, Vector,
@@ -77,26 +73,30 @@ pub mod tests {
 
     #[allow(clippy::type_complexity)]
     pub fn linear_problem<M: Matrix + 'static>() -> (
-        impl NonLinearOpJacobian<M = M, V = M::V, T = M::T>,
+        Closure<
+            M,
+            impl Fn(&M::V, &M::V, M::T, &mut M::V),
+            impl Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        >,
         M::T,
-        Rc<M::V>,
+        M::V,
         Vec<LinearSolveSolution<M::V>>,
     ) {
         let diagonal = M::V::from_vec(vec![2.0.into(), 2.0.into()]);
         let jac1 = M::from_diagonal(&diagonal);
         let jac2 = M::from_diagonal(&diagonal);
-        let p = Rc::new(M::V::zeros(0));
+        let p = M::V::zeros(0);
         let mut op = Closure::new(
             // f = J * x
             move |x, _p, _t, y| jac1.gemv(M::T::one(), x, M::T::zero(), y),
             move |_x, _p, _t, v, y| jac2.gemv(M::T::one(), v, M::T::zero(), y),
             2,
             2,
-            p,
+            p.len(),
         );
-        op.calculate_sparsity(&M::V::from_element(2, M::T::one()), M::T::zero());
+        op.calculate_sparsity(&M::V::from_element(2, M::T::one()), M::T::zero(), &p);
         let rtol = M::T::from(1e-6);
-        let atol = Rc::new(M::V::from_vec(vec![1e-6.into(), 1e-6.into()]));
+        let atol = M::V::from_vec(vec![1e-6.into(), 1e-6.into()]);
         let solns = vec![LinearSolveSolution::new(
             M::V::from_vec(vec![2.0.into(), 4.0.into()]),
             M::V::from_vec(vec![1.0.into(), 2.0.into()]),
@@ -104,23 +104,23 @@ pub mod tests {
         (op, rtol, atol, solns)
     }
 
-    pub fn test_linear_solver<C>(
-        mut solver: impl LinearSolver<C::M>,
+    pub fn test_linear_solver<'a, C>(
+        mut solver: impl LinearSolver<'a, C::M>,
         op: C,
         rtol: C::T,
-        atol: Rc<C::V>,
+        atol: &'a C::V,
         solns: Vec<LinearSolveSolution<C::V>>,
     ) where
         C: NonLinearOpJacobian,
-        for<'a> &'a C::V: VectorRef<C::V>,
+        for<'b> &'b C::V: VectorRef<C::V>,
     {
-        solver.set_problem(&op, rtol, atol.clone());
+        solver.set_problem(&op, rtol, atol);
         let x = C::V::zeros(op.nout());
         let t = C::T::zero();
         solver.set_linearisation(&op, &x, t);
         for soln in solns {
             let x = solver.solve(&soln.b).unwrap();
-            let tol = { &soln.x * scale(rtol) + atol.as_ref() };
+            let tol = { &soln.x * scale(rtol) + atol };
             x.assert_eq(&soln.x, &tol);
         }
     }
@@ -131,13 +131,17 @@ pub mod tests {
     #[test]
     fn test_lu_nalgebra() {
         let (op, rtol, atol, solns) = linear_problem::<MCpuNalgebra>();
+        let p = nalgebra::DVector::zeros(0);
+        let op = ParametrisedOp::new(&op, &p);
         let s = NalgebraLU::default();
-        test_linear_solver(s, op, rtol, atol, solns);
+        test_linear_solver(s, op, rtol, &atol, solns);
     }
     #[test]
     fn test_lu_faer() {
         let (op, rtol, atol, solns) = linear_problem::<MCpuFaer>();
+        let p = faer::Col::zeros(0);
+        let op = ParametrisedOp::new(&op, &p);
         let s = FaerLU::default();
-        test_linear_solver(s, op, rtol, atol, solns);
+        test_linear_solver(s, op, rtol, &atol, solns);
     }
 }

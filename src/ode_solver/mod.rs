@@ -28,6 +28,7 @@ mod tests {
     use super::*;
     use crate::matrix::Matrix;
     use crate::op::unit::UnitCallable;
+    use crate::op::ParametrisedOp;
     use crate::{
         op::OpStatistics, AdjointOdeSolverMethod, CraneliftModule, NonLinearOpJacobian, OdeBuilder,
         OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsRef, OdeSolverMethod,
@@ -50,7 +51,7 @@ mod tests {
         Eqn::M: DefaultSolver,
         Method: OdeSolverMethod<'a, Eqn>,
     {
-        let have_root = method.problem().eqn.as_ref().root().is_some();
+        let have_root = method.problem().eqn.root().is_some();
         for (i, point) in solution.solution_points.iter().enumerate() {
             let (soln, sens_soln) = if use_tstop {
                 match method.set_stop_time(point.t) {
@@ -96,7 +97,7 @@ mod tests {
                     // problem rtol and atol is on the state, so just use solution tolerance here
                     (solution.rtol, &solution.atol)
                 } else {
-                    (method.problem().rtol, method.problem().atol.as_ref())
+                    (method.problem().rtol, &method.problem().atol)
                 };
                 let error = soln.clone() - &point.state;
                 let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
@@ -310,7 +311,6 @@ mod tests {
         type T = M::T;
         type V = M::V;
         type M = M;
-        fn set_params(&mut self, _p: Rc<Self::V>) {}
         fn nout(&self) -> usize {
             1
         }
@@ -327,10 +327,10 @@ mod tests {
 
     impl<'a, M: Matrix> OdeEquationsRef<'a> for TestEqn<M> {
         type Rhs = &'a TestEqnRhs<M>;
-        type Mass = &'a UnitCallable<M>;
-        type Root = &'a UnitCallable<M>;
+        type Mass = ParametrisedOp<'a, UnitCallable<M>>;
+        type Root = ParametrisedOp<'a, UnitCallable<M>>;
         type Init = &'a TestEqnInit<M>;
-        type Out = &'a UnitCallable<M>;
+        type Out = ParametrisedOp<'a, UnitCallable<M>>;
     }
 
     impl<M: Matrix> OdeEquations for TestEqn<M> {
@@ -338,11 +338,11 @@ mod tests {
             &self.rhs
         }
 
-        fn mass(&self) -> Option<&UnitCallable<M>> {
+        fn mass(&self) -> Option<<Self as OdeEquationsRef<'_>>::Mass> {
             None
         }
 
-        fn root(&self) -> Option<&UnitCallable<M>> {
+        fn root(&self) -> Option<<Self as OdeEquationsRef<'_>>::Root> {
             None
         }
 
@@ -350,16 +350,19 @@ mod tests {
             &self.init
         }
 
-        fn out(&self) -> Option<&UnitCallable<M>> {
+        fn out(&self) -> Option<<Self as OdeEquationsRef<'_>>::Out> {
             None
+        }
+        fn set_params(&mut self, _p: &Self::V) {
+            unimplemented!()
         }
     }
 
     pub fn test_problem<M: Matrix>() -> OdeSolverProblem<TestEqn<M>> {
         OdeSolverProblem::new(
-            Rc::new(TestEqn::new()),
+            TestEqn::new(),
             M::T::from(1e-6),
-            Rc::new(M::V::from_element(1, M::T::from(1e-6))),
+            M::V::from_element(1, M::T::from(1e-6)),
             None,
             None,
             None,
@@ -414,7 +417,7 @@ mod tests {
         ",
         )
         .unwrap();
-        OdeBuilder::new().build_from_eqn(eqn).unwrap()
+        OdeBuilder::<M>::new().build_from_eqn(eqn).unwrap()
     }
 
     #[cfg(feature = "diffsl")]

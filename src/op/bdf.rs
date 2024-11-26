@@ -1,18 +1,17 @@
 use crate::{
     matrix::DenseMatrix, ode_solver::equations::OdeEquationsImplicit, scale, LinearOp, Matrix,
-    MatrixSparsity, NonLinearOp, NonLinearOpJacobian, OdeSolverProblem, Op, Vector,
+    MatrixSparsity, NonLinearOp, NonLinearOpJacobian, Op, Vector,
 };
 use num_traits::{One, Zero};
 use std::ops::MulAssign;
 use std::{
     cell::{Ref, RefCell},
     ops::{AddAssign, Deref, SubAssign},
-    rc::Rc,
 };
 
 // callable to solve for F(y) = M (y' + psi) - c * f(y) = 0
 pub struct BdfCallable<Eqn: OdeEquationsImplicit> {
-    eqn: Rc<Eqn>,
+    eqn: Eqn,
     psi_neg_y0: RefCell<Eqn::V>,
     c: RefCell<Eqn::T>,
     tmp: RefCell<Eqn::V>,
@@ -23,10 +22,10 @@ pub struct BdfCallable<Eqn: OdeEquationsImplicit> {
     sparsity: Option<<Eqn::M as Matrix>::Sparsity>,
 }
 
-impl<Eqn: OdeEquationsImplicit> Clone for BdfCallable<Eqn> {
-    fn clone(&self) -> Self {
+impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
+    pub fn clone_state(&self, eqn: Eqn) -> Self {
         Self {
-            eqn: Rc::clone(&self.eqn),
+            eqn,
             psi_neg_y0: RefCell::new(self.psi_neg_y0.borrow().clone()),
             c: RefCell::new(*self.c.borrow()),
             tmp: RefCell::new(self.tmp.borrow().clone()),
@@ -37,9 +36,6 @@ impl<Eqn: OdeEquationsImplicit> Clone for BdfCallable<Eqn> {
             sparsity: self.sparsity.clone(),
         }
     }
-}
-
-impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
     // F(y) = M (y - y0 + psi) - c * f(y) = 0
     // M = I
     // dg = f(y)
@@ -58,8 +54,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
         let c = self.c.borrow();
         d.axpy(*c, dg, -Eqn::T::one());
     }
-    pub fn from_sensitivity_eqn(eqn: &Rc<Eqn>) -> Self {
-        let eqn = eqn.clone();
+    pub fn from_sensitivity_eqn(eqn: Eqn) -> Self {
         let n = eqn.rhs().nstates();
         let c = RefCell::new(Eqn::T::zero());
         let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n));
@@ -81,15 +76,14 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
             sparsity,
         }
     }
-    pub fn eqn_mut(&mut self) -> &mut Rc<Eqn> {
-        &mut self.eqn
-    }
-    pub fn eqn(&self) -> &Rc<Eqn> {
+    pub fn eqn(&self) -> &Eqn {
         &self.eqn
     }
-    pub fn new(ode_problem: &OdeSolverProblem<Eqn>) -> Self {
-        let eqn = ode_problem.eqn.clone();
-        let n = ode_problem.eqn.rhs().nstates();
+    pub fn eqn_mut(&mut self) -> &mut Eqn {
+        &mut self.eqn
+    }
+    pub fn new(eqn: Eqn) -> Self {
+        let n = eqn.rhs().nstates();
         let c = RefCell::new(Eqn::T::zero());
         let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n));
         let jacobian_is_stale = RefCell::new(true);
@@ -294,7 +288,7 @@ mod tests {
     #[test]
     fn test_bdf_callable() {
         let (problem, _soln) = exponential_decay_problem::<Mcpu>(false);
-        let mut bdf_callable = BdfCallable::new(&problem);
+        let mut bdf_callable = BdfCallable::new(&problem.eqn);
         let c = 0.1;
         let phi_neg_y0 = Vcpu::from_vec(vec![1.1, 1.2]);
         bdf_callable.set_c_direct(c);

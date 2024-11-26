@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use nalgebra::{DMatrix, DVector, Dyn};
 
 use crate::{
@@ -29,7 +27,7 @@ where
     }
 }
 
-impl<T: Scalar> LinearSolver<DMatrix<T>> for LU<T> {
+impl<'a, T: Scalar> LinearSolver<'a, DMatrix<T>> for LU<T> {
     fn solve_in_place(&self, state: &mut DVector<T>) -> Result<(), DiffsolError> {
         if self.lu.is_none() {
             return Err(linear_solver_error!(LuNotInitialized))?;
@@ -56,7 +54,7 @@ impl<T: Scalar> LinearSolver<DMatrix<T>> for LU<T> {
         &mut self,
         op: &C,
         _rtol: T,
-        _atol: Rc<DVector<T>>,
+        _atol: &'a DVector<T>,
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();

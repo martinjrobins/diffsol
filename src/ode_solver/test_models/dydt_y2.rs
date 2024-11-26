@@ -29,12 +29,12 @@ pub fn dydt_y2_problem<M: DenseMatrix + 'static>(
     let size2 = size;
     let y0 = -200.;
     let tlast = 20.0;
-    let problem = OdeBuilder::new()
+    let problem = OdeBuilder::<M>::new()
         .use_coloring(use_coloring)
         .rtol(1e-4)
-        .build_ode(rhs::<M>, rhs_jac::<M>, move |_p, _t| {
-            M::V::from_vec([y0.into()].repeat(size2))
-        })
+        .rhs_implicit(rhs::<M>, rhs_jac::<M>)
+        .init(move |_p, _t| M::V::from_vec([y0.into()].repeat(size2)))
+        .build()
         .unwrap();
     let mut soln = OdeSolverSolution::default();
     let y0 = M::V::from_vec([y0.into()].repeat(size));

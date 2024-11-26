@@ -94,7 +94,7 @@ impl Display for SundialsMatrix {
 }
 
 impl DefaultSolver for SundialsMatrix {
-    type LS = SundialsLinearSolver;
+    type LS<'a> = SundialsLinearSolver;
 }
 
 impl MatrixCommon for SundialsMatrix {

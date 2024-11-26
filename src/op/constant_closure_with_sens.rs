@@ -1,6 +1,6 @@
-use std::rc::Rc;
-
 use crate::{ConstantOp, ConstantOpSens, Matrix, Op, Vector};
+
+use super::{BuilderOp, ParametrisedOp};
 
 pub struct ConstantClosureWithSens<M, I, J>
 where
@@ -10,10 +10,9 @@ where
 {
     func: I,
     func_sens: J,
-    nstates: usize,
     nout: usize,
     nparams: usize,
-    p: Rc<M::V>,
+    _phantom: std::marker::PhantomData<M>,
 }
 
 impl<M, I, J> ConstantClosureWithSens<M, I, J>
@@ -22,15 +21,13 @@ where
     I: Fn(&M::V, M::T) -> M::V,
     J: Fn(&M::V, M::T, &M::V, &mut M::V),
 {
-    pub fn new(func: I, func_sens: J, nstates: usize, nout: usize, p: Rc<M::V>) -> Self {
-        let nparams = p.len();
+    pub fn new(func: I, func_sens: J, nout: usize, nparams: usize) -> Self {
         Self {
             func,
             func_sens,
-            nstates,
             nout,
             nparams,
-            p,
+            _phantom: std::marker::PhantomData,
         }
     }
 }
@@ -45,7 +42,7 @@ where
     type T = M::T;
     type M = M;
     fn nstates(&self) -> usize {
-        self.nstates
+        0
     }
     fn nout(&self) -> usize {
         self.nout
@@ -53,33 +50,49 @@ where
     fn nparams(&self) -> usize {
         self.nparams
     }
-    fn set_params(&mut self, p: Rc<M::V>) {
-        assert_eq!(p.len(), self.nparams);
-        self.p = p;
+}
+
+impl<M, I, J> BuilderOp for ConstantClosureWithSens<M, I, J>
+where
+    M: Matrix,
+    I: Fn(&M::V, M::T) -> M::V,
+    J: Fn(&M::V, M::T, &M::V, &mut M::V),
+{
+    fn calculate_sparsity(&mut self, _y0: &Self::V, _t0: Self::T, _p: &Self::V) {
+        // do nothing
+    }
+    fn set_nstates(&mut self, _nstates: usize) {
+        // do nothing
+    }
+    fn set_nout(&mut self, nout: usize) {
+        self.nout = nout;
+    }
+    fn set_nparams(&mut self, nparams: usize) {
+        self.nparams = nparams;
     }
 }
 
-impl<M, I, J> ConstantOp for ConstantClosureWithSens<M, I, J>
+impl<'a, M, I, J> ConstantOp for ParametrisedOp<'a, ConstantClosureWithSens<M, I, J>>
 where
     M: Matrix,
     I: Fn(&M::V, M::T) -> M::V,
     J: Fn(&M::V, M::T, &M::V, &mut M::V),
 {
     fn call_inplace(&self, t: Self::T, y: &mut Self::V) {
-        y.copy_from(&(self.func)(self.p.as_ref(), t));
+        y.copy_from(&(self.op.func)(self.p, t));
     }
     fn call(&self, t: Self::T) -> Self::V {
-        (self.func)(self.p.as_ref(), t)
+        (self.op.func)(self.p, t)
     }
 }
 
-impl<M, I, J> ConstantOpSens for ConstantClosureWithSens<M, I, J>
+impl<'a, M, I, J> ConstantOpSens for ParametrisedOp<'a, ConstantClosureWithSens<M, I, J>>
 where
     M: Matrix,
     I: Fn(&M::V, M::T) -> M::V,
     J: Fn(&M::V, M::T, &M::V, &mut M::V),
 {
     fn sens_mul_inplace(&self, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        (self.func_sens)(self.p.as_ref(), t, v, y);
+        (self.op.func_sens)(self.p, t, v, y);
     }
 }

@@ -1,12 +1,11 @@
 use crate::{
-    matrix::Matrix, ode_solver::problem::OdeSolverSolution,
-    op::closure_with_adjoint::ClosureWithAdjoint, scalar::scale, ConstantClosureWithAdjoint,
-    ConstantOp, OdeBuilder, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit,
-    OdeEquationsSens, OdeSolverEquations, OdeSolverProblem, UnitCallable, Vector,
+    matrix::Matrix, ode_solver::problem::OdeSolverSolution, scalar::scale, ConstantOp, OdeBuilder,
+    OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsSens, OdeSolverProblem,
+    Vector,
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};
-use std::{ops::MulAssign, rc::Rc};
+use std::ops::MulAssign;
 
 // exponential decay problem
 // dy/dt = -ay (p = [a, y0])
@@ -141,15 +140,13 @@ pub fn negative_exponential_decay_problem<M: Matrix + 'static>(
     let h = -1.0;
     let k = 0.1;
     let y0 = (-10.0 * k).exp();
-    let problem = OdeBuilder::new()
+    let problem = OdeBuilder::<M>::new()
         .h0(h)
         .p([k, y0])
         .use_coloring(use_coloring)
-        .build_ode(
-            exponential_decay::<M>,
-            exponential_decay_jacobian::<M>,
-            exponential_decay_init::<M>,
-        )
+        .rhs_implicit(exponential_decay::<M>, exponential_decay_jacobian::<M>)
+        .init(exponential_decay_init::<M>)
+        .build()
         .unwrap();
     let p = [M::T::from(k), M::T::from(y0)];
     let mut soln = OdeSolverSolution {
@@ -175,15 +172,13 @@ pub fn exponential_decay_problem<M: Matrix + 'static>(
     let h = 1.0;
     let k = 0.1;
     let y0 = 1.0;
-    let problem = OdeBuilder::new()
+    let problem = OdeBuilder::<M>::new()
         .h0(h)
         .p([k, y0])
         .use_coloring(use_coloring)
-        .build_ode(
-            exponential_decay::<M>,
-            exponential_decay_jacobian::<M>,
-            exponential_decay_init::<M>,
-        )
+        .rhs_implicit(exponential_decay::<M>, exponential_decay_jacobian::<M>)
+        .init(exponential_decay_init::<M>)
+        .build()
         .unwrap();
     let p = [M::T::from(k), M::T::from(y0)];
     let mut soln = OdeSolverSolution::default();
@@ -205,16 +200,13 @@ pub fn exponential_decay_problem_with_root<M: Matrix + 'static>(
 ) {
     let k = 0.1;
     let y0 = 1.0;
-    let problem = OdeBuilder::new()
+    let problem = OdeBuilder::<M>::new()
         .p([k, y0])
         .use_coloring(use_coloring)
-        .build_ode_with_root(
-            exponential_decay::<M>,
-            exponential_decay_jacobian::<M>,
-            exponential_decay_init::<M>,
-            exponential_decay_root::<M>,
-            1,
-        )
+        .rhs_implicit(exponential_decay::<M>, exponential_decay_jacobian::<M>)
+        .init(exponential_decay_init::<M>)
+        .root(exponential_decay_root::<M>, 1)
+        .build()
         .unwrap();
     let p = [M::T::from(k), M::T::from(y0)];
     let mut soln = OdeSolverSolution::default();
@@ -232,85 +224,37 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>() -> (
     OdeSolverProblem<impl OdeEquationsAdjoint<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
-    let k = M::T::from(0.1);
-    let y0 = M::T::from(1.0);
-    let t0 = M::T::from(0.0);
-    let h0 = M::T::from(1.0);
-    let p = Rc::new(M::V::from_vec(vec![k, y0]));
-    let init = exponential_decay_init::<M>;
-    let y0 = init(&p, t0);
-    let nstates = y0.len();
-    let rhs = exponential_decay::<M>;
-    let rhs_jac = exponential_decay_jacobian::<M>;
-    let rhs_adj_jac = exponential_decay_jacobian_adjoint::<M>;
-    let rhs_sens_adj = exponential_decay_sens_transpose::<M>;
-    let mut rhs = ClosureWithAdjoint::new(
-        rhs,
-        rhs_jac,
-        rhs_adj_jac,
-        rhs_sens_adj,
-        nstates,
-        nstates,
-        p.clone(),
-    );
-    let nout = 2;
-    let out = exponential_decay_out::<M>;
-    let out_jac = exponential_decay_out_jac_mul::<M>;
-    let out_jac_adj = exponential_decay_out_adj_mul::<M>;
-    let out_sens_adj = exponential_decay_out_sens_adj::<M>;
-    let out = ClosureWithAdjoint::new(
-        out,
-        out_jac,
-        out_jac_adj,
-        out_sens_adj,
-        nstates,
-        nout,
-        p.clone(),
-    );
-    let init = ConstantClosureWithAdjoint::new(
-        exponential_decay_init::<M>,
-        exponential_decay_init_sens_adjoint::<M>,
-        p.clone(),
-    );
-    if M::is_sparse() {
-        rhs.calculate_jacobian_sparsity(&y0, t0);
-        rhs.calculate_adjoint_sparsity(&y0, t0);
-    }
-    let out = Some(out);
-    let mass: Option<UnitCallable<M>> = None;
-    let root: Option<UnitCallable<M>> = None;
-    let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p.clone());
-    let rtol = M::T::from(1e-6);
-    let atol = Rc::new(M::V::from_element(nstates, M::T::from(1e-6)));
-    let out_rtol = Some(M::T::from(1e-6));
-    let out_atol = Some(Rc::new(M::V::from_element(nout, M::T::from(1e-6))));
-    let param_rtol = Some(M::T::from(1e-6));
-    let param_atol = Some(Rc::new(M::V::from_element(p.len(), M::T::from(1e-6))));
-    let sens_rtol = Some(M::T::from(1e-6));
-    let sens_atol = Some(Rc::new(M::V::from_element(nstates, M::T::from(1e-6))));
-    let integrate_out = true;
-    let problem = OdeSolverProblem::new(
-        Rc::new(eqn),
-        rtol,
-        atol,
-        sens_rtol,
-        sens_atol,
-        out_rtol,
-        out_atol,
-        param_rtol,
-        param_atol,
-        t0,
-        h0,
-        integrate_out,
-    )
-    .unwrap();
+    let k = 0.1;
+    let y0 = 1.0;
+    let problem = OdeBuilder::<M>::new()
+        .p([k, y0])
+        .rhs_adjoint_implicit(
+            exponential_decay::<M>,
+            exponential_decay_jacobian::<M>,
+            exponential_decay_jacobian_adjoint::<M>,
+            exponential_decay_sens_transpose::<M>,
+        )
+        .init_adjoint(
+            exponential_decay_init::<M>,
+            exponential_decay_init_sens_adjoint::<M>,
+        )
+        .out_adjoint_implicit(
+            exponential_decay_out::<M>,
+            exponential_decay_out_jac_mul::<M>,
+            exponential_decay_out_adj_mul::<M>,
+            exponential_decay_out_sens_adj::<M>,
+            2,
+        )
+        .build()
+        .unwrap();
     let mut soln = OdeSolverSolution {
-        atol: problem.atol.as_ref().clone(),
+        atol: problem.atol.clone(),
         rtol: problem.rtol,
         ..Default::default()
     };
     let t0 = M::T::from(0.0);
     let t1 = M::T::from(9.0);
+    let p = [M::T::from(k), M::T::from(y0)];
     for i in 0..10 {
         let t = M::T::from(i as f64);
         let y0: M::V = problem.eqn.init().call(M::T::zero());
@@ -347,18 +291,21 @@ pub fn exponential_decay_problem_sens<M: Matrix + 'static>(
 ) {
     let k = 0.1;
     let y0 = 1.0;
-    let problem = OdeBuilder::new()
+    let problem = OdeBuilder::<M>::new()
         .p([k, y0])
         .sens_rtol(Some(1e-6))
         .sens_atol(Some([1e-6, 1e-6]))
         .use_coloring(use_coloring)
-        .build_ode_with_sens(
+        .rhs_sens_implicit(
             exponential_decay::<M>,
             exponential_decay_jacobian::<M>,
             exponential_decay_sens::<M>,
+        )
+        .init_sens(
             exponential_decay_init::<M>,
             exponential_decay_init_sens::<M>,
         )
+        .build()
         .unwrap();
     let p = [M::T::from(k), M::T::from(y0)];
     let mut soln = OdeSolverSolution::default();

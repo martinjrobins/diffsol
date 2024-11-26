@@ -13,7 +13,7 @@ use faer::{
 use faer::{unzipped, zipped};
 
 impl<T: Scalar> DefaultSolver for Mat<T> {
-    type LS = FaerLU<T>;
+    type LS<'a> = FaerLU<T>;
 }
 
 macro_rules! impl_matrix_common {

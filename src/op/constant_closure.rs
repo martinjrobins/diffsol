@@ -1,6 +1,4 @@
-use num_traits::Zero;
-use std::rc::Rc;
-
+use super::{BuilderOp, ParametrisedOp};
 use crate::{ConstantOp, Matrix, Op, Vector};
 
 pub struct ConstantClosure<M, I>
@@ -9,10 +7,9 @@ where
     I: Fn(&M::V, M::T) -> M::V,
 {
     func: I,
-    nstates: usize,
     nout: usize,
     nparams: usize,
-    p: Rc<M::V>,
+    _phantom: std::marker::PhantomData<M>,
 }
 
 impl<M, I> ConstantClosure<M, I>
@@ -20,17 +17,13 @@ where
     M: Matrix,
     I: Fn(&M::V, M::T) -> M::V,
 {
-    pub fn new(func: I, p: Rc<M::V>) -> Self {
-        let nparams = p.len();
-        let y0 = (func)(p.as_ref(), M::T::zero());
-        let nstates = y0.len();
-        let nout = nstates;
+    pub fn new(func: I, nout: usize, nparams: usize) -> Self {
+        let nout = nout;
         Self {
             func,
-            nstates,
             nout,
             nparams,
-            p,
+            _phantom: std::marker::PhantomData,
         }
     }
 }
@@ -44,7 +37,7 @@ where
     type T = M::T;
     type M = M;
     fn nstates(&self) -> usize {
-        self.nstates
+        0
     }
     fn nout(&self) -> usize {
         self.nout
@@ -52,21 +45,36 @@ where
     fn nparams(&self) -> usize {
         self.nparams
     }
-    fn set_params(&mut self, p: Rc<M::V>) {
-        assert_eq!(p.len(), self.nparams);
-        self.p = p;
+}
+
+impl<M, I> BuilderOp for ConstantClosure<M, I>
+where
+    M: Matrix,
+    I: Fn(&M::V, M::T) -> M::V,
+{
+    fn calculate_sparsity(&mut self, _y0: &Self::V, _t0: Self::T, _p: &Self::V) {
+        // do nothing
+    }
+    fn set_nstates(&mut self, _nstates: usize) {
+        // do nothing
+    }
+    fn set_nout(&mut self, nout: usize) {
+        self.nout = nout;
+    }
+    fn set_nparams(&mut self, nparams: usize) {
+        self.nparams = nparams;
     }
 }
 
-impl<M, I> ConstantOp for ConstantClosure<M, I>
+impl<'a, M, I> ConstantOp for ParametrisedOp<'a, ConstantClosure<M, I>>
 where
     M: Matrix,
     I: Fn(&M::V, M::T) -> M::V,
 {
     fn call_inplace(&self, t: Self::T, y: &mut Self::V) {
-        y.copy_from(&(self.func)(self.p.as_ref(), t));
+        y.copy_from(&(self.op.func)(self.p, t));
     }
     fn call(&self, t: Self::T) -> Self::V {
-        (self.func)(self.p.as_ref(), t)
+        (self.op.func)(self.p, t)
     }
 }

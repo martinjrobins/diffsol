@@ -1,26 +1,22 @@
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
 
 use crate::{
     jacobian::{find_jacobian_non_zeros, find_sens_non_zeros, JacobianColoring},
     Matrix, MatrixSparsity, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens, Op, Vector,
 };
 
-use super::OpStatistics;
+use super::{BuilderOp, OpStatistics, ParametrisedOp};
 
 pub struct ClosureWithSens<M, F, G, H>
 where
     M: Matrix,
-    F: Fn(&M::V, &M::V, M::T, &mut M::V),
-    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
     func: F,
     jacobian_action: G,
     sens_action: H,
     nstates: usize,
-    nout: usize,
     nparams: usize,
-    p: Rc<M::V>,
+    nout: usize,
     coloring: Option<JacobianColoring<M>>,
     sens_coloring: Option<JacobianColoring<M>>,
     sparsity: Option<M::Sparsity>,
@@ -40,10 +36,9 @@ where
         jacobian_action: G,
         sens_action: H,
         nstates: usize,
+        nparams: usize,
         nout: usize,
-        p: Rc<M::V>,
     ) -> Self {
-        let nparams = p.len();
         Self {
             func,
             jacobian_action,
@@ -51,7 +46,6 @@ where
             nstates,
             nout,
             nparams,
-            p,
             statistics: RefCell::new(OpStatistics::default()),
             coloring: None,
             sparsity: None,
@@ -60,8 +54,9 @@ where
         }
     }
 
-    pub fn calculate_jacobian_sparsity(&mut self, y0: &M::V, t0: M::T) {
-        let non_zeros = find_jacobian_non_zeros(self, y0, t0);
+    pub fn calculate_jacobian_sparsity(&mut self, y0: &M::V, t0: M::T, p: &M::V) {
+        let op = ParametrisedOp { op: self, p };
+        let non_zeros = find_jacobian_non_zeros(&op, y0, t0);
         self.sparsity = Some(
             MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
                 .expect("invalid sparsity pattern"),
@@ -71,10 +66,12 @@ where
             &non_zeros,
         ));
     }
-    pub fn calculate_sens_sparsity(&mut self, y0: &M::V, t0: M::T) {
-        let non_zeros = find_sens_non_zeros(self, y0, t0);
+    pub fn calculate_sens_sparsity(&mut self, y0: &M::V, t0: M::T, p: &M::V) {
+        let op = ParametrisedOp { op: self, p };
+        let non_zeros = find_sens_non_zeros(&op, y0, t0);
+        let nparams = p.len();
         self.sens_sparsity = Some(
-            MatrixSparsity::try_from_indices(self.nout(), self.nparams, non_zeros.clone())
+            MatrixSparsity::try_from_indices(self.nout(), nparams, non_zeros.clone())
                 .expect("invalid sparsity pattern"),
         );
         self.sens_coloring = Some(JacobianColoring::new(
@@ -84,12 +81,32 @@ where
     }
 }
 
-impl<M, F, G, H> Op for ClosureWithSens<M, F, G, H>
+impl<M, F, G, H> BuilderOp for ClosureWithSens<M, F, G, H>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+{
+    fn set_nstates(&mut self, nstates: usize) {
+        self.nstates = nstates;
+    }
+    fn set_nout(&mut self, nout: usize) {
+        self.nout = nout;
+    }
+    fn set_nparams(&mut self, nparams: usize) {
+        self.nparams = nparams;
+    }
+
+    fn calculate_sparsity(&mut self, y0: &Self::V, t0: Self::T, p: &Self::V) {
+        self.calculate_jacobian_sparsity(y0, t0, p);
+        self.calculate_sens_sparsity(y0, t0, p);
+    }
+}
+
+impl<M, F, G, H> Op for ClosureWithSens<M, F, G, H>
+where
+    M: Matrix,
 {
     type V = M::V;
     type T = M::T;
@@ -103,17 +120,12 @@ where
     fn nparams(&self) -> usize {
         self.nparams
     }
-    fn set_params(&mut self, p: Rc<M::V>) {
-        assert_eq!(p.len(), self.nparams);
-        self.p = p;
-    }
-
     fn statistics(&self) -> OpStatistics {
         self.statistics.borrow().clone()
     }
 }
 
-impl<M, F, G, H> NonLinearOp for ClosureWithSens<M, F, G, H>
+impl<'a, M, F, G, H> NonLinearOp for ParametrisedOp<'a, ClosureWithSens<M, F, G, H>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -121,12 +133,12 @@ where
     H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
     fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
-        self.statistics.borrow_mut().increment_call();
-        (self.func)(x, self.p.as_ref(), t, y)
+        self.op.statistics.borrow_mut().increment_call();
+        (self.op.func)(x, self.p, t, y)
     }
 }
 
-impl<M, F, G, H> NonLinearOpJacobian for ClosureWithSens<M, F, G, H>
+impl<'a, M, F, G, H> NonLinearOpJacobian for ParametrisedOp<'a, ClosureWithSens<M, F, G, H>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -134,23 +146,23 @@ where
     H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
     fn jac_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
-        self.statistics.borrow_mut().increment_jac_mul();
-        (self.jacobian_action)(x, self.p.as_ref(), t, v, y)
+        self.op.statistics.borrow_mut().increment_jac_mul();
+        (self.op.jacobian_action)(x, self.p, t, v, y)
     }
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
-        self.statistics.borrow_mut().increment_matrix();
-        if let Some(coloring) = self.coloring.as_ref() {
+        self.op.statistics.borrow_mut().increment_matrix();
+        if let Some(coloring) = self.op.coloring.as_ref() {
             coloring.jacobian_inplace(self, x, t, y);
         } else {
             self._default_jacobian_inplace(x, t, y);
         }
     }
     fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
-        self.sparsity.clone()
+        self.op.sparsity.clone()
     }
 }
 
-impl<M, F, G, H> NonLinearOpSens for ClosureWithSens<M, F, G, H>
+impl<'a, M, F, G, H> NonLinearOpSens for ParametrisedOp<'a, ClosureWithSens<M, F, G, H>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -158,17 +170,17 @@ where
     H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
     fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        (self.sens_action)(x, self.p.as_ref(), t, v, y);
+        (self.op.sens_action)(x, self.p, t, v, y);
     }
 
     fn sens_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
-        if let Some(coloring) = self.sens_coloring.as_ref() {
+        if let Some(coloring) = self.op.sens_coloring.as_ref() {
             coloring.jacobian_inplace(self, x, t, y);
         } else {
             self._default_sens_inplace(x, t, y);
         }
     }
     fn sens_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
-        self.sens_sparsity.clone()
+        self.op.sens_sparsity.clone()
     }
 }

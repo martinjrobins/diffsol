@@ -1,11 +1,11 @@
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
 
 use crate::{
     find_matrix_non_zeros, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity, LinearOp,
-    Matrix, Op, Vector,
+    Matrix, Op,
 };
 
-use super::OpStatistics;
+use super::{BuilderOp, OpStatistics, ParametrisedOp};
 
 pub struct LinearClosure<M, F>
 where
@@ -16,7 +16,6 @@ where
     nstates: usize,
     nout: usize,
     nparams: usize,
-    p: Rc<M::V>,
     coloring: Option<JacobianColoring<M>>,
     sparsity: Option<M::Sparsity>,
     statistics: RefCell<OpStatistics>,
@@ -27,22 +26,21 @@ where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
 {
-    pub fn new(func: F, nstates: usize, nout: usize, p: Rc<M::V>) -> Self {
-        let nparams = p.len();
+    pub fn new(func: F, nstates: usize, nout: usize, nparams: usize) -> Self {
         Self {
             func,
             nstates,
             statistics: RefCell::new(OpStatistics::default()),
             nout,
             nparams,
-            p,
             coloring: None,
             sparsity: None,
         }
     }
 
-    pub fn calculate_sparsity(&mut self, t0: M::T) {
-        let non_zeros = find_matrix_non_zeros(self, t0);
+    pub fn calculate_sparsity(&mut self, t0: M::T, p: &M::V) {
+        let op = ParametrisedOp { op: self, p };
+        let non_zeros = find_matrix_non_zeros(&op, t0);
         self.sparsity = Some(
             MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
                 .expect("invalid sparsity pattern"),
@@ -72,35 +70,49 @@ where
         self.nparams
     }
 
-    fn set_params(&mut self, p: Rc<M::V>) {
-        assert_eq!(p.len(), self.nparams);
-        self.p = p;
-    }
-
     fn statistics(&self) -> OpStatistics {
         self.statistics.borrow().clone()
     }
 }
 
-impl<M, F> LinearOp for LinearClosure<M, F>
+impl<M, F> BuilderOp for LinearClosure<M, F>
+where
+    M: Matrix,
+    F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
+{
+    fn calculate_sparsity(&mut self, _y0: &Self::V, t0: Self::T, p: &Self::V) {
+        self.calculate_sparsity(t0, p);
+    }
+    fn set_nout(&mut self, nout: usize) {
+        self.nout = nout;
+    }
+    fn set_nparams(&mut self, nparams: usize) {
+        self.nparams = nparams;
+    }
+    fn set_nstates(&mut self, nstates: usize) {
+        self.nstates = nstates;
+    }
+}
+
+impl<'a, M, F> LinearOp for ParametrisedOp<'a, LinearClosure<M, F>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
 {
     fn gemv_inplace(&self, x: &M::V, t: M::T, beta: M::T, y: &mut M::V) {
-        self.statistics.borrow_mut().increment_call();
-        (self.func)(x, self.p.as_ref(), t, beta, y)
+        self.op.statistics.borrow_mut().increment_call();
+        (self.op.func)(x, self.p, t, beta, y)
     }
 
     fn matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
-        self.statistics.borrow_mut().increment_matrix();
-        if let Some(coloring) = &self.coloring {
+        self.op.statistics.borrow_mut().increment_matrix();
+        if let Some(coloring) = &self.op.coloring {
             coloring.matrix_inplace(self, t, y);
         } else {
             self._default_matrix_inplace(t, y);
         }
     }
     fn sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
-        self.sparsity.clone()
+        self.op.sparsity.clone()
     }
 }

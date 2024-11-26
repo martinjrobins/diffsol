@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::{error::DiffsolError, Matrix, NonLinearOp, NonLinearOpJacobian};
 use convergence::Convergence;
 
@@ -15,17 +13,17 @@ impl<V> NonLinearSolveSolution<V> {
 }
 
 /// A solver for the nonlinear problem `F(x) = 0`.
-pub trait NonLinearSolver<M: Matrix>: Default {
-    fn convergence(&self) -> &Convergence<M::V>;
+pub trait NonLinearSolver<'a, M: Matrix>: Default {
+    fn convergence(&self) -> &Convergence<'a, M::V>;
 
-    fn convergence_mut(&mut self) -> &mut Convergence<M::V>;
+    fn convergence_mut(&mut self) -> &mut Convergence<'a, M::V>;
 
     /// Set the problem to be solved, any previous problem is discarded.
     fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
         &mut self,
         op: &C,
         rtol: M::T,
-        atol: Rc<M::V>,
+        atol: &'a M::V,
     );
 
     /// Reset the approximation of the Jacobian matrix.
@@ -70,12 +68,12 @@ pub mod root;
 //tests
 #[cfg(test)]
 pub mod tests {
-    use std::rc::Rc;
-
     use self::newton::NewtonNonlinearSolver;
     use crate::{
-        linear_solver::nalgebra::lu::LU, matrix::MatrixCommon, op::closure::Closure, scale,
-        DenseMatrix, Vector,
+        linear_solver::nalgebra::lu::LU,
+        matrix::MatrixCommon,
+        op::{closure::Closure, ParametrisedOp},
+        scale, DenseMatrix, Vector,
     };
 
     use super::*;
@@ -83,9 +81,13 @@ pub mod tests {
 
     #[allow(clippy::type_complexity)]
     pub fn get_square_problem<M>() -> (
-        impl NonLinearOpJacobian<M = M, V = M::V, T = M::T>,
+        Closure<
+            M,
+            impl Fn(&M::V, &M::V, M::T, &mut M::V),
+            impl Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        >,
         M::T,
-        Rc<M::V>,
+        M::V,
         Vec<NonLinearSolveSolution<M::V>>,
     )
     where
@@ -93,7 +95,7 @@ pub mod tests {
     {
         let jac1 = M::from_diagonal(&M::V::from_vec(vec![2.0.into(), 2.0.into()]));
         let jac2 = jac1.clone();
-        let p = Rc::new(M::V::zeros(0));
+        let p = M::V::zeros(0);
         let op = Closure::new(
             // 0 = J * x * x - 8
             move |x: &<M as MatrixCommon>::V, _p: &<M as MatrixCommon>::V, _t, y| {
@@ -108,10 +110,10 @@ pub mod tests {
             },
             2,
             2,
-            p,
+            p.len(),
         );
         let rtol = M::T::from(1e-6);
-        let atol = Rc::new(M::V::from_vec(vec![1e-6.into(), 1e-6.into()]));
+        let atol = M::V::from_vec(vec![1e-6.into(), 1e-6.into()]);
         let solns = vec![NonLinearSolveSolution::new(
             M::V::from_vec(vec![2.1.into(), 2.1.into()]),
             M::V::from_vec(vec![2.0.into(), 2.0.into()]),
@@ -119,21 +121,24 @@ pub mod tests {
         (op, rtol, atol, solns)
     }
 
-    pub fn test_nonlinear_solver<C>(
-        mut solver: impl NonLinearSolver<C::M>,
+    pub fn test_nonlinear_solver<'a, C>(
+        mut solver: impl NonLinearSolver<'a, C::M>,
         op: C,
         rtol: C::T,
-        atol: Rc<C::V>,
+        atol: &'a C::V,
         solns: Vec<NonLinearSolveSolution<C::V>>,
     ) where
         C: NonLinearOpJacobian,
+        C::V: 'a,
     {
-        solver.set_problem(&op, rtol, atol.clone());
+        solver.set_problem(&op, rtol, atol);
         let t = C::T::zero();
         solver.reset_jacobian(&op, &solns[0].x0, t);
+        let rtol = solver.convergence().rtol;
+        let atol = solver.convergence().atol;
         for soln in solns {
             let x = solver.solve(&op, &soln.x0, t, &soln.x0).unwrap();
-            let tol = x.clone() * scale(rtol) + atol.as_ref();
+            let tol = x.clone() * scale(rtol) + atol;
             x.assert_eq(&soln.x, &tol);
         }
     }
@@ -144,7 +149,9 @@ pub mod tests {
     fn test_newton_cpu_square() {
         let lu = LU::default();
         let (op, rtol, atol, soln) = get_square_problem::<MCpu>();
+        let p = nalgebra::DVector::zeros(0);
+        let op = ParametrisedOp::new(&op, &p);
         let s = NewtonNonlinearSolver::new(lu);
-        test_nonlinear_solver(s, op, rtol, atol, soln);
+        test_nonlinear_solver(s, op, rtol, &atol, soln);
     }
 }

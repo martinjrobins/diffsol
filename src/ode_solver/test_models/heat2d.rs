@@ -93,7 +93,7 @@ pub fn heat2d_diffsl_problem<
 
     let context: DiffSlContext<M, CG> = DiffSlContext::new(code.as_str()).unwrap();
     let eqn = DiffSl::from_context(context);
-    let problem = OdeBuilder::new()
+    let problem = OdeBuilder::<M>::new()
         .rtol(1e-7)
         .atol([1e-7])
         .build_from_eqn(eqn)
@@ -250,18 +250,14 @@ pub fn head2d_problem<M: Matrix + 'static, const MGRID: usize>() -> (
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
-    let problem = OdeBuilder::new()
+    let problem = OdeBuilder::<M>::new()
         .rtol(1e-7)
         .atol([1e-7])
-        .build_ode_with_mass_and_out(
-            heat2d_rhs::<M, MGRID>,
-            heat2d_jac_mul::<M, MGRID>,
-            heat2d_mass::<M, MGRID>,
-            heat2d_init::<M, MGRID>,
-            heat2d_out::<M, MGRID>,
-            heat2d_out_jac_mul::<M, MGRID>,
-            1,
-        )
+        .rhs_implicit(heat2d_rhs::<M, MGRID>, heat2d_jac_mul::<M, MGRID>)
+        .mass(heat2d_mass::<M, MGRID>)
+        .init(heat2d_init::<M, MGRID>)
+        .out_implicit(heat2d_out::<M, MGRID>, heat2d_out_jac_mul::<M, MGRID>, 1)
+        .build()
         .unwrap();
 
     (problem, soln::<M>())

@@ -68,23 +68,23 @@ where
     }
 }
 
-pub struct AdjointMass<Eqn>
+pub struct AdjointMass<'a, Eqn>
 where
     Eqn: OdeEquationsAdjoint,
 {
-    eqn: Rc<Eqn>,
+    eqn: &'a Eqn,
 }
 
-impl<Eqn> AdjointMass<Eqn>
+impl<'a, Eqn> AdjointMass<'a, Eqn>
 where
     Eqn: OdeEquationsAdjoint,
 {
-    pub fn new(eqn: &Rc<Eqn>) -> Self {
-        Self { eqn: eqn.clone() }
+    pub fn new(eqn: &'a Eqn) -> Self {
+        Self { eqn }
     }
 }
 
-impl<Eqn> Op for AdjointMass<Eqn>
+impl<'a, Eqn> Op for AdjointMass<'a, Eqn>
 where
     Eqn: OdeEquationsAdjoint,
 {
@@ -103,7 +103,7 @@ where
     }
 }
 
-impl<Eqn> LinearOp for AdjointMass<Eqn>
+impl<'a, Eqn> LinearOp for AdjointMass<'a, Eqn>
 where
     Eqn: OdeEquationsAdjoint,
 {
@@ -119,23 +119,23 @@ where
     }
 }
 
-pub struct AdjointInit<Eqn>
+pub struct AdjointInit<'a, Eqn>
 where
     Eqn: OdeEquationsAdjoint,
 {
-    eqn: Rc<Eqn>,
+    eqn: &'a Eqn,
 }
 
-impl<Eqn> AdjointInit<Eqn>
+impl<'a, Eqn> AdjointInit<'a, Eqn>
 where
     Eqn: OdeEquationsAdjoint,
 {
-    pub fn new(eqn: &Rc<Eqn>) -> Self {
-        Self { eqn: eqn.clone() }
+    pub fn new(eqn: &'a Eqn) -> Self {
+        Self { eqn }
     }
 }
 
-impl<Eqn> Op for AdjointInit<Eqn>
+impl<'a, Eqn> Op for AdjointInit<'a, Eqn>
 where
     Eqn: OdeEquationsAdjoint,
 {
@@ -154,7 +154,7 @@ where
     }
 }
 
-impl<Eqn> ConstantOp for AdjointInit<Eqn>
+impl<'a, Eqn> ConstantOp for AdjointInit<'a, Eqn>
 where
     Eqn: OdeEquationsAdjoint,
 {
@@ -176,7 +176,7 @@ where
     Eqn: OdeEquations,
     Method: OdeSolverMethod<'a, Eqn>,
 {
-    eqn: Rc<Eqn>,
+    eqn: &'a Eqn,
     context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
     tmp: RefCell<Eqn::V>,
     with_out: bool,
@@ -188,14 +188,14 @@ where
     Method: OdeSolverMethod<'a, Eqn>,
 {
     pub fn new(
-        eqn: &Rc<Eqn>,
+        eqn: &'a Eqn,
         context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
         with_out: bool,
     ) -> Self {
         let tmp_n = if with_out { eqn.rhs().nstates() } else { 0 };
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(tmp_n));
         Self {
-            eqn: eqn.clone(),
+            eqn,
             context,
             tmp,
             with_out,
@@ -286,7 +286,7 @@ where
     Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<'a, Eqn>,
 {
-    eqn: Rc<Eqn>,
+    eqn: &'a Eqn,
     context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
     tmp: RefCell<Eqn::V>,
     with_out: bool,
@@ -298,14 +298,14 @@ where
     Method: OdeSolverMethod<'a, Eqn>,
 {
     pub fn new(
-        eqn: &Rc<Eqn>,
+        eqn: &'a Eqn,
         context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
         with_out: bool,
     ) -> Self {
         let tmp_n = if with_out { eqn.rhs().nparams() } else { 0 };
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(tmp_n));
         Self {
-            eqn: eqn.clone(),
+            eqn,
             context,
             tmp,
             with_out,
@@ -391,18 +391,58 @@ where
     Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<'a, Eqn>,
 {
-    eqn: Rc<Eqn>,
+    eqn: &'a Eqn,
     rhs: AdjointRhs<'a, Eqn, Method>,
     out: Option<AdjointOut<'a, Eqn, Method>>,
-    mass: Option<AdjointMass<Eqn>>,
+    mass: Option<AdjointMass<'a, Eqn>>,
     context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
     tmp: RefCell<Eqn::V>,
     tmp2: RefCell<Eqn::V>,
-    init: Rc<AdjointInit<Eqn>>,
-    atol: Option<Rc<Eqn::V>>,
+    init: AdjointInit<'a, Eqn>,
+    atol: Option<&'a Eqn::V>,
     rtol: Option<Eqn::T>,
     out_rtol: Option<Eqn::T>,
-    out_atol: Option<Rc<Eqn::V>>,
+    out_atol: Option<&'a Eqn::V>,
+}
+
+impl<'a, Eqn, Method> Clone for AdjointEquations<'a, Eqn, Method>
+where
+    Eqn: OdeEquationsAdjoint,
+    Method: OdeSolverMethod<'a, Eqn>,
+{
+    fn clone(&self) -> Self {
+        let context = Rc::new(RefCell::new(AdjointContext::new(
+            self.context.borrow().checkpointer.clone(),
+        )));
+        let rhs = AdjointRhs::new(self.eqn, context.clone(), self.out.is_some());
+        let init = AdjointInit::new(self.eqn);
+        let out = if self.out.is_some() {
+            Some(AdjointOut::new(self.eqn, context.clone(), true))
+        } else {
+            None
+        };
+        let tmp = self.tmp.clone();
+        let tmp2 = self.tmp2.clone();
+        let atol = self.atol.clone();
+        let rtol = self.rtol.clone();
+        let out_atol = self.out_atol.clone();
+        let out_rtol = self.out_rtol.clone();
+        let mass = self.eqn.mass().map(|_m| AdjointMass::new(self.eqn));
+        Self {
+            rhs,
+            init,
+            mass,
+            context,
+            out,
+            tmp,
+            tmp2,
+            eqn: self.eqn,
+            atol,
+            rtol,
+            out_rtol,
+            out_atol,
+        }
+    }
 }
 
 impl<'a, Eqn, Method> AdjointEquations<'a, Eqn, Method>
@@ -415,11 +455,11 @@ where
         context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
         with_out: bool,
     ) -> Self {
-        let eqn = problem.eqn.clone();
-        let rhs = AdjointRhs::new(&eqn, context.clone(), with_out);
-        let init = Rc::new(AdjointInit::new(&eqn));
+        let eqn = &problem.eqn;
+        let rhs = AdjointRhs::new(eqn, context.clone(), with_out);
+        let init = AdjointInit::new(eqn);
         let out = if with_out {
-            Some(AdjointOut::new(&eqn, context.clone(), with_out))
+            Some(AdjointOut::new(eqn, context.clone(), with_out))
         } else {
             None
         };
@@ -434,18 +474,18 @@ where
             RefCell::new(<Eqn::V as Vector>::zeros(eqn.rhs().nstates()))
         };
         let atol = if with_out {
-            problem.sens_atol.clone()
+            problem.sens_atol.as_ref()
         } else {
             None
         };
         let rtol = if with_out { problem.sens_rtol } else { None };
         let out_atol = if with_out {
-            problem.out_atol.clone()
+            problem.out_atol.as_ref()
         } else {
             None
         };
         let out_rtol = if with_out { problem.out_rtol } else { None };
-        let mass = eqn.mass().map(|_m| AdjointMass::new(&eqn));
+        let mass = eqn.mass().map(|_m| AdjointMass::new(eqn));
         Self {
             rhs,
             init,
@@ -516,9 +556,9 @@ where
     Method: OdeSolverMethod<'b, Eqn>,
 {
     type Rhs = &'a AdjointRhs<'b, Eqn, Method>;
-    type Mass = &'a AdjointMass<Eqn>;
+    type Mass = &'a AdjointMass<'b, Eqn>;
     type Root = <Eqn as OdeEquationsRef<'a>>::Root;
-    type Init = &'a AdjointInit<Eqn>;
+    type Init = &'a AdjointInit<'b, Eqn>;
     type Out = &'a AdjointOut<'b, Eqn, Method>;
 }
 
@@ -530,17 +570,20 @@ where
     fn rhs(&self) -> &AdjointRhs<'a, Eqn, Method> {
         &self.rhs
     }
-    fn mass(&self) -> Option<&AdjointMass<Eqn>> {
+    fn mass(&self) -> Option<&AdjointMass<'a, Eqn>> {
         self.mass.as_ref()
     }
     fn root(&self) -> Option<<Eqn as OdeEquationsRef<'_>>::Root> {
         None
     }
-    fn init(&self) -> &AdjointInit<Eqn> {
+    fn init(&self) -> &AdjointInit<'a, Eqn> {
         &self.init
     }
     fn out(&self) -> Option<&AdjointOut<'a, Eqn, Method>> {
         self.out.as_ref()
+    }
+    fn set_params(&mut self, p: &Self::V) {
+        self.eqn.set_params(p);
     }
 }
 
@@ -557,11 +600,11 @@ where
         self.out().is_some() && self.out_atol.is_some() && self.out_rtol.is_some()
     }
 
-    fn atol(&self) -> Option<&Rc<Eqn::V>> {
-        self.atol.as_ref()
+    fn atol(&self) -> Option<&Eqn::V> {
+        self.atol
     }
-    fn out_atol(&self) -> Option<&Rc<Eqn::V>> {
-        self.out_atol.as_ref()
+    fn out_atol(&self) -> Option<&Eqn::V> {
+        self.out_atol
     }
     fn out_rtol(&self) -> Option<Eqn::T> {
         self.out_rtol

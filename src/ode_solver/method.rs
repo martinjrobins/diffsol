@@ -425,7 +425,7 @@ where
 }
 
 pub trait SensitivitiesOdeSolverMethod<'a, Eqn>:
-    AugmentedOdeSolverMethod<'a, Eqn, SensEquations<Eqn>>
+    AugmentedOdeSolverMethod<'a, Eqn, SensEquations<'a, Eqn>>
 where
     Eqn: OdeEquationsSens + 'a,
 {
@@ -436,20 +436,20 @@ where
     Eqn: OdeEquationsAdjoint + 'a,
     Self: 'a,
 {
-    type DefaultAdjointSolver<'b>: AugmentedOdeSolverMethod<
-        'b,
+    type DefaultAdjointSolver: AugmentedOdeSolverMethod<
+        'a,
         AdjointEquations<'a, Eqn, Self>,
         AdjointEquations<'a, Eqn, Self>,
         State = Self::State,
-    >
-    where
-        'a: 'b;
+    >;
 
     fn default_adjoint_solver<'b>(
         self,
         problem: &'b OdeSolverProblem<AdjointEquations<'a, Eqn, Self>>,
         aug_eqn: AdjointEquations<'a, Eqn, Self>,
-    ) -> Result<Self::DefaultAdjointSolver<'b>, DiffsolError>;
+    ) -> Result<Self::DefaultAdjointSolver, DiffsolError>
+    where
+        'b: 'a;
 
     fn into_adjoint_problem(
         &self,
@@ -484,7 +484,7 @@ where
         let new_eqn = AdjointEquations::new(problem, context.clone(), false);
         let new_augmented_eqn = AdjointEquations::new(problem, context, true);
         let adj_problem = OdeSolverProblem {
-            eqn: Rc::new(new_eqn),
+            eqn: new_eqn,
             rtol: problem.rtol,
             atol: problem.atol.clone(),
             t0: t,
@@ -525,7 +525,7 @@ mod test {
         assert!((t[t.len() - 1] - 10.0).abs() < 1e-10);
         for (i, t_i) in t.iter().enumerate() {
             let y_i = y.column(i).into_owned();
-            y_i.assert_eq_norm(&expect(*t_i), problem.atol.as_ref(), problem.rtol, 15.0);
+            y_i.assert_eq_norm(&expect(*t_i), &problem.atol, problem.rtol, 15.0);
         }
     }
 
@@ -547,7 +547,7 @@ mod test {
         let (y, t) = s.solve(10.0).unwrap();
         for (i, t_i) in t.iter().enumerate() {
             let y_i = y.column(i).into_owned();
-            y_i.assert_eq_norm(&expect(*t_i), problem.atol.as_ref(), problem.rtol, 15.0);
+            y_i.assert_eq_norm(&expect(*t_i), &problem.atol, problem.rtol, 15.0);
         }
     }
 
@@ -560,7 +560,7 @@ mod test {
         let y = s.solve_dense(t_eval.as_slice()).unwrap();
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
-            y_i.assert_eq_norm(&soln_pt.state, problem.atol.as_ref(), problem.rtol, 15.0);
+            y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
         }
     }
 
@@ -573,7 +573,7 @@ mod test {
         let y = s.solve_dense(t_eval.as_slice()).unwrap();
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
-            y_i.assert_eq_norm(&soln_pt.state, problem.atol.as_ref(), problem.rtol, 15.0);
+            y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
         }
     }
 
@@ -586,7 +586,7 @@ mod test {
         let (y, sens) = s.solve_dense_sensitivities(t_eval.as_slice()).unwrap();
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
-            y_i.assert_eq_norm(&soln_pt.state, problem.atol.as_ref(), problem.rtol, 15.0);
+            y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
         }
         for (j, soln_pts) in soln.sens_solution_points.unwrap().iter().enumerate() {
             for (i, soln_pt) in soln_pts.iter().enumerate() {

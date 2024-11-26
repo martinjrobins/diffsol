@@ -6,6 +6,7 @@ use crate::{
 };
 use num_traits::One;
 
+#[derive(Clone)]
 pub struct HermiteInterpolator<V>
 where
     V: Vector,
@@ -114,6 +115,21 @@ where
     segment: RefCell<HermiteInterpolator<Eqn::V>>,
     previous_segment: RefCell<Option<HermiteInterpolator<Eqn::V>>>,
     solver: RefCell<Method>,
+}
+
+impl<'a, Eqn, Method> Clone for Checkpointing<'a, Eqn, Method>
+where
+    Method: OdeSolverMethod<'a, Eqn>,
+    Eqn: OdeEquations,
+{
+    fn clone(&self) -> Self {
+        Checkpointing {
+            checkpoints: self.checkpoints.clone(),
+            segment: RefCell::new(self.segment.borrow().clone()),
+            previous_segment: RefCell::new(self.previous_segment.borrow().clone()),
+            solver: RefCell::new(self.solver.borrow().clone()),
+        }
+    }
 }
 
 impl<'a, Eqn, Method> Checkpointing<'a, Eqn, Method>

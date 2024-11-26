@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::{
     error::{DiffsolError, NonLinearSolverError},
     non_linear_solver_error, Convergence, ConvergenceStatus, LinearSolver, Matrix, NonLinearOp,
@@ -36,14 +34,14 @@ pub fn newton_iteration<V: Vector>(
     Err(non_linear_solver_error!(NewtonDidNotConverge))
 }
 
-pub struct NewtonNonlinearSolver<M: Matrix, Ls: LinearSolver<M>> {
-    convergence: Option<Convergence<M::V>>,
+pub struct NewtonNonlinearSolver<'a, M: Matrix, Ls: LinearSolver<'a, M>> {
+    convergence: Option<Convergence<'a, M::V>>,
     linear_solver: Ls,
     is_jacobian_set: bool,
     tmp: M::V,
 }
 
-impl<M: Matrix, Ls: LinearSolver<M>> NewtonNonlinearSolver<M, Ls> {
+impl<'a, M: Matrix, Ls: LinearSolver<'a, M>> NewtonNonlinearSolver<'a, M, Ls> {
     pub fn new(linear_solver: Ls) -> Self {
         Self {
             convergence: None,
@@ -57,20 +55,22 @@ impl<M: Matrix, Ls: LinearSolver<M>> NewtonNonlinearSolver<M, Ls> {
     }
 }
 
-impl<M: Matrix, Ls: LinearSolver<M>> Default for NewtonNonlinearSolver<M, Ls> {
+impl<'a, M: Matrix, Ls: LinearSolver<'a, M>> Default for NewtonNonlinearSolver<'a, M, Ls> {
     fn default() -> Self {
         Self::new(Ls::default())
     }
 }
 
-impl<M: Matrix, Ls: LinearSolver<M>> NonLinearSolver<M> for NewtonNonlinearSolver<M, Ls> {
-    fn convergence(&self) -> &Convergence<M::V> {
+impl<'a, M: Matrix, Ls: LinearSolver<'a, M>> NonLinearSolver<'a, M>
+    for NewtonNonlinearSolver<'a, M, Ls>
+{
+    fn convergence(&self) -> &Convergence<'a, M::V> {
         self.convergence
             .as_ref()
             .expect("NewtonNonlinearSolver::convergence() called before set_problem")
     }
 
-    fn convergence_mut(&mut self) -> &mut Convergence<M::V> {
+    fn convergence_mut(&mut self) -> &mut Convergence<'a, M::V> {
         self.convergence
             .as_mut()
             .expect("NewtonNonlinearSolver::convergence_mut() called before set_problem")
@@ -80,9 +80,9 @@ impl<M: Matrix, Ls: LinearSolver<M>> NonLinearSolver<M> for NewtonNonlinearSolve
         &mut self,
         op: &C,
         rtol: M::T,
-        atol: Rc<M::V>,
+        atol: &'a M::V,
     ) {
-        self.linear_solver.set_problem(op, rtol, atol.clone());
+        self.linear_solver.set_problem(op, rtol, atol);
         self.convergence = Some(Convergence::new(rtol, atol));
         self.is_jacobian_set = false;
         self.tmp = C::V::zeros(op.nstates());
