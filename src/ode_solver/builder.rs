@@ -562,45 +562,63 @@ where
         self
     }
 
-    pub fn sens_rtol(mut self, sens_rtol: Option<f64>) -> Self {
-        self.sens_rtol = sens_rtol.map(M::T::from);
+    pub fn sens_rtol(mut self, sens_rtol: f64) -> Self {
+        self.sens_rtol = Some(sens_rtol.into());
         self
     }
 
-    pub fn sens_atol<V, T>(mut self, sens_atol: Option<V>) -> Self
+    pub fn sens_atol<V, T>(mut self, sens_atol: V) -> Self
     where
         V: IntoIterator<Item = T>,
         M::T: From<T>,
     {
-        self.sens_atol = sens_atol.map(|atol| atol.into_iter().map(|x| M::T::from(x)).collect());
+        self.sens_atol = Some(sens_atol.into_iter().map(|x| M::T::from(x)).collect());
         self
     }
 
-    pub fn out_rtol(mut self, out_rtol: Option<f64>) -> Self {
-        self.out_rtol = out_rtol.map(M::T::from);
+    pub fn turn_off_sensitivities_error_control(mut self) -> Self {
+        self.sens_atol = None;
+        self.sens_rtol = None;
         self
     }
 
-    pub fn out_atol<V, T>(mut self, out_atol: Option<V>) -> Self
+    pub fn turn_off_output_error_control(mut self) -> Self {
+        self.out_atol = None;
+        self.out_rtol = None;
+        self
+    }
+
+    pub fn turn_off_param_error_control(mut self) -> Self {
+        self.param_atol = None;
+        self.param_rtol = None;
+        self
+    }
+
+    pub fn out_rtol(mut self, out_rtol: f64) -> Self {
+        self.out_rtol = Some(out_rtol.into());
+        self
+    }
+
+    pub fn out_atol<V, T>(mut self, out_atol: V) -> Self
     where
         V: IntoIterator<Item = T>,
         M::T: From<T>,
     {
-        self.out_atol = out_atol.map(|atol| atol.into_iter().map(|x| M::T::from(x)).collect());
+        self.out_atol = Some(out_atol.into_iter().map(|x| M::T::from(x)).collect());
         self
     }
 
-    pub fn param_rtol(mut self, param_rtol: Option<f64>) -> Self {
-        self.param_rtol = param_rtol.map(M::T::from);
+    pub fn param_rtol(mut self, param_rtol: f64) -> Self {
+        self.param_rtol = Some(param_rtol.into());
         self
     }
 
-    pub fn param_atol<V, T>(mut self, param_atol: Option<V>) -> Self
+    pub fn param_atol<V, T>(mut self, param_atol: V) -> Self
     where
         V: IntoIterator<Item = T>,
         M::T: From<T>,
     {
-        self.param_atol = param_atol.map(|atol| atol.into_iter().map(|x| M::T::from(x)).collect());
+        self.param_atol = Some(param_atol.into_iter().map(|x| M::T::from(x)).collect());
         self
     }
 

@@ -293,8 +293,8 @@ pub fn exponential_decay_problem_sens<M: Matrix + 'static>(
     let y0 = 1.0;
     let problem = OdeBuilder::<M>::new()
         .p([k, y0])
-        .sens_rtol(Some(1e-6))
-        .sens_atol(Some([1e-6, 1e-6]))
+        .sens_rtol(1e-6)
+        .sens_atol([1e-6, 1e-6])
         .use_coloring(use_coloring)
         .rhs_sens_implicit(
             exponential_decay::<M>,
