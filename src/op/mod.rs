@@ -42,9 +42,7 @@ pub trait Op {
     fn nout(&self) -> usize;
 
     /// Return the number of parameters of the operator.
-    fn nparams(&self) -> usize {
-        0
-    }
+    fn nparams(&self) -> usize;
 
     /// Return statistics about the operator (e.g. how many times it was called, how many times the jacobian was computed, etc.)
     fn statistics(&self) -> OpStatistics {
@@ -80,6 +78,9 @@ impl<'a, C: Op> Op for ParametrisedOp<'a, C> {
     }
     fn nout(&self) -> usize {
         self.op.nout()
+    }
+    fn nparams(&self) -> usize {
+        self.op.nparams()
     }
     fn statistics(&self) -> OpStatistics {
         self.op.statistics()

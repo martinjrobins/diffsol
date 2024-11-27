@@ -189,7 +189,7 @@ pub use ode_solver::{
     method::AdjointOdeSolverMethod, method::OdeSolverMethod, method::OdeSolverStopReason,
     problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::SdirkState,
     sens_equations::SensEquations, sens_equations::SensInit, sens_equations::SensRhs,
-    state::OdeSolverState, tableau::Tableau,
+    state::OdeSolverState, tableau::Tableau, method::AugmentedOdeSolverMethod,
 };
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};

@@ -13,17 +13,11 @@ impl<V> NonLinearSolveSolution<V> {
 }
 
 /// A solver for the nonlinear problem `F(x) = 0`.
-pub trait NonLinearSolver<'a, M: Matrix>: Default {
-    fn convergence(&self) -> &Convergence<'a, M::V>;
-
-    fn convergence_mut(&mut self) -> &mut Convergence<'a, M::V>;
-
+pub trait NonLinearSolver<M: Matrix>: Default {
     /// Set the problem to be solved, any previous problem is discarded.
     fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
         &mut self,
         op: &C,
-        rtol: M::T,
-        atol: &'a M::V,
     );
 
     /// Reset the approximation of the Jacobian matrix.
@@ -41,9 +35,10 @@ pub trait NonLinearSolver<'a, M: Matrix>: Default {
         x: &M::V,
         t: M::T,
         error_y: &M::V,
+        convergence: &mut Convergence<'_, M::V>,
     ) -> Result<M::V, DiffsolError> {
         let mut x = x.clone();
-        self.solve_in_place(op, &mut x, t, error_y)?;
+        self.solve_in_place(op, &mut x, t, error_y, convergence)?;
         Ok(x)
     }
 
@@ -54,6 +49,7 @@ pub trait NonLinearSolver<'a, M: Matrix>: Default {
         x: &mut C::V,
         t: C::T,
         error_y: &C::V,
+        convergence: &mut Convergence<'_, M::V>,
     ) -> Result<(), DiffsolError>;
 
     /// Solve the linearised problem `J * x = b`, where `J` was calculated using [Self::reset_jacobian].
@@ -121,23 +117,21 @@ pub mod tests {
         (op, rtol, atol, solns)
     }
 
-    pub fn test_nonlinear_solver<'a, C>(
-        mut solver: impl NonLinearSolver<'a, C::M>,
+    pub fn test_nonlinear_solver<C>(
+        mut solver: impl NonLinearSolver<C::M>,
         op: C,
         rtol: C::T,
-        atol: &'a C::V,
+        atol: &C::V,
         solns: Vec<NonLinearSolveSolution<C::V>>,
     ) where
         C: NonLinearOpJacobian,
-        C::V: 'a,
     {
-        solver.set_problem(&op, rtol, atol);
+        solver.set_problem(&op);
+        let mut convergence = Convergence::new(rtol, atol);
         let t = C::T::zero();
         solver.reset_jacobian(&op, &solns[0].x0, t);
-        let rtol = solver.convergence().rtol;
-        let atol = solver.convergence().atol;
         for soln in solns {
-            let x = solver.solve(&op, &soln.x0, t, &soln.x0).unwrap();
+            let x = solver.solve(&op, &soln.x0, t, &soln.x0, &mut convergence).unwrap();
             let tol = x.clone() * scale(rtol) + atol;
             x.assert_eq(&soln.x, &tol);
         }

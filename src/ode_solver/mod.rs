@@ -32,9 +32,9 @@ mod tests {
     use crate::{
         op::OpStatistics, AdjointOdeSolverMethod, CraneliftModule, NonLinearOpJacobian, OdeBuilder,
         OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsRef, OdeSolverMethod,
-        OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
+        OdeSolverProblem, OdeSolverState, OdeSolverStopReason, AugmentedOdeSolverMethod,
     };
-    use crate::{ConstantOp, DefaultDenseMatrix, DefaultSolver, NonLinearOp, Op, Vector};
+    use crate::{ConstantOp, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp, Op, Vector};
     use num_traits::One;
     use num_traits::Zero;
 
@@ -131,7 +131,7 @@ mod tests {
         method.state().y.clone()
     }
 
-    pub fn test_ode_solver_adjoint<'a, 'b, M, Eqn, Method>(
+    pub fn test_ode_solver_adjoint<'a, 'b, LS, M, Eqn, Method>(
         mut method: Method,
         solution: OdeSolverSolution<M::V>,
     ) where
@@ -140,6 +140,7 @@ mod tests {
         Eqn: OdeEquationsAdjoint<M = M, T = M::T, V = M::V> + 'a,
         Eqn::V: DefaultDenseMatrix<T = M::T>,
         Eqn::M: DefaultSolver,
+        LS: LinearSolver<M>,
     {
         let t0 = solution.solution_points.first().unwrap().t;
         let t1 = solution.solution_points.last().unwrap().t;
@@ -183,18 +184,17 @@ mod tests {
         ydots.push(method.state().dy.clone());
         checkpoints.push(method.checkpoint());
         let last_segment = HermiteInterpolator::new(ys, ydots, ts);
-        let (adjoint_problem, adjoint_equations) = method
-            .into_adjoint_problem(checkpoints, last_segment)
-            .unwrap();
-        let mut adjoint_solver = method
-            .default_adjoint_solver(&adjoint_problem, adjoint_equations)
-            .unwrap();
-        let y_expect = M::V::from_element(adjoint_problem.eqn.rhs().nstates(), M::T::zero());
+
+        let problem = method.problem();
+        let adjoint_aug_eqn = method.adjoint_equations(checkpoints, last_segment).unwrap();
+        let mut adjoint_solver = method.default_adjoint_solver::<LS>(adjoint_aug_eqn).unwrap();
+
+        let y_expect = M::V::from_element(problem.eqn.rhs().nstates(), M::T::zero());
         adjoint_solver
             .state()
             .y
             .assert_eq_st(&y_expect, M::T::from(1e-9));
-        let g_expect = M::V::from_element(adjoint_problem.eqn.rhs().nparams(), M::T::zero());
+        let g_expect = M::V::from_element(problem.eqn.rhs().nparams(), M::T::zero());
         for sgi in adjoint_solver.state().sg.iter() {
             sgi.assert_eq_st(&g_expect, M::T::from(1e-9));
         }
@@ -203,12 +203,10 @@ mod tests {
         while adjoint_solver.state().t.abs() > t0 {
             adjoint_solver.step().unwrap();
         }
-        let adjoint_problem = adjoint_solver.problem().clone();
-        let mut state = adjoint_solver.into_state();
+        let (mut state, aug_eqn) = adjoint_solver.into_state_and_eqn();
+        let aug_eqn = aug_eqn.unwrap();
         let state_mut = state.as_mut();
-        adjoint_problem
-            .eqn
-            .correct_sg_for_init(t0, state_mut.s, state_mut.sg);
+        aug_eqn.correct_sg_for_init(t0, state_mut.s, state_mut.sg);
 
         let points = solution
             .sens_solution_points

@@ -2,10 +2,7 @@ use nalgebra::ComplexField;
 use std::ops::AddAssign;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError},
-    AdjointEquations, AugmentedOdeEquationsImplicit, DefaultDenseMatrix, LinearSolver,
-    NewtonNonlinearSolver, NoAug, OdeEquationsAdjoint, OdeEquationsSens, SensEquations, StateRef,
-    StateRefMut,
+    error::{DiffsolError, OdeSolverError}, AdjointEquations, AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, LinearSolver, NoAug, OdeEquationsAdjoint, OdeEquationsSens, SensEquations, StateRef, StateRefMut
 };
 
 use num_traits::{abs, One, Pow, Zero};
@@ -39,51 +36,50 @@ where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-    Nls: NonLinearSolver<'a, Eqn::M>,
+    Nls: NonLinearSolver<Eqn::M>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
 {
+    fn into_state_and_eqn(self) -> (Self::State, Option<AugEqn>) {
+        (self.state, self.s_op.map(|op| op.eqn))
+    }
 }
 
-impl<'a, M, Eqn, LS> SensitivitiesOdeSolverMethod<'a, Eqn>
-    for Bdf<'a, Eqn, NewtonNonlinearSolver<'a, Eqn::M, LS>, M, SensEquations<'a, Eqn>>
+impl<'a, M, Eqn, Nls> SensitivitiesOdeSolverMethod<'a, Eqn> for Bdf<'a, Eqn, Nls, M, SensEquations<'a, Eqn>>
 where
     Eqn: OdeEquationsSens,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
     Eqn::V: DefaultDenseMatrix,
-    LS: LinearSolver<'a, Eqn::M>,
+    Nls: NonLinearSolver<Eqn::M>,
 {
 }
 
-impl<'a, M, Eqn, LS> AdjointOdeSolverMethod<'a, Eqn>
-    for Bdf<'a, Eqn, NewtonNonlinearSolver<'a, Eqn::M, LS>, M>
+impl<'a, M, Eqn, Nls> AdjointOdeSolverMethod<'a, Eqn> for Bdf<'a, Eqn, Nls, M>
 where
     Eqn: OdeEquationsAdjoint,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
     Eqn::V: DefaultDenseMatrix,
-    LS: LinearSolver<'a, Eqn::M> + 'a,
+    Nls: NonLinearSolver<Eqn::M> + 'a,
 {
     type DefaultAdjointSolver = Bdf<
         'a,
-        AdjointEquations<'a, Eqn, Bdf<'a, Eqn, NewtonNonlinearSolver<'a, Eqn::M, LS>, M>>,
-        NewtonNonlinearSolver<'a, Eqn::M, LS>,
+        Eqn,
+        Nls,
         M,
-        AdjointEquations<'a, Eqn, Bdf<'a, Eqn, NewtonNonlinearSolver<'a, Eqn::M, LS>, M>>,
+        AdjointEquations<'a, Eqn, Bdf<'a, Eqn, Nls, M>>,
     >;
-    fn default_adjoint_solver<'b>(
-        mut self,
-        problem: &'b OdeSolverProblem<AdjointEquations<'a, Eqn, Self>>,
+    fn default_adjoint_solver<LS: LinearSolver<Eqn::M>>(
+        self,
         mut aug_eqn: AdjointEquations<'a, Eqn, Self>,
     ) -> Result<Self::DefaultAdjointSolver, DiffsolError>
-    where
-        'a: 'b,
     {
-        let mut state = Self::State::new_without_initialise_augmented(&problem, &mut aug_eqn)?;
-        state.set_consistent_augmented(&problem, &mut aug_eqn, &mut self.nonlinear_solver)?;
-        Bdf::new_augmented(state, &problem, aug_eqn, self.nonlinear_solver)
+        let problem = self.problem();
+        let nonlinear_solver = self.nonlinear_solver;
+        let state = self.state.into_adjoint::<LS, _, _>(problem, &mut aug_eqn)?;
+        Bdf::new_augmented(state, problem, aug_eqn, nonlinear_solver)
     }
 }
 
@@ -116,13 +112,14 @@ where
 pub struct Bdf<
     'a,
     Eqn: OdeEquationsImplicit,
-    Nls: NonLinearSolver<'a, Eqn::M>,
+    Nls: NonLinearSolver<Eqn::M>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V> = <<Eqn as Op>::V as DefaultDenseMatrix>::M,
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> = NoAug<Eqn>,
 > where
     Eqn::V: DefaultDenseMatrix,
 {
     nonlinear_solver: Nls,
+    convergence: Convergence<'a, Eqn::V>,
     ode_problem: &'a OdeSolverProblem<Eqn>,
     op: Option<BdfCallable<&'a Eqn>>,
     n_equal_steps: usize,
@@ -152,7 +149,7 @@ pub struct Bdf<
 impl<'a, M, Eqn, Nls, AugmentedEqn> Clone for Bdf<'a, Eqn, Nls, M, AugmentedEqn>
 where
     Eqn: OdeEquationsImplicit,
-    Nls: NonLinearSolver<'a, Eqn::M>,
+    Nls: NonLinearSolver<Eqn::M>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
     Eqn::V: DefaultDenseMatrix,
@@ -162,10 +159,7 @@ where
         let mut nonlinear_solver = Nls::default();
         let op = if let Some(op) = self.op.as_ref() {
             let op = op.clone_state(&self.ode_problem.eqn);
-            nonlinear_solver.set_problem(&op, problem.rtol, &problem.atol);
-            nonlinear_solver
-                .convergence_mut()
-                .set_max_iter(self.nonlinear_solver.convergence().max_iter());
+            nonlinear_solver.set_problem(&op);
             nonlinear_solver.reset_jacobian(&op, &self.state.y, self.state.t);
             Some(op)
         } else {
@@ -178,6 +172,7 @@ where
         Self {
             nonlinear_solver,
             ode_problem: problem,
+            convergence: self.convergence.clone(),
             op,
             s_op,
             n_equal_steps: self.n_equal_steps,
@@ -213,7 +208,7 @@ where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-    Nls: NonLinearSolver<'a, Eqn::M>,
+    Nls: NonLinearSolver<Eqn::M>,
 {
     const NEWTON_MAXITER: IndexType = 4;
     const MIN_FACTOR: f64 = 0.5;
@@ -258,10 +253,9 @@ where
         let bdf_callable = BdfCallable::new(&problem.eqn);
         bdf_callable.set_c(state.h, alpha[state.order]);
 
-        nonlinear_solver.set_problem(&bdf_callable, problem.rtol, &problem.atol);
-        nonlinear_solver
-            .convergence_mut()
-            .set_max_iter(Self::NEWTON_MAXITER);
+        nonlinear_solver.set_problem(&bdf_callable);
+        let mut convergence = Convergence::new(problem.rtol, &problem.atol);
+        convergence.set_max_iter(Self::NEWTON_MAXITER);
         nonlinear_solver.reset_jacobian(&bdf_callable, &state.y, state.t);
         let op = Some(bdf_callable);
 
@@ -296,6 +290,7 @@ where
         let is_state_modified = false;
 
         Ok(Self {
+            convergence,
             s_op: None,
             op,
             ode_problem: problem,
@@ -779,10 +774,10 @@ where
             {
                 let s_new = &mut self.state.s[i];
                 s_new.copy_from(&self.s_predict);
+                // todo: should be a separate convergence object?
                 self.nonlinear_solver
-                    .solve_in_place(&*op, s_new, t_new, &self.s_predict)?;
-                self.statistics.number_of_nonlinear_solver_iterations +=
-                    self.nonlinear_solver.convergence().niter();
+                    .solve_in_place(&*op, s_new, t_new, &self.s_predict, &mut self.convergence)?;
+                self.statistics.number_of_nonlinear_solver_iterations += self.convergence.niter();
                 let s_new = &*s_new;
                 self.s_deltas[i].copy_from(s_new);
                 self.s_deltas[i] -= &self.s_predict;
@@ -802,7 +797,7 @@ where
     AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn::V: DefaultDenseMatrix,
-    Nls: NonLinearSolver<'a, Eqn::M>,
+    Nls: NonLinearSolver<Eqn::M>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
@@ -975,10 +970,10 @@ where
                 &mut self.y_delta,
                 self.t_predict,
                 &self.y_predict,
+                &mut self.convergence,
             );
             // update statistics
-            self.statistics.number_of_nonlinear_solver_iterations +=
-                self.nonlinear_solver.convergence().niter();
+            self.statistics.number_of_nonlinear_solver_iterations += self.convergence.niter();
 
             // only calculate norm and sensitivities if solve was successful
             if solve_result.is_ok() {
@@ -1030,8 +1025,8 @@ where
             error_norm = self.error_control();
 
             // need to caulate safety even if step is accepted
-            let maxiter = self.nonlinear_solver.convergence().max_iter() as f64;
-            let niter = self.nonlinear_solver.convergence().niter() as f64;
+            let maxiter = self.convergence.max_iter() as f64;
+            let niter = self.convergence.niter() as f64;
             safety = Eqn::T::from(0.9 * (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter));
 
             // do the error test
@@ -1324,7 +1319,7 @@ mod test {
     fn bdf_test_nalgebra_exponential_decay_adjoint() {
         let (problem, soln) = exponential_decay_problem_adjoint::<M>();
         let s = problem.bdf::<LS>().unwrap();
-        test_ode_solver_adjoint(s, soln);
+        test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 84
         number_of_jac_muls: 6
@@ -1337,7 +1332,7 @@ mod test {
     fn bdf_test_nalgebra_exponential_decay_algebraic_adjoint() {
         let (problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>();
         let s = problem.bdf::<LS>().unwrap();
-        test_ode_solver_adjoint(s, soln);
+        test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 190
         number_of_jac_muls: 24

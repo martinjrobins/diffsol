@@ -37,7 +37,7 @@ impl<T: Scalar> SparseColMat<T> {
 }
 
 impl<T: Scalar> DefaultSolver for SparseColMat<T> {
-    type LS<'a> = FaerSparseLU<T>;
+    type LS = FaerSparseLU<T>;
 }
 
 impl<T: Scalar> MatrixCommon for SparseColMat<T> {

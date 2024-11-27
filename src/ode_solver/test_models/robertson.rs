@@ -152,6 +152,7 @@ pub fn robertson_sens<M: Matrix + 'static>() -> (
 ) {
     let problem = OdeBuilder::<M>::new()
         .atol([1e-8, 1e-6, 1e-6])
+        .p([0.04, 1.0e4, 3.0e7])
         .rhs_sens_implicit(
             robertson_rhs::<M>,
             robertson_jac_mul::<M>,

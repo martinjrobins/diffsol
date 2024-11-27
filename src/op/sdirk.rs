@@ -15,7 +15,7 @@ use super::{NonLinearOp, Op};
 
 // callable to solve for F(y) = M (y) - h f(phi + a * y) = 0
 pub struct SdirkCallable<Eqn: OdeEquations> {
-    eqn: Eqn,
+    pub(crate) eqn: Eqn,
     c: Eqn::T,
     h: RefCell<Eqn::T>,
     phi: RefCell<Eqn::V>,

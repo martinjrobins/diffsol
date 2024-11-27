@@ -3,8 +3,8 @@ use crate::LinearSolver;
 use super::Matrix;
 
 pub trait DefaultSolver: Matrix {
-    type LS<'a>: LinearSolver<'a, Self> + Default;
-    fn default_solver<'a>() -> Self::LS<'a> {
+    type LS: LinearSolver<Self> + Default;
+    fn default_solver() -> Self::LS {
         Self::LS::default()
     }
 }

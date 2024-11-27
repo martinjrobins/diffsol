@@ -180,7 +180,7 @@ where
     }
 }
 
-impl<'a, M> LinearSolver<'a, M> for KLU<M>
+impl<M> LinearSolver<M> for KLU<M>
 where
     M: MatrixKLU,
     M::V: VectorKLU,
@@ -224,8 +224,6 @@ where
     fn set_problem<C: NonLinearOpJacobian<T = M::T, V = M::V, M = M>>(
         &mut self,
         op: &C,
-        _rtol: M::T,
-        _atol: &'a M::V,
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();

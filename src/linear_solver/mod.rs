@@ -16,7 +16,8 @@ pub use faer::lu::LU as FaerLU;
 pub use nalgebra::lu::LU as NalgebraLU;
 
 /// A solver for the linear problem `Ax = b`, where `A` is a linear operator that is obtained by taking the linearisation of a nonlinear operator `C`
-pub trait LinearSolver<'a, M: Matrix>: Default {
+pub trait LinearSolver<M: Matrix>: Default {
+
     // sets the point at which the linearisation of the operator is evaluated
     // the operator is assumed to have the same sparsity as that given to [Self::set_problem]
     fn set_linearisation<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
@@ -32,8 +33,6 @@ pub trait LinearSolver<'a, M: Matrix>: Default {
     fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
         &mut self,
         op: &C,
-        rtol: M::T,
-        atol: &'a M::V,
     );
 
     /// Solve the problem `Ax = b` and return the solution `x`.
@@ -105,7 +104,7 @@ pub mod tests {
     }
 
     pub fn test_linear_solver<'a, C>(
-        mut solver: impl LinearSolver<'a, C::M>,
+        mut solver: impl LinearSolver<C::M>,
         op: C,
         rtol: C::T,
         atol: &'a C::V,
@@ -114,7 +113,7 @@ pub mod tests {
         C: NonLinearOpJacobian,
         for<'b> &'b C::V: VectorRef<C::V>,
     {
-        solver.set_problem(&op, rtol, atol);
+        solver.set_problem(&op);
         let x = C::V::zeros(op.nout());
         let t = C::T::zero();
         solver.set_linearisation(&op, &x, t);

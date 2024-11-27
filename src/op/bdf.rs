@@ -11,7 +11,7 @@ use std::{
 
 // callable to solve for F(y) = M (y' + psi) - c * f(y) = 0
 pub struct BdfCallable<Eqn: OdeEquationsImplicit> {
-    eqn: Eqn,
+    pub(crate) eqn: Eqn,
     psi_neg_y0: RefCell<Eqn::V>,
     c: RefCell<Eqn::T>,
     tmp: RefCell<Eqn::V>,

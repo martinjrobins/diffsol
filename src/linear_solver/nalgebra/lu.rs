@@ -27,7 +27,7 @@ where
     }
 }
 
-impl<'a, T: Scalar> LinearSolver<'a, DMatrix<T>> for LU<T> {
+impl<T: Scalar> LinearSolver<DMatrix<T>> for LU<T> {
     fn solve_in_place(&self, state: &mut DVector<T>) -> Result<(), DiffsolError> {
         if self.lu.is_none() {
             return Err(linear_solver_error!(LuNotInitialized))?;
@@ -53,8 +53,6 @@ impl<'a, T: Scalar> LinearSolver<'a, DMatrix<T>> for LU<T> {
     fn set_problem<C: NonLinearOpJacobian<T = T, V = DVector<T>, M = DMatrix<T>>>(
         &mut self,
         op: &C,
-        _rtol: T,
-        _atol: &'a DVector<T>,
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();

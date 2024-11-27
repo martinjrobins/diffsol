@@ -35,7 +35,7 @@ where
     }
 }
 
-impl<'a, T: Scalar> LinearSolver<'a, SparseColMat<T>> for FaerSparseLU<T> {
+impl<T: Scalar> LinearSolver<SparseColMat<T>> for FaerSparseLU<T> {
     fn set_linearisation<C: NonLinearOpJacobian<T = T, V = Col<T>, M = SparseColMat<T>>>(
         &mut self,
         op: &C,
@@ -65,8 +65,6 @@ impl<'a, T: Scalar> LinearSolver<'a, SparseColMat<T>> for FaerSparseLU<T> {
     fn set_problem<C: NonLinearOpJacobian<T = T, V = Col<T>, M = SparseColMat<T>>>(
         &mut self,
         op: &C,
-        _rtol: T,
-        _atol: &'a Col<T>,
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();

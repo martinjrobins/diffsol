@@ -56,12 +56,10 @@ impl Drop for SundialsLinearSolver {
     }
 }
 
-impl<'a> LinearSolver<'a, SundialsMatrix> for SundialsLinearSolver {
+impl LinearSolver<SundialsMatrix> for SundialsLinearSolver {
     fn set_problem<C: NonLinearOpJacobian<T = realtype, V = SundialsVector, M = SundialsMatrix>>(
         &mut self,
         op: &C,
-        _rtol: realtype,
-        _atol: &'a SundialsVector,
     ) {
         let matrix = SundialsMatrix::zeros(op.nstates(), op.nstates());
         let y0 = SundialsVector::new_serial(op.nstates());

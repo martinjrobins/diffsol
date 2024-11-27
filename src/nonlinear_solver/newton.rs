@@ -34,17 +34,15 @@ pub fn newton_iteration<V: Vector>(
     Err(non_linear_solver_error!(NewtonDidNotConverge))
 }
 
-pub struct NewtonNonlinearSolver<'a, M: Matrix, Ls: LinearSolver<'a, M>> {
-    convergence: Option<Convergence<'a, M::V>>,
+pub struct NewtonNonlinearSolver<M: Matrix, Ls: LinearSolver<M>> {
     linear_solver: Ls,
     is_jacobian_set: bool,
     tmp: M::V,
 }
 
-impl<'a, M: Matrix, Ls: LinearSolver<'a, M>> NewtonNonlinearSolver<'a, M, Ls> {
+impl<M: Matrix, Ls: LinearSolver<M>> NewtonNonlinearSolver<M, Ls> {
     pub fn new(linear_solver: Ls) -> Self {
         Self {
-            convergence: None,
             linear_solver,
             is_jacobian_set: false,
             tmp: M::V::zeros(0),
@@ -55,35 +53,20 @@ impl<'a, M: Matrix, Ls: LinearSolver<'a, M>> NewtonNonlinearSolver<'a, M, Ls> {
     }
 }
 
-impl<'a, M: Matrix, Ls: LinearSolver<'a, M>> Default for NewtonNonlinearSolver<'a, M, Ls> {
+impl<M: Matrix, Ls: LinearSolver<M>> Default for NewtonNonlinearSolver<M, Ls> {
     fn default() -> Self {
         Self::new(Ls::default())
     }
 }
 
-impl<'a, M: Matrix, Ls: LinearSolver<'a, M>> NonLinearSolver<'a, M>
-    for NewtonNonlinearSolver<'a, M, Ls>
+impl<M: Matrix, Ls: LinearSolver<M>> NonLinearSolver<M>
+    for NewtonNonlinearSolver<M, Ls>
 {
-    fn convergence(&self) -> &Convergence<'a, M::V> {
-        self.convergence
-            .as_ref()
-            .expect("NewtonNonlinearSolver::convergence() called before set_problem")
-    }
-
-    fn convergence_mut(&mut self) -> &mut Convergence<'a, M::V> {
-        self.convergence
-            .as_mut()
-            .expect("NewtonNonlinearSolver::convergence_mut() called before set_problem")
-    }
-
     fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
         &mut self,
         op: &C,
-        rtol: M::T,
-        atol: &'a M::V,
     ) {
-        self.linear_solver.set_problem(op, rtol, atol);
-        self.convergence = Some(Convergence::new(rtol, atol));
+        self.linear_solver.set_problem(op);
         self.is_jacobian_set = false;
         self.tmp = C::V::zeros(op.nstates());
     }
@@ -108,10 +91,8 @@ impl<'a, M: Matrix, Ls: LinearSolver<'a, M>> NonLinearSolver<'a, M>
         xn: &mut M::V,
         t: M::T,
         error_y: &M::V,
+        convergence: &mut Convergence<M::V>,
     ) -> Result<(), DiffsolError> {
-        if self.convergence.is_none() {
-            panic!("NewtonNonlinearSolver::solve() called before set_problem");
-        }
         if !self.is_jacobian_set {
             panic!("NewtonNonlinearSolver::solve_in_place() called before reset_jacobian");
         }
@@ -120,7 +101,6 @@ impl<'a, M: Matrix, Ls: LinearSolver<'a, M>> NonLinearSolver<'a, M>
         }
         let linear_solver = |x: &mut C::V| self.linear_solver.solve_in_place(x);
         let fun = |x: &C::V, y: &mut C::V| op.call_inplace(x, t, y);
-        let convergence = self.convergence.as_mut().unwrap();
         newton_iteration(xn, &mut self.tmp, error_y, fun, linear_solver, convergence)
     }
 }

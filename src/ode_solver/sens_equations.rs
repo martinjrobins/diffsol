@@ -336,6 +336,9 @@ impl<'a, Eqn: OdeEquationsSens> AugmentedOdeEquations<Eqn> for SensEquations<'a,
         self.rhs.set_param_index(index);
         self.init.set_param_index(index);
     }
+    fn integrate_main_eqn(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

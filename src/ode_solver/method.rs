@@ -9,10 +9,8 @@ use crate::{
     AdjointContext, AdjointEquations, AugmentedOdeEquations, Checkpointing, DefaultDenseMatrix,
     DenseMatrix, Matrix, NonLinearOp, OdeEquations, OdeEquationsAdjoint, OdeEquationsSens,
     OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut, Vector,
-    VectorViewMut,
+    VectorViewMut, LinearSolver, HermiteInterpolator,
 };
-
-use super::checkpointing::HermiteInterpolator;
 
 #[derive(Debug, PartialEq)]
 pub enum OdeSolverStopReason<T: Scalar> {
@@ -268,7 +266,7 @@ where
     /// the ith element is the sensitivities of the ith element of `g` with respect to the
     /// parameters.
     #[allow(clippy::type_complexity)]
-    fn solve_adjoint(
+    fn solve_adjoint<LS: LinearSolver<Eqn::M>>(
         mut self,
         final_time: Eqn::T,
         max_steps_between_checkpoints: Option<usize>,
@@ -325,22 +323,18 @@ where
 
         // construct the adjoint solver
         let last_segment = HermiteInterpolator::new(ys, ydots, ts);
-        let (adjoint_problem, adjoint_aug_eqn) =
-            self.into_adjoint_problem(checkpoints, last_segment)?;
-        let mut adjoint_solver =
-            Self::default_adjoint_solver(self, &adjoint_problem, adjoint_aug_eqn)?;
+        let adjoint_aug_eqn = self.adjoint_equations(checkpoints, last_segment)?;
+        let mut adjoint_solver = self.default_adjoint_solver::<LS>(adjoint_aug_eqn)?;
 
         // solve the adjoint problem
         adjoint_solver.set_stop_time(t0).unwrap();
         while adjoint_solver.step()? != OdeSolverStopReason::TstopReached {}
 
         // correct the adjoint solution for the initial conditions
-        let adjoint_problem = adjoint_solver.problem().clone();
-        let mut state = adjoint_solver.into_state();
+        let (mut state, aug_eqn) = adjoint_solver.into_state_and_eqn();
+        let aug_eqn = aug_eqn.unwrap();
         let state_mut = state.as_mut();
-        adjoint_problem
-            .eqn
-            .correct_sg_for_init(t0, state_mut.s, state_mut.sg);
+        aug_eqn.correct_sg_for_init(t0, state_mut.s, state_mut.sg);
 
         // return the solution
         Ok((g, state_mut.sg.to_owned()))
@@ -422,6 +416,7 @@ where
     Eqn: OdeEquations + 'a,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
 {
+    fn into_state_and_eqn(self) -> (Self::State, Option<AugmentedEqn>);
 }
 
 pub trait SensitivitiesOdeSolverMethod<'a, Eqn>:
@@ -438,28 +433,23 @@ where
 {
     type DefaultAdjointSolver: AugmentedOdeSolverMethod<
         'a,
-        AdjointEquations<'a, Eqn, Self>,
+        Eqn,
         AdjointEquations<'a, Eqn, Self>,
         State = Self::State,
     >;
 
-    fn default_adjoint_solver<'b>(
-        self,
-        problem: &'b OdeSolverProblem<AdjointEquations<'a, Eqn, Self>>,
-        aug_eqn: AdjointEquations<'a, Eqn, Self>,
-    ) -> Result<Self::DefaultAdjointSolver, DiffsolError>
-    where
-        'b: 'a;
 
-    fn into_adjoint_problem(
+    fn default_adjoint_solver<LS: LinearSolver<Eqn::M>>(
+        self,
+        aug_eqn: AdjointEquations<'a, Eqn, Self>,
+    ) -> Result<Self::DefaultAdjointSolver, DiffsolError>;
+
+    fn adjoint_equations(
         &self,
         checkpoints: Vec<Self::State>,
         last_segment: HermiteInterpolator<Eqn::V>,
     ) -> Result<
-        (
-            OdeSolverProblem<AdjointEquations<'a, Eqn, Self>>,
-            AdjointEquations<'a, Eqn, Self>,
-        ),
+        AdjointEquations<'a, Eqn, Self>,
         DiffsolError,
     >
     where
@@ -467,8 +457,6 @@ where
         Eqn::V: DefaultDenseMatrix,
     {
         let problem = self.problem();
-        let t = self.state().t;
-        let h = self.state().h;
         let checkpointer_solver = self.clone();
 
         // construct checkpointing
@@ -481,24 +469,9 @@ where
 
         // construct adjoint equations and problem
         let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
-        let new_eqn = AdjointEquations::new(problem, context.clone(), false);
         let new_augmented_eqn = AdjointEquations::new(problem, context, true);
-        let adj_problem = OdeSolverProblem {
-            eqn: new_eqn,
-            rtol: problem.rtol,
-            atol: problem.atol.clone(),
-            t0: t,
-            h0: -h,
-            integrate_out: false,
-            sens_rtol: None,
-            sens_atol: None,
-            out_rtol: None,
-            out_atol: None,
-            param_rtol: None,
-            param_atol: None,
-        };
 
-        Ok((adj_problem, new_augmented_eqn))
+        Ok(new_augmented_eqn)
     }
 }
 
@@ -607,7 +580,7 @@ mod test {
         let s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let final_time = soln.solution_points[soln.solution_points.len() - 1].t;
-        let (g, gs_adj) = s.solve_adjoint(final_time, None).unwrap();
+        let (g, gs_adj) = s.solve_adjoint::<NalgebraLU<f64>>(final_time, None).unwrap();
         g.assert_eq_norm(
             &soln.solution_points[soln.solution_points.len() - 1].state,
             problem.out_atol.as_ref().unwrap(),

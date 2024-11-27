@@ -760,13 +760,8 @@ where
 
         if self.use_coloring || M::is_sparse() {
             rhs.calculate_sparsity(&y0, self.t0, &p);
-            init.calculate_sparsity(&y0, self.t0, &p);
             mass.as_mut()
                 .map(|mass| mass.calculate_sparsity(&y0, self.t0, &p));
-            root.as_mut()
-                .map(|root| root.calculate_sparsity(&y0, self.t0, &p));
-            out.as_mut()
-                .map(|out| out.calculate_sparsity(&y0, self.t0, &p));
         }
         let nout = out.as_ref().map(|out| out.nout());
         let eqn = OdeSolverEquations::new(rhs, init, mass, root, out, p);

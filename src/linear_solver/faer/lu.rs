@@ -26,7 +26,7 @@ where
     }
 }
 
-impl<'a, T: Scalar> LinearSolver<'a, Mat<T>> for LU<T> {
+impl<T: Scalar> LinearSolver<Mat<T>> for LU<T> {
     fn set_linearisation<C: NonLinearOpJacobian<T = T, V = Col<T>, M = Mat<T>>>(
         &mut self,
         op: &C,
@@ -50,8 +50,6 @@ impl<'a, T: Scalar> LinearSolver<'a, Mat<T>> for LU<T> {
     fn set_problem<C: NonLinearOpJacobian<T = T, V = Col<T>, M = Mat<T>>>(
         &mut self,
         op: &C,
-        _rtol: T,
-        _atol: &'a Col<T>,
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();

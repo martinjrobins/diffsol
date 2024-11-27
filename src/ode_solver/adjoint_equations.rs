@@ -587,8 +587,7 @@ where
     }
 }
 
-impl<'a, Eqn, Method> AugmentedOdeEquations<AdjointEquations<'a, Eqn, Method>>
-    for AdjointEquations<'a, Eqn, Method>
+impl<'a, Eqn, Method> AugmentedOdeEquations<Eqn> for AdjointEquations<'a, Eqn, Method>
 where
     Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<'a, Eqn>,
@@ -624,6 +623,10 @@ where
     fn update_rhs_out_state(&mut self, _y: &Eqn::V, _dy: &Eqn::V, _t: Eqn::T) {}
 
     fn update_init_state(&mut self, _t: <Eqn as Op>::T) {}
+    
+    fn integrate_main_eqn(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

@@ -3,7 +3,7 @@ use num_traits::{One, Pow, Zero};
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
-    nonlinear_solver::NonLinearSolver,
+    nonlinear_solver::{convergence::Convergence, NonLinearSolver},
     ode_solver_error, scale, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp,
     InitOp, LinearSolver, NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeEquationsImplicit,
     OdeEquationsSens, OdeSolverProblem, Op, SensEquations, Vector,
@@ -141,14 +141,13 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     /// It will also set the initial step size based on the given solver.
     /// If you want to create a state without this default initialisation, use [Self::new_without_initialise] instead.
     /// You can then use [Self::set_consistent] and [Self::set_step_size] to set the state up if you need to.
-    fn new<'a, LS, Eqn>(
-        ode_problem: &'a OdeSolverProblem<Eqn>,
+    fn new<LS, Eqn>(
+        ode_problem: &OdeSolverProblem<Eqn>,
         solver_order: usize,
     ) -> Result<Self, DiffsolError>
     where
         Eqn: OdeEquationsImplicit<T = V::T, V = V>,
-        LS: LinearSolver<'a, Eqn::M>,
-        Eqn::V: 'a,
+        LS: LinearSolver<Eqn::M>,
     {
         let mut ret = Self::new_without_initialise(ode_problem)?;
         let mut root_solver = NewtonNonlinearSolver::new(LS::default());
@@ -157,29 +156,27 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         Ok(ret)
     }
 
-    fn new_with_sensitivities<'a, LS, Eqn>(
-        ode_problem: &'a OdeSolverProblem<Eqn>,
+    fn new_with_sensitivities<LS, Eqn>(
+        ode_problem: &OdeSolverProblem<Eqn>,
         solver_order: usize,
     ) -> Result<Self, DiffsolError>
     where
         Eqn: OdeEquationsSens<T = V::T, V = V>,
-        LS: LinearSolver<'a, Eqn::M>,
-        Eqn::V: 'a,
+        LS: LinearSolver<Eqn::M>,
     {
         let mut augmented_eqn = SensEquations::new(ode_problem);
         Self::new_with_augmented::<LS, _, _>(ode_problem, &mut augmented_eqn, solver_order)
     }
 
-    fn new_with_augmented<'a, LS, Eqn, AugmentedEqn>(
-        ode_problem: &'a OdeSolverProblem<Eqn>,
+    fn new_with_augmented<LS, Eqn, AugmentedEqn>(
+        ode_problem: &OdeSolverProblem<Eqn>,
         augmented_eqn: &mut AugmentedEqn,
         solver_order: usize,
     ) -> Result<Self, DiffsolError>
     where
         Eqn: OdeEquationsImplicit<T = V::T, V = V>,
         AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> + std::fmt::Debug,
-        LS: LinearSolver<'a, Eqn::M>,
-        Eqn::V: 'a,
+        LS: LinearSolver<Eqn::M>,
     {
         let mut ret = Self::new_without_initialise_augmented(ode_problem, augmented_eqn)?;
         let mut root_solver = NewtonNonlinearSolver::new(LS::default());
@@ -188,6 +185,51 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         ret.set_consistent_augmented(ode_problem, augmented_eqn, &mut root_solver_sens)?;
         ret.set_step_size(ode_problem, solver_order);
         Ok(ret)
+    }
+    
+    fn into_adjoint<LS, Eqn, AugmentedEqn>(self, ode_problem: &OdeSolverProblem<Eqn>, augmented_eqn: &mut AugmentedEqn) -> Result<Self, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit<T = V::T, V = V>,
+        AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> + std::fmt::Debug,
+        LS: LinearSolver<AugmentedEqn::M>,
+    {
+        let mut state = self.into_common();
+        let naug = augmented_eqn.max_index();
+        let mut s = Vec::with_capacity(naug);
+        let mut ds = Vec::with_capacity(naug);
+        let nstates = augmented_eqn.rhs().nstates();
+        for i in 0..naug {
+            augmented_eqn.set_index(i);
+            let si = augmented_eqn.init().call(state.t);
+            let dsi = V::zeros(nstates);
+            s.push(si);
+            ds.push(dsi);
+        }
+        state.s = s;
+        state.ds = ds;
+        let (dsg, sg) = if augmented_eqn.out().is_some() {
+            let mut sg = Vec::with_capacity(naug);
+            let mut dsg = Vec::with_capacity(naug);
+            for i in 0..naug {
+                augmented_eqn.set_index(i);
+                let out = augmented_eqn
+                    .out()
+                    .ok_or(ode_solver_error!(StateProblemMismatch))?;
+                let dsgi = out.call(&state.s[i], state.t);
+                let sgi = V::zeros(out.nout());
+                sg.push(sgi);
+                dsg.push(dsgi);
+            }
+            (dsg, sg)
+        } else {
+            (vec![], vec![])
+        };
+        state.sg = sg;
+        state.dsg = dsg;
+        let mut state = Self::new_from_common(state);
+        let mut root_solver_sens = NewtonNonlinearSolver::new(LS::default());
+        state.set_consistent_augmented(ode_problem, augmented_eqn, &mut root_solver_sens)?;
+        Ok(state)
     }
 
     /// Create a new solver state from an ODE problem, without any initialisation apart from setting the initial time state vector y,
@@ -275,15 +317,14 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     }
 
     /// Calculate a consistent state and time derivative of the state, based on the equations of the problem.
-    fn set_consistent<'a, Eqn, S>(
+    fn set_consistent<Eqn, S>(
         &mut self,
-        ode_problem: &'a OdeSolverProblem<Eqn>,
+        ode_problem: &OdeSolverProblem<Eqn>,
         root_solver: &mut S,
     ) -> Result<(), DiffsolError>
     where
         Eqn: OdeEquationsImplicit<T = V::T, V = V>,
-        S: NonLinearSolver<'a, Eqn::M>,
-        Eqn::V: 'a,
+        S: NonLinearSolver<Eqn::M>,
     {
         let state = self.as_mut();
         ode_problem
@@ -296,12 +337,13 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let f = InitOp::new(&ode_problem.eqn, ode_problem.t0, state.y);
         let rtol = ode_problem.rtol;
         let atol = &ode_problem.atol;
-        root_solver.set_problem(&f, rtol, atol);
+        root_solver.set_problem(&f);
         let mut y_tmp = state.dy.clone();
         y_tmp.copy_from_indices(state.y, &f.algebraic_indices);
         let yerr = y_tmp.clone();
         root_solver.reset_jacobian(&f, &y_tmp, *state.t);
-        root_solver.solve_in_place(&f, &mut y_tmp, *state.t, &yerr)?;
+        let mut convergence = Convergence::new(rtol, atol);
+        root_solver.solve_in_place(&f, &mut y_tmp, *state.t, &yerr, &mut convergence)?;
         f.scatter_soln(&y_tmp, state.y, state.dy);
         Ok(())
     }
@@ -309,17 +351,16 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     /// Calculate the initial sensitivity vectors and their time derivatives, based on the equations of the problem.
     /// Note that this function assumes that the state is already consistent with the algebraic constraints
     /// (either via [Self::set_consistent] or by setting the state up manually).
-    fn set_consistent_augmented<'a, Eqn, AugmentedEqn, S>(
+    fn set_consistent_augmented<Eqn, AugmentedEqn, S>(
         &mut self,
-        ode_problem: &'a OdeSolverProblem<Eqn>,
+        ode_problem: &OdeSolverProblem<Eqn>,
         augmented_eqn: &mut AugmentedEqn,
         root_solver: &mut S,
     ) -> Result<(), DiffsolError>
     where
         Eqn: OdeEquationsImplicit<T = V::T, V = V>,
         AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> + std::fmt::Debug,
-        S: NonLinearSolver<'a, AugmentedEqn::M>,
-        Eqn::V: 'a,
+        S: NonLinearSolver<AugmentedEqn::M>,
     {
         let state = self.as_mut();
         augmented_eqn.update_rhs_out_state(state.y, state.dy, *state.t);
@@ -335,16 +376,17 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
             return Ok(());
         }
 
+        let mut convergence = Convergence::new(ode_problem.rtol, &ode_problem.atol);
         for i in 0..naug {
             augmented_eqn.set_index(i);
             let f = InitOp::new(augmented_eqn, ode_problem.t0, &state.s[i]);
-            root_solver.set_problem(&f, ode_problem.rtol, &ode_problem.atol);
+            root_solver.set_problem(&f);
 
             let mut y = state.ds[i].clone();
             y.copy_from_indices(state.y, &f.algebraic_indices);
             let yerr = y.clone();
             root_solver.reset_jacobian(&f, &y, *state.t);
-            root_solver.solve_in_place(&f, &mut y, *state.t, &yerr)?;
+            root_solver.solve_in_place(&f, &mut y, *state.t, &yerr, &mut convergence)?;
             f.scatter_soln(&y, &mut state.s[i], &mut state.ds[i]);
         }
         Ok(())

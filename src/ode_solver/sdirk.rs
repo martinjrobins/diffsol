@@ -16,7 +16,7 @@ use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, AdjointOdeSolverMethod,
     AugmentedOdeEquations, AugmentedOdeEquationsImplicit, DenseMatrix, JacobianUpdate, NonLinearOp,
     OdeEquationsAdjoint, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-    Op, Scalar, StateRef, StateRefMut, Vector, VectorViewMut,
+    Op, Scalar, StateRef, StateRefMut, Vector, VectorViewMut, Convergence
 };
 use num_traits::abs;
 use num_traits::One;
@@ -34,42 +34,41 @@ where
     Eqn: OdeEquationsImplicit,
     AugEqn: AugmentedOdeEquationsImplicit<Eqn>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    LS: LinearSolver<'a, Eqn::M>,
+    LS: LinearSolver<Eqn::M>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
+    fn into_state_and_eqn(self) -> (Self::State, Option<AugEqn>) {
+        (self.state, self.s_op.map(|op| op.eqn))
+    }
 }
 
 impl<'a, M, Eqn, LS> AdjointOdeSolverMethod<'a, Eqn> for Sdirk<'a, Eqn, LS, M>
 where
     Eqn: OdeEquationsAdjoint,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    LS: LinearSolver<'a, Eqn::M> + 'a,
+    LS: LinearSolver<Eqn::M> + 'a,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
     type DefaultAdjointSolver = Sdirk<
         'a,
-        AdjointEquations<'a, Eqn, Sdirk<'a, Eqn, LS, M>>,
+        Eqn,
         LS,
         M,
         AdjointEquations<'a, Eqn, Sdirk<'a, Eqn, LS, M>>,
     >;
-    fn default_adjoint_solver<'b>(
+
+    fn default_adjoint_solver<ALS: LinearSolver<Eqn::M>>(
         self,
-        problem: &'b OdeSolverProblem<AdjointEquations<'a, Eqn, Self>>,
         mut aug_eqn: AdjointEquations<'a, Eqn, Self>,
-    ) -> Result<Self::DefaultAdjointSolver, DiffsolError>
-    where
-        'b: 'a,
-    {
-        let tableau = self.tableau.clone();
-        let mut state = Self::State::new_without_initialise_augmented(&problem, &mut aug_eqn)?;
-        let mut init_nls = NewtonNonlinearSolver::<Eqn::M, LS>::default();
-        state.set_consistent_augmented(problem, &mut aug_eqn, &mut init_nls)?;
-        Sdirk::new_augmented(problem, state, tableau, LS::default(), aug_eqn)
+    ) -> Result<Self::DefaultAdjointSolver, DiffsolError> {
+        let problem = self.problem();
+        let tableau = self.tableau;
+        let state = self.state.into_adjoint::<ALS, _, _>(problem, &mut aug_eqn)?;
+        Sdirk::new_augmented(&self.problem, state, tableau, LS::default(), aug_eqn)
     }
 }
 
@@ -90,14 +89,15 @@ pub struct Sdirk<
     AugmentedEqn = NoAug<Eqn>,
 > where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    LS: LinearSolver<'a, Eqn::M>,
+    LS: LinearSolver<Eqn::M>,
     Eqn: OdeEquationsImplicit,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
 {
     tableau: Tableau<M>,
     problem: &'a OdeSolverProblem<Eqn>,
-    nonlinear_solver: NewtonNonlinearSolver<'a, Eqn::M, LS>,
+    nonlinear_solver: NewtonNonlinearSolver<Eqn::M, LS>,
+    convergence: Convergence<'a, Eqn::V>,
     op: Option<SdirkCallable<&'a Eqn>>,
     state: SdirkState<Eqn::V>,
     diff: M,
@@ -124,7 +124,7 @@ pub struct Sdirk<
 impl<'a, M, Eqn, LS, AugmentedEqn> Clone for Sdirk<'a, Eqn, LS, M, AugmentedEqn>
 where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    LS: LinearSolver<'a, Eqn::M>,
+    LS: LinearSolver<Eqn::M>,
     Eqn: OdeEquationsImplicit,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
@@ -136,10 +136,7 @@ where
         let mut nonlinear_solver = NewtonNonlinearSolver::new(LS::default());
         let op = if let Some(op) = &self.op {
             let op = op.clone_state(&problem.eqn);
-            nonlinear_solver.set_problem(&op, problem.rtol, &problem.atol);
-            nonlinear_solver
-                .convergence_mut()
-                .set_max_iter(self.nonlinear_solver.convergence().max_iter());
+            nonlinear_solver.set_problem(&op);
             nonlinear_solver.reset_jacobian(&op, &self.state.y, self.state.t);
             Some(op)
         } else {
@@ -152,6 +149,7 @@ where
         Self {
             tableau: self.tableau.clone(),
             problem: self.problem,
+            convergence: self.convergence.clone(),
             nonlinear_solver,
             op,
             state: self.state.clone(),
@@ -180,7 +178,7 @@ where
 
 impl<'a, M, Eqn, LS, AugmentedEqn> Sdirk<'a, Eqn, LS, M, AugmentedEqn>
 where
-    LS: LinearSolver<'a, Eqn::M>,
+    LS: LinearSolver<Eqn::M>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquationsImplicit,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
@@ -271,12 +269,11 @@ where
         jacobian_update.update_rhs_jacobian();
 
         let mut nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
-        nonlinear_solver.set_problem(&callable, problem.rtol, &problem.atol);
+        nonlinear_solver.set_problem(&callable);
 
         // set max iterations for nonlinear solver
-        nonlinear_solver
-            .convergence_mut()
-            .set_max_iter(Self::NEWTON_MAXITER);
+        let mut convergence = Convergence::new(problem.rtol, &problem.atol);
+        convergence.set_max_iter(Self::NEWTON_MAXITER);
         nonlinear_solver.reset_jacobian(&callable, &state.y, state.t);
         let op = Some(callable);
 
@@ -317,6 +314,7 @@ where
             old_y_sens: vec![],
             old_f_sens: vec![],
             old_g,
+            convergence,
             diff,
             sdiff: vec![],
             sgdiff: vec![],
@@ -438,11 +436,10 @@ where
 
             // solve
             let op = self.s_op.as_ref().unwrap();
-            self.nonlinear_solver.solve_in_place(op, ds, t, s0)?;
+            self.nonlinear_solver.solve_in_place(op, ds, t, s0, &mut self.convergence)?;
 
             self.old_y_sens[j].copy_from(&op.get_last_f_eval());
-            self.statistics.number_of_nonlinear_solver_iterations +=
-                self.nonlinear_solver.convergence().niter();
+            self.statistics.number_of_nonlinear_solver_iterations += self.convergence.niter();
 
             // calculate sdg and store in sgdiff
             if let Some(out) = self.s_op.as_ref().unwrap().eqn().out() {
@@ -529,7 +526,7 @@ where
 
 impl<'a, M, Eqn, AugmentedEqn, LS> OdeSolverMethod<'a, Eqn> for Sdirk<'a, Eqn, LS, M, AugmentedEqn>
 where
-    LS: LinearSolver<'a, Eqn::M>,
+    LS: LinearSolver<Eqn::M>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     Eqn: OdeEquationsImplicit,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
@@ -674,9 +671,9 @@ where
                     &mut self.old_f,
                     t,
                     &self.state.y,
+                    &mut self.convergence,
                 );
-                self.statistics.number_of_nonlinear_solver_iterations +=
-                    self.nonlinear_solver.convergence().niter();
+                self.statistics.number_of_nonlinear_solver_iterations += self.convergence.niter();
 
                 // only calculate sensitivities if the solve succeeded
                 if solve_result.is_ok() {
@@ -784,8 +781,8 @@ where
             error_norm /= Eqn::T::from(ncontributions as f64);
 
             // adjust step size based on error
-            let maxiter = self.nonlinear_solver.convergence().max_iter() as f64;
-            let niter = self.nonlinear_solver.convergence().niter() as f64;
+            let maxiter = self.convergence.max_iter() as f64;
+            let niter = self.convergence.niter() as f64;
             let safety = Eqn::T::from(0.9 * (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter));
             let order = self.tableau.order() as f64;
             factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (order + 1.0)));
@@ -1161,7 +1158,7 @@ mod test {
     fn sdirk_test_esdirk34_exponential_decay_adjoint() {
         let (problem, soln) = exponential_decay_problem_adjoint::<M>();
         let s = problem.esdirk34::<LS>().unwrap();
-        test_ode_solver_adjoint(s, soln);
+        test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 196
         number_of_jac_muls: 6
@@ -1174,7 +1171,7 @@ mod test {
     fn sdirk_test_esdirk34_exponential_decay_algebraic_adjoint() {
         let (problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>();
         let s = problem.esdirk34::<LS>().unwrap();
-        test_ode_solver_adjoint(s, soln);
+        test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 171
         number_of_jac_muls: 12
