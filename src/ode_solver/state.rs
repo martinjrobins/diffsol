@@ -380,7 +380,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let mut convergence = Convergence::new(ode_problem.rtol, &ode_problem.atol);
         for i in 0..naug {
             augmented_eqn.set_index(i);
-            let f = InitOp::new(augmented_eqn, ode_problem.t0, &state.s[i]);
+            let f = InitOp::new(augmented_eqn, *state.t, &state.s[i]);
             root_solver.set_problem(&f);
 
             let mut y = state.ds[i].clone();

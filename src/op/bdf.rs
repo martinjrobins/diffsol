@@ -54,7 +54,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
         let c = self.c.borrow();
         d.axpy(*c, dg, -Eqn::T::one());
     }
-    pub fn from_sensitivity_eqn(eqn: Eqn) -> Self {
+    pub fn new_no_jacobian(eqn: Eqn) -> Self {
         let n = eqn.rhs().nstates();
         let c = RefCell::new(Eqn::T::zero());
         let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n));

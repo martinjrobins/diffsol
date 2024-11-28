@@ -334,7 +334,12 @@ where
         // allocate internal state for sensitivities
         let naug = augmented_eqn.max_index();
         let nstates = problem.eqn.rhs().nstates();
-        ret.s_op = Some(BdfCallable::from_sensitivity_eqn(augmented_eqn));
+
+        if augmented_eqn.integrate_main_eqn() {
+            ret.s_op = Some(BdfCallable::new_no_jacobian(augmented_eqn));
+        } else {
+            ret.s_op = Some(BdfCallable::new(augmented_eqn));
+        }
 
         ret.s_deltas = vec![<Eqn::V as Vector>::zeros(nstates); naug];
         ret.s_predict = <Eqn::V as Vector>::zeros(nstates);
@@ -384,19 +389,28 @@ where
     }
 
     fn _jacobian_updates(&mut self, c: Eqn::T, state: SolverState) {
-        let y = &self.state.y;
-        let t = self.state.t;
+        let integrate_main_eqn = self.integrate_main_eqn();
         //let y = &self.y_predict;
         //let t = self.t_predict;
         if self.jacobian_update.check_rhs_jacobian_update(c, &state) {
             self.op.as_mut().unwrap().set_jacobian_is_stale();
-            self.nonlinear_solver
-                .reset_jacobian(self.op.as_ref().unwrap(), y, t);
+            if integrate_main_eqn {
+                self.nonlinear_solver
+                    .reset_jacobian(self.op.as_ref().unwrap(), &self.state.y, self.state.t);
+            } else {
+                self.nonlinear_solver
+                    .reset_jacobian(self.s_op.as_ref().unwrap(), &self.state.s[0], self.state.t);
+            }
             self.jacobian_update.update_rhs_jacobian();
             self.jacobian_update.update_jacobian(c);
         } else if self.jacobian_update.check_jacobian_update(c, &state) {
-            self.nonlinear_solver
-                .reset_jacobian(self.op.as_ref().unwrap(), y, t);
+            if integrate_main_eqn {
+                self.nonlinear_solver
+                    .reset_jacobian(self.op.as_ref().unwrap(), &self.state.y, self.state.t);
+            } else {
+                self.nonlinear_solver
+                    .reset_jacobian(self.s_op.as_ref().unwrap(), &self.state.s[0], self.state.t);
+            }
             self.jacobian_update.update_jacobian(c);
         }
     }
@@ -416,18 +430,21 @@ where
         let r = Self::_compute_r(order, factor);
         let ru = r.mat_mul(&self.u);
         {
-            Self::_update_diff_for_step_size(&ru, &mut self.state.diff, &mut self.diff_tmp, order);
+            if self.integrate_main_eqn() {
+                Self::_update_diff_for_step_size(&ru, &mut self.state.diff, &mut self.diff_tmp, order);
+                if self.ode_problem.integrate_out {
+                    Self::_update_diff_for_step_size(
+                        &ru,
+                        &mut self.state.gdiff,
+                        &mut self.gdiff_tmp,
+                        order,
+                    );
+                }
+            }
             for diff in self.state.sdiff.iter_mut() {
                 Self::_update_diff_for_step_size(&ru, diff, &mut self.diff_tmp, order);
             }
-            if self.ode_problem.integrate_out {
-                Self::_update_diff_for_step_size(
-                    &ru,
-                    &mut self.state.gdiff,
-                    &mut self.gdiff_tmp,
-                    order,
-                );
-            }
+            
             for diff in self.state.sgdiff.iter_mut() {
                 Self::_update_diff_for_step_size(&ru, diff, &mut self.sgdiff_tmp, order);
             }
@@ -665,41 +682,29 @@ where
                     self.g_delta.squared_norm(&state.g, atol, rtol) * self.error_const2[order];
                 ncontrib += 1;
             }
-        } else {
-            let atol = self.s_op.as_ref().unwrap().eqn().atol().unwrap_or(&self.ode_problem.atol);
-            let rtol = self.s_op.as_ref().unwrap().eqn().rtol().unwrap_or(self.ode_problem.rtol);
-            error_norm += self.s_deltas[0].squared_norm(&state.s[0], atol, rtol)
-                * self.error_const2[order];
-            ncontrib += 1;
-            if output_in_error_control {
-                let atol = self.s_op.as_ref().unwrap().eqn().out_atol().unwrap_or(self.ode_problem.out_atol.as_ref().unwrap());
-                let rtol = self.s_op.as_ref().unwrap().eqn().out_rtol().unwrap_or(self.ode_problem.out_rtol.unwrap());
-                error_norm += self.sg_deltas[0].squared_norm(&state.sg[0], atol, rtol)
-                    * self.error_const2[order];
-                ncontrib += 1;
-            }
         }
         if sens_in_error_control {
-            let min_index = if !integrate_main_eqn { 1 } else { 0 };
             let sens_atol = self.s_op.as_ref().unwrap().eqn().atol().unwrap();
             let sens_rtol = self.s_op.as_ref().unwrap().eqn().rtol().unwrap();
-            for i in min_index..state.sdiff.len() {
+            for i in 0..state.sdiff.len() {
                 error_norm += self.s_deltas[i].squared_norm(&state.s[i], sens_atol, sens_rtol)
                     * self.error_const2[order];
             }
-            ncontrib += state.sdiff.len() - min_index;
+            ncontrib += state.sdiff.len();
         }
         if sens_output_in_error_control {
-            let min_index = if !integrate_main_eqn && output_in_error_control { 1 } else { 0 };
             let rtol = self.s_op.as_ref().unwrap().eqn().out_rtol().unwrap();
             let atol = self.s_op.as_ref().unwrap().eqn().out_atol().unwrap();
-            for i in min_index..state.sgdiff.len() {
+            for i in 0..state.sgdiff.len() {
                 error_norm += self.sg_deltas[i].squared_norm(&state.sg[i], atol, rtol)
                     * self.error_const2[order];
             }
-            ncontrib += state.sgdiff.len() - min_index;
+            ncontrib += state.sgdiff.len();
         }
-        error_norm / Eqn::T::from(ncontrib as f64)
+        if ncontrib > 1 {
+            error_norm /= Eqn::T::from(ncontrib as f64)
+        }
+        error_norm
     }
 
     fn predict_error_control(&self, order: usize) -> Eqn::T {
@@ -741,41 +746,20 @@ where
                     * self.error_const2[order];
                 ncontrib += 1;
             }
-        } else {
-            let atol = self.s_op.as_ref().unwrap().eqn().atol().unwrap_or(&self.ode_problem.atol);
-            let rtol = self.s_op.as_ref().unwrap().eqn().rtol().unwrap_or(self.ode_problem.rtol);
-            error_norm += state
-                .sdiff[0]
-                .column(order + 1)
-                .squared_norm(&state.s[0], atol, rtol)
-                * self.error_const2[order];
-            ncontrib += 1;
-            if output_in_error_control {
-                let atol = self.s_op.as_ref().unwrap().eqn().out_atol().unwrap_or(self.ode_problem.out_atol.as_ref().unwrap());
-                let rtol = self.s_op.as_ref().unwrap().eqn().out_rtol().unwrap_or(self.ode_problem.out_rtol.unwrap());
-                error_norm += state
-                    .sgdiff[0]
-                    .column(order + 1)
-                    .squared_norm(&state.sg[0], atol, rtol)
-                    * self.error_const2[order];
-                ncontrib += 1;
-            }
         }
         if sens_in_error_control {
-            let min_index = if !integrate_main_eqn { 1 } else { 0 };
             let sens_atol = self.s_op.as_ref().unwrap().eqn().atol().unwrap();
             let sens_rtol = self.s_op.as_ref().unwrap().eqn().rtol().unwrap();
-            for i in min_index..state.sdiff.len() {
+            for i in 0..state.sdiff.len() {
                 error_norm += state.sdiff[i].column(order + 1).squared_norm(
                     &state.s[i],
                     sens_atol,
                     sens_rtol,
                 ) * self.error_const2[order];
             }
-            ncontrib += state.sdiff.len() - min_index;
+            ncontrib += state.sdiff.len();
         }
         if sens_output_in_error_control {
-            let min_index = if !integrate_main_eqn && output_in_error_control { 1 } else { 0 };
             let rtol = self.s_op.as_ref().unwrap().eqn().out_rtol().unwrap();
             let atol = self.s_op.as_ref().unwrap().eqn().out_atol().unwrap();
             for i in 0..state.sgdiff.len() {
@@ -785,9 +769,13 @@ where
                         .squared_norm(&state.sg[i], atol, rtol)
                         * self.error_const2[order];
             }
-            ncontrib += state.sgdiff.len() - min_index;
+            ncontrib += state.sgdiff.len();
         }
-        error_norm / Eqn::T::from(ncontrib as f64)
+        if ncontrib == 0 {
+            error_norm
+        } else {
+            error_norm / Eqn::T::from(ncontrib as f64)
+        }
     }
 
     fn sensitivity_solve(&mut self, t_new: Eqn::T) -> Result<(), DiffsolError> {
@@ -1365,14 +1353,14 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 11
-        number_of_steps: 44
+        number_of_steps: 47
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 217
+        number_of_nonlinear_solver_iterations: 223
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.statistics(), @r###"
-        number_of_calls: 87
-        number_of_jac_muls: 136
+        number_of_calls: 84
+        number_of_jac_muls: 145
         number_of_matrix_evals: 1
         number_of_jac_adj_muls: 0
         "###);
@@ -1385,9 +1373,9 @@ mod test {
         test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 84
-        number_of_jac_muls: 6
-        number_of_matrix_evals: 3
-        number_of_jac_adj_muls: 492
+        number_of_jac_muls: 8
+        number_of_matrix_evals: 4
+        number_of_jac_adj_muls: 392
         "###);
     }
 
@@ -1398,9 +1386,9 @@ mod test {
         test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 190
-        number_of_jac_muls: 24
-        number_of_matrix_evals: 8
-        number_of_jac_adj_muls: 278
+        number_of_jac_muls: 27
+        number_of_matrix_evals: 9
+        number_of_jac_adj_muls: 217
         "###);
     }
 
@@ -1563,16 +1551,16 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 112
-        number_of_steps: 467
+        number_of_linear_solver_setups: 146
+        number_of_steps: 502
         number_of_error_test_failures: 2
-        number_of_nonlinear_solver_iterations: 3472
-        number_of_nonlinear_solver_fails: 49
+        number_of_nonlinear_solver_iterations: 3705
+        number_of_nonlinear_solver_fails: 70
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 1041
-        number_of_jac_muls: 2672
-        number_of_matrix_evals: 45
+        number_of_calls: 1144
+        number_of_jac_muls: 2882
+        number_of_matrix_evals: 58
         number_of_jac_adj_muls: 0
         "###);
     }

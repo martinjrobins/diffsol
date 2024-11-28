@@ -190,12 +190,22 @@ where
     const MIN_FACTOR: f64 = 0.2;
     const MAX_FACTOR: f64 = 10.0;
     const MIN_TIMESTEP: f64 = 1e-13;
-
+    
     pub fn new(
+        problem: &'a OdeSolverProblem<Eqn>,
+        state: SdirkState<Eqn::V>,
+        tableau: Tableau<M>,
+        linear_solver: LS,
+    ) -> Result<Self, DiffsolError> {
+        Self::_new(problem, state, tableau, linear_solver, true)
+    }
+
+    fn _new(
         problem: &'a OdeSolverProblem<Eqn>,
         mut state: SdirkState<Eqn::V>,
         tableau: Tableau<M>,
         linear_solver: LS,
+        integrate_main_eqn: bool,
     ) -> Result<Self, DiffsolError> {
         // check that the upper triangular part of a is zero
         let s = tableau.s();
@@ -262,20 +272,25 @@ where
         }
 
         // setup linear solver for first step
-        let callable = SdirkCallable::new(&problem.eqn, gamma);
-        callable.set_h(state.h);
         let mut jacobian_update = JacobianUpdate::default();
         jacobian_update.update_jacobian(state.h);
         jacobian_update.update_rhs_jacobian();
 
         let mut nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
-        nonlinear_solver.set_problem(&callable);
 
         // set max iterations for nonlinear solver
         let mut convergence = Convergence::new(problem.rtol, &problem.atol);
         convergence.set_max_iter(Self::NEWTON_MAXITER);
-        nonlinear_solver.reset_jacobian(&callable, &state.y, state.t);
-        let op = Some(callable);
+
+        let op = if integrate_main_eqn {
+            let callable = SdirkCallable::new(&problem.eqn, gamma);
+            callable.set_h(state.h);
+            nonlinear_solver.set_problem(&callable);
+            nonlinear_solver.reset_jacobian(&callable, &state.y, state.t);
+            Some(callable)
+        } else {
+            None
+        };
 
         // update statistics
         let statistics = BdfStatistics::default();
@@ -347,7 +362,7 @@ where
         augmented_eqn: AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
         state.check_sens_consistent_with_problem(problem, &augmented_eqn)?;
-        let mut ret = Self::new(problem, state, tableau, linear_solver)?;
+        let mut ret = Self::_new(problem, state, tableau, linear_solver, augmented_eqn.integrate_main_eqn())?;
         let naug = augmented_eqn.max_index();
         let nstates = augmented_eqn.rhs().nstates();
         let order = ret.tableau.s();
@@ -357,8 +372,15 @@ where
         if let Some(out) = augmented_eqn.out() {
             ret.sgdiff = vec![M::zeros(out.nout(), order); naug];
         }
-        let augmented_eqn = augmented_eqn;
-        ret.s_op = Some(SdirkCallable::from_eqn(augmented_eqn, ret.gamma));
+        
+        ret.s_op = if augmented_eqn.integrate_main_eqn() {
+            Some(SdirkCallable::new_no_jacobian(augmented_eqn, ret.gamma))
+        } else {
+            let callable = SdirkCallable::new(augmented_eqn, ret.gamma);
+            ret.nonlinear_solver.set_problem(&callable);
+            ret.nonlinear_solver.reset_jacobian(&callable, &ret.state.s[0], ret.state.t);
+            Some(callable)
+        };
         Ok(ret)
     }
 
@@ -394,7 +416,12 @@ where
         {
             let factor = (tstop - state.t) / state.h;
             state.h *= factor;
-            self.op.as_mut().unwrap().set_h(state.h);
+            if let Some(op) = self.op.as_mut() {
+                op.set_h(state.h);
+            }
+            if let Some(s_op) = self.s_op.as_mut() {
+                s_op.set_h(state.h);
+            }
         }
         Ok(None)
     }
@@ -420,9 +447,6 @@ where
             let op = self.s_op.as_mut().unwrap();
             op.eqn_mut()
                 .update_rhs_out_state(&self.old_y, &self.old_f, t);
-
-            // construct bdf discretisation of sensitivity equations
-            op.set_h(h);
         }
 
         // solve for sensitivities equations discretised using sdirk equation
@@ -486,20 +510,21 @@ where
 
     fn _jacobian_updates(&mut self, h: Eqn::T, state: SolverState) {
         if self.jacobian_update.check_rhs_jacobian_update(h, &state) {
-            self.op.as_mut().unwrap().set_jacobian_is_stale();
-            self.nonlinear_solver.reset_jacobian(
-                self.op.as_ref().unwrap(),
-                &self.old_f,
-                self.state.t,
-            );
+            if let Some(op) = self.op.as_mut() {
+                op.set_jacobian_is_stale();
+                self.nonlinear_solver.reset_jacobian(op, &self.old_f, self.state.t);
+            } else if let Some(s_op) = self.s_op.as_mut() {
+                s_op.set_jacobian_is_stale();
+                self.nonlinear_solver.reset_jacobian(s_op, &self.old_f_sens[0], self.state.t);
+            }
             self.jacobian_update.update_rhs_jacobian();
             self.jacobian_update.update_jacobian(h);
         } else if self.jacobian_update.check_jacobian_update(h, &state) {
-            self.nonlinear_solver.reset_jacobian(
-                self.op.as_ref().unwrap(),
-                &self.old_f,
-                self.state.t,
-            );
+            if let Some(op) = self.op.as_ref() {
+                self.nonlinear_solver.reset_jacobian(op, &self.old_f, self.state.t);
+            } else if let Some(s_op) = self.s_op.as_ref() {
+                self.nonlinear_solver.reset_jacobian(s_op, &self.old_f_sens[0], self.state.t);
+            }
             self.jacobian_update.update_jacobian(h);
         }
     }
@@ -515,7 +540,12 @@ where
         }
 
         // update h for new step size
-        self.op.as_mut().unwrap().set_h(new_h);
+        if let Some(op) = self.op.as_mut() {
+            op.set_h(new_h);
+        }
+        if let Some(s_op) = self.s_op.as_mut() {
+            s_op.set_h(new_h);
+        }
 
         // update state
         self.state.h = new_h;
@@ -658,28 +688,33 @@ where
 
             for i in start..self.tableau.s() {
                 let t = t0 + self.tableau.c()[i] * h;
-                self.op.as_mut().unwrap().set_phi(
-                    &self.diff.columns(0, i),
-                    &self.state.y,
-                    &self.a_rows[i],
-                );
-
-                Self::predict_stage(i, &self.diff, &mut self.old_f, &self.tableau);
-
-                let mut solve_result = self.nonlinear_solver.solve_in_place(
-                    self.op.as_ref().unwrap(),
-                    &mut self.old_f,
-                    t,
-                    &self.state.y,
-                    &mut self.convergence,
-                );
-                self.statistics.number_of_nonlinear_solver_iterations += self.convergence.niter();
+                
+                // main equation
+                let mut solve_result = Ok(());
+                if let Some(op) = self.op.as_mut() {
+                    op.set_phi(
+                        &self.diff.columns(0, i),
+                        &self.state.y,
+                        &self.a_rows[i],
+                    );
+                    Self::predict_stage(i, &self.diff, &mut self.old_f, &self.tableau);
+                    solve_result = self.nonlinear_solver.solve_in_place(
+                        op,
+                        &mut self.old_f,
+                        t,
+                        &self.state.y,
+                        &mut self.convergence,
+                    );
+                    self.statistics.number_of_nonlinear_solver_iterations += self.convergence.niter();
+                }
 
                 // only calculate sensitivities if the solve succeeded
                 if solve_result.is_ok() {
+                    if let Some(op) = self.op.as_ref() {
+                        self.old_y
+                            .copy_from(&op.get_last_f_eval());
+                    }
                     // old_y now has the new y soln and old_f has the new dy soln
-                    self.old_y
-                        .copy_from(&self.op.as_ref().unwrap().get_last_f_eval());
                     if self.s_op.is_some() {
                         solve_result = self.solve_for_sensitivities(i, t);
                     }
@@ -701,16 +736,18 @@ where
                     continue 'step;
                 };
 
-                // update diff with solved dy
-                self.diff.column_mut(i).copy_from(&self.old_f);
+                if self.op.is_some() {
+                    // update diff with solved dy
+                    self.diff.column_mut(i).copy_from(&self.old_f);
 
-                // calculate dg and store in gdiff
-                if self.problem.integrate_out {
-                    let out = self.problem.eqn.out().unwrap();
-                    out.call_inplace(&self.old_y, t, &mut self.state.dg);
-                    self.gdiff
-                        .column_mut(i)
-                        .axpy(h, &self.state.dg, Eqn::T::zero());
+                    // calculate dg and store in gdiff
+                    if self.problem.integrate_out {
+                        let out = self.problem.eqn.out().unwrap();
+                        out.call_inplace(&self.old_y, t, &mut self.state.dg);
+                        self.gdiff
+                            .column_mut(i)
+                            .axpy(h, &self.state.dg, Eqn::T::zero());
+                    }
                 }
 
                 if self.s_op.is_some() {
@@ -719,29 +756,33 @@ where
                     }
                 }
             }
+            let mut ncontributions = 0;
+            let mut error_norm = Eqn::T::zero();
             // successfully solved for all stages, now compute error
-            self.diff
-                .gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), &mut error);
+            if self.op.is_some() {
+                self.diff
+                    .gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), &mut error);
 
-            // compute error norm
-            let atol = &self.problem().atol;
-            let rtol = self.problem().rtol;
-            let mut error_norm = error.squared_norm(&self.old_y, atol, rtol);
-            let mut ncontributions = 1;
-
-            // output errors
-            if out_error_control {
-                self.gdiff.gemv(
-                    Eqn::T::one(),
-                    self.tableau.d(),
-                    Eqn::T::zero(),
-                    &mut out_error,
-                );
-                let atol = self.problem().out_atol.as_ref().unwrap();
-                let rtol = self.problem().out_rtol.unwrap();
-                let out_error_norm = out_error.squared_norm(&self.old_g, atol, rtol);
-                error_norm += out_error_norm;
+                // compute error norm
+                let atol = &self.problem().atol;
+                let rtol = self.problem().rtol;
+                error_norm += error.squared_norm(&self.old_y, atol, rtol);
                 ncontributions += 1;
+
+                // output errors
+                if out_error_control {
+                    self.gdiff.gemv(
+                        Eqn::T::one(),
+                        self.tableau.d(),
+                        Eqn::T::zero(),
+                        &mut out_error,
+                    );
+                    let atol = self.problem().out_atol.as_ref().unwrap();
+                    let rtol = self.problem().out_rtol.unwrap();
+                    let out_error_norm = out_error.squared_norm(&self.old_g, atol, rtol);
+                    error_norm += out_error_norm;
+                    ncontributions += 1;
+                }
             }
 
             // sensitivity errors
@@ -778,7 +819,9 @@ where
                     ncontributions += 1;
                 }
             }
-            error_norm /= Eqn::T::from(ncontributions as f64);
+            if ncontributions > 1 {
+                error_norm /= Eqn::T::from(ncontributions as f64);
+            }
 
             // adjust step size based on error
             let maxiter = self.convergence.max_iter() as f64;
@@ -845,8 +888,11 @@ where
         self._jacobian_updates(new_h, SolverState::StepSuccess);
 
         // update statistics
-        self.statistics.number_of_linear_solver_setups =
-            self.op.as_ref().unwrap().number_of_jac_evals();
+        if let Some(op) = self.op.as_ref() {
+            self.statistics.number_of_linear_solver_setups = op.number_of_jac_evals();
+        } else if let Some(s_op) = self.s_op.as_ref() {
+            self.statistics.number_of_linear_solver_setups = s_op.number_of_jac_evals();
+        }
         self.statistics.number_of_steps += 1;
         self.jacobian_update.step();
 
@@ -1100,15 +1146,15 @@ mod test {
         let mut s = problem.tr_bdf2_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 7
-        number_of_steps: 52
-        number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 520
+        number_of_linear_solver_setups: 8
+        number_of_steps: 53
+        number_of_error_test_failures: 1
+        number_of_nonlinear_solver_iterations: 540
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 210
-        number_of_jac_muls: 318
+        number_of_calls: 218
+        number_of_jac_muls: 330
         number_of_matrix_evals: 2
         number_of_jac_adj_muls: 0
         "###);
@@ -1140,15 +1186,15 @@ mod test {
         let mut s = problem.esdirk34_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 5
+        number_of_linear_solver_setups: 6
         number_of_steps: 20
-        number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 317
+        number_of_error_test_failures: 1
+        number_of_nonlinear_solver_iterations: 332
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 122
-        number_of_jac_muls: 201
+        number_of_calls: 128
+        number_of_jac_muls: 210
         number_of_matrix_evals: 1
         number_of_jac_adj_muls: 0
         "###);
@@ -1163,7 +1209,7 @@ mod test {
         number_of_calls: 196
         number_of_jac_muls: 6
         number_of_matrix_evals: 3
-        number_of_jac_adj_muls: 599
+        number_of_jac_adj_muls: 474
         "###);
     }
 
@@ -1176,7 +1222,7 @@ mod test {
         number_of_calls: 171
         number_of_jac_muls: 12
         number_of_matrix_evals: 4
-        number_of_jac_adj_muls: 287
+        number_of_jac_adj_muls: 191
         "###);
     }
 
@@ -1206,16 +1252,16 @@ mod test {
         let mut s = problem.tr_bdf2_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 112
-        number_of_steps: 216
+        number_of_linear_solver_setups: 109
+        number_of_steps: 215
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 4529
-        number_of_nonlinear_solver_fails: 37
+        number_of_nonlinear_solver_iterations: 4544
+        number_of_nonlinear_solver_fails: 36
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 1420
-        number_of_jac_muls: 3277
-        number_of_matrix_evals: 27
+        number_of_calls: 1443
+        number_of_jac_muls: 3268
+        number_of_matrix_evals: 28
         number_of_jac_adj_muls: 0
         "###);
     }
