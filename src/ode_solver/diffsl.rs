@@ -28,7 +28,7 @@ pub struct DiffSlContext<M: Matrix<T = T>, CG: CodegenModule> {
 
 impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
     /// Create a new context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
-    /// The input parameters are not initialized and must be set using the [Op::set_params] function before solving the ODE.
+    /// The input parameters are not initialized and must be set using the [OdeEquations::set_params] function before solving the ODE.
     pub fn new(text: &str) -> Result<Self, DiffsolError> {
         let compiler =
             Compiler::from_discrete_str(text).map_err(|e| DiffsolError::Other(e.to_string()))?;

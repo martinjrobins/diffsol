@@ -50,6 +50,7 @@ harness = false
 
 [package.metadata.docs.rs]
 features = ["diffsl-llvm15"]
+cargo-args = ["-Zunstable-options", "-Zrustdoc-scrape-examples"]
 
 [profile.profiling]
 inherits = "release"

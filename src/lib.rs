@@ -5,15 +5,17 @@
 //!
 //! ## Solving ODEs
 //!
-//! The simplest way to create a new problem is to use the [OdeBuilder] struct. You can set the initial time, initial step size, relative tolerance, absolute tolerance, and parameters,
-//! or leave them at their default values. Then, call one of the `build_*` functions (e.g. [OdeBuilder::build_ode], [OdeBuilder::build_ode_with_mass], [OdeBuilder::build_from_eqn]) to create a [OdeSolverProblem].
+//! The simplest way to create a new problem is to use the [OdeBuilder] struct. You can set many configuration options such as the initial time ([OdeBuilder::t0]), initial step size ([OdeBuilder::h0]), 
+//! relative tolerance ([OdeBuilder::rtol]), absolute tolerance ([OdeBuilder::atol]), parameters ([OdeBuilder::p]) and equations ([OdeBuilder::rhs_implicit], [OdeBuilder::init], [OdeBuilder::mass] etc.)
+//! or leave them at their default values. Then, call the [OdeBuilder::build] function to create a [OdeSolverProblem].
 //!
 //! You will also need to choose a matrix type to use. DiffSol can use the [nalgebra](https://nalgebra.org) `DMatrix` type, the [faer](https://github.com/sarah-ek/faer-rs) `Mat` type, or any other type that implements the
 //! [Matrix] trait.
 //!
 //! ## Initial state
 //!
-//! The solver state is held in [OdeSolverState], and contains a state vector, the gradient of the state vector, the time, and the step size. You can intitialise a new state using [OdeSolverState::new],
+//! The solver state is held in [OdeSolverState], and contains a state vector, the gradient of the state vector, the time, and the step size. The [OdeSolverProblem] class has a collection of methods to create and initialise
+//! a new state for each solver ([OdeSolverProblem::bdf_state], [OdeSolverProblem::tr_bdf2_state], [OdeSolverProblem::esdirk34_state]). Or you can manually intitialise a new state using [OdeSolverState::new],
 //! or create an uninitialised state using [OdeSolverState::new_without_initialise] and intitialise it manually or using the [OdeSolverState::set_consistent] and [OdeSolverState::set_step_size] methods.
 //!
 //! To view the state within a solver, you can use the [OdeSolverMethod::state] or [OdeSolverMethod::state_mut] methods. These will return references to the state using either the [StateRef] or [StateRefMut] structs
@@ -23,6 +25,9 @@
 //! To solve the problem given the initial state, you need to choose a solver. DiffSol provides the following solvers:
 //! - A Backwards Difference Formulae [Bdf] solver, suitable for stiff problems and singular mass matrices.
 //! - A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver [Sdirk]. You can use your own butcher tableau using [Tableau] or use one of the provided ([Tableau::tr_bdf2], [Tableau::esdirk34]).
+//! 
+//! The easiest way to create a solver is to use one of the provided methods on the [OdeSolverProblem] struct ([OdeSolverProblem::bdf_solver], [OdeSolverProblem::tr_bdf2_solver], [OdeSolverProblem::esdirk34_solver]).
+//! These create a new solver from a provided state and problem. Alternatively, you can create both the solver and the state at once using [OdeSolverProblem::bdf], [OdeSolverProblem::tr_bdf2], [OdeSolverProblem::esdirk34].
 //!
 //! See the [OdeSolverMethod] trait for a more detailed description of the available methods on each solver. Possible workflows are:
 //! - Use the [OdeSolverMethod::step] method to step the solution forward in time with an internal time step chosen by the solver to meet the error tolerances.
@@ -58,21 +63,21 @@
 //!
 //! ## Events / Root finding
 //!
-//! DiffSol provides a simple way to detect user-provided events during the integration of the ODEs. You can use this by providing a closure that has a zero-crossing at the event you want to detect, using the [OdeBuilder::build_ode_with_root] builder,
+//! DiffSol provides a simple way to detect user-provided events during the integration of the ODEs. You can use this by providing a closure that has a zero-crossing at the event you want to detect, using the [OdeBuilder::root] method,
 //! or by providing a [NonLinearOp] that has a zero-crossing at the event you want to detect. To use the root finding feature while integrating with the solver, you can use the return value of [OdeSolverMethod::step] to check if an event has been detected.
 //!
 //! ## Forward Sensitivity Analysis
 //!
-//! DiffSol provides a way to compute the forward sensitivity of the solution with respect to the parameters. To use this your equations struct must implement the [OdeEquationsSens] trait.
-//! Note that by default the sensitivity equations are included in the error control for the solvers, you can change this by setting tolerances using the [OdeBuilder::sens_atol] and [[OdeBuilder::sens_rtol]] methods.
-//! You will also need to use [SensitivitiesOdeSolverMethod::set_problem_with_sensitivities] to set the problem with sensitivities.
-//!
-//! To obtain the sensitivity solution via interpolation, you can use the [OdeSolverMethod::interpolate_sens] method. Otherwise the sensitivity vectors are stored in the [OdeSolverState] struct.
+//! DiffSol provides a way to compute the forward sensitivity of the solution with respect to the parameters. You can provide the requires equations to the builder using [OdeBuilder::rhs_sens_implicit] and [OdeBuilder::init_sens],
+//! or your equations struct must implement the [OdeEquationsSens] trait,
+//! Note that by default the sensitivity equations are included in the error control for the solvers, you can change this by setting tolerances using the [OdeBuilder::sens_atol] and [OdeBuilder::sens_rtol] methods.
+//! 
+//! The easiest way to obtain the sensitivity solution is to use the [OdeSolverMethod::solve_dense_sensitivities] method, which will solve the forward problem and the sensitivity equations simultaneously and return the result.
+//! If you are manually stepping the solver, you can use the [OdeSolverMethod::interpolate_sens] method to obtain the sensitivity solution at a given time. Otherwise the sensitivity vectors are stored in the [OdeSolverState] struct.
 //!
 //! ## Checkpointing
 //!
-//! You can checkpoint the solver at a set of times using the [OdeSolverMethod::checkpoint] method. This will store the state of the solver at the given times, and subsequently use the [OdeSolverMethod::set_problem]
-//! method to restore the solver to the state at the given time.
+//! You can checkpoint the solver at the current internal time [OdeSolverMethod::checkpoint] method.
 //!
 //! ## Interpolation
 //!
@@ -93,10 +98,16 @@
 //! and then used to compute the sensitivities of the output function. Checkpointing is typically used to store the forward solution at a set of times as theses are required
 //! to solve the adjoint equations.
 //!
-//! To use the adjoint sensitivity method, your equations struct must implement the [OdeEquationsAdjoint] trait. When you compute the forward solution, use checkpointing
-//! to store the solution at a set of times. From this you should obtain a `Vec<OdeSolverState>` (that can be the start and end of the solution), and
-//! a [HermiteInterpolator] that can be used to interpolate the solution between the last two checkpoints. You can then use the [AdjointOdeSolverMethod::into_adjoint_solver]
-//! method to create an adjoint solver from the forward solver, and then use this solver to step the adjoint equations backwards in time. Once the adjoint equations have been solved,
+//! To provide the builder with the required equations, you can use the [OdeBuilder::rhs_adjoint_implicit], [OdeBuilder::init_adjoint], and [OdeBuilder::out_adjoint_implicit] methods,
+//! or your equations struct must implement the [OdeEquationsAdjoint] trait. 
+//! 
+//! The easiest way to obtain the adjoint solution is to use the [OdeSolverMethod::solve_adjoint] method, which will solve the forwards problem, then the adjoint problem and return the result.
+//! If you wish to manually do the timestepping, then the best place to start is by looking at the source code for the [OdeSolverMethod::solve_adjoint] method. During the solution of the forwards problem 
+//! you will need to use checkpointing to store the solution at a set of times.
+//! From this you should obtain a `Vec<OdeSolverState>` (that can be the start and end of the solution), and
+//! a [HermiteInterpolator] that can be used to interpolate the solution between the last two checkpoints. You can then use the [AdjointOdeSolverMethod::adjoint_equations] and then create
+//! an adjoint solver either manually or using the [AdjointOdeSolverMethod::default_adjoint_solver] method. You can then use this solver to step the adjoint equations backwards in time using [OdeSolverMethod::step] as normal. 
+//! Once the adjoint equations have been solved,
 //! the sensitivities of the output function will be stored in the [StateRef::sg] field of the adjoint solver state. If your parameters are used to calculate the initial conditions
 //! of the forward problem, then you will need to use the [AdjointEquations::correct_sg_for_init] method to correct the sensitivities for the initial conditions.
 //!

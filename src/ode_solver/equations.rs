@@ -363,68 +363,6 @@ impl<T> OdeEquationsAdjoint for T where
 /// which define a nonlinear operator or function `F` that maps an input vector `x` to an output vector `y`, (i.e. `y = F(x)`).
 /// Once you have implemented this trait, you can then pass an instance of your struct to the `rhs` argument of the [Self::new] method.
 /// Once you have created an instance of [OdeSolverEquations], you can then use [crate::OdeBuilder::build_from_eqn] to create a problem.
-///
-/// For example:
-///
-/// ```rust
-/// use std::rc::Rc;
-/// use diffsol::{Bdf, OdeSolverState, OdeSolverMethod, NonLinearOp, NonLinearOpJacobian, OdeSolverEquations, OdeSolverProblem, Op, UnitCallable, ConstantClosure, OdeBuilder};
-/// type M = nalgebra::DMatrix<f64>;
-/// type V = nalgebra::DVector<f64>;
-///
-/// struct MyProblem;
-/// impl Op for MyProblem {
-///    type V = V;
-///    type T = f64;
-///    type M = M;
-///    fn nstates(&self) -> usize {
-///       1
-///    }
-///    fn nout(&self) -> usize {
-///       1
-///    }
-/// }
-///   
-/// // implement rhs equations for the problem
-/// impl NonLinearOp for MyProblem {
-///    fn call_inplace(&self, x: &V, _t: f64, y: &mut V) {
-///       y[0] = -0.1 * x[0];
-///   }
-/// }
-/// impl NonLinearOpJacobian for MyProblem {
-///    fn jac_mul_inplace(&self, x: &V, _t: f64, v: &V, y: &mut V) {
-///      y[0] = -0.1 * v[0];
-///   }
-/// }
-///
-///
-/// let rhs = MyProblem;
-///
-/// // use the provided constant closure to define the initial condition
-/// let init_fn = |p: &V, _t: f64| V::from_vec(vec![1.0]);
-/// let init = ConstantClosure::new(init_fn, Rc::new(V::from_vec(vec![])));
-///
-/// // we don't have a mass matrix, root or output functions, so we can set to None
-/// // we still need to give a placeholder type for these, so we use the diffsol::UnitCallable type
-/// let mass: Option<UnitCallable<M>> = None;
-/// let root: Option<UnitCallable<M>> = None;
-/// let out: Option<UnitCallable<M>> = None;
-///
-/// let p = Rc::new(V::from_vec(vec![]));
-/// let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p);
-///
-/// let problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
-///
-/// let mut solver = Bdf::default();
-/// let t = 0.4;
-/// let state = OdeSolverState::new(&problem, &solver).unwrap();
-/// solver.set_problem(state, &problem);
-/// while solver.state().unwrap().t <= t {
-///    solver.step().unwrap();
-/// }
-/// let y = solver.interpolate(t);
-/// ```
-///
 pub struct OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
 where
     M: Matrix,
