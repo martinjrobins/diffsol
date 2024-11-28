@@ -216,11 +216,20 @@ where
     const MAX_THRESHOLD: f64 = 2.0;
     const MIN_THRESHOLD: f64 = 0.9;
     const MIN_TIMESTEP: f64 = 1e-32;
-
+    
     pub fn new(
+        problem: &'a OdeSolverProblem<Eqn>,
+        state: BdfState<Eqn::V, M>,
+        nonlinear_solver: Nls,
+    ) -> Result<Self, DiffsolError> {
+        Self::_new(problem, state, nonlinear_solver, true)
+    }
+
+    fn _new(
         problem: &'a OdeSolverProblem<Eqn>,
         mut state: BdfState<Eqn::V, M>,
         mut nonlinear_solver: Nls,
+        integrate_main_eqn: bool,
     ) -> Result<Self, DiffsolError> {
         // kappa values for difference orders, taken from Table 1 of [1]
         let kappa = [
@@ -249,15 +258,19 @@ where
 
         state.check_consistent_with_problem(problem)?;
 
-        // setup linear solver for first step
-        let bdf_callable = BdfCallable::new(&problem.eqn);
-        bdf_callable.set_c(state.h, alpha[state.order]);
-
-        nonlinear_solver.set_problem(&bdf_callable);
         let mut convergence = Convergence::new(problem.rtol, &problem.atol);
         convergence.set_max_iter(Self::NEWTON_MAXITER);
-        nonlinear_solver.reset_jacobian(&bdf_callable, &state.y, state.t);
-        let op = Some(bdf_callable);
+
+        let op = if integrate_main_eqn {
+            // setup linear solver for first step
+            let bdf_callable = BdfCallable::new(&problem.eqn);
+            bdf_callable.set_c(state.h, alpha[state.order]);
+            nonlinear_solver.set_problem(&bdf_callable);
+            nonlinear_solver.reset_jacobian(&bdf_callable, &state.y, state.t);
+            Some(bdf_callable)
+        } else {
+            None
+        };
 
         state.set_problem(problem)?;
 
@@ -327,7 +340,7 @@ where
     ) -> Result<Self, DiffsolError> {
         state.check_sens_consistent_with_problem(problem, &augmented_eqn)?;
 
-        let mut ret = Self::new(problem, state, nonlinear_solver)?;
+        let mut ret = Self::_new(problem, state, nonlinear_solver, augmented_eqn.integrate_main_eqn())?;
 
         ret.state.set_augmented_problem(problem, &augmented_eqn)?;
 
@@ -335,11 +348,14 @@ where
         let naug = augmented_eqn.max_index();
         let nstates = problem.eqn.rhs().nstates();
 
-        if augmented_eqn.integrate_main_eqn() {
-            ret.s_op = Some(BdfCallable::new_no_jacobian(augmented_eqn));
+        ret.s_op = if augmented_eqn.integrate_main_eqn() {
+            Some(BdfCallable::new_no_jacobian(augmented_eqn))
         } else {
-            ret.s_op = Some(BdfCallable::new(augmented_eqn));
-        }
+            let bdf_callable = BdfCallable::new(augmented_eqn);
+            ret.nonlinear_solver.set_problem(&bdf_callable);
+            ret.nonlinear_solver.reset_jacobian(&bdf_callable, &ret.state.s[0], ret.state.t);
+            Some(bdf_callable)
+        };
 
         ret.s_deltas = vec![<Eqn::V as Vector>::zeros(nstates); naug];
         ret.s_predict = <Eqn::V as Vector>::zeros(nstates);
@@ -348,14 +364,6 @@ where
             ret.sgdiff_tmp = M::zeros(out.nout(), BdfState::<Eqn::V, M>::MAX_ORDER + 3);
         }
         Ok(ret)
-    }
-
-    fn integrate_main_eqn(&self) -> bool {
-        if let Some(s_op) = &self.s_op {
-            s_op.eqn().integrate_main_eqn()
-        } else {
-            true 
-        }
     }
 
     pub fn get_statistics(&self) -> &BdfStatistics {
@@ -389,27 +397,21 @@ where
     }
 
     fn _jacobian_updates(&mut self, c: Eqn::T, state: SolverState) {
-        let integrate_main_eqn = self.integrate_main_eqn();
-        //let y = &self.y_predict;
-        //let t = self.t_predict;
         if self.jacobian_update.check_rhs_jacobian_update(c, &state) {
-            self.op.as_mut().unwrap().set_jacobian_is_stale();
-            if integrate_main_eqn {
-                self.nonlinear_solver
-                    .reset_jacobian(self.op.as_ref().unwrap(), &self.state.y, self.state.t);
-            } else {
-                self.nonlinear_solver
-                    .reset_jacobian(self.s_op.as_ref().unwrap(), &self.state.s[0], self.state.t);
+            if let Some(op) = self.op.as_mut() {
+                op.set_jacobian_is_stale();
+                self.nonlinear_solver.reset_jacobian(op, &self.state.y, self.state.t);
+            } else if let Some(s_op) = self.s_op.as_mut() {
+                s_op.set_jacobian_is_stale();
+                self.nonlinear_solver.reset_jacobian(s_op, &self.state.s[0], self.state.t);
             }
             self.jacobian_update.update_rhs_jacobian();
             self.jacobian_update.update_jacobian(c);
         } else if self.jacobian_update.check_jacobian_update(c, &state) {
-            if integrate_main_eqn {
-                self.nonlinear_solver
-                    .reset_jacobian(self.op.as_ref().unwrap(), &self.state.y, self.state.t);
-            } else {
-                self.nonlinear_solver
-                    .reset_jacobian(self.s_op.as_ref().unwrap(), &self.state.s[0], self.state.t);
+            if let Some(op) = self.op.as_mut() {
+                self.nonlinear_solver.reset_jacobian(op, &self.state.y, self.state.t);
+            } else if let Some(s_op) = self.s_op.as_mut() {
+                self.nonlinear_solver.reset_jacobian(s_op, &self.state.s[0], self.state.t);
             }
             self.jacobian_update.update_jacobian(c);
         }
@@ -430,7 +432,7 @@ where
         let r = Self::_compute_r(order, factor);
         let ru = r.mat_mul(&self.u);
         {
-            if self.integrate_main_eqn() {
+            if self.op.is_some() {
                 Self::_update_diff_for_step_size(&ru, &mut self.state.diff, &mut self.diff_tmp, order);
                 if self.ode_problem.integrate_out {
                     Self::_update_diff_for_step_size(
@@ -450,7 +452,12 @@ where
             }
         }
 
-        self.op.as_mut().unwrap().set_c(new_h, self.alpha[order]);
+        if let Some(op) = self.op.as_mut() {
+            op.set_c(new_h, self.alpha[order]);
+        }
+        if let Some(s_op) = self.s_op.as_mut() {
+            s_op.set_c(new_h, self.alpha[order]);
+        }
 
         self.state.h = new_h;
 
@@ -491,19 +498,31 @@ where
 
     fn calculate_sens_output_delta(&mut self, i: usize) {
         let state = &mut self.state;
-        let op = self.s_op.as_ref().unwrap();
+        let s_op = self.s_op.as_ref().unwrap();
 
         // integrate sensitivity output equations
-        let out = op.eqn().out().unwrap();
+        let out = s_op.eqn().out().unwrap();
         out.call_inplace(&state.s[i], self.t_predict, &mut state.dsg[i]);
-        self.op.as_ref().unwrap().integrate_out(
-            &state.dsg[i],
-            &state.sgdiff[i],
-            self.gamma.as_slice(),
-            self.alpha.as_slice(),
-            state.order,
-            &mut self.sg_deltas[i],
-        );
+
+        if let Some(op) = self.s_op.as_ref() {
+            op.integrate_out(
+                &state.dsg[i],
+                &state.sgdiff[i],
+                self.gamma.as_slice(),
+                self.alpha.as_slice(),
+                state.order,
+                &mut self.sg_deltas[i],
+            );
+        } else if let Some(s_op) = self.s_op.as_ref() {
+            s_op.integrate_out(
+                &state.dsg[i],
+                &state.sgdiff[i],
+                self.gamma.as_slice(),
+                self.alpha.as_slice(),
+                state.order,
+                &mut self.sg_deltas[i],
+            );
+        }
     }
 
     fn update_differences_and_integrate_out(&mut self) {
@@ -573,13 +592,15 @@ where
         Self::_predict_using_diff(&mut self.y_predict, &state.diff, state.order);
 
         // update psi and c (h, D, y0 has changed)
-        self.op.as_mut().unwrap().set_psi_and_y0(
-            &state.diff,
-            self.gamma.as_slice(),
-            self.alpha.as_slice(),
-            state.order,
-            &self.y_predict,
-        );
+        if let Some(op) = self.op.as_mut() {
+            op.set_psi_and_y0(
+                &state.diff,
+                self.gamma.as_slice(),
+                self.alpha.as_slice(),
+                state.order,
+                &self.y_predict,
+            );
+        }
 
         // update time
         let t_new = state.t + state.h;
@@ -666,11 +687,10 @@ where
                 .unwrap()
                 .eqn()
                 .include_out_in_error_control();
-        let integrate_main_eqn = self.integrate_main_eqn();
 
         let mut error_norm = M::T::zero();
         let mut ncontrib = 0;
-        if integrate_main_eqn {
+        if self.op.is_some() {
             let atol = &self.ode_problem.atol;
             let rtol = self.ode_problem.rtol;
             error_norm += self.y_delta.squared_norm(&state.y, atol, rtol) * self.error_const2[order - 1];
@@ -722,14 +742,12 @@ where
                 .unwrap()
                 .eqn()
                 .include_out_in_error_control();
-        let integrate_main_eqn = self.integrate_main_eqn();
-        
 
         let atol = &self.ode_problem.atol;
         let rtol = self.ode_problem.rtol;
         let mut error_norm = M::T::zero();
         let mut ncontrib = 0;
-        if integrate_main_eqn {
+        if self.op.is_some() {
             error_norm += state
                 .diff
                 .column(order + 1)
@@ -779,39 +797,35 @@ where
     }
 
     fn sensitivity_solve(&mut self, t_new: Eqn::T) -> Result<(), DiffsolError> {
-        let h = self.state.h;
         let order = self.state.order;
-        let op = self.s_op.as_mut().unwrap();
 
         // update for new state
-        {
-            let dy_new = self.op.as_ref().unwrap().tmp();
+        if let Some(op) = self.op.as_ref() {
+            let s_op = self.s_op.as_mut().unwrap();
+            let dy_new = op.tmp();
             let y_new = &self.y_predict;
-            op.eqn_mut().update_rhs_out_state(y_new, &dy_new, t_new);
-
-            // construct bdf discretisation of sensitivity equations
-            op.set_c(h, self.alpha[order]);
+            s_op.eqn_mut().update_rhs_out_state(y_new, &dy_new, t_new);
         }
 
         // solve for sensitivities equations discretised using BDF
-        let naug = op.eqn().max_index();
+        let naug = self.s_op.as_mut().unwrap().eqn().max_index();
         for i in 0..naug {
-            let op = self.s_op.as_mut().unwrap();
             // setup
+            let s_op = self.s_op.as_mut().unwrap();
             {
                 let state = &self.state;
                 // predict forward to new step
                 Self::_predict_using_diff(&mut self.s_predict, &state.sdiff[i], order);
 
                 // setup op
-                op.set_psi_and_y0(
+                s_op.set_psi_and_y0(
                     &state.sdiff[i],
                     self.gamma.as_slice(),
                     self.alpha.as_slice(),
                     order,
                     &self.s_predict,
                 );
-                op.eqn_mut().set_index(i);
+                s_op.eqn_mut().set_index(i);
             }
 
             // solve
@@ -820,14 +834,14 @@ where
                 s_new.copy_from(&self.s_predict);
                 // todo: should be a separate convergence object?
                 self.nonlinear_solver
-                    .solve_in_place(&*op, s_new, t_new, &self.s_predict, &mut self.convergence)?;
+                    .solve_in_place(&*s_op, s_new, t_new, &self.s_predict, &mut self.convergence)?;
                 self.statistics.number_of_nonlinear_solver_iterations += self.convergence.niter();
                 let s_new = &*s_new;
                 self.s_deltas[i].copy_from(s_new);
                 self.s_deltas[i] -= &self.s_predict;
             }
 
-            if op.eqn().out().is_some() && op.eqn().include_out_in_error_control() {
+            if s_op.eqn().out().is_some() && s_op.eqn().include_out_in_error_control() {
                 self.calculate_sens_output_delta(i);
             }
         }
@@ -980,11 +994,6 @@ where
         let integrate_out = problem.integrate_out;
         let output_in_error_control = problem.output_in_error_control();
         let integrate_sens = self.s_op.is_some();
-        let integrate_main_eqn = if let Some(s_op) = &self.s_op {
-            s_op.eqn().integrate_main_eqn()
-        } else {
-            true 
-        };
 
         let mut convergence_fail = false;
 
@@ -1015,9 +1024,9 @@ where
 
             // solve BDF equation using y0 as starting point
             let mut solve_result = Ok(());
-            if integrate_main_eqn {
+            if let Some(op) = self.op.as_ref() {
                 solve_result = self.nonlinear_solver.solve_in_place(
-                    self.op.as_ref().unwrap(),
+                    op,
                     &mut self.y_delta,
                     self.t_predict,
                     &self.y_predict,
@@ -1115,8 +1124,11 @@ where
         }
 
         // update statistics
-        self.statistics.number_of_linear_solver_setups =
-            self.op.as_ref().unwrap().number_of_jac_evals();
+        if let Some(op) = self.op.as_ref() {
+            self.statistics.number_of_linear_solver_setups = op.number_of_jac_evals();
+        } else if let Some(s_op) = self.s_op.as_ref() {
+            self.statistics.number_of_linear_solver_setups = s_op.number_of_jac_evals();
+        }
         self.statistics.number_of_steps += 1;
         self.jacobian_update.step();
 
@@ -1352,15 +1364,15 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 11
-        number_of_steps: 47
-        number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 223
+        number_of_linear_solver_setups: 13
+        number_of_steps: 48
+        number_of_error_test_failures: 1
+        number_of_nonlinear_solver_iterations: 234
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.statistics(), @r###"
-        number_of_calls: 84
-        number_of_jac_muls: 145
+        number_of_calls: 89
+        number_of_jac_muls: 151
         number_of_matrix_evals: 1
         number_of_jac_adj_muls: 0
         "###);
@@ -1373,8 +1385,8 @@ mod test {
         test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 84
-        number_of_jac_muls: 8
-        number_of_matrix_evals: 4
+        number_of_jac_muls: 6
+        number_of_matrix_evals: 3
         number_of_jac_adj_muls: 392
         "###);
     }
@@ -1386,9 +1398,9 @@ mod test {
         test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 190
-        number_of_jac_muls: 27
-        number_of_matrix_evals: 9
-        number_of_jac_adj_muls: 217
+        number_of_jac_muls: 24
+        number_of_matrix_evals: 8
+        number_of_jac_adj_muls: 187
         "###);
     }
 
@@ -1551,16 +1563,16 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 146
-        number_of_steps: 502
-        number_of_error_test_failures: 2
-        number_of_nonlinear_solver_iterations: 3705
+        number_of_linear_solver_setups: 152
+        number_of_steps: 512
+        number_of_error_test_failures: 5
+        number_of_nonlinear_solver_iterations: 3779
         number_of_nonlinear_solver_fails: 70
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 1144
-        number_of_jac_muls: 2882
-        number_of_matrix_evals: 58
+        number_of_calls: 1157
+        number_of_jac_muls: 2930
+        number_of_matrix_evals: 54
         number_of_jac_adj_muls: 0
         "###);
     }
