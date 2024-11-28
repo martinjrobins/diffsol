@@ -189,11 +189,6 @@ mod tests {
         let adjoint_aug_eqn = method.adjoint_equations(checkpoints, last_segment).unwrap();
         let mut adjoint_solver = method.default_adjoint_solver::<LS>(adjoint_aug_eqn).unwrap();
 
-        let y_expect = M::V::from_element(problem.eqn.rhs().nstates(), M::T::zero());
-        adjoint_solver
-            .state()
-            .y
-            .assert_eq_st(&y_expect, M::T::from(1e-9));
         let g_expect = M::V::from_element(problem.eqn.rhs().nparams(), M::T::zero());
         for sgi in adjoint_solver.state().sg.iter() {
             sgi.assert_eq_st(&g_expect, M::T::from(1e-9));

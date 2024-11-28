@@ -125,7 +125,7 @@ where
     ///
     /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
     /// - `rhs_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
-    pub fn rhs_implicit<'a, F, G>(
+    pub fn rhs_implicit<F, G>(
         self,
         rhs: F,
         rhs_jac: G,
@@ -201,6 +201,7 @@ where
         }
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn rhs_adjoint_implicit<F, G, H, I>(
         self,
         rhs: F,
@@ -399,9 +400,9 @@ where
     /// # Arguments
     ///
     /// - `mass`: Function of type Fn(v: &V, p: &V, t: S, beta: S, y: &mut V) that computes a gemv multiplication of the mass matrix with
-    /// the vector v (i.e. y = M * v + beta * y).
+    ///   the vector v (i.e. y = M * v + beta * y).
     /// - `mass_adjoint`: Function of type Fn(v: &V, p: &V, t: S, beta: S, y: &mut V) that computes a gemv multiplication of the transpose of the mass matrix with
-    /// the vector v (i.e. y = M^T * v + beta * y).
+    ///   the vector v (i.e. y = M^T * v + beta * y).
     pub fn mass_adjoint<F, G>(
         self,
         mass: F,
@@ -511,6 +512,7 @@ where
         }
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn out_adjoint_implicit<F, G, H, I>(
         self,
         out: F,
@@ -727,6 +729,7 @@ where
         v
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn build(
         self,
     ) -> Result<OdeSolverProblem<OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>>, DiffsolError>
@@ -766,20 +769,27 @@ where
         init.set_nout(nstates);
         init.set_nparams(nparams);
 
-        mass.as_mut().map(|mass| mass.set_nstates(nstates));
-        mass.as_mut().map(|mass| mass.set_nparams(nparams));
-        mass.as_mut().map(|mass| mass.set_nout(nstates));
-
-        root.as_mut().map(|root| root.set_nstates(nstates));
-        root.as_mut().map(|root| root.set_nparams(nparams));
-
-        out.as_mut().map(|out| out.set_nstates(nstates));
-        out.as_mut().map(|out| out.set_nparams(nparams));
+        if let Some(ref mut mass) = mass {
+            mass.set_nstates(nstates);
+            mass.set_nparams(nparams);
+            mass.set_nout(nstates);
+        }
+        
+        if let Some(ref mut root) = root {
+            root.set_nstates(nstates);
+            root.set_nparams(nparams);
+        }
+        
+        if let Some(ref mut out) = out {
+            out.set_nstates(nstates);
+            out.set_nparams(nparams);
+        }
 
         if self.use_coloring || M::is_sparse() {
             rhs.calculate_sparsity(&y0, self.t0, &p);
-            mass.as_mut()
-                .map(|mass| mass.calculate_sparsity(&y0, self.t0, &p));
+            if let Some(ref mut mass) = mass {
+                mass.calculate_sparsity(&y0, self.t0, &p);
+            }
         }
         let nout = out.as_ref().map(|out| out.nout());
         let eqn = OdeSolverEquations::new(rhs, init, mass, root, out, p);

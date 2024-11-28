@@ -228,6 +228,7 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>() -> (
     let y0 = 1.0;
     let problem = OdeBuilder::<M>::new()
         .p([k, y0])
+        .integrate_out(true)
         .rhs_adjoint_implicit(
             exponential_decay::<M>,
             exponential_decay_jacobian::<M>,

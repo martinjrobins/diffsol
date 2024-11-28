@@ -56,7 +56,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
 
     pub fn check_new_iteration(&mut self, dy: &mut V, y: &V) -> ConvergenceStatus {
         self.niter += 1;
-        let norm = dy.squared_norm(y, &self.atol, self.rtol).sqrt();
+        let norm = dy.squared_norm(y, self.atol, self.rtol).sqrt();
         // if norm is zero then we are done
         if norm <= V::T::EPSILON {
             return ConvergenceStatus::Converged;

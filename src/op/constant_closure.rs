@@ -18,7 +18,6 @@ where
     I: Fn(&M::V, M::T) -> M::V,
 {
     pub fn new(func: I, nout: usize, nparams: usize) -> Self {
-        let nout = nout;
         Self {
             func,
             nout,

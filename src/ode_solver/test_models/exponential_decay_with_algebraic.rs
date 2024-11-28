@@ -228,9 +228,10 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: Matrix + 'static>() -
     OdeSolverSolution<M::V>,
 ) {
     let a = 0.1;
-    let nout = 2;
+    let nout = 1;
     let problem = OdeBuilder::<M>::new()
         .p([a])
+        .integrate_out(true)
         .rhs_adjoint_implicit(
             exponential_decay_with_algebraic::<M>,
             exponential_decay_with_algebraic_jacobian::<M>,
@@ -250,7 +251,7 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: Matrix + 'static>() -
             exponential_decay_with_algebraic_out_jac_mul::<M>,
             exponential_decay_with_algebraic_out_jac_adj_mul::<M>,
             exponential_decay_with_algebraic_out_sens_adj::<M>,
-            2,
+            nout,
         )
         .build()
         .unwrap();

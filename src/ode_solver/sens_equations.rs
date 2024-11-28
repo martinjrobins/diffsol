@@ -215,7 +215,7 @@ where
             rhs: SensRhs::new(self.eqn, false),
             init: SensInit::new(self.eqn),
             rtol: self.rtol,
-            atol: self.atol.clone(),
+            atol: self.atol,
         }
     }
 }

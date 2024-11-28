@@ -68,7 +68,7 @@ where
         let problem = self.problem();
         let tableau = self.tableau;
         let state = self.state.into_adjoint::<ALS, _, _>(problem, &mut aug_eqn)?;
-        Sdirk::new_augmented(&self.problem, state, tableau, LS::default(), aug_eqn)
+        Sdirk::new_augmented(self.problem, state, tableau, LS::default(), aug_eqn)
     }
 }
 

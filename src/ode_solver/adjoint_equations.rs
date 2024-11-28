@@ -423,10 +423,10 @@ where
         };
         let tmp = self.tmp.clone();
         let tmp2 = self.tmp2.clone();
-        let atol = self.atol.clone();
-        let rtol = self.rtol.clone();
-        let out_atol = self.out_atol.clone();
-        let out_rtol = self.out_rtol.clone();
+        let atol = self.atol;
+        let rtol = self.rtol;
+        let out_atol = self.out_atol;
+        let out_rtol = self.out_rtol;
         let mass = self.eqn.mass().map(|_m| AdjointMass::new(self.eqn));
         Self {
             rhs,
@@ -464,14 +464,14 @@ where
             None
         };
         let tmp = if with_out {
-            RefCell::new(<Eqn::V as Vector>::zeros(0))
-        } else {
             RefCell::new(<Eqn::V as Vector>::zeros(eqn.rhs().nparams()))
+        } else {
+            RefCell::new(<Eqn::V as Vector>::zeros(0))
         };
         let tmp2 = if with_out {
-            RefCell::new(<Eqn::V as Vector>::zeros(0))
-        } else {
             RefCell::new(<Eqn::V as Vector>::zeros(eqn.rhs().nstates()))
+        } else {
+            RefCell::new(<Eqn::V as Vector>::zeros(0))
         };
         let atol = if with_out {
             problem.sens_atol.as_ref()

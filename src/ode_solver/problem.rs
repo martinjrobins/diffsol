@@ -25,7 +25,7 @@ where
 
 macro_rules! sdirk_solver_from_tableau {
     ($state:ident, $state_sens:ident, $method:ident, $method_sens:ident, $method_solver:ident, $method_solver_sens:ident, $tableau:ident) => {
-        pub fn $state<'a, LS: LinearSolver<Eqn::M>>(
+        pub fn $state<LS: LinearSolver<Eqn::M>>(
             &self,
         ) -> Result<SdirkState<Eqn::V>, DiffsolError>
         where
@@ -198,6 +198,7 @@ where
         self.bdf_solver(state)
     }
 
+    #[allow(clippy::type_complexity)]
     pub(crate) fn bdf_solver_aug<
         LS: LinearSolver<Eqn::M>,
         Aug: AugmentedOdeEquationsImplicit<Eqn>,
@@ -216,6 +217,7 @@ where
         Bdf::new_augmented(state, self, aug_eqn, newton_solver)
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn bdf_solver_sens<LS: LinearSolver<Eqn::M>>(
         &self,
         state: BdfState<Eqn::V>,
@@ -236,6 +238,7 @@ where
         self.bdf_solver_aug(state, sens_eqn)
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn bdf_sens<LS: LinearSolver<Eqn::M>>(
         &self,
     ) -> Result<

@@ -345,6 +345,14 @@ where
         Ok(ret)
     }
 
+    fn integrate_main_eqn(&self) -> bool {
+        if let Some(s_op) = &self.s_op {
+            s_op.eqn().integrate_main_eqn()
+        } else {
+            true 
+        }
+    }
+
     pub fn get_statistics(&self) -> &BdfStatistics {
         &self.statistics
     }
@@ -641,36 +649,55 @@ where
                 .unwrap()
                 .eqn()
                 .include_out_in_error_control();
+        let integrate_main_eqn = self.integrate_main_eqn();
 
-        let atol = &self.ode_problem.atol;
-        let rtol = self.ode_problem.rtol;
-        let mut error_norm =
-            self.y_delta.squared_norm(&state.y, atol, rtol) * self.error_const2[order - 1];
-        let mut ncontrib = 1;
-        if output_in_error_control {
-            let rtol = self.ode_problem.out_rtol.unwrap();
-            let atol = self.ode_problem.out_atol.as_ref().unwrap();
-            error_norm +=
-                self.g_delta.squared_norm(&state.g, atol, rtol) * self.error_const2[order];
+        let mut error_norm = M::T::zero();
+        let mut ncontrib = 0;
+        if integrate_main_eqn {
+            let atol = &self.ode_problem.atol;
+            let rtol = self.ode_problem.rtol;
+            error_norm += self.y_delta.squared_norm(&state.y, atol, rtol) * self.error_const2[order - 1];
             ncontrib += 1;
+            if output_in_error_control {
+                let rtol = self.ode_problem.out_rtol.unwrap();
+                let atol = self.ode_problem.out_atol.as_ref().unwrap();
+                error_norm +=
+                    self.g_delta.squared_norm(&state.g, atol, rtol) * self.error_const2[order];
+                ncontrib += 1;
+            }
+        } else {
+            let atol = self.s_op.as_ref().unwrap().eqn().atol().unwrap_or(&self.ode_problem.atol);
+            let rtol = self.s_op.as_ref().unwrap().eqn().rtol().unwrap_or(self.ode_problem.rtol);
+            error_norm += self.s_deltas[0].squared_norm(&state.s[0], atol, rtol)
+                * self.error_const2[order];
+            ncontrib += 1;
+            if output_in_error_control {
+                let atol = self.s_op.as_ref().unwrap().eqn().out_atol().unwrap_or(self.ode_problem.out_atol.as_ref().unwrap());
+                let rtol = self.s_op.as_ref().unwrap().eqn().out_rtol().unwrap_or(self.ode_problem.out_rtol.unwrap());
+                error_norm += self.sg_deltas[0].squared_norm(&state.sg[0], atol, rtol)
+                    * self.error_const2[order];
+                ncontrib += 1;
+            }
         }
         if sens_in_error_control {
+            let min_index = if !integrate_main_eqn { 1 } else { 0 };
             let sens_atol = self.s_op.as_ref().unwrap().eqn().atol().unwrap();
             let sens_rtol = self.s_op.as_ref().unwrap().eqn().rtol().unwrap();
-            for i in 0..state.sdiff.len() {
+            for i in min_index..state.sdiff.len() {
                 error_norm += self.s_deltas[i].squared_norm(&state.s[i], sens_atol, sens_rtol)
                     * self.error_const2[order];
             }
-            ncontrib += state.sdiff.len();
+            ncontrib += state.sdiff.len() - min_index;
         }
         if sens_output_in_error_control {
+            let min_index = if !integrate_main_eqn && output_in_error_control { 1 } else { 0 };
             let rtol = self.s_op.as_ref().unwrap().eqn().out_rtol().unwrap();
             let atol = self.s_op.as_ref().unwrap().eqn().out_atol().unwrap();
-            for i in 0..state.sgdiff.len() {
+            for i in min_index..state.sgdiff.len() {
                 error_norm += self.sg_deltas[i].squared_norm(&state.sg[i], atol, rtol)
                     * self.error_const2[order];
             }
-            ncontrib += state.sgdiff.len();
+            ncontrib += state.sgdiff.len() - min_index;
         }
         error_norm / Eqn::T::from(ncontrib as f64)
     }
@@ -690,37 +717,65 @@ where
                 .unwrap()
                 .eqn()
                 .include_out_in_error_control();
+        let integrate_main_eqn = self.integrate_main_eqn();
+        
 
         let atol = &self.ode_problem.atol;
         let rtol = self.ode_problem.rtol;
-        let mut error_norm = state
-            .diff
-            .column(order + 1)
-            .squared_norm(&state.y, atol, rtol)
-            * self.error_const2[order];
-        let mut ncontrib = 1;
-        if output_in_error_control {
-            let rtol = self.ode_problem.out_rtol.unwrap();
-            let atol = self.ode_problem.out_atol.as_ref().unwrap();
+        let mut error_norm = M::T::zero();
+        let mut ncontrib = 0;
+        if integrate_main_eqn {
             error_norm += state
-                .gdiff
+                .diff
                 .column(order + 1)
-                .squared_norm(&state.g, atol, rtol)
+                .squared_norm(&state.y, atol, rtol)
                 * self.error_const2[order];
             ncontrib += 1;
+            if output_in_error_control {
+                let rtol = self.ode_problem.out_rtol.unwrap();
+                let atol = self.ode_problem.out_atol.as_ref().unwrap();
+                error_norm += state
+                    .gdiff
+                    .column(order + 1)
+                    .squared_norm(&state.g, atol, rtol)
+                    * self.error_const2[order];
+                ncontrib += 1;
+            }
+        } else {
+            let atol = self.s_op.as_ref().unwrap().eqn().atol().unwrap_or(&self.ode_problem.atol);
+            let rtol = self.s_op.as_ref().unwrap().eqn().rtol().unwrap_or(self.ode_problem.rtol);
+            error_norm += state
+                .sdiff[0]
+                .column(order + 1)
+                .squared_norm(&state.s[0], atol, rtol)
+                * self.error_const2[order];
+            ncontrib += 1;
+            if output_in_error_control {
+                let atol = self.s_op.as_ref().unwrap().eqn().out_atol().unwrap_or(self.ode_problem.out_atol.as_ref().unwrap());
+                let rtol = self.s_op.as_ref().unwrap().eqn().out_rtol().unwrap_or(self.ode_problem.out_rtol.unwrap());
+                error_norm += state
+                    .sgdiff[0]
+                    .column(order + 1)
+                    .squared_norm(&state.sg[0], atol, rtol)
+                    * self.error_const2[order];
+                ncontrib += 1;
+            }
         }
         if sens_in_error_control {
+            let min_index = if !integrate_main_eqn { 1 } else { 0 };
             let sens_atol = self.s_op.as_ref().unwrap().eqn().atol().unwrap();
             let sens_rtol = self.s_op.as_ref().unwrap().eqn().rtol().unwrap();
-            for i in 0..state.sdiff.len() {
+            for i in min_index..state.sdiff.len() {
                 error_norm += state.sdiff[i].column(order + 1).squared_norm(
                     &state.s[i],
                     sens_atol,
                     sens_rtol,
                 ) * self.error_const2[order];
             }
+            ncontrib += state.sdiff.len() - min_index;
         }
         if sens_output_in_error_control {
+            let min_index = if !integrate_main_eqn && output_in_error_control { 1 } else { 0 };
             let rtol = self.s_op.as_ref().unwrap().eqn().out_rtol().unwrap();
             let atol = self.s_op.as_ref().unwrap().eqn().out_atol().unwrap();
             for i in 0..state.sgdiff.len() {
@@ -730,6 +785,7 @@ where
                         .squared_norm(&state.sg[i], atol, rtol)
                         * self.error_const2[order];
             }
+            ncontrib += state.sgdiff.len() - min_index;
         }
         error_norm / Eqn::T::from(ncontrib as f64)
     }
@@ -936,6 +992,11 @@ where
         let integrate_out = problem.integrate_out;
         let output_in_error_control = problem.output_in_error_control();
         let integrate_sens = self.s_op.is_some();
+        let integrate_main_eqn = if let Some(s_op) = &self.s_op {
+            s_op.eqn().integrate_main_eqn()
+        } else {
+            true 
+        };
 
         let mut convergence_fail = false;
 
@@ -965,33 +1026,35 @@ where
             self.y_delta.copy_from(&self.y_predict);
 
             // solve BDF equation using y0 as starting point
-            let mut solve_result = self.nonlinear_solver.solve_in_place(
-                self.op.as_ref().unwrap(),
-                &mut self.y_delta,
-                self.t_predict,
-                &self.y_predict,
-                &mut self.convergence,
-            );
-            // update statistics
-            self.statistics.number_of_nonlinear_solver_iterations += self.convergence.niter();
+            let mut solve_result = Ok(());
+            if integrate_main_eqn {
+                solve_result = self.nonlinear_solver.solve_in_place(
+                    self.op.as_ref().unwrap(),
+                    &mut self.y_delta,
+                    self.t_predict,
+                    &self.y_predict,
+                    &mut self.convergence,
+                );
+                // update statistics
+                self.statistics.number_of_nonlinear_solver_iterations += self.convergence.niter();
 
-            // only calculate norm and sensitivities if solve was successful
-            if solve_result.is_ok() {
-                // test error is within tolerance
-                // combine eq 3, 4 and 6 from [1] to obtain error
-                // Note that error = C_k * h^{k+1} y^{k+1}
-                // and d = D^{k+1} y_{n+1} \approx h^{k+1} y^{k+1}
-                self.y_delta -= &self.y_predict;
+                if solve_result.is_ok() {
+                    // test error is within tolerance
+                    // combine eq 3, 4 and 6 from [1] to obtain error
+                    // Note that error = C_k * h^{k+1} y^{k+1}
+                    // and d = D^{k+1} y_{n+1} \approx h^{k+1} y^{k+1}
+                    self.y_delta -= &self.y_predict;
 
-                // deal with output equations
-                if integrate_out && output_in_error_control {
-                    self.calculate_output_delta();
+                    // deal with output equations
+                    if integrate_out && output_in_error_control {
+                        self.calculate_output_delta();
+                    }
                 }
+            }
 
-                // sensitivities
-                if integrate_sens && self.sensitivity_solve(self.t_predict).is_err() {
-                    solve_result = Err(ode_solver_error!(SensitivitySolveFailed));
-                }
+            // only calculate sensitivities if solve was successful
+            if solve_result.is_ok() && integrate_sens && self.sensitivity_solve(self.t_predict).is_err() {
+                solve_result = Err(ode_solver_error!(SensitivitySolveFailed));
             }
 
             // handle case where either nonlinear solve failed
@@ -1147,7 +1210,7 @@ where
             let ret = self.root_finder.as_ref().unwrap().check_root(
                 &|t: <Eqn as Op>::T| self.interpolate(t),
                 &root_fn,
-                &self.state.as_ref().y,
+                self.state.as_ref().y,
                 self.state.as_ref().t,
             );
             if let Some(root) = ret {

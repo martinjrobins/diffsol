@@ -194,6 +194,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         LS: LinearSolver<AugmentedEqn::M>,
     {
         let mut state = self.into_common();
+        state.h = -state.h;
         let naug = augmented_eqn.max_index();
         let mut s = Vec::with_capacity(naug);
         let mut ds = Vec::with_capacity(naug);
