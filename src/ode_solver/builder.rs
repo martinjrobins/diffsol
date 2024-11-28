@@ -51,13 +51,14 @@ impl Default for OdeBuilder {
 /// # Example
 ///  
 /// ```rust
-/// use diffsol::{OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod};
+/// use diffsol::{OdeBuilder, NalgebraLU, Bdf, OdeSolverState, OdeSolverMethod};
 /// type M = nalgebra::DMatrix<f64>;
+/// type LS = NalgebraLU<f64>;
 ///
-/// let problem = OdeBuilder::new()
+/// let problem = OdeBuilder::<M>::new()
 ///   .rtol(1e-6)
 ///   .p([0.1])
-///   .build_ode::<M, _, _, _>(
+///   .rhs_implicit(
 ///     // dy/dt = -ay
 ///     |x, p, t, y| {
 ///       y[0] = -p[0] * x[0];
@@ -66,17 +67,19 @@ impl Default for OdeBuilder {
 ///     |x, p, t, v, y| {
 ///       y[0] = -p[0] * v[0];
 ///     },
+///   )
+///   .init(
 ///     // y(0) = 1
 ///    |p, t| {
 ///       nalgebra::DVector::from_vec(vec![1.0])
 ///    },
-///   ).unwrap();
+///   )
+///   .build()
+///   .unwrap();
 ///
-/// let mut solver = Bdf::default();
+/// let mut solver = problem.bdf::<LS>().unwrap();
 /// let t = 0.4;
-/// let mut state = OdeSolverState::new(&problem, &solver).unwrap();
-/// solver.set_problem(state, &problem);
-/// while solver.state().unwrap().t <= t {
+/// while solver.state().t <= t {
 ///     solver.step().unwrap();
 /// }
 /// let y = solver.interpolate(t);

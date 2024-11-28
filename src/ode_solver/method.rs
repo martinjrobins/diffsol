@@ -30,14 +30,12 @@ pub enum OdeSolverStopReason<T: Scalar> {
 /// ```
 /// use diffsol::{ OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeEquationsImplicit, DefaultSolver };
 ///
-/// fn solve_ode<Eqn>(solver: &mut impl OdeSolverMethod<Eqn>, problem: &OdeSolverProblem<Eqn>, t: Eqn::T) -> Eqn::V
+/// fn solve_ode<'a, Eqn>(solver: &mut impl OdeSolverMethod<'a, Eqn>, t: Eqn::T) -> Eqn::V
 /// where
-///    Eqn: OdeEquationsImplicit,
+///    Eqn: OdeEquationsImplicit + 'a,
 ///    Eqn::M: DefaultSolver,
 /// {
-///     let state = OdeSolverState::new(problem, solver).unwrap();
-///     solver.set_problem(state, problem);
-///     while solver.state().unwrap().t <= t {
+///     while solver.state().t <= t {
 ///         solver.step().unwrap();
 ///     }
 ///     solver.interpolate(t).unwrap()
