@@ -160,7 +160,7 @@ impl<V: Vector> RootFinder<V> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{error::DiffsolError, op::ParametrisedOp, ClosureNoJac, RootFinder, Vector};
+    use crate::{error::DiffsolError, op::ParameterisedOp, ClosureNoJac, RootFinder, Vector};
 
     #[test]
     fn test_root() {
@@ -176,7 +176,7 @@ mod tests {
             1,
             p.len(),
         );
-        let root_fn = ParametrisedOp::new(&root_fn, &p);
+        let root_fn = ParameterisedOp::new(&root_fn, &p);
 
         // check no root
         let root_finder = RootFinder::new(1);

@@ -1,5 +1,5 @@
 use crate::{
-    op::{constant_op::ConstantOpSensAdjoint, linear_op::LinearOpTranspose, ParametrisedOp},
+    op::{constant_op::ConstantOpSensAdjoint, linear_op::LinearOpTranspose, ParameterisedOp},
     ConstantOp, ConstantOpSens, LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint,
     NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Op, Vector,
 };
@@ -440,17 +440,17 @@ where
     Mass: Op<M = M, V = M::V, T = M::T>,
     Root: Op<M = M, V = M::V, T = M::T>,
     Out: Op<M = M, V = M::V, T = M::T>,
-    ParametrisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T>,
-    ParametrisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T>,
-    ParametrisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T>,
-    ParametrisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T>,
-    ParametrisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T>,
+    ParameterisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T>,
+    ParameterisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T>,
+    ParameterisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T>,
+    ParameterisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T>,
+    ParameterisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T>,
 {
-    type Rhs = ParametrisedOp<'a, Rhs>;
-    type Mass = ParametrisedOp<'a, Mass>;
-    type Root = ParametrisedOp<'a, Root>;
-    type Init = ParametrisedOp<'a, Init>;
-    type Out = ParametrisedOp<'a, Out>;
+    type Rhs = ParameterisedOp<'a, Rhs>;
+    type Mass = ParameterisedOp<'a, Mass>;
+    type Root = ParameterisedOp<'a, Root>;
+    type Init = ParameterisedOp<'a, Init>;
+    type Out = ParameterisedOp<'a, Out>;
 }
 
 impl<M, Rhs, Init, Mass, Root, Out> OdeEquations
@@ -462,32 +462,32 @@ where
     Mass: Op<M = M, V = M::V, T = M::T>,
     Root: Op<M = M, V = M::V, T = M::T>,
     Out: Op<M = M, V = M::V, T = M::T>,
-    for<'a> ParametrisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T>,
-    for<'a> ParametrisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T>,
-    for<'a> ParametrisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T>,
-    for<'a> ParametrisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T>,
-    for<'a> ParametrisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T>,
+    for<'a> ParameterisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T>,
+    for<'a> ParameterisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T>,
+    for<'a> ParameterisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T>,
+    for<'a> ParameterisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T>,
+    for<'a> ParameterisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T>,
 {
-    fn rhs(&self) -> ParametrisedOp<'_, Rhs> {
-        ParametrisedOp::new(&self.rhs, self.params())
+    fn rhs(&self) -> ParameterisedOp<'_, Rhs> {
+        ParameterisedOp::new(&self.rhs, self.params())
     }
-    fn mass(&self) -> Option<ParametrisedOp<'_, Mass>> {
+    fn mass(&self) -> Option<ParameterisedOp<'_, Mass>> {
         self.mass
             .as_ref()
-            .map(|mass| ParametrisedOp::new(mass, self.params()))
+            .map(|mass| ParameterisedOp::new(mass, self.params()))
     }
-    fn root(&self) -> Option<ParametrisedOp<'_, Root>> {
+    fn root(&self) -> Option<ParameterisedOp<'_, Root>> {
         self.root
             .as_ref()
-            .map(|root| ParametrisedOp::new(root, self.params()))
+            .map(|root| ParameterisedOp::new(root, self.params()))
     }
-    fn init(&self) -> ParametrisedOp<'_, Init> {
-        ParametrisedOp::new(&self.init, self.params())
+    fn init(&self) -> ParameterisedOp<'_, Init> {
+        ParameterisedOp::new(&self.init, self.params())
     }
-    fn out(&self) -> Option<ParametrisedOp<'_, Out>> {
+    fn out(&self) -> Option<ParameterisedOp<'_, Out>> {
         self.out
             .as_ref()
-            .map(|out| ParametrisedOp::new(out, self.params()))
+            .map(|out| ParameterisedOp::new(out, self.params()))
     }
     fn set_params(&mut self, p: &Self::V) {
         self.params_mut().copy_from(p);

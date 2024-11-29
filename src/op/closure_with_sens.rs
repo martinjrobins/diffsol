@@ -5,7 +5,7 @@ use crate::{
     Matrix, MatrixSparsity, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens, Op, Vector,
 };
 
-use super::{BuilderOp, OpStatistics, ParametrisedOp};
+use super::{BuilderOp, OpStatistics, ParameterisedOp};
 
 pub struct ClosureWithSens<M, F, G, H>
 where
@@ -55,7 +55,7 @@ where
     }
 
     pub fn calculate_jacobian_sparsity(&mut self, y0: &M::V, t0: M::T, p: &M::V) {
-        let op = ParametrisedOp { op: self, p };
+        let op = ParameterisedOp { op: self, p };
         let non_zeros = find_jacobian_non_zeros(&op, y0, t0);
         self.sparsity = Some(
             MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
@@ -67,7 +67,7 @@ where
         ));
     }
     pub fn calculate_sens_sparsity(&mut self, y0: &M::V, t0: M::T, p: &M::V) {
-        let op = ParametrisedOp { op: self, p };
+        let op = ParameterisedOp { op: self, p };
         let non_zeros = find_sens_non_zeros(&op, y0, t0);
         let nparams = p.len();
         self.sens_sparsity = Some(
@@ -125,7 +125,7 @@ where
     }
 }
 
-impl<'a, M, F, G, H> NonLinearOp for ParametrisedOp<'a, ClosureWithSens<M, F, G, H>>
+impl<'a, M, F, G, H> NonLinearOp for ParameterisedOp<'a, ClosureWithSens<M, F, G, H>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -138,7 +138,7 @@ where
     }
 }
 
-impl<'a, M, F, G, H> NonLinearOpJacobian for ParametrisedOp<'a, ClosureWithSens<M, F, G, H>>
+impl<'a, M, F, G, H> NonLinearOpJacobian for ParameterisedOp<'a, ClosureWithSens<M, F, G, H>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -162,7 +162,7 @@ where
     }
 }
 
-impl<'a, M, F, G, H> NonLinearOpSens for ParametrisedOp<'a, ClosureWithSens<M, F, G, H>>
+impl<'a, M, F, G, H> NonLinearOpSens for ParameterisedOp<'a, ClosureWithSens<M, F, G, H>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),

@@ -31,7 +31,7 @@ macro_rules! sdirk_solver_from_tableau {
         where
             Eqn: OdeEquationsImplicit,
         {
-            self.sdirk_state::<LS, _>(Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau())
+            self.sdirk_state::<LS, _>(&Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau())
         }
 
         pub fn $state_sens<LS: LinearSolver<Eqn::M>>(
@@ -40,7 +40,7 @@ macro_rules! sdirk_solver_from_tableau {
         where
             Eqn: OdeEquationsSens,
         {
-            self.sdirk_state_sens::<LS, _>(Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau())
+            self.sdirk_state_sens::<LS, _>(&Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau())
         }
 
         pub fn $method_solver<LS: LinearSolver<Eqn::M>>(
@@ -260,7 +260,7 @@ where
 
     pub fn sdirk_state<LS: LinearSolver<Eqn::M>, DM: DenseMatrix>(
         &self,
-        tableau: Tableau<DM>,
+        tableau: &Tableau<DM>,
     ) -> Result<SdirkState<Eqn::V>, DiffsolError>
     where
         Eqn: OdeEquationsImplicit,
@@ -270,7 +270,7 @@ where
 
     pub fn sdirk_state_sens<LS: LinearSolver<Eqn::M>, DM: DenseMatrix>(
         &self,
-        tableau: Tableau<DM>,
+        tableau: &Tableau<DM>,
     ) -> Result<SdirkState<Eqn::V>, DiffsolError>
     where
         Eqn: OdeEquationsSens,

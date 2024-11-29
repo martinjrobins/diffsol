@@ -210,11 +210,11 @@ pub use op::nonlinear_op::{
 pub use op::{
     closure::Closure, closure_with_adjoint::ClosureWithAdjoint, constant_closure::ConstantClosure,
     constant_closure_with_adjoint::ConstantClosureWithAdjoint, linear_closure::LinearClosure,
-    unit::UnitCallable, Op,
+    unit::UnitCallable, Op, BuilderOp, ParameterisedOp,
 };
 use op::{
     closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,
-    constant_closure_with_sens::ConstantClosureWithSens, init::InitOp, ParametrisedOp,
+    constant_closure_with_sens::ConstantClosureWithSens, init::InitOp,
 };
 use scalar::{IndexType, Scalar, Scale};
 pub use vector::DefaultDenseMatrix;

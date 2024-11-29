@@ -22,8 +22,7 @@ We also need the partial derivative of the initial state vector with respect to 
 
 \\[J_{y_0} v = 0.\\]
 
-
-We can then use the `OdeBuilder` struct to specify the sensitivity problem. The `build_ode_with_sens` method is used to create a new problem that includes the sensitivity equations.
+We can then use the `OdeBuilder` struct to specify the sensitivity problem. The `rhs_sens_implicit` and `init_sens` methods are used to create a new problem that includes the sensitivity equations.
 
 ```rust
 # fn main() {
@@ -31,16 +30,20 @@ use diffsol::OdeBuilder;
 use nalgebra::DVector;
 type M = nalgebra::DMatrix<f64>;
 
-let problem = OdeBuilder::new()
+let problem = OdeBuilder::<M>::new()
     .p(vec![1.0, 10.0])
-    .build_ode_with_sens::<M, _, _, _, _, _>(
+    .rhs_sens_implicit(
       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
       |x, p, _t, v, y| y[0] = v[0] * x[0] * (1.0 - x[0] / p[1]) 
         + v[1] * p[0] * x[0] * x[0] / (p[1] * p[1]),
+    )
+    .init_sens(
       |_p, _t| DVector::from_element(1, 0.1),
       |_p, _t, _v, y| y[0] = 0.0,
-    ).unwrap();
+    )
+    .build()
+    .unwrap();
 # }
 ```
 
@@ -54,22 +57,26 @@ Lets imagine we want to solve the sensitivity problem up to a time \\(t_o = 10\\
 # use diffsol::OdeBuilder;
 # use nalgebra::DVector;
 # type M = nalgebra::DMatrix<f64>;
-use diffsol::{OdeSolverMethod, OdeSolverState, Bdf};
+use diffsol::{OdeSolverMethod, NalgebraLU};
+type LS = NalgebraLU<f64>;
 
-# let problem = OdeBuilder::new()
+# let problem = OdeBuilder::<M>::new()
 #     .p(vec![1.0, 10.0])
-#     .build_ode_with_sens::<M, _, _, _, _, _>(
+#     .rhs_sens_implicit(
 #       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
 #       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-#       |x, p, _t, v, y| y[0] = v[0] * x[0] * (1.0 - x[0] / p[1]) + v[1] * p[0] * x[0] * x[0] / (p[1] * p[1]),
+#       |x, p, _t, v, y| y[0] = v[0] * x[0] * (1.0 - x[0] / p[1]) 
+#         + v[1] * p[0] * x[0] * x[0] / (p[1] * p[1]),
+#     )
+#     .init_sens(
 #       |_p, _t| DVector::from_element(1, 0.1),
 #       |_p, _t, _v, y| y[0] = 0.0,
-#     ).unwrap();
-let mut solver = Bdf::default();
-let state = OdeSolverState::new(&problem, &solver).unwrap();
-solver.set_problem(state, &problem);
+#     )
+#     .build()
+#     .unwrap();
+let mut solver = problem.bdf::<LS>().unwrap();
 let t_o = 10.0;
-while solver.state().unwrap().t < t_o {
+while solver.state().t < t_o {
     solver.step().unwrap();
 }
 # }
@@ -84,26 +91,30 @@ If we need the sensitivity at the current internal time step, we can get this fr
 # use diffsol::OdeBuilder;
 # use nalgebra::DVector;
 # type M = nalgebra::DMatrix<f64>;
-# use diffsol::{OdeSolverMethod, OdeSolverState, Bdf};
+# use diffsol::{OdeSolverMethod, OdeSolverState, NalgebraLU};
+# type LS = NalgebraLU<f64>;
 # 
-# let problem = OdeBuilder::new()
+# let problem = OdeBuilder::<M>::new()
 #     .p(vec![1.0, 10.0])
-#     .build_ode_with_sens::<M, _, _, _, _, _>(
+#     .rhs_sens_implicit(
 #       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
 #       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-#       |x, p, _t, v, y| y[0] = v[0] * x[0] * (1.0 - x[0] / p[1]) + v[1] * p[0] * x[0] * x[0] / (p[1] * p[1]),
+#       |x, p, _t, v, y| y[0] = v[0] * x[0] * (1.0 - x[0] / p[1]) 
+#         + v[1] * p[0] * x[0] * x[0] / (p[1] * p[1]),
+#     )
+#     .init_sens(
 #       |_p, _t| DVector::from_element(1, 0.1),
 #       |_p, _t, _v, y| y[0] = 0.0,
-#     ).unwrap();
-# let mut solver = Bdf::default();
-# let state = OdeSolverState::new(&problem, &solver).unwrap();
-# solver.set_problem(state, &problem);
+#     )
+#     .build()
+#     .unwrap();
+# let mut solver = problem.bdf::<LS>().unwrap();
 # let t_o = 10.0;
-# while solver.state().unwrap().t < t_o {
+# while solver.state().t < t_o {
 #     solver.step().unwrap();
 # }
 let sens_at_t_o = solver.interpolate_sens(t_o).unwrap();
-let sens_at_internal_step = &solver.state().as_ref().unwrap().s;
+let sens_at_internal_step = &solver.state().s;
 # }
 ```
 

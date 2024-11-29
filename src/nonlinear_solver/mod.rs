@@ -68,7 +68,7 @@ pub mod tests {
     use crate::{
         linear_solver::nalgebra::lu::LU,
         matrix::MatrixCommon,
-        op::{closure::Closure, ParametrisedOp},
+        op::{closure::Closure, ParameterisedOp},
         scale, DenseMatrix, Vector,
     };
 
@@ -144,7 +144,7 @@ pub mod tests {
         let lu = LU::default();
         let (op, rtol, atol, soln) = get_square_problem::<MCpu>();
         let p = nalgebra::DVector::zeros(0);
-        let op = ParametrisedOp::new(&op, &p);
+        let op = ParameterisedOp::new(&op, &p);
         let s = NewtonNonlinearSolver::new(lu);
         test_nonlinear_solver(s, op, rtol, &atol, soln);
     }

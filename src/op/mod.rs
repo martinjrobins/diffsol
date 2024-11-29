@@ -51,12 +51,12 @@ pub trait Op {
 }
 
 /// A wrapper for an operator that parameterises it with a parameter vector.
-pub struct ParametrisedOp<'a, C: Op> {
-    op: &'a C,
-    p: &'a C::V,
+pub struct ParameterisedOp<'a, C: Op> {
+    pub op: &'a C,
+    pub p: &'a C::V,
 }
 
-impl<'a, C: Op> ParametrisedOp<'a, C> {
+impl<'a, C: Op> ParameterisedOp<'a, C> {
     pub fn new(op: &'a C, p: &'a C::V) -> Self {
         Self { op, p }
     }
@@ -69,7 +69,7 @@ pub trait BuilderOp: Op {
     fn calculate_sparsity(&mut self, y0: &Self::V, t0: Self::T, p: &Self::V);
 }
 
-impl<'a, C: Op> Op for ParametrisedOp<'a, C> {
+impl<'a, C: Op> Op for ParameterisedOp<'a, C> {
     type V = C::V;
     type T = C::T;
     type M = C::M;

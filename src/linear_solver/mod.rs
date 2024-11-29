@@ -61,7 +61,7 @@ impl<V> LinearSolveSolution<V> {
 pub mod tests {
     use crate::{
         linear_solver::{FaerLU, NalgebraLU},
-        op::{closure::Closure, ParametrisedOp},
+        op::{closure::Closure, ParameterisedOp},
         scalar::scale,
         vector::VectorRef,
         LinearSolver, Matrix, NonLinearOpJacobian, Vector,
@@ -131,7 +131,7 @@ pub mod tests {
     fn test_lu_nalgebra() {
         let (op, rtol, atol, solns) = linear_problem::<MCpuNalgebra>();
         let p = nalgebra::DVector::zeros(0);
-        let op = ParametrisedOp::new(&op, &p);
+        let op = ParameterisedOp::new(&op, &p);
         let s = NalgebraLU::default();
         test_linear_solver(s, op, rtol, &atol, solns);
     }
@@ -139,7 +139,7 @@ pub mod tests {
     fn test_lu_faer() {
         let (op, rtol, atol, solns) = linear_problem::<MCpuFaer>();
         let p = faer::Col::zeros(0);
-        let op = ParametrisedOp::new(&op, &p);
+        let op = ParameterisedOp::new(&op, &p);
         let s = FaerLU::default();
         test_linear_solver(s, op, rtol, &atol, solns);
     }

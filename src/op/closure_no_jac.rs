@@ -2,7 +2,7 @@ use std::cell::RefCell;
 
 use crate::{Matrix, NonLinearOp, Op};
 
-use super::{BuilderOp, OpStatistics, ParametrisedOp};
+use super::{BuilderOp, OpStatistics, ParameterisedOp};
 
 pub struct ClosureNoJac<M, F>
 where
@@ -75,7 +75,7 @@ where
     }
 }
 
-impl<'a, M, F> NonLinearOp for ParametrisedOp<'a, ClosureNoJac<M, F>>
+impl<'a, M, F> NonLinearOp for ParameterisedOp<'a, ClosureNoJac<M, F>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),

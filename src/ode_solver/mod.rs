@@ -28,7 +28,7 @@ mod tests {
     use super::*;
     use crate::matrix::Matrix;
     use crate::op::unit::UnitCallable;
-    use crate::op::ParametrisedOp;
+    use crate::op::ParameterisedOp;
     use crate::{
         op::OpStatistics, AdjointOdeSolverMethod, CraneliftModule, NonLinearOpJacobian, OdeBuilder,
         OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsRef, OdeSolverMethod,
@@ -320,10 +320,10 @@ mod tests {
 
     impl<'a, M: Matrix> OdeEquationsRef<'a> for TestEqn<M> {
         type Rhs = &'a TestEqnRhs<M>;
-        type Mass = ParametrisedOp<'a, UnitCallable<M>>;
-        type Root = ParametrisedOp<'a, UnitCallable<M>>;
+        type Mass = ParameterisedOp<'a, UnitCallable<M>>;
+        type Root = ParameterisedOp<'a, UnitCallable<M>>;
         type Init = &'a TestEqnInit<M>;
-        type Out = ParametrisedOp<'a, UnitCallable<M>>;
+        type Out = ParameterisedOp<'a, UnitCallable<M>>;
     }
 
     impl<M: Matrix> OdeEquations for TestEqn<M> {

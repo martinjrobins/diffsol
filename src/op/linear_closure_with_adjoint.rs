@@ -5,7 +5,7 @@ use crate::{
     matrix::sparsity::MatrixSparsity, LinearOp, LinearOpTranspose, Matrix, Op,
 };
 
-use super::{BuilderOp, OpStatistics, ParametrisedOp};
+use super::{BuilderOp, OpStatistics, ParameterisedOp};
 
 pub struct LinearClosureWithAdjoint<M, F, G>
 where
@@ -47,7 +47,7 @@ where
     }
 
     pub fn calculate_sparsity(&mut self, t0: M::T, p: &M::V) {
-        let op = ParametrisedOp { op: self, p };
+        let op = ParameterisedOp { op: self, p };
         let non_zeros = find_matrix_non_zeros(&op, t0);
         self.sparsity = Some(
             MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
@@ -59,7 +59,7 @@ where
         ));
     }
     pub fn calculate_adjoint_sparsity(&mut self, t0: M::T, p: &M::V) {
-        let op = ParametrisedOp { op: self, p };
+        let op = ParameterisedOp { op: self, p };
         let non_zeros = find_transpose_non_zeros(&op, t0);
         self.sparsity_adjoint = Some(
             MatrixSparsity::try_from_indices(self.nstates, self.nout, non_zeros.clone())
@@ -117,7 +117,7 @@ where
     }
 }
 
-impl<'a, M, F, G> LinearOp for ParametrisedOp<'a, LinearClosureWithAdjoint<M, F, G>>
+impl<'a, M, F, G> LinearOp for ParameterisedOp<'a, LinearClosureWithAdjoint<M, F, G>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
@@ -141,7 +141,7 @@ where
     }
 }
 
-impl<'a, M, F, G> LinearOpTranspose for ParametrisedOp<'a, LinearClosureWithAdjoint<M, F, G>>
+impl<'a, M, F, G> LinearOpTranspose for ParameterisedOp<'a, LinearClosureWithAdjoint<M, F, G>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),

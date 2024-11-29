@@ -29,13 +29,14 @@ We can solve this system of ODEs using DiffSol with the following code:
 # fn main() {
 # use std::fs;
 use diffsol::{
-    DiffSl, CraneliftModule, OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod
+    DiffSl, CraneliftModule, OdeBuilder, OdeSolverMethod
 };
 use plotly::{
     Plot, Scatter, common::Mode, layout::Layout, layout::Axis
 };
 type M = nalgebra::DMatrix<f64>;
 type CG = CraneliftModule;
+type LS = diffsol::NalgebraLU<f64>;
         
 let eqn = DiffSl::<M, CG>::compile("
     k { 1.0 } m { 1.0 } c { 0.1 }
@@ -48,11 +49,10 @@ let eqn = DiffSl::<M, CG>::compile("
         -k/m * x - c/m * v,
     }
 ").unwrap();
-let problem = OdeBuilder::new()
+let problem = OdeBuilder::<M>::new()
     .build_from_eqn(eqn).unwrap();
-let mut solver = Bdf::default();
-let state = OdeSolverState::new(&problem, &solver).unwrap();
-let (ys, ts) = solver.solve(&problem, state, 40.0).unwrap();
+let mut solver = problem.bdf::<LS>().unwrap();
+let (ys, ts) = solver.solve(40.0).unwrap();
 
 let x: Vec<_> = ys.row(0).into_iter().copied().collect();
 let time: Vec<_> = ts.into_iter().collect();

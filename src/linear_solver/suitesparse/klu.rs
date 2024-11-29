@@ -238,7 +238,7 @@ where
 mod tests {
     use crate::{
         linear_solver::tests::{linear_problem, test_linear_solver},
-        op::ParametrisedOp,
+        op::ParameterisedOp,
         SparseColMat,
     };
 
@@ -248,7 +248,7 @@ mod tests {
     fn test_klu() {
         let (op, rtol, atol, solns) = linear_problem::<SparseColMat<f64>>();
         let p = faer::Col::zeros(0);
-        let op = ParametrisedOp::new(&op, &p);
+        let op = ParameterisedOp::new(&op, &p);
         let s = KLU::default();
         test_linear_solver(s, op, rtol, &atol, solns);
     }

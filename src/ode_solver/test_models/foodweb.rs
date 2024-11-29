@@ -2,7 +2,7 @@ use crate::{
     find_jacobian_non_zeros, find_matrix_non_zeros, ode_solver::problem::OdeSolverSolution,
     ConstantOp, JacobianColoring, LinearOp, Matrix, MatrixSparsity, NonLinearOp,
     NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsRef, OdeSolverProblem, Op,
-    ParametrisedOp, UnitCallable, Vector,
+    ParameterisedOp, UnitCallable, Vector,
 };
 use num_traits::Zero;
 
@@ -788,7 +788,7 @@ where
     type Init = FoodWebInit<'a, M, NX>;
     type Rhs = FoodWebRhs<'a, M, NX>;
     type Mass = FoodWebMass<'a, M, NX>;
-    type Root = ParametrisedOp<'a, UnitCallable<M>>;
+    type Root = ParameterisedOp<'a, UnitCallable<M>>;
     type Out = FoodWebOut<'a, M, NX>;
 }
 

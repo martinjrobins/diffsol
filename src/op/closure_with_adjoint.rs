@@ -9,7 +9,7 @@ use crate::{
     NonLinearOpSensAdjoint, Op, Vector,
 };
 
-use super::{BuilderOp, OpStatistics, ParametrisedOp};
+use super::{BuilderOp, OpStatistics, ParameterisedOp};
 
 #[derive(Clone)]
 pub struct ClosureWithAdjoint<M, F, G, H, I>
@@ -72,7 +72,7 @@ where
     }
 
     pub fn calculate_jacobian_sparsity(&mut self, y0: &M::V, t0: M::T, p: &M::V) {
-        let op = ParametrisedOp { op: self, p };
+        let op = ParameterisedOp { op: self, p };
         let non_zeros = find_jacobian_non_zeros(&op, y0, t0);
         self.sparsity = Some(
             MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
@@ -85,7 +85,7 @@ where
     }
 
     pub fn calculate_adjoint_sparsity(&mut self, y0: &M::V, t0: M::T, p: &M::V) {
-        let op = ParametrisedOp { op: self, p };
+        let op = ParameterisedOp { op: self, p };
         let non_zeros = find_adjoint_non_zeros(&op, y0, t0);
         self.sparsity_adjoint = Some(
             MatrixSparsity::try_from_indices(self.nstates, self.nout, non_zeros.clone())
@@ -98,7 +98,7 @@ where
     }
 
     pub fn calculate_sens_adjoint_sparsity(&mut self, y0: &M::V, t0: M::T, p: &M::V) {
-        let op = ParametrisedOp { op: self, p };
+        let op = ParameterisedOp { op: self, p };
         let non_zeros = find_sens_adjoint_non_zeros(&op, y0, t0);
         let nparams = p.len();
         self.sens_sparsity = Some(
@@ -161,7 +161,7 @@ where
     }
 }
 
-impl<'a, M, F, G, H, I> NonLinearOp for ParametrisedOp<'a, ClosureWithAdjoint<M, F, G, H, I>>
+impl<'a, M, F, G, H, I> NonLinearOp for ParameterisedOp<'a, ClosureWithAdjoint<M, F, G, H, I>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -176,7 +176,7 @@ where
 }
 
 impl<'a, M, F, G, H, I> NonLinearOpJacobian
-    for ParametrisedOp<'a, ClosureWithAdjoint<M, F, G, H, I>>
+    for ParameterisedOp<'a, ClosureWithAdjoint<M, F, G, H, I>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -201,7 +201,7 @@ where
     }
 }
 
-impl<'a, M, F, G, H, I> NonLinearOpAdjoint for ParametrisedOp<'a, ClosureWithAdjoint<M, F, G, H, I>>
+impl<'a, M, F, G, H, I> NonLinearOpAdjoint for ParameterisedOp<'a, ClosureWithAdjoint<M, F, G, H, I>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -227,7 +227,7 @@ where
 }
 
 impl<'a, M, F, G, H, I> NonLinearOpSensAdjoint
-    for ParametrisedOp<'a, ClosureWithAdjoint<M, F, G, H, I>>
+    for ParameterisedOp<'a, ClosureWithAdjoint<M, F, G, H, I>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),

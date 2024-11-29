@@ -5,7 +5,7 @@ use crate::{
     Matrix, Op,
 };
 
-use super::{BuilderOp, OpStatistics, ParametrisedOp};
+use super::{BuilderOp, OpStatistics, ParameterisedOp};
 
 pub struct LinearClosure<M, F>
 where
@@ -39,7 +39,7 @@ where
     }
 
     pub fn calculate_sparsity(&mut self, t0: M::T, p: &M::V) {
-        let op = ParametrisedOp { op: self, p };
+        let op = ParameterisedOp { op: self, p };
         let non_zeros = find_matrix_non_zeros(&op, t0);
         self.sparsity = Some(
             MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
@@ -94,7 +94,7 @@ where
     }
 }
 
-impl<'a, M, F> LinearOp for ParametrisedOp<'a, LinearClosure<M, F>>
+impl<'a, M, F> LinearOp for ParameterisedOp<'a, LinearClosure<M, F>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),

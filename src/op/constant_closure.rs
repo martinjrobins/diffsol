@@ -1,4 +1,4 @@
-use super::{BuilderOp, ParametrisedOp};
+use super::{BuilderOp, ParameterisedOp};
 use crate::{ConstantOp, Matrix, Op, Vector};
 
 pub struct ConstantClosure<M, I>
@@ -65,7 +65,7 @@ where
     }
 }
 
-impl<'a, M, I> ConstantOp for ParametrisedOp<'a, ConstantClosure<M, I>>
+impl<'a, M, I> ConstantOp for ParameterisedOp<'a, ConstantClosure<M, I>>
 where
     M: Matrix,
     I: Fn(&M::V, M::T) -> M::V,

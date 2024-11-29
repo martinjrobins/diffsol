@@ -6,7 +6,7 @@ use crate::{
     op::{linear_closure_with_adjoint::LinearClosureWithAdjoint, BuilderOp},
     Closure, ClosureNoJac, ClosureWithAdjoint, ClosureWithSens, ConstantClosure,
     ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp, LinearClosure, LinearOp,
-    Matrix, NonLinearOp, OdeEquations, OdeSolverProblem, Op, ParametrisedOp, UnitCallable, Vector,
+    Matrix, NonLinearOp, OdeEquations, OdeSolverProblem, Op, ParameterisedOp, UnitCallable, Vector,
 };
 
 use super::equations::OdeSolverEquations;
@@ -250,6 +250,30 @@ where
         }
     }
 
+    pub fn rhs_custom<RhsCustom: BuilderOp>(self, rhs: RhsCustom) -> OdeBuilder<M, RhsCustom, Init, Mass, Root, Out> {
+        OdeBuilder::<M, RhsCustom, Init, Mass, Root, Out> {
+            rhs: Some(rhs),
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+        }
+    }
+
     /// Set the initial condition of the ODE.
     ///
     /// # Arguments
@@ -302,6 +326,30 @@ where
             init: Some(ConstantClosureWithSens::new(
                 init, init_sens, nstates, nstates,
             )),
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+        }
+    }
+
+    pub fn init_custom<InitCustom: BuilderOp>(self, init: InitCustom) -> OdeBuilder<M, Rhs, InitCustom, Mass, Root, Out> {
+        OdeBuilder::<M, Rhs, InitCustom, Mass, Root, Out> {
+            rhs: self.rhs,
+            init: Some(init),
             mass: self.mass,
             root: self.root,
             out: self.out,
@@ -445,6 +493,30 @@ where
         }
     }
 
+    pub fn mass_custom<MassCustom: BuilderOp>(self, mass: MassCustom) -> OdeBuilder<M, Rhs, Init, MassCustom, Root, Out> {
+        OdeBuilder::<M, Rhs, Init, MassCustom, Root, Out> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: Some(mass),
+            root: self.root,
+            out: self.out,
+
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+        }
+    }
+
     /// Set a root equation for the ODE.
     ///
     /// # Arguments
@@ -464,6 +536,30 @@ where
             init: self.init,
             mass: self.mass,
             root: Some(ClosureNoJac::new(root, nstates, nroots, nroots)),
+            out: self.out,
+
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+        }
+    }
+
+    pub fn root_custom<RootCustom: BuilderOp>(self, root: RootCustom) -> OdeBuilder<M, Rhs, Init, Mass, RootCustom, Out> {
+        OdeBuilder::<M, Rhs, Init, Mass, RootCustom, Out> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: Some(root),
             out: self.out,
 
             t0: self.t0,
@@ -545,6 +641,30 @@ where
                 nout,
                 nstates,
             )),
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+        }
+    }
+
+    pub fn out_custom<OutCustom: BuilderOp>(self, out: OutCustom) -> OdeBuilder<M, Rhs, Init, Mass, Root, OutCustom> {
+        OdeBuilder::<M, Rhs, Init, Mass, Root, OutCustom> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: Some(out),
+
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -743,11 +863,11 @@ where
         Mass: BuilderOp<V = M::V, T = M::T, M = M>,
         Root: BuilderOp<V = M::V, T = M::T, M = M>,
         Out: BuilderOp<V = M::V, T = M::T, M = M>,
-        for<'a> ParametrisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T>,
-        for<'a> ParametrisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T>,
-        for<'a> ParametrisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T>,
-        for<'a> ParametrisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T>,
-        for<'a> ParametrisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T>,
+        for<'a> ParameterisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T>,
+        for<'a> ParameterisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T>,
+        for<'a> ParameterisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T>,
+        for<'a> ParameterisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T>,
+        for<'a> ParameterisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T>,
     {
         let p = Self::build_p(self.p);
         let nparams = p.len();
@@ -761,7 +881,7 @@ where
         let mut root = self.root;
         let mut out = self.out;
 
-        let init_op = ParametrisedOp::new(&init, &p);
+        let init_op = ParameterisedOp::new(&init, &p);
         let y0 = init_op.call(self.t0);
         let nstates = y0.len();
 

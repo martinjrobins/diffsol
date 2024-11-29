@@ -1,6 +1,6 @@
 use crate::{ConstantOp, ConstantOpSens, Matrix, Op, Vector};
 
-use super::{BuilderOp, ParametrisedOp};
+use super::{BuilderOp, ParameterisedOp};
 
 pub struct ConstantClosureWithSens<M, I, J>
 where
@@ -72,7 +72,7 @@ where
     }
 }
 
-impl<'a, M, I, J> ConstantOp for ParametrisedOp<'a, ConstantClosureWithSens<M, I, J>>
+impl<'a, M, I, J> ConstantOp for ParameterisedOp<'a, ConstantClosureWithSens<M, I, J>>
 where
     M: Matrix,
     I: Fn(&M::V, M::T) -> M::V,
@@ -86,7 +86,7 @@ where
     }
 }
 
-impl<'a, M, I, J> ConstantOpSens for ParametrisedOp<'a, ConstantClosureWithSens<M, I, J>>
+impl<'a, M, I, J> ConstantOpSens for ParameterisedOp<'a, ConstantClosureWithSens<M, I, J>>
 where
     M: Matrix,
     I: Fn(&M::V, M::T) -> M::V,

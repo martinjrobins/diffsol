@@ -31,6 +31,9 @@ impl Op for MyMass {
   fn nout(&self) -> usize {
       1
   }
+  fn nparams(&self) -> usize {
+      0
+  }
 }
 
 impl LinearOp for MyMass {
@@ -41,22 +44,4 @@ impl LinearOp for MyMass {
 # }
 ```
 
-Alternatively, we can use the [`LinearClosure`](https://docs.rs/diffsol/latest/diffsol/op/linear_closure/struct.LinearClosure.html) struct to implement the `LinearOp` trait for us.
-
-```rust
-# fn main() {
-# use std::rc::Rc;
-use diffsol::LinearClosure;
-
-# type T = f64;
-# type V = nalgebra::DVector<T>;
-# type M = nalgebra::DMatrix<T>;
-#
-# let p = Rc::new(V::from_vec(vec![1.0, 10.0]));
-let mass_fn = |v: &V, _p: &V, _t: T, beta: T, y: &mut V| {
-    y[0] = v[0] + beta * y[0];
-};
-let mass = Rc::new(LinearClosure::<M, _>::new(mass_fn, 1, 1, p.clone()));
-# }
-```
 

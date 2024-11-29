@@ -65,12 +65,13 @@ Let's solve this system of ODEs using the DiffSol crate. We will use the [DiffSL
 # fn main() {
 # use std::fs;
 use diffsol::{
-    DiffSl, CraneliftModule, OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod
+    DiffSl, CraneliftModule, OdeBuilder, OdeSolverMethod
 };
 use plotly::{
     Plot, Scatter, common::Mode, layout::Layout, layout::Axis
 };
 type M = nalgebra::DMatrix<f64>;
+type LS = diffsol::NalgebraLU<f64>;
 type CG = CraneliftModule;
         
 let eqn = DiffSl::<M, CG>::compile("
@@ -84,11 +85,10 @@ let eqn = DiffSl::<M, CG>::compile("
         c * y1 * y2 - d * y2,
     }
 ").unwrap();
-let problem = OdeBuilder::new()
+let problem = OdeBuilder::<M>::new()
     .build_from_eqn(eqn).unwrap();
-let mut solver = Bdf::default();
-let state = OdeSolverState::new(&problem, &solver).unwrap();
-let (ys, ts) = solver.solve(&problem, state, 40.0).unwrap();
+let mut solver = problem.bdf::<LS>().unwrap();
+let (ys, ts) = solver.solve(40.0).unwrap();
 
 let prey: Vec<_> = ys.row(0).into_iter().copied().collect();
 let predator: Vec<_> = ys.row(1).into_iter().copied().collect();
@@ -125,12 +125,13 @@ so we can solve this system for different values of \\(y_0\\) and plot the phase
 # fn main() {
 # use std::fs;
 use diffsol::{
-    DiffSl, CraneliftModule, OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod
+    DiffSl, CraneliftModule, OdeBuilder, OdeSolverMethod, OdeEquations
 };
 use plotly::{
     Plot, Scatter, common::Mode, layout::Layout, layout::Axis
 };
 type M = nalgebra::DMatrix<f64>;
+type LS = diffsol::NalgebraLU<f64>;
 type CG = CraneliftModule;
         
 let eqn = DiffSl::<M, CG>::compile("
@@ -147,15 +148,15 @@ let eqn = DiffSl::<M, CG>::compile("
     }
 ").unwrap();
 
-let mut problem = OdeBuilder::new().p([1.0]).build_from_eqn(eqn).unwrap();
-let mut solver = Bdf::default();
+let mut problem = OdeBuilder::<M>::new().p([1.0]).build_from_eqn(eqn).unwrap();
 
 let mut plot = Plot::new();
 for y0 in (1..6).map(f64::from) {
-    problem.set_params(nalgebra::DVector::from_element(1, y0)).unwrap();
+    let p = nalgebra::DVector::from_element(1, y0);
+    problem.eqn_mut().set_params(&p);
     
-    let state = OdeSolverState::new(&problem, &solver).unwrap();
-    let (ys, _ts) = solver.solve(&problem, state, 40.0).unwrap();
+    let mut solver = problem.bdf::<LS>().unwrap();
+    let (ys, _ts) = solver.solve(40.0).unwrap();
 
     let prey: Vec<_> = ys.row(0).into_iter().copied().collect();
     let predator: Vec<_> = ys.row(1).into_iter().copied().collect();
@@ -163,9 +164,6 @@ for y0 in (1..6).map(f64::from) {
     let phase = Scatter::new(prey, predator)
         .mode(Mode::Lines).name(format!("y0 = {}", y0));
     plot.add_trace(phase);
-
-    // release problem and state to set new parameters in the next iteration
-    solver.take_state().unwrap();
 }
 
 let layout = Layout::new()

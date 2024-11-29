@@ -61,14 +61,14 @@ In code, the bouncing ball problem can be solved using DiffSol as follows:
 # fn main() {
 # use std::fs;
 use diffsol::{
-    DiffSl, CraneliftModule, OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod,
-    OdeSolverStopReason,
+    DiffSl, CraneliftModule, OdeBuilder, OdeSolverMethod, OdeSolverStopReason,
 };
 use plotly::{
     Plot, Scatter, common::Mode, layout::Layout, layout::Axis
 };
 type M = nalgebra::DMatrix<f64>;
 type CG = CraneliftModule;
+type LS = diffsol::NalgebraLU<f64>;
         
 let eqn = DiffSl::<M, CG>::compile("
     g { 9.81 } h { 10.0 }
@@ -86,10 +86,8 @@ let eqn = DiffSl::<M, CG>::compile("
 ").unwrap();
 
 let e = 0.8;
-let problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
-let mut solver = Bdf::default();
-let state = OdeSolverState::new(&problem, &solver).unwrap();
-solver.set_problem(state, &problem).unwrap();
+let problem = OdeBuilder::<M>::new().build_from_eqn(eqn).unwrap();
+let mut solver = problem.bdf::<LS>().unwrap();
 
 let mut x = Vec::new();
 let mut v = Vec::new();
@@ -97,8 +95,8 @@ let mut t = Vec::new();
 let final_time = 10.0;
 
 // save the initial state
-x.push(solver.state().unwrap().y[0]);
-v.push(solver.state().unwrap().y[1]);
+x.push(solver.state().y[0]);
+v.push(solver.state().y[1]);
 t.push(0.0);
 
 // solve until the final time is reached
@@ -117,16 +115,16 @@ loop {
             y[0] = y[0].max(f64::EPSILON);
 
             // set the state to the updated state
-            solver.state_mut().unwrap().y.copy_from(&y);
-            solver.state_mut().unwrap().dy[0] = y[1];
-            *solver.state_mut().unwrap().t = t;
+            solver.state_mut().y.copy_from(&y);
+            solver.state_mut().dy[0] = y[1];
+            *solver.state_mut().t = t;
         },
         Ok(OdeSolverStopReason::TstopReached) => break,
         Err(_) => panic!("unexpected solver error"),
     }
-    x.push(solver.state().unwrap().y[0]);
-    v.push(solver.state().unwrap().y[1]);
-    t.push(solver.state().unwrap().t);
+    x.push(solver.state().y[0]);
+    v.push(solver.state().y[1]);
+    t.push(solver.state().t);
 }
 let mut plot = Plot::new();
 let x = Scatter::new(t.clone(), x).mode(Mode::Lines).name("x");

@@ -80,14 +80,14 @@ Let's now solve this system of ODEs using DiffSol.
 # fn main() {
 # use std::fs;
 use diffsol::{
-    DiffSl, CraneliftModule, OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod,
-    OdeSolverStopReason,
+    DiffSl, CraneliftModule, OdeBuilder, OdeSolverMethod, OdeSolverStopReason,
 };
 use plotly::{
     Plot, Scatter, common::Mode, layout::Layout, layout::Axis
 };
 type M = nalgebra::DMatrix<f64>;
 type CG = CraneliftModule;
+type LS = diffsol::NalgebraLU<f64>;
         
 let eqn = DiffSl::<M, CG>::compile("
     Vc { 1000.0 } Vp1 { 1000.0 } CL { 100.0 } Qp1 { 50.0 }
@@ -101,20 +101,18 @@ let eqn = DiffSl::<M, CG>::compile("
     }
 ").unwrap();
 
-let problem = OdeBuilder::new().build_from_eqn(eqn).unwrap();
-let mut solver = Bdf::default();
+let problem = OdeBuilder::<M>::new().build_from_eqn(eqn).unwrap();
+let mut solver = problem.bdf::<LS>().unwrap();
 let doses = vec![(0.0, 1000.0), (6.0, 1000.0), (12.0, 1000.0), (18.0, 1000.0)];
-let state = OdeSolverState::new(&problem, &solver).unwrap();
-solver.set_problem(state, &problem).unwrap();
 
 let mut q_c = Vec::new();
 let mut q_p1 = Vec::new();
 let mut time = Vec::new();
 
 // apply the first dose and save the initial state
-solver.state_mut().unwrap().y[0] = doses[0].1;
-q_c.push(solver.state().unwrap().y[0]);
-q_p1.push(solver.state().unwrap().y[1]);
+solver.state_mut().y[0] = doses[0].1;
+q_c.push(solver.state().y[0]);
+q_p1.push(solver.state().y[1]);
 time.push(0.0);
 
 // solve and apply the remaining doses
@@ -122,16 +120,16 @@ for (t, dose) in doses.into_iter().skip(1) {
     solver.set_stop_time(t).unwrap();
     loop {
         let ret = solver.step();
-        q_c.push(solver.state().unwrap().y[0]);
-        q_p1.push(solver.state().unwrap().y[1]);
-        time.push(solver.state().unwrap().t);
+        q_c.push(solver.state().y[0]);
+        q_p1.push(solver.state().y[1]);
+        time.push(solver.state().t);
         match ret {
             Ok(OdeSolverStopReason::InternalTimestep) => continue,
             Ok(OdeSolverStopReason::TstopReached) => break,
             _ => panic!("unexpected solver error"),
         }
     }
-    solver.state_mut().unwrap().y[0] += dose;
+    solver.state_mut().y[0] += dose;
 }
 let mut plot = Plot::new();
 let q_c = Scatter::new(time.clone(), q_c).mode(Mode::Lines).name("q_c");
