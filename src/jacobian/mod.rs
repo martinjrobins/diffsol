@@ -235,6 +235,7 @@ mod tests {
     use num_traits::{One, Zero};
     use std::ops::MulAssign;
 
+    #[allow(clippy::type_complexity)]
     fn helper_triplets2op_nonlinear<'a, M: Matrix + 'a>(
         triplets: &'a [(usize, usize, M::T)],
         p: &'a M::V,
@@ -271,6 +272,7 @@ mod tests {
         ret
     }
 
+    #[allow(clippy::type_complexity)]
     fn helper_triplets2op_linear<'a, M: Matrix + 'a>(
         triplets: &'a [(usize, usize, M::T)],
         p: &'a M::V,

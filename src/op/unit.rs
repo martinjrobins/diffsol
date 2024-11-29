@@ -59,49 +59,49 @@ impl<M: Matrix> BuilderOp for UnitCallable<M> {
     }
 }
 
-impl<'a, M: Matrix> LinearOp for ParameterisedOp<'a, UnitCallable<M>> {
+impl<M: Matrix> LinearOp for ParameterisedOp<'_, UnitCallable<M>> {
     fn gemv_inplace(&self, x: &Self::V, _t: Self::T, beta: Self::T, y: &mut Self::V) {
         y.axpy(Self::T::one(), x, beta);
     }
 }
 
-impl<'a, M: Matrix> NonLinearOp for ParameterisedOp<'a, UnitCallable<M>> {
+impl<M: Matrix> NonLinearOp for ParameterisedOp<'_, UnitCallable<M>> {
     fn call_inplace(&self, x: &Self::V, _t: Self::T, y: &mut Self::V) {
         y.copy_from(x);
     }
 }
 
-impl<'a, M: Matrix> NonLinearOpJacobian for ParameterisedOp<'a, UnitCallable<M>> {
+impl<M: Matrix> NonLinearOpJacobian for ParameterisedOp<'_, UnitCallable<M>> {
     fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
         y.copy_from(v);
     }
 }
 
-impl<'a, M: Matrix> NonLinearOpAdjoint for ParameterisedOp<'a, UnitCallable<M>> {
+impl<M: Matrix> NonLinearOpAdjoint for ParameterisedOp<'_, UnitCallable<M>> {
     fn jac_transpose_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
         y.copy_from(v);
     }
 }
 
-impl<'a, M: Matrix> NonLinearOpSens for ParameterisedOp<'a, UnitCallable<M>> {
+impl<M: Matrix> NonLinearOpSens for ParameterisedOp<'_, UnitCallable<M>> {
     fn sens_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
         y.fill(Self::T::zero());
     }
 }
 
-impl<'a, M: Matrix> NonLinearOpSensAdjoint for ParameterisedOp<'a, UnitCallable<M>> {
+impl<M: Matrix> NonLinearOpSensAdjoint for ParameterisedOp<'_, UnitCallable<M>> {
     fn sens_transpose_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
         y.fill(Self::T::zero());
     }
 }
 
-impl<'a, M: Matrix> LinearOpSens for ParameterisedOp<'a, UnitCallable<M>> {
+impl<M: Matrix> LinearOpSens for ParameterisedOp<'_, UnitCallable<M>> {
     fn sens_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
         y.fill(Self::T::zero());
     }
 }
 
-impl<'a, M: Matrix> LinearOpTranspose for ParameterisedOp<'a, UnitCallable<M>> {
+impl<M: Matrix> LinearOpTranspose for ParameterisedOp<'_, UnitCallable<M>> {
     fn gemv_transpose_inplace(&self, x: &Self::V, _t: Self::T, beta: Self::T, y: &mut Self::V) {
         y.axpy(Self::T::one(), x, beta);
     }

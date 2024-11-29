@@ -70,7 +70,7 @@ impl<'a, Eqn: OdeEquationsImplicit> InitOp<'a, Eqn> {
     }
 }
 
-impl<'a, Eqn: OdeEquationsImplicit> Op for InitOp<'a, Eqn> {
+impl<Eqn: OdeEquationsImplicit> Op for InitOp<'_, Eqn> {
     type V = Eqn::V;
     type T = Eqn::T;
     type M = Eqn::M;
@@ -85,7 +85,7 @@ impl<'a, Eqn: OdeEquationsImplicit> Op for InitOp<'a, Eqn> {
     }
 }
 
-impl<'a, Eqn: OdeEquationsImplicit> NonLinearOp for InitOp<'a, Eqn> {
+impl<Eqn: OdeEquationsImplicit> NonLinearOp for InitOp<'_, Eqn> {
     // -M_u du + f(u, v)
     // g(t, u, v)
     fn call_inplace(&self, x: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
@@ -102,7 +102,7 @@ impl<'a, Eqn: OdeEquationsImplicit> NonLinearOp for InitOp<'a, Eqn> {
     }
 }
 
-impl<'a, Eqn: OdeEquationsImplicit> NonLinearOpJacobian for InitOp<'a, Eqn> {
+impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for InitOp<'_, Eqn> {
     // J v
     fn jac_mul_inplace(&self, _x: &Eqn::V, _t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
         self.jac.gemv(Eqn::T::one(), v, Eqn::T::one(), y);

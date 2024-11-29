@@ -72,7 +72,7 @@ where
     }
 }
 
-impl<'a, M, I, J> ConstantOp for ParameterisedOp<'a, ConstantClosureWithAdjoint<M, I, J>>
+impl<M, I, J> ConstantOp for ParameterisedOp<'_, ConstantClosureWithAdjoint<M, I, J>>
 where
     M: Matrix,
     I: Fn(&M::V, M::T) -> M::V,
@@ -86,7 +86,7 @@ where
     }
 }
 
-impl<'a, M, I, J> ConstantOpSensAdjoint for ParameterisedOp<'a, ConstantClosureWithAdjoint<M, I, J>>
+impl<M, I, J> ConstantOpSensAdjoint for ParameterisedOp<'_, ConstantClosureWithAdjoint<M, I, J>>
 where
     M: Matrix,
     I: Fn(&M::V, M::T) -> M::V,

@@ -188,7 +188,7 @@ pub trait OdeEquationsRef<'a, ImplicitBounds: Sealed = Bounds<&'a Self>>: Op {
     type Out: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
 }
 
-impl<'a, 'b, T: OdeEquationsRef<'a>> OdeEquationsRef<'a> for &'b T {
+impl<'a, T: OdeEquationsRef<'a>> OdeEquationsRef<'a> for &T {
     type Mass = <T as OdeEquationsRef<'a>>::Mass;
     type Rhs = <T as OdeEquationsRef<'a>>::Rhs;
     type Root = <T as OdeEquationsRef<'a>>::Root;

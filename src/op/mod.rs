@@ -69,7 +69,7 @@ pub trait BuilderOp: Op {
     fn calculate_sparsity(&mut self, y0: &Self::V, t0: Self::T, p: &Self::V);
 }
 
-impl<'a, C: Op> Op for ParameterisedOp<'a, C> {
+impl<C: Op> Op for ParameterisedOp<'_, C> {
     type V = C::V;
     type T = C::T;
     type M = C::M;

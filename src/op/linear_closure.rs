@@ -94,7 +94,7 @@ where
     }
 }
 
-impl<'a, M, F> LinearOp for ParameterisedOp<'a, LinearClosure<M, F>>
+impl<M, F> LinearOp for ParameterisedOp<'_, LinearClosure<M, F>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),

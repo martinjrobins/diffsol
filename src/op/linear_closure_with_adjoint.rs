@@ -117,7 +117,7 @@ where
     }
 }
 
-impl<'a, M, F, G> LinearOp for ParameterisedOp<'a, LinearClosureWithAdjoint<M, F, G>>
+impl<M, F, G> LinearOp for ParameterisedOp<'_, LinearClosureWithAdjoint<M, F, G>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
@@ -141,7 +141,7 @@ where
     }
 }
 
-impl<'a, M, F, G> LinearOpTranspose for ParameterisedOp<'a, LinearClosureWithAdjoint<M, F, G>>
+impl<M, F, G> LinearOpTranspose for ParameterisedOp<'_, LinearClosureWithAdjoint<M, F, G>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),

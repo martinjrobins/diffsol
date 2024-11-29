@@ -65,7 +65,7 @@ where
     }
 }
 
-impl<'a, M, I> ConstantOp for ParameterisedOp<'a, ConstantClosure<M, I>>
+impl<M, I> ConstantOp for ParameterisedOp<'_, ConstantClosure<M, I>>
 where
     M: Matrix,
     I: Fn(&M::V, M::T) -> M::V,

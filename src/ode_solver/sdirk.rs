@@ -118,7 +118,7 @@ pub struct Sdirk<
     jacobian_update: JacobianUpdate<Eqn::T>,
 }
 
-impl<'a, M, Eqn, LS, AugmentedEqn> Clone for Sdirk<'a, Eqn, LS, M, AugmentedEqn>
+impl<M, Eqn, LS, AugmentedEqn> Clone for Sdirk<'_, Eqn, LS, M, AugmentedEqn>
 where
     M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
     LS: LinearSolver<Eqn::M>,

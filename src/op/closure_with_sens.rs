@@ -125,7 +125,7 @@ where
     }
 }
 
-impl<'a, M, F, G, H> NonLinearOp for ParameterisedOp<'a, ClosureWithSens<M, F, G, H>>
+impl<M, F, G, H> NonLinearOp for ParameterisedOp<'_, ClosureWithSens<M, F, G, H>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -138,7 +138,7 @@ where
     }
 }
 
-impl<'a, M, F, G, H> NonLinearOpJacobian for ParameterisedOp<'a, ClosureWithSens<M, F, G, H>>
+impl<M, F, G, H> NonLinearOpJacobian for ParameterisedOp<'_, ClosureWithSens<M, F, G, H>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -162,7 +162,7 @@ where
     }
 }
 
-impl<'a, M, F, G, H> NonLinearOpSens for ParameterisedOp<'a, ClosureWithSens<M, F, G, H>>
+impl<M, F, G, H> NonLinearOpSens for ParameterisedOp<'_, ClosureWithSens<M, F, G, H>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),

@@ -143,7 +143,7 @@ pub struct Bdf<
     jacobian_update: JacobianUpdate<Eqn::T>,
 }
 
-impl<'a, M, Eqn, Nls, AugmentedEqn> Clone for Bdf<'a, Eqn, Nls, M, AugmentedEqn>
+impl<M, Eqn, Nls, AugmentedEqn> Clone for Bdf<'_, Eqn, Nls, M, AugmentedEqn>
 where
     Eqn: OdeEquationsImplicit,
     Nls: NonLinearSolver<Eqn::M>,

@@ -39,7 +39,7 @@ where
     }
 }
 
-impl<'a, Eqn> Op for SensInit<'a, Eqn>
+impl<Eqn> Op for SensInit<'_, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
@@ -58,7 +58,7 @@ where
     }
 }
 
-impl<'a, Eqn> ConstantOp for SensInit<'a, Eqn>
+impl<Eqn> ConstantOp for SensInit<'_, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
@@ -133,7 +133,7 @@ where
     }
 }
 
-impl<'a, Eqn> Op for SensRhs<'a, Eqn>
+impl<Eqn> Op for SensRhs<'_, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
@@ -152,7 +152,7 @@ where
     }
 }
 
-impl<'a, Eqn> NonLinearOp for SensRhs<'a, Eqn>
+impl<Eqn> NonLinearOp for SensRhs<'_, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
@@ -166,7 +166,7 @@ where
     }
 }
 
-impl<'a, Eqn> NonLinearOpJacobian for SensRhs<'a, Eqn>
+impl<Eqn> NonLinearOpJacobian for SensRhs<'_, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
@@ -205,7 +205,7 @@ where
     rtol: Option<Eqn::T>,
 }
 
-impl<'a, Eqn> Clone for SensEquations<'a, Eqn>
+impl<Eqn> Clone for SensEquations<'_, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
@@ -220,7 +220,7 @@ where
     }
 }
 
-impl<'a, Eqn> std::fmt::Debug for SensEquations<'a, Eqn>
+impl<Eqn> std::fmt::Debug for SensEquations<'_, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
@@ -249,7 +249,7 @@ where
     }
 }
 
-impl<'a, Eqn> Op for SensEquations<'a, Eqn>
+impl<Eqn> Op for SensEquations<'_, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
@@ -303,7 +303,7 @@ where
     }
 }
 
-impl<'a, Eqn: OdeEquationsSens> AugmentedOdeEquations<Eqn> for SensEquations<'a, Eqn> {
+impl<Eqn: OdeEquationsSens> AugmentedOdeEquations<Eqn> for SensEquations<'_, Eqn> {
     fn include_in_error_control(&self) -> bool {
         self.rtol.is_some() && self.atol.is_some()
     }

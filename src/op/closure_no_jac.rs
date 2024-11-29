@@ -75,7 +75,7 @@ where
     }
 }
 
-impl<'a, M, F> NonLinearOp for ParameterisedOp<'a, ClosureNoJac<M, F>>
+impl<M, F> NonLinearOp for ParameterisedOp<'_, ClosureNoJac<M, F>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),

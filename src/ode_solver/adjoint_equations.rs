@@ -84,7 +84,7 @@ where
     }
 }
 
-impl<'a, Eqn> Op for AdjointMass<'a, Eqn>
+impl<Eqn> Op for AdjointMass<'_, Eqn>
 where
     Eqn: OdeEquationsAdjoint,
 {
@@ -103,7 +103,7 @@ where
     }
 }
 
-impl<'a, Eqn> LinearOp for AdjointMass<'a, Eqn>
+impl<Eqn> LinearOp for AdjointMass<'_, Eqn>
 where
     Eqn: OdeEquationsAdjoint,
 {
@@ -135,7 +135,7 @@ where
     }
 }
 
-impl<'a, Eqn> Op for AdjointInit<'a, Eqn>
+impl<Eqn> Op for AdjointInit<'_, Eqn>
 where
     Eqn: OdeEquationsAdjoint,
 {
@@ -154,7 +154,7 @@ where
     }
 }
 
-impl<'a, Eqn> ConstantOp for AdjointInit<'a, Eqn>
+impl<Eqn> ConstantOp for AdjointInit<'_, Eqn>
 where
     Eqn: OdeEquationsAdjoint,
 {
