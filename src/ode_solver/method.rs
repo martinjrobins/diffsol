@@ -7,9 +7,9 @@ use crate::{
     ode_solver_error,
     scalar::Scalar,
     AdjointContext, AdjointEquations, AugmentedOdeEquations, Checkpointing, DefaultDenseMatrix,
-    DenseMatrix, Matrix, NonLinearOp, OdeEquations, OdeEquationsAdjoint, OdeEquationsSens,
-    OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut, Vector,
-    VectorViewMut, LinearSolver, HermiteInterpolator,
+    DenseMatrix, HermiteInterpolator, LinearSolver, Matrix, NonLinearOp, OdeEquations,
+    OdeEquationsAdjoint, OdeEquationsSens, OdeSolverProblem, OdeSolverState, Op, SensEquations,
+    StateRef, StateRefMut, Vector, VectorViewMut,
 };
 
 #[derive(Debug, PartialEq)]
@@ -436,7 +436,6 @@ where
         State = Self::State,
     >;
 
-
     fn default_adjoint_solver<LS: LinearSolver<Eqn::M>>(
         self,
         aug_eqn: AdjointEquations<'a, Eqn, Self>,
@@ -446,10 +445,7 @@ where
         &self,
         checkpoints: Vec<Self::State>,
         last_segment: HermiteInterpolator<Eqn::V>,
-    ) -> Result<
-        AdjointEquations<'a, Eqn, Self>,
-        DiffsolError,
-    >
+    ) -> Result<AdjointEquations<'a, Eqn, Self>, DiffsolError>
     where
         Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
@@ -578,7 +574,9 @@ mod test {
         let s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let final_time = soln.solution_points[soln.solution_points.len() - 1].t;
-        let (g, gs_adj) = s.solve_adjoint::<NalgebraLU<f64>>(final_time, None).unwrap();
+        let (g, gs_adj) = s
+            .solve_adjoint::<NalgebraLU<f64>>(final_time, None)
+            .unwrap();
         g.assert_eq_norm(
             &soln.solution_points[soln.solution_points.len() - 1].state,
             problem.out_atol.as_ref().unwrap(),

@@ -15,10 +15,7 @@ impl<V> NonLinearSolveSolution<V> {
 /// A solver for the nonlinear problem `F(x) = 0`.
 pub trait NonLinearSolver<M: Matrix>: Default {
     /// Set the problem to be solved, any previous problem is discarded.
-    fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
-        &mut self,
-        op: &C,
-    );
+    fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(&mut self, op: &C);
 
     /// Reset the approximation of the Jacobian matrix.
     fn reset_jacobian<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
@@ -131,7 +128,9 @@ pub mod tests {
         let t = C::T::zero();
         solver.reset_jacobian(&op, &solns[0].x0, t);
         for soln in solns {
-            let x = solver.solve(&op, &soln.x0, t, &soln.x0, &mut convergence).unwrap();
+            let x = solver
+                .solve(&op, &soln.x0, t, &soln.x0, &mut convergence)
+                .unwrap();
             let tol = x.clone() * scale(rtol) + atol;
             x.assert_eq(&soln.x, &tol);
         }

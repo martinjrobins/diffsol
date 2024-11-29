@@ -221,10 +221,7 @@ where
         Ok(())
     }
 
-    fn set_problem<C: NonLinearOpJacobian<T = M::T, V = M::V, M = M>>(
-        &mut self,
-        op: &C,
-    ) {
+    fn set_problem<C: NonLinearOpJacobian<T = M::T, V = M::V, M = M>>(&mut self, op: &C) {
         let ncols = op.nstates();
         let nrows = op.nout();
         let mut matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity());

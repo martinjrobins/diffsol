@@ -14,9 +14,9 @@ use crate::SdirkState;
 use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, AdjointOdeSolverMethod,
-    AugmentedOdeEquations, AugmentedOdeEquationsImplicit, DenseMatrix, JacobianUpdate, NonLinearOp,
-    OdeEquationsAdjoint, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-    Op, Scalar, StateRef, StateRefMut, Vector, VectorViewMut, Convergence
+    AugmentedOdeEquations, AugmentedOdeEquationsImplicit, Convergence, DenseMatrix, JacobianUpdate,
+    NonLinearOp, OdeEquationsAdjoint, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem,
+    OdeSolverState, Op, Scalar, StateRef, StateRefMut, Vector, VectorViewMut,
 };
 use num_traits::abs;
 use num_traits::One;
@@ -53,13 +53,8 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
-    type DefaultAdjointSolver = Sdirk<
-        'a,
-        Eqn,
-        LS,
-        M,
-        AdjointEquations<'a, Eqn, Sdirk<'a, Eqn, LS, M>>,
-    >;
+    type DefaultAdjointSolver =
+        Sdirk<'a, Eqn, LS, M, AdjointEquations<'a, Eqn, Sdirk<'a, Eqn, LS, M>>>;
 
     fn default_adjoint_solver<ALS: LinearSolver<Eqn::M>>(
         self,
@@ -67,7 +62,9 @@ where
     ) -> Result<Self::DefaultAdjointSolver, DiffsolError> {
         let problem = self.problem();
         let tableau = self.tableau;
-        let state = self.state.into_adjoint::<ALS, _, _>(problem, &mut aug_eqn)?;
+        let state = self
+            .state
+            .into_adjoint::<ALS, _, _>(problem, &mut aug_eqn)?;
         Sdirk::new_augmented(self.problem, state, tableau, LS::default(), aug_eqn)
     }
 }
@@ -190,7 +187,7 @@ where
     const MIN_FACTOR: f64 = 0.2;
     const MAX_FACTOR: f64 = 10.0;
     const MIN_TIMESTEP: f64 = 1e-13;
-    
+
     pub fn new(
         problem: &'a OdeSolverProblem<Eqn>,
         state: SdirkState<Eqn::V>,
@@ -362,7 +359,13 @@ where
         augmented_eqn: AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
         state.check_sens_consistent_with_problem(problem, &augmented_eqn)?;
-        let mut ret = Self::_new(problem, state, tableau, linear_solver, augmented_eqn.integrate_main_eqn())?;
+        let mut ret = Self::_new(
+            problem,
+            state,
+            tableau,
+            linear_solver,
+            augmented_eqn.integrate_main_eqn(),
+        )?;
         let naug = augmented_eqn.max_index();
         let nstates = augmented_eqn.rhs().nstates();
         let order = ret.tableau.s();
@@ -372,13 +375,14 @@ where
         if let Some(out) = augmented_eqn.out() {
             ret.sgdiff = vec![M::zeros(out.nout(), order); naug];
         }
-        
+
         ret.s_op = if augmented_eqn.integrate_main_eqn() {
             Some(SdirkCallable::new_no_jacobian(augmented_eqn, ret.gamma))
         } else {
             let callable = SdirkCallable::new(augmented_eqn, ret.gamma);
             ret.nonlinear_solver.set_problem(&callable);
-            ret.nonlinear_solver.reset_jacobian(&callable, &ret.state.s[0], ret.state.t);
+            ret.nonlinear_solver
+                .reset_jacobian(&callable, &ret.state.s[0], ret.state.t);
             Some(callable)
         };
         Ok(ret)
@@ -460,7 +464,8 @@ where
 
             // solve
             let op = self.s_op.as_ref().unwrap();
-            self.nonlinear_solver.solve_in_place(op, ds, t, s0, &mut self.convergence)?;
+            self.nonlinear_solver
+                .solve_in_place(op, ds, t, s0, &mut self.convergence)?;
 
             self.old_y_sens[j].copy_from(&op.get_last_f_eval());
             self.statistics.number_of_nonlinear_solver_iterations += self.convergence.niter();
@@ -512,18 +517,22 @@ where
         if self.jacobian_update.check_rhs_jacobian_update(h, &state) {
             if let Some(op) = self.op.as_mut() {
                 op.set_jacobian_is_stale();
-                self.nonlinear_solver.reset_jacobian(op, &self.old_f, self.state.t);
+                self.nonlinear_solver
+                    .reset_jacobian(op, &self.old_f, self.state.t);
             } else if let Some(s_op) = self.s_op.as_mut() {
                 s_op.set_jacobian_is_stale();
-                self.nonlinear_solver.reset_jacobian(s_op, &self.old_f_sens[0], self.state.t);
+                self.nonlinear_solver
+                    .reset_jacobian(s_op, &self.old_f_sens[0], self.state.t);
             }
             self.jacobian_update.update_rhs_jacobian();
             self.jacobian_update.update_jacobian(h);
         } else if self.jacobian_update.check_jacobian_update(h, &state) {
             if let Some(op) = self.op.as_ref() {
-                self.nonlinear_solver.reset_jacobian(op, &self.old_f, self.state.t);
+                self.nonlinear_solver
+                    .reset_jacobian(op, &self.old_f, self.state.t);
             } else if let Some(s_op) = self.s_op.as_ref() {
-                self.nonlinear_solver.reset_jacobian(s_op, &self.old_f_sens[0], self.state.t);
+                self.nonlinear_solver
+                    .reset_jacobian(s_op, &self.old_f_sens[0], self.state.t);
             }
             self.jacobian_update.update_jacobian(h);
         }
@@ -688,15 +697,11 @@ where
 
             for i in start..self.tableau.s() {
                 let t = t0 + self.tableau.c()[i] * h;
-                
+
                 // main equation
                 let mut solve_result = Ok(());
                 if let Some(op) = self.op.as_mut() {
-                    op.set_phi(
-                        &self.diff.columns(0, i),
-                        &self.state.y,
-                        &self.a_rows[i],
-                    );
+                    op.set_phi(&self.diff.columns(0, i), &self.state.y, &self.a_rows[i]);
                     Self::predict_stage(i, &self.diff, &mut self.old_f, &self.tableau);
                     solve_result = self.nonlinear_solver.solve_in_place(
                         op,
@@ -705,14 +710,14 @@ where
                         &self.state.y,
                         &mut self.convergence,
                     );
-                    self.statistics.number_of_nonlinear_solver_iterations += self.convergence.niter();
+                    self.statistics.number_of_nonlinear_solver_iterations +=
+                        self.convergence.niter();
                 }
 
                 // only calculate sensitivities if the solve succeeded
                 if solve_result.is_ok() {
                     if let Some(op) = self.op.as_ref() {
-                        self.old_y
-                            .copy_from(&op.get_last_f_eval());
+                        self.old_y.copy_from(&op.get_last_f_eval());
                     }
                     // old_y now has the new y soln and old_f has the new dy soln
                     if self.s_op.is_some() {

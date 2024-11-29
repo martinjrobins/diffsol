@@ -250,7 +250,10 @@ where
         }
     }
 
-    pub fn rhs_custom<RhsCustom: BuilderOp>(self, rhs: RhsCustom) -> OdeBuilder<M, RhsCustom, Init, Mass, Root, Out> {
+    pub fn rhs_custom<RhsCustom: BuilderOp>(
+        self,
+        rhs: RhsCustom,
+    ) -> OdeBuilder<M, RhsCustom, Init, Mass, Root, Out> {
         OdeBuilder::<M, RhsCustom, Init, Mass, Root, Out> {
             rhs: Some(rhs),
             init: self.init,
@@ -346,7 +349,10 @@ where
         }
     }
 
-    pub fn init_custom<InitCustom: BuilderOp>(self, init: InitCustom) -> OdeBuilder<M, Rhs, InitCustom, Mass, Root, Out> {
+    pub fn init_custom<InitCustom: BuilderOp>(
+        self,
+        init: InitCustom,
+    ) -> OdeBuilder<M, Rhs, InitCustom, Mass, Root, Out> {
         OdeBuilder::<M, Rhs, InitCustom, Mass, Root, Out> {
             rhs: self.rhs,
             init: Some(init),
@@ -493,7 +499,10 @@ where
         }
     }
 
-    pub fn mass_custom<MassCustom: BuilderOp>(self, mass: MassCustom) -> OdeBuilder<M, Rhs, Init, MassCustom, Root, Out> {
+    pub fn mass_custom<MassCustom: BuilderOp>(
+        self,
+        mass: MassCustom,
+    ) -> OdeBuilder<M, Rhs, Init, MassCustom, Root, Out> {
         OdeBuilder::<M, Rhs, Init, MassCustom, Root, Out> {
             rhs: self.rhs,
             init: self.init,
@@ -554,7 +563,10 @@ where
         }
     }
 
-    pub fn root_custom<RootCustom: BuilderOp>(self, root: RootCustom) -> OdeBuilder<M, Rhs, Init, Mass, RootCustom, Out> {
+    pub fn root_custom<RootCustom: BuilderOp>(
+        self,
+        root: RootCustom,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, RootCustom, Out> {
         OdeBuilder::<M, Rhs, Init, Mass, RootCustom, Out> {
             rhs: self.rhs,
             init: self.init,
@@ -657,7 +669,10 @@ where
         }
     }
 
-    pub fn out_custom<OutCustom: BuilderOp>(self, out: OutCustom) -> OdeBuilder<M, Rhs, Init, Mass, Root, OutCustom> {
+    pub fn out_custom<OutCustom: BuilderOp>(
+        self,
+        out: OutCustom,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, OutCustom> {
         OdeBuilder::<M, Rhs, Init, Mass, Root, OutCustom> {
             rhs: self.rhs,
             init: self.init,
@@ -897,12 +912,12 @@ where
             mass.set_nparams(nparams);
             mass.set_nout(nstates);
         }
-        
+
         if let Some(ref mut root) = root {
             root.set_nstates(nstates);
             root.set_nparams(nparams);
         }
-        
+
         if let Some(ref mut out) = out {
             out.set_nstates(nstates);
             out.set_nparams(nparams);

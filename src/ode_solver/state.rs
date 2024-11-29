@@ -186,8 +186,12 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         ret.set_step_size(ode_problem, solver_order);
         Ok(ret)
     }
-    
-    fn into_adjoint<LS, Eqn, AugmentedEqn>(self, ode_problem: &OdeSolverProblem<Eqn>, augmented_eqn: &mut AugmentedEqn) -> Result<Self, DiffsolError>
+
+    fn into_adjoint<LS, Eqn, AugmentedEqn>(
+        self,
+        ode_problem: &OdeSolverProblem<Eqn>,
+        augmented_eqn: &mut AugmentedEqn,
+    ) -> Result<Self, DiffsolError>
     where
         Eqn: OdeEquationsImplicit<T = V::T, V = V>,
         AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> + std::fmt::Debug,

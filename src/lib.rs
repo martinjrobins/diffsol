@@ -5,7 +5,7 @@
 //!
 //! ## Solving ODEs
 //!
-//! The simplest way to create a new problem is to use the [OdeBuilder] struct. You can set many configuration options such as the initial time ([OdeBuilder::t0]), initial step size ([OdeBuilder::h0]), 
+//! The simplest way to create a new problem is to use the [OdeBuilder] struct. You can set many configuration options such as the initial time ([OdeBuilder::t0]), initial step size ([OdeBuilder::h0]),
 //! relative tolerance ([OdeBuilder::rtol]), absolute tolerance ([OdeBuilder::atol]), parameters ([OdeBuilder::p]) and equations ([OdeBuilder::rhs_implicit], [OdeBuilder::init], [OdeBuilder::mass] etc.)
 //! or leave them at their default values. Then, call the [OdeBuilder::build] function to create a [OdeSolverProblem].
 //!
@@ -25,7 +25,7 @@
 //! To solve the problem given the initial state, you need to choose a solver. DiffSol provides the following solvers:
 //! - A Backwards Difference Formulae [Bdf] solver, suitable for stiff problems and singular mass matrices.
 //! - A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver [Sdirk]. You can use your own butcher tableau using [Tableau] or use one of the provided ([Tableau::tr_bdf2], [Tableau::esdirk34]).
-//! 
+//!
 //! The easiest way to create a solver is to use one of the provided methods on the [OdeSolverProblem] struct ([OdeSolverProblem::bdf_solver], [OdeSolverProblem::tr_bdf2_solver], [OdeSolverProblem::esdirk34_solver]).
 //! These create a new solver from a provided state and problem. Alternatively, you can create both the solver and the state at once using [OdeSolverProblem::bdf], [OdeSolverProblem::tr_bdf2], [OdeSolverProblem::esdirk34].
 //!
@@ -71,7 +71,7 @@
 //! DiffSol provides a way to compute the forward sensitivity of the solution with respect to the parameters. You can provide the requires equations to the builder using [OdeBuilder::rhs_sens_implicit] and [OdeBuilder::init_sens],
 //! or your equations struct must implement the [OdeEquationsSens] trait,
 //! Note that by default the sensitivity equations are included in the error control for the solvers, you can change this by setting tolerances using the [OdeBuilder::sens_atol] and [OdeBuilder::sens_rtol] methods.
-//! 
+//!
 //! The easiest way to obtain the sensitivity solution is to use the [OdeSolverMethod::solve_dense_sensitivities] method, which will solve the forward problem and the sensitivity equations simultaneously and return the result.
 //! If you are manually stepping the solver, you can use the [OdeSolverMethod::interpolate_sens] method to obtain the sensitivity solution at a given time. Otherwise the sensitivity vectors are stored in the [OdeSolverState] struct.
 //!
@@ -99,14 +99,14 @@
 //! to solve the adjoint equations.
 //!
 //! To provide the builder with the required equations, you can use the [OdeBuilder::rhs_adjoint_implicit], [OdeBuilder::init_adjoint], and [OdeBuilder::out_adjoint_implicit] methods,
-//! or your equations struct must implement the [OdeEquationsAdjoint] trait. 
-//! 
+//! or your equations struct must implement the [OdeEquationsAdjoint] trait.
+//!
 //! The easiest way to obtain the adjoint solution is to use the [OdeSolverMethod::solve_adjoint] method, which will solve the forwards problem, then the adjoint problem and return the result.
-//! If you wish to manually do the timestepping, then the best place to start is by looking at the source code for the [OdeSolverMethod::solve_adjoint] method. During the solution of the forwards problem 
+//! If you wish to manually do the timestepping, then the best place to start is by looking at the source code for the [OdeSolverMethod::solve_adjoint] method. During the solution of the forwards problem
 //! you will need to use checkpointing to store the solution at a set of times.
 //! From this you should obtain a `Vec<OdeSolverState>` (that can be the start and end of the solution), and
 //! a [HermiteInterpolator] that can be used to interpolate the solution between the last two checkpoints. You can then use the [AdjointOdeSolverMethod::adjoint_equations] and then create
-//! an adjoint solver either manually or using the [AdjointOdeSolverMethod::default_adjoint_solver] method. You can then use this solver to step the adjoint equations backwards in time using [OdeSolverMethod::step] as normal. 
+//! an adjoint solver either manually or using the [AdjointOdeSolverMethod::default_adjoint_solver] method. You can then use this solver to step the adjoint equations backwards in time using [OdeSolverMethod::step] as normal.
 //! Once the adjoint equations have been solved,
 //! the sensitivities of the output function will be stored in the [StateRef::sg] field of the adjoint solver state. If your parameters are used to calculate the initial conditions
 //! of the forward problem, then you will need to use the [AdjointEquations::correct_sg_for_init] method to correct the sensitivities for the initial conditions.
@@ -197,10 +197,10 @@ pub use ode_solver::{
     equations::AugmentedOdeEquations, equations::AugmentedOdeEquationsImplicit, equations::NoAug,
     equations::OdeEquations, equations::OdeEquationsAdjoint, equations::OdeEquationsImplicit,
     equations::OdeEquationsRef, equations::OdeEquationsSens, equations::OdeSolverEquations,
-    method::AdjointOdeSolverMethod, method::OdeSolverMethod, method::OdeSolverStopReason,
-    problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::SdirkState,
+    method::AdjointOdeSolverMethod, method::AugmentedOdeSolverMethod, method::OdeSolverMethod,
+    method::OdeSolverStopReason, problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::SdirkState,
     sens_equations::SensEquations, sens_equations::SensInit, sens_equations::SensRhs,
-    state::OdeSolverState, tableau::Tableau, method::AugmentedOdeSolverMethod,
+    state::OdeSolverState, tableau::Tableau,
 };
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};
@@ -210,7 +210,7 @@ pub use op::nonlinear_op::{
 pub use op::{
     closure::Closure, closure_with_adjoint::ClosureWithAdjoint, constant_closure::ConstantClosure,
     constant_closure_with_adjoint::ConstantClosureWithAdjoint, linear_closure::LinearClosure,
-    unit::UnitCallable, Op, BuilderOp, ParameterisedOp,
+    unit::UnitCallable, BuilderOp, Op, ParameterisedOp,
 };
 use op::{
     closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,

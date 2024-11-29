@@ -159,18 +159,14 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
-    pub fn bdf_state<LS: LinearSolver<Eqn::M>>(
-        &self,
-    ) -> Result<BdfState<Eqn::V>, DiffsolError>
+    pub fn bdf_state<LS: LinearSolver<Eqn::M>>(&self) -> Result<BdfState<Eqn::V>, DiffsolError>
     where
         Eqn: OdeEquationsImplicit,
     {
         BdfState::new::<LS, Eqn>(self, 1)
     }
 
-    pub fn bdf_state_sens<LS: LinearSolver<Eqn::M>>(
-        &self,
-    ) -> Result<BdfState<Eqn::V>, DiffsolError>
+    pub fn bdf_state_sens<LS: LinearSolver<Eqn::M>>(&self) -> Result<BdfState<Eqn::V>, DiffsolError>
     where
         Eqn: OdeEquationsSens,
     {
@@ -306,10 +302,7 @@ where
         Sdirk::new_augmented(self, state, tableau, LS::default(), aug_eqn)
     }
 
-    pub fn sdirk_solver_sens<
-        LS: LinearSolver<Eqn::M>,
-        DM: DenseMatrix<V = Eqn::V, T = Eqn::T>,
-    >(
+    pub fn sdirk_solver_sens<LS: LinearSolver<Eqn::M>, DM: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
         &self,
         state: SdirkState<Eqn::V>,
         tableau: Tableau<DM>,

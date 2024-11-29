@@ -30,11 +30,13 @@ mod tests {
     use crate::op::unit::UnitCallable;
     use crate::op::ParameterisedOp;
     use crate::{
-        op::OpStatistics, AdjointOdeSolverMethod, CraneliftModule, NonLinearOpJacobian, OdeBuilder,
-        OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsRef, OdeSolverMethod,
-        OdeSolverProblem, OdeSolverState, OdeSolverStopReason, AugmentedOdeSolverMethod,
+        op::OpStatistics, AdjointOdeSolverMethod, AugmentedOdeSolverMethod, CraneliftModule,
+        NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit,
+        OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
     };
-    use crate::{ConstantOp, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp, Op, Vector};
+    use crate::{
+        ConstantOp, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp, Op, Vector,
+    };
     use num_traits::One;
     use num_traits::Zero;
 
@@ -187,7 +189,9 @@ mod tests {
 
         let problem = method.problem();
         let adjoint_aug_eqn = method.adjoint_equations(checkpoints, last_segment).unwrap();
-        let mut adjoint_solver = method.default_adjoint_solver::<LS>(adjoint_aug_eqn).unwrap();
+        let mut adjoint_solver = method
+            .default_adjoint_solver::<LS>(adjoint_aug_eqn)
+            .unwrap();
 
         let g_expect = M::V::from_element(problem.eqn.rhs().nparams(), M::T::zero());
         for sgi in adjoint_solver.state().sg.iter() {

@@ -201,7 +201,8 @@ where
     }
 }
 
-impl<'a, M, F, G, H, I> NonLinearOpAdjoint for ParameterisedOp<'a, ClosureWithAdjoint<M, F, G, H, I>>
+impl<'a, M, F, G, H, I> NonLinearOpAdjoint
+    for ParameterisedOp<'a, ClosureWithAdjoint<M, F, G, H, I>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
