@@ -470,8 +470,14 @@ impl VectorIndex for SundialsIndexVector {
 }
 
 impl Vector for SundialsVector {
-    type View<'a> = SundialsVectorView<'a> where Self: 'a;
-    type ViewMut<'a> = SundialsVectorViewMut<'a> where Self: 'a;
+    type View<'a>
+        = SundialsVectorView<'a>
+    where
+        Self: 'a;
+    type ViewMut<'a>
+        = SundialsVectorViewMut<'a>
+    where
+        Self: 'a;
     type Index = SundialsIndexVector;
     fn len(&self) -> IndexType {
         unsafe { N_VGetLength_Serial(self.sundials_vector()) as IndexType }

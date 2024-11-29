@@ -175,8 +175,7 @@ where
     }
 }
 
-impl<M, F, G, H, I> NonLinearOpJacobian
-    for ParameterisedOp<'_, ClosureWithAdjoint<M, F, G, H, I>>
+impl<M, F, G, H, I> NonLinearOpJacobian for ParameterisedOp<'_, ClosureWithAdjoint<M, F, G, H, I>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
@@ -201,8 +200,7 @@ where
     }
 }
 
-impl<M, F, G, H, I> NonLinearOpAdjoint
-    for ParameterisedOp<'_, ClosureWithAdjoint<M, F, G, H, I>>
+impl<M, F, G, H, I> NonLinearOpAdjoint for ParameterisedOp<'_, ClosureWithAdjoint<M, F, G, H, I>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
