@@ -5,7 +5,7 @@ Often users will want to provide their own structs that can hold custom data str
 
 ## Traits
 
-The final goal is to implement the [`OdeEquations`](https://docs.rs/diffsol/latest/diffsol/ode_solver/equations/trait.OdeEquations.html) trait.
+To create your own structs for the ode system, the final goal is to implement the [`OdeEquations`](https://docs.rs/diffsol/latest/diffsol/ode_solver/equations/trait.OdeEquations.html) trait.
 When you have done this, you can use the `build_from_eqn` method on the `OdeBuilder` struct to create the problem.
 
 For each function in your system of equations, you will need to implement the appropriate trait for each function.
