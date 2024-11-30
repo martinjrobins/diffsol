@@ -219,11 +219,11 @@ impl<M: Matrix> JacobianColoring<M> {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
 
     use crate::jacobian::{find_jacobian_non_zeros, JacobianColoring};
     use crate::matrix::Matrix;
     use crate::op::linear_closure::LinearClosure;
+    use crate::op::ParameterisedOp;
     use crate::vector::Vector;
     use crate::{
         jacobian::{coloring::nonzeros2graph, greedy_coloring::color_graph_greedy},
@@ -235,11 +235,17 @@ mod tests {
     use num_traits::{One, Zero};
     use std::ops::MulAssign;
 
+    #[allow(clippy::type_complexity)]
     fn helper_triplets2op_nonlinear<'a, M: Matrix + 'a>(
         triplets: &'a [(usize, usize, M::T)],
+        p: &'a M::V,
         nrows: usize,
         ncols: usize,
-    ) -> impl NonLinearOpJacobian<M = M, V = M::V, T = M::T> + 'a {
+    ) -> Closure<
+        M,
+        impl Fn(&M::V, &M::V, M::T, &mut M::V) + use<'a, M>,
+        impl Fn(&M::V, &M::V, M::T, &M::V, &mut M::V) + use<'a, M>,
+    > {
         let nstates = ncols;
         let nout = nrows;
         let f = move |x: &M::V, y: &mut M::V| {
@@ -258,19 +264,21 @@ mod tests {
             },
             nstates,
             nout,
-            Rc::new(M::V::zeros(0)),
+            p.len(),
         );
         let y0 = M::V::zeros(nstates);
         let t0 = M::T::zero();
-        ret.calculate_sparsity(&y0, t0);
+        ret.calculate_sparsity(&y0, t0, p);
         ret
     }
 
+    #[allow(clippy::type_complexity)]
     fn helper_triplets2op_linear<'a, M: Matrix + 'a>(
         triplets: &'a [(usize, usize, M::T)],
+        p: &'a M::V,
         nrows: usize,
         ncols: usize,
-    ) -> impl LinearOp<M = M, V = M::V, T = M::T> + 'a {
+    ) -> LinearClosure<M, impl Fn(&M::V, &M::V, M::T, M::T, &mut M::V) + use<'a, M>> {
         let nstates = ncols;
         let nout = nrows;
         let f = move |x: &M::V, y: &mut M::V| {
@@ -285,10 +293,10 @@ mod tests {
             },
             nstates,
             nout,
-            Rc::new(M::V::zeros(0)),
+            p.len(),
         );
         let t0 = M::T::zero();
-        ret.calculate_sparsity(t0);
+        ret.calculate_sparsity(t0, p);
         ret
     }
 
@@ -308,8 +316,10 @@ mod tests {
                 (1, 1, M::T::one()),
             ],
         ];
+        let p = M::V::zeros(0);
         for triplets in test_triplets {
-            let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), 2, 2);
+            let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), &p, 2, 2);
+            let op = ParameterisedOp::new(&op, &p);
             let non_zeros = find_jacobian_non_zeros(&op, &M::V::zeros(2), M::T::zero());
             let expect = triplets
                 .iter()
@@ -346,8 +356,10 @@ mod tests {
             ],
         ];
         let expect = vec![vec![1, 1], vec![1, 2], vec![1, 1], vec![1, 2]];
+        let p = M::V::zeros(0);
         for (triplets, expect) in test_triplets.iter().zip(expect) {
-            let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), 2, 2);
+            let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), &p, 2, 2);
+            let op = ParameterisedOp::new(&op, &p);
             let non_zeros = find_jacobian_non_zeros(&op, &M::V::zeros(2), M::T::zero());
             let ncols = op.nstates();
             let graph = nonzeros2graph(non_zeros.as_slice(), ncols);
@@ -385,8 +397,10 @@ mod tests {
         let n = 3;
 
         // test nonlinear functions
+        let p = M::V::zeros(0);
         for triplets in test_triplets.iter() {
-            let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), n, n);
+            let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), &p, n, n);
+            let op = ParameterisedOp::new(&op, &p);
             let y0 = M::V::zeros(n);
             let t0 = M::T::zero();
             let nonzeros = triplets
@@ -405,8 +419,10 @@ mod tests {
         }
 
         // test linear functions
+        let p = M::V::zeros(0);
         for triplets in test_triplets {
-            let op = helper_triplets2op_linear::<M>(triplets.as_slice(), n, n);
+            let op = helper_triplets2op_linear::<M>(triplets.as_slice(), &p, n, n);
+            let op = ParameterisedOp::new(&op, &p);
             let t0 = M::T::zero();
             let nonzeros = triplets
                 .iter()

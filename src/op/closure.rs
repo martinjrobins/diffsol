@@ -1,11 +1,11 @@
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
 
 use crate::{
     find_jacobian_non_zeros, jacobian::JacobianColoring, Matrix, MatrixSparsity, NonLinearOp,
-    NonLinearOpJacobian, Op, Vector,
+    NonLinearOpJacobian, Op,
 };
 
-use super::OpStatistics;
+use super::{BuilderOp, OpStatistics, ParameterisedOp};
 
 pub struct Closure<M, F, G>
 where
@@ -18,7 +18,6 @@ where
     nstates: usize,
     nout: usize,
     nparams: usize,
-    p: Rc<M::V>,
     coloring: Option<JacobianColoring<M>>,
     sparsity: Option<M::Sparsity>,
     statistics: RefCell<OpStatistics>,
@@ -30,23 +29,21 @@ where
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
-    pub fn new(func: F, jacobian_action: G, nstates: usize, nout: usize, p: Rc<M::V>) -> Self {
-        let nparams = p.len();
+    pub fn new(func: F, jacobian_action: G, nstates: usize, nout: usize, nparams: usize) -> Self {
         Self {
             func,
             jacobian_action,
             nstates,
-            nout,
             nparams,
-            p,
+            nout,
             statistics: RefCell::new(OpStatistics::default()),
             coloring: None,
             sparsity: None,
         }
     }
-
-    pub fn calculate_sparsity(&mut self, y0: &M::V, t0: M::T) {
-        let non_zeros = find_jacobian_non_zeros(self, y0, t0);
+    pub fn calculate_sparsity(&mut self, y0: &M::V, t0: M::T, p: &M::V) {
+        let param_op = ParameterisedOp { op: self, p };
+        let non_zeros = find_jacobian_non_zeros(&param_op, y0, t0);
         self.sparsity = Some(
             MatrixSparsity::try_from_indices(self.nout(), self.nstates(), non_zeros.clone())
                 .expect("invalid sparsity pattern"),
@@ -55,6 +52,27 @@ where
             self.sparsity.as_ref().unwrap(),
             &non_zeros,
         ));
+    }
+}
+
+impl<M, F, G> BuilderOp for Closure<M, F, G>
+where
+    M: Matrix,
+    F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+{
+    fn calculate_sparsity(&mut self, y0: &M::V, t0: M::T, p: &M::V) {
+        self.calculate_sparsity(y0, t0, p);
+    }
+
+    fn set_nstates(&mut self, nstates: usize) {
+        self.nstates = nstates;
+    }
+    fn set_nout(&mut self, nout: usize) {
+        self.nout = nout;
+    }
+    fn set_nparams(&mut self, nparams: usize) {
+        self.nparams = nparams;
     }
 }
 
@@ -76,47 +94,42 @@ where
     fn nparams(&self) -> usize {
         self.nparams
     }
-    fn set_params(&mut self, p: Rc<M::V>) {
-        assert_eq!(p.len(), self.nparams);
-        self.p = p;
-    }
-
     fn statistics(&self) -> OpStatistics {
         self.statistics.borrow().clone()
     }
 }
 
-impl<M, F, G> NonLinearOp for Closure<M, F, G>
+impl<M, F, G> NonLinearOp for ParameterisedOp<'_, Closure<M, F, G>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
     fn call_inplace(&self, x: &M::V, t: M::T, y: &mut M::V) {
-        self.statistics.borrow_mut().increment_call();
-        (self.func)(x, self.p.as_ref(), t, y)
+        self.op.statistics.borrow_mut().increment_call();
+        (self.op.func)(x, self.p, t, y)
     }
 }
 
-impl<M, F, G> NonLinearOpJacobian for Closure<M, F, G>
+impl<M, F, G> NonLinearOpJacobian for ParameterisedOp<'_, Closure<M, F, G>>
 where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
     fn jac_mul_inplace(&self, x: &M::V, t: M::T, v: &M::V, y: &mut M::V) {
-        self.statistics.borrow_mut().increment_jac_mul();
-        (self.jacobian_action)(x, self.p.as_ref(), t, v, y)
+        self.op.statistics.borrow_mut().increment_jac_mul();
+        (self.op.jacobian_action)(x, self.p, t, v, y)
     }
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
-        self.statistics.borrow_mut().increment_matrix();
-        if let Some(coloring) = self.coloring.as_ref() {
+        self.op.statistics.borrow_mut().increment_matrix();
+        if let Some(coloring) = self.op.coloring.as_ref() {
             coloring.jacobian_inplace(self, x, t, y);
         } else {
             self._default_jacobian_inplace(x, t, y);
         }
     }
     fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
-        self.sparsity.clone()
+        self.op.sparsity.clone()
     }
 }

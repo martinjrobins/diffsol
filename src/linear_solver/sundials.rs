@@ -1,18 +1,30 @@
-use std::rc::Rc;
-
 use crate::sundials_sys::{
-    realtype, SUNLinSolFree, SUNLinSolSetup, SUNLinSolSolve, SUNLinSol_Dense, SUNLinearSolver,
+    realtype, IDAGetReturnFlagName, SUNLinSolFree, SUNLinSolSetup, SUNLinSolSolve, SUNLinSol_Dense,
+    SUNLinearSolver,
 };
 
 use crate::{
-    error::*, linear_solver_error, ode_solver::sundials::sundials_check,
-    vector::sundials::SundialsVector, Matrix, NonLinearOpJacobian, SundialsMatrix,
+    error::*, linear_solver_error, vector::sundials::SundialsVector, Matrix, NonLinearOpJacobian,
+    SundialsMatrix,
 };
+use std::ffi::{c_int, CStr};
 
 #[cfg(not(sundials_version_major = "5"))]
 use crate::vector::sundials::get_suncontext;
 
 use super::LinearSolver;
+
+pub fn sundials_check(retval: c_int) -> Result<(), DiffsolError> {
+    if retval < 0 {
+        let char_ptr = unsafe { IDAGetReturnFlagName(i64::from(retval)) };
+        let c_str = unsafe { CStr::from_ptr(char_ptr) };
+        Err(DiffsolError::from(OdeSolverError::SundialsError(
+            c_str.to_str().unwrap().to_string(),
+        )))
+    } else {
+        Ok(())
+    }
+}
 
 pub struct SundialsLinearSolver {
     linear_solver: Option<SUNLinearSolver>,
@@ -48,8 +60,6 @@ impl LinearSolver<SundialsMatrix> for SundialsLinearSolver {
     fn set_problem<C: NonLinearOpJacobian<T = realtype, V = SundialsVector, M = SundialsMatrix>>(
         &mut self,
         op: &C,
-        _rtol: realtype,
-        _atol: Rc<SundialsVector>,
     ) {
         let matrix = SundialsMatrix::zeros(op.nstates(), op.nstates());
         let y0 = SundialsVector::new_serial(op.nstates());

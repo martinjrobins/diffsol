@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::{error::LinearSolverError, linear_solver_error};
 
 use crate::{
@@ -49,12 +47,7 @@ impl<T: Scalar> LinearSolver<Mat<T>> for LU<T> {
         Ok(())
     }
 
-    fn set_problem<C: NonLinearOpJacobian<T = T, V = Col<T>, M = Mat<T>>>(
-        &mut self,
-        op: &C,
-        _rtol: T,
-        _atol: Rc<Col<T>>,
-    ) {
+    fn set_problem<C: NonLinearOpJacobian<T = T, V = Col<T>, M = Mat<T>>>(&mut self, op: &C) {
         let ncols = op.nstates();
         let nrows = op.nout();
         let matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity());

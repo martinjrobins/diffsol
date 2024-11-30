@@ -1,5 +1,5 @@
 use num_traits::Zero;
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
 
 use crate::{
     op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, ConstantOp, ConstantOpSens,
@@ -7,26 +7,26 @@ use crate::{
     OdeSolverProblem, Op, Vector,
 };
 
-pub struct SensInit<Eqn>
+pub struct SensInit<'a, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
-    eqn: Rc<Eqn>,
+    eqn: &'a Eqn,
     init_sens: Eqn::M,
     index: usize,
 }
 
-impl<Eqn> SensInit<Eqn>
+impl<'a, Eqn> SensInit<'a, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
-    pub fn new(eqn: &Rc<Eqn>) -> Self {
+    pub fn new(eqn: &'a Eqn) -> Self {
         let nstates = eqn.rhs().nstates();
         let nparams = eqn.rhs().nparams();
         let init_sens = Eqn::M::new_from_sparsity(nstates, nparams, eqn.init().sens_sparsity());
         let index = 0;
         Self {
-            eqn: eqn.clone(),
+            eqn,
             init_sens,
             index,
         }
@@ -39,7 +39,7 @@ where
     }
 }
 
-impl<Eqn> Op for SensInit<Eqn>
+impl<Eqn> Op for SensInit<'_, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
@@ -58,7 +58,7 @@ where
     }
 }
 
-impl<Eqn> ConstantOp for SensInit<Eqn>
+impl<Eqn> ConstantOp for SensInit<'_, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
@@ -81,24 +81,24 @@ where
 /// Strategy is to pre-compute S = f_p from the state at given time step and store it in a matrix using [Self::update_state].
 /// Then the ith column of function F(s, t) is evaluated as J * s_i + S_i, where s_i is the ith column of the sensitivity matrix
 /// and S_i is the ith column of the matrix S. The column to evaluate is set using [Self::set_param_index].
-pub struct SensRhs<Eqn>
+pub struct SensRhs<'a, Eqn>
 where
     Eqn: OdeEquations,
 {
-    eqn: Rc<Eqn>,
+    eqn: &'a Eqn,
     sens: RefCell<Eqn::M>,
     y: RefCell<Eqn::V>,
     index: RefCell<usize>,
 }
 
-impl<Eqn> SensRhs<Eqn>
+impl<'a, Eqn> SensRhs<'a, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
-    pub fn new(eqn: &Rc<Eqn>, allocate: bool) -> Self {
+    pub fn new(eqn: &'a Eqn, allocate: bool) -> Self {
         if !allocate {
             return Self {
-                eqn: eqn.clone(),
+                eqn,
                 sens: RefCell::new(<Eqn::M as Matrix>::zeros(0, 0)),
                 y: RefCell::new(<Eqn::V as Vector>::zeros(0)),
                 index: RefCell::new(0),
@@ -114,7 +114,7 @@ where
         let y = RefCell::new(<Eqn::V as Vector>::zeros(nstates));
         let index = RefCell::new(0);
         Self {
-            eqn: eqn.clone(),
+            eqn,
             sens: RefCell::new(rhs_sens),
             y,
             index,
@@ -133,7 +133,7 @@ where
     }
 }
 
-impl<Eqn> Op for SensRhs<Eqn>
+impl<Eqn> Op for SensRhs<'_, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
@@ -152,7 +152,7 @@ where
     }
 }
 
-impl<Eqn> NonLinearOp for SensRhs<Eqn>
+impl<Eqn> NonLinearOp for SensRhs<'_, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
@@ -166,7 +166,7 @@ where
     }
 }
 
-impl<Eqn> NonLinearOpJacobian for SensRhs<Eqn>
+impl<Eqn> NonLinearOpJacobian for SensRhs<'_, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
@@ -194,18 +194,33 @@ where
 ///  f_p is the partial derivative of the right-hand side with respect to the parameters
 ///  dy(0)/dp is the partial derivative of the state at the initial time wrt the parameters
 ///
-pub struct SensEquations<Eqn>
+pub struct SensEquations<'a, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
-    eqn: Rc<Eqn>,
-    rhs: Rc<SensRhs<Eqn>>,
-    init: Rc<SensInit<Eqn>>,
-    atol: Option<Rc<Eqn::V>>,
+    eqn: &'a Eqn,
+    rhs: SensRhs<'a, Eqn>,
+    init: SensInit<'a, Eqn>,
+    atol: Option<&'a Eqn::V>,
     rtol: Option<Eqn::T>,
 }
 
-impl<Eqn> std::fmt::Debug for SensEquations<Eqn>
+impl<Eqn> Clone for SensEquations<'_, Eqn>
+where
+    Eqn: OdeEquationsSens,
+{
+    fn clone(&self) -> Self {
+        Self {
+            eqn: self.eqn,
+            rhs: SensRhs::new(self.eqn, false),
+            init: SensInit::new(self.eqn),
+            rtol: self.rtol,
+            atol: self.atol,
+        }
+    }
+}
+
+impl<Eqn> std::fmt::Debug for SensEquations<'_, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
@@ -214,27 +229,27 @@ where
     }
 }
 
-impl<Eqn> SensEquations<Eqn>
+impl<'a, Eqn> SensEquations<'a, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
-    pub(crate) fn new(problem: &OdeSolverProblem<Eqn>) -> Self {
+    pub(crate) fn new(problem: &'a OdeSolverProblem<Eqn>) -> Self {
         let eqn = &problem.eqn;
         let rtol = problem.sens_rtol;
-        let atol = problem.sens_atol.clone();
-        let rhs = Rc::new(SensRhs::new(eqn, true));
-        let init = Rc::new(SensInit::new(eqn));
+        let atol = problem.sens_atol.as_ref();
+        let rhs = SensRhs::new(eqn, true);
+        let init = SensInit::new(eqn);
         Self {
             rhs,
             init,
-            eqn: eqn.clone(),
+            eqn,
             rtol,
             atol,
         }
     }
 }
 
-impl<Eqn> Op for SensEquations<Eqn>
+impl<Eqn> Op for SensEquations<'_, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
@@ -253,22 +268,22 @@ where
     }
 }
 
-impl<'a, Eqn> OdeEquationsRef<'a> for SensEquations<Eqn>
+impl<'a, 'b, Eqn> OdeEquationsRef<'a> for SensEquations<'b, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
-    type Rhs = &'a SensRhs<Eqn>;
+    type Rhs = &'a SensRhs<'b, Eqn>;
     type Mass = <Eqn as OdeEquationsRef<'a>>::Mass;
     type Root = <Eqn as OdeEquationsRef<'a>>::Root;
-    type Init = &'a SensInit<Eqn>;
+    type Init = &'a SensInit<'b, Eqn>;
     type Out = <Eqn as OdeEquationsRef<'a>>::Out;
 }
 
-impl<Eqn> OdeEquations for SensEquations<Eqn>
+impl<'a, Eqn> OdeEquations for SensEquations<'a, Eqn>
 where
     Eqn: OdeEquationsSens,
 {
-    fn rhs(&self) -> &SensRhs<Eqn> {
+    fn rhs(&self) -> &SensRhs<'a, Eqn> {
         &self.rhs
     }
     fn mass(&self) -> Option<<Eqn as OdeEquationsRef<'_>>::Mass> {
@@ -277,15 +292,18 @@ where
     fn root(&self) -> Option<<Eqn as OdeEquationsRef<'_>>::Root> {
         None
     }
-    fn init(&self) -> &SensInit<Eqn> {
+    fn init(&self) -> &SensInit<'a, Eqn> {
         &self.init
     }
     fn out(&self) -> Option<<Eqn as OdeEquationsRef<'_>>::Out> {
         None
     }
+    fn set_params(&mut self, p: &Self::V) {
+        self.eqn.set_params(p);
+    }
 }
 
-impl<Eqn: OdeEquationsSens> AugmentedOdeEquations<Eqn> for SensEquations<Eqn> {
+impl<Eqn: OdeEquationsSens> AugmentedOdeEquations<Eqn> for SensEquations<'_, Eqn> {
     fn include_in_error_control(&self) -> bool {
         self.rtol.is_some() && self.atol.is_some()
     }
@@ -295,10 +313,10 @@ impl<Eqn: OdeEquationsSens> AugmentedOdeEquations<Eqn> for SensEquations<Eqn> {
     fn rtol(&self) -> Option<Eqn::T> {
         self.rtol
     }
-    fn atol(&self) -> Option<&Rc<Eqn::V>> {
-        self.atol.as_ref()
+    fn atol(&self) -> Option<&Eqn::V> {
+        self.atol
     }
-    fn out_atol(&self) -> Option<&Rc<Eqn::V>> {
+    fn out_atol(&self) -> Option<&Eqn::V> {
         None
     }
     fn out_rtol(&self) -> Option<Eqn::T> {
@@ -309,14 +327,17 @@ impl<Eqn: OdeEquationsSens> AugmentedOdeEquations<Eqn> for SensEquations<Eqn> {
         self.nparams()
     }
     fn update_rhs_out_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T) {
-        Rc::get_mut(&mut self.rhs).unwrap().update_state(y, dy, t);
+        self.rhs.update_state(y, dy, t);
     }
     fn update_init_state(&mut self, t: Eqn::T) {
-        Rc::get_mut(&mut self.init).unwrap().update_state(t);
+        self.init.update_state(t);
     }
     fn set_index(&mut self, index: usize) {
-        Rc::get_mut(&mut self.rhs).unwrap().set_param_index(index);
-        Rc::get_mut(&mut self.init).unwrap().set_param_index(index);
+        self.rhs.set_param_index(index);
+        self.init.set_param_index(index);
+    }
+    fn integrate_main_eqn(&self) -> bool {
+        true
     }
 }
 

@@ -35,9 +35,10 @@ Once you have created the `DiffSl` struct you can use it to create a problem usi
 ```rust
 # fn main() {
 # use diffsol::{DiffSl, CraneliftModule};
-use diffsol::{OdeBuilder, Bdf, OdeSolverMethod, OdeSolverState};
+use diffsol::{OdeBuilder, OdeSolverMethod, OdeSolverState};
 # type M = nalgebra::DMatrix<f64>;
 # type CG = CraneliftModule;
+type LS = diffsol::NalgebraLU<f64>;
 
         
 # let eqn = DiffSl::<M, CG>::compile("
@@ -47,13 +48,12 @@ use diffsol::{OdeBuilder, Bdf, OdeSolverMethod, OdeSolverState};
 #     u { 0.1 }
 #     F { r * u * (1.0 - u / k) }
 # ").unwrap();
-let problem = OdeBuilder::new()
+let problem = OdeBuilder::<M>::new()
 .rtol(1e-6)
 .p([1.0, 10.0])
 .build_from_eqn(eqn).unwrap();
-let mut solver = Bdf::default();
+let mut solver = problem.bdf::<LS>().unwrap();
 let t = 0.4;
-let state = OdeSolverState::new(&problem, &solver).unwrap();
-let _soln = solver.solve(&problem, state, t).unwrap();
+let _soln = solver.solve(t).unwrap();
 # }
 ```

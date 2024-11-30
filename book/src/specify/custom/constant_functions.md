@@ -22,6 +22,9 @@ impl Op for MyInit {
     fn nout(&self) -> usize {
         1
     }
+    fn nparams(&self) -> usize {
+        0
+    }
 }
 
 impl ConstantOp for MyInit {
@@ -29,22 +32,5 @@ impl ConstantOp for MyInit {
         y[0] = 0.1;
     }
 }
-# }
-```
-
-Again, we can use the [`ConstantClosure`](https://docs.rs/diffsol/latest/diffsol/op/constant_closure/struct.ConstantClosure.html) struct to implement the `ConstantOp` trait for us if it's not neccessary to use our own struct.
-
-```rust
-# fn main() {
-# use std::rc::Rc;
-use diffsol::ConstantClosure;
-
-# type T = f64;
-# type V = nalgebra::DVector<T>;
-# type M = nalgebra::DMatrix<T>;
-#
-let p = Rc::new(V::from_vec(vec![1.0, 10.0]));
-let init_fn = |_p: &V, _t: T| V::from_element(1, 0.1);
-let init = Rc::new(ConstantClosure::<M, _>::new(init_fn, p.clone()));
 # }
 ```

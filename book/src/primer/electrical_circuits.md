@@ -85,13 +85,14 @@ We can solve this system of equations using DiffSol and plot the current and vol
 # fn main() {
 # use std::fs;
 use diffsol::{
-    DiffSl, CraneliftModule, OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod
+    DiffSl, CraneliftModule, OdeBuilder, OdeSolverMethod
 };
 use plotly::{
     Plot, Scatter, common::Mode, layout::Layout, layout::Axis
 };
 type M = nalgebra::DMatrix<f64>;
 type CG = CraneliftModule;
+type LS = diffsol::NalgebraLU<f64>;
         
 let eqn = DiffSl::<M, CG>::compile("
     R { 100.0 } L { 1.0 } C { 0.001 } V0 { 10 } omega { 100.0 }
@@ -124,11 +125,10 @@ let eqn = DiffSl::<M, CG>::compile("
         iR,
     }
 ").unwrap();
-let problem = OdeBuilder::new()
+let problem = OdeBuilder::<M>::new()
     .build_from_eqn(eqn).unwrap();
-let mut solver = Bdf::default();
-let state = OdeSolverState::new(&problem, &solver).unwrap();
-let (ys, ts) = solver.solve(&problem, state, 1.0).unwrap();
+let mut solver = problem.bdf::<LS>().unwrap();
+let (ys, ts) = solver.solve(1.0).unwrap();
 
 let ir: Vec<_> = ys.row(0).into_iter().copied().collect();
 let t: Vec<_> = ts.into_iter().collect();

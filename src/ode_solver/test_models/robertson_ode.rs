@@ -13,7 +13,7 @@ pub fn robertson_ode<M: Matrix + 'static>(
     OdeSolverSolution<M::V>,
 ) {
     const N: usize = 3;
-    let problem = OdeBuilder::new()
+    let problem = OdeBuilder::<M>::new()
         .p([0.04, 1.0e4, 3.0e7])
         .rtol(1e-4)
         .atol(
@@ -25,7 +25,7 @@ pub fn robertson_ode<M: Matrix + 'static>(
                 .collect::<Vec<f64>>(),
         )
         .use_coloring(use_coloring)
-        .build_ode(
+        .rhs_implicit(
             //     dy1/dt = -.04*y1 + 1.e4*y2*y3
             //*    dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*(y2)^2
             //*    dy3/dt = 3.e7*(y2)^2
@@ -49,11 +49,12 @@ pub fn robertson_ode<M: Matrix + 'static>(
                     y[i + 2] = M::T::from(2.0) * p[2] * x[i + 1] * v[i + 1];
                 }
             },
-            move |_p: &M::V, _t: M::T| {
-                let init = [M::T::one(), M::T::zero(), M::T::zero()];
-                M::V::from_vec(init.iter().cycle().take(ngroups * N).cloned().collect())
-            },
         )
+        .init(move |_p: &M::V, _t: M::T| {
+            let init = [M::T::one(), M::T::zero(), M::T::zero()];
+            M::V::from_vec(init.iter().cycle().take(ngroups * N).cloned().collect())
+        })
+        .build()
         .unwrap();
 
     let mut soln = OdeSolverSolution::default();

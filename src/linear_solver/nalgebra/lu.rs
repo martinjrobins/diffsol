@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use nalgebra::{DMatrix, DVector, Dyn};
 
 use crate::{
@@ -55,8 +53,6 @@ impl<T: Scalar> LinearSolver<DMatrix<T>> for LU<T> {
     fn set_problem<C: NonLinearOpJacobian<T = T, V = DVector<T>, M = DMatrix<T>>>(
         &mut self,
         op: &C,
-        _rtol: T,
-        _atol: Rc<DVector<T>>,
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();

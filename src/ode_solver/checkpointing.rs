@@ -6,6 +6,7 @@ use crate::{
 };
 use num_traits::One;
 
+#[derive(Clone)]
 pub struct HermiteInterpolator<V>
 where
     V: Vector,
@@ -35,16 +36,15 @@ where
     pub fn new(ys: Vec<V>, ydots: Vec<V>, ts: Vec<V::T>) -> Self {
         HermiteInterpolator { ys, ydots, ts }
     }
-    pub fn reset<Eqn, Method, State>(
+    pub fn reset<'a, Eqn, Method, State>(
         &mut self,
-        problem: &OdeSolverProblem<Eqn>,
         solver: &mut Method,
         state0: &State,
         state1: &State,
     ) -> Result<(), DiffsolError>
     where
-        Eqn: OdeEquations<V = V, T = V::T>,
-        Method: OdeSolverMethod<Eqn, State = State>,
+        Eqn: OdeEquations<V = V, T = V::T> + 'a,
+        Method: OdeSolverMethod<'a, Eqn, State = State>,
         State: OdeSolverState<V>,
     {
         let state0_ref = state0.as_ref();
@@ -56,12 +56,12 @@ where
         self.ydots.push(state0_ref.dy.clone());
         self.ts.push(state0_ref.t);
 
-        solver.set_problem(state0.clone(), problem)?;
-        while solver.state().unwrap().t < state1_ref.t {
+        solver.set_state(state0.clone());
+        while solver.state().t < state1_ref.t {
             solver.step()?;
-            self.ys.push(solver.state().unwrap().y.clone());
-            self.ydots.push(solver.state().unwrap().dy.clone());
-            self.ts.push(solver.state().unwrap().t);
+            self.ys.push(solver.state().y.clone());
+            self.ydots.push(solver.state().dy.clone());
+            self.ts.push(solver.state().t);
         }
         Ok(())
     }
@@ -106,21 +106,35 @@ where
     }
 }
 
-pub struct Checkpointing<Eqn, Method>
+pub struct Checkpointing<'a, Eqn, Method>
 where
-    Method: OdeSolverMethod<Eqn>,
+    Method: OdeSolverMethod<'a, Eqn>,
     Eqn: OdeEquations,
 {
     checkpoints: Vec<Method::State>,
     segment: RefCell<HermiteInterpolator<Eqn::V>>,
     previous_segment: RefCell<Option<HermiteInterpolator<Eqn::V>>>,
     solver: RefCell<Method>,
-    pub(crate) problem: OdeSolverProblem<Eqn>,
 }
 
-impl<Eqn, Method> Checkpointing<Eqn, Method>
+impl<'a, Eqn, Method> Clone for Checkpointing<'a, Eqn, Method>
 where
-    Method: OdeSolverMethod<Eqn>,
+    Method: OdeSolverMethod<'a, Eqn>,
+    Eqn: OdeEquations,
+{
+    fn clone(&self) -> Self {
+        Checkpointing {
+            checkpoints: self.checkpoints.clone(),
+            segment: RefCell::new(self.segment.borrow().clone()),
+            previous_segment: RefCell::new(self.previous_segment.borrow().clone()),
+            solver: RefCell::new(self.solver.borrow().clone()),
+        }
+    }
+}
+
+impl<'a, Eqn, Method> Checkpointing<'a, Eqn, Method>
+where
+    Method: OdeSolverMethod<'a, Eqn>,
     Eqn: OdeEquations,
 {
     pub fn new(
@@ -129,21 +143,16 @@ where
         checkpoints: Vec<Method::State>,
         segment: Option<HermiteInterpolator<Eqn::V>>,
     ) -> Self {
-        if solver.problem().is_none() {
-            panic!("Solver must have a problem set");
-        }
         if checkpoints.len() < 2 {
             panic!("Checkpoints must have at least 2 elements");
         }
         if start_idx >= checkpoints.len() - 1 {
             panic!("start_idx must be less than checkpoints.len() - 1");
         }
-        let problem = solver.problem().unwrap().clone();
         let segment = segment.unwrap_or_else(|| {
             let mut segment = HermiteInterpolator::default();
             segment
                 .reset(
-                    &problem,
                     &mut solver,
                     &checkpoints[start_idx],
                     &checkpoints[start_idx + 1],
@@ -159,8 +168,11 @@ where
             segment,
             previous_segment,
             solver,
-            problem,
         }
+    }
+
+    pub fn problem(&self) -> &'a OdeSolverProblem<Eqn> {
+        self.solver.borrow().problem()
     }
 
     pub fn interpolate(&self, t: Eqn::T, y: &mut Eqn::V) -> Result<(), DiffsolError> {
@@ -202,7 +214,6 @@ where
         let mut previous_segment = self.previous_segment.borrow_mut();
         let mut segment = self.segment.borrow_mut();
         previous_segment.as_mut().unwrap().reset(
-            &self.problem,
             &mut *solver,
             &self.checkpoints[idx],
             &self.checkpoints[idx + 1],
@@ -218,39 +229,39 @@ mod tests {
     use nalgebra::{DMatrix, DVector};
 
     use crate::{
-        ode_solver::test_models::robertson::robertson, Bdf, BdfState, OdeEquations,
-        OdeSolverMethod, OdeSolverState, Op, Vector,
+        ode_solver::test_models::robertson::robertson, NalgebraLU, OdeEquations, OdeSolverMethod,
+        Op, Vector,
     };
 
     use super::{Checkpointing, HermiteInterpolator};
 
     #[test]
     fn test_checkpointing() {
-        let mut solver = Bdf::default();
-        let (problem, soln) = robertson::<DMatrix<f64>>(false);
+        type M = DMatrix<f64>;
+        type LS = NalgebraLU<f64>;
+        let (problem, soln) = robertson::<M>(false);
         let t_final = soln.solution_points.last().unwrap().t;
         let n_steps = 30;
-        let state0: BdfState<_, _> = OdeSolverState::new(&problem, &solver).unwrap();
-        solver.set_problem(state0.clone(), &problem).unwrap();
-        let mut checkpoints = vec![state0];
+        let mut solver = problem.bdf::<LS>().unwrap();
+        let mut checkpoints = vec![solver.checkpoint()];
         let mut i = 0;
         let mut ys = Vec::new();
         let mut ts = Vec::new();
         let mut ydots = Vec::new();
-        while solver.state().unwrap().t < t_final {
-            ts.push(solver.state().unwrap().t);
-            ys.push(solver.state().unwrap().y.clone());
-            ydots.push(solver.state().unwrap().dy.clone());
+        while solver.state().t < t_final {
+            ts.push(solver.state().t);
+            ys.push(solver.state().y.clone());
+            ydots.push(solver.state().dy.clone());
             solver.step().unwrap();
             i += 1;
-            if i % n_steps == 0 && solver.state().unwrap().t < t_final {
-                checkpoints.push(solver.checkpoint().unwrap());
+            if i % n_steps == 0 && solver.state().t < t_final {
+                checkpoints.push(solver.checkpoint());
                 ts.clear();
                 ys.clear();
                 ydots.clear();
             }
         }
-        checkpoints.push(solver.checkpoint().unwrap());
+        checkpoints.push(solver.checkpoint());
         let segment = HermiteInterpolator::new(ys, ydots, ts);
         let checkpointer =
             Checkpointing::new(solver, checkpoints.len() - 2, checkpoints, Some(segment));

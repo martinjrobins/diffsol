@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::{
     error::{DiffsolError, LinearSolverError},
     linear_solver::LinearSolver,
@@ -67,8 +65,6 @@ impl<T: Scalar> LinearSolver<SparseColMat<T>> for FaerSparseLU<T> {
     fn set_problem<C: NonLinearOpJacobian<T = T, V = Col<T>, M = SparseColMat<T>>>(
         &mut self,
         op: &C,
-        _rtol: T,
-        _atol: Rc<Col<T>>,
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();

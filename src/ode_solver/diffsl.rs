@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
 
 use diffsl::{execution::module::CodegenModule, Compiler};
 
@@ -28,7 +28,7 @@ pub struct DiffSlContext<M: Matrix<T = T>, CG: CodegenModule> {
 
 impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
     /// Create a new context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
-    /// The input parameters are not initialized and must be set using the [Op::set_params] function before solving the ODE.
+    /// The input parameters are not initialized and must be set using the [OdeEquations::set_params] function before solving the ODE.
     pub fn new(text: &str) -> Result<Self, DiffsolError> {
         let compiler =
             Compiler::from_discrete_str(text).map_err(|e| DiffsolError::Other(e.to_string()))?;
@@ -343,19 +343,6 @@ impl<M: Matrix<T = T>, CG: CodegenModule> Op for DiffSl<M, CG> {
     fn nparams(&self) -> usize {
         self.context.nparams
     }
-    fn set_params(&mut self, p: Rc<Self::V>) {
-        // set the parameters in data
-        self.context
-            .compiler
-            .set_inputs(p.as_slice(), self.context.data.borrow_mut().as_mut_slice());
-
-        // set_u0 will calculate all the constants in the equations based on the params
-        let mut dummy = M::V::zeros(self.context.nstates);
-        self.context.compiler.set_u0(
-            dummy.as_mut_slice(),
-            self.context.data.borrow_mut().as_mut_slice(),
-        );
-    }
 }
 
 impl<'a, M: Matrix<T = T>, CG: CodegenModule> OdeEquationsRef<'a> for DiffSl<M, CG> {
@@ -386,18 +373,30 @@ impl<M: Matrix<T = T>, CG: CodegenModule> OdeEquations for DiffSl<M, CG> {
     fn out(&self) -> Option<DiffSlOut<'_, M, CG>> {
         Some(DiffSlOut(self))
     }
+
+    fn set_params(&mut self, p: &Self::V) {
+        // set the parameters in data
+        self.context
+            .compiler
+            .set_inputs(p.as_slice(), self.context.data.borrow_mut().as_mut_slice());
+
+        // set_u0 will calculate all the constants in the equations based on the params
+        let mut dummy = M::V::zeros(self.context.nstates);
+        self.context.compiler.set_u0(
+            dummy.as_mut_slice(),
+            self.context.data.borrow_mut().as_mut_slice(),
+        );
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
-
     use diffsl::{execution::module::CodegenModule, CraneliftModule};
     use nalgebra::DVector;
 
     use crate::{
-        Bdf, ConstantOp, LinearOp, NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations,
-        OdeSolverMethod, OdeSolverState, Op, Vector,
+        ConstantOp, LinearOp, NalgebraLU, NonLinearOp, NonLinearOpJacobian, OdeBuilder,
+        OdeEquations, OdeSolverMethod, Vector,
     };
 
     use super::{DiffSl, DiffSlContext};
@@ -445,7 +444,7 @@ mod tests {
         let context = DiffSlContext::<nalgebra::DMatrix<f64>, CG>::new(text).unwrap();
         let p = DVector::from_vec(vec![r, k]);
         let mut eqn = DiffSl::from_context(context);
-        eqn.set_params(Rc::new(p));
+        eqn.set_params(&p);
 
         // test that the initial values look ok
         let y0 = 0.1;
@@ -466,11 +465,13 @@ mod tests {
         mass_y.assert_eq_st(&mass_y_expect, 1e-10);
 
         // solver a bit and check the state and output
-        let problem = OdeBuilder::new().p([r, k]).build_from_eqn(eqn).unwrap();
-        let mut solver = Bdf::default();
+        let problem = OdeBuilder::<nalgebra::DMatrix<f64>>::new()
+            .p([r, k])
+            .build_from_eqn(eqn)
+            .unwrap();
+        let mut solver = problem.bdf::<NalgebraLU<f64>>().unwrap();
         let t = 1.0;
-        let state = OdeSolverState::new(&problem, &solver).unwrap();
-        let (ys, ts) = solver.solve(&problem, state, t).unwrap();
+        let (ys, ts) = solver.solve(t).unwrap();
         for (i, t) in ts.iter().enumerate() {
             let y_expect = k / (1.0 + (k - y0) * (-r * t).exp() / y0);
             let z_expect = 2.0 * y_expect;
@@ -480,8 +481,8 @@ mod tests {
 
         // do it again with some explicit t_evals
         let t_evals = vec![0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0];
-        let state = OdeSolverState::new(&problem, &solver).unwrap();
-        let ys = solver.solve_dense(&problem, state, &t_evals).unwrap();
+        let mut solver = problem.bdf::<NalgebraLU<f64>>().unwrap();
+        let ys = solver.solve_dense(&t_evals).unwrap();
         for (i, t) in t_evals.iter().enumerate() {
             let y_expect = k / (1.0 + (k - y0) * (-r * t).exp() / y0);
             let z_expect = 2.0 * y_expect;

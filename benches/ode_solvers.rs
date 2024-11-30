@@ -17,9 +17,11 @@ fn criterion_benchmark(c: &mut Criterion) {
         ($name:ident, $solver:ident, $linear_solver:ident, $model:ident, $model_problem:ident, $matrix:ty) => {
             c.bench_function(stringify!($name), |b| {
                 b.iter(|| {
-                    let ls = $linear_solver::default();
                     let (problem, soln) = $model_problem::<$matrix>(false);
-                    benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t, ls);
+                    benchmarks::$solver::<_, $linear_solver<_>>(
+                        &problem,
+                        soln.solution_points.last().unwrap().t,
+                    );
                 })
             });
         };
@@ -126,9 +128,8 @@ fn criterion_benchmark(c: &mut Criterion) {
         ($name:ident, $solver:ident, $linear_solver:ident, $model:ident, $model_problem:ident, $matrix:ty,  $($N:expr),+) => {
             $(c.bench_function(concat!(stringify!($name), "_", $N), |b| {
                 b.iter(|| {
-                    let ls = $linear_solver::default();
                     let (problem, soln) = $model_problem::<$matrix>(false, $N);
-                    benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t, ls);
+                    benchmarks::$solver::<_, $linear_solver<_>>(&problem, soln.solution_points.last().unwrap().t);
                 })
             });)+
         };
@@ -219,12 +220,14 @@ fn criterion_benchmark(c: &mut Criterion) {
         ($name:ident, $solver:ident, $linear_solver:ident, $matrix:ty) => {
             #[cfg(feature = "diffsl-llvm")]
             c.bench_function(stringify!($name), |b| {
-                use diffsol::diffsl::LlvmModule;
                 use diffsol::ode_solver::test_models::robertson::*;
+                use diffsol::LlvmModule;
                 b.iter(|| {
                     let (problem, soln) = robertson_diffsl_problem::<$matrix, LlvmModule>();
-                    let ls = $linear_solver::default();
-                    benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t, ls)
+                    benchmarks::$solver::<_, $linear_solver<_>>(
+                        &problem,
+                        soln.solution_points.last().unwrap().t,
+                    )
                 })
             });
         };
@@ -242,8 +245,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             $(c.bench_function(concat!(stringify!($name), "_", $N), |b| {
                 b.iter(|| {
                     let (problem, soln) = $model_problem::<$matrix, $N>();
-                    let ls = $linear_solver::default();
-                    benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t, ls)
+                    benchmarks::$solver::<_, $linear_solver<_>>(&problem, soln.solution_points.last().unwrap().t)
                 })
             });)+
         };
@@ -334,8 +336,7 @@ fn criterion_benchmark(c: &mut Criterion) {
             $(c.bench_function(concat!(stringify!($name), "_", $N), |b| {
                 b.iter(|| {
                     let (problem, soln) = $model_problem::<$matrix, $N>();
-                    let ls = $linear_solver::default();
-                    benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t, ls)
+                    benchmarks::$solver::<_, $linear_solver<_>>(&problem, soln.solution_points.last().unwrap().t)
                 })
             });)+
         };
@@ -424,11 +425,10 @@ fn criterion_benchmark(c: &mut Criterion) {
             $(#[cfg(feature = "diffsl-llvm")]
             c.bench_function(concat!(stringify!($name), "_", $N), |b| {
                 use diffsol::ode_solver::test_models::heat2d::*;
-                use diffsol::diffsl::LlvmModule;
+                use diffsol::LlvmModule;
                 b.iter(|| {
                     let (problem, soln) = heat2d_diffsl_problem::<$matrix, LlvmModule, $N>();
-                    let ls = $linear_solver::default();
-                    benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t, ls)
+                    benchmarks::$solver::<_, $linear_solver<_>>(&problem, soln.solution_points.last().unwrap().t)
                 })
             });)+
         };
@@ -499,11 +499,10 @@ fn criterion_benchmark(c: &mut Criterion) {
             $(#[cfg(feature = "diffsl-llvm")]
             c.bench_function(concat!(stringify!($name), "_", $N), |b| {
                 use diffsol::ode_solver::test_models::foodweb::*;
-                use diffsol::diffsl::LlvmModule;
+                use diffsol::LlvmModule;
                 b.iter(|| {
                     let (problem, soln) = foodweb_diffsl_problem::<$matrix, LlvmModule, $N>();
-                    let ls = $linear_solver::default();
-                    benchmarks::$solver(&problem, soln.solution_points.last().unwrap().t, ls)
+                    benchmarks::$solver::<_, $linear_solver<_>>(&problem, soln.solution_points.last().unwrap().t)
                 })
             });)+
 
@@ -542,56 +541,47 @@ mod benchmarks {
     use diffsol::vector::VectorRef;
     use diffsol::LinearSolver;
     use diffsol::{
-        Bdf, DefaultDenseMatrix, DefaultSolver, Matrix, NewtonNonlinearSolver,
-        OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Sdirk, Tableau,
+        DefaultDenseMatrix, DefaultSolver, Matrix, OdeEquationsImplicit, OdeSolverMethod,
+        OdeSolverProblem,
     };
 
     // bdf
-    pub fn bdf<Eqn>(problem: &OdeSolverProblem<Eqn>, t: Eqn::T, ls: impl LinearSolver<Eqn::M>)
+    pub fn bdf<Eqn, LS>(problem: &OdeSolverProblem<Eqn>, t: Eqn::T)
     where
         Eqn: OdeEquationsImplicit,
         Eqn::M: Matrix + DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
+        LS: LinearSolver<Eqn::M>,
         for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
         for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
     {
-        let nls = NewtonNonlinearSolver::new(ls);
-        let mut s = Bdf::<<Eqn::V as DefaultDenseMatrix>::M, _, _>::new(nls);
-        let state = OdeSolverState::new(problem, &s).unwrap();
-        let _y = s.solve(problem, state, t);
+        let mut s = problem.bdf::<LS>().unwrap();
+        let _y = s.solve(t);
     }
 
-    pub fn esdirk34<Eqn>(
-        problem: &OdeSolverProblem<Eqn>,
-        t: Eqn::T,
-        linear_solver: impl LinearSolver<Eqn::M>,
-    ) where
+    pub fn esdirk34<Eqn, LS>(problem: &OdeSolverProblem<Eqn>, t: Eqn::T)
+    where
         Eqn: OdeEquationsImplicit,
         Eqn::M: Matrix + DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
+        LS: LinearSolver<Eqn::M>,
         for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
         for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
     {
-        let tableau = Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::esdirk34();
-        let mut s = Sdirk::new(tableau, linear_solver);
-        let state = OdeSolverState::new(problem, &s).unwrap();
-        let _y = s.solve(problem, state, t);
+        let mut s = problem.esdirk34::<LS>().unwrap();
+        let _y = s.solve(t);
     }
 
-    pub fn tr_bdf2<Eqn>(
-        problem: &OdeSolverProblem<Eqn>,
-        t: Eqn::T,
-        linear_solver: impl LinearSolver<Eqn::M>,
-    ) where
+    pub fn tr_bdf2<Eqn, LS>(problem: &OdeSolverProblem<Eqn>, t: Eqn::T)
+    where
         Eqn: OdeEquationsImplicit,
         Eqn::M: Matrix + DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
+        LS: LinearSolver<Eqn::M>,
         for<'a> &'a Eqn::V: VectorRef<Eqn::V>,
         for<'a> &'a Eqn::M: MatrixRef<Eqn::M>,
     {
-        let tableau = Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::tr_bdf2();
-        let mut s = Sdirk::new(tableau, linear_solver);
-        let state = OdeSolverState::new(problem, &s).unwrap();
-        let _y = s.solve(problem, state, t);
+        let mut s = problem.tr_bdf2::<LS>().unwrap();
+        let _y = s.solve(t);
     }
 }

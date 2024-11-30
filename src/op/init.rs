@@ -3,7 +3,7 @@ use crate::{
     VectorIndex,
 };
 use num_traits::{One, Zero};
-use std::{cell::RefCell, rc::Rc};
+use std::cell::RefCell;
 
 use super::{NonLinearOp, Op};
 
@@ -11,17 +11,16 @@ use super::{NonLinearOp, Op};
 ///
 /// We calculate consistent initial conditions following the approach of
 /// Brown, P. N., Hindmarsh, A. C., & Petzold, L. R. (1998). Consistent initial condition calculation for differential-algebraic systems. SIAM Journal on Scientific Computing, 19(5), 1495-1512.
-pub struct InitOp<Eqn: OdeEquationsImplicit> {
-    eqn: Rc<Eqn>,
+pub struct InitOp<'a, Eqn: OdeEquationsImplicit> {
+    eqn: &'a Eqn,
     jac: Eqn::M,
     pub y0: RefCell<Eqn::V>,
     pub algebraic_indices: <Eqn::V as Vector>::Index,
     neg_mass: Eqn::M,
 }
 
-impl<Eqn: OdeEquationsImplicit> InitOp<Eqn> {
-    pub fn new(eqn: &Rc<Eqn>, t0: Eqn::T, y0: &Eqn::V) -> Self {
-        let eqn = eqn.clone();
+impl<'a, Eqn: OdeEquationsImplicit> InitOp<'a, Eqn> {
+    pub fn new(eqn: &'a Eqn, t0: Eqn::T, y0: &Eqn::V) -> Self {
         let n = eqn.rhs().nstates();
         let mass_diagonal = eqn.mass().unwrap().matrix(t0).diagonal();
         let algebraic_indices = mass_diagonal.filter_indices(|x| x == Eqn::T::zero());
@@ -71,7 +70,7 @@ impl<Eqn: OdeEquationsImplicit> InitOp<Eqn> {
     }
 }
 
-impl<Eqn: OdeEquationsImplicit> Op for InitOp<Eqn> {
+impl<Eqn: OdeEquationsImplicit> Op for InitOp<'_, Eqn> {
     type V = Eqn::V;
     type T = Eqn::T;
     type M = Eqn::M;
@@ -86,7 +85,7 @@ impl<Eqn: OdeEquationsImplicit> Op for InitOp<Eqn> {
     }
 }
 
-impl<Eqn: OdeEquationsImplicit> NonLinearOp for InitOp<Eqn> {
+impl<Eqn: OdeEquationsImplicit> NonLinearOp for InitOp<'_, Eqn> {
     // -M_u du + f(u, v)
     // g(t, u, v)
     fn call_inplace(&self, x: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
@@ -103,7 +102,7 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOp for InitOp<Eqn> {
     }
 }
 
-impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for InitOp<Eqn> {
+impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for InitOp<'_, Eqn> {
     // J v
     fn jac_mul_inplace(&self, _x: &Eqn::V, _t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
         self.jac.gemv(Eqn::T::one(), v, Eqn::T::one(), y);

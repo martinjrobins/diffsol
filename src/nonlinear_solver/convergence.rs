@@ -1,13 +1,12 @@
 use nalgebra::ComplexField;
 use num_traits::{One, Pow};
-use std::rc::Rc;
 
 use crate::{scalar::IndexType, Scalar, Vector};
 
 #[derive(Clone)]
-pub struct Convergence<V: Vector> {
-    rtol: V::T,
-    atol: Rc<V>,
+pub struct Convergence<'a, V: Vector> {
+    pub rtol: V::T,
+    pub atol: &'a V,
     tol: V::T,
     max_iter: IndexType,
     niter: IndexType,
@@ -21,7 +20,7 @@ pub enum ConvergenceStatus {
     MaximumIterations,
 }
 
-impl<V: Vector> Convergence<V> {
+impl<'a, V: Vector> Convergence<'a, V> {
     pub fn max_iter(&self) -> IndexType {
         self.max_iter
     }
@@ -31,7 +30,7 @@ impl<V: Vector> Convergence<V> {
     pub fn niter(&self) -> IndexType {
         self.niter
     }
-    pub fn new(rtol: V::T, atol: Rc<V>) -> Self {
+    pub fn new(rtol: V::T, atol: &'a V) -> Self {
         let minimum_tol = V::T::from(10.0) * V::T::EPSILON / rtol;
         let maximum_tol = V::T::from(0.03);
         let mut tol = V::T::from(0.33);
@@ -57,7 +56,7 @@ impl<V: Vector> Convergence<V> {
 
     pub fn check_new_iteration(&mut self, dy: &mut V, y: &V) -> ConvergenceStatus {
         self.niter += 1;
-        let norm = dy.squared_norm(y, &self.atol, self.rtol).sqrt();
+        let norm = dy.squared_norm(y, self.atol, self.rtol).sqrt();
         // if norm is zero then we are done
         if norm <= V::T::EPSILON {
             return ConvergenceStatus::Converged;

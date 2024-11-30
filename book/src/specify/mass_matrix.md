@@ -38,25 +38,29 @@ use nalgebra::{DMatrix, DVector};
 type M = DMatrix<f64>;
 type V = DVector<f64>;
 
-let problem = OdeBuilder::new()
+let problem = OdeBuilder::<M>::new()
     .t0(0.0)
     .rtol(1e-6)
     .atol([1e-6])
     .p(vec![1.0, 10.0])
-    .build_ode_with_mass::<M, _, _, _, _>(
-    |x, p, _t, y| {
-        y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
-        y[1] = x[0] - x[1];
-    },
-    |x, p, _t, v , y| {
-        y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]);
-        y[1] = v[0] - v[1];
-    },
-    |v, _p, _t, beta, y| {
-        y[0] = v[0] + beta * y[0];
-        y[1] *= beta;
-    },
-    |_p, _t| V::from_element(2, 0.1),
-    ).unwrap();
+    .rhs_implicit(
+        |x, p, _t, y| {
+            y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
+            y[1] = x[0] - x[1];
+        },
+        |x, p, _t, v , y| {
+            y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]);
+            y[1] = v[0] - v[1];
+        },
+    )
+    .mass(
+        |v, _p, _t, beta, y| {
+            y[0] = v[0] + beta * y[0];
+            y[1] *= beta;
+        },
+    )
+    .init(|_p, _t| V::from_element(2, 0.1))
+    .build()
+    .unwrap();
 # }
 ```

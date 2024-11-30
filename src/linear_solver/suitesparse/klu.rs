@@ -1,7 +1,5 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use faer::Col;
+use std::cell::RefCell;
 
 #[cfg(target_pointer_width = "32")]
 use suitesparse_sys::{
@@ -223,12 +221,7 @@ where
         Ok(())
     }
 
-    fn set_problem<C: NonLinearOpJacobian<T = M::T, V = M::V, M = M>>(
-        &mut self,
-        op: &C,
-        _rtol: M::T,
-        _atol: Rc<M::V>,
-    ) {
+    fn set_problem<C: NonLinearOpJacobian<T = M::T, V = M::V, M = M>>(&mut self, op: &C) {
         let ncols = op.nstates();
         let nrows = op.nout();
         let mut matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity());
@@ -242,6 +235,7 @@ where
 mod tests {
     use crate::{
         linear_solver::tests::{linear_problem, test_linear_solver},
+        op::ParameterisedOp,
         SparseColMat,
     };
 
@@ -250,7 +244,9 @@ mod tests {
     #[test]
     fn test_klu() {
         let (op, rtol, atol, solns) = linear_problem::<SparseColMat<f64>>();
+        let p = faer::Col::zeros(0);
+        let op = ParameterisedOp::new(&op, &p);
         let s = KLU::default();
-        test_linear_solver(s, op, rtol, atol, solns);
+        test_linear_solver(s, op, rtol, &atol, solns);
     }
 }

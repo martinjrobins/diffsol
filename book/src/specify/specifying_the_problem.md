@@ -30,7 +30,7 @@ DiffSol has three main APIs for specifying problems:
   where the user can implement the functions above on their own structs.
   This API is more flexible than the `OdeBuilder` API, but is more complex to use. It is useful if you have custom data structures and code that you want to use to evaluate
   your functions that does not fit within the `OdeBuilder` API.
-- The [`DiffSlContext`](https://docs.rs/diffsol/latest/diffsol/ode_solver/diffsl/struct.DiffSlContext.html) struct, where the user can specify the functions above using the [DiffSL](https://martinjrobins.github.io/diffsl/)
+- The [`DiffSl`](https://docs.rs/diffsol/latest/diffsol/ode_solver/diffsl/struct.DiffSl.html) struct, where the user can specify the functions above using the [DiffSL](https://martinjrobins.github.io/diffsl/)
   Domain Specific Language (DSL). This API is behind a feature flag (`diffsl` if you want to use the slower cranelift backend, `diffsl-llvm*` if you want to use the faster LLVM backend), but has the best API if you want to use DiffSL from a higher-level language like Python or R while still having similar performance.
 
 

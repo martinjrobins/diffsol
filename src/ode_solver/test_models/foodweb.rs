@@ -1,10 +1,8 @@
-use std::rc::Rc;
-
 use crate::{
     find_jacobian_non_zeros, find_matrix_non_zeros, ode_solver::problem::OdeSolverSolution,
     ConstantOp, JacobianColoring, LinearOp, Matrix, MatrixSparsity, NonLinearOp,
     NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsRef, OdeSolverProblem, Op,
-    UnitCallable, Vector,
+    ParameterisedOp, UnitCallable, Vector,
 };
 use num_traits::Zero;
 
@@ -139,7 +137,7 @@ where
     );
 
     let eqn: DiffSl<M, CG> = DiffSl::from_context(DiffSlContext::new(code.as_str()).unwrap());
-    let problem = OdeBuilder::new()
+    let problem = OdeBuilder::<M>::new()
         .rtol(1e-5)
         .atol([1e-5])
         .build_from_eqn(eqn)
@@ -790,7 +788,7 @@ where
     type Init = FoodWebInit<'a, M, NX>;
     type Rhs = FoodWebRhs<'a, M, NX>;
     type Mass = FoodWebMass<'a, M, NX>;
-    type Root = &'a UnitCallable<M>;
+    type Root = ParameterisedOp<'a, UnitCallable<M>>;
     type Out = FoodWebOut<'a, M, NX>;
 }
 
@@ -809,6 +807,12 @@ where
     }
     fn out(&self) -> Option<FoodWebOut<'_, M, NX>> {
         Some(FoodWebOut::new(self))
+    }
+    fn root(&self) -> Option<<Self as OdeEquationsRef<'_>>::Root> {
+        None
+    }
+    fn set_params(&mut self, _p: &Self::V) {
+        unimplemented!()
     }
 }
 
@@ -1032,18 +1036,7 @@ where
     let context = FoodWebContext::<M, NX>::new();
     let eqn = FoodWeb::new(context, t0);
     let problem = OdeSolverProblem::new(
-        Rc::new(eqn),
-        rtol,
-        Rc::new(atol),
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        t0,
-        h0,
-        false,
+        eqn, rtol, atol, None, None, None, None, None, None, t0, h0, false,
     )
     .unwrap();
     let soln = soln::<M>();

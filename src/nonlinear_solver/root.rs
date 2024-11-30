@@ -8,6 +8,7 @@ use crate::{
 
 use num_traits::{abs, One, Zero};
 
+#[derive(Clone)]
 pub struct RootFinder<V: Vector> {
     t0: RefCell<V::T>,
     g0: RefCell<V>,
@@ -159,23 +160,23 @@ impl<V: Vector> RootFinder<V> {
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
-
-    use crate::{error::DiffsolError, ClosureNoJac, RootFinder, Vector};
+    use crate::{error::DiffsolError, op::ParameterisedOp, ClosureNoJac, RootFinder, Vector};
 
     #[test]
     fn test_root() {
         type V = nalgebra::DVector<f64>;
         type M = nalgebra::DMatrix<f64>;
         let interpolate = |t: f64| -> Result<V, DiffsolError> { Ok(Vector::from_vec(vec![t])) };
+        let p = V::zeros(0);
         let root_fn = ClosureNoJac::<M, _>::new(
             |y: &V, _p: &V, _t: f64, g: &mut V| {
                 g[0] = y[0] - 0.4;
             },
             1,
             1,
-            Rc::new(V::zeros(0)),
+            p.len(),
         );
+        let root_fn = ParameterisedOp::new(&root_fn, &p);
 
         // check no root
         let root_finder = RootFinder::new(1);

@@ -11,12 +11,12 @@ pub fn robertson_ode_with_sens<M: Matrix + 'static>(
     OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {
-    let problem = OdeBuilder::new()
+    let problem = OdeBuilder::<M>::new()
         .p([0.04, 1.0e4, 3.0e7])
         .rtol(1e-4)
         .atol([1.0e-8, 1.0e-6, 1.0e-6])
         .use_coloring(use_coloring)
-        .build_ode_with_sens(
+        .rhs_sens_implicit(
             //     dy1/dt = -.04*y1 + 1.e4*y2*y3
             //*    dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*(y2)^2
             //*    dy3/dt = 3.e7*(y2)^2
@@ -38,9 +38,12 @@ pub fn robertson_ode_with_sens<M: Matrix + 'static>(
                 y[1] = v[0] * x[0] - v[1] * x[1] * x[2] - v[2] * x[1] * x[1];
                 y[2] = v[2] * x[1] * x[1];
             },
+        )
+        .init_sens(
             |_p: &M::V, _t: M::T| M::V::from_vec(vec![1.0.into(), 0.0.into(), 0.0.into()]),
             |_p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V| y.fill(M::T::zero()),
         )
+        .build()
         .unwrap();
 
     let mut soln = OdeSolverSolution::default();

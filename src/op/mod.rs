@@ -1,5 +1,3 @@
-use std::rc::Rc;
-
 use crate::{
     ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
     NonLinearOp, NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar, Vector,
@@ -44,18 +42,48 @@ pub trait Op {
     fn nout(&self) -> usize;
 
     /// Return the number of parameters of the operator.
-    fn nparams(&self) -> usize {
-        0
-    }
-
-    /// Set the parameters of the operator to the given value.
-    fn set_params(&mut self, p: Rc<Self::V>) {
-        assert_eq!(p.len(), self.nparams());
-    }
+    fn nparams(&self) -> usize;
 
     /// Return statistics about the operator (e.g. how many times it was called, how many times the jacobian was computed, etc.)
     fn statistics(&self) -> OpStatistics {
         OpStatistics::default()
+    }
+}
+
+/// A wrapper for an operator that parameterises it with a parameter vector.
+pub struct ParameterisedOp<'a, C: Op> {
+    pub op: &'a C,
+    pub p: &'a C::V,
+}
+
+impl<'a, C: Op> ParameterisedOp<'a, C> {
+    pub fn new(op: &'a C, p: &'a C::V) -> Self {
+        Self { op, p }
+    }
+}
+
+pub trait BuilderOp: Op {
+    fn set_nstates(&mut self, nstates: usize);
+    fn set_nparams(&mut self, nparams: usize);
+    fn set_nout(&mut self, nout: usize);
+    fn calculate_sparsity(&mut self, y0: &Self::V, t0: Self::T, p: &Self::V);
+}
+
+impl<C: Op> Op for ParameterisedOp<'_, C> {
+    type V = C::V;
+    type T = C::T;
+    type M = C::M;
+    fn nstates(&self) -> usize {
+        self.op.nstates()
+    }
+    fn nout(&self) -> usize {
+        self.op.nout()
+    }
+    fn nparams(&self) -> usize {
+        self.op.nparams()
+    }
+    fn statistics(&self) -> OpStatistics {
+        self.op.statistics()
     }
 }
 
@@ -95,6 +123,24 @@ impl OpStatistics {
 }
 
 impl<C: Op> Op for &C {
+    type T = C::T;
+    type V = C::V;
+    type M = C::M;
+    fn nstates(&self) -> usize {
+        C::nstates(*self)
+    }
+    fn nout(&self) -> usize {
+        C::nout(*self)
+    }
+    fn nparams(&self) -> usize {
+        C::nparams(*self)
+    }
+    fn statistics(&self) -> OpStatistics {
+        C::statistics(*self)
+    }
+}
+
+impl<C: Op> Op for &mut C {
     type T = C::T;
     type V = C::V;
     type M = C::M;

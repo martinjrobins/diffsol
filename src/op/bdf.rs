@@ -1,19 +1,17 @@
 use crate::{
     matrix::DenseMatrix, ode_solver::equations::OdeEquationsImplicit, scale, LinearOp, Matrix,
-    MatrixRef, MatrixSparsity, NonLinearOp, NonLinearOpJacobian, OdeSolverProblem, Op, Vector,
-    VectorRef,
+    MatrixSparsity, NonLinearOp, NonLinearOpJacobian, Op, Vector,
 };
 use num_traits::{One, Zero};
 use std::ops::MulAssign;
 use std::{
     cell::{Ref, RefCell},
     ops::{AddAssign, Deref, SubAssign},
-    rc::Rc,
 };
 
 // callable to solve for F(y) = M (y' + psi) - c * f(y) = 0
 pub struct BdfCallable<Eqn: OdeEquationsImplicit> {
-    eqn: Rc<Eqn>,
+    pub(crate) eqn: Eqn,
     psi_neg_y0: RefCell<Eqn::V>,
     c: RefCell<Eqn::T>,
     tmp: RefCell<Eqn::V>,
@@ -25,6 +23,19 @@ pub struct BdfCallable<Eqn: OdeEquationsImplicit> {
 }
 
 impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
+    pub fn clone_state(&self, eqn: Eqn) -> Self {
+        Self {
+            eqn,
+            psi_neg_y0: RefCell::new(self.psi_neg_y0.borrow().clone()),
+            c: RefCell::new(*self.c.borrow()),
+            tmp: RefCell::new(self.tmp.borrow().clone()),
+            rhs_jac: RefCell::new(self.rhs_jac.borrow().clone()),
+            mass_jac: RefCell::new(self.mass_jac.borrow().clone()),
+            jacobian_is_stale: RefCell::new(*self.jacobian_is_stale.borrow()),
+            number_of_jac_evals: RefCell::new(*self.number_of_jac_evals.borrow()),
+            sparsity: self.sparsity.clone(),
+        }
+    }
     // F(y) = M (y - y0 + psi) - c * f(y) = 0
     // M = I
     // dg = f(y)
@@ -43,8 +54,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
         let c = self.c.borrow();
         d.axpy(*c, dg, -Eqn::T::one());
     }
-    pub fn from_sensitivity_eqn(eqn: &Rc<Eqn>) -> Self {
-        let eqn = eqn.clone();
+    pub fn new_no_jacobian(eqn: Eqn) -> Self {
         let n = eqn.rhs().nstates();
         let c = RefCell::new(Eqn::T::zero());
         let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n));
@@ -66,15 +76,14 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
             sparsity,
         }
     }
-    pub fn eqn_mut(&mut self) -> &mut Rc<Eqn> {
-        &mut self.eqn
-    }
-    pub fn eqn(&self) -> &Rc<Eqn> {
+    pub fn eqn(&self) -> &Eqn {
         &self.eqn
     }
-    pub fn new(ode_problem: &OdeSolverProblem<Eqn>) -> Self {
-        let eqn = ode_problem.eqn.clone();
-        let n = ode_problem.eqn.rhs().nstates();
+    pub fn eqn_mut(&mut self) -> &mut Eqn {
+        &mut self.eqn
+    }
+    pub fn new(eqn: Eqn) -> Self {
+        let n = eqn.rhs().nstates();
         let c = RefCell::new(Eqn::T::zero());
         let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n));
         let jacobian_is_stale = RefCell::new(true);
@@ -146,10 +155,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
     pub fn number_of_jac_evals(&self) -> usize {
         *self.number_of_jac_evals.borrow()
     }
-    pub fn set_c(&self, h: Eqn::T, alpha: Eqn::T)
-    where
-        for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-    {
+    pub fn set_c(&self, h: Eqn::T, alpha: Eqn::T) {
         self.c.replace(h * alpha);
     }
     fn set_psi<M: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
@@ -204,11 +210,7 @@ impl<Eqn: OdeEquationsImplicit> Op for BdfCallable<Eqn> {
 // dF(y)/dp = dM/dp (y - y0 + psi) + Ms - c * df(y)/dp - c df(y)/dy s = 0
 // jac is M - c * df(y)/dy, same
 // callable to solve for F(y) = M (y' + psi) - f(y) = 0
-impl<Eqn: OdeEquationsImplicit> NonLinearOp for BdfCallable<Eqn>
-where
-    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
-    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-{
+impl<Eqn: OdeEquationsImplicit> NonLinearOp for BdfCallable<Eqn> {
     // F(y) = M (y - y0 + psi) - c * f(y) = 0
     fn call_inplace(&self, x: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
         let psi_neg_y0_ref = self.psi_neg_y0.borrow();
@@ -229,11 +231,7 @@ where
     }
 }
 
-impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for BdfCallable<Eqn>
-where
-    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
-    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-{
+impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for BdfCallable<Eqn> {
     // (M - c * f'(y)) v
     fn jac_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
         self.eqn.rhs().jac_mul_inplace(x, t, v, y);
@@ -290,7 +288,7 @@ mod tests {
     #[test]
     fn test_bdf_callable() {
         let (problem, _soln) = exponential_decay_problem::<Mcpu>(false);
-        let mut bdf_callable = BdfCallable::new(&problem);
+        let mut bdf_callable = BdfCallable::new(&problem.eqn);
         let c = 0.1;
         let phi_neg_y0 = Vcpu::from_vec(vec![1.1, 1.2]);
         bdf_callable.set_c_direct(c);
