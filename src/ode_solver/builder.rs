@@ -322,7 +322,6 @@ where
         }
     }
 
-
     /// Set the initial condition of the ODE for adjoint sensitivity analysis.
     ///
     /// # Arguments
@@ -445,7 +444,6 @@ where
             integrate_out: self.integrate_out,
         }
     }
-
 
     /// Set a root equation for the ODE.
     ///
