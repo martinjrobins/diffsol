@@ -185,6 +185,9 @@ impl Op for MyMass {
   fn nout(&amp;self) -&gt; usize {
       1
   }
+  fn nparams(&amp;self) -&gt; usize {
+      0
+  }
 }
 
 impl LinearOp for MyMass {
@@ -192,21 +195,6 @@ impl LinearOp for MyMass {
       y.gemv(1.0, &amp;self.mass, x, beta)
   }
 }
-<span class="boring">}</span></code></pre></pre>
-<p>Alternatively, we can use the <a href="https://docs.rs/diffsol/latest/diffsol/op/linear_closure/struct.LinearClosure.html"><code>LinearClosure</code></a> struct to implement the <code>LinearOp</code> trait for us.</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
-</span><span class="boring">use std::rc::Rc;
-</span>use diffsol::LinearClosure;
-
-<span class="boring">type T = f64;
-</span><span class="boring">type V = nalgebra::DVector&lt;T&gt;;
-</span><span class="boring">type M = nalgebra::DMatrix&lt;T&gt;;
-</span><span class="boring">
-</span><span class="boring">let p = Rc::new(V::from_vec(vec![1.0, 10.0]));
-</span>let mass_fn = |v: &amp;V, _p: &amp;V, _t: T, beta: T, y: &amp;mut V| {
-    y[0] = v[0] + beta * y[0];
-};
-let mass = Rc::new(LinearClosure::&lt;M, _&gt;::new(mass_fn, 1, 1, p.clone()));
 <span class="boring">}</span></code></pre></pre>
 
                     </main>
@@ -217,7 +205,7 @@ let mass = Rc::new(LinearClosure::&lt;M, _&gt;::new(mass_fn, 1, 1, p.clone()));
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../../specify/custom/putting_it_all_together.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../../specify/custom/ode_systems.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -231,7 +219,7 @@ let mass = Rc::new(LinearClosure::&lt;M, _&gt;::new(mass_fn, 1, 1, p.clone()));
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../../specify/custom/putting_it_all_together.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../../specify/custom/ode_systems.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

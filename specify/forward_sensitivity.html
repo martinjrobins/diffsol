@@ -168,22 +168,26 @@ The logistic growth equation is:</p>
 <p>\[J_p v = v_r y (1 - y/K) + v_K r y^2 / K^2 .\]</p>
 <p>We also need the partial derivative of the initial state vector with respect to the parameters multiplied by a vector \(v\), which we will call \(J_{y_0} v\). Since the initial state vector is constant, this is just zero</p>
 <p>\[J_{y_0} v = 0.\]</p>
-<p>We can then use the <code>OdeBuilder</code> struct to specify the sensitivity problem. The <code>build_ode_with_sens</code> method is used to create a new problem that includes the sensitivity equations.</p>
+<p>We can then use the <code>OdeBuilder</code> struct to specify the sensitivity problem. The <code>rhs_sens_implicit</code> and <code>init_sens</code> methods are used to create a new problem that includes the sensitivity equations.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
 </span>use diffsol::OdeBuilder;
 use nalgebra::DVector;
 type M = nalgebra::DMatrix&lt;f64&gt;;
 
-let problem = OdeBuilder::new()
+let problem = OdeBuilder::&lt;M&gt;::new()
     .p(vec![1.0, 10.0])
-    .build_ode_with_sens::&lt;M, _, _, _, _, _&gt;(
+    .rhs_sens_implicit(
       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
       |x, p, _t, v, y| y[0] = v[0] * x[0] * (1.0 - x[0] / p[1]) 
         + v[1] * p[0] * x[0] * x[0] / (p[1] * p[1]),
+    )
+    .init_sens(
       |_p, _t| DVector::from_element(1, 0.1),
       |_p, _t, _v, y| y[0] = 0.0,
-    ).unwrap();
+    )
+    .build()
+    .unwrap();
 <span class="boring">}</span></code></pre></pre>
 <h2 id="solving-the-sensitivity-problem"><a class="header" href="#solving-the-sensitivity-problem">Solving the sensitivity problem</a></h2>
 <p>Once the sensitivity problem has been specified, we can solve it using the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html"><code>OdeSolverMethod</code></a> trait.
@@ -192,22 +196,26 @@ Lets imagine we want to solve the sensitivity problem up to a time \(t_o = 10\).
 </span><span class="boring">use diffsol::OdeBuilder;
 </span><span class="boring">use nalgebra::DVector;
 </span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
-</span>use diffsol::{OdeSolverMethod, OdeSolverState, Bdf};
+</span>use diffsol::{OdeSolverMethod, NalgebraLU};
+type LS = NalgebraLU&lt;f64&gt;;
 
-<span class="boring">let problem = OdeBuilder::new()
+<span class="boring">let problem = OdeBuilder::&lt;M&gt;::new()
 </span><span class="boring">    .p(vec![1.0, 10.0])
-</span><span class="boring">    .build_ode_with_sens::&lt;M, _, _, _, _, _&gt;(
+</span><span class="boring">    .rhs_sens_implicit(
 </span><span class="boring">      |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
 </span><span class="boring">      |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-</span><span class="boring">      |x, p, _t, v, y| y[0] = v[0] * x[0] * (1.0 - x[0] / p[1]) + v[1] * p[0] * x[0] * x[0] / (p[1] * p[1]),
+</span><span class="boring">      |x, p, _t, v, y| y[0] = v[0] * x[0] * (1.0 - x[0] / p[1]) 
+</span><span class="boring">        + v[1] * p[0] * x[0] * x[0] / (p[1] * p[1]),
+</span><span class="boring">    )
+</span><span class="boring">    .init_sens(
 </span><span class="boring">      |_p, _t| DVector::from_element(1, 0.1),
 </span><span class="boring">      |_p, _t, _v, y| y[0] = 0.0,
-</span><span class="boring">    ).unwrap();
-</span>let mut solver = Bdf::default();
-let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
-solver.set_problem(state, &amp;problem);
+</span><span class="boring">    )
+</span><span class="boring">    .build()
+</span><span class="boring">    .unwrap();
+</span>let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
 let t_o = 10.0;
-while solver.state().unwrap().t &lt; t_o {
+while solver.state().t &lt; t_o {
     solver.step().unwrap();
 }
 <span class="boring">}</span></code></pre></pre>
@@ -218,26 +226,30 @@ If we need the sensitivity at the current internal time step, we can get this fr
 </span><span class="boring">use diffsol::OdeBuilder;
 </span><span class="boring">use nalgebra::DVector;
 </span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
-</span><span class="boring">use diffsol::{OdeSolverMethod, OdeSolverState, Bdf};
+</span><span class="boring">use diffsol::{OdeSolverMethod, OdeSolverState, NalgebraLU};
+</span><span class="boring">type LS = NalgebraLU&lt;f64&gt;;
 </span><span class="boring">
-</span><span class="boring">let problem = OdeBuilder::new()
+</span><span class="boring">let problem = OdeBuilder::&lt;M&gt;::new()
 </span><span class="boring">    .p(vec![1.0, 10.0])
-</span><span class="boring">    .build_ode_with_sens::&lt;M, _, _, _, _, _&gt;(
+</span><span class="boring">    .rhs_sens_implicit(
 </span><span class="boring">      |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
 </span><span class="boring">      |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-</span><span class="boring">      |x, p, _t, v, y| y[0] = v[0] * x[0] * (1.0 - x[0] / p[1]) + v[1] * p[0] * x[0] * x[0] / (p[1] * p[1]),
+</span><span class="boring">      |x, p, _t, v, y| y[0] = v[0] * x[0] * (1.0 - x[0] / p[1]) 
+</span><span class="boring">        + v[1] * p[0] * x[0] * x[0] / (p[1] * p[1]),
+</span><span class="boring">    )
+</span><span class="boring">    .init_sens(
 </span><span class="boring">      |_p, _t| DVector::from_element(1, 0.1),
 </span><span class="boring">      |_p, _t, _v, y| y[0] = 0.0,
-</span><span class="boring">    ).unwrap();
-</span><span class="boring">let mut solver = Bdf::default();
-</span><span class="boring">let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
-</span><span class="boring">solver.set_problem(state, &amp;problem);
+</span><span class="boring">    )
+</span><span class="boring">    .build()
+</span><span class="boring">    .unwrap();
+</span><span class="boring">let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
 </span><span class="boring">let t_o = 10.0;
-</span><span class="boring">while solver.state().unwrap().t &lt; t_o {
+</span><span class="boring">while solver.state().t &lt; t_o {
 </span><span class="boring">    solver.step().unwrap();
 </span><span class="boring">}
 </span>let sens_at_t_o = solver.interpolate_sens(t_o).unwrap();
-let sens_at_internal_step = &amp;solver.state().as_ref().unwrap().s;
+let sens_at_internal_step = &amp;solver.state().s;
 <span class="boring">}</span></code></pre></pre>
 
                     </main>

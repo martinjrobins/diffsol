@@ -176,6 +176,9 @@ impl Op for MyInit {
     fn nout(&amp;self) -&gt; usize {
         1
     }
+    fn nparams(&amp;self) -&gt; usize {
+        0
+    }
 }
 
 impl ConstantOp for MyInit {
@@ -183,19 +186,6 @@ impl ConstantOp for MyInit {
         y[0] = 0.1;
     }
 }
-<span class="boring">}</span></code></pre></pre>
-<p>Again, we can use the <a href="https://docs.rs/diffsol/latest/diffsol/op/constant_closure/struct.ConstantClosure.html"><code>ConstantClosure</code></a> struct to implement the <code>ConstantOp</code> trait for us if it's not neccessary to use our own struct.</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
-</span><span class="boring">use std::rc::Rc;
-</span>use diffsol::ConstantClosure;
-
-<span class="boring">type T = f64;
-</span><span class="boring">type V = nalgebra::DVector&lt;T&gt;;
-</span><span class="boring">type M = nalgebra::DMatrix&lt;T&gt;;
-</span><span class="boring">
-</span>let p = Rc::new(V::from_vec(vec![1.0, 10.0]));
-let init_fn = |_p: &amp;V, _t: T| V::from_element(1, 0.1);
-let init = Rc::new(ConstantClosure::&lt;M, _&gt;::new(init_fn, p.clone()));
 <span class="boring">}</span></code></pre></pre>
 
                     </main>

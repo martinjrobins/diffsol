@@ -182,7 +182,7 @@ This is the easiest API to use from Rust, and is the recommended API for most us
 where the user can implement the functions above on their own structs.
 This API is more flexible than the <code>OdeBuilder</code> API, but is more complex to use. It is useful if you have custom data structures and code that you want to use to evaluate
 your functions that does not fit within the <code>OdeBuilder</code> API.</li>
-<li>The <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/diffsl/struct.DiffSlContext.html"><code>DiffSlContext</code></a> struct, where the user can specify the functions above using the <a href="https://martinjrobins.github.io/diffsl/">DiffSL</a>
+<li>The <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/diffsl/struct.DiffSl.html"><code>DiffSl</code></a> struct, where the user can specify the functions above using the <a href="https://martinjrobins.github.io/diffsl/">DiffSL</a>
 Domain Specific Language (DSL). This API is behind a feature flag (<code>diffsl</code> if you want to use the slower cranelift backend, <code>diffsl-llvm*</code> if you want to use the faster LLVM backend), but has the best API if you want to use DiffSL from a higher-level language like Python or R while still having similar performance.</li>
 </ul>
 

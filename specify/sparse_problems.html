@@ -164,24 +164,28 @@ but we will duplicate this equation 10 times to create a system of 10 equations.
 type M = diffsol::SparseColMat&lt;f64&gt;;
 type V = faer::Col&lt;f64&gt;;
 
-let problem = OdeBuilder::new()
+let problem = OdeBuilder::&lt;M&gt;::new()
     .t0(0.0)
     .rtol(1e-6)
     .atol([1e-6])
     .p(vec![1.0, 10.0])
-    .build_ode::&lt;M, _, _, _&gt;(
-       |x, p, _t, y| {
-         for i in 0..10 {
-           y[i] = p[0] * x[i] * (1.0 - x[i] / p[1]);
-         }
-       },
-       |x, p, _t, v , y| {
-         for i in 0..10 {
-           y[i] = p[0] * v[i] * (1.0 - 2.0 * x[i] / p[1]);
-         }
-       },
-       |_p, _t| V::from_fn(10, |_| 0.1),
-    ).unwrap();
+    .rhs_implicit(
+        |x, p, _t, y| {
+            for i in 0..10 {
+                y[i] = p[0] * x[i] * (1.0 - x[i] / p[1]);
+            }
+        },
+        |x, p, _t, v , y| {
+            for i in 0..10 {
+                y[i] = p[0] * v[i] * (1.0 - 2.0 * x[i] / p[1]);
+            }
+        },
+    )
+    .init(
+        |_p, _t| V::from_fn(10, |_| 0.1),
+    )
+    .build()
+    .unwrap();
 <span class="boring">}</span></code></pre></pre>
 <p>Note that we have not specified the jacobian itself, but instead we have specified the jacobian multiplied by a vector function \(f'(y, p, t, v)\).
 DiffSol will use this function to generate a jacobian matrix, and since we have specified a sparse matrix type, DiffSol will attempt to
@@ -194,24 +198,28 @@ guess the sparsity pattern of the jacobian matrix and use this to efficiently ge
 </span><span class="boring">type V = faer::Col&lt;f64&gt;;
 </span><span class="boring">
 </span><span class="boring">fn main() {
-</span><span class="boring"> let problem = OdeBuilder::new()
-</span><span class="boring">   .t0(0.0)
-</span><span class="boring">   .rtol(1e-6)
-</span><span class="boring">   .atol([1e-6])
-</span><span class="boring">   .p(vec![1.0, 10.0])
-</span><span class="boring">   .build_ode::&lt;M, _, _, _&gt;(
-</span><span class="boring">   |x, p, _t, y| {
-</span><span class="boring">     for i in 0..10 {
-</span><span class="boring">       y[i] = p[0] * x[i] * (1.0 - x[i] / p[1]);
-</span><span class="boring">     }
-</span><span class="boring">   },
-</span><span class="boring">   |x, p, _t, v , y| {
-</span><span class="boring">     for i in 0..10 {
-</span><span class="boring">       y[i] = p[0] * v[i] * (1.0 - 2.0 * x[i] / p[1]);
-</span><span class="boring">     }
-</span><span class="boring">   },
-</span><span class="boring">   |_p, _t| V::from_fn(10, |_| 0.1),
-</span><span class="boring">   ).unwrap();
+</span><span class="boring">let problem = OdeBuilder::&lt;M&gt;::new()
+</span><span class="boring">    .t0(0.0)
+</span><span class="boring">    .rtol(1e-6)
+</span><span class="boring">    .atol([1e-6])
+</span><span class="boring">    .p(vec![1.0, 10.0])
+</span><span class="boring">    .rhs_implicit(
+</span><span class="boring">        |x, p, _t, y| {
+</span><span class="boring">            for i in 0..10 {
+</span><span class="boring">                y[i] = p[0] * x[i] * (1.0 - x[i] / p[1]);
+</span><span class="boring">            }
+</span><span class="boring">        },
+</span><span class="boring">        |x, p, _t, v , y| {
+</span><span class="boring">            for i in 0..10 {
+</span><span class="boring">                y[i] = p[0] * v[i] * (1.0 - 2.0 * x[i] / p[1]);
+</span><span class="boring">            }
+</span><span class="boring">        },
+</span><span class="boring">    )
+</span><span class="boring">    .init(
+</span><span class="boring">        |_p, _t| V::from_fn(10, |_| 0.1),
+</span><span class="boring">    )
+</span><span class="boring">    .build()
+</span><span class="boring">    .unwrap();
 </span>let t0 = problem.t0;
 let y0 = problem.eqn.init().call(t0);
 let jacobian = problem.eqn.rhs().jacobian(&amp;y0, t0);
@@ -232,95 +240,11 @@ for (i, j, v) in jacobian.triplet_iter() {
 (9, 9) = 0.98
 </code></pre>
 <p>DiffSol attempts to guess the sparsity pattern of your jacobian matrix by calling the \(f'(y, p, t, v)\) function repeatedly with different one-hot vectors \(v\)
-with a <code>NaN</code> value at each index. The output of this function (i.e. which elements are <code>0</code> and which are <code>NaN</code>) is then used to determine the sparsity pattern of the jacobian matrix.
+with a <code>NaN</code> value at each hot index. The output of this function (i.e. which elements are <code>0</code> and which are <code>NaN</code>) is then used to determine the sparsity pattern of the jacobian matrix.
 Due to the fact that for IEEE 754 floating point numbers, <code>NaN</code> is propagated through most operations, this method is able to detect which output elements are dependent on which input elements.</p>
 <p>However, this method is not foolproof, and it may fail to detect the correct sparsity pattern in some cases, particularly if values of <code>v</code> are used in control-flow statements.
-If DiffSol does not detect the correct sparsity pattern, you can manually specify the jacobian. To do this, you need
-to implement the <a href="https://docs.rs/diffsol/latest/diffsol/op/trait.NonLinearOp.html"><code>diffsol::NonLinearOp</code></a> trait for the rhs function.
-This is described in more detail in the <a href="./custom_problem_structs.html">"Custom Problem Structs"</a> section, but is illustrated below.</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
-</span>use std::rc::Rc;
-use faer::sparse::{SparseColMat, SymbolicSparseColMat};
-use diffsol::{NonLinearOp, NonLinearOpJacobian, OdeSolverEquations, Op, UnitCallable, ConstantClosure, OdeBuilder};
-
-type T = f64;
-type V = faer::Col&lt;T&gt;;
-type M = diffsol::SparseColMat&lt;T&gt;;
-
-struct MyProblem {
-  jacobian: SparseColMat&lt;usize, T&gt;,
-  p: Rc&lt;V&gt;,
-}
-
-impl MyProblem {
-  fn new(p: Rc&lt;V&gt;) -&gt; Self {
-    let mut triplets = Vec::new();
-    for i in 0..10 {
-      triplets.push((i, i, 1.0));
-    }
-    let jacobian = SparseColMat::try_new_from_triplets(10, 10, triplets.as_slice()).unwrap();
-    MyProblem { p, jacobian }
-  }
-}
-
-impl Op for MyProblem {
-  type T = T;
-  type V = V;
-  type M = M;
-  fn nstates(&amp;self) -&gt; usize {
-    10
-  }
-  fn nout(&amp;self) -&gt; usize {
-    10
-  }
-  fn nparams(&amp;self) -&gt; usize {
-      2
-  }
-}
-  
-impl NonLinearOp for MyProblem {
-  fn call_inplace(&amp;self, x: &amp;V, _t: T, y: &amp;mut V) {
-    for i in 0..10 {
-      y[i] = self.p[0] * x[i] * (1.0 - x[i] / self.p[1]);
-    }
-  }
-  
- 
-}
-impl NonLinearOpJacobian for MyProblem {
-  fn jac_mul_inplace(&amp;self, x: &amp;V, _t: T, v: &amp;V, y: &amp;mut V) {
-    for i in 0..10 {
-      y[i] = self.p[0] * v[i] * (1.0 - 2.0 * x[i] / self.p[1]);
-    }
-  }
-  fn jacobian_inplace(&amp;self, x: &amp;Self::V, _t: Self::T, y: &amp;mut Self::M) {
-    for i in 0..10 {
-      let row = y.faer().row_indices()[i];
-      y.faer_mut().values_mut()[i] = self.p[0] * (1.0 - 2.0 * x[row] / self.p[1]);
-    }
-  }
-  fn jacobian_sparsity(&amp;self) -&gt; Option&lt;SymbolicSparseColMat&lt;usize&gt;&gt; {
-    Some(self.jacobian.symbolic().to_owned().unwrap())
-  }
-}
-
-let p_slice = [1.0, 10.0];
-let p = Rc::new(V::from_fn(p_slice.len(), |i| p_slice[i]));
-let rhs = MyProblem::new(p.clone());
-
-// use the provided constant closure to define the initial condition
-let init_fn = |_p: &amp;V, _t: T| V::from_fn(10, |_| 0.1);
-let init = ConstantClosure::new(init_fn, p.clone());
-
-// we don't have a mass matrix, root or output functions, so we can set to None
-// we still need to give a placeholder type for these, so we use the diffsol::UnitCallable type
-let mass: Option&lt;UnitCallable&lt;M&gt;&gt; = None;
-let root: Option&lt;UnitCallable&lt;M&gt;&gt; = None;
-let out: Option&lt;UnitCallable&lt;M&gt;&gt; = None;
-
-let eqn = OdeSolverEquations::new(rhs, mass, root, init, out, p);
-let _problem = OdeBuilder::new().p(p_slice).build_from_eqn(eqn).unwrap();
-<span class="boring">}</span></code></pre></pre>
+If DiffSol does not detect the correct sparsity pattern, you can manually specify the jacobian. To do this, you need to use a custom struct that implements the <code>OdeEquations</code> trait,
+This is described in more detail in the <a href="./custom_problem_structs.html">"Custom Problem Structs"</a> section.</p>
 
                     </main>
 

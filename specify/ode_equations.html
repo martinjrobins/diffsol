@@ -156,10 +156,9 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="ode-equations"><a class="header" href="#ode-equations">ODE equations</a></h1>
-<p>The simplest way to create a new ode problem in Rust is to use the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct.
-You can set the initial time, initial step size, relative tolerance, absolute tolerance, and parameters, or leave them at their default values.
-Then, call one of the <code>build_*</code> functions to create a new problem, for example the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.build_ode"><code>build_ode</code></a>
-function can be used to create an ODE problem of the form \(dy/dt = f(t, y, p)\), where \(y\) is the state vector, \(t\) is the time, and \(p\) are the parameters.</p>
+<p>The simplest way to create a new ode problem is to use the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct.
+You can use methods to set the equations to be solve, initial time, initial step size, relative &amp; absolute tolerances, and parameters, or leave them at their default values.
+Then, call the <code>build</code> method to create a new problem.</p>
 <p>Below is an example of how to create a new ODE problem using the <code>OdeBuilder</code> struct.
 The specific problem we will solve is the logistic equation</p>
 <p>\[\frac{dy}{dt} = r y (1 - y/K),\]</p>
@@ -176,19 +175,25 @@ and the jacobian of \(f\) multiplied by a vector \(v\) function, which we will c
 use nalgebra::DVector;
 type M = nalgebra::DMatrix&lt;f64&gt;;
 
-let problem = OdeBuilder::new()
+let problem = OdeBuilder::&lt;M&gt;::new()
     .t0(0.0)
     .rtol(1e-6)
     .atol([1e-6])
     .p(vec![1.0, 10.0])
-    .build_ode::&lt;M, _, _, _&gt;(
-       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-       |_p, _t| DVector::from_element(1, 0.1),
-    ).unwrap();
+    .rhs_implicit(
+        |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
+        |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
+    )
+    .init(
+        |_p, _t| DVector::from_element(1, 0.1),
+    )
+    .build()
+    .unwrap();
 <span class="boring">}</span></code></pre></pre>
-<p>Each <code>build_*</code> method requires the user to specify what matrix type they wish to use to define and solve the model (the other types are inferred from the closure types).
-Here we use the <code>nalgebra::DMatrix&lt;f64&gt;</code> type, which is a dense matrix type from the <a href="https://nalgebra.org">nalgebra</a> crate. Other options are:</p>
+<p>The <code>rhs_implicit</code> method is used to specify the \(f(y, p, t)\) and \(f'(y, p, t, v)\) functions, whereas the <code>init</code> method is used to specify the initial state vector \(y_0(p, t)\).
+We also use the <code>t0</code>, <code>rtol</code>, <code>atol</code>, and <code>p</code> methods to set the initial time, relative tolerance, absolute tolerance, and parameters, respectively.</p>
+<p>We have also specified the matrix type <code>M</code> to be <code>nalgebra::DMatrix&lt;f64&gt;</code>, using a generic parameter of the <code>OdeBuilder</code> struct.
+The <code>nalgebra::DMatrix&lt;f64&gt;</code> type is a dense matrix type from the <a href="https://nalgebra.org">nalgebra</a> crate. Other options are:</p>
 <ul>
 <li><code>faer::Mat&lt;T&gt;</code> from <a href="https://github.com/sarah-ek/faer-rs">faer</a>, which is a dense matrix type.</li>
 <li><code>diffsol::SparseColMat&lt;T&gt;</code>, which is a thin wrapper around <code>faer::sparse::SparseColMat&lt;T&gt;</code>, a sparse compressed sparse column matrix type.</li>
@@ -201,11 +206,6 @@ For these matrix types the associated vector type is:</p>
 <li><code>faer::Col&lt;T&gt;</code> for <code>faer::Mat&lt;T&gt;</code>.</li>
 <li><code>faer::Coll&lt;T&gt;</code> for <code>diffsol::SparseColMat&lt;T&gt;</code>.</li>
 </ul>
-<p>The arguments to the <code>build_ode</code> method are the equations that define the problem.
-The first closure is the function \(f(y, p, t)\) this is implemented as a closure that takes the time <code>t</code>,
-the parameter vector <code>p</code>, the state vector <code>y</code>, and a mutable reference that the closure can use to place the result (i.e. the derivative of the state vector \(f(y, p, t)\)).
-The second closure is similar in structure in defines the jacobian multiplied by a vector \(v\) function \(f'(y, p, t, v)\).
-The third closure returns the initial state vector \(y_0(p, t)\), this is done so that diffsol can infer the size of the state vector.</p>
 
                     </main>
 

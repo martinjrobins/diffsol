@@ -180,10 +180,11 @@ let eqn = DiffSl::&lt;M, CG&gt;::compile("
 <p>Once you have created the <code>DiffSl</code> struct you can use it to create a problem using the <code>build_from_eqn</code> method on the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
 </span><span class="boring">use diffsol::{DiffSl, CraneliftModule};
-</span>use diffsol::{OdeBuilder, Bdf, OdeSolverMethod, OdeSolverState};
+</span>use diffsol::{OdeBuilder, OdeSolverMethod, OdeSolverState};
 <span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
 </span><span class="boring">type CG = CraneliftModule;
-</span>
+</span>type LS = diffsol::NalgebraLU&lt;f64&gt;;
+
         
 <span class="boring">let eqn = DiffSl::&lt;M, CG&gt;::compile("
 </span><span class="boring">    in = [r, k]
@@ -192,21 +193,20 @@ let eqn = DiffSl::&lt;M, CG&gt;::compile("
 </span><span class="boring">    u { 0.1 }
 </span><span class="boring">    F { r * u * (1.0 - u / k) }
 </span><span class="boring">").unwrap();
-</span>let problem = OdeBuilder::new()
+</span>let problem = OdeBuilder::&lt;M&gt;::new()
 .rtol(1e-6)
 .p([1.0, 10.0])
 .build_from_eqn(eqn).unwrap();
-let mut solver = Bdf::default();
+let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
 let t = 0.4;
-let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
-let _soln = solver.solve(&amp;problem, state, t).unwrap();
+let _soln = solver.solve(t).unwrap();
 <span class="boring">}</span></code></pre></pre>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../specify/custom/putting_it_all_together.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../specify/custom/ode_systems.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
@@ -220,7 +220,7 @@ let _soln = solver.solve(&amp;problem, state, t).unwrap();
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../specify/custom/putting_it_all_together.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../specify/custom/ode_systems.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 

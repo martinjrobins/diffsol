@@ -212,13 +212,14 @@ V_s(t) = V_0 \sin(omega t)
 <pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
 </span><span class="boring">use std::fs;
 </span>use diffsol::{
-    DiffSl, CraneliftModule, OdeBuilder, Bdf, OdeSolverState, OdeSolverMethod
+    DiffSl, CraneliftModule, OdeBuilder, OdeSolverMethod
 };
 use plotly::{
     Plot, Scatter, common::Mode, layout::Layout, layout::Axis
 };
 type M = nalgebra::DMatrix&lt;f64&gt;;
 type CG = CraneliftModule;
+type LS = diffsol::NalgebraLU&lt;f64&gt;;
         
 let eqn = DiffSl::&lt;M, CG&gt;::compile("
     R { 100.0 } L { 1.0 } C { 0.001 } V0 { 10 } omega { 100.0 }
@@ -251,11 +252,10 @@ let eqn = DiffSl::&lt;M, CG&gt;::compile("
         iR,
     }
 ").unwrap();
-let problem = OdeBuilder::new()
+let problem = OdeBuilder::&lt;M&gt;::new()
     .build_from_eqn(eqn).unwrap();
-let mut solver = Bdf::default();
-let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
-let (ys, ts) = solver.solve(&amp;problem, state, 1.0).unwrap();
+let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
+let (ys, ts) = solver.solve(1.0).unwrap();
 
 let ir: Vec&lt;_&gt; = ys.row(0).into_iter().copied().collect();
 let t: Vec&lt;_&gt; = ts.into_iter().collect();

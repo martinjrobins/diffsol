@@ -169,20 +169,21 @@ For this example we'll use the root finding function \(r(y, p, t) = y - 0.5\), w
 use nalgebra::DVector;
 type M = nalgebra::DMatrix&lt;f64&gt;;
 
-let problem = OdeBuilder::new()
+let problem = OdeBuilder::&lt;M&gt;::new()
     .t0(0.0)
     .rtol(1e-6)
     .atol([1e-6])
     .p(vec![1.0, 10.0])
-    .build_ode_with_root::&lt;M, _, _, _, _&gt;(
+    .rhs_implicit(
        |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
        |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-       |_p, _t| DVector::from_element(1, 0.1),
-       |x, _p, _t, y| y[0] = x[0] - 0.5,
-       1,
-    ).unwrap();
+    )
+    .init(|_p, _t| DVector::from_element(1, 0.1))
+    .root(|x, _p, _t, y| y[0] = x[0] - 0.5, 1)
+    .build()
+    .unwrap();
 <span class="boring">}</span></code></pre></pre>
-<p>here we have added the root finding function \(r(y, p, t) = y - 0.5\), and also let DiffSol know that we have one root function by passing <code>1</code> as the last argument to the <code>build_ode_with_root</code> method.
+<p>here we have added the root finding function \(r(y, p, t) = y - 0.5\), and also let DiffSol know that we have one root function by passing <code>1</code> as the last argument to the <code>root</code> method.
 If we had specified more than one root function, the solver would stop when any of the root functions are zero.</p>
 <h2 id="detecting-roots-during-the-solve"><a class="header" href="#detecting-roots-during-the-solve">Detecting roots during the solve</a></h2>
 <p>To detect the root during the solve, we can use the return type on the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#tymethod.step"><code>step</code></a> method of the solver.
@@ -191,20 +192,20 @@ If successful the <code>step</code> method returns an <a href="https://docs.rs/d
 </span><span class="boring">use diffsol::OdeBuilder;
 </span><span class="boring">use nalgebra::DVector;
 </span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
-</span>use diffsol::{OdeSolverMethod, OdeSolverStopReason, OdeSolverState, Bdf};
+</span>use diffsol::{OdeSolverMethod, OdeSolverStopReason, NalgebraLU};
+type LS = NalgebraLU&lt;f64&gt;;
 
-<span class="boring">let problem = OdeBuilder::new()
+<span class="boring">let problem = OdeBuilder::&lt;M&gt;::new()
 </span><span class="boring">    .p(vec![1.0, 10.0])
-</span><span class="boring">    .build_ode_with_root::&lt;M, _, _, _, _&gt;(
-</span><span class="boring">        |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-</span><span class="boring">        |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-</span><span class="boring">        |_p, _t| DVector::from_element(1, 0.1),
-</span><span class="boring">        |x, _p, _t, y| y[0] = x[0] - 0.5,
-</span><span class="boring">        1,
-</span><span class="boring">    ).unwrap();
-</span>let mut solver = Bdf::default();
-let state = OdeSolverState::new(&amp;problem, &amp;solver).unwrap();
-solver.set_problem(state, &amp;problem);
+</span><span class="boring">    .rhs_implicit(
+</span><span class="boring">       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
+</span><span class="boring">       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
+</span><span class="boring">    )
+</span><span class="boring">    .init(|_p, _t| DVector::from_element(1, 0.1))
+</span><span class="boring">    .root(|x, _p, _t, y| y[0] = x[0] - 0.5, 1)
+</span><span class="boring">    .build()
+</span><span class="boring">    .unwrap();
+</span>let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
 let t = loop {
     match solver.step() {
         Ok(OdeSolverStopReason::InternalTimestep) =&gt; continue,
@@ -214,7 +215,7 @@ let t = loop {
     }
 };
 println!("Root found at t = {}", t);
-let _soln = &amp;solver.state().unwrap().y;
+let _soln = &amp;solver.state().y;
 <span class="boring">}</span></code></pre></pre>
 
                     </main>

@@ -159,33 +159,26 @@
 <p>To illustrate how to implement a custom problem struct, we will take the familar logistic equation:</p>
 <p>\[\frac{dy}{dt} = r y (1 - y/K),\]</p>
 <p>Our goal is to implement a custom struct that can evaluate the rhs function \(f(y, p, t)\) and the jacobian multiplied by a vector \(f'(y, p, t, v)\).
-First we define a struct that, for this simple example, only holds the parameters of interest. For a more complex problem, this struct could hold data structures neccessary to compute the rhs.</p>
+First we define an empty struct. For a more complex problem, this struct could hold data structures neccessary to compute the rhs.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
-</span>use std::rc::Rc;
-type T = f64;
+</span>type T = f64;
 type V = nalgebra::DVector&lt;T&gt;;
 
-struct MyProblem {
-    p: Rc&lt;V&gt;,
-}
+struct MyProblem;
 <span class="boring">}</span></code></pre></pre>
-<p>We use an <code>Rc</code> to hold the parameters because these parameters will need to be shared between the different functions that we will implement.</p>
-<p>Now we will implement the base <code>Op</code> trait for our struct. This trait specifies the types of the vectors and matrices that will be used, as well as the number of states and outputs in the rhs function.</p>
+<p>Now we will implement the base <code>Op</code> trait for our struct. The <code>Op</code> trait specifies the types of the vectors and matrices that will be used, as well as the number of states and outputs in the rhs function.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
-</span><span class="boring">use std::rc::Rc;
 </span>use diffsol::Op;
 
 type T = f64;
 type V = nalgebra::DVector&lt;T&gt;;
 type M = nalgebra::DMatrix&lt;T&gt;;
 
-<span class="boring">struct MyProblem {
-</span><span class="boring">    p: Rc&lt;V&gt;,
-</span><span class="boring">}
+<span class="boring">struct MyProblem;
 </span><span class="boring">
 </span><span class="boring">impl MyProblem {
-</span><span class="boring">    fn new(p: Rc&lt;V&gt;) -&gt; Self {
-</span><span class="boring">        MyProblem { p }
+</span><span class="boring">    fn new() -&gt; Self {
+</span><span class="boring">        MyProblem {}
 </span><span class="boring">    }
 </span><span class="boring">}
 </span><span class="boring">
@@ -199,27 +192,27 @@ type M = nalgebra::DMatrix&lt;T&gt;;
     fn nout(&amp;self) -&gt; usize {
         1
     }
+    fn nparams(&amp;self) -&gt; usize {
+        0
+    }
 }
 <span class="boring">}</span></code></pre></pre>
 <p>Next we implement the <code>NonLinearOp</code> and <code>NonLinearOpJacobian</code> trait for our struct. This trait specifies the functions that will be used to evaluate the rhs function and the jacobian multiplied by a vector.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
-</span><span class="boring">use std::rc::Rc;
 </span>use diffsol::{
-  NonLinearOp, NonLinearOpJacobian, OdeSolverEquations, OdeSolverProblem, 
-  Op, UnitCallable, ConstantClosure
+  NonLinearOp, NonLinearOpJacobian
 };
-
+<span class="boring">use diffsol::Op;
+</span>
 <span class="boring">type T = f64;
 </span><span class="boring">type V = nalgebra::DVector&lt;T&gt;;
 </span><span class="boring">type M = nalgebra::DMatrix&lt;T&gt;;
 </span><span class="boring">
-</span><span class="boring">struct MyProblem {
-</span><span class="boring">    p: Rc&lt;V&gt;,
-</span><span class="boring">}
+</span><span class="boring">struct MyProblem;
 </span><span class="boring">
 </span><span class="boring">impl MyProblem {
-</span><span class="boring">    fn new(p: Rc&lt;V&gt;) -&gt; Self {
-</span><span class="boring">        MyProblem { p }
+</span><span class="boring">    fn new() -&gt; Self {
+</span><span class="boring">        MyProblem { }
 </span><span class="boring">    }
 </span><span class="boring">}
 </span><span class="boring">
@@ -233,39 +226,23 @@ type M = nalgebra::DMatrix&lt;T&gt;;
 </span><span class="boring">    fn nout(&amp;self) -&gt; usize {
 </span><span class="boring">        1
 </span><span class="boring">    }
+</span><span class="boring">    fn nparams(&amp;self) -&gt; usize {
+</span><span class="boring">        0
+</span><span class="boring">    }
 </span><span class="boring">}
-</span><span class="boring">
-</span>impl NonLinearOp for MyProblem {
+</span>
+impl&lt;'a&gt; NonLinearOp for MyProblem {
     fn call_inplace(&amp;self, x: &amp;V, _t: T, y: &amp;mut V) {
-        y[0] = self.p[0] * x[0] * (1.0 - x[0] / self.p[1]);
+        y[0] = x[0] * (1.0 - x[0]);
     }
 }
-impl NonLinearOpJacobian for MyProblem {
+impl&lt;'a&gt; NonLinearOpJacobian for MyProblem {
     fn jac_mul_inplace(&amp;self, x: &amp;V, _t: T, v: &amp;V, y: &amp;mut V) {
-        y[0] = self.p[0] * v[0] * (1.0 - 2.0 * x[0] / self.p[1]);
+        y[0] = v[0] * (1.0 - 2.0 * x[0]);
     }
 }
 <span class="boring">}</span></code></pre></pre>
-<p>There we go, all done! This demonstrates how to implement a custom struct to specify a rhs function. But this is a fair bit of boilerplate code, do we really need to do all this for <strong>every</strong> function we want to implement?</p>
-<p>Thankfully, the answer is no. If we didn't need to use our own struct for this particular function, we can alternativly use
-the <a href="https://docs.rs/diffsol/latest/diffsol/op/closure/struct.Closure.html"><code>Closure</code></a> struct to implement the <code>NonLinearOp</code> trait for us.</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
-</span><span class="boring">use std::rc::Rc;
-</span><span class="boring">type T = f64;
-</span><span class="boring">type V = nalgebra::DVector&lt;T&gt;;
-</span><span class="boring">type M = nalgebra::DMatrix&lt;T&gt;;
-</span><span class="boring">
-</span>use diffsol::Closure;
-
-let rhs_fn = |x: &amp;V, p: &amp;V, _t: T, y: &amp;mut V| {
-    y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]);
-};
-let jac_fn = |x: &amp;V, p: &amp;V, _t: T, v: &amp;V, y: &amp;mut V| {
-    y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]);
-};
-let p = Rc::new(V::from_vec(vec![1.0, 10.0]));
-let rhs = Rc::new(Closure::&lt;M, _, _&gt;::new(rhs_fn, jac_fn, 1, 1, p.clone()));
-<span class="boring">}</span></code></pre></pre>
+<p>There we go, all done! This demonstrates how to implement a custom struct to specify a rhs function.</p>
 
                     </main>
 
