@@ -6,9 +6,9 @@ Ordinary Differential Equations (ODEs) are sometimes called rate equations becau
 \frac{dc}{dt} = k c
 \\]
 
-where \\(k\\) is a constant that describes the growth rate of the cells. This is a first order ODE, because it involves only the first derivative of the state variable \\(c\\) with respect to time. We can write down a general form for a first order ODE as:
+where \\(k\\) is a constant that describes the growth rate of the cells. This is a first order ODE, because it involves only the first derivative of the state variable \\(c\\) with respect to time.
 
-We can also use the same form to solve a coupled set of equations, say we had *two* populations of cells in the same dish that grow with different rates. We could define the state of the system as the concentrations of the two cell populations, and assign these states to variables \\(c_1\\) and \\(c_2\\). We could then write down both equations as:
+We can also solve a coupled set of equations, say we had *two* populations of cells in the same dish that grow with different rates. We could define the state of the system as the concentrations of the two cell populations, and assign these states to variables \\(c_1\\) and \\(c_2\\). We could then write down both equations as:
 
 \\[
 \begin{align*}

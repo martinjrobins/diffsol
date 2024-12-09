@@ -10,6 +10,7 @@
   - [DAEs via the Mass Matrix](./primer/the_mass_matrix.md)
     - [Example: Electrical Circuits](./primer/electrical_circuits.md)
   - [PDEs](./primer/pdes.md)
+    - [Example: Heat Equation](./primer/heat_equation.md)
     - [Example: Physics-based Battery Simulation](./primer/physics_based_battery_simulation.md)
 - [DiffSol APIs for specifying problems](./specify/specifying_the_problem.md)
   - [ODE equations](./specify/ode_equations.md)

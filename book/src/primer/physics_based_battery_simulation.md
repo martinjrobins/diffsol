@@ -10,56 +10,61 @@ The Single Particle Model (SPM) is a physics-based model of a lithium-ion batter
 
 ## The Single Particle Model state equations
 
-The SPM model only needs to solve for the concentration of lithium ions in the positive and negative electrodes, $c_n$ and $c_p$. The diffusion of lithium ions in each electrode particle $c_i$ is given by:
+The SPM model only needs to solve for the concentration of lithium ions in the positive and negative electrodes, \\(c_n\\) and \\(c_p\\). The diffusion of lithium ions in each electrode particle \\(c_i\\) is given by:
 
-$$
+\\[
 \frac{\partial c_i}{\partial t} = \nabla \cdot (D_i \nabla c_i)
-$$
+\\]
 
 subject to the following boundary and initial conditions:
 
-$$
+\\[
 \left.\frac{\partial c_i}{\partial r}\right\vert_{r=0} = 0, \quad \left.\frac{\partial c}{\partial r}\right\vert_{r=R_i} = -j_i, \quad \left.c\right\vert_{t=0} = c^0_i
-$$
+\\]
 
-where $c_i$ is the concentration of lithium ions in the positive ($i=n$) or negative ($i=p$) electrode, $D_i$ is the diffusion coefficient, $j_i$ is the interfacial current density, and $c^0_i$ is the concentration at the particle surface.
+where \\(c_i\\) is the concentration of lithium ions in the positive (\\(i=n\\)) or negative (\\(i=p\\)) electrode, \\(D_i\\) is the diffusion coefficient, \\(j_i\\) is the interfacial current density, and \\(c^0_i\\) is the concentration at the particle surface.
 
-The  fluxes of lithium ions in the positive and negative electrodes $j_i$ are dependent on the applied current $I$:
+The fluxes of lithium ions in the positive and negative electrodes \\(j_i\\) are dependent on the applied current \\(I\\):
 
-$$
-\begin{align*}
-j_n &= \frac{I}{a_n \delta_n F \mathcal{A}}, \qquad
-j_p &= \frac{-I}{a_p \delta_p F \mathcal{A}},
-\end{align*}
-$$
+\\[
+j_n = \frac{I}{a_n \delta_n F \mathcal{A}}, \qquad
+j_p = \frac{-I}{a_p \delta_p F \mathcal{A}},
+\\]
 
-where $a_i = 3 \epsilon_i / R_i$ is the specific surface area of the electrode, $\epsilon_i$ is the volume fraction of active material, $\delta_i$ is the thickness of the electrode, $F$ is the Faraday constant, and $\mathcal{A}$ is the electrode surface area.
+where \\(a_i = 3 \epsilon_i / R_i\\) is the specific surface area of the electrode, \\(\epsilon_i\\) is the volume fraction of active material, \\(\delta_i\\) is the thickness of the electrode, \\(F\\) is the Faraday constant, and \\(\mathcal{A}\\) is the electrode surface area.
 
 ## Output variables for the Single Particle Model
 
-Now that we have defined the equations to solve, we turn to the output variables that we need to calculate from the state variables $c_n$ and $c_p$. The terminal voltage of the battery is given by:
+Now that we have defined the equations to solve, we turn to the output variables that we need to calculate from the state variables \\(c_n\\) and \\(c_p\\). The terminal voltage of the battery is given by:
 
-$$
+\\[
 V = U_p(x_p^s) - U_n(x_n^s) + \eta_p - \eta_n
-$$
+\\]
 
-where $U_i$ is the open circuit potential (OCP) of the electrode, $x_i^s = c_i(r=R_i) / c_i^{max}$ is the surface stoichiometry, and $\eta_i$ is the overpotential.
+where \\(U_i\\) is the open circuit potential (OCP) of the electrode, \\(x_i^s = c_i(r=R_i) / c_i^{max}\\) is the surface stoichiometry, and \\(\eta_i\\) is the overpotential.
 
-Assuming Butler-Volmer kinetics and $\alpha_i = 0.5$, the overpotential is given by:
+Assuming Butler-Volmer kinetics and \\(\alpha_i = 0.5\\), the overpotential is given by:
 
-$$
+\\[
 \eta_i = \frac{2RT}{F} \sinh^{-1} \left( \frac{j_i F}{2i_{0,i}} \right)
-$$
+\\]
 
-where the exchange current density $i_{0,i}$ is given by:
+where the exchange current density \\(i_{0,i}\\) is given by:
 
-$$
+\\[
 i_{0,i} = k_i F \sqrt{c_e} \sqrt{c_i(r=R_i)} \sqrt{c_i^{max} - c_i(r=R_i)}
-$$
+\\]
 
-where $c_e$ is the concentration of lithium ions in the electrolyte, and $k_i$ is the reaction rate constant.
+where \\(c_e\\) is the concentration of lithium ions in the electrolyte, and \\(k_i\\) is the reaction rate constant.
 
 ## Stopping conditions
+
+We wish to terminate the simulation if the terminal voltage exceeds an upper threshold \\(V_{\text{max}}\\) or falls below a lower threshold \\(V_{\text{min}}\\). DiffSol uses a root-finding algorithm to detect when the terminal voltage crosses these thresholds, using the following stopping conditions:
+
+\\[
+V_{\text{max}} - V = 0, \qquad
+V - V_{\text{min}} = 0, 
+\\]
 
 
 ## Solving the Single Particle Model using DiffSol
