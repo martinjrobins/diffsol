@@ -32,7 +32,6 @@ jobs:
             - stable
           os:
             - ubuntu-latest
-            - macos-13
             - macos-latest
             - windows-latest
           include:
@@ -53,23 +52,11 @@ jobs:
       run: rustup default ${{ matrix.toolchain }} && rustup update ${{ matrix.toolchain }} --no-self-update && rustup component add clippy
     - name: Rust version
       run: rustc -Vv
-    - name: Install LLVM and Clang (Ubuntu)
+    - name: Install LLVM and Clang
       uses: KyleMayes/install-llvm-action@v2
-      if : matrix.os == 'ubuntu-latest'
+      if : matrix.os == 'ubuntu-lastest' || matrix.os == 'macos-13' || matrix.os == 'macos-latest'
       with:
         version: "16.0"
-    - name: Install LLVM and Clang (macOS)
-      if : matrix.os == 'macos-13'
-      run: |
-        brew install llvm@16
-        echo "LLVM_SYS_160_PREFIX=/usr/local/opt/llvm@16" >> $GITHUB_ENV
-        echo "LLVM_DIR=/usr/local/opt/llvm@16" >> $GITHUB_ENV
-    - name: Install LLVM and Clang (macOS M1)
-      if : matrix.os == 'macos-latest'
-      run: |
-        brew install llvm@16
-        echo "LLVM_SYS_160_PREFIX=/opt/homebrew/Cellar/llvm@16" >> $GITHUB_ENV
-        echo "LLVM_DIR=/opt/homebrew/Cellar/llvm@16" >> $GITHUB_ENV
     - name: Set features variable and install dependencies (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
       run: |
