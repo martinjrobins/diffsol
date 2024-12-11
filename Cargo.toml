@@ -18,17 +18,16 @@ sundials = ["suitesparse_sys", "bindgen", "cc"]
 suitesparse = ["suitesparse_sys"]
 diffsl = ["dep:diffsl"]
 diffsl-llvm = []
-diffsl-llvm13 = ["diffsl/llvm13-0", "diffsl", "diffsl-llvm"]
-diffsl-llvm14 = ["diffsl/llvm14-0", "diffsl", "diffsl-llvm"]
 diffsl-llvm15 = ["diffsl/llvm15-0", "diffsl", "diffsl-llvm"]
 diffsl-llvm16 = ["diffsl/llvm16-0", "diffsl", "diffsl-llvm"]
 diffsl-llvm17 = ["diffsl/llvm17-0", "diffsl", "diffsl-llvm"]
+diffsl-llvm18 = ["diffsl/llvm18-0", "diffsl", "diffsl-llvm"]
 
 [dependencies]
 nalgebra = "0.33.2"
 nalgebra-sparse = { version = "0.10", features = ["io"] }
 num-traits = "0.2.17"
-serde = { version = "1.0.215", features = ["derive"] }
+serde = { version = "1.0.216", features = ["derive"] }
 diffsl = { package = "diffsl", version = "0.2.6", optional = true }
 petgraph = "0.6.4"
 faer = "0.19.4"
