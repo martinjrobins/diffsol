@@ -54,7 +54,7 @@ jobs:
       run: rustc -Vv
     - name: Install LLVM and Clang
       uses: KyleMayes/install-llvm-action@v2
-      if : matrix.os == 'ubuntu-lastest' || matrix.os == 'macos-13' || matrix.os == 'macos-latest'
+      if : matrix.os == 'ubuntu-latest' || matrix.os == 'macos-13' || matrix.os == 'macos-latest'
       with:
         version: "16.0"
     - name: Set features variable and install dependencies (Ubuntu)
