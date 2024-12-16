@@ -26,4 +26,6 @@
   - [Sparse problems](./specify/sparse_problems.md)
 - [Choosing a solver](./choosing_a_solver.md)
 - [Solving the problem](./solving_the_problem.md)
-- [Benchmarks](./benchmarks.md)
+- [Benchmarks](./benchmarks/benchmarks.md)
+  - [Sundials](./benchmarks/sundials.md)
+  - [Python (Diffrax & Casadi)](./benchmarks/python.md)
