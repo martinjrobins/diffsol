@@ -1,10 +1,6 @@
-# Benchmarks
+# Sundials Benchmarks
 
-The goal of this chapter is to compare the performance of the DiffSol
-implementation with other similar ode solver libraries. To begin with we have
-focused on comparing against the popular
-[Sundials](https://github.com/LLNL/sundials) solver suite, developed by the
-Lawrence Livermore National Laboratory. 
+To begin with we have focused on comparing against the popular [Sundials](https://github.com/LLNL/sundials) solver suite, developed by the Lawrence Livermore National Laboratory. 
 
 ## Test Problems
 To choose the test problems we have used several of the examples provided in the Sundials library. The problems are:
@@ -48,7 +44,7 @@ entire model by hand.
 
 ## Results
 
-These results were generated using DiffSol v0.2.1.
+These results were generated using DiffSol v0.5.1, and were run on a Dell PowerEdge R7525 2U rack server, with dual AMD EPYC 7343 3.2Ghz 16C CPU and 128GB Memory.
 
 The performance of each implementation was timed and includes all setup and solve time. The exception to this is for the DiffSl implementations, where the JIT compilation for the model was not included in the timings 
 (since the compilation time for the C and Rust code was also not included). 
@@ -68,20 +64,25 @@ For the small, dense, stiff `robertson` problem the DiffSol implementation is ve
 For the sparse `heat2d` problem the DiffSol implementation is slower than Sundials for smaller problems (about 2) but the performance improves significantly for larger problems until it is at about 0.3.
 Since this improvement for larger systems is not seen in `foodweb` or `robertson_ode` problems, it is likely due to the fact that the `heat2d` problem has a constant jacobian matrix and the DiffSol implementation has an advantage in this case.
 
-For the `foodweb` problem the DiffSol implementation is quite close to IDA for all sizes.
-It is again slower for small systems (about 1.5) and the performance improves for medium systems until it reaches a value of 0.7, but then performance starts to slowly decrease for larger systems until it is about 1.0 
+For the `foodweb` problem the DiffSol implementation is between 1.8 - 2.1 times slower than Sundials. It is interesting that when the problem is implemented in the DiffSl language (see benchmark below) the slowdown reduces to 1.5, indicating
+that much of the performance difference is likely due to the implementation details of the Rust code for the rhs, jacobian and mass matrix functions.
 
-The DiffSol implementation of the `robertson_ode` problem is the only problem generally slower then the Sundials CVODE implementation and is about 1.5 - 1.9 the time taken by Sundials. Since the same method and linear solver is used in both cases the cause of this discrepancy is not
-due to these factors, but is likely due to the differences in how the jacobian is calculated (in Sundials it is provided directly, but DiffSol is required to calculate it from the jacobian multiplication function).
+The DiffSol implementation of the `robertson_ode` problem ranges between 1.2 - 1.8 times slower than Sundials over the problem range.
+
+### tr_bdf2 & esdirk34 solvers (SDIRK)
+
+![Sdirk](./images/benchmarks/bench_tr_bdf2_esdirk.svg)
+
+The low-order `tr_bdf2` solver is slower than the `bdf` solver for all the problems, perhaps due to the generally tight tolerances used (`robertson` and `robertson_ode` have tolerances of 1e-6-1e-8, `heat2d` was 1e-7 and `foodweb` was 1e-5). The `esdirk34` solver is faster than `bdf` for the `foodweb` problem, but slightly slower for the other problems.
+
 
 ### Bdf + DiffSl
 
 ![Bdf + DiffSl](./images/benchmarks/bench_bdf_diffsl.svg)
 
 The main difference between this plot and the previous for the Bdf solver is the use of the DiffSl language for the equations, rather than Rust closures. 
-The trends in each case are mostly the same, and the DiffSl implementation only has a small slowdown comparared with rust closures for most problems.
-This difference is minimal, and can be seen most clearly for the small `robertson` problem where the DiffSl implementation is just above 1.0 times the speed of the Sundials implementation, while the rust closure implementation is about 0.9.
-However, for some larger systems the DiffSl can be faster, for example the `foodweb` problem is quicker at larger sizes, which is probably due to the fact that the rust closures bound-check the array indexing, while the DiffSl implementation does not.
+The trends in each case are mostly the same, and the DiffSl implementation only has a small slowdown comparared with rust closures for most problems. For some problems, such as `foodweb`, the DiffSl implementation is actually faster than the Rust closure implementation.
+This may be due to the fact that the rust closures bound-check the array indexing, while the DiffSl implementation does not.
 
 This plot demonstrates that a DiffSL implementation can be comparable in speed to a hand-written Rust or C implementation, but much more easily wrapped and used from a high-level language like Python or R, where the equations can be passed down
 to the rust solver as a simple string and then JIT compiled at runtime.

@@ -11,7 +11,7 @@ problems = [
         "name": "robertson", 
         "reference_name": "roberts_dns",
         "arg": None,
-        "solvers": ["nalgebra_esdirk34", "nalgebra_tr_bdf2", "nalgebra_bdf", "nalgebra_bdf_diffsl"],
+        "solvers": ["nalgebra_esdirk34", "nalgebra_tr_bdf2", "nalgebra_bdf", "nalgebra_bdf_diffsl"]
     },
     {
         "name": "robertson_ode",
@@ -24,7 +24,7 @@ problems = [
         "name": "heat2d",
         "reference_name": "heat2d_klu",
         "arg": [5, 10, 20, 30],
-        "solvers": ["faer_sparse_esdirk", "faer_sparse_tr_bdf2", "faer_sparse_bdf", "faer_sparse_bdf", "faer_sparse_bdf_diffsl"]
+        "solvers": ["faer_sparse_esdirk", "faer_sparse_tr_bdf2", "faer_sparse_bdf", "faer_sparse_bdf_diffsl"]
         #"solvers": ["faer_sparse_esdirk_klu", "faer_sparse_tr_bdf2_klu", "faer_sparse_bdf_klu", "faer_sparse_bdf_klu_diffsl"]
     },
     {
@@ -115,7 +115,7 @@ ax2.set_title("ESDIRK solver")
 ax3.set_title("BDF solver")
 ax4.set_title("BDF solver + DiffSL")
 
-basedir = "book/src/images/benchmarks"
+basedir = "book/src/benchmarks/images"
 fig1.savefig(f"{basedir}/bench_tr_bdf2_esdirk.svg")
 fig2.savefig(f"{basedir}/bench_bdf.svg")
 fig3.savefig(f"{basedir}/bench_bdf_diffsl.svg")
