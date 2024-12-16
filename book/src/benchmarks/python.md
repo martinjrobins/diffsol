@@ -1,5 +1,9 @@
 # Python (Diffrax & Casadi)
 
+[Diffrax](https://docs.kidger.site/diffrax/) is a Python library for solving ODEs and SDEs implemented using JAX. [Casadi](https://web.casadi.org/) is a C++ library with Python and MATLAB bindings, for solving ODEs and DAEs, nonlinear optimisation and algorithmic differentiation. In this benchmark we compare the performance of the DiffSol implementation with the Diffrax and Casadi libraries.
+
+As well as demonstrating the performance of the DiffSol library, this benchmark also serves as an example of how to wrap and use DiffSol in other languages. The code for this benchmark can be found [here](https://github.com/martinjrobins/diffsol_python_benchmark). The [maturin](https://www.maturin.rs/) library was used to generate a template for the Python bindings and the CI/CD pipeline neccessary to build the bindings, run pytest tests and build the wheels ready for distribution on PyPI. The [pyo3](https://github.com/PyO3/pyo3) library was used to wrap the DiffSol library in Python. 
+
 ## Problem setup
 
 We will use the `robertson_ode` problem for this benchmark. This is a stiff ODE system with 3 equations and 3 unknowns, and is a common benchmark problem for ODE solvers. To illustrate the performance over a range of problem sizes we duplicated the equations by a factor of `ngroups`, so the number of equations is `3 * ngroups`.
