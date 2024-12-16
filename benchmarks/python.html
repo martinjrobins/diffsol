@@ -1,0 +1,226 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Python (Diffrax &amp; Casadi) - DiffSol</title>
+
+
+        <!-- Custom HTML head -->
+        <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+        <!-- MathJax -->
+        <script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">DiffSol</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="python-diffrax--casadi"><a class="header" href="#python-diffrax--casadi">Python (Diffrax &amp; Casadi)</a></h1>
+<p><a href="https://docs.kidger.site/diffrax/">Diffrax</a> is a Python library for solving ODEs and SDEs implemented using JAX. <a href="https://web.casadi.org/">Casadi</a> is a C++ library with Python and MATLAB bindings, for solving ODEs and DAEs, nonlinear optimisation and algorithmic differentiation. In this benchmark we compare the performance of the DiffSol implementation with the Diffrax and Casadi libraries.</p>
+<p>As well as demonstrating the performance of the DiffSol library, this benchmark also serves as an example of how to wrap and use DiffSol in other languages. The code for this benchmark can be found <a href="https://github.com/martinjrobins/diffsol_python_benchmark">here</a>. The <a href="https://www.maturin.rs/">maturin</a> library was used to generate a template for the Python bindings and the CI/CD pipeline neccessary to build the bindings, run pytest tests and build the wheels ready for distribution on PyPI. The <a href="https://github.com/PyO3/pyo3">pyo3</a> library was used to wrap the DiffSol library in Python.</p>
+<h2 id="problem-setup"><a class="header" href="#problem-setup">Problem setup</a></h2>
+<p>We will use the <code>robertson_ode</code> problem for this benchmark. This is a stiff ODE system with 3 equations and 3 unknowns, and is a common benchmark problem for ODE solvers. To illustrate the performance over a range of problem sizes we duplicated the equations by a factor of <code>ngroups</code>, so the number of equations is <code>3 * ngroups</code>.</p>
+<p>For the Diffrax implementation we based this on the <a href="https://docs.kidger.site/diffrax/examples/stiff_ode/">example</a> from the Diffrax documentation, extending this to include the <code>ngroups</code> parameter. As with the example, we used the <code>Kvaerno5</code> method for the solver. You can see the final implementation of the model <a href="https://github.com/martinjrobins/diffsol_python_benchmark/blob/main/diffsol_python_benchmark/diffrax_models.py">here</a>.</p>
+<p>For the Casadi implementation we wrote this from scratch using the libraries Python API. You can see the final implementation of the model <a href="https://github.com/martinjrobins/diffsol_python_benchmark/blob/main/diffsol_python_benchmark/casadi_models.py">here</a>.</p>
+<p>The DiffSol implementation of the model was done using the DiffSL language, and you can see the final implementation of the model <a href="https://github.com/martinjrobins/diffsol_python_benchmark/blob/main/diffsol_python_benchmark/diffsol_models.py">here</a>.</p>
+<p>The final implementation of the benchmark using these models is done <a href="https://github.com/martinjrobins/diffsol_python_benchmark/blob/main/bench/bench.py">here</a>. The DiffSol benchmark is done using the <code>bdf</code> solver. For <code>ngroup</code> &lt; 20 it uses the <code>nalgebra</code> dense matrix and LU solver, and for <code>ngroups</code> &gt;= 20 the <code>faer</code> sparse matrix and LU solver.</p>
+<h2 id="differences-between-implementations"><a class="header" href="#differences-between-implementations">Differences between implementations</a></h2>
+<p>There are a number of differences between the Diffrax, Casadi and DiffSol implementations that may affect the performance of the solvers. The main differences are:</p>
+<ul>
+<li>The Casadi implementation uses sparse matrices, whereas the DiffSol implementation uses dense matrices for <code>ngroups</code> &lt; 20, and sparse matrices for <code>ngroups</code> &gt;= 20. This will provide an advantage for DiffSol for smaller problems.</li>
+<li>I'm unsure if the Diffrax implementation uses sparse or dense matrices, but it is most likely dense, as JAX only has experimental support for sparse matrices. This will provide an advantage for DiffSol for larger problems.</li>
+<li>The Diffrax implementation uses the <code>Kvaerno5</code> method, which is a 5th order implicit Runge-Kutta method. This is different from the BDF method used by both the Casadi and DiffSol implementations.</li>
+<li>Each library was allowed to use multiple threads according to their default settings. The only part of the DiffSol implementation that takes advantage of multiple threads is the <code>faer</code> sparse LU solver and matrix. Both the <code>nalgebra</code> LU solver / matrix, and the DiffSL generated code are single-threaded only. Diffrax uses JAX, which takes advantage of multiple threads (CPU only, no GPUs were used in these benchmarks). The Casadi implementation also uses multiple threads, but I'm unsure of the details.</li>
+</ul>
+<h2 id="results"><a class="header" href="#results">Results</a></h2>
+<p>The benchmarks were run on a Dell PowerEdge R7525 2U rack server, with dual AMD EPYC 7343 3.2Ghz 16C CPU and 128GB Memory. Each benchmark was run using both a low (1e-8) and high (1e-4) tolerances for both <code>rtol</code> and <code>atol</code>, and with <code>ngroup</code> ranging between 1 - 10,000. The results are presented in the following graphs, where the x-axis is the size of the problem <code>ngroup</code> and the y-axis is the time taken to solve the problem relative to the time taken by the DiffSol implementation (so <code>10^0</code> is the same time as DiffSol, <code>10^1</code> is 10 times slower etc.)</p>
+<p><img src="./images/python_plot.svg" alt="Python" /></p>
+<p>DiffSol is faster than both the Casadi and Diffrax implementations over the range of problem sizes and tolerances tested, although the Casadi and DiffSol implementations converge to be similar for larger problems (<code>ngroups</code> &gt; 100).</p>
+<p>The region that DiffSol really outperforms the other implementations is for smaller problems (<code>ngroups</code> &lt; 5), at <code>ngroups</code> = 1, Casadi and Diffrax are between 3 - 40 times slower than DiffSol. This small size region are where the dense matrix and solver used is more appropriate for the problem, and the overhead of the other libraries is more significant. The Casadi library needs to traverse a graph of operations to calculate each rhs or jacobian evaluation, whereas the DiffSL JIT compiler will compile to native code using the LLVM backend, along with low-level optimisations that are not available to Casadi. Diffrax as well is significantly slower than DiffSol for smaller problems, and this might be due to (a) Diffrax being a ML library and not optimised for solving stiff ODEs, and (b) double precision is used, which again is not a common use case for ML libraries.</p>
+<p>As the problem sizes get larger, the performance of Diffrax and Casadi improve rapidly relative to DiffSol, but after <code>ngroups</code> &gt; 10 the performance of Diffrax drops off again, probably due to JAX not taking advantage of the sparse structure of the problem. The performance of Casadi continues to improve, and for <code>ngroups</code> &gt; 100 it is comparable to DiffSol. By the time <code>ngroups</code> = 10,000, the performance of Casadi is identical to DiffSol.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../benchmarks/sundials.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../benchmarks/sundials.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+    </div>
+    </body>
+</html>
