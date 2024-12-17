@@ -26,8 +26,11 @@ jobs:
   unit-tests:
     name: Tests - ${{ matrix.os }} - ${{ matrix.toolchain }}
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.experimental }}
     strategy:
         matrix:
+          experimental:
+            - false
           toolchain:
             - stable
           os:
@@ -37,8 +40,10 @@ jobs:
           include:
             - toolchain: beta
               os: ubuntu-latest
+              experimental: true
             - toolchain: nightly
               os: ubuntu-latest
+              experimental: true
 
     steps:
     - uses: actions/checkout@v4
