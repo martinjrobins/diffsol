@@ -2,7 +2,7 @@
 
 We will model a [damped spring-mass system](https://en.wikipedia.org/wiki/Mass-spring-damper_model) using a second order ODE. The system consists of a mass \\(m\\) attached to a spring with spring constant \\(k\\), and a damping force proportional to the velocity of the mass with damping coefficient \\(c\\). 
 
-![Spring-mass system](https://upload.wikimedia.org/wikipedia/commons/thumb/4/45/Mass_spring_damper.svg/330px-Mass_spring_damper.svg.png)
+<img src="images/Mass_spring_damper.svg" width="350">
 
 The equation of motion for the mass can be written as:
 

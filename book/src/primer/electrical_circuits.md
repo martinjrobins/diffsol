@@ -10,7 +10,7 @@ V_s =       R       |
     +-------+-------+
 ```
 
-The circuit consists of a resistor \\(R\\), an inductor \\(L\\), and a capacitor \\(C\\) connected in series to a voltage source \\(V_s\\). The voltage across the resistor \\(V\\) is given by Ohm's law:
+The circuit consists of a resistor \\(R\\), an inductor \\(L\\), and a capacitor \\(C\\) connected to a voltage source \\(V_s\\). The voltage across the resistor \\(V\\) is given by Ohm's law:
 
 \\[
 V = R i_R
@@ -35,7 +35,7 @@ where \\(i_C\\) is the current flowing through the capacitor. The sum of the cur
 i_L = i_R + i_C
 \\]
 
-Thus we have a system of two differential equations and two algebraic equation that describe the evolution of the currents through the resistor, inductor, and capacitor, and the voltage across the resistor. We can write these equations in the general form:
+Thus we have a system of two differential equations and two algebraic equation that describe the evolution of the currents through the resistor, inductor, and capacitor; and the voltage across the resistor. We can write these equations in the general form:
 
 \\[
 M \frac{d\mathbf{y}}{dt} = \mathbf{f}(\mathbf{y}, t)
@@ -74,10 +74,10 @@ The initial conditions for the system are:
 The voltage source \\(V_s\\) acts as a forcing function for the system, and we can specify this as sinusoidal function of time.
 
 \\[
-    V_s(t) = V_0 \sin(omega t)
+    V_s(t) = V_0 \sin(\omega t)
 \\]
 
-where \\(omega\\) is the angular frequency of the source. Since this is a low-pass filter, we will choose a high frequency for the source, say \\(omega = 200\\), to demonstrate the filtering effect of the circuit.
+where \\(\omega\\) is the angular frequency of the source. Since this is a low-pass filter, we will choose a high frequency for the source, say \\(\omega = 200\\), to demonstrate the filtering effect of the circuit.
 
 We can solve this system of equations using DiffSol and plot the current and voltage across the resistor as a function of time. 
 

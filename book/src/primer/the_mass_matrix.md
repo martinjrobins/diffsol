@@ -12,8 +12,8 @@ where \\(\mathbf{y}\\) is the vector of state variables, \\(\mathbf{y}'\\) is th
 
 \\[
 \begin{align*}
-\frac{d\mathbf{y}}{dt} &= \mathbf{f}(\mathbf{y}, \mathbf{y}', t) \\\\
-0 = \mathbf{g}(\mathbf{y}, t)
+\frac{d\mathbf{y}}{dt} &= \mathbf{f}(\mathbf{y}, t) \\\\
+0 &= \mathbf{g}(\mathbf{y}, t)
 \end{align*}
 \\]
 
