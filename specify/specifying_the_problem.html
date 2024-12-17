@@ -174,16 +174,13 @@
 </ul>
 <p>The user can also optionally specify a root function \(r(t, y, p)\) that can be used to find the time at which a root occurs.</p>
 <h2 id="diffsol-problem-apis"><a class="header" href="#diffsol-problem-apis">DiffSol problem APIs</a></h2>
-<p>DiffSol has three main APIs for specifying problems:</p>
+<p>Specifying a problem in DiffSol is done via the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct, using the <code>OdeBuilder::new</code> method to create a new builder, and then chaining methods to set the equations to be solved, initial time, initial step size, relative &amp; absolute tolerances, and parameters, or leaving them at their default values. Then, call the <code>build</code> method to create a new problem.</p>
+<p>Users can specify the equations to be solved via three main APIs, ranging from the simplest to the most complex (but also the most flexible):</p>
 <ul>
-<li>The <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct, where the user can specify the functions above using Rust closures.
-This is the easiest API to use from Rust, and is the recommended API for most users.</li>
-<li>The <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/equations/trait.OdeEquations.html"><code>OdeEquations</code></a> trait
-where the user can implement the functions above on their own structs.
-This API is more flexible than the <code>OdeBuilder</code> API, but is more complex to use. It is useful if you have custom data structures and code that you want to use to evaluate
-your functions that does not fit within the <code>OdeBuilder</code> API.</li>
-<li>The <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/diffsl/struct.DiffSl.html"><code>DiffSl</code></a> struct, where the user can specify the functions above using the <a href="https://martinjrobins.github.io/diffsl/">DiffSL</a>
-Domain Specific Language (DSL). This API is behind a feature flag (<code>diffsl</code> if you want to use the slower cranelift backend, <code>diffsl-llvm*</code> if you want to use the faster LLVM backend), but has the best API if you want to use DiffSL from a higher-level language like Python or R while still having similar performance.</li>
+<li>The <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/diffsl/struct.DiffSl.html"><code>DiffSl</code></a> struct allows users to specify the equations above using the <a href="https://martinjrobins.github.io/diffsl/">DiffSL</a>
+Domain Specific Language (DSL). This API is behind a feature flag (<code>diffsl</code> if you want to use the slower cranelift backend, <code>diffsl-llvm*</code> if you want to use the faster LLVM backend). This is the easiest API to use as it can use automatic differentiation to calculate the neccessary gradients, and is the best API if you want to use DiffSL from a higher-level language like Python or R while still having similar performance to Rust.</li>
+<li>The <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct also has methods to set the equations using rust closures (see e.g. <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.rhs_implicit">OdeBuilder::rhs_implicit</a>). This API is convenient if you want to stick to pure rust code without using DiffSL and the JIT compiler, but requires you to calculate the gradients of the equations yourself.</li>
+<li>Implementing the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/equations/trait.OdeEquations.html"><code>OdeEquations</code></a> trait allows users to implement the equations on their own structs. This API is the most flexible as it allows users to use custom data structures and code that might not fit within the <code>OdeBuilder</code> API. However, it is the most verbose API and requires users to be more familiar with the various DiffSol traits.</li>
 </ul>
 
                     </main>

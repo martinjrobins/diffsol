@@ -160,7 +160,7 @@
 <p>\[
 \frac{\partial u}{\partial t} = D \frac{\partial^2 u}{\partial x^2}
 \]</p>
-<p>where \(u(x, t)\) is the temperature of the material at position \(x\) and time \(t\), and \(D\) is the thermal diffusivity of the material. To solve this equation, we need to discretize it in space and time. We can use a finite difference method to do this.</p>
+<p>where \(u(x, t)\) is the temperature of the material at position \(x\) and time \(t\), and \(D\) is the thermal diffusivity of the material. To solve this equation, we need to discretize it in space and time. We can use a finite difference method to discretise the spatial derivative, and then solve the resulting system of ODEs using DiffSol.</p>
 <h2 id="finite-difference-method"><a class="header" href="#finite-difference-method">Finite difference method</a></h2>
 <p>The finite difference method is a numerical method for discretising a spatial derivative like \(\frac{\partial^2 u}{\partial x^2}\). It approximates this <em>continuous</em> term by a <em>discrete</em> term, in this case the multiplication of a matrix by a vector. We can use this discretisation method to convert the heat equation into a system of ODEs suitable for DiffSol.</p>
 <p>We will not go into the details of the finite difference method here but mearly derive a single finite difference approximation for the term \(\frac{\partial^2 u}{\partial x^2}\), or \(u_{xx}\) using more compact notation.</p>
@@ -173,7 +173,7 @@ u_{xx} \approx \frac{u(x + h) - 2u(x) + u(x-h)}{h^2}
 <pre><code>          +----+----+----------+----+&gt; x
           0   x_1  x_2    ... x_N   1
 </code></pre>
-<p>Using this set of point and the discretised equation, this gives a set of \(N\) equations at each interior point on the domain:</p>
+<p>Using this set of points and the discrete approximation, this gives a set of \(N\) equations at each interior point on the domain:</p>
 <p>\[
 \frac{v_{i+1} - 2v_i + v_{i-1}}{h^2} \text{ for } i = 1...N
 \]</p>
@@ -225,11 +225,15 @@ g(1)
 \end{bmatrix}
 \]</p>
 <h2 id="method-of-lines-approximation"><a class="header" href="#method-of-lines-approximation">Method of Lines Approximation</a></h2>
-<p>We can use our FD approximation of the spatial derivative to convert the heat equation into a system of ODEs. We can write the heat equation as:</p>
+<p>We can use our FD approximation of the spatial derivative to convert the heat equation into a system of ODEs. Starting from our original definition of the heat equation:</p>
 <p>\[
-\frac{du}{dt} = D \frac{d^2 u}{dx^2} \approx \frac{D}{h^2} (A u + b)
+\frac{\partial u}{\partial t} = D \frac{\partial^2 u}{\partial x^2}
 \]</p>
-<p>where \(u\) is a vector of temperatures at each point in space, \(A\) and \(b\) is the sparse matrix and vector we derived above. This is a system of ODEs that we can solve using DiffSol.</p>
+<p>and using our finite difference approximation and definition of the sparse matrix \(A\) and vector \(b\), this becomes:</p>
+<p>\[
+\frac{du}{dt} = \frac{D}{h^2} (A u + b)
+\]</p>
+<p>where \(u\) is a vector of temperatures at each point in space. This is a system of ODEs that we can solve using DiffSol.</p>
 <h2 id="diffsol-implementation"><a class="header" href="#diffsol-implementation">DiffSol Implementation</a></h2>
 <pre><pre class="playground"><code class="language-rust">use diffsol::{
     DiffSl, OdeBuilder, CraneliftModule, SparseColMat, FaerSparseLU, 

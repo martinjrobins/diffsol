@@ -164,8 +164,8 @@
 <p>where \(\mathbf{y}\) is the vector of state variables, \(\mathbf{y}'\) is the vector of derivatives of the state variables, and \(\mathbf{F}\) is a vector-valued function that describes the system of equations. However, for the purposes of this primer and the capabilities of DiffSol, we will focus on a specific form of DAEs called index-1 or semi-explicit DAEs, which can be written as a combination of differential and algebraic equations:</p>
 <p>\[
 \begin{align*}
-\frac{d\mathbf{y}}{dt} &amp;= \mathbf{f}(\mathbf{y}, \mathbf{y}', t) \\
-0 = \mathbf{g}(\mathbf{y}, t)
+\frac{d\mathbf{y}}{dt} &amp;= \mathbf{f}(\mathbf{y}, t) \\
+0 &amp;= \mathbf{g}(\mathbf{y}, t)
 \end{align*}
 \]</p>
 <p>where \(\mathbf{f}\) is the vector-valued function that describes the differential equations and \(\mathbf{g}\) is the vector-valued function that describes the algebraic equations. The key difference between DAEs and ODEs is that DAEs include algebraic equations that must be satisfied at each time step, in addition to the differential equations that describe the rate of change of the state variables.</p>

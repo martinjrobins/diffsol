@@ -163,7 +163,7 @@ V_s =       R       |
     |       |       |
     +-------+-------+
 </code></pre>
-<p>The circuit consists of a resistor \(R\), an inductor \(L\), and a capacitor \(C\) connected in series to a voltage source \(V_s\). The voltage across the resistor \(V\) is given by Ohm's law:</p>
+<p>The circuit consists of a resistor \(R\), an inductor \(L\), and a capacitor \(C\) connected to a voltage source \(V_s\). The voltage across the resistor \(V\) is given by Ohm's law:</p>
 <p>\[
 V = R i_R
 \]</p>
@@ -179,7 +179,7 @@ V = R i_R
 <p>\[
 i_L = i_R + i_C
 \]</p>
-<p>Thus we have a system of two differential equations and two algebraic equation that describe the evolution of the currents through the resistor, inductor, and capacitor, and the voltage across the resistor. We can write these equations in the general form:</p>
+<p>Thus we have a system of two differential equations and two algebraic equation that describe the evolution of the currents through the resistor, inductor, and capacitor; and the voltage across the resistor. We can write these equations in the general form:</p>
 <p>\[
 M \frac{d\mathbf{y}}{dt} = \mathbf{f}(\mathbf{y}, t)
 \]</p>
@@ -205,9 +205,9 @@ M \frac{d\mathbf{y}}{dt} = \begin{bmatrix} 0 \\ \frac{di_L}{dt} \\ 0 \\ \frac{dV
 \]</p>
 <p>The voltage source \(V_s\) acts as a forcing function for the system, and we can specify this as sinusoidal function of time.</p>
 <p>\[
-V_s(t) = V_0 \sin(omega t)
+V_s(t) = V_0 \sin(\omega t)
 \]</p>
-<p>where \(omega\) is the angular frequency of the source. Since this is a low-pass filter, we will choose a high frequency for the source, say \(omega = 200\), to demonstrate the filtering effect of the circuit.</p>
+<p>where \(\omega\) is the angular frequency of the source. Since this is a low-pass filter, we will choose a high frequency for the source, say \(\omega = 200\), to demonstrate the filtering effect of the circuit.</p>
 <p>We can solve this system of equations using DiffSol and plot the current and voltage across the resistor as a function of time.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
 </span><span class="boring">use std::fs;

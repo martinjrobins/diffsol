@@ -156,9 +156,7 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="ode-equations"><a class="header" href="#ode-equations">ODE equations</a></h1>
-<p>The simplest way to create a new ode problem is to use the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct.
-You can use methods to set the equations to be solve, initial time, initial step size, relative &amp; absolute tolerances, and parameters, or leave them at their default values.
-Then, call the <code>build</code> method to create a new problem.</p>
+<p>To create a new ode problem, use the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct. You can create a builder using the <code>OdeBuilder::new</code> method, and then chain methods to set the equations to be solve, initial time, initial step size, relative &amp; absolute tolerances, and parameters, or leave them at their default values. Then, call the <code>build</code> method to create a new problem.</p>
 <p>Below is an example of how to create a new ODE problem using the <code>OdeBuilder</code> struct.
 The specific problem we will solve is the logistic equation</p>
 <p>\[\frac{dy}{dt} = r y (1 - y/K),\]</p>

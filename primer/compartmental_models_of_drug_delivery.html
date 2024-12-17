@@ -174,7 +174,7 @@
 \]</p>
 <p>The body itself is modelled as one or more <em>compartments</em>, each of which is defined as a kinetically homogeneous unit (these compartments do not relate to specific organs in the body, unlike Physiologically based pharmacokinetic, PBPK, modeling). There is typically a main <em>central</em> compartment into which the drug is administered and from which the drug is excreted from the body, combined with zero or more <em>peripheral</em> compartments to which the drug can be distributed to/from the central compartment (See Fig 2). Each
 peripheral compartment is only connected to the central compartment.</p>
-<p><img src="https://sabs-r3.github.io/software-engineering-projects/fig/pk2.svg" alt="Fig 2" /></p>
+<p><img src="images/pk2.svg" alt="Fig 2" /></p>
 <p>The following example PK model describes the two-compartment model shown diagrammatically in the figure above. The time-dependent variables to be solved are the drug quantity in the central and peripheral compartments, $q_c$ and $q_{p1}$ (units: [ng]) respectively.</p>
 <p>\[
 \frac{dq_c}{dt} = \text{Dose}(t) - \frac{q_c}{V_c} CL - Q_{p1} \left ( \frac{q_c}{V_c} - \frac{q_{p1}}{V_{p1}} \right ),
@@ -210,7 +210,7 @@ peripheral compartment is only connected to the central compartment.</p>
 <p>\[
 V_c = 1000 \text{ mL}, \quad V_{p1} = 1000 \text{ mL}, \quad CL = 100 \text{ mL/h}, \quad Q_{p1} = 50 \text{ mL/h}
 \]</p>
-<p>Let's now solve this system of ODEs using DiffSol.</p>
+<p>Let's now solve this system of ODEs using DiffSol. To implement the discrete dose events, we set a stop time for the simulation at each dose event using the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#tymethod.set_stop_time">OdeSolverMethod::set_stop_time</a> method. During timestepping we can check the return value of the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#tymethod.step">OdeSolverMethod::step</a> method to see if the solver has reached the stop time. If it has, we can apply the dose and continue the simulation.</p>
 <pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
 </span><span class="boring">use std::fs;
 </span>use diffsol::{
