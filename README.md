@@ -25,7 +25,7 @@ You can use DiffSol out-of-the-box with vectors, matrices and linear solvers fro
 
 See installation instructions on the [crates.io page](https://crates.io/crates/diffsol).
 
-The [DiffSol book](https://martinjrobins.github.io/diffsol/) describes how to use DiffSol using many modelling examples taken from various application fields (e.g. population dynamics, electrical circuits and phamacological modelling), as well as more detailed information on the various APIs used to specify the ODE equations. For a more complete description of the API, please see the [docs.rs API documentation](https://docs.rs/diffsol). 
+The [DiffSol book](https://martinjrobins.github.io/diffsol/) describes how to use DiffSol using examples taken from several application areas (e.g. population dynamics, electrical circuits and phamacological modelling), as well as more detailed information on the various APIs used to specify the ODE equations. For a more complete description of the API, please see the [docs.rs API documentation](https://docs.rs/diffsol). 
 
 ## Solvers 
 
