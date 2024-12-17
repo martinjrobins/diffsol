@@ -17,7 +17,7 @@ M \frac{dy}{dt} = f(t, y, p)
 
 where $M$ is a (possibly singular and optional) mass matrix, $y$ is the state vector, $t$ is the time and $p$ is a vector of parameters. 
 
-The equations can be given using either rust closures or the [DiffSL](https://martinjrobins.github.io/diffsl/) Domain Specific Language (DSL). The DSL uses automatic differentiation using [Enzyme](https://enzyme.mit.edu/) to calculate the necessary jacobians, and JIT compilation (using either [LLVM](https://llvm.org/) or [Cranelift](https://cranelift.dev/)) to generate efficient native code at runtime. The DSL is ideal for using DiffSol from a higher-level language like Python or R while still maintaining similar performance to pure rust.
+The equations can be given by either rust closures or the [DiffSL](https://martinjrobins.github.io/diffsl/) Domain Specific Language (DSL). The DSL uses automatic differentiation using [Enzyme](https://enzyme.mit.edu/) to calculate the necessary jacobians, and JIT compilation (using either [LLVM](https://llvm.org/) or [Cranelift](https://cranelift.dev/)) to generate efficient native code at runtime. The DSL is ideal for using DiffSol from a higher-level language like Python or R while still maintaining similar performance to pure rust.
 
 You can use DiffSol out-of-the-box with vectors, matrices and linear solvers from the [nalgebra](https://nalgebra.org) or [faer](https://github.com/sarah-ek/faer-rs) crates, or you can implement your own types or solvers by implementing the required traits.
 
