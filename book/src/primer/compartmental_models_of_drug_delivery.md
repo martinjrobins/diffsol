@@ -24,7 +24,7 @@ These are often referred to as ADME, and taken together describe the drug concen
 The body itself is modelled as one or more *compartments*, each of which is defined as a kinetically homogeneous unit (these compartments do not relate to specific organs in the body, unlike Physiologically based pharmacokinetic, PBPK, modeling). There is typically a main *central* compartment into which the drug is administered and from which the drug is excreted from the body, combined with zero or more *peripheral* compartments to which the drug can be distributed to/from the central compartment (See Fig 2). Each 
 peripheral compartment is only connected to the central compartment.
 
-![Fig 2](https://sabs-r3.github.io/software-engineering-projects/fig/pk2.svg)
+![Fig 2](images/pk2.svg)
 
 The following example PK model describes the two-compartment model shown diagrammatically in the figure above. The time-dependent variables to be solved are the drug quantity in the central and peripheral compartments, $q_c$ and $q_{p1}$ (units: [ng]) respectively.
 
@@ -74,7 +74,7 @@ For the dose function, we will specify a dose of 1000 ng at regular intervals of
 V_c = 1000 \text{ mL}, \quad V_{p1} = 1000 \text{ mL}, \quad CL = 100 \text{ mL/h}, \quad Q_{p1} = 50 \text{ mL/h}
 \\]
 
-Let's now solve this system of ODEs using DiffSol. 
+Let's now solve this system of ODEs using DiffSol. To implement the discrete dose events, we set a stop time for the simulation at each dose event using the [OdeSolverMethod::set_stop_time](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#tymethod.set_stop_time) method. During timestepping we can check the return value of the [OdeSolverMethod::step](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#tymethod.step) method to see if the solver has reached the stop time. If it has, we can apply the dose and continue the simulation.
 
 ```rust
 # fn main() {

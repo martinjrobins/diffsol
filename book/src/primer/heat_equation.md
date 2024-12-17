@@ -6,7 +6,7 @@ Lets consider a simple example, the heat equation. The heat equation is a PDE th
 \frac{\partial u}{\partial t} = D \frac{\partial^2 u}{\partial x^2}
 \\]
 
-where \\(u(x, t)\\) is the temperature of the material at position \\(x\\) and time \\(t\\), and \\(D\\) is the thermal diffusivity of the material. To solve this equation, we need to discretize it in space and time. We can use a finite difference method to do this.
+where \\(u(x, t)\\) is the temperature of the material at position \\(x\\) and time \\(t\\), and \\(D\\) is the thermal diffusivity of the material. To solve this equation, we need to discretize it in space and time. We can use a finite difference method to discretise the spatial derivative, and then solve the resulting system of ODEs using DiffSol.
 
 ## Finite difference method
 
@@ -27,7 +27,7 @@ We will discretise \\(u_{xx} = 0\\) at \\(N\\) regular points along \\(x\\) from
               +----+----+----------+----+> x
               0   x_1  x_2    ... x_N   1
 
-Using this set of point and the discretised equation, this gives a set of \\(N\\) equations at each interior point on the domain:
+Using this set of points and the discrete approximation, this gives a set of \\(N\\) equations at each interior point on the domain:
 
 \\[
 \frac{v_{i+1} - 2v_i + v_{i-1}}{h^2} \text{ for } i = 1...N
@@ -94,13 +94,20 @@ g(1)
 
 ## Method of Lines Approximation
 
-We can use our FD approximation of the spatial derivative to convert the heat equation into a system of ODEs. We can write the heat equation as:
+We can use our FD approximation of the spatial derivative to convert the heat equation into a system of ODEs. Starting from our original definition of the heat equation:
 
 \\[
-\frac{du}{dt} = D \frac{d^2 u}{dx^2} \approx \frac{D}{h^2} (A u + b)
+\frac{\partial u}{\partial t} = D \frac{\partial^2 u}{\partial x^2}
 \\]
 
-where \\(u\\) is a vector of temperatures at each point in space, \\(A\\) and \\(b\\) is the sparse matrix and vector we derived above. This is a system of ODEs that we can solve using DiffSol.
+and using our finite difference approximation and definition of the sparse matrix \\(A\\) and vector \\(b\\), this becomes:
+
+
+\\[
+\frac{du}{dt} = \frac{D}{h^2} (A u + b)
+\\]
+
+where \\(u\\) is a vector of temperatures at each point in space. This is a system of ODEs that we can solve using DiffSol.
 
 ## DiffSol Implementation
 

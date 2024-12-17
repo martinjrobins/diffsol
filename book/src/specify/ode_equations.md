@@ -1,8 +1,6 @@
 # ODE equations
 
-The simplest way to create a new ode problem is to use the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html) struct. 
-You can use methods to set the equations to be solve, initial time, initial step size, relative & absolute tolerances, and parameters, or leave them at their default values.
-Then, call the `build` method to create a new problem.
+To create a new ode problem, use the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html) struct. You can create a builder using the `OdeBuilder::new` method, and then chain methods to set the equations to be solve, initial time, initial step size, relative & absolute tolerances, and parameters, or leave them at their default values. Then, call the `build` method to create a new problem.
 
 Below is an example of how to create a new ODE problem using the `OdeBuilder` struct. 
 The specific problem we will solve is the logistic equation 
