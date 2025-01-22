@@ -4,7 +4,7 @@ use crate::{
     error::DiffsolError, linear_solver::LinearSolver, Matrix, NonLinearOpJacobian, Scalar,
 };
 
-use faer::{linalg::solvers::FullPivLu, solvers::SpSolver, Col, Mat};
+use faer::{linalg::solvers::FullPivLu, Col, Mat, linalg::solvers::Solve};
 /// A [LinearSolver] that uses the LU decomposition in the [`faer`](https://github.com/sarah-ek/faer-rs) library to solve the linear system.
 pub struct LU<T>
 where

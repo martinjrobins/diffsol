@@ -7,8 +7,8 @@ use crate::{
 };
 
 use faer::{
-    solvers::SpSolver,
     sparse::linalg::{solvers::Lu, solvers::SymbolicLu},
+    linalg::solvers::Solve,
     Col,
 };
 

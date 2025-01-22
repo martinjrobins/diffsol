@@ -8,7 +8,7 @@ use crate::vector::Vector;
 use crate::{DefaultSolver, FaerSparseLU, IndexType, Scalar, Scale};
 
 use faer::sparse::ops::{ternary_op_assign_into, union_symbolic};
-use faer::sparse::{SymbolicSparseColMat, SymbolicSparseColMatRef};
+use faer::sparse::{Pair, SymbolicSparseColMat, SymbolicSparseColMatRef, Triplet};
 use faer::Col;
 
 pub struct SparseColMat<T: Scalar>(faer::sparse::SparseColMat<IndexType, T>);
@@ -22,7 +22,7 @@ impl<T: Scalar> Debug for SparseColMat<T> {
 impl<T: Scalar> Clone for SparseColMat<T> {
     fn clone(&self) -> Self {
         let sparsity = self.0.symbolic().to_owned().unwrap();
-        let values = self.0.values().to_vec();
+        let values = self.0.val().to_vec();
         Self(faer::sparse::SparseColMat::new(sparsity, values))
     }
 }
@@ -87,7 +87,7 @@ impl<T: Scalar> MatrixSparsity<SparseColMat<T>> for SymbolicSparseColMat<IndexTy
     }
 
     fn new_diagonal(n: IndexType) -> Self {
-        let indices = (0..n).map(|i| (i, i)).collect::<Vec<_>>();
+        let indices = (0..n).map(|i| Pair::new(i, i)).collect::<Vec<_>>();
         SymbolicSparseColMat::try_new_from_indices(n, n, indices.as_slice())
             .unwrap()
             .0
@@ -98,6 +98,7 @@ impl<T: Scalar> MatrixSparsity<SparseColMat<T>> for SymbolicSparseColMat<IndexTy
         ncols: IndexType,
         indices: Vec<(IndexType, IndexType)>,
     ) -> Result<Self, DiffsolError> {
+        let indices = indices.iter().map(|(i, j)| Pair::new(*i, *j)).collect::<Vec<_>>();
         match Self::try_new_from_indices(nrows, ncols, indices.as_slice()) {
             Ok((sparsity, _)) => Ok(sparsity),
             Err(e) => Err(DiffsolError::Other(e.to_string())),
@@ -109,8 +110,8 @@ impl<T: Scalar> MatrixSparsity<SparseColMat<T>> for SymbolicSparseColMat<IndexTy
         rows: &[IndexType],
         cols: &[IndexType],
     ) -> <<SparseColMat<T> as MatrixCommon>::V as Vector>::Index {
-        let col_ptrs = self.col_ptrs();
-        let row_indices = self.row_indices();
+        let col_ptrs = self.col_ptr();
+        let row_indices = self.row_idx();
         let mut indices = Vec::with_capacity(rows.len());
         for (&i, &j) in rows.iter().zip(cols.iter()) {
             let col_ptr = col_ptrs[j];
@@ -164,7 +165,7 @@ impl<T: Scalar> Mul<Scale<T>> for SparseColMat<T> {
     type Output = SparseColMat<T>;
 
     fn mul(mut self, rhs: Scale<T>) -> Self::Output {
-        for v in self.0.values_mut() {
+        for v in self.0.val_mut() {
             v.mul_assign(rhs.value());
         }
         self
@@ -193,7 +194,7 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
         src_indices: &<Self::V as Vector>::Index,
         data: &Self::V,
     ) {
-        let values = self.0.values_mut();
+        let values = self.0.val_mut();
         for (dst_i, src_i) in dst_indices.iter().zip(src_indices.iter()) {
             values[*dst_i] = data[*src_i];
         }
@@ -201,16 +202,16 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
 
     fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
         for i in self.0.col_range(j) {
-            let row = self.0.row_indices()[i];
-            v[row] += self.0.values()[i];
+            let row = self.0.row_idx()[i];
+            v[row] += self.0.val()[i];
         }
     }
 
     fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)> {
         (0..self.ncols()).flat_map(move |j| {
             self.0.col_range(j).map(move |i| {
-                let row = self.0.row_indices()[i];
-                (row, j, &self.0.values()[i])
+                let row = self.0.row_idx()[i];
+                (row, j, &self.0.val()[i])
             })
         })
     }
@@ -220,6 +221,7 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
         ncols: IndexType,
         triplets: Vec<(IndexType, IndexType, T)>,
     ) -> Result<Self, DiffsolError> {
+        let triplets = triplets.iter().map(|(i, j, v)| Triplet::new(*i, *j, *v)).collect::<Vec<_>>();
         match faer::sparse::SparseColMat::try_new_from_triplets(nrows, ncols, triplets.as_slice()) {
             Ok(mat) => Ok(Self(mat)),
             Err(e) => Err(DiffsolError::from(
@@ -228,7 +230,7 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
         }
     }
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        let tmp = self.0.as_ref() * x.as_ref();
+        let tmp = &self.0 * x;
         y.axpy(alpha, &tmp, beta);
     }
     fn zeros(nrows: IndexType, ncols: IndexType) -> Self {
@@ -237,20 +239,20 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
     fn copy_from(&mut self, other: &Self) {
         self.0 = faer::sparse::SparseColMat::new(
             other.0.symbolic().to_owned().unwrap(),
-            other.0.values().to_vec(),
+            other.0.val().to_vec(),
         )
     }
     fn from_diagonal(v: &Col<T>) -> Self {
         let dim = v.nrows();
-        let triplets = (0..dim).map(|i| (i, i, v[i])).collect::<Vec<_>>();
+        let triplets = (0..dim).map(|i| Triplet::new(i, i, v[i])).collect::<Vec<_>>();
         Self(faer::sparse::SparseColMat::try_new_from_triplets(dim, dim, &triplets).unwrap())
     }
     fn diagonal(&self) -> Self::V {
         let mut ret = Col::zeros(self.nrows());
         for j in 0..self.ncols() {
             for i in self.0.col_range(j) {
-                if self.0.row_indices()[i] == j {
-                    ret[j] = self.0.values()[i];
+                if self.0.row_idx()[i] == j {
+                    ret[j] = self.0.val()[i];
                     break;
                 }
             }
@@ -260,8 +262,8 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
     fn set_column(&mut self, j: IndexType, v: &Self::V) {
         assert_eq!(v.len(), self.nrows());
         for i in self.0.col_range(j) {
-            let row_i = self.0.row_indices()[i];
-            self.0.values_mut()[i] = v[row_i];
+            let row_i = self.0.row_idx()[i];
+            self.0.val_mut()[i] = v[row_i];
         }
     }
 
@@ -279,7 +281,7 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
         let sparsity = sparsity.expect("Sparsity pattern required for sparse matrix");
         assert_eq!(sparsity.nrows(), nrows);
         assert_eq!(sparsity.ncols(), ncols);
-        let nnz = sparsity.row_indices().len();
+        let nnz = sparsity.row_idx().len();
         Self(faer::sparse::SparseColMat::new(
             sparsity,
             vec![T::zero(); nnz],
