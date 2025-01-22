@@ -9,6 +9,7 @@ use crate::{DefaultSolver, FaerSparseLU, IndexType, Scalar, Scale};
 
 use faer::sparse::ops::{ternary_op_assign_into, union_symbolic};
 use faer::sparse::{Pair, SymbolicSparseColMat, SymbolicSparseColMatRef, Triplet};
+use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::Col;
 
 pub struct SparseColMat<T: Scalar>(faer::sparse::SparseColMat<IndexType, T>);
@@ -57,11 +58,11 @@ impl<T: Scalar> MatrixSparsity<SparseColMat<T>> for SymbolicSparseColMat<IndexTy
         self,
         other: SymbolicSparseColMatRef<IndexType>,
     ) -> Result<SymbolicSparseColMat<IndexType>, DiffsolError> {
-        union_symbolic(self.as_ref(), other).map_err(|e| DiffsolError::Other(e.to_string()))
+        union_symbolic(self.rb(), other).map_err(|e| DiffsolError::Other(e.to_string()))
     }
 
     fn as_ref(&self) -> SymbolicSparseColMatRef<IndexType> {
-        self.as_ref()
+        self.rb()
     }
 
     fn nrows(&self) -> IndexType {
@@ -268,8 +269,8 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
     }
 
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
-        ternary_op_assign_into(self.0.as_mut(), x.0.as_ref(), y.0.as_ref(), |_s, x, y| {
-            x + beta * y
+        ternary_op_assign_into(self.0.rb_mut(), x.0.rb(), y.0.rb(), |s, x, y| {
+            *s = *x.unwrap_or(&T::zero()) + beta * *y.unwrap_or(&T::zero())
         });
     }
 

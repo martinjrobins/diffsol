@@ -10,6 +10,7 @@ use faer::{
     sparse::linalg::{solvers::Lu, solvers::SymbolicLu},
     linalg::solvers::Solve,
     Col,
+    reborrow::Reborrow,
 };
 
 /// A [LinearSolver] that uses the LU decomposition in the [`faer`](https://github.com/sarah-ek/faer-rs) library to solve the linear system.
@@ -47,7 +48,7 @@ impl<T: Scalar> LinearSolver<SparseColMat<T>> for FaerSparseLU<T> {
         self.lu = Some(
             Lu::try_new_with_symbolic(
                 self.lu_symbolic.as_ref().unwrap().clone(),
-                matrix.faer().as_ref(),
+                matrix.faer().rb(),
             )
             .expect("Failed to factorise matrix"),
         )

@@ -1,3 +1,4 @@
+use std::slice;
 use std::ops::{Div, Mul, MulAssign};
 
 use faer::{zip, unzip, Col, ColMut, ColRef, Mat};
@@ -88,10 +89,10 @@ impl<T: Scalar> Vector for Col<T> {
         self.norm_l2()
     }
     fn as_mut_slice(&mut self) -> &mut [Self::T] {
-        self.as_slice_mut()
+        unsafe { slice::from_raw_parts_mut(self.as_ptr_mut(), self.len() as usize) }
     }
     fn as_slice(&self) -> &[Self::T] {
-        self.as_slice()
+        unsafe { slice::from_raw_parts(self.as_ptr(), self.len() as usize) }
     }
     fn copy_from_slice(&mut self, slice: &[Self::T]) {
         assert_eq!(slice.len(), self.len() as usize, "Vector lengths do not match");
@@ -123,7 +124,7 @@ impl<T: Scalar> Vector for Col<T> {
         self.copy_from(other)
     }
     fn fill(&mut self, value: Self::T) {
-        self.fill(value);
+        self.iter_mut().for_each(|s| *s = value);
     }
     fn from_element(nstates: usize, value: Self::T) -> Self {
         Col::from_vec(vec![value; nstates])
@@ -139,20 +140,20 @@ impl<T: Scalar> Vector for Col<T> {
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {
         zip!(self.as_mut(), x.as_view())
-            .for_each(|unzip!(mut si, xi)| *si = *si * beta + *xi * alpha);
+            .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
         zip!(self.as_mut(), x)
-            .for_each(|unzip!(mut si, xi)| *si = *si * beta + *xi * alpha);
+            .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }
     fn map_inplace(&mut self, f: impl Fn(Self::T) -> Self::T) {
-        zip!(self.as_mut()).for_each(|unzip!(mut xi)| *xi = f(*xi));
+        zip!(self.as_mut()).for_each(|unzip!(xi)| *xi = f(*xi));
     }
     fn component_mul_assign(&mut self, other: &Self) {
-        zip!(self.as_mut(), other.as_view()).for_each(|unzip!(mut s, o)| *s *= *o);
+        zip!(self.as_mut(), other.as_view()).for_each(|unzip!(s, o)| *s *= *o);
     }
     fn component_div_assign(&mut self, other: &Self) {
-        zip!(self.as_mut(), other.as_view()).for_each(|unzip!(mut s, o)| *s /= *o);
+        zip!(self.as_mut(), other.as_view()).for_each(|unzip!(s, o)| *s /= *o);
     }
     fn filter_indices<F: Fn(Self::T) -> bool>(&self, f: F) -> Self::Index {
         let mut indices = vec![];
