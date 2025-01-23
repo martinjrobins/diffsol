@@ -91,7 +91,7 @@ pub fn heat2d_diffsl_problem<
         dx2 = (1.0 / (MGRID as f64 - 1.0)).powi(2),
     );
 
-    let context: DiffSlContext<M, CG> = DiffSlContext::new(code.as_str()).unwrap();
+    let context: DiffSlContext<M, CG> = DiffSlContext::new(code.as_str(), 1).unwrap();
     let eqn = DiffSl::from_context(context);
     let problem = OdeBuilder::<M>::new()
         .rtol(1e-7)

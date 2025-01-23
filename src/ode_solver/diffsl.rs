@@ -3,10 +3,7 @@ use std::cell::RefCell;
 use diffsl::{execution::module::CodegenModule, Compiler};
 
 use crate::{
-    error::DiffsolError, find_jacobian_non_zeros, find_matrix_non_zeros,
-    jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
-    op::nonlinear_op::NonLinearOpJacobian, ConstantOp, LinearOp, Matrix, NonLinearOp, OdeEquations,
-    OdeEquationsRef, Op, Vector,
+    error::DiffsolError, find_jacobian_non_zeros, find_matrix_non_zeros, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity, op::nonlinear_op::NonLinearOpJacobian, ConstantOp, LinearOp, Matrix, NonLinearOp, OdeEquations, OdeEquationsRef, Op, Vector
 };
 
 pub type T = f64;
@@ -24,14 +21,26 @@ pub struct DiffSlContext<M: Matrix<T = T>, CG: CodegenModule> {
     nparams: usize,
     has_mass: bool,
     nout: usize,
+    nthreads: usize,
 }
 
 impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
     /// Create a new context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
     /// The input parameters are not initialized and must be set using the [OdeEquations::set_params] function before solving the ODE.
-    pub fn new(text: &str) -> Result<Self, DiffsolError> {
+    /// 
+    /// # Arguments
+    /// 
+    /// * `text` - The text of the ODE equations in the DiffSL language.
+    /// * `nthreads` - The number of threads to use for code generation (0 for automatic, 1 for single-threaded).
+    /// 
+    pub fn new(text: &str, nthreads: usize) -> Result<Self, DiffsolError> {
+        let mode = match nthreads {
+            0 => diffsl::execution::compiler::CompilerMode::MultiThreaded(None),
+            1 => diffsl::execution::compiler::CompilerMode::SingleThreaded,
+            _ => diffsl::execution::compiler::CompilerMode::MultiThreaded(Some(nthreads)),
+        };
         let compiler =
-            Compiler::from_discrete_str(text).map_err(|e| DiffsolError::Other(e.to_string()))?;
+            Compiler::from_discrete_str(text, mode).map_err(|e| DiffsolError::Other(e.to_string()))?;
         let (nstates, nparams, nout, _ndata, nroots, has_mass) = compiler.get_dims();
         let data = RefCell::new(compiler.get_new_data());
         let ddata = RefCell::new(compiler.get_new_data());
@@ -47,12 +56,18 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
             nroots,
             nout,
             has_mass,
+            nthreads,
         })
     }
 
     pub fn recompile(&mut self, text: &str) -> Result<(), DiffsolError> {
+        let mode = match self.nthreads {
+            0 => diffsl::execution::compiler::CompilerMode::MultiThreaded(None),
+            1 => diffsl::execution::compiler::CompilerMode::SingleThreaded,
+            _ => diffsl::execution::compiler::CompilerMode::MultiThreaded(Some(self.nthreads)),
+        };
         self.compiler =
-            Compiler::from_discrete_str(text).map_err(|e| DiffsolError::Other(e.to_string()))?;
+            Compiler::from_discrete_str(text, mode).map_err(|e| DiffsolError::Other(e.to_string()))?;
         let (nstates, nparams, nout, _ndata, nroots, has_mass) = self.compiler.get_dims();
         self.data = RefCell::new(self.compiler.get_new_data());
         self.ddata = RefCell::new(self.compiler.get_new_data());
@@ -73,7 +88,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> Default for DiffSlContext<M, CG> {
             u { y = 1 }
             F { -y }
             out { y }
-        ",
+        ", 1,
         )
         .unwrap()
     }
@@ -88,8 +103,8 @@ pub struct DiffSl<M: Matrix<T = T>, CG: CodegenModule> {
 }
 
 impl<M: Matrix<T = T>, CG: CodegenModule> DiffSl<M, CG> {
-    pub fn compile(code: &str) -> Result<Self, DiffsolError> {
-        let context = DiffSlContext::<M, CG>::new(code)?;
+    pub fn compile(code: &str, nthreads: usize) -> Result<Self, DiffsolError> {
+        let context = DiffSlContext::<M, CG>::new(code, nthreads)?;
         Ok(Self::from_context(context))
     }
     pub fn from_context(context: DiffSlContext<M, CG>) -> Self {
@@ -441,7 +456,7 @@ mod tests {
 
         let k = 1.0;
         let r = 1.0;
-        let context = DiffSlContext::<nalgebra::DMatrix<f64>, CG>::new(text).unwrap();
+        let context = DiffSlContext::<nalgebra::DMatrix<f64>, CG>::new(text, 1).unwrap();
         let p = DVector::from_vec(vec![r, k]);
         let mut eqn = DiffSl::from_context(context);
         eqn.set_params(&p);
