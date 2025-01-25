@@ -8,9 +8,7 @@ use crate::FaerLU;
 use crate::{Dense, DenseRef, Vector};
 
 use faer::{get_global_parallelism, unzip, zip, Accum};
-use faer::{
-    linalg::matmul::matmul, Col, ColMut, ColRef, Mat, MatMut, MatRef,
-};
+use faer::{linalg::matmul::matmul, Col, ColMut, ColRef, Mat, MatMut, MatRef};
 
 impl<T: Scalar> DefaultSolver for Mat<T> {
     type LS = FaerLU<T>;
@@ -70,7 +68,7 @@ impl<'a, T: Scalar> MatrixView<'a> for MatRef<'a, T> {
             self.as_ref(),
             x.as_ref(),
             alpha,
-            get_global_parallelism()
+            get_global_parallelism(),
         );
     }
     fn gemv_v(
@@ -87,7 +85,7 @@ impl<'a, T: Scalar> MatrixView<'a> for MatRef<'a, T> {
             self.as_ref(),
             x.as_ref(),
             alpha,
-            get_global_parallelism()
+            get_global_parallelism(),
         );
     }
 }
@@ -104,7 +102,7 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for MatMut<'a, T> {
             a.as_ref(),
             b.as_ref(),
             alpha,
-            get_global_parallelism()
+            get_global_parallelism(),
         )
     }
     fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T) {
@@ -115,7 +113,7 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for MatMut<'a, T> {
             a.as_ref(),
             b.as_ref(),
             alpha,
-            get_global_parallelism()
+            get_global_parallelism(),
         )
     }
 }
@@ -132,7 +130,7 @@ impl<T: Scalar> DenseMatrix for Mat<T> {
             a.as_ref(),
             b.as_ref(),
             alpha,
-            get_global_parallelism()
+            get_global_parallelism(),
         )
     }
     fn column_mut(&mut self, i: usize) -> ColMut<'_, T> {
@@ -216,7 +214,7 @@ impl<T: Scalar> Matrix for Mat<T> {
             self.as_ref(),
             x.as_ref(),
             alpha,
-            get_global_parallelism()
+            get_global_parallelism(),
         );
     }
     fn zeros(nrows: IndexType, ncols: IndexType) -> Self {

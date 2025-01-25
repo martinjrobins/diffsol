@@ -7,9 +7,9 @@ use crate::error::{DiffsolError, MatrixError};
 use crate::vector::Vector;
 use crate::{DefaultSolver, FaerSparseLU, IndexType, Scalar, Scale};
 
+use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::sparse::ops::{ternary_op_assign_into, union_symbolic};
 use faer::sparse::{Pair, SymbolicSparseColMat, SymbolicSparseColMatRef, Triplet};
-use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::Col;
 
 pub struct SparseColMat<T: Scalar>(faer::sparse::SparseColMat<IndexType, T>);
@@ -99,7 +99,10 @@ impl<T: Scalar> MatrixSparsity<SparseColMat<T>> for SymbolicSparseColMat<IndexTy
         ncols: IndexType,
         indices: Vec<(IndexType, IndexType)>,
     ) -> Result<Self, DiffsolError> {
-        let indices = indices.iter().map(|(i, j)| Pair::new(*i, *j)).collect::<Vec<_>>();
+        let indices = indices
+            .iter()
+            .map(|(i, j)| Pair::new(*i, *j))
+            .collect::<Vec<_>>();
         match Self::try_new_from_indices(nrows, ncols, indices.as_slice()) {
             Ok((sparsity, _)) => Ok(sparsity),
             Err(e) => Err(DiffsolError::Other(e.to_string())),
@@ -222,7 +225,10 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
         ncols: IndexType,
         triplets: Vec<(IndexType, IndexType, T)>,
     ) -> Result<Self, DiffsolError> {
-        let triplets = triplets.iter().map(|(i, j, v)| Triplet::new(*i, *j, *v)).collect::<Vec<_>>();
+        let triplets = triplets
+            .iter()
+            .map(|(i, j, v)| Triplet::new(*i, *j, *v))
+            .collect::<Vec<_>>();
         match faer::sparse::SparseColMat::try_new_from_triplets(nrows, ncols, triplets.as_slice()) {
             Ok(mat) => Ok(Self(mat)),
             Err(e) => Err(DiffsolError::from(
@@ -245,7 +251,9 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
     }
     fn from_diagonal(v: &Col<T>) -> Self {
         let dim = v.nrows();
-        let triplets = (0..dim).map(|i| Triplet::new(i, i, v[i])).collect::<Vec<_>>();
+        let triplets = (0..dim)
+            .map(|i| Triplet::new(i, i, v[i]))
+            .collect::<Vec<_>>();
         Self(faer::sparse::SparseColMat::try_new_from_triplets(dim, dim, &triplets).unwrap())
     }
     fn diagonal(&self) -> Self::V {

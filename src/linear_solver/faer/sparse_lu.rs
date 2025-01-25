@@ -7,10 +7,10 @@ use crate::{
 };
 
 use faer::{
-    sparse::linalg::{solvers::Lu, solvers::SymbolicLu},
     linalg::solvers::Solve,
-    Col,
     reborrow::Reborrow,
+    sparse::linalg::{solvers::Lu, solvers::SymbolicLu},
+    Col,
 };
 
 /// A [LinearSolver] that uses the LU decomposition in the [`faer`](https://github.com/sarah-ek/faer-rs) library to solve the linear system.

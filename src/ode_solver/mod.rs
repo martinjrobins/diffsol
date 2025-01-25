@@ -411,7 +411,8 @@ mod tests {
             stop {
                 x,
             }
-        ", 1,
+        ",
+            1, false,
         )
         .unwrap();
         OdeBuilder::<M>::new().build_from_eqn(eqn).unwrap()

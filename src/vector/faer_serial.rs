@@ -1,7 +1,7 @@
-use std::slice;
 use std::ops::{Div, Mul, MulAssign};
+use std::slice;
 
-use faer::{zip, unzip, Col, ColMut, ColRef, Mat};
+use faer::{unzip, zip, Col, ColMut, ColRef, Mat};
 
 use crate::{scalar::Scale, IndexType, Scalar, Vector};
 
@@ -139,12 +139,10 @@ impl<T: Scalar> Vector for Col<T> {
         self.iter_mut().for_each(|s| *s += scalar);
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {
-        zip!(self.as_mut(), x.as_view())
-            .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
+        zip!(self.as_mut(), x.as_view()).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
-        zip!(self.as_mut(), x)
-            .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
+        zip!(self.as_mut(), x).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }
     fn map_inplace(&mut self, f: impl Fn(Self::T) -> Self::T) {
         zip!(self.as_mut()).for_each(|unzip!(xi)| *xi = f(*xi));
@@ -236,8 +234,7 @@ impl<'a, T: Scalar> VectorViewMut<'a> for ColMut<'a, T> {
         self.copy_from(other);
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
-        zip!(self.as_mut(), x.as_view())
-            .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
+        zip!(self.as_mut(), x.as_view()).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }
 }
 

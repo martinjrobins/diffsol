@@ -51,6 +51,10 @@ where
         }
         self.last_t = Some(t);
         self.checkpointer.interpolate(t, &mut self.x).unwrap();
+        // for diffsl, we need to set data for the adjoint state! 
+        // basically just involves calling the normal rhs function with the new self.x
+        // todo: this seems a bit hacky, perhaps a dedicated function on the trait for this?
+        self.checkpointer.problem().eqn.rhs().call(&self.x, t);
     }
 
     pub fn state(&self) -> &Eqn::V {
