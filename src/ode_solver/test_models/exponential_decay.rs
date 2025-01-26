@@ -173,8 +173,12 @@ pub fn exponential_decay_problem_diffsl<M: Matrix<T=f64>, CG: crate::CodegenModu
         in = [k, y0]
         k { 0.1 }
         y0 { 1.0 }
-        u_i { y0, y0 }
+        u_i { x = y0, y = y0 }
         F_i { -k * u_i }
+        out_i {
+            1 * x  +  2 * y,
+            3 * x  +  4 * y,
+        }
     ", 1, pre_adjoint).unwrap();
     let problem = OdeBuilder::<M>::new()
         .p([k, y0])
@@ -356,9 +360,9 @@ mod tests {
 
     #[cfg(feature = "diffsl-llvm")]
     #[test]
-    fn test_exponential_decay_diffsl() {
+    fn test_exponential_decay_diffsl_llvm() {
         use nalgebra::{DMatrix, DVector};
-        use crate::{NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, ConstantOpSensAdjoint};
+        use crate::{NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, ConstantOpSensAdjoint, ConstantOpSens, NonLinearOpJacobian};
         let (problem, _soln) = exponential_decay_problem_diffsl::<DMatrix<f64>, crate::LlvmModule>(true);
         let x = DVector::from_vec(vec![1.0, 2.0]);
         let t = 0.0;
@@ -398,6 +402,42 @@ mod tests {
         let mut y = DVector::zeros(2);
         for _i in 0..2 {
             problem.eqn().init().sens_transpose_mul_inplace(t, &v, &mut y);
+            assert_eq!(y, y_check);
+        }
+
+        // check the set_u0 sens jacobian
+        let mut y_check = DVector::zeros(2);
+        exponential_decay_init_sens::<DMatrix<f64>>(&p, t, &v, &mut y_check);
+        let mut y = DVector::zeros(2);
+        for _i in 0..2 {
+            problem.eqn().init().sens_mul_inplace(t, &v, &mut y);
+            assert_eq!(y, y_check);
+        }
+
+        // check the calc_out jacobian
+        let mut y_check = DVector::zeros(2);
+        exponential_decay_out_jac_mul::<DMatrix<f64>>(&x, &p, t, &v, &mut y_check);
+        let mut y = DVector::zeros(2);
+        for _i in 0..2 {
+            problem.eqn().out().unwrap().jac_mul_inplace(&x, t, &v, &mut y);
+            assert_eq!(y, y_check);
+        }
+
+        // check the calc_out adjoint jacobian
+        let mut y_check = DVector::zeros(2);
+        exponential_decay_out_adj_mul::<DMatrix<f64>>(&x, &p, t, &v, &mut y_check);
+        let mut y = DVector::zeros(2);
+        for _i in 0..2 {
+            problem.eqn().out().unwrap().jac_transpose_mul_inplace(&x, t, &v, &mut y);
+            assert_eq!(y, y_check);
+        }
+
+        // check the calc_out sens adjoint jacobian
+        let mut y_check = DVector::zeros(2);
+        exponential_decay_out_sens_adj::<DMatrix<f64>>(&x, &p, t, &v, &mut y_check);
+        let mut y = DVector::zeros(2);
+        for _i in 0..2 {
+            problem.eqn().out().unwrap().sens_transpose_mul_inplace(&x, t, &v, &mut y);
             assert_eq!(y, y_check);
         }
 

@@ -387,8 +387,10 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpAdjoint for DiffSlOut<'_, M
             x.as_slice(),
             y.as_mut_slice(),
             self.0.context.data.borrow_mut().as_slice(),
-            self.0.context.ddata.borrow_mut().as_mut_slice(),
+            ddata.as_mut_slice(),
         );
+        // negate y
+        y.mul_assign(Scale(-1.0));
     }
 }
 
@@ -422,13 +424,15 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpSensAdjoint for DiffSlOut<'
             t,
             x.as_slice(),
             self.0.context.data.borrow_mut().as_mut_slice(),
-            self.0.context.sens_data.borrow_mut().as_mut_slice(),
+            sens_data.as_mut_slice(),
         );
         // set y to the result in inputs
         self.0.context.compiler.get_inputs(
             y.as_mut_slice(),
-            self.0.context.sens_data.borrow().as_slice(),
+            sens_data.as_slice(),
         );
+        // negate y
+        y.mul_assign(Scale(-1.0));
     }
 }
 
