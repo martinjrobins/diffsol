@@ -138,7 +138,7 @@
 //!
 
 #[cfg(feature = "diffsl")]
-pub use diffsl::CraneliftModule;
+pub use diffsl::{CraneliftModule, execution::module::CodegenModule};
 #[cfg(feature = "diffsl-llvm")]
 pub use diffsl::LlvmModule;
 
