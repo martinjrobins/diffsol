@@ -1,11 +1,15 @@
 use core::panic;
-use std::ops::MulAssign;
 use std::cell::RefCell;
+use std::ops::MulAssign;
 
 use diffsl::{execution::module::CodegenModule, Compiler};
 
 use crate::{
-    error::DiffsolError, find_jacobian_non_zeros, find_matrix_non_zeros, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity, op::nonlinear_op::NonLinearOpJacobian, ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scale, Vector
+    error::DiffsolError, find_jacobian_non_zeros, find_matrix_non_zeros,
+    jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
+    op::nonlinear_op::NonLinearOpJacobian, ConstantOp, ConstantOpSens, ConstantOpSensAdjoint,
+    LinearOp, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSens,
+    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scale, Vector,
 };
 
 pub type T = f64;
@@ -129,7 +133,10 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSl<M, CG> {
             let t0 = 0.0;
             let x0 = M::V::zeros(op.nstates());
             let non_zeros_transposed = find_jacobian_non_zeros(&op, &x0, t0);
-            let non_zeros = non_zeros_transposed.into_iter().map(|(i, j)| (j, i)).collect::<Vec<_>>();
+            let non_zeros = non_zeros_transposed
+                .into_iter()
+                .map(|(i, j)| (j, i))
+                .collect::<Vec<_>>();
             let sparsity =
                 M::Sparsity::try_from_indices(op.nout(), op.nstates(), non_zeros.clone())
                     .expect("invalid sparsity pattern");
@@ -141,7 +148,10 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSl<M, CG> {
             let op = self.mass().unwrap();
             let t0 = 0.0;
             let non_zeros_transposed = find_matrix_non_zeros(&op, t0);
-            let non_zeros = non_zeros_transposed.into_iter().map(|(i, j)| (j, i)).collect::<Vec<_>>();
+            let non_zeros = non_zeros_transposed
+                .into_iter()
+                .map(|(i, j)| (j, i))
+                .collect::<Vec<_>>();
             let sparsity =
                 M::Sparsity::try_from_indices(op.nout(), op.nstates(), non_zeros.clone())
                     .expect("invalid sparsity pattern");
@@ -352,26 +362,25 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlOut<'_, M, CG> {
 
 impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpJacobian for DiffSlOut<'_, M, CG> {
     fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        // init ddata with all zero except for out
+        let mut ddata = self.0.context.ddata.borrow_mut();
+        ddata.fill(0.0);
         self.0.context.compiler.calc_out_grad(
             t,
             x.as_slice(),
             v.as_slice(),
             self.0.context.data.borrow_mut().as_mut_slice(),
-            self.0.context.ddata.borrow_mut().as_mut_slice(),
+            ddata.as_mut_slice(),
         );
-        let out_grad = self
-            .0
-            .context
-            .compiler
-            .get_out(self.0.context.ddata.borrow().as_slice());
+        let out_grad = self.0.context.compiler.get_out(ddata.as_slice());
         y.copy_from_slice(out_grad);
     }
 }
 
 impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpAdjoint for DiffSlOut<'_, M, CG> {
     fn jac_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        let mut ddata = self.0.context.ddata.borrow_mut();
         // init ddata with all zero except for out
+        let mut ddata = self.0.context.ddata.borrow_mut();
         ddata.fill(0.0);
         let out_grad = self
             .0
@@ -408,7 +417,11 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpSens for DiffSlOut<'_, M, C
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
         );
         // get out and write to y
-        let out = self.0.context.compiler.get_out(self.0.context.sens_data.borrow().as_slice());
+        let out = self
+            .0
+            .context
+            .compiler
+            .get_out(self.0.context.sens_data.borrow().as_slice());
         y.copy_from_slice(out);
     }
 }
@@ -418,7 +431,12 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpSensAdjoint for DiffSlOut<'
         let mut sens_data = self.0.context.sens_data.borrow_mut();
         // set outputs for sens_data (zero everything except for out)
         sens_data.fill(0.0);
-        let out = self.0.context.compiler.get_tensor_data_mut("out", &mut sens_data).unwrap();
+        let out = self
+            .0
+            .context
+            .compiler
+            .get_tensor_data_mut("out", &mut sens_data)
+            .unwrap();
         out.copy_from_slice(v.as_slice());
         self.0.context.compiler.calc_out_srgrad(
             t,
@@ -427,10 +445,10 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpSensAdjoint for DiffSlOut<'
             sens_data.as_mut_slice(),
         );
         // set y to the result in inputs
-        self.0.context.compiler.get_inputs(
-            y.as_mut_slice(),
-            sens_data.as_slice(),
-        );
+        self.0
+            .context
+            .compiler
+            .get_inputs(y.as_mut_slice(), sens_data.as_slice());
         // negate y
         y.mul_assign(Scale(-1.0));
     }
@@ -581,7 +599,6 @@ impl<M: Matrix<T = T>, CG: CodegenModule> LinearOp for DiffSlMass<'_, M, CG> {
         self.0.mass_sparsity.clone()
     }
 }
-
 
 impl<M: Matrix<T = T>, CG: CodegenModule> LinearOpTranspose for DiffSlMass<'_, M, CG> {
     fn gemv_transpose_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {

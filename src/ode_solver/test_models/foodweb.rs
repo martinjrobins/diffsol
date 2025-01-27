@@ -136,7 +136,8 @@ where
         n2 = 2 * NX * NX,
     );
 
-    let eqn: DiffSl<M, CG> = DiffSl::from_context(DiffSlContext::new(code.as_str(), 1).unwrap(), false);
+    let eqn: DiffSl<M, CG> =
+        DiffSl::from_context(DiffSlContext::new(code.as_str(), 1).unwrap(), false);
     let problem = OdeBuilder::<M>::new()
         .rtol(1e-5)
         .atol([1e-5])

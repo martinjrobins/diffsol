@@ -163,29 +163,48 @@ pub fn negative_exponential_decay_problem<M: Matrix + 'static>(
 }
 
 #[cfg(feature = "diffsl")]
-pub fn exponential_decay_problem_diffsl<M: Matrix<T=f64>, CG: crate::CodegenModule>(pre_adjoint: bool) -> (
+pub fn exponential_decay_problem_diffsl<M: Matrix<T = f64>, CG: crate::CodegenModule>(
+    prep_adjoint: bool,
+) -> (
     OdeSolverProblem<crate::DiffSl<M, CG>>,
     OdeSolverSolution<M::V>,
 ) {
     let k = 0.1;
     let y0 = 1.0;
-    let diffsl = crate::DiffSl::compile("
+    let out = if prep_adjoint {
+        "1 * x  +  2 * y, 3 * x  +  4 * y,"
+    } else {
+        "u_i"
+    };
+    let diffsl = crate::DiffSl::compile(
+        format!(
+            "
         in = [k, y0]
-        k { 0.1 }
-        y0 { 1.0 }
-        u_i { x = y0, y = y0 }
-        F_i { -k * u_i }
-        out_i {
-            1 * x  +  2 * y,
-            3 * x  +  4 * y,
-        }
-    ", 1, pre_adjoint).unwrap();
+        k {{ 0.1 }}
+        y0 {{ 1.0 }}
+        u_i {{ x = y0, y = y0 }}
+        F_i {{ -k * u_i }}
+        out_i {{
+            {}
+        }}",
+            out
+        )
+        .as_str(),
+        1,
+        prep_adjoint,
+    )
+    .unwrap();
     let problem = OdeBuilder::<M>::new()
         .p([k, y0])
+        .integrate_out(prep_adjoint)
         .build_from_eqn(diffsl)
         .unwrap();
     let p = [k, y0];
-    let mut soln = OdeSolverSolution::default();
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
     for i in 0..10 {
         let t = i as f64;
         let y0 = problem.eqn.init().call(0.0);
@@ -353,7 +372,6 @@ pub fn exponential_decay_problem_sens<M: Matrix + 'static>(
     (problem, soln)
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -361,9 +379,13 @@ mod tests {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn test_exponential_decay_diffsl_llvm() {
+        use crate::{
+            ConstantOpSens, ConstantOpSensAdjoint, NonLinearOpAdjoint, NonLinearOpJacobian,
+            NonLinearOpSens, NonLinearOpSensAdjoint,
+        };
         use nalgebra::{DMatrix, DVector};
-        use crate::{NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, ConstantOpSensAdjoint, ConstantOpSens, NonLinearOpJacobian};
-        let (problem, _soln) = exponential_decay_problem_diffsl::<DMatrix<f64>, crate::LlvmModule>(true);
+        let (problem, _soln) =
+            exponential_decay_problem_diffsl::<DMatrix<f64>, crate::LlvmModule>(true);
         let x = DVector::from_vec(vec![1.0, 2.0]);
         let t = 0.0;
         let v = DVector::from_vec(vec![2.0, 3.0]);
@@ -374,7 +396,10 @@ mod tests {
         exponential_decay_jacobian_adjoint::<DMatrix<f64>>(&x, &p, t, &v, &mut y_check);
         let mut y = DVector::zeros(2);
         for _i in 0..2 {
-            problem.eqn().rhs().jac_transpose_mul_inplace(&x, t, &v, &mut y);
+            problem
+                .eqn()
+                .rhs()
+                .jac_transpose_mul_inplace(&x, t, &v, &mut y);
             assert_eq!(y, y_check);
         }
 
@@ -392,7 +417,10 @@ mod tests {
         exponential_decay_sens_transpose::<DMatrix<f64>>(&x, &p, t, &v, &mut y_check);
         let mut y = DVector::zeros(2);
         for _i in 0..2 {
-            problem.eqn().rhs().sens_transpose_mul_inplace(&x, t, &v, &mut y);
+            problem
+                .eqn()
+                .rhs()
+                .sens_transpose_mul_inplace(&x, t, &v, &mut y);
             assert_eq!(y, y_check);
         }
 
@@ -401,7 +429,10 @@ mod tests {
         exponential_decay_init_sens_adjoint::<DMatrix<f64>>(&p, t, &v, &mut y_check);
         let mut y = DVector::zeros(2);
         for _i in 0..2 {
-            problem.eqn().init().sens_transpose_mul_inplace(t, &v, &mut y);
+            problem
+                .eqn()
+                .init()
+                .sens_transpose_mul_inplace(t, &v, &mut y);
             assert_eq!(y, y_check);
         }
 
@@ -419,7 +450,11 @@ mod tests {
         exponential_decay_out_jac_mul::<DMatrix<f64>>(&x, &p, t, &v, &mut y_check);
         let mut y = DVector::zeros(2);
         for _i in 0..2 {
-            problem.eqn().out().unwrap().jac_mul_inplace(&x, t, &v, &mut y);
+            problem
+                .eqn()
+                .out()
+                .unwrap()
+                .jac_mul_inplace(&x, t, &v, &mut y);
             assert_eq!(y, y_check);
         }
 
@@ -428,7 +463,11 @@ mod tests {
         exponential_decay_out_adj_mul::<DMatrix<f64>>(&x, &p, t, &v, &mut y_check);
         let mut y = DVector::zeros(2);
         for _i in 0..2 {
-            problem.eqn().out().unwrap().jac_transpose_mul_inplace(&x, t, &v, &mut y);
+            problem
+                .eqn()
+                .out()
+                .unwrap()
+                .jac_transpose_mul_inplace(&x, t, &v, &mut y);
             assert_eq!(y, y_check);
         }
 
@@ -437,9 +476,12 @@ mod tests {
         exponential_decay_out_sens_adj::<DMatrix<f64>>(&x, &p, t, &v, &mut y_check);
         let mut y = DVector::zeros(2);
         for _i in 0..2 {
-            problem.eqn().out().unwrap().sens_transpose_mul_inplace(&x, t, &v, &mut y);
+            problem
+                .eqn()
+                .out()
+                .unwrap()
+                .sens_transpose_mul_inplace(&x, t, &v, &mut y);
             assert_eq!(y, y_check);
         }
-
     }
 }

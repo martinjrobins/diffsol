@@ -1271,12 +1271,13 @@ mod test {
                 dydt_y2::dydt_y2_problem,
                 exponential_decay::{
                     exponential_decay_problem, exponential_decay_problem_adjoint,
-                    exponential_decay_problem_sens, exponential_decay_problem_with_root,
-                    negative_exponential_decay_problem,
+                    exponential_decay_problem_diffsl, exponential_decay_problem_sens,
+                    exponential_decay_problem_with_root, negative_exponential_decay_problem,
                 },
                 exponential_decay_with_algebraic::{
                     exponential_decay_with_algebraic_adjoint_problem,
                     exponential_decay_with_algebraic_problem,
+                    exponential_decay_with_algebraic_problem_diffsl,
                     exponential_decay_with_algebraic_problem_sens,
                 },
                 foodweb::foodweb_problem,
@@ -1399,6 +1400,24 @@ mod test {
         "###);
     }
 
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn bdf_test_nalgebra_exponential_decay_diffsl_sens() {
+        let (_problem, mut soln) = exponential_decay_problem_sens::<M>(false);
+        let (problem, _soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(false);
+        soln.atol = problem.atol.clone();
+        soln.rtol = problem.rtol;
+        let mut s = problem.bdf_sens::<LS>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, true);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        number_of_linear_solver_setups: 13
+        number_of_steps: 48
+        number_of_error_test_failures: 1
+        number_of_nonlinear_solver_iterations: 234
+        number_of_nonlinear_solver_fails: 0
+        "###);
+    }
+
     #[test]
     fn bdf_test_nalgebra_exponential_decay_adjoint() {
         let (problem, soln) = exponential_decay_problem_adjoint::<M>();
@@ -1412,6 +1431,15 @@ mod test {
         "###);
     }
 
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn bdf_test_nalgebra_exponential_decay_adjoint_diffsl() {
+        let (_problem, soln) = exponential_decay_problem_adjoint::<M>();
+        let (problem, _soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(true);
+        let s = problem.bdf::<LS>().unwrap();
+        test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
+    }
+
     #[test]
     fn bdf_test_nalgebra_exponential_decay_algebraic_adjoint() {
         let (problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>();
@@ -1423,6 +1451,16 @@ mod test {
         number_of_matrix_evals: 8
         number_of_jac_adj_muls: 187
         "###);
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn bdf_test_nalgebra_exponential_decay_with_algebraic_adjoint_diffsl() {
+        let (_problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>();
+        let (problem, _soln) =
+            exponential_decay_with_algebraic_problem_diffsl::<M, diffsl::LlvmModule>(true);
+        let s = problem.bdf::<LS>().unwrap();
+        test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
     }
 
     #[test]
@@ -1469,6 +1507,25 @@ mod test {
         number_of_jac_muls: 100
         number_of_matrix_evals: 3
         number_of_jac_adj_muls: 0
+        "###);
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn bdf_test_nalgebra_exponential_decay_algebraic_diffsl_sens() {
+        let (_problem, mut soln) = exponential_decay_with_algebraic_problem_sens::<M>();
+        let (problem, _soln) =
+            exponential_decay_with_algebraic_problem_diffsl::<M, diffsl::LlvmModule>(false);
+        soln.atol = problem.atol.clone();
+        soln.rtol = problem.rtol;
+        let mut s = problem.bdf_sens::<LS>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, true);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        number_of_linear_solver_setups: 18
+        number_of_steps: 43
+        number_of_error_test_failures: 3
+        number_of_nonlinear_solver_iterations: 155
+        number_of_nonlinear_solver_fails: 0
         "###);
     }
 
