@@ -1424,7 +1424,7 @@ mod test {
         let s = problem.bdf::<LS>().unwrap();
         test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 84
+        number_of_calls: 183
         number_of_jac_muls: 6
         number_of_matrix_evals: 3
         number_of_jac_adj_muls: 392
@@ -1446,7 +1446,7 @@ mod test {
         let s = problem.bdf::<LS>().unwrap();
         test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 190
+        number_of_calls: 279
         number_of_jac_muls: 24
         number_of_matrix_evals: 8
         number_of_jac_adj_muls: 187

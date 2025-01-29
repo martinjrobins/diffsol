@@ -24,11 +24,14 @@ pub struct DiffSlContext<M: Matrix<T = T>, CG: CodegenModule> {
     sens_data: RefCell<Vec<M::T>>,
     tmp: RefCell<M::V>,
     tmp2: RefCell<M::V>,
+    tmp_out: RefCell<M::V>,
+    tmp2_out: RefCell<M::V>,
     nstates: usize,
     nroots: usize,
     nparams: usize,
     has_mass: bool,
     has_root: bool,
+    has_out: bool,
     nout: usize,
     nthreads: usize,
 }
@@ -52,11 +55,14 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
             .map_err(|e| DiffsolError::Other(e.to_string()))?;
         let (nstates, nparams, nout, _ndata, nroots, has_mass) = compiler.get_dims();
         let has_root = nroots > 0;
+        let has_out = nout > 0;
         let data = RefCell::new(compiler.get_new_data());
         let ddata = RefCell::new(compiler.get_new_data());
         let sens_data = RefCell::new(compiler.get_new_data());
         let tmp = RefCell::new(M::V::zeros(nstates));
         let tmp2 = RefCell::new(M::V::zeros(nstates));
+        let tmp_out = RefCell::new(M::V::zeros(nout));
+        let tmp2_out = RefCell::new(M::V::zeros(nout));
 
         Ok(Self {
             compiler,
@@ -67,10 +73,13 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
             nstates,
             tmp,
             tmp2,
+            tmp_out,
+            tmp2_out,
             nroots,
             nout,
             has_mass,
             has_root,
+            has_out,
             nthreads,
         })
     }
@@ -350,13 +359,8 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlOut<'_, M, CG> {
             t,
             x.as_slice(),
             self.0.context.data.borrow_mut().as_mut_slice(),
+            y.as_mut_slice(),
         );
-        let out = self
-            .0
-            .context
-            .compiler
-            .get_out(self.0.context.data.borrow().as_slice());
-        y.copy_from_slice(out);
     }
 }
 
@@ -371,9 +375,9 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpJacobian for DiffSlOut<'_, 
             v.as_slice(),
             self.0.context.data.borrow_mut().as_mut_slice(),
             ddata.as_mut_slice(),
+            self.0.context.tmp_out.borrow().as_slice(),
+            y.as_mut_slice(),
         );
-        let out_grad = self.0.context.compiler.get_out(ddata.as_slice());
-        y.copy_from_slice(out_grad);
     }
 }
 
@@ -382,13 +386,8 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpAdjoint for DiffSlOut<'_, M
         // init ddata with all zero except for out
         let mut ddata = self.0.context.ddata.borrow_mut();
         ddata.fill(0.0);
-        let out_grad = self
-            .0
-            .context
-            .compiler
-            .get_tensor_data_mut("out", ddata.as_mut_slice())
-            .unwrap();
-        out_grad.copy_from_slice(v.as_slice());
+        let mut tmp2_out = self.0.context.tmp2_out.borrow_mut();
+        tmp2_out.copy_from(v);
         // zero y
         y.fill(0.0);
         self.0.context.compiler.calc_out_rgrad(
@@ -397,6 +396,8 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpAdjoint for DiffSlOut<'_, M
             y.as_mut_slice(),
             self.0.context.data.borrow_mut().as_slice(),
             ddata.as_mut_slice(),
+            self.0.context.tmp_out.borrow().as_slice(),
+            tmp2_out.as_mut_slice(),
         );
         // negate y
         y.mul_assign(Scale(-1.0));
@@ -415,14 +416,9 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpSens for DiffSlOut<'_, M, C
             x.as_slice(),
             self.0.context.data.borrow_mut().as_mut_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
+            self.0.context.tmp_out.borrow().as_slice(),
+            y.as_mut_slice(),
         );
-        // get out and write to y
-        let out = self
-            .0
-            .context
-            .compiler
-            .get_out(self.0.context.sens_data.borrow().as_slice());
-        y.copy_from_slice(out);
     }
 }
 
@@ -431,18 +427,15 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpSensAdjoint for DiffSlOut<'
         let mut sens_data = self.0.context.sens_data.borrow_mut();
         // set outputs for sens_data (zero everything except for out)
         sens_data.fill(0.0);
-        let out = self
-            .0
-            .context
-            .compiler
-            .get_tensor_data_mut("out", &mut sens_data)
-            .unwrap();
-        out.copy_from_slice(v.as_slice());
+        let mut tmp2_out = self.0.context.tmp2_out.borrow_mut();
+        tmp2_out.copy_from(v);
         self.0.context.compiler.calc_out_srgrad(
             t,
             x.as_slice(),
             self.0.context.data.borrow_mut().as_mut_slice(),
             sens_data.as_mut_slice(),
+            self.0.context.tmp_out.borrow().as_slice(),
+            tmp2_out.as_mut_slice(),
         );
         // set y to the result in inputs
         self.0
@@ -676,7 +669,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> OdeEquations for DiffSl<M, CG> {
     }
 
     fn out(&self) -> Option<DiffSlOut<'_, M, CG>> {
-        Some(DiffSlOut(self))
+        self.context.has_out.then_some(DiffSlOut(self))
     }
 
     fn set_params(&mut self, p: &Self::V) {
