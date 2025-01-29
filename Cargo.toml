@@ -28,7 +28,7 @@ nalgebra = "0.33.2"
 nalgebra-sparse = { version = "0.10", features = ["io"] }
 num-traits = "0.2.17"
 serde = { version = "1.0.217", features = ["derive"] }
-diffsl = { package = "diffsl", version = "0.4.1", optional = true }
+diffsl = { package = "diffsl", version = "0.4.2", optional = true }
 petgraph = "0.7.1"
 faer = "0.21.3"
 suitesparse_sys = { version = "0.1.3", optional = true }
