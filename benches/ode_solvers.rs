@@ -7,9 +7,6 @@ use diffsol::{
     FaerLU, FaerSparseLU, NalgebraLU, SparseColMat,
 };
 
-#[cfg(feature = "suitesparse")]
-use diffsol::KLU;
-
 mod sundials_benches;
 
 fn criterion_benchmark(c: &mut Criterion) {
@@ -148,20 +145,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         900
     );
 
-    #[cfg(feature = "suitesparse")]
-    bench_robertson_ode!(
-        faer_sparse_bdf_klu_robertson_ode,
-        bdf,
-        KLU,
-        robertson_ode,
-        robertson_ode,
-        SparseColMat<f64>,
-        25,
-        100,
-        400,
-        900
-    );
-
     bench_robertson_ode!(
         faer_sparse_tr_bdf2_robertson_ode,
         tr_bdf2,
@@ -175,38 +158,10 @@ fn criterion_benchmark(c: &mut Criterion) {
         900
     );
 
-    #[cfg(feature = "suitesparse")]
-    bench_robertson_ode!(
-        faer_sparse_tr_bdf2_klu_robertson_ode,
-        tr_bdf2,
-        KLU,
-        robertson_ode,
-        robertson_ode,
-        SparseColMat<f64>,
-        25,
-        100,
-        400,
-        900
-    );
-
     bench_robertson_ode!(
         faer_sparse_esdirk_robertson_ode,
         esdirk34,
         FaerSparseLU,
-        robertson_ode,
-        robertson_ode,
-        SparseColMat<f64>,
-        25,
-        100,
-        400,
-        900
-    );
-
-    #[cfg(feature = "suitesparse")]
-    bench_robertson_ode!(
-        faer_sparse_esdirk_klu_robertson_ode,
-        esdirk34,
-        KLU,
         robertson_ode,
         robertson_ode,
         SparseColMat<f64>,
@@ -264,20 +219,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         30
     );
 
-    #[cfg(feature = "suitesparse")]
-    bench_wsize!(
-        faer_sparse_bdf_klu_heat2d,
-        bdf,
-        KLU,
-        heat2d,
-        head2d_problem,
-        SparseColMat<f64>,
-        5,
-        10,
-        20,
-        30
-    );
-
     bench_wsize!(
         faer_sparse_tr_bdf2_heat2d,
         tr_bdf2,
@@ -291,37 +232,10 @@ fn criterion_benchmark(c: &mut Criterion) {
         30
     );
 
-    #[cfg(feature = "suitesparse")]
-    bench_wsize!(
-        faer_sparse_tr_bdf2_klu_heat2d,
-        tr_bdf2,
-        KLU,
-        heat2d,
-        head2d_problem,
-        SparseColMat<f64>,
-        5,
-        10,
-        20,
-        30
-    );
     bench_wsize!(
         faer_sparse_esdirk_heat2d,
         esdirk34,
         FaerSparseLU,
-        heat2d,
-        head2d_problem,
-        SparseColMat<f64>,
-        5,
-        10,
-        20,
-        30
-    );
-
-    #[cfg(feature = "suitesparse")]
-    bench_wsize!(
-        faer_sparse_esdirk_klu_heat2d,
-        esdirk34,
-        KLU,
         heat2d,
         head2d_problem,
         SparseColMat<f64>,
@@ -355,19 +269,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         30
     );
 
-    #[cfg(feature = "suitesparse")]
-    bench_foodweb!(
-        faer_sparse_bdf_klu_foodweb,
-        bdf,
-        KLU,
-        foodweb,
-        foodweb_problem,
-        SparseColMat<f64>,
-        5,
-        10,
-        20,
-        30
-    );
     bench_foodweb!(
         faer_sparse_tr_bdf2_foodweb,
         tr_bdf2,
@@ -381,19 +282,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         30
     );
 
-    #[cfg(feature = "suitesparse")]
-    bench_foodweb!(
-        faer_sparse_tr_bdf2_klu_foodweb,
-        tr_bdf2,
-        KLU,
-        foodweb,
-        foodweb_problem,
-        SparseColMat<f64>,
-        5,
-        10,
-        20,
-        30
-    );
     bench_foodweb!(
         faer_sparse_esdirk_foodweb,
         esdirk34,
@@ -406,20 +294,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         20,
         30
     );
-    #[cfg(feature = "suitesparse")]
-    bench_foodweb!(
-        faer_sparse_esdirk_klu_foodweb,
-        esdirk34,
-        KLU,
-        foodweb,
-        foodweb_problem,
-        SparseColMat<f64>,
-        5,
-        10,
-        20,
-        30
-    );
-
     macro_rules! bench_diffsl_heat2d {
         ($name:ident, $solver:ident, $linear_solver:ident, $matrix:ty, $($N:expr),+) => {
             $(#[cfg(feature = "diffsl-llvm")]
@@ -437,18 +311,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         faer_sparse_bdf_diffsl_heat2d,
         bdf,
         FaerSparseLU,
-        SparseColMat<f64>,
-        5,
-        10,
-        20,
-        30
-    );
-
-    #[cfg(feature = "suitesparse")]
-    bench_diffsl_heat2d!(
-        faer_sparse_bdf_klu_diffsl_heat2d,
-        bdf,
-        KLU,
         SparseColMat<f64>,
         5,
         10,
@@ -513,18 +375,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         faer_sparse_bdf_diffsl_foodweb,
         bdf,
         FaerSparseLU,
-        SparseColMat<f64>,
-        5,
-        10,
-        20,
-        30
-    );
-
-    #[cfg(feature = "suitesparse")]
-    bench_diffsl_foodweb!(
-        faer_sparse_bdf_klu_diffsl_foodweb,
-        bdf,
-        KLU,
         SparseColMat<f64>,
         5,
         10,
