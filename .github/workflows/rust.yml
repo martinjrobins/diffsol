@@ -52,7 +52,7 @@ jobs:
         path: |
           ${{ env.CARGO_HOME }}
           target
-        key: diffsol-${{ runner.os }}-${{ matrix.toolchain}}
+        key: diffsol-${{ runner.os }}-${{ matrix.toolchain}}-llvm17
     - name: Set up Rust
       run: rustup default ${{ matrix.toolchain }} && rustup update ${{ matrix.toolchain }} --no-self-update && rustup component add clippy
     - name: Rust version
@@ -61,17 +61,17 @@ jobs:
       uses: KyleMayes/install-llvm-action@v2
       if : matrix.os == 'ubuntu-latest' || matrix.os == 'macos-13' || matrix.os == 'macos-latest'
       with:
-        version: "16.0"
+        version: "17.0"
     - name: Set features variable and install dependencies (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
       run: |
-        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm16 --features sundials --features suitesparse" >> $GITHUB_ENV
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features sundials" >> $GITHUB_ENV
         sudo apt-get update
         sudo apt-get install -y libsuitesparse-dev libsundials-dev
     - name: Set features variable and install dependencies (macOS)
       if: matrix.os == 'macos-13' || matrix.os == 'macos-latest'
       run: |
-        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm16" >> $GITHUB_ENV
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17" >> $GITHUB_ENV
     - name: Set features variable and install dependencies (Windows)
       if: matrix.os == 'windows-latest'
       run: |

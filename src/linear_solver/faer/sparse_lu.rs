@@ -7,7 +7,8 @@ use crate::{
 };
 
 use faer::{
-    solvers::SpSolver,
+    linalg::solvers::Solve,
+    reborrow::Reborrow,
     sparse::linalg::{solvers::Lu, solvers::SymbolicLu},
     Col,
 };
@@ -47,7 +48,7 @@ impl<T: Scalar> LinearSolver<SparseColMat<T>> for FaerSparseLU<T> {
         self.lu = Some(
             Lu::try_new_with_symbolic(
                 self.lu_symbolic.as_ref().unwrap().clone(),
-                matrix.faer().as_ref(),
+                matrix.faer().rb(),
             )
             .expect("Failed to factorise matrix"),
         )

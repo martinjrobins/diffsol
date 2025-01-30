@@ -1211,7 +1211,7 @@ mod test {
         let s = problem.esdirk34::<LS>().unwrap();
         test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 196
+        number_of_calls: 314
         number_of_jac_muls: 6
         number_of_matrix_evals: 3
         number_of_jac_adj_muls: 474
@@ -1224,7 +1224,7 @@ mod test {
         let s = problem.esdirk34::<LS>().unwrap();
         test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 171
+        number_of_calls: 265
         number_of_jac_muls: 12
         number_of_matrix_evals: 4
         number_of_jac_adj_muls: 191

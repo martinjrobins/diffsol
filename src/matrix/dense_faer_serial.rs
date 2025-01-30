@@ -7,10 +7,8 @@ use crate::scalar::{IndexType, Scalar, Scale};
 use crate::FaerLU;
 use crate::{Dense, DenseRef, Vector};
 
-use faer::{
-    linalg::matmul::matmul, mat::As2D, Col, ColMut, ColRef, Mat, MatMut, MatRef, Parallelism,
-};
-use faer::{unzipped, zipped};
+use faer::{get_global_parallelism, unzip, zip, Accum};
+use faer::{linalg::matmul::matmul, Col, ColMut, ColRef, Mat, MatMut, MatRef};
 
 impl<T: Scalar> DefaultSolver for Mat<T> {
     type LS = FaerLU<T>;
@@ -63,13 +61,14 @@ impl<'a, T: Scalar> MatrixView<'a> for MatRef<'a, T> {
     type Owned = Mat<T>;
 
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
+        y.mul_assign(Scale(beta));
         matmul(
-            y.as_2d_mut(),
-            self.as_2d_ref(),
-            x.as_2d_ref(),
-            Some(beta),
+            y.as_mut(),
+            Accum::Add,
+            self.as_ref(),
+            x.as_ref(),
             alpha,
-            Parallelism::None,
+            get_global_parallelism(),
         );
     }
     fn gemv_v(
@@ -79,13 +78,14 @@ impl<'a, T: Scalar> MatrixView<'a> for MatRef<'a, T> {
         beta: Self::T,
         y: &mut Self::V,
     ) {
+        y.mul_assign(Scale(beta));
         matmul(
-            y.as_2d_mut(),
-            self.as_2d_ref(),
-            x.as_2d_ref(),
-            Some(beta),
+            y.as_mut(),
+            Accum::Add,
+            self.as_ref(),
+            x.as_ref(),
             alpha,
-            Parallelism::None,
+            get_global_parallelism(),
         );
     }
 }
@@ -95,23 +95,25 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for MatMut<'a, T> {
     type View = MatRef<'a, T>;
 
     fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T) {
+        self.mul_assign(Scale(beta));
         matmul(
             self.as_mut(),
+            Accum::Add,
             a.as_ref(),
             b.as_ref(),
-            Some(beta),
             alpha,
-            Parallelism::None,
+            get_global_parallelism(),
         )
     }
     fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T) {
+        self.mul_assign(Scale(beta));
         matmul(
             self.as_mut(),
+            Accum::Add,
             a.as_ref(),
             b.as_ref(),
-            Some(beta),
             alpha,
-            Parallelism::None,
+            get_global_parallelism(),
         )
     }
 }
@@ -121,13 +123,14 @@ impl<T: Scalar> DenseMatrix for Mat<T> {
     type ViewMut<'a> = MatMut<'a, T>;
 
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T) {
+        self.mul_assign(faer::Scale(beta));
         matmul(
             self.as_mut(),
+            Accum::Add,
             a.as_ref(),
             b.as_ref(),
-            Some(beta),
             alpha,
-            Parallelism::None,
+            get_global_parallelism(),
         )
     }
     fn column_mut(&mut self, i: usize) -> ColMut<'_, T> {
@@ -157,8 +160,8 @@ impl<T: Scalar> DenseMatrix for Mat<T> {
         }
         for k in 0..self.nrows() {
             let value =
-                unsafe { beta * self.read_unchecked(k, i) + alpha * self.read_unchecked(k, j) };
-            unsafe { self.write_unchecked(k, i, value) };
+                unsafe { beta * *self.get_unchecked(k, i) + alpha * *self.get_unchecked(k, j) };
+            unsafe { *self.get_mut_unchecked(k, i) = value };
         }
     }
 }
@@ -204,13 +207,14 @@ impl<T: Scalar> Matrix for Mat<T> {
         Ok(m)
     }
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
+        y.mul_assign(Scale(beta));
         matmul(
-            y.as_2d_mut(),
-            self.as_2d_ref(),
-            x.as_2d_ref(),
-            Some(beta),
+            y.as_mut(),
+            Accum::Add,
+            self.as_ref(),
+            x.as_ref(),
             alpha,
-            Parallelism::None,
+            get_global_parallelism(),
         );
     }
     fn zeros(nrows: IndexType, ncols: IndexType) -> Self {
@@ -231,7 +235,7 @@ impl<T: Scalar> Matrix for Mat<T> {
     }
 
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
-        zipped!(self, x, y).for_each(|unzipped!(mut s, x, y)| s.write(x.read() + beta * y.read()));
+        zip!(self, x, y).for_each(|unzip!(s, x, y)| *s = *x + beta * *y);
     }
 
     fn new_from_sparsity(

@@ -6,10 +6,8 @@ use std::{
 use crate::vector::VectorView;
 pub trait Scalar:
     nalgebra::Scalar
-    + faer::Entity
-    + faer::ComplexField
-    + faer::SimpleEntity
-    + faer::RealField
+    + faer_traits::ComplexField
+    + faer_traits::RealField
     + nalgebra::SimdRealField
     + nalgebra::ComplexField<RealField = Self>
     + num_traits::Signed
@@ -41,7 +39,7 @@ impl Scalar for f64 {
 
 impl<T: Scalar> From<faer::Scale<T>> for Scale<T> {
     fn from(s: faer::Scale<T>) -> Self {
-        Scale(s.value())
+        Scale(s.0)
     }
 }
 impl<T: Scalar> From<Scale<T>> for faer::Scale<T> {

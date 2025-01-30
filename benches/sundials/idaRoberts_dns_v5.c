@@ -141,7 +141,7 @@ int idaRoberts_dns(void)
   t0 = ZERO;
   tout1 = RCONST(0.4);
 
-  PrintHeader(rtol, avtol, yy);
+  //PrintHeader(rtol, avtol, yy);
 
   /* Call IDACreate and IDAInit to initialize IDA memory */
   mem = IDACreate();

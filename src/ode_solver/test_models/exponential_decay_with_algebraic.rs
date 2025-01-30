@@ -309,3 +309,178 @@ pub fn exponential_decay_with_algebraic_problem_sens<M: Matrix + 'static>() -> (
     }
     (problem, soln)
 }
+
+#[cfg(feature = "diffsl")]
+pub fn exponential_decay_with_algebraic_problem_diffsl<
+    M: Matrix<T = f64>,
+    CG: crate::CodegenModule,
+>(
+    prep_adjoint: bool,
+) -> (
+    OdeSolverProblem<crate::DiffSl<M, CG>>,
+    OdeSolverSolution<M::V>,
+) {
+    let k = 0.1;
+    let out = if prep_adjoint { "k * z" } else { "u_i" };
+    let diffsl = crate::DiffSl::compile(
+        format!(
+            "
+        in = [k]
+        k {{ 0.1 }}
+        u_i {{ x = 1, y = 1, z = 0 }}
+        dudt_i {{ dxdt = 0, dydt = 0, dzdt = 0 }}
+        M_i {{ dxdt, dydt, 0 }}
+        F_i {{ -k * x, -k * y, z - y }}
+        out_i {{ {} }}
+    ",
+            out
+        )
+        .as_str(),
+        1,
+        prep_adjoint,
+    )
+    .unwrap();
+    let problem = OdeBuilder::<M>::new()
+        .p([k])
+        .integrate_out(prep_adjoint)
+        .build_from_eqn(diffsl)
+        .unwrap();
+    let p = [k];
+    let mut soln = OdeSolverSolution::default();
+    for i in 0..10 {
+        let t = i as f64 / 10.0;
+        let y0 = M::V::from_vec(vec![1.0, 1.0, 1.0]);
+        let y: M::V = y0 * scale(M::T::exp(-p[0] * t));
+        soln.push(y, t);
+    }
+    (problem, soln)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn test_exponential_decay_with_algebraic_diffsl_llvm() {
+        use crate::{
+            ConstantOpSens, ConstantOpSensAdjoint, NonLinearOpAdjoint, NonLinearOpJacobian,
+            NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations,
+        };
+        use nalgebra::{DMatrix, DVector};
+        let (problem, _soln) = exponential_decay_with_algebraic_problem_diffsl::<
+            DMatrix<f64>,
+            crate::LlvmModule,
+        >(true);
+        let x = DVector::from_vec(vec![1.0, 2.0, 3.0]);
+        let t = 0.0;
+        let v = DVector::from_vec(vec![2.0, 3.0, 4.0]);
+        let v_in = DVector::from_vec(vec![5.0]);
+        let p = DVector::from_vec(vec![0.1]);
+
+        // check the adjoint jacobian
+        let mut y_check = DVector::zeros(3);
+        exponential_decay_with_algebraic_adjoint::<DMatrix<f64>>(&x, &p, t, &v, &mut y_check);
+        let mut y = DVector::zeros(3);
+        for _i in 0..2 {
+            problem
+                .eqn()
+                .rhs()
+                .jac_transpose_mul_inplace(&x, t, &v, &mut y);
+            assert_eq!(y, y_check);
+        }
+
+        // check the sens jacobian
+        let mut y_check = DVector::zeros(3);
+        exponential_decay_with_algebraic_sens::<DMatrix<f64>>(&x, &p, t, &v_in, &mut y_check);
+        let mut y = DVector::zeros(3);
+        for _i in 0..2 {
+            problem.eqn().rhs().sens_mul_inplace(&x, t, &v_in, &mut y);
+            assert_eq!(y, y_check);
+        }
+
+        // check the sens adjoint jacobian
+        let mut y_check = DVector::zeros(1);
+        exponential_decay_with_algebraic_sens_adjoint::<DMatrix<f64>>(&x, &p, t, &v, &mut y_check);
+        let mut y = DVector::zeros(1);
+        for _i in 0..2 {
+            problem
+                .eqn()
+                .rhs()
+                .sens_transpose_mul_inplace(&x, t, &v, &mut y);
+            assert_eq!(y, y_check);
+        }
+
+        // check the set_u0 sens adjoint jacobian
+        let mut y_check = DVector::zeros(1);
+        exponential_decay_with_algebraic_init_sens_adjoint::<DMatrix<f64>>(&p, t, &v, &mut y_check);
+        let mut y = DVector::zeros(1);
+        for _i in 0..2 {
+            problem
+                .eqn()
+                .init()
+                .sens_transpose_mul_inplace(t, &v, &mut y);
+            assert_eq!(y, y_check);
+        }
+
+        // check the set_u0 sens jacobian
+        let mut y_check = DVector::zeros(3);
+        exponential_decay_with_algebraic_init_sens::<DMatrix<f64>>(&p, t, &v_in, &mut y_check);
+        let mut y = DVector::zeros(3);
+        for _i in 0..2 {
+            problem.eqn().init().sens_mul_inplace(t, &v_in, &mut y);
+            assert_eq!(y, y_check);
+        }
+
+        // check the calc_out jacobian
+        let mut y_check = DVector::zeros(1);
+        exponential_decay_with_algebraic_out_jac_mul::<DMatrix<f64>>(&x, &p, t, &v, &mut y_check);
+        let mut y = DVector::zeros(1);
+        for _i in 0..2 {
+            problem
+                .eqn()
+                .out()
+                .unwrap()
+                .jac_mul_inplace(&x, t, &v, &mut y);
+            assert_eq!(y, y_check);
+        }
+
+        // check the calc_out adjoint jacobian
+        let mut y_check = DVector::zeros(3);
+        exponential_decay_with_algebraic_out_jac_adj_mul::<DMatrix<f64>>(
+            &x,
+            &p,
+            t,
+            &v_in,
+            &mut y_check,
+        );
+        let mut y = DVector::zeros(3);
+        for _i in 0..2 {
+            problem
+                .eqn()
+                .out()
+                .unwrap()
+                .jac_transpose_mul_inplace(&x, t, &v_in, &mut y);
+            assert_eq!(y, y_check);
+        }
+
+        // check the calc_out sens adjoint jacobian
+        let mut y_check = DVector::zeros(1);
+        exponential_decay_with_algebraic_out_sens_adj::<DMatrix<f64>>(
+            &x,
+            &p,
+            t,
+            &v_in,
+            &mut y_check,
+        );
+        let mut y = DVector::zeros(1);
+        for _i in 0..2 {
+            problem
+                .eqn()
+                .out()
+                .unwrap()
+                .sens_transpose_mul_inplace(&x, t, &v_in, &mut y);
+            assert_eq!(y, y_check);
+        }
+    }
+}

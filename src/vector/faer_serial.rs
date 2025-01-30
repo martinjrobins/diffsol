@@ -1,6 +1,7 @@
 use std::ops::{Div, Mul, MulAssign};
+use std::slice;
 
-use faer::{unzipped, zipped, Col, ColMut, ColRef, Mat};
+use faer::{unzip, zip, Col, ColMut, ColRef, Mat};
 
 use crate::{scalar::Scale, IndexType, Scalar, Vector};
 
@@ -53,14 +54,15 @@ macro_rules! impl_div_scale {
         impl<'a, T: Scalar> Div<Scale<T>> for $col_type {
             type Output = Col<T>;
             fn div(self, rhs: Scale<T>) -> Self::Output {
-                zipped!(self).map(|unzipped!(xi)| *xi / rhs.value())
+                let inv_rhs = T::one() / rhs.value();
+                self * faer::Scale(inv_rhs)
             }
         }
     };
 }
 
 impl_mul_scale!(Col<T>);
-impl_div_scale!(faer::Col<T>);
+impl_div_scale!(Col<T>);
 
 macro_rules! impl_mul_assign_scale {
     ($col_type:ty) => {
@@ -87,14 +89,14 @@ impl<T: Scalar> Vector for Col<T> {
         self.norm_l2()
     }
     fn as_mut_slice(&mut self) -> &mut [Self::T] {
-        self.as_slice_mut()
+        unsafe { slice::from_raw_parts_mut(self.as_ptr_mut(), self.len()) }
     }
     fn as_slice(&self) -> &[Self::T] {
-        self.as_slice()
+        unsafe { slice::from_raw_parts(self.as_ptr(), self.len()) }
     }
     fn copy_from_slice(&mut self, slice: &[Self::T]) {
-        let v = faer::col::from_slice(slice);
-        self.copy_from(v);
+        assert_eq!(slice.len(), self.len(), "Vector lengths do not match");
+        self.iter_mut().zip(slice.iter()).for_each(|(a, b)| *a = *b);
     }
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
@@ -102,10 +104,10 @@ impl<T: Scalar> Vector for Col<T> {
             panic!("Vector lengths do not match");
         }
         for i in 0..self.len() {
-            let yi = unsafe { y.read_unchecked(i) };
-            let ai = unsafe { atol.read_unchecked(i) };
-            let xi = unsafe { self.read_unchecked(i) };
-            acc += (xi / (yi.abs() * rtol + ai)).powi(2);
+            let yi = unsafe { y.get_unchecked(i) };
+            let ai = unsafe { atol.get_unchecked(i) };
+            let xi = unsafe { self.get_unchecked(i) };
+            acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
         }
         acc / Self::T::from(self.len() as f64)
     }
@@ -122,7 +124,7 @@ impl<T: Scalar> Vector for Col<T> {
         self.copy_from(other)
     }
     fn fill(&mut self, value: Self::T) {
-        self.fill(value);
+        self.iter_mut().for_each(|s| *s = value);
     }
     fn from_element(nstates: usize, value: Self::T) -> Self {
         Col::from_vec(vec![value; nstates])
@@ -134,24 +136,22 @@ impl<T: Scalar> Vector for Col<T> {
         Self::from_element(nstates, T::zero())
     }
     fn add_scalar_mut(&mut self, scalar: Self::T) {
-        zipped!(self.as_mut()).for_each(|unzipped!(mut s)| *s += scalar)
+        self.iter_mut().for_each(|s| *s += scalar);
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {
-        zipped!(self.as_mut(), x.as_view())
-            .for_each(|unzipped!(mut si, xi)| si.write(si.read() * beta + xi.read() * alpha));
+        zip!(self.as_mut(), x.as_view()).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
-        zipped!(self.as_mut(), x)
-            .for_each(|unzipped!(mut si, xi)| si.write(si.read() * beta + xi.read() * alpha));
+        zip!(self.as_mut(), x).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }
     fn map_inplace(&mut self, f: impl Fn(Self::T) -> Self::T) {
-        zipped!(self.as_mut()).for_each(|unzipped!(mut xi)| xi.write(f(*xi)));
+        zip!(self.as_mut()).for_each(|unzip!(xi)| *xi = f(*xi));
     }
     fn component_mul_assign(&mut self, other: &Self) {
-        zipped!(self.as_mut(), other.as_view()).for_each(|unzipped!(mut s, o)| *s *= *o);
+        zip!(self.as_mut(), other.as_view()).for_each(|unzip!(s, o)| *s *= *o);
     }
     fn component_div_assign(&mut self, other: &Self) {
-        zipped!(self.as_mut(), other.as_view()).for_each(|unzipped!(mut s, o)| *s /= *o);
+        zip!(self.as_mut(), other.as_view()).for_each(|unzip!(s, o)| *s /= *o);
     }
     fn filter_indices<F: Fn(Self::T) -> bool>(&self, f: F) -> Self::Index {
         let mut indices = vec![];
@@ -215,10 +215,10 @@ impl<'a, T: Scalar> VectorView<'a> for ColRef<'a, T> {
             panic!("Vector lengths do not match");
         }
         for i in 0..self.nrows() {
-            let yi = unsafe { y.read_unchecked(i) };
-            let ai = unsafe { atol.read_unchecked(i) };
-            let xi = unsafe { self.read_unchecked(i) };
-            acc += (xi / (yi.abs() * rtol + ai)).powi(2);
+            let yi = unsafe { y.get_unchecked(i) };
+            let ai = unsafe { atol.get_unchecked(i) };
+            let xi = unsafe { self.get_unchecked(i) };
+            acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
         }
         acc / Self::T::from(self.nrows() as f64)
     }
@@ -234,8 +234,7 @@ impl<'a, T: Scalar> VectorViewMut<'a> for ColMut<'a, T> {
         self.copy_from(other);
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
-        zipped!(self.as_mut(), x.as_view())
-            .for_each(|unzipped!(mut si, xi)| si.write(si.read() * beta + xi.read() * alpha));
+        zip!(self.as_mut(), x.as_view()).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }
 }
 

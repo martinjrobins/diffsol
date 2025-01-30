@@ -38,17 +38,17 @@ trait MatrixKLU: Matrix<T = f64> {
 
 impl MatrixKLU for SparseColMat<f64> {
     fn column_pointers_mut_ptr(&mut self) -> *mut KluIndextype {
-        let ptrs = self.faer().symbolic().col_ptrs();
+        let ptrs = self.faer().symbolic().col_ptr();
         ptrs.as_ptr() as *mut KluIndextype
     }
 
     fn row_indices_mut_ptr(&mut self) -> *mut KluIndextype {
-        let indices = self.faer().symbolic().row_indices();
+        let indices = self.faer().symbolic().row_idx();
         indices.as_ptr() as *mut KluIndextype
     }
 
     fn values_mut_ptr(&mut self) -> *mut f64 {
-        let values = self.faer().values();
+        let values = self.faer().val();
         values.as_ptr() as *mut f64
     }
 }
