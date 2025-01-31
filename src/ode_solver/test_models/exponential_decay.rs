@@ -190,8 +190,6 @@ pub fn exponential_decay_problem_diffsl<M: Matrix<T = f64>, CG: crate::CodegenMo
             out
         )
         .as_str(),
-        1,
-        prep_adjoint,
     )
     .unwrap();
     let problem = OdeBuilder::<M>::new()

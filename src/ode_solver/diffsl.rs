@@ -53,7 +53,22 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
         };
         let compiler = Compiler::from_discrete_str(text, mode)
             .map_err(|e| DiffsolError::Other(e.to_string()))?;
+        let (nstates, _nparams, _nout, _ndata, _nroots, _has_mass) = compiler.get_dims();
+
+        let compiler = if nthreads == 0 {
+            let num_cpus = std::thread::available_parallelism().unwrap().get();
+            let nthreads = num_cpus.min(nstates / 1000).max(1);
+            Compiler::from_discrete_str(
+                text,
+                diffsl::execution::compiler::CompilerMode::MultiThreaded(Some(nthreads)),
+            )
+            .map_err(|e| DiffsolError::Other(e.to_string()))?
+        } else {
+            compiler
+        };
+
         let (nstates, nparams, nout, _ndata, nroots, has_mass) = compiler.get_dims();
+
         let has_root = nroots > 0;
         let has_out = nout > 0;
         let data = RefCell::new(compiler.get_new_data());
@@ -132,44 +147,11 @@ pub struct DiffSl<M: Matrix<T = T>, CG: CodegenModule> {
 }
 
 impl<M: Matrix<T = T>, CG: CodegenModule> DiffSl<M, CG> {
-    pub fn compile(code: &str, nthreads: usize, prep_adjoint: bool) -> Result<Self, DiffsolError> {
-        let context = DiffSlContext::<M, CG>::new(code, nthreads)?;
-        Ok(Self::from_context(context, prep_adjoint))
+    pub fn compile(code: &str) -> Result<Self, DiffsolError> {
+        let context = DiffSlContext::<M, CG>::new(code, 1)?;
+        Ok(Self::from_context(context))
     }
-    pub fn prep_adjoint(&mut self) {
-        if let Some(_rhs_coloring) = &self.rhs_coloring {
-            let op = self.rhs();
-            let t0 = 0.0;
-            let x0 = M::V::zeros(op.nstates());
-            let non_zeros_transposed = find_jacobian_non_zeros(&op, &x0, t0);
-            let non_zeros = non_zeros_transposed
-                .into_iter()
-                .map(|(i, j)| (j, i))
-                .collect::<Vec<_>>();
-            let sparsity =
-                M::Sparsity::try_from_indices(op.nout(), op.nstates(), non_zeros.clone())
-                    .expect("invalid sparsity pattern");
-            let coloring = JacobianColoring::new(&sparsity, &non_zeros);
-            self.rhs_adjoint_sparsity = Some(sparsity);
-            self.rhs_adjoint_coloring = Some(coloring);
-        }
-        if let Some(_mass_coloring) = &self.mass_coloring {
-            let op = self.mass().unwrap();
-            let t0 = 0.0;
-            let non_zeros_transposed = find_matrix_non_zeros(&op, t0);
-            let non_zeros = non_zeros_transposed
-                .into_iter()
-                .map(|(i, j)| (j, i))
-                .collect::<Vec<_>>();
-            let sparsity =
-                M::Sparsity::try_from_indices(op.nout(), op.nstates(), non_zeros.clone())
-                    .expect("invalid sparsity pattern");
-            let coloring = JacobianColoring::new(&sparsity, &non_zeros);
-            self.mass_transpose_sparsity = Some(sparsity);
-            self.mass_transpose_coloring = Some(coloring);
-        }
-    }
-    pub fn from_context(context: DiffSlContext<M, CG>, prep_adjoint: bool) -> Self {
+    pub fn from_context(context: DiffSlContext<M, CG>) -> Self {
         let mut ret = Self {
             context,
             mass_coloring: None,
@@ -186,24 +168,41 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSl<M, CG> {
             let t0 = 0.0;
             let x0 = M::V::zeros(op.nstates());
             let non_zeros = find_jacobian_non_zeros(&op, &x0, t0);
-            let sparsity =
-                M::Sparsity::try_from_indices(op.nout(), op.nstates(), non_zeros.clone())
-                    .expect("invalid sparsity pattern");
+            let n = op.nstates();
+
+            let sparsity = M::Sparsity::try_from_indices(n, n, non_zeros.clone())
+                .expect("invalid sparsity pattern");
             let coloring = JacobianColoring::new(&sparsity, &non_zeros);
             ret.rhs_coloring = Some(coloring);
             ret.rhs_sparsity = Some(sparsity);
 
+            let non_zeros = non_zeros
+                .into_iter()
+                .map(|(i, j)| (j, i))
+                .collect::<Vec<_>>();
+            let sparsity = M::Sparsity::try_from_indices(n, n, non_zeros.clone())
+                .expect("invalid sparsity pattern");
+            let coloring = JacobianColoring::new(&sparsity, &non_zeros);
+            ret.rhs_adjoint_sparsity = Some(sparsity);
+            ret.rhs_adjoint_coloring = Some(coloring);
+
             if let Some(op) = ret.mass() {
                 let non_zeros = find_matrix_non_zeros(&op, t0);
-                let sparsity =
-                    M::Sparsity::try_from_indices(op.nout(), op.nstates(), non_zeros.clone())
-                        .expect("invalid sparsity pattern");
+                let sparsity = M::Sparsity::try_from_indices(n, n, non_zeros.clone())
+                    .expect("invalid sparsity pattern");
                 let coloring = JacobianColoring::new(&sparsity, &non_zeros);
                 ret.mass_coloring = Some(coloring);
                 ret.mass_sparsity = Some(sparsity);
-            }
-            if prep_adjoint {
-                ret.prep_adjoint();
+
+                let non_zeros = non_zeros
+                    .into_iter()
+                    .map(|(i, j)| (j, i))
+                    .collect::<Vec<_>>();
+                let sparsity = M::Sparsity::try_from_indices(n, n, non_zeros.clone())
+                    .expect("invalid sparsity pattern");
+                let coloring = JacobianColoring::new(&sparsity, &non_zeros);
+                ret.mass_transpose_sparsity = Some(sparsity);
+                ret.mass_transpose_coloring = Some(coloring);
             }
         }
         ret
@@ -741,7 +740,7 @@ mod tests {
         let r = 1.0;
         let context = DiffSlContext::<nalgebra::DMatrix<f64>, CG>::new(text, 1).unwrap();
         let p = DVector::from_vec(vec![r, k]);
-        let mut eqn = DiffSl::from_context(context, false);
+        let mut eqn = DiffSl::from_context(context);
         eqn.set_params(&p);
 
         // test that the initial values look ok
