@@ -47,7 +47,7 @@ pub fn robertson_diffsl_problem<
         }";
 
     let context = DiffSlContext::<M, CG>::new(code, 1).unwrap();
-    let eqn = DiffSl::from_context(context, false);
+    let eqn = DiffSl::from_context(context);
     let problem = OdeBuilder::<M>::new()
         .p([0.04, 1.0e4, 3.0e7])
         .rtol(1e-4)

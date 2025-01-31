@@ -336,8 +336,6 @@ pub fn exponential_decay_with_algebraic_problem_diffsl<
             out
         )
         .as_str(),
-        1,
-        prep_adjoint,
     )
     .unwrap();
     let problem = OdeBuilder::<M>::new()
