@@ -4,7 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+# diffsol = { path = "..", features = ["diffsl-llvm17"] }
 diffsol = { path = "..", features = ["diffsl"] }
 nalgebra = "0.33.2"
-faer = "0.19.4"
+faer = "0.21.3"
 plotly = "0.10.0"
+# argmin = "0.10.0"
+# argmin-math = { version = "0.4" }
+# argmin-observer-slog = "0.1.0"

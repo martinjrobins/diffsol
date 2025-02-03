@@ -12,6 +12,8 @@
   - [PDEs](./primer/pdes.md)
     - [Example: Heat Equation](./primer/heat_equation.md)
     - [Example: Physics-based Battery Simulation](./primer/physics_based_battery_simulation.md)
+  - [Forward Sensitivity Analysis](./primer/forward_sensitivity_analysis.md)
+    - [Example: Fitting a population dynamics model to data](./primer/population_dynamics_fitting.md)
 - [DiffSol APIs for specifying problems](./specify/specifying_the_problem.md)
   - [ODE equations](./specify/ode_equations.md)
   - [Mass matrix](./specify/mass_matrix.md)
