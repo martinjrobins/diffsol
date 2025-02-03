@@ -1,0 +1,501 @@
+<!DOCTYPE HTML>
+<html lang="en" class="light sidebar-visible" dir="ltr">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Example: Fitting a population dynamics model to data - DiffSol</title>
+
+
+        <!-- Custom HTML head -->
+        <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff">
+
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
+
+        <!-- Fonts -->
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
+
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="../highlight.css">
+        <link rel="stylesheet" href="../tomorrow-night.css">
+        <link rel="stylesheet" href="../ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+
+        <!-- MathJax -->
+        <script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+
+        <!-- Provide site root to javascript -->
+        <script>
+            var path_to_root = "../";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+        <!-- Start loading toc.js asap -->
+        <script src="../toc.js"></script>
+    </head>
+    <body>
+    <div id="body-container">
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script>
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script>
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            const html = document.documentElement;
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add("js");
+        </script>
+
+        <input type="checkbox" id="sidebar-toggle-anchor" class="hidden">
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script>
+            var sidebar = null;
+            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            } else {
+                sidebar = 'hidden';
+            }
+            sidebar_toggle.checked = sidebar === 'visible';
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <!-- populated by js -->
+            <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
+            <noscript>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+            </noscript>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle">
+                <div class="sidebar-resize-indicator"></div>
+            </div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky">
+                    <div class="left-buttons">
+                        <label id="sidebar-toggle" class="icon-button" for="sidebar-toggle-anchor" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </label>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">DiffSol</h1>
+
+                    <div class="right-buttons">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script>
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="fitting-a-predator-prey-model-to-data"><a class="header" href="#fitting-a-predator-prey-model-to-data">Fitting a Predator-Prey Model to data</a></h1>
+<p>In this example we will again use the <a href="https://en.wikipedia.org/wiki/Lotka%E2%80%93Volterra_equations">Lotka-Volterra equations</a>, which are described in more detail in the <a href="./population_dynamics.html">Population Dynamics - Predator-Prey Model</a> example.</p>
+<p>The equations are</p>
+<p>\[
+\frac{x}{dt} = a x - b x y \\
+\frac{y}{dt} = c x y - d y
+\]</p>
+<p>We also have initial conditions for the populations at time \(t = 0\).</p>
+<p>\[
+\frac{x}{dt} = x0 \\
+\frac{y}{dt} = y0
+\]</p>
+<p>This model has six parameters, \(a, b, c, d, x0, y0\). For the purposes of this example, we'll fit two of these parameters \(b, d)\) to some synthetic data. We'll use the model itself to generate the synthetic data, so we'll know the true values of the parameters to verify the fitting process.</p>
+<p>We'll use the argmin crate to perform the optimisation. This is a popular rust crate that contains a number of optimisation algorithms. It does have some limitations, such as the lack of support for constraints, so it may not be suitable for many real ODE fitting problems as the solver can easily fail to converge if the parameter vector moves into a difficult region (e.g. the Lotka-Volterra model only makes sense for positive values of the parameters). However, it will be sufficient for this example to demonstrate the sensitivity analysis capabilities of <code>diffsol</code>.</p>
+<p>First of all we will need to implement some of the argmin traits to specify the optimisation problem. We'll create a <code>struct Problem</code> and implement the <code>CostFunction</code> and <code>Gradient</code> traits for it. The <code>Problem</code> struct will hold our synthetic data (held by the <code>ys_data</code> and <code>ts_data</code> fields) and the <code>OdeSolverProblem</code> that we'll use to solve the ODEs. We'll also create some type aliases for the nalgebra and diffsol types we'll be using.</p>
+<p>Note that the <code>problem</code> field of the <code>Problem</code> struct is wrapped in a <code>RefCell</code> so that we can mutate it in the <code>cost</code> and <code>gradient</code> methods. Setting the parameters of the ODE solver problem is a mutable operation (i.e. you are changing the equations), so we need to use <code>RefCell</code> and interior mutability to do this.</p>
+<pre><code class="language-rust ignore">use argmin::{
+    core::{observers::ObserverMode, CostFunction, Executor, Gradient},
+    solver::{linesearch::MoreThuenteLineSearch, quasinewton::LBFGS},
+};
+use argmin_observer_slog::SlogLogger;
+use diffsol::{DiffSl, OdeBuilder, OdeSolverMethod, OdeEquations, OdeSolverProblem};
+use nalgebra::{DMatrix, DVector};
+use std::cell::RefCell;
+
+type M = DMatrix&lt;f64&gt;;
+type V = DVector&lt;f64&gt;;
+type T = f64;
+type LS = diffsol::NalgebraLU&lt;f64&gt;;
+type CG = diffsol::LlvmModule;
+type Eqn = DiffSl&lt;M, CG&gt;;
+
+struct Problem {
+    ys_data: M,
+    ts_data: Vec&lt;T&gt;,
+    problem: RefCell&lt;OdeSolverProblem&lt;Eqn&gt;&gt;,
+}</code></pre>
+<p>The argmin <code>CostFunction</code> trait requires an implementation of the <code>cost</code> method, which will calculate the sum-of-squares difference between the synthetic data and the model output. Since the argmin crate does not support constraints, we'll return a large value if the ODE solver fails to converge.</p>
+<pre><code class="language-rust ignore"><span class="boring">use argmin::{
+</span><span class="boring">    core::{observers::ObserverMode, CostFunction, Executor, Gradient},
+</span><span class="boring">    solver::{linesearch::MoreThuenteLineSearch, quasinewton::LBFGS},
+</span><span class="boring">};
+</span><span class="boring">use argmin_observer_slog::SlogLogger;
+</span><span class="boring">use diffsol::{DiffSl, OdeBuilder, OdeSolverMethod, OdeEquations, OdeSolverProblem};
+</span><span class="boring">use nalgebra::{DMatrix, DVector};
+</span><span class="boring">use std::cell::RefCell;
+</span><span class="boring">
+</span><span class="boring">type M = DMatrix&lt;f64&gt;;
+</span><span class="boring">type V = DVector&lt;f64&gt;;
+</span><span class="boring">type T = f64;
+</span><span class="boring">type LS = diffsol::NalgebraLU&lt;f64&gt;;
+</span><span class="boring">type CG = diffsol::LlvmModule;
+</span><span class="boring">type Eqn = DiffSl&lt;M, CG&gt;;
+</span><span class="boring">
+</span><span class="boring">struct Problem {
+</span><span class="boring">    ys_data: M,
+</span><span class="boring">    ts_data: Vec&lt;T&gt;,
+</span><span class="boring">    problem: RefCell&lt;OdeSolverProblem&lt;Eqn&gt;&gt;,
+</span><span class="boring">}
+</span>impl CostFunction for Problem {
+    type Output = T;
+    type Param = Vec&lt;T&gt;;
+
+    fn cost(&amp;self, param: &amp;Self::Param) -&gt; Result&lt;Self::Output, argmin_math::Error&gt; {
+        let mut problem = self.problem.borrow_mut();
+        problem.eqn_mut().set_params(&amp;V::from_vec(param.clone()));
+        let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
+        let ys = match solver.solve_dense(&amp;self.ts_data) {
+            Ok(ys) =&gt; ys,
+            Err(_) =&gt; return Ok(f64::MAX / 1000.),
+        };
+        let loss = ys
+            .column_iter()
+            .zip(self.ys_data.column_iter())
+            .map(|(a, b)| (a - b).norm_squared())
+            .sum::&lt;f64&gt;();
+        Ok(loss)
+    }
+}</code></pre>
+<p>The argmin <code>Gradient</code> trait requires an implementation of the <code>gradient</code> method, which will calculate the gradient of the cost function with respect to the parameters. Our sum-of-squares cost function can be written as</p>
+<p>\[
+\text{loss} = \sum_i (y_i(p) - \hat{y}_i)^2
+\]</p>
+<p>where \(y_i(p)\) is the model output as a function of the parameters \(p\), and \(\hat{y}_i\) is the observed data at time index \(i\). Threrefore, the gradient of this cost function with respect to the parameters is</p>
+<p>\[
+\frac{\partial \text{loss}}{\partial p} = 2 \sum_i (y_i(p) - \hat{y}_i) \cdot \frac{\partial y_i}{\partial p}
+\]</p>
+<p>where \(\frac{\partial y_i}{\partial p}\) is the sensitivity of the model output with respect to the parameters. We can calculate this sensitivity using the <code>solve_dense_sensitivities</code> method of the ODE solver. The gradient of the cost function is then the sum of the dot product of the residuals and the sensitivities for each time point. Again, if the ODE solver fails to converge, we'll return a large value for the gradient.</p>
+<pre><code class="language-rust ignore"><span class="boring">use argmin::{
+</span><span class="boring">    core::{observers::ObserverMode, CostFunction, Executor, Gradient},
+</span><span class="boring">    solver::{linesearch::MoreThuenteLineSearch, quasinewton::LBFGS},
+</span><span class="boring">};
+</span><span class="boring">use argmin_observer_slog::SlogLogger;
+</span><span class="boring">use diffsol::{DiffSl, OdeBuilder, OdeSolverMethod, OdeEquations, OdeSolverProblem};
+</span><span class="boring">use nalgebra::{DMatrix, DVector};
+</span><span class="boring">use std::cell::RefCell;
+</span><span class="boring">
+</span><span class="boring">type M = DMatrix&lt;f64&gt;;
+</span><span class="boring">type V = DVector&lt;f64&gt;;
+</span><span class="boring">type T = f64;
+</span><span class="boring">type LS = diffsol::NalgebraLU&lt;f64&gt;;
+</span><span class="boring">type CG = diffsol::LlvmModule;
+</span><span class="boring">type Eqn = DiffSl&lt;M, CG&gt;;
+</span><span class="boring">
+</span><span class="boring">struct Problem {
+</span><span class="boring">    ys_data: M,
+</span><span class="boring">    ts_data: Vec&lt;T&gt;,
+</span><span class="boring">    problem: RefCell&lt;OdeSolverProblem&lt;Eqn&gt;&gt;,
+</span><span class="boring">}
+</span>impl Gradient for Problem {
+    type Gradient = Vec&lt;T&gt;;
+    type Param = Vec&lt;T&gt;;
+
+    fn gradient(&amp;self, param: &amp;Self::Param) -&gt; Result&lt;Self::Gradient, argmin_math::Error&gt; {
+        let mut problem = self.problem.borrow_mut();
+        problem.eqn_mut().set_params(&amp;V::from_vec(param.clone()));
+        let mut solver = problem.bdf_sens::&lt;LS&gt;().unwrap();
+        let (ys, sens) = match solver.solve_dense_sensitivities(&amp;self.ts_data) {
+            Ok((ys, sens)) =&gt; (ys, sens),
+            Err(_) =&gt; return Ok(vec![f64::MAX / 1000.; param.len()]),
+        };
+        let dlossdp = sens
+            .into_iter()
+            .map(|s| {
+                s.column_iter()
+                    .zip(ys.column_iter().zip(self.ys_data.column_iter()))
+                    .map(|(si, (yi, di))| 2.0 * (yi - di).dot(&amp;si))
+                    .sum::&lt;f64&gt;()
+            })
+            .collect::&lt;Vec&lt;f64&gt;&gt;();
+        Ok(dlossdp)
+    }
+}</code></pre>
+<p>With these implementation out of the way, we can now perform the fitting problem. We'll generate some synthetic data using the Lotka-Volterra equations with some true parameters, and then fit the model to this data. We'll use the <code>LBFGS</code> solver from the argmin crate, which is a quasi-Newton method that uses the Broyden-Fletcher-Goldfarb-Shanno (BFGS) update formula. We'll also use the <code>SlogLogger</code> observer to log the progress of the optimisation.</p>
+<p>We'll initialise the optimizer a short distance away from the true parameter values, and then check the final optimised parameter values against the true values.</p>
+<pre><code class="language-rust ignore"><span class="boring">use argmin::{
+</span><span class="boring">    core::{observers::ObserverMode, CostFunction, Executor, Gradient},
+</span><span class="boring">    solver::{linesearch::MoreThuenteLineSearch, quasinewton::LBFGS},
+</span><span class="boring">};
+</span><span class="boring">use argmin_observer_slog::SlogLogger;
+</span><span class="boring">use diffsol::{DiffSl, OdeBuilder, OdeSolverMethod, OdeEquations, OdeSolverProblem};
+</span><span class="boring">use nalgebra::{DMatrix, DVector};
+</span><span class="boring">use std::cell::RefCell;
+</span><span class="boring">
+</span><span class="boring">type M = DMatrix&lt;f64&gt;;
+</span><span class="boring">type V = DVector&lt;f64&gt;;
+</span><span class="boring">type T = f64;
+</span><span class="boring">type LS = diffsol::NalgebraLU&lt;f64&gt;;
+</span><span class="boring">type CG = diffsol::LlvmModule;
+</span><span class="boring">type Eqn = DiffSl&lt;M, CG&gt;;
+</span><span class="boring">
+</span><span class="boring">struct Problem {
+</span><span class="boring">    ys_data: M,
+</span><span class="boring">    ts_data: Vec&lt;T&gt;,
+</span><span class="boring">    problem: RefCell&lt;OdeSolverProblem&lt;Eqn&gt;&gt;,
+</span><span class="boring">}
+</span><span class="boring">
+</span><span class="boring">impl CostFunction for Problem {
+</span><span class="boring">    type Output = T;
+</span><span class="boring">    type Param = Vec&lt;T&gt;;
+</span><span class="boring">
+</span><span class="boring">    fn cost(&amp;self, param: &amp;Self::Param) -&gt; Result&lt;Self::Output, argmin_math::Error&gt; {
+</span><span class="boring">        let mut problem = self.problem.borrow_mut();
+</span><span class="boring">        problem.eqn_mut().set_params(&amp;V::from_vec(param.clone()));
+</span><span class="boring">        let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
+</span><span class="boring">        let ys = match solver.solve_dense(&amp;self.ts_data) {
+</span><span class="boring">            Ok(ys) =&gt; ys,
+</span><span class="boring">            Err(_) =&gt; return Ok(f64::MAX / 1000.),
+</span><span class="boring">        };
+</span><span class="boring">        let loss = ys
+</span><span class="boring">            .column_iter()
+</span><span class="boring">            .zip(self.ys_data.column_iter())
+</span><span class="boring">            .map(|(a, b)| (a - b).norm_squared())
+</span><span class="boring">            .sum::&lt;f64&gt;();
+</span><span class="boring">        Ok(loss)
+</span><span class="boring">    }
+</span><span class="boring">}
+</span><span class="boring">
+</span><span class="boring">impl Gradient for Problem {
+</span><span class="boring">    type Gradient = Vec&lt;T&gt;;
+</span><span class="boring">    type Param = Vec&lt;T&gt;;
+</span><span class="boring">
+</span><span class="boring">    fn gradient(&amp;self, param: &amp;Self::Param) -&gt; Result&lt;Self::Gradient, argmin_math::Error&gt; {
+</span><span class="boring">        let mut problem = self.problem.borrow_mut();
+</span><span class="boring">        problem.eqn_mut().set_params(&amp;V::from_vec(param.clone()));
+</span><span class="boring">        let mut solver = problem.bdf_sens::&lt;LS&gt;().unwrap();
+</span><span class="boring">        let (ys, sens) = match solver.solve_dense_sensitivities(&amp;self.ts_data) {
+</span><span class="boring">            Ok((ys, sens)) =&gt; (ys, sens),
+</span><span class="boring">            Err(_) =&gt; return Ok(vec![f64::MAX / 1000.; param.len()]),
+</span><span class="boring">        };
+</span><span class="boring">        let dlossdp = sens
+</span><span class="boring">            .into_iter()
+</span><span class="boring">            .map(|s| {
+</span><span class="boring">                s.column_iter()
+</span><span class="boring">                    .zip(ys.column_iter().zip(self.ys_data.column_iter()))
+</span><span class="boring">                    .map(|(si, (yi, di))| 2.0 * (yi - di).dot(&amp;si))
+</span><span class="boring">                    .sum::&lt;f64&gt;()
+</span><span class="boring">            })
+</span><span class="boring">            .collect::&lt;Vec&lt;f64&gt;&gt;();
+</span><span class="boring">        Ok(dlossdp)
+</span><span class="boring">    }
+</span><span class="boring">}
+</span><span class="boring">
+</span><span class="boring">
+</span><span class="boring">fn main() {
+</span>let eqn = DiffSl::&lt;M, CG&gt;::compile(
+    "
+        in = [ b, d ]
+        a { 2.0/3.0 } b { 4.0/3.0 } c { 1.0 } d { 1.0 } x0 { 1.0 } y0 { 1.0 }
+        u_i {
+            y1 = x0,
+            y2 = y0,
+        }
+        F_i {
+            a * y1 - b * y1 * y2,
+            c * y1 * y2 - d * y2,
+        }
+    ",
+)
+.unwrap();
+
+let (b_true, d_true) = (4.0/3.0, 1.0);
+let t_data = (0..101)
+    .map(|i| f64::from(i) * 40. / 100.)
+    .collect::&lt;Vec&lt;f64&gt;&gt;();
+let problem = OdeBuilder::&lt;M&gt;::new()
+    .p([b_true, d_true])
+    .sens_atol([1e-6])
+    .sens_rtol(1e-6)
+    .build_from_eqn(eqn)
+    .unwrap();
+let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
+let ys_data = solver.solve_dense(&amp;t_data).unwrap();
+
+let cost = Problem {
+    ys_data,
+    ts_data: t_data,
+    problem: RefCell::new(problem),
+};
+
+let init_param = vec![
+    b_true - 0.1,
+    d_true - 0.1,
+];
+
+let linesearch = MoreThuenteLineSearch::new().with_c(1e-4, 0.9).unwrap();
+let solver = LBFGS::new(linesearch, 7);
+let res = Executor::new(cost, solver)
+    .configure(|state| state.param(init_param))
+    .add_observer(SlogLogger::term(), ObserverMode::Always)
+    .run()
+    .unwrap();
+
+// print result
+println!("{}", res);
+// Best parameter vector
+let best = res.state().best_param.as_ref().unwrap();
+println!("Best parameter vector: {:?}", best);
+println!("True parameter vector: {:?}", vec![b_true, d_true]);
+<span class="boring">}</span></code></pre>
+<pre><code>Feb 03 13:16:44.604 INFO L-BFGS
+Feb 03 13:16:44.842 INFO iter: 0, cost: 21.574177406963013, best_cost: 21.574177406963013, cost_count: 6, gradient_count: 7, gamma: 1, time: 0.238573908
+Feb 03 13:16:44.920 INFO iter: 1, cost: 0.6811721224055488, best_cost: 0.6811721224055488, cost_count: 8, gradient_count: 10, time: 0.077082344, gamma: 0.00036901099013336356
+Feb 03 13:16:44.969 INFO iter: 2, cost: 0.6478536174002669, best_cost: 0.6478536174002669, cost_count: 9, gradient_count: 12, time: 0.049218286, gamma: 0.00017983731521908368
+Feb 03 13:16:45.018 INFO iter: 3, cost: 0.5515637814971768, best_cost: 0.5515637814971768, cost_count: 10, gradient_count: 14, time: 0.049264513, gamma: 0.00013404417466199433
+Feb 03 13:16:45.069 INFO iter: 4, cost: 0.2889819270908579, best_cost: 0.2889819270908579, cost_count: 11, gradient_count: 16, time: 0.050718659, gamma: 0.00019004425867568796
+Feb 03 13:16:45.120 INFO iter: 5, cost: 0.06441855702549167, best_cost: 0.06441855702549167, cost_count: 12, gradient_count: 18, gamma: 0.0005522578375180803, time: 0.05102388
+Feb 03 13:16:45.172 INFO iter: 6, cost: 0.001969603423448309, best_cost: 0.001969603423448309, cost_count: 13, gradient_count: 20, time: 0.051874014, gamma: 0.002084311472606979
+Feb 03 13:16:45.224 INFO iter: 7, cost: 0.00018682781933202676, best_cost: 0.00018682781933202676, cost_count: 14, gradient_count: 22, gamma: 0.00020342834067043386, time: 0.051705468
+Feb 03 13:16:45.276 INFO iter: 8, cost: 0.0000004145187755175781, best_cost: 0.0000004145187755175781, cost_count: 15, gradient_count: 24, time: 0.052326582, gamma: 0.00013653160933392906
+Feb 03 13:16:45.328 INFO iter: 9, cost: 0.00000019683422285908518, best_cost: 0.00000019683422285908518, cost_count: 16, gradient_count: 26, time: 0.05250708, gamma: 0.0002897867622209216
+Feb 03 13:16:45.381 INFO iter: 10, cost: 0.00000018573267264008743, best_cost: 0.00000018573267264008743, cost_count: 17, gradient_count: 28, time: 0.052503364, gamma: 0.0006940640307853263
+Feb 03 13:16:47.047 INFO iter: 11, cost: 0.0000001857326722089365, best_cost: 0.0000001857326722089365, cost_count: 74, gradient_count: 86, gamma: 0.00012163138683631344, time: 1.665703414
+Feb 03 13:16:47.531 INFO iter: 12, cost: 0.00000018573267291060315, best_cost: 0.0000001857326722089365, cost_count: 90, gradient_count: 103, gamma: 0.000001225820261527594, time: 0.484634742
+Feb 03 13:16:49.078 INFO iter: 13, cost: 0.000000185732672314337, best_cost: 0.0000001857326722089365, cost_count: 143, gradient_count: 157, time: 1.5466635069999999, gamma: 0.00000005014738728081247
+Feb 03 13:16:49.562 INFO iter: 14, cost: 0.00000018573267355654775, best_cost: 0.0000001857326722089365, cost_count: 159, gradient_count: 174, gamma: 0.00000386732692846693, time: 0.483722743
+Feb 03 13:16:51.051 INFO iter: 15, cost: 0.0000001857326728225398, best_cost: 0.0000001857326722089365, cost_count: 210, gradient_count: 226, time: 1.489475966, gamma: -0.00000029042697044185633
+Feb 03 13:16:51.880 INFO iter: 16, cost: 0.00000018573267387423262, best_cost: 0.0000001857326722089365, cost_count: 238, gradient_count: 255, time: 0.828862625, gamma: 0.0000014262616055754604
+Feb 03 13:16:53.202 INFO iter: 17, cost: 0.00000018573267376814762, best_cost: 0.0000001857326722089365, cost_count: 283, gradient_count: 301, gamma: 0.00000006448722374243354, time: 1.32160584
+OptimizationResult:
+    Solver:        L-BFGS
+    param (best):  [1.3333663799297248, 1.0000008551827637]
+    cost (best):   0.0000001857326722089365
+    iters (best):  11
+    iters (total): 18
+    termination:   Solver converged
+    time:          8.62392681s
+
+Best parameter vector: [1.3333663799297248, 1.0000008551827637]
+True parameter vector: [1.3333333333333333, 1.0]
+</code></pre>
+<p>So, we've successfully fitted the Lotka-Volterra model to some synthetic data and recovered the original true parameters. This is a simple example and could easily be improved. For example, you will note from the output that the argmin crate is calling both the cost and gradient functions, and this is often done using the exact same parameter vector. Ideally we'd like to cache the results of the <code>solve_dense_sensitivities</code> method and reuse them in both the <code>cost</code> and <code>gradient</code> functions.</p>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="../primer/forward_sensitivity_analysis.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+
+                            <a rel="next prefetch" href="../specify/specifying_the_problem.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="../primer/forward_sensitivity_analysis.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+
+                    <a rel="next prefetch" href="../specify/specifying_the_problem.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+
+
+
+        <script>
+            window.playground_copyable = true;
+        </script>
+
+
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
+
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
+
+        <!-- Custom JS scripts -->
+
+
+    </div>
+    </body>
+</html>
