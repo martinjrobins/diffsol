@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::rc::Rc;
+use num_traits::One;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
@@ -257,16 +258,27 @@ where
         Ok(ret)
     }
 
-    /// Using the provided state, solve the forwards and adjoint problem from the current time up to `final_time`.
-    /// An output function must be provided and the problem must be setup to integrate this output
-    /// function over time. Returns a tuple of `(g, sgs)`, where `g` is the vector of the integral
+    /// Using the provided state, solve the forwards and adjoint problem from the current time up to the last time in `t_eval`.
+    /// An output function must be provided. If the problem is setup to integrate this output function over time, the output function is integrated over time, i.e.
+    /// 
+    /// $$
+    /// g = \int_{t_0}^{t_{\text{final}}} f(y(t), t) dt
+    /// $$
+    /// 
+    /// Alternatively, if the problem is setup to *not* integrate this output function over time, the output function is evaluated at each timepoint in `t_eval` and summed, i.e.
+    /// 
+    /// $$
+    /// g = \sum_{i=0}^{n-1} \int_{t_i}^{t_{i+1}} f(y(t), t) dt
+    /// $$
+    /// 
+    /// Returns a tuple of `(g, sgs)`, where `g` is the vector of the integral
     /// of the output function from the current time to `final_time`, and `sgs` is a `Vec` where
-    /// the ith element is the sensitivities of the ith element of `g` with respect to the
+    /// the ith element is the gradient of the ith element of `g` with respect to the
     /// parameters.
     #[allow(clippy::type_complexity)]
     fn solve_adjoint<LS: LinearSolver<Eqn::M>>(
         mut self,
-        final_time: Eqn::T,
+        t_eval: &[Eqn::T],
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<(Eqn::V, Vec<Eqn::V>), DiffsolError>
     where
@@ -282,33 +294,54 @@ where
                 "Cannot solve adjoint without output function"
             ));
         }
-        if !self.problem().integrate_out {
-            return Err(ode_solver_error!(
-                Other,
-                "Cannot solve adjoint without integrating out"
-            ));
+        // check t_eval has at least one point
+        if t_eval.is_empty() {
+            return Err(ode_solver_error!(InvalidTEval));
         }
+        // check t_eval is increasing and all values are greater than or equal to the current time
+        let t0 = self.state().t;
+        if t_eval.windows(2).any(|w| w[0] > w[1] || w[0] < t0) {
+            return Err(ode_solver_error!(InvalidTEval));
+        }
+        let final_time = t_eval[t_eval.len() - 1];
         let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
         let t0 = self.state().t;
         let mut ts = vec![t0];
         let mut ys = vec![self.state().y.clone()];
         let mut ydots = vec![self.state().dy.clone()];
+        let nout = self.problem().eqn.nout();
+        let nparams = self.problem().eqn.nparams();
+        let mut g_sg_tmp = if self.problem().integrate_out {
+            Some((Eqn::V::zeros(nout), vec![Eqn::V::zeros(nparams); nout], Eqn::V::zeros(nout)))
+        } else {
+            None
+        };
 
         // do the main forward solve, saving checkpoints
         self.set_stop_time(final_time)?;
         let mut nsteps = 0;
         let mut checkpoints = vec![self.checkpoint()];
-        while self.step()? != OdeSolverStopReason::TstopReached {
-            ts.push(self.state().t);
-            ys.push(self.state().y.clone());
-            ydots.push(self.state().dy.clone());
-            nsteps += 1;
-            if nsteps > max_steps_between_checkpoints {
-                checkpoints.push(self.checkpoint());
-                nsteps = 0;
-                ts.clear();
-                ys.clear();
-                ydots.clear();
+        for t in t_eval {
+            while self.state().t < *t {
+                self.step()?;
+                ts.push(self.state().t);
+                ys.push(self.state().y.clone());
+                ydots.push(self.state().dy.clone());
+                nsteps += 1;
+                if nsteps > max_steps_between_checkpoints {
+                    checkpoints.push(self.checkpoint());
+                    nsteps = 0;
+                    ts.clear();
+                    ys.clear();
+                    ydots.clear();
+                }
+            }
+            if let Some((g, _sg, tmp)) = g_sg_tmp.as_mut() {
+                let y = self.interpolate(*t)?;
+                self.problem().eqn.out().unwrap().call_inplace(&y, *t, tmp);
+                g.axpy(Eqn::T::one(), tmp, Eqn::T::one());
+
+
             }
         }
         ts.push(self.state().t);
@@ -337,7 +370,7 @@ where
         // return the solution
         Ok((g, state_mut.sg.to_owned()))
     }
-
+    
     /// Using the provided state, solve the problem up to time `t_eval[t_eval.len()-1]`
     /// Returns a tuple `(y, sens)`, where `y` is a dense matrix of solution values at timepoints given by `t_eval`,
     /// and `sens` is a Vec of dense matrices, the ith element of the Vec are the the sensitivities with respect to the ith parameter.
