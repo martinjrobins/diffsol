@@ -6,10 +6,7 @@ use std::{
 };
 
 use crate::{
-    op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, Checkpointing, ConstantOp,
-    ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint, OdeEquationsRef, OdeSolverMethod,
-    OdeSolverProblem, Op, Vector,
+    error::DiffsolError, op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, Checkpointing, ConstantOp, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint, OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, Op, Vector
 };
 
 pub struct AdjointContext<'a, Eqn, Method>
@@ -20,6 +17,7 @@ where
     checkpointer: Checkpointing<'a, Eqn, Method>,
     x: Eqn::V,
     index: usize,
+    max_index: usize,
     last_t: Option<Eqn::T>,
     col: Eqn::V,
 }
@@ -29,15 +27,16 @@ where
     Eqn: OdeEquationsAdjoint,
     Method: OdeSolverMethod<'a, Eqn>,
 {
-    pub fn new(checkpointer: Checkpointing<'a, Eqn, Method>) -> Self {
+    pub fn new(checkpointer: Checkpointing<'a, Eqn, Method>, max_index: usize) -> Self {
         let x = <Eqn::V as Vector>::zeros(checkpointer.problem().eqn.rhs().nstates());
-        let mut col = <Eqn::V as Vector>::zeros(checkpointer.problem().eqn.out().unwrap().nout());
+        let mut col = <Eqn::V as Vector>::zeros(max_index);
         let index = 0;
         col[0] = Eqn::T::one();
         Self {
             checkpointer,
             x,
             index,
+            max_index,
             col,
             last_t: None,
         }
@@ -416,7 +415,7 @@ where
 {
     fn clone(&self) -> Self {
         let context = Rc::new(RefCell::new(AdjointContext::new(
-            self.context.borrow().checkpointer.clone(),
+            self.context.borrow().checkpointer.clone(), self.context.borrow().max_index,
         )));
         let rhs = AdjointRhs::new(self.eqn, context.clone(), self.out.is_some());
         let init = AdjointInit::new(self.eqn);
@@ -506,6 +505,10 @@ where
         }
     }
 
+    pub fn eqn(&self) -> &'a Eqn {
+        self.eqn
+    }
+
     pub fn correct_sg_for_init(&self, t: Eqn::T, s: &[Eqn::V], sg: &mut [Eqn::V]) {
         let mut tmp = self.tmp.borrow_mut();
         for (s_i, sg_i) in s.iter().zip(sg.iter_mut()) {
@@ -521,6 +524,12 @@ where
                 sg_i.sub_assign(&*tmp);
             }
         }
+    }
+    
+    pub fn interpolate_forward_state(&self, t: Eqn::T, y: &mut Eqn::V) -> Result<(), DiffsolError> {
+        self.context.borrow_mut().set_state(t);
+        let context = self.context.borrow();
+        context.checkpointer.interpolate(t, y)
     }
 }
 
@@ -617,7 +626,7 @@ where
     }
 
     fn max_index(&self) -> usize {
-        self.eqn.out().map(|o| o.nout()).unwrap_or(0)
+        self.context.borrow().max_index
     }
 
     fn set_index(&mut self, index: usize) {
@@ -641,9 +650,7 @@ mod tests {
         ode_solver::{
             adjoint_equations::AdjointEquations,
             test_models::exponential_decay::exponential_decay_problem_adjoint,
-        },
-        AdjointContext, AugmentedOdeEquations, Checkpointing, FaerSparseLU, Matrix, MatrixCommon,
-        NonLinearOp, NonLinearOpJacobian, SdirkState, SparseColMat, Vector,
+        }, AdjointContext, AugmentedOdeEquations, Checkpointing, FaerSparseLU, Matrix, MatrixCommon, NonLinearOp, NonLinearOpJacobian, OdeEquations, SdirkState, SparseColMat, Vector, Op
     };
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;
@@ -666,9 +673,10 @@ mod tests {
             ds: Vec::new(),
             h: 0.0,
         };
+        let nout = problem.eqn.out().unwrap().nout();
         let solver = problem.esdirk34_solver::<LS>(state.clone()).unwrap();
         let checkpointer = Checkpointing::new(solver, 0, vec![state.clone(), state.clone()], None);
-        let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
+        let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer, nout)));
         let adj_eqn = AdjointEquations::new(&problem, context.clone(), false);
         // F(λ, x, t) = -f^T_x(x, t) λ
         // f_x = |-a 0|
@@ -736,11 +744,12 @@ mod tests {
             ds: Vec::new(),
             h: 0.0,
         };
+        let nout = problem.eqn.out().unwrap().nout();
         let solver = problem
             .esdirk34_solver::<FaerSparseLU<f64>>(state.clone())
             .unwrap();
         let checkpointer = Checkpointing::new(solver, 0, vec![state.clone(), state.clone()], None);
-        let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer)));
+        let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer, nout)));
         let mut adj_eqn = AdjointEquations::new(&problem, context, true);
 
         // f_x^T = |-a 0|

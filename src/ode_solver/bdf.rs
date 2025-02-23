@@ -1,10 +1,11 @@
 use nalgebra::ComplexField;
 use std::ops::AddAssign;
+use std::cell::Ref;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
-    AdjointEquations, AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, LinearSolver,
-    NoAug, OdeEquationsAdjoint, OdeEquationsSens, SensEquations, StateRef, StateRefMut,
+    AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix,
+    NoAug, OdeEquationsSens, SensEquations, StateRef, StateRefMut,
 };
 
 use num_traits::{abs, One, Pow, Zero};
@@ -16,10 +17,11 @@ use crate::{
     AugmentedOdeEquations, BdfState, DenseMatrix, IndexType, JacobianUpdate, MatrixViewMut,
     NonLinearOp, NonLinearSolver, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem,
     OdeSolverState, OdeSolverStopReason, Op, Scalar, Vector, VectorRef, VectorView, VectorViewMut,
+    SensitivitiesOdeSolverMethod,
 };
 
-use super::method::{AdjointOdeSolverMethod, AugmentedOdeSolverMethod};
-use super::{jacobian_update::SolverState, method::SensitivitiesOdeSolverMethod};
+use super::method::AugmentedOdeSolverMethod;
+use super::jacobian_update::SolverState;
 
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct BdfStatistics {
@@ -44,41 +46,11 @@ where
     fn into_state_and_eqn(self) -> (Self::State, Option<AugEqn>) {
         (self.state, self.s_op.map(|op| op.eqn))
     }
-}
-
-impl<'a, M, Eqn, Nls> SensitivitiesOdeSolverMethod<'a, Eqn>
-    for Bdf<'a, Eqn, Nls, M, SensEquations<'a, Eqn>>
-where
-    Eqn: OdeEquationsSens,
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
-    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-    Eqn::V: DefaultDenseMatrix,
-    Nls: NonLinearSolver<Eqn::M>,
-{
-}
-
-impl<'a, M, Eqn, Nls> AdjointOdeSolverMethod<'a, Eqn> for Bdf<'a, Eqn, Nls, M>
-where
-    Eqn: OdeEquationsAdjoint,
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
-    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-    Eqn::V: DefaultDenseMatrix,
-    Nls: NonLinearSolver<Eqn::M> + 'a,
-{
-    type DefaultAdjointSolver =
-        Bdf<'a, Eqn, Nls, M, AdjointEquations<'a, Eqn, Bdf<'a, Eqn, Nls, M>>>;
-    fn default_adjoint_solver<LS: LinearSolver<Eqn::M>>(
-        self,
-        mut aug_eqn: AdjointEquations<'a, Eqn, Self>,
-    ) -> Result<Self::DefaultAdjointSolver, DiffsolError> {
-        let problem = self.problem();
-        let nonlinear_solver = self.nonlinear_solver;
-        let state = self.state.into_adjoint::<LS, _, _>(problem, &mut aug_eqn)?;
-        Bdf::new_augmented(state, problem, aug_eqn, nonlinear_solver)
+    fn augmented_eqn(&self) -> Option<&AugEqn> {
+        self.s_op.as_ref().map(|op| op.eqn())
     }
 }
+
 
 // notes quadrature.
 // ndf formula rearranged to [2]:
@@ -881,6 +853,16 @@ where
 
     fn order(&self) -> usize {
         self.state.order
+    }
+    
+    fn jacobian(&self) -> Option<Ref<<Eqn>::M>> {
+        if let Some(op) = self.op.as_ref() {
+            Some(op.jacobian())
+        } else if let Some(s_op) = self.s_op.as_ref() {
+            Some(s_op.jacobian())
+        } else {
+            None
+        }
     }
 
     fn set_state(&mut self, state: Self::State) {

@@ -81,6 +81,8 @@ pub enum OdeSolverError {
     SundialsError(String),
     #[error("Problem not set")]
     ProblemNotSet,
+    #[error("Jacobian not available")]
+    JacobianNotAvailable,
     #[error("Error: {0}")]
     Other(String),
 }

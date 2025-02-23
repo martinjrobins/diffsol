@@ -1,8 +1,11 @@
+use std::{cell::RefCell, rc::Rc};
+
 use crate::{
-    error::DiffsolError, vector::Vector, AugmentedOdeEquationsImplicit, Bdf, BdfState,
-    DefaultDenseMatrix, DenseMatrix, LinearSolver, MatrixRef, NewtonNonlinearSolver, OdeEquations,
-    OdeEquationsImplicit, OdeEquationsSens, OdeSolverState, Sdirk, SdirkState, SensEquations,
-    Tableau, VectorRef,
+    error::DiffsolError, vector::Vector, AdjointContext, AdjointEquations,
+    AugmentedOdeEquationsImplicit, Bdf, BdfState, Checkpointing, DefaultDenseMatrix, DenseMatrix,
+    LinearSolver, MatrixRef, NewtonNonlinearSolver, OdeEquations, OdeEquationsAdjoint,
+    OdeEquationsImplicit, OdeEquationsSens, OdeSolverMethod, OdeSolverState, Op, Sdirk, SdirkState,
+    SensEquations, Tableau, VectorRef,
 };
 
 pub struct OdeSolverProblem<Eqn>
@@ -211,6 +214,30 @@ where
     {
         let newton_solver = NewtonNonlinearSolver::new(LS::default());
         Bdf::new_augmented(state, self, aug_eqn, newton_solver)
+    }
+
+    pub(crate) fn bdf_solver_adjoint<'a, LS: LinearSolver<Eqn::M>, S: OdeSolverMethod<'a, Eqn>>(
+        &'a self,
+        checkpointer: Checkpointing<'a, Eqn, S>,
+    ) -> Result<
+        Bdf<
+            'a,
+            Eqn,
+            NewtonNonlinearSolver<Eqn::M, LS>,
+            <Eqn::V as DefaultDenseMatrix>::M,
+            AdjointEquations<'a, Eqn, S>,
+        >,
+        DiffsolError,
+    >
+    where
+        Eqn: OdeEquationsAdjoint,
+    {
+        let nout = self.eqn.out().unwrap().nout();
+        let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer, nout)));
+        let mut augmented_eqn = AdjointEquations::new(self, context, self.integrate_out);
+        let newton_solver = NewtonNonlinearSolver::new(LS::default());
+        let state = BdfState::new_without_initialise_augmented(self, &mut augmented_eqn)?;
+        Bdf::new_augmented(state, self, augmented_eqn, newton_solver)
     }
 
     #[allow(clippy::type_complexity)]

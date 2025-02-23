@@ -1,14 +1,20 @@
+use num_traits::{One, Zero};
 use std::cell::Ref;
+use std::cell::RefCell;
+use std::ops::SubAssign;
+use std::rc::Rc;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
+    matrix::default_solver::DefaultSolver,
     ode_solver_error,
-    scalar::Scalar,
-    AugmentedOdeEquations, Checkpointing, DefaultDenseMatrix,
-    DenseMatrix, HermiteInterpolator, Matrix, NonLinearOp,
-    OdeEquations,
-    OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
-    Vector, VectorViewMut,
+    op::matrix::MatrixOp,
+    scalar::{Scalar, Scale},
+    AdjointContext, AdjointEquations, AugmentedOdeEquations, Checkpointing, DefaultDenseMatrix,
+    DenseMatrix, HermiteInterpolator, LinearOp, LinearSolver, Matrix, MatrixCommon, NonLinearOp,
+    NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint,
+    OdeEquationsSens, OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut,
+    Vector, VectorIndex, VectorViewMut,
 };
 
 /// Utility function to write out the solution at a given timepoint
@@ -227,7 +233,7 @@ where
     
     #[allow(clippy::type_complexity)]
     fn solve_with_checkpointing(
-        mut self,
+        &mut self,
         final_time: Eqn::T,
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<(Checkpointing<'a, Eqn, Self>, <Eqn::V as DefaultDenseMatrix>::M, Vec<Eqn::T>), DiffsolError>
@@ -248,10 +254,10 @@ where
         let mut ydots = vec![self.state().dy.clone()];
 
         // do the main loop, saving checkpoints
-        write_out(&self, &mut ret_y, &mut ret_t);
+        write_out(self, &mut ret_y, &mut ret_t);
         self.set_stop_time(final_time)?;
         while self.step()? != OdeSolverStopReason::TstopReached {
-            write_out(&self, &mut ret_y, &mut ret_t);
+            write_out(self, &mut ret_y, &mut ret_t);
             ts.push(self.state().t);
             ys.push(self.state().y.clone());
             ydots.push(self.state().dy.clone());
@@ -266,7 +272,7 @@ where
         }
 
         // store the final step
-        write_out(&self, &mut ret_y, &mut ret_t);
+        write_out(self, &mut ret_y, &mut ret_t);
         let ntimes = ret_t.len();
         let nrows = ret_y[0].len();
         let mut ret_y_matrix = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nrows, ntimes);
@@ -284,6 +290,7 @@ where
         let last_segment = HermiteInterpolator::new(ys, ydots, ts);
         let checkpointer =
             Checkpointing::new(self, checkpoints.len() - 2, checkpoints, Some(last_segment));
+
 
         Ok((checkpointer, ret_y_matrix, ret_t))
     }
@@ -353,6 +360,137 @@ where
 
         Ok((checkpointer, ret))
     }
+
+    /// Using the provided state, solve the forwards and adjoint problem from the current time up to the last time in `t_eval`.
+    /// An output function must be provided. Rhe problem must be setup to integrate this output function over time, the output function is integrated over time, i.e.
+    ///
+    /// $$
+    /// g = \int_{t_0}^{t_{\text{final}}} f(y(t), t) dt
+    /// $$
+    ///
+    /// Returns a tuple of `(g, sgs)`, where `g` is the vector of the integral
+    /// of the output function from the current time to `final_time`, and `sgs` is a `Vec` where
+    /// the ith element is the gradient of the ith element of `g` with respect to the
+    /// parameters.
+    #[allow(clippy::type_complexity)]
+    fn solve_adjoint<LS: LinearSolver<Eqn::M>>(
+        mut self,
+        final_time: Eqn::T,
+        max_steps_between_checkpoints: Option<usize>,
+    ) -> Result<(Eqn::V, Vec<Eqn::V>), DiffsolError>
+    where
+        Eqn: OdeEquationsAdjoint,
+        Eqn::M: DefaultSolver,
+        Eqn::V: DefaultDenseMatrix,
+        Self: Sized,
+    {
+        if self.problem().eqn.out().is_none() {
+            return Err(ode_solver_error!(
+                Other,
+                "Cannot solve adjoint without output function"
+            ));
+        }
+        if !self.problem().integrate_out {
+            return Err(ode_solver_error!(
+                Other,
+                "Cannot solve adjoint without integrating out"
+            ));
+        }
+        let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
+        let t0 = self.state().t;
+        let mut ts = vec![t0];
+        let mut ys = vec![self.state().y.clone()];
+        let mut ydots = vec![self.state().dy.clone()];
+
+        // do the main forward solve, saving checkpoints
+        self.set_stop_time(final_time)?;
+        let mut nsteps = 0;
+        let mut checkpoints = vec![self.checkpoint()];
+        while self.step()? != OdeSolverStopReason::TstopReached {
+            ts.push(self.state().t);
+            ys.push(self.state().y.clone());
+            ydots.push(self.state().dy.clone());
+            nsteps += 1;
+            if nsteps > max_steps_between_checkpoints {
+                checkpoints.push(self.checkpoint());
+                nsteps = 0;
+                ts.clear();
+                ys.clear();
+                ydots.clear();
+            }
+        }
+        ts.push(self.state().t);
+        ys.push(self.state().y.clone());
+        ydots.push(self.state().dy.clone());
+        checkpoints.push(self.checkpoint());
+
+        // save integrateed out function
+        let g = self.state().g.clone();
+
+        // construct the adjoint solver
+        let last_segment = HermiteInterpolator::new(ys, ydots, ts);
+        let adjoint_aug_eqn = self.adjoint_equations(checkpoints, last_segment)?;
+        let mut adjoint_solver = self.default_adjoint_solver::<LS>(adjoint_aug_eqn)?;
+
+        // solve the adjoint problem
+        adjoint_solver.set_stop_time(t0).unwrap();
+        while adjoint_solver.step()? != OdeSolverStopReason::TstopReached {}
+
+        // correct the adjoint solution for the initial conditions
+        let (mut state, aug_eqn) = adjoint_solver.into_state_and_eqn();
+        let aug_eqn = aug_eqn.unwrap();
+        let state_mut = state.as_mut();
+        aug_eqn.correct_sg_for_init(t0, state_mut.s, state_mut.sg);
+
+        // return the solution
+        Ok((g, state_mut.sg.to_owned()))
+    }
+
+    /// Using the provided state, solve the sum of squares forwards and adjoint problem using the given data in `y_eval`,
+    /// from the current time up to the last time in `t_eval`.
+    /// An output function f must be provided. The problem *must not* be is setup to integrate this output function over time,
+    ///
+    /// The sum of squares problem is defined as:
+    ///
+    /// $$
+    /// g = \sum_{i=0}^{n-1}  || f(y_i, t_i, p) - \hat{y}_i ||^2 dt
+    /// $$
+    ///
+    /// The gradient of g wrt the parameters is also calculated.
+    ///
+    /// $$
+    /// \frac{d g}{d p} = \sum_{i=0}^{n-1} 2 \frac{d f}{d p} \cdot (f(y_i, t_i, p) -  \hat{y}_i)) dt
+    /// $$
+    ///
+    /// Returns a tuple of `(g, sgs)`, where `g` is the vector of the sum of squares function, and `sgs` is a `Vec` where
+    /// the ith element is the gradient of the ith element of `g` with respect to the
+    /// parameters.
+    fn solve_dense_adjoint_forward_pass(
+        self,
+        t_eval: &[Eqn::T],
+        g_len: usize,
+        max_steps_between_checkpoints: Option<usize>,
+    ) -> Result<
+        (
+            AdjointEquations<'a, Eqn, Self>,
+            <Eqn::V as DefaultDenseMatrix>::M,
+        ),
+        DiffsolError,
+    >
+    where
+        Eqn: OdeEquationsAdjoint,
+        Eqn::M: DefaultSolver,
+        Eqn::V: DefaultDenseMatrix,
+        Self: Sized,
+    {
+        let problem = self.problem();
+        let with_out = problem.integrate_out;
+        let (checkpointer, ret) =
+            self.solve_dense_with_checkpointing(t_eval, max_steps_between_checkpoints)?;
+        let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer, g_len)));
+        let augmented_eqn = AdjointEquations::new(problem, context, with_out);
+        Ok((augmented_eqn, ret))
+    }
 }
 
 pub trait AugmentedOdeSolverMethod<'a, Eqn, AugmentedEqn>: OdeSolverMethod<'a, Eqn>
@@ -364,10 +502,321 @@ where
     fn augmented_eqn(&self) -> Option<&AugmentedEqn>;
 }
 
+pub trait SensitivitiesOdeSolverMethod<'a, Eqn>:
+    AugmentedOdeSolverMethod<'a, Eqn, SensEquations<'a, Eqn>>
+where
+    Eqn: OdeEquationsSens + 'a,
+{
+    /// Using the provided state, solve the problem up to time `t_eval[t_eval.len()-1]`
+    /// Returns a tuple `(y, sens)`, where `y` is a dense matrix of solution values at timepoints given by `t_eval`,
+    /// and `sens` is a Vec of dense matrices, the ith element of the Vec are the the sensitivities with respect to the ith parameter.
+    /// After the solver has finished, the internal state of the solver is at time `t_eval[t_eval.len()-1]`.
+    #[allow(clippy::type_complexity)]
+    fn solve_dense_sensitivities(
+        &mut self,
+        t_eval: &[Eqn::T],
+    ) -> Result<
+        (
+            <Eqn::V as DefaultDenseMatrix>::M,
+            Vec<<Eqn::V as DefaultDenseMatrix>::M>,
+        ),
+        DiffsolError,
+    >
+    where
+        Eqn: OdeEquationsSens,
+        Eqn::M: DefaultSolver,
+        Eqn::V: DefaultDenseMatrix,
+        Self: Sized,
+    {
+        if self.problem().integrate_out {
+            return Err(ode_solver_error!(
+                Other,
+                "Cannot integrate out when solving for sensitivities"
+            ));
+        }
+        let nrows = self.problem().eqn.rhs().nstates();
+        let mut ret = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nrows, t_eval.len());
+        let mut ret_sens =
+            vec![
+                <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nrows, t_eval.len());
+                self.problem().eqn.rhs().nparams()
+            ];
 
+        // check t_eval is increasing and all values are greater than or equal to the current time
+        let t0 = self.state().t;
+        if t_eval.windows(2).any(|w| w[0] > w[1] || w[0] < t0) {
+            return Err(ode_solver_error!(InvalidTEval));
+        }
 
+        // do loop
+        self.set_stop_time(t_eval[t_eval.len() - 1])?;
+        let mut step_reason = OdeSolverStopReason::InternalTimestep;
+        for (i, t) in t_eval.iter().take(t_eval.len() - 1).enumerate() {
+            while self.state().t < *t {
+                step_reason = self.step()?;
+            }
+            let y = self.interpolate(*t)?;
+            ret.column_mut(i).copy_from(&y);
+            let s = self.interpolate_sens(*t)?;
+            for (j, s_j) in s.iter().enumerate() {
+                ret_sens[j].column_mut(i).copy_from(s_j);
+            }
+        }
 
+        // do final step
+        while step_reason != OdeSolverStopReason::TstopReached {
+            step_reason = self.step()?;
+        }
+        let y = self.state().y;
+        ret.column_mut(t_eval.len() - 1).copy_from(y);
+        let s = self.state().s;
+        for (j, s_j) in s.iter().enumerate() {
+            ret_sens[j].column_mut(t_eval.len() - 1).copy_from(s_j);
+        }
+        Ok((ret, ret_sens))
+    }
+}
 
+pub trait DefaultAdjointOdeSolver<'a, Eqn>: OdeSolverMethod<'a, Eqn>
+where
+    Eqn: OdeEquationsAdjoint + 'a,
+    Self: 'a,
+{
+    type DefaultAdjointSolver: AugmentedOdeSolverMethod<
+        'a,
+        Eqn,
+        AdjointEquations<'a, Eqn, Self>,
+        State = Self::State,
+    >;
+
+    fn default_adjoint_solver<LS: LinearSolver<Eqn::M>>(
+        self,
+        aug_eqn: AdjointEquations<'a, Eqn, Self>,
+    ) -> Result<Self::DefaultAdjointSolver, DiffsolError>;
+}
+
+struct IntegrateDeltaG<M: Matrix, LS: LinearSolver<M>> {
+    pub rhs_jac_aa: Option<MatrixOp<M>>,
+    pub solver: Option<LS>,
+    pub algebraic_indices: <M::V as Vector>::Index,
+    pub differential_indices: <M::V as Vector>::Index,
+    pub tmp_algebraic: M::V,
+    pub tmp_differential: M::V,
+    pub tmp_nparams: M::V,
+    pub tmp_nstates: M::V,
+    pub tmp_nstates2: M::V,
+    pub tmp_nout: M::V,
+}
+
+impl<M, LS> IntegrateDeltaG<M, LS>
+where
+    M: Matrix,
+    LS: LinearSolver<M>,
+{
+    fn new<'a, Eqn, Solver>(solver: &Solver) -> Self
+    where
+        Eqn: OdeEquations<M = M, V = M::V, T = M::T> + 'a,
+        Solver: OdeSolverMethod<'a, Eqn>,
+    {
+        let eqn = solver.problem().eqn;
+        let (algebraic_indices, differential_indices) = if let Some(mass) = eqn.mass() {
+            mass.matrix(M::T::zero())
+                .diagonal()
+                .partition_indices(|x| x == M::T::zero())
+        } else {
+            (
+                <M::V as Vector>::Index::zeros(0),
+                <M::V as Vector>::Index::zeros(0),
+            )
+        };
+        let nparams = eqn.rhs().nparams();
+        let nstates = eqn.rhs().nstates();
+        let nout = eqn.out().map(|o| o.nout()).unwrap_or(nstates);
+        let tmp_nstates = M::V::zeros(nstates);
+        let tmp_nstates2 = M::V::zeros(nstates);
+        let tmp_nparams = M::V::zeros(nparams);
+        let tmp_nout = M::V::zeros(nout);
+        let tmp_algebraic = M::V::zeros(algebraic_indices.len());
+        let tmp_differential = M::V::zeros(nstates - algebraic_indices.len());
+        if algebraic_indices.len() > 0 {
+            let jacobian = solver
+                .jacobian()
+                .ok_or(DiffsolError::from(OdeSolverError::JacobianNotAvailable))?;
+            let (_, _, _, rhs_jac_aa) = jacobian.split_at_indices(&algebraic_indices);
+            let rhs_jac_aa_op = MatrixOp::new(rhs_jac_aa);
+            let mut solver = LS::default();
+            solver.set_problem(&rhs_jac_aa_op);
+            return Self {
+                rhs_jac_aa: Some(rhs_jac_aa_op),
+                solver: Some(solver),
+                tmp_nparams,
+                tmp_algebraic,
+                algebraic_indices,
+                tmp_nstates,
+                tmp_nout,
+                tmp_differential,
+                differential_indices,
+                tmp_nstates2,
+            };
+        } else {
+            return Self {
+                rhs_jac_aa: None,
+                solver: None,
+                tmp_algebraic,
+                tmp_nparams,
+                algebraic_indices,
+                tmp_nstates,
+                tmp_nout,
+                tmp_differential,
+                differential_indices,
+                tmp_nstates2,
+            };
+        }
+    }
+    fn integrate_delta_g<'a, 'b, Eqn, S1, Solver>(
+        &mut self,
+        solver: &Solver,
+        dgdus: impl Iterator<Item = <M::V as Vector>::View<'b>>,
+    ) where
+        Eqn: OdeEquationsAdjoint<M = M, V = M::V, T = M::T> + 'a,
+        Solver: AdjointOdeSolverMethod<'a, Eqn, S1>,
+        S1: OdeSolverMethod<'a, Eqn>,
+    {
+        // interpolate forward state y
+        let t = solver.state().t;
+        solver
+            .augmented_eqn()
+            .unwrap()
+            .interpolate_forward_state(t, &mut self.tmp_nstates);
+
+        // if there are algebraic indices, setup the solver for (f*_y^a)^{-1}
+        if self.algebraic_indices.len() > 0 {
+            let jacobian = solver.jacobian().unwrap();
+            let (_, _, jac_ad, jac_aa) = jacobian.split_at_indices(&self.algebraic_indices);
+            let rhs_jac_aa = self.rhs_jac_aa.as_mut().unwrap();
+
+            // init solver for (f*_u^a)^{-1}
+            rhs_jac_aa.m_mut().copy_from(&jac_aa);
+
+            // linearisation does not depend on x or t
+            self.solver
+                .unwrap()
+                .set_linearisation(rhs_jac_aa, &self.tmp_algebraic, 0);
+        }
+
+        for ((s_i, sg_i), dgdu) in solver
+            .state_mut()
+            .s
+            .iter_mut()
+            .zip(solver.state_mut().s.iter_mut())
+            .zip(dgdus)
+        {
+            self.tmp_nout.copy_from_view(&dgdu);
+            let (dgdy, dgdp) = if let Some(out) = solver.augmented_eqn().unwrap().eqn().out() {
+                out.jac_transpose_mul_inplace(
+                    &self.tmp_nstates,
+                    t,
+                    &self.tmp_nout,
+                    &mut self.tmp_nstates2,
+                );
+                &self.tmp_nstates2
+            } else {
+                &self.tmp_nout
+            };
+            if self.algebraic_indices.len() > 0 {
+                // add f*_y^d (f*_y^a)^{-1} g*_y^a - g*_y^d to differential part of s
+                // note g_y^T = u_y^T * g_u^T, where u_y^T is the out adjoint
+                self.tmp_differential
+                    .gather_from_view(dgdy, &self.differential_indices);
+                self.tmp_algebraic
+                    .gather_from_view(dgdy, &self.algebraic_indices);
+                s_i.sub_assign(self.tmp_differential);
+                self.solver.unwrap().solve_in_place(&mut self.tmp_algebraic);
+                jac_ad.gemv(M::T::one(), &self.tmp_algebraic, M::T::one(), s_i);
+            } else {
+                // add -g*_y^T(x, t) to s
+                s_i.sub_assign(dgdy);
+            }
+            // add -g_p^T(x, t) to sg
+            // g_p = g_u^T * u_y^T * y_p^T
+            // g_p^T =  u_p^T * g_u^T (u is the output of the model, so u_p^T is the sens_tranpose)
+            if let Some(out) = solver.augmented_eqn().unwrap().eqn().out() {
+                out.sens_transpose_mul_inplace(
+                    &self.tmp_nstates,
+                    t,
+                    &self.tmp_nout,
+                    &mut self.tmp_nparams,
+                );
+                sg_i.sub_assign(&self.tmp_nparams);
+            }
+        }
+    }
+}
+
+pub trait AdjointOdeSolverMethod<'a, Eqn, Solver>:
+    AugmentedOdeSolverMethod<'a, Eqn, AdjointEquations<'a, Eqn, Solver>>
+where
+    Eqn: OdeEquationsAdjoint + 'a,
+    Solver: OdeSolverMethod<'a, Eqn>,
+{
+    /// user has output function G made from a sequence of n functions h_i
+    /// $$
+    /// G = \int_{t_0}^{t_{\text{final}}} \sum_{i=0}^{n-1} g(u_i) \delta(t - t_i) dt
+    /// $$
+    /// where $u_i$ is the output of the model at time $t_i$
+    ///
+    /// user passes in dgdu_i, the gradient of g_i with respect to u_i for each timepoint i
+    /// dgdu is a vector of length m, each containing a dense matrix of size n_o x n,
+    /// where n_o is the number of outputs in the model and n is the number of timepoints
+    fn solve_dense_adjoint_backwards_pass(
+        self,
+        t_eval: &[Eqn::T],
+        dgdu_eval: &[&mut <Eqn::V as DefaultDenseMatrix>::M],
+    ) -> Result<Self::State, DiffsolError>
+    where
+        Eqn::V: DefaultDenseMatrix,
+    {
+        // check that aug_eqn exists
+        if self.augmented_eqn().is_none() {
+            return Err(ode_solver_error!(Other, "No augmented equations"));
+        }
+        // check that aug_eqn has m equations
+        if self.augmented_eqn().unwrap().max_index() != dgdu_eval.len() {
+            return Err(ode_solver_error!(
+                Other,
+                "Number of output functions does not match number of provided gradients"
+            ));
+        }
+        // check that nrows of each dgdu_eval is the same as the number of outputs in the model
+        let nout = self.problem().eqn.out().map(|o| o.nout()).unwrap_or(0);
+        if dgdu_eval.iter().any(|dgdu| dgdu.nrows() != nout) {
+            return Err(ode_solver_error!(
+                Other,
+                "Number of outputs does not match number of rows in gradient"
+            ));
+        }
+
+        let integrate_delta_g = IntegrateDeltaG::new(&self);
+
+        // solve the adjoint problem stopping at each t_eval
+        for (i, t) in t_eval.iter().enumerate().rev().skip(1) {
+            self.set_stop_time(*t).unwrap();
+            while self.step()? != OdeSolverStopReason::TstopReached {}
+
+            let dudg_i = dgdu_eval.iter().map(|dgdu| dgdu.column(i));
+            integrate_delta_g.integrate_delta_g(&self, dudg_i);
+        }
+
+        // correct the adjoint solution for the initial conditions
+        let (mut state, aug_eqn) = self.into_state_and_eqn();
+        let aug_eqn = aug_eqn.unwrap();
+        let state_mut = state.as_mut();
+        aug_eqn.correct_sg_for_init(t0, state_mut.s, state_mut.sg);
+
+        // return the solution
+        Ok(state)
+    }
+}
 
 #[cfg(test)]
 mod test {
@@ -377,8 +826,6 @@ mod test {
             exponential_decay_problem_sens,
         },
         scale, NalgebraLU, OdeSolverMethod, Vector,
-        SensitivitiesOdeSolverMethod, OdeEquations, Op,
-        AdjointOdeSolverMethod,
     };
 
     #[test]
@@ -476,17 +923,15 @@ mod test {
         let s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let final_time = soln.solution_points[soln.solution_points.len() - 1].t;
-        let (checkpointer, y, t) = s.solve_with_checkpointing(final_time, None).unwrap();
-        let adjoint_solver = problem.bdf_solver_adjoint::<NalgebraLU<f64>, _>(checkpointer).unwrap();
-        let state = adjoint_solver.solve_adjoint_backwards_pass(&[], &[]).unwrap();
-        let g = state.g;
+        let (g, gs_adj) = s
+            .solve_adjoint::<NalgebraLU<f64>>(final_time, None)
+            .unwrap();
         g.assert_eq_norm(
             &soln.solution_points[soln.solution_points.len() - 1].state,
             problem.out_atol.as_ref().unwrap(),
             problem.out_rtol.unwrap(),
             15.0,
         );
-        let gs_adj = state.sg;
         for (j, soln_pts) in soln.sens_solution_points.unwrap().iter().enumerate() {
             gs_adj[j].assert_eq_norm(
                 &soln_pts[0].state,

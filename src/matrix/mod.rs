@@ -252,7 +252,7 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
     /// Extract the diagonal of the matrix as an owned vector
     fn diagonal(&self) -> Self::V;
 
-    /// Perform a matrix-vector multiplication `y = self * x + beta * y`.
+    /// Perform a matrix-vector multiplication `y = alpha * self * x + beta * y`.
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V);
 
     /// Copy the contents of `other` into `self`

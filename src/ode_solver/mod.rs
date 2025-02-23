@@ -13,6 +13,8 @@ pub mod sens_equations;
 pub mod state;
 pub mod tableau;
 pub mod test_models;
+pub mod sensitivities;
+pub mod adjoint;
 
 #[cfg(feature = "diffsl")]
 pub mod diffsl;

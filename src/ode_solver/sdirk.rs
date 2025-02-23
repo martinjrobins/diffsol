@@ -42,30 +42,8 @@ where
     fn into_state_and_eqn(self) -> (Self::State, Option<AugEqn>) {
         (self.state, self.s_op.map(|op| op.eqn))
     }
-}
-
-impl<'a, M, Eqn, LS> AdjointOdeSolverMethod<'a, Eqn> for Sdirk<'a, Eqn, LS, M>
-where
-    Eqn: OdeEquationsAdjoint,
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    LS: LinearSolver<Eqn::M> + 'a,
-    Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
-    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
-    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-{
-    type DefaultAdjointSolver =
-        Sdirk<'a, Eqn, LS, M, AdjointEquations<'a, Eqn, Sdirk<'a, Eqn, LS, M>>>;
-
-    fn default_adjoint_solver<ALS: LinearSolver<Eqn::M>>(
-        self,
-        mut aug_eqn: AdjointEquations<'a, Eqn, Self>,
-    ) -> Result<Self::DefaultAdjointSolver, DiffsolError> {
-        let problem = self.problem();
-        let tableau = self.tableau;
-        let state = self
-            .state
-            .into_adjoint::<ALS, _, _>(problem, &mut aug_eqn)?;
-        Sdirk::new_augmented(self.problem, state, tableau, LS::default(), aug_eqn)
+    fn augmented_eqn(&self) -> Option<&AugEqn> {
+        self.s_op.as_ref().map(|op| op.eqn())
     }
 }
 
@@ -577,6 +555,16 @@ where
 
     fn problem(&self) -> &'a OdeSolverProblem<Eqn> {
         self.problem
+    }
+    
+    fn jacobian(&self) -> Option<std::cell::Ref<<Eqn>::M>> {
+        if let Some(op) = self.op.as_ref() {
+            Some(op.jacobian())
+        } else if let Some(s_op) = self.s_op.as_ref() {
+            Some(s_op.jacobian())
+        } else {
+            None
+        }
     }
 
     fn order(&self) -> usize {
