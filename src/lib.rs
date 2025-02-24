@@ -191,16 +191,17 @@ pub use nonlinear_solver::{newton::NewtonNonlinearSolver, NonLinearSolver};
 use ode_solver::jacobian_update::JacobianUpdate;
 pub use ode_solver::state::{StateRef, StateRefMut};
 pub use ode_solver::{
-    adjoint_equations::AdjointContext, adjoint_equations::AdjointEquations,
-    adjoint_equations::AdjointInit, adjoint_equations::AdjointRhs, bdf::Bdf, bdf_state::BdfState,
-    builder::OdeBuilder, checkpointing::Checkpointing, checkpointing::HermiteInterpolator,
+    adjoint::AdjointOdeSolverMethod, adjoint_equations::AdjointContext,
+    adjoint_equations::AdjointEquations, adjoint_equations::AdjointInit,
+    adjoint_equations::AdjointRhs, bdf::Bdf, bdf_state::BdfState, builder::OdeBuilder,
+    checkpointing::Checkpointing, checkpointing::HermiteInterpolator,
     equations::AugmentedOdeEquations, equations::AugmentedOdeEquationsImplicit, equations::NoAug,
     equations::OdeEquations, equations::OdeEquationsAdjoint, equations::OdeEquationsImplicit,
     equations::OdeEquationsRef, equations::OdeEquationsSens, equations::OdeSolverEquations,
-    adjoint::AdjointOdeSolverMethod, method::AugmentedOdeSolverMethod, method::OdeSolverMethod,
-    method::OdeSolverStopReason, problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::SdirkState,
+    method::AugmentedOdeSolverMethod, method::OdeSolverMethod, method::OdeSolverStopReason,
+    problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::SdirkState,
     sens_equations::SensEquations, sens_equations::SensInit, sens_equations::SensRhs,
-    state::OdeSolverState, tableau::Tableau, sensitivities::SensitivitiesOdeSolverMethod,
+    sensitivities::SensitivitiesOdeSolverMethod, state::OdeSolverState, tableau::Tableau,
 };
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};
@@ -210,7 +211,7 @@ pub use op::nonlinear_op::{
 pub use op::{
     closure::Closure, closure_with_adjoint::ClosureWithAdjoint, constant_closure::ConstantClosure,
     constant_closure_with_adjoint::ConstantClosureWithAdjoint, linear_closure::LinearClosure,
-    unit::UnitCallable, BuilderOp, Op, ParameterisedOp, matrix::MatrixOp,
+    matrix::MatrixOp, unit::UnitCallable, BuilderOp, Op, ParameterisedOp,
 };
 use op::{
     closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,

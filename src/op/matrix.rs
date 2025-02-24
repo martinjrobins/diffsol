@@ -1,5 +1,5 @@
-use num_traits::Zero;
 use crate::{LinearOp, Matrix, MatrixSparsityRef, NonLinearOp, NonLinearOpJacobian, Op};
+use num_traits::Zero;
 
 pub struct MatrixOp<M: Matrix> {
     m: M,
@@ -51,15 +51,15 @@ impl<M: Matrix> NonLinearOpJacobian for MatrixOp<M> {
     fn jac_mul_inplace(&self, _x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         self.m.gemv(t, v, Self::T::zero(), y);
     }
-    
+
     fn jacobian(&self, _x: &Self::V, _t: Self::T) -> Self::M {
         self.m.clone()
     }
-    
+
     fn jacobian_inplace(&self, _x: &Self::V, _t: Self::T, y: &mut Self::M) {
         y.copy_from(&self.m);
     }
-    
+
     fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
         self.m.sparsity().map(|s| s.to_owned())
     }

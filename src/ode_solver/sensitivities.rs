@@ -1,6 +1,8 @@
-use crate::{AugmentedOdeSolverMethod, error::DiffsolError, OdeEquationsSens, SensEquations, DefaultDenseMatrix, DefaultSolver, OdeSolverStopReason};
-
-
+use crate::{
+    error::DiffsolError, error::OdeSolverError, ode_solver_error, AugmentedOdeSolverMethod,
+    DefaultDenseMatrix, DefaultSolver, DenseMatrix, Matrix, OdeEquationsSens, OdeSolverStopReason,
+    Op, SensEquations, VectorViewMut,
+};
 
 pub trait SensitivitiesOdeSolverMethod<'a, Eqn>:
     AugmentedOdeSolverMethod<'a, Eqn, SensEquations<'a, Eqn>>

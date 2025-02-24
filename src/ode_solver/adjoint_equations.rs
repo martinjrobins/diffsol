@@ -6,7 +6,10 @@ use std::{
 };
 
 use crate::{
-    error::DiffsolError, op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, Checkpointing, ConstantOp, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint, OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, Op, Vector
+    error::DiffsolError, op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations,
+    Checkpointing, ConstantOp, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
+    NonLinearOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint,
+    OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, Op, Vector,
 };
 
 pub struct AdjointContext<'a, Eqn, Method>
@@ -415,7 +418,8 @@ where
 {
     fn clone(&self) -> Self {
         let context = Rc::new(RefCell::new(AdjointContext::new(
-            self.context.borrow().checkpointer.clone(), self.context.borrow().max_index,
+            self.context.borrow().checkpointer.clone(),
+            self.context.borrow().max_index,
         )));
         let rhs = AdjointRhs::new(self.eqn, context.clone(), self.out.is_some());
         let init = AdjointInit::new(self.eqn);
@@ -525,7 +529,7 @@ where
             }
         }
     }
-    
+
     pub fn interpolate_forward_state(&self, t: Eqn::T, y: &mut Eqn::V) -> Result<(), DiffsolError> {
         self.context.borrow_mut().set_state(t);
         let context = self.context.borrow();
@@ -598,6 +602,9 @@ where
     fn set_params(&mut self, p: &Self::V) {
         self.eqn.set_params(p);
     }
+    fn get_params(&self, p: &mut Self::V) {
+        self.eqn.get_params(p);
+    }
 }
 
 impl<'a, Eqn, Method> AugmentedOdeEquations<Eqn> for AdjointEquations<'a, Eqn, Method>
@@ -650,7 +657,9 @@ mod tests {
         ode_solver::{
             adjoint_equations::AdjointEquations,
             test_models::exponential_decay::exponential_decay_problem_adjoint,
-        }, AdjointContext, AugmentedOdeEquations, Checkpointing, FaerSparseLU, Matrix, MatrixCommon, NonLinearOp, NonLinearOpJacobian, OdeEquations, SdirkState, SparseColMat, Vector, Op
+        },
+        AdjointContext, AugmentedOdeEquations, Checkpointing, FaerSparseLU, Matrix, MatrixCommon,
+        NonLinearOp, NonLinearOpJacobian, OdeEquations, Op, SdirkState, SparseColMat, Vector,
     };
     type Mcpu = nalgebra::DMatrix<f64>;
     type Vcpu = nalgebra::DVector<f64>;

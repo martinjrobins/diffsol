@@ -211,7 +211,10 @@ impl<T: Scalar> Vector for DVector<T> {
                 indices_false.push(i as IndexType);
             }
         }
-        (Self::Index::from_vec(indices_true), Self::Index::from_vec(indices_false))
+        (
+            Self::Index::from_vec(indices_true),
+            Self::Index::from_vec(indices_false),
+        )
     }
     fn binary_fold<B, F>(&self, other: &Self, init: B, f: F) -> B
     where

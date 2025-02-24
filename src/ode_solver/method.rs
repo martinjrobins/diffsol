@@ -4,10 +4,8 @@ use crate::{
     error::{DiffsolError, OdeSolverError},
     ode_solver_error,
     scalar::Scalar,
-    AugmentedOdeEquations, Checkpointing, DefaultDenseMatrix,
-    DenseMatrix, HermiteInterpolator, Matrix, NonLinearOp,
-    OdeEquations,
-    OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
+    AugmentedOdeEquations, Checkpointing, DefaultDenseMatrix, DenseMatrix, HermiteInterpolator,
+    Matrix, NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
     Vector, VectorViewMut,
 };
 
@@ -224,13 +222,20 @@ where
         assert_eq!(step_reason, OdeSolverStopReason::TstopReached);
         Ok(ret)
     }
-    
+
     #[allow(clippy::type_complexity)]
     fn solve_with_checkpointing(
-        mut self,
+        &mut self,
         final_time: Eqn::T,
         max_steps_between_checkpoints: Option<usize>,
-    ) -> Result<(Checkpointing<'a, Eqn, Self>, <Eqn::V as DefaultDenseMatrix>::M, Vec<Eqn::T>), DiffsolError>
+    ) -> Result<
+        (
+            Checkpointing<'a, Eqn, Self>,
+            <Eqn::V as DefaultDenseMatrix>::M,
+            Vec<Eqn::T>,
+        ),
+        DiffsolError,
+    >
     where
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
@@ -238,7 +243,7 @@ where
         let mut ret_t = Vec::new();
         let mut ret_y = Vec::new();
         let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
-        
+
         // allocate checkpoint info
         let mut nsteps = 0;
         let t0 = self.state().t;
@@ -248,10 +253,10 @@ where
         let mut ydots = vec![self.state().dy.clone()];
 
         // do the main loop, saving checkpoints
-        write_out(&self, &mut ret_y, &mut ret_t);
+        write_out(self, &mut ret_y, &mut ret_t);
         self.set_stop_time(final_time)?;
         while self.step()? != OdeSolverStopReason::TstopReached {
-            write_out(&self, &mut ret_y, &mut ret_t);
+            write_out(self, &mut ret_y, &mut ret_t);
             ts.push(self.state().t);
             ys.push(self.state().y.clone());
             ydots.push(self.state().dy.clone());
@@ -266,14 +271,14 @@ where
         }
 
         // store the final step
-        write_out(&self, &mut ret_y, &mut ret_t);
+        write_out(self, &mut ret_y, &mut ret_t);
         let ntimes = ret_t.len();
         let nrows = ret_y[0].len();
         let mut ret_y_matrix = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nrows, ntimes);
         for (i, y) in ret_y.iter().enumerate() {
             ret_y_matrix.column_mut(i).copy_from(y);
         }
-        
+
         // add final checkpoint
         ts.push(self.state().t);
         ys.push(self.state().y.clone());
@@ -282,8 +287,12 @@ where
 
         // construct checkpointing
         let last_segment = HermiteInterpolator::new(ys, ydots, ts);
-        let checkpointer =
-            Checkpointing::new(self, checkpoints.len() - 2, checkpoints, Some(last_segment));
+        let checkpointer = Checkpointing::new(
+            self.clone(),
+            checkpoints.len() - 2,
+            checkpoints,
+            Some(last_segment),
+        );
 
         Ok((checkpointer, ret_y_matrix, ret_t))
     }
@@ -291,8 +300,9 @@ where
     /// Solve the problem and write out the solution at the given timepoints, using checkpointing so that
     /// the solution can be interpolated at any timepoint.
     /// See [Self::solve_dense] for a similar method that does not use checkpointing.
+    #[allow(clippy::type_complexity)]
     fn solve_dense_with_checkpointing(
-        mut self,
+        &mut self,
         t_eval: &[Eqn::T],
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<
@@ -306,7 +316,7 @@ where
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
-        let mut ret = dense_allocate_return(&self, t_eval)?;
+        let mut ret = dense_allocate_return(self, t_eval)?;
         let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
 
         // allocate checkpoint info
@@ -337,7 +347,7 @@ where
                     ydots.clear();
                 }
             }
-            dense_write_out(&self, &mut ret, t_eval, i)?;
+            dense_write_out(self, &mut ret, t_eval, i)?;
         }
         assert_eq!(step_reason, OdeSolverStopReason::TstopReached);
 
@@ -348,8 +358,12 @@ where
         let last_segment = HermiteInterpolator::new(ys, ydots, ts);
 
         // construct checkpointing
-        let checkpointer =
-            Checkpointing::new(self, checkpoints.len() - 2, checkpoints, Some(last_segment));
+        let checkpointer = Checkpointing::new(
+            self.clone(),
+            checkpoints.len() - 2,
+            checkpoints,
+            Some(last_segment),
+        );
 
         Ok((checkpointer, ret))
     }
@@ -364,11 +378,6 @@ where
     fn augmented_eqn(&self) -> Option<&AugmentedEqn>;
 }
 
-
-
-
-
-
 #[cfg(test)]
 mod test {
     use crate::{
@@ -376,9 +385,8 @@ mod test {
             exponential_decay_problem, exponential_decay_problem_adjoint,
             exponential_decay_problem_sens,
         },
-        scale, NalgebraLU, OdeSolverMethod, Vector,
-        SensitivitiesOdeSolverMethod, OdeEquations, Op,
-        AdjointOdeSolverMethod,
+        scale, AdjointOdeSolverMethod, NalgebraLU, OdeSolverMethod, SensitivitiesOdeSolverMethod,
+        Vector,
     };
 
     #[test]
@@ -473,12 +481,16 @@ mod test {
     #[test]
     fn test_solve_adjoint() {
         let (problem, soln) = exponential_decay_problem_adjoint::<nalgebra::DMatrix<f64>>();
-        let s = problem.bdf::<NalgebraLU<f64>>().unwrap();
+        let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let final_time = soln.solution_points[soln.solution_points.len() - 1].t;
-        let (checkpointer, y, t) = s.solve_with_checkpointing(final_time, None).unwrap();
-        let adjoint_solver = problem.bdf_solver_adjoint::<NalgebraLU<f64>, _>(checkpointer).unwrap();
-        let state = adjoint_solver.solve_adjoint_backwards_pass(&[], &[]).unwrap();
+        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<NalgebraLU<f64>, _>(checkpointer)
+            .unwrap();
+        let state = adjoint_solver
+            .solve_adjoint_backwards_pass(&[], &[])
+            .unwrap();
         let g = state.g;
         g.assert_eq_norm(
             &soln.solution_points[soln.solution_points.len() - 1].state,

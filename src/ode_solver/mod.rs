@@ -1,3 +1,4 @@
+pub mod adjoint;
 pub mod adjoint_equations;
 pub mod bdf;
 pub mod bdf_state;
@@ -10,11 +11,10 @@ pub mod problem;
 pub mod sdirk;
 pub mod sdirk_state;
 pub mod sens_equations;
+pub mod sensitivities;
 pub mod state;
 pub mod tableau;
 pub mod test_models;
-pub mod sensitivities;
-pub mod adjoint;
 
 #[cfg(feature = "diffsl")]
 pub mod diffsl;
@@ -24,7 +24,6 @@ mod tests {
     use std::rc::Rc;
 
     use self::problem::OdeSolverSolution;
-    use checkpointing::HermiteInterpolator;
     use nalgebra::ComplexField;
 
     use super::*;
@@ -32,9 +31,10 @@ mod tests {
     use crate::op::unit::UnitCallable;
     use crate::op::ParameterisedOp;
     use crate::{
-        op::OpStatistics, AdjointOdeSolverMethod, AugmentedOdeSolverMethod, CraneliftModule,
-        NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit,
-        OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
+        op::OpStatistics, AdjointOdeSolverMethod, CraneliftModule, DenseMatrix, MatrixCommon,
+        MatrixRef, NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeEquationsAdjoint,
+        OdeEquationsImplicit, OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+        OdeSolverStopReason, VectorRef, VectorView,
     };
     use crate::{
         ConstantOp, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp, Op, Vector,
@@ -135,98 +135,64 @@ mod tests {
         method.state().y.clone()
     }
 
-    pub fn test_ode_solver_adjoint<'a, 'b, LS, M, Eqn, Method>(
-        mut method: Method,
-        solution: OdeSolverSolution<M::V>,
-    ) where
-        M: Matrix,
-        Method: AdjointOdeSolverMethod<'a, Eqn>,
-        Eqn: OdeEquationsAdjoint<M = M, T = M::T, V = M::V> + 'a,
-        Eqn::V: DefaultDenseMatrix<T = M::T>,
-        Eqn::M: DefaultSolver,
-        LS: LinearSolver<M>,
+    pub fn setup_test_ode_solver_adjoint<'a, LS, Eqn>(
+        problem: &'a mut OdeSolverProblem<Eqn>,
+        soln: OdeSolverSolution<Eqn::V>,
+    ) -> <Eqn::V as DefaultDenseMatrix>::M
+    where
+        Eqn: OdeEquationsAdjoint + 'a,
+        LS: LinearSolver<Eqn::M>,
+        Eqn::V: DefaultDenseMatrix,
+        for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+        for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
     {
-        let t0 = solution.solution_points.first().unwrap().t;
-        let t1 = solution.solution_points.last().unwrap().t;
-        method.set_stop_time(t1).unwrap();
-        let mut nsteps = 0;
-        let (rtol, atol) = (solution.rtol, &solution.atol);
-        let mut checkpoints = vec![method.checkpoint()];
-        let mut ts = Vec::new();
-        let mut ys = Vec::new();
-        let mut ydots = Vec::new();
-        for point in solution.solution_points.iter() {
-            while method.state().t.abs() < point.t.abs() {
-                ts.push(method.state().t);
-                ys.push(method.state().y.clone());
-                ydots.push(method.state().dy.clone());
-                method.step().unwrap();
-                nsteps += 1;
-                if nsteps > 50 && method.state().t.abs() < t1.abs() {
-                    checkpoints.push(method.checkpoint());
-                    nsteps = 0;
-                    ts.clear();
-                    ys.clear();
-                    ydots.clear();
-                }
+        let nparams = problem.eqn.nparams();
+        let nout = problem.eqn.nout();
+        let mut dgdp = <Eqn::V as DefaultDenseMatrix>::M::zeros(nparams, nout);
+        let final_time = soln.solution_points.last().unwrap().t;
+        let mut p_0 = Eqn::V::zeros(nparams);
+        problem.eqn.get_params(&mut p_0);
+        let mut h = Eqn::V::from_element(nparams, Eqn::T::from(1e-10));
+        h.axpy(Eqn::T::from(1. + 1e-10), &p_0, Eqn::T::one());
+        let p_1 = p_0 + &h;
+        for i in 0..nparams {
+            let mut s = problem.bdf::<LS>().unwrap();
+            s.set_stop_time(final_time).unwrap();
+            while s.step().unwrap() != OdeSolverStopReason::TstopReached {}
+            let g_0 = s.state().g.clone();
+
+            problem.eqn.set_params(&p_1);
+            let mut s = problem.bdf::<LS>().unwrap();
+            s.set_stop_time(final_time).unwrap();
+            while s.step().unwrap() != OdeSolverStopReason::TstopReached {}
+            let g_1 = s.state().g.clone();
+
+            for j in 0..nout {
+                dgdp[(i, j)] = (g_1[j] - g_0[j]) / h[i];
             }
-            let soln = method.interpolate_out(point.t).unwrap();
-            // problem rtol and atol is on the state, so just use solution tolerance here
-            let error = soln.clone() - &point.state;
-            let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
-            assert!(
-                error_norm < M::T::from(15.0),
-                "error_norm: {} at t = {}. soln: {:?}, expected: {:?}",
-                error_norm,
-                point.t,
-                soln,
-                point.state
-            );
         }
-        ts.push(method.state().t);
-        ys.push(method.state().y.clone());
-        ydots.push(method.state().dy.clone());
-        checkpoints.push(method.checkpoint());
-        let last_segment = HermiteInterpolator::new(ys, ydots, ts);
+        dgdp
+    }
 
-        let problem = method.problem();
-        let adjoint_aug_eqn = method.adjoint_equations(checkpoints, last_segment).unwrap();
-        let mut adjoint_solver = method
-            .default_adjoint_solver::<LS>(adjoint_aug_eqn)
+    pub fn test_ode_solver_adjoint<'a, Eqn, SolverF, SolverB>(
+        backwards_solver: SolverB,
+        dgdu: <Eqn::V as DefaultDenseMatrix>::M,
+    ) where
+        SolverF: OdeSolverMethod<'a, Eqn>,
+        SolverB: AdjointOdeSolverMethod<'a, Eqn, SolverF>,
+        Eqn: OdeEquationsAdjoint + 'a,
+        Eqn::V: DefaultDenseMatrix,
+        Eqn::M: DefaultSolver,
+    {
+        let nout = backwards_solver.problem().eqn.nout();
+        let atol = Eqn::V::from_element(nout, Eqn::T::from(1e-6));
+        let rtol = Eqn::T::from(1e-6);
+        let state = backwards_solver
+            .solve_adjoint_backwards_pass(&[], &[])
             .unwrap();
-
-        let g_expect = M::V::from_element(problem.eqn.rhs().nparams(), M::T::zero());
-        for sgi in adjoint_solver.state().sg.iter() {
-            sgi.assert_eq_st(&g_expect, M::T::from(1e-9));
-        }
-
-        adjoint_solver.set_stop_time(t0).unwrap();
-        while adjoint_solver.state().t.abs() > t0 {
-            adjoint_solver.step().unwrap();
-        }
-        let (mut state, aug_eqn) = adjoint_solver.into_state_and_eqn();
-        let aug_eqn = aug_eqn.unwrap();
-        let state_mut = state.as_mut();
-        aug_eqn.correct_sg_for_init(t0, state_mut.s, state_mut.sg);
-
-        let points = solution
-            .sens_solution_points
-            .as_ref()
-            .unwrap()
-            .iter()
-            .map(|x| &x[0])
-            .collect::<Vec<_>>();
-        for (soln, point) in state_mut.sg.iter().zip(points.iter()) {
-            let error = soln.clone() - &point.state;
-            let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
-            assert!(
-                error_norm < M::T::from(15.0),
-                "error_norm: {} at t = {}. soln: {:?}, expected: {:?}",
-                error_norm,
-                point.t,
-                soln,
-                point.state
-            );
+        let gs_adj = state.into_common().sg;
+        for j in 0..dgdu.ncols() {
+            gs_adj[j].assert_eq_norm(&dgdu.column(j).into_owned(), &atol, rtol, Eqn::T::from(15.));
         }
     }
 
@@ -353,6 +319,9 @@ mod tests {
             None
         }
         fn set_params(&mut self, _p: &Self::V) {
+            unimplemented!()
+        }
+        fn get_params(&self, _p: &mut Self::V) {
             unimplemented!()
         }
     }

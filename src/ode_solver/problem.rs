@@ -27,7 +27,7 @@ where
 }
 
 macro_rules! sdirk_solver_from_tableau {
-    ($state:ident, $state_sens:ident, $method:ident, $method_sens:ident, $method_solver:ident, $method_solver_sens:ident, $tableau:ident) => {
+    ($state:ident, $state_sens:ident, $method:ident, $method_sens:ident, $method_solver:ident, $method_solver_sens:ident, $method_solver_adjoint:ident, $tableau:ident) => {
         pub fn $state<LS: LinearSolver<Eqn::M>>(
             &self,
         ) -> Result<SdirkState<Eqn::V>, DiffsolError>
@@ -75,6 +75,22 @@ macro_rules! sdirk_solver_from_tableau {
             )
         }
 
+        pub fn $method_solver_adjoint<'a, LS: LinearSolver<Eqn::M>, S: OdeSolverMethod<'a, Eqn>>(
+            &'a self,
+            checkpointer: Checkpointing<'a, Eqn, S>,
+        ) -> Result<
+            Sdirk<'a, Eqn, LS, <Eqn::V as DefaultDenseMatrix>::M, AdjointEquations<'a, Eqn, S>>,
+            DiffsolError,
+        >
+        where
+            Eqn: OdeEquationsAdjoint,
+        {
+            self.sdirk_solver_adjoint(
+                Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(),
+                checkpointer,
+            )
+        }
+
         pub fn $method<LS: LinearSolver<Eqn::M>>(
             &self,
         ) -> Result<Sdirk<'_, Eqn, LS>, DiffsolError>
@@ -97,6 +113,7 @@ macro_rules! sdirk_solver_from_tableau {
             let state = self.$state_sens::<LS>()?;
             self.$method_solver_sens::<LS>(state)
         }
+
     };
 }
 
@@ -216,7 +233,8 @@ where
         Bdf::new_augmented(state, self, aug_eqn, newton_solver)
     }
 
-    pub(crate) fn bdf_solver_adjoint<'a, LS: LinearSolver<Eqn::M>, S: OdeSolverMethod<'a, Eqn>>(
+    #[allow(clippy::type_complexity)]
+    pub fn bdf_solver_adjoint<'a, LS: LinearSolver<Eqn::M>, S: OdeSolverMethod<'a, Eqn>>(
         &'a self,
         checkpointer: Checkpointing<'a, Eqn, S>,
     ) -> Result<
@@ -329,6 +347,26 @@ where
         Sdirk::new_augmented(self, state, tableau, LS::default(), aug_eqn)
     }
 
+    pub(crate) fn sdirk_solver_adjoint<
+        'a,
+        LS: LinearSolver<Eqn::M>,
+        DM: DenseMatrix<V = Eqn::V, T = Eqn::T>,
+        S: OdeSolverMethod<'a, Eqn>,
+    >(
+        &'a self,
+        tableau: Tableau<DM>,
+        checkpointer: Checkpointing<'a, Eqn, S>,
+    ) -> Result<Sdirk<'a, Eqn, LS, DM, AdjointEquations<'a, Eqn, S>>, DiffsolError>
+    where
+        Eqn: OdeEquationsAdjoint,
+    {
+        let nout = self.eqn.out().unwrap().nout();
+        let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer, nout)));
+        let mut augmented_eqn = AdjointEquations::new(self, context, self.integrate_out);
+        let state = SdirkState::new_without_initialise_augmented(self, &mut augmented_eqn)?;
+        Sdirk::new_augmented(self, state, tableau, LS::default(), augmented_eqn)
+    }
+
     pub fn sdirk_solver_sens<LS: LinearSolver<Eqn::M>, DM: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
         &self,
         state: SdirkState<Eqn::V>,
@@ -348,6 +386,7 @@ where
         tr_bdf2_sens,
         tr_bdf2_solver,
         tr_bdf2_solver_sens,
+        tr_bdf2_solver_adjoint,
         tr_bdf2
     );
     sdirk_solver_from_tableau!(
@@ -357,6 +396,7 @@ where
         esdirk34_sens,
         esdirk34_solver,
         esdirk34_solver_sens,
+        esdirk34_solver_adjoint,
         esdirk34
     );
 }

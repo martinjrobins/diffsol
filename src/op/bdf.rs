@@ -36,8 +36,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
             sparsity: self.sparsity.clone(),
         }
     }
-    
-    
+
     // F(y) = M (y - y0 + psi) - c * f(y) = 0
     // M = I
     // dg = f(y)
@@ -89,7 +88,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
         let mass_jac = self.mass_jac.borrow();
         Some((rhs_jac.clone(), mass_jac.clone()))
     }
-    pub fn jacobian(&self) -> Ref<Eqn::M> {
+    pub fn rhs_jac(&self) -> Ref<Eqn::M> {
         self.rhs_jac.borrow()
     }
     pub fn new(eqn: Eqn) -> Self {

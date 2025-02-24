@@ -2,12 +2,12 @@ use crate::{
     error::{DiffsolError, OdeSolverError},
     ode_solver_error, AdjointEquations, AugmentedOdeEquations, AugmentedOdeSolverMethod,
     DefaultDenseMatrix, DefaultSolver, DenseMatrix, LinearOp, LinearSolver, Matrix, MatrixCommon,
-    MatrixOp, OdeEquations, OdeEquationsAdjoint, OdeSolverMethod, OdeSolverState,
-    OdeSolverStopReason, Op, Vector, VectorIndex, NonLinearOpAdjoint, NonLinearOpSensAdjoint, Scalar,
+    MatrixOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint,
+    OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op, Vector, VectorIndex,
 };
 
+use num_traits::{One, Zero};
 use std::ops::AddAssign;
-use num_traits::{Zero, One, abs};
 
 pub trait AdjointOdeSolverMethod<'a, Eqn, Solver>:
     AugmentedOdeSolverMethod<'a, Eqn, AdjointEquations<'a, Eqn, Solver>>
@@ -15,19 +15,18 @@ where
     Eqn: OdeEquationsAdjoint + 'a,
     Solver: OdeSolverMethod<'a, Eqn>,
 {
-
     /// Backwards pass for adjoint sensitivity analysis
-    /// 
+    ///
     /// The overall goal is to compute the gradient of an output function G with respect to the model parameters p
-    /// 
+    ///
     /// If `dgdu_eval` is empty, then G is the integral of the model output function u over time
-    /// 
+    ///
     /// $$
     /// G = \int_{t_0}^{t_{\text{final}}} u(y(t)) dt
     /// $$
-    /// 
+    ///
     /// where `y(t)` is the solution of the model at time `t`
-    /// 
+    ///
     /// If `dgdu_eval` is non empty, then the output function G made from the sum of a sequence of n functions g_i
     ///
     /// $$
@@ -35,14 +34,14 @@ where
     /// $$
     ///
     /// where $g(t)$ is the output of the model at time $t_i$
-    /// 
+    ///
     /// For example, if G is the standard sum of squared errors, then $g_i = (u(y(t_i)) - d_i)^2$,
     /// where $d_i$ is the measured value of the output at time $t_i$
-    /// 
+    ///
     /// The user passes in the gradient of g_i with respect to u_i for each timepoint i in `dgdu_eval`.
-    /// For example, if g_i = (u(y(t_i)) - d_i)^2, then dgdu_i = 2(u(y(t_i)) - d_i), where $u(y(t_i))$ 
+    /// For example, if g_i = (u(y(t_i)) - d_i)^2, then dgdu_i = 2(u(y(t_i)) - d_i), where $u(y(t_i))$
     /// can be obtained from the forward pass.
-    /// 
+    ///
     /// The input `dgdu_eval` is a vector so users can supply multiple sets of `g_i` functions, and each
     /// element of the vector is a dense matrix of size n_o x n, where n_o is the number of outputs in the model
     /// and n is the number of timepoints. The i-th column of `dgdu_eval` is the gradient of g_i with respect to u_i.
@@ -60,12 +59,15 @@ where
         if self.augmented_eqn().is_none() {
             return Err(ode_solver_error!(Other, "No augmented equations"));
         }
-        
+
         // t_eval should be in increasing order
         if t_eval.windows(2).any(|w| w[0] >= w[1]) {
-            return Err(ode_solver_error!(Other, "t_eval should be in increasing order"));
+            return Err(ode_solver_error!(
+                Other,
+                "t_eval should be in increasing order"
+            ));
         }
-        
+
         let have_neqn = self.augmented_eqn().unwrap().max_index();
         if dgdu_eval.is_empty() {
             // if dgdus is empty, then the number of outputs in the model is used
@@ -96,33 +98,33 @@ where
         }
 
         let mut integrate_delta_g = if have_neqn > 0 {
-            Some(IntegrateDeltaG::<_, <Eqn::M as DefaultSolver>::LS>::new(&self)?)
+            Some(IntegrateDeltaG::<_, <Eqn::M as DefaultSolver>::LS>::new(
+                &self,
+            )?)
         } else {
             None
         };
-        
+
         // solve the adjoint problem stopping at each t_eval
         for (i, t) in t_eval.iter().enumerate().rev() {
             // integrate to t if not already there
-            let state = self.state();
-            let troundoff = Eqn::T::from(100.0) * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
-            if abs(state.t - *t) > troundoff {
-                self.set_stop_time(*t).unwrap();
-                while self.step()? != OdeSolverStopReason::TstopReached {}
+            match self.set_stop_time(*t) {
+                Ok(_) => while self.step()? != OdeSolverStopReason::TstopReached {},
+                Err(DiffsolError::OdeSolverError(OdeSolverError::StopTimeAtCurrentTime)) => {}
+                e => e?,
             }
-            
+
             if let Some(integrate_delta_g) = integrate_delta_g.as_mut() {
                 let dudg_i = dgdu_eval.iter().map(|dgdu| dgdu.column(i));
-                integrate_delta_g.integrate_delta_g(&mut self, dudg_i);
+                integrate_delta_g.integrate_delta_g(&mut self, dudg_i)?;
             }
         }
-        
+
         // keep integrating until t0
-        let state = self.state();
-        let troundoff = Eqn::T::from(100.0) * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
-        if abs(state.t -  self.problem().t0) > troundoff {
-            self.set_stop_time(self.problem().t0).unwrap();
-            while self.step()? != OdeSolverStopReason::TstopReached {}
+        match self.set_stop_time(self.problem().t0) {
+            Ok(_) => while self.step()? != OdeSolverStopReason::TstopReached {},
+            Err(DiffsolError::OdeSolverError(OdeSolverError::StopTimeAtCurrentTime)) => {}
+            e => e?,
         }
 
         // correct the adjoint solution for the initial conditions
@@ -136,12 +138,13 @@ where
     }
 }
 
-impl <'a, Eqn, S, Solver> AdjointOdeSolverMethod<'a, Eqn, S> for Solver
+impl<'a, Eqn, S, Solver> AdjointOdeSolverMethod<'a, Eqn, S> for Solver
 where
     Eqn: OdeEquationsAdjoint + 'a,
     S: OdeSolverMethod<'a, Eqn>,
     Solver: AugmentedOdeSolverMethod<'a, Eqn, AdjointEquations<'a, Eqn, S>>,
-{}
+{
+}
 
 struct IntegrateDeltaG<M: Matrix, LS: LinearSolver<M>> {
     pub rhs_jac_aa: Option<MatrixOp<M>>,
@@ -225,7 +228,8 @@ where
         &mut self,
         solver: &mut Solver,
         dgdus: impl Iterator<Item = <M::V as Vector>::View<'b>>,
-    ) where
+    ) -> Result<(), DiffsolError>
+    where
         Eqn: OdeEquationsAdjoint<M = M, V = M::V, T = M::T> + 'a,
         Solver: AdjointOdeSolverMethod<'a, Eqn, S1>,
         S1: OdeSolverMethod<'a, Eqn>,
@@ -235,7 +239,7 @@ where
         solver
             .augmented_eqn()
             .unwrap()
-            .interpolate_forward_state(t, &mut self.tmp_nstates);
+            .interpolate_forward_state(t, &mut self.tmp_nstates)?;
 
         // if there are algebraic indices, setup the solver for (f*_y^a)^{-1}
         let rhs_jac_ad_op = if self.algebraic_indices.len() > 0 {
@@ -247,9 +251,11 @@ where
             rhs_jac_aa.m_mut().copy_from(&jac_aa);
 
             // linearisation does not depend on x or t
-            self.solver.as_mut()
-                .unwrap()
-                .set_linearisation(rhs_jac_aa, &self.tmp_algebraic, Eqn::T::zero());
+            self.solver.as_mut().unwrap().set_linearisation(
+                rhs_jac_aa,
+                &self.tmp_algebraic,
+                Eqn::T::zero(),
+            );
             Some(jac_ad)
         } else {
             None
@@ -257,8 +263,7 @@ where
 
         let out = solver.augmented_eqn().unwrap().eqn().out();
         let state_mut = solver.state_mut();
-        for ((s_i, sg_i), dgdu) in 
-            state_mut
+        for ((s_i, sg_i), dgdu) in state_mut
             .s
             .iter_mut()
             .zip(state_mut.sg.iter_mut())
@@ -281,14 +286,18 @@ where
                 // note g_y^T = u_y^T * g_u^T, where u_y^T is the out adjoint
                 self.tmp_differential
                     .gather(neg_dgdy, &self.differential_indices);
-                self.tmp_algebraic
-                    .gather(neg_dgdy, &self.algebraic_indices);
+                self.tmp_algebraic.gather(neg_dgdy, &self.algebraic_indices);
                 s_i.add_assign(&self.tmp_differential);
-                self.solver.as_ref().unwrap().solve_in_place(&mut self.tmp_algebraic);
-                rhs_jac_ad_op
+                self.solver
                     .as_ref()
                     .unwrap()
-                    .gemv(-M::T::one(), &self.tmp_algebraic, M::T::one(), s_i);
+                    .solve_in_place(&mut self.tmp_algebraic)?;
+                rhs_jac_ad_op.as_ref().unwrap().gemv(
+                    -M::T::one(),
+                    &self.tmp_algebraic,
+                    M::T::one(),
+                    s_i,
+                );
             } else {
                 // add -g*_y^T(x, t) to s
                 s_i.add_assign(neg_dgdy);
@@ -306,5 +315,6 @@ where
                 sg_i.add_assign(&self.tmp_nparams);
             }
         }
+        Ok(())
     }
 }

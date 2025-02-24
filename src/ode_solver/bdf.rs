@@ -1,11 +1,10 @@
 use nalgebra::ComplexField;
-use std::ops::AddAssign;
 use std::cell::Ref;
+use std::ops::AddAssign;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
-    AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix,
-    NoAug, OdeEquationsSens, SensEquations, StateRef, StateRefMut,
+    AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, NoAug, StateRef, StateRefMut,
 };
 
 use num_traits::{abs, One, Pow, Zero};
@@ -17,11 +16,10 @@ use crate::{
     AugmentedOdeEquations, BdfState, DenseMatrix, IndexType, JacobianUpdate, MatrixViewMut,
     NonLinearOp, NonLinearSolver, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem,
     OdeSolverState, OdeSolverStopReason, Op, Scalar, Vector, VectorRef, VectorView, VectorViewMut,
-    SensitivitiesOdeSolverMethod,
 };
 
-use super::method::AugmentedOdeSolverMethod;
 use super::jacobian_update::SolverState;
+use super::method::AugmentedOdeSolverMethod;
 
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct BdfStatistics {
@@ -50,7 +48,6 @@ where
         self.s_op.as_ref().map(|op| op.eqn())
     }
 }
-
 
 // notes quadrature.
 // ndf formula rearranged to [2]:
@@ -854,14 +851,12 @@ where
     fn order(&self) -> usize {
         self.state.order
     }
-    
+
     fn jacobian(&self) -> Option<Ref<<Eqn>::M>> {
         if let Some(op) = self.op.as_ref() {
-            Some(op.jacobian())
-        } else if let Some(s_op) = self.s_op.as_ref() {
-            Some(s_op.jacobian())
+            Some(op.rhs_jac())
         } else {
-            None
+            self.s_op.as_ref().map(|s_op| s_op.rhs_jac())
         }
     }
 
@@ -1234,10 +1229,7 @@ where
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
         self.tstop = Some(tstop);
         if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
-            let error = OdeSolverError::StopTimeBeforeCurrentTime {
-                stop_time: tstop.into(),
-                state_time: self.state.t.into(),
-            };
+            let error = OdeSolverError::StopTimeAtCurrentTime;
             self.tstop = None;
             return Err(DiffsolError::from(error));
         }
@@ -1270,8 +1262,9 @@ mod test {
                 robertson_ode_with_sens::robertson_ode_with_sens,
             },
             tests::{
-                test_checkpointing, test_interpolate, test_ode_solver, test_ode_solver_adjoint,
-                test_problem, test_state_mut, test_state_mut_on_problem,
+                setup_test_ode_solver_adjoint, test_checkpointing, test_interpolate,
+                test_ode_solver, test_ode_solver_adjoint, test_problem, test_state_mut,
+                test_state_mut_on_problem,
             },
         },
         FaerLU, FaerSparseLU, OdeEquations, OdeSolverMethod, Op, SparseColMat, Vector,
@@ -1402,9 +1395,13 @@ mod test {
 
     #[test]
     fn bdf_test_nalgebra_exponential_decay_adjoint() {
-        let (problem, soln) = exponential_decay_problem_adjoint::<M>();
-        let s = problem.bdf::<LS>().unwrap();
-        test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
+        let (mut problem, soln) = exponential_decay_problem_adjoint::<M>();
+        let final_time = soln.solution_points.last().unwrap().t;
+        let dgdu = setup_test_ode_solver_adjoint::<LS, _>(&mut problem, soln);
+        let mut s = problem.bdf::<LS>().unwrap();
+        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let adjoint_solver = problem.bdf_solver_adjoint::<LS, _>(checkpointer).unwrap();
+        test_ode_solver_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 183
         number_of_jac_muls: 6
@@ -1416,17 +1413,24 @@ mod test {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_test_nalgebra_exponential_decay_adjoint_diffsl() {
-        let (_problem, soln) = exponential_decay_problem_adjoint::<M>();
-        let (problem, _soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(true);
-        let s = problem.bdf::<LS>().unwrap();
-        test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
+        let (mut problem, soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(true);
+        let final_time = soln.solution_points.last().unwrap().t;
+        let dgdu = setup_test_ode_solver_adjoint::<LS, _>(&mut problem, soln);
+        let mut s = problem.bdf::<LS>().unwrap();
+        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let adjoint_solver = problem.bdf_solver_adjoint::<LS, _>(checkpointer).unwrap();
+        test_ode_solver_adjoint(adjoint_solver, dgdu);
     }
 
     #[test]
     fn bdf_test_nalgebra_exponential_decay_algebraic_adjoint() {
-        let (problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>();
-        let s = problem.bdf::<LS>().unwrap();
-        test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
+        let (mut problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>();
+        let final_time = soln.solution_points.last().unwrap().t;
+        let dgdu = setup_test_ode_solver_adjoint::<LS, _>(&mut problem, soln);
+        let mut s = problem.bdf::<LS>().unwrap();
+        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let adjoint_solver = problem.bdf_solver_adjoint::<LS, _>(checkpointer).unwrap();
+        test_ode_solver_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 279
         number_of_jac_muls: 24
@@ -1438,11 +1442,14 @@ mod test {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_test_nalgebra_exponential_decay_with_algebraic_adjoint_diffsl() {
-        let (_problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>();
-        let (problem, _soln) =
+        let (mut problem, soln) =
             exponential_decay_with_algebraic_problem_diffsl::<M, diffsl::LlvmModule>(true);
-        let s = problem.bdf::<LS>().unwrap();
-        test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
+        let final_time = soln.solution_points.last().unwrap().t;
+        let dgdu = setup_test_ode_solver_adjoint::<LS, _>(&mut problem, soln);
+        let mut s = problem.bdf::<LS>().unwrap();
+        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let adjoint_solver = problem.bdf_solver_adjoint::<LS, _>(checkpointer).unwrap();
+        test_ode_solver_adjoint(adjoint_solver, dgdu);
     }
 
     #[test]
