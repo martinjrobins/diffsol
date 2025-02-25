@@ -1063,8 +1063,8 @@ mod test {
                 robertson_ode::robertson_ode,
             },
             tests::{
-                setup_test_ode_solver_adjoint, test_checkpointing, test_interpolate,
-                test_ode_solver, test_ode_solver_adjoint, test_problem, test_state_mut,
+                setup_test_adjoint, test_checkpointing, test_interpolate,
+                test_ode_solver, test_adjoint, test_problem, test_state_mut,
                 test_state_mut_on_problem,
             },
         },
@@ -1189,15 +1189,15 @@ mod test {
 
     #[test]
     fn sdirk_test_esdirk34_exponential_decay_adjoint() {
-        let (mut problem, soln) = exponential_decay_problem_adjoint::<M>();
+        let (mut problem, soln) = exponential_decay_problem_adjoint::<M>(true);
         let final_time = soln.solution_points.last().unwrap().t;
-        let dgdu = setup_test_ode_solver_adjoint::<LS, _>(&mut problem, soln);
+        let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let mut s = problem.esdirk34::<LS>().unwrap();
         let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
             .esdirk34_solver_adjoint::<LS, _>(checkpointer)
             .unwrap();
-        test_ode_solver_adjoint(adjoint_solver, dgdu);
+        test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 314
         number_of_jac_muls: 6
@@ -1208,15 +1208,15 @@ mod test {
 
     #[test]
     fn sdirk_test_esdirk34_exponential_decay_algebraic_adjoint() {
-        let (mut problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>();
+        let (mut problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>(true);
         let final_time = soln.solution_points.last().unwrap().t;
-        let dgdu = setup_test_ode_solver_adjoint::<LS, _>(&mut problem, soln);
+        let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let mut s = problem.esdirk34::<LS>().unwrap();
         let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
             .esdirk34_solver_adjoint::<LS, _>(checkpointer)
             .unwrap();
-        test_ode_solver_adjoint(adjoint_solver, dgdu);
+        test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 265
         number_of_jac_muls: 12

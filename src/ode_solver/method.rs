@@ -386,7 +386,7 @@ mod test {
             exponential_decay_problem_sens,
         },
         scale, AdjointOdeSolverMethod, NalgebraLU, OdeSolverMethod, SensitivitiesOdeSolverMethod,
-        Vector,
+        Vector, OdeEquations, Op
     };
 
     #[test]
@@ -408,7 +408,7 @@ mod test {
 
     #[test]
     fn test_solve_integrate_out() {
-        let (problem, _soln) = exponential_decay_problem_adjoint::<nalgebra::DMatrix<f64>>();
+        let (problem, _soln) = exponential_decay_problem_adjoint::<nalgebra::DMatrix<f64>>(true);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let k = 0.1;
@@ -443,7 +443,7 @@ mod test {
 
     #[test]
     fn test_dense_solve_integrate_out() {
-        let (problem, soln) = exponential_decay_problem_adjoint::<nalgebra::DMatrix<f64>>();
+        let (problem, soln) = exponential_decay_problem_adjoint::<nalgebra::DMatrix<f64>>(true);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
@@ -480,24 +480,25 @@ mod test {
 
     #[test]
     fn test_solve_adjoint() {
-        let (problem, soln) = exponential_decay_problem_adjoint::<nalgebra::DMatrix<f64>>();
+        let (problem, soln) = exponential_decay_problem_adjoint::<nalgebra::DMatrix<f64>>(true);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let final_time = soln.solution_points[soln.solution_points.len() - 1].t;
         let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
-        let adjoint_solver = problem
-            .bdf_solver_adjoint::<NalgebraLU<f64>, _>(checkpointer)
-            .unwrap();
-        let state = adjoint_solver
-            .solve_adjoint_backwards_pass(&[], &[])
-            .unwrap();
-        let g = state.g;
+        let g = s.state().g;
         g.assert_eq_norm(
             &soln.solution_points[soln.solution_points.len() - 1].state,
             problem.out_atol.as_ref().unwrap(),
             problem.out_rtol.unwrap(),
             15.0,
         );
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<NalgebraLU<f64>, _>(checkpointer, None)
+            .unwrap();
+        let state = adjoint_solver
+            .solve_adjoint_backwards_pass(&[], &[])
+            .unwrap();
+        
         let gs_adj = state.sg;
         for (j, soln_pts) in soln.sens_solution_points.unwrap().iter().enumerate() {
             gs_adj[j].assert_eq_norm(
@@ -506,6 +507,19 @@ mod test {
                 problem.out_rtol.unwrap(),
                 15.0,
             );
+        }
+    }
+    
+    #[test]
+    fn test_solve_checkpointing() {
+        let (problem, soln) = exponential_decay_problem::<nalgebra::DMatrix<f64>>(false);
+        let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
+        let final_time = soln.solution_points[soln.solution_points.len() - 1].t;
+        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let mut y = nalgebra::DVector::zeros(problem.eqn.rhs().nstates());
+        for point in soln.solution_points.iter() {
+            checkpointer.interpolate(point.t, &mut y).unwrap();
+            y.assert_eq_norm(&point.state, &problem.atol, problem.rtol, 100.0);
         }
     }
 }

@@ -237,6 +237,7 @@ where
     pub fn bdf_solver_adjoint<'a, LS: LinearSolver<Eqn::M>, S: OdeSolverMethod<'a, Eqn>>(
         &'a self,
         checkpointer: Checkpointing<'a, Eqn, S>,
+        nout_override: Option<usize>,
     ) -> Result<
         Bdf<
             'a,
@@ -252,15 +253,16 @@ where
     {
         let h = checkpointer.last_h();
         let t = checkpointer.last_t();
-        let nout = self.eqn.out().unwrap().nout();
+        let nout = nout_override.unwrap_or(self.eqn.out().unwrap().nout());
         let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer, nout)));
         let mut augmented_eqn = AdjointEquations::new(self, context, self.integrate_out);
-        let newton_solver = NewtonNonlinearSolver::new(LS::default());
+        let mut newton_solver = NewtonNonlinearSolver::new(LS::default());
         let mut state = BdfState::new_without_initialise_augmented(self, &mut augmented_eqn)?;
         *state.as_mut().t = t;
         if let Some(h) = h {
             *state.as_mut().h = -h;
         }
+        state.set_consistent_augmented(self, &mut augmented_eqn, &mut newton_solver)?;
         Bdf::new_augmented(state, self, augmented_eqn, newton_solver)
     }
 
@@ -376,6 +378,8 @@ where
         if let Some(h) = h {
             *state.as_mut().h = -h;
         }
+        let mut newton_solver = NewtonNonlinearSolver::new(LS::default());
+        state.set_consistent_augmented(self, &mut augmented_eqn, &mut newton_solver)?;
         Sdirk::new_augmented(self, state, tableau, LS::default(), augmented_eqn)
     }
 

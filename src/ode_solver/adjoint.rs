@@ -7,7 +7,7 @@ use crate::{
 };
 
 use num_traits::{One, Zero};
-use std::ops::AddAssign;
+use std::ops::SubAssign;
 
 pub trait AdjointOdeSolverMethod<'a, Eqn, Solver>:
     AugmentedOdeSolverMethod<'a, Eqn, AdjointEquations<'a, Eqn, Solver>>
@@ -49,7 +49,7 @@ where
     fn solve_adjoint_backwards_pass(
         mut self,
         t_eval: &[Eqn::T],
-        dgdu_eval: &[&mut <Eqn::V as DefaultDenseMatrix>::M],
+        dgdu_eval: &[<Eqn::V as DefaultDenseMatrix>::M],
     ) -> Result<Self::State, DiffsolError>
     where
         Eqn::V: DefaultDenseMatrix,
@@ -98,9 +98,10 @@ where
         }
 
         let mut integrate_delta_g = if have_neqn > 0 && !dgdu_eval.is_empty() {
-            Some(IntegrateDeltaG::<_, <Eqn::M as DefaultSolver>::LS>::new(
+            let integrate_delta_g = IntegrateDeltaG::<_, <Eqn::M as DefaultSolver>::LS>::new(
                 &self,
-            )?)
+            )?;
+            Some(integrate_delta_g)
         } else {
             None
         };
@@ -154,6 +155,7 @@ struct IntegrateDeltaG<M: Matrix, LS: LinearSolver<M>> {
     pub differential_indices: <M::V as Vector>::Index,
     pub tmp_algebraic: M::V,
     pub tmp_differential: M::V,
+    pub tmp_differential2: M::V,
     pub tmp_nparams: M::V,
     pub tmp_nstates: M::V,
     pub tmp_nstates2: M::V,
@@ -190,6 +192,7 @@ where
         let tmp_nout = M::V::zeros(nout);
         let tmp_algebraic = M::V::zeros(algebraic_indices.len());
         let tmp_differential = M::V::zeros(nstates - algebraic_indices.len());
+        let tmp_differential2 = M::V::zeros(nstates - algebraic_indices.len());
         if algebraic_indices.len() > 0 {
             let jacobian = solver
                 .jacobian()
@@ -207,6 +210,7 @@ where
                 tmp_nstates,
                 tmp_nout,
                 tmp_differential,
+                tmp_differential2,
                 differential_indices,
                 tmp_nstates2,
             })
@@ -220,6 +224,7 @@ where
                 tmp_nstates,
                 tmp_nout,
                 tmp_differential,
+                tmp_differential2,
                 differential_indices,
                 tmp_nstates2,
             })
@@ -280,28 +285,32 @@ where
                 );
                 &self.tmp_nstates2
             } else {
-                &self.tmp_nout
+                self.tmp_nstates2.axpy(-M::T::one(), &self.tmp_nout, M::T::zero());
+                &self.tmp_nstates2
             };
             if self.algebraic_indices.len() > 0 {
-                // add f*_y^d (f*_y^a)^{-1} g*_y^a - g*_y^d to differential part of s
+                // add -f*_y^d (f*_y^a)^{-1} g*_y^a + g*_y^d to differential part of s
+                // todo: need to add M^T^-1 to that for non-identity mass
                 // note g_y^T = u_y^T * g_u^T, where u_y^T is the out adjoint
                 self.tmp_differential
                     .gather(neg_dgdy, &self.differential_indices);
                 self.tmp_algebraic.gather(neg_dgdy, &self.algebraic_indices);
-                s_i.add_assign(&self.tmp_differential);
+                self.tmp_differential2.gather(s_i, &self.differential_indices);
+                self.tmp_differential2.sub_assign(&self.tmp_differential);
                 self.solver
                     .as_ref()
                     .unwrap()
                     .solve_in_place(&mut self.tmp_algebraic)?;
                 rhs_jac_ad_op.as_ref().unwrap().gemv(
-                    -M::T::one(),
+                    M::T::one(),
                     &self.tmp_algebraic,
                     M::T::one(),
-                    s_i,
+                    &mut self.tmp_differential2,
                 );
+                self.tmp_differential2.scatter(&self.differential_indices, s_i);
             } else {
-                // add -g*_y^T(x, t) to s
-                s_i.add_assign(neg_dgdy);
+                // add g*_y^T(x, t) to s
+                s_i.sub_assign(neg_dgdy);
             }
             // add -g_p^T(x, t) to sg
             // g_p = g_u^T * u_y^T * y_p^T
@@ -313,7 +322,7 @@ where
                     &self.tmp_nout,
                     &mut self.tmp_nparams,
                 );
-                sg_i.add_assign(&self.tmp_nparams);
+                sg_i.sub_assign(&self.tmp_nparams);
             }
         }
         Ok(())

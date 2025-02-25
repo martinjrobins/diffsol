@@ -399,7 +399,7 @@ where
 {
     eqn: &'a Eqn,
     rhs: AdjointRhs<'a, Eqn, Method>,
-    out: Option<AdjointOut<'a, Eqn, Method>>,
+    out: AdjointOut<'a, Eqn, Method>,
     mass: Option<AdjointMass<'a, Eqn>>,
     context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
     tmp: RefCell<Eqn::V>,
@@ -421,13 +421,9 @@ where
             self.context.borrow().checkpointer.clone(),
             self.context.borrow().max_index,
         )));
-        let rhs = AdjointRhs::new(self.eqn, context.clone(), self.out.is_some());
+        let rhs = AdjointRhs::new(self.eqn, context.clone(), self.rhs.with_out);
         let init = AdjointInit::new(self.eqn);
-        let out = if self.out.is_some() {
-            Some(AdjointOut::new(self.eqn, context.clone(), true))
-        } else {
-            None
-        };
+        let out = AdjointOut::new(self.eqn, context.clone(), self.out.with_out);
         let tmp = self.tmp.clone();
         let tmp2 = self.tmp2.clone();
         let atol = self.atol;
@@ -465,33 +461,13 @@ where
         let eqn = &problem.eqn;
         let rhs = AdjointRhs::new(eqn, context.clone(), with_out);
         let init = AdjointInit::new(eqn);
-        let out = if with_out {
-            Some(AdjointOut::new(eqn, context.clone(), with_out))
-        } else {
-            None
-        };
-        let tmp = if with_out {
-            RefCell::new(<Eqn::V as Vector>::zeros(eqn.rhs().nparams()))
-        } else {
-            RefCell::new(<Eqn::V as Vector>::zeros(0))
-        };
-        let tmp2 = if with_out {
-            RefCell::new(<Eqn::V as Vector>::zeros(eqn.rhs().nstates()))
-        } else {
-            RefCell::new(<Eqn::V as Vector>::zeros(0))
-        };
-        let atol = if with_out {
-            problem.sens_atol.as_ref()
-        } else {
-            None
-        };
-        let rtol = if with_out { problem.sens_rtol } else { None };
-        let out_atol = if with_out {
-            problem.out_atol.as_ref()
-        } else {
-            None
-        };
-        let out_rtol = if with_out { problem.out_rtol } else { None };
+        let out = AdjointOut::new(eqn, context.clone(), with_out);
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(eqn.rhs().nparams()));
+        let tmp2 = RefCell::new(<Eqn::V as Vector>::zeros(eqn.rhs().nstates()));
+        let atol = problem.sens_atol.as_ref();
+        let rtol = problem.sens_rtol;
+        let out_atol = problem.out_atol.as_ref();
+        let out_rtol = problem.out_rtol;
         let mass = eqn.mass().map(|_m| AdjointMass::new(eqn));
         Self {
             rhs,
@@ -597,7 +573,7 @@ where
         &self.init
     }
     fn out(&self) -> Option<&AdjointOut<'a, Eqn, Method>> {
-        self.out.as_ref()
+        Some(&self.out)
     }
     fn set_params(&mut self, p: &Self::V) {
         self.eqn.set_params(p);
@@ -669,7 +645,7 @@ mod tests {
     fn test_rhs_exponential() {
         // dy/dt = -ay (p = [a])
         // a = 0.1
-        let (problem, _soln) = exponential_decay_problem_adjoint::<Mcpu>();
+        let (problem, _soln) = exponential_decay_problem_adjoint::<Mcpu>(true);
         let state = SdirkState {
             t: 0.0,
             y: Vcpu::from_vec(vec![1.0, 1.0]),
@@ -722,7 +698,7 @@ mod tests {
         //            = |1  1| |1| + |0| = |3|
         //              |0  0| |2|  |0|  = |0|
         adj_eqn.set_index(0);
-        let out = adj_eqn.out.unwrap().call(&v, state.t);
+        let out = adj_eqn.out.call(&v, state.t);
         let out_expect = Vcpu::from_vec(vec![3.0, 0.0]);
         out.assert_eq_st(&out_expect, 1e-10);
 
@@ -740,7 +716,7 @@ mod tests {
     fn test_rhs_exponential_sparse() {
         // dy/dt = -ay (p = [a])
         // a = 0.1
-        let (problem, _soln) = exponential_decay_problem_adjoint::<SparseColMat<f64>>();
+        let (problem, _soln) = exponential_decay_problem_adjoint::<SparseColMat<f64>>(true);
         let state = SdirkState {
             t: 0.0,
             y: faer::Col::from_vec(vec![1.0, 1.0]),

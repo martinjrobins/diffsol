@@ -176,6 +176,11 @@ pub trait Vector:
             self[i] = other[indices[i]];
         }
     }
+    fn scatter(&self, indices: &Self::Index, other: &mut Self) {
+        for i in 0..indices.len() {
+            other[indices[i]] = self[i];
+        }
+    }
     fn assert_eq_st(&self, other: &Self, tol: Self::T) {
         let tol = Self::from_element(self.len(), tol);
         self.assert_eq(other, &tol);

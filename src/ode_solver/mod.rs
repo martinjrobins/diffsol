@@ -39,8 +39,7 @@ mod tests {
     use crate::{
         ConstantOp, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp, Op, Vector,
     };
-    use num_traits::One;
-    use num_traits::Zero;
+    use num_traits::{One, Zero, Pow};
 
     pub fn test_ode_solver<'a, M, Eqn, Method>(
         method: &mut Method,
@@ -135,7 +134,7 @@ mod tests {
         method.state().y.clone()
     }
 
-    pub fn setup_test_ode_solver_adjoint<'a, LS, Eqn>(
+    pub fn setup_test_adjoint<'a, LS, Eqn>(
         problem: &'a mut OdeSolverProblem<Eqn>,
         soln: OdeSolverSolution<Eqn::V>,
     ) -> <Eqn::V as DefaultDenseMatrix>::M
@@ -179,10 +178,127 @@ mod tests {
         problem.eqn.set_params(&p_base);
         dgdp
     }
+    
+    /// sum_i^n (soln_i - data_i)^2
+    /// sum_i^n (soln_i - data_i)^4
+    pub(crate) fn sum_squares<DM>(soln: &DM, data: &DM) -> DM::V 
+    where 
+        DM: DenseMatrix,
+    {
+        let mut ret = DM::V::zeros(2);
+        for j in 0..soln.ncols() {
+            let soln_j = soln.column(j);
+            let data_j = data.column(j);
+            for i in 0..soln.nrows() {
+                ret[0] += (soln_j[i] - data_j[i]).pow(2);
+                ret[1] += (soln_j[i] - data_j[i]).pow(4);
+            }
+        }
+        ret
+    }
+    
+    /// sum_i^n 2 * (soln_i - data_i)
+    /// sum_i^n 4 * (soln_i - data_i)^3
+    pub(crate) fn dsum_squaresdp<DM>(soln: &DM, data: &DM) -> Vec<DM> 
+    where 
+        DM: DenseMatrix,
+    {
+        let mut ret = vec![soln.clone(), soln.clone()];
+        for i in 0..soln.nrows() {
+            for j in 0..soln.ncols() {
+                ret[0][(i, j)] = DM::T::from(2.) * (soln[(i, j)] - data[(i, j)]);
+            }
+        }
+        for i in 0..soln.nrows() {
+            for j in 0..soln.ncols() {
+                ret[1][(i, j)] = DM::T::from(4.) * (soln[(i, j)] - data[(i, j)]).pow(3);
+            }
+        }
+        ret
+    }
+    
+    pub fn setup_test_adjoint_sum_squares<'a, LS, Eqn>(
+        problem: &'a mut OdeSolverProblem<Eqn>,
+        times: &[Eqn::T],
+    ) -> (<Eqn::V as DefaultDenseMatrix>::M, <Eqn::V as DefaultDenseMatrix>::M)
+    where
+        Eqn: OdeEquationsAdjoint + 'a,
+        LS: LinearSolver<Eqn::M>,
+        Eqn::V: DefaultDenseMatrix,
+        for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+        for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+    {
+        let nparams = problem.eqn.nparams();
+        let nout = 2;
+        let mut dgdp = <Eqn::V as DefaultDenseMatrix>::M::zeros(nparams, nout);
+        
+        let mut p_0 = Eqn::V::zeros(nparams);
+        problem.eqn.get_params(&mut p_0);
+        let h_base = Eqn::T::from(1e-10);
+        let mut h = Eqn::V::from_element(nparams, h_base);
+        h.axpy(h_base, &p_0, Eqn::T::one());
+        let mut p_data = p_0.clone();
+        p_data.axpy(Eqn::T::from(0.1), &p_0, Eqn::T::one());
+        let p_base = p_0.clone();
+        
+        problem.eqn.set_params(&p_data);
+        let mut s = problem.bdf::<LS>().unwrap();
+        let data = s.solve_dense(times).unwrap();
 
-    pub fn test_ode_solver_adjoint<'a, Eqn, SolverF, SolverB>(
+        for i in 0..nparams {
+            p_0[i] = p_base[i] + h[i];
+            problem.eqn.set_params(&p_0);
+            let mut s = problem.bdf::<LS>().unwrap();
+            let v = s.solve_dense(times).unwrap();
+            let g_pos = sum_squares(&v, &data);
+
+            p_0[i] = p_base[i] - h[i];
+            problem.eqn.set_params(&p_0);
+            let mut s = problem.bdf::<LS>().unwrap();
+            let v = s.solve_dense(times).unwrap();
+            let g_neg = sum_squares(&v, &data);
+
+            p_0[i] = p_base[i];
+
+            for j in 0..nout {
+                dgdp[(i, j)] = (g_pos[j] - g_neg[j]) / (Eqn::T::from(2.) * h[i]);
+            }
+        }
+        problem.eqn.set_params(&p_base);
+        (dgdp, data)
+    }
+    
+    pub fn test_adjoint_sum_squares<'a, Eqn, SolverF, SolverB>(
         backwards_solver: SolverB,
-        dgdu: <Eqn::V as DefaultDenseMatrix>::M,
+        dgdp_check: <Eqn::V as DefaultDenseMatrix>::M,
+        forwards_soln: <Eqn::V as DefaultDenseMatrix>::M,
+        data: <Eqn::V as DefaultDenseMatrix>::M,
+        times: &[Eqn::T],
+    ) where
+        SolverF: OdeSolverMethod<'a, Eqn>,
+        SolverB: AdjointOdeSolverMethod<'a, Eqn, SolverF>,
+        Eqn: OdeEquationsAdjoint + 'a,
+        Eqn::V: DefaultDenseMatrix,
+        Eqn::M: DefaultSolver,
+    {
+        let nout = 2;
+        let dgdu = dsum_squaresdp(&forwards_soln, &data);
+
+        let atol = Eqn::V::from_element(nout, Eqn::T::from(1e-6));
+        let rtol = Eqn::T::from(1e-6);
+        let state = backwards_solver
+            .solve_adjoint_backwards_pass(times, dgdu.as_slice())
+            .unwrap();
+        let gs_adj = state.into_common().sg;
+        #[allow(clippy::needless_range_loop)]
+        for j in 0..dgdp_check.ncols() {
+            gs_adj[j].assert_eq_norm(&dgdp_check.column(j).into_owned(), &atol, rtol, Eqn::T::from(15.));
+        }
+    }
+
+    pub fn test_adjoint<'a, Eqn, SolverF, SolverB>(
+        backwards_solver: SolverB,
+        dgdp_check: <Eqn::V as DefaultDenseMatrix>::M,
     ) where
         SolverF: OdeSolverMethod<'a, Eqn>,
         SolverB: AdjointOdeSolverMethod<'a, Eqn, SolverF>,
@@ -198,8 +314,8 @@ mod tests {
             .unwrap();
         let gs_adj = state.into_common().sg;
         #[allow(clippy::needless_range_loop)]
-        for j in 0..dgdu.ncols() {
-            gs_adj[j].assert_eq_norm(&dgdu.column(j).into_owned(), &atol, rtol, Eqn::T::from(15.));
+        for j in 0..dgdp_check.ncols() {
+            gs_adj[j].assert_eq_norm(&dgdp_check.column(j).into_owned(), &atol, rtol, Eqn::T::from(15.));
         }
     }
 
