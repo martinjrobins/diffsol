@@ -152,25 +152,31 @@ mod tests {
         let final_time = soln.solution_points.last().unwrap().t;
         let mut p_0 = Eqn::V::zeros(nparams);
         problem.eqn.get_params(&mut p_0);
-        let mut h = Eqn::V::from_element(nparams, Eqn::T::from(1e-10));
-        h.axpy(Eqn::T::from(1. + 1e-10), &p_0, Eqn::T::one());
-        let p_1 = p_0 + &h;
+        let h_base = Eqn::T::from(1e-10);
+        let mut h = Eqn::V::from_element(nparams, h_base);
+        h.axpy(h_base, &p_0, Eqn::T::one());
+        let p_base = p_0.clone();
         for i in 0..nparams {
+            p_0[i] = p_base[i] + h[i];
+            problem.eqn.set_params(&p_0);
             let mut s = problem.bdf::<LS>().unwrap();
             s.set_stop_time(final_time).unwrap();
             while s.step().unwrap() != OdeSolverStopReason::TstopReached {}
-            let g_0 = s.state().g.clone();
+            let g_pos = s.state().g.clone();
 
-            problem.eqn.set_params(&p_1);
+            p_0[i] = p_base[i] - h[i];
+            problem.eqn.set_params(&p_0);
             let mut s = problem.bdf::<LS>().unwrap();
             s.set_stop_time(final_time).unwrap();
             while s.step().unwrap() != OdeSolverStopReason::TstopReached {}
-            let g_1 = s.state().g.clone();
+            let g_neg = s.state().g.clone();
+            p_0[i] = p_base[i];
 
             for j in 0..nout {
-                dgdp[(i, j)] = (g_1[j] - g_0[j]) / h[i];
+                dgdp[(i, j)] = (g_pos[j] - g_neg[j]) / (Eqn::T::from(2.) * h[i]);
             }
         }
+        problem.eqn.set_params(&p_base);
         dgdp
     }
 
@@ -191,6 +197,7 @@ mod tests {
             .solve_adjoint_backwards_pass(&[], &[])
             .unwrap();
         let gs_adj = state.into_common().sg;
+        #[allow(clippy::needless_range_loop)]
         for j in 0..dgdu.ncols() {
             gs_adj[j].assert_eq_norm(&dgdu.column(j).into_owned(), &atol, rtol, Eqn::T::from(15.));
         }

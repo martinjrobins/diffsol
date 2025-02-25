@@ -171,7 +171,6 @@ pub trait Vector:
             self[indices[i]] = other[indices[i]];
         }
     }
-    
     fn gather(&mut self, other: &Self, indices: &Self::Index) {
         for i in 0..indices.len() {
             self[i] = other[indices[i]];

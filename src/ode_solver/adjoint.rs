@@ -97,7 +97,7 @@ where
             ));
         }
 
-        let mut integrate_delta_g = if have_neqn > 0 {
+        let mut integrate_delta_g = if have_neqn > 0 && !dgdu_eval.is_empty() {
             Some(IntegrateDeltaG::<_, <Eqn::M as DefaultSolver>::LS>::new(
                 &self,
             )?)
@@ -121,7 +121,8 @@ where
         }
 
         // keep integrating until t0
-        match self.set_stop_time(self.problem().t0) {
+        let t0 = self.problem().t0;
+        match self.set_stop_time(t0) {
             Ok(_) => while self.step()? != OdeSolverStopReason::TstopReached {},
             Err(DiffsolError::OdeSolverError(OdeSolverError::StopTimeAtCurrentTime)) => {}
             e => e?,
@@ -131,7 +132,7 @@ where
         let (mut state, aug_eqn) = self.into_state_and_eqn();
         let aug_eqn = aug_eqn.unwrap();
         let state_mut = state.as_mut();
-        aug_eqn.correct_sg_for_init(t_eval[0], state_mut.s, state_mut.sg);
+        aug_eqn.correct_sg_for_init(t0, state_mut.s, state_mut.sg);
 
         // return the solution
         Ok(state)
