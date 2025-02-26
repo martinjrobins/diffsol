@@ -386,8 +386,8 @@ mod test {
             exponential_decay_problem, exponential_decay_problem_adjoint,
             exponential_decay_problem_sens,
         },
-        scale, AdjointOdeSolverMethod, NalgebraLU, OdeSolverMethod, SensitivitiesOdeSolverMethod,
-        Vector, OdeEquations, Op
+        scale, AdjointOdeSolverMethod, NalgebraLU, OdeEquations, OdeSolverMethod, Op,
+        SensitivitiesOdeSolverMethod, Vector,
     };
 
     #[test]
@@ -499,7 +499,7 @@ mod test {
         let state = adjoint_solver
             .solve_adjoint_backwards_pass(&[], &[])
             .unwrap();
-        
+
         let gs_adj = state.sg;
         for (j, soln_pts) in soln.sens_solution_points.unwrap().iter().enumerate() {
             gs_adj[j].assert_eq_norm(
@@ -510,7 +510,7 @@ mod test {
             );
         }
     }
-    
+
     #[test]
     fn test_solve_checkpointing() {
         let (problem, soln) = exponential_decay_problem::<nalgebra::DMatrix<f64>>(false);

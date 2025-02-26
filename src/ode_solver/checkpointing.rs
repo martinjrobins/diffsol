@@ -2,9 +2,9 @@ use std::cell::RefCell;
 
 use crate::{
     error::DiffsolError, other_error, OdeEquations, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState, Vector, Scalar
+    OdeSolverState, Scalar, Vector,
 };
-use num_traits::{One, abs};
+use num_traits::{abs, One};
 
 #[derive(Clone)]
 pub struct HermiteInterpolator<V>
@@ -182,9 +182,12 @@ where
             solver,
         }
     }
-    
+
     pub fn last_t(&self) -> Eqn::T {
-        self.segment.borrow().last_t().expect("segment should not be empty")
+        self.segment
+            .borrow()
+            .last_t()
+            .expect("segment should not be empty")
     }
 
     pub fn last_h(&self) -> Option<Eqn::T> {
@@ -220,7 +223,7 @@ where
         {
             return Err(other_error!("t is outside of the checkpoints"));
         }
-        
+
         // snap t to nearest checkpoint if outside of range
         let t = if t < self.checkpoints[0].as_ref().t {
             self.checkpoints[0].as_ref().t

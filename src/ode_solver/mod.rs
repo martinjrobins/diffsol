@@ -39,7 +39,7 @@ mod tests {
     use crate::{
         ConstantOp, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp, Op, Vector,
     };
-    use num_traits::{One, Zero, Pow};
+    use num_traits::{One, Pow, Zero};
 
     pub fn test_ode_solver<'a, M, Eqn, Method>(
         method: &mut Method,
@@ -178,11 +178,11 @@ mod tests {
         problem.eqn.set_params(&p_base);
         dgdp
     }
-    
+
     /// sum_i^n (soln_i - data_i)^2
     /// sum_i^n (soln_i - data_i)^4
-    pub(crate) fn sum_squares<DM>(soln: &DM, data: &DM) -> DM::V 
-    where 
+    pub(crate) fn sum_squares<DM>(soln: &DM, data: &DM) -> DM::V
+    where
         DM: DenseMatrix,
     {
         let mut ret = DM::V::zeros(2);
@@ -196,11 +196,11 @@ mod tests {
         }
         ret
     }
-    
+
     /// sum_i^n 2 * (soln_i - data_i)
     /// sum_i^n 4 * (soln_i - data_i)^3
-    pub(crate) fn dsum_squaresdp<DM>(soln: &DM, data: &DM) -> Vec<DM> 
-    where 
+    pub(crate) fn dsum_squaresdp<DM>(soln: &DM, data: &DM) -> Vec<DM>
+    where
         DM: DenseMatrix,
     {
         let mut ret = vec![soln.clone(), soln.clone()];
@@ -216,11 +216,14 @@ mod tests {
         }
         ret
     }
-    
+
     pub fn setup_test_adjoint_sum_squares<'a, LS, Eqn>(
         problem: &'a mut OdeSolverProblem<Eqn>,
         times: &[Eqn::T],
-    ) -> (<Eqn::V as DefaultDenseMatrix>::M, <Eqn::V as DefaultDenseMatrix>::M)
+    ) -> (
+        <Eqn::V as DefaultDenseMatrix>::M,
+        <Eqn::V as DefaultDenseMatrix>::M,
+    )
     where
         Eqn: OdeEquationsAdjoint + 'a,
         LS: LinearSolver<Eqn::M>,
@@ -231,7 +234,7 @@ mod tests {
         let nparams = problem.eqn.nparams();
         let nout = 2;
         let mut dgdp = <Eqn::V as DefaultDenseMatrix>::M::zeros(nparams, nout);
-        
+
         let mut p_0 = Eqn::V::zeros(nparams);
         problem.eqn.get_params(&mut p_0);
         let h_base = Eqn::T::from(1e-10);
@@ -240,7 +243,7 @@ mod tests {
         let mut p_data = p_0.clone();
         p_data.axpy(Eqn::T::from(0.1), &p_0, Eqn::T::one());
         let p_base = p_0.clone();
-        
+
         problem.eqn.set_params(&p_data);
         let mut s = problem.bdf::<LS>().unwrap();
         let data = s.solve_dense(times).unwrap();
@@ -267,7 +270,7 @@ mod tests {
         problem.eqn.set_params(&p_base);
         (dgdp, data)
     }
-    
+
     pub fn test_adjoint_sum_squares<'a, Eqn, SolverF, SolverB>(
         backwards_solver: SolverB,
         dgdp_check: <Eqn::V as DefaultDenseMatrix>::M,
@@ -292,7 +295,12 @@ mod tests {
         let gs_adj = state.into_common().sg;
         #[allow(clippy::needless_range_loop)]
         for j in 0..dgdp_check.ncols() {
-            gs_adj[j].assert_eq_norm(&dgdp_check.column(j).into_owned(), &atol, rtol, Eqn::T::from(15.));
+            gs_adj[j].assert_eq_norm(
+                &dgdp_check.column(j).into_owned(),
+                &atol,
+                rtol,
+                Eqn::T::from(15.),
+            );
         }
     }
 
@@ -315,7 +323,12 @@ mod tests {
         let gs_adj = state.into_common().sg;
         #[allow(clippy::needless_range_loop)]
         for j in 0..dgdp_check.ncols() {
-            gs_adj[j].assert_eq_norm(&dgdp_check.column(j).into_owned(), &atol, rtol, Eqn::T::from(15.));
+            gs_adj[j].assert_eq_norm(
+                &dgdp_check.column(j).into_owned(),
+                &atol,
+                rtol,
+                Eqn::T::from(15.),
+            );
         }
     }
 

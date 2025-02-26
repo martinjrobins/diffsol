@@ -270,7 +270,9 @@ pub fn exponential_decay_problem_with_root<M: Matrix + 'static>(
 }
 
 #[allow(clippy::type_complexity)]
-pub fn exponential_decay_problem_adjoint<M: Matrix>(integrate_out: bool) -> (
+pub fn exponential_decay_problem_adjoint<M: Matrix>(
+    integrate_out: bool,
+) -> (
     OdeSolverProblem<impl OdeEquationsAdjoint<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {

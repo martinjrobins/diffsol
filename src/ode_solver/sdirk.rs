@@ -1063,9 +1063,8 @@ mod test {
                 robertson_ode::robertson_ode,
             },
             tests::{
-                setup_test_adjoint, test_checkpointing, test_interpolate,
-                test_ode_solver, test_adjoint, test_problem, test_state_mut,
-                test_state_mut_on_problem,
+                setup_test_adjoint, test_adjoint, test_checkpointing, test_interpolate,
+                test_ode_solver, test_problem, test_state_mut, test_state_mut_on_problem,
             },
         },
         FaerSparseLU, NalgebraLU, OdeEquations, OdeSolverMethod, Op, SparseColMat, Vector,

@@ -179,6 +179,7 @@ pub use jacobian::{
     find_adjoint_non_zeros, find_jacobian_non_zeros, find_matrix_non_zeros,
     find_sens_adjoint_non_zeros, find_sens_non_zeros, find_transpose_non_zeros, JacobianColoring,
 };
+use matrix::extract_block::ExtractBlock;
 pub use matrix::{default_solver::DefaultSolver, Matrix};
 use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,

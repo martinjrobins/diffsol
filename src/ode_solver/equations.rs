@@ -432,7 +432,10 @@ where
         self.init.nstates()
     }
     fn nout(&self) -> usize {
-        self.out.as_ref().map(|out| out.nout()).unwrap_or(self.rhs.nout())
+        self.out
+            .as_ref()
+            .map(|out| out.nout())
+            .unwrap_or(self.rhs.nout())
     }
     fn nparams(&self) -> usize {
         self.rhs.nparams()
