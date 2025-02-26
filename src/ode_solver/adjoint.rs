@@ -150,7 +150,9 @@ where
 
 struct IntegrateDeltaG<M: Matrix, LS: LinearSolver<M>> {
     pub rhs_jac_aa: Option<MatrixOp<M>>,
-    pub solver: Option<LS>,
+    pub solver_jaa: Option<LS>,
+    pub mass_dd: Option<MatrixOp<M>>,
+    pub solver_mdd: Option<LS>,
     pub algebraic_indices: <M::V as Vector>::Index,
     pub differential_indices: <M::V as Vector>::Index,
     pub tmp_algebraic: M::V,
@@ -193,42 +195,46 @@ where
         let tmp_algebraic = M::V::zeros(algebraic_indices.len());
         let tmp_differential = M::V::zeros(nstates - algebraic_indices.len());
         let tmp_differential2 = M::V::zeros(nstates - algebraic_indices.len());
-        if algebraic_indices.len() > 0 {
+
+        let (solver_jaa, rhs_jac_aa) = if algebraic_indices.len() > 0 {
             let jacobian = solver
                 .jacobian()
                 .ok_or(DiffsolError::from(OdeSolverError::JacobianNotAvailable))?;
             let (_, _, _, rhs_jac_aa) = jacobian.split_at_indices(&algebraic_indices);
-            let rhs_jac_aa_op = MatrixOp::new(rhs_jac_aa);
+            let rhs_jac_aa_op = MatrixOp::new(rhs_jac_aa.into_transpose());
             let mut solver = LS::default();
             solver.set_problem(&rhs_jac_aa_op);
-            Ok(Self {
-                rhs_jac_aa: Some(rhs_jac_aa_op),
-                solver: Some(solver),
-                tmp_nparams,
-                tmp_algebraic,
-                algebraic_indices,
-                tmp_nstates,
-                tmp_nout,
-                tmp_differential,
-                tmp_differential2,
-                differential_indices,
-                tmp_nstates2,
-            })
+            (Some(solver), Some(rhs_jac_aa_op))
         } else {
-            Ok(Self {
-                rhs_jac_aa: None,
-                solver: None,
-                tmp_algebraic,
-                tmp_nparams,
-                algebraic_indices,
-                tmp_nstates,
-                tmp_nout,
-                tmp_differential,
-                tmp_differential2,
-                differential_indices,
-                tmp_nstates2,
-            })
-        }
+            (None, None)
+        };
+
+        let (solver_mdd, mass_dd) = if let Some(mass) = eqn.mass() {
+            let mass = solver.mass().ok_or(DiffsolError::from(OdeSolverError::MassNotAvailable))?;
+            let (mass_dd, _, _, _) = mass.split_at_indices(&differential_indices);
+            let mut solver = LS::default();
+            let mass_dd_op = MatrixOp::new(mass_dd.into_transpose());
+            solver.set_problem(&mass_dd_op);
+            (Some(solver), Some(mass_dd_op))
+        } else {
+            (None, None)
+        };
+
+        Ok(Self {
+            rhs_jac_aa,
+            solver_jaa,
+            mass_dd,
+            solver_mdd,
+            tmp_nparams,
+            tmp_algebraic,
+            algebraic_indices,
+            tmp_nstates,
+            tmp_nout,
+            tmp_differential,
+            tmp_differential2,
+            differential_indices,
+            tmp_nstates2,
+        })
     }
     fn integrate_delta_g<'a, 'b, Eqn, S1, Solver>(
         &mut self,
@@ -247,25 +253,35 @@ where
             .unwrap()
             .interpolate_forward_state(t, &mut self.tmp_nstates)?;
 
-        // if there are algebraic indices, setup the solver for (f*_y^a)^{-1}
-        let rhs_jac_ad_op = if self.algebraic_indices.len() > 0 {
-            let jacobian = solver.jacobian().unwrap();
-            let (_, _, jac_ad, jac_aa) = jacobian.split_at_indices(&self.algebraic_indices);
+        let out = solver.augmented_eqn().unwrap().eqn().out();
 
-            // init solver for (f*_u^a)^{-1}
+        // if there are algebraic indices, setup the solver for (f*_y^a)^{-1} and M_dd*^-1
+        if let Some(lin_sol) = self.solver_jaa.as_mut() {
+            let (_, _, jac_ad, jac_aa) = solver.jacobian().unwrap().split_at_indices(&self.algebraic_indices);
             let rhs_jac_aa = self.rhs_jac_aa.as_mut().unwrap();
-            rhs_jac_aa.m_mut().copy_from(&jac_aa);
-
-            // linearisation does not depend on x or t
-            self.solver.as_mut().unwrap().set_linearisation(
+            rhs_jac_aa.m_mut().copy_from(&jac_aa.into_transpose());
+            lin_sol.set_linearisation(
                 rhs_jac_aa,
                 &self.tmp_algebraic,
                 Eqn::T::zero(),
             );
-            Some(jac_ad)
-        } else {
-            None
         };
+
+        // if there is a mass matrix, setup the solver for M_dd*^-1
+        if let Some(lin_sol) = self.solver_mdd.as_mut() {
+            let (mass_dd, _, _, _) =  solver.mass().unwrap().split_at_indices(&self.differential_indices);
+            let mass_dd_op = self.mass_dd.as_mut().unwrap();
+            mass_dd_op.m_mut().copy_from(&mass_dd.into_transpose());
+            lin_sol.set_linearisation(mass_dd_op, &self.tmp_differential, Eqn::T::zero());
+        } 
+
+        // tmp_nout = all
+        // tmp_nstates = all
+        // tmp_nstates = out
+        // tmp_differential = algebraic or mass
+        // tmp_algebraic = algebraic
+        // tmp_differential2 = algebraic
+        // tmp_nparams = out
 
         let out = solver.augmented_eqn().unwrap().eqn().out();
         let state_mut = solver.state_mut();
@@ -275,44 +291,92 @@ where
             .zip(state_mut.sg.iter_mut())
             .zip(dgdus)
         {
+            // start from dgdu^T, where u is the output of the model
             self.tmp_nout.copy_from_view(&dgdu);
-            let neg_dgdy = if let Some(out) = out.as_ref() {
+
+            // has out, mass and algebraic indices
+            if let (Some(out), Some(sol_mdd), Some(sol_jaa)) = (out.as_ref(), self.solver_mdd.as_ref(), self.solver_jaa.as_ref()) {
+                // calculate -dgdy^T = -u_y^T * dgdu^T (if u = y, then dgdy = dgdu)
                 out.jac_transpose_mul_inplace(
                     &self.tmp_nstates,
                     t,
                     &self.tmp_nout,
                     &mut self.tmp_nstates2,
                 );
-                &self.tmp_nstates2
-            } else {
-                self.tmp_nstates2.axpy(-M::T::one(), &self.tmp_nout, M::T::zero());
-                &self.tmp_nstates2
-            };
-            if self.algebraic_indices.len() > 0 {
-                // add -f*_y^d (f*_y^a)^{-1} g*_y^a + g*_y^d to differential part of s
-                // todo: need to add M^T^-1 to that for non-identity mass
-                // note g_y^T = u_y^T * g_u^T, where u_y^T is the out adjoint
+                // calculate -M_dd^-1 * dgdy_d^T (if M = I, then dgdy = dgdu)
                 self.tmp_differential
-                    .gather(neg_dgdy, &self.differential_indices);
-                self.tmp_algebraic.gather(neg_dgdy, &self.algebraic_indices);
+                    .gather(&self.tmp_nstates2, &self.differential_indices);
+                self.tmp_algebraic.gather(&self.tmp_nstates2, &self.algebraic_indices);
+                sol_mdd.solve_in_place(&mut self.tmp_differential)?;
+
+                // add -f*_y^d (f*_y^a)^{-1} g*_y^a + M_dd^-1 g*_y^d to differential part of s
                 self.tmp_differential2.gather(s_i, &self.differential_indices);
                 self.tmp_differential2.sub_assign(&self.tmp_differential);
-                self.solver
-                    .as_ref()
-                    .unwrap()
-                    .solve_in_place(&mut self.tmp_algebraic)?;
-                rhs_jac_ad_op.as_ref().unwrap().gemv(
+
+                sol_jaa.solve_in_place(&mut self.tmp_algebraic)?; 
+                let rhs_jac_ad = self.rhs_jac_aa.as_ref().unwrap().m();
+                rhs_jac_ad.gemv(
                     M::T::one(),
                     &self.tmp_algebraic,
                     M::T::one(),
                     &mut self.tmp_differential2,
                 );
                 self.tmp_differential2.scatter(&self.differential_indices, s_i);
+            // just has out and mass, no algebraic indices
+            } else if let (Some(out), Some(sol_mdd)) = (out.as_ref(), self.solver_mdd.as_ref()) {
+                // calculate -dgdy^T = -u_y^T * dgdu^T (if u = y, then dgdy = dgdu)
+                out.jac_transpose_mul_inplace(
+                    &self.tmp_nstates,
+                    t,
+                    &self.tmp_nout,
+                    &mut self.tmp_nstates2,
+                );
+                // calculate -M_dd^-1 * dgdy^T (if M = I, then dgdy = dgdu)
+                sol_mdd.solve_in_place(&mut self.tmp_nstates2)?;
+                s_i.sub_assign(&self.tmp_nstates2);
+            // just has out, no mass
+            } else if let Some(out) = out.as_ref() {
+                // calculate -dgdy^T = -u_y^T * dgdu^T (if u = y, then dgdy = dgdu)
+                out.jac_transpose_mul_inplace(
+                    &self.tmp_nstates,
+                    t,
+                    &self.tmp_nout,
+                    &mut self.tmp_nstates2,
+                );
+                s_i.sub_assign(&self.tmp_nstates2);
+            // no out, has mass and algebraic indices
+            } else if let (Some(sol_mdd), Some(sol_jaa)) = (self.solver_mdd.as_ref(), self.solver_jaa.as_ref()) {
+                self.tmp_differential
+                    .gather(&self.tmp_nout, &self.differential_indices);
+                self.tmp_algebraic.gather(&self.tmp_nout, &self.algebraic_indices);
+
+                // calculate -M_dd^-1 * dgdy^T (if M = I, then dgdy = dgdu)
+                sol_mdd.solve_in_place(&mut self.tmp_differential)?;
+
+                // add -f*_y^d (f*_y^a)^{-1} g*_y^a + M_dd^-1 g*_y^d to differential part of s
+                self.tmp_differential2.gather(s_i, &self.differential_indices);
+                self.tmp_differential2.sub_assign(&self.tmp_differential);
+                sol_jaa.solve_in_place(&mut self.tmp_algebraic)?;
+                let rhs_jac_ad = self.rhs_jac_aa.as_ref().unwrap().m();
+                rhs_jac_ad.gemv(
+                    M::T::one(),
+                    &self.tmp_algebraic,
+                    M::T::one(),
+                    &mut self.tmp_differential2,
+                );
+                self.tmp_differential2.scatter(&self.differential_indices, s_i);
+            // no out, has mass, no algebraic indices
+            } else if let Some(sol_mdd) = self.solver_mdd.as_ref() {
+                // calculate -M_dd^-1 * dgdy^T (if M = I, then dgdy = dgdu)
+                sol_mdd.solve_in_place(&mut self.tmp_nout)?;
+                s_i.sub_assign(&self.tmp_nout);
+            // no out, no mass
             } else {
-                // add g*_y^T(x, t) to s
-                s_i.sub_assign(neg_dgdy);
+                // add -dgdy^T to s
+                s_i.sub_assign(&self.tmp_nout);
             }
-            // add -g_p^T(x, t) to sg
+                
+            // add -g_p^T(x, t) to sg if there is an output function
             // g_p = g_u^T * u_y^T * y_p^T
             // g_p^T =  u_p^T * g_u^T (u is the output of the model, so u_p^T is the sens_tranpose)
             if let Some(out) = out.as_ref() {

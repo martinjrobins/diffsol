@@ -140,6 +140,7 @@ where
     fn state_mut(&mut self) -> StateRefMut<Eqn::V>;
 
     fn jacobian(&self) -> Option<Ref<Eqn::M>>;
+    fn mass(&self) -> Option<Ref<Eqn::M>>;
 
     /// Step the solution forward by one step, altering the internal state of the solver.
     /// The return value is a `Result` containing the reason for stopping the solver, possible reasons are:

@@ -249,6 +249,9 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
         Self::try_from_triplets(n, m, triplets).unwrap()
     }
 
+    /// return the transpose of the matrix, consuming it
+    fn into_transpose(self) -> Self;
+
     /// Extract the diagonal of the matrix as an owned vector
     fn diagonal(&self) -> Self::V;
 
