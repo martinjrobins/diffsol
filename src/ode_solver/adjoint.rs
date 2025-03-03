@@ -155,6 +155,7 @@ struct BlockInfoSol<M: Matrix, LS: LinearSolver<M>> {
 
 struct BlockInfo<M: Matrix> {
     pub block: MatrixOp<M>,
+    pub src_indices: <M::V as Vector>::Index,
 }
 
 struct PartitionInfo<I> {
@@ -207,7 +208,7 @@ where
                 let jacobian = solver
                     .jacobian()
                     .ok_or(DiffsolError::from(OdeSolverError::JacobianNotAvailable))?;
-                let [_, _, (ad, _ad_idx), (aa, aa_idx)] =
+                let [_, _, (ad, ad_idx), (aa, aa_idx)] =
                     jacobian.split(|i| mass_diag[i] == M::T::zero(), true);
                 let mut rhs_jac_aa = BlockInfoSol {
                     block: MatrixOp::new(aa),
@@ -217,6 +218,7 @@ where
                 rhs_jac_aa.solver.set_problem(&rhs_jac_aa.block);
                 let rhs_jac_ad = BlockInfo {
                     block: MatrixOp::new(ad),
+                    src_indices: ad_idx,
                 };
                 (Some(rhs_jac_aa), Some(rhs_jac_ad))
             } else {
@@ -279,6 +281,10 @@ where
         // if there are algebraic indices, setup the solver for (f*_y^a)^{-1} and M_dd*^-1
         if let Some(rhs_jac_aa) = self.rhs_jac_aa.as_mut() {
             let jacobian = solver.jacobian().unwrap();
+            let rhs_jac_ad = self.rhs_jac_ad.as_mut().unwrap();
+            rhs_jac_ad.block
+                .m_mut()
+                .copy_block_from(&rhs_jac_ad.src_indices, &jacobian);
             rhs_jac_aa
                 .block
                 .m_mut()

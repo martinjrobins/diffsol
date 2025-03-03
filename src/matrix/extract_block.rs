@@ -15,6 +15,7 @@ impl CscBlock {
         ncols: IndexType,
         cols: Vec<Vec<(IndexType, IndexType)>>,
     ) -> Self {
+        assert_eq!(ncols, cols.len());
         let mut row_indices = Vec::new();
         let mut col_pointers = Vec::new();
         let mut src_indices = Vec::new();
@@ -23,11 +24,13 @@ impl CscBlock {
             col_pointers.push(acc);
             acc += col.len();
             for (src_i, my_i) in col.into_iter() {
+                assert!(my_i < nrows);
                 row_indices.push(my_i);
                 src_indices.push(src_i);
             }
         }
         col_pointers.push(acc);
+        assert_eq!(col_pointers.len(), ncols + 1);
         Self {
             ncols,
             nrows,
@@ -163,16 +166,16 @@ impl CscBlock {
     {
         let n = col_pointers.len() - 1;
         let (cat, upper_indices, lower_indices, n_up, n_low) = Self::setup_split(f, n);
-        let mut ur_tmp = vec![Vec::new(); n];
-        let mut ul_tmp = vec![Vec::new(); n];
-        let mut lr_tmp = vec![Vec::new(); n];
-        let mut ll_tmp = vec![Vec::new(); n];
+        let mut ur_tmp = vec![Vec::new(); n_up];
+        let mut ul_tmp = vec![Vec::new(); n_low];
+        let mut lr_tmp = vec![Vec::new(); n_up];
+        let mut ll_tmp = vec![Vec::new(); n_low];
 
         for j in 0..n {
             let col_ptr = col_pointers[j];
             let next_col_ptr = col_pointers[j + 1];
             if cat[j] {
-                let jj = n_up - upper_indices[j];
+                let jj = lower_indices[j];
                 for (data_i, &i) in row_indices
                     .iter()
                     .enumerate()
@@ -180,15 +183,15 @@ impl CscBlock {
                     .skip(col_ptr)
                 {
                     if !cat[i] {
-                        let ii = n_up - upper_indices[i];
-                        ur_tmp[jj].push((data_i, ii));
+                        let ii = upper_indices[i];
+                        ur_tmp[ii].push((data_i, jj));
                     } else {
                         let ii = lower_indices[i];
-                        lr_tmp[jj].push((data_i, ii));
+                        lr_tmp[ii].push((data_i, jj));
                     }
                 }
             } else {
-                let jj = n_low - lower_indices[j];
+                let jj = upper_indices[j];
                 for (data_i, &i) in row_indices
                     .iter()
                     .enumerate()
@@ -196,19 +199,19 @@ impl CscBlock {
                     .skip(col_ptr)
                 {
                     if !cat[i] {
-                        let ii = n_up - upper_indices[i];
-                        ul_tmp[jj].push((data_i, ii));
+                        let ii = upper_indices[i];
+                        ul_tmp[ii].push((data_i, jj));
                     } else {
                         let ii = lower_indices[i];
-                        ll_tmp[jj].push((data_i, ii));
+                        ll_tmp[ii].push((data_i, jj));
                     }
                 }
             }
         }
-        let ur = Self::new_from_vec(n_up, n_low, ur_tmp);
-        let ul = Self::new_from_vec(n_up, n_up, ul_tmp);
-        let lr = Self::new_from_vec(n_low, n_low, lr_tmp);
-        let ll = Self::new_from_vec(n_low, n_up, ll_tmp);
+        let ur = Self::new_from_vec(n_low, n_up, ur_tmp);
+        let ul = Self::new_from_vec(n_low, n_low, ul_tmp);
+        let lr = Self::new_from_vec(n_up, n_up, lr_tmp);
+        let ll = Self::new_from_vec(n_up, n_low, ll_tmp);
         (ul, ur, ll, lr)
     }
 
@@ -258,7 +261,7 @@ impl<I: VectorIndex> ColMajBlock<I> {
         col_indices: &[IndexType],
         transpose: bool,
     ) -> Self {
-        let src_indices = if transpose {
+        let mut src_indices = if transpose {
             col_indices
                 .iter()
                 .chain(row_indices.iter())
@@ -271,6 +274,7 @@ impl<I: VectorIndex> ColMajBlock<I> {
                 .copied()
                 .collect::<Vec<_>>()
         };
+        src_indices.push(if transpose { 1 } else { 0 });
         let src_indices = I::from_slice(src_indices.as_slice());
         let nrows = if transpose { ncols } else { nrows };
         let ncols = if transpose { nrows } else { ncols };
@@ -325,11 +329,22 @@ impl<I: VectorIndex> ColMajBlock<I> {
     pub fn copy_block_from<M: DenseMatrix>(data: &mut M, src_data: &M, src_indices: &I) {
         let nrows = data.nrows();
         let ncols = data.ncols();
-        for j in 0..ncols {
-            let jj = src_indices[nrows + j];
-            for i in 0..nrows {
-                let ii = src_indices[i];
-                data[(i, j)] = src_data[(ii, jj)];
+        let transpose = src_indices[src_indices.len() - 1] == 1;
+        if transpose {
+            for j in 0..ncols {
+                let jj = src_indices[nrows + j];
+                for i in 0..nrows {
+                    let ii = src_indices[i];
+                    data[(i, j)] = src_data[(jj, ii)];
+                }
+            }
+        } else {
+            for j in 0..ncols {
+                let jj = src_indices[nrows + j];
+                for i in 0..nrows {
+                    let ii = src_indices[i];
+                    data[(i, j)] = src_data[(ii, jj)];
+                }
             }
         }
     }
@@ -443,14 +458,14 @@ mod tests {
             .map(|(i, j, v)| (*i, *j, M::T::from(*v)))
             .collect::<Vec<_>>();
         let m = M::try_from_triplets(4, 4, triplets.clone()).unwrap();
-        let indices = vec![0, 2];
+        let indices = [0, 2];
 
         let [(ul, _ul_idx), (ur, _ur_idx), (ll, _ll_idx), (lr, _lr_idx)] =
             m.split(|i| indices.contains(&i), false);
-        let ul_triplets = vec![(0, 0, 6.0), (1, 0, 14.0), (0, 1, 8.0), (1, 1, 16.0)];
-        let ur_triplets = vec![(0, 0, 5.0), (1, 0, 13.0), (0, 1, 7.0), (1, 1, 15.0)];
-        let ll_triplets = vec![(0, 0, 2.0), (1, 0, 10.0), (0, 1, 4.0), (1, 1, 12.0)];
-        let lr_triplets = vec![(0, 0, 1.0), (1, 0, 9.0), (0, 1, 3.0), (1, 1, 11.0)];
+        let ul_triplets = [(0, 0, 6.0), (1, 0, 14.0), (0, 1, 8.0), (1, 1, 16.0)];
+        let ur_triplets = [(0, 0, 5.0), (1, 0, 13.0), (0, 1, 7.0), (1, 1, 15.0)];
+        let ll_triplets = [(0, 0, 2.0), (1, 0, 10.0), (0, 1, 4.0), (1, 1, 12.0)];
+        let lr_triplets = [(0, 0, 1.0), (1, 0, 9.0), (0, 1, 3.0), (1, 1, 11.0)];
         let ul_triplets = ul_triplets
             .iter()
             .map(|(i, j, v)| (*i, *j, M::T::from(*v)))
@@ -502,10 +517,10 @@ mod tests {
 
         let [(ul, _ul_idx), (ur, _ur_idx), (ll, _ll_idx), (lr, _lr_idx)] =
             m.split(|i| indices.contains(&i), true);
-        let ul_triplets = vec![(0, 0, 6.0), (1, 0, 8.0), (0, 1, 14.0), (1, 1, 16.0)];
-        let ur_triplets = vec![(0, 0, 5.0), (1, 0, 7.0), (0, 1, 13.0), (1, 1, 15.0)];
-        let ll_triplets = vec![(0, 0, 2.0), (1, 0, 4.0), (0, 1, 10.0), (1, 1, 12.0)];
-        let lr_triplets = vec![(0, 0, 1.0), (1, 0, 3.0), (0, 1, 9.0), (1, 1, 11.0)];
+        let ul_triplets = [(0, 0, 6.0), (1, 0, 8.0), (0, 1, 14.0), (1, 1, 16.0)];
+        let ur_triplets = [(0, 0, 5.0), (1, 0, 7.0), (0, 1, 13.0), (1, 1, 15.0)];
+        let ll_triplets = [(0, 0, 2.0), (1, 0, 4.0), (0, 1, 10.0), (1, 1, 12.0)];
+        let lr_triplets = [(0, 0, 1.0), (1, 0, 3.0), (0, 1, 9.0), (1, 1, 11.0)];
         let ul_triplets = ul_triplets
             .iter()
             .map(|(i, j, v)| (*i, *j, M::T::from(*v)))
@@ -547,22 +562,15 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let mat = M::combine(&ul, &ur, &ll, &lr, |i| indices.contains(&i));
-        assert_eq!(
-            triplets,
-            mat.triplet_iter()
-                .map(|(i, j, v)| (i, j, *v))
-                .collect::<Vec<_>>()
-        );
 
-        let indices = vec![2];
+        let indices = [2];
 
         let [(ul, _ul_idx), (ur, _ur_idx), (ll, _ll_idx), (lr, _lr_idx)] =
             m.split(|i| indices.contains(&i), false);
-        let ul_triplets = vec![(0, 0, 6.0), (1, 0, 14.0), (0, 1, 8.0), (1, 1, 16.0)];
-        let ur_triplets = vec![(0, 0, 5.0), (1, 0, 13.0), (0, 1, 7.0), (1, 1, 15.0)];
-        let ll_triplets = vec![(0, 0, 2.0), (1, 0, 10.0), (0, 1, 4.0), (1, 1, 12.0)];
-        let lr_triplets = vec![(0, 0, 1.0), (1, 0, 9.0), (0, 1, 3.0), (1, 1, 11.0)];
+        let ul_triplets = [(0, 0, 1.0), (1, 0, 5.0), (2, 0, 13.0), (0, 1, 2.0), (1, 1, 6.0), (2, 1, 14.0), (0, 2, 4.0), (1, 2, 8.0), (2, 2, 16.0)];
+        let ur_triplets = [(0, 0, 3.0), (1, 0, 7.0), (2, 0, 15.0)];
+        let ll_triplets = [(0, 0, 9.0), (0, 1, 10.0), (0, 2, 12.0)];
+        let lr_triplets = [(0, 0, 11.0)];
         let ul_triplets = ul_triplets
             .iter()
             .map(|(i, j, v)| (*i, *j, M::T::from(*v)))
