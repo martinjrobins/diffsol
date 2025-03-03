@@ -3,10 +3,11 @@ use std::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
 use crate::error::DiffsolError;
 use crate::scalar::Scale;
-use crate::{IndexType, Scalar, Vector, VectorIndex};
+use crate::{IndexType, Scalar, Vector};
 
+use extract_block::combine;
 use num_traits::{One, Zero};
-use sparsity::{MatrixSparsity, MatrixSparsityRef};
+use sparsity::{Dense, MatrixSparsity, MatrixSparsityRef};
 
 #[cfg(feature = "nalgebra")]
 mod dense_nalgebra_serial;
@@ -127,8 +128,6 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
         Self::zeros(1, 1).sparsity().is_some()
     }
 
-    fn into_transpose(self) -> Self;
-
     /// Extract the diagonal of the matrix as an owned vector
     fn diagonal(&self) -> Self::V;
 
@@ -166,16 +165,34 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
         data: &Self::V,
     );
 
-    /// assign the values in `data` to the matrix at the indices in `dst_indices` from the indices in `src_indices`
-    /// dst_index and src_indices can be obtained using the `get_index` method on the Sparsity type
-    ///      - for dense matrices, the dst_index is the data index in column-major order
-    ///      - for sparse matrices, the dst_index is the index into the data array
-    fn set_data_with_indices_mat(
-        &mut self,
-        dst_indices: &<Self::V as Vector>::Index,
-        src_indices: &<Self::V as Vector>::Index,
-        data: &Self,
-    );
+    fn split<F: Fn(IndexType) -> bool>(
+        &self,
+        f: F,
+        transpose: bool,
+    ) -> [(Self, <Self::V as Vector>::Index); 4] {
+        match self.sparsity() {
+            Some(sp) => sp.split(f, transpose).map(|(sp, src_indices)| {
+                let mut m = Self::new_from_sparsity(sp.nrows(), sp.ncols(), Some(sp));
+                m.copy_block_from(&src_indices, self);
+                (m, src_indices)
+            }),
+            None => Dense::<Self>::new(self.nrows(), self.ncols())
+                .split(f, transpose)
+                .map(|(sp, src_indices)| {
+                    let mut m = Self::new_from_sparsity(sp.nrows(), sp.ncols(), None);
+                    m.copy_block_from(&src_indices, self);
+                    (m, src_indices)
+                }),
+        }
+    }
+
+    fn combine<F: Fn(IndexType) -> bool>(ul: &Self, ur: &Self, ll: &Self, lr: &Self, f: F) -> Self {
+        combine(ul, ur, ll, lr, f)
+    }
+
+    /// copies the values in `parent` to a matrix previously extracted using [MatrixSparsityRef::extract_blocks]
+    /// to obtain the `src_indices` arg
+    fn copy_block_from(&mut self, src_indices: &<Self::V as Vector>::Index, parent: &Self);
 
     /// Perform the assignment self = x + beta * y where x and y are matrices and beta is a scalar
     /// Panics if the sparsity of self, x, and y do not match (i.e. sparsity of self must be the union of the sparsity of x and y)
@@ -242,4 +259,3 @@ pub trait DenseMatrix:
         ret
     }
 }
-

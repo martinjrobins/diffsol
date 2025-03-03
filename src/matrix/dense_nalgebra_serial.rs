@@ -10,7 +10,9 @@ use crate::{scalar::Scale, IndexType, Scalar, Vector};
 use super::default_solver::DefaultSolver;
 use super::sparsity::{Dense, DenseRef};
 use crate::error::DiffsolError;
-use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU};
+use crate::{
+    ColMajBlock, DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU,
+};
 
 impl<T: Scalar> DefaultSolver for DMatrix<T> {
     type LS = NalgebraLU<T>;
@@ -101,6 +103,10 @@ impl<T: Scalar> Matrix for DMatrix<T> {
         None
     }
 
+    fn copy_block_from(&mut self, src_indices: &<Self::V as Vector>::Index, parent: &Self) {
+        ColMajBlock::<<Self::V as Vector>::Index>::copy_block_from(self, parent, src_indices);
+    }
+
     fn set_data_with_indices(
         &mut self,
         dst_indices: &<Self::V as Vector>::Index,
@@ -121,7 +127,7 @@ impl<T: Scalar> Matrix for DMatrix<T> {
     fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)> {
         let n = self.ncols();
         let m = self.nrows();
-        (0..m).flat_map(move |i| (0..n).map(move |j| (i, j, &self[(i, j)])))
+        (0..n).flat_map(move |j| (0..m).map(move |i| (i, j, &self[(i, j)])))
     }
 
     fn try_from_triplets(

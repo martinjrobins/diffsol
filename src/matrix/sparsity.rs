@@ -3,9 +3,10 @@ use crate::{
     matrix_error,
     scalar::IndexType,
     vector::{Vector, VectorIndex},
+    ColMajBlock,
 };
 
-use super::Matrix;
+use super::{Matrix, MatrixCommon};
 
 pub trait MatrixSparsity<M: Matrix>: Sized + Clone {
     fn nrows(&self) -> IndexType;
@@ -20,7 +21,7 @@ pub trait MatrixSparsity<M: Matrix>: Sized + Clone {
     fn union(self, other: M::SparsityRef<'_>) -> Result<M::Sparsity, DiffsolError>;
     fn new_diagonal(n: IndexType) -> Self;
     fn as_ref(&self) -> M::SparsityRef<'_>;
-    fn get_index(&self, indices: Vec<(IndexType, IndexType)>) -> <M::V as Vector>::Index;
+    fn get_index(&self, indices: &[(IndexType, IndexType)]) -> <M::V as Vector>::Index;
 }
 
 pub trait MatrixSparsityRef<'a, M: Matrix> {
@@ -29,7 +30,11 @@ pub trait MatrixSparsityRef<'a, M: Matrix> {
     fn is_sparse() -> bool;
     fn indices(&self) -> Vec<(IndexType, IndexType)>;
     fn to_owned(&self) -> M::Sparsity;
-    fn get_index(&self, indices: Vec<(IndexType, IndexType)>) -> <M::V as Vector>::Index;
+    fn split<F: Fn(IndexType) -> bool>(
+        &self,
+        f: F,
+        transpose: bool,
+    ) -> [(M::Sparsity, <M::V as Vector>::Index); 4];
 }
 
 #[derive(Clone)]
@@ -51,6 +56,30 @@ impl<M: Matrix> Dense<M> {
             _phantom: std::marker::PhantomData,
         }
     }
+    pub fn nrows(&self) -> IndexType {
+        self.nrows
+    }
+    pub fn ncols(&self) -> IndexType {
+        self.ncols
+    }
+    pub(crate) fn split<F: Fn(IndexType) -> bool>(
+        &self,
+        f: F,
+        transpose: bool,
+    ) -> [(Self, <<M as MatrixCommon>::V as Vector>::Index); 4] {
+        let (ul_blk, ur_blk, ll_blk, lr_blk) =
+            ColMajBlock::split(self.nrows, self.ncols, f, transpose);
+        let ul = Dense::new(ul_blk.nrows, ul_blk.ncols);
+        let ur = Dense::new(ur_blk.nrows, ur_blk.ncols);
+        let ll = Dense::new(ll_blk.nrows, ll_blk.ncols);
+        let lr = Dense::new(lr_blk.nrows, lr_blk.ncols);
+        [
+            (ul, ul_blk.src_indices),
+            (ur, ur_blk.src_indices),
+            (ll, ll_blk.src_indices),
+            (lr, lr_blk.src_indices),
+        ]
+    }
 }
 
 impl<'a, M: Matrix> DenseRef<'a, M> {
@@ -61,7 +90,7 @@ impl<'a, M: Matrix> DenseRef<'a, M> {
 
 impl<M> MatrixSparsity<M> for Dense<M>
 where
-    for<'a> M: Matrix<Sparsity = Dense<M>, SparsityRef<'a> = DenseRef<'a, M>> + 'a,
+    for<'a> M: Matrix<Sparsity = Dense<M>, SparsityRef<'a> = DenseRef<'a, M>>,
 {
     fn union(self, other: M::SparsityRef<'_>) -> Result<M::Sparsity, DiffsolError> {
         if self.nrows() != other.nrows() || self.ncols() != other.ncols() {
@@ -104,10 +133,9 @@ where
     fn new_diagonal(n: IndexType) -> Self {
         Dense::new(n, n)
     }
-    fn get_index(&self, rows: &[IndexType], cols: &[IndexType]) -> <M::V as Vector>::Index {
-        let indices: Vec<_> = rows
+    fn get_index(&self, indices: &[(IndexType, IndexType)]) -> <M::V as Vector>::Index {
+        let indices: Vec<_> = indices
             .iter()
-            .zip(cols.iter())
             .map(|(i, j)| {
                 if i >= &self.nrows() || j >= &self.ncols() {
                     panic!("Index out of bounds")
@@ -121,10 +149,18 @@ where
 
 impl<'a, M> MatrixSparsityRef<'a, M> for DenseRef<'a, M>
 where
-    M: Matrix<Sparsity = Dense<M>, SparsityRef<'a> = Self> + 'a,
+    M: Matrix<Sparsity = Dense<M>, SparsityRef<'a> = Self>,
 {
     fn to_owned(&self) -> M::Sparsity {
         Dense::new(self.nrows(), self.ncols())
+    }
+
+    fn split<F: Fn(IndexType) -> bool>(
+        &self,
+        f: F,
+        transpose: bool,
+    ) -> [(M::Sparsity, <<M as MatrixCommon>::V as Vector>::Index); 4] {
+        self.dense.split(f, transpose)
     }
 
     fn nrows(&self) -> IndexType {

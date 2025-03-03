@@ -409,6 +409,7 @@ impl_sub_view_owned!(SundialsVectorView, SundialsVector);
 impl<'a> VectorViewMut<'a> for SundialsVectorViewMut<'a> {
     type Owned = SundialsVector;
     type View = SundialsVectorView<'a>;
+    type Index = SundialsIndexVector;
     fn copy_from(&mut self, other: &Self::Owned) {
         unsafe { N_VScale(1.0, other.sundials_vector(), self.sundials_vector()) }
     }

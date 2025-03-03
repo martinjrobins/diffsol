@@ -563,6 +563,14 @@ where
         }
     }
 
+    fn mass(&self) -> Option<std::cell::Ref<<Eqn>::M>> {
+        if let Some(op) = self.op.as_ref() {
+            Some(op.mass())
+        } else {
+            self.s_op.as_ref().map(|s_op| s_op.mass())
+        }
+    }
+
     fn order(&self) -> usize {
         self.tableau.order()
     }

@@ -109,6 +109,7 @@ impl_mul_assign_scale_vector!(DVectorViewMut<'a, T>);
 impl<'a, T: Scalar> VectorViewMut<'a> for DVectorViewMut<'a, T> {
     type Owned = DVector<T>;
     type View = DVectorView<'a, T>;
+    type Index = DVector<IndexType>;
     fn copy_from(&mut self, other: &Self::Owned) {
         self.copy_from(other);
     }

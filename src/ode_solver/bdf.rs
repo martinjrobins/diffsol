@@ -861,6 +861,14 @@ where
         }
     }
 
+    fn mass(&self) -> Option<Ref<<Eqn>::M>> {
+        if let Some(op) = self.op.as_ref() {
+            Some(op.mass())
+        } else {
+            self.s_op.as_ref().map(|s_op| s_op.mass())
+        }
+    }
+
     fn set_state(&mut self, state: Self::State) {
         let old_order = self.state.order;
         self.state = state;

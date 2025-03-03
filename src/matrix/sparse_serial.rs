@@ -3,7 +3,7 @@ use std::{collections::HashSet, ops::Mul};
 use nalgebra::DVector;
 use nalgebra_sparse::{pattern::SparsityPattern, CooMatrix, CscMatrix};
 
-use crate::{error::DiffsolError, scalar::Scale, vector::Vector, IndexType, Scalar};
+use crate::{error::DiffsolError, scalar::Scale, vector::Vector, CscBlock, IndexType, Scalar};
 
 use super::{
     sparsity::{MatrixSparsity, MatrixSparsityRef},
@@ -138,10 +138,10 @@ impl<T: Scalar> MatrixSparsity<CscMatrix<T>> for SparsityPattern {
         major_offsets.push(n);
         SparsityPattern::try_from_offsets_and_indices(n, n, major_offsets, minor_indices).unwrap()
     }
-    fn get_index(&self, rows: &[IndexType], cols: &[IndexType]) -> DVector<IndexType> {
-        let mut index = DVector::<IndexType>::zeros(rows.len());
+    fn get_index(&self, indices: &[(IndexType, IndexType)]) -> DVector<IndexType> {
+        let mut index = DVector::<IndexType>::zeros(indices.len());
         #[allow(unused_mut)]
-        for ((&i, &j), mut ii) in rows.iter().zip(cols.iter()).zip(index.iter_mut()) {
+        for (&(i, j), mut ii) in indices.iter().zip(index.iter_mut()) {
             let offset = self.major_offsets()[j];
             let lane = self.lane(j);
             let lane_i = lane.iter().position(|&x| x == i).unwrap();
@@ -152,6 +152,53 @@ impl<T: Scalar> MatrixSparsity<CscMatrix<T>> for SparsityPattern {
 }
 
 impl<'a, T: Scalar> MatrixSparsityRef<'a, CscMatrix<T>> for &'a SparsityPattern {
+    fn split<F: Fn(IndexType) -> bool>(
+        &self,
+        f: F,
+        transpose: bool,
+    ) -> [(
+        SparsityPattern,
+        <<CscMatrix<T> as MatrixCommon>::V as Vector>::Index,
+    ); 4] {
+        let col_ptrs = self.major_offsets();
+        let row_idx = self.minor_indices();
+        let (ul_blk, ur_blk, ll_blk, lr_blk) = CscBlock::split(row_idx, col_ptrs, f, transpose);
+        let ul_sym = SparsityPattern::try_from_offsets_and_indices(
+            ul_blk.ncols,
+            ul_blk.nrows,
+            ul_blk.col_pointers,
+            ul_blk.row_indices,
+        )
+        .unwrap();
+        let ur_sym = SparsityPattern::try_from_offsets_and_indices(
+            ur_blk.ncols,
+            ur_blk.nrows,
+            ur_blk.col_pointers,
+            ur_blk.row_indices,
+        )
+        .unwrap();
+        let ll_sym = SparsityPattern::try_from_offsets_and_indices(
+            ll_blk.ncols,
+            ll_blk.nrows,
+            ll_blk.col_pointers,
+            ll_blk.row_indices,
+        )
+        .unwrap();
+        let lr_sym = SparsityPattern::try_from_offsets_and_indices(
+            lr_blk.ncols,
+            lr_blk.nrows,
+            lr_blk.col_pointers,
+            lr_blk.row_indices,
+        )
+        .unwrap();
+        [
+            (ul_sym, ul_blk.src_indices.into()),
+            (ur_sym, ur_blk.src_indices.into()),
+            (ll_sym, ll_blk.src_indices.into()),
+            (lr_sym, lr_blk.src_indices.into()),
+        ]
+    }
+
     fn to_owned(&self) -> SparsityPattern {
         SparsityPattern::clone(self)
     }
@@ -190,6 +237,10 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
 
     fn sparsity(&self) -> Option<Self::SparsityRef<'_>> {
         Some(self.pattern())
+    }
+
+    fn copy_block_from(&mut self, src_indices: &<Self::V as Vector>::Index, parent: &Self) {
+        CscBlock::copy_block_from(self.values_mut(), parent.values(), src_indices);
     }
 
     fn set_data_with_indices(

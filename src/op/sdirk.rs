@@ -50,6 +50,9 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
     pub fn rhs_jac(&self) -> Ref<Eqn::M> {
         self.rhs_jac.borrow()
     }
+    pub fn mass(&self) -> Ref<Eqn::M> {
+        self.mass_jac.borrow()
+    }
     pub fn new_no_jacobian(eqn: Eqn, c: Eqn::T) -> Self {
         let n = eqn.rhs().nstates();
         let h = RefCell::new(Eqn::T::zero());

@@ -230,6 +230,7 @@ impl<'a, T: Scalar> VectorView<'a> for ColRef<'a, T> {
 impl<'a, T: Scalar> VectorViewMut<'a> for ColMut<'a, T> {
     type Owned = Col<T>;
     type View = ColRef<'a, T>;
+    type Index = Vec<IndexType>;
     fn copy_from(&mut self, other: &Self::Owned) {
         self.copy_from(other);
     }
