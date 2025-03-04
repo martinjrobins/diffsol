@@ -284,10 +284,10 @@ mod tests {
         Eqn::V: DefaultDenseMatrix,
         Eqn::M: DefaultSolver,
     {
-        let nout = 2;
+        let nparams = dgdp_check.nrows();
         let dgdu = dsum_squaresdp(&forwards_soln, &data);
 
-        let atol = Eqn::V::from_element(nout, Eqn::T::from(1e-6));
+        let atol = Eqn::V::from_element(nparams, Eqn::T::from(1e-6));
         let rtol = Eqn::T::from(1e-6);
         let state = backwards_solver
             .solve_adjoint_backwards_pass(times, dgdu.as_slice())

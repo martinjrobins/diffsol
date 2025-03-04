@@ -195,7 +195,8 @@ where
                 mass_diag.partition_indices(|x| x == M::T::zero());
 
             // setup mass solver
-            let [(dd, dd_idx), _, _, _] = mass_matrix.split(|i| mass_diag[i] == M::T::zero(), true);
+            let [(dd, dd_idx), _, _, _] =
+                mass_matrix.split(|i| mass_diag[i] == M::T::zero(), false);
             let mut mass_dd = BlockInfoSol {
                 block: MatrixOp::new(dd),
                 src_indices: dd_idx,
@@ -208,8 +209,8 @@ where
                 let jacobian = solver
                     .jacobian()
                     .ok_or(DiffsolError::from(OdeSolverError::JacobianNotAvailable))?;
-                let [_, _, (ad, ad_idx), (aa, aa_idx)] =
-                    jacobian.split(|i| mass_diag[i] == M::T::zero(), true);
+                let [_, (ad, ad_idx), _, (aa, aa_idx)] =
+                    jacobian.split(|i| mass_diag[i] == M::T::zero(), false);
                 let mut rhs_jac_aa = BlockInfoSol {
                     block: MatrixOp::new(aa),
                     src_indices: aa_idx,
@@ -282,7 +283,8 @@ where
         if let Some(rhs_jac_aa) = self.rhs_jac_aa.as_mut() {
             let jacobian = solver.jacobian().unwrap();
             let rhs_jac_ad = self.rhs_jac_ad.as_mut().unwrap();
-            rhs_jac_ad.block
+            rhs_jac_ad
+                .block
                 .m_mut()
                 .copy_block_from(&rhs_jac_ad.src_indices, &jacobian);
             rhs_jac_aa

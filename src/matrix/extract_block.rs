@@ -276,8 +276,11 @@ impl<I: VectorIndex> ColMajBlock<I> {
         };
         src_indices.push(if transpose { 1 } else { 0 });
         let src_indices = I::from_slice(src_indices.as_slice());
-        let nrows = if transpose { ncols } else { nrows };
-        let ncols = if transpose { nrows } else { ncols };
+        let (nrows, ncols) = if transpose {
+            (ncols, nrows)
+        } else {
+            (nrows, ncols)
+        };
         Self {
             nrows,
             ncols,
@@ -562,15 +565,33 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-
         let indices = [2];
 
         let [(ul, _ul_idx), (ur, _ur_idx), (ll, _ll_idx), (lr, _lr_idx)] =
             m.split(|i| indices.contains(&i), false);
-        let ul_triplets = [(0, 0, 1.0), (1, 0, 5.0), (2, 0, 13.0), (0, 1, 2.0), (1, 1, 6.0), (2, 1, 14.0), (0, 2, 4.0), (1, 2, 8.0), (2, 2, 16.0)];
+        let ul_triplets = [
+            (0, 0, 1.0),
+            (1, 0, 5.0),
+            (2, 0, 13.0),
+            (0, 1, 2.0),
+            (1, 1, 6.0),
+            (2, 1, 14.0),
+            (0, 2, 4.0),
+            (1, 2, 8.0),
+            (2, 2, 16.0),
+        ];
         let ur_triplets = [(0, 0, 3.0), (1, 0, 7.0), (2, 0, 15.0)];
         let ll_triplets = [(0, 0, 9.0), (0, 1, 10.0), (0, 2, 12.0)];
         let lr_triplets = [(0, 0, 11.0)];
+        assert_eq!(ul.nrows(), 3);
+        assert_eq!(ul.ncols(), 3);
+        assert_eq!(ur.nrows(), 3);
+        assert_eq!(ur.ncols(), 1);
+        assert_eq!(ll.nrows(), 1);
+        assert_eq!(ll.ncols(), 3);
+        assert_eq!(lr.nrows(), 1);
+        assert_eq!(lr.ncols(), 1);
+
         let ul_triplets = ul_triplets
             .iter()
             .map(|(i, j, v)| (*i, *j, M::T::from(*v)))
