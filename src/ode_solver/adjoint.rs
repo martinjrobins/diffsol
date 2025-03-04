@@ -7,7 +7,7 @@ use crate::{
 };
 
 use num_traits::{One, Zero};
-use std::ops::SubAssign;
+use std::ops::{SubAssign, AddAssign};
 
 pub trait AdjointOdeSolverMethod<'a, Eqn, Solver>:
     AugmentedOdeSolverMethod<'a, Eqn, AdjointEquations<'a, Eqn, Solver>>
@@ -89,7 +89,7 @@ where
             }
         }
         // check that nrows of each dgdu_eval is the same as the number of outputs in the model
-        let nout = self.problem().eqn.out().map(|o| o.nout()).unwrap_or(0);
+        let nout = self.problem().eqn.nout();
         if dgdu_eval.iter().any(|dgdu| dgdu.nrows() != nout) {
             return Err(ode_solver_error!(
                 Other,
@@ -345,6 +345,7 @@ where
                     &self.tmp_nout,
                     &mut self.tmp_nstates2,
                 );
+
                 // calculate -M_dd^-1 * dgdy_d^T (if M = I, then dgdy = dgdu)
                 self.tmp_differential
                     .gather(&self.tmp_nstates2, &p.differential_indices);
@@ -395,12 +396,12 @@ where
                 self.tmp_algebraic
                     .gather(&self.tmp_nout, &p.algebraic_indices);
 
-                // calculate -M_dd^-1 * dgdy^T (if M = I, then dgdy = dgdu)
+                // calculate M_dd^-1 * dgdy^T (if M = I, then dgdy = dgdu)
                 sol_mdd.solve_in_place(&mut self.tmp_differential)?;
 
                 // add -f*_y^d (f*_y^a)^{-1} g*_y^a + M_dd^-1 g*_y^d to differential part of s
                 self.tmp_differential2.gather(s_i, &p.differential_indices);
-                self.tmp_differential2.sub_assign(&self.tmp_differential);
+                self.tmp_differential2.add_assign(&self.tmp_differential);
                 sol_jaa.solve_in_place(&mut self.tmp_algebraic)?;
                 let rhs_jac_ad = self.rhs_jac_aa.as_ref().unwrap().block.m();
                 rhs_jac_ad.gemv(
@@ -412,13 +413,13 @@ where
                 self.tmp_differential2.scatter(&p.differential_indices, s_i);
             // no out, has mass, no algebraic indices
             } else if let Some(sol_mdd) = sol_mdd_opt {
-                // calculate -M_dd^-1 * dgdy^T (if M = I, then dgdy = dgdu)
+                // calculate M_dd^-1 * dgdy^T (if M = I, then dgdy = dgdu)
                 sol_mdd.solve_in_place(&mut self.tmp_nout)?;
-                s_i.sub_assign(&self.tmp_nout);
+                s_i.add_assign(&self.tmp_nout);
             // no out, no mass
             } else {
-                // add -dgdy^T to s
-                s_i.sub_assign(&self.tmp_nout);
+                // add dgdy^T to s
+                s_i.add_assign(&self.tmp_nout);
             }
 
             // add -g_p^T(x, t) to sg if there is an output function (requires tmp_nparams)

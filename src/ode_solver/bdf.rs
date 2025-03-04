@@ -854,18 +854,22 @@ where
     }
 
     fn jacobian(&self) -> Option<Ref<<Eqn>::M>> {
+        let t = self.state.t;
         if let Some(op) = self.op.as_ref() {
-            Some(op.rhs_jac())
+            let x = &self.state.y;
+            Some(op.rhs_jac(x, t))
         } else {
-            self.s_op.as_ref().map(|s_op| s_op.rhs_jac())
+            let x = &self.state.s[0];
+            self.s_op.as_ref().map(|s_op| s_op.rhs_jac(x, t))
         }
     }
 
     fn mass(&self) -> Option<Ref<<Eqn>::M>> {
+        let t = self.state.t;
         if let Some(op) = self.op.as_ref() {
-            Some(op.mass())
+            Some(op.mass(t))
         } else {
-            self.s_op.as_ref().map(|s_op| s_op.mass())
+            self.s_op.as_ref().map(|s_op| s_op.mass(t))
         }
     }
 
@@ -1625,6 +1629,51 @@ mod test {
         let (problem, soln) = robertson::robertson_diffsl_problem::<M, LlvmModule>();
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn bdf_test_nalgebra_diffsl_robertson_adjoint() {
+        use diffsl::LlvmModule;
+
+        use crate::ode_solver::test_models::robertson;
+        let (mut problem, soln) = robertson::robertson_diffsl_problem::<M, LlvmModule>();
+        let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
+        let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
+        let (problem, _soln) = robertson::robertson_diffsl_problem::<M, LlvmModule>();
+        let mut s = problem.bdf::<LS>().unwrap();
+        let (checkpointer, soln) = s
+            .solve_dense_with_checkpointing(times.as_slice(), None)
+            .unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdp.ncols()))
+            .unwrap();
+        test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
+        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
+        number_of_calls: 233
+        number_of_jac_muls: 15
+        number_of_matrix_evals: 5
+        number_of_jac_adj_muls: 395
+        "###);
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn bdf_test_nalgebra_diffsl_robertson_ode_adjoint() {
+        use diffsl::LlvmModule;
+        use crate::ode_solver::test_models::robertson_ode;
+        let (mut problem, soln) = robertson_ode::robertson_ode_diffsl_problem::<M, LlvmModule>();
+        let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
+        let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
+        let (problem, _soln) = robertson_ode::robertson_ode_diffsl_problem::<M, LlvmModule>();
+        let mut s = problem.bdf::<LS>().unwrap();
+        let (checkpointer, soln) = s
+            .solve_dense_with_checkpointing(times.as_slice(), None)
+            .unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdp.ncols()))
+            .unwrap();
+        test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
     }
 
     #[test]

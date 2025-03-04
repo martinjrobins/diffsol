@@ -253,7 +253,7 @@ where
     {
         let h = checkpointer.last_h();
         let t = checkpointer.last_t();
-        let nout = nout_override.unwrap_or(self.eqn.out().unwrap().nout());
+        let nout = nout_override.unwrap_or_else(|| self.eqn.nout());
         let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer, nout)));
         let mut augmented_eqn = AdjointEquations::new(self, context, self.integrate_out);
         let mut newton_solver = NewtonNonlinearSolver::new(LS::default());

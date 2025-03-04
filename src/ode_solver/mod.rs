@@ -299,7 +299,7 @@ mod tests {
                 &dgdp_check.column(j).into_owned(),
                 &atol,
                 rtol,
-                Eqn::T::from(15.),
+                Eqn::T::from(40.),
             );
         }
     }

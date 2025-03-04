@@ -635,7 +635,11 @@ impl<M: Matrix<T = T>, CG: CodegenModule> Op for DiffSl<M, CG> {
         self.context.nstates
     }
     fn nout(&self) -> usize {
-        self.context.nout
+        if self.context.has_out {
+            self.context.nout
+        } else {
+            self.context.nstates
+        }
     }
     fn nparams(&self) -> usize {
         self.context.nparams

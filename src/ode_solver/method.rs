@@ -139,7 +139,12 @@ where
     /// account the mutated state, this could be expensive for multi-step methods.
     fn state_mut(&mut self) -> StateRefMut<Eqn::V>;
 
+    /// Returns the current jacobian matrix of the solver, if it has one
+    /// Note that this will force a full recalculation of the Jacobian.
     fn jacobian(&self) -> Option<Ref<Eqn::M>>;
+
+    /// Returns the current mass matrix of the solver, if it has one
+    /// Note that this will force a full recalculation of the mass matrix.
     fn mass(&self) -> Option<Ref<Eqn::M>>;
 
     /// Step the solution forward by one step, altering the internal state of the solver.

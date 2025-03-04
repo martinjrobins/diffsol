@@ -556,18 +556,22 @@ where
     }
 
     fn jacobian(&self) -> Option<std::cell::Ref<<Eqn>::M>> {
+        let t = self.state.t;
         if let Some(op) = self.op.as_ref() {
-            Some(op.rhs_jac())
+            let x = &self.state.y;
+            Some(op.rhs_jac(x, t))
         } else {
-            self.s_op.as_ref().map(|s_op| s_op.rhs_jac())
+            let x = &self.state.s[0];
+            self.s_op.as_ref().map(|s_op| s_op.rhs_jac(x, t))
         }
     }
 
     fn mass(&self) -> Option<std::cell::Ref<<Eqn>::M>> {
+        let t = self.state.t;
         if let Some(op) = self.op.as_ref() {
-            Some(op.mass())
+            Some(op.mass(t))
         } else {
-            self.s_op.as_ref().map(|s_op| s_op.mass())
+            self.s_op.as_ref().map(|s_op| s_op.mass(t))
         }
     }
 

@@ -710,7 +710,7 @@ where
     ) -> Result<(M::V, Option<M::V>, Option<M::V>, Option<M::V>), DiffsolError> {
         let atol = Self::build_atol(atol, nstates, "states")?;
         let out_atol = match out_atol {
-            Some(out_atol) => Some(Self::build_atol(out_atol, nout.unwrap_or(0), "output")?),
+            Some(out_atol) => Some(Self::build_atol(out_atol, nout.unwrap_or(nstates), "output")?),
             None => None,
         };
         let param_atol = match param_atol {

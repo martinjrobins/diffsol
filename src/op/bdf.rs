@@ -88,10 +88,18 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
         let mass_jac = self.mass_jac.borrow();
         Some((rhs_jac.clone(), mass_jac.clone()))
     }
-    pub fn rhs_jac(&self) -> Ref<Eqn::M> {
+    pub fn rhs_jac(&self, x: &Eqn::V, t: Eqn::T) -> Ref<Eqn::M> {
+        {
+            let mut rhs_jac = self.rhs_jac.borrow_mut();
+            self.eqn.rhs().jacobian_inplace(x, t, &mut rhs_jac);
+        }
         self.rhs_jac.borrow()
     }
-    pub fn mass(&self) -> Ref<Eqn::M> {
+    pub fn mass(&self, t: Eqn::T) -> Ref<Eqn::M> {
+        {
+            let mut mass_jac = self.mass_jac.borrow_mut();
+            self.eqn.mass().unwrap().matrix_inplace(t, &mut mass_jac);
+        }
         self.mass_jac.borrow()
     }
     pub fn new(eqn: Eqn) -> Self {
