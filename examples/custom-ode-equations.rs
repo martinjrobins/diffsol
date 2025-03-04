@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use diffsol::{ConstantOp, LinearOp, NonLinearOp, OdeEquations, OdeEquationsRef, Op};
 type T = f64;
 type V = nalgebra::DVector<f64>;
