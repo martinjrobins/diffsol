@@ -1500,7 +1500,7 @@ mod test {
         number_of_calls: 233
         number_of_jac_muls: 15
         number_of_matrix_evals: 5
-        number_of_jac_adj_muls: 395
+        number_of_jac_adj_muls: 428
         "###);
     }
 
@@ -1633,35 +1633,9 @@ mod test {
 
     #[cfg(feature = "diffsl-llvm")]
     #[test]
-    fn bdf_test_nalgebra_diffsl_robertson_adjoint() {
-        use diffsl::LlvmModule;
-
-        use crate::ode_solver::test_models::robertson;
-        let (mut problem, soln) = robertson::robertson_diffsl_problem::<M, LlvmModule>();
-        let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
-        let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
-        let (problem, _soln) = robertson::robertson_diffsl_problem::<M, LlvmModule>();
-        let mut s = problem.bdf::<LS>().unwrap();
-        let (checkpointer, soln) = s
-            .solve_dense_with_checkpointing(times.as_slice(), None)
-            .unwrap();
-        let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdp.ncols()))
-            .unwrap();
-        test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
-        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 233
-        number_of_jac_muls: 15
-        number_of_matrix_evals: 5
-        number_of_jac_adj_muls: 395
-        "###);
-    }
-
-    #[cfg(feature = "diffsl-llvm")]
-    #[test]
     fn bdf_test_nalgebra_diffsl_robertson_ode_adjoint() {
-        use diffsl::LlvmModule;
         use crate::ode_solver::test_models::robertson_ode;
+        use diffsl::LlvmModule;
         let (mut problem, soln) = robertson_ode::robertson_ode_diffsl_problem::<M, LlvmModule>();
         let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
         let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());

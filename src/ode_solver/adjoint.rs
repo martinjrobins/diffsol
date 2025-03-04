@@ -7,7 +7,7 @@ use crate::{
 };
 
 use num_traits::{One, Zero};
-use std::ops::{SubAssign, AddAssign};
+use std::ops::{AddAssign, SubAssign};
 
 pub trait AdjointOdeSolverMethod<'a, Eqn, Solver>:
     AugmentedOdeSolverMethod<'a, Eqn, AdjointEquations<'a, Eqn, Solver>>

@@ -1075,8 +1075,9 @@ mod test {
                 robertson_ode::robertson_ode,
             },
             tests::{
-                setup_test_adjoint, test_adjoint, test_checkpointing, test_interpolate,
-                test_ode_solver, test_problem, test_state_mut, test_state_mut_on_problem,
+                setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
+                test_adjoint_sum_squares, test_checkpointing, test_interpolate, test_ode_solver,
+                test_problem, test_state_mut, test_state_mut_on_problem,
             },
         },
         FaerSparseLU, NalgebraLU, OdeEquations, OdeSolverMethod, Op, SparseColMat, Vector,
@@ -1214,6 +1215,28 @@ mod test {
         number_of_jac_muls: 14
         number_of_matrix_evals: 7
         number_of_jac_adj_muls: 474
+        "###);
+    }
+
+    #[test]
+    fn sdirk_test_nalgebra_exponential_decay_algebraic_adjoint_sum_squares() {
+        let (mut problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>(false);
+        let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
+        let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
+        let (problem, _soln) = exponential_decay_with_algebraic_adjoint_problem::<M>(false);
+        let mut s = problem.esdirk34::<LS>().unwrap();
+        let (checkpointer, soln) = s
+            .solve_dense_with_checkpointing(times.as_slice(), None)
+            .unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdp.ncols()))
+            .unwrap();
+        test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
+        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
+        number_of_calls: 282
+        number_of_jac_muls: 12
+        number_of_matrix_evals: 4
+        number_of_jac_adj_muls: 425
         "###);
     }
 
