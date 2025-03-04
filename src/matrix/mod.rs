@@ -190,7 +190,7 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
         combine(ul, ur, ll, lr, f)
     }
 
-    /// copies the values in `parent` to a matrix previously extracted using [MatrixSparsityRef::extract_blocks]
+    /// copies the values in `parent` to a matrix previously extracted using [MatrixSparsityRef::split]
     /// to obtain the `src_indices` arg
     fn copy_block_from(&mut self, src_indices: &<Self::V as Vector>::Index, parent: &Self);
 

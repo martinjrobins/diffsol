@@ -17,9 +17,9 @@ where
 {
     /// Backwards pass for adjoint sensitivity analysis
     ///
-    /// The overall goal is to compute the gradient of an output function G with respect to the model parameters p
+    /// The overall goal is to compute the gradient of an output function `G` with respect to the model parameters `p`
     ///
-    /// If `dgdu_eval` is empty, then G is the integral of the model output function u over time
+    /// If `dgdu_eval` is empty, then `G` is the integral of the model output function `u` over time
     ///
     /// $$
     /// G = \int_{t_0}^{t_{\text{final}}} u(y(t)) dt
@@ -27,25 +27,24 @@ where
     ///
     /// where `y(t)` is the solution of the model at time `t`
     ///
-    /// If `dgdu_eval` is non empty, then the output function G made from the sum of a sequence of n functions g_i
+    /// If `dgdu_eval` is non empty, then the output function `G` made from the sum of a sequence of `n` functions `g_i`
+    /// operating on the model output function u at timepoints `t_i`
     ///
     /// $$
     /// G = \int_{t_0}^{t_{\text{final}}} \sum_{i=0}^{n-1} g_i(u(y(t_i)))) \delta(t - t_i) dt
     /// $$
     ///
-    /// where $g(t)$ is the output of the model at time $t_i$
+    /// For example, if `G` is the standard sum of squared errors, then `g_i = (u(y(t_i)) - d_i)^2`,
+    /// where `d_i` is the measured value of the output at time `t_i`
     ///
-    /// For example, if G is the standard sum of squared errors, then $g_i = (u(y(t_i)) - d_i)^2$,
-    /// where $d_i$ is the measured value of the output at time $t_i$
-    ///
-    /// The user passes in the gradient of g_i with respect to u_i for each timepoint i in `dgdu_eval`.
-    /// For example, if g_i = (u(y(t_i)) - d_i)^2, then dgdu_i = 2(u(y(t_i)) - d_i), where $u(y(t_i))$
+    /// The user passes in the gradient of `g_i` with respect to `u_i` for each timepoint `i` in `dgdu_eval`.
+    /// For example, if `g_i = (u(y(t_i)) - d_i)^2`, then `dgdu_i = 2(u(y(t_i)) - d_i)`, where `u(y(t_i))`
     /// can be obtained from the forward pass.
     ///
     /// The input `dgdu_eval` is a vector so users can supply multiple sets of `g_i` functions, and each
-    /// element of the vector is a dense matrix of size n_o x n, where n_o is the number of outputs in the model
-    /// and n is the number of timepoints. The i-th column of `dgdu_eval` is the gradient of g_i with respect to u_i.
-    /// The input `t_eval` is a vector of length n, where the i-th element is the timepoint t_i.
+    /// element of the vector is a dense matrix of size `n_o x n`, where `n_o`` is the number of outputs in the model
+    /// and `n` is the number of timepoints. The i-th column of `dgdu_eval` is the gradient of `g_i` with respect to `u_i`.
+    /// The input `t_eval` is a vector of length `n`, where the i-th element is the timepoint `t_i`.
     fn solve_adjoint_backwards_pass(
         mut self,
         t_eval: &[Eqn::T],
