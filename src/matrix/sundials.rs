@@ -246,6 +246,10 @@ impl Matrix for SundialsMatrix {
         None
     }
 
+    fn copy_block_from(&mut self, _src_indices: &<Self::V as Vector>::Index, _parent: &Self) {
+        unimplemented!("copy_block_from not implemented for SundialsMatrix");
+    }
+
     fn set_data_with_indices(
         &mut self,
         dst_indices: &<Self::V as Vector>::Index,

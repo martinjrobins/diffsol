@@ -105,13 +105,15 @@ impl<M: Matrix> JacobianColoring<M> {
         for c in 1..=max_color {
             let mut rows = Vec::new();
             let mut cols = Vec::new();
-            for (i, j) in non_zeros.iter() {
+            let mut indices = Vec::new();
+            for (i, j) in non_zeros {
                 if coloring[*j] == c {
                     rows.push(*i);
                     cols.push(*j);
+                    indices.push((*i, *j));
                 }
             }
-            let dst_indices = sparsity.get_index(rows.as_slice(), cols.as_slice());
+            let dst_indices = sparsity.get_index(indices.as_slice());
             let src_indices = <M::V as Vector>::Index::from_slice(rows.as_slice());
             let unique_cols: HashSet<_> = HashSet::from_iter(cols.iter().cloned());
             let unique_cols = unique_cols.into_iter().collect::<Vec<_>>();

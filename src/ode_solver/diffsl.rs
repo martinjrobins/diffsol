@@ -635,7 +635,11 @@ impl<M: Matrix<T = T>, CG: CodegenModule> Op for DiffSl<M, CG> {
         self.context.nstates
     }
     fn nout(&self) -> usize {
-        self.context.nout
+        if self.context.has_out {
+            self.context.nout
+        } else {
+            self.context.nstates
+        }
     }
     fn nparams(&self) -> usize {
         self.context.nparams
@@ -683,6 +687,12 @@ impl<M: Matrix<T = T>, CG: CodegenModule> OdeEquations for DiffSl<M, CG> {
             dummy.as_mut_slice(),
             self.context.data.borrow_mut().as_mut_slice(),
         );
+    }
+
+    fn get_params(&self, p: &mut Self::V) {
+        self.context
+            .compiler
+            .get_inputs(p.as_mut_slice(), self.context.data.borrow().as_slice());
     }
 }
 

@@ -3,8 +3,6 @@ use crate::error::OdeSolverError;
 use crate::matrix::MatrixRef;
 use crate::ode_solver_error;
 use crate::vector::VectorRef;
-use crate::AdjointEquations;
-use crate::DefaultDenseMatrix;
 use crate::LinearSolver;
 use crate::NewtonNonlinearSolver;
 use crate::NoAug;
@@ -13,10 +11,10 @@ use crate::RootFinder;
 use crate::SdirkState;
 use crate::Tableau;
 use crate::{
-    nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, AdjointOdeSolverMethod,
-    AugmentedOdeEquations, AugmentedOdeEquationsImplicit, Convergence, DenseMatrix, JacobianUpdate,
-    NonLinearOp, OdeEquationsAdjoint, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState, Op, Scalar, StateRef, StateRefMut, Vector, VectorViewMut,
+    nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, AugmentedOdeEquations,
+    AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, DenseMatrix, JacobianUpdate,
+    NonLinearOp, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op,
+    Scalar, StateRef, StateRefMut, Vector, VectorViewMut,
 };
 use num_traits::abs;
 use num_traits::One;
@@ -42,30 +40,8 @@ where
     fn into_state_and_eqn(self) -> (Self::State, Option<AugEqn>) {
         (self.state, self.s_op.map(|op| op.eqn))
     }
-}
-
-impl<'a, M, Eqn, LS> AdjointOdeSolverMethod<'a, Eqn> for Sdirk<'a, Eqn, LS, M>
-where
-    Eqn: OdeEquationsAdjoint,
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
-    LS: LinearSolver<Eqn::M> + 'a,
-    Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
-    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
-    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-{
-    type DefaultAdjointSolver =
-        Sdirk<'a, Eqn, LS, M, AdjointEquations<'a, Eqn, Sdirk<'a, Eqn, LS, M>>>;
-
-    fn default_adjoint_solver<ALS: LinearSolver<Eqn::M>>(
-        self,
-        mut aug_eqn: AdjointEquations<'a, Eqn, Self>,
-    ) -> Result<Self::DefaultAdjointSolver, DiffsolError> {
-        let problem = self.problem();
-        let tableau = self.tableau;
-        let state = self
-            .state
-            .into_adjoint::<ALS, _, _>(problem, &mut aug_eqn)?;
-        Sdirk::new_augmented(self.problem, state, tableau, LS::default(), aug_eqn)
+    fn augmented_eqn(&self) -> Option<&AugEqn> {
+        self.s_op.as_ref().map(|op| op.eqn())
     }
 }
 
@@ -579,6 +555,26 @@ where
         self.problem
     }
 
+    fn jacobian(&self) -> Option<std::cell::Ref<<Eqn>::M>> {
+        let t = self.state.t;
+        if let Some(op) = self.op.as_ref() {
+            let x = &self.state.y;
+            Some(op.rhs_jac(x, t))
+        } else {
+            let x = &self.state.s[0];
+            self.s_op.as_ref().map(|s_op| s_op.rhs_jac(x, t))
+        }
+    }
+
+    fn mass(&self) -> Option<std::cell::Ref<<Eqn>::M>> {
+        let t = self.state.t;
+        if let Some(op) = self.op.as_ref() {
+            Some(op.mass(t))
+        } else {
+            self.s_op.as_ref().map(|s_op| s_op.mass(t))
+        }
+    }
+
     fn order(&self) -> usize {
         self.tableau.order()
     }
@@ -928,10 +924,7 @@ where
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
         self.tstop = Some(tstop);
         if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
-            let error = OdeSolverError::StopTimeBeforeCurrentTime {
-                stop_time: tstop.into(),
-                state_time: self.state.t.into(),
-            };
+            let error = OdeSolverError::StopTimeAtCurrentTime;
             self.tstop = None;
             return Err(DiffsolError::from(error));
         }
@@ -1082,7 +1075,8 @@ mod test {
                 robertson_ode::robertson_ode,
             },
             tests::{
-                test_checkpointing, test_interpolate, test_ode_solver, test_ode_solver_adjoint,
+                setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
+                test_adjoint_sum_squares, test_checkpointing, test_interpolate, test_ode_solver,
                 test_problem, test_state_mut, test_state_mut_on_problem,
             },
         },
@@ -1207,26 +1201,60 @@ mod test {
 
     #[test]
     fn sdirk_test_esdirk34_exponential_decay_adjoint() {
-        let (problem, soln) = exponential_decay_problem_adjoint::<M>();
-        let s = problem.esdirk34::<LS>().unwrap();
-        test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
+        let (mut problem, soln) = exponential_decay_problem_adjoint::<M>(true);
+        let final_time = soln.solution_points.last().unwrap().t;
+        let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
+        let mut s = problem.esdirk34::<LS>().unwrap();
+        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let adjoint_solver = problem
+            .esdirk34_solver_adjoint::<LS, _>(checkpointer)
+            .unwrap();
+        test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 314
-        number_of_jac_muls: 6
-        number_of_matrix_evals: 3
+        number_of_calls: 651
+        number_of_jac_muls: 14
+        number_of_matrix_evals: 7
         number_of_jac_adj_muls: 474
         "###);
     }
 
     #[test]
-    fn sdirk_test_esdirk34_exponential_decay_algebraic_adjoint() {
-        let (problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>();
-        let s = problem.esdirk34::<LS>().unwrap();
-        test_ode_solver_adjoint::<LS, _, _, _>(s, soln);
+    fn sdirk_test_nalgebra_exponential_decay_algebraic_adjoint_sum_squares() {
+        let (mut problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>(false);
+        let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
+        let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
+        let (problem, _soln) = exponential_decay_with_algebraic_adjoint_problem::<M>(false);
+        let mut s = problem.esdirk34::<LS>().unwrap();
+        let (checkpointer, soln) = s
+            .solve_dense_with_checkpointing(times.as_slice(), None)
+            .unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdp.ncols()))
+            .unwrap();
+        test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 265
+        number_of_calls: 282
         number_of_jac_muls: 12
         number_of_matrix_evals: 4
+        number_of_jac_adj_muls: 425
+        "###);
+    }
+
+    #[test]
+    fn sdirk_test_esdirk34_exponential_decay_algebraic_adjoint() {
+        let (mut problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>(true);
+        let final_time = soln.solution_points.last().unwrap().t;
+        let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
+        let mut s = problem.esdirk34::<LS>().unwrap();
+        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let adjoint_solver = problem
+            .esdirk34_solver_adjoint::<LS, _>(checkpointer)
+            .unwrap();
+        test_adjoint(adjoint_solver, dgdu);
+        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
+        number_of_calls: 478
+        number_of_jac_muls: 30
+        number_of_matrix_evals: 10
         number_of_jac_adj_muls: 191
         "###);
     }

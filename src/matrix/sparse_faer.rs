@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::ops::Mul;
 
+use super::extract_block::CscBlock;
 use super::sparsity::MatrixSparsityRef;
 use super::{Matrix, MatrixCommon, MatrixSparsity};
 use crate::error::{DiffsolError, MatrixError};
@@ -111,13 +112,12 @@ impl<T: Scalar> MatrixSparsity<SparseColMat<T>> for SymbolicSparseColMat<IndexTy
 
     fn get_index(
         &self,
-        rows: &[IndexType],
-        cols: &[IndexType],
+        indices: &[(IndexType, IndexType)],
     ) -> <<SparseColMat<T> as MatrixCommon>::V as Vector>::Index {
         let col_ptrs = self.col_ptr();
         let row_indices = self.row_idx();
-        let mut indices = Vec::with_capacity(rows.len());
-        for (&i, &j) in rows.iter().zip(cols.iter()) {
+        let mut ret = Vec::with_capacity(indices.len());
+        for &(i, j) in indices.iter() {
             let col_ptr = col_ptrs[j];
             let next_col_ptr = col_ptrs[j + 1];
             for (ii, &ri) in row_indices
@@ -127,12 +127,12 @@ impl<T: Scalar> MatrixSparsity<SparseColMat<T>> for SymbolicSparseColMat<IndexTy
                 .skip(col_ptr)
             {
                 if ri == i {
-                    indices.push(ii);
+                    ret.push(ii);
                     break;
                 }
             }
         }
-        indices
+        ret
     }
 }
 
@@ -152,6 +152,52 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, SparseColMat<T>>
 
     fn is_sparse() -> bool {
         true
+    }
+
+    fn split<F: Fn(IndexType) -> bool>(
+        &self,
+        f: F,
+        transpose: bool,
+    ) -> [(
+        SymbolicSparseColMat<IndexType>,
+        <<SparseColMat<T> as MatrixCommon>::V as Vector>::Index,
+    ); 4] {
+        let (_ni, _nj, col_ptrs, _col_nnz, row_idx) = self.parts();
+        let (ul_blk, ur_blk, ll_blk, lr_blk) = CscBlock::split(row_idx, col_ptrs, f, transpose);
+        let ul_sym = SymbolicSparseColMat::new_checked(
+            ul_blk.nrows,
+            ul_blk.ncols,
+            ul_blk.col_pointers,
+            None,
+            ul_blk.row_indices,
+        );
+        let ur_sym = SymbolicSparseColMat::new_checked(
+            ur_blk.nrows,
+            ur_blk.ncols,
+            ur_blk.col_pointers,
+            None,
+            ur_blk.row_indices,
+        );
+        let ll_sym = SymbolicSparseColMat::new_checked(
+            ll_blk.nrows,
+            ll_blk.ncols,
+            ll_blk.col_pointers,
+            None,
+            ll_blk.row_indices,
+        );
+        let lr_sym = SymbolicSparseColMat::new_checked(
+            lr_blk.nrows,
+            lr_blk.ncols,
+            lr_blk.col_pointers,
+            None,
+            lr_blk.row_indices,
+        );
+        [
+            (ul_sym, ul_blk.src_indices),
+            (ur_sym, ur_blk.src_indices),
+            (ll_sym, ll_blk.src_indices),
+            (lr_sym, lr_blk.src_indices),
+        ]
     }
 
     fn indices(&self) -> Vec<(IndexType, IndexType)> {
@@ -190,6 +236,10 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
 
     fn sparsity(&self) -> Option<Self::SparsityRef<'_>> {
         Some(self.0.symbolic())
+    }
+
+    fn copy_block_from(&mut self, src_indices: &<Self::V as Vector>::Index, parent: &Self) {
+        CscBlock::copy_block_from(self.0.val_mut(), parent.0.val(), src_indices);
     }
 
     fn set_data_with_indices(
@@ -283,8 +333,8 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
     }
 
     fn new_from_sparsity(
-        ncols: IndexType,
         nrows: IndexType,
+        ncols: IndexType,
         sparsity: Option<Self::Sparsity>,
     ) -> Self {
         let sparsity = sparsity.expect("Sparsity pattern required for sparse matrix");

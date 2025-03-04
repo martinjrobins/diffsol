@@ -4,7 +4,7 @@ use super::default_solver::DefaultSolver;
 use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 use crate::error::DiffsolError;
 use crate::scalar::{IndexType, Scalar, Scale};
-use crate::FaerLU;
+use crate::{ColMajBlock, FaerLU};
 use crate::{Dense, DenseRef, Vector};
 
 use faer::{get_global_parallelism, unzip, zip, Accum};
@@ -174,6 +174,10 @@ impl<T: Scalar> Matrix for Mat<T> {
         None
     }
 
+    fn copy_block_from(&mut self, src_indices: &<Self::V as Vector>::Index, parent: &Self) {
+        ColMajBlock::<<Self::V as Vector>::Index>::copy_block_from(self, parent, src_indices);
+    }
+
     fn set_data_with_indices(
         &mut self,
         dst_indices: &<Self::V as Vector>::Index,
@@ -192,7 +196,7 @@ impl<T: Scalar> Matrix for Mat<T> {
     }
 
     fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)> {
-        (0..self.nrows()).flat_map(move |i| (0..self.ncols()).map(move |j| (i, j, &self[(i, j)])))
+        (0..self.ncols()).flat_map(move |j| (0..self.nrows()).map(move |i| (i, j, &self[(i, j)])))
     }
 
     fn try_from_triplets(

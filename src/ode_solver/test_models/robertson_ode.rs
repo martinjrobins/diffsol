@@ -4,6 +4,47 @@ use crate::{
 };
 use num_traits::{One, Zero};
 
+#[cfg(feature = "diffsl")]
+#[allow(clippy::type_complexity)]
+pub fn robertson_ode_diffsl_problem<
+    M: Matrix<T = f64>,
+    CG: diffsl::execution::module::CodegenModule,
+>() -> (
+    OdeSolverProblem<impl crate::OdeEquationsAdjoint<M = M, V = M::V, T = M::T>>,
+    OdeSolverSolution<M::V>,
+) {
+    use crate::{DiffSl, DiffSlContext};
+
+    let code = "
+        in = [k1, k2, k3]
+        k1 { 0.04 }
+        k2 { 10000 }
+        k3 { 30000000 }
+        u_i {
+            x = 1,
+            y = 0,
+            z = 0,
+        }
+        F_i {
+            -k1*x + k2*y*z,
+            k1*x - k2*y*z - k3*y*y,
+            k3*y*y,
+        }";
+
+    let context = DiffSlContext::<M, CG>::new(code, 1).unwrap();
+    let eqn = DiffSl::from_context(context);
+    let problem = OdeBuilder::<M>::new()
+        .p([0.04, 1.0e4, 3.0e7])
+        .rtol(1e-4)
+        .atol([1.0e-8, 1.0e-6, 1.0e-6])
+        .build_from_eqn(eqn)
+        .unwrap();
+    let mut soln = soln::<M::V>();
+    soln.rtol = problem.rtol;
+    soln.atol = problem.atol.clone();
+    (problem, soln)
+}
+
 #[allow(clippy::type_complexity)]
 pub fn robertson_ode<M: Matrix + 'static>(
     use_coloring: bool,
@@ -93,6 +134,33 @@ pub fn robertson_ode<M: Matrix + 'static>(
         );
     }
     (problem, soln)
+}
+
+fn soln<V: Vector>() -> OdeSolverSolution<V> {
+    let mut soln = OdeSolverSolution::default();
+    let data = vec![
+        (vec![1.0, 0.0, 0.0], 0.0),
+        (vec![9.851641e-01, 3.386242e-05, 1.480205e-02], 0.4),
+        (vec![9.055097e-01, 2.240338e-05, 9.446793e-02], 4.0),
+        (vec![7.158017e-01, 9.185037e-06, 2.841892e-01], 40.0),
+        (vec![4.505360e-01, 3.223271e-06, 5.494608e-01], 400.0),
+        (vec![1.832299e-01, 8.944378e-07, 8.167692e-01], 4000.0),
+        (vec![3.898902e-02, 1.622006e-07, 9.610108e-01], 40000.0),
+        (vec![4.936383e-03, 1.984224e-08, 9.950636e-01], 400000.0),
+        (vec![5.168093e-04, 2.068293e-09, 9.994832e-01], 4000000.0),
+        (vec![5.202440e-05, 2.081083e-10, 9.999480e-01], 4.0000e+07),
+        (vec![5.201061e-06, 2.080435e-11, 9.999948e-01], 4.0000e+08),
+        (vec![5.258603e-07, 2.103442e-12, 9.999995e-01], 4.0000e+09),
+        (vec![6.934511e-08, 2.773804e-13, 9.999999e-01], 4.0000e+10),
+    ];
+
+    for (values, time) in data {
+        soln.push(
+            V::from_vec(values.into_iter().map(|v| v.into()).collect()),
+            time.into(),
+        );
+    }
+    soln
 }
 
 /* -----------------------------------------------------------------

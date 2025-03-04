@@ -72,7 +72,7 @@
 //! or your equations struct must implement the [OdeEquationsSens] trait,
 //! Note that by default the sensitivity equations are included in the error control for the solvers, you can change this by setting tolerances using the [OdeBuilder::sens_atol] and [OdeBuilder::sens_rtol] methods.
 //!
-//! The easiest way to obtain the sensitivity solution is to use the [OdeSolverMethod::solve_dense_sensitivities] method, which will solve the forward problem and the sensitivity equations simultaneously and return the result.
+//! The easiest way to obtain the sensitivity solution is to use the [SensitivitiesOdeSolverMethod::solve_dense_sensitivities] method, which will solve the forward problem and the sensitivity equations simultaneously and return the result.
 //! If you are manually stepping the solver, you can use the [OdeSolverMethod::interpolate_sens] method to obtain the sensitivity solution at a given time. Otherwise the sensitivity vectors are stored in the [OdeSolverState] struct.
 //!
 //! ## Checkpointing
@@ -101,15 +101,13 @@
 //! To provide the builder with the required equations, you can use the [OdeBuilder::rhs_adjoint_implicit], [OdeBuilder::init_adjoint], and [OdeBuilder::out_adjoint_implicit] methods,
 //! or your equations struct must implement the [OdeEquationsAdjoint] trait.
 //!
-//! The easiest way to obtain the adjoint solution is to use the [OdeSolverMethod::solve_adjoint] method, which will solve the forwards problem, then the adjoint problem and return the result.
-//! If you wish to manually do the timestepping, then the best place to start is by looking at the source code for the [OdeSolverMethod::solve_adjoint] method. During the solution of the forwards problem
-//! you will need to use checkpointing to store the solution at a set of times.
-//! From this you should obtain a `Vec<OdeSolverState>` (that can be the start and end of the solution), and
-//! a [HermiteInterpolator] that can be used to interpolate the solution between the last two checkpoints. You can then use the [AdjointOdeSolverMethod::adjoint_equations] and then create
-//! an adjoint solver either manually or using the [AdjointOdeSolverMethod::default_adjoint_solver] method. You can then use this solver to step the adjoint equations backwards in time using [OdeSolverMethod::step] as normal.
-//! Once the adjoint equations have been solved,
-//! the sensitivities of the output function will be stored in the [StateRef::sg] field of the adjoint solver state. If your parameters are used to calculate the initial conditions
-//! of the forward problem, then you will need to use the [AdjointEquations::correct_sg_for_init] method to correct the sensitivities for the initial conditions.
+//! To obtain the adjoint solution, it is first required to generate a checkpointing struct using either [OdeSolverMethod::solve_with_checkpointing] or [OdeSolverMethod::solve_dense_with_checkpointing] methods,
+//! which will solve the forwards problem. Then you can create an adjoint solver using the functions on the problem struct, for example [OdeSolverProblem::bdf_solver_adjoint]. Once you have created your
+//! adjoint solver, then use the [AdjointOdeSolverMethod::solve_adjoint_backwards_pass] method to solve the adjoint equations backwards in time and obtain your solution.
+//! The gradients of your outputs wrt the parameters are stored in the [StateRef::sg] field.
+//!
+//! If you wish to manually do the timestepping, then the best place to start is by looking at the source code for the [AdjointOdeSolverMethod::solve_adjoint_backwards_pass] method. During the solution of the forwards problem
+//! you will need to use checkpointing to store the solution at a set of times, and you can see how this is done in the [OdeSolverMethod::solve_with_checkpointing] method.
 //!
 //! ## Nonlinear and linear solvers
 //!
@@ -179,6 +177,7 @@ pub use jacobian::{
     find_adjoint_non_zeros, find_jacobian_non_zeros, find_matrix_non_zeros,
     find_sens_adjoint_non_zeros, find_sens_non_zeros, find_transpose_non_zeros, JacobianColoring,
 };
+use matrix::extract_block::{ColMajBlock, CscBlock};
 pub use matrix::{default_solver::DefaultSolver, Matrix};
 use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
@@ -191,16 +190,17 @@ pub use nonlinear_solver::{newton::NewtonNonlinearSolver, NonLinearSolver};
 use ode_solver::jacobian_update::JacobianUpdate;
 pub use ode_solver::state::{StateRef, StateRefMut};
 pub use ode_solver::{
-    adjoint_equations::AdjointContext, adjoint_equations::AdjointEquations,
-    adjoint_equations::AdjointInit, adjoint_equations::AdjointRhs, bdf::Bdf, bdf_state::BdfState,
-    builder::OdeBuilder, checkpointing::Checkpointing, checkpointing::HermiteInterpolator,
+    adjoint::AdjointOdeSolverMethod, adjoint_equations::AdjointContext,
+    adjoint_equations::AdjointEquations, adjoint_equations::AdjointInit,
+    adjoint_equations::AdjointRhs, bdf::Bdf, bdf_state::BdfState, builder::OdeBuilder,
+    checkpointing::Checkpointing, checkpointing::HermiteInterpolator,
     equations::AugmentedOdeEquations, equations::AugmentedOdeEquationsImplicit, equations::NoAug,
     equations::OdeEquations, equations::OdeEquationsAdjoint, equations::OdeEquationsImplicit,
     equations::OdeEquationsRef, equations::OdeEquationsSens, equations::OdeSolverEquations,
-    method::AdjointOdeSolverMethod, method::AugmentedOdeSolverMethod, method::OdeSolverMethod,
-    method::OdeSolverStopReason, problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::SdirkState,
+    method::AugmentedOdeSolverMethod, method::OdeSolverMethod, method::OdeSolverStopReason,
+    problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::SdirkState,
     sens_equations::SensEquations, sens_equations::SensInit, sens_equations::SensRhs,
-    state::OdeSolverState, tableau::Tableau,
+    sensitivities::SensitivitiesOdeSolverMethod, state::OdeSolverState, tableau::Tableau,
 };
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};
@@ -210,7 +210,7 @@ pub use op::nonlinear_op::{
 pub use op::{
     closure::Closure, closure_with_adjoint::ClosureWithAdjoint, constant_closure::ConstantClosure,
     constant_closure_with_adjoint::ConstantClosureWithAdjoint, linear_closure::LinearClosure,
-    unit::UnitCallable, BuilderOp, Op, ParameterisedOp,
+    matrix::MatrixOp, unit::UnitCallable, BuilderOp, Op, ParameterisedOp,
 };
 use op::{
     closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,

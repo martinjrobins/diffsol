@@ -47,6 +47,22 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
         self.eqn.out().unwrap().call_inplace(ys, t, y);
         y.mul_assign(scale(*(self.h.borrow())));
     }
+    pub fn rhs_jac(&self, x: &Eqn::V, t: Eqn::T) -> Ref<Eqn::M> {
+        {
+            let mut rhs_jac = self.rhs_jac.borrow_mut();
+            self.set_tmp(x);
+            let tmp = self.tmp.borrow();
+            self.eqn.rhs().jacobian_inplace(&tmp, t, &mut rhs_jac);
+        }
+        self.rhs_jac.borrow()
+    }
+    pub fn mass(&self, t: Eqn::T) -> Ref<Eqn::M> {
+        {
+            let mut mass_jac = self.mass_jac.borrow_mut();
+            self.eqn.mass().unwrap().matrix_inplace(t, &mut mass_jac);
+        }
+        self.mass_jac.borrow()
+    }
     pub fn new_no_jacobian(eqn: Eqn, c: Eqn::T) -> Self {
         let n = eqn.rhs().nstates();
         let h = RefCell::new(Eqn::T::zero());
