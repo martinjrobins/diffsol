@@ -166,125 +166,28 @@ Therefore, you need to already have structs that implement the <code>NonLinearOp
 you have already implemented these traits for your structs.</p>
 <p>Often, the structs that implement these traits will have to use data defined in the struct that implements the <code>OdeEquations</code> trait. For example, they might wish to have a reference to the same parameter vector <code>p</code>. Therefore, you will often need to define lifetimes for these structs to ensure that they can access the data they need.</p>
 <p>Note that these struct will need to be lightweight and should not contain a significant amount of data. The data should be stored in the struct that implements the <code>OdeEquations</code> trait. This is because these structs will be created and destroyed many times during the course of the simulation (e.g. every time the right-hand side function is called).</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
-</span>type T = f64;
+<pre><code class="language-rust ignore">use diffsol::{ConstantOp, LinearOp, NonLinearOp, OdeEquations, OdeEquationsRef, Op};
+type T = f64;
 type V = nalgebra::DVector&lt;f64&gt;;
 type M = nalgebra::DMatrix&lt;f64&gt;;
-struct MyRhs&lt;'a&gt; { p: &amp;'a V } // implements NonLinearOp
-struct MyMass&lt;'a&gt; { p: &amp;'a V } // implements LinearOp
-struct MyInit&lt;'a&gt; { p: &amp;'a V } // implements ConstantOp
-struct MyRoot&lt;'a&gt; { p: &amp;'a V } // implements NonLinearOp
-struct MyOut&lt;'a&gt; { p: &amp;'a V } // implements NonLinearOp
-<span class="boring">}</span></code></pre></pre>
+struct MyRhs&lt;'a&gt; {
+    p: &amp;'a V,
+} // implements NonLinearOp
+struct MyMass&lt;'a&gt; {
+    p: &amp;'a V,
+} // implements LinearOp
+struct MyInit&lt;'a&gt; {
+    p: &amp;'a V,
+} // implements ConstantOp
+struct MyRoot&lt;'a&gt; {
+    p: &amp;'a V,
+} // implements NonLinearOp
+struct MyOut&lt;'a&gt; {
+    p: &amp;'a V,
+} // implements NonLinearOp</code></pre>
 <h2 id="implementing-the-odeequations-traits"><a class="header" href="#implementing-the-odeequations-traits">Implementing the OdeEquations traits</a></h2>
 <p>Lets imagine we have a struct <code>MyProblem</code> that we want to use to specify the entire system of equations. We can implement the <code>Op</code>, <code>OdeEquations</code>, and <code>OdeEquationsRef</code> traits for this struct like so:</p>
-<pre><pre class="playground"><code class="language-rust">use diffsol::{Op, NonLinearOp, LinearOp, ConstantOp, OdeEquations, OdeEquationsRef};
-<span class="boring">fn main() {
-</span><span class="boring">type T = f64;
-</span><span class="boring">type V = nalgebra::DVector&lt;f64&gt;;
-</span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
-</span><span class="boring">struct MyRhs&lt;'a&gt; { p: &amp;'a V } // implements NonLinearOp
-</span><span class="boring">struct MyMass&lt;'a&gt; { p: &amp;'a V } // implements LinearOp
-</span><span class="boring">struct MyInit&lt;'a&gt; { p: &amp;'a V } // implements ConstantOp
-</span><span class="boring">struct MyRoot&lt;'a&gt; { p: &amp;'a V } // implements NonLinearOp
-</span><span class="boring">struct MyOut&lt;'a&gt; { p: &amp;'a V } // implements NonLinearOp
-</span><span class="boring">impl Op for MyRhs&lt;'_&gt; {
-</span><span class="boring">    type T = T;
-</span><span class="boring">    type V = V;
-</span><span class="boring">    type M = M;
-</span><span class="boring">    fn nstates(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nout(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nparams(&amp;self) -&gt; usize {
-</span><span class="boring">        2
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl NonLinearOp for MyRhs&lt;'_&gt; {
-</span><span class="boring">    fn call_inplace(&amp;self, x: &amp;V, _t: T, y: &amp;mut V) {
-</span><span class="boring">        y[0] = x[0] * x[0];
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl Op for MyMass&lt;'_&gt; {
-</span><span class="boring">    type T = T;
-</span><span class="boring">    type V = V;
-</span><span class="boring">    type M = M;
-</span><span class="boring">    fn nstates(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nout(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nparams(&amp;self) -&gt; usize {
-</span><span class="boring">        0
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl LinearOp for MyMass&lt;'_&gt; {
-</span><span class="boring">    fn gemv_inplace(&amp;self, x: &amp;V, _t: T, beta: T, y: &amp;mut V) {
-</span><span class="boring">        y[0] = x[0] * beta;
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl Op for MyInit&lt;'_&gt; {
-</span><span class="boring">    type T = T;
-</span><span class="boring">    type V = V;
-</span><span class="boring">    type M = M;
-</span><span class="boring">    fn nstates(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nout(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nparams(&amp;self) -&gt; usize {
-</span><span class="boring">        0
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl ConstantOp for MyInit&lt;'_&gt; {
-</span><span class="boring">    fn call_inplace(&amp;self, _t: T, y: &amp;mut V) {
-</span><span class="boring">        y[0] = 0.1;
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl Op for MyRoot&lt;'_&gt; {
-</span><span class="boring">    type T = T;
-</span><span class="boring">    type V = V;
-</span><span class="boring">    type M = M;
-</span><span class="boring">    fn nstates(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nout(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nparams(&amp;self) -&gt; usize {
-</span><span class="boring">        0
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl NonLinearOp for MyRoot&lt;'_&gt; {
-</span><span class="boring">    fn call_inplace(&amp;self, x: &amp;V, _t: T, y: &amp;mut V) {
-</span><span class="boring">        y[0] = x[0] - 1.0;
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl Op for MyOut&lt;'_&gt; {
-</span><span class="boring">    type T = T;
-</span><span class="boring">    type V = V;
-</span><span class="boring">    type M = M;
-</span><span class="boring">    fn nstates(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nout(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nparams(&amp;self) -&gt; usize {
-</span><span class="boring">        0
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl NonLinearOp for MyOut&lt;'_&gt; {
-</span><span class="boring">    fn call_inplace(&amp;self, x: &amp;V, _t: T, y: &amp;mut V) {
-</span><span class="boring">        y[0] = x[0];
-</span><span class="boring">    }
-</span><span class="boring">}
-</span>
-struct MyProblem {
+<pre><code class="language-rust ignore">struct MyProblem {
     p: V,
 }
 
@@ -336,175 +239,19 @@ impl OdeEquations for MyProblem {
     fn set_params(&amp;mut self, p: &amp;V) {
         self.p.copy_from(p);
     }
-}
-<span class="boring">}</span></code></pre></pre>
+    fn get_params(&amp;self, p: &amp;mut Self::V) {
+        p.copy_from(&amp;self.p);
+    }
+}</code></pre>
 <h2 id="creating-the-problem"><a class="header" href="#creating-the-problem">Creating the problem</a></h2>
 <p>Now that we have our custom <code>OdeEquations</code> struct, we can use it in an <code>OdeBuilder</code> to create the problem. Hint: click the button below to see the full code, which includes the implementation of the <code>Op</code>, <code>NonLinearOp</code>, <code>LinearOp</code>, and <code>ConstantOp</code> traits for the <code>MyRhs</code>, <code>MyMass</code>, <code>MyInit</code>, <code>MyRoot</code>, and <code>MyOut</code> structs.</p>
-<pre><pre class="playground"><code class="language-rust">use diffsol::{Op, NonLinearOp, LinearOp, ConstantOp, OdeEquations, OdeEquationsRef};
-<span class="boring">fn main() {
-</span><span class="boring">type T = f64;
-</span><span class="boring">type V = nalgebra::DVector&lt;f64&gt;;
-</span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
-</span><span class="boring">struct MyRhs&lt;'a&gt; { p: &amp;'a V } // implements NonLinearOp
-</span><span class="boring">struct MyMass&lt;'a&gt; { p: &amp;'a V } // implements LinearOp
-</span><span class="boring">struct MyInit&lt;'a&gt; { p: &amp;'a V } // implements ConstantOp
-</span><span class="boring">struct MyRoot&lt;'a&gt; { p: &amp;'a V } // implements NonLinearOp
-</span><span class="boring">struct MyOut&lt;'a&gt; { p: &amp;'a V } // implements NonLinearOp
-</span><span class="boring">impl Op for MyRhs&lt;'_&gt; {
-</span><span class="boring">    type T = T;
-</span><span class="boring">    type V = V;
-</span><span class="boring">    type M = M;
-</span><span class="boring">    fn nstates(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nout(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nparams(&amp;self) -&gt; usize {
-</span><span class="boring">        2
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl NonLinearOp for MyRhs&lt;'_&gt; {
-</span><span class="boring">    fn call_inplace(&amp;self, x: &amp;V, _t: T, y: &amp;mut V) {
-</span><span class="boring">        y[0] = x[0] * x[0];
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl Op for MyMass&lt;'_&gt; {
-</span><span class="boring">    type T = T;
-</span><span class="boring">    type V = V;
-</span><span class="boring">    type M = M;
-</span><span class="boring">    fn nstates(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nout(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nparams(&amp;self) -&gt; usize {
-</span><span class="boring">        0
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl LinearOp for MyMass&lt;'_&gt; {
-</span><span class="boring">    fn gemv_inplace(&amp;self, x: &amp;V, _t: T, beta: T, y: &amp;mut V) {
-</span><span class="boring">        y[0] = x[0] * beta;
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl Op for MyInit&lt;'_&gt; {
-</span><span class="boring">    type T = T;
-</span><span class="boring">    type V = V;
-</span><span class="boring">    type M = M;
-</span><span class="boring">    fn nstates(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nout(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nparams(&amp;self) -&gt; usize {
-</span><span class="boring">        0
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl ConstantOp for MyInit&lt;'_&gt; {
-</span><span class="boring">    fn call_inplace(&amp;self, _t: T, y: &amp;mut V) {
-</span><span class="boring">        y[0] = 0.1;
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl Op for MyRoot&lt;'_&gt; {
-</span><span class="boring">    type T = T;
-</span><span class="boring">    type V = V;
-</span><span class="boring">    type M = M;
-</span><span class="boring">    fn nstates(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nout(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nparams(&amp;self) -&gt; usize {
-</span><span class="boring">        0
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl NonLinearOp for MyRoot&lt;'_&gt; {
-</span><span class="boring">    fn call_inplace(&amp;self, x: &amp;V, _t: T, y: &amp;mut V) {
-</span><span class="boring">        y[0] = x[0] - 1.0;
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl Op for MyOut&lt;'_&gt; {
-</span><span class="boring">    type T = T;
-</span><span class="boring">    type V = V;
-</span><span class="boring">    type M = M;
-</span><span class="boring">    fn nstates(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nout(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nparams(&amp;self) -&gt; usize {
-</span><span class="boring">        0
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">impl NonLinearOp for MyOut&lt;'_&gt; {
-</span><span class="boring">    fn call_inplace(&amp;self, x: &amp;V, _t: T, y: &amp;mut V) {
-</span><span class="boring">        y[0] = x[0];
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">
-</span><span class="boring">struct MyProblem {
-</span><span class="boring">    p: V,
-</span><span class="boring">}
-</span><span class="boring">
-</span><span class="boring">impl MyProblem {
-</span><span class="boring">    fn new() -&gt; Self {
-</span><span class="boring">        MyProblem { p: V::zeros(2) }
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">
-</span><span class="boring">impl Op for MyProblem {
-</span><span class="boring">    type T = T;
-</span><span class="boring">    type V = V;
-</span><span class="boring">    type M = M;
-</span><span class="boring">    fn nstates(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nout(&amp;self) -&gt; usize {
-</span><span class="boring">        1
-</span><span class="boring">    }
-</span><span class="boring">    fn nparams(&amp;self) -&gt; usize {
-</span><span class="boring">        2
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">
-</span><span class="boring">impl&lt;'a&gt; OdeEquationsRef&lt;'a&gt; for MyProblem {
-</span><span class="boring">    type Rhs = MyRhs&lt;'a&gt;;
-</span><span class="boring">    type Mass = MyMass&lt;'a&gt;;
-</span><span class="boring">    type Init = MyInit&lt;'a&gt;;
-</span><span class="boring">    type Root = MyRoot&lt;'a&gt;;
-</span><span class="boring">    type Out = MyOut&lt;'a&gt;;
-</span><span class="boring">}
-</span><span class="boring">
-</span><span class="boring">impl OdeEquations for MyProblem {
-</span><span class="boring">    fn rhs(&amp;self) -&gt; &lt;MyProblem as OdeEquationsRef&lt;'_&gt;&gt;::Rhs {
-</span><span class="boring">        MyRhs { p: &amp;self.p }
-</span><span class="boring">    }
-</span><span class="boring">    fn mass(&amp;self) -&gt; Option&lt;&lt;MyProblem as OdeEquationsRef&lt;'_&gt;&gt;::Mass&gt; {
-</span><span class="boring">        Some(MyMass { p: &amp;self.p })
-</span><span class="boring">    }
-</span><span class="boring">    fn init(&amp;self) -&gt; &lt;MyProblem as OdeEquationsRef&lt;'_&gt;&gt;::Init {
-</span><span class="boring">        MyInit { p: &amp;self.p }
-</span><span class="boring">    }
-</span><span class="boring">    fn root(&amp;self) -&gt; Option&lt;&lt;MyProblem as OdeEquationsRef&lt;'_&gt;&gt;::Root&gt; {
-</span><span class="boring">        Some(MyRoot { p: &amp;self.p })
-</span><span class="boring">    }
-</span><span class="boring">    fn out(&amp;self) -&gt; Option&lt;&lt;MyProblem as OdeEquationsRef&lt;'_&gt;&gt;::Out&gt; {
-</span><span class="boring">        Some(MyOut { p: &amp;self.p })
-</span><span class="boring">    }
-</span><span class="boring">    fn set_params(&amp;mut self, p: &amp;V) {
-</span><span class="boring">        self.p.copy_from(p);
-</span><span class="boring">    }
-</span><span class="boring">}
-</span>use diffsol::OdeBuilder;
-let problem = OdeBuilder::&lt;M&gt;::new()
-    .p(vec![1.0, 10.0])
-    .build_from_eqn(MyProblem::new())
-    .unwrap();
-<span class="boring">}</span></code></pre></pre>
+<pre><code class="language-rust ignore">use diffsol::OdeBuilder;
+fn main() {
+    let _problem = OdeBuilder::&lt;M&gt;::new()
+        .p(vec![1.0, 10.0])
+        .build_from_eqn(MyProblem::new())
+        .unwrap();
+}</code></pre>
 
                     </main>
 

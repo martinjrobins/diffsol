@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Example: Fitting a population dynamics model to data - DiffSol</title>
+        <title>Example: Fitting a predator-prey model to data - DiffSol</title>
 
 
         <!-- Custom HTML head -->
@@ -176,7 +176,10 @@
     solver::{linesearch::MoreThuenteLineSearch, quasinewton::LBFGS},
 };
 use argmin_observer_slog::SlogLogger;
-use diffsol::{DiffSl, OdeBuilder, OdeSolverMethod, OdeEquations, OdeSolverProblem};
+use diffsol::{
+    DiffSl, OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverProblem,
+    SensitivitiesOdeSolverMethod,
+};
 use nalgebra::{DMatrix, DVector};
 use std::cell::RefCell;
 
@@ -193,28 +196,7 @@ struct Problem {
     problem: RefCell&lt;OdeSolverProblem&lt;Eqn&gt;&gt;,
 }</code></pre>
 <p>The argmin <code>CostFunction</code> trait requires an implementation of the <code>cost</code> method, which will calculate the sum-of-squares difference between the synthetic data and the model output. Since the argmin crate does not support constraints, we'll return a large value if the ODE solver fails to converge.</p>
-<pre><code class="language-rust ignore"><span class="boring">use argmin::{
-</span><span class="boring">    core::{observers::ObserverMode, CostFunction, Executor, Gradient},
-</span><span class="boring">    solver::{linesearch::MoreThuenteLineSearch, quasinewton::LBFGS},
-</span><span class="boring">};
-</span><span class="boring">use argmin_observer_slog::SlogLogger;
-</span><span class="boring">use diffsol::{DiffSl, OdeBuilder, OdeSolverMethod, OdeEquations, OdeSolverProblem};
-</span><span class="boring">use nalgebra::{DMatrix, DVector};
-</span><span class="boring">use std::cell::RefCell;
-</span><span class="boring">
-</span><span class="boring">type M = DMatrix&lt;f64&gt;;
-</span><span class="boring">type V = DVector&lt;f64&gt;;
-</span><span class="boring">type T = f64;
-</span><span class="boring">type LS = diffsol::NalgebraLU&lt;f64&gt;;
-</span><span class="boring">type CG = diffsol::LlvmModule;
-</span><span class="boring">type Eqn = DiffSl&lt;M, CG&gt;;
-</span><span class="boring">
-</span><span class="boring">struct Problem {
-</span><span class="boring">    ys_data: M,
-</span><span class="boring">    ts_data: Vec&lt;T&gt;,
-</span><span class="boring">    problem: RefCell&lt;OdeSolverProblem&lt;Eqn&gt;&gt;,
-</span><span class="boring">}
-</span>impl CostFunction for Problem {
+<pre><code class="language-rust ignore">impl CostFunction for Problem {
     type Output = T;
     type Param = Vec&lt;T&gt;;
 
@@ -243,28 +225,7 @@ struct Problem {
 \frac{\partial \text{loss}}{\partial p} = 2 \sum_i (y_i(p) - \hat{y}_i) \cdot \frac{\partial y_i}{\partial p}
 \]</p>
 <p>where \(\frac{\partial y_i}{\partial p}\) is the sensitivity of the model output with respect to the parameters. We can calculate this sensitivity using the <code>solve_dense_sensitivities</code> method of the ODE solver. The gradient of the cost function is then the sum of the dot product of the residuals and the sensitivities for each time point. Again, if the ODE solver fails to converge, we'll return a large value for the gradient.</p>
-<pre><code class="language-rust ignore"><span class="boring">use argmin::{
-</span><span class="boring">    core::{observers::ObserverMode, CostFunction, Executor, Gradient},
-</span><span class="boring">    solver::{linesearch::MoreThuenteLineSearch, quasinewton::LBFGS},
-</span><span class="boring">};
-</span><span class="boring">use argmin_observer_slog::SlogLogger;
-</span><span class="boring">use diffsol::{DiffSl, OdeBuilder, OdeSolverMethod, OdeEquations, OdeSolverProblem};
-</span><span class="boring">use nalgebra::{DMatrix, DVector};
-</span><span class="boring">use std::cell::RefCell;
-</span><span class="boring">
-</span><span class="boring">type M = DMatrix&lt;f64&gt;;
-</span><span class="boring">type V = DVector&lt;f64&gt;;
-</span><span class="boring">type T = f64;
-</span><span class="boring">type LS = diffsol::NalgebraLU&lt;f64&gt;;
-</span><span class="boring">type CG = diffsol::LlvmModule;
-</span><span class="boring">type Eqn = DiffSl&lt;M, CG&gt;;
-</span><span class="boring">
-</span><span class="boring">struct Problem {
-</span><span class="boring">    ys_data: M,
-</span><span class="boring">    ts_data: Vec&lt;T&gt;,
-</span><span class="boring">    problem: RefCell&lt;OdeSolverProblem&lt;Eqn&gt;&gt;,
-</span><span class="boring">}
-</span>impl Gradient for Problem {
+<pre><code class="language-rust ignore">impl Gradient for Problem {
     type Gradient = Vec&lt;T&gt;;
     type Param = Vec&lt;T&gt;;
 
@@ -290,131 +251,59 @@ struct Problem {
 }</code></pre>
 <p>With these implementation out of the way, we can now perform the fitting problem. We'll generate some synthetic data using the Lotka-Volterra equations with some true parameters, and then fit the model to this data. We'll use the <code>LBFGS</code> solver from the argmin crate, which is a quasi-Newton method that uses the Broyden-Fletcher-Goldfarb-Shanno (BFGS) update formula. We'll also use the <code>SlogLogger</code> observer to log the progress of the optimisation.</p>
 <p>We'll initialise the optimizer a short distance away from the true parameter values, and then check the final optimised parameter values against the true values.</p>
-<pre><code class="language-rust ignore"><span class="boring">use argmin::{
-</span><span class="boring">    core::{observers::ObserverMode, CostFunction, Executor, Gradient},
-</span><span class="boring">    solver::{linesearch::MoreThuenteLineSearch, quasinewton::LBFGS},
-</span><span class="boring">};
-</span><span class="boring">use argmin_observer_slog::SlogLogger;
-</span><span class="boring">use diffsol::{DiffSl, OdeBuilder, OdeSolverMethod, OdeEquations, OdeSolverProblem};
-</span><span class="boring">use nalgebra::{DMatrix, DVector};
-</span><span class="boring">use std::cell::RefCell;
-</span><span class="boring">
-</span><span class="boring">type M = DMatrix&lt;f64&gt;;
-</span><span class="boring">type V = DVector&lt;f64&gt;;
-</span><span class="boring">type T = f64;
-</span><span class="boring">type LS = diffsol::NalgebraLU&lt;f64&gt;;
-</span><span class="boring">type CG = diffsol::LlvmModule;
-</span><span class="boring">type Eqn = DiffSl&lt;M, CG&gt;;
-</span><span class="boring">
-</span><span class="boring">struct Problem {
-</span><span class="boring">    ys_data: M,
-</span><span class="boring">    ts_data: Vec&lt;T&gt;,
-</span><span class="boring">    problem: RefCell&lt;OdeSolverProblem&lt;Eqn&gt;&gt;,
-</span><span class="boring">}
-</span><span class="boring">
-</span><span class="boring">impl CostFunction for Problem {
-</span><span class="boring">    type Output = T;
-</span><span class="boring">    type Param = Vec&lt;T&gt;;
-</span><span class="boring">
-</span><span class="boring">    fn cost(&amp;self, param: &amp;Self::Param) -&gt; Result&lt;Self::Output, argmin_math::Error&gt; {
-</span><span class="boring">        let mut problem = self.problem.borrow_mut();
-</span><span class="boring">        problem.eqn_mut().set_params(&amp;V::from_vec(param.clone()));
-</span><span class="boring">        let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
-</span><span class="boring">        let ys = match solver.solve_dense(&amp;self.ts_data) {
-</span><span class="boring">            Ok(ys) =&gt; ys,
-</span><span class="boring">            Err(_) =&gt; return Ok(f64::MAX / 1000.),
-</span><span class="boring">        };
-</span><span class="boring">        let loss = ys
-</span><span class="boring">            .column_iter()
-</span><span class="boring">            .zip(self.ys_data.column_iter())
-</span><span class="boring">            .map(|(a, b)| (a - b).norm_squared())
-</span><span class="boring">            .sum::&lt;f64&gt;();
-</span><span class="boring">        Ok(loss)
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">
-</span><span class="boring">impl Gradient for Problem {
-</span><span class="boring">    type Gradient = Vec&lt;T&gt;;
-</span><span class="boring">    type Param = Vec&lt;T&gt;;
-</span><span class="boring">
-</span><span class="boring">    fn gradient(&amp;self, param: &amp;Self::Param) -&gt; Result&lt;Self::Gradient, argmin_math::Error&gt; {
-</span><span class="boring">        let mut problem = self.problem.borrow_mut();
-</span><span class="boring">        problem.eqn_mut().set_params(&amp;V::from_vec(param.clone()));
-</span><span class="boring">        let mut solver = problem.bdf_sens::&lt;LS&gt;().unwrap();
-</span><span class="boring">        let (ys, sens) = match solver.solve_dense_sensitivities(&amp;self.ts_data) {
-</span><span class="boring">            Ok((ys, sens)) =&gt; (ys, sens),
-</span><span class="boring">            Err(_) =&gt; return Ok(vec![f64::MAX / 1000.; param.len()]),
-</span><span class="boring">        };
-</span><span class="boring">        let dlossdp = sens
-</span><span class="boring">            .into_iter()
-</span><span class="boring">            .map(|s| {
-</span><span class="boring">                s.column_iter()
-</span><span class="boring">                    .zip(ys.column_iter().zip(self.ys_data.column_iter()))
-</span><span class="boring">                    .map(|(si, (yi, di))| 2.0 * (yi - di).dot(&amp;si))
-</span><span class="boring">                    .sum::&lt;f64&gt;()
-</span><span class="boring">            })
-</span><span class="boring">            .collect::&lt;Vec&lt;f64&gt;&gt;();
-</span><span class="boring">        Ok(dlossdp)
-</span><span class="boring">    }
-</span><span class="boring">}
-</span><span class="boring">
-</span><span class="boring">
-</span><span class="boring">fn main() {
-</span>let eqn = DiffSl::&lt;M, CG&gt;::compile(
-    "
-        in = [ b, d ]
-        a { 2.0/3.0 } b { 4.0/3.0 } c { 1.0 } d { 1.0 } x0 { 1.0 } y0 { 1.0 }
-        u_i {
-            y1 = x0,
-            y2 = y0,
-        }
-        F_i {
-            a * y1 - b * y1 * y2,
-            c * y1 * y2 - d * y2,
-        }
-    ",
-)
-.unwrap();
-
-let (b_true, d_true) = (4.0/3.0, 1.0);
-let t_data = (0..101)
-    .map(|i| f64::from(i) * 40. / 100.)
-    .collect::&lt;Vec&lt;f64&gt;&gt;();
-let problem = OdeBuilder::&lt;M&gt;::new()
-    .p([b_true, d_true])
-    .sens_atol([1e-6])
-    .sens_rtol(1e-6)
-    .build_from_eqn(eqn)
-    .unwrap();
-let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
-let ys_data = solver.solve_dense(&amp;t_data).unwrap();
-
-let cost = Problem {
-    ys_data,
-    ts_data: t_data,
-    problem: RefCell::new(problem),
-};
-
-let init_param = vec![
-    b_true - 0.1,
-    d_true - 0.1,
-];
-
-let linesearch = MoreThuenteLineSearch::new().with_c(1e-4, 0.9).unwrap();
-let solver = LBFGS::new(linesearch, 7);
-let res = Executor::new(cost, solver)
-    .configure(|state| state.param(init_param))
-    .add_observer(SlogLogger::term(), ObserverMode::Always)
-    .run()
+<pre><code class="language-rust ignore">fn main() {
+    let eqn = DiffSl::&lt;M, CG&gt;::compile(
+        "
+            in = [ b, d ]
+            a { 2.0/3.0 } b { 4.0/3.0 } c { 1.0 } d { 1.0 } x0 { 1.0 } y0 { 1.0 }
+            u_i {
+                y1 = x0,
+                y2 = y0,
+            }
+            F_i {
+                a * y1 - b * y1 * y2,
+                c * y1 * y2 - d * y2,
+            }
+        ",
+    )
     .unwrap();
 
-// print result
-println!("{}", res);
-// Best parameter vector
-let best = res.state().best_param.as_ref().unwrap();
-println!("Best parameter vector: {:?}", best);
-println!("True parameter vector: {:?}", vec![b_true, d_true]);
-<span class="boring">}</span></code></pre>
+    let (b_true, d_true) = (4.0 / 3.0, 1.0);
+    let t_data = (0..101)
+        .map(|i| f64::from(i) * 40. / 100.)
+        .collect::&lt;Vec&lt;f64&gt;&gt;();
+    let problem = OdeBuilder::&lt;M&gt;::new()
+        .p([b_true, d_true])
+        .sens_atol([1e-6])
+        .sens_rtol(1e-6)
+        .build_from_eqn(eqn)
+        .unwrap();
+    let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
+    let ys_data = solver.solve_dense(&amp;t_data).unwrap();
+
+    let cost = Problem {
+        ys_data,
+        ts_data: t_data,
+        problem: RefCell::new(problem),
+    };
+
+    let init_param = vec![b_true - 0.1, d_true - 0.1];
+
+    let linesearch = MoreThuenteLineSearch::new().with_c(1e-4, 0.9).unwrap();
+    let solver = LBFGS::new(linesearch, 7);
+    let res = Executor::new(cost, solver)
+        .configure(|state| state.param(init_param))
+        .add_observer(SlogLogger::term(), ObserverMode::Always)
+        .run()
+        .unwrap();
+
+    // print result
+    println!("{}", res);
+    // Best parameter vector
+    let best = res.state().best_param.as_ref().unwrap();
+    println!("Best parameter vector: {:?}", best);
+    println!("True parameter vector: {:?}", vec![b_true, d_true]);
+}</code></pre>
 <pre><code>Feb 03 13:16:44.604 INFO L-BFGS
 Feb 03 13:16:44.842 INFO iter: 0, cost: 21.574177406963013, best_cost: 21.574177406963013, cost_count: 6, gradient_count: 7, gamma: 1, time: 0.238573908
 Feb 03 13:16:44.920 INFO iter: 1, cost: 0.6811721224055488, best_cost: 0.6811721224055488, cost_count: 8, gradient_count: 10, time: 0.077082344, gamma: 0.00036901099013336356
@@ -456,7 +345,7 @@ True parameter vector: [1.3333333333333333, 1.0]
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../specify/specifying_the_problem.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../primer/backwards_sensitivity_analysis.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -470,7 +359,7 @@ True parameter vector: [1.3333333333333333, 1.0]
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../specify/specifying_the_problem.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../primer/backwards_sensitivity_analysis.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

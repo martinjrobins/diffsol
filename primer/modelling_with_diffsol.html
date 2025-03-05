@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Explicit First Order ODEs - DiffSol</title>
+        <title>Modelling with DiffSol - DiffSol</title>
 
 
         <!-- Custom HTML head -->
@@ -155,49 +155,45 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="explicit-first-order-odes"><a class="header" href="#explicit-first-order-odes">Explicit First Order ODEs</a></h1>
-<p>Ordinary Differential Equations (ODEs) are often called rate equations because they describe how the <em>rate of change</em> of a system depends on its current <em>state</em>. For example, lets assume we wish to model the growth of a population of cells within a petri dish. We could define the <em>state</em> of the system as the concentration of cells in the dish, and assign this state to a variable \(c\). The <em>rate of change</em> of the system would then be the rate at which the concentration of cells changes with time, which we could denote as \(\frac{dc}{dt}\). We know that our cells will grow at a rate proportional to the current concentration of cells, so this can be written as:</p>
-<p>\[
-\frac{dc}{dt} = k c
-\]</p>
-<p>where \(k\) is a constant that describes the growth rate of the cells. This is a first order ODE, because it involves only the first derivative of the state variable \(c\) with respect to time.</p>
-<p>We can extend this further to solve multiple equations simultaineously, in order to model the rate of change of more than one quantity. For example, say we had <em>two</em> populations of cells in the same dish that grow with different rates. We could define the state of the system as the concentrations of the two cell populations, and assign these states to variables \(c_1\) and \(c_2\). could then write down both equations as:</p>
-<p>\[
-\begin{align*}
-\frac{dc_1}{dt} &amp;= k_1 c_1  \\
-\frac{dc_2}{dt} &amp;= k_2 c_2
-\end{align*}
-\]</p>
-<p>and then combine them in a vector form as:</p>
-<p>\[
-\begin{bmatrix}
-\frac{dc_1}{dt} \\
-\frac{dc_2}{dt}
-\end{bmatrix} = \begin{bmatrix}
-k_1 c_1 \\
-k_2 c_2
-\end{bmatrix}
-\]</p>
-<p>By defining a new <em>vector</em> of state variables \(\mathbf{y} = [c_1, c_2]\) and a vector valued function \(\mathbf{f}(\mathbf{y}, t) = \begin{bmatrix} k_1 c_1 \\ k_2 c_2 \end{bmatrix}\), we are left with the standard form of a <em>explicit</em> first order ODE system:</p>
-<p>\[
-\frac{d\mathbf{y}}{dt} = \mathbf{f}(\mathbf{y}, t)
-\]</p>
-<p>This is an explicit equation for the derivative of the state, \(\frac{d\mathbf{y}}{dt}\), as a function of only of the state variables \(\mathbf{y}\) and of time \(t\).</p>
-<p>We need one more piece of information to solve this system of ODEs: the initial conditions for the populations at time \(t = 0\). For example, if we started with a concentration of 10 for the first population and 5 for the second population, we would write:</p>
-<p>\[
-\mathbf{y}(0) = \begin{bmatrix} 10 \\ 5 \end{bmatrix}
-\]</p>
-<p>Many ODE solver libraries, like DiffSol, require users to provide their ODEs in the form of a set of explicit first order ODEs. Given both the system of ODEs and the initial conditions, the solver can then integrate the equations forward in time to find the solution \(\mathbf{y}(t)\). This is the general process for solving ODEs, so it is important to know how to translate your problem into a set of first order ODEs, and thus to the general form of a explicit first order ODE system shown above. In the next two sections, we will look at an example of a first order ODE system in the area of population dynamics, and then solve it using DiffSol.</p>
+                        <h1 id="modelling-with-diffsol"><a class="header" href="#modelling-with-diffsol">Modelling with DiffSol</a></h1>
+<p>Ordinary Differential Equations (ODEs) are a powerful tool for modelling a wide range of physical systems. Unlike purely data-driven models, ODEs are based on the underlying physics, biology, or chemistry of the system being modelled. This makes them particularly useful for predicting the behaviour of a system under conditions that have not been observed. In this section, we will introduce the basics of ODE modelling, and illustrate their use with a series of examples written using the DiffSol crate.</p>
+<p>The topics covered in this section are:</p>
+<ul>
+<li><a href="./primer/first_order_odes.html">First Order ODEs</a>: First order ODEs are the simplest type of ODE. Any ODE system can be written as a set of first order ODEs, so libraries like DiffSol are designed such that the user provides their equations in this form.
+<ul>
+<li><a href="./primer/population_dynamics.html">Example: Population Dynamics</a>: A simple example of a first order ODE system, modelling the interaction of predator and prey populations.</li>
+</ul>
+</li>
+<li><a href="./primer/higher_order_odes.html">Higher Order ODEs</a>: Higher order ODEs are equations that involve derivatives of order greater than one. These can be converted to a system of first order ODEs, which is the form that DiffSol expects.
+<ul>
+<li><a href="./primer/spring_mass_systems.html">Example: Spring-mass systems</a>: A simple example of a higher order ODE system, modelling the motion of a damped spring-mass system.</li>
+</ul>
+</li>
+<li><a href="./primer/discrete_events.html">Discrete Events</a>: Discrete events are events that occur at specific times or when the system is in a particular state, rather than continuously. These can be modelled by treating the events as changes in the ODE system's state. DiffSol provides an API to detect and handle these events.
+<ul>
+<li><a href="./primer/compartmental_models_of_drug_delivery.html">Example: Compartmental models of Drug Delivery</a>: Pharmacokinetic models describe how a drug is absorbed, distributed, metabolised, and excreted by the body. They are a common example of systems with discrete events, as the drug is often administered at discrete times.</li>
+<li><a href="./primer/bouncing_ball.html">Example: Bouncing Ball</a>: A simple example of a system where the discrete event occurs when the ball hits the ground, instead of at a specific time.</li>
+</ul>
+</li>
+<li><a href="./primer/the_mass_matrix.html">DAEs via the Mass Matrix</a>: Differential Algebraic Equations (DAEs) are a generalisation of ODEs that include algebraic equations as well as differential equations. DiffSol can solve DAEs by treating them as ODEs with a mass matrix. This section explains how to use the mass matrix to solve DAEs.
+<ul>
+<li><a href="./primer/electrical_circuits.html">Example: Electrical Circuits</a>: Electrical circuits are a common example of DAEs, here we will model a simple low-pass LRC filter circuit.</li>
+</ul>
+</li>
+<li><a href="./primer/pdes.html">PDEs</a>: Partial Differential Equations (PDEs) are a generalisation of ODEs that involve derivatives with respect to more than one variable (e.g. a spatial variable). DiffSol can be used to solver PDEs using the method of lines, where the spatial derivatives are discretised to form a system of ODEs.
+<ul>
+<li><a href="./primer/heat_equation.html">Example: Heat Equation</a>: The heat equation describes how heat diffuses in a domain over time. We will solve the heat equation in a 1D domain with Dirichlet boundary conditions.</li>
+<li><a href="./primer/physics_based_battery_simulation.html">Example: Physics-based Battery Simulation</a>: A more complex example of a PDE system, modelling the charge and discharge of a lithium-ion battery. For this example we will use the PyBaMM library to form the ODE system, and DiffSol to solve it.</li>
+</ul>
+</li>
+</ul>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../primer/modelling_with_diffsol.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
-                                <i class="fa fa-angle-left"></i>
-                            </a>
 
-                            <a rel="next prefetch" href="../primer/population_dynamics.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../primer/first_order_odes.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -207,11 +203,8 @@ k_2 c_2
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../primer/modelling_with_diffsol.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
-                        <i class="fa fa-angle-left"></i>
-                    </a>
 
-                    <a rel="next prefetch" href="../primer/population_dynamics.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../primer/first_order_odes.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
