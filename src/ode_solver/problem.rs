@@ -1,10 +1,10 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    error::DiffsolError, vector::Vector, AdjointContext, AdjointEquations,
+    error::DiffsolError, vector::Vector, AdjointContext, AdjointEquations, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, Bdf, BdfState, Checkpointing, DefaultDenseMatrix, DenseMatrix,
     LinearSolver, MatrixRef, NewtonNonlinearSolver, OdeEquations, OdeEquationsAdjoint,
-    OdeEquationsImplicit, OdeEquationsSens, OdeSolverMethod, OdeSolverState, Op, Sdirk, SdirkState,
+    OdeEquationsImplicit, OdeEquationsSens, OdeSolverMethod, OdeSolverState, Sdirk, SdirkState,
     SensEquations, Tableau, VectorRef,
 };
 
@@ -78,6 +78,7 @@ macro_rules! sdirk_solver_from_tableau {
         pub fn $method_solver_adjoint<'a, LS: LinearSolver<Eqn::M>, S: OdeSolverMethod<'a, Eqn>>(
             &'a self,
             checkpointer: Checkpointing<'a, Eqn, S>,
+            nout_override: Option<usize>,
         ) -> Result<
             Sdirk<'a, Eqn, LS, <Eqn::V as DefaultDenseMatrix>::M, AdjointEquations<'a, Eqn, S>>,
             DiffsolError,
@@ -88,6 +89,7 @@ macro_rules! sdirk_solver_from_tableau {
             self.sdirk_solver_adjoint(
                 Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(),
                 checkpointer,
+                nout_override,
             )
         }
 
@@ -263,6 +265,13 @@ where
             *state.as_mut().h = -h;
         }
         state.set_consistent_augmented(self, &mut augmented_eqn, &mut newton_solver)?;
+        state.set_step_size(
+            state.h,
+            augmented_eqn.atol().unwrap(),
+            augmented_eqn.rtol().unwrap(),
+            &augmented_eqn,
+            1,
+        );
         Bdf::new_augmented(state, self, augmented_eqn, newton_solver)
     }
 
@@ -364,13 +373,14 @@ where
         &'a self,
         tableau: Tableau<DM>,
         checkpointer: Checkpointing<'a, Eqn, S>,
+        nout_override: Option<usize>,
     ) -> Result<Sdirk<'a, Eqn, LS, DM, AdjointEquations<'a, Eqn, S>>, DiffsolError>
     where
         Eqn: OdeEquationsAdjoint,
     {
-        let nout = self.eqn.out().unwrap().nout();
         let t = checkpointer.last_t();
         let h = checkpointer.last_h();
+        let nout = nout_override.unwrap_or_else(|| self.eqn.nout());
         let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer, nout)));
         let mut augmented_eqn = AdjointEquations::new(self, context, self.integrate_out);
         let mut state = SdirkState::new_without_initialise_augmented(self, &mut augmented_eqn)?;
@@ -380,6 +390,13 @@ where
         }
         let mut newton_solver = NewtonNonlinearSolver::new(LS::default());
         state.set_consistent_augmented(self, &mut augmented_eqn, &mut newton_solver)?;
+        state.set_step_size(
+            state.h,
+            augmented_eqn.atol().unwrap(),
+            augmented_eqn.rtol().unwrap(),
+            &augmented_eqn,
+            tableau.order(),
+        );
         Sdirk::new_augmented(self, state, tableau, LS::default(), augmented_eqn)
     }
 

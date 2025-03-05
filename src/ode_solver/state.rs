@@ -152,7 +152,13 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let mut ret = Self::new_without_initialise(ode_problem)?;
         let mut root_solver = NewtonNonlinearSolver::new(LS::default());
         ret.set_consistent(ode_problem, &mut root_solver)?;
-        ret.set_step_size(ode_problem, solver_order);
+        ret.set_step_size(
+            ode_problem.h0,
+            &ode_problem.atol,
+            ode_problem.rtol,
+            &ode_problem.eqn,
+            solver_order,
+        );
         Ok(ret)
     }
 
@@ -183,7 +189,13 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         ret.set_consistent(ode_problem, &mut root_solver)?;
         let mut root_solver_sens = NewtonNonlinearSolver::new(LS::default());
         ret.set_consistent_augmented(ode_problem, augmented_eqn, &mut root_solver_sens)?;
-        ret.set_step_size(ode_problem, solver_order);
+        ret.set_step_size(
+            ode_problem.h0,
+            &ode_problem.atol,
+            ode_problem.rtol,
+            &ode_problem.eqn,
+            solver_order,
+        );
         Ok(ret)
     }
 
@@ -402,19 +414,22 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     /// Section II.4.2
     /// Note: this assumes that the state is already consistent with the algebraic constraints
     /// and y and dy are already set appropriately
-    fn set_step_size<Eqn>(&mut self, ode_problem: &OdeSolverProblem<Eqn>, solver_order: usize)
-    where
+    fn set_step_size<Eqn>(
+        &mut self,
+        h0: Eqn::T,
+        atol: &Eqn::V,
+        rtol: Eqn::T,
+        eqn: &Eqn,
+        solver_order: usize,
+    ) where
         Eqn: OdeEquations<T = V::T, V = V>,
     {
-        let is_neg_h = ode_problem.h0 < Eqn::T::zero();
+        let is_neg_h = h0 < Eqn::T::zero();
         let (h0, h1) = {
             let state = self.as_ref();
             let y0 = state.y;
             let t0 = state.t;
             let f0 = state.dy;
-
-            let rtol = ode_problem.rtol;
-            let atol = &ode_problem.atol;
 
             let d0 = y0.squared_norm(y0, atol, rtol).sqrt();
             let d1 = f0.squared_norm(y0, atol, rtol).sqrt();
@@ -429,11 +444,11 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
             let f1 = if is_neg_h {
                 let y1 = f0.clone() * scale(-h0) + y0;
                 let t1 = t0 - h0;
-                ode_problem.eqn.rhs().call(&y1, t1)
+                eqn.rhs().call(&y1, t1)
             } else {
                 let y1 = f0.clone() * scale(h0) + y0;
                 let t1 = t0 + h0;
-                ode_problem.eqn.rhs().call(&y1, t1)
+                eqn.rhs().call(&y1, t1)
             };
 
             let df = f1 - f0;

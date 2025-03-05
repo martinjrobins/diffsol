@@ -27,18 +27,22 @@ diffsl-llvm18 = ["diffsl/llvm18-0", "diffsl", "diffsl-llvm"]
 nalgebra = "0.33.2"
 nalgebra-sparse = { version = "0.10", features = ["io"] }
 num-traits = "0.2.17"
-serde = { version = "1.0.217", features = ["derive"] }
+serde = { version = "1.0.218", features = ["derive"] }
 diffsl = { package = "diffsl", version = "0.4.2", optional = true }
 petgraph = "0.7.1"
-faer = "0.21.3"
+faer = "0.21.7"
 suitesparse_sys = { version = "0.1.3", optional = true }
-thiserror = "2.0.11"
+thiserror = "2.0.12"
 faer-traits = "0.21.0"
 
 [dev-dependencies]
 insta = { version = "1.42.0", features = ["yaml"] }
 criterion = { version = "0.5.1" }
 skeptic = "0.13.7"
+plotly = "0.12.1"
+argmin = "0.10.0"
+argmin-math = { version = "0.4" }
+argmin-observer-slog = "0.1.0"
 
 [build-dependencies]
 bindgen = { version = "0.71.1", optional = true }
@@ -54,3 +58,11 @@ features = ["diffsl-llvm15"]
 [profile.profiling]
 inherits = "release"
 debug = true
+
+[[example]]
+name = "pred-prey-fitting"
+required-features = ["diffsl-llvm"]
+
+[[example]]
+name = "mass-spring-fitting-adjoint"
+required-features = ["diffsl-llvm"]

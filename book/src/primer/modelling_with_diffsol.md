@@ -1,4 +1,4 @@
-# Modelling with ODEs
+# Modelling with DiffSol
 
 Ordinary Differential Equations (ODEs) are a powerful tool for modelling a wide range of physical systems. Unlike purely data-driven models, ODEs are based on the underlying physics, biology, or chemistry of the system being modelled. This makes them particularly useful for predicting the behaviour of a system under conditions that have not been observed. In this section, we will introduce the basics of ODE modelling, and illustrate their use with a series of examples written using the DiffSol crate.
 
