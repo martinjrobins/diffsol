@@ -62,3 +62,7 @@ debug = true
 [[example]]
 name = "pred-prey-fitting"
 required-features = ["diffsl-llvm"]
+
+[[example]]
+name = "mass-spring-fitting-adjoint"
+required-features = ["diffsl-llvm"]
