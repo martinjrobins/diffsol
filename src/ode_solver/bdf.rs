@@ -182,6 +182,7 @@ where
     const MAX_THRESHOLD: f64 = 2.0;
     const MIN_THRESHOLD: f64 = 0.9;
     const MIN_TIMESTEP: f64 = 1e-32;
+    const MAX_ERROR_TEST_FAILS: usize = 40;
 
     pub fn new(
         problem: &'a OdeSolverProblem<Eqn>,
@@ -1002,6 +1003,7 @@ where
         let integrate_out = problem.integrate_out;
         let output_in_error_control = problem.output_in_error_control();
         let integrate_sens = self.s_op.is_some();
+        let old_num_error_test_failures = self.statistics.number_of_error_test_failures;
 
         let mut convergence_fail = false;
 
@@ -1120,6 +1122,15 @@ where
 
                 // update statistics
                 self.statistics.number_of_error_test_failures += 1;
+                if self.statistics.number_of_error_test_failures - old_num_error_test_failures
+                    >= Self::MAX_ERROR_TEST_FAILS
+                {
+                    return Err(DiffsolError::from(
+                        OdeSolverError::TooManyErrorTestFailures {
+                            time: self.state.t.into(),
+                        },
+                    ));
+                }
             }
         }
 
@@ -1419,10 +1430,10 @@ mod test {
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 184
+        number_of_calls: 213
         number_of_jac_muls: 6
         number_of_matrix_evals: 3
-        number_of_jac_adj_muls: 392
+        number_of_jac_adj_muls: 455
         "###);
     }
 
@@ -1441,10 +1452,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 507
+        number_of_calls: 511
         number_of_jac_muls: 6
         number_of_matrix_evals: 3
-        number_of_jac_adj_muls: 1620
+        number_of_jac_adj_muls: 1608
         "###);
     }
 
@@ -1478,7 +1489,7 @@ mod test {
         number_of_calls: 207
         number_of_jac_muls: 15
         number_of_matrix_evals: 5
-        number_of_jac_adj_muls: 201
+        number_of_jac_adj_muls: 189
         "###);
     }
 
@@ -1497,10 +1508,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 233
+        number_of_calls: 267
         number_of_jac_muls: 15
         number_of_matrix_evals: 5
-        number_of_jac_adj_muls: 428
+        number_of_jac_adj_muls: 500
         "###);
     }
 

@@ -67,6 +67,8 @@ pub enum OdeSolverError {
     StateNotSet,
     #[error("Sensitivity solve failed")]
     SensitivitySolveFailed,
+    #[error("Exceeded maximum number of error test failures at time = {time}")]
+    TooManyErrorTestFailures { time: f64 },
     #[error("Step size is too small at time = {time}")]
     StepSizeTooSmall { time: f64 },
     #[error("Sensitivity requested but equations do not support it")]

@@ -163,6 +163,7 @@ where
     const MIN_FACTOR: f64 = 0.2;
     const MAX_FACTOR: f64 = 10.0;
     const MIN_TIMESTEP: f64 = 1e-13;
+    const MAX_ERROR_TEST_FAILS: usize = 40;
 
     pub fn new(
         problem: &'a OdeSolverProblem<Eqn>,
@@ -602,6 +603,7 @@ where
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
         let n = self.state.y.len();
+        let old_num_error_test_fails = self.statistics.number_of_error_test_failures;
 
         if self.is_state_mutated {
             // reinitalise root finder if needed
@@ -843,6 +845,15 @@ where
             }
             // step is rejected, factor reduces step size, so we try again with the smaller step size
             self.statistics.number_of_error_test_failures += 1;
+            if self.statistics.number_of_error_test_failures - old_num_error_test_fails
+                >= Self::MAX_ERROR_TEST_FAILS
+            {
+                return Err(DiffsolError::from(
+                    OdeSolverError::TooManyErrorTestFailures {
+                        time: self.state.t.into(),
+                    },
+                ));
+            }
             let new_h = self._update_step_size(factor)?;
             self._jacobian_updates(new_h, SolverState::ErrorTestFail);
         }
@@ -1207,14 +1218,14 @@ mod test {
         let mut s = problem.esdirk34::<LS>().unwrap();
         let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
-            .esdirk34_solver_adjoint::<LS, _>(checkpointer)
+            .esdirk34_solver_adjoint::<LS, _>(checkpointer, None)
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 651
+        number_of_calls: 644
         number_of_jac_muls: 14
         number_of_matrix_evals: 7
-        number_of_jac_adj_muls: 474
+        number_of_jac_adj_muls: 439
         "###);
     }
 
@@ -1233,10 +1244,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 282
+        number_of_calls: 317
         number_of_jac_muls: 12
         number_of_matrix_evals: 4
-        number_of_jac_adj_muls: 425
+        number_of_jac_adj_muls: 500
         "###);
     }
 
@@ -1248,14 +1259,14 @@ mod test {
         let mut s = problem.esdirk34::<LS>().unwrap();
         let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
-            .esdirk34_solver_adjoint::<LS, _>(checkpointer)
+            .esdirk34_solver_adjoint::<LS, _>(checkpointer, None)
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 478
+        number_of_calls: 456
         number_of_jac_muls: 30
         number_of_matrix_evals: 10
-        number_of_jac_adj_muls: 191
+        number_of_jac_adj_muls: 149
         "###);
     }
 

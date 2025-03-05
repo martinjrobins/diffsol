@@ -1,5 +1,5 @@
 # Summary
-- [Modelling with ODEs](./primer/modelling_with_odes.md)
+- [Modelling with DiffSol](./primer/modelling_with_diffsol.md)
   - [Explicit First Order ODEs](./primer/first_order_odes.md)
     - [Example: Population Dynamics](./primer/population_dynamics.md)
   - [Higher Order ODEs](./primer/higher_order_odes.md)
@@ -13,7 +13,9 @@
     - [Example: Heat Equation](./primer/heat_equation.md)
     - [Example: Physics-based Battery Simulation](./primer/physics_based_battery_simulation.md)
   - [Forward Sensitivity Analysis](./primer/forward_sensitivity_analysis.md)
-    - [Example: Fitting a population dynamics model to data](./primer/population_dynamics_fitting.md)
+    - [Example: Fitting a predator-prey model to data](./primer/population_dynamics_fitting.md)
+  - [Backwards Sensitivity Analysis](./primer/backwards_sensitivity_analysis.md)
+    - [Example: Fitting a spring-mass model to data](./primer/spring_mass_fitting.md)
 - [DiffSol APIs for specifying problems](./specify/specifying_the_problem.md)
   - [ODE equations](./specify/ode_equations.md)
   - [Mass matrix](./specify/mass_matrix.md)
