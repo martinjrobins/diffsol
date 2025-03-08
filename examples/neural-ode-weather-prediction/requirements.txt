@@ -1,0 +1,6 @@
+jax
+jaxlib
+equinox
+tensorflow
+tf2onnx
+numpy==1.26.4

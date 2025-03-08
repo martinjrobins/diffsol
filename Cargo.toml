@@ -1,68 +1,26 @@
-[package]
-name = "diffsol"
-version = "0.5.3"
+[workspace]
+members = [
+  "diffsol",
+  "examples/*",
+]
+resolver = "2"
+
+[workspace.package]
 edition = "2021"
-description = "A library for solving ordinary differential equations (ODEs) in Rust."
 license = "MIT"
 authors = ["Martin Robinson <martinjrobins@gmail.com>"]
 repository = "https://github.com/martinjrobins/diffsol"
 
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[features]
-default = ["nalgebra", "faer", "diffsl"]
-faer = []
-nalgebra = []
-sundials = ["suitesparse_sys", "bindgen", "cc"]
-suitesparse = ["suitesparse_sys"]
-diffsl = ["dep:diffsl"]
-diffsl-llvm = []
-diffsl-llvm15 = ["diffsl/llvm15-0", "diffsl", "diffsl-llvm"]
-diffsl-llvm16 = ["diffsl/llvm16-0", "diffsl", "diffsl-llvm"]
-diffsl-llvm17 = ["diffsl/llvm17-0", "diffsl", "diffsl-llvm"]
-diffsl-llvm18 = ["diffsl/llvm18-0", "diffsl", "diffsl-llvm"]
-
-[dependencies]
+[workspace.dependencies]
 nalgebra = "0.33.2"
-nalgebra-sparse = { version = "0.10", features = ["io"] }
-num-traits = "0.2.17"
-serde = { version = "1.0.218", features = ["derive"] }
-diffsl = { package = "diffsl", version = "0.4.2", optional = true }
-petgraph = "0.7.1"
 faer = "0.21.7"
-suitesparse_sys = { version = "0.1.3", optional = true }
-thiserror = "2.0.12"
-faer-traits = "0.21.0"
 
-[dev-dependencies]
-insta = { version = "1.42.0", features = ["yaml"] }
-criterion = { version = "0.5.1" }
-skeptic = "0.13.7"
-plotly = "0.12.1"
-argmin = "0.10.0"
+plotly = { version = "0.12.1" }
+argmin = { version = "0.10.0" }
 argmin-math = { version = "0.4" }
-argmin-observer-slog = "0.1.0"
-
-[build-dependencies]
-bindgen = { version = "0.71.1", optional = true }
-cc = { version = "1.2.10", optional = true }
-
-[[bench]]
-name = "ode_solvers"
-harness = false
-
-[package.metadata.docs.rs]
-features = ["diffsl-llvm15"]
+argmin-observer-slog = { version = "0.1.0" }
 
 [profile.profiling]
 inherits = "release"
 debug = true
 
-[[example]]
-name = "pred-prey-fitting"
-required-features = ["diffsl-llvm"]
-
-[[example]]
-name = "mass-spring-fitting-adjoint"
-required-features = ["diffsl-llvm"]
