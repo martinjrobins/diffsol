@@ -7,8 +7,9 @@ publish = false
 [dependencies]
 diffsol = { path = "../../diffsol" }
 nalgebra = { workspace = true }
-faer = "0.21.3"
-plotly = "0.10.0"
-# argmin = "0.10.0"
-# argmin-math = { version = "0.4" }
-# argmin-observer-slog = "0.1.0"
+plotly = { workspace = true }
+ort = "=2.0.0-rc.9"
+ndarray = "0.16.1"
+
+[build-dependencies]
+burn-import = "~0.17"

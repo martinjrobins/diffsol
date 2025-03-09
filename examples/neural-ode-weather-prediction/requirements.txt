@@ -3,4 +3,6 @@ jaxlib
 equinox
 tensorflow
 tf2onnx
+pydot
+pandas
 numpy==1.26.4
