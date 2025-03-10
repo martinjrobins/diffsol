@@ -85,7 +85,7 @@ jobs:
       run: cargo clippy --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}}
     - name: Docs - all features
       if : matrix.os == 'ubuntu-latest' && matrix.toolchain == 'nightly'
-      run: cargo rustdoc ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}}
+      run: cargo rustdoc -p diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}}
   book:
     runs-on: ubuntu-latest
     steps:
