@@ -25,9 +25,9 @@
         <link rel="stylesheet" href="../fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="../highlight.css">
-        <link rel="stylesheet" href="../tomorrow-night.css">
-        <link rel="stylesheet" href="../ayu-highlight.css">
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
 
@@ -237,14 +237,14 @@ $$</p>
             g_m.column_mut(j).copy_from(&amp;g_m_i);
         }
         let adjoint_solver = problem.bdf_solver_adjoint::&lt;LS, _&gt;(c, Some(1)).unwrap();
-        match adjoint_solver.solve_adjoint_backwards_pass(self.ts_data.as_slice(), &amp;[g_m]) {
+        match adjoint_solver.solve_adjoint_backwards_pass(self.ts_data.as_slice(), &amp;[&amp;g_m]) {
             Ok(soln) =&gt; Ok(soln.as_ref().sg[0].iter().copied().collect::&lt;Vec&lt;_&gt;&gt;()),
             Err(_) =&gt; Ok(vec![f64::MAX / 1000.; param.len()]),
         }
     }
 }</code></pre>
 <p>In our main function we'll create the model, generate some synthetic data, and then call argmin to fit the model to the data.</p>
-<pre><code class="language-rust ignore">fn main() {
+<pre><code class="language-rust ignore">pub fn main() {
     let eqn = DiffSl::&lt;M, CG&gt;::compile(
         "
         in = [k, c]
@@ -364,7 +364,7 @@ True parameter vector: [1.0, 0.1]
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../specify/specifying_the_problem.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../primer/weather_neural_ode.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -378,7 +378,7 @@ True parameter vector: [1.0, 0.1]
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../specify/specifying_the_problem.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../primer/weather_neural_ode.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

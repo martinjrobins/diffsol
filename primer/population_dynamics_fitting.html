@@ -25,9 +25,9 @@
         <link rel="stylesheet" href="../fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" href="../highlight.css">
-        <link rel="stylesheet" href="../tomorrow-night.css">
-        <link rel="stylesheet" href="../ayu-highlight.css">
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
 
@@ -251,7 +251,7 @@ struct Problem {
 }</code></pre>
 <p>With these implementation out of the way, we can now perform the fitting problem. We'll generate some synthetic data using the Lotka-Volterra equations with some true parameters, and then fit the model to this data. We'll use the <code>LBFGS</code> solver from the argmin crate, which is a quasi-Newton method that uses the Broyden-Fletcher-Goldfarb-Shanno (BFGS) update formula. We'll also use the <code>SlogLogger</code> observer to log the progress of the optimisation.</p>
 <p>We'll initialise the optimizer a short distance away from the true parameter values, and then check the final optimised parameter values against the true values.</p>
-<pre><code class="language-rust ignore">fn main() {
+<pre><code class="language-rust ignore">pub fn main() {
     let eqn = DiffSl::&lt;M, CG&gt;::compile(
         "
             in = [ b, d ]
