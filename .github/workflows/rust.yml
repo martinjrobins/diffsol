@@ -31,6 +31,12 @@ jobs:
         matrix:
           experimental:
             - false
+          clippy:
+            - false
+          rustdoc:
+            - false
+          tests:
+            - true
           toolchain:
             - stable
           os:
@@ -44,6 +50,18 @@ jobs:
             - toolchain: nightly
               os: ubuntu-latest
               experimental: true
+            - toolchain: stable
+              os: ubuntu-latest
+              tests: false
+              clippy: true
+              experimental: true
+              name: Clippy
+            - toolchain: nightly
+              os: ubuntu-latest
+              tests: false
+              rustdoc: true
+              experimental: true
+              name: Rustdoc
 
     steps:
     - uses: actions/checkout@v4
@@ -77,14 +95,16 @@ jobs:
       run: |
         echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl" >> $GITHUB_ENV
     - name: Run tests - default features
+      if: matrix.tests == true
       run: cargo test --verbose
     - name: Run tests - all features
+      if: matrix.tests == true
       run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
     - name: Clippy - all features
-      if : matrix.os == 'ubuntu-latest' && matrix.toolchain == 'nightly'
+      if: matrix.clippy == true
       run: cargo clippy --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}}
     - name: Docs - all features
-      if : matrix.os == 'ubuntu-latest' && matrix.toolchain == 'nightly'
+      if: matrix.rustdoc == true
       run: cargo rustdoc -p diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}}
   book:
     runs-on: ubuntu-latest
