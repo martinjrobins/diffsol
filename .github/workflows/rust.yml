@@ -49,9 +49,13 @@ jobs:
             - toolchain: beta
               os: ubuntu-latest
               experimental: true
+              tests: true
+              basename: Tests
             - toolchain: nightly
               os: ubuntu-latest
+              tests: true
               experimental: true
+              basename: Tests
             - toolchain: stable
               os: ubuntu-latest
               tests: false
