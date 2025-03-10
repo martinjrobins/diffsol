@@ -62,7 +62,7 @@ impl Gradient for Problem {
             g_m.column_mut(j).copy_from(&g_m_i);
         }
         let adjoint_solver = problem.bdf_solver_adjoint::<LS, _>(c, Some(1)).unwrap();
-        match adjoint_solver.solve_adjoint_backwards_pass(self.ts_data.as_slice(), &[g_m]) {
+        match adjoint_solver.solve_adjoint_backwards_pass(self.ts_data.as_slice(), &[&g_m]) {
             Ok(soln) => Ok(soln.as_ref().sg[0].iter().copied().collect::<Vec<_>>()),
             Err(_) => Ok(vec![f64::MAX / 1000.; param.len()]),
         }

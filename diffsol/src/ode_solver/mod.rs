@@ -290,7 +290,7 @@ mod tests {
         let atol = Eqn::V::from_element(nparams, Eqn::T::from(1e-6));
         let rtol = Eqn::T::from(1e-6);
         let state = backwards_solver
-            .solve_adjoint_backwards_pass(times, dgdu.as_slice())
+            .solve_adjoint_backwards_pass(times, dgdu.iter().collect::<Vec<_>>().as_slice())
             .unwrap();
         let gs_adj = state.into_common().sg;
         #[allow(clippy::needless_range_loop)]
