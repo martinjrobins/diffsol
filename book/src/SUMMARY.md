@@ -16,6 +16,7 @@
     - [Example: Fitting a predator-prey model to data](./primer/population_dynamics_fitting.md)
   - [Backwards Sensitivity Analysis](./primer/backwards_sensitivity_analysis.md)
     - [Example: Fitting a spring-mass model to data](./primer/spring_mass_fitting.md)
+    - [Example: Weather prediction using neural ODEs](./primer/weather_neural_ode.md)
 - [DiffSol APIs for specifying problems](./specify/specifying_the_problem.md)
   - [ODE equations](./specify/ode_equations.md)
   - [Mass matrix](./specify/mass_matrix.md)

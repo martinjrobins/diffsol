@@ -10,6 +10,8 @@ nalgebra = { workspace = true }
 plotly = { workspace = true }
 ort = "=2.0.0-rc.9"
 ndarray = "0.16.1"
+csv = "1.3.1"
+rand = "0.9.0"
 
 [build-dependencies]
 burn-import = "~0.17"

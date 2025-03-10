@@ -466,8 +466,8 @@ where
         let tmp2 = RefCell::new(<Eqn::V as Vector>::zeros(eqn.rhs().nstates()));
         let atol = problem.sens_atol.as_ref();
         let rtol = problem.sens_rtol;
-        let out_atol = problem.out_atol.as_ref();
-        let out_rtol = problem.out_rtol;
+        let out_atol = problem.param_atol.as_ref();
+        let out_rtol = problem.param_rtol;
         let mass = eqn.mass().map(|_m| AdjointMass::new(eqn));
         Self {
             rhs,

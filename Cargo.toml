@@ -3,6 +3,9 @@ members = [
   "diffsol",
   "examples/*",
 ]
+exclude = [
+  "book",
+]
 resolver = "2"
 
 [workspace.package]
