@@ -112,6 +112,6 @@ where \\(u\\) is a vector of temperatures at each point in space. This is a syst
 ## DiffSol Implementation
 
 ```rust,ignore
-{{#include ../../../examples/pde-heat.rs}}
+{{#include ../../../examples/pde-heat/src/main.rs}}
 ```
 {{#include images/heat-equation.html}}

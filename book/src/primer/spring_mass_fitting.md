@@ -14,7 +14,7 @@ where \\(v = \frac{dx}{dt}\\) is the velocity of the mass.
 We'll use the argmin crate to perform the optimisation. To hold the synthetic data and the model, we'll create a `struct Problem` like so
 
 ```rust,ignore
-{{#include ../../../examples/mass-spring-fitting-adjoint/src/main.rs::24}}
+{{#include ../../../examples/mass-spring-fitting-adjoint/src/main_llvm.rs::24}}
 ```
 
 To use argmin we need to specify traits giving the loss function and its gradient. In this case we'll define a loss function equal to the sum of squares error between the model output and the synthetic data. 
@@ -26,7 +26,7 @@ $$
 where \\(y_i(p)\\) is the model output as a function of the parameters \\(p\\), and \\(\hat{y}_i\\) is the observed data at time index \\(i\\).
 
 ```rust,ignore
-{{#include ../../../examples/mass-spring-fitting-adjoint/src/main.rs:26:45}}
+{{#include ../../../examples/mass-spring-fitting-adjoint/src/main_llvm.rs:26:45}}
 ```
 
 The gradient of this cost function with respect to the model outputs \\(y_i\\) is
@@ -38,13 +38,13 @@ $$
 We can calculate this using DiffSol's adjoint sensitivity analysis functionality. First we solve the forwards problem, generating a checkpointing struct. Using the forward solution we can then calculate \\(\frac{\partial loss}{\partial y_i}\\) for each time point, and then pass this into the adjoint backwards pass to calculate the gradient of the cost function with respect to the parameters.
 
 ```rust,ignore
-{{#include ../../../examples/mass-spring-fitting-adjoint/src/main.rs:47:70}}
+{{#include ../../../examples/mass-spring-fitting-adjoint/src/main_llvm.rs:47:70}}
 ```
 
 In our main function we'll create the model, generate some synthetic data, and then call argmin to fit the model to the data.
 
 ```rust,ignore
-{{#include ../../../examples/mass-spring-fitting-adjoint/src/main.rs:72::}}
+{{#include ../../../examples/mass-spring-fitting-adjoint/src/main_llvm.rs:72::}}
 ```
 
 ```

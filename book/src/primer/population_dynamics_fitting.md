@@ -26,13 +26,13 @@ First of all we will need to implement some of the argmin traits to specify the 
 Note that the `problem` field of the `Problem` struct is wrapped in a `RefCell` so that we can mutate it in the `cost` and `gradient` methods. Setting the parameters of the ODE solver problem is a mutable operation (i.e. you are changing the equations), so we need to use `RefCell` and interior mutability to do this.
 
 ```rust,ignore
-{{#include ../../../examples/predator-prey-fitting-forward/src/main.rs::24}}
+{{#include ../../../examples/predator-prey-fitting-forward/src/main_llvm.rs::24}}
 ```
 
 The argmin `CostFunction` trait requires an implementation of the `cost` method, which will calculate the sum-of-squares difference between the synthetic data and the model output. Since the argmin crate does not support constraints, we'll return a large value if the ODE solver fails to converge.
 
 ```rust,ignore
-{{#include ../../../examples/predator-prey-fitting-forward/src/main.rs:26:45}}
+{{#include ../../../examples/predator-prey-fitting-forward/src/main_llvm.rs:26:45}}
 ```
 
 The argmin `Gradient` trait requires an implementation of the `gradient` method, which will calculate the gradient of the cost function with respect to the parameters. Our sum-of-squares cost function can be written as
@@ -50,7 +50,7 @@ where \\(y_i(p)\\) is the model output as a function of the parameters \\(p\\), 
 where \\(\frac{\partial y_i}{\partial p}\\) is the sensitivity of the model output with respect to the parameters. We can calculate this sensitivity using the `solve_dense_sensitivities` method of the ODE solver. The gradient of the cost function is then the sum of the dot product of the residuals and the sensitivities for each time point. Again, if the ODE solver fails to converge, we'll return a large value for the gradient.
 
 ```rust,ignore
-{{#include ../../../examples/predator-prey-fitting-forward/src/main.rs:47:70}}
+{{#include ../../../examples/predator-prey-fitting-forward/src/main_llvm.rs:47:70}}
 ```
 
 With these implementation out of the way, we can now perform the fitting problem. We'll generate some synthetic data using the Lotka-Volterra equations with some true parameters, and then fit the model to this data. We'll use the `LBFGS` solver from the argmin crate, which is a quasi-Newton method that uses the Broyden-Fletcher-Goldfarb-Shanno (BFGS) update formula. We'll also use the `SlogLogger` observer to log the progress of the optimisation.
@@ -58,7 +58,7 @@ With these implementation out of the way, we can now perform the fitting problem
 We'll initialise the optimizer a short distance away from the true parameter values, and then check the final optimised parameter values against the true values.
 
 ```rust,ignore
-{{#include ../../../examples/predator-prey-fitting-forward/src/main.rs:72::}}
+{{#include ../../../examples/predator-prey-fitting-forward/src/main_llvm.rs:72::}}
 ```
 
 ```
