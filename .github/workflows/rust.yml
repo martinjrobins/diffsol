@@ -24,7 +24,7 @@ jobs:
       - run: cargo fmt --all -- --check
 
   unit-tests:
-    name: Tests - ${{ matrix.os }} - ${{ matrix.toolchain }}
+    name: ${{ matrix.basename }} - ${{ matrix.os }} - ${{ matrix.toolchain }}
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.experimental }}
     strategy:
@@ -39,6 +39,8 @@ jobs:
             - true
           toolchain:
             - stable
+          basename:
+            - Tests
           os:
             - ubuntu-latest
             - macos-latest
@@ -55,13 +57,13 @@ jobs:
               tests: false
               clippy: true
               experimental: true
-              name: Clippy
+              basename: Clippy
             - toolchain: nightly
               os: ubuntu-latest
               tests: false
               rustdoc: true
               experimental: true
-              name: Rustdoc
+              basename: Rustdoc
 
     steps:
     - uses: actions/checkout@v4
