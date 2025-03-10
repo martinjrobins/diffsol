@@ -26,8 +26,3 @@ argmin-observer-slog = { version = "0.1.0" }
 [profile.profiling]
 inherits = "release"
 debug = true
-
-[patch.crates-io]
-burn = { path="../burn/crates/burn" }
-burn-import = { path="../burn/crates/burn-import" }
-
