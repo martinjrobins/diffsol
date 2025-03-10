@@ -48,7 +48,7 @@ where
     fn solve_adjoint_backwards_pass(
         mut self,
         t_eval: &[Eqn::T],
-        dgdu_eval: &[<Eqn::V as DefaultDenseMatrix>::M],
+        dgdu_eval: &[&<Eqn::V as DefaultDenseMatrix>::M],
     ) -> Result<Self::State, DiffsolError>
     where
         Eqn::V: DefaultDenseMatrix,

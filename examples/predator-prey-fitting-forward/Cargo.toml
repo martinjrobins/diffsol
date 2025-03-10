@@ -1,0 +1,20 @@
+[package]
+name = "predator-prey-fitting-forward"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[features]
+diffsl-llvm15 = ["diffsol/diffsl-llvm15"]
+diffsl-llvm16 = ["diffsol/diffsl-llvm16"]
+diffsl-llvm17 = ["diffsol/diffsl-llvm17"]
+diffsl-llvm18 = ["diffsol/diffsl-llvm18"]
+diffsl-llvm = []
+
+[dependencies]
+diffsol = { path = "../../diffsol" }
+nalgebra = { workspace = true }
+plotly = { workspace = true }
+argmin = { workspace = true }
+argmin-math = { workspace = true }
+argmin-observer-slog = { workspace = true }

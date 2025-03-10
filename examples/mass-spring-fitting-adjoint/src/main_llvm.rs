@@ -4,8 +4,8 @@ use argmin::{
 };
 use argmin_observer_slog::SlogLogger;
 use diffsol::{
-    DiffSl, OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverProblem,
-    SensitivitiesOdeSolverMethod,
+    AdjointOdeSolverMethod, DiffSl, OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverProblem,
+    OdeSolverState,
 };
 use nalgebra::{DMatrix, DVector};
 use std::cell::RefCell;
@@ -51,49 +51,51 @@ impl Gradient for Problem {
     fn gradient(&self, param: &Self::Param) -> Result<Self::Gradient, argmin_math::Error> {
         let mut problem = self.problem.borrow_mut();
         problem.eqn_mut().set_params(&V::from_vec(param.clone()));
-        let mut solver = problem.bdf_sens::<LS>().unwrap();
-        let (ys, sens) = match solver.solve_dense_sensitivities(&self.ts_data) {
-            Ok((ys, sens)) => (ys, sens),
+        let mut solver = problem.bdf::<LS>().unwrap();
+        let (c, ys) = match solver.solve_dense_with_checkpointing(&self.ts_data, None) {
+            Ok(ys) => ys,
             Err(_) => return Ok(vec![f64::MAX / 1000.; param.len()]),
         };
-        let dlossdp = sens
-            .into_iter()
-            .map(|s| {
-                s.column_iter()
-                    .zip(ys.column_iter().zip(self.ys_data.column_iter()))
-                    .map(|(si, (yi, di))| 2.0 * (yi - di).dot(&si))
-                    .sum::<f64>()
-            })
-            .collect::<Vec<f64>>();
-        Ok(dlossdp)
+        let mut g_m = M::zeros(2, self.ts_data.len());
+        for j in 0..g_m.ncols() {
+            let g_m_i = 2.0 * (ys.column(j) - self.ys_data.column(j));
+            g_m.column_mut(j).copy_from(&g_m_i);
+        }
+        let adjoint_solver = problem.bdf_solver_adjoint::<LS, _>(c, Some(1)).unwrap();
+        match adjoint_solver.solve_adjoint_backwards_pass(self.ts_data.as_slice(), &[&g_m]) {
+            Ok(soln) => Ok(soln.as_ref().sg[0].iter().copied().collect::<Vec<_>>()),
+            Err(_) => Ok(vec![f64::MAX / 1000.; param.len()]),
+        }
     }
 }
 
-fn main() {
+pub fn main() {
     let eqn = DiffSl::<M, CG>::compile(
         "
-            in = [ b, d ]
-            a { 2.0/3.0 } b { 4.0/3.0 } c { 1.0 } d { 1.0 } x0 { 1.0 } y0 { 1.0 }
-            u_i {
-                y1 = x0,
-                y2 = y0,
-            }
-            F_i {
-                a * y1 - b * y1 * y2,
-                c * y1 * y2 - d * y2,
-            }
+        in = [k, c]
+        k { 1.0 } m { 1.0 } c { 0.1 }
+        u_i {
+            x = 1,
+            v = 0,
+        }
+        F_i {
+            v,
+            -k/m * x - c/m * v,
+        }
         ",
     )
     .unwrap();
 
-    let (b_true, d_true) = (4.0 / 3.0, 1.0);
+    let (k_true, c_true) = (1.0, 0.1);
     let t_data = (0..101)
         .map(|i| f64::from(i) * 40. / 100.)
         .collect::<Vec<f64>>();
     let problem = OdeBuilder::<M>::new()
-        .p([b_true, d_true])
+        .p([k_true, c_true])
         .sens_atol([1e-6])
         .sens_rtol(1e-6)
+        .out_atol([1e-6])
+        .out_rtol(1e-6)
         .build_from_eqn(eqn)
         .unwrap();
     let mut solver = problem.bdf::<LS>().unwrap();
@@ -105,7 +107,7 @@ fn main() {
         problem: RefCell::new(problem),
     };
 
-    let init_param = vec![b_true - 0.1, d_true - 0.1];
+    let init_param = vec![k_true - 0.1, c_true - 0.01];
 
     let linesearch = MoreThuenteLineSearch::new().with_c(1e-4, 0.9).unwrap();
     let solver = LBFGS::new(linesearch, 7);
@@ -120,5 +122,5 @@ fn main() {
     // Best parameter vector
     let best = res.state().best_param.as_ref().unwrap();
     println!("Best parameter vector: {:?}", best);
-    println!("True parameter vector: {:?}", vec![b_true, d_true]);
+    println!("True parameter vector: {:?}", vec![k_true, c_true]);
 }

@@ -24,15 +24,23 @@ jobs:
       - run: cargo fmt --all -- --check
 
   unit-tests:
-    name: Tests - ${{ matrix.os }} - ${{ matrix.toolchain }}
+    name: ${{ matrix.basename }} - ${{ matrix.os }} - ${{ matrix.toolchain }}
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.experimental }}
     strategy:
         matrix:
           experimental:
             - false
+          clippy:
+            - false
+          rustdoc:
+            - false
+          tests:
+            - true
           toolchain:
             - stable
+          basename:
+            - Tests
           os:
             - ubuntu-latest
             - macos-latest
@@ -41,9 +49,25 @@ jobs:
             - toolchain: beta
               os: ubuntu-latest
               experimental: true
+              tests: true
+              basename: Tests
             - toolchain: nightly
               os: ubuntu-latest
+              tests: true
               experimental: true
+              basename: Tests
+            - toolchain: stable
+              os: ubuntu-latest
+              tests: false
+              clippy: true
+              experimental: true
+              basename: Clippy
+            - toolchain: nightly
+              os: ubuntu-latest
+              tests: false
+              rustdoc: true
+              experimental: true
+              basename: Rustdoc
 
     steps:
     - uses: actions/checkout@v4
@@ -77,15 +101,17 @@ jobs:
       run: |
         echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl" >> $GITHUB_ENV
     - name: Run tests - default features
+      if: matrix.tests == true
       run: cargo test --verbose
     - name: Run tests - all features
+      if: matrix.tests == true
       run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
     - name: Clippy - all features
-      if : matrix.os == 'ubuntu-latest' && matrix.toolchain == 'nightly'
+      if: matrix.clippy == true
       run: cargo clippy --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}}
     - name: Docs - all features
-      if : matrix.os == 'ubuntu-latest' && matrix.toolchain == 'nightly'
-      run: cargo rustdoc ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}}
+      if: matrix.rustdoc == true
+      run: cargo rustdoc -p diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}}
   book:
     runs-on: ubuntu-latest
     steps:

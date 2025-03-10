@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 # diffsol = { path = "..", features = ["diffsl-llvm17"] }
-diffsol = { path = "..", features = ["diffsl"] }
+diffsol = { path = "../diffsol", features = ["diffsl"] }
 nalgebra = "0.33.2"
 faer = "0.21.3"
 plotly = "0.10.0"
