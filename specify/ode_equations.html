@@ -168,26 +168,23 @@ and the jacobian of \(f\) multiplied by a vector \(v\) function, which we will c
 <p>and the initial state</p>
 <p>\[y_0(p, t) = 0.1\]</p>
 <p>This can be done using the following code:</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
-</span>use diffsol::OdeBuilder;
+<pre><code class="language-rust ignore">use diffsol::{NalgebraLU, OdeSolverMethod, OdeSolverStopReason};
 use nalgebra::DVector;
 type M = nalgebra::DMatrix&lt;f64&gt;;
 
-let problem = OdeBuilder::&lt;M&gt;::new()
-    .t0(0.0)
-    .rtol(1e-6)
-    .atol([1e-6])
-    .p(vec![1.0, 10.0])
-    .rhs_implicit(
-        |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-        |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-    )
-    .init(
-        |_p, _t| DVector::from_element(1, 0.1),
-    )
-    .build()
-    .unwrap();
-<span class="boring">}</span></code></pre></pre>
+fn main() {
+    //
+    // SPECIFYING THE PROBLEM
+    //
+    let problem = OdeBuilder::&lt;M&gt;::new()
+        .p(vec![1.0, 10.0])
+        .rhs_implicit(
+            |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
+            |x, p, _t, v, y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
+        )
+        .init(|_p, _t| DVector::from_element(1, 0.1))
+        .build()
+        .unwrap();</code></pre>
 <p>The <code>rhs_implicit</code> method is used to specify the \(f(y, p, t)\) and \(f'(y, p, t, v)\) functions, whereas the <code>init</code> method is used to specify the initial state vector \(y_0(p, t)\).
 We also use the <code>t0</code>, <code>rtol</code>, <code>atol</code>, and <code>p</code> methods to set the initial time, relative tolerance, absolute tolerance, and parameters, respectively.</p>
 <p>We have also specified the matrix type <code>M</code> to be <code>nalgebra::DMatrix&lt;f64&gt;</code>, using a generic parameter of the <code>OdeBuilder</code> struct.
