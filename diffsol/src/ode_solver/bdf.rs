@@ -1401,6 +1401,7 @@ mod test {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_test_nalgebra_exponential_decay_diffsl_sens() {
+        use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem_diffsl;
         let (_problem, mut soln) = exponential_decay_problem_sens::<M>(false);
         let (problem, _soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(false);
         soln.atol = problem.atol.clone();
@@ -1461,6 +1462,7 @@ mod test {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_test_nalgebra_exponential_decay_adjoint_diffsl() {
+        use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem_diffsl;
         let (mut problem, soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(true);
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
@@ -1517,6 +1519,7 @@ mod test {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_test_nalgebra_exponential_decay_with_algebraic_adjoint_diffsl() {
+        use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_diffsl;
         let (mut problem, soln) =
             exponential_decay_with_algebraic_problem_diffsl::<M, diffsl::LlvmModule>(true);
         let final_time = soln.solution_points.last().unwrap().t;
@@ -1579,6 +1582,7 @@ mod test {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_test_nalgebra_exponential_decay_algebraic_diffsl_sens() {
+        use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_diffsl;
         let (_problem, mut soln) = exponential_decay_with_algebraic_problem_sens::<M>();
         let (problem, _soln) =
             exponential_decay_with_algebraic_problem_diffsl::<M, diffsl::LlvmModule>(false);

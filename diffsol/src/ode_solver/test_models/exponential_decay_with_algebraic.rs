@@ -361,6 +361,7 @@ mod tests {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn test_exponential_decay_with_algebraic_diffsl_llvm() {
+        use super::*;
         use crate::{
             ConstantOpSens, ConstantOpSensAdjoint, NonLinearOpAdjoint, NonLinearOpJacobian,
             NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations,
