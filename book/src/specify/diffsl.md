@@ -11,20 +11,8 @@ For more detail on the syntax of DiffSL see the [DiffSL book](https://martinjrob
 The main struct that is used to specify a problem in DiffSL is the [`DiffSl`](https://docs.rs/diffsol/latest/diffsol/ode_solver/diffsl/struct.DiffSl.html) struct. Creating this struct
 Just-In-Time (JIT) compiles your DiffSL code into a form that can be executed efficiently by DiffSol. 
 
-```rust
-# fn main() {
-use diffsol::{DiffSl, CraneliftModule};
-type M = nalgebra::DMatrix<f64>;
-type CG = CraneliftModule;
-        
-let eqn = DiffSl::<M, CG>::compile("
-    in = [r, k]
-    r { 1.0 }
-    k { 1.0 }
-    u { 0.1 }
-    F { r * u * (1.0 - u / k) }
-").unwrap();
-# }
+```rust,ignore
+{{#include ../../../examples/intro-logistic-diffsl/src/main.rs::17}}
 ```
 
 The `CG` parameter specifies the backend that you want to use to compile the DiffSL code. The `CraneliftModule` backend is the default backend and is behind the `diffsl` feature flag. If you want to use the faster LLVM backend you can use the `LlvmModule` backend, which is behind one of the `diffsl-llvm*` feature flags, depending on the version of LLVM you have installed.
@@ -32,28 +20,6 @@ The `CG` parameter specifies the backend that you want to use to compile the Dif
 Once you have created the `DiffSl` struct you can use it to create a problem using the `build_from_eqn` method on the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html) struct.
 
 
-```rust
-# fn main() {
-# use diffsol::{DiffSl, CraneliftModule};
-use diffsol::{OdeBuilder, OdeSolverMethod, OdeSolverState};
-# type M = nalgebra::DMatrix<f64>;
-# type CG = CraneliftModule;
-type LS = diffsol::NalgebraLU<f64>;
-
-        
-# let eqn = DiffSl::<M, CG>::compile("
-#     in = [r, k]
-#     r { 1.0 }
-#     k { 1.0 }
-#     u { 0.1 }
-#     F { r * u * (1.0 - u / k) }
-# ").unwrap();
-let problem = OdeBuilder::<M>::new()
-.rtol(1e-6)
-.p([1.0, 10.0])
-.build_from_eqn(eqn).unwrap();
-let mut solver = problem.bdf::<LS>().unwrap();
-let t = 0.4;
-let _soln = solver.solve(t).unwrap();
-# }
+```rust,ignore
+{{#include ../../../examples/intro-logistic-diffsl/src/main.rs:18:}}
 ```
