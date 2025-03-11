@@ -20,27 +20,9 @@ and the initial state
 
 This can be done using the following code:
 
-```rust
-# fn main() {
-use diffsol::OdeBuilder;
-use nalgebra::DVector;
-type M = nalgebra::DMatrix<f64>;
-
-let problem = OdeBuilder::<M>::new()
-    .t0(0.0)
-    .rtol(1e-6)
-    .atol([1e-6])
-    .p(vec![1.0, 10.0])
-    .rhs_implicit(
-        |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-        |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-    )
-    .init(
-        |_p, _t| DVector::from_element(1, 0.1),
-    )
-    .build()
-    .unwrap();
-# }
+```rust,ignore
+{{#include ../../../examples/intro-logistic-closures/src/main.rs:3:5}}
+{{#include ../../../examples/intro-logistic-closures/src/main.rs:7:20}}
 ```
 
 The `rhs_implicit` method is used to specify the \\(f(y, p, t)\\) and \\(f'(y, p, t, v)\\) functions, whereas the `init` method is used to specify the initial state vector \\(y_0(p, t)\\).

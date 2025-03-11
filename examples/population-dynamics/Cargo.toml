@@ -1,0 +1,10 @@
+[package]
+name = "population-dynamics"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+diffsol = { path = "../../diffsol" }
+nalgebra = { workspace = true }
+plotly = { workspace = true }
