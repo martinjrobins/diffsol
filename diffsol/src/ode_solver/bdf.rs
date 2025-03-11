@@ -1269,13 +1269,12 @@ mod test {
                 dydt_y2::dydt_y2_problem,
                 exponential_decay::{
                     exponential_decay_problem, exponential_decay_problem_adjoint,
-                    exponential_decay_problem_diffsl, exponential_decay_problem_sens,
-                    exponential_decay_problem_with_root, negative_exponential_decay_problem,
+                    exponential_decay_problem_sens, exponential_decay_problem_with_root,
+                    negative_exponential_decay_problem,
                 },
                 exponential_decay_with_algebraic::{
                     exponential_decay_with_algebraic_adjoint_problem,
                     exponential_decay_with_algebraic_problem,
-                    exponential_decay_with_algebraic_problem_diffsl,
                     exponential_decay_with_algebraic_problem_sens,
                 },
                 foodweb::foodweb_problem,

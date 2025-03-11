@@ -358,8 +358,6 @@ pub fn exponential_decay_with_algebraic_problem_diffsl<
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn test_exponential_decay_with_algebraic_diffsl_llvm() {

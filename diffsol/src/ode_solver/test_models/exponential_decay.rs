@@ -374,8 +374,6 @@ pub fn exponential_decay_problem_sens<M: Matrix + 'static>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn test_exponential_decay_diffsl_llvm() {

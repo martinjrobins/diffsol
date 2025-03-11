@@ -12,47 +12,8 @@ For each solver, you will need to specify the linear solver type to use. The ava
 Each solver can be created directly, but it generally easier to use the methods on the [`OdeSolverProblem`](https://docs.rs/diffsol/latest/diffsol/ode_solver/problem/struct.OdeSolverProblem.html) struct to create the solver.
 For example:
 
-```rust
-# use diffsol::OdeBuilder;
-# use nalgebra::DVector;
-use diffsol::{OdeSolverState, NalgebraLU, BdfState, Tableau, SdirkState};
-# type M = nalgebra::DMatrix<f64>;
-type LS = NalgebraLU<f64>;
-# fn main() {
-# 
-#   let problem = OdeBuilder::<M>::new()
-#     .p(vec![1.0, 10.0])
-#     .rhs_implicit(
-#        |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-#        |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-#     )
-#     .init(|_p, _t| DVector::from_element(1, 0.1))
-#     .build()
-#     .unwrap();
-// Create a BDF solver with an initial state
-let solver = problem.bdf::<LS>();
-
-// Create a non-initialised state and manually set the values before
-// creating the solver
-let state = BdfState::new_without_initialise(&problem).unwrap();
-// ... set the state values manually
-let solver = problem.bdf_solver::<LS>(state);
-
-// Create a SDIRK solver with a pre-defined tableau
-let tableau = Tableau::<M>::tr_bdf2();
-let state = problem.sdirk_state::<LS, _>(&tableau).unwrap();
-let solver = problem.sdirk_solver::<LS, _>(state, tableau);
-
-// Create a tr_bdf2 or esdirk34 solvers directly (both are SDIRK solvers with different tableaus)
-let solver = problem.tr_bdf2::<LS>();
-let solver = problem.esdirk34::<LS>();
-
-// Create a non-initialised state and manually set the values before
-// creating the solver
-let state = SdirkState::new_without_initialise(&problem).unwrap();
-// ... set the state values manually
-let solver = problem.tr_bdf2_solver::<LS>(state);
-# }
+```rust,ignore
+{{#include ../../examples/intro-logistic-closures/src/main.rs:1:42}}
 ```
 
 # Initialisation
@@ -65,26 +26,6 @@ For example, say that you wish to bypass the initialisation of the state as you 
 
 Note that each state struct has a [`as_ref`](https://docs.rs/diffsol/latest/diffsol/ode_solver/state/trait.OdeSolverState.html#tymethod.as_ref) and [`as_mut`](https://docs.rs/diffsol/latest/diffsol/ode_solver/state/trait.OdeSolverState.html#tymethod.as_mut) methods that return a [`StateRef`](https://docs.rs/diffsol/latest/diffsol/ode_solver/state/struct.StateRef.html) or [`StateRefMut`](https://docs.rs/diffsol/latest/diffsol/ode_solver/state/struct.StateRefMut.html) struct respectively. These structs provide a solver-independent way to access the state values so you can use the same code with different solvers.
 
-```rust
-# use diffsol::OdeBuilder;
-# use nalgebra::DVector;
-# type M = nalgebra::DMatrix<f64>;
-use diffsol::{OdeSolverState, NalgebraLU, BdfState};
-type LS = NalgebraLU<f64>;
-
-# fn main() {
-# 
-#   let problem = OdeBuilder::<M>::new()
-#     .p(vec![1.0, 10.0])
-#     .rhs_implicit(
-#        |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-#        |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-#     )
-#     .init(|_p, _t| DVector::from_element(1, 0.1))
-#     .build()
-#     .unwrap();
-let mut state = BdfState::new_without_initialise(&problem).unwrap();
-state.as_mut().y[0] = 0.1;
-let mut solver = problem.bdf_solver::<LS>(state);
-# }
+```rust,ignore
+{{#include ../../examples/intro-logistic-closures/src/main.rs:44:49}}
 ```
