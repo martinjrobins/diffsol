@@ -62,10 +62,10 @@ All solvers feature:
 - Event handling, stopping when a given condition $g_e(t, y, p)$ is met or at a specific time.
 - Numerical quadrature of an optional output $g_o(t, y, p)$ function over time.
 - Forward sensitivity analysis, calculating the gradient of an output function or the solver states $y$ with respect to the parameters $p$.
-- Adjoint sensitivity analysis, calculating the gradient of cost function $G(p)$ with respect to the parameters $p$. The cost function can be the integral of a continuous output function $g(t, y, p)$ or a sum of a set of discrete functions $h_i(t_i, y, p)$ at time points $t_i$.
+- Adjoint sensitivity analysis, calculating the gradient of cost function $G(p)$ with respect to the parameters $p$. The cost function can be the integral of a continuous output function $g(t, y, p)$ or a sum of a set of discrete functions $g_i(t_i, y, p)$ at time points $t_i$.
 
 # Acknowledgements
 
-We greatfully acknowledge the support of all the contributors to the `DiffSol` project, for their advice, enthusiasm, bug reports and code contributions. In particular, we would like to thank the authors of the `pharmsol` crate, Julian Otalvaro and Markus Hovd.
+We greatfully acknowledge the support of all the past and future contributors to the `DiffSol` project, for their advice, enthusiasm, bug reports and code. In particular, we would like to thank the authors of the `pharmsol` crate, Julian Otalvaro and Markus Hovd.
 
 # References
