@@ -94,10 +94,6 @@ impl<T: Scalar> Vector for Col<T> {
     fn as_slice(&self) -> &[Self::T] {
         unsafe { slice::from_raw_parts(self.as_ptr(), self.len()) }
     }
-    fn copy_from_slice(&mut self, slice: &[Self::T]) {
-        assert_eq!(slice.len(), self.len(), "Vector lengths do not match");
-        self.iter_mut().zip(slice.iter()).for_each(|(a, b)| *a = *b);
-    }
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
         if y.len() != self.len() || y.len() != atol.len() {

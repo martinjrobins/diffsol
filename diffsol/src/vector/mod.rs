@@ -150,11 +150,17 @@ pub trait Vector:
     fn fill(&mut self, value: Self::T);
     fn as_view(&self) -> Self::View<'_>;
     fn as_view_mut(&mut self) -> Self::ViewMut<'_>;
+
+    /// get the vector as a slice
+    /// TODO: not compatible with gpu vectors? but used for diffsl api
     fn as_slice(&self) -> &[Self::T];
+
+    /// get the vector as a mut slice
+    /// TODO: not compatible with gpu vectors? but used for diffsl api
     fn as_mut_slice(&mut self) -> &mut [Self::T];
+
     fn copy_from(&mut self, other: &Self);
     fn copy_from_view(&mut self, other: &Self::View<'_>);
-    fn copy_from_slice(&mut self, slice: &[Self::T]);
 
     /// create a vector from a Vec
     /// TODO: would prefer to use From trait but not implemented for faer::Col
