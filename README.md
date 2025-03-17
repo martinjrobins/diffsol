@@ -21,6 +21,19 @@ The equations can be given by either rust closures or the [DiffSL](https://marti
 
 You can use DiffSol out-of-the-box with vectors, matrices and linear solvers from the [nalgebra](https://nalgebra.org) or [faer](https://github.com/sarah-ek/faer-rs) crates, or you can implement your own types or solvers by implementing the required traits.
 
+## Wanted - Developers for higher-level language wrappers
+
+Diffsol is designed to be easy to use from higher-level languages like Python or R. I'd prefer not to split my focus away from the core library, so I'm looking for developers who would like to lead the development of these wrappers. If you're interested, please get in touch.
+
+- [x] Python (e.g. using [PyO3](https://pyo3.rs/v0.24.0/)). https://github.com/alexallmont/py-diffsol.
+- [ ] Python ML frameworks (e.g. [JAX](https://docs.jax.dev/en/latest/ffi.html), [PyTorch](https://pytorch.org/tutorials/advanced/cpp_extension.html))
+- [ ] R (e.g. using [extendr](https://extendr.github.io/)).
+- [ ] Julia
+- [ ] Matlab
+- [ ] JavaScript backend (e.g using [Neon](https://neon-rs.dev/))
+- [ ] JavaScript in browser (e.g. using [wasm-pack](https://rustwasm.github.io/wasm-pack/))
+- [ ] Others, feel free to suggest your favourite language.
+
 ## Installation and Usage
 
 See installation instructions on the [crates.io page](https://crates.io/crates/diffsol).
