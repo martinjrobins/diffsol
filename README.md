@@ -15,23 +15,21 @@ Diffsol is a library for solving ordinary differential equations (ODEs) or semi-
 M \frac{dy}{dt} = f(t, y, p)
 ```
 
-where $M$ is a (possibly singular and optional) mass matrix, $y$ is the state vector, $t$ is the time and $p$ is a vector of parameters. 
+where $M$ is a (possibly singular and optional) mass matrix, $y$ is the state vector, $t$ is the time and $p$ is a vector of parameters.
 
-The equations can be given by either rust coded or the [DiffSL](https://martinjrobins.github.io/diffsl/) Domain Specific Language (DSL). The DSL uses automatic differentiation using [Enzyme](https://enzyme.mit.edu/) to calculate the necessary jacobians, and JIT compilation (using either [LLVM](https://llvm.org/) or [Cranelift](https://cranelift.dev/)) to generate efficient native code at runtime. The DSL is ideal for using DiffSol from a higher-level language like Python or R while still maintaining similar performance to pure rust.
-
-You can use DiffSol out-of-the-box with vectors, matrices and linear solvers from the [nalgebra](https://nalgebra.org) or [faer](https://github.com/sarah-ek/faer-rs) crates, or you can implement your own types or solvers by implementing the required traits.
+The equations can be given by either rust code or the [DiffSL](https://martinjrobins.github.io/diffsl/) Domain Specific Language (DSL). The DSL uses automatic differentiation using [Enzyme](https://enzyme.mit.edu/) to calculate the necessary jacobians, and JIT compilation (using either [LLVM](https://llvm.org/) or [Cranelift](https://cranelift.dev/)) to generate efficient native code at runtime. The DSL is ideal for using DiffSol from a higher-level language like Python or R while still maintaining similar performance to pure rust.
 
 ## Installation and Usage
 
 See installation instructions on the [crates.io page](https://crates.io/crates/diffsol).
 
-The [DiffSol book](https://martinjrobins.github.io/diffsol/) describes how to use DiffSol using examples taken from several application areas (e.g. population dynamics, electrical circuits and pharmacological modelling), as well as more detailed information on the various APIs used to specify the ODE equations. For a more complete description of the API, please see the [docs.rs API documentation](https://docs.rs/diffsol). 
+The [DiffSol book](https://martinjrobins.github.io/diffsol/) describes how to use DiffSol using examples taken from several application areas (e.g. population dynamics, electrical circuits and pharmacological modelling), as well as more detailed information on the various APIs used to specify the ODE equations. For a more complete description of the API, please see the [docs.rs API documentation](https://docs.rs/diffsol).
 
-## Features 
+## Features
 
 The following solvers are available in DiffSol
 
-1. A variable order Backwards Difference Formulae (BDF) solver, suitable for stiff problems and singular mass matrices. The basic algorithm is derived in [(Byrne & Hindmarsh, 1975)](#1), however this particular implementation follows that implemented in the Matlab routine50 ode15s [(Shampine & Reichelt, 1997)](#4) and the SciPy implementation [(Virtanen et al., 2020)](#5), which features the NDF formulas for improved stability
+1. A variable order Backwards Difference Formulae (BDF) solver, suitable for stiff problems and singular mass matrices. The basic algorithm is derived in [(Byrne & Hindmarsh, 1975)](#1), however this particular implementation follows that implemented in the Matlab routine ode15s [(Shampine & Reichelt, 1997)](#4) and the SciPy implementation [(Virtanen et al., 2020)](#5), which features the NDF formulas for improved stability
 2. A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver, suitable for moderately stiff problems and singular mass matrices. Two different butcher tableau are provided, TR-BDF2 [(Hosea & Shampine, 1996)](#2) and ESDIRK34 [(Jørgensen et al., 2018)](#3), or users can supply their own.
 
 All solvers feature:
@@ -53,8 +51,8 @@ Diffsol is designed to be easy to use from higher-level languages like Python or
 - [ ] R (e.g. using [extendr](https://extendr.github.io/)).
 - [ ] Julia
 - [ ] Matlab
-- [ ] JavaScript backend (e.g using [Neon](https://neon-rs.dev/))
-- [ ] JavaScript in browser (e.g. using [wasm-pack](https://rustwasm.github.io/wasm-pack/))
+- [ ] Javascript in backend (e.g using [Neon](https://neon-rs.dev/))
+- [ ] Javascript in browser (e.g. using [wasm-pack](https://rustwasm.github.io/wasm-pack/))
 - [ ] Others, feel free to suggest your favourite language.
 
 ## References
