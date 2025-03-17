@@ -112,10 +112,8 @@ pub trait VectorView<'a>:
 pub trait Vector:
     VectorOpsByValue<Self>
     + for<'b> VectorOpsByValue<&'b Self>
-    // TODO: commenting out these because they cause a compiler hang (https://github.com/martinjrobins/diffsol/issues/3)
-    // TODO: replace when this is fixed
-    //+ for<'a> VectorOpsByValue<Self::View<'a>>
-    //+ for<'a, 'b> VectorOpsByValue<&'b Self::View<'a>>
+    + for<'a> VectorOpsByValue<Self::View<'a>>
+    + for<'a, 'b> VectorOpsByValue<&'b Self::View<'a>>
     + Mul<Scale<Self::T>, Output = Self>
     + Div<Scale<Self::T>, Output = Self>
     + VectorMutOpsByValue<Self>
@@ -134,20 +132,22 @@ pub trait Vector:
     where
         Self: 'a;
     type Index: VectorIndex;
+
+    /// returns \sum_i (x_i)^2
     fn norm(&self) -> Self::T;
+
+    /// returns \sum_i (x_i / (|y_i| * rtol + atol_i))^2
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T;
+
     fn len(&self) -> IndexType;
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn map_inplace(&mut self, f: impl Fn(Self::T) -> Self::T);
     fn from_element(nstates: usize, value: Self::T) -> Self;
     fn zeros(nstates: usize) -> Self {
         Self::from_element(nstates, Self::T::zero())
     }
-    fn fill(&mut self, value: Self::T) {
-        self.map_inplace(|_| value);
-    }
+    fn fill(&mut self, value: Self::T);
     fn as_view(&self) -> Self::View<'_>;
     fn as_view_mut(&mut self) -> Self::ViewMut<'_>;
     fn as_slice(&self) -> &[Self::T];
@@ -155,7 +155,11 @@ pub trait Vector:
     fn copy_from(&mut self, other: &Self);
     fn copy_from_view(&mut self, other: &Self::View<'_>);
     fn copy_from_slice(&mut self, slice: &[Self::T]);
+
+    /// create a vector from a Vec
+    /// TODO: would prefer to use From trait but not implemented for faer::Col
     fn from_vec(vec: Vec<Self::T>) -> Self;
+
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T);
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T);
     fn add_scalar_mut(&mut self, scalar: Self::T);

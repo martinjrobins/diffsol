@@ -160,9 +160,6 @@ impl<T: Scalar> Vector for DVector<T> {
         }
         acc / Self::T::from(self.len() as f64)
     }
-    fn fill(&mut self, value: T) {
-        self.fill(value);
-    }
     fn as_view(&self) -> Self::View<'_> {
         self.as_view()
     }
@@ -172,8 +169,8 @@ impl<T: Scalar> Vector for DVector<T> {
     fn copy_from(&mut self, other: &Self) {
         self.copy_from(other);
     }
-    fn map_inplace(&mut self, f: impl Fn(Self::T) -> Self::T) {
-        self.iter_mut().for_each(|x: &mut _| *x = f(*x));
+    fn fill(&mut self, value: Self::T) {
+        self.iter_mut().for_each(|x: &mut _| *x = value);
     }
     fn copy_from_view(&mut self, other: &Self::View<'_>) {
         self.copy_from(other);

@@ -144,9 +144,6 @@ impl<T: Scalar> Vector for Col<T> {
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
         zip!(self.as_mut(), x).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }
-    fn map_inplace(&mut self, f: impl Fn(Self::T) -> Self::T) {
-        zip!(self.as_mut()).for_each(|unzip!(xi)| *xi = f(*xi));
-    }
     fn component_mul_assign(&mut self, other: &Self) {
         zip!(self.as_mut(), other.as_view()).for_each(|unzip!(s, o)| *s *= *o);
     }
