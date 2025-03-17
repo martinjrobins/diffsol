@@ -131,9 +131,6 @@ impl<T: Scalar> Vector for Col<T> {
     fn zeros(nstates: usize) -> Self {
         Self::from_element(nstates, T::zero())
     }
-    fn add_scalar_mut(&mut self, scalar: Self::T) {
-        self.iter_mut().for_each(|s| *s += scalar);
-    }
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {
         zip!(self.as_mut(), x.as_view()).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }

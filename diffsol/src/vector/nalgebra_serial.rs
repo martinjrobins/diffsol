@@ -181,9 +181,6 @@ impl<T: Scalar> Vector for DVector<T> {
     fn zeros(nstates: usize) -> Self {
         Self::zeros(nstates)
     }
-    fn add_scalar_mut(&mut self, scalar: T) {
-        self.add_scalar_mut(scalar);
-    }
     fn axpy(&mut self, alpha: T, x: &Self, beta: T) {
         self.axpy(alpha, x, beta);
     }

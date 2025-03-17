@@ -166,9 +166,12 @@ pub trait Vector:
     /// TODO: would prefer to use From trait but not implemented for faer::Col
     fn from_vec(vec: Vec<Self::T>) -> Self;
 
+    /// axpy operation: self += alpha * x + beta * self
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T);
+
+    /// axpy operation: self += alpha * x + beta * self
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T);
-    fn add_scalar_mut(&mut self, scalar: Self::T);
+
     fn component_mul_assign(&mut self, other: &Self);
     fn component_div_assign(&mut self, other: &Self);
     fn partition_indices<F: Fn(Self::T) -> bool>(&self, f: F) -> (Self::Index, Self::Index);
