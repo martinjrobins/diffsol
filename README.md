@@ -31,8 +31,8 @@ The [DiffSol book](https://martinjrobins.github.io/diffsol/) describes how to us
 
 The following solvers are available in DiffSol
 
-1. A variable order Backwards Difference Formulae (BDF) solver, suitable for stiff problems and singular mass matrices. The basic algorithm is derived in Byrne & Hindmarsh (1975), however this particular implementation follows that implemented in the Matlab routine50 ode15s (Shampine & Reichelt, 1997) and the SciPy implementation (Virtanen et al., 2020), which features the NDF formulas for improved stability
-2. A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver, suitable for moderately stiff problems and singular mass matrices. Two different butcher tableau are provided, TR-BDF2 (Hosea & Shampine, 1996) and ESDIRK34 (Jørgensen et al., 2018), or users can supply their own.
+1. A variable order Backwards Difference Formulae (BDF) solver, suitable for stiff problems and singular mass matrices. The basic algorithm is derived in [(Byrne & Hindmarsh, 1975)](#1), however this particular implementation follows that implemented in the Matlab routine50 ode15s [(Shampine & Reichelt, 1997)](#4) and the SciPy implementation [(Virtanen et al., 2020)](#5), which features the NDF formulas for improved stability
+2. A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver, suitable for moderately stiff problems and singular mass matrices. Two different butcher tableau are provided, TR-BDF2 [(Hosea & Shampine, 1996)](#2) and ESDIRK34 [(Jørgensen et al., 2018)](#3), or users can supply their own.
 
 All solvers feature:
 
@@ -42,7 +42,7 @@ All solvers feature:
 - Event handling, stopping when a given condition $g_e(t, y , p)$ is met or at a specific time.
 - Numerical quadrature of an optional output $g_o(t, y, p)$ function over time.
 - Forward sensitivity analysis, calculating the gradient of an output function or the solver states $y$ with respect to the parameters $p$.
-- Adjoint sensitivity analysis, calculating the gradient of cost function $G(p)$ with respect to the parameters $p$. The cost function can be the integral of a continuous output function $g(t, y, p)$ or a sum of a set of discrete functions $h_i(t_i, y_i, p) at time points $t_i$.
+- Adjoint sensitivity analysis, calculating the gradient of cost function $G(p)$ with respect to the parameters $p$. The cost function can be the integral of a continuous output function $g(t, y, p)$ or a sum of a set of discrete functions $h_i(t_i, y_i, p)$ at time points $t_i$.
 
 ## Wanted - Developers for higher-level language wrappers
 
@@ -59,8 +59,8 @@ Diffsol is designed to be easy to use from higher-level languages like Python or
 
 ## References
 
-- Byrne, G. D., & Hindmarsh, A. C. (1975). A polyalgorithm for the numerical solution of ordinary differential equations. ACM Transactions on Mathematical Software (TOMS), 1(1), 71–96.81
-- Hosea, M., & Shampine, L. (1996). Analysis and implementation of TR-BDF2. Applied Numerical Mathematics, 20(1-2), 21–37.
-- Jørgensen, J. B., Kristensen, M. R., & Thomsen, P. G. (2018). A family of ESDIRK integration methods. arXiv Preprint arXiv:1803.01613.
-- Shampine, L. F., & Reichelt, M. W. (1997). The matlab ode suite. SIAM Journal on Scientific Computing, 18(1), 1–22.
-- Virtanen, P., Gommers, R., Oliphant, T. E., Haberland, M., Reddy, T., Cournapeau, D., Burovski, E., Peterson, P., Weckesser, W., Bright, J., & others. (2020). SciPy 1.0: Fundamental algorithms for scientific computing in python. Nature Methods, 17(3), 261–272.
+- <a id="1"></a> Byrne, G. D., & Hindmarsh, A. C. (1975). A polyalgorithm for the numerical solution of ordinary differential equations. ACM Transactions on Mathematical Software (TOMS), 1(1), 71–96.81
+- <a id="2"></a> Hosea, M., & Shampine, L. (1996). Analysis and implementation of TR-BDF2. Applied Numerical Mathematics, 20(1-2), 21–37.
+- <a id="3"></a> Jørgensen, J. B., Kristensen, M. R., & Thomsen, P. G. (2018). A family of ESDIRK integration methods. arXiv Preprint arXiv:1803.01613.
+- <a id="4"></a> Shampine, L. F., & Reichelt, M. W. (1997). The matlab ode suite. SIAM Journal on Scientific Computing, 18(1), 1–22.
+- <a id="5"></a> Virtanen, P., Gommers, R., Oliphant, T. E., Haberland, M., Reddy, T., Cournapeau, D., Burovski, E., Peterson, P., Weckesser, W., Bright, J., & others. (2020). SciPy 1.0: Fundamental algorithms for scientific computing in python. Nature Methods, 17(3), 261–272.
