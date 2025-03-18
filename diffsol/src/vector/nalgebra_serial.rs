@@ -194,15 +194,26 @@ impl<T: Scalar> Vector for DVector<T> {
         self.component_mul_assign(other);
     }
 
-    fn binary_fold<B, F>(&self, other: &Self, init: B, f: F) -> B
-    where
-        F: Fn(B, Self::T, Self::T, IndexType) -> B,
-    {
-        let mut acc = init;
-        for (i, (x, y)) in self.iter().zip(other.iter()).enumerate() {
-            acc = f(acc, *x, *y, i);
+    fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32) {
+        let mut max_frac = T::zero();
+        let mut max_frac_index = -1;
+        let mut found_root = false;
+        assert_eq!(self.len(), g1.len(), "Vector lengths do not match");
+        for i in 0..self.len() {
+            let g0 = unsafe { *self.get_unchecked(i) };
+            let g1 = unsafe { *g1.get_unchecked(i) };
+            if g1 == T::zero() {
+                found_root = true;
+            }
+            if g0 * g1 < T::zero() {
+                let frac = (g1 / (g1 - g0)).abs();
+                if frac > max_frac {
+                    max_frac = frac;
+                    max_frac_index = i as i32;
+                }
+            }
         }
-        acc
+        (found_root, max_frac, max_frac_index)
     }
 }
 
@@ -235,5 +246,10 @@ mod tests {
             VectorView::squared_norm(&vview, &y, &atol, rtol),
             errorn_check
         );
+    }
+
+    #[test]
+    fn test_root_finding() {
+        super::super::tests::test_root_finding::<DVector<f64>>();
     }
 }

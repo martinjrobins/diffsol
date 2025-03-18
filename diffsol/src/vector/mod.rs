@@ -178,9 +178,14 @@ pub trait Vector:
     /// element-wise division
     fn component_div_assign(&mut self, other: &Self);
 
-    fn binary_fold<B, F>(&self, other: &Self, init: B, f: F) -> B
-    where
-        F: Fn(B, Self::T, Self::T, IndexType) -> B;
+    /// given two vectors `g0=self` and `g1`, return:
+    /// - `true` if a root is found in g1 (i.e. g1[i] == 0)
+    /// - for all values of i where a zero crossing is found (i.e. g0[i] * g1[i] < 0), return:
+    ///     - max_i(abs(g1[i] / (g1[i] - g0[i]))), 0 otherwise
+    ///     - the index i at the maximum value, -1 otherwise
+    fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32);
+
+    /// assign `value` to the elements of `self` at the indices specified by `indices`
     fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
         for i in 0..indices.len() {
             self[indices[i]] = value;
@@ -274,3 +279,33 @@ pub trait Vector:
 pub trait DefaultDenseMatrix: Vector {
     type M: DenseMatrix<V = Self, T = Self::T>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::Vector;
+
+
+    pub fn test_root_finding<V: Vector>() {
+        let g0 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()]);
+        let g1 = V::from_vec(vec![1.0.into(), 2.0.into(), 3.0.into()]);
+        let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
+        assert!(!found_root);
+        assert_eq!(max_frac, V::T::from(0.5));
+        assert_eq!(max_frac_index, 1);
+
+        let g0 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()]);
+        let g1 = V::from_vec(vec![1.0.into(), 2.0.into(), 0.0.into()]);
+        let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
+        assert!(found_root);
+        assert_eq!(max_frac, V::T::from(0.5));
+        assert_eq!(max_frac_index, 1);
+
+        let g0 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()]);
+        let g1 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()]);
+        let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
+        assert!(!found_root);
+        assert_eq!(max_frac, V::T::from(0.0));
+        assert_eq!(max_frac_index, -1);
+    }
+}
+ 
