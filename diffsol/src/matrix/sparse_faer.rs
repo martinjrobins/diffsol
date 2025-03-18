@@ -5,8 +5,8 @@ use super::extract_block::CscBlock;
 use super::sparsity::MatrixSparsityRef;
 use super::{Matrix, MatrixCommon, MatrixSparsity};
 use crate::error::{DiffsolError, MatrixError};
-use crate::vector::Vector;
 use crate::{DefaultSolver, FaerSparseLU, IndexType, Scalar, Scale};
+use crate::{Vector, VectorIndex};
 
 use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::sparse::ops::{ternary_op_assign_into, union_symbolic};
@@ -154,16 +154,17 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, SparseColMat<T>>
         true
     }
 
-    fn split<F: Fn(IndexType) -> bool>(
+    fn split(
         &self,
-        f: F,
+        indices: &<<SparseColMat<T> as MatrixCommon>::V as Vector>::Index,
         transpose: bool,
     ) -> [(
         SymbolicSparseColMat<IndexType>,
         <<SparseColMat<T> as MatrixCommon>::V as Vector>::Index,
     ); 4] {
         let (_ni, _nj, col_ptrs, _col_nnz, row_idx) = self.parts();
-        let (ul_blk, ur_blk, ll_blk, lr_blk) = CscBlock::split(row_idx, col_ptrs, f, transpose);
+        let (ul_blk, ur_blk, ll_blk, lr_blk) =
+            CscBlock::split(row_idx, col_ptrs, indices, transpose);
         let ul_sym = SymbolicSparseColMat::new_checked(
             ul_blk.nrows,
             ul_blk.ncols,
@@ -306,18 +307,29 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
             .collect::<Vec<_>>();
         Self(faer::sparse::SparseColMat::try_new_from_triplets(dim, dim, &triplets).unwrap())
     }
-    fn diagonal(&self) -> Self::V {
-        let mut ret = Col::zeros(self.nrows());
-        for j in 0..self.ncols() {
-            for i in self.0.col_range(j) {
-                if self.0.row_idx()[i] == j {
-                    ret[j] = self.0.val()[i];
+
+    fn partition_indices_by_zero_diagonal(
+        &self,
+    ) -> (<Self::V as Vector>::Index, <Self::V as Vector>::Index) {
+        let mut indices_zero_diag = vec![];
+        let mut indices_non_zero_diag = vec![];
+        'outer: for j in 0..self.ncols() {
+            for (i, v) in self.0.row_idx_of_col(j).zip(self.0.val_of_col(j)) {
+                if i == j && *v != T::zero() {
+                    indices_non_zero_diag.push(j);
+                    continue 'outer;
+                } else if i > j {
                     break;
                 }
             }
+            indices_zero_diag.push(j);
         }
-        ret
+        (
+            <Self::V as Vector>::Index::from_vec(indices_zero_diag),
+            <Self::V as Vector>::Index::from_vec(indices_non_zero_diag),
+        )
     }
+
     fn set_column(&mut self, j: IndexType, v: &Self::V) {
         assert_eq!(v.len(), self.nrows());
         for i in self.0.col_range(j) {
@@ -362,5 +374,10 @@ mod tests {
             assert_eq!(j, triplet.1);
             assert_eq!(*val, triplet.2);
         }
+    }
+
+    #[test]
+    fn test_partition_indices_by_zero_diagonal() {
+        super::super::tests::test_partition_indices_by_zero_diagonal::<SparseColMat<f64>>();
     }
 }

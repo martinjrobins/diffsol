@@ -114,10 +114,10 @@ impl<M: Matrix> JacobianColoring<M> {
                 }
             }
             let dst_indices = sparsity.get_index(indices.as_slice());
-            let src_indices = <M::V as Vector>::Index::from_slice(rows.as_slice());
+            let src_indices = <M::V as Vector>::Index::from_vec(rows);
             let unique_cols: HashSet<_> = HashSet::from_iter(cols.iter().cloned());
             let unique_cols = unique_cols.into_iter().collect::<Vec<_>>();
-            let input_indices = <M::V as Vector>::Index::from_slice(unique_cols.as_slice());
+            let input_indices = <M::V as Vector>::Index::from_vec(unique_cols);
             dst_indices_per_color.push(dst_indices);
             src_indices_per_color.push(src_indices);
             input_indices_per_color.push(input_indices);

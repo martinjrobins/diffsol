@@ -43,7 +43,11 @@ pub fn gaussian_decay_problem<M: DenseMatrix + 'static>(
     for i in 0..10 {
         let t = M::T::from(i as f64 / 1.0);
         let mut y: M::V = problem.eqn.init().call(M::T::zero());
-        let px = M::V::from_vec(p.iter().map(|&x| (x * t.pow(2)/ M::T::from(-2.0)).exp()).collect::<Vec<_>>());
+        let px = M::V::from_vec(
+            p.iter()
+                .map(|&x| (x * t.pow(2) / M::T::from(-2.0)).exp())
+                .collect::<Vec<_>>(),
+        );
         y.component_mul_assign(&px);
         soln.push(y, t);
     }

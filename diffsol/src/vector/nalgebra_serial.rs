@@ -31,8 +31,8 @@ impl VectorIndex for DVector<IndexType> {
     fn len(&self) -> crate::IndexType {
         self.len()
     }
-    fn from_slice(slice: &[IndexType]) -> Self {
-        DVector::from_iterator(slice.len(), slice.iter().copied())
+    fn from_vec(v: Vec<IndexType>) -> Self {
+        DVector::from_vec(v)
     }
     fn clone_as_vec(&self) -> Vec<IndexType> {
         self.iter().copied().collect()
@@ -193,21 +193,7 @@ impl<T: Scalar> Vector for DVector<T> {
     fn component_mul_assign(&mut self, other: &Self) {
         self.component_mul_assign(other);
     }
-    fn partition_indices<F: Fn(T) -> bool>(&self, f: F) -> (Self::Index, Self::Index) {
-        let mut indices_true = vec![];
-        let mut indices_false = vec![];
-        for (i, &x) in self.iter().enumerate() {
-            if f(x) {
-                indices_true.push(i as IndexType);
-            } else {
-                indices_false.push(i as IndexType);
-            }
-        }
-        (
-            Self::Index::from_vec(indices_true),
-            Self::Index::from_vec(indices_false),
-        )
-    }
+
     fn binary_fold<B, F>(&self, other: &Self, init: B, f: F) -> B
     where
         F: Fn(B, Self::T, Self::T, IndexType) -> B,

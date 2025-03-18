@@ -67,32 +67,32 @@ impl CscBlock {
     ///     
     /// return order is (UL, UR, LL, LR)
     ///
-    pub fn split<F>(
+    pub fn split<I>(
         row_indices: &[IndexType],
         col_pointers: &[IndexType],
-        f: F,
+        indices: &I,
         transpose: bool,
     ) -> (Self, Self, Self, Self)
     where
-        F: Fn(IndexType) -> bool,
+        I: VectorIndex,
     {
         if transpose {
-            Self::split_transpose(row_indices, col_pointers, f)
+            Self::split_transpose(row_indices, col_pointers, indices)
         } else {
-            Self::split_no_tranpose(row_indices, col_pointers, f)
+            Self::split_no_tranpose(row_indices, col_pointers, indices)
         }
     }
 
-    fn split_no_tranpose<F>(
+    fn split_no_tranpose<I>(
         row_indices: &[IndexType],
         col_pointers: &[IndexType],
-        f: F,
+        indices: &I,
     ) -> (Self, Self, Self, Self)
     where
-        F: Fn(IndexType) -> bool,
+        I: VectorIndex,
     {
         let n = col_pointers.len() - 1;
-        let (cat, upper_indices, lower_indices, nni, ni) = Self::setup_split(f, n);
+        let (cat, upper_indices, lower_indices, nni, ni) = Self::setup_split(indices, n);
         let mut ur = Self::new(nni, ni);
         let mut ul = Self::new(nni, nni);
         let mut lr = Self::new(ni, ni);
@@ -156,16 +156,16 @@ impl CscBlock {
     /// returns the transpose of each block, but in the same return order
     /// return order is (UL, UR, LL, LR)
     ///
-    pub fn split_transpose<F>(
+    pub fn split_transpose<I>(
         row_indices: &[IndexType],
         col_pointers: &[IndexType],
-        f: F,
+        indices: &I,
     ) -> (Self, Self, Self, Self)
     where
-        F: Fn(IndexType) -> bool,
+        I: VectorIndex,
     {
         let n = col_pointers.len() - 1;
-        let (cat, upper_indices, lower_indices, n_up, n_low) = Self::setup_split(f, n);
+        let (cat, upper_indices, lower_indices, n_up, n_low) = Self::setup_split(indices, n);
         let mut ur_tmp = vec![Vec::new(); n_up];
         let mut ul_tmp = vec![Vec::new(); n_low];
         let mut lr_tmp = vec![Vec::new(); n_up];
@@ -215,8 +215,8 @@ impl CscBlock {
         (ul, ur, ll, lr)
     }
 
-    fn setup_split<F>(
-        f: F,
+    fn setup_split<I>(
+        indices: &I,
         n: usize,
     ) -> (
         Vec<bool>,
@@ -226,9 +226,11 @@ impl CscBlock {
         IndexType,
     )
     where
-        F: Fn(IndexType) -> bool,
+        I: VectorIndex,
     {
-        let cat = (0..n).map(f).collect::<Vec<_>>();
+        let indices = indices.clone_as_vec();
+        let mut cat = vec![false; n];
+        indices.iter().for_each(|&i| cat[i] = true);
 
         let mut upper_indices = Vec::with_capacity(n);
         let mut lower_indices = Vec::with_capacity(n);
@@ -275,7 +277,7 @@ impl<I: VectorIndex> ColMajBlock<I> {
                 .collect::<Vec<_>>()
         };
         src_indices.push(if transpose { 1 } else { 0 });
-        let src_indices = I::from_slice(src_indices.as_slice());
+        let src_indices = I::from_vec(src_indices);
         let (nrows, ncols) = if transpose {
             (ncols, nrows)
         } else {
@@ -295,20 +297,19 @@ impl<I: VectorIndex> ColMajBlock<I> {
     ///     
     /// return order is (UL, UR, LL, LR)
     ///
-    pub fn split<F>(
+    pub fn split(
         nrows: IndexType,
         ncols: IndexType,
-        f: F,
+        indices: &I,
         transpose: bool,
-    ) -> (Self, Self, Self, Self)
-    where
-        F: Fn(IndexType) -> bool,
-    {
+    ) -> (Self, Self, Self, Self) {
         if nrows != ncols {
             panic!("Matrix must be square");
         }
         let n = nrows;
-        let cat = (0..n).map(f).collect::<Vec<_>>();
+        let indices = indices.clone_as_vec();
+        let mut cat = vec![false; n];
+        indices.iter().for_each(|&i| cat[i] = true);
 
         let mut upper_indices = Vec::new();
         let mut lower_indices = Vec::new();
@@ -354,9 +355,9 @@ impl<I: VectorIndex> ColMajBlock<I> {
 }
 
 /// Combine four matrices into a single matrix according to a predicate
-pub fn combine<F, M>(ul: &M, ur: &M, ll: &M, lr: &M, f: F) -> M
+pub fn combine<I, M>(ul: &M, ur: &M, ll: &M, lr: &M, indices: &I) -> M
 where
-    F: Fn(IndexType) -> bool,
+    I: VectorIndex,
     M: Matrix,
 {
     let n = ul.nrows() + ll.nrows();
@@ -369,7 +370,9 @@ where
         panic!("Matrices must have the same shape");
     }
     let mut triplets = Vec::new();
-    let cat = (0..n).map(f).collect::<Vec<_>>();
+    let indices = indices.clone_as_vec();
+    let mut cat = vec![false; n];
+    indices.iter().for_each(|&i| cat[i] = true);
     let ni = cat.len();
     let mut upper_indices = Vec::with_capacity(n);
     let mut lower_indices = Vec::with_capacity(n);
@@ -414,7 +417,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SparseColMat;
+    use crate::{SparseColMat, Vector};
     use faer::Mat;
 
     #[test]
@@ -461,10 +464,9 @@ mod tests {
             .map(|(i, j, v)| (*i, *j, M::T::from(*v)))
             .collect::<Vec<_>>();
         let m = M::try_from_triplets(4, 4, triplets.clone()).unwrap();
-        let indices = [0, 2];
+        let indices = <M::V as Vector>::Index::from_vec(vec![0, 2]);
 
-        let [(ul, _ul_idx), (ur, _ur_idx), (ll, _ll_idx), (lr, _lr_idx)] =
-            m.split(|i| indices.contains(&i), false);
+        let [(ul, _ul_idx), (ur, _ur_idx), (ll, _ll_idx), (lr, _lr_idx)] = m.split(&indices, false);
         let ul_triplets = [(0, 0, 6.0), (1, 0, 14.0), (0, 1, 8.0), (1, 1, 16.0)];
         let ur_triplets = [(0, 0, 5.0), (1, 0, 13.0), (0, 1, 7.0), (1, 1, 15.0)];
         let ll_triplets = [(0, 0, 2.0), (1, 0, 10.0), (0, 1, 4.0), (1, 1, 12.0)];
@@ -510,7 +512,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let mat = M::combine(&ul, &ur, &ll, &lr, |i| indices.contains(&i));
+        let mat = M::combine(&ul, &ur, &ll, &lr, &indices);
         assert_eq!(
             triplets,
             mat.triplet_iter()
@@ -518,8 +520,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let [(ul, _ul_idx), (ur, _ur_idx), (ll, _ll_idx), (lr, _lr_idx)] =
-            m.split(|i| indices.contains(&i), true);
+        let [(ul, _ul_idx), (ur, _ur_idx), (ll, _ll_idx), (lr, _lr_idx)] = m.split(&indices, true);
         let ul_triplets = [(0, 0, 6.0), (1, 0, 8.0), (0, 1, 14.0), (1, 1, 16.0)];
         let ur_triplets = [(0, 0, 5.0), (1, 0, 7.0), (0, 1, 13.0), (1, 1, 15.0)];
         let ll_triplets = [(0, 0, 2.0), (1, 0, 4.0), (0, 1, 10.0), (1, 1, 12.0)];
@@ -565,10 +566,9 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let indices = [2];
+        let indices = <M::V as Vector>::Index::from_vec(vec![2]);
 
-        let [(ul, _ul_idx), (ur, _ur_idx), (ll, _ll_idx), (lr, _lr_idx)] =
-            m.split(|i| indices.contains(&i), false);
+        let [(ul, _ul_idx), (ur, _ur_idx), (ll, _ll_idx), (lr, _lr_idx)] = m.split(&indices, false);
         let ul_triplets = [
             (0, 0, 1.0),
             (1, 0, 5.0),
@@ -633,7 +633,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let mat = M::combine(&ul, &ur, &ll, &lr, |i| indices.contains(&i));
+        let mat = M::combine(&ul, &ur, &ll, &lr, &indices);
         assert_eq!(
             triplets,
             mat.triplet_iter()

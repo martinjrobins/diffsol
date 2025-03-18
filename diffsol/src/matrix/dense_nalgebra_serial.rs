@@ -120,6 +120,24 @@ impl<T: Scalar> Matrix for DMatrix<T> {
         }
     }
 
+    fn partition_indices_by_zero_diagonal(
+        &self,
+    ) -> (<Self::V as Vector>::Index, <Self::V as Vector>::Index) {
+        let mut zero_diagonal_indices = Vec::new();
+        let mut non_zero_diagonal_indices = Vec::new();
+        for i in 0..self.nrows() {
+            if self[(i, i)].is_zero() {
+                zero_diagonal_indices.push(i);
+            } else {
+                non_zero_diagonal_indices.push(i);
+            }
+        }
+        (
+            <Self::V as Vector>::Index::from_vec(zero_diagonal_indices),
+            <Self::V as Vector>::Index::from_vec(non_zero_diagonal_indices),
+        )
+    }
+
     fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
         v.add_assign(&self.column(j));
     }
@@ -146,9 +164,6 @@ impl<T: Scalar> Matrix for DMatrix<T> {
     }
     fn from_diagonal(v: &DVector<T>) -> Self {
         Self::from_diagonal(v)
-    }
-    fn diagonal(&self) -> Self::V {
-        self.diagonal()
     }
 
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
@@ -234,5 +249,10 @@ mod tests {
         assert_eq!(a[(0, 1)], 4.0);
         assert_eq!(a[(1, 0)], 3.0);
         assert_eq!(a[(1, 1)], 10.0);
+    }
+
+    #[test]
+    fn test_partition_indices_by_zero_diagonal() {
+        super::super::tests::test_partition_indices_by_zero_diagonal::<DMatrix<f64>>();
     }
 }

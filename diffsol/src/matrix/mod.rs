@@ -128,8 +128,9 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
         Self::zeros(1, 1).sparsity().is_some()
     }
 
-    /// Extract the diagonal of the matrix as an owned vector
-    fn diagonal(&self) -> Self::V;
+    fn partition_indices_by_zero_diagonal(
+        &self,
+    ) -> (<Self::V as Vector>::Index, <Self::V as Vector>::Index);
 
     /// Perform a matrix-vector multiplication `y = alpha * self * x + beta * y`.
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V);
@@ -165,19 +166,21 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
         data: &Self::V,
     );
 
-    fn split<F: Fn(IndexType) -> bool>(
+    fn split(
         &self,
-        f: F,
+        algebraic_indices: &<Self::V as Vector>::Index,
         transpose: bool,
     ) -> [(Self, <Self::V as Vector>::Index); 4] {
         match self.sparsity() {
-            Some(sp) => sp.split(f, transpose).map(|(sp, src_indices)| {
-                let mut m = Self::new_from_sparsity(sp.nrows(), sp.ncols(), Some(sp));
-                m.copy_block_from(&src_indices, self);
-                (m, src_indices)
-            }),
+            Some(sp) => sp
+                .split(algebraic_indices, transpose)
+                .map(|(sp, src_indices)| {
+                    let mut m = Self::new_from_sparsity(sp.nrows(), sp.ncols(), Some(sp));
+                    m.copy_block_from(&src_indices, self);
+                    (m, src_indices)
+                }),
             None => Dense::<Self>::new(self.nrows(), self.ncols())
-                .split(f, transpose)
+                .split(algebraic_indices, transpose)
                 .map(|(sp, src_indices)| {
                     let mut m = Self::new_from_sparsity(sp.nrows(), sp.ncols(), None);
                     m.copy_block_from(&src_indices, self);
@@ -186,8 +189,14 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
         }
     }
 
-    fn combine<F: Fn(IndexType) -> bool>(ul: &Self, ur: &Self, ll: &Self, lr: &Self, f: F) -> Self {
-        combine(ul, ur, ll, lr, f)
+    fn combine(
+        ul: &Self,
+        ur: &Self,
+        ll: &Self,
+        lr: &Self,
+        algebraic_indices: &<Self::V as Vector>::Index,
+    ) -> Self {
+        combine(ul, ur, ll, lr, algebraic_indices)
     }
 
     /// copies the values in `parent` to a matrix previously extracted using [MatrixSparsityRef::split]
@@ -257,5 +266,47 @@ pub trait DenseMatrix:
         let mut ret = Self::zeros(nrows, ncols);
         ret.gemm(Self::T::one(), self, b, Self::T::zero());
         ret
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Matrix;
+    use crate::{scalar::IndexType, VectorIndex};
+
+    pub fn test_partition_indices_by_zero_diagonal<M: Matrix>() {
+        let triplets = vec![(0, 0, 1.0.into()), (1, 1, 2.0.into()), (3, 3, 1.0.into())];
+        let m = M::try_from_triplets(4, 4, triplets).unwrap();
+        let (zero_diagonal_indices, non_zero_diagonal_indices) =
+            m.partition_indices_by_zero_diagonal();
+        assert_eq!(zero_diagonal_indices.clone_as_vec(), vec![2]);
+        assert_eq!(non_zero_diagonal_indices.clone_as_vec(), vec![0, 1, 3]);
+
+        let triplets = vec![
+            (0, 0, 1.0.into()),
+            (1, 1, 2.0.into()),
+            (2, 2, 0.0.into()),
+            (3, 3, 1.0.into()),
+        ];
+        let m = M::try_from_triplets(4, 4, triplets).unwrap();
+        let (zero_diagonal_indices, non_zero_diagonal_indices) =
+            m.partition_indices_by_zero_diagonal();
+        assert_eq!(zero_diagonal_indices.clone_as_vec(), vec![2]);
+        assert_eq!(non_zero_diagonal_indices.clone_as_vec(), vec![0, 1, 3]);
+
+        let triplets = vec![
+            (0, 0, 1.0.into()),
+            (1, 1, 2.0.into()),
+            (2, 2, 3.0.into()),
+            (3, 3, 1.0.into()),
+        ];
+        let m = M::try_from_triplets(4, 4, triplets).unwrap();
+        let (zero_diagonal_indices, non_zero_diagonal_indices) =
+            m.partition_indices_by_zero_diagonal();
+        assert_eq!(
+            zero_diagonal_indices.clone_as_vec(),
+            Vec::<IndexType>::new()
+        );
+        assert_eq!(non_zero_diagonal_indices.clone_as_vec(), vec![0, 1, 2, 3]);
     }
 }

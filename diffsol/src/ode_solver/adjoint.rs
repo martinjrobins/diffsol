@@ -189,13 +189,11 @@ where
         let eqn = &solver.problem().eqn;
         let (partition, mass_dd, rhs_jac_aa, rhs_jac_ad) = if let Some(_mass) = eqn.mass() {
             let mass_matrix = solver.mass().unwrap();
-            let mass_diag = mass_matrix.diagonal();
             let (algebraic_indices, differential_indices) =
-                mass_diag.partition_indices(|x| x == M::T::zero());
+                mass_matrix.partition_indices_by_zero_diagonal();
 
             // setup mass solver
-            let [(dd, dd_idx), _, _, _] =
-                mass_matrix.split(|i| mass_diag[i] == M::T::zero(), false);
+            let [(dd, dd_idx), _, _, _] = mass_matrix.split(&algebraic_indices, false);
             let mut mass_dd = BlockInfoSol {
                 block: MatrixOp::new(dd),
                 src_indices: dd_idx,
@@ -208,8 +206,7 @@ where
                 let jacobian = solver
                     .jacobian()
                     .ok_or(DiffsolError::from(OdeSolverError::JacobianNotAvailable))?;
-                let [_, (ad, ad_idx), _, (aa, aa_idx)] =
-                    jacobian.split(|i| mass_diag[i] == M::T::zero(), false);
+                let [_, (ad, ad_idx), _, (aa, aa_idx)] = jacobian.split(&algebraic_indices, false);
                 let mut rhs_jac_aa = BlockInfoSol {
                     block: MatrixOp::new(aa),
                     src_indices: aa_idx,

@@ -20,7 +20,7 @@ pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug + Cl
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn from_slice(slice: &[IndexType]) -> Self;
+    fn from_vec(v: Vec<IndexType>) -> Self;
 }
 
 pub trait VectorCommon: Sized + Debug {
@@ -172,9 +172,12 @@ pub trait Vector:
     /// axpy operation: self += alpha * x + beta * self
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T);
 
+    /// element-wise multiplication
     fn component_mul_assign(&mut self, other: &Self);
+
+    /// element-wise division
     fn component_div_assign(&mut self, other: &Self);
-    fn partition_indices<F: Fn(Self::T) -> bool>(&self, f: F) -> (Self::Index, Self::Index);
+
     fn binary_fold<B, F>(&self, other: &Self, init: B, f: F) -> B
     where
         F: Fn(B, Self::T, Self::T, IndexType) -> B;

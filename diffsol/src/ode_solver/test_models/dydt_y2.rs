@@ -43,7 +43,10 @@ pub fn dydt_y2_problem<M: DenseMatrix + 'static>(
     for i in 0..=n {
         let t = M::T::from(i as f64 * dt);
         // y = y0 / (1 - y0 * t)
-        let y = y0.iter().map(|&y| y / (M::T::one() - y * t)).collect::<Vec<_>>();
+        let y = y0
+            .iter()
+            .map(|&y| y / (M::T::one() - y * t))
+            .collect::<Vec<_>>();
         soln.push(M::V::from_vec(y), t);
     }
     (problem, soln)

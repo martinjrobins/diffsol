@@ -143,18 +143,6 @@ impl<T: Scalar> Vector for Col<T> {
     fn component_div_assign(&mut self, other: &Self) {
         zip!(self.as_mut(), other.as_view()).for_each(|unzip!(s, o)| *s /= *o);
     }
-    fn partition_indices<F: Fn(Self::T) -> bool>(&self, f: F) -> (Self::Index, Self::Index) {
-        let mut indices_true = vec![];
-        let mut indices_false = vec![];
-        for i in 0..self.len() {
-            if f(self[i]) {
-                indices_true.push(i as IndexType);
-            } else {
-                indices_false.push(i as IndexType);
-            }
-        }
-        (indices_true, indices_false)
-    }
     fn binary_fold<B, F>(&self, other: &Self, init: B, f: F) -> B
     where
         F: Fn(B, Self::T, Self::T, IndexType) -> B,
@@ -174,8 +162,8 @@ impl VectorIndex for Vec<IndexType> {
     fn len(&self) -> IndexType {
         self.len() as IndexType
     }
-    fn from_slice(slice: &[IndexType]) -> Self {
-        slice.to_vec()
+    fn from_vec(v: Vec<IndexType>) -> Self {
+        v
     }
     fn clone_as_vec(&self) -> Vec<IndexType> {
         self.clone()
