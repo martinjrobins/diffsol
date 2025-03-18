@@ -273,7 +273,6 @@ pub trait DefaultDenseMatrix: Vector {
 mod tests {
     use super::Vector;
 
-
     pub fn test_root_finding<V: Vector>() {
         let g0 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()]);
         let g1 = V::from_vec(vec![1.0.into(), 2.0.into(), 3.0.into()]);
@@ -297,4 +296,3 @@ mod tests {
         assert_eq!(max_frac_index, -1);
     }
 }
- 
