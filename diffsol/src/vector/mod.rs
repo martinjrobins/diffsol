@@ -195,11 +195,8 @@ pub trait Vector:
 
     /// scatter values from `self` to `other` at the indices specified by `indices`
     /// i.e. other[indices[i]] = self[i] for all i
-    fn scatter(&self, indices: &Self::Index, other: &mut Self) {
-        for i in 0..indices.len() {
-            other[indices[i]] = self[i];
-        }
-    }
+    fn scatter(&self, indices: &Self::Index, other: &mut Self);
+
     fn assert_eq_st(&self, other: &Self, tol: Self::T) {
         let tol = Self::from_element(self.len(), tol);
         self.assert_eq(other, &tol);
