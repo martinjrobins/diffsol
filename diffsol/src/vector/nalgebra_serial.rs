@@ -227,6 +227,13 @@ impl<T: Scalar> Vector for DVector<T> {
             self[*i] = other[*i];
         }
     }
+
+    fn gather(&mut self, other: &Self, indices: &Self::Index) {
+        assert_eq!(self.len(), indices.len(), "Vector lengths do not match");
+        for (s, o) in self.iter_mut().zip(indices.iter()) {
+            *s = other[*o];
+        }
+    }
 }
 
 // tests

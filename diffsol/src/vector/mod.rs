@@ -191,11 +191,7 @@ pub trait Vector:
 
     /// gather values from `other` at the indices specified by `indices`
     /// i.e. self[i] = other[indices[i]] for all i
-    fn gather(&mut self, other: &Self, indices: &Self::Index) {
-        for i in 0..indices.len() {
-            self[i] = other[indices[i]];
-        }
-    }
+    fn gather(&mut self, other: &Self, indices: &Self::Index);
 
     /// scatter values from `self` to `other` at the indices specified by `indices`
     /// i.e. other[indices[i]] = self[i] for all i
