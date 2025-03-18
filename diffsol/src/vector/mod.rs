@@ -87,11 +87,6 @@ pub trait VectorViewMut<'a>:
     type Index: VectorIndex;
     fn copy_from(&mut self, other: &Self::Owned);
     fn copy_from_view(&mut self, other: &Self::View);
-    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
-        for i in 0..indices.len() {
-            self[indices[i]] = other[indices[i]];
-        }
-    }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T);
 }
 
