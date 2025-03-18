@@ -221,6 +221,12 @@ impl<T: Scalar> Vector for DVector<T> {
             self[*i] = value;
         }
     }
+
+    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
+        for i in indices {
+            self[*i] = other[*i];
+        }
+    }
 }
 
 // tests

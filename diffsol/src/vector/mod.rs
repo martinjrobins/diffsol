@@ -187,11 +187,7 @@ pub trait Vector:
     /// copy from `other` at the indices specified by `indices`
     /// generaly `self` and `other` have the same length
     /// i.e. self[indices[i]] = other[indices[i]] for all i
-    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
-        for i in 0..indices.len() {
-            self[indices[i]] = other[indices[i]];
-        }
-    }
+    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index);
 
     /// gather values from `other` at the indices specified by `indices`
     /// i.e. self[i] = other[indices[i]] for all i

@@ -171,6 +171,12 @@ impl<T: Scalar> Vector for Col<T> {
             self[*i] = value;
         }
     }
+
+    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
+        for i in indices {
+            self[*i] = other[*i];
+        }
+    }
 }
 
 impl VectorIndex for Vec<IndexType> {
