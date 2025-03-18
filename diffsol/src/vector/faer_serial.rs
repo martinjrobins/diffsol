@@ -165,6 +165,12 @@ impl<T: Scalar> Vector for Col<T> {
         }
         (found_root, max_frac, max_frac_index)
     }
+
+    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
+        for i in indices {
+            self[*i] = value;
+        }
+    }
 }
 
 impl VectorIndex for Vec<IndexType> {

@@ -161,10 +161,10 @@ pub trait Vector:
     /// TODO: would prefer to use From trait but not implemented for faer::Col
     fn from_vec(vec: Vec<Self::T>) -> Self;
 
-    /// axpy operation: self += alpha * x + beta * self
+    /// axpy operation: self = alpha * x + beta * self
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T);
 
-    /// axpy operation: self += alpha * x + beta * self
+    /// axpy operation: self = alpha * x + beta * self
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T);
 
     /// element-wise multiplication
@@ -181,23 +181,28 @@ pub trait Vector:
     fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32);
 
     /// assign `value` to the elements of `self` at the indices specified by `indices`
-    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
-        for i in 0..indices.len() {
-            self[indices[i]] = value;
-        }
-    }
+    /// i.e. self[indices[i]] = value for all i
+    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T);
+
     /// copy from `other` at the indices specified by `indices`
     /// generaly `self` and `other` have the same length
+    /// i.e. self[indices[i]] = other[indices[i]] for all i
     fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
         for i in 0..indices.len() {
             self[indices[i]] = other[indices[i]];
         }
     }
+
+    /// gather values from `other` at the indices specified by `indices`
+    /// i.e. self[i] = other[indices[i]] for all i
     fn gather(&mut self, other: &Self, indices: &Self::Index) {
         for i in 0..indices.len() {
             self[i] = other[indices[i]];
         }
     }
+
+    /// scatter values from `self` to `other` at the indices specified by `indices`
+    /// i.e. other[indices[i]] = self[i] for all i
     fn scatter(&self, indices: &Self::Index, other: &mut Self) {
         for i in 0..indices.len() {
             other[indices[i]] = self[i];
