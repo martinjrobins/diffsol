@@ -1,7 +1,7 @@
 use crate::{
     matrix::Matrix, ode_solver::problem::OdeSolverSolution, scalar::scale, ConstantOp, OdeBuilder,
     OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsSens, OdeSolverProblem,
-    Vector,
+    Vector, MatrixHost, VectorHost,
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};
@@ -9,7 +9,7 @@ use std::ops::MulAssign;
 
 // exponential decay problem
 // dy/dt = -ay (p = [a, y0])
-fn exponential_decay<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
+fn exponential_decay<M: MatrixHost>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
     y.copy_from(x);
     y.mul_assign(scale(-p[0]));
 }
@@ -19,14 +19,14 @@ fn exponential_decay<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
 //         | -y  0 |
 // df/dp v = | -y  0 | |v_1| = |-yv_1|
 //           | -y  0 | |v_2|   |-yv_1 |
-fn exponential_decay_sens<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+fn exponential_decay_sens<M: MatrixHost>(x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
     y.copy_from(x);
     y.mul_assign(scale(-v[0]));
 }
 
 // df/dp^T v = | -y  -y | |v_1| = |-yv_1 - yv_2|
 //             |  0   0 | |v_2|   |  0  |
-fn exponential_decay_sens_transpose<M: Matrix>(
+fn exponential_decay_sens_transpose<M: MatrixHost>(
     x: &M::V,
     _p: &M::V,
     _t: M::T,
@@ -40,13 +40,13 @@ fn exponential_decay_sens_transpose<M: Matrix>(
 // J = | -a  0 |
 //     | 0  -a |
 // Jv = -av
-fn exponential_decay_jacobian<M: Matrix>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+fn exponential_decay_jacobian<M: MatrixHost>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
     y.copy_from(v);
     y.mul_assign(scale(-p[0]));
 }
 
 // -J^Tv = av
-fn exponential_decay_jacobian_adjoint<M: Matrix>(
+fn exponential_decay_jacobian_adjoint<M: MatrixHost>(
     _x: &M::V,
     p: &M::V,
     _t: M::T,
@@ -57,7 +57,7 @@ fn exponential_decay_jacobian_adjoint<M: Matrix>(
     y.mul_assign(scale(p[0]));
 }
 
-fn exponential_decay_init<M: Matrix>(p: &M::V, _t: M::T) -> M::V {
+fn exponential_decay_init<M: MatrixHost>(p: &M::V, _t: M::T) -> M::V {
     M::V::from_vec(vec![p[1], p[1]])
 }
 
@@ -65,25 +65,25 @@ fn exponential_decay_init<M: Matrix>(p: &M::V, _t: M::T) -> M::V {
 //          | 0 1 |
 // dy0/dp v = | 0 1 | |v_1| = |v_2|
 //            | 0 1 | |v_2|   |v_2|
-fn exponential_decay_init_sens<M: Matrix>(_p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+fn exponential_decay_init_sens<M: MatrixHost>(_p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
     y[0] = v[1];
     y[1] = v[1];
 }
 
 // dy0/dp^T v = | 0 0 | |v_1| = |0 |
 //              | 1 1 | |v_2|   |v_1 + v_2|
-fn exponential_decay_init_sens_adjoint<M: Matrix>(_p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+fn exponential_decay_init_sens_adjoint<M: MatrixHost>(_p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
     y[0] = M::T::zero();
     y[1] = -v[0] - v[1];
 }
 
-fn exponential_decay_root<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+fn exponential_decay_root<M: MatrixHost>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
     y[0] = x[0] - M::T::from(0.6);
 }
 
 /// g_1 = 1 * x_1  +  2 * x_2
 /// g_2 = 3 * x_1  +  4 * x_2
-fn exponential_decay_out<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+fn exponential_decay_out<M: MatrixHost>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
     y[0] = M::T::from(1.0) * x[0] + M::T::from(2.0) * x[1];
     y[1] = M::T::from(3.0) * x[0] + M::T::from(4.0) * x[1];
 }
@@ -92,7 +92,7 @@ fn exponential_decay_out<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V)
 ///    |3 4|
 /// J v = |1 2| |v_1| = |v_1 + 2v_2|
 ///       |3 4| |v_2|   |3v_1 + 4v_2|
-fn exponential_decay_out_jac_mul<M: Matrix>(
+fn exponential_decay_out_jac_mul<M: MatrixHost>(
     _x: &M::V,
     _p: &M::V,
     _t: M::T,
@@ -107,7 +107,7 @@ fn exponential_decay_out_jac_mul<M: Matrix>(
 ///    |3 4|
 /// -J^T v = |-1 -3| |v_1| = |-v_1 - 3v_2|
 ///         |-2 -4| |v_2|   |-2v_1 - 4v_2|
-fn exponential_decay_out_adj_mul<M: Matrix>(
+fn exponential_decay_out_adj_mul<M: MatrixHost>(
     _x: &M::V,
     _p: &M::V,
     _t: M::T,
@@ -120,7 +120,7 @@ fn exponential_decay_out_adj_mul<M: Matrix>(
 
 /// J = |0 0|
 ///     |0 0|
-fn exponential_decay_out_sens_adj<M: Matrix>(
+fn exponential_decay_out_sens_adj<M: MatrixHost>(
     _x: &M::V,
     _p: &M::V,
     _t: M::T,
@@ -131,7 +131,7 @@ fn exponential_decay_out_sens_adj<M: Matrix>(
 }
 
 #[allow(clippy::type_complexity)]
-pub fn negative_exponential_decay_problem<M: Matrix + 'static>(
+pub fn negative_exponential_decay_problem<M: MatrixHost + 'static>(
     use_coloring: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
@@ -163,7 +163,7 @@ pub fn negative_exponential_decay_problem<M: Matrix + 'static>(
 }
 
 #[cfg(feature = "diffsl")]
-pub fn exponential_decay_problem_diffsl<M: Matrix<T = f64>, CG: crate::CodegenModule>(
+pub fn exponential_decay_problem_diffsl<M: MatrixHost<T = f64>, CG: crate::CodegenModule>(
     prep_adjoint: bool,
 ) -> (
     OdeSolverProblem<crate::DiffSl<M, CG>>,
@@ -213,7 +213,7 @@ pub fn exponential_decay_problem_diffsl<M: Matrix<T = f64>, CG: crate::CodegenMo
 }
 
 #[allow(clippy::type_complexity)]
-pub fn exponential_decay_problem<M: Matrix + 'static>(
+pub fn exponential_decay_problem<M: MatrixHost + 'static>(
     use_coloring: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
@@ -242,7 +242,7 @@ pub fn exponential_decay_problem<M: Matrix + 'static>(
 }
 
 #[allow(clippy::type_complexity)]
-pub fn exponential_decay_problem_with_root<M: Matrix + 'static>(
+pub fn exponential_decay_problem_with_root<M: MatrixHost + 'static>(
     use_coloring: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
@@ -270,7 +270,7 @@ pub fn exponential_decay_problem_with_root<M: Matrix + 'static>(
 }
 
 #[allow(clippy::type_complexity)]
-pub fn exponential_decay_problem_adjoint<M: Matrix>(
+pub fn exponential_decay_problem_adjoint<M: MatrixHost>(
     integrate_out: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquationsAdjoint<M = M, V = M::V, T = M::T>>,
@@ -336,7 +336,7 @@ pub fn exponential_decay_problem_adjoint<M: Matrix>(
 }
 
 #[allow(clippy::type_complexity)]
-pub fn exponential_decay_problem_sens<M: Matrix + 'static>(
+pub fn exponential_decay_problem_sens<M: MatrixHost + 'static>(
     use_coloring: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T>>,

@@ -181,7 +181,7 @@ use matrix::extract_block::{ColMajBlock, CscBlock};
 pub use matrix::{default_solver::DefaultSolver, Matrix};
 use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
-    DenseMatrix, MatrixCommon, MatrixRef, MatrixView, MatrixViewMut,
+    DenseMatrix, MatrixCommon, MatrixRef, MatrixView, MatrixViewMut, MatrixHost,
 };
 use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus, root::RootFinder,
@@ -218,7 +218,7 @@ use op::{
 };
 use scalar::{IndexType, Scalar, Scale};
 pub use vector::DefaultDenseMatrix;
-use vector::{Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut};
+use vector::{Vector, VectorHost, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut};
 
 pub use scalar::scale;
 

@@ -1,8 +1,8 @@
 use std::ops::{Div, Mul, MulAssign};
 
-use nalgebra::{DMatrix, DVector, DVectorView, DVectorViewMut};
+use nalgebra::{DMatrix, DVector, DVectorView, DVectorViewMut, LpNorm};
 
-use crate::{IndexType, Scalar, Scale};
+use crate::{IndexType, Scalar, Scale, VectorHost};
 
 use super::{DefaultDenseMatrix, Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
@@ -128,6 +128,15 @@ impl<T: Scalar> Div<Scale<T>> for DVector<T> {
     }
 }
 
+impl<T: Scalar> VectorHost for DVector<T> {
+    fn as_slice(&self) -> &[Self::T] {
+        self.as_slice()
+    }
+    fn as_mut_slice(&mut self) -> &mut [Self::T] {
+        self.as_mut_slice()
+    }
+}
+
 impl<T: Scalar> Vector for DVector<T> {
     type View<'a> = DVectorView<'a, T>;
     type ViewMut<'a> = DVectorViewMut<'a, T>;
@@ -135,14 +144,14 @@ impl<T: Scalar> Vector for DVector<T> {
     fn len(&self) -> IndexType {
         self.len()
     }
-    fn norm(&self) -> Self::T {
-        self.norm()
+    fn norm(&self, k: i32) -> Self::T {
+        self.apply_norm(&LpNorm(k))
     }
-    fn as_slice(&self) -> &[Self::T] {
-        self.as_slice()
+    fn get_index(&self, index: IndexType) -> Self::T {
+        self[index]
     }
-    fn as_mut_slice(&mut self) -> &mut [Self::T] {
-        self.as_mut_slice()
+    fn set_index(&mut self, index: IndexType, value: Self::T) {
+        self[index] = value;
     }
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
@@ -177,6 +186,9 @@ impl<T: Scalar> Vector for DVector<T> {
     }
     fn from_vec(vec: Vec<T>) -> Self {
         Self::from_vec(vec)
+    }
+    fn into_vec(self) -> Vec<Self::T> {
+        self.iter().copied().collect()
     }
     fn zeros(nstates: usize) -> Self {
         Self::zeros(nstates)

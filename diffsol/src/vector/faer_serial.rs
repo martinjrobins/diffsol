@@ -5,7 +5,7 @@ use faer::{unzip, zip, Col, ColMut, ColRef, Mat};
 
 use crate::{scalar::Scale, IndexType, Scalar, Vector};
 
-use crate::{VectorCommon, VectorIndex, VectorView, VectorViewMut};
+use crate::{VectorCommon, VectorIndex, VectorView, VectorViewMut, VectorHost};
 
 use super::DefaultDenseMatrix;
 
@@ -78,6 +78,15 @@ macro_rules! impl_mul_assign_scale {
 impl_mul_assign_scale!(ColMut<'a, T>);
 impl_mul_assign_scale!(Col<T>);
 
+impl<T: Scalar> VectorHost for Col<T> {
+    fn as_mut_slice(&mut self) -> &mut [Self::T] {
+        unsafe { slice::from_raw_parts_mut(self.as_ptr_mut(), self.len()) }
+    }
+    fn as_slice(&self) -> &[Self::T] {
+        unsafe { slice::from_raw_parts(self.as_ptr(), self.len()) }
+    }
+}
+
 impl<T: Scalar> Vector for Col<T> {
     type View<'a> = ColRef<'a, T>;
     type ViewMut<'a> = ColMut<'a, T>;
@@ -85,15 +94,20 @@ impl<T: Scalar> Vector for Col<T> {
     fn len(&self) -> IndexType {
         self.nrows()
     }
-    fn norm(&self) -> T {
-        self.norm_l2()
+    fn get_index(&self, index: IndexType) -> Self::T {
+        self[index]
     }
-    fn as_mut_slice(&mut self) -> &mut [Self::T] {
-        unsafe { slice::from_raw_parts_mut(self.as_ptr_mut(), self.len()) }
+    fn set_index(&mut self, index: IndexType, value: Self::T) {
+        self[index] = value;
     }
-    fn as_slice(&self) -> &[Self::T] {
-        unsafe { slice::from_raw_parts(self.as_ptr(), self.len()) }
+    fn norm(&self, k: i32) -> T {
+        match k {
+            1 => self.norm_l1(),
+            2 => self.norm_l2(),
+            _ => self.iter().fold(T::zero(), |acc, x| acc + x.pow(k)),
+        }
     }
+    
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
         if y.len() != self.len() || y.len() != atol.len() {

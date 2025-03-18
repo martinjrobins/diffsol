@@ -79,8 +79,6 @@ pub trait VectorViewMut<'a>:
     + for<'b> VectorMutOpsByValue<&'b Self::View>
     + for<'b> VectorMutOpsByValue<&'b Self::Owned>
     + MulAssign<Scale<Self::T>>
-    + Index<IndexType, Output = Self::T>
-    + IndexMut<IndexType, Output = Self::T>
 {
     type Owned;
     type View;
@@ -96,7 +94,6 @@ pub trait VectorView<'a>:
     + for<'b> VectorOpsByValue<&'b Self::Owned, Self::Owned>
     + for<'b> VectorOpsByValue<&'b Self, Self::Owned>
     + Mul<Scale<Self::T>, Output = Self::Owned>
-    + Index<IndexType, Output = Self::T>
 {
     type Owned;
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T;
@@ -116,8 +113,6 @@ pub trait Vector:
     + for<'b> VectorMutOpsByValue<&'b Self>
     + for<'a, 'b> VectorMutOpsByValue<&'b Self::View<'a>>
     + MulAssign<Scale<Self::T>>
-    + Index<IndexType, Output = Self::T>
-    + IndexMut<IndexType, Output = Self::T>
     + Clone
 {
     type View<'a>: VectorView<'a, T = Self::T, Owned = Self>
@@ -128,8 +123,16 @@ pub trait Vector:
         Self: 'a;
     type Index: VectorIndex;
 
-    /// returns \sum_i (x_i)^2
-    fn norm(&self) -> Self::T;
+    /// set the value at index `index` to `value`, might be slower than using `IndexMut`
+    /// if the vector is not on the host
+    fn set_index(&mut self, index: IndexType, value: Self::T);
+
+    /// get the value at index `index`, might be slower than using `Index`
+    /// if the vector is not on the host
+    fn get_index(&self, index: IndexType) -> Self::T;
+
+    /// returns \sum_i (x_i)^k
+    fn norm(&self, k: i32) -> Self::T;
 
     /// returns \sum_i (x_i / (|y_i| * rtol + atol_i))^2
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T;
@@ -146,13 +149,7 @@ pub trait Vector:
     fn as_view(&self) -> Self::View<'_>;
     fn as_view_mut(&mut self) -> Self::ViewMut<'_>;
 
-    /// get the vector as a slice
-    /// TODO: not compatible with gpu vectors? but used for diffsl api
-    fn as_slice(&self) -> &[Self::T];
-
-    /// get the vector as a mut slice
-    /// TODO: not compatible with gpu vectors? but used for diffsl api
-    fn as_mut_slice(&mut self) -> &mut [Self::T];
+    
 
     fn copy_from(&mut self, other: &Self);
     fn copy_from_view(&mut self, other: &Self::View<'_>);
@@ -160,6 +157,10 @@ pub trait Vector:
     /// create a vector from a Vec
     /// TODO: would prefer to use From trait but not implemented for faer::Col
     fn from_vec(vec: Vec<Self::T>) -> Self;
+
+    /// convert the vector to a Vec
+    /// TODO: would prefer to use Into trait but not implemented for faer::Col
+    fn into_vec(self) -> Vec<Self::T>;
 
     /// axpy operation: self = alpha * x + beta * self
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T);
@@ -221,26 +222,29 @@ pub trait Vector:
             self.len(),
             other.len()
         );
+        let s = self.into_vec();
+        let other = other.into_vec();
+        let tol = tol.into_vec();
         for i in 0..self.len() {
-            if num_traits::abs(self[i] - other[i]) > tol[i] {
+            if num_traits::abs(s[i] - other[i]) > tol[i] {
                 eprintln!(
                     "Vector element mismatch at index {}: {} != {}",
                     i, self[i], other[i]
                 );
-                if self.len() <= 3 {
-                    eprintln!("left: {:?}", self);
+                if s.len() <= 3 {
+                    eprintln!("left: {:?}", s);
                     eprintln!("right: {:?}", other);
                 } else if i == 0 {
                     eprintln!(
                         "left: [{}, {}, {}, ...] != [{}, {}, {}, ...]",
-                        self[0], self[1], self[2], other[0], other[1], other[2]
+                        s[0], s[1], s[2], other[0], other[1], other[2]
                     );
-                } else if i == self.len() - 1 {
+                } else if i == s.len() - 1 {
                     eprintln!(
                         "left: [..., {}, {}, {}] != [..., {}, {}, {}]",
-                        self[i - 2],
-                        self[i - 1],
-                        self[i],
+                        s[i - 2],
+                        s[i - 1],
+                        s[i],
                         other[i - 2],
                         other[i - 1],
                         other[i]
@@ -248,9 +252,9 @@ pub trait Vector:
                 } else {
                     eprintln!(
                         "left: [..., {}, {}, {}, ...] != [..., {}, {}, {}, ...]",
-                        self[i - 1],
-                        self[i],
-                        self[i + 1],
+                        s[i - 1],
+                        s[i],
+                        s[i + 1],
                         other[i - 1],
                         other[i],
                         other[i + 1]
@@ -258,11 +262,24 @@ pub trait Vector:
                 }
                 panic!(
                     "Vector element mismatch at index {}: {} != {}",
-                    i, self[i], other[i]
+                    i, s[i], other[i]
                 );
             }
         }
     }
+}
+
+pub trait VectorHost: Vector
+    + Index<IndexType, Output = Self::T>
+    + IndexMut<IndexType, Output = Self::T>
+{
+    /// get the vector as a slice
+    /// TODO: not compatible with gpu vectors? but used for diffsl api
+    fn as_slice(&self) -> &[Self::T];
+
+    /// get the vector as a mut slice
+    /// TODO: not compatible with gpu vectors? but used for diffsl api
+    fn as_mut_slice(&mut self) -> &mut [Self::T];
 }
 
 pub trait DefaultDenseMatrix: Vector {

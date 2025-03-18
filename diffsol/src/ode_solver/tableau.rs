@@ -59,7 +59,7 @@ impl<M: DenseMatrix> Tableau<M> {
         ]);
         let mut d = M::V::zeros(3);
         for i in 0..3 {
-            d[i] = b[i] - b_hat[i];
+            d.set_index(i, b.get_index(i) - b_hat.get_index(i));
         }
 
         let mut beta = M::zeros(3, 2);

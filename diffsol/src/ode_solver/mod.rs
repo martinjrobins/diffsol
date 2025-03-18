@@ -34,7 +34,7 @@ mod tests {
         op::OpStatistics, AdjointOdeSolverMethod, CraneliftModule, DenseMatrix, MatrixCommon,
         MatrixRef, NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeEquationsAdjoint,
         OdeEquationsImplicit, OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-        OdeSolverStopReason, VectorRef, VectorView,
+        OdeSolverStopReason, VectorRef, VectorView, Scale, VectorViewMut, MatrixHost,
     };
     use crate::{
         ConstantOp, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp, Op, Vector,
@@ -154,26 +154,27 @@ mod tests {
         let h_base = Eqn::T::from(1e-10);
         let mut h = Eqn::V::from_element(nparams, h_base);
         h.axpy(h_base, &p_0, Eqn::T::one());
+        let twice_h = h.clone() * Scale(Eqn::T::from(2.0));
         let p_base = p_0.clone();
         for i in 0..nparams {
-            p_0[i] = p_base[i] + h[i];
+            p_0.set_index(i, p_base.get_index(i) + h.get_index(i));
             problem.eqn.set_params(&p_0);
             let mut s = problem.bdf::<LS>().unwrap();
             s.set_stop_time(final_time).unwrap();
             while s.step().unwrap() != OdeSolverStopReason::TstopReached {}
             let g_pos = s.state().g.clone();
 
-            p_0[i] = p_base[i] - h[i];
+            p_0.set_index(i, p_base.get_index(i) - h.get_index(i));
             problem.eqn.set_params(&p_0);
             let mut s = problem.bdf::<LS>().unwrap();
             s.set_stop_time(final_time).unwrap();
             while s.step().unwrap() != OdeSolverStopReason::TstopReached {}
             let g_neg = s.state().g.clone();
-            p_0[i] = p_base[i];
+            p_0.set_index(i, p_base.get_index(i));
 
-            for j in 0..nout {
-                dgdp[(i, j)] = (g_pos[j] - g_neg[j]) / (Eqn::T::from(2.) * h[i]);
-            }
+            let mut delta = g_pos - g_neg;
+            delta.component_div_assign(&twice_h);
+            dgdp.row_mut(i).copy_from(&delta);
         }
         problem.eqn.set_params(&p_base);
         dgdp
@@ -189,10 +190,9 @@ mod tests {
         for j in 0..soln.ncols() {
             let soln_j = soln.column(j);
             let data_j = data.column(j);
-            for i in 0..soln.nrows() {
-                ret[0] += (soln_j[i] - data_j[i]).pow(2);
-                ret[1] += (soln_j[i] - data_j[i]).pow(4);
-            }
+            let delta = soln_j - data_j;
+            ret.set_index(0, ret.get_index(0) + delta.norm(2));
+            ret.set_index(1, ret.get_index(1) + delta.norm(4));
         }
         ret
     }
@@ -240,6 +240,7 @@ mod tests {
         let h_base = Eqn::T::from(1e-10);
         let mut h = Eqn::V::from_element(nparams, h_base);
         h.axpy(h_base, &p_0, Eqn::T::one());
+        let twice_h = h.clone() * Scale(Eqn::T::from(2.0));
         let mut p_data = p_0.clone();
         p_data.axpy(Eqn::T::from(0.1), &p_0, Eqn::T::one());
         let p_base = p_0.clone();
@@ -249,23 +250,23 @@ mod tests {
         let data = s.solve_dense(times).unwrap();
 
         for i in 0..nparams {
-            p_0[i] = p_base[i] + h[i];
+            p_0.set_index(i, p_base.get_index(i) + h.get_index(i));
             problem.eqn.set_params(&p_0);
             let mut s = problem.bdf::<LS>().unwrap();
             let v = s.solve_dense(times).unwrap();
             let g_pos = sum_squares(&v, &data);
 
-            p_0[i] = p_base[i] - h[i];
+            p_0.set_index(i, p_base.get_index(i) - h.get_index(i));
             problem.eqn.set_params(&p_0);
             let mut s = problem.bdf::<LS>().unwrap();
             let v = s.solve_dense(times).unwrap();
             let g_neg = sum_squares(&v, &data);
 
-            p_0[i] = p_base[i];
+            p_0.set_index(i, p_base.get_index(i));
 
-            for j in 0..nout {
-                dgdp[(i, j)] = (g_pos[j] - g_neg[j]) / (Eqn::T::from(2.) * h[i]);
-            }
+            let mut delta = g_pos - g_neg;
+            delta.component_div_assign(&twice_h);
+            dgdp.row_mut(i).copy_from(&delta);
         }
         problem.eqn.set_params(&p_base);
         (dgdp, data)
@@ -354,7 +355,7 @@ mod tests {
 
     impl<M: Matrix> ConstantOp for TestEqnInit<M> {
         fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
-            y[0] = M::T::one();
+            y.fill(M::T::one());
         }
     }
 
@@ -380,13 +381,13 @@ mod tests {
 
     impl<M: Matrix> NonLinearOp for TestEqnRhs<M> {
         fn call_inplace(&self, _x: &Self::V, _t: Self::T, y: &mut Self::V) {
-            y[0] = M::T::zero();
+            y.fill(M::T::zero());
         }
     }
 
     impl<M: Matrix> NonLinearOpJacobian for TestEqnRhs<M> {
         fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
-            y[0] = M::T::zero();
+            y.fill(M::T::zero());
         }
     }
 
@@ -497,12 +498,12 @@ mod tests {
         let state = s.checkpoint();
         let state2 = s.state();
         state2.y.assert_eq_st(state.as_ref().y, M::T::from(1e-9));
-        s.state_mut().y[0] = M::T::from(std::f64::consts::PI);
-        assert_eq!(s.state_mut().y[0], M::T::from(std::f64::consts::PI));
+        s.state_mut().y.set_index(0, M::T::from(std::f64::consts::PI));
+        assert_eq!(s.state_mut().y.get_index(0), M::T::from(std::f64::consts::PI));
     }
 
     #[cfg(feature = "diffsl")]
-    pub fn test_ball_bounce_problem<M: Matrix<T = f64>>(
+    pub fn test_ball_bounce_problem<M: MatrixHost<T = f64>>(
     ) -> OdeSolverProblem<crate::DiffSl<M, CraneliftModule>> {
         let eqn = crate::DiffSl::compile(
             "
@@ -527,7 +528,7 @@ mod tests {
     #[cfg(feature = "diffsl")]
     pub fn test_ball_bounce<'a, M, Method>(mut solver: Method) -> (Vec<f64>, Vec<f64>, Vec<f64>)
     where
-        M: Matrix<T = f64>,
+        M: MatrixHost<T = f64>,
         M: DefaultSolver<T = f64>,
         M::V: DefaultDenseMatrix<T = f64>,
         Method: OdeSolverMethod<'a, crate::DiffSl<M, CraneliftModule>>,
@@ -546,14 +547,14 @@ mod tests {
                     let mut y = solver.interpolate(t).unwrap();
 
                     // update the velocity of the ball
-                    y[1] *= -e;
+                    y.set_index(1, y.get_index(1) * -e);
 
                     // make sure the ball is above the ground
-                    y[0] = y[0].max(f64::EPSILON);
+                    y.set_index(0, y.get_index(0).max(f64::EPSILON));
 
                     // set the state to the updated state
                     solver.state_mut().y.copy_from(&y);
-                    solver.state_mut().dy[0] = y[1];
+                    solver.state_mut().dy.set_index(0, y.get_index(1));
                     *solver.state_mut().t = t;
 
                     break;
@@ -568,8 +569,8 @@ mod tests {
         let mut t = vec![];
         for _ in 0..3 {
             let ret = solver.step();
-            x.push(solver.state().y[0]);
-            v.push(solver.state().y[1]);
+            x.push(solver.state().y.get_index(0));
+            v.push(solver.state().y.get_index(1));
             t.push(solver.state().t);
             match ret {
                 Ok(OdeSolverStopReason::InternalTimestep) => (),
@@ -607,7 +608,7 @@ mod tests {
                 solver2.step().unwrap();
                 let time_error = (solver1.state().t - solver2.state().t).abs()
                     / (solver1.state().t.abs() * solver1.problem().rtol
-                        + solver1.problem().atol[0]);
+                        + solver1.problem().atol.get_index(0));
                 assert!(
                     time_error < M::T::from(20.0),
                     "time_error: {} at t = {}",

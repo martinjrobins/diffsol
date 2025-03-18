@@ -3,6 +3,7 @@ use std::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
 use crate::error::DiffsolError;
 use crate::scalar::Scale;
+use crate::vector::VectorHost;
 use crate::{IndexType, Scalar, Vector};
 
 use extract_block::combine;
@@ -216,6 +217,11 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
         triplets: Vec<(IndexType, IndexType, Self::T)>,
     ) -> Result<Self, DiffsolError>;
 }
+
+/// A host matrix is a matrix type that has a host vector type
+pub trait MatrixHost: Matrix<V: VectorHost> {}
+
+impl<T: Matrix<V: VectorHost>> MatrixHost for T {}
 
 /// A dense column-major matrix. The assumption is that the underlying matrix is stored in column-major order, so functions for taking columns views are efficient
 pub trait DenseMatrix:

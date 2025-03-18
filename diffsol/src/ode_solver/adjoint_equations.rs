@@ -34,7 +34,7 @@ where
         let x = <Eqn::V as Vector>::zeros(checkpointer.problem().eqn.rhs().nstates());
         let mut col = <Eqn::V as Vector>::zeros(max_index);
         let index = 0;
-        col[0] = Eqn::T::one();
+        col.set_index(0, Eqn::T::one());
         Self {
             checkpointer,
             x,
@@ -68,9 +68,9 @@ where
     }
 
     pub fn set_index(&mut self, index: usize) {
-        self.col[self.index] = Eqn::T::zero();
+        self.col.set_index(self.index, Eqn::T::zero());
         self.index = index;
-        self.col[self.index] = Eqn::T::one();
+        self.col.set_index(self.index, Eqn::T::one());
     }
 }
 

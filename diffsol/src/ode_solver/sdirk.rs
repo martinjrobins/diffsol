@@ -224,14 +224,14 @@ where
         for i in 0..s {
             assert_eq!(
                 tableau.a()[(s - 1, i)],
-                tableau.b()[i],
+                tableau.b().get_index(i),
                 "Invalid tableau, expected a(s-1, i) = b(i)"
             );
         }
 
         // check that last c is 1
         assert_eq!(
-            tableau.c()[s - 1],
+            tableau.c().get_index(s - 1),
             Eqn::T::one(),
             "Invalid tableau, expected c(s-1) = 1"
         );
@@ -239,7 +239,7 @@ where
         // check that the first c is 0 for esdirk methods
         if !is_sdirk {
             assert_eq!(
-                tableau.c()[0],
+                tableau.c().get_index(0),
                 Eqn::T::zero(),
                 "Invalid tableau, expected c(0) = 0 for esdirk methods"
             );
@@ -414,7 +414,7 @@ where
             dy.copy_from_view(&diff.column(i - 1));
         } else {
             let c =
-                (tableau.c()[i] - tableau.c()[i - 2]) / (tableau.c()[i - 1] - tableau.c()[i - 2]);
+                (tableau.c().get_index(i) - tableau.c().get_index(i - 2)) / (tableau.c().get_index(i - 1) - tableau.c().get_index(i - 2));
             // dy = c1  + c * (c1 - c2)
             dy.copy_from_view(&diff.column(i - 1));
             dy.axpy_v(-c, &diff.column(i - 2), Eqn::T::one() + c);
@@ -694,7 +694,7 @@ where
             }
 
             for i in start..self.tableau.s() {
-                let t = t0 + self.tableau.c()[i] * h;
+                let t = t0 + self.tableau.c().get_index(i) * h;
 
                 // main equation
                 let mut solve_result = Ok(());
