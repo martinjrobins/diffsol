@@ -124,7 +124,7 @@ impl<T: Scalar> DenseMatrix for Mat<T> {
     type ViewMut<'a> = MatMut<'a, T>;
 
     fn from_vec(nrows: IndexType, ncols: IndexType, data: Vec<Self::T>) -> Self {
-        Self::from_fn(nrows, ncols, |i, j| data[i as usize + j as usize * nrows])
+        Self::from_fn(nrows, ncols, |i, j| data[i + j * nrows])
     }
 
     fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {

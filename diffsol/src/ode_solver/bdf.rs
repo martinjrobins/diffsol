@@ -353,20 +353,22 @@ where
         //
         //Note that the U matrix also defined in the same section can be also be
         //found using factor = 1, which corresponds to R with a constant step size
-        let mut r = vec![M::T::zero(); (order + 1) * (order + 1)];
+        let ncols = order + 1;
+        let nrows = order + 1;
+        let mut r = vec![M::T::zero(); ncols * nrows];
 
         // r[0, 0:order] = 1
-        for j in 0..=order {
-            r[j] = M::T::one();
+        for j in 0..ncols {
+            r[j * nrows] = M::T::one();
         }
 
-        // r[i, j] = r[i, j-1] * (j - 1 - factor * i) / j
-        for i in 1..=order {
-            let idx = i * (order + 1);
-            let i_t = M::T::from(i as f64);
-            for j in 1..=order {
-                let j_t = M::T::from(j as f64);
-                r[idx + j] = r[idx + j - 1] * (i_t - M::T::one() - factor * j_t) / i_t;
+        // r[i, j] = r[i-1, j] * (j - 1 - factor * i) / j
+        for j in 1..ncols {
+            let j_t = M::T::from(j as f64);
+            for i in 1..nrows {
+                let i_t = M::T::from(i as f64);
+                let idx_ij = j * nrows + i;
+                r[idx_ij] = r[idx_ij - 1] * (i_t - M::T::one() - factor * j_t) / i_t;
             }
         }
 

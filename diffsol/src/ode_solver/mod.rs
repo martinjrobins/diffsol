@@ -34,7 +34,7 @@ mod tests {
         op::OpStatistics, AdjointOdeSolverMethod, CraneliftModule, DenseMatrix, MatrixCommon,
         MatrixHost, MatrixRef, NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeEquationsAdjoint,
         OdeEquationsImplicit, OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-        OdeSolverStopReason, Scale, VectorRef, VectorView,
+        OdeSolverStopReason, Scale, VectorRef, VectorView, VectorViewMut,
     };
     use crate::{
         ConstantOp, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp, Op, Vector,
@@ -154,7 +154,6 @@ mod tests {
         let h_base = Eqn::T::from(1e-10);
         let mut h = Eqn::V::from_element(nparams, h_base);
         h.axpy(h_base, &p_0, Eqn::T::one());
-        let twice_h = h.clone() * Scale(Eqn::T::from(2.0));
         let p_base = p_0.clone();
         for i in 0..nparams {
             p_0.set_index(i, p_base.get_index(i) + h.get_index(i));
@@ -172,8 +171,7 @@ mod tests {
             let g_neg = s.state().g.clone();
             p_0.set_index(i, p_base.get_index(i));
 
-            let mut delta = g_pos - g_neg;
-            delta.component_div_assign(&twice_h);
+            let delta = (g_pos - g_neg) / Scale(Eqn::T::from(2.) * h.get_index(i));
             for j in 0..nout {
                 dgdp.set_index(i, j, delta.get_index(j));
             }
@@ -193,8 +191,8 @@ mod tests {
             let soln_j = soln.column(j);
             let data_j = data.column(j);
             let delta = soln_j - data_j;
-            ret.set_index(0, ret.get_index(0) + delta.norm(2));
-            ret.set_index(1, ret.get_index(1) + delta.norm(4));
+            ret.set_index(0, ret.get_index(0) + delta.norm(2).powi(2));
+            ret.set_index(1, ret.get_index(1) + delta.norm(4).powi(4));
         }
         ret
     }
@@ -205,9 +203,21 @@ mod tests {
     where
         DM: DenseMatrix,
     {
-        let mut ret = Vec::new();
-        ret.push((soln.clone() - data) * Scale(DM::T::from(2.)));
-        ret.push((soln.clone() - data) * Scale(DM::T::from(4.)));
+        let delta = soln.clone() - data;
+        let mut delta3 = delta.clone();
+        for j in 0..delta3.ncols() {
+            let delta_col = delta.column(j).into_owned();
+
+            let mut delta3_col = delta_col.clone();
+            delta3_col.component_mul_assign(&delta_col);
+            delta3_col.component_mul_assign(&delta_col);
+
+            delta3.column_mut(j).copy_from(&delta3_col);
+        }
+        let ret = vec![
+            delta * Scale(DM::T::from(2.)),
+            delta3 * Scale(DM::T::from(4.)),
+        ];
         ret
     }
 
@@ -234,7 +244,6 @@ mod tests {
         let h_base = Eqn::T::from(1e-10);
         let mut h = Eqn::V::from_element(nparams, h_base);
         h.axpy(h_base, &p_0, Eqn::T::one());
-        let twice_h = h.clone() * Scale(Eqn::T::from(2.0));
         let mut p_data = p_0.clone();
         p_data.axpy(Eqn::T::from(0.1), &p_0, Eqn::T::one());
         let p_base = p_0.clone();
@@ -258,8 +267,7 @@ mod tests {
 
             p_0.set_index(i, p_base.get_index(i));
 
-            let mut delta = g_pos - g_neg;
-            delta.component_div_assign(&twice_h);
+            let delta = (g_pos - g_neg) / Scale(Eqn::T::from(2.) * h.get_index(i));
             for j in 0..nout {
                 dgdp.set_index(i, j, delta.get_index(j));
             }
