@@ -137,19 +137,35 @@ pub trait Vector:
     /// returns \sum_i (x_i / (|y_i| * rtol + atol_i))^2
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T;
 
+    /// get the length of the vector
     fn len(&self) -> IndexType;
+
+    /// check if the vector is empty
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// create a vector of size `nstates` with all elements set to `value`
     fn from_element(nstates: usize, value: Self::T) -> Self;
+
+    /// create a vector of size `nstates` with all elements set to zero
     fn zeros(nstates: usize) -> Self {
         Self::from_element(nstates, Self::T::zero())
     }
+
+    /// fill the vector with `value`
     fn fill(&mut self, value: Self::T);
+
+    /// create a view of the vector
     fn as_view(&self) -> Self::View<'_>;
+
+    /// create a mutable view of the vector
     fn as_view_mut(&mut self) -> Self::ViewMut<'_>;
 
+    /// copy the values from `other` to `self`
     fn copy_from(&mut self, other: &Self);
+
+    /// copy the values from `other` to `self`
     fn copy_from_view(&mut self, other: &Self::View<'_>);
 
     /// create a vector from a Vec
@@ -196,10 +212,13 @@ pub trait Vector:
     /// i.e. other[indices[i]] = self[i] for all i
     fn scatter(&self, indices: &Self::Index, other: &mut Self);
 
+    /// assert that `self` is equal to `other` within a tolerance `tol`
     fn assert_eq_st(&self, other: &Self, tol: Self::T) {
         let tol = Self::from_element(self.len(), tol);
         self.assert_eq(other, &tol);
     }
+
+    /// assert that `self` is equal to `other` using the same norm used by the solvers
     fn assert_eq_norm(&self, other: &Self, atol: &Self, rtol: Self::T, factor: Self::T) {
         let error = self.clone() - other.clone();
         let error_norm = error.squared_norm(other, atol, rtol).sqrt();
@@ -212,6 +231,7 @@ pub trait Vector:
         );
     }
 
+    /// assert that `self` is equal to `other` within a vector tolerance `tol`
     fn assert_eq(&self, other: &Self, tol: &Self) {
         assert_eq!(
             self.len(),
