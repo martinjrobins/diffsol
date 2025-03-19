@@ -1,5 +1,4 @@
 use std::{
-    cmp::min,
     fmt::Display,
     ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign},
 };
@@ -246,10 +245,6 @@ impl Matrix for SundialsMatrix {
         None
     }
 
-    fn copy_block_from(&mut self, _src_indices: &<Self::V as Vector>::Index, _parent: &Self) {
-        unimplemented!("copy_block_from not implemented for SundialsMatrix");
-    }
-
     fn set_data_with_indices(
         &mut self,
         dst_indices: &<Self::V as Vector>::Index,
@@ -263,6 +258,16 @@ impl Matrix for SundialsMatrix {
         }
     }
 
+    fn partition_indices_by_zero_diagonal(
+        &self,
+    ) -> (<Self::V as Vector>::Index, <Self::V as Vector>::Index) {
+        unimplemented!()
+    }
+
+    fn gather(&mut self, _other: &Self, _indices: &<Self::V as Vector>::Index) {
+        unimplemented!()
+    }
+
     fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
         let n = self.nrows();
         for i in 0..n {
@@ -274,15 +279,6 @@ impl Matrix for SundialsMatrix {
         let n = self.ncols();
         let m = self.nrows();
         (0..m).flat_map(move |i| (0..n).map(move |j| (i, j, &self[(i, j)])))
-    }
-
-    fn diagonal(&self) -> Self::V {
-        let n = min(self.nrows(), self.ncols());
-        let mut v = SundialsVector::new_serial(n);
-        for i in 0..n {
-            v[i] = self[(i, i)];
-        }
-        v
     }
 
     fn copy_from(&mut self, other: &Self) {
