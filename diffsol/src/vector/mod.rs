@@ -13,7 +13,7 @@ mod nalgebra_serial;
 #[cfg(feature = "sundials")]
 pub mod sundials;
 
-pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug + Clone {
+pub trait VectorIndex: Sized + Debug + Clone {
     fn zeros(len: IndexType) -> Self;
     fn len(&self) -> IndexType;
     fn clone_as_vec(&self) -> Vec<IndexType>;
@@ -149,8 +149,6 @@ pub trait Vector:
     fn as_view(&self) -> Self::View<'_>;
     fn as_view_mut(&mut self) -> Self::ViewMut<'_>;
 
-    
-
     fn copy_from(&mut self, other: &Self);
     fn copy_from_view(&mut self, other: &Self::View<'_>);
 
@@ -160,7 +158,7 @@ pub trait Vector:
 
     /// convert the vector to a Vec
     /// TODO: would prefer to use Into trait but not implemented for faer::Col
-    fn into_vec(self) -> Vec<Self::T>;
+    fn clone_as_vec(&self) -> Vec<Self::T>;
 
     /// axpy operation: self = alpha * x + beta * self
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T);
@@ -222,14 +220,14 @@ pub trait Vector:
             self.len(),
             other.len()
         );
-        let s = self.into_vec();
-        let other = other.into_vec();
-        let tol = tol.into_vec();
+        let s = self.clone_as_vec();
+        let other = other.clone_as_vec();
+        let tol = tol.clone_as_vec();
         for i in 0..self.len() {
             if num_traits::abs(s[i] - other[i]) > tol[i] {
                 eprintln!(
                     "Vector element mismatch at index {}: {} != {}",
-                    i, self[i], other[i]
+                    i, s[i], other[i]
                 );
                 if s.len() <= 3 {
                     eprintln!("left: {:?}", s);
@@ -269,9 +267,8 @@ pub trait Vector:
     }
 }
 
-pub trait VectorHost: Vector
-    + Index<IndexType, Output = Self::T>
-    + IndexMut<IndexType, Output = Self::T>
+pub trait VectorHost:
+    Vector + Index<IndexType, Output = Self::T> + IndexMut<IndexType, Output = Self::T>
 {
     /// get the vector as a slice
     /// TODO: not compatible with gpu vectors? but used for diffsl api

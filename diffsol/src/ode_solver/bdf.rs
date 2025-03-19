@@ -353,21 +353,24 @@ where
         //
         //Note that the U matrix also defined in the same section can be also be
         //found using factor = 1, which corresponds to R with a constant step size
-        let mut r = M::zeros(order + 1, order + 1);
+        let mut r = vec![M::T::zero(); (order + 1) * (order + 1)];
 
         // r[0, 0:order] = 1
         for j in 0..=order {
-            r[(0, j)] = M::T::one();
+            r[j] = M::T::one();
         }
+
         // r[i, j] = r[i, j-1] * (j - 1 - factor * i) / j
         for i in 1..=order {
+            let idx = i * (order + 1);
+            let i_t = M::T::from(i as f64);
             for j in 1..=order {
-                let i_t = M::T::from(i as f64);
                 let j_t = M::T::from(j as f64);
-                r[(i, j)] = r[(i - 1, j)] * (i_t - M::T::one() - factor * j_t) / i_t;
+                r[idx + j] = r[idx + j - 1] * (i_t - M::T::one() - factor * j_t) / i_t;
             }
         }
-        r
+
+        M::from_vec(order + 1, order + 1, r)
     }
 
     fn _jacobian_updates(&mut self, c: Eqn::T, state: SolverState) {

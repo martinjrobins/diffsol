@@ -35,6 +35,13 @@ macro_rules! gen_find_non_zeros_nonlinear {
                     }
                     col.set_index(i, F::T::zero());
                 }
+                // OR:
+                //col.clone_as_vec().into_iter().for_each(|v| {
+                //    if v.is_nan() {
+                //        triplets.push((0, 0));
+                //    }
+                //});
+                col.fill(F::T::zero());
                 v.set_index(j, F::T::zero());
             }
             triplets
@@ -78,6 +85,12 @@ macro_rules! gen_find_non_zeros_linear {
                     }
                     col.set_index(i, F::T::zero());
                 }
+                // OR:
+                //col.clone_as_vec().into_iter().for_each(|v| {
+                //    if v.is_nan() {
+                //        triplets.push((0, 0));
+                //    }
+                //});
                 v.set_index(j, F::T::zero());
             }
             triplets
@@ -258,7 +271,7 @@ mod tests {
         let nout = nrows;
         let f = move |x: &M::V, y: &mut M::V| {
             for (i, j, v) in triplets {
-                y.set_index(*i,  y.get_index(*i) + x.get_index(*j) * *v);
+                y.set_index(*i, y.get_index(*i) + x.get_index(*j) * *v);
             }
         };
         let mut ret = Closure::new(
@@ -291,7 +304,7 @@ mod tests {
         let nout = nrows;
         let f = move |x: &M::V, y: &mut M::V| {
             for (i, j, v) in triplets {
-                y.set_index(*i,  y.get_index(*i) + x.get_index(*j) * *v);
+                y.set_index(*i, y.get_index(*i) + x.get_index(*j) * *v);
             }
         };
         let mut ret = LinearClosure::new(

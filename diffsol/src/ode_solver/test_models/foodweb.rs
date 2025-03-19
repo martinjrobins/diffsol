@@ -1,8 +1,8 @@
 use crate::{
     find_jacobian_non_zeros, find_matrix_non_zeros, ode_solver::problem::OdeSolverSolution,
-    ConstantOp, JacobianColoring, LinearOp, Matrix, MatrixSparsity, NonLinearOp,
+    ConstantOp, JacobianColoring, LinearOp, Matrix, MatrixHost, MatrixSparsity, NonLinearOp,
     NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsRef, OdeSolverProblem, Op,
-    ParameterisedOp, UnitCallable, Vector,
+    ParameterisedOp, UnitCallable, Vector, VectorHost,
 };
 use num_traits::Zero;
 
@@ -28,7 +28,7 @@ pub fn foodweb_diffsl_problem<M, CG, const NX: usize>() -> (
     OdeSolverSolution<M::V>,
 )
 where
-    M: Matrix<T = f64>,
+    M: MatrixHost<T = f64>,
     CG: diffsl::execution::module::CodegenModule,
 {
     use crate::{DiffSl, DiffSlContext, OdeBuilder};
@@ -148,7 +148,7 @@ where
 
 pub struct FoodWebContext<M, const NX: usize>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     acoef: [[M::T; NUM_SPECIES]; NUM_SPECIES],
     bcoef: [M::T; NUM_SPECIES],
@@ -231,7 +231,7 @@ where
  * -----------------------------------------------------------------*/
 impl<M, const NX: usize> FoodWebContext<M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     const DX: f64 = AX / (NX as f64 - 1.0);
     const DY: f64 = AY / (NX as f64 - 1.0);
@@ -274,7 +274,7 @@ where
 
 impl<M, const NX: usize> Default for FoodWebContext<M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     fn default() -> Self {
         Self::new()
@@ -283,7 +283,7 @@ where
 
 struct FoodWebInit<'a, M, const NX: usize>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     pub foodweb: &'a FoodWeb<M, NX>,
 }
@@ -293,7 +293,7 @@ macro_rules! context_consts {
     ($name:ident) => {
         impl<'a, M, const NX: usize> $name<'a, M, NX>
         where
-            M: Matrix,
+            M: MatrixHost,
         {
             pub fn new(foodweb: &'a FoodWeb<M, NX>) -> Self {
                 Self { foodweb }
@@ -307,7 +307,7 @@ macro_rules! impl_op {
     ($name:ident) => {
         impl<'a, M, const NX: usize> Op for $name<'a, M, NX>
         where
-            M: Matrix,
+            M: MatrixHost,
         {
             type M = M;
             type V = M::V;
@@ -331,7 +331,7 @@ impl_op!(FoodWebInit);
 
 impl<M, const NX: usize> ConstantOp for FoodWebInit<'_, M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     #[allow(unused_mut)]
     fn call_inplace(&self, _t: M::T, mut y: &mut M::V) {
@@ -363,14 +363,14 @@ where
 
 struct FoodWebRhs<'a, M, const NX: usize>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     pub foodweb: &'a FoodWeb<M, NX>,
 }
 
 impl<'a, M, const NX: usize> FoodWebRhs<'a, M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     pub fn new(foodweb: &'a FoodWeb<M, NX>) -> Self {
         Self { foodweb }
@@ -379,7 +379,7 @@ where
 
 impl<M, const NX: usize> Op for FoodWebRhs<'_, M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     type M = M;
     type V = M::V;
@@ -398,7 +398,7 @@ where
 
 impl<M, const NX: usize> NonLinearOp for FoodWebRhs<'_, M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     /*
      * Fweb: Rate function for the food-web problem.
@@ -486,7 +486,7 @@ where
 
 impl<M, const NX: usize> NonLinearOpJacobian for FoodWebRhs<'_, M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     #[allow(unused_mut)]
     fn jac_mul_inplace(&self, x: &M::V, _t: M::T, v: &M::V, mut y: &mut M::V) {
@@ -583,14 +583,14 @@ where
 
 struct FoodWebMass<'a, M, const NX: usize>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     pub foodweb: &'a FoodWeb<M, NX>,
 }
 
 impl<'a, M, const NX: usize> FoodWebMass<'a, M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     pub fn new(foodweb: &'a FoodWeb<M, NX>) -> Self {
         Self { foodweb }
@@ -599,7 +599,7 @@ where
 
 impl<M, const NX: usize> Op for FoodWebMass<'_, M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     type M = M;
     type V = M::V;
@@ -618,7 +618,7 @@ where
 
 impl<M, const NX: usize> LinearOp for FoodWebMass<'_, M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     #[allow(unused_mut)]
     fn gemv_inplace(&self, x: &Self::V, _t: Self::T, beta: Self::T, mut y: &mut Self::V) {
@@ -646,7 +646,7 @@ where
 
 struct FoodWebOut<'a, M, const NX: usize>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     pub foodweb: &'a FoodWeb<M, NX>,
 }
@@ -655,7 +655,7 @@ context_consts!(FoodWebOut);
 
 impl<M, const NX: usize> Op for FoodWebOut<'_, M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     type M = M;
     type V = M::V;
@@ -674,7 +674,7 @@ where
 
 impl<M, const NX: usize> NonLinearOp for FoodWebOut<'_, M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     #[allow(unused_mut)]
     fn call_inplace(&self, x: &M::V, _t: M::T, mut y: &mut M::V) {
@@ -694,7 +694,7 @@ where
 
 impl<M, const NX: usize> NonLinearOpJacobian for FoodWebOut<'_, M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     #[allow(unused_mut)]
     fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, mut y: &mut Self::V) {
@@ -715,7 +715,7 @@ where
 
 struct FoodWeb<M, const NX: usize>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     context: FoodWebContext<M, NX>,
     rhs_sparsity: Option<M::Sparsity>,
@@ -726,7 +726,7 @@ where
 
 impl<M, const NX: usize> FoodWeb<M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     pub fn new(context: FoodWebContext<M, NX>, t0: M::T) -> Self {
         let mut ret = Self {
@@ -764,7 +764,7 @@ where
 
 impl<M, const NX: usize> Op for FoodWeb<M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     type M = M;
     type V = M::V;
@@ -783,7 +783,7 @@ where
 
 impl<'a, M, const NX: usize> OdeEquationsRef<'a> for FoodWeb<M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     type Init = FoodWebInit<'a, M, NX>;
     type Rhs = FoodWebRhs<'a, M, NX>;
@@ -794,7 +794,7 @@ where
 
 impl<M, const NX: usize> OdeEquations for FoodWeb<M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     fn rhs(&self) -> FoodWebRhs<'_, M, NX> {
         FoodWebRhs::new(self)
@@ -822,7 +822,7 @@ where
 #[cfg(feature = "diffsl")]
 struct FoodWebDiff<M, const NX: usize>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     pub sparsity: Option<M::Sparsity>,
 }
@@ -830,7 +830,7 @@ where
 #[cfg(feature = "diffsl")]
 impl<M, const NX: usize> FoodWebDiff<M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     pub fn new(y0: &M::V, t0: M::T) -> Self {
         let mut ret = Self { sparsity: None };
@@ -845,7 +845,7 @@ where
 #[cfg(feature = "diffsl")]
 impl<M, const NX: usize> Op for FoodWebDiff<M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     type M = M;
     type V = M::V;
@@ -865,7 +865,7 @@ where
 #[cfg(feature = "diffsl")]
 impl<M, const NX: usize> NonLinearOp for FoodWebDiff<M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     #[allow(unused_mut)]
     fn call_inplace(&self, x: &M::V, _t: M::T, mut y: &mut M::V) {
@@ -908,7 +908,7 @@ where
 #[cfg(feature = "diffsl")]
 impl<M, const NX: usize> NonLinearOpJacobian for FoodWebDiff<M, NX>
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     #[allow(unused_mut)]
     fn jac_mul_inplace(&self, _x: &M::V, _t: M::T, v: &M::V, mut y: &mut M::V) {
@@ -1030,7 +1030,7 @@ pub fn foodweb_problem<M, const NX: usize>() -> (
     OdeSolverSolution<M::V>,
 )
 where
-    M: Matrix,
+    M: MatrixHost,
 {
     let rtol = M::T::from(1e-5);
     let atol = M::V::from_element(NUM_SPECIES * NX * NX, M::T::from(1e-5));

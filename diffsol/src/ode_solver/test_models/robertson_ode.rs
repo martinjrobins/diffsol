@@ -1,5 +1,5 @@
 use crate::{
-    ode_solver::problem::OdeSolverSolution, Matrix, OdeBuilder, OdeEquationsImplicit,
+    ode_solver::problem::OdeSolverSolution, MatrixHost, OdeBuilder, OdeEquationsImplicit,
     OdeSolverProblem, Vector,
 };
 use num_traits::{One, Zero};
@@ -7,7 +7,7 @@ use num_traits::{One, Zero};
 #[cfg(feature = "diffsl")]
 #[allow(clippy::type_complexity)]
 pub fn robertson_ode_diffsl_problem<
-    M: Matrix<T = f64>,
+    M: MatrixHost<T = f64>,
     CG: diffsl::execution::module::CodegenModule,
 >() -> (
     OdeSolverProblem<impl crate::OdeEquationsAdjoint<M = M, V = M::V, T = M::T>>,
@@ -46,7 +46,7 @@ pub fn robertson_ode_diffsl_problem<
 }
 
 #[allow(clippy::type_complexity)]
-pub fn robertson_ode<M: Matrix + 'static>(
+pub fn robertson_ode<M: MatrixHost + 'static>(
     use_coloring: bool,
     ngroups: usize,
 ) -> (

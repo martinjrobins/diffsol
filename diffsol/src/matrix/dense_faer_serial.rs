@@ -4,8 +4,8 @@ use super::default_solver::DefaultSolver;
 use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 use crate::error::DiffsolError;
 use crate::scalar::{IndexType, Scalar, Scale};
+use crate::FaerLU;
 use crate::VectorIndex;
-use crate::{ColMajBlock, FaerLU};
 use crate::{Dense, DenseRef, Vector};
 
 use faer::{get_global_parallelism, unzip, zip, Accum};
@@ -123,6 +123,14 @@ impl<T: Scalar> DenseMatrix for Mat<T> {
     type View<'a> = MatRef<'a, T>;
     type ViewMut<'a> = MatMut<'a, T>;
 
+    fn from_vec(nrows: IndexType, ncols: IndexType, data: Vec<Self::T>) -> Self {
+        Self::from_fn(nrows, ncols, |i, j| data[i as usize + j as usize * nrows])
+    }
+
+    fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {
+        self[(i, j)]
+    }
+
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T) {
         self.mul_assign(faer::Scale(beta));
         matmul(
@@ -140,6 +148,10 @@ impl<T: Scalar> DenseMatrix for Mat<T> {
 
     fn columns_mut(&mut self, start: usize, ncols: usize) -> MatMut<'_, T> {
         self.get_mut(0..self.nrows(), start..ncols)
+    }
+
+    fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T) {
+        self[(i, j)] = value;
     }
 
     fn column(&self, i: usize) -> ColRef<'_, T> {
@@ -175,8 +187,16 @@ impl<T: Scalar> Matrix for Mat<T> {
         None
     }
 
-    fn copy_block_from(&mut self, src_indices: &<Self::V as Vector>::Index, parent: &Self) {
-        ColMajBlock::<<Self::V as Vector>::Index>::copy_block_from(self, parent, src_indices);
+    fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
+        assert_eq!(indices.len(), self.nrows() * self.ncols());
+        let mut idx = indices.iter().peekable();
+        for j in 0..self.ncols() {
+            let other_col = other.column(*idx.peek().unwrap() / other.nrows());
+            for self_ij in self.column_mut(j).iter_mut() {
+                let other_i = idx.next().unwrap() % other.nrows();
+                *self_ij = other_col[other_i];
+            }
+        }
     }
 
     fn set_data_with_indices(

@@ -1,7 +1,7 @@
 use crate::{
-    matrix::Matrix, ode_solver::problem::OdeSolverSolution, scalar::scale, ConstantOp, OdeBuilder,
+    ode_solver::problem::OdeSolverSolution, scalar::scale, ConstantOp, MatrixHost, OdeBuilder,
     OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsSens, OdeSolverProblem,
-    Vector, MatrixHost, VectorHost,
+    Vector,
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};
@@ -40,7 +40,13 @@ fn exponential_decay_sens_transpose<M: MatrixHost>(
 // J = | -a  0 |
 //     | 0  -a |
 // Jv = -av
-fn exponential_decay_jacobian<M: MatrixHost>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+fn exponential_decay_jacobian<M: MatrixHost>(
+    _x: &M::V,
+    p: &M::V,
+    _t: M::T,
+    v: &M::V,
+    y: &mut M::V,
+) {
     y.copy_from(v);
     y.mul_assign(scale(-p[0]));
 }

@@ -187,7 +187,7 @@ impl<T: Scalar> Vector for DVector<T> {
     fn from_vec(vec: Vec<T>) -> Self {
         Self::from_vec(vec)
     }
-    fn into_vec(self) -> Vec<Self::T> {
+    fn clone_as_vec(&self) -> Vec<Self::T> {
         self.iter().copied().collect()
     }
     fn zeros(nstates: usize) -> Self {

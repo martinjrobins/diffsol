@@ -155,15 +155,13 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, CscMatrix<T>> for &'a SparsityPattern 
     fn split(
         &self,
         indices: &<DVector<T> as Vector>::Index,
-        transpose: bool,
     ) -> [(
         SparsityPattern,
         <<CscMatrix<T> as MatrixCommon>::V as Vector>::Index,
     ); 4] {
         let col_ptrs = self.major_offsets();
         let row_idx = self.minor_indices();
-        let (ul_blk, ur_blk, ll_blk, lr_blk) =
-            CscBlock::split(row_idx, col_ptrs, indices, transpose);
+        let (ul_blk, ur_blk, ll_blk, lr_blk) = CscBlock::split(row_idx, col_ptrs, indices);
         let ul_sym = SparsityPattern::try_from_offsets_and_indices(
             ul_blk.ncols,
             ul_blk.nrows,
@@ -240,8 +238,12 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
         Some(self.pattern())
     }
 
-    fn copy_block_from(&mut self, src_indices: &<Self::V as Vector>::Index, parent: &Self) {
-        CscBlock::copy_block_from(self.values_mut(), parent.values(), src_indices);
+    fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
+        let dst_data = self.values_mut();
+        let src_data = other.values();
+        for (dst_i, idx) in dst_data.iter_mut().zip(indices.iter()) {
+            *dst_i = src_data[*idx];
+        }
     }
 
     fn set_data_with_indices(

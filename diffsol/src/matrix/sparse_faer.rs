@@ -157,14 +157,12 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, SparseColMat<T>>
     fn split(
         &self,
         indices: &<<SparseColMat<T> as MatrixCommon>::V as Vector>::Index,
-        transpose: bool,
     ) -> [(
         SymbolicSparseColMat<IndexType>,
         <<SparseColMat<T> as MatrixCommon>::V as Vector>::Index,
     ); 4] {
         let (_ni, _nj, col_ptrs, _col_nnz, row_idx) = self.parts();
-        let (ul_blk, ur_blk, ll_blk, lr_blk) =
-            CscBlock::split(row_idx, col_ptrs, indices, transpose);
+        let (ul_blk, ur_blk, ll_blk, lr_blk) = CscBlock::split(row_idx, col_ptrs, indices);
         let ul_sym = SymbolicSparseColMat::new_checked(
             ul_blk.nrows,
             ul_blk.ncols,
@@ -239,8 +237,12 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
         Some(self.0.symbolic())
     }
 
-    fn copy_block_from(&mut self, src_indices: &<Self::V as Vector>::Index, parent: &Self) {
-        CscBlock::copy_block_from(self.0.val_mut(), parent.0.val(), src_indices);
+    fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
+        let dst_data = self.0.val_mut();
+        let src_data = other.0.val();
+        for (dst_i, idx) in dst_data.iter_mut().zip(indices.iter()) {
+            *dst_i = src_data[*idx];
+        }
     }
 
     fn set_data_with_indices(

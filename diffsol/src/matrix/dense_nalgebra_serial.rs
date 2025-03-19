@@ -10,9 +10,7 @@ use crate::{scalar::Scale, IndexType, Scalar, Vector};
 use super::default_solver::DefaultSolver;
 use super::sparsity::{Dense, DenseRef};
 use crate::error::DiffsolError;
-use crate::{
-    ColMajBlock, DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU,
-};
+use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU};
 
 impl<T: Scalar> DefaultSolver for DMatrix<T> {
     type LS = NalgebraLU<T>;
@@ -103,10 +101,6 @@ impl<T: Scalar> Matrix for DMatrix<T> {
         None
     }
 
-    fn copy_block_from(&mut self, src_indices: &<Self::V as Vector>::Index, parent: &Self) {
-        ColMajBlock::<<Self::V as Vector>::Index>::copy_block_from(self, parent, src_indices);
-    }
-
     fn set_data_with_indices(
         &mut self,
         dst_indices: &<Self::V as Vector>::Index,
@@ -117,6 +111,18 @@ impl<T: Scalar> Matrix for DMatrix<T> {
             let i = dst_i % self.nrows();
             let j = dst_i / self.nrows();
             self[(i, j)] = data[*src_i];
+        }
+    }
+
+    fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
+        assert_eq!(indices.len(), self.nrows() * self.ncols());
+        let mut idx = indices.iter().peekable();
+        for j in 0..self.ncols() {
+            let other_col = other.column(*idx.peek().unwrap() / other.nrows());
+            for self_ij in self.column_mut(j).iter_mut() {
+                let other_i = idx.next().unwrap() % other.nrows();
+                *self_ij = other_col[other_i];
+            }
         }
     }
 
@@ -197,12 +203,24 @@ impl<T: Scalar> DenseMatrix for DMatrix<T> {
         self.gemm(alpha, a, b, beta);
     }
 
+    fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {
+        self[(i, j)]
+    }
+
+    fn from_vec(nrows: IndexType, ncols: IndexType, data: Vec<Self::T>) -> Self {
+        DMatrix::from_vec(nrows, ncols, data)
+    }
+
     fn column_mut(&mut self, i: IndexType) -> DVectorViewMut<'_, T> {
         self.column_mut(i)
     }
 
     fn columns_mut(&mut self, start: IndexType, ncols: IndexType) -> Self::ViewMut<'_> {
         self.columns_mut(start, ncols)
+    }
+
+    fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T) {
+        self[(i, j)] = value;
     }
 
     fn column(&self, i: IndexType) -> DVectorView<'_, T> {

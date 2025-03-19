@@ -36,10 +36,10 @@ pub trait LinearOp: Op {
         let mut v = Self::V::zeros(self.nstates());
         let mut col = Self::V::zeros(self.nout());
         for j in 0..self.nstates() {
-            v[j] = Self::T::one();
+            v.set_index(j, Self::T::one());
             self.call_inplace(&v, t, &mut col);
             y.set_column(j, &col);
-            v[j] = Self::T::zero();
+            v.set_index(j, Self::T::zero());
         }
     }
 
@@ -70,10 +70,10 @@ pub trait LinearOpTranspose: LinearOp {
         let mut v = Self::V::zeros(self.nstates());
         let mut col = Self::V::zeros(self.nout());
         for j in 0..self.nstates() {
-            v[j] = Self::T::one();
+            v.set_index(j, Self::T::one());
             self.call_transpose_inplace(&v, t, &mut col);
             y.set_column(j, &col);
-            v[j] = Self::T::zero();
+            v.set_index(j, Self::T::zero());
         }
     }
     fn transpose_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
@@ -108,10 +108,10 @@ pub trait LinearOpSens: LinearOp {
         let mut v = Self::V::zeros(self.nparams());
         let mut col = Self::V::zeros(self.nout());
         for j in 0..self.nparams() {
-            v[j] = Self::T::one();
+            v.set_index(j, Self::T::one());
             self.sens_mul_inplace(x, t, &v, &mut col);
             y.set_column(j, &col);
-            v[j] = Self::T::zero();
+            v.set_index(j, Self::T::zero());
         }
     }
 

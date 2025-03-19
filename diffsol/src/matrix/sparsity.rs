@@ -33,7 +33,6 @@ pub trait MatrixSparsityRef<'a, M: Matrix> {
     fn split(
         &self,
         algebraic_indices: &<M::V as Vector>::Index,
-        transpose: bool,
     ) -> [(M::Sparsity, <M::V as Vector>::Index); 4];
 }
 
@@ -65,10 +64,9 @@ impl<M: Matrix> Dense<M> {
     pub(crate) fn split(
         &self,
         algebraic_indices: &<M::V as Vector>::Index,
-        transpose: bool,
     ) -> [(Self, <<M as MatrixCommon>::V as Vector>::Index); 4] {
         let (ul_blk, ur_blk, ll_blk, lr_blk) =
-            ColMajBlock::split(self.nrows, self.ncols, algebraic_indices, transpose);
+            ColMajBlock::split(self.nrows, self.ncols, algebraic_indices);
         let ul = Dense::new(ul_blk.nrows, ul_blk.ncols);
         let ur = Dense::new(ur_blk.nrows, ur_blk.ncols);
         let ll = Dense::new(ll_blk.nrows, ll_blk.ncols);
@@ -158,9 +156,8 @@ where
     fn split(
         &self,
         indices: &<M::V as Vector>::Index,
-        transpose: bool,
     ) -> [(M::Sparsity, <<M as MatrixCommon>::V as Vector>::Index); 4] {
-        self.dense.split(indices, transpose)
+        self.dense.split(indices)
     }
 
     fn nrows(&self) -> IndexType {

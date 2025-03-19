@@ -186,17 +186,17 @@ where
         for i in 0..s {
             for j in (i + 1)..s {
                 assert_eq!(
-                    tableau.a()[(i, j)],
+                    tableau.a().get_index(i, j),
                     Eqn::T::zero(),
                     "Invalid tableau, expected a(i, j) = 0 for i > j"
                 );
             }
         }
-        let gamma = tableau.a()[(1, 1)];
+        let gamma = tableau.a().get_index(1, 1);
         //check that for i = 1..s-1, a(i, i) = gamma
         for i in 1..tableau.s() {
             assert_eq!(
-                tableau.a()[(i, i)],
+                tableau.a().get_index(i, i),
                 gamma,
                 "Invalid tableau, expected a(i, i) = gamma = {} for i = 1..s-1",
                 gamma
@@ -206,16 +206,16 @@ where
         // if a(0, 0) = 0, then we're a ESDIRK method
         // otherwise, error
         let zero = Eqn::T::zero();
-        if tableau.a()[(0, 0)] != zero && tableau.a()[(0, 0)] != gamma {
+        if tableau.a().get_index(0, 0) != zero && tableau.a().get_index(0, 0) != gamma {
             panic!("Invalid tableau, expected a(0, 0) = 0 or a(0, 0) = gamma");
         }
-        let is_sdirk = tableau.a()[(0, 0)] == gamma;
+        let is_sdirk = tableau.a().get_index(0, 0) == gamma;
 
         let mut a_rows = Vec::with_capacity(s);
         for i in 0..s {
             let mut row = Vec::with_capacity(i);
             for j in 0..i {
-                row.push(tableau.a()[(i, j)]);
+                row.push(tableau.a().get_index(i, j));
             }
             a_rows.push(Eqn::V::from_vec(row));
         }
@@ -223,7 +223,7 @@ where
         // check last row of a is the same as b
         for i in 0..s {
             assert_eq!(
-                tableau.a()[(s - 1, i)],
+                tableau.a().get_index(s - 1, i),
                 tableau.b().get_index(i),
                 "Invalid tableau, expected a(s-1, i) = b(i)"
             );
@@ -413,8 +413,8 @@ where
         } else if i == 1 {
             dy.copy_from_view(&diff.column(i - 1));
         } else {
-            let c =
-                (tableau.c().get_index(i) - tableau.c().get_index(i - 2)) / (tableau.c().get_index(i - 1) - tableau.c().get_index(i - 2));
+            let c = (tableau.c().get_index(i) - tableau.c().get_index(i - 2))
+                / (tableau.c().get_index(i - 1) - tableau.c().get_index(i - 2));
             // dy = c1  + c * (c1 - c2)
             dy.copy_from_view(&diff.column(i - 1));
             dy.axpy_v(-c, &diff.column(i - 2), Eqn::T::one() + c);

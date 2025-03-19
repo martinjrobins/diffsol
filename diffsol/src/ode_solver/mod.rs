@@ -32,14 +32,14 @@ mod tests {
     use crate::op::ParameterisedOp;
     use crate::{
         op::OpStatistics, AdjointOdeSolverMethod, CraneliftModule, DenseMatrix, MatrixCommon,
-        MatrixRef, NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeEquationsAdjoint,
+        MatrixHost, MatrixRef, NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeEquationsAdjoint,
         OdeEquationsImplicit, OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-        OdeSolverStopReason, VectorRef, VectorView, Scale, VectorViewMut, MatrixHost,
+        OdeSolverStopReason, Scale, VectorRef, VectorView,
     };
     use crate::{
         ConstantOp, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp, Op, Vector,
     };
-    use num_traits::{One, Pow, Zero};
+    use num_traits::{One, Zero};
 
     pub fn test_ode_solver<'a, M, Eqn, Method>(
         method: &mut Method,
@@ -174,7 +174,9 @@ mod tests {
 
             let mut delta = g_pos - g_neg;
             delta.component_div_assign(&twice_h);
-            dgdp.row_mut(i).copy_from(&delta);
+            for j in 0..nout {
+                dgdp.set_index(i, j, delta.get_index(j));
+            }
         }
         problem.eqn.set_params(&p_base);
         dgdp
@@ -203,17 +205,9 @@ mod tests {
     where
         DM: DenseMatrix,
     {
-        let mut ret = vec![soln.clone(), soln.clone()];
-        for i in 0..soln.nrows() {
-            for j in 0..soln.ncols() {
-                ret[0][(i, j)] = DM::T::from(2.) * (soln[(i, j)] - data[(i, j)]);
-            }
-        }
-        for i in 0..soln.nrows() {
-            for j in 0..soln.ncols() {
-                ret[1][(i, j)] = DM::T::from(4.) * (soln[(i, j)] - data[(i, j)]).pow(3);
-            }
-        }
+        let mut ret = Vec::new();
+        ret.push((soln.clone() - data) * Scale(DM::T::from(2.)));
+        ret.push((soln.clone() - data) * Scale(DM::T::from(4.)));
         ret
     }
 
@@ -266,7 +260,9 @@ mod tests {
 
             let mut delta = g_pos - g_neg;
             delta.component_div_assign(&twice_h);
-            dgdp.row_mut(i).copy_from(&delta);
+            for j in 0..nout {
+                dgdp.set_index(i, j, delta.get_index(j));
+            }
         }
         problem.eqn.set_params(&p_base);
         (dgdp, data)
@@ -498,8 +494,13 @@ mod tests {
         let state = s.checkpoint();
         let state2 = s.state();
         state2.y.assert_eq_st(state.as_ref().y, M::T::from(1e-9));
-        s.state_mut().y.set_index(0, M::T::from(std::f64::consts::PI));
-        assert_eq!(s.state_mut().y.get_index(0), M::T::from(std::f64::consts::PI));
+        s.state_mut()
+            .y
+            .set_index(0, M::T::from(std::f64::consts::PI));
+        assert_eq!(
+            s.state_mut().y.get_index(0),
+            M::T::from(std::f64::consts::PI)
+        );
     }
 
     #[cfg(feature = "diffsl")]

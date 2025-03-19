@@ -8,8 +8,8 @@ use crate::{
     error::DiffsolError, find_jacobian_non_zeros, find_matrix_non_zeros,
     jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
     op::nonlinear_op::NonLinearOpJacobian, ConstantOp, ConstantOpSens, ConstantOpSensAdjoint,
-    LinearOp, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSens,
-    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scale, Vector, MatrixHost,
+    LinearOp, LinearOpTranspose, Matrix, MatrixHost, NonLinearOp, NonLinearOpAdjoint,
+    NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scale, Vector,
     VectorHost,
 };
 

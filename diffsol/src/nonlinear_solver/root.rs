@@ -81,7 +81,9 @@ impl<V: Vector> RootFinder<V> {
         let five = V::T::from(5.0);
         let pntone = V::T::from(0.1);
         while abs(t1 - t0) > tol {
-            let mut t_mid = t1 - (t1 - t0) * g1.get_index(imax) / (g1.get_index(imax) - alpha * g0.get_index(imax));
+            let mut t_mid = t1
+                - (t1 - t0) * g1.get_index(imax)
+                    / (g1.get_index(imax) - alpha * g0.get_index(imax));
 
             // adjust t_mid away from the boundaries
             if abs(t_mid - t0) < half * tol {

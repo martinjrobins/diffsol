@@ -42,9 +42,9 @@ impl<'a, Eqn: OdeEquationsImplicit> InitOp<'a, Eqn> {
         // note rhs_jac = (df/du df/dv)
         //                (dg/du dg/dv)
         // according to the algebraic indices.
-        let [(m_u, _), _, _, _] = mass.split(&algebraic_indices, false);
+        let [(m_u, _), _, _, _] = mass.split(&algebraic_indices);
         let m_u = m_u * scale(-Eqn::T::one());
-        let [_, (dfdv, _), _, (dgdv, _)] = rhs_jac.split(&algebraic_indices, false);
+        let [_, (dfdv, _), _, (dgdv, _)] = rhs_jac.split(&algebraic_indices);
         let zero_ll =
             <Eqn::M as Matrix>::zeros(algebraic_indices.len(), n - algebraic_indices.len());
         let zero_ur =

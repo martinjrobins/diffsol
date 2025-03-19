@@ -5,7 +5,7 @@ use faer::{unzip, zip, Col, ColMut, ColRef, Mat};
 
 use crate::{scalar::Scale, IndexType, Scalar, Vector};
 
-use crate::{VectorCommon, VectorIndex, VectorView, VectorViewMut, VectorHost};
+use crate::{VectorCommon, VectorHost, VectorIndex, VectorView, VectorViewMut};
 
 use super::DefaultDenseMatrix;
 
@@ -107,7 +107,7 @@ impl<T: Scalar> Vector for Col<T> {
             _ => self.iter().fold(T::zero(), |acc, x| acc + x.pow(k)),
         }
     }
-    
+
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
         if y.len() != self.len() || y.len() != atol.len() {
@@ -141,6 +141,9 @@ impl<T: Scalar> Vector for Col<T> {
     }
     fn from_vec(vec: Vec<Self::T>) -> Self {
         Col::from_fn(vec.len(), |i| vec[i])
+    }
+    fn clone_as_vec(&self) -> Vec<Self::T> {
+        self.iter().cloned().collect()
     }
     fn zeros(nstates: usize) -> Self {
         Self::from_element(nstates, T::zero())
