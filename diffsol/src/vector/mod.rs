@@ -186,27 +186,27 @@ pub trait Vector:
     fn component_div_assign(&mut self, other: &Self);
 
     /// given two vectors `g0=self` and `g1`, return:
-    /// - `true` if a root is found in g1 (i.e. g1[i] == 0)
-    /// - for all values of i where a zero crossing is found (i.e. g0[i] * g1[i] < 0), return:
-    ///     - max_i(abs(g1[i] / (g1[i] - g0[i]))), 0 otherwise
+    /// - `true` if a root is found in g1 (i.e. g1_i == 0)
+    /// - for all values of i where a zero crossing is found (i.e. g0_i * g1_i < 0), return:
+    ///     - max_i(abs(g1_i / (g1_i - g0_i))), 0 otherwise
     ///     - the index i at the maximum value, -1 otherwise
     fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32);
 
     /// assign `value` to the elements of `self` at the indices specified by `indices`
-    /// i.e. self[indices[i]] = value for all i
+    /// i.e. `self[indices[i]] = value` for all i
     fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T);
 
     /// copy from `other` at the indices specified by `indices`
     /// generaly `self` and `other` have the same length
-    /// i.e. self[indices[i]] = other[indices[i]] for all i
+    /// i.e. `self[indices[i]] = other[indices[i]]` for all i
     fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index);
 
     /// gather values from `other` at the indices specified by `indices`
-    /// i.e. self[i] = other[indices[i]] for all i
+    /// i.e. `self[i] = other[indices[i]]` for all i
     fn gather(&mut self, other: &Self, indices: &Self::Index);
 
     /// scatter values from `self` to `other` at the indices specified by `indices`
-    /// i.e. other[indices[i]] = self[i] for all i
+    /// i.e. `other[indices[i]] = self[i]` for all i
     fn scatter(&self, indices: &Self::Index, other: &mut Self);
 
     /// assert that `self` is equal to `other` within a tolerance `tol`
