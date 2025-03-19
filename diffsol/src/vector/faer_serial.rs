@@ -104,7 +104,10 @@ impl<T: Scalar> Vector for Col<T> {
         match k {
             1 => self.norm_l1(),
             2 => self.norm_l2(),
-            _ => self.iter().fold(T::zero(), |acc, x| acc + x.pow(k)),
+            _ => self
+                .iter()
+                .fold(T::zero(), |acc, x| acc + x.pow(k))
+                .pow(T::one() / T::from(k as f64)),
         }
     }
 
@@ -241,9 +244,6 @@ impl<'a, T: Scalar> VectorView<'a> for ColRef<'a, T> {
     type Owned = Col<T>;
     fn into_owned(self) -> Col<T> {
         self.to_owned()
-    }
-    fn norm(&self) -> T {
-        self.norm_l2()
     }
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();

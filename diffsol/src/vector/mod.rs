@@ -97,7 +97,6 @@ pub trait VectorView<'a>:
 {
     type Owned;
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T;
-    fn norm(&self) -> Self::T;
     fn into_owned(self) -> Self::Owned;
 }
 
@@ -131,7 +130,7 @@ pub trait Vector:
     /// if the vector is not on the host
     fn get_index(&self, index: IndexType) -> Self::T;
 
-    /// returns \sum_i (x_i)^k
+    /// returns (\sum_i (x_i)^k)^(1/k)
     fn norm(&self, k: i32) -> Self::T;
 
     /// returns \sum_i (x_i / (|y_i| * rtol + atol_i))^2

@@ -56,9 +56,6 @@ impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
     fn into_owned(self) -> Self::Owned {
         self.into_owned()
     }
-    fn norm(&self) -> T {
-        self.norm()
-    }
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
         if y.len() != self.len() || y.len() != atol.len() {
