@@ -89,12 +89,13 @@ pub mod tests {
         let jac1 = M::from_diagonal(&M::V::from_vec(vec![2.0.into(), 2.0.into()]));
         let jac2 = jac1.clone();
         let p = M::V::zeros(0);
+        let eights = M::V::from_vec(vec![8.0.into(), 8.0.into()]);
         let op = Closure::new(
             // 0 = J * x * x - 8
             move |x: &<M as MatrixCommon>::V, _p: &<M as MatrixCommon>::V, _t, y| {
                 jac1.gemv(M::T::one(), x, M::T::zero(), y); // y = J * x
                 y.component_mul_assign(x);
-                y.add_scalar_mut(M::T::from(-8.0));
+                y.axpy(-M::T::one(), &eights, M::T::one());
             },
             // J = 2 * J * x * dx
             move |x: &<M as MatrixCommon>::V, _p: &<M as MatrixCommon>::V, _t, v, y| {

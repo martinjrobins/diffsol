@@ -43,13 +43,21 @@ impl<M: DenseMatrix> Tableau<M> {
         let d = gamma / M::T::from(2.0);
         let w = M::T::from(2.0_f64.sqrt() / 4.0);
 
-        let mut a = M::zeros(3, 3);
-        a[(1, 0)] = d;
-        a[(1, 1)] = d;
-
-        a[(2, 0)] = w;
-        a[(2, 1)] = w;
-        a[(2, 2)] = d;
+        let a = M::from_vec(
+            3,
+            3,
+            vec![
+                M::T::zero(),
+                d,
+                w,
+                M::T::zero(),
+                d,
+                w,
+                M::T::zero(),
+                M::T::zero(),
+                d,
+            ],
+        );
 
         let b = M::V::from_vec(vec![w, w, d]);
         let b_hat = M::V::from_vec(vec![
@@ -59,16 +67,21 @@ impl<M: DenseMatrix> Tableau<M> {
         ]);
         let mut d = M::V::zeros(3);
         for i in 0..3 {
-            d[i] = b[i] - b_hat[i];
+            d.set_index(i, b.get_index(i) - b_hat.get_index(i));
         }
 
-        let mut beta = M::zeros(3, 2);
-        beta[(0, 0)] = M::T::from(2.0) * w;
-        beta[(0, 1)] = -w;
-        beta[(1, 0)] = M::T::from(2.0) * w;
-        beta[(1, 1)] = -w;
-        beta[(2, 0)] = gamma - M::T::from(1.0);
-        beta[(2, 1)] = M::T::from(2.0) * w;
+        let beta = M::from_vec(
+            3,
+            2,
+            vec![
+                M::T::from(2.) * w,
+                M::T::from(2.) * w,
+                gamma - M::T::from(1.),
+                -w,
+                -w,
+                M::T::from(2.) * w,
+            ],
+        );
 
         let c = M::V::from_vec(vec![M::T::zero(), gamma, M::T::one()]);
 
@@ -80,21 +93,36 @@ impl<M: DenseMatrix> Tableau<M> {
     /// A third order ESDIRK method
     /// from Jørgensen, J. B., Kristensen, M. R., & Thomsen, P. G. (2018). A family of ESDIRK integration methods. arXiv preprint arXiv:1803.01613.
     pub fn esdirk34() -> Self {
-        let mut a = M::zeros(4, 4);
         let gamma = M::T::from(0.435_866_521_508_459);
-        a[(1, 0)] = gamma;
-        a[(1, 1)] = gamma;
+        let a = M::from_vec(
+            4,
+            4,
+            vec![
+                M::T::zero(),
+                gamma,
+                M::T::from(0.140_737_774_724_706_2),
+                M::T::from(0.102_399_400_619_911),
+                M::T::zero(),
+                gamma,
+                M::T::from(-0.108_365_551_381_320_8),
+                M::T::from(-0.376_878_452_255_556_1),
+                M::T::zero(),
+                M::T::zero(),
+                gamma,
+                M::T::from(0.838_612_530_127_186_1),
+                M::T::zero(),
+                M::T::zero(),
+                M::T::zero(),
+                gamma,
+            ],
+        );
 
-        a[(2, 0)] = M::T::from(0.140_737_774_724_706_2);
-        a[(2, 1)] = M::T::from(-0.108_365_551_381_320_8);
-        a[(2, 2)] = gamma;
-
-        a[(3, 0)] = M::T::from(0.102_399_400_619_911);
-        a[(3, 1)] = M::T::from(-0.376_878_452_255_556_1);
-        a[(3, 2)] = M::T::from(0.838_612_530_127_186_1);
-        a[(3, 3)] = gamma;
-
-        let b = M::V::from_vec(vec![a[(3, 0)], a[(3, 1)], a[(3, 2)], a[(3, 3)]]);
+        let b = M::V::from_vec(vec![
+            a.get_index(3, 0),
+            a.get_index(3, 1),
+            a.get_index(3, 2),
+            a.get_index(3, 3),
+        ]);
 
         let c = M::V::from_vec(vec![
             M::T::zero(),

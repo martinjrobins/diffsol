@@ -52,20 +52,7 @@ impl<V: Vector> RootFinder<V> {
         let gmid = &mut *self.gmid.borrow_mut();
         root_fn.call_inplace(y, t, g1);
 
-        let sign_change_fn = |mut acc: (bool, V::T, i32), g0: V::T, g1: V::T, i: IndexType| {
-            if g1 == V::T::zero() {
-                acc.0 = true;
-            } else if g0 * g1 < V::T::zero() {
-                let gfrac = abs(g1 / (g1 - g0));
-                if gfrac > acc.1 {
-                    acc.1 = gfrac;
-                    acc.2 = i32::try_from(i).unwrap();
-                }
-            }
-            acc
-        };
-        let (rootfnd, _gfracmax, imax) =
-            (*g0).binary_fold(g1, (false, V::T::zero(), -1), sign_change_fn);
+        let (rootfnd, _gfracmax, imax) = g0.root_finding(g1);
 
         // if no sign change we don't need to find the root
         if imax < 0 {
@@ -94,7 +81,9 @@ impl<V: Vector> RootFinder<V> {
         let five = V::T::from(5.0);
         let pntone = V::T::from(0.1);
         while abs(t1 - t0) > tol {
-            let mut t_mid = t1 - (t1 - t0) * g1[imax] / (g1[imax] - alpha * g0[imax]);
+            let mut t_mid = t1
+                - (t1 - t0) * g1.get_index(imax)
+                    / (g1.get_index(imax) - alpha * g0.get_index(imax));
 
             // adjust t_mid away from the boundaries
             if abs(t_mid - t0) < half * tol {
@@ -119,8 +108,7 @@ impl<V: Vector> RootFinder<V> {
             let ymid = interpolate(t_mid).unwrap();
             root_fn.call_inplace(&ymid, t_mid, gmid);
 
-            let (rootfnd, _gfracmax, imax_i32) =
-                (*g0).binary_fold(gmid, (false, V::T::zero(), -1), sign_change_fn);
+            let (rootfnd, _gfracmax, imax_i32) = g0.root_finding(gmid);
             let lower = imax_i32 >= 0;
 
             if lower {

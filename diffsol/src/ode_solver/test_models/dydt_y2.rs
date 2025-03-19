@@ -37,17 +37,17 @@ pub fn dydt_y2_problem<M: DenseMatrix + 'static>(
         .build()
         .unwrap();
     let mut soln = OdeSolverSolution::default();
-    let y0 = M::V::from_vec([y0.into()].repeat(size));
+    let y0: Vec<M::T> = [y0.into()].repeat(size);
     let n = 10;
     let dt = tlast / n as f64;
     for i in 0..=n {
         let t = M::T::from(i as f64 * dt);
         // y = y0 / (1 - y0 * t)
-        let mut denom = y0.clone() * (scale(-t));
-        denom.add_scalar_mut(M::T::one());
-        let mut y = y0.clone();
-        y.component_div_assign(&denom);
-        soln.push(y, t);
+        let y = y0
+            .iter()
+            .map(|&y| y / (M::T::one() - y * t))
+            .collect::<Vec<_>>();
+        soln.push(M::V::from_vec(y), t);
     }
     (problem, soln)
 }

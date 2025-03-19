@@ -189,13 +189,11 @@ where
         let eqn = &solver.problem().eqn;
         let (partition, mass_dd, rhs_jac_aa, rhs_jac_ad) = if let Some(_mass) = eqn.mass() {
             let mass_matrix = solver.mass().unwrap();
-            let mass_diag = mass_matrix.diagonal();
             let (algebraic_indices, differential_indices) =
-                mass_diag.partition_indices(|x| x == M::T::zero());
+                mass_matrix.partition_indices_by_zero_diagonal();
 
             // setup mass solver
-            let [(dd, dd_idx), _, _, _] =
-                mass_matrix.split(|i| mass_diag[i] == M::T::zero(), false);
+            let [(dd, dd_idx), _, _, _] = mass_matrix.split(&algebraic_indices);
             let mut mass_dd = BlockInfoSol {
                 block: MatrixOp::new(dd),
                 src_indices: dd_idx,
@@ -208,8 +206,7 @@ where
                 let jacobian = solver
                     .jacobian()
                     .ok_or(DiffsolError::from(OdeSolverError::JacobianNotAvailable))?;
-                let [_, (ad, ad_idx), _, (aa, aa_idx)] =
-                    jacobian.split(|i| mass_diag[i] == M::T::zero(), false);
+                let [_, (ad, ad_idx), _, (aa, aa_idx)] = jacobian.split(&algebraic_indices);
                 let mut rhs_jac_aa = BlockInfoSol {
                     block: MatrixOp::new(aa),
                     src_indices: aa_idx,
@@ -285,11 +282,11 @@ where
             rhs_jac_ad
                 .block
                 .m_mut()
-                .copy_block_from(&rhs_jac_ad.src_indices, &jacobian);
+                .gather(&jacobian, &rhs_jac_ad.src_indices);
             rhs_jac_aa
                 .block
                 .m_mut()
-                .copy_block_from(&rhs_jac_aa.src_indices, &jacobian);
+                .gather(&jacobian, &rhs_jac_aa.src_indices);
             rhs_jac_aa.solver.set_linearisation(
                 &rhs_jac_aa.block,
                 &self.tmp_algebraic,
@@ -300,10 +297,7 @@ where
         // if there is a mass matrix, setup the solver for M_dd*^-1
         if let Some(mass_dd) = self.mass_dd.as_mut() {
             let mass = solver.mass().unwrap();
-            mass_dd
-                .block
-                .m_mut()
-                .copy_block_from(&mass_dd.src_indices, &mass);
+            mass_dd.block.m_mut().gather(&mass, &mass_dd.src_indices);
             mass_dd.solver.set_linearisation(
                 &mass_dd.block,
                 &self.tmp_differential,

@@ -2,7 +2,7 @@ use crate::{
     scale, LinearOp, Matrix, MatrixSparsityRef, NonLinearOpJacobian, OdeEquationsImplicit, Vector,
     VectorIndex,
 };
-use num_traits::{One, Zero};
+use num_traits::One;
 use std::cell::RefCell;
 
 use super::{NonLinearOp, Op};
@@ -22,9 +22,11 @@ pub struct InitOp<'a, Eqn: OdeEquationsImplicit> {
 impl<'a, Eqn: OdeEquationsImplicit> InitOp<'a, Eqn> {
     pub fn new(eqn: &'a Eqn, t0: Eqn::T, y0: &Eqn::V) -> Self {
         let n = eqn.rhs().nstates();
-        let mass_diagonal = eqn.mass().unwrap().matrix(t0).diagonal();
-        let is_algebraic = |i| mass_diagonal[i] == Eqn::T::zero();
-        let (algebraic_indices, _) = mass_diagonal.partition_indices(|x| x == Eqn::T::zero());
+        let (algebraic_indices, _) = eqn
+            .mass()
+            .unwrap()
+            .matrix(t0)
+            .partition_indices_by_zero_diagonal();
 
         let rhs_jac = eqn.rhs().jacobian(y0, t0);
         let mass = eqn.mass().unwrap().matrix(t0);
@@ -40,16 +42,16 @@ impl<'a, Eqn: OdeEquationsImplicit> InitOp<'a, Eqn> {
         // note rhs_jac = (df/du df/dv)
         //                (dg/du dg/dv)
         // according to the algebraic indices.
-        let [(m_u, _), _, _, _] = mass.split(is_algebraic, false);
+        let [(m_u, _), _, _, _] = mass.split(&algebraic_indices);
         let m_u = m_u * scale(-Eqn::T::one());
-        let [_, (dfdv, _), _, (dgdv, _)] = rhs_jac.split(is_algebraic, false);
+        let [_, (dfdv, _), _, (dgdv, _)] = rhs_jac.split(&algebraic_indices);
         let zero_ll =
             <Eqn::M as Matrix>::zeros(algebraic_indices.len(), n - algebraic_indices.len());
         let zero_ur =
             <Eqn::M as Matrix>::zeros(n - algebraic_indices.len(), algebraic_indices.len());
         let zero_lr = <Eqn::M as Matrix>::zeros(algebraic_indices.len(), algebraic_indices.len());
-        let jac = Eqn::M::combine(&m_u, &dfdv, &zero_ll, &dgdv, is_algebraic);
-        let neg_mass = Eqn::M::combine(&m_u, &zero_ur, &zero_ll, &zero_lr, is_algebraic);
+        let jac = Eqn::M::combine(&m_u, &dfdv, &zero_ll, &dgdv, &algebraic_indices);
+        let neg_mass = Eqn::M::combine(&m_u, &zero_ur, &zero_ll, &zero_lr, &algebraic_indices);
 
         let y0 = y0.clone();
         let y0 = RefCell::new(y0);

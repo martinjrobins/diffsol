@@ -1,8 +1,8 @@
 use std::ops::{Div, Mul, MulAssign};
 
-use nalgebra::{DMatrix, DVector, DVectorView, DVectorViewMut};
+use nalgebra::{DMatrix, DVector, DVectorView, DVectorViewMut, LpNorm};
 
-use crate::{IndexType, Scalar, Scale};
+use crate::{IndexType, Scalar, Scale, VectorHost};
 
 use super::{DefaultDenseMatrix, Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
@@ -31,8 +31,8 @@ impl VectorIndex for DVector<IndexType> {
     fn len(&self) -> crate::IndexType {
         self.len()
     }
-    fn from_slice(slice: &[IndexType]) -> Self {
-        DVector::from_iterator(slice.len(), slice.iter().copied())
+    fn from_vec(v: Vec<IndexType>) -> Self {
+        DVector::from_vec(v)
     }
     fn clone_as_vec(&self) -> Vec<IndexType> {
         self.iter().copied().collect()
@@ -55,9 +55,6 @@ impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
     type Owned = DVector<T>;
     fn into_owned(self) -> Self::Owned {
         self.into_owned()
-    }
-    fn norm(&self) -> T {
-        self.norm()
     }
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
@@ -128,6 +125,15 @@ impl<T: Scalar> Div<Scale<T>> for DVector<T> {
     }
 }
 
+impl<T: Scalar> VectorHost for DVector<T> {
+    fn as_slice(&self) -> &[Self::T] {
+        self.as_slice()
+    }
+    fn as_mut_slice(&mut self) -> &mut [Self::T] {
+        self.as_mut_slice()
+    }
+}
+
 impl<T: Scalar> Vector for DVector<T> {
     type View<'a> = DVectorView<'a, T>;
     type ViewMut<'a> = DVectorViewMut<'a, T>;
@@ -135,17 +141,14 @@ impl<T: Scalar> Vector for DVector<T> {
     fn len(&self) -> IndexType {
         self.len()
     }
-    fn norm(&self) -> Self::T {
-        self.norm()
+    fn norm(&self, k: i32) -> Self::T {
+        self.apply_norm(&LpNorm(k))
     }
-    fn as_slice(&self) -> &[Self::T] {
-        self.as_slice()
+    fn get_index(&self, index: IndexType) -> Self::T {
+        self[index]
     }
-    fn as_mut_slice(&mut self) -> &mut [Self::T] {
-        self.as_mut_slice()
-    }
-    fn copy_from_slice(&mut self, slice: &[Self::T]) {
-        self.copy_from_slice(slice);
+    fn set_index(&mut self, index: IndexType, value: Self::T) {
+        self[index] = value;
     }
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
@@ -160,9 +163,6 @@ impl<T: Scalar> Vector for DVector<T> {
         }
         acc / Self::T::from(self.len() as f64)
     }
-    fn fill(&mut self, value: T) {
-        self.fill(value);
-    }
     fn as_view(&self) -> Self::View<'_> {
         self.as_view()
     }
@@ -172,8 +172,8 @@ impl<T: Scalar> Vector for DVector<T> {
     fn copy_from(&mut self, other: &Self) {
         self.copy_from(other);
     }
-    fn map_inplace(&mut self, f: impl Fn(Self::T) -> Self::T) {
-        self.iter_mut().for_each(|x: &mut _| *x = f(*x));
+    fn fill(&mut self, value: Self::T) {
+        self.iter_mut().for_each(|x: &mut _| *x = value);
     }
     fn copy_from_view(&mut self, other: &Self::View<'_>) {
         self.copy_from(other);
@@ -184,11 +184,11 @@ impl<T: Scalar> Vector for DVector<T> {
     fn from_vec(vec: Vec<T>) -> Self {
         Self::from_vec(vec)
     }
+    fn clone_as_vec(&self) -> Vec<Self::T> {
+        self.iter().copied().collect()
+    }
     fn zeros(nstates: usize) -> Self {
         Self::zeros(nstates)
-    }
-    fn add_scalar_mut(&mut self, scalar: T) {
-        self.add_scalar_mut(scalar);
     }
     fn axpy(&mut self, alpha: T, x: &Self, beta: T) {
         self.axpy(alpha, x, beta);
@@ -202,30 +202,53 @@ impl<T: Scalar> Vector for DVector<T> {
     fn component_mul_assign(&mut self, other: &Self) {
         self.component_mul_assign(other);
     }
-    fn partition_indices<F: Fn(T) -> bool>(&self, f: F) -> (Self::Index, Self::Index) {
-        let mut indices_true = vec![];
-        let mut indices_false = vec![];
-        for (i, &x) in self.iter().enumerate() {
-            if f(x) {
-                indices_true.push(i as IndexType);
-            } else {
-                indices_false.push(i as IndexType);
+
+    fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32) {
+        let mut max_frac = T::zero();
+        let mut max_frac_index = -1;
+        let mut found_root = false;
+        assert_eq!(self.len(), g1.len(), "Vector lengths do not match");
+        for i in 0..self.len() {
+            let g0 = unsafe { *self.get_unchecked(i) };
+            let g1 = unsafe { *g1.get_unchecked(i) };
+            if g1 == T::zero() {
+                found_root = true;
+            }
+            if g0 * g1 < T::zero() {
+                let frac = (g1 / (g1 - g0)).abs();
+                if frac > max_frac {
+                    max_frac = frac;
+                    max_frac_index = i as i32;
+                }
             }
         }
-        (
-            Self::Index::from_vec(indices_true),
-            Self::Index::from_vec(indices_false),
-        )
+        (found_root, max_frac, max_frac_index)
     }
-    fn binary_fold<B, F>(&self, other: &Self, init: B, f: F) -> B
-    where
-        F: Fn(B, Self::T, Self::T, IndexType) -> B,
-    {
-        let mut acc = init;
-        for (i, (x, y)) in self.iter().zip(other.iter()).enumerate() {
-            acc = f(acc, *x, *y, i);
+
+    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
+        for i in indices {
+            self[*i] = value;
         }
-        acc
+    }
+
+    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
+        for i in indices {
+            self[*i] = other[*i];
+        }
+    }
+
+    fn gather(&mut self, other: &Self, indices: &Self::Index) {
+        assert_eq!(self.len(), indices.len(), "Vector lengths do not match");
+        for (s, o) in self.iter_mut().zip(indices.iter()) {
+            *s = other[*o];
+        }
+    }
+
+    fn scatter(&self, indices: &Self::Index, other: &mut Self) {
+        assert_eq!(self.len(), indices.len(), "Vector lengths do not match");
+        for (s, o) in self.iter().zip(indices.iter()) {
+            other[*o] = *s;
+        }
     }
 }
 
@@ -258,5 +281,10 @@ mod tests {
             VectorView::squared_norm(&vview, &y, &atol, rtol),
             errorn_check
         );
+    }
+
+    #[test]
+    fn test_root_finding() {
+        super::super::tests::test_root_finding::<DVector<f64>>();
     }
 }

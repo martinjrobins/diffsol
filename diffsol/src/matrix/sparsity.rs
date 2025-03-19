@@ -30,10 +30,9 @@ pub trait MatrixSparsityRef<'a, M: Matrix> {
     fn is_sparse() -> bool;
     fn indices(&self) -> Vec<(IndexType, IndexType)>;
     fn to_owned(&self) -> M::Sparsity;
-    fn split<F: Fn(IndexType) -> bool>(
+    fn split(
         &self,
-        f: F,
-        transpose: bool,
+        algebraic_indices: &<M::V as Vector>::Index,
     ) -> [(M::Sparsity, <M::V as Vector>::Index); 4];
 }
 
@@ -62,13 +61,12 @@ impl<M: Matrix> Dense<M> {
     pub fn ncols(&self) -> IndexType {
         self.ncols
     }
-    pub(crate) fn split<F: Fn(IndexType) -> bool>(
+    pub(crate) fn split(
         &self,
-        f: F,
-        transpose: bool,
+        algebraic_indices: &<M::V as Vector>::Index,
     ) -> [(Self, <<M as MatrixCommon>::V as Vector>::Index); 4] {
         let (ul_blk, ur_blk, ll_blk, lr_blk) =
-            ColMajBlock::split(self.nrows, self.ncols, f, transpose);
+            ColMajBlock::split(self.nrows, self.ncols, algebraic_indices);
         let ul = Dense::new(ul_blk.nrows, ul_blk.ncols);
         let ur = Dense::new(ur_blk.nrows, ur_blk.ncols);
         let ll = Dense::new(ll_blk.nrows, ll_blk.ncols);
@@ -143,7 +141,7 @@ where
                 j * self.nrows() + i
             })
             .collect();
-        <M::V as Vector>::Index::from_slice(indices.as_slice())
+        <M::V as Vector>::Index::from_vec(indices)
     }
 }
 
@@ -155,12 +153,11 @@ where
         Dense::new(self.nrows(), self.ncols())
     }
 
-    fn split<F: Fn(IndexType) -> bool>(
+    fn split(
         &self,
-        f: F,
-        transpose: bool,
+        indices: &<M::V as Vector>::Index,
     ) -> [(M::Sparsity, <<M as MatrixCommon>::V as Vector>::Index); 4] {
-        self.dense.split(f, transpose)
+        self.dense.split(indices)
     }
 
     fn nrows(&self) -> IndexType {

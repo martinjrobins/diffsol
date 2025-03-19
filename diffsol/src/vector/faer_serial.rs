@@ -5,7 +5,7 @@ use faer::{unzip, zip, Col, ColMut, ColRef, Mat};
 
 use crate::{scalar::Scale, IndexType, Scalar, Vector};
 
-use crate::{VectorCommon, VectorIndex, VectorView, VectorViewMut};
+use crate::{VectorCommon, VectorHost, VectorIndex, VectorView, VectorViewMut};
 
 use super::DefaultDenseMatrix;
 
@@ -78,6 +78,15 @@ macro_rules! impl_mul_assign_scale {
 impl_mul_assign_scale!(ColMut<'a, T>);
 impl_mul_assign_scale!(Col<T>);
 
+impl<T: Scalar> VectorHost for Col<T> {
+    fn as_mut_slice(&mut self) -> &mut [Self::T] {
+        unsafe { slice::from_raw_parts_mut(self.as_ptr_mut(), self.len()) }
+    }
+    fn as_slice(&self) -> &[Self::T] {
+        unsafe { slice::from_raw_parts(self.as_ptr(), self.len()) }
+    }
+}
+
 impl<T: Scalar> Vector for Col<T> {
     type View<'a> = ColRef<'a, T>;
     type ViewMut<'a> = ColMut<'a, T>;
@@ -85,19 +94,23 @@ impl<T: Scalar> Vector for Col<T> {
     fn len(&self) -> IndexType {
         self.nrows()
     }
-    fn norm(&self) -> T {
-        self.norm_l2()
+    fn get_index(&self, index: IndexType) -> Self::T {
+        self[index]
     }
-    fn as_mut_slice(&mut self) -> &mut [Self::T] {
-        unsafe { slice::from_raw_parts_mut(self.as_ptr_mut(), self.len()) }
+    fn set_index(&mut self, index: IndexType, value: Self::T) {
+        self[index] = value;
     }
-    fn as_slice(&self) -> &[Self::T] {
-        unsafe { slice::from_raw_parts(self.as_ptr(), self.len()) }
+    fn norm(&self, k: i32) -> T {
+        match k {
+            1 => self.norm_l1(),
+            2 => self.norm_l2(),
+            _ => self
+                .iter()
+                .fold(T::zero(), |acc, x| acc + x.pow(k))
+                .pow(T::one() / T::from(k as f64)),
+        }
     }
-    fn copy_from_slice(&mut self, slice: &[Self::T]) {
-        assert_eq!(slice.len(), self.len(), "Vector lengths do not match");
-        self.iter_mut().zip(slice.iter()).for_each(|(a, b)| *a = *b);
-    }
+
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
         if y.len() != self.len() || y.len() != atol.len() {
@@ -132,11 +145,11 @@ impl<T: Scalar> Vector for Col<T> {
     fn from_vec(vec: Vec<Self::T>) -> Self {
         Col::from_fn(vec.len(), |i| vec[i])
     }
+    fn clone_as_vec(&self) -> Vec<Self::T> {
+        self.iter().cloned().collect()
+    }
     fn zeros(nstates: usize) -> Self {
         Self::from_element(nstates, T::zero())
-    }
-    fn add_scalar_mut(&mut self, scalar: Self::T) {
-        self.iter_mut().for_each(|s| *s += scalar);
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {
         zip!(self.as_mut(), x.as_view()).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
@@ -144,36 +157,59 @@ impl<T: Scalar> Vector for Col<T> {
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
         zip!(self.as_mut(), x).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }
-    fn map_inplace(&mut self, f: impl Fn(Self::T) -> Self::T) {
-        zip!(self.as_mut()).for_each(|unzip!(xi)| *xi = f(*xi));
-    }
     fn component_mul_assign(&mut self, other: &Self) {
         zip!(self.as_mut(), other.as_view()).for_each(|unzip!(s, o)| *s *= *o);
     }
     fn component_div_assign(&mut self, other: &Self) {
         zip!(self.as_mut(), other.as_view()).for_each(|unzip!(s, o)| *s /= *o);
     }
-    fn partition_indices<F: Fn(Self::T) -> bool>(&self, f: F) -> (Self::Index, Self::Index) {
-        let mut indices_true = vec![];
-        let mut indices_false = vec![];
+
+    fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32) {
+        let mut max_frac = T::zero();
+        let mut max_frac_index = -1;
+        let mut found_root = false;
+        assert_eq!(self.len(), g1.len(), "Vector lengths do not match");
         for i in 0..self.len() {
-            if f(self[i]) {
-                indices_true.push(i as IndexType);
-            } else {
-                indices_false.push(i as IndexType);
+            let g0 = unsafe { *self.get_unchecked(i) };
+            let g1 = unsafe { *g1.get_unchecked(i) };
+            if g1 == T::zero() {
+                found_root = true;
+            }
+            if g0 * g1 < T::zero() {
+                let frac = (g1 / (g1 - g0)).abs();
+                if frac > max_frac {
+                    max_frac = frac;
+                    max_frac_index = i as i32;
+                }
             }
         }
-        (indices_true, indices_false)
+        (found_root, max_frac, max_frac_index)
     }
-    fn binary_fold<B, F>(&self, other: &Self, init: B, f: F) -> B
-    where
-        F: Fn(B, Self::T, Self::T, IndexType) -> B,
-    {
-        let mut acc = init;
-        for i in 0..self.len() {
-            acc = f(acc, self[i], other[i], i);
+
+    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
+        for i in indices {
+            self[*i] = value;
         }
-        acc
+    }
+
+    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
+        for i in indices {
+            self[*i] = other[*i];
+        }
+    }
+
+    fn gather(&mut self, other: &Self, indices: &Self::Index) {
+        assert_eq!(self.len(), indices.len(), "Vector lengths do not match");
+        for (s, o) in self.iter_mut().zip(indices.iter()) {
+            *s = other[*o];
+        }
+    }
+
+    fn scatter(&self, indices: &Self::Index, other: &mut Self) {
+        assert_eq!(self.len(), indices.len(), "Vector lengths do not match");
+        for (s, o) in self.iter().zip(indices.iter()) {
+            other[*o] = *s;
+        }
     }
 }
 
@@ -184,8 +220,8 @@ impl VectorIndex for Vec<IndexType> {
     fn len(&self) -> IndexType {
         self.len() as IndexType
     }
-    fn from_slice(slice: &[IndexType]) -> Self {
-        slice.to_vec()
+    fn from_vec(v: Vec<IndexType>) -> Self {
+        v
     }
     fn clone_as_vec(&self) -> Vec<IndexType> {
         self.clone()
@@ -208,9 +244,6 @@ impl<'a, T: Scalar> VectorView<'a> for ColRef<'a, T> {
     type Owned = Col<T>;
     fn into_owned(self) -> Col<T> {
         self.to_owned()
-    }
-    fn norm(&self) -> T {
-        self.norm_l2()
     }
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
@@ -288,5 +321,10 @@ mod tests {
             v.as_ref().squared_norm(&y, &atol, rtol),
             errorn_check
         );
+    }
+
+    #[test]
+    fn test_root_finding() {
+        super::super::tests::test_root_finding::<Col<f64>>();
     }
 }

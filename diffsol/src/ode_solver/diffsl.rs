@@ -8,8 +8,9 @@ use crate::{
     error::DiffsolError, find_jacobian_non_zeros, find_matrix_non_zeros,
     jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
     op::nonlinear_op::NonLinearOpJacobian, ConstantOp, ConstantOpSens, ConstantOpSensAdjoint,
-    LinearOp, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSens,
-    NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scale, Vector,
+    LinearOp, LinearOpTranspose, Matrix, MatrixHost, NonLinearOp, NonLinearOpAdjoint,
+    NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scale, Vector,
+    VectorHost,
 };
 
 pub type T = f64;
@@ -146,7 +147,7 @@ pub struct DiffSl<M: Matrix<T = T>, CG: CodegenModule> {
     rhs_adjoint_coloring: Option<JacobianColoring<M>>,
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> DiffSl<M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> DiffSl<M, CG> {
     pub fn compile(code: &str) -> Result<Self, DiffsolError> {
         let context = DiffSlContext::<M, CG>::new(code, 1)?;
         Ok(Self::from_context(context))
@@ -289,7 +290,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> Op for DiffSlOut<'_, M, CG> {
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> ConstantOp for DiffSlInit<'_, M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> ConstantOp for DiffSlInit<'_, M, CG> {
     fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
         self.0.context.compiler.set_u0(
             y.as_mut_slice(),
@@ -298,14 +299,14 @@ impl<M: Matrix<T = T>, CG: CodegenModule> ConstantOp for DiffSlInit<'_, M, CG> {
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> ConstantOpSens for DiffSlInit<'_, M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> ConstantOpSens for DiffSlInit<'_, M, CG> {
     fn sens_mul_inplace(&self, _t: Self::T, v: &Self::V, y: &mut Self::V) {
         self.0.context.compiler.set_inputs(
             v.as_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
         );
         self.0.context.compiler.set_u0_grad(
-            self.0.context.tmp.borrow_mut().as_mut_slice(),
+            self.0.context.tmp.borrow().as_slice(),
             y.as_mut_slice(),
             self.0.context.data.borrow_mut().as_mut_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
@@ -313,7 +314,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> ConstantOpSens for DiffSlInit<'_, M, C
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> ConstantOpSensAdjoint for DiffSlInit<'_, M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> ConstantOpSensAdjoint for DiffSlInit<'_, M, CG> {
     fn sens_transpose_mul_inplace(&self, _t: Self::T, v: &Self::V, y: &mut Self::V) {
         // copy v to tmp2
         let mut tmp2 = self.0.context.tmp2.borrow_mut();
@@ -335,7 +336,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> ConstantOpSensAdjoint for DiffSlInit<'
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlRoot<'_, M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> NonLinearOp for DiffSlRoot<'_, M, CG> {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
         self.0.context.compiler.calc_stop(
             t,
@@ -346,13 +347,13 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlRoot<'_, M, CG> 
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpJacobian for DiffSlRoot<'_, M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> NonLinearOpJacobian for DiffSlRoot<'_, M, CG> {
     fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
         y.fill(0.0);
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlOut<'_, M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> NonLinearOp for DiffSlOut<'_, M, CG> {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
         self.0.context.compiler.calc_out(
             t,
@@ -363,7 +364,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlOut<'_, M, CG> {
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpJacobian for DiffSlOut<'_, M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> NonLinearOpJacobian for DiffSlOut<'_, M, CG> {
     fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         // init ddata with all zero except for out
         let mut ddata = self.0.context.ddata.borrow_mut();
@@ -380,7 +381,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpJacobian for DiffSlOut<'_, 
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpAdjoint for DiffSlOut<'_, M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> NonLinearOpAdjoint for DiffSlOut<'_, M, CG> {
     fn jac_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         // init ddata with all zero except for out
         let mut ddata = self.0.context.ddata.borrow_mut();
@@ -403,7 +404,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpAdjoint for DiffSlOut<'_, M
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpSens for DiffSlOut<'_, M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> NonLinearOpSens for DiffSlOut<'_, M, CG> {
     fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         // set inputs for sens_data
         self.0.context.compiler.set_inputs(
@@ -421,7 +422,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpSens for DiffSlOut<'_, M, C
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpSensAdjoint for DiffSlOut<'_, M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> NonLinearOpSensAdjoint for DiffSlOut<'_, M, CG> {
     fn sens_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         let mut sens_data = self.0.context.sens_data.borrow_mut();
         // set outputs for sens_data (zero everything except for out)
@@ -446,7 +447,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpSensAdjoint for DiffSlOut<'
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlRhs<'_, M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> NonLinearOp for DiffSlRhs<'_, M, CG> {
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
         self.0.context.compiler.rhs(
             t,
@@ -457,7 +458,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOp for DiffSlRhs<'_, M, CG> {
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpJacobian for DiffSlRhs<'_, M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> NonLinearOpJacobian for DiffSlRhs<'_, M, CG> {
     fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         let tmp = self.0.context.tmp.borrow();
         self.0.context.compiler.rhs_grad(
@@ -483,7 +484,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpJacobian for DiffSlRhs<'_, 
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpAdjoint for DiffSlRhs<'_, M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> NonLinearOpAdjoint for DiffSlRhs<'_, M, CG> {
     fn jac_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         // copy v to tmp2
         let mut tmp2 = self.0.context.tmp2.borrow_mut();
@@ -521,7 +522,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpAdjoint for DiffSlRhs<'_, M
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpSens for DiffSlRhs<'_, M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> NonLinearOpSens for DiffSlRhs<'_, M, CG> {
     fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         let tmp = self.0.context.tmp.borrow();
         self.0.context.compiler.set_inputs(
@@ -539,7 +540,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpSens for DiffSlRhs<'_, M, C
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpSensAdjoint for DiffSlRhs<'_, M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> NonLinearOpSensAdjoint for DiffSlRhs<'_, M, CG> {
     fn sens_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         // todo: would rhs_srgrad ever use rr? I don't think so, but need to check
         let tmp = self.0.context.tmp.borrow();
@@ -566,7 +567,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> NonLinearOpSensAdjoint for DiffSlRhs<'
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> LinearOp for DiffSlMass<'_, M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> LinearOp for DiffSlMass<'_, M, CG> {
     fn gemv_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
         let mut tmp = self.0.context.tmp.borrow_mut();
         self.0.context.compiler.mass(
@@ -592,7 +593,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> LinearOp for DiffSlMass<'_, M, CG> {
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> LinearOpTranspose for DiffSlMass<'_, M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> LinearOpTranspose for DiffSlMass<'_, M, CG> {
     fn gemv_transpose_inplace(&self, x: &Self::V, t: Self::T, beta: Self::T, y: &mut Self::V) {
         // scale y by beta
         y.mul_assign(Scale(beta));
@@ -626,7 +627,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> LinearOpTranspose for DiffSlMass<'_, M
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> Op for DiffSl<M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> Op for DiffSl<M, CG> {
     type M = M;
     type T = T;
     type V = M::V;
@@ -646,7 +647,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> Op for DiffSl<M, CG> {
     }
 }
 
-impl<'a, M: Matrix<T = T>, CG: CodegenModule> OdeEquationsRef<'a> for DiffSl<M, CG> {
+impl<'a, M: MatrixHost<T = T>, CG: CodegenModule> OdeEquationsRef<'a> for DiffSl<M, CG> {
     type Mass = DiffSlMass<'a, M, CG>;
     type Rhs = DiffSlRhs<'a, M, CG>;
     type Root = DiffSlRoot<'a, M, CG>;
@@ -654,7 +655,7 @@ impl<'a, M: Matrix<T = T>, CG: CodegenModule> OdeEquationsRef<'a> for DiffSl<M, 
     type Out = DiffSlOut<'a, M, CG>;
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> OdeEquations for DiffSl<M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModule> OdeEquations for DiffSl<M, CG> {
     fn rhs(&self) -> DiffSlRhs<'_, M, CG> {
         DiffSlRhs(self)
     }

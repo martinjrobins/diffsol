@@ -4,7 +4,8 @@ use super::default_solver::DefaultSolver;
 use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 use crate::error::DiffsolError;
 use crate::scalar::{IndexType, Scalar, Scale};
-use crate::{ColMajBlock, FaerLU};
+use crate::FaerLU;
+use crate::VectorIndex;
 use crate::{Dense, DenseRef, Vector};
 
 use faer::{get_global_parallelism, unzip, zip, Accum};
@@ -122,6 +123,14 @@ impl<T: Scalar> DenseMatrix for Mat<T> {
     type View<'a> = MatRef<'a, T>;
     type ViewMut<'a> = MatMut<'a, T>;
 
+    fn from_vec(nrows: IndexType, ncols: IndexType, data: Vec<Self::T>) -> Self {
+        Self::from_fn(nrows, ncols, |i, j| data[i + j * nrows])
+    }
+
+    fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {
+        self[(i, j)]
+    }
+
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T) {
         self.mul_assign(faer::Scale(beta));
         matmul(
@@ -139,6 +148,10 @@ impl<T: Scalar> DenseMatrix for Mat<T> {
 
     fn columns_mut(&mut self, start: usize, ncols: usize) -> MatMut<'_, T> {
         self.get_mut(0..self.nrows(), start..ncols)
+    }
+
+    fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T) {
+        self[(i, j)] = value;
     }
 
     fn column(&self, i: usize) -> ColRef<'_, T> {
@@ -174,8 +187,16 @@ impl<T: Scalar> Matrix for Mat<T> {
         None
     }
 
-    fn copy_block_from(&mut self, src_indices: &<Self::V as Vector>::Index, parent: &Self) {
-        ColMajBlock::<<Self::V as Vector>::Index>::copy_block_from(self, parent, src_indices);
+    fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
+        assert_eq!(indices.len(), self.nrows() * self.ncols());
+        let mut idx = indices.iter().peekable();
+        for j in 0..self.ncols() {
+            let other_col = other.column(*idx.peek().unwrap() / other.nrows());
+            for self_ij in self.column_mut(j).iter_mut() {
+                let other_i = idx.next().unwrap() % other.nrows();
+                *self_ij = other_col[other_i];
+            }
+        }
     }
 
     fn set_data_with_indices(
@@ -231,8 +252,25 @@ impl<T: Scalar> Matrix for Mat<T> {
         let dim = v.nrows();
         Self::from_fn(dim, dim, |i, j| if i == j { v[i] } else { T::zero() })
     }
-    fn diagonal(&self) -> Self::V {
-        self.diagonal().column_vector().to_owned()
+    fn partition_indices_by_zero_diagonal(
+        &self,
+    ) -> (<Self::V as Vector>::Index, <Self::V as Vector>::Index) {
+        let diagonal = self.diagonal().column_vector();
+        let (zero_indices, nonzero_indices) = diagonal.iter().enumerate().fold(
+            (Vec::new(), Vec::new()),
+            |(mut zero_indices, mut nonzero_indices), (i, &v)| {
+                if v.is_zero() {
+                    zero_indices.push(i);
+                } else {
+                    nonzero_indices.push(i);
+                }
+                (zero_indices, nonzero_indices)
+            },
+        );
+        (
+            <Self::V as Vector>::Index::from_vec(zero_indices),
+            <Self::V as Vector>::Index::from_vec(nonzero_indices),
+        )
     }
     fn set_column(&mut self, j: IndexType, v: &Self::V) {
         self.column_mut(j).copy_from(v);
@@ -273,5 +311,10 @@ mod tests {
         assert_eq!(a[(0, 1)], 4.0);
         assert_eq!(a[(1, 0)], 3.0);
         assert_eq!(a[(1, 1)], 10.0);
+    }
+
+    #[test]
+    fn test_partition_indices_by_zero_diagonal() {
+        super::super::tests::test_partition_indices_by_zero_diagonal::<Mat<f64>>();
     }
 }

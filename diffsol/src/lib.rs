@@ -158,15 +158,6 @@ pub use linear_solver::{faer::sparse_lu::FaerSparseLU, FaerLU, NalgebraLU};
 
 pub use matrix::sparse_faer::SparseColMat;
 
-#[cfg(feature = "sundials")]
-pub use matrix::sundials::SundialsMatrix;
-
-#[cfg(feature = "sundials")]
-pub use vector::sundials::SundialsVector;
-
-#[cfg(feature = "sundials")]
-pub use linear_solver::sundials::SundialsLinearSolver;
-
 #[cfg(feature = "suitesparse")]
 pub use linear_solver::suitesparse::klu::KLU;
 
@@ -181,7 +172,7 @@ use matrix::extract_block::{ColMajBlock, CscBlock};
 pub use matrix::{default_solver::DefaultSolver, Matrix};
 use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
-    DenseMatrix, MatrixCommon, MatrixRef, MatrixView, MatrixViewMut,
+    DenseMatrix, MatrixCommon, MatrixHost, MatrixRef, MatrixView, MatrixViewMut,
 };
 use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus, root::RootFinder,
@@ -218,7 +209,7 @@ use op::{
 };
 use scalar::{IndexType, Scalar, Scale};
 pub use vector::DefaultDenseMatrix;
-use vector::{Vector, VectorCommon, VectorIndex, VectorRef, VectorView, VectorViewMut};
+use vector::{Vector, VectorCommon, VectorHost, VectorIndex, VectorRef, VectorView, VectorViewMut};
 
 pub use scalar::scale;
 

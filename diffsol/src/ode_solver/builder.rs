@@ -690,11 +690,7 @@ where
                 )
             ))
         } else {
-            let mut v = M::V::zeros(nstates);
-            for (i, &a) in atol.iter().enumerate() {
-                v[i] = a;
-            }
-            Ok(v)
+            Ok(M::V::from_vec(atol))
         }
     }
 
@@ -729,11 +725,7 @@ where
     }
 
     fn build_p(p: Vec<M::T>) -> M::V {
-        let mut v = M::V::zeros(p.len());
-        for (i, &p) in p.iter().enumerate() {
-            v[i] = p;
-        }
-        v
+        M::V::from_vec(p)
     }
 
     #[allow(clippy::type_complexity)]

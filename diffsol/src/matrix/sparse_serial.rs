@@ -152,17 +152,16 @@ impl<T: Scalar> MatrixSparsity<CscMatrix<T>> for SparsityPattern {
 }
 
 impl<'a, T: Scalar> MatrixSparsityRef<'a, CscMatrix<T>> for &'a SparsityPattern {
-    fn split<F: Fn(IndexType) -> bool>(
+    fn split(
         &self,
-        f: F,
-        transpose: bool,
+        indices: &<DVector<T> as Vector>::Index,
     ) -> [(
         SparsityPattern,
         <<CscMatrix<T> as MatrixCommon>::V as Vector>::Index,
     ); 4] {
         let col_ptrs = self.major_offsets();
         let row_idx = self.minor_indices();
-        let (ul_blk, ur_blk, ll_blk, lr_blk) = CscBlock::split(row_idx, col_ptrs, f, transpose);
+        let (ul_blk, ur_blk, ll_blk, lr_blk) = CscBlock::split(row_idx, col_ptrs, indices);
         let ul_sym = SparsityPattern::try_from_offsets_and_indices(
             ul_blk.ncols,
             ul_blk.nrows,
@@ -239,8 +238,12 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
         Some(self.pattern())
     }
 
-    fn copy_block_from(&mut self, src_indices: &<Self::V as Vector>::Index, parent: &Self) {
-        CscBlock::copy_block_from(self.values_mut(), parent.values(), src_indices);
+    fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
+        let dst_data = self.values_mut();
+        let src_data = other.values();
+        for (dst_i, idx) in dst_data.iter_mut().zip(indices.iter()) {
+            *dst_i = src_data[*idx];
+        }
     }
 
     fn set_data_with_indices(
@@ -298,12 +301,29 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
         }
         CscMatrix::from(&coo)
     }
-    fn diagonal(&self) -> Self::V {
-        let mut ret = DVector::zeros(self.nrows());
-        for (i, _j, &v) in self.diagonal_as_csc().triplet_iter() {
-            ret[i] = v;
+    fn partition_indices_by_zero_diagonal(
+        &self,
+    ) -> (<Self::V as Vector>::Index, <Self::V as Vector>::Index) {
+        let mut zero_diagonal_indices = Vec::new();
+        let mut non_zero_diagonal_indices = Vec::new();
+        'outer: for j in 0..self.ncols() {
+            let col = self.col(j);
+            let row_indices = col.row_indices();
+            let values = col.values();
+            for (&i, v) in row_indices.iter().zip(values.iter()) {
+                if i == j && !v.is_zero() {
+                    non_zero_diagonal_indices.push(j);
+                    continue 'outer;
+                } else if i > j {
+                    break;
+                }
+            }
+            zero_diagonal_indices.push(j);
         }
-        ret
+        (
+            <Self::V as Vector>::Index::from_vec(zero_diagonal_indices),
+            <Self::V as Vector>::Index::from_vec(non_zero_diagonal_indices),
+        )
     }
     fn set_column(&mut self, j: IndexType, v: &Self::V) {
         // check v is the same length as the column
@@ -330,5 +350,15 @@ impl<T: Scalar> Matrix for CscMatrix<T> {
         assert_eq!(sparsity.major_dim(), ncols);
         let values = vec![T::zero(); sparsity.nnz()];
         CscMatrix::try_from_pattern_and_values(sparsity.clone(), values).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use nalgebra_sparse::CscMatrix;
+
+    #[test]
+    fn test_partition_indices_by_zero_diagonal() {
+        super::super::tests::test_partition_indices_by_zero_diagonal::<CscMatrix<f64>>();
     }
 }

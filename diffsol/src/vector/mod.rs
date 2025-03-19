@@ -10,17 +10,15 @@ use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAss
 mod faer_serial;
 #[cfg(feature = "nalgebra")]
 mod nalgebra_serial;
-#[cfg(feature = "sundials")]
-pub mod sundials;
 
-pub trait VectorIndex: Sized + Index<IndexType, Output = IndexType> + Debug + Clone {
+pub trait VectorIndex: Sized + Debug + Clone {
     fn zeros(len: IndexType) -> Self;
     fn len(&self) -> IndexType;
     fn clone_as_vec(&self) -> Vec<IndexType>;
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn from_slice(slice: &[IndexType]) -> Self;
+    fn from_vec(v: Vec<IndexType>) -> Self;
 }
 
 pub trait VectorCommon: Sized + Debug {
@@ -79,19 +77,12 @@ pub trait VectorViewMut<'a>:
     + for<'b> VectorMutOpsByValue<&'b Self::View>
     + for<'b> VectorMutOpsByValue<&'b Self::Owned>
     + MulAssign<Scale<Self::T>>
-    + Index<IndexType, Output = Self::T>
-    + IndexMut<IndexType, Output = Self::T>
 {
     type Owned;
     type View;
     type Index: VectorIndex;
     fn copy_from(&mut self, other: &Self::Owned);
     fn copy_from_view(&mut self, other: &Self::View);
-    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
-        for i in 0..indices.len() {
-            self[indices[i]] = other[indices[i]];
-        }
-    }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T);
 }
 
@@ -101,21 +92,17 @@ pub trait VectorView<'a>:
     + for<'b> VectorOpsByValue<&'b Self::Owned, Self::Owned>
     + for<'b> VectorOpsByValue<&'b Self, Self::Owned>
     + Mul<Scale<Self::T>, Output = Self::Owned>
-    + Index<IndexType, Output = Self::T>
 {
     type Owned;
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T;
-    fn norm(&self) -> Self::T;
     fn into_owned(self) -> Self::Owned;
 }
 
 pub trait Vector:
     VectorOpsByValue<Self>
     + for<'b> VectorOpsByValue<&'b Self>
-    // TODO: commenting out these because they cause a compiler hang (https://github.com/martinjrobins/diffsol/issues/3)
-    // TODO: replace when this is fixed
-    //+ for<'a> VectorOpsByValue<Self::View<'a>>
-    //+ for<'a, 'b> VectorOpsByValue<&'b Self::View<'a>>
+    + for<'a> VectorOpsByValue<Self::View<'a>>
+    + for<'a, 'b> VectorOpsByValue<&'b Self::View<'a>>
     + Mul<Scale<Self::T>, Output = Self>
     + Div<Scale<Self::T>, Output = Self>
     + VectorMutOpsByValue<Self>
@@ -123,8 +110,6 @@ pub trait Vector:
     + for<'b> VectorMutOpsByValue<&'b Self>
     + for<'a, 'b> VectorMutOpsByValue<&'b Self::View<'a>>
     + MulAssign<Scale<Self::T>>
-    + Index<IndexType, Output = Self::T>
-    + IndexMut<IndexType, Output = Self::T>
     + Clone
 {
     type View<'a>: VectorView<'a, T = Self::T, Owned = Self>
@@ -134,63 +119,103 @@ pub trait Vector:
     where
         Self: 'a;
     type Index: VectorIndex;
-    fn norm(&self) -> Self::T;
+
+    /// set the value at index `index` to `value`, might be slower than using `IndexMut`
+    /// if the vector is not on the host
+    fn set_index(&mut self, index: IndexType, value: Self::T);
+
+    /// get the value at index `index`, might be slower than using `Index`
+    /// if the vector is not on the host
+    fn get_index(&self, index: IndexType) -> Self::T;
+
+    /// returns (\sum_i (x_i)^k)^(1/k)
+    fn norm(&self, k: i32) -> Self::T;
+
+    /// returns \sum_i (x_i / (|y_i| * rtol + atol_i))^2
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T;
+
+    /// get the length of the vector
     fn len(&self) -> IndexType;
+
+    /// check if the vector is empty
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn map_inplace(&mut self, f: impl Fn(Self::T) -> Self::T);
+
+    /// create a vector of size `nstates` with all elements set to `value`
     fn from_element(nstates: usize, value: Self::T) -> Self;
+
+    /// create a vector of size `nstates` with all elements set to zero
     fn zeros(nstates: usize) -> Self {
         Self::from_element(nstates, Self::T::zero())
     }
-    fn fill(&mut self, value: Self::T) {
-        self.map_inplace(|_| value);
-    }
+
+    /// fill the vector with `value`
+    fn fill(&mut self, value: Self::T);
+
+    /// create a view of the vector
     fn as_view(&self) -> Self::View<'_>;
+
+    /// create a mutable view of the vector
     fn as_view_mut(&mut self) -> Self::ViewMut<'_>;
-    fn as_slice(&self) -> &[Self::T];
-    fn as_mut_slice(&mut self) -> &mut [Self::T];
+
+    /// copy the values from `other` to `self`
     fn copy_from(&mut self, other: &Self);
+
+    /// copy the values from `other` to `self`
     fn copy_from_view(&mut self, other: &Self::View<'_>);
-    fn copy_from_slice(&mut self, slice: &[Self::T]);
+
+    /// create a vector from a Vec
+    /// TODO: would prefer to use From trait but not implemented for faer::Col
     fn from_vec(vec: Vec<Self::T>) -> Self;
+
+    /// convert the vector to a Vec
+    /// TODO: would prefer to use Into trait but not implemented for faer::Col
+    fn clone_as_vec(&self) -> Vec<Self::T>;
+
+    /// axpy operation: self = alpha * x + beta * self
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T);
+
+    /// axpy operation: self = alpha * x + beta * self
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T);
-    fn add_scalar_mut(&mut self, scalar: Self::T);
+
+    /// element-wise multiplication
     fn component_mul_assign(&mut self, other: &Self);
+
+    /// element-wise division
     fn component_div_assign(&mut self, other: &Self);
-    fn partition_indices<F: Fn(Self::T) -> bool>(&self, f: F) -> (Self::Index, Self::Index);
-    fn binary_fold<B, F>(&self, other: &Self, init: B, f: F) -> B
-    where
-        F: Fn(B, Self::T, Self::T, IndexType) -> B;
-    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
-        for i in 0..indices.len() {
-            self[indices[i]] = value;
-        }
-    }
+
+    /// given two vectors `g0=self` and `g1`, return:
+    /// - `true` if a root is found in g1 (i.e. g1_i == 0)
+    /// - for all values of i where a zero crossing is found (i.e. g0_i * g1_i < 0), return:
+    ///     - max_i(abs(g1_i / (g1_i - g0_i))), 0 otherwise
+    ///     - the index i at the maximum value, -1 otherwise
+    fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32);
+
+    /// assign `value` to the elements of `self` at the indices specified by `indices`
+    /// i.e. `self[indices[i]] = value` for all i
+    fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T);
+
     /// copy from `other` at the indices specified by `indices`
     /// generaly `self` and `other` have the same length
-    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
-        for i in 0..indices.len() {
-            self[indices[i]] = other[indices[i]];
-        }
-    }
-    fn gather(&mut self, other: &Self, indices: &Self::Index) {
-        for i in 0..indices.len() {
-            self[i] = other[indices[i]];
-        }
-    }
-    fn scatter(&self, indices: &Self::Index, other: &mut Self) {
-        for i in 0..indices.len() {
-            other[indices[i]] = self[i];
-        }
-    }
+    /// i.e. `self[indices[i]] = other[indices[i]]` for all i
+    fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index);
+
+    /// gather values from `other` at the indices specified by `indices`
+    /// i.e. `self[i] = other[indices[i]]` for all i
+    fn gather(&mut self, other: &Self, indices: &Self::Index);
+
+    /// scatter values from `self` to `other` at the indices specified by `indices`
+    /// i.e. `other[indices[i]] = self[i]` for all i
+    fn scatter(&self, indices: &Self::Index, other: &mut Self);
+
+    /// assert that `self` is equal to `other` within a tolerance `tol`
     fn assert_eq_st(&self, other: &Self, tol: Self::T) {
         let tol = Self::from_element(self.len(), tol);
         self.assert_eq(other, &tol);
     }
+
+    /// assert that `self` is equal to `other` using the same norm used by the solvers
     fn assert_eq_norm(&self, other: &Self, atol: &Self, rtol: Self::T, factor: Self::T) {
         let error = self.clone() - other.clone();
         let error_norm = error.squared_norm(other, atol, rtol).sqrt();
@@ -203,6 +228,7 @@ pub trait Vector:
         );
     }
 
+    /// assert that `self` is equal to `other` within a vector tolerance `tol`
     fn assert_eq(&self, other: &Self, tol: &Self) {
         assert_eq!(
             self.len(),
@@ -211,26 +237,29 @@ pub trait Vector:
             self.len(),
             other.len()
         );
+        let s = self.clone_as_vec();
+        let other = other.clone_as_vec();
+        let tol = tol.clone_as_vec();
         for i in 0..self.len() {
-            if num_traits::abs(self[i] - other[i]) > tol[i] {
+            if num_traits::abs(s[i] - other[i]) > tol[i] {
                 eprintln!(
                     "Vector element mismatch at index {}: {} != {}",
-                    i, self[i], other[i]
+                    i, s[i], other[i]
                 );
-                if self.len() <= 3 {
-                    eprintln!("left: {:?}", self);
+                if s.len() <= 3 {
+                    eprintln!("left: {:?}", s);
                     eprintln!("right: {:?}", other);
                 } else if i == 0 {
                     eprintln!(
                         "left: [{}, {}, {}, ...] != [{}, {}, {}, ...]",
-                        self[0], self[1], self[2], other[0], other[1], other[2]
+                        s[0], s[1], s[2], other[0], other[1], other[2]
                     );
-                } else if i == self.len() - 1 {
+                } else if i == s.len() - 1 {
                     eprintln!(
                         "left: [..., {}, {}, {}] != [..., {}, {}, {}]",
-                        self[i - 2],
-                        self[i - 1],
-                        self[i],
+                        s[i - 2],
+                        s[i - 1],
+                        s[i],
                         other[i - 2],
                         other[i - 1],
                         other[i]
@@ -238,9 +267,9 @@ pub trait Vector:
                 } else {
                     eprintln!(
                         "left: [..., {}, {}, {}, ...] != [..., {}, {}, {}, ...]",
-                        self[i - 1],
-                        self[i],
-                        self[i + 1],
+                        s[i - 1],
+                        s[i],
+                        s[i + 1],
                         other[i - 1],
                         other[i],
                         other[i + 1]
@@ -248,13 +277,53 @@ pub trait Vector:
                 }
                 panic!(
                     "Vector element mismatch at index {}: {} != {}",
-                    i, self[i], other[i]
+                    i, s[i], other[i]
                 );
             }
         }
     }
 }
 
+pub trait VectorHost:
+    Vector + Index<IndexType, Output = Self::T> + IndexMut<IndexType, Output = Self::T>
+{
+    /// get the vector as a slice
+    /// TODO: not compatible with gpu vectors? but used for diffsl api
+    fn as_slice(&self) -> &[Self::T];
+
+    /// get the vector as a mut slice
+    /// TODO: not compatible with gpu vectors? but used for diffsl api
+    fn as_mut_slice(&mut self) -> &mut [Self::T];
+}
+
 pub trait DefaultDenseMatrix: Vector {
     type M: DenseMatrix<V = Self, T = Self::T>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Vector;
+
+    pub fn test_root_finding<V: Vector>() {
+        let g0 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()]);
+        let g1 = V::from_vec(vec![1.0.into(), 2.0.into(), 3.0.into()]);
+        let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
+        assert!(!found_root);
+        assert_eq!(max_frac, V::T::from(0.5));
+        assert_eq!(max_frac_index, 1);
+
+        let g0 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()]);
+        let g1 = V::from_vec(vec![1.0.into(), 2.0.into(), 0.0.into()]);
+        let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
+        assert!(found_root);
+        assert_eq!(max_frac, V::T::from(0.5));
+        assert_eq!(max_frac_index, 1);
+
+        let g0 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()]);
+        let g1 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()]);
+        let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
+        assert!(!found_root);
+        assert_eq!(max_frac, V::T::from(0.0));
+        assert_eq!(max_frac_index, -1);
+    }
 }

@@ -1,13 +1,13 @@
 use crate::{
-    matrix::Matrix, ode_solver::problem::OdeSolverSolution, OdeBuilder, OdeEquationsImplicit,
-    OdeEquationsSens, OdeSolverProblem, Vector,
+    matrix::Matrix, ode_solver::problem::OdeSolverSolution, MatrixHost, OdeBuilder,
+    OdeEquationsImplicit, OdeEquationsSens, OdeSolverProblem, Vector,
 };
 use num_traits::Zero;
 
 #[cfg(feature = "diffsl")]
 #[allow(clippy::type_complexity)]
 pub fn robertson_diffsl_problem<
-    M: Matrix<T = f64>,
+    M: MatrixHost<T = f64>,
     CG: diffsl::execution::module::CodegenModule,
 >() -> (
     OdeSolverProblem<impl crate::OdeEquationsAdjoint<M = M, V = M::V, T = M::T>>,
@@ -63,12 +63,12 @@ pub fn robertson_diffsl_problem<
 //*      dy1/dt = -.04*y1 + 1.e4*y2*y3
 //*      dy2/dt = .04*y1 - 1.e4*y2*y3 - 3.e7*y2**2
 //*         0   = y1 + y2 + y3 - 1
-fn robertson_rhs<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
+fn robertson_rhs<M: MatrixHost>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
     y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
     y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
     y[2] = x[0] + x[1] + x[2] - M::T::from(1.0);
 }
-fn robertson_jac_mul<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+fn robertson_jac_mul<M: MatrixHost>(x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
     y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
     y[1] = p[0] * v[0]
         - p[1] * v[1] * x[2]
@@ -77,13 +77,13 @@ fn robertson_jac_mul<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut 
     y[2] = v[0] + v[1] + v[2];
 }
 
-fn robertson_sens_mul<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
+fn robertson_sens_mul<M: MatrixHost>(x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
     y[0] = -v[0] * x[0] + v[1] * x[1] * x[2];
     y[1] = v[0] * x[0] - v[1] * x[1] * x[2] - v[2] * x[1] * x[1];
     y[2] = M::T::zero();
 }
 
-fn robertson_mass<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, beta: M::T, y: &mut M::V) {
+fn robertson_mass<M: MatrixHost>(x: &M::V, _p: &M::V, _t: M::T, beta: M::T, y: &mut M::V) {
     y[0] = x[0] + beta * y[0];
     y[1] = x[1] + beta * y[1];
     y[2] = beta * y[2];
@@ -98,7 +98,7 @@ fn robertson_init_sens<M: Matrix>(_p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V) 
 }
 
 #[allow(clippy::type_complexity)]
-pub fn robertson<M: Matrix>(
+pub fn robertson<M: MatrixHost>(
     use_coloring: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
@@ -146,7 +146,7 @@ fn soln<V: Vector>() -> OdeSolverSolution<V> {
 }
 
 #[allow(clippy::type_complexity)]
-pub fn robertson_sens<M: Matrix + 'static>() -> (
+pub fn robertson_sens<M: MatrixHost + 'static>() -> (
     OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T>>,
     OdeSolverSolution<M::V>,
 ) {

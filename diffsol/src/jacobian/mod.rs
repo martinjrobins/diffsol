@@ -15,6 +15,9 @@ pub mod greedy_coloring;
 macro_rules! gen_find_non_zeros_nonlinear {
     ($name:ident, $op_fn:ident, $op_trait:ident) => {
         /// Find the non-zero entries of the $name matrix of a non-linear operator.
+        /// TODO: This function is not efficient for non-host vectors and could be part of the Vector trait
+        ///       to allow for more efficient implementations. It's ok for now since this is only used once
+        ///       during the setup phase.
         pub fn $name<F: NonLinearOp + $op_trait + ?Sized>(
             op: &F,
             x: &F::V,
@@ -24,15 +27,22 @@ macro_rules! gen_find_non_zeros_nonlinear {
             let mut col = F::V::zeros(op.nout());
             let mut triplets = Vec::with_capacity(op.nstates());
             for j in 0..op.nstates() {
-                v[j] = F::T::NAN;
+                v.set_index(j, F::T::NAN);
                 op.$op_fn(x, t, &v, &mut col);
                 for i in 0..op.nout() {
-                    if col[i].is_nan() {
+                    if col.get_index(i).is_nan() {
                         triplets.push((i, j));
                     }
-                    col[i] = F::T::zero();
+                    col.set_index(i, F::T::zero());
                 }
-                v[j] = F::T::zero();
+                // OR:
+                //col.clone_as_vec().into_iter().for_each(|v| {
+                //    if v.is_nan() {
+                //        triplets.push((0, 0));
+                //    }
+                //});
+                col.fill(F::T::zero());
+                v.set_index(j, F::T::zero());
             }
             triplets
         }
@@ -59,20 +69,29 @@ gen_find_non_zeros_nonlinear!(
 macro_rules! gen_find_non_zeros_linear {
     ($name:ident, $op_fn:ident $(, $op_trait:tt )?) => {
         /// Find the non-zero entries of the $name matrix of a non-linear operator.
+        /// TODO: This function is not efficient for non-host vectors and could be part of the Vector trait
+        ///       to allow for more efficient implementations. It's ok for now since this is only used once
+        ///       during the setup phase.
         pub fn $name<F: LinearOp + ?Sized $(+ $op_trait)?>(op: &F, t: F::T) -> Vec<(usize, usize)> {
             let mut v = F::V::zeros(op.nstates());
             let mut col = F::V::zeros(op.nout());
             let mut triplets = Vec::with_capacity(op.nstates());
             for j in 0..op.nstates() {
-                v[j] = F::T::NAN;
+                v.set_index(j, F::T::NAN);
                 op.$op_fn(&v, t, &mut col);
                 for i in 0..op.nout() {
-                    if col[i].is_nan() {
+                    if col.get_index(i).is_nan() {
                         triplets.push((i, j));
                     }
-                    col[i] = F::T::zero();
+                    col.set_index(i, F::T::zero());
                 }
-                v[j] = F::T::zero();
+                // OR:
+                //col.clone_as_vec().into_iter().for_each(|v| {
+                //    if v.is_nan() {
+                //        triplets.push((0, 0));
+                //    }
+                //});
+                v.set_index(j, F::T::zero());
             }
             triplets
         }
@@ -114,10 +133,10 @@ impl<M: Matrix> JacobianColoring<M> {
                 }
             }
             let dst_indices = sparsity.get_index(indices.as_slice());
-            let src_indices = <M::V as Vector>::Index::from_slice(rows.as_slice());
+            let src_indices = <M::V as Vector>::Index::from_vec(rows);
             let unique_cols: HashSet<_> = HashSet::from_iter(cols.iter().cloned());
             let unique_cols = unique_cols.into_iter().collect::<Vec<_>>();
-            let input_indices = <M::V as Vector>::Index::from_slice(unique_cols.as_slice());
+            let input_indices = <M::V as Vector>::Index::from_vec(unique_cols);
             dst_indices_per_color.push(dst_indices);
             src_indices_per_color.push(src_indices);
             input_indices_per_color.push(input_indices);
@@ -252,7 +271,7 @@ mod tests {
         let nout = nrows;
         let f = move |x: &M::V, y: &mut M::V| {
             for (i, j, v) in triplets {
-                y[*i] += x[*j] * *v;
+                y.set_index(*i, y.get_index(*i) + x.get_index(*j) * *v);
             }
         };
         let mut ret = Closure::new(
@@ -285,7 +304,7 @@ mod tests {
         let nout = nrows;
         let f = move |x: &M::V, y: &mut M::V| {
             for (i, j, v) in triplets {
-                y[*i] += x[*j] * *v;
+                y.set_index(*i, y.get_index(*i) + x.get_index(*j) * *v);
             }
         };
         let mut ret = LinearClosure::new(
