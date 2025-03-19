@@ -158,15 +158,6 @@ pub use linear_solver::{faer::sparse_lu::FaerSparseLU, FaerLU, NalgebraLU};
 
 pub use matrix::sparse_faer::SparseColMat;
 
-#[cfg(feature = "sundials")]
-pub use matrix::sundials::SundialsMatrix;
-
-#[cfg(feature = "sundials")]
-pub use vector::sundials::SundialsVector;
-
-#[cfg(feature = "sundials")]
-pub use linear_solver::sundials::SundialsLinearSolver;
-
 #[cfg(feature = "suitesparse")]
 pub use linear_solver::suitesparse::klu::KLU;
 

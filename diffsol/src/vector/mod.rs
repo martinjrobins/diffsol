@@ -10,8 +10,6 @@ use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAss
 mod faer_serial;
 #[cfg(feature = "nalgebra")]
 mod nalgebra_serial;
-#[cfg(feature = "sundials")]
-pub mod sundials;
 
 pub trait VectorIndex: Sized + Debug + Clone {
     fn zeros(len: IndexType) -> Self;

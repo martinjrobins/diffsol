@@ -24,9 +24,6 @@ pub mod extract_block;
 mod sparse_serial;
 pub mod sparsity;
 
-#[cfg(feature = "sundials")]
-pub mod sundials;
-
 pub trait MatrixCommon: Sized + Debug {
     type V: Vector<T = Self::T>;
     type T: Scalar;

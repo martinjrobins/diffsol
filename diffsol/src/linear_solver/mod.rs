@@ -6,9 +6,6 @@ pub mod nalgebra;
 #[cfg(feature = "faer")]
 pub mod faer;
 
-#[cfg(feature = "sundials")]
-pub mod sundials;
-
 #[cfg(feature = "suitesparse")]
 pub mod suitesparse;
 
