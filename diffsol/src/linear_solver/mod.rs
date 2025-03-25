@@ -58,6 +58,7 @@ pub mod tests {
         scalar::scale,
         vector::VectorRef,
         LinearSolver, Matrix, NonLinearOpJacobian, Vector,
+        Op,
     };
     use num_traits::{One, Zero};
 
@@ -77,7 +78,7 @@ pub mod tests {
         let diagonal = M::V::from_vec(vec![2.0.into(), 2.0.into()]);
         let jac1 = M::from_diagonal(&diagonal);
         let jac2 = M::from_diagonal(&diagonal);
-        let p = M::V::zeros(0);
+        let p = M::V::zeros(0, Default::default());
         let mut op = Closure::new(
             // f = J * x
             move |x, _p, _t, y| jac1.gemv(M::T::one(), x, M::T::zero(), y),
@@ -86,12 +87,12 @@ pub mod tests {
             2,
             p.len(),
         );
-        op.calculate_sparsity(&M::V::from_element(2, M::T::one()), M::T::zero(), &p);
+        op.calculate_sparsity(&M::V::from_element(2, M::T::one(), op.context()), M::T::zero(), &p);
         let rtol = M::T::from(1e-6);
-        let atol = M::V::from_vec(vec![1e-6.into(), 1e-6.into()]);
+        let atol = M::V::from_vec(vec![1e-6.into(), 1e-6.into()], op.context());
         let solns = vec![LinearSolveSolution::new(
-            M::V::from_vec(vec![2.0.into(), 4.0.into()]),
-            M::V::from_vec(vec![1.0.into(), 2.0.into()]),
+            M::V::from_vec(vec![2.0.into(), 4.0.into()], op.context()),
+            M::V::from_vec(vec![1.0.into(), 2.0.into()], op.context()),
         )];
         (op, rtol, atol, solns)
     }

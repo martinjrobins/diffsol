@@ -23,8 +23,8 @@ macro_rules! gen_find_non_zeros_nonlinear {
             x: &F::V,
             t: F::T,
         ) -> Vec<(usize, usize)> {
-            let mut v = F::V::zeros(op.nstates());
-            let mut col = F::V::zeros(op.nout());
+            let mut v = F::V::zeros(op.nstates(), op.context());
+            let mut col = F::V::zeros(op.nout(), op.context());
             let mut triplets = Vec::with_capacity(op.nstates());
             for j in 0..op.nstates() {
                 v.set_index(j, F::T::NAN);
@@ -73,8 +73,8 @@ macro_rules! gen_find_non_zeros_linear {
         ///       to allow for more efficient implementations. It's ok for now since this is only used once
         ///       during the setup phase.
         pub fn $name<F: LinearOp + ?Sized $(+ $op_trait)?>(op: &F, t: F::T) -> Vec<(usize, usize)> {
-            let mut v = F::V::zeros(op.nstates());
-            let mut col = F::V::zeros(op.nout());
+            let mut v = F::V::zeros(op.nstates(), op.context());
+            let mut col = F::V::zeros(op.nout(), op.context());
             let mut triplets = Vec::with_capacity(op.nstates());
             for j in 0..op.nstates() {
                 v.set_index(j, F::T::NAN);
@@ -165,8 +165,8 @@ impl<M: Matrix> JacobianColoring<M> {
         t: F::T,
         y: &mut F::M,
     ) {
-        let mut v = F::V::zeros(op.nstates());
-        let mut col = F::V::zeros(op.nout());
+        let mut v = F::V::zeros(op.nstates(), op.context());
+        let mut col = F::V::zeros(op.nout(), op.context());
         for c in 0..self.dst_indices_per_color.len() {
             let input = &self.input_indices_per_color[c];
             let dst_indices = &self.dst_indices_per_color[c];
@@ -185,8 +185,8 @@ impl<M: Matrix> JacobianColoring<M> {
         t: F::T,
         y: &mut F::M,
     ) {
-        let mut v = F::V::zeros(op.nstates());
-        let mut col = F::V::zeros(op.nout());
+        let mut v = F::V::zeros(op.nstates(), op.context());
+        let mut col = F::V::zeros(op.nout(), op.context());
         for c in 0..self.dst_indices_per_color.len() {
             let input = &self.input_indices_per_color[c];
             let dst_indices = &self.dst_indices_per_color[c];
@@ -205,8 +205,8 @@ impl<M: Matrix> JacobianColoring<M> {
         t: F::T,
         y: &mut F::M,
     ) {
-        let mut v = F::V::zeros(op.nstates());
-        let mut col = F::V::zeros(op.nout());
+        let mut v = F::V::zeros(op.nstates(), op.context());
+        let mut col = F::V::zeros(op.nout(), op.context());
         for c in 0..self.dst_indices_per_color.len() {
             let input = &self.input_indices_per_color[c];
             let dst_indices = &self.dst_indices_per_color[c];
@@ -224,8 +224,8 @@ impl<M: Matrix> JacobianColoring<M> {
         t: F::T,
         y: &mut F::M,
     ) {
-        let mut v = F::V::zeros(op.nstates());
-        let mut col = F::V::zeros(op.nout());
+        let mut v = F::V::zeros(op.nstates(), op.context());
+        let mut col = F::V::zeros(op.nout(), op.context());
         for c in 0..self.dst_indices_per_color.len() {
             let input = &self.input_indices_per_color[c];
             let dst_indices = &self.dst_indices_per_color[c];
@@ -287,7 +287,7 @@ mod tests {
             nout,
             p.len(),
         );
-        let y0 = M::V::zeros(nstates);
+        let y0 = M::V::zeros(nstates, p.context());
         let t0 = M::T::zero();
         ret.calculate_sparsity(&y0, t0, p);
         ret
@@ -337,11 +337,11 @@ mod tests {
                 (1, 1, M::T::one()),
             ],
         ];
-        let p = M::V::zeros(0);
+        let p = M::V::zeros(0, Default::default()); 
         for triplets in test_triplets {
             let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), &p, 2, 2);
             let op = ParameterisedOp::new(&op, &p);
-            let non_zeros = find_jacobian_non_zeros(&op, &M::V::zeros(2), M::T::zero());
+            let non_zeros = find_jacobian_non_zeros(&op, &M::V::zeros(2, p.context()), M::T::zero());
             let expect = triplets
                 .iter()
                 .map(|(i, j, _v)| (*i, *j))
@@ -377,11 +377,11 @@ mod tests {
             ],
         ];
         let expect = vec![vec![1, 1], vec![1, 2], vec![1, 1], vec![1, 2]];
-        let p = M::V::zeros(0);
+        let p = M::V::zeros(0, Default::default());
         for (triplets, expect) in test_triplets.iter().zip(expect) {
             let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), &p, 2, 2);
             let op = ParameterisedOp::new(&op, &p);
-            let non_zeros = find_jacobian_non_zeros(&op, &M::V::zeros(2), M::T::zero());
+            let non_zeros = find_jacobian_non_zeros(&op, &M::V::zeros(2, p.context()), M::T::zero());
             let ncols = op.nstates();
             let graph = nonzeros2graph(non_zeros.as_slice(), ncols);
             let coloring = color_graph_greedy(&graph);
@@ -418,11 +418,11 @@ mod tests {
         let n = 3;
 
         // test nonlinear functions
-        let p = M::V::zeros(0);
+        let p = M::V::zeros(0, Default::default());
         for triplets in test_triplets.iter() {
             let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), &p, n, n);
             let op = ParameterisedOp::new(&op, &p);
-            let y0 = M::V::zeros(n);
+            let y0 = M::V::zeros(n, p.context());
             let t0 = M::T::zero();
             let nonzeros = triplets
                 .iter()
@@ -431,16 +431,16 @@ mod tests {
             let coloring = JacobianColoring::new(&op.jacobian_sparsity().unwrap(), &nonzeros);
             let mut jac = M::new_from_sparsity(3, 3, op.jacobian_sparsity());
             coloring.jacobian_inplace(&op, &y0, t0, &mut jac);
-            let mut gemv1 = M::V::zeros(n);
-            let v = M::V::from_element(3, M::T::one());
+            let mut gemv1 = M::V::zeros(n, p.context());
+            let v = M::V::from_element(3, M::T::one(), p.context());
             op.jac_mul_inplace(&y0, t0, &v, &mut gemv1);
-            let mut gemv2 = M::V::zeros(n);
+            let mut gemv2 = M::V::zeros(n, p.context());
             jac.gemv(M::T::one(), &v, M::T::zero(), &mut gemv2);
             gemv1.assert_eq_st(&gemv2, M::T::from(1e-10));
         }
 
         // test linear functions
-        let p = M::V::zeros(0);
+        let p = M::V::zeros(0, p.context());
         for triplets in test_triplets {
             let op = helper_triplets2op_linear::<M>(triplets.as_slice(), &p, n, n);
             let op = ParameterisedOp::new(&op, &p);
@@ -452,10 +452,10 @@ mod tests {
             let coloring = JacobianColoring::new(&op.sparsity().unwrap(), &nonzeros);
             let mut jac = M::new_from_sparsity(3, 3, op.sparsity());
             coloring.matrix_inplace(&op, t0, &mut jac);
-            let mut gemv1 = M::V::zeros(n);
-            let v = M::V::from_element(3, M::T::one());
+            let mut gemv1 = M::V::zeros(n, p.context());
+            let v = M::V::from_element(3, M::T::one(), p.context());
             op.gemv_inplace(&v, t0, M::T::zero(), &mut gemv1);
-            let mut gemv2 = M::V::zeros(n);
+            let mut gemv2 = M::V::zeros(n, p.context());
             jac.gemv(M::T::one(), &v, M::T::zero(), &mut gemv2);
             gemv1.assert_eq_st(&gemv2, M::T::from(1e-10));
         }

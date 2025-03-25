@@ -1,6 +1,6 @@
 use crate::matrix::DenseMatrix;
 use crate::scalar::Scale;
-use crate::{IndexType, Scalar};
+use crate::{IndexType, Scalar, Context};
 use nalgebra::ComplexField;
 use num_traits::Zero;
 use std::fmt::Debug;
@@ -10,6 +10,9 @@ use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAss
 mod faer_serial;
 #[cfg(feature = "nalgebra")]
 mod nalgebra_serial;
+
+#[cfg(feature = "cuda")]
+mod cuda;
 
 pub trait VectorIndex: Sized + Debug + Clone {
     fn zeros(len: IndexType) -> Self;
@@ -119,6 +122,10 @@ pub trait Vector:
     where
         Self: 'a;
     type Index: VectorIndex;
+    type C: Context;
+    
+    /// get a clone of the context
+    fn context(&self) -> Self::C;
 
     /// set the value at index `index` to `value`, might be slower than using `IndexMut`
     /// if the vector is not on the host
@@ -143,11 +150,11 @@ pub trait Vector:
     }
 
     /// create a vector of size `nstates` with all elements set to `value`
-    fn from_element(nstates: usize, value: Self::T) -> Self;
+    fn from_element(nstates: usize, value: Self::T, ctx: Self::C) -> Self;
 
     /// create a vector of size `nstates` with all elements set to zero
-    fn zeros(nstates: usize) -> Self {
-        Self::from_element(nstates, Self::T::zero())
+    fn zeros(nstates: usize, ctx: Self::C) -> Self {
+        Self::from_element(nstates, Self::T::zero(), ctx)
     }
 
     /// fill the vector with `value`
@@ -167,7 +174,7 @@ pub trait Vector:
 
     /// create a vector from a Vec
     /// TODO: would prefer to use From trait but not implemented for faer::Col
-    fn from_vec(vec: Vec<Self::T>) -> Self;
+    fn from_vec(vec: Vec<Self::T>, ctx: Self::C) -> Self;
 
     /// convert the vector to a Vec
     /// TODO: would prefer to use Into trait but not implemented for faer::Col
@@ -211,8 +218,8 @@ pub trait Vector:
 
     /// assert that `self` is equal to `other` within a tolerance `tol`
     fn assert_eq_st(&self, other: &Self, tol: Self::T) {
-        let tol = Self::from_element(self.len(), tol);
-        self.assert_eq(other, &tol);
+        let tol = vec![tol; self.len()];
+        Self::assert_eq_vec(self.clone_as_vec(), other.clone_as_vec(), tol);
     }
 
     /// assert that `self` is equal to `other` using the same norm used by the solvers
@@ -240,7 +247,11 @@ pub trait Vector:
         let s = self.clone_as_vec();
         let other = other.clone_as_vec();
         let tol = tol.clone_as_vec();
-        for i in 0..self.len() {
+        Self::assert_eq_vec(s, other, tol);
+    }
+
+    fn assert_eq_vec(s: Vec<Self::T>, other: Vec<Self::T>, tol: Vec<Self::T>) {
+        for i in 0..s.len() {
             if num_traits::abs(s[i] - other[i]) > tol[i] {
                 eprintln!(
                     "Vector element mismatch at index {}: {} != {}",
@@ -305,22 +316,22 @@ mod tests {
     use super::Vector;
 
     pub fn test_root_finding<V: Vector>() {
-        let g0 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()]);
-        let g1 = V::from_vec(vec![1.0.into(), 2.0.into(), 3.0.into()]);
+        let g0 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()], Default::default());
+        let g1 = V::from_vec(vec![1.0.into(), 2.0.into(), 3.0.into()], Default::default());
         let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
         assert!(!found_root);
         assert_eq!(max_frac, V::T::from(0.5));
         assert_eq!(max_frac_index, 1);
 
-        let g0 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()]);
-        let g1 = V::from_vec(vec![1.0.into(), 2.0.into(), 0.0.into()]);
+        let g0 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()], Default::default());
+        let g1 = V::from_vec(vec![1.0.into(), 2.0.into(), 0.0.into()], Default::default());
         let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
         assert!(found_root);
         assert_eq!(max_frac, V::T::from(0.5));
         assert_eq!(max_frac_index, 1);
 
-        let g0 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()]);
-        let g1 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()]);
+        let g0 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()], Default::default());
+        let g1 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()], Default::default());
         let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
         assert!(!found_root);
         assert_eq!(max_frac, V::T::from(0.0));

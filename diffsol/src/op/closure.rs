@@ -21,6 +21,7 @@ where
     coloring: Option<JacobianColoring<M>>,
     sparsity: Option<M::Sparsity>,
     statistics: RefCell<OpStatistics>,
+    ctx: M::C,
 }
 
 impl<M, F, G> Closure<M, F, G>
@@ -29,7 +30,7 @@ where
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
-    pub fn new(func: F, jacobian_action: G, nstates: usize, nout: usize, nparams: usize) -> Self {
+    pub fn new(func: F, jacobian_action: G, nstates: usize, nout: usize, nparams: usize, ctx: &M::C) -> Self {
         Self {
             func,
             jacobian_action,
@@ -39,6 +40,7 @@ where
             statistics: RefCell::new(OpStatistics::default()),
             coloring: None,
             sparsity: None,
+            ctx: ctx.clone(),
         }
     }
     pub fn calculate_sparsity(&mut self, y0: &M::V, t0: M::T, p: &M::V) {
@@ -85,6 +87,12 @@ where
     type V = M::V;
     type T = M::T;
     type M = M;
+    type C = M::C;
+
+    fn context(&self) -> &Self::C {
+        &self.ctx
+    }
+
     fn nstates(&self) -> usize {
         self.nstates
     }

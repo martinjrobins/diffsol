@@ -119,6 +119,7 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for MatMut<'a, T> {
     }
 }
 
+
 impl<T: Scalar> DenseMatrix for Mat<T> {
     type View<'a> = MatRef<'a, T>;
     type ViewMut<'a> = MatMut<'a, T>;

@@ -1,6 +1,8 @@
+
 use crate::{
     ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
     NonLinearOp, NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar, Vector,
+    Context,
 };
 
 use nonlinear_op::NonLinearOpJacobian;
@@ -32,8 +34,12 @@ pub mod unit;
 /// It also defines the type of the scalar, vector, and matrices used in the operator.
 pub trait Op {
     type T: Scalar;
-    type V: Vector<T = Self::T>;
-    type M: Matrix<T = Self::T, V = Self::V>;
+    type V: Vector<T = Self::T, C = Self::C>;
+    type M: Matrix<T = Self::T, V = Self::V, C = Self::C>;
+    type C: Context;
+
+    /// return the context of the operator
+    fn context(&self) -> &Self::C;
 
     /// Return the number of input states of the operator.
     fn nstates(&self) -> usize;

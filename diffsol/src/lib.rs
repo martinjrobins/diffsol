@@ -145,6 +145,7 @@ pub mod linear_solver;
 pub mod matrix;
 pub mod nonlinear_solver;
 pub mod ode_solver;
+pub mod context;
 pub mod op;
 pub mod scalar;
 pub mod solver;
@@ -155,6 +156,8 @@ pub mod sundials_sys;
 
 pub use linear_solver::LinearSolver;
 pub use linear_solver::{faer::sparse_lu::FaerSparseLU, FaerLU, NalgebraLU};
+
+pub use context::Context;
 
 pub use matrix::sparse_faer::SparseColMat;
 

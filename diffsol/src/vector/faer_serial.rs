@@ -1,7 +1,7 @@
 use std::ops::{Div, Mul, MulAssign};
 use std::slice;
 
-use faer::{unzip, zip, Col, ColMut, ColRef, Mat};
+use faer::{get_global_parallelism, unzip, zip, Col, ColMut, ColRef, Mat, Par};
 
 use crate::{scalar::Scale, IndexType, Scalar, Vector};
 
@@ -87,10 +87,23 @@ impl<T: Scalar> VectorHost for Col<T> {
     }
 }
 
+#[derive(Clone)]
+struct FaerContext {
+    par: Par,
+}
+
+impl Default for FaerContext {
+    fn default() -> Self {
+        Self { par: get_global_parallelism() }
+    }
+}
+
+
 impl<T: Scalar> Vector for Col<T> {
     type View<'a> = ColRef<'a, T>;
     type ViewMut<'a> = ColMut<'a, T>;
     type Index = Vec<IndexType>;
+    type C = FaerContext;
     fn len(&self) -> IndexType {
         self.nrows()
     }
@@ -139,8 +152,8 @@ impl<T: Scalar> Vector for Col<T> {
     fn fill(&mut self, value: Self::T) {
         self.iter_mut().for_each(|s| *s = value);
     }
-    fn from_element(nstates: usize, value: Self::T) -> Self {
-        Col::from_vec(vec![value; nstates])
+    fn from_element(nstates: usize, value: Self::T, ctx: &Self::C) -> Self {
+        Col::from_vec(vec![value; nstates], ctx)
     }
     fn from_vec(vec: Vec<Self::T>) -> Self {
         Col::from_fn(vec.len(), |i| vec[i])

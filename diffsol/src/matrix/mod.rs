@@ -4,7 +4,7 @@ use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 use crate::error::DiffsolError;
 use crate::scalar::Scale;
 use crate::vector::VectorHost;
-use crate::{IndexType, Scalar, Vector};
+use crate::{IndexType, Scalar, Vector, Context};
 
 use extract_block::combine;
 use num_traits::{One, Zero};
@@ -25,8 +25,9 @@ mod sparse_serial;
 pub mod sparsity;
 
 pub trait MatrixCommon: Sized + Debug {
-    type V: Vector<T = Self::T>;
+    type V: Vector<T = Self::T, C = Self::C>;
     type T: Scalar;
+    type C: Context;
 
     fn nrows(&self) -> IndexType;
     fn ncols(&self) -> IndexType;
@@ -38,6 +39,7 @@ where
 {
     type T = M::T;
     type V = M::V;
+    type C = M::C;
 
     fn nrows(&self) -> IndexType {
         M::nrows(*self)
@@ -53,6 +55,7 @@ where
 {
     type T = M::T;
     type V = M::V;
+    type C = M::C;
 
     fn ncols(&self) -> IndexType {
         M::ncols(*self)
