@@ -2753,7 +2753,7 @@ entire model by hand.</p>
 We have presented the results in the following graphs, where the x-axis is the size of the problem \(n\) and the y-axis is the time taken to solve the problem relative to the time taken by the Sundials implementation
 (so \(10^0\) is the same time as Sundials, \(10^1\) is 10 times slower etc.)</p>
 <h3 id="bdf-solver"><a class="header" href="#bdf-solver">Bdf solver</a></h3>
-<p><img src="benchmarks/./images/benchmarks/bench_bdf.svg" alt="Bdf" /></p>
+<p><img src="benchmarks/./images/bench_bdf.svg" alt="Bdf" /></p>
 <p>The BDF solver is the same method as that used by the Sundials IDA and CVODE solvers so we expect the performance to be largely similar, and this is generally the case.
 There are differences due to the implementation details for each library, and the differences in the implementations for the linear solvers and matrices as discussed above.</p>
 <p>For the small, dense, stiff <code>robertson</code> problem the DiffSol implementation is very close and only slightly faster than Sundials (about 0.9).</p>
@@ -2763,10 +2763,10 @@ Since this improvement for larger systems is not seen in <code>foodweb</code> or
 that much of the performance difference is likely due to the implementation details of the Rust code for the rhs, jacobian and mass matrix functions.</p>
 <p>The DiffSol implementation of the <code>robertson_ode</code> problem ranges between 1.2 - 1.8 times slower than Sundials over the problem range.</p>
 <h3 id="tr_bdf2--esdirk34-solvers-sdirk"><a class="header" href="#tr_bdf2--esdirk34-solvers-sdirk">tr_bdf2 &amp; esdirk34 solvers (SDIRK)</a></h3>
-<p><img src="benchmarks/./images/benchmarks/bench_tr_bdf2_esdirk.svg" alt="Sdirk" /></p>
+<p><img src="benchmarks/./images/bench_tr_bdf2_esdirk.svg" alt="Sdirk" /></p>
 <p>The low-order <code>tr_bdf2</code> solver is slower than the <code>bdf</code> solver for all the problems, perhaps due to the generally tight tolerances used (<code>robertson</code> and <code>robertson_ode</code> have tolerances of 1e-6-1e-8, <code>heat2d</code> was 1e-7 and <code>foodweb</code> was 1e-5). The <code>esdirk34</code> solver is faster than <code>bdf</code> for the <code>foodweb</code> problem, but slightly slower for the other problems.</p>
 <h3 id="bdf--diffsl"><a class="header" href="#bdf--diffsl">Bdf + DiffSl</a></h3>
-<p><img src="benchmarks/./images/benchmarks/bench_bdf_diffsl.svg" alt="Bdf + DiffSl" /></p>
+<p><img src="benchmarks/./images/bench_bdf_diffsl.svg" alt="Bdf + DiffSl" /></p>
 <p>The main difference between this plot and the previous for the Bdf solver is the use of the DiffSl language for the equations, rather than Rust closures.
 The trends in each case are mostly the same, and the DiffSl implementation only has a small slowdown comparared with rust closures for most problems. For some problems, such as <code>foodweb</code>, the DiffSl implementation is actually faster than the Rust closure implementation.
 This may be due to the fact that the rust closures bound-check the array indexing, while the DiffSl implementation does not.</p>
