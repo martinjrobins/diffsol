@@ -54,7 +54,7 @@ We have presented the results in the following graphs, where the x-axis is the s
 ### Bdf solver
 
 
-![Bdf](./images/benchmarks/bench_bdf.svg)
+![Bdf](./images/bench_bdf.svg)
 
 The BDF solver is the same method as that used by the Sundials IDA and CVODE solvers so we expect the performance to be largely similar, and this is generally the case.
 There are differences due to the implementation details for each library, and the differences in the implementations for the linear solvers and matrices as discussed above.
@@ -71,14 +71,14 @@ The DiffSol implementation of the `robertson_ode` problem ranges between 1.2 - 1
 
 ### tr_bdf2 & esdirk34 solvers (SDIRK)
 
-![Sdirk](./images/benchmarks/bench_tr_bdf2_esdirk.svg)
+![Sdirk](./images/bench_tr_bdf2_esdirk.svg)
 
 The low-order `tr_bdf2` solver is slower than the `bdf` solver for all the problems, perhaps due to the generally tight tolerances used (`robertson` and `robertson_ode` have tolerances of 1e-6-1e-8, `heat2d` was 1e-7 and `foodweb` was 1e-5). The `esdirk34` solver is faster than `bdf` for the `foodweb` problem, but slightly slower for the other problems.
 
 
 ### Bdf + DiffSl
 
-![Bdf + DiffSl](./images/benchmarks/bench_bdf_diffsl.svg)
+![Bdf + DiffSl](./images/bench_bdf_diffsl.svg)
 
 The main difference between this plot and the previous for the Bdf solver is the use of the DiffSl language for the equations, rather than Rust closures. 
 The trends in each case are mostly the same, and the DiffSl implementation only has a small slowdown comparared with rust closures for most problems. For some problems, such as `foodweb`, the DiffSl implementation is actually faster than the Rust closure implementation.
