@@ -14,18 +14,23 @@ mod nalgebra_serial;
 #[cfg(feature = "cuda")]
 mod cuda;
 
+#[macro_use]
+mod utils;
+
 pub trait VectorIndex: Sized + Debug + Clone {
-    fn zeros(len: IndexType) -> Self;
+    type C: Context;
+    fn zeros(len: IndexType, ctx: Self::C) -> Self;
     fn len(&self) -> IndexType;
     fn clone_as_vec(&self) -> Vec<IndexType>;
     fn is_empty(&self) -> bool {
         self.len() == 0
     }
-    fn from_vec(v: Vec<IndexType>) -> Self;
+    fn from_vec(v: Vec<IndexType>, ctx: Self::C) -> Self;
 }
 
 pub trait VectorCommon: Sized + Debug {
     type T: Scalar;
+    type C: Context;
 }
 
 impl<V> VectorCommon for &V
@@ -33,6 +38,7 @@ where
     V: VectorCommon,
 {
     type T = V::T;
+    type C = V::C;
 }
 
 impl<V> VectorCommon for &mut V
@@ -40,6 +46,7 @@ where
     V: VectorCommon,
 {
     type T = V::T;
+    type C = V::C;
 }
 
 pub trait VectorOpsByValue<Rhs = Self, Output = Self>:
@@ -122,10 +129,9 @@ pub trait Vector:
     where
         Self: 'a;
     type Index: VectorIndex;
-    type C: Context;
     
-    /// get a clone of the context
-    fn context(&self) -> Self::C;
+    /// get the context
+    fn context(&self) -> &Self::C;
 
     /// set the value at index `index` to `value`, might be slower than using `IndexMut`
     /// if the vector is not on the host

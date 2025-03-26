@@ -6,6 +6,6 @@
 /// 
 /// It will generally be the case that all the operators / vectors / matrices for the current ode problem
 /// share the same context
-pub trait Context: Clone + Default {}
+pub trait Context: Clone + Default + Debug {}
 
 impl<T: Clone + Default> Context for T {}

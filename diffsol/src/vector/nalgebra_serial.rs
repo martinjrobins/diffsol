@@ -1,60 +1,130 @@
-use std::ops::{Div, Mul, MulAssign};
+use std::ops::{Div, Index, IndexMut, Mul, MulAssign, SubAssign, AddAssign, Sub, Add};
 
-use nalgebra::{DMatrix, DVector, DVectorView, DVectorViewMut, LpNorm};
+use nalgebra::{DVector, DVectorView, DVectorViewMut, LpNorm};
+use super::utils::*;
 
 use crate::{IndexType, Scalar, Scale, VectorHost};
 
 use super::{DefaultDenseMatrix, Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
-impl<T: Scalar> DefaultDenseMatrix for DVector<T> {
-    type M = DMatrix<T>;
+#[derive(Clone)]
+struct NalgebraContext;
+
+impl Default for NalgebraContext {
+    fn default() -> Self {
+        Self
+    }
 }
 
-macro_rules! impl_op_for_dvector_struct {
-    ($struct:ident, $trait_name:ident, $func_name:ident) => {
-        impl<'a, T: Scalar> $trait_name<Scale<T>> for $struct<'a, T> {
-            type Output = DVector<T>;
-            fn $func_name(self, rhs: Scale<T>) -> Self::Output {
-                self * rhs.value()
-            }
-        }
-    };
+#[derive(Debug, Clone)]
+struct NalgebraIndex {
+    data: DVector<IndexType>,
+    context: NalgebraContext,
 }
 
-impl_op_for_dvector_struct!(DVectorView, Mul, mul);
-impl_op_for_dvector_struct!(DVectorViewMut, Mul, mul);
+#[derive(Debug, Clone)]
+struct NalgebraVec<T: Scalar> {
+    data: DVector<T>,
+    context: NalgebraContext,
+}
 
-impl VectorIndex for DVector<IndexType> {
-    fn zeros(len: IndexType) -> Self {
-        DVector::from_element(len, 0)
+#[derive(Debug, Clone)]
+struct NalgebraVecRef<'a, T: Scalar> {
+    data: DVectorView<'a, T>,
+    context: NalgebraContext,
+}
+
+#[derive(Debug, Clone)]
+struct NalgebraVecMut<'a, T: Scalar> {
+    data: DVectorViewMut<'a, T>,
+    context: NalgebraContext,
+}
+
+impl<T: Scalar> DefaultDenseMatrix for NalgebraVec<T> {
+    type M = NalgebraMat<T>;
+}
+
+impl_vector_common!(NalgebraVec<T>, NalgebraContext);
+impl_vector_common!(NalgebraVecRef<'_, T>, NalgebraContext);
+impl_vector_common!(NalgebraVecMut<'_, T>, NalgebraContext);
+
+impl_mul_scalar!(NalgebraVec<T>, NalgebraVec<T>);
+impl_mul_scalar!(NalgebraVecRef<'_, T>, NalgebraVec<T>);
+impl_mul_scalar!(NalgebraVecMut<'_, T>, NalgebraVec<T>);
+impl_div_scalar!(NalgebraVec<T>, NalgebraVec<T>);
+impl_mul_assign_scalar!(NalgebraVecMut<'a, T>);
+impl_mul_assign_scalar!(NalgebraVec<T>);
+
+impl_sub_assign!(NalgebraVec<T>, NalgebraVec<T>);
+impl_sub_assign!(NalgebraVec<T>, &NalgebraVec<T>);
+impl_sub_assign!(NalgebraVec<T>, NalgebraVecRef<'_, T>);
+impl_sub_assign!(NalgebraVec<T>, &NalgebraVecRef<'_, T>);
+
+impl_sub_assign!(NalgebraVecMut<'_, T>, NalgebraVec<T>);
+impl_sub_assign!(NalgebraVecMut<'_, T>, &NalgebraVec<T>);
+impl_sub_assign!(NalgebraVecMut<'_, T>, NalgebraVecRef<'_, T>);
+impl_sub_assign!(NalgebraVecMut<'_, T>, &NalgebraVecRef<'_, T>);
+
+impl_add_assign!(NalgebraVec<T>, NalgebraVec<T>);
+impl_add_assign!(NalgebraVec<T>, &NalgebraVec<T>);
+impl_add_assign!(NalgebraVec<T>, NalgebraVecRef<'_, T>);
+impl_add_assign!(NalgebraVec<T>, &NalgebraVecRef<'_, T>);
+
+impl_add_assign!(NalgebraVecMut<'_, T>, NalgebraVec<T>);
+impl_add_assign!(NalgebraVecMut<'_, T>, &NalgebraVec<T>);
+impl_add_assign!(NalgebraVecMut<'_, T>, NalgebraVecRef<'_, T>);
+impl_add_assign!(NalgebraVecMut<'_, T>, &NalgebraVecRef<'_, T>);
+
+impl_sub!(NalgebraVec<T>, NalgebraVec<T>, NalgebraVec<T>);
+impl_sub!(NalgebraVec<T>, &NalgebraVec<T>, NalgebraVec<T>);
+impl_sub!(NalgebraVec<T>, NalgebraVecRef<'_, T>, NalgebraVec<T>);
+impl_sub!(NalgebraVec<T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
+
+impl_sub!(NalgebraVecRef<'_, T>, NalgebraVec<T>, NalgebraVec<T>);
+impl_sub!(NalgebraVecRef<'_, T>, &NalgebraVec<T>, NalgebraVec<T>);
+impl_sub!(NalgebraVecRef<'_, T>, NalgebraVecRef<'_, T>, NalgebraVec<T>);
+impl_sub!(NalgebraVecRef<'_, T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
+
+impl_add!(NalgebraVec<T>, NalgebraVec<T>, NalgebraVec<T>);
+impl_add!(NalgebraVec<T>, &NalgebraVec<T>, NalgebraVec<T>);
+impl_add!(NalgebraVec<T>, NalgebraVecRef<'_, T>, NalgebraVec<T>);
+impl_add!(NalgebraVec<T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
+
+impl_add!(NalgebraVecRef<'_, T>, NalgebraVec<T>, NalgebraVec<T>);
+impl_add!(NalgebraVecRef<'_, T>, &NalgebraVec<T>, NalgebraVec<T>);
+impl_add!(NalgebraVecRef<'_, T>, NalgebraVecRef<'_, T>, NalgebraVec<T>);
+impl_add!(NalgebraVecRef<'_, T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
+
+impl_index!(NalgebraVec<T>);
+
+
+impl VectorIndex for NalgebraIndex {
+    type C = NalgebraContext;
+    fn zeros(len: IndexType, ctx: Self::C) -> Self {
+        let data = DVector::from_element(len, 0);
+        Self { data, context: ctx }
+
     }
     fn len(&self) -> crate::IndexType {
         self.len()
     }
-    fn from_vec(v: Vec<IndexType>) -> Self {
-        DVector::from_vec(v)
+    fn from_vec(v: Vec<IndexType>, ctx: Self::C) -> Self {
+        let data = DVector::from_vec(v);
+        Self { data, context: ctx }
     }
     fn clone_as_vec(&self) -> Vec<IndexType> {
         self.iter().copied().collect()
     }
 }
 
-macro_rules! impl_vector_common {
-    ($vector_type:ty) => {
-        impl<'a, T: Scalar> VectorCommon for $vector_type {
-            type T = T;
-        }
-    };
-}
+impl<'a, T: Scalar> VectorView<'a> for NalgebraVecRef<'a, T> {
+    type Owned = NalgebraVec<T>;
 
-impl_vector_common!(DVector<T>);
-impl_vector_common!(DVectorView<'a, T>);
-impl_vector_common!(DVectorViewMut<'a, T>);
-
-impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
-    type Owned = DVector<T>;
     fn into_owned(self) -> Self::Owned {
-        self.into_owned()
+        Self::Owned {
+            data: self.data.into_owned(),
+            context: self.context,
+        }
     }
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
@@ -71,42 +141,11 @@ impl<'a, T: Scalar> VectorView<'a> for DVectorView<'a, T> {
     }
 }
 
-macro_rules! impl_mul_scale_vector {
-    ($vector_type:ty) => {
-        impl<T: Scalar> Mul<Scale<T>> for $vector_type {
-            type Output = DVector<T>;
-            fn mul(self, rhs: Scale<T>) -> Self::Output {
-                self * rhs.value()
-            }
-        }
 
-        impl<T: Scalar> Mul<Scale<T>> for &$vector_type {
-            type Output = DVector<T>;
-            fn mul(self, rhs: Scale<T>) -> Self::Output {
-                self * rhs.value()
-            }
-        }
-    };
-}
-
-impl_mul_scale_vector!(DVector<T>);
-macro_rules! impl_mul_assign_scale_vector {
-    ($vector_type:ty) => {
-        impl<'a, T: Scalar> MulAssign<Scale<T>> for $vector_type {
-            fn mul_assign(&mut self, rhs: Scale<T>) {
-                *self *= rhs.value();
-            }
-        }
-    };
-}
-
-impl_mul_assign_scale_vector!(DVector<T>);
-impl_mul_assign_scale_vector!(DVectorViewMut<'a, T>);
-
-impl<'a, T: Scalar> VectorViewMut<'a> for DVectorViewMut<'a, T> {
-    type Owned = DVector<T>;
-    type View = DVectorView<'a, T>;
-    type Index = DVector<IndexType>;
+impl<'a, T: Scalar> VectorViewMut<'a> for NalgebraVecMut<'a, T> {
+    type Owned = NalgebraVec<T>;
+    type View = NalgebraVecRef<'a, T>;
+    type Index = NalgebraIndex;
     fn copy_from(&mut self, other: &Self::Owned) {
         self.copy_from(other);
     }
@@ -118,37 +157,34 @@ impl<'a, T: Scalar> VectorViewMut<'a> for DVectorViewMut<'a, T> {
     }
 }
 
-impl<T: Scalar> Div<Scale<T>> for DVector<T> {
-    type Output = DVector<T>;
-    fn div(self, rhs: Scale<T>) -> Self::Output {
-        self / rhs.value()
-    }
-}
 
-impl<T: Scalar> VectorHost for DVector<T> {
+impl<T: Scalar> VectorHost for NalgebraVec<T> {
     fn as_slice(&self) -> &[Self::T] {
-        self.as_slice()
+        self.data.as_slice()
     }
     fn as_mut_slice(&mut self) -> &mut [Self::T] {
-        self.as_mut_slice()
+        self.data.as_mut_slice()
     }
 }
 
-impl<T: Scalar> Vector for DVector<T> {
-    type View<'a> = DVectorView<'a, T>;
-    type ViewMut<'a> = DVectorViewMut<'a, T>;
-    type Index = DVector<IndexType>;
+impl<T: Scalar> Vector for NalgebraVec<T> {
+    type View<'a> = NalgebraVecRef<'a, T>;
+    type ViewMut<'a> = NalgebraVecMut<'a, T>;
+    type Index = NalgebraIndex;
     fn len(&self) -> IndexType {
-        self.len()
+        self.data.len()
+    }
+    fn context(&self) -> &Self::C {
+        &self.context
     }
     fn norm(&self, k: i32) -> Self::T {
-        self.apply_norm(&LpNorm(k))
+        self.data.apply_norm(&LpNorm(k))
     }
     fn get_index(&self, index: IndexType) -> Self::T {
-        self[index]
+        self.data[index]
     }
     fn set_index(&mut self, index: IndexType, value: Self::T) {
-        self[index] = value;
+        self.data[index] = value;
     }
     fn squared_norm(&self, y: &Self, atol: &Self, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
@@ -158,49 +194,52 @@ impl<T: Scalar> Vector for DVector<T> {
         for i in 0..self.len() {
             let yi = unsafe { y.get_unchecked(i) };
             let ai = unsafe { atol.get_unchecked(i) };
-            let xi = unsafe { self.get_unchecked(i) };
+            let xi = unsafe { self.data.get_unchecked(i) };
             acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
         }
         acc / Self::T::from(self.len() as f64)
     }
     fn as_view(&self) -> Self::View<'_> {
-        self.as_view()
+        self.data.as_view()
     }
     fn as_view_mut(&mut self) -> Self::ViewMut<'_> {
-        self.as_view_mut()
+        self.data.as_view_mut()
     }
     fn copy_from(&mut self, other: &Self) {
-        self.copy_from(other);
+        self.data.copy_from(other);
     }
     fn fill(&mut self, value: Self::T) {
-        self.iter_mut().for_each(|x: &mut _| *x = value);
+        self.data.iter_mut().for_each(|x: &mut _| *x = value);
     }
     fn copy_from_view(&mut self, other: &Self::View<'_>) {
-        self.copy_from(other);
+        self.data.copy_from(other.data);
     }
-    fn from_element(nstates: usize, value: T) -> Self {
-        Self::from_element(nstates, value)
+    fn from_element(nstates: usize, value: T, ctx: Self::C) -> Self {
+        let data = DVector::from_element(nstates, value);
+        Self { data, context: ctx }
     }
-    fn from_vec(vec: Vec<T>) -> Self {
-        Self::from_vec(vec)
+    fn from_vec(vec: Vec<T>, ctx: Self::C) -> Self {
+        let data = DVector::from_vec(vec);
+        Self { data, context: ctx }
     }
     fn clone_as_vec(&self) -> Vec<Self::T> {
-        self.iter().copied().collect()
+        self.data.iter().copied().collect()
     }
-    fn zeros(nstates: usize) -> Self {
-        Self::zeros(nstates)
+    fn zeros(nstates: usize, ctx: Self::C) -> Self {
+        let data = DVector::zeros(nstates);
+        Self { data, context: ctx }
     }
     fn axpy(&mut self, alpha: T, x: &Self, beta: T) {
-        self.axpy(alpha, x, beta);
+        self.data.axpy(alpha, x.data, beta);
     }
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
-        self.axpy(alpha, x, beta);
+        self.data.axpy(alpha, x.data, beta);
     }
     fn component_div_assign(&mut self, other: &Self) {
-        self.component_div_assign(other);
+        self.data.component_div_assign(other);
     }
     fn component_mul_assign(&mut self, other: &Self) {
-        self.component_mul_assign(other);
+        self.data.component_mul_assign(other);
     }
 
     fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32) {
