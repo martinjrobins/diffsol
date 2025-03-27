@@ -10,7 +10,7 @@ pub fn robertson_ode_diffsl_problem<
     M: MatrixHost<T = f64>,
     CG: diffsl::execution::module::CodegenModule,
 >() -> (
-    OdeSolverProblem<impl crate::OdeEquationsAdjoint<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl crate::OdeEquationsAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     use crate::{DiffSl, DiffSlContext};
@@ -50,7 +50,7 @@ pub fn robertson_ode<M: MatrixHost + 'static>(
     use_coloring: bool,
     ngroups: usize,
 ) -> (
-    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     const N: usize = 3;

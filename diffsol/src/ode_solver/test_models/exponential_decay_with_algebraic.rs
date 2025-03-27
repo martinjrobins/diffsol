@@ -196,7 +196,7 @@ fn exponential_decay_with_algebraic_out_sens_adj<M: MatrixHost>(
 pub fn exponential_decay_with_algebraic_problem<M: MatrixHost + 'static>(
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let p = M::V::from_vec(vec![0.1.into()]);
@@ -226,7 +226,7 @@ pub fn exponential_decay_with_algebraic_problem<M: MatrixHost + 'static>(
 pub fn exponential_decay_with_algebraic_adjoint_problem<M: MatrixHost + 'static>(
     integrate_out: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquationsAdjoint<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let a = 0.1;
@@ -281,7 +281,7 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: MatrixHost + 'static>
 
 #[allow(clippy::type_complexity)]
 pub fn exponential_decay_with_algebraic_problem_sens<M: MatrixHost + 'static>() -> (
-    OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let k = 0.1;

@@ -140,7 +140,7 @@ fn exponential_decay_out_sens_adj<M: MatrixHost>(
 pub fn negative_exponential_decay_problem<M: MatrixHost + 'static>(
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let h = -1.0;
@@ -222,7 +222,7 @@ pub fn exponential_decay_problem_diffsl<M: MatrixHost<T = f64>, CG: crate::Codeg
 pub fn exponential_decay_problem<M: MatrixHost + 'static>(
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let h = 1.0;
@@ -279,7 +279,7 @@ pub fn exponential_decay_problem_with_root<M: MatrixHost + 'static>(
 pub fn exponential_decay_problem_adjoint<M: MatrixHost>(
     integrate_out: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquationsAdjoint<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let k = 0.1;

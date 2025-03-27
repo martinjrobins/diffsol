@@ -53,12 +53,7 @@ impl<V> LinearSolveSolution<V> {
 #[cfg(test)]
 pub mod tests {
     use crate::{
-        linear_solver::{FaerLU, NalgebraLU},
-        op::{closure::Closure, ParameterisedOp},
-        scalar::scale,
-        vector::VectorRef,
-        LinearSolver, Matrix, NonLinearOpJacobian, Vector,
-        Op,
+        linear_solver::{FaerLU, NalgebraLU}, matrix::dense_nalgebra_serial::NalgebraMat, op::{closure::Closure, ParameterisedOp}, scalar::scale, vector::VectorRef, LinearSolver, Matrix, NalgebraVec, NonLinearOpJacobian, Op, Vector, FaerVec, FaerMat,
     };
     use num_traits::{One, Zero};
 
@@ -120,21 +115,18 @@ pub mod tests {
         }
     }
 
-    type MCpuNalgebra = nalgebra::DMatrix<f64>;
-    type MCpuFaer = faer::Mat<f64>;
-
     #[test]
     fn test_lu_nalgebra() {
-        let (op, rtol, atol, solns) = linear_problem::<MCpuNalgebra>();
-        let p = nalgebra::DVector::zeros(0);
+        let (op, rtol, atol, solns) = linear_problem::<NalgebraMat<f64>>();
+        let p = NalgebraVec::zeros(0, op.context().clone());
         let op = ParameterisedOp::new(&op, &p);
         let s = NalgebraLU::default();
         test_linear_solver(s, op, rtol, &atol, solns);
     }
     #[test]
     fn test_lu_faer() {
-        let (op, rtol, atol, solns) = linear_problem::<MCpuFaer>();
-        let p = faer::Col::zeros(0);
+        let (op, rtol, atol, solns) = linear_problem::<FaerMat<f64>>();
+        let p = FaerVec::zeros(0, op.context().clone());
         let op = ParameterisedOp::new(&op, &p);
         let s = FaerLU::default();
         test_linear_solver(s, op, rtol, &atol, solns);

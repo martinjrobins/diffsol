@@ -294,10 +294,10 @@ pub trait DenseMatrix:
     fn get_index(&self, i: IndexType, j: IndexType) -> Self::T;
 
     /// mat_mat_mul using gemm, allocating a new matrix
-    fn mat_mul(&self, b: &Self, ctx: Self::C) -> Self {
+    fn mat_mul(&self, b: &Self) -> Self {
         let nrows = self.nrows();
         let ncols = b.ncols();
-        let mut ret = Self::zeros(nrows, ncols, ctx);
+        let mut ret = Self::zeros(nrows, ncols, self.context().clone());
         ret.gemm(Self::T::one(), self, b, Self::T::zero());
         ret
     }

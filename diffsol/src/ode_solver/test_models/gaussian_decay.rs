@@ -27,7 +27,7 @@ pub fn gaussian_decay_problem<M: DenseMatrix + 'static>(
     use_coloring: bool,
     size: usize,
 ) -> (
-    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let size2 = size;

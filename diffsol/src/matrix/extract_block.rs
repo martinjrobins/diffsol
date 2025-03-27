@@ -305,8 +305,8 @@ mod tests {
             .iter()
             .map(|(i, j, v)| (*i, *j, M::T::from(*v)))
             .collect::<Vec<_>>();
-        let m = M::try_from_triplets(4, 4, triplets.clone()).unwrap();
-        let indices = <M::V as Vector>::Index::from_vec(vec![0, 2]);
+        let m = M::try_from_triplets(4, 4, triplets.clone(), Default::default()).unwrap();
+        let indices = <M::V as Vector>::Index::from_vec(vec![0, 2], Default::default());
 
         let [(ul, _ul_idx), (ur, _ur_idx), (ll, _ll_idx), (lr, _lr_idx)] = m.split(&indices);
         let ul_triplets = [(0, 0, 6.0), (1, 0, 14.0), (0, 1, 8.0), (1, 1, 16.0)];
@@ -362,7 +362,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let indices = <M::V as Vector>::Index::from_vec(vec![2]);
+        let indices = <M::V as Vector>::Index::from_vec(vec![2], Default::default());
 
         let [(ul, _ul_idx), (ur, _ur_idx), (ll, _ll_idx), (lr, _lr_idx)] = m.split(&indices);
         let ul_triplets = [

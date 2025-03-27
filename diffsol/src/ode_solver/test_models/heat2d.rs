@@ -23,7 +23,7 @@ pub fn heat2d_diffsl_problem<
     CG: diffsl::execution::module::CodegenModule,
     const MGRID: usize,
 >() -> (
-    OdeSolverProblem<impl crate::OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl crate::OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     use crate::{DiffSl, DiffSlContext};
@@ -247,7 +247,7 @@ fn _pde_solution<T: Scalar>(x: T, y: T, t: T, max_terms: usize) -> T {
 
 #[allow(clippy::type_complexity)]
 pub fn head2d_problem<M: MatrixHost + 'static, const MGRID: usize>() -> (
-    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::<M>::new()

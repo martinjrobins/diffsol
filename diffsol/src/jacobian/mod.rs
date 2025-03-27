@@ -253,7 +253,6 @@ mod tests {
         LinearOp, Op,
     };
     use crate::{scale, NonLinearOpJacobian, FaerSparseMat};
-    use nalgebra::DMatrix;
     use num_traits::{One, Zero};
     use std::ops::MulAssign;
 

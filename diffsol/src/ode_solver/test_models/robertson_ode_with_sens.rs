@@ -8,7 +8,7 @@ use num_traits::Zero;
 pub fn robertson_ode_with_sens<M: MatrixHost + 'static>(
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::<M>::new()

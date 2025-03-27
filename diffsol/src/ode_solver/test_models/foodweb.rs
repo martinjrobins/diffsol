@@ -24,7 +24,7 @@ const BETA: f64 = 1000.0;
 #[cfg(feature = "diffsl")]
 #[allow(clippy::type_complexity)]
 pub fn foodweb_diffsl_problem<M, CG, const NX: usize>() -> (
-    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 )
 where

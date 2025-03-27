@@ -1,6 +1,6 @@
 use crate::{
     matrix::Matrix, ode_solver::problem::OdeSolverSolution, MatrixHost, OdeBuilder,
-    OdeEquationsImplicit, OdeEquationsSens, OdeSolverProblem, Vector,
+    OdeEquationsImplicit, OdeEquationsSens, OdeSolverProblem, Vector, Op
 };
 use num_traits::Zero;
 
@@ -10,7 +10,7 @@ pub fn robertson_diffsl_problem<
     M: MatrixHost<T = f64>,
     CG: diffsl::execution::module::CodegenModule,
 >() -> (
-    OdeSolverProblem<impl crate::OdeEquationsAdjoint<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl crate::OdeEquationsAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     use crate::{DiffSl, DiffSlContext};
@@ -101,7 +101,7 @@ fn robertson_init_sens<M: Matrix>(_p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V) 
 pub fn robertson<M: MatrixHost>(
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::<M>::new()
@@ -147,7 +147,7 @@ fn soln<V: Vector>() -> OdeSolverSolution<V> {
 
 #[allow(clippy::type_complexity)]
 pub fn robertson_sens<M: MatrixHost + 'static>() -> (
-    OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::<M>::new()
@@ -184,7 +184,7 @@ pub fn robertson_sens<M: MatrixHost + 'static>() -> (
 
     for (values, time) in data {
         soln.push(
-            M::V::from_vec(values.into_iter().map(|v| v.into()).collect()),
+            M::V::from_vec(values.into_iter().map(|v| v.into()).collect(), problem.eqn.context().clone()),
             time.into(),
         );
     }

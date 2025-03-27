@@ -147,12 +147,13 @@ mod tests {
     {
         let nparams = problem.eqn.nparams();
         let nout = problem.eqn.nout();
-        let mut dgdp = <Eqn::V as DefaultDenseMatrix>::M::zeros(nparams, nout);
+        let ctx = problem.eqn.context();
+        let mut dgdp = <Eqn::V as DefaultDenseMatrix>::M::zeros(nparams, nout, ctx.clone());
         let final_time = soln.solution_points.last().unwrap().t;
-        let mut p_0 = Eqn::V::zeros(nparams);
+        let mut p_0 = Eqn::V::zeros(nparams, ctx.clone());
         problem.eqn.get_params(&mut p_0);
         let h_base = Eqn::T::from(1e-10);
-        let mut h = Eqn::V::from_element(nparams, h_base);
+        let mut h = Eqn::V::from_element(nparams, h_base, ctx.clone());
         h.axpy(h_base, &p_0, Eqn::T::one());
         let p_base = p_0.clone();
         for i in 0..nparams {
@@ -337,14 +338,15 @@ mod tests {
         }
     }
 
-    pub struct TestEqnInit<M> {
-        _m: std::marker::PhantomData<M>,
+    pub struct TestEqnInit<M: Matrix> {
+        ctx: M::C,
     }
 
     impl<M: Matrix> Op for TestEqnInit<M> {
         type T = M::T;
         type V = M::V;
         type M = M;
+        type C = M::C;
 
         fn nout(&self) -> usize {
             1
@@ -354,6 +356,9 @@ mod tests {
         }
         fn nstates(&self) -> usize {
             1
+        }
+        fn context(&self) -> &Self::C {
+            &self.ctx
         }
     }
 
@@ -363,14 +368,15 @@ mod tests {
         }
     }
 
-    pub struct TestEqnRhs<M> {
-        _m: std::marker::PhantomData<M>,
+    pub struct TestEqnRhs<M: Matrix> {
+        ctx: M::C,
     }
 
     impl<M: Matrix> Op for TestEqnRhs<M> {
         type T = M::T;
         type V = M::V;
         type M = M;
+        type C = M::C;
 
         fn nout(&self) -> usize {
             1
@@ -380,6 +386,9 @@ mod tests {
         }
         fn nstates(&self) -> usize {
             1
+        }
+        fn context(&self) -> &Self::C {
+            &self.ctx
         }
     }
 
@@ -398,17 +407,20 @@ mod tests {
     pub struct TestEqn<M: Matrix> {
         rhs: Rc<TestEqnRhs<M>>,
         init: Rc<TestEqnInit<M>>,
+        ctx: M::C,
     }
 
     impl<M: Matrix> TestEqn<M> {
         pub fn new() -> Self {
+            let ctx = M::C::default();
             Self {
                 rhs: Rc::new(TestEqnRhs {
-                    _m: std::marker::PhantomData,
+                    ctx: ctx.clone(),
                 }),
                 init: Rc::new(TestEqnInit {
-                    _m: std::marker::PhantomData,
+                    ctx: ctx.clone(),
                 }),
+                ctx,
             }
         }
     }
@@ -417,6 +429,7 @@ mod tests {
         type T = M::T;
         type V = M::V;
         type M = M;
+        type C = M::C;
         fn nout(&self) -> usize {
             1
         }
@@ -428,6 +441,9 @@ mod tests {
         }
         fn statistics(&self) -> crate::op::OpStatistics {
             OpStatistics::default()
+        }
+        fn context(&self) -> &Self::C {
+            &self.ctx
         }
     }
 
