@@ -1,71 +1,94 @@
-use std::ops::{AddAssign, Mul, MulAssign};
+use std::ops::{AddAssign, Mul, MulAssign, Add, Sub, SubAssign};
 
 use nalgebra::{
-    DMatrix, DMatrixView, DMatrixViewMut, DVector, DVectorView, DVectorViewMut, RawStorage,
-    RawStorageMut,
+    DMatrix, DMatrixView, DMatrixViewMut,
 };
 
 use crate::{scalar::Scale, IndexType, Scalar, Vector};
 
 use super::default_solver::DefaultSolver;
 use super::sparsity::{Dense, DenseRef};
+use super::utils::*;
 use crate::error::DiffsolError;
-use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU};
+use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU, NalgebraContext, NalgebraVec, VectorIndex, NalgebraVecMut, NalgebraVecRef};
 
-impl<T: Scalar> DefaultSolver for DMatrix<T> {
+#[derive(Clone, Debug, PartialEq)]
+pub struct NalgebraMat<T: Scalar> {
+    pub(crate) data: DMatrix<T>,
+    pub(crate) context: NalgebraContext,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NalgebraMatRef<'a, T: Scalar> {
+    pub(crate) data: DMatrixView<'a, T>,
+    pub(crate) context: NalgebraContext,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct NalgebraMatMut<'a, T: Scalar> {
+    pub(crate) data: DMatrixViewMut<'a, T>,
+    pub(crate) context: NalgebraContext,
+}
+
+impl<T: Scalar> DefaultSolver for NalgebraMat<T> {
     type LS = NalgebraLU<T>;
 }
 
-macro_rules! impl_matrix_common {
-    ($matrix_type:ty) => {
-        impl<'a, T: Scalar> MatrixCommon for $matrix_type {
-            type V = DVector<T>;
-            type T = T;
+impl_matrix_common!(NalgebraMatMut<'_, T>, NalgebraVec<T>, NalgebraContext);
+impl_matrix_common!(NalgebraMatRef<'_, T>, NalgebraVec<T>, NalgebraContext);
+impl_matrix_common!(NalgebraMat<T>, NalgebraVec<T>, NalgebraContext);
 
-            fn nrows(&self) -> IndexType {
-                self.nrows()
-            }
+macro_rules! impl_mul_scalar {
+    ($mat_type:ty, $out:ty) => {
+        impl<'a, T: Scalar> Mul<Scale<T>> for $mat_type {
+            type Output = $out;
 
-            fn ncols(&self) -> IndexType {
-                self.ncols()
+            fn mul(self, rhs: Scale<T>) -> Self::Output {
+                let scale = rhs.value();
+                Self::Output { data: &self.data * scale, context: self.context.clone() }
             }
         }
     };
 }
 
-impl_matrix_common!(DMatrixViewMut<'a, T>);
-impl_matrix_common!(DMatrixView<'a, T>);
-impl_matrix_common!(DMatrix<T>);
-
-macro_rules! impl_mul_scale {
-    ($matrix_type:ty) => {
-        impl<'a, T: Scalar> Mul<Scale<T>> for $matrix_type {
-            type Output = DMatrix<T>;
-            fn mul(self, rhs: Scale<T>) -> Self::Output {
-                self * rhs.value()
-            }
-        }
-
-        impl<'a, T: Scalar> Mul<Scale<T>> for &$matrix_type {
-            type Output = DMatrix<T>;
-            fn mul(self, rhs: Scale<T>) -> Self::Output {
-                self * rhs.value()
+macro_rules! impl_mul_assign_scalar {
+    ($mat_type:ty) => {
+        impl<T: Scalar> MulAssign<Scale<T>> for $mat_type {
+            fn mul_assign(&mut self, rhs: Scale<T>) {
+                let scale = rhs.value();
+                self.data *= scale;
             }
         }
     };
 }
 
-impl_mul_scale!(DMatrixView<'a, T>);
-impl_mul_scale!(DMatrix<T>);
+impl_mul_scalar!(NalgebraMatRef<'_, T>, NalgebraMat<T>);
+impl_mul_scalar!(NalgebraMat<T>, NalgebraMat<T>);
+impl_mul_scalar!(&NalgebraMat<T>, NalgebraMat<T>);
 
-impl<T: Scalar> MulAssign<Scale<T>> for DMatrixViewMut<'_, T> {
-    fn mul_assign(&mut self, rhs: Scale<T>) {
-        *self *= rhs.value();
-    }
-}
+impl_mul_assign_scalar!(NalgebraMatMut<'_, T>);
 
-impl<'a, T: Scalar> MatrixView<'a> for DMatrixView<'a, T> {
-    type Owned = DMatrix<T>;
+impl_add!(NalgebraMat<T>, &NalgebraMat<T>, NalgebraMat<T>);
+impl_add!(NalgebraMat<T>, &NalgebraMatRef<'_, T>, NalgebraMat<T>);
+impl_add!(NalgebraMatRef<'_, T>, &NalgebraMat<T>, NalgebraMat<T>);
+
+impl_sub!(NalgebraMat<T>, &NalgebraMat<T>, NalgebraMat<T>);
+impl_sub!(NalgebraMat<T>, &NalgebraMatRef<'_, T>, NalgebraMat<T>);
+impl_sub!(NalgebraMatRef<'_, T>, &NalgebraMat<T>, NalgebraMat<T>);
+
+impl_add_assign!(NalgebraMat<T>, &NalgebraMat<T>);
+impl_add_assign!(NalgebraMat<T>, &NalgebraMatRef<'_, T>);
+impl_add_assign!(NalgebraMatMut<'_, T>, &NalgebraMatRef<'_, T>);
+impl_add_assign!(NalgebraMatMut<'_, T>, &NalgebraMatMut<'_, T>);
+
+impl_sub_assign!(NalgebraMat<T>, &NalgebraMat<T>);
+impl_sub_assign!(NalgebraMat<T>, &NalgebraMatRef<'_, T>);
+impl_sub_assign!(NalgebraMatMut<'_, T>, &NalgebraMatRef<'_, T>);
+impl_sub_assign!(NalgebraMatMut<'_, T>, &NalgebraMatMut<'_, T>);
+
+
+impl<'a, T: Scalar> MatrixView<'a> for NalgebraMatRef<'a, T> {
+    type Owned = NalgebraMat<T>;
 
     fn gemv_v(
         &self,
@@ -74,31 +97,35 @@ impl<'a, T: Scalar> MatrixView<'a> for DMatrixView<'a, T> {
         beta: Self::T,
         y: &mut Self::V,
     ) {
-        y.gemv(alpha, self, x, beta);
+        y.data.gemv(alpha, &self.data, &x.data, beta);
     }
 
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        y.gemv(alpha, self, x, beta);
+        y.data.gemv(alpha, &self.data, &x.data, beta);
     }
 }
 
-impl<'a, T: Scalar> MatrixViewMut<'a> for DMatrixViewMut<'a, T> {
-    type Owned = DMatrix<T>;
-    type View = DMatrixView<'a, T>;
+impl<'a, T: Scalar> MatrixViewMut<'a> for NalgebraMatMut<'a, T> {
+    type Owned = NalgebraMat<T>;
+    type View = NalgebraMatRef<'a, T>;
     fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T) {
-        self.gemm(alpha, a, b, beta);
+        self.data.gemm(alpha, &a.data, &b.data, beta);
     }
     fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T) {
-        self.gemm(alpha, a, b, beta);
+        self.data.gemm(alpha, &a.data, &b.data, beta);
     }
 }
 
-impl<T: Scalar> Matrix for DMatrix<T> {
+impl<T: Scalar> Matrix for NalgebraMat<T> {
     type Sparsity = Dense<Self>;
     type SparsityRef<'a> = DenseRef<'a, Self>;
 
     fn sparsity(&self) -> Option<Self::SparsityRef<'_>> {
         None
+    }
+
+    fn context(&self) -> &Self::C {
+        &self.context
     }
 
     fn set_data_with_indices(
@@ -107,19 +134,19 @@ impl<T: Scalar> Matrix for DMatrix<T> {
         src_indices: &<Self::V as Vector>::Index,
         data: &Self::V,
     ) {
-        for (dst_i, src_i) in dst_indices.iter().zip(src_indices.iter()) {
+        for (dst_i, src_i) in dst_indices.data.iter().zip(src_indices.data.iter()) {
             let i = dst_i % self.nrows();
             let j = dst_i / self.nrows();
-            self[(i, j)] = data[*src_i];
+            self.data[(i, j)] = data[*src_i];
         }
     }
 
     fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
         assert_eq!(indices.len(), self.nrows() * self.ncols());
-        let mut idx = indices.iter().peekable();
+        let mut idx = indices.data.iter().peekable();
         for j in 0..self.ncols() {
-            let other_col = other.column(*idx.peek().unwrap() / other.nrows());
-            for self_ij in self.column_mut(j).iter_mut() {
+            let other_col = other.data.column(*idx.peek().unwrap() / other.nrows());
+            for self_ij in self.data.column_mut(j).iter_mut() {
                 let other_i = idx.next().unwrap() % other.nrows();
                 *self_ij = other_col[other_i];
             }
@@ -132,15 +159,15 @@ impl<T: Scalar> Matrix for DMatrix<T> {
         let mut zero_diagonal_indices = Vec::new();
         let mut non_zero_diagonal_indices = Vec::new();
         for i in 0..self.nrows() {
-            if self[(i, i)].is_zero() {
+            if self.data[(i, i)].is_zero() {
                 zero_diagonal_indices.push(i);
             } else {
                 non_zero_diagonal_indices.push(i);
             }
         }
         (
-            <Self::V as Vector>::Index::from_vec(zero_diagonal_indices),
-            <Self::V as Vector>::Index::from_vec(non_zero_diagonal_indices),
+            <Self::V as Vector>::Index::from_vec(zero_diagonal_indices, self.context.clone()),
+            <Self::V as Vector>::Index::from_vec(non_zero_diagonal_indices, self.context.clone()),
         )
     }
 
@@ -151,83 +178,92 @@ impl<T: Scalar> Matrix for DMatrix<T> {
     fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)> {
         let n = self.ncols();
         let m = self.nrows();
-        (0..n).flat_map(move |j| (0..m).map(move |i| (i, j, &self[(i, j)])))
+        (0..n).flat_map(move |j| (0..m).map(move |i| (i, j, &self.data[(i, j)])))
     }
 
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,
         triplets: Vec<(IndexType, IndexType, T)>,
+        ctx: Self::C,
     ) -> Result<Self, DiffsolError> {
-        let mut m = Self::zeros(nrows, ncols);
+        let mut m = DMatrix::zeros(nrows, ncols);
         for (i, j, v) in triplets {
             m[(i, j)] = v;
         }
-        Ok(m)
+        Ok(Self { data: m, context: ctx })
     }
-    fn zeros(nrows: IndexType, ncols: IndexType) -> Self {
-        Self::zeros(nrows, ncols)
+    fn zeros(nrows: IndexType, ncols: IndexType, ctx: Self::C) -> Self {
+        let data = DMatrix::zeros(nrows, ncols);
+        Self { data, context: ctx }
     }
-    fn from_diagonal(v: &DVector<T>) -> Self {
-        Self::from_diagonal(v)
+    fn from_diagonal(v: &Self::V, ctx: Self::C) -> Self {
+        let data = DMatrix::from_diagonal(v);
+        Self { data, context: ctx }
     }
 
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        y.gemv(alpha, self, x, beta);
+        y.data.gemv(alpha, &self.data, &x.data, beta);
     }
     fn copy_from(&mut self, other: &Self) {
-        self.copy_from(other);
+        self.data.copy_from(&other.data);
     }
     fn set_column(&mut self, j: IndexType, v: &Self::V) {
-        self.column_mut(j).copy_from(v);
+        self.data.column_mut(j).copy_from(&v.data);
     }
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
         self.copy_from(y);
-        self.mul_assign(beta);
+        self.data.mul_assign(beta);
         self.add_assign(x);
     }
     fn new_from_sparsity(
         nrows: IndexType,
         ncols: IndexType,
         _sparsity: Option<Self::Sparsity>,
+        ctx: Self::C,
     ) -> Self {
-        Self::zeros(nrows, ncols)
+        Self::zeros(nrows, ncols, ctx)
     }
 }
 
-impl<T: Scalar> DenseMatrix for DMatrix<T> {
-    type View<'a> = DMatrixView<'a, T>;
-    type ViewMut<'a> = DMatrixViewMut<'a, T>;
+impl<T: Scalar> DenseMatrix for NalgebraMat<T> {
+    type View<'a> = NalgebraMatRef<'a, T>;
+    type ViewMut<'a> = NalgebraMatMut<'a, T>;
 
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T) {
-        self.gemm(alpha, a, b, beta);
+        self.data.gemm(alpha, &a.data, &b.data, beta);
     }
 
     fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {
-        self[(i, j)]
+        self.data[(i, j)]
     }
 
-    fn from_vec(nrows: IndexType, ncols: IndexType, data: Vec<Self::T>) -> Self {
-        DMatrix::from_vec(nrows, ncols, data)
+    fn from_vec(nrows: IndexType, ncols: IndexType, data: Vec<Self::T>, ctx: Self::C) -> Self {
+        let data = DMatrix::from_vec(nrows, ncols, data);
+        Self { data, context: ctx }
     }
 
-    fn column_mut(&mut self, i: IndexType) -> DVectorViewMut<'_, T> {
-        self.column_mut(i)
+    fn column_mut(&mut self, i: IndexType) -> <Self::V as Vector>::ViewMut<'_> {
+        let data = self.data.column_mut(i);
+        NalgebraVecMut { data, context: self.context.clone() }
     }
 
     fn columns_mut(&mut self, start: IndexType, ncols: IndexType) -> Self::ViewMut<'_> {
-        self.columns_mut(start, ncols)
+        let data = self.data.columns_mut(start, ncols);
+        NalgebraMatMut { data, context: self.context.clone() }
     }
 
     fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T) {
-        self[(i, j)] = value;
+        self.data[(i, j)] = value;
     }
 
-    fn column(&self, i: IndexType) -> DVectorView<'_, T> {
-        self.column(i)
+    fn column(&self, i: IndexType) -> <Self::V as Vector>::View<'_> {
+        let data = self.data.column(i);
+        NalgebraVecRef { data, context: self.context.clone() }
     }
     fn columns(&self, start: IndexType, ncols: IndexType) -> Self::View<'_> {
-        self.columns(start, ncols)
+        let data = self.data.columns(start, ncols);
+        NalgebraMatRef { data, context: self.context.clone() }
     }
     fn column_axpy(&mut self, alpha: Self::T, j: IndexType, beta: Self::T, i: IndexType) {
         if i > self.ncols() {
@@ -258,19 +294,23 @@ mod tests {
     fn test_column_axpy() {
         // M = [1 2]
         //     [3 4]
-        let mut a = DMatrix::from_row_slice(2, 2, &[1.0, 2.0, 3.0, 4.0]);
+        let data = DMatrix::from_row_slice(2, 2, &[1.0, 2.0, 3.0, 4.0]);
+        let mut a = NalgebraMat {
+            data,
+            context: Default::default(),
+        };
         // op is M(:, 1) = 2 * M(:, 0) + M(:, 1)
         a.column_axpy(2.0, 0, 1.0, 1);
         // M = [1 4]
         //     [3 10]
-        assert_eq!(a[(0, 0)], 1.0);
-        assert_eq!(a[(0, 1)], 4.0);
-        assert_eq!(a[(1, 0)], 3.0);
-        assert_eq!(a[(1, 1)], 10.0);
+        assert_eq!(a.get_index(0, 0), 1.0);
+        assert_eq!(a.get_index(0, 1), 4.0);
+        assert_eq!(a.get_index(1, 0), 3.0);
+        assert_eq!(a.get_index(1, 1), 10.0);
     }
 
     #[test]
     fn test_partition_indices_by_zero_diagonal() {
-        super::super::tests::test_partition_indices_by_zero_diagonal::<DMatrix<f64>>();
+        super::super::tests::test_partition_indices_by_zero_diagonal::<NalgebraMat<f64>>();
     }
 }

@@ -3,40 +3,30 @@ use std::slice;
 
 use faer::{get_global_parallelism, unzip, zip, Col, ColMut, ColRef, Par};
 
-use crate::{scalar::Scale, IndexType, Scalar, Vector};
+use crate::{scalar::Scale, IndexType, Scalar, Vector, FaerContext};
 
 use crate::{VectorCommon, VectorHost, VectorIndex, VectorView, VectorViewMut};
 
 use super::utils::*;
 use super::DefaultDenseMatrix;
 
-#[derive(Clone)]
-struct FaerContext {
-    par: Par,
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaerVec<T: Scalar> {
+    pub(crate) data: Col<T>,
+    pub(crate) context: FaerContext,
 }
 
-impl Default for FaerContext {
-    fn default() -> Self {
-        Self { par: get_global_parallelism() }
-    }
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaerVecRef<'a, T: Scalar> {
+    pub(crate) data: ColRef<'a, T>,
+    pub(crate) context: FaerContext,
 }
 
-#[derive(Debug, Clone)]
-struct FaerVec<T: Scalar> {
-    data: Col<T>,
-    context: FaerContext,
-}
-
-#[derive(Debug, Clone)]
-struct FaerVecRef<'a, T: Scalar> {
-    data: ColRef<'a, T>,
-    context: FaerContext,
-}
-
-#[derive(Debug, Clone)]
-struct FaerVecMut<'a, T: Scalar> {
-    data: ColMut<'a, T>,
-    context: FaerContext,
+#[derive(Debug, PartialEq)]
+pub struct FaerVecMut<'a, T: Scalar> {
+    pub(crate) data: ColMut<'a, T>,
+    pub(crate) context: FaerContext,
 }
 
 impl<T: Scalar> DefaultDenseMatrix for FaerVec<T> {
@@ -47,12 +37,48 @@ impl_vector_common!(FaerVec<T>, FaerContext);
 impl_vector_common!(FaerVecRef<'_, T>, FaerContext);
 impl_vector_common!(FaerVecMut<'_, T>, FaerContext);
 
-impl_mul_scalar!(FaerVec<T>, FaerVec<T>);
-impl_mul_scalar!(FaerVecRef<'_, T>, FaerVec<T>);
-impl_mul_scalar!(FaerVecMut<'_, T>, FaerVec<T>);
-impl_div_scalar!(FaerVec<T>, FaerVec<T>);
-impl_mul_assign_scalar!(FaerVecMut<'a, T>);
-impl_mul_assign_scalar!(FaerVec<T>);
+macro_rules! impl_mul_scalar {
+    ($lhs:ty, $out:ty, $scalar:ty) => {
+        impl<T: Scalar> Mul<Scale<T>> for $lhs{
+            type Output = $out;
+            fn mul(self, rhs: Scale<T>) -> Self::Output {
+                let scale: $scalar = rhs.into();
+                Self::Output { data: self.data * scale, context: self.context }
+            }
+        }
+    };
+}
+
+macro_rules! impl_div_scalar {
+    ($lhs:ty, $out:ty, $scalar:expr) => {
+        impl<'a, T: Scalar> Div<Scale<T>> for $lhs {
+            type Output = $out;
+            fn div(self, rhs: Scale<T>) -> Self::Output {
+                let inv_rhs: T = T::one() / rhs.value();
+                let scale = faer::Scale(inv_rhs);
+                Self::Output { data: self.data * scale, context: self.context }
+            }
+        }
+    };
+}
+
+macro_rules! impl_mul_assign_scalar {
+    ($col_type:ty, $scalar:ty) => {
+        impl<'a, T: Scalar> MulAssign<Scale<T>> for $col_type {
+            fn mul_assign(&mut self, rhs: Scale<T>) {
+                let scale = faer::Scale(rhs.value());
+                self.data *= scale;
+            }
+        }
+    };
+}
+
+impl_mul_scalar!(FaerVec<T>, FaerVec<T>, faer::Scale<T>);
+impl_mul_scalar!(FaerVecRef<'_, T>, FaerVec<T>, faer::Scale<T>);
+impl_mul_scalar!(FaerVecMut<'_, T>, FaerVec<T>, faer::Scale<T>);
+impl_div_scalar!(FaerVec<T>, FaerVec<T>, faer::Scale::<T>);
+impl_mul_assign_scalar!(FaerVecMut<'a, T>, faer::Scale<T>);
+impl_mul_assign_scalar!(FaerVec<T>, faer::Scale<T>);
 
 impl_sub_assign!(FaerVec<T>, FaerVec<T>);
 impl_sub_assign!(FaerVec<T>, &FaerVec<T>);
@@ -140,8 +166,8 @@ impl<T: Scalar> Vector for FaerVec<T> {
             panic!("Vector lengths do not match");
         }
         for i in 0..self.len() {
-            let yi = unsafe { y.get_unchecked(i) };
-            let ai = unsafe { atol.get_unchecked(i) };
+            let yi = unsafe { y.data.get_unchecked(i) };
+            let ai = unsafe { atol.data.get_unchecked(i) };
             let xi = unsafe { self.data.get_unchecked(i) };
             acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
         }
@@ -163,7 +189,7 @@ impl<T: Scalar> Vector for FaerVec<T> {
         self.data.iter_mut().for_each(|s| *s = value);
     }
     fn from_element(nstates: usize, value: Self::T, ctx: Self::C) -> Self {
-        let data = Col::from_vec(vec![value; nstates], ctx);
+        let data = Col::from_fn(nstates, |_| value);
         FaerVec { data, context: ctx }
     }
     fn from_vec(vec: Vec<Self::T>, ctx: Self::C) -> Self {
@@ -177,16 +203,16 @@ impl<T: Scalar> Vector for FaerVec<T> {
         Self::from_element(nstates, T::zero(), ctx)
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {
-        zip!(self.data.as_mut(), x.data.as_view()).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
+        zip!(self.data.as_mut(), x.data.as_ref()).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
         zip!(self.data.as_mut(), x.data).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }
     fn component_mul_assign(&mut self, other: &Self) {
-        zip!(self.data.as_mut(), other.data.as_view()).for_each(|unzip!(s, o)| *s *= *o);
+        zip!(self.data.as_mut(), other.data.as_ref()).for_each(|unzip!(s, o)| *s *= *o);
     }
     fn component_div_assign(&mut self, other: &Self) {
-        zip!(self.data.as_mut(), other.data.as_view()).for_each(|unzip!(s, o)| *s /= *o);
+        zip!(self.data.as_mut(), other.data.as_ref()).for_each(|unzip!(s, o)| *s /= *o);
     }
 
     fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32) {
@@ -225,14 +251,14 @@ impl<T: Scalar> Vector for FaerVec<T> {
 
     fn gather(&mut self, other: &Self, indices: &Self::Index) {
         assert_eq!(self.len(), indices.len(), "Vector lengths do not match");
-        for (s, o) in self.iter_mut().zip(indices.iter()) {
+        for (s, o) in self.data.iter_mut().zip(indices.iter()) {
             *s = other[*o];
         }
     }
 
     fn scatter(&self, indices: &Self::Index, other: &mut Self) {
         assert_eq!(self.len(), indices.len(), "Vector lengths do not match");
-        for (s, o) in self.iter().zip(indices.iter()) {
+        for (s, o) in self.data.iter().zip(indices.iter()) {
             other[*o] = *s;
         }
     }
@@ -240,13 +266,13 @@ impl<T: Scalar> Vector for FaerVec<T> {
 
 impl VectorIndex for Vec<IndexType> {
     type C = FaerContext;
-    fn zeros(len: IndexType) -> Self {
+    fn zeros(len: IndexType, ctx: Self::C) -> Self {
         vec![0; len]
     }
     fn len(&self) -> IndexType {
         self.len() as IndexType
     }
-    fn from_vec(v: Vec<IndexType>) -> Self {
+    fn from_vec(v: Vec<IndexType>, ctx: Self::C) -> Self {
         v
     }
     fn clone_as_vec(&self) -> Vec<IndexType> {
@@ -262,16 +288,16 @@ impl<'a, T: Scalar> VectorView<'a> for FaerVecRef<'a, T> {
     }
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
-        if y.len() != self.nrows() || y.nrows() != atol.nrows() {
+        if y.len() != self.data.nrows() || y.data.nrows() != atol.data.nrows() {
             panic!("Vector lengths do not match");
         }
-        for i in 0..self.nrows() {
-            let yi = unsafe { y.get_unchecked(i) };
-            let ai = unsafe { atol.get_unchecked(i) };
-            let xi = unsafe { self.get_unchecked(i) };
+        for i in 0..self.data.nrows() {
+            let yi = unsafe { y.data.get_unchecked(i) };
+            let ai = unsafe { atol.data.get_unchecked(i) };
+            let xi = unsafe { self.data.get_unchecked(i) };
             acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
         }
-        acc / Self::T::from(self.nrows() as f64)
+        acc / Self::T::from(self.data.nrows() as f64)
     }
 }
 
@@ -280,13 +306,13 @@ impl<'a, T: Scalar> VectorViewMut<'a> for FaerVecMut<'a, T> {
     type View = FaerVecRef<'a, T>;
     type Index = Vec<IndexType>;
     fn copy_from(&mut self, other: &Self::Owned) {
-        self.copy_from(other);
+        self.data.copy_from(&other.data);
     }
     fn copy_from_view(&mut self, other: &Self::View) {
-        self.copy_from(other);
+        self.data.copy_from(&other.data);
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
-        zip!(self.as_mut(), x.as_view()).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
+        zip!(self.data.as_mut(), x.data.as_ref()).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }
 }
 
@@ -323,7 +349,7 @@ mod tests {
         tmp += &atol;
         let mut r = v.clone();
         r.component_div_assign(&tmp);
-        let errorn_check = r.squared_norm_l2() / 3.0;
+        let errorn_check = r.data.squared_norm_l2() / 3.0;
         assert!(
             (v.squared_norm(&y, &atol, rtol) - errorn_check).abs() < 1e-10,
             "{} vs {}",
@@ -331,15 +357,15 @@ mod tests {
             errorn_check
         );
         assert!(
-            (v.as_ref().squared_norm(&y, &atol, rtol) - errorn_check).abs() < 1e-10,
+            (v.squared_norm(&y, &atol, rtol) - errorn_check).abs() < 1e-10,
             "{} vs {}",
-            v.as_ref().squared_norm(&y, &atol, rtol),
+            v.squared_norm(&y, &atol, rtol),
             errorn_check
         );
     }
 
     #[test]
     fn test_root_finding() {
-        super::super::tests::test_root_finding::<Col<f64>>();
+        super::super::tests::test_root_finding::<FaerVec<f64>>();
     }
 }

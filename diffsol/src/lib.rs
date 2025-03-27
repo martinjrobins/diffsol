@@ -157,7 +157,7 @@ pub mod sundials_sys;
 pub use linear_solver::LinearSolver;
 pub use linear_solver::{faer::sparse_lu::FaerSparseLU, FaerLU, NalgebraLU};
 
-pub use context::Context;
+pub use context::{Context, faer::FaerContext, nalgebra::NalgebraContext};
 
 pub use matrix::sparse_faer::SparseColMat;
 
@@ -176,6 +176,7 @@ pub use matrix::{default_solver::DefaultSolver, Matrix};
 use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
     DenseMatrix, MatrixCommon, MatrixHost, MatrixRef, MatrixView, MatrixViewMut,
+    dense_faer_serial::{FaerMat, FaerMatMut, FaerMatRef},
 };
 use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus, root::RootFinder,
@@ -212,7 +213,7 @@ use op::{
 };
 use scalar::{IndexType, Scalar, Scale};
 pub use vector::DefaultDenseMatrix;
-use vector::{Vector, VectorCommon, VectorHost, VectorIndex, VectorRef, VectorView, VectorViewMut};
+pub use vector::{Vector, VectorCommon, VectorHost, VectorIndex, VectorRef, VectorView, VectorViewMut, faer_serial::{FaerVec, FaerVecMut, FaerVecRef}, nalgebra_serial::{NalgebraVec, NalgebraVecMut, NalgebraVecRef}};
 
 pub use scalar::scale;
 

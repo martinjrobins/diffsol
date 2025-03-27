@@ -6,6 +6,14 @@
 /// 
 /// It will generally be the case that all the operators / vectors / matrices for the current ode problem
 /// share the same context
-pub trait Context: Clone + Default + Debug {}
+
+#[cfg(feature = "nalgebra")]
+pub mod nalgebra;
+
+#[cfg(feature = "faer")]
+pub mod faer;
+
+
+pub trait Context: Clone + Default {}
 
 impl<T: Clone + Default> Context for T {}

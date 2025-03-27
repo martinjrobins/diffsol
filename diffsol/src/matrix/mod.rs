@@ -11,10 +11,10 @@ use num_traits::{One, Zero};
 use sparsity::{Dense, MatrixSparsity, MatrixSparsityRef};
 
 #[cfg(feature = "nalgebra")]
-mod dense_nalgebra_serial;
+pub mod dense_nalgebra_serial;
 
 #[cfg(feature = "faer")]
-mod dense_faer_serial;
+pub mod dense_faer_serial;
 
 #[cfg(feature = "faer")]
 pub mod sparse_faer;
@@ -23,6 +23,9 @@ pub mod default_solver;
 pub mod extract_block;
 mod sparse_serial;
 pub mod sparsity;
+
+#[macro_use]
+mod utils;
 
 pub trait MatrixCommon: Sized + Debug {
     type V: Vector<T = Self::T, C = Self::C>;
@@ -124,6 +127,8 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
 
     /// Return sparsity information (None if the matrix is dense)
     fn sparsity(&self) -> Option<Self::SparsityRef<'_>>;
+    
+    fn context(&self) -> &Self::C;
 
     fn is_sparse() -> bool {
         Self::zeros(1, 1).sparsity().is_some()
@@ -140,17 +145,18 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
     fn copy_from(&mut self, other: &Self);
 
     /// Create a new matrix of shape `nrows` x `ncols` filled with zeros
-    fn zeros(nrows: IndexType, ncols: IndexType) -> Self;
+    fn zeros(nrows: IndexType, ncols: IndexType, ctx: Self::C) -> Self;
 
     /// Create a new matrix from a sparsity pattern, the non-zero elements are not initialized
     fn new_from_sparsity(
         nrows: IndexType,
         ncols: IndexType,
         sparsity: Option<Self::Sparsity>,
+        ctx: Self::C,
     ) -> Self;
 
     /// Create a new diagonal matrix from a [Vector] holding the diagonal elements
-    fn from_diagonal(v: &Self::V) -> Self;
+    fn from_diagonal(v: &Self::V, ctx: Self::C) -> Self;
 
     /// sets the values of column `j` to be equal to the values in `v`
     /// For sparse matrices, only the existing non-zero elements are updated
@@ -196,14 +202,14 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
     ) -> [(Self, <Self::V as Vector>::Index); 4] {
         match self.sparsity() {
             Some(sp) => sp.split(algebraic_indices).map(|(sp, src_indices)| {
-                let mut m = Self::new_from_sparsity(sp.nrows(), sp.ncols(), Some(sp));
+                let mut m = Self::new_from_sparsity(sp.nrows(), sp.ncols(), Some(sp), self.context());
                 m.gather(self, &src_indices);
                 (m, src_indices)
             }),
             None => Dense::<Self>::new(self.nrows(), self.ncols())
                 .split(algebraic_indices)
                 .map(|(sp, src_indices)| {
-                    let mut m = Self::new_from_sparsity(sp.nrows(), sp.ncols(), None);
+                    let mut m = Self::new_from_sparsity(sp.nrows(), sp.ncols(), None, self.context());
                     m.gather(self, &src_indices);
                     (m, src_indices)
                 }),
@@ -231,6 +237,7 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
         nrows: IndexType,
         ncols: IndexType,
         triplets: Vec<(IndexType, IndexType, Self::T)>,
+        ctx: Self::C,
     ) -> Result<Self, DiffsolError>;
 }
 
@@ -298,7 +305,7 @@ pub trait DenseMatrix:
 
     /// creates a new matrix from a vector of values, which are assumed
     /// to be in column-major order
-    fn from_vec(nrows: IndexType, ncols: IndexType, data: Vec<Self::T>) -> Self;
+    fn from_vec(nrows: IndexType, ncols: IndexType, data: Vec<Self::T>, ctx: Self::C) -> Self;
 }
 
 #[cfg(test)]
@@ -308,7 +315,7 @@ mod tests {
 
     pub fn test_partition_indices_by_zero_diagonal<M: Matrix>() {
         let triplets = vec![(0, 0, 1.0.into()), (1, 1, 2.0.into()), (3, 3, 1.0.into())];
-        let m = M::try_from_triplets(4, 4, triplets).unwrap();
+        let m = M::try_from_triplets(4, 4, triplets, Default::default()).unwrap();
         let (zero_diagonal_indices, non_zero_diagonal_indices) =
             m.partition_indices_by_zero_diagonal();
         assert_eq!(zero_diagonal_indices.clone_as_vec(), vec![2]);
@@ -320,7 +327,7 @@ mod tests {
             (2, 2, 0.0.into()),
             (3, 3, 1.0.into()),
         ];
-        let m = M::try_from_triplets(4, 4, triplets).unwrap();
+        let m = M::try_from_triplets(4, 4, triplets, Default::default()).unwrap();
         let (zero_diagonal_indices, non_zero_diagonal_indices) =
             m.partition_indices_by_zero_diagonal();
         assert_eq!(zero_diagonal_indices.clone_as_vec(), vec![2]);
@@ -332,7 +339,7 @@ mod tests {
             (2, 2, 3.0.into()),
             (3, 3, 1.0.into()),
         ];
-        let m = M::try_from_triplets(4, 4, triplets).unwrap();
+        let m = M::try_from_triplets(4, 4, triplets, Default::default()).unwrap();
         let (zero_diagonal_indices, non_zero_diagonal_indices) =
             m.partition_indices_by_zero_diagonal();
         assert_eq!(

@@ -3,41 +3,34 @@ use std::ops::{Div, Index, IndexMut, Mul, MulAssign, SubAssign, AddAssign, Sub, 
 use nalgebra::{DVector, DVectorView, DVectorViewMut, LpNorm};
 use super::utils::*;
 
-use crate::{IndexType, Scalar, Scale, VectorHost};
+use crate::{IndexType, Scalar, Scale, VectorHost, NalgebraContext};
 
 use super::{DefaultDenseMatrix, Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
-#[derive(Clone)]
-struct NalgebraContext;
 
-impl Default for NalgebraContext {
-    fn default() -> Self {
-        Self
-    }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NalgebraIndex {
+    pub(crate) data: DVector<IndexType>,
+    pub(crate) context: NalgebraContext,
 }
 
-#[derive(Debug, Clone)]
-struct NalgebraIndex {
-    data: DVector<IndexType>,
-    context: NalgebraContext,
+#[derive(Debug, Clone, PartialEq)]
+pub struct NalgebraVec<T: Scalar> {
+    pub(crate) data: DVector<T>,
+    pub(crate) context: NalgebraContext,
 }
 
-#[derive(Debug, Clone)]
-struct NalgebraVec<T: Scalar> {
-    data: DVector<T>,
-    context: NalgebraContext,
+#[derive(Debug, Clone, PartialEq)]
+pub struct NalgebraVecRef<'a, T: Scalar> {
+    pub(crate) data: DVectorView<'a, T>,
+    pub(crate) context: NalgebraContext,
 }
 
-#[derive(Debug, Clone)]
-struct NalgebraVecRef<'a, T: Scalar> {
-    data: DVectorView<'a, T>,
-    context: NalgebraContext,
-}
-
-#[derive(Debug, Clone)]
-struct NalgebraVecMut<'a, T: Scalar> {
-    data: DVectorViewMut<'a, T>,
-    context: NalgebraContext,
+#[derive(Debug, PartialEq)]
+pub struct NalgebraVecMut<'a, T: Scalar> {
+    pub(crate) data: DVectorViewMut<'a, T>,
+    pub(crate) context: NalgebraContext,
 }
 
 impl<T: Scalar> DefaultDenseMatrix for NalgebraVec<T> {
@@ -48,12 +41,47 @@ impl_vector_common!(NalgebraVec<T>, NalgebraContext);
 impl_vector_common!(NalgebraVecRef<'_, T>, NalgebraContext);
 impl_vector_common!(NalgebraVecMut<'_, T>, NalgebraContext);
 
-impl_mul_scalar!(NalgebraVec<T>, NalgebraVec<T>);
-impl_mul_scalar!(NalgebraVecRef<'_, T>, NalgebraVec<T>);
-impl_mul_scalar!(NalgebraVecMut<'_, T>, NalgebraVec<T>);
-impl_div_scalar!(NalgebraVec<T>, NalgebraVec<T>);
-impl_mul_assign_scalar!(NalgebraVecMut<'a, T>);
-impl_mul_assign_scalar!(NalgebraVec<T>);
+macro_rules! impl_mul_scalar {
+    ($lhs:ty, $out:ty, $scalar:ty) => {
+        impl<T: Scalar> Mul<Scale<T>> for $lhs{
+            type Output = $out;
+            fn mul(self, rhs: Scale<T>) -> Self::Output {
+                let scale: $scalar = rhs.value();
+                Self::Output { data: self.data * scale, context: self.context }
+            }
+        }
+    };
+}
+
+macro_rules! impl_div_scalar {
+    ($lhs:ty, $out:ty, $scalar:expr) => {
+        impl<'a, T: Scalar> Div<Scale<T>> for $lhs {
+            type Output = $out;
+            fn div(self, rhs: Scale<T>) -> Self::Output {
+                let inv_rhs: T = T::one() / rhs.value();
+                Self::Output { data: self.data * inv_rhs, context: self.context }
+            }
+        }
+    };
+}
+
+macro_rules! impl_mul_assign_scalar {
+    ($col_type:ty, $scalar:ty) => {
+        impl<'a, T: Scalar> MulAssign<Scale<T>> for $col_type {
+            fn mul_assign(&mut self, rhs: Scale<T>) {
+                let scale = rhs.value();
+                self.data *= scale;
+            }
+        }
+    };
+}
+
+impl_mul_scalar!(NalgebraVec<T>, NalgebraVec<T>, T);
+impl_mul_scalar!(NalgebraVecRef<'_, T>, NalgebraVec<T>, T);
+impl_mul_scalar!(NalgebraVecMut<'_, T>, NalgebraVec<T>, T);
+impl_div_scalar!(NalgebraVec<T>, NalgebraVec<T>, T);
+impl_mul_assign_scalar!(NalgebraVecMut<'a, T>, T);
+impl_mul_assign_scalar!(NalgebraVec<T>, T);
 
 impl_sub_assign!(NalgebraVec<T>, NalgebraVec<T>);
 impl_sub_assign!(NalgebraVec<T>, &NalgebraVec<T>);
@@ -106,14 +134,14 @@ impl VectorIndex for NalgebraIndex {
 
     }
     fn len(&self) -> crate::IndexType {
-        self.len()
+        self.data.len()
     }
     fn from_vec(v: Vec<IndexType>, ctx: Self::C) -> Self {
         let data = DVector::from_vec(v);
         Self { data, context: ctx }
     }
     fn clone_as_vec(&self) -> Vec<IndexType> {
-        self.iter().copied().collect()
+        self.data.iter().copied().collect()
     }
 }
 
@@ -128,16 +156,16 @@ impl<'a, T: Scalar> VectorView<'a> for NalgebraVecRef<'a, T> {
     }
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
-        if y.len() != self.len() || y.len() != atol.len() {
+        if y.len() != self.data.len() || y.len() != atol.len() {
             panic!("Vector lengths do not match");
         }
-        for i in 0..self.len() {
-            let yi = unsafe { y.get_unchecked(i) };
-            let ai = unsafe { atol.get_unchecked(i) };
-            let xi = unsafe { self.get_unchecked(i) };
+        for i in 0..self.data.len() {
+            let yi = unsafe { y.data.get_unchecked(i) };
+            let ai = unsafe { atol.data.get_unchecked(i) };
+            let xi = unsafe { self.data.get_unchecked(i) };
             acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
         }
-        acc / Self::T::from(self.len() as f64)
+        acc / Self::T::from(self.data.len() as f64)
     }
 }
 
@@ -147,13 +175,13 @@ impl<'a, T: Scalar> VectorViewMut<'a> for NalgebraVecMut<'a, T> {
     type View = NalgebraVecRef<'a, T>;
     type Index = NalgebraIndex;
     fn copy_from(&mut self, other: &Self::Owned) {
-        self.copy_from(other);
+        self.data.copy_from(&other.data);
     }
     fn copy_from_view(&mut self, other: &Self::View) {
-        self.copy_from(other);
+        self.data.copy_from(&other.data);
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
-        self.axpy(alpha, x, beta);
+        self.data.axpy(alpha, &x.data, beta);
     }
 }
 
@@ -192,27 +220,27 @@ impl<T: Scalar> Vector for NalgebraVec<T> {
             panic!("Vector lengths do not match");
         }
         for i in 0..self.len() {
-            let yi = unsafe { y.get_unchecked(i) };
-            let ai = unsafe { atol.get_unchecked(i) };
+            let yi = unsafe { y.data.get_unchecked(i) };
+            let ai = unsafe { atol.data.get_unchecked(i) };
             let xi = unsafe { self.data.get_unchecked(i) };
             acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
         }
         acc / Self::T::from(self.len() as f64)
     }
     fn as_view(&self) -> Self::View<'_> {
-        self.data.as_view()
+        Self::View { data: self.data.as_view(), context: self.context.clone() }
     }
     fn as_view_mut(&mut self) -> Self::ViewMut<'_> {
-        self.data.as_view_mut()
+        Self::ViewMut { data: self.data.as_view_mut(), context: self.context.clone() }
     }
     fn copy_from(&mut self, other: &Self) {
-        self.data.copy_from(other);
+        self.data.copy_from(&other.data);
     }
     fn fill(&mut self, value: Self::T) {
         self.data.iter_mut().for_each(|x: &mut _| *x = value);
     }
     fn copy_from_view(&mut self, other: &Self::View<'_>) {
-        self.data.copy_from(other.data);
+        self.data.copy_from(&other.data);
     }
     fn from_element(nstates: usize, value: T, ctx: Self::C) -> Self {
         let data = DVector::from_element(nstates, value);
@@ -230,16 +258,16 @@ impl<T: Scalar> Vector for NalgebraVec<T> {
         Self { data, context: ctx }
     }
     fn axpy(&mut self, alpha: T, x: &Self, beta: T) {
-        self.data.axpy(alpha, x.data, beta);
+        self.data.axpy(alpha, &x.data, beta);
     }
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
-        self.data.axpy(alpha, x.data, beta);
+        self.data.axpy(alpha, &x.data, beta);
     }
     fn component_div_assign(&mut self, other: &Self) {
-        self.data.component_div_assign(other);
+        self.data.component_div_assign(&other.data);
     }
     fn component_mul_assign(&mut self, other: &Self) {
-        self.data.component_mul_assign(other);
+        self.data.component_mul_assign(&other.data);
     }
 
     fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32) {
@@ -248,8 +276,8 @@ impl<T: Scalar> Vector for NalgebraVec<T> {
         let mut found_root = false;
         assert_eq!(self.len(), g1.len(), "Vector lengths do not match");
         for i in 0..self.len() {
-            let g0 = unsafe { *self.get_unchecked(i) };
-            let g1 = unsafe { *g1.get_unchecked(i) };
+            let g0 = unsafe { *self.data.get_unchecked(i) };
+            let g1 = unsafe { *g1.data.get_unchecked(i) };
             if g1 == T::zero() {
                 found_root = true;
             }
@@ -265,27 +293,27 @@ impl<T: Scalar> Vector for NalgebraVec<T> {
     }
 
     fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
-        for i in indices {
+        for i in indices.data.iter() {
             self[*i] = value;
         }
     }
 
     fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
-        for i in indices {
+        for i in indices.data.iter() {
             self[*i] = other[*i];
         }
     }
 
     fn gather(&mut self, other: &Self, indices: &Self::Index) {
         assert_eq!(self.len(), indices.len(), "Vector lengths do not match");
-        for (s, o) in self.iter_mut().zip(indices.iter()) {
+        for (s, o) in self.data.iter_mut().zip(indices.data.iter()) {
             *s = other[*o];
         }
     }
 
     fn scatter(&self, indices: &Self::Index, other: &mut Self) {
         assert_eq!(self.len(), indices.len(), "Vector lengths do not match");
-        for (s, o) in self.iter().zip(indices.iter()) {
+        for (s, o) in self.data.iter().zip(indices.data.iter()) {
             other[*o] = *s;
         }
     }
@@ -297,23 +325,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_abs() {
-        let v = DVector::from_vec(vec![1.0, -2.0, 3.0]);
-        let v_abs = v.abs();
-        assert_eq!(v_abs, DVector::from_vec(vec![1.0, 2.0, 3.0]));
-    }
-
-    #[test]
     fn test_error_norm() {
-        let v = DVector::from_vec(vec![1.0, -2.0, 3.0]);
-        let y = DVector::from_vec(vec![1.0, 2.0, 3.0]);
-        let atol = DVector::from_vec(vec![0.1, 0.2, 0.3]);
+        let v = NalgebraVec::from_vec(vec![1.0, -2.0, 3.0], Default::default());
+        let y = NalgebraVec::from_vec(vec![1.0, 2.0, 3.0], Default::default());
+        let atol = NalgebraVec::from_vec(vec![0.1, 0.2, 0.3], Default::default());
         let rtol = 0.1;
-        let mut tmp = y.clone() * rtol;
+        let mut tmp = y.clone() * Scale(rtol);
         tmp += &atol;
         let mut r = v.clone();
         r.component_div_assign(&tmp);
-        let errorn_check = r.norm_squared() / 3.0;
+        let errorn_check = r.data.norm_squared() / 3.0;
         assert_eq!(v.squared_norm(&y, &atol, rtol), errorn_check);
         let vview = v.as_view();
         assert_eq!(
@@ -324,6 +345,6 @@ mod tests {
 
     #[test]
     fn test_root_finding() {
-        super::super::tests::test_root_finding::<DVector<f64>>();
+        super::super::tests::test_root_finding::<NalgebraVec<f64>>();
     }
 }

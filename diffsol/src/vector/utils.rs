@@ -10,42 +10,7 @@ macro_rules! impl_vector_common {
 }
 pub(crate) use impl_vector_common;
 
-macro_rules! impl_mul_scalar {
-    ($lhs:ty, $out:ty) => {
-        impl<T: Scalar> Mul<Scale<T>> for $lhs{
-            type Output = $out;
-            fn mul(self, rhs: Scale<T>) -> Self::Output {
-                let scale: faer::Scale<T> = rhs.into();
-                Self::Output { data: self.data * scale, context: self.context }
-            }
-        }
-    };
-}
-pub(crate) use impl_mul_scalar; 
 
-macro_rules! impl_div_scalar {
-    ($lhs:ty, $out:ty) => {
-        impl<'a, T: Scalar> Div<Scale<T>> for $lhs {
-            type Output = $out;
-            fn div(self, rhs: Scale<T>) -> Self::Output {
-                let inv_rhs = T::one() / rhs.value();
-                Self::Output { data: self.data * faer::Scale(inv_rhs), context: self.context }
-            }
-        }
-    };
-}
-pub(crate) use impl_div_scalar;
-
-macro_rules! impl_mul_assign_scalar {
-    ($col_type:ty) => {
-        impl<'a, T: Scalar> MulAssign<Scale<T>> for $col_type {
-            fn mul_assign(&mut self, rhs: Scale<T>) {
-                self.data *= rhs.into();
-            }
-        }
-    };
-}
-pub(crate) use impl_mul_assign_scalar;
 
 macro_rules! impl_sub_assign {
     ($lhs:ty, $rhs:ty) => {
@@ -74,7 +39,7 @@ macro_rules! impl_sub {
         impl<T: Scalar> Sub<$rhs> for $lhs {
             type Output = $out;
             fn sub(self, rhs: $rhs) -> Self::Output {
-                Self::Output { data: self.data - rhs.data, context: self.context }
+                Self::Output { data: self.data - &rhs.data, context: self.context }
             }
         }
     };
@@ -86,7 +51,7 @@ macro_rules! impl_add {
         impl<T: Scalar> Add<$rhs> for $lhs {
             type Output = $out;
             fn add(self, rhs: $rhs) -> Self::Output {
-                Self::Output { data: self.data + rhs.data, context: self.context }
+                Self::Output { data: self.data + &rhs.data, context: self.context }
             }
         }
     };

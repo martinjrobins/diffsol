@@ -7,12 +7,12 @@ use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
 #[cfg(feature = "faer")]
-mod faer_serial;
+pub mod faer_serial;
 #[cfg(feature = "nalgebra")]
-mod nalgebra_serial;
+pub mod nalgebra_serial;
 
 #[cfg(feature = "cuda")]
-mod cuda;
+pub mod cuda;
 
 #[macro_use]
 mod utils;
