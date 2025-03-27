@@ -177,6 +177,7 @@ use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
     DenseMatrix, MatrixCommon, MatrixHost, MatrixRef, MatrixView, MatrixViewMut,
     dense_faer_serial::{FaerMat, FaerMatMut, FaerMatRef},
+    sparse_faer_serial::FaerSparseMat,
 };
 use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus, root::RootFinder,

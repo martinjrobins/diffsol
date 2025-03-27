@@ -21,7 +21,6 @@ pub mod sparse_faer;
 
 pub mod default_solver;
 pub mod extract_block;
-mod sparse_serial;
 pub mod sparsity;
 
 #[macro_use]
@@ -156,7 +155,7 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
     ) -> Self;
 
     /// Create a new diagonal matrix from a [Vector] holding the diagonal elements
-    fn from_diagonal(v: &Self::V, ctx: Self::C) -> Self;
+    fn from_diagonal(v: &Self::V) -> Self;
 
     /// sets the values of column `j` to be equal to the values in `v`
     /// For sparse matrices, only the existing non-zero elements are updated
