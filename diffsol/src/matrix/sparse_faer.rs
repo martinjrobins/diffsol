@@ -105,6 +105,7 @@ impl<T: Scalar> MatrixSparsity<FaerSparseMat<T>> for SymbolicSparseColMat<IndexT
     fn get_index(
         &self,
         indices: &[(IndexType, IndexType)],
+        _ctx: FaerContext,
     ) -> <<FaerSparseMat<T> as MatrixCommon>::V as Vector>::Index {
         let col_ptrs = self.col_ptr();
         let row_indices = self.row_idx();
@@ -266,7 +267,7 @@ impl<T: Scalar> Matrix for FaerSparseMat<T> {
         }
     }
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        let tmp = &self.data * x;
+        let tmp = Self::V { data: &self.data * &x.data, context: self.context.clone() };
         y.axpy(alpha, &tmp, beta);
     }
     fn zeros(nrows: IndexType, ncols: IndexType, ctx: Self::C) -> Self {

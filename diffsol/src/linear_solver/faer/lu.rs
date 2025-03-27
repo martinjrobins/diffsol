@@ -44,7 +44,7 @@ impl<T: Scalar> LinearSolver<FaerMat<T>> for LU<T> {
             return Err(linear_solver_error!(LuNotInitialized))?;
         }
         let lu = self.lu.as_ref().unwrap();
-        lu.solve_in_place(x);
+        lu.solve_in_place(x.data.as_mut());
         Ok(())
     }
 

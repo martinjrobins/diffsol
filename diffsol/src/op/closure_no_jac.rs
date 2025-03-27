@@ -14,7 +14,7 @@ where
     nout: usize,
     nparams: usize,
     statistics: RefCell<OpStatistics>,
-    _phantom: std::marker::PhantomData<M>,
+    ctx: M::C,
 }
 
 impl<M, F> ClosureNoJac<M, F>
@@ -22,14 +22,14 @@ where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, &mut M::V),
 {
-    pub fn new(func: F, nstates: usize, nout: usize, nparams: usize) -> Self {
+    pub fn new(func: F, nstates: usize, nout: usize, nparams: usize, ctx: M::C) -> Self {
         Self {
             func,
             nstates,
             nparams,
             nout,
             statistics: RefCell::new(OpStatistics::default()),
-            _phantom: std::marker::PhantomData,
+            ctx,
         }
     }
 }
@@ -61,8 +61,12 @@ where
     type V = M::V;
     type T = M::T;
     type M = M;
+    type C = M::C;
     fn nstates(&self) -> usize {
         self.nstates
+    }
+    fn context(&self) -> &Self::C {
+        &self.ctx
     }
     fn nout(&self) -> usize {
         self.nout

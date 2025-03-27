@@ -34,7 +34,7 @@ macro_rules! impl_add_assign {
 }
 pub(crate) use impl_add_assign;
 
-macro_rules! impl_sub {
+macro_rules! impl_sub_lhs {
     ($lhs:ty, $rhs:ty, $out:ty) => {
         impl<T: Scalar> Sub<$rhs> for $lhs {
             type Output = $out;
@@ -44,9 +44,35 @@ macro_rules! impl_sub {
         }
     };
 }
-pub(crate) use impl_sub;
+pub(crate) use impl_sub_lhs;
 
-macro_rules! impl_add {
+macro_rules! impl_sub_rhs {
+    ($lhs:ty, $rhs:ty, $out:ty) => {
+        impl<T: Scalar> Sub<$rhs> for $lhs {
+            type Output = $out;
+            fn sub(self, rhs: $rhs) -> Self::Output {
+                Self::Output { data: &self.data - rhs.data, context: rhs.context }
+            }
+        }
+    };
+}
+pub(crate) use impl_sub_rhs;
+
+macro_rules! impl_sub_both_ref {
+    ($lhs:ty, $rhs:ty, $out:ty) => {
+        impl<T: Scalar> Sub<$rhs> for $lhs {
+            type Output = $out;
+            fn sub(self, rhs: $rhs) -> Self::Output {
+                Self::Output { data: &self.data - &rhs.data, context: self.context.clone() }
+            }
+        }
+    };
+}
+pub(crate) use impl_sub_both_ref;
+
+
+
+macro_rules! impl_add_lhs {
     ($lhs:ty, $rhs:ty, $out:ty) => {
         impl<T: Scalar> Add<$rhs> for $lhs {
             type Output = $out;
@@ -56,7 +82,33 @@ macro_rules! impl_add {
         }
     };
 }
-pub(crate) use impl_add;
+pub(crate) use impl_add_lhs;
+
+macro_rules! impl_add_rhs {
+    ($lhs:ty, $rhs:ty, $out:ty) => {
+        impl<T: Scalar> Add<$rhs> for $lhs {
+            type Output = $out;
+            fn add(self, rhs: $rhs) -> Self::Output {
+                Self::Output { data: &self.data + rhs.data, context: rhs.context }
+            }
+        }
+    };
+}
+pub(crate) use impl_add_rhs;
+
+macro_rules! impl_add_both_ref {
+    ($lhs:ty, $rhs:ty, $out:ty) => {
+        impl<T: Scalar> Add<$rhs> for $lhs {
+            type Output = $out;
+            fn add(self, rhs: $rhs) -> Self::Output {
+                Self::Output { data: &self.data + &rhs.data, context: self.context.clone() }
+            }
+        }
+    };
+}
+pub(crate) use impl_add_both_ref;
+
+
 
 macro_rules! impl_index {
     ($lhs:ty) => {

@@ -159,8 +159,6 @@ pub use linear_solver::{faer::sparse_lu::FaerSparseLU, FaerLU, NalgebraLU};
 
 pub use context::{Context, faer::FaerContext, nalgebra::NalgebraContext};
 
-pub use matrix::sparse_faer::SparseColMat;
-
 #[cfg(feature = "suitesparse")]
 pub use linear_solver::suitesparse::klu::KLU;
 
@@ -177,7 +175,8 @@ use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
     DenseMatrix, MatrixCommon, MatrixHost, MatrixRef, MatrixView, MatrixViewMut,
     dense_faer_serial::{FaerMat, FaerMatMut, FaerMatRef},
-    sparse_faer_serial::FaerSparseMat,
+    sparse_faer::FaerSparseMat,
+    dense_nalgebra_serial::{NalgebraMat, NalgebraMatMut, NalgebraMatRef},
 };
 use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus, root::RootFinder,

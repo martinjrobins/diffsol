@@ -4,7 +4,7 @@ use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 use crate::error::DiffsolError;
 use crate::scalar::Scale;
 use crate::vector::VectorHost;
-use crate::{IndexType, Scalar, Vector, Context};
+use crate::{Context, IndexType, Scalar, Vector, VectorIndex};
 
 use extract_block::combine;
 use num_traits::{One, Zero};
@@ -27,7 +27,7 @@ pub mod sparsity;
 mod utils;
 
 pub trait MatrixCommon: Sized + Debug {
-    type V: Vector<T = Self::T, C = Self::C>;
+    type V: Vector<T = Self::T, C = Self::C, Index: VectorIndex<C = Self::C>>;
     type T: Scalar;
     type C: Context;
 
@@ -130,7 +130,7 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
     fn context(&self) -> &Self::C;
 
     fn is_sparse() -> bool {
-        Self::zeros(1, 1).sparsity().is_some()
+        Self::zeros(1, 1, Default::default()).sparsity().is_some()
     }
 
     fn partition_indices_by_zero_diagonal(
@@ -201,14 +201,14 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
     ) -> [(Self, <Self::V as Vector>::Index); 4] {
         match self.sparsity() {
             Some(sp) => sp.split(algebraic_indices).map(|(sp, src_indices)| {
-                let mut m = Self::new_from_sparsity(sp.nrows(), sp.ncols(), Some(sp), self.context());
+                let mut m = Self::new_from_sparsity(sp.nrows(), sp.ncols(), Some(sp), self.context().clone());
                 m.gather(self, &src_indices);
                 (m, src_indices)
             }),
             None => Dense::<Self>::new(self.nrows(), self.ncols())
                 .split(algebraic_indices)
                 .map(|(sp, src_indices)| {
-                    let mut m = Self::new_from_sparsity(sp.nrows(), sp.ncols(), None, self.context());
+                    let mut m = Self::new_from_sparsity(sp.nrows(), sp.ncols(), None, self.context().clone());
                     m.gather(self, &src_indices);
                     (m, src_indices)
                 }),
@@ -294,10 +294,10 @@ pub trait DenseMatrix:
     fn get_index(&self, i: IndexType, j: IndexType) -> Self::T;
 
     /// mat_mat_mul using gemm, allocating a new matrix
-    fn mat_mul(&self, b: &Self) -> Self {
+    fn mat_mul(&self, b: &Self, ctx: Self::C) -> Self {
         let nrows = self.nrows();
         let ncols = b.ncols();
-        let mut ret = Self::zeros(nrows, ncols);
+        let mut ret = Self::zeros(nrows, ncols, ctx);
         ret.gemm(Self::T::one(), self, b, Self::T::zero());
         ret
     }

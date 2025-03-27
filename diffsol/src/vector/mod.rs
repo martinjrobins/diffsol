@@ -19,6 +19,7 @@ mod utils;
 
 pub trait VectorIndex: Sized + Debug + Clone {
     type C: Context;
+    fn context(&self) -> &Self::C;
     fn zeros(len: IndexType, ctx: Self::C) -> Self;
     fn len(&self) -> IndexType;
     fn clone_as_vec(&self) -> Vec<IndexType>;

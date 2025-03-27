@@ -23,8 +23,8 @@ macro_rules! gen_find_non_zeros_nonlinear {
             x: &F::V,
             t: F::T,
         ) -> Vec<(usize, usize)> {
-            let mut v = F::V::zeros(op.nstates(), op.context());
-            let mut col = F::V::zeros(op.nout(), op.context());
+            let mut v = F::V::zeros(op.nstates(), op.context().clone());
+            let mut col = F::V::zeros(op.nout(), op.context().clone());
             let mut triplets = Vec::with_capacity(op.nstates());
             for j in 0..op.nstates() {
                 v.set_index(j, F::T::NAN);
@@ -73,8 +73,8 @@ macro_rules! gen_find_non_zeros_linear {
         ///       to allow for more efficient implementations. It's ok for now since this is only used once
         ///       during the setup phase.
         pub fn $name<F: LinearOp + ?Sized $(+ $op_trait)?>(op: &F, t: F::T) -> Vec<(usize, usize)> {
-            let mut v = F::V::zeros(op.nstates(), op.context());
-            let mut col = F::V::zeros(op.nout(), op.context());
+            let mut v = F::V::zeros(op.nstates(), op.context().clone());
+            let mut col = F::V::zeros(op.nout(), op.context().clone());
             let mut triplets = Vec::with_capacity(op.nstates());
             for j in 0..op.nstates() {
                 v.set_index(j, F::T::NAN);
@@ -113,7 +113,7 @@ pub struct JacobianColoring<M: Matrix> {
 }
 
 impl<M: Matrix> JacobianColoring<M> {
-    pub fn new(sparsity: &impl MatrixSparsity<M>, non_zeros: &[(usize, usize)]) -> Self {
+    pub fn new(sparsity: &impl MatrixSparsity<M>, non_zeros: &[(usize, usize)], ctx: M::C) -> Self {
         let ncols = sparsity.ncols();
         let graph = nonzeros2graph(non_zeros, ncols);
         let coloring = color_graph_greedy(&graph);
@@ -133,10 +133,10 @@ impl<M: Matrix> JacobianColoring<M> {
                 }
             }
             let dst_indices = sparsity.get_index(indices.as_slice());
-            let src_indices = <M::V as Vector>::Index::from_vec(rows);
+            let src_indices = <M::V as Vector>::Index::from_vec(rows, ctx.clone());
             let unique_cols: HashSet<_> = HashSet::from_iter(cols.iter().cloned());
             let unique_cols = unique_cols.into_iter().collect::<Vec<_>>();
-            let input_indices = <M::V as Vector>::Index::from_vec(unique_cols);
+            let input_indices = <M::V as Vector>::Index::from_vec(unique_cols, ctx.clone());
             dst_indices_per_color.push(dst_indices);
             src_indices_per_color.push(src_indices);
             input_indices_per_color.push(input_indices);
@@ -158,15 +158,15 @@ impl<M: Matrix> JacobianColoring<M> {
     //    Self::new_from_non_zeros(op, non_zeros)
     //}
 
-    pub fn jacobian_inplace<F: NonLinearOpJacobian<M = M, V = M::V, T = M::T>>(
+    pub fn jacobian_inplace<F: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>>(
         &self,
         op: &F,
         x: &F::V,
         t: F::T,
         y: &mut F::M,
     ) {
-        let mut v = F::V::zeros(op.nstates(), op.context());
-        let mut col = F::V::zeros(op.nout(), op.context());
+        let mut v = F::V::zeros(op.nstates(), op.context().clone());
+        let mut col = F::V::zeros(op.nout(), op.context().clone());
         for c in 0..self.dst_indices_per_color.len() {
             let input = &self.input_indices_per_color[c];
             let dst_indices = &self.dst_indices_per_color[c];
@@ -178,15 +178,15 @@ impl<M: Matrix> JacobianColoring<M> {
         }
     }
 
-    pub fn adjoint_inplace<F: NonLinearOpAdjoint<M = M, V = M::V, T = M::T>>(
+    pub fn adjoint_inplace<F: NonLinearOpAdjoint<M = M, V = M::V, T = M::T, C = M::C>>(
         &self,
         op: &F,
         x: &F::V,
         t: F::T,
         y: &mut F::M,
     ) {
-        let mut v = F::V::zeros(op.nstates(), op.context());
-        let mut col = F::V::zeros(op.nout(), op.context());
+        let mut v = F::V::zeros(op.nstates(), op.context().clone());
+        let mut col = F::V::zeros(op.nout(), op.context().clone());
         for c in 0..self.dst_indices_per_color.len() {
             let input = &self.input_indices_per_color[c];
             let dst_indices = &self.dst_indices_per_color[c];
@@ -198,15 +198,15 @@ impl<M: Matrix> JacobianColoring<M> {
         }
     }
 
-    pub fn sens_adjoint_inplace<F: NonLinearOpSensAdjoint<M = M, V = M::V, T = M::T>>(
+    pub fn sens_adjoint_inplace<F: NonLinearOpSensAdjoint<M = M, V = M::V, T = M::T, C = M::C>>(
         &self,
         op: &F,
         x: &F::V,
         t: F::T,
         y: &mut F::M,
     ) {
-        let mut v = F::V::zeros(op.nstates(), op.context());
-        let mut col = F::V::zeros(op.nout(), op.context());
+        let mut v = F::V::zeros(op.nstates(), op.context().clone());
+        let mut col = F::V::zeros(op.nout(), op.context().clone());
         for c in 0..self.dst_indices_per_color.len() {
             let input = &self.input_indices_per_color[c];
             let dst_indices = &self.dst_indices_per_color[c];
@@ -218,14 +218,14 @@ impl<M: Matrix> JacobianColoring<M> {
         }
     }
 
-    pub fn matrix_inplace<F: LinearOp<M = M, V = M::V, T = M::T>>(
+    pub fn matrix_inplace<F: LinearOp<M = M, V = M::V, T = M::T, C = M::C>>(
         &self,
         op: &F,
         t: F::T,
         y: &mut F::M,
     ) {
-        let mut v = F::V::zeros(op.nstates(), op.context());
-        let mut col = F::V::zeros(op.nout(), op.context());
+        let mut v = F::V::zeros(op.nstates(), op.context().clone());
+        let mut col = F::V::zeros(op.nout(), op.context().clone());
         for c in 0..self.dst_indices_per_color.len() {
             let input = &self.input_indices_per_color[c];
             let dst_indices = &self.dst_indices_per_color[c];
@@ -242,6 +242,7 @@ impl<M: Matrix> JacobianColoring<M> {
 mod tests {
 
     use crate::jacobian::{find_jacobian_non_zeros, JacobianColoring};
+    use crate::matrix::dense_nalgebra_serial::NalgebraMat;
     use crate::matrix::Matrix;
     use crate::op::linear_closure::LinearClosure;
     use crate::op::ParameterisedOp;
@@ -251,7 +252,7 @@ mod tests {
         op::closure::Closure,
         LinearOp, Op,
     };
-    use crate::{scale, NonLinearOpJacobian, SparseColMat};
+    use crate::{scale, NonLinearOpJacobian, FaerSparseMat};
     use nalgebra::DMatrix;
     use num_traits::{One, Zero};
     use std::ops::MulAssign;
@@ -286,8 +287,9 @@ mod tests {
             nstates,
             nout,
             p.len(),
+            p.context().clone(),
         );
-        let y0 = M::V::zeros(nstates, p.context());
+        let y0 = M::V::zeros(nstates, p.context().clone());
         let t0 = M::T::zero();
         ret.calculate_sparsity(&y0, t0, p);
         ret
@@ -341,7 +343,7 @@ mod tests {
         for triplets in test_triplets {
             let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), &p, 2, 2);
             let op = ParameterisedOp::new(&op, &p);
-            let non_zeros = find_jacobian_non_zeros(&op, &M::V::zeros(2, p.context()), M::T::zero());
+            let non_zeros = find_jacobian_non_zeros(&op, &M::V::zeros(2, p.context().clone()), M::T::zero());
             let expect = triplets
                 .iter()
                 .map(|(i, j, _v)| (*i, *j))
@@ -352,12 +354,12 @@ mod tests {
 
     #[test]
     fn find_non_zeros_dmatrix() {
-        find_non_zeros::<DMatrix<f64>>();
+        find_non_zeros::<NalgebraMat<f64>>();
     }
 
     #[test]
     fn find_non_zeros_faer_sparse() {
-        find_non_zeros::<SparseColMat<f64>>();
+        find_non_zeros::<FaerSparseMat<f64>>();
     }
 
     fn build_coloring<M: Matrix>() {
@@ -381,7 +383,7 @@ mod tests {
         for (triplets, expect) in test_triplets.iter().zip(expect) {
             let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), &p, 2, 2);
             let op = ParameterisedOp::new(&op, &p);
-            let non_zeros = find_jacobian_non_zeros(&op, &M::V::zeros(2, p.context()), M::T::zero());
+            let non_zeros = find_jacobian_non_zeros(&op, &M::V::zeros(2, p.context().clone()), M::T::zero());
             let ncols = op.nstates();
             let graph = nonzeros2graph(non_zeros.as_slice(), ncols);
             let coloring = color_graph_greedy(&graph);
@@ -392,12 +394,12 @@ mod tests {
 
     #[test]
     fn build_coloring_dmatrix() {
-        build_coloring::<DMatrix<f64>>();
+        build_coloring::<NalgebraMat<f64>>();
     }
 
     #[test]
     fn build_coloring_faer_sparse() {
-        build_coloring::<SparseColMat<f64>>();
+        build_coloring::<FaerSparseMat<f64>>();
     }
 
     fn matrix_coloring<M: Matrix>() {
@@ -422,25 +424,25 @@ mod tests {
         for triplets in test_triplets.iter() {
             let op = helper_triplets2op_nonlinear::<M>(triplets.as_slice(), &p, n, n);
             let op = ParameterisedOp::new(&op, &p);
-            let y0 = M::V::zeros(n, p.context());
+            let y0 = M::V::zeros(n, p.context().clone());
             let t0 = M::T::zero();
             let nonzeros = triplets
                 .iter()
                 .map(|(i, j, _v)| (*i, *j))
                 .collect::<Vec<_>>();
-            let coloring = JacobianColoring::new(&op.jacobian_sparsity().unwrap(), &nonzeros);
-            let mut jac = M::new_from_sparsity(3, 3, op.jacobian_sparsity());
+            let coloring = JacobianColoring::new(&op.jacobian_sparsity().unwrap(), &nonzeros, p.context().clone());
+            let mut jac = M::new_from_sparsity(3, 3, op.jacobian_sparsity(), p.context().clone());
             coloring.jacobian_inplace(&op, &y0, t0, &mut jac);
-            let mut gemv1 = M::V::zeros(n, p.context());
-            let v = M::V::from_element(3, M::T::one(), p.context());
+            let mut gemv1 = M::V::zeros(n, p.context().clone());
+            let v = M::V::from_element(3, M::T::one(), p.context().clone());
             op.jac_mul_inplace(&y0, t0, &v, &mut gemv1);
-            let mut gemv2 = M::V::zeros(n, p.context());
+            let mut gemv2 = M::V::zeros(n, p.context().clone());
             jac.gemv(M::T::one(), &v, M::T::zero(), &mut gemv2);
             gemv1.assert_eq_st(&gemv2, M::T::from(1e-10));
         }
 
         // test linear functions
-        let p = M::V::zeros(0, p.context());
+        let p = M::V::zeros(0, p.context().clone());
         for triplets in test_triplets {
             let op = helper_triplets2op_linear::<M>(triplets.as_slice(), &p, n, n);
             let op = ParameterisedOp::new(&op, &p);
@@ -449,13 +451,13 @@ mod tests {
                 .iter()
                 .map(|(i, j, _v)| (*i, *j))
                 .collect::<Vec<_>>();
-            let coloring = JacobianColoring::new(&op.sparsity().unwrap(), &nonzeros);
-            let mut jac = M::new_from_sparsity(3, 3, op.sparsity());
+            let coloring = JacobianColoring::new(&op.sparsity().unwrap(), &nonzeros, p.context().clone());
+            let mut jac = M::new_from_sparsity(3, 3, op.sparsity(), p.context().clone());
             coloring.matrix_inplace(&op, t0, &mut jac);
-            let mut gemv1 = M::V::zeros(n, p.context());
-            let v = M::V::from_element(3, M::T::one(), p.context());
+            let mut gemv1 = M::V::zeros(n, p.context().clone());
+            let v = M::V::from_element(3, M::T::one(), p.context().clone());
             op.gemv_inplace(&v, t0, M::T::zero(), &mut gemv1);
-            let mut gemv2 = M::V::zeros(n, p.context());
+            let mut gemv2 = M::V::zeros(n, p.context().clone());
             jac.gemv(M::T::one(), &v, M::T::zero(), &mut gemv2);
             gemv1.assert_eq_st(&gemv2, M::T::from(1e-10));
         }
@@ -463,11 +465,11 @@ mod tests {
 
     #[test]
     fn matrix_coloring_dmatrix() {
-        matrix_coloring::<DMatrix<f64>>();
+        matrix_coloring::<NalgebraMat<f64>>();
     }
 
     #[test]
     fn matrix_coloring_faer_sparse() {
-        matrix_coloring::<SparseColMat<f64>>();
+        matrix_coloring::<FaerSparseMat<f64>>();
     }
 }

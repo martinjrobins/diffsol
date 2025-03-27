@@ -197,9 +197,9 @@ impl<T: Scalar> Matrix for NalgebraMat<T> {
         let data = DMatrix::zeros(nrows, ncols);
         Self { data, context: ctx }
     }
-    fn from_diagonal(v: &Self::V, ctx: Self::C) -> Self {
-        let data = DMatrix::from_diagonal(v);
-        Self { data, context: ctx }
+    fn from_diagonal(v: &Self::V) -> Self {
+        let data = DMatrix::from_diagonal(&v.data);
+        Self { data, context: v.context().clone() }
     }
 
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {

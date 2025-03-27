@@ -75,10 +75,11 @@ pub mod tests {
         M::V,
         Vec<LinearSolveSolution<M::V>>,
     ) {
-        let diagonal = M::V::from_vec(vec![2.0.into(), 2.0.into()]);
+        let diagonal = M::V::from_vec(vec![2.0.into(), 2.0.into()], Default::default());
         let jac1 = M::from_diagonal(&diagonal);
         let jac2 = M::from_diagonal(&diagonal);
-        let p = M::V::zeros(0, Default::default());
+        let ctx = M::C::default();
+        let p = M::V::zeros(0, ctx.clone());
         let mut op = Closure::new(
             // f = J * x
             move |x, _p, _t, y| jac1.gemv(M::T::one(), x, M::T::zero(), y),
@@ -86,13 +87,14 @@ pub mod tests {
             2,
             2,
             p.len(),
+            ctx.clone(), 
         );
-        op.calculate_sparsity(&M::V::from_element(2, M::T::one(), op.context()), M::T::zero(), &p);
+        op.calculate_sparsity(&M::V::from_element(2, M::T::one(), ctx.clone()), M::T::zero(), &p);
         let rtol = M::T::from(1e-6);
-        let atol = M::V::from_vec(vec![1e-6.into(), 1e-6.into()], op.context());
+        let atol = M::V::from_vec(vec![1e-6.into(), 1e-6.into()], ctx.clone());
         let solns = vec![LinearSolveSolution::new(
-            M::V::from_vec(vec![2.0.into(), 4.0.into()], op.context()),
-            M::V::from_vec(vec![1.0.into(), 2.0.into()], op.context()),
+            M::V::from_vec(vec![2.0.into(), 4.0.into()], ctx.clone()),
+            M::V::from_vec(vec![1.0.into(), 2.0.into()], ctx.clone()),
         )];
         (op, rtol, atol, solns)
     }
@@ -108,7 +110,7 @@ pub mod tests {
         for<'b> &'b C::V: VectorRef<C::V>,
     {
         solver.set_problem(&op);
-        let x = C::V::zeros(op.nout());
+        let x = C::V::zeros(op.nout(), op.context().clone());
         let t = C::T::zero();
         solver.set_linearisation(&op, &x, t);
         for soln in solns {

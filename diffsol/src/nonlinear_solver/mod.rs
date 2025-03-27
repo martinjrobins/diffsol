@@ -15,7 +15,7 @@ impl<V> NonLinearSolveSolution<V> {
 /// A solver for the nonlinear problem `F(x) = 0`.
 pub trait NonLinearSolver<M: Matrix>: Default {
     /// Set the problem to be solved, any previous problem is discarded.
-    fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(&mut self, op: &C);
+    fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(&mut self, op: &C);
 
     /// Reset the approximation of the Jacobian matrix.
     fn reset_jacobian<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
@@ -63,10 +63,7 @@ pub mod root;
 pub mod tests {
     use self::newton::NewtonNonlinearSolver;
     use crate::{
-        linear_solver::nalgebra::lu::LU,
-        matrix::MatrixCommon,
-        op::{closure::Closure, ParameterisedOp},
-        scale, DenseMatrix, Vector,
+        linear_solver::nalgebra::lu::LU, matrix::{dense_nalgebra_serial::NalgebraMat, MatrixCommon}, op::{closure::Closure, ParameterisedOp}, scale, DenseMatrix, NalgebraVec, Vector, Op
     };
 
     use super::*;
@@ -86,10 +83,10 @@ pub mod tests {
     where
         M: DenseMatrix + 'static,
     {
-        let jac1 = M::from_diagonal(&M::V::from_vec(vec![2.0.into(), 2.0.into()]));
+        let jac1 = M::from_diagonal(&M::V::from_vec(vec![2.0.into(), 2.0.into()], Default::default()));
         let jac2 = jac1.clone();
-        let p = M::V::zeros(0);
-        let eights = M::V::from_vec(vec![8.0.into(), 8.0.into()]);
+        let p = M::V::zeros(0, jac1.context().clone());
+        let eights = M::V::from_vec(vec![8.0.into(), 8.0.into()], jac1.context().clone());
         let op = Closure::new(
             // 0 = J * x * x - 8
             move |x: &<M as MatrixCommon>::V, _p: &<M as MatrixCommon>::V, _t, y| {
@@ -105,12 +102,13 @@ pub mod tests {
             2,
             2,
             p.len(),
+            p.context().clone(),
         );
         let rtol = M::T::from(1e-6);
-        let atol = M::V::from_vec(vec![1e-6.into(), 1e-6.into()]);
+        let atol = M::V::from_vec(vec![1e-6.into(), 1e-6.into()], p.context().clone());
         let solns = vec![NonLinearSolveSolution::new(
-            M::V::from_vec(vec![2.1.into(), 2.1.into()]),
-            M::V::from_vec(vec![2.0.into(), 2.0.into()]),
+            M::V::from_vec(vec![2.1.into(), 2.1.into()], p.context().clone()),
+            M::V::from_vec(vec![2.0.into(), 2.0.into()], p.context().clone()),
         )];
         (op, rtol, atol, solns)
     }
@@ -137,13 +135,13 @@ pub mod tests {
         }
     }
 
-    type MCpu = nalgebra::DMatrix<f64>;
+    type MCpu = NalgebraMat<f64>;
 
     #[test]
     fn test_newton_cpu_square() {
         let lu = LU::default();
         let (op, rtol, atol, soln) = get_square_problem::<MCpu>();
-        let p = nalgebra::DVector::zeros(0);
+        let p = NalgebraVec::zeros(0, op.context().clone());
         let op = ParameterisedOp::new(&op, &p);
         let s = NewtonNonlinearSolver::new(lu);
         test_nonlinear_solver(s, op, rtol, &atol, soln);

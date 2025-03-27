@@ -3,7 +3,7 @@ use std::ops::{Div, Index, IndexMut, Mul, MulAssign, SubAssign, AddAssign, Sub, 
 use nalgebra::{DVector, DVectorView, DVectorViewMut, LpNorm};
 use super::utils::*;
 
-use crate::{IndexType, Scalar, Scale, VectorHost, NalgebraContext};
+use crate::{IndexType, Scalar, Scale, VectorHost, NalgebraContext, NalgebraMat};
 
 use super::{DefaultDenseMatrix, Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
 
@@ -47,7 +47,7 @@ macro_rules! impl_mul_scalar {
             type Output = $out;
             fn mul(self, rhs: Scale<T>) -> Self::Output {
                 let scale: $scalar = rhs.value();
-                Self::Output { data: self.data * scale, context: self.context }
+                Self::Output { data: &self.data * scale, context: self.context.clone() }
             }
         }
     };
@@ -77,6 +77,7 @@ macro_rules! impl_mul_assign_scalar {
 }
 
 impl_mul_scalar!(NalgebraVec<T>, NalgebraVec<T>, T);
+impl_mul_scalar!(&NalgebraVec<T>, NalgebraVec<T>, T);
 impl_mul_scalar!(NalgebraVecRef<'_, T>, NalgebraVec<T>, T);
 impl_mul_scalar!(NalgebraVecMut<'_, T>, NalgebraVec<T>, T);
 impl_div_scalar!(NalgebraVec<T>, NalgebraVec<T>, T);
@@ -103,25 +104,35 @@ impl_add_assign!(NalgebraVecMut<'_, T>, &NalgebraVec<T>);
 impl_add_assign!(NalgebraVecMut<'_, T>, NalgebraVecRef<'_, T>);
 impl_add_assign!(NalgebraVecMut<'_, T>, &NalgebraVecRef<'_, T>);
 
-impl_sub!(NalgebraVec<T>, NalgebraVec<T>, NalgebraVec<T>);
-impl_sub!(NalgebraVec<T>, &NalgebraVec<T>, NalgebraVec<T>);
-impl_sub!(NalgebraVec<T>, NalgebraVecRef<'_, T>, NalgebraVec<T>);
-impl_sub!(NalgebraVec<T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
+impl_sub_both_ref!(&NalgebraVec<T>, &NalgebraVec<T>, NalgebraVec<T>);
+impl_sub_rhs!(&NalgebraVec<T>, NalgebraVec<T>, NalgebraVec<T>);
+impl_sub_both_ref!(&NalgebraVec<T>, NalgebraVecRef<'_, T>, NalgebraVec<T>);
+impl_sub_both_ref!(&NalgebraVec<T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
 
-impl_sub!(NalgebraVecRef<'_, T>, NalgebraVec<T>, NalgebraVec<T>);
-impl_sub!(NalgebraVecRef<'_, T>, &NalgebraVec<T>, NalgebraVec<T>);
-impl_sub!(NalgebraVecRef<'_, T>, NalgebraVecRef<'_, T>, NalgebraVec<T>);
-impl_sub!(NalgebraVecRef<'_, T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
+impl_sub_lhs!(NalgebraVec<T>, NalgebraVec<T>, NalgebraVec<T>);
+impl_sub_lhs!(NalgebraVec<T>, &NalgebraVec<T>, NalgebraVec<T>);
+impl_sub_lhs!(NalgebraVec<T>, NalgebraVecRef<'_, T>, NalgebraVec<T>);
+impl_sub_lhs!(NalgebraVec<T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
 
-impl_add!(NalgebraVec<T>, NalgebraVec<T>, NalgebraVec<T>);
-impl_add!(NalgebraVec<T>, &NalgebraVec<T>, NalgebraVec<T>);
-impl_add!(NalgebraVec<T>, NalgebraVecRef<'_, T>, NalgebraVec<T>);
-impl_add!(NalgebraVec<T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
+impl_sub_rhs!(NalgebraVecRef<'_, T>, NalgebraVec<T>, NalgebraVec<T>);
+impl_sub_both_ref!(NalgebraVecRef<'_, T>, &NalgebraVec<T>, NalgebraVec<T>);
+impl_sub_both_ref!(NalgebraVecRef<'_, T>, NalgebraVecRef<'_, T>, NalgebraVec<T>);
+impl_sub_both_ref!(NalgebraVecRef<'_, T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
 
-impl_add!(NalgebraVecRef<'_, T>, NalgebraVec<T>, NalgebraVec<T>);
-impl_add!(NalgebraVecRef<'_, T>, &NalgebraVec<T>, NalgebraVec<T>);
-impl_add!(NalgebraVecRef<'_, T>, NalgebraVecRef<'_, T>, NalgebraVec<T>);
-impl_add!(NalgebraVecRef<'_, T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
+impl_add_both_ref!(&NalgebraVec<T>, &NalgebraVec<T>, NalgebraVec<T>);
+impl_add_rhs!(&NalgebraVec<T>, NalgebraVec<T>, NalgebraVec<T>);
+impl_add_both_ref!(&NalgebraVec<T>, NalgebraVecRef<'_, T>, NalgebraVec<T>);
+impl_add_both_ref!(&NalgebraVec<T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
+
+impl_add_lhs!(NalgebraVec<T>, NalgebraVec<T>, NalgebraVec<T>);
+impl_add_lhs!(NalgebraVec<T>, &NalgebraVec<T>, NalgebraVec<T>);
+impl_add_lhs!(NalgebraVec<T>, NalgebraVecRef<'_, T>, NalgebraVec<T>);
+impl_add_lhs!(NalgebraVec<T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
+
+impl_add_rhs!(NalgebraVecRef<'_, T>, NalgebraVec<T>, NalgebraVec<T>);
+impl_add_both_ref!(NalgebraVecRef<'_, T>, &NalgebraVec<T>, NalgebraVec<T>);
+impl_add_both_ref!(NalgebraVecRef<'_, T>, NalgebraVecRef<'_, T>, NalgebraVec<T>);
+impl_add_both_ref!(NalgebraVecRef<'_, T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
 
 impl_index!(NalgebraVec<T>);
 

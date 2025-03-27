@@ -290,10 +290,10 @@ impl<T: Scalar> Matrix for FaerMat<T> {
     fn copy_from(&mut self, other: &Self) {
         self.data.copy_from(&other.data);
     }
-    fn from_diagonal(v: &Self::V, ctx: Self::C) -> Self {
+    fn from_diagonal(v: &Self::V) -> Self {
         let dim = v.len();
         let data = Mat::from_fn(dim, dim, |i, j| if i == j { v[i] } else { T::zero() });
-        Self { data, context: ctx }
+        Self { data, context: v.context().clone() }
     }
     fn partition_indices_by_zero_diagonal(
         &self,

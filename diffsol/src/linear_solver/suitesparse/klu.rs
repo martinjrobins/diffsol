@@ -1,4 +1,3 @@
-use faer::Col;
 use std::cell::RefCell;
 
 #[cfg(target_pointer_width = "32")]
@@ -27,7 +26,7 @@ use crate::{
     linear_solver_error,
     matrix::MatrixCommon,
     vector::Vector,
-    Matrix, NonLinearOpJacobian, SparseColMat,
+    Matrix, NonLinearOpJacobian, FaerSparseMat, FaerVec,
 };
 
 trait MatrixKLU: Matrix<T = f64> {
@@ -36,19 +35,19 @@ trait MatrixKLU: Matrix<T = f64> {
     fn values_mut_ptr(&mut self) -> *mut f64;
 }
 
-impl MatrixKLU for SparseColMat<f64> {
+impl MatrixKLU for FaerSparseMat<f64> {
     fn column_pointers_mut_ptr(&mut self) -> *mut KluIndextype {
-        let ptrs = self.faer().symbolic().col_ptr();
+        let ptrs = self.data.symbolic().col_ptr();
         ptrs.as_ptr() as *mut KluIndextype
     }
 
     fn row_indices_mut_ptr(&mut self) -> *mut KluIndextype {
-        let indices = self.faer().symbolic().row_idx();
+        let indices = self.data.symbolic().row_idx();
         indices.as_ptr() as *mut KluIndextype
     }
 
     fn values_mut_ptr(&mut self) -> *mut f64 {
-        let values = self.faer().val();
+        let values = self.data.val();
         values.as_ptr() as *mut f64
     }
 }
@@ -57,9 +56,9 @@ trait VectorKLU: Vector {
     fn values_mut_ptr(&mut self) -> *mut f64;
 }
 
-impl VectorKLU for Col<f64> {
+impl VectorKLU for FaerVec<f64> {
     fn values_mut_ptr(&mut self) -> *mut f64 {
-        self.as_mut().as_ptr_mut()
+        self.data.as_mut().as_ptr_mut()
     }
 }
 
@@ -221,10 +220,10 @@ where
         Ok(())
     }
 
-    fn set_problem<C: NonLinearOpJacobian<T = M::T, V = M::V, M = M>>(&mut self, op: &C) {
+    fn set_problem<C: NonLinearOpJacobian<T = M::T, V = M::V, M = M, C = M::C>>(&mut self, op: &C) {
         let ncols = op.nstates();
         let nrows = op.nout();
-        let mut matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity());
+        let mut matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), op.context().clone());
         let mut klu_common = self.klu_common.borrow_mut();
         self.klu_symbolic = KluSymbolic::try_from_matrix(&mut matrix, klu_common.as_mut()).ok();
         self.matrix = Some(matrix);
@@ -236,15 +235,15 @@ mod tests {
     use crate::{
         linear_solver::tests::{linear_problem, test_linear_solver},
         op::ParameterisedOp,
-        SparseColMat,
+        FaerSparseMat, Op,
     };
 
     use super::*;
 
     #[test]
     fn test_klu() {
-        let (op, rtol, atol, solns) = linear_problem::<SparseColMat<f64>>();
-        let p = faer::Col::zeros(0);
+        let (op, rtol, atol, solns) = linear_problem::<FaerSparseMat<f64>>();
+        let p = FaerVec::zeros(0, op.context().clone());
         let op = ParameterisedOp::new(&op, &p);
         let s = KLU::default();
         test_linear_solver(s, op, rtol, &atol, solns);
