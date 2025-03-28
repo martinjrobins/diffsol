@@ -1026,7 +1026,7 @@ fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
 
 #[allow(clippy::type_complexity)]
 pub fn foodweb_problem<M, const NX: usize>() -> (
-    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 )
 where

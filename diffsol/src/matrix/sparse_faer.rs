@@ -7,7 +7,7 @@ use super::sparsity::MatrixSparsityRef;
 use super::{Matrix, MatrixCommon, MatrixSparsity};
 use crate::error::{DiffsolError, MatrixError};
 use crate::{DefaultSolver, FaerSparseLU, IndexType, Scalar, Scale};
-use crate::{Vector, VectorIndex, FaerContext, FaerVec};
+use crate::{Vector, VectorIndex, FaerContext, FaerVec, FaerVecIndex};
 
 use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::sparse::ops::{ternary_op_assign_into, union_symbolic};
@@ -105,7 +105,7 @@ impl<T: Scalar> MatrixSparsity<FaerSparseMat<T>> for SymbolicSparseColMat<IndexT
     fn get_index(
         &self,
         indices: &[(IndexType, IndexType)],
-        _ctx: FaerContext,
+        ctx: FaerContext,
     ) -> <<FaerSparseMat<T> as MatrixCommon>::V as Vector>::Index {
         let col_ptrs = self.col_ptr();
         let row_indices = self.row_idx();
@@ -125,7 +125,7 @@ impl<T: Scalar> MatrixSparsity<FaerSparseMat<T>> for SymbolicSparseColMat<IndexT
                 }
             }
         }
-        ret
+        FaerVecIndex { data: ret, context: ctx }
     }
 }
 
@@ -154,6 +154,7 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, FaerSparseMat<T>> for SymbolicSparseCo
         <<FaerSparseMat<T> as MatrixCommon>::V as Vector>::Index,
     ); 4] {
         let (_ni, _nj, col_ptrs, _col_nnz, row_idx) = self.parts();
+        let ctx = indices.context();
         let (ul_blk, ur_blk, ll_blk, lr_blk) = CscBlock::split(row_idx, col_ptrs, indices);
         let ul_sym = SymbolicSparseColMat::new_checked(
             ul_blk.nrows,
@@ -184,10 +185,10 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, FaerSparseMat<T>> for SymbolicSparseCo
             lr_blk.row_indices,
         );
         [
-            (ul_sym, ul_blk.src_indices),
-            (ur_sym, ur_blk.src_indices),
-            (ll_sym, ll_blk.src_indices),
-            (lr_sym, lr_blk.src_indices),
+            (ul_sym, FaerVecIndex { data: ul_blk.src_indices, context: ctx.clone() }),
+            (ur_sym, FaerVecIndex { data: ur_blk.src_indices, context: ctx.clone() }),
+            (ll_sym, FaerVecIndex { data: ll_blk.src_indices, context: ctx.clone() }),
+            (lr_sym, FaerVecIndex { data: lr_blk.src_indices, context: ctx.clone() }),
         ]
     }
 
@@ -216,7 +217,7 @@ impl<T: Scalar> Matrix for FaerSparseMat<T> {
     fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
         let dst_data = self.data.val_mut();
         let src_data = other.data.val();
-        for (dst_i, idx) in dst_data.iter_mut().zip(indices.iter()) {
+        for (dst_i, idx) in dst_data.iter_mut().zip(indices.data.iter()) {
             *dst_i = src_data[*idx];
         }
     }
@@ -228,7 +229,7 @@ impl<T: Scalar> Matrix for FaerSparseMat<T> {
         data: &Self::V,
     ) {
         let values = self.data.val_mut();
-        for (dst_i, src_i) in dst_indices.iter().zip(src_indices.iter()) {
+        for (dst_i, src_i) in dst_indices.data.iter().zip(src_indices.data.iter()) {
             values[*dst_i] = data[*src_i];
         }
     }

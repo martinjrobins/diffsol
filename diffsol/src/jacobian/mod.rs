@@ -316,6 +316,7 @@ mod tests {
             nstates,
             nout,
             p.len(),
+            p.context().clone(),
         );
         let t0 = M::T::zero();
         ret.calculate_sparsity(t0, p);

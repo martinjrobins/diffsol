@@ -34,7 +34,7 @@ mod tests {
         op::OpStatistics, AdjointOdeSolverMethod, CraneliftModule, DenseMatrix, MatrixCommon,
         MatrixHost, MatrixRef, NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeEquationsAdjoint,
         OdeEquationsImplicit, OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-        OdeSolverStopReason, Scale, VectorRef, VectorView, VectorViewMut,
+        OdeSolverStopReason, Scale, VectorRef, VectorView, VectorViewMut, Context
     };
     use crate::{
         ConstantOp, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp, Op, Vector,
@@ -187,7 +187,7 @@ mod tests {
     where
         DM: DenseMatrix,
     {
-        let mut ret = DM::V::zeros(2);
+        let mut ret = DM::V::zeros(2, soln.context().clone());
         for j in 0..soln.ncols() {
             let soln_j = soln.column(j);
             let data_j = data.column(j);
@@ -238,12 +238,13 @@ mod tests {
     {
         let nparams = problem.eqn.nparams();
         let nout = 2;
-        let mut dgdp = <Eqn::V as DefaultDenseMatrix>::M::zeros(nparams, nout);
+        let ctx = problem.eqn.context();
+        let mut dgdp = <Eqn::V as DefaultDenseMatrix>::M::zeros(nparams, nout, ctx.clone());
 
-        let mut p_0 = Eqn::V::zeros(nparams);
+        let mut p_0 = ctx.vector_zeros(nparams);
         problem.eqn.get_params(&mut p_0);
         let h_base = Eqn::T::from(1e-10);
-        let mut h = Eqn::V::from_element(nparams, h_base);
+        let mut h = Eqn::V::from_element(nparams, h_base, ctx.clone());
         h.axpy(h_base, &p_0, Eqn::T::one());
         let mut p_data = p_0.clone();
         p_data.axpy(Eqn::T::from(0.1), &p_0, Eqn::T::one());
@@ -293,7 +294,7 @@ mod tests {
         let nparams = dgdp_check.nrows();
         let dgdu = dsum_squaresdp(&forwards_soln, &data);
 
-        let atol = Eqn::V::from_element(nparams, Eqn::T::from(1e-6));
+        let atol = Eqn::V::from_element(nparams, Eqn::T::from(1e-6), data.context().clone());
         let rtol = Eqn::T::from(1e-6);
         let state = backwards_solver
             .solve_adjoint_backwards_pass(times, dgdu.iter().collect::<Vec<_>>().as_slice())
@@ -321,7 +322,7 @@ mod tests {
         Eqn::M: DefaultSolver,
     {
         let nout = backwards_solver.problem().eqn.nout();
-        let atol = Eqn::V::from_element(nout, Eqn::T::from(1e-6));
+        let atol = Eqn::V::from_element(nout, Eqn::T::from(1e-6), dgdp_check.context().clone());
         let rtol = Eqn::T::from(1e-6);
         let state = backwards_solver
             .solve_adjoint_backwards_pass(&[], &[])
@@ -484,10 +485,12 @@ mod tests {
     }
 
     pub fn test_problem<M: Matrix>() -> OdeSolverProblem<TestEqn<M>> {
+        let eqn = TestEqn::<M>::new();
+        let atol = eqn.context().vector_from_element(1, M::T::from(1e-6));
         OdeSolverProblem::new(
-            TestEqn::new(),
+            eqn,
             M::T::from(1e-6),
-            M::V::from_element(1, M::T::from(1e-6)),
+            atol,
             None,
             None,
             None,
@@ -530,8 +533,7 @@ mod tests {
     #[cfg(feature = "diffsl")]
     pub fn test_ball_bounce_problem<M: MatrixHost<T = f64>>(
     ) -> OdeSolverProblem<crate::DiffSl<M, CraneliftModule>> {
-        let eqn = crate::DiffSl::compile(
-            "
+        OdeBuilder::<M>::new().build_from_diffsl( "
             g { 9.81 } h { 10.0 }
             u_i {
                 x = h,
@@ -544,10 +546,7 @@ mod tests {
             stop {
                 x,
             }
-        ",
-        )
-        .unwrap();
-        OdeBuilder::<M>::new().build_from_eqn(eqn).unwrap()
+        ").unwrap()
     }
 
     #[cfg(feature = "diffsl")]

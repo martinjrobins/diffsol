@@ -47,7 +47,7 @@ pub fn dydt_y2_problem<M: DenseMatrix + 'static>(
             .iter()
             .map(|&y| y / (M::T::one() - y * t))
             .collect::<Vec<_>>();
-        soln.push(M::V::from_vec(y), t);
+        soln.push(problem.context().vector_from_vec(y), t);
     }
     (problem, soln)
 }

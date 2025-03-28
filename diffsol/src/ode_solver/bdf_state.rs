@@ -88,7 +88,7 @@ where
 impl<V, M> OdeSolverState<V> for BdfState<V, M>
 where
     V: Vector + DefaultDenseMatrix,
-    M: DenseMatrix<T = V::T, V = V>,
+    M: DenseMatrix<T = V::T, V = V, C = V::C>,
 {
     fn set_problem<Eqn: OdeEquations>(
         &mut self,
@@ -166,11 +166,12 @@ where
             h,
         } = state;
         let nstates = y.len();
-        let diff = M::zeros(nstates, Self::MAX_ORDER + 3);
-        let sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3); s.len()];
-        let gdiff = M::zeros(g.len(), Self::MAX_ORDER + 3);
+        let ctx = y.context();
+        let diff = M::zeros(nstates, Self::MAX_ORDER + 3, ctx.clone());
+        let sdiff = vec![M::zeros(nstates, Self::MAX_ORDER + 3, ctx.clone()); s.len()];
+        let gdiff = M::zeros(g.len(), Self::MAX_ORDER + 3, ctx.clone());
         let sgdiff = if !sg.is_empty() {
-            vec![M::zeros(sg[0].len(), Self::MAX_ORDER + 3); sg.len()]
+            vec![M::zeros(sg[0].len(), Self::MAX_ORDER + 3, ctx.clone()); sg.len()]
         } else {
             Vec::new()
         };

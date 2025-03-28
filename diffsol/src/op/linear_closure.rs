@@ -19,6 +19,7 @@ where
     coloring: Option<JacobianColoring<M>>,
     sparsity: Option<M::Sparsity>,
     statistics: RefCell<OpStatistics>,
+    ctx: M::C,
 }
 
 impl<M, F> LinearClosure<M, F>
@@ -26,7 +27,7 @@ where
     M: Matrix,
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
 {
-    pub fn new(func: F, nstates: usize, nout: usize, nparams: usize) -> Self {
+    pub fn new(func: F, nstates: usize, nout: usize, nparams: usize, ctx: M::C) -> Self {
         Self {
             func,
             nstates,
@@ -35,6 +36,7 @@ where
             nparams,
             coloring: None,
             sparsity: None,
+            ctx,
         }
     }
 
@@ -48,6 +50,7 @@ where
         self.coloring = Some(JacobianColoring::new(
             self.sparsity.as_ref().unwrap(),
             &non_zeros,
+            self.ctx.clone(),
         ));
     }
 }
@@ -60,6 +63,7 @@ where
     type V = M::V;
     type T = M::T;
     type M = M;
+    type C = M::C;
     fn nstates(&self) -> usize {
         self.nstates
     }
@@ -68,6 +72,9 @@ where
     }
     fn nparams(&self) -> usize {
         self.nparams
+    }
+    fn context(&self) -> &Self::C {
+        &self.ctx
     }
 
     fn statistics(&self) -> OpStatistics {

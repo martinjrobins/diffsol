@@ -229,7 +229,7 @@ impl<T: Scalar> Matrix for FaerMat<T> {
 
     fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
         assert_eq!(indices.len(), self.nrows() * self.ncols());
-        let mut idx = indices.iter().peekable();
+        let mut idx = indices.data.iter().peekable();
         for j in 0..self.ncols() {
             let other_col = other.data.col(*idx.peek().unwrap() / other.nrows());
             for self_ij in self.data.col_mut(j).iter_mut() {
@@ -245,7 +245,7 @@ impl<T: Scalar> Matrix for FaerMat<T> {
         src_indices: &<Self::V as Vector>::Index,
         data: &Self::V,
     ) {
-        for (dst_i, src_i) in dst_indices.iter().zip(src_indices.iter()) {
+        for (dst_i, src_i) in dst_indices.data.iter().zip(src_indices.data.iter()) {
             let i = dst_i % self.nrows();
             let j = dst_i / self.nrows();
             self.data[(i, j)] = data[*src_i];

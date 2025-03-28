@@ -162,9 +162,9 @@ impl<I: VectorIndex> ColMajBlock<I> {
             panic!("Matrix must be square");
         }
         let n = nrows;
-        let indices = indices.clone_as_vec();
+        let all_indices = indices.clone_as_vec();
         let mut cat = vec![false; n];
-        indices.iter().for_each(|&i| cat[i] = true);
+        all_indices.iter().for_each(|&i| cat[i] = true);
 
         let mut upper_indices = Vec::new();
         let mut lower_indices = Vec::new();

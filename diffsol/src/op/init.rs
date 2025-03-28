@@ -46,10 +46,10 @@ impl<'a, Eqn: OdeEquationsImplicit> InitOp<'a, Eqn> {
         let m_u = m_u * scale(-Eqn::T::one());
         let [_, (dfdv, _), _, (dgdv, _)] = rhs_jac.split(&algebraic_indices);
         let zero_ll =
-            <Eqn::M as Matrix>::zeros(algebraic_indices.len(), n - algebraic_indices.len());
+            <Eqn::M as Matrix>::zeros(algebraic_indices.len(), n - algebraic_indices.len(), eqn.context().clone());
         let zero_ur =
-            <Eqn::M as Matrix>::zeros(n - algebraic_indices.len(), algebraic_indices.len());
-        let zero_lr = <Eqn::M as Matrix>::zeros(algebraic_indices.len(), algebraic_indices.len());
+            <Eqn::M as Matrix>::zeros(n - algebraic_indices.len(), algebraic_indices.len(), eqn.context().clone());
+        let zero_lr = <Eqn::M as Matrix>::zeros(algebraic_indices.len(), algebraic_indices.len(), eqn.context().clone());
         let jac = Eqn::M::combine(&m_u, &dfdv, &zero_ll, &dgdv, &algebraic_indices);
         let neg_mass = Eqn::M::combine(&m_u, &zero_ur, &zero_ll, &zero_lr, &algebraic_indices);
 
@@ -76,6 +76,7 @@ impl<Eqn: OdeEquationsImplicit> Op for InitOp<'_, Eqn> {
     type V = Eqn::V;
     type T = Eqn::T;
     type M = Eqn::M;
+    type C = Eqn::C;
     fn nstates(&self) -> usize {
         self.eqn.rhs().nstates()
     }
@@ -84,6 +85,9 @@ impl<Eqn: OdeEquationsImplicit> Op for InitOp<'_, Eqn> {
     }
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
+    }
+    fn context(&self) -> &Self::C {
+        self.eqn.context()
     }
 }
 

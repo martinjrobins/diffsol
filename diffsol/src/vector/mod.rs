@@ -315,7 +315,7 @@ pub trait VectorHost:
 }
 
 pub trait DefaultDenseMatrix: Vector {
-    type M: DenseMatrix<V = Self, T = Self::T>;
+    type M: DenseMatrix<V = Self, T = Self::T, C = Self::C>;
 }
 
 #[cfg(test)]

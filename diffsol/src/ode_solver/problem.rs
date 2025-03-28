@@ -123,12 +123,6 @@ impl<Eqn> OdeSolverProblem<Eqn>
 where
     Eqn: OdeEquations,
 {
-    pub fn default_rtol() -> Eqn::T {
-        Eqn::T::from(1e-6)
-    }
-    pub fn default_atol(nstates: usize) -> Eqn::V {
-        Eqn::V::from_element(nstates, Eqn::T::from(1e-6))
-    }
     pub fn output_in_error_control(&self) -> bool {
         self.integrate_out
             && self.eqn.out().is_some()
@@ -172,12 +166,15 @@ where
     pub fn eqn_mut(&mut self) -> &mut Eqn {
         &mut self.eqn
     }
+    pub fn context(&self) -> &Eqn::C {
+        self.eqn.context()
+    }
 }
 
 impl<Eqn> OdeSolverProblem<Eqn>
 where
     Eqn: OdeEquations,
-    Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
@@ -498,7 +495,7 @@ impl<V: Vector> Default for OdeSolverSolution<V> {
             solution_points: Vec::new(),
             sens_solution_points: None,
             rtol: V::T::from(1e-6),
-            atol: V::from_element(1, V::T::from(1e-6)),
+            atol: V::from_element(1, V::T::from(1e-6), V::C::default()),
             negative_time: false,
         }
     }

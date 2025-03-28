@@ -6,7 +6,7 @@ use crate::{
     scalar::Scalar,
     AugmentedOdeEquations, Checkpointing, DefaultDenseMatrix, DenseMatrix, HermiteInterpolator,
     Matrix, NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
-    Vector, VectorViewMut,
+    Vector, VectorViewMut, Context
 };
 
 /// Utility function to write out the solution at a given timepoint
@@ -69,7 +69,7 @@ where
     } else {
         s.problem().eqn.rhs().nstates()
     };
-    let ret = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nrows, t_eval.len());
+    let ret = s.problem().context().dense_mat_zeros::<Eqn::V>(nrows, t_eval.len());
 
     // check t_eval is increasing and all values are greater than or equal to the current time
     let t0 = s.state().t;
@@ -196,7 +196,7 @@ where
         write_out(self, &mut ret_y, &mut ret_t);
         let ntimes = ret_t.len();
         let nrows = ret_y[0].len();
-        let mut ret_y_matrix = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nrows, ntimes);
+        let mut ret_y_matrix = self.problem().context().dense_mat_zeros::<Eqn::V>(nrows, ntimes);
         for (i, y) in ret_y.iter().enumerate() {
             ret_y_matrix.column_mut(i).copy_from(y);
         }
@@ -280,7 +280,7 @@ where
         write_out(self, &mut ret_y, &mut ret_t);
         let ntimes = ret_t.len();
         let nrows = ret_y[0].len();
-        let mut ret_y_matrix = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nrows, ntimes);
+        let mut ret_y_matrix = self.problem().context().dense_mat_zeros::<Eqn::V>(nrows, ntimes);
         for (i, y) in ret_y.iter().enumerate() {
             ret_y_matrix.column_mut(i).copy_from(y);
         }
@@ -387,21 +387,19 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
-        ode_solver::test_models::exponential_decay::{
+        matrix::dense_nalgebra_serial::NalgebraMat, ode_solver::test_models::exponential_decay::{
             exponential_decay_problem, exponential_decay_problem_adjoint,
             exponential_decay_problem_sens,
-        },
-        scale, AdjointOdeSolverMethod, NalgebraLU, OdeEquations, OdeSolverMethod, Op,
-        SensitivitiesOdeSolverMethod, Vector,
+        }, scale, AdjointOdeSolverMethod, NalgebraLU, OdeEquations, OdeSolverMethod, Op, SensitivitiesOdeSolverMethod, Vector, Context, DenseMatrix, VectorView
     };
 
     #[test]
     fn test_solve() {
-        let (problem, _soln) = exponential_decay_problem::<nalgebra::DMatrix<f64>>(false);
+        let (problem, _soln) = exponential_decay_problem::<NalgebraMat<f64>>(false);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let k = 0.1;
-        let y0 = nalgebra::DVector::from_vec(vec![1.0, 1.0]);
+        let y0 = problem.context().vector_from_vec(vec![1.0, 1.0]);
         let expect = |t: f64| &y0 * scale(f64::exp(-k * t));
         let (y, t) = s.solve(10.0).unwrap();
         assert!((t[0] - 0.0).abs() < 1e-10);
@@ -414,7 +412,7 @@ mod test {
 
     #[test]
     fn test_solve_integrate_out() {
-        let (problem, _soln) = exponential_decay_problem_adjoint::<nalgebra::DMatrix<f64>>(true);
+        let (problem, _soln) = exponential_decay_problem_adjoint::<NalgebraMat<f64>>(true);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let k = 0.1;
@@ -436,7 +434,7 @@ mod test {
 
     #[test]
     fn test_dense_solve() {
-        let (problem, soln) = exponential_decay_problem::<nalgebra::DMatrix<f64>>(false);
+        let (problem, soln) = exponential_decay_problem::<NalgebraMat<f64>>(false);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
@@ -449,7 +447,7 @@ mod test {
 
     #[test]
     fn test_dense_solve_integrate_out() {
-        let (problem, soln) = exponential_decay_problem_adjoint::<nalgebra::DMatrix<f64>>(true);
+        let (problem, soln) = exponential_decay_problem_adjoint::<NalgebraMat<f64>>(true);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
@@ -462,7 +460,7 @@ mod test {
 
     #[test]
     fn test_dense_solve_sensitivities() {
-        let (problem, soln) = exponential_decay_problem_sens::<nalgebra::DMatrix<f64>>(false);
+        let (problem, soln) = exponential_decay_problem_sens::<NalgebraMat<f64>>(false);
         let mut s = problem.bdf_sens::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
@@ -486,7 +484,7 @@ mod test {
 
     #[test]
     fn test_solve_adjoint() {
-        let (problem, soln) = exponential_decay_problem_adjoint::<nalgebra::DMatrix<f64>>(true);
+        let (problem, soln) = exponential_decay_problem_adjoint::<NalgebraMat<f64>>(true);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let final_time = soln.solution_points[soln.solution_points.len() - 1].t;
@@ -518,7 +516,7 @@ mod test {
 
     #[test]
     fn test_solve_checkpointing() {
-        let (problem, soln) = exponential_decay_problem::<nalgebra::DMatrix<f64>>(false);
+        let (problem, soln) = exponential_decay_problem::<NalgebraMat<f64>>(false);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
         let final_time = soln.solution_points[soln.solution_points.len() - 1].t;
         let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();

@@ -260,18 +260,16 @@ where
 
 #[cfg(test)]
 mod tests {
-    use nalgebra::{DMatrix, DVector};
 
     use crate::{
-        ode_solver::test_models::robertson::robertson, NalgebraLU, OdeEquations, OdeSolverMethod,
-        Op, Vector,
+        matrix::dense_nalgebra_serial::NalgebraMat, ode_solver::test_models::robertson::robertson, NalgebraLU, OdeEquations, OdeSolverMethod, Op, Vector, Context
     };
 
     use super::{Checkpointing, HermiteInterpolator};
 
     #[test]
     fn test_checkpointing() {
-        type M = DMatrix<f64>;
+        type M = NalgebraMat<f64>;
         type LS = NalgebraLU<f64>;
         let (problem, soln) = robertson::<M>(false);
         let t_final = soln.solution_points.last().unwrap().t;
@@ -299,7 +297,7 @@ mod tests {
         let segment = HermiteInterpolator::new(ys, ydots, ts);
         let checkpointer =
             Checkpointing::new(solver, checkpoints.len() - 2, checkpoints, Some(segment));
-        let mut y = DVector::zeros(problem.eqn.rhs().nstates());
+        let mut y = problem.context().vector_zeros(problem.eqn.rhs().nstates());
         for point in soln.solution_points.iter().rev() {
             checkpointer.interpolate(point.t, &mut y).unwrap();
             y.assert_eq_norm(&point.state, &problem.atol, problem.rtol, 10.0);

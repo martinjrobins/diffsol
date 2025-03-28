@@ -1,6 +1,6 @@
 use crate::{
     matrix::Matrix, ode_solver::problem::OdeSolverSolution, scalar::scale, MatrixHost, OdeBuilder,
-    OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsSens, OdeSolverProblem, Vector,
+    OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsSens, OdeSolverProblem, Vector, Op,
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};
@@ -199,7 +199,6 @@ pub fn exponential_decay_with_algebraic_problem<M: MatrixHost + 'static>(
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
-    let p = M::V::from_vec(vec![0.1.into()]);
     let problem = OdeBuilder::<M>::new()
         .p([0.1])
         .use_coloring(use_coloring)
@@ -212,10 +211,12 @@ pub fn exponential_decay_with_algebraic_problem<M: MatrixHost + 'static>(
         .build()
         .unwrap();
 
+    let ctx = problem.eqn.context();
+    let p = M::V::from_vec(vec![0.1.into()], ctx.clone());
     let mut soln = OdeSolverSolution::default();
     for i in 0..10 {
         let t = M::T::from(i as f64 / 10.0);
-        let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into(), 1.0.into()]);
+        let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into(), 1.0.into()], ctx.clone());
         let y: M::V = y0 * scale(M::T::exp(-p[0] * t));
         soln.push(y, t);
     }
@@ -258,8 +259,9 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: MatrixHost + 'static>
         .build()
         .unwrap();
 
-    let p = M::V::from_vec(vec![a.into()]);
-    let atol_out = M::V::from_element(nout, M::T::from(1e-6));
+    let ctx = problem.eqn.context();
+    let p = M::V::from_vec(vec![a.into()], ctx.clone());
+    let atol_out = M::V::from_element(nout, M::T::from(1e-6), ctx.clone());
     let mut soln = OdeSolverSolution {
         atol: atol_out,
         rtol: problem.rtol,
@@ -269,11 +271,11 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: MatrixHost + 'static>
     let t1 = M::T::from(9.0);
     for i in 0..10 {
         let t = M::T::from(i as f64);
-        let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into(), 1.0.into()]);
+        let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into(), 1.0.into()], ctx.clone());
         let g = y0.clone() * scale((M::T::exp(-p[0] * t0) - M::T::exp(-p[0] * t)) / p[0]);
-        let g = M::V::from_vec(vec![p[0] * g[2]]);
+        let g = M::V::from_vec(vec![p[0] * g[2]], ctx.clone());
         let dgdk = t1 * M::T::exp(-p[0] * t1);
-        let dg = M::V::from_vec(vec![dgdk]);
+        let dg = M::V::from_vec(vec![dgdk], ctx.clone());
         soln.push_sens(g, t, &[dg]);
     }
     (problem, soln)
@@ -300,11 +302,12 @@ pub fn exponential_decay_with_algebraic_problem_sens<M: MatrixHost + 'static>() 
         .build()
         .unwrap();
 
-    let p = M::V::from_vec(vec![k.into()]);
+    let ctx = problem.eqn.context();
+    let p = M::V::from_vec(vec![k.into()], ctx.clone());
     let mut soln = OdeSolverSolution::default();
     for i in 0..10 {
         let t = M::T::from(i as f64 / 10.0);
-        let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into(), 1.0.into()]);
+        let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into(), 1.0.into()], ctx.clone());
         let y: M::V = y0.clone() * scale(M::T::exp(-p[0] * t));
         let yp = y0 * scale(-t * M::T::exp(-p[0] * t));
         soln.push_sens(y, t, &[yp]);
@@ -324,8 +327,11 @@ pub fn exponential_decay_with_algebraic_problem_diffsl<
 ) {
     let k = 0.1;
     let out = if prep_adjoint { "k * z" } else { "u_i" };
-    let diffsl = crate::DiffSl::compile(
-        format!(
+    let problem = OdeBuilder::<M>::new()
+        .p([k])
+        .integrate_out(prep_adjoint)
+        .build_from_diffsl(
+    format!(
             "
         in = [k]
         k {{ 0.1 }}
@@ -337,19 +343,14 @@ pub fn exponential_decay_with_algebraic_problem_diffsl<
     ",
             out
         )
-        .as_str(),
-    )
-    .unwrap();
-    let problem = OdeBuilder::<M>::new()
-        .p([k])
-        .integrate_out(prep_adjoint)
-        .build_from_eqn(diffsl)
+        .as_str()
+        )
         .unwrap();
     let p = [k];
     let mut soln = OdeSolverSolution::default();
     for i in 0..10 {
         let t = i as f64 / 10.0;
-        let y0 = M::V::from_vec(vec![1.0, 1.0, 1.0]);
+        let y0 = M::V::from_vec(vec![1.0, 1.0, 1.0], problem.eqn.context().clone());
         let y: M::V = y0 * scale(M::T::exp(-p[0] * t));
         soln.push(y, t);
     }
@@ -363,24 +364,23 @@ mod tests {
     fn test_exponential_decay_with_algebraic_diffsl_llvm() {
         use super::*;
         use crate::{
-            ConstantOpSens, ConstantOpSensAdjoint, NonLinearOpAdjoint, NonLinearOpJacobian,
-            NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations,
+            matrix::dense_nalgebra_serial::NalgebraMat, ConstantOpSens, ConstantOpSensAdjoint, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, NalgebraVec,
         };
-        use nalgebra::{DMatrix, DVector};
         let (problem, _soln) = exponential_decay_with_algebraic_problem_diffsl::<
-            DMatrix<f64>,
+            NalgebraMat<f64>,
             crate::LlvmModule,
         >(true);
-        let x = DVector::from_vec(vec![1.0, 2.0, 3.0]);
+        let ctx = problem.eqn.context();
+        let x = NalgebraVec::from_vec(vec![1.0, 2.0, 3.0], ctx.clone());
         let t = 0.0;
-        let v = DVector::from_vec(vec![2.0, 3.0, 4.0]);
-        let v_in = DVector::from_vec(vec![5.0]);
-        let p = DVector::from_vec(vec![0.1]);
+        let v = NalgebraVec::from_vec(vec![2.0, 3.0, 4.0], ctx.clone());
+        let v_in = NalgebraVec::from_vec(vec![5.0], ctx.clone());
+        let p = NalgebraVec::from_vec(vec![0.1], ctx.clone());
 
         // check the adjoint jacobian
-        let mut y_check = DVector::zeros(3);
-        exponential_decay_with_algebraic_adjoint::<DMatrix<f64>>(&x, &p, t, &v, &mut y_check);
-        let mut y = DVector::zeros(3);
+        let mut y_check = NalgebraVec::zeros(3, ctx.clone());
+        exponential_decay_with_algebraic_adjoint::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
+        let mut y = NalgebraVec::zeros(3, ctx.clone());
         for _i in 0..2 {
             problem
                 .eqn()
@@ -390,18 +390,18 @@ mod tests {
         }
 
         // check the sens jacobian
-        let mut y_check = DVector::zeros(3);
-        exponential_decay_with_algebraic_sens::<DMatrix<f64>>(&x, &p, t, &v_in, &mut y_check);
-        let mut y = DVector::zeros(3);
+        let mut y_check = NalgebraVec::zeros(3, ctx.clone());
+        exponential_decay_with_algebraic_sens::<NalgebraMat<f64>>(&x, &p, t, &v_in, &mut y_check);
+        let mut y = NalgebraVec::zeros(3, ctx.clone());
         for _i in 0..2 {
             problem.eqn().rhs().sens_mul_inplace(&x, t, &v_in, &mut y);
             assert_eq!(y, y_check);
         }
 
         // check the sens adjoint jacobian
-        let mut y_check = DVector::zeros(1);
-        exponential_decay_with_algebraic_sens_adjoint::<DMatrix<f64>>(&x, &p, t, &v, &mut y_check);
-        let mut y = DVector::zeros(1);
+        let mut y_check = NalgebraVec::zeros(1, ctx.clone());
+        exponential_decay_with_algebraic_sens_adjoint::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
+        let mut y = NalgebraVec::zeros(1, ctx.clone());
         for _i in 0..2 {
             problem
                 .eqn()
@@ -411,9 +411,9 @@ mod tests {
         }
 
         // check the set_u0 sens adjoint jacobian
-        let mut y_check = DVector::zeros(1);
-        exponential_decay_with_algebraic_init_sens_adjoint::<DMatrix<f64>>(&p, t, &v, &mut y_check);
-        let mut y = DVector::zeros(1);
+        let mut y_check = NalgebraVec::zeros(1, ctx.clone());
+        exponential_decay_with_algebraic_init_sens_adjoint::<NalgebraMat<f64>>(&p, t, &v, &mut y_check);
+        let mut y = NalgebraVec::zeros(1, ctx.clone());
         for _i in 0..2 {
             problem
                 .eqn()
@@ -423,18 +423,18 @@ mod tests {
         }
 
         // check the set_u0 sens jacobian
-        let mut y_check = DVector::zeros(3);
-        exponential_decay_with_algebraic_init_sens::<DMatrix<f64>>(&p, t, &v_in, &mut y_check);
-        let mut y = DVector::zeros(3);
+        let mut y_check = NalgebraVec::zeros(3, ctx.clone());
+        exponential_decay_with_algebraic_init_sens::<NalgebraMat<f64>>(&p, t, &v_in, &mut y_check);
+        let mut y = NalgebraVec::zeros(3, ctx.clone());
         for _i in 0..2 {
             problem.eqn().init().sens_mul_inplace(t, &v_in, &mut y);
             assert_eq!(y, y_check);
         }
 
         // check the calc_out jacobian
-        let mut y_check = DVector::zeros(1);
-        exponential_decay_with_algebraic_out_jac_mul::<DMatrix<f64>>(&x, &p, t, &v, &mut y_check);
-        let mut y = DVector::zeros(1);
+        let mut y_check = NalgebraVec::zeros(1, ctx.clone());
+        exponential_decay_with_algebraic_out_jac_mul::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
+        let mut y = NalgebraVec::zeros(1, ctx.clone());
         for _i in 0..2 {
             problem
                 .eqn()
@@ -445,15 +445,15 @@ mod tests {
         }
 
         // check the calc_out adjoint jacobian
-        let mut y_check = DVector::zeros(3);
-        exponential_decay_with_algebraic_out_jac_adj_mul::<DMatrix<f64>>(
+        let mut y_check = NalgebraVec::zeros(3, ctx.clone());
+        exponential_decay_with_algebraic_out_jac_adj_mul::<NalgebraMat<f64>>(
             &x,
             &p,
             t,
             &v_in,
             &mut y_check,
         );
-        let mut y = DVector::zeros(3);
+        let mut y = NalgebraVec::zeros(3, ctx.clone());
         for _i in 0..2 {
             problem
                 .eqn()
@@ -464,15 +464,15 @@ mod tests {
         }
 
         // check the calc_out sens adjoint jacobian
-        let mut y_check = DVector::zeros(1);
-        exponential_decay_with_algebraic_out_sens_adj::<DMatrix<f64>>(
+        let mut y_check = NalgebraVec::zeros(1, ctx.clone());
+        exponential_decay_with_algebraic_out_sens_adj::<NalgebraMat<f64>>(
             &x,
             &p,
             t,
             &v_in,
             &mut y_check,
         );
-        let mut y = DVector::zeros(1);
+        let mut y = NalgebraVec::zeros(1, ctx.clone());
         for _i in 0..2 {
             problem
                 .eqn()

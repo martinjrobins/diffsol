@@ -1,7 +1,7 @@
 use std::ops::{Div, Index, IndexMut, Mul, MulAssign, SubAssign, AddAssign, Sub, Add};
 use std::slice;
 
-use faer::{get_global_parallelism, unzip, zip, Col, ColMut, ColRef, Par};
+use faer::{zip, Col, ColMut, ColRef, unzip};
 
 use crate::{scalar::Scale, IndexType, Scalar, Vector, FaerContext};
 
@@ -14,6 +14,12 @@ use super::DefaultDenseMatrix;
 #[derive(Debug, Clone, PartialEq)]
 pub struct FaerVec<T: Scalar> {
     pub(crate) data: Col<T>,
+    pub(crate) context: FaerContext,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaerVecIndex {
+    pub(crate) data: Vec<IndexType>,
     pub(crate) context: FaerContext,
 }
 
@@ -147,7 +153,7 @@ impl<T: Scalar> VectorHost for FaerVec<T> {
 impl<T: Scalar> Vector for FaerVec<T> {
     type View<'a> = FaerVecRef<'a, T>;
     type ViewMut<'a> = FaerVecMut<'a, T>;
-    type Index = Vec<IndexType>;
+    type Index = FaerVecIndex;
     fn context(&self) -> &Self::C {
         &self.context
     }
@@ -249,45 +255,48 @@ impl<T: Scalar> Vector for FaerVec<T> {
     }
 
     fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T) {
-        for i in indices {
+        for i in indices.data.iter() {
             self[*i] = value;
         }
     }
 
     fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
-        for i in indices {
+        for i in indices.data.iter() {
             self[*i] = other[*i];
         }
     }
 
     fn gather(&mut self, other: &Self, indices: &Self::Index) {
         assert_eq!(self.len(), indices.len(), "Vector lengths do not match");
-        for (s, o) in self.data.iter_mut().zip(indices.iter()) {
+        for (s, o) in self.data.iter_mut().zip(indices.data.iter()) {
             *s = other[*o];
         }
     }
 
     fn scatter(&self, indices: &Self::Index, other: &mut Self) {
         assert_eq!(self.len(), indices.len(), "Vector lengths do not match");
-        for (s, o) in self.data.iter().zip(indices.iter()) {
+        for (s, o) in self.data.iter().zip(indices.data.iter()) {
             other[*o] = *s;
         }
     }
 }
 
-impl VectorIndex for Vec<IndexType> {
+impl VectorIndex for FaerVecIndex {
     type C = FaerContext;
-    fn zeros(len: IndexType, _ctx: Self::C) -> Self {
-        vec![0; len]
+    fn zeros(len: IndexType, ctx: Self::C) -> Self {
+        Self { data: vec![0; len], context: ctx }
     }
     fn len(&self) -> IndexType {
-        self.len() as IndexType
+        self.data.len() as IndexType
     }
-    fn from_vec(v: Vec<IndexType>, _ctx: Self::C) -> Self {
-        v
+    fn from_vec(v: Vec<IndexType>, ctx: Self::C) -> Self {
+        Self { data: v, context: ctx }
     }
     fn clone_as_vec(&self) -> Vec<IndexType> {
-        self.clone()
+        self.data.clone()
+    }
+    fn context(&self) -> &Self::C {
+        &self.context
     }
 }
 
@@ -315,7 +324,7 @@ impl<'a, T: Scalar> VectorView<'a> for FaerVecRef<'a, T> {
 impl<'a, T: Scalar> VectorViewMut<'a> for FaerVecMut<'a, T> {
     type Owned = FaerVec<T>;
     type View = FaerVecRef<'a, T>;
-    type Index = Vec<IndexType>;
+    type Index = FaerVecIndex;
     fn copy_from(&mut self, other: &Self::Owned) {
         self.data.copy_from(&other.data);
     }

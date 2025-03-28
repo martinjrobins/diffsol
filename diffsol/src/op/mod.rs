@@ -79,6 +79,7 @@ impl<C: Op> Op for ParameterisedOp<'_, C> {
     type V = C::V;
     type T = C::T;
     type M = C::M;
+    type C = C::C;
     fn nstates(&self) -> usize {
         self.op.nstates()
     }
@@ -90,6 +91,9 @@ impl<C: Op> Op for ParameterisedOp<'_, C> {
     }
     fn statistics(&self) -> OpStatistics {
         self.op.statistics()
+    }
+    fn context(&self) -> &Self::C {
+        self.op.context()
     }
 }
 
@@ -132,6 +136,7 @@ impl<C: Op> Op for &C {
     type T = C::T;
     type V = C::V;
     type M = C::M;
+    type C = C::C;
     fn nstates(&self) -> usize {
         C::nstates(*self)
     }
@@ -143,6 +148,9 @@ impl<C: Op> Op for &C {
     }
     fn statistics(&self) -> OpStatistics {
         C::statistics(*self)
+    }
+    fn context(&self) -> &Self::C {
+        C::context(*self)
     }
 }
 
@@ -150,6 +158,7 @@ impl<C: Op> Op for &mut C {
     type T = C::T;
     type V = C::V;
     type M = C::M;
+    type C = C::C;
     fn nstates(&self) -> usize {
         C::nstates(*self)
     }
@@ -161,6 +170,9 @@ impl<C: Op> Op for &mut C {
     }
     fn statistics(&self) -> OpStatistics {
         C::statistics(*self)
+    }
+    fn context(&self) -> &Self::C {
+        C::context(*self)
     }
 }
 

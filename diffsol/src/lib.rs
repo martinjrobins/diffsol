@@ -169,14 +169,14 @@ pub use jacobian::{
     find_adjoint_non_zeros, find_jacobian_non_zeros, find_matrix_non_zeros,
     find_sens_adjoint_non_zeros, find_sens_non_zeros, find_transpose_non_zeros, JacobianColoring,
 };
-use matrix::extract_block::{ColMajBlock, CscBlock};
+use matrix::extract_block::ColMajBlock;
 pub use matrix::{default_solver::DefaultSolver, Matrix};
 use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
     DenseMatrix, MatrixCommon, MatrixHost, MatrixRef, MatrixView, MatrixViewMut,
-    dense_faer_serial::{FaerMat, FaerMatMut, FaerMatRef},
+    dense_faer_serial::FaerMat,
     sparse_faer::FaerSparseMat,
-    dense_nalgebra_serial::{NalgebraMat, NalgebraMatMut, NalgebraMatRef},
+    dense_nalgebra_serial::NalgebraMat,
 };
 use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus, root::RootFinder,
@@ -213,7 +213,7 @@ use op::{
 };
 use scalar::{IndexType, Scalar, Scale};
 pub use vector::DefaultDenseMatrix;
-pub use vector::{Vector, VectorCommon, VectorHost, VectorIndex, VectorRef, VectorView, VectorViewMut, faer_serial::{FaerVec, FaerVecMut, FaerVecRef}, nalgebra_serial::{NalgebraVec, NalgebraVecMut, NalgebraVecRef}};
+pub use vector::{Vector, VectorCommon, VectorHost, VectorIndex, VectorRef, VectorView, VectorViewMut, faer_serial::{FaerVec, FaerVecMut, FaerVecRef, FaerVecIndex}, nalgebra_serial::{NalgebraVec, NalgebraVecMut, NalgebraVecRef}};
 
 pub use scalar::scale;
 

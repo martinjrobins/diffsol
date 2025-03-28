@@ -154,6 +154,9 @@ impl VectorIndex for NalgebraIndex {
     fn clone_as_vec(&self) -> Vec<IndexType> {
         self.data.iter().copied().collect()
     }
+    fn context(&self) -> &Self::C {
+        &self.context
+    }
 }
 
 impl<'a, T: Scalar> VectorView<'a> for NalgebraVecRef<'a, T> {

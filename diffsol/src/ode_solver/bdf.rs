@@ -1296,7 +1296,7 @@ mod test {
                 test_adjoint_sum_squares, test_checkpointing, test_interpolate, test_ode_solver,
                 test_problem, test_state_mut, test_state_mut_on_problem,
             },
-        }, FaerLU, FaerSparseLU, FaerSparseMat, OdeEquations, OdeSolverMethod, Op, Vector
+        }, FaerLU, FaerSparseLU, FaerSparseMat, OdeEquations, OdeSolverMethod, Op, Vector, FaerMat, MatrixCommon, Context, DenseMatrix, VectorView
     };
 
     use num_traits::abs;
@@ -1364,7 +1364,7 @@ mod test {
 
     #[test]
     fn bdf_test_faer_exponential_decay() {
-        type M = faer::Mat<f64>;
+        type M = FaerMat<f64>;
         type LS = FaerLU<f64>;
         let (problem, soln) = exponential_decay_problem::<M>(false);
         let mut s = problem.bdf::<LS>().unwrap();
@@ -1885,12 +1885,13 @@ mod test {
     #[test]
     fn test_param_sweep_bdf() {
         let (mut problem, _soln) = exponential_decay_problem::<M>(false);
+        let ctx = problem.eqn.context();
         let mut ps = Vec::new();
         for y0 in (1..10).map(f64::from) {
-            ps.push(nalgebra::DVector::<f64>::from_vec(vec![0.1, y0]));
+            ps.push(ctx.vector_from_vec(vec![0.1, y0]));
         }
 
-        let mut old_soln: Option<nalgebra::DVector<f64>> = None;
+        let mut old_soln: Option<<M as MatrixCommon>::V> = None;
         for p in ps {
             problem.eqn_mut().set_params(&p);
             let mut s = problem.bdf::<LS>().unwrap();
@@ -1912,7 +1913,7 @@ mod test {
     #[test]
     fn test_ball_bounce_bdf() {
         use crate::ode_solver::tests::test_ball_bounce_problem;
-        type M = nalgebra::DMatrix<f64>;
+        type M = crate::NalgebraMat<f64>;
         type LS = crate::NalgebraLU<f64>;
         let (x, v, t) = crate::ode_solver::tests::test_ball_bounce(
             test_ball_bounce_problem::<M>().bdf::<LS>().unwrap(),

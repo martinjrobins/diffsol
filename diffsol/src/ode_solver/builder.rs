@@ -1,19 +1,13 @@
-use nalgebra::DMatrix;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError},
-    ode_solver_error,
-    op::{linear_closure_with_adjoint::LinearClosureWithAdjoint, BuilderOp},
-    Closure, ClosureNoJac, ClosureWithAdjoint, ClosureWithSens, ConstantClosure,
-    ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp, LinearClosure, LinearOp,
-    Matrix, NonLinearOp, OdeEquations, OdeSolverProblem, Op, ParameterisedOp, UnitCallable, Vector,
+    error::{DiffsolError, OdeSolverError}, matrix::dense_nalgebra_serial::NalgebraMat, ode_solver_error, op::{linear_closure_with_adjoint::LinearClosureWithAdjoint, BuilderOp}, Closure, ClosureNoJac, ClosureWithAdjoint, ClosureWithSens, ConstantClosure, ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp, LinearClosure, LinearOp, Matrix, NonLinearOp, OdeEquations, OdeSolverProblem, Op, ParameterisedOp, UnitCallable, Vector, VectorHost
 };
 
 use super::equations::OdeSolverEquations;
 
 /// Builder for ODE problems. Use methods to set parameters and then call one of the build methods when done.
 pub struct OdeBuilder<
-    M: Matrix = DMatrix<f64>,
+    M: Matrix = NalgebraMat<f64>,
     Rhs = UnitCallable<M>,
     Init = UnitCallable<M>,
     Mass = UnitCallable<M>,
@@ -38,6 +32,7 @@ pub struct OdeBuilder<
     mass: Option<Mass>,
     root: Option<Root>,
     out: Option<Out>,
+    ctx: M::C,
 }
 
 impl Default for OdeBuilder {
@@ -119,6 +114,7 @@ where
             param_atol: Some(default_atol.clone()),
             sens_atol: Some(default_atol),
             sens_rtol: Some(default_rtol),
+            ctx: M::C::default(),
         }
     }
 
@@ -139,7 +135,7 @@ where
     {
         let nstates = 0;
         OdeBuilder::<M, Closure<M, F, G>, Init, Mass, Root, Out> {
-            rhs: Some(Closure::new(rhs, rhs_jac, nstates, nstates, nstates)),
+            rhs: Some(Closure::new(rhs, rhs_jac, nstates, nstates, nstates, self.ctx.clone())),
             init: self.init,
             mass: self.mass,
             root: self.root,
@@ -158,6 +154,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            ctx: self.ctx,
         }
     }
 
@@ -201,6 +198,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            ctx: self.ctx,
         }
     }
 
@@ -247,6 +245,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            ctx: self.ctx,
         }
     }
 
@@ -279,6 +278,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            ctx: self.ctx,
         }
     }
 
@@ -319,6 +319,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            ctx: self.ctx,
         }
     }
 
@@ -363,6 +364,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            ctx: self.ctx,
         }
     }
 
@@ -378,7 +380,7 @@ where
         OdeBuilder::<M, Rhs, Init, LinearClosure<M, F>, Root, Out> {
             rhs: self.rhs,
             init: self.init,
-            mass: Some(LinearClosure::new(mass, nstates, nstates, nstates)),
+            mass: Some(LinearClosure::new(mass, nstates, nstates, nstates, self.ctx.clone())),
             root: self.root,
             out: self.out,
 
@@ -395,6 +397,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            ctx: self.ctx,
         }
     }
 
@@ -442,6 +445,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            ctx: self.ctx,
         }
     }
 
@@ -463,7 +467,7 @@ where
             rhs: self.rhs,
             init: self.init,
             mass: self.mass,
-            root: Some(ClosureNoJac::new(root, nstates, nroots, nroots)),
+            root: Some(ClosureNoJac::new(root, nstates, nroots, nroots, self.ctx.clone())),
             out: self.out,
 
             t0: self.t0,
@@ -479,6 +483,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            ctx: self.ctx,
         }
     }
 
@@ -498,7 +503,7 @@ where
             init: self.init,
             mass: self.mass,
             root: self.root,
-            out: Some(Closure::new(out, out_jac, nstates, nout, nstates)),
+            out: Some(Closure::new(out, out_jac, nstates, nout, nstates, self.ctx.clone())),
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -512,6 +517,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            ctx: self.ctx,
         }
     }
 
@@ -558,6 +564,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            ctx: self.ctx,
         }
     }
 
@@ -676,9 +683,9 @@ where
         self
     }
 
-    fn build_atol(atol: Vec<M::T>, nstates: usize, ty: &str) -> Result<M::V, DiffsolError> {
+    fn build_atol(atol: Vec<M::T>, nstates: usize, ty: &str, ctx: M::C) -> Result<M::V, DiffsolError> {
         if atol.len() == 1 {
-            Ok(M::V::from_element(nstates, atol[0]))
+            Ok(M::V::from_element(nstates, atol[0], ctx))
         } else if atol.len() != nstates {
             Err(ode_solver_error!(
                 BuilderError,
@@ -690,7 +697,7 @@ where
                 )
             ))
         } else {
-            Ok(M::V::from_vec(atol))
+            Ok(M::V::from_vec(atol, ctx))
         }
     }
 
@@ -703,29 +710,31 @@ where
         nstates: usize,
         nout: Option<usize>,
         nparam: usize,
+        ctx: M::C,
     ) -> Result<(M::V, Option<M::V>, Option<M::V>, Option<M::V>), DiffsolError> {
-        let atol = Self::build_atol(atol, nstates, "states")?;
+        let atol = Self::build_atol(atol, nstates, "states", ctx.clone())?;
         let out_atol = match out_atol {
             Some(out_atol) => Some(Self::build_atol(
                 out_atol,
                 nout.unwrap_or(nstates),
                 "output",
+                ctx.clone(),
             )?),
             None => None,
         };
         let param_atol = match param_atol {
-            Some(param_atol) => Some(Self::build_atol(param_atol, nparam, "parameters")?),
+            Some(param_atol) => Some(Self::build_atol(param_atol, nparam, "parameters", ctx.clone())?),
             None => None,
         };
         let sens_atol = match sens_atol {
-            Some(sens_atol) => Some(Self::build_atol(sens_atol, nstates, "sensitivity")?),
+            Some(sens_atol) => Some(Self::build_atol(sens_atol, nstates, "sensitivity", ctx.clone())?),
             None => None,
         };
         Ok((atol, sens_atol, out_atol, param_atol))
     }
 
-    fn build_p(p: Vec<M::T>) -> M::V {
-        M::V::from_vec(p)
+    fn build_p(p: Vec<M::T>, ctx: M::C) -> M::V {
+        M::V::from_vec(p, ctx)
     }
 
     #[allow(clippy::type_complexity)]
@@ -734,18 +743,18 @@ where
     ) -> Result<OdeSolverProblem<OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>>, DiffsolError>
     where
         M: Matrix,
-        Rhs: BuilderOp<V = M::V, T = M::T, M = M>,
-        Init: BuilderOp<V = M::V, T = M::T, M = M>,
-        Mass: BuilderOp<V = M::V, T = M::T, M = M>,
-        Root: BuilderOp<V = M::V, T = M::T, M = M>,
-        Out: BuilderOp<V = M::V, T = M::T, M = M>,
-        for<'a> ParameterisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T>,
-        for<'a> ParameterisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T>,
-        for<'a> ParameterisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T>,
-        for<'a> ParameterisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T>,
-        for<'a> ParameterisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T>,
+        Rhs: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
+        Init: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
+        Mass: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
+        Root: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
+        Out: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
+        for<'a> ParameterisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+        for<'a> ParameterisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T, C = M::C>,
+        for<'a> ParameterisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+        for<'a> ParameterisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+        for<'a> ParameterisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
     {
-        let p = Self::build_p(self.p);
+        let p = Self::build_p(self.p, self.ctx.clone());
         let nparams = p.len();
         let mut rhs = self
             .rhs
@@ -801,6 +810,7 @@ where
             nstates,
             nout,
             nparams,
+            self.ctx,
         )?;
         OdeSolverProblem::new(
             eqn,
@@ -816,6 +826,15 @@ where
             self.h0,
             self.integrate_out,
         )
+    }
+
+    #[cfg(feature = "diffsl")]
+    pub fn build_from_diffsl<CG: crate::CodegenModule>(self, code: &str) -> Result<OdeSolverProblem<crate::DiffSl<M, CG>>, DiffsolError> 
+    where 
+        M: Matrix<V: VectorHost, T = f64>,
+    {
+        let eqn = crate::DiffSl::compile(code, self.ctx.clone())?;
+        self.build_from_eqn(eqn)
     }
 
     /// Build an ODE problem from a set of equations
@@ -834,6 +853,7 @@ where
             nstates,
             nout,
             nparams,
+            self.ctx.clone(),
         )?;
         if self.p.len() != nparams {
             return Err(ode_solver_error!(
@@ -846,7 +866,7 @@ where
             ));
         }
 
-        let p = Self::build_p(self.p);
+        let p = Self::build_p(self.p, self.ctx);
         eqn.set_params(&p);
         OdeSolverProblem::new(
             eqn,
