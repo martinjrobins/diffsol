@@ -527,10 +527,9 @@ mod tests {
     use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
     use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
     use crate::vector::Vector;
-    use crate::{Context, DenseMatrix, LinearOp, NalgebraVec, NonLinearOp, NonLinearOpJacobian};
+    use crate::{Context, DenseMatrix, LinearOp, NonLinearOp, NonLinearOpJacobian};
 
     type Mcpu = NalgebraMat<f64>;
-    type Vcpu = NalgebraVec<f64>;
 
     #[test]
     fn ode_equation_test() {

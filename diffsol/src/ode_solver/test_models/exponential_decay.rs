@@ -151,7 +151,7 @@ pub fn negative_exponential_decay_problem<M: MatrixHost + 'static>(
         .p([k, y0])
         .use_coloring(use_coloring)
         .rhs_implicit(exponential_decay::<M>, exponential_decay_jacobian::<M>)
-        .init(exponential_decay_init::<M>)
+        .init(exponential_decay_init::<M>, 2)
         .build()
         .unwrap();
     let p = [M::T::from(k), M::T::from(y0)];
@@ -231,7 +231,7 @@ pub fn exponential_decay_problem<M: MatrixHost + 'static>(
         .p([k, y0])
         .use_coloring(use_coloring)
         .rhs_implicit(exponential_decay::<M>, exponential_decay_jacobian::<M>)
-        .init(exponential_decay_init::<M>)
+        .init(exponential_decay_init::<M>, 2)
         .build()
         .unwrap();
     let p = [M::T::from(k), M::T::from(y0)];
@@ -258,7 +258,7 @@ pub fn exponential_decay_problem_with_root<M: MatrixHost + 'static>(
         .p([k, y0])
         .use_coloring(use_coloring)
         .rhs_implicit(exponential_decay::<M>, exponential_decay_jacobian::<M>)
-        .init(exponential_decay_init::<M>)
+        .init(exponential_decay_init::<M>, 2)
         .root(exponential_decay_root::<M>, 1)
         .build()
         .unwrap();
@@ -294,6 +294,7 @@ pub fn exponential_decay_problem_adjoint<M: MatrixHost>(
         .init_adjoint(
             exponential_decay_init::<M>,
             exponential_decay_init_sens_adjoint::<M>,
+            2,
         )
         .out_adjoint_implicit(
             exponential_decay_out::<M>,
@@ -365,6 +366,7 @@ pub fn exponential_decay_problem_sens<M: MatrixHost + 'static>(
         .init_sens(
             exponential_decay_init::<M>,
             exponential_decay_init_sens::<M>,
+            2,
         )
         .build()
         .unwrap();

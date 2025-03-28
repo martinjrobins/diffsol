@@ -52,8 +52,8 @@ impl Default for OdeBuilder {
 /// # Example
 ///  
 /// ```rust
-/// use diffsol::{OdeBuilder, NalgebraLU, Bdf, OdeSolverState, OdeSolverMethod};
-/// type M = nalgebra::DMatrix<f64>;
+/// use diffsol::{OdeBuilder, NalgebraLU, Bdf, OdeSolverState, OdeSolverMethod, NalgebraMat};
+/// type M = NalgebraMat<f64>;
 /// type LS = NalgebraLU<f64>;
 ///
 /// let problem = OdeBuilder::<M>::new()
@@ -71,9 +71,8 @@ impl Default for OdeBuilder {
 ///   )
 ///   .init(
 ///     // y(0) = 1
-///    |p, t| {
-///       nalgebra::DVector::from_vec(vec![1.0])
-///    },
+///    |p, t, y| y[0] = 1.0,
+///    1,
 ///   )
 ///   .build()
 ///   .unwrap();
@@ -273,19 +272,17 @@ where
     ///
     /// # Arguments
     /// - `init`: Function of type Fn(p: &V, t: S) -> V that computes the initial state.
-    pub fn init<F>(self, init: F) -> OdeBuilder<M, Rhs, ConstantClosure<M, F>, Mass, Root, Out>
+    pub fn init<F>(
+        self,
+        init: F,
+        nstates: usize,
+    ) -> OdeBuilder<M, Rhs, ConstantClosure<M, F>, Mass, Root, Out>
     where
         F: Fn(&M::V, M::T, &mut M::V),
     {
-        let nstates = 0;
         OdeBuilder::<M, Rhs, ConstantClosure<M, F>, Mass, Root, Out> {
             rhs: self.rhs,
-            init: Some(ConstantClosure::new(
-                init,
-                nstates,
-                nstates,
-                self.ctx.clone(),
-            )),
+            init: Some(ConstantClosure::new(init, nstates, 0, self.ctx.clone())),
             mass: self.mass,
             root: self.root,
             out: self.out,
@@ -316,19 +313,19 @@ where
         self,
         init: F,
         init_sens: G,
+        nstates: usize,
     ) -> OdeBuilder<M, Rhs, ConstantClosureWithSens<M, F, G>, Mass, Root, Out>
     where
         F: Fn(&M::V, M::T, &mut M::V),
         G: Fn(&M::V, M::T, &M::V, &mut M::V),
     {
-        let nstates = 0;
         OdeBuilder::<M, Rhs, ConstantClosureWithSens<M, F, G>, Mass, Root, Out> {
             rhs: self.rhs,
             init: Some(ConstantClosureWithSens::new(
                 init,
                 init_sens,
                 nstates,
-                nstates,
+                0,
                 self.ctx.clone(),
             )),
             mass: self.mass,
@@ -362,19 +359,19 @@ where
         self,
         init: F,
         init_sens_adjoint: G,
+        nstates: usize,
     ) -> OdeBuilder<M, Rhs, ConstantClosureWithAdjoint<M, F, G>, Mass, Root, Out>
     where
         F: Fn(&M::V, M::T, &mut M::V),
         G: Fn(&M::V, M::T, &M::V, &mut M::V),
     {
-        let nstates = 0;
         OdeBuilder::<M, Rhs, ConstantClosureWithAdjoint<M, F, G>, Mass, Root, Out> {
             rhs: self.rhs,
             init: Some(ConstantClosureWithAdjoint::new(
                 init,
                 init_sens_adjoint,
                 nstates,
-                nstates,
+                0,
                 self.ctx.clone(),
             )),
             mass: self.mass,

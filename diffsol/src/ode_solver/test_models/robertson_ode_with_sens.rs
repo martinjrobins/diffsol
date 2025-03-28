@@ -46,6 +46,7 @@ pub fn robertson_ode_with_sens<M: MatrixHost + 'static>(
                 y[2] = M::T::zero();
             },
             |_p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V| y.fill(M::T::zero()),
+            3,
         )
         .build()
         .unwrap();

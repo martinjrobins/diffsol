@@ -32,7 +32,7 @@ pub fn dydt_y2_problem<M: DenseMatrix + 'static>(
         .use_coloring(use_coloring)
         .rtol(1e-4)
         .rhs_implicit(rhs::<M>, rhs_jac::<M>)
-        .init(move |_p, _t, y| y.fill(y0.into()))
+        .init(move |_p, _t, y| y.fill(y0.into()), size)
         .build()
         .unwrap();
     let mut soln = OdeSolverSolution::default();

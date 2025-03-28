@@ -244,12 +244,13 @@ pub fn head2d_problem<M: MatrixHost + 'static, const MGRID: usize>() -> (
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
+    let nstates = MGRID * MGRID;
     let problem = OdeBuilder::<M>::new()
         .rtol(1e-7)
         .atol([1e-7])
         .rhs_implicit(heat2d_rhs::<M, MGRID>, heat2d_jac_mul::<M, MGRID>)
         .mass(heat2d_mass::<M, MGRID>)
-        .init(heat2d_init::<M, MGRID>)
+        .init(heat2d_init::<M, MGRID>, nstates)
         .out_implicit(heat2d_out::<M, MGRID>, heat2d_out_jac_mul::<M, MGRID>, 1)
         .build()
         .unwrap();

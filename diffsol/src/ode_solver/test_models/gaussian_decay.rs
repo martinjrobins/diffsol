@@ -34,7 +34,7 @@ pub fn gaussian_decay_problem<M: DenseMatrix + 'static>(
         .p([0.1].repeat(size))
         .use_coloring(use_coloring)
         .rhs_implicit(gaussian_decay::<M>, gaussian_decay_jacobian::<M>)
-        .init(move |_p, _t, y| y.fill(1.0.into()))
+        .init(move |_p, _t, y| y.fill(1.0.into()), size)
         .build()
         .unwrap();
     let p = [M::T::from(0.1)].repeat(size);

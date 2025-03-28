@@ -109,7 +109,7 @@ pub fn robertson<M: MatrixHost>(
         .use_coloring(use_coloring)
         .rhs_implicit(robertson_rhs::<M>, robertson_jac_mul::<M>)
         .mass(robertson_mass::<M>)
-        .init(robertson_init::<M>)
+        .init(robertson_init::<M>, 3)
         .build()
         .unwrap();
 
@@ -159,7 +159,7 @@ pub fn robertson_sens<M: MatrixHost + 'static>() -> (
             robertson_jac_mul::<M>,
             robertson_sens_mul::<M>,
         )
-        .init_sens(robertson_init::<M>, robertson_init_sens::<M>)
+        .init_sens(robertson_init::<M>, robertson_init_sens::<M>, 3)
         .mass(robertson_mass::<M>)
         .build()
         .unwrap();

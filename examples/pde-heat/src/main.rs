@@ -1,5 +1,5 @@
 use diffsol::{
-    CraneliftModule, DiffSl, FaerSparseLU, FaerSparseMat, MatrixCommon, OdeBuilder, OdeSolverMethod,
+    CraneliftModule, FaerSparseLU, FaerSparseMat, MatrixCommon, OdeBuilder, OdeSolverMethod,
 };
 use plotly::{
     layout::{Axis, Layout},

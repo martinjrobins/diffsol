@@ -209,7 +209,7 @@ pub fn exponential_decay_with_algebraic_problem<M: MatrixHost + 'static>(
             exponential_decay_with_algebraic_jacobian::<M>,
         )
         .mass(exponential_decay_with_algebraic_mass::<M>)
-        .init(exponential_decay_with_algebraic_init::<M>)
+        .init(exponential_decay_with_algebraic_init::<M>, 3)
         .build()
         .unwrap();
 
@@ -246,6 +246,7 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: MatrixHost + 'static>
         .init_adjoint(
             exponential_decay_with_algebraic_init::<M>,
             exponential_decay_with_algebraic_init_sens_adjoint::<M>,
+            3,
         )
         .mass_adjoint(
             exponential_decay_with_algebraic_mass::<M>,
@@ -299,6 +300,7 @@ pub fn exponential_decay_with_algebraic_problem_sens<M: MatrixHost + 'static>() 
         .init_sens(
             exponential_decay_with_algebraic_init::<M>,
             exponential_decay_with_algebraic_init_sens::<M>,
+            3,
         )
         .mass(exponential_decay_with_algebraic_mass::<M>)
         .build()

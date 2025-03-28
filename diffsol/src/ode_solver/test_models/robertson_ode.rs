@@ -50,6 +50,7 @@ pub fn robertson_ode<M: MatrixHost + 'static>(
     OdeSolverSolution<M::V>,
 ) {
     const N: usize = 3;
+    let nstates = N * ngroups;
     let problem = OdeBuilder::<M>::new()
         .p([0.04, 1.0e4, 3.0e7])
         .rtol(1e-4)
@@ -87,14 +88,17 @@ pub fn robertson_ode<M: MatrixHost + 'static>(
                 }
             },
         )
-        .init(move |_p: &M::V, _t: M::T, y: &mut M::V| {
-            for ig in 0..ngroups {
-                let i = ig * N;
-                y[i] = M::T::one();
-                y[i + 1] = M::T::zero();
-                y[i + 2] = M::T::zero();
-            }
-        })
+        .init(
+            move |_p: &M::V, _t: M::T, y: &mut M::V| {
+                for ig in 0..ngroups {
+                    let i = ig * N;
+                    y[i] = M::T::one();
+                    y[i + 1] = M::T::zero();
+                    y[i + 2] = M::T::zero();
+                }
+            },
+            nstates,
+        )
         .build()
         .unwrap();
 
