@@ -4,7 +4,7 @@ use diffsol::{
         exponential_decay::exponential_decay_problem, foodweb::foodweb_problem,
         heat2d::head2d_problem, robertson::robertson, robertson_ode::robertson_ode,
     },
-    FaerLU, FaerMat, FaerSparseLU, FaerSparseMat, NalgebraLU, NalgebraMat,
+    FaerLU, FaerMat, FaerSparseLU, FaerSparseMat, NalgebraLU, NalgebraMat
 };
 
 mod sundials_benches;
@@ -78,7 +78,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         FaerLU,
         exponential_decay,
         exponential_decay_problem,
-        faer::Mat<f64>
+        FaerMat<f64>
     );
     bench!(
         faer_esdirk34_exponential_decay,
@@ -86,7 +86,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         FaerLU,
         exponential_decay,
         exponential_decay_problem,
-        faer::Mat<f64>
+        FaerMat<f64>
     );
     bench!(
         faer_tr_bdf2_exponential_decay,
@@ -94,7 +94,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         FaerLU,
         exponential_decay,
         exponential_decay_problem,
-        faer::Mat<f64>
+        FaerMat<f64>
     );
     bench!(
         faer_bdf_robertson,
@@ -102,7 +102,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         FaerLU,
         robertson,
         robertson,
-        faer::Mat<f64>
+        FaerMat<f64>
     );
     bench!(
         faer_esdirk34_robertson,
@@ -110,7 +110,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         FaerLU,
         robertson,
         robertson,
-        faer::Mat<f64>
+        FaerMat<f64>
     );
     bench!(
         faer_tr_bdf2_robertson,
@@ -118,7 +118,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         FaerLU,
         robertson,
         robertson,
-        faer::Mat<f64>
+        FaerMat<f64>
     );
 
     macro_rules! bench_robertson_ode {
@@ -138,7 +138,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         FaerSparseLU,
         robertson_ode,
         robertson_ode,
-        SparseColMat<f64>,
+        FaerSparseMat<f64>,
         25,
         100,
         400,
@@ -151,7 +151,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         FaerSparseLU,
         robertson_ode,
         robertson_ode,
-        SparseColMat<f64>,
+        FaerSparseMat<f64>,
         25,
         100,
         400,
@@ -164,7 +164,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         FaerSparseLU,
         robertson_ode,
         robertson_ode,
-        SparseColMat<f64>,
+        FaerSparseMat<f64>,
         25,
         100,
         400,
