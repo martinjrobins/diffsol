@@ -14,7 +14,7 @@ pub trait NonLinearOp: Op {
     /// Compute the operator `F(x, t)` at a given state and time, and return the result.
     /// Use `[Self::call_inplace]` to for a non-allocating version.
     fn call(&self, x: &Self::V, t: Self::T) -> Self::V {
-        let mut y = Self::V::zeros(self.nout());
+        let mut y = Self::V::zeros(self.nout(), self.context().clone());
         self.call_inplace(x, t, &mut y);
         y
     }
@@ -28,7 +28,7 @@ pub trait NonLinearOpSens: NonLinearOp {
     /// Compute the product of the partial gradient of F wrt a parameter vector p with a given vector `\parial F/\partial p(x, t) * v`, and return the result.
     /// Use `[Self::sens_mul_inplace]` to for a non-allocating version.
     fn sens_mul(&self, x: &Self::V, t: Self::T, v: &Self::V) -> Self::V {
-        let mut y = Self::V::zeros(self.nstates());
+        let mut y = Self::V::zeros(self.nstates(), self.context().clone());
         self.sens_mul_inplace(x, t, v, &mut y);
         y
     }
@@ -43,8 +43,8 @@ pub trait NonLinearOpSens: NonLinearOp {
 
     /// Default implementation of the gradient computation (this is the default for [Self::sens_inplace]).
     fn _default_sens_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
-        let mut v = Self::V::zeros(self.nparams());
-        let mut col = Self::V::zeros(self.nout());
+        let mut v = Self::V::zeros(self.nparams(), self.context().clone());
+        let mut col = Self::V::zeros(self.nout(), self.context().clone());
         for j in 0..self.nparams() {
             v.set_index(j, Self::T::one());
             self.sens_mul_inplace(x, t, &v, &mut col);
@@ -58,7 +58,7 @@ pub trait NonLinearOpSens: NonLinearOp {
     fn sens(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
         let m = self.nparams();
-        let mut y = Self::M::new_from_sparsity(n, m, self.sens_sparsity());
+        let mut y = Self::M::new_from_sparsity(n, m, self.sens_sparsity(), self.context().clone());
         self.sens_inplace(x, t, &mut y);
         y
     }
@@ -74,7 +74,8 @@ pub trait NonLinearOpSensAdjoint: NonLinearOp {
     /// See [Self::sens_adjoint_inplace] for a non-allocating version.
     fn sens_adjoint(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
-        let mut y = Self::M::new_from_sparsity(n, n, self.sens_adjoint_sparsity());
+        let mut y =
+            Self::M::new_from_sparsity(n, n, self.sens_adjoint_sparsity(), self.context().clone());
         self.sens_adjoint_inplace(x, t, &mut y);
         y
     }
@@ -89,8 +90,8 @@ pub trait NonLinearOpSensAdjoint: NonLinearOp {
 
     /// Default implementation of the gradient computation (this is the default for [Self::sens_adjoint_inplace]).
     fn _default_sens_adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
-        let mut v = Self::V::zeros(self.nstates());
-        let mut col = Self::V::zeros(self.nout());
+        let mut v = Self::V::zeros(self.nstates(), self.context().clone());
+        let mut col = Self::V::zeros(self.nout(), self.context().clone());
         for j in 0..self.nstates() {
             v.set_index(j, Self::T::one());
             self.sens_transpose_mul_inplace(x, t, &v, &mut col);
@@ -119,8 +120,8 @@ pub trait NonLinearOpAdjoint: NonLinearOp {
 
     /// Default implementation of the Adjoint computation (this is the default for [Self::adjoint_inplace]).
     fn _default_adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
-        let mut v = Self::V::zeros(self.nstates());
-        let mut col = Self::V::zeros(self.nout());
+        let mut v = Self::V::zeros(self.nstates(), self.context().clone());
+        let mut col = Self::V::zeros(self.nout(), self.context().clone());
         for j in 0..self.nstates() {
             v.set_index(j, Self::T::one());
             self.jac_transpose_mul_inplace(x, t, &v, &mut col);
@@ -133,7 +134,8 @@ pub trait NonLinearOpAdjoint: NonLinearOp {
     /// See [Self::adjoint_inplace] for a non-allocating version.
     fn adjoint(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
-        let mut y = Self::M::new_from_sparsity(n, n, self.adjoint_sparsity());
+        let mut y =
+            Self::M::new_from_sparsity(n, n, self.adjoint_sparsity(), self.context().clone());
         self.adjoint_inplace(x, t, &mut y);
         y
     }
@@ -149,7 +151,7 @@ pub trait NonLinearOpJacobian: NonLinearOp {
     /// Compute the product of the Jacobian with a given vector `J(x, t) * v`, and return the result.
     /// Use `[Self::jac_mul_inplace]` to for a non-allocating version.
     fn jac_mul(&self, x: &Self::V, t: Self::T, v: &Self::V) -> Self::V {
-        let mut y = Self::V::zeros(self.nstates());
+        let mut y = Self::V::zeros(self.nstates(), self.context().clone());
         self.jac_mul_inplace(x, t, v, &mut y);
         y
     }
@@ -158,7 +160,8 @@ pub trait NonLinearOpJacobian: NonLinearOp {
     /// See [Self::jacobian_inplace] for a non-allocating version.
     fn jacobian(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
-        let mut y = Self::M::new_from_sparsity(n, n, self.jacobian_sparsity());
+        let mut y =
+            Self::M::new_from_sparsity(n, n, self.jacobian_sparsity(), self.context().clone());
         self.jacobian_inplace(x, t, &mut y);
         y
     }
@@ -178,8 +181,8 @@ pub trait NonLinearOpJacobian: NonLinearOp {
 
     /// Default implementation of the Jacobian computation (this is the default for [Self::jacobian_inplace]).
     fn _default_jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
-        let mut v = Self::V::zeros(self.nstates());
-        let mut col = Self::V::zeros(self.nout());
+        let mut v = Self::V::zeros(self.nstates(), self.context().clone());
+        let mut col = Self::V::zeros(self.nout(), self.context().clone());
         for j in 0..self.nstates() {
             v.set_index(j, Self::T::one());
             self.jac_mul_inplace(x, t, &v, &mut col);

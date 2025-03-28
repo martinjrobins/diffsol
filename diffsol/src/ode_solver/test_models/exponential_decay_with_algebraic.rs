@@ -1,6 +1,6 @@
 use crate::{
     matrix::Matrix, ode_solver::problem::OdeSolverSolution, scalar::scale, MatrixHost, OdeBuilder,
-    OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsSens, OdeSolverProblem, Vector, Op,
+    OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsSens, OdeSolverProblem, Op, Vector,
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};
@@ -115,8 +115,10 @@ fn exponential_decay_with_algebraic_mass_transpose<M: MatrixHost>(
     y[nstates - 1] = yn;
 }
 
-fn exponential_decay_with_algebraic_init<M: Matrix>(_p: &M::V, _t: M::T) -> M::V {
-    M::V::from_vec(vec![1.0.into(), 1.0.into(), 0.0.into()])
+fn exponential_decay_with_algebraic_init<M: MatrixHost>(_p: &M::V, _t: M::T, y: &mut M::V) {
+    y[0] = M::T::one();
+    y[1] = M::T::one();
+    y[2] = M::T::zero();
 }
 
 fn exponential_decay_with_algebraic_init_sens<M: Matrix>(
@@ -331,8 +333,8 @@ pub fn exponential_decay_with_algebraic_problem_diffsl<
         .p([k])
         .integrate_out(prep_adjoint)
         .build_from_diffsl(
-    format!(
-            "
+            format!(
+                "
         in = [k]
         k {{ 0.1 }}
         u_i {{ x = 1, y = 1, z = 0 }}
@@ -341,9 +343,9 @@ pub fn exponential_decay_with_algebraic_problem_diffsl<
         F_i {{ -k * x, -k * y, z - y }}
         out_i {{ {} }}
     ",
-            out
-        )
-        .as_str()
+                out
+            )
+            .as_str(),
         )
         .unwrap();
     let p = [k];
@@ -364,7 +366,9 @@ mod tests {
     fn test_exponential_decay_with_algebraic_diffsl_llvm() {
         use super::*;
         use crate::{
-            matrix::dense_nalgebra_serial::NalgebraMat, ConstantOpSens, ConstantOpSensAdjoint, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, NalgebraVec,
+            matrix::dense_nalgebra_serial::NalgebraMat, ConstantOpSens, ConstantOpSensAdjoint,
+            NalgebraVec, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
+            NonLinearOpSensAdjoint, OdeEquations,
         };
         let (problem, _soln) = exponential_decay_with_algebraic_problem_diffsl::<
             NalgebraMat<f64>,
@@ -400,7 +404,13 @@ mod tests {
 
         // check the sens adjoint jacobian
         let mut y_check = NalgebraVec::zeros(1, ctx.clone());
-        exponential_decay_with_algebraic_sens_adjoint::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
+        exponential_decay_with_algebraic_sens_adjoint::<NalgebraMat<f64>>(
+            &x,
+            &p,
+            t,
+            &v,
+            &mut y_check,
+        );
         let mut y = NalgebraVec::zeros(1, ctx.clone());
         for _i in 0..2 {
             problem
@@ -412,7 +422,12 @@ mod tests {
 
         // check the set_u0 sens adjoint jacobian
         let mut y_check = NalgebraVec::zeros(1, ctx.clone());
-        exponential_decay_with_algebraic_init_sens_adjoint::<NalgebraMat<f64>>(&p, t, &v, &mut y_check);
+        exponential_decay_with_algebraic_init_sens_adjoint::<NalgebraMat<f64>>(
+            &p,
+            t,
+            &v,
+            &mut y_check,
+        );
         let mut y = NalgebraVec::zeros(1, ctx.clone());
         for _i in 0..2 {
             problem
@@ -433,7 +448,13 @@ mod tests {
 
         // check the calc_out jacobian
         let mut y_check = NalgebraVec::zeros(1, ctx.clone());
-        exponential_decay_with_algebraic_out_jac_mul::<NalgebraMat<f64>>(&x, &p, t, &v, &mut y_check);
+        exponential_decay_with_algebraic_out_jac_mul::<NalgebraMat<f64>>(
+            &x,
+            &p,
+            t,
+            &v,
+            &mut y_check,
+        );
         let mut y = NalgebraVec::zeros(1, ctx.clone());
         for _i in 0..2 {
             problem

@@ -45,11 +45,21 @@ impl<'a, Eqn: OdeEquationsImplicit> InitOp<'a, Eqn> {
         let [(m_u, _), _, _, _] = mass.split(&algebraic_indices);
         let m_u = m_u * scale(-Eqn::T::one());
         let [_, (dfdv, _), _, (dgdv, _)] = rhs_jac.split(&algebraic_indices);
-        let zero_ll =
-            <Eqn::M as Matrix>::zeros(algebraic_indices.len(), n - algebraic_indices.len(), eqn.context().clone());
-        let zero_ur =
-            <Eqn::M as Matrix>::zeros(n - algebraic_indices.len(), algebraic_indices.len(), eqn.context().clone());
-        let zero_lr = <Eqn::M as Matrix>::zeros(algebraic_indices.len(), algebraic_indices.len(), eqn.context().clone());
+        let zero_ll = <Eqn::M as Matrix>::zeros(
+            algebraic_indices.len(),
+            n - algebraic_indices.len(),
+            eqn.context().clone(),
+        );
+        let zero_ur = <Eqn::M as Matrix>::zeros(
+            n - algebraic_indices.len(),
+            algebraic_indices.len(),
+            eqn.context().clone(),
+        );
+        let zero_lr = <Eqn::M as Matrix>::zeros(
+            algebraic_indices.len(),
+            algebraic_indices.len(),
+            eqn.context().clone(),
+        );
         let jac = Eqn::M::combine(&m_u, &dfdv, &zero_ll, &dgdv, &algebraic_indices);
         let neg_mass = Eqn::M::combine(&m_u, &zero_ur, &zero_ll, &zero_lr, &algebraic_indices);
 
@@ -130,20 +140,20 @@ mod tests {
     use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
     use crate::op::init::InitOp;
     use crate::vector::Vector;
-    use crate::{NonLinearOp, NonLinearOpJacobian};
+    use crate::{DenseMatrix, NalgebraMat, NalgebraVec, NonLinearOp, NonLinearOpJacobian};
 
-    type Mcpu = nalgebra::DMatrix<f64>;
-    type Vcpu = nalgebra::DVector<f64>;
+    type Mcpu = NalgebraMat<f64>;
+    type Vcpu = NalgebraVec<f64>;
 
     #[test]
     fn test_initop() {
         let (problem, _soln) = exponential_decay_with_algebraic_problem::<Mcpu>(false);
-        let y0 = Vcpu::from_vec(vec![1.0, 2.0, 3.0]);
-        let dy0 = Vcpu::from_vec(vec![4.0, 5.0, 6.0]);
+        let y0 = Vcpu::from_vec(vec![1.0, 2.0, 3.0], problem.context().clone());
+        let dy0 = Vcpu::from_vec(vec![4.0, 5.0, 6.0], problem.context().clone());
         let t = 0.0;
         let initop = InitOp::new(&problem.eqn, t, &y0);
         // check that the init function is correct
-        let mut y_out = Vcpu::from_vec(vec![0.0, 0.0, 0.0]);
+        let mut y_out = Vcpu::from_vec(vec![0.0, 0.0, 0.0], problem.context().clone());
 
         // -M_u du + f(u, v)
         // g(t, u, v)
@@ -165,9 +175,9 @@ mod tests {
         //  i.e. F(y) = |-1 * 4 + -0.1 * 1| = |-4.1|
         //              |-1 * 5 + -0.1 * 2|   |-5.2|
         //              |2 - 1|               |1|
-        let du_v = Vcpu::from_vec(vec![dy0[0], dy0[1], y0[2]]);
+        let du_v = Vcpu::from_vec(vec![dy0[0], dy0[1], y0[2]], problem.context().clone());
         initop.call_inplace(&du_v, t, &mut y_out);
-        let y_out_expect = Vcpu::from_vec(vec![-4.1, -5.2, 1.0]);
+        let y_out_expect = Vcpu::from_vec(vec![-4.1, -5.2, 1.0], problem.context().clone());
         y_out.assert_eq_st(&y_out_expect, 1e-10);
 
         // df/dv = |0|
@@ -177,14 +187,14 @@ mod tests {
         //                   = |0 -1 0|
         //     (0,    dg/dv) = |0 0 1|
         let jac = initop.jacobian(&du_v, t);
-        assert_eq!(jac[(0, 0)], -1.0);
-        assert_eq!(jac[(0, 1)], 0.0);
-        assert_eq!(jac[(0, 2)], 0.0);
-        assert_eq!(jac[(1, 0)], 0.0);
-        assert_eq!(jac[(1, 1)], -1.0);
-        assert_eq!(jac[(1, 2)], 0.0);
-        assert_eq!(jac[(2, 0)], 0.0);
-        assert_eq!(jac[(2, 1)], 0.0);
-        assert_eq!(jac[(2, 2)], 1.0);
+        assert_eq!(jac.get_index(0, 0), -1.0);
+        assert_eq!(jac.get_index(0, 1), 0.0);
+        assert_eq!(jac.get_index(0, 2), 0.0);
+        assert_eq!(jac.get_index(1, 0), 0.0);
+        assert_eq!(jac.get_index(1, 1), -1.0);
+        assert_eq!(jac.get_index(1, 2), 0.0);
+        assert_eq!(jac.get_index(2, 0), 0.0);
+        assert_eq!(jac.get_index(2, 1), 0.0);
+        assert_eq!(jac.get_index(2, 2), 1.0);
     }
 }

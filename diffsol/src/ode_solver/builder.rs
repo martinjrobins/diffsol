@@ -1,6 +1,12 @@
-
 use crate::{
-    error::{DiffsolError, OdeSolverError}, matrix::dense_nalgebra_serial::NalgebraMat, ode_solver_error, op::{linear_closure_with_adjoint::LinearClosureWithAdjoint, BuilderOp}, Closure, ClosureNoJac, ClosureWithAdjoint, ClosureWithSens, ConstantClosure, ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp, LinearClosure, LinearOp, Matrix, NonLinearOp, OdeEquations, OdeSolverProblem, Op, ParameterisedOp, UnitCallable, Vector, VectorHost
+    error::{DiffsolError, OdeSolverError},
+    matrix::dense_nalgebra_serial::NalgebraMat,
+    ode_solver_error,
+    op::{linear_closure_with_adjoint::LinearClosureWithAdjoint, BuilderOp},
+    Closure, ClosureNoJac, ClosureWithAdjoint, ClosureWithSens, ConstantClosure,
+    ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp, LinearClosure, LinearOp,
+    Matrix, NonLinearOp, OdeEquations, OdeSolverProblem, Op, ParameterisedOp, UnitCallable, Vector,
+    VectorHost,
 };
 
 use super::equations::OdeSolverEquations;
@@ -135,7 +141,14 @@ where
     {
         let nstates = 0;
         OdeBuilder::<M, Closure<M, F, G>, Init, Mass, Root, Out> {
-            rhs: Some(Closure::new(rhs, rhs_jac, nstates, nstates, nstates, self.ctx.clone())),
+            rhs: Some(Closure::new(
+                rhs,
+                rhs_jac,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
             init: self.init,
             mass: self.mass,
             root: self.root,
@@ -178,7 +191,13 @@ where
         let nstates = 0;
         OdeBuilder::<M, ClosureWithSens<M, F, G, H>, Init, Mass, Root, Out> {
             rhs: Some(ClosureWithSens::new(
-                rhs, rhs_jac, rhs_sens, nstates, nstates, nstates,
+                rhs,
+                rhs_jac,
+                rhs_sens,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
             )),
             init: self.init,
             mass: self.mass,
@@ -226,6 +245,7 @@ where
                 nstates,
                 nstates,
                 nstates,
+                self.ctx.clone(),
             )),
             init: self.init,
             mass: self.mass,
@@ -255,12 +275,17 @@ where
     /// - `init`: Function of type Fn(p: &V, t: S) -> V that computes the initial state.
     pub fn init<F>(self, init: F) -> OdeBuilder<M, Rhs, ConstantClosure<M, F>, Mass, Root, Out>
     where
-        F: Fn(&M::V, M::T) -> M::V,
+        F: Fn(&M::V, M::T, &mut M::V),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, ConstantClosure<M, F>, Mass, Root, Out> {
             rhs: self.rhs,
-            init: Some(ConstantClosure::new(init, nstates, nstates)),
+            init: Some(ConstantClosure::new(
+                init,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
             mass: self.mass,
             root: self.root,
             out: self.out,
@@ -293,14 +318,18 @@ where
         init_sens: G,
     ) -> OdeBuilder<M, Rhs, ConstantClosureWithSens<M, F, G>, Mass, Root, Out>
     where
-        F: Fn(&M::V, M::T) -> M::V,
+        F: Fn(&M::V, M::T, &mut M::V),
         G: Fn(&M::V, M::T, &M::V, &mut M::V),
     {
         let nstates = 0;
         OdeBuilder::<M, Rhs, ConstantClosureWithSens<M, F, G>, Mass, Root, Out> {
             rhs: self.rhs,
             init: Some(ConstantClosureWithSens::new(
-                init, init_sens, nstates, nstates,
+                init,
+                init_sens,
+                nstates,
+                nstates,
+                self.ctx.clone(),
             )),
             mass: self.mass,
             root: self.root,
@@ -335,7 +364,7 @@ where
         init_sens_adjoint: G,
     ) -> OdeBuilder<M, Rhs, ConstantClosureWithAdjoint<M, F, G>, Mass, Root, Out>
     where
-        F: Fn(&M::V, M::T) -> M::V,
+        F: Fn(&M::V, M::T, &mut M::V),
         G: Fn(&M::V, M::T, &M::V, &mut M::V),
     {
         let nstates = 0;
@@ -346,6 +375,7 @@ where
                 init_sens_adjoint,
                 nstates,
                 nstates,
+                self.ctx.clone(),
             )),
             mass: self.mass,
             root: self.root,
@@ -380,7 +410,13 @@ where
         OdeBuilder::<M, Rhs, Init, LinearClosure<M, F>, Root, Out> {
             rhs: self.rhs,
             init: self.init,
-            mass: Some(LinearClosure::new(mass, nstates, nstates, nstates, self.ctx.clone())),
+            mass: Some(LinearClosure::new(
+                mass,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
             root: self.root,
             out: self.out,
 
@@ -428,6 +464,7 @@ where
                 nstates,
                 nstates,
                 nstates,
+                self.ctx.clone(),
             )),
             root: self.root,
             out: self.out,
@@ -467,7 +504,13 @@ where
             rhs: self.rhs,
             init: self.init,
             mass: self.mass,
-            root: Some(ClosureNoJac::new(root, nstates, nroots, nroots, self.ctx.clone())),
+            root: Some(ClosureNoJac::new(
+                root,
+                nstates,
+                nroots,
+                nroots,
+                self.ctx.clone(),
+            )),
             out: self.out,
 
             t0: self.t0,
@@ -503,7 +546,14 @@ where
             init: self.init,
             mass: self.mass,
             root: self.root,
-            out: Some(Closure::new(out, out_jac, nstates, nout, nstates, self.ctx.clone())),
+            out: Some(Closure::new(
+                out,
+                out_jac,
+                nstates,
+                nout,
+                nstates,
+                self.ctx.clone(),
+            )),
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -550,6 +600,7 @@ where
                 nstates,
                 nout,
                 nstates,
+                self.ctx.clone(),
             )),
             t0: self.t0,
             h0: self.h0,
@@ -683,7 +734,12 @@ where
         self
     }
 
-    fn build_atol(atol: Vec<M::T>, nstates: usize, ty: &str, ctx: M::C) -> Result<M::V, DiffsolError> {
+    fn build_atol(
+        atol: Vec<M::T>,
+        nstates: usize,
+        ty: &str,
+        ctx: M::C,
+    ) -> Result<M::V, DiffsolError> {
         if atol.len() == 1 {
             Ok(M::V::from_element(nstates, atol[0], ctx))
         } else if atol.len() != nstates {
@@ -723,11 +779,21 @@ where
             None => None,
         };
         let param_atol = match param_atol {
-            Some(param_atol) => Some(Self::build_atol(param_atol, nparam, "parameters", ctx.clone())?),
+            Some(param_atol) => Some(Self::build_atol(
+                param_atol,
+                nparam,
+                "parameters",
+                ctx.clone(),
+            )?),
             None => None,
         };
         let sens_atol = match sens_atol {
-            Some(sens_atol) => Some(Self::build_atol(sens_atol, nstates, "sensitivity", ctx.clone())?),
+            Some(sens_atol) => Some(Self::build_atol(
+                sens_atol,
+                nstates,
+                "sensitivity",
+                ctx.clone(),
+            )?),
             None => None,
         };
         Ok((atol, sens_atol, out_atol, param_atol))
@@ -829,8 +895,11 @@ where
     }
 
     #[cfg(feature = "diffsl")]
-    pub fn build_from_diffsl<CG: crate::CodegenModule>(self, code: &str) -> Result<OdeSolverProblem<crate::DiffSl<M, CG>>, DiffsolError> 
-    where 
+    pub fn build_from_diffsl<CG: crate::CodegenModule>(
+        self,
+        code: &str,
+    ) -> Result<OdeSolverProblem<crate::DiffSl<M, CG>>, DiffsolError>
+    where
         M: Matrix<V: VectorHost, T = f64>,
     {
         let eqn = crate::DiffSl::compile(code, self.ctx.clone())?;

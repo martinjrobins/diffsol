@@ -262,7 +262,8 @@ where
 mod tests {
 
     use crate::{
-        matrix::dense_nalgebra_serial::NalgebraMat, ode_solver::test_models::robertson::robertson, NalgebraLU, OdeEquations, OdeSolverMethod, Op, Vector, Context
+        matrix::dense_nalgebra_serial::NalgebraMat, ode_solver::test_models::robertson::robertson,
+        Context, NalgebraLU, OdeEquations, OdeSolverMethod, Op, Vector,
     };
 
     use super::{Checkpointing, HermiteInterpolator};

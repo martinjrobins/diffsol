@@ -3,7 +3,7 @@ use crate::{
     linear_solver::LinearSolver,
     linear_solver_error,
     scalar::IndexType,
-    Matrix, NonLinearOpJacobian, Scalar, FaerSparseMat, FaerVec, FaerContext
+    FaerContext, FaerSparseMat, FaerVec, Matrix, NonLinearOpJacobian, Scalar,
 };
 
 use faer::{
@@ -45,11 +45,8 @@ impl<T: Scalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         op.jacobian_inplace(x, t, matrix);
         self.lu = Some(
-            Lu::try_new_with_symbolic(
-                self.lu_symbolic.as_ref().unwrap().clone(),
-                matrix.data.rb(),
-            )
-            .expect("Failed to factorise matrix"),
+            Lu::try_new_with_symbolic(self.lu_symbolic.as_ref().unwrap().clone(), matrix.data.rb())
+                .expect("Failed to factorise matrix"),
         )
     }
 
@@ -62,13 +59,16 @@ impl<T: Scalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
         Ok(())
     }
 
-    fn set_problem<C: NonLinearOpJacobian<T = T, V = FaerVec<T>, M = FaerSparseMat<T>, C = FaerContext>>(
+    fn set_problem<
+        C: NonLinearOpJacobian<T = T, V = FaerVec<T>, M = FaerSparseMat<T>, C = FaerContext>,
+    >(
         &mut self,
         op: &C,
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();
-        let matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), op.context().clone());
+        let matrix =
+            C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), op.context().clone());
         self.matrix = Some(matrix);
         self.lu_symbolic = Some(
             SymbolicLu::try_new(self.matrix.as_ref().unwrap().data.symbolic())

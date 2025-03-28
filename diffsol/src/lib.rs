@@ -140,12 +140,12 @@ pub use diffsl::LlvmModule;
 #[cfg(feature = "diffsl")]
 pub use diffsl::{execution::module::CodegenModule, CraneliftModule};
 
+pub mod context;
 pub mod jacobian;
 pub mod linear_solver;
 pub mod matrix;
 pub mod nonlinear_solver;
 pub mod ode_solver;
-pub mod context;
 pub mod op;
 pub mod scalar;
 pub mod solver;
@@ -157,7 +157,7 @@ pub mod sundials_sys;
 pub use linear_solver::LinearSolver;
 pub use linear_solver::{faer::sparse_lu::FaerSparseLU, FaerLU, NalgebraLU};
 
-pub use context::{Context, faer::FaerContext, nalgebra::NalgebraContext};
+pub use context::{faer::FaerContext, nalgebra::NalgebraContext, Context};
 
 #[cfg(feature = "suitesparse")]
 pub use linear_solver::suitesparse::klu::KLU;
@@ -170,13 +170,14 @@ pub use jacobian::{
     find_sens_adjoint_non_zeros, find_sens_non_zeros, find_transpose_non_zeros, JacobianColoring,
 };
 use matrix::extract_block::ColMajBlock;
-pub use matrix::{default_solver::DefaultSolver, Matrix};
+pub use matrix::{
+    default_solver::DefaultSolver, dense_faer_serial::FaerMat, dense_nalgebra_serial::NalgebraMat,
+    sparse_faer::FaerSparseMat, DenseMatrix, Matrix, MatrixCommon,
+};
+
 use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
-    DenseMatrix, MatrixCommon, MatrixHost, MatrixRef, MatrixView, MatrixViewMut,
-    dense_faer_serial::FaerMat,
-    sparse_faer::FaerSparseMat,
-    dense_nalgebra_serial::NalgebraMat,
+    MatrixHost, MatrixRef, MatrixView, MatrixViewMut,
 };
 use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus, root::RootFinder,
@@ -211,9 +212,13 @@ use op::{
     closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,
     constant_closure_with_sens::ConstantClosureWithSens, init::InitOp,
 };
-use scalar::{IndexType, Scalar, Scale};
+pub use scalar::{IndexType, Scalar, Scale};
 pub use vector::DefaultDenseMatrix;
-pub use vector::{Vector, VectorCommon, VectorHost, VectorIndex, VectorRef, VectorView, VectorViewMut, faer_serial::{FaerVec, FaerVecMut, FaerVecRef, FaerVecIndex}, nalgebra_serial::{NalgebraVec, NalgebraVecMut, NalgebraVecRef}};
+pub use vector::{
+    faer_serial::{FaerVec, FaerVecIndex, FaerVecMut, FaerVecRef},
+    nalgebra_serial::{NalgebraVec, NalgebraVecMut, NalgebraVecRef},
+    Vector, VectorCommon, VectorHost, VectorIndex, VectorRef, VectorView, VectorViewMut,
+};
 
 pub use scalar::scale;
 

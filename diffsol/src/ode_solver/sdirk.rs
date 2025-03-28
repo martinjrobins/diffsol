@@ -641,7 +641,10 @@ where
         let sens_error_control =
             self.s_op.is_some() && self.s_op.as_ref().unwrap().eqn().include_in_error_control();
         let mut sens_error = if sens_error_control {
-            <Eqn::V as Vector>::zeros(self.s_op.as_ref().unwrap().eqn().rhs().nstates(), ctx.clone())
+            <Eqn::V as Vector>::zeros(
+                self.s_op.as_ref().unwrap().eqn().rhs().nstates(),
+                ctx.clone(),
+            )
         } else {
             <Eqn::V as Vector>::zeros(0, ctx.clone())
         };
@@ -653,7 +656,10 @@ where
                 .eqn()
                 .include_out_in_error_control();
         let mut sens_out_error = if sens_out_error_control {
-            <Eqn::V as Vector>::zeros(self.s_op.as_ref().unwrap().eqn().out().unwrap().nout(), ctx.clone())
+            <Eqn::V as Vector>::zeros(
+                self.s_op.as_ref().unwrap().eqn().out().unwrap().nout(),
+                ctx.clone(),
+            )
         } else {
             <Eqn::V as Vector>::zeros(0, ctx.clone())
         };
@@ -1077,7 +1083,8 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
-        matrix::dense_nalgebra_serial::NalgebraMat, ode_solver::{
+        matrix::dense_nalgebra_serial::NalgebraMat,
+        ode_solver::{
             test_models::{
                 exponential_decay::{
                     exponential_decay_problem, exponential_decay_problem_adjoint,
@@ -1094,7 +1101,9 @@ mod test {
                 test_adjoint_sum_squares, test_checkpointing, test_interpolate, test_ode_solver,
                 test_problem, test_state_mut, test_state_mut_on_problem,
             },
-        }, Context, DenseMatrix, FaerSparseLU, FaerSparseMat, MatrixCommon, NalgebraLU, NalgebraVec, OdeEquations, OdeSolverMethod, Op, Vector
+        },
+        Context, DenseMatrix, FaerSparseLU, FaerSparseMat, MatrixCommon, NalgebraLU, NalgebraVec,
+        OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
     };
 
     use num_traits::abs;
@@ -1424,7 +1433,7 @@ mod test {
     #[cfg(feature = "diffsl")]
     #[test]
     fn test_ball_bounce_tr_bdf2() {
-        type M = nalgebra::DMatrix<f64>;
+        type M = crate::NalgebraMat<f64>;
         type LS = crate::NalgebraLU<f64>;
         let (x, v, t) = crate::ode_solver::tests::test_ball_bounce(
             crate::ode_solver::tests::test_ball_bounce_problem::<M>()

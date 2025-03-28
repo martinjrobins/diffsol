@@ -1,17 +1,20 @@
-use diffsol::{CraneliftModule, DiffSl, FaerSparseLU, OdeBuilder, OdeSolverMethod, SparseColMat};
+use diffsol::{
+    CraneliftModule, DiffSl, FaerSparseLU, FaerSparseMat, MatrixCommon, OdeBuilder, OdeSolverMethod,
+};
 use plotly::{
     layout::{Axis, Layout},
     Plot, Surface,
 };
 use std::fs;
 
-type M = SparseColMat<f64>;
+type M = FaerSparseMat<f64>;
 type LS = FaerSparseLU<f64>;
 type CG = CraneliftModule;
 
 fn main() {
-    let eqn = DiffSl::<M, CG>::compile(
-        "
+    let problem = OdeBuilder::<M>::new()
+        .build_from_diffsl::<CG>(
+            "
     D { 1.0 }
     h { 1.0 }
     g { 0.0 }
@@ -35,10 +38,8 @@ fn main() {
     F_i {
         D * (heat_i + b_i) / (h * h)
     }",
-    )
-    .unwrap();
-
-    let problem = OdeBuilder::<M>::new().build_from_eqn(eqn).unwrap();
+        )
+        .unwrap();
     let times = (0..50).map(|i| i as f64).collect::<Vec<f64>>();
     let mut solver = problem.bdf::<LS>().unwrap();
     let sol = solver.solve_dense(&times).unwrap();
@@ -46,6 +47,7 @@ fn main() {
     let x = (0..21).map(|i| i as f64).collect::<Vec<f64>>();
     let y = times;
     let z = sol
+        .inner()
         .col_iter()
         .map(|v| v.iter().copied().collect::<Vec<f64>>())
         .collect::<Vec<Vec<f64>>>();

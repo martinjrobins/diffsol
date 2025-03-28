@@ -57,13 +57,14 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
     }
     pub fn new_no_jacobian(eqn: Eqn) -> Self {
         let n = eqn.rhs().nstates();
+        let ctx = eqn.context();
         let c = RefCell::new(Eqn::T::zero());
-        let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n));
+        let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
         let jacobian_is_stale = RefCell::new(true);
         let number_of_jac_evals = RefCell::new(0);
-        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n));
-        let rhs_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0));
-        let mass_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0));
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
+        let rhs_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0, ctx.clone()));
+        let mass_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0, ctx.clone()));
         let sparsity = None;
         Self {
             eqn,
@@ -104,11 +105,12 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
     }
     pub fn new(eqn: Eqn) -> Self {
         let n = eqn.rhs().nstates();
+        let ctx = eqn.context();
         let c = RefCell::new(Eqn::T::zero());
-        let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n));
+        let psi_neg_y0 = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
         let jacobian_is_stale = RefCell::new(true);
         let number_of_jac_evals = RefCell::new(0);
-        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n));
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
 
         // create the mass and rhs jacobians according to the sparsity pattern
         let rhs_jac_sparsity = eqn.rhs().jacobian_sparsity();
@@ -116,6 +118,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
             n,
             n,
             rhs_jac_sparsity.map(|s| s.to_owned()),
+            ctx.clone(),
         ));
         let sparsity = if let Some(rhs_jac_sparsity) = eqn.rhs().jacobian_sparsity() {
             if let Some(mass) = eqn.mass() {
@@ -137,10 +140,15 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
 
         let mass_jac = if eqn.mass().is_none() {
             // no mass matrix, so just use the identity
-            Eqn::M::from_diagonal(&Eqn::V::from_element(n, Eqn::T::one()))
+            Eqn::M::from_diagonal(&Eqn::V::from_element(n, Eqn::T::one(), ctx.clone()))
         } else {
             // mass is not constant, so just create a matrix with the correct sparsity
-            Eqn::M::new_from_sparsity(n, n, eqn.mass().unwrap().sparsity().map(|s| s.to_owned()))
+            Eqn::M::new_from_sparsity(
+                n,
+                n,
+                eqn.mass().unwrap().sparsity().map(|s| s.to_owned()),
+                ctx.clone(),
+            )
         };
 
         let mass_jac = RefCell::new(mass_jac);
@@ -216,6 +224,7 @@ impl<Eqn: OdeEquationsImplicit> Op for BdfCallable<Eqn> {
     type V = Eqn::V;
     type T = Eqn::T;
     type M = Eqn::M;
+    type C = Eqn::C;
     fn nstates(&self) -> usize {
         self.eqn.rhs().nstates()
     }
@@ -224,6 +233,9 @@ impl<Eqn: OdeEquationsImplicit> Op for BdfCallable<Eqn> {
     }
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
+    }
+    fn context(&self) -> &Self::C {
+        self.eqn.context()
     }
 }
 
@@ -297,26 +309,28 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for BdfCallable<Eqn> {
 
 #[cfg(test)]
 mod tests {
+    use crate::matrix::dense_nalgebra_serial::NalgebraMat;
     use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
     use crate::vector::Vector;
-    use crate::{NonLinearOp, NonLinearOpJacobian};
+    use crate::{DenseMatrix, NalgebraVec, NonLinearOp, NonLinearOpJacobian};
 
     use super::BdfCallable;
-    type Mcpu = nalgebra::DMatrix<f64>;
-    type Vcpu = nalgebra::DVector<f64>;
+    type Mcpu = NalgebraMat<f64>;
+    type Vcpu = NalgebraVec<f64>;
 
     #[test]
     fn test_bdf_callable() {
         let (problem, _soln) = exponential_decay_problem::<Mcpu>(false);
         let mut bdf_callable = BdfCallable::new(&problem.eqn);
+        let ctx = problem.context();
         let c = 0.1;
-        let phi_neg_y0 = Vcpu::from_vec(vec![1.1, 1.2]);
+        let phi_neg_y0 = Vcpu::from_vec(vec![1.1, 1.2], ctx.clone());
         bdf_callable.set_c_direct(c);
         bdf_callable.set_psi_neg_y0_direct(phi_neg_y0);
         // check that the bdf function is correct
-        let y = Vcpu::from_vec(vec![1.0, 1.0]);
+        let y = Vcpu::from_vec(vec![1.0, 1.0], ctx.clone());
         let t = 0.0;
-        let mut y_out = Vcpu::from_vec(vec![0.0, 0.0]);
+        let mut y_out = Vcpu::from_vec(vec![0.0, 0.0], ctx.clone());
 
         // F(y) = M (y - y0 + psi) - c * f(y)
         // M = |1 0|
@@ -328,24 +342,24 @@ mod tests {
         //  i.e. F(y) = |1 0| |2.1| - 0.1 * |-0.1| =  |2.11|
         //              |0 1| |2.2|         |-0.1|    |2.21|
         bdf_callable.call_inplace(&y, t, &mut y_out);
-        let y_out_expect = Vcpu::from_vec(vec![2.11, 2.21]);
+        let y_out_expect = Vcpu::from_vec(vec![2.11, 2.21], ctx.clone());
         y_out.assert_eq_st(&y_out_expect, 1e-10);
 
-        let v = Vcpu::from_vec(vec![1.0, 1.0]);
+        let v = Vcpu::from_vec(vec![1.0, 1.0], ctx.clone());
         // f'(y)v = |-0.1|
         //          |-0.1|
         // Mv - c * f'(y) v = |1 0| |1| - 0.1 * |-0.1| = |1.01|
         //                    |0 1| |1|         |-0.1|   |1.01|
         bdf_callable.jac_mul_inplace(&y, t, &v, &mut y_out);
-        let y_out_expect = Vcpu::from_vec(vec![1.01, 1.01]);
+        let y_out_expect = Vcpu::from_vec(vec![1.01, 1.01], ctx.clone());
         y_out.assert_eq_st(&y_out_expect, 1e-10);
 
         // J = M - c * f'(y) = |1 0| - 0.1 * |-0.1 0| = |1.01 0|
         //                     |0 1|         |0 -0.1|   |0 1.01|
         let jac = bdf_callable.jacobian(&y, t);
-        assert_eq!(jac[(0, 0)], 1.01);
-        assert_eq!(jac[(0, 1)], 0.0);
-        assert_eq!(jac[(1, 0)], 0.0);
-        assert_eq!(jac[(1, 1)], 1.01);
+        assert_eq!(jac.get_index(0, 0), 1.01);
+        assert_eq!(jac.get_index(0, 1), 0.0);
+        assert_eq!(jac.get_index(1, 0), 0.0);
+        assert_eq!(jac.get_index(1, 1), 1.01);
     }
 }

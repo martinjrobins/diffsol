@@ -1,7 +1,5 @@
 use faer::{get_global_parallelism, Par};
 
-
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct FaerContext {
     par: Par,
@@ -9,6 +7,8 @@ pub struct FaerContext {
 
 impl Default for FaerContext {
     fn default() -> Self {
-        Self { par: get_global_parallelism() }
+        Self {
+            par: get_global_parallelism(),
+        }
     }
 }

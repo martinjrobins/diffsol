@@ -1,6 +1,6 @@
 use crate::matrix::DenseMatrix;
 use crate::scalar::Scale;
-use crate::{IndexType, Scalar, Context};
+use crate::{Context, IndexType, Scalar};
 use nalgebra::ComplexField;
 use num_traits::Zero;
 use std::fmt::Debug;
@@ -11,8 +11,8 @@ pub mod faer_serial;
 #[cfg(feature = "nalgebra")]
 pub mod nalgebra_serial;
 
-#[cfg(feature = "cuda")]
-pub mod cuda;
+//#[cfg(feature = "cuda")]
+//pub mod cuda;
 
 #[macro_use]
 mod utils;
@@ -32,6 +32,9 @@ pub trait VectorIndex: Sized + Debug + Clone {
 pub trait VectorCommon: Sized + Debug {
     type T: Scalar;
     type C: Context;
+    type Inner;
+
+    fn inner(&self) -> &Self::Inner;
 }
 
 impl<V> VectorCommon for &V
@@ -40,6 +43,10 @@ where
 {
     type T = V::T;
     type C = V::C;
+    type Inner = V::Inner;
+    fn inner(&self) -> &Self::Inner {
+        V::inner(self)
+    }
 }
 
 impl<V> VectorCommon for &mut V
@@ -48,6 +55,10 @@ where
 {
     type T = V::T;
     type C = V::C;
+    type Inner = V::Inner;
+    fn inner(&self) -> &Self::Inner {
+        V::inner(self)
+    }
 }
 
 pub trait VectorOpsByValue<Rhs = Self, Output = Self>:
@@ -130,9 +141,11 @@ pub trait Vector:
     where
         Self: 'a;
     type Index: VectorIndex;
-    
+
     /// get the context
     fn context(&self) -> &Self::C;
+
+    fn inner_mut(&mut self) -> &mut Self::Inner;
 
     /// set the value at index `index` to `value`, might be slower than using `IndexMut`
     /// if the vector is not on the host
@@ -323,22 +336,34 @@ mod tests {
     use super::Vector;
 
     pub fn test_root_finding<V: Vector>() {
-        let g0 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()], Default::default());
+        let g0 = V::from_vec(
+            vec![1.0.into(), (-2.0).into(), 3.0.into()],
+            Default::default(),
+        );
         let g1 = V::from_vec(vec![1.0.into(), 2.0.into(), 3.0.into()], Default::default());
         let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
         assert!(!found_root);
         assert_eq!(max_frac, V::T::from(0.5));
         assert_eq!(max_frac_index, 1);
 
-        let g0 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()], Default::default());
+        let g0 = V::from_vec(
+            vec![1.0.into(), (-2.0).into(), 3.0.into()],
+            Default::default(),
+        );
         let g1 = V::from_vec(vec![1.0.into(), 2.0.into(), 0.0.into()], Default::default());
         let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
         assert!(found_root);
         assert_eq!(max_frac, V::T::from(0.5));
         assert_eq!(max_frac_index, 1);
 
-        let g0 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()], Default::default());
-        let g1 = V::from_vec(vec![1.0.into(), (-2.0).into(), 3.0.into()], Default::default());
+        let g0 = V::from_vec(
+            vec![1.0.into(), (-2.0).into(), 3.0.into()],
+            Default::default(),
+        );
+        let g1 = V::from_vec(
+            vec![1.0.into(), (-2.0).into(), 3.0.into()],
+            Default::default(),
+        );
         let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
         assert!(!found_root);
         assert_eq!(max_frac, V::T::from(0.0));

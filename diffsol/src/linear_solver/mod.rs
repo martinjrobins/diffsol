@@ -53,7 +53,12 @@ impl<V> LinearSolveSolution<V> {
 #[cfg(test)]
 pub mod tests {
     use crate::{
-        linear_solver::{FaerLU, NalgebraLU}, matrix::dense_nalgebra_serial::NalgebraMat, op::{closure::Closure, ParameterisedOp}, scalar::scale, vector::VectorRef, LinearSolver, Matrix, NalgebraVec, NonLinearOpJacobian, Op, Vector, FaerVec, FaerMat,
+        linear_solver::{FaerLU, NalgebraLU},
+        matrix::dense_nalgebra_serial::NalgebraMat,
+        op::{closure::Closure, ParameterisedOp},
+        scalar::scale,
+        vector::VectorRef,
+        FaerMat, FaerVec, LinearSolver, Matrix, NalgebraVec, NonLinearOpJacobian, Op, Vector,
     };
     use num_traits::{One, Zero};
 
@@ -82,9 +87,13 @@ pub mod tests {
             2,
             2,
             p.len(),
-            ctx.clone(), 
+            ctx.clone(),
         );
-        op.calculate_sparsity(&M::V::from_element(2, M::T::one(), ctx.clone()), M::T::zero(), &p);
+        op.calculate_sparsity(
+            &M::V::from_element(2, M::T::one(), ctx.clone()),
+            M::T::zero(),
+            &p,
+        );
         let rtol = M::T::from(1e-6);
         let atol = M::V::from_vec(vec![1e-6.into(), 1e-6.into()], ctx.clone());
         let solns = vec![LinearSolveSolution::new(

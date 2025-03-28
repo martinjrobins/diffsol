@@ -140,7 +140,12 @@ impl<I: VectorIndex> ColMajBlock<I> {
         }
     }
 
-    fn src_indices(nrows: IndexType, row_indices: &[IndexType], col_indices: &[IndexType], ctx: I::C) -> I {
+    fn src_indices(
+        nrows: IndexType,
+        row_indices: &[IndexType],
+        col_indices: &[IndexType],
+        ctx: I::C,
+    ) -> I {
         let mut src_indices = Vec::new();
         for &j in col_indices {
             for &i in row_indices {
@@ -181,22 +186,42 @@ impl<I: VectorIndex> ColMajBlock<I> {
         let ul = Self::new(
             n_up,
             n_up,
-            Self::src_indices(nrows, &upper_indices, &upper_indices, indices.context().clone()),
+            Self::src_indices(
+                nrows,
+                &upper_indices,
+                &upper_indices,
+                indices.context().clone(),
+            ),
         );
         let ur = Self::new(
             n_up,
             n_low,
-            Self::src_indices(nrows, &upper_indices, &lower_indices, indices.context().clone()),
+            Self::src_indices(
+                nrows,
+                &upper_indices,
+                &lower_indices,
+                indices.context().clone(),
+            ),
         );
         let ll = Self::new(
             n_low,
             n_up,
-            Self::src_indices(nrows, &lower_indices, &upper_indices, indices.context().clone()),
+            Self::src_indices(
+                nrows,
+                &lower_indices,
+                &upper_indices,
+                indices.context().clone(),
+            ),
         );
         let lr = Self::new(
             n_low,
             n_low,
-            Self::src_indices(nrows, &lower_indices, &lower_indices, indices.context().clone()),
+            Self::src_indices(
+                nrows,
+                &lower_indices,
+                &lower_indices,
+                indices.context().clone(),
+            ),
         );
         (ul, ur, ll, lr)
     }
@@ -265,7 +290,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FaerSparseMat, Vector, FaerMat, NalgebraMat}; 
+    use crate::{FaerMat, FaerSparseMat, NalgebraMat, Vector};
 
     #[test]
     fn test_split_combine_faer_sparse() {

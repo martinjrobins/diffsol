@@ -1,16 +1,32 @@
 ///! A set of macros to implement common operations for vectors
-/// 
+///
 macro_rules! impl_vector_common {
-    ($vec:ty, $con:ty) => {
+    ($vec:ty, $con:ty, $in:ty) => {
         impl<T: Scalar> VectorCommon for $vec {
             type T = T;
             type C = $con;
+            type Inner = $in;
+            fn inner(&self) -> &Self::Inner {
+                &self.data
+            }
         }
     };
 }
 pub(crate) use impl_vector_common;
 
-
+macro_rules! impl_vector_common_ref {
+    ($vec:ty, $con:ty, $in:ty) => {
+        impl<'a, T: Scalar> VectorCommon for $vec {
+            type T = T;
+            type C = $con;
+            type Inner = $in;
+            fn inner(&self) -> &Self::Inner {
+                &self.data
+            }
+        }
+    };
+}
+pub(crate) use impl_vector_common_ref;
 
 macro_rules! impl_sub_assign {
     ($lhs:ty, $rhs:ty) => {
@@ -39,7 +55,10 @@ macro_rules! impl_sub_lhs {
         impl<T: Scalar> Sub<$rhs> for $lhs {
             type Output = $out;
             fn sub(self, rhs: $rhs) -> Self::Output {
-                Self::Output { data: self.data - &rhs.data, context: self.context }
+                Self::Output {
+                    data: self.data - &rhs.data,
+                    context: self.context,
+                }
             }
         }
     };
@@ -51,7 +70,10 @@ macro_rules! impl_sub_rhs {
         impl<T: Scalar> Sub<$rhs> for $lhs {
             type Output = $out;
             fn sub(self, rhs: $rhs) -> Self::Output {
-                Self::Output { data: &self.data - rhs.data, context: rhs.context }
+                Self::Output {
+                    data: &self.data - rhs.data,
+                    context: rhs.context,
+                }
             }
         }
     };
@@ -63,21 +85,25 @@ macro_rules! impl_sub_both_ref {
         impl<T: Scalar> Sub<$rhs> for $lhs {
             type Output = $out;
             fn sub(self, rhs: $rhs) -> Self::Output {
-                Self::Output { data: &self.data - &rhs.data, context: self.context.clone() }
+                Self::Output {
+                    data: &self.data - &rhs.data,
+                    context: self.context.clone(),
+                }
             }
         }
     };
 }
 pub(crate) use impl_sub_both_ref;
 
-
-
 macro_rules! impl_add_lhs {
     ($lhs:ty, $rhs:ty, $out:ty) => {
         impl<T: Scalar> Add<$rhs> for $lhs {
             type Output = $out;
             fn add(self, rhs: $rhs) -> Self::Output {
-                Self::Output { data: self.data + &rhs.data, context: self.context }
+                Self::Output {
+                    data: self.data + &rhs.data,
+                    context: self.context,
+                }
             }
         }
     };
@@ -89,7 +115,10 @@ macro_rules! impl_add_rhs {
         impl<T: Scalar> Add<$rhs> for $lhs {
             type Output = $out;
             fn add(self, rhs: $rhs) -> Self::Output {
-                Self::Output { data: &self.data + rhs.data, context: rhs.context }
+                Self::Output {
+                    data: &self.data + rhs.data,
+                    context: rhs.context,
+                }
             }
         }
     };
@@ -101,14 +130,15 @@ macro_rules! impl_add_both_ref {
         impl<T: Scalar> Add<$rhs> for $lhs {
             type Output = $out;
             fn add(self, rhs: $rhs) -> Self::Output {
-                Self::Output { data: &self.data + &rhs.data, context: self.context.clone() }
+                Self::Output {
+                    data: &self.data + &rhs.data,
+                    context: self.context.clone(),
+                }
             }
         }
     };
 }
 pub(crate) use impl_add_both_ref;
-
-
 
 macro_rules! impl_index {
     ($lhs:ty) => {
@@ -118,6 +148,12 @@ macro_rules! impl_index {
                 &self.data[index]
             }
         }
+    };
+}
+pub(crate) use impl_index;
+
+macro_rules! impl_index_mut {
+    ($lhs:ty) => {
         impl<T: Scalar> IndexMut<IndexType> for $lhs {
             fn index_mut(&mut self, index: IndexType) -> &mut Self::Output {
                 &mut self.data[index]
@@ -125,5 +161,4 @@ macro_rules! impl_index {
         }
     };
 }
-pub(crate) use impl_index;
-
+pub(crate) use impl_index_mut;

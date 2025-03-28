@@ -1,13 +1,11 @@
-use std::ops::{Div, Index, IndexMut, Mul, MulAssign, SubAssign, AddAssign, Sub, Add};
+use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
-use nalgebra::{DVector, DVectorView, DVectorViewMut, LpNorm};
 use super::utils::*;
+use nalgebra::{DVector, DVectorView, DVectorViewMut, LpNorm};
 
-use crate::{IndexType, Scalar, Scale, VectorHost, NalgebraContext, NalgebraMat};
+use crate::{IndexType, NalgebraContext, NalgebraMat, Scalar, Scale, VectorHost};
 
 use super::{DefaultDenseMatrix, Vector, VectorCommon, VectorIndex, VectorView, VectorViewMut};
-
-
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct NalgebraIndex {
@@ -37,17 +35,24 @@ impl<T: Scalar> DefaultDenseMatrix for NalgebraVec<T> {
     type M = NalgebraMat<T>;
 }
 
-impl_vector_common!(NalgebraVec<T>, NalgebraContext);
-impl_vector_common!(NalgebraVecRef<'_, T>, NalgebraContext);
-impl_vector_common!(NalgebraVecMut<'_, T>, NalgebraContext);
+impl_vector_common!(NalgebraVec<T>, NalgebraContext, DVector<T>);
+impl_vector_common_ref!(NalgebraVecRef<'a, T>, NalgebraContext, DVectorView<'a, T>);
+impl_vector_common_ref!(
+    NalgebraVecMut<'a, T>,
+    NalgebraContext,
+    DVectorViewMut<'a, T>
+);
 
 macro_rules! impl_mul_scalar {
     ($lhs:ty, $out:ty, $scalar:ty) => {
-        impl<T: Scalar> Mul<Scale<T>> for $lhs{
+        impl<T: Scalar> Mul<Scale<T>> for $lhs {
             type Output = $out;
             fn mul(self, rhs: Scale<T>) -> Self::Output {
                 let scale: $scalar = rhs.value();
-                Self::Output { data: &self.data * scale, context: self.context.clone() }
+                Self::Output {
+                    data: &self.data * scale,
+                    context: self.context.clone(),
+                }
             }
         }
     };
@@ -59,7 +64,10 @@ macro_rules! impl_div_scalar {
             type Output = $out;
             fn div(self, rhs: Scale<T>) -> Self::Output {
                 let inv_rhs: T = T::one() / rhs.value();
-                Self::Output { data: self.data * inv_rhs, context: self.context }
+                Self::Output {
+                    data: self.data * inv_rhs,
+                    context: self.context,
+                }
             }
         }
     };
@@ -117,7 +125,11 @@ impl_sub_lhs!(NalgebraVec<T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
 impl_sub_rhs!(NalgebraVecRef<'_, T>, NalgebraVec<T>, NalgebraVec<T>);
 impl_sub_both_ref!(NalgebraVecRef<'_, T>, &NalgebraVec<T>, NalgebraVec<T>);
 impl_sub_both_ref!(NalgebraVecRef<'_, T>, NalgebraVecRef<'_, T>, NalgebraVec<T>);
-impl_sub_both_ref!(NalgebraVecRef<'_, T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
+impl_sub_both_ref!(
+    NalgebraVecRef<'_, T>,
+    &NalgebraVecRef<'_, T>,
+    NalgebraVec<T>
+);
 
 impl_add_both_ref!(&NalgebraVec<T>, &NalgebraVec<T>, NalgebraVec<T>);
 impl_add_rhs!(&NalgebraVec<T>, NalgebraVec<T>, NalgebraVec<T>);
@@ -132,17 +144,22 @@ impl_add_lhs!(NalgebraVec<T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
 impl_add_rhs!(NalgebraVecRef<'_, T>, NalgebraVec<T>, NalgebraVec<T>);
 impl_add_both_ref!(NalgebraVecRef<'_, T>, &NalgebraVec<T>, NalgebraVec<T>);
 impl_add_both_ref!(NalgebraVecRef<'_, T>, NalgebraVecRef<'_, T>, NalgebraVec<T>);
-impl_add_both_ref!(NalgebraVecRef<'_, T>, &NalgebraVecRef<'_, T>, NalgebraVec<T>);
+impl_add_both_ref!(
+    NalgebraVecRef<'_, T>,
+    &NalgebraVecRef<'_, T>,
+    NalgebraVec<T>
+);
 
 impl_index!(NalgebraVec<T>);
+impl_index_mut!(NalgebraVec<T>);
 
+impl_index!(NalgebraVecRef<'_, T>);
 
 impl VectorIndex for NalgebraIndex {
     type C = NalgebraContext;
     fn zeros(len: IndexType, ctx: Self::C) -> Self {
         let data = DVector::from_element(len, 0);
         Self { data, context: ctx }
-
     }
     fn len(&self) -> crate::IndexType {
         self.data.len()
@@ -183,7 +200,6 @@ impl<'a, T: Scalar> VectorView<'a> for NalgebraVecRef<'a, T> {
     }
 }
 
-
 impl<'a, T: Scalar> VectorViewMut<'a> for NalgebraVecMut<'a, T> {
     type Owned = NalgebraVec<T>;
     type View = NalgebraVecRef<'a, T>;
@@ -198,7 +214,6 @@ impl<'a, T: Scalar> VectorViewMut<'a> for NalgebraVecMut<'a, T> {
         self.data.axpy(alpha, &x.data, beta);
     }
 }
-
 
 impl<T: Scalar> VectorHost for NalgebraVec<T> {
     fn as_slice(&self) -> &[Self::T] {
@@ -215,6 +230,9 @@ impl<T: Scalar> Vector for NalgebraVec<T> {
     type Index = NalgebraIndex;
     fn len(&self) -> IndexType {
         self.data.len()
+    }
+    fn inner_mut(&mut self) -> &mut Self::Inner {
+        &mut self.data
     }
     fn context(&self) -> &Self::C {
         &self.context
@@ -242,10 +260,16 @@ impl<T: Scalar> Vector for NalgebraVec<T> {
         acc / Self::T::from(self.len() as f64)
     }
     fn as_view(&self) -> Self::View<'_> {
-        Self::View { data: self.data.as_view(), context: self.context.clone() }
+        Self::View {
+            data: self.data.as_view(),
+            context: self.context.clone(),
+        }
     }
     fn as_view_mut(&mut self) -> Self::ViewMut<'_> {
-        Self::ViewMut { data: self.data.as_view_mut(), context: self.context.clone() }
+        Self::ViewMut {
+            data: self.data.as_view_mut(),
+            context: self.context.clone(),
+        }
     }
     fn copy_from(&mut self, other: &Self) {
         self.data.copy_from(&other.data);

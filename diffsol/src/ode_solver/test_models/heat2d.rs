@@ -26,8 +26,6 @@ pub fn heat2d_diffsl_problem<
     OdeSolverProblem<impl crate::OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
-    use crate::{DiffSl, DiffSlContext};
-
     let (problem, _soln) = head2d_problem::<M, MGRID>();
     let u0 = problem.eqn.init().call(0.0);
     let jac = problem.eqn.rhs().jacobian(&u0, 0.0);
@@ -91,14 +89,12 @@ pub fn heat2d_diffsl_problem<
         dx2 = (1.0 / (MGRID as f64 - 1.0)).powi(2),
     );
 
-    let context: DiffSlContext<M, CG> = DiffSlContext::new(code.as_str(), 1).unwrap();
-    let eqn = DiffSl::from_context(context);
     let problem = OdeBuilder::<M>::new()
         .rtol(1e-7)
         .atol([1e-7])
-        .build_from_eqn(eqn)
+        .build_from_diffsl::<CG>(code.as_str())
         .unwrap();
-    let soln = soln::<M>();
+    let soln = soln::<M>(problem.context().clone());
     (problem, soln)
 }
 
@@ -148,9 +144,8 @@ fn heat2d_jac_mul<M: MatrixHost, const MGRID: usize>(
     }
 }
 
-fn heat2d_init<M: MatrixHost, const MGRID: usize>(_p: &M::V, _t: M::T) -> M::V {
+fn heat2d_init<M: MatrixHost, const MGRID: usize>(_p: &M::V, _t: M::T, uu: &mut M::V) {
     let mm = M::T::from(MGRID as f64);
-    let mut uu = M::V::zeros(MGRID * MGRID);
     let bval = M::T::zero();
     let one = M::T::one();
     let dx = one / (mm - one);
@@ -177,7 +172,6 @@ fn heat2d_init<M: MatrixHost, const MGRID: usize>(_p: &M::V, _t: M::T) -> M::V {
             }
         }
     }
-    uu
 }
 
 fn heat2d_mass<M: MatrixHost, const MGRID: usize>(
@@ -259,16 +253,17 @@ pub fn head2d_problem<M: MatrixHost + 'static, const MGRID: usize>() -> (
         .out_implicit(heat2d_out::<M, MGRID>, heat2d_out_jac_mul::<M, MGRID>, 1)
         .build()
         .unwrap();
+    let ctx = problem.context().clone();
 
-    (problem, soln::<M>())
+    (problem, soln::<M>(ctx))
 }
 
-fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
+fn soln<M: Matrix>(ctx: M::C) -> OdeSolverSolution<M::V> {
     let mut soln = OdeSolverSolution {
         solution_points: Vec::new(),
         sens_solution_points: None,
         rtol: M::T::from(1e-5),
-        atol: M::V::from_element(1, M::T::from(1e-5)),
+        atol: M::V::from_element(1, M::T::from(1e-5), ctx.clone()),
         negative_time: false,
     };
     let data = vec![
@@ -286,7 +281,10 @@ fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
         (vec![3.259034338585213e-17], 10.24),
     ];
     for (values, time) in data {
-        let values = M::V::from_vec(values.iter().map(|v| M::T::from(*v)).collect::<Vec<_>>());
+        let values = M::V::from_vec(
+            values.iter().map(|v| M::T::from(*v)).collect::<Vec<_>>(),
+            ctx.clone(),
+        );
         let time = M::T::from(time);
         soln.push(values, time);
     }
@@ -295,49 +293,57 @@ fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{ConstantOp, LinearOp, NonLinearOpJacobian, OdeEquations};
+    use crate::{
+        matrix::dense_nalgebra_serial::NalgebraMat, ConstantOp, LinearOp, NonLinearOpJacobian,
+        OdeEquations,
+    };
 
     use super::*;
 
     #[test]
     fn test_jacobian() {
         //let jac = heat2d_jacobian::<nalgebra::DMatrix<f64>, 10>();
-        let (problem, _soln) = head2d_problem::<nalgebra::DMatrix<f64>, 10>();
+        let (problem, _soln) = head2d_problem::<NalgebraMat<f64>, 10>();
         let u0 = problem.eqn.init().call(0.0);
         let jac = problem.eqn.rhs().jacobian(&u0, 0.0);
-        insta::assert_yaml_snapshot!(jac.to_string());
+        insta::assert_yaml_snapshot!(jac.data.to_string());
     }
 
     #[test]
     fn test_mass() {
-        let (problem, _soln) = head2d_problem::<nalgebra::DMatrix<f64>, 10>();
+        let (problem, _soln) = head2d_problem::<NalgebraMat<f64>, 10>();
         let mass = problem.eqn.mass().unwrap().matrix(0.0);
-        insta::assert_yaml_snapshot!(mass.to_string());
+        insta::assert_yaml_snapshot!(mass.data.to_string());
     }
 
     #[cfg(feature = "diffsl")]
     #[test]
     fn test_mass_diffsl() {
-        use crate::SparseColMat;
+        use crate::{FaerSparseMat, FaerVec};
         use diffsl::CraneliftModule;
-        use faer::Col;
 
-        let (problem, _soln) = heat2d_diffsl_problem::<SparseColMat<f64>, CraneliftModule, 5>();
-        let u = Col::from_vec(vec![
-            1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0,
-            17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0,
-        ]);
-        let mut y = Col::zeros(25);
+        let (problem, _soln) = heat2d_diffsl_problem::<FaerSparseMat<f64>, CraneliftModule, 5>();
+        let u = FaerVec::from_vec(
+            vec![
+                1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0,
+                16.0, 17.0, 18.0, 19.0, 20.0, 21.0, 22.0, 23.0, 24.0, 25.0,
+            ],
+            problem.context().clone(),
+        );
+        let mut y = FaerVec::zeros(25, problem.context().clone());
         problem.eqn.mass().unwrap().call_inplace(&u, 0.0, &mut y);
-        let expect = Col::from_vec(vec![
-            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 8.0, 9.0, 0.0, 0.0, 12.0, 13.0, 14.0, 0.0, 0.0,
-            17.0, 18.0, 19.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-        ]);
+        let expect = FaerVec::from_vec(
+            vec![
+                0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 7.0, 8.0, 9.0, 0.0, 0.0, 12.0, 13.0, 14.0, 0.0, 0.0,
+                17.0, 18.0, 19.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            ],
+            problem.context().clone(),
+        );
         y.assert_eq_st(&expect, 1.0e-10);
     }
 
     #[test]
     fn test_soln() {
-        let (_problem, _soln) = head2d_problem::<nalgebra::DMatrix<f64>, 10>();
+        let (_problem, _soln) = head2d_problem::<NalgebraMat<f64>, 10>();
     }
 }

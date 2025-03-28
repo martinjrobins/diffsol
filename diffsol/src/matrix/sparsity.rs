@@ -21,7 +21,11 @@ pub trait MatrixSparsity<M: Matrix>: Sized + Clone {
     fn union(self, other: M::SparsityRef<'_>) -> Result<M::Sparsity, DiffsolError>;
     fn new_diagonal(n: IndexType) -> Self;
     fn as_ref(&self) -> M::SparsityRef<'_>;
-    fn get_index(&self, indices: &[(IndexType, IndexType)], ctx: <M::V as VectorCommon>::C) -> <M::V as Vector>::Index;
+    fn get_index(
+        &self,
+        indices: &[(IndexType, IndexType)],
+        ctx: <M::V as VectorCommon>::C,
+    ) -> <M::V as Vector>::Index;
 }
 
 pub trait MatrixSparsityRef<'a, M: Matrix> {
@@ -131,7 +135,11 @@ where
     fn new_diagonal(n: IndexType) -> Self {
         Dense::new(n, n)
     }
-    fn get_index(&self, indices: &[(IndexType, IndexType)], ctx: <M::V as VectorCommon>::C) -> <M::V as Vector>::Index {
+    fn get_index(
+        &self,
+        indices: &[(IndexType, IndexType)],
+        ctx: <M::V as VectorCommon>::C,
+    ) -> <M::V as Vector>::Index {
         let indices: Vec<_> = indices
             .iter()
             .map(|(i, j)| {

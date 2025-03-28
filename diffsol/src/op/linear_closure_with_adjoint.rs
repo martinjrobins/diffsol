@@ -23,6 +23,7 @@ where
     coloring_adjoint: Option<JacobianColoring<M>>,
     sparsity_adjoint: Option<M::Sparsity>,
     statistics: RefCell<OpStatistics>,
+    ctx: M::C,
 }
 
 impl<M, F, G> LinearClosureWithAdjoint<M, F, G>
@@ -31,7 +32,14 @@ where
     F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
     G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
 {
-    pub fn new(func: F, func_adjoint: G, nstates: usize, nout: usize, nparams: usize) -> Self {
+    pub fn new(
+        func: F,
+        func_adjoint: G,
+        nstates: usize,
+        nout: usize,
+        nparams: usize,
+        ctx: M::C,
+    ) -> Self {
         Self {
             func,
             func_adjoint,
@@ -43,6 +51,7 @@ where
             sparsity: None,
             coloring_adjoint: None,
             sparsity_adjoint: None,
+            ctx,
         }
     }
 
@@ -56,6 +65,7 @@ where
         self.coloring = Some(JacobianColoring::new(
             self.sparsity.as_ref().unwrap(),
             &non_zeros,
+            self.ctx.clone(),
         ));
     }
     pub fn calculate_adjoint_sparsity(&mut self, t0: M::T, p: &M::V) {
@@ -68,6 +78,7 @@ where
         self.coloring_adjoint = Some(JacobianColoring::new(
             self.sparsity_adjoint.as_ref().unwrap(),
             &non_zeros,
+            self.ctx.clone(),
         ));
     }
 }
@@ -81,6 +92,7 @@ where
     type V = M::V;
     type T = M::T;
     type M = M;
+    type C = M::C;
     fn nstates(&self) -> usize {
         self.nstates
     }
@@ -89,6 +101,9 @@ where
     }
     fn nparams(&self) -> usize {
         self.nparams
+    }
+    fn context(&self) -> &Self::C {
+        &self.ctx
     }
 
     fn statistics(&self) -> OpStatistics {

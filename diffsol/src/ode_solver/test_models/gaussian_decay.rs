@@ -30,12 +30,11 @@ pub fn gaussian_decay_problem<M: DenseMatrix + 'static>(
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
-    let size2 = size;
     let problem = OdeBuilder::<M>::new()
         .p([0.1].repeat(size))
         .use_coloring(use_coloring)
         .rhs_implicit(gaussian_decay::<M>, gaussian_decay_jacobian::<M>)
-        .init(move |_p, _t| M::V::from_vec([1.0.into()].repeat(size2)))
+        .init(move |_p, _t, y| y.fill(1.0.into()))
         .build()
         .unwrap();
     let p = [M::T::from(0.1)].repeat(size);
@@ -47,6 +46,7 @@ pub fn gaussian_decay_problem<M: DenseMatrix + 'static>(
             p.iter()
                 .map(|&x| (x * t.pow(2) / M::T::from(-2.0)).exp())
                 .collect::<Vec<_>>(),
+            problem.context().clone(),
         );
         y.component_mul_assign(&px);
         soln.push(y, t);

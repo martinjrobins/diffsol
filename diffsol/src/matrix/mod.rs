@@ -30,9 +30,11 @@ pub trait MatrixCommon: Sized + Debug {
     type V: Vector<T = Self::T, C = Self::C, Index: VectorIndex<C = Self::C>>;
     type T: Scalar;
     type C: Context;
+    type Inner;
 
     fn nrows(&self) -> IndexType;
     fn ncols(&self) -> IndexType;
+    fn inner(&self) -> &Self::Inner;
 }
 
 impl<M> MatrixCommon for &M
@@ -42,12 +44,16 @@ where
     type T = M::T;
     type V = M::V;
     type C = M::C;
+    type Inner = M::Inner;
 
     fn nrows(&self) -> IndexType {
         M::nrows(*self)
     }
     fn ncols(&self) -> IndexType {
         M::ncols(*self)
+    }
+    fn inner(&self) -> &Self::Inner {
+        M::inner(*self)
     }
 }
 
@@ -58,12 +64,16 @@ where
     type T = M::T;
     type V = M::V;
     type C = M::C;
+    type Inner = M::Inner;
 
     fn ncols(&self) -> IndexType {
         M::ncols(*self)
     }
     fn nrows(&self) -> IndexType {
         M::nrows(*self)
+    }
+    fn inner(&self) -> &Self::Inner {
+        M::inner(*self)
     }
 }
 
@@ -126,7 +136,7 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
 
     /// Return sparsity information (None if the matrix is dense)
     fn sparsity(&self) -> Option<Self::SparsityRef<'_>>;
-    
+
     fn context(&self) -> &Self::C;
 
     fn is_sparse() -> bool {
@@ -201,14 +211,24 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
     ) -> [(Self, <Self::V as Vector>::Index); 4] {
         match self.sparsity() {
             Some(sp) => sp.split(algebraic_indices).map(|(sp, src_indices)| {
-                let mut m = Self::new_from_sparsity(sp.nrows(), sp.ncols(), Some(sp), self.context().clone());
+                let mut m = Self::new_from_sparsity(
+                    sp.nrows(),
+                    sp.ncols(),
+                    Some(sp),
+                    self.context().clone(),
+                );
                 m.gather(self, &src_indices);
                 (m, src_indices)
             }),
             None => Dense::<Self>::new(self.nrows(), self.ncols())
                 .split(algebraic_indices)
                 .map(|(sp, src_indices)| {
-                    let mut m = Self::new_from_sparsity(sp.nrows(), sp.ncols(), None, self.context().clone());
+                    let mut m = Self::new_from_sparsity(
+                        sp.nrows(),
+                        sp.ncols(),
+                        None,
+                        self.context().clone(),
+                    );
                     m.gather(self, &src_indices);
                     (m, src_indices)
                 }),

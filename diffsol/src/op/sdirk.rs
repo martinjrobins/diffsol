@@ -66,12 +66,13 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
     pub fn new_no_jacobian(eqn: Eqn, c: Eqn::T) -> Self {
         let n = eqn.rhs().nstates();
         let h = RefCell::new(Eqn::T::zero());
-        let phi = RefCell::new(<Eqn::V as Vector>::zeros(n));
+        let ctx = eqn.context();
+        let phi = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
         let jacobian_is_stale = RefCell::new(false);
         let number_of_jac_evals = RefCell::new(0);
-        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n));
-        let rhs_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0));
-        let mass_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0));
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
+        let rhs_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0, ctx.clone()));
+        let mass_jac = RefCell::new(<Eqn::M as Matrix>::zeros(0, 0, ctx.clone()));
         let sparsity = None;
         Self {
             eqn,
@@ -93,17 +94,19 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
 
     pub fn new(eqn: Eqn, c: Eqn::T) -> Self {
         let n = eqn.rhs().nstates();
+        let ctx = eqn.context();
         let h = RefCell::new(Eqn::T::zero());
-        let phi = RefCell::new(<Eqn::V as Vector>::zeros(n));
+        let phi = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
         let jacobian_is_stale = RefCell::new(true);
         let number_of_jac_evals = RefCell::new(0);
-        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n));
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(n, ctx.clone()));
 
         // create the mass and rhs jacobians according to the sparsity pattern
         let rhs_jac = RefCell::new(Eqn::M::new_from_sparsity(
             n,
             n,
             eqn.rhs().jacobian_sparsity(),
+            ctx.clone(),
         ));
         let sparsity = if let Some(rhs_jac_sparsity) = eqn.rhs().jacobian_sparsity() {
             if let Some(mass) = eqn.mass() {
@@ -125,10 +128,15 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
 
         let mass_jac = if eqn.mass().is_none() {
             // no mass matrix, so just use the identity
-            Eqn::M::from_diagonal(&Eqn::V::from_element(n, Eqn::T::one()))
+            Eqn::M::from_diagonal(&Eqn::V::from_element(n, Eqn::T::one(), ctx.clone()))
         } else {
             // mass is not constant, so just create a matrix with the correct sparsity
-            Eqn::M::new_from_sparsity(n, n, eqn.mass().unwrap().sparsity().map(|s| s.to_owned()))
+            Eqn::M::new_from_sparsity(
+                n,
+                n,
+                eqn.mass().unwrap().sparsity().map(|s| s.to_owned()),
+                ctx.clone(),
+            )
         };
         let mass_jac = RefCell::new(mass_jac);
 
@@ -197,6 +205,7 @@ impl<Eqn: OdeEquations> Op for SdirkCallable<Eqn> {
     type V = Eqn::V;
     type T = Eqn::T;
     type M = Eqn::M;
+    type C = Eqn::C;
     fn nstates(&self) -> usize {
         self.eqn.rhs().nstates()
     }
@@ -205,6 +214,9 @@ impl<Eqn: OdeEquations> Op for SdirkCallable<Eqn> {
     }
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
+    }
+    fn context(&self) -> &Self::C {
+        self.eqn.context()
     }
 }
 
@@ -288,15 +300,16 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::matrix::dense_nalgebra_serial::NalgebraMat;
     use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
     use crate::ode_solver::test_models::robertson::robertson;
     use crate::vector::Vector;
-    use crate::Matrix;
-    use crate::{NonLinearOp, NonLinearOpJacobian};
+    use crate::{DenseMatrix, NonLinearOp, NonLinearOpJacobian};
+    use crate::{Matrix, NalgebraVec};
 
     use super::SdirkCallable;
-    type Mcpu = nalgebra::DMatrix<f64>;
-    type Vcpu = nalgebra::DVector<f64>;
+    type Mcpu = NalgebraMat<f64>;
+    type Vcpu = NalgebraVec<f64>;
 
     #[test]
     fn test_sdirk_robertson_jacobian() {
@@ -304,17 +317,18 @@ mod tests {
             let (problem, _soln) = robertson::<Mcpu>(colored);
             let c = 0.1;
             let h = 1.3;
-            let phi = Vcpu::from_vec(vec![1.1, 1.2, 1.3]);
+            let ctx = problem.context();
+            let phi = Vcpu::from_vec(vec![1.1, 1.2, 1.3], ctx.clone());
             let sdirk_callable = SdirkCallable::new(&problem.eqn, c);
             sdirk_callable.set_h(h);
             sdirk_callable.set_phi_direct(phi);
             let t = 0.9;
-            let y = Vcpu::from_vec(vec![1.1, 1.2, 1.3]);
+            let y = Vcpu::from_vec(vec![1.1, 1.2, 1.3], ctx.clone());
 
-            let v = Vcpu::from_vec(vec![2.0, 3.0, 4.0]);
+            let v = Vcpu::from_vec(vec![2.0, 3.0, 4.0], ctx.clone());
             let jac = sdirk_callable.jacobian(&y, t);
             let jac_mul_v = sdirk_callable.jac_mul(&y, t, &v);
-            let mut jac_mul_v2 = Vcpu::from_vec(vec![0.0, 0.0, 0.0]);
+            let mut jac_mul_v2 = Vcpu::from_vec(vec![0.0, 0.0, 0.0], ctx.clone());
             jac.gemv(1.0, &v, 0.0, &mut jac_mul_v2);
             jac_mul_v.assert_eq_st(&jac_mul_v2, 1e-10);
         }
@@ -325,15 +339,16 @@ mod tests {
         let (problem, _soln) = exponential_decay_problem::<Mcpu>(false);
         let c = 0.1;
         let h = 1.0;
+        let ctx = problem.context();
         let sdirk_callable = SdirkCallable::new(&problem.eqn, c);
         sdirk_callable.set_h(h);
 
-        let phi = Vcpu::from_vec(vec![1.1, 1.2]);
+        let phi = Vcpu::from_vec(vec![1.1, 1.2], ctx.clone());
         sdirk_callable.set_phi_direct(phi);
         // check that the function is correct
-        let y = Vcpu::from_vec(vec![1.0, 1.0]);
+        let y = Vcpu::from_vec(vec![1.0, 1.0], ctx.clone());
         let t = 0.0;
-        let mut y_out = Vcpu::from_vec(vec![0.0, 0.0]);
+        let mut y_out = Vcpu::from_vec(vec![0.0, 0.0], ctx.clone());
 
         // F(y) = M y -  h f(phi + c * y)
         // M = |1 0|
@@ -347,29 +362,29 @@ mod tests {
         //  i.e. F(y) = |1 0| |1| - |-0.12| =  |1.12|
         //              |0 1| |1|   |-0.13|    |1.13|
         sdirk_callable.call_inplace(&y, t, &mut y_out);
-        let y_out_expect = Vcpu::from_vec(vec![1.12, 1.13]);
+        let y_out_expect = Vcpu::from_vec(vec![1.12, 1.13], ctx.clone());
         y_out.assert_eq_st(&y_out_expect, 1e-10);
 
-        let v = Vcpu::from_vec(vec![1.0, 1.0]);
+        let v = Vcpu::from_vec(vec![1.0, 1.0], ctx.clone());
         // f'(phi + c * y)v = |-0.1| = |-0.1|
         //                    |-0.1| = |-0.1|
         // Mv - c * h * f'(phi + c * y) v = |1 0| |1| - 0.1 * |-0.1| = |1.01|
         //                                  |0 1| |1|         |-0.1|   |1.01|
         sdirk_callable.jac_mul_inplace(&y, t, &v, &mut y_out);
-        let y_out_expect = Vcpu::from_vec(vec![1.01, 1.01]);
+        let y_out_expect = Vcpu::from_vec(vec![1.01, 1.01], ctx.clone());
         y_out.assert_eq_st(&y_out_expect, 1e-10);
 
         // J = M - c * h * f'(phi + c * y) = |1 0| - 0.1 * |-0.1 0| = |1.01 0|
         //                                   |0 1|         |0 -0.1|   |0 1.01|
         let mut jac = sdirk_callable.jacobian(&y, t);
-        assert_eq!(jac[(0, 0)], 1.01);
-        assert_eq!(jac[(0, 1)], 0.0);
-        assert_eq!(jac[(1, 0)], 0.0);
-        assert_eq!(jac[(1, 1)], 1.01);
+        assert_eq!(jac.get_index(0, 0), 1.01);
+        assert_eq!(jac.get_index(0, 1), 0.0);
+        assert_eq!(jac.get_index(1, 0), 0.0);
+        assert_eq!(jac.get_index(1, 1), 1.01);
         sdirk_callable.jacobian_inplace(&y, t, &mut jac);
-        assert_eq!(jac[(0, 0)], 1.01);
-        assert_eq!(jac[(0, 1)], 0.0);
-        assert_eq!(jac[(1, 0)], 0.0);
-        assert_eq!(jac[(1, 1)], 1.01);
+        assert_eq!(jac.get_index(0, 0), 1.01);
+        assert_eq!(jac.get_index(0, 1), 0.0);
+        assert_eq!(jac.get_index(1, 0), 0.0);
+        assert_eq!(jac.get_index(1, 1), 1.01);
     }
 }

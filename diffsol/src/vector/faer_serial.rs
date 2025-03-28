@@ -1,15 +1,14 @@
-use std::ops::{Div, Index, IndexMut, Mul, MulAssign, SubAssign, AddAssign, Sub, Add};
+use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 use std::slice;
 
-use faer::{zip, Col, ColMut, ColRef, unzip};
+use faer::{unzip, zip, Col, ColMut, ColRef};
 
-use crate::{scalar::Scale, IndexType, Scalar, Vector, FaerContext};
+use crate::{scalar::Scale, FaerContext, IndexType, Scalar, Vector};
 
-use crate::{VectorCommon, VectorHost, VectorIndex, VectorView, VectorViewMut, FaerMat};
+use crate::{FaerMat, VectorCommon, VectorHost, VectorIndex, VectorView, VectorViewMut};
 
 use super::utils::*;
 use super::DefaultDenseMatrix;
-
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FaerVec<T: Scalar> {
@@ -39,17 +38,20 @@ impl<T: Scalar> DefaultDenseMatrix for FaerVec<T> {
     type M = FaerMat<T>;
 }
 
-impl_vector_common!(FaerVec<T>, FaerContext);
-impl_vector_common!(FaerVecRef<'_, T>, FaerContext);
-impl_vector_common!(FaerVecMut<'_, T>, FaerContext);
+impl_vector_common!(FaerVec<T>, FaerContext, Col<T>);
+impl_vector_common_ref!(FaerVecRef<'a, T>, FaerContext, ColRef<'a, T>);
+impl_vector_common_ref!(FaerVecMut<'a, T>, FaerContext, ColMut<'a, T>);
 
 macro_rules! impl_mul_scalar {
     ($lhs:ty, $out:ty, $scalar:ty) => {
-        impl<T: Scalar> Mul<Scale<T>> for $lhs{
+        impl<T: Scalar> Mul<Scale<T>> for $lhs {
             type Output = $out;
             fn mul(self, rhs: Scale<T>) -> Self::Output {
                 let scale: $scalar = rhs.into();
-                Self::Output { data: &self.data * scale, context: self.context.clone() }
+                Self::Output {
+                    data: &self.data * scale,
+                    context: self.context.clone(),
+                }
             }
         }
     };
@@ -62,7 +64,10 @@ macro_rules! impl_div_scalar {
             fn div(self, rhs: Scale<T>) -> Self::Output {
                 let inv_rhs: T = T::one() / rhs.value();
                 let scale = faer::Scale(inv_rhs);
-                Self::Output { data: &self.data * scale, context: self.context.clone() }
+                Self::Output {
+                    data: &self.data * scale,
+                    context: self.context.clone(),
+                }
             }
         }
     };
@@ -138,7 +143,8 @@ impl_add_both_ref!(FaerVecRef<'_, T>, FaerVecRef<'_, T>, FaerVec<T>);
 impl_add_both_ref!(FaerVecRef<'_, T>, &FaerVecRef<'_, T>, FaerVec<T>);
 
 impl_index!(FaerVec<T>);
-
+impl_index_mut!(FaerVec<T>);
+impl_index!(FaerVecRef<'_, T>);
 
 impl<T: Scalar> VectorHost for FaerVec<T> {
     fn as_mut_slice(&mut self) -> &mut [Self::T] {
@@ -149,13 +155,15 @@ impl<T: Scalar> VectorHost for FaerVec<T> {
     }
 }
 
-
 impl<T: Scalar> Vector for FaerVec<T> {
     type View<'a> = FaerVecRef<'a, T>;
     type ViewMut<'a> = FaerVecMut<'a, T>;
     type Index = FaerVecIndex;
     fn context(&self) -> &Self::C {
         &self.context
+    }
+    fn inner_mut(&mut self) -> &mut Self::Inner {
+        &mut self.data
     }
     fn len(&self) -> IndexType {
         self.data.nrows()
@@ -170,7 +178,8 @@ impl<T: Scalar> Vector for FaerVec<T> {
         match k {
             1 => self.data.norm_l1(),
             2 => self.data.norm_l2(),
-            _ => self.data
+            _ => self
+                .data
                 .iter()
                 .fold(T::zero(), |acc, x| acc + x.pow(k))
                 .pow(T::one() / T::from(k as f64)),
@@ -191,10 +200,16 @@ impl<T: Scalar> Vector for FaerVec<T> {
         acc / Self::T::from(self.len() as f64)
     }
     fn as_view(&self) -> Self::View<'_> {
-        FaerVecRef { data: self.data.as_ref(), context: self.context.clone() }
+        FaerVecRef {
+            data: self.data.as_ref(),
+            context: self.context.clone(),
+        }
     }
     fn as_view_mut(&mut self) -> Self::ViewMut<'_> {
-        FaerVecMut { data: self.data.as_mut(), context: self.context.clone() }
+        FaerVecMut {
+            data: self.data.as_mut(),
+            context: self.context.clone(),
+        }
     }
     fn copy_from(&mut self, other: &Self) {
         self.data.copy_from(&other.data)
@@ -220,7 +235,8 @@ impl<T: Scalar> Vector for FaerVec<T> {
         Self::from_element(nstates, T::zero(), ctx)
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {
-        zip!(self.data.as_mut(), x.data.as_ref()).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
+        zip!(self.data.as_mut(), x.data.as_ref())
+            .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
         zip!(self.data.as_mut(), x.data).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
@@ -284,13 +300,19 @@ impl<T: Scalar> Vector for FaerVec<T> {
 impl VectorIndex for FaerVecIndex {
     type C = FaerContext;
     fn zeros(len: IndexType, ctx: Self::C) -> Self {
-        Self { data: vec![0; len], context: ctx }
+        Self {
+            data: vec![0; len],
+            context: ctx,
+        }
     }
     fn len(&self) -> IndexType {
         self.data.len() as IndexType
     }
     fn from_vec(v: Vec<IndexType>, ctx: Self::C) -> Self {
-        Self { data: v, context: ctx }
+        Self {
+            data: v,
+            context: ctx,
+        }
     }
     fn clone_as_vec(&self) -> Vec<IndexType> {
         self.data.clone()
@@ -300,11 +322,13 @@ impl VectorIndex for FaerVecIndex {
     }
 }
 
-
 impl<'a, T: Scalar> VectorView<'a> for FaerVecRef<'a, T> {
     type Owned = FaerVec<T>;
     fn into_owned(self) -> FaerVec<T> {
-        FaerVec { data: self.data.to_owned(), context: self.context }
+        FaerVec {
+            data: self.data.to_owned(),
+            context: self.context,
+        }
     }
     fn squared_norm(&self, y: &Self::Owned, atol: &Self::Owned, rtol: Self::T) -> Self::T {
         let mut acc = T::zero();
@@ -332,7 +356,8 @@ impl<'a, T: Scalar> VectorViewMut<'a> for FaerVecMut<'a, T> {
         self.data.copy_from(&other.data);
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
-        zip!(self.data.as_mut(), x.data.as_ref()).for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
+        zip!(self.data.as_mut(), x.data.as_ref())
+            .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }
 }
 

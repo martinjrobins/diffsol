@@ -337,7 +337,11 @@ where
         ret.s_predict = <Eqn::V as Vector>::zeros(nstates, ctx.clone());
         if let Some(out) = ret.s_op.as_ref().unwrap().eqn().out() {
             ret.sg_deltas = vec![<Eqn::V as Vector>::zeros(out.nout(), ctx.clone()); naug];
-            ret.sgdiff_tmp = M::zeros(out.nout(), BdfState::<Eqn::V, M>::MAX_ORDER + 3, ctx.clone());
+            ret.sgdiff_tmp = M::zeros(
+                out.nout(),
+                BdfState::<Eqn::V, M>::MAX_ORDER + 3,
+                ctx.clone(),
+            );
         }
         Ok(ret)
     }
@@ -891,7 +895,11 @@ where
 
         // order might have changed
         if self.state.order != old_order {
-            self.u = Self::_compute_r(self.state.order, Eqn::T::one(), self.problem().eqn.context().clone());
+            self.u = Self::_compute_r(
+                self.state.order,
+                Eqn::T::one(),
+                self.problem().eqn.context().clone(),
+            );
         }
 
         // reinitialise jacobian updates as if a checkpoint was taken
@@ -1212,7 +1220,11 @@ where
                 };
                 self.state.order = new_order;
                 if max_index != 1 {
-                    self.u = Self::_compute_r(new_order, Eqn::T::one(), self.problem().eqn.context().clone());
+                    self.u = Self::_compute_r(
+                        new_order,
+                        Eqn::T::one(),
+                        self.problem().eqn.context().clone(),
+                    );
                 }
                 new_order
             };
@@ -1271,7 +1283,8 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
-        matrix::dense_nalgebra_serial::NalgebraMat, ode_solver::{
+        matrix::dense_nalgebra_serial::NalgebraMat,
+        ode_solver::{
             test_models::{
                 dydt_y2::dydt_y2_problem,
                 exponential_decay::{
@@ -1296,7 +1309,9 @@ mod test {
                 test_adjoint_sum_squares, test_checkpointing, test_interpolate, test_ode_solver,
                 test_problem, test_state_mut, test_state_mut_on_problem,
             },
-        }, FaerLU, FaerSparseLU, FaerSparseMat, OdeEquations, OdeSolverMethod, Op, Vector, FaerMat, MatrixCommon, Context, DenseMatrix, VectorView
+        },
+        Context, DenseMatrix, FaerLU, FaerMat, FaerSparseLU, FaerSparseMat, MatrixCommon,
+        OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
     };
 
     use num_traits::abs;

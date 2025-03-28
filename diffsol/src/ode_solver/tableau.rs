@@ -38,7 +38,7 @@ impl<M: DenseMatrix> Tableau<M> {
     ///
     /// continuous extension from :
     /// from Jørgensen, J. B., Kristensen, M. R., & Thomsen, P. G. (2018). A family of ESDIRK integration methods. arXiv preprint arXiv:1803.01613.
-    pub fn tr_bdf2() -> Self {
+    pub fn tr_bdf2(ctx: M::C) -> Self {
         let gamma = M::T::from(2.0 - 2.0_f64.sqrt());
         let d = gamma / M::T::from(2.0);
         let w = M::T::from(2.0_f64.sqrt() / 4.0);
@@ -57,15 +57,19 @@ impl<M: DenseMatrix> Tableau<M> {
                 M::T::zero(),
                 d,
             ],
+            ctx.clone(),
         );
 
-        let b = M::V::from_vec(vec![w, w, d]);
-        let b_hat = M::V::from_vec(vec![
-            (M::T::from(1.0) - w) / M::T::from(3.0),
-            (M::T::from(3.0) * w + M::T::from(1.0)) / M::T::from(3.0),
-            d / M::T::from(3.0),
-        ]);
-        let mut d = M::V::zeros(3);
+        let b = M::V::from_vec(vec![w, w, d], ctx.clone());
+        let b_hat = M::V::from_vec(
+            vec![
+                (M::T::from(1.0) - w) / M::T::from(3.0),
+                (M::T::from(3.0) * w + M::T::from(1.0)) / M::T::from(3.0),
+                d / M::T::from(3.0),
+            ],
+            ctx.clone(),
+        );
+        let mut d = M::V::zeros(3, ctx.clone());
         for i in 0..3 {
             d.set_index(i, b.get_index(i) - b_hat.get_index(i));
         }
@@ -81,9 +85,10 @@ impl<M: DenseMatrix> Tableau<M> {
                 -w,
                 M::T::from(2.) * w,
             ],
+            ctx.clone(),
         );
 
-        let c = M::V::from_vec(vec![M::T::zero(), gamma, M::T::one()]);
+        let c = M::V::from_vec(vec![M::T::zero(), gamma, M::T::one()], ctx.clone());
 
         let order = 2;
 
@@ -92,7 +97,7 @@ impl<M: DenseMatrix> Tableau<M> {
 
     /// A third order ESDIRK method
     /// from Jørgensen, J. B., Kristensen, M. R., & Thomsen, P. G. (2018). A family of ESDIRK integration methods. arXiv preprint arXiv:1803.01613.
-    pub fn esdirk34() -> Self {
+    pub fn esdirk34(ctx: M::C) -> Self {
         let gamma = M::T::from(0.435_866_521_508_459);
         let a = M::from_vec(
             4,
@@ -115,28 +120,38 @@ impl<M: DenseMatrix> Tableau<M> {
                 M::T::zero(),
                 gamma,
             ],
+            ctx.clone(),
         );
 
-        let b = M::V::from_vec(vec![
-            a.get_index(3, 0),
-            a.get_index(3, 1),
-            a.get_index(3, 2),
-            a.get_index(3, 3),
-        ]);
+        let b = M::V::from_vec(
+            vec![
+                a.get_index(3, 0),
+                a.get_index(3, 1),
+                a.get_index(3, 2),
+                a.get_index(3, 3),
+            ],
+            ctx.clone(),
+        );
 
-        let c = M::V::from_vec(vec![
-            M::T::zero(),
-            M::T::from(0.871_733_043_016_918),
-            M::T::from(0.468_238_744_851_844_4),
-            M::T::one(),
-        ]);
+        let c = M::V::from_vec(
+            vec![
+                M::T::zero(),
+                M::T::from(0.871_733_043_016_918),
+                M::T::from(0.468_238_744_851_844_4),
+                M::T::one(),
+            ],
+            ctx.clone(),
+        );
 
-        let d = M::V::from_vec(vec![
-            M::T::from(-0.054_625_497_240_413_94),
-            M::T::from(-0.494_208_893_625_994_96),
-            M::T::from(0.221_934_499_735_064_66),
-            M::T::from(0.326_899_891_131_344_27),
-        ]);
+        let d = M::V::from_vec(
+            vec![
+                M::T::from(-0.054_625_497_240_413_94),
+                M::T::from(-0.494_208_893_625_994_96),
+                M::T::from(0.221_934_499_735_064_66),
+                M::T::from(0.326_899_891_131_344_27),
+            ],
+            ctx.clone(),
+        );
 
         Self::new(a, b, c, d, 3, None)
     }

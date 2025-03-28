@@ -2,7 +2,8 @@ use crate::FaerContext;
 use crate::{error::LinearSolverError, linear_solver_error};
 
 use crate::{
-    error::DiffsolError, linear_solver::LinearSolver, Matrix, NonLinearOpJacobian, Scalar, FaerMat, FaerVec
+    error::DiffsolError, linear_solver::LinearSolver, FaerMat, FaerVec, Matrix,
+    NonLinearOpJacobian, Scalar,
 };
 
 use faer::{linalg::solvers::FullPivLu, linalg::solvers::Solve};
@@ -48,10 +49,16 @@ impl<T: Scalar> LinearSolver<FaerMat<T>> for LU<T> {
         Ok(())
     }
 
-    fn set_problem<C: NonLinearOpJacobian<T = T, V = FaerVec<T>, M = FaerMat<T>, C = FaerContext>>(&mut self, op: &C) {
+    fn set_problem<
+        C: NonLinearOpJacobian<T = T, V = FaerVec<T>, M = FaerMat<T>, C = FaerContext>,
+    >(
+        &mut self,
+        op: &C,
+    ) {
         let ncols = op.nstates();
         let nrows = op.nout();
-        let matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), op.context().clone());
+        let matrix =
+            C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), op.context().clone());
         self.matrix = Some(matrix);
     }
 }

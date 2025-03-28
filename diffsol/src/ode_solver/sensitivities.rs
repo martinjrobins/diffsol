@@ -1,6 +1,6 @@
 use crate::{
     error::DiffsolError, error::OdeSolverError, ode_solver_error, AugmentedOdeSolverMethod,
-    DefaultDenseMatrix, DefaultSolver, DenseMatrix, Matrix, OdeEquationsSens, OdeSolverStopReason,
+    Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, OdeEquationsSens, OdeSolverStopReason,
     Op, SensEquations, VectorViewMut,
 };
 
@@ -37,12 +37,16 @@ where
             ));
         }
         let nrows = self.problem().eqn.rhs().nstates();
-        let mut ret = <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nrows, t_eval.len());
-        let mut ret_sens =
-            vec![
-                <<Eqn::V as DefaultDenseMatrix>::M as Matrix>::zeros(nrows, t_eval.len());
-                self.problem().eqn.rhs().nparams()
-            ];
+        let mut ret = self
+            .problem()
+            .context()
+            .dense_mat_zeros::<Eqn::V>(nrows, t_eval.len());
+        let mut ret_sens = vec![
+            self.problem()
+                .context()
+                .dense_mat_zeros::<Eqn::V>(nrows, t_eval.len());
+            self.problem().eqn.rhs().nparams()
+        ];
 
         // check t_eval is increasing and all values are greater than or equal to the current time
         let t0 = self.state().t;

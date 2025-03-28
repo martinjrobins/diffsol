@@ -63,7 +63,10 @@ pub mod root;
 pub mod tests {
     use self::newton::NewtonNonlinearSolver;
     use crate::{
-        linear_solver::nalgebra::lu::LU, matrix::{dense_nalgebra_serial::NalgebraMat, MatrixCommon}, op::{closure::Closure, ParameterisedOp}, scale, DenseMatrix, NalgebraVec, Vector, Op
+        linear_solver::nalgebra::lu::LU,
+        matrix::{dense_nalgebra_serial::NalgebraMat, MatrixCommon},
+        op::{closure::Closure, ParameterisedOp},
+        scale, DenseMatrix, NalgebraVec, Op, Vector,
     };
 
     use super::*;
@@ -83,7 +86,10 @@ pub mod tests {
     where
         M: DenseMatrix + 'static,
     {
-        let jac1 = M::from_diagonal(&M::V::from_vec(vec![2.0.into(), 2.0.into()], Default::default()));
+        let jac1 = M::from_diagonal(&M::V::from_vec(
+            vec![2.0.into(), 2.0.into()],
+            Default::default(),
+        ));
         let jac2 = jac1.clone();
         let p = M::V::zeros(0, jac1.context().clone());
         let eights = M::V::from_vec(vec![8.0.into(), 8.0.into()], jac1.context().clone());

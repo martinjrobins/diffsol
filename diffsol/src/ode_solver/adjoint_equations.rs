@@ -479,8 +479,14 @@ where
         let rhs = AdjointRhs::new(eqn, context.clone(), with_out);
         let init = AdjointInit::new(eqn);
         let out = AdjointOut::new(eqn, context.clone(), with_out);
-        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(eqn.rhs().nparams(), eqn.context().clone()));
-        let tmp2 = RefCell::new(<Eqn::V as Vector>::zeros(eqn.rhs().nstates(), eqn.context().clone()));
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(
+            eqn.rhs().nparams(),
+            eqn.context().clone(),
+        ));
+        let tmp2 = RefCell::new(<Eqn::V as Vector>::zeros(
+            eqn.rhs().nstates(),
+            eqn.context().clone(),
+        ));
         let atol = problem.sens_atol.as_ref();
         let rtol = problem.sens_rtol;
         let out_atol = problem.param_atol.as_ref();
@@ -651,11 +657,14 @@ mod tests {
     use std::{cell::RefCell, rc::Rc};
 
     use crate::{
-        matrix::dense_nalgebra_serial::NalgebraMat, ode_solver::{
+        matrix::dense_nalgebra_serial::NalgebraMat,
+        ode_solver::{
             adjoint_equations::AdjointEquations,
             test_models::exponential_decay::exponential_decay_problem_adjoint,
-        }, AdjointContext, AugmentedOdeEquations, Checkpointing, FaerSparseLU, Matrix, MatrixCommon, NalgebraVec, NonLinearOp, NonLinearOpJacobian, OdeEquations, Op, SdirkState, Vector, DenseMatrix,
-        FaerVec, FaerSparseMat,
+        },
+        AdjointContext, AugmentedOdeEquations, Checkpointing, DenseMatrix, FaerSparseLU,
+        FaerSparseMat, FaerVec, Matrix, MatrixCommon, NalgebraVec, NonLinearOp,
+        NonLinearOpJacobian, OdeEquations, Op, SdirkState, Vector,
     };
     type Mcpu = NalgebraMat<f64>;
     type Vcpu = NalgebraVec<f64>;

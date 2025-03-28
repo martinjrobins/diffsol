@@ -1,5 +1,5 @@
 use crate::{
-    ode_solver::problem::OdeSolverSolution, scalar::scale, DenseMatrix, OdeBuilder,
+    ode_solver::problem::OdeSolverSolution, scalar::scale, Context, DenseMatrix, OdeBuilder,
     OdeEquationsImplicit, OdeSolverProblem, Vector,
 };
 use num_traits::One;
@@ -26,14 +26,13 @@ pub fn dydt_y2_problem<M: DenseMatrix + 'static>(
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
-    let size2 = size;
     let y0 = -200.;
     let tlast = 20.0;
     let problem = OdeBuilder::<M>::new()
         .use_coloring(use_coloring)
         .rtol(1e-4)
         .rhs_implicit(rhs::<M>, rhs_jac::<M>)
-        .init(move |_p, _t| M::V::from_vec([y0.into()].repeat(size2)))
+        .init(move |_p, _t, y| y.fill(y0.into()))
         .build()
         .unwrap();
     let mut soln = OdeSolverSolution::default();

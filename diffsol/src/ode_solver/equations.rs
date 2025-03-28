@@ -33,7 +33,7 @@ impl OdeEquationsStatistics {
 }
 
 pub trait AugmentedOdeEquations<Eqn: OdeEquations>:
-    OdeEquations<T = Eqn::T, V = Eqn::V, M = Eqn::M> + Clone
+    OdeEquations<T = Eqn::T, V = Eqn::V, M = Eqn::M, C = Eqn::C> + Clone
 {
     fn update_rhs_out_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T);
     fn update_init_state(&mut self, t: Eqn::T);
@@ -49,13 +49,14 @@ pub trait AugmentedOdeEquations<Eqn: OdeEquations>:
 }
 
 pub trait AugmentedOdeEquationsImplicit<Eqn: OdeEquationsImplicit>:
-    AugmentedOdeEquations<Eqn> + OdeEquationsImplicit<T = Eqn::T, V = Eqn::V, M = Eqn::M>
+    AugmentedOdeEquations<Eqn> + OdeEquationsImplicit<T = Eqn::T, V = Eqn::V, M = Eqn::M, C = Eqn::C>
 {
 }
 
 impl<Aug, Eqn> AugmentedOdeEquationsImplicit<Eqn> for Aug
 where
-    Aug: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit<T = Eqn::T, V = Eqn::V, M = Eqn::M>,
+    Aug: AugmentedOdeEquations<Eqn>
+        + OdeEquationsImplicit<T = Eqn::T, V = Eqn::V, M = Eqn::M, C = Eqn::C>,
     Eqn: OdeEquationsImplicit,
 {
 }
@@ -189,11 +190,11 @@ impl<Eqn: OdeEquationsImplicit> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
 /// - the root function `G(t, y)` which is given as a [NonLinearOp] using the `Root` associated type and the [OdeEquations::root] function
 /// - the output function `H(t, y)` which is given as a [NonLinearOp] using the `Out` associated type and the [OdeEquations::out] function
 pub trait OdeEquationsRef<'a, ImplicitBounds: Sealed = Bounds<&'a Self>>: Op {
-    type Mass: LinearOp<M = Self::M, V = Self::V, T = Self::T>;
-    type Rhs: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
-    type Root: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
-    type Init: ConstantOp<M = Self::M, V = Self::V, T = Self::T>;
-    type Out: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
+    type Mass: LinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
+    type Rhs: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
+    type Root: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
+    type Init: ConstantOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
+    type Out: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
 }
 
 impl<'a, T: OdeEquationsRef<'a>> OdeEquationsRef<'a> for &T {
@@ -526,7 +527,7 @@ mod tests {
     use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
     use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
     use crate::vector::Vector;
-    use crate::{LinearOp, NalgebraVec, NonLinearOp, NonLinearOpJacobian, Context, DenseMatrix};
+    use crate::{Context, DenseMatrix, LinearOp, NalgebraVec, NonLinearOp, NonLinearOpJacobian};
 
     type Mcpu = NalgebraMat<f64>;
     type Vcpu = NalgebraVec<f64>;

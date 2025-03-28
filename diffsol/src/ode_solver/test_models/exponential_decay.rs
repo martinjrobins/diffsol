@@ -1,7 +1,7 @@
 use crate::{
     ode_solver::problem::OdeSolverSolution, scalar::scale, ConstantOp, MatrixHost, OdeBuilder,
     OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsSens, OdeSolverProblem,
-    Vector, Op,
+    Op, Vector,
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};
@@ -63,8 +63,8 @@ fn exponential_decay_jacobian_adjoint<M: MatrixHost>(
     y.mul_assign(scale(p[0]));
 }
 
-fn exponential_decay_init<M: MatrixHost>(p: &M::V, _t: M::T) -> M::V {
-    M::V::from_vec(vec![p[1], p[1]])
+fn exponential_decay_init<M: MatrixHost>(p: &M::V, _t: M::T, y: &mut M::V) {
+    y.fill(p[1]);
 }
 
 // dy0/dp = | 0 1 |
@@ -186,8 +186,8 @@ pub fn exponential_decay_problem_diffsl<M: MatrixHost<T = f64>, CG: crate::Codeg
         .p([k, y0])
         .integrate_out(prep_adjoint)
         .build_from_diffsl(
-        format!(
-            "
+            format!(
+                "
             in = [k, y0]
             k {{ 0.1 }}
             y0 {{ 1.0 }}
@@ -198,7 +198,7 @@ pub fn exponential_decay_problem_diffsl<M: MatrixHost<T = f64>, CG: crate::Codeg
             }}",
                 out
             )
-            .as_str()
+            .as_str(),
         )
         .unwrap();
     let p = [k, y0];
@@ -317,10 +317,13 @@ pub fn exponential_decay_problem_adjoint<M: MatrixHost>(
         let t = M::T::from(i as f64);
         let y0: M::V = problem.eqn.init().call(M::T::zero());
         let g = y0.clone() * scale((M::T::exp(-p[0] * t0) - M::T::exp(-p[0] * t)) / p[0]);
-        let g = M::V::from_vec(vec![
-            g[0] + M::T::from(2.0) * g[1],
-            M::T::from(3.0) * g[0] + M::T::from(4.0) * g[1],
-        ], ctx.clone());
+        let g = M::V::from_vec(
+            vec![
+                g[0] + M::T::from(2.0) * g[1],
+                M::T::from(3.0) * g[0] + M::T::from(4.0) * g[1],
+            ],
+            ctx.clone(),
+        );
         let dydk = y0.clone()
             * scale(
                 M::T::exp(-p[0] * (t1 + t0))
@@ -384,7 +387,9 @@ mod tests {
     fn test_exponential_decay_diffsl_llvm() {
         use super::*;
         use crate::{
-            matrix::dense_nalgebra_serial::NalgebraMat, ConstantOpSens, ConstantOpSensAdjoint, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, NalgebraVec
+            matrix::dense_nalgebra_serial::NalgebraMat, ConstantOpSens, ConstantOpSensAdjoint,
+            NalgebraVec, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
+            NonLinearOpSensAdjoint,
         };
         let (problem, _soln) =
             exponential_decay_problem_diffsl::<NalgebraMat<f64>, crate::LlvmModule>(true);

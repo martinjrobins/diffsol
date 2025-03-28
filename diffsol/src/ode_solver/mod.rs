@@ -31,10 +31,11 @@ mod tests {
     use crate::op::unit::UnitCallable;
     use crate::op::ParameterisedOp;
     use crate::{
-        op::OpStatistics, AdjointOdeSolverMethod, CraneliftModule, DenseMatrix, MatrixCommon,
-        MatrixHost, MatrixRef, NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeEquationsAdjoint,
-        OdeEquationsImplicit, OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-        OdeSolverStopReason, Scale, VectorRef, VectorView, VectorViewMut, Context
+        op::OpStatistics, AdjointOdeSolverMethod, Context, CraneliftModule, DenseMatrix,
+        MatrixCommon, MatrixHost, MatrixRef, NonLinearOpJacobian, OdeBuilder, OdeEquations,
+        OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsRef, OdeSolverMethod,
+        OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Scale, VectorRef, VectorView,
+        VectorViewMut,
     };
     use crate::{
         ConstantOp, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp, Op, Vector,
@@ -415,12 +416,8 @@ mod tests {
         pub fn new() -> Self {
             let ctx = M::C::default();
             Self {
-                rhs: Rc::new(TestEqnRhs {
-                    ctx: ctx.clone(),
-                }),
-                init: Rc::new(TestEqnInit {
-                    ctx: ctx.clone(),
-                }),
+                rhs: Rc::new(TestEqnRhs { ctx: ctx.clone() }),
+                init: Rc::new(TestEqnInit { ctx: ctx.clone() }),
                 ctx,
             }
         }
@@ -533,7 +530,9 @@ mod tests {
     #[cfg(feature = "diffsl")]
     pub fn test_ball_bounce_problem<M: MatrixHost<T = f64>>(
     ) -> OdeSolverProblem<crate::DiffSl<M, CraneliftModule>> {
-        OdeBuilder::<M>::new().build_from_diffsl( "
+        OdeBuilder::<M>::new()
+            .build_from_diffsl(
+                "
             g { 9.81 } h { 10.0 }
             u_i {
                 x = h,
@@ -546,7 +545,9 @@ mod tests {
             stop {
                 x,
             }
-        ").unwrap()
+        ",
+            )
+            .unwrap()
     }
 
     #[cfg(feature = "diffsl")]

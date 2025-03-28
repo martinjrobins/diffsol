@@ -1,13 +1,13 @@
-use std::ops::{AddAssign, Mul, MulAssign, Add, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
 use super::default_solver::DefaultSolver;
+use super::utils::*;
 use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 use crate::error::DiffsolError;
 use crate::scalar::{IndexType, Scalar, Scale};
-use crate::{FaerLU, FaerVecMut, FaerVecRef};
 use crate::VectorIndex;
-use crate::{Dense, DenseRef, Vector, FaerContext, FaerVec, VectorViewMut};
-use super::utils::*;
+use crate::{Dense, DenseRef, FaerContext, FaerVec, Vector, VectorViewMut};
+use crate::{FaerLU, FaerVecMut, FaerVecRef};
 
 use faer::{get_global_parallelism, unzip, zip, Accum};
 use faer::{linalg::matmul::matmul, Mat, MatMut, MatRef};
@@ -34,9 +34,9 @@ impl<T: Scalar> DefaultSolver for FaerMat<T> {
     type LS = FaerLU<T>;
 }
 
-impl_matrix_common!(FaerMatMut<'_, T>, FaerVec<T>, FaerContext);
-impl_matrix_common!(FaerMatRef<'_, T>, FaerVec<T>, FaerContext);
-impl_matrix_common!(FaerMat<T>, FaerVec<T>, FaerContext);
+impl_matrix_common_ref!(FaerMatMut<'a, T>, FaerVec<T>, FaerContext, MatMut<'a, T>);
+impl_matrix_common_ref!(FaerMatRef<'a, T>, FaerVec<T>, FaerContext, MatRef<'a, T>);
+impl_matrix_common!(FaerMat<T>, FaerVec<T>, FaerContext, Mat<T>);
 
 macro_rules! impl_mul_scalar {
     ($mat_type:ty, $out:ty) => {
@@ -45,7 +45,10 @@ macro_rules! impl_mul_scalar {
 
             fn mul(self, rhs: Scale<T>) -> Self::Output {
                 let scale: faer::Scale<T> = rhs.into();
-                Self::Output { data: &self.data * scale, context: self.context.clone() }
+                Self::Output {
+                    data: &self.data * scale,
+                    context: self.context.clone(),
+                }
             }
         }
     };
@@ -86,6 +89,9 @@ impl_sub_assign!(FaerMat<T>, &FaerMatRef<'_, T>);
 impl_sub_assign!(FaerMatMut<'_, T>, &FaerMatRef<'_, T>);
 impl_sub_assign!(FaerMatMut<'_, T>, &FaerMatMut<'_, T>);
 
+impl_index!(FaerMat<T>);
+impl_index!(FaerMatRef<'_, T>);
+impl_index_mut!(FaerMat<T>);
 
 impl<'a, T: Scalar> MatrixView<'a> for FaerMatRef<'a, T> {
     type Owned = FaerMat<T>;
@@ -148,7 +154,6 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for FaerMatMut<'a, T> {
     }
 }
 
-
 impl<T: Scalar> DenseMatrix for FaerMat<T> {
     type View<'a> = FaerMatRef<'a, T>;
     type ViewMut<'a> = FaerMatMut<'a, T>;
@@ -156,7 +161,6 @@ impl<T: Scalar> DenseMatrix for FaerMat<T> {
     fn from_vec(nrows: IndexType, ncols: IndexType, data: Vec<Self::T>, ctx: Self::C) -> Self {
         let data = Mat::from_fn(nrows, ncols, |i, j| data[i + j * nrows]);
         Self { data, context: ctx }
-
     }
 
     fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {
@@ -176,12 +180,18 @@ impl<T: Scalar> DenseMatrix for FaerMat<T> {
     }
     fn column_mut(&mut self, i: usize) -> <Self::V as Vector>::ViewMut<'_> {
         let data = self.data.get_mut(0..self.nrows(), i);
-        FaerVecMut { data, context: self.context.clone() }
+        FaerVecMut {
+            data,
+            context: self.context.clone(),
+        }
     }
 
     fn columns_mut(&mut self, start: usize, ncols: usize) -> Self::ViewMut<'_> {
         let data = self.data.get_mut(0..self.data.nrows(), start..ncols);
-        FaerMatMut { data, context: self.context.clone() }
+        FaerMatMut {
+            data,
+            context: self.context.clone(),
+        }
     }
 
     fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T) {
@@ -190,11 +200,17 @@ impl<T: Scalar> DenseMatrix for FaerMat<T> {
 
     fn column(&self, i: usize) -> <Self::V as Vector>::View<'_> {
         let data = self.data.get(0..self.data.nrows(), i);
-        FaerVecRef { data, context: self.context.clone() }
+        FaerVecRef {
+            data,
+            context: self.context.clone(),
+        }
     }
     fn columns(&self, start: usize, nrows: usize) -> Self::View<'_> {
         let data = self.data.get(0..self.nrows(), start..nrows);
-        FaerMatRef { data, context: self.context.clone() }
+        FaerMatRef {
+            data,
+            context: self.context.clone(),
+        }
     }
 
     fn column_axpy(&mut self, alpha: Self::T, j: IndexType, beta: Self::T, i: IndexType) {
@@ -208,8 +224,9 @@ impl<T: Scalar> DenseMatrix for FaerMat<T> {
             panic!("Column index cannot be the same");
         }
         for k in 0..self.nrows() {
-            let value =
-                unsafe { beta * *self.data.get_unchecked(k, i) + alpha * *self.data.get_unchecked(k, j) };
+            let value = unsafe {
+                beta * *self.data.get_unchecked(k, i) + alpha * *self.data.get_unchecked(k, j)
+            };
             unsafe { *self.data.get_mut_unchecked(k, i) = value };
         }
     }
@@ -257,7 +274,8 @@ impl<T: Scalar> Matrix for FaerMat<T> {
     }
 
     fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)> {
-        (0..self.ncols()).flat_map(move |j| (0..self.nrows()).map(move |i| (i, j, &self.data[(i, j)])))
+        (0..self.ncols())
+            .flat_map(move |j| (0..self.nrows()).map(move |i| (i, j, &self.data[(i, j)])))
     }
 
     fn try_from_triplets(
@@ -270,7 +288,10 @@ impl<T: Scalar> Matrix for FaerMat<T> {
         for (i, j, v) in triplets {
             m[(i, j)] = v;
         }
-        Ok(Self { data: m, context: ctx })
+        Ok(Self {
+            data: m,
+            context: ctx,
+        })
     }
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
         y.mul_assign(Scale(beta));
@@ -293,7 +314,10 @@ impl<T: Scalar> Matrix for FaerMat<T> {
     fn from_diagonal(v: &Self::V) -> Self {
         let dim = v.len();
         let data = Mat::from_fn(dim, dim, |i, j| if i == j { v[i] } else { T::zero() });
-        Self { data, context: v.context().clone() }
+        Self {
+            data,
+            context: v.context().clone(),
+        }
     }
     fn partition_indices_by_zero_diagonal(
         &self,
@@ -320,7 +344,8 @@ impl<T: Scalar> Matrix for FaerMat<T> {
     }
 
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
-        zip!(self.data.as_mut(), x.data.as_ref(), y.data.as_ref()).for_each(|unzip!(s, x, y)| *s = *x + beta * *y);
+        zip!(self.data.as_mut(), x.data.as_ref(), y.data.as_ref())
+            .for_each(|unzip!(s, x, y)| *s = *x + beta * *y);
     }
 
     fn new_from_sparsity(

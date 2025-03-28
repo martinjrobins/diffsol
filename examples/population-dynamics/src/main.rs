@@ -1,7 +1,9 @@
-use diffsol::{CraneliftModule, DiffSl, OdeBuilder, OdeEquations, OdeSolverMethod};
+use diffsol::{
+    CraneliftModule, MatrixCommon, NalgebraVec, OdeBuilder, OdeEquations, OdeSolverMethod, Vector,
+};
 use plotly::{common::Mode, layout::Axis, layout::Layout, Plot, Scatter};
 use std::fs;
-type M = nalgebra::DMatrix<f64>;
+type M = diffsol::NalgebraMat<f64>;
 type LS = diffsol::NalgebraLU<f64>;
 type CG = CraneliftModule;
 
@@ -11,26 +13,26 @@ fn main() {
 }
 
 fn solve() {
-    let eqn = DiffSl::<M, CG>::compile(
-        "
-    a { 2.0/3.0 } b { 4.0/3.0 } c { 1.0 } d { 1.0 }
-    u_i {
-        y1 = 1,
-        y2 = 1,
-    }
-    F_i {
-        a * y1 - b * y1 * y2,
-        c * y1 * y2 - d * y2,
-    }
-",
-    )
-    .unwrap();
-    let problem = OdeBuilder::<M>::new().build_from_eqn(eqn).unwrap();
+    let problem = OdeBuilder::<M>::new()
+        .build_from_diffsl::<CG>(
+            "
+        a { 2.0/3.0 } b { 4.0/3.0 } c { 1.0 } d { 1.0 }
+        u_i {
+            y1 = 1,
+            y2 = 1,
+        }
+        F_i {
+            a * y1 - b * y1 * y2,
+            c * y1 * y2 - d * y2,
+        }
+    ",
+        )
+        .unwrap();
     let mut solver = problem.bdf::<LS>().unwrap();
     let (ys, ts) = solver.solve(40.0).unwrap();
 
-    let prey: Vec<_> = ys.row(0).into_iter().copied().collect();
-    let predator: Vec<_> = ys.row(1).into_iter().copied().collect();
+    let prey: Vec<_> = ys.inner().row(0).into_iter().copied().collect();
+    let predator: Vec<_> = ys.inner().row(1).into_iter().copied().collect();
     let time: Vec<_> = ts.into_iter().collect();
 
     let prey = Scatter::new(time.clone(), prey)
@@ -54,35 +56,35 @@ fn solve() {
 }
 
 fn phase_plane() {
-    let eqn = DiffSl::<M, CG>::compile(
-        "
-    in = [ y0 ]
-    y0 { 1.0 }
-    a { 2.0/3.0 } b { 4.0/3.0 } c { 1.0 } d { 1.0 }
-    u_i {
-        y1 = y0,
-        y2 = y0,
-    }
-    F_i {
-        a * y1 - b * y1 * y2,
-        c * y1 * y2 - d * y2,
-    }
-",
-    )
-    .unwrap();
-
-    let mut problem = OdeBuilder::<M>::new().p([1.0]).build_from_eqn(eqn).unwrap();
+    let mut problem = OdeBuilder::<M>::new()
+        .p([1.0])
+        .build_from_diffsl::<CG>(
+            "
+        in = [ y0 ]
+        y0 { 1.0 }
+        a { 2.0/3.0 } b { 4.0/3.0 } c { 1.0 } d { 1.0 }
+        u_i {
+            y1 = y0,
+            y2 = y0,
+        }
+        F_i {
+            a * y1 - b * y1 * y2,
+            c * y1 * y2 - d * y2,
+        }
+    ",
+        )
+        .unwrap();
 
     let mut plot = Plot::new();
     for y0 in (1..6).map(f64::from) {
-        let p = nalgebra::DVector::from_element(1, y0);
+        let p = NalgebraVec::from_element(1, y0, problem.context().clone());
         problem.eqn_mut().set_params(&p);
 
         let mut solver = problem.bdf::<LS>().unwrap();
         let (ys, _ts) = solver.solve(40.0).unwrap();
 
-        let prey: Vec<_> = ys.row(0).into_iter().copied().collect();
-        let predator: Vec<_> = ys.row(1).into_iter().copied().collect();
+        let prey: Vec<_> = ys.inner().row(0).into_iter().copied().collect();
+        let predator: Vec<_> = ys.inner().row(1).into_iter().copied().collect();
 
         let phase = Scatter::new(prey, predator)
             .mode(Mode::Lines)

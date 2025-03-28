@@ -1,8 +1,6 @@
-use std::ops::{AddAssign, Mul, MulAssign, Add, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
-use nalgebra::{
-    DMatrix, DMatrixView, DMatrixViewMut,
-};
+use nalgebra::{DMatrix, DMatrixView, DMatrixViewMut};
 
 use crate::{scalar::Scale, IndexType, Scalar, Vector};
 
@@ -10,7 +8,10 @@ use super::default_solver::DefaultSolver;
 use super::sparsity::{Dense, DenseRef};
 use super::utils::*;
 use crate::error::DiffsolError;
-use crate::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraLU, NalgebraContext, NalgebraVec, VectorIndex, NalgebraVecMut, NalgebraVecRef};
+use crate::{
+    DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut, NalgebraContext, NalgebraLU,
+    NalgebraVec, NalgebraVecMut, NalgebraVecRef, VectorIndex,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct NalgebraMat<T: Scalar> {
@@ -34,9 +35,19 @@ impl<T: Scalar> DefaultSolver for NalgebraMat<T> {
     type LS = NalgebraLU<T>;
 }
 
-impl_matrix_common!(NalgebraMatMut<'_, T>, NalgebraVec<T>, NalgebraContext);
-impl_matrix_common!(NalgebraMatRef<'_, T>, NalgebraVec<T>, NalgebraContext);
-impl_matrix_common!(NalgebraMat<T>, NalgebraVec<T>, NalgebraContext);
+impl_matrix_common_ref!(
+    NalgebraMatMut<'a, T>,
+    NalgebraVec<T>,
+    NalgebraContext,
+    DMatrixViewMut<'a, T>
+);
+impl_matrix_common_ref!(
+    NalgebraMatRef<'a, T>,
+    NalgebraVec<T>,
+    NalgebraContext,
+    DMatrixView<'a, T>
+);
+impl_matrix_common!(NalgebraMat<T>, NalgebraVec<T>, NalgebraContext, DMatrix<T>);
 
 macro_rules! impl_mul_scalar {
     ($mat_type:ty, $out:ty) => {
@@ -45,7 +56,10 @@ macro_rules! impl_mul_scalar {
 
             fn mul(self, rhs: Scale<T>) -> Self::Output {
                 let scale = rhs.value();
-                Self::Output { data: &self.data * scale, context: self.context.clone() }
+                Self::Output {
+                    data: &self.data * scale,
+                    context: self.context.clone(),
+                }
             }
         }
     };
@@ -86,6 +100,9 @@ impl_sub_assign!(NalgebraMat<T>, &NalgebraMatRef<'_, T>);
 impl_sub_assign!(NalgebraMatMut<'_, T>, &NalgebraMatRef<'_, T>);
 impl_sub_assign!(NalgebraMatMut<'_, T>, &NalgebraMatMut<'_, T>);
 
+impl_index!(NalgebraMat<T>);
+impl_index!(NalgebraMatRef<'_, T>);
+impl_index_mut!(NalgebraMat<T>);
 
 impl<'a, T: Scalar> MatrixView<'a> for NalgebraMatRef<'a, T> {
     type Owned = NalgebraMat<T>;
@@ -191,7 +208,10 @@ impl<T: Scalar> Matrix for NalgebraMat<T> {
         for (i, j, v) in triplets {
             m[(i, j)] = v;
         }
-        Ok(Self { data: m, context: ctx })
+        Ok(Self {
+            data: m,
+            context: ctx,
+        })
     }
     fn zeros(nrows: IndexType, ncols: IndexType, ctx: Self::C) -> Self {
         let data = DMatrix::zeros(nrows, ncols);
@@ -199,7 +219,10 @@ impl<T: Scalar> Matrix for NalgebraMat<T> {
     }
     fn from_diagonal(v: &Self::V) -> Self {
         let data = DMatrix::from_diagonal(&v.data);
-        Self { data, context: v.context().clone() }
+        Self {
+            data,
+            context: v.context().clone(),
+        }
     }
 
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
@@ -245,12 +268,18 @@ impl<T: Scalar> DenseMatrix for NalgebraMat<T> {
 
     fn column_mut(&mut self, i: IndexType) -> <Self::V as Vector>::ViewMut<'_> {
         let data = self.data.column_mut(i);
-        NalgebraVecMut { data, context: self.context.clone() }
+        NalgebraVecMut {
+            data,
+            context: self.context.clone(),
+        }
     }
 
     fn columns_mut(&mut self, start: IndexType, ncols: IndexType) -> Self::ViewMut<'_> {
         let data = self.data.columns_mut(start, ncols);
-        NalgebraMatMut { data, context: self.context.clone() }
+        NalgebraMatMut {
+            data,
+            context: self.context.clone(),
+        }
     }
 
     fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T) {
@@ -259,11 +288,17 @@ impl<T: Scalar> DenseMatrix for NalgebraMat<T> {
 
     fn column(&self, i: IndexType) -> <Self::V as Vector>::View<'_> {
         let data = self.data.column(i);
-        NalgebraVecRef { data, context: self.context.clone() }
+        NalgebraVecRef {
+            data,
+            context: self.context.clone(),
+        }
     }
     fn columns(&self, start: IndexType, ncols: IndexType) -> Self::View<'_> {
         let data = self.data.columns(start, ncols);
-        NalgebraMatRef { data, context: self.context.clone() }
+        NalgebraMatRef {
+            data,
+            context: self.context.clone(),
+        }
     }
     fn column_axpy(&mut self, alpha: Self::T, j: IndexType, beta: Self::T, i: IndexType) {
         if i > self.ncols() {
@@ -277,10 +312,10 @@ impl<T: Scalar> DenseMatrix for NalgebraMat<T> {
         }
         for k in 0..self.nrows() {
             let value = unsafe {
-                beta * *self.data.get_unchecked(k, i) + alpha * *self.data.get_unchecked(k, j)
+                beta * *self.data.get_unchecked((k, i)) + alpha * *self.data.get_unchecked((k, j))
             };
             unsafe {
-                *self.data.get_unchecked_mut(k, i) = value;
+                *self.data.get_unchecked_mut((k, i)) = value;
             };
         }
     }

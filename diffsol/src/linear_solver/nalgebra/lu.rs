@@ -1,7 +1,10 @@
 use nalgebra::Dyn;
 
 use crate::{
-    error::{DiffsolError, LinearSolverError}, linear_solver_error, matrix::dense_nalgebra_serial::NalgebraMat, LinearSolver, Matrix, NalgebraContext, NalgebraVec, NonLinearOpJacobian, Scalar
+    error::{DiffsolError, LinearSolverError},
+    linear_solver_error,
+    matrix::dense_nalgebra_serial::NalgebraMat,
+    LinearSolver, Matrix, NalgebraContext, NalgebraVec, NonLinearOpJacobian, Scalar,
 };
 
 /// A [LinearSolver] that uses the LU decomposition in the [`nalgebra` library](https://nalgebra.org/) to solve the linear system.
@@ -49,13 +52,16 @@ impl<T: Scalar> LinearSolver<NalgebraMat<T>> for LU<T> {
         self.lu = Some(matrix.data.clone().lu());
     }
 
-    fn set_problem<C: NonLinearOpJacobian<T = T, V = NalgebraVec<T>, M = NalgebraMat<T>, C = NalgebraContext>>(
+    fn set_problem<
+        C: NonLinearOpJacobian<T = T, V = NalgebraVec<T>, M = NalgebraMat<T>, C = NalgebraContext>,
+    >(
         &mut self,
         op: &C,
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();
-        let matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), op.context().clone());
+        let matrix =
+            C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), op.context().clone());
         self.matrix = Some(matrix);
     }
 }

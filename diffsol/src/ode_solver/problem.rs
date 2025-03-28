@@ -28,13 +28,13 @@ where
 
 macro_rules! sdirk_solver_from_tableau {
     ($state:ident, $state_sens:ident, $method:ident, $method_sens:ident, $method_solver:ident, $method_solver_sens:ident, $method_solver_adjoint:ident, $tableau:ident) => {
-        pub fn $state<LS: LinearSolver<Eqn::M>>(
-            &self,
-        ) -> Result<SdirkState<Eqn::V>, DiffsolError>
+        pub fn $state<LS: LinearSolver<Eqn::M>>(&self) -> Result<SdirkState<Eqn::V>, DiffsolError>
         where
             Eqn: OdeEquationsImplicit,
         {
-            self.sdirk_state::<LS, _>(&Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau())
+            self.sdirk_state::<LS, _>(&Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(
+                self.context().clone(),
+            ))
         }
 
         pub fn $state_sens<LS: LinearSolver<Eqn::M>>(
@@ -43,7 +43,9 @@ macro_rules! sdirk_solver_from_tableau {
         where
             Eqn: OdeEquationsSens,
         {
-            self.sdirk_state_sens::<LS, _>(&Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau())
+            self.sdirk_state_sens::<LS, _>(&Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(
+                self.context().clone(),
+            ))
         }
 
         pub fn $method_solver<LS: LinearSolver<Eqn::M>>(
@@ -55,7 +57,7 @@ macro_rules! sdirk_solver_from_tableau {
         {
             self.sdirk_solver(
                 state,
-                Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(),
+                Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(self.context().clone()),
             )
         }
 
@@ -71,7 +73,7 @@ macro_rules! sdirk_solver_from_tableau {
         {
             self.sdirk_solver_sens(
                 state,
-                Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(),
+                Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(self.context().clone()),
             )
         }
 
@@ -87,15 +89,13 @@ macro_rules! sdirk_solver_from_tableau {
             Eqn: OdeEquationsAdjoint,
         {
             self.sdirk_solver_adjoint(
-                Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(),
+                Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(self.context().clone()),
                 checkpointer,
                 nout_override,
             )
         }
 
-        pub fn $method<LS: LinearSolver<Eqn::M>>(
-            &self,
-        ) -> Result<Sdirk<'_, Eqn, LS>, DiffsolError>
+        pub fn $method<LS: LinearSolver<Eqn::M>>(&self) -> Result<Sdirk<'_, Eqn, LS>, DiffsolError>
         where
             Eqn: OdeEquationsImplicit,
         {
@@ -115,7 +115,6 @@ macro_rules! sdirk_solver_from_tableau {
             let state = self.$state_sens::<LS>()?;
             self.$method_solver_sens::<LS>(state)
         }
-
     };
 }
 
@@ -333,7 +332,10 @@ where
         SdirkState::new_with_sensitivities::<LS, _>(self, tableau.order())
     }
 
-    pub fn sdirk_solver<LS: LinearSolver<Eqn::M>, DM: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
+    pub fn sdirk_solver<
+        LS: LinearSolver<Eqn::M>,
+        DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+    >(
         &self,
         state: SdirkState<Eqn::V>,
         tableau: Tableau<DM>,
@@ -347,7 +349,7 @@ where
 
     pub(crate) fn sdirk_solver_aug<
         LS: LinearSolver<Eqn::M>,
-        DM: DenseMatrix<V = Eqn::V, T = Eqn::T>,
+        DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
         Aug: AugmentedOdeEquationsImplicit<Eqn>,
     >(
         &self,
@@ -364,7 +366,7 @@ where
     pub(crate) fn sdirk_solver_adjoint<
         'a,
         LS: LinearSolver<Eqn::M>,
-        DM: DenseMatrix<V = Eqn::V, T = Eqn::T>,
+        DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
         S: OdeSolverMethod<'a, Eqn>,
     >(
         &'a self,
@@ -397,7 +399,10 @@ where
         Sdirk::new_augmented(self, state, tableau, LS::default(), augmented_eqn)
     }
 
-    pub fn sdirk_solver_sens<LS: LinearSolver<Eqn::M>, DM: DenseMatrix<V = Eqn::V, T = Eqn::T>>(
+    pub fn sdirk_solver_sens<
+        LS: LinearSolver<Eqn::M>,
+        DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+    >(
         &self,
         state: SdirkState<Eqn::V>,
         tableau: Tableau<DM>,

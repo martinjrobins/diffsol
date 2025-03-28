@@ -727,7 +727,9 @@ mod tests {
     use diffsl::{execution::module::CodegenModule, CraneliftModule};
 
     use crate::{
-        matrix::dense_nalgebra_serial::NalgebraMat, ConstantOp, LinearOp, NalgebraContext, NalgebraLU, NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeSolverMethod, Vector, Context, DenseMatrix, VectorView
+        matrix::dense_nalgebra_serial::NalgebraMat, ConstantOp, Context, DenseMatrix, LinearOp,
+        NalgebraContext, NalgebraLU, NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations,
+        OdeSolverMethod, Vector, VectorView,
     };
 
     use super::{DiffSl, DiffSlContext};
