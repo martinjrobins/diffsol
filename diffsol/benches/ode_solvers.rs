@@ -4,7 +4,7 @@ use diffsol::{
         exponential_decay::exponential_decay_problem, foodweb::foodweb_problem,
         heat2d::head2d_problem, robertson::robertson, robertson_ode::robertson_ode,
     },
-    FaerLU, FaerMat, FaerSparseLU, FaerSparseMat, NalgebraLU, NalgebraMat
+    FaerLU, FaerMat, FaerSparseLU, FaerSparseMat, NalgebraLU, NalgebraMat,
 };
 
 mod sundials_benches;

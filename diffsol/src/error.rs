@@ -14,6 +14,9 @@ pub enum DiffsolError {
     OdeSolverError(#[from] OdeSolverError),
     #[error("Matrix error: {0}")]
     MatrixError(#[from] MatrixError),
+    #[cfg(feature = "cuda")]
+    #[error("Cuda error: {0}")]
+    VectorError(#[from] CudaError),
     #[error("Error: {0}")]
     Other(String),
 }
@@ -104,6 +107,26 @@ pub enum MatrixError {
     IndexOutOfBounds,
     #[error("Error: {0}")]
     Other(String),
+}
+
+#[cfg(feature = "cuda")]
+#[derive(Error, Debug)]
+pub enum CudaError {
+    #[error("Failed to allocate memory on GPU")]
+    CudaMemoryAllocationError,
+    #[error("Cuda error: {0}")]
+    Other(String),
+}
+
+#[cfg(feature = "cuda")]
+#[macro_export]
+macro_rules! cuda_error {
+    ($variant:ident) => {
+        DiffsolError::from(CudaError::$variant)
+    };
+    ($variant:ident, $($arg:tt)*) => {
+        DiffsolError::from(CudaError::$variant($($arg)*))
+    };
 }
 
 #[macro_export]

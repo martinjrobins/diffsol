@@ -11,8 +11,8 @@ pub mod faer_serial;
 #[cfg(feature = "nalgebra")]
 pub mod nalgebra_serial;
 
-//#[cfg(feature = "cuda")]
-//pub mod cuda;
+#[cfg(feature = "cuda")]
+pub mod cuda;
 
 #[macro_use]
 mod utils;
