@@ -239,20 +239,23 @@ g(1)
 \]</p>
 <p>where \(u\) is a vector of temperatures at each point in space. This is a system of ODEs that we can solve using DiffSol.</p>
 <h2 id="diffsol-implementation"><a class="header" href="#diffsol-implementation">DiffSol Implementation</a></h2>
-<pre><code class="language-rust ignore">use diffsol::{CraneliftModule, DiffSl, FaerSparseLU, OdeBuilder, OdeSolverMethod, SparseColMat};
+<pre><code class="language-rust ignore">use diffsol::{
+    CraneliftModule, FaerSparseLU, FaerSparseMat, MatrixCommon, OdeBuilder, OdeSolverMethod,
+};
 use plotly::{
     layout::{Axis, Layout},
     Plot, Surface,
 };
 use std::fs;
 
-type M = SparseColMat&lt;f64&gt;;
+type M = FaerSparseMat&lt;f64&gt;;
 type LS = FaerSparseLU&lt;f64&gt;;
 type CG = CraneliftModule;
 
 fn main() {
-    let eqn = DiffSl::&lt;M, CG&gt;::compile(
-        "
+    let problem = OdeBuilder::&lt;M&gt;::new()
+        .build_from_diffsl::&lt;CG&gt;(
+            "
     D { 1.0 }
     h { 1.0 }
     g { 0.0 }
@@ -276,10 +279,8 @@ fn main() {
     F_i {
         D * (heat_i + b_i) / (h * h)
     }",
-    )
-    .unwrap();
-
-    let problem = OdeBuilder::&lt;M&gt;::new().build_from_eqn(eqn).unwrap();
+        )
+        .unwrap();
     let times = (0..50).map(|i| i as f64).collect::&lt;Vec&lt;f64&gt;&gt;();
     let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
     let sol = solver.solve_dense(&amp;times).unwrap();
@@ -287,6 +288,7 @@ fn main() {
     let x = (0..21).map(|i| i as f64).collect::&lt;Vec&lt;f64&gt;&gt;();
     let y = times;
     let z = sol
+        .inner()
         .col_iter()
         .map(|v| v.iter().copied().collect::&lt;Vec&lt;f64&gt;&gt;())
         .collect::&lt;Vec&lt;Vec&lt;f64&gt;&gt;&gt;();

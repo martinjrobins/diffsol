@@ -170,10 +170,14 @@ Therefore, you need to already have structs that implement the <code>NonLinearOp
 you have already implemented these traits for your structs.</p>
 <p>Often, the structs that implement these traits will have to use data defined in the struct that implements the <code>OdeEquations</code> trait. For example, they might wish to have a reference to the same parameter vector <code>p</code>. Therefore, you will often need to define lifetimes for these structs to ensure that they can access the data they need.</p>
 <p>Note that these struct will need to be lightweight and should not contain a significant amount of data. The data should be stored in the struct that implements the <code>OdeEquations</code> trait. This is because these structs will be created and destroyed many times during the course of the simulation (e.g. every time the right-hand side function is called).</p>
-<pre><code class="language-rust ignore">use diffsol::{ConstantOp, LinearOp, NonLinearOp, OdeEquations, OdeEquationsRef, Op};
+<pre><code class="language-rust ignore">use diffsol::{
+    ConstantOp, LinearOp, NalgebraContext, NalgebraMat, NalgebraVec, NonLinearOp, OdeEquations,
+    OdeEquationsRef, Op, Vector,
+};
 type T = f64;
-type V = nalgebra::DVector&lt;f64&gt;;
-type M = nalgebra::DMatrix&lt;f64&gt;;
+type V = NalgebraVec&lt;f64&gt;;
+type M = NalgebraMat&lt;f64&gt;;
+type C = NalgebraContext;
 struct MyRhs&lt;'a&gt; {
     p: &amp;'a V,
 } // implements NonLinearOp
@@ -184,20 +188,42 @@ struct MyInit&lt;'a&gt; {
     p: &amp;'a V,
 } // implements ConstantOp
 struct MyRoot&lt;'a&gt; {
-    p: &amp;'a V,
-} // implements NonLinearOp
-struct MyOut&lt;'a&gt; {
-    p: &amp;'a V,
-} // implements NonLinearOp</code></pre>
+    p: &amp;'a V,</code></pre>
 <h2 id="implementing-the-odeequations-traits"><a class="header" href="#implementing-the-odeequations-traits">Implementing the OdeEquations traits</a></h2>
 <p>Lets imagine we have a struct <code>MyProblem</code> that we want to use to specify the entire system of equations. We can implement the <code>Op</code>, <code>OdeEquations</code>, and <code>OdeEquationsRef</code> traits for this struct like so:</p>
-<pre><code class="language-rust ignore">struct MyProblem {
+<pre><code class="language-rust ignore">impl Op for MyOut&lt;'_&gt; {
+    type T = T;
+    type V = V;
+    type M = M;
+    type C = C;
+    fn nstates(&amp;self) -&gt; usize {
+        1
+    }
+    fn nout(&amp;self) -&gt; usize {
+        1
+    }
+    fn nparams(&amp;self) -&gt; usize {
+        0
+    }
+    fn context(&amp;self) -&gt; &amp;Self::C {
+        self.p.context()
+    }
+}
+impl NonLinearOp for MyOut&lt;'_&gt; {
+    fn call_inplace(&amp;self, x: &amp;V, _t: T, y: &amp;mut V) {
+        y[0] = x[0];
+    }
+}
+
+struct MyProblem {
     p: V,
 }
 
 impl MyProblem {
     fn new() -&gt; Self {
-        MyProblem { p: V::zeros(2) }
+        MyProblem {
+            p: V::zeros(2, C::default()),
+        }
     }
 }
 
@@ -205,6 +231,7 @@ impl Op for MyProblem {
     type T = T;
     type V = V;
     type M = M;
+    type C = C;
     fn nstates(&amp;self) -&gt; usize {
         1
     }
@@ -214,10 +241,15 @@ impl Op for MyProblem {
     fn nparams(&amp;self) -&gt; usize {
         2
     }
+    fn context(&amp;self) -&gt; &amp;Self::C {
+        self.p.context()
+    }
 }
 
-impl&lt;'a&gt; OdeEquationsRef&lt;'a&gt; for MyProblem {
-    type Rhs = MyRhs&lt;'a&gt;;
+impl&lt;'a&gt; OdeEquationsRef&lt;'a&gt; for MyProblem {</code></pre>
+<h2 id="creating-the-problem"><a class="header" href="#creating-the-problem">Creating the problem</a></h2>
+<p>Now that we have our custom <code>OdeEquations</code> struct, we can use it in an <code>OdeBuilder</code> to create the problem. Hint: click the button below to see the full code, which includes the implementation of the <code>Op</code>, <code>NonLinearOp</code>, <code>LinearOp</code>, and <code>ConstantOp</code> traits for the <code>MyRhs</code>, <code>MyMass</code>, <code>MyInit</code>, <code>MyRoot</code>, and <code>MyOut</code> structs.</p>
+<pre><code class="language-rust ignore">    type Rhs = MyRhs&lt;'a&gt;;
     type Mass = MyMass&lt;'a&gt;;
     type Init = MyInit&lt;'a&gt;;
     type Root = MyRoot&lt;'a&gt;;
@@ -246,10 +278,8 @@ impl OdeEquations for MyProblem {
     fn get_params(&amp;self, p: &amp;mut Self::V) {
         p.copy_from(&amp;self.p);
     }
-}</code></pre>
-<h2 id="creating-the-problem"><a class="header" href="#creating-the-problem">Creating the problem</a></h2>
-<p>Now that we have our custom <code>OdeEquations</code> struct, we can use it in an <code>OdeBuilder</code> to create the problem. Hint: click the button below to see the full code, which includes the implementation of the <code>Op</code>, <code>NonLinearOp</code>, <code>LinearOp</code>, and <code>ConstantOp</code> traits for the <code>MyRhs</code>, <code>MyMass</code>, <code>MyInit</code>, <code>MyRoot</code>, and <code>MyOut</code> structs.</p>
-<pre><code class="language-rust ignore">use diffsol::OdeBuilder;
+}
+use diffsol::OdeBuilder;
 fn main() {
     let _problem = OdeBuilder::&lt;M&gt;::new()
         .p(vec![1.0, 10.0])

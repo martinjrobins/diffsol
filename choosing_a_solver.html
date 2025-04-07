@@ -175,9 +175,8 @@
 For example:</p>
 <pre><code class="language-rust ignore">use diffsol::OdeBuilder;
 use diffsol::{BdfState, OdeSolverState, SdirkState, Tableau};
-use diffsol::{NalgebraLU, OdeSolverMethod, OdeSolverStopReason};
-use nalgebra::DVector;
-type M = nalgebra::DMatrix&lt;f64&gt;;
+use diffsol::{NalgebraLU, NalgebraMat, OdeSolverMethod, OdeSolverStopReason, Vector};
+type M = NalgebraMat&lt;f64&gt;;
 type LS = NalgebraLU&lt;f64&gt;;
 
 fn main() {
@@ -190,7 +189,7 @@ fn main() {
             |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
             |x, p, _t, v, y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
         )
-        .init(|_p, _t| DVector::from_element(1, 0.1))
+        .init(|_p, _t, y| y.fill(0.1), 1)
         .build()
         .unwrap();
 
@@ -208,24 +207,25 @@ fn main() {
     let _solver = problem.bdf_solver::&lt;LS&gt;(state);
 
     // Create a SDIRK solver with a pre-defined tableau
-    let tableau = Tableau::&lt;M&gt;::tr_bdf2();
+    let tableau = Tableau::&lt;M&gt;::tr_bdf2(problem.context().clone());
     let state = problem.sdirk_state::&lt;LS, _&gt;(&amp;tableau).unwrap();
     let _solver = problem.sdirk_solver::&lt;LS, _&gt;(state, tableau);
 
     // Create a tr_bdf2 or esdirk34 solvers directly (both are SDIRK solvers with different tableaus)
     let _solver = problem.tr_bdf2::&lt;LS&gt;();
-    let _solver = problem.esdirk34::&lt;LS&gt;();</code></pre>
+    let _solver = problem.esdirk34::&lt;LS&gt;();
+</code></pre>
 <h1 id="initialisation"><a class="header" href="#initialisation">Initialisation</a></h1>
 <p>Each solver has an internal state that holds information like the current state vector, the gradient of the state vector, the current time, and the current step size. When you create a solver using the <code>bdf</code> or <code>sdirk</code> methods on the <code>OdeSolverProblem</code> struct, the solver will be initialised with an initial state based on the initial conditions of the problem as well as satisfying any algebraic constraints. An initial time step will also be chosen based on your provided equations.</p>
 <p>Each solver's state struct implements the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/state/trait.OdeSolverState.html"><code>OdeSolverState</code></a> trait, and if you wish to manually create and setup a state, you can use the methods on this trait to do so.</p>
 <p>For example, say that you wish to bypass the initialisation of the state as you already have the algebraic constraints and so don't need to solve for them. You can use the <code>new_without_initialise</code> method on the <code>OdeSolverState</code> trait to create a new state without initialising it. You can then use the <code>as_mut</code> method to get a mutable reference to the state and set the values manually.</p>
 <p>Note that each state struct has a <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/state/trait.OdeSolverState.html#tymethod.as_ref"><code>as_ref</code></a> and <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/state/trait.OdeSolverState.html#tymethod.as_mut"><code>as_mut</code></a> methods that return a <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/state/struct.StateRef.html"><code>StateRef</code></a> or <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/state/struct.StateRefMut.html"><code>StateRefMut</code></a> struct respectively. These structs provide a solver-independent way to access the state values so you can use the same code with different solvers.</p>
-<pre><code class="language-rust ignore">    // Create a non-initialised state and manually set the values before
-    // creating the solver
+<pre><code class="language-rust ignore">    // creating the solver
     let mut state = SdirkState::new_without_initialise(&amp;problem).unwrap();
     // ... set the state values manually
     state.as_mut().y[0] = 0.1;
-    let _solver = problem.tr_bdf2_solver::&lt;LS&gt;(state);</code></pre>
+    let _solver = problem.tr_bdf2_solver::&lt;LS&gt;(state);
+</code></pre>
 
                     </main>
 

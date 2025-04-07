@@ -288,7 +288,7 @@ impl NeuralOde {
         let mut y_input = self.0.input_y.borrow_mut();
         y_input
             .iter_mut()
-            .zip(x.iter())
+            .zip(x.inner().iter())
             .for_each(|(y, x)| *y = *x as f32);
         let outputs = self
             .0
@@ -302,21 +302,36 @@ impl NeuralOde {
             )
             .unwrap();
         let y_data = outputs["Identity_1:0"].try_extract_tensor::&lt;f32&gt;().unwrap();
-        y.iter_mut()
+        y.inner_mut()
+            .iter_mut()
             .zip(y_data.as_slice().unwrap())
             .for_each(|(y, x)| *y = *x as f64);
     }
 }</code></pre>
 <p>We'll also need an optimiser, so we'll write an AdamW algorithm using the definition in the <a href="https://pytorch.org/docs/stable/generated/torch.optim.AdamW.html">PyTorch documentation</a> as a guide:</p>
-<pre><code class="language-rust ignore">impl AdamW {
-    fn new(nparams: usize) -&gt; Self {
+<pre><code class="language-rust ignore">struct AdamW {
+    lr: T,
+    betas: (T, T),
+    eps: T,
+    m: V,
+    m_hat: V,
+    v: V,
+    v_hat: V,
+    grads2: V,
+    lambda: T,
+    t: i32,
+}
+
+impl AdamW {
+    fn new(nparams: usize, ctx: C) -&gt; Self {
         let lr = 1e-2;
         let betas = (0.9, 0.999);
         let eps = 1e-8;
-        let m = V::zeros(nparams);
-        let m_hat = V::zeros(nparams);
-        let v = V::zeros(nparams);
-        let v_hat = V::zeros(nparams);
+        let m = V::zeros(nparams, ctx.clone());
+        let m_hat = V::zeros(nparams, ctx.clone());
+        let v = V::zeros(nparams, ctx.clone());
+        let v_hat = V::zeros(nparams, ctx.clone());
+        let grads2 = V::zeros(nparams, ctx.clone());
         let lambda = 1e-2;
         Self {
             lr,
@@ -327,25 +342,25 @@ impl NeuralOde {
             v,
             v_hat,
             lambda,
+            grads2,
             t: 0,
         }
     }
 
     fn step(&amp;mut self, params: &amp;mut V, grads: &amp;V) {
         self.t += 1;
-        params.mul_assign(1.0 - self.lr * self.lambda);
+        params.mul_assign(Scale(1.0 - self.lr * self.lambda));
         self.m.axpy(1.0 - self.betas.0, grads, self.betas.0);
-        self.v.axpy(
-            1.0 - self.betas.1,
-            &amp;grads.component_mul(grads),
-            self.betas.1,
-        );
-        self.m_hat = &amp;self.m / (1.0 - self.betas.0.powi(self.t));
-        self.v_hat = &amp;self.v / (1.0 - self.betas.1.powi(self.t));
+        self.grads2.copy_from(grads);
+        self.grads2.component_mul_assign(grads);
+        self.v.axpy(1.0 - self.betas.1, &amp;self.grads2, self.betas.1);
+        self.m_hat = &amp;self.m * Scale(1.0 / (1.0 - self.betas.0.powi(self.t)));
+        self.v_hat = &amp;self.v * Scale(1.0 / (1.0 - self.betas.1.powi(self.t)));
         params
+            .inner_mut()
             .iter_mut()
-            .zip(self.v_hat.iter())
-            .zip(self.m_hat.iter())
+            .zip(self.v_hat.inner().iter())
+            .zip(self.m_hat.inner().iter())
             .for_each(|((params_i, v_hat_i), m_hat_i)| {
                 *params_i -= self.lr * m_hat_i / (v_hat_i.sqrt() + self.eps)
             });
@@ -366,8 +381,8 @@ impl NeuralOde {
     let mut loss = 0.0;
     for j in 0..g_m.ncols() {
         let delta = ys.column(j) - ys_data.column(j);
-        loss += delta.dot(&amp;delta);
-        let g_m_i = 2.0 * delta;
+        loss += delta.inner().dot(delta.inner());
+        let g_m_i = delta * Scale(2.0);
         g_m.column_mut(j).copy_from(&amp;g_m_i);
     }
     let adjoint_solver = problem.bdf_solver_adjoint::&lt;LS, _&gt;(c, Some(1)).unwrap();
@@ -381,8 +396,8 @@ impl NeuralOde {
     ys_data: &amp;M,
     p: &amp;mut V,
 ) {
-    let mut gm = M::zeros(problem.eqn.nout(), ts_data.len());
-    let mut adam = AdamW::new(problem.eqn.nparams());
+    let mut gm = M::zeros(problem.eqn.nout(), ts_data.len(), problem.context().clone());
+    let mut adam = AdamW::new(problem.eqn.nparams(), problem.context().clone());
     for _ in 0..150 {
         match loss_fn(problem, p, ts_data, ys_data, &amp;mut gm) {
             Ok((loss, g)) =&gt; {

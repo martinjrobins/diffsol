@@ -167,29 +167,27 @@ For more detail on the syntax of DiffSL see the <a href="https://martinjrobins.g
 <h2 id="diffsl-context"><a class="header" href="#diffsl-context">DiffSL Context</a></h2>
 <p>The main struct that is used to specify a problem in DiffSL is the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/diffsl/struct.DiffSl.html"><code>DiffSl</code></a> struct. Creating this struct
 Just-In-Time (JIT) compiles your DiffSL code into a form that can be executed efficiently by DiffSol.</p>
-<pre><code class="language-rust ignore">use diffsol::{CraneliftModule, DiffSl};
+<pre><code class="language-rust ignore">use diffsol::CraneliftModule;
 use diffsol::{OdeBuilder, OdeSolverMethod};
-type M = nalgebra::DMatrix&lt;f64&gt;;
+type M = diffsol::NalgebraMat&lt;f64&gt;;
 type CG = CraneliftModule;
 type LS = diffsol::NalgebraLU&lt;f64&gt;;
 
 fn main() {
-    let eqn = DiffSl::&lt;M, CG&gt;::compile(
-        "
-     in = [r, k]
-     r { 1.0 }
-     k { 1.0 }
-     u { 0.1 }
-     F { r * u * (1.0 - u / k) }
- ",
-    )
-    .unwrap();</code></pre>
-<p>The <code>CG</code> parameter specifies the backend that you want to use to compile the DiffSL code. The <code>CraneliftModule</code> backend is the default backend and is behind the <code>diffsl</code> feature flag. If you want to use the faster LLVM backend you can use the <code>LlvmModule</code> backend, which is behind one of the <code>diffsl-llvm*</code> feature flags, depending on the version of LLVM you have installed.</p>
-<p>Once you have created the <code>DiffSl</code> struct you can use it to create a problem using the <code>build_from_eqn</code> method on the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct.</p>
-<pre><code class="language-rust ignore">    let problem = OdeBuilder::&lt;M&gt;::new()
+    let problem = OdeBuilder::&lt;M&gt;::new()
         .rtol(1e-6)
         .p([1.0, 10.0])
-        .build_from_eqn(eqn)
+        .build_from_diffsl::&lt;CG&gt;(
+            "
+                in = [r, k]
+                r { 1.0 }
+                k { 1.0 }
+                u { 0.1 }
+                F { r * u * (1.0 - u / k) }</code></pre>
+<p>The <code>CG</code> parameter specifies the backend that you want to use to compile the DiffSL code. The <code>CraneliftModule</code> backend is the default backend and is behind the <code>diffsl</code> feature flag. If you want to use the faster LLVM backend you can use the <code>LlvmModule</code> backend, which is behind one of the <code>diffsl-llvm*</code> feature flags, depending on the version of LLVM you have installed.</p>
+<p>Once you have created the <code>DiffSl</code> struct you can use it to create a problem using the <code>build_from_eqn</code> method on the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct.</p>
+<pre><code class="language-rust ignore">            ",
+        )
         .unwrap();
     let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
     let t = 0.4;

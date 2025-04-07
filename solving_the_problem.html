@@ -172,9 +172,8 @@
 <p>The following example shows how to solve a simple ODE problem using the <code>solve</code> method on the <code>OdeSolverMethod</code> trait.</p>
 <pre><code class="language-rust ignore">use diffsol::OdeBuilder;
 use diffsol::{BdfState, OdeSolverState, SdirkState, Tableau};
-use diffsol::{NalgebraLU, OdeSolverMethod, OdeSolverStopReason};
-use nalgebra::DVector;
-type M = nalgebra::DMatrix&lt;f64&gt;;
+use diffsol::{NalgebraLU, NalgebraMat, OdeSolverMethod, OdeSolverStopReason, Vector};
+type M = NalgebraMat&lt;f64&gt;;
 type LS = NalgebraLU&lt;f64&gt;;
 
 fn main() {
@@ -187,39 +186,39 @@ fn main() {
             |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
             |x, p, _t, v, y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
         )
-        .init(|_p, _t| DVector::from_element(1, 0.1))
+        .init(|_p, _t, y| y.fill(0.1), 1)
         .build()
         .unwrap();
 
-    let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
-    let (_ys, _ts) = solver.solve(10.0).unwrap();</code></pre>
+    //
+    let (_ys, _ts) = solver.solve(10.0).unwrap();
+</code></pre>
 <p><code>solve_dense</code> will solve a problem from an initial state, returning the solution at a <code>Vec</code> of times provided by the user.</p>
-<pre><code class="language-rust ignore">    let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
-    let times = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
-    let _soln = solver.solve_dense(&amp;times).unwrap();</code></pre>
+<pre><code class="language-rust ignore">    let times = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
+    let _soln = solver.solve_dense(&amp;times).unwrap();
+</code></pre>
 <h2 id="stepping-the-solution"><a class="header" href="#stepping-the-solution">Stepping the Solution</a></h2>
 <p>The fundamental method to step the solver through a solution is the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#tymethod.step"><code>step</code></a> method on the <code>OdeSolverMethod</code> trait, which steps the solution forward in time by a single step, with a step size chosen by the solver in order to satisfy the error tolerances in the <code>problem</code> struct. The <code>step</code> method returns a <code>Result</code> that contains the new state of the solution if the step was successful, or an error if the step failed.</p>
-<pre><code class="language-rust ignore">    let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
-    while solver.state().t &lt; 10.0 {
+<pre><code class="language-rust ignore">    while solver.state().t &lt; 10.0 {
         if solver.step().is_err() {
             break;
         }
-    }</code></pre>
+    }
+</code></pre>
 <p>The <code>step</code> method will return an error if the solver fails to converge to the solution or if the step size becomes too small.</p>
 <p>Often you will want to get the solution at a specific time \(t_o\). There are two ways to do this based on your particular needs, the most lightweight way is to step the solution forward
 until you are beyond \(t_o\), and then interpolate the solution back to \(t_o\) using the <code>interpolate</code> method on the <code>OdeSolverMethod</code> trait.</p>
-<pre><code class="language-rust ignore">    let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
-    let t_o = 10.0;
+<pre><code class="language-rust ignore">    let t_o = 10.0;
     while solver.state().t &lt; t_o {
         solver.step().unwrap();
     }
-    let _soln = solver.interpolate(t_o).unwrap();</code></pre>
+    let _soln = solver.interpolate(t_o).unwrap();
+</code></pre>
 <p>The second way is to use the <code>set_stop_time</code> method on the <code>OdeSolverMethod</code> trait to stop the solver at a specific time, this will override the internal time step so that the solver stops at the specified time.
 Note that this can be less efficient if you wish to continue stepping forward after the specified time, as the solver will need to be re-initialised.
 The enum returned by <code>step</code> will indicate when the solver has stopped at the specified time.
 Once the solver has stopped at the specified time, you can get the current state of the solution using the <code>state</code> method on the solver, which returns an <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/struct.OdeSolverState.html"><code>OdeSolverState</code></a> struct.</p>
-<pre><code class="language-rust ignore">    let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
-    solver.set_stop_time(10.0).unwrap();
+<pre><code class="language-rust ignore">    solver.set_stop_time(10.0).unwrap();
     loop {
         match solver.step() {
             Ok(OdeSolverStopReason::InternalTimestep) =&gt; continue,
@@ -228,7 +227,8 @@ Once the solver has stopped at the specified time, you can get the current state
             Err(e) =&gt; panic!("Solver failed to converge: {}", e),
         }
     }
-    let _soln = &amp;solver.state().y;</code></pre>
+    let _soln = &amp;solver.state().y;
+}</code></pre>
 
                     </main>
 

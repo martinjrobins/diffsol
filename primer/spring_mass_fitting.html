@@ -175,14 +175,14 @@
 };
 use argmin_observer_slog::SlogLogger;
 use diffsol::{
-    AdjointOdeSolverMethod, DiffSl, OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState,
+    AdjointOdeSolverMethod, DenseMatrix, DiffSl, Matrix, MatrixCommon, NalgebraMat, NalgebraVec,
+    OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Scale, Vector,
+    VectorCommon, VectorViewMut,
 };
-use nalgebra::{DMatrix, DVector};
 use std::cell::RefCell;
 
-type M = DMatrix&lt;f64&gt;;
-type V = DVector&lt;f64&gt;;
+type M = NalgebraMat&lt;f64&gt;;
+type V = NalgebraVec&lt;f64&gt;;
 type T = f64;
 type LS = diffsol::NalgebraLU&lt;f64&gt;;
 type CG = diffsol::LlvmModule;
@@ -191,66 +191,88 @@ type Eqn = DiffSl&lt;M, CG&gt;;
 struct Problem {
     ys_data: M,
     ts_data: Vec&lt;T&gt;,
-    problem: RefCell&lt;OdeSolverProblem&lt;Eqn&gt;&gt;,
-}</code></pre>
+    problem: RefCell&lt;OdeSolverProblem&lt;Eqn&gt;&gt;,</code></pre>
 <p>To use argmin we need to specify traits giving the loss function and its gradient. In this case we'll define a loss function equal to the sum of squares error between the model output and the synthetic data.</p>
 <p>$$
 \text{loss} = \sum_i (y_i(p) - \hat{y}_i)^2
 $$</p>
 <p>where \(y_i(p)\) is the model output as a function of the parameters \(p\), and \(\hat{y}_i\) is the observed data at time index \(i\).</p>
-<pre><code class="language-rust ignore">impl CostFunction for Problem {
+<pre><code class="language-rust ignore">
+impl CostFunction for Problem {
     type Output = T;
     type Param = Vec&lt;T&gt;;
 
     fn cost(&amp;self, param: &amp;Self::Param) -&gt; Result&lt;Self::Output, argmin_math::Error&gt; {
         let mut problem = self.problem.borrow_mut();
-        problem.eqn_mut().set_params(&amp;V::from_vec(param.clone()));
+        let context = problem.eqn().context().clone();
+        problem
+            .eqn_mut()
+            .set_params(&amp;V::from_vec(param.clone(), context));
         let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
         let ys = match solver.solve_dense(&amp;self.ts_data) {
             Ok(ys) =&gt; ys,
             Err(_) =&gt; return Ok(f64::MAX / 1000.),
         };
         let loss = ys
+            .inner()
             .column_iter()
-            .zip(self.ys_data.column_iter())
-            .map(|(a, b)| (a - b).norm_squared())
-            .sum::&lt;f64&gt;();
-        Ok(loss)
-    }
-}</code></pre>
+            .zip(self.ys_data.inner().column_iter())
+            .map(|(a, b)| (a - b).norm_squared())</code></pre>
 <p>The gradient of this cost function with respect to the model outputs \(y_i\) is</p>
 <p>$$
 \frac{\partial \text{loss}}{\partial y_i} = 2 (y_i(p) - \hat{y}_i)
 $$</p>
 <p>We can calculate this using DiffSol's adjoint sensitivity analysis functionality. First we solve the forwards problem, generating a checkpointing struct. Using the forward solution we can then calculate \(\frac{\partial loss}{\partial y_i}\) for each time point, and then pass this into the adjoint backwards pass to calculate the gradient of the cost function with respect to the parameters.</p>
-<pre><code class="language-rust ignore">impl Gradient for Problem {
+<pre><code class="language-rust ignore">        Ok(loss)
+    }
+}
+
+impl Gradient for Problem {
     type Gradient = Vec&lt;T&gt;;
     type Param = Vec&lt;T&gt;;
 
     fn gradient(&amp;self, param: &amp;Self::Param) -&gt; Result&lt;Self::Gradient, argmin_math::Error&gt; {
         let mut problem = self.problem.borrow_mut();
-        problem.eqn_mut().set_params(&amp;V::from_vec(param.clone()));
+        let context = problem.eqn().context().clone();
+        problem
+            .eqn_mut()
+            .set_params(&amp;V::from_vec(param.clone(), context));
         let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
         let (c, ys) = match solver.solve_dense_with_checkpointing(&amp;self.ts_data, None) {
             Ok(ys) =&gt; ys,
             Err(_) =&gt; return Ok(vec![f64::MAX / 1000.; param.len()]),
         };
-        let mut g_m = M::zeros(2, self.ts_data.len());
+        let mut g_m = M::zeros(2, self.ts_data.len(), problem.eqn().context().clone());
         for j in 0..g_m.ncols() {
-            let g_m_i = 2.0 * (ys.column(j) - self.ys_data.column(j));
+            let g_m_i = (ys.column(j) - self.ys_data.column(j)) * Scale(2.0);
             g_m.column_mut(j).copy_from(&amp;g_m_i);
         }
-        let adjoint_solver = problem.bdf_solver_adjoint::&lt;LS, _&gt;(c, Some(1)).unwrap();
-        match adjoint_solver.solve_adjoint_backwards_pass(self.ts_data.as_slice(), &amp;[&amp;g_m]) {
-            Ok(soln) =&gt; Ok(soln.as_ref().sg[0].iter().copied().collect::&lt;Vec&lt;_&gt;&gt;()),
+        let adjoint_solver = problem.bdf_solver_adjoint::&lt;LS, _&gt;(c, Some(1)).unwrap();</code></pre>
+<p>In our main function we'll create the model, generate some synthetic data, and then call argmin to fit the model to the data.</p>
+<pre><code class="language-rust ignore">        match adjoint_solver.solve_adjoint_backwards_pass(self.ts_data.as_slice(), &amp;[&amp;g_m]) {
+            Ok(soln) =&gt; Ok(soln.as_ref().sg[0]
+                .inner()
+                .iter()
+                .copied()
+                .collect::&lt;Vec&lt;_&gt;&gt;()),
             Err(_) =&gt; Ok(vec![f64::MAX / 1000.; param.len()]),
         }
     }
-}</code></pre>
-<p>In our main function we'll create the model, generate some synthetic data, and then call argmin to fit the model to the data.</p>
-<pre><code class="language-rust ignore">pub fn main() {
-    let eqn = DiffSl::&lt;M, CG&gt;::compile(
-        "
+}
+
+pub fn main() {
+    let (k_true, c_true) = (1.0, 0.1);
+    let t_data = (0..101)
+        .map(|i| f64::from(i) * 40. / 100.)
+        .collect::&lt;Vec&lt;f64&gt;&gt;();
+    let problem = OdeBuilder::&lt;M&gt;::new()
+        .p([k_true, c_true])
+        .sens_atol([1e-6])
+        .sens_rtol(1e-6)
+        .out_atol([1e-6])
+        .out_rtol(1e-6)
+        .build_from_diffsl(
+            "
         in = [k, c]
         k { 1.0 } m { 1.0 } c { 0.1 }
         u_i {
@@ -262,20 +284,7 @@ $$</p>
             -k/m * x - c/m * v,
         }
         ",
-    )
-    .unwrap();
-
-    let (k_true, c_true) = (1.0, 0.1);
-    let t_data = (0..101)
-        .map(|i| f64::from(i) * 40. / 100.)
-        .collect::&lt;Vec&lt;f64&gt;&gt;();
-    let problem = OdeBuilder::&lt;M&gt;::new()
-        .p([k_true, c_true])
-        .sens_atol([1e-6])
-        .sens_rtol(1e-6)
-        .out_atol([1e-6])
-        .out_rtol(1e-6)
-        .build_from_eqn(eqn)
+        )
         .unwrap();
     let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
     let ys_data = solver.solve_dense(&amp;t_data).unwrap();
