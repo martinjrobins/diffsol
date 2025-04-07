@@ -4,10 +4,9 @@ use argmin::{
 };
 use argmin_observer_slog::SlogLogger;
 use diffsol::{
-    AdjointOdeSolverMethod, DiffSl, NalgebraMat, NalgebraVec, OdeBuilder, OdeEquations,
-    OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+    AdjointOdeSolverMethod, DenseMatrix, DiffSl, Matrix, MatrixCommon, NalgebraMat, NalgebraVec, OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Vector, VectorCommon, VectorViewMut,
+    Scale,
 };
-use nalgebra::{DMatrix, DVector};
 use std::cell::RefCell;
 
 type M = NalgebraMat<f64>;
@@ -29,15 +28,16 @@ impl CostFunction for Problem {
 
     fn cost(&self, param: &Self::Param) -> Result<Self::Output, argmin_math::Error> {
         let mut problem = self.problem.borrow_mut();
-        problem.eqn_mut().set_params(&V::from_vec(param.clone()));
+        let context = problem.eqn().context().clone();
+        problem.eqn_mut().set_params(&V::from_vec(param.clone(), context));
         let mut solver = problem.bdf::<LS>().unwrap();
         let ys = match solver.solve_dense(&self.ts_data) {
             Ok(ys) => ys,
             Err(_) => return Ok(f64::MAX / 1000.),
         };
         let loss = ys
-            .column_iter()
-            .zip(self.ys_data.column_iter())
+            .inner().column_iter()
+            .zip(self.ys_data.inner().column_iter())
             .map(|(a, b)| (a - b).norm_squared())
             .sum::<f64>();
         Ok(loss)
@@ -50,20 +50,21 @@ impl Gradient for Problem {
 
     fn gradient(&self, param: &Self::Param) -> Result<Self::Gradient, argmin_math::Error> {
         let mut problem = self.problem.borrow_mut();
-        problem.eqn_mut().set_params(&V::from_vec(param.clone()));
+        let context = problem.eqn().context().clone();
+        problem.eqn_mut().set_params(&V::from_vec(param.clone(), context));
         let mut solver = problem.bdf::<LS>().unwrap();
         let (c, ys) = match solver.solve_dense_with_checkpointing(&self.ts_data, None) {
             Ok(ys) => ys,
             Err(_) => return Ok(vec![f64::MAX / 1000.; param.len()]),
         };
-        let mut g_m = M::zeros(2, self.ts_data.len());
+        let mut g_m = M::zeros(2, self.ts_data.len(), problem.eqn().context().clone());
         for j in 0..g_m.ncols() {
-            let g_m_i = 2.0 * (ys.column(j) - self.ys_data.column(j));
+            let g_m_i = (ys.column(j) - self.ys_data.column(j)) * Scale(2.0);
             g_m.column_mut(j).copy_from(&g_m_i);
         }
         let adjoint_solver = problem.bdf_solver_adjoint::<LS, _>(c, Some(1)).unwrap();
         match adjoint_solver.solve_adjoint_backwards_pass(self.ts_data.as_slice(), &[&g_m]) {
-            Ok(soln) => Ok(soln.as_ref().sg[0].iter().copied().collect::<Vec<_>>()),
+            Ok(soln) => Ok(soln.as_ref().sg[0].inner().iter().copied().collect::<Vec<_>>()),
             Err(_) => Ok(vec![f64::MAX / 1000.; param.len()]),
         }
     }

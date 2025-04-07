@@ -125,10 +125,8 @@
 //! ## Matrix and vector types
 //!
 //! When solving ODEs, you will need to choose a matrix and vector type to use. DiffSol uses the following types:
-//! - [nalgebra::DMatrix] and [nalgebra::DVector] from the [nalgebra](https://nalgebra.org) library.
-//! - [faer::Mat] and [faer::Col] from the [faer](https://github.com/sarah-ek/faer-rs) library.
-//! - [nalgebra_sparse::CscMatrix] from the nalgebra-sparse library.
-//! - [SparseColMat], which is a thin wrapper around the [faer::sparse::SparseColMat] type from faer.
+//! - [NalgebraVec] and [NalgebraMat] (wrappers around [nalgebra::DMatrix] and [nalgebra::DVector] from the [nalgebra](https://nalgebra.org) library).
+//! - [FaerVec], [FaerMat] and [FaerSparseMat] (wrappers around [faer::Mat], [faer::Col] and [faer::sparse::SparseColMat] from the [faer](https://github.com/sarah-ek/faer-rs) library).
 //!
 //! If you wish to use your own matrix and vector types, you will need to implement the following traits:
 //! - For matrices: [Matrix], [MatrixView], [MatrixViewMut], [DenseMatrix], and [MatrixCommon].
