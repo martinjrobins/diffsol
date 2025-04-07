@@ -4,8 +4,9 @@ use argmin::{
 };
 use argmin_observer_slog::SlogLogger;
 use diffsol::{
-    AdjointOdeSolverMethod, DenseMatrix, DiffSl, Matrix, MatrixCommon, NalgebraMat, NalgebraVec, OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Vector, VectorCommon, VectorViewMut,
-    Scale,
+    AdjointOdeSolverMethod, DenseMatrix, DiffSl, Matrix, MatrixCommon, NalgebraMat, NalgebraVec,
+    OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Scale, Vector,
+    VectorCommon, VectorViewMut,
 };
 use std::cell::RefCell;
 
@@ -29,14 +30,17 @@ impl CostFunction for Problem {
     fn cost(&self, param: &Self::Param) -> Result<Self::Output, argmin_math::Error> {
         let mut problem = self.problem.borrow_mut();
         let context = problem.eqn().context().clone();
-        problem.eqn_mut().set_params(&V::from_vec(param.clone(), context));
+        problem
+            .eqn_mut()
+            .set_params(&V::from_vec(param.clone(), context));
         let mut solver = problem.bdf::<LS>().unwrap();
         let ys = match solver.solve_dense(&self.ts_data) {
             Ok(ys) => ys,
             Err(_) => return Ok(f64::MAX / 1000.),
         };
         let loss = ys
-            .inner().column_iter()
+            .inner()
+            .column_iter()
             .zip(self.ys_data.inner().column_iter())
             .map(|(a, b)| (a - b).norm_squared())
             .sum::<f64>();
@@ -51,7 +55,9 @@ impl Gradient for Problem {
     fn gradient(&self, param: &Self::Param) -> Result<Self::Gradient, argmin_math::Error> {
         let mut problem = self.problem.borrow_mut();
         let context = problem.eqn().context().clone();
-        problem.eqn_mut().set_params(&V::from_vec(param.clone(), context));
+        problem
+            .eqn_mut()
+            .set_params(&V::from_vec(param.clone(), context));
         let mut solver = problem.bdf::<LS>().unwrap();
         let (c, ys) = match solver.solve_dense_with_checkpointing(&self.ts_data, None) {
             Ok(ys) => ys,
@@ -64,7 +70,11 @@ impl Gradient for Problem {
         }
         let adjoint_solver = problem.bdf_solver_adjoint::<LS, _>(c, Some(1)).unwrap();
         match adjoint_solver.solve_adjoint_backwards_pass(self.ts_data.as_slice(), &[&g_m]) {
-            Ok(soln) => Ok(soln.as_ref().sg[0].inner().iter().copied().collect::<Vec<_>>()),
+            Ok(soln) => Ok(soln.as_ref().sg[0]
+                .inner()
+                .iter()
+                .copied()
+                .collect::<Vec<_>>()),
             Err(_) => Ok(vec![f64::MAX / 1000.; param.len()]),
         }
     }
