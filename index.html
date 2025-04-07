@@ -35,10 +35,11 @@
         <!-- MathJax -->
         <script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
 
-        <!-- Provide site root to javascript -->
+        <!-- Provide site root and default themes to javascript -->
         <script>
-            var path_to_root = "";
-            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+            const path_to_root = "";
+            const default_light_theme = "light";
+            const default_dark_theme = "navy";
         </script>
         <!-- Start loading toc.js asap -->
         <script src="toc.js"></script>
@@ -48,8 +49,8 @@
         <!-- Work around some values being stored in localStorage wrapped in quotes -->
         <script>
             try {
-                var theme = localStorage.getItem('mdbook-theme');
-                var sidebar = localStorage.getItem('mdbook-sidebar');
+                let theme = localStorage.getItem('mdbook-theme');
+                let sidebar = localStorage.getItem('mdbook-sidebar');
 
                 if (theme.startsWith('"') && theme.endsWith('"')) {
                     localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
@@ -63,7 +64,8 @@
 
         <!-- Set the theme before any content is loaded, prevents flash -->
         <script>
-            var theme;
+            const default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? default_dark_theme : default_light_theme;
+            let theme;
             try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
             if (theme === null || theme === undefined) { theme = default_theme; }
             const html = document.documentElement;
@@ -76,8 +78,8 @@
 
         <!-- Hide / unhide sidebar before it is displayed -->
         <script>
-            var sidebar = null;
-            var sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
+            let sidebar = null;
+            const sidebar_toggle = document.getElementById("sidebar-toggle-anchor");
             if (document.body.clientWidth >= 1080) {
                 try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
                 sidebar = sidebar || 'visible';
@@ -113,6 +115,7 @@
                             <i class="fa fa-paint-brush"></i>
                         </button>
                         <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="default_theme">Auto</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="light">Light</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
                             <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
@@ -161,48 +164,48 @@
 <p>The topics covered in this section are:</p>
 <ul>
 <li>
-<p><a href="./primer/first_order_odes.html">First Order ODEs</a>: First order ODEs are the simplest type of ODE. Any ODE system can be written as a set of first order ODEs, so libraries like DiffSol are designed such that the user provides their equations in this form.</p>
+<p><a href="./first_order_odes.html">First Order ODEs</a>: First order ODEs are the simplest type of ODE. Any ODE system can be written as a set of first order ODEs, so libraries like DiffSol are designed such that the user provides their equations in this form.</p>
 <ul>
-<li><a href="./primer/population_dynamics.html">Example: Population Dynamics</a>: A simple example of a first order ODE system, modelling the interaction of predator and prey populations.</li>
+<li><a href="./population_dynamics.html">Example: Population Dynamics</a>: A simple example of a first order ODE system, modelling the interaction of predator and prey populations.</li>
 </ul>
 </li>
 <li>
-<p><a href="./primer/higher_order_odes.html">Higher Order ODEs</a>: Higher order ODEs are equations that involve derivatives of order greater than one. These can be converted to a system of first order ODEs, which is the form that DiffSol expects.</p>
+<p><a href="./higher_order_odes.html">Higher Order ODEs</a>: Higher order ODEs are equations that involve derivatives of order greater than one. These can be converted to a system of first order ODEs, which is the form that DiffSol expects.</p>
 <ul>
-<li><a href="./primer/spring_mass_systems.html">Example: Spring-mass systems</a>: A simple example of a higher order ODE system, modelling the motion of a damped spring-mass system.</li>
+<li><a href="./spring_mass_systems.html">Example: Spring-mass systems</a>: A simple example of a higher order ODE system, modelling the motion of a damped spring-mass system.</li>
 </ul>
 </li>
 <li>
-<p><a href="./primer/discrete_events.html">Discrete Events</a>: Discrete events are events that occur at specific times or when the system is in a particular state, rather than continuously. These can be modelled by treating the events as changes in the ODE system's state. DiffSol provides an API to detect and handle these events.</p>
+<p><a href="./discrete_events.html">Discrete Events</a>: Discrete events are events that occur at specific times or when the system is in a particular state, rather than continuously. These can be modelled by treating the events as changes in the ODE system's state. DiffSol provides an API to detect and handle these events.</p>
 <ul>
-<li><a href="./primer/compartmental_models_of_drug_delivery.html">Example: Compartmental models of Drug Delivery</a>: Pharmacokinetic models describe how a drug is absorbed, distributed, metabolised, and excreted by the body. They are a common example of systems with discrete events, as the drug is often administered at discrete times.</li>
-<li><a href="./primer/bouncing_ball.html">Example: Bouncing Ball</a>: A simple example of a system where the discrete event occurs when the ball hits the ground, instead of at a specific time.</li>
+<li><a href="./compartmental_models_of_drug_delivery.html">Example: Compartmental models of Drug Delivery</a>: Pharmacokinetic models describe how a drug is absorbed, distributed, metabolised, and excreted by the body. They are a common example of systems with discrete events, as the drug is often administered at discrete times.</li>
+<li><a href="./bouncing_ball.html">Example: Bouncing Ball</a>: A simple example of a system where the discrete event occurs when the ball hits the ground, instead of at a specific time.</li>
 </ul>
 </li>
 <li>
-<p><a href="./primer/the_mass_matrix.html">DAEs via the Mass Matrix</a>: Differential Algebraic Equations (DAEs) are a generalisation of ODEs that include algebraic equations as well as differential equations. DiffSol can solve DAEs by treating them as ODEs with a mass matrix. This section explains how to use the mass matrix to solve DAEs.</p>
+<p><a href="./the_mass_matrix.html">DAEs via the Mass Matrix</a>: Differential Algebraic Equations (DAEs) are a generalisation of ODEs that include algebraic equations as well as differential equations. DiffSol can solve DAEs by treating them as ODEs with a mass matrix. This section explains how to use the mass matrix to solve DAEs.</p>
 <ul>
-<li><a href="./primer/electrical_circuits.html">Example: Electrical Circuits</a>: Electrical circuits are a common example of DAEs, here we will model a simple low-pass LRC filter circuit.</li>
+<li><a href="./electrical_circuits.html">Example: Electrical Circuits</a>: Electrical circuits are a common example of DAEs, here we will model a simple low-pass LRC filter circuit.</li>
 </ul>
 </li>
 <li>
-<p><a href="./primer/pdes.html">PDEs</a>: Partial Differential Equations (PDEs) are a generalisation of ODEs that involve derivatives with respect to more than one variable (e.g. a spatial variable). DiffSol can be used to solver PDEs using the method of lines, where the spatial derivatives are discretised to form a system of ODEs.</p>
+<p><a href="./pdes.html">PDEs</a>: Partial Differential Equations (PDEs) are a generalisation of ODEs that involve derivatives with respect to more than one variable (e.g. a spatial variable). DiffSol can be used to solver PDEs using the method of lines, where the spatial derivatives are discretised to form a system of ODEs.</p>
 <ul>
-<li><a href="./primer/heat_equation.html">Example: Heat Equation</a>: The heat equation describes how heat diffuses in a domain over time. We will solve the heat equation in a 1D domain with Dirichlet boundary conditions.</li>
-<li><a href="./primer/physics_based_battery_simulation.html">Example: Physics-based Battery Simulation</a>: A more complex example of a PDE system, modelling the charge and discharge of a lithium-ion battery. For this example we will use the PyBaMM library to form the ODE system, and DiffSol to solve it.</li>
+<li><a href="./heat_equation.html">Example: Heat Equation</a>: The heat equation describes how heat diffuses in a domain over time. We will solve the heat equation in a 1D domain with Dirichlet boundary conditions.</li>
+<li><a href="./physics_based_battery_simulation.html">Example: Physics-based Battery Simulation</a>: A more complex example of a PDE system, modelling the charge and discharge of a lithium-ion battery. For this example we will use the PyBaMM library to form the ODE system, and DiffSol to solve it.</li>
 </ul>
 </li>
 <li>
-<p><a href="./primer/forward_sensitivity_analysis.html">Forward Sensitivity Analysis</a>: Sensitivity analysis is a technique used to determine how the output of a model changes with respect to changes in the model parameters. Forward sensitivity analysis calculates the sensitivity of the model output with respect to the parameters by solving the ODE system and the sensitivity equations simultaneously.</p>
+<p><a href="./forward_sensitivity_analysis.html">Forward Sensitivity Analysis</a>: Sensitivity analysis is a technique used to determine how the output of a model changes with respect to changes in the model parameters. Forward sensitivity analysis calculates the sensitivity of the model output with respect to the parameters by solving the ODE system and the sensitivity equations simultaneously.</p>
 <ul>
-<li><a href="./primer/population_dynamics_fitting.html">Example: Fitting a predator-prey model to data</a>: An example of fitting a predator-prey model to synthetic data using forward sensitivity analysis.</li>
+<li><a href="./population_dynamics_fitting.html">Example: Fitting a predator-prey model to data</a>: An example of fitting a predator-prey model to synthetic data using forward sensitivity analysis.</li>
 </ul>
 </li>
 <li>
-<p><a href="./primer/backwards_sensitivity_analysis.html">Backwards Sensitivity Analysis</a>: Backwards sensitivity analysis calculates the sensitivity of a loss function with respect to the parameters by first solving the ODE system and then the adjoint equations backwards in time. This is useful if your model has a high number of parameters, as it can be more efficient than forward sensitivity analysis.</p>
+<p><a href="./backwards_sensitivity_analysis.html">Backwards Sensitivity Analysis</a>: Backwards sensitivity analysis calculates the sensitivity of a loss function with respect to the parameters by first solving the ODE system and then the adjoint equations backwards in time. This is useful if your model has a high number of parameters, as it can be more efficient than forward sensitivity analysis.</p>
 <ul>
-<li><a href="./primer/spring_mass_fitting.html">Example: Fitting a spring-mass model to data</a>: An example of fitting a spring-mass model to synthetic data using backwards sensitivity analysis.</li>
-<li><a href="./primer/weather_neural_ode.html">Example: Weather prediction using neural ODEs</a>: An example of fitting a neural ODE to weather data using backwards sensitivity analysis.</li>
+<li><a href="./spring_mass_fitting.html">Example: Fitting a spring-mass model to data</a>: An example of fitting a spring-mass model to synthetic data using backwards sensitivity analysis.</li>
+<li><a href="./weather_neural_ode.html">Example: Weather prediction using neural ODEs</a>: An example of fitting a neural ODE to weather data using backwards sensitivity analysis.</li>
 </ul>
 </li>
 </ul>
