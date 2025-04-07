@@ -754,7 +754,7 @@ where
         }
     }
 
-    #[allow(clippy::type_complexity)]
+    #[allow(clippy::type_complexity, clippy::too_many_arguments)]
     fn build_atols(
         atol: Vec<M::T>,
         sens_atol: Option<Vec<M::T>>,

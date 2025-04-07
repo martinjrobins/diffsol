@@ -1,5 +1,3 @@
-///! A set of macros to implement common operations for vectors
-///
 macro_rules! impl_vector_common {
     ($vec:ty, $con:ty, $in:ty) => {
         impl<T: Scalar> VectorCommon for $vec {

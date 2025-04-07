@@ -45,6 +45,7 @@ where
     H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         func: F,
         jacobian_action: G,

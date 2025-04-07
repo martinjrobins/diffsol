@@ -123,8 +123,7 @@ impl CudaContext {
             .unwrap_or_else(|e| {
                 panic!(
                     "Failed to load function {} from module diffsol. Error: {}",
-                    kernel_name,
-                    e.to_string()
+                    kernel_name, e
                 )
             })
     }

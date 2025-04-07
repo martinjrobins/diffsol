@@ -387,7 +387,7 @@ fn loss_fn(
     let mut loss = 0.0;
     for j in 0..g_m.ncols() {
         let delta = ys.column(j) - ys_data.column(j);
-        loss += delta.inner().dot(&delta.inner());
+        loss += delta.inner().dot(delta.inner());
         let g_m_i = delta * Scale(2.0);
         g_m.column_mut(j).copy_from(&g_m_i);
     }
@@ -428,7 +428,7 @@ fn train_one_round(
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // load data
-    let ctx = NalgebraContext::default();
+    let ctx = NalgebraContext;
     let file = File::open(format!("{}{}", BASE_DATA_DIR, "MonthlyDelhiClimate.csv"))?;
     let mut reader = ReaderBuilder::new().has_headers(true).from_reader(file);
     let nrows = reader.records().count();
