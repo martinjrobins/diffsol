@@ -114,6 +114,8 @@ pub enum MatrixError {
 pub enum CudaError {
     #[error("Failed to allocate memory on GPU")]
     CudaMemoryAllocationError,
+    #[error("Failed to initialize CUDA: {0}")]
+    CudaInitializationError(String),
     #[error("Cuda error: {0}")]
     Other(String),
 }

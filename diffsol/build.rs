@@ -195,8 +195,6 @@ fn cuda_main() -> Result<(), String> {
     use std::{env, path::PathBuf, process::Command};
     let kernel_dir = "src/cuda_kernels";
     println!("cargo:rerun-if-changed={}", kernel_dir);
-    let kernels = ["vec_mul_scalar.cu"];
-
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     // Specify the desired architecture version.
@@ -205,18 +203,16 @@ fn cuda_main() -> Result<(), String> {
 
     // build the cuda kernels
     let ptx_file = out_dir.join("diffsol.ptx");
+    let input_file = PathBuf::from(kernel_dir).join("all.cu");
 
     let mut nvcc_call = Command::new("nvcc");
     nvcc_call
         .arg("-ptx")
+        .arg(&input_file)
         .arg("-o")
         .arg(&ptx_file)
         .arg(format!("-arch={}", arch))
         .arg(format!("-code={}", code));
-    for kernel in kernels.iter() {
-        let cuda_src = PathBuf::from(kernel_dir).join(kernel);
-        nvcc_call.arg(cuda_src);
-    }
     let nvcc_status = nvcc_call.status().unwrap();
 
     assert!(
@@ -227,6 +223,8 @@ fn cuda_main() -> Result<(), String> {
 }
 
 fn main() -> Result<(), String> {
+    println!("cargo:rerun-if-changed=build.rs");
+
     #[cfg(feature = "cuda")]
     cuda_main()?;
 
@@ -249,7 +247,6 @@ fn main() -> Result<(), String> {
         // compile sundials benches
         let mut files = compile_benches(&sundials, &suitesparse);
         files.push("benches/sundials_benches.rs".to_string());
-        files.push("build.rs".to_string());
         files.push("benches/idaHeat2d_klu_v5.c".to_string());
         files.push("benches/idaHeat2d_klu_v6.c".to_string());
         files.push("benches/idaFoodWeb_bnd_v5.c".to_string());

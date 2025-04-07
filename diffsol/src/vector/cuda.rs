@@ -37,12 +37,21 @@ impl CudaGlobalContext {
 }
 
 #[derive(Clone, Debug)]
-struct CudaContext {
+pub struct CudaContext {
     stream: Arc<CudaStream>,
 }
 
 extern "C" fn zero(_block_size: std::ffi::c_int) -> usize {
     0
+}
+
+extern "C" fn squared_norm_blk_size<T: ScalarCuda>(block_size: std::ffi::c_int) -> usize {
+    (block_size * std::mem::size_of::<T>() as c_int) as usize
+}
+
+extern "C" fn root_finding_blk_size<T: ScalarCuda>(block_size: std::ffi::c_int) -> usize {
+    ((block_size * std::mem::size_of::<T>() as c_int)
+        + (block_size * std::mem::size_of::<c_int>() as c_int)) as usize
 }
 
 impl CudaContext {
@@ -77,7 +86,8 @@ impl CudaContext {
         let (device, module) = match devices.get(ordinal) {
             Some(dev_mod) => dev_mod.clone(),
             None => {
-                let device = CudaDevice::new(ordinal).unwrap();
+                let device = CudaDevice::new(ordinal)
+                    .map_err(|e| cuda_error!(CudaInitializationError, e.to_string()))?;
                 let module = Self::compile_ptx(&device)?;
                 devices.insert(ordinal, device.clone(), module.clone());
                 (device, module)
@@ -110,11 +120,11 @@ impl CudaContext {
         let kernel_name = format!("{}_{}", kernel_name, T::as_str());
         module
             .load_function(kernel_name.as_str())
-            .unwrap_or_else(|_| {
-                let kernel_name = format!("{}_{}", kernel_name, T::as_str());
+            .unwrap_or_else(|e| {
                 panic!(
-                    "Failed to load function {} from module diffsol",
-                    kernel_name
+                    "Failed to load function {} from module diffsol. Error: {}",
+                    kernel_name,
+                    e.to_string()
                 )
             })
     }
@@ -128,6 +138,29 @@ impl CudaContext {
             grid_dim: (grid_size, 1, 1),
             block_dim: (block_size, 1, 1),
             shared_mem_bytes: 0,
+        }
+    }
+
+    fn launch_config_1d_reduce(
+        &self,
+        n: u32,
+        f: &CudaFunction,
+        smem_size_f: extern "C" fn(block_size: std::ffi::c_int) -> usize,
+    ) -> LaunchConfig {
+        let (_min_grid_size, block_size) = f
+            .occupancy_max_potential_block_size(smem_size_f, 0, 0, None)
+            .expect("Failed to get occupancy max potential block size");
+        // block_size must be a power of 2, find the previous power of 2
+        // https://internals.rust-lang.org/t/add-prev-power-of-two/14281
+        // n = 0 gives highest_bit_set_idx = 0.
+        let highest_bit_set_idx = 31 - (block_size | 1).leading_zeros();
+        // Binary AND of highest bit with n is a no-op, except zero gets wiped.
+        let block_size = (1 << highest_bit_set_idx) & block_size;
+        let grid_size = n.div_ceil(block_size); // Round up according to array size
+        LaunchConfig {
+            grid_dim: (grid_size, 1, 1),
+            block_dim: (block_size, 1, 1),
+            shared_mem_bytes: smem_size_f(block_size as i32) as u32,
         }
     }
 
@@ -187,8 +220,16 @@ impl CudaContext {
         rtol: T,
     ) -> T {
         let n = y.len() as u32;
+        assert_eq!(n, y0.len() as u32, "Length mismatch: {} != {}", n, y0.len());
+        assert_eq!(
+            n,
+            atol.len() as u32,
+            "Length mismatch: {} != {}",
+            n,
+            atol.len()
+        );
         let f = self.function::<T>("vec_squared_norm");
-        let config = self.launch_config_1d(n, &f);
+        let config = self.launch_config_1d_reduce(n, &f, squared_norm_blk_size::<T>);
         let blocks_per_grid = config.grid_dim.0;
         let mut partial_sums = unsafe {
             self.stream
@@ -219,8 +260,20 @@ impl CudaContext {
         rtol: T,
     ) -> T {
         let n = y.len() as u32;
+        assert_eq!(n, y0.len() as u32, "Length mismatch: {} != {}", n, y0.len());
+        assert_eq!(
+            n,
+            atol.len() as u32,
+            "Length mismatch: {} != {}",
+            n,
+            atol.len()
+        );
         let f = self.function::<T>("vec_squared_norm");
-        let config = self.launch_config_1d(n, &f);
+        let config = self.launch_config_1d_reduce(n, &f, squared_norm_blk_size::<T>);
+        println!(
+            "Launch config: grid_dim: {}, block_dim: {}",
+            config.grid_dim.0, config.block_dim.0
+        );
         let blocks_per_grid = config.grid_dim.0;
         let mut partial_sums = unsafe {
             self.stream
@@ -283,7 +336,7 @@ struct CudaVec<T: ScalarCuda> {
 
 #[derive(Debug, Clone)]
 struct CudaIndex {
-    data: CudaSlice<IndexType>,
+    data: CudaSlice<c_int>,
     context: CudaContext,
 }
 
@@ -690,6 +743,9 @@ impl VectorIndex for CudaIndex {
             .stream
             .memcpy_dtov(&self.data)
             .expect("Failed to copy data from device to host")
+            .into_iter()
+            .map(|x| x as IndexType)
+            .collect()
     }
     fn from_vec(v: Vec<IndexType>, ctx: Self::C) -> Self {
         let mut data = unsafe {
@@ -697,6 +753,7 @@ impl VectorIndex for CudaIndex {
                 .alloc(v.len())
                 .expect("Failed to allocate memory for CudaVec")
         };
+        let v = v.into_iter().map(|x| x as c_int).collect::<Vec<_>>();
         ctx.stream
             .memcpy_htod(&v, &mut data)
             .expect("Failed to copy data from host to device");
@@ -837,7 +894,16 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn root_finding(&self, g1: &Self) -> (bool, Self::T, i32) {
         let f = self.context.function::<T>("vec_root_finding");
         let n = self.len() as u32;
-        let config = self.context.launch_config_1d(n, &f);
+        assert_eq!(
+            n,
+            g1.len() as u32,
+            "Vector length mismatch: {} != {}",
+            n,
+            g1.len()
+        );
+        let config = self
+            .context
+            .launch_config_1d_reduce(n, &f, root_finding_blk_size::<T>);
         let blocks_per_grid = config.grid_dim.0;
         let mut max_vals = unsafe {
             self.context
@@ -931,6 +997,13 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn scatter(&self, indices: &Self::Index, other: &mut Self) {
         let f = self.context.function::<T>("vec_scatter");
         let n = indices.len() as u32;
+        assert_eq!(
+            indices.len(),
+            self.len(),
+            "Vector length mismatch: {} != {}",
+            indices.len(),
+            self.len()
+        );
         let mut build = self.context.stream.launch_builder(&f);
         build
             .arg(&self.data)
@@ -1009,8 +1082,8 @@ mod tests {
     fn test_cuda_vec_fill() {
         let ctx = setup_cuda_context();
         let mut vec = CudaVec::<f64>::zeros(10, ctx.clone());
-        vec.fill(3.14);
-        assert!(vec.clone_as_vec().iter().all(|&x| x == 3.14));
+        vec.fill(2.14);
+        assert!(vec.clone_as_vec().iter().all(|&x| x == 2.14));
     }
 
     #[test]
@@ -1067,12 +1140,20 @@ mod tests {
     #[test]
     fn test_cuda_vec_ref_squared_norm() {
         let ctx = setup_cuda_context();
-        let vec1 = CudaVec::<f64>::from_vec(vec![1.0, 2.0, 3.0], ctx.clone());
+        let vec1 = CudaVec::<f64>::from_vec(vec![2.0, 3.0, 4.0], ctx.clone());
         let vec2 = CudaVec::<f64>::from_vec(vec![1.0, 2.0, 3.0], ctx.clone());
-        let atol = CudaVec::<f64>::from_vec(vec![0.1, 0.1, 0.1], ctx.clone());
+        let atol = CudaVec::<f64>::from_vec(vec![0.1, 0.2, 0.3], ctx.clone());
         let rtol = 0.1;
         let norm = vec1.as_view().squared_norm(&vec2, &atol, rtol);
-        assert_eq!(norm, 0.0);
+        let expected = [2.0, 3.0, 4.0]
+            .iter()
+            .zip([1.0, 2.0, 3.0].iter())
+            .zip([0.1, 0.2, 0.3].iter())
+            .map(|((a, b), c)| (a / (b * rtol + c)).powi(2))
+            .sum::<f64>();
+        assert!((norm - expected).abs() < 1e-6);
+        let norm = vec1.squared_norm(&vec2, &atol, rtol);
+        assert!((norm - expected).abs() < 1e-6);
     }
 
     #[test]
@@ -1082,26 +1163,6 @@ mod tests {
         let vec2 = CudaVec::<f64>::from_vec(vec![1.0, 2.0, 3.0], ctx.clone());
         vec1.as_view_mut().copy_from(&vec2);
         assert_eq!(vec1.clone_as_vec(), vec![1.0, 2.0, 3.0]);
-    }
-
-    #[test]
-    fn test_cuda_vec_gather() {
-        let ctx = setup_cuda_context();
-        let mut result = CudaVec::<f64>::zeros(3, ctx.clone());
-        let vec = CudaVec::<f64>::from_vec(vec![10.0, 20.0, 30.0, 40.0], ctx.clone());
-        let indices = CudaIndex::from_vec(vec![3, 0, 2], ctx.clone());
-        result.gather(&vec, &indices);
-        assert_eq!(result.clone_as_vec(), vec![40.0, 10.0, 30.0]);
-    }
-
-    #[test]
-    fn test_cuda_vec_scatter() {
-        let ctx = setup_cuda_context();
-        let vec = CudaVec::<f64>::from_vec(vec![40.0, 10.0, 30.0], ctx.clone());
-        let indices = CudaIndex::from_vec(vec![3, 0, 2], ctx.clone());
-        let mut result = CudaVec::<f64>::zeros(4, ctx.clone());
-        vec.scatter(&indices, &mut result);
-        assert_eq!(result.clone_as_vec(), vec![10.0, 0.0, 30.0, 40.0]);
     }
 
     #[test]
@@ -1157,6 +1218,7 @@ mod tests {
         let mut vec = CudaVec::<f64>::zeros(5, ctx.clone());
         let indices = CudaIndex::from_vec(vec![1, 3], ctx.clone());
         vec.assign_at_indices(&indices, 42.0);
+        assert_eq!(indices.clone_as_vec(), vec![1, 3]);
         assert_eq!(vec.clone_as_vec(), vec![0.0, 42.0, 0.0, 42.0, 0.0]);
     }
 

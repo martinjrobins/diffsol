@@ -1,6 +1,14 @@
 #include <cuda_runtime.h>
 #include <math.h>
 
+// CUDA kernel to compute the squared norm of a vector
+// using a relative and absolute tolerance
+// The squared norm is computed as:
+// sum_i (y_i / (|y0_i| * rel_tol + abs_tol_i))^2
+// where y0 is the reference vector, abs_tol is the absolute tolerance vector,
+// and rel_tol is the relative tolerance scalar.
+// The result is stored in the partial_sums array, which is assumed to be large enough
+// to hold the results of all blocks.
 __global__
 void vec_squared_norm_f64(const double* __restrict__ y,
                           const double* __restrict__ y0,

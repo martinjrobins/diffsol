@@ -10,7 +10,6 @@ void vec_assign_at_indices_f64(double* self,
 
     // Grid-stride loop for flexibility
     for (int i = idx; i < n; i += blockDim.x * gridDim.x) {
-        int target_idx = indices[i];
-        self[target_idx] = value;
+        self[indices[i]] = value;
     }
 }
