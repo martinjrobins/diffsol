@@ -37,31 +37,31 @@ Finally, we can export all four of these JAX functions to ONNX, which will allow
 Within rust now, we can define a DiffSol system of equations by creating a struct `NeuralOde`. We'll use the [`ort`](https://ort.pyke.io/) crate and the ONNX Runtime to load the ONNX models that we made in Python.
 
 ```rust,ignore
-{{#include ../../../examples/neural-ode-weather-prediction/src/main.rs:31:83}}
+{{#include ../../../examples/neural-ode-weather-prediction/src/main.rs:33:85}}
 ```
 
 We'll also implement the `OdeSystemAdjoint` trait for `NeuralOde`, which will allow us to use the adjoint method to calculate gradients of out loss function with respect to the parameters of the neural network. As an example, here is the implementation of the `NonLinearOp` trait:
 
 ```rust,ignore
-{{#include ../../../examples/neural-ode-weather-prediction/src/main.rs:181:204}}
+{{#include ../../../examples/neural-ode-weather-prediction/src/main.rs:196:220}}
 ```
 
 We'll also need an optimiser, so we'll write an AdamW algorithm using the definition in the [PyTorch documentation](https://pytorch.org/docs/stable/generated/torch.optim.AdamW.html) as a guide:
 
 ```rust,ignore
-{{#include ../../../examples/neural-ode-weather-prediction/src/main.rs:311:353}}
+{{#include ../../../examples/neural-ode-weather-prediction/src/main.rs:318:374}}
 ```
 
 We'll then define our loss function, which will return the sum of squared errors between the solution and the data points, along with the gradients of the loss function with respect to the parameters. Since the size of the parameter vector is quite large (>2000), we'll use the adjoint method to calculate the gradients.
 
 ```rust,ignore
-{{#include ../../../examples/neural-ode-weather-prediction/src/main.rs:355:376}}
+{{#include ../../../examples/neural-ode-weather-prediction/src/main.rs:376:397}}
 ```
 
 Finally, we can train the neural network to predict the weather. Following the example given in the linked blog post above, we'll train in stages by increasing the number of datapoints by four each time. Each time we'll train for 150 steps using the AdamW optimiser.
 
 ```rust,ignore
-{{#include ../../../examples/neural-ode-weather-prediction/src/main.rs:387:406}}
+{{#include ../../../examples/neural-ode-weather-prediction/src/main.rs:408:427}}
 ```
 
 To give an indication of the results, we'll plot the results after we've used the first 20 data-points to train the model, and we'll predict the model solution to the entire dataset.
