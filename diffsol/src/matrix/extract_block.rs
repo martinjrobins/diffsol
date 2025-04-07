@@ -140,14 +140,19 @@ impl<I: VectorIndex> ColMajBlock<I> {
         }
     }
 
-    fn src_indices(nrows: IndexType, row_indices: &[IndexType], col_indices: &[IndexType]) -> I {
+    fn src_indices(
+        nrows: IndexType,
+        row_indices: &[IndexType],
+        col_indices: &[IndexType],
+        ctx: I::C,
+    ) -> I {
         let mut src_indices = Vec::new();
         for &j in col_indices {
             for &i in row_indices {
                 src_indices.push(j * nrows + i);
             }
         }
-        I::from_vec(src_indices)
+        I::from_vec(src_indices, ctx)
     }
 
     /// split a square csc matrix into four blocks based on a predicate
@@ -162,9 +167,9 @@ impl<I: VectorIndex> ColMajBlock<I> {
             panic!("Matrix must be square");
         }
         let n = nrows;
-        let indices = indices.clone_as_vec();
+        let all_indices = indices.clone_as_vec();
         let mut cat = vec![false; n];
-        indices.iter().for_each(|&i| cat[i] = true);
+        all_indices.iter().for_each(|&i| cat[i] = true);
 
         let mut upper_indices = Vec::new();
         let mut lower_indices = Vec::new();
@@ -181,22 +186,42 @@ impl<I: VectorIndex> ColMajBlock<I> {
         let ul = Self::new(
             n_up,
             n_up,
-            Self::src_indices(nrows, &upper_indices, &upper_indices),
+            Self::src_indices(
+                nrows,
+                &upper_indices,
+                &upper_indices,
+                indices.context().clone(),
+            ),
         );
         let ur = Self::new(
             n_up,
             n_low,
-            Self::src_indices(nrows, &upper_indices, &lower_indices),
+            Self::src_indices(
+                nrows,
+                &upper_indices,
+                &lower_indices,
+                indices.context().clone(),
+            ),
         );
         let ll = Self::new(
             n_low,
             n_up,
-            Self::src_indices(nrows, &lower_indices, &upper_indices),
+            Self::src_indices(
+                nrows,
+                &lower_indices,
+                &upper_indices,
+                indices.context().clone(),
+            ),
         );
         let lr = Self::new(
             n_low,
             n_low,
-            Self::src_indices(nrows, &lower_indices, &lower_indices),
+            Self::src_indices(
+                nrows,
+                &lower_indices,
+                &lower_indices,
+                indices.context().clone(),
+            ),
         );
         (ul, ur, ll, lr)
     }
@@ -259,33 +284,27 @@ where
         let jj = lower_indices_short[j];
         triplets.push((ii, jj, v));
     }
-    M::try_from_triplets(n, m, triplets).unwrap()
+    M::try_from_triplets(n, m, triplets, ul.context().clone()).unwrap()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SparseColMat, Vector};
-    use faer::Mat;
+    use crate::{FaerMat, FaerSparseMat, NalgebraMat, Vector};
 
     #[test]
     fn test_split_combine_faer_sparse() {
-        test_split_combine::<SparseColMat<f64>>();
+        test_split_combine::<FaerSparseMat<f64>>();
     }
 
     #[test]
     fn test_split_combine_faer_dense() {
-        test_split_combine::<Mat<f64>>();
+        test_split_combine::<FaerMat<f64>>();
     }
 
     #[test]
     fn test_split_combine_nalgebra_dense() {
-        test_split_combine::<nalgebra::DMatrix<f64>>();
-    }
-
-    #[test]
-    fn test_split_combine_nalgebra_sparse() {
-        test_split_combine::<nalgebra_sparse::CscMatrix<f64>>();
+        test_split_combine::<NalgebraMat<f64>>();
     }
 
     fn test_split_combine<M: Matrix>() {
@@ -311,8 +330,8 @@ mod tests {
             .iter()
             .map(|(i, j, v)| (*i, *j, M::T::from(*v)))
             .collect::<Vec<_>>();
-        let m = M::try_from_triplets(4, 4, triplets.clone()).unwrap();
-        let indices = <M::V as Vector>::Index::from_vec(vec![0, 2]);
+        let m = M::try_from_triplets(4, 4, triplets.clone(), Default::default()).unwrap();
+        let indices = <M::V as Vector>::Index::from_vec(vec![0, 2], Default::default());
 
         let [(ul, _ul_idx), (ur, _ur_idx), (ll, _ll_idx), (lr, _lr_idx)] = m.split(&indices);
         let ul_triplets = [(0, 0, 6.0), (1, 0, 14.0), (0, 1, 8.0), (1, 1, 16.0)];
@@ -368,7 +387,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
 
-        let indices = <M::V as Vector>::Index::from_vec(vec![2]);
+        let indices = <M::V as Vector>::Index::from_vec(vec![2], Default::default());
 
         let [(ul, _ul_idx), (ur, _ur_idx), (ll, _ll_idx), (lr, _lr_idx)] = m.split(&indices);
         let ul_triplets = [

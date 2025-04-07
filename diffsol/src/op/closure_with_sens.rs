@@ -22,6 +22,7 @@ where
     sparsity: Option<M::Sparsity>,
     sens_sparsity: Option<M::Sparsity>,
     statistics: RefCell<OpStatistics>,
+    ctx: M::C,
 }
 
 impl<M, F, G, H> ClosureWithSens<M, F, G, H>
@@ -38,6 +39,7 @@ where
         nstates: usize,
         nparams: usize,
         nout: usize,
+        ctx: M::C,
     ) -> Self {
         Self {
             func,
@@ -51,6 +53,7 @@ where
             sparsity: None,
             sens_coloring: None,
             sens_sparsity: None,
+            ctx,
         }
     }
 
@@ -64,6 +67,7 @@ where
         self.coloring = Some(JacobianColoring::new(
             self.sparsity.as_ref().unwrap(),
             &non_zeros,
+            self.ctx.clone(),
         ));
     }
     pub fn calculate_sens_sparsity(&mut self, y0: &M::V, t0: M::T, p: &M::V) {
@@ -77,6 +81,7 @@ where
         self.sens_coloring = Some(JacobianColoring::new(
             self.sens_sparsity.as_ref().unwrap(),
             &non_zeros,
+            self.ctx.clone(),
         ));
     }
 }
@@ -111,6 +116,7 @@ where
     type V = M::V;
     type T = M::T;
     type M = M;
+    type C = M::C;
     fn nstates(&self) -> usize {
         self.nstates
     }
@@ -122,6 +128,9 @@ where
     }
     fn statistics(&self) -> OpStatistics {
         self.statistics.borrow().clone()
+    }
+    fn context(&self) -> &Self::C {
+        &self.ctx
     }
 }
 

@@ -47,6 +47,11 @@ impl<T: Scalar> From<Scale<T>> for faer::Scale<T> {
         faer::Scale(s.value())
     }
 }
+impl<T: Scalar> From<T> for Scale<T> {
+    fn from(s: T) -> Self {
+        Scale(s)
+    }
+}
 
 #[derive(Copy, Clone, Debug)]
 pub struct Scale<E: Scalar>(pub E);

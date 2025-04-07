@@ -34,6 +34,7 @@ where
     sens_sparsity: Option<M::Sparsity>,
     coloring_sens_adjoint: Option<JacobianColoring<M>>,
     statistics: RefCell<OpStatistics>,
+    ctx: M::C,
 }
 
 impl<M, F, G, H, I> ClosureWithAdjoint<M, F, G, H, I>
@@ -44,6 +45,7 @@ where
     H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         func: F,
         jacobian_action: G,
@@ -52,6 +54,7 @@ where
         nstates: usize,
         nout: usize,
         nparams: usize,
+        ctx: M::C,
     ) -> Self {
         Self {
             func,
@@ -68,6 +71,7 @@ where
             coloring_adjoint: None,
             sens_sparsity: None,
             coloring_sens_adjoint: None,
+            ctx,
         }
     }
 
@@ -81,6 +85,7 @@ where
         self.coloring = Some(JacobianColoring::new(
             self.sparsity.as_ref().unwrap(),
             &non_zeros,
+            self.ctx.clone(),
         ));
     }
 
@@ -94,6 +99,7 @@ where
         self.coloring_adjoint = Some(JacobianColoring::new(
             self.sparsity_adjoint.as_ref().unwrap(),
             &non_zeros,
+            self.ctx.clone(),
         ));
     }
 
@@ -108,6 +114,7 @@ where
         self.coloring_sens_adjoint = Some(JacobianColoring::new(
             self.sens_sparsity.as_ref().unwrap(),
             &non_zeros,
+            self.ctx.clone(),
         ));
     }
 }
@@ -123,6 +130,7 @@ where
     type V = M::V;
     type T = M::T;
     type M = M;
+    type C = M::C;
     fn nstates(&self) -> usize {
         self.nstates
     }
@@ -134,6 +142,9 @@ where
     }
     fn statistics(&self) -> OpStatistics {
         self.statistics.borrow().clone()
+    }
+    fn context(&self) -> &Self::C {
+        &self.ctx
     }
 }
 

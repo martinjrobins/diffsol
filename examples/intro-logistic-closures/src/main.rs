@@ -1,8 +1,7 @@
 use diffsol::OdeBuilder;
 use diffsol::{BdfState, OdeSolverState, SdirkState, Tableau};
-use diffsol::{NalgebraLU, OdeSolverMethod, OdeSolverStopReason};
-use nalgebra::DVector;
-type M = nalgebra::DMatrix<f64>;
+use diffsol::{NalgebraLU, NalgebraMat, OdeSolverMethod, OdeSolverStopReason, Vector};
+type M = NalgebraMat<f64>;
 type LS = NalgebraLU<f64>;
 
 fn main() {
@@ -15,7 +14,7 @@ fn main() {
             |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
             |x, p, _t, v, y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
         )
-        .init(|_p, _t| DVector::from_element(1, 0.1))
+        .init(|_p, _t, y| y.fill(0.1), 1)
         .build()
         .unwrap();
 
@@ -33,7 +32,7 @@ fn main() {
     let _solver = problem.bdf_solver::<LS>(state);
 
     // Create a SDIRK solver with a pre-defined tableau
-    let tableau = Tableau::<M>::tr_bdf2();
+    let tableau = Tableau::<M>::tr_bdf2(problem.context().clone());
     let state = problem.sdirk_state::<LS, _>(&tableau).unwrap();
     let _solver = problem.sdirk_solver::<LS, _>(state, tableau);
 

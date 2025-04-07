@@ -3,14 +3,13 @@ use crate::{
     linear_solver::LinearSolver,
     linear_solver_error,
     scalar::IndexType,
-    Matrix, NonLinearOpJacobian, Scalar, SparseColMat,
+    FaerContext, FaerSparseMat, FaerVec, Matrix, NonLinearOpJacobian, Scalar,
 };
 
 use faer::{
     linalg::solvers::Solve,
     reborrow::Reborrow,
     sparse::linalg::{solvers::Lu, solvers::SymbolicLu},
-    Col,
 };
 
 /// A [LinearSolver] that uses the LU decomposition in the [`faer`](https://github.com/sarah-ek/faer-rs) library to solve the linear system.
@@ -20,7 +19,7 @@ where
 {
     lu: Option<Lu<IndexType, T>>,
     lu_symbolic: Option<SymbolicLu<IndexType>>,
-    matrix: Option<SparseColMat<T>>,
+    matrix: Option<FaerSparseMat<T>>,
 }
 
 impl<T> Default for FaerSparseLU<T>
@@ -36,43 +35,43 @@ where
     }
 }
 
-impl<T: Scalar> LinearSolver<SparseColMat<T>> for FaerSparseLU<T> {
-    fn set_linearisation<C: NonLinearOpJacobian<T = T, V = Col<T>, M = SparseColMat<T>>>(
+impl<T: Scalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
+    fn set_linearisation<C: NonLinearOpJacobian<T = T, V = FaerVec<T>, M = FaerSparseMat<T>>>(
         &mut self,
         op: &C,
-        x: &Col<T>,
+        x: &FaerVec<T>,
         t: T,
     ) {
         let matrix = self.matrix.as_mut().expect("Matrix not set");
         op.jacobian_inplace(x, t, matrix);
         self.lu = Some(
-            Lu::try_new_with_symbolic(
-                self.lu_symbolic.as_ref().unwrap().clone(),
-                matrix.faer().rb(),
-            )
-            .expect("Failed to factorise matrix"),
+            Lu::try_new_with_symbolic(self.lu_symbolic.as_ref().unwrap().clone(), matrix.data.rb())
+                .expect("Failed to factorise matrix"),
         )
     }
 
-    fn solve_in_place(&self, x: &mut Col<T>) -> Result<(), DiffsolError> {
+    fn solve_in_place(&self, x: &mut FaerVec<T>) -> Result<(), DiffsolError> {
         if self.lu.is_none() {
             return Err(linear_solver_error!(LuNotInitialized))?;
         }
         let lu = self.lu.as_ref().unwrap();
-        lu.solve_in_place(x);
+        lu.solve_in_place(&mut x.data);
         Ok(())
     }
 
-    fn set_problem<C: NonLinearOpJacobian<T = T, V = Col<T>, M = SparseColMat<T>>>(
+    fn set_problem<
+        C: NonLinearOpJacobian<T = T, V = FaerVec<T>, M = FaerSparseMat<T>, C = FaerContext>,
+    >(
         &mut self,
         op: &C,
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();
-        let matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity());
+        let matrix =
+            C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), op.context().clone());
         self.matrix = Some(matrix);
         self.lu_symbolic = Some(
-            SymbolicLu::try_new(self.matrix.as_ref().unwrap().faer().symbolic())
+            SymbolicLu::try_new(self.matrix.as_ref().unwrap().data.symbolic())
                 .expect("Failed to create symbolic LU"),
         );
     }

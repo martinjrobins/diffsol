@@ -23,7 +23,12 @@ where
     pub fn new(eqn: &'a Eqn) -> Self {
         let nstates = eqn.rhs().nstates();
         let nparams = eqn.rhs().nparams();
-        let init_sens = Eqn::M::new_from_sparsity(nstates, nparams, eqn.init().sens_sparsity());
+        let init_sens = Eqn::M::new_from_sparsity(
+            nstates,
+            nparams,
+            eqn.init().sens_sparsity(),
+            eqn.context().clone(),
+        );
         let index = 0;
         Self {
             eqn,
@@ -46,6 +51,7 @@ where
     type T = Eqn::T;
     type V = Eqn::V;
     type M = Eqn::M;
+    type C = Eqn::C;
 
     fn nstates(&self) -> usize {
         self.eqn.rhs().nstates()
@@ -55,6 +61,9 @@ where
     }
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
+    }
+    fn context(&self) -> &Self::C {
+        self.eqn.context()
     }
 }
 
@@ -99,8 +108,8 @@ where
         if !allocate {
             return Self {
                 eqn,
-                sens: RefCell::new(<Eqn::M as Matrix>::zeros(0, 0)),
-                y: RefCell::new(<Eqn::V as Vector>::zeros(0)),
+                sens: RefCell::new(<Eqn::M as Matrix>::zeros(0, 0, eqn.context().clone())),
+                y: RefCell::new(<Eqn::V as Vector>::zeros(0, eqn.context().clone())),
                 index: RefCell::new(0),
             };
         }
@@ -110,8 +119,9 @@ where
             nstates,
             nparams,
             eqn.rhs().sens_sparsity().map(|s| s.to_owned()),
+            eqn.context().clone(),
         );
-        let y = RefCell::new(<Eqn::V as Vector>::zeros(nstates));
+        let y = RefCell::new(<Eqn::V as Vector>::zeros(nstates, eqn.context().clone()));
         let index = RefCell::new(0);
         Self {
             eqn,
@@ -140,6 +150,7 @@ where
     type T = Eqn::T;
     type V = Eqn::V;
     type M = Eqn::M;
+    type C = Eqn::C;
 
     fn nstates(&self) -> usize {
         self.eqn.rhs().nstates()
@@ -149,6 +160,9 @@ where
     }
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
+    }
+    fn context(&self) -> &Self::C {
+        self.eqn.context()
     }
 }
 
@@ -256,6 +270,7 @@ where
     type T = Eqn::T;
     type V = Eqn::V;
     type M = Eqn::M;
+    type C = Eqn::C;
 
     fn nstates(&self) -> usize {
         self.eqn.rhs().nstates()
@@ -265,6 +280,9 @@ where
     }
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
+    }
+    fn context(&self) -> &Self::C {
+        self.eqn.context()
     }
 }
 
@@ -347,15 +365,17 @@ impl<Eqn: OdeEquationsSens> AugmentedOdeEquations<Eqn> for SensEquations<'_, Eqn
 #[cfg(test)]
 mod tests {
     use crate::{
+        matrix::dense_nalgebra_serial::NalgebraMat,
         ode_solver::test_models::{
             exponential_decay::exponential_decay_problem_sens,
             exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
             robertson::robertson_sens,
         },
-        AugmentedOdeEquations, NonLinearOp, SdirkState, SensEquations, Vector,
+        AugmentedOdeEquations, DenseMatrix, MatrixCommon, NalgebraVec, NonLinearOp, SdirkState,
+        SensEquations, Vector,
     };
-    type Mcpu = nalgebra::DMatrix<f64>;
-    type Vcpu = nalgebra::DVector<f64>;
+    type Mcpu = NalgebraMat<f64>;
+    type Vcpu = NalgebraVec<f64>;
 
     #[test]
     fn test_rhs_exponential() {
@@ -364,10 +384,10 @@ mod tests {
         let mut sens_eqn = SensEquations::new(&problem);
         let state = SdirkState {
             t: 0.0,
-            y: Vcpu::from_vec(vec![1.0, 1.0]),
-            dy: Vcpu::from_vec(vec![1.0, 1.0]),
-            g: Vcpu::zeros(0),
-            dg: Vcpu::zeros(0),
+            y: Vcpu::from_vec(vec![1.0, 1.0], problem.context().clone()),
+            dy: Vcpu::from_vec(vec![1.0, 1.0], problem.context().clone()),
+            g: Vcpu::zeros(0, problem.context().clone()),
+            dg: Vcpu::zeros(0, problem.context().clone()),
             sg: Vec::new(),
             dsg: Vec::new(),
             s: Vec::new(),
@@ -383,8 +403,8 @@ mod tests {
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 2);
         assert_eq!(sens.ncols(), 2);
-        assert_eq!(sens[(0, 0)], -1.0);
-        assert_eq!(sens[(1, 0)], -1.0);
+        assert_eq!(sens.get_index(0, 0), -1.0);
+        assert_eq!(sens.get_index(1, 0), -1.0);
 
         // F(s, t)_i = J * s_i + S_i
         // J = |-a 0|
@@ -392,9 +412,9 @@ mod tests {
         // F(s, t)_0 = |-a 0| |1| + |-1.0| = |-1.1|
         //             |0 -a| |2|   |-1.0|   |-1.2|
         sens_eqn.rhs.set_param_index(0);
-        let s = Vcpu::from_vec(vec![1.0, 2.0]);
+        let s = Vcpu::from_vec(vec![1.0, 2.0], problem.context().clone());
         let f = sens_eqn.rhs.call(&s, state.t);
-        let f_expect = Vcpu::from_vec(vec![-1.1, -1.2]);
+        let f_expect = Vcpu::from_vec(vec![-1.1, -1.2], problem.context().clone());
         f.assert_eq_st(&f_expect, 1e-10);
     }
 
@@ -404,10 +424,10 @@ mod tests {
         let mut sens_eqn = SensEquations::new(&problem);
         let state = SdirkState {
             t: 0.0,
-            y: Vcpu::from_vec(vec![1.0, 1.0, 1.0]),
-            dy: Vcpu::from_vec(vec![1.0, 1.0, 1.0]),
-            g: Vcpu::zeros(0),
-            dg: Vcpu::zeros(0),
+            y: Vcpu::from_vec(vec![1.0, 1.0, 1.0], problem.context().clone()),
+            dy: Vcpu::from_vec(vec![1.0, 1.0, 1.0], problem.context().clone()),
+            g: Vcpu::zeros(0, problem.context().clone()),
+            dg: Vcpu::zeros(0, problem.context().clone()),
             sg: Vec::new(),
             dsg: Vec::new(),
             s: Vec::new(),
@@ -427,9 +447,9 @@ mod tests {
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 3);
         assert_eq!(sens.ncols(), 1);
-        assert_eq!(sens[(0, 0)], -1.0);
-        assert_eq!(sens[(1, 0)], -1.0);
-        assert_eq!(sens[(2, 0)], 0.0);
+        assert_eq!(sens.get_index(0, 0), -1.0);
+        assert_eq!(sens.get_index(1, 0), -1.0);
+        assert_eq!(sens.get_index(2, 0), 0.0);
         sens_eqn.rhs.y.borrow().assert_eq_st(&state.y, 1e-10);
 
         // F(s, t)_i = J * s_i + S_i
@@ -441,9 +461,9 @@ mod tests {
         //             |0 0 0 | |1|   | 0  |   | 0 |
         sens_eqn.rhs.set_param_index(0);
         assert_eq!(sens_eqn.rhs.index.borrow().clone(), 0);
-        let s = Vcpu::from_vec(vec![1.0, 1.0, 1.0]);
+        let s = Vcpu::from_vec(vec![1.0, 1.0, 1.0], problem.context().clone());
         let f = sens_eqn.rhs.call(&s, state.t);
-        let f_expect = Vcpu::from_vec(vec![-1.1, -1.1, 0.0]);
+        let f_expect = Vcpu::from_vec(vec![-1.1, -1.1, 0.0], problem.context().clone());
         f.assert_eq_st(&f_expect, 1e-10);
     }
 
@@ -453,10 +473,10 @@ mod tests {
         let mut sens_eqn = SensEquations::new(&problem);
         let state = SdirkState {
             t: 0.0,
-            y: Vcpu::from_vec(vec![1.0, 2.0, 3.0]),
-            dy: Vcpu::from_vec(vec![1.0, 1.0, 1.0]),
-            g: Vcpu::zeros(0),
-            dg: Vcpu::zeros(0),
+            y: Vcpu::from_vec(vec![1.0, 2.0, 3.0], problem.context().clone()),
+            dy: Vcpu::from_vec(vec![1.0, 1.0, 1.0], problem.context().clone()),
+            g: Vcpu::zeros(0, problem.context().clone()),
+            dg: Vcpu::zeros(0, problem.context().clone()),
             sg: Vec::new(),
             dsg: Vec::new(),
             s: Vec::new(),
@@ -474,14 +494,14 @@ mod tests {
         let sens = sens_eqn.rhs.sens.borrow();
         assert_eq!(sens.nrows(), 3);
         assert_eq!(sens.ncols(), 3);
-        assert_eq!(sens[(0, 0)], -state.y[0]);
-        assert_eq!(sens[(0, 1)], state.y[1] * state.y[2]);
-        assert_eq!(sens[(0, 2)], 0.0);
-        assert_eq!(sens[(1, 0)], state.y[0]);
-        assert_eq!(sens[(1, 1)], -state.y[1] * state.y[2]);
-        assert_eq!(sens[(1, 2)], -state.y[1] * state.y[1]);
-        assert_eq!(sens[(2, 0)], 0.0);
-        assert_eq!(sens[(2, 1)], 0.0);
-        assert_eq!(sens[(2, 2)], 0.0);
+        assert_eq!(sens.get_index(0, 0), -state.y[0]);
+        assert_eq!(sens.get_index(0, 1), state.y[1] * state.y[2]);
+        assert_eq!(sens.get_index(0, 2), 0.0);
+        assert_eq!(sens.get_index(1, 0), state.y[0]);
+        assert_eq!(sens.get_index(1, 1), -state.y[1] * state.y[2]);
+        assert_eq!(sens.get_index(1, 2), -state.y[1] * state.y[1]);
+        assert_eq!(sens.get_index(2, 0), 0.0);
+        assert_eq!(sens.get_index(2, 1), 0.0);
+        assert_eq!(sens.get_index(2, 2), 0.0);
     }
 }

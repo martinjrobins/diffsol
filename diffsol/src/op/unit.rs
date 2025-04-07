@@ -11,21 +11,18 @@ use super::{BuilderOp, ParameterisedOp};
 /// A dummy operator that returns the input vector. Can be used either as a [NonLinearOp] or [LinearOp].
 pub struct UnitCallable<M: Matrix> {
     n: usize,
-    _phantom: std::marker::PhantomData<M>,
+    ctx: M::C,
 }
 
 impl<M: Matrix> Default for UnitCallable<M> {
     fn default() -> Self {
-        Self::new(1)
+        Self::new(1, M::C::default())
     }
 }
 
 impl<M: Matrix> UnitCallable<M> {
-    pub fn new(n: usize) -> Self {
-        Self {
-            n,
-            _phantom: std::marker::PhantomData,
-        }
+    pub fn new(n: usize, ctx: M::C) -> Self {
+        Self { n, ctx }
     }
 }
 
@@ -33,6 +30,7 @@ impl<M: Matrix> Op for UnitCallable<M> {
     type T = M::T;
     type V = M::V;
     type M = M;
+    type C = M::C;
     fn nstates(&self) -> usize {
         self.n
     }
@@ -41,6 +39,9 @@ impl<M: Matrix> Op for UnitCallable<M> {
     }
     fn nparams(&self) -> usize {
         0
+    }
+    fn context(&self) -> &Self::C {
+        &self.ctx
     }
 }
 

@@ -17,12 +17,12 @@ pub struct RootFinder<V: Vector> {
 }
 
 impl<V: Vector> RootFinder<V> {
-    pub fn new(n: usize) -> Self {
+    pub fn new(n: usize, ctx: V::C) -> Self {
         Self {
             t0: RefCell::new(V::T::zero()),
-            g0: RefCell::new(V::zeros(n)),
-            g1: RefCell::new(V::zeros(n)),
-            gmid: RefCell::new(V::zeros(n)),
+            g0: RefCell::new(V::zeros(n, ctx.clone())),
+            g1: RefCell::new(V::zeros(n, ctx.clone())),
+            gmid: RefCell::new(V::zeros(n, ctx)),
         }
     }
 
@@ -148,14 +148,19 @@ impl<V: Vector> RootFinder<V> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{error::DiffsolError, op::ParameterisedOp, ClosureNoJac, RootFinder, Vector};
+    use crate::{
+        error::DiffsolError, matrix::dense_nalgebra_serial::NalgebraMat, op::ParameterisedOp,
+        ClosureNoJac, NalgebraContext, NalgebraVec, RootFinder, Vector,
+    };
 
     #[test]
     fn test_root() {
-        type V = nalgebra::DVector<f64>;
-        type M = nalgebra::DMatrix<f64>;
-        let interpolate = |t: f64| -> Result<V, DiffsolError> { Ok(Vector::from_vec(vec![t])) };
-        let p = V::zeros(0);
+        type V = NalgebraVec<f64>;
+        type M = NalgebraMat<f64>;
+        let ctx = NalgebraContext::default();
+        let interpolate =
+            |t: f64| -> Result<V, DiffsolError> { Ok(Vector::from_vec(vec![t], ctx.clone())) };
+        let p = V::zeros(0, ctx.clone());
         let root_fn = ClosureNoJac::<M, _>::new(
             |y: &V, _p: &V, _t: f64, g: &mut V| {
                 g[0] = y[0] - 0.4;
@@ -163,21 +168,30 @@ mod tests {
             1,
             1,
             p.len(),
+            ctx.clone(),
         );
         let root_fn = ParameterisedOp::new(&root_fn, &p);
 
         // check no root
-        let root_finder = RootFinder::new(1);
-        root_finder.init(&root_fn, &Vector::from_vec(vec![0.0]), 0.0);
-        let root =
-            root_finder.check_root(&interpolate, &root_fn, &Vector::from_vec(vec![0.3]), 0.3);
+        let root_finder = RootFinder::new(1, ctx.clone());
+        root_finder.init(&root_fn, &Vector::from_vec(vec![0.0], ctx.clone()), 0.0);
+        let root = root_finder.check_root(
+            &interpolate,
+            &root_fn,
+            &Vector::from_vec(vec![0.3], ctx.clone()),
+            0.3,
+        );
         assert_eq!(root, None);
 
         // check root
-        let root_finder = RootFinder::new(1);
-        root_finder.init(&root_fn, &Vector::from_vec(vec![0.0]), 0.0);
-        let root =
-            root_finder.check_root(&interpolate, &root_fn, &Vector::from_vec(vec![1.3]), 1.3);
+        let root_finder = RootFinder::new(1, ctx.clone());
+        root_finder.init(&root_fn, &Vector::from_vec(vec![0.0], ctx.clone()), 0.0);
+        let root = root_finder.check_root(
+            &interpolate,
+            &root_fn,
+            &Vector::from_vec(vec![1.3], ctx.clone()),
+            1.3,
+        );
         if let Some(root) = root {
             assert!((root - 0.4).abs() < 1e-10);
         } else {

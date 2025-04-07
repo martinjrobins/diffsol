@@ -35,7 +35,7 @@ impl<'a, M, Eqn, Nls, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
 where
     Eqn: OdeEquationsImplicit,
     AugEqn: AugmentedOdeEquationsImplicit<Eqn>,
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
     Nls: NonLinearSolver<Eqn::M>,
@@ -79,7 +79,7 @@ pub struct Bdf<
     'a,
     Eqn: OdeEquationsImplicit,
     Nls: NonLinearSolver<Eqn::M>,
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V> = <<Eqn as Op>::V as DefaultDenseMatrix>::M,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C> = <<Eqn as Op>::V as DefaultDenseMatrix>::M,
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> = NoAug<Eqn>,
 > where
     Eqn::V: DefaultDenseMatrix,
@@ -116,7 +116,7 @@ impl<M, Eqn, Nls, AugmentedEqn> Clone for Bdf<'_, Eqn, Nls, M, AugmentedEqn>
 where
     Eqn: OdeEquationsImplicit,
     Nls: NonLinearSolver<Eqn::M>,
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
     Eqn::V: DefaultDenseMatrix,
 {
@@ -171,7 +171,7 @@ where
     AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
     Eqn: OdeEquationsImplicit,
     Eqn::V: DefaultDenseMatrix,
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
     Nls: NonLinearSolver<Eqn::M>,
@@ -243,8 +243,9 @@ where
 
         // setup root solver
         let mut root_finder = None;
+        let ctx = problem.eqn.context();
         if let Some(root_fn) = problem.eqn.root() {
-            root_finder = Some(RootFinder::new(root_fn.nout()));
+            root_finder = Some(RootFinder::new(root_fn.nout(), ctx.clone()));
             root_finder
                 .as_ref()
                 .unwrap()
@@ -253,20 +254,20 @@ where
 
         // (re)allocate internal state
         let nstates = problem.eqn.rhs().nstates();
-        let diff_tmp = M::zeros(nstates, BdfState::<Eqn::V, M>::MAX_ORDER + 3);
-        let y_delta = <Eqn::V as Vector>::zeros(nstates);
-        let y_predict = <Eqn::V as Vector>::zeros(nstates);
+        let diff_tmp = M::zeros(nstates, BdfState::<Eqn::V, M>::MAX_ORDER + 3, ctx.clone());
+        let y_delta = <Eqn::V as Vector>::zeros(nstates, ctx.clone());
+        let y_predict = <Eqn::V as Vector>::zeros(nstates, ctx.clone());
 
         let nout = if let Some(out) = problem.eqn.out() {
             out.nout()
         } else {
             0
         };
-        let g_delta = <Eqn::V as Vector>::zeros(nout);
-        let gdiff_tmp = M::zeros(nout, BdfState::<Eqn::V, M>::MAX_ORDER + 3);
+        let g_delta = <Eqn::V as Vector>::zeros(nout, ctx.clone());
+        let gdiff_tmp = M::zeros(nout, BdfState::<Eqn::V, M>::MAX_ORDER + 3, ctx.clone());
 
         // init U matrix
-        let u = Self::_compute_r(state.order, Eqn::T::one());
+        let u = Self::_compute_r(state.order, Eqn::T::one(), ctx.clone());
         let is_state_modified = false;
 
         Ok(Self {
@@ -278,11 +279,11 @@ where
             n_equal_steps: 0,
             diff_tmp,
             gdiff_tmp,
-            sgdiff_tmp: M::zeros(0, 0),
+            sgdiff_tmp: M::zeros(0, 0, ctx.clone()),
             y_delta,
             y_predict,
             t_predict: Eqn::T::zero(),
-            s_predict: Eqn::V::zeros(0),
+            s_predict: Eqn::V::zeros(0, ctx.clone()),
             s_deltas: Vec::new(),
             sg_deltas: Vec::new(),
             g_delta,
@@ -331,11 +332,16 @@ where
             Some(bdf_callable)
         };
 
-        ret.s_deltas = vec![<Eqn::V as Vector>::zeros(nstates); naug];
-        ret.s_predict = <Eqn::V as Vector>::zeros(nstates);
+        let ctx = problem.eqn.context();
+        ret.s_deltas = vec![<Eqn::V as Vector>::zeros(nstates, ctx.clone()); naug];
+        ret.s_predict = <Eqn::V as Vector>::zeros(nstates, ctx.clone());
         if let Some(out) = ret.s_op.as_ref().unwrap().eqn().out() {
-            ret.sg_deltas = vec![<Eqn::V as Vector>::zeros(out.nout()); naug];
-            ret.sgdiff_tmp = M::zeros(out.nout(), BdfState::<Eqn::V, M>::MAX_ORDER + 3);
+            ret.sg_deltas = vec![<Eqn::V as Vector>::zeros(out.nout(), ctx.clone()); naug];
+            ret.sgdiff_tmp = M::zeros(
+                out.nout(),
+                BdfState::<Eqn::V, M>::MAX_ORDER + 3,
+                ctx.clone(),
+            );
         }
         Ok(ret)
     }
@@ -344,7 +350,7 @@ where
         &self.statistics
     }
 
-    fn _compute_r(order: usize, factor: Eqn::T) -> M {
+    fn _compute_r(order: usize, factor: Eqn::T, ctx: M::C) -> M {
         //computes the R matrix with entries
         //given by the first equation on page 8 of [1]
         //
@@ -372,7 +378,7 @@ where
             }
         }
 
-        M::from_vec(order + 1, order + 1, r)
+        M::from_vec(order + 1, order + 1, r, ctx)
     }
 
     fn _jacobian_updates(&mut self, c: Eqn::T, state: SolverState) {
@@ -412,7 +418,7 @@ where
 
         // update D using equations in section 3.2 of [1]
         let order = self.state.order;
-        let r = Self::_compute_r(order, factor);
+        let r = Self::_compute_r(order, factor, self.problem().eqn.context().clone());
         let ru = r.mat_mul(&self.u);
         {
             if self.op.is_some() {
@@ -642,7 +648,7 @@ where
             }
         }
 
-        self.u = Self::_compute_r(1, Eqn::T::one());
+        self.u = Self::_compute_r(1, Eqn::T::one(), self.problem().eqn.context().clone());
         self.is_state_modified = false;
     }
 
@@ -847,7 +853,7 @@ impl<'a, M, Eqn, Nls, AugmentedEqn> OdeSolverMethod<'a, Eqn> for Bdf<'a, Eqn, Nl
 where
     Eqn: OdeEquationsImplicit,
     AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     Eqn::V: DefaultDenseMatrix,
     Nls: NonLinearSolver<Eqn::M>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -889,7 +895,11 @@ where
 
         // order might have changed
         if self.state.order != old_order {
-            self.u = Self::_compute_r(self.state.order, Eqn::T::one());
+            self.u = Self::_compute_r(
+                self.state.order,
+                Eqn::T::one(),
+                self.problem().eqn.context().clone(),
+            );
         }
 
         // reinitialise jacobian updates as if a checkpoint was taken
@@ -1210,7 +1220,11 @@ where
                 };
                 self.state.order = new_order;
                 if max_index != 1 {
-                    self.u = Self::_compute_r(new_order, Eqn::T::one());
+                    self.u = Self::_compute_r(
+                        new_order,
+                        Eqn::T::one(),
+                        self.problem().eqn.context().clone(),
+                    );
                 }
                 new_order
             };
@@ -1269,6 +1283,7 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
+        matrix::dense_nalgebra_serial::NalgebraMat,
         ode_solver::{
             test_models::{
                 dydt_y2::dydt_y2_problem,
@@ -1295,12 +1310,13 @@ mod test {
                 test_problem, test_state_mut, test_state_mut_on_problem,
             },
         },
-        FaerLU, FaerSparseLU, OdeEquations, OdeSolverMethod, Op, SparseColMat, Vector,
+        Context, DenseMatrix, FaerLU, FaerMat, FaerSparseLU, FaerSparseMat, MatrixCommon,
+        OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
     };
 
     use num_traits::abs;
 
-    type M = nalgebra::DMatrix<f64>;
+    type M = NalgebraMat<f64>;
     type LS = crate::NalgebraLU<f64>;
     #[test]
     fn bdf_state_mut() {
@@ -1348,7 +1364,7 @@ mod test {
 
     #[test]
     fn bdf_test_faer_sparse_exponential_decay() {
-        let (problem, soln) = exponential_decay_problem::<SparseColMat<f64>>(false);
+        let (problem, soln) = exponential_decay_problem::<FaerSparseMat<f64>>(false);
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
@@ -1363,7 +1379,7 @@ mod test {
 
     #[test]
     fn bdf_test_faer_exponential_decay() {
-        type M = faer::Mat<f64>;
+        type M = FaerMat<f64>;
         type LS = FaerLU<f64>;
         let (problem, soln) = exponential_decay_problem::<M>(false);
         let mut s = problem.bdf::<LS>().unwrap();
@@ -1559,7 +1575,7 @@ mod test {
 
     #[test]
     fn bdf_test_faer_sparse_exponential_decay_algebraic() {
-        let (problem, soln) = exponential_decay_with_algebraic_problem::<SparseColMat<f64>>(false);
+        let (problem, soln) = exponential_decay_with_algebraic_problem::<FaerSparseMat<f64>>(false);
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
@@ -1626,7 +1642,7 @@ mod test {
 
     #[test]
     fn bdf_test_faer_sparse_robertson() {
-        let (problem, soln) = robertson::<SparseColMat<f64>>(false);
+        let (problem, soln) = robertson::<FaerSparseMat<f64>>(false);
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
@@ -1634,7 +1650,7 @@ mod test {
     #[cfg(feature = "suitesparse")]
     #[test]
     fn bdf_test_faer_sparse_ku_robertson() {
-        let (problem, soln) = robertson::<SparseColMat<f64>>(false);
+        let (problem, soln) = robertson::<FaerSparseMat<f64>>(false);
         let mut s = problem.bdf::<crate::KLU<_>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
@@ -1811,7 +1827,7 @@ mod test {
 
     #[test]
     fn test_bdf_faer_sparse_heat2d() {
-        let (problem, soln) = head2d_problem::<SparseColMat<f64>, 10>();
+        let (problem, soln) = head2d_problem::<FaerSparseMat<f64>, 10>();
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -1835,14 +1851,14 @@ mod test {
         use diffsl::LlvmModule;
 
         use crate::ode_solver::test_models::heat2d;
-        let (problem, soln) = heat2d::heat2d_diffsl_problem::<SparseColMat<f64>, LlvmModule, 10>();
+        let (problem, soln) = heat2d::heat2d_diffsl_problem::<FaerSparseMat<f64>, LlvmModule, 10>();
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
     #[test]
     fn test_bdf_faer_sparse_foodweb() {
-        let (problem, soln) = foodweb_problem::<SparseColMat<f64>, 10>();
+        let (problem, soln) = foodweb_problem::<FaerSparseMat<f64>, 10>();
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -1861,7 +1877,7 @@ mod test {
 
         use crate::ode_solver::test_models::foodweb;
         let (problem, soln) =
-            foodweb::foodweb_diffsl_problem::<SparseColMat<f64>, LlvmModule, 10>();
+            foodweb::foodweb_diffsl_problem::<FaerSparseMat<f64>, LlvmModule, 10>();
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
@@ -1884,12 +1900,13 @@ mod test {
     #[test]
     fn test_param_sweep_bdf() {
         let (mut problem, _soln) = exponential_decay_problem::<M>(false);
+        let ctx = problem.eqn.context();
         let mut ps = Vec::new();
         for y0 in (1..10).map(f64::from) {
-            ps.push(nalgebra::DVector::<f64>::from_vec(vec![0.1, y0]));
+            ps.push(ctx.vector_from_vec(vec![0.1, y0]));
         }
 
-        let mut old_soln: Option<nalgebra::DVector<f64>> = None;
+        let mut old_soln: Option<<M as MatrixCommon>::V> = None;
         for p in ps {
             problem.eqn_mut().set_params(&p);
             let mut s = problem.bdf::<LS>().unwrap();
@@ -1911,7 +1928,7 @@ mod test {
     #[test]
     fn test_ball_bounce_bdf() {
         use crate::ode_solver::tests::test_ball_bounce_problem;
-        type M = nalgebra::DMatrix<f64>;
+        type M = crate::NalgebraMat<f64>;
         type LS = crate::NalgebraLU<f64>;
         let (x, v, t) = crate::ode_solver::tests::test_ball_bounce(
             test_ball_bounce_problem::<M>().bdf::<LS>().unwrap(),

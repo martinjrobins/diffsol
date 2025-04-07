@@ -14,8 +14,8 @@ pub struct LinearisedOp<C: NonLinearOpJacobian> {
 
 impl<C: NonLinearOpJacobian> LinearisedOp<C> {
     pub fn new(callable: Rc<C>) -> Self {
-        let x = C::V::zeros(callable.nstates());
-        let tmp = RefCell::new(C::V::zeros(callable.nstates()));
+        let x = C::V::zeros(callable.nstates(), callable.context().clone());
+        let tmp = RefCell::new(C::V::zeros(callable.nstates(), callable.context().clone()));
         Self {
             callable,
             x,
@@ -42,6 +42,7 @@ impl<C: NonLinearOpJacobian> Op for LinearisedOp<C> {
     type V = C::V;
     type T = C::T;
     type M = C::M;
+    type C = C::C;
     fn nstates(&self) -> usize {
         self.callable.nstates()
     }
@@ -50,6 +51,9 @@ impl<C: NonLinearOpJacobian> Op for LinearisedOp<C> {
     }
     fn nparams(&self) -> usize {
         self.callable.nparams()
+    }
+    fn context(&self) -> &Self::C {
+        self.callable.context()
     }
 }
 

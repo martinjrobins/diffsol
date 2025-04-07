@@ -24,14 +24,14 @@ const BETA: f64 = 1000.0;
 #[cfg(feature = "diffsl")]
 #[allow(clippy::type_complexity)]
 pub fn foodweb_diffsl_problem<M, CG, const NX: usize>() -> (
-    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 )
 where
     M: MatrixHost<T = f64>,
     CG: diffsl::execution::module::CodegenModule,
 {
-    use crate::{DiffSl, DiffSlContext, OdeBuilder};
+    use crate::OdeBuilder;
 
     let (problem, _soln) = foodweb_problem::<M, NX>();
     let u0 = problem.eqn.init().call(0.0);
@@ -43,8 +43,8 @@ where
         .collect::<Vec<_>>()
         .join(",\n");
 
-    let mut xx = M::V::zeros(NX * NX);
-    let mut yy = M::V::zeros(NX * NX);
+    let mut xx = M::V::zeros(NX * NX, problem.context().clone());
+    let mut yy = M::V::zeros(NX * NX, problem.context().clone());
     for jy in 0..NX {
         let y = jy as f64 * AY / (NX as f64 - 1.0);
         for jx in 0..NX {
@@ -136,13 +136,12 @@ where
         n2 = 2 * NX * NX,
     );
 
-    let eqn: DiffSl<M, CG> = DiffSl::from_context(DiffSlContext::new(code.as_str(), 1).unwrap());
     let problem = OdeBuilder::<M>::new()
         .rtol(1e-5)
         .atol([1e-5])
-        .build_from_eqn(eqn)
+        .build_from_diffsl::<CG>(code.as_str())
         .unwrap();
-    let soln = soln::<M>();
+    let soln = soln::<M>(problem.context().clone());
     (problem, soln)
 }
 
@@ -155,6 +154,7 @@ where
     cox: [M::T; NUM_SPECIES],
     coy: [M::T; NUM_SPECIES],
     nstates: usize,
+    ctx: M::C,
 }
 
 // Following is the description of this model from the Sundials examples:
@@ -236,7 +236,7 @@ where
     const DX: f64 = AX / (NX as f64 - 1.0);
     const DY: f64 = AY / (NX as f64 - 1.0);
 
-    pub fn new() -> Self {
+    pub fn new(ctx: M::C) -> Self {
         let mut acoef = [[M::T::zero(); NUM_SPECIES]; NUM_SPECIES];
         let mut bcoef = [M::T::zero(); NUM_SPECIES];
         let mut cox = [M::T::zero(); NUM_SPECIES];
@@ -268,6 +268,7 @@ where
             cox,
             coy,
             nstates,
+            ctx,
         }
     }
 }
@@ -277,7 +278,7 @@ where
     M: MatrixHost,
 {
     fn default() -> Self {
-        Self::new()
+        Self::new(M::C::default())
     }
 }
 
@@ -312,6 +313,7 @@ macro_rules! impl_op {
             type M = M;
             type V = M::V;
             type T = M::T;
+            type C = M::C;
 
             fn nout(&self) -> usize {
                 self.foodweb.context.nstates
@@ -321,6 +323,9 @@ macro_rules! impl_op {
             }
             fn nstates(&self) -> usize {
                 self.foodweb.context.nstates
+            }
+            fn context(&self) -> &Self::C {
+                self.foodweb.context()
             }
         }
     };
@@ -384,6 +389,7 @@ where
     type M = M;
     type V = M::V;
     type T = M::T;
+    type C = M::C;
 
     fn nout(&self) -> usize {
         self.foodweb.context.nstates
@@ -393,6 +399,9 @@ where
     }
     fn nstates(&self) -> usize {
         self.foodweb.context.nstates
+    }
+    fn context(&self) -> &Self::C {
+        self.foodweb.context()
     }
 }
 
@@ -604,6 +613,7 @@ where
     type M = M;
     type V = M::V;
     type T = M::T;
+    type C = M::C;
 
     fn nout(&self) -> usize {
         self.foodweb.context.nstates
@@ -613,6 +623,9 @@ where
     }
     fn nstates(&self) -> usize {
         self.foodweb.context.nstates
+    }
+    fn context(&self) -> &Self::C {
+        self.foodweb.context()
     }
 }
 
@@ -660,6 +673,7 @@ where
     type M = M;
     type V = M::V;
     type T = M::T;
+    type C = M::C;
 
     fn nout(&self) -> usize {
         2 * NUM_SPECIES
@@ -669,6 +683,9 @@ where
     }
     fn nstates(&self) -> usize {
         self.foodweb.context.nstates
+    }
+    fn context(&self) -> &Self::C {
+        self.foodweb.context()
     }
 }
 
@@ -746,6 +763,7 @@ where
         ret.rhs_coloring = Some(JacobianColoring::new(
             ret.rhs_sparsity.as_ref().unwrap(),
             &non_zeros,
+            ret.context().clone(),
         ));
 
         let mass = FoodWebMass::new(&ret);
@@ -757,6 +775,7 @@ where
         ret.mass_coloring = Some(JacobianColoring::new(
             ret.mass_sparsity.as_ref().unwrap(),
             &non_zeros,
+            ret.context().clone(),
         ));
         ret
     }
@@ -769,6 +788,7 @@ where
     type M = M;
     type V = M::V;
     type T = M::T;
+    type C = M::C;
 
     fn nout(&self) -> usize {
         2 * NUM_SPECIES
@@ -778,6 +798,9 @@ where
     }
     fn nstates(&self) -> usize {
         self.context.nstates
+    }
+    fn context(&self) -> &Self::C {
+        &self.context.ctx
     }
 }
 
@@ -825,6 +848,7 @@ where
     M: MatrixHost,
 {
     pub sparsity: Option<M::Sparsity>,
+    ctx: M::C,
 }
 
 #[cfg(feature = "diffsl")]
@@ -833,7 +857,10 @@ where
     M: MatrixHost,
 {
     pub fn new(y0: &M::V, t0: M::T) -> Self {
-        let mut ret = Self { sparsity: None };
+        let mut ret = Self {
+            sparsity: None,
+            ctx: y0.context().clone(),
+        };
         let non_zeros = find_jacobian_non_zeros(&ret, y0, t0);
         ret.sparsity = Some(
             MatrixSparsity::try_from_indices(ret.nout(), ret.nstates(), non_zeros.clone()).unwrap(),
@@ -850,6 +877,7 @@ where
     type M = M;
     type V = M::V;
     type T = M::T;
+    type C = M::C;
 
     fn nout(&self) -> usize {
         NX * NX
@@ -859,6 +887,9 @@ where
     }
     fn nstates(&self) -> usize {
         NX * NX
+    }
+    fn context(&self) -> &Self::C {
+        &self.ctx
     }
 }
 
@@ -951,12 +982,12 @@ where
     }
 }
 
-fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
+fn soln<M: Matrix>(ctx: M::C) -> OdeSolverSolution<M::V> {
     let mut soln = OdeSolverSolution {
         solution_points: Vec::new(),
         sens_solution_points: None,
         rtol: M::T::from(1e-4),
-        atol: M::V::from_element(2 * NUM_SPECIES, M::T::from(1e-4)),
+        atol: M::V::from_element(2 * NUM_SPECIES, M::T::from(1e-4), ctx.clone()),
         negative_time: false,
     };
     let data = vec![
@@ -1017,7 +1048,10 @@ fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
         ),
     ];
     for (values, time) in data {
-        let values = M::V::from_vec(values.iter().map(|v| M::T::from(*v)).collect::<Vec<_>>());
+        let values = M::V::from_vec(
+            values.iter().map(|v| M::T::from(*v)).collect::<Vec<_>>(),
+            ctx.clone(),
+        );
         let time = M::T::from(time);
         soln.push(values, time);
     }
@@ -1026,35 +1060,39 @@ fn soln<M: Matrix>() -> OdeSolverSolution<M::V> {
 
 #[allow(clippy::type_complexity)]
 pub fn foodweb_problem<M, const NX: usize>() -> (
-    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 )
 where
     M: MatrixHost,
 {
     let rtol = M::T::from(1e-5);
-    let atol = M::V::from_element(NUM_SPECIES * NX * NX, M::T::from(1e-5));
+    let ctx = M::C::default();
+    let atol = M::V::from_element(NUM_SPECIES * NX * NX, M::T::from(1e-5), ctx.clone());
     let t0 = M::T::zero();
     let h0 = M::T::from(1.0);
-    let context = FoodWebContext::<M, NX>::new();
+    let context = FoodWebContext::<M, NX>::new(ctx);
     let eqn = FoodWeb::new(context, t0);
     let problem = OdeSolverProblem::new(
         eqn, rtol, atol, None, None, None, None, None, None, t0, h0, false,
     )
     .unwrap();
-    let soln = soln::<M>();
+    let soln = soln::<M>(problem.context().clone());
     (problem, soln)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{ConstantOp, LinearOp, NonLinearOp};
+    use crate::{
+        matrix::dense_nalgebra_serial::NalgebraMat, scalar::Scale, ConstantOp, DenseMatrix,
+        LinearOp, MatrixCommon, NonLinearOp,
+    };
 
     use super::*;
 
     #[test]
     fn test_jacobian() {
-        type M = nalgebra::DMatrix<f64>;
+        type M = NalgebraMat<f64>;
         const NX: usize = 10;
         let (problem, _soln) = foodweb_problem::<M, NX>();
         let u0 = problem.eqn.init().call(0.0);
@@ -1069,14 +1107,14 @@ mod tests {
             vminus[i] -= h;
             let yplus = problem.eqn.rhs().call(&vplus, 0.0);
             let yminus = problem.eqn.rhs().call(&vminus, 0.0);
-            let fdiff = (yplus - yminus) / (2.0 * h);
+            let fdiff = (yplus - yminus) * Scale(1.0 / (2.0 * h));
             for j in 0..jac.nrows() {
                 assert!(
-                    (jac[(j, i)] - fdiff[j]).abs() < 1e-1,
+                    (jac.get_index(j, i) - fdiff[j]).abs() < 1e-1,
                     "jac[{}, {}] = {} (expect {})",
                     j,
                     i,
-                    jac[(j, i)],
+                    jac.get_index(j, i),
                     fdiff[j]
                 );
             }
@@ -1088,7 +1126,7 @@ mod tests {
     fn test_diffsl() {
         use diffsl::LlvmModule;
 
-        type M = nalgebra::DMatrix<f64>;
+        type M = NalgebraMat<f64>;
         const NX: usize = 10;
         let (problem, _soln) = foodweb_problem::<M, NX>();
         let u0 = problem.eqn.init().call(0.0);
@@ -1142,12 +1180,12 @@ mod tests {
                     j / NUM_SPECIES
                 };
                 assert!(
-                    (jac[(j, i)] - jac_diffsl[(j_diffsl, i_diffsl)]).abs() < 1e-3,
+                    (jac.get_index(j, i) - jac_diffsl.get_index(j_diffsl, i_diffsl)).abs() < 1e-3,
                     "jac[{}, {}] = {} (expect {})",
                     j,
                     i,
-                    jac[(j, i)],
-                    jac_diffsl[(j_diffsl, i_diffsl)]
+                    jac.get_index(j, i),
+                    jac_diffsl.get_index(j_diffsl, i_diffsl)
                 );
             }
         }
@@ -1155,16 +1193,16 @@ mod tests {
 
     #[test]
     fn test_mass() {
-        type M = nalgebra::DMatrix<f64>;
+        type M = NalgebraMat<f64>;
         const NX: usize = 10;
         let (problem, _soln) = foodweb_problem::<M, NX>();
         let mass = problem.eqn.mass().unwrap().matrix(0.0);
         for i in 0..mass.ncols() {
             for j in 0..mass.nrows() {
                 if i == j && i % NUM_SPECIES < NPREY {
-                    assert_eq!(mass[(i, j)], 1.0);
+                    assert_eq!(mass.get_index(i, j), 1.0);
                 } else {
-                    assert_eq!(mass[(i, j)], 0.0);
+                    assert_eq!(mass.get_index(i, j), 0.0);
                 }
             }
         }

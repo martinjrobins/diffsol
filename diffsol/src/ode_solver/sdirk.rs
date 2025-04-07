@@ -31,9 +31,9 @@ impl<'a, M, Eqn, LS, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
 where
     Eqn: OdeEquationsImplicit,
     AugEqn: AugmentedOdeEquationsImplicit<Eqn>,
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     LS: LinearSolver<Eqn::M>,
-    Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
@@ -61,10 +61,10 @@ pub struct Sdirk<
     M = <<Eqn as Op>::V as DefaultDenseMatrix>::M,
     AugmentedEqn = NoAug<Eqn>,
 > where
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     LS: LinearSolver<Eqn::M>,
     Eqn: OdeEquationsImplicit,
-    Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
 {
     tableau: Tableau<M>,
@@ -96,10 +96,10 @@ pub struct Sdirk<
 
 impl<M, Eqn, LS, AugmentedEqn> Clone for Sdirk<'_, Eqn, LS, M, AugmentedEqn>
 where
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     LS: LinearSolver<Eqn::M>,
     Eqn: OdeEquationsImplicit,
-    Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
@@ -152,9 +152,9 @@ where
 impl<'a, M, Eqn, LS, AugmentedEqn> Sdirk<'a, Eqn, LS, M, AugmentedEqn>
 where
     LS: LinearSolver<Eqn::M>,
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     Eqn: OdeEquationsImplicit,
-    Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
@@ -212,12 +212,13 @@ where
         let is_sdirk = tableau.a().get_index(0, 0) == gamma;
 
         let mut a_rows = Vec::with_capacity(s);
+        let ctx = problem.context();
         for i in 0..s {
             let mut row = Vec::with_capacity(i);
             for j in 0..i {
                 row.push(tableau.a().get_index(i, j));
             }
-            a_rows.push(Eqn::V::from_vec(row));
+            a_rows.push(Eqn::V::from_vec(row, ctx.clone()));
         }
 
         // check last row of a is the same as b
@@ -273,13 +274,13 @@ where
 
         let nstates = state.y.len();
         let order = tableau.s();
-        let diff = M::zeros(nstates, order);
+        let diff = M::zeros(nstates, order, ctx.clone());
         let gdiff_rows = if problem.integrate_out {
             problem.eqn.out().unwrap().nout()
         } else {
             0
         };
-        let gdiff = M::zeros(gdiff_rows, order);
+        let gdiff = M::zeros(gdiff_rows, order, ctx.clone());
 
         let old_f = state.dy.clone();
         let old_t = state.t;
@@ -287,12 +288,12 @@ where
         let old_g = if problem.integrate_out {
             state.g.clone()
         } else {
-            <Eqn::V as Vector>::zeros(0)
+            <Eqn::V as Vector>::zeros(0, ctx.clone())
         };
 
         state.set_problem(problem)?;
         let root_finder = if let Some(root_fn) = problem.eqn.root() {
-            let root_finder = RootFinder::new(root_fn.nout());
+            let root_finder = RootFinder::new(root_fn.nout(), ctx.clone());
             root_finder.init(&root_fn, &state.y, state.t);
             Some(root_finder)
         } else {
@@ -346,11 +347,12 @@ where
         let naug = augmented_eqn.max_index();
         let nstates = augmented_eqn.rhs().nstates();
         let order = ret.tableau.s();
-        ret.sdiff = vec![M::zeros(nstates, order); naug];
-        ret.old_f_sens = vec![<Eqn::V as Vector>::zeros(nstates); naug];
+        let ctx = problem.eqn.context();
+        ret.sdiff = vec![M::zeros(nstates, order, ctx.clone()); naug];
+        ret.old_f_sens = vec![<Eqn::V as Vector>::zeros(nstates, ctx.clone()); naug];
         ret.old_y_sens = ret.state.s.clone();
         if let Some(out) = augmented_eqn.out() {
-            ret.sgdiff = vec![M::zeros(out.nout(), order); naug];
+            ret.sgdiff = vec![M::zeros(out.nout(), order, ctx.clone()); naug];
         }
 
         ret.s_op = if augmented_eqn.integrate_main_eqn() {
@@ -473,8 +475,8 @@ where
             thetav.push(theta * thetav[i - 1]);
         }
         // beta_poly = beta * thetav
-        let thetav = Eqn::V::from_vec(thetav);
-        let mut beta_f = <Eqn::V as Vector>::zeros(s_star);
+        let thetav = Eqn::V::from_vec(thetav, beta.context().clone());
+        let mut beta_f = <Eqn::V as Vector>::zeros(s_star, beta.context().clone());
         beta.gemv(Eqn::T::one(), &thetav, Eqn::T::zero(), &mut beta_f);
         beta_f
     }
@@ -543,9 +545,9 @@ where
 impl<'a, M, Eqn, AugmentedEqn, LS> OdeSolverMethod<'a, Eqn> for Sdirk<'a, Eqn, LS, M, AugmentedEqn>
 where
     LS: LinearSolver<Eqn::M>,
-    M: DenseMatrix<T = Eqn::T, V = Eqn::V>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     Eqn: OdeEquationsImplicit,
-    Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
@@ -627,19 +629,24 @@ where
         let mut updated_jacobian = false;
 
         // dont' reset jacobian for the first attempt at the step
-        let mut error = <Eqn::V as Vector>::zeros(n);
+        let ctx = self.problem.eqn.context();
+        // todo: remove this allocation?
+        let mut error = <Eqn::V as Vector>::zeros(n, ctx.clone());
         let out_error_control = self.problem().output_in_error_control();
         let mut out_error = if out_error_control {
-            <Eqn::V as Vector>::zeros(self.problem().eqn.out().unwrap().nout())
+            <Eqn::V as Vector>::zeros(self.problem().eqn.out().unwrap().nout(), ctx.clone())
         } else {
-            <Eqn::V as Vector>::zeros(0)
+            <Eqn::V as Vector>::zeros(0, ctx.clone())
         };
         let sens_error_control =
             self.s_op.is_some() && self.s_op.as_ref().unwrap().eqn().include_in_error_control();
         let mut sens_error = if sens_error_control {
-            <Eqn::V as Vector>::zeros(self.s_op.as_ref().unwrap().eqn().rhs().nstates())
+            <Eqn::V as Vector>::zeros(
+                self.s_op.as_ref().unwrap().eqn().rhs().nstates(),
+                ctx.clone(),
+            )
         } else {
-            <Eqn::V as Vector>::zeros(0)
+            <Eqn::V as Vector>::zeros(0, ctx.clone())
         };
         let sens_out_error_control = self.s_op.is_some()
             && self
@@ -649,9 +656,12 @@ where
                 .eqn()
                 .include_out_in_error_control();
         let mut sens_out_error = if sens_out_error_control {
-            <Eqn::V as Vector>::zeros(self.s_op.as_ref().unwrap().eqn().out().unwrap().nout())
+            <Eqn::V as Vector>::zeros(
+                self.s_op.as_ref().unwrap().eqn().out().unwrap().nout(),
+                ctx.clone(),
+            )
         } else {
-            <Eqn::V as Vector>::zeros(0)
+            <Eqn::V as Vector>::zeros(0, ctx.clone())
         };
 
         let mut factor: Eqn::T;
@@ -1073,6 +1083,7 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
+        matrix::dense_nalgebra_serial::NalgebraMat,
         ode_solver::{
             test_models::{
                 exponential_decay::{
@@ -1091,12 +1102,13 @@ mod test {
                 test_problem, test_state_mut, test_state_mut_on_problem,
             },
         },
-        FaerSparseLU, NalgebraLU, OdeEquations, OdeSolverMethod, Op, SparseColMat, Vector,
+        Context, DenseMatrix, FaerSparseLU, FaerSparseMat, MatrixCommon, NalgebraLU, NalgebraVec,
+        OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
     };
 
     use num_traits::abs;
 
-    type M = nalgebra::DMatrix<f64>;
+    type M = NalgebraMat<f64>;
     type LS = NalgebraLU<f64>;
 
     #[test]
@@ -1372,7 +1384,7 @@ mod test {
 
     #[test]
     fn test_tr_bdf2_faer_sparse_heat2d() {
-        let (problem, soln) = head2d_problem::<SparseColMat<f64>, 10>();
+        let (problem, soln) = head2d_problem::<FaerSparseMat<f64>, 10>();
         let mut s = problem.tr_bdf2::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
@@ -1397,10 +1409,10 @@ mod test {
         let (mut problem, _soln) = exponential_decay_problem::<M>(false);
         let mut ps = Vec::new();
         for y0 in (1..10).map(f64::from) {
-            ps.push(nalgebra::DVector::<f64>::from_vec(vec![0.1, y0]));
+            ps.push(problem.context().vector_from_vec(vec![0.1, y0]));
         }
 
-        let mut old_soln: Option<nalgebra::DVector<f64>> = None;
+        let mut old_soln: Option<NalgebraVec<f64>> = None;
         for p in ps {
             problem.eqn_mut().set_params(&p);
             let mut s = problem.tr_bdf2::<LS>().unwrap();
@@ -1421,7 +1433,7 @@ mod test {
     #[cfg(feature = "diffsl")]
     #[test]
     fn test_ball_bounce_tr_bdf2() {
-        type M = nalgebra::DMatrix<f64>;
+        type M = crate::NalgebraMat<f64>;
         type LS = crate::NalgebraLU<f64>;
         let (x, v, t) = crate::ode_solver::tests::test_ball_bounce(
             crate::ode_solver::tests::test_ball_bounce_problem::<M>()

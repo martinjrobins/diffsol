@@ -31,8 +31,9 @@ where
     Method: OdeSolverMethod<'a, Eqn>,
 {
     pub fn new(checkpointer: Checkpointing<'a, Eqn, Method>, max_index: usize) -> Self {
-        let x = <Eqn::V as Vector>::zeros(checkpointer.problem().eqn.rhs().nstates());
-        let mut col = <Eqn::V as Vector>::zeros(max_index);
+        let ctx = checkpointer.problem().eqn.context();
+        let x = <Eqn::V as Vector>::zeros(checkpointer.problem().eqn.rhs().nstates(), ctx.clone());
+        let mut col = <Eqn::V as Vector>::zeros(max_index, ctx.clone());
         let index = 0;
         col.set_index(0, Eqn::T::one());
         Self {
@@ -97,6 +98,7 @@ where
     type T = Eqn::T;
     type V = Eqn::V;
     type M = Eqn::M;
+    type C = Eqn::C;
 
     fn nstates(&self) -> usize {
         self.eqn.rhs().nstates()
@@ -106,6 +108,9 @@ where
     }
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
+    }
+    fn context(&self) -> &Self::C {
+        self.eqn.context()
     }
 }
 
@@ -148,6 +153,7 @@ where
     type T = Eqn::T;
     type V = Eqn::V;
     type M = Eqn::M;
+    type C = Eqn::C;
 
     fn nstates(&self) -> usize {
         self.eqn.rhs().nstates()
@@ -157,6 +163,9 @@ where
     }
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
+    }
+    fn context(&self) -> &Self::C {
+        self.eqn.context()
     }
 }
 
@@ -199,7 +208,7 @@ where
         with_out: bool,
     ) -> Self {
         let tmp_n = if with_out { eqn.rhs().nstates() } else { 0 };
-        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(tmp_n));
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(tmp_n, eqn.context().clone()));
         Self {
             eqn,
             context,
@@ -217,6 +226,7 @@ where
     type T = Eqn::T;
     type V = Eqn::V;
     type M = Eqn::M;
+    type C = Eqn::C;
 
     fn nstates(&self) -> usize {
         self.eqn.rhs().nstates()
@@ -226,6 +236,9 @@ where
     }
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
+    }
+    fn context(&self) -> &Self::C {
+        self.eqn.context()
     }
 }
 
@@ -309,7 +322,7 @@ where
         with_out: bool,
     ) -> Self {
         let tmp_n = if with_out { eqn.rhs().nparams() } else { 0 };
-        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(tmp_n));
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(tmp_n, eqn.context().clone()));
         Self {
             eqn,
             context,
@@ -327,6 +340,7 @@ where
     type T = Eqn::T;
     type V = Eqn::V;
     type M = Eqn::M;
+    type C = Eqn::C;
 
     fn nstates(&self) -> usize {
         self.eqn.rhs().nstates()
@@ -336,6 +350,9 @@ where
     }
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
+    }
+    fn context(&self) -> &Self::C {
+        self.eqn.context()
     }
 }
 
@@ -462,8 +479,14 @@ where
         let rhs = AdjointRhs::new(eqn, context.clone(), with_out);
         let init = AdjointInit::new(eqn);
         let out = AdjointOut::new(eqn, context.clone(), with_out);
-        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(eqn.rhs().nparams()));
-        let tmp2 = RefCell::new(<Eqn::V as Vector>::zeros(eqn.rhs().nstates()));
+        let tmp = RefCell::new(<Eqn::V as Vector>::zeros(
+            eqn.rhs().nparams(),
+            eqn.context().clone(),
+        ));
+        let tmp2 = RefCell::new(<Eqn::V as Vector>::zeros(
+            eqn.rhs().nstates(),
+            eqn.context().clone(),
+        ));
         let atol = problem.sens_atol.as_ref();
         let rtol = problem.sens_rtol;
         let out_atol = problem.param_atol.as_ref();
@@ -531,6 +554,7 @@ where
     type T = Eqn::T;
     type V = Eqn::V;
     type M = Eqn::M;
+    type C = Eqn::C;
 
     fn nstates(&self) -> usize {
         self.eqn.rhs().nstates()
@@ -540,6 +564,9 @@ where
     }
     fn nparams(&self) -> usize {
         self.eqn.rhs().nparams()
+    }
+    fn context(&self) -> &Self::C {
+        self.eqn.context()
     }
 }
 
@@ -630,15 +657,17 @@ mod tests {
     use std::{cell::RefCell, rc::Rc};
 
     use crate::{
+        matrix::dense_nalgebra_serial::NalgebraMat,
         ode_solver::{
             adjoint_equations::AdjointEquations,
             test_models::exponential_decay::exponential_decay_problem_adjoint,
         },
-        AdjointContext, AugmentedOdeEquations, Checkpointing, FaerSparseLU, Matrix, MatrixCommon,
-        NonLinearOp, NonLinearOpJacobian, OdeEquations, Op, SdirkState, SparseColMat, Vector,
+        AdjointContext, AugmentedOdeEquations, Checkpointing, DenseMatrix, FaerSparseLU,
+        FaerSparseMat, FaerVec, Matrix, MatrixCommon, NalgebraVec, NonLinearOp,
+        NonLinearOpJacobian, OdeEquations, Op, SdirkState, Vector,
     };
-    type Mcpu = nalgebra::DMatrix<f64>;
-    type Vcpu = nalgebra::DVector<f64>;
+    type Mcpu = NalgebraMat<f64>;
+    type Vcpu = NalgebraVec<f64>;
     type LS = crate::NalgebraLU<f64>;
 
     #[test]
@@ -646,12 +675,13 @@ mod tests {
         // dy/dt = -ay (p = [a])
         // a = 0.1
         let (problem, _soln) = exponential_decay_problem_adjoint::<Mcpu>(true);
+        let ctx = problem.eqn.context();
         let state = SdirkState {
             t: 0.0,
-            y: Vcpu::from_vec(vec![1.0, 1.0]),
-            dy: Vcpu::from_vec(vec![1.0, 1.0]),
-            g: Vcpu::zeros(0),
-            dg: Vcpu::zeros(0),
+            y: Vcpu::from_vec(vec![1.0, 1.0], ctx.clone()),
+            dy: Vcpu::from_vec(vec![1.0, 1.0], ctx.clone()),
+            g: Vcpu::zeros(0, ctx.clone()),
+            dg: Vcpu::zeros(0, ctx.clone()),
             sg: Vec::new(),
             dsg: Vec::new(),
             s: Vec::new(),
@@ -668,9 +698,9 @@ mod tests {
         //       |0 -a|
         // F(s, t)_0 =  |a 0| |1| = |a| = |0.1|
         //              |0 a| |2|   |2a| = |0.2|
-        let v = Vcpu::from_vec(vec![1.0, 2.0]);
+        let v = Vcpu::from_vec(vec![1.0, 2.0], ctx.clone());
         let f = adj_eqn.rhs.call(&v, state.t);
-        let f_expect = Vcpu::from_vec(vec![0.1, 0.2]);
+        let f_expect = Vcpu::from_vec(vec![0.1, 0.2], ctx.clone());
         f.assert_eq_st(&f_expect, 1e-10);
 
         let mut adj_eqn = AdjointEquations::new(&problem, context.clone(), true);
@@ -681,8 +711,8 @@ mod tests {
         let adjoint = adj_eqn.rhs.jacobian(&state.y, state.t);
         assert_eq!(adjoint.nrows(), 2);
         assert_eq!(adjoint.ncols(), 2);
-        assert_eq!(adjoint[(0, 0)], 0.1);
-        assert_eq!(adjoint[(1, 1)], 0.1);
+        assert_eq!(adjoint.get_index(0, 0), 0.1);
+        assert_eq!(adjoint.get_index(1, 1), 0.1);
 
         // g_x = |1 2|
         //       |3 4|
@@ -699,7 +729,7 @@ mod tests {
         //              |0  0| |2|  |0|  = |0|
         adj_eqn.set_index(0);
         let out = adj_eqn.out.call(&v, state.t);
-        let out_expect = Vcpu::from_vec(vec![3.0, 0.0]);
+        let out_expect = Vcpu::from_vec(vec![3.0, 0.0], ctx.clone());
         out.assert_eq_st(&out_expect, 1e-10);
 
         // F(λ, x, t) = -f^T_x(x, t) λ - g^T_x(x,t)
@@ -708,7 +738,7 @@ mod tests {
         // F(s, t)_0 =  |a 0| |1| - |1.0| = | a - 1| = |-0.9|
         //              |0 a| |2|   |2.0|   |2a - 2| = |-1.8|
         let f = adj_eqn.rhs.call(&v, state.t);
-        let f_expect = Vcpu::from_vec(vec![-0.9, -1.8]);
+        let f_expect = Vcpu::from_vec(vec![-0.9, -1.8], ctx.clone());
         f.assert_eq_st(&f_expect, 1e-10);
     }
 
@@ -716,13 +746,14 @@ mod tests {
     fn test_rhs_exponential_sparse() {
         // dy/dt = -ay (p = [a])
         // a = 0.1
-        let (problem, _soln) = exponential_decay_problem_adjoint::<SparseColMat<f64>>(true);
+        let (problem, _soln) = exponential_decay_problem_adjoint::<FaerSparseMat<f64>>(true);
+        let ctx = problem.eqn.context();
         let state = SdirkState {
             t: 0.0,
-            y: faer::Col::from_vec(vec![1.0, 1.0]),
-            dy: faer::Col::from_vec(vec![1.0, 1.0]),
-            g: faer::Col::zeros(0),
-            dg: faer::Col::zeros(0),
+            y: FaerVec::from_vec(vec![1.0, 1.0], ctx.clone()),
+            dy: FaerVec::from_vec(vec![1.0, 1.0], ctx.clone()),
+            g: FaerVec::zeros(0, ctx.clone()),
+            dg: FaerVec::zeros(0, ctx.clone()),
             sg: Vec::new(),
             dsg: Vec::new(),
             s: Vec::new(),
@@ -763,9 +794,9 @@ mod tests {
         // F(s, t)_0 =  |a 0| |1| - |1.0| = |a - 1| = |-0.9|
         //              |0 a| |2|   |2.0|   |2a - 2| = |-1.8|
         adj_eqn.set_index(0);
-        let v = faer::Col::from_vec(vec![1.0, 2.0]);
+        let v = FaerVec::from_vec(vec![1.0, 2.0], ctx.clone());
         let f = adj_eqn.rhs.call(&v, state.t);
-        let f_expect = faer::Col::from_vec(vec![-0.9, -1.8]);
+        let f_expect = FaerVec::from_vec(vec![-0.9, -1.8], ctx.clone());
         f.assert_eq_st(&f_expect, 1e-10);
     }
 }

@@ -1,8 +1,12 @@
 #![allow(dead_code)]
-use diffsol::{ConstantOp, LinearOp, NonLinearOp, OdeEquations, OdeEquationsRef, Op};
+use diffsol::{
+    ConstantOp, LinearOp, NalgebraContext, NalgebraMat, NalgebraVec, NonLinearOp, OdeEquations,
+    OdeEquationsRef, Op, Vector,
+};
 type T = f64;
-type V = nalgebra::DVector<f64>;
-type M = nalgebra::DMatrix<f64>;
+type V = NalgebraVec<f64>;
+type M = NalgebraMat<f64>;
+type C = NalgebraContext;
 struct MyRhs<'a> {
     p: &'a V,
 } // implements NonLinearOp
@@ -22,6 +26,7 @@ impl Op for MyRhs<'_> {
     type T = T;
     type V = V;
     type M = M;
+    type C = C;
     fn nstates(&self) -> usize {
         1
     }
@@ -30,6 +35,9 @@ impl Op for MyRhs<'_> {
     }
     fn nparams(&self) -> usize {
         2
+    }
+    fn context(&self) -> &Self::C {
+        self.p.context()
     }
 }
 impl NonLinearOp for MyRhs<'_> {
@@ -41,6 +49,7 @@ impl Op for MyMass<'_> {
     type T = T;
     type V = V;
     type M = M;
+    type C = C;
     fn nstates(&self) -> usize {
         1
     }
@@ -49,6 +58,9 @@ impl Op for MyMass<'_> {
     }
     fn nparams(&self) -> usize {
         0
+    }
+    fn context(&self) -> &Self::C {
+        self.p.context()
     }
 }
 impl LinearOp for MyMass<'_> {
@@ -60,6 +72,7 @@ impl Op for MyInit<'_> {
     type T = T;
     type V = V;
     type M = M;
+    type C = C;
     fn nstates(&self) -> usize {
         1
     }
@@ -68,6 +81,9 @@ impl Op for MyInit<'_> {
     }
     fn nparams(&self) -> usize {
         0
+    }
+    fn context(&self) -> &Self::C {
+        self.p.context()
     }
 }
 impl ConstantOp for MyInit<'_> {
@@ -79,6 +95,7 @@ impl Op for MyRoot<'_> {
     type T = T;
     type V = V;
     type M = M;
+    type C = C;
     fn nstates(&self) -> usize {
         1
     }
@@ -87,6 +104,9 @@ impl Op for MyRoot<'_> {
     }
     fn nparams(&self) -> usize {
         0
+    }
+    fn context(&self) -> &Self::C {
+        self.p.context()
     }
 }
 impl NonLinearOp for MyRoot<'_> {
@@ -98,6 +118,7 @@ impl Op for MyOut<'_> {
     type T = T;
     type V = V;
     type M = M;
+    type C = C;
     fn nstates(&self) -> usize {
         1
     }
@@ -106,6 +127,9 @@ impl Op for MyOut<'_> {
     }
     fn nparams(&self) -> usize {
         0
+    }
+    fn context(&self) -> &Self::C {
+        self.p.context()
     }
 }
 impl NonLinearOp for MyOut<'_> {
@@ -120,7 +144,9 @@ struct MyProblem {
 
 impl MyProblem {
     fn new() -> Self {
-        MyProblem { p: V::zeros(2) }
+        MyProblem {
+            p: V::zeros(2, C::default()),
+        }
     }
 }
 
@@ -128,6 +154,7 @@ impl Op for MyProblem {
     type T = T;
     type V = V;
     type M = M;
+    type C = C;
     fn nstates(&self) -> usize {
         1
     }
@@ -136,6 +163,9 @@ impl Op for MyProblem {
     }
     fn nparams(&self) -> usize {
         2
+    }
+    fn context(&self) -> &Self::C {
+        self.p.context()
     }
 }
 

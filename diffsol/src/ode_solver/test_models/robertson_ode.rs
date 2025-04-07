@@ -10,11 +10,9 @@ pub fn robertson_ode_diffsl_problem<
     M: MatrixHost<T = f64>,
     CG: diffsl::execution::module::CodegenModule,
 >() -> (
-    OdeSolverProblem<impl crate::OdeEquationsAdjoint<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl crate::OdeEquationsAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
-    use crate::{DiffSl, DiffSlContext};
-
     let code = "
         in = [k1, k2, k3]
         k1 { 0.04 }
@@ -31,15 +29,13 @@ pub fn robertson_ode_diffsl_problem<
             k3*y*y,
         }";
 
-    let context = DiffSlContext::<M, CG>::new(code, 1).unwrap();
-    let eqn = DiffSl::from_context(context);
     let problem = OdeBuilder::<M>::new()
         .p([0.04, 1.0e4, 3.0e7])
         .rtol(1e-4)
         .atol([1.0e-8, 1.0e-6, 1.0e-6])
-        .build_from_eqn(eqn)
+        .build_from_diffsl::<CG>(code)
         .unwrap();
-    let mut soln = soln::<M::V>();
+    let mut soln = soln::<M::V>(problem.context().clone());
     soln.rtol = problem.rtol;
     soln.atol = problem.atol.clone();
     (problem, soln)
@@ -50,10 +46,11 @@ pub fn robertson_ode<M: MatrixHost + 'static>(
     use_coloring: bool,
     ngroups: usize,
 ) -> (
-    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     const N: usize = 3;
+    let nstates = N * ngroups;
     let problem = OdeBuilder::<M>::new()
         .p([0.04, 1.0e4, 3.0e7])
         .rtol(1e-4)
@@ -91,10 +88,17 @@ pub fn robertson_ode<M: MatrixHost + 'static>(
                 }
             },
         )
-        .init(move |_p: &M::V, _t: M::T| {
-            let init = [M::T::one(), M::T::zero(), M::T::zero()];
-            M::V::from_vec(init.iter().cycle().take(ngroups * N).cloned().collect())
-        })
+        .init(
+            move |_p: &M::V, _t: M::T, y: &mut M::V| {
+                for ig in 0..ngroups {
+                    let i = ig * N;
+                    y[i] = M::T::one();
+                    y[i + 1] = M::T::zero();
+                    y[i + 2] = M::T::zero();
+                }
+            },
+            nstates,
+        )
         .build()
         .unwrap();
 
@@ -129,14 +133,17 @@ pub fn robertson_ode<M: MatrixHost + 'static>(
 
     for (values, time) in data {
         soln.push(
-            M::V::from_vec(values.into_iter().map(|v| v.into()).collect()),
+            M::V::from_vec(
+                values.into_iter().map(|v| v.into()).collect(),
+                problem.context().clone(),
+            ),
             time.into(),
         );
     }
     (problem, soln)
 }
 
-fn soln<V: Vector>() -> OdeSolverSolution<V> {
+fn soln<V: Vector>(ctx: V::C) -> OdeSolverSolution<V> {
     let mut soln = OdeSolverSolution::default();
     let data = vec![
         (vec![1.0, 0.0, 0.0], 0.0),
@@ -156,7 +163,7 @@ fn soln<V: Vector>() -> OdeSolverSolution<V> {
 
     for (values, time) in data {
         soln.push(
-            V::from_vec(values.into_iter().map(|v| v.into()).collect()),
+            V::from_vec(values.into_iter().map(|v| v.into()).collect(), ctx.clone()),
             time.into(),
         );
     }

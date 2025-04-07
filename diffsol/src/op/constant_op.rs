@@ -5,7 +5,7 @@ use num_traits::{One, Zero};
 pub trait ConstantOp: Op {
     fn call_inplace(&self, t: Self::T, y: &mut Self::V);
     fn call(&self, t: Self::T) -> Self::V {
-        let mut y = Self::V::zeros(self.nout());
+        let mut y = Self::V::zeros(self.nout(), self.context().clone());
         self.call_inplace(t, &mut y);
         y
     }
@@ -26,8 +26,8 @@ pub trait ConstantOpSens: ConstantOp {
 
     /// Default implementation of the gradient computation (this is the default for [Self::sens_inplace]).
     fn _default_sens_inplace(&self, t: Self::T, y: &mut Self::M) {
-        let mut v = Self::V::zeros(self.nparams());
-        let mut col = Self::V::zeros(self.nout());
+        let mut v = Self::V::zeros(self.nparams(), self.context().clone());
+        let mut col = Self::V::zeros(self.nout(), self.context().clone());
         for j in 0..self.nparams() {
             v.set_index(j, Self::T::one());
             self.sens_mul_inplace(t, &v, &mut col);
@@ -41,7 +41,7 @@ pub trait ConstantOpSens: ConstantOp {
     fn sens(&self, t: Self::T) -> Self::M {
         let n = self.nstates();
         let m = self.nparams();
-        let mut y = Self::M::new_from_sparsity(n, m, self.sens_sparsity());
+        let mut y = Self::M::new_from_sparsity(n, m, self.sens_sparsity(), self.context().clone());
         self.sens_inplace(t, &mut y);
         y
     }
@@ -59,7 +59,8 @@ pub trait ConstantOpSensAdjoint: ConstantOp {
     /// See [Self::sens_adjoint_inplace] for a non-allocating version.
     fn sens_adjoint(&self, t: Self::T) -> Self::M {
         let n = self.nstates();
-        let mut y = Self::M::new_from_sparsity(n, n, self.sens_adjoint_sparsity());
+        let mut y =
+            Self::M::new_from_sparsity(n, n, self.sens_adjoint_sparsity(), self.context().clone());
         self.sens_adjoint_inplace(t, &mut y);
         y
     }
@@ -74,8 +75,8 @@ pub trait ConstantOpSensAdjoint: ConstantOp {
 
     /// Default implementation of the gradient computation (this is the default for [Self::sens_adjoint_inplace]).
     fn _default_sens_adjoint_inplace(&self, t: Self::T, y: &mut Self::M) {
-        let mut v = Self::V::zeros(self.nstates());
-        let mut col = Self::V::zeros(self.nout());
+        let mut v = Self::V::zeros(self.nstates(), self.context().clone());
+        let mut col = Self::V::zeros(self.nout(), self.context().clone());
         for j in 0..self.nstates() {
             v.set_index(j, Self::T::one());
             self.sens_transpose_mul_inplace(t, &v, &mut col);

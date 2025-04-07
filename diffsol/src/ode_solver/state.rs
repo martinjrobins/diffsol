@@ -146,7 +146,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         solver_order: usize,
     ) -> Result<Self, DiffsolError>
     where
-        Eqn: OdeEquationsImplicit<T = V::T, V = V>,
+        Eqn: OdeEquationsImplicit<T = V::T, V = V, C = V::C>,
         LS: LinearSolver<Eqn::M>,
     {
         let mut ret = Self::new_without_initialise(ode_problem)?;
@@ -167,7 +167,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         solver_order: usize,
     ) -> Result<Self, DiffsolError>
     where
-        Eqn: OdeEquationsSens<T = V::T, V = V>,
+        Eqn: OdeEquationsSens<T = V::T, V = V, C = V::C>,
         LS: LinearSolver<Eqn::M>,
     {
         let mut augmented_eqn = SensEquations::new(ode_problem);
@@ -180,7 +180,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         solver_order: usize,
     ) -> Result<Self, DiffsolError>
     where
-        Eqn: OdeEquationsImplicit<T = V::T, V = V>,
+        Eqn: OdeEquationsImplicit<T = V::T, V = V, C = V::C>,
         AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> + std::fmt::Debug,
         LS: LinearSolver<Eqn::M>,
     {
@@ -205,7 +205,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         augmented_eqn: &mut AugmentedEqn,
     ) -> Result<Self, DiffsolError>
     where
-        Eqn: OdeEquationsImplicit<T = V::T, V = V>,
+        Eqn: OdeEquationsImplicit<T = V::T, V = V, C = V::C>,
         AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> + std::fmt::Debug,
         LS: LinearSolver<AugmentedEqn::M>,
     {
@@ -215,10 +215,11 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let mut s = Vec::with_capacity(naug);
         let mut ds = Vec::with_capacity(naug);
         let nstates = augmented_eqn.rhs().nstates();
+        let ctx = ode_problem.context();
         for i in 0..naug {
             augmented_eqn.set_index(i);
             let si = augmented_eqn.init().call(state.t);
-            let dsi = V::zeros(nstates);
+            let dsi = V::zeros(nstates, ctx.clone());
             s.push(si);
             ds.push(dsi);
         }
@@ -233,7 +234,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
                     .out()
                     .ok_or(ode_solver_error!(StateProblemMismatch))?;
                 let dsgi = out.call(&state.s[i], state.t);
-                let sgi = V::zeros(out.nout());
+                let sgi = V::zeros(out.nout(), ctx.clone());
                 sg.push(sgi);
                 dsg.push(dsgi);
             }
@@ -257,21 +258,24 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         ode_problem: &OdeSolverProblem<Eqn>,
     ) -> Result<Self, DiffsolError>
     where
-        Eqn: OdeEquations<T = V::T, V = V>,
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
     {
         let t = ode_problem.t0;
         let h = ode_problem.h0;
         let y = ode_problem.eqn.init().call(t);
-        let dy = V::zeros(y.len());
+        let dy = V::zeros(y.len(), y.context().clone());
         let (s, ds) = (vec![], vec![]);
         let (dg, g) = if ode_problem.integrate_out {
             let out = ode_problem
                 .eqn
                 .out()
                 .ok_or(ode_solver_error!(StateProblemMismatch))?;
-            (out.call(&y, t), V::zeros(out.nout()))
+            (out.call(&y, t), V::zeros(out.nout(), y.context().clone()))
         } else {
-            (V::zeros(0), V::zeros(0))
+            (
+                V::zeros(0, y.context().clone()),
+                V::zeros(0, y.context().clone()),
+            )
         };
         let (sg, dsg) = (vec![], vec![]);
         let state = StateCommon {
@@ -294,7 +298,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         augmented_eqn: &mut AugmentedEqn,
     ) -> Result<Self, DiffsolError>
     where
-        Eqn: OdeEquations<T = V::T, V = V>,
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
         AugmentedEqn: AugmentedOdeEquations<Eqn>,
     {
         let mut state = Self::new_without_initialise(ode_problem)?.into_common();
@@ -302,10 +306,11 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let mut s = Vec::with_capacity(naug);
         let mut ds = Vec::with_capacity(naug);
         let nstates = augmented_eqn.rhs().nstates();
+        let ctx = ode_problem.context();
         for i in 0..naug {
             augmented_eqn.set_index(i);
             let si = augmented_eqn.init().call(state.t);
-            let dsi = V::zeros(nstates);
+            let dsi = V::zeros(nstates, ctx.clone());
             s.push(si);
             ds.push(dsi);
         }
@@ -320,7 +325,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
                     .out()
                     .ok_or(ode_solver_error!(StateProblemMismatch))?;
                 let dsgi = out.call(&state.s[i], state.t);
-                let sgi = V::zeros(out.nout());
+                let sgi = V::zeros(out.nout(), ctx.clone());
                 sg.push(sgi);
                 dsg.push(dsgi);
             }
@@ -340,7 +345,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         root_solver: &mut S,
     ) -> Result<(), DiffsolError>
     where
-        Eqn: OdeEquationsImplicit<T = V::T, V = V>,
+        Eqn: OdeEquationsImplicit<T = V::T, V = V, C = V::C>,
         S: NonLinearSolver<Eqn::M>,
     {
         let state = self.as_mut();
@@ -375,7 +380,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         root_solver: &mut S,
     ) -> Result<(), DiffsolError>
     where
-        Eqn: OdeEquationsImplicit<T = V::T, V = V>,
+        Eqn: OdeEquationsImplicit<T = V::T, V = V, C = V::C>,
         AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> + std::fmt::Debug,
         S: NonLinearSolver<AugmentedEqn::M>,
     {
@@ -422,7 +427,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         eqn: &Eqn,
         solver_order: usize,
     ) where
-        Eqn: OdeEquations<T = V::T, V = V>,
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
     {
         let is_neg_h = h0 < Eqn::T::zero();
         let (h0, h1) = {

@@ -33,7 +33,7 @@ impl OdeEquationsStatistics {
 }
 
 pub trait AugmentedOdeEquations<Eqn: OdeEquations>:
-    OdeEquations<T = Eqn::T, V = Eqn::V, M = Eqn::M> + Clone
+    OdeEquations<T = Eqn::T, V = Eqn::V, M = Eqn::M, C = Eqn::C> + Clone
 {
     fn update_rhs_out_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T);
     fn update_init_state(&mut self, t: Eqn::T);
@@ -49,13 +49,14 @@ pub trait AugmentedOdeEquations<Eqn: OdeEquations>:
 }
 
 pub trait AugmentedOdeEquationsImplicit<Eqn: OdeEquationsImplicit>:
-    AugmentedOdeEquations<Eqn> + OdeEquationsImplicit<T = Eqn::T, V = Eqn::V, M = Eqn::M>
+    AugmentedOdeEquations<Eqn> + OdeEquationsImplicit<T = Eqn::T, V = Eqn::V, M = Eqn::M, C = Eqn::C>
 {
 }
 
 impl<Aug, Eqn> AugmentedOdeEquationsImplicit<Eqn> for Aug
 where
-    Aug: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit<T = Eqn::T, V = Eqn::V, M = Eqn::M>,
+    Aug: AugmentedOdeEquations<Eqn>
+        + OdeEquationsImplicit<T = Eqn::T, V = Eqn::V, M = Eqn::M, C = Eqn::C>,
     Eqn: OdeEquationsImplicit,
 {
 }
@@ -79,6 +80,7 @@ where
     type T = Eqn::T;
     type V = Eqn::V;
     type M = Eqn::M;
+    type C = Eqn::C;
 
     fn nout(&self) -> usize {
         panic!("This should never be called")
@@ -90,6 +92,9 @@ where
         panic!("This should never be called")
     }
     fn statistics(&self) -> crate::op::OpStatistics {
+        panic!("This should never be called")
+    }
+    fn context(&self) -> &Self::C {
         panic!("This should never be called")
     }
 }
@@ -185,11 +190,11 @@ impl<Eqn: OdeEquationsImplicit> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
 /// - the root function `G(t, y)` which is given as a [NonLinearOp] using the `Root` associated type and the [OdeEquations::root] function
 /// - the output function `H(t, y)` which is given as a [NonLinearOp] using the `Out` associated type and the [OdeEquations::out] function
 pub trait OdeEquationsRef<'a, ImplicitBounds: Sealed = Bounds<&'a Self>>: Op {
-    type Mass: LinearOp<M = Self::M, V = Self::V, T = Self::T>;
-    type Rhs: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
-    type Root: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
-    type Init: ConstantOp<M = Self::M, V = Self::V, T = Self::T>;
-    type Out: NonLinearOp<M = Self::M, V = Self::V, T = Self::T>;
+    type Mass: LinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
+    type Rhs: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
+    type Root: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
+    type Init: ConstantOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
+    type Out: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
 }
 
 impl<'a, T: OdeEquationsRef<'a>> OdeEquationsRef<'a> for &T {
@@ -315,51 +320,51 @@ impl<T: OdeEquations> OdeEquations for &'_ T {
 }
 
 pub trait OdeEquationsImplicit:
-    OdeEquations<Rhs: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T>>
+    OdeEquations<Rhs: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T, C = Self::C>>
 {
 }
 
 impl<T> OdeEquationsImplicit for T where
-    T: OdeEquations<Rhs: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T>>
+    T: OdeEquations<Rhs: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = Self::C>>
 {
 }
 
 pub trait OdeEquationsSens:
     OdeEquationsImplicit<
-    Rhs: NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T>,
-    Init: ConstantOpSens<M = Self::M, V = Self::V, T = Self::T>,
+    Rhs: NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Init: ConstantOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
 >
 {
 }
 
 impl<T> OdeEquationsSens for T where
     T: OdeEquationsImplicit<
-        Rhs: NonLinearOpSens<M = T::M, V = T::V, T = T::T>,
-        Init: ConstantOpSens<M = T::M, V = T::V, T = T::T>,
+        Rhs: NonLinearOpSens<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Init: ConstantOpSens<M = T::M, V = T::V, T = T::T, C = T::C>,
     >
 {
 }
 
 pub trait OdeEquationsAdjoint:
     OdeEquationsImplicit<
-    Rhs: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T>
-             + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T>,
-    Init: ConstantOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T>,
-    Out: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T>
-             + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T>,
-    Mass: LinearOpTranspose<M = Self::M, V = Self::V, T = Self::T>,
+    Rhs: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+             + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Init: ConstantOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Out: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+             + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Mass: LinearOpTranspose<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
 >
 {
 }
 
 impl<T> OdeEquationsAdjoint for T where
     T: OdeEquationsImplicit<
-        Rhs: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T>
-                 + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T>,
-        Init: ConstantOpSensAdjoint<M = T::M, V = T::V, T = T::T>,
-        Out: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T>
-                 + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T>,
-        Mass: LinearOpTranspose<M = T::M, V = T::V, T = T::T>,
+        Rhs: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
+                 + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Init: ConstantOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Out: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
+                 + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Mass: LinearOpTranspose<M = T::M, V = T::V, T = T::T, C = T::C>,
     >
 {
 }
@@ -419,15 +424,16 @@ where
 impl<M, Rhs, Init, Mass, Root, Out> Op for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
 where
     M: Matrix,
-    Init: Op<M = M, V = M::V, T = M::T>,
-    Rhs: Op<M = M, V = M::V, T = M::T>,
-    Mass: Op<M = M, V = M::V, T = M::T>,
-    Root: Op<M = M, V = M::V, T = M::T>,
-    Out: Op<M = M, V = M::V, T = M::T>,
+    Init: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Rhs: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Mass: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Root: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Out: Op<M = M, V = M::V, T = M::T, C = M::C>,
 {
     type T = M::T;
     type V = M::V;
     type M = M;
+    type C = M::C;
     fn nstates(&self) -> usize {
         self.init.nstates()
     }
@@ -443,22 +449,25 @@ where
     fn statistics(&self) -> crate::op::OpStatistics {
         self.rhs.statistics()
     }
+    fn context(&self) -> &Self::C {
+        self.rhs.context()
+    }
 }
 
 impl<'a, M, Rhs, Init, Mass, Root, Out> OdeEquationsRef<'a>
     for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
 where
     M: Matrix,
-    Rhs: Op<M = M, V = M::V, T = M::T>,
-    Init: Op<M = M, V = M::V, T = M::T>,
-    Mass: Op<M = M, V = M::V, T = M::T>,
-    Root: Op<M = M, V = M::V, T = M::T>,
-    Out: Op<M = M, V = M::V, T = M::T>,
-    ParameterisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T>,
-    ParameterisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T>,
-    ParameterisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T>,
-    ParameterisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T>,
-    ParameterisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T>,
+    Rhs: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Init: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Mass: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Root: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Out: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    ParameterisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+    ParameterisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T, C = M::C>,
+    ParameterisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+    ParameterisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+    ParameterisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
 {
     type Rhs = ParameterisedOp<'a, Rhs>;
     type Mass = ParameterisedOp<'a, Mass>;
@@ -471,16 +480,16 @@ impl<M, Rhs, Init, Mass, Root, Out> OdeEquations
     for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
 where
     M: Matrix,
-    Rhs: Op<M = M, V = M::V, T = M::T>,
-    Init: Op<M = M, V = M::V, T = M::T>,
-    Mass: Op<M = M, V = M::V, T = M::T>,
-    Root: Op<M = M, V = M::V, T = M::T>,
-    Out: Op<M = M, V = M::V, T = M::T>,
-    for<'a> ParameterisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T>,
-    for<'a> ParameterisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T>,
-    for<'a> ParameterisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T>,
-    for<'a> ParameterisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T>,
-    for<'a> ParameterisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T>,
+    Rhs: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Init: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Mass: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Root: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Out: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    for<'a> ParameterisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+    for<'a> ParameterisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T, C = M::C>,
+    for<'a> ParameterisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+    for<'a> ParameterisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+    for<'a> ParameterisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
 {
     fn rhs(&self) -> ParameterisedOp<'_, Rhs> {
         ParameterisedOp::new(&self.rhs, self.params())
@@ -513,64 +522,62 @@ where
 
 #[cfg(test)]
 mod tests {
-    use nalgebra::DVector;
-
+    use crate::matrix::dense_nalgebra_serial::NalgebraMat;
     use crate::ode_solver::equations::OdeEquations;
     use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
     use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
     use crate::vector::Vector;
-    use crate::{LinearOp, NonLinearOp, NonLinearOpJacobian};
+    use crate::{Context, DenseMatrix, LinearOp, NonLinearOp, NonLinearOpJacobian};
 
-    type Mcpu = nalgebra::DMatrix<f64>;
-    type Vcpu = nalgebra::DVector<f64>;
+    type Mcpu = NalgebraMat<f64>;
 
     #[test]
     fn ode_equation_test() {
         let (problem, _soln) = exponential_decay_problem::<Mcpu>(false);
-        let y = DVector::from_vec(vec![1.0, 1.0]);
+        let y = problem.context().vector_from_vec(vec![1.0, 1.0]);
         let rhs_y = problem.eqn.rhs().call(&y, 0.0);
-        let expect_rhs_y = DVector::from_vec(vec![-0.1, -0.1]);
+        let expect_rhs_y = problem.context().vector_from_vec(vec![-0.1, -0.1]);
         rhs_y.assert_eq_st(&expect_rhs_y, 1e-10);
         let jac_rhs_y = problem.eqn.rhs().jac_mul(&y, 0.0, &y);
-        let expect_jac_rhs_y = Vcpu::from_vec(vec![-0.1, -0.1]);
+        let expect_jac_rhs_y = problem.context().vector_from_vec(vec![-0.1, -0.1]);
         jac_rhs_y.assert_eq_st(&expect_jac_rhs_y, 1e-10);
         assert!(problem.eqn.mass().is_none());
         let jac = problem.eqn.rhs().jacobian(&y, 0.0);
-        assert_eq!(jac[(0, 0)], -0.1);
-        assert_eq!(jac[(1, 1)], -0.1);
-        assert_eq!(jac[(0, 1)], 0.0);
-        assert_eq!(jac[(1, 0)], 0.0);
+        assert_eq!(jac.get_index(0, 0), -0.1);
+        assert_eq!(jac.get_index(1, 1), -0.1);
+        assert_eq!(jac.get_index(0, 1), 0.0);
+        assert_eq!(jac.get_index(1, 0), 0.0);
     }
 
     #[test]
     fn ode_with_mass_test() {
         let (problem, _soln) = exponential_decay_with_algebraic_problem::<Mcpu>(false);
-        let y = DVector::from_vec(vec![1.0, 1.0, 1.0]);
+        let y = problem.context().vector_from_vec(vec![1.0, 1.0, 1.0]);
         let rhs_y = problem.eqn.rhs().call(&y, 0.0);
-        let expect_rhs_y = DVector::from_vec(vec![-0.1, -0.1, 0.0]);
+        let expect_rhs_y = problem.context().vector_from_vec(vec![-0.1, -0.1, 0.0]);
         rhs_y.assert_eq_st(&expect_rhs_y, 1e-10);
         let jac_rhs_y = problem.eqn.rhs().jac_mul(&y, 0.0, &y);
-        let expect_jac_rhs_y = Vcpu::from_vec(vec![-0.1, -0.1, 0.0]);
+        let expect_jac_rhs_y = problem.context().vector_from_vec(vec![-0.1, -0.1, 0.0]);
         jac_rhs_y.assert_eq_st(&expect_jac_rhs_y, 1e-10);
         let mass = problem.eqn.mass().unwrap().matrix(0.0);
-        assert_eq!(mass[(0, 0)], 1.);
-        assert_eq!(mass[(1, 1)], 1.);
-        assert_eq!(mass[(2, 2)], 0.);
-        assert_eq!(mass[(0, 1)], 0.);
-        assert_eq!(mass[(1, 0)], 0.);
-        assert_eq!(mass[(0, 2)], 0.);
-        assert_eq!(mass[(2, 0)], 0.);
-        assert_eq!(mass[(1, 2)], 0.);
-        assert_eq!(mass[(2, 1)], 0.);
+        assert_eq!(mass.get_index(0, 0), 1.);
+        assert_eq!(mass.get_index(1, 1), 1.);
+        assert_eq!(mass.get_index(2, 2), 0.);
+        assert_eq!(mass.get_index(0, 1), 0.);
+        assert_eq!(mass.get_index(1, 0), 0.);
+        assert_eq!(mass.get_index(0, 2), 0.);
+        assert_eq!(mass.get_index(2, 0), 0.);
+        assert_eq!(mass.get_index(1, 2), 0.);
+        assert_eq!(mass.get_index(2, 1), 0.);
         let jac = problem.eqn.rhs().jacobian(&y, 0.0);
-        assert_eq!(jac[(0, 0)], -0.1);
-        assert_eq!(jac[(1, 1)], -0.1);
-        assert_eq!(jac[(2, 2)], 1.0);
-        assert_eq!(jac[(0, 1)], 0.0);
-        assert_eq!(jac[(1, 0)], 0.0);
-        assert_eq!(jac[(0, 2)], 0.0);
-        assert_eq!(jac[(2, 0)], 0.0);
-        assert_eq!(jac[(1, 2)], 0.0);
-        assert_eq!(jac[(2, 1)], -1.0);
+        assert_eq!(jac.get_index(0, 0), -0.1);
+        assert_eq!(jac.get_index(1, 1), -0.1);
+        assert_eq!(jac.get_index(2, 2), 1.0);
+        assert_eq!(jac.get_index(0, 1), 0.0);
+        assert_eq!(jac.get_index(1, 0), 0.0);
+        assert_eq!(jac.get_index(0, 2), 0.0);
+        assert_eq!(jac.get_index(2, 0), 0.0);
+        assert_eq!(jac.get_index(1, 2), 0.0);
+        assert_eq!(jac.get_index(2, 1), -1.0);
     }
 }

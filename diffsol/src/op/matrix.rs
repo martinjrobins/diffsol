@@ -21,6 +21,7 @@ impl<M: Matrix> Op for MatrixOp<M> {
     type V = M::V;
     type T = M::T;
     type M = M;
+    type C = M::C;
     fn nstates(&self) -> usize {
         self.m.nrows()
     }
@@ -29,6 +30,9 @@ impl<M: Matrix> Op for MatrixOp<M> {
     }
     fn nparams(&self) -> usize {
         0
+    }
+    fn context(&self) -> &Self::C {
+        self.m.context()
     }
 }
 

@@ -35,6 +35,7 @@ pub struct DiffSlContext<M: Matrix<T = T>, CG: CodegenModule> {
     has_out: bool,
     nout: usize,
     nthreads: usize,
+    ctx: M::C,
 }
 
 impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
@@ -46,7 +47,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
     /// * `text` - The text of the ODE equations in the DiffSL language.
     /// * `nthreads` - The number of threads to use for code generation (0 for automatic, 1 for single-threaded).
     ///
-    pub fn new(text: &str, nthreads: usize) -> Result<Self, DiffsolError> {
+    pub fn new(text: &str, nthreads: usize, ctx: M::C) -> Result<Self, DiffsolError> {
         let mode = match nthreads {
             0 => diffsl::execution::compiler::CompilerMode::MultiThreaded(None),
             1 => diffsl::execution::compiler::CompilerMode::SingleThreaded,
@@ -75,10 +76,10 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
         let data = RefCell::new(compiler.get_new_data());
         let ddata = RefCell::new(compiler.get_new_data());
         let sens_data = RefCell::new(compiler.get_new_data());
-        let tmp = RefCell::new(M::V::zeros(nstates));
-        let tmp2 = RefCell::new(M::V::zeros(nstates));
-        let tmp_out = RefCell::new(M::V::zeros(nout));
-        let tmp2_out = RefCell::new(M::V::zeros(nout));
+        let tmp = RefCell::new(M::V::zeros(nstates, ctx.clone()));
+        let tmp2 = RefCell::new(M::V::zeros(nstates, ctx.clone()));
+        let tmp_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
+        let tmp2_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
 
         Ok(Self {
             compiler,
@@ -97,6 +98,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
             has_root,
             has_out,
             nthreads,
+            ctx,
         })
     }
 
@@ -111,7 +113,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
         let (nstates, nparams, nout, _ndata, nroots, has_mass) = self.compiler.get_dims();
         self.data = RefCell::new(self.compiler.get_new_data());
         self.ddata = RefCell::new(self.compiler.get_new_data());
-        self.tmp = RefCell::new(M::V::zeros(nstates));
+        self.tmp = RefCell::new(M::V::zeros(nstates, self.ctx.clone()));
         self.nparams = nparams;
         self.nstates = nstates;
         self.nout = nout;
@@ -130,6 +132,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> Default for DiffSlContext<M, CG> {
             out { y }
         ",
             1,
+            M::C::default(),
         )
         .unwrap()
     }
@@ -148,8 +151,8 @@ pub struct DiffSl<M: Matrix<T = T>, CG: CodegenModule> {
 }
 
 impl<M: MatrixHost<T = T>, CG: CodegenModule> DiffSl<M, CG> {
-    pub fn compile(code: &str) -> Result<Self, DiffsolError> {
-        let context = DiffSlContext::<M, CG>::new(code, 1)?;
+    pub fn compile(code: &str, ctx: M::C) -> Result<Self, DiffsolError> {
+        let context = DiffSlContext::<M, CG>::new(code, 1, ctx)?;
         Ok(Self::from_context(context))
     }
     pub fn from_context(context: DiffSlContext<M, CG>) -> Self {
@@ -166,14 +169,15 @@ impl<M: MatrixHost<T = T>, CG: CodegenModule> DiffSl<M, CG> {
         };
         if M::is_sparse() {
             let op = ret.rhs();
+            let ctx = op.context().clone();
             let t0 = 0.0;
-            let x0 = M::V::zeros(op.nstates());
+            let x0 = M::V::zeros(op.nstates(), op.context().clone());
             let non_zeros = find_jacobian_non_zeros(&op, &x0, t0);
             let n = op.nstates();
 
             let sparsity = M::Sparsity::try_from_indices(n, n, non_zeros.clone())
                 .expect("invalid sparsity pattern");
-            let coloring = JacobianColoring::new(&sparsity, &non_zeros);
+            let coloring = JacobianColoring::new(&sparsity, &non_zeros, op.context().clone());
             ret.rhs_coloring = Some(coloring);
             ret.rhs_sparsity = Some(sparsity);
 
@@ -183,15 +187,16 @@ impl<M: MatrixHost<T = T>, CG: CodegenModule> DiffSl<M, CG> {
                 .collect::<Vec<_>>();
             let sparsity = M::Sparsity::try_from_indices(n, n, non_zeros.clone())
                 .expect("invalid sparsity pattern");
-            let coloring = JacobianColoring::new(&sparsity, &non_zeros);
+            let coloring = JacobianColoring::new(&sparsity, &non_zeros, ctx);
             ret.rhs_adjoint_sparsity = Some(sparsity);
             ret.rhs_adjoint_coloring = Some(coloring);
 
             if let Some(op) = ret.mass() {
+                let ctx = op.context().clone();
                 let non_zeros = find_matrix_non_zeros(&op, t0);
                 let sparsity = M::Sparsity::try_from_indices(n, n, non_zeros.clone())
                     .expect("invalid sparsity pattern");
-                let coloring = JacobianColoring::new(&sparsity, &non_zeros);
+                let coloring = JacobianColoring::new(&sparsity, &non_zeros, op.context().clone());
                 ret.mass_coloring = Some(coloring);
                 ret.mass_sparsity = Some(sparsity);
 
@@ -201,7 +206,7 @@ impl<M: MatrixHost<T = T>, CG: CodegenModule> DiffSl<M, CG> {
                     .collect::<Vec<_>>();
                 let sparsity = M::Sparsity::try_from_indices(n, n, non_zeros.clone())
                     .expect("invalid sparsity pattern");
-                let coloring = JacobianColoring::new(&sparsity, &non_zeros);
+                let coloring = JacobianColoring::new(&sparsity, &non_zeros, ctx);
                 ret.mass_transpose_sparsity = Some(sparsity);
                 ret.mass_transpose_coloring = Some(coloring);
             }
@@ -222,6 +227,7 @@ macro_rules! impl_op_for_diffsl {
             type M = M;
             type T = T;
             type V = M::V;
+            type C = M::C;
 
             fn nstates(&self) -> usize {
                 self.0.context.nstates
@@ -232,6 +238,9 @@ macro_rules! impl_op_for_diffsl {
             }
             fn nparams(&self) -> usize {
                 self.0.context.nparams
+            }
+            fn context(&self) -> &Self::C {
+                &self.0.context.ctx
             }
         }
     };
@@ -244,6 +253,7 @@ impl<M: Matrix<T = T>, CG: CodegenModule> Op for DiffSlInit<'_, M, CG> {
     type M = M;
     type T = T;
     type V = M::V;
+    type C = M::C;
 
     fn nstates(&self) -> usize {
         self.0.context.nstates
@@ -255,12 +265,16 @@ impl<M: Matrix<T = T>, CG: CodegenModule> Op for DiffSlInit<'_, M, CG> {
     fn nparams(&self) -> usize {
         self.0.context.nparams
     }
+    fn context(&self) -> &Self::C {
+        &self.0.context.ctx
+    }
 }
 
 impl<M: Matrix<T = T>, CG: CodegenModule> Op for DiffSlRoot<'_, M, CG> {
     type M = M;
     type T = T;
     type V = M::V;
+    type C = M::C;
 
     fn nstates(&self) -> usize {
         self.0.context.nstates
@@ -272,12 +286,16 @@ impl<M: Matrix<T = T>, CG: CodegenModule> Op for DiffSlRoot<'_, M, CG> {
     fn nparams(&self) -> usize {
         self.0.context.nparams
     }
+    fn context(&self) -> &Self::C {
+        &self.0.context.ctx
+    }
 }
 
 impl<M: Matrix<T = T>, CG: CodegenModule> Op for DiffSlOut<'_, M, CG> {
     type M = M;
     type T = T;
     type V = M::V;
+    type C = M::C;
 
     fn nstates(&self) -> usize {
         self.0.context.nstates
@@ -287,6 +305,9 @@ impl<M: Matrix<T = T>, CG: CodegenModule> Op for DiffSlOut<'_, M, CG> {
     }
     fn nparams(&self) -> usize {
         self.0.context.nparams
+    }
+    fn context(&self) -> &Self::C {
+        &self.0.context.ctx
     }
 }
 
@@ -631,6 +652,7 @@ impl<M: MatrixHost<T = T>, CG: CodegenModule> Op for DiffSl<M, CG> {
     type M = M;
     type T = T;
     type V = M::V;
+    type C = M::C;
 
     fn nstates(&self) -> usize {
         self.context.nstates
@@ -644,6 +666,9 @@ impl<M: MatrixHost<T = T>, CG: CodegenModule> Op for DiffSl<M, CG> {
     }
     fn nparams(&self) -> usize {
         self.context.nparams
+    }
+    fn context(&self) -> &Self::C {
+        &self.context.ctx
     }
 }
 
@@ -683,7 +708,7 @@ impl<M: MatrixHost<T = T>, CG: CodegenModule> OdeEquations for DiffSl<M, CG> {
             .set_inputs(p.as_slice(), self.context.data.borrow_mut().as_mut_slice());
 
         // set_u0 will calculate all the constants in the equations based on the params
-        let mut dummy = M::V::zeros(self.context.nstates);
+        let mut dummy = M::V::zeros(self.context.nstates, self.context().clone());
         self.context.compiler.set_u0(
             dummy.as_mut_slice(),
             self.context.data.borrow_mut().as_mut_slice(),
@@ -700,11 +725,11 @@ impl<M: MatrixHost<T = T>, CG: CodegenModule> OdeEquations for DiffSl<M, CG> {
 #[cfg(test)]
 mod tests {
     use diffsl::{execution::module::CodegenModule, CraneliftModule};
-    use nalgebra::DVector;
 
     use crate::{
-        ConstantOp, LinearOp, NalgebraLU, NonLinearOp, NonLinearOpJacobian, OdeBuilder,
-        OdeEquations, OdeSolverMethod, Vector,
+        matrix::dense_nalgebra_serial::NalgebraMat, ConstantOp, Context, DenseMatrix, LinearOp,
+        NalgebraContext, NalgebraLU, NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations,
+        OdeSolverMethod, Vector, VectorView,
     };
 
     use super::{DiffSl, DiffSlContext};
@@ -749,31 +774,32 @@ mod tests {
 
         let k = 1.0;
         let r = 1.0;
-        let context = DiffSlContext::<nalgebra::DMatrix<f64>, CG>::new(text, 1).unwrap();
-        let p = DVector::from_vec(vec![r, k]);
+        let ctx = NalgebraContext::default();
+        let context = DiffSlContext::<NalgebraMat<f64>, CG>::new(text, 1, ctx.clone()).unwrap();
+        let p = ctx.vector_from_vec(vec![r, k]);
         let mut eqn = DiffSl::from_context(context);
         eqn.set_params(&p);
 
         // test that the initial values look ok
         let y0 = 0.1;
         let init = eqn.init().call(0.0);
-        let init_expect = DVector::from_vec(vec![y0, 0.0]);
+        let init_expect = ctx.vector_from_vec(vec![y0, 0.0]);
         init.assert_eq_st(&init_expect, 1e-10);
         let rhs = eqn.rhs().call(&init, 0.0);
-        let rhs_expect = DVector::from_vec(vec![r * y0 * (1.0 - y0 / k), 2.0 * y0]);
+        let rhs_expect = ctx.vector_from_vec(vec![r * y0 * (1.0 - y0 / k), 2.0 * y0]);
         rhs.assert_eq_st(&rhs_expect, 1e-10);
-        let v = DVector::from_vec(vec![1.0, 1.0]);
+        let v = ctx.vector_from_vec(vec![1.0, 1.0]);
         let rhs_jac = eqn.rhs().jac_mul(&init, 0.0, &v);
-        let rhs_jac_expect = DVector::from_vec(vec![r * (1.0 - y0 / k) - r * y0 / k, 1.0]);
+        let rhs_jac_expect = ctx.vector_from_vec(vec![r * (1.0 - y0 / k) - r * y0 / k, 1.0]);
         rhs_jac.assert_eq_st(&rhs_jac_expect, 1e-10);
-        let mut mass_y = DVector::from_vec(vec![0.0, 0.0]);
-        let v = DVector::from_vec(vec![1.0, 1.0]);
+        let mut mass_y = ctx.vector_from_vec(vec![0.0, 0.0]);
+        let v = ctx.vector_from_vec(vec![1.0, 1.0]);
         eqn.mass().unwrap().call_inplace(&v, 0.0, &mut mass_y);
-        let mass_y_expect = DVector::from_vec(vec![1.0, 0.0]);
+        let mass_y_expect = ctx.vector_from_vec(vec![1.0, 0.0]);
         mass_y.assert_eq_st(&mass_y_expect, 1e-10);
 
         // solver a bit and check the state and output
-        let problem = OdeBuilder::<nalgebra::DMatrix<f64>>::new()
+        let problem = OdeBuilder::<NalgebraMat<f64>>::new()
             .p([r, k])
             .build_from_eqn(eqn)
             .unwrap();
@@ -783,7 +809,7 @@ mod tests {
         for (i, t) in ts.iter().enumerate() {
             let y_expect = k / (1.0 + (k - y0) * (-r * t).exp() / y0);
             let z_expect = 2.0 * y_expect;
-            let expected_out = DVector::from_vec(vec![3.0 * y_expect, 4.0 * z_expect]);
+            let expected_out = ctx.vector_from_vec(vec![3.0 * y_expect, 4.0 * z_expect]);
             ys.column(i).into_owned().assert_eq_st(&expected_out, 1e-4);
         }
 
@@ -794,7 +820,7 @@ mod tests {
         for (i, t) in t_evals.iter().enumerate() {
             let y_expect = k / (1.0 + (k - y0) * (-r * t).exp() / y0);
             let z_expect = 2.0 * y_expect;
-            let expected_out = DVector::from_vec(vec![3.0 * y_expect, 4.0 * z_expect]);
+            let expected_out = ctx.vector_from_vec(vec![3.0 * y_expect, 4.0 * z_expect]);
             ys.column(i).into_owned().assert_eq_st(&expected_out, 1e-4);
         }
     }

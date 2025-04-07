@@ -125,10 +125,8 @@
 //! ## Matrix and vector types
 //!
 //! When solving ODEs, you will need to choose a matrix and vector type to use. DiffSol uses the following types:
-//! - [nalgebra::DMatrix] and [nalgebra::DVector] from the [nalgebra](https://nalgebra.org) library.
-//! - [faer::Mat] and [faer::Col] from the [faer](https://github.com/sarah-ek/faer-rs) library.
-//! - [nalgebra_sparse::CscMatrix] from the nalgebra-sparse library.
-//! - [SparseColMat], which is a thin wrapper around the [faer::sparse::SparseColMat] type from faer.
+//! - [NalgebraVec] and [NalgebraMat] (wrappers around [nalgebra::DMatrix] and [nalgebra::DVector] from the [nalgebra](https://nalgebra.org) library).
+//! - [FaerVec], [FaerMat] and [FaerSparseMat] (wrappers around [faer::Mat], [faer::Col] and [faer::sparse::SparseColMat] from the [faer](https://github.com/sarah-ek/faer-rs) library).
 //!
 //! If you wish to use your own matrix and vector types, you will need to implement the following traits:
 //! - For matrices: [Matrix], [MatrixView], [MatrixViewMut], [DenseMatrix], and [MatrixCommon].
@@ -140,6 +138,7 @@ pub use diffsl::LlvmModule;
 #[cfg(feature = "diffsl")]
 pub use diffsl::{execution::module::CodegenModule, CraneliftModule};
 
+pub mod context;
 pub mod jacobian;
 pub mod linear_solver;
 pub mod matrix;
@@ -156,7 +155,7 @@ pub mod sundials_sys;
 pub use linear_solver::LinearSolver;
 pub use linear_solver::{faer::sparse_lu::FaerSparseLU, FaerLU, NalgebraLU};
 
-pub use matrix::sparse_faer::SparseColMat;
+pub use context::{faer::FaerContext, nalgebra::NalgebraContext, Context};
 
 #[cfg(feature = "suitesparse")]
 pub use linear_solver::suitesparse::klu::KLU;
@@ -168,11 +167,15 @@ pub use jacobian::{
     find_adjoint_non_zeros, find_jacobian_non_zeros, find_matrix_non_zeros,
     find_sens_adjoint_non_zeros, find_sens_non_zeros, find_transpose_non_zeros, JacobianColoring,
 };
-use matrix::extract_block::{ColMajBlock, CscBlock};
-pub use matrix::{default_solver::DefaultSolver, Matrix};
+use matrix::extract_block::ColMajBlock;
+pub use matrix::{
+    default_solver::DefaultSolver, dense_faer_serial::FaerMat, dense_nalgebra_serial::NalgebraMat,
+    sparse_faer::FaerSparseMat, DenseMatrix, Matrix, MatrixCommon,
+};
+
 use matrix::{
     sparsity::Dense, sparsity::DenseRef, sparsity::MatrixSparsity, sparsity::MatrixSparsityRef,
-    DenseMatrix, MatrixCommon, MatrixHost, MatrixRef, MatrixView, MatrixViewMut,
+    MatrixHost, MatrixRef, MatrixView, MatrixViewMut,
 };
 use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus, root::RootFinder,
@@ -207,9 +210,13 @@ use op::{
     closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,
     constant_closure_with_sens::ConstantClosureWithSens, init::InitOp,
 };
-use scalar::{IndexType, Scalar, Scale};
+pub use scalar::{IndexType, Scalar, Scale};
 pub use vector::DefaultDenseMatrix;
-use vector::{Vector, VectorCommon, VectorHost, VectorIndex, VectorRef, VectorView, VectorViewMut};
+pub use vector::{
+    faer_serial::{FaerVec, FaerVecIndex, FaerVecMut, FaerVecRef},
+    nalgebra_serial::{NalgebraVec, NalgebraVecMut, NalgebraVecRef},
+    Vector, VectorCommon, VectorHost, VectorIndex, VectorRef, VectorView, VectorViewMut,
+};
 
 pub use scalar::scale;
 

@@ -4,12 +4,13 @@ use std::ops::MulAssign;
 
 use csv::ReaderBuilder;
 use diffsol::{
-    error::DiffsolError, AdjointOdeSolverMethod, NalgebraLU, NonLinearOp, NonLinearOpAdjoint,
+    error::DiffsolError, AdjointOdeSolverMethod, DenseMatrix, Matrix, MatrixCommon,
+    NalgebraContext, NalgebraLU, NalgebraMat, NalgebraVec, NonLinearOp, NonLinearOpAdjoint,
     NonLinearOpJacobian, NonLinearOpSensAdjoint, OdeBuilder, OdeEquations, OdeEquationsRef,
-    OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, UnitCallable,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Scale, UnitCallable, Vector,
+    VectorCommon, VectorView, VectorViewMut,
 };
 use diffsol::{ConstantOp, ConstantOpSensAdjoint};
-use nalgebra::{DMatrix, DVector};
 use ndarray::Array1;
 use ort::error::Result;
 use ort::inputs;
@@ -20,8 +21,9 @@ use plotly::{Layout, Plot, Scatter};
 use rand::distr::{Distribution, Uniform};
 
 type T = f64;
-type V = DVector<T>;
-type M = DMatrix<T>;
+type V = NalgebraVec<T>;
+type M = NalgebraMat<T>;
+type C = NalgebraContext;
 type LS = NalgebraLU<T>;
 
 const BASE_MODEL_DIR: &str = "examples/neural-ode-weather-prediction/src/model/";
@@ -86,6 +88,7 @@ impl Op for NeuralOde {
     type T = T;
     type V = V;
     type M = M;
+    type C = C;
     fn nstates(&self) -> usize {
         self.data_dim()
     }
@@ -94,6 +97,9 @@ impl Op for NeuralOde {
     }
     fn nparams(&self) -> usize {
         self.input_p.len()
+    }
+    fn context(&self) -> &Self::C {
+        self.y0.context()
     }
 }
 
@@ -121,12 +127,13 @@ impl OdeEquations for NeuralOde {
     fn set_params(&mut self, p: &Self::V) {
         self.input_p
             .iter_mut()
-            .zip(p.iter())
+            .zip(p.inner().iter())
             .for_each(|(input_p, p)| *input_p = *p as f32);
     }
 
     fn get_params(&self, p: &mut Self::V) {
-        p.iter_mut()
+        p.inner_mut()
+            .iter_mut()
             .zip(self.input_p.iter())
             .for_each(|(p, input_p)| *p = *input_p as f64);
     }
@@ -138,6 +145,7 @@ impl Op for Init<'_> {
     type M = M;
     type V = V;
     type T = T;
+    type C = C;
     fn nout(&self) -> usize {
         self.0.nout()
     }
@@ -146,6 +154,9 @@ impl Op for Init<'_> {
     }
     fn nstates(&self) -> usize {
         self.0.nstates()
+    }
+    fn context(&self) -> &Self::C {
+        self.0.context()
     }
 }
 
@@ -167,6 +178,7 @@ impl Op for Rhs<'_> {
     type M = M;
     type V = V;
     type T = T;
+    type C = C;
     fn nout(&self) -> usize {
         self.0.nout()
     }
@@ -176,6 +188,9 @@ impl Op for Rhs<'_> {
     fn nstates(&self) -> usize {
         self.0.nstates()
     }
+    fn context(&self) -> &Self::C {
+        self.0.context()
+    }
 }
 
 impl NonLinearOp for Rhs<'_> {
@@ -183,7 +198,7 @@ impl NonLinearOp for Rhs<'_> {
         let mut y_input = self.0.input_y.borrow_mut();
         y_input
             .iter_mut()
-            .zip(x.iter())
+            .zip(x.inner().iter())
             .for_each(|(y, x)| *y = *x as f32);
         let outputs = self
             .0
@@ -197,7 +212,8 @@ impl NonLinearOp for Rhs<'_> {
             )
             .unwrap();
         let y_data = outputs["Identity_1:0"].try_extract_tensor::<f32>().unwrap();
-        y.iter_mut()
+        y.inner_mut()
+            .iter_mut()
             .zip(y_data.as_slice().unwrap())
             .for_each(|(y, x)| *y = *x as f64);
     }
@@ -208,12 +224,12 @@ impl NonLinearOpJacobian for Rhs<'_> {
         let mut y_input = self.0.input_y.borrow_mut();
         y_input
             .iter_mut()
-            .zip(x.iter())
+            .zip(x.inner().iter())
             .for_each(|(y, x)| *y = *x as f32);
         let mut v_input = self.0.input_v.borrow_mut();
         v_input
             .iter_mut()
-            .zip(v.iter())
+            .zip(v.inner().iter())
             .for_each(|(v, x)| *v = *x as f32);
         let outputs = self
             .0
@@ -228,7 +244,8 @@ impl NonLinearOpJacobian for Rhs<'_> {
             )
             .unwrap();
         let y_data = outputs["Identity_1:0"].try_extract_tensor::<f32>().unwrap();
-        y.iter_mut()
+        y.inner_mut()
+            .iter_mut()
             .zip(y_data.as_slice().unwrap())
             .for_each(|(y, x)| *y = *x as f64);
     }
@@ -239,12 +256,12 @@ impl NonLinearOpAdjoint for Rhs<'_> {
         let mut y_input = self.0.input_y.borrow_mut();
         y_input
             .iter_mut()
-            .zip(x.iter())
+            .zip(x.inner().iter())
             .for_each(|(y, x)| *y = *x as f32);
         let mut v_input = self.0.input_v.borrow_mut();
         v_input
             .iter_mut()
-            .zip(v.iter())
+            .zip(v.inner().iter())
             .for_each(|(v, x)| *v = *x as f32);
         let outputs = self
             .0
@@ -259,7 +276,8 @@ impl NonLinearOpAdjoint for Rhs<'_> {
             )
             .unwrap();
         let y_data = outputs["Identity_1:0"].try_extract_tensor::<f32>().unwrap();
-        y.iter_mut()
+        y.inner_mut()
+            .iter_mut()
             .zip(y_data.as_slice().unwrap())
             .for_each(|(y, x)| *y = *x as f64);
     }
@@ -270,12 +288,12 @@ impl NonLinearOpSensAdjoint for Rhs<'_> {
         let mut y_input = self.0.input_y.borrow_mut();
         y_input
             .iter_mut()
-            .zip(x.iter())
+            .zip(x.inner().iter())
             .for_each(|(y, x)| *y = *x as f32);
         let mut v_input = self.0.input_v.borrow_mut();
         v_input
             .iter_mut()
-            .zip(v.iter())
+            .zip(v.inner().iter())
             .for_each(|(v, x)| *v = *x as f32);
         let outputs = self
             .0
@@ -290,7 +308,8 @@ impl NonLinearOpSensAdjoint for Rhs<'_> {
             )
             .unwrap();
         let y_data = outputs["Identity_1:0"].try_extract_tensor::<f32>().unwrap();
-        y.iter_mut()
+        y.inner_mut()
+            .iter_mut()
             .zip(y_data.as_slice().unwrap())
             .for_each(|(y, x)| *y = *x as f64);
     }
@@ -304,19 +323,21 @@ struct AdamW {
     m_hat: V,
     v: V,
     v_hat: V,
+    grads2: V,
     lambda: T,
     t: i32,
 }
 
 impl AdamW {
-    fn new(nparams: usize) -> Self {
+    fn new(nparams: usize, ctx: C) -> Self {
         let lr = 1e-2;
         let betas = (0.9, 0.999);
         let eps = 1e-8;
-        let m = V::zeros(nparams);
-        let m_hat = V::zeros(nparams);
-        let v = V::zeros(nparams);
-        let v_hat = V::zeros(nparams);
+        let m = V::zeros(nparams, ctx.clone());
+        let m_hat = V::zeros(nparams, ctx.clone());
+        let v = V::zeros(nparams, ctx.clone());
+        let v_hat = V::zeros(nparams, ctx.clone());
+        let grads2 = V::zeros(nparams, ctx.clone());
         let lambda = 1e-2;
         Self {
             lr,
@@ -327,25 +348,25 @@ impl AdamW {
             v,
             v_hat,
             lambda,
+            grads2,
             t: 0,
         }
     }
 
     fn step(&mut self, params: &mut V, grads: &V) {
         self.t += 1;
-        params.mul_assign(1.0 - self.lr * self.lambda);
+        params.mul_assign(Scale(1.0 - self.lr * self.lambda));
         self.m.axpy(1.0 - self.betas.0, grads, self.betas.0);
-        self.v.axpy(
-            1.0 - self.betas.1,
-            &grads.component_mul(grads),
-            self.betas.1,
-        );
-        self.m_hat = &self.m / (1.0 - self.betas.0.powi(self.t));
-        self.v_hat = &self.v / (1.0 - self.betas.1.powi(self.t));
+        self.grads2.copy_from(grads);
+        self.grads2.component_mul_assign(grads);
+        self.v.axpy(1.0 - self.betas.1, &self.grads2, self.betas.1);
+        self.m_hat = &self.m * Scale(1.0 / (1.0 - self.betas.0.powi(self.t)));
+        self.v_hat = &self.v * Scale(1.0 / (1.0 - self.betas.1.powi(self.t)));
         params
+            .inner_mut()
             .iter_mut()
-            .zip(self.v_hat.iter())
-            .zip(self.m_hat.iter())
+            .zip(self.v_hat.inner().iter())
+            .zip(self.m_hat.inner().iter())
             .for_each(|((params_i, v_hat_i), m_hat_i)| {
                 *params_i -= self.lr * m_hat_i / (v_hat_i.sqrt() + self.eps)
             });
@@ -366,8 +387,8 @@ fn loss_fn(
     let mut loss = 0.0;
     for j in 0..g_m.ncols() {
         let delta = ys.column(j) - ys_data.column(j);
-        loss += delta.dot(&delta);
-        let g_m_i = 2.0 * delta;
+        loss += delta.inner().dot(delta.inner());
+        let g_m_i = delta * Scale(2.0);
         g_m.column_mut(j).copy_from(&g_m_i);
     }
     let adjoint_solver = problem.bdf_solver_adjoint::<LS, _>(c, Some(1)).unwrap();
@@ -390,8 +411,8 @@ fn train_one_round(
     ys_data: &M,
     p: &mut V,
 ) {
-    let mut gm = M::zeros(problem.eqn.nout(), ts_data.len());
-    let mut adam = AdamW::new(problem.eqn.nparams());
+    let mut gm = M::zeros(problem.eqn.nout(), ts_data.len(), problem.context().clone());
+    let mut adam = AdamW::new(problem.eqn.nparams(), problem.context().clone());
     for _ in 0..150 {
         match loss_fn(problem, p, ts_data, ys_data, &mut gm) {
             Ok((loss, g)) => {
@@ -407,13 +428,14 @@ fn train_one_round(
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // load data
+    let ctx = NalgebraContext;
     let file = File::open(format!("{}{}", BASE_DATA_DIR, "MonthlyDelhiClimate.csv"))?;
     let mut reader = ReaderBuilder::new().has_headers(true).from_reader(file);
     let nrows = reader.records().count();
     let file = File::open(format!("{}{}", BASE_DATA_DIR, "MonthlyDelhiClimate.csv"))?;
     let mut reader = ReaderBuilder::new().has_headers(true).from_reader(file);
     let data_dim = 4;
-    let mut ys_data = M::zeros(data_dim, nrows);
+    let mut ys_data = M::zeros(data_dim, nrows, ctx.clone());
     let mut ts_data = vec![0.0; nrows];
     for (j, row) in reader.records().enumerate() {
         let row = row?;
@@ -437,7 +459,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect::<Vec<_>>();
     let mut problem = OdeBuilder::<M>::new().p(p).build_from_eqn(eqn)?;
 
-    let mut p = V::zeros(problem.eqn.nparams());
+    let mut p = V::zeros(problem.eqn.nparams(), problem.context().clone());
     problem.eqn.get_params(&mut p);
 
     let ntimes = ts_data.len();
@@ -445,9 +467,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // train
         let batch_len = i * 4;
         let ts_data_batch = &ts_data[0..batch_len];
-        let mut ys_data_batch = M::zeros(ys_data.nrows(), batch_len);
+        let mut ys_data_batch = M::zeros(ys_data.nrows(), batch_len, problem.context().clone());
         for j in 0..batch_len {
-            ys_data_batch.column_mut(j).copy_from(&ys_data.column(j));
+            ys_data_batch
+                .column_mut(j)
+                .copy_from_view(&ys_data.column(j));
         }
         println!("Training on data points: {}", batch_len);
         train_one_round(&mut problem, ts_data_batch, &ys_data_batch, &mut p);

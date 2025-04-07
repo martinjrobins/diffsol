@@ -1,73 +1,108 @@
-use std::ops::{AddAssign, Mul, MulAssign};
+use std::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
 use super::default_solver::DefaultSolver;
+use super::utils::*;
 use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 use crate::error::DiffsolError;
 use crate::scalar::{IndexType, Scalar, Scale};
-use crate::FaerLU;
 use crate::VectorIndex;
-use crate::{Dense, DenseRef, Vector};
+use crate::{Dense, DenseRef, FaerContext, FaerVec, Vector, VectorViewMut};
+use crate::{FaerLU, FaerVecMut, FaerVecRef};
 
 use faer::{get_global_parallelism, unzip, zip, Accum};
-use faer::{linalg::matmul::matmul, Col, ColMut, ColRef, Mat, MatMut, MatRef};
+use faer::{linalg::matmul::matmul, Mat, MatMut, MatRef};
 
-impl<T: Scalar> DefaultSolver for Mat<T> {
+#[derive(Clone, Debug, PartialEq)]
+pub struct FaerMat<T: Scalar> {
+    pub(crate) data: Mat<T>,
+    pub(crate) context: FaerContext,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FaerMatRef<'a, T: Scalar> {
+    pub(crate) data: MatRef<'a, T>,
+    pub(crate) context: FaerContext,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct FaerMatMut<'a, T: Scalar> {
+    pub(crate) data: MatMut<'a, T>,
+    pub(crate) context: FaerContext,
+}
+
+impl<T: Scalar> DefaultSolver for FaerMat<T> {
     type LS = FaerLU<T>;
 }
 
-macro_rules! impl_matrix_common {
-    ($mat_type:ty) => {
-        impl<'a, T: Scalar> MatrixCommon for $mat_type {
-            type T = T;
-            type V = Col<T>;
+impl_matrix_common_ref!(FaerMatMut<'a, T>, FaerVec<T>, FaerContext, MatMut<'a, T>);
+impl_matrix_common_ref!(FaerMatRef<'a, T>, FaerVec<T>, FaerContext, MatRef<'a, T>);
+impl_matrix_common!(FaerMat<T>, FaerVec<T>, FaerContext, Mat<T>);
 
-            fn nrows(&self) -> IndexType {
-                self.nrows()
-            }
-            fn ncols(&self) -> IndexType {
-                self.ncols()
-            }
-        }
-    };
-}
-
-impl_matrix_common!(MatMut<'a, T>);
-impl_matrix_common!(MatRef<'a, T>);
-impl_matrix_common!(Mat<T>);
-
-macro_rules! impl_mul_scale {
-    ($mat_type:ty) => {
+macro_rules! impl_mul_scalar {
+    ($mat_type:ty, $out:ty) => {
         impl<'a, T: Scalar> Mul<Scale<T>> for $mat_type {
-            type Output = Mat<T>;
+            type Output = $out;
 
             fn mul(self, rhs: Scale<T>) -> Self::Output {
                 let scale: faer::Scale<T> = rhs.into();
-                self * scale
+                Self::Output {
+                    data: &self.data * scale,
+                    context: self.context.clone(),
+                }
             }
         }
     };
 }
-impl_mul_scale!(MatRef<'a, T>);
-impl_mul_scale!(Mat<T>);
-impl_mul_scale!(&Mat<T>);
 
-impl<T: Scalar> MulAssign<Scale<T>> for MatMut<'_, T> {
-    fn mul_assign(&mut self, rhs: Scale<T>) {
-        let scale: faer::Scale<T> = rhs.into();
-        *self *= scale;
-    }
+macro_rules! impl_mul_assign_scalar {
+    ($mat_type:ty) => {
+        impl<T: Scalar> MulAssign<Scale<T>> for $mat_type {
+            fn mul_assign(&mut self, rhs: Scale<T>) {
+                let scale: faer::Scale<T> = rhs.into();
+                self.data *= scale;
+            }
+        }
+    };
 }
 
-impl<'a, T: Scalar> MatrixView<'a> for MatRef<'a, T> {
-    type Owned = Mat<T>;
+impl_mul_scalar!(FaerMatRef<'_, T>, FaerMat<T>);
+impl_mul_scalar!(FaerMat<T>, FaerMat<T>);
+impl_mul_scalar!(&FaerMat<T>, FaerMat<T>);
+
+impl_mul_assign_scalar!(FaerMatMut<'_, T>);
+
+impl_add!(FaerMat<T>, &FaerMat<T>, FaerMat<T>);
+impl_add!(FaerMat<T>, &FaerMatRef<'_, T>, FaerMat<T>);
+impl_add!(FaerMatRef<'_, T>, &FaerMat<T>, FaerMat<T>);
+
+impl_sub!(FaerMat<T>, &FaerMat<T>, FaerMat<T>);
+impl_sub!(FaerMat<T>, &FaerMatRef<'_, T>, FaerMat<T>);
+impl_sub!(FaerMatRef<'_, T>, &FaerMat<T>, FaerMat<T>);
+
+impl_add_assign!(FaerMat<T>, &FaerMat<T>);
+impl_add_assign!(FaerMat<T>, &FaerMatRef<'_, T>);
+impl_add_assign!(FaerMatMut<'_, T>, &FaerMatRef<'_, T>);
+impl_add_assign!(FaerMatMut<'_, T>, &FaerMatMut<'_, T>);
+
+impl_sub_assign!(FaerMat<T>, &FaerMat<T>);
+impl_sub_assign!(FaerMat<T>, &FaerMatRef<'_, T>);
+impl_sub_assign!(FaerMatMut<'_, T>, &FaerMatRef<'_, T>);
+impl_sub_assign!(FaerMatMut<'_, T>, &FaerMatMut<'_, T>);
+
+impl_index!(FaerMat<T>);
+impl_index!(FaerMatRef<'_, T>);
+impl_index_mut!(FaerMat<T>);
+
+impl<'a, T: Scalar> MatrixView<'a> for FaerMatRef<'a, T> {
+    type Owned = FaerMat<T>;
 
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
         y.mul_assign(Scale(beta));
         matmul(
-            y.as_mut(),
+            y.data.as_mut(),
             Accum::Add,
-            self.as_ref(),
-            x.as_ref(),
+            self.data.as_ref(),
+            x.data.as_ref(),
             alpha,
             get_global_parallelism(),
         );
@@ -81,27 +116,27 @@ impl<'a, T: Scalar> MatrixView<'a> for MatRef<'a, T> {
     ) {
         y.mul_assign(Scale(beta));
         matmul(
-            y.as_mut(),
+            y.data.as_mut(),
             Accum::Add,
-            self.as_ref(),
-            x.as_ref(),
+            self.data.as_ref(),
+            x.data.as_ref(),
             alpha,
             get_global_parallelism(),
         );
     }
 }
 
-impl<'a, T: Scalar> MatrixViewMut<'a> for MatMut<'a, T> {
-    type Owned = Mat<T>;
-    type View = MatRef<'a, T>;
+impl<'a, T: Scalar> MatrixViewMut<'a> for FaerMatMut<'a, T> {
+    type Owned = FaerMat<T>;
+    type View = FaerMatRef<'a, T>;
 
     fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T) {
         self.mul_assign(Scale(beta));
         matmul(
-            self.as_mut(),
+            self.data.as_mut(),
             Accum::Add,
-            a.as_ref(),
-            b.as_ref(),
+            a.data.as_ref(),
+            b.data.as_ref(),
             alpha,
             get_global_parallelism(),
         )
@@ -109,56 +144,73 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for MatMut<'a, T> {
     fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T) {
         self.mul_assign(Scale(beta));
         matmul(
-            self.as_mut(),
+            self.data.as_mut(),
             Accum::Add,
-            a.as_ref(),
-            b.as_ref(),
+            a.data.as_ref(),
+            b.data.as_ref(),
             alpha,
             get_global_parallelism(),
         )
     }
 }
 
-impl<T: Scalar> DenseMatrix for Mat<T> {
-    type View<'a> = MatRef<'a, T>;
-    type ViewMut<'a> = MatMut<'a, T>;
+impl<T: Scalar> DenseMatrix for FaerMat<T> {
+    type View<'a> = FaerMatRef<'a, T>;
+    type ViewMut<'a> = FaerMatMut<'a, T>;
 
-    fn from_vec(nrows: IndexType, ncols: IndexType, data: Vec<Self::T>) -> Self {
-        Self::from_fn(nrows, ncols, |i, j| data[i + j * nrows])
+    fn from_vec(nrows: IndexType, ncols: IndexType, data: Vec<Self::T>, ctx: Self::C) -> Self {
+        let data = Mat::from_fn(nrows, ncols, |i, j| data[i + j * nrows]);
+        Self { data, context: ctx }
     }
 
     fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {
-        self[(i, j)]
+        self.data[(i, j)]
     }
 
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T) {
-        self.mul_assign(faer::Scale(beta));
+        self.data.mul_assign(faer::Scale(beta));
         matmul(
-            self.as_mut(),
+            self.data.as_mut(),
             Accum::Add,
-            a.as_ref(),
-            b.as_ref(),
+            a.data.as_ref(),
+            b.data.as_ref(),
             alpha,
             get_global_parallelism(),
         )
     }
-    fn column_mut(&mut self, i: usize) -> ColMut<'_, T> {
-        self.get_mut(0..self.nrows(), i)
+    fn column_mut(&mut self, i: usize) -> <Self::V as Vector>::ViewMut<'_> {
+        let data = self.data.get_mut(0..self.nrows(), i);
+        FaerVecMut {
+            data,
+            context: self.context.clone(),
+        }
     }
 
-    fn columns_mut(&mut self, start: usize, ncols: usize) -> MatMut<'_, T> {
-        self.get_mut(0..self.nrows(), start..ncols)
+    fn columns_mut(&mut self, start: usize, ncols: usize) -> Self::ViewMut<'_> {
+        let data = self.data.get_mut(0..self.data.nrows(), start..ncols);
+        FaerMatMut {
+            data,
+            context: self.context.clone(),
+        }
     }
 
     fn set_index(&mut self, i: IndexType, j: IndexType, value: Self::T) {
-        self[(i, j)] = value;
+        self.data[(i, j)] = value;
     }
 
-    fn column(&self, i: usize) -> ColRef<'_, T> {
-        self.get(0..self.nrows(), i)
+    fn column(&self, i: usize) -> <Self::V as Vector>::View<'_> {
+        let data = self.data.get(0..self.data.nrows(), i);
+        FaerVecRef {
+            data,
+            context: self.context.clone(),
+        }
     }
-    fn columns(&self, start: usize, nrows: usize) -> MatRef<'_, T> {
-        self.get(0..self.nrows(), start..nrows)
+    fn columns(&self, start: usize, nrows: usize) -> Self::View<'_> {
+        let data = self.data.get(0..self.nrows(), start..nrows);
+        FaerMatRef {
+            data,
+            context: self.context.clone(),
+        }
     }
 
     fn column_axpy(&mut self, alpha: Self::T, j: IndexType, beta: Self::T, i: IndexType) {
@@ -172,14 +224,15 @@ impl<T: Scalar> DenseMatrix for Mat<T> {
             panic!("Column index cannot be the same");
         }
         for k in 0..self.nrows() {
-            let value =
-                unsafe { beta * *self.get_unchecked(k, i) + alpha * *self.get_unchecked(k, j) };
-            unsafe { *self.get_mut_unchecked(k, i) = value };
+            let value = unsafe {
+                beta * *self.data.get_unchecked(k, i) + alpha * *self.data.get_unchecked(k, j)
+            };
+            unsafe { *self.data.get_mut_unchecked(k, i) = value };
         }
     }
 }
 
-impl<T: Scalar> Matrix for Mat<T> {
+impl<T: Scalar> Matrix for FaerMat<T> {
     type Sparsity = Dense<Self>;
     type SparsityRef<'a> = DenseRef<'a, Self>;
 
@@ -187,12 +240,16 @@ impl<T: Scalar> Matrix for Mat<T> {
         None
     }
 
+    fn context(&self) -> &Self::C {
+        &self.context
+    }
+
     fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
         assert_eq!(indices.len(), self.nrows() * self.ncols());
-        let mut idx = indices.iter().peekable();
+        let mut idx = indices.data.iter().peekable();
         for j in 0..self.ncols() {
-            let other_col = other.column(*idx.peek().unwrap() / other.nrows());
-            for self_ij in self.column_mut(j).iter_mut() {
+            let other_col = other.data.col(*idx.peek().unwrap() / other.nrows());
+            for self_ij in self.data.col_mut(j).iter_mut() {
                 let other_i = idx.next().unwrap() % other.nrows();
                 *self_ij = other_col[other_i];
             }
@@ -205,10 +262,10 @@ impl<T: Scalar> Matrix for Mat<T> {
         src_indices: &<Self::V as Vector>::Index,
         data: &Self::V,
     ) {
-        for (dst_i, src_i) in dst_indices.iter().zip(src_indices.iter()) {
+        for (dst_i, src_i) in dst_indices.data.iter().zip(src_indices.data.iter()) {
             let i = dst_i % self.nrows();
             let j = dst_i / self.nrows();
-            self[(i, j)] = data[*src_i];
+            self.data[(i, j)] = data[*src_i];
         }
     }
 
@@ -217,45 +274,55 @@ impl<T: Scalar> Matrix for Mat<T> {
     }
 
     fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)> {
-        (0..self.ncols()).flat_map(move |j| (0..self.nrows()).map(move |i| (i, j, &self[(i, j)])))
+        (0..self.ncols())
+            .flat_map(move |j| (0..self.nrows()).map(move |i| (i, j, &self.data[(i, j)])))
     }
 
     fn try_from_triplets(
         nrows: IndexType,
         ncols: IndexType,
         triplets: Vec<(IndexType, IndexType, T)>,
+        ctx: Self::C,
     ) -> Result<Self, DiffsolError> {
-        let mut m = Self::zeros(nrows, ncols);
+        let mut m = Mat::zeros(nrows, ncols);
         for (i, j, v) in triplets {
             m[(i, j)] = v;
         }
-        Ok(m)
+        Ok(Self {
+            data: m,
+            context: ctx,
+        })
     }
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
         y.mul_assign(Scale(beta));
         matmul(
-            y.as_mut(),
+            y.data.as_mut(),
             Accum::Add,
-            self.as_ref(),
-            x.as_ref(),
+            self.data.as_ref(),
+            x.data.as_ref(),
             alpha,
             get_global_parallelism(),
         );
     }
-    fn zeros(nrows: IndexType, ncols: IndexType) -> Self {
-        Self::zeros(nrows, ncols)
+    fn zeros(nrows: IndexType, ncols: IndexType, ctx: Self::C) -> Self {
+        let data = Mat::zeros(nrows, ncols);
+        Self { data, context: ctx }
     }
     fn copy_from(&mut self, other: &Self) {
-        self.copy_from(other);
+        self.data.copy_from(&other.data);
     }
-    fn from_diagonal(v: &Col<T>) -> Self {
-        let dim = v.nrows();
-        Self::from_fn(dim, dim, |i, j| if i == j { v[i] } else { T::zero() })
+    fn from_diagonal(v: &Self::V) -> Self {
+        let dim = v.len();
+        let data = Mat::from_fn(dim, dim, |i, j| if i == j { v[i] } else { T::zero() });
+        Self {
+            data,
+            context: v.context().clone(),
+        }
     }
     fn partition_indices_by_zero_diagonal(
         &self,
     ) -> (<Self::V as Vector>::Index, <Self::V as Vector>::Index) {
-        let diagonal = self.diagonal().column_vector();
+        let diagonal = self.data.diagonal().column_vector();
         let (zero_indices, nonzero_indices) = diagonal.iter().enumerate().fold(
             (Vec::new(), Vec::new()),
             |(mut zero_indices, mut nonzero_indices), (i, &v)| {
@@ -268,8 +335,8 @@ impl<T: Scalar> Matrix for Mat<T> {
             },
         );
         (
-            <Self::V as Vector>::Index::from_vec(zero_indices),
-            <Self::V as Vector>::Index::from_vec(nonzero_indices),
+            <Self::V as Vector>::Index::from_vec(zero_indices, self.context.clone()),
+            <Self::V as Vector>::Index::from_vec(nonzero_indices, self.context.clone()),
         )
     }
     fn set_column(&mut self, j: IndexType, v: &Self::V) {
@@ -277,15 +344,17 @@ impl<T: Scalar> Matrix for Mat<T> {
     }
 
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
-        zip!(self, x, y).for_each(|unzip!(s, x, y)| *s = *x + beta * *y);
+        zip!(self.data.as_mut(), x.data.as_ref(), y.data.as_ref())
+            .for_each(|unzip!(s, x, y)| *s = *x + beta * *y);
     }
 
     fn new_from_sparsity(
         nrows: IndexType,
         ncols: IndexType,
         _sparsity: Option<Self::Sparsity>,
+        ctx: Self::C,
     ) -> Self {
-        Self::zeros(nrows, ncols)
+        Self::zeros(nrows, ncols, ctx)
     }
 }
 
@@ -297,24 +366,24 @@ mod tests {
     fn test_column_axpy() {
         // M = [1 2]
         //     [3 4]
-        let mut a = Mat::zeros(2, 2);
-        a[(0, 0)] = 1.0;
-        a[(0, 1)] = 2.0;
-        a[(1, 0)] = 3.0;
-        a[(1, 1)] = 4.0;
+        let mut a = FaerMat::zeros(2, 2, Default::default());
+        a.set_index(0, 0, 1.0);
+        a.set_index(0, 1, 2.0);
+        a.set_index(1, 0, 3.0);
+        a.set_index(1, 1, 4.0);
 
         // op is M(:, 1) = 2 * M(:, 0) + M(:, 1)
         a.column_axpy(2.0, 0, 1.0, 1);
         // M = [1 4]
         //     [3 10]
-        assert_eq!(a[(0, 0)], 1.0);
-        assert_eq!(a[(0, 1)], 4.0);
-        assert_eq!(a[(1, 0)], 3.0);
-        assert_eq!(a[(1, 1)], 10.0);
+        assert_eq!(a.get_index(0, 0), 1.0);
+        assert_eq!(a.get_index(0, 1), 4.0);
+        assert_eq!(a.get_index(1, 0), 3.0);
+        assert_eq!(a.get_index(1, 1), 10.0);
     }
 
     #[test]
     fn test_partition_indices_by_zero_diagonal() {
-        super::super::tests::test_partition_indices_by_zero_diagonal::<Mat<f64>>();
+        super::super::tests::test_partition_indices_by_zero_diagonal::<FaerMat<f64>>();
     }
 }

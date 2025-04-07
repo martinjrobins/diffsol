@@ -17,6 +17,7 @@ repository = "https://github.com/martinjrobins/diffsol"
 [workspace.dependencies]
 nalgebra = "0.33.2"
 faer = "0.21.7"
+cudarc = "0.14.0"
 
 plotly = { version = "0.12.1" }
 argmin = { version = "0.10.0" }

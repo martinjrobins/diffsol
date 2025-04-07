@@ -183,10 +183,11 @@ where
 {
     fn new<'a, Eqn, Solver>(solver: &Solver) -> Result<Self, DiffsolError>
     where
-        Eqn: OdeEquations<M = M, V = M::V, T = M::T> + 'a,
+        Eqn: OdeEquations<M = M, V = M::V, T = M::T, C = M::C> + 'a,
         Solver: OdeSolverMethod<'a, Eqn>,
     {
         let eqn = &solver.problem().eqn;
+        let ctx = solver.problem().eqn.context();
         let (partition, mass_dd, rhs_jac_aa, rhs_jac_ad) = if let Some(_mass) = eqn.mass() {
             let mass_matrix = solver.mass().unwrap();
             let (algebraic_indices, differential_indices) =
@@ -232,18 +233,18 @@ where
         let nparams = eqn.rhs().nparams();
         let nstates = eqn.rhs().nstates();
         let nout = eqn.out().map(|o| o.nout()).unwrap_or(nstates);
-        let tmp_nstates = M::V::zeros(nstates);
-        let tmp_nstates2 = M::V::zeros(nstates);
-        let tmp_nparams = M::V::zeros(nparams);
-        let tmp_nout = M::V::zeros(nout);
+        let tmp_nstates = M::V::zeros(nstates, ctx.clone());
+        let tmp_nstates2 = M::V::zeros(nstates, ctx.clone());
+        let tmp_nparams = M::V::zeros(nparams, ctx.clone());
+        let tmp_nout = M::V::zeros(nout, ctx.clone());
         let nalgebraic = partition
             .as_ref()
             .map(|p| p.algebraic_indices.len())
             .unwrap_or(0);
         let ndifferential = nstates - nalgebraic;
-        let tmp_algebraic = M::V::zeros(nalgebraic);
-        let tmp_differential = M::V::zeros(ndifferential);
-        let tmp_differential2 = M::V::zeros(ndifferential);
+        let tmp_algebraic = M::V::zeros(nalgebraic, ctx.clone());
+        let tmp_differential = M::V::zeros(ndifferential, ctx.clone());
+        let tmp_differential2 = M::V::zeros(ndifferential, ctx.clone());
         Ok(Self {
             rhs_jac_aa,
             rhs_jac_ad,

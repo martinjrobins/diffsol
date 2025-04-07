@@ -26,7 +26,7 @@ pub trait LinearSolver<M: Matrix>: Default {
     /// Set the problem to be solved, any previous problem is discarded.
     /// Any internal state of the solver is reset.
     /// This function will normally set the sparsity pattern of the matrix to be solved.
-    fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(&mut self, op: &C);
+    fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(&mut self, op: &C);
 
     /// Solve the problem `Ax = b` and return the solution `x`.
     /// panics if [Self::set_linearisation] has not been called previously
@@ -54,10 +54,11 @@ impl<V> LinearSolveSolution<V> {
 pub mod tests {
     use crate::{
         linear_solver::{FaerLU, NalgebraLU},
+        matrix::dense_nalgebra_serial::NalgebraMat,
         op::{closure::Closure, ParameterisedOp},
         scalar::scale,
         vector::VectorRef,
-        LinearSolver, Matrix, NonLinearOpJacobian, Vector,
+        FaerMat, FaerVec, LinearSolver, Matrix, NalgebraVec, NonLinearOpJacobian, Op, Vector,
     };
     use num_traits::{One, Zero};
 
@@ -74,10 +75,11 @@ pub mod tests {
         M::V,
         Vec<LinearSolveSolution<M::V>>,
     ) {
-        let diagonal = M::V::from_vec(vec![2.0.into(), 2.0.into()]);
+        let diagonal = M::V::from_vec(vec![2.0.into(), 2.0.into()], Default::default());
         let jac1 = M::from_diagonal(&diagonal);
         let jac2 = M::from_diagonal(&diagonal);
-        let p = M::V::zeros(0);
+        let ctx = M::C::default();
+        let p = M::V::zeros(0, ctx.clone());
         let mut op = Closure::new(
             // f = J * x
             move |x, _p, _t, y| jac1.gemv(M::T::one(), x, M::T::zero(), y),
@@ -85,13 +87,18 @@ pub mod tests {
             2,
             2,
             p.len(),
+            ctx.clone(),
         );
-        op.calculate_sparsity(&M::V::from_element(2, M::T::one()), M::T::zero(), &p);
+        op.calculate_sparsity(
+            &M::V::from_element(2, M::T::one(), ctx.clone()),
+            M::T::zero(),
+            &p,
+        );
         let rtol = M::T::from(1e-6);
-        let atol = M::V::from_vec(vec![1e-6.into(), 1e-6.into()]);
+        let atol = M::V::from_vec(vec![1e-6.into(), 1e-6.into()], ctx.clone());
         let solns = vec![LinearSolveSolution::new(
-            M::V::from_vec(vec![2.0.into(), 4.0.into()]),
-            M::V::from_vec(vec![1.0.into(), 2.0.into()]),
+            M::V::from_vec(vec![2.0.into(), 4.0.into()], ctx.clone()),
+            M::V::from_vec(vec![1.0.into(), 2.0.into()], ctx.clone()),
         )];
         (op, rtol, atol, solns)
     }
@@ -107,7 +114,7 @@ pub mod tests {
         for<'b> &'b C::V: VectorRef<C::V>,
     {
         solver.set_problem(&op);
-        let x = C::V::zeros(op.nout());
+        let x = C::V::zeros(op.nout(), op.context().clone());
         let t = C::T::zero();
         solver.set_linearisation(&op, &x, t);
         for soln in solns {
@@ -117,21 +124,18 @@ pub mod tests {
         }
     }
 
-    type MCpuNalgebra = nalgebra::DMatrix<f64>;
-    type MCpuFaer = faer::Mat<f64>;
-
     #[test]
     fn test_lu_nalgebra() {
-        let (op, rtol, atol, solns) = linear_problem::<MCpuNalgebra>();
-        let p = nalgebra::DVector::zeros(0);
+        let (op, rtol, atol, solns) = linear_problem::<NalgebraMat<f64>>();
+        let p = NalgebraVec::zeros(0, op.context().clone());
         let op = ParameterisedOp::new(&op, &p);
         let s = NalgebraLU::default();
         test_linear_solver(s, op, rtol, &atol, solns);
     }
     #[test]
     fn test_lu_faer() {
-        let (op, rtol, atol, solns) = linear_problem::<MCpuFaer>();
-        let p = faer::Col::zeros(0);
+        let (op, rtol, atol, solns) = linear_problem::<FaerMat<f64>>();
+        let p = FaerVec::zeros(0, op.context().clone());
         let op = ParameterisedOp::new(&op, &p);
         let s = FaerLU::default();
         test_linear_solver(s, op, rtol, &atol, solns);

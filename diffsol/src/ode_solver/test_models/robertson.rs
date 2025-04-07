@@ -1,8 +1,8 @@
 use crate::{
     matrix::Matrix, ode_solver::problem::OdeSolverSolution, MatrixHost, OdeBuilder,
-    OdeEquationsImplicit, OdeEquationsSens, OdeSolverProblem, Vector,
+    OdeEquationsImplicit, OdeEquationsSens, OdeSolverProblem, Op, Vector,
 };
-use num_traits::Zero;
+use num_traits::{One, Zero};
 
 #[cfg(feature = "diffsl")]
 #[allow(clippy::type_complexity)]
@@ -10,11 +10,9 @@ pub fn robertson_diffsl_problem<
     M: MatrixHost<T = f64>,
     CG: diffsl::execution::module::CodegenModule,
 >() -> (
-    OdeSolverProblem<impl crate::OdeEquationsAdjoint<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl crate::OdeEquationsAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
-    use crate::{DiffSl, DiffSlContext};
-
     let code = "
         in = [k1, k2, k3]
         k1 { 0.04 }
@@ -46,15 +44,13 @@ pub fn robertson_diffsl_problem<
             z,
         }";
 
-    let context = DiffSlContext::<M, CG>::new(code, 1).unwrap();
-    let eqn = DiffSl::from_context(context);
     let problem = OdeBuilder::<M>::new()
         .p([0.04, 1.0e4, 3.0e7])
         .rtol(1e-4)
         .atol([1.0e-8, 1.0e-6, 1.0e-6])
-        .build_from_eqn(eqn)
+        .build_from_diffsl::<CG>(code)
         .unwrap();
-    let mut soln = soln::<M::V>();
+    let mut soln = soln::<M::V>(problem.context().clone());
     soln.rtol = problem.rtol;
     soln.atol = problem.atol.clone();
     (problem, soln)
@@ -89,8 +85,10 @@ fn robertson_mass<M: MatrixHost>(x: &M::V, _p: &M::V, _t: M::T, beta: M::T, y: &
     y[2] = beta * y[2];
 }
 
-fn robertson_init<M: Matrix>(_p: &M::V, _t: M::T) -> M::V {
-    M::V::from_vec(vec![1.0.into(), 0.0.into(), 0.0.into()])
+fn robertson_init<M: MatrixHost>(_p: &M::V, _t: M::T, y: &mut M::V) {
+    y[0] = M::T::one();
+    y[1] = M::T::zero();
+    y[2] = M::T::zero();
 }
 
 fn robertson_init_sens<M: Matrix>(_p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V) {
@@ -101,7 +99,7 @@ fn robertson_init_sens<M: Matrix>(_p: &M::V, _t: M::T, _v: &M::V, y: &mut M::V) 
 pub fn robertson<M: MatrixHost>(
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::<M>::new()
@@ -111,14 +109,15 @@ pub fn robertson<M: MatrixHost>(
         .use_coloring(use_coloring)
         .rhs_implicit(robertson_rhs::<M>, robertson_jac_mul::<M>)
         .mass(robertson_mass::<M>)
-        .init(robertson_init::<M>)
+        .init(robertson_init::<M>, 3)
         .build()
         .unwrap();
 
-    (problem, soln())
+    let ctx = problem.context().clone();
+    (problem, soln(ctx))
 }
 
-fn soln<V: Vector>() -> OdeSolverSolution<V> {
+fn soln<V: Vector>(ctx: V::C) -> OdeSolverSolution<V> {
     let mut soln = OdeSolverSolution::default();
     let data = vec![
         (vec![1.0, 0.0, 0.0], 0.0),
@@ -138,7 +137,7 @@ fn soln<V: Vector>() -> OdeSolverSolution<V> {
 
     for (values, time) in data {
         soln.push(
-            V::from_vec(values.into_iter().map(|v| v.into()).collect()),
+            V::from_vec(values.into_iter().map(|v| v.into()).collect(), ctx.clone()),
             time.into(),
         );
     }
@@ -147,7 +146,7 @@ fn soln<V: Vector>() -> OdeSolverSolution<V> {
 
 #[allow(clippy::type_complexity)]
 pub fn robertson_sens<M: MatrixHost + 'static>() -> (
-    OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T>>,
+    OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::<M>::new()
@@ -160,7 +159,7 @@ pub fn robertson_sens<M: MatrixHost + 'static>() -> (
             robertson_jac_mul::<M>,
             robertson_sens_mul::<M>,
         )
-        .init_sens(robertson_init::<M>, robertson_init_sens::<M>)
+        .init_sens(robertson_init::<M>, robertson_init_sens::<M>, 3)
         .mass(robertson_mass::<M>)
         .build()
         .unwrap();
@@ -184,7 +183,10 @@ pub fn robertson_sens<M: MatrixHost + 'static>() -> (
 
     for (values, time) in data {
         soln.push(
-            M::V::from_vec(values.into_iter().map(|v| v.into()).collect()),
+            M::V::from_vec(
+                values.into_iter().map(|v| v.into()).collect(),
+                problem.eqn.context().clone(),
+            ),
             time.into(),
         );
     }

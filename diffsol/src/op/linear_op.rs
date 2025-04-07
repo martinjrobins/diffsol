@@ -19,7 +19,12 @@ pub trait LinearOp: Op {
     /// Compute the matrix representation of the operator `A(t)` and return it.
     /// See [Self::matrix_inplace] for a non-allocating version.
     fn matrix(&self, t: Self::T) -> Self::M {
-        let mut y = Self::M::new_from_sparsity(self.nstates(), self.nstates(), self.sparsity());
+        let mut y = Self::M::new_from_sparsity(
+            self.nstates(),
+            self.nstates(),
+            self.sparsity(),
+            self.context().clone(),
+        );
         self.matrix_inplace(t, &mut y);
         y
     }
@@ -33,8 +38,8 @@ pub trait LinearOp: Op {
 
     /// Default implementation of the matrix computation, see [Self::matrix_inplace].
     fn _default_matrix_inplace(&self, t: Self::T, y: &mut Self::M) {
-        let mut v = Self::V::zeros(self.nstates());
-        let mut col = Self::V::zeros(self.nout());
+        let mut v = Self::V::zeros(self.nstates(), self.context().clone());
+        let mut col = Self::V::zeros(self.nout(), self.context().clone());
         for j in 0..self.nstates() {
             v.set_index(j, Self::T::one());
             self.call_inplace(&v, t, &mut col);
@@ -67,8 +72,8 @@ pub trait LinearOpTranspose: LinearOp {
 
     /// Default implementation of the tranpose computation, see [Self::transpose_inplace].
     fn _default_transpose_inplace(&self, t: Self::T, y: &mut Self::M) {
-        let mut v = Self::V::zeros(self.nstates());
-        let mut col = Self::V::zeros(self.nout());
+        let mut v = Self::V::zeros(self.nstates(), self.context().clone());
+        let mut col = Self::V::zeros(self.nout(), self.context().clone());
         for j in 0..self.nstates() {
             v.set_index(j, Self::T::one());
             self.call_transpose_inplace(&v, t, &mut col);
@@ -90,7 +95,7 @@ pub trait LinearOpSens: LinearOp {
     /// Compute the product of the partial gradient of F wrt a parameter vector p with a given vector `\parial F/\partial p(x, t) * v`, and return the result.
     /// Use `[Self::sens_mul_inplace]` to for a non-allocating version.
     fn sens_mul(&self, x: &Self::V, t: Self::T, v: &Self::V) -> Self::V {
-        let mut y = Self::V::zeros(self.nstates());
+        let mut y = Self::V::zeros(self.nstates(), self.context().clone());
         self.sens_mul_inplace(x, t, v, &mut y);
         y
     }
@@ -105,8 +110,8 @@ pub trait LinearOpSens: LinearOp {
 
     /// Default implementation of the gradient computation (this is the default for [Self::sens_inplace]).
     fn _default_sens_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
-        let mut v = Self::V::zeros(self.nparams());
-        let mut col = Self::V::zeros(self.nout());
+        let mut v = Self::V::zeros(self.nparams(), self.context().clone());
+        let mut col = Self::V::zeros(self.nout(), self.context().clone());
         for j in 0..self.nparams() {
             v.set_index(j, Self::T::one());
             self.sens_mul_inplace(x, t, &v, &mut col);
@@ -120,7 +125,7 @@ pub trait LinearOpSens: LinearOp {
     fn sens(&self, x: &Self::V, t: Self::T) -> Self::M {
         let n = self.nstates();
         let m = self.nparams();
-        let mut y = Self::M::new_from_sparsity(n, m, self.sens_sparsity());
+        let mut y = Self::M::new_from_sparsity(n, m, self.sens_sparsity(), self.context().clone());
         self.sens_inplace(x, t, &mut y);
         y
     }

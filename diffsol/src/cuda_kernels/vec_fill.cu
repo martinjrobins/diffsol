@@ -1,0 +1,6 @@
+__global__ void vec_fill_f64(double* lhs, double value, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    for (int i = idx; i < n; i += blockDim.x * gridDim.x) {
+        lhs[i] = value;
+    }
+}

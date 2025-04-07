@@ -1,60 +1,54 @@
 use std::fmt::Debug;
-use std::ops::Mul;
+use std::ops::{Add, Mul, Sub};
 
 use super::extract_block::CscBlock;
 use super::sparsity::MatrixSparsityRef;
+use super::utils::*;
 use super::{Matrix, MatrixCommon, MatrixSparsity};
 use crate::error::{DiffsolError, MatrixError};
 use crate::{DefaultSolver, FaerSparseLU, IndexType, Scalar, Scale};
-use crate::{Vector, VectorIndex};
+use crate::{FaerContext, FaerVec, FaerVecIndex, Vector, VectorIndex};
 
 use faer::reborrow::{Reborrow, ReborrowMut};
 use faer::sparse::ops::{ternary_op_assign_into, union_symbolic};
-use faer::sparse::{Pair, SymbolicSparseColMat, SymbolicSparseColMatRef, Triplet};
-use faer::Col;
+use faer::sparse::{Pair, SparseColMat, SymbolicSparseColMat, SymbolicSparseColMatRef, Triplet};
 
-pub struct SparseColMat<T: Scalar>(faer::sparse::SparseColMat<IndexType, T>);
-
-impl<T: Scalar> Debug for SparseColMat<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
+#[derive(Clone, Debug)]
+pub struct FaerSparseMat<T: Scalar> {
+    pub(crate) data: SparseColMat<IndexType, T>,
+    pub(crate) context: FaerContext,
 }
 
-impl<T: Scalar> Clone for SparseColMat<T> {
-    fn clone(&self) -> Self {
-        let sparsity = self.0.symbolic().to_owned().unwrap();
-        let values = self.0.val().to_vec();
-        Self(faer::sparse::SparseColMat::new(sparsity, values))
-    }
-}
-
-impl<T: Scalar> SparseColMat<T> {
-    pub fn faer(&self) -> &faer::sparse::SparseColMat<IndexType, T> {
-        &self.0
-    }
-    pub fn faer_mut(&mut self) -> &mut faer::sparse::SparseColMat<IndexType, T> {
-        &mut self.0
-    }
-}
-
-impl<T: Scalar> DefaultSolver for SparseColMat<T> {
+impl<T: Scalar> DefaultSolver for FaerSparseMat<T> {
     type LS = FaerSparseLU<T>;
 }
 
-impl<T: Scalar> MatrixCommon for SparseColMat<T> {
-    type T = T;
-    type V = Col<T>;
+impl_matrix_common!(FaerSparseMat<T>, FaerVec<T>, FaerContext, SparseColMat<IndexType, T>);
 
-    fn nrows(&self) -> IndexType {
-        self.0.nrows()
-    }
-    fn ncols(&self) -> IndexType {
-        self.0.ncols()
-    }
+macro_rules! impl_mul_scalar {
+    ($mat_type:ty, $out:ty) => {
+        impl<'a, T: Scalar> Mul<Scale<T>> for $mat_type {
+            type Output = $out;
+
+            fn mul(self, rhs: Scale<T>) -> Self::Output {
+                let scale: faer::Scale<T> = rhs.into();
+                Self::Output {
+                    data: &self.data * scale,
+                    context: self.context.clone(),
+                }
+            }
+        }
+    };
 }
 
-impl<T: Scalar> MatrixSparsity<SparseColMat<T>> for SymbolicSparseColMat<IndexType> {
+impl_mul_scalar!(FaerSparseMat<T>, FaerSparseMat<T>);
+impl_mul_scalar!(&FaerSparseMat<T>, FaerSparseMat<T>);
+
+impl_add!(FaerSparseMat<T>, &FaerSparseMat<T>, FaerSparseMat<T>);
+
+impl_sub!(FaerSparseMat<T>, &FaerSparseMat<T>, FaerSparseMat<T>);
+
+impl<T: Scalar> MatrixSparsity<FaerSparseMat<T>> for SymbolicSparseColMat<IndexType> {
     fn union(
         self,
         other: SymbolicSparseColMatRef<IndexType>,
@@ -113,7 +107,8 @@ impl<T: Scalar> MatrixSparsity<SparseColMat<T>> for SymbolicSparseColMat<IndexTy
     fn get_index(
         &self,
         indices: &[(IndexType, IndexType)],
-    ) -> <<SparseColMat<T> as MatrixCommon>::V as Vector>::Index {
+        ctx: FaerContext,
+    ) -> <<FaerSparseMat<T> as MatrixCommon>::V as Vector>::Index {
         let col_ptrs = self.col_ptr();
         let row_indices = self.row_idx();
         let mut ret = Vec::with_capacity(indices.len());
@@ -132,11 +127,14 @@ impl<T: Scalar> MatrixSparsity<SparseColMat<T>> for SymbolicSparseColMat<IndexTy
                 }
             }
         }
-        ret
+        FaerVecIndex {
+            data: ret,
+            context: ctx,
+        }
     }
 }
 
-impl<'a, T: Scalar> MatrixSparsityRef<'a, SparseColMat<T>>
+impl<'a, T: Scalar> MatrixSparsityRef<'a, FaerSparseMat<T>>
     for SymbolicSparseColMatRef<'a, IndexType>
 {
     fn to_owned(&self) -> SymbolicSparseColMat<IndexType> {
@@ -156,12 +154,13 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, SparseColMat<T>>
 
     fn split(
         &self,
-        indices: &<<SparseColMat<T> as MatrixCommon>::V as Vector>::Index,
+        indices: &<<FaerSparseMat<T> as MatrixCommon>::V as Vector>::Index,
     ) -> [(
         SymbolicSparseColMat<IndexType>,
-        <<SparseColMat<T> as MatrixCommon>::V as Vector>::Index,
+        <<FaerSparseMat<T> as MatrixCommon>::V as Vector>::Index,
     ); 4] {
         let (_ni, _nj, col_ptrs, _col_nnz, row_idx) = self.parts();
+        let ctx = indices.context();
         let (ul_blk, ur_blk, ll_blk, lr_blk) = CscBlock::split(row_idx, col_ptrs, indices);
         let ul_sym = SymbolicSparseColMat::new_checked(
             ul_blk.nrows,
@@ -192,10 +191,34 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, SparseColMat<T>>
             lr_blk.row_indices,
         );
         [
-            (ul_sym, ul_blk.src_indices),
-            (ur_sym, ur_blk.src_indices),
-            (ll_sym, ll_blk.src_indices),
-            (lr_sym, lr_blk.src_indices),
+            (
+                ul_sym,
+                FaerVecIndex {
+                    data: ul_blk.src_indices,
+                    context: ctx.clone(),
+                },
+            ),
+            (
+                ur_sym,
+                FaerVecIndex {
+                    data: ur_blk.src_indices,
+                    context: ctx.clone(),
+                },
+            ),
+            (
+                ll_sym,
+                FaerVecIndex {
+                    data: ll_blk.src_indices,
+                    context: ctx.clone(),
+                },
+            ),
+            (
+                lr_sym,
+                FaerVecIndex {
+                    data: lr_blk.src_indices,
+                    context: ctx.clone(),
+                },
+            ),
         ]
     }
 
@@ -210,37 +233,21 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, SparseColMat<T>>
     }
 }
 
-impl<T: Scalar> Mul<Scale<T>> for SparseColMat<T> {
-    type Output = SparseColMat<T>;
-
-    fn mul(mut self, rhs: Scale<T>) -> Self::Output {
-        for v in self.0.val_mut() {
-            v.mul_assign(rhs.value());
-        }
-        self
-    }
-}
-
-impl<T: Scalar> Mul<Scale<T>> for &SparseColMat<T> {
-    type Output = SparseColMat<T>;
-
-    fn mul(self, rhs: Scale<T>) -> Self::Output {
-        self.clone() * rhs
-    }
-}
-
-impl<T: Scalar> Matrix for SparseColMat<T> {
+impl<T: Scalar> Matrix for FaerSparseMat<T> {
     type Sparsity = SymbolicSparseColMat<IndexType>;
     type SparsityRef<'a> = SymbolicSparseColMatRef<'a, IndexType>;
 
     fn sparsity(&self) -> Option<Self::SparsityRef<'_>> {
-        Some(self.0.symbolic())
+        Some(self.data.symbolic())
+    }
+    fn context(&self) -> &FaerContext {
+        &self.context
     }
 
     fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
-        let dst_data = self.0.val_mut();
-        let src_data = other.0.val();
-        for (dst_i, idx) in dst_data.iter_mut().zip(indices.iter()) {
+        let dst_data = self.data.val_mut();
+        let src_data = other.data.val();
+        for (dst_i, idx) in dst_data.iter_mut().zip(indices.data.iter()) {
             *dst_i = src_data[*idx];
         }
     }
@@ -251,24 +258,24 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
         src_indices: &<Self::V as Vector>::Index,
         data: &Self::V,
     ) {
-        let values = self.0.val_mut();
-        for (dst_i, src_i) in dst_indices.iter().zip(src_indices.iter()) {
+        let values = self.data.val_mut();
+        for (dst_i, src_i) in dst_indices.data.iter().zip(src_indices.data.iter()) {
             values[*dst_i] = data[*src_i];
         }
     }
 
     fn add_column_to_vector(&self, j: IndexType, v: &mut Self::V) {
-        for i in self.0.col_range(j) {
-            let row = self.0.row_idx()[i];
-            v[row] += self.0.val()[i];
+        for i in self.data.col_range(j) {
+            let row = self.data.row_idx()[i];
+            v[row] += self.data.val()[i];
         }
     }
 
     fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)> {
         (0..self.ncols()).flat_map(move |j| {
-            self.0.col_range(j).map(move |i| {
-                let row = self.0.row_idx()[i];
-                (row, j, &self.0.val()[i])
+            self.data.col_range(j).map(move |i| {
+                let row = self.data.row_idx()[i];
+                (row, j, &self.data.val()[i])
             })
         })
     }
@@ -277,37 +284,50 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
         nrows: IndexType,
         ncols: IndexType,
         triplets: Vec<(IndexType, IndexType, T)>,
+        ctx: Self::C,
     ) -> Result<Self, DiffsolError> {
         let triplets = triplets
             .iter()
             .map(|(i, j, v)| Triplet::new(*i, *j, *v))
             .collect::<Vec<_>>();
         match faer::sparse::SparseColMat::try_new_from_triplets(nrows, ncols, triplets.as_slice()) {
-            Ok(mat) => Ok(Self(mat)),
+            Ok(mat) => Ok(Self {
+                data: mat,
+                context: ctx,
+            }),
             Err(e) => Err(DiffsolError::from(
                 MatrixError::FailedToCreateMatrixFromTriplets(e),
             )),
         }
     }
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
-        let tmp = &self.0 * x;
+        let tmp = Self::V {
+            data: &self.data * &x.data,
+            context: self.context.clone(),
+        };
         y.axpy(alpha, &tmp, beta);
     }
-    fn zeros(nrows: IndexType, ncols: IndexType) -> Self {
-        Self(faer::sparse::SparseColMat::try_new_from_triplets(nrows, ncols, &[]).unwrap())
+    fn zeros(nrows: IndexType, ncols: IndexType, ctx: Self::C) -> Self {
+        Self {
+            data: SparseColMat::try_new_from_triplets(nrows, ncols, &[]).unwrap(),
+            context: ctx,
+        }
     }
     fn copy_from(&mut self, other: &Self) {
-        self.0 = faer::sparse::SparseColMat::new(
-            other.0.symbolic().to_owned().unwrap(),
-            other.0.val().to_vec(),
+        self.data = faer::sparse::SparseColMat::new(
+            other.data.symbolic().to_owned().unwrap(),
+            other.data.val().to_vec(),
         )
     }
-    fn from_diagonal(v: &Col<T>) -> Self {
-        let dim = v.nrows();
+    fn from_diagonal(v: &FaerVec<T>) -> Self {
+        let dim = v.len();
         let triplets = (0..dim)
             .map(|i| Triplet::new(i, i, v[i]))
             .collect::<Vec<_>>();
-        Self(faer::sparse::SparseColMat::try_new_from_triplets(dim, dim, &triplets).unwrap())
+        Self {
+            data: SparseColMat::try_new_from_triplets(dim, dim, &triplets).unwrap(),
+            context: v.context().clone(),
+        }
     }
 
     fn partition_indices_by_zero_diagonal(
@@ -316,7 +336,7 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
         let mut indices_zero_diag = vec![];
         let mut indices_non_zero_diag = vec![];
         'outer: for j in 0..self.ncols() {
-            for (i, v) in self.0.row_idx_of_col(j).zip(self.0.val_of_col(j)) {
+            for (i, v) in self.data.row_idx_of_col(j).zip(self.data.val_of_col(j)) {
                 if i == j && *v != T::zero() {
                     indices_non_zero_diag.push(j);
                     continue 'outer;
@@ -327,21 +347,21 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
             indices_zero_diag.push(j);
         }
         (
-            <Self::V as Vector>::Index::from_vec(indices_zero_diag),
-            <Self::V as Vector>::Index::from_vec(indices_non_zero_diag),
+            <Self::V as Vector>::Index::from_vec(indices_zero_diag, self.context.clone()),
+            <Self::V as Vector>::Index::from_vec(indices_non_zero_diag, self.context.clone()),
         )
     }
 
     fn set_column(&mut self, j: IndexType, v: &Self::V) {
         assert_eq!(v.len(), self.nrows());
-        for i in self.0.col_range(j) {
-            let row_i = self.0.row_idx()[i];
-            self.0.val_mut()[i] = v[row_i];
+        for i in self.data.col_range(j) {
+            let row_i = self.data.row_idx()[i];
+            self.data.val_mut()[i] = v[row_i];
         }
     }
 
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self) {
-        ternary_op_assign_into(self.0.rb_mut(), x.0.rb(), y.0.rb(), |s, x, y| {
+        ternary_op_assign_into(self.data.rb_mut(), x.data.rb(), y.data.rb(), |s, x, y| {
             *s = *x.unwrap_or(&T::zero()) + beta * *y.unwrap_or(&T::zero())
         });
     }
@@ -350,25 +370,28 @@ impl<T: Scalar> Matrix for SparseColMat<T> {
         nrows: IndexType,
         ncols: IndexType,
         sparsity: Option<Self::Sparsity>,
+        ctx: Self::C,
     ) -> Self {
         let sparsity = sparsity.expect("Sparsity pattern required for sparse matrix");
         assert_eq!(sparsity.nrows(), nrows);
         assert_eq!(sparsity.ncols(), ncols);
         let nnz = sparsity.row_idx().len();
-        Self(faer::sparse::SparseColMat::new(
-            sparsity,
-            vec![T::zero(); nnz],
-        ))
+        Self {
+            data: SparseColMat::new(sparsity, vec![T::zero(); nnz]),
+            context: ctx,
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{Matrix, SparseColMat};
+    use crate::{FaerSparseMat, Matrix};
     #[test]
     fn test_triplet_iter() {
         let triplets = vec![(0, 0, 1.0), (1, 0, 2.0), (2, 2, 3.0), (3, 2, 4.0)];
-        let mat = SparseColMat::<f64>::try_from_triplets(4, 3, triplets.clone()).unwrap();
+        let mat =
+            FaerSparseMat::<f64>::try_from_triplets(4, 3, triplets.clone(), Default::default())
+                .unwrap();
         let mut iter = mat.triplet_iter();
         for triplet in triplets {
             let (i, j, val) = iter.next().unwrap();
@@ -380,6 +403,6 @@ mod tests {
 
     #[test]
     fn test_partition_indices_by_zero_diagonal() {
-        super::super::tests::test_partition_indices_by_zero_diagonal::<SparseColMat<f64>>();
+        super::super::tests::test_partition_indices_by_zero_diagonal::<FaerSparseMat<f64>>();
     }
 }

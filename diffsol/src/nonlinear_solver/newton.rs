@@ -45,7 +45,7 @@ impl<M: Matrix, Ls: LinearSolver<M>> NewtonNonlinearSolver<M, Ls> {
         Self {
             linear_solver,
             is_jacobian_set: false,
-            tmp: M::V::zeros(0),
+            tmp: M::V::zeros(0, Default::default()),
         }
     }
     pub fn linear_solver(&self) -> &Ls {
@@ -60,10 +60,10 @@ impl<M: Matrix, Ls: LinearSolver<M>> Default for NewtonNonlinearSolver<M, Ls> {
 }
 
 impl<M: Matrix, Ls: LinearSolver<M>> NonLinearSolver<M> for NewtonNonlinearSolver<M, Ls> {
-    fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(&mut self, op: &C) {
+    fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(&mut self, op: &C) {
         self.linear_solver.set_problem(op);
         self.is_jacobian_set = false;
-        self.tmp = C::V::zeros(op.nstates());
+        self.tmp = C::V::zeros(op.nstates(), op.context().clone());
     }
 
     fn reset_jacobian<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
