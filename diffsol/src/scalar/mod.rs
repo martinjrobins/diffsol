@@ -3,6 +3,9 @@ use std::{
     ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign},
 };
 
+#[cfg(feature = "cuda")]
+pub mod cuda;
+
 use crate::vector::VectorView;
 pub trait Scalar:
     nalgebra::Scalar

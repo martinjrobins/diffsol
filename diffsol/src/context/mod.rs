@@ -1,5 +1,8 @@
 use crate::{DefaultDenseMatrix, Matrix, Vector};
 
+#[cfg(feature = "cuda")]
+pub mod cuda;
+
 #[cfg(feature = "nalgebra")]
 pub mod nalgebra;
 

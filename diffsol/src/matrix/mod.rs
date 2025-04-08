@@ -10,6 +10,9 @@ use extract_block::combine;
 use num_traits::{One, Zero};
 use sparsity::{Dense, MatrixSparsity, MatrixSparsityRef};
 
+#[cfg(feature = "cuda")]
+pub mod cuda;
+
 #[cfg(feature = "nalgebra")]
 pub mod dense_nalgebra_serial;
 
