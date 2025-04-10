@@ -1,45 +1,15 @@
-use std::collections::HashMap;
 use std::ffi::c_int;
 use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Sub, SubAssign};
-use std::sync::{Arc, LazyLock, Mutex};
-use std::{env, fs};
 
 use super::{utils::*, VectorIndex, VectorView, VectorViewMut};
 use cudarc::cublas::sys::lib as cublas;
 use cudarc::cublas::CudaBlas;
 use cudarc::driver::{
-    CudaContext as CudaDevice, CudaFunction, CudaModule, CudaSlice, CudaStream, CudaView,
-    CudaViewMut, DevicePtr, DevicePtrMut, DeviceRepr, LaunchConfig, PushKernelArg, ValidAsZeroBits,
+    CudaFunction, CudaSlice, CudaView, CudaViewMut, DevicePtr, DevicePtrMut, LaunchConfig,
+    PushKernelArg,
 };
-use cudarc::nvrtc::Ptx;
 
-use crate::error::{CudaError, DiffsolError};
-use crate::{cuda_error, IndexType, Scalar, Scale, Vector, VectorCommon};
-
-static DEVICES: LazyLock<Mutex<CudaGlobalContext>> =
-    LazyLock::new(|| Mutex::new(CudaGlobalContext::new()));
-
-struct CudaGlobalContext {
-    devices: HashMap<usize, (Arc<CudaDevice>, Arc<CudaModule>)>,
-}
-
-impl CudaGlobalContext {
-    fn new() -> Self {
-        let devices = HashMap::new();
-        Self { devices }
-    }
-    fn get(&self, ordinal: usize) -> Option<&(Arc<CudaDevice>, Arc<CudaModule>)> {
-        self.devices.get(&ordinal)
-    }
-    fn insert(&mut self, ordinal: usize, device: Arc<CudaDevice>, module: Arc<CudaModule>) {
-        self.devices.insert(ordinal, (device, module));
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct CudaContext {
-    stream: Arc<CudaStream>,
-}
+use crate::{CudaContext, CudaType, IndexType, ScalarCuda, Scale, Vector, VectorCommon};
 
 extern "C" fn zero(_block_size: std::ffi::c_int) -> usize {
     0
@@ -55,80 +25,7 @@ extern "C" fn root_finding_blk_size<T: ScalarCuda>(block_size: std::ffi::c_int) 
 }
 
 impl CudaContext {
-    /// Compiles the PTX files for the given device.
-    fn compile_ptx(device: &Arc<CudaDevice>) -> Result<Arc<CudaModule>, DiffsolError> {
-        let out_dir = env::var("OUT_DIR").unwrap();
-        // module in diffsol.ptx
-        let ptx_file = format!("{}/diffsol.ptx", out_dir);
-        // check if the file exists
-        if fs::metadata(&ptx_file).is_err() {
-            return Err(cuda_error!(
-                Other,
-                format!("PTX file not found: {}", ptx_file)
-            ));
-        }
-        // compile the PTX file
-        let ptx = Ptx::from_file(&ptx_file);
-        let module = device.load_module(ptx).map_err(|e| {
-            cuda_error!(
-                Other,
-                format!("Failed to load module from PTX file {}: {}", ptx_file, e)
-            )
-        })?;
-        Ok(module)
-    }
-
-    /// Gets the device for the given ordinal. If the device is not already created, it creates a new one.
-    pub fn get_device_and_module(
-        ordinal: usize,
-    ) -> Result<(Arc<CudaDevice>, Arc<CudaModule>), DiffsolError> {
-        let mut devices = DEVICES.lock().unwrap();
-        let (device, module) = match devices.get(ordinal) {
-            Some(dev_mod) => dev_mod.clone(),
-            None => {
-                let device = CudaDevice::new(ordinal)
-                    .map_err(|e| cuda_error!(CudaInitializationError, e.to_string()))?;
-                let module = Self::compile_ptx(&device)?;
-                devices.insert(ordinal, device.clone(), module.clone());
-                (device, module)
-            }
-        };
-        device.bind_to_thread().unwrap();
-        Ok((device, module))
-    }
-
-    /// Creates a new CudaContext with the given ordinal and creates a new non-default stream.
-    pub fn new_with_stream(ordinal: usize) -> Result<Self, DiffsolError> {
-        let (device, _module) = Self::get_device_and_module(ordinal)?;
-        let stream = device
-            .new_stream()
-            .map_err(|e| cuda_error!(Other, format!("Failed to create new stream: {}", e)))?;
-        Ok(Self { stream })
-    }
-
-    /// Creates a new CudaContext with the given ordinal (uses default stream).
-    pub fn new(ordinal: usize) -> Result<Self, DiffsolError> {
-        let (device, _module) = Self::get_device_and_module(ordinal)?;
-        let stream = device.default_stream();
-        Ok(Self { stream })
-    }
-
-    fn function<T: ScalarCuda>(&self, kernel_name: &str) -> CudaFunction {
-        let ordinal = self.stream.context().ordinal();
-        let (_device, module) =
-            Self::get_device_and_module(ordinal).expect("Failed to get device and module");
-        let kernel_name = format!("{}_{}", kernel_name, T::as_str());
-        module
-            .load_function(kernel_name.as_str())
-            .unwrap_or_else(|e| {
-                panic!(
-                    "Failed to load function {} from module diffsol. Error: {}",
-                    kernel_name, e
-                )
-            })
-    }
-
-    fn launch_config_1d(&self, n: u32, f: &CudaFunction) -> LaunchConfig {
+    pub(crate) fn launch_config_1d(&self, n: u32, f: &CudaFunction) -> LaunchConfig {
         let (_min_grid_size, block_size) = f
             .occupancy_max_potential_block_size(zero, 0, 0, None)
             .expect("Failed to get occupancy max potential block size");
@@ -140,7 +37,7 @@ impl CudaContext {
         }
     }
 
-    fn launch_config_1d_reduce(
+    pub(crate) fn launch_config_1d_reduce(
         &self,
         n: u32,
         f: &CudaFunction,
@@ -163,16 +60,20 @@ impl CudaContext {
         }
     }
 
-    fn axpy<T: ScalarCuda, D1: DevicePtr<T>, D2: DevicePtrMut<T>>(
+    pub(crate) fn axpy<T: ScalarCuda, D1: DevicePtr<T>, D2: DevicePtrMut<T>>(
         &self,
         alpha: T,
         x: &D1,
         y: &mut D2,
     ) {
-        let blas = CudaBlas::new(self.stream.clone()).expect("Failed to create CudaBlas");
         let n = x.len() as c_int;
         let (x, _syn_x) = x.device_ptr(&self.stream);
         let (y, _syn_y) = y.device_ptr_mut(&self.stream);
+        self.axpy_inner(alpha, x, y, n);
+    }
+
+    pub(crate) fn axpy_inner<T: ScalarCuda>(&self, alpha: T, x: u64, y: u64, n: c_int) {
+        let blas = CudaBlas::new(self.stream.clone()).expect("Failed to create CudaBlas");
         match T::as_enum() {
             CudaType::F64 => {
                 let x = x as *const f64;
@@ -296,59 +197,28 @@ impl CudaContext {
     }
 }
 
-impl Default for CudaContext {
-    fn default() -> Self {
-        Self::new(0).unwrap()
-    }
-}
-
-enum CudaType {
-    F64,
-}
-
-trait ScalarCuda: Scalar + ValidAsZeroBits + DeviceRepr {
-    fn as_enum() -> CudaType;
-    fn as_f64(self) -> f64 {
-        panic!("Unsupported type for as_f64");
-    }
-    fn as_str() -> &'static str {
-        match Self::as_enum() {
-            CudaType::F64 => "f64",
-        }
-    }
-}
-
-impl ScalarCuda for f64 {
-    fn as_enum() -> CudaType {
-        CudaType::F64
-    }
-    fn as_f64(self) -> f64 {
-        self
-    }
+#[derive(Debug, Clone)]
+pub struct CudaVec<T: ScalarCuda> {
+    pub(crate) data: CudaSlice<T>,
+    pub(crate) context: CudaContext,
 }
 
 #[derive(Debug, Clone)]
-struct CudaVec<T: ScalarCuda> {
-    data: CudaSlice<T>,
-    context: CudaContext,
-}
-
-#[derive(Debug, Clone)]
-struct CudaIndex {
-    data: CudaSlice<c_int>,
-    context: CudaContext,
+pub struct CudaIndex {
+    pub(crate) data: CudaSlice<c_int>,
+    pub(crate) context: CudaContext,
 }
 
 #[derive(Debug)]
-struct CudaVecRef<'a, T: ScalarCuda> {
-    data: CudaView<'a, T>,
-    context: CudaContext,
+pub struct CudaVecRef<'a, T: ScalarCuda> {
+    pub(crate) data: CudaView<'a, T>,
+    pub(crate) context: CudaContext,
 }
 
 #[derive(Debug)]
-struct CudaVecMut<'a, T: ScalarCuda> {
-    data: CudaViewMut<'a, T>,
-    context: CudaContext,
+pub struct CudaVecMut<'a, T: ScalarCuda> {
+    pub(crate) data: CudaViewMut<'a, T>,
+    pub(crate) context: CudaContext,
 }
 
 //impl<T: ScalarCuda> DefaultDenseMatrix for CudaVec<T> {
@@ -861,11 +731,15 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {
-        self.mul_assign(Scale(beta));
+        if beta != T::one() {
+            self.mul_assign(Scale(beta));
+        }
         self.context.axpy::<T, _, _>(alpha, &x.data, &mut self.data);
     }
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
-        self.mul_assign(Scale(beta));
+        if beta != T::one() {
+            self.mul_assign(Scale(beta));
+        }
         self.context.axpy::<T, _, _>(alpha, &x.data, &mut self.data);
     }
     fn clone_as_vec(&self) -> Vec<Self::T> {
@@ -1055,7 +929,9 @@ impl<'a, T: ScalarCuda> VectorViewMut<'a> for CudaVecMut<'a, T> {
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
-        self.mul_assign(Scale(beta));
+        if beta != T::one() {
+            self.mul_assign(Scale(beta));
+        }
         self.context.axpy::<T, _, _>(alpha, &x.data, &mut self.data);
     }
 }

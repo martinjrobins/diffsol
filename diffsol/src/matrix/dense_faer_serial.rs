@@ -186,8 +186,8 @@ impl<T: Scalar> DenseMatrix for FaerMat<T> {
         }
     }
 
-    fn columns_mut(&mut self, start: usize, ncols: usize) -> Self::ViewMut<'_> {
-        let data = self.data.get_mut(0..self.data.nrows(), start..ncols);
+    fn columns_mut(&mut self, start: usize, end: usize) -> Self::ViewMut<'_> {
+        let data = self.data.get_mut(0..self.data.nrows(), start..end);
         FaerMatMut {
             data,
             context: self.context.clone(),
@@ -205,15 +205,15 @@ impl<T: Scalar> DenseMatrix for FaerMat<T> {
             context: self.context.clone(),
         }
     }
-    fn columns(&self, start: usize, nrows: usize) -> Self::View<'_> {
-        let data = self.data.get(0..self.nrows(), start..nrows);
+    fn columns(&self, start: usize, end: usize) -> Self::View<'_> {
+        let data = self.data.get(0..self.nrows(), start..end);
         FaerMatRef {
             data,
             context: self.context.clone(),
         }
     }
 
-    fn column_axpy(&mut self, alpha: Self::T, j: IndexType, beta: Self::T, i: IndexType) {
+    fn column_axpy(&mut self, alpha: Self::T, j: IndexType, i: IndexType) {
         if i > self.ncols() {
             panic!("Column index out of bounds");
         }
@@ -224,9 +224,8 @@ impl<T: Scalar> DenseMatrix for FaerMat<T> {
             panic!("Column index cannot be the same");
         }
         for k in 0..self.nrows() {
-            let value = unsafe {
-                beta * *self.data.get_unchecked(k, i) + alpha * *self.data.get_unchecked(k, j)
-            };
+            let value =
+                unsafe { *self.data.get_unchecked(k, i) + alpha * *self.data.get_unchecked(k, j) };
             unsafe { *self.data.get_mut_unchecked(k, i) = value };
         }
     }
@@ -273,9 +272,9 @@ impl<T: Scalar> Matrix for FaerMat<T> {
         v.add_assign(&self.column(j));
     }
 
-    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)> {
+    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, Self::T)> {
         (0..self.ncols())
-            .flat_map(move |j| (0..self.nrows()).map(move |i| (i, j, &self.data[(i, j)])))
+            .flat_map(move |j| (0..self.nrows()).map(move |i| (i, j, self.data[(i, j)])))
     }
 
     fn try_from_triplets(
@@ -364,22 +363,7 @@ mod tests {
 
     #[test]
     fn test_column_axpy() {
-        // M = [1 2]
-        //     [3 4]
-        let mut a = FaerMat::zeros(2, 2, Default::default());
-        a.set_index(0, 0, 1.0);
-        a.set_index(0, 1, 2.0);
-        a.set_index(1, 0, 3.0);
-        a.set_index(1, 1, 4.0);
-
-        // op is M(:, 1) = 2 * M(:, 0) + M(:, 1)
-        a.column_axpy(2.0, 0, 1.0, 1);
-        // M = [1 4]
-        //     [3 10]
-        assert_eq!(a.get_index(0, 0), 1.0);
-        assert_eq!(a.get_index(0, 1), 4.0);
-        assert_eq!(a.get_index(1, 0), 3.0);
-        assert_eq!(a.get_index(1, 1), 10.0);
+        super::super::tests::test_column_axpy::<FaerMat<f64>>();
     }
 
     #[test]

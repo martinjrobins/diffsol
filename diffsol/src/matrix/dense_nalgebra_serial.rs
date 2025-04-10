@@ -192,10 +192,10 @@ impl<T: Scalar> Matrix for NalgebraMat<T> {
         v.add_assign(&self.column(j));
     }
 
-    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)> {
+    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, Self::T)> {
         let n = self.ncols();
         let m = self.nrows();
-        (0..n).flat_map(move |j| (0..m).map(move |i| (i, j, &self.data[(i, j)])))
+        (0..n).flat_map(move |j| (0..m).map(move |i| (i, j, self.data[(i, j)])))
     }
 
     fn try_from_triplets(
@@ -274,8 +274,8 @@ impl<T: Scalar> DenseMatrix for NalgebraMat<T> {
         }
     }
 
-    fn columns_mut(&mut self, start: IndexType, ncols: IndexType) -> Self::ViewMut<'_> {
-        let data = self.data.columns_mut(start, ncols);
+    fn columns_mut(&mut self, start: IndexType, end: IndexType) -> Self::ViewMut<'_> {
+        let data = self.data.columns_mut(start, end - start);
         NalgebraMatMut {
             data,
             context: self.context.clone(),
@@ -293,14 +293,14 @@ impl<T: Scalar> DenseMatrix for NalgebraMat<T> {
             context: self.context.clone(),
         }
     }
-    fn columns(&self, start: IndexType, ncols: IndexType) -> Self::View<'_> {
-        let data = self.data.columns(start, ncols);
+    fn columns(&self, start: IndexType, end: IndexType) -> Self::View<'_> {
+        let data = self.data.columns(start, end - start);
         NalgebraMatRef {
             data,
             context: self.context.clone(),
         }
     }
-    fn column_axpy(&mut self, alpha: Self::T, j: IndexType, beta: Self::T, i: IndexType) {
+    fn column_axpy(&mut self, alpha: Self::T, j: IndexType, i: IndexType) {
         if i > self.ncols() {
             panic!("Column index out of bounds");
         }
@@ -312,7 +312,7 @@ impl<T: Scalar> DenseMatrix for NalgebraMat<T> {
         }
         for k in 0..self.nrows() {
             let value = unsafe {
-                beta * *self.data.get_unchecked((k, i)) + alpha * *self.data.get_unchecked((k, j))
+                *self.data.get_unchecked((k, i)) + alpha * *self.data.get_unchecked((k, j))
             };
             unsafe {
                 *self.data.get_unchecked_mut((k, i)) = value;
@@ -327,21 +327,7 @@ mod tests {
 
     #[test]
     fn test_column_axpy() {
-        // M = [1 2]
-        //     [3 4]
-        let data = DMatrix::from_row_slice(2, 2, &[1.0, 2.0, 3.0, 4.0]);
-        let mut a = NalgebraMat {
-            data,
-            context: Default::default(),
-        };
-        // op is M(:, 1) = 2 * M(:, 0) + M(:, 1)
-        a.column_axpy(2.0, 0, 1.0, 1);
-        // M = [1 4]
-        //     [3 10]
-        assert_eq!(a.get_index(0, 0), 1.0);
-        assert_eq!(a.get_index(0, 1), 4.0);
-        assert_eq!(a.get_index(1, 0), 3.0);
-        assert_eq!(a.get_index(1, 1), 10.0);
+        super::super::tests::test_column_axpy::<NalgebraMat<f64>>();
     }
 
     #[test]

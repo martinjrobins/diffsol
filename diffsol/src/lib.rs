@@ -218,6 +218,13 @@ pub use vector::{
     Vector, VectorCommon, VectorHost, VectorIndex, VectorRef, VectorView, VectorViewMut,
 };
 
+#[cfg(feature = "cuda")]
+pub use context::cuda::CudaContext;
+#[cfg(feature = "cuda")]
+pub use scalar::cuda::{CudaType, ScalarCuda};
+#[cfg(feature = "cuda")]
+pub use vector::cuda::{CudaIndex, CudaVec, CudaVecMut, CudaVecRef};
+
 pub use scalar::scale;
 
 pub mod error;

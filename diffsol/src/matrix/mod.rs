@@ -10,6 +10,9 @@ use extract_block::combine;
 use num_traits::{One, Zero};
 use sparsity::{Dense, MatrixSparsity, MatrixSparsityRef};
 
+#[cfg(feature = "cuda")]
+pub mod cuda;
+
 #[cfg(feature = "nalgebra")]
 pub mod dense_nalgebra_serial;
 
@@ -109,9 +112,7 @@ pub trait MatrixViewMut<'a>:
 
 /// A view of a dense matrix [Matrix]
 pub trait MatrixView<'a>:
-    for<'b> MatrixOpsByValue<&'b Self::Owned, Self::Owned>
-    + Mul<Scale<Self::T>, Output = Self::Owned>
-    + Clone
+    for<'b> MatrixOpsByValue<&'b Self::Owned, Self::Owned> + Mul<Scale<Self::T>, Output = Self::Owned>
 {
     type Owned;
 
@@ -249,7 +250,7 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
     /// Panics if the sparsity of self, x, and y do not match (i.e. sparsity of self must be the union of the sparsity of x and y)
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self);
 
-    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)>;
+    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, Self::T)>;
 
     /// Create a new matrix from a vector of triplets (i, j, value) where i and j are the row and column indices of the value
     fn try_from_triplets(
@@ -293,16 +294,16 @@ pub trait DenseMatrix:
     fn gemm(&mut self, alpha: Self::T, a: &Self, b: &Self, beta: Self::T);
 
     /// Performs an axpy operation on two columns of the matrix `M[:, i] = alpha * M[:, j] + M[:, i]`
-    fn column_axpy(&mut self, alpha: Self::T, j: IndexType, beta: Self::T, i: IndexType);
+    fn column_axpy(&mut self, alpha: Self::T, j: IndexType, i: IndexType);
 
-    /// Get a matrix view of the columns starting at `start` and ending at `start + ncols`
-    fn columns(&self, start: IndexType, ncols: IndexType) -> Self::View<'_>;
+    /// Get a matrix view of the columns starting at `start` and ending at `end`
+    fn columns(&self, start: IndexType, end: IndexType) -> Self::View<'_>;
 
     /// Get a vector view of the column `i`
     fn column(&self, i: IndexType) -> <Self::V as Vector>::View<'_>;
 
-    /// Get a mutable matrix view of the columns starting at `start` and ending at `start + ncols`
-    fn columns_mut(&mut self, start: IndexType, ncols: IndexType) -> Self::ViewMut<'_>;
+    /// Get a mutable matrix view of the columns starting at `start` and ending at `end`
+    fn columns_mut(&mut self, start: IndexType, end: IndexType) -> Self::ViewMut<'_>;
 
     /// Get a mutable vector view of the column `i`
     fn column_mut(&mut self, i: IndexType) -> <Self::V as Vector>::ViewMut<'_>;
@@ -329,7 +330,7 @@ pub trait DenseMatrix:
 
 #[cfg(test)]
 mod tests {
-    use super::Matrix;
+    use super::{DenseMatrix, Matrix};
     use crate::{scalar::IndexType, VectorIndex};
 
     pub fn test_partition_indices_by_zero_diagonal<M: Matrix>() {
@@ -366,5 +367,24 @@ mod tests {
             Vec::<IndexType>::new()
         );
         assert_eq!(non_zero_diagonal_indices.clone_as_vec(), vec![0, 1, 2, 3]);
+    }
+
+    pub fn test_column_axpy<M: DenseMatrix>() {
+        // M = [1 2]
+        //     [3 4]
+        let mut a = M::zeros(2, 2, Default::default());
+        a.set_index(0, 0, M::T::from(1.0));
+        a.set_index(0, 1, M::T::from(2.0));
+        a.set_index(1, 0, M::T::from(3.0));
+        a.set_index(1, 1, M::T::from(4.0));
+
+        // op is M(:, 1) = 2 * M(:, 0) + M(:, 1)
+        a.column_axpy(M::T::from(2.0), 0, 1);
+        // M = [1 4]
+        //     [3 10]
+        assert_eq!(a.get_index(0, 0), M::T::from(1.0));
+        assert_eq!(a.get_index(0, 1), M::T::from(4.0));
+        assert_eq!(a.get_index(1, 0), M::T::from(3.0));
+        assert_eq!(a.get_index(1, 1), M::T::from(10.0));
     }
 }

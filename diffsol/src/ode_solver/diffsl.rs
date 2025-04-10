@@ -774,7 +774,7 @@ mod tests {
 
         let k = 1.0;
         let r = 1.0;
-        let ctx = NalgebraContext::default();
+        let ctx = NalgebraContext;
         let context = DiffSlContext::<NalgebraMat<f64>, CG>::new(text, 1, ctx.clone()).unwrap();
         let p = ctx.vector_from_vec(vec![r, k]);
         let mut eqn = DiffSl::from_context(context);

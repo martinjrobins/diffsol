@@ -776,9 +776,9 @@ mod tests {
         assert_eq!(adjoint.ncols(), 2);
         for (i, j, v) in adjoint.triplet_iter() {
             if i == j {
-                assert_eq!(*v, 0.1);
+                assert_eq!(v, 0.1);
             } else {
-                assert_eq!(*v, 0.0);
+                assert_eq!(v, 0.0);
             }
         }
 
