@@ -192,10 +192,10 @@ impl<T: Scalar> Matrix for NalgebraMat<T> {
         v.add_assign(&self.column(j));
     }
 
-    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)> {
+    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, Self::T)> {
         let n = self.ncols();
         let m = self.nrows();
-        (0..n).flat_map(move |j| (0..m).map(move |i| (i, j, &self.data[(i, j)])))
+        (0..n).flat_map(move |j| (0..m).map(move |i| (i, j, self.data[(i, j)])))
     }
 
     fn try_from_triplets(
@@ -274,8 +274,8 @@ impl<T: Scalar> DenseMatrix for NalgebraMat<T> {
         }
     }
 
-    fn columns_mut(&mut self, start: IndexType, ncols: IndexType) -> Self::ViewMut<'_> {
-        let data = self.data.columns_mut(start, ncols);
+    fn columns_mut(&mut self, start: IndexType, end: IndexType) -> Self::ViewMut<'_> {
+        let data = self.data.columns_mut(start, end - start);
         NalgebraMatMut {
             data,
             context: self.context.clone(),
@@ -293,8 +293,8 @@ impl<T: Scalar> DenseMatrix for NalgebraMat<T> {
             context: self.context.clone(),
         }
     }
-    fn columns(&self, start: IndexType, ncols: IndexType) -> Self::View<'_> {
-        let data = self.data.columns(start, ncols);
+    fn columns(&self, start: IndexType, end: IndexType) -> Self::View<'_> {
+        let data = self.data.columns(start, end - start);
         NalgebraMatRef {
             data,
             context: self.context.clone(),

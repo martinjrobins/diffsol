@@ -264,22 +264,22 @@ where
             upper_acc += 1;
         }
     }
-    for (i, j, &v) in ul.triplet_iter() {
+    for (i, j, v) in ul.triplet_iter() {
         let ii = upper_indices_short[i];
         let jj = upper_indices_short[j];
         triplets.push((ii, jj, v));
     }
-    for (i, j, &v) in ur.triplet_iter() {
+    for (i, j, v) in ur.triplet_iter() {
         let ii = upper_indices_short[i];
         let jj = lower_indices_short[j];
         triplets.push((ii, jj, v));
     }
-    for (i, j, &v) in ll.triplet_iter() {
+    for (i, j, v) in ll.triplet_iter() {
         let ii = lower_indices_short[i];
         let jj = upper_indices_short[j];
         triplets.push((ii, jj, v));
     }
-    for (i, j, &v) in lr.triplet_iter() {
+    for (i, j, v) in lr.triplet_iter() {
         let ii = lower_indices_short[i];
         let jj = lower_indices_short[j];
         triplets.push((ii, jj, v));
@@ -357,25 +357,25 @@ mod tests {
         assert_eq!(
             ul_triplets,
             ul.triplet_iter()
-                .map(|(i, j, v)| (i, j, *v))
+                .map(|(i, j, v)| (i, j, v))
                 .collect::<Vec<_>>()
         );
         assert_eq!(
             ur_triplets,
             ur.triplet_iter()
-                .map(|(i, j, v)| (i, j, *v))
+                .map(|(i, j, v)| (i, j, v))
                 .collect::<Vec<_>>()
         );
         assert_eq!(
             ll_triplets,
             ll.triplet_iter()
-                .map(|(i, j, v)| (i, j, *v))
+                .map(|(i, j, v)| (i, j, v))
                 .collect::<Vec<_>>()
         );
         assert_eq!(
             lr_triplets,
             lr.triplet_iter()
-                .map(|(i, j, v)| (i, j, *v))
+                .map(|(i, j, v)| (i, j, v))
                 .collect::<Vec<_>>()
         );
 
@@ -383,7 +383,7 @@ mod tests {
         assert_eq!(
             triplets,
             mat.triplet_iter()
-                .map(|(i, j, v)| (i, j, *v))
+                .map(|(i, j, v)| (i, j, v))
                 .collect::<Vec<_>>()
         );
 

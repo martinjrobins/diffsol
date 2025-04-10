@@ -186,8 +186,8 @@ impl<T: Scalar> DenseMatrix for FaerMat<T> {
         }
     }
 
-    fn columns_mut(&mut self, start: usize, ncols: usize) -> Self::ViewMut<'_> {
-        let data = self.data.get_mut(0..self.data.nrows(), start..ncols);
+    fn columns_mut(&mut self, start: usize, end: usize) -> Self::ViewMut<'_> {
+        let data = self.data.get_mut(0..self.data.nrows(), start..end);
         FaerMatMut {
             data,
             context: self.context.clone(),
@@ -205,8 +205,8 @@ impl<T: Scalar> DenseMatrix for FaerMat<T> {
             context: self.context.clone(),
         }
     }
-    fn columns(&self, start: usize, nrows: usize) -> Self::View<'_> {
-        let data = self.data.get(0..self.nrows(), start..nrows);
+    fn columns(&self, start: usize, end: usize) -> Self::View<'_> {
+        let data = self.data.get(0..self.nrows(), start..end);
         FaerMatRef {
             data,
             context: self.context.clone(),
@@ -273,9 +273,9 @@ impl<T: Scalar> Matrix for FaerMat<T> {
         v.add_assign(&self.column(j));
     }
 
-    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)> {
+    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, Self::T)> {
         (0..self.ncols())
-            .flat_map(move |j| (0..self.nrows()).map(move |i| (i, j, &self.data[(i, j)])))
+            .flat_map(move |j| (0..self.nrows()).map(move |i| (i, j, self.data[(i, j)])))
     }
 
     fn try_from_triplets(

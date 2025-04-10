@@ -114,7 +114,6 @@ pub trait MatrixViewMut<'a>:
 pub trait MatrixView<'a>:
     for<'b> MatrixOpsByValue<&'b Self::Owned, Self::Owned>
     + Mul<Scale<Self::T>, Output = Self::Owned>
-    + Clone
 {
     type Owned;
 
@@ -252,7 +251,7 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
     /// Panics if the sparsity of self, x, and y do not match (i.e. sparsity of self must be the union of the sparsity of x and y)
     fn scale_add_and_assign(&mut self, x: &Self, beta: Self::T, y: &Self);
 
-    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)>;
+    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, Self::T)>;
 
     /// Create a new matrix from a vector of triplets (i, j, value) where i and j are the row and column indices of the value
     fn try_from_triplets(
@@ -298,14 +297,14 @@ pub trait DenseMatrix:
     /// Performs an axpy operation on two columns of the matrix `M[:, i] = alpha * M[:, j] + M[:, i]`
     fn column_axpy(&mut self, alpha: Self::T, j: IndexType, beta: Self::T, i: IndexType);
 
-    /// Get a matrix view of the columns starting at `start` and ending at `start + ncols`
-    fn columns(&self, start: IndexType, ncols: IndexType) -> Self::View<'_>;
+    /// Get a matrix view of the columns starting at `start` and ending at `end`
+    fn columns(&self, start: IndexType, end: IndexType) -> Self::View<'_>;
 
     /// Get a vector view of the column `i`
     fn column(&self, i: IndexType) -> <Self::V as Vector>::View<'_>;
 
-    /// Get a mutable matrix view of the columns starting at `start` and ending at `start + ncols`
-    fn columns_mut(&mut self, start: IndexType, ncols: IndexType) -> Self::ViewMut<'_>;
+    /// Get a mutable matrix view of the columns starting at `start` and ending at `end`
+    fn columns_mut(&mut self, start: IndexType, end: IndexType) -> Self::ViewMut<'_>;
 
     /// Get a mutable vector view of the column `i`
     fn column_mut(&mut self, i: IndexType) -> <Self::V as Vector>::ViewMut<'_>;

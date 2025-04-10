@@ -271,11 +271,11 @@ impl<T: Scalar> Matrix for FaerSparseMat<T> {
         }
     }
 
-    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, &Self::T)> {
+    fn triplet_iter(&self) -> impl Iterator<Item = (IndexType, IndexType, Self::T)> {
         (0..self.ncols()).flat_map(move |j| {
             self.data.col_range(j).map(move |i| {
                 let row = self.data.row_idx()[i];
-                (row, j, &self.data.val()[i])
+                (row, j, self.data.val()[i])
             })
         })
     }

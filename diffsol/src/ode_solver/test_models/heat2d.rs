@@ -39,7 +39,7 @@ pub fn heat2d_diffsl_problem<
         .join(",\n");
     let jac_diffsl = jac
         .triplet_iter()
-        .map(|(i, j, v)| format!("            ({}, {}): {}", i, j, *v))
+        .map(|(i, j, v)| format!("            ({}, {}): {}", i, j, v))
         .collect::<Vec<_>>()
         .join(",\n");
 

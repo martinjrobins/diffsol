@@ -62,7 +62,7 @@ impl CudaContext {
         }
     }
 
-    fn axpy<T: ScalarCuda, D1: DevicePtr<T>, D2: DevicePtrMut<T>>(
+    pub(crate) fn axpy<T: ScalarCuda, D1: DevicePtr<T>, D2: DevicePtrMut<T>>(
         &self,
         alpha: T,
         x: &D1,
@@ -200,26 +200,26 @@ impl CudaContext {
 
 #[derive(Debug, Clone)]
 pub struct CudaVec<T: ScalarCuda> {
-    data: CudaSlice<T>,
-    context: CudaContext,
+    pub(crate) data: CudaSlice<T>,
+    pub(crate) context: CudaContext,
 }
 
 #[derive(Debug, Clone)]
 pub struct CudaIndex {
-    data: CudaSlice<c_int>,
-    context: CudaContext,
+    pub(crate) data: CudaSlice<c_int>,
+    pub(crate) context: CudaContext,
 }
 
 #[derive(Debug)]
 pub struct CudaVecRef<'a, T: ScalarCuda> {
-    data: CudaView<'a, T>,
-    context: CudaContext,
+    pub(crate) data: CudaView<'a, T>,
+    pub(crate) context: CudaContext,
 }
 
 #[derive(Debug)]
 pub struct CudaVecMut<'a, T: ScalarCuda> {
-    data: CudaViewMut<'a, T>,
-    context: CudaContext,
+    pub(crate) data: CudaViewMut<'a, T>,
+    pub(crate) context: CudaContext,
 }
 
 //impl<T: ScalarCuda> DefaultDenseMatrix for CudaVec<T> {
