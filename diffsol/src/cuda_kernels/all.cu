@@ -1,4 +1,9 @@
 extern "C" {
+#include "mat_from_diagonal.cu"
+#include "mat_get_diagonal.cu"
+#include "mat_scale_add_assign.cu"
+#include "mat_set_column.cu"
+#include "mat_set_data_with_indices.cu"
 #include "vec_add_assign_rhs.cu"
 #include "vec_add_assign.cu"
 #include "vec_add.cu"

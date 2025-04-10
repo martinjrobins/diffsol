@@ -213,7 +213,7 @@ impl<T: Scalar> DenseMatrix for FaerMat<T> {
         }
     }
 
-    fn column_axpy(&mut self, alpha: Self::T, j: IndexType, beta: Self::T, i: IndexType) {
+    fn column_axpy(&mut self, alpha: Self::T, j: IndexType, i: IndexType) {
         if i > self.ncols() {
             panic!("Column index out of bounds");
         }
@@ -224,9 +224,8 @@ impl<T: Scalar> DenseMatrix for FaerMat<T> {
             panic!("Column index cannot be the same");
         }
         for k in 0..self.nrows() {
-            let value = unsafe {
-                beta * *self.data.get_unchecked(k, i) + alpha * *self.data.get_unchecked(k, j)
-            };
+            let value =
+                unsafe { *self.data.get_unchecked(k, i) + alpha * *self.data.get_unchecked(k, j) };
             unsafe { *self.data.get_mut_unchecked(k, i) = value };
         }
     }
@@ -364,22 +363,7 @@ mod tests {
 
     #[test]
     fn test_column_axpy() {
-        // M = [1 2]
-        //     [3 4]
-        let mut a = FaerMat::zeros(2, 2, Default::default());
-        a.set_index(0, 0, 1.0);
-        a.set_index(0, 1, 2.0);
-        a.set_index(1, 0, 3.0);
-        a.set_index(1, 1, 4.0);
-
-        // op is M(:, 1) = 2 * M(:, 0) + M(:, 1)
-        a.column_axpy(2.0, 0, 1.0, 1);
-        // M = [1 4]
-        //     [3 10]
-        assert_eq!(a.get_index(0, 0), 1.0);
-        assert_eq!(a.get_index(0, 1), 4.0);
-        assert_eq!(a.get_index(1, 0), 3.0);
-        assert_eq!(a.get_index(1, 1), 10.0);
+        super::super::tests::test_column_axpy::<FaerMat<f64>>();
     }
 
     #[test]

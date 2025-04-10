@@ -219,13 +219,11 @@ pub use vector::{
 };
 
 #[cfg(feature = "cuda")]
-pub use vector::cuda::{
-    CudaVec, CudaIndex, CudaVecMut, CudaVecRef,
-};
-#[cfg(feature = "cuda")]
 pub use context::cuda::CudaContext;
 #[cfg(feature = "cuda")]
-pub use scalar::cuda::{ScalarCuda, CudaType};
+pub use scalar::cuda::{CudaType, ScalarCuda};
+#[cfg(feature = "cuda")]
+pub use vector::cuda::{CudaIndex, CudaVec, CudaVecMut, CudaVecRef};
 
 pub use scalar::scale;
 

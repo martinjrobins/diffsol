@@ -5,13 +5,11 @@ use super::{utils::*, VectorIndex, VectorView, VectorViewMut};
 use cudarc::cublas::sys::lib as cublas;
 use cudarc::cublas::CudaBlas;
 use cudarc::driver::{
-    CudaFunction, CudaSlice, CudaView,
-    CudaViewMut, DevicePtr, DevicePtrMut, LaunchConfig, PushKernelArg,
+    CudaFunction, CudaSlice, CudaView, CudaViewMut, DevicePtr, DevicePtrMut, LaunchConfig,
+    PushKernelArg,
 };
 
-use crate::{CudaContext, IndexType, ScalarCuda, Scale, Vector, VectorCommon, CudaType};
-
-
+use crate::{CudaContext, CudaType, IndexType, ScalarCuda, Scale, Vector, VectorCommon};
 
 extern "C" fn zero(_block_size: std::ffi::c_int) -> usize {
     0
@@ -68,10 +66,14 @@ impl CudaContext {
         x: &D1,
         y: &mut D2,
     ) {
-        let blas = CudaBlas::new(self.stream.clone()).expect("Failed to create CudaBlas");
         let n = x.len() as c_int;
         let (x, _syn_x) = x.device_ptr(&self.stream);
         let (y, _syn_y) = y.device_ptr_mut(&self.stream);
+        self.axpy_inner(alpha, x, y, n);
+    }
+
+    pub(crate) fn axpy_inner<T: ScalarCuda>(&self, alpha: T, x: u64, y: u64, n: c_int) {
+        let blas = CudaBlas::new(self.stream.clone()).expect("Failed to create CudaBlas");
         match T::as_enum() {
             CudaType::F64 => {
                 let x = x as *const f64;
@@ -194,9 +196,6 @@ impl CudaContext {
         partial_sums.into_iter().fold(T::zero(), |acc, x| acc + x)
     }
 }
-
-
-
 
 #[derive(Debug, Clone)]
 pub struct CudaVec<T: ScalarCuda> {
@@ -732,11 +731,15 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self, beta: Self::T) {
-        self.mul_assign(Scale(beta));
+        if beta != T::one() {
+            self.mul_assign(Scale(beta));
+        }
         self.context.axpy::<T, _, _>(alpha, &x.data, &mut self.data);
     }
     fn axpy_v(&mut self, alpha: Self::T, x: &Self::View<'_>, beta: Self::T) {
-        self.mul_assign(Scale(beta));
+        if beta != T::one() {
+            self.mul_assign(Scale(beta));
+        }
         self.context.axpy::<T, _, _>(alpha, &x.data, &mut self.data);
     }
     fn clone_as_vec(&self) -> Vec<Self::T> {
@@ -926,7 +929,9 @@ impl<'a, T: ScalarCuda> VectorViewMut<'a> for CudaVecMut<'a, T> {
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
     }
     fn axpy(&mut self, alpha: Self::T, x: &Self::Owned, beta: Self::T) {
-        self.mul_assign(Scale(beta));
+        if beta != T::one() {
+            self.mul_assign(Scale(beta));
+        }
         self.context.axpy::<T, _, _>(alpha, &x.data, &mut self.data);
     }
 }

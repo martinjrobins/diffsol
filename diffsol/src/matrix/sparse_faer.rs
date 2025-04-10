@@ -397,7 +397,7 @@ mod tests {
             let (i, j, val) = iter.next().unwrap();
             assert_eq!(i, triplet.0);
             assert_eq!(j, triplet.1);
-            assert_eq!(*val, triplet.2);
+            assert_eq!(val, triplet.2);
         }
     }
 

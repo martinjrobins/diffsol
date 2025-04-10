@@ -157,7 +157,7 @@ mod tests {
     fn test_root() {
         type V = NalgebraVec<f64>;
         type M = NalgebraMat<f64>;
-        let ctx = NalgebraContext::default();
+        let ctx = NalgebraContext;
         let interpolate =
             |t: f64| -> Result<V, DiffsolError> { Ok(Vector::from_vec(vec![t], ctx.clone())) };
         let p = V::zeros(0, ctx.clone());

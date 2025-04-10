@@ -1,8 +1,19 @@
-use std::{collections::HashMap, env, fs, sync::{Arc, LazyLock, Mutex}};
+use std::{
+    collections::HashMap,
+    env, fs,
+    sync::{Arc, LazyLock, Mutex},
+};
 
-use cudarc::{driver::{CudaContext as CudaDevice, CudaFunction, CudaModule, CudaStream}, nvrtc::Ptx};
+use cudarc::{
+    driver::{CudaContext as CudaDevice, CudaFunction, CudaModule, CudaStream},
+    nvrtc::Ptx,
+};
 
-use crate::{cuda_error, error::{CudaError, DiffsolError}, ScalarCuda}; 
+use crate::{
+    cuda_error,
+    error::{CudaError, DiffsolError},
+    ScalarCuda,
+};
 
 static DEVICES: LazyLock<Mutex<CudaGlobalContext>> =
     LazyLock::new(|| Mutex::new(CudaGlobalContext::new()));
