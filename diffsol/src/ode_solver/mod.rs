@@ -9,6 +9,7 @@ pub mod jacobian_update;
 pub mod method;
 pub mod problem;
 pub mod sdirk;
+pub mod explicit_rk;
 pub mod sdirk_state;
 pub mod sens_equations;
 pub mod sensitivities;
