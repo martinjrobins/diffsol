@@ -6,7 +6,7 @@ use crate::{
 use super::state::StateCommon;
 
 #[derive(Clone)]
-pub struct SdirkState<V: Vector> {
+pub struct RkState<V: Vector> {
     pub(crate) y: V,
     pub(crate) dy: V,
     pub(crate) g: V,
@@ -19,9 +19,9 @@ pub struct SdirkState<V: Vector> {
     pub(crate) h: V::T,
 }
 
-impl<V> SdirkState<V> where V: Vector {}
+impl<V> RkState<V> where V: Vector {}
 
-impl<V> OdeSolverState<V> for SdirkState<V>
+impl<V> OdeSolverState<V> for RkState<V>
 where
     V: Vector,
 {

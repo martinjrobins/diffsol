@@ -1,5 +1,5 @@
 use crate::{
-    ode_solver::problem::OdeSolverSolution, MatrixHost, OdeBuilder, OdeEquationsSens,
+    ode_solver::problem::OdeSolverSolution, MatrixHost, OdeBuilder, OdeEquationsImplicitSens,
     OdeSolverProblem, Vector,
 };
 use num_traits::{One, Zero};
@@ -8,7 +8,7 @@ use num_traits::{One, Zero};
 pub fn robertson_ode_with_sens<M: MatrixHost + 'static>(
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverProblem<impl OdeEquationsImplicitSens<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::<M>::new()

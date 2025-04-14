@@ -34,7 +34,7 @@ mod tests {
     use crate::{
         op::OpStatistics, AdjointOdeSolverMethod, Context, CraneliftModule, DenseMatrix,
         MatrixCommon, MatrixHost, MatrixRef, NonLinearOpJacobian, OdeBuilder, OdeEquations,
-        OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsRef, OdeSolverMethod,
+        OdeEquationsImplicitAdjoint, OdeEquationsImplicit, OdeEquationsRef, OdeSolverMethod,
         OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Scale, VectorRef, VectorView,
         VectorViewMut,
     };
@@ -141,7 +141,7 @@ mod tests {
         soln: OdeSolverSolution<Eqn::V>,
     ) -> <Eqn::V as DefaultDenseMatrix>::M
     where
-        Eqn: OdeEquationsAdjoint + 'a,
+        Eqn: OdeEquationsImplicitAdjoint + 'a,
         LS: LinearSolver<Eqn::M>,
         Eqn::V: DefaultDenseMatrix,
         for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -232,7 +232,7 @@ mod tests {
         <Eqn::V as DefaultDenseMatrix>::M,
     )
     where
-        Eqn: OdeEquationsAdjoint + 'a,
+        Eqn: OdeEquationsImplicitAdjoint + 'a,
         LS: LinearSolver<Eqn::M>,
         Eqn::V: DefaultDenseMatrix,
         for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -289,7 +289,7 @@ mod tests {
     ) where
         SolverF: OdeSolverMethod<'a, Eqn>,
         SolverB: AdjointOdeSolverMethod<'a, Eqn, SolverF>,
-        Eqn: OdeEquationsAdjoint + 'a,
+        Eqn: OdeEquationsImplicitAdjoint + 'a,
         Eqn::V: DefaultDenseMatrix,
         Eqn::M: DefaultSolver,
     {
@@ -319,7 +319,7 @@ mod tests {
     ) where
         SolverF: OdeSolverMethod<'a, Eqn>,
         SolverB: AdjointOdeSolverMethod<'a, Eqn, SolverF>,
-        Eqn: OdeEquationsAdjoint + 'a,
+        Eqn: OdeEquationsImplicitAdjoint + 'a,
         Eqn::V: DefaultDenseMatrix,
         Eqn::M: DefaultSolver,
     {

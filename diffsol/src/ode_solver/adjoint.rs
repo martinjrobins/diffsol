@@ -2,7 +2,7 @@ use crate::{
     error::{DiffsolError, OdeSolverError},
     ode_solver_error, AdjointEquations, AugmentedOdeEquations, AugmentedOdeSolverMethod,
     DefaultDenseMatrix, DefaultSolver, DenseMatrix, LinearSolver, Matrix, MatrixCommon, MatrixOp,
-    NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint, OdeSolverMethod,
+    NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsImplicitAdjoint, OdeSolverMethod,
     OdeSolverState, OdeSolverStopReason, Op, Vector, VectorIndex,
 };
 
@@ -12,7 +12,7 @@ use std::ops::{AddAssign, SubAssign};
 pub trait AdjointOdeSolverMethod<'a, Eqn, Solver>:
     AugmentedOdeSolverMethod<'a, Eqn, AdjointEquations<'a, Eqn, Solver>>
 where
-    Eqn: OdeEquationsAdjoint + 'a,
+    Eqn: OdeEquationsImplicitAdjoint + 'a,
     Solver: OdeSolverMethod<'a, Eqn>,
 {
     /// Backwards pass for adjoint sensitivity analysis
@@ -140,7 +140,7 @@ where
 
 impl<'a, Eqn, S, Solver> AdjointOdeSolverMethod<'a, Eqn, S> for Solver
 where
-    Eqn: OdeEquationsAdjoint + 'a,
+    Eqn: OdeEquationsImplicitAdjoint + 'a,
     S: OdeSolverMethod<'a, Eqn>,
     Solver: AugmentedOdeSolverMethod<'a, Eqn, AdjointEquations<'a, Eqn, S>>,
 {
@@ -265,7 +265,7 @@ where
         dgdus: impl Iterator<Item = <M::V as Vector>::View<'b>>,
     ) -> Result<(), DiffsolError>
     where
-        Eqn: OdeEquationsAdjoint<M = M, V = M::V, T = M::T> + 'a,
+        Eqn: OdeEquationsImplicitAdjoint<M = M, V = M::V, T = M::T> + 'a,
         Solver: AdjointOdeSolverMethod<'a, Eqn, S1>,
         S1: OdeSolverMethod<'a, Eqn>,
     {

@@ -8,7 +8,7 @@ use crate::NewtonNonlinearSolver;
 use crate::NoAug;
 use crate::OdeSolverStopReason;
 use crate::RootFinder;
-use crate::SdirkState;
+use crate::RkState;
 use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, AugmentedOdeEquations,
@@ -72,7 +72,7 @@ pub struct Sdirk<
     nonlinear_solver: NewtonNonlinearSolver<Eqn::M, LS>,
     convergence: Convergence<'a, Eqn::V>,
     op: Option<SdirkCallable<&'a Eqn>>,
-    state: SdirkState<Eqn::V>,
+    state: RkState<Eqn::V>,
     diff: M,
     sdiff: Vec<M>,
     sgdiff: Vec<M>,
@@ -167,7 +167,7 @@ where
 
     pub fn new(
         problem: &'a OdeSolverProblem<Eqn>,
-        state: SdirkState<Eqn::V>,
+        state: RkState<Eqn::V>,
         tableau: Tableau<M>,
         linear_solver: LS,
     ) -> Result<Self, DiffsolError> {
@@ -176,7 +176,7 @@ where
 
     fn _new(
         problem: &'a OdeSolverProblem<Eqn>,
-        mut state: SdirkState<Eqn::V>,
+        mut state: RkState<Eqn::V>,
         tableau: Tableau<M>,
         linear_solver: LS,
         integrate_main_eqn: bool,
@@ -331,7 +331,7 @@ where
 
     pub fn new_augmented(
         problem: &'a OdeSolverProblem<Eqn>,
-        state: SdirkState<Eqn::V>,
+        state: RkState<Eqn::V>,
         tableau: Tableau<M>,
         linear_solver: LS,
         augmented_eqn: AugmentedEqn,
@@ -552,7 +552,7 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
-    type State = SdirkState<Eqn::V>;
+    type State = RkState<Eqn::V>;
 
     fn problem(&self) -> &'a OdeSolverProblem<Eqn> {
         self.problem
@@ -594,7 +594,7 @@ where
         self._jacobian_updates(self.state.h, SolverState::Checkpoint);
     }
 
-    fn into_state(self) -> SdirkState<Eqn::V> {
+    fn into_state(self) -> RkState<Eqn::V> {
         self.state
     }
 

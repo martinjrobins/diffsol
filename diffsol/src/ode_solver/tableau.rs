@@ -156,6 +156,123 @@ impl<M: DenseMatrix> Tableau<M> {
         Self::new(a, b, c, d, 3, None)
     }
 
+    pub fn tsit45(ctx: M::C) -> Self {
+
+        let c = M::V::from_vec(
+            vec![
+                M::T::from(0.0),
+                M::T::from(0.161),
+                M::T::from(0.327),
+                M::T::from(0.9),
+                M::T::from(0.9800255409045097),
+                M::T::from(1.0),
+                M::T::from(1.0),
+            ],
+            ctx.clone(),
+        );
+
+        let b = M::V::from_vec(
+            vec![
+                M::T::from(0.09646076681806523),
+                M::T::from(0.01),
+                M::T::from(0.4798896504144996),
+                M::T::from(1.379008574103742),
+                M::T::from(-3.290069515436081),
+                M::T::from(2.324710524099774),
+                M::T::from(0.0),
+            ],
+            ctx.clone(),
+        );
+
+        let bhat = M::V::from_vec(
+            vec![
+                M::T::from(0.001780011052226),
+                M::T::from(0.000816434459657),
+                M::T::from(-0.007880878010262),
+                M::T::from(0.144711007173263),
+                M::T::from(-0.582357165452555),
+                M::T::from(0.458082105929187),
+                M::T::from(1.0/66.0),
+            ],
+            ctx.clone(),
+        );
+
+        let mut d = M::V::zeros(7, ctx.clone());
+        for i in 0..7 {
+            d.set_index(i, b.get_index(i) - bhat.get_index(i));
+        }
+
+        let mut a = M::zeros(7, 7, ctx.clone());
+        a.set_index(2, 1, M::T::from(0.335_480_655_492_357));
+        a.set_index(3, 1, M::T::from(-6.359448489975075));
+        a.set_index(4, 1, M::T::from(-11.74888356406283));
+        a.set_index(5, 1, M::T::from(-12.92096931784711));
+        a.set_index(3, 2, M::T::from(4.362295432869581));
+        a.set_index(4, 2, M::T::from(7.495539342889836));
+        a.set_index(5, 2, M::T::from(8.159367898576159));
+        a.set_index(4, 3, M::T::from(-0.09249506636175525));
+        a.set_index(5, 3, M::T::from(-0.071_584_973_281_401));
+        a.set_index(5, 4, M::T::from(-0.02826905039406838));
+        for i in 1..7 {
+            let mut a_sum = M::T::zero();
+            for j in 1..i {
+                a_sum += a.get_index(i, j);
+            }
+            a.set_index(i, 0, c.get_index(i) - a_sum);
+        }
+        for j in 0..6 {
+            a.set_index(6, j, b.get_index(j));
+        }
+
+        // b0 = -1.05308849772902*t**4 + 2.91325546182191*t**3 - 2.76370619727483*t**2 + 1.0*t
+        // b1 = 0.1017*t**4 - 0.2234*t**3 + 0.1317*t**2
+        // b2 = 2.49062728565125*t**4 - 5.9410338721315*t**3 + 3.93029623689475*t**2
+        // b3 = -16.5481028892449*t**4 + 30.3381886302823*t**3 - 12.4110771669337*t**2
+        // b4 = 47.3795219628193*t**4 - 88.1789048947664*t**3 + 37.509313416511*t**2
+        // b5 = -34.8706578614966*t**4 + 65.0918946747937*t**3 - 27.8965262891973*t**2
+        // b6 = 2.5*t**4 - 4.0*t**3 + 1.5*t**2
+
+        let beta = M::from_vec(
+            7,
+            4,
+            vec![
+                M::T::one(),
+                M::T::zero(),
+                M::T::zero(),
+                M::T::zero(),
+                M::T::zero(),
+                M::T::zero(),
+                M::T::zero(),
+                M::T::from(-2.76370619727483),
+                M::T::from(0.1317),
+                M::T::from(3.93029623689475),
+                M::T::from(-12.4110771669337),
+                M::T::from(37.509313416511),
+                M::T::from(-27.8965262891973),
+                M::T::from(1.5),
+                M::T::from(2.91325546182191),
+                M::T::from(-0.2234),
+                M::T::from(-5.9410338721315),
+                M::T::from(30.3381886302823),
+                M::T::from(-88.1789048947664),
+                M::T::from(65.0918946747937),
+                M::T::from(-4.0),
+                M::T::from(-1.05308849772902),
+                M::T::from(0.1017),
+                M::T::from(2.49062728565125),
+                M::T::from(-16.5481028892449),
+                M::T::from(47.3795219628193),
+                M::T::from(-34.8706578614966),
+                M::T::from(2.5),
+            ],
+            ctx.clone(),
+        );
+
+        let order = 4;
+        Self::new(a, b, c, d, order, Some(beta))
+
+    }
+
     pub fn new(a: M, b: M::V, c: M::V, d: M::V, order: usize, beta: Option<M>) -> Self {
         let s = c.len();
         assert_eq!(a.ncols(), s, "Invalid number of rows in a, expected {}", s);

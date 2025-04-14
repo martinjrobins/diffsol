@@ -5,7 +5,7 @@ use crate::vector::VectorRef;
 use crate::NoAug;
 use crate::OdeSolverStopReason;
 use crate::RootFinder;
-use crate::SdirkState;
+use crate::RkState;
 use crate::Tableau;
 use crate::{
     scale, AugmentedOdeEquations,
@@ -60,7 +60,7 @@ pub struct ExplicitRk<
     tableau: Tableau<M>,
     problem: &'a OdeSolverProblem<Eqn>,
     augmented_eqn: Option<AugmentedEqn>,
-    state: SdirkState<Eqn::V>,
+    state: RkState<Eqn::V>,
     a_rows: Vec<Eqn::V>,
     statistics: BdfStatistics,
     root_finder: Option<RootFinder<Eqn::V>>,
@@ -69,7 +69,7 @@ pub struct ExplicitRk<
     sdiff: Vec<M>,
     sgdiff: Vec<M>,
     gdiff: M,
-    old_state: SdirkState<Eqn::V>,
+    old_state: RkState<Eqn::V>,
     is_state_mutated: bool,
 }
 
@@ -116,7 +116,7 @@ where
 
     pub fn new(
         problem: &'a OdeSolverProblem<Eqn>,
-        state: SdirkState<Eqn::V>,
+        state: RkState<Eqn::V>,
         tableau: Tableau<M>,
     ) -> Result<Self, DiffsolError> {
         Self::_new(problem, state, tableau)
@@ -124,7 +124,7 @@ where
 
     fn _new(
         problem: &'a OdeSolverProblem<Eqn>,
-        mut state: SdirkState<Eqn::V>,
+        mut state: RkState<Eqn::V>,
         tableau: Tableau<M>,
     ) -> Result<Self, DiffsolError> {
         // check that the upper triangular and diagonal parts of a are zero
@@ -220,7 +220,7 @@ where
 
     pub fn new_augmented(
         problem: &'a OdeSolverProblem<Eqn>,
-        state: SdirkState<Eqn::V>,
+        state: RkState<Eqn::V>,
         tableau: Tableau<M>,
         augmented_eqn: AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
@@ -320,7 +320,7 @@ where
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
 {
-    type State = SdirkState<Eqn::V>;
+    type State = RkState<Eqn::V>;
 
     fn problem(&self) -> &'a OdeSolverProblem<Eqn> {
         self.problem
@@ -342,7 +342,7 @@ where
         self.state = state;
     }
 
-    fn into_state(self) -> SdirkState<Eqn::V> {
+    fn into_state(self) -> RkState<Eqn::V> {
         self.state
     }
 

@@ -6,7 +6,7 @@ use crate::{
     nonlinear_solver::{convergence::Convergence, NonLinearSolver},
     ode_solver_error, scale, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp,
     InitOp, LinearSolver, NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeEquationsImplicit,
-    OdeEquationsSens, OdeSolverProblem, Op, SensEquations, Vector,
+    OdeEquationsImplicitSens, OdeSolverProblem, Op, SensEquations, Vector,
 };
 
 /// A state holding those variables that are common to all ODE solver states,
@@ -137,11 +137,33 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     }
 
     /// Create a new solver state from an ODE problem.
+    /// This function will set the initial step size based on the given solver.
+    /// If you want to create a state without this default initialisation, use [Self::new_without_initialise] instead.
+    /// You can then use [Self::set_consistent] and [Self::set_step_size] to set the state up if you need to.
+    fn new<Eqn>(
+        ode_problem: &OdeSolverProblem<Eqn>,
+        solver_order: usize,
+    ) -> Result<Self, DiffsolError>
+    where
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
+    {
+        let mut ret = Self::new_without_initialise(ode_problem)?;
+        ret.set_step_size(
+            ode_problem.h0,
+            &ode_problem.atol,
+            ode_problem.rtol,
+            &ode_problem.eqn,
+            solver_order,
+        );
+        Ok(ret)
+    }
+
+    /// Create a new solver state from an ODE problem.
     /// This function will make the state consistent with any algebraic constraints using a default nonlinear solver.
     /// It will also set the initial step size based on the given solver.
     /// If you want to create a state without this default initialisation, use [Self::new_without_initialise] instead.
     /// You can then use [Self::set_consistent] and [Self::set_step_size] to set the state up if you need to.
-    fn new<LS, Eqn>(
+    fn new_and_consistent<LS, Eqn>(
         ode_problem: &OdeSolverProblem<Eqn>,
         solver_order: usize,
     ) -> Result<Self, DiffsolError>
@@ -167,14 +189,14 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         solver_order: usize,
     ) -> Result<Self, DiffsolError>
     where
-        Eqn: OdeEquationsSens<T = V::T, V = V, C = V::C>,
+        Eqn: OdeEquationsImplicitSens<T = V::T, V = V, C = V::C>,
         LS: LinearSolver<Eqn::M>,
     {
         let mut augmented_eqn = SensEquations::new(ode_problem);
-        Self::new_with_augmented::<LS, _, _>(ode_problem, &mut augmented_eqn, solver_order)
+        Self::new_with_augmented_and_consistent::<LS, _, _>(ode_problem, &mut augmented_eqn, solver_order)
     }
 
-    fn new_with_augmented<LS, Eqn, AugmentedEqn>(
+    fn new_with_augmented_and_consistent<LS, Eqn, AugmentedEqn>(
         ode_problem: &OdeSolverProblem<Eqn>,
         augmented_eqn: &mut AugmentedEqn,
         solver_order: usize,

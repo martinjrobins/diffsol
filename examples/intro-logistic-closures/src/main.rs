@@ -1,5 +1,5 @@
 use diffsol::OdeBuilder;
-use diffsol::{BdfState, OdeSolverState, SdirkState, Tableau};
+use diffsol::{BdfState, OdeSolverState, RkState, Tableau};
 use diffsol::{NalgebraLU, NalgebraMat, OdeSolverMethod, OdeSolverStopReason, Vector};
 type M = NalgebraMat<f64>;
 type LS = NalgebraLU<f64>;
@@ -33,7 +33,7 @@ fn main() {
 
     // Create a SDIRK solver with a pre-defined tableau
     let tableau = Tableau::<M>::tr_bdf2(problem.context().clone());
-    let state = problem.sdirk_state::<LS, _>(&tableau).unwrap();
+    let state = problem.rk_state::<LS, _>(&tableau).unwrap();
     let _solver = problem.sdirk_solver::<LS, _>(state, tableau);
 
     // Create a tr_bdf2 or esdirk34 solvers directly (both are SDIRK solvers with different tableaus)
@@ -42,7 +42,7 @@ fn main() {
 
     // Create a non-initialised state and manually set the values before
     // creating the solver
-    let mut state = SdirkState::new_without_initialise(&problem).unwrap();
+    let mut state = RkState::new_without_initialise(&problem).unwrap();
     // ... set the state values manually
     state.as_mut().y[0] = 0.1;
     let _solver = problem.tr_bdf2_solver::<LS>(state);

@@ -1,13 +1,13 @@
 use crate::{
     error::DiffsolError, error::OdeSolverError, ode_solver_error, AugmentedOdeSolverMethod,
-    Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, OdeEquationsSens, OdeSolverStopReason,
+    Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, OdeEquationsImplicitSens, OdeSolverStopReason,
     Op, SensEquations, VectorViewMut,
 };
 
 pub trait SensitivitiesOdeSolverMethod<'a, Eqn>:
     AugmentedOdeSolverMethod<'a, Eqn, SensEquations<'a, Eqn>>
 where
-    Eqn: OdeEquationsSens + 'a,
+    Eqn: OdeEquationsImplicitSens + 'a,
 {
     /// Using the provided state, solve the problem up to time `t_eval[t_eval.len()-1]`
     /// Returns a tuple `(y, sens)`, where `y` is a dense matrix of solution values at timepoints given by `t_eval`,
@@ -25,7 +25,7 @@ where
         DiffsolError,
     >
     where
-        Eqn: OdeEquationsSens,
+        Eqn: OdeEquationsImplicitSens,
         Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
@@ -86,6 +86,6 @@ where
 impl<'a, M, Eqn> SensitivitiesOdeSolverMethod<'a, Eqn> for M
 where
     M: AugmentedOdeSolverMethod<'a, Eqn, SensEquations<'a, Eqn>>,
-    Eqn: OdeEquationsSens + 'a,
+    Eqn: OdeEquationsImplicitSens + 'a,
 {
 }
