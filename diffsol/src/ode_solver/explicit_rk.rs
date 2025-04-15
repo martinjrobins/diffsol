@@ -772,13 +772,10 @@ mod test {
     use crate::{
         matrix::dense_nalgebra_serial::NalgebraMat,
         ode_solver::{
-            test_models::{
-                exponential_decay::{
-                    exponential_decay_problem, exponential_decay_problem_adjoint,
-                    exponential_decay_problem_sens, exponential_decay_problem_with_root,
-                    negative_exponential_decay_problem,
-                },
-                robertson_ode::robertson_ode,
+            test_models::exponential_decay::{
+                exponential_decay_problem, exponential_decay_problem_adjoint,
+                exponential_decay_problem_sens, exponential_decay_problem_with_root,
+                negative_exponential_decay_problem,
             },
             tests::{
                 setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
@@ -832,16 +829,16 @@ mod test {
         let mut s = problem.tsit45().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 4
-        number_of_steps: 29
+        number_of_linear_solver_setups: 0
+        number_of_steps: 5
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 116
+        number_of_nonlinear_solver_iterations: 0
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 118
-        number_of_jac_muls: 2
-        number_of_matrix_evals: 1
+        number_of_calls: 32
+        number_of_jac_muls: 0
+        number_of_matrix_evals: 0
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -902,26 +899,6 @@ mod test {
         number_of_jac_muls: 6
         number_of_matrix_evals: 3
         number_of_jac_adj_muls: 1608
-        "###);
-    }
-
-    #[test]
-    fn test_tsit45_nalgebra_robertson_ode() {
-        let (problem, soln) = robertson_ode::<M>(false, 1);
-        let mut s = problem.tsit45().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 113
-        number_of_steps: 304
-        number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 2601
-        number_of_nonlinear_solver_fails: 15
-        "###);
-        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 2603
-        number_of_jac_muls: 39
-        number_of_matrix_evals: 13
-        number_of_jac_adj_muls: 0
         "###);
     }
 

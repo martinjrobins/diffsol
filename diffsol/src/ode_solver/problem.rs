@@ -322,6 +322,7 @@ where
         if let Some(h) = h {
             *state.as_mut().h = -h;
         }
+        state.set_consistent(self, &mut newton_solver)?;
         state.set_consistent_augmented(self, &mut augmented_eqn, &mut newton_solver)?;
         state.set_step_size(
             state.h,
@@ -475,6 +476,7 @@ where
             *state.as_mut().h = -h;
         }
         let mut newton_solver = NewtonNonlinearSolver::new(LS::default());
+        state.set_consistent(self, &mut newton_solver)?;
         state.set_consistent_augmented(self, &mut augmented_eqn, &mut newton_solver)?;
         state.set_step_size(
             state.h,
