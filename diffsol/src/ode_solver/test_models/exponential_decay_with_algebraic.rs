@@ -1,6 +1,7 @@
 use crate::{
     matrix::Matrix, ode_solver::problem::OdeSolverSolution, scalar::scale, MatrixHost, OdeBuilder,
-    OdeEquationsImplicitAdjoint, OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
+    OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem,
+    Op, Vector,
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};

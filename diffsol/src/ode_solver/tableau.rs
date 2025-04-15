@@ -157,7 +157,6 @@ impl<M: DenseMatrix> Tableau<M> {
     }
 
     pub fn tsit45(ctx: M::C) -> Self {
-
         let c = M::V::from_vec(
             vec![
                 M::T::from(0.0),
@@ -192,7 +191,7 @@ impl<M: DenseMatrix> Tableau<M> {
                 M::T::from(0.144711007173263),
                 M::T::from(-0.582357165452555),
                 M::T::from(0.458082105929187),
-                M::T::from(1.0/66.0),
+                M::T::from(1.0 / 66.0),
             ],
             ctx.clone(),
         );
@@ -270,7 +269,6 @@ impl<M: DenseMatrix> Tableau<M> {
 
         let order = 4;
         Self::new(a, b, c, d, order, Some(beta))
-
     }
 
     pub fn new(a: M, b: M::V, c: M::V, d: M::V, order: usize, beta: Option<M>) -> Self {

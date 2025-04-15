@@ -33,7 +33,7 @@ fn main() {
 
     // Create a SDIRK solver with a pre-defined tableau
     let tableau = Tableau::<M>::tr_bdf2(problem.context().clone());
-    let state = problem.rk_state::<LS, _>(&tableau).unwrap();
+    let state = problem.rk_state(&tableau).unwrap();
     let _solver = problem.sdirk_solver::<LS, _>(state, tableau);
 
     // Create a tr_bdf2 or esdirk34 solvers directly (both are SDIRK solvers with different tableaus)

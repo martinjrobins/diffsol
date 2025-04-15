@@ -3,8 +3,8 @@ use std::cell::RefCell;
 
 use crate::{
     op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, ConstantOp, ConstantOpSens,
-    Matrix, NonLinearOp, NonLinearOpSens, OdeEquations, OdeEquationsRef, OdeEquationsImplicitSens,
-    OdeSolverProblem, Op, Vector
+    Matrix, NonLinearOp, NonLinearOpSens, OdeEquations, OdeEquationsImplicitSens, OdeEquationsRef,
+    OdeSolverProblem, Op, Vector,
 };
 
 pub struct SensInit<'a, Eqn>
@@ -301,7 +301,6 @@ impl<'a, Eqn> OdeEquations for SensEquations<'a, Eqn>
 where
     Eqn: OdeEquationsImplicitSens,
 {
-
     fn rhs(&self) -> &SensRhs<'a, Eqn> {
         &self.rhs
     }

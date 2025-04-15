@@ -1,7 +1,7 @@
 use crate::{
     error::DiffsolError, error::OdeSolverError, ode_solver_error, AugmentedOdeSolverMethod,
-    Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, OdeEquationsImplicitSens, OdeSolverStopReason,
-    Op, SensEquations, VectorViewMut,
+    Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, OdeEquationsImplicitSens,
+    OdeSolverStopReason, Op, SensEquations, VectorViewMut,
 };
 
 pub trait SensitivitiesOdeSolverMethod<'a, Eqn>:

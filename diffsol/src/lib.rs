@@ -189,14 +189,13 @@ pub use ode_solver::{
     adjoint_equations::AdjointRhs, bdf::Bdf, bdf_state::BdfState, builder::OdeBuilder,
     checkpointing::Checkpointing, checkpointing::HermiteInterpolator,
     equations::AugmentedOdeEquations, equations::AugmentedOdeEquationsImplicit, equations::NoAug,
-    equations::OdeEquations, equations::OdeEquationsImplicitAdjoint, equations::OdeEquationsImplicit,
-    equations::OdeEquationsAdjoint,
-    equations::OdeEquationsRef, equations::OdeEquationsImplicitSens, equations::OdeSolverEquations,
+    equations::OdeEquations, equations::OdeEquationsAdjoint, equations::OdeEquationsImplicit,
+    equations::OdeEquationsImplicitAdjoint, equations::OdeEquationsImplicitSens,
+    equations::OdeEquationsRef, equations::OdeSolverEquations, explicit_rk::ExplicitRk,
     method::AugmentedOdeSolverMethod, method::OdeSolverMethod, method::OdeSolverStopReason,
-    problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::RkState,
-    explicit_rk::ExplicitRk,
-    sens_equations::SensEquations, sens_equations::SensInit, sens_equations::SensRhs,
-    sensitivities::SensitivitiesOdeSolverMethod, state::OdeSolverState, tableau::Tableau,
+    problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::RkState, sens_equations::SensEquations,
+    sens_equations::SensInit, sens_equations::SensRhs, sensitivities::SensitivitiesOdeSolverMethod,
+    state::OdeSolverState, tableau::Tableau,
 };
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};

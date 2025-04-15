@@ -4,14 +4,13 @@ use crate::ode_solver_error;
 use crate::vector::VectorRef;
 use crate::NoAug;
 use crate::OdeSolverStopReason;
-use crate::RootFinder;
 use crate::RkState;
+use crate::RootFinder;
 use crate::Tableau;
 use crate::{
-    scale, AugmentedOdeEquations,
-    DenseMatrix,
-    NonLinearOp, OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op,
-    Scalar, StateRef, StateRefMut, Vector, VectorViewMut, DefaultDenseMatrix, MatrixView
+    scale, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, MatrixView, NonLinearOp,
+    OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Scalar, StateRef,
+    StateRefMut, Vector, VectorViewMut,
 };
 use num_traits::abs;
 use num_traits::One;
@@ -127,6 +126,10 @@ where
         mut state: RkState<Eqn::V>,
         tableau: Tableau<M>,
     ) -> Result<Self, DiffsolError> {
+        // check that there isn't any mass matrix
+        if problem.eqn.mass().is_some() {
+            return Err(DiffsolError::from(OdeSolverError::MassMatrixNotSupported));
+        }
         // check that the upper triangular and diagonal parts of a are zero
         let s = tableau.s();
         for i in 0..s {
@@ -171,7 +174,6 @@ where
             Eqn::T::zero(),
             "Invalid tableau, expected c(0) = 0"
         );
-
 
         // update statistics
         let statistics = BdfStatistics::default();
@@ -225,11 +227,7 @@ where
         augmented_eqn: AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
         state.check_sens_consistent_with_problem(problem, &augmented_eqn)?;
-        let mut ret = Self::_new(
-            problem,
-            state,
-            tableau,
-        )?;
+        let mut ret = Self::_new(problem, state, tableau)?;
         let naug = augmented_eqn.max_index();
         let nstates = augmented_eqn.rhs().nstates();
         let order = ret.tableau.s();
@@ -277,15 +275,14 @@ where
         Ok(None)
     }
 
-
-    fn interpolate_from_diff(y0: &Eqn::V, beta_f: &Eqn::V, diff: &M) -> Eqn::V {
+    fn interpolate_from_diff(h: Eqn::T, y0: &Eqn::V, beta_f: &Eqn::V, diff: &M) -> Eqn::V {
         // ret = old_y + sum_{i=0}^{s_star-1} beta[i] * diff[:, i]
         let mut ret = y0.clone();
-        diff.gemv(Eqn::T::one(), beta_f, Eqn::T::one(), &mut ret);
+        diff.gemv(h, beta_f, Eqn::T::one(), &mut ret);
         ret
     }
 
-    fn interpolate_beta_function(theta: Eqn::T, beta: &M) -> Eqn::V {
+    fn interpolate_beta_function(h: Eqn::T, theta: Eqn::T, beta: &M) -> Eqn::V {
         let poly_order = beta.ncols();
         let s_star = beta.nrows();
         let mut thetav = Vec::with_capacity(poly_order);
@@ -296,7 +293,7 @@ where
         // beta_poly = beta * thetav
         let thetav = Eqn::V::from_vec(thetav, beta.context().clone());
         let mut beta_f = <Eqn::V as Vector>::zeros(s_star, beta.context().clone());
-        beta.gemv(Eqn::T::one(), &thetav, Eqn::T::zero(), &mut beta_f);
+        beta.gemv(h, &thetav, Eqn::T::zero(), &mut beta_f);
         beta_f
     }
 
@@ -331,7 +328,7 @@ where
     }
 
     fn mass(&self) -> Option<std::cell::Ref<<Eqn>::M>> {
-        None 
+        None
     }
 
     fn order(&self) -> usize {
@@ -371,7 +368,6 @@ where
             self.is_state_mutated = false;
         }
 
-
         let ctx = self.problem.eqn.context();
         // todo: remove this allocation?
         let mut error = <Eqn::V as Vector>::zeros(n, ctx.clone());
@@ -381,8 +377,12 @@ where
         } else {
             <Eqn::V as Vector>::zeros(0, ctx.clone())
         };
-        let sens_error_control =
-            self.augmented_eqn.is_some() && self.augmented_eqn.as_ref().unwrap().include_in_error_control();
+        let sens_error_control = self.augmented_eqn.is_some()
+            && self
+                .augmented_eqn
+                .as_ref()
+                .unwrap()
+                .include_in_error_control();
         let mut sens_error = if sens_error_control {
             <Eqn::V as Vector>::zeros(
                 self.augmented_eqn.as_ref().unwrap().rhs().nstates(),
@@ -411,15 +411,11 @@ where
             true
         };
 
-
-        
-
         // loop until step is accepted
         let t0 = self.state.t;
         let mut h = self.state.h;
         let mut factor: Eqn::T;
         'step: loop {
-
             // since start == 1, then we need to compute the first stage
             // from the last stage of the previous step
             self.diff.column_mut(0).copy_from(&self.state.dy);
@@ -445,7 +441,12 @@ where
                 // main equation
                 if integrate_main_eqn {
                     self.old_state.y.copy_from(&self.state.y);
-                    self.diff.columns(0, i).gemv_o(h, &self.a_rows[i], Eqn::T::one(), &mut self.old_state.y);
+                    self.diff.columns(0, i).gemv_o(
+                        h,
+                        &self.a_rows[i],
+                        Eqn::T::one(),
+                        &mut self.old_state.y,
+                    );
 
                     // update diff with solved dy
                     self.problem.eqn.rhs().call_inplace(
@@ -453,15 +454,13 @@ where
                         t,
                         &mut self.old_state.dy,
                     );
-                    self.diff
-                        .column_mut(i).copy_from(&self.old_state.dy);
+                    self.diff.column_mut(i).copy_from(&self.old_state.dy);
 
                     // calculate dg and store in gdiff
                     if self.problem.integrate_out {
                         let out = self.problem.eqn.out().unwrap();
                         out.call_inplace(&self.old_state.y, t, &mut self.state.dg);
-                        self.gdiff
-                            .column_mut(i).copy_from(&self.state.dg);
+                        self.gdiff.column_mut(i).copy_from(&self.state.dg);
                     }
                 }
 
@@ -476,12 +475,13 @@ where
                             &mut self.old_state.s[j],
                         );
 
-                        aug_eqn.rhs()
-                            .call_inplace(&self.old_state.s[j], t, &mut self.old_state.ds[j]);
+                        aug_eqn.rhs().call_inplace(
+                            &self.old_state.s[j],
+                            t,
+                            &mut self.old_state.ds[j],
+                        );
 
-                        self.sdiff[j]
-                            .column_mut(i)
-                            .copy_from(&self.old_state.ds[j]);
+                        self.sdiff[j].column_mut(i).copy_from(&self.old_state.ds[j]);
                     }
                 }
             }
@@ -500,12 +500,8 @@ where
 
                 // output errors
                 if out_error_control {
-                    self.gdiff.gemv(
-                        Eqn::T::one(),
-                        self.tableau.d(),
-                        Eqn::T::zero(),
-                        &mut out_error,
-                    );
+                    self.gdiff
+                        .gemv(h, self.tableau.d(), Eqn::T::zero(), &mut out_error);
                     let atol = self.problem().out_atol.as_ref().unwrap();
                     let rtol = self.problem().out_rtol.unwrap();
                     let out_error_norm = out_error.squared_norm(&self.old_state.g, atol, rtol);
@@ -520,12 +516,7 @@ where
                 let atol = aug_eqn.atol().unwrap();
                 let rtol = aug_eqn.rtol().unwrap();
                 for i in 0..self.sdiff.len() {
-                    self.sdiff[i].gemv(
-                        h,
-                        self.tableau.d(),
-                        Eqn::T::zero(),
-                        &mut sens_error,
-                    );
+                    self.sdiff[i].gemv(h, self.tableau.d(), Eqn::T::zero(), &mut sens_error);
                     let sens_error_norm = sens_error.squared_norm(&self.old_state.s[i], atol, rtol);
                     error_norm += sens_error_norm;
                     ncontributions += 1;
@@ -538,12 +529,7 @@ where
                 let atol = aug_eqn.atol().unwrap();
                 let rtol = aug_eqn.rtol().unwrap();
                 for i in 0..self.sgdiff.len() {
-                    self.sgdiff[i].gemv(
-                        h,
-                        self.tableau.d(),
-                        Eqn::T::zero(),
-                        &mut sens_out_error,
-                    );
+                    self.sgdiff[i].gemv(h, self.tableau.d(), Eqn::T::zero(), &mut sens_out_error);
                     let sens_error_norm =
                         sens_out_error.squared_norm(&self.state.sg[i], atol, rtol);
                     error_norm += sens_error_norm;
@@ -590,7 +576,6 @@ where
             }
         }
 
-
         // step accepted, so integrate output functions
         if self.problem.integrate_out {
             self.old_state.g.copy_from(&self.state.g);
@@ -613,7 +598,7 @@ where
         // update step size for next step
         self.old_state.h = factor * h;
         std::mem::swap(&mut self.old_state, &mut self.state);
-        
+
         // update statistics
         self.statistics.number_of_steps += 1;
 
@@ -677,17 +662,19 @@ where
         };
 
         if let Some(beta) = self.tableau.beta() {
-            let beta_f = Self::interpolate_beta_function(theta, beta);
+            let beta_f = Self::interpolate_beta_function(dt, theta, beta);
             let ret = self
-                .old_state.s
+                .old_state
+                .s
                 .iter()
                 .zip(self.sdiff.iter())
-                .map(|(y, diff)| Self::interpolate_from_diff(y, &beta_f, diff))
+                .map(|(y, diff)| Self::interpolate_from_diff(dt, y, &beta_f, diff))
                 .collect();
             Ok(ret)
         } else {
             let ret = self
-                .old_state.s
+                .old_state
+                .s
                 .iter()
                 .zip(state.s.iter())
                 .zip(self.sdiff.iter())
@@ -724,8 +711,8 @@ where
         };
 
         if let Some(beta) = self.tableau.beta() {
-            let beta_f = Self::interpolate_beta_function(theta, beta);
-            let ret = Self::interpolate_from_diff(&self.old_state.y, &beta_f, &self.diff);
+            let beta_f = Self::interpolate_beta_function(dt, theta, beta);
+            let ret = Self::interpolate_from_diff(dt, &self.old_state.y, &beta_f, &self.diff);
             Ok(ret)
         } else {
             let ret = Self::interpolate_hermite(theta, &self.old_state.y, &state.y, &self.diff);
@@ -760,8 +747,8 @@ where
         };
 
         if let Some(beta) = self.tableau.beta() {
-            let beta_f = Self::interpolate_beta_function(theta, beta);
-            let ret = Self::interpolate_from_diff(&self.old_state.g, &beta_f, &self.gdiff);
+            let beta_f = Self::interpolate_beta_function(dt, theta, beta);
+            let ret = Self::interpolate_from_diff(dt, &self.old_state.g, &beta_f, &self.gdiff);
             Ok(ret)
         } else {
             let ret = Self::interpolate_hermite(theta, &self.old_state.g, &state.g, &self.gdiff);
@@ -790,9 +777,6 @@ mod test {
                     exponential_decay_problem_sens, exponential_decay_problem_with_root,
                     negative_exponential_decay_problem,
                 },
-                exponential_decay_with_algebraic::exponential_decay_with_algebraic_adjoint_problem,
-                heat2d::head2d_problem,
-                robertson::{robertson, robertson_sens},
                 robertson_ode::robertson_ode,
             },
             tests::{
@@ -801,8 +785,8 @@ mod test {
                 test_problem, test_state_mut, test_state_mut_on_problem,
             },
         },
-        Context, DenseMatrix, FaerSparseLU, FaerSparseMat, MatrixCommon, NalgebraLU, NalgebraVec,
-        OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
+        Context, DenseMatrix, MatrixCommon, NalgebraLU, NalgebraVec, OdeEquations, OdeSolverMethod,
+        Op, Vector, VectorView,
     };
 
     use num_traits::abs;
@@ -811,40 +795,40 @@ mod test {
     type LS = NalgebraLU<f64>;
 
     #[test]
-    fn sdirk_state_mut() {
-        test_state_mut(test_problem::<M>().tr_bdf2::<LS>().unwrap());
+    fn explicit_rk_state_mut() {
+        test_state_mut(test_problem::<M>().tsit45().unwrap());
     }
     #[test]
-    fn sdirk_test_interpolate() {
-        test_interpolate(test_problem::<M>().tr_bdf2::<LS>().unwrap());
+    fn explicit_rk_test_interpolate() {
+        test_interpolate(test_problem::<M>().tsit45().unwrap());
     }
 
     #[test]
-    fn sdirk_test_checkpointing() {
+    fn explicit_rk_test_checkpointing() {
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        let s1 = problem.tr_bdf2::<LS>().unwrap();
-        let s2 = problem.tr_bdf2::<LS>().unwrap();
+        let s1 = problem.tsit45().unwrap();
+        let s2 = problem.tsit45().unwrap();
         test_checkpointing(soln, s1, s2);
     }
 
     #[test]
-    fn sdirk_test_state_mut_exponential_decay() {
+    fn explicit_rk_test_state_mut_exponential_decay() {
         let (p, soln) = exponential_decay_problem::<M>(false);
-        let s = p.tr_bdf2::<LS>().unwrap();
+        let s = p.tsit45().unwrap();
         test_state_mut_on_problem(s, soln);
     }
 
     #[test]
-    fn sdirk_test_nalgebra_negative_exponential_decay() {
+    fn explicit_rk_test_nalgebra_negative_exponential_decay() {
         let (problem, soln) = negative_exponential_decay_problem::<M>(false);
-        let mut s = problem.esdirk34::<LS>().unwrap();
+        let mut s = problem.tsit45().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
     #[test]
-    fn test_tr_bdf2_nalgebra_exponential_decay() {
+    fn test_tsit45_nalgebra_exponential_decay() {
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        let mut s = problem.tr_bdf2::<LS>().unwrap();
+        let mut s = problem.tsit45().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 4
@@ -862,9 +846,9 @@ mod test {
     }
 
     #[test]
-    fn test_tr_bdf2_nalgebra_exponential_decay_sens() {
+    fn test_tsit45_nalgebra_exponential_decay_sens() {
         let (problem, soln) = exponential_decay_problem_sens::<M>(false);
-        let mut s = problem.tr_bdf2_sens::<LS>().unwrap();
+        let mut s = problem.tsit45_sens().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 8
@@ -882,55 +866,13 @@ mod test {
     }
 
     #[test]
-    fn test_esdirk34_nalgebra_exponential_decay() {
-        let (problem, soln) = exponential_decay_problem::<M>(false);
-        let mut s = problem.esdirk34::<LS>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 3
-        number_of_steps: 13
-        number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 84
-        number_of_nonlinear_solver_fails: 0
-        "###);
-        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 86
-        number_of_jac_muls: 2
-        number_of_matrix_evals: 1
-        number_of_jac_adj_muls: 0
-        "###);
-    }
-
-    #[test]
-    fn test_esdirk34_nalgebra_exponential_decay_sens() {
-        let (problem, soln) = exponential_decay_problem_sens::<M>(false);
-        let mut s = problem.esdirk34_sens::<LS>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, true);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 6
-        number_of_steps: 20
-        number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 332
-        number_of_nonlinear_solver_fails: 0
-        "###);
-        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 128
-        number_of_jac_muls: 210
-        number_of_matrix_evals: 1
-        number_of_jac_adj_muls: 0
-        "###);
-    }
-
-    #[test]
-    fn sdirk_test_esdirk34_exponential_decay_adjoint() {
+    fn explicit_rk_test_tsit45_exponential_decay_adjoint() {
         let (mut problem, soln) = exponential_decay_problem_adjoint::<M>(true);
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
-        let mut s = problem.esdirk34::<LS>().unwrap();
+        let mut s = problem.tsit45().unwrap();
         let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
-        let adjoint_solver = problem
-            .esdirk34_solver_adjoint::<LS, _>(checkpointer, None)
-            .unwrap();
+        let adjoint_solver = problem.tsit45_solver_adjoint(checkpointer, None).unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 644
@@ -941,130 +883,31 @@ mod test {
     }
 
     #[test]
-    fn sdirk_test_nalgebra_exponential_decay_algebraic_adjoint_sum_squares() {
-        let (mut problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>(false);
+    fn explicit_rk_test_nalgebra_exponential_decay_adjoint_sum_squares() {
+        let (mut problem, soln) = exponential_decay_problem_adjoint::<M>(false);
         let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
         let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
-        let (problem, _soln) = exponential_decay_with_algebraic_adjoint_problem::<M>(false);
-        let mut s = problem.esdirk34::<LS>().unwrap();
+        let (problem, _soln) = exponential_decay_problem_adjoint::<M>(false);
+        let mut s = problem.tsit45().unwrap();
         let (checkpointer, soln) = s
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdp.ncols()))
+            .tsit45_solver_adjoint(checkpointer, Some(dgdp.ncols()))
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 317
-        number_of_jac_muls: 12
-        number_of_matrix_evals: 4
-        number_of_jac_adj_muls: 500
+        number_of_calls: 511
+        number_of_jac_muls: 6
+        number_of_matrix_evals: 3
+        number_of_jac_adj_muls: 1608
         "###);
     }
 
     #[test]
-    fn sdirk_test_esdirk34_exponential_decay_algebraic_adjoint() {
-        let (mut problem, soln) = exponential_decay_with_algebraic_adjoint_problem::<M>(true);
-        let final_time = soln.solution_points.last().unwrap().t;
-        let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
-        let mut s = problem.esdirk34::<LS>().unwrap();
-        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
-        let adjoint_solver = problem
-            .esdirk34_solver_adjoint::<LS, _>(checkpointer, None)
-            .unwrap();
-        test_adjoint(adjoint_solver, dgdu);
-        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 456
-        number_of_jac_muls: 30
-        number_of_matrix_evals: 10
-        number_of_jac_adj_muls: 149
-        "###);
-    }
-
-    #[test]
-    fn test_tr_bdf2_nalgebra_robertson() {
-        let (problem, soln) = robertson::<M>(false);
-        let mut s = problem.tr_bdf2::<LS>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 97
-        number_of_steps: 232
-        number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 1921
-        number_of_nonlinear_solver_fails: 18
-        "###);
-        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 1924
-        number_of_jac_muls: 36
-        number_of_matrix_evals: 12
-        number_of_jac_adj_muls: 0
-        "###);
-    }
-
-    #[test]
-    fn test_tr_bdf2_nalgebra_robertson_sens() {
-        let (problem, soln) = robertson_sens::<M>();
-        let mut s = problem.tr_bdf2_sens::<LS>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, true);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 109
-        number_of_steps: 215
-        number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 4544
-        number_of_nonlinear_solver_fails: 36
-        "###);
-        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 1443
-        number_of_jac_muls: 3268
-        number_of_matrix_evals: 28
-        number_of_jac_adj_muls: 0
-        "###);
-    }
-
-    #[test]
-    fn test_esdirk34_nalgebra_robertson() {
-        let (problem, soln) = robertson::<M>(false);
-        let mut s = problem.esdirk34::<LS>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 100
-        number_of_steps: 141
-        number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 1793
-        number_of_nonlinear_solver_fails: 24
-        "###);
-        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 1796
-        number_of_jac_muls: 54
-        number_of_matrix_evals: 18
-        number_of_jac_adj_muls: 0
-        "###);
-    }
-
-    #[test]
-    fn test_esdirk34_nalgebra_robertson_sens() {
-        let (problem, soln) = robertson_sens::<M>();
-        let mut s = problem.esdirk34_sens::<LS>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, true);
-        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 114
-        number_of_steps: 131
-        number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 4442
-        number_of_nonlinear_solver_fails: 44
-        "###);
-        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 1492
-        number_of_jac_muls: 3136
-        number_of_matrix_evals: 33
-        number_of_jac_adj_muls: 0
-        "###);
-    }
-
-    #[test]
-    fn test_tr_bdf2_nalgebra_robertson_ode() {
+    fn test_tsit45_nalgebra_robertson_ode() {
         let (problem, soln) = robertson_ode::<M>(false, 1);
-        let mut s = problem.tr_bdf2::<LS>().unwrap();
+        let mut s = problem.tsit45().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 113
@@ -1082,29 +925,22 @@ mod test {
     }
 
     #[test]
-    fn test_tr_bdf2_faer_sparse_heat2d() {
-        let (problem, soln) = head2d_problem::<FaerSparseMat<f64>, 10>();
-        let mut s = problem.tr_bdf2::<FaerSparseLU<f64>>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
-    }
-
-    #[test]
-    fn test_tstop_tr_bdf2() {
+    fn test_tstop_tsit45() {
         let (problem, soln) = exponential_decay_problem::<M>(false);
-        let mut s = problem.tr_bdf2::<LS>().unwrap();
+        let mut s = problem.tsit45().unwrap();
         test_ode_solver(&mut s, soln, None, true, false);
     }
 
     #[test]
-    fn test_root_finder_tr_bdf2() {
+    fn test_root_finder_tsit45() {
         let (problem, soln) = exponential_decay_problem_with_root::<M>(false);
-        let mut s = problem.tr_bdf2::<LS>().unwrap();
+        let mut s = problem.tsit45().unwrap();
         let y = test_ode_solver(&mut s, soln, None, false, false);
         assert!(abs(y[0] - 0.6) < 1e-6, "y[0] = {}", y[0]);
     }
 
     #[test]
-    fn test_param_sweep_tr_bdf2() {
+    fn test_param_sweep_tsit45() {
         let (mut problem, _soln) = exponential_decay_problem::<M>(false);
         let mut ps = Vec::new();
         for y0 in (1..10).map(f64::from) {
@@ -1114,7 +950,7 @@ mod test {
         let mut old_soln: Option<NalgebraVec<f64>> = None;
         for p in ps {
             problem.eqn_mut().set_params(&p);
-            let mut s = problem.tr_bdf2::<LS>().unwrap();
+            let mut s = problem.tsit45().unwrap();
             let (ys, _ts) = s.solve(10.0).unwrap();
             // check that the new solution is different from the old one
             if let Some(old_soln) = &mut old_soln {
@@ -1131,12 +967,11 @@ mod test {
 
     #[cfg(feature = "diffsl")]
     #[test]
-    fn test_ball_bounce_tr_bdf2() {
+    fn test_ball_bounce_tsit45() {
         type M = crate::NalgebraMat<f64>;
-        type LS = crate::NalgebraLU<f64>;
         let (x, v, t) = crate::ode_solver::tests::test_ball_bounce(
             crate::ode_solver::tests::test_ball_bounce_problem::<M>()
-                .tr_bdf2::<LS>()
+                .tsit45()
                 .unwrap(),
         );
         let expected_x = [6.375884661615263];

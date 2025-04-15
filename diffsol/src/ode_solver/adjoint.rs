@@ -2,8 +2,8 @@ use crate::{
     error::{DiffsolError, OdeSolverError},
     ode_solver_error, AdjointEquations, AugmentedOdeEquations, AugmentedOdeSolverMethod,
     DefaultDenseMatrix, DefaultSolver, DenseMatrix, LinearSolver, Matrix, MatrixCommon, MatrixOp,
-    NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsImplicitAdjoint, OdeSolverMethod,
-    OdeSolverState, OdeSolverStopReason, Op, Vector, VectorIndex,
+    NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsImplicitAdjoint,
+    OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op, Vector, VectorIndex,
 };
 
 use num_traits::{One, Zero};

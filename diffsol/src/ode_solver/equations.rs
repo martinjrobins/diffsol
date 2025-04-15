@@ -317,7 +317,6 @@ impl<T: OdeEquations> OdeEquations for &'_ T {
     fn get_params(&self, _p: &mut Self::V) {
         unimplemented!()
     }
-    
 }
 
 pub trait OdeEquationsImplicit:

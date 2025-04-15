@@ -184,7 +184,26 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         Ok(ret)
     }
 
-    fn new_with_sensitivities<LS, Eqn>(
+    fn new_with_sensitivities<Eqn>(
+        ode_problem: &OdeSolverProblem<Eqn>,
+        solver_order: usize,
+    ) -> Result<Self, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitSens<T = V::T, V = V, C = V::C>,
+    {
+        let mut augmented_eqn = SensEquations::new(ode_problem);
+        let mut ret = Self::new_without_initialise_augmented(ode_problem, &mut augmented_eqn)?;
+        ret.set_step_size(
+            ode_problem.h0,
+            &ode_problem.atol,
+            ode_problem.rtol,
+            &ode_problem.eqn,
+            solver_order,
+        );
+        Ok(ret)
+    }
+
+    fn new_with_sensitivities_and_consistent<LS, Eqn>(
         ode_problem: &OdeSolverProblem<Eqn>,
         solver_order: usize,
     ) -> Result<Self, DiffsolError>
@@ -193,24 +212,11 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         LS: LinearSolver<Eqn::M>,
     {
         let mut augmented_eqn = SensEquations::new(ode_problem);
-        Self::new_with_augmented_and_consistent::<LS, _, _>(ode_problem, &mut augmented_eqn, solver_order)
-    }
-
-    fn new_with_augmented_and_consistent<LS, Eqn, AugmentedEqn>(
-        ode_problem: &OdeSolverProblem<Eqn>,
-        augmented_eqn: &mut AugmentedEqn,
-        solver_order: usize,
-    ) -> Result<Self, DiffsolError>
-    where
-        Eqn: OdeEquationsImplicit<T = V::T, V = V, C = V::C>,
-        AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> + std::fmt::Debug,
-        LS: LinearSolver<Eqn::M>,
-    {
-        let mut ret = Self::new_without_initialise_augmented(ode_problem, augmented_eqn)?;
+        let mut ret = Self::new_without_initialise_augmented(ode_problem, &mut augmented_eqn)?;
         let mut root_solver = NewtonNonlinearSolver::new(LS::default());
         ret.set_consistent(ode_problem, &mut root_solver)?;
         let mut root_solver_sens = NewtonNonlinearSolver::new(LS::default());
-        ret.set_consistent_augmented(ode_problem, augmented_eqn, &mut root_solver_sens)?;
+        ret.set_consistent_augmented(ode_problem, &mut augmented_eqn, &mut root_solver_sens)?;
         ret.set_step_size(
             ode_problem.h0,
             &ode_problem.atol,
@@ -273,7 +279,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     }
 
     /// Create a new solver state from an ODE problem, without any initialisation apart from setting the initial time state vector y,
-    /// and if applicable the sensitivity vectors s.
+    /// the initial time derivative dy and if applicable the sensitivity vectors s.
     /// This is useful if you want to set up the state yourself, or if you want to use a different nonlinear solver to make the state consistent,
     /// or if you want to set the step size yourself or based on the exact order of the solver.
     fn new_without_initialise<Eqn>(
@@ -285,7 +291,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let t = ode_problem.t0;
         let h = ode_problem.h0;
         let y = ode_problem.eqn.init().call(t);
-        let dy = V::zeros(y.len(), y.context().clone());
+        let dy = ode_problem.eqn.rhs().call(&y, t);
         let (s, ds) = (vec![], vec![]);
         let (dg, g) = if ode_problem.integrate_out {
             let out = ode_problem
@@ -370,14 +376,10 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         Eqn: OdeEquationsImplicit<T = V::T, V = V, C = V::C>,
         S: NonLinearSolver<Eqn::M>,
     {
-        let state = self.as_mut();
-        ode_problem
-            .eqn
-            .rhs()
-            .call_inplace(state.y, *state.t, state.dy);
         if ode_problem.eqn.mass().is_none() {
             return Ok(());
         }
+        let state = self.as_mut();
         let f = InitOp::new(&ode_problem.eqn, ode_problem.t0, state.y);
         let rtol = ode_problem.rtol;
         let atol = &ode_problem.atol;

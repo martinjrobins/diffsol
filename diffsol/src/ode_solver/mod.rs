@@ -5,11 +5,11 @@ pub mod bdf_state;
 pub mod builder;
 pub mod checkpointing;
 pub mod equations;
+pub mod explicit_rk;
 pub mod jacobian_update;
 pub mod method;
 pub mod problem;
 pub mod sdirk;
-pub mod explicit_rk;
 pub mod sdirk_state;
 pub mod sens_equations;
 pub mod sensitivities;
@@ -34,7 +34,7 @@ mod tests {
     use crate::{
         op::OpStatistics, AdjointOdeSolverMethod, Context, CraneliftModule, DenseMatrix,
         MatrixCommon, MatrixHost, MatrixRef, NonLinearOpJacobian, OdeBuilder, OdeEquations,
-        OdeEquationsImplicitAdjoint, OdeEquationsImplicit, OdeEquationsRef, OdeSolverMethod,
+        OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsRef, OdeSolverMethod,
         OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Scale, VectorRef, VectorView,
         VectorViewMut,
     };

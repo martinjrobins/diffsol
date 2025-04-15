@@ -7,8 +7,8 @@ use crate::LinearSolver;
 use crate::NewtonNonlinearSolver;
 use crate::NoAug;
 use crate::OdeSolverStopReason;
-use crate::RootFinder;
 use crate::RkState;
+use crate::RootFinder;
 use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, AugmentedOdeEquations,
@@ -1252,7 +1252,7 @@ mod test {
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdp.ncols()))
+            .esdirk34_solver_adjoint::<LS, _>(checkpointer, Some(dgdp.ncols()))
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"

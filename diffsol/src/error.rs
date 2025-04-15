@@ -58,6 +58,8 @@ pub enum OdeSolverError {
         state_time
     )]
     StopTimeBeforeCurrentTime { stop_time: f64, state_time: f64 },
+    #[error("Mass matrix not supported for this solver")]
+    MassMatrixNotSupported,
     #[error("Stop time is at the current state time")]
     StopTimeAtCurrentTime,
     #[error("Interpolation time is after current time")]
