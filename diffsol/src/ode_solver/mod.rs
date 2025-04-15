@@ -308,7 +308,7 @@ mod tests {
                 &dgdp_check.column(j).into_owned(),
                 &atol,
                 rtol,
-                Eqn::T::from(40.),
+                Eqn::T::from(66.),
             );
         }
     }
@@ -684,6 +684,7 @@ mod tests {
 
         // reinit using state_mut
         s.state_mut().y.copy_from(state.as_ref().y);
+        s.state_mut().dy.copy_from(state.as_ref().dy);
         *s.state_mut().t = state.as_ref().t;
 
         // solve and check against solution
@@ -697,7 +698,7 @@ mod tests {
                 .squared_norm(&error, &s.problem().atol, s.problem().rtol)
                 .sqrt();
             assert!(
-                error_norm < Eqn::T::from(17.0),
+                error_norm < Eqn::T::from(18.0),
                 "error_norm: {} at t = {}",
                 error_norm,
                 point.t

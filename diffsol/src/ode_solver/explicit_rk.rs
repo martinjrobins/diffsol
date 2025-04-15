@@ -236,6 +236,7 @@ where
         if let Some(out) = augmented_eqn.out() {
             ret.sgdiff = vec![M::zeros(out.nout(), order, ctx.clone()); naug];
         }
+        ret.augmented_eqn = Some(augmented_eqn);
         Ok(ret)
     }
 
@@ -432,7 +433,7 @@ where
 
             // output function
             if self.problem.integrate_out {
-                self.gdiff.column_mut(0).copy_from(&self.state.g);
+                self.gdiff.column_mut(0).copy_from(&self.state.dg);
             }
 
             for i in 1..self.tableau.s() {
@@ -459,17 +460,19 @@ where
                     // calculate dg and store in gdiff
                     if self.problem.integrate_out {
                         let out = self.problem.eqn.out().unwrap();
-                        out.call_inplace(&self.old_state.y, t, &mut self.state.dg);
-                        self.gdiff.column_mut(i).copy_from(&self.state.dg);
+                        out.call_inplace(&self.old_state.y, t, &mut self.old_state.dg);
+                        self.gdiff.column_mut(i).copy_from(&self.old_state.dg);
                     }
                 }
 
                 // calculate sensitivities
-                if let Some(aug_eqn) = self.augmented_eqn.as_ref() {
+                if let Some(aug_eqn) = self.augmented_eqn.as_mut() {
+                    aug_eqn.update_rhs_out_state(&self.old_state.y, &self.old_state.dy, t);
                     for j in 0..self.sdiff.len() {
+                        aug_eqn.set_index(j);
                         self.old_state.s[j].copy_from(&self.state.s[j]);
                         self.sdiff[j].columns(0, i).gemv_o(
-                            Eqn::T::one(),
+                            h,
                             &self.a_rows[i],
                             Eqn::T::one(),
                             &mut self.old_state.s[j],
@@ -482,6 +485,14 @@ where
                         );
 
                         self.sdiff[j].column_mut(i).copy_from(&self.old_state.ds[j]);
+
+                        // calculate sdg and store in sgdiff
+                        if let Some(out) = aug_eqn.out() {
+                            out.call_inplace(&self.old_state.s[j], t, &mut self.old_state.dsg[j]);
+                            self.sgdiff[j]
+                                .column_mut(i)
+                                .copy_from(&self.old_state.dsg[j]);
+                        }
                     }
                 }
             }
@@ -504,7 +515,7 @@ where
                         .gemv(h, self.tableau.d(), Eqn::T::zero(), &mut out_error);
                     let atol = self.problem().out_atol.as_ref().unwrap();
                     let rtol = self.problem().out_rtol.unwrap();
-                    let out_error_norm = out_error.squared_norm(&self.old_state.g, atol, rtol);
+                    let out_error_norm = out_error.squared_norm(&self.state.g, atol, rtol);
                     error_norm += out_error_norm;
                     ncontributions += 1;
                 }
@@ -849,16 +860,16 @@ mod test {
         let mut s = problem.tsit45_sens().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 8
-        number_of_steps: 53
-        number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 540
+        number_of_linear_solver_setups: 0
+        number_of_steps: 7
+        number_of_error_test_failures: 0
+        number_of_nonlinear_solver_iterations: 0
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 218
-        number_of_jac_muls: 330
-        number_of_matrix_evals: 2
+        number_of_calls: 44
+        number_of_jac_muls: 86
+        number_of_matrix_evals: 0
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -873,10 +884,10 @@ mod test {
         let adjoint_solver = problem.tsit45_solver_adjoint(checkpointer, None).unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 644
-        number_of_jac_muls: 14
-        number_of_matrix_evals: 7
-        number_of_jac_adj_muls: 439
+        number_of_calls: 434
+        number_of_jac_muls: 8
+        number_of_matrix_evals: 4
+        number_of_jac_adj_muls: 123
         "###);
     }
 
@@ -895,10 +906,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 511
-        number_of_jac_muls: 6
-        number_of_matrix_evals: 3
-        number_of_jac_adj_muls: 1608
+        number_of_calls: 747
+        number_of_jac_muls: 0
+        number_of_matrix_evals: 0
+        number_of_jac_adj_muls: 1707
         "###);
     }
 

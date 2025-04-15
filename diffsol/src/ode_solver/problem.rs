@@ -3,9 +3,10 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     error::DiffsolError, vector::Vector, AdjointContext, AdjointEquations, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, Bdf, BdfState, Checkpointing, DefaultDenseMatrix, DenseMatrix,
-    ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, OdeEquations, OdeEquationsAdjoint,
-    OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverMethod,
-    OdeSolverState, RkState, Sdirk, SensEquations, Tableau, VectorRef,
+    ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NonLinearOp, OdeEquations,
+    OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
+    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Sdirk, SensEquations,
+    Tableau, VectorRef,
 };
 
 pub struct OdeSolverProblem<Eqn>
@@ -569,6 +570,18 @@ where
         if let Some(h) = h {
             *state.as_mut().h = -h;
         }
+
+        // eval the rhs since we're not calling set_consistent_augmented
+        let state_mut = state.as_mut();
+        augmented_eqn.update_rhs_out_state(state_mut.y, state_mut.dy, *state_mut.t);
+        let naug = augmented_eqn.max_index();
+        for i in 0..naug {
+            augmented_eqn.set_index(i);
+            augmented_eqn
+                .rhs()
+                .call_inplace(&state_mut.s[i], *state_mut.t, &mut state_mut.ds[i]);
+        }
+
         state.set_step_size(
             state.h,
             augmented_eqn.atol().unwrap(),

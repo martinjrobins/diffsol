@@ -193,6 +193,17 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     {
         let mut augmented_eqn = SensEquations::new(ode_problem);
         let mut ret = Self::new_without_initialise_augmented(ode_problem, &mut augmented_eqn)?;
+
+        // eval the rhs since we're not calling set_consistent_augmented
+        let state = ret.as_mut();
+        augmented_eqn.update_rhs_out_state(state.y, state.dy, *state.t);
+        let naug = augmented_eqn.max_index();
+        for i in 0..naug {
+            augmented_eqn.set_index(i);
+            augmented_eqn
+                .rhs()
+                .call_inplace(&state.s[i], *state.t, &mut state.ds[i]);
+        }
         ret.set_step_size(
             ode_problem.h0,
             &ode_problem.atol,
