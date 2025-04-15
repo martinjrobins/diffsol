@@ -3,13 +3,13 @@ use std::cell::RefCell;
 
 use crate::{
     op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, ConstantOp, ConstantOpSens,
-    Matrix, NonLinearOp, NonLinearOpSens, OdeEquations, OdeEquationsRef, OdeEquationsSens,
+    Matrix, NonLinearOp, NonLinearOpSens, OdeEquations, OdeEquationsImplicitSens, OdeEquationsRef,
     OdeSolverProblem, Op, Vector,
 };
 
 pub struct SensInit<'a, Eqn>
 where
-    Eqn: OdeEquationsSens,
+    Eqn: OdeEquations,
 {
     eqn: &'a Eqn,
     init_sens: Eqn::M,
@@ -18,7 +18,7 @@ where
 
 impl<'a, Eqn> SensInit<'a, Eqn>
 where
-    Eqn: OdeEquationsSens,
+    Eqn: OdeEquationsImplicitSens,
 {
     pub fn new(eqn: &'a Eqn) -> Self {
         let nstates = eqn.rhs().nstates();
@@ -46,7 +46,7 @@ where
 
 impl<Eqn> Op for SensInit<'_, Eqn>
 where
-    Eqn: OdeEquationsSens,
+    Eqn: OdeEquations,
 {
     type T = Eqn::T;
     type V = Eqn::V;
@@ -69,7 +69,7 @@ where
 
 impl<Eqn> ConstantOp for SensInit<'_, Eqn>
 where
-    Eqn: OdeEquationsSens,
+    Eqn: OdeEquations,
 {
     fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
         y.fill(Eqn::T::zero());
@@ -102,7 +102,7 @@ where
 
 impl<'a, Eqn> SensRhs<'a, Eqn>
 where
-    Eqn: OdeEquationsSens,
+    Eqn: OdeEquationsImplicitSens,
 {
     pub fn new(eqn: &'a Eqn, allocate: bool) -> Self {
         if !allocate {
@@ -145,7 +145,7 @@ where
 
 impl<Eqn> Op for SensRhs<'_, Eqn>
 where
-    Eqn: OdeEquationsSens,
+    Eqn: OdeEquations,
 {
     type T = Eqn::T;
     type V = Eqn::V;
@@ -168,7 +168,7 @@ where
 
 impl<Eqn> NonLinearOp for SensRhs<'_, Eqn>
 where
-    Eqn: OdeEquationsSens,
+    Eqn: OdeEquationsImplicitSens,
 {
     /// the ith column of function F(s, t) is evaluated as J * s_i + S_i, where s_i is the ith column of the sensitivity matrix
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
@@ -182,7 +182,7 @@ where
 
 impl<Eqn> NonLinearOpJacobian for SensRhs<'_, Eqn>
 where
-    Eqn: OdeEquationsSens,
+    Eqn: OdeEquationsImplicitSens,
 {
     fn jac_mul_inplace(&self, _x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         let state_y = self.y.borrow();
@@ -210,7 +210,7 @@ where
 ///
 pub struct SensEquations<'a, Eqn>
 where
-    Eqn: OdeEquationsSens,
+    Eqn: OdeEquations,
 {
     eqn: &'a Eqn,
     rhs: SensRhs<'a, Eqn>,
@@ -221,7 +221,7 @@ where
 
 impl<Eqn> Clone for SensEquations<'_, Eqn>
 where
-    Eqn: OdeEquationsSens,
+    Eqn: OdeEquationsImplicitSens,
 {
     fn clone(&self) -> Self {
         Self {
@@ -236,7 +236,7 @@ where
 
 impl<Eqn> std::fmt::Debug for SensEquations<'_, Eqn>
 where
-    Eqn: OdeEquationsSens,
+    Eqn: OdeEquations,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "SensEquations")
@@ -245,7 +245,7 @@ where
 
 impl<'a, Eqn> SensEquations<'a, Eqn>
 where
-    Eqn: OdeEquationsSens,
+    Eqn: OdeEquationsImplicitSens,
 {
     pub(crate) fn new(problem: &'a OdeSolverProblem<Eqn>) -> Self {
         let eqn = &problem.eqn;
@@ -265,7 +265,7 @@ where
 
 impl<Eqn> Op for SensEquations<'_, Eqn>
 where
-    Eqn: OdeEquationsSens,
+    Eqn: OdeEquations,
 {
     type T = Eqn::T;
     type V = Eqn::V;
@@ -288,7 +288,7 @@ where
 
 impl<'a, 'b, Eqn> OdeEquationsRef<'a> for SensEquations<'b, Eqn>
 where
-    Eqn: OdeEquationsSens,
+    Eqn: OdeEquationsImplicitSens,
 {
     type Rhs = &'a SensRhs<'b, Eqn>;
     type Mass = <Eqn as OdeEquationsRef<'a>>::Mass;
@@ -299,7 +299,7 @@ where
 
 impl<'a, Eqn> OdeEquations for SensEquations<'a, Eqn>
 where
-    Eqn: OdeEquationsSens,
+    Eqn: OdeEquationsImplicitSens,
 {
     fn rhs(&self) -> &SensRhs<'a, Eqn> {
         &self.rhs
@@ -324,7 +324,7 @@ where
     }
 }
 
-impl<Eqn: OdeEquationsSens> AugmentedOdeEquations<Eqn> for SensEquations<'_, Eqn> {
+impl<Eqn: OdeEquationsImplicitSens> AugmentedOdeEquations<Eqn> for SensEquations<'_, Eqn> {
     fn include_in_error_control(&self) -> bool {
         self.rtol.is_some() && self.atol.is_some()
     }
@@ -371,7 +371,7 @@ mod tests {
             exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
             robertson::robertson_sens,
         },
-        AugmentedOdeEquations, DenseMatrix, MatrixCommon, NalgebraVec, NonLinearOp, SdirkState,
+        AugmentedOdeEquations, DenseMatrix, MatrixCommon, NalgebraVec, NonLinearOp, RkState,
         SensEquations, Vector,
     };
     type Mcpu = NalgebraMat<f64>;
@@ -382,7 +382,7 @@ mod tests {
         // dy/dt = -ay (p = [a])
         let (problem, _soln) = exponential_decay_problem_sens::<Mcpu>(false);
         let mut sens_eqn = SensEquations::new(&problem);
-        let state = SdirkState {
+        let state = RkState {
             t: 0.0,
             y: Vcpu::from_vec(vec![1.0, 1.0], problem.context().clone()),
             dy: Vcpu::from_vec(vec![1.0, 1.0], problem.context().clone()),
@@ -422,7 +422,7 @@ mod tests {
     fn test_rhs_exponential_algebraic() {
         let (problem, _soln) = exponential_decay_with_algebraic_problem_sens::<Mcpu>();
         let mut sens_eqn = SensEquations::new(&problem);
-        let state = SdirkState {
+        let state = RkState {
             t: 0.0,
             y: Vcpu::from_vec(vec![1.0, 1.0, 1.0], problem.context().clone()),
             dy: Vcpu::from_vec(vec![1.0, 1.0, 1.0], problem.context().clone()),
@@ -471,7 +471,7 @@ mod tests {
     fn test_rhs_robertson() {
         let (problem, _soln) = robertson_sens::<Mcpu>();
         let mut sens_eqn = SensEquations::new(&problem);
-        let state = SdirkState {
+        let state = RkState {
             t: 0.0,
             y: Vcpu::from_vec(vec![1.0, 2.0, 3.0], problem.context().clone()),
             dy: Vcpu::from_vec(vec![1.0, 1.0, 1.0], problem.context().clone()),

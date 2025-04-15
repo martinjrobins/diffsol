@@ -1,6 +1,6 @@
 use crate::{
     matrix::Matrix, ode_solver::problem::OdeSolverSolution, MatrixHost, OdeBuilder,
-    OdeEquationsImplicit, OdeEquationsSens, OdeSolverProblem, Op, Vector,
+    OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
 };
 use num_traits::{One, Zero};
 
@@ -10,7 +10,7 @@ pub fn robertson_diffsl_problem<
     M: MatrixHost<T = f64>,
     CG: diffsl::execution::module::CodegenModule,
 >() -> (
-    OdeSolverProblem<impl crate::OdeEquationsAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverProblem<impl crate::OdeEquationsImplicitAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let code = "
@@ -146,7 +146,7 @@ fn soln<V: Vector>(ctx: V::C) -> OdeSolverSolution<V> {
 
 #[allow(clippy::type_complexity)]
 pub fn robertson_sens<M: MatrixHost + 'static>() -> (
-    OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverProblem<impl OdeEquationsImplicitSens<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::<M>::new()

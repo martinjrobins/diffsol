@@ -10,7 +10,7 @@ pub fn robertson_ode_diffsl_problem<
     M: MatrixHost<T = f64>,
     CG: diffsl::execution::module::CodegenModule,
 >() -> (
-    OdeSolverProblem<impl crate::OdeEquationsAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverProblem<impl crate::OdeEquationsImplicitAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let code = "

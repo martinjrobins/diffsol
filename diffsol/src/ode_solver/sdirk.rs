@@ -7,8 +7,8 @@ use crate::LinearSolver;
 use crate::NewtonNonlinearSolver;
 use crate::NoAug;
 use crate::OdeSolverStopReason;
+use crate::RkState;
 use crate::RootFinder;
-use crate::SdirkState;
 use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, AugmentedOdeEquations,
@@ -72,7 +72,7 @@ pub struct Sdirk<
     nonlinear_solver: NewtonNonlinearSolver<Eqn::M, LS>,
     convergence: Convergence<'a, Eqn::V>,
     op: Option<SdirkCallable<&'a Eqn>>,
-    state: SdirkState<Eqn::V>,
+    state: RkState<Eqn::V>,
     diff: M,
     sdiff: Vec<M>,
     sgdiff: Vec<M>,
@@ -167,7 +167,7 @@ where
 
     pub fn new(
         problem: &'a OdeSolverProblem<Eqn>,
-        state: SdirkState<Eqn::V>,
+        state: RkState<Eqn::V>,
         tableau: Tableau<M>,
         linear_solver: LS,
     ) -> Result<Self, DiffsolError> {
@@ -176,7 +176,7 @@ where
 
     fn _new(
         problem: &'a OdeSolverProblem<Eqn>,
-        mut state: SdirkState<Eqn::V>,
+        mut state: RkState<Eqn::V>,
         tableau: Tableau<M>,
         linear_solver: LS,
         integrate_main_eqn: bool,
@@ -331,7 +331,7 @@ where
 
     pub fn new_augmented(
         problem: &'a OdeSolverProblem<Eqn>,
-        state: SdirkState<Eqn::V>,
+        state: RkState<Eqn::V>,
         tableau: Tableau<M>,
         linear_solver: LS,
         augmented_eqn: AugmentedEqn,
@@ -552,7 +552,7 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
-    type State = SdirkState<Eqn::V>;
+    type State = RkState<Eqn::V>;
 
     fn problem(&self) -> &'a OdeSolverProblem<Eqn> {
         self.problem
@@ -594,7 +594,7 @@ where
         self._jacobian_updates(self.state.h, SolverState::Checkpoint);
     }
 
-    fn into_state(self) -> SdirkState<Eqn::V> {
+    fn into_state(self) -> RkState<Eqn::V> {
         self.state
     }
 
@@ -1234,10 +1234,10 @@ mod test {
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 644
+        number_of_calls: 621
         number_of_jac_muls: 14
         number_of_matrix_evals: 7
-        number_of_jac_adj_muls: 439
+        number_of_jac_adj_muls: 347
         "###);
     }
 
@@ -1252,14 +1252,14 @@ mod test {
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdp.ncols()))
+            .esdirk34_solver_adjoint::<LS, _>(checkpointer, Some(dgdp.ncols()))
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 317
-        number_of_jac_muls: 12
-        number_of_matrix_evals: 4
-        number_of_jac_adj_muls: 500
+        number_of_calls: 287
+        number_of_jac_muls: 15
+        number_of_matrix_evals: 5
+        number_of_jac_adj_muls: 460
         "###);
     }
 
@@ -1275,10 +1275,10 @@ mod test {
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 456
-        number_of_jac_muls: 30
-        number_of_matrix_evals: 10
-        number_of_jac_adj_muls: 149
+        number_of_calls: 471
+        number_of_jac_muls: 33
+        number_of_matrix_evals: 11
+        number_of_jac_adj_muls: 168
         "###);
     }
 

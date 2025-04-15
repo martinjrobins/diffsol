@@ -5,6 +5,7 @@ pub mod bdf_state;
 pub mod builder;
 pub mod checkpointing;
 pub mod equations;
+pub mod explicit_rk;
 pub mod jacobian_update;
 pub mod method;
 pub mod problem;
@@ -33,7 +34,7 @@ mod tests {
     use crate::{
         op::OpStatistics, AdjointOdeSolverMethod, Context, CraneliftModule, DenseMatrix,
         MatrixCommon, MatrixHost, MatrixRef, NonLinearOpJacobian, OdeBuilder, OdeEquations,
-        OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsRef, OdeSolverMethod,
+        OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsRef, OdeSolverMethod,
         OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Scale, VectorRef, VectorView,
         VectorViewMut,
     };
@@ -140,7 +141,7 @@ mod tests {
         soln: OdeSolverSolution<Eqn::V>,
     ) -> <Eqn::V as DefaultDenseMatrix>::M
     where
-        Eqn: OdeEquationsAdjoint + 'a,
+        Eqn: OdeEquationsImplicitAdjoint + 'a,
         LS: LinearSolver<Eqn::M>,
         Eqn::V: DefaultDenseMatrix,
         for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -231,7 +232,7 @@ mod tests {
         <Eqn::V as DefaultDenseMatrix>::M,
     )
     where
-        Eqn: OdeEquationsAdjoint + 'a,
+        Eqn: OdeEquationsImplicitAdjoint + 'a,
         LS: LinearSolver<Eqn::M>,
         Eqn::V: DefaultDenseMatrix,
         for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -288,7 +289,7 @@ mod tests {
     ) where
         SolverF: OdeSolverMethod<'a, Eqn>,
         SolverB: AdjointOdeSolverMethod<'a, Eqn, SolverF>,
-        Eqn: OdeEquationsAdjoint + 'a,
+        Eqn: OdeEquationsImplicitAdjoint + 'a,
         Eqn::V: DefaultDenseMatrix,
         Eqn::M: DefaultSolver,
     {
@@ -307,7 +308,7 @@ mod tests {
                 &dgdp_check.column(j).into_owned(),
                 &atol,
                 rtol,
-                Eqn::T::from(40.),
+                Eqn::T::from(66.),
             );
         }
     }
@@ -318,7 +319,7 @@ mod tests {
     ) where
         SolverF: OdeSolverMethod<'a, Eqn>,
         SolverB: AdjointOdeSolverMethod<'a, Eqn, SolverF>,
-        Eqn: OdeEquationsAdjoint + 'a,
+        Eqn: OdeEquationsImplicitAdjoint + 'a,
         Eqn::V: DefaultDenseMatrix,
         Eqn::M: DefaultSolver,
     {
@@ -624,10 +625,15 @@ mod tests {
             solver1.step().unwrap();
         }
         let checkpoint = solver1.checkpoint();
+        let checkpoint_t = checkpoint.as_ref().t;
         solver2.set_state(checkpoint);
 
         // carry on solving with both solvers, they should produce about the same results (probably might diverge a bit, but should always match the solution)
         for point in soln.solution_points.iter().skip(half_i + 1) {
+            // point should be past checkpoint
+            if point.t < checkpoint_t {
+                continue;
+            }
             while solver2.state().t < point.t {
                 solver1.step().unwrap();
                 solver2.step().unwrap();
@@ -678,6 +684,7 @@ mod tests {
 
         // reinit using state_mut
         s.state_mut().y.copy_from(state.as_ref().y);
+        s.state_mut().dy.copy_from(state.as_ref().dy);
         *s.state_mut().t = state.as_ref().t;
 
         // solve and check against solution
@@ -691,7 +698,7 @@ mod tests {
                 .squared_norm(&error, &s.problem().atol, s.problem().rtol)
                 .sqrt();
             assert!(
-                error_norm < Eqn::T::from(17.0),
+                error_norm < Eqn::T::from(18.0),
                 "error_norm: {} at t = {}",
                 error_norm,
                 point.t

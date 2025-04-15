@@ -1451,10 +1451,10 @@ mod test {
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 213
+        number_of_calls: 202
         number_of_jac_muls: 6
         number_of_matrix_evals: 3
-        number_of_jac_adj_muls: 455
+        number_of_jac_adj_muls: 425
         "###);
     }
 
@@ -1473,10 +1473,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 511
+        number_of_calls: 493
         number_of_jac_muls: 6
         number_of_matrix_evals: 3
-        number_of_jac_adj_muls: 1608
+        number_of_jac_adj_muls: 1554
         "###);
     }
 
@@ -1508,10 +1508,10 @@ mod test {
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 207
-        number_of_jac_muls: 15
-        number_of_matrix_evals: 5
-        number_of_jac_adj_muls: 189
+        number_of_calls: 198
+        number_of_jac_muls: 18
+        number_of_matrix_evals: 6
+        number_of_jac_adj_muls: 177
         "###);
     }
 
@@ -1530,10 +1530,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 267
-        number_of_jac_muls: 15
-        number_of_matrix_evals: 5
-        number_of_jac_adj_muls: 500
+        number_of_calls: 261
+        number_of_jac_muls: 18
+        number_of_matrix_evals: 6
+        number_of_jac_adj_muls: 486
         "###);
     }
 

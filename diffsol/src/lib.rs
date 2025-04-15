@@ -15,7 +15,7 @@
 //! ## Initial state
 //!
 //! The solver state is held in [OdeSolverState], and contains a state vector, the gradient of the state vector, the time, and the step size. The [OdeSolverProblem] class has a collection of methods to create and initialise
-//! a new state for each solver ([OdeSolverProblem::bdf_state], [OdeSolverProblem::tr_bdf2_state], [OdeSolverProblem::esdirk34_state]). Or you can manually intitialise a new state using [OdeSolverState::new],
+//! a new state for each solver ([OdeSolverProblem::bdf_state], [OdeSolverProblem::rk_state], [OdeSolverProblem::rk_state_and_consistent]). Or you can manually intitialise a new state using [OdeSolverState::new],
 //! or create an uninitialised state using [OdeSolverState::new_without_initialise] and intitialise it manually or using the [OdeSolverState::set_consistent] and [OdeSolverState::set_step_size] methods.
 //!
 //! To view the state within a solver, you can use the [OdeSolverMethod::state] or [OdeSolverMethod::state_mut] methods. These will return references to the state using either the [StateRef] or [StateRefMut] structs
@@ -69,7 +69,7 @@
 //! ## Forward Sensitivity Analysis
 //!
 //! DiffSol provides a way to compute the forward sensitivity of the solution with respect to the parameters. You can provide the requires equations to the builder using [OdeBuilder::rhs_sens_implicit] and [OdeBuilder::init_sens],
-//! or your equations struct must implement the [OdeEquationsSens] trait,
+//! or your equations struct must implement the [OdeEquationsImplicitSens] trait,
 //! Note that by default the sensitivity equations are included in the error control for the solvers, you can change this by setting tolerances using the [OdeBuilder::sens_atol] and [OdeBuilder::sens_rtol] methods.
 //!
 //! The easiest way to obtain the sensitivity solution is to use the [SensitivitiesOdeSolverMethod::solve_dense_sensitivities] method, which will solve the forward problem and the sensitivity equations simultaneously and return the result.
@@ -190,11 +190,12 @@ pub use ode_solver::{
     checkpointing::Checkpointing, checkpointing::HermiteInterpolator,
     equations::AugmentedOdeEquations, equations::AugmentedOdeEquationsImplicit, equations::NoAug,
     equations::OdeEquations, equations::OdeEquationsAdjoint, equations::OdeEquationsImplicit,
-    equations::OdeEquationsRef, equations::OdeEquationsSens, equations::OdeSolverEquations,
+    equations::OdeEquationsImplicitAdjoint, equations::OdeEquationsImplicitSens,
+    equations::OdeEquationsRef, equations::OdeSolverEquations, explicit_rk::ExplicitRk,
     method::AugmentedOdeSolverMethod, method::OdeSolverMethod, method::OdeSolverStopReason,
-    problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::SdirkState,
-    sens_equations::SensEquations, sens_equations::SensInit, sens_equations::SensRhs,
-    sensitivities::SensitivitiesOdeSolverMethod, state::OdeSolverState, tableau::Tableau,
+    problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::RkState, sens_equations::SensEquations,
+    sens_equations::SensInit, sens_equations::SensRhs, sensitivities::SensitivitiesOdeSolverMethod,
+    state::OdeSolverState, tableau::Tableau,
 };
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};

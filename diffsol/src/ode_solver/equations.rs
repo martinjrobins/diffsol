@@ -137,7 +137,7 @@ impl<Eqn: OdeEquations> OdeEquations for NoAug<Eqn> {
     }
 }
 
-impl<Eqn: OdeEquationsImplicit> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
+impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
     fn update_rhs_out_state(&mut self, _y: &Eqn::V, _dy: &Eqn::V, _t: Eqn::T) {
         panic!("This should never be called")
     }
@@ -329,7 +329,7 @@ impl<T> OdeEquationsImplicit for T where
 {
 }
 
-pub trait OdeEquationsSens:
+pub trait OdeEquationsImplicitSens:
     OdeEquationsImplicit<
     Rhs: NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
     Init: ConstantOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
@@ -337,7 +337,7 @@ pub trait OdeEquationsSens:
 {
 }
 
-impl<T> OdeEquationsSens for T where
+impl<T> OdeEquationsImplicitSens for T where
     T: OdeEquationsImplicit<
         Rhs: NonLinearOpSens<M = T::M, V = T::V, T = T::T, C = T::C>,
         Init: ConstantOpSens<M = T::M, V = T::V, T = T::T, C = T::C>,
@@ -345,7 +345,7 @@ impl<T> OdeEquationsSens for T where
 {
 }
 
-pub trait OdeEquationsAdjoint:
+pub trait OdeEquationsImplicitAdjoint:
     OdeEquationsImplicit<
     Rhs: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
              + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
@@ -357,8 +357,32 @@ pub trait OdeEquationsAdjoint:
 {
 }
 
-impl<T> OdeEquationsAdjoint for T where
+impl<T> OdeEquationsImplicitAdjoint for T where
     T: OdeEquationsImplicit<
+        Rhs: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
+                 + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Init: ConstantOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Out: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
+                 + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Mass: LinearOpTranspose<M = T::M, V = T::V, T = T::T, C = T::C>,
+    >
+{
+}
+
+pub trait OdeEquationsAdjoint:
+    OdeEquations<
+    Rhs: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+             + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Init: ConstantOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Out: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+             + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Mass: LinearOpTranspose<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+>
+{
+}
+
+impl<T> OdeEquationsAdjoint for T where
+    T: OdeEquations<
         Rhs: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
                  + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
         Init: ConstantOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,

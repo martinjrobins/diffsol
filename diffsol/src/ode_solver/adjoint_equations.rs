@@ -27,7 +27,7 @@ where
 
 impl<'a, Eqn, Method> AdjointContext<'a, Eqn, Method>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
     Method: OdeSolverMethod<'a, Eqn>,
 {
     pub fn new(checkpointer: Checkpointing<'a, Eqn, Method>, max_index: usize) -> Self {
@@ -77,14 +77,14 @@ where
 
 pub struct AdjointMass<'a, Eqn>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
 {
     eqn: &'a Eqn,
 }
 
 impl<'a, Eqn> AdjointMass<'a, Eqn>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
 {
     pub fn new(eqn: &'a Eqn) -> Self {
         Self { eqn }
@@ -93,7 +93,7 @@ where
 
 impl<Eqn> Op for AdjointMass<'_, Eqn>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
 {
     type T = Eqn::T;
     type V = Eqn::V;
@@ -132,14 +132,14 @@ where
 
 pub struct AdjointInit<'a, Eqn>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
 {
     eqn: &'a Eqn,
 }
 
 impl<'a, Eqn> AdjointInit<'a, Eqn>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
 {
     pub fn new(eqn: &'a Eqn) -> Self {
         Self { eqn }
@@ -148,7 +148,7 @@ where
 
 impl<Eqn> Op for AdjointInit<'_, Eqn>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
 {
     type T = Eqn::T;
     type V = Eqn::V;
@@ -171,7 +171,7 @@ where
 
 impl<Eqn> ConstantOp for AdjointInit<'_, Eqn>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
 {
     fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
         y.fill(Eqn::T::zero());
@@ -220,7 +220,7 @@ where
 
 impl<'a, Eqn, Method> Op for AdjointRhs<'a, Eqn, Method>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
     Method: OdeSolverMethod<'a, Eqn>,
 {
     type T = Eqn::T;
@@ -302,7 +302,7 @@ where
 /// We need the current state x(t), which is obtained from the checkpointed forward solve at the current time step.
 pub struct AdjointOut<'a, Eqn, Method>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
     Method: OdeSolverMethod<'a, Eqn>,
 {
     eqn: &'a Eqn,
@@ -313,7 +313,7 @@ where
 
 impl<'a, Eqn, Method> AdjointOut<'a, Eqn, Method>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
     Method: OdeSolverMethod<'a, Eqn>,
 {
     pub fn new(
@@ -334,7 +334,7 @@ where
 
 impl<'a, Eqn, Method> Op for AdjointOut<'a, Eqn, Method>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
     Method: OdeSolverMethod<'a, Eqn>,
 {
     type T = Eqn::T;
@@ -411,7 +411,7 @@ where
 ///
 pub struct AdjointEquations<'a, Eqn, Method>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
     Method: OdeSolverMethod<'a, Eqn>,
 {
     eqn: &'a Eqn,
@@ -430,7 +430,7 @@ where
 
 impl<'a, Eqn, Method> Clone for AdjointEquations<'a, Eqn, Method>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
     Method: OdeSolverMethod<'a, Eqn>,
 {
     fn clone(&self) -> Self {
@@ -538,7 +538,7 @@ where
 
 impl<'a, Eqn, Method> std::fmt::Debug for AdjointEquations<'a, Eqn, Method>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
     Method: OdeSolverMethod<'a, Eqn>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -548,7 +548,7 @@ where
 
 impl<'a, Eqn, Method> Op for AdjointEquations<'a, Eqn, Method>
 where
-    Eqn: OdeEquationsAdjoint,
+    Eqn: OdeEquations,
     Method: OdeSolverMethod<'a, Eqn>,
 {
     type T = Eqn::T;
@@ -664,7 +664,7 @@ mod tests {
         },
         AdjointContext, AugmentedOdeEquations, Checkpointing, DenseMatrix, FaerSparseLU,
         FaerSparseMat, FaerVec, Matrix, MatrixCommon, NalgebraVec, NonLinearOp,
-        NonLinearOpJacobian, OdeEquations, Op, SdirkState, Vector,
+        NonLinearOpJacobian, OdeEquations, Op, RkState, Vector,
     };
     type Mcpu = NalgebraMat<f64>;
     type Vcpu = NalgebraVec<f64>;
@@ -676,7 +676,7 @@ mod tests {
         // a = 0.1
         let (problem, _soln) = exponential_decay_problem_adjoint::<Mcpu>(true);
         let ctx = problem.eqn.context();
-        let state = SdirkState {
+        let state = RkState {
             t: 0.0,
             y: Vcpu::from_vec(vec![1.0, 1.0], ctx.clone()),
             dy: Vcpu::from_vec(vec![1.0, 1.0], ctx.clone()),
@@ -748,7 +748,7 @@ mod tests {
         // a = 0.1
         let (problem, _soln) = exponential_decay_problem_adjoint::<FaerSparseMat<f64>>(true);
         let ctx = problem.eqn.context();
-        let state = SdirkState {
+        let state = RkState {
             t: 0.0,
             y: FaerVec::from_vec(vec![1.0, 1.0], ctx.clone()),
             dy: FaerVec::from_vec(vec![1.0, 1.0], ctx.clone()),

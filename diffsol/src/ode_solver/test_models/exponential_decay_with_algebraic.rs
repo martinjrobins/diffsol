@@ -1,6 +1,7 @@
 use crate::{
     matrix::Matrix, ode_solver::problem::OdeSolverSolution, scalar::scale, MatrixHost, OdeBuilder,
-    OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsSens, OdeSolverProblem, Op, Vector,
+    OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem,
+    Op, Vector,
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};
@@ -229,7 +230,7 @@ pub fn exponential_decay_with_algebraic_problem<M: MatrixHost + 'static>(
 pub fn exponential_decay_with_algebraic_adjoint_problem<M: MatrixHost + 'static>(
     integrate_out: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquationsAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverProblem<impl OdeEquationsImplicitAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let a = 0.1;
@@ -286,7 +287,7 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: MatrixHost + 'static>
 
 #[allow(clippy::type_complexity)]
 pub fn exponential_decay_with_algebraic_problem_sens<M: MatrixHost + 'static>() -> (
-    OdeSolverProblem<impl OdeEquationsSens<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverProblem<impl OdeEquationsImplicitSens<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let k = 0.1;
