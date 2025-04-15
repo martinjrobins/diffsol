@@ -625,10 +625,15 @@ mod tests {
             solver1.step().unwrap();
         }
         let checkpoint = solver1.checkpoint();
+        let checkpoint_t = checkpoint.as_ref().t;
         solver2.set_state(checkpoint);
 
         // carry on solving with both solvers, they should produce about the same results (probably might diverge a bit, but should always match the solution)
         for point in soln.solution_points.iter().skip(half_i + 1) {
+            // point should be past checkpoint
+            if point.t < checkpoint_t {
+                continue;
+            }
             while solver2.state().t < point.t {
                 solver1.step().unwrap();
                 solver2.step().unwrap();

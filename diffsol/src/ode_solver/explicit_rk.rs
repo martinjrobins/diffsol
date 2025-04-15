@@ -282,7 +282,7 @@ where
         ret
     }
 
-    fn interpolate_beta_function(h: Eqn::T, theta: Eqn::T, beta: &M) -> Eqn::V {
+    fn interpolate_beta_function(theta: Eqn::T, beta: &M) -> Eqn::V {
         let poly_order = beta.ncols();
         let s_star = beta.nrows();
         let mut thetav = Vec::with_capacity(poly_order);
@@ -293,18 +293,18 @@ where
         // beta_poly = beta * thetav
         let thetav = Eqn::V::from_vec(thetav, beta.context().clone());
         let mut beta_f = <Eqn::V as Vector>::zeros(s_star, beta.context().clone());
-        beta.gemv(h, &thetav, Eqn::T::zero(), &mut beta_f);
+        beta.gemv(M::T::one(), &thetav, Eqn::T::zero(), &mut beta_f);
         beta_f
     }
 
-    fn interpolate_hermite(theta: Eqn::T, u0: &Eqn::V, u1: &Eqn::V, diff: &M) -> Eqn::V {
-        let hf0 = diff.column(0);
-        let hf1 = diff.column(diff.ncols() - 1);
+    fn interpolate_hermite(h: Eqn::T, theta: Eqn::T, u0: &Eqn::V, u1: &Eqn::V, diff: &M) -> Eqn::V {
+        let f0 = diff.column(0);
+        let f1 = diff.column(diff.ncols() - 1);
         u0 * scale(Eqn::T::from(1.0) - theta)
             + u1 * scale(theta)
             + ((u1 - u0) * scale(Eqn::T::from(1.0) - Eqn::T::from(2.0) * theta)
-                + hf0 * scale(theta - Eqn::T::from(1.0))
-                + hf1 * scale(theta))
+                + f0 * scale(h * (theta - Eqn::T::from(1.0)))
+                + f1 * scale(h * theta))
                 * scale(theta * (theta - Eqn::T::from(1.0)))
     }
 }
@@ -662,7 +662,7 @@ where
         };
 
         if let Some(beta) = self.tableau.beta() {
-            let beta_f = Self::interpolate_beta_function(dt, theta, beta);
+            let beta_f = Self::interpolate_beta_function(theta, beta);
             let ret = self
                 .old_state
                 .s
@@ -678,7 +678,7 @@ where
                 .iter()
                 .zip(state.s.iter())
                 .zip(self.sdiff.iter())
-                .map(|((s0, s1), diff)| Self::interpolate_hermite(theta, s0, s1, diff))
+                .map(|((s0, s1), diff)| Self::interpolate_hermite(dt, theta, s0, s1, diff))
                 .collect();
             Ok(ret)
         }
@@ -711,11 +711,11 @@ where
         };
 
         if let Some(beta) = self.tableau.beta() {
-            let beta_f = Self::interpolate_beta_function(dt, theta, beta);
+            let beta_f = Self::interpolate_beta_function(theta, beta);
             let ret = Self::interpolate_from_diff(dt, &self.old_state.y, &beta_f, &self.diff);
             Ok(ret)
         } else {
-            let ret = Self::interpolate_hermite(theta, &self.old_state.y, &state.y, &self.diff);
+            let ret = Self::interpolate_hermite(dt, theta, &self.old_state.y, &state.y, &self.diff);
             Ok(ret)
         }
     }
@@ -747,11 +747,12 @@ where
         };
 
         if let Some(beta) = self.tableau.beta() {
-            let beta_f = Self::interpolate_beta_function(dt, theta, beta);
+            let beta_f = Self::interpolate_beta_function(theta, beta);
             let ret = Self::interpolate_from_diff(dt, &self.old_state.g, &beta_f, &self.gdiff);
             Ok(ret)
         } else {
-            let ret = Self::interpolate_hermite(theta, &self.old_state.g, &state.g, &self.gdiff);
+            let ret =
+                Self::interpolate_hermite(dt, theta, &self.old_state.g, &state.g, &self.gdiff);
             Ok(ret)
         }
     }
