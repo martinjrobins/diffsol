@@ -171,7 +171,7 @@
 </ul>
 <p>The following example shows how to solve a simple ODE problem using the <code>solve</code> method on the <code>OdeSolverMethod</code> trait.</p>
 <pre><code class="language-rust ignore">use diffsol::OdeBuilder;
-use diffsol::{BdfState, OdeSolverState, SdirkState, Tableau};
+use diffsol::{BdfState, OdeSolverState, RkState, Tableau};
 use diffsol::{NalgebraLU, NalgebraMat, OdeSolverMethod, OdeSolverStopReason, Vector};
 type M = NalgebraMat&lt;f64&gt;;
 type LS = NalgebraLU&lt;f64&gt;;
