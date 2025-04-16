@@ -96,6 +96,13 @@ impl_index_mut!(FaerMat<T>);
 impl<'a, T: Scalar> MatrixView<'a> for FaerMatRef<'a, T> {
     type Owned = FaerMat<T>;
 
+    fn into_owned(self) -> Self::Owned {
+        Self::Owned {
+            data: self.data.to_owned(),
+            context: self.context.clone(),
+        }
+    }
+
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
         y.mul_assign(Scale(beta));
         matmul(
@@ -129,6 +136,13 @@ impl<'a, T: Scalar> MatrixView<'a> for FaerMatRef<'a, T> {
 impl<'a, T: Scalar> MatrixViewMut<'a> for FaerMatMut<'a, T> {
     type Owned = FaerMat<T>;
     type View = FaerMatRef<'a, T>;
+
+    fn into_owned(self) -> Self::Owned {
+        Self::Owned {
+            data: self.data.to_owned(),
+            context: self.context.clone(),
+        }
+    }
 
     fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T) {
         self.mul_assign(Scale(beta));

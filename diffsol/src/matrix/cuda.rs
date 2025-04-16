@@ -521,6 +521,21 @@ impl_add_both_ref!(CudaMatRef<'_, T>, &CudaMat<T>, CudaMat<T>);
 impl<'a, T: ScalarCuda> MatrixView<'a> for CudaMatRef<'a, T> {
     type Owned = CudaMat<T>;
 
+    fn into_owned(self) -> Self::Owned {
+        let mut data = unsafe { self.context.stream.alloc(self.nrows * self.ncols) }
+            .expect("Failed to allocate memory for CudaVec");
+        self.context
+            .stream
+            .memcpy_dtod(&self.data, &mut data)
+            .expect("Failed to copy data from device to host");
+        CudaMat {
+            data,
+            context: self.context.clone(),
+            nrows: self.nrows,
+            ncols: self.ncols,
+        }
+    }
+
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
         self.context.gemv(
             self.nrows(),
@@ -554,6 +569,21 @@ impl<'a, T: ScalarCuda> MatrixView<'a> for CudaMatRef<'a, T> {
 impl<'a, T: ScalarCuda> MatrixViewMut<'a> for CudaMatMut<'a, T> {
     type Owned = CudaMat<T>;
     type View = CudaMatRef<'a, T>;
+
+    fn into_owned(self) -> Self::Owned {
+        let mut data = unsafe { self.context.stream.alloc(self.nrows * self.ncols) }
+            .expect("Failed to allocate memory for CudaVec");
+        self.context
+            .stream
+            .memcpy_dtod(&self.data, &mut data)
+            .expect("Failed to copy data from device to host");
+        CudaMat {
+            data,
+            context: self.context.clone(),
+            nrows: self.nrows,
+            ncols: self.ncols,
+        }
+    }
 
     fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T) {
         self.context.gemm(
@@ -676,7 +706,7 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
             data,
             context: self.context.clone(),
             nrows: self.nrows(),
-            ncols: self.ncols(),
+            ncols: end - start,
         }
     }
 
@@ -1117,5 +1147,56 @@ mod tests {
         mat.set_column(1, &vec);
         assert_eq!(mat.get_index(0, 1), 5.0);
         assert_eq!(mat.get_index(1, 1), 6.0);
+    }
+
+    #[test]
+    fn test_cudamat_into_owned() {
+        let ctx = CudaContext::default();
+        let mut mat = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
+        let mat_ref = mat.columns(0, 2);
+        assert_eq!(mat_ref.nrows(), 2);
+        assert_eq!(mat_ref.ncols(), 2);
+        let mat_copy = mat_ref.into_owned();
+        assert_eq!(mat_copy.nrows(), 2);
+        assert_eq!(mat_copy.ncols(), 2);
+        assert_eq!(mat_copy.get_index(0, 0), 1.0);
+        assert_eq!(mat_copy.get_index(1, 1), 4.0);
+        let mat_ref = mat.columns_mut(0, 2);
+        assert_eq!(mat_ref.nrows(), 2);
+        assert_eq!(mat_ref.ncols(), 2);
+        let mat_copy = mat_ref.into_owned();
+        assert_eq!(mat_copy.nrows(), 2);
+        assert_eq!(mat_copy.ncols(), 2);
+        assert_eq!(mat_copy.get_index(0, 0), 1.0);
+        assert_eq!(mat_copy.get_index(1, 1), 4.0);
+
+        // Check that the original matrix is unchanged
+        assert_eq!(mat.nrows(), 2);
+        assert_eq!(mat.ncols(), 2);
+        assert_eq!(mat.get_index(0, 0), 1.0);
+        assert_eq!(mat.get_index(1, 1), 4.0);
+    }
+
+    #[test]
+    fn test_cudamat_columns() {
+        let ctx = CudaContext::default();
+        let mut mat = CudaMat::from_vec(
+            2,
+            4,
+            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+            ctx.clone(),
+        );
+        let cols = mat.columns(1, 3);
+        assert_eq!(cols.nrows(), 2);
+        assert_eq!(cols.ncols(), 2);
+        let cols = cols.into_owned();
+        assert_eq!(cols.get_index(0, 0), 3.0);
+        assert_eq!(cols.get_index(1, 1), 6.0);
+        let cols = mat.columns_mut(1, 3);
+        assert_eq!(cols.nrows(), 2);
+        assert_eq!(cols.ncols(), 2);
+        let cols = cols.into_owned();
+        assert_eq!(cols.get_index(0, 0), 3.0);
+        assert_eq!(cols.get_index(1, 1), 6.0);
     }
 }

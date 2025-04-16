@@ -107,6 +107,13 @@ impl_index_mut!(NalgebraMat<T>);
 impl<'a, T: Scalar> MatrixView<'a> for NalgebraMatRef<'a, T> {
     type Owned = NalgebraMat<T>;
 
+    fn into_owned(self) -> Self::Owned {
+        Self::Owned {
+            data: self.data.into_owned(),
+            context: self.context.clone(),
+        }
+    }
+
     fn gemv_v(
         &self,
         alpha: Self::T,
@@ -125,6 +132,12 @@ impl<'a, T: Scalar> MatrixView<'a> for NalgebraMatRef<'a, T> {
 impl<'a, T: Scalar> MatrixViewMut<'a> for NalgebraMatMut<'a, T> {
     type Owned = NalgebraMat<T>;
     type View = NalgebraMatRef<'a, T>;
+    fn into_owned(self) -> Self::Owned {
+        Self::Owned {
+            data: self.data.into_owned(),
+            context: self.context.clone(),
+        }
+    }
     fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T) {
         self.data.gemm(alpha, &a.data, &b.data, beta);
     }

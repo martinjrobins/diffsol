@@ -53,7 +53,6 @@ mod tests {
     where
         M: Matrix,
         Eqn: OdeEquations<M = M, T = M::T, V = M::V> + 'a,
-        Eqn::M: DefaultSolver,
         Method: OdeSolverMethod<'a, Eqn>,
     {
         let have_root = method.problem().eqn.root().is_some();

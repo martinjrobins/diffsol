@@ -9,7 +9,10 @@ use cudarc::driver::{
     PushKernelArg,
 };
 
-use crate::{CudaContext, CudaType, IndexType, ScalarCuda, Scale, Vector, VectorCommon};
+use crate::{
+    CudaContext, CudaMat, CudaType, DefaultDenseMatrix, IndexType, ScalarCuda, Scale, Vector,
+    VectorCommon,
+};
 
 extern "C" fn zero(_block_size: std::ffi::c_int) -> usize {
     0
@@ -221,9 +224,9 @@ pub struct CudaVecMut<'a, T: ScalarCuda> {
     pub(crate) context: CudaContext,
 }
 
-//impl<T: ScalarCuda> DefaultDenseMatrix for CudaVec<T> {
-//    type M = CudaMat<T>;
-//}
+impl<T: ScalarCuda> DefaultDenseMatrix for CudaVec<T> {
+    type M = CudaMat<T>;
+}
 
 macro_rules! impl_vector_common {
     ($vec:ty, $con:ty, $in:ty) => {
@@ -1010,6 +1013,10 @@ mod tests {
         let x = CudaVec::<f64>::from_vec(vec![4.0, 5.0, 6.0], ctx.clone());
         y.axpy(2.0, &x, 1.0);
         assert_eq!(y.clone_as_vec(), vec![9.0, 12.0, 15.0]);
+        y.axpy(2.0, &x, 0.0);
+        assert_eq!(y.clone_as_vec(), vec![8.0, 10.0, 12.0]);
+        y.axpy(0.0, &x, 1.0);
+        assert_eq!(y.clone_as_vec(), vec![8.0, 10.0, 12.0]);
     }
 
     #[test]
@@ -1125,5 +1132,15 @@ mod tests {
         let mut result = CudaVec::<f64>::zeros(4, ctx.clone());
         vec.scatter(&indices, &mut result);
         assert_eq!(result.clone_as_vec(), vec![10.0, 0.0, 30.0, 40.0]);
+    }
+
+    #[test]
+    fn test_cuda_vec_get_set_index() {
+        let ctx = setup_cuda_context();
+        let mut vec = CudaVec::<f64>::zeros(5, ctx.clone());
+        vec.set_index(2, 42.0);
+        assert_eq!(vec.get_index(2), 42.0);
+        assert_eq!(vec.clone_as_vec(), vec![0.0, 0.0, 42.0, 0.0, 0.0]);
+        assert_eq!(vec.get_index(0), 0.0);
     }
 }

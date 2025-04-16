@@ -1,7 +1,7 @@
 use crate::{
-    ode_solver::problem::OdeSolverSolution, scalar::scale, ConstantOp, MatrixHost, OdeBuilder,
-    OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens,
-    OdeSolverProblem, Op, Vector,
+    ode_solver::problem::OdeSolverSolution, scalar::scale, ConstantOp, Matrix, MatrixHost,
+    OdeBuilder, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
+    OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};
@@ -9,9 +9,9 @@ use std::ops::MulAssign;
 
 // exponential decay problem
 // dy/dt = -ay (p = [a, y0])
-fn exponential_decay<M: MatrixHost>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
+fn exponential_decay<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
     y.copy_from(x);
-    y.mul_assign(scale(-p[0]));
+    y.mul_assign(scale(-p.get_index(0)));
 }
 
 // df/dp v = -yv (p = [a, y0])
@@ -40,15 +40,9 @@ fn exponential_decay_sens_transpose<M: MatrixHost>(
 // J = | -a  0 |
 //     | 0  -a |
 // Jv = -av
-fn exponential_decay_jacobian<M: MatrixHost>(
-    _x: &M::V,
-    p: &M::V,
-    _t: M::T,
-    v: &M::V,
-    y: &mut M::V,
-) {
+fn exponential_decay_jacobian<M: Matrix>(_x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
     y.copy_from(v);
-    y.mul_assign(scale(-p[0]));
+    y.mul_assign(scale(-p.get_index(0)));
 }
 
 // -J^Tv = av
@@ -63,8 +57,8 @@ fn exponential_decay_jacobian_adjoint<M: MatrixHost>(
     y.mul_assign(scale(p[0]));
 }
 
-fn exponential_decay_init<M: MatrixHost>(p: &M::V, _t: M::T, y: &mut M::V) {
-    y.fill(p[1]);
+fn exponential_decay_init<M: Matrix>(p: &M::V, _t: M::T, y: &mut M::V) {
+    y.fill(p.get_index(1));
 }
 
 // dy0/dp = | 0 1 |
@@ -217,7 +211,7 @@ pub fn exponential_decay_problem_diffsl<M: MatrixHost<T = f64>, CG: crate::Codeg
 }
 
 #[allow(clippy::type_complexity)]
-pub fn exponential_decay_problem<M: MatrixHost + 'static>(
+pub fn exponential_decay_problem<M: Matrix + 'static>(
     use_coloring: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
