@@ -106,6 +106,7 @@ pub trait MatrixViewMut<'a>:
 {
     type Owned;
     type View;
+    fn into_owned(self) -> Self::Owned;
     fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T);
     fn gemm_vo(&mut self, alpha: Self::T, a: &Self::View, b: &Self::Owned, beta: Self::T);
 }
@@ -115,6 +116,8 @@ pub trait MatrixView<'a>:
     for<'b> MatrixOpsByValue<&'b Self::Owned, Self::Owned> + Mul<Scale<Self::T>, Output = Self::Owned>
 {
     type Owned;
+
+    fn into_owned(self) -> Self::Owned;
 
     /// Perform a matrix-vector multiplication `y = self * x + beta * y`.
     fn gemv_v(

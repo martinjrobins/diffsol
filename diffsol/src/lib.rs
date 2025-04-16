@@ -222,6 +222,8 @@ pub use vector::{
 #[cfg(feature = "cuda")]
 pub use context::cuda::CudaContext;
 #[cfg(feature = "cuda")]
+pub use matrix::cuda::{CudaMat, CudaMatMut, CudaMatRef};
+#[cfg(feature = "cuda")]
 pub use scalar::cuda::{CudaType, ScalarCuda};
 #[cfg(feature = "cuda")]
 pub use vector::cuda::{CudaIndex, CudaVec, CudaVecMut, CudaVecRef};
