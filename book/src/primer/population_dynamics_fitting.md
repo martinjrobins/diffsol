@@ -1,20 +1,19 @@
 # Fitting a Predator-Prey Model to data
 
-In this example we will again use the [Lotka-Volterra equations](https://en.wikipedia.org/wiki/Lotka%E2%80%93Volterra_equations), which are described in more detail in the [Population Dynamics - Predator-Prey Model](./population_dynamics.md) example. 
+In this example we will again use the [Lotka-Volterra equations](https://en.wikipedia.org/wiki/Lotka%E2%80%93Volterra_equations), which are described in more detail in the [Population Dynamics - Predator-Prey Model](./population_dynamics.md) example.
 
 The equations are
 
 \\[
-\frac{x}{dt} = a x - b x y \\\\
-\frac{y}{dt} = c x y - d y
+\frac{dx}{dt} = a x - b x y \\\\
+\frac{dy}{dt} = c x y - d y
 \\]
-
 
 We also have initial conditions for the populations at time \\(t = 0\\).
 
 \\[
-\frac{x}{dt} = x0 \\\\
-\frac{y}{dt} = y0
+x(0) = x0 \\\\
+y(0) = y0
 \\]
 
 This model has six parameters, \\(a, b, c, d, x0, y0\\). For the purposes of this example, we'll fit two of these parameters \\(b, d)\\) to some synthetic data. We'll use the model itself to generate the synthetic data, so we'll know the true values of the parameters to verify the fitting process.
@@ -94,4 +93,4 @@ Best parameter vector: [1.3333663799297248, 1.0000008551827637]
 True parameter vector: [1.3333333333333333, 1.0]
 ```
 
-So, we've successfully fitted the Lotka-Volterra model to some synthetic data and recovered the original true parameters. This is a simple example and could easily be improved. For example, you will note from the output that the argmin crate is calling both the cost and gradient functions, and this is often done using the exact same parameter vector. Ideally we'd like to cache the results of the `solve_dense_sensitivities` method and reuse them in both the `cost` and `gradient` functions. 
+So, we've successfully fitted the Lotka-Volterra model to some synthetic data and recovered the original true parameters. This is a simple example and could easily be improved. For example, you will note from the output that the argmin crate is calling both the cost and gradient functions, and this is often done using the exact same parameter vector. Ideally we'd like to cache the results of the `solve_dense_sensitivities` method and reuse them in both the `cost` and `gradient` functions.
