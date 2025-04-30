@@ -1201,13 +1201,13 @@ y(t_0) &amp;= y_0
 <p>In this example we will again use the <a href="https://en.wikipedia.org/wiki/Lotka%E2%80%93Volterra_equations">Lotka-Volterra equations</a>, which are described in more detail in the <a href="primer/./population_dynamics.html">Population Dynamics - Predator-Prey Model</a> example.</p>
 <p>The equations are</p>
 <p>\[
-\frac{x}{dt} = a x - b x y \\
-\frac{y}{dt} = c x y - d y
+\frac{dx}{dt} = a x - b x y \\
+\frac{dy}{dt} = c x y - d y
 \]</p>
 <p>We also have initial conditions for the populations at time \(t = 0\).</p>
 <p>\[
-\frac{x}{dt} = x0 \\
-\frac{y}{dt} = y0
+x(0) = x0 \\
+y(0) = y0
 \]</p>
 <p>This model has six parameters, \(a, b, c, d, x0, y0\). For the purposes of this example, we'll fit two of these parameters \(b, d)\) to some synthetic data. We'll use the model itself to generate the synthetic data, so we'll know the true values of the parameters to verify the fitting process.</p>
 <p>We'll use the argmin crate to perform the optimisation. This is a popular rust crate that contains a number of optimisation algorithms. It does have some limitations, such as the lack of support for constraints, so it may not be suitable for many real ODE fitting problems as the solver can easily fail to converge if the parameter vector moves into a difficult region (e.g. the Lotka-Volterra model only makes sense for positive values of the parameters). However, it will be sufficient for this example to demonstrate the sensitivity analysis capabilities of <code>diffsol</code>.</p>
