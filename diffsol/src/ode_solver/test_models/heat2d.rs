@@ -323,7 +323,7 @@ mod tests {
         use crate::{FaerSparseMat, FaerVec};
         use diffsl::CraneliftJitModule;
 
-        let (problem, _soln) = heat2d_diffsl_problem::<FaerSparseMat<f64>, CraneliftModule, 5>();
+        let (problem, _soln) = heat2d_diffsl_problem::<FaerSparseMat<f64>, CraneliftJitModule, 5>();
         let u = FaerVec::from_vec(
             vec![
                 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0,

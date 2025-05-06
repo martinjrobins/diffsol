@@ -529,7 +529,7 @@ mod tests {
     #[cfg(feature = "diffsl-cranelift")]
     pub fn test_ball_bounce_problem<M: crate::MatrixHost<T = f64>>(
     ) -> OdeSolverProblem<crate::DiffSl<M, crate::CraneliftJitModule>> {
-        OdeBuilder::<M>::new()
+        crate::OdeBuilder::<M>::new()
             .build_from_diffsl(
                 "
             g { 9.81 } h { 10.0 }
