@@ -240,7 +240,7 @@ g(1)
 <p>where \(u\) is a vector of temperatures at each point in space. This is a system of ODEs that we can solve using DiffSol.</p>
 <h2 id="diffsol-implementation"><a class="header" href="#diffsol-implementation">DiffSol Implementation</a></h2>
 <pre><code class="language-rust ignore">use diffsol::{
-    CraneliftModule, FaerSparseLU, FaerSparseMat, MatrixCommon, OdeBuilder, OdeSolverMethod,
+    CraneliftJitModule, FaerSparseLU, FaerSparseMat, MatrixCommon, OdeBuilder, OdeSolverMethod,
 };
 use plotly::{
     layout::{Axis, Layout},
@@ -250,7 +250,7 @@ use std::fs;
 
 type M = FaerSparseMat&lt;f64&gt;;
 type LS = FaerSparseLU&lt;f64&gt;;
-type CG = CraneliftModule;
+type CG = CraneliftJitModule;
 
 fn main() {
     let problem = OdeBuilder::&lt;M&gt;::new()
