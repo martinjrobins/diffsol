@@ -29,7 +29,7 @@ pub fn foodweb_diffsl_problem<M, CG, const NX: usize>() -> (
 )
 where
     M: MatrixHost<T = f64>,
-    CG: diffsl::execution::module::CodegenModule,
+    CG: crate::CodegenModuleJit + crate::CodegenModuleCompile,
 {
     use crate::OdeBuilder;
 

@@ -1,11 +1,12 @@
 use diffsol::{
-    CraneliftModule, MatrixCommon, NalgebraVec, OdeBuilder, OdeEquations, OdeSolverMethod, Vector,
+    CraneliftJitModule, MatrixCommon, NalgebraVec, OdeBuilder, OdeEquations, OdeSolverMethod,
+    Vector,
 };
 use plotly::{common::Mode, layout::Axis, layout::Layout, Plot, Scatter};
 use std::fs;
 type M = diffsol::NalgebraMat<f64>;
 type LS = diffsol::NalgebraLU<f64>;
-type CG = CraneliftModule;
+type CG = CraneliftJitModule;
 
 fn main() {
     solve();

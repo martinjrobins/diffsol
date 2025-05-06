@@ -163,7 +163,10 @@ pub fn negative_exponential_decay_problem<M: MatrixHost + 'static>(
 }
 
 #[cfg(feature = "diffsl")]
-pub fn exponential_decay_problem_diffsl<M: MatrixHost<T = f64>, CG: crate::CodegenModule>(
+pub fn exponential_decay_problem_diffsl<
+    M: MatrixHost<T = f64>,
+    CG: crate::CodegenModuleJit + crate::CodegenModuleCompile,
+>(
     prep_adjoint: bool,
 ) -> (
     OdeSolverProblem<crate::DiffSl<M, CG>>,

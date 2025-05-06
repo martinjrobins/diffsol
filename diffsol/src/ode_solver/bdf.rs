@@ -1924,7 +1924,7 @@ mod test {
         }
     }
 
-    #[cfg(feature = "diffsl")]
+    #[cfg(feature = "diffsl-cranelift")]
     #[test]
     fn test_ball_bounce_bdf() {
         use crate::ode_solver::tests::test_ball_bounce_problem;

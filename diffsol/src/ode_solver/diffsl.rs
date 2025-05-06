@@ -2,7 +2,10 @@ use core::panic;
 use std::cell::RefCell;
 use std::ops::MulAssign;
 
-use diffsl::{execution::module::CodegenModule, Compiler};
+use diffsl::{
+    execution::module::{CodegenModule, CodegenModuleCompile, CodegenModuleJit},
+    Compiler,
+};
 
 use crate::{
     error::DiffsolError, find_jacobian_non_zeros, find_matrix_non_zeros,
@@ -38,7 +41,7 @@ pub struct DiffSlContext<M: Matrix<T = T>, CG: CodegenModule> {
     ctx: M::C,
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
+impl<M: Matrix<T = T>, CG: CodegenModuleCompile + CodegenModuleJit> DiffSlContext<M, CG> {
     /// Create a new context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
     /// The input parameters are not initialized and must be set using the [OdeEquations::set_params] function before solving the ODE.
     ///
@@ -123,7 +126,9 @@ impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
     }
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModule> Default for DiffSlContext<M, CG> {
+impl<M: Matrix<T = T>, CG: CodegenModuleJit + CodegenModuleCompile> Default
+    for DiffSlContext<M, CG>
+{
     fn default() -> Self {
         Self::new(
             "
@@ -150,7 +155,7 @@ pub struct DiffSl<M: Matrix<T = T>, CG: CodegenModule> {
     rhs_adjoint_coloring: Option<JacobianColoring<M>>,
 }
 
-impl<M: MatrixHost<T = T>, CG: CodegenModule> DiffSl<M, CG> {
+impl<M: MatrixHost<T = T>, CG: CodegenModuleJit + CodegenModuleCompile> DiffSl<M, CG> {
     pub fn compile(code: &str, ctx: M::C) -> Result<Self, DiffsolError> {
         let context = DiffSlContext::<M, CG>::new(code, 1, ctx)?;
         Ok(Self::from_context(context))
@@ -724,7 +729,7 @@ impl<M: MatrixHost<T = T>, CG: CodegenModule> OdeEquations for DiffSl<M, CG> {
 
 #[cfg(test)]
 mod tests {
-    use diffsl::{execution::module::CodegenModule, CraneliftModule};
+    use diffsl::execution::module::{CodegenModuleCompile, CodegenModuleJit};
 
     use crate::{
         matrix::dense_nalgebra_serial::NalgebraMat, ConstantOp, Context, DenseMatrix, LinearOp,
@@ -734,9 +739,10 @@ mod tests {
 
     use super::{DiffSl, DiffSlContext};
 
+    #[cfg(feature = "diffsl-cranelift")]
     #[test]
     fn diffsl_logistic_growth_cranelift() {
-        diffsl_logistic_growth::<CraneliftModule>();
+        diffsl_logistic_growth::<diffsl::CraneliftJitModule>();
     }
 
     #[cfg(feature = "diffsl-llvm")]
@@ -745,7 +751,7 @@ mod tests {
         diffsl_logistic_growth::<diffsl::LlvmModule>();
     }
 
-    fn diffsl_logistic_growth<CG: CodegenModule>() {
+    fn diffsl_logistic_growth<CG: CodegenModuleJit + CodegenModuleCompile>() {
         let text = "
             in = [r, k]
             r { 1 }

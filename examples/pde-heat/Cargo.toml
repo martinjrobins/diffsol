@@ -11,6 +11,6 @@ diffsl-llvm17 = ["diffsol/diffsl-llvm17"]
 diffsl-llvm18 = ["diffsol/diffsl-llvm18"]
 
 [dependencies]
-diffsol = { path = "../../diffsol" }
+diffsol = { path = "../../diffsol", features = ["diffsl-cranelift"] }
 faer = { workspace = true }
 plotly = { workspace = true }

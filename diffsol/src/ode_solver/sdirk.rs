@@ -1430,7 +1430,7 @@ mod test {
         }
     }
 
-    #[cfg(feature = "diffsl")]
+    #[cfg(feature = "diffsl-cranelift")]
     #[test]
     fn test_ball_bounce_tr_bdf2() {
         type M = crate::NalgebraMat<f64>;

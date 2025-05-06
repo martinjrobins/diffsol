@@ -5,6 +5,6 @@ edition.workspace = true
 publish = false
 
 [dependencies]
-diffsol = { path = "../../diffsol" }
+diffsol = { path = "../../diffsol", features = ["diffsl-cranelift"] }
 nalgebra = { workspace = true }
 plotly = { workspace = true }

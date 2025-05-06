@@ -133,10 +133,12 @@
 //! - For vectors: [Vector], [VectorIndex], [VectorView], [VectorViewMut], and [VectorCommon].
 //!
 
+#[cfg(feature = "diffsl")]
+pub use diffsl::execution::module::{CodegenModule, CodegenModuleCompile, CodegenModuleJit};
+#[cfg(feature = "diffsl-cranelift")]
+pub use diffsl::CraneliftJitModule;
 #[cfg(feature = "diffsl-llvm")]
 pub use diffsl::LlvmModule;
-#[cfg(feature = "diffsl")]
-pub use diffsl::{execution::module::CodegenModule, CraneliftModule};
 
 pub mod context;
 pub mod jacobian;

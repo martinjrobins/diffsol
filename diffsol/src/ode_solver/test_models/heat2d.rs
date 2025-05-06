@@ -20,7 +20,7 @@ use crate::{ConstantOp, LinearOp, NonLinearOpJacobian, OdeEquations};
 #[allow(clippy::type_complexity)]
 pub fn heat2d_diffsl_problem<
     M: MatrixHost<T = f64>,
-    CG: diffsl::execution::module::CodegenModule,
+    CG: crate::CodegenModuleJit + crate::CodegenModuleCompile,
     const MGRID: usize,
 >() -> (
     OdeSolverProblem<impl crate::OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
@@ -317,13 +317,13 @@ mod tests {
         insta::assert_yaml_snapshot!(mass.data.to_string());
     }
 
-    #[cfg(feature = "diffsl")]
+    #[cfg(feature = "diffsl-cranelift")]
     #[test]
     fn test_mass_diffsl() {
         use crate::{FaerSparseMat, FaerVec};
-        use diffsl::CraneliftModule;
+        use diffsl::CraneliftJitModule;
 
-        let (problem, _soln) = heat2d_diffsl_problem::<FaerSparseMat<f64>, CraneliftModule, 5>();
+        let (problem, _soln) = heat2d_diffsl_problem::<FaerSparseMat<f64>, CraneliftJitModule, 5>();
         let u = FaerVec::from_vec(
             vec![
                 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0,

@@ -1,7 +1,6 @@
-use diffsol::CraneliftModule;
 use diffsol::{OdeBuilder, OdeSolverMethod};
 type M = diffsol::NalgebraMat<f64>;
-type CG = CraneliftModule;
+type CG = diffsol::CraneliftJitModule;
 type LS = diffsol::NalgebraLU<f64>;
 
 fn main() {

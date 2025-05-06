@@ -1,5 +1,5 @@
 use diffsol::{
-    CraneliftModule, FaerSparseLU, FaerSparseMat, MatrixCommon, OdeBuilder, OdeSolverMethod,
+    CraneliftJitModule, FaerSparseLU, FaerSparseMat, MatrixCommon, OdeBuilder, OdeSolverMethod,
 };
 use plotly::{
     layout::{Axis, Layout},
@@ -9,7 +9,7 @@ use std::fs;
 
 type M = FaerSparseMat<f64>;
 type LS = FaerSparseLU<f64>;
-type CG = CraneliftModule;
+type CG = CraneliftJitModule;
 
 fn main() {
     let problem = OdeBuilder::<M>::new()

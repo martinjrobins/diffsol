@@ -89,17 +89,17 @@ jobs:
     - name: Set features variable and install dependencies (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
       run: |
-        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features sundials" >> $GITHUB_ENV
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features sundials" >> $GITHUB_ENV
         sudo apt-get update
         sudo apt-get install -y libsuitesparse-dev libsundials-dev
     - name: Set features variable and install dependencies (macOS)
       if: matrix.os == 'macos-13' || matrix.os == 'macos-latest'
       run: |
-        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17" >> $GITHUB_ENV
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift" >> $GITHUB_ENV
     - name: Set features variable and install dependencies (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl" >> $GITHUB_ENV
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-cranelift" >> $GITHUB_ENV
     - name: Run tests - default features
       if: matrix.tests == true
       run: cargo test --verbose
