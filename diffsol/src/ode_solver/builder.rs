@@ -892,7 +892,7 @@ where
     }
 
     #[cfg(feature = "diffsl")]
-    pub fn build_from_diffsl<CG: crate::CodegenModule>(
+    pub fn build_from_diffsl<CG: crate::CodegenModuleJit + crate::CodegenModuleCompile>(
         self,
         code: &str,
     ) -> Result<OdeSolverProblem<crate::DiffSl<M, CG>>, DiffsolError>

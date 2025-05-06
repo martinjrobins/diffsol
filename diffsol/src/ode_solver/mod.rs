@@ -32,11 +32,10 @@ mod tests {
     use crate::op::unit::UnitCallable;
     use crate::op::ParameterisedOp;
     use crate::{
-        op::OpStatistics, AdjointOdeSolverMethod, Context, CraneliftModule, DenseMatrix,
-        MatrixCommon, MatrixHost, MatrixRef, NonLinearOpJacobian, OdeBuilder, OdeEquations,
-        OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsRef, OdeSolverMethod,
-        OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Scale, VectorRef, VectorView,
-        VectorViewMut,
+        op::OpStatistics, AdjointOdeSolverMethod, Context, DenseMatrix, MatrixCommon, MatrixRef,
+        NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
+        OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
+        Scale, VectorRef, VectorView, VectorViewMut,
     };
     use crate::{
         ConstantOp, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp, Op, Vector,
@@ -527,9 +526,9 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "diffsl")]
-    pub fn test_ball_bounce_problem<M: MatrixHost<T = f64>>(
-    ) -> OdeSolverProblem<crate::DiffSl<M, CraneliftModule>> {
+    #[cfg(feature = "diffsl-cranelift")]
+    pub fn test_ball_bounce_problem<M: crate::MatrixHost<T = f64>>(
+    ) -> OdeSolverProblem<crate::DiffSl<M, crate::CraneliftJitModule>> {
         OdeBuilder::<M>::new()
             .build_from_diffsl(
                 "
@@ -550,13 +549,13 @@ mod tests {
             .unwrap()
     }
 
-    #[cfg(feature = "diffsl")]
+    #[cfg(feature = "diffsl-cranelift")]
     pub fn test_ball_bounce<'a, M, Method>(mut solver: Method) -> (Vec<f64>, Vec<f64>, Vec<f64>)
     where
-        M: MatrixHost<T = f64>,
+        M: crate::MatrixHost<T = f64>,
         M: DefaultSolver<T = f64>,
         M::V: DefaultDenseMatrix<T = f64>,
-        Method: OdeSolverMethod<'a, crate::DiffSl<M, CraneliftModule>>,
+        Method: OdeSolverMethod<'a, crate::DiffSl<M, crate::CraneliftJitModule>>,
     {
         let e = 0.8;
 

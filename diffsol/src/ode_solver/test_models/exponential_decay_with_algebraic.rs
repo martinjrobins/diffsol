@@ -323,7 +323,7 @@ pub fn exponential_decay_with_algebraic_problem_sens<M: MatrixHost + 'static>() 
 #[cfg(feature = "diffsl")]
 pub fn exponential_decay_with_algebraic_problem_diffsl<
     M: MatrixHost<T = f64>,
-    CG: crate::CodegenModule,
+    CG: crate::CodegenModuleJit + crate::CodegenModuleCompile,
 >(
     prep_adjoint: bool,
 ) -> (

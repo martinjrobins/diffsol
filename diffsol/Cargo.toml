@@ -11,13 +11,14 @@ repository.workspace = true
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["nalgebra", "faer", "diffsl"]
+default = ["nalgebra", "faer"]
 faer = []
 nalgebra = []
 cuda = ["dep:cudarc"]
 sundials = ["suitesparse_sys", "bindgen", "cc"]
 suitesparse = ["suitesparse_sys"]
-diffsl = ["dep:diffsl"]
+diffsl = []
+diffsl-cranelift = ["diffsl/cranelift", "diffsl"]
 diffsl-llvm = []
 diffsl-llvm15 = ["diffsl/llvm15-0", "diffsl", "diffsl-llvm"]
 diffsl-llvm16 = ["diffsl/llvm16-0", "diffsl", "diffsl-llvm"]
@@ -29,22 +30,22 @@ nalgebra = { workspace = true }
 faer = { workspace = true }
 nalgebra-sparse = { version = "0.10", features = ["io"] }
 num-traits = "0.2.17"
-serde = { version = "1.0.218", features = ["derive"] }
-diffsl = { package = "diffsl", version = "0.4.2", optional = true }
-petgraph = "0.7.1"
+serde = { version = "1.0.219", features = ["derive"] }
+diffsl = { package = "diffsl", version = "0.5.0", optional = true, features = ["rayon"] }
+petgraph = "0.8.1"
 suitesparse_sys = { version = "0.1.3", optional = true }
 thiserror = "2.0.12"
 faer-traits = "0.21.0"
 cudarc = { workspace = true, optional = true, features = ["cuda-version-from-build-system"] }
 
 [dev-dependencies]
-insta = { version = "1.42.0", features = ["yaml"] }
+insta = { version = "1.43.1", features = ["yaml"] }
 criterion = { version = "0.5.1" }
 skeptic = "0.13.7"
 
 [build-dependencies]
 bindgen = { version = "0.71.1", optional = true }
-cc = { version = "1.2.10", optional = true }
+cc = { version = "1.2.21", optional = true }
 
 [[bench]]
 name = "ode_solvers"

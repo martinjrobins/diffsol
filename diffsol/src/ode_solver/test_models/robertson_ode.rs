@@ -8,7 +8,7 @@ use num_traits::{One, Zero};
 #[allow(clippy::type_complexity)]
 pub fn robertson_ode_diffsl_problem<
     M: MatrixHost<T = f64>,
-    CG: diffsl::execution::module::CodegenModule,
+    CG: crate::CodegenModuleJit + crate::CodegenModuleCompile,
 >() -> (
     OdeSolverProblem<impl crate::OdeEquationsImplicitAdjoint<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
