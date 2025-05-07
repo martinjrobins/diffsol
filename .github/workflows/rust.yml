@@ -109,7 +109,7 @@ jobs:
         echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-cranelift" >> $GITHUB_ENV
     - name: Setup tmate session
       uses: mxschmitt/action-tmate@v3
-      if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
+      #if: ${{ github.event_name == 'workflow_dispatch' && inputs.debug_enabled }}
     - name: Run tests - default features
       if: matrix.tests == true
       run: cargo test --verbose
