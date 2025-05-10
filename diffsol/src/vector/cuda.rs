@@ -2,7 +2,7 @@ use std::ffi::c_int;
 use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Sub, SubAssign};
 
 use super::{utils::*, VectorIndex, VectorView, VectorViewMut};
-use cudarc::cublas::sys::lib as cublas;
+use cudarc::cublas::sys as cublas;
 use cudarc::cublas::CudaBlas;
 use cudarc::driver::{
     CudaFunction, CudaSlice, CudaView, CudaViewMut, DevicePtr, DevicePtrMut, LaunchConfig,
@@ -83,7 +83,7 @@ impl CudaContext {
                 let y = y as *mut f64;
                 let alpha = alpha.as_f64();
                 unsafe {
-                    cublas().cublasDaxpy_v2(*blas.handle(), n, &alpha as *const f64, x, 1, y, 1)
+                    cublas::cublasDaxpy_v2(*blas.handle(), n, &alpha as *const f64, x, 1, y, 1)
                 }
             }
         }
@@ -104,7 +104,7 @@ impl CudaContext {
                 let x = x as *const f64;
                 let mut result_f64 = 0.0;
                 let status = unsafe {
-                    cublas().cublasDnrm2_v2(*blas.handle(), n, x, 1, &mut result_f64 as *mut f64)
+                    cublas::cublasDnrm2_v2(*blas.handle(), n, x, 1, &mut result_f64 as *mut f64)
                 };
                 result = result_f64.into();
                 status
