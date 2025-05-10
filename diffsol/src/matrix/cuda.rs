@@ -1,4 +1,4 @@
-use cudarc::cublas::sys::lib as cublas;
+use cudarc::cublas::sys as cublas;
 use cudarc::{
     cublas::{sys::cublasOperation_t, CudaBlas},
     driver::{CudaSlice, CudaView, CudaViewMut, DevicePtr, DevicePtrMut, PushKernelArg},
@@ -101,7 +101,7 @@ impl CudaContext {
         match T::as_enum() {
             CudaType::F64 => {
                 unsafe {
-                    cublas().cublasDgemv_v2(
+                    cublas::cublasDgemv_v2(
                         *blas.handle(),
                         cublasOperation_t::CUBLAS_OP_N,
                         nrows as c_int,
@@ -144,7 +144,7 @@ impl CudaContext {
         match T::as_enum() {
             CudaType::F64 => {
                 unsafe {
-                    cublas().cublasDgemm_v2(
+                    cublas::cublasDgemm_v2(
                         *blas.handle(),
                         cublasOperation_t::CUBLAS_OP_N,
                         cublasOperation_t::CUBLAS_OP_N,
