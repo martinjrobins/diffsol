@@ -36,7 +36,7 @@ let problem = OdeBuilder::<M>::new()
 # }
 ```
 
-here we have added the root finding function \\(r(y, p, t) = y - 0.5\\), and also let DiffSol know that we have one root function by passing `1` as the last argument to the `root` method.
+here we have added the root finding function \\(r(y, p, t) = y - 0.5\\), and also let Diffsol know that we have one root function by passing `1` as the last argument to the `root` method.
 If we had specified more than one root function, the solver would stop when any of the root functions are zero.
 
 ## Detecting roots during the solve

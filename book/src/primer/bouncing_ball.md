@@ -47,15 +47,15 @@ When the ball hits the ground, we need to update the velocity of the ball accord
 v' = -e v
 \\]
 
-where \\(e\\) is the coefficient of restitution. However, to implement this in our ODE solver, we need to detect when the ball hits the ground. We can do this by using DiffSol's event handling feature, which allows us to specify a function that is equal to zero when the event occurs, i.e. when the ball hits the ground. This function \\(g(\mathbf{y}, t)\\) is called an event or root function, and for our bouncing ball problem, it is given by:
+where \\(e\\) is the coefficient of restitution. However, to implement this in our ODE solver, we need to detect when the ball hits the ground. We can do this by using Diffsol's event handling feature, which allows us to specify a function that is equal to zero when the event occurs, i.e. when the ball hits the ground. This function \\(g(\mathbf{y}, t)\\) is called an event or root function, and for our bouncing ball problem, it is given by:
 
 \\[
 g(\mathbf{y}, t) = x
 \\]
 
-where \\(x\\) is the position of the ball. When the ball hits the ground, the event function will be zero and DiffSol will stop the integration, and we can update the velocity of the ball accordingly.
+where \\(x\\) is the position of the ball. When the ball hits the ground, the event function will be zero and Diffsol will stop the integration, and we can update the velocity of the ball accordingly.
 
-In code, the bouncing ball problem can be solved using DiffSol as follows:
+In code, the bouncing ball problem can be solved using Diffsol as follows:
 
 ```rust
 # fn main() {

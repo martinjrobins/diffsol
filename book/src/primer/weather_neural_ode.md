@@ -8,7 +8,7 @@ $$
 
 Here, \\(y(t)\\) is the state of the system at time \\(t\\), and \\(f\\) is a neural network with parameters \\(p\\). The neural network is trained to predict the derivative of the state, and the ODE solver is used to integrate the state forward in time, and to calculate gradients of the loss function with respect to the parameters of the neural network.
 
-In this example, we will duplicate the weather prediction example from the excellent [blog post](https://sebastiancallh.github.io/post/neural-ode-weather-forecast/) by Sebastian Callh, but instead using DiffSol as the solver. We'll skip over some of the details, but you can read more details about the problem setup in the original blog post, and see the full code in the [DiffSol repository](https://github.com/martinjrobins/diffsol).
+In this example, we will duplicate the weather prediction example from the excellent [blog post](https://sebastiancallh.github.io/post/neural-ode-weather-forecast/) by Sebastian Callh, but instead using Diffsol as the solver. We'll skip over some of the details, but you can read more details about the problem setup in the original blog post, and see the full code in the [Diffsol repository](https://github.com/martinjrobins/diffsol).
 
 First we'll need a neural network model, and we'll use [Equinox](https://github.com/patrick-kidger/equinox) and [JAX](https://docs.jax.dev/en/latest/index.html) for this. We'll define a simple neural network with 3 layers like so
 
@@ -22,7 +22,7 @@ We will then create four JAX functions that will allow us to calculate:
 - the negative vector-Jacobian product of the rhs function with respect to the state \\(y\\).
 - the negative vector-Jacobian product of the rhs function with respect to the parameters \\(p\\).
 
-We will need all four of these to define the ODE problem and to solve it using DiffSol.
+We will need all four of these to define the ODE problem and to solve it using Diffsol.
 
 ```python
 {{#include ../../../examples/neural-ode-weather-prediction/src/model/model.py:57:80}}
@@ -34,7 +34,7 @@ Finally, we can export all four of these JAX functions to ONNX, which will allow
 {{#include ../../../examples/neural-ode-weather-prediction/src/model/model.py:25:33}}
 ```
 
-Within rust now, we can define a DiffSol system of equations by creating a struct `NeuralOde`. We'll use the [`ort`](https://ort.pyke.io/) crate and the ONNX Runtime to load the ONNX models that we made in Python.
+Within rust now, we can define a Diffsol system of equations by creating a struct `NeuralOde`. We'll use the [`ort`](https://ort.pyke.io/) crate and the ONNX Runtime to load the ONNX models that we made in Python.
 
 ```rust,ignore
 {{#include ../../../examples/neural-ode-weather-prediction/src/main.rs:33:85}}
@@ -68,4 +68,4 @@ To give an indication of the results, we'll plot the results after we've used th
 
 {{#include ../../../examples/neural-ode-weather-prediction/neural-ode-weather_5}}
 
-This seems to work well, and is good at matching the data points a long way into the future. This has been a whirlwind description of both Neural ODEs and this particular analysis. For a more detailed explanation, please refer to the original blog post by Sebastian Callh. We've also skipped over many more boring parts of the code, and you can see the full code for this example in the [DiffSol repository](https://github.com/martinjrobins/diffsol).
+This seems to work well, and is good at matching the data points a long way into the future. This has been a whirlwind description of both Neural ODEs and this particular analysis. For a more detailed explanation, please refer to the original blog post by Sebastian Callh. We've also skipped over many more boring parts of the code, and you can see the full code for this example in the [Diffsol repository](https://github.com/martinjrobins/diffsol).

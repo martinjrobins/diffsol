@@ -59,7 +59,7 @@ We also have initial conditions for the populations at time \\(t = 0\\). We can 
 \mathbf{y}(0) = \begin{bmatrix} 1 \\\\ 1 \end{bmatrix}
 \\]
 
-Let's solve this system of ODEs using the DiffSol crate. We will use the [DiffSL](https://martinjrobins.github.io/diffsl/) domain-specific language to specify the problem. We could have also used [Rust closures](specify/ode_equations.md), but this allows us to illustrate the modelling process with a minimum of Rust syntax.
+Let's solve this system of ODEs using the Diffsol crate. We will use the [DiffSL](https://martinjrobins.github.io/diffsl/) domain-specific language to specify the problem. We could have also used [Rust closures](specify/ode_equations.md), but this allows us to illustrate the modelling process with a minimum of Rust syntax.
 
 ```rust,ignore
 {{#include ../../../examples/population-dynamics/src/main.rs::53}}

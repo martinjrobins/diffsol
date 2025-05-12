@@ -6,11 +6,11 @@ Lets consider a simple example, the heat equation. The heat equation is a PDE th
 \frac{\partial u}{\partial t} = D \frac{\partial^2 u}{\partial x^2}
 \\]
 
-where \\(u(x, t)\\) is the temperature of the material at position \\(x\\) and time \\(t\\), and \\(D\\) is the thermal diffusivity of the material. To solve this equation, we need to discretize it in space and time. We can use a finite difference method to discretise the spatial derivative, and then solve the resulting system of ODEs using DiffSol.
+where \\(u(x, t)\\) is the temperature of the material at position \\(x\\) and time \\(t\\), and \\(D\\) is the thermal diffusivity of the material. To solve this equation, we need to discretize it in space and time. We can use a finite difference method to discretise the spatial derivative, and then solve the resulting system of ODEs using Diffsol.
 
 ## Finite difference method
 
-The finite difference method is a numerical method for discretising a spatial derivative like \\(\frac{\partial^2 u}{\partial x^2}\\). It approximates this *continuous* term by a *discrete* term, in this case the multiplication of a matrix by a vector. We can use this discretisation method to convert the heat equation into a system of ODEs suitable for DiffSol.
+The finite difference method is a numerical method for discretising a spatial derivative like \\(\frac{\partial^2 u}{\partial x^2}\\). It approximates this *continuous* term by a *discrete* term, in this case the multiplication of a matrix by a vector. We can use this discretisation method to convert the heat equation into a system of ODEs suitable for Diffsol.
 
 We will not go into the details of the finite difference method here but mearly derive a single finite difference approximation for the term \\(\frac{\partial^2 u}{\partial x^2}\\), or \\(u_{xx}\\) using more compact notation. 
 
@@ -107,9 +107,9 @@ and using our finite difference approximation and definition of the sparse matri
 \frac{du}{dt} = \frac{D}{h^2} (A u + b)
 \\]
 
-where \\(u\\) is a vector of temperatures at each point in space. This is a system of ODEs that we can solve using DiffSol.
+where \\(u\\) is a vector of temperatures at each point in space. This is a system of ODEs that we can solve using Diffsol.
 
-## DiffSol Implementation
+## Diffsol Implementation
 
 ```rust,ignore
 {{#include ../../../examples/pde-heat/src/main.rs}}

@@ -19,11 +19,11 @@ where \\(z\\) is the additional variable with a solution \\(z = y\\). When this 
 
 \\[M(t) = \begin{bmatrix} 1 & 0 \\\\ 0 & 0 \end{bmatrix}.\\]
 
-Like the Jacobian, the DiffSol builder does not require the full mass matrix, instead users can provide a function that gives a GEMV (General Matrix-Vector) product of the mass matrix with a vector.
+Like the Jacobian, the Diffsol builder does not require the full mass matrix, instead users can provide a function that gives a GEMV (General Matrix-Vector) product of the mass matrix with a vector.
 
 \\[m(\mathbf{v}, \mathbf{p}, t, \beta, \mathbf{y}) = M(p, t) \mathbf{v} + \beta \mathbf{y}. \\]
 
-Thus, to specify this problem using DiffSol, we can use the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html) struct and provide the functions:
+Thus, to specify this problem using Diffsol, we can use the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html) struct and provide the functions:
 
  \\[f(\mathbf{y}, \mathbf{p}, t) = \begin{bmatrix} r y_0 (1 - y_0/K) \\\\ y_0 - y_1 \end{bmatrix},\\]
  \\[f'(\mathbf{y}, \mathbf{p}, t, \mathbf{v}) = \begin{bmatrix} r v_0 (1 - 2 y_0/K) \\\\ v_0 - v_1 \end{bmatrix},\\]

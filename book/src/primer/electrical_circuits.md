@@ -79,7 +79,7 @@ The voltage source \\(V_s\\) acts as a forcing function for the system, and we c
 
 where \\(\omega\\) is the angular frequency of the source. Since this is a low-pass filter, we will choose a high frequency for the source, say \\(\omega = 200\\), to demonstrate the filtering effect of the circuit.
 
-We can solve this system of equations using DiffSol and plot the current and voltage across the resistor as a function of time. 
+We can solve this system of equations using Diffsol and plot the current and voltage across the resistor as a function of time. 
 
 ```rust
 # fn main() {

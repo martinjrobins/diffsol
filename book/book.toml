@@ -3,7 +3,7 @@ authors = ["martinjrobins"]
 language = "en"
 multilingual = false
 src = "src"
-title = "DiffSol"
+title = "Diffsol"
 
 [output.html]
 mathjax-support = true

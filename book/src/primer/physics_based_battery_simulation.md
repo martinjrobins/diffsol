@@ -59,7 +59,7 @@ where \\(c_e\\) is the concentration of lithium ions in the electrolyte, and \\(
 
 ## Stopping conditions
 
-We wish to terminate the simulation if the terminal voltage exceeds an upper threshold \\(V_{\text{max}}\\) or falls below a lower threshold \\(V_{\text{min}}\\). DiffSol uses a root-finding algorithm to detect when the terminal voltage crosses these thresholds, using the following stopping conditions:
+We wish to terminate the simulation if the terminal voltage exceeds an upper threshold \\(V_{\text{max}}\\) or falls below a lower threshold \\(V_{\text{min}}\\). Diffsol uses a root-finding algorithm to detect when the terminal voltage crosses these thresholds, using the following stopping conditions:
 
 \\[
 V_{\text{max}} - V = 0, \qquad
@@ -67,11 +67,11 @@ V - V_{\text{min}} = 0,
 \\]
 
 
-## Solving the Single Particle Model using DiffSol
+## Solving the Single Particle Model using Diffsol
 
 The equations above describe the Single Particle Model of a lithium-ion battery, but they are relativly complex and difficult to discretise compared with the simple heat equation PDE that we saw in the [Heat Equation](./heat_equation.md) section.
 
-Rather than derive and write down the discretised equations outselves, we will instead rely on the [PyBaMM library](https://pybamm.org/) to generate the equations for us. PyBaMM is a Python library that can generate a wide variety of physics-based battery models, using different parameterisations, physics and operating conditions. Combined with [a tool](https://github.com/martinjrobins/pybamm2diffsl) that takes a PyBaMM model and writes it out in the DiffSL language, we can generate [a DiffSL file](src/spm.ds) that can be used to solve the equations of the SPM model described above. We can then use the DiffSol crate to solve the model and calculate the terminal voltage of the battery over a range of current rates.
+Rather than derive and write down the discretised equations outselves, we will instead rely on the [PyBaMM library](https://pybamm.org/) to generate the equations for us. PyBaMM is a Python library that can generate a wide variety of physics-based battery models, using different parameterisations, physics and operating conditions. Combined with [a tool](https://github.com/martinjrobins/pybamm2diffsl) that takes a PyBaMM model and writes it out in the DiffSL language, we can generate [a DiffSL file](src/spm.ds) that can be used to solve the equations of the SPM model described above. We can then use the Diffsol crate to solve the model and calculate the terminal voltage of the battery over a range of current rates.
 
 The code below reads in the DiffSL file, compiles it, and then solves the equation for different current rates. We wish to stop the simulation when either the final time is reached, or when one of the stopping conditions is met. We will output the terminal voltage of the battery at regular intervals during the simulation, because the terminal voltage can change more rapidly than the state variables \\(c_n\\) and \\(c_p\\), particularly during the "knee" of the discharge curve.
 

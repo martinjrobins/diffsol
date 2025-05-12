@@ -4,7 +4,7 @@ Each solver implements the [`OdeSolverMethod`](https://docs.rs/diffsol/latest/di
 
 ## Solving the Problem
 
-DiffSol has a few high-level solution functions on the `OdeSolverMethod` trait that are the easiest way to solve your equations:
+Diffsol has a few high-level solution functions on the `OdeSolverMethod` trait that are the easiest way to solve your equations:
 - [`solve`](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#method.solve) - solve the problem from an initial state up to a specified time, returning the solution at all the internal timesteps used by the solver.
 - [`solve_dense`](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#method.solve_dense) - solve the problem from an initial state, returning the solution at a `Vec` of times provided by the user.
 - [`solve_dense_sensitivities`](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#method.solve_dense_sensitivities) - solve the forward sensitivity problem from an initial state, returning the solution at a `Vec` of times provided by the user.

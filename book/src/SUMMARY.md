@@ -1,5 +1,5 @@
 # Summary
-- [Modelling with DiffSol](./primer/modelling_with_diffsol.md)
+- [Modelling with Diffsol](./primer/modelling_with_diffsol.md)
   - [Explicit First Order ODEs](./primer/first_order_odes.md)
     - [Example: Population Dynamics](./primer/population_dynamics.md)
   - [Higher Order ODEs](./primer/higher_order_odes.md)
@@ -17,7 +17,7 @@
   - [Backwards Sensitivity Analysis](./primer/backwards_sensitivity_analysis.md)
     - [Example: Fitting a spring-mass model to data](./primer/spring_mass_fitting.md)
     - [Example: Weather prediction using neural ODEs](./primer/weather_neural_ode.md)
-- [DiffSol APIs for specifying problems](./specify/specifying_the_problem.md)
+- [Diffsol APIs for specifying problems](./specify/specifying_the_problem.md)
   - [ODE equations](./specify/ode_equations.md)
   - [Mass matrix](./specify/mass_matrix.md)
   - [Root finding](./specify/root_finding.md)

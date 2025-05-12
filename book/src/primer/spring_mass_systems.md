@@ -23,7 +23,7 @@ We can convert this to a system of two first order ODEs by introducing a new var
 
 where \\(v = \frac{dx}{dt}\\) is the velocity of the mass.
 
-We can solve this system of ODEs using DiffSol with the following code:
+We can solve this system of ODEs using Diffsol with the following code:
 
 ```rust
 # fn main() {

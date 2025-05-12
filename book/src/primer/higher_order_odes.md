@@ -35,4 +35,4 @@ and
 \mathbf{f}(\mathbf{y}, t) = \begin{bmatrix} v \\\\ -g \end{bmatrix}
 \\]
 
-In the next section, we'll look at another example of a higher order ODE system: the spring-mass system, and solve this using DiffSol.
+In the next section, we'll look at another example of a higher order ODE system: the spring-mass system, and solve this using Diffsol.

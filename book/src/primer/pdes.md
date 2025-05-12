@@ -1,8 +1,8 @@
 # Partial Differential Equations (PDEs)
 
-DiffSol is an ODE solver, but it can also solve PDEs. The idea is to discretize the PDE in space and time, and then solve the resulting system of ODEs. This is called the method of lines.
+Diffsol is an ODE solver, but it can also solve PDEs. The idea is to discretize the PDE in space and time, and then solve the resulting system of ODEs. This is called the method of lines.
 
-Discretizing a PDE is a large topic, and there are many ways to do it. Common methods include finite difference, finite volume, finite element, and spectral methods. Finite difference methods are the simplest to understand and implement, so some of the examples in this book will demonstrate this method to give you a flavour of how to solve PDEs with DiffSol. However, in general we recommend that you use another package to discretise your PDE, and then import the resulting ODE system into DiffSol for solving.
+Discretizing a PDE is a large topic, and there are many ways to do it. Common methods include finite difference, finite volume, finite element, and spectral methods. Finite difference methods are the simplest to understand and implement, so some of the examples in this book will demonstrate this method to give you a flavour of how to solve PDEs with Diffsol. However, in general we recommend that you use another package to discretise your PDE, and then import the resulting ODE system into Diffsol for solving.
 
 ## Some useful packages
 

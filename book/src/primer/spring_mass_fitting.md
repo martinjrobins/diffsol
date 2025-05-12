@@ -35,7 +35,7 @@ $$
 \frac{\partial \text{loss}}{\partial y_i} = 2 (y_i(p) - \hat{y}_i)
 $$
 
-We can calculate this using DiffSol's adjoint sensitivity analysis functionality. First we solve the forwards problem, generating a checkpointing struct. Using the forward solution we can then calculate \\(\frac{\partial loss}{\partial y_i}\\) for each time point, and then pass this into the adjoint backwards pass to calculate the gradient of the cost function with respect to the parameters.
+We can calculate this using Diffsol's adjoint sensitivity analysis functionality. First we solve the forwards problem, generating a checkpointing struct. Using the forward solution we can then calculate \\(\frac{\partial loss}{\partial y_i}\\) for each time point, and then pass this into the adjoint backwards pass to calculate the gradient of the cost function with respect to the parameters.
 
 ```rust,ignore
 {{#include ../../../examples/mass-spring-fitting-adjoint/src/main_llvm.rs:47:71}}
