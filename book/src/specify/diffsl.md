@@ -14,7 +14,7 @@ Just-In-Time (JIT) compiles your DiffSL code into a form that can be executed ef
 {{#include ../../../examples/intro-logistic-diffsl/src/main.rs::17}}
 ```
 
-The `CG` parameter specifies the backend that you want to use to compile the DiffSL code. The `CraneliftModule` backend is behind the `diffsl-cranelift` feature flag. If you want to use the faster LLVM backend you can use the `LlvmModule` backend, which is behind one of the `diffsl-llvm*` feature flags, depending on the version of LLVM you have installed.
+The `CG` parameter specifies the backend that you want to use to compile the DiffSL code. The `CraneliftJitModule` backend is behind the `diffsl-cranelift` feature flag. If you want to use the faster LLVM backend you can use the `LlvmModule` backend, which is behind one of the `diffsl-llvm*` feature flags, depending on the version of LLVM you have installed.
 
 Once you have created the `DiffSl` struct you can use it to create a problem using the `build_from_eqn` method on the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html) struct.
 

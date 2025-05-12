@@ -1,0 +1,10 @@
+[package]
+name = "spring-mass-system"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+diffsol = { path = "../../diffsol", features = ["diffsl-cranelift"] }
+nalgebra = { workspace = true }
+plotly = { workspace = true }

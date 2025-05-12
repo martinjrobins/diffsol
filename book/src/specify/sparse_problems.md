@@ -3,12 +3,12 @@
 Lets consider a large system of equations that have a jacobian matrix that is sparse. For simplicity we will start with the logistic equation from the ["Specifying the Problem"](./specifying_the_problem.md) section,
 but we will duplicate this equation 10 times to create a system of 10 equations. This system will have a jacobian matrix that is a diagonal matrix with 10 diagonal elements, and all other elements are zero.
 
-Since this system is sparse, we choose a sparse matrix type to represent the jacobian matrix. We will use the `diffsol::SparseColMat<T>` type, which is a thin wrapper around `faer::sparse::SparseColMat<T>`, a sparse compressed sparse column matrix type.
+Since this system is sparse, we choose a sparse matrix type to represent the jacobian matrix. We will use the `diffsol::FaerSparseMat<T>` type, which is a thin wrapper around `faer::sparse::FaerSparseMat<T>`, a sparse compressed sparse column matrix type.
 
 ```rust
 # fn main() {
 use diffsol::OdeBuilder;
-type M = diffsol::SparseColMat<f64>;
+type M = diffsol::FaerSparseMat<f64>;
 type V = faer::Col<f64>;
 
 let problem = OdeBuilder::<M>::new()
@@ -46,7 +46,7 @@ To illustrate this, we can calculate the jacobian matrix from the `rhs` function
 # use diffsol::OdeBuilder;
 use diffsol::{OdeEquations, NonLinearOp, NonLinearOpJacobian, Matrix, ConstantOp};
 
-# type M = diffsol::SparseColMat<f64>;
+# type M = diffsol::FaerSparseMat<f64>;
 # type V = faer::Col<f64>;
 #
 # fn main() {

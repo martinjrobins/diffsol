@@ -9,8 +9,8 @@ pub mod faer;
 #[cfg(feature = "suitesparse")]
 pub mod suitesparse;
 
-#[cfg(feature = "cuda")]
-pub mod cuda;
+//#[cfg(feature = "cuda")]
+//pub mod cuda;
 
 pub use faer::lu::LU as FaerLU;
 pub use nalgebra::lu::LU as NalgebraLU;

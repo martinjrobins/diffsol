@@ -1,6 +1,6 @@
 # Physics-based Battery Simulation
 
-Traditional battery models are based on equivalent circuit models, similar to the circuit modelled in section [Electrical Circuits](./electrical_circuits.md). 
+Traditional battery models are based on equivalent circuit models, similar to the circuit modelled in section [Electrical Circuits](./electrical_circuits.md).
 These models are simple and computationally efficient, but they lack the ability to capture all of the complex electrochemical processes that occur in a battery.
 Physics-based models, on the other hand, are based on the electrochemical processes that occur in the battery, and can provide a more detailed description of the battery's behaviour.
 They are parameterized by physical properties of the battery, such as the diffusion coefficients of lithium ions in the electrodes, the reaction rate constants, and the surface area of the electrodes,
@@ -63,9 +63,8 @@ We wish to terminate the simulation if the terminal voltage exceeds an upper thr
 
 \\[
 V_{\text{max}} - V = 0, \qquad
-V - V_{\text{min}} = 0, 
+V - V_{\text{min}} = 0,
 \\]
-
 
 ## Solving the Single Particle Model using Diffsol
 
@@ -77,86 +76,8 @@ The code below reads in the DiffSL file, compiles it, and then solves the equati
 
 The discretised equations result in sparse matrices, so we use the sparse matrix and linear solver modules provided by the [faer](https://github.com/sarah-quinones/faer-rs) crate to solve the equations efficiently.
 
-
-```rust
-use diffsol::{
-    DiffSl, OdeBuilder, CraneliftModule, SparseColMat, FaerSparseLU, 
-    OdeSolverMethod, OdeSolverStopReason, OdeEquations, NonLinearOp,
-};
-use plotly::{
-    Plot, Scatter, common::Mode, layout::Layout, layout::Axis
-};
-# use std::fs;
-# fn main() {
-type M = SparseColMat<f64>;
-type LS = FaerSparseLU<f64>;
-type CG = CraneliftModule;
-
-let file = std::fs::read_to_string("../src/primer/src/spm.ds").unwrap();
-
-let eqn = DiffSl::<M, CG>::compile(&file).unwrap();
-let mut problem = OdeBuilder::<M>::new()
-    .p([1.0])
-    .build_from_eqn(eqn)
-    .unwrap();
-let currents = vec![0.6, 0.8, 1.0, 1.2, 1.4];
-let final_time = 3600.0;
-let delta_t = 3.0;
-    
-let mut plot = Plot::new();
-for current in currents {
-    problem.eqn.set_params(&faer::Col::from_fn(1, |_| current));
-
-    let mut solver = problem.bdf::<LS>().unwrap();
-    let mut v = Vec::new();
-    let mut t = Vec::new();
-
-    // save the initial output
-    let mut out = problem.eqn.out().unwrap().call(solver.state().y, solver.state().t);
-    v.push(out[0]);
-    t.push(0.0);
-
-    // solve until the final time is reached
-    // or we reach the stop condition
-    solver.set_stop_time(final_time).unwrap();
-    let mut next_output_time = delta_t;
-    let mut finished = false;
-    while !finished {
-        let curr_t = match solver.step() {
-            Ok(OdeSolverStopReason::InternalTimestep) => solver.state().t,
-            Ok(OdeSolverStopReason::RootFound(t)) => {
-                finished = true;
-                t
-            },
-            Ok(OdeSolverStopReason::TstopReached) => {
-                finished = true;
-                final_time
-            },
-            Err(_) => panic!("unexpected solver error"),
-        };
-        while curr_t > next_output_time {
-            let y = solver.interpolate(next_output_time).unwrap();
-            problem.eqn.out().unwrap().call_inplace(&y, next_output_time, &mut out);
-            v.push(out[0]);
-            t.push(next_output_time);
-            next_output_time += delta_t;
-        }
-    }
-
-    let voltage = Scatter::new(t, v)
-        .mode(Mode::Lines)
-        .name(format!("current = {} A", current));
-    plot.add_trace(voltage);
-}
-
-let layout = Layout::new()
-    .x_axis(Axis::new().title("t [sec]"))
-    .y_axis(Axis::new().title("voltage [V]"));
-plot.set_layout(layout);
-let plot_html = plot.to_inline_html(Some("battery-simulation"));
-# fs::write("../src/primer/images/battery-simulation.html", plot_html).expect("Unable to write file");
-# }
+```rust,ignore
+{{#include ../../../examples/physics-based-battery-simulation/src/main.rs}}
 ```
 
 {{#include images/battery-simulation.html}}
-

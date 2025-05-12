@@ -31,11 +31,11 @@ We also use the `t0`, `rtol`, `atol`, and `p` methods to set the initial time, r
 We have also specified the matrix type `M` to be `nalgebra::DMatrix<f64>`, using a generic parameter of the `OdeBuilder` struct.
 The `nalgebra::DMatrix<f64>` type is a dense matrix type from the [nalgebra](https://nalgebra.org) crate. Other options are:
 - `faer::Mat<T>` from [faer](https://github.com/sarah-ek/faer-rs), which is a dense matrix type.
-- `diffsol::SparseColMat<T>`, which is a thin wrapper around `faer::sparse::SparseColMat<T>`, a sparse compressed sparse column matrix type.
+- `diffsol::FaerSparseMat<T>`, which is a thin wrapper around `faer::sparse::FaerSparseMat<T>`, a sparse compressed sparse column matrix type.
     
 Each of these matrix types have an associated vector type that is used to represent the vectors in the problem (i.e. the state vector \\(y\\), the parameter vector \\(p\\), and the gradient vector \\(v\\)).
 You can see in the example above that the `DVector` type is explicitly used to create the initial state vector in the third closure.
 For these matrix types the associated vector type is:
 - `nalgebra::DVector<T>` for `nalgebra::DMatrix<T>`.
 - `faer::Col<T>` for `faer::Mat<T>`.
-- `faer::Coll<T>` for `diffsol::SparseColMat<T>`.
+- `faer::Coll<T>` for `diffsol::FaerSparseMat<T>`.

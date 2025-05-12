@@ -1,6 +1,6 @@
 # Example: Weather prediction using Neural ODEs
 
-If we wish to train a neural network to predict the weather or any other time series dataset, we can use a Neural ODE. A Neural ODE replaces the rhs of an ODE with a neural network. 
+If we wish to train a neural network to predict the weather or any other time series dataset, we can use a Neural ODE. A Neural ODE replaces the rhs of an ODE with a neural network.
 
 $$
 \frac{dy}{dt} = f(y, p)
@@ -17,6 +17,7 @@ First we'll need a neural network model, and we'll use [Equinox](https://github.
 ```
 
 We will then create four JAX functions that will allow us to calculate:
+
 - the rhs function \\(f(y, p)\\) of the Neural ODE, where \\(y\\) is the state of the system and \\(p\\) are the parameters.
 - the Jacobian-vector product of the rhs function with respect to the state \\(y\\).
 - the negative vector-Jacobian product of the rhs function with respect to the state \\(y\\).
