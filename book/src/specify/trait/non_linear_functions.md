@@ -5,100 +5,33 @@ To illustrate how to implement a custom problem struct, we will take the familar
 \\[\frac{dy}{dt} = r y (1 - y/K),\\]
 
 Our goal is to implement a custom struct that can evaluate the rhs function \\(f(y, p, t)\\) and the jacobian multiplied by a vector \\(f'(y, p, t, v)\\).
-First we define an empty struct. For a more complex problem, this struct could hold data structures neccessary to compute the rhs.
 
-```rust
-# fn main() {
-type T = f64;
-type V = nalgebra::DVector<T>;
+To start with, lets define a few linear algebra types that we will use in our function. We need four types:
+- `T` is the scalar type (e.g. `f64`)
+- `V` is the vector type (e.g. `NalgebraVec<T>`)
+- `M` is the matrix type (e.g. `NalgebraMat<T>`)
+- `C` is the context type for the rest (e.g. `NalgebraContext`)
 
-struct MyProblem;
-# }
+```rust,ignore
+{{#include ../../../../examples/custom-ode-equations/src/common.rs}}
 ```
 
-Now we will implement the base `Op` trait for our struct. The `Op` trait specifies the types of the vectors and matrices that will be used, as well as the number of states and outputs in the rhs function.
+Next, we'll define a struct that we'll use to calculate our RHS equations \\(f(y, p, t)\\). We'll pretend that this struct has a reference to a parameter vector \\(p\\) that we'll use to calculate the rhs function. This makes sense since we'll have multiple functions that make up our systems of equations, and they will probably share some parameters. 
 
-```rust
-# fn main() {
-use diffsol::Op;
-
-type T = f64;
-type V = nalgebra::DVector<T>;
-type M = nalgebra::DMatrix<T>;
-
-# struct MyProblem;
-# 
-# impl MyProblem {
-#     fn new() -> Self {
-#         MyProblem {}
-#     }
-# }
-# 
-impl Op for MyProblem {
-    type T = T;
-    type V = V;
-    type M = M;
-    fn nstates(&self) -> usize {
-        1
-    }
-    fn nout(&self) -> usize {
-        1
-    }
-    fn nparams(&self) -> usize {
-        0
-    }
-}
-# }
+```rust,ignore
+{{#include ../../../../examples/custom-ode-equations/src/my_rhs.rs}}
 ```
 
+Now we will implement the base [`Op`](https://docs.rs/diffsol/latest/diffsol/op/trait.Op.html) trait for our struct. The `Op` trait specifies the types of the vectors and matrices that will be used, as well as the number of states and outputs in the rhs function.
 
-Next we implement the `NonLinearOp` and `NonLinearOpJacobian` trait for our struct. This trait specifies the functions that will be used to evaluate the rhs function and the jacobian multiplied by a vector.
+```rust,ignore
+{{#include ../../../../examples/custom-ode-equations/src/my_rhs_impl_op.rs}}
+```
 
-```rust
-# fn main() {
-use diffsol::{
-  NonLinearOp, NonLinearOpJacobian
-};
-# use diffsol::Op;
+Next we implement the [`NonLinearOp`](https://docs.rs/diffsol/latest/diffsol/op/nonlinear_op/trait.NonLinearOp.html) and [`NonLinearOpJacobian`](https://docs.rs/diffsol/latest/diffsol/op/nonlinear_op/trait.NonLinearOpJacobian.html) trait for our struct. This trait specifies the functions that will be used to evaluate the rhs function and the jacobian multiplied by a vector.
 
-# type T = f64;
-# type V = nalgebra::DVector<T>;
-# type M = nalgebra::DMatrix<T>;
-#
-# struct MyProblem;
-# 
-# impl MyProblem {
-#     fn new() -> Self {
-#         MyProblem { }
-#     }
-# }
-# 
-# impl Op for MyProblem {
-#     type T = T;
-#     type V = V;
-#     type M = M;
-#     fn nstates(&self) -> usize {
-#         1
-#     }
-#     fn nout(&self) -> usize {
-#         1
-#     }
-#     fn nparams(&self) -> usize {
-#         0
-#     }
-# }
-
-impl<'a> NonLinearOp for MyProblem {
-    fn call_inplace(&self, x: &V, _t: T, y: &mut V) {
-        y[0] = x[0] * (1.0 - x[0]);
-    }
-}
-impl<'a> NonLinearOpJacobian for MyProblem {
-    fn jac_mul_inplace(&self, x: &V, _t: T, v: &V, y: &mut V) {
-        y[0] = v[0] * (1.0 - 2.0 * x[0]);
-    }
-}
-# }
+```rust,ignore
+{{#include ../../../../examples/custom-ode-equations/src/my_rhs_impl_nonlinear.rs}}
 ```
 
 There we go, all done! This demonstrates how to implement a custom struct to specify a rhs function.

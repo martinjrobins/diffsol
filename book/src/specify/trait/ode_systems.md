@@ -17,22 +17,33 @@ Often, the structs that implement these traits will have to use data defined in 
 
 Note that these struct will need to be lightweight and should not contain a significant amount of data. The data should be stored in the struct that implements the `OdeEquations` trait. This is because these structs will be created and destroyed many times during the course of the simulation (e.g. every time the right-hand side function is called).
 
+## My custom ode equations
+
+We'll define a central struct `MyEquations` that will hold the data for the entire system of equations. In this example, `MyEquations` will own a parameter vector `p` that is used by all the equations.
+
 ```rust,ignore
-{{#include ../../../../examples/custom-ode-equations/src/main.rs:2:20}}
+{{#include ../../../../examples/custom-ode-equations/src/my_equations.rs}}
+```
+
+As with individual functions, we also need to implement the `Op` trait for this struct. 
+
+```rust,ignore
+{{#include ../../../../examples/custom-ode-equations/src/my_equations_impl_op.rs}}
 ```
 
 ## Implementing the OdeEquations traits
 
-Lets imagine we have a struct `MyProblem` that we want to use to specify the entire system of equations. We can implement the `Op`, `OdeEquations`, and `OdeEquationsRef` traits for this struct like so:
+`OdeEquations` and `OdeEquationsRef` are a pair of traits that together define the system of equations using the individual function structs that we defined earlier. The `OdeEquationsRef` trait is designed to allow individual function structs to be able to reference the data in the main `OdeEquations` struct, allowing them to share data.
+
 
 ```rust,ignore
-{{#include ../../../../examples/custom-ode-equations/src/main.rs:117:172}}
+{{#include ../../../../examples/custom-ode-equations/src/my_equations_impl_ode_equations.rs}}
 ```
 
 ## Creating the problem
 
-Now that we have our custom `OdeEquations` struct, we can use it in an `OdeBuilder` to create the problem. Hint: click the button below to see the full code, which includes the implementation of the `Op`, `NonLinearOp`, `LinearOp`, and `ConstantOp` traits for the `MyRhs`, `MyMass`, `MyInit`, `MyRoot`, and `MyOut` structs.
+Now that we have our custom `OdeEquations` struct, we can use it in an `OdeBuilder` to create the problem.
 
 ```rust,ignore
-{{#include ../../../../examples/custom-ode-equations/src/main.rs:173:}}
+{{#include ../../../../examples/custom-ode-equations/src/build.rs}}
 ```

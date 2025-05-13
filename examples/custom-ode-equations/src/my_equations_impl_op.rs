@@ -1,7 +1,7 @@
 use diffsol::{Op, Vector};
-use crate::{T, V, M, C, MyMass};
+use crate::{T, V, M, C, MyEquations};
 
-impl Op for MyMass<'_> {
+impl Op for MyEquations {
     type T = T;
     type V = V;
     type M = M;
@@ -13,7 +13,7 @@ impl Op for MyMass<'_> {
         1
     }
     fn nparams(&self) -> usize {
-        0
+        2
     }
     fn context(&self) -> &Self::C {
         self.p.context()

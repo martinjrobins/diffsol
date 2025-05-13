@@ -1,5 +1,5 @@
 use diffsol::{NalgebraMat, NalgebraVec, NalgebraContext};
-type T = f64;
-type V = NalgebraVec<T>;
-type M = NalgebraMat<T>;
-type C = NalgebraContext;
+pub type T = f64;
+pub type V = NalgebraVec<T>;
+pub type M = NalgebraMat<T>;
+pub type C = NalgebraContext;
