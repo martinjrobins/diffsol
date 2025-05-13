@@ -14,26 +14,8 @@ For this example we'll use the root finding function \\(r(y, p, t) = y - 0.5\\),
 
 This can be done using the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html) via the following code:
 
-```rust
-# fn main() {
-use diffsol::OdeBuilder;
-use nalgebra::DVector;
-type M = nalgebra::DMatrix<f64>;
-
-let problem = OdeBuilder::<M>::new()
-    .t0(0.0)
-    .rtol(1e-6)
-    .atol([1e-6])
-    .p(vec![1.0, 10.0])
-    .rhs_implicit(
-       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-    )
-    .init(|_p, _t| DVector::from_element(1, 0.1))
-    .root(|x, _p, _t, y| y[0] = x[0] - 0.5, 1)
-    .build()
-    .unwrap();
-# }
+```rust,ignore
+{{#include ../../../../examples/intro-logistic-closures/src/problem_root.rs}}
 ```
 
 here we have added the root finding function \\(r(y, p, t) = y - 0.5\\), and also let Diffsol know that we have one root function by passing `1` as the last argument to the `root` method.
@@ -45,35 +27,6 @@ To detect the root during the solve, we can use the return type on the [`step`](
 If successful the `step` method returns an [`OdeSolverStopReason`](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/enum.OdeSolverStopReason.html) enum that contains the reason the solver stopped.
 
 
-```rust
-# fn main() {
-# use diffsol::OdeBuilder;
-# use nalgebra::DVector;
-# type M = nalgebra::DMatrix<f64>;
-use diffsol::{OdeSolverMethod, OdeSolverStopReason, NalgebraLU};
-type LS = NalgebraLU<f64>;
-
-# let problem = OdeBuilder::<M>::new()
-#     .p(vec![1.0, 10.0])
-#     .rhs_implicit(
-#        |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-#        |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-#     )
-#     .init(|_p, _t| DVector::from_element(1, 0.1))
-#     .root(|x, _p, _t, y| y[0] = x[0] - 0.5, 1)
-#     .build()
-#     .unwrap();
-let mut solver = problem.bdf::<LS>().unwrap();
-let t = loop {
-    match solver.step() {
-        Ok(OdeSolverStopReason::InternalTimestep) => continue,
-        Ok(OdeSolverStopReason::TstopReached) => panic!("We didn't set a stop time"),
-        Ok(OdeSolverStopReason::RootFound(t)) => break t,
-        Err(e) => panic!("Solver failed to converge: {}", e),
-    }
-};
-println!("Root found at t = {}", t);
-let _soln = &solver.state().y;
-# }
+```rust,ignore
+{{#include ../../../../examples/intro-logistic-closures/src/solve_match_step.rs}}
 ```
-

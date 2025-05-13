@@ -1,68 +1,23 @@
-#![allow(dead_code)]
-use diffsol::{
-    ConstantOp, LinearOp, NalgebraContext, NalgebraMat, NalgebraVec, NonLinearOp, OdeEquations,
-    OdeEquationsRef, Op, Vector,
-};
-type T = f64;
-type V = NalgebraVec<f64>;
-type M = NalgebraMat<f64>;
-type C = NalgebraContext;
-struct MyRhs<'a> {
-    p: &'a V,
-} // implements NonLinearOp
-struct MyMass<'a> {
-    p: &'a V,
-} // implements LinearOp
-struct MyInit<'a> {
-    p: &'a V,
-} // implements ConstantOp
-struct MyRoot<'a> {
-    p: &'a V,
-} // implements NonLinearOp
-struct MyOut<'a> {
-    p: &'a V,
-} // implements NonLinearOp
-impl Op for MyRhs<'_> {
-    type T = T;
-    type V = V;
-    type M = M;
-    type C = C;
-    fn nstates(&self) -> usize {
-        1
-    }
-    fn nout(&self) -> usize {
-        1
-    }
-    fn nparams(&self) -> usize {
-        2
-    }
-    fn context(&self) -> &Self::C {
-        self.p.context()
-    }
-}
-impl NonLinearOp for MyRhs<'_> {
-    fn call_inplace(&self, x: &V, _t: T, y: &mut V) {
-        y[0] = x[0] * x[0];
-    }
-}
-impl Op for MyMass<'_> {
-    type T = T;
-    type V = V;
-    type M = M;
-    type C = C;
-    fn nstates(&self) -> usize {
-        1
-    }
-    fn nout(&self) -> usize {
-        1
-    }
-    fn nparams(&self) -> usize {
-        0
-    }
-    fn context(&self) -> &Self::C {
-        self.p.context()
-    }
-}
+mod common;
+use common::{T, V, M, C};
+mod my_rhs;
+use my_rhs::MyRhs;
+mod my_rhs_impl_op;
+mod my_rhs_impl_nonlinear;
+mod my_mass;
+use my_mass::MyMass;
+mod my_mass_impl_op;
+mod my_init;
+use my_init::MyInit;
+mod my_root;
+use my_root::MyRoot;
+mod my_out;
+use my_out::MyOut;
+
+
+
+
+
 impl LinearOp for MyMass<'_> {
     fn gemv_inplace(&self, x: &V, _t: T, beta: T, y: &mut V) {
         y[0] = x[0] * beta;

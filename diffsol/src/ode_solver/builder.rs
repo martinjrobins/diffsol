@@ -128,10 +128,7 @@ where
     /// # Arguments
     ///
     /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
-    pub fn rhs<F>(
-        self,
-        rhs: F,
-    ) -> OdeBuilder<M, ClosureNoJac<M, F>, Init, Mass, Root, Out>
+    pub fn rhs<F>(self, rhs: F) -> OdeBuilder<M, ClosureNoJac<M, F>, Init, Mass, Root, Out>
     where
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
     {

@@ -1,9 +1,23 @@
 use diffsol::{BdfState, OdeSolverState, RkState, Tableau};
-use diffsol::{NalgebraLU, NalgebraMat, OdeSolverMethod, OdeSolverStopReason};
+use diffsol::{NalgebraLU, NalgebraMat, OdeSolverMethod};
 mod problem_implicit;
 use problem_implicit::problem_implicit;
 mod problem_explicit;
 use problem_explicit::problem_explicit;
+mod problem_mass;
+use problem_mass::problem_mass;
+mod problem_root;
+use problem_root::problem_root;
+mod problem_fwd_sens;
+use problem_fwd_sens::problem_fwd_sens;
+mod problem_sparse;
+use problem_sparse::problem_sparse;
+mod solve_match_step;
+use solve_match_step::solve_match_step;
+mod solve_fwd_sens;
+use solve_fwd_sens::solve_fwd_sens;
+mod print_jacobian;
+use print_jacobian::print_jacobian;
 type M = NalgebraMat<f64>;
 type LS = NalgebraLU<f64>;
 
@@ -11,8 +25,17 @@ fn main() {
     //
     // SPECIFYING THE PROBLEM
     //
+    let problem = problem_fwd_sens();
+    let mut solver = problem.bdf::<LS>().unwrap();
+    solve_fwd_sens(&mut solver);
+    let _problem = problem_root();
+    let _problem = problem_mass();
     let _problem = problem_explicit();
+    let problem = problem_sparse();
+    print_jacobian(&problem);
     let problem = problem_implicit();
+    let mut solver = problem.bdf::<LS>().unwrap();
+    solve_match_step(&mut solver);
 
     //
     // CHOOSING A SOLVER
@@ -72,16 +95,4 @@ fn main() {
     }
     let _soln = solver.interpolate(t_o).unwrap();
 
-    // Manually step the solver, stop solver at specified time
-    let mut solver = problem.bdf::<LS>().unwrap();
-    solver.set_stop_time(10.0).unwrap();
-    loop {
-        match solver.step() {
-            Ok(OdeSolverStopReason::InternalTimestep) => continue,
-            Ok(OdeSolverStopReason::TstopReached) => break,
-            Ok(OdeSolverStopReason::RootFound(_)) => panic!("Root finding not used"),
-            Err(e) => panic!("Solver failed to converge: {}", e),
-        }
-    }
-    let _soln = &solver.state().y;
 }
