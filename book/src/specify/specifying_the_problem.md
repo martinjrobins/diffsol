@@ -24,7 +24,7 @@ The user can also optionally specify a root function \\(r(t, y, p)\\) that can b
 
 ## Diffsol problem APIs
 
-Specifying a problem in Diffsol is done via the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html) struct, using the `OdeBuilder::new` method to create a new builder, and then chaining methods to set the equations to be solved, initial time, initial step size, relative & absolute tolerances, and parameters, or leaving them at their default values. Then, call the `build` method to create a new problem.
+Specifying a problem in Diffsol is done via the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html) struct, using the `OdeBuilder::new` method to create a new builder, and then chaining methods to set the equations to be solved, initial time, initial step size, relative & absolute tolerances, and parameters, or leaving them at their default values. Then, call a `build` method to create a new problem.
 
 Users can specify the equations to be solved via three main APIs, ranging from the simplest to the most complex (but also the most flexible):
 

@@ -1,4 +1,4 @@
-# Custom Problem Structs
+# OdeEquations trait
 
 While the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html) struct is a convenient way to specify the problem, it may not be suitable in all cases. 
 Often users will want to provide their own structs that can hold custom data structures and methods for evaluating the right-hand side of the ODE, the jacobian, and other functions.

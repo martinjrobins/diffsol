@@ -128,6 +128,49 @@ where
     /// # Arguments
     ///
     /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
+    pub fn rhs<F>(
+        self,
+        rhs: F,
+    ) -> OdeBuilder<M, ClosureNoJac<M, F>, Init, Mass, Root, Out>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, ClosureNoJac<M, F>, Init, Mass, Root, Out> {
+            rhs: Some(ClosureNoJac::new(
+                rhs,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+        }
+    }
+
+    /// Set the right-hand side of the ODE.
+    ///
+    /// # Arguments
+    ///
+    /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
     /// - `rhs_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
     pub fn rhs_implicit<F, G>(
         self,

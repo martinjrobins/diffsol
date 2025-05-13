@@ -1,6 +1,9 @@
-use diffsol::OdeBuilder;
 use diffsol::{BdfState, OdeSolverState, RkState, Tableau};
-use diffsol::{NalgebraLU, NalgebraMat, OdeSolverMethod, OdeSolverStopReason, Vector};
+use diffsol::{NalgebraLU, NalgebraMat, OdeSolverMethod, OdeSolverStopReason};
+mod problem_implicit;
+use problem_implicit::problem_implicit;
+mod problem_explicit;
+use problem_explicit::problem_explicit;
 type M = NalgebraMat<f64>;
 type LS = NalgebraLU<f64>;
 
@@ -8,15 +11,8 @@ fn main() {
     //
     // SPECIFYING THE PROBLEM
     //
-    let problem = OdeBuilder::<M>::new()
-        .p(vec![1.0, 10.0])
-        .rhs_implicit(
-            |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-            |x, p, _t, v, y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-        )
-        .init(|_p, _t, y| y.fill(0.1), 1)
-        .build()
-        .unwrap();
+    let _problem = problem_explicit();
+    let problem = problem_implicit();
 
     //
     // CHOOSING A SOLVER

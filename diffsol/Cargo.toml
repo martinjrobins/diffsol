@@ -52,5 +52,5 @@ name = "ode_solvers"
 harness = false
 
 [package.metadata.docs.rs]
-features = ["diffsl-llvm15"]
+features = ["diffsl-llvm15", "diffsl-cranelift", "rayon"]
 
