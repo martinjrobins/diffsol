@@ -3,6 +3,7 @@ use diffsol::{
     AdjointOdeSolverMethod, OdeEquationsImplicitAdjoint, OdeSolverMethod, OdeSolverState,
 };
 
+#[allow(dead_code)]
 pub fn solve_adjoint_sens<'a, Solver, Eqn>(solver: &mut Solver)
 where
     Solver: OdeSolverMethod<'a, Eqn>,

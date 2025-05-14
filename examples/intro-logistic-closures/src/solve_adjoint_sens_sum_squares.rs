@@ -4,6 +4,7 @@ use diffsol::{
     OdeSolverMethod, OdeSolverState, Scale, VectorViewMut,
 };
 
+#[allow(dead_code)]
 pub fn solve_adjoint_sens_sum_squares<'a, Solver, Eqn>(solver: &mut Solver)
 where
     Solver: OdeSolverMethod<'a, Eqn>,
