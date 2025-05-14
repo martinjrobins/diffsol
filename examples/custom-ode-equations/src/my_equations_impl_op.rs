@@ -1,5 +1,5 @@
+use crate::{MyEquations, C, M, T, V};
 use diffsol::{Op, Vector};
-use crate::{T, V, M, C, MyEquations};
 
 impl Op for MyEquations {
     type T = T;

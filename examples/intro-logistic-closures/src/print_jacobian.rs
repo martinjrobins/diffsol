@@ -1,4 +1,4 @@
-use diffsol::{OdeEquationsImplicit, OdeSolverProblem, NonLinearOpJacobian, Matrix, ConstantOp};
+use diffsol::{ConstantOp, Matrix, NonLinearOpJacobian, OdeEquationsImplicit, OdeSolverProblem};
 
 pub fn print_jacobian(problem: &OdeSolverProblem<impl OdeEquationsImplicit>) {
     let t0 = problem.t0;

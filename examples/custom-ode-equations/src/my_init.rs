@@ -1,5 +1,5 @@
-use diffsol::{Op, Vector, ConstantOp};
-use crate::{T, V, M, C};
+use crate::{C, M, T, V};
+use diffsol::{ConstantOp, Op, Vector};
 
 pub struct MyInit<'a> {
     pub p: &'a V,

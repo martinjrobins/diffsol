@@ -1,5 +1,5 @@
+use crate::{C, V};
 use diffsol::Vector;
-use crate::{V, C};
 pub struct MyEquations {
     pub p: V,
 }

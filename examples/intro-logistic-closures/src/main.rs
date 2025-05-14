@@ -1,5 +1,5 @@
-use diffsol::{BdfState, OdeSolverState, RkState, Tableau};
-use diffsol::{NalgebraLU, NalgebraMat, OdeSolverMethod};
+use diffsol::NalgebraVec;
+use diffsol::{NalgebraLU, NalgebraMat};
 mod problem_implicit;
 use problem_implicit::problem_implicit;
 mod problem_explicit;
@@ -12,13 +12,29 @@ mod problem_fwd_sens;
 use problem_fwd_sens::problem_fwd_sens;
 mod problem_sparse;
 use problem_sparse::problem_sparse;
+mod solve;
+use solve::solve;
+mod solve_dense;
+use solve_dense::solve_dense;
+mod solve_interpolate;
+use solve_interpolate::solve_interpolate;
+mod solve_step;
+use solve_step::solve_step;
 mod solve_match_step;
 use solve_match_step::solve_match_step;
 mod solve_fwd_sens;
 use solve_fwd_sens::solve_fwd_sens;
 mod print_jacobian;
 use print_jacobian::print_jacobian;
+mod create_solvers;
+use create_solvers::create_solvers;
+mod create_solvers_uninit;
+use create_solvers_uninit::create_solvers_uninit;
+mod create_solvers_tableau;
+use create_solvers_tableau::create_solvers_tableau;
 type M = NalgebraMat<f64>;
+type V = NalgebraVec<f64>;
+type T = f64;
 type LS = NalgebraLU<f64>;
 
 fn main() {
@@ -40,59 +56,19 @@ fn main() {
     //
     // CHOOSING A SOLVER
     //
-
-    // Create a BDF solver with an initial state
-    let _solver = problem.bdf::<LS>();
-
-    // Create a non-initialised state and manually set the values before
-    // creating the solver
-    let state = BdfState::new_without_initialise(&problem).unwrap();
-    // ... set the state values manually
-    let _solver = problem.bdf_solver::<LS>(state);
-
-    // Create a SDIRK solver with a pre-defined tableau
-    let tableau = Tableau::<M>::tr_bdf2(problem.context().clone());
-    let state = problem.rk_state(&tableau).unwrap();
-    let _solver = problem.sdirk_solver::<LS, _>(state, tableau);
-
-    // Create a tr_bdf2 or esdirk34 solvers directly (both are SDIRK solvers with different tableaus)
-    let _solver = problem.tr_bdf2::<LS>();
-    let _solver = problem.esdirk34::<LS>();
-
-    // Create a non-initialised state and manually set the values before
-    // creating the solver
-    let mut state = RkState::new_without_initialise(&problem).unwrap();
-    // ... set the state values manually
-    state.as_mut().y[0] = 0.1;
-    let _solver = problem.tr_bdf2_solver::<LS>(state);
+    create_solvers();
+    create_solvers_uninit();
+    create_solvers_tableau();
 
     //
     // SOLVING THE PROBLEM
     //
-
-    // Solve the problem return solution at solver times
     let mut solver = problem.bdf::<LS>().unwrap();
-    let (_ys, _ts) = solver.solve(10.0).unwrap();
-
-    // Solve the problem return solution at specified times
+    solve(&mut solver);
     let mut solver = problem.bdf::<LS>().unwrap();
-    let times = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
-    let _soln = solver.solve_dense(&times).unwrap();
-
-    // Manually step the solver until given time
+    solve_dense(&mut solver);
     let mut solver = problem.bdf::<LS>().unwrap();
-    while solver.state().t < 10.0 {
-        if solver.step().is_err() {
-            break;
-        }
-    }
-
-    // Manually step the solver, get solution at specified time
+    solve_step(&mut solver);
     let mut solver = problem.bdf::<LS>().unwrap();
-    let t_o = 10.0;
-    while solver.state().t < t_o {
-        solver.step().unwrap();
-    }
-    let _soln = solver.interpolate(t_o).unwrap();
-
+    solve_interpolate(&mut solver);
 }

@@ -1,9 +1,9 @@
 use diffsol::{OdeEquationsImplicitSens, OdeSolverMethod};
 
-pub fn solve_fwd_sens<'a, Solver, Eqn>(solver: &mut Solver) 
+pub fn solve_fwd_sens<'a, Solver, Eqn>(solver: &mut Solver)
 where
     Solver: OdeSolverMethod<'a, Eqn>,
-    Eqn: OdeEquationsImplicitSens<T=f64> + 'a
+    Eqn: OdeEquationsImplicitSens<T = f64> + 'a,
 {
     let t_o = 5.0;
     while solver.state().t < t_o {

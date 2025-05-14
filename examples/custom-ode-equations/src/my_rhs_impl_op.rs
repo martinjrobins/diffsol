@@ -1,5 +1,5 @@
+use crate::{MyRhs, C, M, T, V};
 use diffsol::{Op, Vector};
-use crate::{T, V, M, C, MyRhs};
 
 impl Op for MyRhs<'_> {
     type T = T;

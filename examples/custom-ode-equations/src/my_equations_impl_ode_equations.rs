@@ -1,5 +1,5 @@
-use diffsol::{OdeEquationsRef, OdeEquations, Vector};
-use crate::{V, MyRhs, MyMass, MyInit, MyRoot, MyOut, MyEquations};
+use crate::{MyEquations, MyInit, MyMass, MyOut, MyRhs, MyRoot, V};
+use diffsol::{OdeEquations, OdeEquationsRef, Vector};
 
 impl<'a> OdeEquationsRef<'a> for MyEquations {
     type Rhs = MyRhs<'a>;

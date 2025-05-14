@@ -1,9 +1,9 @@
 use diffsol::{OdeEquations, OdeSolverMethod, OdeSolverStopReason};
 
-pub fn solve_match_step<'a, Solver, Eqn>(solver: &mut Solver) 
+pub fn solve_match_step<'a, Solver, Eqn>(solver: &mut Solver)
 where
     Solver: OdeSolverMethod<'a, Eqn>,
-    Eqn: OdeEquations<T=f64> + 'a
+    Eqn: OdeEquations<T = f64> + 'a,
 {
     solver.set_stop_time(10.0).unwrap();
     loop {

@@ -1,5 +1,5 @@
-use diffsol::{Op, Vector, NonLinearOp};
-use crate::{T, V, M, C};
+use crate::{C, M, T, V};
+use diffsol::{NonLinearOp, Op, Vector};
 
 pub struct MyRoot<'a> {
     pub p: &'a V,

@@ -1,5 +1,5 @@
-use diffsol::{Op, Vector, LinearOp};
-use crate::{T, V, M, C};
+use crate::{C, M, T, V};
+use diffsol::{LinearOp, Op, Vector};
 
 pub struct MyMass<'a> {
     pub p: &'a V,
