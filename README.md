@@ -7,7 +7,7 @@
 </a>
 </div>
 
-# DiffSol
+# Diffsol
 
 Diffsol is a library for solving ordinary differential equations (ODEs) or semi-explicit differential algebraic equations (DAEs) in Rust. It can solve equations in the following form:
 
@@ -17,21 +17,21 @@ M \frac{dy}{dt} = f(t, y, p)
 
 where $M$ is a (possibly singular and optional) mass matrix, $y$ is the state vector, $t$ is the time and $p$ is a vector of parameters.
 
-The equations can be given by either rust code or the [DiffSL](https://martinjrobins.github.io/diffsl/) Domain Specific Language (DSL). The DSL uses automatic differentiation using [Enzyme](https://enzyme.mit.edu/) to calculate the necessary jacobians, and JIT compilation (using either [LLVM](https://llvm.org/) or [Cranelift](https://cranelift.dev/)) to generate efficient native code at runtime. The DSL is ideal for using DiffSol from a higher-level language like Python or R while still maintaining similar performance to pure rust.
+The equations can be given by either rust code or the [DiffSL](https://martinjrobins.github.io/diffsl/) Domain Specific Language (DSL). The DSL uses automatic differentiation using [Enzyme](https://enzyme.mit.edu/) to calculate the necessary jacobians, and JIT compilation (using either [LLVM](https://llvm.org/) or [Cranelift](https://cranelift.dev/)) to generate efficient native code at runtime. The DSL is ideal for using Diffsol from a higher-level language like Python or R while still maintaining similar performance to pure rust.
 
 ## Installation and Usage
 
 See installation instructions on the [crates.io page](https://crates.io/crates/diffsol).
 
-The [DiffSol book](https://martinjrobins.github.io/diffsol/) describes how to use DiffSol using examples taken from several application areas (e.g. population dynamics, electrical circuits and pharmacological modelling), as well as more detailed information on the various APIs used to specify the ODE equations. For a more complete description of the API, please see the [docs.rs API documentation](https://docs.rs/diffsol).
+The [Diffsol book](https://martinjrobins.github.io/diffsol/) describes how to use Diffsol using examples taken from several application areas (e.g. population dynamics, electrical circuits and pharmacological modelling), as well as more detailed information on the various APIs used to specify the ODE equations. For a more complete description of the API, please see the [docs.rs API documentation](https://docs.rs/diffsol).
 
 ## Features
 
-The following solvers are available in DiffSol
+The following solvers are available in Diffsol
 
 1. A variable order Backwards Difference Formulae (BDF) solver, suitable for stiff problems and singular mass matrices. The basic algorithm is derived in [(Byrne & Hindmarsh, 1975)](#1), however this particular implementation follows that implemented in the Matlab routine ode15s [(Shampine & Reichelt, 1997)](#4) and the SciPy implementation [(Virtanen et al., 2020)](#5), which features the NDF formulas for improved stability
 2. A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver, suitable for moderately stiff problems and singular mass matrices. Two different butcher tableau are provided, TR-BDF2 [(Hosea & Shampine, 1996)](#2) and ESDIRK34 [(Jørgensen et al., 2018)](#3), or users can supply their own.
-3. A variable order Explict Runge-Kutta (ERK) solver, suitable for non-stiff problems. One butcher tableau is provided, the 4th order 5(4) pair of Tsitouras [(Tsitouras, 2011)](#5), or users can supply their own.
+3. A variable order Explict Runge-Kutta (ERK) solver, suitable for non-stiff problems. One butcher tableau is provided, the 4th order TSIT45 [(Tsitouras, 2011)](#5), or users can supply their own.
 
 All solvers feature:
 

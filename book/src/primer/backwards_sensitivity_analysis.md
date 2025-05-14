@@ -2,7 +2,7 @@
 
 Backwards sensitivity analysis, as the name suggests, starts from a given cost or loss function that you want to minimise, and derives the gradient of this function with respect to the parameters of the ODE systems using a lagrangian multiplier approach.
 
-DiffSol supports two different classes of loss functions, the first being an integral of a model output function \\(g(t, u)\\) over time,
+Diffsol supports two different classes of loss functions, the first being an integral of a model output function \\(g(t, u)\\) over time,
 
 $$
 G(p) = \int_0^{t_f} g(t, u) dt
@@ -97,4 +97,4 @@ g_p &= g_m m_p
 \end{aligned}
 $$
 
-where \\(m_u\\) and \\(m_p\\) are the partial derivatives of the model output function with respect to the state variables and parameters, respectively. Therefore, a user only has to supply \\(g_m\\) at each of the time points \\(t_i\\) and DiffSol will be able to calculate the correct gradients as part of the backwards solution of the adjoint ODE system.
+where \\(m_u\\) and \\(m_p\\) are the partial derivatives of the model output function with respect to the state variables and parameters, respectively. Therefore, a user only has to supply \\(g_m\\) at each of the time points \\(t_i\\) and Diffsol will be able to calculate the correct gradients as part of the backwards solution of the adjoint ODE system.

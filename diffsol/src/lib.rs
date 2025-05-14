@@ -1,6 +1,6 @@
-//! # DiffSol
+//! # Diffsol
 //!
-//! DiffSol is a library for solving differential equations. It provides a simple interface to solve ODEs with optional mass matrices,
+//! Diffsol is a library for solving differential equations. It provides a simple interface to solve ODEs with optional mass matrices,
 //! where the user can provide the equations either as closures or via strings in a domain-specific language.
 //!
 //! ## Solving ODEs
@@ -9,7 +9,7 @@
 //! relative tolerance ([OdeBuilder::rtol]), absolute tolerance ([OdeBuilder::atol]), parameters ([OdeBuilder::p]) and equations ([OdeBuilder::rhs_implicit], [OdeBuilder::init], [OdeBuilder::mass] etc.)
 //! or leave them at their default values. Then, call the [OdeBuilder::build] function to create a [OdeSolverProblem].
 //!
-//! You will also need to choose a matrix type to use. DiffSol can use the [nalgebra](https://nalgebra.org) `DMatrix` type, the [faer](https://github.com/sarah-ek/faer-rs) `Mat` type, or any other type that implements the
+//! You will also need to choose a matrix type to use. Diffsol can use the [nalgebra](https://nalgebra.org) `DMatrix` type, the [faer](https://github.com/sarah-ek/faer-rs) `Mat` type, or any other type that implements the
 //! [Matrix] trait.
 //!
 //! ## Initial state
@@ -22,7 +22,7 @@
 //!
 //! ## The solver
 //!
-//! To solve the problem given the initial state, you need to choose a solver. DiffSol provides the following solvers:
+//! To solve the problem given the initial state, you need to choose a solver. Diffsol provides the following solvers:
 //! - A Backwards Difference Formulae [Bdf] solver, suitable for stiff problems and singular mass matrices.
 //! - A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver [Sdirk]. You can use your own butcher tableau using [Tableau] or use one of the provided ([Tableau::tr_bdf2], [Tableau::esdirk34]).
 //!
@@ -40,7 +40,7 @@
 //! DiffSL is a domain-specific language for specifying differential equations <https://github.com/martinjrobins/diffsl>. It uses the LLVM compiler framwork
 //! to compile the equations to efficient machine code and uses the EnzymeAD library to compute the jacobian.
 //!
-//! You can use DiffSL with DiffSol using the [DiffSlContext] and [DiffSl] structs and [OdeBuilder::build_from_eqn] method. You need to enable one of the `diffsl-llvm*` features
+//! You can use DiffSL with Diffsol using the [DiffSlContext] and [DiffSl] structs and [OdeBuilder::build_from_eqn] method. You need to enable one of the `diffsl-llvm*` features
 //! corresponding to the version of LLVM you have installed. E.g. to use your LLVM 10 installation, enable the `diffsl-llvm10` feature.
 //!
 //! For more information on the DiffSL language, see the [DiffSL documentation](https://martinjrobins.github.io/diffsl/)
@@ -53,8 +53,8 @@
 //!
 //! ## Sparsity pattern for Jacobians and Mass matrices
 //!
-//! Via an implementation of [OdeEquationsImplicit], the user provides the action of the jacobian on a vector `J(x) v`. By default DiffSol uses this to generate a jacobian matrix for the ODE solver.
-//! For sparse jacobians, DiffSol will attempt to detect the sparsity pattern of the jacobian using this function and use a sparse matrix representation internally.
+//! Via an implementation of [OdeEquationsImplicit], the user provides the action of the jacobian on a vector `J(x) v`. By default Diffsol uses this to generate a jacobian matrix for the ODE solver.
+//! For sparse jacobians, Diffsol will attempt to detect the sparsity pattern of the jacobian using this function and use a sparse matrix representation internally.
 //! It attempts to determine the sparsity pattern of the jacobian (i.e. its non-zero values) by passing in `NaNs` for the input vector `x` and checking which elements
 //! of the output vector `J(x) v` are also `NaN`, using the fact that `NaN`s propagate through most operations. However, this method is not foolproof and will fail if,
 //! for example, your jacobian function uses any control flow that depends on the input vector. If this is the case, you can provide the jacobian matrix directly by
@@ -63,12 +63,12 @@
 //!
 //! ## Events / Root finding
 //!
-//! DiffSol provides a simple way to detect user-provided events during the integration of the ODEs. You can use this by providing a closure that has a zero-crossing at the event you want to detect, using the [OdeBuilder::root] method,
+//! Diffsol provides a simple way to detect user-provided events during the integration of the ODEs. You can use this by providing a closure that has a zero-crossing at the event you want to detect, using the [OdeBuilder::root] method,
 //! or by providing a [NonLinearOp] that has a zero-crossing at the event you want to detect. To use the root finding feature while integrating with the solver, you can use the return value of [OdeSolverMethod::step] to check if an event has been detected.
 //!
 //! ## Forward Sensitivity Analysis
 //!
-//! DiffSol provides a way to compute the forward sensitivity of the solution with respect to the parameters. You can provide the requires equations to the builder using [OdeBuilder::rhs_sens_implicit] and [OdeBuilder::init_sens],
+//! Diffsol provides a way to compute the forward sensitivity of the solution with respect to the parameters. You can provide the requires equations to the builder using [OdeBuilder::rhs_sens_implicit] and [OdeBuilder::init_sens],
 //! or your equations struct must implement the [OdeEquationsImplicitSens] trait,
 //! Note that by default the sensitivity equations are included in the error control for the solvers, you can change this by setting tolerances using the [OdeBuilder::sens_atol] and [OdeBuilder::sens_rtol] methods.
 //!
@@ -87,7 +87,7 @@
 //!
 //! ## Quadrature and Output functions
 //!
-//! The [OdeSolverEquations::Out] associated type can be used to define an output function. DiffSol will optionally integrate this function over the solution trajectory by
+//! The [OdeSolverEquations::Out] associated type can be used to define an output function. Diffsol will optionally integrate this function over the solution trajectory by
 //! using the [OdeBuilder::integrate_out] method. By default, the output integration is added to the error control of the solver, and the tolerances can be
 //! adjusted using the [OdeBuilder::out_atol] and [OdeBuilder::out_rtol] methods. It can be removed from the error control by setting the tolerances to `None`.
 //!
@@ -111,7 +111,7 @@
 //!
 //! ## Nonlinear and linear solvers
 //!
-//! DiffSol provides generic nonlinear and linear solvers that are used internally by the ODE solver. You can use the solvers provided by DiffSol, or implement your own following the provided traits.
+//! Diffsol provides generic nonlinear and linear solvers that are used internally by the ODE solver. You can use the solvers provided by Diffsol, or implement your own following the provided traits.
 //! The linear solver trait is [LinearSolver], and the nonlinear solver trait is [NonLinearSolver].
 //!
 //! The provided linear solvers are:
@@ -124,7 +124,7 @@
 //!
 //! ## Matrix and vector types
 //!
-//! When solving ODEs, you will need to choose a matrix and vector type to use. DiffSol uses the following types:
+//! When solving ODEs, you will need to choose a matrix and vector type to use. Diffsol uses the following types:
 //! - [NalgebraVec] and [NalgebraMat] (wrappers around [nalgebra::DMatrix] and [nalgebra::DVector] from the [nalgebra](https://nalgebra.org) library).
 //! - [FaerVec], [FaerMat] and [FaerSparseMat] (wrappers around [faer::Mat], [faer::Col] and [faer::sparse::SparseColMat] from the [faer](https://github.com/sarah-ek/faer-rs) library).
 //!

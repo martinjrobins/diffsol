@@ -1,0 +1,9 @@
+# Rust closures
+
+To create a new ode problem, use the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html) struct. You can create a builder using the `OdeBuilder::new` method, and then chain methods to set the equations to be solve, initial time, initial step size, relative & absolute tolerances, and parameters, or leave them at their default values. Then, call the `build` method to create a new problem.
+
+## Explicit vs implicit methods
+
+Diffsol contains a variety of methods for solving ODEs, including both explicit and implicit methods. An example of an explicit method is the euler method, which is a simple first-order method that uses the current state to calculate the next state. The only information needed to use this method is the right-hand side of the ODE, which is provided by the user. An example of an implicit method is the backward euler method, which uses the current state and the next state to calculate the next state, by solving an implicit non-linear equation. This method requires the user to provide the right-hand side of the ODE, as well as the jacobian of the right-hand side with respect to the state vector.
+
+Diffsol uses the Rust type system to distinguish between user-provided systems of equations that are either explicit or implicit. Any system of equations that is suitable for an explicit method implements the [`OdeEquations`](https://docs.rs/diffsol/latest/diffsol/ode_solver/equations/trait.OdeEquations.html) trait, whereas a system of equations that is suitable for an implicit method implements the [`OdeEquationsImplicit`](https://docs.rs/diffsol/latest/diffsol/ode_solver/equations/trait.OdeEquationsImplicit.html) trait. If you are using the rust closures API, this is largely hidden from you, but you still need to be aware of these traits when when specifying your own functions or structs.

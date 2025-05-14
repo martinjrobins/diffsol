@@ -5,7 +5,7 @@ In this example, we will model the population dynamics of a predator-prey system
 The rate of change of the prey population is governed by two terms: growth and predation. The growth term represents the natural increase in the prey population in the absence of predators, and is proportional to the current population of prey. The predation term represents the rate at which the predators consume the prey, and is proportional to the product of the prey and predator populations. The rate of change of the prey population can be written as:
 
 \\[
-\frac{dx}{dt} = a x - b x y 
+\frac{dx}{dt} = a x - b x y
 \\]
 
 where \\(a\\) is the growth rate of the prey population, and \\(b\\) is the predation rate.
@@ -45,11 +45,11 @@ or in the general form of a first order ODE system:
 \frac{d\mathbf{y}}{dt} = \mathbf{f}(\mathbf{y}, t)
 \\]
 
-where 
+where
 
-\\[\mathbf{y} = \begin{bmatrix} x \\\\ y \end{bmatrix} \\] 
+\\[\mathbf{y} = \begin{bmatrix} x \\\\ y \end{bmatrix} \\]
 
-and 
+and
 
 \\[\mathbf{f}(\mathbf{y}, t) = \begin{bmatrix} a x - b x y \\\\ c x y - d y \end{bmatrix}\\]
 
@@ -59,11 +59,12 @@ We also have initial conditions for the populations at time \\(t = 0\\). We can 
 \mathbf{y}(0) = \begin{bmatrix} 1 \\\\ 1 \end{bmatrix}
 \\]
 
-Let's solve this system of ODEs using the DiffSol crate. We will use the [DiffSL](https://martinjrobins.github.io/diffsl/) domain-specific language to specify the problem. We could have also used [Rust closures](specify/ode_equations.md), but this allows us to illustrate the modelling process with a minimum of Rust syntax.
+Let's solve this system of ODEs using the Diffsol crate. We will use the [DiffSL](https://martinjrobins.github.io/diffsl/) domain-specific language to specify the problem. We could have also used [Rust closures](specify/ode_equations.md), but this allows us to illustrate the modelling process with a minimum of Rust syntax.
 
 ```rust,ignore
-{{#include ../../../examples/population-dynamics/src/main.rs::53}}
+{{#include ../../../examples/population-dynamics/src/main.rs::57}}
 ```
+
 {{#include images/prey-predator.html}}
 
 A phase plane plot of the predator-prey system is a useful visualisation of the dynamics of the system. This plot shows the prey population on the x-axis and the predator population on the y-axis. Trajectories in the phase plane represent the evolution of the populations over time. Lets reframe the equations to introduce a new parameter \\(y_0\\) which is the initial predator and prey population. We can then plot the phase plane for different values of \\(y_0\\) to see how the system behaves for different initial conditions.
@@ -77,8 +78,7 @@ Our initial conditions are now:
 so we can solve this system for different values of \\(y_0\\) and plot the phase plane for each case. We will use similar code as above, but we will introduce our new parameter and loop over different values of \\(y_0\\)
 
 ```rust,ignore
-{{#include ../../../examples/population-dynamics/src/main.rs:55:98}}
+{{#include ../../../examples/population-dynamics/src/main.rs:59:}}
 ```
+
 {{#include images/prey-predator2.html}}
-
-

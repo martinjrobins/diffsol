@@ -8,7 +8,7 @@ DAEs can be written in the general implicit form:
 \mathbf{F}(\mathbf{y}, \mathbf{y}', t) = 0
 \\]
 
-where \\(\mathbf{y}\\) is the vector of state variables, \\(\mathbf{y}'\\) is the vector of derivatives of the state variables, and \\(\mathbf{F}\\) is a vector-valued function that describes the system of equations. However, for the purposes of this primer and the capabilities of DiffSol, we will focus on a specific form of DAEs called index-1 or semi-explicit DAEs, which can be written as a combination of differential and algebraic equations:
+where \\(\mathbf{y}\\) is the vector of state variables, \\(\mathbf{y}'\\) is the vector of derivatives of the state variables, and \\(\mathbf{F}\\) is a vector-valued function that describes the system of equations. However, for the purposes of this primer and the capabilities of Diffsol, we will focus on a specific form of DAEs called index-1 or semi-explicit DAEs, which can be written as a combination of differential and algebraic equations:
 
 \\[
 \begin{align*}
@@ -33,5 +33,5 @@ M \frac{d\mathbf{y}}{dt} = \mathbf{f}(\mathbf{y}, t)
 
 When \\(M\\) is the identity matrix (i.e. a matrix with ones along the diagonal), this reduces to the standard form of an explicit ODE. However, when \\(M\\) has diagonal entries that are zero, this introduces algebraic equations into the system and it reduces to the semi-explicit DAE equations show above. The matrix \\(M\\) is called the *mass matrix*. 
 
-Thus, we now have a general form of a set of differential equations, that includes both ODEs and semi-explicit DAEs. This general form is used by DiffSol to allow users to specify a wide range of problems, from simple ODEs to more complex DAEs. In the next section, we will look at a few examples of DAEs and how to solve them using DiffSol and a mass matrix.
+Thus, we now have a general form of a set of differential equations, that includes both ODEs and semi-explicit DAEs. This general form is used by Diffsol to allow users to specify a wide range of problems, from simple ODEs to more complex DAEs. In the next section, we will look at a few examples of DAEs and how to solve them using Diffsol and a mass matrix.
 
