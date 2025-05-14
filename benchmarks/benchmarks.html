@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Benchmarks - DiffSol</title>
+        <title>Benchmarks - Diffsol</title>
 
 
         <!-- Custom HTML head -->
@@ -127,7 +127,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">DiffSol</h1>
+                    <h1 class="menu-title">Diffsol</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -160,20 +160,20 @@
                 <div id="content" class="content">
                     <main>
                         <h1 id="benchmarks"><a class="header" href="#benchmarks">Benchmarks</a></h1>
-<p>The goal of this chapter is to compare the performance of the DiffSol implementation with other similar ode solver libraries.</p>
+<p>The goal of this chapter is to compare the performance of the Diffsol implementation with other similar ode solver libraries.</p>
 <p>The libraries we will compare against are:</p>
 <ul>
 <li><a href="https://computing.llnl.gov/projects/sundials">Sundials</a>: A suite of advanced numerical solvers for ODEs and DAEs, implemented in C.</li>
 <li><a href="https://docs.kidger.site/diffrax/">Diffrax</a>: A Python library for solving ODEs and SDEs implemented using JAX.</li>
 <li><a href="https://web.casadi.org/">Casadi</a>: A C++ library with Python anbd MATLAB bindings, for solving ODEs and DAEs, nonlinear optimisation and algorithmic differentiation.</li>
 </ul>
-<p>The comparison with Sundials will be done in Rust by wrapping C functions and comparing them to Rust implementations. The comparsion with the Python libraries (Diffrax and Casadi) will be done by wrapping DiffSol in Python using the PyO3 library, and comparing the performance of the wrapped functions. As well as benchmarking the DiffSol solvers, this also serves <a href="https://github.com/martinjrobins/diffsol_python_benchmark">as an example</a> of how to wrap and use DiffSol in other languages.</p>
+<p>The comparison with Sundials will be done in Rust by wrapping C functions and comparing them to Rust implementations. The comparsion with the Python libraries (Diffrax and Casadi) will be done by wrapping Diffsol in Python using the PyO3 library, and comparing the performance of the wrapped functions. As well as benchmarking the Diffsol solvers, this also serves <a href="https://github.com/martinjrobins/diffsol_python_benchmark">as an example</a> of how to wrap and use Diffsol in other languages.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../solving_the_problem.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../solve/forward_sens.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
@@ -187,7 +187,7 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../solving_the_problem.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../solve/forward_sens.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 

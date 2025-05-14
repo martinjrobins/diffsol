@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Example: Heat Equation - DiffSol</title>
+        <title>Example: Heat Equation - Diffsol</title>
 
 
         <!-- Custom HTML head -->
@@ -127,7 +127,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">DiffSol</h1>
+                    <h1 class="menu-title">Diffsol</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -164,9 +164,9 @@
 <p>\[
 \frac{\partial u}{\partial t} = D \frac{\partial^2 u}{\partial x^2}
 \]</p>
-<p>where \(u(x, t)\) is the temperature of the material at position \(x\) and time \(t\), and \(D\) is the thermal diffusivity of the material. To solve this equation, we need to discretize it in space and time. We can use a finite difference method to discretise the spatial derivative, and then solve the resulting system of ODEs using DiffSol.</p>
+<p>where \(u(x, t)\) is the temperature of the material at position \(x\) and time \(t\), and \(D\) is the thermal diffusivity of the material. To solve this equation, we need to discretize it in space and time. We can use a finite difference method to discretise the spatial derivative, and then solve the resulting system of ODEs using Diffsol.</p>
 <h2 id="finite-difference-method"><a class="header" href="#finite-difference-method">Finite difference method</a></h2>
-<p>The finite difference method is a numerical method for discretising a spatial derivative like \(\frac{\partial^2 u}{\partial x^2}\). It approximates this <em>continuous</em> term by a <em>discrete</em> term, in this case the multiplication of a matrix by a vector. We can use this discretisation method to convert the heat equation into a system of ODEs suitable for DiffSol.</p>
+<p>The finite difference method is a numerical method for discretising a spatial derivative like \(\frac{\partial^2 u}{\partial x^2}\). It approximates this <em>continuous</em> term by a <em>discrete</em> term, in this case the multiplication of a matrix by a vector. We can use this discretisation method to convert the heat equation into a system of ODEs suitable for Diffsol.</p>
 <p>We will not go into the details of the finite difference method here but mearly derive a single finite difference approximation for the term \(\frac{\partial^2 u}{\partial x^2}\), or \(u_{xx}\) using more compact notation.</p>
 <p>The central FD approximation of \(u_{xx}\) is:</p>
 <p>\[
@@ -237,8 +237,8 @@ g(1)
 <p>\[
 \frac{du}{dt} = \frac{D}{h^2} (A u + b)
 \]</p>
-<p>where \(u\) is a vector of temperatures at each point in space. This is a system of ODEs that we can solve using DiffSol.</p>
-<h2 id="diffsol-implementation"><a class="header" href="#diffsol-implementation">DiffSol Implementation</a></h2>
+<p>where \(u\) is a vector of temperatures at each point in space. This is a system of ODEs that we can solve using Diffsol.</p>
+<h2 id="diffsol-implementation"><a class="header" href="#diffsol-implementation">Diffsol Implementation</a></h2>
 <pre><code class="language-rust ignore">use diffsol::{
     CraneliftJitModule, FaerSparseLU, FaerSparseMat, MatrixCommon, OdeBuilder, OdeSolverMethod,
 };

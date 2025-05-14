@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Root finding - DiffSol</title>
+        <title>Manual time-stepping - Diffsol</title>
 
 
         <!-- Custom HTML head -->
@@ -127,7 +127,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">DiffSol</h1>
+                    <h1 class="menu-title">Diffsol</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -159,78 +159,32 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="root-finding"><a class="header" href="#root-finding">Root finding</a></h1>
-<p>Root finding is the process of finding the values of the variables that make a set of equations equal to zero. This is a common problem where you want to
-stop the solver or perform some action when a certain condition is met.</p>
-<h2 id="specifying-the-root-finding-function"><a class="header" href="#specifying-the-root-finding-function">Specifying the root finding function</a></h2>
-<p>Using the logistic example, we can add a root finding function \(r(y, p, t)\) that will stop the solver when the value of \(y\) is such that \(r(y, p, t) = 0\).
-For this example we'll use the root finding function \(r(y, p, t) = y - 0.5\), which will stop the solver when the value of \(y\) is 0.5.</p>
-<p>\[\frac{dy}{dt} = r y (1 - y/K),\]
-\[r(y, p, t) = y - 0.5,\]</p>
-<p>This can be done using the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> via the following code:</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
-</span>use diffsol::OdeBuilder;
-use nalgebra::DVector;
-type M = nalgebra::DMatrix&lt;f64&gt;;
+                        <h1 id="manual-time-stepping"><a class="header" href="#manual-time-stepping">Manual time-stepping</a></h1>
+<p>The fundamental method to step the solver through a solution is the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#tymethod.step"><code>step</code></a> method on the <code>OdeSolverMethod</code> trait, which steps the solution forward in time by a single step, with a step size chosen by the solver in order to satisfy the error tolerances in the <code>problem</code> struct. The <code>step</code> method returns a <code>Result</code> that contains the new state of the solution if the step was successful, or an error if the step failed.</p>
+<pre><code class="language-rust ignore">use diffsol::OdeSolverMethod;
 
-let problem = OdeBuilder::&lt;M&gt;::new()
-    .t0(0.0)
-    .rtol(1e-6)
-    .atol([1e-6])
-    .p(vec![1.0, 10.0])
-    .rhs_implicit(
-       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-    )
-    .init(|_p, _t| DVector::from_element(1, 0.1))
-    .root(|x, _p, _t, y| y[0] = x[0] - 0.5, 1)
-    .build()
-    .unwrap();
-<span class="boring">}</span></code></pre></pre>
-<p>here we have added the root finding function \(r(y, p, t) = y - 0.5\), and also let DiffSol know that we have one root function by passing <code>1</code> as the last argument to the <code>root</code> method.
-If we had specified more than one root function, the solver would stop when any of the root functions are zero.</p>
-<h2 id="detecting-roots-during-the-solve"><a class="header" href="#detecting-roots-during-the-solve">Detecting roots during the solve</a></h2>
-<p>To detect the root during the solve, we can use the return type on the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#tymethod.step"><code>step</code></a> method of the solver.
-If successful the <code>step</code> method returns an <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/enum.OdeSolverStopReason.html"><code>OdeSolverStopReason</code></a> enum that contains the reason the solver stopped.</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
-</span><span class="boring">use diffsol::OdeBuilder;
-</span><span class="boring">use nalgebra::DVector;
-</span><span class="boring">type M = nalgebra::DMatrix&lt;f64&gt;;
-</span>use diffsol::{OdeSolverMethod, OdeSolverStopReason, NalgebraLU};
-type LS = NalgebraLU&lt;f64&gt;;
-
-<span class="boring">let problem = OdeBuilder::&lt;M&gt;::new()
-</span><span class="boring">    .p(vec![1.0, 10.0])
-</span><span class="boring">    .rhs_implicit(
-</span><span class="boring">       |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-</span><span class="boring">       |x, p, _t, v , y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-</span><span class="boring">    )
-</span><span class="boring">    .init(|_p, _t| DVector::from_element(1, 0.1))
-</span><span class="boring">    .root(|x, _p, _t, y| y[0] = x[0] - 0.5, 1)
-</span><span class="boring">    .build()
-</span><span class="boring">    .unwrap();
-</span>let mut solver = problem.bdf::&lt;LS&gt;().unwrap();
-let t = loop {
-    match solver.step() {
-        Ok(OdeSolverStopReason::InternalTimestep) =&gt; continue,
-        Ok(OdeSolverStopReason::TstopReached) =&gt; panic!("We didn't set a stop time"),
-        Ok(OdeSolverStopReason::RootFound(t)) =&gt; break t,
-        Err(e) =&gt; panic!("Solver failed to converge: {}", e),
+pub fn solve_step&lt;'a, Solver, Eqn&gt;(solver: &amp;mut Solver)
+where
+    Solver: OdeSolverMethod&lt;'a, Eqn&gt;,
+    Eqn: diffsol::OdeEquations&lt;T = f64&gt; + 'a,
+{
+    while solver.state().t &lt; 10.0 {
+        if solver.step().is_err() {
+            break;
+        }
     }
-};
-println!("Root found at t = {}", t);
-let _soln = &amp;solver.state().y;
-<span class="boring">}</span></code></pre></pre>
+}</code></pre>
+<p>The <code>step</code> method will return an error if the solver fails to converge to the solution or if the step size becomes too small.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../specify/mass_matrix.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../solve/solving_the_problem.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../specify/forward_sensitivity.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../solve/interpolation.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -240,11 +194,11 @@ let _soln = &amp;solver.state().y;
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../specify/mass_matrix.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../solve/solving_the_problem.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../specify/forward_sensitivity.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../solve/interpolation.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

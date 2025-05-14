@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Discrete Events - Diffsol</title>
+        <title>ODE systems - Diffsol</title>
 
 
         <!-- Custom HTML head -->
@@ -14,21 +14,21 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="../favicon.svg">
-        <link rel="shortcut icon" href="../favicon.png">
-        <link rel="stylesheet" href="../css/variables.css">
-        <link rel="stylesheet" href="../css/general.css">
-        <link rel="stylesheet" href="../css/chrome.css">
-        <link rel="stylesheet" href="../css/print.css" media="print">
+        <link rel="icon" href="../../favicon.svg">
+        <link rel="shortcut icon" href="../../favicon.png">
+        <link rel="stylesheet" href="../../css/variables.css">
+        <link rel="stylesheet" href="../../css/general.css">
+        <link rel="stylesheet" href="../../css/chrome.css">
+        <link rel="stylesheet" href="../../css/print.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
-        <link rel="stylesheet" href="../fonts/fonts.css">
+        <link rel="stylesheet" href="../../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../../fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
-        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
-        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+        <link rel="stylesheet" id="highlight-css" href="../../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../../ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
 
@@ -37,12 +37,12 @@
 
         <!-- Provide site root and default themes to javascript -->
         <script>
-            const path_to_root = "../";
+            const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc.js"></script>
+        <script src="../../toc.js"></script>
     </head>
     <body>
     <div id="body-container">
@@ -95,7 +95,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
             </noscript>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -130,7 +130,7 @@
                     <h1 class="menu-title">Diffsol</h1>
 
                     <div class="right-buttons">
-                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
 
@@ -159,21 +159,111 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="discrete-events"><a class="header" href="#discrete-events">Discrete Events</a></h1>
-<p>ODEs describe the continuous evolution of a system over time, but many systems also involve discrete events that occur at specific times. For example, in a compartmental model of drug delivery, the administration of a drug is a discrete event that occurs at a specific time. In a bouncing ball model, the collision of the ball with the ground is a discrete event that changes the state of the system. It is normally difficult to model these events using ODEs alone, as they require a different approach to handle the discontinuities in the system. While we can represent discrete events mathematically using delta functions, many ODE solvers are not designed to handle discontinuities, and may produce inaccurate results or fail to converge during the integration.</p>
-<p>Diffsol provides a way to model discrete events in a system of ODEs by allowing users to manipulate the internal state of each solver during the time-stepping. Each solver has an internal state that holds information such as the current time \(t\), the current state of the system \(\mathbf{y}\), and other solver-specific information. When a discrete event occurs, the user can update the internal state of the solver to reflect the change in the system, and then continue the integration of the ODE as normal.</p>
-<p>Diffsol also provides a way to stop the integration of the ODEs, either at a specific time or when a specific condition is met. This can be useful for modelling systems with discrete events, as it allows the user to control the integration of the ODEs and to handle the events in a flexible way.</p>
-<p>The <a href="../solving_the_problem.html">Solving the Problem</a> and <a href="../specify/root_finding.html">Root Finding</a> sections provides an introduction to the API for solving ODEs and detecting events with Diffsol. In the next two sections, we will look at two examples of systems with discrete events: compartmental models of drug delivery and bouncing ball models, and solve them using Diffsol using this API.</p>
+                        <h1 id="ode-systems"><a class="header" href="#ode-systems">ODE systems</a></h1>
+<p>So far we've focused on using custom structs to specify individual equations, now we need to put these together to specify the entire system of equations.</p>
+<h2 id="implementing-the-odeequations-trait"><a class="header" href="#implementing-the-odeequations-trait">Implementing the OdeEquations trait</a></h2>
+<p>To specify the entire system of equations, you need to implement the <code>Op</code>, <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/equations/trait.OdeEquations.html"><code>OdeEquations</code></a>
+and <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/equations/trait.OdeEquationsRef.html"><code>OdeEquationsRef</code></a> traits for your struct.</p>
+<h2 id="getting-all-your-traits-in-order"><a class="header" href="#getting-all-your-traits-in-order">Getting all your traits in order</a></h2>
+<p>The <code>OdeEquations</code> trait requires methods that return objects corresponding to the right-hand side function, mass matrix, root function, initial condition, and output functions.
+Therefore, you need to already have structs that implement the <code>NonLinearOp</code>, <code>LinearOp</code>, and <code>ConstantOp</code> traits for these functions. For the purposes of this example, we will assume that
+you have already implemented these traits for your structs.</p>
+<p>Often, the structs that implement these traits will have to use data defined in the struct that implements the <code>OdeEquations</code> trait. For example, they might wish to have a reference to the same parameter vector <code>p</code>. Therefore, you will often need to define lifetimes for these structs to ensure that they can access the data they need.</p>
+<p>Note that these struct will need to be lightweight and should not contain a significant amount of data. The data should be stored in the struct that implements the <code>OdeEquations</code> trait. This is because these structs will be created and destroyed many times during the course of the simulation (e.g. every time the right-hand side function is called).</p>
+<h2 id="my-custom-ode-equations"><a class="header" href="#my-custom-ode-equations">My custom ode equations</a></h2>
+<p>We'll define a central struct <code>MyEquations</code> that will hold the data for the entire system of equations. In this example, <code>MyEquations</code> will own a parameter vector <code>p</code> that is used by all the equations.</p>
+<pre><code class="language-rust ignore">use crate::{C, V};
+use diffsol::Vector;
+pub struct MyEquations {
+    pub p: V,
+}
+
+impl MyEquations {
+    pub fn new() -&gt; Self {
+        MyEquations {
+            p: V::zeros(2, C::default()),
+        }
+    }
+}</code></pre>
+<p>As with individual functions, we also need to implement the <code>Op</code> trait for this struct.</p>
+<pre><code class="language-rust ignore">use crate::{MyEquations, C, M, T, V};
+use diffsol::{Op, Vector};
+
+impl Op for MyEquations {
+    type T = T;
+    type V = V;
+    type M = M;
+    type C = C;
+    fn nstates(&amp;self) -&gt; usize {
+        1
+    }
+    fn nout(&amp;self) -&gt; usize {
+        1
+    }
+    fn nparams(&amp;self) -&gt; usize {
+        2
+    }
+    fn context(&amp;self) -&gt; &amp;Self::C {
+        self.p.context()
+    }
+}</code></pre>
+<h2 id="implementing-the-odeequations-traits"><a class="header" href="#implementing-the-odeequations-traits">Implementing the OdeEquations traits</a></h2>
+<p><code>OdeEquations</code> and <code>OdeEquationsRef</code> are a pair of traits that together define the system of equations using the individual function structs that we defined earlier. The <code>OdeEquationsRef</code> trait is designed to allow individual function structs to be able to reference the data in the main <code>OdeEquations</code> struct, allowing them to share data.</p>
+<pre><code class="language-rust ignore">use crate::{MyEquations, MyInit, MyMass, MyOut, MyRhs, MyRoot, V};
+use diffsol::{OdeEquations, OdeEquationsRef, Vector};
+
+impl&lt;'a&gt; OdeEquationsRef&lt;'a&gt; for MyEquations {
+    type Rhs = MyRhs&lt;'a&gt;;
+    type Mass = MyMass&lt;'a&gt;;
+    type Init = MyInit&lt;'a&gt;;
+    type Root = MyRoot&lt;'a&gt;;
+    type Out = MyOut&lt;'a&gt;;
+}
+
+impl OdeEquations for MyEquations {
+    fn rhs(&amp;self) -&gt; &lt;MyEquations as OdeEquationsRef&lt;'_&gt;&gt;::Rhs {
+        MyRhs { p: &amp;self.p }
+    }
+    fn mass(&amp;self) -&gt; Option&lt;&lt;MyEquations as OdeEquationsRef&lt;'_&gt;&gt;::Mass&gt; {
+        Some(MyMass { p: &amp;self.p })
+    }
+    fn init(&amp;self) -&gt; &lt;MyEquations as OdeEquationsRef&lt;'_&gt;&gt;::Init {
+        MyInit { p: &amp;self.p }
+    }
+    fn root(&amp;self) -&gt; Option&lt;&lt;MyEquations as OdeEquationsRef&lt;'_&gt;&gt;::Root&gt; {
+        Some(MyRoot { p: &amp;self.p })
+    }
+    fn out(&amp;self) -&gt; Option&lt;&lt;MyEquations as OdeEquationsRef&lt;'_&gt;&gt;::Out&gt; {
+        Some(MyOut { p: &amp;self.p })
+    }
+    fn set_params(&amp;mut self, p: &amp;V) {
+        self.p.copy_from(p);
+    }
+    fn get_params(&amp;self, p: &amp;mut Self::V) {
+        p.copy_from(&amp;self.p);
+    }
+}</code></pre>
+<h2 id="creating-the-problem"><a class="header" href="#creating-the-problem">Creating the problem</a></h2>
+<p>Now that we have our custom <code>OdeEquations</code> struct, we can use it in an <code>OdeBuilder</code> to create the problem.</p>
+<pre><code class="language-rust ignore">use crate::{MyEquations, M};
+use diffsol::OdeBuilder;
+
+pub fn build() {
+    OdeBuilder::&lt;M&gt;::new()
+        .p(vec![1.0, 10.0])
+        .build_from_eqn(MyEquations::new())
+        .unwrap();
+}</code></pre>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../primer/spring_mass_systems.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../../specify/trait/linear_functions.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../primer/compartmental_models_of_drug_delivery.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../../solver/creating_a_solver.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -183,11 +273,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../primer/spring_mass_systems.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../../specify/trait/linear_functions.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../primer/compartmental_models_of_drug_delivery.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../../solver/creating_a_solver.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
@@ -202,13 +292,13 @@
         </script>
 
 
-        <script src="../elasticlunr.min.js"></script>
-        <script src="../mark.min.js"></script>
-        <script src="../searcher.js"></script>
+        <script src="../../elasticlunr.min.js"></script>
+        <script src="../../mark.min.js"></script>
+        <script src="../../searcher.js"></script>
 
-        <script src="../clipboard.min.js"></script>
-        <script src="../highlight.js"></script>
-        <script src="../book.js"></script>
+        <script src="../../clipboard.min.js"></script>
+        <script src="../../highlight.js"></script>
+        <script src="../../book.js"></script>
 
         <!-- Custom JS scripts -->
 

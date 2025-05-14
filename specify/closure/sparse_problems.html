@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Linear functions - DiffSol</title>
+        <title>Sparse problems - Diffsol</title>
 
 
         <!-- Custom HTML head -->
@@ -127,7 +127,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">DiffSol</h1>
+                    <h1 class="menu-title">Diffsol</h1>
 
                     <div class="right-buttons">
                         <a href="../../print.html" title="Print this book" aria-label="Print this book">
@@ -159,57 +159,81 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="linear-functions"><a class="header" href="#linear-functions">Linear functions</a></h1>
-<p>Naturally, we can also implement the <code>LinearOp</code> trait if we want to include a mass matrix in our model. A common use case for implementing this trait is to store the mass matrix in a custom struct, like so:</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
-</span>use diffsol::{Op, LinearOp};
+                        <h1 id="sparse-problems"><a class="header" href="#sparse-problems">Sparse problems</a></h1>
+<p>Lets consider a large system of equations that have a jacobian matrix that is sparse. For simplicity we will start with the logistic equation from the <a href="./specifying_the_problem.html">"Specifying the Problem"</a> section,
+but we will duplicate this equation 10 times to create a system of 10 equations. This system will have a jacobian matrix that is a diagonal matrix with 10 diagonal elements, and all other elements are zero.</p>
+<p>Since this system is sparse, we choose a sparse matrix type to represent the jacobian matrix. We will use the <code>diffsol::FaerSparseMat&lt;T&gt;</code> type, which is a thin wrapper around <code>faer::sparse::FaerSparseMat&lt;T&gt;</code>, a sparse compressed sparse column matrix type.</p>
+<pre><code class="language-rust ignore">use diffsol::{MatrixCommon, OdeBuilder};
+use diffsol::{NalgebraMat, OdeEquationsImplicit, OdeSolverProblem, Vector};
+type M = NalgebraMat&lt;f64&gt;;
+type V = &lt;M as MatrixCommon&gt;::V;
+type C = &lt;M as MatrixCommon&gt;::C;
+type T = &lt;M as MatrixCommon&gt;::T;
 
-<span class="boring">type T = f64;
-</span><span class="boring">type V = nalgebra::DVector&lt;T&gt;;
-</span><span class="boring">type M = nalgebra::DMatrix&lt;T&gt;;
-</span><span class="boring">
-</span>struct MyMass {
-  mass: M,
-}
+pub fn problem_sparse() -&gt; OdeSolverProblem&lt;impl OdeEquationsImplicit&lt;M = M, V = V, T = T, C = C&gt;&gt; {
+    OdeBuilder::&lt;M&gt;::new()
+        .t0(0.0)
+        .rtol(1e-6)
+        .atol([1e-6])
+        .p(vec![1.0, 10.0])
+        .rhs_implicit(
+            |x, p, _t, y| {
+                for i in 0..10 {
+                    y[i] = p[0] * x[i] * (1.0 - x[i] / p[1]);
+                }
+            },
+            |x, p, _t, v, y| {
+                for i in 0..10 {
+                    y[i] = p[0] * v[i] * (1.0 - 2.0 * x[i] / p[1]);
+                }
+            },
+        )
+        .init(|_p, _t, y| y.fill(0.1), 10)
+        .build()
+        .unwrap()
+}</code></pre>
+<p>Note that we have not specified the jacobian itself, but instead we have specified the jacobian multiplied by a vector function \(f'(y, p, t, v)\).
+Diffsol will use this function to generate a jacobian matrix, and since we have specified a sparse matrix type, Diffsol will attempt to
+guess the sparsity pattern of the jacobian matrix and use this to efficiently generate the jacobian matrix.</p>
+<p>To illustrate this, we can calculate the jacobian matrix from the <code>rhs</code> function contained in the <code>problem</code> object:</p>
+<pre><code class="language-rust ignore">use diffsol::{ConstantOp, Matrix, NonLinearOpJacobian, OdeEquationsImplicit, OdeSolverProblem};
 
-impl MyMass {
-  fn new() -&gt; Self {
-      let mass = M::from_element(1, 1, 1.0);
-      Self { mass }
-  }
-}
-
-impl Op for MyMass {
-  type T = T;
-  type V = V;
-  type M = M;
-  fn nstates(&amp;self) -&gt; usize {
-      1
-  }
-  fn nout(&amp;self) -&gt; usize {
-      1
-  }
-  fn nparams(&amp;self) -&gt; usize {
-      0
-  }
-}
-
-impl LinearOp for MyMass {
-  fn gemv_inplace(&amp;self, x: &amp;V, _t: T, beta: T, y: &amp;mut V) {
-      y.gemv(1.0, &amp;self.mass, x, beta)
-  }
-}
-<span class="boring">}</span></code></pre></pre>
+pub fn print_jacobian(problem: &amp;OdeSolverProblem&lt;impl OdeEquationsImplicit&gt;) {
+    let t0 = problem.t0;
+    let y0 = problem.eqn.init().call(t0);
+    let jacobian = problem.eqn.rhs().jacobian(&amp;y0, t0);
+    for (i, j, v) in jacobian.triplet_iter() {
+        println!("({}, {}) = {}", i, j, v);
+    }
+}</code></pre>
+<p>which will print the jacobian matrix in triplet format:</p>
+<pre><code>(0, 0) = 0.98
+(1, 1) = 0.98
+(2, 2) = 0.98
+(3, 3) = 0.98
+(4, 4) = 0.98
+(5, 5) = 0.98
+(6, 6) = 0.98
+(7, 7) = 0.98
+(8, 8) = 0.98
+(9, 9) = 0.98
+</code></pre>
+<p>Diffsol attempts to guess the sparsity pattern of your jacobian matrix by calling the \(f'(y, p, t, v)\) function repeatedly with different one-hot vectors \(v\)
+with a <code>NaN</code> value at each hot index. The output of this function (i.e. which elements are <code>0</code> and which are <code>NaN</code>) is then used to determine the sparsity pattern of the jacobian matrix.
+Due to the fact that for IEEE 754 floating point numbers, <code>NaN</code> is propagated through most operations, this method is able to detect which output elements are dependent on which input elements.</p>
+<p>However, this method is not foolproof, and it may fail to detect the correct sparsity pattern in some cases, particularly if values of <code>v</code> are used in control-flow statements.
+If Diffsol does not detect the correct sparsity pattern, you can manually specify the jacobian. To do this, you need to use a custom struct that implements the <code>OdeEquations</code> trait,
+This is described in more detail in the <a href="../trait/ode_equations_trait.html">"OdeEquations trait"</a> section.</p>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../../specify/custom/constant_functions.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../../specify/closure/forward_sensitivity.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../../specify/custom/ode_systems.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../../specify/trait/ode_equations_trait.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -219,11 +243,11 @@ impl LinearOp for MyMass {
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../../specify/custom/constant_functions.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../../specify/closure/forward_sensitivity.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../../specify/custom/ode_systems.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../../specify/trait/ode_equations_trait.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

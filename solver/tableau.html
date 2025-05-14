@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Discrete Events - Diffsol</title>
+        <title>Tableau - Diffsol</title>
 
 
         <!-- Custom HTML head -->
@@ -159,21 +159,35 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="discrete-events"><a class="header" href="#discrete-events">Discrete Events</a></h1>
-<p>ODEs describe the continuous evolution of a system over time, but many systems also involve discrete events that occur at specific times. For example, in a compartmental model of drug delivery, the administration of a drug is a discrete event that occurs at a specific time. In a bouncing ball model, the collision of the ball with the ground is a discrete event that changes the state of the system. It is normally difficult to model these events using ODEs alone, as they require a different approach to handle the discontinuities in the system. While we can represent discrete events mathematically using delta functions, many ODE solvers are not designed to handle discontinuities, and may produce inaccurate results or fail to converge during the integration.</p>
-<p>Diffsol provides a way to model discrete events in a system of ODEs by allowing users to manipulate the internal state of each solver during the time-stepping. Each solver has an internal state that holds information such as the current time \(t\), the current state of the system \(\mathbf{y}\), and other solver-specific information. When a discrete event occurs, the user can update the internal state of the solver to reflect the change in the system, and then continue the integration of the ODE as normal.</p>
-<p>Diffsol also provides a way to stop the integration of the ODEs, either at a specific time or when a specific condition is met. This can be useful for modelling systems with discrete events, as it allows the user to control the integration of the ODEs and to handle the events in a flexible way.</p>
-<p>The <a href="../solving_the_problem.html">Solving the Problem</a> and <a href="../specify/root_finding.html">Root Finding</a> sections provides an introduction to the API for solving ODEs and detecting events with Diffsol. In the next two sections, we will look at two examples of systems with discrete events: compartmental models of drug delivery and bouncing ball models, and solve them using Diffsol using this API.</p>
+                        <h1 id="butchers-tableau"><a class="header" href="#butchers-tableau">Butchers Tableau</a></h1>
+<p>The Butcher tableau is a way of representing the coefficients of a Runge-Kutta method (see the <a href="https://en.wikipedia.org/wiki/Butcher_tableau">wikipedia page</a>). Diffsol uses the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/tableau/struct.Tableau.html"><code>Tableau</code></a> struct to represent the tableau, and this is used to create any of the SDIRK or ERK solvers. Diffsol has a few inbuilt tableaus that you can use, otherwise you can create your own by constructing an instance of <code>Tableau</code></p>
+<p>To create an SDIRK or ERK solver using a pre-defined tableau, you can use methods on the <code>OdeSolverProblem</code> struct like so:</p>
+<pre><code class="language-rust ignore">use crate::{problem_implicit, LS, M};
+use diffsol::Tableau;
+
+pub fn create_solvers_tableau() {
+    let problem = problem_implicit();
+
+    // Create a SDIRK solver with a pre-defined tableau
+    let tableau = Tableau::&lt;M&gt;::tr_bdf2(problem.context().clone());
+    let state = problem.rk_state(&amp;tableau).unwrap();
+    let _solver = problem.sdirk_solver::&lt;LS, _&gt;(state, tableau);
+
+    // Create an ERK solver with a pre-defined tableau
+    let tableau = Tableau::&lt;M&gt;::tsit45(problem.context().clone());
+    let state = problem.rk_state(&amp;tableau).unwrap();
+    let _solver = problem.explicit_rk_solver(state, tableau);
+}</code></pre>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../primer/spring_mass_systems.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../solver/initialisation.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../primer/compartmental_models_of_drug_delivery.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../solve/solving_the_problem.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -183,11 +197,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../primer/spring_mass_systems.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../solver/initialisation.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../primer/compartmental_models_of_drug_delivery.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../solve/solving_the_problem.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

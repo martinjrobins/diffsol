@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>DiffSol APIs for specifying problems - DiffSol</title>
+        <title>Diffsol APIs for specifying problems - Diffsol</title>
 
 
         <!-- Custom HTML head -->
@@ -127,7 +127,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">DiffSol</h1>
+                    <h1 class="menu-title">Diffsol</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -159,10 +159,10 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="diffsol-apis-for-specifying-problems"><a class="header" href="#diffsol-apis-for-specifying-problems">DiffSol APIs for specifying problems</a></h1>
-<p>Most of the DiffSol user-facing API revolves around specifying the problem you want to solve, thus a large part of this book will be dedicated to explaining how to specify a problem. All the examples presented in <a href="../primer/modelling_with_odes.html">the primer</a> used the DiffSL DSL to specify the problem, but DiffSol also provides a pure Rust API for specifying problems. This API is sometimes more verbose than the DSL, but is more flexible, more performant, and easier to use if you have a model already written in Rust or another language that you can easily port or call from Rust.</p>
+                        <h1 id="diffsol-apis-for-specifying-problems"><a class="header" href="#diffsol-apis-for-specifying-problems">Diffsol APIs for specifying problems</a></h1>
+<p>Most of the Diffsol user-facing API revolves around specifying the problem you want to solve, thus a large part of this book will be dedicated to explaining how to specify a problem. All the examples presented in <a href="../primer/modelling_with_odes.html">the primer</a> used the DiffSL DSL to specify the problem, but Diffsol also provides a pure Rust API for specifying problems. This API is sometimes more verbose than the DSL, but is more flexible, more performant, and easier to use if you have a model already written in Rust or another language that you can easily port or call from Rust.</p>
 <h2 id="ode-equations"><a class="header" href="#ode-equations">ODE equations</a></h2>
-<p>The class of ODE equations that DiffSol can solve are of the form</p>
+<p>The class of ODE equations that Diffsol can solve are of the form</p>
 <p>\[M(t) \frac{dy}{dt} = f(t, y, p),\]
 \[y(t_0) = y_0(t_0, p),\]
 \[z(t) = g(t, y, p),\]</p>
@@ -177,14 +177,14 @@
 <li>\(g(t, y, p)\) is an output function that can be used to calculate additional outputs from the state vector (this is optional, and is implicitly \(g(t, y, p) = y\) if not specified).</li>
 </ul>
 <p>The user can also optionally specify a root function \(r(t, y, p)\) that can be used to find the time at which a root occurs.</p>
-<h2 id="diffsol-problem-apis"><a class="header" href="#diffsol-problem-apis">DiffSol problem APIs</a></h2>
-<p>Specifying a problem in DiffSol is done via the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct, using the <code>OdeBuilder::new</code> method to create a new builder, and then chaining methods to set the equations to be solved, initial time, initial step size, relative &amp; absolute tolerances, and parameters, or leaving them at their default values. Then, call the <code>build</code> method to create a new problem.</p>
+<h2 id="diffsol-problem-apis"><a class="header" href="#diffsol-problem-apis">Diffsol problem APIs</a></h2>
+<p>Specifying a problem in Diffsol is done via the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct, using the <code>OdeBuilder::new</code> method to create a new builder, and then chaining methods to set the equations to be solved, initial time, initial step size, relative &amp; absolute tolerances, and parameters, or leaving them at their default values. Then, call a <code>build</code> method to create a new problem.</p>
 <p>Users can specify the equations to be solved via three main APIs, ranging from the simplest to the most complex (but also the most flexible):</p>
 <ul>
 <li>The <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/diffsl/struct.DiffSl.html"><code>DiffSl</code></a> struct allows users to specify the equations above using the <a href="https://martinjrobins.github.io/diffsl/">DiffSL</a>
 Domain Specific Language (DSL). This API is behind a feature flag (<code>diffsl-cranelift</code> if you want to use the slower cranelift backend, <code>diffsl-llvm*</code> if you want to use the faster LLVM backend). This is the easiest API to use as it can use automatic differentiation to calculate the neccessary gradients, and is the best API if you want to use DiffSL from a higher-level language like Python or R while still having similar performance to Rust.</li>
 <li>The <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct also has methods to set the equations using rust closures (see e.g. <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html#method.rhs_implicit">OdeBuilder::rhs_implicit</a>). This API is convenient if you want to stick to pure rust code without using DiffSL and the JIT compiler, but requires you to calculate the gradients of the equations yourself.</li>
-<li>Implementing the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/equations/trait.OdeEquations.html"><code>OdeEquations</code></a> trait allows users to implement the equations on their own structs. This API is the most flexible as it allows users to use custom data structures and code that might not fit within the <code>OdeBuilder</code> API. However, it is the most verbose API and requires users to be more familiar with the various DiffSol traits.</li>
+<li>Implementing the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/equations/trait.OdeEquations.html"><code>OdeEquations</code></a> trait allows users to implement the equations on their own structs. This API is the most flexible as it allows users to use custom data structures and code that might not fit within the <code>OdeBuilder</code> API. However, it is the most verbose API and requires users to be more familiar with the various Diffsol traits.</li>
 </ul>
 
                     </main>
@@ -195,7 +195,7 @@ Domain Specific Language (DSL). This API is behind a feature flag (<code>diffsl-
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../specify/ode_equations.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../specify/diffsl/diffsl.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -209,7 +209,7 @@ Domain Specific Language (DSL). This API is behind a feature flag (<code>diffsl-
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../specify/ode_equations.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../specify/diffsl/diffsl.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>

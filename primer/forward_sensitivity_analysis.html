@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Forward Sensitivity Analysis - DiffSol</title>
+        <title>Forward Sensitivity Analysis - Diffsol</title>
 
 
         <!-- Custom HTML head -->
@@ -127,7 +127,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">DiffSol</h1>
+                    <h1 class="menu-title">Diffsol</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -175,7 +175,7 @@ y(t_0) &amp;= y_0
 \end{align*}
 \]</p>
 <p>Here, \(\frac{dy}{dp}\) is the sensitivity of the solution with respect to the parameters. The sensitivity equations are solved alongside the ODE system to give us the solution and the sensitivity of the solution with respect to the parameters. Note that this is a similar concept to forward-mode automatic differentiation, but whereas automatic differentiation calculates the derivative of the code itself (e.g. the "discretised" ODE system), forward sensitivity analysis calculates the derivative of the continuous equations before they are discretised. This means that the error control for forward sensitivity analysis is decoupled from the forward solve, and the tolerances for both can be set independently. However, both methods have the same scaling properties as the number of parameters increases, each additional parameter requires one additional solve, so the method is not efficient for large numbers of parameters (&gt;100). In this case, adjoint sensitivity analysis is often preferred.</p>
-<p>To use forward sensitvity analysis in DiffSol, more equations need to be specified that calculate the gradients with respect to the parameters. If you are using the <code>OdeBuilder</code> struct and rust closures, you need to supply additional closures that calculate the gradient of the right-hand side, and the gradient of the initial state vector with respect to the parameters. You can see an example of this in the <a href="../specify/forward_sensitivity.html">Forward Sensitivity API</a> section. If you are using the DiffSL language, these gradients are calculated automatically and you don't need to worry about them. An example of using forward sensitivity analysis in DiffSL is given in the <a href="./population_dynamics_fitting.html">Fitting a Preditor-Prey Model to Data</a> section next.</p>
+<p>To use forward sensitvity analysis in Diffsol, more equations need to be specified that calculate the gradients with respect to the parameters. If you are using the <code>OdeBuilder</code> struct and rust closures, you need to supply additional closures that calculate the gradient of the right-hand side, and the gradient of the initial state vector with respect to the parameters. You can see an example of this in the <a href="../specify/forward_sensitivity.html">Forward Sensitivity API</a> section. If you are using the DiffSL language, these gradients are calculated automatically and you don't need to worry about them. An example of using forward sensitivity analysis in DiffSL is given in the <a href="./population_dynamics_fitting.html">Fitting a Preditor-Prey Model to Data</a> section next.</p>
 
                     </main>
 

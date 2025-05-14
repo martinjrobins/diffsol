@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Constant functions - DiffSol</title>
+        <title>Forward Sensitivities - Diffsol</title>
 
 
         <!-- Custom HTML head -->
@@ -14,21 +14,21 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="../../favicon.svg">
-        <link rel="shortcut icon" href="../../favicon.png">
-        <link rel="stylesheet" href="../../css/variables.css">
-        <link rel="stylesheet" href="../../css/general.css">
-        <link rel="stylesheet" href="../../css/chrome.css">
-        <link rel="stylesheet" href="../../css/print.css" media="print">
+        <link rel="icon" href="../favicon.svg">
+        <link rel="shortcut icon" href="../favicon.png">
+        <link rel="stylesheet" href="../css/variables.css">
+        <link rel="stylesheet" href="../css/general.css">
+        <link rel="stylesheet" href="../css/chrome.css">
+        <link rel="stylesheet" href="../css/print.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="../../FontAwesome/css/font-awesome.css">
-        <link rel="stylesheet" href="../../fonts/fonts.css">
+        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" id="highlight-css" href="../../highlight.css">
-        <link rel="stylesheet" id="tomorrow-night-css" href="../../tomorrow-night.css">
-        <link rel="stylesheet" id="ayu-highlight-css" href="../../ayu-highlight.css">
+        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
 
@@ -37,12 +37,12 @@
 
         <!-- Provide site root and default themes to javascript -->
         <script>
-            const path_to_root = "../../";
+            const path_to_root = "../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../../toc.js"></script>
+        <script src="../toc.js"></script>
     </head>
     <body>
     <div id="body-container">
@@ -95,7 +95,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
             </noscript>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -127,10 +127,10 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">DiffSol</h1>
+                    <h1 class="menu-title">Diffsol</h1>
 
                     <div class="right-buttons">
-                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
 
@@ -159,48 +159,40 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="constant-functions"><a class="header" href="#constant-functions">Constant functions</a></h1>
-<p>Now we've implemented the rhs function, but how about the initial condition? We can implement the <code>ConstantOp</code> trait to specify the initial condition. Since this is quite similar to the <code>NonLinearOp</code> trait, we will do it all in one go.</p>
-<pre><pre class="playground"><code class="language-rust"><span class="boring">fn main() {
-</span>use diffsol::{Op, ConstantOp};
+                        <h1 id="forward-sensitivities"><a class="header" href="#forward-sensitivities">Forward Sensitivities</a></h1>
+<p>The <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/sensitivities/trait.SensitivitiesOdeSolverMethod.html"><code>SensitivitiesOdeSolverMethod</code></a> trait provides a way to compute the forward sensitivities of the solution of an ODE problem, using its <code>solve_dense_sensitivities</code> method.</p>
+<p>This method computes both the solution and the sensitivities at the same time, at the time-points provided by the user. These are returned as a tuple containing:</p>
+<ul>
+<li>A matrix of the solution at each time-point, where each column corresponds to a time-point and each row corresponds to a state variable.</li>
+<li>a <code>Vec</code> of matrices containing the sensitivities at each time-point. Each element of the outer vector corresponds to the sensitivities for each parameter, and each column of the inner matrix corresponds to a time-point.</li>
+</ul>
+<pre><code class="language-rust ignore">use crate::{M, T, V};
+use diffsol::{OdeEquationsImplicitSens, SensitivitiesOdeSolverMethod};
 
-<span class="boring">type T = f64;
-</span><span class="boring">type V = nalgebra::DVector&lt;T&gt;;
-</span><span class="boring">type M = nalgebra::DMatrix&lt;T&gt;;
-</span><span class="boring">
-</span>struct MyInit {}
-
-impl Op for MyInit {
-    type T = T;
-    type V = V;
-    type M = M;
-    fn nstates(&amp;self) -&gt; usize {
-        1
+pub fn solve_fwd_sens&lt;'a, Solver, Eqn&gt;(solver: &amp;mut Solver)
+where
+    Solver: SensitivitiesOdeSolverMethod&lt;'a, Eqn&gt;,
+    Eqn: OdeEquationsImplicitSens&lt;T = T, V = V, M = M&gt; + 'a,
+{
+    let t_evals = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
+    let (y, sens) = solver
+        .solve_dense_sensitivities(t_evals.as_slice())
+        .unwrap();
+    println!("solution: {:?}", y);
+    for (i, dydp_i) in sens.iter().enumerate() {
+        println!("sens wrt parameter {}: {:?}", i, dydp_i);
     }
-    fn nout(&amp;self) -&gt; usize {
-        1
-    }
-    fn nparams(&amp;self) -&gt; usize {
-        0
-    }
-}
-
-impl ConstantOp for MyInit {
-    fn call_inplace(&amp;self, _t: T, y: &amp;mut V) {
-        y[0] = 0.1;
-    }
-}
-<span class="boring">}</span></code></pre></pre>
+}</code></pre>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../../specify/custom/non_linear_functions.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../solve/stopping.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../../specify/custom/linear_functions.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../benchmarks/benchmarks.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -210,11 +202,11 @@ impl ConstantOp for MyInit {
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../../specify/custom/non_linear_functions.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../solve/stopping.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../../specify/custom/linear_functions.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../benchmarks/benchmarks.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
@@ -229,13 +221,13 @@ impl ConstantOp for MyInit {
         </script>
 
 
-        <script src="../../elasticlunr.min.js"></script>
-        <script src="../../mark.min.js"></script>
-        <script src="../../searcher.js"></script>
+        <script src="../elasticlunr.min.js"></script>
+        <script src="../mark.min.js"></script>
+        <script src="../searcher.js"></script>
 
-        <script src="../../clipboard.min.js"></script>
-        <script src="../../highlight.js"></script>
-        <script src="../../book.js"></script>
+        <script src="../clipboard.min.js"></script>
+        <script src="../highlight.js"></script>
+        <script src="../book.js"></script>
 
         <!-- Custom JS scripts -->
 

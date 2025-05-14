@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Choosing a solver - DiffSol</title>
+        <title>Root finding - Diffsol</title>
 
 
         <!-- Custom HTML head -->
@@ -14,21 +14,21 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="favicon.svg">
-        <link rel="shortcut icon" href="favicon.png">
-        <link rel="stylesheet" href="css/variables.css">
-        <link rel="stylesheet" href="css/general.css">
-        <link rel="stylesheet" href="css/chrome.css">
-        <link rel="stylesheet" href="css/print.css" media="print">
+        <link rel="icon" href="../../favicon.svg">
+        <link rel="shortcut icon" href="../../favicon.png">
+        <link rel="stylesheet" href="../../css/variables.css">
+        <link rel="stylesheet" href="../../css/general.css">
+        <link rel="stylesheet" href="../../css/chrome.css">
+        <link rel="stylesheet" href="../../css/print.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
-        <link rel="stylesheet" href="fonts/fonts.css">
+        <link rel="stylesheet" href="../../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../../fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" id="highlight-css" href="highlight.css">
-        <link rel="stylesheet" id="tomorrow-night-css" href="tomorrow-night.css">
-        <link rel="stylesheet" id="ayu-highlight-css" href="ayu-highlight.css">
+        <link rel="stylesheet" id="highlight-css" href="../../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../../ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
 
@@ -37,12 +37,12 @@
 
         <!-- Provide site root and default themes to javascript -->
         <script>
-            const path_to_root = "";
+            const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="toc.js"></script>
+        <script src="../../toc.js"></script>
     </head>
     <body>
     <div id="body-container">
@@ -95,7 +95,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
             </noscript>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -127,10 +127,10 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">DiffSol</h1>
+                    <h1 class="menu-title">Diffsol</h1>
 
                     <div class="right-buttons">
-                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
 
@@ -159,83 +159,70 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="choosing-a-solver"><a class="header" href="#choosing-a-solver">Choosing a solver</a></h1>
-<p>Once you have defined the problem, you need to create a solver to solve the problem. The available solvers are:</p>
-<ul>
-<li><a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/bdf/struct.Bdf.html"><code>diffsol::Bdf</code></a>: A Backwards Difference Formulae solver, suitable for stiff problems and singular mass matrices.</li>
-<li><a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/sdirk/struct.Sdirk.html"><code>diffsol::Sdirk</code></a> A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver. You can define your own butcher tableau using <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/tableau/struct.Tableau.html"><code>Tableau</code></a> or use one of the pre-defined tableaues.</li>
-</ul>
-<p>For each solver, you will need to specify the linear solver type to use. The available linear solvers are:</p>
-<ul>
-<li><a href="https://docs.rs/diffsol/latest/diffsol/linear_solver/nalgebra_lu/struct.NalgebraLU.html"><code>diffsol::NalgebraLU</code></a>: A LU decomposition solver using the <a href="https://nalgebra.org">nalgebra</a> crate.</li>
-<li><a href="https://docs.rs/diffsol/latest/diffsol/linear_solver/faer_lu/struct.FaerLU.html"><code>diffsol::FaerLU</code></a>: A LU decomposition solver using the <a href="https://github.com/sarah-ek/faer-rs">faer</a> crate.</li>
-<li><a href="https://docs.rs/diffsol/latest/diffsol/linear_solver/faer_sparse_lu/struct.FaerSparseLU.html"><code>diffsol::FaerSparseLU</code></a>: A sparse LU decomposition solver using the <code>faer</code> crate.</li>
-</ul>
-<p>Each solver can be created directly, but it generally easier to use the methods on the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/problem/struct.OdeSolverProblem.html"><code>OdeSolverProblem</code></a> struct to create the solver.
-For example:</p>
-<pre><code class="language-rust ignore">use diffsol::OdeBuilder;
-use diffsol::{BdfState, OdeSolverState, RkState, Tableau};
-use diffsol::{NalgebraLU, NalgebraMat, OdeSolverMethod, OdeSolverStopReason, Vector};
+                        <h1 id="root-finding"><a class="header" href="#root-finding">Root finding</a></h1>
+<p>Root finding is the process of finding the values of the variables that make a set of equations equal to zero. This is a common problem where you want to
+stop the solver or perform some action when a certain condition is met.</p>
+<h2 id="specifying-the-root-finding-function"><a class="header" href="#specifying-the-root-finding-function">Specifying the root finding function</a></h2>
+<p>Using the logistic example, we can add a root finding function \(r(y, p, t)\) that will stop the solver when the value of \(y\) is such that \(r(y, p, t) = 0\).
+For this example we'll use the root finding function \(r(y, p, t) = y - 0.5\), which will stop the solver when the value of \(y\) is 0.5.</p>
+<p>\[\frac{dy}{dt} = r y (1 - y/K),\]
+\[r(y, p, t) = y - 0.5,\]</p>
+<p>This can be done using the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> via the following code:</p>
+<pre><code class="language-rust ignore">use diffsol::{MatrixCommon, OdeBuilder};
+use diffsol::{NalgebraMat, OdeEquationsImplicit, OdeSolverProblem};
 type M = NalgebraMat&lt;f64&gt;;
-type LS = NalgebraLU&lt;f64&gt;;
+type V = &lt;M as MatrixCommon&gt;::V;
+type C = &lt;M as MatrixCommon&gt;::C;
+type T = &lt;M as MatrixCommon&gt;::T;
 
-fn main() {
-    //
-    // SPECIFYING THE PROBLEM
-    //
-    let problem = OdeBuilder::&lt;M&gt;::new()
+pub fn problem_root() -&gt; OdeSolverProblem&lt;impl OdeEquationsImplicit&lt;M = M, V = V, T = T, C = C&gt;&gt; {
+    OdeBuilder::&lt;M&gt;::new()
+        .t0(0.0)
+        .rtol(1e-6)
+        .atol([1e-6])
         .p(vec![1.0, 10.0])
         .rhs_implicit(
             |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
             |x, p, _t, v, y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
         )
-        .init(|_p, _t, y| y.fill(0.1), 1)
+        .init(|_p, _t, y| y[0] = 0.1, 1)
+        .root(|x, _p, _t, y| y[0] = x[0] - 0.5, 1)
         .build()
-        .unwrap();
+        .unwrap()
+}</code></pre>
+<p>here we have added the root finding function \(r(y, p, t) = y - 0.5\), and also let Diffsol know that we have one root function by passing <code>1</code> as the last argument to the <code>root</code> method.
+If we had specified more than one root function, the solver would stop when any of the root functions are zero.</p>
+<h2 id="detecting-roots-during-the-solve"><a class="header" href="#detecting-roots-during-the-solve">Detecting roots during the solve</a></h2>
+<p>To detect the root during the solve, we can use the return type on the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#tymethod.step"><code>step</code></a> method of the solver.
+If successful the <code>step</code> method returns an <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/method/enum.OdeSolverStopReason.html"><code>OdeSolverStopReason</code></a> enum that contains the reason the solver stopped.</p>
+<pre><code class="language-rust ignore">use diffsol::{OdeEquations, OdeSolverMethod, OdeSolverStopReason};
 
-    //
-    // CHOOSING A SOLVER
-    //
-
-    // Create a BDF solver with an initial state
-    let _solver = problem.bdf::&lt;LS&gt;();
-
-    // Create a non-initialised state and manually set the values before
-    // creating the solver
-    let state = BdfState::new_without_initialise(&amp;problem).unwrap();
-    // ... set the state values manually
-    let _solver = problem.bdf_solver::&lt;LS&gt;(state);
-
-    // Create a SDIRK solver with a pre-defined tableau
-    let tableau = Tableau::&lt;M&gt;::tr_bdf2(problem.context().clone());
-    let state = problem.rk_state(&amp;tableau).unwrap();
-    let _solver = problem.sdirk_solver::&lt;LS, _&gt;(state, tableau);
-
-    // Create a tr_bdf2 or esdirk34 solvers directly (both are SDIRK solvers with different tableaus)
-    let _solver = problem.tr_bdf2::&lt;LS&gt;();
-    let _solver = problem.esdirk34::&lt;LS&gt;();
-</code></pre>
-<h1 id="initialisation"><a class="header" href="#initialisation">Initialisation</a></h1>
-<p>Each solver has an internal state that holds information like the current state vector, the gradient of the state vector, the current time, and the current step size. When you create a solver using the <code>bdf</code> or <code>sdirk</code> methods on the <code>OdeSolverProblem</code> struct, the solver will be initialised with an initial state based on the initial conditions of the problem as well as satisfying any algebraic constraints. An initial time step will also be chosen based on your provided equations.</p>
-<p>Each solver's state struct implements the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/state/trait.OdeSolverState.html"><code>OdeSolverState</code></a> trait, and if you wish to manually create and setup a state, you can use the methods on this trait to do so.</p>
-<p>For example, say that you wish to bypass the initialisation of the state as you already have the algebraic constraints and so don't need to solve for them. You can use the <code>new_without_initialise</code> method on the <code>OdeSolverState</code> trait to create a new state without initialising it. You can then use the <code>as_mut</code> method to get a mutable reference to the state and set the values manually.</p>
-<p>Note that each state struct has a <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/state/trait.OdeSolverState.html#tymethod.as_ref"><code>as_ref</code></a> and <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/state/trait.OdeSolverState.html#tymethod.as_mut"><code>as_mut</code></a> methods that return a <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/state/struct.StateRef.html"><code>StateRef</code></a> or <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/state/struct.StateRefMut.html"><code>StateRefMut</code></a> struct respectively. These structs provide a solver-independent way to access the state values so you can use the same code with different solvers.</p>
-<pre><code class="language-rust ignore">    // creating the solver
-    let mut state = RkState::new_without_initialise(&amp;problem).unwrap();
-    // ... set the state values manually
-    state.as_mut().y[0] = 0.1;
-    let _solver = problem.tr_bdf2_solver::&lt;LS&gt;(state);
-</code></pre>
+pub fn solve_match_step&lt;'a, Solver, Eqn&gt;(solver: &amp;mut Solver)
+where
+    Solver: OdeSolverMethod&lt;'a, Eqn&gt;,
+    Eqn: OdeEquations&lt;T = f64&gt; + 'a,
+{
+    solver.set_stop_time(10.0).unwrap();
+    loop {
+        match solver.step() {
+            Ok(OdeSolverStopReason::InternalTimestep) =&gt; continue,
+            Ok(OdeSolverStopReason::TstopReached) =&gt; break,
+            Ok(OdeSolverStopReason::RootFound(_t)) =&gt; break,
+            Err(e) =&gt; panic!("Solver failed to converge: {}", e),
+        }
+    }
+    println!("Solver stopped at time: {}", solver.state().t);
+}</code></pre>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="specify/sparse_problems.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../../specify/closure/mass_matrix.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="solving_the_problem.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../../specify/closure/forward_sensitivity.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -245,11 +232,11 @@ fn main() {
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="specify/sparse_problems.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../../specify/closure/mass_matrix.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="solving_the_problem.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../../specify/closure/forward_sensitivity.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
@@ -264,13 +251,13 @@ fn main() {
         </script>
 
 
-        <script src="elasticlunr.min.js"></script>
-        <script src="mark.min.js"></script>
-        <script src="searcher.js"></script>
+        <script src="../../elasticlunr.min.js"></script>
+        <script src="../../mark.min.js"></script>
+        <script src="../../searcher.js"></script>
 
-        <script src="clipboard.min.js"></script>
-        <script src="highlight.js"></script>
-        <script src="book.js"></script>
+        <script src="../../clipboard.min.js"></script>
+        <script src="../../highlight.js"></script>
+        <script src="../../book.js"></script>
 
         <!-- Custom JS scripts -->
 

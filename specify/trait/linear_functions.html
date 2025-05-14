@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>Discrete Events - Diffsol</title>
+        <title>Linear functions - Diffsol</title>
 
 
         <!-- Custom HTML head -->
@@ -14,21 +14,21 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="theme-color" content="#ffffff">
 
-        <link rel="icon" href="../favicon.svg">
-        <link rel="shortcut icon" href="../favicon.png">
-        <link rel="stylesheet" href="../css/variables.css">
-        <link rel="stylesheet" href="../css/general.css">
-        <link rel="stylesheet" href="../css/chrome.css">
-        <link rel="stylesheet" href="../css/print.css" media="print">
+        <link rel="icon" href="../../favicon.svg">
+        <link rel="shortcut icon" href="../../favicon.png">
+        <link rel="stylesheet" href="../../css/variables.css">
+        <link rel="stylesheet" href="../../css/general.css">
+        <link rel="stylesheet" href="../../css/chrome.css">
+        <link rel="stylesheet" href="../../css/print.css" media="print">
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="../FontAwesome/css/font-awesome.css">
-        <link rel="stylesheet" href="../fonts/fonts.css">
+        <link rel="stylesheet" href="../../FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="../../fonts/fonts.css">
 
         <!-- Highlight.js Stylesheets -->
-        <link rel="stylesheet" id="highlight-css" href="../highlight.css">
-        <link rel="stylesheet" id="tomorrow-night-css" href="../tomorrow-night.css">
-        <link rel="stylesheet" id="ayu-highlight-css" href="../ayu-highlight.css">
+        <link rel="stylesheet" id="highlight-css" href="../../highlight.css">
+        <link rel="stylesheet" id="tomorrow-night-css" href="../../tomorrow-night.css">
+        <link rel="stylesheet" id="ayu-highlight-css" href="../../ayu-highlight.css">
 
         <!-- Custom theme stylesheets -->
 
@@ -37,12 +37,12 @@
 
         <!-- Provide site root and default themes to javascript -->
         <script>
-            const path_to_root = "../";
+            const path_to_root = "../../";
             const default_light_theme = "light";
             const default_dark_theme = "navy";
         </script>
         <!-- Start loading toc.js asap -->
-        <script src="../toc.js"></script>
+        <script src="../../toc.js"></script>
     </head>
     <body>
     <div id="body-container">
@@ -95,7 +95,7 @@
             <!-- populated by js -->
             <mdbook-sidebar-scrollbox class="sidebar-scrollbox"></mdbook-sidebar-scrollbox>
             <noscript>
-                <iframe class="sidebar-iframe-outer" src="../toc.html"></iframe>
+                <iframe class="sidebar-iframe-outer" src="../../toc.html"></iframe>
             </noscript>
             <div id="sidebar-resize-handle" class="sidebar-resize-handle">
                 <div class="sidebar-resize-indicator"></div>
@@ -130,7 +130,7 @@
                     <h1 class="menu-title">Diffsol</h1>
 
                     <div class="right-buttons">
-                        <a href="../print.html" title="Print this book" aria-label="Print this book">
+                        <a href="../../print.html" title="Print this book" aria-label="Print this book">
                             <i id="print-button" class="fa fa-print"></i>
                         </a>
 
@@ -159,21 +159,49 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="discrete-events"><a class="header" href="#discrete-events">Discrete Events</a></h1>
-<p>ODEs describe the continuous evolution of a system over time, but many systems also involve discrete events that occur at specific times. For example, in a compartmental model of drug delivery, the administration of a drug is a discrete event that occurs at a specific time. In a bouncing ball model, the collision of the ball with the ground is a discrete event that changes the state of the system. It is normally difficult to model these events using ODEs alone, as they require a different approach to handle the discontinuities in the system. While we can represent discrete events mathematically using delta functions, many ODE solvers are not designed to handle discontinuities, and may produce inaccurate results or fail to converge during the integration.</p>
-<p>Diffsol provides a way to model discrete events in a system of ODEs by allowing users to manipulate the internal state of each solver during the time-stepping. Each solver has an internal state that holds information such as the current time \(t\), the current state of the system \(\mathbf{y}\), and other solver-specific information. When a discrete event occurs, the user can update the internal state of the solver to reflect the change in the system, and then continue the integration of the ODE as normal.</p>
-<p>Diffsol also provides a way to stop the integration of the ODEs, either at a specific time or when a specific condition is met. This can be useful for modelling systems with discrete events, as it allows the user to control the integration of the ODEs and to handle the events in a flexible way.</p>
-<p>The <a href="../solving_the_problem.html">Solving the Problem</a> and <a href="../specify/root_finding.html">Root Finding</a> sections provides an introduction to the API for solving ODEs and detecting events with Diffsol. In the next two sections, we will look at two examples of systems with discrete events: compartmental models of drug delivery and bouncing ball models, and solve them using Diffsol using this API.</p>
+                        <h1 id="linear-functions"><a class="header" href="#linear-functions">Linear functions</a></h1>
+<p>Naturally, we can also implement the <code>LinearOp</code> trait if we want to include a mass matrix in our model. A common use case for implementing this trait is to store the mass matrix in a custom struct, like so:</p>
+<pre><code class="language-rust ignore">use crate::{C, M, T, V};
+use diffsol::{LinearOp, Op, Vector};
+
+pub struct MyMass&lt;'a&gt; {
+    pub p: &amp;'a V,
+}
+
+impl Op for MyMass&lt;'_&gt; {
+    type T = T;
+    type V = V;
+    type M = M;
+    type C = C;
+    fn nstates(&amp;self) -&gt; usize {
+        1
+    }
+    fn nout(&amp;self) -&gt; usize {
+        1
+    }
+    fn nparams(&amp;self) -&gt; usize {
+        0
+    }
+    fn context(&amp;self) -&gt; &amp;Self::C {
+        self.p.context()
+    }
+}
+
+impl LinearOp for MyMass&lt;'_&gt; {
+    fn gemv_inplace(&amp;self, x: &amp;V, _t: T, beta: T, y: &amp;mut V) {
+        y[0] = x[0] * beta;
+    }
+}</code></pre>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../primer/spring_mass_systems.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../../specify/trait/constant_functions.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../primer/compartmental_models_of_drug_delivery.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../../specify/trait/ode_systems.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -183,11 +211,11 @@
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../primer/spring_mass_systems.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../../specify/trait/constant_functions.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../primer/compartmental_models_of_drug_delivery.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../../specify/trait/ode_systems.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
@@ -202,13 +230,13 @@
         </script>
 
 
-        <script src="../elasticlunr.min.js"></script>
-        <script src="../mark.min.js"></script>
-        <script src="../searcher.js"></script>
+        <script src="../../elasticlunr.min.js"></script>
+        <script src="../../mark.min.js"></script>
+        <script src="../../searcher.js"></script>
 
-        <script src="../clipboard.min.js"></script>
-        <script src="../highlight.js"></script>
-        <script src="../book.js"></script>
+        <script src="../../clipboard.min.js"></script>
+        <script src="../../highlight.js"></script>
+        <script src="../../book.js"></script>
 
         <!-- Custom JS scripts -->
 

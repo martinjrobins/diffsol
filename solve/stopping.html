@@ -3,7 +3,7 @@
     <head>
         <!-- Book generated using mdBook -->
         <meta charset="UTF-8">
-        <title>ODE equations - DiffSol</title>
+        <title>Stopping - Diffsol</title>
 
 
         <!-- Custom HTML head -->
@@ -127,7 +127,7 @@
                         </button>
                     </div>
 
-                    <h1 class="menu-title">DiffSol</h1>
+                    <h1 class="menu-title">Diffsol</h1>
 
                     <div class="right-buttons">
                         <a href="../print.html" title="Print this book" aria-label="Print this book">
@@ -159,62 +159,38 @@
 
                 <div id="content" class="content">
                     <main>
-                        <h1 id="ode-equations"><a class="header" href="#ode-equations">ODE equations</a></h1>
-<p>To create a new ode problem, use the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct. You can create a builder using the <code>OdeBuilder::new</code> method, and then chain methods to set the equations to be solve, initial time, initial step size, relative &amp; absolute tolerances, and parameters, or leave them at their default values. Then, call the <code>build</code> method to create a new problem.</p>
-<p>Below is an example of how to create a new ODE problem using the <code>OdeBuilder</code> struct.
-The specific problem we will solve is the logistic equation</p>
-<p>\[\frac{dy}{dt} = r y (1 - y/K),\]</p>
-<p>where \(r\) is the growth rate and \(K\) is the carrying capacity.
-To specify the problem, we need to provide the \(dy/dt\) function \(f(y, p, t)\),
-and the jacobian of \(f\) multiplied by a vector \(v\) function, which we will call \(f'(y, p, t, v)\). That is</p>
-<p>\[f(y, p, t) = r y (1 - y/K),\]
-\[f'(y, p, t, v) = rv (1 - 2y/K),\]</p>
-<p>and the initial state</p>
-<p>\[y_0(p, t) = 0.1\]</p>
-<p>This can be done using the following code:</p>
-<pre><code class="language-rust ignore">use diffsol::{NalgebraLU, NalgebraMat, OdeSolverMethod, OdeSolverStopReason, Vector};
-type M = NalgebraMat&lt;f64&gt;;
-type LS = NalgebraLU&lt;f64&gt;;
-fn main() {
-    //
-    // SPECIFYING THE PROBLEM
-    //
-    let problem = OdeBuilder::&lt;M&gt;::new()
-        .p(vec![1.0, 10.0])
-        .rhs_implicit(
-            |x, p, _t, y| y[0] = p[0] * x[0] * (1.0 - x[0] / p[1]),
-            |x, p, _t, v, y| y[0] = p[0] * v[0] * (1.0 - 2.0 * x[0] / p[1]),
-        )
-        .init(|_p, _t, y| y.fill(0.1), 1)
-        .build()
-        .unwrap();
-</code></pre>
-<p>The <code>rhs_implicit</code> method is used to specify the \(f(y, p, t)\) and \(f'(y, p, t, v)\) functions, whereas the <code>init</code> method is used to specify the initial state vector \(y_0(p, t)\).
-We also use the <code>t0</code>, <code>rtol</code>, <code>atol</code>, and <code>p</code> methods to set the initial time, relative tolerance, absolute tolerance, and parameters, respectively.</p>
-<p>We have also specified the matrix type <code>M</code> to be <code>nalgebra::DMatrix&lt;f64&gt;</code>, using a generic parameter of the <code>OdeBuilder</code> struct.
-The <code>nalgebra::DMatrix&lt;f64&gt;</code> type is a dense matrix type from the <a href="https://nalgebra.org">nalgebra</a> crate. Other options are:</p>
-<ul>
-<li><code>faer::Mat&lt;T&gt;</code> from <a href="https://github.com/sarah-ek/faer-rs">faer</a>, which is a dense matrix type.</li>
-<li><code>diffsol::SparseColMat&lt;T&gt;</code>, which is a thin wrapper around <code>faer::sparse::SparseColMat&lt;T&gt;</code>, a sparse compressed sparse column matrix type.</li>
-</ul>
-<p>Each of these matrix types have an associated vector type that is used to represent the vectors in the problem (i.e. the state vector \(y\), the parameter vector \(p\), and the gradient vector \(v\)).
-You can see in the example above that the <code>DVector</code> type is explicitly used to create the initial state vector in the third closure.
-For these matrix types the associated vector type is:</p>
-<ul>
-<li><code>nalgebra::DVector&lt;T&gt;</code> for <code>nalgebra::DMatrix&lt;T&gt;</code>.</li>
-<li><code>faer::Col&lt;T&gt;</code> for <code>faer::Mat&lt;T&gt;</code>.</li>
-<li><code>faer::Coll&lt;T&gt;</code> for <code>diffsol::SparseColMat&lt;T&gt;</code>.</li>
-</ul>
+                        <h1 id="stopping"><a class="header" href="#stopping">Stopping</a></h1>
+<p>There are two methods to halt the solver when a certain condition is met: you can either stop at a specific time or stop when a certain event occurs.</p>
+<p>Stopping at a specific time is straightforward, as you can use the <code>set_stop_time</code> method on the <code>OdeSolverMethod</code> trait and then just check if the return value of the <code>step</code> method is <code>Ok(OdeSolverStopReason::TstopReached)</code></p>
+<p>Stopping at a certain event requires you to set a root function in your system of equations, see <a href="specify/closure/root_finding.html">Root Finding</a> for more information. During time-stepping, you can check if the solver has discovered a root by checking if the return value of the <code>step</code> method is <code>Ok(OdeSolverStopReason::RootFound)</code>. <code>RootFound</code> holds the time at which the root was found, and you can use the <code>interpolate</code> method to obtain the solution at that time.</p>
+<pre><code class="language-rust ignore">use diffsol::{OdeEquations, OdeSolverMethod, OdeSolverStopReason};
+
+pub fn solve_match_step&lt;'a, Solver, Eqn&gt;(solver: &amp;mut Solver)
+where
+    Solver: OdeSolverMethod&lt;'a, Eqn&gt;,
+    Eqn: OdeEquations&lt;T = f64&gt; + 'a,
+{
+    solver.set_stop_time(10.0).unwrap();
+    loop {
+        match solver.step() {
+            Ok(OdeSolverStopReason::InternalTimestep) =&gt; continue,
+            Ok(OdeSolverStopReason::TstopReached) =&gt; break,
+            Ok(OdeSolverStopReason::RootFound(_t)) =&gt; break,
+            Err(e) =&gt; panic!("Solver failed to converge: {}", e),
+        }
+    }
+    println!("Solver stopped at time: {}", solver.state().t);
+}</code></pre>
 
                     </main>
 
                     <nav class="nav-wrapper" aria-label="Page navigation">
                         <!-- Mobile navigation buttons -->
-                            <a rel="prev" href="../specify/specifying_the_problem.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                            <a rel="prev" href="../solve/interpolation.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                                 <i class="fa fa-angle-left"></i>
                             </a>
 
-                            <a rel="next prefetch" href="../specify/mass_matrix.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                            <a rel="next prefetch" href="../solve/forward_sens.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                                 <i class="fa fa-angle-right"></i>
                             </a>
 
@@ -224,11 +200,11 @@ For these matrix types the associated vector type is:</p>
             </div>
 
             <nav class="nav-wide-wrapper" aria-label="Page navigation">
-                    <a rel="prev" href="../specify/specifying_the_problem.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                    <a rel="prev" href="../solve/interpolation.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
                         <i class="fa fa-angle-left"></i>
                     </a>
 
-                    <a rel="next prefetch" href="../specify/mass_matrix.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                    <a rel="next prefetch" href="../solve/forward_sens.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
                         <i class="fa fa-angle-right"></i>
                     </a>
             </nav>
