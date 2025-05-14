@@ -38,6 +38,7 @@
   - [Manual time-stepping](./solve/manual-time-stepping.md)
   - [Interpolation](./solve/interpolation.md)
   - [Stopping](./solve/stopping.md)
+  - [Forward Sensitivities](./solve/forward_sens.md)
 - [Benchmarks](./benchmarks/benchmarks.md)
   - [Sundials](./benchmarks/sundials.md)
   - [Python (Diffrax & Casadi)](./benchmarks/python.md)

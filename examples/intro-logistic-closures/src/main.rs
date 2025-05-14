@@ -1,4 +1,4 @@
-use diffsol::NalgebraVec;
+use diffsol::{NalgebraContext, NalgebraVec};
 use diffsol::{NalgebraLU, NalgebraMat};
 mod problem_implicit;
 use problem_implicit::problem_implicit;
@@ -24,7 +24,11 @@ mod solve_match_step;
 use solve_match_step::solve_match_step;
 mod solve_fwd_sens;
 use solve_fwd_sens::solve_fwd_sens;
+mod solve_fwd_sens_step;
+use solve_fwd_sens_step::solve_fwd_sens_step;
 mod print_jacobian;
+mod solve_adjoint_sens;
+mod solve_adjoint_sens_sum_squares;
 use print_jacobian::print_jacobian;
 mod create_solvers;
 use create_solvers::create_solvers;
@@ -36,14 +40,17 @@ type M = NalgebraMat<f64>;
 type V = NalgebraVec<f64>;
 type T = f64;
 type LS = NalgebraLU<f64>;
+type C = NalgebraContext;
 
 fn main() {
     //
     // SPECIFYING THE PROBLEM
     //
     let problem = problem_fwd_sens();
-    let mut solver = problem.bdf::<LS>().unwrap();
+    let mut solver = problem.bdf_sens::<LS>().unwrap();
     solve_fwd_sens(&mut solver);
+    let mut solver = problem.bdf_sens::<LS>().unwrap();
+    solve_fwd_sens_step(&mut solver);
     let _problem = problem_root();
     let _problem = problem_mass();
     let _problem = problem_explicit();

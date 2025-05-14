@@ -34,7 +34,7 @@ Once the sensitivity problem has been specified, we can solve it using the [`Ode
 Lets imagine we want to solve the sensitivity problem up to a time \\(t_o = 10\\). We can use the `OdeSolverMethod` trait to solve the problem as normal, stepping forward in time until we reach \\(t_o\\).
 
 ```rust,ignore
-{{#include ../../../../examples/intro-logistic-closures/src/solve_fwd_sens.rs}}
+{{#include ../../../../examples/intro-logistic-closures/src/solve_fwd_sens_step.rs}}
 ```
 
 We can then obtain the sensitivity vectors at time \\(t_o\\) using the `interpolate_sens` method on the `OdeSolverMethod` trait. 

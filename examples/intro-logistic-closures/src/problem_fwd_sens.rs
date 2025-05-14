@@ -1,9 +1,5 @@
-use diffsol::{MatrixCommon, OdeBuilder};
-use diffsol::{NalgebraMat, OdeEquationsImplicitSens, OdeSolverProblem};
-type M = NalgebraMat<f64>;
-type V = <M as MatrixCommon>::V;
-type C = <M as MatrixCommon>::C;
-type T = <M as MatrixCommon>::T;
+use crate::{C, M, T, V};
+use diffsol::{OdeBuilder, OdeEquationsImplicitSens, OdeSolverProblem};
 
 pub fn problem_fwd_sens(
 ) -> OdeSolverProblem<impl OdeEquationsImplicitSens<M = M, V = V, T = T, C = C>> {
