@@ -2203,9 +2203,9 @@ If we need the sensitivity at the current internal time step, we can get this fr
 <p>Lets consider a large system of equations that have a jacobian matrix that is sparse. For simplicity we will start with the logistic equation from the <a href="specify/closure/./specifying_the_problem.html">"Specifying the Problem"</a> section,
 but we will duplicate this equation 10 times to create a system of 10 equations. This system will have a jacobian matrix that is a diagonal matrix with 10 diagonal elements, and all other elements are zero.</p>
 <p>Since this system is sparse, we choose a sparse matrix type to represent the jacobian matrix. We will use the <code>diffsol::FaerSparseMat&lt;T&gt;</code> type, which is a thin wrapper around <code>faer::sparse::FaerSparseMat&lt;T&gt;</code>, a sparse compressed sparse column matrix type.</p>
-<pre><code class="language-rust ignore">use diffsol::{MatrixCommon, OdeBuilder};
-use diffsol::{NalgebraMat, OdeEquationsImplicit, OdeSolverProblem, Vector};
-type M = NalgebraMat&lt;f64&gt;;
+<pre><code class="language-rust ignore">use diffsol::{FaerSparseMat, MatrixCommon, OdeBuilder};
+use diffsol::{OdeEquationsImplicit, OdeSolverProblem, Vector};
+type M = FaerSparseMat&lt;f64&gt;;
 type V = &lt;M as MatrixCommon&gt;::V;
 type C = &lt;M as MatrixCommon&gt;::C;
 type T = &lt;M as MatrixCommon&gt;::T;
