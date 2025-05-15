@@ -1,6 +1,6 @@
-use diffsol::{MatrixCommon, OdeBuilder};
-use diffsol::{NalgebraMat, OdeEquationsImplicit, OdeSolverProblem, Vector};
-type M = NalgebraMat<f64>;
+use diffsol::{FaerSparseMat, MatrixCommon, OdeBuilder};
+use diffsol::{OdeEquationsImplicit, OdeSolverProblem, Vector};
+type M = FaerSparseMat<f64>;
 type V = <M as MatrixCommon>::V;
 type C = <M as MatrixCommon>::C;
 type T = <M as MatrixCommon>::T;
