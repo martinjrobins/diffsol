@@ -9,8 +9,8 @@ pub mod faer;
 #[cfg(feature = "suitesparse")]
 pub mod suitesparse;
 
-//#[cfg(feature = "cuda")]
-//pub mod cuda;
+#[cfg(feature = "cuda")]
+pub mod cuda;
 
 pub use faer::lu::LU as FaerLU;
 pub use nalgebra::lu::LU as NalgebraLU;
@@ -19,7 +19,7 @@ pub use nalgebra::lu::LU as NalgebraLU;
 pub trait LinearSolver<M: Matrix>: Default {
     // sets the point at which the linearisation of the operator is evaluated
     // the operator is assumed to have the same sparsity as that given to [Self::set_problem]
-    fn set_linearisation<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
+    fn set_linearisation<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(
         &mut self,
         op: &C,
         x: &M::V,

@@ -169,10 +169,10 @@ impl CudaContext {
 }
 
 impl<T: ScalarCuda> CudaMat<T> {
-    fn nrows(&self) -> IndexType {
+    pub fn nrows(&self) -> IndexType {
         self.nrows
     }
-    fn ncols(&self) -> IndexType {
+    pub fn ncols(&self) -> IndexType {
         self.ncols
     }
     fn col_major_index(&self, i: IndexType, j: IndexType) -> IndexType {
