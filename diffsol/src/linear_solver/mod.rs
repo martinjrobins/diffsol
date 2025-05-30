@@ -143,4 +143,15 @@ pub mod tests {
         let s = FaerLU::default();
         test_linear_solver(s, op, rtol, &atol, solns);
     }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn test_lu_cuda() {
+        use crate::{CudaLU, CudaMat, CudaVec};
+        let (op, rtol, atol, solns) = linear_problem::<CudaMat<f64>>();
+        let p = CudaVec::zeros(0, op.context().clone());
+        let op = ParameterisedOp::new(&op, &p);
+        let s = CudaLU::default();
+        test_linear_solver(s, op, rtol, &atol, solns);
+    }
 }

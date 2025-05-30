@@ -143,6 +143,7 @@ pub fn robertson_ode<M: MatrixHost + 'static>(
     (problem, soln)
 }
 
+#[cfg(feature = "diffsl")]
 fn soln<V: Vector>(ctx: V::C) -> OdeSolverSolution<V> {
     let mut soln = OdeSolverSolution::default();
     let data = vec![

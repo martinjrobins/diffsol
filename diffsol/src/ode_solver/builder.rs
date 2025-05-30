@@ -6,7 +6,6 @@ use crate::{
     Closure, ClosureNoJac, ClosureWithAdjoint, ClosureWithSens, ConstantClosure,
     ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp, LinearClosure, LinearOp,
     Matrix, NonLinearOp, OdeEquations, OdeSolverProblem, Op, ParameterisedOp, UnitCallable, Vector,
-    VectorHost,
 };
 
 use super::equations::OdeSolverEquations;
@@ -937,7 +936,7 @@ where
         code: &str,
     ) -> Result<OdeSolverProblem<crate::DiffSl<M, CG>>, DiffsolError>
     where
-        M: Matrix<V: VectorHost, T = f64>,
+        M: Matrix<V: crate::VectorHost, T = f64>,
     {
         let eqn = crate::DiffSl::compile(code, self.ctx.clone())?;
         self.build_from_eqn(eqn)

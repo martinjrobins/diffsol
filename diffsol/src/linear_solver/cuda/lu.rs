@@ -1,11 +1,19 @@
 use std::{cell::RefCell, mem::MaybeUninit};
 
-use crate::{error::{DiffsolError, LinearSolverError}, linear_solver_error, CudaContext, CudaMat, CudaVec, LinearSolver, Matrix, NonLinearOpJacobian, ScalarCuda};
-use cudarc::{cusolver::sys::{cublasOperation_t, cusolverDnCreate, cusolverDnDestroy, cusolverDnDgetrf, cusolverDnDgetrf_bufferSize, cusolverDnDgetrs, cusolverDnHandle_t, cusolverStatus_t}, driver::{CudaSlice, DevicePtrMut, DevicePtr}};
+use crate::{
+    error::{DiffsolError, LinearSolverError},
+    linear_solver_error, CudaContext, CudaMat, CudaVec, LinearSolver, Matrix, NonLinearOpJacobian,
+    ScalarCuda,
+};
+use cudarc::{
+    cusolver::sys::{
+        cublasOperation_t, cusolverDnCreate, cusolverDnDestroy, cusolverDnDgetrf,
+        cusolverDnDgetrf_bufferSize, cusolverDnDgetrs, cusolverDnHandle_t, cusolverStatus_t,
+    },
+    driver::{CudaSlice, DevicePtr, DevicePtrMut},
+};
 
-
-
-pub struct CudaLu<T>
+pub struct CudaLU<T>
 where
     T: ScalarCuda,
 {
@@ -15,10 +23,9 @@ where
     matrix: Option<CudaMat<T>>,
     handle: cusolverDnHandle_t,
     linearisation_set: bool,
-
 }
 
-impl<T> Default for CudaLu<T>
+impl<T> Default for CudaLU<T>
 where
     T: ScalarCuda,
 {
@@ -42,17 +49,18 @@ where
     }
 }
 
-impl<T: ScalarCuda> Drop for CudaLu<T> {
+impl<T: ScalarCuda> Drop for CudaLU<T> {
     fn drop(&mut self) {
         unsafe {
             cusolverDnDestroy(self.handle);
         }
     }
 }
-        
 
-impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLu<T> {
-    fn set_linearisation<C: NonLinearOpJacobian<T = T, V = CudaVec<T>, M = CudaMat<T>, C = CudaContext>>(
+impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLU<T> {
+    fn set_linearisation<
+        C: NonLinearOpJacobian<T = T, V = CudaVec<T>, M = CudaMat<T>, C = CudaContext>,
+    >(
         &mut self,
         op: &C,
         x: &CudaVec<T>,
@@ -64,7 +72,6 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLu<T> {
         let mut nfo = self.nfo.as_mut().expect("NFO not set").borrow_mut();
         op.jacobian_inplace(x, t, matrix);
         {
-            
             let m = i32::try_from(matrix.nrows()).unwrap();
             let n = i32::try_from(matrix.ncols()).unwrap();
             let lda = i32::try_from(matrix.nrows()).unwrap();
@@ -73,8 +80,20 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLu<T> {
             let (workspace, _ws_syn) = work.device_ptr_mut(stream);
             let (pivots, _pivots_syn) = pivots.device_ptr_mut(stream);
             let (nfo, _nfo_syn) = nfo.device_ptr_mut(stream);
-            unsafe { cusolverDnDgetrf(self.handle, m, n, a as *mut f64, lda, workspace as *mut f64, pivots as *mut i32, nfo as *mut i32) };
+            unsafe {
+                cusolverDnDgetrf(
+                    self.handle,
+                    m,
+                    n,
+                    a as *mut f64,
+                    lda,
+                    workspace as *mut f64,
+                    pivots as *mut i32,
+                    nfo as *mut i32,
+                )
+            };
         }
+        self.linearisation_set = true;
     }
 
     fn solve_in_place(&self, x: &mut CudaVec<T>) -> Result<(), DiffsolError> {
@@ -94,7 +113,6 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLu<T> {
         }
         let mut nfo = self.nfo.as_ref().expect("NFO not set").borrow_mut();
         {
-
             let stream = matrix.data.stream();
             let n = i32::try_from(x.data.len()).unwrap();
             let lda = i32::try_from(self.matrix.as_ref().unwrap().nrows()).unwrap();
@@ -102,7 +120,20 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLu<T> {
             let (x_data, _x_syn) = x.data.device_ptr_mut(stream);
             let (pivots, _pivots_syn) = self.pivots.as_ref().unwrap().device_ptr(stream);
             let (nfo, _nfo_syn) = nfo.device_ptr_mut(stream);
-            unsafe { cusolverDnDgetrs(self.handle, cublasOperation_t::CUBLAS_OP_N, n, 1, a as *mut f64, lda, pivots as *mut i32, x_data as *mut f64, n, nfo as *mut i32) };
+            unsafe {
+                cusolverDnDgetrs(
+                    self.handle,
+                    cublasOperation_t::CUBLAS_OP_N,
+                    n,
+                    1,
+                    a as *mut f64,
+                    lda,
+                    pivots as *mut i32,
+                    x_data as *mut f64,
+                    n,
+                    nfo as *mut i32,
+                )
+            };
         }
         Ok(())
     }
@@ -117,9 +148,9 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLu<T> {
         let nrows = op.nout();
         let matrix =
             C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), op.context().clone());
-        
+
         self.matrix = Some(matrix);
-        
+
         /* step 3: query working space of getrf */
         let stream = &op.context().stream;
         let lwork = {
@@ -134,9 +165,15 @@ impl<T: ScalarCuda> LinearSolver<CudaMat<T>> for CudaLu<T> {
             lwork
         };
         unsafe {
-            self.work = Some(stream.alloc(lwork as usize).expect("Failed to allocate work space"));
+            self.work = Some(
+                stream
+                    .alloc(lwork as usize)
+                    .expect("Failed to allocate work space"),
+            );
             self.pivots = Some(stream.alloc(nrows).expect("Failed to allocate pivots"));
-            self.nfo = Some(RefCell::new(stream.alloc(1).expect("Failed to allocate NFO")));
+            self.nfo = Some(RefCell::new(
+                stream.alloc(1).expect("Failed to allocate NFO"),
+            ));
         }
         self.linearisation_set = false;
     }
