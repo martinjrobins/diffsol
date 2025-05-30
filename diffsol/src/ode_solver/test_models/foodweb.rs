@@ -2,7 +2,7 @@ use crate::{
     find_jacobian_non_zeros, find_matrix_non_zeros, ode_solver::problem::OdeSolverSolution,
     ConstantOp, JacobianColoring, LinearOp, Matrix, MatrixHost, MatrixSparsity, NonLinearOp,
     NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsRef, OdeSolverProblem, Op,
-    ParameterisedOp, UnitCallable, Vector, VectorHost,
+    ParameterisedOp, UnitCallable, Vector,
 };
 use num_traits::Zero;
 
@@ -31,7 +31,7 @@ where
     M: MatrixHost<T = f64>,
     CG: crate::CodegenModuleJit + crate::CodegenModuleCompile,
 {
-    use crate::OdeBuilder;
+    use crate::{OdeBuilder, VectorHost};
 
     let (problem, _soln) = foodweb_problem::<M, NX>();
     let u0 = problem.eqn.init().call(0.0);

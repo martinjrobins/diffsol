@@ -1369,6 +1369,15 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn bdf_test_cuda_exponential_decay() {
+        use crate::{CudaLU, CudaMat};
+        let (problem, soln) = exponential_decay_problem::<CudaMat<f64>>(false);
+        let mut s = problem.bdf::<CudaLU<f64>>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
     #[test]
     fn bdf_test_checkpointing() {
         let (problem, soln) = exponential_decay_problem::<M>(false);

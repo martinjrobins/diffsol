@@ -8,7 +8,7 @@
 
 use crate::{
     ode_solver::problem::OdeSolverSolution, scalar::Scalar, Matrix, MatrixHost, OdeBuilder,
-    OdeEquationsImplicit, OdeSolverProblem, Vector, VectorHost,
+    OdeEquationsImplicit, OdeSolverProblem, Vector,
 };
 use nalgebra::ComplexField;
 use num_traits::{One, Zero};
@@ -26,6 +26,7 @@ pub fn heat2d_diffsl_problem<
     OdeSolverProblem<impl crate::OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
+    use crate::VectorHost;
     let (problem, _soln) = head2d_problem::<M, MGRID>();
     let u0 = problem.eqn.init().call(0.0);
     let jac = problem.eqn.rhs().jacobian(&u0, 0.0);

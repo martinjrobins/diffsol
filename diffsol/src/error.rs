@@ -30,6 +30,10 @@ pub enum LinearSolverError {
     LuSolveFailed,
     #[error("Linear solver not setup")]
     LinearSolverNotSetup,
+    #[error("Linear solver matrix not square")]
+    LinearSolverMatrixNotSquare,
+    #[error("Linear solver matrix not compatible with vector")]
+    LinearSolverMatrixVectorNotCompatible,
     #[error("KLU failed to analyze")]
     KluFailedToAnalyze,
     #[error("KLU failed to factorize")]

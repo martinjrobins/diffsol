@@ -173,10 +173,6 @@ impl CudaContext {
         );
         let f = self.function::<T>("vec_squared_norm");
         let config = self.launch_config_1d_reduce(n, &f, squared_norm_blk_size::<T>);
-        println!(
-            "Launch config: grid_dim: {}, block_dim: {}",
-            config.grid_dim.0, config.block_dim.0
-        );
         let blocks_per_grid = config.grid_dim.0;
         let mut partial_sums = unsafe {
             self.stream
@@ -267,6 +263,9 @@ macro_rules! impl_mul_scalar {
             fn mul(mut self, rhs: Scale<T>) -> Self::Output {
                 let f = self.context.function::<T>("vec_mul_assign_scalar");
                 let n = self.data.len() as u32;
+                if n == 0 {
+                    return self;
+                }
                 let scalar = rhs.value();
                 let mut build = self.context.stream.launch_builder(&f);
                 build.arg(&mut self.data).arg(&scalar).arg(&n);
@@ -286,6 +285,9 @@ macro_rules! impl_mul_scalar_alloc {
                 let mut ret = Self::Output::zeros(self.data.len(), self.context.clone());
                 let f = self.context.function::<T>("vec_mul_scalar");
                 let n = self.data.len() as u32;
+                if n == 0 {
+                    return ret;
+                }
                 let mut build = self.context.stream.launch_builder(&f);
                 let scalar = rhs.value();
                 build
@@ -309,6 +311,9 @@ macro_rules! impl_mul_scalar_alloc_mut {
                 let mut ret = Self::Output::zeros(self.data.len(), self.context.clone());
                 let f = self.context.function::<T>("vec_mul_scalar");
                 let n = self.data.len() as u32;
+                if n == 0 {
+                    return ret;
+                }
                 let mut build = self.context.stream.launch_builder(&f);
                 let scalar = rhs.value();
                 let self_data = self.data.as_view();
@@ -343,6 +348,9 @@ macro_rules! impl_mul_assign_scalar {
             fn mul_assign(&mut self, rhs: Scale<T>) {
                 let f = self.context.function::<T>("vec_mul_assign_scalar");
                 let n = self.data.len() as u32;
+                if n == 0 {
+                    return;
+                }
                 let mut build = self.context.stream.launch_builder(&f);
                 let scalar = rhs.value();
                 build.arg(&mut self.data).arg(&scalar).arg(&n);
@@ -367,6 +375,9 @@ macro_rules! impl_sub_assign {
             fn sub_assign(&mut self, rhs: $rhs) {
                 let f = self.context.function::<T>("vec_sub_assign");
                 let n = self.data.len() as u32;
+                if n == 0 {
+                    return;
+                }
                 let mut build = self.context.stream.launch_builder(&f);
                 build.arg(&mut self.data).arg(&rhs.data).arg(&n);
                 let config = self.context.launch_config_1d(n, &f);
@@ -382,6 +393,9 @@ macro_rules! impl_add_assign {
             fn add_assign(&mut self, rhs: $rhs) {
                 let f = self.context.function::<T>("vec_add_assign");
                 let n = self.data.len() as u32;
+                if n == 0 {
+                    return;
+                }
                 let mut build = self.context.stream.launch_builder(&f);
                 build.arg(&mut self.data).arg(&rhs.data).arg(&n);
                 let config = self.context.launch_config_1d(n, &f);
@@ -426,6 +440,9 @@ macro_rules! impl_sub_both_ref {
                 let mut ret = Self::Output::zeros(self.data.len(), self.context.clone());
                 let f = self.context.function::<T>("vec_sub");
                 let n = self.data.len() as u32;
+                if n == 0 {
+                    return ret;
+                }
                 let mut build = self.context.stream.launch_builder(&f);
                 build
                     .arg(&self.data)
@@ -454,6 +471,9 @@ macro_rules! impl_sub_lhs {
                 );
                 let f = self.context.function::<T>("vec_sub_assign");
                 let n = self.data.len() as u32;
+                if n == 0 {
+                    return self;
+                }
                 let mut build = self.context.stream.launch_builder(&f);
                 build.arg(&mut self.data).arg(&rhs.data).arg(&n);
                 let config = self.context.launch_config_1d(n, &f);
@@ -478,6 +498,9 @@ macro_rules! impl_sub_rhs {
                 );
                 let f = self.context.function::<T>("vec_sub_assign_rhs");
                 let n = self.data.len() as u32;
+                if n == 0 {
+                    return rhs;
+                }
                 let mut build = self.context.stream.launch_builder(&f);
                 build.arg(&self.data).arg(&mut rhs.data).arg(&n);
                 let config = self.context.launch_config_1d(n, &f);
@@ -518,6 +541,9 @@ macro_rules! impl_add_both_ref {
                 let mut ret = Self::Output::zeros(self.data.len(), self.context.clone());
                 let f = self.context.function::<T>("vec_add");
                 let n = self.data.len() as u32;
+                if n == 0 {
+                    return ret;
+                }
                 let mut build = self.context.stream.launch_builder(&f);
                 build
                     .arg(&self.data)
@@ -546,6 +572,9 @@ macro_rules! impl_add_lhs {
                 );
                 let f = self.context.function::<T>("vec_add_assign");
                 let n = self.data.len() as u32;
+                if n == 0 {
+                    return self;
+                }
                 let mut build = self.context.stream.launch_builder(&f);
                 build.arg(&mut self.data).arg(&rhs.data).arg(&n);
                 let config = self.context.launch_config_1d(n, &f);
@@ -570,6 +599,9 @@ macro_rules! impl_add_rhs {
                 );
                 let f = self.context.function::<T>("vec_add_assign_rhs");
                 let n = self.data.len() as u32;
+                if n == 0 {
+                    return rhs;
+                }
                 let mut build = self.context.stream.launch_builder(&f);
                 build.arg(&self.data).arg(&mut rhs.data).arg(&n);
                 let config = self.context.launch_config_1d(n, &f);
@@ -700,6 +732,9 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn fill(&mut self, value: Self::T) {
         let f = self.context.function::<T>("vec_fill");
         let n = self.len() as u32;
+        if n == 0 {
+            return;
+        }
         let mut build = self.context.stream.launch_builder(&f);
         build.arg(&mut self.data).arg(&value).arg(&n);
         let config = self.context.launch_config_1d(n, &f);
@@ -720,6 +755,9 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn copy_from(&mut self, other: &Self) {
         let f = self.context.function::<T>("vec_copy");
         let n = self.len() as u32;
+        if n == 0 {
+            return;
+        }
         let mut build = self.context.stream.launch_builder(&f);
         build.arg(&mut self.data).arg(&other.data).arg(&n);
         let config = self.context.launch_config_1d(n, &f);
@@ -728,6 +766,9 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn copy_from_view(&mut self, other: &Self::View<'_>) {
         let f = self.context.function::<T>("vec_copy");
         let n = self.len() as u32;
+        if n == 0 {
+            return;
+        }
         let mut build = self.context.stream.launch_builder(&f);
         build.arg(&mut self.data).arg(&other.data).arg(&n);
         let config = self.context.launch_config_1d(n, &f);
@@ -754,6 +795,9 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn component_mul_assign(&mut self, other: &Self) {
         let f = self.context.function::<T>("vec_mul_assign");
         let n = self.len() as u32;
+        if n == 0 {
+            return;
+        }
         let mut build = self.context.stream.launch_builder(&f);
         build.arg(&mut self.data).arg(&other.data).arg(&n);
         let config = self.context.launch_config_1d(n, &f);
@@ -762,6 +806,9 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn component_div_assign(&mut self, other: &Self) {
         let f = self.context.function::<T>("vec_div_assign");
         let n = self.len() as u32;
+        if n == 0 {
+            return;
+        }
         let mut build = self.context.stream.launch_builder(&f);
         build.arg(&mut self.data).arg(&other.data).arg(&n);
         let config = self.context.launch_config_1d(n, &f);
@@ -849,6 +896,9 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index) {
         let f = self.context.function::<T>("vec_copy_from_indices");
         let n = indices.len() as u32;
+        if n == 0 {
+            return; // Skip if zero-length vectors
+        }
         let mut build = self.context.stream.launch_builder(&f);
         build
             .arg(&mut self.data)
@@ -861,6 +911,9 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn gather(&mut self, other: &Self, indices: &Self::Index) {
         let f = self.context.function::<T>("vec_gather");
         let n = indices.len() as u32;
+        if n == 0 {
+            return; // Skip if zero-length vectors
+        }
         let mut build = self.context.stream.launch_builder(&f);
         build
             .arg(&mut self.data)
@@ -873,6 +926,9 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn scatter(&self, indices: &Self::Index, other: &mut Self) {
         let f = self.context.function::<T>("vec_scatter");
         let n = indices.len() as u32;
+        if n == 0 {
+            return; // Skip if zero-length vectors
+        }
         assert_eq!(
             indices.len(),
             self.len(),
@@ -918,6 +974,9 @@ impl<'a, T: ScalarCuda> VectorViewMut<'a> for CudaVecMut<'a, T> {
     fn copy_from(&mut self, other: &Self::Owned) {
         let f = self.context.function::<T>("vec_copy");
         let n = self.data.len() as u32;
+        if n == 0 {
+            return; // Skip if zero-length vectors
+        }
         let mut build = self.context.stream.launch_builder(&f);
         build.arg(&mut self.data).arg(&other.data).arg(&n);
         let config = self.context.launch_config_1d(n, &f);
@@ -926,6 +985,9 @@ impl<'a, T: ScalarCuda> VectorViewMut<'a> for CudaVecMut<'a, T> {
     fn copy_from_view(&mut self, other: &Self::View) {
         let f = self.context.function::<T>("vec_copy");
         let n = self.data.len() as u32;
+        if n == 0 {
+            return; // Skip if zero-length vectors
+        }
         let mut build = self.context.stream.launch_builder(&f);
         build.arg(&mut self.data).arg(&other.data).arg(&n);
         let config = self.context.launch_config_1d(n, &f);

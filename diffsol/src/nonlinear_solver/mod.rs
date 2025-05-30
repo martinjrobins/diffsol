@@ -18,7 +18,7 @@ pub trait NonLinearSolver<M: Matrix>: Default {
     fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(&mut self, op: &C);
 
     /// Reset the approximation of the Jacobian matrix.
-    fn reset_jacobian<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
+    fn reset_jacobian<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(
         &mut self,
         op: &C,
         x: &M::V,

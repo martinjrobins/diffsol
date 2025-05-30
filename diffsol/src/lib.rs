@@ -224,6 +224,8 @@ pub use vector::{
 #[cfg(feature = "cuda")]
 pub use context::cuda::CudaContext;
 #[cfg(feature = "cuda")]
+pub use linear_solver::cuda::lu::CudaLU;
+#[cfg(feature = "cuda")]
 pub use matrix::cuda::{CudaMat, CudaMatMut, CudaMatRef};
 #[cfg(feature = "cuda")]
 pub use scalar::cuda::{CudaType, ScalarCuda};
