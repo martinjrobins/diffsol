@@ -1,5 +1,5 @@
-use crate::{MyEquations, MyInit, MyMass, MyOut, MyRhs, MyRoot, V};
-use diffsol::{OdeEquations, OdeEquationsRef, Vector};
+use crate::{MyEquations, MyInit, MyMass, MyOut, MyRhs, MyRoot, M, V};
+use diffsol::{OdeEquations, OdeEquationsRef, UnitCallable, Vector};
 
 impl<'a> OdeEquationsRef<'a> for MyEquations {
     type Rhs = MyRhs<'a>;
@@ -7,6 +7,7 @@ impl<'a> OdeEquationsRef<'a> for MyEquations {
     type Init = MyInit<'a>;
     type Root = MyRoot<'a>;
     type Out = MyOut<'a>;
+    type Diffusion = UnitCallable<M>;
 }
 
 impl OdeEquations for MyEquations {

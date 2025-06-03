@@ -1,9 +1,10 @@
 use super::Op;
-use crate::{Vector, Scalar};
-use num_traits::{Zero, One};
+use crate::{Scalar, Vector};
+use num_traits::{One, Zero};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StochOpKind {
+    Zero,
     Scalar,
     Diagonal,
     Additive,
@@ -11,7 +12,7 @@ pub enum StochOpKind {
 }
 
 /// Stochastic differential equation (SDE) operations.
-/// 
+///
 /// For scalar noise, nprocess is 1.
 /// For diagonal noise, y_i only depends on x_i and d_w_i.
 /// For additive noise, y_i does not depend on x_i.
@@ -19,6 +20,9 @@ pub trait StochOp: Op {
     fn nprocess(&self) -> usize;
     fn call_inplace(&self, x: &Self::V, d_w: &Self::V, t: Self::T, y: &mut [Self::V]);
     fn kind(&self) -> StochOpKind {
+        if self.nprocess() == 0 {
+            return StochOpKind::Zero;
+        }
         if self.nprocess() == 1 {
             return StochOpKind::Scalar;
         }
@@ -30,10 +34,12 @@ pub trait StochOp: Op {
         let t = Self::T::zero();
         self.call_inplace(&x, &d_w, t, &mut y);
         // if none of the outputs has nans, it is additive
-        if y.iter().all(|y_j| !y_j.clone_as_vec().iter().any(|&val| val.is_nan())) {
+        if y.iter()
+            .all(|y_j| !y_j.clone_as_vec().iter().any(|&val| val.is_nan()))
+        {
             return StochOpKind::Additive;
         }
-        
+
         x.fill(Self::T::one());
 
         for i in 0..self.nprocess() {
@@ -47,7 +53,7 @@ pub trait StochOp: Op {
             for (j, y_j) in y.iter().enumerate() {
                 if j != i {
                     let has_nans = y_j.clone_as_vec().iter().any(|&val| val.is_nan());
-                    if has_nans  {
+                    if has_nans {
                         return StochOpKind::Other;
                     }
                 }
@@ -57,7 +63,6 @@ pub trait StochOp: Op {
         StochOpKind::Diagonal
     }
 }
-
 
 #[cfg(test)]
 mod test {
@@ -74,20 +79,30 @@ mod test {
         type V = NalgebraVec<f64>;
         type C = NalgebraContext;
         type M = NalgebraMat<f64>;
-        
-        fn nstates(&self) -> usize { 2 }
-        fn nout(&self) -> usize { 2 }
-        fn nparams(&self) -> usize { 0 }
-        fn context(&self) -> &Self::C { &self.ctx }
+
+        fn nstates(&self) -> usize {
+            2
+        }
+        fn nout(&self) -> usize {
+            2
+        }
+        fn nparams(&self) -> usize {
+            0
+        }
+        fn context(&self) -> &Self::C {
+            &self.ctx
+        }
     }
     impl StochOp for TestScalar {
-        fn nprocess(&self) -> usize { 1 }
+        fn nprocess(&self) -> usize {
+            1
+        }
         fn call_inplace(&self, x: &Self::V, d_w: &Self::V, _t: Self::T, y: &mut [Self::V]) {
             assert_eq!(y.len(), 1);
             y[0] = x + d_w.clone();
         }
     }
-    
+
     struct TestDiagonal {
         ctx: NalgebraContext,
     }
@@ -96,14 +111,24 @@ mod test {
         type V = NalgebraVec<f64>;
         type C = NalgebraContext;
         type M = NalgebraMat<f64>;
-        
-        fn nstates(&self) -> usize { 2 }
-        fn nout(&self) -> usize { 2 }
-        fn nparams(&self) -> usize { 0 }
-        fn context(&self) -> &Self::C { &self.ctx }
+
+        fn nstates(&self) -> usize {
+            2
+        }
+        fn nout(&self) -> usize {
+            2
+        }
+        fn nparams(&self) -> usize {
+            0
+        }
+        fn context(&self) -> &Self::C {
+            &self.ctx
+        }
     }
     impl StochOp for TestDiagonal {
-        fn nprocess(&self) -> usize { 2 }
+        fn nprocess(&self) -> usize {
+            2
+        }
         fn call_inplace(&self, x: &Self::V, d_w: &Self::V, _t: Self::T, y: &mut [Self::V]) {
             assert_eq!(y.len(), 2);
             for i in 0..2 {
@@ -119,14 +144,24 @@ mod test {
         type V = NalgebraVec<f64>;
         type C = NalgebraContext;
         type M = NalgebraMat<f64>;
-        
-        fn nstates(&self) -> usize { 2 }
-        fn nout(&self) -> usize { 2 }
-        fn nparams(&self) -> usize { 0 }
-        fn context(&self) -> &Self::C { &self.ctx }
+
+        fn nstates(&self) -> usize {
+            2
+        }
+        fn nout(&self) -> usize {
+            2
+        }
+        fn nparams(&self) -> usize {
+            0
+        }
+        fn context(&self) -> &Self::C {
+            &self.ctx
+        }
     }
     impl StochOp for TestAdditive {
-        fn nprocess(&self) -> usize { 2 }
+        fn nprocess(&self) -> usize {
+            2
+        }
         fn call_inplace(&self, _x: &Self::V, d_w: &Self::V, _t: Self::T, y: &mut [Self::V]) {
             assert_eq!(y.len(), 2);
             let mut ones = Self::V::zeros(self.nout(), self.context().clone());
@@ -145,14 +180,24 @@ mod test {
         type V = NalgebraVec<f64>;
         type C = NalgebraContext;
         type M = NalgebraMat<f64>;
-        
-        fn nstates(&self) -> usize { 2 }
-        fn nout(&self) -> usize { 2 }
-        fn nparams(&self) -> usize { 0 }
-        fn context(&self) -> &Self::C { &self.ctx }
+
+        fn nstates(&self) -> usize {
+            2
+        }
+        fn nout(&self) -> usize {
+            2
+        }
+        fn nparams(&self) -> usize {
+            0
+        }
+        fn context(&self) -> &Self::C {
+            &self.ctx
+        }
     }
     impl StochOp for TestOther {
-        fn nprocess(&self) -> usize { 2 }
+        fn nprocess(&self) -> usize {
+            2
+        }
         fn call_inplace(&self, x: &Self::V, d_w: &Self::V, _t: Self::T, y: &mut [Self::V]) {
             assert_eq!(y.len(), 2);
             for i in 0..2 {
@@ -163,30 +208,36 @@ mod test {
             }
         }
     }
-    
+
     #[test]
     fn test_additive() {
-        let op = TestAdditive { ctx: NalgebraContext };
+        let op = TestAdditive {
+            ctx: NalgebraContext,
+        };
         assert_eq!(op.kind(), StochOpKind::Additive);
     }
-    
+
     #[test]
     fn test_diagonal() {
-        let op = TestDiagonal { ctx: NalgebraContext };
+        let op = TestDiagonal {
+            ctx: NalgebraContext,
+        };
         assert_eq!(op.kind(), StochOpKind::Diagonal);
     }
-    
+
     #[test]
     fn test_scalar() {
-        let op = TestScalar { ctx: NalgebraContext };
+        let op = TestScalar {
+            ctx: NalgebraContext,
+        };
         assert_eq!(op.kind(), StochOpKind::Scalar);
     }
 
     #[test]
     fn test_other() {
-        let op = TestOther { ctx: NalgebraContext };
+        let op = TestOther {
+            ctx: NalgebraContext,
+        };
         assert_eq!(op.kind(), StochOpKind::Other);
     }
 }
-    
- 

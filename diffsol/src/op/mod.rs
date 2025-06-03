@@ -1,7 +1,7 @@
 use crate::{
     ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, Context, LinearOp, LinearOpTranspose,
     Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar,
-    Vector,
+    StochOp, Vector,
 };
 
 use nonlinear_op::NonLinearOpJacobian;
@@ -23,9 +23,9 @@ pub mod linear_op;
 pub mod linearise;
 pub mod matrix;
 pub mod nonlinear_op;
+pub mod sde;
 pub mod sdirk;
 pub mod unit;
-pub mod sde;
 
 /// A generic operator trait.
 ///
@@ -75,6 +75,10 @@ pub trait BuilderOp: Op {
     fn calculate_sparsity(&mut self, y0: &Self::V, t0: Self::T, p: &Self::V);
 }
 
+pub trait BuilderStochOp: StochOp + BuilderOp {
+    fn set_nprocess(&mut self, nprocess: usize);
+}
+
 impl<C: Op> Op for ParameterisedOp<'_, C> {
     type V = C::V;
     type T = C::T;
@@ -94,6 +98,15 @@ impl<C: Op> Op for ParameterisedOp<'_, C> {
     }
     fn context(&self) -> &Self::C {
         self.op.context()
+    }
+}
+
+impl<C: StochOp> StochOp for ParameterisedOp<'_, C> {
+    fn nprocess(&self) -> usize {
+        self.op.nprocess()
+    }
+    fn call_inplace(&self, x: &Self::V, d_w: &Self::V, t: Self::T, y: &mut [Self::V]) {
+        self.op.call_inplace(x, d_w, t, y)
     }
 }
 

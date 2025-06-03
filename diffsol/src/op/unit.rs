@@ -2,11 +2,11 @@
 
 use crate::{
     LinearOp, LinearOpSens, LinearOpTranspose, Matrix, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Op, Vector,
+    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Op, StochOp, Vector,
 };
 use num_traits::{One, Zero};
 
-use super::{BuilderOp, ParameterisedOp};
+use super::{BuilderOp, BuilderStochOp, ParameterisedOp};
 
 /// A dummy operator that returns the input vector. Can be used either as a [NonLinearOp] or [LinearOp].
 pub struct UnitCallable<M: Matrix> {
@@ -57,6 +57,12 @@ impl<M: Matrix> BuilderOp for UnitCallable<M> {
     }
     fn set_nstates(&mut self, nstates: usize) {
         self.n = nstates;
+    }
+}
+
+impl<M: Matrix> BuilderStochOp for UnitCallable<M> {
+    fn set_nprocess(&mut self, _nprocess: usize) {
+        // Do nothing
     }
 }
 
@@ -154,4 +160,11 @@ impl<M: Matrix> LinearOpTranspose for UnitCallable<M> {
     fn gemv_transpose_inplace(&self, x: &Self::V, _t: Self::T, beta: Self::T, y: &mut Self::V) {
         y.axpy(Self::T::one(), x, beta);
     }
+}
+
+impl<M: Matrix> StochOp for UnitCallable<M> {
+    fn nprocess(&self) -> usize {
+        0
+    }
+    fn call_inplace(&self, _x: &Self::V, _d_w: &Self::V, _t: Self::T, _y: &mut [Self::V]) {}
 }

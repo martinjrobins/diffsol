@@ -12,8 +12,8 @@ use crate::{
     jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
     op::nonlinear_op::NonLinearOpJacobian, ConstantOp, ConstantOpSens, ConstantOpSensAdjoint,
     LinearOp, LinearOpTranspose, Matrix, MatrixHost, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scale, Vector,
-    VectorHost,
+    NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scale,
+    UnitCallable, Vector, VectorHost,
 };
 
 pub type T = f64;
@@ -683,6 +683,7 @@ impl<'a, M: MatrixHost<T = T>, CG: CodegenModule> OdeEquationsRef<'a> for DiffSl
     type Root = DiffSlRoot<'a, M, CG>;
     type Init = DiffSlInit<'a, M, CG>;
     type Out = DiffSlOut<'a, M, CG>;
+    type Diffusion = UnitCallable<M>;
 }
 
 impl<M: MatrixHost<T = T>, CG: CodegenModule> OdeEquations for DiffSl<M, CG> {

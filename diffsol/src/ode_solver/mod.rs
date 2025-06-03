@@ -450,6 +450,7 @@ mod tests {
         type Root = ParameterisedOp<'a, UnitCallable<M>>;
         type Init = &'a TestEqnInit<M>;
         type Out = ParameterisedOp<'a, UnitCallable<M>>;
+        type Diffusion = ParameterisedOp<'a, UnitCallable<M>>;
     }
 
     impl<M: Matrix> OdeEquations for TestEqn<M> {

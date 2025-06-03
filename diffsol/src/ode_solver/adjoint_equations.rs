@@ -580,6 +580,7 @@ where
     type Root = <Eqn as OdeEquationsRef<'a>>::Root;
     type Init = &'a AdjointInit<'b, Eqn>;
     type Out = &'a AdjointOut<'b, Eqn, Method>;
+    type Diffusion = <Eqn as OdeEquationsRef<'a>>::Diffusion;
 }
 
 impl<'a, Eqn, Method> OdeEquations for AdjointEquations<'a, Eqn, Method>

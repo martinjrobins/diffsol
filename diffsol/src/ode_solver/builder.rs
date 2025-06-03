@@ -2,10 +2,11 @@ use crate::{
     error::{DiffsolError, OdeSolverError},
     matrix::dense_nalgebra_serial::NalgebraMat,
     ode_solver_error,
-    op::{linear_closure_with_adjoint::LinearClosureWithAdjoint, BuilderOp},
+    op::{linear_closure_with_adjoint::LinearClosureWithAdjoint, BuilderOp, BuilderStochOp},
     Closure, ClosureNoJac, ClosureWithAdjoint, ClosureWithSens, ConstantClosure,
     ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp, LinearClosure, LinearOp,
-    Matrix, NonLinearOp, OdeEquations, OdeSolverProblem, Op, ParameterisedOp, UnitCallable, Vector,
+    Matrix, NonLinearOp, OdeEquations, OdeSolverProblem, Op, ParameterisedOp, StochOp,
+    UnitCallable, Vector,
 };
 
 use super::equations::OdeSolverEquations;
@@ -18,6 +19,7 @@ pub struct OdeBuilder<
     Mass = UnitCallable<M>,
     Root = UnitCallable<M>,
     Out = UnitCallable<M>,
+    Diffusion = UnitCallable<M>,
 > {
     t0: M::T,
     h0: M::T,
@@ -37,6 +39,7 @@ pub struct OdeBuilder<
     mass: Option<Mass>,
     root: Option<Root>,
     out: Option<Out>,
+    diffusion: Option<Diffusion>,
     ctx: M::C,
 }
 
@@ -84,7 +87,7 @@ impl Default for OdeBuilder {
 /// let y = solver.interpolate(t);
 /// ```
 ///
-impl<M, Rhs, Init, Mass, Root, Out> OdeBuilder<M, Rhs, Init, Mass, Root, Out>
+impl<M, Rhs, Init, Mass, Root, Out, Diffusion> OdeBuilder<M, Rhs, Init, Mass, Root, Out, Diffusion>
 where
     M: Matrix,
 {
@@ -105,6 +108,7 @@ where
             mass: None,
             root: None,
             out: None,
+            diffusion: None,
             t0: 0.0.into(),
             h0: 1.0.into(),
             rtol: default_rtol,
@@ -127,12 +131,15 @@ where
     /// # Arguments
     ///
     /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
-    pub fn rhs<F>(self, rhs: F) -> OdeBuilder<M, ClosureNoJac<M, F>, Init, Mass, Root, Out>
+    pub fn rhs<F>(
+        self,
+        rhs: F,
+    ) -> OdeBuilder<M, ClosureNoJac<M, F>, Init, Mass, Root, Out, Diffusion>
     where
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, ClosureNoJac<M, F>, Init, Mass, Root, Out> {
+        OdeBuilder::<M, ClosureNoJac<M, F>, Init, Mass, Root, Out, Diffusion> {
             rhs: Some(ClosureNoJac::new(
                 rhs,
                 nstates,
@@ -144,6 +151,7 @@ where
             mass: self.mass,
             root: self.root,
             out: self.out,
+            diffusion: self.diffusion,
 
             t0: self.t0,
             h0: self.h0,
@@ -172,13 +180,13 @@ where
         self,
         rhs: F,
         rhs_jac: G,
-    ) -> OdeBuilder<M, Closure<M, F, G>, Init, Mass, Root, Out>
+    ) -> OdeBuilder<M, Closure<M, F, G>, Init, Mass, Root, Out, Diffusion>
     where
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
         G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, Closure<M, F, G>, Init, Mass, Root, Out> {
+        OdeBuilder::<M, Closure<M, F, G>, Init, Mass, Root, Out, Diffusion> {
             rhs: Some(Closure::new(
                 rhs,
                 rhs_jac,
@@ -191,6 +199,7 @@ where
             mass: self.mass,
             root: self.root,
             out: self.out,
+            diffusion: self.diffusion,
 
             t0: self.t0,
             h0: self.h0,
@@ -215,19 +224,20 @@ where
     /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
     /// - `rhs_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
     /// - `rhs_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the rhs wrt the parameters, with the vector v.
+    #[allow(clippy::type_complexity)]
     pub fn rhs_sens_implicit<F, G, H>(
         self,
         rhs: F,
         rhs_jac: G,
         rhs_sens: H,
-    ) -> OdeBuilder<M, ClosureWithSens<M, F, G, H>, Init, Mass, Root, Out>
+    ) -> OdeBuilder<M, ClosureWithSens<M, F, G, H>, Init, Mass, Root, Out, Diffusion>
     where
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
         G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
         H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, ClosureWithSens<M, F, G, H>, Init, Mass, Root, Out> {
+        OdeBuilder::<M, ClosureWithSens<M, F, G, H>, Init, Mass, Root, Out, Diffusion> {
             rhs: Some(ClosureWithSens::new(
                 rhs,
                 rhs_jac,
@@ -241,6 +251,7 @@ where
             mass: self.mass,
             root: self.root,
             out: self.out,
+            diffusion: self.diffusion,
 
             t0: self.t0,
             h0: self.h0,
@@ -266,7 +277,7 @@ where
         rhs_jac: G,
         rhs_adjoint: H,
         rhs_sens_adjoint: I,
-    ) -> OdeBuilder<M, ClosureWithAdjoint<M, F, G, H, I>, Init, Mass, Root, Out>
+    ) -> OdeBuilder<M, ClosureWithAdjoint<M, F, G, H, I>, Init, Mass, Root, Out, Diffusion>
     where
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
         G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
@@ -274,7 +285,7 @@ where
         I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, ClosureWithAdjoint<M, F, G, H, I>, Init, Mass, Root, Out> {
+        OdeBuilder::<M, ClosureWithAdjoint<M, F, G, H, I>, Init, Mass, Root, Out, Diffusion> {
             rhs: Some(ClosureWithAdjoint::new(
                 rhs,
                 rhs_jac,
@@ -289,6 +300,7 @@ where
             mass: self.mass,
             root: self.root,
             out: self.out,
+            diffusion: self.diffusion,
 
             t0: self.t0,
             h0: self.h0,
@@ -315,16 +327,17 @@ where
         self,
         init: F,
         nstates: usize,
-    ) -> OdeBuilder<M, Rhs, ConstantClosure<M, F>, Mass, Root, Out>
+    ) -> OdeBuilder<M, Rhs, ConstantClosure<M, F>, Mass, Root, Out, Diffusion>
     where
         F: Fn(&M::V, M::T, &mut M::V),
     {
-        OdeBuilder::<M, Rhs, ConstantClosure<M, F>, Mass, Root, Out> {
+        OdeBuilder::<M, Rhs, ConstantClosure<M, F>, Mass, Root, Out, Diffusion> {
             rhs: self.rhs,
             init: Some(ConstantClosure::new(init, nstates, 0, self.ctx.clone())),
             mass: self.mass,
             root: self.root,
             out: self.out,
+            diffusion: self.diffusion,
 
             t0: self.t0,
             h0: self.h0,
@@ -353,12 +366,12 @@ where
         init: F,
         init_sens: G,
         nstates: usize,
-    ) -> OdeBuilder<M, Rhs, ConstantClosureWithSens<M, F, G>, Mass, Root, Out>
+    ) -> OdeBuilder<M, Rhs, ConstantClosureWithSens<M, F, G>, Mass, Root, Out, Diffusion>
     where
         F: Fn(&M::V, M::T, &mut M::V),
         G: Fn(&M::V, M::T, &M::V, &mut M::V),
     {
-        OdeBuilder::<M, Rhs, ConstantClosureWithSens<M, F, G>, Mass, Root, Out> {
+        OdeBuilder::<M, Rhs, ConstantClosureWithSens<M, F, G>, Mass, Root, Out, Diffusion> {
             rhs: self.rhs,
             init: Some(ConstantClosureWithSens::new(
                 init,
@@ -370,6 +383,7 @@ where
             mass: self.mass,
             root: self.root,
             out: self.out,
+            diffusion: self.diffusion,
 
             t0: self.t0,
             h0: self.h0,
@@ -399,12 +413,12 @@ where
         init: F,
         init_sens_adjoint: G,
         nstates: usize,
-    ) -> OdeBuilder<M, Rhs, ConstantClosureWithAdjoint<M, F, G>, Mass, Root, Out>
+    ) -> OdeBuilder<M, Rhs, ConstantClosureWithAdjoint<M, F, G>, Mass, Root, Out, Diffusion>
     where
         F: Fn(&M::V, M::T, &mut M::V),
         G: Fn(&M::V, M::T, &M::V, &mut M::V),
     {
-        OdeBuilder::<M, Rhs, ConstantClosureWithAdjoint<M, F, G>, Mass, Root, Out> {
+        OdeBuilder::<M, Rhs, ConstantClosureWithAdjoint<M, F, G>, Mass, Root, Out, Diffusion> {
             rhs: self.rhs,
             init: Some(ConstantClosureWithAdjoint::new(
                 init,
@@ -416,6 +430,7 @@ where
             mass: self.mass,
             root: self.root,
             out: self.out,
+            diffusion: self.diffusion,
 
             t0: self.t0,
             h0: self.h0,
@@ -438,12 +453,15 @@ where
     ///
     /// # Arguments
     /// - `mass`: Function of type Fn(v: &V, p: &V, t: S, beta: S, y: &mut V) that computes a gemv multiplication of the mass matrix with the vector v (i.e. y = M * v + beta * y).
-    pub fn mass<F>(self, mass: F) -> OdeBuilder<M, Rhs, Init, LinearClosure<M, F>, Root, Out>
+    pub fn mass<F>(
+        self,
+        mass: F,
+    ) -> OdeBuilder<M, Rhs, Init, LinearClosure<M, F>, Root, Out, Diffusion>
     where
         F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, Rhs, Init, LinearClosure<M, F>, Root, Out> {
+        OdeBuilder::<M, Rhs, Init, LinearClosure<M, F>, Root, Out, Diffusion> {
             rhs: self.rhs,
             init: self.init,
             mass: Some(LinearClosure::new(
@@ -455,6 +473,7 @@ where
             )),
             root: self.root,
             out: self.out,
+            diffusion: self.diffusion,
 
             t0: self.t0,
             h0: self.h0,
@@ -485,13 +504,13 @@ where
         self,
         mass: F,
         mass_adjoint: G,
-    ) -> OdeBuilder<M, Rhs, Init, LinearClosureWithAdjoint<M, F, G>, Root, Out>
+    ) -> OdeBuilder<M, Rhs, Init, LinearClosureWithAdjoint<M, F, G>, Root, Out, Diffusion>
     where
         F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
         G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, Rhs, Init, LinearClosureWithAdjoint<M, F, G>, Root, Out> {
+        OdeBuilder::<M, Rhs, Init, LinearClosureWithAdjoint<M, F, G>, Root, Out, Diffusion> {
             rhs: self.rhs,
             init: self.init,
             mass: Some(LinearClosureWithAdjoint::new(
@@ -504,6 +523,7 @@ where
             )),
             root: self.root,
             out: self.out,
+            diffusion: self.diffusion,
 
             t0: self.t0,
             h0: self.h0,
@@ -531,12 +551,12 @@ where
         self,
         root: F,
         nroots: usize,
-    ) -> OdeBuilder<M, Rhs, Init, Mass, ClosureNoJac<M, F>, Out>
+    ) -> OdeBuilder<M, Rhs, Init, Mass, ClosureNoJac<M, F>, Out, Diffusion>
     where
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, Rhs, Init, Mass, ClosureNoJac<M, F>, Out> {
+        OdeBuilder::<M, Rhs, Init, Mass, ClosureNoJac<M, F>, Out, Diffusion> {
             rhs: self.rhs,
             init: self.init,
             mass: self.mass,
@@ -548,6 +568,7 @@ where
                 self.ctx.clone(),
             )),
             out: self.out,
+            diffusion: self.diffusion,
 
             t0: self.t0,
             h0: self.h0,
@@ -571,13 +592,13 @@ where
         out: F,
         out_jac: G,
         nout: usize,
-    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Closure<M, F, G>>
+    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Closure<M, F, G>, Diffusion>
     where
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
         G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, Rhs, Init, Mass, Root, Closure<M, F, G>> {
+        OdeBuilder::<M, Rhs, Init, Mass, Root, Closure<M, F, G>, Diffusion> {
             rhs: self.rhs,
             init: self.init,
             mass: self.mass,
@@ -590,6 +611,8 @@ where
                 nstates,
                 self.ctx.clone(),
             )),
+            diffusion: self.diffusion,
+
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -615,7 +638,7 @@ where
         out_adjoint: H,
         out_sens_adjoint: I,
         nout: usize,
-    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, ClosureWithAdjoint<M, F, G, H, I>>
+    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, ClosureWithAdjoint<M, F, G, H, I>, Diffusion>
     where
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
         G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
@@ -623,7 +646,7 @@ where
         I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, Rhs, Init, Mass, Root, ClosureWithAdjoint<M, F, G, H, I>> {
+        OdeBuilder::<M, Rhs, Init, Mass, Root, ClosureWithAdjoint<M, F, G, H, I>, Diffusion> {
             rhs: self.rhs,
             init: self.init,
             mass: self.mass,
@@ -638,6 +661,8 @@ where
                 nstates,
                 self.ctx.clone(),
             )),
+            diffusion: self.diffusion,
+
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -842,7 +867,10 @@ where
     #[allow(clippy::type_complexity)]
     pub fn build(
         self,
-    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>>, DiffsolError>
+    ) -> Result<
+        OdeSolverProblem<OdeSolverEquations<M, Rhs, Init, Mass, Root, Out, Diffusion>>,
+        DiffsolError,
+    >
     where
         M: Matrix,
         Rhs: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
@@ -850,11 +878,13 @@ where
         Mass: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
         Root: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
         Out: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
+        Diffusion: BuilderStochOp<M = M, V = M::V, T = M::T, C = M::C>,
         for<'a> ParameterisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
         for<'a> ParameterisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T, C = M::C>,
         for<'a> ParameterisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T, C = M::C>,
         for<'a> ParameterisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
         for<'a> ParameterisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+        for<'a> ParameterisedOp<'a, Diffusion>: StochOp<M = M, V = M::V, T = M::T, C = M::C>,
     {
         let p = Self::build_p(self.p, self.ctx.clone());
         let nparams = p.len();
@@ -867,6 +897,7 @@ where
         let mut mass = self.mass;
         let mut root = self.root;
         let mut out = self.out;
+        let mut diffusion = self.diffusion;
 
         let init_op = ParameterisedOp::new(&init, &p);
         let y0 = init_op.call(self.t0);
@@ -895,6 +926,11 @@ where
             out.set_nparams(nparams);
         }
 
+        if let Some(ref mut diffusion) = diffusion {
+            diffusion.set_nstates(nstates);
+            diffusion.set_nparams(nparams);
+        }
+
         if self.use_coloring || M::is_sparse() {
             rhs.calculate_sparsity(&y0, self.t0, &p);
             if let Some(ref mut mass) = mass {
@@ -902,7 +938,7 @@ where
             }
         }
         let nout = out.as_ref().map(|out| out.nout());
-        let eqn = OdeSolverEquations::new(rhs, init, mass, root, out, p);
+        let eqn = OdeSolverEquations::new(rhs, init, mass, root, out, diffusion, p);
 
         let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
             self.atol,
