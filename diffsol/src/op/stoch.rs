@@ -4,6 +4,7 @@ use num_traits::{Zero, One};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StochOpKind {
+    Zero,
     Scalar,
     Diagonal,
     Additive,
@@ -17,8 +18,11 @@ pub enum StochOpKind {
 /// For additive noise, y_i does not depend on x_i.
 pub trait StochOp: Op {
     fn nprocess(&self) -> usize;
-    fn call_inplace(&self, x: &Self::V, d_w: &Self::V, t: Self::T, y: &mut [Self::V]);
+    fn process_inplace(&self, x: &Self::V, d_w: &Self::V, t: Self::T, y: &mut [Self::V]);
     fn kind(&self) -> StochOpKind {
+        if self.nprocess() == 0 {
+            return StochOpKind::Zero;
+        }
         if self.nprocess() == 1 {
             return StochOpKind::Scalar;
         }
@@ -28,7 +32,7 @@ pub trait StochOp: Op {
         let mut d_w = Self::V::zeros(self.nprocess(), self.context().clone());
         d_w.fill(Self::T::one());
         let t = Self::T::zero();
-        self.call_inplace(&x, &d_w, t, &mut y);
+        self.process_inplace(&x, &d_w, t, &mut y);
         // if none of the outputs has nans, it is additive
         if y.iter().all(|y_j| !y_j.clone_as_vec().iter().any(|&val| val.is_nan())) {
             return StochOpKind::Additive;
@@ -41,7 +45,7 @@ pub trait StochOp: Op {
                 d_w.set_index(i - 1, Self::T::one());
             }
             d_w.set_index(i, Self::T::NAN);
-            self.call_inplace(&x, &d_w, t, &mut y);
+            self.process_inplace(&x, &d_w, t, &mut y);
 
             // if any of the y[j] j != i has nans, it is other
             for (j, y_j) in y.iter().enumerate() {
@@ -82,7 +86,7 @@ mod test {
     }
     impl StochOp for TestScalar {
         fn nprocess(&self) -> usize { 1 }
-        fn call_inplace(&self, x: &Self::V, d_w: &Self::V, _t: Self::T, y: &mut [Self::V]) {
+        fn process_inplace(&self, x: &Self::V, d_w: &Self::V, _t: Self::T, y: &mut [Self::V]) {
             assert_eq!(y.len(), 1);
             y[0] = x + d_w.clone();
         }
@@ -104,7 +108,7 @@ mod test {
     }
     impl StochOp for TestDiagonal {
         fn nprocess(&self) -> usize { 2 }
-        fn call_inplace(&self, x: &Self::V, d_w: &Self::V, _t: Self::T, y: &mut [Self::V]) {
+        fn process_inplace(&self, x: &Self::V, d_w: &Self::V, _t: Self::T, y: &mut [Self::V]) {
             assert_eq!(y.len(), 2);
             for i in 0..2 {
                 y[i] = x.clone() * Scale(d_w[i]);
@@ -127,7 +131,7 @@ mod test {
     }
     impl StochOp for TestAdditive {
         fn nprocess(&self) -> usize { 2 }
-        fn call_inplace(&self, _x: &Self::V, d_w: &Self::V, _t: Self::T, y: &mut [Self::V]) {
+        fn process_inplace(&self, _x: &Self::V, d_w: &Self::V, _t: Self::T, y: &mut [Self::V]) {
             assert_eq!(y.len(), 2);
             let mut ones = Self::V::zeros(self.nout(), self.context().clone());
             ones.fill(Self::T::one());
@@ -153,7 +157,7 @@ mod test {
     }
     impl StochOp for TestOther {
         fn nprocess(&self) -> usize { 2 }
-        fn call_inplace(&self, x: &Self::V, d_w: &Self::V, _t: Self::T, y: &mut [Self::V]) {
+        fn process_inplace(&self, x: &Self::V, d_w: &Self::V, _t: Self::T, y: &mut [Self::V]) {
             assert_eq!(y.len(), 2);
             for i in 0..2 {
                 y[i] = x.clone() * Scale(d_w[i]);

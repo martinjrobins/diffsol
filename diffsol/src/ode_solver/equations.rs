@@ -1,7 +1,7 @@
 use crate::{
     op::{constant_op::ConstantOpSensAdjoint, linear_op::LinearOpTranspose, ParameterisedOp},
     ConstantOp, ConstantOpSens, LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Op, Vector,
+    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Op, Vector, StochOp,
 };
 use serde::Serialize;
 
@@ -325,7 +325,19 @@ pub trait OdeEquationsImplicit:
 }
 
 impl<T> OdeEquationsImplicit for T where
-    T: OdeEquations<Rhs: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = Self::C>>
+    T: OdeEquations<Rhs: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>>
+{
+}
+
+pub trait OdeEquationsStoch:
+    OdeEquations<Rhs: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C> + StochOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>>
+{
+}
+
+impl<T> OdeEquationsStoch for T where
+    T: OdeEquations<
+        Rhs: NonLinearOp<M = T::M, V = T::V, T = T::T, C = T::C> + StochOp<M = T::M, V = T::V, T = T::T, C = T::C>,
+    >
 {
 }
 

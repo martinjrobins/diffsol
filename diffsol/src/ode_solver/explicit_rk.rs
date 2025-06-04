@@ -1,6 +1,5 @@
 use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
-use crate::ode_solver_error;
 use crate::vector::VectorRef;
 use crate::NoAug;
 use crate::OdeSolverStopReason;
@@ -8,8 +7,8 @@ use crate::RkState;
 use crate::RootFinder;
 use crate::Tableau;
 use crate::{
-    scale, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, MatrixView, NonLinearOp,
-    OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Scalar, StateRef,
+    AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, MatrixView, NonLinearOp,
+    OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef,
     StateRefMut, Vector, VectorViewMut,
 };
 use num_traits::abs;
@@ -19,6 +18,7 @@ use num_traits::Zero;
 
 use super::bdf::BdfStatistics;
 use super::method::AugmentedOdeSolverMethod;
+use super::utils::{handle_tstop, interpolate, interpolate_sens, interpolate_out};
 
 impl<'a, Eqn, M, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
     for ExplicitRk<'a, Eqn, M, AugEqn>
@@ -78,7 +78,6 @@ where
     M: DenseMatrix<V = Eqn::V, T = Eqn::T>,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
-    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
 {
     fn clone(&self) -> Self {
         Self {
@@ -106,7 +105,6 @@ where
     M: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
-    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
 {
     const MIN_FACTOR: f64 = 0.2;
     const MAX_FACTOR: f64 = 10.0;
@@ -244,70 +242,7 @@ where
         &self.statistics
     }
 
-    fn handle_tstop(
-        &mut self,
-        tstop: Eqn::T,
-    ) -> Result<Option<OdeSolverStopReason<Eqn::T>>, DiffsolError> {
-        let state = &mut self.state;
-
-        // check if the we are at tstop
-        let troundoff = Eqn::T::from(100.0) * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
-        if abs(state.t - tstop) <= troundoff {
-            self.tstop = None;
-            return Ok(Some(OdeSolverStopReason::TstopReached));
-        } else if (state.h > M::T::zero() && tstop < state.t - troundoff)
-            || (state.h < M::T::zero() && tstop > state.t + troundoff)
-        {
-            return Err(DiffsolError::from(
-                OdeSolverError::StopTimeBeforeCurrentTime {
-                    stop_time: tstop.into(),
-                    state_time: state.t.into(),
-                },
-            ));
-        }
-
-        // check if the next step will be beyond tstop, if so adjust the step size
-        if (state.h > M::T::zero() && state.t + state.h > tstop + troundoff)
-            || (state.h < M::T::zero() && state.t + state.h < tstop - troundoff)
-        {
-            let factor = (tstop - state.t) / state.h;
-            state.h *= factor;
-        }
-        Ok(None)
-    }
-
-    fn interpolate_from_diff(h: Eqn::T, y0: &Eqn::V, beta_f: &Eqn::V, diff: &M) -> Eqn::V {
-        // ret = old_y + sum_{i=0}^{s_star-1} beta[i] * diff[:, i]
-        let mut ret = y0.clone();
-        diff.gemv(h, beta_f, Eqn::T::one(), &mut ret);
-        ret
-    }
-
-    fn interpolate_beta_function(theta: Eqn::T, beta: &M) -> Eqn::V {
-        let poly_order = beta.ncols();
-        let s_star = beta.nrows();
-        let mut thetav = Vec::with_capacity(poly_order);
-        thetav.push(theta);
-        for i in 1..poly_order {
-            thetav.push(theta * thetav[i - 1]);
-        }
-        // beta_poly = beta * thetav
-        let thetav = Eqn::V::from_vec(thetav, beta.context().clone());
-        let mut beta_f = <Eqn::V as Vector>::zeros(s_star, beta.context().clone());
-        beta.gemv(M::T::one(), &thetav, Eqn::T::zero(), &mut beta_f);
-        beta_f
-    }
-
-    fn interpolate_hermite(h: Eqn::T, theta: Eqn::T, u0: &Eqn::V, u1: &Eqn::V, diff: &M) -> Eqn::V {
-        let f0 = diff.column(0);
-        let f1 = diff.column(diff.ncols() - 1);
-        u0 * scale(Eqn::T::from(1.0) - theta)
-            + u1 * scale(theta)
-            + ((u1 - u0) * scale(Eqn::T::from(1.0) - Eqn::T::from(2.0) * theta)
-                + f0 * scale(h * (theta - Eqn::T::from(1.0)))
-                + f1 * scale(h * theta))
-                * scale(theta * (theta - Eqn::T::from(1.0)))
-    }
+    
 }
 
 impl<'a, Eqn, M, AugmentedEqn> OdeSolverMethod<'a, Eqn> for ExplicitRk<'a, Eqn, M, AugmentedEqn>
@@ -316,7 +251,6 @@ where
     M: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
-    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
 {
     type State = RkState<Eqn::V>;
 
@@ -628,8 +562,11 @@ where
 
         // check if the we are at tstop
         if let Some(tstop) = self.tstop {
-            if let Some(reason) = self.handle_tstop(tstop).unwrap() {
-                return Ok(reason);
+            if let Some(OdeSolverStopReason::TstopReached) =
+                handle_tstop(self.state.as_mut(), tstop)?
+            {
+                self.tstop = None; // reset tstop
+                return Ok(OdeSolverStopReason::TstopReached);
             }
         }
 
@@ -639,7 +576,7 @@ where
 
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
         self.tstop = Some(tstop);
-        if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
+        if let Some(OdeSolverStopReason::TstopReached) = handle_tstop(self.state.as_mut(), tstop)? {
             let error = OdeSolverError::StopTimeAtCurrentTime;
             self.tstop = None;
             return Err(DiffsolError::from(error));
@@ -648,124 +585,36 @@ where
     }
 
     fn interpolate_sens(&self, t: <Eqn as Op>::T) -> Result<Vec<<Eqn as Op>::V>, DiffsolError> {
-        let state = &self.state;
-
-        if self.is_state_mutated {
-            if t == state.t {
-                return Ok(state.s.clone());
-            } else {
-                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-            }
-        }
-
-        // check that t is within the current step depending on the direction
-        let is_forward = state.h > Eqn::T::zero();
-        if (is_forward && (t > state.t || t < self.old_state.t))
-            || (!is_forward && (t < state.t || t > self.old_state.t))
-        {
-            return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-        }
-        let dt = state.t - self.old_state.t;
-        let theta = if dt == Eqn::T::zero() {
-            Eqn::T::one()
-        } else {
-            (t - self.old_state.t) / dt
-        };
-
-        if let Some(beta) = self.tableau.beta() {
-            let beta_f = Self::interpolate_beta_function(theta, beta);
-            let ret = self
-                .old_state
-                .s
-                .iter()
-                .zip(self.sdiff.iter())
-                .map(|(y, diff)| Self::interpolate_from_diff(dt, y, &beta_f, diff))
-                .collect();
-            Ok(ret)
-        } else {
-            let ret = self
-                .old_state
-                .s
-                .iter()
-                .zip(state.s.iter())
-                .zip(self.sdiff.iter())
-                .map(|((s0, s1), diff)| Self::interpolate_hermite(dt, theta, s0, s1, diff))
-                .collect();
-            Ok(ret)
-        }
+        interpolate_sens(
+            self.is_state_mutated,
+            self.tableau.beta(),
+            t,
+            self.state.as_ref(),
+            self.old_state.as_ref(),
+            &self.sdiff,
+        )
     }
 
     fn interpolate(&self, t: <Eqn>::T) -> Result<<Eqn>::V, DiffsolError> {
-        let state = &self.state;
-
-        if self.is_state_mutated {
-            if t == state.t {
-                return Ok(state.y.clone());
-            } else {
-                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-            }
-        }
-
-        // check that t is within the current step depending on the direction
-        let is_forward = state.h > Eqn::T::zero();
-        if (is_forward && (t > state.t || t < self.old_state.t))
-            || (!is_forward && (t < state.t || t > self.old_state.t))
-        {
-            return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-        }
-
-        let dt = state.t - self.old_state.t;
-        let theta = if dt == Eqn::T::zero() {
-            Eqn::T::one()
-        } else {
-            (t - self.old_state.t) / dt
-        };
-
-        if let Some(beta) = self.tableau.beta() {
-            let beta_f = Self::interpolate_beta_function(theta, beta);
-            let ret = Self::interpolate_from_diff(dt, &self.old_state.y, &beta_f, &self.diff);
-            Ok(ret)
-        } else {
-            let ret = Self::interpolate_hermite(dt, theta, &self.old_state.y, &state.y, &self.diff);
-            Ok(ret)
-        }
+        interpolate(
+            self.is_state_mutated,
+            self.tableau.beta(),
+            t,
+            self.state.as_ref(),
+            self.old_state.as_ref(),
+            &self.diff,
+        )
     }
 
     fn interpolate_out(&self, t: <Eqn>::T) -> Result<<Eqn>::V, DiffsolError> {
-        let state = &self.state;
-
-        if self.is_state_mutated {
-            if t == state.t {
-                return Ok(state.g.clone());
-            } else {
-                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-            }
-        }
-
-        // check that t is within the current step depending on the direction
-        let is_forward = state.h > Eqn::T::zero();
-        if (is_forward && (t > state.t || t < self.old_state.t))
-            || (!is_forward && (t < state.t || t > self.old_state.t))
-        {
-            return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-        }
-
-        let dt = state.t - self.old_state.t;
-        let theta = if dt == Eqn::T::zero() {
-            Eqn::T::one()
-        } else {
-            (t - self.old_state.t) / dt
-        };
-
-        if let Some(beta) = self.tableau.beta() {
-            let beta_f = Self::interpolate_beta_function(theta, beta);
-            let ret = Self::interpolate_from_diff(dt, &self.old_state.g, &beta_f, &self.gdiff);
-            Ok(ret)
-        } else {
-            let ret =
-                Self::interpolate_hermite(dt, theta, &self.old_state.g, &state.g, &self.gdiff);
-            Ok(ret)
-        }
+        interpolate_out(
+            self.is_state_mutated,
+            self.tableau.beta(),
+            t,
+            self.state.as_ref(),
+            self.old_state.as_ref(),
+            &self.gdiff,
+        )
     }
 
     fn state(&self) -> StateRef<Eqn::V> {

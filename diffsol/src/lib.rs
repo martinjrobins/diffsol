@@ -199,12 +199,14 @@ pub use ode_solver::{
     sens_equations::SensInit, sens_equations::SensRhs, sensitivities::SensitivitiesOdeSolverMethod,
     state::OdeSolverState, tableau::Tableau,
 };
+pub use ode_solver::equations::OdeEquationsStoch;
+pub use ode_solver::sde::SdeSolverMethod;
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};
 pub use op::nonlinear_op::{
     NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint,
 };
-pub use op::sde::{StochOp, StochOpKind};
+pub use op::stoch::{StochOp, StochOpKind};
 pub use op::{
     closure::Closure, closure_with_adjoint::ClosureWithAdjoint, constant_closure::ConstantClosure,
     constant_closure_with_adjoint::ConstantClosureWithAdjoint, linear_closure::LinearClosure,

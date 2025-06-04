@@ -16,6 +16,8 @@ pub mod sensitivities;
 pub mod state;
 pub mod tableau;
 pub mod test_models;
+pub mod sde;
+pub mod utils;
 
 #[cfg(feature = "diffsl")]
 pub mod diffsl;

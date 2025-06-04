@@ -25,7 +25,7 @@ pub mod matrix;
 pub mod nonlinear_op;
 pub mod sdirk;
 pub mod unit;
-pub mod sde;
+pub mod stoch;
 
 /// A generic operator trait.
 ///
