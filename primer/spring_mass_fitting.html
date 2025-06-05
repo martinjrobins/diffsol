@@ -202,14 +202,14 @@ type Eqn = DiffSl&lt;M, CG&gt;;
 struct Problem {
     ys_data: M,
     ts_data: Vec&lt;T&gt;,
-    problem: RefCell&lt;OdeSolverProblem&lt;Eqn&gt;&gt;,</code></pre>
+    problem: RefCell&lt;OdeSolverProblem&lt;Eqn&gt;&gt;,
+}</code></pre>
 <p>To use argmin we need to specify traits giving the loss function and its gradient. In this case we'll define a loss function equal to the sum of squares error between the model output and the synthetic data.</p>
 <p>$$
 \text{loss} = \sum_i (y_i(p) - \hat{y}_i)^2
 $$</p>
 <p>where \(y_i(p)\) is the model output as a function of the parameters \(p\), and \(\hat{y}_i\) is the observed data at time index \(i\).</p>
-<pre><code class="language-rust ignore">
-impl CostFunction for Problem {
+<pre><code class="language-rust ignore">impl CostFunction for Problem {
     type Output = T;
     type Param = Vec&lt;T&gt;;
 
@@ -228,17 +228,17 @@ impl CostFunction for Problem {
             .inner()
             .column_iter()
             .zip(self.ys_data.inner().column_iter())
-            .map(|(a, b)| (a - b).norm_squared())</code></pre>
+            .map(|(a, b)| (a - b).norm_squared())
+            .sum::&lt;f64&gt;();
+        Ok(loss)
+    }
+}</code></pre>
 <p>The gradient of this cost function with respect to the model outputs \(y_i\) is</p>
 <p>$$
 \frac{\partial \text{loss}}{\partial y_i} = 2 (y_i(p) - \hat{y}_i)
 $$</p>
 <p>We can calculate this using Diffsol's adjoint sensitivity analysis functionality. First we solve the forwards problem, generating a checkpointing struct. Using the forward solution we can then calculate \(\frac{\partial loss}{\partial y_i}\) for each time point, and then pass this into the adjoint backwards pass to calculate the gradient of the cost function with respect to the parameters.</p>
-<pre><code class="language-rust ignore">        Ok(loss)
-    }
-}
-
-impl Gradient for Problem {
+<pre><code class="language-rust ignore">impl Gradient for Problem {
     type Gradient = Vec&lt;T&gt;;
     type Param = Vec&lt;T&gt;;
 
@@ -258,9 +258,8 @@ impl Gradient for Problem {
             let g_m_i = (ys.column(j) - self.ys_data.column(j)) * Scale(2.0);
             g_m.column_mut(j).copy_from(&amp;g_m_i);
         }
-        let adjoint_solver = problem.bdf_solver_adjoint::&lt;LS, _&gt;(c, Some(1)).unwrap();</code></pre>
-<p>In our main function we'll create the model, generate some synthetic data, and then call argmin to fit the model to the data.</p>
-<pre><code class="language-rust ignore">        match adjoint_solver.solve_adjoint_backwards_pass(self.ts_data.as_slice(), &amp;[&amp;g_m]) {
+        let adjoint_solver = problem.bdf_solver_adjoint::&lt;LS, _&gt;(c, Some(1)).unwrap();
+        match adjoint_solver.solve_adjoint_backwards_pass(self.ts_data.as_slice(), &amp;[&amp;g_m]) {
             Ok(soln) =&gt; Ok(soln.as_ref().sg[0]
                 .inner()
                 .iter()
@@ -269,9 +268,9 @@ impl Gradient for Problem {
             Err(_) =&gt; Ok(vec![f64::MAX / 1000.; param.len()]),
         }
     }
-}
-
-pub fn main() {
+}</code></pre>
+<p>In our main function we'll create the model, generate some synthetic data, and then call argmin to fit the model to the data.</p>
+<pre><code class="language-rust ignore">pub fn main() {
     let (k_true, c_true) = (1.0, 0.1);
     let t_data = (0..101)
         .map(|i| f64::from(i) * 40. / 100.)
