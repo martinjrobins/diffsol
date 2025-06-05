@@ -11,6 +11,7 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "MIT"
+readme = "diffsol/README.md"
 authors = ["Martin Robinson <martinjrobins@gmail.com>"]
 repository = "https://github.com/martinjrobins/diffsol"
 
@@ -23,6 +24,8 @@ plotly = { version = "0.12.1" }
 argmin = { version = "0.10.0" }
 argmin-math = { version = "0.4" }
 argmin-observer-slog = { version = "0.1.0" }
+ort = "=2.0.0-rc.9"
+ort-sys = { version = "=2.0.0-rc.9", default-features = false }
 
 [profile.profiling]
 inherits = "release"
