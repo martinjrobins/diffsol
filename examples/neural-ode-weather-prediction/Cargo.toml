@@ -8,7 +8,7 @@ publish = false
 diffsol = { path = "../../diffsol" }
 nalgebra = { workspace = true }
 plotly = { workspace = true }
-ort-sys = { version = "=2.0.0-rc.9", default-features = false } # match whatever version of `ort` you use
+ort = { version = "=2.0.0-rc.9", default-features = false }
 ndarray = "0.16.1"
 csv = "1.3.1"
 rand = "0.9.0"
