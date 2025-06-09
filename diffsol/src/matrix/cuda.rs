@@ -711,10 +711,10 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
     }
 
     fn column_axpy(&mut self, alpha: Self::T, j: IndexType, i: IndexType) {
-        if i > self.ncols() {
+        if i >= self.ncols() {
             panic!("Column index out of bounds");
         }
-        if j > self.ncols() {
+        if j >= self.ncols() {
             panic!("Column index out of bounds");
         }
         if i == j {
