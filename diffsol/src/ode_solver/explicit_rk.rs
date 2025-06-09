@@ -1,24 +1,16 @@
+use super::method::AugmentedOdeSolverMethod;
+use super::runge_kutta::Rk;
 use crate::error::DiffsolError;
-use crate::error::OdeSolverError;
+use crate::ode_solver::bdf::BdfStatistics;
 use crate::vector::VectorRef;
 use crate::NoAug;
 use crate::OdeSolverStopReason;
 use crate::RkState;
-use crate::RootFinder;
 use crate::Tableau;
 use crate::{
-    AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, MatrixView, NonLinearOp,
-    OdeEquations, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef,
-    StateRefMut, Vector, VectorViewMut,
+    AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverMethod,
+    OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
 };
-use num_traits::abs;
-use num_traits::One;
-use num_traits::Pow;
-use num_traits::Zero;
-
-use super::bdf::BdfStatistics;
-use super::method::AugmentedOdeSolverMethod;
-use super::utils::{handle_tstop, interpolate, interpolate_sens, interpolate_out};
 
 impl<'a, Eqn, M, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
     for ExplicitRk<'a, Eqn, M, AugEqn>
@@ -30,10 +22,10 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
 {
     fn into_state_and_eqn(self) -> (Self::State, Option<AugEqn>) {
-        (self.state, self.augmented_eqn)
+        self.rk.into_state_and_eqn()
     }
     fn augmented_eqn(&self) -> Option<&AugEqn> {
-        self.augmented_eqn.as_ref()
+        self.rk.augmented_eqn()
     }
 }
 
@@ -56,20 +48,7 @@ pub struct ExplicitRk<
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
 {
-    tableau: Tableau<M>,
-    problem: &'a OdeSolverProblem<Eqn>,
-    augmented_eqn: Option<AugmentedEqn>,
-    state: RkState<Eqn::V>,
-    a_rows: Vec<Eqn::V>,
-    statistics: BdfStatistics,
-    root_finder: Option<RootFinder<Eqn::V>>,
-    tstop: Option<Eqn::T>,
-    diff: M,
-    sdiff: Vec<M>,
-    sgdiff: Vec<M>,
-    gdiff: M,
-    old_state: RkState<Eqn::V>,
-    is_state_mutated: bool,
+    rk: Rk<'a, Eqn, M, AugmentedEqn>,
 }
 
 impl<Eqn, M, AugmentedEqn> Clone for ExplicitRk<'_, Eqn, M, AugmentedEqn>
@@ -81,20 +60,7 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            old_state: self.old_state.clone(),
-            tableau: self.tableau.clone(),
-            problem: self.problem,
-            state: self.state.clone(),
-            a_rows: self.a_rows.clone(),
-            statistics: self.statistics.clone(),
-            root_finder: self.root_finder.clone(),
-            tstop: self.tstop,
-            is_state_mutated: self.is_state_mutated,
-            diff: self.diff.clone(),
-            sdiff: self.sdiff.clone(),
-            sgdiff: self.sgdiff.clone(),
-            gdiff: self.gdiff.clone(),
-            augmented_eqn: self.augmented_eqn.clone(),
+            rk: self.rk.clone(),
         }
     }
 }
@@ -106,115 +72,14 @@ where
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
 {
-    const MIN_FACTOR: f64 = 0.2;
-    const MAX_FACTOR: f64 = 10.0;
-    const MIN_TIMESTEP: f64 = 1e-13;
-    const MAX_ERROR_TEST_FAILS: usize = 40;
-
     pub fn new(
         problem: &'a OdeSolverProblem<Eqn>,
         state: RkState<Eqn::V>,
         tableau: Tableau<M>,
     ) -> Result<Self, DiffsolError> {
-        Self::_new(problem, state, tableau)
-    }
-
-    fn _new(
-        problem: &'a OdeSolverProblem<Eqn>,
-        mut state: RkState<Eqn::V>,
-        tableau: Tableau<M>,
-    ) -> Result<Self, DiffsolError> {
-        // check that there isn't any mass matrix
-        if problem.eqn.mass().is_some() {
-            return Err(DiffsolError::from(OdeSolverError::MassMatrixNotSupported));
-        }
-        // check that the upper triangular and diagonal parts of a are zero
-        let s = tableau.s();
-        for i in 0..s {
-            for j in i..s {
-                assert_eq!(
-                    tableau.a().get_index(i, j),
-                    Eqn::T::zero(),
-                    "Invalid tableau, expected a(i, j) = 0 for i >= j"
-                );
-            }
-        }
-
-        let mut a_rows = Vec::with_capacity(s);
-        let ctx = problem.context();
-        for i in 0..s {
-            let mut row = Vec::with_capacity(i);
-            for j in 0..i {
-                row.push(tableau.a().get_index(i, j));
-            }
-            a_rows.push(Eqn::V::from_vec(row, ctx.clone()));
-        }
-
-        // check last row of a is the same as b
-        for i in 0..s {
-            assert_eq!(
-                tableau.a().get_index(s - 1, i),
-                tableau.b().get_index(i),
-                "Invalid tableau, expected a(s-1, i) = b(i)"
-            );
-        }
-
-        // check that last c is 1
-        assert_eq!(
-            tableau.c().get_index(s - 1),
-            Eqn::T::one(),
-            "Invalid tableau, expected c(s-1) = 1"
-        );
-
-        // check that first c is 0
-        assert_eq!(
-            tableau.c().get_index(0),
-            Eqn::T::zero(),
-            "Invalid tableau, expected c(0) = 0"
-        );
-
-        // update statistics
-        let statistics = BdfStatistics::default();
-
-        state.check_consistent_with_problem(problem)?;
-
-        let nstates = state.y.len();
-        let order = tableau.s();
-
-        state.set_problem(problem)?;
-        let root_finder = if let Some(root_fn) = problem.eqn.root() {
-            let root_finder = RootFinder::new(root_fn.nout(), ctx.clone());
-            root_finder.init(&root_fn, &state.y, state.t);
-            Some(root_finder)
-        } else {
-            None
-        };
-
-        let diff = M::zeros(nstates, order, ctx.clone());
-        let gdiff_rows = if problem.integrate_out {
-            problem.eqn.out().unwrap().nout()
-        } else {
-            0
-        };
-        let gdiff = M::zeros(gdiff_rows, order, ctx.clone());
-
-        let old_state = state.clone();
-
+        Rk::<Eqn, M, AugmentedEqn>::check_explicit_rk(problem, &tableau)?;
         Ok(Self {
-            tableau,
-            state,
-            old_state,
-            problem,
-            a_rows,
-            statistics,
-            root_finder,
-            tstop: None,
-            is_state_mutated: false,
-            diff,
-            gdiff,
-            sdiff: vec![],
-            sgdiff: vec![],
-            augmented_eqn: None,
+            rk: Rk::new(problem, state, tableau)?,
         })
     }
 
@@ -224,25 +89,15 @@ where
         tableau: Tableau<M>,
         augmented_eqn: AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
-        state.check_sens_consistent_with_problem(problem, &augmented_eqn)?;
-        let mut ret = Self::_new(problem, state, tableau)?;
-        let naug = augmented_eqn.max_index();
-        let nstates = augmented_eqn.rhs().nstates();
-        let order = ret.tableau.s();
-        let ctx = problem.eqn.context();
-        ret.sdiff = vec![M::zeros(nstates, order, ctx.clone()); naug];
-        if let Some(out) = augmented_eqn.out() {
-            ret.sgdiff = vec![M::zeros(out.nout(), order, ctx.clone()); naug];
-        }
-        ret.augmented_eqn = Some(augmented_eqn);
-        Ok(ret)
+        Rk::<Eqn, M, AugmentedEqn>::check_explicit_rk(problem, &tableau)?;
+        Ok(Self {
+            rk: Rk::new_augmented(problem, state, tableau, augmented_eqn)?,
+        })
     }
 
     pub fn get_statistics(&self) -> &BdfStatistics {
-        &self.statistics
+        self.rk.get_statistics()
     }
-
-    
 }
 
 impl<'a, Eqn, M, AugmentedEqn> OdeSolverMethod<'a, Eqn> for ExplicitRk<'a, Eqn, M, AugmentedEqn>
@@ -255,7 +110,7 @@ where
     type State = RkState<Eqn::V>;
 
     fn problem(&self) -> &'a OdeSolverProblem<Eqn> {
-        self.problem
+        self.rk.problem()
     }
 
     fn jacobian(&self) -> Option<std::cell::Ref<<Eqn>::M>> {
@@ -267,363 +122,47 @@ where
     }
 
     fn order(&self) -> usize {
-        self.tableau.order()
+        self.rk.order()
     }
 
     fn set_state(&mut self, state: Self::State) {
-        self.state = state;
+        self.rk.set_state(state);
     }
 
     fn into_state(self) -> RkState<Eqn::V> {
-        self.state
+        self.rk.into_state()
     }
 
     fn checkpoint(&mut self) -> Self::State {
-        self.state.clone()
+        self.rk.checkpoint()
     }
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
-        let n = self.state.y.len();
-        let old_num_error_test_fails = self.statistics.number_of_error_test_failures;
-
-        if self.is_state_mutated {
-            // reinitalise root finder if needed
-            if let Some(root_fn) = self.problem.eqn.root() {
-                let state = &self.state;
-                self.root_finder
-                    .as_ref()
-                    .unwrap()
-                    .init(&root_fn, &state.y, state.t);
-            }
-            // reinitialise tstop if needed
-            if let Some(t_stop) = self.tstop {
-                self.set_stop_time(t_stop)?;
-            }
-
-            self.is_state_mutated = false;
-        }
-
-        let ctx = self.problem.eqn.context();
-        // todo: remove this allocation?
-        let mut error = <Eqn::V as Vector>::zeros(n, ctx.clone());
-        let out_error_control = self.problem().output_in_error_control();
-        let mut out_error = if out_error_control {
-            <Eqn::V as Vector>::zeros(self.problem().eqn.out().unwrap().nout(), ctx.clone())
-        } else {
-            <Eqn::V as Vector>::zeros(0, ctx.clone())
-        };
-        let sens_error_control = self.augmented_eqn.is_some()
-            && self
-                .augmented_eqn
-                .as_ref()
-                .unwrap()
-                .include_in_error_control();
-        let mut sens_error = if sens_error_control {
-            <Eqn::V as Vector>::zeros(
-                self.augmented_eqn.as_ref().unwrap().rhs().nstates(),
-                ctx.clone(),
-            )
-        } else {
-            <Eqn::V as Vector>::zeros(0, ctx.clone())
-        };
-        let sens_out_error_control = self.augmented_eqn.is_some()
-            && self
-                .augmented_eqn
-                .as_ref()
-                .unwrap()
-                .include_out_in_error_control();
-        let mut sens_out_error = if sens_out_error_control {
-            <Eqn::V as Vector>::zeros(
-                self.augmented_eqn.as_ref().unwrap().out().unwrap().nout(),
-                ctx.clone(),
-            )
-        } else {
-            <Eqn::V as Vector>::zeros(0, ctx.clone())
-        };
-        let integrate_main_eqn = if let Some(aug_eqn) = self.augmented_eqn.as_ref() {
-            aug_eqn.integrate_main_eqn()
-        } else {
-            true
-        };
-
-        // loop until step is accepted
-        let t0 = self.state.t;
-        let mut h = self.state.h;
-        let mut factor: Eqn::T;
-        'step: loop {
-            // since start == 1, then we need to compute the first stage
-            // from the last stage of the previous step
-            self.diff.column_mut(0).copy_from(&self.state.dy);
-
-            // sensitivities too
-            if self.augmented_eqn.is_some() {
-                for (diff, dy) in self.sdiff.iter_mut().zip(self.state.ds.iter()) {
-                    diff.column_mut(0).copy_from(dy);
-                }
-                for (diff, dg) in self.sgdiff.iter_mut().zip(self.state.dsg.iter()) {
-                    diff.column_mut(0).copy_from(dg);
-                }
-            }
-
-            // output function
-            if self.problem.integrate_out {
-                self.gdiff.column_mut(0).copy_from(&self.state.dg);
-            }
-
-            for i in 1..self.tableau.s() {
-                let t = t0 + self.tableau.c().get_index(i) * h;
-
-                // main equation
-                if integrate_main_eqn {
-                    self.old_state.y.copy_from(&self.state.y);
-                    self.diff.columns(0, i).gemv_o(
-                        h,
-                        &self.a_rows[i],
-                        Eqn::T::one(),
-                        &mut self.old_state.y,
-                    );
-
-                    // update diff with solved dy
-                    self.problem.eqn.rhs().call_inplace(
-                        &self.old_state.y,
-                        t,
-                        &mut self.old_state.dy,
-                    );
-                    self.diff.column_mut(i).copy_from(&self.old_state.dy);
-
-                    // calculate dg and store in gdiff
-                    if self.problem.integrate_out {
-                        let out = self.problem.eqn.out().unwrap();
-                        out.call_inplace(&self.old_state.y, t, &mut self.old_state.dg);
-                        self.gdiff.column_mut(i).copy_from(&self.old_state.dg);
-                    }
-                }
-
-                // calculate sensitivities
-                if let Some(aug_eqn) = self.augmented_eqn.as_mut() {
-                    aug_eqn.update_rhs_out_state(&self.old_state.y, &self.old_state.dy, t);
-                    for j in 0..self.sdiff.len() {
-                        aug_eqn.set_index(j);
-                        self.old_state.s[j].copy_from(&self.state.s[j]);
-                        self.sdiff[j].columns(0, i).gemv_o(
-                            h,
-                            &self.a_rows[i],
-                            Eqn::T::one(),
-                            &mut self.old_state.s[j],
-                        );
-
-                        aug_eqn.rhs().call_inplace(
-                            &self.old_state.s[j],
-                            t,
-                            &mut self.old_state.ds[j],
-                        );
-
-                        self.sdiff[j].column_mut(i).copy_from(&self.old_state.ds[j]);
-
-                        // calculate sdg and store in sgdiff
-                        if let Some(out) = aug_eqn.out() {
-                            out.call_inplace(&self.old_state.s[j], t, &mut self.old_state.dsg[j]);
-                            self.sgdiff[j]
-                                .column_mut(i)
-                                .copy_from(&self.old_state.dsg[j]);
-                        }
-                    }
-                }
-            }
-            let mut ncontributions = 0;
-            let mut error_norm = Eqn::T::zero();
-            // successfully solved for all stages, now compute error
-            if integrate_main_eqn {
-                self.diff
-                    .gemv(h, self.tableau.d(), Eqn::T::zero(), &mut error);
-
-                // compute error norm
-                let atol = &self.problem().atol;
-                let rtol = self.problem().rtol;
-                error_norm += error.squared_norm(&self.old_state.y, atol, rtol);
-                ncontributions += 1;
-
-                // output errors
-                if out_error_control {
-                    self.gdiff
-                        .gemv(h, self.tableau.d(), Eqn::T::zero(), &mut out_error);
-                    let atol = self.problem().out_atol.as_ref().unwrap();
-                    let rtol = self.problem().out_rtol.unwrap();
-                    let out_error_norm = out_error.squared_norm(&self.state.g, atol, rtol);
-                    error_norm += out_error_norm;
-                    ncontributions += 1;
-                }
-            }
-
-            // sensitivity errors
-            if sens_error_control {
-                let aug_eqn = self.augmented_eqn.as_ref().unwrap();
-                let atol = aug_eqn.atol().unwrap();
-                let rtol = aug_eqn.rtol().unwrap();
-                for i in 0..self.sdiff.len() {
-                    self.sdiff[i].gemv(h, self.tableau.d(), Eqn::T::zero(), &mut sens_error);
-                    let sens_error_norm = sens_error.squared_norm(&self.old_state.s[i], atol, rtol);
-                    error_norm += sens_error_norm;
-                    ncontributions += 1;
-                }
-            }
-
-            // sensitivity output errors
-            if sens_out_error_control {
-                let aug_eqn = self.augmented_eqn.as_ref().unwrap();
-                let atol = aug_eqn.atol().unwrap();
-                let rtol = aug_eqn.rtol().unwrap();
-                for i in 0..self.sgdiff.len() {
-                    self.sgdiff[i].gemv(h, self.tableau.d(), Eqn::T::zero(), &mut sens_out_error);
-                    let sens_error_norm =
-                        sens_out_error.squared_norm(&self.state.sg[i], atol, rtol);
-                    error_norm += sens_error_norm;
-                    ncontributions += 1;
-                }
-            }
-            if ncontributions > 1 {
-                error_norm /= Eqn::T::from(ncontributions as f64);
-            }
-
-            // adjust step size based on error
-            let safety = Eqn::T::from(0.9);
-            let order = self.tableau.order() as f64;
-            factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (order + 1.0)));
-            if factor < Eqn::T::from(Self::MIN_FACTOR) {
-                factor = Eqn::T::from(Self::MIN_FACTOR);
-            }
-            if factor > Eqn::T::from(Self::MAX_FACTOR) {
-                factor = Eqn::T::from(Self::MAX_FACTOR);
-            }
-
-            // test error is within tolerance
-            if error_norm <= Eqn::T::from(1.0) {
-                break 'step;
-            }
-            // step is rejected, factor reduces step size, so we try again with the smaller step size
-            self.statistics.number_of_error_test_failures += 1;
-            if self.statistics.number_of_error_test_failures - old_num_error_test_fails
-                >= Self::MAX_ERROR_TEST_FAILS
-            {
-                return Err(DiffsolError::from(
-                    OdeSolverError::TooManyErrorTestFailures {
-                        time: self.state.t.into(),
-                    },
-                ));
-            }
-            h *= factor;
-
-            // if step size too small, then fail
-            if abs(h) < Eqn::T::from(Self::MIN_TIMESTEP) {
-                return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
-                    time: self.state.t.into(),
-                }));
-            }
-        }
-
-        // step accepted, so integrate output functions
-        if self.problem.integrate_out {
-            self.old_state.g.copy_from(&self.state.g);
-            self.gdiff
-                .gemv(h, self.tableau.b(), Eqn::T::one(), &mut self.old_state.g);
-        }
-
-        for i in 0..self.sgdiff.len() {
-            self.old_state.sg[i].copy_from(&self.state.sg[i]);
-            self.sgdiff[i].gemv(
-                h,
-                self.tableau.b(),
-                Eqn::T::one(),
-                &mut self.old_state.sg[i],
-            );
-        }
-
-        // take the step
-        self.old_state.t = t0 + h;
-        // update step size for next step
-        self.old_state.h = factor * h;
-        std::mem::swap(&mut self.old_state, &mut self.state);
-
-        // update statistics
-        self.statistics.number_of_steps += 1;
-
-        // check for root within accepted step
-        if let Some(root_fn) = self.problem.eqn.root() {
-            let ret = self.root_finder.as_ref().unwrap().check_root(
-                &|t| self.interpolate(t),
-                &root_fn,
-                &self.state.y,
-                self.state.t,
-            );
-            if let Some(root) = ret {
-                return Ok(OdeSolverStopReason::RootFound(root));
-            }
-        }
-
-        // check if the we are at tstop
-        if let Some(tstop) = self.tstop {
-            if let Some(OdeSolverStopReason::TstopReached) =
-                handle_tstop(self.state.as_mut(), tstop)?
-            {
-                self.tstop = None; // reset tstop
-                return Ok(OdeSolverStopReason::TstopReached);
-            }
-        }
-
-        // just a normal step, no roots or tstop reached
-        Ok(OdeSolverStopReason::InternalTimestep)
+        self.rk.step_explicit()
     }
 
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
-        self.tstop = Some(tstop);
-        if let Some(OdeSolverStopReason::TstopReached) = handle_tstop(self.state.as_mut(), tstop)? {
-            let error = OdeSolverError::StopTimeAtCurrentTime;
-            self.tstop = None;
-            return Err(DiffsolError::from(error));
-        }
-        Ok(())
+        self.rk.set_stop_time(tstop)
     }
 
     fn interpolate_sens(&self, t: <Eqn as Op>::T) -> Result<Vec<<Eqn as Op>::V>, DiffsolError> {
-        interpolate_sens(
-            self.is_state_mutated,
-            self.tableau.beta(),
-            t,
-            self.state.as_ref(),
-            self.old_state.as_ref(),
-            &self.sdiff,
-        )
+        self.rk.interpolate_sens(t)
     }
 
     fn interpolate(&self, t: <Eqn>::T) -> Result<<Eqn>::V, DiffsolError> {
-        interpolate(
-            self.is_state_mutated,
-            self.tableau.beta(),
-            t,
-            self.state.as_ref(),
-            self.old_state.as_ref(),
-            &self.diff,
-        )
+        self.rk.interpolate(t)
     }
 
     fn interpolate_out(&self, t: <Eqn>::T) -> Result<<Eqn>::V, DiffsolError> {
-        interpolate_out(
-            self.is_state_mutated,
-            self.tableau.beta(),
-            t,
-            self.state.as_ref(),
-            self.old_state.as_ref(),
-            &self.gdiff,
-        )
+        self.rk.interpolate_out(t)
     }
 
     fn state(&self) -> StateRef<Eqn::V> {
-        self.state.as_ref()
+        self.rk.state().as_ref()
     }
 
     fn state_mut(&mut self) -> StateRefMut<Eqn::V> {
-        self.is_state_mutated = true;
-        self.state.as_mut()
+        self.rk.state_mut().as_mut()
     }
 }
 

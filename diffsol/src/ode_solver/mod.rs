@@ -9,6 +9,8 @@ pub mod explicit_rk;
 pub mod jacobian_update;
 pub mod method;
 pub mod problem;
+pub mod runge_kutta;
+pub mod sde;
 pub mod sdirk;
 pub mod sdirk_state;
 pub mod sens_equations;
@@ -16,8 +18,6 @@ pub mod sensitivities;
 pub mod state;
 pub mod tableau;
 pub mod test_models;
-pub mod sde;
-pub mod utils;
 
 #[cfg(feature = "diffsl")]
 pub mod diffsl;

@@ -183,7 +183,9 @@ use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus, root::RootFinder,
 };
 pub use nonlinear_solver::{newton::NewtonNonlinearSolver, NonLinearSolver};
+pub use ode_solver::equations::OdeEquationsStoch;
 use ode_solver::jacobian_update::JacobianUpdate;
+pub use ode_solver::sde::SdeSolverMethod;
 pub use ode_solver::state::{StateRef, StateRefMut};
 pub use ode_solver::{
     adjoint::AdjointOdeSolverMethod, adjoint_equations::AdjointContext,
@@ -199,8 +201,6 @@ pub use ode_solver::{
     sens_equations::SensInit, sens_equations::SensRhs, sensitivities::SensitivitiesOdeSolverMethod,
     state::OdeSolverState, tableau::Tableau,
 };
-pub use ode_solver::equations::OdeEquationsStoch;
-pub use ode_solver::sde::SdeSolverMethod;
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};
 pub use op::nonlinear_op::{
