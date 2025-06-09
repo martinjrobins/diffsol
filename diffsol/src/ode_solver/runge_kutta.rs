@@ -302,22 +302,25 @@ where
     }
 
     pub(crate) fn step_explicit(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
-        self.start_step()?;
+        let mut h = self.start_step()?;
 
         // loop until step is accepted
         let mut nattempts = 0;
-        loop {
+        let factor = loop {
             // start a step attempt
-            self.start_step_attempt();
+            self.start_step_attempt(h);
             for i in 1..self.tableau.s() {
-                self.do_stage(i);
+                self.do_stage(i, h);
             }
-            if self.end_step_attempt(nattempts)? {
-                break;
+            let error_norm = self.end_step_attempt(nattempts, h)?;
+            let factor = self.factor(error_norm, h)?;
+            if error_norm < Eqn::T::one() {
+                break factor;
             }
+            h *= factor;
             nattempts += 1;
-        }
-        self.step_accepted()
+        };
+        self.step_accepted(h, factor)
     }
 
     fn integrate_main_eqn(&self) -> bool {
@@ -338,7 +341,7 @@ where
         Ok(())
     }
 
-    fn start_step(&mut self) -> Result<(), DiffsolError> {
+    fn start_step(&mut self) -> Result<Eqn::T, DiffsolError> {
         if self.is_state_mutated {
             // reinitalise root finder if needed
             if let Some(root_fn) = self.problem.eqn.root() {
@@ -356,24 +359,29 @@ where
             self.is_state_mutated = false;
         }
 
-        // init the h on the old state
-        self.old_state.h = self.state.h;
-        Ok(())
+        Ok(self.state.h)
     }
 
-    fn factor(error_norm: Eqn::T, order: usize) -> Eqn::T {
+    fn factor(&self, error_norm: Eqn::T, h: Eqn::T) -> Result<Eqn::T, DiffsolError> {
         let safety = Eqn::T::from(0.9);
-        let mut factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (order as f64 + 1.0)));
+        let mut factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (self.order() as f64 + 1.0)));
         if factor < Eqn::T::from(Self::MIN_FACTOR) {
             factor = Eqn::T::from(Self::MIN_FACTOR);
         }
         if factor > Eqn::T::from(Self::MAX_FACTOR) {
             factor = Eqn::T::from(Self::MAX_FACTOR);
         }
-        factor
+
+        // if step size too small, then fail
+        if abs(factor * h) < Eqn::T::from(Self::MIN_TIMESTEP) {
+            return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
+                time: self.state.t.into(),
+            }));
+        }
+        Ok(factor)
     }
 
-    fn start_step_attempt(&mut self) {
+    fn start_step_attempt(&mut self, _h: Eqn::T) {
         // we need to compute the first stage
         // from the last stage of the previous step
         self.diff.column_mut(0).copy_from(&self.state.dy);
@@ -394,14 +402,14 @@ where
         }
     }
 
-    fn do_stage(&mut self, i: usize) {
-        let t = self.state.t + self.tableau.c().get_index(i) * self.old_state.h;
+    fn do_stage(&mut self, i: usize, h: Eqn::T) {
+        let t = self.state.t + self.tableau.c().get_index(i) * h;
 
         // main equation
         if self.integrate_main_eqn() {
             self.old_state.y.copy_from(&self.state.y);
             self.diff.columns(0, i).gemv_o(
-                self.old_state.h,
+                h,
                 &self.a_rows[i],
                 Eqn::T::one(),
                 &mut self.old_state.y,
@@ -429,7 +437,7 @@ where
                 aug_eqn.set_index(j);
                 self.old_state.s[j].copy_from(&self.state.s[j]);
                 self.sdiff[j].columns(0, i).gemv_o(
-                    self.old_state.h,
+                    h,
                     &self.a_rows[i],
                     Eqn::T::one(),
                     &mut self.old_state.s[j],
@@ -482,8 +490,7 @@ where
         Ok(None)
     }
 
-    fn end_step_attempt(&mut self, nattempts: usize) -> Result<bool, DiffsolError> {
-        let h = self.old_state.h;
+    fn end_step_attempt(&mut self, nattempts: usize, h: Eqn::T) -> Result<Eqn::T, DiffsolError> {
         let mut ncontributions = 0;
         let mut error_norm = Eqn::T::zero();
         if let Some(error) = self.error.as_mut() {
@@ -547,24 +554,15 @@ where
                 ));
             }
         }
-        let factor = Self::factor(error_norm, self.order());
-        self.old_state.h *= factor;
-
-        // if step size too small, then fail
-        if abs(self.old_state.h) < Eqn::T::from(Self::MIN_TIMESTEP) {
-            return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
-                time: self.state.t.into(),
-            }));
-        }
-        Ok(success)
+        Ok(error_norm)
     }
 
-    fn step_accepted(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
+    fn step_accepted(&mut self, h: Eqn::T, factor: Eqn::T) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
         // step accepted, so integrate output functions
         if self.problem.integrate_out {
             self.old_state.g.copy_from(&self.state.g);
             self.gdiff.gemv(
-                self.old_state.h,
+                h,
                 self.tableau.b(),
                 Eqn::T::one(),
                 &mut self.old_state.g,
@@ -574,7 +572,7 @@ where
         for i in 0..self.sgdiff.len() {
             self.old_state.sg[i].copy_from(&self.state.sg[i]);
             self.sgdiff[i].gemv(
-                self.old_state.h,
+                h,
                 self.tableau.b(),
                 Eqn::T::one(),
                 &mut self.old_state.sg[i],
@@ -582,7 +580,8 @@ where
         }
 
         // take the step
-        self.old_state.t = self.state.t + self.old_state.h;
+        self.old_state.t = self.state.t + h;
+        self.old_state.h = factor * h;
         std::mem::swap(&mut self.old_state, &mut self.state);
 
         // update statistics
