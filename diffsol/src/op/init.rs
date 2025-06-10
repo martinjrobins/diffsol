@@ -20,13 +20,13 @@ pub struct InitOp<'a, Eqn: OdeEquationsImplicit> {
 }
 
 impl<'a, Eqn: OdeEquationsImplicit> InitOp<'a, Eqn> {
-    pub fn new(eqn: &'a Eqn, t0: Eqn::T, y0: &Eqn::V) -> Self {
+    pub fn new(
+        eqn: &'a Eqn,
+        t0: Eqn::T,
+        y0: &Eqn::V,
+        algebraic_indices: <Eqn::V as Vector>::Index,
+    ) -> Self {
         let n = eqn.rhs().nstates();
-        let (algebraic_indices, _) = eqn
-            .mass()
-            .unwrap()
-            .matrix(t0)
-            .partition_indices_by_zero_diagonal();
 
         let rhs_jac = eqn.rhs().jacobian(y0, t0);
         let mass = eqn.mass().unwrap().matrix(t0);
@@ -140,7 +140,10 @@ mod tests {
     use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
     use crate::op::init::InitOp;
     use crate::vector::Vector;
-    use crate::{DenseMatrix, NalgebraMat, NalgebraVec, NonLinearOp, NonLinearOpJacobian};
+    use crate::{
+        DenseMatrix, LinearOp, Matrix, NalgebraMat, NalgebraVec, NonLinearOp, NonLinearOpJacobian,
+        OdeEquations,
+    };
 
     type Mcpu = NalgebraMat<f64>;
     type Vcpu = NalgebraVec<f64>;
@@ -151,7 +154,14 @@ mod tests {
         let y0 = Vcpu::from_vec(vec![1.0, 2.0, 3.0], problem.context().clone());
         let dy0 = Vcpu::from_vec(vec![4.0, 5.0, 6.0], problem.context().clone());
         let t = 0.0;
-        let initop = InitOp::new(&problem.eqn, t, &y0);
+        let (algebraic_indices, _) = problem
+            .eqn()
+            .mass()
+            .unwrap()
+            .matrix(t)
+            .partition_indices_by_zero_diagonal();
+
+        let initop = InitOp::new(&problem.eqn, t, &y0, algebraic_indices);
         // check that the init function is correct
         let mut y_out = Vcpu::from_vec(vec![0.0, 0.0, 0.0], problem.context().clone());
 

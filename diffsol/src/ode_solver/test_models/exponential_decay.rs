@@ -14,6 +14,11 @@ fn exponential_decay<M: Matrix>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
     y.mul_assign(scale(-p.get_index(0)));
 }
 
+// mass matrix is identity
+fn exponential_decay_mass<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, beta: M::T, y: &mut M::V) {
+    y.axpy(M::T::one(), x, beta);
+}
+
 // df/dp v = -yv (p = [a, y0])
 // df/dp = | -y  0 |
 //         | -y  0 |
@@ -228,6 +233,36 @@ pub fn exponential_decay_problem<M: Matrix + 'static>(
         .p([k, y0])
         .use_coloring(use_coloring)
         .rhs_implicit(exponential_decay::<M>, exponential_decay_jacobian::<M>)
+        .init(exponential_decay_init::<M>, 2)
+        .build()
+        .unwrap();
+    let p = [M::T::from(k), M::T::from(y0)];
+    let mut soln = OdeSolverSolution::default();
+    for i in 0..10 {
+        let t = M::T::from(i as f64);
+        let y0: M::V = problem.eqn.init().call(M::T::zero());
+        let y = y0 * scale(M::T::exp(-p[0] * t));
+        soln.push(y, t);
+    }
+    (problem, soln)
+}
+
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_problem_with_mass<M: Matrix + 'static>(
+    use_coloring: bool,
+) -> (
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverSolution<M::V>,
+) {
+    let h = 1.0;
+    let k = 0.1;
+    let y0 = 1.0;
+    let problem = OdeBuilder::<M>::new()
+        .h0(h)
+        .p([k, y0])
+        .use_coloring(use_coloring)
+        .rhs_implicit(exponential_decay::<M>, exponential_decay_jacobian::<M>)
+        .mass(exponential_decay_mass::<M>)
         .init(exponential_decay_init::<M>, 2)
         .build()
         .unwrap();
