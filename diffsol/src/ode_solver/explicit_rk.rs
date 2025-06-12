@@ -22,10 +22,10 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
 {
     fn into_state_and_eqn(self) -> (Self::State, Option<AugEqn>) {
-        self.rk.into_state_and_eqn()
+        (self.rk.into_state(), self.augmented_eqn)
     }
     fn augmented_eqn(&self) -> Option<&AugEqn> {
-        self.rk.augmented_eqn()
+        self.augmented_eqn.as_ref()
     }
 }
 
@@ -48,7 +48,8 @@ pub struct ExplicitRk<
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
 {
-    rk: Rk<'a, Eqn, M, AugmentedEqn>,
+    rk: Rk<'a, Eqn, M>,
+    augmented_eqn: Option<AugmentedEqn>,
 }
 
 impl<Eqn, M, AugmentedEqn> Clone for ExplicitRk<'_, Eqn, M, AugmentedEqn>
@@ -61,6 +62,7 @@ where
     fn clone(&self) -> Self {
         Self {
             rk: self.rk.clone(),
+            augmented_eqn: self.augmented_eqn.clone(),
         }
     }
 }
@@ -77,9 +79,10 @@ where
         state: RkState<Eqn::V>,
         tableau: Tableau<M>,
     ) -> Result<Self, DiffsolError> {
-        Rk::<Eqn, M, AugmentedEqn>::check_explicit_rk(problem, &tableau)?;
+        Rk::<Eqn, M>::check_explicit_rk(problem, &tableau)?;
         Ok(Self {
             rk: Rk::new(problem, state, tableau)?,
+            augmented_eqn: None,
         })
     }
 
@@ -89,9 +92,10 @@ where
         tableau: Tableau<M>,
         augmented_eqn: AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
-        Rk::<Eqn, M, AugmentedEqn>::check_explicit_rk(problem, &tableau)?;
+        Rk::<Eqn, M>::check_explicit_rk(problem, &tableau)?;
         Ok(Self {
-            rk: Rk::new_augmented(problem, state, tableau, augmented_eqn)?,
+            rk: Rk::new_augmented(problem, state, tableau, &augmented_eqn)?,
+            augmented_eqn: Some(augmented_eqn),
         })
     }
 
@@ -138,7 +142,7 @@ where
     }
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
-        self.rk.step_explicit()
+        self.rk.step_explicit(self.augmented_eqn.as_mut())
     }
 
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {

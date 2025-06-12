@@ -1,6 +1,5 @@
 use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
-use crate::NoAug;
 use crate::OdeSolverStopReason;
 use crate::RkState;
 use crate::RootFinder;
@@ -25,15 +24,13 @@ use std::ops::MulAssign;
 /// Restrictions:
 /// - The upper triangular and diagonal parts of the `a` matrix must be zero (i.e. explicit).
 /// - The last row of the `a` matrix must be the same as the `b` vector, and the last element of the `c` vector must be 1 (i.e. a stiffly accurate method)
-pub struct Rk<'a, Eqn, M = <<Eqn as Op>::V as DefaultDenseMatrix>::M, AugmentedEqn = NoAug<Eqn>>
+pub struct Rk<'a, Eqn, M = <<Eqn as Op>::V as DefaultDenseMatrix>::M>
 where
     Eqn: OdeEquations,
     M: DenseMatrix<V = Eqn::V, T = Eqn::T>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
-    AugmentedEqn: AugmentedOdeEquations<Eqn>,
 {
     problem: &'a OdeSolverProblem<Eqn>,
-    augmented_eqn: Option<AugmentedEqn>,
     tableau: Tableau<M>,
     state: RkState<Eqn::V>,
     a_rows: Vec<Eqn::V>,
@@ -53,11 +50,10 @@ where
     sens_out_error: Option<Eqn::V>,
 }
 
-impl<Eqn, M, AugmentedEqn> Clone for Rk<'_, Eqn, M, AugmentedEqn>
+impl<Eqn, M> Clone for Rk<'_, Eqn, M>
 where
     Eqn: OdeEquations,
     M: DenseMatrix<V = Eqn::V, T = Eqn::T>,
-    AugmentedEqn: AugmentedOdeEquations<Eqn>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
 {
     fn clone(&self) -> Self {
@@ -75,7 +71,6 @@ where
             sdiff: self.sdiff.clone(),
             sgdiff: self.sgdiff.clone(),
             gdiff: self.gdiff.clone(),
-            augmented_eqn: self.augmented_eqn.clone(),
             error: self.error.clone(),
             out_error: self.out_error.clone(),
             sens_error: self.sens_error.clone(),
@@ -84,11 +79,10 @@ where
     }
 }
 
-impl<'a, Eqn, M, AugmentedEqn> Rk<'a, Eqn, M, AugmentedEqn>
+impl<'a, Eqn, M> Rk<'a, Eqn, M>
 where
     Eqn: OdeEquations,
     M: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
-    AugmentedEqn: AugmentedOdeEquations<Eqn>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
 {
     const MIN_FACTOR: f64 = 0.2;
@@ -172,7 +166,6 @@ where
             gdiff,
             sdiff: vec![],
             sgdiff: vec![],
-            augmented_eqn: None,
             error,
             out_error,
             sens_error: None,
@@ -180,13 +173,13 @@ where
         })
     }
 
-    pub(crate) fn new_augmented(
+    pub(crate) fn new_augmented<AugmentedEqn: AugmentedOdeEquations<Eqn>>(
         problem: &'a OdeSolverProblem<Eqn>,
         state: RkState<Eqn::V>,
         tableau: Tableau<M>,
-        augmented_eqn: AugmentedEqn,
+        augmented_eqn: &AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
-        state.check_sens_consistent_with_problem(problem, &augmented_eqn)?;
+        state.check_sens_consistent_with_problem(problem, augmented_eqn)?;
         let mut ret = Self::_new(problem, state, tableau)?;
         let naug = augmented_eqn.max_index();
         let nstates = augmented_eqn.rhs().nstates();
@@ -212,7 +205,6 @@ where
             ret.error = None;
             ret.out_error = None;
         }
-        ret.augmented_eqn = Some(augmented_eqn);
         Ok(ret)
     }
 
@@ -261,6 +253,70 @@ where
         Ok(())
     }
 
+    pub(crate) fn check_sdirk_rk(
+        tableau: &Tableau<M>,
+    ) -> Result<(), DiffsolError> {
+        // check that the upper triangular part of a is zero
+        let s = tableau.s();
+        for i in 0..s {
+            for j in (i + 1)..s {
+                assert_eq!(
+                    tableau.a().get_index(i, j),
+                    Eqn::T::zero(),
+                    "Invalid tableau, expected a(i, j) = 0 for i > j"
+                );
+            }
+        }
+        let gamma = tableau.a().get_index(1, 1);
+        //check that for i = 1..s-1, a(i, i) = gamma
+        for i in 1..tableau.s() {
+            assert_eq!(
+                tableau.a().get_index(i, i),
+                gamma,
+                "Invalid tableau, expected a(i, i) = gamma = {} for i = 1..s-1",
+                gamma
+            );
+        }
+        // if a(0, 0) = gamma, then we're a SDIRK method
+        // if a(0, 0) = 0, then we're a ESDIRK method
+        // otherwise, error
+        let zero = Eqn::T::zero();
+        if tableau.a().get_index(0, 0) != zero && tableau.a().get_index(0, 0) != gamma {
+            panic!("Invalid tableau, expected a(0, 0) = 0 or a(0, 0) = gamma");
+        }
+        let is_sdirk = tableau.a().get_index(0, 0) == gamma;
+
+        // check last row of a is the same as b
+        for i in 0..s {
+            assert_eq!(
+                tableau.a().get_index(s - 1, i),
+                tableau.b().get_index(i),
+                "Invalid tableau, expected a(s-1, i) = b(i)"
+            );
+        }
+
+        // check that last c is 1
+        assert_eq!(
+            tableau.c().get_index(s - 1),
+            Eqn::T::one(),
+            "Invalid tableau, expected c(s-1) = 1"
+        );
+
+        // check that the first c is 0 for esdirk methods
+        if !is_sdirk {
+            assert_eq!(
+                tableau.c().get_index(0),
+                Eqn::T::zero(),
+                "Invalid tableau, expected c(0) = 0 for esdirk methods"
+            );
+        }
+        Ok(())
+    }
+
+    pub(crate) fn tableau(&self) -> &Tableau<M> {
+        &self.tableau
+    }
+
     pub(crate) fn get_statistics(&self) -> &BdfStatistics {
         &self.statistics
     }
@@ -294,25 +350,18 @@ where
         &mut self.state
     }
 
-    pub(crate) fn into_state_and_eqn(self) -> (RkState<Eqn::V>, Option<AugmentedEqn>) {
-        (self.state, self.augmented_eqn)
-    }
-    pub(crate) fn augmented_eqn(&self) -> Option<&AugmentedEqn> {
-        self.augmented_eqn.as_ref()
-    }
-
-    pub(crate) fn step_explicit(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
+    pub(crate) fn step_explicit(&mut self, mut augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
         let mut h = self.start_step()?;
 
         // loop until step is accepted
         let mut nattempts = 0;
         let factor = loop {
             // start a step attempt
-            self.start_step_attempt(h);
+            self.start_step_attempt(h, augmented_eqn.as_deref_mut());
             for i in 1..self.tableau.s() {
-                self.do_stage(i, h);
+                self.do_stage(i, h, augmented_eqn.as_deref_mut());
             }
-            let error_norm = self.end_step_attempt(nattempts, h)?;
+            let error_norm = self.end_step_attempt(nattempts, h, augmented_eqn.as_deref_mut())?;
             let factor = self.factor(error_norm, h)?;
             if error_norm < Eqn::T::one() {
                 break factor;
@@ -321,14 +370,6 @@ where
             nattempts += 1;
         };
         self.step_accepted(h, factor)
-    }
-
-    fn integrate_main_eqn(&self) -> bool {
-        if let Some(aug_eqn) = self.augmented_eqn.as_ref() {
-            aug_eqn.integrate_main_eqn()
-        } else {
-            true
-        }
     }
 
     pub(crate) fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
@@ -381,13 +422,13 @@ where
         Ok(factor)
     }
 
-    fn start_step_attempt(&mut self, _h: Eqn::T) {
+    fn start_step_attempt(&mut self, _h: Eqn::T, augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>) {
         // we need to compute the first stage
         // from the last stage of the previous step
         self.diff.column_mut(0).copy_from(&self.state.dy);
 
         // sensitivities too
-        if self.augmented_eqn.is_some() {
+        if augmented_eqn.is_some() {
             for (diff, dy) in self.sdiff.iter_mut().zip(self.state.ds.iter()) {
                 diff.column_mut(0).copy_from(dy);
             }
@@ -402,11 +443,15 @@ where
         }
     }
 
-    fn do_stage(&mut self, i: usize, h: Eqn::T) {
+    fn do_stage(&mut self, i: usize, h: Eqn::T, augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>) {
         let t = self.state.t + self.tableau.c().get_index(i) * h;
 
         // main equation
-        if self.integrate_main_eqn() {
+        let integrate_main_eqn = augmented_eqn
+            .as_ref()
+            .map(|eqn| eqn.integrate_main_eqn())
+            .unwrap_or(false);
+        if integrate_main_eqn {
             self.old_state.y.copy_from(&self.state.y);
             self.diff.columns(0, i).gemv_o(
                 h,
@@ -431,8 +476,8 @@ where
         }
 
         // calculate sensitivities
-        if let Some(aug_eqn) = self.augmented_eqn.as_mut() {
-            aug_eqn.update_rhs_out_state(&self.old_state.y, &self.old_state.dy, t);
+        if let Some(aug_eqn) = augmented_eqn {
+            (*aug_eqn).update_rhs_out_state(&self.old_state.y, &self.old_state.dy, t);
             for j in 0..self.sdiff.len() {
                 aug_eqn.set_index(j);
                 self.old_state.s[j].copy_from(&self.state.s[j]);
@@ -490,7 +535,7 @@ where
         Ok(None)
     }
 
-    fn end_step_attempt(&mut self, nattempts: usize, h: Eqn::T) -> Result<Eqn::T, DiffsolError> {
+    fn end_step_attempt(&mut self, nattempts: usize, h: Eqn::T, augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>) -> Result<Eqn::T, DiffsolError> {
         let mut ncontributions = 0;
         let mut error_norm = Eqn::T::zero();
         if let Some(error) = self.error.as_mut() {
@@ -516,7 +561,7 @@ where
 
         // sensitivity errors
         if let Some(sens_error) = self.sens_error.as_mut() {
-            let aug_eqn = self.augmented_eqn.as_ref().unwrap();
+            let aug_eqn = augmented_eqn.as_ref().unwrap();
             let atol = aug_eqn.atol().unwrap();
             let rtol = aug_eqn.rtol().unwrap();
             for i in 0..self.sdiff.len() {
@@ -529,7 +574,7 @@ where
 
         // sensitivity output errors
         if let Some(sens_out_error) = self.sens_out_error.as_mut() {
-            let aug_eqn = self.augmented_eqn.as_ref().unwrap();
+            let aug_eqn = augmented_eqn.as_ref().unwrap();
             let atol = aug_eqn.atol().unwrap();
             let rtol = aug_eqn.rtol().unwrap();
             for i in 0..self.sgdiff.len() {

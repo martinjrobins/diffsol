@@ -1,6 +1,8 @@
 use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
 use crate::matrix::MatrixRef;
+use crate::ode_solver::runge_kutta::Rk;
+use crate::ode_solver::state;
 use crate::ode_solver_error;
 use crate::vector::VectorRef;
 use crate::LinearSolver;
@@ -67,30 +69,11 @@ pub struct Sdirk<
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
 {
-    tableau: Tableau<M>,
-    problem: &'a OdeSolverProblem<Eqn>,
+    rk: Rk<'a, Eqn, M>,
     nonlinear_solver: NewtonNonlinearSolver<Eqn::M, LS>,
     convergence: Convergence<'a, Eqn::V>,
     op: Option<SdirkCallable<&'a Eqn>>,
-    state: RkState<Eqn::V>,
-    diff: M,
-    sdiff: Vec<M>,
-    sgdiff: Vec<M>,
-    gdiff: M,
-    old_g: Eqn::V,
-    gamma: Eqn::T,
-    is_sdirk: bool,
     s_op: Option<SdirkCallable<AugmentedEqn>>,
-    old_t: Eqn::T,
-    old_y: Eqn::V,
-    old_y_sens: Vec<Eqn::V>,
-    old_f: Eqn::V,
-    old_f_sens: Vec<Eqn::V>,
-    a_rows: Vec<Eqn::V>,
-    statistics: BdfStatistics,
-    root_finder: Option<RootFinder<Eqn::V>>,
-    tstop: Option<Eqn::T>,
-    is_state_mutated: bool,
     jacobian_update: JacobianUpdate<Eqn::T>,
 }
 
@@ -105,12 +88,11 @@ where
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
     fn clone(&self) -> Self {
-        let problem = self.problem;
         let mut nonlinear_solver = NewtonNonlinearSolver::new(LS::default());
         let op = if let Some(op) = &self.op {
-            let op = op.clone_state(&problem.eqn);
+            let op = op.clone_state(&self.problem().eqn);
             nonlinear_solver.set_problem(&op);
-            nonlinear_solver.reset_jacobian(&op, &self.state.y, self.state.t);
+            nonlinear_solver.reset_jacobian(&op, &self.rk.state().y, self.rk.state().t);
             Some(op)
         } else {
             None
@@ -120,30 +102,11 @@ where
             op
         });
         Self {
-            tableau: self.tableau.clone(),
-            problem: self.problem,
+            rk: self.rk.clone(),
             convergence: self.convergence.clone(),
             nonlinear_solver,
             op,
-            state: self.state.clone(),
-            diff: self.diff.clone(),
-            sdiff: self.sdiff.clone(),
-            sgdiff: self.sgdiff.clone(),
-            gdiff: self.gdiff.clone(),
-            old_g: self.old_g.clone(),
-            gamma: self.gamma,
-            is_sdirk: self.is_sdirk,
             s_op,
-            old_t: self.old_t,
-            old_y: self.old_y.clone(),
-            old_y_sens: self.old_y_sens.clone(),
-            old_f: self.old_f.clone(),
-            old_f_sens: self.old_f_sens.clone(),
-            a_rows: self.a_rows.clone(),
-            statistics: self.statistics.clone(),
-            root_finder: self.root_finder.clone(),
-            tstop: self.tstop,
-            is_state_mutated: self.is_state_mutated,
             jacobian_update: self.jacobian_update.clone(),
         }
     }
@@ -160,10 +123,14 @@ where
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
     const NEWTON_MAXITER: usize = 10;
-    const MIN_FACTOR: f64 = 0.2;
-    const MAX_FACTOR: f64 = 10.0;
-    const MIN_TIMESTEP: f64 = 1e-13;
-    const MAX_ERROR_TEST_FAILS: usize = 40;
+
+    fn gamma(&self) -> Eqn::T {
+        self.rk.tableau().a().get_index(1, 1)
+    }
+
+    fn is_dirk(&self) -> bool {
+        self.rk.tableau().a().get_index(0, 0) == self.gamma()
+    }
 
     pub fn new(
         problem: &'a OdeSolverProblem<Eqn>,
@@ -171,80 +138,18 @@ where
         tableau: Tableau<M>,
         linear_solver: LS,
     ) -> Result<Self, DiffsolError> {
-        Self::_new(problem, state, tableau, linear_solver, true)
+        Rk::<Eqn, M, AugmentedEqn>::check_sdirk_rk(&tableau)?;
+        let rk = Rk::new(problem, state, tableau)?;
+        Self::_new(rk, problem, linear_solver, true)
     }
 
     fn _new(
+        rk: Rk<'a, Eqn, M, AugmentedEqn>,
         problem: &'a OdeSolverProblem<Eqn>,
-        mut state: RkState<Eqn::V>,
-        tableau: Tableau<M>,
         linear_solver: LS,
         integrate_main_eqn: bool,
     ) -> Result<Self, DiffsolError> {
-        // check that the upper triangular part of a is zero
-        let s = tableau.s();
-        for i in 0..s {
-            for j in (i + 1)..s {
-                assert_eq!(
-                    tableau.a().get_index(i, j),
-                    Eqn::T::zero(),
-                    "Invalid tableau, expected a(i, j) = 0 for i > j"
-                );
-            }
-        }
-        let gamma = tableau.a().get_index(1, 1);
-        //check that for i = 1..s-1, a(i, i) = gamma
-        for i in 1..tableau.s() {
-            assert_eq!(
-                tableau.a().get_index(i, i),
-                gamma,
-                "Invalid tableau, expected a(i, i) = gamma = {} for i = 1..s-1",
-                gamma
-            );
-        }
-        // if a(0, 0) = gamma, then we're a SDIRK method
-        // if a(0, 0) = 0, then we're a ESDIRK method
-        // otherwise, error
-        let zero = Eqn::T::zero();
-        if tableau.a().get_index(0, 0) != zero && tableau.a().get_index(0, 0) != gamma {
-            panic!("Invalid tableau, expected a(0, 0) = 0 or a(0, 0) = gamma");
-        }
-        let is_sdirk = tableau.a().get_index(0, 0) == gamma;
-
-        let mut a_rows = Vec::with_capacity(s);
-        let ctx = problem.context();
-        for i in 0..s {
-            let mut row = Vec::with_capacity(i);
-            for j in 0..i {
-                row.push(tableau.a().get_index(i, j));
-            }
-            a_rows.push(Eqn::V::from_vec(row, ctx.clone()));
-        }
-
-        // check last row of a is the same as b
-        for i in 0..s {
-            assert_eq!(
-                tableau.a().get_index(s - 1, i),
-                tableau.b().get_index(i),
-                "Invalid tableau, expected a(s-1, i) = b(i)"
-            );
-        }
-
-        // check that last c is 1
-        assert_eq!(
-            tableau.c().get_index(s - 1),
-            Eqn::T::one(),
-            "Invalid tableau, expected c(s-1) = 1"
-        );
-
-        // check that the first c is 0 for esdirk methods
-        if !is_sdirk {
-            assert_eq!(
-                tableau.c().get_index(0),
-                Eqn::T::zero(),
-                "Invalid tableau, expected c(0) = 0 for esdirk methods"
-            );
-        }
+        let state = rk.state();
 
         // setup linear solver for first step
         let mut jacobian_update = JacobianUpdate::default();
@@ -257,6 +162,7 @@ where
         let mut convergence = Convergence::new(problem.rtol, &problem.atol);
         convergence.set_max_iter(Self::NEWTON_MAXITER);
 
+        let gamma = rk.tableau().a().get_index(1, 1);
         let op = if integrate_main_eqn {
             let callable = SdirkCallable::new(&problem.eqn, gamma);
             callable.set_h(state.h);
@@ -267,64 +173,12 @@ where
             None
         };
 
-        // update statistics
-        let statistics = BdfStatistics::default();
-
-        state.check_consistent_with_problem(problem)?;
-
-        let nstates = state.y.len();
-        let order = tableau.s();
-        let diff = M::zeros(nstates, order, ctx.clone());
-        let gdiff_rows = if problem.integrate_out {
-            problem.eqn.out().unwrap().nout()
-        } else {
-            0
-        };
-        let gdiff = M::zeros(gdiff_rows, order, ctx.clone());
-
-        let old_f = state.dy.clone();
-        let old_t = state.t;
-        let old_y = state.y.clone();
-        let old_g = if problem.integrate_out {
-            state.g.clone()
-        } else {
-            <Eqn::V as Vector>::zeros(0, ctx.clone())
-        };
-
-        state.set_problem(problem)?;
-        let root_finder = if let Some(root_fn) = problem.eqn.root() {
-            let root_finder = RootFinder::new(root_fn.nout(), ctx.clone());
-            root_finder.init(&root_fn, &state.y, state.t);
-            Some(root_finder)
-        } else {
-            None
-        };
-
         Ok(Self {
-            old_y_sens: vec![],
-            old_f_sens: vec![],
-            old_g,
+            rk,
             convergence,
-            diff,
-            sdiff: vec![],
-            sgdiff: vec![],
-            tableau,
             nonlinear_solver,
             op,
-            state,
-            problem,
             s_op: None,
-            gdiff,
-            gamma,
-            is_sdirk,
-            old_t,
-            old_y,
-            a_rows,
-            old_f,
-            statistics,
-            root_finder,
-            tstop: None,
-            is_state_mutated: false,
             jacobian_update,
         })
     }
@@ -336,78 +190,25 @@ where
         linear_solver: LS,
         augmented_eqn: AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
-        state.check_sens_consistent_with_problem(problem, &augmented_eqn)?;
-        let mut ret = Self::_new(
-            problem,
-            state,
-            tableau,
-            linear_solver,
-            augmented_eqn.integrate_main_eqn(),
-        )?;
-        let naug = augmented_eqn.max_index();
-        let nstates = augmented_eqn.rhs().nstates();
-        let order = ret.tableau.s();
-        let ctx = problem.eqn.context();
-        ret.sdiff = vec![M::zeros(nstates, order, ctx.clone()); naug];
-        ret.old_f_sens = vec![<Eqn::V as Vector>::zeros(nstates, ctx.clone()); naug];
-        ret.old_y_sens = ret.state.s.clone();
-        if let Some(out) = augmented_eqn.out() {
-            ret.sgdiff = vec![M::zeros(out.nout(), order, ctx.clone()); naug];
-        }
-
+        Rk::<Eqn, M, AugmentedEqn>::check_sdirk_rk(&tableau)?;
+        let rk = Rk::new_augmented(problem, state, tableau, &augmented_eqn)?;
+        let mut ret = Self::_new(rk, problem, linear_solver, true)?;
+        
         ret.s_op = if augmented_eqn.integrate_main_eqn() {
-            Some(SdirkCallable::new_no_jacobian(augmented_eqn, ret.gamma))
+            let callable = SdirkCallable::new_no_jacobian(augmented_eqn, ret.gamma());
+            Some(callable)
         } else {
-            let callable = SdirkCallable::new(augmented_eqn, ret.gamma);
+            let state = ret.rk.state();
+            let callable = SdirkCallable::new(augmented_eqn, ret.gamma());
             ret.nonlinear_solver.set_problem(&callable);
             ret.nonlinear_solver
-                .reset_jacobian(&callable, &ret.state.s[0], ret.state.t);
+                .reset_jacobian(&callable, &state.s[0], state.t);
             Some(callable)
         };
         Ok(ret)
     }
 
-    pub fn get_statistics(&self) -> &BdfStatistics {
-        &self.statistics
-    }
 
-    fn handle_tstop(
-        &mut self,
-        tstop: Eqn::T,
-    ) -> Result<Option<OdeSolverStopReason<Eqn::T>>, DiffsolError> {
-        let state = &mut self.state;
-
-        // check if the we are at tstop
-        let troundoff = Eqn::T::from(100.0) * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
-        if abs(state.t - tstop) <= troundoff {
-            self.tstop = None;
-            return Ok(Some(OdeSolverStopReason::TstopReached));
-        } else if (state.h > M::T::zero() && tstop < state.t - troundoff)
-            || (state.h < M::T::zero() && tstop > state.t + troundoff)
-        {
-            return Err(DiffsolError::from(
-                OdeSolverError::StopTimeBeforeCurrentTime {
-                    stop_time: tstop.into(),
-                    state_time: state.t.into(),
-                },
-            ));
-        }
-
-        // check if the next step will be beyond tstop, if so adjust the step size
-        if (state.h > M::T::zero() && state.t + state.h > tstop + troundoff)
-            || (state.h < M::T::zero() && state.t + state.h < tstop - troundoff)
-        {
-            let factor = (tstop - state.t) / state.h;
-            state.h *= factor;
-            if let Some(op) = self.op.as_mut() {
-                op.set_h(state.h);
-            }
-            if let Some(s_op) = self.s_op.as_mut() {
-                s_op.set_h(state.h);
-            }
-        }
-        Ok(None)
-    }
 
     fn predict_stage(i: usize, diff: &M, dy: &mut Eqn::V, tableau: &Tableau<M>) {
         if i == 0 {
