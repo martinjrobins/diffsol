@@ -11,6 +11,7 @@ use crate::{
     AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverMethod,
     OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
 };
+use num_traits::One;
 
 impl<'a, Eqn, M, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
     for ExplicitRk<'a, Eqn, M, AugEqn>
@@ -142,7 +143,27 @@ where
     }
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
-        self.rk.step_explicit(self.augmented_eqn.as_mut())
+        let mut h = self.rk.start_step()?;
+
+        // loop until step is accepted
+        let mut nattempts = 0;
+        let factor = loop {
+            // start a step attempt
+            self.rk.start_step_attempt(h, self.augmented_eqn.as_mut());
+            for i in 1..self.rk.tableau().s() {
+                self.rk.do_stage(i, h, self.augmented_eqn.as_mut());
+            }
+            let error_norm = self.rk.error_norm(h, self.augmented_eqn.as_mut());
+            let factor = self.rk.factor(error_norm);
+            if error_norm < Eqn::T::one() {
+                break factor;
+            }
+            h *= factor;
+            nattempts += 1;
+            self.rk.error_test_fail(h, nattempts)?;
+        };
+        self.rk.step_accepted(h, h * factor)?;
+        Ok(OdeSolverStopReason::InternalTimestep)
     }
 
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {

@@ -1,8 +1,6 @@
 use crate::{
-    matrix::{MatrixRef, MatrixView},
-    ode_solver::equations::OdeEquations,
-    scale, LinearOp, Matrix, MatrixSparsity, NonLinearOpJacobian, OdeEquationsImplicit, Vector,
-    VectorRef,
+    matrix::MatrixView, ode_solver::equations::OdeEquations, scale, LinearOp, Matrix,
+    MatrixSparsity, NonLinearOpJacobian, OdeEquationsImplicit, Vector,
 };
 use num_traits::{One, Zero};
 use std::{
@@ -157,10 +155,7 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
     pub fn number_of_jac_evals(&self) -> usize {
         *self.number_of_jac_evals.borrow()
     }
-    pub fn set_h(&self, h: Eqn::T)
-    where
-        for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-    {
+    pub fn set_h(&self, h: Eqn::T) {
         self.h.replace(h);
     }
     pub fn get_last_f_eval(&self) -> Ref<Eqn::V> {
@@ -220,11 +215,7 @@ impl<Eqn: OdeEquations> Op for SdirkCallable<Eqn> {
     }
 }
 
-impl<Eqn: OdeEquationsImplicit> NonLinearOp for SdirkCallable<Eqn>
-where
-    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
-    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-{
+impl<Eqn: OdeEquationsImplicit> NonLinearOp for SdirkCallable<Eqn> {
     // F(y) = M (y) - h f(phi + c * y) = 0
     fn call_inplace(&self, x: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
         self.set_tmp(x);
@@ -242,11 +233,7 @@ where
     }
 }
 
-impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for SdirkCallable<Eqn>
-where
-    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
-    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
-{
+impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for SdirkCallable<Eqn> {
     // (M - c * h * f'(phi + c * y)) v
     fn jac_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
         self.set_tmp(x);

@@ -1,28 +1,20 @@
 use crate::error::DiffsolError;
-use crate::error::OdeSolverError;
 use crate::matrix::MatrixRef;
 use crate::ode_solver::runge_kutta::Rk;
-use crate::ode_solver::state;
-use crate::ode_solver_error;
 use crate::vector::VectorRef;
 use crate::LinearSolver;
 use crate::NewtonNonlinearSolver;
 use crate::NoAug;
 use crate::OdeSolverStopReason;
 use crate::RkState;
-use crate::RootFinder;
 use crate::Tableau;
 use crate::{
-    nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, scale, AugmentedOdeEquations,
+    nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, DenseMatrix, JacobianUpdate,
-    NonLinearOp, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op,
-    Scalar, StateRef, StateRefMut, Vector, VectorViewMut,
+    OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef,
+    StateRefMut,
 };
-use num_traits::abs;
 use num_traits::One;
-use num_traits::Pow;
-use num_traits::Zero;
-use std::ops::MulAssign;
 
 use super::bdf::BdfStatistics;
 use super::jacobian_update::SolverState;
@@ -40,7 +32,7 @@ where
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
     fn into_state_and_eqn(self) -> (Self::State, Option<AugEqn>) {
-        (self.state, self.s_op.map(|op| op.eqn))
+        (self.rk.into_state(), self.s_op.map(|op| op.eqn))
     }
     fn augmented_eqn(&self) -> Option<&AugEqn> {
         self.s_op.as_ref().map(|op| op.eqn())
@@ -84,8 +76,6 @@ where
     Eqn: OdeEquationsImplicit,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
-    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
-    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
     fn clone(&self) -> Self {
         let mut nonlinear_solver = NewtonNonlinearSolver::new(LS::default());
@@ -119,17 +109,11 @@ where
     Eqn: OdeEquationsImplicit,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
-    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
-    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
     const NEWTON_MAXITER: usize = 10;
 
     fn gamma(&self) -> Eqn::T {
         self.rk.tableau().a().get_index(1, 1)
-    }
-
-    fn is_dirk(&self) -> bool {
-        self.rk.tableau().a().get_index(0, 0) == self.gamma()
     }
 
     pub fn new(
@@ -138,13 +122,13 @@ where
         tableau: Tableau<M>,
         linear_solver: LS,
     ) -> Result<Self, DiffsolError> {
-        Rk::<Eqn, M, AugmentedEqn>::check_sdirk_rk(&tableau)?;
+        Rk::<Eqn, M>::check_sdirk_rk(&tableau)?;
         let rk = Rk::new(problem, state, tableau)?;
         Self::_new(rk, problem, linear_solver, true)
     }
 
     fn _new(
-        rk: Rk<'a, Eqn, M, AugmentedEqn>,
+        rk: Rk<'a, Eqn, M>,
         problem: &'a OdeSolverProblem<Eqn>,
         linear_solver: LS,
         integrate_main_eqn: bool,
@@ -190,10 +174,10 @@ where
         linear_solver: LS,
         augmented_eqn: AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
-        Rk::<Eqn, M, AugmentedEqn>::check_sdirk_rk(&tableau)?;
+        Rk::<Eqn, M>::check_sdirk_rk(&tableau)?;
         let rk = Rk::new_augmented(problem, state, tableau, &augmented_eqn)?;
         let mut ret = Self::_new(rk, problem, linear_solver, true)?;
-        
+
         ret.s_op = if augmented_eqn.integrate_main_eqn() {
             let callable = SdirkCallable::new_no_jacobian(augmented_eqn, ret.gamma());
             Some(callable)
@@ -208,138 +192,55 @@ where
         Ok(ret)
     }
 
-
-
-    fn predict_stage(i: usize, diff: &M, dy: &mut Eqn::V, tableau: &Tableau<M>) {
-        if i == 0 {
-            dy.fill(Eqn::T::zero());
-        } else if i == 1 {
-            dy.copy_from_view(&diff.column(i - 1));
-        } else {
-            let c = (tableau.c().get_index(i) - tableau.c().get_index(i - 2))
-                / (tableau.c().get_index(i - 1) - tableau.c().get_index(i - 2));
-            // dy = c1  + c * (c1 - c2)
-            dy.copy_from_view(&diff.column(i - 1));
-            dy.axpy_v(-c, &diff.column(i - 2), Eqn::T::one() + c);
-        }
-    }
-
-    fn solve_for_sensitivities(&mut self, i: usize, t: Eqn::T) -> Result<(), DiffsolError> {
-        let h = self.state.h;
-        // update for new state
-        {
-            let op = self.s_op.as_mut().unwrap();
-            op.eqn_mut()
-                .update_rhs_out_state(&self.old_y, &self.old_f, t);
-        }
-
-        // solve for sensitivities equations discretised using sdirk equation
-        for j in 0..self.sdiff.len() {
-            let s0 = &self.state.s[j];
-            let op = self.s_op.as_mut().unwrap();
-            op.set_phi(&self.sdiff[j].columns(0, i), s0, &self.a_rows[i]);
-            op.eqn_mut().set_index(j);
-            let ds = &mut self.old_f_sens[j];
-            Self::predict_stage(i, &self.sdiff[j], ds, &self.tableau);
-
-            // solve
-            let op = self.s_op.as_ref().unwrap();
-            self.nonlinear_solver
-                .solve_in_place(op, ds, t, s0, &mut self.convergence)?;
-
-            self.old_y_sens[j].copy_from(&op.get_last_f_eval());
-            self.statistics.number_of_nonlinear_solver_iterations += self.convergence.niter();
-
-            // calculate sdg and store in sgdiff
-            if let Some(out) = self.s_op.as_ref().unwrap().eqn().out() {
-                let dsg = &mut self.state.dsg[j];
-                out.call_inplace(&self.old_y_sens[j], t, dsg);
-                self.sgdiff[j].column_mut(i).axpy(h, dsg, Eqn::T::zero());
-            }
-        }
-        Ok(())
-    }
-
-    fn interpolate_from_diff(y0: &Eqn::V, beta_f: &Eqn::V, diff: &M) -> Eqn::V {
-        // ret = old_y + sum_{i=0}^{s_star-1} beta[i] * diff[:, i]
-        let mut ret = y0.clone();
-        diff.gemv(Eqn::T::one(), beta_f, Eqn::T::one(), &mut ret);
-        ret
-    }
-
-    fn interpolate_beta_function(theta: Eqn::T, beta: &M) -> Eqn::V {
-        let poly_order = beta.ncols();
-        let s_star = beta.nrows();
-        let mut thetav = Vec::with_capacity(poly_order);
-        thetav.push(theta);
-        for i in 1..poly_order {
-            thetav.push(theta * thetav[i - 1]);
-        }
-        // beta_poly = beta * thetav
-        let thetav = Eqn::V::from_vec(thetav, beta.context().clone());
-        let mut beta_f = <Eqn::V as Vector>::zeros(s_star, beta.context().clone());
-        beta.gemv(Eqn::T::one(), &thetav, Eqn::T::zero(), &mut beta_f);
-        beta_f
-    }
-
-    fn interpolate_hermite(theta: Eqn::T, u0: &Eqn::V, u1: &Eqn::V, diff: &M) -> Eqn::V {
-        let hf0 = diff.column(0);
-        let hf1 = diff.column(diff.ncols() - 1);
-        u0 * scale(Eqn::T::from(1.0) - theta)
-            + u1 * scale(theta)
-            + ((u1 - u0) * scale(Eqn::T::from(1.0) - Eqn::T::from(2.0) * theta)
-                + hf0 * scale(theta - Eqn::T::from(1.0))
-                + hf1 * scale(theta))
-                * scale(theta * (theta - Eqn::T::from(1.0)))
-    }
-
-    fn _jacobian_updates(&mut self, h: Eqn::T, state: SolverState) {
+    fn jacobian_updates(&mut self, h: Eqn::T, state: SolverState) {
         if self.jacobian_update.check_rhs_jacobian_update(h, &state) {
             if let Some(op) = self.op.as_mut() {
                 op.set_jacobian_is_stale();
-                self.nonlinear_solver
-                    .reset_jacobian(op, &self.old_f, self.state.t);
+                self.nonlinear_solver.reset_jacobian(
+                    op,
+                    &self.rk.old_state().dy,
+                    self.rk.state().t,
+                );
             } else if let Some(s_op) = self.s_op.as_mut() {
                 s_op.set_jacobian_is_stale();
-                self.nonlinear_solver
-                    .reset_jacobian(s_op, &self.old_f_sens[0], self.state.t);
+                self.nonlinear_solver.reset_jacobian(
+                    s_op,
+                    &self.rk.old_state().ds[0],
+                    self.rk.state().t,
+                );
             }
             self.jacobian_update.update_rhs_jacobian();
             self.jacobian_update.update_jacobian(h);
         } else if self.jacobian_update.check_jacobian_update(h, &state) {
             if let Some(op) = self.op.as_ref() {
-                self.nonlinear_solver
-                    .reset_jacobian(op, &self.old_f, self.state.t);
+                self.nonlinear_solver.reset_jacobian(
+                    op,
+                    &self.rk.old_state().dy,
+                    self.rk.state().t,
+                );
             } else if let Some(s_op) = self.s_op.as_ref() {
-                self.nonlinear_solver
-                    .reset_jacobian(s_op, &self.old_f_sens[0], self.state.t);
+                self.nonlinear_solver.reset_jacobian(
+                    s_op,
+                    &self.rk.old_state().ds[0],
+                    self.rk.state().t,
+                );
             }
             self.jacobian_update.update_jacobian(h);
         }
     }
 
-    fn _update_step_size(&mut self, factor: Eqn::T) -> Result<Eqn::T, DiffsolError> {
-        let new_h = self.state.h * factor;
-
-        // if step size too small, then fail
-        if abs(new_h) < Eqn::T::from(Self::MIN_TIMESTEP) {
-            return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
-                time: self.state.t.into(),
-            }));
-        }
-
+    fn update_op_step_size(&mut self, h: Eqn::T) {
         // update h for new step size
         if let Some(op) = self.op.as_mut() {
-            op.set_h(new_h);
+            op.set_h(h);
         }
         if let Some(s_op) = self.s_op.as_mut() {
-            s_op.set_h(new_h);
+            s_op.set_h(h);
         }
+    }
 
-        // update state
-        self.state.h = new_h;
-
-        Ok(new_h)
+    pub fn get_statistics(&self) -> &BdfStatistics {
+        self.rk.get_statistics()
     }
 }
 
@@ -350,28 +251,26 @@ where
     Eqn: OdeEquationsImplicit,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
-    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
-    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
     type State = RkState<Eqn::V>;
 
     fn problem(&self) -> &'a OdeSolverProblem<Eqn> {
-        self.problem
+        self.rk.problem()
     }
 
     fn jacobian(&self) -> Option<std::cell::Ref<<Eqn>::M>> {
-        let t = self.state.t;
+        let t = self.rk.state().t;
         if let Some(op) = self.op.as_ref() {
-            let x = &self.state.y;
+            let x = &self.rk.state().y;
             Some(op.rhs_jac(x, t))
         } else {
-            let x = &self.state.s[0];
+            let x = &self.rk.state().s[0];
             self.s_op.as_ref().map(|s_op| s_op.rhs_jac(x, t))
         }
     }
 
     fn mass(&self) -> Option<std::cell::Ref<<Eqn>::M>> {
-        let t = self.state.t;
+        let t = self.rk.state().t;
         if let Some(op) = self.op.as_ref() {
             Some(op.mass(t))
         } else {
@@ -380,504 +279,114 @@ where
     }
 
     fn order(&self) -> usize {
-        self.tableau.order()
+        self.rk.order()
     }
 
     fn set_state(&mut self, state: Self::State) {
-        self.state = state;
+        let h = state.h;
+        self.rk.set_state(state);
 
         // update the op with the new state
         if let Some(op) = self.op.as_mut() {
-            op.set_h(self.state.h);
+            op.set_h(h);
         }
 
         // reinitialise jacobian updates as if a checkpoint was taken
-        self._jacobian_updates(self.state.h, SolverState::Checkpoint);
+        self.jacobian_updates(h, SolverState::Checkpoint);
     }
 
     fn into_state(self) -> RkState<Eqn::V> {
-        self.state
+        self.rk.into_state()
     }
 
     fn checkpoint(&mut self) -> Self::State {
-        self._jacobian_updates(self.state.h, SolverState::Checkpoint);
-        self.state.clone()
+        self.jacobian_updates(self.rk.state().h, SolverState::Checkpoint);
+        self.rk.state().clone()
     }
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
-        let n = self.state.y.len();
-        let old_num_error_test_fails = self.statistics.number_of_error_test_failures;
-
-        if self.is_state_mutated {
-            // reinitalise root finder if needed
-            if let Some(root_fn) = self.problem.eqn.root() {
-                let state = &self.state;
-                self.root_finder
-                    .as_ref()
-                    .unwrap()
-                    .init(&root_fn, &state.y, state.t);
-            }
-            // reinitialise tstop if needed
-            if let Some(t_stop) = self.tstop {
-                self.set_stop_time(t_stop)?;
-            }
-
-            self.is_state_mutated = false;
-        }
-
-        // optionally do the first step
-        let start = if self.is_sdirk { 0 } else { 1 };
-        let mut updated_jacobian = false;
-
-        // dont' reset jacobian for the first attempt at the step
-        let ctx = self.problem.eqn.context();
-        // todo: remove this allocation?
-        let mut error = <Eqn::V as Vector>::zeros(n, ctx.clone());
-        let out_error_control = self.problem().output_in_error_control();
-        let mut out_error = if out_error_control {
-            <Eqn::V as Vector>::zeros(self.problem().eqn.out().unwrap().nout(), ctx.clone())
-        } else {
-            <Eqn::V as Vector>::zeros(0, ctx.clone())
-        };
-        let sens_error_control =
-            self.s_op.is_some() && self.s_op.as_ref().unwrap().eqn().include_in_error_control();
-        let mut sens_error = if sens_error_control {
-            <Eqn::V as Vector>::zeros(
-                self.s_op.as_ref().unwrap().eqn().rhs().nstates(),
-                ctx.clone(),
-            )
-        } else {
-            <Eqn::V as Vector>::zeros(0, ctx.clone())
-        };
-        let sens_out_error_control = self.s_op.is_some()
-            && self
-                .s_op
-                .as_ref()
-                .unwrap()
-                .eqn()
-                .include_out_in_error_control();
-        let mut sens_out_error = if sens_out_error_control {
-            <Eqn::V as Vector>::zeros(
-                self.s_op.as_ref().unwrap().eqn().out().unwrap().nout(),
-                ctx.clone(),
-            )
-        } else {
-            <Eqn::V as Vector>::zeros(0, ctx.clone())
-        };
-
-        let mut factor: Eqn::T;
+        let mut h = self.rk.start_step()?;
 
         // loop until step is accepted
-        'step: loop {
-            let t0 = self.state.t;
-            let h = self.state.h;
-            // if start == 1, then we need to compute the first stage
-            // from the last stage of the previous step
-            if start == 1 {
-                {
-                    let state = &self.state;
-                    let mut hf = self.diff.column_mut(0);
-                    hf.copy_from(&state.dy);
-                    hf *= scale(h);
-                }
-
-                // sensitivities too
-                if self.s_op.is_some() {
-                    for (diff, dy) in self.sdiff.iter_mut().zip(self.state.ds.iter()) {
-                        let mut hf = diff.column_mut(0);
-                        hf.copy_from(dy);
-                        hf *= scale(h);
-                    }
-                    for (diff, dg) in self.sgdiff.iter_mut().zip(self.state.dsg.iter()) {
-                        let mut hf = diff.column_mut(0);
-                        hf.copy_from(dg);
-                        hf *= scale(h);
-                    }
-                }
-
-                // output function
-                if self.problem.integrate_out {
-                    let state = &self.state;
-                    let mut hf = self.gdiff.column_mut(0);
-                    hf.copy_from(&state.dg);
-                    hf *= scale(h);
-                }
-            }
-
-            for i in start..self.tableau.s() {
-                let t = t0 + self.tableau.c().get_index(i) * h;
-
-                // main equation
-                let mut solve_result = Ok(());
-                if let Some(op) = self.op.as_mut() {
-                    op.set_phi(&self.diff.columns(0, i), &self.state.y, &self.a_rows[i]);
-                    Self::predict_stage(i, &self.diff, &mut self.old_f, &self.tableau);
-                    solve_result = self.nonlinear_solver.solve_in_place(
-                        op,
-                        &mut self.old_f,
-                        t,
-                        &self.state.y,
+        let mut nattempts = 0;
+        let mut updated_jacobian = false;
+        let start = if self.rk.skip_first_stage() { 1 } else { 0 };
+        let factor = 'step: loop {
+            // start a step attempt
+            self.rk
+                .start_step_attempt(h, self.s_op.as_mut().map(|s_op| s_op.eqn_mut()));
+            for i in start..self.rk.tableau().s() {
+                if self
+                    .rk
+                    .do_stage_sdirk(
+                        i,
+                        h,
+                        self.op.as_ref(),
+                        self.s_op.as_mut(),
+                        &mut self.nonlinear_solver,
                         &mut self.convergence,
-                    );
-                    self.statistics.number_of_nonlinear_solver_iterations +=
-                        self.convergence.niter();
-                }
-
-                // only calculate sensitivities if the solve succeeded
-                if solve_result.is_ok() {
-                    if let Some(op) = self.op.as_ref() {
-                        self.old_y.copy_from(&op.get_last_f_eval());
-                    }
-                    // old_y now has the new y soln and old_f has the new dy soln
-                    if self.s_op.is_some() {
-                        solve_result = self.solve_for_sensitivities(i, t);
-                    }
-                }
-
-                // handle solve failure
-                if solve_result.is_err() {
-                    self.statistics.number_of_nonlinear_solver_fails += 1;
+                    )
+                    .is_err()
+                {
                     if !updated_jacobian {
                         // newton iteration did not converge, so update jacobian and try again
                         updated_jacobian = true;
-                        self._jacobian_updates(h, SolverState::FirstConvergenceFail);
+                        self.jacobian_updates(h, SolverState::FirstConvergenceFail);
                     } else {
                         // newton iteration did not converge and jacobian has been updated, so we reduce step size and try again
-                        let new_h = self._update_step_size(Eqn::T::from(0.3))?;
-                        self._jacobian_updates(new_h, SolverState::SecondConvergenceFail);
+                        h *= Eqn::T::from(0.3);
+                        self.update_op_step_size(h);
+                        self.jacobian_updates(h, SolverState::SecondConvergenceFail);
                     }
+                    self.rk.solve_fail(h)?;
                     // try again....
                     continue 'step;
-                };
-
-                if self.op.is_some() {
-                    // update diff with solved dy
-                    self.diff.column_mut(i).copy_from(&self.old_f);
-
-                    // calculate dg and store in gdiff
-                    if self.problem.integrate_out {
-                        let out = self.problem.eqn.out().unwrap();
-                        out.call_inplace(&self.old_y, t, &mut self.state.dg);
-                        self.gdiff
-                            .column_mut(i)
-                            .axpy(h, &self.state.dg, Eqn::T::zero());
-                    }
-                }
-
-                if self.s_op.is_some() {
-                    for (diff, old_f_sens) in self.sdiff.iter_mut().zip(self.old_f_sens.iter()) {
-                        diff.column_mut(i).copy_from(old_f_sens);
-                    }
                 }
             }
-            let mut ncontributions = 0;
-            let mut error_norm = Eqn::T::zero();
-            // successfully solved for all stages, now compute error
-            if self.op.is_some() {
-                self.diff
-                    .gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), &mut error);
-
-                // compute error norm
-                let atol = &self.problem().atol;
-                let rtol = self.problem().rtol;
-                error_norm += error.squared_norm(&self.old_y, atol, rtol);
-                ncontributions += 1;
-
-                // output errors
-                if out_error_control {
-                    self.gdiff.gemv(
-                        Eqn::T::one(),
-                        self.tableau.d(),
-                        Eqn::T::zero(),
-                        &mut out_error,
-                    );
-                    let atol = self.problem().out_atol.as_ref().unwrap();
-                    let rtol = self.problem().out_rtol.unwrap();
-                    let out_error_norm = out_error.squared_norm(&self.old_g, atol, rtol);
-                    error_norm += out_error_norm;
-                    ncontributions += 1;
-                }
+            let error_norm = self
+                .rk
+                .error_norm(h, self.s_op.as_mut().map(|s_op| s_op.eqn_mut()));
+            let factor = self.rk.factor(error_norm);
+            if error_norm < Eqn::T::one() {
+                break factor;
             }
+            h *= factor;
+            self.update_op_step_size(h);
+            nattempts += 1;
+            self.rk.error_test_fail(h, nattempts)?;
+            self.jacobian_updates(h, SolverState::ErrorTestFail);
+        };
 
-            // sensitivity errors
-            if sens_error_control {
-                let atol = self.s_op.as_ref().unwrap().eqn().atol().unwrap();
-                let rtol = self.s_op.as_ref().unwrap().eqn().rtol().unwrap();
-                for i in 0..self.sdiff.len() {
-                    self.sdiff[i].gemv(
-                        Eqn::T::one(),
-                        self.tableau.d(),
-                        Eqn::T::zero(),
-                        &mut sens_error,
-                    );
-                    let sens_error_norm = sens_error.squared_norm(&self.old_y_sens[i], atol, rtol);
-                    error_norm += sens_error_norm;
-                    ncontributions += 1;
-                }
-            }
-
-            // sensitivity output errors
-            if sens_out_error_control {
-                let atol = self.s_op.as_ref().unwrap().eqn().out_atol().unwrap();
-                let rtol = self.s_op.as_ref().unwrap().eqn().out_rtol().unwrap();
-                for i in 0..self.sgdiff.len() {
-                    self.sgdiff[i].gemv(
-                        Eqn::T::one(),
-                        self.tableau.d(),
-                        Eqn::T::zero(),
-                        &mut sens_out_error,
-                    );
-                    let sens_error_norm =
-                        sens_out_error.squared_norm(&self.state.sg[i], atol, rtol);
-                    error_norm += sens_error_norm;
-                    ncontributions += 1;
-                }
-            }
-            if ncontributions > 1 {
-                error_norm /= Eqn::T::from(ncontributions as f64);
-            }
-
-            // adjust step size based on error
-            let maxiter = self.convergence.max_iter() as f64;
-            let niter = self.convergence.niter() as f64;
-            let safety = Eqn::T::from(0.9 * (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter));
-            let order = self.tableau.order() as f64;
-            factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (order + 1.0)));
-            if factor < Eqn::T::from(Self::MIN_FACTOR) {
-                factor = Eqn::T::from(Self::MIN_FACTOR);
-            }
-            if factor > Eqn::T::from(Self::MAX_FACTOR) {
-                factor = Eqn::T::from(Self::MAX_FACTOR);
-            }
-
-            // test error is within tolerance
-            if error_norm <= Eqn::T::from(1.0) {
-                break 'step;
-            }
-            // step is rejected, factor reduces step size, so we try again with the smaller step size
-            self.statistics.number_of_error_test_failures += 1;
-            if self.statistics.number_of_error_test_failures - old_num_error_test_fails
-                >= Self::MAX_ERROR_TEST_FAILS
-            {
-                return Err(DiffsolError::from(
-                    OdeSolverError::TooManyErrorTestFailures {
-                        time: self.state.t.into(),
-                    },
-                ));
-            }
-            let new_h = self._update_step_size(factor)?;
-            self._jacobian_updates(new_h, SolverState::ErrorTestFail);
-        }
-
-        // take the step
-        {
-            let state = &mut self.state;
-            self.old_t = state.t;
-            state.t += state.h;
-
-            // last stage is the solution and is the same as old_f
-            // todo: can we get rid of old_f and just use diff?
-            self.old_f.mul_assign(scale(Eqn::T::one() / state.h));
-            std::mem::swap(&mut self.old_f, &mut state.dy);
-
-            // old_y already has the new y soln
-            std::mem::swap(&mut self.old_y, &mut state.y);
-
-            for i in 0..self.sdiff.len() {
-                self.old_f_sens[i].mul_assign(scale(Eqn::T::one() / state.h));
-                std::mem::swap(&mut self.old_f_sens[i], &mut state.ds[i]);
-                std::mem::swap(&mut self.old_y_sens[i], &mut state.s[i]);
-            }
-
-            for i in 0..self.sgdiff.len() {
-                self.sgdiff[i].gemv(
-                    Eqn::T::one(),
-                    self.tableau.b(),
-                    Eqn::T::one(),
-                    &mut state.sg[i],
-                );
-            }
-
-            // integrate output function
-            if self.problem.integrate_out {
-                self.old_g.copy_from(&state.g);
-                self.gdiff
-                    .gemv(Eqn::T::one(), self.tableau.b(), Eqn::T::one(), &mut state.g);
-            }
-        }
-
-        // update step size for next step
-        let new_h = self._update_step_size(factor)?;
-        self._jacobian_updates(new_h, SolverState::StepSuccess);
-
-        // update statistics
-        if let Some(op) = self.op.as_ref() {
-            self.statistics.number_of_linear_solver_setups = op.number_of_jac_evals();
-        } else if let Some(s_op) = self.s_op.as_ref() {
-            self.statistics.number_of_linear_solver_setups = s_op.number_of_jac_evals();
-        }
-        self.statistics.number_of_steps += 1;
-        self.jacobian_update.step();
-
-        // check for root within accepted step
-        if let Some(root_fn) = self.problem.eqn.root() {
-            let ret = self.root_finder.as_ref().unwrap().check_root(
-                &|t| self.interpolate(t),
-                &root_fn,
-                &self.state.y,
-                self.state.t,
-            );
-            if let Some(root) = ret {
-                return Ok(OdeSolverStopReason::RootFound(root));
-            }
-        }
-
-        // check if the we are at tstop
-        if let Some(tstop) = self.tstop {
-            if let Some(reason) = self.handle_tstop(tstop).unwrap() {
-                return Ok(reason);
-            }
-        }
-
-        // just a normal step, no roots or tstop reached
+        // accept the step and prepare for the next step
+        let new_h = h * factor;
+        self.rk.step_accepted(h, new_h)?;
+        self.update_op_step_size(new_h);
+        self.jacobian_updates(new_h, SolverState::StepSuccess);
         Ok(OdeSolverStopReason::InternalTimestep)
     }
 
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
-        self.tstop = Some(tstop);
-        if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
-            let error = OdeSolverError::StopTimeAtCurrentTime;
-            self.tstop = None;
-            return Err(DiffsolError::from(error));
-        }
-        Ok(())
+        self.rk.set_stop_time(tstop)
     }
 
     fn interpolate_sens(&self, t: <Eqn as Op>::T) -> Result<Vec<<Eqn as Op>::V>, DiffsolError> {
-        let state = &self.state;
-
-        if self.is_state_mutated {
-            if t == state.t {
-                return Ok(state.s.clone());
-            } else {
-                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-            }
-        }
-
-        // check that t is within the current step depending on the direction
-        let is_forward = state.h > Eqn::T::zero();
-        if (is_forward && (t > state.t || t < self.old_t))
-            || (!is_forward && (t < state.t || t > self.old_t))
-        {
-            return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-        }
-        let dt = state.t - self.old_t;
-        let theta = if dt == Eqn::T::zero() {
-            Eqn::T::one()
-        } else {
-            (t - self.old_t) / dt
-        };
-
-        if let Some(beta) = self.tableau.beta() {
-            let beta_f = Self::interpolate_beta_function(theta, beta);
-            let ret = self
-                .old_y_sens
-                .iter()
-                .zip(self.sdiff.iter())
-                .map(|(y, diff)| Self::interpolate_from_diff(y, &beta_f, diff))
-                .collect();
-            Ok(ret)
-        } else {
-            let ret = self
-                .old_y_sens
-                .iter()
-                .zip(state.s.iter())
-                .zip(self.sdiff.iter())
-                .map(|((s0, s1), diff)| Self::interpolate_hermite(theta, s0, s1, diff))
-                .collect();
-            Ok(ret)
-        }
+        self.rk.interpolate_sens(t)
     }
 
     fn interpolate(&self, t: <Eqn>::T) -> Result<<Eqn>::V, DiffsolError> {
-        let state = &self.state;
-
-        if self.is_state_mutated {
-            if t == state.t {
-                return Ok(state.y.clone());
-            } else {
-                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-            }
-        }
-
-        // check that t is within the current step depending on the direction
-        let is_forward = state.h > Eqn::T::zero();
-        if (is_forward && (t > state.t || t < self.old_t))
-            || (!is_forward && (t < state.t || t > self.old_t))
-        {
-            return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-        }
-
-        let dt = state.t - self.old_t;
-        let theta = if dt == Eqn::T::zero() {
-            Eqn::T::one()
-        } else {
-            (t - self.old_t) / dt
-        };
-
-        if let Some(beta) = self.tableau.beta() {
-            let beta_f = Self::interpolate_beta_function(theta, beta);
-            let ret = Self::interpolate_from_diff(&self.old_y, &beta_f, &self.diff);
-            Ok(ret)
-        } else {
-            let ret = Self::interpolate_hermite(theta, &self.old_y, &state.y, &self.diff);
-            Ok(ret)
-        }
+        self.rk.interpolate(t)
     }
 
     fn interpolate_out(&self, t: <Eqn>::T) -> Result<<Eqn>::V, DiffsolError> {
-        let state = &self.state;
-
-        if self.is_state_mutated {
-            if t == state.t {
-                return Ok(state.g.clone());
-            } else {
-                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-            }
-        }
-
-        // check that t is within the current step depending on the direction
-        let is_forward = state.h > Eqn::T::zero();
-        if (is_forward && (t > state.t || t < self.old_t))
-            || (!is_forward && (t < state.t || t > self.old_t))
-        {
-            return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-        }
-
-        let dt = state.t - self.old_t;
-        let theta = if dt == Eqn::T::zero() {
-            Eqn::T::one()
-        } else {
-            (t - self.old_t) / dt
-        };
-
-        if let Some(beta) = self.tableau.beta() {
-            let beta_f = Self::interpolate_beta_function(theta, beta);
-            let ret = Self::interpolate_from_diff(&self.old_g, &beta_f, &self.gdiff);
-            Ok(ret)
-        } else {
-            let ret = Self::interpolate_hermite(theta, &self.old_g, &state.g, &self.gdiff);
-            Ok(ret)
-        }
+        self.rk.interpolate_out(t)
     }
 
     fn state(&self) -> StateRef<Eqn::V> {
-        self.state.as_ref()
+        self.rk.state().as_ref()
     }
 
     fn state_mut(&mut self) -> StateRefMut<Eqn::V> {
-        self.is_state_mutated = true;
-        self.state.as_mut()
+        self.rk.state_mut().as_mut()
     }
 }
 

@@ -1,12 +1,16 @@
 use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
+use crate::op::sdirk::SdirkCallable;
+use crate::AugmentedOdeEquationsImplicit;
+use crate::OdeEquationsImplicit;
 use crate::OdeSolverStopReason;
 use crate::RkState;
 use crate::RootFinder;
 use crate::Tableau;
 use crate::{
-    ode_solver_error, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, MatrixView,
-    NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Scalar, Vector, VectorViewMut,
+    ode_solver_error, AugmentedOdeEquations, Convergence, DefaultDenseMatrix, DenseMatrix,
+    MatrixView, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op,
+    Scalar, Vector, VectorViewMut,
 };
 use num_traits::abs;
 use num_traits::One;
@@ -253,9 +257,11 @@ where
         Ok(())
     }
 
-    pub(crate) fn check_sdirk_rk(
-        tableau: &Tableau<M>,
-    ) -> Result<(), DiffsolError> {
+    pub(crate) fn skip_first_stage(&self) -> bool {
+        self.tableau.a().get_index(0, 0) == Eqn::T::zero()
+    }
+
+    pub(crate) fn check_sdirk_rk(tableau: &Tableau<M>) -> Result<(), DiffsolError> {
         // check that the upper triangular part of a is zero
         let s = tableau.s();
         for i in 0..s {
@@ -345,31 +351,13 @@ where
         &self.state
     }
 
+    pub(crate) fn old_state(&self) -> &RkState<Eqn::V> {
+        &self.old_state
+    }
+
     pub(crate) fn state_mut(&mut self) -> &mut RkState<Eqn::V> {
         self.is_state_mutated = true;
         &mut self.state
-    }
-
-    pub(crate) fn step_explicit(&mut self, mut augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
-        let mut h = self.start_step()?;
-
-        // loop until step is accepted
-        let mut nattempts = 0;
-        let factor = loop {
-            // start a step attempt
-            self.start_step_attempt(h, augmented_eqn.as_deref_mut());
-            for i in 1..self.tableau.s() {
-                self.do_stage(i, h, augmented_eqn.as_deref_mut());
-            }
-            let error_norm = self.end_step_attempt(nattempts, h, augmented_eqn.as_deref_mut())?;
-            let factor = self.factor(error_norm, h)?;
-            if error_norm < Eqn::T::one() {
-                break factor;
-            }
-            h *= factor;
-            nattempts += 1;
-        };
-        self.step_accepted(h, factor)
     }
 
     pub(crate) fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
@@ -382,7 +370,7 @@ where
         Ok(())
     }
 
-    fn start_step(&mut self) -> Result<Eqn::T, DiffsolError> {
+    pub(crate) fn start_step(&mut self) -> Result<Eqn::T, DiffsolError> {
         if self.is_state_mutated {
             // reinitalise root finder if needed
             if let Some(root_fn) = self.problem.eqn.root() {
@@ -403,7 +391,7 @@ where
         Ok(self.state.h)
     }
 
-    fn factor(&self, error_norm: Eqn::T, h: Eqn::T) -> Result<Eqn::T, DiffsolError> {
+    pub(crate) fn factor(&self, error_norm: Eqn::T) -> Eqn::T {
         let safety = Eqn::T::from(0.9);
         let mut factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (self.order() as f64 + 1.0)));
         if factor < Eqn::T::from(Self::MIN_FACTOR) {
@@ -412,38 +400,42 @@ where
         if factor > Eqn::T::from(Self::MAX_FACTOR) {
             factor = Eqn::T::from(Self::MAX_FACTOR);
         }
-
-        // if step size too small, then fail
-        if abs(factor * h) < Eqn::T::from(Self::MIN_TIMESTEP) {
-            return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
-                time: self.state.t.into(),
-            }));
-        }
-        Ok(factor)
+        factor
     }
 
-    fn start_step_attempt(&mut self, _h: Eqn::T, augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>) {
-        // we need to compute the first stage
+    pub(crate) fn start_step_attempt(
+        &mut self,
+        _h: Eqn::T,
+        augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>,
+    ) {
+        // if start == 1, then we need to compute the first stage
         // from the last stage of the previous step
-        self.diff.column_mut(0).copy_from(&self.state.dy);
+        if self.skip_first_stage() {
+            self.diff.column_mut(0).copy_from(&self.state.dy);
 
-        // sensitivities too
-        if augmented_eqn.is_some() {
-            for (diff, dy) in self.sdiff.iter_mut().zip(self.state.ds.iter()) {
-                diff.column_mut(0).copy_from(dy);
+            // sensitivities too
+            if augmented_eqn.is_some() {
+                for (diff, dy) in self.sdiff.iter_mut().zip(self.state.ds.iter()) {
+                    diff.column_mut(0).copy_from(dy);
+                }
+                for (diff, dg) in self.sgdiff.iter_mut().zip(self.state.dsg.iter()) {
+                    diff.column_mut(0).copy_from(dg);
+                }
             }
-            for (diff, dg) in self.sgdiff.iter_mut().zip(self.state.dsg.iter()) {
-                diff.column_mut(0).copy_from(dg);
-            }
-        }
 
-        // output function
-        if self.problem.integrate_out {
-            self.gdiff.column_mut(0).copy_from(&self.state.dg);
+            // output function
+            if self.problem.integrate_out {
+                self.gdiff.column_mut(0).copy_from(&self.state.dg);
+            }
         }
     }
 
-    fn do_stage(&mut self, i: usize, h: Eqn::T, augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>) {
+    pub(crate) fn do_stage(
+        &mut self,
+        i: usize,
+        h: Eqn::T,
+        augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>,
+    ) {
         let t = self.state.t + self.tableau.c().get_index(i) * h;
 
         // main equation
@@ -505,6 +497,93 @@ where
         }
     }
 
+    fn predict_stage_sdirk(i: usize, diff: &M, dy: &mut Eqn::V, tableau: &Tableau<M>) {
+        if i == 0 {
+            dy.fill(Eqn::T::zero());
+        } else if i == 1 {
+            dy.copy_from_view(&diff.column(i - 1));
+        } else {
+            let c = (tableau.c().get_index(i) - tableau.c().get_index(i - 2))
+                / (tableau.c().get_index(i - 1) - tableau.c().get_index(i - 2));
+            // dy = c1  + c * (c1 - c2)
+            dy.copy_from_view(&diff.column(i - 1));
+            dy.axpy_v(-c, &diff.column(i - 2), Eqn::T::one() + c);
+        }
+    }
+
+    pub(crate) fn do_stage_sdirk(
+        &mut self,
+        i: usize,
+        h: Eqn::T,
+        op: Option<&SdirkCallable<&Eqn>>,
+        s_op: Option<&mut SdirkCallable<impl AugmentedOdeEquationsImplicit<Eqn>>>,
+        nonlinear_solver: &mut impl NonLinearSolver<Eqn::M>,
+        convergence: &mut Convergence<'a, Eqn::V>,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        let t = self.state.t + self.tableau.c().get_index(i) * h;
+
+        // main equation
+        if let Some(op) = op {
+            op.set_phi(&self.diff.columns(0, i), &self.state.y, &self.a_rows[i]);
+            Self::predict_stage_sdirk(i, &self.diff, &mut self.old_state.dy, &self.tableau);
+            let solve_result = nonlinear_solver.solve_in_place(
+                op,
+                &mut self.old_state.dy,
+                t,
+                &self.state.y,
+                convergence,
+            );
+            self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
+            solve_result?;
+            self.old_state.y.copy_from(&op.get_last_f_eval());
+
+            // update diff with solved dy
+            self.diff.column_mut(i).copy_from(&self.old_state.dy);
+
+            // calculate dg and store in gdiff
+            if self.problem.integrate_out {
+                let out = self.problem.eqn.out().unwrap();
+                out.call_inplace(&self.old_state.y, t, &mut self.old_state.dg);
+                self.gdiff.column_mut(i).copy_from(&self.old_state.dg);
+            }
+        }
+
+        // calculate sensitivities
+        if let Some(op) = s_op {
+            let h = self.state.h;
+            // update for new state
+            op.eqn_mut()
+                .update_rhs_out_state(&self.old_state.y, &self.old_state.dy, t);
+
+            // solve for sensitivities equations discretised using sdirk equation
+            for j in 0..self.sdiff.len() {
+                let s0 = &self.state.s[j];
+                op.set_phi(&self.sdiff[j].columns(0, i), s0, &self.a_rows[i]);
+                op.eqn_mut().set_index(j);
+                let ds = &mut self.old_state.ds[j];
+                Self::predict_stage_sdirk(i, &self.sdiff[j], ds, &self.tableau);
+
+                // solve
+                let solver_result = nonlinear_solver.solve_in_place(op, ds, t, s0, convergence);
+                self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
+                solver_result?;
+
+                self.old_state.s[j].copy_from(&op.get_last_f_eval());
+
+                // calculate sdg and store in sgdiff
+                if let Some(out) = op.eqn().out() {
+                    let dsg = &mut self.state.dsg[j];
+                    out.call_inplace(&self.old_state.s[j], t, dsg);
+                    self.sgdiff[j].column_mut(i).axpy(h, dsg, Eqn::T::zero());
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn handle_tstop(
         &mut self,
         tstop: Eqn::T,
@@ -535,7 +614,11 @@ where
         Ok(None)
     }
 
-    fn end_step_attempt(&mut self, nattempts: usize, h: Eqn::T, augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>) -> Result<Eqn::T, DiffsolError> {
+    pub(crate) fn error_norm(
+        &mut self,
+        h: Eqn::T,
+        augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>,
+    ) -> Eqn::T {
         let mut ncontributions = 0;
         let mut error_norm = Eqn::T::zero();
         if let Some(error) = self.error.as_mut() {
@@ -587,31 +670,53 @@ where
         if ncontributions > 1 {
             error_norm /= Eqn::T::from(ncontributions as f64);
         }
-        let success = error_norm < Eqn::T::one();
-        if !success {
-            // step is rejected, factor reduces step size, so we try again with the smaller step size
-            self.statistics.number_of_error_test_failures += 1;
-            if nattempts >= Self::MAX_ERROR_TEST_FAILS {
-                return Err(DiffsolError::from(
-                    OdeSolverError::TooManyErrorTestFailures {
-                        time: self.state.t.into(),
-                    },
-                ));
-            }
-        }
-        Ok(error_norm)
+        error_norm
     }
 
-    fn step_accepted(&mut self, h: Eqn::T, factor: Eqn::T) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
+    pub(crate) fn error_test_fail(
+        &mut self,
+        h: Eqn::T,
+        nattempts: usize,
+    ) -> Result<(), DiffsolError> {
+        self.statistics.number_of_error_test_failures += 1;
+        // if too many error test failures, then fail
+        if nattempts >= Self::MAX_ERROR_TEST_FAILS {
+            return Err(DiffsolError::from(
+                OdeSolverError::TooManyErrorTestFailures {
+                    time: self.state.t.into(),
+                },
+            ));
+        }
+        // if step size too small, then fail
+        if abs(h) < Eqn::T::from(Self::MIN_TIMESTEP) {
+            return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
+                time: self.state.t.into(),
+            }));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn solve_fail(&mut self, h: Eqn::T) -> Result<(), DiffsolError> {
+        self.statistics.number_of_nonlinear_solver_fails += 1;
+        // if step size too small, then fail
+        if abs(h) < Eqn::T::from(Self::MIN_TIMESTEP) {
+            return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
+                time: self.state.t.into(),
+            }));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn step_accepted(
+        &mut self,
+        h: Eqn::T,
+        new_h: Eqn::T,
+    ) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
         // step accepted, so integrate output functions
         if self.problem.integrate_out {
             self.old_state.g.copy_from(&self.state.g);
-            self.gdiff.gemv(
-                h,
-                self.tableau.b(),
-                Eqn::T::one(),
-                &mut self.old_state.g,
-            );
+            self.gdiff
+                .gemv(h, self.tableau.b(), Eqn::T::one(), &mut self.old_state.g);
         }
 
         for i in 0..self.sgdiff.len() {
@@ -626,7 +731,7 @@ where
 
         // take the step
         self.old_state.t = self.state.t + h;
-        self.old_state.h = factor * h;
+        self.old_state.h = new_h;
         std::mem::swap(&mut self.old_state, &mut self.state);
 
         // update statistics
