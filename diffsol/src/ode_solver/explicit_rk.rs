@@ -162,8 +162,7 @@ where
             nattempts += 1;
             self.rk.error_test_fail(h, nattempts)?;
         };
-        self.rk.step_accepted(h, h * factor)?;
-        Ok(OdeSolverStopReason::InternalTimestep)
+        self.rk.step_accepted(h, h * factor)
     }
 
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {

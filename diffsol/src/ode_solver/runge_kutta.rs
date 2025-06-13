@@ -1,6 +1,7 @@
 use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
 use crate::op::sdirk::SdirkCallable;
+use crate::scale;
 use crate::AugmentedOdeEquationsImplicit;
 use crate::OdeEquationsImplicit;
 use crate::OdeSolverStopReason;
@@ -516,7 +517,7 @@ where
         i: usize,
         h: Eqn::T,
         op: Option<&SdirkCallable<&Eqn>>,
-        s_op: Option<&mut SdirkCallable<impl AugmentedOdeEquationsImplicit<Eqn>>>,
+        mut s_op: Option<&mut SdirkCallable<impl AugmentedOdeEquationsImplicit<Eqn>>>,
         nonlinear_solver: &mut impl NonLinearSolver<Eqn::M>,
         convergence: &mut Convergence<'a, Eqn::V>,
     ) -> Result<(), DiffsolError>
@@ -527,8 +528,9 @@ where
 
         // main equation
         if let Some(op) = op {
-            op.set_phi(&self.diff.columns(0, i), &self.state.y, &self.a_rows[i]);
+            op.set_phi(h, &self.diff.columns(0, i), &self.state.y, &self.a_rows[i]);
             Self::predict_stage_sdirk(i, &self.diff, &mut self.old_state.dy, &self.tableau);
+            self.old_state.dy *= scale(h);
             let solve_result = nonlinear_solver.solve_in_place(
                 op,
                 &mut self.old_state.dy,
@@ -539,6 +541,7 @@ where
             self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
             solve_result?;
             self.old_state.y.copy_from(&op.get_last_f_eval());
+            self.old_state.dy *= scale(Eqn::T::one() / h);
 
             // update diff with solved dy
             self.diff.column_mut(i).copy_from(&self.old_state.dy);
@@ -552,7 +555,7 @@ where
         }
 
         // calculate sensitivities
-        if let Some(op) = s_op {
+        if let Some(ref mut op) = s_op {
             let h = self.state.h;
             // update for new state
             op.eqn_mut()
@@ -561,26 +564,28 @@ where
             // solve for sensitivities equations discretised using sdirk equation
             for j in 0..self.sdiff.len() {
                 let s0 = &self.state.s[j];
-                op.set_phi(&self.sdiff[j].columns(0, i), s0, &self.a_rows[i]);
+                op.set_phi(h, &self.sdiff[j].columns(0, i), s0, &self.a_rows[i]);
                 op.eqn_mut().set_index(j);
-                let ds = &mut self.old_state.ds[j];
-                Self::predict_stage_sdirk(i, &self.sdiff[j], ds, &self.tableau);
+                Self::predict_stage_sdirk(i, &self.sdiff[j], &mut self.old_state.ds[j], &self.tableau);
+                self.old_state.ds[j] *= scale(h);
 
                 // solve
-                let solver_result = nonlinear_solver.solve_in_place(op, ds, t, s0, convergence);
+                let solver_result = nonlinear_solver.solve_in_place(*op, &mut self.old_state.ds[j], t, s0, convergence);
                 self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
                 solver_result?;
 
                 self.old_state.s[j].copy_from(&op.get_last_f_eval());
+                self.old_state.ds[j] *= scale(Eqn::T::one() / h);
 
                 // calculate sdg and store in sgdiff
                 if let Some(out) = op.eqn().out() {
                     let dsg = &mut self.state.dsg[j];
                     out.call_inplace(&self.old_state.s[j], t, dsg);
-                    self.sgdiff[j].column_mut(i).axpy(h, dsg, Eqn::T::zero());
+                    self.sgdiff[j].column_mut(i).copy_from(dsg);
                 }
             }
         }
+        self.statistics.number_of_linear_solver_setups = op.map_or_else(|| s_op.as_ref().unwrap().number_of_jac_evals(), |op| op.number_of_jac_evals());
         Ok(())
     }
 

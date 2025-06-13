@@ -180,10 +180,12 @@ where
 
         ret.s_op = if augmented_eqn.integrate_main_eqn() {
             let callable = SdirkCallable::new_no_jacobian(augmented_eqn, ret.gamma());
+            callable.set_h(ret.rk.state().h);
             Some(callable)
         } else {
             let state = ret.rk.state();
             let callable = SdirkCallable::new(augmented_eqn, ret.gamma());
+            callable.set_h(state.h);
             ret.nonlinear_solver.set_problem(&callable);
             ret.nonlinear_solver
                 .reset_jacobian(&callable, &state.s[0], state.t);
@@ -306,6 +308,7 @@ where
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
         let mut h = self.rk.start_step()?;
+        self.update_op_step_size(h);
 
         // loop until step is accepted
         let mut nattempts = 0;
@@ -359,10 +362,9 @@ where
 
         // accept the step and prepare for the next step
         let new_h = h * factor;
-        self.rk.step_accepted(h, new_h)?;
-        self.update_op_step_size(new_h);
         self.jacobian_updates(new_h, SolverState::StepSuccess);
-        Ok(OdeSolverStopReason::InternalTimestep)
+        self.jacobian_update.step();
+        self.rk.step_accepted(h, new_h)
     }
 
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {

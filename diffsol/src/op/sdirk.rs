@@ -171,13 +171,14 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
     }
     pub fn set_phi<'a, M: MatrixView<'a, T = Eqn::T, V = Eqn::V>>(
         &self,
+        h: Eqn::T,
         diff: &M,
         y0: &Eqn::V,
         a: &Eqn::V,
     ) {
         let mut phi = self.phi.borrow_mut();
         phi.copy_from(y0);
-        diff.gemv_o(Eqn::T::one(), a, Eqn::T::one(), &mut phi);
+        diff.gemv_o(h, a, Eqn::T::one(), &mut phi);
     }
 
     // tmp = phi + c * x
