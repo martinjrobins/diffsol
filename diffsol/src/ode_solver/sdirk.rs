@@ -326,6 +326,10 @@ where
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
         let mut h = self.rk.start_step()?;
 
+        self.update_op_step_size(h);
+        self.jacobian_updates(h, SolverState::StepSuccess);
+        self.jacobian_update.step();
+
         // loop until step is accepted
         let mut nattempts = 0;
         let mut updated_jacobian = false;
@@ -379,13 +383,9 @@ where
             self.rk.error_test_fail(h, nattempts)?;
         };
 
-        // accept the step and prepare for the next step
+        // accept the step
         let new_h = h * factor;
-        self.rk.step_accepted(h, new_h)?;
-        self.update_op_step_size(new_h);
-        self.jacobian_updates(new_h, SolverState::StepSuccess);
-        self.jacobian_update.step();
-        Ok(OdeSolverStopReason::InternalTimestep)
+        self.rk.step_accepted(h, new_h)
     }
 
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
