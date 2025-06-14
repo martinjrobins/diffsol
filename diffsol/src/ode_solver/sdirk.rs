@@ -191,7 +191,7 @@ where
             // trick cause phi is zero
             callable.set_h(state.h);
             callable.set_phi_direct(&state.s[0]);
-            let zero = Eqn::V::zeros(state.y.len(), problem.eqn.context().clone());
+            let zero = Eqn::V::zeros(state.s[0].len(), problem.eqn.context().clone());
             ret.nonlinear_solver.set_problem(&callable);
             ret.nonlinear_solver
                 .reset_jacobian(&callable, &zero, state.t);
@@ -216,7 +216,7 @@ where
                 );
             } else if let Some(s_op) = self.s_op.as_mut() {
                 s_op.set_jacobian_is_stale();
-                s_op.set_phi_direct(&self.rk.state().y);
+                s_op.set_phi_direct(&self.rk.state().s[0]);
                 let zero = Eqn::V::zeros(
                     s_op.eqn().nstates(),
                     s_op.eqn().context().clone(),
@@ -326,6 +326,7 @@ where
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
         let mut h = self.rk.start_step()?;
 
+        // setup the nonlinear solver for the step
         self.update_op_step_size(h);
         self.jacobian_updates(h, SolverState::StepSuccess);
         self.jacobian_update.step();

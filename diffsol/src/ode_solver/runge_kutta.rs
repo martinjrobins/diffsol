@@ -528,7 +528,7 @@ where
         Eqn: OdeEquationsImplicit,
     {
         let t = self.state.t + self.tableau.c().get_index(i) * h;
-        convergence.h = h;
+        convergence.h = abs(h);
 
         // main equation
         if let Some(op) = op {
@@ -579,9 +579,8 @@ where
 
                 // calculate sdg and store in sgdiff
                 if let Some(out) = op.eqn().out() {
-                    let dsg = &mut self.state.dsg[j];
-                    out.call_inplace(&self.old_state.s[j], t, dsg);
-                    self.sgdiff[j].column_mut(i).copy_from(dsg);
+                    out.call_inplace(&self.old_state.s[j], t, &mut self.old_state.dsg[j]);
+                    self.sgdiff[j].column_mut(i).copy_from(&self.old_state.dsg[j]);
                 }
             }
         }
@@ -663,8 +662,8 @@ where
         // sensitivity output errors
         if let Some(sens_out_error) = self.sens_out_error.as_mut() {
             let aug_eqn = augmented_eqn.as_ref().unwrap();
-            let atol = aug_eqn.atol().unwrap();
-            let rtol = aug_eqn.rtol().unwrap();
+            let atol = aug_eqn.out_atol().unwrap();
+            let rtol = aug_eqn.out_rtol().unwrap();
             for i in 0..self.sgdiff.len() {
                 self.sgdiff[i].gemv(h, self.tableau.d(), Eqn::T::zero(), sens_out_error);
                 let sens_error_norm = sens_out_error.squared_norm(&self.state.sg[i], atol, rtol);
