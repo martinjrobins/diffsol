@@ -1,7 +1,6 @@
 use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
 use crate::op::sdirk::SdirkCallable;
-use crate::scale;
 use crate::AugmentedOdeEquationsImplicit;
 use crate::OdeEquationsImplicit;
 use crate::OdeSolverStopReason;
@@ -48,7 +47,6 @@ where
     gdiff: M,
     old_state: RkState<Eqn::V>,
     is_state_mutated: bool,
-    scale_diff_h: bool,
 
     error: Option<Eqn::V>,
     out_error: Option<Eqn::V>,
@@ -81,7 +79,6 @@ where
             out_error: self.out_error.clone(),
             sens_error: self.sens_error.clone(),
             sens_out_error: self.sens_out_error.clone(),
-            scale_diff_h: self.scale_diff_h,
         }
     }
 }
@@ -177,7 +174,6 @@ where
             out_error,
             sens_error: None,
             sens_out_error: None,
-            scale_diff_h: false,
         })
     }
 
@@ -409,7 +405,7 @@ where
 
     pub(crate) fn start_step_attempt(
         &mut self,
-        h: Eqn::T,
+        _h: Eqn::T,
         augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>,
     ) {
         // if start == 1, then we need to compute the first stage
@@ -417,25 +413,16 @@ where
         if self.skip_first_stage() {
             let mut hf = self.diff.column_mut(0);
             hf.copy_from(&self.state.dy);
-            if self.scale_diff_h {
-                hf *= scale(h);
-            }
 
             // sensitivities too
             if augmented_eqn.is_some() {
                 for (diff, dy) in self.sdiff.iter_mut().zip(self.state.ds.iter()) {
                     let mut hf = diff.column_mut(0);
                     hf.copy_from(dy);
-                    if self.scale_diff_h {
-                        hf *= scale(h);
-                    }
                 }
                 for (diff, dg) in self.sgdiff.iter_mut().zip(self.state.dsg.iter()) {
                     let mut hf = diff.column_mut(0);
                     hf.copy_from(dg);
-                    if self.scale_diff_h {
-                        hf *= scale(h);
-                    }
                 }
             }
 
@@ -443,9 +430,6 @@ where
             if self.problem.integrate_out {
                 let mut hf = self.gdiff.column_mut(0);
                 hf.copy_from(&self.state.dg);
-                if self.scale_diff_h {
-                    hf *= scale(h);
-                }
             }
         }
     }
@@ -457,11 +441,6 @@ where
         augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>,
     ) {
         let t = self.state.t + self.tableau.c().get_index(i) * h;
-        let h_or_1 = if self.scale_diff_h {
-            Eqn::T::one()
-        } else {
-            h
-        };
 
         // main equation
         let integrate_main_eqn = augmented_eqn
@@ -471,7 +450,7 @@ where
         if integrate_main_eqn {
             self.old_state.y.copy_from(&self.state.y);
             self.diff.columns(0, i).gemv_o(
-                h_or_1,
+                h,
                 &self.a_rows[i],
                 Eqn::T::one(),
                 &mut self.old_state.y,
@@ -499,7 +478,7 @@ where
                 aug_eqn.set_index(j);
                 self.old_state.s[j].copy_from(&self.state.s[j]);
                 self.sdiff[j].columns(0, i).gemv_o(
-                    h_or_1,
+                    h,
                     &self.a_rows[i],
                     Eqn::T::one(),
                     &mut self.old_state.s[j],
@@ -549,16 +528,11 @@ where
         Eqn: OdeEquationsImplicit,
     {
         let t = self.state.t + self.tableau.c().get_index(i) * h;
-        let h_or_1 = if self.scale_diff_h {
-            Eqn::T::one()
-        } else {
-            h
-        };
-        convergence.h = h_or_1;
+        convergence.h = h;
 
         // main equation
         if let Some(op) = op {
-            op.set_phi(h_or_1, &self.diff.columns(0, i), &self.state.y, &self.a_rows[i]);
+            op.set_phi(h, &self.diff.columns(0, i), &self.state.y, &self.a_rows[i]);
             Self::predict_stage_sdirk(i, &self.state.dy, &self.diff, &mut self.old_state.dy, &self.tableau);
             let solve_result = nonlinear_solver.solve_in_place(
                 op,
@@ -590,7 +564,7 @@ where
 
             // solve for sensitivities equations discretised using sdirk equation
             for j in 0..self.sdiff.len() {
-                op.set_phi(h_or_1, &self.sdiff[j].columns(0, i), &self.state.s[j], &self.a_rows[i]);
+                op.set_phi(h, &self.sdiff[j].columns(0, i), &self.state.s[j], &self.a_rows[i]);
                 op.eqn_mut().set_index(j);
                 Self::predict_stage_sdirk(i, &self.state.ds[j], &self.sdiff[j], &mut self.old_state.ds[j], &self.tableau);
 
@@ -652,13 +626,8 @@ where
     ) -> Eqn::T {
         let mut ncontributions = 0;
         let mut error_norm = Eqn::T::zero();
-        let h_or_1 = if self.scale_diff_h {
-            Eqn::T::one()
-        } else {
-            h
-        };
         if let Some(error) = self.error.as_mut() {
-            self.diff.gemv(h_or_1, self.tableau.d(), Eqn::T::zero(), error);
+            self.diff.gemv(h, self.tableau.d(), Eqn::T::zero(), error);
 
             // compute error norm
             let atol = &self.problem.atol;
@@ -670,7 +639,7 @@ where
         if let Some(out_error) = self.out_error.as_mut() {
             // output errors
             self.gdiff
-                .gemv(h_or_1, self.tableau.d(), Eqn::T::zero(), out_error);
+                .gemv(h, self.tableau.d(), Eqn::T::zero(), out_error);
             let atol = self.problem.out_atol.as_ref().unwrap();
             let rtol = self.problem.out_rtol.unwrap();
             let out_error_norm = out_error.squared_norm(&self.state.g, atol, rtol);
@@ -684,7 +653,7 @@ where
             let atol = aug_eqn.atol().unwrap();
             let rtol = aug_eqn.rtol().unwrap();
             for i in 0..self.sdiff.len() {
-                self.sdiff[i].gemv(h_or_1, self.tableau.d(), Eqn::T::zero(), sens_error);
+                self.sdiff[i].gemv(h, self.tableau.d(), Eqn::T::zero(), sens_error);
                 let sens_error_norm = sens_error.squared_norm(&self.state.s[i], atol, rtol);
                 error_norm += sens_error_norm;
                 ncontributions += 1;
@@ -697,7 +666,7 @@ where
             let atol = aug_eqn.atol().unwrap();
             let rtol = aug_eqn.rtol().unwrap();
             for i in 0..self.sgdiff.len() {
-                self.sgdiff[i].gemv(h_or_1, self.tableau.d(), Eqn::T::zero(), sens_out_error);
+                self.sgdiff[i].gemv(h, self.tableau.d(), Eqn::T::zero(), sens_out_error);
                 let sens_error_norm = sens_out_error.squared_norm(&self.state.sg[i], atol, rtol);
                 error_norm += sens_error_norm;
                 ncontributions += 1;
@@ -863,11 +832,7 @@ where
         } else {
             (t - self.old_state.t) / dt
         };
-        let scale_diff = if self.scale_diff_h {
-            Eqn::T::one()
-        } else {
-            dt
-        };
+        let scale_diff = dt;
         if let Some(beta) = self.tableau.beta() {
             let beta_f = Self::interpolate_beta_function(theta, beta);
             let ret = Self::interpolate_from_diff(scale_diff, &self.old_state.y, &beta_f, &self.diff);
@@ -902,11 +867,7 @@ where
         } else {
             (t - self.old_state.t) / dt
         };
-        let scale_diff = if self.scale_diff_h {
-            Eqn::T::one()
-        } else {
-            dt
-        };
+        let scale_diff = dt;
         if let Some(beta) = self.tableau.beta() {
             let beta_f = Self::interpolate_beta_function(theta, beta);
             let ret = Self::interpolate_from_diff(scale_diff, &self.old_state.g, &beta_f, &self.gdiff);
@@ -941,11 +902,7 @@ where
         } else {
             (t - self.old_state.t) / dt
         };
-        let scale_diff = if self.scale_diff_h {
-            Eqn::T::one()
-        } else {
-            dt
-        };
+        let scale_diff = dt;
         if let Some(beta) = self.tableau.beta() {
             let beta_f = Self::interpolate_beta_function(theta, beta);
             let ret = self

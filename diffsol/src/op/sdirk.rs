@@ -1,19 +1,16 @@
 use crate::{
-    matrix::MatrixView, ode_solver::equations::OdeEquations, scale, LinearOp, Matrix,
+    matrix::MatrixView, ode_solver::equations::OdeEquations, LinearOp, Matrix,
     MatrixSparsity, NonLinearOpJacobian, OdeEquationsImplicit, Vector,
 };
 use num_traits::{One, Zero};
 use std::{
     cell::{Ref, RefCell},
     ops::Deref,
-    ops::MulAssign,
 };
 
 use super::{NonLinearOp, Op};
 
-const SCALE_H: bool = true;
-
-// callable to solve for F(y) = M (y) - h f(phi + a * y) = 0
+// callable to solve for F(y) = M (y) - f(phi + a * h * y) = 0
 pub struct SdirkCallable<Eqn: OdeEquations> {
     pub(crate) eqn: Eqn,
     c: Eqn::T,
@@ -42,12 +39,9 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
             sparsity: self.sparsity.clone(),
         }
     }
-    //  y = h g(phi + c * y_s)
+    //  y = g(phi + c * y_s)
     pub fn integrate_out(&self, ys: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
         self.eqn.out().unwrap().call_inplace(ys, t, y);
-        if !SCALE_H {
-            y.mul_assign(scale(*(self.h.borrow())));
-        }
     }
     pub fn rhs_jac(&self, x: &Eqn::V, t: Eqn::T) -> Ref<Eqn::M> {
         {
@@ -187,16 +181,12 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
         diff.gemv_o(h, a, Eqn::T::one(), &mut phi);
     }
 
-    // tmp = phi + c * x
+    // tmp = phi + c * h * x
     fn set_tmp(&self, x: &Eqn::V) {
         let phi_ref = self.phi.borrow();
         let phi = phi_ref.deref();
         let mut tmp = self.tmp.borrow_mut();
-        let c = if SCALE_H {
-            self.c * *self.h.borrow()
-        } else {
-            self.c
-        };
+        let c = self.c * *self.h.borrow();
 
         tmp.copy_from(phi);
         tmp.axpy(c, x, Eqn::T::one());
@@ -227,20 +217,15 @@ impl<Eqn: OdeEquations> Op for SdirkCallable<Eqn> {
 }
 
 impl<Eqn: OdeEquationsImplicit> NonLinearOp for SdirkCallable<Eqn> {
-    // F(y) = M (y) - h f(phi + c * y) = 0
+    // F(y) = M (y) - f(phi + c * h * y) = 0
     fn call_inplace(&self, x: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
         self.set_tmp(x);
         let tmp = self.tmp.borrow();
-        let h = *self.h.borrow().deref();
 
         self.eqn.rhs().call_inplace(&tmp, t, y);
 
         // y = Mx - h y
-        let beta = if SCALE_H {
-            -Eqn::T::one()
-        } else {
-            -h
-        };
+        let beta = -Eqn::T::one();
         if let Some(mass) = self.eqn.mass() {
             mass.gemv_inplace(x, t, beta, y);
         } else {
@@ -250,7 +235,7 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOp for SdirkCallable<Eqn> {
 }
 
 impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for SdirkCallable<Eqn> {
-    // (M - c * h * f'(phi + c * y)) v
+    // (M - c * h * f'(phi + c * h * y)) v
     fn jac_mul_inplace(&self, x: &Eqn::V, t: Eqn::T, v: &Eqn::V, y: &mut Eqn::V) {
         self.set_tmp(x);
         let tmp = self.tmp.borrow();
@@ -267,7 +252,7 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for SdirkCallable<Eqn> {
         }
     }
 
-    // M - c * h * f'(phi + c * y)
+    // M - c * h * f'(phi + c * h * y)
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         let c = self.c;
         let h = *self.h.borrow().deref();
