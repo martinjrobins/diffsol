@@ -475,7 +475,7 @@ where
     type M = M;
     type C = M::C;
     fn nstates(&self) -> usize {
-        self.init.nstates()
+        self.rhs.nstates()
     }
     fn nout(&self) -> usize {
         self.out

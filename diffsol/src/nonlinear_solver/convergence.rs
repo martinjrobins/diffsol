@@ -7,6 +7,7 @@ use crate::{scalar::IndexType, Scalar, Vector};
 pub struct Convergence<'a, V: Vector> {
     pub rtol: V::T,
     pub atol: &'a V,
+    pub h: V::T,
     tol: V::T,
     max_iter: IndexType,
     niter: IndexType,
@@ -41,6 +42,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
             tol = minimum_tol;
         }
         Self {
+            h: V::T::from(1.0),
             rtol,
             atol,
             tol,
@@ -56,7 +58,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
 
     pub fn check_new_iteration(&mut self, dy: &mut V, y: &V) -> ConvergenceStatus {
         self.niter += 1;
-        let norm = dy.squared_norm(y, self.atol, self.rtol).sqrt();
+        let norm = self.h * dy.squared_norm(y, self.atol, self.rtol).sqrt();
         // if norm is zero then we are done
         if norm <= V::T::EPSILON {
             return ConvergenceStatus::Converged;

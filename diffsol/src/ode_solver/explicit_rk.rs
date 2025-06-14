@@ -154,7 +154,7 @@ where
                 self.rk.do_stage(i, h, self.augmented_eqn.as_mut());
             }
             let error_norm = self.rk.error_norm(h, self.augmented_eqn.as_mut());
-            let factor = self.rk.factor(error_norm);
+            let factor = self.rk.factor(error_norm, 1.0);
             if error_norm < Eqn::T::one() {
                 break factor;
             }

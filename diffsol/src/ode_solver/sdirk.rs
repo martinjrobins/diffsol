@@ -12,7 +12,7 @@ use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, DenseMatrix, JacobianUpdate,
     OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef,
-    StateRefMut,
+    StateRefMut, Vector
 };
 use num_traits::One;
 
@@ -82,7 +82,7 @@ where
         let op = if let Some(op) = &self.op {
             let op = op.clone_state(&self.problem().eqn);
             nonlinear_solver.set_problem(&op);
-            nonlinear_solver.reset_jacobian(&op, &self.rk.state().y, self.rk.state().t);
+            nonlinear_solver.reset_jacobian(&op, &self.rk.state().dy, self.rk.state().t);
             Some(op)
         } else {
             None
@@ -149,9 +149,12 @@ where
         let gamma = rk.tableau().a().get_index(1, 1);
         let op = if integrate_main_eqn {
             let callable = SdirkCallable::new(&problem.eqn, gamma);
+            // trick cause phi is zero
             callable.set_h(state.h);
+            callable.set_phi_direct(&state.y);
             nonlinear_solver.set_problem(&callable);
-            nonlinear_solver.reset_jacobian(&callable, &state.y, state.t);
+            let zero = Eqn::V::zeros(state.y.len(), problem.eqn.context().clone());
+            nonlinear_solver.reset_jacobian(&callable, &zero, state.t);
             Some(callable)
         } else {
             None
@@ -185,10 +188,13 @@ where
         } else {
             let state = ret.rk.state();
             let callable = SdirkCallable::new(augmented_eqn, ret.gamma());
+            // trick cause phi is zero
             callable.set_h(state.h);
+            callable.set_phi_direct(&state.s[0]);
+            let zero = Eqn::V::zeros(state.y.len(), problem.eqn.context().clone());
             ret.nonlinear_solver.set_problem(&callable);
             ret.nonlinear_solver
-                .reset_jacobian(&callable, &state.s[0], state.t);
+                .reset_jacobian(&callable, &zero, state.t);
             Some(callable)
         };
         Ok(ret)
@@ -198,22 +204,33 @@ where
         if self.jacobian_update.check_rhs_jacobian_update(h, &state) {
             if let Some(op) = self.op.as_mut() {
                 op.set_jacobian_is_stale();
+                op.set_phi_direct(&self.rk.state().y);
+                let zero = Eqn::V::zeros(
+                    op.eqn().nstates(),
+                    op.eqn().context().clone(),
+                );
                 self.nonlinear_solver.reset_jacobian(
                     op,
-                    &self.rk.old_state().dy,
+                    &zero,
                     self.rk.state().t,
                 );
             } else if let Some(s_op) = self.s_op.as_mut() {
                 s_op.set_jacobian_is_stale();
+                s_op.set_phi_direct(&self.rk.state().y);
+                let zero = Eqn::V::zeros(
+                    s_op.eqn().nstates(),
+                    s_op.eqn().context().clone(),
+                );
                 self.nonlinear_solver.reset_jacobian(
                     s_op,
-                    &self.rk.old_state().ds[0],
+                    &zero,
                     self.rk.state().t,
                 );
             }
             self.jacobian_update.update_rhs_jacobian();
             self.jacobian_update.update_jacobian(h);
         } else if self.jacobian_update.check_jacobian_update(h, &state) {
+            // shouldn't matter what we put in for x cause rhs_jacobian is already updated
             if let Some(op) = self.op.as_ref() {
                 self.nonlinear_solver.reset_jacobian(
                     op,
@@ -308,7 +325,6 @@ where
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
         let mut h = self.rk.start_step()?;
-        self.update_op_step_size(h);
 
         // loop until step is accepted
         let mut nattempts = 0;
@@ -349,22 +365,27 @@ where
             let error_norm = self
                 .rk
                 .error_norm(h, self.s_op.as_mut().map(|s_op| s_op.eqn_mut()));
-            let factor = self.rk.factor(error_norm);
+            
+            let maxiter = self.convergence.max_iter() as f64;
+            let niter = self.convergence.niter() as f64;
+            let factor = self.rk.factor(error_norm, (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter));
             if error_norm < Eqn::T::one() {
                 break factor;
             }
             h *= factor;
             self.update_op_step_size(h);
+            self.jacobian_updates(h, SolverState::ErrorTestFail);
             nattempts += 1;
             self.rk.error_test_fail(h, nattempts)?;
-            self.jacobian_updates(h, SolverState::ErrorTestFail);
         };
 
         // accept the step and prepare for the next step
         let new_h = h * factor;
+        self.rk.step_accepted(h, new_h)?;
+        self.update_op_step_size(new_h);
         self.jacobian_updates(new_h, SolverState::StepSuccess);
         self.jacobian_update.step();
-        self.rk.step_accepted(h, new_h)
+        Ok(OdeSolverStopReason::InternalTimestep)
     }
 
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
@@ -403,7 +424,10 @@ mod test {
                     exponential_decay_problem_sens, exponential_decay_problem_with_root,
                     negative_exponential_decay_problem,
                 },
-                exponential_decay_with_algebraic::exponential_decay_with_algebraic_adjoint_problem,
+                exponential_decay_with_algebraic::{
+                    exponential_decay_with_algebraic_adjoint_problem,
+                    exponential_decay_with_algebraic_problem,
+                },
                 heat2d::head2d_problem,
                 robertson::{robertson, robertson_sens},
                 robertson_ode::robertson_ode,
@@ -497,6 +521,26 @@ mod test {
     #[test]
     fn test_esdirk34_nalgebra_exponential_decay() {
         let (problem, soln) = exponential_decay_problem::<M>(false);
+        let mut s = problem.esdirk34::<LS>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        number_of_linear_solver_setups: 3
+        number_of_steps: 13
+        number_of_error_test_failures: 0
+        number_of_nonlinear_solver_iterations: 84
+        number_of_nonlinear_solver_fails: 0
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
+        number_of_calls: 86
+        number_of_jac_muls: 2
+        number_of_matrix_evals: 1
+        number_of_jac_adj_muls: 0
+        "###);
+    }
+    
+    #[test]
+    fn test_esdirk34_nalgebra_exponential_decay_algebraic() {
+        let (problem, soln) = exponential_decay_with_algebraic_problem::<M>(false);
         let mut s = problem.esdirk34::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"

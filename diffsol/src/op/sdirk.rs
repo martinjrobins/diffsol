@@ -11,6 +11,8 @@ use std::{
 
 use super::{NonLinearOp, Op};
 
+const SCALE_H: bool = true;
+
 // callable to solve for F(y) = M (y) - h f(phi + a * y) = 0
 pub struct SdirkCallable<Eqn: OdeEquations> {
     pub(crate) eqn: Eqn,
@@ -43,7 +45,9 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
     //  y = h g(phi + c * y_s)
     pub fn integrate_out(&self, ys: &Eqn::V, t: Eqn::T, y: &mut Eqn::V) {
         self.eqn.out().unwrap().call_inplace(ys, t, y);
-        y.mul_assign(scale(*(self.h.borrow())));
+        if !SCALE_H {
+            y.mul_assign(scale(*(self.h.borrow())));
+        }
     }
     pub fn rhs_jac(&self, x: &Eqn::V, t: Eqn::T) -> Ref<Eqn::M> {
         {
@@ -158,16 +162,18 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
     pub fn set_h(&self, h: Eqn::T) {
         self.h.replace(h);
     }
+    pub fn set_c(&mut self, c: Eqn::T) {
+        self.c = c;
+    }
     pub fn get_last_f_eval(&self) -> Ref<Eqn::V> {
         self.tmp.borrow()
     }
     pub fn eqn(&self) -> &Eqn {
         &self.eqn
     }
-    #[allow(dead_code)]
-    fn set_phi_direct(&self, phi: Eqn::V) {
+    pub fn set_phi_direct(&self, phi: &Eqn::V) {
         let mut phi_ref = self.phi.borrow_mut();
-        phi_ref.copy_from(&phi);
+        phi_ref.copy_from(phi);
     }
     pub fn set_phi<'a, M: MatrixView<'a, T = Eqn::T, V = Eqn::V>>(
         &self,
@@ -186,7 +192,11 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
         let phi_ref = self.phi.borrow();
         let phi = phi_ref.deref();
         let mut tmp = self.tmp.borrow_mut();
-        let c = self.c;
+        let c = if SCALE_H {
+            self.c * *self.h.borrow()
+        } else {
+            self.c
+        };
 
         tmp.copy_from(phi);
         tmp.axpy(c, x, Eqn::T::one());
@@ -226,10 +236,15 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOp for SdirkCallable<Eqn> {
         self.eqn.rhs().call_inplace(&tmp, t, y);
 
         // y = Mx - h y
-        if let Some(mass) = self.eqn.mass() {
-            mass.gemv_inplace(x, t, -h, y);
+        let beta = if SCALE_H {
+            -Eqn::T::one()
         } else {
-            y.axpy(Eqn::T::one(), x, -h);
+            -h
+        };
+        if let Some(mass) = self.eqn.mass() {
+            mass.gemv_inplace(x, t, beta, y);
+        } else {
+            y.axpy(Eqn::T::one(), x, beta);
         }
     }
 }
@@ -309,7 +324,7 @@ mod tests {
             let phi = Vcpu::from_vec(vec![1.1, 1.2, 1.3], ctx.clone());
             let sdirk_callable = SdirkCallable::new(&problem.eqn, c);
             sdirk_callable.set_h(h);
-            sdirk_callable.set_phi_direct(phi);
+            sdirk_callable.set_phi_direct(&phi);
             let t = 0.9;
             let y = Vcpu::from_vec(vec![1.1, 1.2, 1.3], ctx.clone());
 
@@ -332,7 +347,7 @@ mod tests {
         sdirk_callable.set_h(h);
 
         let phi = Vcpu::from_vec(vec![1.1, 1.2], ctx.clone());
-        sdirk_callable.set_phi_direct(phi);
+        sdirk_callable.set_phi_direct(&phi);
         // check that the function is correct
         let y = Vcpu::from_vec(vec![1.0, 1.0], ctx.clone());
         let t = 0.0;
