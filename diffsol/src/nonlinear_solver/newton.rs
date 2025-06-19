@@ -63,7 +63,7 @@ impl<M: Matrix, Ls: LinearSolver<M>> NonLinearSolver<M> for NewtonNonlinearSolve
     fn clear_jacobian(&mut self) {
         self.is_jacobian_set = false;
     }
-    
+
     fn is_jacobian_set(&self) -> bool {
         self.is_jacobian_set
     }
@@ -73,7 +73,6 @@ impl<M: Matrix, Ls: LinearSolver<M>> NonLinearSolver<M> for NewtonNonlinearSolve
         self.is_jacobian_set = false;
         self.tmp = C::V::zeros(op.nstates(), op.context().clone());
     }
-
 
     fn reset_jacobian<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(
         &mut self,

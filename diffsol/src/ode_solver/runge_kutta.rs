@@ -413,29 +413,25 @@ where
         // if start == 1, then we need to compute the first stage
         // from the last stage of the previous step
         if self.skip_first_stage() {
-            let mut hf = self.diff.column_mut(0);
-            hf.copy_from(&self.state.dy);
-            hf *= scale(h);
+            self.diff
+                .column_mut(0)
+                .axpy(h, &self.state.dy, Eqn::T::zero());
 
             // sensitivities too
             if augmented_eqn.is_some() {
                 for (sdiff, ds) in self.sdiff.iter_mut().zip(self.state.ds.iter()) {
-                    let mut hf = sdiff.column_mut(0);
-                    hf.copy_from(ds);
-                    hf *= scale(h);
+                    sdiff.column_mut(0).axpy(h, ds, Eqn::T::zero());
                 }
                 for (sgdiff, sdg) in self.sgdiff.iter_mut().zip(self.state.dsg.iter()) {
-                    let mut hf = sgdiff.column_mut(0);
-                    hf.copy_from(sdg);
-                    hf *= scale(h);
+                    sgdiff.column_mut(0).axpy(h, sdg, Eqn::T::zero());
                 }
             }
 
             // output function
             if self.problem.integrate_out {
-                let mut hf = self.gdiff.column_mut(0);
-                hf.copy_from(&self.state.dg);
-                hf *= scale(h);
+                self.gdiff
+                    .column_mut(0)
+                    .axpy(h, &self.state.dg, Eqn::T::zero());
             }
         }
     }
@@ -467,21 +463,17 @@ where
                 .eqn
                 .rhs()
                 .call_inplace(&self.old_state.y, t, &mut self.old_state.dy);
-            self.diff.column_mut(i).axpy(
-                h,
-                &self.old_state.dy,
-                Eqn::T::zero(),
-            );
+            self.diff
+                .column_mut(i)
+                .axpy(h, &self.old_state.dy, Eqn::T::zero());
 
             // calculate dg and store in gdiff
             if self.problem.integrate_out {
                 let out = self.problem.eqn.out().unwrap();
                 out.call_inplace(&self.old_state.y, t, &mut self.old_state.dg);
-                self.gdiff.column_mut(i).axpy(
-                    h,
-                    &self.old_state.dg,
-                    Eqn::T::zero(),
-                );
+                self.gdiff
+                    .column_mut(i)
+                    .axpy(h, &self.old_state.dg, Eqn::T::zero());
             }
         }
 
@@ -502,11 +494,9 @@ where
                     .rhs()
                     .call_inplace(&self.old_state.s[j], t, &mut self.old_state.ds[j]);
 
-                self.sdiff[j].column_mut(i).axpy(
-                    h,
-                    &self.old_state.ds[j],
-                    Eqn::T::zero(),
-                );
+                self.sdiff[j]
+                    .column_mut(i)
+                    .axpy(h, &self.old_state.ds[j], Eqn::T::zero());
 
                 // calculate sdg and store in sgdiff
                 if let Some(out) = aug_eqn.out() {
@@ -519,7 +509,14 @@ where
         }
     }
 
-    fn predict_stage_sdirk(i: usize, h: Eqn::T, dy0: &Eqn::V, diff: &M, dy: &mut Eqn::V, tableau: &Tableau<M>) {
+    fn predict_stage_sdirk(
+        i: usize,
+        h: Eqn::T,
+        dy0: &Eqn::V,
+        diff: &M,
+        dy: &mut Eqn::V,
+        tableau: &Tableau<M>,
+    ) {
         if i == 0 {
             dy.axpy(h, dy0, Eqn::T::zero());
         } else if i == 1 {
@@ -550,8 +547,20 @@ where
 
         // main equation
         if let Some(op) = op {
-            op.set_phi(Eqn::T::one(), &self.diff.columns(0, i), &self.state.y, &self.a_rows[i]);
-            Self::predict_stage_sdirk(i, h, &self.state.dy, &self.diff, &mut self.old_state.dy, &self.tableau);
+            op.set_phi(
+                Eqn::T::one(),
+                &self.diff.columns(0, i),
+                &self.state.y,
+                &self.a_rows[i],
+            );
+            Self::predict_stage_sdirk(
+                i,
+                h,
+                &self.state.dy,
+                &self.diff,
+                &mut self.old_state.dy,
+                &self.tableau,
+            );
             if !nonlinear_solver.is_jacobian_set() {
                 nonlinear_solver.reset_jacobian(op, &self.old_state.dy, t);
             }
@@ -573,11 +582,9 @@ where
             if self.problem.integrate_out {
                 let out = self.problem.eqn.out().unwrap();
                 out.call_inplace(&self.old_state.y, t, &mut self.old_state.dg);
-                self.gdiff.column_mut(i).axpy(
-                    h,
-                    &self.old_state.dg,
-                    Eqn::T::zero(),
-                );
+                self.gdiff
+                    .column_mut(i)
+                    .axpy(h, &self.old_state.dg, Eqn::T::zero());
             }
         }
 
@@ -589,19 +596,40 @@ where
 
             // solve for sensitivities equations discretised using sdirk equation
             for j in 0..self.sdiff.len() {
-                op.set_phi(Eqn::T::one(), &self.sdiff[j].columns(0, i), &self.state.s[j], &self.a_rows[i]);
+                op.set_phi(
+                    Eqn::T::one(),
+                    &self.sdiff[j].columns(0, i),
+                    &self.state.s[j],
+                    &self.a_rows[i],
+                );
                 op.eqn_mut().set_index(j);
-                Self::predict_stage_sdirk(i, h, &self.state.ds[j], &self.sdiff[j], &mut self.old_state.ds[j], &self.tableau);
-                
+                Self::predict_stage_sdirk(
+                    i,
+                    h,
+                    &self.state.ds[j],
+                    &self.sdiff[j],
+                    &mut self.old_state.ds[j],
+                    &self.tableau,
+                );
+
                 if !nonlinear_solver.is_jacobian_set() {
-                    nonlinear_solver.reset_jacobian::<SdirkCallable<AugEqn>>(op, &self.old_state.ds[j], t);
+                    nonlinear_solver.reset_jacobian::<SdirkCallable<AugEqn>>(
+                        op,
+                        &self.old_state.ds[j],
+                        t,
+                    );
                 }
 
                 // solve
-                let solver_result = nonlinear_solver.solve_in_place(*op, &mut self.old_state.ds[j], t, &self.state.s[j], convergence);
+                let solver_result = nonlinear_solver.solve_in_place(
+                    *op,
+                    &mut self.old_state.ds[j],
+                    t,
+                    &self.state.s[j],
+                    convergence,
+                );
                 self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
                 solver_result?;
-
 
                 self.old_state.s[j].copy_from(&op.get_last_f_eval());
                 self.sdiff[j].column_mut(i).copy_from(&self.old_state.ds[j]);
@@ -615,7 +643,10 @@ where
                 }
             }
         }
-        self.statistics.number_of_linear_solver_setups = op.map_or_else(|| s_op.as_ref().unwrap().number_of_jac_evals(), |op| op.number_of_jac_evals());
+        self.statistics.number_of_linear_solver_setups = op.map_or_else(
+            || s_op.as_ref().unwrap().number_of_jac_evals(),
+            |op| op.number_of_jac_evals(),
+        );
         Ok(())
     }
 
@@ -651,13 +682,14 @@ where
 
     pub(crate) fn error_norm(
         &mut self,
-        h: Eqn::T,
+        _h: Eqn::T,
         augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>,
     ) -> Eqn::T {
         let mut ncontributions = 0;
         let mut error_norm = Eqn::T::zero();
         if let Some(error) = self.error.as_mut() {
-            self.diff.gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), error);
+            self.diff
+                .gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), error);
 
             // compute error norm
             let atol = &self.problem.atol;
@@ -695,7 +727,12 @@ where
             let atol = aug_eqn.out_atol().unwrap();
             let rtol = aug_eqn.out_rtol().unwrap();
             for i in 0..self.sgdiff.len() {
-                self.sgdiff[i].gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), sens_out_error);
+                self.sgdiff[i].gemv(
+                    Eqn::T::one(),
+                    self.tableau.d(),
+                    Eqn::T::zero(),
+                    sens_out_error,
+                );
                 error_norm += sens_out_error.squared_norm(&self.state.sg[i], atol, rtol);
                 ncontributions += 1;
             }
@@ -749,8 +786,12 @@ where
         // step accepted, so integrate output functions
         if self.problem.integrate_out {
             self.old_state.g.copy_from(&self.state.g);
-            self.gdiff
-                .gemv(Eqn::T::one(), self.tableau.b(), Eqn::T::one(), &mut self.old_state.g);
+            self.gdiff.gemv(
+                Eqn::T::one(),
+                self.tableau.b(),
+                Eqn::T::one(),
+                &mut self.old_state.g,
+            );
         }
 
         for i in 0..self.sgdiff.len() {
@@ -870,11 +911,17 @@ where
         let scale_diff = Eqn::T::one();
         if let Some(beta) = self.tableau.beta() {
             let beta_f = Self::interpolate_beta_function(theta, beta);
-            let ret = Self::interpolate_from_diff(scale_diff, &self.old_state.y, &beta_f, &self.diff);
+            let ret =
+                Self::interpolate_from_diff(scale_diff, &self.old_state.y, &beta_f, &self.diff);
             Ok(ret)
         } else {
-            let ret =
-                Self::interpolate_hermite(scale_diff, theta, &self.old_state.y, &self.state.y, &self.diff);
+            let ret = Self::interpolate_hermite(
+                scale_diff,
+                theta,
+                &self.old_state.y,
+                &self.state.y,
+                &self.diff,
+            );
             Ok(ret)
         }
     }
@@ -905,11 +952,17 @@ where
         let scale_diff = Eqn::T::one();
         if let Some(beta) = self.tableau.beta() {
             let beta_f = Self::interpolate_beta_function(theta, beta);
-            let ret = Self::interpolate_from_diff(scale_diff, &self.old_state.g, &beta_f, &self.gdiff);
+            let ret =
+                Self::interpolate_from_diff(scale_diff, &self.old_state.g, &beta_f, &self.gdiff);
             Ok(ret)
         } else {
-            let ret =
-                Self::interpolate_hermite(scale_diff, theta, &self.old_state.g, &self.state.g, &self.gdiff);
+            let ret = Self::interpolate_hermite(
+                scale_diff,
+                theta,
+                &self.old_state.g,
+                &self.state.g,
+                &self.gdiff,
+            );
             Ok(ret)
         }
     }

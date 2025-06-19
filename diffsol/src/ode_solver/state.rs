@@ -1,9 +1,13 @@
 use nalgebra::ComplexField;
 use num_traits::{One, Pow, Zero};
-use std::ops::AddAssign;
 
 use crate::{
-    error::{DiffsolError, OdeSolverError}, nonlinear_solver::{convergence::Convergence, NonLinearSolver}, ode_solver_error, op::{closure_no_jac::ClosureNoJac, sdirk::SdirkCallable}, scale, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp, InitOp, LinearOp, LinearSolver, Matrix, NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverProblem, Op, ParameterisedOp, Sdirk, SensEquations, Vector, VectorIndex
+    error::{DiffsolError, OdeSolverError},
+    nonlinear_solver::{convergence::Convergence, NonLinearSolver},
+    ode_solver_error, scale, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp,
+    InitOp, LinearOp, LinearSolver, Matrix, NewtonNonlinearSolver, NonLinearOp, OdeEquations,
+    OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverProblem, Op, SensEquations, Vector,
+    VectorIndex,
 };
 
 /// A state holding those variables that are common to all ODE solver states,
@@ -398,12 +402,16 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
             return Ok(());
         }
 
-
         // equations are:
         // h(t, u, v, du) = 0
         // g(t, u, v) = 0
-        // first we solve for du, v 
-        let f = InitOp::new(&ode_problem.eqn, ode_problem.t0, state.y, algebraic_indices.clone());
+        // first we solve for du, v
+        let f = InitOp::new(
+            &ode_problem.eqn,
+            ode_problem.t0,
+            state.y,
+            algebraic_indices.clone(),
+        );
         let rtol = ode_problem.rtol;
         let atol = &ode_problem.atol;
         root_solver.set_problem(&f);
@@ -415,8 +423,9 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         root_solver.solve_in_place(&f, &mut y_tmp, *state.t, &yerr, &mut convergence)?;
         f.scatter_soln(&y_tmp, state.y, state.dy);
         // dv is not solved for, so we set it to zero, it will be solved for in the first step of the solver
-        state.dy.assign_at_indices(&algebraic_indices, Eqn::T::zero());
-
+        state
+            .dy
+            .assign_at_indices(&algebraic_indices, Eqn::T::zero());
 
         // we need to solve for dv to get a consistent gradient for the algebraic states
         // we'll use sdirk op with c = 1, h = rtol, psi = y, which gives M (hdy) - hf(y + hdy)

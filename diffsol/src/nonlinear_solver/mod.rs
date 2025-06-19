@@ -16,7 +16,7 @@ impl<V> NonLinearSolveSolution<V> {
 pub trait NonLinearSolver<M: Matrix>: Default {
     /// Set the problem to be solved, any previous problem is discarded.
     fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(&mut self, op: &C);
-    
+
     fn is_jacobian_set(&self) -> bool;
 
     /// Reset the approximation of the Jacobian matrix.
@@ -26,7 +26,7 @@ pub trait NonLinearSolver<M: Matrix>: Default {
         x: &M::V,
         t: M::T,
     );
-    
+
     /// Clear the approximation of the Jacobian matrix.
     fn clear_jacobian(&mut self);
 
