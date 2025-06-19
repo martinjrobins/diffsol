@@ -1,10 +1,12 @@
 use crate::error::DiffsolError;
 use crate::matrix::MatrixRef;
 use crate::ode_solver::runge_kutta::Rk;
+use crate::scale;
 use crate::vector::VectorRef;
 use crate::LinearSolver;
 use crate::NewtonNonlinearSolver;
 use crate::NoAug;
+use crate::OdeEquations;
 use crate::OdeSolverStopReason;
 use crate::RkState;
 use crate::Tableau;
@@ -14,7 +16,7 @@ use crate::{
     OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef,
     StateRefMut, Vector
 };
-use num_traits::One;
+use num_traits::{One, Zero};
 
 use super::bdf::BdfStatistics;
 use super::jacobian_update::SolverState;
@@ -124,9 +126,12 @@ where
     ) -> Result<Self, DiffsolError> {
         Rk::<Eqn, M>::check_sdirk_rk(&tableau)?;
         let rk = Rk::new(problem, state, tableau)?;
-        Self::_new(rk, problem, linear_solver, true)
+        let mut ret = Self::_new(rk, problem, linear_solver, true)?;
+        ret.nonlinear_solver.set_problem(ret.op.as_ref().unwrap());
+        ret.jacobian_updates(ret.rk.state().h, SolverState::Checkpoint);
+        Ok(ret)
     }
-
+    
     fn _new(
         rk: Rk<'a, Eqn, M>,
         problem: &'a OdeSolverProblem<Eqn>,
@@ -140,7 +145,7 @@ where
         jacobian_update.update_jacobian(state.h);
         jacobian_update.update_rhs_jacobian();
 
-        let mut nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
+        let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
 
         // set max iterations for nonlinear solver
         let mut convergence = Convergence::new(problem.rtol, &problem.atol);
@@ -149,12 +154,7 @@ where
         let gamma = rk.tableau().a().get_index(1, 1);
         let op = if integrate_main_eqn {
             let callable = SdirkCallable::new(&problem.eqn, gamma);
-            // trick cause phi is zero
             callable.set_h(state.h);
-            callable.set_phi_direct(&state.y);
-            nonlinear_solver.set_problem(&callable);
-            let zero = Eqn::V::zeros(state.y.len(), problem.eqn.context().clone());
-            nonlinear_solver.reset_jacobian(&callable, &zero, state.t);
             Some(callable)
         } else {
             None
@@ -182,50 +182,60 @@ where
         let mut ret = Self::_new(rk, problem, linear_solver, true)?;
 
         ret.s_op = if augmented_eqn.integrate_main_eqn() {
+            ret.nonlinear_solver.set_problem(ret.op.as_ref().unwrap());
             let callable = SdirkCallable::new_no_jacobian(augmented_eqn, ret.gamma());
             callable.set_h(ret.rk.state().h);
             Some(callable)
         } else {
+            ret.op = None;
             let state = ret.rk.state();
             let callable = SdirkCallable::new(augmented_eqn, ret.gamma());
-            // trick cause phi is zero
             callable.set_h(state.h);
-            callable.set_phi_direct(&state.s[0]);
-            let zero = Eqn::V::zeros(state.s[0].len(), problem.eqn.context().clone());
             ret.nonlinear_solver.set_problem(&callable);
-            ret.nonlinear_solver
-                .reset_jacobian(&callable, &zero, state.t);
             Some(callable)
         };
+        ret.jacobian_updates(ret.rk.state().h, SolverState::Checkpoint);
         Ok(ret)
     }
-
+    
     fn jacobian_updates(&mut self, h: Eqn::T, state: SolverState) {
         if self.jacobian_update.check_rhs_jacobian_update(h, &state) {
             if let Some(op) = self.op.as_mut() {
                 op.set_jacobian_is_stale();
-                op.set_phi_direct(&self.rk.state().y);
-                let zero = Eqn::V::zeros(
-                    op.eqn().nstates(),
-                    op.eqn().context().clone(),
-                );
-                self.nonlinear_solver.reset_jacobian(
-                    op,
-                    &zero,
-                    self.rk.state().t,
-                );
+                if let SolverState::Checkpoint = state {
+                    op.zero_phi();
+                    let mut hf = self.rk.state().dy.clone();
+                    hf *= scale(h);
+                    self.nonlinear_solver.reset_jacobian(
+                        op,
+                        &hf,
+                        self.rk.state().t,
+                    );
+                } else {
+                    self.nonlinear_solver.reset_jacobian(
+                        op,
+                        &self.rk.old_state().dy,
+                        self.rk.state().t,
+                    );
+                }
             } else if let Some(s_op) = self.s_op.as_mut() {
                 s_op.set_jacobian_is_stale();
-                s_op.set_phi_direct(&self.rk.state().s[0]);
-                let zero = Eqn::V::zeros(
-                    s_op.eqn().nstates(),
-                    s_op.eqn().context().clone(),
-                );
-                self.nonlinear_solver.reset_jacobian(
-                    s_op,
-                    &zero,
-                    self.rk.state().t,
-                );
+                if let SolverState::Checkpoint = state {
+                    s_op.zero_phi();
+                    let mut hf = self.rk.state().ds[0].clone();
+                    hf *= scale(h);
+                    self.nonlinear_solver.reset_jacobian(
+                        s_op,
+                        &hf,
+                        self.rk.state().t,
+                    );
+                } else {
+                    self.nonlinear_solver.reset_jacobian(
+                        s_op,
+                        &self.rk.old_state().ds[0],
+                        self.rk.state().t,
+                    );
+                }
             }
             self.jacobian_update.update_rhs_jacobian();
             self.jacobian_update.update_jacobian(h);
@@ -305,10 +315,7 @@ where
         let h = state.h;
         self.rk.set_state(state);
 
-        // update the op with the new state
-        if let Some(op) = self.op.as_mut() {
-            op.set_h(h);
-        }
+        self.update_op_step_size(h);
 
         // reinitialise jacobian updates as if a checkpoint was taken
         self.jacobian_updates(h, SolverState::Checkpoint);
@@ -319,6 +326,7 @@ where
     }
 
     fn checkpoint(&mut self) -> Self::State {
+        self.update_op_step_size(self.rk.state().h);
         self.jacobian_updates(self.rk.state().h, SolverState::Checkpoint);
         self.rk.state().clone()
     }
@@ -326,10 +334,8 @@ where
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
         let mut h = self.rk.start_step()?;
 
-        // setup the nonlinear solver for the step
+        // setup the operators for the step
         self.update_op_step_size(h);
-        self.jacobian_updates(h, SolverState::StepSuccess);
-        self.jacobian_update.step();
 
         // loop until step is accepted
         let mut nattempts = 0;
@@ -386,7 +392,10 @@ where
 
         // accept the step
         let new_h = h * factor;
-        self.rk.step_accepted(h, new_h)
+        self.update_op_step_size(h);
+        self.jacobian_updates(h, SolverState::StepSuccess);
+        self.jacobian_update.step();
+        self.rk.step_accepted(h, new_h, true)
     }
 
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
