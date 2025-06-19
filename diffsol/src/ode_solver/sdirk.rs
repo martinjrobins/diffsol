@@ -84,7 +84,6 @@ where
         let op = if let Some(op) = &self.op {
             let op = op.clone_state(&self.problem().eqn);
             nonlinear_solver.set_problem(&op);
-            nonlinear_solver.reset_jacobian(&op, &self.rk.state().dy, self.rk.state().t);
             Some(op)
         } else {
             None
