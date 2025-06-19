@@ -533,17 +533,18 @@ where
         }
     }
 
-    pub(crate) fn do_stage_sdirk(
+    pub(crate) fn do_stage_sdirk<AugEqn>(
         &mut self,
         i: usize,
         h: Eqn::T,
         op: Option<&SdirkCallable<&Eqn>>,
-        mut s_op: Option<&mut SdirkCallable<impl AugmentedOdeEquationsImplicit<Eqn>>>,
+        mut s_op: Option<&mut SdirkCallable<AugEqn>>,
         nonlinear_solver: &mut impl NonLinearSolver<Eqn::M>,
         convergence: &mut Convergence<'a, Eqn::V>,
     ) -> Result<(), DiffsolError>
     where
         Eqn: OdeEquationsImplicit,
+        AugEqn: AugmentedOdeEquationsImplicit<Eqn>,
     {
         let t = self.state.t + self.tableau.c().get_index(i) * h;
 
@@ -551,6 +552,9 @@ where
         if let Some(op) = op {
             op.set_phi(Eqn::T::one(), &self.diff.columns(0, i), &self.state.y, &self.a_rows[i]);
             Self::predict_stage_sdirk(i, h, &self.state.dy, &self.diff, &mut self.old_state.dy, &self.tableau);
+            if !nonlinear_solver.is_jacobian_set() {
+                nonlinear_solver.reset_jacobian(op, &self.old_state.dy, t);
+            }
             let solve_result = nonlinear_solver.solve_in_place(
                 op,
                 &mut self.old_state.dy,
@@ -588,6 +592,10 @@ where
                 op.set_phi(Eqn::T::one(), &self.sdiff[j].columns(0, i), &self.state.s[j], &self.a_rows[i]);
                 op.eqn_mut().set_index(j);
                 Self::predict_stage_sdirk(i, h, &self.state.ds[j], &self.sdiff[j], &mut self.old_state.ds[j], &self.tableau);
+                
+                if !nonlinear_solver.is_jacobian_set() {
+                    nonlinear_solver.reset_jacobian::<SdirkCallable<AugEqn>>(op, &self.old_state.ds[j], t);
+                }
 
                 // solve
                 let solver_result = nonlinear_solver.solve_in_place(*op, &mut self.old_state.ds[j], t, &self.state.s[j], convergence);

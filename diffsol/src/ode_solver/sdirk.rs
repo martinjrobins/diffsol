@@ -128,7 +128,6 @@ where
         let rk = Rk::new(problem, state, tableau)?;
         let mut ret = Self::_new(rk, problem, linear_solver, true)?;
         ret.nonlinear_solver.set_problem(ret.op.as_ref().unwrap());
-        ret.jacobian_updates(ret.rk.state().h, SolverState::Checkpoint);
         Ok(ret)
     }
     
@@ -202,40 +201,18 @@ where
         if self.jacobian_update.check_rhs_jacobian_update(h, &state) {
             if let Some(op) = self.op.as_mut() {
                 op.set_jacobian_is_stale();
-                if let SolverState::Checkpoint = state {
-                    op.zero_phi();
-                    let mut hf = self.rk.state().dy.clone();
-                    hf *= scale(h);
-                    self.nonlinear_solver.reset_jacobian(
-                        op,
-                        &hf,
-                        self.rk.state().t,
-                    );
-                } else {
-                    self.nonlinear_solver.reset_jacobian(
-                        op,
-                        &self.rk.old_state().dy,
-                        self.rk.state().t,
-                    );
-                }
+                self.nonlinear_solver.reset_jacobian(
+                    op,
+                    &self.rk.old_state().dy,
+                    self.rk.state().t,
+                );
             } else if let Some(s_op) = self.s_op.as_mut() {
                 s_op.set_jacobian_is_stale();
-                if let SolverState::Checkpoint = state {
-                    s_op.zero_phi();
-                    let mut hf = self.rk.state().ds[0].clone();
-                    hf *= scale(h);
-                    self.nonlinear_solver.reset_jacobian(
-                        s_op,
-                        &hf,
-                        self.rk.state().t,
-                    );
-                } else {
-                    self.nonlinear_solver.reset_jacobian(
-                        s_op,
-                        &self.rk.old_state().ds[0],
-                        self.rk.state().t,
-                    );
-                }
+                self.nonlinear_solver.reset_jacobian(
+                    s_op,
+                    &self.rk.old_state().ds[0],
+                    self.rk.state().t,
+                );
             }
             self.jacobian_update.update_rhs_jacobian();
             self.jacobian_update.update_jacobian(h);
@@ -318,7 +295,7 @@ where
         self.update_op_step_size(h);
 
         // reinitialise jacobian updates as if a checkpoint was taken
-        self.jacobian_updates(h, SolverState::Checkpoint);
+        self.nonlinear_solver.clear_jacobian();
     }
 
     fn into_state(self) -> RkState<Eqn::V> {
@@ -326,8 +303,7 @@ where
     }
 
     fn checkpoint(&mut self) -> Self::State {
-        self.update_op_step_size(self.rk.state().h);
-        self.jacobian_updates(self.rk.state().h, SolverState::Checkpoint);
+        self.nonlinear_solver.clear_jacobian();
         self.rk.state().clone()
     }
 

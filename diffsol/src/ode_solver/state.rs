@@ -414,26 +414,28 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let mut convergence = Convergence::new(rtol, atol);
         root_solver.solve_in_place(&f, &mut y_tmp, *state.t, &yerr, &mut convergence)?;
         f.scatter_soln(&y_tmp, state.y, state.dy);
+        // dv is not solved for, so we set it to zero, it will be solved for in the first step of the solver
+        state.dy.assign_at_indices(&algebraic_indices, Eqn::T::zero());
 
 
         // we need to solve for dv to get a consistent gradient for the algebraic states
         // we'll use sdirk op with c = 1, h = rtol, psi = y, which gives M (hdy) - hf(y + hdy)
         // the jacobian in this case  is M - h f(y + hdy)
         // note this is basically one step of implicit euler
-        let op = SdirkCallable::new(&ode_problem.eqn, Eqn::T::one());
-        let h = rtol;
-        op.set_phi_direct(state.y);
-        op.set_h(h);
-        root_solver.set_problem(&op);
-        y_tmp.axpy(
-            h,
-            state.dy,
-            Eqn::T::zero(),
-        );
-        root_solver.reset_jacobian(&op, &y_tmp, *state.t);
-        root_solver.solve_in_place(&op, &mut y_tmp, *state.t, state.y, &mut convergence)?;
-        y_tmp.mul_assign(scale(Eqn::T::one() / h));
-        state.dy.copy_from_indices(&y_tmp, &algebraic_indices);
+        //let op = SdirkCallable::new(&ode_problem.eqn, Eqn::T::one());
+        //let h = rtol;
+        //op.set_phi_direct(state.y);
+        //op.set_h(h);
+        //root_solver.set_problem(&op);
+        //y_tmp.axpy(
+        //    h,
+        //    state.dy,
+        //    Eqn::T::zero(),
+        //);
+        //root_solver.reset_jacobian(&op, &y_tmp, *state.t);
+        //root_solver.solve_in_place(&op, &mut y_tmp, *state.t, state.y, &mut convergence)?;
+        //y_tmp.mul_assign(scale(Eqn::T::one() / h));
+        //state.dy.copy_from_indices(&y_tmp, &algebraic_indices);
 
         Ok(())
     }

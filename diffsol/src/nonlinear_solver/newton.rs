@@ -60,11 +60,20 @@ impl<M: Matrix, Ls: LinearSolver<M>> Default for NewtonNonlinearSolver<M, Ls> {
 }
 
 impl<M: Matrix, Ls: LinearSolver<M>> NonLinearSolver<M> for NewtonNonlinearSolver<M, Ls> {
+    fn clear_jacobian(&mut self) {
+        self.is_jacobian_set = false;
+    }
+    
+    fn is_jacobian_set(&self) -> bool {
+        self.is_jacobian_set
+    }
+
     fn set_problem<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(&mut self, op: &C) {
         self.linear_solver.set_problem(op);
         self.is_jacobian_set = false;
         self.tmp = C::V::zeros(op.nstates(), op.context().clone());
     }
+
 
     fn reset_jacobian<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M, C = M::C>>(
         &mut self,
