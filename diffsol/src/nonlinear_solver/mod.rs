@@ -26,7 +26,7 @@ pub trait NonLinearSolver<M: Matrix>: Default {
     );
 
     // Solve the problem `F(x, t) = 0` for fixed t, and return the solution `x`.
-    fn solve<C: NonLinearOpJacobian<V = M::V, T = M::T, M = M>>(
+    fn solve<C: NonLinearOp<V = M::V, T = M::T, M = M>>(
         &mut self,
         op: &C,
         x: &M::V,
