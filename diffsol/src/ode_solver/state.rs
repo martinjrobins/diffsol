@@ -5,8 +5,9 @@ use crate::{
     error::{DiffsolError, OdeSolverError},
     nonlinear_solver::{convergence::Convergence, NonLinearSolver},
     ode_solver_error, scale, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp,
-    InitOp, LinearSolver, NewtonNonlinearSolver, NonLinearOp, OdeEquations, OdeEquationsImplicit,
-    OdeEquationsImplicitSens, OdeSolverProblem, Op, SensEquations, Vector,
+    InitOp, LinearOp, LinearSolver, Matrix, NewtonNonlinearSolver, NonLinearOp, OdeEquations,
+    OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverProblem, Op, SensEquations, Vector,
+    VectorIndex,
 };
 
 /// A state holding those variables that are common to all ODE solver states,
@@ -391,7 +392,16 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
             return Ok(());
         }
         let state = self.as_mut();
-        let f = InitOp::new(&ode_problem.eqn, ode_problem.t0, state.y);
+        let (algebraic_indices, _) = ode_problem
+            .eqn
+            .mass()
+            .unwrap()
+            .matrix(ode_problem.t0)
+            .partition_indices_by_zero_diagonal();
+        if algebraic_indices.is_empty() {
+            return Ok(());
+        }
+        let f = InitOp::new(&ode_problem.eqn, ode_problem.t0, state.y, algebraic_indices);
         let rtol = ode_problem.rtol;
         let atol = &ode_problem.atol;
         root_solver.set_problem(&f);
@@ -434,9 +444,24 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         }
 
         let mut convergence = Convergence::new(ode_problem.rtol, &ode_problem.atol);
+        let (algebraic_indices, _) = ode_problem
+            .eqn
+            .mass()
+            .unwrap()
+            .matrix(ode_problem.t0)
+            .partition_indices_by_zero_diagonal();
+        if algebraic_indices.is_empty() {
+            return Ok(());
+        }
+
         for i in 0..naug {
             augmented_eqn.set_index(i);
-            let f = InitOp::new(augmented_eqn, *state.t, &state.s[i]);
+            let f = InitOp::new(
+                augmented_eqn,
+                *state.t,
+                &state.s[i],
+                algebraic_indices.clone(),
+            );
             root_solver.set_problem(&f);
 
             let mut y = state.ds[i].clone();

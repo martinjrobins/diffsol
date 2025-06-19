@@ -6,6 +6,7 @@ description = "A library for solving ordinary differential equations (ODEs) in R
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
+readme.workspace = true
 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

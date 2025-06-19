@@ -431,8 +431,8 @@ mod test {
             test_models::{
                 exponential_decay::{
                     exponential_decay_problem, exponential_decay_problem_adjoint,
-                    exponential_decay_problem_sens, exponential_decay_problem_with_root,
-                    negative_exponential_decay_problem,
+                    exponential_decay_problem_sens, exponential_decay_problem_with_mass,
+                    exponential_decay_problem_with_root, negative_exponential_decay_problem,
                 },
                 exponential_decay_with_algebraic::{
                     exponential_decay_with_algebraic_adjoint_problem,
@@ -485,6 +485,13 @@ mod test {
     fn sdirk_test_nalgebra_negative_exponential_decay() {
         let (problem, soln) = negative_exponential_decay_problem::<M>(false);
         let mut s = problem.esdirk34::<LS>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[test]
+    fn sdirk_test_exponential_decay_with_mass() {
+        let (problem, soln) = exponential_decay_problem_with_mass::<M>(false);
+        let mut s = problem.tr_bdf2::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
     }
 
