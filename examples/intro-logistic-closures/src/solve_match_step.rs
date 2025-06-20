@@ -11,7 +11,7 @@ where
             Ok(OdeSolverStopReason::InternalTimestep) => continue,
             Ok(OdeSolverStopReason::TstopReached) => break,
             Ok(OdeSolverStopReason::RootFound(_t)) => break,
-            Err(e) => panic!("Solver failed to converge: {}", e),
+            Err(e) => panic!("Solver failed to converge: {e}"),
         }
     }
     println!("Solver stopped at time: {}", solver.state().t);

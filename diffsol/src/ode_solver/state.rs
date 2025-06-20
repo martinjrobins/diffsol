@@ -84,8 +84,8 @@ pub struct StateRefMut<'a, V: Vector> {
 /// - the derivative of the sensitivity vectors wrt time `ds`
 ///
 pub trait OdeSolverState<V: Vector>: Clone + Sized {
-    fn as_ref(&self) -> StateRef<V>;
-    fn as_mut(&mut self) -> StateRefMut<V>;
+    fn as_ref(&self) -> StateRef<'_, V>;
+    fn as_mut(&mut self) -> StateRefMut<'_, V>;
     fn into_common(self) -> StateCommon<V>;
     fn new_from_common(state: StateCommon<V>) -> Self;
 
@@ -401,7 +401,17 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         if algebraic_indices.is_empty() {
             return Ok(());
         }
-        let f = InitOp::new(&ode_problem.eqn, ode_problem.t0, state.y, algebraic_indices);
+
+        // equations are:
+        // h(t, u, v, du) = 0
+        // g(t, u, v) = 0
+        // first we solve for du, v
+        let f = InitOp::new(
+            &ode_problem.eqn,
+            ode_problem.t0,
+            state.y,
+            algebraic_indices.clone(),
+        );
         let rtol = ode_problem.rtol;
         let atol = &ode_problem.atol;
         root_solver.set_problem(&f);
@@ -412,6 +422,10 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let mut convergence = Convergence::new(rtol, atol);
         root_solver.solve_in_place(&f, &mut y_tmp, *state.t, &yerr, &mut convergence)?;
         f.scatter_soln(&y_tmp, state.y, state.dy);
+        // dv is not solved for, so we set it to zero, it will be solved for in the first step of the solver
+        state
+            .dy
+            .assign_at_indices(&algebraic_indices, Eqn::T::zero());
         Ok(())
     }
 

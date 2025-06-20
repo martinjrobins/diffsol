@@ -865,7 +865,7 @@ where
         self.state.order
     }
 
-    fn jacobian(&self) -> Option<Ref<<Eqn>::M>> {
+    fn jacobian(&self) -> Option<Ref<'_, <Eqn>::M>> {
         let t = self.state.t;
         if let Some(op) = self.op.as_ref() {
             let x = &self.state.y;
@@ -876,7 +876,7 @@ where
         }
     }
 
-    fn mass(&self) -> Option<Ref<<Eqn>::M>> {
+    fn mass(&self) -> Option<Ref<'_, <Eqn>::M>> {
         let t = self.state.t;
         if let Some(op) = self.op.as_ref() {
             Some(op.mass(t))
@@ -990,7 +990,7 @@ where
         self.ode_problem
     }
 
-    fn state(&self) -> StateRef<Eqn::V> {
+    fn state(&self) -> StateRef<'_, Eqn::V> {
         self.state.as_ref()
     }
 
@@ -998,7 +998,7 @@ where
         self.state
     }
 
-    fn state_mut(&mut self) -> StateRefMut<Eqn::V> {
+    fn state_mut(&mut self) -> StateRefMut<'_, Eqn::V> {
         self.is_state_modified = true;
         self.state.as_mut()
     }
@@ -1518,9 +1518,9 @@ mod test {
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 198
-        number_of_jac_muls: 18
-        number_of_matrix_evals: 6
-        number_of_jac_adj_muls: 177
+        number_of_jac_muls: 15
+        number_of_matrix_evals: 5
+        number_of_jac_adj_muls: 174
         "###);
     }
 
@@ -1539,10 +1539,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 261
-        number_of_jac_muls: 18
-        number_of_matrix_evals: 6
-        number_of_jac_adj_muls: 486
+        number_of_calls: 255
+        number_of_jac_muls: 15
+        number_of_matrix_evals: 5
+        number_of_jac_adj_muls: 482
         "###);
     }
 
@@ -1568,14 +1568,14 @@ mod test {
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 20
-        number_of_steps: 41
-        number_of_error_test_failures: 4
-        number_of_nonlinear_solver_iterations: 79
+        number_of_linear_solver_setups: 18
+        number_of_steps: 35
+        number_of_error_test_failures: 5
+        number_of_nonlinear_solver_iterations: 75
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 83
+        number_of_calls: 79
         number_of_jac_muls: 6
         number_of_matrix_evals: 2
         number_of_jac_adj_muls: 0
@@ -1595,15 +1595,15 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 18
+        number_of_linear_solver_setups: 21
         number_of_steps: 43
-        number_of_error_test_failures: 3
-        number_of_nonlinear_solver_iterations: 155
+        number_of_error_test_failures: 7
+        number_of_nonlinear_solver_iterations: 167
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 71
-        number_of_jac_muls: 100
+        number_of_calls: 74
+        number_of_jac_muls: 109
         number_of_matrix_evals: 3
         number_of_jac_adj_muls: 0
         "###);
@@ -1621,10 +1621,10 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 18
+        number_of_linear_solver_setups: 21
         number_of_steps: 43
-        number_of_error_test_failures: 3
-        number_of_nonlinear_solver_iterations: 155
+        number_of_error_test_failures: 7
+        number_of_nonlinear_solver_iterations: 167
         number_of_nonlinear_solver_fails: 0
         "###);
     }
@@ -1871,11 +1871,11 @@ mod test {
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 45
-        number_of_steps: 161
+        number_of_linear_solver_setups: 40
+        number_of_steps: 146
         number_of_error_test_failures: 2
-        number_of_nonlinear_solver_iterations: 355
-        number_of_nonlinear_solver_fails: 14
+        number_of_nonlinear_solver_iterations: 324
+        number_of_nonlinear_solver_fails: 13
         "###);
     }
 
