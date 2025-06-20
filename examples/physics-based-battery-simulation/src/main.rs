@@ -72,7 +72,7 @@ fn main() {
 
         let voltage = Scatter::new(t, v)
             .mode(Mode::Lines)
-            .name(format!("current = {} A", current));
+            .name(format!("current = {current} A"));
         plot.add_trace(voltage);
     }
 

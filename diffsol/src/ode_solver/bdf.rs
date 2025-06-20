@@ -865,7 +865,7 @@ where
         self.state.order
     }
 
-    fn jacobian(&self) -> Option<Ref<<Eqn>::M>> {
+    fn jacobian(&self) -> Option<Ref<'_, <Eqn>::M>> {
         let t = self.state.t;
         if let Some(op) = self.op.as_ref() {
             let x = &self.state.y;
@@ -876,7 +876,7 @@ where
         }
     }
 
-    fn mass(&self) -> Option<Ref<<Eqn>::M>> {
+    fn mass(&self) -> Option<Ref<'_, <Eqn>::M>> {
         let t = self.state.t;
         if let Some(op) = self.op.as_ref() {
             Some(op.mass(t))
@@ -990,7 +990,7 @@ where
         self.ode_problem
     }
 
-    fn state(&self) -> StateRef<Eqn::V> {
+    fn state(&self) -> StateRef<'_, Eqn::V> {
         self.state.as_ref()
     }
 
@@ -998,7 +998,7 @@ where
         self.state
     }
 
-    fn state_mut(&mut self) -> StateRefMut<Eqn::V> {
+    fn state_mut(&mut self) -> StateRefMut<'_, Eqn::V> {
         self.is_state_modified = true;
         self.state.as_mut()
     }

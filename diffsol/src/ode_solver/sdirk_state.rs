@@ -70,7 +70,7 @@ where
         }
     }
 
-    fn as_mut(&mut self) -> StateRefMut<V> {
+    fn as_mut(&mut self) -> StateRefMut<'_, V> {
         StateRefMut {
             y: &mut self.y,
             dy: &mut self.dy,
@@ -85,7 +85,7 @@ where
         }
     }
 
-    fn as_ref(&self) -> StateRef<V> {
+    fn as_ref(&self) -> StateRef<'_, V> {
         StateRef {
             y: &self.y,
             dy: &self.dy,

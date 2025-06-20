@@ -118,11 +118,11 @@ where
         self.rk.problem()
     }
 
-    fn jacobian(&self) -> Option<std::cell::Ref<<Eqn>::M>> {
+    fn jacobian(&self) -> Option<std::cell::Ref<'_, <Eqn>::M>> {
         None
     }
 
-    fn mass(&self) -> Option<std::cell::Ref<<Eqn>::M>> {
+    fn mass(&self) -> Option<std::cell::Ref<'_, <Eqn>::M>> {
         None
     }
 
@@ -181,11 +181,11 @@ where
         self.rk.interpolate_out(t)
     }
 
-    fn state(&self) -> StateRef<Eqn::V> {
+    fn state(&self) -> StateRef<'_, Eqn::V> {
         self.rk.state().as_ref()
     }
 
-    fn state_mut(&mut self) -> StateRefMut<Eqn::V> {
+    fn state_mut(&mut self) -> StateRefMut<'_, Eqn::V> {
         self.rk.state_mut().as_mut()
     }
 }
@@ -381,7 +381,7 @@ mod test {
                 let diff = error
                     .squared_norm(old_soln, &problem.atol, problem.rtol)
                     .sqrt();
-                assert!(diff > 1.0e-6, "diff: {}", diff);
+                assert!(diff > 1.0e-6, "diff: {diff}");
             }
             old_soln = Some(ys.column(ys.ncols() - 1).into_owned());
         }

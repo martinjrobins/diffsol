@@ -261,7 +261,7 @@ where
         self.rk.problem()
     }
 
-    fn jacobian(&self) -> Option<std::cell::Ref<<Eqn>::M>> {
+    fn jacobian(&self) -> Option<std::cell::Ref<'_, <Eqn>::M>> {
         let t = self.rk.state().t;
         if let Some(op) = self.op.as_ref() {
             let x = &self.rk.state().y;
@@ -272,7 +272,7 @@ where
         }
     }
 
-    fn mass(&self) -> Option<std::cell::Ref<<Eqn>::M>> {
+    fn mass(&self) -> Option<std::cell::Ref<'_, <Eqn>::M>> {
         let t = self.rk.state().t;
         if let Some(op) = self.op.as_ref() {
             Some(op.mass(t))
@@ -389,11 +389,11 @@ where
         self.rk.interpolate_out(t)
     }
 
-    fn state(&self) -> StateRef<Eqn::V> {
+    fn state(&self) -> StateRef<'_, Eqn::V> {
         self.rk.state().as_ref()
     }
 
-    fn state_mut(&mut self) -> StateRefMut<Eqn::V> {
+    fn state_mut(&mut self) -> StateRefMut<'_, Eqn::V> {
         self.rk.state_mut().as_mut()
     }
 }

@@ -45,7 +45,7 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
         self.eqn.out().unwrap().call_inplace(ys, t, y);
         y.mul_assign(scale(*self.h.borrow().deref()));
     }
-    pub fn rhs_jac(&self, x: &Eqn::V, t: Eqn::T) -> Ref<Eqn::M> {
+    pub fn rhs_jac(&self, x: &Eqn::V, t: Eqn::T) -> Ref<'_, Eqn::M> {
         {
             let mut rhs_jac = self.rhs_jac.borrow_mut();
             self.set_tmp(x);
@@ -54,7 +54,7 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
         }
         self.rhs_jac.borrow()
     }
-    pub fn mass(&self, t: Eqn::T) -> Ref<Eqn::M> {
+    pub fn mass(&self, t: Eqn::T) -> Ref<'_, Eqn::M> {
         {
             let mut mass_jac = self.mass_jac.borrow_mut();
             self.eqn.mass().unwrap().matrix_inplace(t, &mut mass_jac);
@@ -161,7 +161,7 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
     pub fn set_c(&mut self, c: Eqn::T) {
         self.c = c;
     }
-    pub fn get_last_f_eval(&self) -> Ref<Eqn::V> {
+    pub fn get_last_f_eval(&self) -> Ref<'_, Eqn::V> {
         self.tmp.borrow()
     }
     pub fn eqn(&self) -> &Eqn {

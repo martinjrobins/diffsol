@@ -84,8 +84,8 @@ pub struct StateRefMut<'a, V: Vector> {
 /// - the derivative of the sensitivity vectors wrt time `ds`
 ///
 pub trait OdeSolverState<V: Vector>: Clone + Sized {
-    fn as_ref(&self) -> StateRef<V>;
-    fn as_mut(&mut self) -> StateRefMut<V>;
+    fn as_ref(&self) -> StateRef<'_, V>;
+    fn as_mut(&mut self) -> StateRefMut<'_, V>;
     fn into_common(self) -> StateCommon<V>;
     fn new_from_common(state: StateCommon<V>) -> Self;
 

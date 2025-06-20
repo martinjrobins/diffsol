@@ -89,14 +89,14 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
         let mass_jac = self.mass_jac.borrow();
         Some((rhs_jac.clone(), mass_jac.clone()))
     }
-    pub fn rhs_jac(&self, x: &Eqn::V, t: Eqn::T) -> Ref<Eqn::M> {
+    pub fn rhs_jac(&self, x: &Eqn::V, t: Eqn::T) -> Ref<'_, Eqn::M> {
         {
             let mut rhs_jac = self.rhs_jac.borrow_mut();
             self.eqn.rhs().jacobian_inplace(x, t, &mut rhs_jac);
         }
         self.rhs_jac.borrow()
     }
-    pub fn mass(&self, t: Eqn::T) -> Ref<Eqn::M> {
+    pub fn mass(&self, t: Eqn::T) -> Ref<'_, Eqn::M> {
         {
             let mut mass_jac = self.mass_jac.borrow_mut();
             self.eqn.mass().unwrap().matrix_inplace(t, &mut mass_jac);
@@ -176,7 +176,7 @@ impl<Eqn: OdeEquationsImplicit> BdfCallable<Eqn> {
         self.psi_neg_y0.replace(psi_neg_y0);
     }
 
-    pub fn tmp(&self) -> Ref<Eqn::V> {
+    pub fn tmp(&self) -> Ref<'_, Eqn::V> {
         self.tmp.borrow()
     }
 
