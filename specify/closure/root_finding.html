@@ -219,7 +219,7 @@ where
             Ok(OdeSolverStopReason::InternalTimestep) =&gt; continue,
             Ok(OdeSolverStopReason::TstopReached) =&gt; break,
             Ok(OdeSolverStopReason::RootFound(_t)) =&gt; break,
-            Err(e) =&gt; panic!("Solver failed to converge: {}", e),
+            Err(e) =&gt; panic!("Solver failed to converge: {e}"),
         }
     }
     println!("Solver stopped at time: {}", solver.state().t);

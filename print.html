@@ -395,7 +395,7 @@ fn solve() {
 
         let phase = Scatter::new(prey, predator)
             .mode(Mode::Lines)
-            .name(format!("y0 = {}", y0));
+            .name(format!("y0 = {y0}"));
         plot.add_trace(phase);
     }
 
@@ -1185,7 +1185,7 @@ fn main() {
 
         let voltage = Scatter::new(t, v)
             .mode(Mode::Lines)
-            .name(format!("current = {} A", current));
+            .name(format!("current = {current} A"));
         plot.add_trace(voltage);
     }
 
@@ -1755,7 +1755,7 @@ def rhs_sens_transpose_mul(p, y, v):
 
 impl NeuralOde {
     fn new_session(filename: &amp;str) -&gt; Result&lt;Session&gt; {
-        let full_filename = format!("{}{}", BASE_MODEL_DIR, filename);
+        let full_filename = format!("{BASE_MODEL_DIR}{filename}");
         let session = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level3)?
             .with_intra_threads(4)?
@@ -1914,7 +1914,7 @@ impl AdamW {
     for _ in 0..150 {
         match loss_fn(problem, p, ts_data, ys_data, &amp;mut gm) {
             Ok((loss, g)) =&gt; {
-                println!("loss: {}", loss);
+                println!("loss: {loss}");
                 adam.step(p, &amp;g)
             }
             Err(e) =&gt; {
@@ -2150,7 +2150,7 @@ where
             Ok(OdeSolverStopReason::InternalTimestep) =&gt; continue,
             Ok(OdeSolverStopReason::TstopReached) =&gt; break,
             Ok(OdeSolverStopReason::RootFound(_t)) =&gt; break,
-            Err(e) =&gt; panic!("Solver failed to converge: {}", e),
+            Err(e) =&gt; panic!("Solver failed to converge: {e}"),
         }
     }
     println!("Solver stopped at time: {}", solver.state().t);
@@ -2253,7 +2253,7 @@ pub fn print_jacobian(problem: &amp;OdeSolverProblem&lt;impl OdeEquationsImplici
     let y0 = problem.eqn.init().call(t0);
     let jacobian = problem.eqn.rhs().jacobian(&amp;y0, t0);
     for (i, j, v) in jacobian.triplet_iter() {
-        println!("({}, {}) = {}", i, j, v);
+        println!("({i}, {j}) = {v}");
     }
 }</code></pre>
 <p>which will print the jacobian matrix in triplet format:</p>
@@ -2659,7 +2659,7 @@ where
             Ok(OdeSolverStopReason::InternalTimestep) =&gt; continue,
             Ok(OdeSolverStopReason::TstopReached) =&gt; break,
             Ok(OdeSolverStopReason::RootFound(_t)) =&gt; break,
-            Err(e) =&gt; panic!("Solver failed to converge: {}", e),
+            Err(e) =&gt; panic!("Solver failed to converge: {e}"),
         }
     }
     println!("Solver stopped at time: {}", solver.state().t);

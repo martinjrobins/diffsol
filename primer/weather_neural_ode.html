@@ -253,7 +253,7 @@ def rhs_sens_transpose_mul(p, y, v):
 
 impl NeuralOde {
     fn new_session(filename: &amp;str) -&gt; Result&lt;Session&gt; {
-        let full_filename = format!("{}{}", BASE_MODEL_DIR, filename);
+        let full_filename = format!("{BASE_MODEL_DIR}{filename}");
         let session = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level3)?
             .with_intra_threads(4)?
@@ -412,7 +412,7 @@ impl AdamW {
     for _ in 0..150 {
         match loss_fn(problem, p, ts_data, ys_data, &amp;mut gm) {
             Ok((loss, g)) =&gt; {
-                println!("loss: {}", loss);
+                println!("loss: {loss}");
                 adam.step(p, &amp;g)
             }
             Err(e) =&gt; {

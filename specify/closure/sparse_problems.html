@@ -214,7 +214,7 @@ pub fn print_jacobian(problem: &amp;OdeSolverProblem&lt;impl OdeEquationsImplici
     let y0 = problem.eqn.init().call(t0);
     let jacobian = problem.eqn.rhs().jacobian(&amp;y0, t0);
     for (i, j, v) in jacobian.triplet_iter() {
-        println!("({}, {}) = {}", i, j, v);
+        println!("({i}, {j}) = {v}");
     }
 }</code></pre>
 <p>which will print the jacobian matrix in triplet format:</p>
