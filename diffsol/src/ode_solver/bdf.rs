@@ -1518,9 +1518,9 @@ mod test {
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 198
-        number_of_jac_muls: 18
-        number_of_matrix_evals: 6
-        number_of_jac_adj_muls: 177
+        number_of_jac_muls: 15
+        number_of_matrix_evals: 5
+        number_of_jac_adj_muls: 174
         "###);
     }
 

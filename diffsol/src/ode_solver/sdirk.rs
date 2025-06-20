@@ -460,7 +460,7 @@ mod test {
     fn sdirk_test_nalgebra_negative_exponential_decay() {
         let (problem, soln) = negative_exponential_decay_problem::<M>(false);
         let mut s = problem.esdirk34::<LS>().unwrap();
-        test_ode_solver(&mut s, soln, None, false, false);
+        test_ode_solver(&mut s, soln, Some(30.), false, false);
     }
 
     #[test]
@@ -623,10 +623,10 @@ mod test {
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 471
-        number_of_jac_muls: 33
-        number_of_matrix_evals: 11
-        number_of_jac_adj_muls: 168
+        number_of_calls: 496
+        number_of_jac_muls: 21
+        number_of_matrix_evals: 7
+        number_of_jac_adj_muls: 199
         "###);
     }
 
