@@ -43,7 +43,7 @@ pub struct CudaContext {
 impl CudaContext {
     /// Compiles the PTX files for the given device.
     fn compile_ptx(device: &Arc<CudaDevice>) -> Result<Arc<CudaModule>, DiffsolError> {
-        let out_dir = env::var("OUT_DIR").unwrap();
+        let out_dir = env!("OUT_DIR");
         // module in diffsol.ptx
         let ptx_file = format!("{}/diffsol.ptx", out_dir);
         // check if the file exists
