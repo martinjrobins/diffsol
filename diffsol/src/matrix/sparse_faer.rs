@@ -56,7 +56,7 @@ impl<T: Scalar> MatrixSparsity<FaerSparseMat<T>> for SymbolicSparseColMat<IndexT
         union_symbolic(self.rb(), other).map_err(|e| DiffsolError::Other(e.to_string()))
     }
 
-    fn as_ref(&self) -> SymbolicSparseColMatRef<IndexType> {
+    fn as_ref(&self) -> SymbolicSparseColMatRef<'_, IndexType> {
         self.rb()
     }
 

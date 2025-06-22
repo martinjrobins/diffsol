@@ -46,7 +46,7 @@ macro_rules! sdirk_solver_from_tableau {
             &self,
             state: RkState<Eqn::V>,
         ) -> Result<
-            Sdirk<'_, Eqn, LS, <Eqn::V as DefaultDenseMatrix>::M, SensEquations<Eqn>>,
+            Sdirk<'_, Eqn, LS, <Eqn::V as DefaultDenseMatrix>::M, SensEquations<'_, Eqn>>,
             DiffsolError,
         >
         where
@@ -89,7 +89,7 @@ macro_rules! sdirk_solver_from_tableau {
         pub fn $method_sens<LS: LinearSolver<Eqn::M>>(
             &self,
         ) -> Result<
-            Sdirk<'_, Eqn, LS, <Eqn::V as DefaultDenseMatrix>::M, SensEquations<Eqn>>,
+            Sdirk<'_, Eqn, LS, <Eqn::V as DefaultDenseMatrix>::M, SensEquations<'_, Eqn>>,
             DiffsolError,
         >
         where
@@ -122,7 +122,7 @@ macro_rules! rk_solver_from_tableau {
             &self,
             state: RkState<Eqn::V>,
         ) -> Result<
-            ExplicitRk<'_, Eqn, <Eqn::V as DefaultDenseMatrix>::M, SensEquations<Eqn>>,
+            ExplicitRk<'_, Eqn, <Eqn::V as DefaultDenseMatrix>::M, SensEquations<'_, Eqn>>,
             DiffsolError,
         >
         where
@@ -165,7 +165,7 @@ macro_rules! rk_solver_from_tableau {
         pub fn $method_sens(
             &self,
         ) -> Result<
-            ExplicitRk<'_, Eqn, <Eqn::V as DefaultDenseMatrix>::M, SensEquations<Eqn>>,
+            ExplicitRk<'_, Eqn, <Eqn::V as DefaultDenseMatrix>::M, SensEquations<'_, Eqn>>,
             DiffsolError,
         >
         where
@@ -345,7 +345,7 @@ where
             Eqn,
             NewtonNonlinearSolver<Eqn::M, LS>,
             <Eqn::V as DefaultDenseMatrix>::M,
-            SensEquations<Eqn>,
+            SensEquations<'_, Eqn>,
         >,
         DiffsolError,
     >
@@ -365,7 +365,7 @@ where
             Eqn,
             NewtonNonlinearSolver<Eqn::M, LS>,
             <Eqn::V as DefaultDenseMatrix>::M,
-            SensEquations<Eqn>,
+            SensEquations<'_, Eqn>,
         >,
         DiffsolError,
     >
@@ -496,7 +496,7 @@ where
         &self,
         state: RkState<Eqn::V>,
         tableau: Tableau<DM>,
-    ) -> Result<Sdirk<'_, Eqn, LS, DM, SensEquations<Eqn>>, DiffsolError>
+    ) -> Result<Sdirk<'_, Eqn, LS, DM, SensEquations<'_, Eqn>>, DiffsolError>
     where
         Eqn: OdeEquationsImplicitSens,
     {
@@ -596,7 +596,7 @@ where
         &self,
         state: RkState<Eqn::V>,
         tableau: Tableau<DM>,
-    ) -> Result<ExplicitRk<'_, Eqn, DM, SensEquations<Eqn>>, DiffsolError>
+    ) -> Result<ExplicitRk<'_, Eqn, DM, SensEquations<'_, Eqn>>, DiffsolError>
     where
         Eqn: OdeEquationsImplicitSens,
     {

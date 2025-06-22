@@ -43,7 +43,7 @@ struct NeuralOde {
 
 impl NeuralOde {
     fn new_session(filename: &str) -> Result<Session> {
-        let full_filename = format!("{}{}", BASE_MODEL_DIR, filename);
+        let full_filename = format!("{BASE_MODEL_DIR}{filename}");
         let session = Session::builder()?
             .with_optimization_level(GraphOptimizationLevel::Level3)?
             .with_intra_threads(4)?
@@ -416,7 +416,7 @@ fn train_one_round(
     for _ in 0..150 {
         match loss_fn(problem, p, ts_data, ys_data, &mut gm) {
             Ok((loss, g)) => {
-                println!("loss: {}", loss);
+                println!("loss: {loss}");
                 adam.step(p, &g)
             }
             Err(e) => {
@@ -429,10 +429,10 @@ fn train_one_round(
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // load data
     let ctx = NalgebraContext;
-    let file = File::open(format!("{}{}", BASE_DATA_DIR, "MonthlyDelhiClimate.csv"))?;
+    let file = File::open(format!("{BASE_DATA_DIR}MonthlyDelhiClimate.csv"))?;
     let mut reader = ReaderBuilder::new().has_headers(true).from_reader(file);
     let nrows = reader.records().count();
-    let file = File::open(format!("{}{}", BASE_DATA_DIR, "MonthlyDelhiClimate.csv"))?;
+    let file = File::open(format!("{BASE_DATA_DIR}MonthlyDelhiClimate.csv"))?;
     let mut reader = ReaderBuilder::new().has_headers(true).from_reader(file);
     let data_dim = 4;
     let mut ys_data = M::zeros(data_dim, nrows, ctx.clone());
@@ -473,7 +473,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .column_mut(j)
                 .copy_from_view(&ys_data.column(j));
         }
-        println!("Training on data points: {}", batch_len);
+        println!("Training on data points: {batch_len}");
         train_one_round(&mut problem, ts_data_batch, &ys_data_batch, &mut p);
 
         // predict
@@ -600,7 +600,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         plot.set_layout(layout);
         let plot_html = plot.to_inline_html(Some("neural-ode-weather-prediction"));
         fs::write(
-            format!("{}neural-ode-weather_{}", BASE_OUTPUT_DIR, i).as_str(),
+            format!("{BASE_OUTPUT_DIR}neural-ode-weather_{i}").as_str(),
             plot_html,
         )
         .expect("Unable to write file");
