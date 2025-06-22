@@ -130,3 +130,28 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./book/book
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.CARGO_HOME }}
+            target
+          key: diffsol-${{ runner.os }}-coverage-llvm17
+      - run: rustup update stable --no-self-update && rustup default stable
+      - name: Install tarpaulin
+        run: cargo install cargo-tarpaulin
+      - name: Set features variable and install dependencies
+        run: |
+          echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features sundials" >> $GITHUB_ENV
+          sudo apt-get update
+          sudo apt-get install -y libsuitesparse-dev libsundials-dev
+      - name: Generate coverage report
+        run: cargo tarpaulin --out Xml ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: cobertura.xml
