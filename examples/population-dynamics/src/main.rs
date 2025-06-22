@@ -89,7 +89,7 @@ fn phase_plane() {
 
         let phase = Scatter::new(prey, predator)
             .mode(Mode::Lines)
-            .name(format!("y0 = {}", y0));
+            .name(format!("y0 = {y0}"));
         plot.add_trace(phase);
     }
 

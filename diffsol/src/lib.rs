@@ -183,7 +183,9 @@ use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus, root::RootFinder,
 };
 pub use nonlinear_solver::{newton::NewtonNonlinearSolver, NonLinearSolver};
+pub use ode_solver::equations::OdeEquationsStoch;
 use ode_solver::jacobian_update::JacobianUpdate;
+pub use ode_solver::sde::SdeSolverMethod;
 pub use ode_solver::state::{StateRef, StateRefMut};
 pub use ode_solver::{
     adjoint::AdjointOdeSolverMethod, adjoint_equations::AdjointContext,
@@ -204,6 +206,7 @@ pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};
 pub use op::nonlinear_op::{
     NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint,
 };
+pub use op::stoch::{StochOp, StochOpKind};
 pub use op::{
     closure::Closure, closure_with_adjoint::ClosureWithAdjoint, constant_closure::ConstantClosure,
     constant_closure_with_adjoint::ConstantClosureWithAdjoint, linear_closure::LinearClosure,

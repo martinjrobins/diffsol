@@ -135,20 +135,20 @@ where
     fn into_state(self) -> Self::State;
 
     /// Get the current state of the solver
-    fn state(&self) -> StateRef<Eqn::V>;
+    fn state(&self) -> StateRef<'_, Eqn::V>;
 
     /// Get a mutable reference to the current state of the solver
     /// Note that calling this will cause the next call to `step` to perform some reinitialisation to take into
     /// account the mutated state, this could be expensive for multi-step methods.
-    fn state_mut(&mut self) -> StateRefMut<Eqn::V>;
+    fn state_mut(&mut self) -> StateRefMut<'_, Eqn::V>;
 
     /// Returns the current jacobian matrix of the solver, if it has one
     /// Note that this will force a full recalculation of the Jacobian.
-    fn jacobian(&self) -> Option<Ref<Eqn::M>>;
+    fn jacobian(&self) -> Option<Ref<'_, Eqn::M>>;
 
     /// Returns the current mass matrix of the solver, if it has one
     /// Note that this will force a full recalculation of the mass matrix.
-    fn mass(&self) -> Option<Ref<Eqn::M>>;
+    fn mass(&self) -> Option<Ref<'_, Eqn::M>>;
 
     /// Step the solution forward by one step, altering the internal state of the solver.
     /// The return value is a `Result` containing the reason for stopping the solver, possible reasons are:
