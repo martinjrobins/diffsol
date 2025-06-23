@@ -89,9 +89,9 @@ jobs:
     - name: Set features variable and install dependencies (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
       run: |
-        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features sundials" >> $GITHUB_ENV
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse" >> $GITHUB_ENV
         sudo apt-get update
-        sudo apt-get install -y libsuitesparse-dev libsundials-dev
+        sudo apt-get install -y libsuitesparse-dev
     - name: Set features variable and install dependencies (macOS)
       if: matrix.os == 'macos-13' || matrix.os == 'macos-latest'
       run: |
@@ -146,11 +146,11 @@ jobs:
         run: cargo install cargo-tarpaulin
       - name: Set features variable and install dependencies
         run: |
-          echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features sundials" >> $GITHUB_ENV
+          echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse" >> $GITHUB_ENV
           sudo apt-get update
-          sudo apt-get install -y libsuitesparse-dev libsundials-dev
+          sudo apt-get install -y libsuitesparse-dev
       - name: Generate coverage report
-        run: cargo tarpaulin --out Xml ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
+        run: cargo tarpaulin --out Xml --packages diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
       - name: Upload coverage
         uses: codecov/codecov-action@v3
         with:
