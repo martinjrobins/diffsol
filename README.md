@@ -5,6 +5,9 @@
 <a href="https://github.com/martinjrobins/diffsol/actions/workflows/rust.yml">
     <img src="https://github.com/martinjrobins/diffsol/actions/workflows/rust.yml/badge.svg" alt="CI build status badge">
 </a>
+<a href="https://codecov.io/gh/martinjrobins/diffsol">
+    <img src="https://codecov.io/gh/martinjrobins/diffsol/branch/main/graph/badge.svg" alt="code coverage">
+</a>
 </div>
 
 # Diffsol
