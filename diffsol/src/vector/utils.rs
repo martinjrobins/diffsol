@@ -29,6 +29,7 @@ pub(crate) use impl_vector_common_ref;
 macro_rules! impl_sub_assign {
     ($lhs:ty, $rhs:ty) => {
         impl<T: Scalar> SubAssign<$rhs> for $lhs {
+            #[inline]
             fn sub_assign(&mut self, rhs: $rhs) {
                 self.data -= &rhs.data;
             }
@@ -40,6 +41,7 @@ pub(crate) use impl_sub_assign;
 macro_rules! impl_add_assign {
     ($lhs:ty, $rhs:ty) => {
         impl<T: Scalar> AddAssign<$rhs> for $lhs {
+            #[inline]
             fn add_assign(&mut self, rhs: $rhs) {
                 self.data += &rhs.data;
             }
@@ -52,6 +54,7 @@ macro_rules! impl_sub_lhs {
     ($lhs:ty, $rhs:ty, $out:ty) => {
         impl<T: Scalar> Sub<$rhs> for $lhs {
             type Output = $out;
+            #[inline]
             fn sub(self, rhs: $rhs) -> Self::Output {
                 Self::Output {
                     data: self.data - &rhs.data,
@@ -67,6 +70,7 @@ macro_rules! impl_sub_rhs {
     ($lhs:ty, $rhs:ty, $out:ty) => {
         impl<T: Scalar> Sub<$rhs> for $lhs {
             type Output = $out;
+            #[inline]
             fn sub(self, rhs: $rhs) -> Self::Output {
                 Self::Output {
                     data: &self.data - rhs.data,
@@ -82,6 +86,7 @@ macro_rules! impl_sub_both_ref {
     ($lhs:ty, $rhs:ty, $out:ty) => {
         impl<T: Scalar> Sub<$rhs> for $lhs {
             type Output = $out;
+            #[inline]
             fn sub(self, rhs: $rhs) -> Self::Output {
                 Self::Output {
                     data: &self.data - &rhs.data,
@@ -97,6 +102,7 @@ macro_rules! impl_add_lhs {
     ($lhs:ty, $rhs:ty, $out:ty) => {
         impl<T: Scalar> Add<$rhs> for $lhs {
             type Output = $out;
+            #[inline]
             fn add(self, rhs: $rhs) -> Self::Output {
                 Self::Output {
                     data: self.data + &rhs.data,
@@ -112,6 +118,7 @@ macro_rules! impl_add_rhs {
     ($lhs:ty, $rhs:ty, $out:ty) => {
         impl<T: Scalar> Add<$rhs> for $lhs {
             type Output = $out;
+            #[inline]
             fn add(self, rhs: $rhs) -> Self::Output {
                 Self::Output {
                     data: &self.data + rhs.data,
@@ -127,6 +134,7 @@ macro_rules! impl_add_both_ref {
     ($lhs:ty, $rhs:ty, $out:ty) => {
         impl<T: Scalar> Add<$rhs> for $lhs {
             type Output = $out;
+            #[inline]
             fn add(self, rhs: $rhs) -> Self::Output {
                 Self::Output {
                     data: &self.data + &rhs.data,
@@ -142,6 +150,7 @@ macro_rules! impl_index {
     ($lhs:ty) => {
         impl<T: Scalar> Index<IndexType> for $lhs {
             type Output = T;
+            #[inline]
             fn index(&self, index: IndexType) -> &Self::Output {
                 &self.data[index]
             }
@@ -153,6 +162,7 @@ pub(crate) use impl_index;
 macro_rules! impl_index_mut {
     ($lhs:ty) => {
         impl<T: Scalar> IndexMut<IndexType> for $lhs {
+            #[inline]
             fn index_mut(&mut self, index: IndexType) -> &mut Self::Output {
                 &mut self.data[index]
             }

@@ -194,7 +194,8 @@ impl<'a, T: Scalar> VectorView<'a> for NalgebraVecRef<'a, T> {
             let yi = unsafe { y.data.get_unchecked(i) };
             let ai = unsafe { atol.data.get_unchecked(i) };
             let xi = unsafe { self.data.get_unchecked(i) };
-            acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
+            let tmp = *xi / (yi.abs() * rtol + *ai);
+            acc += tmp * tmp;
         }
         acc / Self::T::from(self.data.len() as f64)
     }
@@ -255,7 +256,8 @@ impl<T: Scalar> Vector for NalgebraVec<T> {
             let yi = unsafe { y.data.get_unchecked(i) };
             let ai = unsafe { atol.data.get_unchecked(i) };
             let xi = unsafe { self.data.get_unchecked(i) };
-            acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
+            let tmp = *xi / (yi.abs() * rtol + *ai);
+            acc += tmp * tmp;
         }
         acc / Self::T::from(self.len() as f64)
     }
