@@ -132,9 +132,10 @@ jobs:
       if: matrix.coverage == true
       run: cargo tarpaulin --out Xml --packages diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
     - name: Upload coverage
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v5
       if: matrix.coverage == true
       with:
+        token: ${{ secrets.CODECOV_TOKEN }}
         files: cobertura.xml
 
   book:
