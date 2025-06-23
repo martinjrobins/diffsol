@@ -288,6 +288,10 @@ impl<T: Scalar> Vector for NalgebraVec<T> {
         let data = DVector::from_vec(vec);
         Self { data, context: ctx }
     }
+    fn from_slice(slice: &[T], ctx: Self::C) -> Self {
+        let data = DVector::from_column_slice(slice);
+        Self { data, context: ctx }
+    }
     fn clone_as_vec(&self) -> Vec<Self::T> {
         self.data.iter().copied().collect()
     }

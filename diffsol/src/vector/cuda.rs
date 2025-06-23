@@ -711,6 +711,17 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
             .expect("Failed to copy data from host to device");
         Self { data, context: ctx }
     }
+    fn from_slice(slice: &[Self::T], ctx: Self::C) -> Self {
+        let mut data = unsafe {
+            ctx.stream
+                .alloc(slice.len())
+                .expect("Failed to allocate memory for CudaVec")
+        };
+        ctx.stream
+            .memcpy_htod(slice, &mut data)
+            .expect("Failed to copy data from host to device");
+        Self { data, context: ctx }
+    }
     fn from_element(nstates: usize, value: Self::T, ctx: Self::C) -> Self {
         let data = unsafe {
             ctx.stream
