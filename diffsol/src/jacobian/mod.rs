@@ -105,11 +105,26 @@ gen_find_non_zeros_linear!(
     LinearOpTranspose
 );
 
-#[derive(Clone)]
+use std::cell::RefCell;
+
 pub struct JacobianColoring<M: Matrix> {
     dst_indices_per_color: Vec<<M::V as Vector>::Index>,
     src_indices_per_color: Vec<<M::V as Vector>::Index>,
     input_indices_per_color: Vec<<M::V as Vector>::Index>,
+    scratch_v: RefCell<M::V>,
+    scratch_col: RefCell<M::V>,
+}
+
+impl<M: Matrix> Clone for JacobianColoring<M> {
+    fn clone(&self) -> Self {
+        Self {
+            dst_indices_per_color: self.dst_indices_per_color.clone(),
+            src_indices_per_color: self.src_indices_per_color.clone(),
+            input_indices_per_color: self.input_indices_per_color.clone(),
+            scratch_v: RefCell::new(self.scratch_v.borrow().clone()),
+            scratch_col: RefCell::new(self.scratch_col.borrow().clone()),
+        }
+    }
 }
 
 impl<M: Matrix> JacobianColoring<M> {
@@ -141,10 +156,14 @@ impl<M: Matrix> JacobianColoring<M> {
             src_indices_per_color.push(src_indices);
             input_indices_per_color.push(input_indices);
         }
+        let scratch_v = RefCell::new(M::V::zeros(sparsity.ncols(), ctx.clone()));
+        let scratch_col = RefCell::new(M::V::zeros(sparsity.nrows(), ctx.clone()));
         Self {
             dst_indices_per_color,
             src_indices_per_color,
             input_indices_per_color,
+            scratch_v,
+            scratch_col,
         }
     }
 
@@ -165,8 +184,8 @@ impl<M: Matrix> JacobianColoring<M> {
         t: F::T,
         y: &mut F::M,
     ) {
-        let mut v = F::V::zeros(op.nstates(), op.context().clone());
-        let mut col = F::V::zeros(op.nout(), op.context().clone());
+        let mut v = self.scratch_v.borrow_mut();
+        let mut col = self.scratch_col.borrow_mut();
         for c in 0..self.dst_indices_per_color.len() {
             let input = &self.input_indices_per_color[c];
             let dst_indices = &self.dst_indices_per_color[c];
@@ -185,8 +204,8 @@ impl<M: Matrix> JacobianColoring<M> {
         t: F::T,
         y: &mut F::M,
     ) {
-        let mut v = F::V::zeros(op.nstates(), op.context().clone());
-        let mut col = F::V::zeros(op.nout(), op.context().clone());
+        let mut v = self.scratch_v.borrow_mut();
+        let mut col = self.scratch_col.borrow_mut();
         for c in 0..self.dst_indices_per_color.len() {
             let input = &self.input_indices_per_color[c];
             let dst_indices = &self.dst_indices_per_color[c];
@@ -205,8 +224,8 @@ impl<M: Matrix> JacobianColoring<M> {
         t: F::T,
         y: &mut F::M,
     ) {
-        let mut v = F::V::zeros(op.nstates(), op.context().clone());
-        let mut col = F::V::zeros(op.nout(), op.context().clone());
+        let mut v = self.scratch_v.borrow_mut();
+        let mut col = self.scratch_col.borrow_mut();
         for c in 0..self.dst_indices_per_color.len() {
             let input = &self.input_indices_per_color[c];
             let dst_indices = &self.dst_indices_per_color[c];
@@ -224,8 +243,8 @@ impl<M: Matrix> JacobianColoring<M> {
         t: F::T,
         y: &mut F::M,
     ) {
-        let mut v = F::V::zeros(op.nstates(), op.context().clone());
-        let mut col = F::V::zeros(op.nout(), op.context().clone());
+        let mut v = self.scratch_v.borrow_mut();
+        let mut col = self.scratch_col.borrow_mut();
         for c in 0..self.dst_indices_per_color.len() {
             let input = &self.input_indices_per_color[c];
             let dst_indices = &self.dst_indices_per_color[c];
