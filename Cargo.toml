@@ -3,6 +3,9 @@ members = [
   "diffsol",
   "examples/*",
 ]
+default-members = [
+  "diffsol",
+]
 exclude = [
   "book",
 ]

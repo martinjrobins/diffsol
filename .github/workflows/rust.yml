@@ -121,10 +121,10 @@ jobs:
       run: cargo test --verbose
     - name: Run tests - all features
       if: matrix.tests == true
-      run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
+      run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }} --workspace
     - name: Clippy - all features
       if: matrix.clippy == true
-      run: cargo clippy --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}}
+      run: cargo clippy --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}} --workspace
     - name: Docs - all features
       if: matrix.rustdoc == true
       run: cargo rustdoc -p diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}}
