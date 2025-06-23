@@ -29,6 +29,8 @@ jobs:
     continue-on-error: ${{ matrix.experimental }}
     strategy:
         matrix:
+          coverage:
+            - false
           experimental:
             - false
           clippy:
@@ -46,28 +48,39 @@ jobs:
             - macos-latest
             - windows-latest
           include:
+            - toolchain: stable
+              os: ubuntu-latest
+              tests: false
+              clippy: false
+              experimental: true
+              basename: Coverage
+              coverage: true
             - toolchain: beta
               os: ubuntu-latest
               experimental: true
               tests: true
               basename: Tests
+              coverage: false
             - toolchain: nightly
               os: ubuntu-latest
               tests: true
               experimental: true
               basename: Tests
+              coverage: false
             - toolchain: stable
               os: ubuntu-latest
               tests: false
               clippy: true
               experimental: true
               basename: Clippy
+              coverage: false
             - toolchain: nightly
               os: ubuntu-latest
               tests: false
               rustdoc: true
               experimental: true
               basename: Rustdoc
+              coverage: false
 
     steps:
     - uses: actions/checkout@v4
@@ -112,6 +125,15 @@ jobs:
     - name: Docs - all features
       if: matrix.rustdoc == true
       run: cargo rustdoc -p diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}}
+    - name: Generate coverage report
+      if: matrix.coverage == true
+      run: cargo tarpaulin --out Xml --packages diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3
+      if: matrix.coverage == true
+      with:
+        files: cobertura.xml
+
   book:
     runs-on: ubuntu-latest
     steps:
@@ -130,28 +152,3 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./book/book
-
-  coverage:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ${{ env.CARGO_HOME }}
-            target
-          key: diffsol-${{ runner.os }}-coverage-llvm17
-      - run: rustup update stable --no-self-update && rustup default stable
-      - name: Install tarpaulin
-        run: cargo install cargo-tarpaulin
-      - name: Set features variable and install dependencies
-        run: |
-          echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse" >> $GITHUB_ENV
-          sudo apt-get update
-          sudo apt-get install -y libsuitesparse-dev
-      - name: Generate coverage report
-        run: cargo tarpaulin --out Xml --packages diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-        with:
-          files: cobertura.xml
