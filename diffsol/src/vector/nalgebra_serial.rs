@@ -389,4 +389,11 @@ mod tests {
     fn test_root_finding() {
         super::super::tests::test_root_finding::<NalgebraVec<f64>>();
     }
+
+    #[test]
+    fn test_from_slice() {
+        let slice = [1.0, 2.0, 3.0];
+        let v = NalgebraVec::from_slice(&slice, Default::default());
+        assert_eq!(v.clone_as_vec(), slice);
+    }
 }
