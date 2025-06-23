@@ -97,10 +97,14 @@ impl<M: Matrix, Ls: LinearSolver<M>> NonLinearSolver<M> for NewtonNonlinearSolve
         convergence: &mut Convergence<M::V>,
     ) -> Result<(), DiffsolError> {
         if !self.is_jacobian_set {
-            panic!("NewtonNonlinearSolver::solve_in_place() called before reset_jacobian");
+            return Err(non_linear_solver_error!(JacobianNotReset));
         }
         if xn.len() != op.nstates() {
-            panic!("NewtonNonlinearSolver::solve() called with state of wrong size, expected {}, got {}", op.nstates(), xn.len());
+            let error = NonLinearSolverError::WrongStateLength {
+                expected: op.nstates(),
+                found: xn.len(),
+            };
+            return Err(DiffsolError::from(error));
         }
         let linear_solver = |x: &mut C::V| self.linear_solver.solve_in_place(x);
         let fun = |x: &C::V, y: &mut C::V| op.call_inplace(x, t, y);

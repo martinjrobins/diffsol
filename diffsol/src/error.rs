@@ -49,6 +49,10 @@ pub enum NonLinearSolverError {
     NewtonDidNotConverge,
     #[error("LU solve failed")]
     LuSolveFailed,
+    #[error("Jacobian not reset before calling solve")]
+    JacobianNotReset,
+    #[error("State has wrong length: expected {expected}, got {found}")]
+    WrongStateLength { expected: usize, found: usize },
     #[error("Error: {0}")]
     Other(String),
 }
