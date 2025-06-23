@@ -228,6 +228,10 @@ impl<T: Scalar> Vector for FaerVec<T> {
         let data = Col::from_fn(vec.len(), |i| vec[i]);
         FaerVec { data, context: ctx }
     }
+    fn from_slice(slice: &[Self::T], ctx: Self::C) -> Self {
+        let data = Col::from_fn(slice.len(), |i| slice[i]);
+        FaerVec { data, context: ctx }
+    }
     fn clone_as_vec(&self) -> Vec<Self::T> {
         self.data.iter().cloned().collect()
     }
@@ -412,5 +416,12 @@ mod tests {
     #[test]
     fn test_root_finding() {
         super::super::tests::test_root_finding::<FaerVec<f64>>();
+    }
+
+    #[test]
+    fn test_from_slice() {
+        let slice = [1.0, 2.0, 3.0];
+        let v = FaerVec::from_slice(&slice, Default::default());
+        assert_eq!(v.clone_as_vec(), slice);
     }
 }

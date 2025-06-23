@@ -29,6 +29,8 @@ jobs:
     continue-on-error: ${{ matrix.experimental }}
     strategy:
         matrix:
+          coverage:
+            - false
           experimental:
             - false
           clippy:
@@ -46,28 +48,39 @@ jobs:
             - macos-latest
             - windows-latest
           include:
+            - toolchain: stable
+              os: ubuntu-latest
+              tests: false
+              clippy: false
+              experimental: true
+              basename: Coverage
+              coverage: true
             - toolchain: beta
               os: ubuntu-latest
               experimental: true
               tests: true
               basename: Tests
+              coverage: false
             - toolchain: nightly
               os: ubuntu-latest
               tests: true
               experimental: true
               basename: Tests
+              coverage: false
             - toolchain: stable
               os: ubuntu-latest
               tests: false
               clippy: true
               experimental: true
               basename: Clippy
+              coverage: false
             - toolchain: nightly
               os: ubuntu-latest
               tests: false
               rustdoc: true
               experimental: true
               basename: Rustdoc
+              coverage: false
 
     steps:
     - uses: actions/checkout@v4
@@ -76,7 +89,7 @@ jobs:
         path: |
           ${{ env.CARGO_HOME }}
           target
-        key: diffsol-${{ runner.os }}-${{ matrix.toolchain}}-llvm17
+        key: diffsol-${{ runner.os }}-${{ matrix.toolchain}}-coverage${{ matrix.coverage }}-llvm17
     - name: Set up Rust
       run: rustup default ${{ matrix.toolchain }} && rustup update ${{ matrix.toolchain }} --no-self-update && rustup component add clippy
     - name: Rust version
@@ -89,9 +102,12 @@ jobs:
     - name: Set features variable and install dependencies (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
       run: |
-        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features sundials" >> $GITHUB_ENV
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse" >> $GITHUB_ENV
         sudo apt-get update
-        sudo apt-get install -y libsuitesparse-dev libsundials-dev
+        sudo apt-get install -y libsuitesparse-dev
+    - name: Install tarpaulin
+      if: matrix.coverage == true
+      run: cargo install cargo-tarpaulin
     - name: Set features variable and install dependencies (macOS)
       if: matrix.os == 'macos-13' || matrix.os == 'macos-latest'
       run: |
@@ -112,6 +128,16 @@ jobs:
     - name: Docs - all features
       if: matrix.rustdoc == true
       run: cargo rustdoc -p diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}}
+    - name: Generate coverage report
+      if: matrix.coverage == true
+      run: cargo tarpaulin --out Xml --packages diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
+    - name: Upload coverage
+      uses: codecov/codecov-action@v5
+      if: matrix.coverage == true
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: cobertura.xml
+
   book:
     runs-on: ubuntu-latest
     steps:
