@@ -196,6 +196,9 @@ pub trait Vector:
     /// TODO: would prefer to use From trait but not implemented for faer::Col
     fn from_vec(vec: Vec<Self::T>, ctx: Self::C) -> Self;
 
+    /// create a vector from a slice
+    fn from_slice(slice: &[Self::T], ctx: Self::C) -> Self;
+
     /// convert the vector to a Vec
     /// TODO: would prefer to use Into trait but not implemented for faer::Col
     fn clone_as_vec(&self) -> Vec<Self::T>;
