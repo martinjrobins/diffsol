@@ -23,8 +23,8 @@ The Lotka-Volterra equations are a simple model of predator-prey dynamics, and m
 Putting the two equations together, we have a system of two first order ODEs:
 
 \\[
-\frac{x}{dt} = a x - b x y \\\\
-\frac{y}{dt} = c x y - d y
+\frac{dx}{dt} = a x - b x y \\\\
+\frac{dy}{dt} = c x y - d y
 \\]
 
 which can be written in vector form as:

@@ -35,7 +35,7 @@ By defining a new *vector* of state variables \\(\mathbf{y} = [c_1, c_2]\\) and 
 \frac{d\mathbf{y}}{dt} = \mathbf{f}(\mathbf{y}, t)
 \\]
 
-This is an explicit equation for the derivative of the state, \\(\frac{d\mathbf{y}}{dt}\\), as a function of only of the state variables \\(\mathbf{y}\\) and of time \\(t\\).
+This is an explicit equation for the derivative of the state, \\(\frac{d\mathbf{y}}{dt}\\), as a function of the state variables \\(\mathbf{y}\\) and of time \\(t\\).
 
 We need one more piece of information to solve this system of ODEs: the initial conditions for the populations at time \\(t = 0\\). For example, if we started with a concentration of 10 for the first population and 5 for the second population, we would write:
 
