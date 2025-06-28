@@ -13,7 +13,7 @@ For more detail on the syntax of DiffSL see the [DiffSL book](https://martinjrob
 
 To create a DiffSL problem you simply need to use the `build_from_eqn` method on the [`OdeBuilder`](https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html) struct, passing in a `str` containing the DiffSL code. The DiffSL code is then parsed and compiled into native machine code using either the LLVM or Cranelift backends. The `CG` type parameter specifies the backend that you want to use to compile the DiffSL code. The `CraneliftJitModule` backend is behind the `diffsl-cranelift` feature flag. The faster [`LlvmModule`](https://docs.rs/diffsol/latest/diffsol/struct.LlvmModule.html) backend is behind one of the `diffsl-llvm*` feature flags (currently `diffsl-llvm15`, `diffsl-llvm16`, `diffsl-llvm17` or `diffsl-llvm18`), depending on the version of LLVM you have installed.
 
-For example, here is an example of speciying a simple logistic equation using DiffSL:
+For example, here is an example of specifying a simple logistic equation using DiffSL:
 
 ```rust,ignore
 {{#include ../../../../examples/intro-logistic-diffsl/src/main.rs}}
