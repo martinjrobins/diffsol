@@ -248,7 +248,7 @@ k_2 c_2
 <p>\[
 \frac{d\mathbf{y}}{dt} = \mathbf{f}(\mathbf{y}, t)
 \]</p>
-<p>This is an explicit equation for the derivative of the state, \(\frac{d\mathbf{y}}{dt}\), as a function of only of the state variables \(\mathbf{y}\) and of time \(t\).</p>
+<p>This is an explicit equation for the derivative of the state, \(\frac{d\mathbf{y}}{dt}\), as a function of the state variables \(\mathbf{y}\) and of time \(t\).</p>
 <p>We need one more piece of information to solve this system of ODEs: the initial conditions for the populations at time \(t = 0\). For example, if we started with a concentration of 10 for the first population and 5 for the second population, we would write:</p>
 <p>\[
 \mathbf{y}(0) = \begin{bmatrix} 10 \\ 5 \end{bmatrix}
@@ -269,8 +269,8 @@ k_2 c_2
 <p>The Lotka-Volterra equations are a simple model of predator-prey dynamics, and make several assumptions that may not hold in real ecosystems. For example, the model assumes that the prey population grows exponentially in the absence of predators, that the predator population decreases linearly in the absence of prey, and that the spatial distribution of the species has no effect. Despite these simplifications, the Lotka-Volterra equations capture some of the essential features of predator-prey interactions, such as oscillations in the populations and the dependence of each species on the other. When modelling with ODEs, it is important to consider the simplest model that captures the behaviour of interest, and to be aware of the assumptions that underlie the model.</p>
 <p>Putting the two equations together, we have a system of two first order ODEs:</p>
 <p>\[
-\frac{x}{dt} = a x - b x y \\
-\frac{y}{dt} = c x y - d y
+\frac{dx}{dt} = a x - b x y \\
+\frac{dy}{dt} = c x y - d y
 \]</p>
 <p>which can be written in vector form as:</p>
 <p>\[
@@ -1964,7 +1964,7 @@ the specification of a system of ordinary differential equations. It features a 
 <p>For more detail on the syntax of DiffSL see the <a href="https://martinjrobins.github.io/diffsl/">DiffSL book</a>. This section will focus on how to use DiffSL to specify a problem in Diffsol.</p>
 <h2 id="creating-a-diffsl-problem"><a class="header" href="#creating-a-diffsl-problem">Creating a DiffSL problem</a></h2>
 <p>To create a DiffSL problem you simply need to use the <code>build_from_eqn</code> method on the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct, passing in a <code>str</code> containing the DiffSL code. The DiffSL code is then parsed and compiled into native machine code using either the LLVM or Cranelift backends. The <code>CG</code> type parameter specifies the backend that you want to use to compile the DiffSL code. The <code>CraneliftJitModule</code> backend is behind the <code>diffsl-cranelift</code> feature flag. The faster <a href="https://docs.rs/diffsol/latest/diffsol/struct.LlvmModule.html"><code>LlvmModule</code></a> backend is behind one of the <code>diffsl-llvm*</code> feature flags (currently <code>diffsl-llvm15</code>, <code>diffsl-llvm16</code>, <code>diffsl-llvm17</code> or <code>diffsl-llvm18</code>), depending on the version of LLVM you have installed.</p>
-<p>For example, here is an example of speciying a simple logistic equation using DiffSL:</p>
+<p>For example, here is an example of specifying a simple logistic equation using DiffSL:</p>
 <pre><code class="language-rust ignore">use diffsol::{OdeBuilder, OdeSolverMethod};
 type M = diffsol::NalgebraMat&lt;f64&gt;;
 type CG = diffsol::CraneliftJitModule;

@@ -185,8 +185,8 @@
 <p>The Lotka-Volterra equations are a simple model of predator-prey dynamics, and make several assumptions that may not hold in real ecosystems. For example, the model assumes that the prey population grows exponentially in the absence of predators, that the predator population decreases linearly in the absence of prey, and that the spatial distribution of the species has no effect. Despite these simplifications, the Lotka-Volterra equations capture some of the essential features of predator-prey interactions, such as oscillations in the populations and the dependence of each species on the other. When modelling with ODEs, it is important to consider the simplest model that captures the behaviour of interest, and to be aware of the assumptions that underlie the model.</p>
 <p>Putting the two equations together, we have a system of two first order ODEs:</p>
 <p>\[
-\frac{x}{dt} = a x - b x y \\
-\frac{y}{dt} = c x y - d y
+\frac{dx}{dt} = a x - b x y \\
+\frac{dy}{dt} = c x y - d y
 \]</p>
 <p>which can be written in vector form as:</p>
 <p>\[

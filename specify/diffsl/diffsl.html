@@ -178,7 +178,7 @@ the specification of a system of ordinary differential equations. It features a 
 <p>For more detail on the syntax of DiffSL see the <a href="https://martinjrobins.github.io/diffsl/">DiffSL book</a>. This section will focus on how to use DiffSL to specify a problem in Diffsol.</p>
 <h2 id="creating-a-diffsl-problem"><a class="header" href="#creating-a-diffsl-problem">Creating a DiffSL problem</a></h2>
 <p>To create a DiffSL problem you simply need to use the <code>build_from_eqn</code> method on the <a href="https://docs.rs/diffsol/latest/diffsol/ode_solver/builder/struct.OdeBuilder.html"><code>OdeBuilder</code></a> struct, passing in a <code>str</code> containing the DiffSL code. The DiffSL code is then parsed and compiled into native machine code using either the LLVM or Cranelift backends. The <code>CG</code> type parameter specifies the backend that you want to use to compile the DiffSL code. The <code>CraneliftJitModule</code> backend is behind the <code>diffsl-cranelift</code> feature flag. The faster <a href="https://docs.rs/diffsol/latest/diffsol/struct.LlvmModule.html"><code>LlvmModule</code></a> backend is behind one of the <code>diffsl-llvm*</code> feature flags (currently <code>diffsl-llvm15</code>, <code>diffsl-llvm16</code>, <code>diffsl-llvm17</code> or <code>diffsl-llvm18</code>), depending on the version of LLVM you have installed.</p>
-<p>For example, here is an example of speciying a simple logistic equation using DiffSL:</p>
+<p>For example, here is an example of specifying a simple logistic equation using DiffSL:</p>
 <pre><code class="language-rust ignore">use diffsol::{OdeBuilder, OdeSolverMethod};
 type M = diffsol::NalgebraMat&lt;f64&gt;;
 type CG = diffsol::CraneliftJitModule;
