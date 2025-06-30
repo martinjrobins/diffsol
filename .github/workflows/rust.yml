@@ -62,8 +62,8 @@ jobs:
               os: ubuntu-latest
               tests: false
               clippy: false
-              experimental: true
-              basename: Examples
+              experimental: false
+              basename: Book
               coverage: false
               book: true
             - toolchain: beta
@@ -157,9 +157,8 @@ jobs:
         mdbook build book
         rustup target add wasm32-unknown-unknown
         cd examples/population-dynamics-wasm-yew
-        trunk build --release 
-        mkdir -p book/examples/population-dynamics-wasm-yew
-        cp -r dist/* book/examples/population-dynamics-wasm-yew
+        mkdir -p ${{ github.workspace }}/book/book/examples/population-dynamics-wasm-yew
+        trunk build --release --dist ${{ github.workspace }}/book/book/examples/population-dynamics-wasm-yew
     - name: Generate coverage report
       if: matrix.coverage == true
       run: cargo tarpaulin --out Xml --packages diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
