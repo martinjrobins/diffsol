@@ -126,9 +126,9 @@ pub fn main() {
         .unwrap();
 
     // print result
-    println!("{}", res);
+    println!("{res}");
     // Best parameter vector
     let best = res.state().best_param.as_ref().unwrap();
-    println!("Best parameter vector: {:?}", best);
+    println!("Best parameter vector: {best:?}");
     println!("True parameter vector: {:?}", vec![k_true, c_true]);
 }
