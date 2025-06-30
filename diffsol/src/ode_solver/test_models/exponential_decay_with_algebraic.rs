@@ -344,9 +344,8 @@ pub fn exponential_decay_with_algebraic_problem_diffsl<
         dudt_i {{ dxdt = 0, dydt = 0, dzdt = 0 }}
         M_i {{ dxdt, dydt, 0 }}
         F_i {{ -k * x, -k * y, z - y }}
-        out_i {{ {} }}
-    ",
-                out
+        out_i {{ {out} }}
+    "
             )
             .as_str(),
         )

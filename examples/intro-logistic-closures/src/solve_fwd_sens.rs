@@ -10,8 +10,8 @@ where
     let (y, sens) = solver
         .solve_dense_sensitivities(t_evals.as_slice())
         .unwrap();
-    println!("solution: {:?}", y);
+    println!("solution: {y:?}");
     for (i, dydp_i) in sens.iter().enumerate() {
-        println!("sens wrt parameter {}: {:?}", i, dydp_i);
+        println!("sens wrt parameter {i}: {dydp_i:?}");
     }
 }

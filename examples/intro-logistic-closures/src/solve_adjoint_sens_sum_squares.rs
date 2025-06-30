@@ -31,6 +31,6 @@ where
         .solve_adjoint_backwards_pass(t_data.as_slice(), &[&g_m])
         .unwrap();
     for (i, dgdp_i) in final_state.as_ref().sg.iter().enumerate() {
-        println!("sens wrt parameter {}: {:?}", i, dgdp_i);
+        println!("sens wrt parameter {i}: {dgdp_i:?}");
     }
 }

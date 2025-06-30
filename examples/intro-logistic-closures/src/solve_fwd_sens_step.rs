@@ -11,6 +11,6 @@ where
     }
     let sens_at_t_o = solver.interpolate_sens(t_o).unwrap();
     let sens_at_internal_step = &solver.state().s;
-    println!("sensitivity at t_o: {:?}", sens_at_t_o);
-    println!("sensitivity at internal step: {:?}", sens_at_internal_step);
+    println!("sensitivity at t_o: {sens_at_t_o:?}");
+    println!("sensitivity at internal step: {sens_at_internal_step:?}");
 }

@@ -251,10 +251,7 @@ pub trait Vector:
         let error_norm = error.squared_norm(other, atol, rtol).sqrt();
         assert!(
             error_norm < factor,
-            "error_norm: {}. self: {:?}, other: {:?}",
-            error_norm,
-            self,
-            other
+            "error_norm: {error_norm}. self: {self:?}, other: {other:?}",
         );
     }
 
@@ -277,15 +274,15 @@ pub trait Vector:
         for i in 0..s.len() {
             if num_traits::abs(s[i] - other[i]) > tol[i] {
                 eprintln!(
-                    "Vector element mismatch at index {}: {} != {}",
-                    i, s[i], other[i]
+                    "Vector element mismatch at index {i}: {} != {}",
+                    s[i], other[i]
                 );
                 if s.len() <= 3 {
-                    eprintln!("left: {:?}", s);
-                    eprintln!("right: {:?}", other);
+                    eprintln!("left: {s:?}");
+                    eprintln!("right: {other:?}");
                 } else if i == 0 {
                     eprintln!(
-                        "left: [{}, {}, {}, ...] != [{}, {}, {}, ...]",
+                        "left: [{}, {}, {}] != [{}, {}, {}]",
                         s[0], s[1], s[2], other[0], other[1], other[2]
                     );
                 } else if i == s.len() - 1 {
