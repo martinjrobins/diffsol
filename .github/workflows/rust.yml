@@ -158,7 +158,7 @@ jobs:
         rustup target add wasm32-unknown-unknown
         cd examples/population-dynamics-wasm-yew
         mkdir -p ${{ github.workspace }}/book/book/examples/population-dynamics-wasm-yew
-        trunk build --release --dist ${{ github.workspace }}/book/book/examples/population-dynamics-wasm-yew
+        trunk build --release --public-url /diffsol/examples/population-dynamics-wasm-yew/ --dist ${{ github.workspace }}/book/book/examples/population-dynamics-wasm-yew
     - name: Generate coverage report
       if: matrix.coverage == true
       run: cargo tarpaulin --out Xml --packages diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
