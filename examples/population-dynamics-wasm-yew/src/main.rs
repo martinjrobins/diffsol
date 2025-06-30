@@ -1,9 +1,11 @@
 use diffsol::{MatrixCommon, NalgebraVec, OdeBuilder, OdeEquations, OdeSolverMethod, Op, Vector};
-use yew::prelude::*;
-use yew_plotly::{plotly::{common::Mode, layout::Axis, Layout, Plot, Scatter}, Plotly};
 use web_sys::HtmlInputElement;
+use yew::prelude::*;
+use yew_plotly::{
+    plotly::{common::Mode, layout::Axis, Layout, Plot, Scatter},
+    Plotly,
+};
 type M = diffsol::NalgebraMat<f64>;
-
 
 #[function_component]
 fn App() -> Html {
@@ -19,7 +21,10 @@ fn App() -> Html {
             .unwrap()
     });
     let params = use_state(|| {
-        NalgebraVec::from_vec(vec![2.0 / 3.0, 4.0 / 3.0, 1.0, 1.0], problem.borrow().eqn.context().clone())
+        NalgebraVec::from_vec(
+            vec![2.0 / 3.0, 4.0 / 3.0, 1.0, 1.0],
+            problem.borrow().eqn.context().clone(),
+        )
     });
 
     let onchange = |i: usize| {
@@ -37,7 +42,6 @@ fn App() -> Html {
     };
     let oninput_a: Callback<InputEvent> = onchange(0);
     let oninput_b: Callback<InputEvent> = onchange(1);
-
 
     let problem = problem.borrow();
     let mut solver = problem.tsit45().unwrap();
