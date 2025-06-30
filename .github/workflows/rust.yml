@@ -29,6 +29,8 @@ jobs:
     continue-on-error: ${{ matrix.experimental }}
     strategy:
         matrix:
+          book:
+            - false
           coverage:
             - false
           experimental:
@@ -55,18 +57,29 @@ jobs:
               experimental: true
               basename: Coverage
               coverage: true
+              book: false
+            - toolchain: stable
+              os: ubuntu-latest
+              tests: false
+              clippy: false
+              experimental: true
+              basename: Examples
+              coverage: false
+              book: true
             - toolchain: beta
               os: ubuntu-latest
               experimental: true
               tests: true
               basename: Tests
               coverage: false
+              book: false
             - toolchain: nightly
               os: ubuntu-latest
               tests: true
               experimental: true
               basename: Tests
               coverage: false
+              book: false
             - toolchain: stable
               os: ubuntu-latest
               tests: false
@@ -74,6 +87,7 @@ jobs:
               experimental: true
               basename: Clippy
               coverage: false
+              book: false
             - toolchain: nightly
               os: ubuntu-latest
               tests: false
@@ -81,6 +95,7 @@ jobs:
               experimental: true
               basename: Rustdoc
               coverage: false
+              book: false
 
     steps:
     - uses: actions/checkout@v4
@@ -100,11 +115,19 @@ jobs:
       with:
         version: "17.0"
     - name: Set features variable and install dependencies (Ubuntu)
-      if: matrix.os == 'ubuntu-latest'
+      if: matrix.os == 'ubuntu-latest' && matrix.book == false
       run: |
         echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse" >> $GITHUB_ENV
         sudo apt-get update
         sudo apt-get install -y libsuitesparse-dev
+    - name: Install Trunk
+      uses: jetli/trunk-action@v0.4.0
+      if: matrix.book == true
+    - name: Setup mdBook
+      uses: peaceiris/actions-mdbook@v2
+      if: matrix.book == true
+      with:
+        mdbook-version: 'latest'
     - name: Install tarpaulin
       if: matrix.coverage == true
       run: cargo install cargo-tarpaulin
@@ -128,6 +151,15 @@ jobs:
     - name: Docs - all features
       if: matrix.rustdoc == true
       run: cargo rustdoc -p diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}}
+    - name: Build book and wasm examples
+      if: matrix.book == true
+      run: |
+        mdbook build book
+        rustup target add wasm32-unknown-unknown
+        cd examples/population-dynamics-wasm-yew
+        trunk build --release 
+        mkdir -p book/examples/population-dynamics-wasm-yew
+        cp -r dist/* book/examples/population-dynamics-wasm-yew
     - name: Generate coverage report
       if: matrix.coverage == true
       run: cargo tarpaulin --out Xml --packages diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
@@ -137,22 +169,20 @@ jobs:
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: cobertura.xml
+    - name: Upload artifact
+      uses: actions/upload-pages-artifact@v3
+      if: matrix.book == true
+      with:
+        path: "book/book/"
 
-  book:
+  deploy:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
+    needs: unit-tests
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup mdBook
-        uses: peaceiris/actions-mdbook@v2
-        with:
-          mdbook-version: 'latest'
-
-      - run: mdbook build book
-
-      - name: Deploy
-        uses: peaceiris/actions-gh-pages@v4
-        if: ${{ github.ref == 'refs/heads/main' }}
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./book/book
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
