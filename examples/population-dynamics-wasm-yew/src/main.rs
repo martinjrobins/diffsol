@@ -43,14 +43,15 @@ fn App() -> Html {
     let oninput_a: Callback<InputEvent> = onchange(0);
     let oninput_b: Callback<InputEvent> = onchange(1);
 
-    let problem = problem.borrow();
-    let mut solver = problem.tsit45().unwrap();
-    let (ys, ts) = solver.solve(40.0).unwrap();
+    let (ys, ts) = {
+        let problem = problem.borrow();
+        let mut solver = problem.tsit45().unwrap();
+        solver.solve(40.0).unwrap()
+    };
 
     let prey: Vec<_> = ys.inner().row(0).into_iter().copied().collect();
     let predator: Vec<_> = ys.inner().row(1).into_iter().copied().collect();
     let time: Vec<_> = ts.into_iter().collect();
-    println!("Prey: {:?}", prey);
 
     let prey = Scatter::new(time.clone(), prey)
         .mode(Mode::Lines)
@@ -77,11 +78,11 @@ fn App() -> Html {
             <Plotly plot={plot}/>
             <ul>
                 <li>
-                    <input oninput={oninput_a} type="range" id="a" name="a" min="0" max="3" step="0.1" value={a_str} />
+                    <input oninput={oninput_a} type="range" id="a" name="a" min="0.1" max="3" step="0.1" value={a_str} />
                     <label for="a">{"a"}</label>
                 </li>
                 <li>
-                    <input oninput={oninput_b} type="range" id="b" name="b" min="0" max="3" step="0.1" value={b_str} />
+                    <input oninput={oninput_b} type="range" id="b" name="b" min="0.1" max="3" step="0.1" value={b_str} />
                     <label for="b">{"b"}</label>
                 </li>
             </ul>

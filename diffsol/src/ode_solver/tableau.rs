@@ -302,31 +302,15 @@ impl<M: DenseMatrix> Tableau<M> {
 
     pub fn new(a: M, b: M::V, c: M::V, d: M::V, order: usize, beta: Option<M>) -> Self {
         let s = c.len();
-        assert_eq!(a.ncols(), s, "Invalid number of rows in a, expected {}", s);
-        assert_eq!(
-            a.nrows(),
-            s,
-            "Invalid number of columns in a, expected {}",
-            s
-        );
-        assert_eq!(
-            b.len(),
-            s,
-            "Invalid number of elements in b, expected {}",
-            s
-        );
-        assert_eq!(
-            c.len(),
-            s,
-            "Invalid number of elements in c, expected {}",
-            s
-        );
+        assert_eq!(a.ncols(), s, "Invalid number of rows in a, expected {s}");
+        assert_eq!(a.nrows(), s, "Invalid number of columns in a, expected {s}",);
+        assert_eq!(b.len(), s, "Invalid number of elements in b, expected {s}",);
+        assert_eq!(c.len(), s, "Invalid number of elements in c, expected {s}",);
         if let Some(beta) = &beta {
             assert_eq!(
                 beta.nrows(),
                 s,
-                "Invalid number of rows in beta, expected {}",
-                s
+                "Invalid number of rows in beta, expected {s}",
             );
         }
         Self {

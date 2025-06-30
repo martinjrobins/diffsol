@@ -280,8 +280,7 @@ where
             assert_eq!(
                 tableau.a().get_index(i, i),
                 gamma,
-                "Invalid tableau, expected a(i, i) = gamma = {} for i = 1..s-1",
-                gamma
+                "Invalid tableau, expected a(i, i) = gamma = {gamma} for i = 1..s-1",
             );
         }
         // if a(0, 0) = gamma, then we're a SDIRK method

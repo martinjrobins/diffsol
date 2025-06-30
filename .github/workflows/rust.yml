@@ -104,14 +104,14 @@ jobs:
         path: |
           ${{ env.CARGO_HOME }}
           target
-        key: diffsol-${{ runner.os }}-${{ matrix.toolchain}}-coverage${{ matrix.coverage }}-llvm17
+        key: diffsol-${{ runner.os }}-${{ matrix.toolchain}}-coverage${{ matrix.coverage }}-book${{ matrix.book }}-llvm17
     - name: Set up Rust
       run: rustup default ${{ matrix.toolchain }} && rustup update ${{ matrix.toolchain }} --no-self-update && rustup component add clippy
     - name: Rust version
       run: rustc -Vv
     - name: Install LLVM and Clang
       uses: KyleMayes/install-llvm-action@v2
-      if : matrix.os == 'ubuntu-latest' || matrix.os == 'macos-13' || matrix.os == 'macos-latest'
+      if : (matrix.os == 'ubuntu-latest' || matrix.os == 'macos-13' || matrix.os == 'macos-latest') && matrix.book == false
       with:
         version: "17.0"
     - name: Set features variable and install dependencies (Ubuntu)

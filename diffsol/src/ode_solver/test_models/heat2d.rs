@@ -40,7 +40,7 @@ pub fn heat2d_diffsl_problem<
         .join(",\n");
     let jac_diffsl = jac
         .triplet_iter()
-        .map(|(i, j, v)| format!("            ({}, {}): {}", i, j, v))
+        .map(|(i, j, v)| format!("            ({i}, {j}): {v}"))
         .collect::<Vec<_>>()
         .join(",\n");
 
@@ -49,9 +49,9 @@ pub fn heat2d_diffsl_problem<
     for i in 0..MGRID * MGRID {
         // check if i in mass_ones
         if mass_ones.contains(&i) {
-            mass_diffsl.push(format!("            ({}, {}): 1", i, i));
+            mass_diffsl.push(format!("            ({i}, {i}): 1"));
         } else {
-            mass_diffsl.push(format!("            ({}, {}): 0", i, i));
+            mass_diffsl.push(format!("            ({i}, {i}): 0"));
         }
     }
     let mass_diffsl = mass_diffsl.join(",\n");

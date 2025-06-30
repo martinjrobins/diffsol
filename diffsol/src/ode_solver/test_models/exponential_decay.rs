@@ -196,9 +196,8 @@ pub fn exponential_decay_problem_diffsl<
             u_i {{ x = y0, y = y0 }}
             F_i {{ -k * u_i }}
             out_i {{
-                {}
-            }}",
-                out
+                {out}
+            }}"
             )
             .as_str(),
         )

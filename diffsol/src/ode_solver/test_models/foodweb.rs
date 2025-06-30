@@ -39,7 +39,7 @@ where
     let diff = diffop.jacobian(&u0, 0.0);
     let diff_diffsl = diff
         .triplet_iter()
-        .map(|(i, j, v)| format!("            ({}, {}): {}", i, j, v))
+        .map(|(i, j, v)| format!("            ({i}, {j}): {v}"))
         .collect::<Vec<_>>()
         .join(",\n");
 
@@ -57,13 +57,13 @@ where
     let xx_diffsl = xx
         .as_slice()
         .iter()
-        .map(|v| format!("            {}", v))
+        .map(|v| format!("            {v}"))
         .collect::<Vec<_>>()
         .join(",\n");
     let yy_diffsl = yy
         .as_slice()
         .iter()
-        .map(|v| format!("            {}", v))
+        .map(|v| format!("            {v}"))
         .collect::<Vec<_>>()
         .join(",\n");
 
