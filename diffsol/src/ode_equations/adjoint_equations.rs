@@ -658,7 +658,7 @@ mod tests {
 
     use crate::{
         matrix::dense_nalgebra_serial::NalgebraMat,
-        ode_solver::{
+        ode_equations::{
             adjoint_equations::AdjointEquations,
             test_models::exponential_decay::exponential_decay_problem_adjoint,
         },

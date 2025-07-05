@@ -1,10 +1,8 @@
 pub mod adjoint;
-pub mod adjoint_equations;
 pub mod bdf;
 pub mod bdf_state;
 pub mod builder;
 pub mod checkpointing;
-pub mod equations;
 pub mod explicit_rk;
 pub mod jacobian_update;
 pub mod method;
@@ -13,14 +11,9 @@ pub mod runge_kutta;
 pub mod sde;
 pub mod sdirk;
 pub mod sdirk_state;
-pub mod sens_equations;
 pub mod sensitivities;
 pub mod state;
 pub mod tableau;
-pub mod test_models;
-
-#[cfg(feature = "diffsl")]
-pub mod diffsl;
 
 #[cfg(test)]
 mod tests {

@@ -1,6 +1,6 @@
 use crate::{
-    matrix::MatrixView, ode_solver::equations::OdeEquations, scale, LinearOp, Matrix,
-    MatrixSparsity, NonLinearOpJacobian, OdeEquationsImplicit, Vector,
+    matrix::MatrixView, scale, LinearOp, Matrix, MatrixSparsity, NonLinearOpJacobian, OdeEquations,
+    OdeEquationsImplicit, Vector,
 };
 use num_traits::{One, Zero};
 use std::{
@@ -295,8 +295,8 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for SdirkCallable<Eqn> {
 #[cfg(test)]
 mod tests {
     use crate::matrix::dense_nalgebra_serial::NalgebraMat;
-    use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
-    use crate::ode_solver::test_models::robertson::robertson;
+    use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem;
+    use crate::ode_equations::test_models::robertson::robertson;
     use crate::vector::Vector;
     use crate::{DenseMatrix, NonLinearOp, NonLinearOpJacobian};
     use crate::{Matrix, NalgebraVec};

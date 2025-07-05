@@ -5,6 +5,12 @@ use crate::{
 };
 use serde::Serialize;
 
+pub mod adjoint_equations;
+#[cfg(feature = "diffsl")]
+pub mod diffsl;
+pub mod sens_equations;
+pub mod test_models;
+
 #[derive(Clone, Debug, Serialize)]
 pub struct OdeEquationsStatistics {
     pub number_of_rhs_evals: usize,
@@ -563,10 +569,10 @@ where
 #[cfg(test)]
 mod tests {
     use crate::matrix::dense_nalgebra_serial::NalgebraMat;
-    use crate::ode_solver::equations::OdeEquations;
-    use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
-    use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
+    use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem;
+    use crate::ode_equations::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
     use crate::vector::Vector;
+    use crate::OdeEquations;
     use crate::{Context, DenseMatrix, LinearOp, NonLinearOp, NonLinearOpJacobian};
 
     type Mcpu = NalgebraMat<f64>;

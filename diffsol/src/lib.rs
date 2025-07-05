@@ -145,6 +145,7 @@ pub mod jacobian;
 pub mod linear_solver;
 pub mod matrix;
 pub mod nonlinear_solver;
+pub mod ode_equations;
 pub mod ode_solver;
 pub mod op;
 pub mod scalar;
@@ -163,7 +164,7 @@ pub use context::{faer::FaerContext, nalgebra::NalgebraContext, Context};
 pub use linear_solver::suitesparse::klu::KLU;
 
 #[cfg(feature = "diffsl")]
-pub use ode_solver::diffsl::{DiffSl, DiffSlContext};
+pub use ode_equations::diffsl::{DiffSl, DiffSlContext};
 
 pub use jacobian::{
     find_adjoint_non_zeros, find_jacobian_non_zeros, find_matrix_non_zeros,
@@ -183,23 +184,23 @@ use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus, root::RootFinder,
 };
 pub use nonlinear_solver::{newton::NewtonNonlinearSolver, NonLinearSolver};
-pub use ode_solver::equations::OdeEquationsStoch;
+pub use ode_equations::{
+    adjoint_equations::AdjointContext, adjoint_equations::AdjointEquations,
+    adjoint_equations::AdjointInit, adjoint_equations::AdjointRhs, sens_equations::SensEquations,
+    sens_equations::SensInit, sens_equations::SensRhs, AugmentedOdeEquations,
+    AugmentedOdeEquationsImplicit, NoAug, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit,
+    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeEquationsRef, OdeEquationsStoch,
+    OdeSolverEquations,
+};
 use ode_solver::jacobian_update::JacobianUpdate;
 pub use ode_solver::sde::SdeSolverMethod;
 pub use ode_solver::state::{StateRef, StateRefMut};
 pub use ode_solver::{
-    adjoint::AdjointOdeSolverMethod, adjoint_equations::AdjointContext,
-    adjoint_equations::AdjointEquations, adjoint_equations::AdjointInit,
-    adjoint_equations::AdjointRhs, bdf::Bdf, bdf_state::BdfState, builder::OdeBuilder,
-    checkpointing::Checkpointing, checkpointing::HermiteInterpolator,
-    equations::AugmentedOdeEquations, equations::AugmentedOdeEquationsImplicit, equations::NoAug,
-    equations::OdeEquations, equations::OdeEquationsAdjoint, equations::OdeEquationsImplicit,
-    equations::OdeEquationsImplicitAdjoint, equations::OdeEquationsImplicitSens,
-    equations::OdeEquationsRef, equations::OdeSolverEquations, explicit_rk::ExplicitRk,
+    adjoint::AdjointOdeSolverMethod, bdf::Bdf, bdf_state::BdfState, builder::OdeBuilder,
+    checkpointing::Checkpointing, checkpointing::HermiteInterpolator, explicit_rk::ExplicitRk,
     method::AugmentedOdeSolverMethod, method::OdeSolverMethod, method::OdeSolverStopReason,
-    problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::RkState, sens_equations::SensEquations,
-    sens_equations::SensInit, sens_equations::SensRhs, sensitivities::SensitivitiesOdeSolverMethod,
-    state::OdeSolverState, tableau::Tableau,
+    problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::RkState,
+    sensitivities::SensitivitiesOdeSolverMethod, state::OdeSolverState, tableau::Tableau,
 };
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};
