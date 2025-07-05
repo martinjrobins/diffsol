@@ -1284,7 +1284,7 @@ where
 mod test {
     use crate::{
         matrix::dense_nalgebra_serial::NalgebraMat,
-        ode_solver::{
+        ode_equations::{
             test_models::{
                 dydt_y2::dydt_y2_problem,
                 exponential_decay::{
@@ -1304,11 +1304,11 @@ mod test {
                 robertson_ode::robertson_ode,
                 robertson_ode_with_sens::robertson_ode_with_sens,
             },
-            tests::{
-                setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
-                test_adjoint_sum_squares, test_checkpointing, test_interpolate, test_ode_solver,
-                test_problem, test_state_mut, test_state_mut_on_problem,
-            },
+        },
+        ode_solver::tests::{
+            setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
+            test_adjoint_sum_squares, test_checkpointing, test_interpolate, test_ode_solver,
+            test_problem, test_state_mut, test_state_mut_on_problem,
         },
         Context, DenseMatrix, FaerLU, FaerMat, FaerSparseLU, FaerSparseMat, MatrixCommon,
         OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
@@ -1431,7 +1431,7 @@ mod test {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_test_nalgebra_exponential_decay_diffsl_sens() {
-        use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem_diffsl;
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem_diffsl;
         let (_problem, mut soln) = exponential_decay_problem_sens::<M>(false);
         let (problem, _soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(false);
         soln.atol = problem.atol.clone();
@@ -1492,7 +1492,7 @@ mod test {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_test_nalgebra_exponential_decay_adjoint_diffsl() {
-        use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem_diffsl;
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem_diffsl;
         let (mut problem, soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(true);
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
@@ -1549,7 +1549,7 @@ mod test {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_test_nalgebra_exponential_decay_with_algebraic_adjoint_diffsl() {
-        use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_diffsl;
+        use crate::ode_equations::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_diffsl;
         let (mut problem, soln) =
             exponential_decay_with_algebraic_problem_diffsl::<M, diffsl::LlvmModule>(true);
         let final_time = soln.solution_points.last().unwrap().t;
@@ -1612,7 +1612,7 @@ mod test {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_test_nalgebra_exponential_decay_algebraic_diffsl_sens() {
-        use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_diffsl;
+        use crate::ode_equations::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_diffsl;
         let (_problem, mut soln) = exponential_decay_with_algebraic_problem_sens::<M>();
         let (problem, _soln) =
             exponential_decay_with_algebraic_problem_diffsl::<M, diffsl::LlvmModule>(false);
@@ -1669,7 +1669,7 @@ mod test {
     fn bdf_test_nalgebra_diffsl_robertson() {
         use diffsl::LlvmModule;
 
-        use crate::ode_solver::test_models::robertson;
+        use crate::ode_equations::test_models::robertson;
         let (problem, soln) = robertson::robertson_diffsl_problem::<M, LlvmModule>();
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
@@ -1678,7 +1678,7 @@ mod test {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_test_nalgebra_diffsl_robertson_ode_adjoint() {
-        use crate::ode_solver::test_models::robertson_ode;
+        use crate::ode_equations::test_models::robertson_ode;
         use diffsl::LlvmModule;
         let (mut problem, soln) = robertson_ode::robertson_ode_diffsl_problem::<M, LlvmModule>();
         let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
@@ -1859,7 +1859,7 @@ mod test {
     fn test_bdf_faer_sparse_heat2d_diffsl() {
         use diffsl::LlvmModule;
 
-        use crate::ode_solver::test_models::heat2d;
+        use crate::ode_equations::test_models::heat2d;
         let (problem, soln) = heat2d::heat2d_diffsl_problem::<FaerSparseMat<f64>, LlvmModule, 10>();
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
@@ -1884,7 +1884,7 @@ mod test {
     fn test_bdf_faer_sparse_foodweb_diffsl() {
         use diffsl::LlvmModule;
 
-        use crate::ode_solver::test_models::foodweb;
+        use crate::ode_equations::test_models::foodweb;
         let (problem, soln) =
             foodweb::foodweb_diffsl_problem::<FaerSparseMat<f64>, LlvmModule, 10>();
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();

@@ -262,7 +262,7 @@ where
 mod tests {
 
     use crate::{
-        matrix::dense_nalgebra_serial::NalgebraMat, ode_solver::test_models::robertson::robertson,
+        matrix::dense_nalgebra_serial::NalgebraMat, ode_equations::test_models::robertson::robertson,
         Context, NalgebraLU, OdeEquations, OdeSolverMethod, Op, Vector,
     };
 

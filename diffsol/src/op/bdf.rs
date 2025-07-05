@@ -1,5 +1,5 @@
 use crate::{
-    matrix::DenseMatrix, ode_solver::equations::OdeEquationsImplicit, scale, LinearOp, Matrix,
+    matrix::DenseMatrix, OdeEquationsImplicit, scale, LinearOp, Matrix,
     MatrixSparsity, NonLinearOp, NonLinearOpJacobian, Op, Vector,
 };
 use num_traits::{One, Zero};
@@ -310,7 +310,7 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for BdfCallable<Eqn> {
 #[cfg(test)]
 mod tests {
     use crate::matrix::dense_nalgebra_serial::NalgebraMat;
-    use crate::ode_solver::test_models::exponential_decay::exponential_decay_problem;
+    use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem;
     use crate::vector::Vector;
     use crate::{DenseMatrix, NalgebraVec, NonLinearOp, NonLinearOpJacobian};
 

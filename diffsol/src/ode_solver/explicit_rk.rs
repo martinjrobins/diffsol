@@ -194,17 +194,17 @@ where
 mod test {
     use crate::{
         matrix::dense_nalgebra_serial::NalgebraMat,
-        ode_solver::{
+        ode_equations::{
             test_models::exponential_decay::{
                 exponential_decay_problem, exponential_decay_problem_adjoint,
                 exponential_decay_problem_sens, exponential_decay_problem_with_root,
                 negative_exponential_decay_problem,
             },
-            tests::{
+        },
+        ode_solver::tests::{
                 setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
                 test_adjoint_sum_squares, test_checkpointing, test_interpolate, test_ode_solver,
                 test_problem, test_state_mut, test_state_mut_on_problem,
-            },
         },
         Context, DenseMatrix, MatrixCommon, NalgebraLU, NalgebraVec, OdeEquations, OdeSolverMethod,
         Op, Vector, VectorView,

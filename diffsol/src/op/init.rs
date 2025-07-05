@@ -137,7 +137,7 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for InitOp<'_, Eqn> {
 #[cfg(test)]
 mod tests {
 
-    use crate::ode_solver::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
+    use crate::ode_equations::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
     use crate::op::init::InitOp;
     use crate::vector::Vector;
     use crate::{

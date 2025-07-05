@@ -8,7 +8,7 @@ use crate::{
     Matrix, NonLinearOp, OdeEquations, OdeSolverProblem, Op, ParameterisedOp, UnitCallable, Vector,
 };
 
-use super::equations::OdeSolverEquations;
+use crate::OdeSolverEquations;
 
 /// Builder for ODE problems. Use methods to set parameters and then call one of the build methods when done.
 pub struct OdeBuilder<

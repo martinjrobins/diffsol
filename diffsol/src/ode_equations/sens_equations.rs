@@ -366,7 +366,7 @@ impl<Eqn: OdeEquationsImplicitSens> AugmentedOdeEquations<Eqn> for SensEquations
 mod tests {
     use crate::{
         matrix::dense_nalgebra_serial::NalgebraMat,
-        ode_solver::test_models::{
+        ode_equations::test_models::{
             exponential_decay::exponential_decay_problem_sens,
             exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
             robertson::robertson_sens,
