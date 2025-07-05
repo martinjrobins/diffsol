@@ -1284,26 +1284,24 @@ where
 mod test {
     use crate::{
         matrix::dense_nalgebra_serial::NalgebraMat,
-        ode_equations::{
-            test_models::{
-                dydt_y2::dydt_y2_problem,
-                exponential_decay::{
-                    exponential_decay_problem, exponential_decay_problem_adjoint,
-                    exponential_decay_problem_sens, exponential_decay_problem_with_root,
-                    negative_exponential_decay_problem,
-                },
-                exponential_decay_with_algebraic::{
-                    exponential_decay_with_algebraic_adjoint_problem,
-                    exponential_decay_with_algebraic_problem,
-                    exponential_decay_with_algebraic_problem_sens,
-                },
-                foodweb::foodweb_problem,
-                gaussian_decay::gaussian_decay_problem,
-                heat2d::head2d_problem,
-                robertson::{robertson, robertson_sens},
-                robertson_ode::robertson_ode,
-                robertson_ode_with_sens::robertson_ode_with_sens,
+        ode_equations::test_models::{
+            dydt_y2::dydt_y2_problem,
+            exponential_decay::{
+                exponential_decay_problem, exponential_decay_problem_adjoint,
+                exponential_decay_problem_sens, exponential_decay_problem_with_root,
+                negative_exponential_decay_problem,
             },
+            exponential_decay_with_algebraic::{
+                exponential_decay_with_algebraic_adjoint_problem,
+                exponential_decay_with_algebraic_problem,
+                exponential_decay_with_algebraic_problem_sens,
+            },
+            foodweb::foodweb_problem,
+            gaussian_decay::gaussian_decay_problem,
+            heat2d::head2d_problem,
+            robertson::{robertson, robertson_sens},
+            robertson_ode::robertson_ode,
+            robertson_ode_with_sens::robertson_ode_with_sens,
         },
         ode_solver::tests::{
             setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,

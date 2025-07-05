@@ -569,10 +569,10 @@ where
 #[cfg(test)]
 mod tests {
     use crate::matrix::dense_nalgebra_serial::NalgebraMat;
-    use crate::OdeEquations;
     use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem;
     use crate::ode_equations::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
     use crate::vector::Vector;
+    use crate::OdeEquations;
     use crate::{Context, DenseMatrix, LinearOp, NonLinearOp, NonLinearOpJacobian};
 
     type Mcpu = NalgebraMat<f64>;

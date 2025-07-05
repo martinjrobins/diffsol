@@ -1,6 +1,6 @@
 use crate::{
-    matrix::DenseMatrix, OdeEquationsImplicit, scale, LinearOp, Matrix,
-    MatrixSparsity, NonLinearOp, NonLinearOpJacobian, Op, Vector,
+    matrix::DenseMatrix, scale, LinearOp, Matrix, MatrixSparsity, NonLinearOp, NonLinearOpJacobian,
+    OdeEquationsImplicit, Op, Vector,
 };
 use num_traits::{One, Zero};
 use std::ops::MulAssign;

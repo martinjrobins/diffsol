@@ -1,6 +1,6 @@
 use crate::{
-    matrix::MatrixView, OdeEquations, scale, LinearOp, Matrix,
-    MatrixSparsity, NonLinearOpJacobian, OdeEquationsImplicit, Vector,
+    matrix::MatrixView, scale, LinearOp, Matrix, MatrixSparsity, NonLinearOpJacobian, OdeEquations,
+    OdeEquationsImplicit, Vector,
 };
 use num_traits::{One, Zero};
 use std::{

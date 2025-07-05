@@ -15,7 +15,6 @@ pub mod sensitivities;
 pub mod state;
 pub mod tableau;
 
-
 #[cfg(test)]
 mod tests {
     use std::rc::Rc;
