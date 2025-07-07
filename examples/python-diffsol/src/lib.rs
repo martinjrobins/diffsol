@@ -1,3 +1,5 @@
+use std::sync::{Arc, Mutex};
+
 use diffsol::{error::DiffsolError, NonLinearOp, OdeBuilder, OdeEquations, OdeSolverProblem, Vector, VectorHost, OdeSolverMethod, Op};
 use numpy::{ndarray::{s, Array2}, IntoPyArray, PyArray2, PyReadonlyArray1};
 use pyo3::{exceptions::PyValueError, prelude::*};
@@ -14,11 +16,8 @@ type Eqn = diffsol::DiffSl<M, CG>;
 
 #[pyclass]
 struct PyDiffsol {
-    problem: OdeSolverProblem<Eqn>,
+    problem: Arc<Mutex<OdeSolverProblem<Eqn>>>,
 }
-
-unsafe impl Send for PyDiffsol {}
-unsafe impl Sync for PyDiffsol {}
 
 #[pymethods]
 impl PyDiffsol {
@@ -26,19 +25,20 @@ impl PyDiffsol {
     fn new(code: &str) -> Result<Self, PyDiffsolError> {
         let problem = OdeBuilder::<M>::new()
             .build_from_diffsl(code)?;
-        Ok(Self { problem })
+        Ok(Self { problem: Arc::new(Mutex::new(problem)) })
     }
 
     #[pyo3(signature = (params, times))]
     fn solve<'py>(&mut self, py: Python<'py>, params: PyReadonlyArray1<'py, f64>, times: PyReadonlyArray1<'py, f64>) -> Result<Bound<'py, PyArray2<f64>>, PyDiffsolError> {
+        let mut problem = self.problem.lock().map_err(|e| PyDiffsolError(DiffsolError::Other(e.to_string())))?;
         let times = times.as_array();
         let params = V::from_slice(params.as_array().as_slice().unwrap(), C::default());
-        self.problem.eqn.set_params(&params);
-        let mut solver = self.problem.bdf::<LS>()?;
-        let nout = if let Some(_out) = self.problem.eqn.out() {
-            self.problem.eqn.nout()
+        problem.eqn.set_params(&params);
+        let mut solver = problem.bdf::<LS>()?;
+        let nout = if let Some(_out) = problem.eqn.out() {
+            problem.eqn.nout()
         } else {
-            self.problem.eqn.nstates()
+            problem.eqn.nstates()
         };
         let mut sol = Array2::zeros((nout, times.len())); 
         for (i, &t) in times.iter().enumerate() {
@@ -46,7 +46,7 @@ impl PyDiffsol {
                 solver.step()?;
             }
             let y = solver.interpolate(t)?;
-            let out = if let Some(out) = self.problem.eqn.out() {
+            let out = if let Some(out) = problem.eqn.out() {
                 out.call(&y, t)
             } else {
                 y
