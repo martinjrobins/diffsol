@@ -1,7 +1,13 @@
 use std::sync::{Arc, Mutex};
 
-use diffsol::{error::DiffsolError, NonLinearOp, OdeBuilder, OdeEquations, OdeSolverProblem, Vector, VectorHost, OdeSolverMethod, Op};
-use numpy::{ndarray::{s, Array2}, IntoPyArray, PyArray2, PyReadonlyArray1};
+use diffsol::{
+    error::DiffsolError, NonLinearOp, OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverProblem,
+    Op, Vector, VectorHost,
+};
+use numpy::{
+    ndarray::{s, Array2},
+    IntoPyArray, PyArray2, PyReadonlyArray1,
+};
 use pyo3::{exceptions::PyValueError, prelude::*};
 
 type M = diffsol::NalgebraMat<f64>;
@@ -23,14 +29,23 @@ struct PyDiffsol {
 impl PyDiffsol {
     #[new]
     fn new(code: &str) -> Result<Self, PyDiffsolError> {
-        let problem = OdeBuilder::<M>::new()
-            .build_from_diffsl(code)?;
-        Ok(Self { problem: Arc::new(Mutex::new(problem)) })
+        let problem = OdeBuilder::<M>::new().build_from_diffsl(code)?;
+        Ok(Self {
+            problem: Arc::new(Mutex::new(problem)),
+        })
     }
 
     #[pyo3(signature = (params, times))]
-    fn solve<'py>(&mut self, py: Python<'py>, params: PyReadonlyArray1<'py, f64>, times: PyReadonlyArray1<'py, f64>) -> Result<Bound<'py, PyArray2<f64>>, PyDiffsolError> {
-        let mut problem = self.problem.lock().map_err(|e| PyDiffsolError(DiffsolError::Other(e.to_string())))?;
+    fn solve<'py>(
+        &mut self,
+        py: Python<'py>,
+        params: PyReadonlyArray1<'py, f64>,
+        times: PyReadonlyArray1<'py, f64>,
+    ) -> Result<Bound<'py, PyArray2<f64>>, PyDiffsolError> {
+        let mut problem = self
+            .problem
+            .lock()
+            .map_err(|e| PyDiffsolError(DiffsolError::Other(e.to_string())))?;
         let times = times.as_array();
         let params = V::from_slice(params.as_array().as_slice().unwrap(), C::default());
         problem.eqn.set_params(&params);
@@ -40,7 +55,7 @@ impl PyDiffsol {
         } else {
             problem.eqn.nstates()
         };
-        let mut sol = Array2::zeros((nout, times.len())); 
+        let mut sol = Array2::zeros((nout, times.len()));
         for (i, &t) in times.iter().enumerate() {
             while solver.state().t < t {
                 solver.step()?;
@@ -51,7 +66,10 @@ impl PyDiffsol {
             } else {
                 y
             };
-            sol.slice_mut(s![.., i]).iter_mut().zip(out.as_slice().iter()).for_each(|(a, b)| *a = *b);
+            sol.slice_mut(s![.., i])
+                .iter_mut()
+                .zip(out.as_slice().iter())
+                .for_each(|(a, b)| *a = *b);
         }
         Ok(sol.into_pyarray(py))
     }
