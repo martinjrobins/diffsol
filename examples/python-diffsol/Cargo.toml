@@ -1,0 +1,22 @@
+[package]
+name = "python_diffsol"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "python_diffsol"
+crate-type = ["cdylib"]
+
+[features]
+diffsol-llvm = []
+diffsol-llvm15 = ["diffsol/diffsl-llvm15", "diffsol-llvm"]
+diffsol-llvm16 = ["diffsol/diffsl-llvm16", "diffsol-llvm"]
+diffsol-llvm17 = ["diffsol/diffsl-llvm17", "diffsol-llvm"]
+diffsol-llvm18 = ["diffsol/diffsl-llvm18", "diffsol-llvm"]
+
+[dependencies]
+diffsol = { path = "../../diffsol", features = ["diffsl-cranelift"] }
+nalgebra = { workspace = true }
+numpy = "0.25.0"
+pyo3 = "0.25.0"

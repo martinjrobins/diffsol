@@ -932,13 +932,18 @@ where
 
     #[cfg(feature = "diffsl")]
     pub fn build_from_diffsl<CG: crate::CodegenModuleJit + crate::CodegenModuleCompile>(
-        self,
+        mut self,
         code: &str,
     ) -> Result<OdeSolverProblem<crate::DiffSl<M, CG>>, DiffsolError>
     where
         M: Matrix<V: crate::VectorHost, T = f64>,
     {
         let eqn = crate::DiffSl::compile(code, self.ctx.clone())?;
+        // if the user hasn't set the parameters, resize them to match the number of parameters in the equations
+        let nparams = eqn.rhs().nparams();
+        if self.p.len() != nparams && self.p.is_empty() {
+            self.p.resize(nparams, 0.0);
+        }
         self.build_from_eqn(eqn)
     }
 
