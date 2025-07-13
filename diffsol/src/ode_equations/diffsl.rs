@@ -362,7 +362,7 @@ impl<M: MatrixHost<T = T>, CG: CodegenModule> ConstantOpSens for DiffSlInit<'_, 
             v.as_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
         );
-        self.0.context.compiler.set_u0_grad(
+        self.0.context.compiler.set_u0_sgrad(
             self.0.context.tmp.borrow().as_slice(),
             y.as_mut_slice(),
             self.0.context.data.borrow_mut().as_mut_slice(),
@@ -597,7 +597,7 @@ impl<M: MatrixHost<T = T>, CG: CodegenModule> NonLinearOpSens for DiffSlRhs<'_, 
     }
     fn sens_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         if let Some(coloring) = &self.0.rhs_sens_coloring {
-            coloring.jacobian_inplace(self, x, t, y);
+            coloring.sens_inplace(self, x, t, y);
         } else {
             self._default_sens_inplace(x, t, y);
         }
@@ -634,7 +634,7 @@ impl<M: MatrixHost<T = T>, CG: CodegenModule> NonLinearOpSensAdjoint for DiffSlR
     }
     fn sens_adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         if let Some(coloring) = &self.0.rhs_sens_adjoint_coloring {
-            coloring.jacobian_inplace(self, x, t, y);
+            coloring.sens_adjoint_inplace(self, x, t, y);
         } else {
             self._default_adjoint_inplace(x, t, y);
         }

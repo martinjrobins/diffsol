@@ -209,6 +209,26 @@ impl<M: Matrix> JacobianColoring<M> {
         }
     }
 
+    pub fn sens_inplace<F: NonLinearOpSens<M = M, V = M::V, T = M::T, C = M::C>>(
+        &self,
+        op: &F,
+        x: &F::V,
+        t: F::T,
+        y: &mut F::M,
+    ) {
+        let mut v = self.scratch_v.borrow_mut();
+        let mut col = self.scratch_col.borrow_mut();
+        for c in 0..self.dst_indices_per_color.len() {
+            let input = &self.input_indices_per_color[c];
+            let dst_indices = &self.dst_indices_per_color[c];
+            let src_indices = &self.src_indices_per_color[c];
+            v.assign_at_indices(input, F::T::one());
+            op.sens_mul_inplace(x, t, &v, &mut col);
+            y.set_data_with_indices(dst_indices, src_indices, &col);
+            v.assign_at_indices(input, F::T::zero());
+        }
+    }
+
     pub fn adjoint_inplace<F: NonLinearOpAdjoint<M = M, V = M::V, T = M::T, C = M::C>>(
         &self,
         op: &F,

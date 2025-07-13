@@ -1430,10 +1430,7 @@ mod test {
     #[test]
     fn bdf_test_nalgebra_exponential_decay_diffsl_sens() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem_diffsl;
-        let (_problem, mut soln) = exponential_decay_problem_sens::<M>(false);
-        let (problem, _soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(false);
-        soln.atol = problem.atol.clone();
-        soln.rtol = problem.rtol;
+        let (problem, soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(false);
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
@@ -1451,10 +1448,7 @@ mod test {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem_diffsl;
         type M = FaerSparseMat<f64>;
         type LS = FaerSparseLU<f64>;
-        let (_problem, mut soln) = exponential_decay_problem_sens::<M>(false);
-        let (problem, _soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(false);
-        soln.atol = problem.atol.clone();
-        soln.rtol = problem.rtol;
+        let (problem, soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(false);
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
     }
