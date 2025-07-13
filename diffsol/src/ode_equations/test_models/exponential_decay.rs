@@ -211,8 +211,13 @@ pub fn exponential_decay_problem_diffsl<
     for i in 0..10 {
         let t = i as f64;
         let y0 = problem.eqn.init().call(0.0);
-        let y = y0 * scale((-p[0] * t).exp());
-        soln.push(y, t);
+        let y = y0.clone() * scale((-p[0] * t).exp());
+        let ypk = y0 * scale(-t * M::T::exp(-p[0] * t));
+        let ypy0 = M::V::from_vec(
+            vec![(-p[0] * t).exp(), (-p[0] * t).exp()],
+            y.context().clone(),
+        );
+        soln.push_sens(y, t, &[ypk, ypy0]);
     }
     (problem, soln)
 }
@@ -240,7 +245,7 @@ pub fn exponential_decay_problem<M: Matrix + 'static>(
     for i in 0..10 {
         let t = M::T::from(i as f64);
         let y0: M::V = problem.eqn.init().call(M::T::zero());
-        let y = y0 * scale(M::T::exp(-p[0] * t));
+        let y = y0.clone() * scale(M::T::exp(-p[0] * t));
         soln.push(y, t);
     }
     (problem, soln)
@@ -407,8 +412,12 @@ pub fn exponential_decay_problem_sens<M: MatrixHost + 'static>(
         let t = M::T::from(i as f64);
         let y0: M::V = problem.eqn.init().call(M::T::zero());
         let y = y0.clone() * scale(M::T::exp(-p[0] * t));
-        let yp = y0 * scale(-t * M::T::exp(-p[0] * t));
-        soln.push_sens(y, t, &[yp]);
+        let ypk = y0 * scale(-t * M::T::exp(-p[0] * t));
+        let ypy0 = M::V::from_vec(
+            vec![(-p[0] * t).exp(), (-p[0] * t).exp()],
+            y.context().clone(),
+        );
+        soln.push_sens(y, t, &[ypk, ypy0]);
     }
     (problem, soln)
 }

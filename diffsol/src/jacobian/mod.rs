@@ -13,7 +13,7 @@ pub mod graph;
 pub mod greedy_coloring;
 
 macro_rules! gen_find_non_zeros_nonlinear {
-    ($name:ident, $op_fn:ident, $op_trait:ident) => {
+    ($name:ident, $op_fn:ident, $op_trait:ident, $nrows:ident, $ncols:ident) => {
         /// Find the non-zero entries of the $name matrix of a non-linear operator.
         /// TODO: This function is not efficient for non-host vectors and could be part of the Vector trait
         ///       to allow for more efficient implementations. It's ok for now since this is only used once
@@ -23,10 +23,10 @@ macro_rules! gen_find_non_zeros_nonlinear {
             x: &F::V,
             t: F::T,
         ) -> Vec<(usize, usize)> {
-            let mut v = F::V::zeros(op.nstates(), op.context().clone());
-            let mut col = F::V::zeros(op.nout(), op.context().clone());
+            let mut v = F::V::zeros(op.$ncols(), op.context().clone());
+            let mut col = F::V::zeros(op.$nrows(), op.context().clone());
             let mut triplets = Vec::with_capacity(op.nstates());
-            for j in 0..op.nstates() {
+            for j in 0..op.$ncols() {
                 v.set_index(j, F::T::NAN);
                 op.$op_fn(x, t, &v, &mut col);
                 for i in 0..op.nout() {
@@ -52,18 +52,30 @@ macro_rules! gen_find_non_zeros_nonlinear {
 gen_find_non_zeros_nonlinear!(
     find_jacobian_non_zeros,
     jac_mul_inplace,
-    NonLinearOpJacobian
+    NonLinearOpJacobian,
+    nout,
+    nstates
 );
 gen_find_non_zeros_nonlinear!(
     find_adjoint_non_zeros,
     jac_transpose_mul_inplace,
-    NonLinearOpAdjoint
+    NonLinearOpAdjoint,
+    nstates,
+    nout
 );
-gen_find_non_zeros_nonlinear!(find_sens_non_zeros, sens_mul_inplace, NonLinearOpSens);
+gen_find_non_zeros_nonlinear!(
+    find_sens_non_zeros,
+    sens_mul_inplace,
+    NonLinearOpSens,
+    nstates,
+    nparams
+);
 gen_find_non_zeros_nonlinear!(
     find_sens_adjoint_non_zeros,
     sens_transpose_mul_inplace,
-    NonLinearOpSensAdjoint
+    NonLinearOpSensAdjoint,
+    nparams,
+    nstates
 );
 
 macro_rules! gen_find_non_zeros_linear {
@@ -192,6 +204,26 @@ impl<M: Matrix> JacobianColoring<M> {
             let src_indices = &self.src_indices_per_color[c];
             v.assign_at_indices(input, F::T::one());
             op.jac_mul_inplace(x, t, &v, &mut col);
+            y.set_data_with_indices(dst_indices, src_indices, &col);
+            v.assign_at_indices(input, F::T::zero());
+        }
+    }
+
+    pub fn sens_inplace<F: NonLinearOpSens<M = M, V = M::V, T = M::T, C = M::C>>(
+        &self,
+        op: &F,
+        x: &F::V,
+        t: F::T,
+        y: &mut F::M,
+    ) {
+        let mut v = self.scratch_v.borrow_mut();
+        let mut col = self.scratch_col.borrow_mut();
+        for c in 0..self.dst_indices_per_color.len() {
+            let input = &self.input_indices_per_color[c];
+            let dst_indices = &self.dst_indices_per_color[c];
+            let src_indices = &self.src_indices_per_color[c];
+            v.assign_at_indices(input, F::T::one());
+            op.sens_mul_inplace(x, t, &v, &mut col);
             y.set_data_with_indices(dst_indices, src_indices, &col);
             v.assign_at_indices(input, F::T::zero());
         }

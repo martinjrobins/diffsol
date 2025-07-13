@@ -117,9 +117,9 @@ mod tests {
                                 error.squared_norm(&sens_point.state, atol, rtol).sqrt();
                             assert!(
                                 error_norm < M::T::from(29.0),
-                                "error_norm: {} at t = {}",
-                                error_norm,
-                                point.t
+                                "error_norm: {error_norm} at t = {}, sens index: {j}. soln: {sens_soln:?}, expected: {:?}",
+                                point.t,
+                                sens_point.state
                             );
                         }
                     }

@@ -175,7 +175,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         ($name:ident, $solver:ident, $linear_solver:ident, $matrix:ty) => {
             #[cfg(feature = "diffsl-llvm")]
             c.bench_function(stringify!($name), |b| {
-                use diffsol::ode_solver::test_models::robertson::*;
+                use diffsol::ode_equations::test_models::robertson::*;
                 use diffsol::LlvmModule;
                 let (problem, soln) = robertson_diffsl_problem::<$matrix, LlvmModule>();
                 b.iter(|| {

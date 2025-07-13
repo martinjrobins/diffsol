@@ -1,10 +1,10 @@
-use num_traits::Zero;
+use num_traits::{One, Zero};
 use std::cell::RefCell;
 
 use crate::{
     op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, ConstantOp, ConstantOpSens,
     Matrix, NonLinearOp, NonLinearOpSens, OdeEquations, OdeEquationsImplicitSens, OdeEquationsRef,
-    OdeSolverProblem, Op, Vector,
+    OdeEquationsSens, OdeSolverProblem, Op, Vector,
 };
 
 pub struct SensInit<'a, Eqn>
@@ -12,35 +12,30 @@ where
     Eqn: OdeEquations,
 {
     eqn: &'a Eqn,
-    init_sens: Eqn::M,
     index: usize,
+    tmp: Eqn::V,
+    t0: Eqn::T,
 }
 
 impl<'a, Eqn> SensInit<'a, Eqn>
 where
     Eqn: OdeEquationsImplicitSens,
 {
-    pub fn new(eqn: &'a Eqn) -> Self {
-        let nstates = eqn.rhs().nstates();
-        let nparams = eqn.rhs().nparams();
-        let init_sens = Eqn::M::new_from_sparsity(
-            nstates,
-            nparams,
-            eqn.init().sens_sparsity(),
-            eqn.context().clone(),
-        );
+    pub fn new(eqn: &'a Eqn, t0: Eqn::T) -> Self {
         let index = 0;
+        let nparams = eqn.rhs().nparams();
+        let tmp = Eqn::V::zeros(nparams, eqn.context().clone());
         Self {
+            tmp,
             eqn,
-            init_sens,
             index,
+            t0,
         }
     }
-    pub fn update_state(&mut self, t: Eqn::T) {
-        self.eqn.init().sens_inplace(t, &mut self.init_sens);
-    }
     pub fn set_param_index(&mut self, index: usize) {
+        self.tmp.set_index(self.index, Eqn::T::zero());
         self.index = index;
+        self.tmp.set_index(self.index, Eqn::T::one());
     }
 }
 
@@ -69,11 +64,10 @@ where
 
 impl<Eqn> ConstantOp for SensInit<'_, Eqn>
 where
-    Eqn: OdeEquations,
+    Eqn: OdeEquationsSens,
 {
     fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
-        y.fill(Eqn::T::zero());
-        self.init_sens.add_column_to_vector(self.index, y);
+        self.eqn.init().sens_mul_inplace(self.t0, &self.tmp, y);
     }
 }
 
@@ -227,7 +221,7 @@ where
         Self {
             eqn: self.eqn,
             rhs: SensRhs::new(self.eqn, false),
-            init: SensInit::new(self.eqn),
+            init: SensInit::new(self.eqn, self.init.t0),
             rtol: self.rtol,
             atol: self.atol,
         }
@@ -252,7 +246,7 @@ where
         let rtol = problem.sens_rtol;
         let atol = problem.sens_atol.as_ref();
         let rhs = SensRhs::new(eqn, true);
-        let init = SensInit::new(eqn);
+        let init = SensInit::new(eqn, problem.t0);
         Self {
             rhs,
             init,
@@ -349,9 +343,6 @@ impl<Eqn: OdeEquationsImplicitSens> AugmentedOdeEquations<Eqn> for SensEquations
     }
     fn update_rhs_out_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T) {
         self.rhs.update_state(y, dy, t);
-    }
-    fn update_init_state(&mut self, t: Eqn::T) {
-        self.init.update_state(t);
     }
     fn set_index(&mut self, index: usize) {
         self.rhs.set_param_index(index);

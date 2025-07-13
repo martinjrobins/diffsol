@@ -1415,12 +1415,12 @@ mod test {
         number_of_linear_solver_setups: 13
         number_of_steps: 48
         number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 234
+        number_of_nonlinear_solver_iterations: 272
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.statistics(), @r###"
         number_of_calls: 89
-        number_of_jac_muls: 151
+        number_of_jac_muls: 189
         number_of_matrix_evals: 1
         number_of_jac_adj_muls: 0
         "###);
@@ -1430,19 +1430,27 @@ mod test {
     #[test]
     fn bdf_test_nalgebra_exponential_decay_diffsl_sens() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem_diffsl;
-        let (_problem, mut soln) = exponential_decay_problem_sens::<M>(false);
-        let (problem, _soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(false);
-        soln.atol = problem.atol.clone();
-        soln.rtol = problem.rtol;
+        let (problem, soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(false);
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 13
         number_of_steps: 48
         number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 234
+        number_of_nonlinear_solver_iterations: 272
         number_of_nonlinear_solver_fails: 0
         "###);
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn bdf_test_faer_sparse_exponential_decay_diffsl_sens() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem_diffsl;
+        type M = FaerSparseMat<f64>;
+        type LS = FaerSparseLU<f64>;
+        let (problem, soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(false);
+        let mut s = problem.bdf_sens::<LS>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, true);
     }
 
     #[test]
@@ -1491,6 +1499,23 @@ mod test {
     #[test]
     fn bdf_test_nalgebra_exponential_decay_adjoint_diffsl() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem_diffsl;
+        let (mut problem, soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(true);
+        let final_time = soln.solution_points.last().unwrap().t;
+        let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
+        let mut s = problem.bdf::<LS>().unwrap();
+        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdu.ncols()))
+            .unwrap();
+        test_adjoint(adjoint_solver, dgdu);
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn bdf_test_faer_sparse_exponential_decay_adjoint_diffsl() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem_diffsl;
+        type M = FaerSparseMat<f64>;
+        type LS = FaerSparseLU<f64>;
         let (mut problem, soln) = exponential_decay_problem_diffsl::<M, diffsl::LlvmModule>(true);
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
@@ -1925,7 +1950,7 @@ mod test {
                 let diff = error
                     .squared_norm(old_soln, &problem.atol, problem.rtol)
                     .sqrt();
-                assert!(diff > 1.0e-6, "diff: {}", diff);
+                assert!(diff > 1.0e-6, "diff: {diff}");
             }
             old_soln = Some(ys.column(ys.ncols() - 1).into_owned());
         }
