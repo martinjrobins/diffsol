@@ -495,14 +495,14 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 7
-        number_of_steps: 53
+        number_of_steps: 55
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 530
+        number_of_nonlinear_solver_iterations: 660
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 214
-        number_of_jac_muls: 324
+        number_of_calls: 222
+        number_of_jac_muls: 446
         number_of_matrix_evals: 2
         number_of_jac_adj_muls: 0
         "###);
@@ -555,14 +555,14 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 5
-        number_of_steps: 20
+        number_of_steps: 21
         number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 358
+        number_of_nonlinear_solver_iterations: 442
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 135
-        number_of_jac_muls: 229
+        number_of_calls: 140
+        number_of_jac_muls: 308
         number_of_matrix_evals: 1
         number_of_jac_adj_muls: 0
         "###);
@@ -770,7 +770,7 @@ mod test {
                 let diff = error
                     .squared_norm(old_soln, &problem.atol, problem.rtol)
                     .sqrt();
-                assert!(diff > 1.0e-6, "diff: {}", diff);
+                assert!(diff > 1.0e-6, "diff: {diff}");
             }
             old_soln = Some(ys.column(ys.ncols() - 1).into_owned());
         }

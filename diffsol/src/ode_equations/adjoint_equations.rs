@@ -645,8 +645,6 @@ where
 
     fn update_rhs_out_state(&mut self, _y: &Eqn::V, _dy: &Eqn::V, _t: Eqn::T) {}
 
-    fn update_init_state(&mut self, _t: <Eqn as Op>::T) {}
-
     fn integrate_main_eqn(&self) -> bool {
         false
     }

@@ -8,7 +8,7 @@ use diffsl::{
 };
 
 use crate::{
-    error::DiffsolError, find_jacobian_non_zeros, find_matrix_non_zeros,
+    error::DiffsolError, find_jacobian_non_zeros, find_matrix_non_zeros, find_sens_non_zeros,
     jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
     op::nonlinear_op::NonLinearOpJacobian, ConstantOp, ConstantOpSens, ConstantOpSensAdjoint,
     LinearOp, LinearOpTranspose, Matrix, MatrixHost, NonLinearOp, NonLinearOpAdjoint,
@@ -153,6 +153,10 @@ pub struct DiffSl<M: Matrix<T = T>, CG: CodegenModule> {
     rhs_coloring: Option<JacobianColoring<M>>,
     rhs_adjoint_sparsity: Option<M::Sparsity>,
     rhs_adjoint_coloring: Option<JacobianColoring<M>>,
+    rhs_sens_sparsity: Option<M::Sparsity>,
+    rhs_sens_coloring: Option<JacobianColoring<M>>,
+    rhs_sens_adjoint_sparsity: Option<M::Sparsity>,
+    rhs_sens_adjoint_coloring: Option<JacobianColoring<M>>,
 }
 
 impl<M: MatrixHost<T = T>, CG: CodegenModuleJit + CodegenModuleCompile> DiffSl<M, CG> {
@@ -171,18 +175,24 @@ impl<M: MatrixHost<T = T>, CG: CodegenModuleJit + CodegenModuleCompile> DiffSl<M
             rhs_sparsity: None,
             rhs_adjoint_coloring: None,
             rhs_adjoint_sparsity: None,
+            rhs_sens_coloring: None,
+            rhs_sens_sparsity: None,
+            rhs_sens_adjoint_coloring: None,
+            rhs_sens_adjoint_sparsity: None,
         };
         if M::is_sparse() {
             let op = ret.rhs();
             let ctx = op.context().clone();
             let t0 = 0.0;
             let x0 = M::V::zeros(op.nstates(), op.context().clone());
-            let non_zeros = find_jacobian_non_zeros(&op, &x0, t0);
             let n = op.nstates();
+            let nparams = op.nparams();
+
+            let non_zeros = find_jacobian_non_zeros(&op, &x0, t0);
 
             let sparsity = M::Sparsity::try_from_indices(n, n, non_zeros.clone())
                 .expect("invalid sparsity pattern");
-            let coloring = JacobianColoring::new(&sparsity, &non_zeros, op.context().clone());
+            let coloring = JacobianColoring::new(&sparsity, &non_zeros, ctx.clone());
             ret.rhs_coloring = Some(coloring);
             ret.rhs_sparsity = Some(sparsity);
 
@@ -192,9 +202,30 @@ impl<M: MatrixHost<T = T>, CG: CodegenModuleJit + CodegenModuleCompile> DiffSl<M
                 .collect::<Vec<_>>();
             let sparsity = M::Sparsity::try_from_indices(n, n, non_zeros.clone())
                 .expect("invalid sparsity pattern");
-            let coloring = JacobianColoring::new(&sparsity, &non_zeros, ctx);
+            let coloring = JacobianColoring::new(&sparsity, &non_zeros, ctx.clone());
             ret.rhs_adjoint_sparsity = Some(sparsity);
             ret.rhs_adjoint_coloring = Some(coloring);
+
+            if nparams > 0 {
+                let op = ret.rhs();
+                let non_zeros = find_sens_non_zeros(&op, &x0, t0);
+
+                let sparsity = M::Sparsity::try_from_indices(n, nparams, non_zeros.clone())
+                    .expect("invalid sparsity pattern");
+                let coloring = JacobianColoring::new(&sparsity, &non_zeros, ctx.clone());
+                ret.rhs_sens_coloring = Some(coloring);
+                ret.rhs_sens_sparsity = Some(sparsity);
+
+                let non_zeros = non_zeros
+                    .into_iter()
+                    .map(|(i, j)| (j, i))
+                    .collect::<Vec<_>>();
+                let sparsity = M::Sparsity::try_from_indices(nparams, n, non_zeros.clone())
+                    .expect("invalid sparsity pattern");
+                let coloring = JacobianColoring::new(&sparsity, &non_zeros, ctx.clone());
+                ret.rhs_sens_adjoint_sparsity = Some(sparsity);
+                ret.rhs_sens_adjoint_coloring = Some(coloring);
+            }
 
             if let Some(op) = ret.mass() {
                 let ctx = op.context().clone();
@@ -564,6 +595,16 @@ impl<M: MatrixHost<T = T>, CG: CodegenModule> NonLinearOpSens for DiffSlRhs<'_, 
             y.as_mut_slice(),
         );
     }
+    fn sens_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        if let Some(coloring) = &self.0.rhs_sens_coloring {
+            coloring.jacobian_inplace(self, x, t, y);
+        } else {
+            self._default_sens_inplace(x, t, y);
+        }
+    }
+    fn sens_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        self.0.rhs_sens_sparsity.clone()
+    }
 }
 
 impl<M: MatrixHost<T = T>, CG: CodegenModule> NonLinearOpSensAdjoint for DiffSlRhs<'_, M, CG> {
@@ -590,6 +631,16 @@ impl<M: MatrixHost<T = T>, CG: CodegenModule> NonLinearOpSensAdjoint for DiffSlR
         );
         // negate y
         y.mul_assign(Scale(-1.0));
+    }
+    fn sens_adjoint_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        if let Some(coloring) = &self.0.rhs_sens_adjoint_coloring {
+            coloring.jacobian_inplace(self, x, t, y);
+        } else {
+            self._default_adjoint_inplace(x, t, y);
+        }
+    }
+    fn sens_adjoint_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        self.0.rhs_sens_adjoint_sparsity.clone()
     }
 }
 

@@ -42,7 +42,6 @@ pub trait AugmentedOdeEquations<Eqn: OdeEquations>:
     OdeEquations<T = Eqn::T, V = Eqn::V, M = Eqn::M, C = Eqn::C> + Clone
 {
     fn update_rhs_out_state(&mut self, y: &Eqn::V, dy: &Eqn::V, t: Eqn::T);
-    fn update_init_state(&mut self, t: Eqn::T);
     fn set_index(&mut self, index: usize);
     fn max_index(&self) -> usize;
     fn include_in_error_control(&self) -> bool;
@@ -145,9 +144,6 @@ impl<Eqn: OdeEquations> OdeEquations for NoAug<Eqn> {
 
 impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
     fn update_rhs_out_state(&mut self, _y: &Eqn::V, _dy: &Eqn::V, _t: Eqn::T) {
-        panic!("This should never be called")
-    }
-    fn update_init_state(&mut self, _t: Eqn::T) {
         panic!("This should never be called")
     }
     fn set_index(&mut self, _index: usize) {
@@ -347,6 +343,22 @@ impl<T> OdeEquationsStoch for T where
     T: OdeEquations<
         Rhs: NonLinearOp<M = T::M, V = T::V, T = T::T, C = T::C>
                  + StochOp<M = T::M, V = T::V, T = T::T, C = T::C>,
+    >
+{
+}
+
+pub trait OdeEquationsSens:
+    OdeEquations<
+    Rhs: NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Init: ConstantOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+>
+{
+}
+
+impl<T> OdeEquationsSens for T where
+    T: OdeEquations<
+        Rhs: NonLinearOpSens<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Init: ConstantOpSens<M = T::M, V = T::V, T = T::T, C = T::C>,
     >
 {
 }
