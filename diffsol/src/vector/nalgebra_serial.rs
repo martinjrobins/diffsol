@@ -31,6 +31,15 @@ pub struct NalgebraVecMut<'a, T: Scalar> {
     pub(crate) context: NalgebraContext,
 }
 
+impl<T: Scalar> From<DVector<T>> for NalgebraVec<T> {
+    fn from(data: DVector<T>) -> Self {
+        Self {
+            data,
+            context: NalgebraContext,
+        }
+    }
+}
+
 impl<T: Scalar> DefaultDenseMatrix for NalgebraVec<T> {
     type M = NalgebraMat<T>;
 }
@@ -395,5 +404,12 @@ mod tests {
         let slice = [1.0, 2.0, 3.0];
         let v = NalgebraVec::from_slice(&slice, Default::default());
         assert_eq!(v.clone_as_vec(), slice);
+    }
+
+    #[test]
+    fn test_into() {
+        let vec = DVector::from_vec(vec![1.0, 2.0, 3.0]);
+        let v: NalgebraVec<f64> = vec.into();
+        assert_eq!(v.clone_as_vec(), vec![1.0, 2.0, 3.0]);
     }
 }
