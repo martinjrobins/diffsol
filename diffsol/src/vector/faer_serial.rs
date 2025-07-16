@@ -34,6 +34,15 @@ pub struct FaerVecMut<'a, T: Scalar> {
     pub(crate) context: FaerContext,
 }
 
+impl<T: Scalar> From<Col<T>> for FaerVec<T> {
+    fn from(data: Col<T>) -> Self {
+        Self {
+            data,
+            context: FaerContext::default(),
+        }
+    }
+}
+
 impl<T: Scalar> DefaultDenseMatrix for FaerVec<T> {
     type M = FaerMat<T>;
 }
@@ -423,5 +432,12 @@ mod tests {
         let slice = [1.0, 2.0, 3.0];
         let v = FaerVec::from_slice(&slice, Default::default());
         assert_eq!(v.clone_as_vec(), slice);
+    }
+
+    #[test]
+    fn test_into() {
+        let col: Col<f64> = Col::from_fn(3, |i| (i + 1) as f64);
+        let v: FaerVec<f64> = col.into();
+        assert_eq!(v.clone_as_vec(), vec![1.0, 2.0, 3.0]);
     }
 }
