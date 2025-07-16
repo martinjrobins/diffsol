@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, Criterion};
 use diffsol::{
-    ode_solver::test_models::{
+    ode_equations::test_models::{
         exponential_decay::exponential_decay_problem, foodweb::foodweb_problem,
         heat2d::head2d_problem, robertson::robertson, robertson_ode::robertson_ode,
     },
@@ -298,7 +298,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         ($name:ident, $solver:ident, $linear_solver:ident, $matrix:ty, $($N:expr),+) => {
             $(#[cfg(feature = "diffsl-llvm")]
             c.bench_function(concat!(stringify!($name), "_", $N), |b| {
-                use diffsol::ode_solver::test_models::heat2d::*;
+                use diffsol::ode_equations::test_models::heat2d::*;
                 use diffsol::LlvmModule;
                 let (problem, soln) = heat2d_diffsl_problem::<$matrix, LlvmModule, $N>();
                 b.iter(|| {
@@ -360,7 +360,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         ($name:ident, $solver:ident, $linear_solver:ident, $matrix:ty, $($N:expr),+) => {
             $(#[cfg(feature = "diffsl-llvm")]
             c.bench_function(concat!(stringify!($name), "_", $N), |b| {
-                use diffsol::ode_solver::test_models::foodweb::*;
+                use diffsol::ode_equations::test_models::foodweb::*;
                 use diffsol::LlvmModule;
                 let (problem, soln) = foodweb_diffsl_problem::<$matrix, LlvmModule, $N>();
                 b.iter(|| {
