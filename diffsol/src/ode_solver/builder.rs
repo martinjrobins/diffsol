@@ -938,7 +938,12 @@ where
     where
         M: Matrix<V: crate::VectorHost, T = f64>,
     {
-        let eqn = crate::DiffSl::compile(code, self.ctx.clone())?;
+        #[cfg(feature = "diffsl-cranelift")]
+        let include_sensitivities = M::is_sparse()
+            && std::any::TypeId::of::<CG>() != std::any::TypeId::of::<diffsl::CraneliftJitModule>();
+        #[cfg(not(feature = "diffsl-cranelift"))]
+        let include_sensitivities = M::is_sparse();
+        let eqn = crate::DiffSl::compile(code, self.ctx.clone(), include_sensitivities)?;
         // if the user hasn't set the parameters, resize them to match the number of parameters in the equations
         let nparams = eqn.rhs().nparams();
         if self.p.len() != nparams && self.p.is_empty() {

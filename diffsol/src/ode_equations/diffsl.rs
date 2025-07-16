@@ -160,11 +160,15 @@ pub struct DiffSl<M: Matrix<T = T>, CG: CodegenModule> {
 }
 
 impl<M: MatrixHost<T = T>, CG: CodegenModuleJit + CodegenModuleCompile> DiffSl<M, CG> {
-    pub fn compile(code: &str, ctx: M::C) -> Result<Self, DiffsolError> {
+    pub fn compile(
+        code: &str,
+        ctx: M::C,
+        include_sensitivities: bool,
+    ) -> Result<Self, DiffsolError> {
         let context = DiffSlContext::<M, CG>::new(code, 1, ctx)?;
-        Ok(Self::from_context(context))
+        Ok(Self::from_context(context, include_sensitivities))
     }
-    pub fn from_context(context: DiffSlContext<M, CG>) -> Self {
+    pub fn from_context(context: DiffSlContext<M, CG>, include_sensitivities: bool) -> Self {
         let mut ret = Self {
             context,
             mass_coloring: None,
@@ -206,7 +210,7 @@ impl<M: MatrixHost<T = T>, CG: CodegenModuleJit + CodegenModuleCompile> DiffSl<M
             ret.rhs_adjoint_sparsity = Some(sparsity);
             ret.rhs_adjoint_coloring = Some(coloring);
 
-            if nparams > 0 {
+            if nparams > 0 && include_sensitivities {
                 let op = ret.rhs();
                 let non_zeros = find_sens_non_zeros(&op, &x0, t0);
 
@@ -783,9 +787,9 @@ mod tests {
     use diffsl::execution::module::{CodegenModuleCompile, CodegenModuleJit};
 
     use crate::{
-        matrix::dense_nalgebra_serial::NalgebraMat, ConstantOp, Context, DenseMatrix, LinearOp,
-        NalgebraContext, NalgebraLU, NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations,
-        OdeSolverMethod, Vector, VectorView,
+        matrix::MatrixRef, ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix,
+        LinearOp, Matrix, NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations,
+        OdeSolverMethod, Vector, VectorHost, VectorRef, VectorView,
     };
 
     use super::{DiffSl, DiffSlContext};
@@ -793,16 +797,35 @@ mod tests {
     #[cfg(feature = "diffsl-cranelift")]
     #[test]
     fn diffsl_logistic_growth_cranelift() {
-        diffsl_logistic_growth::<diffsl::CraneliftJitModule>();
+        diffsl_logistic_growth::<crate::NalgebraMat<f64>, diffsl::CraneliftJitModule>();
+    }
+
+    #[cfg(feature = "diffsl-cranelift")]
+    #[test]
+    fn diffsl_logistic_growth_cranelift_sparse() {
+        diffsl_logistic_growth::<crate::FaerSparseMat<f64>, diffsl::CraneliftJitModule>();
     }
 
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn diffsl_logistic_growth_llvm() {
-        diffsl_logistic_growth::<diffsl::LlvmModule>();
+        diffsl_logistic_growth::<crate::NalgebraMat<f64>, diffsl::LlvmModule>();
     }
 
-    fn diffsl_logistic_growth<CG: CodegenModuleJit + CodegenModuleCompile>() {
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn diffsl_logistic_growth_llvm_sparse() {
+        diffsl_logistic_growth::<crate::FaerSparseMat<f64>, diffsl::LlvmModule>();
+    }
+
+    fn diffsl_logistic_growth<
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T = f64> + DefaultSolver,
+        CG: CodegenModuleJit + CodegenModuleCompile,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
         let text = "
             in = [r, k]
             r { 1 }
@@ -831,10 +854,10 @@ mod tests {
 
         let k = 1.0;
         let r = 1.0;
-        let ctx = NalgebraContext;
-        let context = DiffSlContext::<NalgebraMat<f64>, CG>::new(text, 1, ctx.clone()).unwrap();
+        let ctx = M::C::default();
+        let context = DiffSlContext::<M, CG>::new(text, 1, ctx.clone()).unwrap();
         let p = ctx.vector_from_vec(vec![r, k]);
-        let mut eqn = DiffSl::from_context(context);
+        let mut eqn = DiffSl::from_context(context, false);
         eqn.set_params(&p);
 
         // test that the initial values look ok
@@ -856,11 +879,11 @@ mod tests {
         mass_y.assert_eq_st(&mass_y_expect, 1e-10);
 
         // solver a bit and check the state and output
-        let problem = OdeBuilder::<NalgebraMat<f64>>::new()
+        let problem = OdeBuilder::<M>::new()
             .p([r, k])
             .build_from_eqn(eqn)
             .unwrap();
-        let mut solver = problem.bdf::<NalgebraLU<f64>>().unwrap();
+        let mut solver = problem.bdf::<<M as DefaultSolver>::LS>().unwrap();
         let t = 1.0;
         let (ys, ts) = solver.solve(t).unwrap();
         for (i, t) in ts.iter().enumerate() {
@@ -872,7 +895,7 @@ mod tests {
 
         // do it again with some explicit t_evals
         let t_evals = vec![0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0];
-        let mut solver = problem.bdf::<NalgebraLU<f64>>().unwrap();
+        let mut solver = problem.bdf::<<M as DefaultSolver>::LS>().unwrap();
         let ys = solver.solve_dense(&t_evals).unwrap();
         for (i, t) in t_evals.iter().enumerate() {
             let y_expect = k / (1.0 + (k - y0) * (-r * t).exp() / y0);
