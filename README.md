@@ -50,7 +50,7 @@ All solvers feature:
 
 Diffsol is designed to be easy to use from higher-level languages like Python or R. I'd prefer not to split my focus away from the core library, so I'm looking for developers who would like to lead the development of these wrappers. If you're interested, please get in touch.
 
-- [x] Python (e.g. using [PyO3](https://pyo3.rs/v0.24.0/)). https://github.com/alexallmont/py-diffsol.
+- [x] Python (e.g. using [PyO3](https://pyo3.rs/v0.24.0/)). <https://github.com/alexallmont/pydiffsol>.
 - [ ] Python ML frameworks (e.g. [JAX](https://docs.jax.dev/en/latest/ffi.html), [PyTorch](https://pytorch.org/tutorials/advanced/cpp_extension.html))
 - [ ] R (e.g. using [extendr](https://extendr.github.io/)).
 - [ ] Julia
