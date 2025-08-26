@@ -1,14 +1,7 @@
 [workspace]
-members = [
-  "diffsol",
-  "examples/*",
-]
-default-members = [
-  "diffsol",
-]
-exclude = [
-  "book",
-]
+members = ["diffsol", "examples/*"]
+default-members = ["diffsol"]
+exclude = ["book"]
 resolver = "2"
 
 [workspace.package]
@@ -20,7 +13,7 @@ repository = "https://github.com/martinjrobins/diffsol"
 
 [workspace.dependencies]
 nalgebra = "0.33.2"
-faer = "0.22.6"
+faer = "0.21.9"
 cudarc = { version = "0.16.4", default-features = false }
 
 plotly = { version = "0.12.1" }
