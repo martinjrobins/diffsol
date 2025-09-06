@@ -12,6 +12,7 @@ env:
   RUSTFLAGS: -D warnings -A unused-imports
   RUSTDOCFLAGS: -D warnings
   RUST_BACKTRACE: full
+  LLVM_VERSION: "17"
 
 jobs:
   rustfmt:
@@ -112,9 +113,14 @@ jobs:
       run: rustc -Vv
     - name: Install LLVM and Clang
       uses: KyleMayes/install-llvm-action@v2
-      if : (matrix.os == 'ubuntu-latest' || matrix.os == 'macos-13' || matrix.os == 'macos-latest') && matrix.book == false
+      if : (matrix.os == 'ubuntu-latest' || matrix.os == 'macos-latest') && matrix.book == false
       with:
-        version: "17.0"
+        version: ${{ env.LLVM_VERSION }}
+    - name: Install LLVM for macOS Intel (Homebrew)
+      if: matrix.os == 'macos-13' && matrix.book == false
+      run: |
+        brew install llvm@${{ env.LLVM_VERSION }}
+        echo /usr/local/opt/llvm@${{ env.LLVM_VERSION }}/bin >> $GITHUB_PATH
     - name: Set features variable and install dependencies (Ubuntu)
       if: matrix.os == 'ubuntu-latest' && matrix.book == false
       run: |
