@@ -12,7 +12,7 @@ authors = ["Martin Robinson <martinjrobins@gmail.com>"]
 repository = "https://github.com/martinjrobins/diffsol"
 
 [workspace.dependencies]
-nalgebra = "0.33.2"
+nalgebra = "0.34.0"
 faer = "0.21.9"
 cudarc = { version = "0.16.4", default-features = false }
 
