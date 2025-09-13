@@ -172,7 +172,7 @@ where
 
     /// Get the current order of accuracy of the solver (e.g. explict euler method is first-order)
     fn order(&self) -> usize;
-
+    
     /// Using the provided state, solve the problem up to time `final_time`
     /// Returns a Vec of solution values at timepoints chosen by the solver.
     /// After the solver has finished, the internal state of the solver is at time `final_time`.

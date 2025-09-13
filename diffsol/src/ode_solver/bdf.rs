@@ -198,6 +198,10 @@ where
         mut nonlinear_solver: Nls,
         integrate_main_eqn: bool,
     ) -> Result<Self, DiffsolError> {
+        // check that there isn't any diffusion term
+        if problem.eqn.stoch().is_some() {
+            return Err(DiffsolError::from(OdeSolverError::StochNotSupported));
+        }
         // kappa values for difference orders, taken from Table 1 of [1]
         let kappa = [
             Eqn::T::from(0.0),

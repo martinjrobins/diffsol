@@ -4,6 +4,7 @@ pub mod bdf_state;
 pub mod builder;
 pub mod checkpointing;
 pub mod explicit_rk;
+pub mod explicit_sde_rk;
 pub mod jacobian_update;
 pub mod method;
 pub mod problem;

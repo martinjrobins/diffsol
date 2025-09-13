@@ -212,7 +212,7 @@ where
         }
         Ok(ret)
     }
-
+    
     pub(crate) fn check_explicit_rk(
         problem: &'a OdeSolverProblem<Eqn>,
         tableau: &Tableau<M>,

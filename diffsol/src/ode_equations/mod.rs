@@ -197,6 +197,7 @@ pub trait OdeEquationsRef<'a, ImplicitBounds: Sealed = Bounds<&'a Self>>: Op {
     type Root: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
     type Init: ConstantOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
     type Out: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
+    type Stoch: StochOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
 }
 
 impl<'a, T: OdeEquationsRef<'a>> OdeEquationsRef<'a> for &T {
@@ -205,6 +206,7 @@ impl<'a, T: OdeEquationsRef<'a>> OdeEquationsRef<'a> for &T {
     type Root = <T as OdeEquationsRef<'a>>::Root;
     type Init = <T as OdeEquationsRef<'a>>::Init;
     type Out = <T as OdeEquationsRef<'a>>::Out;
+    type Stoch = <T as OdeEquationsRef<'a>>::Stoch;
 }
 
 // seal the trait so that users must use the provided default type for ImplicitBounds
@@ -235,7 +237,9 @@ pub trait OdeEquations: for<'a> OdeEquationsRef<'a> {
     fn rhs(&self) -> <Self as OdeEquationsRef<'_>>::Rhs;
 
     /// returns the mass matrix `M` as a [LinearOp]
-    fn mass(&self) -> Option<<Self as OdeEquationsRef<'_>>::Mass>;
+    fn mass(&self) -> Option<<Self as OdeEquationsRef<'_>>::Mass> {
+        None
+    }
 
     /// returns the root function `G(t, y)` as a [NonLinearOp]
     fn root(&self) -> Option<<Self as OdeEquationsRef<'_>>::Root> {
@@ -244,6 +248,10 @@ pub trait OdeEquations: for<'a> OdeEquationsRef<'a> {
 
     /// returns the output function `H(t, y)` as a [NonLinearOp]
     fn out(&self) -> Option<<Self as OdeEquationsRef<'_>>::Out> {
+        None
+    }
+
+    fn stoch(&self) -> Option<<Self as OdeEquationsRef<'_>>::Stoch> {
         None
     }
 
@@ -307,7 +315,11 @@ impl<T: OdeEquations> OdeEquations for &'_ T {
     fn out(&self) -> Option<<Self as OdeEquationsRef<'_>>::Out> {
         (*self).out()
     }
-
+    
+    fn stoch(&self) -> Option<<Self as OdeEquationsRef<'_>>::Stoch> {
+        (*self).stoch()
+    }
+    
     fn init(&self) -> <Self as OdeEquationsRef<'_>>::Init {
         (*self).init()
     }
@@ -328,22 +340,6 @@ pub trait OdeEquationsImplicit:
 
 impl<T> OdeEquationsImplicit for T where
     T: OdeEquations<Rhs: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>>
-{
-}
-
-pub trait OdeEquationsStoch:
-    OdeEquations<
-    Rhs: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
-             + StochOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
->
-{
-}
-
-impl<T> OdeEquationsStoch for T where
-    T: OdeEquations<
-        Rhs: NonLinearOp<M = T::M, V = T::V, T = T::T, C = T::C>
-                 + StochOp<M = T::M, V = T::V, T = T::T, C = T::C>,
-    >
 {
 }
 
