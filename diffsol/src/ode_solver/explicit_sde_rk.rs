@@ -64,7 +64,7 @@ where
         state: RkState<Eqn::V>,
         tableau: Tableau<M>,
     ) -> Result<Self, DiffsolError> {
-        Rk::<Eqn, M>::check_explicit_rk(problem, &tableau)?;
+        Rk::<Eqn, M>::check_explicit_sde_rk(problem, &tableau)?;
         Ok(Self {
             rk: Rk::new(problem, state, tableau)?,
             augmented_eqn: None,
@@ -77,7 +77,7 @@ where
         tableau: Tableau<M>,
         augmented_eqn: AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
-        Rk::<Eqn, M>::check_explicit_rk(problem, &tableau)?;
+        Rk::<Eqn, M>::check_explicit_sde_rk(problem, &tableau)?;
         Ok(Self {
             rk: Rk::new_augmented(problem, state, tableau, &augmented_eqn)?,
             augmented_eqn: Some(augmented_eqn),

@@ -20,13 +20,30 @@ use num_traits::{One, Zero};
 /// where `be` is the embedded method for error control and `d` is the difference between the main and embedded method.
 ///
 /// For continous extension methods, the beta matrix is also included.
+/// 
+/// For SDE method, there can be multiple `a`, `c', and 'd' blocks, the options are:
+/// - Single `a`, `c` and `d` block (standard deterministic RK method)
+/// - 2 `a`, 1 `c` and 2 `d` blocks (stochastic e.g. Rößler SRA1 method)
+/// - 4 `a`, 2 `c` and 4 `d` blocks (stochastic e.g. Rößler SRIW1 method)
+///
+/// 
+/// ---------------------
+/// c_0 |  a_0  |  a_1  |
+/// ---------------------
+/// c_1 |  a_2  |  b_3  |
+/// -----------------------------
+///     |  b    |  d_0  |  d_1  |
+///     -------------------------
+///             |  d_2  |  d_3  |
+///             -----------------
+/// 
 ///
 #[derive(Clone)]
 pub struct Tableau<M: DenseMatrix> {
-    a: M,
+    a:  Vec<M>,
     b: M::V,
-    c: M::V,
-    d: M::V,
+    c: Vec<M::V>,
+    d: Vec<M::V>,
     order: usize,
     beta: Option<M>,
 }
@@ -92,7 +109,7 @@ impl<M: DenseMatrix> Tableau<M> {
 
         let order = 2;
 
-        Self::new(a, b, c, d, order, Some(beta))
+        Self::new(vec![a], b, vec![c], vec![d], order, Some(beta))
     }
 
     /// A third order ESDIRK method
@@ -153,7 +170,7 @@ impl<M: DenseMatrix> Tableau<M> {
             ctx.clone(),
         );
 
-        Self::new(a, b, c, d, 3, None)
+        Self::new(vec![a], b, vec![c], vec![d], 3, None)
     }
 
     pub fn tsit45(ctx: M::C) -> Self {
@@ -297,15 +314,84 @@ impl<M: DenseMatrix> Tableau<M> {
         );
 
         let order = 4;
-        Self::new(a, b, c, d, order, Some(beta))
+        Self::new(vec![a], b, vec![c], vec![d], order, Some(beta))
+    }
+    
+    /// Rößler SRIW1 method
+    /// from Rößler, A. (2010). Runge–Kutta methods for the strong approximation of solutions of stochastic differential equations. SIAM Journal on Numerical Analysis, 48(3), 922-952.
+    pub fn robler_sriw1(ctx: M::C) -> Self {
+        let a = vec![
+            M::from_vec(4, 4, 
+                vec![
+                    M::T::zero(), M::T::from(3.0/4.0), M::T::zero(), M::T::zero(),
+                    M::T::zero(), M::T::zero(), M::T::zero(), M::T::zero(),
+                    M::T::zero(), M::T::zero(), M::T::zero(), M::T::zero(),
+                    M::T::zero(), M::T::zero(), M::T::zero(), M::T::zero(),
+                ], ctx.clone()),
+            
+            M::from_vec(4, 4, 
+                vec![
+                    M::T::zero(), M::T::from(3.0/2.0), M::T::zero(), M::T::zero(),
+                    M::T::zero(), M::T::zero(), M::T::zero(), M::T::zero(),
+                    M::T::zero(), M::T::zero(), M::T::zero(), M::T::zero(),
+                    M::T::zero(), M::T::zero(), M::T::zero(), M::T::zero(),
+                ], ctx.clone()),
+            M::from_vec(4, 4, 
+                vec![
+                    M::T::zero(), M::T::from(1.0/4.0), M::T::one(), M::T::zero(),
+                    M::T::zero(), M::T::zero(), M::T::zero(), M::T::zero(),
+                    M::T::zero(), M::T::zero(), M::T::zero(), M::T::from(1.0/4.0),
+                    M::T::zero(), M::T::zero(), M::T::zero(), M::T::zero(),
+                ], ctx.clone()),
+            M::from_vec(4, 4, 
+                vec![
+                    M::T::zero(), M::T::from(1.0/2.0), M::T::from(-1.0), M::T::from(-5.0),
+                    M::T::zero(), M::T::zero(), M::T::zero(), M::T::from(3.0),
+                    M::T::zero(), M::T::zero(), M::T::zero(), M::T::from(1.0/2.0),
+                    M::T::zero(), M::T::zero(), M::T::zero(), M::T::zero(),
+                ], ctx.clone()),
+        ];
+        let c = vec![
+            M::V::from_vec(vec![M::T::zero(), M::T::from(3.0/4.0), M::T::zero(), M::T::zero()], ctx.clone()),
+            M::V::from_vec(vec![M::T::zero(), M::T::from(1.0/4.0), M::T::one(), M::T::from(1.0/4.0)], ctx.clone()),
+        ];
+        let b = M::V::from_vec(vec![M::T::from(1.0/3.0), M::T::from(2.0/3.0), M::T::zero(), M::T::zero()], ctx.clone());
+        let d = vec![
+            M::V::from_vec(vec![M::T::from(-1.0), M::T::from(4.0/3.0), M::T::from(2.0/3.0), M::T::zero()], ctx.clone()),
+            M::V::from_vec(vec![M::T::from(-1.0), M::T::from(4.0/3.0), M::T::from(-1.0/3.0), M::T::zero()], ctx.clone()),
+            M::V::from_vec(vec![M::T::from(2.0), M::T::from(-4.0/3.0), M::T::from(-2.0/3.0), M::T::zero()], ctx.clone()),
+            M::V::from_vec(vec![M::T::from(-2.0), M::T::from(5.0/3.0), M::T::from(-2.0/3.0), M::T::one()], ctx.clone()),
+        ];
+
+        let order = 2;
+
+        Self::new(a, b, c, d, order, None)
     }
 
     pub fn new(a: M, b: M::V, c: M::V, d: M::V, order: usize, beta: Option<M>) -> Self {
         let s = c.len();
-        assert_eq!(a.ncols(), s, "Invalid number of rows in a, expected {s}");
-        assert_eq!(a.nrows(), s, "Invalid number of columns in a, expected {s}",);
+        // length of a should be 1, 2 or 4
+        assert!(a.len() == 1 || a.len() == 2 || a.len() == 4, "Invalid length of a, expected 1, 2 or 4");
+        // length of c should be 1 or 2
+        assert!(c.len() == 1 || c.len() == 2, "Invalid length of c, expected 1 or 2");
+        // length of d should be 1, 2 or 4
+        assert!(d.len() == 1 || d.len() == 2 || d.len() == 4, "Invalid length of d, expected 1, 2 or 4");
+        let expected_c_len = if a.len() == 1 { 1 } else { a.len() / 2 };
+        assert_eq!(c.len(), expected_c_len, "Invalid length of c, expected {expected_c_len}");
+        let expected_d_len = a.len();
+        assert_eq!(d.len(), expected_d_len, "Invalid length of d, expected {expected_d_len}");
+        for a_i in &a {
+            assert_eq!(a_i.ncols(), s, "Invalid number of columns in a_i, expected {s}");
+            assert_eq!(a_i.nrows(), s, "Invalid number of rows in a_i, expected {s}");
+        }
         assert_eq!(b.len(), s, "Invalid number of elements in b, expected {s}",);
-        assert_eq!(c.len(), s, "Invalid number of elements in c, expected {s}",);
+        for d_i in &d {
+            assert_eq!(d_i.ncols(), s, "Invalid number of columns in d_i, expected {s}");
+            assert_eq!(d_i.nrows(), s, "Invalid number of rows in d_i, expected {s}");
+        }
+        for c_i in &c {
+            assert_eq!(c_i.len(), s, "Invalid number of elements in c_i, expected {s}");
+        }
         if let Some(beta) = &beta {
             assert_eq!(
                 beta.nrows(),
@@ -331,20 +417,20 @@ impl<M: DenseMatrix> Tableau<M> {
         self.c.len()
     }
 
-    pub fn a(&self) -> &M {
-        &self.a
+    pub fn a(&self) -> &[M] {
+        self.a.as_slice()
     }
 
     pub fn b(&self) -> &M::V {
         &self.b
     }
 
-    pub fn c(&self) -> &M::V {
-        &self.c
+    pub fn c(&self) -> &[M::V] {
+        self.c.as_slice()
     }
 
-    pub fn d(&self) -> &M::V {
-        &self.d
+    pub fn d(&self) -> &[M::V] {
+        self.d.as_slice()
     }
 
     pub fn beta(&self) -> Option<&M> {

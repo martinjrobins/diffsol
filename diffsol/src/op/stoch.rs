@@ -1,10 +1,8 @@
 use super::Op;
-use crate::{Scalar, Vector};
+use crate::{DefaultDenseMatrix, Scalar, Vector};
 use num_traits::{One, Zero};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StochOpKind {
-    Zero,
+enum StochOpKind {
     Scalar,
     Diagonal,
     Additive,
@@ -12,56 +10,20 @@ pub enum StochOpKind {
 }
 
 /// Stochastic differential equation (SDE) operations.
+/// 
+/// In general, this operator computes `F(x, t)`, where `F` is a matrix of size `nstates() x nprocess()`.
+/// The matrix `F` is computed by the [Self::call_inplace] method, which returns a dense matrix `y`.
+/// The `kind` method returns the type of stochastic operation, either `Scalar`, `Diagonal`, `Additive`, or `Other`,
+/// and the `kind` determines how `y` is interpreted.
 ///
-/// For scalar noise, nprocess is 1.
-/// For diagonal noise, y_i only depends on x_i and d_w_i.
-/// For additive noise, y_i does not depend on x_i.
+/// For scalar noise, `y` is a matrix with one column, and the noise is applied as `y * dW`, where `dW` is a scalar Wiener increment.
+/// For diagonal noise, `y` is a matrix with one column, which is interpreted as the diagonal of the matrix `F(x, t)`. The noise is applied as `F * dW`, where `dW` is a vector of independent Wiener increments.
+/// For additive noise, `y` is a full matrix with `nprocess()` columns that does not depend on `x`, and the noise is applied as `F * dW`, where `dW` is a vector of Wiener increments.
+/// Diffsol does not support other types of noise, but the `Other` kind is provided for completeness.
 pub trait StochOp: Op {
+    fn kind(&self) -> StochOpKind;
     fn nprocess(&self) -> usize;
-    fn process_inplace(&self, x: &Self::V, d_w: &Self::V, t: Self::T, y: &mut [Self::V]);
-    fn kind(&self) -> StochOpKind {
-        if self.nprocess() == 0 {
-            return StochOpKind::Zero;
-        }
-        if self.nprocess() == 1 {
-            return StochOpKind::Scalar;
-        }
-        let mut y = vec![Self::V::zeros(self.nout(), self.context().clone()); self.nprocess()];
-        let mut x = Self::V::zeros(self.nstates(), self.context().clone());
-        x.fill(Self::T::NAN);
-        let mut d_w = Self::V::zeros(self.nprocess(), self.context().clone());
-        d_w.fill(Self::T::one());
-        let t = Self::T::zero();
-        self.process_inplace(&x, &d_w, t, &mut y);
-        // if none of the outputs has nans, it is additive
-        if y.iter()
-            .all(|y_j| !y_j.clone_as_vec().iter().any(|&val| val.is_nan()))
-        {
-            return StochOpKind::Additive;
-        }
-
-        x.fill(Self::T::one());
-
-        for i in 0..self.nprocess() {
-            if i != 0 {
-                d_w.set_index(i - 1, Self::T::one());
-            }
-            d_w.set_index(i, Self::T::NAN);
-            self.process_inplace(&x, &d_w, t, &mut y);
-
-            // if any of the y[j] j != i has nans, it is other
-            for (j, y_j) in y.iter().enumerate() {
-                if j != i {
-                    let has_nans = y_j.clone_as_vec().iter().any(|&val| val.is_nan());
-                    if has_nans {
-                        return StochOpKind::Other;
-                    }
-                }
-            }
-        }
-        // must be diagonal
-        StochOpKind::Diagonal
-    }
+    fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut <Self::V as DefaultDenseMatrix>::M) where Self::V: DefaultDenseMatrix;
 }
 
 #[cfg(test)]

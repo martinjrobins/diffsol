@@ -190,7 +190,7 @@ pub use ode_equations::{
     sens_equations::SensInit, sens_equations::SensRhs, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, NoAug, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit,
     OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeEquationsRef, OdeEquationsSens,
-    OdeEquationsStoch, OdeSolverEquations,
+    OdeSolverEquations,
 };
 use ode_solver::jacobian_update::JacobianUpdate;
 pub use ode_solver::sde::SdeSolverMethod;
@@ -201,6 +201,7 @@ pub use ode_solver::{
     method::AugmentedOdeSolverMethod, method::OdeSolverMethod, method::OdeSolverStopReason,
     problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::RkState,
     sensitivities::SensitivitiesOdeSolverMethod, state::OdeSolverState, tableau::Tableau,
+    tableau_sde::TableauSde,
 };
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};

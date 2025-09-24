@@ -9,7 +9,6 @@ pub mod jacobian_update;
 pub mod method;
 pub mod problem;
 pub mod runge_kutta;
-pub mod sde;
 pub mod sdirk;
 pub mod sdirk_state;
 pub mod sensitivities;
