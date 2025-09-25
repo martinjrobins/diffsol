@@ -9,6 +9,7 @@ use crate::OdeEquationsImplicit;
 use crate::OdeSolverStopReason;
 use crate::RkState;
 use crate::RootFinder;
+use crate::StochEnum;
 use crate::StochOpKind;
 use crate::Tableau;
 use crate::{
@@ -51,7 +52,7 @@ where
     gdiff: M,
     old_state: RkState<Eqn::V>,
     is_state_mutated: bool,
-    stoch_eval: <Eqn::V as DefaultDenseMatrix>::M,
+    stoch_dy: Option<Eqn::V>,
     stoch_y: Option<Eqn::V>,
 
     error: Option<Eqn::V>,
@@ -85,7 +86,7 @@ where
             out_error: self.out_error.clone(),
             sens_error: self.sens_error.clone(),
             sens_out_error: self.sens_out_error.clone(),
-            stoch_eval: self.stoch_eval.clone(),
+            stoch_dy: self.stoch_dy.clone(),
         }
     }
 }
@@ -122,11 +123,6 @@ where
         let nstates = state.y.len();
         let order = tableau.s();
         let ctx = problem.context();
-        let (nprocess, kind) = if let Some(stoch) = problem.eqn.stoch() {
-            (stoch.nprocess(), stoch.kind())
-        } else {
-            (0, StochOpKind::Other)
-        };
 
         let s = tableau.s();
         let mut a_rows = Vec::with_capacity(tableau.a().len());
@@ -150,17 +146,26 @@ where
         } else {
             None
         };
-        let n_stoch_diff = match kind {
-            StochOpKind::Scalar | StochOpKind::Diagonal => 1,
-            StochOpKind::Additive => nprocess,
-            StochOpKind::Other => 0,
+        let n_stoch_diff = match problem.eqn.stoch() {
+            StochEnum::Scalar(_) => 1,
+            StochEnum::Diagonal(_) => 2,
+            StochEnum::Additive(_) => 0,
+            StochEnum::None => 0,
         };
-        let stoch_y = match kind {
-            StochOpKind::Scalar | StochOpKind::Diagonal => Some(Eqn::V::zeros(nstates, ctx.clone())),
+        let stoch_y = match problem.eqn.stoch() {
+            StochEnum::Scalar(_) | StochEnum::Diagonal(_) => 
+                Some(Eqn::V::zeros(nstates, ctx.clone())),
             _ => None,
+        };
+        let stoch_dy = match problem.eqn.stoch() {
+            StochEnum::Scalar(_) | StochEnum::Diagonal(_) => 
+                Some(Eqn::V::zeros(nstates, ctx.clone())),
+            _ => None,
+        };
+        let mut diff = vec![M::zeros(nstates, order, ctx.clone()); 1 + n_stoch_diff];
+        if let StochEnum::Additive(op) = problem.eqn.stoch() {
+            diff.push(M::zeros(op.nstates(), order, ctx.clone()));
         }
-        let stoch_eval = StochOpKind::Scalar => <Eqn::V as DefaultDenseMatrix>::M::zeros(nstates, n_stoch_diff, ctx.clone());
-        let diff = vec![M::zeros(nstates, order, ctx.clone()); 1 + n_stoch_diff];
         let gdiff_rows = if problem.integrate_out {
             problem.eqn.out().unwrap().nout()
         } else {
@@ -191,7 +196,7 @@ where
             root_finder,
             tstop: None,
             is_state_mutated: false,
-            stoch_eval,
+            stoch_dy,
             stoch_y,
             diff,
             gdiff,
@@ -484,21 +489,30 @@ where
                 .axpy(h, &self.state.dy, );
 
             // for stochastic methods
-            if let Some(stoch) = self.problem.eqn.stoch() {
-                stoch.call_inplace(&self.old_state.y, self.old_state.t, &mut self.stoch_eval);
-                match stoch.kind() {
-                    StochOpKind::Scalar | StochOpKind::Diagonal => {
-                        self.diff[1].column_mut(0).copy_from_view(&self.stoch_eval.column(0));
-                    },
-                    StochOpKind::Additive => {
-                        for i in 0..stoch.nprocess() {
-                            self.diff[1 + i].column_mut(0).copy_from_view(&self.stoch_eval.column(i));
-                        }
-                    },
-                    StochOpKind::Other => unreachable!("other not supported here"),
-                }
-            }
-                
+            match self.problem.eqn.stoch() {
+                StochEnum::Scalar(op) => {
+                    let stoch_dy = self.stoch_dy.as_mut().unwrap();
+                    op.call_inplace(&self.old_state.y, self.old_state.t, stoch_dy);
+                    self.diff[1].column_mut(0).copy_from(stoch_dy);
+                },
+                StochEnum::Diagonal(op) => {
+                    let stoch_dy = self.stoch_dy.as_mut().unwrap();
+                    op.call_inplace(&self.old_state.y, self.old_state.t, stoch_dy);
+                    self.diff[1].column_mut(0).copy_from(stoch_dy);
+                    stoch_dy.component_mul_assign(int2_dW);
+                    self.diff[2].column_mut(0).copy_from(stoch_dy);
+                },
+                StochEnum::Additive(op) => {
+                    for a in self.a_rows[1][0].iter() {
+
+                    }
+                    let stoch_dy = self.stoch_dy.as_mut().unwrap();
+                    op.call_inplace(self.old_state.t, stoch_dy);
+                    self.diff[1].column_mut(0).copy_from(stoch_dy);
+                },
+                _ => (),
+            };
+                    
             // sensitivities too
             if augmented_eqn.is_some() {
                 for (sdiff, ds) in self.sdiff.iter_mut().zip(self.state.ds.iter()) {
@@ -548,43 +562,14 @@ where
             self.diff
                 .column_mut(i)
                 .axpy(h, &self.old_state.dy, Eqn::T::zero());
-            
-            if let Some(stoch) = self.problem.eqn.stoch() {
-                match stoch.kind() {
-                    StochOpKind::Scalar => {
-                        self.diff[1].columns(0, i).gemv_o(
-                            int2_dW[0] / h,
-                            &self.a_rows[1][i],
-                            Eqn::T::one(),
-                            &mut self.old_state.y,
-                        );
-                        
-                    }
-                    StochOpKind::Diagonal => {
-                        let mut a_rows = self.a_rows[1][i].clone();
-                        a_rows.component_mul_assign(&int2_dW);
-                        self.diff[1].columns(0, i).gemv_o(
-                            Eqn::T::one() / h,
-                            &a_rows,
-                            Eqn::T::one(),
-                            &mut self.old_state.y,
-                        );
-                    },
-                    StochOpKind::Additive => {
-                        for l in 0..stoch.nprocess() {
-                            self.diff[1].columns(0, i).gemv_o(
-                                int2_dW[l] / h,
-                                &self.a_rows[1][i],
-                                Eqn::T::one(),
-                                &mut self.old_state.y,
-                            );
-                        }
-                    },
-                    StochOpKind::Other => unreachable!("other not supported here"),
-                }
-                
-                // evaluate stochastic operator
-                if let Some(stoch_y) = &mut self.stoch_y {
+            match self.problem.eqn.stoch() {
+                StochEnum::Scalar(op) => {
+                    self.diff[1].columns(0, i).gemv_o(
+                        int2_dW[0] / h,
+                        &self.a_rows[1][i],
+                        Eqn::T::one(),
+                        &mut self.old_state.y,
+                    );
                     stoch_y.copy_from(&self.old_state.y);
                     self.diff[0].columns(0, i).gemv_o(
                         Eqn::T::one(),
@@ -598,24 +583,43 @@ where
                         Eqn::T::one(),
                         &mut stoch_y,
                     );
-                    stoch.call_inplace(&stoch_y, t, &mut self.stoch_eval);
-                } else {
-                    stoch.call_inplace(&self.old_state.y, t, &mut self.stoch_eval);
+                    op.call_inplace(&stoch_y, t, &mut self.stoch_dy);
+                    self.diff[1].column_mut(i).copy_from(&self.stoch_dy);
+                    
                 }
-
-                // update diff with solved dy
-                match stoch.kind() {
-                    StochOpKind::Scalar | StochOpKind::Diagonal => {
-                        self.diff[1].column_mut(i).copy_from_view(&self.stoch_eval.column(0));
-                    },
-                    StochOpKind::Additive => {
-                        for i in 0..stoch.nprocess() {
-                            self.diff[1 + i].column_mut(i).copy_from_view(&self.stoch_eval.column(i));
-                        }
-                    },
-                    StochOpKind::Other => unreachable!("other not supported here"),
-                }
-            }
+                StochEnum::Diagonal(op) => {
+                    self.diff[2].columns(0, i).gemv_o(
+                        1 / h,
+                        &self.a_rows[1][i],
+                        Eqn::T::one(),
+                        &mut self.old_state.y,
+                    );
+                    stoch_y.copy_from(&self.old_state.y);
+                    self.diff[0].columns(0, i).gemv_o(
+                        Eqn::T::one(),
+                        &self.a_rows[2][i],
+                        Eqn::T::one(),
+                        &mut stoch_y,
+                    );
+                    self.diff[1].columns(0, i).gemv_o(
+                        h.sqrt(),
+                        &self.a_rows[3][i],
+                        Eqn::T::one(),
+                        &mut stoch_y,
+                    );
+                    op.call_inplace(&stoch_y, t, &mut self.stoch_dy);
+                    self.diff[1].column_mut(i).copy_from(&self.stoch_dy);
+                    self.stoch_dy.component_mul_inplace(&int2_dW);
+                    self.diff[2].column_mut(i).copy_from(&self.stoch_dy);
+                },
+                StochEnum::Additive(lin_op) => {
+                    for s in 0..i {
+                        lin_op.gemv_inplace(int2_dW * self.a_rows[1][s] / h, t + self.tableau.c[s], Eqn::T::one(), &mut self.old_state.y);
+                    }
+                },
+                StochEnum::None => (),
+            };
+               
 
             // calculate dg and store in gdiff
             if self.problem.integrate_out {

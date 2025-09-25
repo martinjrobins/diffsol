@@ -190,7 +190,7 @@ pub use ode_equations::{
     sens_equations::SensInit, sens_equations::SensRhs, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, NoAug, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit,
     OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeEquationsRef, OdeEquationsSens,
-    OdeSolverEquations,
+    OdeSolverEquations, StochEnum,
 };
 use ode_solver::jacobian_update::JacobianUpdate;
 pub use ode_solver::sde::SdeSolverMethod;

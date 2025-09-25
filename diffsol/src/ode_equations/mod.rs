@@ -197,7 +197,8 @@ pub trait OdeEquationsRef<'a, ImplicitBounds: Sealed = Bounds<&'a Self>>: Op {
     type Root: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
     type Init: ConstantOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
     type Out: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
-    type Stoch: StochOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
+    type Stoch: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
+    type StochAdditive: LinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
 }
 
 impl<'a, T: OdeEquationsRef<'a>> OdeEquationsRef<'a> for &T {
@@ -207,6 +208,14 @@ impl<'a, T: OdeEquationsRef<'a>> OdeEquationsRef<'a> for &T {
     type Init = <T as OdeEquationsRef<'a>>::Init;
     type Out = <T as OdeEquationsRef<'a>>::Out;
     type Stoch = <T as OdeEquationsRef<'a>>::Stoch;
+    type StochAdditive = <T as OdeEquationsRef<'a>>::StochAdditive;
+}
+
+pub enum StochEnum<A: NonLinearOp, B: LinearOp> {
+    Scalar(A),
+    Diagonal(A),
+    Additive(B),
+    None,
 }
 
 // seal the trait so that users must use the provided default type for ImplicitBounds
@@ -251,8 +260,8 @@ pub trait OdeEquations: for<'a> OdeEquationsRef<'a> {
         None
     }
 
-    fn stoch(&self) -> Option<<Self as OdeEquationsRef<'_>>::Stoch> {
-        None
+    fn stoch(&self) -> StochEnum<<Self as OdeEquationsRef<'_>>::Stoch, <Self as OdeEquationsRef<'_>>::StochAdditive> {
+        StochEnum::None
     }
 
     /// returns the initial condition, i.e. `y(t)`, where `t` is the initial time

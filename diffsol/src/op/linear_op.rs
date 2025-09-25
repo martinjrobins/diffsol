@@ -5,7 +5,7 @@ use num_traits::{One, Zero};
 /// LinearOp is a trait for linear operators (i.e. they only depend linearly on the input `x`), see [crate::NonLinearOp] for a non-linear op.
 ///
 /// An example of a linear operator is a matrix-vector product `y = A(t) * x`, where `A(t)` is a matrix.
-/// It extends the [Op] trait with methods for calling the operator via a GEMV-like operation (i.e. `y = t * A * x + beta * y`), and for computing the matrix representation of the operator.
+/// It extends the [Op] trait with methods for calling the operator via a GEMV-like operation (i.e. `y = A(t) * x + beta * y`), and for computing the matrix representation of the operator.
 pub trait LinearOp: Op {
     /// Compute the operator `y = A(t) * x` at a given state and time, the default implementation uses [Self::gemv_inplace].
     fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {

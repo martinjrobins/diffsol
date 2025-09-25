@@ -17,13 +17,13 @@ enum StochOpKind {
 /// and the `kind` determines how `y` is interpreted.
 ///
 /// For scalar noise, `y` is a matrix with one column, and the noise is applied as `y * dW`, where `dW` is a scalar Wiener increment.
-/// For diagonal noise, `y` is a matrix with one column, which is interpreted as the diagonal of the matrix `F(x, t)`. The noise is applied as `F * dW`, where `dW` is a vector of independent Wiener increments.
+/// For diagonal noise, `y` is a diagonal matrix, which is interpreted as the diagonal of the matrix `F(x, t)`. The noise is applied as `F * dW`, where `dW` is a vector of independent Wiener increments.
 /// For additive noise, `y` is a full matrix with `nprocess()` columns that does not depend on `x`, and the noise is applied as `F * dW`, where `dW` is a vector of Wiener increments.
 /// Diffsol does not support other types of noise, but the `Other` kind is provided for completeness.
 pub trait StochOp: Op {
     fn kind(&self) -> StochOpKind;
     fn nprocess(&self) -> usize;
-    fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut <Self::V as DefaultDenseMatrix>::M) where Self::V: DefaultDenseMatrix;
+    fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M);
 }
 
 #[cfg(test)]
