@@ -131,6 +131,7 @@ where
             for i in 0..s {
                 let mut row = Vec::with_capacity(i);
                 for j in 0..i {
+                    //TODO: probably could just not push if the value is 0??????
                     row.push(tableau.a().get_index(i, j));
                 }
                 a_rows_i.push(Eqn::V::from_vec(row, ctx.clone()));
@@ -565,7 +566,7 @@ where
             match self.problem.eqn.stoch() {
                 StochEnum::Scalar(op) => {
                     self.diff[1].columns(0, i).gemv_o(
-                        int2_dW[0] / h,
+                        int2_dW_div_h[0],
                         &self.a_rows[1][i],
                         Eqn::T::one(),
                         &mut self.old_state.y,
@@ -588,8 +589,8 @@ where
                     
                 }
                 StochEnum::Diagonal(op) => {
-                    self.diff[2].columns(0, i).gemv_o(
-                        1 / h,
+                    self.diff[1].columns(0, i).scaled_gemv_o(
+                        int2_dW_div_h,
                         &self.a_rows[1][i],
                         Eqn::T::one(),
                         &mut self.old_state.y,
@@ -609,12 +610,14 @@ where
                     );
                     op.call_inplace(&stoch_y, t, &mut self.stoch_dy);
                     self.diff[1].column_mut(i).copy_from(&self.stoch_dy);
-                    self.stoch_dy.component_mul_inplace(&int2_dW);
-                    self.diff[2].column_mut(i).copy_from(&self.stoch_dy);
                 },
                 StochEnum::Additive(lin_op) => {
                     for s in 0..i {
-                        lin_op.gemv_inplace(int2_dW * self.a_rows[1][s] / h, t + self.tableau.c[s], Eqn::T::one(), &mut self.old_state.y);
+                        if self.a_rows[1][i][s] != Eqn::T::zero() {
+                            // TODO: move tmp into state to avoid reallocation
+                            let tmp = int2_dw_div_h * self.a_rows[1][i][s];
+                            lin_op.gemv_inplace(tmp, t + self.tableau.c[s], Eqn::T::one(), &mut self.old_state.y);
+                        }
                     }
                 },
                 StochEnum::None => (),
