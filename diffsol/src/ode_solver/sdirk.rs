@@ -17,9 +17,9 @@ use crate::{
 use num_traits::One;
 
 use super::bdf::BdfStatistics;
+use super::config::SdirkConfig;
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
-use super::config::SdirkConfig;
 
 impl<'a, M, Eqn, LS, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
     for Sdirk<'a, Eqn, LS, M, AugEqn>
@@ -248,6 +248,14 @@ where
     pub fn get_statistics(&self) -> &BdfStatistics {
         self.rk.get_statistics()
     }
+
+    pub fn config(&self) -> &SdirkConfig<Eqn::T> {
+        &self.config
+    }
+
+    pub fn config_mut(&mut self) -> &mut SdirkConfig<Eqn::T> {
+        &mut self.config
+    }
 }
 
 impl<'a, M, Eqn, AugmentedEqn, LS> OdeSolverMethod<'a, Eqn> for Sdirk<'a, Eqn, LS, M, AugmentedEqn>
@@ -356,9 +364,12 @@ where
             let maxiter = self.convergence.max_iter() as f64;
             let niter = self.convergence.niter() as f64;
             let safety_factor = (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter);
-            let factor = self
-                .rk
-                .factor(error_norm, safety_factor, self.config.maximum_timestep_growth, self.config.minimum_timestep_shrink);
+            let factor = self.rk.factor(
+                error_norm,
+                safety_factor,
+                self.config.minimum_timestep_shrink,
+                self.config.maximum_timestep_growth,
+            );
             if error_norm < Eqn::T::one() {
                 break factor;
             }
@@ -366,7 +377,12 @@ where
             self.update_op_step_size(h);
             self.jacobian_updates(h, SolverState::ErrorTestFail);
             nattempts += 1;
-            self.rk.error_test_fail(h, nattempts, self.config.maximum_error_test_failures, self.config.minimum_timestep)?;
+            self.rk.error_test_fail(
+                h,
+                nattempts,
+                self.config.maximum_error_test_failures,
+                self.config.minimum_timestep,
+            )?;
         };
 
         // accept the step

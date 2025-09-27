@@ -8,9 +8,8 @@ use crate::OdeSolverStopReason;
 use crate::RkState;
 use crate::Tableau;
 use crate::{
-    AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverMethod,
-    OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
-    ExplicitRkConfig,
+    AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, ExplicitRkConfig, OdeEquations,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
 };
 use num_traits::One;
 
@@ -108,6 +107,14 @@ where
     pub fn get_statistics(&self) -> &BdfStatistics {
         self.rk.get_statistics()
     }
+
+    pub fn config(&self) -> &ExplicitRkConfig<Eqn::T> {
+        &self.config
+    }
+
+    pub fn config_mut(&mut self) -> &mut ExplicitRkConfig<Eqn::T> {
+        &mut self.config
+    }
 }
 
 impl<'a, Eqn, M, AugmentedEqn> OdeSolverMethod<'a, Eqn> for ExplicitRk<'a, Eqn, M, AugmentedEqn>
@@ -159,13 +166,23 @@ where
                 self.rk.do_stage(i, h, self.augmented_eqn.as_mut());
             }
             let error_norm = self.rk.error_norm(h, self.augmented_eqn.as_mut());
-            let factor = self.rk.factor(error_norm, 1.0, self.config.minimum_timestep_shrink, self.config.maximum_timestep_growth);
+            let factor = self.rk.factor(
+                error_norm,
+                1.0,
+                self.config.minimum_timestep_shrink,
+                self.config.maximum_timestep_growth,
+            );
             if error_norm < Eqn::T::one() {
                 break factor;
             }
             h *= factor;
             nattempts += 1;
-            self.rk.error_test_fail(h, nattempts, self.config.maximum_error_test_failures, self.config.minimum_timestep)?;
+            self.rk.error_test_fail(
+                h,
+                nattempts,
+                self.config.maximum_error_test_failures,
+                self.config.minimum_timestep,
+            )?;
         };
         self.rk.step_accepted(h, h * factor, false)
     }

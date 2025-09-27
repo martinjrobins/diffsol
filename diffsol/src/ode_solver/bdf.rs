@@ -13,14 +13,14 @@ use serde::Serialize;
 use crate::ode_solver_error;
 use crate::{
     matrix::MatrixRef, nonlinear_solver::root::RootFinder, op::bdf::BdfCallable, scalar::scale,
-    AugmentedOdeEquations, BdfState, DenseMatrix, JacobianUpdate, MatrixViewMut,
-    NonLinearOp, NonLinearSolver, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState, OdeSolverStopReason, Op, Scalar, Vector, VectorRef, VectorView, VectorViewMut,
+    AugmentedOdeEquations, BdfState, DenseMatrix, JacobianUpdate, MatrixViewMut, NonLinearOp,
+    NonLinearSolver, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+    OdeSolverStopReason, Op, Scalar, Vector, VectorRef, VectorView, VectorViewMut,
 };
 
+use super::config::BdfConfig;
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
-use super::config::BdfConfig;
 
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct BdfStatistics {
@@ -303,7 +303,13 @@ where
         augmented_eqn: AugmentedEqn,
         nonlinear_solver: Nls,
     ) -> Result<Self, DiffsolError> {
-        Self::new_augmented_with_config(state, problem, augmented_eqn, nonlinear_solver, BdfConfig::default())
+        Self::new_augmented_with_config(
+            state,
+            problem,
+            augmented_eqn,
+            nonlinear_solver,
+            BdfConfig::default(),
+        )
     }
 
     pub fn new_augmented_with_config(
@@ -356,6 +362,14 @@ where
 
     pub fn get_statistics(&self) -> &BdfStatistics {
         &self.statistics
+    }
+
+    pub fn config(&self) -> &BdfConfig<Eqn::T> {
+        &self.config
+    }
+
+    pub fn config_mut(&mut self) -> &mut BdfConfig<Eqn::T> {
+        &mut self.config
     }
 
     fn _compute_r(order: usize, factor: Eqn::T, ctx: M::C) -> M {

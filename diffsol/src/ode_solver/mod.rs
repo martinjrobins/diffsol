@@ -1,9 +1,9 @@
 pub mod adjoint;
 pub mod bdf;
 pub mod bdf_state;
-pub mod config;
 pub mod builder;
 pub mod checkpointing;
+pub mod config;
 pub mod explicit_rk;
 pub mod jacobian_update;
 pub mod method;

@@ -387,7 +387,13 @@ where
         Ok(self.state.h)
     }
 
-    pub(crate) fn factor(&self, error_norm: Eqn::T, safety_factor: f64, min_factor: Eqn::T, max_factor: Eqn::T) -> Eqn::T {
+    pub(crate) fn factor(
+        &self,
+        error_norm: Eqn::T,
+        safety_factor: f64,
+        min_factor: Eqn::T,
+        max_factor: Eqn::T,
+    ) -> Eqn::T {
         let safety = Eqn::T::from(0.9 * safety_factor);
         let mut factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (self.order() as f64 + 1.0)));
         if factor < min_factor {
@@ -762,7 +768,11 @@ where
         Ok(())
     }
 
-    pub(crate) fn solve_fail(&mut self, h: Eqn::T, min_timestep: Eqn::T) -> Result<(), DiffsolError> {
+    pub(crate) fn solve_fail(
+        &mut self,
+        h: Eqn::T,
+        min_timestep: Eqn::T,
+    ) -> Result<(), DiffsolError> {
         self.statistics.number_of_nonlinear_solver_fails += 1;
         // if step size too small, then fail
         if abs(h) < min_timestep {

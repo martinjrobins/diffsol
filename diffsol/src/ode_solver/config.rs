@@ -34,18 +34,6 @@ pub struct SdirkConfig<T> {
     pub maximum_newton_iterations: usize,
 }
 
-impl<T: Scalar> From<SdirkConfig<T>> for ExplicitRkConfig<T> {
-    fn from(sdirk_config: SdirkConfig<T>) -> Self {
-        Self {
-            minimum_timestep: sdirk_config.minimum_timestep,
-            maximum_error_test_failures: sdirk_config.maximum_error_test_failures,
-            maximum_timestep_growth: sdirk_config.maximum_timestep_growth,
-            minimum_timestep_shrink: sdirk_config.minimum_timestep_shrink,
-        }
-    }
-}
-
-
 impl<T: Scalar> Default for SdirkConfig<T> {
     fn default() -> Self {
         Self {
@@ -56,9 +44,7 @@ impl<T: Scalar> Default for SdirkConfig<T> {
             maximum_newton_iterations: 10,
         }
     }
-    
 }
-
 
 #[derive(Debug, Clone)]
 pub struct ExplicitRkConfig<T> {
