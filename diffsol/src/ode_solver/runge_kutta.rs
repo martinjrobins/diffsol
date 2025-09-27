@@ -1,17 +1,21 @@
 use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
+use crate::ode_solver::problem;
 use crate::op::sdirk::SdirkCallable;
+use crate::op::stoch;
 use crate::scale;
 use crate::AugmentedOdeEquationsImplicit;
 use crate::OdeEquationsImplicit;
 use crate::OdeSolverStopReason;
 use crate::RkState;
 use crate::RootFinder;
+use crate::StochEnum;
+use crate::StochOpKind;
 use crate::Tableau;
 use crate::{
     ode_solver_error, AugmentedOdeEquations, Convergence, DefaultDenseMatrix, DenseMatrix,
     MatrixView, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op,
-    Scalar, Vector, VectorViewMut,
+    Scalar, Vector, VectorViewMut, StochOp, Matrix
 };
 use num_traits::abs;
 use num_traits::One;
@@ -38,16 +42,18 @@ where
     problem: &'a OdeSolverProblem<Eqn>,
     tableau: Tableau<M>,
     state: RkState<Eqn::V>,
-    a_rows: Vec<Eqn::V>,
+    a_rows: Vec<Vec<Eqn::V>>,
     statistics: BdfStatistics,
     root_finder: Option<RootFinder<Eqn::V>>,
     tstop: Option<Eqn::T>,
-    diff: M,
+    diff: Vec<M>,
     sdiff: Vec<M>,
     sgdiff: Vec<M>,
     gdiff: M,
     old_state: RkState<Eqn::V>,
     is_state_mutated: bool,
+    stoch_dy: Option<Eqn::V>,
+    stoch_y: Option<Eqn::V>,
 
     error: Option<Eqn::V>,
     out_error: Option<Eqn::V>,
@@ -80,6 +86,7 @@ where
             out_error: self.out_error.clone(),
             sens_error: self.sens_error.clone(),
             sens_out_error: self.sens_out_error.clone(),
+            stoch_dy: self.stoch_dy.clone(),
         }
     }
 }
@@ -115,16 +122,21 @@ where
 
         let nstates = state.y.len();
         let order = tableau.s();
+        let ctx = problem.context();
 
         let s = tableau.s();
-        let mut a_rows = Vec::with_capacity(s);
-        let ctx = problem.context();
-        for i in 0..s {
-            let mut row = Vec::with_capacity(i);
-            for j in 0..i {
-                row.push(tableau.a().get_index(i, j));
+        let mut a_rows = Vec::with_capacity(tableau.a().len());
+        for a in tableau.a() {
+            let mut a_rows_i = Vec::with_capacity(s);
+            for i in 0..s {
+                let mut row = Vec::with_capacity(i);
+                for j in 0..i {
+                    //TODO: probably could just not push if the value is 0??????
+                    row.push(tableau.a().get_index(i, j));
+                }
+                a_rows_i.push(Eqn::V::from_vec(row, ctx.clone()));
             }
-            a_rows.push(Eqn::V::from_vec(row, ctx.clone()));
+            a_rows.push(a_rows_i);
         }
 
         state.set_problem(problem)?;
@@ -135,8 +147,26 @@ where
         } else {
             None
         };
-
-        let diff = M::zeros(nstates, order, ctx.clone());
+        let n_stoch_diff = match problem.eqn.stoch() {
+            StochEnum::Scalar(_) => 1,
+            StochEnum::Diagonal(_) => 2,
+            StochEnum::Additive(_) => 0,
+            StochEnum::None => 0,
+        };
+        let stoch_y = match problem.eqn.stoch() {
+            StochEnum::Scalar(_) | StochEnum::Diagonal(_) => 
+                Some(Eqn::V::zeros(nstates, ctx.clone())),
+            _ => None,
+        };
+        let stoch_dy = match problem.eqn.stoch() {
+            StochEnum::Scalar(_) | StochEnum::Diagonal(_) => 
+                Some(Eqn::V::zeros(nstates, ctx.clone())),
+            _ => None,
+        };
+        let mut diff = vec![M::zeros(nstates, order, ctx.clone()); 1 + n_stoch_diff];
+        if let StochEnum::Additive(op) = problem.eqn.stoch() {
+            diff.push(M::zeros(op.nstates(), order, ctx.clone()));
+        }
         let gdiff_rows = if problem.integrate_out {
             problem.eqn.out().unwrap().nout()
         } else {
@@ -167,6 +197,8 @@ where
             root_finder,
             tstop: None,
             is_state_mutated: false,
+            stoch_dy,
+            stoch_y,
             diff,
             gdiff,
             sdiff: vec![],
@@ -212,7 +244,35 @@ where
         }
         Ok(ret)
     }
+    
+    
+    pub(crate) fn check_explicit_sde_rk(
+        problem: &'a OdeSolverProblem<Eqn>,
+        tableau: &Tableau<M>,
+    ) -> Result<(), DiffsolError> {
+        // check that the upper triangular and diagonal parts of a are zero
+        let s = tableau.s();
+        for a in tableau.a() {
+            for i in 0..s {
+                for j in i..s {
+                    assert_eq!(
+                        a.get_index(i, j),
+                        Eqn::T::zero(),
+                        "Invalid tableau, expected a(i, j) = 0 for i >= j"
+                    );
+                }
+            }
+        }
+        // check that first c is 0
+        assert_eq!(
+            c.get_index(0),
+            Eqn::T::zero(),
+            "Invalid tableau, expected c(0) = 0"
+        );
+        Ok(())
+    }
 
+    
     pub(crate) fn check_explicit_rk(
         problem: &'a OdeSolverProblem<Eqn>,
         tableau: &Tableau<M>,
@@ -221,12 +281,21 @@ where
         if problem.eqn.mass().is_some() {
             return Err(DiffsolError::from(OdeSolverError::MassMatrixNotSupported));
         }
+        // check that there isn't any stochastic operator
+        if problem.eqn.stoch().is_some() {
+            return Err(DiffsolError::from(OdeSolverError::StochNotSupported));
+        }
+        // check that there is only one a matrix
+        assert_eq!(tableau.a().len(), 1, "Invalid tableau, expected only one a matrix");
+        let a = tableau.a()[0];
+        let c = tableau.c();
+
         // check that the upper triangular and diagonal parts of a are zero
         let s = tableau.s();
         for i in 0..s {
             for j in i..s {
                 assert_eq!(
-                    tableau.a().get_index(i, j),
+                    a.get_index(i, j),
                     Eqn::T::zero(),
                     "Invalid tableau, expected a(i, j) = 0 for i >= j"
                 );
@@ -236,7 +305,7 @@ where
         // check last row of a is the same as b
         for i in 0..s {
             assert_eq!(
-                tableau.a().get_index(s - 1, i),
+                a.get_index(s - 1, i),
                 tableau.b().get_index(i),
                 "Invalid tableau, expected a(s-1, i) = b(i)"
             );
@@ -244,14 +313,14 @@ where
 
         // check that last c is 1
         assert_eq!(
-            tableau.c().get_index(s - 1),
+            c.get_index(s - 1),
             Eqn::T::one(),
             "Invalid tableau, expected c(s-1) = 1"
         );
 
         // check that first c is 0
         assert_eq!(
-            tableau.c().get_index(0),
+            c.get_index(0),
             Eqn::T::zero(),
             "Invalid tableau, expected c(0) = 0"
         );
@@ -259,10 +328,13 @@ where
     }
 
     pub(crate) fn skip_first_stage(&self) -> bool {
-        self.tableau.a().get_index(0, 0) == Eqn::T::zero()
+        self.tableau.a()[0].get_index(0, 0) == Eqn::T::zero()
     }
 
     pub(crate) fn check_sdirk_rk(tableau: &Tableau<M>) -> Result<(), DiffsolError> {
+        // check that there is only one a matrix
+        assert_eq!(tableau.a().len(), 1, "Invalid tableau, expected only one a matrix");
+        
         // check that the upper triangular part of a is zero
         let s = tableau.s();
         for i in 0..s {
@@ -403,6 +475,7 @@ where
         }
         factor
     }
+    
 
     pub(crate) fn start_step_attempt(
         &mut self,
@@ -412,10 +485,35 @@ where
         // if start == 1, then we need to compute the first stage
         // from the last stage of the previous step
         if self.skip_first_stage() {
-            self.diff
+            self.diff[0]
                 .column_mut(0)
-                .axpy(h, &self.state.dy, Eqn::T::zero());
+                .axpy(h, &self.state.dy, );
 
+            // for stochastic methods
+            match self.problem.eqn.stoch() {
+                StochEnum::Scalar(op) => {
+                    let stoch_dy = self.stoch_dy.as_mut().unwrap();
+                    op.call_inplace(&self.old_state.y, self.old_state.t, stoch_dy);
+                    self.diff[1].column_mut(0).copy_from(stoch_dy);
+                },
+                StochEnum::Diagonal(op) => {
+                    let stoch_dy = self.stoch_dy.as_mut().unwrap();
+                    op.call_inplace(&self.old_state.y, self.old_state.t, stoch_dy);
+                    self.diff[1].column_mut(0).copy_from(stoch_dy);
+                    stoch_dy.component_mul_assign(int2_dW);
+                    self.diff[2].column_mut(0).copy_from(stoch_dy);
+                },
+                StochEnum::Additive(op) => {
+                    for a in self.a_rows[1][0].iter() {
+
+                    }
+                    let stoch_dy = self.stoch_dy.as_mut().unwrap();
+                    op.call_inplace(self.old_state.t, stoch_dy);
+                    self.diff[1].column_mut(0).copy_from(stoch_dy);
+                },
+                _ => (),
+            };
+                    
             // sensitivities too
             if augmented_eqn.is_some() {
                 for (sdiff, ds) in self.sdiff.iter_mut().zip(self.state.ds.iter()) {
@@ -450,9 +548,9 @@ where
             .unwrap_or(true);
         if integrate_main_eqn {
             self.old_state.y.copy_from(&self.state.y);
-            self.diff.columns(0, i).gemv_o(
+            self.diff[0].columns(0, i).gemv_o(
                 Eqn::T::one(),
-                &self.a_rows[i],
+                &self.a_rows[0][i],
                 Eqn::T::one(),
                 &mut self.old_state.y,
             );
@@ -465,6 +563,66 @@ where
             self.diff
                 .column_mut(i)
                 .axpy(h, &self.old_state.dy, Eqn::T::zero());
+            match self.problem.eqn.stoch() {
+                StochEnum::Scalar(op) => {
+                    self.diff[1].columns(0, i).gemv_o(
+                        int2_dW_div_h[0],
+                        &self.a_rows[1][i],
+                        Eqn::T::one(),
+                        &mut self.old_state.y,
+                    );
+                    stoch_y.copy_from(&self.old_state.y);
+                    self.diff[0].columns(0, i).gemv_o(
+                        Eqn::T::one(),
+                        &self.a_rows[2][i],
+                        Eqn::T::one(),
+                        &mut stoch_y,
+                    );
+                    self.diff[1].columns(0, i).gemv_o(
+                        h.sqrt(),
+                        &self.a_rows[3][i],
+                        Eqn::T::one(),
+                        &mut stoch_y,
+                    );
+                    op.call_inplace(&stoch_y, t, &mut self.stoch_dy);
+                    self.diff[1].column_mut(i).copy_from(&self.stoch_dy);
+                    
+                }
+                StochEnum::Diagonal(op) => {
+                    self.diff[1].columns(0, i).scaled_gemv_o(
+                        int2_dW_div_h,
+                        &self.a_rows[1][i],
+                        Eqn::T::one(),
+                        &mut self.old_state.y,
+                    );
+                    stoch_y.copy_from(&self.old_state.y);
+                    self.diff[0].columns(0, i).gemv_o(
+                        Eqn::T::one(),
+                        &self.a_rows[2][i],
+                        Eqn::T::one(),
+                        &mut stoch_y,
+                    );
+                    self.diff[1].columns(0, i).gemv_o(
+                        h.sqrt(),
+                        &self.a_rows[3][i],
+                        Eqn::T::one(),
+                        &mut stoch_y,
+                    );
+                    op.call_inplace(&stoch_y, t, &mut self.stoch_dy);
+                    self.diff[1].column_mut(i).copy_from(&self.stoch_dy);
+                },
+                StochEnum::Additive(lin_op) => {
+                    for s in 0..i {
+                        if self.a_rows[1][i][s] != Eqn::T::zero() {
+                            // TODO: move tmp into state to avoid reallocation
+                            let tmp = int2_dw_div_h * self.a_rows[1][i][s];
+                            lin_op.gemv_inplace(tmp, t + self.tableau.c[s], Eqn::T::one(), &mut self.old_state.y);
+                        }
+                    }
+                },
+                StochEnum::None => (),
+            };
+               
 
             // calculate dg and store in gdiff
             if self.problem.integrate_out {

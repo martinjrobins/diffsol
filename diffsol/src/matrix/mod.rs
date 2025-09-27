@@ -118,6 +118,8 @@ pub trait MatrixView<'a>:
     type Owned;
 
     fn into_owned(self) -> Self::Owned;
+    
+    
 
     /// Perform a matrix-vector multiplication `y = self * x + beta * y`.
     fn gemv_v(
@@ -129,6 +131,19 @@ pub trait MatrixView<'a>:
     );
 
     fn gemv_o(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V);
+    
+    /// Perform a matrix-vector multiplication that is scaled by a vector instead of a scalar `y += alpha .* self * x`.
+    fn scaled_gemv_o(
+        &self,
+        alpha: &Self::V,
+        x: &Self::V,
+        y: &mut Self::V,
+    ) {
+        let mut temp = Self::V::zeros(y.len(), self.context().clone());
+        self.gemv(Self::T::one(), x, Self::T::zero(), &mut temp);
+        temp.mul_assign(alpha);
+        y.add_assign(&temp);
+    }
 }
 
 /// A base matrix trait (including sparse and dense matrices)
@@ -153,6 +168,9 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
 
     /// Perform a matrix-vector multiplication `y = alpha * self * x + beta * y`.
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V);
+    
+    
+    
 
     /// Copy the contents of `other` into `self`
     fn copy_from(&mut self, other: &Self);

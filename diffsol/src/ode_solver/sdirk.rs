@@ -12,7 +12,7 @@ use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, DenseMatrix, JacobianUpdate,
     OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef,
-    StateRefMut,
+    StateRefMut, error::OdeSolverError
 };
 use num_traits::One;
 
@@ -135,6 +135,11 @@ where
         integrate_main_eqn: bool,
     ) -> Result<Self, DiffsolError> {
         let state = rk.state();
+
+        // check that there isn't any diffusion term
+        if problem.eqn.stoch().is_some() {
+            return Err(DiffsolError::from(OdeSolverError::StochNotSupported));
+        }
 
         // setup linear solver for first step
         let mut jacobian_update = JacobianUpdate::default();

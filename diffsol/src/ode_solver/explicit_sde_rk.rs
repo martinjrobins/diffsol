@@ -1,7 +1,6 @@
 use super::method::AugmentedOdeSolverMethod;
 use super::runge_kutta::Rk;
 use crate::error::DiffsolError;
-use crate::error::OdeSolverError;
 use crate::ode_solver::bdf::BdfStatistics;
 use crate::vector::VectorRef;
 use crate::NoAug;
@@ -14,24 +13,8 @@ use crate::{
 };
 use num_traits::One;
 
-impl<'a, Eqn, M, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
-    for ExplicitRk<'a, Eqn, M, AugEqn>
-where
-    Eqn: OdeEquations,
-    AugEqn: AugmentedOdeEquations<Eqn>,
-    M: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
-    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
-    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
-{
-    fn into_state_and_eqn(self) -> (Self::State, Option<AugEqn>) {
-        (self.rk.into_state(), self.augmented_eqn)
-    }
-    fn augmented_eqn(&self) -> Option<&AugEqn> {
-        self.augmented_eqn.as_ref()
-    }
-}
 
-/// An explicit Runge-Kutta method.
+/// An explicit Runge-Kutta method for SDEs.
 ///
 /// The particular method is defined by the [Tableau] used to create the solver.
 /// If the `beta` matrix of the [Tableau] is present this is used for interpolation, otherwise hermite interpolation is used.
@@ -39,7 +22,7 @@ where
 /// Restrictions:
 /// - The upper triangular and diagonal parts of the `a` matrix must be zero (i.e. explicit).
 /// - The last row of the `a` matrix must be the same as the `b` vector, and the last element of the `c` vector must be 1 (i.e. a stiffly accurate method)
-pub struct ExplicitRk<
+pub struct ExplicitSdeRk<
     'a,
     Eqn,
     M = <<Eqn as Op>::V as DefaultDenseMatrix>::M,
@@ -54,7 +37,7 @@ pub struct ExplicitRk<
     augmented_eqn: Option<AugmentedEqn>,
 }
 
-impl<Eqn, M, AugmentedEqn> Clone for ExplicitRk<'_, Eqn, M, AugmentedEqn>
+impl<Eqn, M, AugmentedEqn> Clone for ExplicitSdeRk<'_, Eqn, M, AugmentedEqn>
 where
     Eqn: OdeEquations,
     M: DenseMatrix<V = Eqn::V, T = Eqn::T>,
@@ -69,7 +52,7 @@ where
     }
 }
 
-impl<'a, Eqn, M, AugmentedEqn> ExplicitRk<'a, Eqn, M, AugmentedEqn>
+impl<'a, Eqn, M, AugmentedEqn> ExplicitSdeRk<'a, Eqn, M, AugmentedEqn>
 where
     Eqn: OdeEquations,
     M: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
@@ -81,11 +64,7 @@ where
         state: RkState<Eqn::V>,
         tableau: Tableau<M>,
     ) -> Result<Self, DiffsolError> {
-        Rk::<Eqn, M>::check_explicit_rk(problem, &tableau)?;
-        // check that there isn't any diffusion term
-        if problem.eqn.stoch().is_some() {
-            return Err(DiffsolError::from(OdeSolverError::StochNotSupported));
-        }
+        Rk::<Eqn, M>::check_explicit_sde_rk(problem, &tableau)?;
         Ok(Self {
             rk: Rk::new(problem, state, tableau)?,
             augmented_eqn: None,
@@ -98,11 +77,7 @@ where
         tableau: Tableau<M>,
         augmented_eqn: AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
-        Rk::<Eqn, M>::check_explicit_rk(problem, &tableau)?;
-        // check that there isn't any diffusion term
-        if problem.eqn.stoch().is_some() {
-            return Err(DiffsolError::from(OdeSolverError::StochNotSupported));
-        }
+        Rk::<Eqn, M>::check_explicit_sde_rk(problem, &tableau)?;
         Ok(Self {
             rk: Rk::new_augmented(problem, state, tableau, &augmented_eqn)?,
             augmented_eqn: Some(augmented_eqn),
@@ -114,7 +89,7 @@ where
     }
 }
 
-impl<'a, Eqn, M, AugmentedEqn> OdeSolverMethod<'a, Eqn> for ExplicitRk<'a, Eqn, M, AugmentedEqn>
+impl<'a, Eqn, M, AugmentedEqn> OdeSolverMethod<'a, Eqn> for ExplicitSdeRk<'a, Eqn, M, AugmentedEqn>
 where
     Eqn: OdeEquations,
     M: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
