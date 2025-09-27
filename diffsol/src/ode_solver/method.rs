@@ -5,8 +5,8 @@ use crate::{
     ode_solver_error,
     scalar::Scalar,
     AugmentedOdeEquations, Checkpointing, Context, DefaultDenseMatrix, DenseMatrix,
-    HermiteInterpolator, NonLinearOp, OdeEquations, OdeSolverProblem, OdeSolverState, Op, StateRef,
-    StateRefMut, Vector, VectorViewMut,
+    HermiteInterpolator, NonLinearOp, OdeEquations, OdeSolverConfig, OdeSolverProblem,
+    OdeSolverState, Op, StateRef, StateRefMut, Vector, VectorViewMut,
 };
 
 /// Utility function to write out the solution at a given timepoint
@@ -117,6 +117,7 @@ where
     Eqn: 'a,
 {
     type State: OdeSolverState<Eqn::V>;
+    type Config: OdeSolverConfig<Eqn::T>;
 
     /// Get the current problem
     fn problem(&self) -> &'a OdeSolverProblem<Eqn>;
@@ -141,6 +142,12 @@ where
     /// Note that calling this will cause the next call to `step` to perform some reinitialisation to take into
     /// account the mutated state, this could be expensive for multi-step methods.
     fn state_mut(&mut self) -> StateRefMut<'_, Eqn::V>;
+
+    /// Get a reference to the current configuration of the solver
+    fn config(&self) -> &Self::Config;
+
+    /// Get a mutable reference to the current configuration of the solver
+    fn config_mut(&mut self) -> &mut Self::Config;
 
     /// Returns the current jacobian matrix of the solver, if it has one
     /// Note that this will force a full recalculation of the Jacobian.

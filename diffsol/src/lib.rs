@@ -196,11 +196,26 @@ use ode_solver::jacobian_update::JacobianUpdate;
 pub use ode_solver::sde::SdeSolverMethod;
 pub use ode_solver::state::{StateRef, StateRefMut};
 pub use ode_solver::{
-    adjoint::AdjointOdeSolverMethod, bdf::Bdf, bdf_state::BdfState, builder::OdeBuilder,
-    checkpointing::Checkpointing, checkpointing::HermiteInterpolator, explicit_rk::ExplicitRk,
-    method::AugmentedOdeSolverMethod, method::OdeSolverMethod, method::OdeSolverStopReason,
-    problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::RkState,
-    sensitivities::SensitivitiesOdeSolverMethod, state::OdeSolverState, tableau::Tableau,
+    adjoint::AdjointOdeSolverMethod,
+    bdf::Bdf,
+    bdf_state::BdfState,
+    builder::OdeBuilder,
+    checkpointing::Checkpointing,
+    checkpointing::HermiteInterpolator,
+    config::{
+        BdfConfig, ExplicitRkConfig, OdeSolverConfig, OdeSolverConfigMut, OdeSolverConfigRef,
+        SdirkConfig,
+    },
+    explicit_rk::ExplicitRk,
+    method::AugmentedOdeSolverMethod,
+    method::OdeSolverMethod,
+    method::OdeSolverStopReason,
+    problem::OdeSolverProblem,
+    sdirk::Sdirk,
+    sdirk_state::RkState,
+    sensitivities::SensitivitiesOdeSolverMethod,
+    state::OdeSolverState,
+    tableau::Tableau,
 };
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};

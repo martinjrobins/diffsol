@@ -3,6 +3,7 @@ pub mod bdf;
 pub mod bdf_state;
 pub mod builder;
 pub mod checkpointing;
+pub mod config;
 pub mod explicit_rk;
 pub mod jacobian_update;
 pub mod method;
@@ -23,14 +24,15 @@ mod tests {
     use nalgebra::ComplexField;
 
     use super::*;
+    use crate::error::{DiffsolError, OdeSolverError};
     use crate::matrix::Matrix;
     use crate::op::unit::UnitCallable;
     use crate::op::ParameterisedOp;
     use crate::{
         op::OpStatistics, AdjointOdeSolverMethod, Context, DenseMatrix, MatrixCommon, MatrixRef,
         NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
-        OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
-        Scale, VectorRef, VectorView, VectorViewMut,
+        OdeEquationsRef, OdeSolverConfig, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+        OdeSolverStopReason, Scale, VectorRef, VectorView, VectorViewMut,
     };
     use crate::{
         ConstantOp, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp, Op, Vector,
@@ -506,6 +508,26 @@ mod tests {
         s.step().unwrap();
         assert!(s.interpolate(s.state().t).is_ok());
         assert!(s.interpolate(s.state().t + t1).is_err());
+    }
+
+    pub fn test_config<'a, Eqn: OdeEquations + 'a, Method: OdeSolverMethod<'a, Eqn>>(
+        mut s: Method,
+    ) {
+        *s.config_mut().as_base_mut().minimum_timestep = Eqn::T::from(1.0e8);
+        assert_eq!(
+            *s.config().as_base_ref().minimum_timestep,
+            Eqn::T::from(1.0e8)
+        );
+        let mut failed = false;
+        for _ in 0..10 {
+            if let Err(DiffsolError::OdeSolverError(OdeSolverError::StepSizeTooSmall { time: _ })) =
+                s.step()
+            {
+                failed = true;
+                break;
+            }
+        }
+        assert!(failed);
     }
 
     pub fn test_state_mut<'a, M: Matrix, Method: OdeSolverMethod<'a, TestEqn<M>>>(mut s: Method) {

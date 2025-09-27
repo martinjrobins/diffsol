@@ -8,8 +8,8 @@ use crate::OdeSolverStopReason;
 use crate::RkState;
 use crate::Tableau;
 use crate::{
-    AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverMethod,
-    OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
+    AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, ExplicitRkConfig, OdeEquations,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
 };
 use num_traits::One;
 
@@ -51,6 +51,7 @@ pub struct ExplicitRk<
 {
     rk: Rk<'a, Eqn, M>,
     augmented_eqn: Option<AugmentedEqn>,
+    config: ExplicitRkConfig<Eqn::T>,
 }
 
 impl<Eqn, M, AugmentedEqn> Clone for ExplicitRk<'_, Eqn, M, AugmentedEqn>
@@ -64,6 +65,7 @@ where
         Self {
             rk: self.rk.clone(),
             augmented_eqn: self.augmented_eqn.clone(),
+            config: self.config.clone(),
         }
     }
 }
@@ -84,6 +86,7 @@ where
         Ok(Self {
             rk: Rk::new(problem, state, tableau)?,
             augmented_eqn: None,
+            config: ExplicitRkConfig::default(),
         })
     }
 
@@ -97,6 +100,7 @@ where
         Ok(Self {
             rk: Rk::new_augmented(problem, state, tableau, &augmented_eqn)?,
             augmented_eqn: Some(augmented_eqn),
+            config: ExplicitRkConfig::default(),
         })
     }
 
@@ -113,6 +117,15 @@ where
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
 {
     type State = RkState<Eqn::V>;
+    type Config = ExplicitRkConfig<Eqn::T>;
+
+    fn config(&self) -> &ExplicitRkConfig<Eqn::T> {
+        &self.config
+    }
+
+    fn config_mut(&mut self) -> &mut ExplicitRkConfig<Eqn::T> {
+        &mut self.config
+    }
 
     fn problem(&self) -> &'a OdeSolverProblem<Eqn> {
         self.rk.problem()
@@ -154,13 +167,23 @@ where
                 self.rk.do_stage(i, h, self.augmented_eqn.as_mut());
             }
             let error_norm = self.rk.error_norm(h, self.augmented_eqn.as_mut());
-            let factor = self.rk.factor(error_norm, 1.0);
+            let factor = self.rk.factor(
+                error_norm,
+                1.0,
+                self.config.minimum_timestep_shrink,
+                self.config.maximum_timestep_growth,
+            );
             if error_norm < Eqn::T::one() {
                 break factor;
             }
             h *= factor;
             nattempts += 1;
-            self.rk.error_test_fail(h, nattempts)?;
+            self.rk.error_test_fail(
+                h,
+                nattempts,
+                self.config.maximum_error_test_failures,
+                self.config.minimum_timestep,
+            )?;
         };
         self.rk.step_accepted(h, h * factor, false)
     }
@@ -194,15 +217,18 @@ where
 mod test {
     use crate::{
         matrix::dense_nalgebra_serial::NalgebraMat,
-        ode_equations::test_models::exponential_decay::{
-            exponential_decay_problem, exponential_decay_problem_adjoint,
-            exponential_decay_problem_sens, exponential_decay_problem_with_root,
-            negative_exponential_decay_problem,
+        ode_equations::test_models::{
+            exponential_decay::{
+                exponential_decay_problem, exponential_decay_problem_adjoint,
+                exponential_decay_problem_sens, exponential_decay_problem_with_root,
+                negative_exponential_decay_problem,
+            },
+            robertson_ode::robertson_ode,
         },
         ode_solver::tests::{
             setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
-            test_adjoint_sum_squares, test_checkpointing, test_interpolate, test_ode_solver,
-            test_problem, test_state_mut, test_state_mut_on_problem,
+            test_adjoint_sum_squares, test_checkpointing, test_config, test_interpolate,
+            test_ode_solver, test_problem, test_state_mut, test_state_mut_on_problem,
         },
         Context, DenseMatrix, MatrixCommon, NalgebraLU, NalgebraVec, OdeEquations, OdeSolverMethod,
         Op, Vector, VectorView,
@@ -216,6 +242,10 @@ mod test {
     #[test]
     fn explicit_rk_state_mut() {
         test_state_mut(test_problem::<M>().tsit45().unwrap());
+    }
+    #[test]
+    fn explicit_rk_config() {
+        test_config(robertson_ode::<M>(false, 1).0.tsit45().unwrap());
     }
     #[test]
     fn explicit_rk_test_interpolate() {

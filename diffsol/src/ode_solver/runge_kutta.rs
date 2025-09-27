@@ -90,11 +90,6 @@ where
     M: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
 {
-    const MIN_FACTOR: f64 = 0.2;
-    const MAX_FACTOR: f64 = 10.0;
-    const MIN_TIMESTEP: f64 = 1e-13;
-    const MAX_ERROR_TEST_FAILS: usize = 40;
-
     pub(crate) fn new(
         problem: &'a OdeSolverProblem<Eqn>,
         state: RkState<Eqn::V>,
@@ -407,14 +402,20 @@ where
         Ok(self.state.h)
     }
 
-    pub(crate) fn factor(&self, error_norm: Eqn::T, safety_factor: f64) -> Eqn::T {
+    pub(crate) fn factor(
+        &self,
+        error_norm: Eqn::T,
+        safety_factor: f64,
+        min_factor: Eqn::T,
+        max_factor: Eqn::T,
+    ) -> Eqn::T {
         let safety = Eqn::T::from(0.9 * safety_factor);
         let mut factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (self.order() as f64 + 1.0)));
-        if factor < Eqn::T::from(Self::MIN_FACTOR) {
-            factor = Eqn::T::from(Self::MIN_FACTOR);
+        if factor < min_factor {
+            factor = min_factor;
         }
-        if factor > Eqn::T::from(Self::MAX_FACTOR) {
-            factor = Eqn::T::from(Self::MAX_FACTOR);
+        if factor > max_factor {
+            factor = max_factor;
         }
         factor
     }
@@ -761,10 +762,12 @@ where
         &mut self,
         h: Eqn::T,
         nattempts: usize,
+        max_error_test_fails: usize,
+        min_timestep: Eqn::T,
     ) -> Result<(), DiffsolError> {
         self.statistics.number_of_error_test_failures += 1;
         // if too many error test failures, then fail
-        if nattempts >= Self::MAX_ERROR_TEST_FAILS {
+        if nattempts >= max_error_test_fails {
             return Err(DiffsolError::from(
                 OdeSolverError::TooManyErrorTestFailures {
                     time: self.state.t.into(),
@@ -772,7 +775,7 @@ where
             ));
         }
         // if step size too small, then fail
-        if abs(h) < Eqn::T::from(Self::MIN_TIMESTEP) {
+        if abs(h) < min_timestep {
             return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
                 time: self.state.t.into(),
             }));
@@ -780,10 +783,14 @@ where
         Ok(())
     }
 
-    pub(crate) fn solve_fail(&mut self, h: Eqn::T) -> Result<(), DiffsolError> {
+    pub(crate) fn solve_fail(
+        &mut self,
+        h: Eqn::T,
+        min_timestep: Eqn::T,
+    ) -> Result<(), DiffsolError> {
         self.statistics.number_of_nonlinear_solver_fails += 1;
         // if step size too small, then fail
-        if abs(h) < Eqn::T::from(Self::MIN_TIMESTEP) {
+        if abs(h) < min_timestep {
             return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
                 time: self.state.t.into(),
             }));
