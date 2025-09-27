@@ -100,6 +100,8 @@ pub enum OdeSolverError {
     ProblemNotSet,
     #[error("Jacobian not available")]
     JacobianNotAvailable,
+    #[error("Invalid Tableau: {0}")]
+    InvalidTableau(String),
     #[error("Error: {0}")]
     Other(String),
 }
