@@ -13,13 +13,14 @@ use serde::Serialize;
 use crate::ode_solver_error;
 use crate::{
     matrix::MatrixRef, nonlinear_solver::root::RootFinder, op::bdf::BdfCallable, scalar::scale,
-    AugmentedOdeEquations, BdfState, DenseMatrix, IndexType, JacobianUpdate, MatrixViewMut,
+    AugmentedOdeEquations, BdfState, DenseMatrix, JacobianUpdate, MatrixViewMut,
     NonLinearOp, NonLinearSolver, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem,
     OdeSolverState, OdeSolverStopReason, Op, Scalar, Vector, VectorRef, VectorView, VectorViewMut,
 };
 
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
+use super::config::BdfConfig;
 
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct BdfStatistics {
@@ -110,6 +111,7 @@ pub struct Bdf<
     root_finder: Option<RootFinder<Eqn::V>>,
     is_state_modified: bool,
     jacobian_update: JacobianUpdate<Eqn::T>,
+    config: BdfConfig<Eqn::T>,
 }
 
 impl<M, Eqn, Nls, AugmentedEqn> Clone for Bdf<'_, Eqn, Nls, M, AugmentedEqn>
@@ -162,6 +164,7 @@ where
             root_finder: self.root_finder.clone(),
             is_state_modified: self.is_state_modified,
             jacobian_update: self.jacobian_update.clone(),
+            config: self.config.clone(),
         }
     }
 }
@@ -176,20 +179,12 @@ where
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
     Nls: NonLinearSolver<Eqn::M>,
 {
-    const NEWTON_MAXITER: IndexType = 4;
-    const MIN_FACTOR: f64 = 0.5;
-    const MAX_FACTOR: f64 = 2.1;
-    const MAX_THRESHOLD: f64 = 2.0;
-    const MIN_THRESHOLD: f64 = 0.9;
-    const MIN_TIMESTEP: f64 = 1e-32;
-    const MAX_ERROR_TEST_FAILS: usize = 40;
-
     pub fn new(
         problem: &'a OdeSolverProblem<Eqn>,
         state: BdfState<Eqn::V, M>,
         nonlinear_solver: Nls,
     ) -> Result<Self, DiffsolError> {
-        Self::_new(problem, state, nonlinear_solver, true)
+        Self::_new(problem, state, nonlinear_solver, true, BdfConfig::default())
     }
 
     fn _new(
@@ -197,6 +192,7 @@ where
         mut state: BdfState<Eqn::V, M>,
         mut nonlinear_solver: Nls,
         integrate_main_eqn: bool,
+        config: BdfConfig<Eqn::T>,
     ) -> Result<Self, DiffsolError> {
         // kappa values for difference orders, taken from Table 1 of [1]
         let kappa = [
@@ -226,7 +222,7 @@ where
         state.check_consistent_with_problem(problem)?;
 
         let mut convergence = Convergence::new(problem.rtol, &problem.atol);
-        convergence.set_max_iter(Self::NEWTON_MAXITER);
+        convergence.set_max_iter(config.maximum_newton_iterations);
 
         let op = if integrate_main_eqn {
             // setup linear solver for first step
@@ -297,6 +293,7 @@ where
             root_finder,
             is_state_modified,
             jacobian_update: JacobianUpdate::default(),
+            config,
         })
     }
 
@@ -306,6 +303,16 @@ where
         augmented_eqn: AugmentedEqn,
         nonlinear_solver: Nls,
     ) -> Result<Self, DiffsolError> {
+        Self::new_augmented_with_config(state, problem, augmented_eqn, nonlinear_solver, BdfConfig::default())
+    }
+
+    pub fn new_augmented_with_config(
+        state: BdfState<Eqn::V, M>,
+        problem: &'a OdeSolverProblem<Eqn>,
+        augmented_eqn: AugmentedEqn,
+        nonlinear_solver: Nls,
+        config: BdfConfig<Eqn::T>,
+    ) -> Result<Self, DiffsolError> {
         state.check_sens_consistent_with_problem(problem, &augmented_eqn)?;
 
         let mut ret = Self::_new(
@@ -313,6 +320,7 @@ where
             state,
             nonlinear_solver,
             augmented_eqn.integrate_main_eqn(),
+            config,
         )?;
 
         ret.state.set_augmented_problem(problem, &augmented_eqn)?;
@@ -456,7 +464,7 @@ where
         self.state.h = new_h;
 
         // if step size too small, then fail
-        if self.state.h.abs() < Eqn::T::from(Self::MIN_TIMESTEP) {
+        if self.state.h.abs() < self.config.minimum_timestep {
             return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
                 time: self.state.t.into(),
             }));
@@ -1126,8 +1134,8 @@ where
                 // calculate optimal step size factor as per eq 2.46 of [2]
                 // and reduce step size and try again
                 let mut factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (order as f64 + 1.0)));
-                if factor < Eqn::T::from(Self::MIN_FACTOR) {
-                    factor = Eqn::T::from(Self::MIN_FACTOR);
+                if factor < self.config.minimum_timestep_shrink {
+                    factor = self.config.minimum_timestep_shrink;
                 }
                 let new_h = self._update_step_size(factor)?;
                 self._jacobian_updates(new_h * self.alpha[order], SolverState::ErrorTestFail);
@@ -1138,7 +1146,7 @@ where
                 // update statistics
                 self.statistics.number_of_error_test_failures += 1;
                 if self.statistics.number_of_error_test_failures - old_num_error_test_failures
-                    >= Self::MAX_ERROR_TEST_FAILS
+                    >= self.config.maximum_error_test_failures
                 {
                     return Err(DiffsolError::from(
                         OdeSolverError::TooManyErrorTestFailures {
@@ -1230,14 +1238,14 @@ where
             };
 
             let mut factor = safety * factors[max_index];
-            if factor > Eqn::T::from(Self::MAX_FACTOR) {
-                factor = Eqn::T::from(Self::MAX_FACTOR);
+            if factor > self.config.maximum_timestep_growth {
+                factor = self.config.maximum_timestep_growth;
             }
-            if factor < Eqn::T::from(Self::MIN_FACTOR) {
-                factor = Eqn::T::from(Self::MIN_FACTOR);
+            if factor < self.config.minimum_timestep_shrink {
+                factor = self.config.minimum_timestep_shrink;
             }
-            if factor >= Eqn::T::from(Self::MAX_THRESHOLD)
-                || factor < Eqn::T::from(Self::MIN_THRESHOLD)
+            if factor >= self.config.minimum_timestep_growth
+                || factor < self.config.maximum_timestep_shrink
                 || max_index == 0
                 || max_index == 2
             {

@@ -19,6 +19,7 @@ use num_traits::One;
 use super::bdf::BdfStatistics;
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
+use super::config::SdirkConfig;
 
 impl<'a, M, Eqn, LS, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
     for Sdirk<'a, Eqn, LS, M, AugEqn>
@@ -67,6 +68,7 @@ pub struct Sdirk<
     op: Option<SdirkCallable<&'a Eqn>>,
     s_op: Option<SdirkCallable<AugmentedEqn>>,
     jacobian_update: JacobianUpdate<Eqn::T>,
+    config: SdirkConfig<Eqn::T>,
 }
 
 impl<M, Eqn, LS, AugmentedEqn> Clone for Sdirk<'_, Eqn, LS, M, AugmentedEqn>
@@ -97,6 +99,7 @@ where
             op,
             s_op,
             jacobian_update: self.jacobian_update.clone(),
+            config: self.config.clone(),
         }
     }
 }
@@ -109,8 +112,6 @@ where
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
 {
-    const NEWTON_MAXITER: usize = 10;
-
     fn gamma(&self) -> Eqn::T {
         self.rk.tableau().a().get_index(1, 1)
     }
@@ -123,7 +124,7 @@ where
     ) -> Result<Self, DiffsolError> {
         Rk::<Eqn, M>::check_sdirk_rk(&tableau)?;
         let rk = Rk::new(problem, state, tableau)?;
-        let mut ret = Self::_new(rk, problem, linear_solver, true)?;
+        let mut ret = Self::_new(rk, problem, linear_solver, true, SdirkConfig::default())?;
         ret.nonlinear_solver.set_problem(ret.op.as_ref().unwrap());
         Ok(ret)
     }
@@ -133,6 +134,7 @@ where
         problem: &'a OdeSolverProblem<Eqn>,
         linear_solver: LS,
         integrate_main_eqn: bool,
+        config: SdirkConfig<Eqn::T>,
     ) -> Result<Self, DiffsolError> {
         let state = rk.state();
 
@@ -145,7 +147,7 @@ where
 
         // set max iterations for nonlinear solver
         let mut convergence = Convergence::new(problem.rtol, &problem.atol);
-        convergence.set_max_iter(Self::NEWTON_MAXITER);
+        convergence.set_max_iter(config.maximum_newton_iterations);
 
         let gamma = rk.tableau().a().get_index(1, 1);
         let op = if integrate_main_eqn {
@@ -163,6 +165,7 @@ where
             op,
             s_op: None,
             jacobian_update,
+            config,
         })
     }
 
@@ -175,7 +178,7 @@ where
     ) -> Result<Self, DiffsolError> {
         Rk::<Eqn, M>::check_sdirk_rk(&tableau)?;
         let rk = Rk::new_augmented(problem, state, tableau, &augmented_eqn)?;
-        let mut ret = Self::_new(rk, problem, linear_solver, true)?;
+        let mut ret = Self::_new(rk, problem, linear_solver, true, SdirkConfig::default())?;
 
         ret.s_op = if augmented_eqn.integrate_main_eqn() {
             ret.nonlinear_solver.set_problem(ret.op.as_ref().unwrap());
@@ -341,7 +344,7 @@ where
                         self.update_op_step_size(h);
                         self.jacobian_updates(h, SolverState::SecondConvergenceFail);
                     }
-                    self.rk.solve_fail(h)?;
+                    self.rk.solve_fail(h, self.config.minimum_timestep)?;
                     // try again....
                     continue 'step;
                 }
@@ -352,9 +355,10 @@ where
 
             let maxiter = self.convergence.max_iter() as f64;
             let niter = self.convergence.niter() as f64;
+            let safety_factor = (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter);
             let factor = self
                 .rk
-                .factor(error_norm, (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter));
+                .factor(error_norm, safety_factor, self.config.maximum_timestep_growth, self.config.minimum_timestep_shrink);
             if error_norm < Eqn::T::one() {
                 break factor;
             }
@@ -362,7 +366,7 @@ where
             self.update_op_step_size(h);
             self.jacobian_updates(h, SolverState::ErrorTestFail);
             nattempts += 1;
-            self.rk.error_test_fail(h, nattempts)?;
+            self.rk.error_test_fail(h, nattempts, self.config.maximum_error_test_failures, self.config.minimum_timestep)?;
         };
 
         // accept the step

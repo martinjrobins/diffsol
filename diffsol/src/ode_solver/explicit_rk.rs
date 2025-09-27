@@ -10,6 +10,7 @@ use crate::Tableau;
 use crate::{
     AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverMethod,
     OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
+    ExplicitRkConfig,
 };
 use num_traits::One;
 
@@ -51,6 +52,7 @@ pub struct ExplicitRk<
 {
     rk: Rk<'a, Eqn, M>,
     augmented_eqn: Option<AugmentedEqn>,
+    config: ExplicitRkConfig<Eqn::T>,
 }
 
 impl<Eqn, M, AugmentedEqn> Clone for ExplicitRk<'_, Eqn, M, AugmentedEqn>
@@ -64,6 +66,7 @@ where
         Self {
             rk: self.rk.clone(),
             augmented_eqn: self.augmented_eqn.clone(),
+            config: self.config.clone(),
         }
     }
 }
@@ -84,6 +87,7 @@ where
         Ok(Self {
             rk: Rk::new(problem, state, tableau)?,
             augmented_eqn: None,
+            config: ExplicitRkConfig::default(),
         })
     }
 
@@ -97,6 +101,7 @@ where
         Ok(Self {
             rk: Rk::new_augmented(problem, state, tableau, &augmented_eqn)?,
             augmented_eqn: Some(augmented_eqn),
+            config: ExplicitRkConfig::default(),
         })
     }
 
@@ -154,13 +159,13 @@ where
                 self.rk.do_stage(i, h, self.augmented_eqn.as_mut());
             }
             let error_norm = self.rk.error_norm(h, self.augmented_eqn.as_mut());
-            let factor = self.rk.factor(error_norm, 1.0);
+            let factor = self.rk.factor(error_norm, 1.0, self.config.minimum_timestep_shrink, self.config.maximum_timestep_growth);
             if error_norm < Eqn::T::one() {
                 break factor;
             }
             h *= factor;
             nattempts += 1;
-            self.rk.error_test_fail(h, nattempts)?;
+            self.rk.error_test_fail(h, nattempts, self.config.maximum_error_test_failures, self.config.minimum_timestep)?;
         };
         self.rk.step_accepted(h, h * factor, false)
     }

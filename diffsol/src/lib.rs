@@ -201,6 +201,7 @@ pub use ode_solver::{
     method::AugmentedOdeSolverMethod, method::OdeSolverMethod, method::OdeSolverStopReason,
     problem::OdeSolverProblem, sdirk::Sdirk, sdirk_state::RkState,
     sensitivities::SensitivitiesOdeSolverMethod, state::OdeSolverState, tableau::Tableau,
+    config::{BdfConfig, SdirkConfig, ExplicitRkConfig},
 };
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};
