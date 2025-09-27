@@ -202,7 +202,10 @@ pub use ode_solver::{
     builder::OdeBuilder,
     checkpointing::Checkpointing,
     checkpointing::HermiteInterpolator,
-    config::{BdfConfig, ExplicitRkConfig, SdirkConfig},
+    config::{
+        BdfConfig, ExplicitRkConfig, OdeSolverConfig, OdeSolverConfigMut, OdeSolverConfigRef,
+        SdirkConfig,
+    },
     explicit_rk::ExplicitRk,
     method::AugmentedOdeSolverMethod,
     method::OdeSolverMethod,

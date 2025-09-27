@@ -364,14 +364,6 @@ where
         &self.statistics
     }
 
-    pub fn config(&self) -> &BdfConfig<Eqn::T> {
-        &self.config
-    }
-
-    pub fn config_mut(&mut self) -> &mut BdfConfig<Eqn::T> {
-        &mut self.config
-    }
-
     fn _compute_r(order: usize, factor: Eqn::T, ctx: M::C) -> M {
         //computes the R matrix with entries
         //given by the first equation on page 8 of [1]
@@ -882,6 +874,15 @@ where
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
     type State = BdfState<Eqn::V, M>;
+    type Config = BdfConfig<Eqn::T>;
+
+    fn config(&self) -> &BdfConfig<Eqn::T> {
+        &self.config
+    }
+
+    fn config_mut(&mut self) -> &mut BdfConfig<Eqn::T> {
+        &mut self.config
+    }
 
     fn order(&self) -> usize {
         self.state.order
@@ -1327,8 +1328,8 @@ mod test {
         },
         ode_solver::tests::{
             setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
-            test_adjoint_sum_squares, test_checkpointing, test_interpolate, test_ode_solver,
-            test_problem, test_state_mut, test_state_mut_on_problem,
+            test_adjoint_sum_squares, test_checkpointing, test_config, test_interpolate,
+            test_ode_solver, test_problem, test_state_mut, test_state_mut_on_problem,
         },
         Context, DenseMatrix, FaerLU, FaerMat, FaerSparseLU, FaerSparseMat, MatrixCommon,
         OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
@@ -1341,6 +1342,11 @@ mod test {
     #[test]
     fn bdf_state_mut() {
         test_state_mut(test_problem::<M>().bdf::<LS>().unwrap());
+    }
+
+    #[test]
+    fn bdf_config() {
+        test_config(robertson_ode::<M>(false, 1).0.bdf::<LS>().unwrap());
     }
 
     #[test]

@@ -248,14 +248,6 @@ where
     pub fn get_statistics(&self) -> &BdfStatistics {
         self.rk.get_statistics()
     }
-
-    pub fn config(&self) -> &SdirkConfig<Eqn::T> {
-        &self.config
-    }
-
-    pub fn config_mut(&mut self) -> &mut SdirkConfig<Eqn::T> {
-        &mut self.config
-    }
 }
 
 impl<'a, M, Eqn, AugmentedEqn, LS> OdeSolverMethod<'a, Eqn> for Sdirk<'a, Eqn, LS, M, AugmentedEqn>
@@ -267,6 +259,15 @@ where
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
 {
     type State = RkState<Eqn::V>;
+    type Config = SdirkConfig<Eqn::T>;
+
+    fn config(&self) -> &SdirkConfig<Eqn::T> {
+        &self.config
+    }
+
+    fn config_mut(&mut self) -> &mut SdirkConfig<Eqn::T> {
+        &mut self.config
+    }
 
     fn problem(&self) -> &'a OdeSolverProblem<Eqn> {
         self.rk.problem()
@@ -438,8 +439,8 @@ mod test {
         },
         ode_solver::tests::{
             setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
-            test_adjoint_sum_squares, test_checkpointing, test_interpolate, test_ode_solver,
-            test_problem, test_state_mut, test_state_mut_on_problem,
+            test_adjoint_sum_squares, test_checkpointing, test_config, test_interpolate,
+            test_ode_solver, test_problem, test_state_mut, test_state_mut_on_problem,
         },
         Context, DenseMatrix, FaerSparseLU, FaerSparseMat, MatrixCommon, NalgebraLU, NalgebraVec,
         OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
@@ -453,6 +454,10 @@ mod test {
     #[test]
     fn sdirk_state_mut() {
         test_state_mut(test_problem::<M>().tr_bdf2::<LS>().unwrap());
+    }
+    #[test]
+    fn sdirk_config() {
+        test_config(robertson_ode::<M>(false, 1).0.esdirk34::<LS>().unwrap());
     }
     #[test]
     fn sdirk_test_interpolate() {

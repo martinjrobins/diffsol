@@ -107,14 +107,6 @@ where
     pub fn get_statistics(&self) -> &BdfStatistics {
         self.rk.get_statistics()
     }
-
-    pub fn config(&self) -> &ExplicitRkConfig<Eqn::T> {
-        &self.config
-    }
-
-    pub fn config_mut(&mut self) -> &mut ExplicitRkConfig<Eqn::T> {
-        &mut self.config
-    }
 }
 
 impl<'a, Eqn, M, AugmentedEqn> OdeSolverMethod<'a, Eqn> for ExplicitRk<'a, Eqn, M, AugmentedEqn>
@@ -125,6 +117,15 @@ where
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
 {
     type State = RkState<Eqn::V>;
+    type Config = ExplicitRkConfig<Eqn::T>;
+
+    fn config(&self) -> &ExplicitRkConfig<Eqn::T> {
+        &self.config
+    }
+
+    fn config_mut(&mut self) -> &mut ExplicitRkConfig<Eqn::T> {
+        &mut self.config
+    }
 
     fn problem(&self) -> &'a OdeSolverProblem<Eqn> {
         self.rk.problem()
@@ -216,15 +217,18 @@ where
 mod test {
     use crate::{
         matrix::dense_nalgebra_serial::NalgebraMat,
-        ode_equations::test_models::exponential_decay::{
-            exponential_decay_problem, exponential_decay_problem_adjoint,
-            exponential_decay_problem_sens, exponential_decay_problem_with_root,
-            negative_exponential_decay_problem,
+        ode_equations::test_models::{
+            exponential_decay::{
+                exponential_decay_problem, exponential_decay_problem_adjoint,
+                exponential_decay_problem_sens, exponential_decay_problem_with_root,
+                negative_exponential_decay_problem,
+            },
+            robertson_ode::robertson_ode,
         },
         ode_solver::tests::{
             setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
-            test_adjoint_sum_squares, test_checkpointing, test_interpolate, test_ode_solver,
-            test_problem, test_state_mut, test_state_mut_on_problem,
+            test_adjoint_sum_squares, test_checkpointing, test_config, test_interpolate,
+            test_ode_solver, test_problem, test_state_mut, test_state_mut_on_problem,
         },
         Context, DenseMatrix, MatrixCommon, NalgebraLU, NalgebraVec, OdeEquations, OdeSolverMethod,
         Op, Vector, VectorView,
@@ -238,6 +242,10 @@ mod test {
     #[test]
     fn explicit_rk_state_mut() {
         test_state_mut(test_problem::<M>().tsit45().unwrap());
+    }
+    #[test]
+    fn explicit_rk_config() {
+        test_config(robertson_ode::<M>(false, 1).0.tsit45().unwrap());
     }
     #[test]
     fn explicit_rk_test_interpolate() {
