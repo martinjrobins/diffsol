@@ -325,13 +325,11 @@ where
         }
 
         // check that the first c is 0 for esdirk methods
-        if !is_sdirk {
-            if tableau.c().get_index(0) != Eqn::T::zero() {
-                return Err(ode_solver_error!(
-                    InvalidTableau,
-                    "Invalid tableau, expected c(0) = 0 for esdirk methods"
-                ));
-            }
+        if !is_sdirk && tableau.c().get_index(0) != Eqn::T::zero() {
+            return Err(ode_solver_error!(
+                InvalidTableau,
+                "Invalid tableau, expected c(0) = 0 for esdirk methods"
+            ));
         }
         Ok(())
     }
