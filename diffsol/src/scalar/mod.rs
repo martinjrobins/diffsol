@@ -9,8 +9,8 @@ pub mod cuda;
 use crate::vector::VectorView;
 pub trait Scalar:
     nalgebra::Scalar
-    + faer_traits::ComplexField
-    + faer_traits::RealField
+    + faer::traits::ComplexField
+    + faer::traits::RealField
     + nalgebra::SimdRealField
     + nalgebra::ComplexField<RealField = Self>
     + num_traits::Signed
