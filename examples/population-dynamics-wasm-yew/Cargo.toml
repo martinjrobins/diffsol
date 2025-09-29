@@ -13,3 +13,4 @@ diffsol = { path = "../../diffsol", features = [] }
 nalgebra = { workspace = true }
 yew-plotly = "0.3.0"
 web-sys = "0.3.77"
+getrandom = { version = "0.3", features = ["wasm_js"] }
