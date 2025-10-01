@@ -347,22 +347,6 @@ impl<T> OdeEquationsStoch for T where
 {
 }
 
-pub trait OdeEquationsSens:
-    OdeEquations<
-    Rhs: NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
-    Init: ConstantOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
->
-{
-}
-
-impl<T> OdeEquationsSens for T where
-    T: OdeEquations<
-        Rhs: NonLinearOpSens<M = T::M, V = T::V, T = T::T, C = T::C>,
-        Init: ConstantOpSens<M = T::M, V = T::V, T = T::T, C = T::C>,
-    >
-{
-}
-
 pub trait OdeEquationsImplicitSens:
     OdeEquationsImplicit<
     Rhs: NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
