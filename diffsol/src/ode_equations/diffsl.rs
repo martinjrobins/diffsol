@@ -37,7 +37,6 @@ pub struct DiffSlContext<M: Matrix<T = T>, CG: CodegenModule> {
     has_root: bool,
     has_out: bool,
     nout: usize,
-    nthreads: usize,
     ctx: M::C,
 }
 
@@ -100,7 +99,6 @@ impl<M: Matrix<T = T>, CG: CodegenModuleCompile + CodegenModuleJit> DiffSlContex
             has_mass,
             has_root,
             has_out,
-            nthreads,
             ctx,
         })
     }
