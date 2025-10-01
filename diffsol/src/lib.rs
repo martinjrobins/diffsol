@@ -189,8 +189,8 @@ pub use ode_equations::{
     adjoint_equations::AdjointInit, adjoint_equations::AdjointRhs, sens_equations::SensEquations,
     sens_equations::SensInit, sens_equations::SensRhs, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, NoAug, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit,
-    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeEquationsRef, OdeEquationsSens,
-    OdeEquationsStoch, OdeSolverEquations,
+    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeEquationsRef, OdeEquationsStoch,
+    OdeSolverEquations,
 };
 use ode_solver::jacobian_update::JacobianUpdate;
 pub use ode_solver::sde::SdeSolverMethod;

@@ -406,7 +406,7 @@ mod test {
         matrix::dense_nalgebra_serial::NalgebraMat,
         ode_equations::test_models::exponential_decay::{
             exponential_decay_problem, exponential_decay_problem_adjoint,
-            exponential_decay_problem_sens,
+            exponential_decay_problem_sens, exponential_decay_problem_sens_with_out,
         },
         scale, AdjointOdeSolverMethod, DenseMatrix, NalgebraLU, NalgebraVec, OdeEquations,
         OdeSolverMethod, Op, SensitivitiesOdeSolverMethod, Vector, VectorView,
@@ -480,6 +480,30 @@ mod test {
     #[test]
     fn test_dense_solve_sensitivities() {
         let (problem, soln) = exponential_decay_problem_sens::<NalgebraMat<f64>>(false);
+        let mut s = problem.bdf_sens::<NalgebraLU<f64>>().unwrap();
+
+        let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
+        let (y, sens) = s.solve_dense_sensitivities(t_eval.as_slice()).unwrap();
+        for (i, soln_pt) in soln.solution_points.iter().enumerate() {
+            let y_i = y.column(i).into_owned();
+            y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
+        }
+        for (j, soln_pts) in soln.sens_solution_points.unwrap().iter().enumerate() {
+            for (i, soln_pt) in soln_pts.iter().enumerate() {
+                let sens_i = sens[j].column(i).into_owned();
+                sens_i.assert_eq_norm(
+                    &soln_pt.state,
+                    problem.sens_atol.as_ref().unwrap(),
+                    problem.sens_rtol.unwrap(),
+                    15.0,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_dense_solve_sensitivities_with_out() {
+        let (problem, soln) = exponential_decay_problem_sens_with_out::<NalgebraMat<f64>>(false);
         let mut s = problem.bdf_sens::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();

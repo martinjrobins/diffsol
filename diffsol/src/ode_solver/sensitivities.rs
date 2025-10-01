@@ -1,8 +1,11 @@
 use crate::{
     error::DiffsolError, error::OdeSolverError, ode_solver_error, AugmentedOdeSolverMethod,
-    Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, OdeEquationsImplicitSens,
-    OdeSolverStopReason, Op, SensEquations, VectorViewMut,
+    Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, NonLinearOp, NonLinearOpJacobian,
+    NonLinearOpSens, OdeEquationsImplicitSens, OdeSolverStopReason, Op, SensEquations, Vector,
+    VectorViewMut,
 };
+use num_traits::{One, Zero};
+use std::ops::AddAssign;
 
 pub trait SensitivitiesOdeSolverMethod<'a, Eqn>:
     AugmentedOdeSolverMethod<'a, Eqn, SensEquations<'a, Eqn>>
@@ -36,7 +39,19 @@ where
                 "Cannot integrate out when solving for sensitivities"
             ));
         }
-        let nrows = self.problem().eqn.rhs().nstates();
+        let (mut tmp_nout, mut tmp_nparms, nrows) = if let Some(out) = self.problem().eqn.out() {
+            (
+                Some(Eqn::V::zeros(out.nout(), self.problem().context().clone())),
+                Some(Eqn::V::zeros(
+                    out.nparams(),
+                    self.problem().context().clone(),
+                )),
+                out.nout(),
+            )
+        } else {
+            (None, None, self.problem().eqn.rhs().nout())
+        };
+
         let mut ret = self
             .problem()
             .context()
@@ -62,10 +77,27 @@ where
                 step_reason = self.step()?;
             }
             let y = self.interpolate(*t)?;
-            ret.column_mut(i).copy_from(&y);
-            let s = self.interpolate_sens(*t)?;
-            for (j, s_j) in s.iter().enumerate() {
-                ret_sens[j].column_mut(i).copy_from(s_j);
+            let mut s = self.interpolate_sens(*t)?;
+            if let Some(out) = self.problem().eqn.out() {
+                let tmp_nout = tmp_nout.as_mut().unwrap();
+                let tmp_nparams = tmp_nparms.as_mut().unwrap();
+                out.call_inplace(&y, *t, tmp_nout);
+                ret.column_mut(i).copy_from(tmp_nout);
+                for (j, s_j) in s.iter_mut().enumerate() {
+                    // compute J * s_j + dF/dp * e_j where e_j is the jth basis vector
+                    tmp_nparams.set_index(j, Eqn::T::one());
+                    out.jac_mul_inplace(&y, *t, s_j, tmp_nout);
+                    s_j.copy_from(tmp_nout);
+                    out.sens_mul_inplace(&y, *t, tmp_nparams, tmp_nout);
+                    s_j.add_assign(&*tmp_nout);
+                    ret_sens[j].column_mut(i).copy_from(s_j);
+                    tmp_nparams.set_index(j, Eqn::T::zero());
+                }
+            } else {
+                ret.column_mut(i).copy_from(&y);
+                for (j, s_j) in s.iter().enumerate() {
+                    ret_sens[j].column_mut(i).copy_from(s_j);
+                }
             }
         }
 
@@ -74,11 +106,33 @@ where
             step_reason = self.step()?;
         }
         let y = self.state().y;
-        ret.column_mut(t_eval.len() - 1).copy_from(y);
         let s = self.state().s;
-        for (j, s_j) in s.iter().enumerate() {
-            ret_sens[j].column_mut(t_eval.len() - 1).copy_from(s_j);
+        let mut s_tmp = tmp_nout.clone();
+        let i = t_eval.len() - 1;
+        let t = t_eval.last().unwrap();
+        if let Some(out) = self.problem().eqn.out() {
+            let tmp_nout = tmp_nout.as_mut().unwrap();
+            let tmp_nparams = tmp_nparms.as_mut().unwrap();
+            let s_tmp = s_tmp.as_mut().unwrap();
+            out.call_inplace(y, *t, tmp_nout);
+            ret.column_mut(i).copy_from(tmp_nout);
+            for (j, s_j) in s.iter().enumerate() {
+                // compute J * s_j + dF/dp * e_j where e_j is the jth basis vector
+                tmp_nparams.set_index(j, Eqn::T::one());
+                out.jac_mul_inplace(y, *t, s_j, tmp_nout);
+                s_tmp.copy_from(tmp_nout);
+                out.sens_mul_inplace(y, *t, tmp_nparams, tmp_nout);
+                s_tmp.add_assign(&*tmp_nout);
+                ret_sens[j].column_mut(i).copy_from(s_tmp);
+                tmp_nparams.set_index(j, Eqn::T::zero());
+            }
+        } else {
+            ret.column_mut(i).copy_from(y);
+            for (j, s_j) in s.iter().enumerate() {
+                ret_sens[j].column_mut(i).copy_from(s_j);
+            }
         }
+
         Ok((ret, ret_sens))
     }
 }
