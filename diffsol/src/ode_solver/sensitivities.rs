@@ -1,8 +1,11 @@
 use crate::{
     error::DiffsolError, error::OdeSolverError, ode_solver_error, AugmentedOdeSolverMethod,
     Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, OdeEquationsImplicitSens,
-    OdeSolverStopReason, Op, SensEquations, VectorViewMut, NonLinearOpSens, NonLinearOp
+    OdeSolverStopReason, Op, SensEquations, VectorViewMut, NonLinearOpSens, NonLinearOp,
+    NonLinearOpJacobian, Vector
 };
+use num_traits::{One, Zero};
+use std::ops::AddAssign;
 
 pub trait SensitivitiesOdeSolverMethod<'a, Eqn>:
     AugmentedOdeSolverMethod<'a, Eqn, SensEquations<'a, Eqn>>
@@ -36,12 +39,20 @@ where
                 "Cannot integrate out when solving for sensitivities"
             ));
         }
-        let nrows = if let Some(out) = self.problem().eqn.out() {
-            out.nout()
+        let (mut tmp_nout, mut tmp_nparms, nrows) = if let Some(out) = self.problem().eqn.out() {
+            (
+                Some(Eqn::V::zeros(out.nout(), self.problem().context().clone())),
+                Some(Eqn::V::zeros(out.nparams(), self.problem().context().clone())),
+                out.nout(),
+            )
         } else {
-            self.problem().eqn.rhs().nout()
+            (
+                None,
+                None,
+                self.problem().eqn.rhs().nout(),
+            )
         };
-        
+
         let mut ret = self
             .problem()
             .context()
@@ -67,12 +78,21 @@ where
                 step_reason = self.step()?;
             }
             let y = self.interpolate(*t)?;
-            let s = self.interpolate_sens(*t)?;
+            let mut s = self.interpolate_sens(*t)?;
             if let Some(out) = self.problem().eqn.out() {
-                ret.column_mut(i).copy_from(&out.call(&y, *t));
-                for (j, s_j) in s.iter().enumerate() {
-                    let new_s_j = out.jac_mul(&y, *t, s_j) + out_sens();
-                    ret_sens[j].column_mut(i).copy_from(&out.sens_mul(&y, *t, s_j));
+                let tmp_nout = tmp_nout.as_mut().unwrap();
+                let tmp_nparams = tmp_nparms.as_mut().unwrap();
+                out.call_inplace(&y, *t, tmp_nout);
+                ret.column_mut(i).copy_from(tmp_nout);
+                for (j, s_j) in s.iter_mut().enumerate() {
+                    // compute J * s_j + dF/dp * e_j where e_j is the jth basis vector
+                    tmp_nparams.set_index(j, Eqn::T::one());
+                    out.jac_mul_inplace(&y, *t, s_j, tmp_nout);
+                    s_j.copy_from(tmp_nout);
+                    out.sens_mul_inplace(&y, *t, tmp_nparams, tmp_nout);
+                    s_j.add_assign(&*tmp_nout);
+                    ret_sens[j].column_mut(i).copy_from(s_j);
+                    tmp_nparams.set_index(j, Eqn::T::zero());
                 }
             } else {
                 ret.column_mut(i).copy_from(&y);
