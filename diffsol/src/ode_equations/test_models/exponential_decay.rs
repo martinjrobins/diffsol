@@ -464,7 +464,7 @@ pub fn exponential_decay_problem_sens_with_out<M: MatrixHost + 'static>(
             exponential_decay_out::<M>,
             exponential_decay_out_jac_mul::<M>,
             exponential_decay_out_sens::<M>,
-            2
+            2,
         )
         .build()
         .unwrap();
