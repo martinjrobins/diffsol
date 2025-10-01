@@ -1,7 +1,7 @@
 use crate::{
     error::DiffsolError, error::OdeSolverError, ode_solver_error, AugmentedOdeSolverMethod,
     Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, OdeEquationsImplicitSens,
-    OdeSolverStopReason, Op, SensEquations, VectorViewMut,
+    OdeSolverStopReason, Op, SensEquations, VectorViewMut, NonLinearOpSens, NonLinearOp
 };
 
 pub trait SensitivitiesOdeSolverMethod<'a, Eqn>:
@@ -36,7 +36,12 @@ where
                 "Cannot integrate out when solving for sensitivities"
             ));
         }
-        let nrows = self.problem().eqn.rhs().nstates();
+        let nrows = if let Some(out) = self.problem().eqn.out() {
+            out.nout()
+        } else {
+            self.problem().eqn.rhs().nout()
+        };
+        
         let mut ret = self
             .problem()
             .context()
@@ -62,10 +67,18 @@ where
                 step_reason = self.step()?;
             }
             let y = self.interpolate(*t)?;
-            ret.column_mut(i).copy_from(&y);
             let s = self.interpolate_sens(*t)?;
-            for (j, s_j) in s.iter().enumerate() {
-                ret_sens[j].column_mut(i).copy_from(s_j);
+            if let Some(out) = self.problem().eqn.out() {
+                ret.column_mut(i).copy_from(&out.call(&y, *t));
+                for (j, s_j) in s.iter().enumerate() {
+                    let new_s_j = out.jac_mul(&y, *t, s_j) + out_sens();
+                    ret_sens[j].column_mut(i).copy_from(&out.sens_mul(&y, *t, s_j));
+                }
+            } else {
+                ret.column_mut(i).copy_from(&y);
+                for (j, s_j) in s.iter().enumerate() {
+                    ret_sens[j].column_mut(i).copy_from(s_j);
+                }
             }
         }
 

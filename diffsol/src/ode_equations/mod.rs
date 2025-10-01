@@ -366,6 +366,7 @@ impl<T> OdeEquationsSens for T where
 pub trait OdeEquationsImplicitSens:
     OdeEquationsImplicit<
     Rhs: NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Out: NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
     Init: ConstantOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
 >
 {
@@ -374,6 +375,7 @@ pub trait OdeEquationsImplicitSens:
 impl<T> OdeEquationsImplicitSens for T where
     T: OdeEquationsImplicit<
         Rhs: NonLinearOpSens<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Out: NonLinearOpSens<M = T::M, V = T::V, T = T::T, C = T::C>,
         Init: ConstantOpSens<M = T::M, V = T::V, T = T::T, C = T::C>,
     >
 {

@@ -607,6 +607,50 @@ where
         }
     }
 
+    pub fn out_sens_implicit<F, G, H>(
+        self,
+        out: F,
+        out_jac: G,
+        out_sens: H,
+        nout: usize,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, ClosureWithSens<M, F, G, H>>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, Root, ClosureWithSens<M, F, G, H>> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: Some(ClosureWithSens::new(
+                out,
+                out_jac,
+                out_sens,
+                nstates,
+                nout,
+                nstates,
+                self.ctx.clone(),
+            )),
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+        }
+    }
+
     #[allow(clippy::type_complexity)]
     pub fn out_adjoint_implicit<F, G, H, I>(
         self,

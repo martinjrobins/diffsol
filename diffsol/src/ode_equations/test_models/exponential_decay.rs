@@ -125,6 +125,18 @@ fn exponential_decay_out_adj_mul<M: MatrixHost>(
 
 /// J = |0 0|
 ///     |0 0|
+fn exponential_decay_out_sens<M: MatrixHost>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+/// J = |0 0|
+///     |0 0|
 fn exponential_decay_out_sens_adj<M: MatrixHost>(
     _x: &M::V,
     _p: &M::V,
@@ -403,6 +415,53 @@ pub fn exponential_decay_problem_sens<M: MatrixHost + 'static>(
             exponential_decay_init::<M>,
             exponential_decay_init_sens::<M>,
             2,
+        )
+        .build()
+        .unwrap();
+    let p = [M::T::from(k), M::T::from(y0)];
+    let mut soln = OdeSolverSolution::default();
+    for i in 0..10 {
+        let t = M::T::from(i as f64);
+        let y0: M::V = problem.eqn.init().call(M::T::zero());
+        let y = y0.clone() * scale(M::T::exp(-p[0] * t));
+        let ypk = y0 * scale(-t * M::T::exp(-p[0] * t));
+        let ypy0 = M::V::from_vec(
+            vec![(-p[0] * t).exp(), (-p[0] * t).exp()],
+            y.context().clone(),
+        );
+        soln.push_sens(y, t, &[ypk, ypy0]);
+    }
+    (problem, soln)
+}
+
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_problem_sens_with_out<M: MatrixHost + 'static>(
+    use_coloring: bool,
+) -> (
+    OdeSolverProblem<impl OdeEquationsImplicitSens<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverSolution<M::V>,
+) {
+    let k = 0.1;
+    let y0 = 1.0;
+    let problem = OdeBuilder::<M>::new()
+        .p([k, y0])
+        .sens_rtol(1e-6)
+        .sens_atol([1e-6, 1e-6])
+        .use_coloring(use_coloring)
+        .rhs_sens_implicit(
+            exponential_decay::<M>,
+            exponential_decay_jacobian::<M>,
+            exponential_decay_sens::<M>,
+        )
+        .init_sens(
+            exponential_decay_init::<M>,
+            exponential_decay_init_sens::<M>,
+            2,
+        )
+        .out_sens_implicit(
+            exponential_decay_out::<M>,
+            exponential_decay_out_jac_mul::<M>,
+            exponential_decay_out_sens::<M>,
         )
         .build()
         .unwrap();
