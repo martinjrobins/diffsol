@@ -294,6 +294,29 @@ mod test {
         "###);
     }
 
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn test_tsit45_nalgebra_heat1d_diffsl() {
+        use crate::ode_equations::test_models::heat1d::heat1d_diffsl_problem;
+
+        let (problem, soln) = heat1d_diffsl_problem::<M, diffsl::LlvmModule, 10>();
+        let mut s = problem.tsit45().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        number_of_linear_solver_setups: 0
+        number_of_steps: 93
+        number_of_error_test_failures: 9
+        number_of_nonlinear_solver_iterations: 0
+        number_of_nonlinear_solver_fails: 0
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
+        number_of_calls: 0
+        number_of_jac_muls: 0
+        number_of_matrix_evals: 0
+        number_of_jac_adj_muls: 0
+        "###);
+    }
+
     #[cfg(feature = "cuda")]
     #[test]
     fn test_tsit45_cuda_exponential_decay() {
