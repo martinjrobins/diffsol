@@ -32,13 +32,16 @@ faer = { workspace = true }
 nalgebra-sparse = { version = "0.10", features = ["io"] }
 num-traits = "0.2.17"
 serde = { version = "1.0.219", features = ["derive"] }
-diffsl = { package = "diffsl", version = "0.5.4", optional = true, features = ["rayon"] }
+diffsl = { package = "diffsl", version = "0.5.4", optional = true, features = [
+    "rayon",
+] }
 petgraph = "0.8.1"
 suitesparse_sys = { version = "0.1.3", optional = true }
 thiserror = "2.0.12"
-faer-traits = "0.22.1"
+faer-traits = "0.23.2"
 cudarc = { workspace = true, optional = true, default-features = false, features = [
-    "cuda-version-from-build-system", "cusolver", 
+    "cuda-version-from-build-system",
+    "cusolver",
     "dynamic-linking",
     "std",
     "cublas",
@@ -64,4 +67,3 @@ harness = false
 
 [package.metadata.docs.rs]
 features = ["diffsl-llvm15", "diffsl-cranelift"]
-
