@@ -52,6 +52,14 @@ cudarc = { workspace = true, optional = true, default-features = false, features
     "nvrtc",
 ] }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+faer = { version = "0.23.2", default-features = false, features = [
+    "std",
+    "sparse-linalg",
+    "rand",
+    "npy",
+] }
+
 [dev-dependencies]
 insta = { version = "1.43.1", features = ["yaml"] }
 criterion = { version = "0.5.1" }
