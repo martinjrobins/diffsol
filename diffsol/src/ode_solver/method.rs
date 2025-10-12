@@ -9,79 +9,6 @@ use crate::{
     OdeSolverState, Op, StateRef, StateRefMut, Vector, VectorViewMut,
 };
 
-/// Utility function to write out the solution at a given timepoint
-/// This function is used by the `solve_dense` method to write out the solution at a given timepoint.
-fn dense_write_out<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
-    s: &S,
-    y_out: &mut <Eqn::V as DefaultDenseMatrix>::M,
-    t_eval: &[Eqn::T],
-    i: usize,
-) -> Result<(), DiffsolError>
-where
-    Eqn::V: DefaultDenseMatrix,
-{
-    let mut y_out = y_out.column_mut(i);
-    let t = t_eval[i];
-    if s.problem().integrate_out {
-        let g = s.interpolate_out(t)?;
-        y_out.copy_from(&g);
-    } else {
-        let y = s.interpolate(t)?;
-        match s.problem().eqn.out() {
-            Some(out) => y_out.copy_from(&out.call(&y, t_eval[i])),
-            None => y_out.copy_from(&y),
-        }
-    }
-    Ok(())
-}
-
-/// utility function to write out the solution at a given timepoint
-/// This function is used by the `solve` method to write out the solution at a given timepoint.
-fn write_out<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
-    s: &S,
-    ret_y: &mut Vec<Eqn::V>,
-    ret_t: &mut Vec<Eqn::T>,
-) {
-    let t = s.state().t;
-    let y = s.state().y;
-    ret_t.push(t);
-    match s.problem().eqn.out() {
-        Some(out) => {
-            if s.problem().integrate_out {
-                ret_y.push(s.state().g.clone());
-            } else {
-                ret_y.push(out.call(y, t));
-            }
-        }
-        None => ret_y.push(y.clone()),
-    }
-}
-
-fn dense_allocate_return<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
-    s: &S,
-    t_eval: &[Eqn::T],
-) -> Result<<Eqn::V as DefaultDenseMatrix>::M, DiffsolError>
-where
-    Eqn::V: DefaultDenseMatrix,
-{
-    let nrows = if s.problem().eqn.out().is_some() {
-        s.problem().eqn.out().unwrap().nout()
-    } else {
-        s.problem().eqn.rhs().nstates()
-    };
-    let ret = s
-        .problem()
-        .context()
-        .dense_mat_zeros::<Eqn::V>(nrows, t_eval.len());
-
-    // check t_eval is increasing and all values are greater than or equal to the current time
-    let t0 = s.state().t;
-    if t_eval.windows(2).any(|w| w[0] > w[1] || w[0] < t0) {
-        return Err(ode_solver_error!(InvalidTEval));
-    }
-    Ok(ret)
-}
-
 #[derive(Debug, PartialEq)]
 pub enum OdeSolverStopReason<T: Scalar> {
     InternalTimestep,
@@ -398,6 +325,81 @@ where
 {
     fn into_state_and_eqn(self) -> (Self::State, Option<AugmentedEqn>);
     fn augmented_eqn(&self) -> Option<&AugmentedEqn>;
+}
+
+/// Utility function to write out the solution at a given timepoint
+/// This function is used by the `solve_dense` method to write out the solution at a given timepoint.
+fn dense_write_out<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
+    s: &S,
+    y_out: &mut <Eqn::V as DefaultDenseMatrix>::M,
+    t_eval: &[Eqn::T],
+    i: usize,
+) -> Result<(), DiffsolError>
+where
+    Eqn::V: DefaultDenseMatrix,
+{
+    let mut y_out = y_out.column_mut(i);
+    let t = t_eval[i];
+    if s.problem().integrate_out {
+        let g = s.interpolate_out(t)?;
+        y_out.copy_from(&g);
+    } else {
+        let y = s.interpolate(t)?;
+        match s.problem().eqn.out() {
+            Some(out) => y_out.copy_from(&out.call(&y, t_eval[i])),
+            None => y_out.copy_from(&y),
+        }
+    }
+    Ok(())
+}
+
+/// utility function to write out the solution at a given timepoint
+/// This function is used by the `solve` method to write out the solution at a given timepoint.
+fn write_out<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
+    s: &S,
+    ret_y: &mut Vec<Eqn::V>,
+    ret_t: &mut Vec<Eqn::T>,
+) {
+    let t = s.state().t;
+    let y = s.state().y;
+    ret_t.push(t);
+    match s.problem().eqn.out() {
+        Some(out) => {
+            if s.problem().integrate_out {
+                ret_y.push(s.state().g.clone());
+            } else {
+                ret_y.push(out.call(y, t));
+            }
+        }
+        None => ret_y.push(y.clone()),
+    }
+}
+
+/// Utility function to allocate the return matrix for the `solve_dense`
+/// and `solve_dense_sensitivities` methods.
+fn dense_allocate_return<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
+    s: &S,
+    t_eval: &[Eqn::T],
+) -> Result<<Eqn::V as DefaultDenseMatrix>::M, DiffsolError>
+where
+    Eqn::V: DefaultDenseMatrix,
+{
+    let nrows = if s.problem().eqn.out().is_some() {
+        s.problem().eqn.out().unwrap().nout()
+    } else {
+        s.problem().eqn.rhs().nstates()
+    };
+    let ret = s
+        .problem()
+        .context()
+        .dense_mat_zeros::<Eqn::V>(nrows, t_eval.len());
+
+    // check t_eval is increasing and all values are greater than or equal to the current time
+    let t0 = s.state().t;
+    if t_eval.windows(2).any(|w| w[0] > w[1] || w[0] < t0) {
+        return Err(ode_solver_error!(InvalidTEval));
+    }
+    Ok(ret)
 }
 
 #[cfg(test)]
