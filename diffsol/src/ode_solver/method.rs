@@ -405,6 +405,7 @@ where
 #[cfg(test)]
 mod test {
     use crate::{
+        error::{DiffsolError, OdeSolverError},
         matrix::dense_nalgebra_serial::NalgebraMat,
         ode_equations::test_models::exponential_decay::{
             exponential_decay_problem, exponential_decay_problem_adjoint,
@@ -477,6 +478,18 @@ mod test {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
         }
+    }
+
+    #[test]
+    fn test_t_eval_errors() {
+        let (problem, _soln) = exponential_decay_problem::<NalgebraMat<f64>>(false);
+        let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
+        let t_eval = vec![0.0, 1.0, 0.5, 2.0];
+        let err = s.solve_dense(t_eval.as_slice()).unwrap_err();
+        assert!(matches!(
+            err,
+            DiffsolError::OdeSolverError(OdeSolverError::InvalidTEval)
+        ));
     }
 
     #[test]
