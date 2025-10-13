@@ -360,7 +360,8 @@ fn write_out<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     ret_t.push(t);
     let i = ret_t.len() - 1;
     if i >= ret_y.ncols() {
-        let remaining: f64 = (Eqn::T::from(1.5) * (final_time - ret_t[i - 1])
+        const GROWTH_FACTOR: f64 = 1.5;
+        let remaining: f64 = (Eqn::T::from(GROWTH_FACTOR) * (final_time - ret_t[i - 1])
             / (ret_t[i] - ret_t[i - 1]))
             .ceil()
             .into();
@@ -394,7 +395,8 @@ where
     } else {
         s.problem().eqn.rhs().nstates()
     };
-    let ret = s.problem().context().dense_mat_zeros::<Eqn::V>(nrows, 10);
+    const INITIAL_NCOLS: usize = 10;
+    let ret = s.problem().context().dense_mat_zeros::<Eqn::V>(nrows, INITIAL_NCOLS);
 
     // check t_eval is increasing and all values are greater than or equal to the current time
     let tmp_nout = if let Some(out) = s.problem().eqn.out() {
