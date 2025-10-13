@@ -360,7 +360,7 @@ where
             Some(out) => {
                 out.call_inplace(&y, t_eval[i], tmp_nout);
                 y_out.copy_from(tmp_nout)
-            },
+            }
             None => y_out.copy_from(&y),
         }
     }
