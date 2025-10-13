@@ -155,6 +155,11 @@ where
         Self: Sized,
     {
         let mut ret = dense_allocate_return(self, t_eval)?;
+        let mut tmp_nout = if let Some(out) = self.problem().eqn.out() {
+            Eqn::V::zeros(out.nout(), self.problem().context().clone())
+        } else {
+            Eqn::V::zeros(0, self.problem().context().clone())
+        };
 
         // do loop
         self.set_stop_time(t_eval[t_eval.len() - 1])?;
@@ -163,7 +168,7 @@ where
             while self.state().t < *t {
                 step_reason = self.step()?;
             }
-            dense_write_out(self, &mut ret, t_eval, i)?;
+            dense_write_out(self, &mut ret, t_eval, i, &mut tmp_nout)?;
         }
         assert_eq!(step_reason, OdeSolverStopReason::TstopReached);
         Ok(ret)
@@ -267,6 +272,11 @@ where
     {
         let mut ret = dense_allocate_return(self, t_eval)?;
         let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
+        let mut tmp_nout = if let Some(out) = self.problem().eqn.out() {
+            Eqn::V::zeros(out.nout(), self.problem().context().clone())
+        } else {
+            Eqn::V::zeros(0, self.problem().context().clone())
+        };
 
         // allocate checkpoint info
         let mut nsteps = 0;
@@ -296,7 +306,7 @@ where
                     ydots.clear();
                 }
             }
-            dense_write_out(self, &mut ret, t_eval, i)?;
+            dense_write_out(self, &mut ret, t_eval, i, &mut tmp_nout)?;
         }
         assert_eq!(step_reason, OdeSolverStopReason::TstopReached);
 
@@ -334,6 +344,7 @@ fn dense_write_out<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     y_out: &mut <Eqn::V as DefaultDenseMatrix>::M,
     t_eval: &[Eqn::T],
     i: usize,
+    tmp_nout: &mut Eqn::V,
 ) -> Result<(), DiffsolError>
 where
     Eqn::V: DefaultDenseMatrix,
@@ -346,7 +357,10 @@ where
     } else {
         let y = s.interpolate(t)?;
         match s.problem().eqn.out() {
-            Some(out) => y_out.copy_from(&out.call(&y, t_eval[i])),
+            Some(out) => {
+                out.call_inplace(&y, t_eval[i], tmp_nout);
+                y_out.copy_from(tmp_nout)
+            },
             None => y_out.copy_from(&y),
         }
     }
