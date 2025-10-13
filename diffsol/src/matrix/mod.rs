@@ -326,6 +326,9 @@ pub trait DenseMatrix:
         ret
     }
 
+    /// Resize the number of columns in the matrix. Existing data is preserved, new elements are uninitialized
+    fn resize_cols(&mut self, ncols: IndexType);
+
     /// creates a new matrix from a vector of values, which are assumed
     /// to be in column-major order
     fn from_vec(nrows: IndexType, ncols: IndexType, data: Vec<Self::T>, ctx: Self::C) -> Self;

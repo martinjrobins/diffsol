@@ -270,6 +270,13 @@ impl<T: Scalar> DenseMatrix for NalgebraMat<T> {
         self.data.gemm(alpha, &a.data, &b.data, beta);
     }
 
+    fn resize_cols(&mut self, ncols: IndexType) {
+        if ncols == self.ncols() {
+            return;
+        }
+        self.data.resize_horizontally_mut(ncols, Self::T::zero());
+    }
+
     fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {
         self.data[(i, j)]
     }

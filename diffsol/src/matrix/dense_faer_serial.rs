@@ -177,6 +177,14 @@ impl<T: Scalar> DenseMatrix for FaerMat<T> {
         Self { data, context: ctx }
     }
 
+    fn resize_cols(&mut self, ncols: IndexType) {
+        if ncols == self.ncols() {
+            return;
+        }
+        let nrows = self.nrows();
+        self.data.resize_with(nrows, ncols, |_, _| T::zero());
+    }
+
     fn get_index(&self, i: IndexType, j: IndexType) -> Self::T {
         self.data[(i, j)]
     }
