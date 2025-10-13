@@ -396,7 +396,10 @@ where
         s.problem().eqn.rhs().nstates()
     };
     const INITIAL_NCOLS: usize = 10;
-    let ret = s.problem().context().dense_mat_zeros::<Eqn::V>(nrows, INITIAL_NCOLS);
+    let ret = s
+        .problem()
+        .context()
+        .dense_mat_zeros::<Eqn::V>(nrows, INITIAL_NCOLS);
 
     // check t_eval is increasing and all values are greater than or equal to the current time
     let tmp_nout = if let Some(out) = s.problem().eqn.out() {
