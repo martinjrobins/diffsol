@@ -5,9 +5,10 @@ use crate::{
     ode_solver_error,
     scalar::Scalar,
     AugmentedOdeEquations, Checkpointing, Context, DefaultDenseMatrix, DenseMatrix,
-    HermiteInterpolator, NonLinearOp, OdeEquations, OdeSolverConfig, OdeSolverProblem,
-    OdeSolverState, Op, StateRef, StateRefMut, Vector, VectorViewMut,
+    HermiteInterpolator, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverConfig,
+    OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut, Vector, VectorViewMut,
 };
+use nalgebra::ComplexField;
 
 #[derive(Debug, PartialEq)]
 pub enum OdeSolverStopReason<T: Scalar> {
@@ -120,27 +121,20 @@ where
         Self: Sized,
     {
         let mut ret_t = Vec::new();
-        let mut ret_y = Vec::new();
+        let (mut ret_y, mut tmp_nout) = allocate_return(self)?;
 
         // do the main loop
-        write_out(self, &mut ret_y, &mut ret_t);
+        write_out(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
         self.set_stop_time(final_time)?;
         while self.step()? != OdeSolverStopReason::TstopReached {
-            write_out(self, &mut ret_y, &mut ret_t);
+            write_out(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
         }
 
         // store the final step
-        write_out(self, &mut ret_y, &mut ret_t);
+        write_out(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
         let ntimes = ret_t.len();
-        let nrows = ret_y[0].len();
-        let mut ret_y_matrix = self
-            .problem()
-            .context()
-            .dense_mat_zeros::<Eqn::V>(nrows, ntimes);
-        for (i, y) in ret_y.iter().enumerate() {
-            ret_y_matrix.column_mut(i).copy_from(y);
-        }
-        Ok((ret_y_matrix, ret_t))
+        ret_y.resize_cols(ntimes);
+        Ok((ret_y, ret_t))
     }
 
     /// Using the provided state, solve the problem up to time `t_eval[t_eval.len()-1]`
@@ -154,7 +148,7 @@ where
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
-        let mut ret = dense_allocate_return(self, t_eval)?;
+        let (mut ret, mut tmp_nout) = dense_allocate_return(self, t_eval)?;
 
         // do loop
         self.set_stop_time(t_eval[t_eval.len() - 1])?;
@@ -163,7 +157,7 @@ where
             while self.state().t < *t {
                 step_reason = self.step()?;
             }
-            dense_write_out(self, &mut ret, t_eval, i)?;
+            dense_write_out(self, &mut ret, t_eval, i, &mut tmp_nout)?;
         }
         assert_eq!(step_reason, OdeSolverStopReason::TstopReached);
         Ok(ret)
@@ -187,7 +181,7 @@ where
         Self: Sized,
     {
         let mut ret_t = Vec::new();
-        let mut ret_y = Vec::new();
+        let (mut ret_y, mut tmp_nout) = allocate_return(self)?;
         let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
 
         // allocate checkpoint info
@@ -199,10 +193,10 @@ where
         let mut ydots = vec![self.state().dy.clone()];
 
         // do the main loop, saving checkpoints
-        write_out(self, &mut ret_y, &mut ret_t);
+        write_out(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
         self.set_stop_time(final_time)?;
         while self.step()? != OdeSolverStopReason::TstopReached {
-            write_out(self, &mut ret_y, &mut ret_t);
+            write_out(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
             ts.push(self.state().t);
             ys.push(self.state().y.clone());
             ydots.push(self.state().dy.clone());
@@ -217,16 +211,9 @@ where
         }
 
         // store the final step
-        write_out(self, &mut ret_y, &mut ret_t);
+        write_out(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
         let ntimes = ret_t.len();
-        let nrows = ret_y[0].len();
-        let mut ret_y_matrix = self
-            .problem()
-            .context()
-            .dense_mat_zeros::<Eqn::V>(nrows, ntimes);
-        for (i, y) in ret_y.iter().enumerate() {
-            ret_y_matrix.column_mut(i).copy_from(y);
-        }
+        ret_y.resize_cols(ntimes);
 
         // add final checkpoint
         ts.push(self.state().t);
@@ -243,7 +230,7 @@ where
             Some(last_segment),
         );
 
-        Ok((checkpointer, ret_y_matrix, ret_t))
+        Ok((checkpointer, ret_y, ret_t))
     }
 
     /// Solve the problem and write out the solution at the given timepoints, using checkpointing so that
@@ -265,7 +252,7 @@ where
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
-        let mut ret = dense_allocate_return(self, t_eval)?;
+        let (mut ret, mut tmp_nout) = dense_allocate_return(self, t_eval)?;
         let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
 
         // allocate checkpoint info
@@ -296,7 +283,7 @@ where
                     ydots.clear();
                 }
             }
-            dense_write_out(self, &mut ret, t_eval, i)?;
+            dense_write_out(self, &mut ret, t_eval, i, &mut tmp_nout)?;
         }
         assert_eq!(step_reason, OdeSolverStopReason::TstopReached);
 
@@ -334,6 +321,7 @@ fn dense_write_out<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     y_out: &mut <Eqn::V as DefaultDenseMatrix>::M,
     t_eval: &[Eqn::T],
     i: usize,
+    tmp_nout: &mut Eqn::V,
 ) -> Result<(), DiffsolError>
 where
     Eqn::V: DefaultDenseMatrix,
@@ -346,7 +334,10 @@ where
     } else {
         let y = s.interpolate(t)?;
         match s.problem().eqn.out() {
-            Some(out) => y_out.copy_from(&out.call(&y, t_eval[i])),
+            Some(out) => {
+                out.call_inplace(&y, t_eval[i], tmp_nout);
+                y_out.copy_from(tmp_nout)
+            }
             None => y_out.copy_from(&y),
         }
     }
@@ -357,22 +348,66 @@ where
 /// This function is used by the `solve` method to write out the solution at a given timepoint.
 fn write_out<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     s: &S,
-    ret_y: &mut Vec<Eqn::V>,
+    ret_y: &mut <Eqn::V as DefaultDenseMatrix>::M,
     ret_t: &mut Vec<Eqn::T>,
-) {
+    final_time: Eqn::T,
+    tmp_nout: &mut Eqn::V,
+) where
+    Eqn::V: DefaultDenseMatrix,
+{
     let t = s.state().t;
     let y = s.state().y;
     ret_t.push(t);
+    let i = ret_t.len() - 1;
+    if i >= ret_y.ncols() {
+        const GROWTH_FACTOR: f64 = 1.5;
+        let remaining: f64 = (Eqn::T::from(GROWTH_FACTOR) * (final_time - ret_t[i - 1])
+            / (ret_t[i] - ret_t[i - 1]))
+            .ceil()
+            .into();
+        let n = ret_y.ncols() + (remaining as usize);
+        ret_y.resize_cols(n);
+    }
+    let mut ret_y_col = ret_y.column_mut(i);
     match s.problem().eqn.out() {
         Some(out) => {
             if s.problem().integrate_out {
-                ret_y.push(s.state().g.clone());
+                ret_y_col.copy_from(s.state().g);
             } else {
-                ret_y.push(out.call(y, t));
+                out.call_inplace(y, t, tmp_nout);
+                ret_y_col.copy_from(tmp_nout);
             }
         }
-        None => ret_y.push(y.clone()),
+        None => ret_y_col.copy_from(y),
     }
+}
+
+/// Utility function to allocate the return matrix for the `solve`
+/// method
+fn allocate_return<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
+    s: &S,
+) -> Result<(<Eqn::V as DefaultDenseMatrix>::M, Eqn::V), DiffsolError>
+where
+    Eqn::V: DefaultDenseMatrix,
+{
+    let nrows = if s.problem().eqn.out().is_some() {
+        s.problem().eqn.out().unwrap().nout()
+    } else {
+        s.problem().eqn.rhs().nstates()
+    };
+    const INITIAL_NCOLS: usize = 10;
+    let ret = s
+        .problem()
+        .context()
+        .dense_mat_zeros::<Eqn::V>(nrows, INITIAL_NCOLS);
+
+    // check t_eval is increasing and all values are greater than or equal to the current time
+    let tmp_nout = if let Some(out) = s.problem().eqn.out() {
+        Eqn::V::zeros(out.nout(), s.problem().context().clone())
+    } else {
+        Eqn::V::zeros(0, s.problem().context().clone())
+    };
+    Ok((ret, tmp_nout))
 }
 
 /// Utility function to allocate the return matrix for the `solve_dense`
@@ -380,7 +415,7 @@ fn write_out<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
 fn dense_allocate_return<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     s: &S,
     t_eval: &[Eqn::T],
-) -> Result<<Eqn::V as DefaultDenseMatrix>::M, DiffsolError>
+) -> Result<(<Eqn::V as DefaultDenseMatrix>::M, Eqn::V), DiffsolError>
 where
     Eqn::V: DefaultDenseMatrix,
 {
@@ -399,7 +434,12 @@ where
     if t_eval.windows(2).any(|w| w[0] > w[1] || w[0] < t0) {
         return Err(ode_solver_error!(InvalidTEval));
     }
-    Ok(ret)
+    let tmp_nout = if let Some(out) = s.problem().eqn.out() {
+        Eqn::V::zeros(out.nout(), s.problem().context().clone())
+    } else {
+        Eqn::V::zeros(0, s.problem().context().clone())
+    };
+    Ok((ret, tmp_nout))
 }
 
 #[cfg(test)]
