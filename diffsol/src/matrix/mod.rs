@@ -393,4 +393,33 @@ mod tests {
         assert_eq!(a.get_index(1, 0), M::T::from(3.0));
         assert_eq!(a.get_index(1, 1), M::T::from(10.0));
     }
+
+    pub fn test_resize_cols<M: DenseMatrix>() {
+        let mut a = M::zeros(2, 2, Default::default());
+        a.set_index(0, 0, M::T::from(1.0));
+        a.set_index(0, 1, M::T::from(2.0));
+        a.set_index(1, 0, M::T::from(3.0));
+        a.set_index(1, 1, M::T::from(4.0));
+
+        a.resize_cols(3);
+        assert_eq!(a.ncols(), 3);
+        assert_eq!(a.nrows(), 2);
+        assert_eq!(a.get_index(0, 0), M::T::from(1.0));
+        assert_eq!(a.get_index(0, 1), M::T::from(2.0));
+        assert_eq!(a.get_index(1, 0), M::T::from(3.0));
+        assert_eq!(a.get_index(1, 1), M::T::from(4.0));
+
+        a.set_index(0, 2, M::T::from(5.0));
+        a.set_index(1, 2, M::T::from(6.0));
+        assert_eq!(a.get_index(0, 2), M::T::from(5.0));
+        assert_eq!(a.get_index(1, 2), M::T::from(6.0));
+
+        a.resize_cols(2);
+        assert_eq!(a.ncols(), 2);
+        assert_eq!(a.nrows(), 2);
+        assert_eq!(a.get_index(0, 0), M::T::from(1.0));
+        assert_eq!(a.get_index(0, 1), M::T::from(2.0));
+        assert_eq!(a.get_index(1, 0), M::T::from(3.0));
+        assert_eq!(a.get_index(1, 1), M::T::from(4.0));
+    }
 }

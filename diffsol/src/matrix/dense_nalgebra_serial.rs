@@ -354,4 +354,9 @@ mod tests {
     fn test_partition_indices_by_zero_diagonal() {
         super::super::tests::test_partition_indices_by_zero_diagonal::<NalgebraMat<f64>>();
     }
+
+    #[test]
+    fn test_resize_cols() {
+        super::super::tests::test_resize_cols::<NalgebraMat<f64>>();
+    }
 }

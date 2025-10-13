@@ -124,14 +124,14 @@ where
         let (mut ret_y, mut tmp_nout) = allocate_return(self)?;
 
         // do the main loop
-        write_out2(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
+        write_out(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
         self.set_stop_time(final_time)?;
         while self.step()? != OdeSolverStopReason::TstopReached {
-            write_out2(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
+            write_out(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
         }
 
         // store the final step
-        write_out2(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
+        write_out(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
         let ntimes = ret_t.len();
         ret_y.resize_cols(ntimes);
         Ok((ret_y, ret_t))
@@ -193,10 +193,10 @@ where
         let mut ydots = vec![self.state().dy.clone()];
 
         // do the main loop, saving checkpoints
-        write_out2(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
+        write_out(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
         self.set_stop_time(final_time)?;
         while self.step()? != OdeSolverStopReason::TstopReached {
-            write_out2(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
+            write_out(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
             ts.push(self.state().t);
             ys.push(self.state().y.clone());
             ydots.push(self.state().dy.clone());
@@ -211,7 +211,7 @@ where
         }
 
         // store the final step
-        write_out2(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
+        write_out(self, &mut ret_y, &mut ret_t, final_time, &mut tmp_nout);
         let ntimes = ret_t.len();
         ret_y.resize_cols(ntimes);
 
@@ -347,26 +347,6 @@ where
 /// utility function to write out the solution at a given timepoint
 /// This function is used by the `solve` method to write out the solution at a given timepoint.
 fn write_out<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
-    s: &S,
-    ret_y: &mut Vec<Eqn::V>,
-    ret_t: &mut Vec<Eqn::T>,
-) {
-    let t = s.state().t;
-    let y = s.state().y;
-    ret_t.push(t);
-    match s.problem().eqn.out() {
-        Some(out) => {
-            if s.problem().integrate_out {
-                ret_y.push(s.state().g.clone());
-            } else {
-                ret_y.push(out.call(y, t));
-            }
-        }
-        None => ret_y.push(y.clone()),
-    }
-}
-
-fn write_out2<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     s: &S,
     ret_y: &mut <Eqn::V as DefaultDenseMatrix>::M,
     ret_t: &mut Vec<Eqn::T>,
