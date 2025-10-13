@@ -85,12 +85,12 @@ where
                 ret.column_mut(i).copy_from(tmp_nout);
                 for (j, s_j) in s.iter_mut().enumerate() {
                     // compute J * s_j + dF/dp * e_j where e_j is the jth basis vector
+                    let mut ret_sens = ret_sens[j].column_mut(i);
                     tmp_nparams.set_index(j, Eqn::T::one());
                     out.jac_mul_inplace(&y, *t, s_j, tmp_nout);
-                    s_j.copy_from(tmp_nout);
+                    ret_sens.copy_from(tmp_nout);
                     out.sens_mul_inplace(&y, *t, tmp_nparams, tmp_nout);
-                    s_j.add_assign(&*tmp_nout);
-                    ret_sens[j].column_mut(i).copy_from(s_j);
+                    ret_sens.add_assign(&*tmp_nout);
                     tmp_nparams.set_index(j, Eqn::T::zero());
                 }
             } else {
@@ -107,23 +107,21 @@ where
         }
         let y = self.state().y;
         let s = self.state().s;
-        let mut s_tmp = tmp_nout.clone();
         let i = t_eval.len() - 1;
         let t = t_eval.last().unwrap();
         if let Some(out) = self.problem().eqn.out() {
             let tmp_nout = tmp_nout.as_mut().unwrap();
             let tmp_nparams = tmp_nparms.as_mut().unwrap();
-            let s_tmp = s_tmp.as_mut().unwrap();
             out.call_inplace(y, *t, tmp_nout);
             ret.column_mut(i).copy_from(tmp_nout);
             for (j, s_j) in s.iter().enumerate() {
                 // compute J * s_j + dF/dp * e_j where e_j is the jth basis vector
+                let mut ret_sens = ret_sens[j].column_mut(i);
                 tmp_nparams.set_index(j, Eqn::T::one());
                 out.jac_mul_inplace(y, *t, s_j, tmp_nout);
-                s_tmp.copy_from(tmp_nout);
+                ret_sens.copy_from(tmp_nout);
                 out.sens_mul_inplace(y, *t, tmp_nparams, tmp_nout);
-                s_tmp.add_assign(&*tmp_nout);
-                ret_sens[j].column_mut(i).copy_from(s_tmp);
+                ret_sens.add_assign(&*tmp_nout);
                 tmp_nparams.set_index(j, Eqn::T::zero());
             }
         } else {
