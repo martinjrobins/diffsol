@@ -241,7 +241,11 @@ where
         let mut root_finder = None;
         let ctx = problem.eqn.context();
         if let Some(root_fn) = problem.eqn.root() {
-            root_finder = Some(RootFinder::new(root_fn.nout(), ctx.clone()));
+            root_finder = Some(RootFinder::new(
+                root_fn.nout(),
+                problem.eqn.nstates(),
+                ctx.clone(),
+            ));
             root_finder
                 .as_ref()
                 .unwrap()
@@ -668,15 +672,21 @@ where
 
     //interpolate solution at time values t* where t-h < t* < t
     //definition of the interpolating polynomial can be found on page 7 of [1]
-    fn interpolate_from_diff(t: Eqn::T, diff: &M, t1: Eqn::T, h: Eqn::T, order: usize) -> Eqn::V {
+    fn interpolate_from_diff(
+        t: Eqn::T,
+        diff: &M,
+        t1: Eqn::T,
+        h: Eqn::T,
+        order: usize,
+        y: &mut Eqn::V,
+    ) {
         let mut time_factor = Eqn::T::from(1.0);
-        let mut order_summation = diff.column(0).into_owned();
+        y.copy_from_view(&diff.column(0));
         for i in 0..order {
             let i_t = Eqn::T::from(i as f64);
             time_factor *= (t - (t1 - h * i_t)) / (h * (Eqn::T::one() + i_t));
-            order_summation += diff.column(i + 1) * scale(time_factor);
+            y.axpy_v(time_factor, &diff.column(i + 1), Eqn::T::one());
         }
-        order_summation
     }
 
     fn error_control(&self) -> Eqn::T {
@@ -932,12 +942,21 @@ where
         );
     }
 
-    fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
+    fn interpolate_inplace(&self, t: Eqn::T, y: &mut Eqn::V) -> Result<(), DiffsolError> {
+        if y.len() != self.state.y.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::InterpolationVectorWrongSize {
+                    expected: self.state.y.len(),
+                    found: y.len(),
+                },
+            ));
+        }
         // state must be set
         let state = &self.state;
         if self.is_state_modified {
             if t == state.t {
-                return Ok(state.y.clone());
+                y.copy_from(&state.y);
+                return Ok(());
             } else {
                 return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
@@ -953,15 +972,25 @@ where
             state.t,
             state.h,
             state.order,
+            y,
         ))
     }
 
-    fn interpolate_out(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
+    fn interpolate_out_inplace(&self, t: Eqn::T, g: &mut Eqn::V) -> Result<(), DiffsolError> {
+        if g.len() != self.state.g.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::InterpolationVectorWrongSize {
+                    expected: self.state.g.len(),
+                    found: g.len(),
+                },
+            ));
+        }
         // state must be set
         let state = &self.state;
         if self.is_state_modified {
             if t == state.t {
-                return Ok(state.g.clone());
+                g.copy_from(&state.g);
+                return Ok(());
             } else {
                 return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
@@ -977,15 +1006,42 @@ where
             state.t,
             state.h,
             state.order,
+            g,
         ))
     }
 
-    fn interpolate_sens(&self, t: <Eqn as Op>::T) -> Result<Vec<Eqn::V>, DiffsolError> {
+    fn interpolate_sens_inplace(
+        &self,
+        t: <Eqn as Op>::T,
+        sens: &mut [Eqn::V],
+    ) -> Result<(), DiffsolError> {
+        if sens.len() != self.state.sdiff.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::SensitivityCountMismatch {
+                    expected: self.state.sdiff.len(),
+                    found: sens.len(),
+                },
+            ));
+        }
+        for s in sens.iter() {
+            if s.len() != self.state.s[0].len() {
+                return Err(DiffsolError::from(
+                    OdeSolverError::InterpolationVectorWrongSize {
+                        expected: self.state.s[0].len(),
+                        found: s.len(),
+                    },
+                ));
+            }
+        }
+
         // state must be set
         let state = &self.state;
         if self.is_state_modified {
             if t == state.t {
-                return Ok(state.s.clone());
+                for (s, st) in sens.iter_mut().zip(state.s.iter()) {
+                    s.copy_from(st);
+                }
+                return Ok(());
             } else {
                 return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
@@ -996,17 +1052,10 @@ where
             return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
         }
 
-        let mut s = Vec::with_capacity(state.s.len());
-        for i in 0..state.s.len() {
-            s.push(Self::interpolate_from_diff(
-                t,
-                &state.sdiff[i],
-                state.t,
-                state.h,
-                state.order,
-            ));
+        for (s, sdiff) in sens.iter_mut().zip(state.sdiff.iter()) {
+            Self::interpolate_from_diff(t, sdiff, state.t, state.h, state.order, s);
         }
-        Ok(s)
+        Ok(())
     }
 
     fn problem(&self) -> &'a OdeSolverProblem<Eqn> {
@@ -1272,7 +1321,7 @@ where
         // check for root within accepted step
         if let Some(root_fn) = self.ode_problem.eqn.root() {
             let ret = self.root_finder.as_ref().unwrap().check_root(
-                &|t: <Eqn as Op>::T| self.interpolate(t),
+                &|t: <Eqn as Op>::T, y: &mut <Eqn as Op>::V| self.interpolate_inplace(t, y),
                 &root_fn,
                 self.state.as_ref().y,
                 self.state.as_ref().t,

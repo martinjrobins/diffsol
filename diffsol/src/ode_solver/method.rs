@@ -97,13 +97,47 @@ where
     fn set_stop_time(&mut self, tstop: Eqn::T) -> Result<(), DiffsolError>;
 
     /// Interpolate the solution at a given time. This time should be between the current time and the last solver time step
-    fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError>;
+    fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
+        let nstates = self.problem().eqn.rhs().nstates();
+        let mut y = Eqn::V::zeros(nstates, self.problem().context().clone());
+        self.interpolate_inplace(t, &mut y)?;
+        Ok(y)
+    }
+
+    /// Interpolate the solution at a given time and place in `y`. This time should be between the current time and the last solver time step
+    fn interpolate_inplace(&self, t: Eqn::T, y: &mut Eqn::V) -> Result<(), DiffsolError>;
 
     /// Interpolate the integral of the output function at a given time. This time should be between the current time and the last solver time step
-    fn interpolate_out(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError>;
+    fn interpolate_out(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
+        let nout = if let Some(out) = self.problem().eqn.out() {
+            out.nout()
+        } else {
+            self.problem().eqn.rhs().nstates()
+        };
+        let mut g = Eqn::V::zeros(nout, self.problem().context().clone());
+        self.interpolate_out_inplace(t, &mut g)?;
+        Ok(g)
+    }
+
+    /// Interpolate the integral of the output function at a given time and place in `g`. This time should be between the current time and the last solver time step
+    fn interpolate_out_inplace(&self, t: Eqn::T, g: &mut Eqn::V) -> Result<(), DiffsolError>;
 
     /// Interpolate the sensitivity vectors at a given time. This time should be between the current time and the last solver time step
-    fn interpolate_sens(&self, t: Eqn::T) -> Result<Vec<Eqn::V>, DiffsolError>;
+    fn interpolate_sens(&self, t: Eqn::T) -> Result<Vec<Eqn::V>, DiffsolError> {
+        let nparams = self.problem().eqn.rhs().nparams();
+        let mut sens = Vec::with_capacity(nparams);
+        for _ in 0..nparams {
+            sens.push(Eqn::V::zeros(
+                self.problem().eqn.rhs().nstates(),
+                self.problem().context().clone(),
+            ));
+        }
+        self.interpolate_sens_inplace(t, &mut sens)?;
+        Ok(sens)
+    }
+
+    /// Interpolate the sensitivity vectors at a given time and place in `sens`. This time should be between the current time and the last solver time step
+    fn interpolate_sens_inplace(&self, t: Eqn::T, sens: &mut [Eqn::V]) -> Result<(), DiffsolError>;
 
     /// Get the current order of accuracy of the solver (e.g. explict euler method is first-order)
     fn order(&self) -> usize;

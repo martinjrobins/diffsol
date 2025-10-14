@@ -19,7 +19,7 @@ use num_traits::Pow;
 use num_traits::Zero;
 
 use super::bdf::BdfStatistics;
-use std::ops::MulAssign;
+use std::ops::{MulAssign, SubAssign};
 
 /// A Runge-Kutta method.
 ///
@@ -124,7 +124,7 @@ where
 
         state.set_problem(problem)?;
         let root_finder = if let Some(root_fn) = problem.eqn.root() {
-            let root_finder = RootFinder::new(root_fn.nout(), ctx.clone());
+            let root_finder = RootFinder::new(root_fn.nout(), problem.eqn.nstates(), ctx.clone());
             root_finder.init(&root_fn, &state.y, state.t);
             Some(root_finder)
         } else {
@@ -842,7 +842,7 @@ where
         // check for root within accepted step
         if let Some(root_fn) = self.problem.eqn.root() {
             let ret = self.root_finder.as_ref().unwrap().check_root(
-                &|t| self.interpolate(t),
+                &|t, y| self.interpolate_inplace(t, y),
                 &root_fn,
                 &self.state.y,
                 self.state.t,
@@ -864,11 +864,10 @@ where
         Ok(OdeSolverStopReason::InternalTimestep)
     }
 
-    fn interpolate_from_diff(scale_diff: M::T, y0: &M::V, beta_f: &M::V, diff: &M) -> M::V {
+    fn interpolate_from_diff(scale_diff: M::T, y0: &M::V, beta_f: &M::V, diff: &M, ret: &mut M::V) {
         // ret = old_y + sum_{i=0}^{s_star-1} beta[i] * diff[:, i]
-        let mut ret = y0.clone();
-        diff.gemv(scale_diff, beta_f, M::T::one(), &mut ret);
-        ret
+        ret.copy_from(y0);
+        diff.gemv(scale_diff, beta_f, M::T::one(), ret);
     }
 
     fn interpolate_beta_function(theta: M::T, beta: &M) -> M::V {
@@ -886,11 +885,19 @@ where
         beta_f
     }
 
-    fn interpolate_hermite(scale_diff: M::T, theta: M::T, u0: &M::V, u1: &M::V, diff: &M) -> M::V {
+    fn interpolate_hermite(
+        scale_diff: M::T,
+        theta: M::T,
+        u0: &M::V,
+        u1: &M::V,
+        diff: &M,
+        y: &mut M::V,
+    ) {
         let f0 = diff.column(0);
         let f1 = diff.column(diff.ncols() - 1);
 
-        let mut y = u1.clone() - u0;
+        y.copy_from(u1);
+        y.sub_assign(u0);
         y.axpy_v(
             scale_diff * (theta - M::T::from(1.0)),
             &f0,
@@ -903,13 +910,21 @@ where
             theta * (theta - M::T::from(1.0)),
         );
         y.axpy(theta, u1, M::T::one());
-        y
     }
 
-    pub(crate) fn interpolate(&self, t: M::T) -> Result<M::V, DiffsolError> {
+    pub(crate) fn interpolate_inplace(&self, t: M::T, ret: &mut M::V) -> Result<(), DiffsolError> {
+        if ret.len() != self.state.y.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::InterpolationVectorWrongSize {
+                    expected: self.state.y.len(),
+                    found: ret.len(),
+                },
+            ));
+        }
         if self.is_state_mutated {
             if t == self.state.t {
-                return Ok(self.state.y.clone());
+                ret.copy_from(&self.state.y);
+                return Ok(());
             } else {
                 return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
@@ -932,25 +947,37 @@ where
         let scale_diff = Eqn::T::one();
         if let Some(beta) = self.tableau.beta() {
             let beta_f = Self::interpolate_beta_function(theta, beta);
-            let ret =
-                Self::interpolate_from_diff(scale_diff, &self.old_state.y, &beta_f, &self.diff);
-            Ok(ret)
+            Self::interpolate_from_diff(scale_diff, &self.old_state.y, &beta_f, &self.diff, ret);
         } else {
-            let ret = Self::interpolate_hermite(
+            Self::interpolate_hermite(
                 scale_diff,
                 theta,
                 &self.old_state.y,
                 &self.state.y,
                 &self.diff,
+                ret,
             );
-            Ok(ret)
         }
+        Ok(())
     }
 
-    pub(crate) fn interpolate_out(&self, t: M::T) -> Result<M::V, DiffsolError> {
+    pub(crate) fn interpolate_out_inplace(
+        &self,
+        t: M::T,
+        g: &mut M::V,
+    ) -> Result<(), DiffsolError> {
+        if g.len() != self.state.g.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::InterpolationVectorWrongSize {
+                    expected: self.state.g.len(),
+                    found: g.len(),
+                },
+            ));
+        }
         if self.is_state_mutated {
             if t == self.state.t {
-                return Ok(self.state.g.clone());
+                g.copy_from(&self.state.g);
+                return Ok(());
             } else {
                 return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
@@ -973,25 +1000,49 @@ where
         let scale_diff = Eqn::T::one();
         if let Some(beta) = self.tableau.beta() {
             let beta_f = Self::interpolate_beta_function(theta, beta);
-            let ret =
-                Self::interpolate_from_diff(scale_diff, &self.old_state.g, &beta_f, &self.gdiff);
-            Ok(ret)
+            Self::interpolate_from_diff(scale_diff, &self.old_state.g, &beta_f, &self.gdiff, g);
         } else {
-            let ret = Self::interpolate_hermite(
+            Self::interpolate_hermite(
                 scale_diff,
                 theta,
                 &self.old_state.g,
                 &self.state.g,
                 &self.gdiff,
+                g,
             );
-            Ok(ret)
         }
+        Ok(())
     }
 
-    pub(crate) fn interpolate_sens(&self, t: Eqn::T) -> Result<Vec<M::V>, DiffsolError> {
+    pub(crate) fn interpolate_sens_inplace(
+        &self,
+        t: Eqn::T,
+        ret: &mut [M::V],
+    ) -> Result<(), DiffsolError> {
+        if ret.len() != self.state.s.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::SensitivityCountMismatch {
+                    expected: self.state.s.len(),
+                    found: ret.len(),
+                },
+            ));
+        }
+        for s in ret.iter() {
+            if s.len() != self.state.s[0].len() {
+                return Err(DiffsolError::from(
+                    OdeSolverError::InterpolationVectorWrongSize {
+                        expected: self.state.s[0].len(),
+                        found: s.len(),
+                    },
+                ));
+            }
+        }
         if self.is_state_mutated {
             if t == self.state.t {
-                return Ok(self.state.s.to_vec());
+                for (r, s) in ret.iter_mut().zip(self.state.s.iter()) {
+                    r.copy_from(s);
+                }
+                return Ok(());
             } else {
                 return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
@@ -1014,24 +1065,26 @@ where
         let scale_diff = Eqn::T::one();
         if let Some(beta) = self.tableau.beta() {
             let beta_f = Self::interpolate_beta_function(theta, beta);
-            let ret = self
+            for ((y, diff), r) in self
                 .old_state
                 .s
                 .iter()
                 .zip(self.sdiff.iter())
-                .map(|(y, diff)| Self::interpolate_from_diff(scale_diff, y, &beta_f, diff))
-                .collect();
-            Ok(ret)
+                .zip(ret.iter_mut())
+            {
+                Self::interpolate_from_diff(scale_diff, y, &beta_f, diff, r);
+            }
         } else {
-            let ret = self
+            for ((s0, s1), (diff, r)) in self
                 .old_state
                 .s
                 .iter()
                 .zip(self.state.s.iter())
-                .zip(self.sdiff.iter())
-                .map(|((s0, s1), diff)| Self::interpolate_hermite(scale_diff, theta, s0, s1, diff))
-                .collect();
-            Ok(ret)
+                .zip(self.sdiff.iter().zip(ret.iter_mut()))
+            {
+                Self::interpolate_hermite(scale_diff, theta, s0, s1, diff, r);
+            }
         }
+        Ok(())
     }
 }
