@@ -966,14 +966,8 @@ where
         if (is_forward && t > state.t) || (!is_forward && t < state.t) {
             return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
         }
-        Ok(Self::interpolate_from_diff(
-            t,
-            &state.diff,
-            state.t,
-            state.h,
-            state.order,
-            y,
-        ))
+        Self::interpolate_from_diff(t, &state.diff, state.t, state.h, state.order, y);
+        Ok(())
     }
 
     fn interpolate_out_inplace(&self, t: Eqn::T, g: &mut Eqn::V) -> Result<(), DiffsolError> {
@@ -1000,14 +994,8 @@ where
         if (is_forward && t > state.t) || (!is_forward && t < state.t) {
             return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
         }
-        Ok(Self::interpolate_from_diff(
-            t,
-            &state.gdiff,
-            state.t,
-            state.h,
-            state.order,
-            g,
-        ))
+        Self::interpolate_from_diff(t, &state.gdiff, state.t, state.h, state.order, g);
+        Ok(())
     }
 
     fn interpolate_sens_inplace(

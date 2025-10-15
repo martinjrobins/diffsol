@@ -124,9 +124,12 @@ where
 
     /// Interpolate the sensitivity vectors at a given time. This time should be between the current time and the last solver time step
     fn interpolate_sens(&self, t: Eqn::T) -> Result<Vec<Eqn::V>, DiffsolError> {
-        let nparams = self.problem().eqn.rhs().nparams();
-        let mut sens = Vec::with_capacity(nparams);
-        for _ in 0..nparams {
+        let nsens = self.state().s.len();
+        if nsens == 0 {
+            return Ok(Vec::new());
+        }
+        let mut sens = Vec::with_capacity(nsens);
+        for _ in 0..nsens {
             sens.push(Eqn::V::zeros(
                 self.problem().eqn.rhs().nstates(),
                 self.problem().context().clone(),
