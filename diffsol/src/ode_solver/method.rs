@@ -8,7 +8,6 @@ use crate::{
     HermiteInterpolator, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverConfig,
     OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut, Vector, VectorViewMut,
 };
-use nalgebra::ComplexField;
 
 #[derive(Debug, PartialEq)]
 pub enum OdeSolverStopReason<T: Scalar> {
