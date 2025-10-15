@@ -245,7 +245,7 @@ mod test {
 
     #[test]
     fn explicit_rk_state_mut() {
-        test_state_mut(test_problem::<M>().tsit45().unwrap());
+        test_state_mut(test_problem::<M>(false).tsit45().unwrap());
     }
     #[test]
     fn explicit_rk_config() {
@@ -253,7 +253,17 @@ mod test {
     }
     #[test]
     fn explicit_rk_test_interpolate() {
-        test_interpolate(test_problem::<M>().tsit45().unwrap());
+        test_interpolate(test_problem::<M>(false).tsit45().unwrap());
+    }
+
+    #[test]
+    fn explicit_rk_test_interpolate_out() {
+        test_interpolate(test_problem::<M>(true).tsit45().unwrap());
+    }
+
+    #[test]
+    fn explicit_rk_test_interpolate_sens() {
+        test_interpolate(test_problem::<M>(false).tsit45_sens().unwrap());
     }
 
     #[test]

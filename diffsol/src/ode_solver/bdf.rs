@@ -1378,7 +1378,7 @@ mod test {
     type LS = crate::NalgebraLU<f64>;
     #[test]
     fn bdf_state_mut() {
-        test_state_mut(test_problem::<M>().bdf::<LS>().unwrap());
+        test_state_mut(test_problem::<M>(false).bdf::<LS>().unwrap());
     }
 
     #[test]
@@ -1388,7 +1388,17 @@ mod test {
 
     #[test]
     fn bdf_test_interpolate() {
-        test_interpolate(test_problem::<M>().bdf::<LS>().unwrap());
+        test_interpolate(test_problem::<M>(false).bdf::<LS>().unwrap());
+    }
+
+    #[test]
+    fn bdf_test_interpolate_out() {
+        test_interpolate(test_problem::<M>(true).bdf::<LS>().unwrap());
+    }
+
+    #[test]
+    fn bdf_test_interpolate_sens() {
+        test_interpolate(test_problem::<M>(false).bdf_sens::<LS>().unwrap());
     }
 
     #[test]

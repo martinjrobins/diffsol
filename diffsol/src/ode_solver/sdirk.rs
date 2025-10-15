@@ -457,15 +457,26 @@ mod test {
 
     #[test]
     fn sdirk_state_mut() {
-        test_state_mut(test_problem::<M>().tr_bdf2::<LS>().unwrap());
+        test_state_mut(test_problem::<M>(false).tr_bdf2::<LS>().unwrap());
     }
     #[test]
     fn sdirk_config() {
         test_config(robertson_ode::<M>(false, 1).0.esdirk34::<LS>().unwrap());
     }
+
     #[test]
     fn sdirk_test_interpolate() {
-        test_interpolate(test_problem::<M>().tr_bdf2::<LS>().unwrap());
+        test_interpolate(test_problem::<M>(false).tr_bdf2::<LS>().unwrap());
+    }
+
+    #[test]
+    fn sdirk_test_interpolate_out() {
+        test_interpolate(test_problem::<M>(true).tr_bdf2::<LS>().unwrap());
+    }
+
+    #[test]
+    fn sdirk_test_interpolate_sens() {
+        test_interpolate(test_problem::<M>(false).tr_bdf2_sens::<LS>().unwrap());
     }
 
     #[test]
