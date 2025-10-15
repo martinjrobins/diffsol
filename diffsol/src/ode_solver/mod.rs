@@ -571,7 +571,9 @@ mod tests {
             assert!(s.interpolate_sens(t0).is_ok());
         }
         s.step().unwrap();
+        let tmid = t0 + (s.state().t - t0) / M::T::from(2.0);
         assert!(s.interpolate(s.state().t).is_ok());
+        assert!(s.interpolate(tmid).is_ok());
         if integrating_out {
             assert!(s.interpolate_out(s.state().t).is_ok());
         } else {
@@ -614,6 +616,22 @@ mod tests {
             assert!(s
                 .interpolate_sens_inplace(s.state().t, &mut s_wrong_vec_length)
                 .is_ok());
+        }
+
+        s.state_mut().y.fill(M::T::from(3.0));
+        assert!(s.interpolate(s.state().t).is_ok());
+        if integrating_out {
+            assert!(s.interpolate_out(s.state().t).is_ok());
+        }
+        if integrating_sens {
+            assert!(s.interpolate_sens(s.state().t).is_ok());
+        }
+        assert!(s.interpolate(tmid).is_err());
+        assert!(s.interpolate_out(tmid).is_err());
+        if integrating_sens {
+            assert!(s.interpolate_sens(tmid).is_err());
+        } else {
+            assert!(s.interpolate_sens(tmid).is_ok());
         }
     }
 
