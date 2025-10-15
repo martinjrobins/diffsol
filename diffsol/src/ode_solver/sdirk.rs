@@ -398,16 +398,20 @@ where
         self.rk.set_stop_time(tstop)
     }
 
-    fn interpolate_sens(&self, t: <Eqn as Op>::T) -> Result<Vec<<Eqn as Op>::V>, DiffsolError> {
-        self.rk.interpolate_sens(t)
+    fn interpolate_sens_inplace(
+        &self,
+        t: <Eqn as Op>::T,
+        sens: &mut [Eqn::V],
+    ) -> Result<(), DiffsolError> {
+        self.rk.interpolate_sens_inplace(t, sens)
     }
 
-    fn interpolate(&self, t: <Eqn>::T) -> Result<<Eqn>::V, DiffsolError> {
-        self.rk.interpolate(t)
+    fn interpolate_inplace(&self, t: <Eqn>::T, y: &mut Eqn::V) -> Result<(), DiffsolError> {
+        self.rk.interpolate_inplace(t, y)
     }
 
-    fn interpolate_out(&self, t: <Eqn>::T) -> Result<<Eqn>::V, DiffsolError> {
-        self.rk.interpolate_out(t)
+    fn interpolate_out_inplace(&self, t: <Eqn>::T, g: &mut Eqn::V) -> Result<(), DiffsolError> {
+        self.rk.interpolate_out_inplace(t, g)
     }
 
     fn state(&self) -> StateRef<'_, Eqn::V> {
@@ -453,15 +457,26 @@ mod test {
 
     #[test]
     fn sdirk_state_mut() {
-        test_state_mut(test_problem::<M>().tr_bdf2::<LS>().unwrap());
+        test_state_mut(test_problem::<M>(false).tr_bdf2::<LS>().unwrap());
     }
     #[test]
     fn sdirk_config() {
         test_config(robertson_ode::<M>(false, 1).0.esdirk34::<LS>().unwrap());
     }
+
     #[test]
     fn sdirk_test_interpolate() {
-        test_interpolate(test_problem::<M>().tr_bdf2::<LS>().unwrap());
+        test_interpolate(test_problem::<M>(false).tr_bdf2::<LS>().unwrap());
+    }
+
+    #[test]
+    fn sdirk_test_interpolate_out() {
+        test_interpolate(test_problem::<M>(true).tr_bdf2::<LS>().unwrap());
+    }
+
+    #[test]
+    fn sdirk_test_interpolate_sens() {
+        test_interpolate(test_problem::<M>(false).tr_bdf2_sens::<LS>().unwrap());
     }
 
     #[test]

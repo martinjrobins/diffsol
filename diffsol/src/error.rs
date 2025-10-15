@@ -70,6 +70,10 @@ pub enum OdeSolverError {
     MassMatrixNotSupported,
     #[error("Stop time is at the current state time")]
     StopTimeAtCurrentTime,
+    #[error("Interpolation vector is not the correct length, expected {expected}, got {found}")]
+    InterpolationVectorWrongSize { expected: usize, found: usize },
+    #[error("Number of sensitivities does not match number of parameters")]
+    SensitivityCountMismatch { expected: usize, found: usize },
     #[error("Interpolation time is after current time")]
     InterpolationTimeAfterCurrentTime,
     #[error("Interpolation time is not within the current step. Step size is zero after calling state_mut()")]

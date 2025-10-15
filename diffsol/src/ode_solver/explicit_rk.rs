@@ -192,16 +192,20 @@ where
         self.rk.set_stop_time(tstop)
     }
 
-    fn interpolate_sens(&self, t: <Eqn as Op>::T) -> Result<Vec<<Eqn as Op>::V>, DiffsolError> {
-        self.rk.interpolate_sens(t)
+    fn interpolate_sens_inplace(
+        &self,
+        t: <Eqn as Op>::T,
+        sens: &mut [Eqn::V],
+    ) -> Result<(), DiffsolError> {
+        self.rk.interpolate_sens_inplace(t, sens)
     }
 
-    fn interpolate(&self, t: <Eqn>::T) -> Result<<Eqn>::V, DiffsolError> {
-        self.rk.interpolate(t)
+    fn interpolate_inplace(&self, t: <Eqn>::T, y: &mut Eqn::V) -> Result<(), DiffsolError> {
+        self.rk.interpolate_inplace(t, y)
     }
 
-    fn interpolate_out(&self, t: <Eqn>::T) -> Result<<Eqn>::V, DiffsolError> {
-        self.rk.interpolate_out(t)
+    fn interpolate_out_inplace(&self, t: <Eqn>::T, g: &mut Eqn::V) -> Result<(), DiffsolError> {
+        self.rk.interpolate_out_inplace(t, g)
     }
 
     fn state(&self) -> StateRef<'_, Eqn::V> {
@@ -241,7 +245,7 @@ mod test {
 
     #[test]
     fn explicit_rk_state_mut() {
-        test_state_mut(test_problem::<M>().tsit45().unwrap());
+        test_state_mut(test_problem::<M>(false).tsit45().unwrap());
     }
     #[test]
     fn explicit_rk_config() {
@@ -249,7 +253,17 @@ mod test {
     }
     #[test]
     fn explicit_rk_test_interpolate() {
-        test_interpolate(test_problem::<M>().tsit45().unwrap());
+        test_interpolate(test_problem::<M>(false).tsit45().unwrap());
+    }
+
+    #[test]
+    fn explicit_rk_test_interpolate_out() {
+        test_interpolate(test_problem::<M>(true).tsit45().unwrap());
+    }
+
+    #[test]
+    fn explicit_rk_test_interpolate_sens() {
+        test_interpolate(test_problem::<M>(false).tsit45_sens().unwrap());
     }
 
     #[test]
