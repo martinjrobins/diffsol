@@ -52,6 +52,19 @@ where
             (None, None, self.problem().eqn.rhs().nout())
         };
 
+        let mut y = Eqn::V::zeros(
+            self.problem().eqn.rhs().nstates(),
+            self.problem().context().clone(),
+        );
+
+        let mut s = vec![
+            Eqn::V::zeros(
+                self.problem().eqn.rhs().nstates(),
+                self.problem().context().clone(),
+            );
+            self.problem().eqn.rhs().nparams()
+        ];
+
         let mut ret = self
             .problem()
             .context()
@@ -76,8 +89,8 @@ where
             while self.state().t < *t {
                 step_reason = self.step()?;
             }
-            let y = self.interpolate(*t)?;
-            let mut s = self.interpolate_sens(*t)?;
+            self.interpolate_inplace(*t, &mut y)?;
+            self.interpolate_sens_inplace(*t, &mut s)?;
             if let Some(out) = self.problem().eqn.out() {
                 let tmp_nout = tmp_nout.as_mut().unwrap();
                 let tmp_nparams = tmp_nparms.as_mut().unwrap();
