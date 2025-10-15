@@ -52,12 +52,19 @@ cudarc = { workspace = true, optional = true, default-features = false, features
 ] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-faer = { workspace = true }
+faer = { workspace = true, features = [
+    "std",
+    "rayon",
+    "sparse-linalg",
+    "rand",
+    "npy",
+] } 
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-faer = { version = "0.23.2", default-features = false, features = [
+faer = { workspace = true, features = [
     "std",
     "sparse-linalg",
+    "rand",
     "npy",
 ] }
 
