@@ -363,6 +363,17 @@ fn criterion_benchmark(c: &mut Criterion) {
         40,
         80
     );
+    
+    bench_diffsl_heat1d!(
+        nalgebra_tsit45_diffsl_heat1d,
+        tsit45,
+        heat1d_diffsl_problem,
+        NalgebraMat<f64>,
+        10,
+        20,
+        40,
+        80
+    );
 
     macro_rules! bench_sundials {
         ($name:ident, $solver:ident) => {

@@ -397,13 +397,8 @@ fn write_out<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     ret_t.push(t);
     let i = ret_t.len() - 1;
     if i >= ret_y.ncols() {
-        const GROWTH_FACTOR: f64 = 1.5;
-        let remaining: f64 = (Eqn::T::from(GROWTH_FACTOR) * (final_time - ret_t[i - 1])
-            / (ret_t[i] - ret_t[i - 1]))
-            .ceil()
-            .into();
-        let n = ret_y.ncols() + (remaining as usize);
-        ret_y.resize_cols(n);
+        const GROWTH_FACTOR: usize = 2;
+        ret_y.resize_cols(GROWTH_FACTOR * ret_y.ncols());
     }
     let mut ret_y_col = ret_y.column_mut(i);
     match s.problem().eqn.out() {
