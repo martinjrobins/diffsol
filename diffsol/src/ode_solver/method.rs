@@ -443,6 +443,7 @@ where
 
 /// Utility function to allocate the return matrix for the `solve_dense`
 /// and `solve_dense_sensitivities` methods.
+#[allow(clippy::type_complexity)]
 fn dense_allocate_return<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     s: &S,
     t_eval: &[Eqn::T],
