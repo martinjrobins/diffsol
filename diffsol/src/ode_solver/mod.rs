@@ -402,9 +402,40 @@ mod tests {
         }
     }
 
+    pub struct TestEqnOut<M: Matrix> {
+        ctx: M::C,
+    }
+
+    impl<M: Matrix> Op for TestEqnOut<M> {
+        type T = M::T;
+        type V = M::V;
+        type M = M;
+        type C = M::C;
+
+        fn nout(&self) -> usize {
+            1
+        }
+        fn nparams(&self) -> usize {
+            0
+        }
+        fn nstates(&self) -> usize {
+            1
+        }
+        fn context(&self) -> &Self::C {
+            &self.ctx
+        }
+    }
+
+    impl<M: Matrix> NonLinearOp for TestEqnOut<M> {
+        fn call_inplace(&self, x: &Self::V, _t: Self::T, y: &mut Self::V) {
+            y.copy_from(x);
+        }
+    }
+
     pub struct TestEqn<M: Matrix> {
         rhs: Rc<TestEqnRhs<M>>,
         init: Rc<TestEqnInit<M>>,
+        out: Rc<TestEqnOut<M>>,
         ctx: M::C,
     }
 
@@ -414,6 +445,7 @@ mod tests {
             Self {
                 rhs: Rc::new(TestEqnRhs { ctx: ctx.clone() }),
                 init: Rc::new(TestEqnInit { ctx: ctx.clone() }),
+                out: Rc::new(TestEqnOut { ctx: ctx.clone() }),
                 ctx,
             }
         }
@@ -446,7 +478,7 @@ mod tests {
         type Mass = ParameterisedOp<'a, UnitCallable<M>>;
         type Root = ParameterisedOp<'a, UnitCallable<M>>;
         type Init = &'a TestEqnInit<M>;
-        type Out = ParameterisedOp<'a, UnitCallable<M>>;
+        type Out = &'a TestEqnOut<M>;
     }
 
     impl<M: Matrix> OdeEquations for TestEqn<M> {
@@ -467,7 +499,7 @@ mod tests {
         }
 
         fn out(&self) -> Option<<Self as OdeEquationsRef<'_>>::Out> {
-            None
+            Some(&self.out)
         }
         fn set_params(&mut self, _p: &Self::V) {
             unimplemented!()
@@ -492,7 +524,7 @@ mod tests {
             None,
             M::T::zero(),
             M::T::one(),
-            false,
+            true,
         )
         .unwrap()
     }
@@ -505,9 +537,21 @@ mod tests {
             .unwrap()
             .assert_eq_st(state.as_ref().y, M::T::from(1e-9));
         assert!(s.interpolate(t1).is_err());
+        assert!(s.interpolate_out(t1).is_err());
         s.step().unwrap();
         assert!(s.interpolate(s.state().t).is_ok());
+        assert!(s.interpolate_out(s.state().t).is_ok());
         assert!(s.interpolate(s.state().t + t1).is_err());
+        assert!(s.interpolate_out(s.state().t + t1).is_err());
+
+        let mut y_wrong_length = M::V::zeros(2, s.problem().context().clone());
+        assert!(s
+            .interpolate_inplace(s.state().t, &mut y_wrong_length)
+            .is_err());
+        let mut g_wrong_length = M::V::zeros(2, s.problem().context().clone());
+        assert!(s
+            .interpolate_out_inplace(s.state().t, &mut g_wrong_length)
+            .is_err());
     }
 
     pub fn test_config<'a, Eqn: OdeEquations + 'a, Method: OdeSolverMethod<'a, Eqn>>(
