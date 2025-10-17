@@ -7,7 +7,7 @@ pub fn heat1d_diffsl_problem<
     M: MatrixHost<T = f64>,
     CG: crate::CodegenModuleJit + crate::CodegenModuleCompile,
     const MGRID: usize,
->() -> (
+>(nthreads: usize) -> (
     OdeSolverProblem<impl crate::OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
@@ -53,7 +53,7 @@ pub fn heat1d_diffsl_problem<
     let problem = OdeBuilder::<M>::new()
         .rtol(1e-6)
         .atol([1e-6])
-        .build_from_diffsl::<CG>(code.as_str())
+        .build_from_diffsl_threaded::<CG>(code.as_str(), nthreads)
         .unwrap();
     let soln = soln::<M>(problem.context().clone(), MGRID, h);
     (problem, soln)

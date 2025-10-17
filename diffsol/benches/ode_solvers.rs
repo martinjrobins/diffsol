@@ -337,14 +337,29 @@ fn criterion_benchmark(c: &mut Criterion) {
             });)+
         };
     }
-
+    
     macro_rules! bench_diffsl_heat1d {
         ($name:ident, $solver:ident, $model_problem:ident, $matrix:ty, $($N:expr),+) => {
             $(#[cfg(feature = "diffsl-llvm")]
             c.bench_function(concat!(stringify!($name), "_", $N), |b| {
                 use diffsol::ode_equations::test_models::heat1d::*;
                 use diffsol::LlvmModule;
-                let (problem, soln) = $model_problem::<$matrix, LlvmModule, $N>();
+                let (problem, soln) = $model_problem::<$matrix, LlvmModule, $N>(1);
+                let t_evals = soln.solution_points.iter().map(|sp| sp.t).collect::<Vec<_>>();
+                b.iter(|| {
+                    benchmarks::$solver::<_>(&problem, &t_evals)
+                })
+            });)+
+        };
+    }
+    
+    macro_rules! bench_diffsl_heat1d_threaded {
+        ($name:ident, $solver:ident, $model_problem:ident, $matrix:ty, $($N:expr),+) => {
+            $(#[cfg(feature = "diffsl-llvm")]
+            c.bench_function(concat!(stringify!($name), "_", $N), |b| {
+                use diffsol::ode_equations::test_models::heat1d::*;
+                use diffsol::LlvmModule;
+                let (problem, soln) = $model_problem::<$matrix, LlvmModule, 80>($N);
                 let t_evals = soln.solution_points.iter().map(|sp| sp.t).collect::<Vec<_>>();
                 b.iter(|| {
                     benchmarks::$solver::<_>(&problem, &t_evals)
@@ -386,6 +401,17 @@ fn criterion_benchmark(c: &mut Criterion) {
         40,
         80
     );
+    
+    bench_diffsl_heat1d_threaded!(
+        nalgebra_tsit45_diffsl_heat1d_threaded,
+        tsit45,
+        heat1d_diffsl_problem,
+        NalgebraMat<f64>,
+        1,
+        2,
+        4,
+        8
+    );
 
     macro_rules! bench_sundials {
         ($name:ident, $solver:ident) => {
@@ -406,6 +432,8 @@ fn criterion_benchmark(c: &mut Criterion) {
     bench_sundials!(sundials_foodweb_bnd_20, idaFoodWeb_bnd_20);
     bench_sundials!(sundials_foodweb_bnd_30, idaFoodWeb_bnd_30);
     bench_sundials!(sundials_roberts_dns, idaRoberts_dns);
+    
+    
 
     macro_rules! bench_sundials_ngroups {
         ($name:ident, $solver:ident, $($N:expr),+) => {

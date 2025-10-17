@@ -141,9 +141,10 @@ impl<M: MatrixHost<T = T>, CG: CodegenModuleJit + CodegenModuleCompile> DiffSl<M
     pub fn compile(
         code: &str,
         ctx: M::C,
+        nthreads: usize,
         include_sensitivities: bool,
     ) -> Result<Self, DiffsolError> {
-        let context = DiffSlContext::<M, CG>::new(code, 1, ctx)?;
+        let context = DiffSlContext::<M, CG>::new(code, nthreads, ctx)?;
         Ok(Self::from_context(context, include_sensitivities))
     }
     pub fn from_context(context: DiffSlContext<M, CG>, include_sensitivities: bool) -> Self {
