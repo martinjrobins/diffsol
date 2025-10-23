@@ -7,16 +7,15 @@ use diffsl::{
     Compiler,
 };
 
+#[cfg(feature = "diffsl-ext")]
+use crate::ode_equations::external_linkage::ExtLinkModule;
 use crate::{
-    error::DiffsolError,
-    find_jacobian_non_zeros, find_matrix_non_zeros, find_sens_non_zeros,
-    jacobian::JacobianColoring,
-    matrix::sparsity::MatrixSparsity,
-    ode_equations::external_linkage::{symbol_map, ExtLinkModule},
-    op::nonlinear_op::NonLinearOpJacobian,
-    ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
-    MatrixHost, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint,
-    OdeEquations, OdeEquationsRef, Op, Scale, Vector, VectorHost,
+    error::DiffsolError, find_jacobian_non_zeros, find_matrix_non_zeros, find_sens_non_zeros,
+    jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
+    op::nonlinear_op::NonLinearOpJacobian, ConstantOp, ConstantOpSens, ConstantOpSensAdjoint,
+    LinearOp, LinearOpTranspose, Matrix, MatrixHost, NonLinearOp, NonLinearOpAdjoint,
+    NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scale, Vector,
+    VectorHost,
 };
 
 pub type T = f64;
@@ -99,8 +98,11 @@ impl<M: Matrix<T = T>, CG: CodegenModuleCompile + CodegenModuleJit> DiffSlContex
     }
 }
 
+#[cfg(feature = "diffsl-ext")]
 impl<M: Matrix<T = T>> DiffSlContext<M, ExtLinkModule> {
     pub fn from_external_linkage(nthreads: usize, ctx: M::C) -> Result<Self, DiffsolError> {
+        use crate::ode_equations::external_linkage::symbol_map;
+
         let mode = match nthreads {
             0 => diffsl::execution::compiler::CompilerMode::MultiThreaded(None),
             1 => diffsl::execution::compiler::CompilerMode::SingleThreaded,
@@ -234,6 +236,7 @@ impl<M: MatrixHost<T = T>, CG: CodegenModule> DiffSl<M, CG> {
     }
 }
 
+#[cfg(feature = "diffsl-ext")]
 impl<M: MatrixHost<T = T>> DiffSl<M, ExtLinkModule> {
     pub fn from_external_linkage(
         ctx: M::C,
