@@ -19,7 +19,7 @@ use num_traits::Pow;
 use num_traits::Zero;
 
 use super::bdf::BdfStatistics;
-use std::ops::MulAssign;
+use std::ops::{MulAssign, SubAssign};
 
 /// A Runge-Kutta method.
 ///
@@ -90,11 +90,6 @@ where
     M: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
 {
-    const MIN_FACTOR: f64 = 0.2;
-    const MAX_FACTOR: f64 = 10.0;
-    const MIN_TIMESTEP: f64 = 1e-13;
-    const MAX_ERROR_TEST_FAILS: usize = 40;
-
     pub(crate) fn new(
         problem: &'a OdeSolverProblem<Eqn>,
         state: RkState<Eqn::V>,
@@ -129,7 +124,7 @@ where
 
         state.set_problem(problem)?;
         let root_finder = if let Some(root_fn) = problem.eqn.root() {
-            let root_finder = RootFinder::new(root_fn.nout(), ctx.clone());
+            let root_finder = RootFinder::new(root_fn.nout(), problem.eqn.nstates(), ctx.clone());
             root_finder.init(&root_fn, &state.y, state.t);
             Some(root_finder)
         } else {
@@ -225,36 +220,45 @@ where
         let s = tableau.s();
         for i in 0..s {
             for j in i..s {
-                assert_eq!(
-                    tableau.a().get_index(i, j),
-                    Eqn::T::zero(),
-                    "Invalid tableau, expected a(i, j) = 0 for i >= j"
-                );
+                if tableau.a().get_index(i, j) != Eqn::T::zero() {
+                    return Err(ode_solver_error!(
+                        InvalidTableau,
+                        format!(
+                            "Invalid tableau, expected a(i, j) = 0 for i >= j, but found a({}, {}) = {}",
+                            i,
+                            j,
+                            tableau.a().get_index(i, j)
+                        )
+                    ));
+                }
             }
         }
 
         // check last row of a is the same as b
         for i in 0..s {
-            assert_eq!(
-                tableau.a().get_index(s - 1, i),
-                tableau.b().get_index(i),
-                "Invalid tableau, expected a(s-1, i) = b(i)"
-            );
+            if tableau.a().get_index(s - 1, i) != tableau.b().get_index(i) {
+                return Err(ode_solver_error!(
+                    InvalidTableau,
+                    "Invalid tableau, expected a(s-1, i) = b(i)"
+                ));
+            }
         }
 
         // check that last c is 1
-        assert_eq!(
-            tableau.c().get_index(s - 1),
-            Eqn::T::one(),
-            "Invalid tableau, expected c(s-1) = 1"
-        );
+        if tableau.c().get_index(s - 1) != Eqn::T::one() {
+            return Err(ode_solver_error!(
+                InvalidTableau,
+                "Invalid tableau, expected c(s-1) = 1"
+            ));
+        }
 
         // check that first c is 0
-        assert_eq!(
-            tableau.c().get_index(0),
-            Eqn::T::zero(),
-            "Invalid tableau, expected c(0) = 0"
-        );
+        if tableau.c().get_index(0) != Eqn::T::zero() {
+            return Err(ode_solver_error!(
+                InvalidTableau,
+                "Invalid tableau, expected c(0) = 0"
+            ));
+        }
         Ok(())
     }
 
@@ -267,54 +271,60 @@ where
         let s = tableau.s();
         for i in 0..s {
             for j in (i + 1)..s {
-                assert_eq!(
-                    tableau.a().get_index(i, j),
-                    Eqn::T::zero(),
-                    "Invalid tableau, expected a(i, j) = 0 for i > j"
-                );
+                if tableau.a().get_index(i, j) != Eqn::T::zero() {
+                    return Err(ode_solver_error!(
+                        InvalidTableau,
+                        "Invalid tableau, expected a(i, j) = 0 for i > j"
+                    ));
+                }
             }
         }
         let gamma = tableau.a().get_index(1, 1);
         //check that for i = 1..s-1, a(i, i) = gamma
         for i in 1..tableau.s() {
-            assert_eq!(
-                tableau.a().get_index(i, i),
-                gamma,
-                "Invalid tableau, expected a(i, i) = gamma = {gamma} for i = 1..s-1",
-            );
+            if tableau.a().get_index(i, i) != gamma {
+                return Err(ode_solver_error!(
+                    InvalidTableau,
+                    format!("Invalid tableau, expected a(i, i) = gamma = {gamma} for i = 1..s-1")
+                ));
+            }
         }
         // if a(0, 0) = gamma, then we're a SDIRK method
         // if a(0, 0) = 0, then we're a ESDIRK method
         // otherwise, error
         let zero = Eqn::T::zero();
         if tableau.a().get_index(0, 0) != zero && tableau.a().get_index(0, 0) != gamma {
-            panic!("Invalid tableau, expected a(0, 0) = 0 or a(0, 0) = gamma");
+            return Err(ode_solver_error!(
+                InvalidTableau,
+                "Invalid tableau, expected a(0, 0) = 0 or a(0, 0) = gamma"
+            ));
         }
         let is_sdirk = tableau.a().get_index(0, 0) == gamma;
 
         // check last row of a is the same as b
         for i in 0..s {
-            assert_eq!(
-                tableau.a().get_index(s - 1, i),
-                tableau.b().get_index(i),
-                "Invalid tableau, expected a(s-1, i) = b(i)"
-            );
+            if tableau.a().get_index(s - 1, i) != tableau.b().get_index(i) {
+                return Err(ode_solver_error!(
+                    InvalidTableau,
+                    "Invalid tableau, expected a(s-1, i) = b(i)"
+                ));
+            }
         }
 
         // check that last c is 1
-        assert_eq!(
-            tableau.c().get_index(s - 1),
-            Eqn::T::one(),
-            "Invalid tableau, expected c(s-1) = 1"
-        );
+        if tableau.c().get_index(s - 1) != Eqn::T::one() {
+            return Err(ode_solver_error!(
+                InvalidTableau,
+                "Invalid tableau, expected c(s-1) = 1"
+            ));
+        }
 
         // check that the first c is 0 for esdirk methods
-        if !is_sdirk {
-            assert_eq!(
-                tableau.c().get_index(0),
-                Eqn::T::zero(),
+        if !is_sdirk && tableau.c().get_index(0) != Eqn::T::zero() {
+            return Err(ode_solver_error!(
+                InvalidTableau,
                 "Invalid tableau, expected c(0) = 0 for esdirk methods"
-            );
+            ));
         }
         Ok(())
     }
@@ -392,14 +402,20 @@ where
         Ok(self.state.h)
     }
 
-    pub(crate) fn factor(&self, error_norm: Eqn::T, safety_factor: f64) -> Eqn::T {
+    pub(crate) fn factor(
+        &self,
+        error_norm: Eqn::T,
+        safety_factor: f64,
+        min_factor: Eqn::T,
+        max_factor: Eqn::T,
+    ) -> Eqn::T {
         let safety = Eqn::T::from(0.9 * safety_factor);
         let mut factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (self.order() as f64 + 1.0)));
-        if factor < Eqn::T::from(Self::MIN_FACTOR) {
-            factor = Eqn::T::from(Self::MIN_FACTOR);
+        if factor < min_factor {
+            factor = min_factor;
         }
-        if factor > Eqn::T::from(Self::MAX_FACTOR) {
-            factor = Eqn::T::from(Self::MAX_FACTOR);
+        if factor > max_factor {
+            factor = max_factor;
         }
         factor
     }
@@ -746,10 +762,12 @@ where
         &mut self,
         h: Eqn::T,
         nattempts: usize,
+        max_error_test_fails: usize,
+        min_timestep: Eqn::T,
     ) -> Result<(), DiffsolError> {
         self.statistics.number_of_error_test_failures += 1;
         // if too many error test failures, then fail
-        if nattempts >= Self::MAX_ERROR_TEST_FAILS {
+        if nattempts >= max_error_test_fails {
             return Err(DiffsolError::from(
                 OdeSolverError::TooManyErrorTestFailures {
                     time: self.state.t.into(),
@@ -757,7 +775,7 @@ where
             ));
         }
         // if step size too small, then fail
-        if abs(h) < Eqn::T::from(Self::MIN_TIMESTEP) {
+        if abs(h) < min_timestep {
             return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
                 time: self.state.t.into(),
             }));
@@ -765,10 +783,14 @@ where
         Ok(())
     }
 
-    pub(crate) fn solve_fail(&mut self, h: Eqn::T) -> Result<(), DiffsolError> {
+    pub(crate) fn solve_fail(
+        &mut self,
+        h: Eqn::T,
+        min_timestep: Eqn::T,
+    ) -> Result<(), DiffsolError> {
         self.statistics.number_of_nonlinear_solver_fails += 1;
         // if step size too small, then fail
-        if abs(h) < Eqn::T::from(Self::MIN_TIMESTEP) {
+        if abs(h) < min_timestep {
             return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
                 time: self.state.t.into(),
             }));
@@ -820,7 +842,7 @@ where
         // check for root within accepted step
         if let Some(root_fn) = self.problem.eqn.root() {
             let ret = self.root_finder.as_ref().unwrap().check_root(
-                &|t| self.interpolate(t),
+                &|t, y| self.interpolate_inplace(t, y),
                 &root_fn,
                 &self.state.y,
                 self.state.t,
@@ -842,11 +864,10 @@ where
         Ok(OdeSolverStopReason::InternalTimestep)
     }
 
-    fn interpolate_from_diff(scale_diff: M::T, y0: &M::V, beta_f: &M::V, diff: &M) -> M::V {
+    fn interpolate_from_diff(scale_diff: M::T, y0: &M::V, beta_f: &M::V, diff: &M, ret: &mut M::V) {
         // ret = old_y + sum_{i=0}^{s_star-1} beta[i] * diff[:, i]
-        let mut ret = y0.clone();
-        diff.gemv(scale_diff, beta_f, M::T::one(), &mut ret);
-        ret
+        ret.copy_from(y0);
+        diff.gemv(scale_diff, beta_f, M::T::one(), ret);
     }
 
     fn interpolate_beta_function(theta: M::T, beta: &M) -> M::V {
@@ -864,11 +885,19 @@ where
         beta_f
     }
 
-    fn interpolate_hermite(scale_diff: M::T, theta: M::T, u0: &M::V, u1: &M::V, diff: &M) -> M::V {
+    fn interpolate_hermite(
+        scale_diff: M::T,
+        theta: M::T,
+        u0: &M::V,
+        u1: &M::V,
+        diff: &M,
+        y: &mut M::V,
+    ) {
         let f0 = diff.column(0);
         let f1 = diff.column(diff.ncols() - 1);
 
-        let mut y = u1.clone() - u0;
+        y.copy_from(u1);
+        y.sub_assign(u0);
         y.axpy_v(
             scale_diff * (theta - M::T::from(1.0)),
             &f0,
@@ -881,13 +910,21 @@ where
             theta * (theta - M::T::from(1.0)),
         );
         y.axpy(theta, u1, M::T::one());
-        y
     }
 
-    pub(crate) fn interpolate(&self, t: M::T) -> Result<M::V, DiffsolError> {
+    pub(crate) fn interpolate_inplace(&self, t: M::T, ret: &mut M::V) -> Result<(), DiffsolError> {
+        if ret.len() != self.state.y.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::InterpolationVectorWrongSize {
+                    expected: self.state.y.len(),
+                    found: ret.len(),
+                },
+            ));
+        }
         if self.is_state_mutated {
             if t == self.state.t {
-                return Ok(self.state.y.clone());
+                ret.copy_from(&self.state.y);
+                return Ok(());
             } else {
                 return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
@@ -910,25 +947,37 @@ where
         let scale_diff = Eqn::T::one();
         if let Some(beta) = self.tableau.beta() {
             let beta_f = Self::interpolate_beta_function(theta, beta);
-            let ret =
-                Self::interpolate_from_diff(scale_diff, &self.old_state.y, &beta_f, &self.diff);
-            Ok(ret)
+            Self::interpolate_from_diff(scale_diff, &self.old_state.y, &beta_f, &self.diff, ret);
         } else {
-            let ret = Self::interpolate_hermite(
+            Self::interpolate_hermite(
                 scale_diff,
                 theta,
                 &self.old_state.y,
                 &self.state.y,
                 &self.diff,
+                ret,
             );
-            Ok(ret)
         }
+        Ok(())
     }
 
-    pub(crate) fn interpolate_out(&self, t: M::T) -> Result<M::V, DiffsolError> {
+    pub(crate) fn interpolate_out_inplace(
+        &self,
+        t: M::T,
+        g: &mut M::V,
+    ) -> Result<(), DiffsolError> {
+        if g.len() != self.state.g.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::InterpolationVectorWrongSize {
+                    expected: self.state.g.len(),
+                    found: g.len(),
+                },
+            ));
+        }
         if self.is_state_mutated {
             if t == self.state.t {
-                return Ok(self.state.g.clone());
+                g.copy_from(&self.state.g);
+                return Ok(());
             } else {
                 return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
@@ -951,25 +1000,49 @@ where
         let scale_diff = Eqn::T::one();
         if let Some(beta) = self.tableau.beta() {
             let beta_f = Self::interpolate_beta_function(theta, beta);
-            let ret =
-                Self::interpolate_from_diff(scale_diff, &self.old_state.g, &beta_f, &self.gdiff);
-            Ok(ret)
+            Self::interpolate_from_diff(scale_diff, &self.old_state.g, &beta_f, &self.gdiff, g);
         } else {
-            let ret = Self::interpolate_hermite(
+            Self::interpolate_hermite(
                 scale_diff,
                 theta,
                 &self.old_state.g,
                 &self.state.g,
                 &self.gdiff,
+                g,
             );
-            Ok(ret)
         }
+        Ok(())
     }
 
-    pub(crate) fn interpolate_sens(&self, t: Eqn::T) -> Result<Vec<M::V>, DiffsolError> {
+    pub(crate) fn interpolate_sens_inplace(
+        &self,
+        t: Eqn::T,
+        ret: &mut [M::V],
+    ) -> Result<(), DiffsolError> {
+        if ret.len() != self.state.s.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::SensitivityCountMismatch {
+                    expected: self.state.s.len(),
+                    found: ret.len(),
+                },
+            ));
+        }
+        for s in ret.iter() {
+            if s.len() != self.state.s[0].len() {
+                return Err(DiffsolError::from(
+                    OdeSolverError::InterpolationVectorWrongSize {
+                        expected: self.state.s[0].len(),
+                        found: s.len(),
+                    },
+                ));
+            }
+        }
         if self.is_state_mutated {
             if t == self.state.t {
-                return Ok(self.state.s.to_vec());
+                for (r, s) in ret.iter_mut().zip(self.state.s.iter()) {
+                    r.copy_from(s);
+                }
+                return Ok(());
             } else {
                 return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
             }
@@ -992,24 +1065,26 @@ where
         let scale_diff = Eqn::T::one();
         if let Some(beta) = self.tableau.beta() {
             let beta_f = Self::interpolate_beta_function(theta, beta);
-            let ret = self
+            for ((y, diff), r) in self
                 .old_state
                 .s
                 .iter()
                 .zip(self.sdiff.iter())
-                .map(|(y, diff)| Self::interpolate_from_diff(scale_diff, y, &beta_f, diff))
-                .collect();
-            Ok(ret)
+                .zip(ret.iter_mut())
+            {
+                Self::interpolate_from_diff(scale_diff, y, &beta_f, diff, r);
+            }
         } else {
-            let ret = self
+            for ((s0, s1), (diff, r)) in self
                 .old_state
                 .s
                 .iter()
                 .zip(self.state.s.iter())
-                .zip(self.sdiff.iter())
-                .map(|((s0, s1), diff)| Self::interpolate_hermite(scale_diff, theta, s0, s1, diff))
-                .collect();
-            Ok(ret)
+                .zip(self.sdiff.iter().zip(ret.iter_mut()))
+            {
+                Self::interpolate_hermite(scale_diff, theta, s0, s1, diff, r);
+            }
         }
+        Ok(())
     }
 }

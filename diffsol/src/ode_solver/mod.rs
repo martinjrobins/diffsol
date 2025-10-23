@@ -3,6 +3,7 @@ pub mod bdf;
 pub mod bdf_state;
 pub mod builder;
 pub mod checkpointing;
+pub mod config;
 pub mod explicit_rk;
 pub mod jacobian_update;
 pub mod method;
@@ -23,17 +24,19 @@ mod tests {
     use nalgebra::ComplexField;
 
     use super::*;
+    use crate::error::{DiffsolError, OdeSolverError};
     use crate::matrix::Matrix;
     use crate::op::unit::UnitCallable;
     use crate::op::ParameterisedOp;
     use crate::{
         op::OpStatistics, AdjointOdeSolverMethod, Context, DenseMatrix, MatrixCommon, MatrixRef,
         NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
-        OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason,
-        Scale, VectorRef, VectorView, VectorViewMut,
+        OdeEquationsRef, OdeSolverConfig, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+        OdeSolverStopReason, Scale, VectorRef, VectorView, VectorViewMut,
     };
     use crate::{
-        ConstantOp, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp, Op, Vector,
+        ConstantOp, ConstantOpSens, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp,
+        NonLinearOpSens, Op, Vector,
     };
     use num_traits::{One, Zero};
 
@@ -348,7 +351,7 @@ mod tests {
             1
         }
         fn nparams(&self) -> usize {
-            0
+            1
         }
         fn nstates(&self) -> usize {
             1
@@ -361,6 +364,12 @@ mod tests {
     impl<M: Matrix> ConstantOp for TestEqnInit<M> {
         fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
             y.fill(M::T::one());
+        }
+    }
+
+    impl<M: Matrix> ConstantOpSens for TestEqnInit<M> {
+        fn sens_mul_inplace(&self, _t: Self::T, _v: &Self::V, sens: &mut Self::V) {
+            sens.fill(M::T::zero());
         }
     }
 
@@ -378,7 +387,7 @@ mod tests {
             1
         }
         fn nparams(&self) -> usize {
-            0
+            1
         }
         fn nstates(&self) -> usize {
             1
@@ -400,9 +409,58 @@ mod tests {
         }
     }
 
+    impl<M: Matrix> NonLinearOpSens for TestEqnRhs<M> {
+        fn sens_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, sens: &mut Self::V) {
+            sens.fill(M::T::zero());
+        }
+    }
+
+    pub struct TestEqnOut<M: Matrix> {
+        ctx: M::C,
+    }
+
+    impl<M: Matrix> Op for TestEqnOut<M> {
+        type T = M::T;
+        type V = M::V;
+        type M = M;
+        type C = M::C;
+
+        fn nout(&self) -> usize {
+            1
+        }
+        fn nparams(&self) -> usize {
+            1
+        }
+        fn nstates(&self) -> usize {
+            1
+        }
+        fn context(&self) -> &Self::C {
+            &self.ctx
+        }
+    }
+
+    impl<M: Matrix> NonLinearOp for TestEqnOut<M> {
+        fn call_inplace(&self, x: &Self::V, _t: Self::T, y: &mut Self::V) {
+            y.copy_from(x);
+        }
+    }
+
+    impl<M: Matrix> NonLinearOpJacobian for TestEqnOut<M> {
+        fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
+            y.copy_from(v);
+        }
+    }
+
+    impl<M: Matrix> NonLinearOpSens for TestEqnOut<M> {
+        fn sens_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, sens: &mut Self::V) {
+            sens.fill(M::T::zero());
+        }
+    }
+
     pub struct TestEqn<M: Matrix> {
         rhs: Rc<TestEqnRhs<M>>,
         init: Rc<TestEqnInit<M>>,
+        out: Rc<TestEqnOut<M>>,
         ctx: M::C,
     }
 
@@ -412,6 +470,7 @@ mod tests {
             Self {
                 rhs: Rc::new(TestEqnRhs { ctx: ctx.clone() }),
                 init: Rc::new(TestEqnInit { ctx: ctx.clone() }),
+                out: Rc::new(TestEqnOut { ctx: ctx.clone() }),
                 ctx,
             }
         }
@@ -426,7 +485,7 @@ mod tests {
             1
         }
         fn nparams(&self) -> usize {
-            0
+            1
         }
         fn nstates(&self) -> usize {
             1
@@ -444,7 +503,7 @@ mod tests {
         type Mass = ParameterisedOp<'a, UnitCallable<M>>;
         type Root = ParameterisedOp<'a, UnitCallable<M>>;
         type Init = &'a TestEqnInit<M>;
-        type Out = ParameterisedOp<'a, UnitCallable<M>>;
+        type Out = &'a TestEqnOut<M>;
     }
 
     impl<M: Matrix> OdeEquations for TestEqn<M> {
@@ -465,7 +524,7 @@ mod tests {
         }
 
         fn out(&self) -> Option<<Self as OdeEquationsRef<'_>>::Out> {
-            None
+            Some(&self.out)
         }
         fn set_params(&mut self, _p: &Self::V) {
             unimplemented!()
@@ -475,7 +534,7 @@ mod tests {
         }
     }
 
-    pub fn test_problem<M: Matrix>() -> OdeSolverProblem<TestEqn<M>> {
+    pub fn test_problem<M: Matrix>(integrate_out: bool) -> OdeSolverProblem<TestEqn<M>> {
         let eqn = TestEqn::<M>::new();
         let atol = eqn.context().vector_from_element(1, M::T::from(1e-6));
         OdeSolverProblem::new(
@@ -490,22 +549,110 @@ mod tests {
             None,
             M::T::zero(),
             M::T::one(),
-            false,
+            integrate_out,
         )
         .unwrap()
     }
 
     pub fn test_interpolate<'a, M: Matrix, Method: OdeSolverMethod<'a, TestEqn<M>>>(mut s: Method) {
         let state = s.checkpoint();
+        let integrating_sens = !s.state().s.is_empty();
+        let integrating_out = s.problem().integrate_out;
         let t0 = state.as_ref().t;
         let t1 = t0 + M::T::from(1e6);
         s.interpolate(t0)
             .unwrap()
             .assert_eq_st(state.as_ref().y, M::T::from(1e-9));
         assert!(s.interpolate(t1).is_err());
+        assert!(s.interpolate_out(t1).is_err());
+        if integrating_sens {
+            assert!(s.interpolate_sens(t1).is_err());
+        } else {
+            assert!(s.interpolate_sens(t0).is_ok());
+        }
         s.step().unwrap();
+        let tmid = t0 + (s.state().t - t0) / M::T::from(2.0);
         assert!(s.interpolate(s.state().t).is_ok());
+        assert!(s.interpolate(tmid).is_ok());
+        if integrating_out {
+            assert!(s.interpolate_out(s.state().t).is_ok());
+        } else {
+            assert!(s.interpolate_out(s.state().t).is_err());
+        }
+        assert!(s.interpolate_sens(s.state().t).is_ok());
         assert!(s.interpolate(s.state().t + t1).is_err());
+        assert!(s.interpolate_out(s.state().t + t1).is_err());
+        if integrating_sens {
+            assert!(s.interpolate_sens(s.state().t + t1).is_err());
+        } else {
+            assert!(s.interpolate_sens(s.state().t + t1).is_ok());
+        }
+
+        let mut y_wrong_length = M::V::zeros(2, s.problem().context().clone());
+        assert!(s
+            .interpolate_inplace(s.state().t, &mut y_wrong_length)
+            .is_err());
+        let mut g_wrong_length = M::V::zeros(2, s.problem().context().clone());
+        assert!(s
+            .interpolate_out_inplace(s.state().t, &mut g_wrong_length)
+            .is_err());
+        let mut s_wrong_length = vec![
+            M::V::zeros(1, s.problem().context().clone()),
+            M::V::zeros(1, s.problem().context().clone()),
+        ];
+        assert!(s
+            .interpolate_sens_inplace(s.state().t, &mut s_wrong_length)
+            .is_err());
+        let mut s_wrong_vec_length = if integrating_sens {
+            vec![M::V::zeros(2, s.problem().context().clone())]
+        } else {
+            vec![]
+        };
+        if integrating_sens {
+            assert!(s
+                .interpolate_sens_inplace(s.state().t, &mut s_wrong_vec_length)
+                .is_err());
+        } else {
+            assert!(s
+                .interpolate_sens_inplace(s.state().t, &mut s_wrong_vec_length)
+                .is_ok());
+        }
+
+        s.state_mut().y.fill(M::T::from(3.0));
+        assert!(s.interpolate(s.state().t).is_ok());
+        if integrating_out {
+            assert!(s.interpolate_out(s.state().t).is_ok());
+        }
+        if integrating_sens {
+            assert!(s.interpolate_sens(s.state().t).is_ok());
+        }
+        assert!(s.interpolate(tmid).is_err());
+        assert!(s.interpolate_out(tmid).is_err());
+        if integrating_sens {
+            assert!(s.interpolate_sens(tmid).is_err());
+        } else {
+            assert!(s.interpolate_sens(tmid).is_ok());
+        }
+    }
+
+    pub fn test_config<'a, Eqn: OdeEquations + 'a, Method: OdeSolverMethod<'a, Eqn>>(
+        mut s: Method,
+    ) {
+        *s.config_mut().as_base_mut().minimum_timestep = Eqn::T::from(1.0e8);
+        assert_eq!(
+            *s.config().as_base_ref().minimum_timestep,
+            Eqn::T::from(1.0e8)
+        );
+        let mut failed = false;
+        for _ in 0..10 {
+            if let Err(DiffsolError::OdeSolverError(OdeSolverError::StepSizeTooSmall { time: _ })) =
+                s.step()
+            {
+                failed = true;
+                break;
+            }
+        }
+        assert!(failed);
     }
 
     pub fn test_state_mut<'a, M: Matrix, Method: OdeSolverMethod<'a, TestEqn<M>>>(mut s: Method) {

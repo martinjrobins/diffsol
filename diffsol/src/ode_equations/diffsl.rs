@@ -37,7 +37,6 @@ pub struct DiffSlContext<M: Matrix<T = T>, CG: CodegenModule> {
     has_root: bool,
     has_out: bool,
     nout: usize,
-    nthreads: usize,
     ctx: M::C,
 }
 
@@ -100,29 +99,8 @@ impl<M: Matrix<T = T>, CG: CodegenModuleCompile + CodegenModuleJit> DiffSlContex
             has_mass,
             has_root,
             has_out,
-            nthreads,
             ctx,
         })
-    }
-
-    pub fn recompile(&mut self, text: &str) -> Result<(), DiffsolError> {
-        let mode = match self.nthreads {
-            0 => diffsl::execution::compiler::CompilerMode::MultiThreaded(None),
-            1 => diffsl::execution::compiler::CompilerMode::SingleThreaded,
-            _ => diffsl::execution::compiler::CompilerMode::MultiThreaded(Some(self.nthreads)),
-        };
-        self.compiler = Compiler::from_discrete_str(text, mode)
-            .map_err(|e| DiffsolError::Other(e.to_string()))?;
-        let (nstates, nparams, nout, _ndata, nroots, has_mass) = self.compiler.get_dims();
-        self.data = RefCell::new(self.compiler.get_new_data());
-        self.ddata = RefCell::new(self.compiler.get_new_data());
-        self.tmp = RefCell::new(M::V::zeros(nstates, self.ctx.clone()));
-        self.nparams = nparams;
-        self.nstates = nstates;
-        self.nout = nout;
-        self.nroots = nroots;
-        self.has_mass = has_mass;
-        Ok(())
     }
 }
 

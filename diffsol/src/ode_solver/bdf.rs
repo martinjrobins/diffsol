@@ -13,11 +13,12 @@ use serde::Serialize;
 use crate::ode_solver_error;
 use crate::{
     matrix::MatrixRef, nonlinear_solver::root::RootFinder, op::bdf::BdfCallable, scalar::scale,
-    AugmentedOdeEquations, BdfState, DenseMatrix, IndexType, JacobianUpdate, MatrixViewMut,
-    NonLinearOp, NonLinearSolver, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState, OdeSolverStopReason, Op, Scalar, Vector, VectorRef, VectorView, VectorViewMut,
+    AugmentedOdeEquations, BdfState, DenseMatrix, JacobianUpdate, MatrixViewMut, NonLinearOp,
+    NonLinearSolver, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+    OdeSolverStopReason, Op, Scalar, Vector, VectorRef, VectorView, VectorViewMut,
 };
 
+use super::config::BdfConfig;
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
 
@@ -110,6 +111,7 @@ pub struct Bdf<
     root_finder: Option<RootFinder<Eqn::V>>,
     is_state_modified: bool,
     jacobian_update: JacobianUpdate<Eqn::T>,
+    config: BdfConfig<Eqn::T>,
 }
 
 impl<M, Eqn, Nls, AugmentedEqn> Clone for Bdf<'_, Eqn, Nls, M, AugmentedEqn>
@@ -162,6 +164,7 @@ where
             root_finder: self.root_finder.clone(),
             is_state_modified: self.is_state_modified,
             jacobian_update: self.jacobian_update.clone(),
+            config: self.config.clone(),
         }
     }
 }
@@ -176,20 +179,12 @@ where
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
     Nls: NonLinearSolver<Eqn::M>,
 {
-    const NEWTON_MAXITER: IndexType = 4;
-    const MIN_FACTOR: f64 = 0.5;
-    const MAX_FACTOR: f64 = 2.1;
-    const MAX_THRESHOLD: f64 = 2.0;
-    const MIN_THRESHOLD: f64 = 0.9;
-    const MIN_TIMESTEP: f64 = 1e-32;
-    const MAX_ERROR_TEST_FAILS: usize = 40;
-
     pub fn new(
         problem: &'a OdeSolverProblem<Eqn>,
         state: BdfState<Eqn::V, M>,
         nonlinear_solver: Nls,
     ) -> Result<Self, DiffsolError> {
-        Self::_new(problem, state, nonlinear_solver, true)
+        Self::_new(problem, state, nonlinear_solver, true, BdfConfig::default())
     }
 
     fn _new(
@@ -197,6 +192,7 @@ where
         mut state: BdfState<Eqn::V, M>,
         mut nonlinear_solver: Nls,
         integrate_main_eqn: bool,
+        config: BdfConfig<Eqn::T>,
     ) -> Result<Self, DiffsolError> {
         // kappa values for difference orders, taken from Table 1 of [1]
         let kappa = [
@@ -226,7 +222,7 @@ where
         state.check_consistent_with_problem(problem)?;
 
         let mut convergence = Convergence::new(problem.rtol, &problem.atol);
-        convergence.set_max_iter(Self::NEWTON_MAXITER);
+        convergence.set_max_iter(config.maximum_newton_iterations);
 
         let op = if integrate_main_eqn {
             // setup linear solver for first step
@@ -245,7 +241,11 @@ where
         let mut root_finder = None;
         let ctx = problem.eqn.context();
         if let Some(root_fn) = problem.eqn.root() {
-            root_finder = Some(RootFinder::new(root_fn.nout(), ctx.clone()));
+            root_finder = Some(RootFinder::new(
+                root_fn.nout(),
+                problem.eqn.nstates(),
+                ctx.clone(),
+            ));
             root_finder
                 .as_ref()
                 .unwrap()
@@ -297,6 +297,7 @@ where
             root_finder,
             is_state_modified,
             jacobian_update: JacobianUpdate::default(),
+            config,
         })
     }
 
@@ -306,6 +307,22 @@ where
         augmented_eqn: AugmentedEqn,
         nonlinear_solver: Nls,
     ) -> Result<Self, DiffsolError> {
+        Self::new_augmented_with_config(
+            state,
+            problem,
+            augmented_eqn,
+            nonlinear_solver,
+            BdfConfig::default(),
+        )
+    }
+
+    pub fn new_augmented_with_config(
+        state: BdfState<Eqn::V, M>,
+        problem: &'a OdeSolverProblem<Eqn>,
+        augmented_eqn: AugmentedEqn,
+        nonlinear_solver: Nls,
+        config: BdfConfig<Eqn::T>,
+    ) -> Result<Self, DiffsolError> {
         state.check_sens_consistent_with_problem(problem, &augmented_eqn)?;
 
         let mut ret = Self::_new(
@@ -313,6 +330,7 @@ where
             state,
             nonlinear_solver,
             augmented_eqn.integrate_main_eqn(),
+            config,
         )?;
 
         ret.state.set_augmented_problem(problem, &augmented_eqn)?;
@@ -456,7 +474,7 @@ where
         self.state.h = new_h;
 
         // if step size too small, then fail
-        if self.state.h.abs() < Eqn::T::from(Self::MIN_TIMESTEP) {
+        if self.state.h.abs() < self.config.minimum_timestep {
             return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
                 time: self.state.t.into(),
             }));
@@ -654,15 +672,21 @@ where
 
     //interpolate solution at time values t* where t-h < t* < t
     //definition of the interpolating polynomial can be found on page 7 of [1]
-    fn interpolate_from_diff(t: Eqn::T, diff: &M, t1: Eqn::T, h: Eqn::T, order: usize) -> Eqn::V {
+    fn interpolate_from_diff(
+        t: Eqn::T,
+        diff: &M,
+        t1: Eqn::T,
+        h: Eqn::T,
+        order: usize,
+        y: &mut Eqn::V,
+    ) {
         let mut time_factor = Eqn::T::from(1.0);
-        let mut order_summation = diff.column(0).into_owned();
+        y.copy_from_view(&diff.column(0));
         for i in 0..order {
             let i_t = Eqn::T::from(i as f64);
             time_factor *= (t - (t1 - h * i_t)) / (h * (Eqn::T::one() + i_t));
-            order_summation += diff.column(i + 1) * scale(time_factor);
+            y.axpy_v(time_factor, &diff.column(i + 1), Eqn::T::one());
         }
-        order_summation
     }
 
     fn error_control(&self) -> Eqn::T {
@@ -860,6 +884,15 @@ where
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
     type State = BdfState<Eqn::V, M>;
+    type Config = BdfConfig<Eqn::T>;
+
+    fn config(&self) -> &BdfConfig<Eqn::T> {
+        &self.config
+    }
+
+    fn config_mut(&mut self) -> &mut BdfConfig<Eqn::T> {
+        &mut self.config
+    }
 
     fn order(&self) -> usize {
         self.state.order
@@ -909,81 +942,108 @@ where
         );
     }
 
-    fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
-        // state must be set
-        let state = &self.state;
-        if self.is_state_modified {
-            if t == state.t {
-                return Ok(state.y.clone());
-            } else {
-                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-            }
-        }
-        // check that t is before/after the current time depending on the direction
-        let is_forward = state.h > Eqn::T::zero();
-        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
-            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
-        }
-        Ok(Self::interpolate_from_diff(
-            t,
-            &state.diff,
-            state.t,
-            state.h,
-            state.order,
-        ))
-    }
-
-    fn interpolate_out(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
-        // state must be set
-        let state = &self.state;
-        if self.is_state_modified {
-            if t == state.t {
-                return Ok(state.g.clone());
-            } else {
-                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-            }
-        }
-        // check that t is before/after the current time depending on the direction
-        let is_forward = state.h > Eqn::T::zero();
-        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
-            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
-        }
-        Ok(Self::interpolate_from_diff(
-            t,
-            &state.gdiff,
-            state.t,
-            state.h,
-            state.order,
-        ))
-    }
-
-    fn interpolate_sens(&self, t: <Eqn as Op>::T) -> Result<Vec<Eqn::V>, DiffsolError> {
-        // state must be set
-        let state = &self.state;
-        if self.is_state_modified {
-            if t == state.t {
-                return Ok(state.s.clone());
-            } else {
-                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
-            }
-        }
-        // check that t is before/after the current time depending on the direction
-        let is_forward = state.h > Eqn::T::zero();
-        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
-            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
-        }
-
-        let mut s = Vec::with_capacity(state.s.len());
-        for i in 0..state.s.len() {
-            s.push(Self::interpolate_from_diff(
-                t,
-                &state.sdiff[i],
-                state.t,
-                state.h,
-                state.order,
+    fn interpolate_inplace(&self, t: Eqn::T, y: &mut Eqn::V) -> Result<(), DiffsolError> {
+        if y.len() != self.state.y.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::InterpolationVectorWrongSize {
+                    expected: self.state.y.len(),
+                    found: y.len(),
+                },
             ));
         }
-        Ok(s)
+        // state must be set
+        let state = &self.state;
+        if self.is_state_modified {
+            if t == state.t {
+                y.copy_from(&state.y);
+                return Ok(());
+            } else {
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+            }
+        }
+        // check that t is before/after the current time depending on the direction
+        let is_forward = state.h > Eqn::T::zero();
+        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
+            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
+        }
+        Self::interpolate_from_diff(t, &state.diff, state.t, state.h, state.order, y);
+        Ok(())
+    }
+
+    fn interpolate_out_inplace(&self, t: Eqn::T, g: &mut Eqn::V) -> Result<(), DiffsolError> {
+        if g.len() != self.state.g.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::InterpolationVectorWrongSize {
+                    expected: self.state.g.len(),
+                    found: g.len(),
+                },
+            ));
+        }
+        // state must be set
+        let state = &self.state;
+        if self.is_state_modified {
+            if t == state.t {
+                g.copy_from(&state.g);
+                return Ok(());
+            } else {
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+            }
+        }
+        // check that t is before/after the current time depending on the direction
+        let is_forward = state.h > Eqn::T::zero();
+        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
+            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
+        }
+        Self::interpolate_from_diff(t, &state.gdiff, state.t, state.h, state.order, g);
+        Ok(())
+    }
+
+    fn interpolate_sens_inplace(
+        &self,
+        t: <Eqn as Op>::T,
+        sens: &mut [Eqn::V],
+    ) -> Result<(), DiffsolError> {
+        if sens.len() != self.state.sdiff.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::SensitivityCountMismatch {
+                    expected: self.state.sdiff.len(),
+                    found: sens.len(),
+                },
+            ));
+        }
+        for s in sens.iter() {
+            if s.len() != self.state.s[0].len() {
+                return Err(DiffsolError::from(
+                    OdeSolverError::InterpolationVectorWrongSize {
+                        expected: self.state.s[0].len(),
+                        found: s.len(),
+                    },
+                ));
+            }
+        }
+
+        // state must be set
+        let state = &self.state;
+        if self.is_state_modified {
+            if t == state.t {
+                for (s, st) in sens.iter_mut().zip(state.s.iter()) {
+                    s.copy_from(st);
+                }
+                return Ok(());
+            } else {
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+            }
+        }
+        // check that t is before/after the current time depending on the direction
+        let is_forward = state.h > Eqn::T::zero();
+        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
+            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
+        }
+
+        for (s, sdiff) in sens.iter_mut().zip(state.sdiff.iter()) {
+            Self::interpolate_from_diff(t, sdiff, state.t, state.h, state.order, s);
+        }
+        Ok(())
     }
 
     fn problem(&self) -> &'a OdeSolverProblem<Eqn> {
@@ -1126,8 +1186,8 @@ where
                 // calculate optimal step size factor as per eq 2.46 of [2]
                 // and reduce step size and try again
                 let mut factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (order as f64 + 1.0)));
-                if factor < Eqn::T::from(Self::MIN_FACTOR) {
-                    factor = Eqn::T::from(Self::MIN_FACTOR);
+                if factor < self.config.minimum_timestep_shrink {
+                    factor = self.config.minimum_timestep_shrink;
                 }
                 let new_h = self._update_step_size(factor)?;
                 self._jacobian_updates(new_h * self.alpha[order], SolverState::ErrorTestFail);
@@ -1138,7 +1198,7 @@ where
                 // update statistics
                 self.statistics.number_of_error_test_failures += 1;
                 if self.statistics.number_of_error_test_failures - old_num_error_test_failures
-                    >= Self::MAX_ERROR_TEST_FAILS
+                    >= self.config.maximum_error_test_failures
                 {
                     return Err(DiffsolError::from(
                         OdeSolverError::TooManyErrorTestFailures {
@@ -1230,14 +1290,14 @@ where
             };
 
             let mut factor = safety * factors[max_index];
-            if factor > Eqn::T::from(Self::MAX_FACTOR) {
-                factor = Eqn::T::from(Self::MAX_FACTOR);
+            if factor > self.config.maximum_timestep_growth {
+                factor = self.config.maximum_timestep_growth;
             }
-            if factor < Eqn::T::from(Self::MIN_FACTOR) {
-                factor = Eqn::T::from(Self::MIN_FACTOR);
+            if factor < self.config.minimum_timestep_shrink {
+                factor = self.config.minimum_timestep_shrink;
             }
-            if factor >= Eqn::T::from(Self::MAX_THRESHOLD)
-                || factor < Eqn::T::from(Self::MIN_THRESHOLD)
+            if factor >= self.config.minimum_timestep_growth
+                || factor < self.config.maximum_timestep_shrink
                 || max_index == 0
                 || max_index == 2
             {
@@ -1249,7 +1309,7 @@ where
         // check for root within accepted step
         if let Some(root_fn) = self.ode_problem.eqn.root() {
             let ret = self.root_finder.as_ref().unwrap().check_root(
-                &|t: <Eqn as Op>::T| self.interpolate(t),
+                &|t: <Eqn as Op>::T, y: &mut <Eqn as Op>::V| self.interpolate_inplace(t, y),
                 &root_fn,
                 self.state.as_ref().y,
                 self.state.as_ref().t,
@@ -1305,8 +1365,8 @@ mod test {
         },
         ode_solver::tests::{
             setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
-            test_adjoint_sum_squares, test_checkpointing, test_interpolate, test_ode_solver,
-            test_problem, test_state_mut, test_state_mut_on_problem,
+            test_adjoint_sum_squares, test_checkpointing, test_config, test_interpolate,
+            test_ode_solver, test_problem, test_state_mut, test_state_mut_on_problem,
         },
         Context, DenseMatrix, FaerLU, FaerMat, FaerSparseLU, FaerSparseMat, MatrixCommon,
         OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
@@ -1318,12 +1378,27 @@ mod test {
     type LS = crate::NalgebraLU<f64>;
     #[test]
     fn bdf_state_mut() {
-        test_state_mut(test_problem::<M>().bdf::<LS>().unwrap());
+        test_state_mut(test_problem::<M>(false).bdf::<LS>().unwrap());
+    }
+
+    #[test]
+    fn bdf_config() {
+        test_config(robertson_ode::<M>(false, 1).0.bdf::<LS>().unwrap());
     }
 
     #[test]
     fn bdf_test_interpolate() {
-        test_interpolate(test_problem::<M>().bdf::<LS>().unwrap());
+        test_interpolate(test_problem::<M>(false).bdf::<LS>().unwrap());
+    }
+
+    #[test]
+    fn bdf_test_interpolate_out() {
+        test_interpolate(test_problem::<M>(true).bdf::<LS>().unwrap());
+    }
+
+    #[test]
+    fn bdf_test_interpolate_sens() {
+        test_interpolate(test_problem::<M>(false).bdf_sens::<LS>().unwrap());
     }
 
     #[test]

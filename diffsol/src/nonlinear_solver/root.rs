@@ -14,15 +14,17 @@ pub struct RootFinder<V: Vector> {
     g0: RefCell<V>,
     g1: RefCell<V>,
     gmid: RefCell<V>,
+    ymid: RefCell<V>,
 }
 
 impl<V: Vector> RootFinder<V> {
-    pub fn new(n: usize, ctx: V::C) -> Self {
+    pub fn new(nroots: usize, nstates: usize, ctx: V::C) -> Self {
         Self {
             t0: RefCell::new(V::T::zero()),
-            g0: RefCell::new(V::zeros(n, ctx.clone())),
-            g1: RefCell::new(V::zeros(n, ctx.clone())),
-            gmid: RefCell::new(V::zeros(n, ctx)),
+            g0: RefCell::new(V::zeros(nroots, ctx.clone())),
+            g1: RefCell::new(V::zeros(nroots, ctx.clone())),
+            gmid: RefCell::new(V::zeros(nroots, ctx.clone())),
+            ymid: RefCell::new(V::zeros(nstates, ctx)),
         }
     }
 
@@ -42,7 +44,7 @@ impl<V: Vector> RootFinder<V> {
     /// We find the root of a function using the method proposed by Sundials [docs](https://sundials.readthedocs.io/en/latest/cvode/Mathematics_link.html#rootfinding)
     pub fn check_root(
         &self,
-        interpolate: &impl Fn(V::T) -> Result<V, DiffsolError>,
+        interpolate_inplace: &impl Fn(V::T, &mut V) -> Result<(), DiffsolError>,
         root_fn: &impl NonLinearOp<V = V, T = V::T>,
         y: &V,
         t: V::T,
@@ -50,6 +52,7 @@ impl<V: Vector> RootFinder<V> {
         let g1 = &mut *self.g1.borrow_mut();
         let g0 = &mut *self.g0.borrow_mut();
         let gmid = &mut *self.gmid.borrow_mut();
+        let ymid = &mut *self.ymid.borrow_mut();
         root_fn.call_inplace(y, t, g1);
 
         let (rootfnd, _gfracmax, imax) = g0.root_finding(g1);
@@ -105,8 +108,8 @@ impl<V: Vector> RootFinder<V> {
                 t_mid = t1 - fracsub * (t1 - t0);
             }
 
-            let ymid = interpolate(t_mid).unwrap();
-            root_fn.call_inplace(&ymid, t_mid, gmid);
+            interpolate_inplace(t_mid, ymid).unwrap();
+            root_fn.call_inplace(ymid, t_mid, gmid);
 
             let (rootfnd, _gfracmax, imax_i32) = g0.root_finding(gmid);
             let lower = imax_i32 >= 0;
@@ -158,8 +161,10 @@ mod tests {
         type V = NalgebraVec<f64>;
         type M = NalgebraMat<f64>;
         let ctx = NalgebraContext;
-        let interpolate =
-            |t: f64| -> Result<V, DiffsolError> { Ok(Vector::from_vec(vec![t], ctx.clone())) };
+        let interpolate_inplace = |t: f64, y: &mut V| -> Result<(), DiffsolError> {
+            y[0] = t;
+            Ok(())
+        };
         let p = V::zeros(0, ctx.clone());
         let root_fn = ClosureNoJac::<M, _>::new(
             |y: &V, _p: &V, _t: f64, g: &mut V| {
@@ -173,10 +178,10 @@ mod tests {
         let root_fn = ParameterisedOp::new(&root_fn, &p);
 
         // check no root
-        let root_finder = RootFinder::new(1, ctx.clone());
+        let root_finder = RootFinder::new(1, 1, ctx.clone());
         root_finder.init(&root_fn, &Vector::from_vec(vec![0.0], ctx.clone()), 0.0);
         let root = root_finder.check_root(
-            &interpolate,
+            &interpolate_inplace,
             &root_fn,
             &Vector::from_vec(vec![0.3], ctx.clone()),
             0.3,
@@ -184,10 +189,10 @@ mod tests {
         assert_eq!(root, None);
 
         // check root
-        let root_finder = RootFinder::new(1, ctx.clone());
+        let root_finder = RootFinder::new(1, 1, ctx.clone());
         root_finder.init(&root_fn, &Vector::from_vec(vec![0.0], ctx.clone()), 0.0);
         let root = root_finder.check_root(
-            &interpolate,
+            &interpolate_inplace,
             &root_fn,
             &Vector::from_vec(vec![1.3], ctx.clone()),
             1.3,

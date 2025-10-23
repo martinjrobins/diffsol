@@ -3,6 +3,7 @@ pub mod exponential_decay;
 pub mod exponential_decay_with_algebraic;
 pub mod foodweb;
 pub mod gaussian_decay;
+pub mod heat1d;
 pub mod heat2d;
 pub mod robertson;
 pub mod robertson_ode;

@@ -8,8 +8,8 @@ use crate::OdeSolverStopReason;
 use crate::RkState;
 use crate::Tableau;
 use crate::{
-    AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverMethod,
-    OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
+    AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, ExplicitRkConfig, OdeEquations,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
 };
 use num_traits::One;
 
@@ -51,6 +51,7 @@ pub struct ExplicitRk<
 {
     rk: Rk<'a, Eqn, M>,
     augmented_eqn: Option<AugmentedEqn>,
+    config: ExplicitRkConfig<Eqn::T>,
 }
 
 impl<Eqn, M, AugmentedEqn> Clone for ExplicitRk<'_, Eqn, M, AugmentedEqn>
@@ -64,6 +65,7 @@ where
         Self {
             rk: self.rk.clone(),
             augmented_eqn: self.augmented_eqn.clone(),
+            config: self.config.clone(),
         }
     }
 }
@@ -84,6 +86,7 @@ where
         Ok(Self {
             rk: Rk::new(problem, state, tableau)?,
             augmented_eqn: None,
+            config: ExplicitRkConfig::default(),
         })
     }
 
@@ -97,6 +100,7 @@ where
         Ok(Self {
             rk: Rk::new_augmented(problem, state, tableau, &augmented_eqn)?,
             augmented_eqn: Some(augmented_eqn),
+            config: ExplicitRkConfig::default(),
         })
     }
 
@@ -113,6 +117,15 @@ where
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
 {
     type State = RkState<Eqn::V>;
+    type Config = ExplicitRkConfig<Eqn::T>;
+
+    fn config(&self) -> &ExplicitRkConfig<Eqn::T> {
+        &self.config
+    }
+
+    fn config_mut(&mut self) -> &mut ExplicitRkConfig<Eqn::T> {
+        &mut self.config
+    }
 
     fn problem(&self) -> &'a OdeSolverProblem<Eqn> {
         self.rk.problem()
@@ -154,13 +167,23 @@ where
                 self.rk.do_stage(i, h, self.augmented_eqn.as_mut());
             }
             let error_norm = self.rk.error_norm(h, self.augmented_eqn.as_mut());
-            let factor = self.rk.factor(error_norm, 1.0);
+            let factor = self.rk.factor(
+                error_norm,
+                1.0,
+                self.config.minimum_timestep_shrink,
+                self.config.maximum_timestep_growth,
+            );
             if error_norm < Eqn::T::one() {
                 break factor;
             }
             h *= factor;
             nattempts += 1;
-            self.rk.error_test_fail(h, nattempts)?;
+            self.rk.error_test_fail(
+                h,
+                nattempts,
+                self.config.maximum_error_test_failures,
+                self.config.minimum_timestep,
+            )?;
         };
         self.rk.step_accepted(h, h * factor, false)
     }
@@ -169,16 +192,20 @@ where
         self.rk.set_stop_time(tstop)
     }
 
-    fn interpolate_sens(&self, t: <Eqn as Op>::T) -> Result<Vec<<Eqn as Op>::V>, DiffsolError> {
-        self.rk.interpolate_sens(t)
+    fn interpolate_sens_inplace(
+        &self,
+        t: <Eqn as Op>::T,
+        sens: &mut [Eqn::V],
+    ) -> Result<(), DiffsolError> {
+        self.rk.interpolate_sens_inplace(t, sens)
     }
 
-    fn interpolate(&self, t: <Eqn>::T) -> Result<<Eqn>::V, DiffsolError> {
-        self.rk.interpolate(t)
+    fn interpolate_inplace(&self, t: <Eqn>::T, y: &mut Eqn::V) -> Result<(), DiffsolError> {
+        self.rk.interpolate_inplace(t, y)
     }
 
-    fn interpolate_out(&self, t: <Eqn>::T) -> Result<<Eqn>::V, DiffsolError> {
-        self.rk.interpolate_out(t)
+    fn interpolate_out_inplace(&self, t: <Eqn>::T, g: &mut Eqn::V) -> Result<(), DiffsolError> {
+        self.rk.interpolate_out_inplace(t, g)
     }
 
     fn state(&self) -> StateRef<'_, Eqn::V> {
@@ -194,15 +221,18 @@ where
 mod test {
     use crate::{
         matrix::dense_nalgebra_serial::NalgebraMat,
-        ode_equations::test_models::exponential_decay::{
-            exponential_decay_problem, exponential_decay_problem_adjoint,
-            exponential_decay_problem_sens, exponential_decay_problem_with_root,
-            negative_exponential_decay_problem,
+        ode_equations::test_models::{
+            exponential_decay::{
+                exponential_decay_problem, exponential_decay_problem_adjoint,
+                exponential_decay_problem_sens, exponential_decay_problem_with_root,
+                negative_exponential_decay_problem,
+            },
+            robertson_ode::robertson_ode,
         },
         ode_solver::tests::{
             setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
-            test_adjoint_sum_squares, test_checkpointing, test_interpolate, test_ode_solver,
-            test_problem, test_state_mut, test_state_mut_on_problem,
+            test_adjoint_sum_squares, test_checkpointing, test_config, test_interpolate,
+            test_ode_solver, test_problem, test_state_mut, test_state_mut_on_problem,
         },
         Context, DenseMatrix, MatrixCommon, NalgebraLU, NalgebraVec, OdeEquations, OdeSolverMethod,
         Op, Vector, VectorView,
@@ -215,11 +245,25 @@ mod test {
 
     #[test]
     fn explicit_rk_state_mut() {
-        test_state_mut(test_problem::<M>().tsit45().unwrap());
+        test_state_mut(test_problem::<M>(false).tsit45().unwrap());
+    }
+    #[test]
+    fn explicit_rk_config() {
+        test_config(robertson_ode::<M>(false, 1).0.tsit45().unwrap());
     }
     #[test]
     fn explicit_rk_test_interpolate() {
-        test_interpolate(test_problem::<M>().tsit45().unwrap());
+        test_interpolate(test_problem::<M>(false).tsit45().unwrap());
+    }
+
+    #[test]
+    fn explicit_rk_test_interpolate_out() {
+        test_interpolate(test_problem::<M>(true).tsit45().unwrap());
+    }
+
+    #[test]
+    fn explicit_rk_test_interpolate_sens() {
+        test_interpolate(test_problem::<M>(false).tsit45_sens().unwrap());
     }
 
     #[test]
@@ -258,6 +302,29 @@ mod test {
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 32
+        number_of_jac_muls: 0
+        number_of_matrix_evals: 0
+        number_of_jac_adj_muls: 0
+        "###);
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn test_tsit45_nalgebra_heat1d_diffsl() {
+        use crate::ode_equations::test_models::heat1d::heat1d_diffsl_problem;
+
+        let (problem, soln) = heat1d_diffsl_problem::<M, diffsl::LlvmModule, 10>();
+        let mut s = problem.tsit45().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+        insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
+        number_of_linear_solver_setups: 0
+        number_of_steps: 93
+        number_of_error_test_failures: 9
+        number_of_nonlinear_solver_iterations: 0
+        number_of_nonlinear_solver_fails: 0
+        "###);
+        insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
+        number_of_calls: 0
         number_of_jac_muls: 0
         number_of_matrix_evals: 0
         number_of_jac_adj_muls: 0

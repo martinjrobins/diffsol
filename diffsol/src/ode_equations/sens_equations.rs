@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use crate::{
     op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations, ConstantOp, ConstantOpSens,
     Matrix, NonLinearOp, NonLinearOpSens, OdeEquations, OdeEquationsImplicitSens, OdeEquationsRef,
-    OdeEquationsSens, OdeSolverProblem, Op, Vector,
+    OdeSolverProblem, Op, Vector,
 };
 
 pub struct SensInit<'a, Eqn>
@@ -64,7 +64,7 @@ where
 
 impl<Eqn> ConstantOp for SensInit<'_, Eqn>
 where
-    Eqn: OdeEquationsSens,
+    Eqn: OdeEquationsImplicitSens,
 {
     fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
         self.eqn.init().sens_mul_inplace(self.t0, &self.tmp, y);
