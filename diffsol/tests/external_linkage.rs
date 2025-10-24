@@ -1,9 +1,9 @@
-use diffsol::{
-    ode_equations::external_linkage::{RealType, UIntType},
-    DenseMatrix, OdeBuilder, OdeSolverMethod,
-};
-type M = diffsol::NalgebraMat<f64>;
-type LS = diffsol::NalgebraLU<f64>;
+#[cfg(not(feature = "diffsl-ext"))]
+type RealType = f64;
+#[cfg(not(feature = "diffsl-ext"))]
+type UIntType = u32;
+#[cfg(feature = "diffsl-ext")]
+use diffsol::ode_equations::external_linkage::{RealType, UIntType};
 
 #[no_mangle]
 extern "C" fn stop(
@@ -174,7 +174,12 @@ extern "C" fn set_id(id: *mut RealType) {
 #[no_mangle]
 extern "C" fn set_constants(_thread_id: UIntType, _thread_dim: UIntType) {}
 
-fn main() {
+#[cfg(feature = "diffsl-ext")]
+#[test]
+fn logistic() {
+    use diffsol::{DenseMatrix, OdeBuilder, OdeSolverMethod};
+    type M = diffsol::NalgebraMat<f64>;
+    type LS = diffsol::NalgebraLU<f64>;
     let r = 1.0;
     let k = 10.0;
     let y0 = 0.1;
@@ -185,5 +190,16 @@ fn main() {
         .unwrap();
     let mut solver = problem.bdf::<LS>().unwrap();
     let t = 0.4;
-    let _ = solver.solve(t).unwrap();
+    let (ys, ts) = solver.solve(t).unwrap();
+    for (i, t) in ts.iter().enumerate() {
+        let y = ys.column(i);
+        let expect_y = k / (1.0 + (k - y0) * (-r * t).exp() / y0);
+        assert!(
+            (y[0] - expect_y).abs() < 1e-6,
+            "at t={:.3}, got {}, expected {}",
+            t,
+            y[0],
+            expect_y
+        );
+    }
 }

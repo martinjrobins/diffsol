@@ -821,6 +821,7 @@ mod tests {
         diffsl_logistic_growth::<crate::FaerSparseMat<f64>, diffsl::LlvmModule>();
     }
 
+    #[allow(dead_code)]
     fn diffsl_logistic_growth<
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T = f64> + DefaultSolver,
         CG: CodegenModuleJit + CodegenModuleCompile,

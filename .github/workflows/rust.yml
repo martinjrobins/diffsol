@@ -117,7 +117,7 @@ jobs:
     - name: Set features variable and install dependencies (Ubuntu)
       if: matrix.os == 'ubuntu-latest' && matrix.book == false
       run: |
-        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse" >> $GITHUB_ENV
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-ext --features diffsl-llvm17 --features diffsl-cranelift --features suitesparse" >> $GITHUB_ENV
         sudo apt-get update
         sudo apt-get install -y libsuitesparse-dev
     - name: Install Trunk
@@ -134,11 +134,11 @@ jobs:
     - name: Set features variable and install dependencies (macOS)
       if: matrix.os == 'macos-13' || matrix.os == 'macos-latest'
       run: |
-        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift" >> $GITHUB_ENV
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-ext --features diffsl-llvm17 --features diffsl-cranelift" >> $GITHUB_ENV
     - name: Set features variable and install dependencies (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-cranelift" >> $GITHUB_ENV
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-ext --features diffsl-cranelift" >> $GITHUB_ENV
     - name: Run tests - default features
       if: matrix.tests == true
       run: cargo test --verbose
