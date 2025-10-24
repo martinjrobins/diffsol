@@ -1,6 +1,6 @@
 use diffsol::{
     ode_equations::external_linkage::{RealType, UIntType},
-    DenseMatrix, OdeBuilder, OdeSolverMethod,
+    OdeBuilder, OdeSolverMethod,
 };
 type M = diffsol::NalgebraMat<f64>;
 type LS = diffsol::NalgebraLU<f64>;
@@ -177,7 +177,6 @@ extern "C" fn set_constants(_thread_id: UIntType, _thread_dim: UIntType) {}
 fn main() {
     let r = 1.0;
     let k = 10.0;
-    let y0 = 0.1;
     let problem = OdeBuilder::<M>::new()
         .rtol(1e-6)
         .p([r, k])
