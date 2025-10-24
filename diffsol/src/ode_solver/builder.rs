@@ -1,3 +1,5 @@
+#[cfg(feature = "diffsl-ext")]
+use crate::ode_equations::external_linkage::ExtLinkModule;
 use crate::{
     error::{DiffsolError, OdeSolverError},
     matrix::dense_nalgebra_serial::NalgebraMat,
@@ -988,6 +990,23 @@ where
         #[cfg(not(feature = "diffsl-cranelift"))]
         let include_sensitivities = M::is_sparse();
         let eqn = crate::DiffSl::compile(code, self.ctx.clone(), include_sensitivities)?;
+        // if the user hasn't set the parameters, resize them to match the number of parameters in the equations
+        let nparams = eqn.rhs().nparams();
+        if self.p.len() != nparams && self.p.is_empty() {
+            self.p.resize(nparams, 0.0);
+        }
+        self.build_from_eqn(eqn)
+    }
+
+    #[cfg(feature = "diffsl-ext")]
+    pub fn build_from_external_linkage(
+        mut self,
+    ) -> Result<OdeSolverProblem<crate::DiffSl<M, ExtLinkModule>>, DiffsolError>
+    where
+        M: Matrix<V: crate::VectorHost, T = f64>,
+    {
+        let include_sensitivities = M::is_sparse() && cfg!(feature = "diffsl-ext-sens");
+        let eqn = crate::DiffSl::from_external_linkage(self.ctx.clone(), include_sensitivities)?;
         // if the user hasn't set the parameters, resize them to match the number of parameters in the equations
         let nparams = eqn.rhs().nparams();
         if self.p.len() != nparams && self.p.is_empty() {

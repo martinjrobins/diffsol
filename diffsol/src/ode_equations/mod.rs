@@ -8,6 +8,9 @@ use serde::Serialize;
 pub mod adjoint_equations;
 #[cfg(feature = "diffsl")]
 pub mod diffsl;
+#[cfg(feature = "diffsl-ext")]
+pub mod external_linkage;
+
 pub mod sens_equations;
 pub mod test_models;
 
