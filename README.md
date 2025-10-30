@@ -1,4 +1,5 @@
 <div align="center">
+<p></p><img src="https://raw.githubusercontent.com/martinjrobins/diffsol/refs/heads/main/assets/diffsol_rectangle.svg" alt="Diffsol logo" width="300"/></p>
 <a href="https://docs.rs/diffsol">
     <img src="https://img.shields.io/crates/v/diffsol.svg?label=docs&color=blue&logo=rust" alt="docs.rs badge">
 </a>
@@ -10,7 +11,7 @@
 </a>
 </div>
 
-# Diffsol
+---
 
 Diffsol is a library for solving ordinary differential equations (ODEs) or semi-explicit differential algebraic equations (DAEs) in Rust. It can solve equations in the following form:
 
