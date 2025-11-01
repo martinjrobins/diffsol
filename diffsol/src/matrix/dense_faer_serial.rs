@@ -337,7 +337,7 @@ impl<T: Scalar> Matrix for FaerMat<T> {
         let data = Mat::from_fn(dim, dim, |i, j| if i == j { v[i] } else { T::zero() });
         Self {
             data,
-            context: v.context().clone(),
+            context: *v.context(),
         }
     }
     fn partition_indices_by_zero_diagonal(
@@ -356,8 +356,8 @@ impl<T: Scalar> Matrix for FaerMat<T> {
             },
         );
         (
-            <Self::V as Vector>::Index::from_vec(zero_indices, self.context.clone()),
-            <Self::V as Vector>::Index::from_vec(nonzero_indices, self.context.clone()),
+            <Self::V as Vector>::Index::from_vec(zero_indices, self.context),
+            <Self::V as Vector>::Index::from_vec(nonzero_indices, self.context),
         )
     }
     fn set_column(&mut self, j: IndexType, v: &Self::V) {

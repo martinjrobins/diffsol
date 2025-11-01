@@ -676,10 +676,10 @@ mod tests {
         let ctx = problem.eqn.context();
         let state = RkState {
             t: 0.0,
-            y: Vcpu::from_vec(vec![1.0, 1.0], ctx.clone()),
-            dy: Vcpu::from_vec(vec![1.0, 1.0], ctx.clone()),
-            g: Vcpu::zeros(0, ctx.clone()),
-            dg: Vcpu::zeros(0, ctx.clone()),
+            y: Vcpu::from_vec(vec![1.0, 1.0], *ctx),
+            dy: Vcpu::from_vec(vec![1.0, 1.0], *ctx),
+            g: Vcpu::zeros(0, *ctx),
+            dg: Vcpu::zeros(0, *ctx),
             sg: Vec::new(),
             dsg: Vec::new(),
             s: Vec::new(),
@@ -696,12 +696,12 @@ mod tests {
         //       |0 -a|
         // F(s, t)_0 =  |a 0| |1| = |a| = |0.1|
         //              |0 a| |2|   |2a| = |0.2|
-        let v = Vcpu::from_vec(vec![1.0, 2.0], ctx.clone());
+        let v = Vcpu::from_vec(vec![1.0, 2.0], *ctx);
         let f = adj_eqn.rhs.call(&v, state.t);
-        let f_expect = Vcpu::from_vec(vec![0.1, 0.2], ctx.clone());
+        let f_expect = Vcpu::from_vec(vec![0.1, 0.2], *ctx);
         f.assert_eq_st(&f_expect, 1e-10);
 
-        let mut adj_eqn = AdjointEquations::new(&problem, context.clone(), true);
+        let mut adj_eqn = AdjointEquations::new(&problem, context, true);
 
         // f_x^T = |-a 0|
         //         |0 -a|
@@ -727,7 +727,7 @@ mod tests {
         //              |0  0| |2|  |0|  = |0|
         adj_eqn.set_index(0);
         let out = adj_eqn.out.call(&v, state.t);
-        let out_expect = Vcpu::from_vec(vec![3.0, 0.0], ctx.clone());
+        let out_expect = Vcpu::from_vec(vec![3.0, 0.0], *ctx);
         out.assert_eq_st(&out_expect, 1e-10);
 
         // F(λ, x, t) = -f^T_x(x, t) λ - g^T_x(x,t)
@@ -736,7 +736,7 @@ mod tests {
         // F(s, t)_0 =  |a 0| |1| - |1.0| = | a - 1| = |-0.9|
         //              |0 a| |2|   |2.0|   |2a - 2| = |-1.8|
         let f = adj_eqn.rhs.call(&v, state.t);
-        let f_expect = Vcpu::from_vec(vec![-0.9, -1.8], ctx.clone());
+        let f_expect = Vcpu::from_vec(vec![-0.9, -1.8], *ctx);
         f.assert_eq_st(&f_expect, 1e-10);
     }
 
@@ -748,10 +748,10 @@ mod tests {
         let ctx = problem.eqn.context();
         let state = RkState {
             t: 0.0,
-            y: FaerVec::from_vec(vec![1.0, 1.0], ctx.clone()),
-            dy: FaerVec::from_vec(vec![1.0, 1.0], ctx.clone()),
-            g: FaerVec::zeros(0, ctx.clone()),
-            dg: FaerVec::zeros(0, ctx.clone()),
+            y: FaerVec::from_vec(vec![1.0, 1.0], *ctx),
+            dy: FaerVec::from_vec(vec![1.0, 1.0], *ctx),
+            g: FaerVec::zeros(0, *ctx),
+            dg: FaerVec::zeros(0, *ctx),
             sg: Vec::new(),
             dsg: Vec::new(),
             s: Vec::new(),
@@ -792,9 +792,9 @@ mod tests {
         // F(s, t)_0 =  |a 0| |1| - |1.0| = |a - 1| = |-0.9|
         //              |0 a| |2|   |2.0|   |2a - 2| = |-1.8|
         adj_eqn.set_index(0);
-        let v = FaerVec::from_vec(vec![1.0, 2.0], ctx.clone());
+        let v = FaerVec::from_vec(vec![1.0, 2.0], *ctx);
         let f = adj_eqn.rhs.call(&v, state.t);
-        let f_expect = FaerVec::from_vec(vec![-0.9, -1.8], ctx.clone());
+        let f_expect = FaerVec::from_vec(vec![-0.9, -1.8], *ctx);
         f.assert_eq_st(&f_expect, 1e-10);
     }
 }

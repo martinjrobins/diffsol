@@ -29,7 +29,7 @@ impl CostFunction for Problem {
 
     fn cost(&self, param: &Self::Param) -> Result<Self::Output, argmin_math::Error> {
         let mut problem = self.problem.borrow_mut();
-        let context = problem.eqn().context().clone();
+        let context = *problem.eqn().context();
         problem
             .eqn_mut()
             .set_params(&V::from_vec(param.clone(), context));
@@ -54,7 +54,7 @@ impl Gradient for Problem {
 
     fn gradient(&self, param: &Self::Param) -> Result<Self::Gradient, argmin_math::Error> {
         let mut problem = self.problem.borrow_mut();
-        let context = problem.eqn().context().clone();
+        let context = *problem.eqn().context();
         problem
             .eqn_mut()
             .set_params(&V::from_vec(param.clone(), context));
@@ -63,7 +63,7 @@ impl Gradient for Problem {
             Ok(ys) => ys,
             Err(_) => return Ok(vec![f64::MAX / 1000.; param.len()]),
         };
-        let mut g_m = M::zeros(2, self.ts_data.len(), problem.eqn().context().clone());
+        let mut g_m = M::zeros(2, self.ts_data.len(), *problem.eqn().context());
         for j in 0..g_m.ncols() {
             let g_m_i = (ys.column(j) - self.ys_data.column(j)) * Scale(2.0);
             g_m.column_mut(j).copy_from(&g_m_i);

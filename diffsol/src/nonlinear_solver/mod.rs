@@ -152,7 +152,7 @@ pub mod tests {
     fn test_newton_cpu_square() {
         let lu = LU::default();
         let (op, rtol, atol, soln) = get_square_problem::<MCpu>();
-        let p = NalgebraVec::zeros(0, op.context().clone());
+        let p = NalgebraVec::zeros(0, *op.context());
         let op = ParameterisedOp::new(&op, &p);
         let s = NewtonNonlinearSolver::new(lu);
         test_nonlinear_solver(s, op, rtol, &atol, soln);

@@ -130,7 +130,7 @@ pub mod tests {
     #[test]
     fn test_lu_nalgebra() {
         let (op, rtol, atol, solns) = linear_problem::<NalgebraMat<f64>>();
-        let p = NalgebraVec::zeros(0, op.context().clone());
+        let p = NalgebraVec::zeros(0, *op.context());
         let op = ParameterisedOp::new(&op, &p);
         let s = NalgebraLU::default();
         test_linear_solver(s, op, rtol, &atol, solns);
@@ -138,7 +138,7 @@ pub mod tests {
     #[test]
     fn test_lu_faer() {
         let (op, rtol, atol, solns) = linear_problem::<FaerMat<f64>>();
-        let p = FaerVec::zeros(0, op.context().clone());
+        let p = FaerVec::zeros(0, *op.context());
         let op = ParameterisedOp::new(&op, &p);
         let s = FaerLU::default();
         test_linear_solver(s, op, rtol, &atol, solns);

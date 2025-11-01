@@ -333,11 +333,11 @@ impl AdamW {
         let lr = 1e-2;
         let betas = (0.9, 0.999);
         let eps = 1e-8;
-        let m = V::zeros(nparams, ctx.clone());
-        let m_hat = V::zeros(nparams, ctx.clone());
-        let v = V::zeros(nparams, ctx.clone());
-        let v_hat = V::zeros(nparams, ctx.clone());
-        let grads2 = V::zeros(nparams, ctx.clone());
+        let m = V::zeros(nparams, ctx);
+        let m_hat = V::zeros(nparams, ctx);
+        let v = V::zeros(nparams, ctx);
+        let v_hat = V::zeros(nparams, ctx);
+        let grads2 = V::zeros(nparams, ctx);
         let lambda = 1e-2;
         Self {
             lr,

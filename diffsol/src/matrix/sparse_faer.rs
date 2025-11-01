@@ -195,28 +195,28 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, FaerSparseMat<T>>
                 ul_sym,
                 FaerVecIndex {
                     data: ul_blk.src_indices,
-                    context: ctx.clone(),
+                    context: *ctx,
                 },
             ),
             (
                 ur_sym,
                 FaerVecIndex {
                     data: ur_blk.src_indices,
-                    context: ctx.clone(),
+                    context: *ctx,
                 },
             ),
             (
                 ll_sym,
                 FaerVecIndex {
                     data: ll_blk.src_indices,
-                    context: ctx.clone(),
+                    context: *ctx,
                 },
             ),
             (
                 lr_sym,
                 FaerVecIndex {
                     data: lr_blk.src_indices,
-                    context: ctx.clone(),
+                    context: *ctx,
                 },
             ),
         ]
@@ -326,7 +326,7 @@ impl<T: Scalar> Matrix for FaerSparseMat<T> {
             .collect::<Vec<_>>();
         Self {
             data: SparseColMat::try_new_from_triplets(dim, dim, &triplets).unwrap(),
-            context: v.context().clone(),
+            context: *v.context(),
         }
     }
 
@@ -347,8 +347,8 @@ impl<T: Scalar> Matrix for FaerSparseMat<T> {
             indices_zero_diag.push(j);
         }
         (
-            <Self::V as Vector>::Index::from_vec(indices_zero_diag, self.context.clone()),
-            <Self::V as Vector>::Index::from_vec(indices_non_zero_diag, self.context.clone()),
+            <Self::V as Vector>::Index::from_vec(indices_zero_diag, self.context),
+            <Self::V as Vector>::Index::from_vec(indices_non_zero_diag, self.context),
         )
     }
 

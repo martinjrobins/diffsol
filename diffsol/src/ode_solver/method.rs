@@ -497,7 +497,7 @@ mod test {
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let k = 0.1;
-        let y0 = NalgebraVec::from_vec(vec![1.0, 1.0], problem.context().clone());
+        let y0 = NalgebraVec::from_vec(vec![1.0, 1.0], *problem.context());
         let expect = |t: f64| &y0 * scale(f64::exp(-k * t));
         let (y, t) = s.solve(10.0).unwrap();
         assert!((t[0] - 0.0).abs() < 1e-10);
@@ -514,13 +514,13 @@ mod test {
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let k = 0.1;
-        let y0 = NalgebraVec::from_vec(vec![1.0, 1.0], problem.context().clone());
+        let y0 = NalgebraVec::from_vec(vec![1.0, 1.0], *problem.context());
         let t0 = 0.0;
         let expect = |t: f64| {
             let g = &y0 * scale((f64::exp(-k * t0) - f64::exp(-k * t)) / k);
             NalgebraVec::from_vec(
                 vec![1.0 * g[0] + 2.0 * g[1], 3.0 * g[0] + 4.0 * g[1]],
-                problem.context().clone(),
+                *problem.context(),
             )
         };
         let (y, t) = s.solve(10.0).unwrap();
@@ -654,7 +654,7 @@ mod test {
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
         let final_time = soln.solution_points[soln.solution_points.len() - 1].t;
         let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
-        let mut y = NalgebraVec::zeros(problem.eqn.rhs().nstates(), problem.context().clone());
+        let mut y = NalgebraVec::zeros(problem.eqn.rhs().nstates(), *problem.context());
         for point in soln.solution_points.iter() {
             checkpointer.interpolate(point.t, &mut y).unwrap();
             y.assert_eq_norm(&point.state, &problem.atol, problem.rtol, 100.0);

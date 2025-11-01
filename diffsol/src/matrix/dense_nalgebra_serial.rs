@@ -196,8 +196,8 @@ impl<T: Scalar> Matrix for NalgebraMat<T> {
             }
         }
         (
-            <Self::V as Vector>::Index::from_vec(zero_diagonal_indices, self.context.clone()),
-            <Self::V as Vector>::Index::from_vec(non_zero_diagonal_indices, self.context.clone()),
+            <Self::V as Vector>::Index::from_vec(zero_diagonal_indices, self.context),
+            <Self::V as Vector>::Index::from_vec(non_zero_diagonal_indices, self.context),
         )
     }
 
@@ -234,7 +234,7 @@ impl<T: Scalar> Matrix for NalgebraMat<T> {
         let data = DMatrix::from_diagonal(&v.data);
         Self {
             data,
-            context: v.context().clone(),
+            context: *v.context(),
         }
     }
 
