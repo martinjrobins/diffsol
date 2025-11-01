@@ -324,13 +324,13 @@ mod tests {
         let mut bdf_callable = BdfCallable::new(&problem.eqn);
         let ctx = problem.context();
         let c = 0.1;
-        let phi_neg_y0 = Vcpu::from_vec(vec![1.1, 1.2], ctx.clone());
+        let phi_neg_y0 = Vcpu::from_vec(vec![1.1, 1.2], *ctx);
         bdf_callable.set_c_direct(c);
         bdf_callable.set_psi_neg_y0_direct(phi_neg_y0);
         // check that the bdf function is correct
-        let y = Vcpu::from_vec(vec![1.0, 1.0], ctx.clone());
+        let y = Vcpu::from_vec(vec![1.0, 1.0], *ctx);
         let t = 0.0;
-        let mut y_out = Vcpu::from_vec(vec![0.0, 0.0], ctx.clone());
+        let mut y_out = Vcpu::from_vec(vec![0.0, 0.0], *ctx);
 
         // F(y) = M (y - y0 + psi) - c * f(y)
         // M = |1 0|
@@ -342,16 +342,16 @@ mod tests {
         //  i.e. F(y) = |1 0| |2.1| - 0.1 * |-0.1| =  |2.11|
         //              |0 1| |2.2|         |-0.1|    |2.21|
         bdf_callable.call_inplace(&y, t, &mut y_out);
-        let y_out_expect = Vcpu::from_vec(vec![2.11, 2.21], ctx.clone());
+        let y_out_expect = Vcpu::from_vec(vec![2.11, 2.21], *ctx);
         y_out.assert_eq_st(&y_out_expect, 1e-10);
 
-        let v = Vcpu::from_vec(vec![1.0, 1.0], ctx.clone());
+        let v = Vcpu::from_vec(vec![1.0, 1.0], *ctx);
         // f'(y)v = |-0.1|
         //          |-0.1|
         // Mv - c * f'(y) v = |1 0| |1| - 0.1 * |-0.1| = |1.01|
         //                    |0 1| |1|         |-0.1|   |1.01|
         bdf_callable.jac_mul_inplace(&y, t, &v, &mut y_out);
-        let y_out_expect = Vcpu::from_vec(vec![1.01, 1.01], ctx.clone());
+        let y_out_expect = Vcpu::from_vec(vec![1.01, 1.01], *ctx);
         y_out.assert_eq_st(&y_out_expect, 1e-10);
 
         // J = M - c * f'(y) = |1 0| - 0.1 * |-0.1 0| = |1.01 0|

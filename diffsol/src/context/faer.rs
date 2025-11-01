@@ -1,6 +1,6 @@
 use faer::{get_global_parallelism, Par};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct FaerContext {
     par: Par,
 }

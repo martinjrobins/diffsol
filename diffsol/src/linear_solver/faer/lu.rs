@@ -57,8 +57,7 @@ impl<T: Scalar> LinearSolver<FaerMat<T>> for LU<T> {
     ) {
         let ncols = op.nstates();
         let nrows = op.nout();
-        let matrix =
-            C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), op.context().clone());
+        let matrix = C::M::new_from_sparsity(nrows, ncols, op.jacobian_sparsity(), *op.context());
         self.matrix = Some(matrix);
     }
 }
