@@ -18,7 +18,7 @@ where
         .solve_dense_with_checkpointing(t_data.as_slice(), None)
         .unwrap();
 
-    let mut g_m = M::zeros(2, t_data.len(), solver.problem().eqn().context().clone());
+    let mut g_m = M::zeros(2, t_data.len(), *solver.problem().eqn().context());
     for j in 0..g_m.ncols() {
         let g_m_i = (soln.column(j) - y_data.column(j)) * Scale(2.0);
         g_m.column_mut(j).copy_from(&g_m_i);
