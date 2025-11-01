@@ -47,7 +47,7 @@ macro_rules! impl_mul_scalar {
                 let scale: faer::Scale<T> = rhs.into();
                 Self::Output {
                     data: &self.data * scale,
-                    context: self.context.clone(),
+                    context: self.context,
                 }
             }
         }
@@ -99,7 +99,7 @@ impl<'a, T: Scalar> MatrixView<'a> for FaerMatRef<'a, T> {
     fn into_owned(self) -> Self::Owned {
         Self::Owned {
             data: self.data.to_owned(),
-            context: self.context.clone(),
+            context: self.context,
         }
     }
 
@@ -140,7 +140,7 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for FaerMatMut<'a, T> {
     fn into_owned(self) -> Self::Owned {
         Self::Owned {
             data: self.data.to_owned(),
-            context: self.context.clone(),
+            context: self.context,
         }
     }
 
@@ -204,7 +204,7 @@ impl<T: Scalar> DenseMatrix for FaerMat<T> {
         let data = self.data.get_mut(0..self.nrows(), i);
         FaerVecMut {
             data,
-            context: self.context.clone(),
+            context: self.context,
         }
     }
 
@@ -212,7 +212,7 @@ impl<T: Scalar> DenseMatrix for FaerMat<T> {
         let data = self.data.get_mut(0..self.data.nrows(), start..end);
         FaerMatMut {
             data,
-            context: self.context.clone(),
+            context: self.context,
         }
     }
 
@@ -224,14 +224,14 @@ impl<T: Scalar> DenseMatrix for FaerMat<T> {
         let data = self.data.get(0..self.data.nrows(), i);
         FaerVecRef {
             data,
-            context: self.context.clone(),
+            context: self.context,
         }
     }
     fn columns(&self, start: usize, end: usize) -> Self::View<'_> {
         let data = self.data.get(0..self.nrows(), start..end);
         FaerMatRef {
             data,
-            context: self.context.clone(),
+            context: self.context,
         }
     }
 

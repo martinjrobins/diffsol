@@ -34,7 +34,7 @@ macro_rules! impl_mul_scalar {
                 let scale: faer::Scale<T> = rhs.into();
                 Self::Output {
                     data: &self.data * scale,
-                    context: self.context.clone(),
+                    context: self.context,
                 }
             }
         }
@@ -303,7 +303,7 @@ impl<T: Scalar> Matrix for FaerSparseMat<T> {
     fn gemv(&self, alpha: Self::T, x: &Self::V, beta: Self::T, y: &mut Self::V) {
         let tmp = Self::V {
             data: &self.data * &x.data,
-            context: self.context.clone(),
+            context: self.context,
         };
         y.axpy(alpha, &tmp, beta);
     }

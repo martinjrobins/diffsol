@@ -58,7 +58,7 @@ macro_rules! impl_mul_scalar {
                 let scale = rhs.value();
                 Self::Output {
                     data: &self.data * scale,
-                    context: self.context.clone(),
+                    context: self.context,
                 }
             }
         }
@@ -110,7 +110,7 @@ impl<'a, T: Scalar> MatrixView<'a> for NalgebraMatRef<'a, T> {
     fn into_owned(self) -> Self::Owned {
         Self::Owned {
             data: self.data.into_owned(),
-            context: self.context.clone(),
+            context: self.context,
         }
     }
 
@@ -135,7 +135,7 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for NalgebraMatMut<'a, T> {
     fn into_owned(self) -> Self::Owned {
         Self::Owned {
             data: self.data.into_owned(),
-            context: self.context.clone(),
+            context: self.context,
         }
     }
     fn gemm_oo(&mut self, alpha: Self::T, a: &Self::Owned, b: &Self::Owned, beta: Self::T) {
@@ -290,7 +290,7 @@ impl<T: Scalar> DenseMatrix for NalgebraMat<T> {
         let data = self.data.column_mut(i);
         NalgebraVecMut {
             data,
-            context: self.context.clone(),
+            context: self.context,
         }
     }
 
@@ -298,7 +298,7 @@ impl<T: Scalar> DenseMatrix for NalgebraMat<T> {
         let data = self.data.columns_mut(start, end - start);
         NalgebraMatMut {
             data,
-            context: self.context.clone(),
+            context: self.context,
         }
     }
 
@@ -310,14 +310,14 @@ impl<T: Scalar> DenseMatrix for NalgebraMat<T> {
         let data = self.data.column(i);
         NalgebraVecRef {
             data,
-            context: self.context.clone(),
+            context: self.context,
         }
     }
     fn columns(&self, start: IndexType, end: IndexType) -> Self::View<'_> {
         let data = self.data.columns(start, end - start);
         NalgebraMatRef {
             data,
-            context: self.context.clone(),
+            context: self.context,
         }
     }
     fn column_axpy(&mut self, alpha: Self::T, j: IndexType, i: IndexType) {
