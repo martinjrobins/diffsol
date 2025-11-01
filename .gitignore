@@ -26,4 +26,5 @@ flamegraph.svg
 *.png
 env/
 *.mtx
-*notes.txttest_par
+*notes.txt
+test_par
