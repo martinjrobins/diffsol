@@ -7,6 +7,8 @@ use diffsl::{
     Compiler,
 };
 
+#[cfg(feature = "diffsl-ext")]
+use crate::ode_equations::external_linkage::ExtLinkModule;
 use crate::{
     error::DiffsolError, find_jacobian_non_zeros, find_matrix_non_zeros, find_sens_non_zeros,
     jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
@@ -40,37 +42,8 @@ pub struct DiffSlContext<M: Matrix<T = T>, CG: CodegenModule> {
     ctx: M::C,
 }
 
-impl<M: Matrix<T = T>, CG: CodegenModuleCompile + CodegenModuleJit> DiffSlContext<M, CG> {
-    /// Create a new context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
-    /// The input parameters are not initialized and must be set using the [OdeEquations::set_params] function before solving the ODE.
-    ///
-    /// # Arguments
-    ///
-    /// * `text` - The text of the ODE equations in the DiffSL language.
-    /// * `nthreads` - The number of threads to use for code generation (0 for automatic, 1 for single-threaded).
-    ///
-    pub fn new(text: &str, nthreads: usize, ctx: M::C) -> Result<Self, DiffsolError> {
-        let mode = match nthreads {
-            0 => diffsl::execution::compiler::CompilerMode::MultiThreaded(None),
-            1 => diffsl::execution::compiler::CompilerMode::SingleThreaded,
-            _ => diffsl::execution::compiler::CompilerMode::MultiThreaded(Some(nthreads)),
-        };
-        let compiler = Compiler::from_discrete_str(text, mode)
-            .map_err(|e| DiffsolError::Other(e.to_string()))?;
-        let (nstates, _nparams, _nout, _ndata, _nroots, _has_mass) = compiler.get_dims();
-
-        let compiler = if nthreads == 0 {
-            let num_cpus = std::thread::available_parallelism().unwrap().get();
-            let nthreads = num_cpus.min(nstates / 1000).max(1);
-            Compiler::from_discrete_str(
-                text,
-                diffsl::execution::compiler::CompilerMode::MultiThreaded(Some(nthreads)),
-            )
-            .map_err(|e| DiffsolError::Other(e.to_string()))?
-        } else {
-            compiler
-        };
-
+impl<M: Matrix<T = T>, CG: CodegenModule> DiffSlContext<M, CG> {
+    fn from_compiler(compiler: Compiler<CG>, ctx: M::C) -> Result<Self, DiffsolError> {
         let (nstates, nparams, nout, _ndata, nroots, has_mass) = compiler.get_dims();
 
         let has_root = nroots > 0;
@@ -101,6 +74,44 @@ impl<M: Matrix<T = T>, CG: CodegenModuleCompile + CodegenModuleJit> DiffSlContex
             has_out,
             ctx,
         })
+    }
+}
+
+impl<M: Matrix<T = T>, CG: CodegenModuleCompile + CodegenModuleJit> DiffSlContext<M, CG> {
+    /// Create a new context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
+    /// The input parameters are not initialized and must be set using the [OdeEquations::set_params] function before solving the ODE.
+    ///
+    /// # Arguments
+    ///
+    /// * `text` - The text of the ODE equations in the DiffSL language.
+    /// * `nthreads` - The number of threads to use for code generation (0 for automatic, 1 for single-threaded).
+    ///
+    pub fn new(text: &str, nthreads: usize, ctx: M::C) -> Result<Self, DiffsolError> {
+        let mode = match nthreads {
+            0 => diffsl::execution::compiler::CompilerMode::MultiThreaded(None),
+            1 => diffsl::execution::compiler::CompilerMode::SingleThreaded,
+            _ => diffsl::execution::compiler::CompilerMode::MultiThreaded(Some(nthreads)),
+        };
+        let compiler = Compiler::from_discrete_str(text, mode)
+            .map_err(|e| DiffsolError::Other(e.to_string()))?;
+        Self::from_compiler(compiler, ctx)
+    }
+}
+
+#[cfg(feature = "diffsl-ext")]
+impl<M: Matrix<T = T>> DiffSlContext<M, ExtLinkModule> {
+    pub fn from_external_linkage(nthreads: usize, ctx: M::C) -> Result<Self, DiffsolError> {
+        use crate::ode_equations::external_linkage::symbol_map;
+
+        let mode = match nthreads {
+            0 => diffsl::execution::compiler::CompilerMode::MultiThreaded(None),
+            1 => diffsl::execution::compiler::CompilerMode::SingleThreaded,
+            _ => diffsl::execution::compiler::CompilerMode::MultiThreaded(Some(nthreads)),
+        };
+        let symbol_map = symbol_map();
+        let compiler = Compiler::new(ExtLinkModule, symbol_map, mode)
+            .map_err(|e| DiffsolError::Other(e.to_string()))?;
+        Self::from_compiler(compiler, ctx)
     }
 }
 
@@ -137,15 +148,7 @@ pub struct DiffSl<M: Matrix<T = T>, CG: CodegenModule> {
     rhs_sens_adjoint_coloring: Option<JacobianColoring<M>>,
 }
 
-impl<M: MatrixHost<T = T>, CG: CodegenModuleJit + CodegenModuleCompile> DiffSl<M, CG> {
-    pub fn compile(
-        code: &str,
-        ctx: M::C,
-        include_sensitivities: bool,
-    ) -> Result<Self, DiffsolError> {
-        let context = DiffSlContext::<M, CG>::new(code, 1, ctx)?;
-        Ok(Self::from_context(context, include_sensitivities))
-    }
+impl<M: MatrixHost<T = T>, CG: CodegenModule> DiffSl<M, CG> {
     pub fn from_context(context: DiffSlContext<M, CG>, include_sensitivities: bool) -> Self {
         let mut ret = Self {
             context,
@@ -230,6 +233,28 @@ impl<M: MatrixHost<T = T>, CG: CodegenModuleJit + CodegenModuleCompile> DiffSl<M
             }
         }
         ret
+    }
+}
+
+#[cfg(feature = "diffsl-ext")]
+impl<M: MatrixHost<T = T>> DiffSl<M, ExtLinkModule> {
+    pub fn from_external_linkage(
+        ctx: M::C,
+        include_sensitivities: bool,
+    ) -> Result<Self, DiffsolError> {
+        let context = DiffSlContext::<M, _>::from_external_linkage(1, ctx)?;
+        Ok(Self::from_context(context, include_sensitivities))
+    }
+}
+
+impl<M: MatrixHost<T = T>, CG: CodegenModuleJit + CodegenModuleCompile> DiffSl<M, CG> {
+    pub fn compile(
+        code: &str,
+        ctx: M::C,
+        include_sensitivities: bool,
+    ) -> Result<Self, DiffsolError> {
+        let context = DiffSlContext::<M, CG>::new(code, 1, ctx)?;
+        Ok(Self::from_context(context, include_sensitivities))
     }
 }
 
@@ -796,6 +821,7 @@ mod tests {
         diffsl_logistic_growth::<crate::FaerSparseMat<f64>, diffsl::LlvmModule>();
     }
 
+    #[allow(dead_code)]
     fn diffsl_logistic_growth<
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T = f64> + DefaultSolver,
         CG: CodegenModuleJit + CodegenModuleCompile,
