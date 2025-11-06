@@ -67,9 +67,9 @@ All solvers feature:
 
 # Bindings in higher-level languages
 
-[`pydiffsol`](https://github.com/alexallmont/pydiffsol) provides Python bindings to `diffsol` using the `PyO3` [@PyO3_Project_and_Contributors_PyO3] crate. It allows users to define ODEs in Python using the `DiffSL` DSL, and solve them using the Rust `diffsol` library. `pydiffsol` aims to provide a simple and easy-to-use interface for solving ODEs in Python, while still maintaining the performance benefits of using Rust under the hood.
+[`pydiffsol`](https://github.com/alexallmont/pydiffsol) provides Python bindings to `diffsol` using the `PyO3` [@PyO3_Project_and_Contributors] crate. It allows users to define ODEs in Python using the `DiffSL` DSL, and solve them using the Rust `diffsol` library. `pydiffsol` aims to provide a simple and easy-to-use interface for solving ODEs in Python, while still maintaining the performance benefits of using Rust under the hood.
 
-The goal is to develop further [bindings to other higher-level languages][https://github.com/martinjrobins/diffsol/issues/131], including R, JAX and JavaScript, exploiting the `DiffSL` DSL to provide high performance while maintaining ease of use and positioning the core `diffsol` library as a widely used cross-language, cross-platform, high-performance ODE solver.
+The goal is to develop further [bindings to other higher-level languages](https://github.com/martinjrobins/diffsol/issues/131), including R, JAX and JavaScript, exploiting the `DiffSL` DSL to provide high performance while maintaining ease of use and positioning the core `diffsol` library as a widely used cross-language, cross-platform, high-performance ODE solver.
 
 # Acknowledgements
 
