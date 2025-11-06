@@ -375,10 +375,10 @@ mod tests {
         let mut sens_eqn = SensEquations::new(&problem);
         let state = RkState {
             t: 0.0,
-            y: Vcpu::from_vec(vec![1.0, 1.0], problem.context().clone()),
-            dy: Vcpu::from_vec(vec![1.0, 1.0], problem.context().clone()),
-            g: Vcpu::zeros(0, problem.context().clone()),
-            dg: Vcpu::zeros(0, problem.context().clone()),
+            y: Vcpu::from_vec(vec![1.0, 1.0], *problem.context()),
+            dy: Vcpu::from_vec(vec![1.0, 1.0], *problem.context()),
+            g: Vcpu::zeros(0, *problem.context()),
+            dg: Vcpu::zeros(0, *problem.context()),
             sg: Vec::new(),
             dsg: Vec::new(),
             s: Vec::new(),
@@ -403,9 +403,9 @@ mod tests {
         // F(s, t)_0 = |-a 0| |1| + |-1.0| = |-1.1|
         //             |0 -a| |2|   |-1.0|   |-1.2|
         sens_eqn.rhs.set_param_index(0);
-        let s = Vcpu::from_vec(vec![1.0, 2.0], problem.context().clone());
+        let s = Vcpu::from_vec(vec![1.0, 2.0], *problem.context());
         let f = sens_eqn.rhs.call(&s, state.t);
-        let f_expect = Vcpu::from_vec(vec![-1.1, -1.2], problem.context().clone());
+        let f_expect = Vcpu::from_vec(vec![-1.1, -1.2], *problem.context());
         f.assert_eq_st(&f_expect, 1e-10);
     }
 
@@ -415,10 +415,10 @@ mod tests {
         let mut sens_eqn = SensEquations::new(&problem);
         let state = RkState {
             t: 0.0,
-            y: Vcpu::from_vec(vec![1.0, 1.0, 1.0], problem.context().clone()),
-            dy: Vcpu::from_vec(vec![1.0, 1.0, 1.0], problem.context().clone()),
-            g: Vcpu::zeros(0, problem.context().clone()),
-            dg: Vcpu::zeros(0, problem.context().clone()),
+            y: Vcpu::from_vec(vec![1.0, 1.0, 1.0], *problem.context()),
+            dy: Vcpu::from_vec(vec![1.0, 1.0, 1.0], *problem.context()),
+            g: Vcpu::zeros(0, *problem.context()),
+            dg: Vcpu::zeros(0, *problem.context()),
             sg: Vec::new(),
             dsg: Vec::new(),
             s: Vec::new(),
@@ -452,9 +452,9 @@ mod tests {
         //             |0 0 0 | |1|   | 0  |   | 0 |
         sens_eqn.rhs.set_param_index(0);
         assert_eq!(sens_eqn.rhs.index.borrow().clone(), 0);
-        let s = Vcpu::from_vec(vec![1.0, 1.0, 1.0], problem.context().clone());
+        let s = Vcpu::from_vec(vec![1.0, 1.0, 1.0], *problem.context());
         let f = sens_eqn.rhs.call(&s, state.t);
-        let f_expect = Vcpu::from_vec(vec![-1.1, -1.1, 0.0], problem.context().clone());
+        let f_expect = Vcpu::from_vec(vec![-1.1, -1.1, 0.0], *problem.context());
         f.assert_eq_st(&f_expect, 1e-10);
     }
 
@@ -464,10 +464,10 @@ mod tests {
         let mut sens_eqn = SensEquations::new(&problem);
         let state = RkState {
             t: 0.0,
-            y: Vcpu::from_vec(vec![1.0, 2.0, 3.0], problem.context().clone()),
-            dy: Vcpu::from_vec(vec![1.0, 1.0, 1.0], problem.context().clone()),
-            g: Vcpu::zeros(0, problem.context().clone()),
-            dg: Vcpu::zeros(0, problem.context().clone()),
+            y: Vcpu::from_vec(vec![1.0, 2.0, 3.0], *problem.context()),
+            dy: Vcpu::from_vec(vec![1.0, 1.0, 1.0], *problem.context()),
+            g: Vcpu::zeros(0, *problem.context()),
+            dg: Vcpu::zeros(0, *problem.context()),
             sg: Vec::new(),
             dsg: Vec::new(),
             s: Vec::new(),

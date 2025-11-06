@@ -151,8 +151,8 @@ mod tests {
     #[test]
     fn test_initop() {
         let (problem, _soln) = exponential_decay_with_algebraic_problem::<Mcpu>(false);
-        let y0 = Vcpu::from_vec(vec![1.0, 2.0, 3.0], problem.context().clone());
-        let dy0 = Vcpu::from_vec(vec![4.0, 5.0, 6.0], problem.context().clone());
+        let y0 = Vcpu::from_vec(vec![1.0, 2.0, 3.0], *problem.context());
+        let dy0 = Vcpu::from_vec(vec![4.0, 5.0, 6.0], *problem.context());
         let t = 0.0;
         let (algebraic_indices, _) = problem
             .eqn()
@@ -163,7 +163,7 @@ mod tests {
 
         let initop = InitOp::new(&problem.eqn, t, &y0, algebraic_indices);
         // check that the init function is correct
-        let mut y_out = Vcpu::from_vec(vec![0.0, 0.0, 0.0], problem.context().clone());
+        let mut y_out = Vcpu::from_vec(vec![0.0, 0.0, 0.0], *problem.context());
 
         // -M_u du + f(u, v)
         // g(t, u, v)
@@ -185,9 +185,9 @@ mod tests {
         //  i.e. F(y) = |-1 * 4 + -0.1 * 1| = |-4.1|
         //              |-1 * 5 + -0.1 * 2|   |-5.2|
         //              |2 - 1|               |1|
-        let du_v = Vcpu::from_vec(vec![dy0[0], dy0[1], y0[2]], problem.context().clone());
+        let du_v = Vcpu::from_vec(vec![dy0[0], dy0[1], y0[2]], *problem.context());
         initop.call_inplace(&du_v, t, &mut y_out);
-        let y_out_expect = Vcpu::from_vec(vec![-4.1, -5.2, 1.0], problem.context().clone());
+        let y_out_expect = Vcpu::from_vec(vec![-4.1, -5.2, 1.0], *problem.context());
         y_out.assert_eq_st(&y_out_expect, 1e-10);
 
         // df/dv = |0|

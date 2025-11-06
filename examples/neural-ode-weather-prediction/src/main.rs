@@ -333,11 +333,11 @@ impl AdamW {
         let lr = 1e-2;
         let betas = (0.9, 0.999);
         let eps = 1e-8;
-        let m = V::zeros(nparams, ctx.clone());
-        let m_hat = V::zeros(nparams, ctx.clone());
-        let v = V::zeros(nparams, ctx.clone());
-        let v_hat = V::zeros(nparams, ctx.clone());
-        let grads2 = V::zeros(nparams, ctx.clone());
+        let m = V::zeros(nparams, ctx);
+        let m_hat = V::zeros(nparams, ctx);
+        let v = V::zeros(nparams, ctx);
+        let v_hat = V::zeros(nparams, ctx);
+        let grads2 = V::zeros(nparams, ctx);
         let lambda = 1e-2;
         Self {
             lr,
@@ -411,8 +411,8 @@ fn train_one_round(
     ys_data: &M,
     p: &mut V,
 ) {
-    let mut gm = M::zeros(problem.eqn.nout(), ts_data.len(), problem.context().clone());
-    let mut adam = AdamW::new(problem.eqn.nparams(), problem.context().clone());
+    let mut gm = M::zeros(problem.eqn.nout(), ts_data.len(), *problem.context());
+    let mut adam = AdamW::new(problem.eqn.nparams(), *problem.context());
     for _ in 0..150 {
         match loss_fn(problem, p, ts_data, ys_data, &mut gm) {
             Ok((loss, g)) => {
@@ -435,7 +435,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file = File::open(format!("{BASE_DATA_DIR}MonthlyDelhiClimate.csv"))?;
     let mut reader = ReaderBuilder::new().has_headers(true).from_reader(file);
     let data_dim = 4;
-    let mut ys_data = M::zeros(data_dim, nrows, ctx.clone());
+    let mut ys_data = M::zeros(data_dim, nrows, ctx);
     let mut ts_data = vec![0.0; nrows];
     for (j, row) in reader.records().enumerate() {
         let row = row?;
@@ -459,7 +459,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .collect::<Vec<_>>();
     let mut problem = OdeBuilder::<M>::new().p(p).build_from_eqn(eqn)?;
 
-    let mut p = V::zeros(problem.eqn.nparams(), problem.context().clone());
+    let mut p = V::zeros(problem.eqn.nparams(), *problem.context());
     problem.eqn.get_params(&mut p);
 
     let ntimes = ts_data.len();
@@ -467,7 +467,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // train
         let batch_len = i * 4;
         let ts_data_batch = &ts_data[0..batch_len];
-        let mut ys_data_batch = M::zeros(ys_data.nrows(), batch_len, problem.context().clone());
+        let mut ys_data_batch = M::zeros(ys_data.nrows(), batch_len, *problem.context());
         for j in 0..batch_len {
             ys_data_batch
                 .column_mut(j)

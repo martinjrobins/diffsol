@@ -23,7 +23,7 @@ fn App() -> Html {
     let params = use_state(|| {
         NalgebraVec::from_vec(
             vec![2.0 / 3.0, 4.0 / 3.0, 1.0, 1.0],
-            problem.borrow().eqn.context().clone(),
+            *problem.borrow().eqn.context(),
         )
     });
 

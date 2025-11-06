@@ -165,7 +165,7 @@ mod tests {
             y[0] = t;
             Ok(())
         };
-        let p = V::zeros(0, ctx.clone());
+        let p = V::zeros(0, ctx);
         let root_fn = ClosureNoJac::<M, _>::new(
             |y: &V, _p: &V, _t: f64, g: &mut V| {
                 g[0] = y[0] - 0.4;
@@ -178,23 +178,23 @@ mod tests {
         let root_fn = ParameterisedOp::new(&root_fn, &p);
 
         // check no root
-        let root_finder = RootFinder::new(1, 1, ctx.clone());
-        root_finder.init(&root_fn, &Vector::from_vec(vec![0.0], ctx.clone()), 0.0);
+        let root_finder = RootFinder::new(1, 1, ctx);
+        root_finder.init(&root_fn, &Vector::from_vec(vec![0.0], ctx), 0.0);
         let root = root_finder.check_root(
             &interpolate_inplace,
             &root_fn,
-            &Vector::from_vec(vec![0.3], ctx.clone()),
+            &Vector::from_vec(vec![0.3], ctx),
             0.3,
         );
         assert_eq!(root, None);
 
         // check root
-        let root_finder = RootFinder::new(1, 1, ctx.clone());
-        root_finder.init(&root_fn, &Vector::from_vec(vec![0.0], ctx.clone()), 0.0);
+        let root_finder = RootFinder::new(1, 1, ctx);
+        root_finder.init(&root_fn, &Vector::from_vec(vec![0.0], ctx), 0.0);
         let root = root_finder.check_root(
             &interpolate_inplace,
             &root_fn,
-            &Vector::from_vec(vec![1.3], ctx.clone()),
+            &Vector::from_vec(vec![1.3], ctx),
             1.3,
         );
         if let Some(root) = root {

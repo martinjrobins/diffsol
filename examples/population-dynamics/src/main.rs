@@ -78,7 +78,7 @@ fn phase_plane() {
 
     let mut plot = Plot::new();
     for y0 in (1..6).map(f64::from) {
-        let p = NalgebraVec::from_element(1, y0, problem.context().clone());
+        let p = NalgebraVec::from_element(1, y0, *problem.context());
         problem.eqn_mut().set_params(&p);
 
         let mut solver = problem.bdf::<LS>().unwrap();

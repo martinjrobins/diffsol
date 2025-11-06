@@ -24,7 +24,7 @@ fn main() {
     for current in currents {
         problem
             .eqn
-            .set_params(&V::from_vec(vec![current], problem.context().clone()));
+            .set_params(&V::from_vec(vec![current], *problem.context()));
 
         let mut solver = problem.bdf::<LS>().unwrap();
         let mut v = Vec::new();

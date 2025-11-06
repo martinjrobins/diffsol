@@ -55,11 +55,12 @@ macro_rules! impl_mul_scalar {
     ($lhs:ty, $out:ty, $scalar:ty) => {
         impl<T: Scalar> Mul<Scale<T>> for $lhs {
             type Output = $out;
+            #[inline]
             fn mul(self, rhs: Scale<T>) -> Self::Output {
                 let scale: $scalar = rhs.into();
                 Self::Output {
                     data: &self.data * scale,
-                    context: self.context.clone(),
+                    context: self.context,
                 }
             }
         }
@@ -70,12 +71,13 @@ macro_rules! impl_div_scalar {
     ($lhs:ty, $out:ty, $scalar:expr) => {
         impl<'a, T: Scalar> Div<Scale<T>> for $lhs {
             type Output = $out;
+            #[inline]
             fn div(self, rhs: Scale<T>) -> Self::Output {
                 let inv_rhs: T = T::one() / rhs.value();
                 let scale = faer::Scale(inv_rhs);
                 Self::Output {
                     data: &self.data * scale,
-                    context: self.context.clone(),
+                    context: self.context,
                 }
             }
         }
@@ -85,6 +87,7 @@ macro_rules! impl_div_scalar {
 macro_rules! impl_mul_assign_scalar {
     ($col_type:ty, $scalar:ty) => {
         impl<'a, T: Scalar> MulAssign<Scale<T>> for $col_type {
+            #[inline]
             fn mul_assign(&mut self, rhs: Scale<T>) {
                 let scale = faer::Scale(rhs.value());
                 self.data *= scale;
@@ -211,13 +214,13 @@ impl<T: Scalar> Vector for FaerVec<T> {
     fn as_view(&self) -> Self::View<'_> {
         FaerVecRef {
             data: self.data.as_ref(),
-            context: self.context.clone(),
+            context: self.context,
         }
     }
     fn as_view_mut(&mut self) -> Self::ViewMut<'_> {
         FaerVecMut {
             data: self.data.as_mut(),
-            context: self.context.clone(),
+            context: self.context,
         }
     }
     fn copy_from(&mut self, other: &Self) {
