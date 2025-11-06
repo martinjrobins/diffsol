@@ -5,7 +5,7 @@ tags:
   - scientific computing
   - solver
   - ordinary differential equations
-  - differential Algebraic equations
+  - differential algebraic equations
   - runge-kutta
   - backward differentiation formula
 authors:
@@ -21,7 +21,7 @@ affiliations:
  - name: Oxford Research Software Engineering Group, Doctoral Training Centre, University of Oxford, Oxford, UK
    index: 1
    ror: 052gg0110
-date: 12 March 2025
+date: 6 Nov 2025
 bibliography: paper.bib
 ---
 
