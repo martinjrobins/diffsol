@@ -49,7 +49,7 @@ jobs:
           os:
             - ubuntu-latest
             - macos-latest
-            - macos-13
+            - macos-15-intel
             - windows-latest
           include:
             - toolchain: stable
@@ -117,7 +117,7 @@ jobs:
       with:
         version: ${{ env.LLVM_VERSION }}
     - name: Install LLVM for macOS Intel (Homebrew)
-      if: matrix.os == 'macos-13' && matrix.book == false
+      if: matrix.os == 'macos-15-intel' && matrix.book == false
       run: |
         brew install llvm@${{ env.LLVM_VERSION }}
         echo /usr/local/opt/llvm@${{ env.LLVM_VERSION }}/bin >> $GITHUB_PATH
@@ -139,7 +139,7 @@ jobs:
       if: matrix.coverage == true
       run: cargo install cargo-tarpaulin
     - name: Set features variable and install dependencies (macOS)
-      if: matrix.os == 'macos-13' || matrix.os == 'macos-latest'
+      if: matrix.os == 'macos-15-intel' || matrix.os == 'macos-latest'
       run: |
         echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift" >> $GITHUB_ENV
     - name: Set features variable and install dependencies (Windows)
