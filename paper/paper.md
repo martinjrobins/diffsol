@@ -1,5 +1,5 @@
 ---
-title: '`diffsol`: A Rust crate for solving differential equations'
+title: '`diffsol`: Rust crate for solving differential equations'
 tags:
   - rust
   - scientific computing
@@ -53,7 +53,7 @@ The following solvers are available in `diffsol`:
 
 1. A variable order Backwards Difference Formulae (BDF) solver, suitable for stiff problems and singular mass matrices.  The basic algorithm is derived in @byrne1975polyalgorithm, however this particular implementation follows that implemented in the Matlab routine ode15s [@shampine1997matlab] and the SciPy implementation [@virtanen2020scipy], which features the NDF formulas for improved stability
 2. A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver, suitable for moderately stiff problems and singular mass matrices. Two different butcher tableau are provided, TR-BDF2 [@bank1985transient, @hosea1996analysis] and ESDIRK34 [@jorgensen2018family], or users can supply their own.
-3. A variable order Explict Runge-Kutta (ERK) solver, suitable for non-stiff problems. One butcher tableau is provided, the 4th order TSIT45 [tsitouras2011runge], or users can supply their own.
+3. A variable order Explict Runge-Kutta (ERK) solver, suitable for non-stiff problems. One butcher tableau is provided, the 4th order TSIT45 [@tsitouras2011runge], or users can supply their own.
 
 All solvers feature:
 
@@ -67,7 +67,7 @@ All solvers feature:
 
 # Bindings in higher-level languages
 
-[`pydiffsol`](https://github.com/alexallmont/pydiffsol) provides Python bindings to `diffsol` using the `PyO3` [PyO3_Project_and_Contributors_PyO3] crate. It allows users to define ODEs in Python using the `DiffSL` DSL, and solve them using the Rust `diffsol` library. `pydiffsol` aims to provide a simple and easy-to-use interface for solving ODEs in Python, while still maintaining the performance benefits of using Rust under the hood.
+[`pydiffsol`](https://github.com/alexallmont/pydiffsol) provides Python bindings to `diffsol` using the `PyO3` [@PyO3_Project_and_Contributors_PyO3] crate. It allows users to define ODEs in Python using the `DiffSL` DSL, and solve them using the Rust `diffsol` library. `pydiffsol` aims to provide a simple and easy-to-use interface for solving ODEs in Python, while still maintaining the performance benefits of using Rust under the hood.
 
 The goal is to develop further [bindings to other higher-level languages][https://github.com/martinjrobins/diffsol/issues/131], including R, JAX and JavaScript, exploiting the `DiffSL` DSL to provide high performance while maintaining ease of use and positioning the core `diffsol` library as a widely used cross-language, cross-platform, high-performance ODE solver.
 
