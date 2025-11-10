@@ -149,8 +149,11 @@ jobs:
     - name: Run tests - default features
       if: matrix.tests == true
       run: cargo test --verbose
+    - name: Run tests - all features (macOS Intel)
+      if: matrix.tests == true && matrix.os == 'macos-15-intel'
+      run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }} --workspace --exclude neural-ode-weather-prediction
     - name: Run tests - all features
-      if: matrix.tests == true
+      if: matrix.tests == true && matrix.os != 'macos-15-intel'
       run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }} --workspace
     - name: Clippy - all features
       if: matrix.clippy == true
