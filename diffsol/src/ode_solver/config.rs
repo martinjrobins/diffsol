@@ -52,12 +52,12 @@ impl<T: Scalar> OdeSolverConfig<T> for BdfConfig<T> {
 impl<T: Scalar> Default for BdfConfig<T> {
     fn default() -> Self {
         Self {
-            minimum_timestep: T::from(1e-32),
+            minimum_timestep: T::from_f64(1e-32).unwrap(),
             maximum_error_test_failures: 40,
-            maximum_timestep_growth: T::from(2.1),
-            minimum_timestep_growth: T::from(2.0),
-            maximum_timestep_shrink: T::from(0.9),
-            minimum_timestep_shrink: T::from(0.5),
+            maximum_timestep_growth: T::from_f64(2.1).unwrap(),
+            minimum_timestep_growth: T::from_f64(2.0).unwrap(),
+            maximum_timestep_shrink: T::from_f64(0.9).unwrap(),
+            minimum_timestep_shrink: T::from_f64(0.5).unwrap(),
             maximum_newton_iterations: 4,
         }
     }
@@ -75,10 +75,10 @@ pub struct SdirkConfig<T> {
 impl<T: Scalar> Default for SdirkConfig<T> {
     fn default() -> Self {
         Self {
-            minimum_timestep: T::from(1e-13),
+            minimum_timestep: T::from_f64(1e-13).unwrap(),
             maximum_error_test_failures: 40,
-            maximum_timestep_growth: T::from(10.0),
-            minimum_timestep_shrink: T::from(0.2),
+            maximum_timestep_growth: T::from_f64(10.0).unwrap(),
+            minimum_timestep_shrink: T::from_f64(0.2).unwrap(),
             maximum_newton_iterations: 10,
         }
     }
@@ -115,10 +115,10 @@ pub struct ExplicitRkConfig<T> {
 impl<T: Scalar> Default for ExplicitRkConfig<T> {
     fn default() -> Self {
         Self {
-            minimum_timestep: T::from(1e-13),
+            minimum_timestep: T::from_f64(1e-13).unwrap(),
             maximum_error_test_failures: 40,
-            maximum_timestep_growth: T::from(10.0),
-            minimum_timestep_shrink: T::from(0.2),
+            maximum_timestep_growth: T::from_f64(10.0).unwrap(),
+            minimum_timestep_shrink: T::from_f64(0.2).unwrap(),
         }
     }
 }

@@ -4,8 +4,8 @@ use crate::{
     scalar::scale, ConstantOp, DenseMatrix, OdeBuilder, OdeEquations, OdeEquationsImplicit, Vector,
 };
 use nalgebra::ComplexField;
-use num_traits::Pow;
-use num_traits::Zero;
+use num_traits::{FromPrimitive, Pow};
+use num_traits::{One, Zero};
 use std::ops::MulAssign;
 
 // dy/dt = -aty (p = [a])
@@ -34,17 +34,17 @@ pub fn gaussian_decay_problem<M: DenseMatrix + 'static>(
         .p([0.1].repeat(size))
         .use_coloring(use_coloring)
         .rhs_implicit(gaussian_decay::<M>, gaussian_decay_jacobian::<M>)
-        .init(move |_p, _t, y| y.fill(1.0.into()), size)
+        .init(move |_p, _t, y| y.fill(M::T::one()), size)
         .build()
         .unwrap();
-    let p = [M::T::from(0.1)].repeat(size);
+    let p = [M::T::from_f64(0.1).unwrap()].repeat(size);
     let mut soln = OdeSolverSolution::default();
     for i in 0..10 {
-        let t = M::T::from(i as f64 / 1.0);
+        let t = M::T::from_f64(i as f64 / 1.0).unwrap();
         let mut y: M::V = problem.eqn.init().call(M::T::zero());
         let px = M::V::from_vec(
             p.iter()
-                .map(|&x| (x * t.pow(2) / M::T::from(-2.0)).exp())
+                .map(|&x| (x * t.pow(2) / M::T::from_f64(-2.0).unwrap()).exp())
                 .collect::<Vec<_>>(),
             problem.context().clone(),
         );

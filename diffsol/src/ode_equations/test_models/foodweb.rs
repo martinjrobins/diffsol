@@ -4,7 +4,7 @@ use crate::{
     NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsRef, OdeSolverProblem, Op,
     ParameterisedOp, UnitCallable, Vector,
 };
-use num_traits::Zero;
+use num_traits::{FromPrimitive, One, Zero};
 
 const NPREY: usize = 1;
 const NUM_SPECIES: usize = 2 * NPREY;
@@ -245,21 +245,21 @@ where
 
         for i in 0..NPREY {
             for j in 0..NPREY {
-                acoef[i][NPREY + j] = M::T::from(-GG);
-                acoef[i + NPREY][j] = M::T::from(EE);
-                acoef[i][j] = M::T::from(0.0);
-                acoef[i + NPREY][NPREY + j] = M::T::from(0.0);
+                acoef[i][NPREY + j] = M::T::from_f64(-GG).unwrap();
+                acoef[i + NPREY][j] = M::T::from_f64(EE).unwrap();
+                acoef[i][j] = M::T::zero();
+                acoef[i + NPREY][NPREY + j] = M::T::zero();
             }
 
-            acoef[i][i] = M::T::from(-AA);
-            acoef[i + NPREY][i + NPREY] = M::T::from(-AA);
+            acoef[i][i] = M::T::from_f64(-AA).unwrap();
+            acoef[i + NPREY][i + NPREY] = M::T::from_f64(-AA).unwrap();
 
-            bcoef[i] = M::T::from(BB);
-            bcoef[i + NPREY] = M::T::from(-BB);
-            cox[i] = M::T::from(DPREY / Self::DX.powi(2));
-            cox[i + NPREY] = M::T::from(DPRED / Self::DX.powi(2));
-            coy[i] = M::T::from(DPREY / Self::DY.powi(2));
-            coy[i + NPREY] = M::T::from(DPRED / Self::DY.powi(2));
+            bcoef[i] = M::T::from_f64(BB).unwrap();
+            bcoef[i + NPREY] = M::T::from_f64(-BB).unwrap();
+            cox[i] = M::T::from_f64(DPREY / Self::DX.powi(2)).unwrap();
+            cox[i + NPREY] = M::T::from_f64(DPRED / Self::DX.powi(2)).unwrap();
+            coy[i] = M::T::from_f64(DPREY / Self::DY.powi(2)).unwrap();
+            coy[i + NPREY] = M::T::from_f64(DPRED / Self::DY.powi(2)).unwrap();
         }
 
         Self {
@@ -356,9 +356,9 @@ where
 
                 for is in 0..NUM_SPECIES {
                     if is < NPREY {
-                        y[loc + is] = M::T::from(10.0 + (is + 1) as f64 * xyfactor);
+                        y[loc + is] = M::T::from_f64(10.0 + (is + 1) as f64 * xyfactor).unwrap();
                     } else {
-                        y[loc + is] = M::T::from(1.0e5);
+                        y[loc + is] = M::T::from_f64(1.0e5).unwrap();
                     }
                 }
             }
@@ -462,12 +462,13 @@ where
                     }
                     *rate = dp;
                 }
-                let fac = M::T::from(
+                let fac = M::T::from_f64(
                     1.0 + ALPHA * xx * yy
                         + BETA
                             * (4.0 * std::f64::consts::PI * xx).sin()
                             * (4.0 * std::f64::consts::PI * yy).sin(),
-                );
+                )
+                .unwrap();
 
                 for is in 0..NUM_SPECIES {
                     rates[is] = x[loc + is] * (self.foodweb.context.bcoef[is] * fac + rates[is]);
@@ -548,12 +549,13 @@ where
                     rates[is] = dp;
                     drates[is] = ddp;
                 }
-                let fac = M::T::from(
+                let fac = M::T::from_f64(
                     1.0 + ALPHA * xx * yy
                         + BETA
                             * (4.0 * std::f64::consts::PI * xx).sin()
                             * (4.0 * std::f64::consts::PI * yy).sin(),
-                );
+                )
+                .unwrap();
 
                 for is in 0..NUM_SPECIES {
                     drates[is] = x[loc + is] * drates[is]
@@ -903,8 +905,8 @@ where
         let nsmx: usize = NX;
         let dx = AX / (NX as f64 - 1.0);
         let dy = AY / (NX as f64 - 1.0);
-        let cox = M::T::from(1.0 / dx.powi(2));
-        let coy = M::T::from(1.0 / dy.powi(2));
+        let cox = M::T::from_f64(1.0 / dx.powi(2)).unwrap();
+        let coy = M::T::from_f64(1.0 / dy.powi(2)).unwrap();
 
         /* Loop over grid points, evaluate interaction vector (length ns),
         form diffusion difference terms, and load crate.                    */
@@ -946,8 +948,8 @@ where
         let nsmx: usize = NX;
         let dx = AX / (NX as f64 - 1.0);
         let dy = AY / (NX as f64 - 1.0);
-        let cox = M::T::from(1.0 / dx.powi(2));
-        let coy = M::T::from(1.0 / dy.powi(2));
+        let cox = M::T::from_f64(1.0 / dx.powi(2)).unwrap();
+        let coy = M::T::from_f64(1.0 / dy.powi(2)).unwrap();
 
         /* Loop over grid points, evaluate interaction vector (length ns),
         form diffusion difference terms, and load crate.                    */
@@ -986,8 +988,8 @@ fn soln<M: Matrix>(ctx: M::C) -> OdeSolverSolution<M::V> {
     let mut soln = OdeSolverSolution {
         solution_points: Vec::new(),
         sens_solution_points: None,
-        rtol: M::T::from(1e-4),
-        atol: M::V::from_element(2 * NUM_SPECIES, M::T::from(1e-4), ctx.clone()),
+        rtol: M::T::from_f64(1e-4).unwrap(),
+        atol: M::V::from_element(2 * NUM_SPECIES, M::T::from_f64(1e-4).unwrap(), ctx.clone()),
         negative_time: false,
     };
     let data = vec![
@@ -1049,10 +1051,13 @@ fn soln<M: Matrix>(ctx: M::C) -> OdeSolverSolution<M::V> {
     ];
     for (values, time) in data {
         let values = M::V::from_vec(
-            values.iter().map(|v| M::T::from(*v)).collect::<Vec<_>>(),
+            values
+                .iter()
+                .map(|v| M::T::from_f64(*v).unwrap())
+                .collect::<Vec<_>>(),
             ctx.clone(),
         );
-        let time = M::T::from(time);
+        let time = M::T::from_f64(time).unwrap();
         soln.push(values, time);
     }
     soln
@@ -1066,11 +1071,15 @@ pub fn foodweb_problem<M, const NX: usize>() -> (
 where
     M: MatrixHost,
 {
-    let rtol = M::T::from(1e-5);
+    let rtol = M::T::from_f64(1e-5).unwrap();
     let ctx = M::C::default();
-    let atol = M::V::from_element(NUM_SPECIES * NX * NX, M::T::from(1e-5), ctx.clone());
+    let atol = M::V::from_element(
+        NUM_SPECIES * NX * NX,
+        M::T::from_f64(1e-5).unwrap(),
+        ctx.clone(),
+    );
     let t0 = M::T::zero();
-    let h0 = M::T::from(1.0);
+    let h0 = M::T::one();
     let context = FoodWebContext::<M, NX>::new(ctx);
     let eqn = FoodWeb::new(context, t0);
     let problem = OdeSolverProblem::new(

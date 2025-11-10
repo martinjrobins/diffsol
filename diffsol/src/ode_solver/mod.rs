@@ -38,7 +38,7 @@ mod tests {
         ConstantOp, ConstantOpSens, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp,
         NonLinearOpSens, Op, Vector,
     };
-    use num_traits::{One, Zero};
+    use num_traits::{FromPrimitive, One, Zero};
 
     pub fn test_ode_solver<'a, M, Eqn, Method>(
         method: &mut Method,
@@ -103,7 +103,7 @@ mod tests {
                 let error = soln.clone() - &point.state;
                 let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
                 assert!(
-                    error_norm < M::T::from(15.0),
+                    error_norm < M::T::from_f64(15.0).unwrap(),
                     "error_norm: {} at t = {}. soln: {:?}, expected: {:?}",
                     error_norm,
                     point.t,
@@ -119,7 +119,7 @@ mod tests {
                             let error_norm =
                                 error.squared_norm(&sens_point.state, atol, rtol).sqrt();
                             assert!(
-                                error_norm < M::T::from(29.0),
+                                error_norm < M::T::from_f64(29.0).unwrap(),
                                 "error_norm: {error_norm} at t = {}, sens index: {j}. soln: {sens_soln:?}, expected: {:?}",
                                 point.t,
                                 sens_point.state
@@ -150,7 +150,7 @@ mod tests {
         let final_time = soln.solution_points.last().unwrap().t;
         let mut p_0 = Eqn::V::zeros(nparams, ctx.clone());
         problem.eqn.get_params(&mut p_0);
-        let h_base = Eqn::T::from(1e-10);
+        let h_base = Eqn::T::from_f64(1e-10).unwrap();
         let mut h = Eqn::V::from_element(nparams, h_base, ctx.clone());
         h.axpy(h_base, &p_0, Eqn::T::one());
         let p_base = p_0.clone();
@@ -170,7 +170,7 @@ mod tests {
             let g_neg = s.state().g.clone();
             p_0.set_index(i, p_base.get_index(i));
 
-            let delta = (g_pos - g_neg) / Scale(Eqn::T::from(2.) * h.get_index(i));
+            let delta = (g_pos - g_neg) / Scale(Eqn::T::from_f64(2.).unwrap() * h.get_index(i));
             for j in 0..nout {
                 dgdp.set_index(i, j, delta.get_index(j));
             }
@@ -214,8 +214,8 @@ mod tests {
             delta3.column_mut(j).copy_from(&delta3_col);
         }
         let ret = vec![
-            delta * Scale(DM::T::from(2.)),
-            delta3 * Scale(DM::T::from(4.)),
+            delta * Scale(DM::T::from_f64(2.).unwrap()),
+            delta3 * Scale(DM::T::from_f64(4.).unwrap()),
         ];
         ret
     }
@@ -241,11 +241,11 @@ mod tests {
 
         let mut p_0 = ctx.vector_zeros(nparams);
         problem.eqn.get_params(&mut p_0);
-        let h_base = Eqn::T::from(1e-10);
+        let h_base = Eqn::T::from_f64(1e-10).unwrap();
         let mut h = Eqn::V::from_element(nparams, h_base, ctx.clone());
         h.axpy(h_base, &p_0, Eqn::T::one());
         let mut p_data = p_0.clone();
-        p_data.axpy(Eqn::T::from(0.1), &p_0, Eqn::T::one());
+        p_data.axpy(Eqn::T::from_f64(0.1).unwrap(), &p_0, Eqn::T::one());
         let p_base = p_0.clone();
 
         problem.eqn.set_params(&p_data);
@@ -267,7 +267,7 @@ mod tests {
 
             p_0.set_index(i, p_base.get_index(i));
 
-            let delta = (g_pos - g_neg) / Scale(Eqn::T::from(2.) * h.get_index(i));
+            let delta = (g_pos - g_neg) / Scale(Eqn::T::from_f64(2.).unwrap() * h.get_index(i));
             for j in 0..nout {
                 dgdp.set_index(i, j, delta.get_index(j));
             }
@@ -292,8 +292,12 @@ mod tests {
         let nparams = dgdp_check.nrows();
         let dgdu = dsum_squaresdp(&forwards_soln, &data);
 
-        let atol = Eqn::V::from_element(nparams, Eqn::T::from(1e-6), data.context().clone());
-        let rtol = Eqn::T::from(1e-6);
+        let atol = Eqn::V::from_element(
+            nparams,
+            Eqn::T::from_f64(1e-6).unwrap(),
+            data.context().clone(),
+        );
+        let rtol = Eqn::T::from_f64(1e-6).unwrap();
         let state = backwards_solver
             .solve_adjoint_backwards_pass(times, dgdu.iter().collect::<Vec<_>>().as_slice())
             .unwrap();
@@ -304,7 +308,7 @@ mod tests {
                 &dgdp_check.column(j).into_owned(),
                 &atol,
                 rtol,
-                Eqn::T::from(66.),
+                Eqn::T::from_f64(66.).unwrap(),
             );
         }
     }
@@ -320,8 +324,12 @@ mod tests {
         Eqn::M: DefaultSolver,
     {
         let nout = backwards_solver.problem().eqn.nout();
-        let atol = Eqn::V::from_element(nout, Eqn::T::from(1e-6), dgdp_check.context().clone());
-        let rtol = Eqn::T::from(1e-6);
+        let atol = Eqn::V::from_element(
+            nout,
+            Eqn::T::from_f64(1e-6).unwrap(),
+            dgdp_check.context().clone(),
+        );
+        let rtol = Eqn::T::from_f64(1e-6).unwrap();
         let state = backwards_solver
             .solve_adjoint_backwards_pass(&[], &[])
             .unwrap();
@@ -332,7 +340,7 @@ mod tests {
                 &dgdp_check.column(j).into_owned(),
                 &atol,
                 rtol,
-                Eqn::T::from(33.),
+                Eqn::T::from_f64(33.).unwrap(),
             );
         }
     }
@@ -536,10 +544,12 @@ mod tests {
 
     pub fn test_problem<M: Matrix>(integrate_out: bool) -> OdeSolverProblem<TestEqn<M>> {
         let eqn = TestEqn::<M>::new();
-        let atol = eqn.context().vector_from_element(1, M::T::from(1e-6));
+        let atol = eqn
+            .context()
+            .vector_from_element(1, M::T::from_f64(1e-6).unwrap());
         OdeSolverProblem::new(
             eqn,
-            M::T::from(1e-6),
+            M::T::from_f64(1e-6).unwrap(),
             atol,
             None,
             None,
@@ -559,10 +569,10 @@ mod tests {
         let integrating_sens = !s.state().s.is_empty();
         let integrating_out = s.problem().integrate_out;
         let t0 = state.as_ref().t;
-        let t1 = t0 + M::T::from(1e6);
+        let t1 = t0 + M::T::from_f64(1e6).unwrap();
         s.interpolate(t0)
             .unwrap()
-            .assert_eq_st(state.as_ref().y, M::T::from(1e-9));
+            .assert_eq_st(state.as_ref().y, M::T::from_f64(1e-9).unwrap());
         assert!(s.interpolate(t1).is_err());
         assert!(s.interpolate_out(t1).is_err());
         if integrating_sens {
@@ -571,7 +581,7 @@ mod tests {
             assert!(s.interpolate_sens(t0).is_ok());
         }
         s.step().unwrap();
-        let tmid = t0 + (s.state().t - t0) / M::T::from(2.0);
+        let tmid = t0 + (s.state().t - t0) / M::T::from_f64(2.0).unwrap();
         assert!(s.interpolate(s.state().t).is_ok());
         assert!(s.interpolate(tmid).is_ok());
         if integrating_out {
@@ -618,7 +628,7 @@ mod tests {
                 .is_ok());
         }
 
-        s.state_mut().y.fill(M::T::from(3.0));
+        s.state_mut().y.fill(M::T::from_f64(3.0).unwrap());
         assert!(s.interpolate(s.state().t).is_ok());
         if integrating_out {
             assert!(s.interpolate_out(s.state().t).is_ok());
@@ -638,10 +648,10 @@ mod tests {
     pub fn test_config<'a, Eqn: OdeEquations + 'a, Method: OdeSolverMethod<'a, Eqn>>(
         mut s: Method,
     ) {
-        *s.config_mut().as_base_mut().minimum_timestep = Eqn::T::from(1.0e8);
+        *s.config_mut().as_base_mut().minimum_timestep = Eqn::T::from_f64(1.0e8).unwrap();
         assert_eq!(
             *s.config().as_base_ref().minimum_timestep,
-            Eqn::T::from(1.0e8)
+            Eqn::T::from_f64(1.0e8).unwrap()
         );
         let mut failed = false;
         for _ in 0..10 {
@@ -658,13 +668,15 @@ mod tests {
     pub fn test_state_mut<'a, M: Matrix, Method: OdeSolverMethod<'a, TestEqn<M>>>(mut s: Method) {
         let state = s.checkpoint();
         let state2 = s.state();
-        state2.y.assert_eq_st(state.as_ref().y, M::T::from(1e-9));
+        state2
+            .y
+            .assert_eq_st(state.as_ref().y, M::T::from_f64(1e-9).unwrap());
         s.state_mut()
             .y
-            .set_index(0, M::T::from(std::f64::consts::PI));
+            .set_index(0, M::T::from_f64(std::f64::consts::PI).unwrap());
         assert_eq!(
             s.state_mut().y.get_index(0),
-            M::T::from(std::f64::consts::PI)
+            M::T::from_f64(std::f64::consts::PI).unwrap()
         );
     }
 
@@ -781,7 +793,7 @@ mod tests {
                     / (solver1.state().t.abs() * solver1.problem().rtol
                         + solver1.problem().atol.get_index(0));
                 assert!(
-                    time_error < M::T::from(20.0),
+                    time_error < M::T::from_f64(20.0).unwrap(),
                     "time_error: {} at t = {}",
                     time_error,
                     solver1.state().t
@@ -790,7 +802,7 @@ mod tests {
                     solver2.state().y,
                     &solver1.problem().atol,
                     solver1.problem().rtol,
-                    M::T::from(20.0),
+                    M::T::from_f64(20.0).unwrap(),
                 );
             }
             let soln = solver1.interpolate(point.t).unwrap();
@@ -798,14 +810,14 @@ mod tests {
                 &point.state,
                 &solver1.problem().atol,
                 solver1.problem().rtol,
-                M::T::from(15.0),
+                M::T::from_f64(15.0).unwrap(),
             );
             let soln = solver2.interpolate(point.t).unwrap();
             soln.assert_eq_norm(
                 &point.state,
                 &solver1.problem().atol,
                 solver1.problem().rtol,
-                M::T::from(15.0),
+                M::T::from_f64(15.0).unwrap(),
             );
         }
     }
@@ -820,7 +832,7 @@ mod tests {
     {
         // save state and solve for a little bit
         let state = s.checkpoint();
-        s.solve(Eqn::T::from(1.0)).unwrap();
+        s.solve(Eqn::T::one()).unwrap();
 
         // reinit using state_mut
         s.state_mut().y.copy_from(state.as_ref().y);
@@ -838,7 +850,7 @@ mod tests {
                 .squared_norm(&error, &s.problem().atol, s.problem().rtol)
                 .sqrt();
             assert!(
-                error_norm < Eqn::T::from(19.0),
+                error_norm < Eqn::T::from_f64(19.0).unwrap(),
                 "error_norm: {} at t = {}",
                 error_norm,
                 point.t

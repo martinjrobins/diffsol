@@ -4,7 +4,7 @@ use crate::{
     Op, Vector,
 };
 use nalgebra::ComplexField;
-use num_traits::{One, Zero};
+use num_traits::{FromPrimitive, One, Zero};
 use std::ops::MulAssign;
 
 // exponential decay problem with algebraic constraint
@@ -215,11 +215,11 @@ pub fn exponential_decay_with_algebraic_problem<M: MatrixHost + 'static>(
         .unwrap();
 
     let ctx = problem.eqn.context();
-    let p = M::V::from_vec(vec![0.1.into()], ctx.clone());
+    let p = M::V::from_vec(vec![M::T::from_f64(0.1).unwrap()], ctx.clone());
     let mut soln = OdeSolverSolution::default();
     for i in 0..10 {
-        let t = M::T::from(i as f64 / 10.0);
-        let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into(), 1.0.into()], ctx.clone());
+        let t = M::T::from_f64(i as f64 / 10.0).unwrap();
+        let y0 = M::V::from_vec(vec![M::T::one(), M::T::one(), M::T::one()], ctx.clone());
         let y: M::V = y0 * scale(M::T::exp(-p[0] * t));
         soln.push(y, t);
     }
@@ -264,18 +264,19 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: MatrixHost + 'static>
         .unwrap();
 
     let ctx = problem.eqn.context();
-    let p = M::V::from_vec(vec![a.into()], ctx.clone());
-    let atol_out = M::V::from_element(nout, M::T::from(1e-6), ctx.clone());
+    let a = M::T::from_f64(a).unwrap();
+    let p = M::V::from_vec(vec![a], ctx.clone());
+    let atol_out = M::V::from_element(nout, M::T::from_f64(1e-6).unwrap(), ctx.clone());
     let mut soln = OdeSolverSolution {
         atol: atol_out,
         rtol: problem.rtol,
         ..Default::default()
     };
-    let t0 = M::T::from(0.0);
-    let t1 = M::T::from(9.0);
+    let t0 = M::T::zero();
+    let t1 = M::T::from_f64(9.0).unwrap();
     for i in 0..10 {
-        let t = M::T::from(i as f64);
-        let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into(), 1.0.into()], ctx.clone());
+        let t = M::T::from_f64(i as f64).unwrap();
+        let y0 = M::V::from_vec(vec![M::T::one(), M::T::one(), M::T::one()], ctx.clone());
         let g = y0.clone() * scale((M::T::exp(-p[0] * t0) - M::T::exp(-p[0] * t)) / p[0]);
         let g = M::V::from_vec(vec![p[0] * g[2]], ctx.clone());
         let dgdk = t1 * M::T::exp(-p[0] * t1);
@@ -308,11 +309,12 @@ pub fn exponential_decay_with_algebraic_problem_sens<M: MatrixHost + 'static>() 
         .unwrap();
 
     let ctx = problem.eqn.context();
-    let p = M::V::from_vec(vec![k.into()], ctx.clone());
+    let k = M::T::from_f64(k).unwrap();
+    let p = M::V::from_vec(vec![k], ctx.clone());
     let mut soln = OdeSolverSolution::default();
     for i in 0..10 {
-        let t = M::T::from(i as f64 / 10.0);
-        let y0 = M::V::from_vec(vec![1.0.into(), 1.0.into(), 1.0.into()], ctx.clone());
+        let t = M::T::from_f64(i as f64 / 10.0).unwrap();
+        let y0 = M::V::from_vec(vec![M::T::one(), M::T::one(), M::T::one()], ctx.clone());
         let y: M::V = y0.clone() * scale(M::T::exp(-p[0] * t));
         let yp = y0 * scale(-t * M::T::exp(-p[0] * t));
         soln.push_sens(y, t, &[yp]);

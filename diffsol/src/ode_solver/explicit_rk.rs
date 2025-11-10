@@ -308,6 +308,13 @@ mod test {
         "###);
     }
 
+    #[test]
+    fn test_tsit45_nalgebra_f32_exponential_decay() {
+        let (problem, soln) = exponential_decay_problem::<NalgebraMat<f32>>(false);
+        let mut s = problem.tsit45().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn test_tsit45_nalgebra_heat1d_diffsl() {

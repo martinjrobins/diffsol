@@ -1,4 +1,5 @@
 use nalgebra::ComplexField;
+use num_traits::FromPrimitive;
 use num_traits::{One, Pow, Zero};
 
 use crate::{
@@ -513,10 +514,11 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
             let d0 = y0.squared_norm(y0, atol, rtol).sqrt();
             let d1 = f0.squared_norm(y0, atol, rtol).sqrt();
 
-            let h0 = if d0 < Eqn::T::from(1e-5) || d1 < Eqn::T::from(1e-5) {
-                Eqn::T::from(1e-6)
+            let h0 = if d0 < Eqn::T::from_f64(1e-5).unwrap() || d1 < Eqn::T::from_f64(1e-5).unwrap()
+            {
+                Eqn::T::from_f64(1e-6).unwrap()
             } else {
-                Eqn::T::from(0.01) * (d0 / d1)
+                Eqn::T::from_f64(0.01).unwrap() * (d0 / d1)
             };
 
             // make sure we preserve the sign of h0
@@ -537,22 +539,22 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
             if max_d < d1 {
                 max_d = d1;
             }
-            let h1 = if max_d < Eqn::T::from(1e-15) {
-                let h1 = h0 * Eqn::T::from(1e-3);
-                if h1 < Eqn::T::from(1e-6) {
-                    Eqn::T::from(1e-6)
+            let h1 = if max_d < Eqn::T::from_f64(1e-15).unwrap() {
+                let h1 = h0 * Eqn::T::from_f64(1e-3).unwrap();
+                if h1 < Eqn::T::from_f64(1e-6).unwrap() {
+                    Eqn::T::from_f64(1e-6).unwrap()
                 } else {
                     h1
                 }
             } else {
-                (Eqn::T::from(0.01) / max_d)
-                    .pow(Eqn::T::one() / Eqn::T::from(1.0 + solver_order as f64))
+                (Eqn::T::from_f64(0.01).unwrap() / max_d)
+                    .pow(Eqn::T::one() / Eqn::T::from_f64(1.0 + solver_order as f64).unwrap())
             };
             (h0, h1)
         };
 
         let state = self.as_mut();
-        *state.h = Eqn::T::from(100.0) * h0;
+        *state.h = Eqn::T::from_f64(100.0).unwrap() * h0;
         if *state.h > h1 {
             *state.h = h1;
         }

@@ -291,6 +291,7 @@ where
 mod tests {
     use super::*;
     use crate::{FaerMat, FaerSparseMat, NalgebraMat, Vector};
+    use num_traits::FromPrimitive;
 
     #[test]
     fn test_split_combine_faer_sparse() {
@@ -328,7 +329,7 @@ mod tests {
         ];
         let triplets = triplets
             .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from(*v)))
+            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
             .collect::<Vec<_>>();
         let m = M::try_from_triplets(4, 4, triplets.clone(), Default::default()).unwrap();
         let indices = <M::V as Vector>::Index::from_vec(vec![0, 2], Default::default());
@@ -340,19 +341,19 @@ mod tests {
         let lr_triplets = [(0, 0, 1.0), (1, 0, 9.0), (0, 1, 3.0), (1, 1, 11.0)];
         let ul_triplets = ul_triplets
             .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from(*v)))
+            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
             .collect::<Vec<_>>();
         let ur_triplets = ur_triplets
             .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from(*v)))
+            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
             .collect::<Vec<_>>();
         let ll_triplets = ll_triplets
             .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from(*v)))
+            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
             .collect::<Vec<_>>();
         let lr_triplets = lr_triplets
             .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from(*v)))
+            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
             .collect::<Vec<_>>();
         assert_eq!(ul_triplets, ul.triplet_iter().collect::<Vec<_>>());
         assert_eq!(ur_triplets, ur.triplet_iter().collect::<Vec<_>>());
@@ -390,19 +391,19 @@ mod tests {
 
         let ul_triplets = ul_triplets
             .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from(*v)))
+            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
             .collect::<Vec<_>>();
         let ur_triplets = ur_triplets
             .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from(*v)))
+            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
             .collect::<Vec<_>>();
         let ll_triplets = ll_triplets
             .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from(*v)))
+            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
             .collect::<Vec<_>>();
         let lr_triplets = lr_triplets
             .iter()
-            .map(|(i, j, v)| (*i, *j, M::T::from(*v)))
+            .map(|(i, j, v)| (*i, *j, M::T::from_f64(*v).unwrap()))
             .collect::<Vec<_>>();
         assert_eq!(ul_triplets, ul.triplet_iter().collect::<Vec<_>>());
         assert_eq!(ur_triplets, ur.triplet_iter().collect::<Vec<_>>());

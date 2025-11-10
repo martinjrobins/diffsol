@@ -194,7 +194,7 @@ impl<T: Scalar> Vector for FaerVec<T> {
                 .data
                 .iter()
                 .fold(T::zero(), |acc, x| acc + x.pow(k))
-                .pow(T::one() / T::from(k as f64)),
+                .pow(T::one() / T::from_f64(k as f64).unwrap()),
         }
     }
 
@@ -209,7 +209,7 @@ impl<T: Scalar> Vector for FaerVec<T> {
             let xi = unsafe { self.data.get_unchecked(i) };
             acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
         }
-        acc / Self::T::from(self.len() as f64)
+        acc / Self::T::from_f64(self.len() as f64).unwrap()
     }
     fn as_view(&self) -> Self::View<'_> {
         FaerVecRef {
@@ -357,7 +357,7 @@ impl<'a, T: Scalar> VectorView<'a> for FaerVecRef<'a, T> {
             let xi = unsafe { self.data.get_unchecked(i) };
             acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
         }
-        acc / Self::T::from(self.data.nrows() as f64)
+        acc / Self::T::from_f64(self.data.nrows() as f64).unwrap()
     }
 }
 
@@ -402,7 +402,7 @@ mod tests {
 
     #[test]
     fn test_error_norm() {
-        let v = FaerVec::from_vec(vec![1.0, -2.0, 3.0], Default::default());
+        let v: FaerVec<f64> = FaerVec::from_vec(vec![1.0, -2.0, 3.0], Default::default());
         let y = FaerVec::from_vec(vec![1.0, 2.0, 3.0], Default::default());
         let atol = FaerVec::from_vec(vec![0.1, 0.2, 0.3], Default::default());
         let rtol = 0.1;
