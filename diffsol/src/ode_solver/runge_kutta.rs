@@ -13,10 +13,7 @@ use crate::{
     MatrixView, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op,
     Scalar, Vector, VectorViewMut,
 };
-use num_traits::abs;
-use num_traits::One;
-use num_traits::Pow;
-use num_traits::Zero;
+use num_traits::{abs, FromPrimitive, One, Pow, ToPrimitive, Zero};
 
 use super::bdf::BdfStatistics;
 use std::ops::{MulAssign, SubAssign};
@@ -409,8 +406,9 @@ where
         min_factor: Eqn::T,
         max_factor: Eqn::T,
     ) -> Eqn::T {
-        let safety = Eqn::T::from(0.9 * safety_factor);
-        let mut factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (self.order() as f64 + 1.0)));
+        let safety = Eqn::T::from_f64(0.9 * safety_factor).unwrap();
+        let mut factor =
+            safety * error_norm.pow(Eqn::T::from_f64(-0.5 / (self.order() as f64 + 1.0)).unwrap());
         if factor < min_factor {
             factor = min_factor;
         }
@@ -671,7 +669,8 @@ where
     ) -> Result<Option<OdeSolverStopReason<Eqn::T>>, DiffsolError> {
         let state = &mut self.state;
         // check if the we are at tstop
-        let troundoff = Eqn::T::from(100.0) * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
+        let troundoff =
+            Eqn::T::from_f64(100.0).unwrap() * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
         if abs(state.t - tstop) <= troundoff {
             return Ok(Some(OdeSolverStopReason::TstopReached));
         } else if (state.h > Eqn::T::zero() && tstop < state.t - troundoff)
@@ -679,8 +678,8 @@ where
         {
             return Err(DiffsolError::from(
                 OdeSolverError::StopTimeBeforeCurrentTime {
-                    stop_time: tstop.into(),
-                    state_time: (state.t).into(),
+                    stop_time: tstop.to_f64().unwrap(),
+                    state_time: (state.t).to_f64().unwrap(),
                 },
             ));
         }
@@ -753,7 +752,7 @@ where
             }
         }
         if ncontributions > 1 {
-            error_norm /= Eqn::T::from(ncontributions as f64);
+            error_norm /= Eqn::T::from_f64(ncontributions as f64).unwrap();
         }
         error_norm
     }
@@ -770,14 +769,14 @@ where
         if nattempts >= max_error_test_fails {
             return Err(DiffsolError::from(
                 OdeSolverError::TooManyErrorTestFailures {
-                    time: self.state.t.into(),
+                    time: self.state.t.to_f64().unwrap(),
                 },
             ));
         }
         // if step size too small, then fail
         if abs(h) < min_timestep {
             return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
-                time: self.state.t.into(),
+                time: self.state.t.to_f64().unwrap(),
             }));
         }
         Ok(())
@@ -792,7 +791,7 @@ where
         // if step size too small, then fail
         if abs(h) < min_timestep {
             return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
-                time: self.state.t.into(),
+                time: self.state.t.to_f64().unwrap(),
             }));
         }
         Ok(())
@@ -899,16 +898,12 @@ where
         y.copy_from(u1);
         y.sub_assign(u0);
         y.axpy_v(
-            scale_diff * (theta - M::T::from(1.0)),
+            scale_diff * (theta - M::T::one()),
             &f0,
-            M::T::one() - M::T::from(2.0) * theta,
+            M::T::one() - M::T::from_f64(2.0).unwrap() * theta,
         );
         y.axpy_v(scale_diff * theta, &f1, M::T::one());
-        y.axpy(
-            M::T::from(1.0) - theta,
-            u0,
-            theta * (theta - M::T::from(1.0)),
-        );
+        y.axpy(M::T::one() - theta, u0, theta * (theta - M::T::one()));
         y.axpy(theta, u1, M::T::one());
     }
 

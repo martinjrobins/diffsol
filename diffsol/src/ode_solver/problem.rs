@@ -1,3 +1,4 @@
+use num_traits::FromPrimitive;
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
@@ -677,8 +678,8 @@ impl<V: Vector> Default for OdeSolverSolution<V> {
         Self {
             solution_points: Vec::new(),
             sens_solution_points: None,
-            rtol: V::T::from(1e-6),
-            atol: V::from_element(1, V::T::from(1e-6), V::C::default()),
+            rtol: V::T::from_f64(1e-6).unwrap(),
+            atol: V::from_element(1, V::T::from_f64(1e-6).unwrap(), V::C::default()),
             negative_time: false,
         }
     }

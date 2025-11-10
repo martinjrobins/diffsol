@@ -14,7 +14,7 @@ use crate::{
     OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef,
     StateRefMut,
 };
-use num_traits::One;
+use num_traits::{FromPrimitive, One};
 
 use super::bdf::BdfStatistics;
 use super::config::SdirkConfig;
@@ -349,7 +349,7 @@ where
                         self.jacobian_updates(h, SolverState::FirstConvergenceFail);
                     } else {
                         // newton iteration did not converge and jacobian has been updated, so we reduce step size and try again
-                        h *= Eqn::T::from(0.3);
+                        h *= Eqn::T::from_f64(0.3).unwrap();
                         self.update_op_step_size(h);
                         self.jacobian_updates(h, SolverState::SecondConvergenceFail);
                     }

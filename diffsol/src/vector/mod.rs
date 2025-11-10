@@ -334,39 +334,70 @@ pub trait DefaultDenseMatrix: Vector {
 #[cfg(test)]
 mod tests {
     use super::Vector;
+    use num_traits::FromPrimitive;
 
     pub fn test_root_finding<V: Vector>() {
         let g0 = V::from_vec(
-            vec![1.0.into(), (-2.0).into(), 3.0.into()],
-            Default::default(),
-        );
-        let g1 = V::from_vec(vec![1.0.into(), 2.0.into(), 3.0.into()], Default::default());
-        let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
-        assert!(!found_root);
-        assert_eq!(max_frac, V::T::from(0.5));
-        assert_eq!(max_frac_index, 1);
-
-        let g0 = V::from_vec(
-            vec![1.0.into(), (-2.0).into(), 3.0.into()],
-            Default::default(),
-        );
-        let g1 = V::from_vec(vec![1.0.into(), 2.0.into(), 0.0.into()], Default::default());
-        let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
-        assert!(found_root);
-        assert_eq!(max_frac, V::T::from(0.5));
-        assert_eq!(max_frac_index, 1);
-
-        let g0 = V::from_vec(
-            vec![1.0.into(), (-2.0).into(), 3.0.into()],
+            vec![
+                V::T::from_f64(1.0).unwrap(),
+                V::T::from_f64(-2.0).unwrap(),
+                V::T::from_f64(3.0).unwrap(),
+            ],
             Default::default(),
         );
         let g1 = V::from_vec(
-            vec![1.0.into(), (-2.0).into(), 3.0.into()],
+            vec![
+                V::T::from_f64(1.0).unwrap(),
+                V::T::from_f64(2.0).unwrap(),
+                V::T::from_f64(3.0).unwrap(),
+            ],
             Default::default(),
         );
         let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
         assert!(!found_root);
-        assert_eq!(max_frac, V::T::from(0.0));
+        assert_eq!(max_frac, V::T::from_f64(0.5).unwrap());
+        assert_eq!(max_frac_index, 1);
+
+        let g0 = V::from_vec(
+            vec![
+                V::T::from_f64(1.0).unwrap(),
+                V::T::from_f64(-2.0).unwrap(),
+                V::T::from_f64(3.0).unwrap(),
+            ],
+            Default::default(),
+        );
+        let g1 = V::from_vec(
+            vec![
+                V::T::from_f64(1.0).unwrap(),
+                V::T::from_f64(2.0).unwrap(),
+                V::T::from_f64(0.0).unwrap(),
+            ],
+            Default::default(),
+        );
+        let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
+        assert!(found_root);
+        assert_eq!(max_frac, V::T::from_f64(0.5).unwrap());
+        assert_eq!(max_frac_index, 1);
+
+        let g0 = V::from_vec(
+            vec![
+                V::T::from_f64(1.0).unwrap(),
+                V::T::from_f64(-2.0).unwrap(),
+                V::T::from_f64(3.0).unwrap(),
+            ],
+            Default::default(),
+        );
+        let g1 = V::from_vec(
+            vec![
+                V::T::from_f64(1.0).unwrap(),
+                V::T::from_f64(-2.0).unwrap(),
+                V::T::from_f64(3.0).unwrap(),
+            ],
+            Default::default(),
+        );
+        let (found_root, max_frac, max_frac_index) = g0.root_finding(&g1);
+        assert!(!found_root);
+        assert_eq!(max_frac, V::T::from_f64(0.0).unwrap());
         assert_eq!(max_frac_index, -1);
     }
 }

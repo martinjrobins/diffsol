@@ -338,20 +338,13 @@ pub trait DenseMatrix:
 mod tests {
     use super::{DenseMatrix, Matrix};
     use crate::{scalar::IndexType, VectorIndex};
+    use num_traits::{FromPrimitive, One, Zero};
 
     pub fn test_partition_indices_by_zero_diagonal<M: Matrix>() {
-        let triplets = vec![(0, 0, 1.0.into()), (1, 1, 2.0.into()), (3, 3, 1.0.into())];
-        let m = M::try_from_triplets(4, 4, triplets, Default::default()).unwrap();
-        let (zero_diagonal_indices, non_zero_diagonal_indices) =
-            m.partition_indices_by_zero_diagonal();
-        assert_eq!(zero_diagonal_indices.clone_as_vec(), vec![2]);
-        assert_eq!(non_zero_diagonal_indices.clone_as_vec(), vec![0, 1, 3]);
-
         let triplets = vec![
-            (0, 0, 1.0.into()),
-            (1, 1, 2.0.into()),
-            (2, 2, 0.0.into()),
-            (3, 3, 1.0.into()),
+            (0, 0, M::T::one()),
+            (1, 1, M::T::from_f64(2.0).unwrap()),
+            (3, 3, M::T::one()),
         ];
         let m = M::try_from_triplets(4, 4, triplets, Default::default()).unwrap();
         let (zero_diagonal_indices, non_zero_diagonal_indices) =
@@ -360,10 +353,22 @@ mod tests {
         assert_eq!(non_zero_diagonal_indices.clone_as_vec(), vec![0, 1, 3]);
 
         let triplets = vec![
-            (0, 0, 1.0.into()),
-            (1, 1, 2.0.into()),
-            (2, 2, 3.0.into()),
-            (3, 3, 1.0.into()),
+            (0, 0, M::T::one()),
+            (1, 1, M::T::from_f64(2.0).unwrap()),
+            (2, 2, M::T::zero()),
+            (3, 3, M::T::one()),
+        ];
+        let m = M::try_from_triplets(4, 4, triplets, Default::default()).unwrap();
+        let (zero_diagonal_indices, non_zero_diagonal_indices) =
+            m.partition_indices_by_zero_diagonal();
+        assert_eq!(zero_diagonal_indices.clone_as_vec(), vec![2]);
+        assert_eq!(non_zero_diagonal_indices.clone_as_vec(), vec![0, 1, 3]);
+
+        let triplets = vec![
+            (0, 0, M::T::one()),
+            (1, 1, M::T::from_f64(2.0).unwrap()),
+            (2, 2, M::T::from_f64(3.0).unwrap()),
+            (3, 3, M::T::one()),
         ];
         let m = M::try_from_triplets(4, 4, triplets, Default::default()).unwrap();
         let (zero_diagonal_indices, non_zero_diagonal_indices) =
@@ -379,47 +384,47 @@ mod tests {
         // M = [1 2]
         //     [3 4]
         let mut a = M::zeros(2, 2, Default::default());
-        a.set_index(0, 0, M::T::from(1.0));
-        a.set_index(0, 1, M::T::from(2.0));
-        a.set_index(1, 0, M::T::from(3.0));
-        a.set_index(1, 1, M::T::from(4.0));
+        a.set_index(0, 0, M::T::one());
+        a.set_index(0, 1, M::T::from_f64(2.0).unwrap());
+        a.set_index(1, 0, M::T::from_f64(3.0).unwrap());
+        a.set_index(1, 1, M::T::from_f64(4.0).unwrap());
 
         // op is M(:, 1) = 2 * M(:, 0) + M(:, 1)
-        a.column_axpy(M::T::from(2.0), 0, 1);
+        a.column_axpy(M::T::from_f64(2.0).unwrap(), 0, 1);
         // M = [1 4]
         //     [3 10]
-        assert_eq!(a.get_index(0, 0), M::T::from(1.0));
-        assert_eq!(a.get_index(0, 1), M::T::from(4.0));
-        assert_eq!(a.get_index(1, 0), M::T::from(3.0));
-        assert_eq!(a.get_index(1, 1), M::T::from(10.0));
+        assert_eq!(a.get_index(0, 0), M::T::one());
+        assert_eq!(a.get_index(0, 1), M::T::from_f64(4.0).unwrap());
+        assert_eq!(a.get_index(1, 0), M::T::from_f64(3.0).unwrap());
+        assert_eq!(a.get_index(1, 1), M::T::from_f64(10.0).unwrap());
     }
 
     pub fn test_resize_cols<M: DenseMatrix>() {
         let mut a = M::zeros(2, 2, Default::default());
-        a.set_index(0, 0, M::T::from(1.0));
-        a.set_index(0, 1, M::T::from(2.0));
-        a.set_index(1, 0, M::T::from(3.0));
-        a.set_index(1, 1, M::T::from(4.0));
+        a.set_index(0, 0, M::T::one());
+        a.set_index(0, 1, M::T::from_f64(2.0).unwrap());
+        a.set_index(1, 0, M::T::from_f64(3.0).unwrap());
+        a.set_index(1, 1, M::T::from_f64(4.0).unwrap());
 
         a.resize_cols(3);
         assert_eq!(a.ncols(), 3);
         assert_eq!(a.nrows(), 2);
-        assert_eq!(a.get_index(0, 0), M::T::from(1.0));
-        assert_eq!(a.get_index(0, 1), M::T::from(2.0));
-        assert_eq!(a.get_index(1, 0), M::T::from(3.0));
-        assert_eq!(a.get_index(1, 1), M::T::from(4.0));
+        assert_eq!(a.get_index(0, 0), M::T::one());
+        assert_eq!(a.get_index(0, 1), M::T::from_f64(2.0).unwrap());
+        assert_eq!(a.get_index(1, 0), M::T::from_f64(3.0).unwrap());
+        assert_eq!(a.get_index(1, 1), M::T::from_f64(4.0).unwrap());
 
-        a.set_index(0, 2, M::T::from(5.0));
-        a.set_index(1, 2, M::T::from(6.0));
-        assert_eq!(a.get_index(0, 2), M::T::from(5.0));
-        assert_eq!(a.get_index(1, 2), M::T::from(6.0));
+        a.set_index(0, 2, M::T::from_f64(5.0).unwrap());
+        a.set_index(1, 2, M::T::from_f64(6.0).unwrap());
+        assert_eq!(a.get_index(0, 2), M::T::from_f64(5.0).unwrap());
+        assert_eq!(a.get_index(1, 2), M::T::from_f64(6.0).unwrap());
 
         a.resize_cols(2);
         assert_eq!(a.ncols(), 2);
         assert_eq!(a.nrows(), 2);
-        assert_eq!(a.get_index(0, 0), M::T::from(1.0));
-        assert_eq!(a.get_index(0, 1), M::T::from(2.0));
-        assert_eq!(a.get_index(1, 0), M::T::from(3.0));
-        assert_eq!(a.get_index(1, 1), M::T::from(4.0));
+        assert_eq!(a.get_index(0, 0), M::T::one());
+        assert_eq!(a.get_index(0, 1), M::T::from_f64(2.0).unwrap());
+        assert_eq!(a.get_index(1, 0), M::T::from_f64(3.0).unwrap());
+        assert_eq!(a.get_index(1, 1), M::T::from_f64(4.0).unwrap());
     }
 }

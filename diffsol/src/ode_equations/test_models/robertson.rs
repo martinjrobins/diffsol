@@ -2,7 +2,7 @@ use crate::{
     matrix::Matrix, ode_solver::problem::OdeSolverSolution, MatrixHost, OdeBuilder,
     OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
 };
-use num_traits::{One, Zero};
+use num_traits::{FromPrimitive, One, Zero};
 
 #[cfg(feature = "diffsl")]
 #[allow(clippy::type_complexity)]
@@ -62,14 +62,14 @@ pub fn robertson_diffsl_problem<
 fn robertson_rhs<M: MatrixHost>(x: &M::V, p: &M::V, _t: M::T, y: &mut M::V) {
     y[0] = -p[0] * x[0] + p[1] * x[1] * x[2];
     y[1] = p[0] * x[0] - p[1] * x[1] * x[2] - p[2] * x[1] * x[1];
-    y[2] = x[0] + x[1] + x[2] - M::T::from(1.0);
+    y[2] = x[0] + x[1] + x[2] - M::T::one();
 }
 fn robertson_jac_mul<M: MatrixHost>(x: &M::V, p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
     y[0] = -p[0] * v[0] + p[1] * v[1] * x[2] + p[1] * x[1] * v[2];
     y[1] = p[0] * v[0]
         - p[1] * v[1] * x[2]
         - p[1] * x[1] * v[2]
-        - M::T::from(2.0) * p[2] * x[1] * v[1];
+        - M::T::from_f64(2.0).unwrap() * p[2] * x[1] * v[1];
     y[2] = v[0] + v[1] + v[2];
 }
 
@@ -137,8 +137,14 @@ fn soln<V: Vector>(ctx: V::C) -> OdeSolverSolution<V> {
 
     for (values, time) in data {
         soln.push(
-            V::from_vec(values.into_iter().map(|v| v.into()).collect(), ctx.clone()),
-            time.into(),
+            V::from_vec(
+                values
+                    .into_iter()
+                    .map(|v| V::T::from_f64(v).unwrap())
+                    .collect(),
+                ctx.clone(),
+            ),
+            V::T::from_f64(time).unwrap(),
         );
     }
     soln
@@ -184,10 +190,13 @@ pub fn robertson_sens<M: MatrixHost + 'static>() -> (
     for (values, time) in data {
         soln.push(
             M::V::from_vec(
-                values.into_iter().map(|v| v.into()).collect(),
+                values
+                    .into_iter()
+                    .map(|v| M::T::from_f64(v).unwrap())
+                    .collect(),
                 problem.eqn.context().clone(),
             ),
-            time.into(),
+            M::T::from_f64(time).unwrap(),
         );
     }
 

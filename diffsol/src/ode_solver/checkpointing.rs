@@ -1,3 +1,4 @@
+use num_traits::FromPrimitive;
 use std::cell::RefCell;
 
 use crate::{
@@ -103,15 +104,15 @@ where
         y.copy_from(u0);
         y.axpy(V::T::one(), u1, -V::T::one());
         y.axpy(
-            h * (theta - V::T::from(1.0)),
+            h * (theta - V::T::from_f64(1.0).unwrap()),
             f0,
-            V::T::one() - V::T::from(2.0) * theta,
+            V::T::one() - V::T::from_f64(2.0).unwrap() * theta,
         );
         y.axpy(h * theta, f1, V::T::one());
         y.axpy(
-            V::T::from(1.0) - theta,
+            V::T::from_f64(1.0).unwrap() - theta,
             u0,
-            theta * (theta - V::T::from(1.0)),
+            theta * (theta - V::T::from_f64(1.0).unwrap()),
         );
         y.axpy(theta, u1, V::T::one());
         Some(())
@@ -217,7 +218,7 @@ where
 
         // if t is before first segment or after last segment, return error
         let h = self.last_h().unwrap_or(Eqn::T::one());
-        let troundoff = Eqn::T::from(100.0) * Eqn::T::EPSILON * (abs(t) + abs(h));
+        let troundoff = Eqn::T::from_f64(100.0).unwrap() * Eqn::T::EPSILON * (abs(t) + abs(h));
         if t < self.checkpoints[0].as_ref().t - troundoff
             || t > self.checkpoints[self.checkpoints.len() - 1].as_ref().t + troundoff
         {

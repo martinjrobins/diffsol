@@ -304,7 +304,7 @@ mod tests {
         LinearOp, Op,
     };
     use crate::{scale, FaerSparseMat, NonLinearOpJacobian};
-    use num_traits::{One, Zero};
+    use num_traits::{FromPrimitive, One, Zero};
     use std::ops::MulAssign;
 
     #[allow(clippy::type_complexity)]
@@ -464,10 +464,10 @@ mod tests {
             ],
             vec![(0, 0, M::T::one()), (1, 1, M::T::one())],
             vec![
-                (0, 0, M::T::from(0.9)),
-                (1, 0, M::T::from(2.0)),
-                (1, 1, M::T::from(1.1)),
-                (2, 2, M::T::from(1.4)),
+                (0, 0, M::T::from_f64(0.9).unwrap()),
+                (1, 0, M::T::from_f64(2.0).unwrap()),
+                (1, 1, M::T::from_f64(1.1).unwrap()),
+                (2, 2, M::T::from_f64(1.4).unwrap()),
             ],
         ];
         let n = 3;
@@ -495,7 +495,7 @@ mod tests {
             op.jac_mul_inplace(&y0, t0, &v, &mut gemv1);
             let mut gemv2 = M::V::zeros(n, p.context().clone());
             jac.gemv(M::T::one(), &v, M::T::zero(), &mut gemv2);
-            gemv1.assert_eq_st(&gemv2, M::T::from(1e-10));
+            gemv1.assert_eq_st(&gemv2, M::T::from_f64(1e-10).unwrap());
         }
 
         // test linear functions
@@ -517,7 +517,7 @@ mod tests {
             op.gemv_inplace(&v, t0, M::T::zero(), &mut gemv1);
             let mut gemv2 = M::V::zeros(n, p.context().clone());
             jac.gemv(M::T::one(), &v, M::T::zero(), &mut gemv2);
-            gemv1.assert_eq_st(&gemv2, M::T::from(1e-10));
+            gemv1.assert_eq_st(&gemv2, M::T::from_f64(1e-10).unwrap());
         }
     }
 

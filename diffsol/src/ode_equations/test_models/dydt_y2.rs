@@ -2,7 +2,7 @@ use crate::{
     ode_solver::problem::OdeSolverSolution, scalar::scale, Context, DenseMatrix, OdeBuilder,
     OdeEquationsImplicit, OdeSolverProblem, Vector,
 };
-use num_traits::One;
+use num_traits::{FromPrimitive, One};
 use std::ops::MulAssign;
 
 // dy/dt = y^2
@@ -15,7 +15,7 @@ fn rhs<M: DenseMatrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
 fn rhs_jac<M: DenseMatrix>(x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V) {
     y.copy_from(v);
     y.component_mul_assign(x);
-    y.mul_assign(scale(M::T::from(2.)));
+    y.mul_assign(scale(M::T::from_f64(2.).unwrap()));
 }
 
 #[allow(clippy::type_complexity)]
@@ -32,15 +32,15 @@ pub fn dydt_y2_problem<M: DenseMatrix + 'static>(
         .use_coloring(use_coloring)
         .rtol(1e-4)
         .rhs_implicit(rhs::<M>, rhs_jac::<M>)
-        .init(move |_p, _t, y| y.fill(y0.into()), size)
+        .init(move |_p, _t, y| y.fill(M::T::from_f64(y0).unwrap()), size)
         .build()
         .unwrap();
     let mut soln = OdeSolverSolution::default();
-    let y0: Vec<M::T> = [y0.into()].repeat(size);
+    let y0: Vec<M::T> = [M::T::from_f64(y0).unwrap()].repeat(size);
     let n = 10;
     let dt = tlast / n as f64;
     for i in 0..=n {
-        let t = M::T::from(i as f64 * dt);
+        let t = M::T::from_f64(i as f64 * dt).unwrap();
         // y = y0 / (1 - y0 * t)
         let y = y0
             .iter()
