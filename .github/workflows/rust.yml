@@ -12,6 +12,7 @@ env:
   RUSTFLAGS: -D warnings -A unused-imports
   RUSTDOCFLAGS: -D warnings
   RUST_BACKTRACE: full
+  LLVM_VERSION: "17"
 
 jobs:
   rustfmt:
@@ -48,6 +49,7 @@ jobs:
           os:
             - ubuntu-latest
             - macos-latest
+            - macos-15-intel
             - windows-latest
           include:
             - toolchain: stable
@@ -111,9 +113,14 @@ jobs:
       run: rustc -Vv
     - name: Install LLVM and Clang
       uses: KyleMayes/install-llvm-action@v2
-      if : (matrix.os == 'ubuntu-latest' || matrix.os == 'macos-13' || matrix.os == 'macos-latest') && matrix.book == false
+      if : (matrix.os == 'ubuntu-latest' || matrix.os == 'macos-latest') && matrix.book == false
       with:
-        version: "17.0"
+        version: ${{ env.LLVM_VERSION }}
+    - name: Install LLVM for macOS Intel (Homebrew)
+      if: matrix.os == 'macos-15-intel' && matrix.book == false
+      run: |
+        brew install llvm@${{ env.LLVM_VERSION }}
+        echo /usr/local/opt/llvm@${{ env.LLVM_VERSION }}/bin >> $GITHUB_PATH
     - name: Set features variable and install dependencies (Ubuntu)
       if: matrix.os == 'ubuntu-latest' && matrix.book == false
       run: |
@@ -132,7 +139,7 @@ jobs:
       if: matrix.coverage == true
       run: cargo install cargo-tarpaulin
     - name: Set features variable and install dependencies (macOS)
-      if: matrix.os == 'macos-13' || matrix.os == 'macos-latest'
+      if: matrix.os == 'macos-15-intel' || matrix.os == 'macos-latest'
       run: |
         echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift" >> $GITHUB_ENV
     - name: Set features variable and install dependencies (Windows)
@@ -142,8 +149,11 @@ jobs:
     - name: Run tests - default features
       if: matrix.tests == true
       run: cargo test --verbose
+    - name: Run tests - all features (macOS Intel)
+      if: matrix.tests == true && matrix.os == 'macos-15-intel'
+      run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }} --workspace --exclude neural-ode-weather-prediction
     - name: Run tests - all features
-      if: matrix.tests == true
+      if: matrix.tests == true && matrix.os != 'macos-15-intel'
       run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }} --workspace
     - name: Clippy - all features
       if: matrix.clippy == true
