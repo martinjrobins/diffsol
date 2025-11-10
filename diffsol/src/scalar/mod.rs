@@ -16,11 +16,10 @@ pub trait Scalar:
     + num_traits::Signed
     + num_traits::Pow<Self, Output = Self>
     + num_traits::Pow<i32, Output = Self>
-    + From<f64>
+    + num_traits::FromPrimitive
+    + num_traits::ToPrimitive
     + Display
     + Copy
-    + From<f64>
-    + Into<f64>
     + PartialOrd
 {
     const EPSILON: Self;
@@ -35,6 +34,15 @@ impl Scalar for f64 {
     const EPSILON: Self = f64::EPSILON;
     const INFINITY: Self = f64::INFINITY;
     const NAN: Self = f64::NAN;
+    fn is_nan(self) -> bool {
+        self.is_nan()
+    }
+}
+
+impl Scalar for f32 {
+    const EPSILON: Self = f32::EPSILON;
+    const INFINITY: Self = f32::INFINITY;
+    const NAN: Self = f32::NAN;
     fn is_nan(self) -> bool {
         self.is_nan()
     }

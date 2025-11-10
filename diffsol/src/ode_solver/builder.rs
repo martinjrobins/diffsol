@@ -9,6 +9,7 @@ use crate::{
 };
 
 use crate::OdeSolverEquations;
+use num_traits::{FromPrimitive, One, Zero};
 
 /// Builder for ODE problems. Use methods to set parameters and then call one of the build methods when done.
 pub struct OdeBuilder<
@@ -97,16 +98,16 @@ where
     /// - use_coloring = false
     /// - constant_mass = false
     pub fn new() -> Self {
-        let default_atol = vec![M::T::from(1e-6)];
-        let default_rtol = 1e-6.into();
+        let default_atol = vec![M::T::from_f64(1e-6).unwrap()];
+        let default_rtol = M::T::from_f64(1e-6).unwrap();
         Self {
             rhs: None,
             init: None,
             mass: None,
             root: None,
             out: None,
-            t0: 0.0.into(),
-            h0: 1.0.into(),
+            t0: M::T::zero(),
+            h0: M::T::one(),
             rtol: default_rtol,
             atol: default_atol.clone(),
             p: vec![],
@@ -701,21 +702,25 @@ where
 
     /// Set the initial time.
     pub fn t0(mut self, t0: f64) -> Self {
-        self.t0 = t0.into();
+        self.t0 = M::T::from_f64(t0).unwrap();
         self
     }
 
     pub fn sens_rtol(mut self, sens_rtol: f64) -> Self {
-        self.sens_rtol = Some(sens_rtol.into());
+        self.sens_rtol = Some(M::T::from_f64(sens_rtol).unwrap());
         self
     }
 
-    pub fn sens_atol<V, T>(mut self, sens_atol: V) -> Self
+    pub fn sens_atol<V>(mut self, sens_atol: V) -> Self
     where
-        V: IntoIterator<Item = T>,
-        M::T: From<T>,
+        V: IntoIterator<Item = f64>,
     {
-        self.sens_atol = Some(sens_atol.into_iter().map(|x| M::T::from(x)).collect());
+        self.sens_atol = Some(
+            sens_atol
+                .into_iter()
+                .map(|x| M::T::from_f64(x).unwrap())
+                .collect(),
+        );
         self
     }
 
@@ -738,7 +743,7 @@ where
     }
 
     pub fn out_rtol(mut self, out_rtol: f64) -> Self {
-        self.out_rtol = Some(out_rtol.into());
+        self.out_rtol = Some(M::T::from_f64(out_rtol).unwrap());
         self
     }
 
@@ -752,16 +757,20 @@ where
     }
 
     pub fn param_rtol(mut self, param_rtol: f64) -> Self {
-        self.param_rtol = Some(param_rtol.into());
+        self.param_rtol = Some(M::T::from_f64(param_rtol).unwrap());
         self
     }
 
-    pub fn param_atol<V, T>(mut self, param_atol: V) -> Self
+    pub fn param_atol<V>(mut self, param_atol: V) -> Self
     where
-        V: IntoIterator<Item = T>,
-        M::T: From<T>,
+        V: IntoIterator<Item = f64>,
     {
-        self.param_atol = Some(param_atol.into_iter().map(|x| M::T::from(x)).collect());
+        self.param_atol = Some(
+            param_atol
+                .into_iter()
+                .map(|x| M::T::from_f64(x).unwrap())
+                .collect(),
+        );
         self
     }
 
@@ -774,33 +783,34 @@ where
 
     /// Set the initial step size.
     pub fn h0(mut self, h0: f64) -> Self {
-        self.h0 = h0.into();
+        self.h0 = M::T::from_f64(h0).unwrap();
         self
     }
 
     /// Set the relative tolerance.
     pub fn rtol(mut self, rtol: f64) -> Self {
-        self.rtol = rtol.into();
+        self.rtol = M::T::from_f64(rtol).unwrap();
         self
     }
 
     /// Set the absolute tolerance.
-    pub fn atol<V, T>(mut self, atol: V) -> Self
+    pub fn atol<V>(mut self, atol: V) -> Self
     where
-        V: IntoIterator<Item = T>,
-        M::T: From<T>,
+        V: IntoIterator<Item = f64>,
     {
-        self.atol = atol.into_iter().map(|x| M::T::from(x)).collect();
+        self.atol = atol
+            .into_iter()
+            .map(|x| M::T::from_f64(x).unwrap())
+            .collect();
         self
     }
 
     /// Set the parameters.
-    pub fn p<V, T>(mut self, p: V) -> Self
+    pub fn p<V>(mut self, p: V) -> Self
     where
-        V: IntoIterator<Item = T>,
-        M::T: From<T>,
+        V: IntoIterator<Item = f64>,
     {
-        self.p = p.into_iter().map(|x| M::T::from(x)).collect();
+        self.p = p.into_iter().map(|x| M::T::from_f64(x).unwrap()).collect();
         self
     }
 

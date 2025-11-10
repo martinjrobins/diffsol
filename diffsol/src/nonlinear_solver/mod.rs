@@ -75,7 +75,7 @@ pub mod tests {
     };
 
     use super::*;
-    use num_traits::{One, Zero};
+    use num_traits::{FromPrimitive, One, Zero};
 
     #[allow(clippy::type_complexity)]
     pub fn get_square_problem<M>() -> (
@@ -92,12 +92,15 @@ pub mod tests {
         M: DenseMatrix + 'static,
     {
         let jac1 = M::from_diagonal(&M::V::from_vec(
-            vec![2.0.into(), 2.0.into()],
+            vec![M::T::from_f64(2.0).unwrap(), M::T::from_f64(2.0).unwrap()],
             Default::default(),
         ));
         let jac2 = jac1.clone();
         let p = M::V::zeros(0, jac1.context().clone());
-        let eights = M::V::from_vec(vec![8.0.into(), 8.0.into()], jac1.context().clone());
+        let eights = M::V::from_vec(
+            vec![M::T::from_f64(8.0).unwrap(), M::T::from_f64(8.0).unwrap()],
+            jac1.context().clone(),
+        );
         let op = Closure::new(
             // 0 = J * x * x - 8
             move |x: &<M as MatrixCommon>::V, _p: &<M as MatrixCommon>::V, _t, y| {
@@ -107,7 +110,7 @@ pub mod tests {
             },
             // J = 2 * J * x * dx
             move |x: &<M as MatrixCommon>::V, _p: &<M as MatrixCommon>::V, _t, v, y| {
-                jac2.gemv(M::T::from(2.0), x, M::T::zero(), y); // y = 2 * J * x
+                jac2.gemv(M::T::from_f64(2.0).unwrap(), x, M::T::zero(), y); // y = 2 * J * x
                 y.component_mul_assign(v);
             },
             2,
@@ -115,11 +118,20 @@ pub mod tests {
             p.len(),
             p.context().clone(),
         );
-        let rtol = M::T::from(1e-6);
-        let atol = M::V::from_vec(vec![1e-6.into(), 1e-6.into()], p.context().clone());
+        let rtol = M::T::from_f64(1e-6).unwrap();
+        let atol = M::V::from_vec(
+            vec![M::T::from_f64(1e-6).unwrap(), M::T::from_f64(1e-6).unwrap()],
+            p.context().clone(),
+        );
         let solns = vec![NonLinearSolveSolution::new(
-            M::V::from_vec(vec![2.1.into(), 2.1.into()], p.context().clone()),
-            M::V::from_vec(vec![2.0.into(), 2.0.into()], p.context().clone()),
+            M::V::from_vec(
+                vec![M::T::from_f64(2.1).unwrap(), M::T::from_f64(2.1).unwrap()],
+                p.context().clone(),
+            ),
+            M::V::from_vec(
+                vec![M::T::from_f64(2.0).unwrap(), M::T::from_f64(2.0).unwrap()],
+                p.context().clone(),
+            ),
         )];
         (op, rtol, atol, solns)
     }

@@ -7,7 +7,7 @@ use crate::{
     AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, NoAug, StateRef, StateRefMut,
 };
 
-use num_traits::{abs, One, Pow, Zero};
+use num_traits::{abs, FromPrimitive, One, Pow, ToPrimitive, Zero};
 use serde::Serialize;
 
 use crate::ode_solver_error;
@@ -195,13 +195,13 @@ where
         config: BdfConfig<Eqn::T>,
     ) -> Result<Self, DiffsolError> {
         // kappa values for difference orders, taken from Table 1 of [1]
-        let kappa = [
-            Eqn::T::from(0.0),
-            Eqn::T::from(-0.1850),
-            Eqn::T::from(-1.0) / Eqn::T::from(9.0),
-            Eqn::T::from(-0.0823),
-            Eqn::T::from(-0.0415),
-            Eqn::T::from(0.0),
+        let kappa: [Eqn::T; 6] = [
+            Eqn::T::zero(),
+            <Eqn::T as FromPrimitive>::from_f64(-0.1850).unwrap(),
+            -Eqn::T::one() / <Eqn::T as FromPrimitive>::from_f64(9.0).unwrap(),
+            <Eqn::T as FromPrimitive>::from_f64(-0.0823).unwrap(),
+            <Eqn::T as FromPrimitive>::from_f64(-0.0415).unwrap(),
+            Eqn::T::zero(),
         ];
         let mut alpha = vec![Eqn::T::zero()];
         let mut gamma = vec![Eqn::T::zero()];
@@ -211,7 +211,7 @@ where
 
         #[allow(clippy::needless_range_loop)]
         for i in 1..=max_order {
-            let i_t = Eqn::T::from(i as f64);
+            let i_t = <Eqn::T as FromPrimitive>::from_f64(i as f64).unwrap();
             let one_over_i = Eqn::T::one() / i_t;
             let one_over_i_plus_one = Eqn::T::one() / (i_t + Eqn::T::one());
             gamma.push(gamma[i - 1] + one_over_i);
@@ -388,9 +388,9 @@ where
 
         // r[i, j] = r[i-1, j] * (j - 1 - factor * i) / j
         for j in 1..ncols {
-            let j_t = M::T::from(j as f64);
+            let j_t = <M::T as FromPrimitive>::from_f64(j as f64).unwrap();
             for i in 1..nrows {
-                let i_t = M::T::from(i as f64);
+                let i_t = <M::T as FromPrimitive>::from_f64(i as f64).unwrap();
                 let idx_ij = j * nrows + i;
                 r[idx_ij] = r[idx_ij - 1] * (i_t - M::T::one() - factor * j_t) / i_t;
             }
@@ -476,7 +476,7 @@ where
         // if step size too small, then fail
         if self.state.h.abs() < self.config.minimum_timestep {
             return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
-                time: self.state.t.into(),
+                time: self.state.t.to_f64().unwrap(),
             }));
         }
         Ok(new_h)
@@ -625,7 +625,9 @@ where
     ) -> Result<Option<OdeSolverStopReason<Eqn::T>>, DiffsolError> {
         // check if the we are at tstop
         let state = &self.state;
-        let troundoff = Eqn::T::from(100.0) * Eqn::T::EPSILON * (abs(state.t) + abs(state.h));
+        let troundoff = <Eqn::T as FromPrimitive>::from_f64(100.0).unwrap()
+            * Eqn::T::EPSILON
+            * (abs(state.t) + abs(state.h));
         if abs(state.t - tstop) <= troundoff {
             self.tstop = None;
             return Ok(Some(OdeSolverStopReason::TstopReached));
@@ -633,8 +635,8 @@ where
             || (state.h < M::T::zero() && tstop > state.t + troundoff)
         {
             let error = OdeSolverError::StopTimeBeforeCurrentTime {
-                stop_time: self.tstop.unwrap().into(),
-                state_time: state.t.into(),
+                stop_time: self.tstop.unwrap().to_f64().unwrap(),
+                state_time: state.t.to_f64().unwrap(),
             };
             self.tstop = None;
 
@@ -680,10 +682,10 @@ where
         order: usize,
         y: &mut Eqn::V,
     ) {
-        let mut time_factor = Eqn::T::from(1.0);
+        let mut time_factor = Eqn::T::one();
         y.copy_from_view(&diff.column(0));
         for i in 0..order {
-            let i_t = Eqn::T::from(i as f64);
+            let i_t = <Eqn::T as FromPrimitive>::from_f64(i as f64).unwrap();
             time_factor *= (t - (t1 - h * i_t)) / (h * (Eqn::T::one() + i_t));
             y.axpy_v(time_factor, &diff.column(i + 1), Eqn::T::one());
         }
@@ -741,7 +743,7 @@ where
             ncontrib += state.sgdiff.len();
         }
         if ncontrib > 1 {
-            error_norm /= Eqn::T::from(ncontrib as f64)
+            error_norm /= <Eqn::T as FromPrimitive>::from_f64(ncontrib as f64).unwrap()
         }
         error_norm
     }
@@ -811,7 +813,7 @@ where
         if ncontrib == 0 {
             error_norm
         } else {
-            error_norm / Eqn::T::from(ncontrib as f64)
+            error_norm / <Eqn::T as FromPrimitive>::from_f64(ncontrib as f64).unwrap()
         }
     }
 
@@ -1148,7 +1150,8 @@ where
                 if convergence_fail {
                     // newton iteration did not converge, but jacobian has already been
                     // evaluated so reduce step size by 0.3 (as per [1]) and try again
-                    let new_h = self._update_step_size(Eqn::T::from(0.3))?;
+                    let new_h =
+                        self._update_step_size(<Eqn::T as FromPrimitive>::from_f64(0.3).unwrap())?;
                     self._jacobian_updates(
                         new_h * self.alpha[order],
                         SolverState::SecondConvergenceFail,
@@ -1175,17 +1178,23 @@ where
             // need to caulate safety even if step is accepted
             let maxiter = self.convergence.max_iter() as f64;
             let niter = self.convergence.niter() as f64;
-            safety = Eqn::T::from(0.9 * (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter));
+            safety = <Eqn::T as FromPrimitive>::from_f64(
+                0.9 * (2.0 * maxiter + 1.0) / (2.0 * maxiter + niter),
+            )
+            .unwrap();
 
             // do the error test
-            if error_norm <= Eqn::T::from(1.0) {
+            if error_norm <= Eqn::T::one() {
                 // step is accepted
                 break;
             } else {
                 // step is rejected
                 // calculate optimal step size factor as per eq 2.46 of [2]
                 // and reduce step size and try again
-                let mut factor = safety * error_norm.pow(Eqn::T::from(-0.5 / (order as f64 + 1.0)));
+                let mut factor = safety
+                    * error_norm.pow(
+                        <Eqn::T as FromPrimitive>::from_f64(-0.5 / (order as f64 + 1.0)).unwrap(),
+                    );
                 if factor < self.config.minimum_timestep_shrink {
                     factor = self.config.minimum_timestep_shrink;
                 }
@@ -1202,7 +1211,7 @@ where
                 {
                     return Err(DiffsolError::from(
                         OdeSolverError::TooManyErrorTestFailures {
-                            time: self.state.t.into(),
+                            time: self.state.t.to_f64().unwrap(),
                         },
                     ));
                 }
@@ -1255,7 +1264,10 @@ where
                     .into_iter()
                     .enumerate()
                     .map(|(i, error_norm)| {
-                        error_norm.pow(Eqn::T::from(-0.5 / (i as f64 + order as f64)))
+                        error_norm.pow(
+                            <Eqn::T as FromPrimitive>::from_f64(-0.5 / (i as f64 + order as f64))
+                                .unwrap(),
+                        )
                     })
                     .collect::<Vec<_>>()
             };
@@ -1369,13 +1381,13 @@ mod test {
             test_ode_solver, test_problem, test_state_mut, test_state_mut_on_problem,
         },
         Context, DenseMatrix, FaerLU, FaerMat, FaerSparseLU, FaerSparseMat, MatrixCommon,
-        OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
+        NalgebraLU, OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
     };
 
     use num_traits::abs;
 
     type M = NalgebraMat<f64>;
-    type LS = crate::NalgebraLU<f64>;
+    type LS = NalgebraLU<f64>;
     #[test]
     fn bdf_state_mut() {
         test_state_mut(test_problem::<M>(false).bdf::<LS>().unwrap());

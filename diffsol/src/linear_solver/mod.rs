@@ -63,7 +63,7 @@ pub mod tests {
         vector::VectorRef,
         FaerMat, FaerVec, LinearSolver, Matrix, NalgebraVec, NonLinearOpJacobian, Op, Vector,
     };
-    use num_traits::{One, Zero};
+    use num_traits::{FromPrimitive, One, Zero};
 
     use super::LinearSolveSolution;
 
@@ -78,7 +78,10 @@ pub mod tests {
         M::V,
         Vec<LinearSolveSolution<M::V>>,
     ) {
-        let diagonal = M::V::from_vec(vec![2.0.into(), 2.0.into()], Default::default());
+        let diagonal = M::V::from_vec(
+            vec![M::T::from_f64(2.0).unwrap(), M::T::from_f64(2.0).unwrap()],
+            Default::default(),
+        );
         let jac1 = M::from_diagonal(&diagonal);
         let jac2 = M::from_diagonal(&diagonal);
         let ctx = M::C::default();
@@ -97,11 +100,17 @@ pub mod tests {
             M::T::zero(),
             &p,
         );
-        let rtol = M::T::from(1e-6);
-        let atol = M::V::from_vec(vec![1e-6.into(), 1e-6.into()], ctx.clone());
+        let rtol = M::T::from_f64(1e-6).unwrap();
+        let atol = M::V::from_vec(
+            vec![M::T::from_f64(1e-6).unwrap(), M::T::from_f64(1e-6).unwrap()],
+            ctx.clone(),
+        );
         let solns = vec![LinearSolveSolution::new(
-            M::V::from_vec(vec![2.0.into(), 4.0.into()], ctx.clone()),
-            M::V::from_vec(vec![1.0.into(), 2.0.into()], ctx.clone()),
+            M::V::from_vec(
+                vec![M::T::from_f64(2.0).unwrap(), M::T::from_f64(4.0).unwrap()],
+                ctx.clone(),
+            ),
+            M::V::from_vec(vec![M::T::one(), M::T::from_f64(2.0).unwrap()], ctx.clone()),
         )];
         (op, rtol, atol, solns)
     }

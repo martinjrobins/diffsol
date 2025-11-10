@@ -25,8 +25,8 @@ impl<T: Scalar> JacobianUpdate<T> {
             steps_since_jacobian_eval: 0,
             steps_since_rhs_jacobian_eval: 0,
             h_at_last_jacobian_update: T::one(),
-            threshold_to_update_jacobian: T::from(0.3),
-            threshold_to_update_rhs_jacobian: T::from(0.2),
+            threshold_to_update_jacobian: T::from_f64(0.3).unwrap(),
+            threshold_to_update_rhs_jacobian: T::from_f64(0.2).unwrap(),
             update_jacobian_after_steps: 20,
             update_rhs_jacobian_after_steps: 50,
         }

@@ -2,7 +2,7 @@ use crate::{
     ode_solver::problem::OdeSolverSolution, MatrixHost, OdeBuilder, OdeEquationsImplicit,
     OdeSolverProblem, Vector,
 };
-use num_traits::{One, Zero};
+use num_traits::{FromPrimitive, One, Zero};
 
 #[cfg(feature = "diffsl")]
 #[allow(clippy::type_complexity)]
@@ -83,8 +83,8 @@ pub fn robertson_ode<M: MatrixHost + 'static>(
                     y[i + 1] = p[0] * v[i]
                         - p[1] * v[i + 1] * x[i + 2]
                         - p[1] * x[i + 1] * v[i + 2]
-                        - M::T::from(2.0) * p[2] * x[i + 1] * v[i + 1];
-                    y[i + 2] = M::T::from(2.0) * p[2] * x[i + 1] * v[i + 1];
+                        - M::T::from_f64(2.0).unwrap() * p[2] * x[i + 1] * v[i + 1];
+                    y[i + 2] = M::T::from_f64(2.0).unwrap() * p[2] * x[i + 1] * v[i + 1];
                 }
             },
         )
@@ -134,10 +134,13 @@ pub fn robertson_ode<M: MatrixHost + 'static>(
     for (values, time) in data {
         soln.push(
             M::V::from_vec(
-                values.into_iter().map(|v| v.into()).collect(),
+                values
+                    .into_iter()
+                    .map(|v| M::T::from_f64(v).unwrap())
+                    .collect(),
                 problem.context().clone(),
             ),
-            time.into(),
+            M::T::from_f64(time).unwrap(),
         );
     }
     (problem, soln)
@@ -164,8 +167,14 @@ fn soln<V: Vector>(ctx: V::C) -> OdeSolverSolution<V> {
 
     for (values, time) in data {
         soln.push(
-            V::from_vec(values.into_iter().map(|v| v.into()).collect(), ctx.clone()),
-            time.into(),
+            V::from_vec(
+                values
+                    .into_iter()
+                    .map(|v| V::T::from_f64(v).unwrap())
+                    .collect(),
+                ctx.clone(),
+            ),
+            V::T::from_f64(time).unwrap(),
         );
     }
     soln

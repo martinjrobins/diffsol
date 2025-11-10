@@ -11,7 +11,7 @@ use crate::{
     OdeEquationsImplicit, OdeSolverProblem, Vector,
 };
 use nalgebra::ComplexField;
-use num_traits::{One, Zero};
+use num_traits::{FromPrimitive, One, Zero};
 
 #[cfg(feature = "diffsl")]
 use crate::{ConstantOp, LinearOp, NonLinearOpJacobian, OdeEquations};
@@ -102,7 +102,8 @@ pub fn heat2d_diffsl_problem<
 fn heat2d_rhs<M: MatrixHost, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
     // Initialize y to x, to take care of boundary equations.
     y.copy_from(x);
-    let mm = M::T::from(MGRID as f64);
+    let mm = M::T::from_f64(MGRID as f64).unwrap();
+    let four = M::T::from_f64(4.0).unwrap();
 
     let dx = M::T::one() / (mm - M::T::one());
     let coeff = M::T::one() / (dx * dx);
@@ -112,9 +113,8 @@ fn heat2d_rhs<M: MatrixHost, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, 
         let offset = MGRID * j;
         for i in 1..MGRID - 1 {
             let loc = offset + i;
-            y[loc] = coeff
-                * (x[loc - 1] + x[loc + 1] + x[loc - MGRID] + x[loc + MGRID]
-                    - M::T::from(4.0) * x[loc]);
+            y[loc] =
+                coeff * (x[loc - 1] + x[loc + 1] + x[loc - MGRID] + x[loc + MGRID] - four * x[loc]);
         }
     }
 }
@@ -128,7 +128,8 @@ fn heat2d_jac_mul<M: MatrixHost, const MGRID: usize>(
 ) {
     // Initialize y to x, to take care of boundary equations.
     y.copy_from(v);
-    let mm = M::T::from(MGRID as f64);
+    let mm = M::T::from_f64(MGRID as f64).unwrap();
+    let four = M::T::from_f64(4.0).unwrap();
 
     let dx = M::T::one() / (mm - M::T::one());
     let coeff = M::T::one() / (dx * dx);
@@ -138,28 +139,28 @@ fn heat2d_jac_mul<M: MatrixHost, const MGRID: usize>(
         let offset = MGRID * j;
         for i in 1..MGRID - 1 {
             let loc = offset + i;
-            y[loc] = coeff
-                * (v[loc - 1] + v[loc + 1] + v[loc - MGRID] + v[loc + MGRID]
-                    - M::T::from(4.0) * v[loc]);
+            y[loc] =
+                coeff * (v[loc - 1] + v[loc + 1] + v[loc - MGRID] + v[loc + MGRID] - four * v[loc]);
         }
     }
 }
 
 fn heat2d_init<M: MatrixHost, const MGRID: usize>(_p: &M::V, _t: M::T, uu: &mut M::V) {
-    let mm = M::T::from(MGRID as f64);
+    let mm = M::T::from_f64(MGRID as f64).unwrap();
     let bval = M::T::zero();
     let one = M::T::one();
     let dx = one / (mm - one);
     let mm1 = MGRID - 1;
+    let sixteen = M::T::from_f64(16.0).unwrap();
 
     /* Initialize uu on all grid points. */
     for j in 0..MGRID {
-        let yfact = dx * M::T::from(j as f64);
+        let yfact = dx * M::T::from_f64(j as f64).unwrap();
         let offset = MGRID * j;
         for i in 0..MGRID {
-            let xfact = dx * M::T::from(i as f64);
+            let xfact = dx * M::T::from_f64(i as f64).unwrap();
             let loc = offset + i;
-            uu[loc] = M::T::from(16.0) * xfact * (one - xfact) * yfact * (one - yfact);
+            uu[loc] = sixteen * xfact * (one - xfact) * yfact * (one - yfact);
         }
     }
 
@@ -198,7 +199,7 @@ fn heat2d_mass<M: MatrixHost, const MGRID: usize>(
 }
 
 fn heat2d_out<M: MatrixHost, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
-    let dx = M::T::one() / (M::T::from(MGRID as f64) - M::T::one());
+    let dx = M::T::one() / (M::T::from_f64(MGRID as f64).unwrap() - M::T::one());
     let norm = x.norm(2);
     y[0] = (norm * dx).powi(2);
 }
@@ -215,15 +216,15 @@ fn heat2d_out_jac_mul<M: Matrix, const MGRID: usize>(
 
 fn _pde_solution<T: Scalar>(x: T, y: T, t: T, max_terms: usize) -> T {
     let mut u = T::zero();
-    let pi = T::from(std::f64::consts::PI);
-    let four = T::from(4.0);
-    let two = T::from(2.0);
-    let sixteen = T::from(16.0);
+    let pi = T::from_f64(std::f64::consts::PI).unwrap();
+    let four = T::from_f64(4.0).unwrap();
+    let two = T::from_f64(2.0).unwrap();
+    let sixteen = T::from_f64(16.0).unwrap();
 
     for n in 1..=max_terms {
-        let nt = T::from(n as f64);
+        let nt = T::from_f64(n as f64).unwrap();
         for m in 1..=max_terms {
-            let mt = T::from(m as f64);
+            let mt = T::from_f64(m as f64).unwrap();
             let ii = (-pi * mt * (pi * mt).sin() - two * (pi * mt).cos() + two)
                 / (pi.powi(3) * mt.powi(3));
             let jj = (-pi * nt * (pi * nt).sin() - two * (pi * nt).cos() + two)
@@ -264,8 +265,8 @@ fn soln<M: Matrix>(ctx: M::C) -> OdeSolverSolution<M::V> {
     let mut soln = OdeSolverSolution {
         solution_points: Vec::new(),
         sens_solution_points: None,
-        rtol: M::T::from(1e-5),
-        atol: M::V::from_element(1, M::T::from(1e-5), ctx.clone()),
+        rtol: M::T::from_f64(1e-5).unwrap(),
+        atol: M::V::from_element(1, M::T::from_f64(1e-5).unwrap(), ctx.clone()),
         negative_time: false,
     };
     let data = vec![
@@ -284,10 +285,13 @@ fn soln<M: Matrix>(ctx: M::C) -> OdeSolverSolution<M::V> {
     ];
     for (values, time) in data {
         let values = M::V::from_vec(
-            values.iter().map(|v| M::T::from(*v)).collect::<Vec<_>>(),
+            values
+                .iter()
+                .map(|v| M::T::from_f64(*v).unwrap())
+                .collect::<Vec<_>>(),
             ctx.clone(),
         );
-        let time = M::T::from(time);
+        let time = M::T::from_f64(time).unwrap();
         soln.push(values, time);
     }
     soln

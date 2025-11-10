@@ -2,7 +2,7 @@ use crate::{
     ode_solver::problem::OdeSolverSolution, MatrixHost, OdeBuilder, OdeEquationsImplicitSens,
     OdeSolverProblem, Vector,
 };
-use num_traits::{One, Zero};
+use num_traits::{FromPrimitive, One, Zero};
 
 #[allow(clippy::type_complexity)]
 pub fn robertson_ode_with_sens<M: MatrixHost + 'static>(
@@ -30,8 +30,8 @@ pub fn robertson_ode_with_sens<M: MatrixHost + 'static>(
                 y[1] = p[0] * v[0]
                     - p[1] * v[1] * x[2]
                     - p[1] * x[1] * v[2]
-                    - M::T::from(2.0) * p[2] * x[1] * v[1];
-                y[2] = M::T::from(2.0) * p[2] * x[1] * v[1];
+                    - M::T::from_f64(2.0).unwrap() * p[2] * x[1] * v[1];
+                y[2] = M::T::from_f64(2.0).unwrap() * p[2] * x[1] * v[1];
             },
             |x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
                 y[0] = -v[0] * x[0] + v[1] * x[1] * x[2];
@@ -71,10 +71,13 @@ pub fn robertson_ode_with_sens<M: MatrixHost + 'static>(
     for (values, time) in data {
         soln.push(
             M::V::from_vec(
-                values.into_iter().map(|v| v.into()).collect(),
+                values
+                    .into_iter()
+                    .map(|v| M::T::from_f64(v).unwrap())
+                    .collect(),
                 problem.context().clone(),
             ),
-            time.into(),
+            M::T::from_f64(time).unwrap(),
         );
     }
     (problem, soln)

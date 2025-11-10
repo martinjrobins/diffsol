@@ -6,7 +6,7 @@ use crate::{
     NonLinearOp, Vector,
 };
 
-use num_traits::{abs, One, Zero};
+use num_traits::{abs, FromPrimitive, One, Zero};
 
 #[derive(Clone)]
 pub struct RootFinder<V: Vector> {
@@ -78,11 +78,11 @@ impl<V: Vector> RootFinder<V> {
         let mut i = 0;
         let mut t1 = t;
         let mut t0 = *self.t0.borrow();
-        let tol = V::T::from(100.0) * V::T::EPSILON * (abs(t1) + abs(t1 - t0));
-        let half = V::T::from(0.5);
-        let double = V::T::from(2.0);
-        let five = V::T::from(5.0);
-        let pntone = V::T::from(0.1);
+        let tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON * (abs(t1) + abs(t1 - t0));
+        let half = V::T::from_f64(0.5).unwrap();
+        let double = V::T::from_f64(2.0).unwrap();
+        let five = V::T::from_f64(5.0).unwrap();
+        let pntone = V::T::from_f64(0.1).unwrap();
         while abs(t1 - t0) > tol {
             let mut t_mid = t1
                 - (t1 - t0) * g1.get_index(imax)

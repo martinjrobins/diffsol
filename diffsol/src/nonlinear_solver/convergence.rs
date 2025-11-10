@@ -1,5 +1,5 @@
 use nalgebra::ComplexField;
-use num_traits::{One, Pow};
+use num_traits::{FromPrimitive, One, Pow};
 
 use crate::{scalar::IndexType, Scalar, Vector};
 
@@ -31,9 +31,9 @@ impl<'a, V: Vector> Convergence<'a, V> {
         self.niter
     }
     pub fn new(rtol: V::T, atol: &'a V) -> Self {
-        let minimum_tol = V::T::from(10.0) * V::T::EPSILON / rtol;
-        let maximum_tol = V::T::from(0.03);
-        let mut tol = V::T::from(0.33);
+        let minimum_tol = V::T::from_f64(10.0).unwrap() * V::T::EPSILON / rtol;
+        let maximum_tol = V::T::from_f64(0.03).unwrap();
+        let mut tol = V::T::from_f64(0.33).unwrap();
         if tol > maximum_tol {
             tol = maximum_tol;
         }
@@ -65,7 +65,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
             let rate = norm / old_norm;
 
             // check if iteration is diverging
-            if rate > V::T::from(0.9) {
+            if rate > V::T::from_f64(0.9).unwrap() {
                 return ConvergenceStatus::Diverged;
             }
 
@@ -78,8 +78,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
 
             // if iteration is not going to converge in max_iter
             // (assuming the current rate), then abort
-            if rate.pow(i32::try_from(self.max_iter - self.niter).unwrap())
-                / (V::T::from(1.0) - rate)
+            if rate.pow(i32::try_from(self.max_iter - self.niter).unwrap()) / (V::T::one() - rate)
                 * norm
                 > self.tol
             {
@@ -87,7 +86,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
             }
         } else {
             // no rate, just test with a large eta
-            if V::T::from(1000.0) * norm < self.tol {
+            if V::T::from_f64(1000.0).unwrap() * norm < self.tol {
                 return ConvergenceStatus::Converged;
             }
         };
