@@ -39,15 +39,15 @@ Diffsol has the following features that can be enabled or disabled:
 - `nalgebra`: Use nalgebra for linear algebra containers and solvers (enabled by default).
 - `faer`: Use faer for linear algebra containers and solvers (enabled by default).
 - `cuda`: Use in-built CUDA linear algebra containers and solvers (disabled by default, experimental).
-- `diffsl-llvm15`, `diffsl-llvm16`, `diffsl-llvm17`, `diffsl-llvm18`, `diffsl-cranelift`: Enable DiffSL with the specified JIT backend (disabled by default).
+- `diffsl-llvm15`, `diffsl-llvm16`, `diffsl-llvm17`, `diffsl-llvm18`, `diffsl-cranelift`: Enable DiffSL with the specified JIT backend (disabled by default). You will need to set the `LLVM_SYS_XXX_PREFIX` (see [`llvm-sys`](https://gitlab.com/taricorp/llvm-sys.rs)) and `LLVM_DIR` environment variables to point to your LLVM installation, where `XXX` is the version number (`150`, `160`, `170` or `180`).
 - `suitesparse`: Enable SuiteSparse KLU sparse linear solver (disabled by default, requires `faer`).
 
-You can add any of the above features by specifying them in your `Cargo.toml`. For example, to enable only the `faer` linear algebra backend and the `diffsl-cranelift` JIT backend, you would add:
+You can add any of the above features by specifying them in your `Cargo.toml`. For example, to enable the `diffsl-cranelift` JIT backend, you would add:
 
 ```toml
 [dependencies]
-diffsol = { version = "0.7", default-features = false, features = ["faer", "diffsl-cranelift"] }
-``` 
+diffsol = { version = "0.7", features = "diffsl-cranelift" }
+```
 
 See the [Cargo.toml documentation](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html) for more information on specifying features.
 
