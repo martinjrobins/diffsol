@@ -105,11 +105,11 @@ All solvers feature:
 Contributions are very welcome, as are bug reports! Please see the [contributing guidelines](CONTRIBUTING.md) for more information, but in summary:
 
 - Please open an [issue](https://github.com/martinjrobins/diffsol/issues) or [discussion](https://github.com/martinjrobins/diffsol/discussions) to report any issues or problems using diffsol
-- Feel free to submit a pull request with your changes or improvements, but please open an issue first if the change is significant. The [contributing guidelines](CONTRIBUTING.md) describe how to set up a development environment, run tests, and format code.
 - There are a number of repositories in the diffsol ecosystem, please route your issue/request to the appropriate repository:
   - [diffsol](https://github.com/martinjrobins/diffsol) - the core ODE solver library
   - [diffsl](https://github.com/martinjrobins/diffsl) - the DiffSL DSL compiler and JIT backends
   - [pydiffsol](https://github.com/alexallmont/pydiffsol) - Python bindings
+- Feel free to submit a pull request with your changes or improvements, but please open an issue first if the change is significant. The [contributing guidelines](CONTRIBUTING.md) describe how to set up a development environment, run tests, and format code.
   
 ## Wanted - Developers for higher-level language wrappers
 
