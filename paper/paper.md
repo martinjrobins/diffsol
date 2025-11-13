@@ -53,7 +53,7 @@ ODE solvers written in lower-level languages like C, Fortran or Rust offer signi
 The following solvers are available in `diffsol`:
 
 1. A variable order Backwards Difference Formulae (BDF) solver, suitable for stiff problems and singular mass matrices.  The basic algorithm is derived in [@byrne1975polyalgorithm], however this particular implementation follows that implemented in the Matlab routine ode15s [@shampine1997matlab] and the SciPy implementation [@virtanen2020scipy], which features the NDF formulas for improved stability
-2. A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver, suitable for moderately stiff problems and singular mass matrices. Two different butcher tableau are provided, TR-BDF2 [@bank1985transient, @hosea1996analysis] and ESDIRK34 [@jorgensen2018family], or users can supply their own.
+2. A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver, suitable for moderately stiff problems and singular mass matrices. Two different butcher tableau are provided, TR-BDF2 [@bank1985transient; @hosea1996analysis] and ESDIRK34 [@jorgensen2018family], or users can supply their own.
 3. A variable order Explicit Runge-Kutta (ERK) solver, suitable for non-stiff problems. One butcher tableau is provided, the 4th order TSIT45 [@tsitouras2011runge], or users can supply their own.
 
 All solvers feature:
