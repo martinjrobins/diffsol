@@ -58,12 +58,11 @@ The [diffsol book](https://martinjrobins.github.io/diffsol/) describes how to us
 For a quick start, see the following example of solving the Lorenz system of equations using the BDF solver and the DiffSL DSL with the LLVM JIT backend:
 
 ```rust
-use diffsol::{LlvmModule, OdeBuilder, OdeSolverMethod, NalgebraMat, NalgebraLU};
+use diffsol::{LlvmModule, NalgebraLU, NalgebraMat, OdeBuilder, OdeSolverMethod};
 
 pub fn lorenz() -> Result<(), Box<dyn std::error::Error>> {
-    let problem = OdeBuilder::<NalgebraMat<f64>>::new()
-        .build_from_diffsl::<LlvmModule>(
-            "
+    let problem = OdeBuilder::<NalgebraMat<f64>>::new().build_from_diffsl::<LlvmModule>(
+        "
             a { 14.0 } b { 10.0 } c { 8.0 / 3.0 }
             u_i {
                 x = 1.0,
@@ -75,7 +74,8 @@ pub fn lorenz() -> Result<(), Box<dyn std::error::Error>> {
                 x * (a - z) - y;
                 x * y - c * z;
             }
-        ")?;
+        ",
+    )?;
     let mut solver = problem.bdf::<NalgebraLU<f64>>()?;
     let (_ys, _ts) = solver.solve(0.0)?;
     Ok(())
