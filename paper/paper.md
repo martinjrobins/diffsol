@@ -38,7 +38,7 @@ $$
 
 where $y$ is the state of the system, $p$ are a set of parameters,  $t$ is time, $f(t, y, p)$ is a function that describes how the state of the system changes over time and $M$ is an optional and possibly singular mass matrix. The solution to an ODE is a function $y(t)$ that satisfies the ODE and any initial conditions.
 
-The equations (e.g. $f(t, y, p)$) can be provided by the user either using Rust code, or a custom Domain Specific Language (DSL) called `DiffSL`. `DiffSL` uses automatic differentiation using Enzyme [@moses22enzyme] to calculate the necessary gradients, and JIT compilation (using either `LLVM` [@lattner2004llvm] or `Cranelift` [@cranelift]) to generate efficient native code at runtime. The DSL is ideal for using `diffsol` from a higher-level language like Python or R while still maintaining similar performance to pure rust.
+The equations (e.g. $f(t, y, p)$) can be provided by the user either using Rust code, or a custom Domain Specific Language (DSL) called `DiffSL`. `DiffSL` uses automatic differentiation using Enzyme [@moses22enzyme] to calculate the necessary gradients, and JIT compilation (using either `LLVM` [@lattner2004llvm] or `Cranelift` [@cranelift]) to generate efficient native code at runtime. The DSL is ideal for using `diffsol` from a higher-level language like Python or R while still maintaining similar performance to pure rust. Diffsol currently provides Python bindings through the [`pydiffsol`](https://github.com/alexallmont/pydiffsol) package, with further language bindings planned.
 
 ODE solvers require linear algebra containers (e.g. vectors, matrices), operators and linear solvers. `diffsol` allows users to choose both dense and sparse matrices and solvers from the `nalgebra` [@nalgebra] or `faer` [@faer] crates, and uses a trait-based approach to allow other linear algebra libraries to be added at a later date.
 
@@ -52,7 +52,7 @@ ODE solvers written in lower-level languages like C, Fortran or Rust offer signi
 
 The following solvers are available in `diffsol`:
 
-1. A variable order Backwards Difference Formulae (BDF) solver, suitable for stiff problems and singular mass matrices.  The basic algorithm is derived in @byrne1975polyalgorithm, however this particular implementation follows that implemented in the Matlab routine ode15s [@shampine1997matlab] and the SciPy implementation [@virtanen2020scipy], which features the NDF formulas for improved stability
+1. A variable order Backwards Difference Formulae (BDF) solver, suitable for stiff problems and singular mass matrices.  The basic algorithm is derived in [@byrne1975polyalgorithm], however this particular implementation follows that implemented in the Matlab routine ode15s [@shampine1997matlab] and the SciPy implementation [@virtanen2020scipy], which features the NDF formulas for improved stability
 2. A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver, suitable for moderately stiff problems and singular mass matrices. Two different butcher tableau are provided, TR-BDF2 [@bank1985transient, @hosea1996analysis] and ESDIRK34 [@jorgensen2018family], or users can supply their own.
 3. A variable order Explicit Runge-Kutta (ERK) solver, suitable for non-stiff problems. One butcher tableau is provided, the 4th order TSIT45 [@tsitouras2011runge], or users can supply their own.
 
