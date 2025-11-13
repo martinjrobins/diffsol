@@ -98,7 +98,7 @@ Diffsol has several optional features that may require additional dependencies:
 
   - On macOS: `brew install llvm@<version>`
   - [Build from source](https://llvm.org/docs/GettingStarted.html) if necessary.
-  - You will need to set the `LLVM_SYS_XXX_PREFIX` (see [`llvm-sys`](https://gitlab.com/taricorp/llvm-sys.rs)) and `LLVM_DIR` environment variables to point to your LLVM installation, where `XX` is the version number (e.g., `15`, `16`, etc.). e.g.
+  - You will need to set the `LLVM_SYS_XXX_PREFIX` (see [`llvm-sys`](https://gitlab.com/taricorp/llvm-sys.rs)) and `LLVM_DIR` environment variables to point to your LLVM installation, where `XXX` is the version number (`150`, `160`, `170` or `181`). e.g.
 
     ```bash
     export LLVM_SYS_170_PREFIX=/usr/lib/llvm-17
