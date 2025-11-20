@@ -15,7 +15,7 @@ fn main() {
     let problem = OdeBuilder::<M>::new()
         .build_from_diffsl::<CG>(
             "
-    D { 1.0 }
+    D { 0.1 }
     h { 1.0 / 21.0}
     g { 0.0 }
     m { 1.0 }
@@ -40,7 +40,7 @@ fn main() {
     }",
         )
         .unwrap();
-    let times = (0..50).map(|i| i as f64).collect::<Vec<f64>>();
+    let times = (0..100).map(|i| i as f64 / 100.0).collect::<Vec<f64>>();
     let mut solver = problem.bdf::<LS>().unwrap();
     let sol = solver.solve_dense(&times).unwrap();
 
