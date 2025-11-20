@@ -16,7 +16,7 @@ fn main() {
         .build_from_diffsl::<CG>(
             "
     D { 1.0 }
-    h { 1.0 }
+    h { 1.0 / 21.0}
     g { 0.0 }
     m { 1.0 }
     A_ij {
@@ -44,7 +44,7 @@ fn main() {
     let mut solver = problem.bdf::<LS>().unwrap();
     let sol = solver.solve_dense(&times).unwrap();
 
-    let x = (0..21).map(|i| i as f64).collect::<Vec<f64>>();
+    let x = (1..=20).map(|i| i as f64 / 21.0).collect::<Vec<f64>>();
     let y = times;
     let z = sol
         .inner()
