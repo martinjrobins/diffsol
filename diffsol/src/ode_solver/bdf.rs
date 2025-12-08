@@ -1870,16 +1870,16 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 152
-        number_of_steps: 512
-        number_of_error_test_failures: 5
-        number_of_nonlinear_solver_iterations: 3779
-        number_of_nonlinear_solver_fails: 70
+        number_of_linear_solver_setups: 149
+        number_of_steps: 506
+        number_of_error_test_failures: 4
+        number_of_nonlinear_solver_iterations: 3725
+        number_of_nonlinear_solver_fails: 68
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 1157
-        number_of_jac_muls: 2930
-        number_of_matrix_evals: 54
+        number_of_calls: 1150
+        number_of_jac_muls: 2887
+        number_of_matrix_evals: 57
         number_of_jac_adj_muls: 0
         "###);
     }

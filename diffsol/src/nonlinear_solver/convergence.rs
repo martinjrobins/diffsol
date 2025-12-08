@@ -44,7 +44,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
             rtol,
             atol,
             tol,
-            max_iter: 10,
+            max_iter: 100,
             old_norm: None,
             niter: 0,
         }
@@ -65,7 +65,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
             let rate = norm / old_norm;
 
             // check if iteration is diverging
-            if rate > V::T::from_f64(0.9).unwrap() {
+            if rate > V::T::one() {
                 return ConvergenceStatus::Diverged;
             }
 
