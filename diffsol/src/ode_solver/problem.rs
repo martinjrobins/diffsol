@@ -39,7 +39,7 @@ pub struct OdeSolverOptions<T: Scalar> {
 impl<T: Scalar> Default for OdeSolverOptions<T> {
     fn default() -> Self {
         Self {
-            max_nonlinear_solver_iterations: 10,
+            max_nonlinear_solver_iterations: 4,
             max_error_test_failures: 40,
             min_timestep: T::from_f64(1e-13).unwrap(),
         }
