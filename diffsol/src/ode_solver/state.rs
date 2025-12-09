@@ -2,6 +2,7 @@ use nalgebra::ComplexField;
 use num_traits::FromPrimitive;
 use num_traits::{One, Pow, Zero};
 
+use crate::BacktrackingLineSearch;
 use crate::{
     error::{DiffsolError, OdeSolverError},
     nonlinear_solver::{convergence::Convergence, NonLinearSolver},
@@ -174,7 +175,8 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         LS: LinearSolver<Eqn::M>,
     {
         let mut ret = Self::new_without_initialise(ode_problem)?;
-        let mut root_solver = NewtonNonlinearSolver::new(LS::default());
+        let mut root_solver =
+            NewtonNonlinearSolver::new(LS::default(), BacktrackingLineSearch::default());
         ret.set_consistent(ode_problem, &mut root_solver)?;
         ret.set_step_size(
             ode_problem.h0,
@@ -226,9 +228,11 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     {
         let mut augmented_eqn = SensEquations::new(ode_problem);
         let mut ret = Self::new_without_initialise_augmented(ode_problem, &mut augmented_eqn)?;
-        let mut root_solver = NewtonNonlinearSolver::new(LS::default());
+        let mut root_solver =
+            NewtonNonlinearSolver::new(LS::default(), BacktrackingLineSearch::default());
         ret.set_consistent(ode_problem, &mut root_solver)?;
-        let mut root_solver_sens = NewtonNonlinearSolver::new(LS::default());
+        let mut root_solver_sens =
+            NewtonNonlinearSolver::new(LS::default(), BacktrackingLineSearch::default());
         ret.set_consistent_augmented(ode_problem, &mut augmented_eqn, &mut root_solver_sens)?;
         ret.set_step_size(
             ode_problem.h0,
@@ -286,7 +290,8 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         state.sg = sg;
         state.dsg = dsg;
         let mut state = Self::new_from_common(state);
-        let mut root_solver_sens = NewtonNonlinearSolver::new(LS::default());
+        let mut root_solver_sens =
+            NewtonNonlinearSolver::new(LS::default(), BacktrackingLineSearch::default());
         state.set_consistent_augmented(ode_problem, augmented_eqn, &mut root_solver_sens)?;
         Ok(state)
     }

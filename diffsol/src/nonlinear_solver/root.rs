@@ -173,7 +173,7 @@ mod tests {
             1,
             1,
             p.len(),
-            ctx.clone(),
+            ctx,
         );
         let root_fn = ParameterisedOp::new(&root_fn, &p);
 

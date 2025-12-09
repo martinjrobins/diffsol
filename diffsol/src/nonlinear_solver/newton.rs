@@ -1,8 +1,9 @@
 use crate::{
     error::{DiffsolError, NonLinearSolverError},
-    non_linear_solver_error, Convergence, ConvergenceStatus, LinearSolver, Matrix, NonLinearOp,
-    NonLinearOpJacobian, NonLinearSolver, Vector,
+    non_linear_solver_error, Convergence, ConvergenceStatus, LineSearch, LinearSolver, Matrix,
+    NonLinearOp, NonLinearOpJacobian, NonLinearSolver, Vector,
 };
+use num_traits::One;
 
 pub fn newton_iteration<V: Vector>(
     xn: &mut V,
@@ -11,19 +12,24 @@ pub fn newton_iteration<V: Vector>(
     fun: impl Fn(&V, &mut V),
     linear_solver: impl Fn(&mut V) -> Result<(), DiffsolError>,
     convergence: &mut Convergence<V>,
+    line_search: &mut impl LineSearch<V>,
 ) -> Result<(), DiffsolError> {
     convergence.reset();
+    line_search.reset();
+    let mut norm = V::T::one();
     loop {
-        fun(xn, tmp);
-        //tmp = f_at_n
+        line_search.take_optimal_step(
+            xn,
+            &mut norm,
+            tmp,
+            error_y,
+            &fun,
+            &linear_solver,
+            convergence,
+        )?;
+        // xn = xn + alpha * delta_n, where alpha is determined by line search
 
-        linear_solver(tmp)?;
-        //tmp = -delta_n
-
-        xn.sub_assign(&*tmp);
-        // xn = xn + delta_n
-
-        let res = convergence.check_new_iteration(tmp, error_y);
+        let res = convergence.check_new_iteration(norm);
         match res {
             ConvergenceStatus::Continue => continue,
             ConvergenceStatus::Converged => return Ok(()),
@@ -34,16 +40,20 @@ pub fn newton_iteration<V: Vector>(
     Err(non_linear_solver_error!(NewtonDidNotConverge))
 }
 
-pub struct NewtonNonlinearSolver<M: Matrix, Ls: LinearSolver<M>> {
+pub struct NewtonNonlinearSolver<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> {
     linear_solver: Ls,
+    line_search: Lsearch,
     is_jacobian_set: bool,
     tmp: M::V,
 }
 
-impl<M: Matrix, Ls: LinearSolver<M>> NewtonNonlinearSolver<M, Ls> {
-    pub fn new(linear_solver: Ls) -> Self {
+impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>>
+    NewtonNonlinearSolver<M, Ls, Lsearch>
+{
+    pub fn new(linear_solver: Ls, line_search: Lsearch) -> Self {
         Self {
             linear_solver,
+            line_search,
             is_jacobian_set: false,
             tmp: M::V::zeros(0, Default::default()),
         }
@@ -53,13 +63,17 @@ impl<M: Matrix, Ls: LinearSolver<M>> NewtonNonlinearSolver<M, Ls> {
     }
 }
 
-impl<M: Matrix, Ls: LinearSolver<M>> Default for NewtonNonlinearSolver<M, Ls> {
+impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> Default
+    for NewtonNonlinearSolver<M, Ls, Lsearch>
+{
     fn default() -> Self {
-        Self::new(Ls::default())
+        Self::new(Ls::default(), Lsearch::default())
     }
 }
 
-impl<M: Matrix, Ls: LinearSolver<M>> NonLinearSolver<M> for NewtonNonlinearSolver<M, Ls> {
+impl<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> NonLinearSolver<M>
+    for NewtonNonlinearSolver<M, Ls, Lsearch>
+{
     fn clear_jacobian(&mut self) {
         self.is_jacobian_set = false;
     }
@@ -108,6 +122,14 @@ impl<M: Matrix, Ls: LinearSolver<M>> NonLinearSolver<M> for NewtonNonlinearSolve
         }
         let linear_solver = |x: &mut C::V| self.linear_solver.solve_in_place(x);
         let fun = |x: &C::V, y: &mut C::V| op.call_inplace(x, t, y);
-        newton_iteration(xn, &mut self.tmp, error_y, fun, linear_solver, convergence)
+        newton_iteration(
+            xn,
+            &mut self.tmp,
+            error_y,
+            fun,
+            linear_solver,
+            convergence,
+            &mut self.line_search,
+        )
     }
 }

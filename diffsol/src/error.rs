@@ -47,6 +47,10 @@ pub enum LinearSolverError {
 pub enum NonLinearSolverError {
     #[error("Newton iterations did not converge")]
     NewtonDidNotConverge,
+    #[error("Newton linesearch failed to find a suitable step in max iterations")]
+    LinesearchFailedMaxIterations,
+    #[error("Newton linesearch failed, minimum step size reached")]
+    LinesearchFailedMinStep,
     #[error("LU solve failed")]
     LuSolveFailed,
     #[error("Jacobian not reset before calling solve")]

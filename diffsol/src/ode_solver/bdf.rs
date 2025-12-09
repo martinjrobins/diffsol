@@ -1981,11 +1981,11 @@ mod test {
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 40
-        number_of_steps: 146
+        number_of_linear_solver_setups: 43
+        number_of_steps: 143
         number_of_error_test_failures: 2
-        number_of_nonlinear_solver_iterations: 324
-        number_of_nonlinear_solver_fails: 13
+        number_of_nonlinear_solver_iterations: 329
+        number_of_nonlinear_solver_fails: 16
         "###);
     }
 

@@ -11,8 +11,8 @@ use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, DenseMatrix, JacobianUpdate,
-    OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef,
-    StateRefMut,
+    NoLineSearch, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op,
+    StateRef, StateRefMut,
 };
 use num_traits::{FromPrimitive, One};
 
@@ -63,7 +63,7 @@ pub struct Sdirk<
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
 {
     rk: Rk<'a, Eqn, M>,
-    nonlinear_solver: NewtonNonlinearSolver<Eqn::M, LS>,
+    nonlinear_solver: NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
     convergence: Convergence<'a, Eqn::V>,
     op: Option<SdirkCallable<&'a Eqn>>,
     s_op: Option<SdirkCallable<AugmentedEqn>>,
@@ -80,7 +80,7 @@ where
     AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
 {
     fn clone(&self) -> Self {
-        let mut nonlinear_solver = NewtonNonlinearSolver::new(LS::default());
+        let mut nonlinear_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
         let op = if let Some(op) = &self.op {
             let op = op.clone_state(&self.problem().eqn);
             nonlinear_solver.set_problem(&op);
@@ -143,7 +143,7 @@ where
         jacobian_update.update_jacobian(state.h);
         jacobian_update.update_rhs_jacobian();
 
-        let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver);
+        let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver, NoLineSearch);
 
         // set max iterations for nonlinear solver
         let mut convergence = Convergence::new(problem.rtol, &problem.atol);
