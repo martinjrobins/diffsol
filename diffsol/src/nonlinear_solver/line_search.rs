@@ -2,7 +2,7 @@ use crate::{
     error::{DiffsolError, NonLinearSolverError},
     non_linear_solver_error,
     nonlinear_solver::convergence::ConvergenceStatus,
-    Convergence, Scalar, Scale, Vector,
+    Convergence, Scalar, Vector,
 };
 use num_traits::{FromPrimitive, One, Pow};
 
@@ -13,6 +13,7 @@ use num_traits::{FromPrimitive, One, Pow};
 /// The x vector is also modified in place to take the optimal step
 pub trait LineSearch<V: Vector>: Default {
     /// Take the optimal step for the current iteration
+    #[allow(clippy::too_many_arguments)]
     fn take_optimal_step(
         &mut self,
         x: &mut V,
