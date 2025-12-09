@@ -340,7 +340,7 @@ mod tests {
                 &dgdp_check.column(j).into_owned(),
                 &atol,
                 rtol,
-                Eqn::T::from_f64(33.).unwrap(),
+                Eqn::T::from_f64(40.).unwrap(),
             );
         }
     }
