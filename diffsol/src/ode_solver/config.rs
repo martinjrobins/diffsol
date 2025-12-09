@@ -1,4 +1,4 @@
-use crate::Scalar;
+use crate::{OdeSolverOptions, Scalar};
 
 pub trait OdeSolverConfig<T> {
     fn as_base_ref(&self) -> OdeSolverConfigRef<'_, T>;
@@ -49,16 +49,16 @@ impl<T: Scalar> OdeSolverConfig<T> for BdfConfig<T> {
     }
 }
 
-impl<T: Scalar> Default for BdfConfig<T> {
-    fn default() -> Self {
+impl<T: Scalar> BdfConfig<T> {
+    pub fn new(ode_options: &OdeSolverOptions<T>) -> Self {
         Self {
-            minimum_timestep: T::from_f64(1e-32).unwrap(),
-            maximum_error_test_failures: 40,
+            minimum_timestep: ode_options.min_timestep,
+            maximum_error_test_failures: ode_options.max_error_test_failures,
             maximum_timestep_growth: T::from_f64(2.1).unwrap(),
             minimum_timestep_growth: T::from_f64(2.0).unwrap(),
             maximum_timestep_shrink: T::from_f64(0.9).unwrap(),
             minimum_timestep_shrink: T::from_f64(0.5).unwrap(),
-            maximum_newton_iterations: 4,
+            maximum_newton_iterations: ode_options.max_nonlinear_solver_iterations,
         }
     }
 }
@@ -72,14 +72,14 @@ pub struct SdirkConfig<T> {
     pub maximum_newton_iterations: usize,
 }
 
-impl<T: Scalar> Default for SdirkConfig<T> {
-    fn default() -> Self {
+impl<T: Scalar> SdirkConfig<T> {
+    pub fn new(ode_options: &OdeSolverOptions<T>) -> Self {
         Self {
-            minimum_timestep: T::from_f64(1e-13).unwrap(),
-            maximum_error_test_failures: 40,
+            minimum_timestep: ode_options.min_timestep,
+            maximum_error_test_failures: ode_options.max_error_test_failures,
             maximum_timestep_growth: T::from_f64(10.0).unwrap(),
             minimum_timestep_shrink: T::from_f64(0.2).unwrap(),
-            maximum_newton_iterations: 10,
+            maximum_newton_iterations: ode_options.max_nonlinear_solver_iterations,
         }
     }
 }
@@ -112,11 +112,11 @@ pub struct ExplicitRkConfig<T> {
     pub minimum_timestep_shrink: T,
 }
 
-impl<T: Scalar> Default for ExplicitRkConfig<T> {
-    fn default() -> Self {
+impl<T: Scalar> ExplicitRkConfig<T> {
+    pub fn new(ode_options: &OdeSolverOptions<T>) -> Self {
         Self {
-            minimum_timestep: T::from_f64(1e-13).unwrap(),
-            maximum_error_test_failures: 40,
+            minimum_timestep: ode_options.min_timestep,
+            maximum_error_test_failures: ode_options.max_error_test_failures,
             maximum_timestep_growth: T::from_f64(10.0).unwrap(),
             minimum_timestep_shrink: T::from_f64(0.2).unwrap(),
         }
