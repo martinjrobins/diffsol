@@ -1083,7 +1083,20 @@ where
     let context = FoodWebContext::<M, NX>::new(ctx);
     let eqn = FoodWeb::new(context, t0);
     let problem = OdeSolverProblem::new(
-        eqn, rtol, atol, None, None, None, None, None, None, t0, h0, false,
+        eqn,
+        rtol,
+        atol,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        t0,
+        h0,
+        false,
+        Default::default(),
+        Default::default(),
     )
     .unwrap();
     let soln = soln::<M>(problem.context().clone());

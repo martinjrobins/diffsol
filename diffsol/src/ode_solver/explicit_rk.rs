@@ -86,7 +86,7 @@ where
         Ok(Self {
             rk: Rk::new(problem, state, tableau)?,
             augmented_eqn: None,
-            config: ExplicitRkConfig::default(),
+            config: ExplicitRkConfig::new(&problem.ode_options),
         })
     }
 
@@ -100,7 +100,7 @@ where
         Ok(Self {
             rk: Rk::new_augmented(problem, state, tableau, &augmented_eqn)?,
             augmented_eqn: Some(augmented_eqn),
-            config: ExplicitRkConfig::default(),
+            config: ExplicitRkConfig::new(&problem.ode_options),
         })
     }
 

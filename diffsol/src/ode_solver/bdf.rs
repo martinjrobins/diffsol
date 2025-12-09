@@ -184,7 +184,13 @@ where
         state: BdfState<Eqn::V, M>,
         nonlinear_solver: Nls,
     ) -> Result<Self, DiffsolError> {
-        Self::_new(problem, state, nonlinear_solver, true, BdfConfig::default())
+        Self::_new(
+            problem,
+            state,
+            nonlinear_solver,
+            true,
+            BdfConfig::new(&problem.ode_options),
+        )
     }
 
     fn _new(
@@ -312,7 +318,7 @@ where
             problem,
             augmented_eqn,
             nonlinear_solver,
-            BdfConfig::default(),
+            BdfConfig::new(&problem.ode_options),
         )
     }
 

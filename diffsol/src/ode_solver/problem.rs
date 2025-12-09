@@ -6,9 +6,45 @@ use crate::{
     AugmentedOdeEquationsImplicit, Bdf, BdfState, Checkpointing, DefaultDenseMatrix, DenseMatrix,
     ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch, NonLinearOp,
     OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
-    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Sdirk, SensEquations,
-    Tableau, VectorRef,
+    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Scalar, Sdirk,
+    SensEquations, Tableau, VectorRef,
 };
+
+pub struct InitialConditionSolverOptions<T: Scalar> {
+    pub use_linesearch: bool,
+    pub max_linesearch_iterations: usize,
+    pub max_newton_iterations: usize,
+    pub step_reduction_factor: T,
+    pub armijo_constant: T,
+}
+
+impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
+    fn default() -> Self {
+        Self {
+            use_linesearch: true,
+            max_linesearch_iterations: 10,
+            max_newton_iterations: 50,
+            step_reduction_factor: T::from_f64(0.5).unwrap(),
+            armijo_constant: T::from_f64(1e-4).unwrap(),
+        }
+    }
+}
+
+pub struct OdeSolverOptions<T: Scalar> {
+    pub max_nonlinear_solver_iterations: usize,
+    pub max_error_test_failures: usize,
+    pub min_timestep: T,
+}
+
+impl<T: Scalar> Default for OdeSolverOptions<T> {
+    fn default() -> Self {
+        Self {
+            max_nonlinear_solver_iterations: 10,
+            max_error_test_failures: 40,
+            min_timestep: T::from_f64(1e-13).unwrap(),
+        }
+    }
+}
 
 pub struct OdeSolverProblem<Eqn>
 where
@@ -26,6 +62,9 @@ where
     pub out_atol: Option<Eqn::V>,
     pub param_rtol: Option<Eqn::T>,
     pub param_atol: Option<Eqn::V>,
+
+    pub ic_options: InitialConditionSolverOptions<Eqn::T>,
+    pub ode_options: OdeSolverOptions<Eqn::T>,
 }
 
 macro_rules! sdirk_solver_from_tableau {
@@ -204,6 +243,8 @@ where
         t0: Eqn::T,
         h0: Eqn::T,
         integrate_out: bool,
+        ic_options: InitialConditionSolverOptions<Eqn::T>,
+        ode_options: OdeSolverOptions<Eqn::T>,
     ) -> Result<Self, DiffsolError> {
         Ok(Self {
             eqn,
@@ -218,6 +259,8 @@ where
             t0,
             h0,
             integrate_out,
+            ic_options,
+            ode_options,
         })
     }
 

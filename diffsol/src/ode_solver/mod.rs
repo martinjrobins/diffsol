@@ -560,6 +560,8 @@ mod tests {
             M::T::zero(),
             M::T::one(),
             integrate_out,
+            Default::default(),
+            Default::default(),
         )
         .unwrap()
     }

@@ -4,8 +4,9 @@ use crate::{
     ode_solver_error,
     op::{linear_closure_with_adjoint::LinearClosureWithAdjoint, BuilderOp},
     Closure, ClosureNoJac, ClosureWithAdjoint, ClosureWithSens, ConstantClosure,
-    ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp, LinearClosure, LinearOp,
-    Matrix, NonLinearOp, OdeEquations, OdeSolverProblem, Op, ParameterisedOp, UnitCallable, Vector,
+    ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp, InitialConditionSolverOptions,
+    LinearClosure, LinearOp, Matrix, NonLinearOp, OdeEquations, OdeSolverOptions, OdeSolverProblem,
+    Op, ParameterisedOp, Scalar, UnitCallable, Vector,
 };
 
 use crate::OdeSolverEquations;
@@ -38,6 +39,8 @@ pub struct OdeBuilder<
     mass: Option<Mass>,
     root: Option<Root>,
     out: Option<Out>,
+    ic_options: InitialConditionSolverOptions<f64>,
+    ode_options: OdeSolverOptions<f64>,
     ctx: M::C,
 }
 
@@ -120,6 +123,8 @@ where
             sens_atol: Some(default_atol),
             sens_rtol: Some(default_rtol),
             ctx: M::C::default(),
+            ic_options: Default::default(),
+            ode_options: Default::default(),
         }
     }
 
@@ -160,6 +165,8 @@ where
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
             ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
         }
     }
 
@@ -207,6 +214,8 @@ where
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
             ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
         }
     }
 
@@ -257,6 +266,8 @@ where
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
             ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
         }
     }
 
@@ -305,6 +316,8 @@ where
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
             ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
         }
     }
 
@@ -341,6 +354,8 @@ where
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
             ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
         }
     }
 
@@ -386,6 +401,8 @@ where
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
             ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
         }
     }
 
@@ -432,6 +449,8 @@ where
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
             ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
         }
     }
 
@@ -471,6 +490,8 @@ where
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
             ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
         }
     }
 
@@ -520,6 +541,8 @@ where
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
             ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
         }
     }
 
@@ -564,6 +587,8 @@ where
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
             ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
         }
     }
 
@@ -605,6 +630,8 @@ where
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
             ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
         }
     }
 
@@ -649,6 +676,8 @@ where
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
             ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
         }
     }
 
@@ -697,6 +726,8 @@ where
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
             ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
         }
     }
 
@@ -893,6 +924,26 @@ where
         M::V::from_vec(p, ctx)
     }
 
+    fn build_ic_options<T: Scalar>(
+        ic_options: InitialConditionSolverOptions<f64>,
+    ) -> InitialConditionSolverOptions<T> {
+        InitialConditionSolverOptions {
+            use_linesearch: ic_options.use_linesearch,
+            max_linesearch_iterations: ic_options.max_linesearch_iterations,
+            armijo_constant: T::from_f64(ic_options.armijo_constant).unwrap(),
+            max_newton_iterations: ic_options.max_newton_iterations,
+            step_reduction_factor: T::from_f64(ic_options.step_reduction_factor).unwrap(),
+        }
+    }
+
+    fn build_ode_options<T: Scalar>(ode_options: OdeSolverOptions<f64>) -> OdeSolverOptions<T> {
+        OdeSolverOptions {
+            max_error_test_failures: ode_options.max_error_test_failures,
+            max_nonlinear_solver_iterations: ode_options.max_nonlinear_solver_iterations,
+            min_timestep: T::from_f64(ode_options.min_timestep).unwrap(),
+        }
+    }
+
     #[allow(clippy::type_complexity)]
     pub fn build(
         self,
@@ -957,6 +1008,8 @@ where
         }
         let nout = out.as_ref().map(|out| out.nout());
         let eqn = OdeSolverEquations::new(rhs, init, mass, root, out, p);
+        let ic_options = Self::build_ic_options::<M::T>(self.ic_options);
+        let ode_options = Self::build_ode_options::<M::T>(self.ode_options);
 
         let (atol, sens_atol, out_atol, param_atol) = Self::build_atols(
             self.atol,
@@ -981,6 +1034,8 @@ where
             self.t0,
             self.h0,
             self.integrate_out,
+            ic_options,
+            ode_options,
         )
     }
 
@@ -1035,6 +1090,8 @@ where
             ));
         }
 
+        let ic_options = Self::build_ic_options::<M::T>(self.ic_options);
+        let ode_options = Self::build_ode_options::<M::T>(self.ode_options);
         let p = Self::build_p(self.p, self.ctx);
         eqn.set_params(&p);
         OdeSolverProblem::new(
@@ -1050,6 +1107,8 @@ where
             self.t0,
             self.h0,
             self.integrate_out,
+            ic_options,
+            ode_options,
         )
     }
 }

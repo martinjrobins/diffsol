@@ -124,7 +124,13 @@ where
     ) -> Result<Self, DiffsolError> {
         Rk::<Eqn, M>::check_sdirk_rk(&tableau)?;
         let rk = Rk::new(problem, state, tableau)?;
-        let mut ret = Self::_new(rk, problem, linear_solver, true, SdirkConfig::default())?;
+        let mut ret = Self::_new(
+            rk,
+            problem,
+            linear_solver,
+            true,
+            SdirkConfig::new(&problem.ode_options),
+        )?;
         ret.nonlinear_solver.set_problem(ret.op.as_ref().unwrap());
         Ok(ret)
     }
@@ -178,7 +184,13 @@ where
     ) -> Result<Self, DiffsolError> {
         Rk::<Eqn, M>::check_sdirk_rk(&tableau)?;
         let rk = Rk::new_augmented(problem, state, tableau, &augmented_eqn)?;
-        let mut ret = Self::_new(rk, problem, linear_solver, true, SdirkConfig::default())?;
+        let mut ret = Self::_new(
+            rk,
+            problem,
+            linear_solver,
+            true,
+            SdirkConfig::new(&problem.ode_options),
+        )?;
 
         ret.s_op = if augmented_eqn.integrate_main_eqn() {
             ret.nonlinear_solver.set_problem(ret.op.as_ref().unwrap());
