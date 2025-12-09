@@ -183,7 +183,11 @@ use matrix::{
 use nonlinear_solver::{
     convergence::Convergence, convergence::ConvergenceStatus, root::RootFinder,
 };
-pub use nonlinear_solver::{newton::NewtonNonlinearSolver, NonLinearSolver};
+pub use nonlinear_solver::{
+    line_search::{BacktrackingLineSearch, LineSearch, NoLineSearch},
+    newton::NewtonNonlinearSolver,
+    NonLinearSolver,
+};
 pub use ode_equations::{
     adjoint_equations::AdjointContext, adjoint_equations::AdjointEquations,
     adjoint_equations::AdjointInit, adjoint_equations::AdjointRhs, sens_equations::SensEquations,

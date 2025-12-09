@@ -60,6 +60,7 @@ pub trait NonLinearSolver<M: Matrix>: Default {
 }
 
 pub mod convergence;
+pub mod line_search;
 pub mod newton;
 pub mod root;
 
@@ -71,7 +72,7 @@ pub mod tests {
         linear_solver::nalgebra::lu::LU,
         matrix::{dense_nalgebra_serial::NalgebraMat, MatrixCommon},
         op::{closure::Closure, ParameterisedOp},
-        scale, DenseMatrix, NalgebraVec, Op, Vector,
+        scale, BacktrackingLineSearch, DenseMatrix, NalgebraVec, NoLineSearch, Op, Vector,
     };
 
     use super::*;
@@ -166,7 +167,19 @@ pub mod tests {
         let (op, rtol, atol, soln) = get_square_problem::<MCpu>();
         let p = NalgebraVec::zeros(0, *op.context());
         let op = ParameterisedOp::new(&op, &p);
-        let s = NewtonNonlinearSolver::new(lu);
+        let nls = NoLineSearch;
+        let s = NewtonNonlinearSolver::new(lu, nls);
+        test_nonlinear_solver(s, op, rtol, &atol, soln);
+    }
+
+    #[test]
+    fn test_newton_cpu_square_backtrack() {
+        let lu = LU::default();
+        let (op, rtol, atol, soln) = get_square_problem::<MCpu>();
+        let p = NalgebraVec::zeros(0, *op.context());
+        let op = ParameterisedOp::new(&op, &p);
+        let ls = BacktrackingLineSearch::default();
+        let s = NewtonNonlinearSolver::new(lu, ls);
         test_nonlinear_solver(s, op, rtol, &atol, soln);
     }
 }

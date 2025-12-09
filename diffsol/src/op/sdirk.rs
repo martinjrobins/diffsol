@@ -312,17 +312,16 @@ mod tests {
             let c = 0.1;
             let h = 1.3;
             let ctx = problem.context();
-            let phi = Vcpu::from_vec(vec![1.1, 1.2, 1.3], ctx.clone());
+            let phi = Vcpu::from_vec(vec![1.1, 1.2, 1.3], *ctx);
             let sdirk_callable = SdirkCallable::new(&problem.eqn, c);
             sdirk_callable.set_h(h);
             sdirk_callable.set_phi_direct(&phi);
             let t = 0.9;
-            let y = Vcpu::from_vec(vec![1.1, 1.2, 1.3], ctx.clone());
-
-            let v = Vcpu::from_vec(vec![2.0, 3.0, 4.0], ctx.clone());
+            let y = Vcpu::from_vec(vec![1.1, 1.2, 1.3], *ctx);
+            let v = Vcpu::from_vec(vec![2.0, 3.0, 4.0], *ctx);
             let jac = sdirk_callable.jacobian(&y, t);
             let jac_mul_v = sdirk_callable.jac_mul(&y, t, &v);
-            let mut jac_mul_v2 = Vcpu::from_vec(vec![0.0, 0.0, 0.0], ctx.clone());
+            let mut jac_mul_v2 = Vcpu::from_vec(vec![0.0, 0.0, 0.0], *ctx);
             jac.gemv(1.0, &v, 0.0, &mut jac_mul_v2);
             jac_mul_v.assert_eq_st(&jac_mul_v2, 1e-10);
         }
@@ -337,13 +336,12 @@ mod tests {
         let sdirk_callable = SdirkCallable::new(&problem.eqn, c);
         sdirk_callable.set_h(h);
 
-        let phi = Vcpu::from_vec(vec![1.1, 1.2], ctx.clone());
+        let phi = Vcpu::from_vec(vec![1.1, 1.2], *ctx);
         sdirk_callable.set_phi_direct(&phi);
         // check that the function is correct
-        let y = Vcpu::from_vec(vec![1.0, 1.0], ctx.clone());
+        let y = Vcpu::from_vec(vec![1.0, 1.0], *ctx);
         let t = 0.0;
-        let mut y_out = Vcpu::from_vec(vec![0.0, 0.0], ctx.clone());
-
+        let mut y_out = Vcpu::from_vec(vec![0.0, 0.0], *ctx);
         // F(y) = M y -  h f(phi + c * y)
         // M = |1 0|
         //     |0 1|
@@ -356,16 +354,16 @@ mod tests {
         //  i.e. F(y) = |1 0| |1| - |-0.12| =  |1.12|
         //              |0 1| |1|   |-0.13|    |1.13|
         sdirk_callable.call_inplace(&y, t, &mut y_out);
-        let y_out_expect = Vcpu::from_vec(vec![1.12, 1.13], ctx.clone());
+        let y_out_expect = Vcpu::from_vec(vec![1.12, 1.13], *ctx);
         y_out.assert_eq_st(&y_out_expect, 1e-10);
 
-        let v = Vcpu::from_vec(vec![1.0, 1.0], ctx.clone());
+        let v = Vcpu::from_vec(vec![1.0, 1.0], *ctx);
         // f'(phi + c * y)v = |-0.1| = |-0.1|
         //                    |-0.1| = |-0.1|
         // Mv - c * h * f'(phi + c * y) v = |1 0| |1| - 0.1 * |-0.1| = |1.01|
         //                                  |0 1| |1|         |-0.1|   |1.01|
         sdirk_callable.jac_mul_inplace(&y, t, &v, &mut y_out);
-        let y_out_expect = Vcpu::from_vec(vec![1.01, 1.01], ctx.clone());
+        let y_out_expect = Vcpu::from_vec(vec![1.01, 1.01], *ctx);
         y_out.assert_eq_st(&y_out_expect, 1e-10);
 
         // J = M - c * h * f'(phi + c * y) = |1 0| - 0.1 * |-0.1 0| = |1.01 0|

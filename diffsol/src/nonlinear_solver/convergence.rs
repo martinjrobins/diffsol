@@ -44,7 +44,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
             rtol,
             atol,
             tol,
-            max_iter: 100,
+            max_iter: 10,
             old_norm: None,
             niter: 0,
         }
@@ -54,9 +54,11 @@ impl<'a, V: Vector> Convergence<'a, V> {
         self.old_norm = None;
     }
 
-    pub fn check_new_iteration(&mut self, dy: &mut V, y: &V) -> ConvergenceStatus {
-        self.niter += 1;
-        let norm = dy.squared_norm(y, self.atol, self.rtol).sqrt();
+    pub fn norm(&self, dy: &V, y: &V) -> V::T {
+        dy.squared_norm(y, self.atol, self.rtol).sqrt()
+    }
+
+    pub fn check_norm(&mut self, norm: V::T) -> ConvergenceStatus {
         // if norm is zero then we are done
         if norm <= V::T::EPSILON {
             return ConvergenceStatus::Converged;
@@ -71,7 +73,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
 
             let eta = rate / (V::T::one() - rate);
 
-            // check if iteration is converging
+            // check if iteration is converged
             if eta * norm < self.tol {
                 return ConvergenceStatus::Converged;
             }
@@ -90,6 +92,20 @@ impl<'a, V: Vector> Convergence<'a, V> {
                 return ConvergenceStatus::Converged;
             }
         };
+        ConvergenceStatus::Continue
+    }
+
+    pub fn check_new_iteration(&mut self, norm: V::T) -> ConvergenceStatus {
+        self.niter += 1;
+
+        let status = self.check_norm(norm);
+
+        // if we have converged or diverged, return immediately
+        match status {
+            ConvergenceStatus::Converged => return ConvergenceStatus::Converged,
+            ConvergenceStatus::Diverged => return ConvergenceStatus::Diverged,
+            _ => {}
+        }
 
         // we havn't converged, so store norm for next iteration
         self.old_norm = Some(norm);

@@ -164,7 +164,7 @@ mod test {
         }
         fn process_inplace(&self, _x: &Self::V, d_w: &Self::V, _t: Self::T, y: &mut [Self::V]) {
             assert_eq!(y.len(), 2);
-            let mut ones = Self::V::zeros(self.nout(), self.context().clone());
+            let mut ones = Self::V::zeros(self.nout(), *self.context());
             ones.fill(Self::T::one());
             for i in 0..2 {
                 y[i] = &ones * Scale(d_w[i]);

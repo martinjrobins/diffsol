@@ -4,8 +4,8 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     error::DiffsolError, vector::Vector, AdjointContext, AdjointEquations, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, Bdf, BdfState, Checkpointing, DefaultDenseMatrix, DenseMatrix,
-    ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NonLinearOp, OdeEquations,
-    OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
+    ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch, NonLinearOp,
+    OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
     OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Sdirk, SensEquations,
     Tableau, VectorRef,
 };
@@ -255,20 +255,22 @@ where
 
     /// Create a new state for the Bdf solver.
     /// The initial state is made consistent with any provided mass matrix.
+    #[allow(clippy::type_complexity)]
     pub fn bdf_solver<LS: LinearSolver<Eqn::M>>(
         &self,
         state: BdfState<Eqn::V>,
-    ) -> Result<Bdf<'_, Eqn, NewtonNonlinearSolver<Eqn::M, LS>>, DiffsolError>
+    ) -> Result<Bdf<'_, Eqn, NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>>, DiffsolError>
     where
         Eqn: OdeEquationsImplicit,
     {
-        let newton_solver = NewtonNonlinearSolver::new(LS::default());
+        let newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
         Bdf::new(self, state, newton_solver)
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn bdf<LS: LinearSolver<Eqn::M>>(
         &self,
-    ) -> Result<Bdf<'_, Eqn, NewtonNonlinearSolver<Eqn::M, LS>>, DiffsolError>
+    ) -> Result<Bdf<'_, Eqn, NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>>, DiffsolError>
     where
         Eqn: OdeEquationsImplicit,
     {
@@ -285,13 +287,19 @@ where
         state: BdfState<Eqn::V>,
         aug_eqn: Aug,
     ) -> Result<
-        Bdf<'_, Eqn, NewtonNonlinearSolver<Eqn::M, LS>, <Eqn::V as DefaultDenseMatrix>::M, Aug>,
+        Bdf<
+            '_,
+            Eqn,
+            NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
+            <Eqn::V as DefaultDenseMatrix>::M,
+            Aug,
+        >,
         DiffsolError,
     >
     where
         Eqn: OdeEquationsImplicit,
     {
-        let newton_solver = NewtonNonlinearSolver::new(LS::default());
+        let newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
         Bdf::new_augmented(state, self, aug_eqn, newton_solver)
     }
 
@@ -304,7 +312,7 @@ where
         Bdf<
             'a,
             Eqn,
-            NewtonNonlinearSolver<Eqn::M, LS>,
+            NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
             <Eqn::V as DefaultDenseMatrix>::M,
             AdjointEquations<'a, Eqn, S>,
         >,
@@ -318,7 +326,7 @@ where
         let nout = nout_override.unwrap_or_else(|| self.eqn.nout());
         let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer, nout)));
         let mut augmented_eqn = AdjointEquations::new(self, context, self.integrate_out);
-        let mut newton_solver = NewtonNonlinearSolver::new(LS::default());
+        let mut newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
         let mut state = BdfState::new_without_initialise_augmented(self, &mut augmented_eqn)?;
         *state.as_mut().t = t;
         if let Some(h) = h {
@@ -344,7 +352,7 @@ where
         Bdf<
             '_,
             Eqn,
-            NewtonNonlinearSolver<Eqn::M, LS>,
+            NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
             <Eqn::V as DefaultDenseMatrix>::M,
             SensEquations<'_, Eqn>,
         >,
@@ -364,7 +372,7 @@ where
         Bdf<
             '_,
             Eqn,
-            NewtonNonlinearSolver<Eqn::M, LS>,
+            NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
             <Eqn::V as DefaultDenseMatrix>::M,
             SensEquations<'_, Eqn>,
         >,
@@ -477,7 +485,7 @@ where
         if let Some(h) = h {
             *state.as_mut().h = -h;
         }
-        let mut newton_solver = NewtonNonlinearSolver::new(LS::default());
+        let mut newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
         state.set_consistent(self, &mut newton_solver)?;
         state.set_consistent_augmented(self, &mut augmented_eqn, &mut newton_solver)?;
         state.set_step_size(
