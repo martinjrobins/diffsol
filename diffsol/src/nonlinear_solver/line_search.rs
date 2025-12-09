@@ -61,8 +61,8 @@ impl<V: Vector> LineSearch<V> for NoLineSearch {
     fn reset(&mut self) {}
 }
 
-///
-/// Backtracking line search implementation
+/// Backtracking line search implementation, derived from backtracking line search algorithm
+/// in Sundials IDA solver (<https://github.com/LLNL/sundials/blob/main/src/ida/ida_ic.c#L480>)
 ///
 /// Parameters:
 /// - tau: step size reduction factor (0 < tau < 1), default 0.5
@@ -95,8 +95,6 @@ impl<V: Vector> Default for BacktrackingLineSearch<V> {
     }
 }
 
-/// Backtracking line search implementation, derived from backtracking line search algorithm
-/// in Sundials IDA solver (https://github.com/LLNL/sundials/blob/main/src/ida/ida_ic.c#L480)
 impl<V: Vector> LineSearch<V> for BacktrackingLineSearch<V> {
     fn reset(&mut self) {
         self.n_iters = 0;
