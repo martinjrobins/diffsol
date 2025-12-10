@@ -243,10 +243,10 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
             ls.max_iter = ode_problem.ic_options.max_linesearch_iterations;
             ls.tau = ode_problem.ic_options.step_reduction_factor;
             let mut root_solver = NewtonNonlinearSolver::new(LS::default(), ls);
-            ret.set_consistent_augmented(ode_problem, &mut augmented_eqn, &mut root_solver)?;
+            ret.set_consistent(ode_problem, &mut root_solver)?;
         } else {
             let mut root_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
-            ret.set_consistent_augmented(ode_problem, &mut augmented_eqn, &mut root_solver)?;
+            ret.set_consistent(ode_problem, &mut root_solver)?;
         }
         if ode_problem.ic_options.use_linesearch {
             let mut ls = BacktrackingLineSearch::default();
@@ -526,7 +526,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
             root_solver.set_problem(&f);
 
             let mut y = state.ds[i].clone();
-            y.copy_from_indices(state.y, &f.algebraic_indices);
+            y.copy_from_indices(&state.s[i], &f.algebraic_indices);
             let mut yerr = y.clone();
             let mut result = Ok(());
             for _ in 0..ode_problem.ic_options.max_linear_solver_setups {
