@@ -449,12 +449,11 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let mut y_tmp = state.dy.clone();
         let mut yerr = y_tmp.clone();
         y_tmp.copy_from_indices(state.y, &f.algebraic_indices);
+        let mut convergence = Convergence::new(rtol, atol);
+        convergence.set_max_iter(ode_problem.ic_options.max_newton_iterations);
         let mut result = Ok(());
         for _ in 0..ode_problem.ic_options.max_linear_solver_setups {
             root_solver.reset_jacobian(&f, &y_tmp, *state.t);
-            let mut convergence = Convergence::new(rtol, atol);
-            convergence.set_max_iter(ode_problem.ic_options.max_newton_iterations);
-            convergence.check_rate = false;
             result = root_solver.solve_in_place(&f, &mut y_tmp, *state.t, &yerr, &mut convergence);
             match &result {
                 Ok(()) => break,
@@ -528,9 +527,23 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
 
             let mut y = state.ds[i].clone();
             y.copy_from_indices(state.y, &f.algebraic_indices);
-            let yerr = y.clone();
-            root_solver.reset_jacobian(&f, &y, *state.t);
-            root_solver.solve_in_place(&f, &mut y, *state.t, &yerr, &mut convergence)?;
+            let mut yerr = y.clone();
+            let mut result = Ok(());
+            for _ in 0..ode_problem.ic_options.max_linear_solver_setups {
+                root_solver.reset_jacobian(&f, &y, *state.t);
+                result = root_solver.solve_in_place(&f, &mut y, *state.t, &yerr, &mut convergence);
+                match &result {
+                    Ok(()) => break,
+                    Err(DiffsolError::NonLinearSolverError(
+                        NonLinearSolverError::NewtonMaxIterations,
+                    )) => (),
+                    e => e.clone()?,
+                }
+                yerr.copy_from(&y);
+            }
+            if result.is_err() {
+                return Err(non_linear_solver_error!(InitialConditionDidNotConverge));
+            }
             f.scatter_soln(&y, &mut state.s[i], &mut state.ds[i]);
         }
         Ok(())

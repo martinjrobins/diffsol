@@ -12,7 +12,6 @@ pub struct Convergence<'a, V: Vector> {
     niter: IndexType,
     old_norm: Option<V::T>,
     rate: Option<V::T>,
-    pub check_rate: bool,
 }
 
 pub enum ConvergenceStatus {
@@ -52,7 +51,6 @@ impl<'a, V: Vector> Convergence<'a, V> {
             old_norm: None,
             rate: None,
             niter: 0,
-            check_rate: true,
         }
     }
     pub fn reset(&mut self) {
@@ -105,9 +103,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
 
     pub fn check_new_iteration(&mut self, norm: V::T) -> ConvergenceStatus {
         let status = self.check_norm(norm);
-        if self.check_rate {
-            self.old_norm = Some(norm);
-        }
+        self.old_norm = Some(norm);
         status
     }
 }
