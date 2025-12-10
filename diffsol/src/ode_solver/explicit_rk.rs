@@ -389,7 +389,7 @@ mod test {
         let adjoint_solver = problem.tsit45_solver_adjoint(checkpointer, None).unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 434
+        number_of_calls: 378
         number_of_jac_muls: 8
         number_of_matrix_evals: 4
         number_of_jac_adj_muls: 123

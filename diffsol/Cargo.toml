@@ -1,6 +1,6 @@
 [package]
 name = "diffsol"
-version = "0.8.4"
+version = "0.8.5"
 edition.workspace = true
 description = "A library for solving ordinary differential equations (ODEs) in Rust."
 license.workspace = true

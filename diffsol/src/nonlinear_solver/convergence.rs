@@ -11,13 +11,13 @@ pub struct Convergence<'a, V: Vector> {
     max_iter: IndexType,
     niter: IndexType,
     old_norm: Option<V::T>,
+    rate: Option<V::T>,
 }
 
 pub enum ConvergenceStatus {
     Converged,
     Diverged,
     Continue,
-    MaximumIterations,
 }
 
 impl<'a, V: Vector> Convergence<'a, V> {
@@ -29,6 +29,9 @@ impl<'a, V: Vector> Convergence<'a, V> {
     }
     pub fn niter(&self) -> IndexType {
         self.niter
+    }
+    pub fn rate(&self) -> Option<V::T> {
+        self.rate
     }
     pub fn new(rtol: V::T, atol: &'a V) -> Self {
         let minimum_tol = V::T::from_f64(10.0).unwrap() * V::T::EPSILON / rtol;
@@ -46,6 +49,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
             tol,
             max_iter: 10,
             old_norm: None,
+            rate: None,
             niter: 0,
         }
     }
@@ -59,15 +63,17 @@ impl<'a, V: Vector> Convergence<'a, V> {
     }
 
     pub fn check_norm(&mut self, norm: V::T) -> ConvergenceStatus {
+        self.niter += 1;
         // if norm is zero then we are done
         if norm <= V::T::EPSILON {
             return ConvergenceStatus::Converged;
         }
         if let Some(old_norm) = self.old_norm {
             let rate = norm / old_norm;
+            self.rate = Some(rate);
 
             // check if iteration is diverging
-            if rate > V::T::one() {
+            if rate > V::T::from_f64(0.9).unwrap() {
                 return ConvergenceStatus::Diverged;
             }
 
@@ -88,7 +94,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
             }
         } else {
             // no rate, just test with a large eta
-            if V::T::from_f64(1000.0).unwrap() * norm < self.tol {
+            if V::T::from_f64(100.0).unwrap() * norm < self.tol {
                 return ConvergenceStatus::Converged;
             }
         };
@@ -96,25 +102,8 @@ impl<'a, V: Vector> Convergence<'a, V> {
     }
 
     pub fn check_new_iteration(&mut self, norm: V::T) -> ConvergenceStatus {
-        self.niter += 1;
-
         let status = self.check_norm(norm);
-
-        // if we have converged or diverged, return immediately
-        match status {
-            ConvergenceStatus::Converged => return ConvergenceStatus::Converged,
-            ConvergenceStatus::Diverged => return ConvergenceStatus::Diverged,
-            _ => {}
-        }
-
-        // we havn't converged, so store norm for next iteration
         self.old_norm = Some(norm);
-
-        // check if we have reached the maximum
-        if self.niter >= self.max_iter {
-            ConvergenceStatus::MaximumIterations
-        } else {
-            ConvergenceStatus::Continue
-        }
+        status
     }
 }

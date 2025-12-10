@@ -184,7 +184,7 @@ where
 
     fn sens_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
         if let Some(coloring) = self.op.sens_coloring.as_ref() {
-            coloring.jacobian_inplace(self, x, t, y);
+            coloring.sens_inplace(self, x, t, y);
         } else {
             self._default_sens_inplace(x, t, y);
         }

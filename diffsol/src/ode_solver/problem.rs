@@ -14,6 +14,7 @@ pub struct InitialConditionSolverOptions<T: Scalar> {
     pub use_linesearch: bool,
     pub max_linesearch_iterations: usize,
     pub max_newton_iterations: usize,
+    pub max_linear_solver_setups: usize,
     pub step_reduction_factor: T,
     pub armijo_constant: T,
 }
@@ -23,7 +24,8 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
         Self {
             use_linesearch: true,
             max_linesearch_iterations: 10,
-            max_newton_iterations: 50,
+            max_linear_solver_setups: 4,
+            max_newton_iterations: 10,
             step_reduction_factor: T::from_f64(0.5).unwrap(),
             armijo_constant: T::from_f64(1e-4).unwrap(),
         }

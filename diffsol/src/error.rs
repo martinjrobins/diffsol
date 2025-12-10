@@ -4,7 +4,7 @@ use thiserror::Error;
 /// Custom error type for Diffsol
 ///
 /// This error type is used to wrap all possible errors that can occur when using Diffsol
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum DiffsolError {
     #[error("Linear solver error: {0}")]
     LinearSolverError(#[from] LinearSolverError),
@@ -22,7 +22,7 @@ pub enum DiffsolError {
 }
 
 /// Possible errors that can occur when solving a linear problem
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum LinearSolverError {
     #[error("LU not initialized")]
     LuNotInitialized,
@@ -43,10 +43,14 @@ pub enum LinearSolverError {
 }
 
 /// Possible errors that can occur when solving a non-linear problem
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum NonLinearSolverError {
-    #[error("Newton iterations did not converge")]
-    NewtonDidNotConverge,
+    #[error("Initial condition solver did not converge")]
+    InitialConditionDidNotConverge,
+    #[error("Newton iterations did not converge, maximum iterations reached")]
+    NewtonMaxIterations,
+    #[error("Newton iteration diverged")]
+    NewtonDiverged,
     #[error("Newton linesearch failed to find a suitable step in max iterations")]
     LinesearchFailedMaxIterations,
     #[error("Newton linesearch failed, minimum step size reached")]
@@ -62,7 +66,7 @@ pub enum NonLinearSolverError {
 }
 
 /// Possible errors that can occur when solving an ODE
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone)]
 pub enum OdeSolverError {
     #[error(
         "Stop time = {} is less than current state time = {}",
@@ -115,7 +119,7 @@ pub enum OdeSolverError {
 }
 
 /// Possible errors for matrix operations
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum MatrixError {
     #[error("Failed to create matrix from triplets: {0}")]
     FailedToCreateMatrixFromTriplets(#[from] CreationError),
@@ -130,7 +134,7 @@ pub enum MatrixError {
 }
 
 #[cfg(feature = "cuda")]
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum CudaError {
     #[error("Failed to allocate memory on GPU")]
     CudaMemoryAllocationError,
