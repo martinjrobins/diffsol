@@ -2,7 +2,7 @@ use nalgebra::ComplexField;
 use num_traits::FromPrimitive;
 use num_traits::{One, Pow, Zero};
 
-use crate::BacktrackingLineSearch;
+use crate::error::NonLinearSolverError;
 use crate::{
     error::{DiffsolError, OdeSolverError},
     nonlinear_solver::{convergence::Convergence, NonLinearSolver},
@@ -11,6 +11,7 @@ use crate::{
     OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverProblem, Op, SensEquations, Vector,
     VectorIndex,
 };
+use crate::{non_linear_solver_error, BacktrackingLineSearch, NoLineSearch};
 
 /// A state holding those variables that are common to all ODE solver states,
 /// can be used to create a new state for a specific solver.
@@ -175,9 +176,17 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         LS: LinearSolver<Eqn::M>,
     {
         let mut ret = Self::new_without_initialise(ode_problem)?;
-        let mut root_solver =
-            NewtonNonlinearSolver::new(LS::default(), BacktrackingLineSearch::default());
-        ret.set_consistent(ode_problem, &mut root_solver)?;
+        if ode_problem.ic_options.use_linesearch {
+            let mut ls = BacktrackingLineSearch::default();
+            ls.c = ode_problem.ic_options.armijo_constant;
+            ls.max_iter = ode_problem.ic_options.max_linesearch_iterations;
+            ls.tau = ode_problem.ic_options.step_reduction_factor;
+            let mut root_solver = NewtonNonlinearSolver::new(LS::default(), ls);
+            ret.set_consistent(ode_problem, &mut root_solver)?;
+        } else {
+            let mut root_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
+            ret.set_consistent(ode_problem, &mut root_solver)?;
+        }
         ret.set_step_size(
             ode_problem.h0,
             &ode_problem.atol,
@@ -228,12 +237,28 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     {
         let mut augmented_eqn = SensEquations::new(ode_problem);
         let mut ret = Self::new_without_initialise_augmented(ode_problem, &mut augmented_eqn)?;
-        let mut root_solver =
-            NewtonNonlinearSolver::new(LS::default(), BacktrackingLineSearch::default());
-        ret.set_consistent(ode_problem, &mut root_solver)?;
-        let mut root_solver_sens =
-            NewtonNonlinearSolver::new(LS::default(), BacktrackingLineSearch::default());
-        ret.set_consistent_augmented(ode_problem, &mut augmented_eqn, &mut root_solver_sens)?;
+        if ode_problem.ic_options.use_linesearch {
+            let mut ls = BacktrackingLineSearch::default();
+            ls.c = ode_problem.ic_options.armijo_constant;
+            ls.max_iter = ode_problem.ic_options.max_linesearch_iterations;
+            ls.tau = ode_problem.ic_options.step_reduction_factor;
+            let mut root_solver = NewtonNonlinearSolver::new(LS::default(), ls);
+            ret.set_consistent_augmented(ode_problem, &mut augmented_eqn, &mut root_solver)?;
+        } else {
+            let mut root_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
+            ret.set_consistent_augmented(ode_problem, &mut augmented_eqn, &mut root_solver)?;
+        }
+        if ode_problem.ic_options.use_linesearch {
+            let mut ls = BacktrackingLineSearch::default();
+            ls.c = ode_problem.ic_options.armijo_constant;
+            ls.max_iter = ode_problem.ic_options.max_linesearch_iterations;
+            ls.tau = ode_problem.ic_options.step_reduction_factor;
+            let mut root_solver_sens = NewtonNonlinearSolver::new(LS::default(), ls);
+            ret.set_consistent_augmented(ode_problem, &mut augmented_eqn, &mut root_solver_sens)?;
+        } else {
+            let mut root_solver_sens = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
+            ret.set_consistent_augmented(ode_problem, &mut augmented_eqn, &mut root_solver_sens)?;
+        }
         ret.set_step_size(
             ode_problem.h0,
             &ode_problem.atol,
@@ -422,11 +447,29 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let atol = &ode_problem.atol;
         root_solver.set_problem(&f);
         let mut y_tmp = state.dy.clone();
+        let mut yerr = y_tmp.clone();
         y_tmp.copy_from_indices(state.y, &f.algebraic_indices);
-        let yerr = y_tmp.clone();
-        root_solver.reset_jacobian(&f, &y_tmp, *state.t);
-        let mut convergence = Convergence::new(rtol, atol);
-        root_solver.solve_in_place(&f, &mut y_tmp, *state.t, &yerr, &mut convergence)?;
+        println!("solving for consistent initial dy");
+        let mut result = Ok(());
+        for _ in 0..ode_problem.ic_options.max_linear_solver_setups {
+            root_solver.reset_jacobian(&f, &y_tmp, *state.t);
+            let mut convergence = Convergence::new(rtol, atol);
+            convergence.set_max_iter(ode_problem.ic_options.max_newton_iterations);
+            convergence.check_rate = false;
+            result = root_solver.solve_in_place(&f, &mut y_tmp, *state.t, &yerr, &mut convergence);
+            match &result {
+                Ok(()) => break,
+                Err(DiffsolError::NonLinearSolverError(
+                    NonLinearSolverError::NewtonMaxIterations,
+                )) => (),
+                e => e.clone()?,
+            }
+            yerr.copy_from(&y_tmp);
+        }
+        if result.is_err() {
+            return Err(non_linear_solver_error!(InitialConditionDidNotConverge));
+        }
+        println!("consistent initial dy found");
         f.scatter_soln(&y_tmp, state.y, state.dy);
         // dv is not solved for, so we set it to zero, it will be solved for in the first step of the solver
         state
@@ -464,6 +507,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         }
 
         let mut convergence = Convergence::new(ode_problem.rtol, &ode_problem.atol);
+        convergence.set_max_iter(ode_problem.ic_options.max_newton_iterations);
         let (algebraic_indices, _) = ode_problem
             .eqn
             .mass()

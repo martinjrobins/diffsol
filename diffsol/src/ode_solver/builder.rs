@@ -933,6 +933,7 @@ where
             armijo_constant: T::from_f64(ic_options.armijo_constant).unwrap(),
             max_newton_iterations: ic_options.max_newton_iterations,
             step_reduction_factor: T::from_f64(ic_options.step_reduction_factor).unwrap(),
+            max_linear_solver_setups: ic_options.max_linear_solver_setups,
         }
     }
 

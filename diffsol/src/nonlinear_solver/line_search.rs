@@ -2,7 +2,7 @@ use crate::{
     error::{DiffsolError, NonLinearSolverError},
     non_linear_solver_error,
     nonlinear_solver::convergence::ConvergenceStatus,
-    Convergence, Scalar, Vector,
+    Convergence, InitialConditionSolverOptions, Scalar, Vector,
 };
 use num_traits::{FromPrimitive, One, Pow};
 
@@ -13,17 +13,15 @@ use num_traits::{FromPrimitive, One, Pow};
 /// The x vector is also modified in place to take the optimal step
 pub trait LineSearch<V: Vector>: Default {
     /// Take the optimal step for the current iteration
-    #[allow(clippy::too_many_arguments)]
     fn take_optimal_step(
         &mut self,
         x: &mut V,
-        norm: &mut V::T,
         delta: &mut V,
         error_y: &V,
         fun: &impl Fn(&V, &mut V),
         linear_solver: &impl Fn(&mut V) -> Result<(), DiffsolError>,
         convergence: &mut Convergence<V>,
-    ) -> Result<(), DiffsolError>;
+    ) -> Result<ConvergenceStatus, DiffsolError>;
 
     /// Reset the line search state
     fn reset(&mut self);
@@ -37,13 +35,12 @@ impl<V: Vector> LineSearch<V> for NoLineSearch {
     fn take_optimal_step(
         &mut self,
         x: &mut V,
-        norm: &mut V::T,
         delta: &mut V,
         error_y: &V,
         fun: &impl Fn(&V, &mut V),
         linear_solver: &impl Fn(&mut V) -> Result<(), DiffsolError>,
         convergence: &mut Convergence<V>,
-    ) -> Result<(), DiffsolError> {
+    ) -> Result<ConvergenceStatus, DiffsolError> {
         //delta = f_at_n
         fun(x, delta);
 
@@ -54,8 +51,8 @@ impl<V: Vector> LineSearch<V> for NoLineSearch {
         x.sub_assign(&*delta);
 
         // norm
-        *norm = convergence.norm(delta, error_y);
-        Ok(())
+        let norm = convergence.norm(delta, error_y);
+        Ok(convergence.check_new_iteration(norm))
     }
 
     fn reset(&mut self) {}
@@ -79,18 +76,21 @@ pub struct BacktrackingLineSearch<V: Vector> {
     pub n_iters: usize,
     delta0: V,
     x0: V,
+    norm: V::T,
 }
 
 impl<V: Vector> Default for BacktrackingLineSearch<V> {
     fn default() -> Self {
+        let ic_options = InitialConditionSolverOptions::<V::T>::default();
         Self {
-            tau: V::T::from_f64(0.5).unwrap(),
-            c: V::T::from_f64(1e-4).unwrap(),
+            tau: ic_options.step_reduction_factor,
+            c: ic_options.armijo_constant,
             steptol: V::T::EPSILON.pow(V::T::from_f64(2.0 / 3.0).unwrap()),
-            max_iter: 100,
+            max_iter: ic_options.max_linesearch_iterations,
             n_iters: 0,
             delta0: V::zeros(0, Default::default()),
             x0: V::zeros(0, Default::default()),
+            norm: V::T::one(),
         }
     }
 }
@@ -102,13 +102,12 @@ impl<V: Vector> LineSearch<V> for BacktrackingLineSearch<V> {
     fn take_optimal_step(
         &mut self,
         x: &mut V,
-        rnorm: &mut V::T,
         delta: &mut V,
         error_y: &V,
         fun: &impl Fn(&V, &mut V),
         linear_solver: &impl Fn(&mut V) -> Result<(), DiffsolError>,
         convergence: &mut Convergence<V>,
-    ) -> Result<(), DiffsolError> {
+    ) -> Result<ConvergenceStatus, DiffsolError> {
         // on the first iteration, we need to init delta and norm
         if convergence.niter() == 0 {
             //delta = f_at_n
@@ -117,12 +116,12 @@ impl<V: Vector> LineSearch<V> for BacktrackingLineSearch<V> {
             //delta = -delta_n
             linear_solver(delta)?;
 
-            *rnorm = convergence.norm(delta, error_y);
+            self.norm = convergence.norm(delta, error_y);
 
             // if we've already converged, take the step and return
-            if let ConvergenceStatus::Converged = convergence.check_norm(*rnorm) {
+            if let ConvergenceStatus::Converged = convergence.check_norm(self.norm) {
                 x.sub_assign(&*delta);
-                return Ok(());
+                return Ok(ConvergenceStatus::Converged);
             }
         }
 
@@ -132,10 +131,10 @@ impl<V: Vector> LineSearch<V> for BacktrackingLineSearch<V> {
         }
         self.x0.copy_from(x);
         self.delta0.copy_from(delta);
-        let norm = *rnorm;
         let half = V::T::from_f64(0.5).unwrap();
 
         // backtracking line search on phi = 0.5 ||F||^2
+        let norm = self.norm;
         let phi0 = norm * norm * half;
         let two_phi0 = norm * norm;
         let min_alpha = self.steptol / norm;
@@ -158,8 +157,8 @@ impl<V: Vector> LineSearch<V> for BacktrackingLineSearch<V> {
             // so the Armijo condition reduces to phi(u+α p) <= phi0 - c * α * ||F||^2``
             let phi1 = new_norm * new_norm * half;
             if phi1 <= phi0 - self.c * alpha * two_phi0 {
-                *rnorm = new_norm;
-                return Ok(());
+                self.norm = new_norm;
+                return Ok(convergence.check_norm(new_norm));
             }
             alpha *= self.tau;
             if alpha < min_alpha {

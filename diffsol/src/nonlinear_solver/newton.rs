@@ -3,8 +3,8 @@ use crate::{
     non_linear_solver_error, Convergence, ConvergenceStatus, LineSearch, LinearSolver, Matrix,
     NonLinearOp, NonLinearOpJacobian, NonLinearSolver, Vector,
 };
-use num_traits::One;
 
+#[allow(clippy::too_many_arguments)]
 pub fn newton_iteration<V: Vector>(
     xn: &mut V,
     tmp: &mut V,
@@ -16,28 +16,18 @@ pub fn newton_iteration<V: Vector>(
 ) -> Result<(), DiffsolError> {
     convergence.reset();
     line_search.reset();
-    let mut norm = V::T::one();
-    loop {
-        line_search.take_optimal_step(
-            xn,
-            &mut norm,
-            tmp,
-            error_y,
-            &fun,
-            &linear_solver,
-            convergence,
-        )?;
-        // xn = xn + alpha * delta_n, where alpha is determined by line search
+    for _ in 0..convergence.max_iter() {
+        let res =
+            line_search.take_optimal_step(xn, tmp, error_y, &fun, &linear_solver, convergence)?;
+        // xn = xn + alpha * delta_n, where alpha is determined by line search, return status
 
-        let res = convergence.check_new_iteration(norm);
         match res {
             ConvergenceStatus::Continue => continue,
             ConvergenceStatus::Converged => return Ok(()),
-            ConvergenceStatus::Diverged => break,
-            ConvergenceStatus::MaximumIterations => break,
+            ConvergenceStatus::Diverged => return Err(non_linear_solver_error!(NewtonDiverged)),
         }
     }
-    Err(non_linear_solver_error!(NewtonDidNotConverge))
+    Err(non_linear_solver_error!(NewtonMaxIterations))
 }
 
 pub struct NewtonNonlinearSolver<M: Matrix, Ls: LinearSolver<M>, Lsearch: LineSearch<M::V>> {
