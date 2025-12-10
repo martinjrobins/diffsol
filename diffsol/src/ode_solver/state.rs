@@ -449,7 +449,6 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let mut y_tmp = state.dy.clone();
         let mut yerr = y_tmp.clone();
         y_tmp.copy_from_indices(state.y, &f.algebraic_indices);
-        println!("solving for consistent initial dy");
         let mut result = Ok(());
         for _ in 0..ode_problem.ic_options.max_linear_solver_setups {
             root_solver.reset_jacobian(&f, &y_tmp, *state.t);
@@ -469,7 +468,6 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         if result.is_err() {
             return Err(non_linear_solver_error!(InitialConditionDidNotConverge));
         }
-        println!("consistent initial dy found");
         f.scatter_soln(&y_tmp, state.y, state.dy);
         // dv is not solved for, so we set it to zero, it will be solved for in the first step of the solver
         state
