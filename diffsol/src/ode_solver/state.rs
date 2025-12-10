@@ -624,3 +624,81 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        ode_equations::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
+        LinearSolver, Matrix, OdeSolverState, Vector, VectorHost,
+    };
+    use num_traits::FromPrimitive;
+
+    #[test]
+    fn test_init_bdf_nalgebra() {
+        type M = crate::NalgebraMat<f64>;
+        type V = crate::NalgebraVec<f64>;
+        type LS = crate::NalgebraLU<f64>;
+        test_consistent_initialisation::<M, crate::BdfState<V>, LS>();
+    }
+
+    #[test]
+    fn test_init_rk_nalgebra() {
+        type M = crate::NalgebraMat<f64>;
+        type V = crate::NalgebraVec<f64>;
+        type LS = crate::NalgebraLU<f64>;
+        test_consistent_initialisation::<M, crate::RkState<V>, LS>();
+    }
+
+    #[test]
+    fn test_init_bdf_faer_sparse() {
+        type M = crate::FaerSparseMat<f64>;
+        type V = crate::FaerVec<f64>;
+        type LS = crate::FaerSparseLU<f64>;
+        test_consistent_initialisation::<M, crate::BdfState<V>, LS>();
+    }
+
+    #[test]
+    fn test_init_rk_faer_sparse() {
+        type M = crate::FaerSparseMat<f64>;
+        type V = crate::FaerVec<f64>;
+        type LS = crate::FaerSparseLU<f64>;
+        test_consistent_initialisation::<M, crate::RkState<V>, LS>();
+    }
+
+    fn test_consistent_initialisation<
+        M: Matrix<V: VectorHost>,
+        S: OdeSolverState<M::V>,
+        LS: LinearSolver<M>,
+    >() {
+        let (mut problem, soln) = exponential_decay_with_algebraic_problem_sens::<M>();
+
+        for line_search in [false, true] {
+            problem.ic_options.use_linesearch = line_search;
+
+            let s = S::new_and_consistent::<LS, _>(&problem, 1).unwrap();
+            s.as_ref().y.assert_eq_norm(
+                &soln.solution_points[0].state,
+                &problem.atol,
+                problem.rtol,
+                M::T::from_f64(10.).unwrap(),
+            );
+
+            let s = S::new_with_sensitivities_and_consistent::<LS, _>(&problem, 1).unwrap();
+            s.as_ref().y.assert_eq_norm(
+                &soln.solution_points[0].state,
+                &problem.atol,
+                problem.rtol,
+                M::T::from_f64(10.).unwrap(),
+            );
+            let sens_soln = soln.sens_solution_points.as_ref().unwrap();
+            for (i, ssoln) in sens_soln.iter().enumerate() {
+                s.as_ref().s[i].assert_eq_norm(
+                    &ssoln[0].state,
+                    &problem.atol,
+                    problem.rtol,
+                    M::T::from_f64(10.).unwrap(),
+                );
+            }
+        }
+    }
+}

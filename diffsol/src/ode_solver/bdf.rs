@@ -1519,6 +1519,13 @@ mod test {
         "###);
     }
 
+    #[test]
+    fn bdf_test_faer_sparse_exponential_decay_sens() {
+        let (problem, soln) = exponential_decay_problem_sens::<FaerSparseMat<f64>>(false);
+        let mut s = problem.bdf_sens::<FaerSparseLU<f64>>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, true);
+    }
+
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_test_nalgebra_exponential_decay_diffsl_sens() {
@@ -1723,6 +1730,13 @@ mod test {
         number_of_matrix_evals: 3
         number_of_jac_adj_muls: 0
         "###);
+    }
+
+    #[test]
+    fn test_bdf_faer_sparse_exponential_decay_algebraic_sens() {
+        let (problem, soln) = exponential_decay_with_algebraic_problem_sens::<FaerSparseMat<f64>>();
+        let mut s = problem.bdf_sens::<FaerSparseLU<f64>>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, true);
     }
 
     #[cfg(feature = "diffsl-llvm")]

@@ -186,6 +186,9 @@ where
         let state_y = self.y.borrow();
         self.eqn.rhs().jacobian_inplace(&state_y, t, y);
     }
+    fn jacobian_sparsity(&self) -> Option<<Self::M as Matrix>::Sparsity> {
+        self.eqn.rhs().jacobian_sparsity()
+    }
 }
 
 /// Sensitivity & adjoint equations for ODEs (we assume M_p = 0):
