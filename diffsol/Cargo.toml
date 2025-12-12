@@ -74,5 +74,9 @@ cc = { version = "1.2", optional = true }
 name = "ode_solvers"
 harness = false
 
+[[bench]]
+name = "pybamm_dfn"
+harness = false
+
 [package.metadata.docs.rs]
 features = ["diffsl-llvm15", "diffsl-cranelift"]
