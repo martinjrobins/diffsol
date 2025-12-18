@@ -18,8 +18,8 @@ fn criterion_benchmark(c: &mut Criterion) {
         let t0 = 0.0;
         let tf = 3600.0;
         let t_interp = (0..100).map(|i| t0 + (tf - t0) * (i as f64) / 99.0).collect::<Vec<_>>();
-        let mut solver = problem.bdf::<LS>().unwrap();
         b.iter(|| {
+            let mut solver = problem.bdf::<LS>().unwrap();
             solver.solve_dense(t_interp.as_slice()).unwrap();
         })
     });
