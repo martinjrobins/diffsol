@@ -17,6 +17,10 @@ pub enum DiffsolError {
     #[cfg(feature = "cuda")]
     #[error("Cuda error: {0}")]
     VectorError(#[from] CudaError),
+    #[error("DiffSL Parser error: {0}")]
+    DiffslParserError(String),
+    #[error("DiffSL Compiler error: {0}")]
+    DiffslCompilerError(String),
     #[error("Error: {0}")]
     Other(String),
 }

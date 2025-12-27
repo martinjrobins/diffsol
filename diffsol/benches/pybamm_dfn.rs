@@ -13,18 +13,20 @@ fn criterion_benchmark(c: &mut Criterion) {
         type CG = diffsol::LlvmModule;
         let full_text = std::fs::read_to_string("benches/pybamm_dfn.diffsl").unwrap();
         let mut problem = OdeBuilder::<M>::new()
-            .build_from_diffsl::<CG>(full_text.as_str()).unwrap();
+            .build_from_diffsl::<CG>(full_text.as_str())
+            .unwrap();
         problem.ic_options.armijo_constant = 1e-1;
         let t0 = 0.0;
         let tf = 3600.0;
-        let t_interp = (0..100).map(|i| t0 + (tf - t0) * (i as f64) / 99.0).collect::<Vec<_>>();
+        let t_interp = (0..100)
+            .map(|i| t0 + (tf - t0) * (i as f64) / 99.0)
+            .collect::<Vec<_>>();
         b.iter(|| {
             let mut solver = problem.bdf::<LS>().unwrap();
             solver.solve_dense(t_interp.as_slice()).unwrap();
         })
     });
 }
-
 
 criterion_group!(benches, criterion_benchmark);
 criterion_main!(benches);
