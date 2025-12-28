@@ -340,8 +340,7 @@ pub fn exponential_decay_with_algebraic_problem_diffsl<
         .build_from_diffsl(
             format!(
                 "
-        in = [k]
-        k {{ 0.1 }}
+        in  {{ k = 0.1 }}
         u_i {{ x = 1, y = 1, z = 0 }}
         dudt_i {{ dxdt = 0, dydt = 0, dzdt = 0 }}
         M_i {{ dxdt, dydt, 0 }}

@@ -1,17 +1,20 @@
 use core::panic;
 use num_traits::{One, Zero};
-use std::cell::RefCell;
 use std::ops::MulAssign;
+use std::{cell::RefCell, mem};
 
 use diffsl::{
-    execution::module::{CodegenModule, CodegenModuleCompile, CodegenModuleJit},
-    execution::scalar::Scalar as DiffSlScalar,
+    discretise::DiscreteModel,
+    execution::{
+        module::{CodegenModule, CodegenModuleCompile, CodegenModuleJit},
+        scalar::Scalar as DiffSlScalar,
+    },
+    parser::parse_ds_string,
     Compiler,
 };
 
 use crate::{
-    error::DiffsolError, find_jacobian_non_zeros, find_matrix_non_zeros, find_sens_non_zeros,
-    jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
+    error::DiffsolError, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
     op::nonlinear_op::NonLinearOpJacobian, ConstantOp, ConstantOpSens, ConstantOpSensAdjoint,
     LinearOp, LinearOpTranspose, Matrix, MatrixHost, NonLinearOp, NonLinearOpAdjoint,
     NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scale, Vector,
@@ -38,6 +41,9 @@ pub struct DiffSlContext<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
     has_out: bool,
     nout: usize,
     ctx: M::C,
+    rhs_state_deps: Vec<(usize, usize)>,
+    rhs_input_deps: Vec<(usize, usize)>,
+    mass_state_deps: Vec<(usize, usize)>,
 }
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> DiffSlContext<M, CG> {
@@ -55,8 +61,15 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> Di
             1 => diffsl::execution::compiler::CompilerMode::SingleThreaded,
             _ => diffsl::execution::compiler::CompilerMode::MultiThreaded(Some(nthreads)),
         };
-        let compiler = Compiler::from_discrete_str(text, mode)
-            .map_err(|e| DiffsolError::Other(e.to_string()))?;
+        let model =
+            parse_ds_string(text).map_err(|e| DiffsolError::DiffslParserError(e.to_string()))?;
+        let mut model = DiscreteModel::build("diffsol", &model)
+            .map_err(|e| DiffsolError::DiffslCompilerError(e.as_error_message(text)))?;
+        let compiler = Compiler::from_discrete_model(&model, mode)
+            .map_err(|e| DiffsolError::DiffslCompilerError(e.to_string()))?;
+        let rhs_state_deps = model.take_rhs_state_deps();
+        let rhs_input_deps = model.take_rhs_input_deps();
+        let mass_state_deps = model.take_mass_state_deps();
         let (nstates, _nparams, _nout, _ndata, _nroots, _has_mass) = compiler.get_dims();
 
         let compiler = if nthreads == 0 {
@@ -100,6 +113,9 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> Di
             has_root,
             has_out,
             ctx,
+            rhs_state_deps,
+            rhs_input_deps,
+            mass_state_deps,
         })
     }
 }
@@ -165,12 +181,10 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModuleJit + CodegenModuleCompile
         if M::is_sparse() {
             let op = ret.rhs();
             let ctx = op.context().clone();
-            let t0 = M::T::zero();
-            let x0 = M::V::zeros(op.nstates(), op.context().clone());
             let n = op.nstates();
             let nparams = op.nparams();
 
-            let non_zeros = find_jacobian_non_zeros(&op, &x0, t0);
+            let non_zeros = mem::take(&mut ret.context.rhs_state_deps);
 
             let sparsity = M::Sparsity::try_from_indices(n, n, non_zeros.clone())
                 .expect("invalid sparsity pattern");
@@ -189,8 +203,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModuleJit + CodegenModuleCompile
             ret.rhs_adjoint_coloring = Some(coloring);
 
             if nparams > 0 && include_sensitivities {
-                let op = ret.rhs();
-                let non_zeros = find_sens_non_zeros(&op, &x0, t0);
+                let non_zeros = mem::take(&mut ret.context.rhs_input_deps);
 
                 let sparsity = M::Sparsity::try_from_indices(n, nparams, non_zeros.clone())
                     .expect("invalid sparsity pattern");
@@ -209,9 +222,9 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModuleJit + CodegenModuleCompile
                 ret.rhs_sens_adjoint_coloring = Some(coloring);
             }
 
+            let non_zeros = mem::take(&mut ret.context.mass_state_deps);
             if let Some(op) = ret.mass() {
                 let ctx = op.context().clone();
-                let non_zeros = find_matrix_non_zeros(&op, t0);
                 let sparsity = M::Sparsity::try_from_indices(n, n, non_zeros.clone())
                     .expect("invalid sparsity pattern");
                 let coloring = JacobianColoring::new(&sparsity, &non_zeros, op.context().clone());
@@ -844,9 +857,7 @@ mod tests {
         for<'b> &'b M: MatrixRef<M>,
     {
         let text = "
-            in = [r, k]
-            r { 1 }
-            k { 1 }
+            in_i { r = 1, k = 1 }
             u_i {
                 y = 0.1,
                 z = 0,
