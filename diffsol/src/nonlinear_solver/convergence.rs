@@ -97,13 +97,15 @@ impl<'a, V: Vector> Convergence<'a, V> {
             if V::T::from_f64(100.0).unwrap() * norm < self.tol {
                 return ConvergenceStatus::Converged;
             }
-            self.old_norm = Some(norm);
         };
         ConvergenceStatus::Continue
     }
 
     pub fn check_new_iteration(&mut self, norm: V::T) -> ConvergenceStatus {
         let status = self.check_norm(norm);
+        if self.niter == 1 {
+            self.old_norm = Some(norm);
+        }
         status
     }
 }
