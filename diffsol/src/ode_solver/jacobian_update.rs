@@ -1,4 +1,4 @@
-use crate::Scalar;
+use crate::{OdeSolverOptions, Scalar};
 
 pub enum SolverState {
     StepSuccess,
@@ -20,15 +20,15 @@ pub struct JacobianUpdate<T: Scalar> {
 }
 
 impl<T: Scalar> JacobianUpdate<T> {
-    pub fn new() -> Self {
+    pub fn new(options: &OdeSolverOptions<T>) -> Self {
         Self {
             steps_since_jacobian_eval: 0,
             steps_since_rhs_jacobian_eval: 0,
             h_at_last_jacobian_update: T::one(),
-            threshold_to_update_jacobian: T::from_f64(0.3).unwrap(),
-            threshold_to_update_rhs_jacobian: T::from_f64(0.2).unwrap(),
-            update_jacobian_after_steps: 20,
-            update_rhs_jacobian_after_steps: 50,
+            threshold_to_update_jacobian: options.threshold_to_update_jacobian,
+            threshold_to_update_rhs_jacobian: options.threshold_to_update_rhs_jacobian,
+            update_jacobian_after_steps: options.update_jacobian_after_steps,
+            update_rhs_jacobian_after_steps: options.update_rhs_jacobian_after_steps,
         }
     }
 
@@ -73,11 +73,5 @@ impl<T: Scalar> JacobianUpdate<T> {
             SolverState::ErrorTestFail => false,
             SolverState::Checkpoint => true,
         }
-    }
-}
-
-impl<T: Scalar> Default for JacobianUpdate<T> {
-    fn default() -> Self {
-        Self::new()
     }
 }

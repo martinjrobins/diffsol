@@ -145,7 +145,7 @@ where
         let state = rk.state();
 
         // setup linear solver for first step
-        let mut jacobian_update = JacobianUpdate::default();
+        let mut jacobian_update = JacobianUpdate::new(&problem.ode_options);
         jacobian_update.update_jacobian(state.h);
         jacobian_update.update_rhs_jacobian();
 
