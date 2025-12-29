@@ -36,6 +36,10 @@ pub struct OdeSolverOptions<T: Scalar> {
     pub max_nonlinear_solver_iterations: usize,
     pub max_error_test_failures: usize,
     pub min_timestep: T,
+    pub update_jacobian_after_steps: usize,
+    pub update_rhs_jacobian_after_steps: usize,
+    pub threshold_to_update_jacobian: T,
+    pub threshold_to_update_rhs_jacobian: T,
 }
 
 impl<T: Scalar> Default for OdeSolverOptions<T> {
@@ -44,6 +48,10 @@ impl<T: Scalar> Default for OdeSolverOptions<T> {
             max_nonlinear_solver_iterations: 4,
             max_error_test_failures: 40,
             min_timestep: T::from_f64(1e-13).unwrap(),
+            update_jacobian_after_steps: 20,
+            update_rhs_jacobian_after_steps: 50,
+            threshold_to_update_jacobian: T::from_f64(0.3).unwrap(),
+            threshold_to_update_rhs_jacobian: T::from_f64(0.2).unwrap(),
         }
     }
 }

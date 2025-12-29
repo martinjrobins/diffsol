@@ -942,6 +942,14 @@ where
             max_error_test_failures: ode_options.max_error_test_failures,
             max_nonlinear_solver_iterations: ode_options.max_nonlinear_solver_iterations,
             min_timestep: T::from_f64(ode_options.min_timestep).unwrap(),
+            update_jacobian_after_steps: ode_options.update_jacobian_after_steps,
+            update_rhs_jacobian_after_steps: ode_options.update_rhs_jacobian_after_steps,
+            threshold_to_update_jacobian: T::from_f64(ode_options.threshold_to_update_jacobian)
+                .unwrap(),
+            threshold_to_update_rhs_jacobian: T::from_f64(
+                ode_options.threshold_to_update_rhs_jacobian,
+            )
+            .unwrap(),
         }
     }
 
