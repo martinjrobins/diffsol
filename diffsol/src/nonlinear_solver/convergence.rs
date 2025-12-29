@@ -83,15 +83,6 @@ impl<'a, V: Vector> Convergence<'a, V> {
             if eta * norm < self.tol {
                 return ConvergenceStatus::Converged;
             }
-
-            // if iteration is not going to converge in max_iter
-            // (assuming the current rate), then abort
-            if rate.pow(i32::try_from(self.max_iter - self.niter).unwrap()) / (V::T::one() - rate)
-                * norm
-                > self.tol
-            {
-                return ConvergenceStatus::Diverged;
-            }
         } else {
             // no rate, just test with a large eta
             if V::T::from_f64(100.0).unwrap() * norm < self.tol {
