@@ -202,9 +202,7 @@ pub fn exponential_decay_problem_diffsl<
         .build_from_diffsl(
             format!(
                 "
-            in = [k, y0]
-            k {{ 0.1 }}
-            y0 {{ 1.0 }}
+            in_i {{ k = 0.1, y0 = 1.0 }}
             u_i {{ x = y0, y = y0 }}
             F_i {{ -k * u_i }}
             out_i {{

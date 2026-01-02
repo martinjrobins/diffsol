@@ -302,7 +302,7 @@ where
             tstop: None,
             root_finder,
             is_state_modified,
-            jacobian_update: JacobianUpdate::default(),
+            jacobian_update: JacobianUpdate::new(&problem.ode_options),
             config,
         })
     }
