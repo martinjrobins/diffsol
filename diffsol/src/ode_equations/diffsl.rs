@@ -537,6 +537,13 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpJacobian
     }
 
     fn jacobian_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::M) {
+        // tmp: try and execute rhs to fill data
+        self.0.context.compiler.rhs(
+            t,
+            x.as_slice(),
+            self.0.context.data.borrow_mut().as_mut_slice(),
+            self.0.context.tmp.borrow_mut().as_mut_slice(),
+        );
         if let Some(coloring) = &self.0.rhs_coloring {
             coloring.jacobian_inplace(self, x, t, y);
         } else {

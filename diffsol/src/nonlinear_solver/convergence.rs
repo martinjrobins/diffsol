@@ -1,5 +1,5 @@
 use nalgebra::ComplexField;
-use num_traits::{FromPrimitive, One, Pow};
+use num_traits::{FromPrimitive, One, Pow, ToPrimitive};
 
 use crate::{scalar::IndexType, Scalar, Vector};
 
@@ -11,7 +11,7 @@ pub struct Convergence<'a, V: Vector> {
     max_iter: IndexType,
     niter: IndexType,
     old_norm: Option<V::T>,
-    rate: Option<V::T>,
+    eta: V::T,
 }
 
 pub enum ConvergenceStatus {
@@ -30,26 +30,29 @@ impl<'a, V: Vector> Convergence<'a, V> {
     pub fn niter(&self) -> IndexType {
         self.niter
     }
-    pub fn rate(&self) -> Option<V::T> {
-        self.rate
+    pub fn eta(&self) -> V::T {
+        self.eta
     }
+    pub fn reset_eta(&mut self) {
+        // timestep change case takes precedence
+        if self.eta != V::T::from_f64(100.).unwrap() {
+            self.eta = V::T::from_f64(20.).unwrap();
+        }
+    }
+
+    pub fn reset_eta_timestep_change(&mut self) {
+        self.eta = V::T::from_f64(100.).unwrap();
+    }
+    
     pub fn new(rtol: V::T, atol: &'a V) -> Self {
-        let minimum_tol = V::T::from_f64(10.0).unwrap() * V::T::EPSILON / rtol;
-        let maximum_tol = V::T::from_f64(0.03).unwrap();
-        let mut tol = V::T::from_f64(0.33).unwrap();
-        if tol > maximum_tol {
-            tol = maximum_tol;
-        }
-        if tol < minimum_tol {
-            tol = minimum_tol;
-        }
+        let tol = V::T::from_f64(0.33).unwrap();
         Self {
             rtol,
             atol,
             tol,
             max_iter: 10,
             old_norm: None,
-            rate: None,
+            eta: V::T::from_f64(20.0).unwrap(),
             niter: 0,
         }
     }
@@ -63,32 +66,43 @@ impl<'a, V: Vector> Convergence<'a, V> {
     }
 
     pub fn check_norm(&mut self, norm: V::T) -> ConvergenceStatus {
+        println!("  Iteration {}, norm = {:.3e}", self.niter + 1, norm.to_f64().unwrap());
         self.niter += 1;
         // if norm is zero then we are done
         if norm <= V::T::EPSILON {
             return ConvergenceStatus::Converged;
         }
-        if let Some(old_norm) = self.old_norm {
+        let eta = if let Some(old_norm) = self.old_norm {
             let rate = (norm / old_norm).pow(V::T::one() / (V::T::from_usize(self.niter - 1).unwrap()));
-            self.rate = Some(rate);
 
             // check if iteration is diverging
             if rate > V::T::from_f64(0.9).unwrap() {
+                println!("Diverged with rate {}", rate);
+                return ConvergenceStatus::Diverged;
+            }
+            
+            // if iteration is not going to converge in max_iter
+            // (assuming the current rate), then abort
+            if rate.pow(i32::try_from(self.max_iter - self.niter).unwrap()) / (V::T::one() - rate)
+                * norm
+                > self.tol
+            {
                 return ConvergenceStatus::Diverged;
             }
 
             let eta = rate / (V::T::one() - rate);
-
-            // check if iteration is converged
-            if eta * norm < self.tol {
-                return ConvergenceStatus::Converged;
-            }
+            self.eta = eta;
+            eta
         } else {
-            // no rate, just test with a large eta
-            if V::T::from_f64(100.0).unwrap() * norm < self.tol {
-                return ConvergenceStatus::Converged;
-            }
+            // todo: should be able to use previous eta, but this is failing for sdirk
+            // self.eta
+            V::T::from_f64(20.).unwrap()
         };
+        // check if iteration is converged
+        println!("  Estimated eta = {:.3e} eta * norm = {:.3e}", eta.to_f64().unwrap(), (eta * norm).to_f64().unwrap());
+        if eta * norm < self.tol {
+            return ConvergenceStatus::Converged;
+        }
         ConvergenceStatus::Continue
     }
 

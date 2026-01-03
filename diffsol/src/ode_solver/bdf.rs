@@ -407,6 +407,10 @@ where
 
     fn _jacobian_updates(&mut self, c: Eqn::T, state: SolverState) {
         if self.jacobian_update.check_rhs_jacobian_update(c, &state) {
+            println!(
+                "Updating RHS Jacobian at time {}, step size {}, c {}",
+                self.state.t, self.state.h, c
+            );
             if let Some(op) = self.op.as_mut() {
                 op.set_jacobian_is_stale();
                 self.nonlinear_solver
@@ -416,9 +420,14 @@ where
                 self.nonlinear_solver
                     .reset_jacobian(s_op, &self.state.s[0], self.state.t);
             }
-            self.jacobian_update.update_rhs_jacobian();
+            self.jacobian_update.update_rhs_jacobian(c);
             self.jacobian_update.update_jacobian(c);
+            self.convergence.reset_eta();
         } else if self.jacobian_update.check_jacobian_update(c, &state) {
+            println!(
+                "Updating Jacobian at time {}, step size {}, c {}",
+                self.state.t, self.state.h, c
+            );
             if let Some(op) = self.op.as_mut() {
                 self.nonlinear_solver
                     .reset_jacobian(op, &self.state.y, self.state.t);
@@ -427,6 +436,7 @@ where
                     .reset_jacobian(s_op, &self.state.s[0], self.state.t);
             }
             self.jacobian_update.update_jacobian(c);
+            self.convergence.reset_eta();
         }
     }
 
@@ -485,6 +495,8 @@ where
                 time: self.state.t.to_f64().unwrap(),
             }));
         }
+
+        self.convergence.reset_eta_timestep_change();
         Ok(new_h)
     }
 
@@ -1243,6 +1255,14 @@ where
         }
         self.statistics.number_of_steps += 1;
         self.jacobian_update.step();
+        
+        println!(
+            "Step accepted at time {:.6}, step size {:.6}, order {}, error norm {:.3e}",
+            self.state.t.to_f64().unwrap(),
+            self.state.h.to_f64().unwrap(),
+            self.state.order,
+            error_norm.to_f64().unwrap()
+        );
 
         // a change in order is only done after running at order k for k + 1 steps
         // (see page 83 of [2])
@@ -1320,6 +1340,11 @@ where
                 || max_index == 2
             {
                 let new_h = self._update_step_size(factor)?;
+                println!(
+                    "    Changing step size to {:.6} and order to {}",
+                    new_h.to_f64().unwrap(),
+                    order
+                );
                 self._jacobian_updates(new_h * self.alpha[order], SolverState::StepSuccess);
             }
         }

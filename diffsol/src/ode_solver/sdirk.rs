@@ -147,7 +147,7 @@ where
         // setup linear solver for first step
         let mut jacobian_update = JacobianUpdate::new(&problem.ode_options);
         jacobian_update.update_jacobian(state.h);
-        jacobian_update.update_rhs_jacobian();
+        jacobian_update.update_rhs_jacobian(state.h);
 
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver, NoLineSearch);
 
@@ -211,6 +211,7 @@ where
 
     fn jacobian_updates(&mut self, h: Eqn::T, state: SolverState) {
         if self.jacobian_update.check_rhs_jacobian_update(h, &state) {
+            println!("Updating RHS Jacobian at time {}, step size {}", self.rk.state().t, h);
             if let Some(op) = self.op.as_mut() {
                 op.set_jacobian_is_stale();
                 self.nonlinear_solver.reset_jacobian(
@@ -226,9 +227,11 @@ where
                     self.rk.state().t,
                 );
             }
-            self.jacobian_update.update_rhs_jacobian();
+            self.jacobian_update.update_rhs_jacobian(h);
             self.jacobian_update.update_jacobian(h);
+            self.convergence.reset_eta();
         } else if self.jacobian_update.check_jacobian_update(h, &state) {
+            println!("Updating Jacobian at time {}, step size {}", self.rk.state().t, h);
             // shouldn't matter what we put in for x cause rhs_jacobian is already updated
             if let Some(op) = self.op.as_ref() {
                 self.nonlinear_solver.reset_jacobian(
@@ -244,6 +247,7 @@ where
                 );
             }
             self.jacobian_update.update_jacobian(h);
+            self.convergence.reset_eta();
         }
     }
 
@@ -317,6 +321,7 @@ where
 
         // reinitialise jacobian updates as if a checkpoint was taken
         self.nonlinear_solver.clear_jacobian();
+        self.convergence.reset_eta();
     }
 
     fn into_state(self) -> RkState<Eqn::V> {
@@ -357,11 +362,14 @@ where
                 {
                     if !updated_jacobian {
                         // newton iteration did not converge, so update jacobian and try again
+                        println!("Newton iteration did not converge, updating Jacobian and retrying at time {}, step size {}", self.rk.state().t, h);
                         updated_jacobian = true;
                         self.jacobian_updates(h, SolverState::FirstConvergenceFail);
                     } else {
+                        println!("Newton iteration still did not converge after Jacobian update at time {}, step size {}", self.rk.state().t, h);
                         // newton iteration did not converge and jacobian has been updated, so we reduce step size and try again
                         h *= Eqn::T::from_f64(0.3).unwrap();
+                        self.convergence.reset_eta_timestep_change();
                         self.update_op_step_size(h);
                         self.jacobian_updates(h, SolverState::SecondConvergenceFail);
                     }
@@ -384,9 +392,24 @@ where
                 self.config.maximum_timestep_growth,
             );
             if error_norm < Eqn::T::one() {
+                println!(
+                    "Step accepted at time {} with norm {}, step size {}",
+                    self.rk.state().t,
+                    error_norm,
+                    h
+                );
                 break factor;
             }
             h *= factor;
+            println!(
+                "Error test failed with norm {}, reducing step size at time {}, step size {}",
+                error_norm,
+                self.rk.state().t,
+                h
+            );
+            if factor != Eqn::T::one() {
+                self.convergence.reset_eta_timestep_change();
+            }
             self.update_op_step_size(h);
             self.jacobian_updates(h, SolverState::ErrorTestFail);
             nattempts += 1;
@@ -399,9 +422,11 @@ where
         };
 
         // accept the step
+        
         let new_h = h * factor;
-        self.update_op_step_size(h);
-        self.jacobian_updates(h, SolverState::StepSuccess);
+        
+        self.update_op_step_size(new_h);
+        self.jacobian_updates(new_h, SolverState::StepSuccess);
         self.jacobian_update.step();
         self.rk.step_accepted(h, new_h, true)
     }

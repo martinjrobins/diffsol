@@ -97,7 +97,7 @@ impl<C: Op> Op for ParameterisedOp<'_, C> {
     }
 }
 
-#[derive(Default, Clone, Serialize)]
+#[derive(Default, Clone, Serialize, Debug)]
 pub struct OpStatistics {
     pub number_of_calls: usize,
     pub number_of_jac_muls: usize,
