@@ -1,3 +1,4 @@
+use log::trace;
 use nalgebra::ComplexField;
 use num_traits::{FromPrimitive, One, Pow, ToPrimitive};
 
@@ -34,16 +35,13 @@ impl<'a, V: Vector> Convergence<'a, V> {
         self.eta
     }
     pub fn reset_eta(&mut self) {
-        // timestep change case takes precedence
-        if self.eta != V::T::from_f64(100.).unwrap() {
-            self.eta = V::T::from_f64(20.).unwrap();
-        }
+        self.eta = V::T::from_f64(20.0.pow(1.25)).unwrap();
     }
 
     pub fn reset_eta_timestep_change(&mut self) {
-        self.eta = V::T::from_f64(100.).unwrap();
+        self.eta = V::T::from_f64(100.0.pow(1.25)).unwrap();
     }
-    
+
     pub fn new(rtol: V::T, atol: &'a V) -> Self {
         let tol = V::T::from_f64(0.33).unwrap();
         Self {
@@ -52,7 +50,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
             tol,
             max_iter: 10,
             old_norm: None,
-            eta: V::T::from_f64(20.0).unwrap(),
+            eta: V::T::from_f64(20.0.pow(1.25)).unwrap(),
             niter: 0,
         }
     }
@@ -66,43 +64,67 @@ impl<'a, V: Vector> Convergence<'a, V> {
     }
 
     pub fn check_norm(&mut self, norm: V::T) -> ConvergenceStatus {
-        println!("  Iteration {}, norm = {:.3e}", self.niter + 1, norm.to_f64().unwrap());
+        trace!(
+            "  Iteration {}, check non-linear solver norm = {:.3e}",
+            self.niter + 1,
+            norm.to_f64().unwrap()
+        );
         self.niter += 1;
-        // if norm is zero then we are done
-        if norm <= V::T::EPSILON {
-            return ConvergenceStatus::Converged;
-        }
-        let eta = if let Some(old_norm) = self.old_norm {
-            let rate = (norm / old_norm).pow(V::T::one() / (V::T::from_usize(self.niter - 1).unwrap()));
+        if let Some(old_norm) = self.old_norm {
+            let rate =
+                (norm / old_norm).pow(V::T::one() / (V::T::from_usize(self.niter - 1).unwrap()));
 
             // check if iteration is diverging
             if rate > V::T::from_f64(0.9).unwrap() {
-                println!("Diverged with rate {}", rate);
+                trace!("  Diverged with rate {}", rate);
                 return ConvergenceStatus::Diverged;
             }
-            
+
             // if iteration is not going to converge in max_iter
             // (assuming the current rate), then abort
             if rate.pow(i32::try_from(self.max_iter - self.niter).unwrap()) / (V::T::one() - rate)
                 * norm
                 > self.tol
             {
+                trace!(
+                    "  Diverged as will not converge in max iterations with rate {}",
+                    rate
+                );
                 return ConvergenceStatus::Diverged;
             }
 
             let eta = rate / (V::T::one() - rate);
+            trace!(
+                "  Updated mean convergence rate = {:.3e}, eta = {:.3e}",
+                rate.to_f64().unwrap(),
+                eta.to_f64().unwrap()
+            );
             self.eta = eta;
-            eta
         } else {
-            // todo: should be able to use previous eta, but this is failing for sdirk
-            // self.eta
-            V::T::from_f64(20.).unwrap()
+            let min_eta = V::T::from_f64(1e4).unwrap() * V::T::EPSILON;
+            if self.eta < min_eta {
+                self.eta = min_eta;
+            }
+            self.eta = self.eta.pow(V::T::from_f64(0.8).unwrap());
+            trace!(
+                "  First iteration, set eta = {:.3e}",
+                self.eta.to_f64().unwrap()
+            );
         };
         // check if iteration is converged
-        println!("  Estimated eta = {:.3e} eta * norm = {:.3e}", eta.to_f64().unwrap(), (eta * norm).to_f64().unwrap());
-        if eta * norm < self.tol {
+        if self.eta * norm < self.tol {
+            trace!(
+                "  Converged with eta * norm = {:.3e} < tol = {:.3e}",
+                (self.eta * norm).to_f64().unwrap(),
+                self.tol.to_f64().unwrap()
+            );
             return ConvergenceStatus::Converged;
         }
+        trace!(
+            "  Not yet converged: eta * norm = {:.3e} >= tol = {:.3e}",
+            (self.eta * norm).to_f64().unwrap(),
+            self.tol.to_f64().unwrap()
+        );
         ConvergenceStatus::Continue
     }
 

@@ -8,7 +8,6 @@ use crate::{
     HermiteInterpolator, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverConfig,
     OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut, Vector, VectorViewMut,
 };
-
 #[derive(Debug, PartialEq)]
 pub enum OdeSolverStopReason<T: Scalar> {
     InternalTimestep,

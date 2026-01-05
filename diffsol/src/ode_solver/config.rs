@@ -22,6 +22,7 @@ pub struct OdeSolverConfigMut<'a, T> {
 pub struct BdfConfig<T> {
     pub minimum_timestep: T,
     pub maximum_error_test_failures: usize,
+    pub maximum_newton_fails: usize,
     pub maximum_timestep_growth: T,
     pub minimum_timestep_growth: T,
     pub maximum_timestep_shrink: T,
@@ -54,6 +55,7 @@ impl<T: Scalar> BdfConfig<T> {
         Self {
             minimum_timestep: ode_options.min_timestep,
             maximum_error_test_failures: ode_options.max_error_test_failures,
+            maximum_newton_fails: ode_options.max_nonlinear_solver_failures,
             maximum_timestep_growth: T::from_f64(2.1).unwrap(),
             minimum_timestep_growth: T::from_f64(2.0).unwrap(),
             maximum_timestep_shrink: T::from_f64(0.9).unwrap(),
@@ -68,8 +70,11 @@ pub struct SdirkConfig<T> {
     pub minimum_timestep: T,
     pub maximum_error_test_failures: usize,
     pub maximum_timestep_growth: T,
+    pub minimum_timestep_growth: T,
     pub minimum_timestep_shrink: T,
+    pub maximum_timestep_shrink: T,
     pub maximum_newton_iterations: usize,
+    pub maximum_newton_fails: usize,
 }
 
 impl<T: Scalar> SdirkConfig<T> {
@@ -77,9 +82,12 @@ impl<T: Scalar> SdirkConfig<T> {
         Self {
             minimum_timestep: ode_options.min_timestep,
             maximum_error_test_failures: ode_options.max_error_test_failures,
-            maximum_timestep_growth: T::from_f64(10.0).unwrap(),
-            minimum_timestep_shrink: T::from_f64(0.2).unwrap(),
+            maximum_timestep_growth: T::from_f64(2.1).unwrap(),
+            minimum_timestep_growth: T::from_f64(2.0).unwrap(),
+            maximum_timestep_shrink: T::from_f64(0.9).unwrap(),
+            minimum_timestep_shrink: T::from_f64(0.5).unwrap(),
             maximum_newton_iterations: ode_options.max_nonlinear_solver_iterations,
+            maximum_newton_fails: ode_options.max_nonlinear_solver_failures,
         }
     }
 }
@@ -109,7 +117,9 @@ pub struct ExplicitRkConfig<T> {
     pub minimum_timestep: T,
     pub maximum_error_test_failures: usize,
     pub maximum_timestep_growth: T,
+    pub minimum_timestep_growth: T,
     pub minimum_timestep_shrink: T,
+    pub maximum_timestep_shrink: T,
 }
 
 impl<T: Scalar> ExplicitRkConfig<T> {
@@ -118,7 +128,9 @@ impl<T: Scalar> ExplicitRkConfig<T> {
             minimum_timestep: ode_options.min_timestep,
             maximum_error_test_failures: ode_options.max_error_test_failures,
             maximum_timestep_growth: T::from_f64(10.0).unwrap(),
+            minimum_timestep_growth: T::from_f64(1.0).unwrap(),
             minimum_timestep_shrink: T::from_f64(0.2).unwrap(),
+            maximum_timestep_shrink: T::from_f64(1.0).unwrap(),
         }
     }
 }

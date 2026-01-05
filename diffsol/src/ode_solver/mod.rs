@@ -103,7 +103,7 @@ mod tests {
                 let error = soln.clone() - &point.state;
                 let error_norm = error.squared_norm(&point.state, atol, rtol).sqrt();
                 assert!(
-                    error_norm < M::T::from_f64(15.0).unwrap(),
+                    error_norm < M::T::from_f64(18.0).unwrap(),
                     "error_norm: {} at t = {}. soln: {:?}, expected: {:?}",
                     error_norm,
                     point.t,

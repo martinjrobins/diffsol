@@ -950,6 +950,7 @@ where
                 ode_options.threshold_to_update_rhs_jacobian,
             )
             .unwrap(),
+            max_nonlinear_solver_failures: ode_options.max_nonlinear_solver_failures,
         }
     }
 

@@ -35,6 +35,7 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
 pub struct OdeSolverOptions<T: Scalar> {
     pub max_nonlinear_solver_iterations: usize,
     pub max_error_test_failures: usize,
+    pub max_nonlinear_solver_failures: usize,
     pub min_timestep: T,
     pub update_jacobian_after_steps: usize,
     pub update_rhs_jacobian_after_steps: usize,
@@ -45,8 +46,9 @@ pub struct OdeSolverOptions<T: Scalar> {
 impl<T: Scalar> Default for OdeSolverOptions<T> {
     fn default() -> Self {
         Self {
-            max_nonlinear_solver_iterations: 10,
+            max_nonlinear_solver_iterations: 4,
             max_error_test_failures: 40,
+            max_nonlinear_solver_failures: 50,
             min_timestep: T::from_f64(1e-13).unwrap(),
             update_jacobian_after_steps: 20,
             update_rhs_jacobian_after_steps: 50,

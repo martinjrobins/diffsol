@@ -2,6 +2,8 @@ use crate::{
     matrix::MatrixView, scale, LinearOp, Matrix, MatrixSparsity, NonLinearOpJacobian, OdeEquations,
     OdeEquationsImplicit, Vector,
 };
+use log::{debug, trace};
+use num_traits::ToPrimitive;
 use num_traits::{One, Zero};
 use std::{
     cell::{Ref, RefCell},
@@ -59,6 +61,9 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
             let mut mass_jac = self.mass_jac.borrow_mut();
             self.eqn.mass().unwrap().matrix_inplace(t, &mut mass_jac);
         }
+        self.mass_jac.borrow()
+    }
+    pub fn current_mass(&self) -> Ref<'_, Eqn::M> {
         self.mass_jac.borrow()
     }
     pub fn new_no_jacobian(eqn: Eqn, c: Eqn::T) -> Self {
@@ -126,9 +131,11 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
 
         let mass_jac = if eqn.mass().is_none() {
             // no mass matrix, so just use the identity
+            trace!("Creating mass jacobian as identity matrix, n = {}", n);
             Eqn::M::from_diagonal(&Eqn::V::from_element(n, Eqn::T::one(), ctx.clone()))
         } else {
             // mass is not constant, so just create a matrix with the correct sparsity
+            trace!("Creating mass jacobian from sparsity, n = {}", n);
             Eqn::M::new_from_sparsity(
                 n,
                 n,
@@ -160,9 +167,6 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
     }
     pub fn set_c(&mut self, c: Eqn::T) {
         self.c = c;
-    }
-    pub fn get_last_f_eval(&self) -> Ref<'_, Eqn::V> {
-        self.tmp.borrow()
     }
     pub fn eqn(&self) -> &Eqn {
         &self.eqn
@@ -196,6 +200,14 @@ impl<Eqn: OdeEquationsImplicit> SdirkCallable<Eqn> {
 
         tmp.copy_from(phi);
         tmp.axpy(c, x, Eqn::T::one());
+    }
+
+    // f_eval = phi + c * x
+    pub fn get_f_eval(&self, x: &Eqn::V, f_eval: &mut Eqn::V) {
+        let phi_ref = self.phi.borrow();
+        let phi = phi_ref.deref();
+        f_eval.copy_from(phi);
+        f_eval.axpy(self.c, x, Eqn::T::one());
     }
 
     pub fn set_jacobian_is_stale(&self) {
@@ -264,6 +276,7 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for SdirkCallable<Eqn> {
         let h = *self.h.borrow().deref();
         if *self.jacobian_is_stale.borrow() {
             // calculate the mass and rhs jacobians
+            debug!("Recomputing RHS Jacobian, h = {}", h.to_f64().unwrap());
             let mut rhs_jac = self.rhs_jac.borrow_mut();
             self.set_tmp(x);
             let tmp = self.tmp.borrow();
@@ -282,6 +295,10 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for SdirkCallable<Eqn> {
             // only h has changed, so just do the addition
             let rhs_jac = self.rhs_jac.borrow();
             let mass_jac = self.mass_jac.borrow();
+            debug!(
+                "Reusing Jacobian, updating with new h = {}",
+                h.to_f64().unwrap()
+            );
             y.scale_add_and_assign(mass_jac.deref(), -(c * h), rhs_jac.deref());
         }
         let number_of_jac_evals = *self.number_of_jac_evals.borrow() + 1;

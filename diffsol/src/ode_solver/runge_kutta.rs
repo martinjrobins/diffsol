@@ -13,6 +13,7 @@ use crate::{
     MatrixView, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op,
     Scalar, Vector, VectorViewMut,
 };
+use log::trace;
 use num_traits::{abs, FromPrimitive, One, Pow, ToPrimitive, Zero};
 
 use super::bdf::BdfStatistics;
@@ -359,10 +360,6 @@ where
         &self.state
     }
 
-    pub(crate) fn old_state(&self) -> &RkState<Eqn::V> {
-        &self.old_state
-    }
-
     pub(crate) fn state_mut(&mut self) -> &mut RkState<Eqn::V> {
         self.is_state_mutated = true;
         &mut self.state
@@ -403,17 +400,22 @@ where
         &self,
         error_norm: Eqn::T,
         safety_factor: f64,
-        min_factor: Eqn::T,
-        max_factor: Eqn::T,
+        min_reduce_factor: Eqn::T,
+        max_reduce_factor: Eqn::T,
+        min_increase_factor: Eqn::T,
+        max_increase_factor: Eqn::T,
     ) -> Eqn::T {
         let safety = Eqn::T::from_f64(0.9 * safety_factor).unwrap();
         let mut factor =
             safety * error_norm.pow(Eqn::T::from_f64(-0.5 / (self.order() as f64 + 1.0)).unwrap());
-        if factor < min_factor {
-            factor = min_factor;
+        if factor > max_reduce_factor && factor < min_increase_factor {
+            factor = Eqn::T::one();
         }
-        if factor > max_factor {
-            factor = max_factor;
+        if factor < min_reduce_factor {
+            factor = min_reduce_factor;
+        }
+        if factor > max_increase_factor {
+            factor = max_increase_factor;
         }
         factor
     }
@@ -426,6 +428,7 @@ where
         // if start == 1, then we need to compute the first stage
         // from the last stage of the previous step
         if self.skip_first_stage() {
+            trace!("Skipping first stage, setting to h * dy from previous step");
             self.diff
                 .column_mut(0)
                 .axpy(h, &self.state.dy, Eqn::T::zero());
@@ -527,19 +530,19 @@ where
         h: Eqn::T,
         dy0: &Eqn::V,
         diff: &M,
-        dy: &mut Eqn::V,
+        hdy: &mut Eqn::V,
         tableau: &Tableau<M>,
     ) {
         if i == 0 {
-            dy.axpy(h, dy0, Eqn::T::zero());
+            hdy.axpy(h, dy0, Eqn::T::zero());
         } else if i == 1 {
-            dy.copy_from_view(&diff.column(i - 1));
+            hdy.copy_from_view(&diff.column(i - 1));
         } else {
             let c = (tableau.c().get_index(i) - tableau.c().get_index(i - 2))
                 / (tableau.c().get_index(i - 1) - tableau.c().get_index(i - 2));
             // dy = c1  + c * (c1 - c2)
-            dy.copy_from_view(&diff.column(i - 1));
-            dy.axpy_v(-c, &diff.column(i - 2), Eqn::T::one() + c);
+            hdy.copy_from_view(&diff.column(i - 1));
+            hdy.axpy_v(-c, &diff.column(i - 2), Eqn::T::one() + c);
         }
     }
 
@@ -557,7 +560,6 @@ where
         AugEqn: AugmentedOdeEquationsImplicit<Eqn>,
     {
         let t = self.state.t + self.tableau.c().get_index(i) * h;
-
         // main equation
         if let Some(op) = op {
             op.set_phi(
@@ -575,18 +577,19 @@ where
                 &self.tableau,
             );
             if !nonlinear_solver.is_jacobian_set() {
-                nonlinear_solver.reset_jacobian(op, &self.old_state.dy, t);
+                nonlinear_solver.reset_jacobian(op, &self.state.y, t);
             }
             let solve_result = nonlinear_solver.solve_in_place(
                 op,
                 &mut self.old_state.dy,
                 t,
                 &self.state.y,
+                //&self.diff.column(0).into_owned(),
                 convergence,
             );
             self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
             solve_result?;
-            self.old_state.y.copy_from(&op.get_last_f_eval());
+            op.get_f_eval(&self.old_state.dy, &mut self.old_state.y);
 
             // update diff with solved dy
             self.diff.column_mut(i).copy_from(&self.old_state.dy);
@@ -628,7 +631,7 @@ where
                 if !nonlinear_solver.is_jacobian_set() {
                     nonlinear_solver.reset_jacobian::<SdirkCallable<AugEqn>>(
                         op,
-                        &self.old_state.ds[j],
+                        &self.old_state.s[j],
                         t,
                     );
                 }
@@ -639,12 +642,13 @@ where
                     &mut self.old_state.ds[j],
                     t,
                     &self.state.s[j],
+                    //&self.sdiff[j].column(0).into_owned(),
                     convergence,
                 );
                 self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
                 solver_result?;
 
-                self.old_state.s[j].copy_from(&op.get_last_f_eval());
+                op.get_f_eval(&self.old_state.ds[j], &mut self.old_state.s[j]);
                 self.sdiff[j].column_mut(i).copy_from(&self.old_state.ds[j]);
 
                 // calculate sdg and store in sgdiff
@@ -698,12 +702,14 @@ where
         &mut self,
         _h: Eqn::T,
         augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>,
-    ) -> Eqn::T {
+        linear_solver: impl FnOnce(&mut Eqn::V) -> Result<(), DiffsolError>,
+    ) -> Result<Eqn::T, DiffsolError> {
         let mut ncontributions = 0;
         let mut error_norm = Eqn::T::zero();
         if let Some(error) = self.error.as_mut() {
             self.diff
                 .gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), error);
+            linear_solver(error)?;
 
             // compute error norm
             let atol = &self.problem.atol;
@@ -754,7 +760,7 @@ where
         if ncontributions > 1 {
             error_norm /= Eqn::T::from_f64(ncontributions as f64).unwrap();
         }
-        error_norm
+        Ok(error_norm)
     }
 
     pub(crate) fn error_test_fail(
@@ -786,8 +792,17 @@ where
         &mut self,
         h: Eqn::T,
         min_timestep: Eqn::T,
+        max_nonlinear_solver_fails: usize,
     ) -> Result<(), DiffsolError> {
         self.statistics.number_of_nonlinear_solver_fails += 1;
+        // if too many nonlinear solver failures, then fail
+        if self.statistics.number_of_nonlinear_solver_fails > max_nonlinear_solver_fails {
+            return Err(DiffsolError::from(
+                OdeSolverError::TooManyNonlinearSolverFailures {
+                    time: self.state.t.to_f64().unwrap(),
+                },
+            ));
+        }
         // if step size too small, then fail
         if abs(h) < min_timestep {
             return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {

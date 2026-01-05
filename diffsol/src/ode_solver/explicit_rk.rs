@@ -166,11 +166,15 @@ where
             for i in 1..self.rk.tableau().s() {
                 self.rk.do_stage(i, h, self.augmented_eqn.as_mut());
             }
-            let error_norm = self.rk.error_norm(h, self.augmented_eqn.as_mut());
+            let error_norm =
+                self.rk
+                    .error_norm(h, self.augmented_eqn.as_mut(), |_err: &mut Eqn::V| Ok(()))?;
             let factor = self.rk.factor(
                 error_norm,
                 1.0,
                 self.config.minimum_timestep_shrink,
+                self.config.maximum_timestep_shrink,
+                self.config.minimum_timestep_growth,
                 self.config.maximum_timestep_growth,
             );
             if error_norm < Eqn::T::one() {
@@ -389,7 +393,7 @@ mod test {
         let adjoint_solver = problem.tsit45_solver_adjoint(checkpointer, None).unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 378
+        number_of_calls: 298
         number_of_jac_muls: 8
         number_of_matrix_evals: 4
         number_of_jac_adj_muls: 123
