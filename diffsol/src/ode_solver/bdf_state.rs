@@ -5,6 +5,7 @@ use crate::{
     scale, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverProblem,
     OdeSolverState, Op, StateRef, StateRefMut, Vector, VectorViewMut,
 };
+use num_traits::Zero;
 use std::ops::MulAssign;
 
 use super::state::StateCommon;
@@ -39,9 +40,35 @@ where
 impl<V, M> BdfState<V, M>
 where
     V: Vector + DefaultDenseMatrix,
-    M: DenseMatrix<T = V::T, V = V>,
+    M: DenseMatrix<T = V::T, V = V, C = V::C>,
 {
     pub(crate) const MAX_ORDER: IndexType = 5;
+
+    pub(crate) fn new_empty(ctx: V::C) -> Self {
+        let default_v = V::zeros(0, ctx.clone());
+        let default_m = M::zeros(0, 0, ctx.clone());
+        Self {
+            order: 1,
+            diff: default_m.clone(),
+            sdiff: Vec::new(),
+            gdiff: default_m.clone(),
+            sgdiff: Vec::new(),
+            y: default_v.clone(),
+            dy: default_v.clone(),
+            g: default_v.clone(),
+            dg: default_v.clone(),
+            s: Vec::new(),
+            ds: Vec::new(),
+            sg: Vec::new(),
+            dsg: Vec::new(),
+            t: V::T::zero(),
+            h: V::T::zero(),
+            diff_initialised: false,
+            sdiff_initialised: false,
+            gdiff_initialised: false,
+            sgdiff_initialised: false,
+        }
+    }
 
     pub fn initialise_diff_to_first_order(&mut self) {
         self.order = 1usize;

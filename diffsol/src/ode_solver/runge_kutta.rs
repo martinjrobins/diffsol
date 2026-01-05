@@ -13,6 +13,7 @@ use crate::{
     MatrixView, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op,
     Scalar, Vector, VectorViewMut,
 };
+use log::info;
 use log::trace;
 use num_traits::{abs, FromPrimitive, One, Pow, ToPrimitive, Zero};
 
@@ -51,6 +52,17 @@ where
     out_error: Option<Eqn::V>,
     sens_error: Option<Eqn::V>,
     sens_out_error: Option<Eqn::V>,
+}
+
+impl<'a, Eqn, M> Drop for Rk<'a, Eqn, M>
+where
+    Eqn: OdeEquations,
+    M: DenseMatrix<V = Eqn::V, T = Eqn::T>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
+{
+    fn drop(&mut self) {
+        info!("Runge-Kutta Solver Statistics: {}", self.statistics);
+    }
 }
 
 impl<Eqn, M> Clone for Rk<'_, Eqn, M>
@@ -340,8 +352,9 @@ where
         self.state = state;
     }
 
-    pub(crate) fn into_state(self) -> RkState<Eqn::V> {
-        self.state
+    pub(crate) fn into_state(mut self) -> RkState<Eqn::V> {
+        let ctx = self.problem().eqn.context().clone();
+        std::mem::replace(&mut self.state, RkState::new_empty(ctx))
     }
 
     pub(crate) fn checkpoint(&mut self) -> RkState<Eqn::V> {
@@ -776,6 +789,7 @@ where
             return Err(DiffsolError::from(
                 OdeSolverError::TooManyErrorTestFailures {
                     time: self.state.t.to_f64().unwrap(),
+                    num_failures: nattempts,
                 },
             ));
         }
@@ -800,6 +814,7 @@ where
             return Err(DiffsolError::from(
                 OdeSolverError::TooManyNonlinearSolverFailures {
                     time: self.state.t.to_f64().unwrap(),
+                    num_failures: max_nonlinear_solver_fails,
                 },
             ));
         }

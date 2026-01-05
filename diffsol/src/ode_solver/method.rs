@@ -347,6 +347,7 @@ where
 {
     fn into_state_and_eqn(self) -> (Self::State, Option<AugmentedEqn>);
     fn augmented_eqn(&self) -> Option<&AugmentedEqn>;
+    fn augmented_eqn_mut(&mut self) -> Option<&mut AugmentedEqn>;
 }
 
 /// Utility function to write out the solution at a given timepoint

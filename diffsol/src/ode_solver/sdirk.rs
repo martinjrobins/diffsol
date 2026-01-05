@@ -1,4 +1,5 @@
 use crate::error::DiffsolError;
+use crate::error::OdeSolverError;
 use crate::matrix::MatrixRef;
 use crate::ode_solver::runge_kutta::Rk;
 use crate::vector::VectorRef;
@@ -16,6 +17,7 @@ use crate::{
 };
 use log::debug;
 use log::trace;
+use nalgebra::ComplexField;
 use num_traits::{FromPrimitive, One, ToPrimitive, Zero};
 
 use super::bdf::BdfStatistics;
@@ -39,6 +41,9 @@ where
     }
     fn augmented_eqn(&self) -> Option<&AugEqn> {
         self.s_op.as_ref().map(|op| op.eqn())
+    }
+    fn augmented_eqn_mut(&mut self) -> Option<&mut AugEqn> {
+        self.s_op.as_mut().map(|op| &mut op.eqn)
     }
 }
 
@@ -335,6 +340,12 @@ where
         );
         let mut h = self.rk.start_step()?;
 
+        if h.abs() < self.config.minimum_timestep {
+            return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
+                time: self.rk.state().t.to_f64().unwrap(),
+            }));
+        }
+
         // setup the operators for the step
         self.update_op_step_size(h);
 
@@ -570,9 +581,6 @@ mod test {
 
     #[test]
     fn test_tr_bdf2_nalgebra_exponential_decay() {
-        //let mut builder = colog::basic_builder();
-        //builder.filter(None, log::LevelFilter::Trace);
-        //builder.init();
         let (problem, soln) = exponential_decay_problem::<M>(false);
         let mut s = problem.tr_bdf2::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
@@ -724,7 +732,7 @@ mod test {
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 402
+        number_of_calls: 400
         number_of_jac_muls: 21
         number_of_matrix_evals: 7
         number_of_jac_adj_muls: 163
@@ -733,43 +741,41 @@ mod test {
 
     #[test]
     fn test_tr_bdf2_nalgebra_robertson() {
-        //let mut builder = colog::basic_builder();
-        //builder.filter(None, log::LevelFilter::Trace);
-        //builder.init();
         let (problem, soln) = robertson::<M>(false);
         let mut s = problem.tr_bdf2::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 75
-        number_of_steps: 291
-        number_of_error_test_failures: 10
-        number_of_nonlinear_solver_iterations: 1187
-        number_of_nonlinear_solver_fails: 15
+        number_of_linear_solver_setups: 65
+        number_of_steps: 295
+        number_of_error_test_failures: 6
+        number_of_nonlinear_solver_iterations: 1205
+        number_of_nonlinear_solver_fails: 10
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 1190
-        number_of_jac_muls: 51
-        number_of_matrix_evals: 17
+        number_of_calls: 1208
+        number_of_jac_muls: 42
+        number_of_matrix_evals: 14
         number_of_jac_adj_muls: 0
         "###);
     }
 
     #[test]
     fn test_tr_bdf2_nalgebra_robertson_sens() {
-        let (problem, soln) = robertson_sens::<M>();
+        let (mut problem, soln) = robertson_sens::<M>();
+        problem.ode_options.max_nonlinear_solver_iterations = 10;
         let mut s = problem.tr_bdf2_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 135
-        number_of_steps: 230
-        number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 4507
-        number_of_nonlinear_solver_fails: 115
+        number_of_linear_solver_setups: 109
+        number_of_steps: 314
+        number_of_error_test_failures: 2
+        number_of_nonlinear_solver_iterations: 4483
+        number_of_nonlinear_solver_fails: 49
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 1344
-        number_of_jac_muls: 3337
-        number_of_matrix_evals: 55
+        number_of_calls: 1399
+        number_of_jac_muls: 3225
+        number_of_matrix_evals: 44
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -780,16 +786,16 @@ mod test {
         let mut s = problem.esdirk34::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 76
-        number_of_steps: 473
-        number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 2415
-        number_of_nonlinear_solver_fails: 9
+        number_of_linear_solver_setups: 72
+        number_of_steps: 434
+        number_of_error_test_failures: 1
+        number_of_nonlinear_solver_iterations: 2322
+        number_of_nonlinear_solver_fails: 7
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 2418
-        number_of_jac_muls: 51
-        number_of_matrix_evals: 17
+        number_of_calls: 2325
+        number_of_jac_muls: 42
+        number_of_matrix_evals: 14
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -800,48 +806,42 @@ mod test {
         let mut s = problem.esdirk34_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 100
-        number_of_steps: 398
-        number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 6904
-        number_of_nonlinear_solver_fails: 28
+        number_of_linear_solver_setups: 81
+        number_of_steps: 408
+        number_of_error_test_failures: 1
+        number_of_nonlinear_solver_iterations: 7088
+        number_of_nonlinear_solver_fails: 16
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 2208
-        number_of_jac_muls: 4792
-        number_of_matrix_evals: 29
+        number_of_calls: 2283
+        number_of_jac_muls: 4883
+        number_of_matrix_evals: 23
         number_of_jac_adj_muls: 0
         "###);
     }
 
     #[test]
     fn test_tr_bdf2_nalgebra_robertson_ode() {
-        //let mut builder = colog::basic_builder();
-        //builder.filter(None, log::LevelFilter::Trace);
-        //builder.init();
         let (problem, soln) = robertson_ode::<M>(false, 1);
         let mut s = problem.tr_bdf2::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 94
-        number_of_steps: 388
-        number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 1880
-        number_of_nonlinear_solver_fails: 25
+        number_of_linear_solver_setups: 85
+        number_of_steps: 372
+        number_of_error_test_failures: 3
+        number_of_nonlinear_solver_iterations: 1952
+        number_of_nonlinear_solver_fails: 16
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 1882
-        number_of_jac_muls: 66
-        number_of_matrix_evals: 22
+        number_of_calls: 1954
+        number_of_jac_muls: 48
+        number_of_matrix_evals: 16
         number_of_jac_adj_muls: 0
         "###);
     }
 
     #[test]
     fn test_tr_bdf2_faer_sparse_heat2d() {
-        //let mut builder = colog::basic_builder();
-        //builder.filter(None, log::LevelFilter::Trace);
-        //builder.init();
         let (problem, soln) = head2d_problem::<FaerSparseMat<f64>, 10>();
         let mut s = problem.tr_bdf2::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);

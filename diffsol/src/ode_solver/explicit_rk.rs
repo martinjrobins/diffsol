@@ -28,6 +28,9 @@ where
     fn augmented_eqn(&self) -> Option<&AugEqn> {
         self.augmented_eqn.as_ref()
     }
+    fn augmented_eqn_mut(&mut self) -> Option<&mut AugEqn> {
+        self.augmented_eqn.as_mut()
+    }
 }
 
 /// An explicit Runge-Kutta method.

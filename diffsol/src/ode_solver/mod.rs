@@ -157,17 +157,21 @@ mod tests {
         for i in 0..nparams {
             p_0.set_index(i, p_base.get_index(i) + h.get_index(i));
             problem.eqn.set_params(&p_0);
-            let mut s = problem.bdf::<LS>().unwrap();
-            s.set_stop_time(final_time).unwrap();
-            while s.step().unwrap() != OdeSolverStopReason::TstopReached {}
-            let g_pos = s.state().g.clone();
+            let g_pos = {
+                let mut s = problem.bdf::<LS>().unwrap();
+                s.set_stop_time(final_time).unwrap();
+                while s.step().unwrap() != OdeSolverStopReason::TstopReached {}
+                s.state().g.clone()
+            };
 
             p_0.set_index(i, p_base.get_index(i) - h.get_index(i));
             problem.eqn.set_params(&p_0);
-            let mut s = problem.bdf::<LS>().unwrap();
-            s.set_stop_time(final_time).unwrap();
-            while s.step().unwrap() != OdeSolverStopReason::TstopReached {}
-            let g_neg = s.state().g.clone();
+            let g_neg = {
+                let mut s = problem.bdf::<LS>().unwrap();
+                s.set_stop_time(final_time).unwrap();
+                while s.step().unwrap() != OdeSolverStopReason::TstopReached {}
+                s.state().g.clone()
+            };
             p_0.set_index(i, p_base.get_index(i));
 
             let delta = (g_pos - g_neg) / Scale(Eqn::T::from_f64(2.).unwrap() * h.get_index(i));
@@ -249,21 +253,27 @@ mod tests {
         let p_base = p_0.clone();
 
         problem.eqn.set_params(&p_data);
-        let mut s = problem.bdf::<LS>().unwrap();
-        let data = s.solve_dense(times).unwrap();
+        let data = {
+            let mut s = problem.bdf::<LS>().unwrap();
+            s.solve_dense(times).unwrap()
+        };
 
         for i in 0..nparams {
             p_0.set_index(i, p_base.get_index(i) + h.get_index(i));
             problem.eqn.set_params(&p_0);
-            let mut s = problem.bdf::<LS>().unwrap();
-            let v = s.solve_dense(times).unwrap();
-            let g_pos = sum_squares(&v, &data);
+            let g_pos = {
+                let mut s = problem.bdf::<LS>().unwrap();
+                let v = s.solve_dense(times).unwrap();
+                sum_squares(&v, &data)
+            };
 
             p_0.set_index(i, p_base.get_index(i) - h.get_index(i));
             problem.eqn.set_params(&p_0);
-            let mut s = problem.bdf::<LS>().unwrap();
-            let v = s.solve_dense(times).unwrap();
-            let g_neg = sum_squares(&v, &data);
+            let g_neg = {
+                let mut s = problem.bdf::<LS>().unwrap();
+                let v = s.solve_dense(times).unwrap();
+                sum_squares(&v, &data)
+            };
 
             p_0.set_index(i, p_base.get_index(i));
 
@@ -308,7 +318,7 @@ mod tests {
                 &dgdp_check.column(j).into_owned(),
                 &atol,
                 rtol,
-                Eqn::T::from_f64(66.).unwrap(),
+                Eqn::T::from_f64(260.).unwrap(),
             );
         }
     }

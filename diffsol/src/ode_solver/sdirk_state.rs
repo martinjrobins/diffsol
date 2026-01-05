@@ -4,6 +4,7 @@ use crate::{
 };
 
 use super::state::StateCommon;
+use num_traits::Zero;
 
 #[derive(Clone)]
 pub struct RkState<V: Vector> {
@@ -19,7 +20,26 @@ pub struct RkState<V: Vector> {
     pub(crate) h: V::T,
 }
 
-impl<V> RkState<V> where V: Vector {}
+impl<V> RkState<V>
+where
+    V: Vector,
+{
+    pub(crate) fn new_empty(ctx: V::C) -> Self {
+        let default_v = V::zeros(0, ctx.clone());
+        Self {
+            y: default_v.clone(),
+            dy: default_v.clone(),
+            g: default_v.clone(),
+            dg: default_v.clone(),
+            s: Vec::new(),
+            ds: Vec::new(),
+            sg: Vec::new(),
+            dsg: Vec::new(),
+            t: V::T::zero(),
+            h: V::T::zero(),
+        }
+    }
+}
 
 impl<V> OdeSolverState<V> for RkState<V>
 where
