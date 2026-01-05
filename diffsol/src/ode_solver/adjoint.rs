@@ -434,7 +434,6 @@ where
         // we have a consistent s_i and sg_i now, calculate ds/dt
         // ds_d = Mdd^{-1} f(s,t)
         // ds_a = 0
-        //for (i, (s_i, ds_i)) in state_mut.s.iter_mut().zip(state_mut.ds.iter_mut()).enumerate() {
         //let n = state_mut.s.len();
         //for i in 0..n {
         //    solver.augmented_eqn_mut().unwrap().set_index(i);

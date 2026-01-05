@@ -43,7 +43,7 @@ impl<'a, V: Vector> Convergence<'a, V> {
     }
 
     pub fn new(rtol: V::T, atol: &'a V) -> Self {
-        let tol = V::T::from_f64(0.33).unwrap();
+        let tol = V::T::from_f64(0.1).unwrap();
         Self {
             rtol,
             atol,
