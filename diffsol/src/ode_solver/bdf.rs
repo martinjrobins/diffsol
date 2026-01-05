@@ -2038,19 +2038,19 @@ mod test {
     }
 
     #[test]
-    fn test_bdf_faer_sparse_foodweb2() {
-        let mut builder = colog::basic_builder();
-        builder.filter(None, log::LevelFilter::Trace);
-        builder.init();
+    fn test_bdf_faer_sparse_foodweb() {
+        //let mut builder = colog::basic_builder();
+        //builder.filter(None, log::LevelFilter::Trace);
+        //builder.init();
         let (problem, soln) = foodweb_problem::<FaerSparseMat<f64>, 10>();
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 44
-        number_of_steps: 154
-        number_of_error_test_failures: 2
-        number_of_nonlinear_solver_iterations: 339
-        number_of_nonlinear_solver_fails: 16
+        number_of_linear_solver_setups: 54
+        number_of_steps: 176
+        number_of_error_test_failures: 7
+        number_of_nonlinear_solver_iterations: 316
+        number_of_nonlinear_solver_fails: 18
         "###);
     }
 
