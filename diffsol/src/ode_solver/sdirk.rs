@@ -781,7 +781,7 @@ mod test {
     }
 
     #[test]
-    fn test_esdirk34_nalgebra_robertson2() {
+    fn test_esdirk34_nalgebra_robertson() {
         let (problem, soln) = robertson::<M>(false);
         let mut s = problem.esdirk34::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);

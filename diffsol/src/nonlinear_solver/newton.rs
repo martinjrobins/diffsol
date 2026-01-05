@@ -27,7 +27,6 @@ pub fn newton_iteration<V: Vector>(
             ConvergenceStatus::Diverged => return Err(non_linear_solver_error!(NewtonDiverged)),
         }
     }
-    println!("Reached max iterations without convergence");
     Err(non_linear_solver_error!(NewtonMaxIterations))
 }
 

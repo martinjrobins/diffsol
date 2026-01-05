@@ -54,7 +54,7 @@ cudarc = { workspace = true, optional = true, default-features = false, features
     "nvrtc",
 ] }
 log = "0.4.29"
-serde_json = "1.0.148"
+serde_json = "1.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 faer = { workspace = true, features = [ "rayon" ] } 
