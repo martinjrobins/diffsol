@@ -429,6 +429,31 @@ where
                 sg_i.sub_assign(&self.tmp_nparams);
             }
         }
+
+        // we have a consistent s_i and sg_i now, calculate ds/dt
+        // ds_d = Mdd^{-1} f(s,t)
+        // ds_a = 0
+        //let n = state_mut.s.len();
+        //for i in 0..n {
+        //    solver.augmented_eqn_mut().unwrap().set_index(i);
+        //    solver.augmented_eqn().unwrap().rhs().call_inplace(&solver.state().s[i], t, &mut self.tmp_nstates);
+
+        //    // mass and algebraic indices
+        //    if let (Some(sol_mdd), Some(p)) = (sol_mdd_opt, self.partition.as_ref()) {
+        //        self.tmp_differential
+        //            .gather(&self.tmp_nstates, &p.differential_indices);
+        //        sol_mdd.solve_in_place(&mut self.tmp_differential)?;
+        //        solver.state_mut().ds[i].assign_at_indices(&p.algebraic_indices, Eqn::T::zero());
+        //        self.tmp_differential.scatter(&p.differential_indices, &mut solver.state_mut().ds[i]);
+        //    // mass only
+        //    } else if let Some(sol_mdd) = sol_mdd_opt {
+        //        sol_mdd.solve_in_place(&mut self.tmp_nstates)?;
+        //        solver.state_mut().ds[i].copy_from(&self.tmp_nstates);
+        //    // no mass
+        //    } else {
+        //        solver.state_mut().ds[i].copy_from(&self.tmp_nstates);
+        //    }
+        //}
         Ok(())
     }
 }

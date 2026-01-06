@@ -1,5 +1,6 @@
+use log::trace;
 use nalgebra::ComplexField;
-use num_traits::{FromPrimitive, One, Pow};
+use num_traits::{FromPrimitive, One, Pow, ToPrimitive};
 
 use crate::{scalar::IndexType, Scalar, Vector};
 
@@ -11,7 +12,7 @@ pub struct Convergence<'a, V: Vector> {
     max_iter: IndexType,
     niter: IndexType,
     old_norm: Option<V::T>,
-    rate: Option<V::T>,
+    eta: V::T,
 }
 
 pub enum ConvergenceStatus {
@@ -30,26 +31,26 @@ impl<'a, V: Vector> Convergence<'a, V> {
     pub fn niter(&self) -> IndexType {
         self.niter
     }
-    pub fn rate(&self) -> Option<V::T> {
-        self.rate
+    pub fn eta(&self) -> V::T {
+        self.eta
     }
+    pub fn reset_eta(&mut self) {
+        self.eta = V::T::from_f64(20.0.pow(1.25)).unwrap();
+    }
+
+    pub fn reset_eta_timestep_change(&mut self) {
+        self.eta = V::T::from_f64(100.0.pow(1.25)).unwrap();
+    }
+
     pub fn new(rtol: V::T, atol: &'a V) -> Self {
-        let minimum_tol = V::T::from_f64(10.0).unwrap() * V::T::EPSILON / rtol;
-        let maximum_tol = V::T::from_f64(0.03).unwrap();
-        let mut tol = V::T::from_f64(0.33).unwrap();
-        if tol > maximum_tol {
-            tol = maximum_tol;
-        }
-        if tol < minimum_tol {
-            tol = minimum_tol;
-        }
+        let tol = V::T::from_f64(0.2).unwrap();
         Self {
             rtol,
             atol,
             tol,
             max_iter: 10,
             old_norm: None,
-            rate: None,
+            eta: V::T::from_f64(20.0.pow(1.25)).unwrap(),
             niter: 0,
         }
     }
@@ -63,25 +64,20 @@ impl<'a, V: Vector> Convergence<'a, V> {
     }
 
     pub fn check_norm(&mut self, norm: V::T) -> ConvergenceStatus {
+        trace!(
+            "  Iteration {}, check non-linear solver norm = {:.3e}",
+            self.niter + 1,
+            norm.to_f64().unwrap()
+        );
         self.niter += 1;
-        // if norm is zero then we are done
-        if norm <= V::T::EPSILON {
-            return ConvergenceStatus::Converged;
-        }
         if let Some(old_norm) = self.old_norm {
-            let rate = norm / old_norm;
-            self.rate = Some(rate);
+            let rate =
+                (norm / old_norm).pow(V::T::one() / (V::T::from_usize(self.niter - 1).unwrap()));
 
             // check if iteration is diverging
             if rate > V::T::from_f64(0.9).unwrap() {
+                trace!("  Diverged with rate {}", rate);
                 return ConvergenceStatus::Diverged;
-            }
-
-            let eta = rate / (V::T::one() - rate);
-
-            // check if iteration is converged
-            if eta * norm < self.tol {
-                return ConvergenceStatus::Converged;
             }
 
             // if iteration is not going to converge in max_iter
@@ -90,20 +86,53 @@ impl<'a, V: Vector> Convergence<'a, V> {
                 * norm
                 > self.tol
             {
+                trace!(
+                    "  Diverged as will not converge in max iterations with rate {}",
+                    rate
+                );
                 return ConvergenceStatus::Diverged;
             }
+
+            let eta = rate / (V::T::one() - rate);
+            trace!(
+                "  Updated mean convergence rate = {:.3e}, eta = {:.3e}",
+                rate.to_f64().unwrap(),
+                eta.to_f64().unwrap()
+            );
+            self.eta = eta;
         } else {
-            // no rate, just test with a large eta
-            if V::T::from_f64(100.0).unwrap() * norm < self.tol {
-                return ConvergenceStatus::Converged;
+            let min_eta = V::T::from_f64(1e4).unwrap() * V::T::EPSILON;
+            if self.eta < min_eta {
+                self.eta = min_eta;
             }
+            self.eta = self.eta.pow(V::T::from_f64(0.8).unwrap());
+            trace!(
+                "  First iteration, set eta = {:.3e}",
+                self.eta.to_f64().unwrap()
+            );
         };
+        // check if iteration is converged
+        if self.eta * norm < self.tol {
+            trace!(
+                "  Converged with eta * norm = {:.3e} < tol = {:.3e}",
+                (self.eta * norm).to_f64().unwrap(),
+                self.tol.to_f64().unwrap()
+            );
+            return ConvergenceStatus::Converged;
+        }
+        trace!(
+            "  Not yet converged: eta * norm = {:.3e} >= tol = {:.3e}",
+            (self.eta * norm).to_f64().unwrap(),
+            self.tol.to_f64().unwrap()
+        );
         ConvergenceStatus::Continue
     }
 
     pub fn check_new_iteration(&mut self, norm: V::T) -> ConvergenceStatus {
         let status = self.check_norm(norm);
-        self.old_norm = Some(norm);
+        if self.niter == 1 {
+            self.old_norm = Some(norm);
+        }
         status
     }
 }

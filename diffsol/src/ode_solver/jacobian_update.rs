@@ -37,8 +37,10 @@ impl<T: Scalar> JacobianUpdate<T> {
         self.h_at_last_jacobian_update = h;
     }
 
-    pub fn update_rhs_jacobian(&mut self) {
+    pub fn update_rhs_jacobian(&mut self, h: T) {
         self.steps_since_rhs_jacobian_eval = 0;
+        self.steps_since_jacobian_eval = 0;
+        self.h_at_last_jacobian_update = h;
     }
 
     pub fn step(&mut self) {

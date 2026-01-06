@@ -106,8 +106,10 @@ pub fn main() {
         ",
         )
         .unwrap();
-    let mut solver = problem.bdf::<LS>().unwrap();
-    let ys_data = solver.solve_dense(&t_data).unwrap();
+    let ys_data = {
+        let mut solver = problem.bdf::<LS>().unwrap();
+        solver.solve_dense(&t_data).unwrap()
+    };
 
     let cost = Problem {
         ys_data,

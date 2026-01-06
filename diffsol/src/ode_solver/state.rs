@@ -1,3 +1,4 @@
+use log::debug;
 use nalgebra::ComplexField;
 use num_traits::FromPrimitive;
 use num_traits::{One, Pow, Zero};
@@ -447,11 +448,12 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let atol = &ode_problem.atol;
         root_solver.set_problem(&f);
         let mut y_tmp = state.dy.clone();
-        let mut yerr = y_tmp.clone();
         y_tmp.copy_from_indices(state.y, &f.algebraic_indices);
+        let mut yerr = y_tmp.clone();
         let mut convergence = Convergence::new(rtol, atol);
         convergence.set_max_iter(ode_problem.ic_options.max_newton_iterations);
         let mut result = Ok(());
+        debug!("Setting consistent initial conditions at t = {}", state.t);
         for _ in 0..ode_problem.ic_options.max_linear_solver_setups {
             root_solver.reset_jacobian(&f, &y_tmp, *state.t);
             result = root_solver.solve_in_place(&f, &mut y_tmp, *state.t, &yerr, &mut convergence);
