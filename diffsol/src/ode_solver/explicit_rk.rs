@@ -11,6 +11,7 @@ use crate::{
     AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, ExplicitRkConfig, OdeEquations,
     OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
 };
+use log::debug;
 use num_traits::One;
 
 impl<'a, Eqn, M, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
@@ -160,6 +161,11 @@ where
 
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
         let mut h = self.rk.start_step()?;
+        debug!(
+            "Starting Explicit RK step at t = {:?} with h = {:?}",
+            self.state().t,
+            h
+        );
 
         // loop until step is accepted
         let mut nattempts = 0;
@@ -181,10 +187,15 @@ where
                 self.config.maximum_timestep_growth,
             );
             if error_norm < Eqn::T::one() {
+                debug!("Step accepted with error norm = {:?}", error_norm);
                 break factor;
             }
             h *= factor;
             nattempts += 1;
+            debug!(
+                "Step rejected with error norm = {:?}, reducing h to {:?}",
+                error_norm, h
+            );
             self.rk.error_test_fail(
                 h,
                 nattempts,
@@ -396,7 +407,7 @@ mod test {
         let adjoint_solver = problem.tsit45_solver_adjoint(checkpointer, None).unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 341
+        number_of_calls: 337
         number_of_jac_muls: 8
         number_of_matrix_evals: 4
         number_of_jac_adj_muls: 159

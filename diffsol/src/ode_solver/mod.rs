@@ -665,6 +665,9 @@ mod tests {
             *s.config().as_base_ref().minimum_timestep,
             Eqn::T::from_f64(1.0e8).unwrap()
         );
+        // force a step size reduction
+        *s.state_mut().h = Eqn::T::from_f64(0.1).unwrap();
+
         let mut failed = false;
         for _ in 0..10 {
             if let Err(DiffsolError::OdeSolverError(OdeSolverError::StepSizeTooSmall { time: _ })) =

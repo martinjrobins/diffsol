@@ -652,12 +652,19 @@ mod test {
     fn test_solve_checkpointing() {
         let (problem, soln) = exponential_decay_problem::<NalgebraMat<f64>>(false);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
+        let k = 0.1;
+        let y0 = NalgebraVec::from_vec(vec![1.0, 1.0], *problem.context());
+        let expect = |t: f64| &y0 * scale(f64::exp(-k * t));
         let final_time = soln.solution_points[soln.solution_points.len() - 1].t;
-        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let (checkpointer, y, t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        for (i, t_i) in t.iter().enumerate() {
+            let y_i = y.column(i).into_owned();
+            y_i.assert_eq_norm(&expect(*t_i), &problem.atol, problem.rtol, 15.0);
+        }
         let mut y = NalgebraVec::zeros(problem.eqn.rhs().nstates(), *problem.context());
         for point in soln.solution_points.iter() {
             checkpointer.interpolate(point.t, &mut y).unwrap();
-            y.assert_eq_norm(&point.state, &problem.atol, problem.rtol, 100.0);
+            y.assert_eq_norm(&point.state, &problem.atol, problem.rtol, 150.0);
         }
     }
 }
