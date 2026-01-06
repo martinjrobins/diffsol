@@ -9,6 +9,9 @@ use crate::{
     Op, ParameterisedOp, Scalar, UnitCallable, Vector,
 };
 
+#[cfg(feature = "diffsl")]
+use diffsl::execution::scalar::Scalar as DiffSlScalar;
+
 use crate::OdeSolverEquations;
 use num_traits::{FromPrimitive, One, Zero};
 
@@ -1055,7 +1058,7 @@ where
         code: &str,
     ) -> Result<OdeSolverProblem<crate::DiffSl<M, CG>>, DiffsolError>
     where
-        M: Matrix<V: crate::VectorHost, T = f64>,
+        M: Matrix<V: crate::VectorHost, T: DiffSlScalar>,
     {
         #[cfg(feature = "diffsl-cranelift")]
         let include_sensitivities = M::is_sparse()
@@ -1066,7 +1069,7 @@ where
         // if the user hasn't set the parameters, resize them to match the number of parameters in the equations
         let nparams = eqn.rhs().nparams();
         if self.p.len() != nparams && self.p.is_empty() {
-            self.p.resize(nparams, 0.0);
+            self.p.resize(nparams, M::T::zero());
         }
         self.build_from_eqn(eqn)
     }

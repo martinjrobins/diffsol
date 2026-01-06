@@ -135,6 +135,8 @@
 
 #[cfg(feature = "diffsl")]
 pub use diffsl::execution::module::{CodegenModule, CodegenModuleCompile, CodegenModuleJit};
+#[cfg(feature = "diffsl")]
+pub use diffsl::execution::scalar::Scalar as DiffSlScalar;
 #[cfg(feature = "diffsl-cranelift")]
 pub use diffsl::CraneliftJitModule;
 #[cfg(feature = "diffsl-llvm")]
