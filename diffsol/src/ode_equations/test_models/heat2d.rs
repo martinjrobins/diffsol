@@ -58,7 +58,6 @@ pub fn heat2d_diffsl_problem<
 
     let code = format!(
         "
-        in = []
         D_ij {{
 {}
         }}

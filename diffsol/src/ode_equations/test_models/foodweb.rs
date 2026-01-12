@@ -69,7 +69,6 @@ where
 
     let code = format!(
         "
-        in = []
         AA {{ 1.0 }}
         EE {{ 10000.0 }}
         GG {{ 0.5e-6 }}
