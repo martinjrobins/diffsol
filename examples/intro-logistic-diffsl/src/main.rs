@@ -9,9 +9,7 @@ fn main() {
         .p([1.0, 10.0])
         .build_from_diffsl::<CG>(
             "
-                in = [r, k]
-                r { 1.0 }
-                k { 1.0 }
+                in_i { r = 1.0, k = 1.0 }
                 u { 0.1 }
                 F { r * u * (1.0 - u / k) }
             ",

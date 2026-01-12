@@ -93,8 +93,8 @@ pub fn main() {
         .out_rtol(1e-6)
         .build_from_diffsl(
             "
-        in = [k, c]
-        k { 1.0 } m { 1.0 } c { 0.1 }
+        in_i { k = 1.0, c = 0.1 }
+        m { 1.0 }
         u_i {
             x = 1,
             v = 0,
