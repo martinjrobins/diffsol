@@ -4,14 +4,13 @@ use argmin::{
 };
 use argmin_observer_slog::SlogLogger;
 use diffsol::{
-    DiffSl, OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverProblem,
-    SensitivitiesOdeSolverMethod,
+    DiffSl, MatrixCommon, OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverProblem, Op,
+    SensitivitiesOdeSolverMethod, Vector,
 };
-use nalgebra::{DMatrix, DVector};
 use std::cell::RefCell;
 
-type M = DMatrix<f64>;
-type V = DVector<f64>;
+type M = diffsol::NalgebraMat<f64>;
+type V = diffsol::NalgebraVec<f64>;
 type T = f64;
 type LS = diffsol::NalgebraLU<f64>;
 type CG = diffsol::LlvmModule;
@@ -29,15 +28,19 @@ impl CostFunction for Problem {
 
     fn cost(&self, param: &Self::Param) -> Result<Self::Output, argmin_math::Error> {
         let mut problem = self.problem.borrow_mut();
-        problem.eqn_mut().set_params(&V::from_vec(param.clone()));
+        let ctx = *problem.eqn().context();
+        problem
+            .eqn_mut()
+            .set_params(&V::from_vec(param.clone(), ctx));
         let mut solver = problem.bdf::<LS>().unwrap();
         let ys = match solver.solve_dense(&self.ts_data) {
             Ok(ys) => ys,
             Err(_) => return Ok(f64::MAX / 1000.),
         };
         let loss = ys
+            .inner()
             .column_iter()
-            .zip(self.ys_data.column_iter())
+            .zip(self.ys_data.inner().column_iter())
             .map(|(a, b)| (a - b).norm_squared())
             .sum::<f64>();
         Ok(loss)
@@ -50,7 +53,10 @@ impl Gradient for Problem {
 
     fn gradient(&self, param: &Self::Param) -> Result<Self::Gradient, argmin_math::Error> {
         let mut problem = self.problem.borrow_mut();
-        problem.eqn_mut().set_params(&V::from_vec(param.clone()));
+        let ctx = *problem.eqn().context();
+        problem
+            .eqn_mut()
+            .set_params(&V::from_vec(param.clone(), ctx));
         let mut solver = problem.bdf_sens::<LS>().unwrap();
         let (ys, sens) = match solver.solve_dense_sensitivities(&self.ts_data) {
             Ok((ys, sens)) => (ys, sens),
@@ -59,8 +65,13 @@ impl Gradient for Problem {
         let dlossdp = sens
             .into_iter()
             .map(|s| {
-                s.column_iter()
-                    .zip(ys.column_iter().zip(self.ys_data.column_iter()))
+                s.inner()
+                    .column_iter()
+                    .zip(
+                        ys.inner()
+                            .column_iter()
+                            .zip(self.ys_data.inner().column_iter()),
+                    )
                     .map(|(si, (yi, di))| 2.0 * (yi - di).dot(&si))
                     .sum::<f64>()
             })
@@ -70,8 +81,7 @@ impl Gradient for Problem {
 }
 
 pub fn main() {
-    let eqn = DiffSl::<M, CG>::compile(
-        "
+    let code = "
             in = [ b, d ]
             a { 2.0/3.0 } b { 4.0/3.0 } c { 1.0 } d { 1.0 } x0 { 1.0 } y0 { 1.0 }
             u_i {
@@ -82,9 +92,7 @@ pub fn main() {
                 a * y1 - b * y1 * y2,
                 c * y1 * y2 - d * y2,
             }
-        ",
-    )
-    .unwrap();
+        ";
 
     let (b_true, d_true) = (4.0 / 3.0, 1.0);
     let t_data = (0..101)
@@ -94,10 +102,12 @@ pub fn main() {
         .p([b_true, d_true])
         .sens_atol([1e-6])
         .sens_rtol(1e-6)
-        .build_from_eqn(eqn)
+        .build_from_diffsl(code)
         .unwrap();
-    let mut solver = problem.bdf::<LS>().unwrap();
-    let ys_data = solver.solve_dense(&t_data).unwrap();
+    let ys_data = {
+        let mut solver = problem.bdf::<LS>().unwrap();
+        solver.solve_dense(&t_data).unwrap()
+    };
 
     let cost = Problem {
         ys_data,
