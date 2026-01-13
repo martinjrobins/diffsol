@@ -132,7 +132,7 @@ use std::cell::RefCell;
 /// 1. Construct a graph where each column is a node, and edges connect columns that share at least one non-zero row
 /// 2. Apply greedy graph coloring to assign colors to columns such that no two adjacent columns share the same color
 /// 3. For each color, perturb all columns of that color simultaneously and compute the corresponding Jacobian entries
-/// 
+///
 /// To enable 3., we pre-calculate for all colors:
 ///    - all the indices in the peturbed vector to peterb (i.e. set to 1) which is stored in `input_indices_per_color`.
 ///    - all the indices in the output vector to read the results from which is stored in `src_indices_per_color`.

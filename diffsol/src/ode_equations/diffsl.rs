@@ -187,7 +187,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModuleJit + CodegenModuleCompile
         let context = DiffSlContext::<M, CG>::new(code, 1, ctx)?;
         Ok(Self::from_context(context, include_sensitivities))
     }
-    
+
     /// Create a `DiffSl` instance from a pre-compiled `DiffSlContext`.
     ///
     /// This function extracts the sparsity patterns and Jacobian colorings from the compiled
