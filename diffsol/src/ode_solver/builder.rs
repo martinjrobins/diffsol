@@ -274,6 +274,16 @@ where
         }
     }
 
+    /// Set the right-hand side of the ODE for adjoint sensitivity analysis.
+    ///
+    /// This method provides all the functions needed for computing adjoint sensitivities,
+    /// including the transpose Jacobian operations.
+    ///
+    /// # Arguments
+    /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
+    /// - `rhs_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
+    /// - `rhs_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the Jacobian with the vector v.
+    /// - `rhs_sens_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the partial derivative of the rhs wrt the parameters, with the vector v.
     #[allow(clippy::type_complexity)]
     pub fn rhs_adjoint_implicit<F, G, H, I>(
         self,
@@ -595,6 +605,15 @@ where
         }
     }
 
+    /// Set the output function of the ODE.
+    ///
+    /// Output functions compute additional quantities of interest that depend on the state.
+    /// These can be integrated alongside the ODE or used for root finding.
+    ///
+    /// # Arguments
+    /// - `out`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the output.
+    /// - `out_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the output with the vector v.
+    /// - `nout`: Number of output equations (i.e. size of the output vector `y`).
     pub fn out_implicit<F, G>(
         self,
         out: F,
@@ -638,6 +657,16 @@ where
         }
     }
 
+    /// Set the output function of the ODE for forward sensitivity analysis, suitable for implicit solvers.
+    ///
+    /// This extends the output function with sensitivity information needed for
+    /// computing sensitivities of the outputs with respect to parameters.
+    ///
+    /// # Arguments
+    /// - `out`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the output.
+    /// - `out_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the output with the vector v.
+    /// - `out_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the output wrt the parameters, with the vector v.
+    /// - `nout`: Number of output equations (i.e. size of the output vector `y`).
     pub fn out_sens_implicit<F, G, H>(
         self,
         out: F,
@@ -684,6 +713,17 @@ where
         }
     }
 
+    /// Set the output function of the ODE for adjoint sensitivity analysis, suitable for implicit solvers.
+    ///
+    /// This provides all the functions needed for computing adjoint sensitivities of outputs,
+    /// including the transpose Jacobian operations.
+    ///
+    /// # Arguments
+    /// - `out`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the output.
+    /// - `out_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the output with the vector v.
+    /// - `out_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the Jacobian with the vector v.
+    /// - `out_sens_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the partial derivative of the output wrt the parameters, with the vector v.
+    /// - `nout`: Number of output equations.
     #[allow(clippy::type_complexity)]
     pub fn out_adjoint_implicit<F, G, H, I>(
         self,
@@ -740,11 +780,18 @@ where
         self
     }
 
+    /// Set the relative tolerance for forward sensitivity or adjoint equations.
+    ///
+    /// If not set or set to `None`, sensitivities will not be included in error control.
     pub fn sens_rtol(mut self, sens_rtol: f64) -> Self {
         self.sens_rtol = Some(M::T::from_f64(sens_rtol).unwrap());
         self
     }
 
+    /// Set the absolute tolerance for forward sensitivity or adjoint equations.
+    ///
+    /// Can be a single value (used for all states) or a vector (one per state).
+    /// If not set or set to `None`, sensitivities will not be included in error control.
     pub fn sens_atol<V>(mut self, sens_atol: V) -> Self
     where
         V: IntoIterator<Item = f64>,
@@ -758,29 +805,48 @@ where
         self
     }
 
+    /// Disable error control for sensitivity equations.
+    ///
+    /// When disabled, the sensitivity equations will still be computed but will not
+    /// contribute to the error estimates that control the timestep.
     pub fn turn_off_sensitivities_error_control(mut self) -> Self {
         self.sens_atol = None;
         self.sens_rtol = None;
         self
     }
 
+    /// Disable error control for output equations.
+    ///
+    /// When disabled, output equations will still be integrated (if `integrate_out` is true)
+    /// but will not contribute to the error estimates that control the timestep.
     pub fn turn_off_output_error_control(mut self) -> Self {
         self.out_atol = None;
         self.out_rtol = None;
         self
     }
 
+    /// Disable error control for adjoint parameter gradient equations.
+    ///
+    /// When disabled, the parameter gradients will still be computed but will not
+    /// contribute to the error estimates that control the timestep during adjoint solves.
     pub fn turn_off_param_error_control(mut self) -> Self {
         self.param_atol = None;
         self.param_rtol = None;
         self
     }
 
+    /// Set the relative tolerance for integration of output equations
+    ///
+    /// If not set, errors in the output equations will not be included in error control.
     pub fn out_rtol(mut self, out_rtol: f64) -> Self {
         self.out_rtol = Some(M::T::from_f64(out_rtol).unwrap());
         self
     }
 
+    /// Set the absolute tolerance for integration of output equations.
+    ///
+    /// Can be a single value (used for all outputs) or a vector (one per output).
+    /// If not set, errors in the output equations will not be included in error control.
     pub fn out_atol<V, T>(mut self, out_atol: V) -> Self
     where
         V: IntoIterator<Item = T>,
@@ -790,11 +856,18 @@ where
         self
     }
 
+    /// Set the relative tolerance for adjoint parameter gradient equations.
+    ///
+    /// If not set, these equations will not be included in error control.
     pub fn param_rtol(mut self, param_rtol: f64) -> Self {
         self.param_rtol = Some(M::T::from_f64(param_rtol).unwrap());
         self
     }
 
+    /// Set the absolute tolerance for adjoint parameter gradient equations.
+    ///
+    /// Can be a single value (used for all parameters) or a vector (one per parameter).
+    /// If not set, these equations will not be included in error control.
     pub fn param_atol<V>(mut self, param_atol: V) -> Self
     where
         V: IntoIterator<Item = f64>,
@@ -821,13 +894,13 @@ where
         self
     }
 
-    /// Set the relative tolerance.
+    /// Set the relative tolerance for the ODE solver. The state variables will be controlled to this relative tolerance.
     pub fn rtol(mut self, rtol: f64) -> Self {
         self.rtol = M::T::from_f64(rtol).unwrap();
         self
     }
 
-    /// Set the absolute tolerance.
+    /// Set the absolute tolerance for the ODE solver. The state variables will be controlled to this absolute tolerance. Can be a single value (used for all states) or a vector (one per state).
     pub fn atol<V>(mut self, atol: V) -> Self
     where
         V: IntoIterator<Item = f64>,
@@ -839,7 +912,7 @@ where
         self
     }
 
-    /// Set the parameters.
+    /// Set the parameters for the ODE system.
     pub fn p<V>(mut self, p: V) -> Self
     where
         V: IntoIterator<Item = f64>,
@@ -851,8 +924,7 @@ where
     /// Set whether to use coloring when computing the Jacobian.
     /// This is always true if matrix type is sparse, but can be set to true for dense matrices as well.
     /// This can speed up the computation of the Jacobian for large sparse systems.
-    /// However, it relys on the sparsity of the Jacobian being constant,
-    /// and for certain systems it may detect the wrong sparsity pattern.
+    /// However, it relys on the sparsity of the Jacobian being constant.
     pub fn use_coloring(mut self, use_coloring: bool) -> Self {
         self.use_coloring = use_coloring;
         self
@@ -957,6 +1029,19 @@ where
         }
     }
 
+    /// Build the ODE problem from the configured builder.
+    ///
+    /// This method validates all the settings, constructs the equation system,
+    /// and returns an `OdeSolverProblem` that can be used to create solvers.
+    ///
+    /// # Returns
+    /// An `OdeSolverProblem` ready to be used with various solver methods.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - Required components (rhs, init) are missing
+    /// - Dimensions are inconsistent
+    /// - Tolerances are invalid
     #[allow(clippy::type_complexity)]
     pub fn build(
         self,
@@ -1052,6 +1137,24 @@ where
         )
     }
 
+    /// Build an ODE problem from a DiffSL model string.
+    ///
+    /// DiffSL is a domain-specific language for specifying differential equations.
+    /// This method compiles the DiffSL code and creates an ODE problem from it.
+    ///
+    /// # Arguments
+    /// - `code`: The DiffSL model code as a string.
+    ///
+    /// # Type Parameters
+    /// - `CG`: The code generation backend (e.g., LLVM or Cranelift).
+    ///
+    /// # Returns
+    /// An `OdeSolverProblem` with equations compiled from DiffSL.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - The DiffSL code has syntax or semantic errors
+    /// - The number of parameters previously given doesn't match the compiled model
     #[cfg(feature = "diffsl")]
     pub fn build_from_diffsl<CG: crate::CodegenModuleJit + crate::CodegenModuleCompile>(
         mut self,
