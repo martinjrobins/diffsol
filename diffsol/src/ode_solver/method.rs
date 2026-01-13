@@ -42,7 +42,10 @@ where
     Self: Sized,
     Eqn: 'a,
 {
+    /// The state type used by the solver
     type State: OdeSolverState<Eqn::V>;
+    
+    /// The configuration type used by the solver
     type Config: OdeSolverConfig<Eqn::T>;
 
     /// Get the current problem
@@ -143,9 +146,21 @@ where
     /// Get the current order of accuracy of the solver (e.g. explict euler method is first-order)
     fn order(&self) -> usize;
 
-    /// Using the provided state, solve the problem up to time `final_time`
-    /// Returns a Vec of solution values at timepoints chosen by the solver.
-    /// After the solver has finished, the internal state of the solver is at time `final_time`.
+    /// Solve the ODE from the current time to `final_time`.
+    ///
+    /// This method integrates the system and returns the solution at adaptive timepoints chosen by the solver's
+    /// internal error control mechanism. This is useful when you want the minimal number of timepoints for a given accuracy.
+    ///
+    /// # Arguments
+    /// - `final_time`: The time to integrate to
+    ///
+    /// # Returns
+    /// A tuple of `(solution_matrix, times)` where:
+    /// - `solution_matrix` is a dense matrix with one column per solution time and one row per state variable
+    /// - `times` is a vector of times at which the solution was evaluated
+    ///
+    /// # Post-condition
+    /// After the solver finishes, the internal state of the solver is at time `final_time`.
     #[allow(clippy::type_complexity)]
     fn solve(
         &mut self,
@@ -172,9 +187,21 @@ where
         Ok((ret_y, ret_t))
     }
 
-    /// Using the provided state, solve the problem up to time `t_eval[t_eval.len()-1]`
-    /// Returns a Vec of solution values at timepoints given by `t_eval`.
-    /// After the solver has finished, the internal state of the solver is at time `t_eval[t_eval.len()-1]`.
+    /// Solve the ODE from the current time to `t_eval[t_eval.len()-1]`, evaluating at specified times.
+    ///
+    /// This method integrates the system and returns the solution interpolated at the specified times.
+    /// The solver uses its own internal timesteps for accuracy, but the output is interpolated to the
+    /// requested evaluation times. This is useful when you need the solution at specific timepoints
+    /// and want the solver's adaptive stepping for accuracy.
+    ///
+    /// # Arguments
+    /// - `t_eval`: A slice of times at which to evaluate the solution. Times should be in increasing order.
+    ///
+    /// # Returns
+    /// A dense matrix with one column per evaluation time (in the same order as `t_eval`) and one row per state variable.
+    ///
+    /// # Post-condition
+    /// After the solver finishes, the internal state of the solver is at time `t_eval[t_eval.len()-1]`.
     fn solve_dense(
         &mut self,
         t_eval: &[Eqn::T],
@@ -198,6 +225,20 @@ where
         Ok(ret)
     }
 
+    /// Solve the ODE from the current time to `final_time`, saving checkpoints at regular intervals.
+    ///
+    /// This method is useful for adjoint sensitivity analysis, where you need to store the solution at
+    /// intermediate times to efficiently compute gradients.
+    ///
+    /// # Arguments
+    /// - `final_time`: The time to integrate to
+    /// - `max_steps_between_checkpoints`: The maximum number of solver steps to take between saving checkpoints (if `None`, defaults to 500)
+    ///
+    /// # Returns
+    /// A tuple of `(checkpointer, output_matrix, output_times)` where:
+    /// - `checkpointer` implements the `Checkpointing` trait and can be used for adjoint integrations
+    /// - `output_matrix` a dense matrix containing the solution at each output time
+    /// - `output_times` a vector of timepoints corresponding to the columns of `output_matrix`
     #[allow(clippy::type_complexity)]
     fn solve_with_checkpointing(
         &mut self,
@@ -268,9 +309,29 @@ where
         Ok((checkpointer, ret_y, ret_t))
     }
 
-    /// Solve the problem and write out the solution at the given timepoints, using checkpointing so that
-    /// the solution can be interpolated at any timepoint.
-    /// See [Self::solve_dense] for a similar method that does not use checkpointing.
+    /// Solve the ODE from the current time to `t_eval[t_eval.len()-1]` with checkpointing, evaluating at specified times.
+    ///
+    /// This method is similar to [Self::solve_dense] but additionally saves checkpoints of the solver state
+    /// at regular intervals. Checkpointing enables efficient adjoint sensitivity analysis by storing the
+    /// forward integration state, allowing backward integration to compute gradients without recomputing
+    /// the entire forward solution.
+    ///
+    /// # Arguments
+    /// - `t_eval`: A slice of times at which to evaluate the solution. Times should be in increasing order.
+    /// - `max_steps_between_checkpoints`: The maximum number of solver steps to take between saving checkpoints.
+    ///   If `None`, defaults to 500.
+    ///
+    /// # Returns
+    /// A tuple of `(checkpointer, solution_matrix)` where:
+    /// - `checkpointer` implements the `Checkpointing` trait and stores the forward integration state for use in adjoint integrations
+    /// - `solution_matrix` is a dense matrix with one column per evaluation time and one row per state variable
+    ///
+    /// # Post-condition
+    /// After the solver finishes, the internal state of the solver is at time `t_eval[t_eval.len()-1]`.
+    ///
+    /// # See also
+    /// - [Self::solve_dense] for a similar method without checkpointing
+    /// - [Self::solve_with_checkpointing] for checkpointing with adaptive output times
     #[allow(clippy::type_complexity)]
     fn solve_dense_with_checkpointing(
         &mut self,
