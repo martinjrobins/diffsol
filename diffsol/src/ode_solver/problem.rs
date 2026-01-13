@@ -10,12 +10,22 @@ use crate::{
     SensEquations, Tableau, VectorRef,
 };
 
+/// Options for the initial condition solver used to find consistent initial conditions
+/// (i.e. when a mass matrix with zeros on the diagonal is present)
 pub struct InitialConditionSolverOptions<T: Scalar> {
+    /// use a backtracking linesearch in the Newton solver (default: true)
     pub use_linesearch: bool,
+    /// maximum number of iterations of the linesearch (default: 10)
     pub max_linesearch_iterations: usize,
+    /// maximum number of Newton iterations for the initial condition solve (default: 10)
     pub max_newton_iterations: usize,
+    /// maximum number of linear solver setups during the initial condition solve (default: 4)
+    /// This compounds with the max_newton_iterations to limit the total number of newton
+    /// iterations (i.e. max_newton_iterations * max_linear_solver_setups)
     pub max_linear_solver_setups: usize,
+    /// factor to reduce the step size during the linesearch (default: 0.5)
     pub step_reduction_factor: T,
+    /// Armijo constant for the linesearch (default: 1e-4)
     pub armijo_constant: T,
 }
 
@@ -32,14 +42,26 @@ impl<T: Scalar> Default for InitialConditionSolverOptions<T> {
     }
 }
 
+/// Options for the ODE solver. These options control various aspects of the solver's behavior.
+/// Some options may not be applicable to all solver methods (e.g. implicit vs explicit methods).
 pub struct OdeSolverOptions<T: Scalar> {
+    /// maximum number of nonlinear solver iterations per solve (default: 10)
     pub max_nonlinear_solver_iterations: usize,
+    /// maximum number of error test failures before aborting the solve and returning an error (default: 40)
     pub max_error_test_failures: usize,
+    /// maximum number of nonlinear solver failures before aborting the solve and returning an error (default: 50)
     pub max_nonlinear_solver_failures: usize,
+    /// minimum allowed timestep size (default: 1e-13)
     pub min_timestep: T,
+    /// maximum number of steps after which to update the Jacobian (default: 20).
+    /// This only requires an additional linear solver setup, not evaluation of the full Jacobian.
     pub update_jacobian_after_steps: usize,
+    /// maximum number of steps after which to update the RHS Jacobian (default: 50).
+    /// This evaluates the full Jacobian of the RHS function and requires an additional linear solver setup.
     pub update_rhs_jacobian_after_steps: usize,
+    /// threshold on the change in timestep size |dt_new / dt_old - 1| to trigger a Jacobian update (default: 0.3)
     pub threshold_to_update_jacobian: T,
+    /// threshold on the change in timestep size |dt_new / dt_old - 1| to trigger a RHS Jacobian update (default: 0.2)
     pub threshold_to_update_rhs_jacobian: T,
 }
 
@@ -58,24 +80,44 @@ impl<T: Scalar> Default for OdeSolverOptions<T> {
     }
 }
 
+/// Struct representing an ODE solver problem, encapsulating the equations,
+/// tolerances, initial conditions, and solver options. This struct can be used
+/// to create individual solvers for different methods (e.g., BDF, Runge-Kutta),
+/// solving the same underlying problem with consistent settings.
+/// 
+/// This struct is normally generated via the `OdeBuilder` API, which provides
+/// a more user-friendly interface for constructing ODE solver problems.
 pub struct OdeSolverProblem<Eqn>
 where
     Eqn: OdeEquations,
 {
+    /// The ODE equations to be solved, which satisfy the `OdeEquations` trait.
     pub eqn: Eqn,
+    /// Relative tolerance for the solver. The state equations are solved to this and the absolute tolerance, given by the norm `sum_i(y_i / (atol_i + rtol * |y0_i|)) < 1`.
     pub rtol: Eqn::T,
+    /// Absolute tolerance for the solver. The state equations are solved to this and the relative tolerance, given by the norm `sum_i(y_i / (atol_i + rtol * |y0_i|)) < 1`.
     pub atol: Eqn::V,
+    /// Initial time for the ODE solve.
     pub t0: Eqn::T,
+    /// Initial step size for the ODE solver.
     pub h0: Eqn::T,
+    /// Whether to integrate the output equations alongside the state equations.
     pub integrate_out: bool,
+    /// Relative tolerance for the forward sensitivity equations or the adjoint equations, if sensitivities are being computed. If `None`, sensitivities are not included in error control.
     pub sens_rtol: Option<Eqn::T>,
+    /// Absolute tolerance for the forward sensitivity equations or the adjoint equations, if sensitivities are being computed. If `None`, sensitivities are not included in error control.
     pub sens_atol: Option<Eqn::V>,
+    /// Relative tolerance for output equations, if outputs are being integrated and used in error control.
     pub out_rtol: Option<Eqn::T>,
+    /// Absolute tolerance for output equations, if outputs are being integrated and used in error control.
     pub out_atol: Option<Eqn::V>,
+    /// Relative tolerance for the adjoint gradient wrt each parameter, if adjoint sensitivities are being computed and used in error control.
     pub param_rtol: Option<Eqn::T>,
+    /// Absolute tolerance for the adjoint gradient wrt each parameter, if adjoint sensitivities are being computed and used in error control.
     pub param_atol: Option<Eqn::V>,
-
+    /// Options for the initial condition solver.
     pub ic_options: InitialConditionSolverOptions<Eqn::T>,
+    /// Options for the ODE solver.
     pub ode_options: OdeSolverOptions<Eqn::T>,
 }
 
