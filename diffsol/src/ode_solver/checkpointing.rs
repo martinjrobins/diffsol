@@ -8,7 +8,7 @@ use crate::{
 use num_traits::{abs, One};
 
 /// Hermite interpolator for ODE solution trajectories.
-/// 
+///
 /// This interpolator uses cubic Hermite interpolation based on solution values and
 /// derivatives at discrete time points. It provides smooth interpolation between
 /// checkpoints and is used internally by the checkpointing system for adjoint
@@ -41,21 +41,21 @@ where
     V: Vector,
 {
     /// Create a new Hermite interpolator with the given solution data.
-    /// 
+    ///
     /// # Arguments
     /// - `ys`: Vector of solution values at each time point
     /// - `ydots`: Vector of solution derivatives (dy/dt) at each time point
     /// - `ts`: Vector of time points (must be sorted)
-    /// 
+    ///
     /// # Notes
     /// All three vectors must have the same length. The time points should be
     /// sorted in increasing or decreasing order for proper interpolation.
     pub fn new(ys: Vec<V>, ydots: Vec<V>, ts: Vec<V::T>) -> Self {
         HermiteInterpolator { ys, ydots, ts }
     }
-    
+
     /// Get the last time point in the interpolator.
-    /// 
+    ///
     /// # Returns
     /// The last time value, or `None` if the interpolator is empty.
     pub fn last_t(&self) -> Option<V::T> {
@@ -64,9 +64,9 @@ where
         }
         Some(self.ts[self.ts.len() - 1])
     }
-    
+
     /// Get the last time step size in the interpolator.
-    /// 
+    ///
     /// # Returns
     /// The difference between the last two time points, or `None` if there are
     /// fewer than two time points.
@@ -76,17 +76,17 @@ where
         }
         Some(self.ts[self.ts.len() - 1] - self.ts[self.ts.len() - 2])
     }
-    
+
     /// Reset the interpolator by solving the ODE between two checkpointed states.
-    /// 
+    ///
     /// This method clears the current interpolation data and re-solves the ODE
     /// from `state0` to `state1`, storing all intermediate solution points.
-    /// 
+    ///
     /// # Arguments
     /// - `solver`: The ODE solver to use for integration
     /// - `state0`: The initial state (starting point)
     /// - `state1`: The final state (target point)
-    /// 
+    ///
     /// # Returns
     /// Ok(()) on success, or an error if the solver fails.
     pub fn reset<'a, Eqn, Method, State>(
@@ -120,13 +120,13 @@ where
     }
 
     /// Interpolate the solution at a given time point.
-    /// 
+    ///
     /// Uses cubic Hermite interpolation to compute the solution value at time `t`.
-    /// 
+    ///
     /// # Arguments
     /// - `t`: The time at which to interpolate
     /// - `y`: Output vector to store the interpolated solution
-    /// 
+    ///
     /// # Returns
     /// `Some(())` if the interpolation succeeded (t is within range), `None` if
     /// t is outside the range of stored time points.
@@ -171,20 +171,20 @@ where
 }
 
 /// Checkpointing system for adjoint sensitivity analysis.
-/// 
+///
 /// This struct manages checkpoints of an ODE solution for use in adjoint sensitivity
 /// computation. It stores solution states at discrete checkpoints and uses Hermite
 /// interpolation between them to provide solution values at arbitrary time points
 /// during the backward adjoint solve.
-/// 
+///
 /// The checkpointing system uses a two-level interpolation strategy:
 /// 1. Checkpoints: Discrete saved states of the ODE solution
 /// 2. Segments: Hermite interpolators that densely sample between adjacent checkpoints
-/// 
+///
 /// When interpolating at a time point, the system first checks if it's in the current
 /// segment. If not, it re-solves the ODE between the appropriate checkpoints to create
 /// a new segment, then interpolates within that segment.
-/// 
+///
 /// # Type Parameters
 /// - `Eqn`: The ODE equations type (inferred from the solver)
 /// - `Method`: The forward solver method type (inferred from the solver)
@@ -220,7 +220,7 @@ where
     Eqn: OdeEquations,
 {
     /// Create a new checkpointing system.
-    /// 
+    ///
     /// # Arguments
     /// - `solver`: The forward solver to use for re-solving segments
     /// - `start_idx`: Index of the checkpoint to start from (must be < checkpoints.len() - 1)
@@ -228,7 +228,7 @@ where
     /// - `segment`: Optional pre-computed Hermite interpolator for the initial segment given by `start_idx`.
     ///   If `None`, the segment between `checkpoints[start_idx]` and `checkpoints[start_idx+1]`
     ///   will be computed automatically.
-    /// 
+    ///
     /// # Panics
     /// Panics if `checkpoints.len() < 2` or if `start_idx >= checkpoints.len() - 1`.
 
@@ -267,10 +267,10 @@ where
     }
 
     /// Get the last (most recent) time point in the current segment.
-    /// 
+    ///
     /// # Returns
     /// The last time value in the current interpolation segment.
-    /// 
+    ///
     /// # Panics
     /// Panics if the segment is empty (should never happen with valid construction).
     pub fn last_t(&self) -> Eqn::T {
@@ -281,7 +281,7 @@ where
     }
 
     /// Get the last time step size in the current segment.
-    /// 
+    ///
     /// # Returns
     /// The difference between the last two time points in the current segment,
     /// or `None` if the segment has fewer than two points.
@@ -290,7 +290,7 @@ where
     }
 
     /// Get a reference to the ODE problem associated with this checkpointing system.
-    /// 
+    ///
     /// # Returns
     /// A reference to the `OdeSolverProblem` that defines the ODE equations,
     /// tolerances, and other solver parameters.
@@ -299,22 +299,22 @@ where
     }
 
     /// Interpolate the solution at a given time point.
-    /// 
+    ///
     /// This method provides the forward solution value at time `t` for use during
     /// the backward adjoint solve. It first checks if `t` is within the current
     /// or previous segment. If not, it identifies the appropriate checkpoint interval,
     /// re-solves the ODE between those checkpoints to create a new segment, and then
     /// interpolates within that segment.
-    /// 
+    ///
     /// # Arguments
     /// - `t`: The time at which to interpolate the solution
     /// - `y`: Output vector to store the interpolated solution
-    /// 
+    ///
     /// # Returns
     /// - `Ok(())` if interpolation succeeded
     /// - `Err(...)` if `t` is outside the range of checkpoints (beyond roundoff tolerance)
     ///   or if re-solving the ODE fails
-    /// 
+    ///
     /// # Notes
     /// Small deviations from the checkpoint range (within roundoff error) are automatically
     /// snapped to the nearest checkpoint boundary.

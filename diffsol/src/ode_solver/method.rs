@@ -44,7 +44,7 @@ where
 {
     /// The state type used by the solver
     type State: OdeSolverState<Eqn::V>;
-    
+
     /// The configuration type used by the solver
     type Config: OdeSolverConfig<Eqn::T>;
 

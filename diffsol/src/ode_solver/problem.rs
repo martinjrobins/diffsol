@@ -84,7 +84,7 @@ impl<T: Scalar> Default for OdeSolverOptions<T> {
 /// tolerances, initial conditions, and solver options. This struct can be used
 /// to create individual solvers for different methods (e.g., BDF, Runge-Kutta),
 /// solving the same underlying problem with consistent settings.
-/// 
+///
 /// This struct is normally generated via the `OdeBuilder` API, which provides
 /// a more user-friendly interface for constructing ODE solver problems.
 pub struct OdeSolverProblem<Eqn>
@@ -355,7 +355,7 @@ where
     Eqn: OdeEquations,
 {
     /// Returns whether outputs are included in the error control.
-    /// 
+    ///
     /// This returns `true` if all of the following conditions are met:
     /// - Output integration is enabled (`integrate_out` is true)
     /// - The equations have output functions defined
@@ -442,17 +442,17 @@ where
     }
 
     /// Create a new BDF solver instance for the problem with the given initial state.
-    /// 
+    ///
     /// This method creates a BDF solver with a Newton nonlinear solver using the specified
     /// linear solver type. The state must be provided and should typically be created using
     /// [`Self::bdf_state`], which ensures consistency for problems with mass matrices.
-    /// 
+    ///
     /// # Type Parameters
     /// - `LS`: The linear solver type used in the Newton solver
-    /// 
+    ///
     /// # Arguments
     /// - `state`: The initial state for the solver
-    /// 
+    ///
     /// # Returns
     /// A BDF solver instance configured for this problem
     #[allow(clippy::type_complexity)]
@@ -469,12 +469,12 @@ where
 
     /// Create a new BDF solver instance for the problem. This will create a consistent initial state,
     /// so might require solving a nonlinear system if a mass matrix is present.
-    /// 
+    ///
     /// This is a convenience method that combines [`Self::bdf_state`] and [`Self::bdf_solver`].
-    /// 
+    ///
     /// # Type Parameters
     /// - `LS`: The linear solver type used in the Newton solver
-    /// 
+    ///
     /// # Returns
     /// A BDF solver instance configured for this problem with a consistent initial state
     #[allow(clippy::type_complexity)]
@@ -514,20 +514,20 @@ where
     }
 
     /// Create a new BDF solver instance for the backwards solve for the adjoint equations. This requires
-    /// a checkpointer to provide the forward solution during the backward solve. 
-    /// 
+    /// a checkpointer to provide the forward solution during the backward solve.
+    ///
     /// If you are computing adjoint sensitivites of the continuous integral of the outputs, the number
     /// of output equations are taken from the equations being solved. If you are computing adjoint sensitivities
     /// for a discrete sum of outputs not in your equations, you must override the number of outputs via `nout_override`.
-    /// 
+    ///
     /// # Type Parameters
     /// - `LS`: The linear solver type used in the Newton solver
     /// - `S`: The forward solver method type used for checkpointing (this can be auto-deduced from the `checkpointer`)
-    /// 
+    ///
     /// # Arguments
     /// - `checkpointer`: The checkpointing object containing the forward solution
     /// - `nout_override`: Optional override for the number of output equations
-    /// 
+    ///
     /// # Returns
     /// A BDF solver instance configured for adjoint sensitivity analysis
     #[allow(clippy::type_complexity)]
@@ -572,16 +572,16 @@ where
     }
 
     /// Create a new BDF solver instance for the problem with forward sensitivities, given the initial state.
-    /// 
+    ///
     /// This method creates a BDF solver that simultaneously solves the state equations and the
     /// forward sensitivity equations with respect to the parameters.
-    /// 
+    ///
     /// # Type Parameters
     /// - `LS`: The linear solver type used in the Newton solver
-    /// 
+    ///
     /// # Arguments
     /// - `state`: The initial state for the solver (including sensitivities)
-    /// 
+    ///
     /// # Returns
     /// A BDF solver instance configured for forward sensitivity analysis
     #[allow(clippy::type_complexity)]
@@ -607,12 +607,12 @@ where
 
     /// Create a new BDF solver instance for the problem with forward sensitivities. This will create
     /// a consistent initial state, so might require solving a nonlinear system if a mass matrix is present.
-    /// 
+    ///
     /// This is a convenience method that combines [`Self::bdf_state_sens`] and [`Self::bdf_solver_sens`].
-    /// 
+    ///
     /// # Type Parameters
     /// - `LS`: The linear solver type used in the Newton solver
-    /// 
+    ///
     /// # Returns
     /// A BDF solver instance configured for forward sensitivity analysis with a consistent initial state
     #[allow(clippy::type_complexity)]
@@ -639,7 +639,7 @@ where
     /// Note: This function will not provide a consistent initial state for
     /// problems with a mass matrix, for this case please use [Self::rk_state_and_consistent]
     /// or initialise the state manually.
-    /// 
+    ///
     /// Note that in-built tableaus (e.g. TR-BDF2, ESDIRK34) have their own methods, so
     /// only use this method for custom tableaus.
     pub fn rk_state<DM: DenseMatrix>(
@@ -692,18 +692,18 @@ where
     }
 
     /// Create a new SDIRK (Singly Diagonally Implicit Runge-Kutta) solver instance with a custom tableau.
-    /// 
+    ///
     /// This method creates an SDIRK solver using the provided Butcher tableau. For built-in tableaus
     /// like TR-BDF2 or ESDIRK34, use the specialized methods [`Self::tr_bdf2_solver`] or [`Self::esdirk34_solver`].
-    /// 
+    ///
     /// # Type Parameters
     /// - `LS`: The linear solver type
     /// - `DM`: The dense matrix type for the tableau (this can can be inferred from the tableau)
-    /// 
+    ///
     /// # Arguments
     /// - `state`: The initial state for the solver
     /// - `tableau`: The Butcher tableau defining the SDIRK method
-    /// 
+    ///
     /// # Returns
     /// An SDIRK solver instance configured for this problem
     pub fn sdirk_solver<
@@ -775,19 +775,19 @@ where
     }
 
     /// Create a new SDIRK solver instance with forward sensitivities using a custom tableau.
-    /// 
+    ///
     /// This method creates an SDIRK solver that simultaneously solves the state equations and the
     /// forward sensitivity equations. For built-in tableaus, use specialized methods like
     /// [`Self::tr_bdf2_solver_sens`] or [`Self::esdirk34_solver_sens`].
-    /// 
+    ///
     /// # Type Parameters
     /// - `LS`: The linear solver type
     /// - `DM`: The dense matrix type for the tableau (this can can be inferred from the tableau)
-    /// 
+    ///
     /// # Arguments
     /// - `state`: The initial state for the solver (including sensitivities)
     /// - `tableau`: The Butcher tableau defining the SDIRK method
-    /// 
+    ///
     /// # Returns
     /// An SDIRK solver instance configured for forward sensitivity analysis
     pub fn sdirk_solver_sens<
@@ -823,17 +823,17 @@ where
     );
 
     /// Create a new explicit Runge-Kutta solver instance with a custom tableau.
-    /// 
+    ///
     /// This method creates an explicit RK solver using the provided Butcher tableau. For built-in
     /// tableaus like Tsitouras 4(5), use the specialized method [`Self::tsit45_solver`].
-    /// 
+    ///
     /// # Type Parameters
     /// - `DM`: The dense matrix type for the tableau (this can be auto-deduced from the `tableau`)
-    /// 
+    ///
     /// # Arguments
     /// - `state`: The initial state for the solver
     /// - `tableau`: The Butcher tableau defining the explicit RK method
-    /// 
+    ///
     /// # Returns
     /// An explicit RK solver instance configured for this problem
     pub fn explicit_rk_solver<DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>>(
@@ -908,17 +908,17 @@ where
     }
 
     /// Create a new explicit Runge-Kutta solver instance with forward sensitivities using a custom tableau.
-    /// 
+    ///
     /// This method creates an explicit RK solver that simultaneously solves the state equations and the
     /// forward sensitivity equations. For built-in tableaus, use specialized methods like [`Self::tsit45_solver_sens`].
-    /// 
+    ///
     /// # Type Parameters
     /// - `DM`: The dense matrix type for the tableau (this can be auto-deduced from the `tableau`)
-    /// 
+    ///
     /// # Arguments
     /// - `state`: The initial state for the solver (including sensitivities)
     /// - `tableau`: The Butcher tableau defining the explicit RK method
-    /// 
+    ///
     /// # Returns
     /// An explicit RK solver instance configured for forward sensitivity analysis
     pub fn explicit_rk_solver_sens<DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>>(
@@ -953,7 +953,7 @@ pub struct OdeSolverSolutionPoint<V: Vector> {
 }
 
 /// Container for the complete ODE solver solution, including state and sensitivity solution points.
-/// 
+///
 /// This struct stores the solution trajectory, keeping points sorted by time. It supports both
 /// forward-time integration (increasing time) and backward-time integration (decreasing time).
 pub struct OdeSolverSolution<V: Vector> {
@@ -971,10 +971,10 @@ pub struct OdeSolverSolution<V: Vector> {
 
 impl<V: Vector> OdeSolverSolution<V> {
     /// Add a new solution point to the solution, maintaining time-sorted order.
-    /// 
+    ///
     /// The point is inserted at the correct position to keep the solution points
     /// sorted by time (increasing for forward integration, decreasing for backward).
-    /// 
+    ///
     /// # Arguments
     /// - `state`: The state vector at this solution point
     /// - `t`: The time at this solution point
@@ -999,10 +999,10 @@ impl<V: Vector> OdeSolverSolution<V> {
         }
     }
     /// Add a new solution point with sensitivities to the solution, maintaining time-sorted order.
-    /// 
+    ///
     /// This method adds both the state and its sensitivities with respect to parameters.
     /// The points are inserted at the correct position to keep all solution points sorted by time.
-    /// 
+    ///
     /// # Arguments
     /// - `state`: The state vector at this solution point
     /// - `t`: The time at this solution point
