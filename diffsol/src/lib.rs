@@ -151,7 +151,6 @@ pub mod ode_equations;
 pub mod ode_solver;
 pub mod op;
 pub mod scalar;
-pub mod solver;
 pub mod vector;
 
 #[cfg(feature = "sundials")]

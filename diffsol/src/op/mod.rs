@@ -68,6 +68,7 @@ impl<'a, C: Op> ParameterisedOp<'a, C> {
     }
 }
 
+/// trait interface for operators used in the [builder pattern](crate::OdeBuilder)
 pub trait BuilderOp: Op {
     fn set_nstates(&mut self, nstates: usize);
     fn set_nparams(&mut self, nparams: usize);
@@ -97,11 +98,16 @@ impl<C: Op> Op for ParameterisedOp<'_, C> {
     }
 }
 
+/// Useful statistics about an operator.
 #[derive(Default, Clone, Serialize, Debug)]
 pub struct OpStatistics {
+    /// number of times the operator was called
     pub number_of_calls: usize,
+    /// number of times the jacobian-vector product was computed
     pub number_of_jac_muls: usize,
+    /// number of times the jacobian matrix was evaluated
     pub number_of_matrix_evals: usize,
+    /// number of times the adjoint jacobian-vector product was computed
     pub number_of_jac_adj_muls: usize,
 }
 
