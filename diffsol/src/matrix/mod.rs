@@ -293,7 +293,9 @@ pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 's
         ll: &Self,
         lr: &Self,
         algebraic_indices: &<Self::V as Vector>::Index,
-    ) -> Self;
+    ) -> Self {
+        combine(ul, ur, ll, lr, algebraic_indices)
+    }
 
     /// Perform the assignment: self = x + beta * y where x and y are matrices and beta is a scalar.
     ///
