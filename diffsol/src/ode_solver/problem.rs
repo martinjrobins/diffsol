@@ -691,6 +691,21 @@ where
         RkState::new_with_sensitivities_and_consistent::<LS, _>(self, tableau.order())
     }
 
+    /// Create a new SDIRK (Singly Diagonally Implicit Runge-Kutta) solver instance with a custom tableau.
+    /// 
+    /// This method creates an SDIRK solver using the provided Butcher tableau. For built-in tableaus
+    /// like TR-BDF2 or ESDIRK34, use the specialized methods [`Self::tr_bdf2_solver`] or [`Self::esdirk34_solver`].
+    /// 
+    /// # Type Parameters
+    /// - `LS`: The linear solver type
+    /// - `DM`: The dense matrix type for the tableau (this can can be inferred from the tableau)
+    /// 
+    /// # Arguments
+    /// - `state`: The initial state for the solver
+    /// - `tableau`: The Butcher tableau defining the SDIRK method
+    /// 
+    /// # Returns
+    /// An SDIRK solver instance configured for this problem
     pub fn sdirk_solver<
         LS: LinearSolver<Eqn::M>,
         DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
@@ -759,6 +774,22 @@ where
         Sdirk::new_augmented(self, state, tableau, LS::default(), augmented_eqn)
     }
 
+    /// Create a new SDIRK solver instance with forward sensitivities using a custom tableau.
+    /// 
+    /// This method creates an SDIRK solver that simultaneously solves the state equations and the
+    /// forward sensitivity equations. For built-in tableaus, use specialized methods like
+    /// [`Self::tr_bdf2_solver_sens`] or [`Self::esdirk34_solver_sens`].
+    /// 
+    /// # Type Parameters
+    /// - `LS`: The linear solver type
+    /// - `DM`: The dense matrix type for the tableau (this can can be inferred from the tableau)
+    /// 
+    /// # Arguments
+    /// - `state`: The initial state for the solver (including sensitivities)
+    /// - `tableau`: The Butcher tableau defining the SDIRK method
+    /// 
+    /// # Returns
+    /// An SDIRK solver instance configured for forward sensitivity analysis
     pub fn sdirk_solver_sens<
         LS: LinearSolver<Eqn::M>,
         DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
