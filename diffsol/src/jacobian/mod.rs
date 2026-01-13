@@ -119,6 +119,31 @@ gen_find_non_zeros_linear!(
 
 use std::cell::RefCell;
 
+/// A structure for efficiently computing sparse Jacobians using graph coloring.
+///
+/// This struct uses graph coloring to group matrix columns that can be computed simultaneously
+/// using finite differences. By identifying columns that don't share any non-zero rows (i.e.,
+/// are structurally orthogonal), multiple Jacobian columns can be computed in parallel with a
+/// single function evaluation per color.
+///
+/// # Algorithm
+///
+/// The algorithm works as follows:
+/// 1. Construct a graph where each column is a node, and edges connect columns that share at least one non-zero row
+/// 2. Apply greedy graph coloring to assign colors to columns such that no two adjacent columns share the same color
+/// 3. For each color, perturb all columns of that color simultaneously and compute the corresponding Jacobian entries
+///
+/// To enable 3., we pre-calculate for all colors:
+///    - all the indices in the peturbed vector to peterb (i.e. set to 1) which is stored in `input_indices_per_color`.
+///    - all the indices in the output vector to read the results from which is stored in `src_indices_per_color`.
+///    - all the indices in the Jacobian matrix data vector to write the results to which is stored in `dst_indices_per_color`.
+///
+/// This reduces the number of function evaluations from O(n) to O(χ), where χ is the chromatic number
+/// of the graph (typically much smaller than n for sparse matrices).
+///
+/// # Type Parameters
+///
+/// * `M` - The matrix type used to store the Jacobian
 pub struct JacobianColoring<M: Matrix> {
     dst_indices_per_color: Vec<<M::V as Vector>::Index>,
     src_indices_per_color: Vec<<M::V as Vector>::Index>,
@@ -140,6 +165,21 @@ impl<M: Matrix> Clone for JacobianColoring<M> {
 }
 
 impl<M: Matrix> JacobianColoring<M> {
+    /// Create a new Jacobian coloring from a sparsity pattern and list of non-zero entries.
+    ///
+    /// This method constructs the graph coloring and organizes the indices for efficient
+    /// Jacobian computation. The coloring is computed using a greedy algorithm that aims
+    /// to minimize the number of colors (and thus function evaluations) needed.
+    ///
+    /// # Arguments
+    ///
+    /// * `sparsity` - The sparsity pattern of the Jacobian matrix
+    /// * `non_zeros` - A list of (row, column) pairs indicating non-zero entries in the Jacobian
+    /// * `ctx` - The context for creating vectors and indices
+    ///
+    /// # Returns
+    ///
+    /// A new `JacobianColoring` instance ready to compute Jacobians efficiently.
     pub fn new(sparsity: &impl MatrixSparsity<M>, non_zeros: &[(usize, usize)], ctx: M::C) -> Self {
         let ncols = sparsity.ncols();
         let graph = nonzeros2graph(non_zeros, ncols);
@@ -189,6 +229,22 @@ impl<M: Matrix> JacobianColoring<M> {
     //    Self::new_from_non_zeros(op, non_zeros)
     //}
 
+    /// Compute the Jacobian matrix in-place using the coloring scheme.
+    ///
+    /// This method uses the pre-computed coloring to efficiently compute the Jacobian by
+    /// evaluating `jac_mul` once per color instead of once per column. For each color group,
+    /// it perturbs multiple columns simultaneously and extracts the corresponding Jacobian entries.
+    ///
+    /// # Arguments
+    ///
+    /// * `op` - The nonlinear operator whose Jacobian is being computed
+    /// * `x` - The state vector at which to evaluate the Jacobian
+    /// * `t` - The time at which to evaluate the Jacobian
+    /// * `y` - The matrix to store the computed Jacobian (modified in-place)
+    ///
+    /// # Note
+    ///
+    /// The sparsity pattern of `y` must match the sparsity pattern used to create this coloring.
     pub fn jacobian_inplace<F: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>>(
         &self,
         op: &F,
@@ -209,6 +265,18 @@ impl<M: Matrix> JacobianColoring<M> {
         }
     }
 
+    /// Compute the sensitivity matrix (∂F/∂p) in-place using the coloring scheme.
+    ///
+    /// Similar to `jacobian_inplace`, but computes the sensitivity of the right-hand side
+    /// with respect to parameters rather than the state variables. This is used for forward
+    /// sensitivity analysis.
+    ///
+    /// # Arguments
+    ///
+    /// * `op` - The nonlinear operator whose sensitivity matrix is being computed
+    /// * `x` - The state vector at which to evaluate the sensitivities
+    /// * `t` - The time at which to evaluate the sensitivities
+    /// * `y` - The matrix to store the computed sensitivity matrix (modified in-place)
     pub fn sens_inplace<F: NonLinearOpSens<M = M, V = M::V, T = M::T, C = M::C>>(
         &self,
         op: &F,
@@ -229,6 +297,18 @@ impl<M: Matrix> JacobianColoring<M> {
         }
     }
 
+    /// Compute the transposed Jacobian (adjoint) matrix in-place using the coloring scheme.
+    ///
+    /// This method computes the transpose of the Jacobian, which is used in adjoint sensitivity
+    /// analysis. The coloring is applied to the columns of the transposed matrix (which correspond
+    /// to the rows of the original Jacobian).
+    ///
+    /// # Arguments
+    ///
+    /// * `op` - The nonlinear operator whose transposed Jacobian is being computed
+    /// * `x` - The state vector at which to evaluate the transposed Jacobian
+    /// * `t` - The time at which to evaluate the transposed Jacobian
+    /// * `y` - The matrix to store the computed transposed Jacobian (modified in-place)
     pub fn adjoint_inplace<F: NonLinearOpAdjoint<M = M, V = M::V, T = M::T, C = M::C>>(
         &self,
         op: &F,

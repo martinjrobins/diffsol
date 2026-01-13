@@ -13,7 +13,8 @@ use std::{
 
 use super::{NonLinearOp, Op};
 
-// callable to solve for F(y) = M (y) - h * f(phi + c * y) = 0
+/// A NonLinearOp implementation of the SDIRK implicit equation system.
+/// i.e. F(y) = M (y) - h * f(phi + c * y) = 0
 pub struct SdirkCallable<Eqn: OdeEquations> {
     pub(crate) eqn: Eqn,
     c: Eqn::T,

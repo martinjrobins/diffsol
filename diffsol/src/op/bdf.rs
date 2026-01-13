@@ -10,7 +10,8 @@ use std::{
     ops::{AddAssign, Deref, SubAssign},
 };
 
-// callable to solve for F(y) = M (y' + psi) - c * f(y) = 0
+/// A NonLinearOp implementation of the BDF implicit equation system.
+/// i.e. F(y) = M (y' + psi) - c * f(y) = 0
 pub struct BdfCallable<Eqn: OdeEquationsImplicit> {
     pub(crate) eqn: Eqn,
     psi_neg_y0: RefCell<Eqn::V>,

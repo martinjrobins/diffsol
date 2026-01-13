@@ -10,6 +10,7 @@ use std::ops::MulAssign;
 
 use super::state::StateCommon;
 
+/// State container for the BDF integrator. For the common state API use `as_ref` and `as_mut` methods.
 #[derive(Clone)]
 pub struct BdfState<V, M = <V as DefaultDenseMatrix>::M>
 where

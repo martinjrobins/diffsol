@@ -148,6 +148,16 @@ jobs:
       if: matrix.os == 'windows-latest'
       run: |
         echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-cranelift" >> $GITHUB_ENV
+    - name: Free Disk Space (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      uses: jlumbroso/free-disk-space@main
+      with:
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: false
+        docker-images: true
+        swap-storage: true
     - name: Run tests - default features
       if: matrix.tests == true
       run: cargo test --verbose

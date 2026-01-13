@@ -257,40 +257,6 @@ pub trait OdeEquations: for<'a> OdeEquationsRef<'a> {
     fn get_params(&self, p: &mut Self::V);
 }
 
-//impl<'a, T: OdeEquations> OdeEquationsRef<'a> for &'a mut T {
-//    type Mass = <T as OdeEquationsRef<'a>>::Mass;
-//    type Rhs = <T as OdeEquationsRef<'a>>::Rhs;
-//    type Root = <T as OdeEquationsRef<'a>>::Root;
-//    type Init = <T as OdeEquationsRef<'a>>::Init;
-//    type Out = <T as OdeEquationsRef<'a>>::Out;
-//}
-//
-//impl<T: OdeEquations> OdeEquations for &'_ mut T {
-//    fn rhs(&self) -> <Self as OdeEquationsRef<'_>>::Rhs {
-//        (*self).rhs()
-//    }
-//
-//    fn mass(&self) -> Option<<Self as OdeEquationsRef<'_>>::Mass> {
-//        (*self).mass()
-//    }
-//
-//    fn root(&self) -> Option<<Self as OdeEquationsRef<'_>>::Root> {
-//        (*self).root()
-//    }
-//
-//    fn out(&self) -> Option<<Self as OdeEquationsRef<'_>>::Out> {
-//        (*self).out()
-//    }
-//
-//    fn init(&self) -> <Self as OdeEquationsRef<'_>>::Init {
-//        (*self).init()
-//    }
-//
-//    fn set_params(&mut self, p: &Self::V) {
-//        (*self).set_params(p)
-//    }
-//}
-
 impl<T: OdeEquations> OdeEquations for &'_ T {
     fn rhs(&self) -> <Self as OdeEquationsRef<'_>>::Rhs {
         (*self).rhs()

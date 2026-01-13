@@ -137,6 +137,10 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleJit + CodegenModuleCompile> De
     }
 }
 
+/// DiffSl implementation of ODE equations. This uses the [DiffSL language](https://martinjrobins.github.io/diffsl/) to specify the ODE equations.
+///
+/// The DiffSL code is compiled into the [DiffSlContext] which is used to evaluate the ODE equations. After compilation,
+/// if the matrix type is sparse, the sparsity patterns of the Jacobians are extracted from the compiled code for use in the ODE solver.
 pub struct DiffSl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
     context: DiffSlContext<M, CG>,
     mass_sparsity: Option<M::Sparsity>,
@@ -154,6 +158,27 @@ pub struct DiffSl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
 }
 
 impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModuleJit + CodegenModuleCompile> DiffSl<M, CG> {
+    /// Compile DiffSL code into ODE equations.
+    ///
+    /// This is a convenience function that creates a new `DiffSlContext` from the provided code
+    /// and then calls `from_context` to create the `DiffSl` instance. For more control over
+    /// the compilation process (e.g., number of threads), create the context directly using
+    /// `DiffSlContext::new` and then call `from_context`.
+    ///
+    /// # Arguments
+    ///
+    /// * `code` - The DiffSL code defining the ODE system
+    /// * `ctx` - The context for creating vectors and matrices (typically `Default::default()`)
+    /// * `include_sensitivities` - Whether to extract sparsity patterns for sensitivity computations.
+    ///   Set to `true` if you plan to compute sensitivities or adjoints.
+    ///
+    /// # Returns
+    ///
+    /// A new `DiffSl` instance that implements `OdeEquations` and can be used with ODE solvers.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the DiffSL code cannot be parsed or compiled.
     pub fn compile(
         code: &str,
         ctx: M::C,
@@ -162,6 +187,27 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModuleJit + CodegenModuleCompile
         let context = DiffSlContext::<M, CG>::new(code, 1, ctx)?;
         Ok(Self::from_context(context, include_sensitivities))
     }
+
+    /// Create a `DiffSl` instance from a pre-compiled `DiffSlContext`.
+    ///
+    /// This function extracts the sparsity patterns and Jacobian colorings from the compiled
+    /// context if the matrix type is sparse. The sparsity patterns are used by ODE solvers
+    /// to efficiently compute Jacobians using finite differences with coloring.
+    ///
+    /// # Arguments
+    ///
+    /// * `context` - A pre-compiled DiffSL context containing the compiled code
+    /// * `include_sensitivities` - Whether to extract sparsity patterns for sensitivity computations.
+    ///   If `true`, extracts sparsity patterns for forward and adjoint sensitivities. Set to `true`
+    ///   if you plan to compute sensitivities or adjoints.
+    ///
+    /// # Returns
+    ///
+    /// A new `DiffSl` instance with sparsity patterns extracted (if applicable).
+    ///
+    /// # Note
+    ///
+    /// For dense matrices, this function simply wraps the context without extracting sparsity patterns.
     pub fn from_context(context: DiffSlContext<M, CG>, include_sensitivities: bool) -> Self {
         let mut ret = Self {
             context,

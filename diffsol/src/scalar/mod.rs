@@ -7,6 +7,23 @@ use std::{
 pub mod cuda;
 
 use crate::vector::VectorView;
+
+/// A scalar type suitable for numerical computations in ODE solvers.
+///
+/// This trait aggregates multiple trait bounds from nalgebra, faer, and num_traits to ensure
+/// scalar types are suitable for all operations within diffsol.
+///
+/// # Implementations
+/// DiffSol provides implementations for `f64` and `f32`.
+///
+/// # Examples
+/// ```
+/// use diffsol::Scalar;
+///
+/// fn compute<T: Scalar>(x: T, y: T) -> T {
+///     x * x + y
+/// }
+/// ```
 pub trait Scalar:
     nalgebra::Scalar
     + faer::traits::ComplexField
@@ -22,12 +39,17 @@ pub trait Scalar:
     + Copy
     + PartialOrd
 {
+    /// Machine epsilon for this scalar type (smallest representable positive value such that 1.0 + EPSILON != 1.0).
     const EPSILON: Self;
+    /// Positive infinity value for this scalar type.
     const INFINITY: Self;
+    /// Not-a-Number (NaN) value for this scalar type.
     const NAN: Self;
+    /// Check if this value is NaN.
     fn is_nan(self) -> bool;
 }
 
+/// The index type used throughout DiffSol for indexing vectors and matrices.
 pub type IndexType = usize;
 
 impl Scalar for f64 {
@@ -64,16 +86,21 @@ impl<T: Scalar> From<T> for Scale<T> {
     }
 }
 
+/// A wrapper for scalar values used when scaling vectors and matrices.
 #[derive(Copy, Clone, Debug)]
 pub struct Scale<E: Scalar>(pub E);
 
 impl<E: Scalar> Scale<E> {
+    /// Get the underlying scalar value.
     #[inline]
     pub fn value(self) -> E {
         self.0
     }
 }
 
+/// Create a `Scale` wrapper from a scalar value.
+///
+/// This is a convenience function equivalent to `Scale(value)`.
 #[inline]
 pub fn scale<E: Scalar>(value: E) -> Scale<E> {
     Scale(value)
