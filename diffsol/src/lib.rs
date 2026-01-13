@@ -163,8 +163,8 @@ pub mod jacobian;
 ///
 /// This module defines the [LinearSolver] trait for solving linear systems and provides implementations:
 /// - Direct solvers: [NalgebraLU], [FaerLU], [FaerSparseLU]
-/// - Optional sparse solvers: [KLU] (requires `suitesparse` feature)
-/// - GPU solvers: [CudaLU] (requires `cuda` feature)
+/// - Optional sparse solvers: `KLU` (requires `suitesparse` feature)
+/// - GPU solvers: `CudaLU` (requires `cuda` feature)
 ///
 /// The linear solver is a critical component used internally by nonlinear solvers to solve Newton systems.
 pub mod linear_solver;
@@ -179,7 +179,7 @@ pub mod linear_solver;
 /// Implementations are provided for:
 /// - Dense matrices: [NalgebraMat], [FaerMat]
 /// - Sparse matrices: [FaerSparseMat]
-/// - GPU matrices: [CudaMat] (requires `cuda` feature)
+/// - GPU matrices: `CudaMat` (requires `cuda` feature)
 pub mod matrix;
 
 /// Nonlinear solver implementations and traits.
@@ -237,7 +237,7 @@ pub mod op;
 /// It aggregates requirements from nalgebra, faer, and num_traits to ensure compatibility with linear algebra operations.
 ///
 /// Implementations are provided for `f32` and `f64`.
-/// GPU scalar types are available via [ScalarCuda] (requires `cuda` feature).
+/// GPU scalar types are available via `ScalarCuda` (requires `cuda` feature).
 pub mod scalar;
 
 /// Vector types and traits.
@@ -250,7 +250,7 @@ pub mod scalar;
 /// Implementations are provided for:
 /// - [NalgebraVec] using nalgebra vectors
 /// - [FaerVec] using faer vectors
-/// - [CudaVec] for GPU computation (requires `cuda` feature)
+/// - `CudaVec` for GPU computation (requires `cuda` feature)
 pub mod vector;
 
 /// Error types and handling.
@@ -259,6 +259,8 @@ pub mod vector;
 /// for different failure modes in ODE solving, including parsing, compilation,
 /// and numerical errors.
 pub mod error;
+
+pub use error::DiffsolError;
 
 #[cfg(feature = "sundials")]
 pub mod sundials_sys;

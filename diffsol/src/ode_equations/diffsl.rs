@@ -139,7 +139,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleJit + CodegenModuleCompile> De
 
 /// DiffSl implementation of ODE equations. This uses the [DiffSL language](https://martinjrobins.github.io/diffsl/) to specify the ODE equations.
 ///
-/// The DiffSL code is compiled into the `DiffSlContext` which is used to evaluate the ODE equations. After compilation,
+/// The DiffSL code is compiled into the [DiffSlContext] which is used to evaluate the ODE equations. After compilation,
 /// if the matrix type is sparse, the sparsity patterns of the Jacobians are extracted from the compiled code for use in the ODE solver.
 pub struct DiffSl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
     context: DiffSlContext<M, CG>,

@@ -231,7 +231,7 @@ where
     ///
     /// # Panics
     /// Panics if `checkpoints.len() < 2` or if `start_idx >= checkpoints.len() - 1`.
-
+    ///
     pub fn new(
         mut solver: Method,
         start_idx: usize,

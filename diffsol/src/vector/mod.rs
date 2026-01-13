@@ -264,13 +264,13 @@ pub trait Vector:
     /// Assign `value` to all elements at the specified indices.
     fn assign_at_indices(&mut self, indices: &Self::Index, value: Self::T);
 
-    /// Copy values from `other` at the specified indices: self[indices[i]] = other[indices[i]]
+    /// Copy values from `other` at the specified indices: self\[indices\[i\]\] = other\[indices\[i\]\]
     fn copy_from_indices(&mut self, other: &Self, indices: &Self::Index);
 
-    /// Gather values from `other` at indices: self[i] = other[indices[i]]
+    /// Gather values from `other` at indices: self\[i\] = other\[indices\[i\]\]
     fn gather(&mut self, other: &Self, indices: &Self::Index);
 
-    /// Scatter values to `other` at indices: other[indices[i]] = self[i]
+    /// Scatter values to `other` at indices: other\[indices\[i\]\] = self\[i\]
     fn scatter(&self, indices: &Self::Index, other: &mut Self);
 
     /// Assert that this vector equals `other` within a scalar tolerance `tol`.
