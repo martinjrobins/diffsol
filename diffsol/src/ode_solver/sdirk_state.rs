@@ -6,6 +6,7 @@ use crate::{
 use super::state::StateCommon;
 use num_traits::Zero;
 
+/// State container for the SDIRK Runge-Kutta solversintegrator. For the common state API use `as_ref` and `as_mut` methods.
 #[derive(Clone)]
 pub struct RkState<V: Vector> {
     pub(crate) y: V,

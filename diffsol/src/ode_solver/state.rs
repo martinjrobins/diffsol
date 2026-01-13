@@ -88,22 +88,29 @@ pub struct StateRefMut<'a, V: Vector> {
 /// - the derivative of the sensitivity vectors wrt time `ds`
 ///
 pub trait OdeSolverState<V: Vector>: Clone + Sized {
+    /// Get an immutable reference to the state.
     fn as_ref(&self) -> StateRef<'_, V>;
+    /// Get a mutable reference to the state.
     fn as_mut(&mut self) -> StateRefMut<'_, V>;
+    /// Convert the state into a common state representation.
     fn into_common(self) -> StateCommon<V>;
+    /// Create a new state from a common state representation.
     fn new_from_common(state: StateCommon<V>) -> Self;
 
+    /// Set the ODE problem for the state, allocating any necessary data structures.
     fn set_problem<Eqn: OdeEquations>(
         &mut self,
         ode_problem: &OdeSolverProblem<Eqn>,
     ) -> Result<(), DiffsolError>;
 
+    /// Set the augmented ODE problem (for sensitivities) for the state.
     fn set_augmented_problem<Eqn: OdeEquations, AugmentedEqn: AugmentedOdeEquations<Eqn>>(
         &mut self,
         ode_problem: &OdeSolverProblem<Eqn>,
         augmented_eqn: &AugmentedEqn,
     ) -> Result<(), DiffsolError>;
 
+    /// Check that the state is consistent with the given ODE problem.
     fn check_consistent_with_problem<Eqn: OdeEquations>(
         &self,
         problem: &OdeSolverProblem<Eqn>,
@@ -117,6 +124,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         Ok(())
     }
 
+    /// Check that the sensitivity vectors in the state are consistent with the given ODE problem.
     fn check_sens_consistent_with_problem<
         Eqn: OdeEquations,
         AugmentedEqn: AugmentedOdeEquations<Eqn>,
@@ -198,6 +206,8 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         Ok(ret)
     }
 
+    /// Create a new solver state from an ODE problem with sensitivity equations.
+    /// This will initialize the sensitivity vectors but will not make them consistent with algebraic constraints.
     fn new_with_sensitivities<Eqn>(
         ode_problem: &OdeSolverProblem<Eqn>,
         solver_order: usize,
@@ -228,6 +238,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         Ok(ret)
     }
 
+    /// Create a new solver state from an ODE problem with sensitivity equations, making both the main state and sensitivities consistent with algebraic constraints.
     fn new_with_sensitivities_and_consistent<LS, Eqn>(
         ode_problem: &OdeSolverProblem<Eqn>,
         solver_order: usize,
@@ -270,6 +281,8 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         Ok(ret)
     }
 
+    /// Convert the state to an adjoint state by reversing the time direction and initializing the adjoint variables.
+    /// This is typically used as the starting point for adjoint sensitivity analysis.
     fn into_adjoint<LS, Eqn, AugmentedEqn>(
         self,
         ode_problem: &OdeSolverProblem<Eqn>,
@@ -365,6 +378,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         Ok(Self::new_from_common(state))
     }
 
+    /// Create a new solver state with augmented equations (sensitivities) from an ODE problem, without making the augmented state consistent.
     fn new_without_initialise_augmented<Eqn, AugmentedEqn>(
         ode_problem: &OdeSolverProblem<Eqn>,
         augmented_eqn: &mut AugmentedEqn,
