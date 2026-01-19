@@ -140,7 +140,6 @@ where
         let op = if let Some(op) = self.op.as_ref() {
             let op = op.clone_state(&self.ode_problem.eqn);
             nonlinear_solver.set_problem(&op);
-            nonlinear_solver.reset_jacobian(&op, &self.state.y, self.state.t);
             Some(op)
         } else {
             None
@@ -1135,6 +1134,10 @@ where
             self.state.h * self.alpha[self.state.order],
             SolverState::Checkpoint,
         );
+        self.state.clone()
+    }
+
+    fn state_clone(&self) -> Self::State {
         self.state.clone()
     }
 

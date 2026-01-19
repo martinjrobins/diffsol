@@ -337,6 +337,10 @@ where
         self.rk.state().clone()
     }
 
+    fn state_clone(&self) -> Self::State {
+        self.rk.state().clone()
+    }
+
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
         debug!(
             "Taking SDIRK step at time {}, step size {}",
