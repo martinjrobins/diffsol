@@ -607,6 +607,7 @@ where
 
 #[cfg(test)]
 mod test {
+    use crate::ConstantOp;
     use crate::{
         error::{DiffsolError, OdeSolverError},
         matrix::dense_nalgebra_serial::NalgebraMat,
@@ -619,7 +620,6 @@ mod test {
         scale, AdjointOdeSolverMethod, DenseMatrix, NalgebraLU, NalgebraVec, OdeEquations,
         OdeSolverMethod, Op, SensitivitiesOdeSolverMethod, Vector, VectorView,
     };
-    use crate::ConstantOp;
 
     #[test]
     fn test_solve() {
@@ -640,7 +640,8 @@ mod test {
 
     #[test]
     fn test_solve_stops_on_root() {
-        let (problem, _soln) = exponential_decay_problem_with_root::<NalgebraMat<f64>>(false, false);
+        let (problem, _soln) =
+            exponential_decay_problem_with_root::<NalgebraMat<f64>>(false, false);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let (y, t) = s.solve(10.0).unwrap();
@@ -691,7 +692,8 @@ mod test {
 
     #[test]
     fn test_dense_solve_stops_on_root() {
-        let (problem, _soln) = exponential_decay_problem_with_root::<NalgebraMat<f64>>(false, false);
+        let (problem, _soln) =
+            exponential_decay_problem_with_root::<NalgebraMat<f64>>(false, false);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = (0..=10).map(|i| i as f64).collect::<Vec<_>>();
