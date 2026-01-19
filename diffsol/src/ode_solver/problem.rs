@@ -51,8 +51,18 @@ pub struct OdeSolverOptions<T: Scalar> {
     pub max_error_test_failures: usize,
     /// maximum number of nonlinear solver failures before aborting the solve and returning an error (default: 50)
     pub max_nonlinear_solver_failures: usize,
+    /// nonlinear solver convergence tolerance (default: 0.2)
+    pub nonlinear_solver_tolerance: T,
     /// minimum allowed timestep size (default: 1e-13)
     pub min_timestep: T,
+    /// optional maximum timestep growth factor (solver-specific default when `None`)
+    pub max_timestep_growth: Option<T>,
+    /// optional minimum timestep growth factor (solver-specific default when `None`)
+    pub min_timestep_growth: Option<T>,
+    /// optional maximum timestep shrink factor (solver-specific default when `None`)
+    pub max_timestep_shrink: Option<T>,
+    /// optional minimum timestep shrink factor (solver-specific default when `None`)
+    pub min_timestep_shrink: Option<T>,
     /// maximum number of steps after which to update the Jacobian (default: 20).
     /// This only requires an additional linear solver setup, not evaluation of the full Jacobian.
     pub update_jacobian_after_steps: usize,
@@ -71,7 +81,12 @@ impl<T: Scalar> Default for OdeSolverOptions<T> {
             max_nonlinear_solver_iterations: 10,
             max_error_test_failures: 40,
             max_nonlinear_solver_failures: 50,
+            nonlinear_solver_tolerance: T::from_f64(0.2).unwrap(),
             min_timestep: T::from_f64(1e-13).unwrap(),
+            max_timestep_growth: None,
+            min_timestep_growth: None,
+            max_timestep_shrink: None,
+            min_timestep_shrink: None,
             update_jacobian_after_steps: 20,
             update_rhs_jacobian_after_steps: 50,
             threshold_to_update_jacobian: T::from_f64(0.3).unwrap(),

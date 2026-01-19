@@ -464,7 +464,11 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let mut y_tmp = state.dy.clone();
         y_tmp.copy_from_indices(state.y, &f.algebraic_indices);
         let mut yerr = y_tmp.clone();
-        let mut convergence = Convergence::new(rtol, atol);
+        let mut convergence = Convergence::with_tolerance(
+            rtol,
+            atol,
+            ode_problem.ode_options.nonlinear_solver_tolerance,
+        );
         convergence.set_max_iter(ode_problem.ic_options.max_newton_iterations);
         let mut result = Ok(());
         debug!("Setting consistent initial conditions at t = {}", state.t);
@@ -519,7 +523,11 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
             return Ok(());
         }
 
-        let mut convergence = Convergence::new(ode_problem.rtol, &ode_problem.atol);
+        let mut convergence = Convergence::with_tolerance(
+            ode_problem.rtol,
+            &ode_problem.atol,
+            ode_problem.ode_options.nonlinear_solver_tolerance,
+        );
         convergence.set_max_iter(ode_problem.ic_options.max_newton_iterations);
         let (algebraic_indices, _) = ode_problem
             .eqn

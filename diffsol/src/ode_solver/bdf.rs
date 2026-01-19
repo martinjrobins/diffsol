@@ -254,7 +254,11 @@ where
 
         state.check_consistent_with_problem(problem)?;
 
-        let mut convergence = Convergence::new(problem.rtol, &problem.atol);
+        let mut convergence = Convergence::with_tolerance(
+            problem.rtol,
+            &problem.atol,
+            problem.ode_options.nonlinear_solver_tolerance,
+        );
         convergence.set_max_iter(config.maximum_newton_iterations);
 
         let op = if integrate_main_eqn {

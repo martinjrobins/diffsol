@@ -161,7 +161,11 @@ where
         let nonlinear_solver = NewtonNonlinearSolver::new(linear_solver, NoLineSearch);
 
         // set max iterations for nonlinear solver
-        let mut convergence = Convergence::new(problem.rtol, &problem.atol);
+        let mut convergence = Convergence::with_tolerance(
+            problem.rtol,
+            &problem.atol,
+            problem.ode_options.nonlinear_solver_tolerance,
+        );
         convergence.set_max_iter(config.maximum_newton_iterations);
 
         let gamma = rk.tableau().a().get_index(1, 1);
