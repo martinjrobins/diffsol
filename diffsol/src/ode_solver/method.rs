@@ -161,6 +161,8 @@ where
     ///
     /// # Post-condition
     /// After the solver finishes, the internal state of the solver is at time `final_time`.
+    /// If a root is found, the solver stops early. The internal state is moved to the root time,
+    /// and the root time/value are returned as the last entry.
     #[allow(clippy::type_complexity)]
     fn solve(
         &mut self,
@@ -176,12 +178,39 @@ where
         // do the main loop
         write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
         self.set_stop_time(final_time)?;
-        while self.step()? != OdeSolverStopReason::TstopReached {
-            write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
+        loop {
+            match self.step()? {
+                OdeSolverStopReason::InternalTimestep => {
+                    write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
+                }
+                OdeSolverStopReason::TstopReached => {
+                    write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
+                    break;
+                }
+                OdeSolverStopReason::RootFound(t_root) => {
+                    let nstates = self.problem().eqn.rhs().nstates();
+                    let mut y_root = Eqn::V::zeros(nstates, self.problem().context().clone());
+                    self.interpolate_inplace(t_root, &mut y_root)?;
+                    let integrate_out = self.problem().integrate_out;
+                    let mut g_root = None;
+                    if integrate_out {
+                        let mut g = self.state().g.clone();
+                        self.interpolate_out_inplace(t_root, &mut g)?;
+                        g_root = Some(g);
+                    }
+                    {
+                        let state = self.state_mut();
+                        state.y.copy_from(&y_root);
+                        *state.t = t_root;
+                        if let Some(g) = g_root.as_ref() {
+                            state.g.copy_from(g);
+                        }
+                    }
+                    write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
+                    break;
+                }
+            }
         }
-
-        // store the final step
-        write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
         let ntimes = ret_t.len();
         ret_y.resize_cols(ntimes);
         Ok((ret_y, ret_t))
@@ -202,6 +231,8 @@ where
     ///
     /// # Post-condition
     /// After the solver finishes, the internal state of the solver is at time `t_eval[t_eval.len()-1]`.
+    /// If a root is found, the solver stops early. The internal state is moved to the root time,
+    /// and the last column corresponds to the root time (which may not be in `t_eval`).
     fn solve_dense(
         &mut self,
         t_eval: &[Eqn::T],
@@ -214,14 +245,49 @@ where
 
         // do loop
         self.set_stop_time(t_eval[t_eval.len() - 1])?;
-        let mut step_reason = OdeSolverStopReason::InternalTimestep;
         for (i, t) in t_eval.iter().enumerate() {
             while self.state().t < *t {
-                step_reason = self.step()?;
+                match self.step()? {
+                    OdeSolverStopReason::InternalTimestep => {}
+                    OdeSolverStopReason::TstopReached => break,
+                    OdeSolverStopReason::RootFound(t_root) => {
+                        self.interpolate_inplace(t_root, &mut tmp_nstates)?;
+                        let integrate_out = self.problem().integrate_out;
+                        let mut g_root = None;
+                        if integrate_out {
+                            let mut g = self.state().g.clone();
+                            self.interpolate_out_inplace(t_root, &mut g)?;
+                            g_root = Some(g);
+                        }
+                        {
+                            let state = self.state_mut();
+                            state.y.copy_from(&tmp_nstates);
+                            *state.t = t_root;
+                            if let Some(g) = g_root.as_ref() {
+                                state.g.copy_from(g);
+                            }
+                        }
+                        {
+                            let mut y_out = ret.column_mut(i);
+                            if integrate_out {
+                                y_out.copy_from(g_root.as_ref().unwrap());
+                            } else {
+                                match self.problem().eqn.out() {
+                                    Some(out) => {
+                                        out.call_inplace(&tmp_nstates, t_root, &mut tmp_nout);
+                                        y_out.copy_from(&tmp_nout);
+                                    }
+                                    None => y_out.copy_from(&tmp_nstates),
+                                }
+                            }
+                        }
+                        ret.resize_cols(i + 1);
+                        return Ok(ret);
+                    }
+                }
             }
             dense_write_out(self, &mut ret, t_eval, i, &mut tmp_nout, &mut tmp_nstates)?;
         }
-        assert_eq!(step_reason, OdeSolverStopReason::TstopReached);
         Ok(ret)
     }
 
@@ -541,12 +607,15 @@ where
 
 #[cfg(test)]
 mod test {
+    use crate::ConstantOp;
     use crate::{
         error::{DiffsolError, OdeSolverError},
         matrix::dense_nalgebra_serial::NalgebraMat,
+        matrix::MatrixCommon,
         ode_equations::test_models::exponential_decay::{
             exponential_decay_problem, exponential_decay_problem_adjoint,
             exponential_decay_problem_sens, exponential_decay_problem_sens_with_out,
+            exponential_decay_problem_with_root,
         },
         scale, AdjointOdeSolverMethod, DenseMatrix, NalgebraLU, NalgebraVec, OdeEquations,
         OdeSolverMethod, Op, SensitivitiesOdeSolverMethod, Vector, VectorView,
@@ -567,6 +636,23 @@ mod test {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&expect(*t_i), &problem.atol, problem.rtol, 15.0);
         }
+    }
+
+    #[test]
+    fn test_solve_stops_on_root() {
+        let (problem, _soln) =
+            exponential_decay_problem_with_root::<NalgebraMat<f64>>(false, false);
+        let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
+
+        let (y, t) = s.solve(10.0).unwrap();
+        let t_root = -0.6_f64.ln() / 0.1;
+        let t_last = *t.last().unwrap();
+        assert!((t_last - t_root).abs() < 1e-3);
+        assert!((s.state().t - t_root).abs() < 1e-3);
+
+        let y_last = y.column(y.ncols() - 1).into_owned();
+        let expected = NalgebraVec::from_vec(vec![0.6, 0.6], *problem.context());
+        y_last.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
     }
 
     #[test]
@@ -602,6 +688,43 @@ mod test {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
         }
+    }
+
+    #[test]
+    fn test_dense_solve_stops_on_root() {
+        let (problem, _soln) =
+            exponential_decay_problem_with_root::<NalgebraMat<f64>>(false, false);
+        let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
+
+        let t_eval = (0..=10).map(|i| i as f64).collect::<Vec<_>>();
+        let y = s.solve_dense(t_eval.as_slice()).unwrap();
+        let t_root = -0.6_f64.ln() / 0.1;
+        assert!((s.state().t - t_root).abs() < 1e-3);
+        assert!(y.ncols() < t_eval.len());
+
+        let y_last = y.column(y.ncols() - 1).into_owned();
+        let expected = NalgebraVec::from_vec(vec![0.6, 0.6], *problem.context());
+        y_last.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
+    }
+
+    #[test]
+    fn test_dense_solve_integrate_out_stops_on_root() {
+        let (problem, _soln) = exponential_decay_problem_with_root::<NalgebraMat<f64>>(false, true);
+        let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
+
+        let t_eval = (0..=10).map(|i| i as f64).collect::<Vec<_>>();
+        let y = s.solve_dense(t_eval.as_slice()).unwrap();
+        let k = 0.1;
+        let decay = 0.6_f64;
+        let t_root = -decay.ln() / k;
+        assert!((s.state().t - t_root).abs() < 1e-3);
+        assert!(y.ncols() < t_eval.len());
+
+        let y_last = y.column(y.ncols() - 1).into_owned();
+        let y0 = problem.eqn.init().call(0.0);
+        let integral = (1.0 - decay) / k;
+        let expected = y0 * scale(integral);
+        y_last.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
     }
 
     #[test]

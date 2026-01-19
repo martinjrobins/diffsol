@@ -518,11 +518,9 @@ mod test {
             test_adjoint_sum_squares, test_checkpointing, test_config, test_interpolate,
             test_ode_solver, test_problem, test_state_mut, test_state_mut_on_problem,
         },
-        Context, DenseMatrix, FaerSparseLU, FaerSparseMat, MatrixCommon, NalgebraLU, NalgebraVec,
-        OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
+        scale, ConstantOp, Context, DenseMatrix, FaerSparseLU, FaerSparseMat, MatrixCommon,
+        NalgebraLU, NalgebraVec, OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
     };
-
-    use num_traits::abs;
 
     type M = NalgebraMat<f64>;
     type LS = NalgebraLU<f64>;
@@ -857,10 +855,23 @@ mod test {
 
     #[test]
     fn test_root_finder_tr_bdf2() {
-        let (problem, soln) = exponential_decay_problem_with_root::<M>(false);
+        let (problem, soln) = exponential_decay_problem_with_root::<M>(false, true);
         let mut s = problem.tr_bdf2::<LS>().unwrap();
         let y = test_ode_solver(&mut s, soln, None, false, false);
-        assert!(abs(y[0] - 0.6) < 1e-6, "y[0] = {}", y[0]);
+
+        let y0 = problem.eqn.init().call(0.0);
+        let mut p = problem.context().vector_zeros(2);
+        problem.eqn.get_params(&mut p);
+        let k = p.get_index(0);
+        let target = 0.6_f64;
+        let t_root = -((target / y0.get_index(0)).ln()) / k;
+        let expected = y0.clone() * scale(f64::exp(-k * t_root));
+        y.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
+
+        let g = s.interpolate_out(t_root).unwrap();
+        let integral = (1.0 - f64::exp(-k * t_root)) / k;
+        let expected_g = y0 * scale(integral);
+        g.assert_eq_norm(&expected_g, &problem.atol, problem.rtol, 15.0);
     }
 
     #[test]
