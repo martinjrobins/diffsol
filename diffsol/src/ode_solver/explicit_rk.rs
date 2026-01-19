@@ -159,6 +159,10 @@ where
         self.rk.checkpoint()
     }
 
+    fn state_clone(&self) -> Self::State {
+        self.rk.state().clone()
+    }
+
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
         let mut h = self.rk.start_step()?;
         debug!(
