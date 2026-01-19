@@ -56,6 +56,9 @@ where
     /// Note that this will force a reinitialisation of the internal Jacobian for the solver, if it has one.
     fn checkpoint(&mut self) -> Self::State;
 
+    /// Clone the current state of the solver without triggering any internal Jacobian reset.
+    fn state_clone(&self) -> Self::State;
+
     /// Replace the current state of the solver with a new state.
     fn set_state(&mut self, state: Self::State);
 
@@ -329,7 +332,7 @@ where
         // allocate checkpoint info
         let mut nsteps = 0;
         let t0 = self.state().t;
-        let mut checkpoints = vec![self.checkpoint()];
+        let mut checkpoints = vec![self.state_clone()];
         let mut ts = vec![t0];
         let mut ys = vec![self.state().y.clone()];
         let mut ydots = vec![self.state().dy.clone()];
@@ -361,7 +364,7 @@ where
         ts.push(self.state().t);
         ys.push(self.state().y.clone());
         ydots.push(self.state().dy.clone());
-        checkpoints.push(self.checkpoint());
+        checkpoints.push(self.state_clone());
 
         // construct checkpointing
         let last_segment = HermiteInterpolator::new(ys, ydots, ts);
@@ -420,7 +423,7 @@ where
         // allocate checkpoint info
         let mut nsteps = 0;
         let t0 = self.state().t;
-        let mut checkpoints = vec![self.checkpoint()];
+        let mut checkpoints = vec![self.state_clone()];
         let mut ts = vec![t0];
         let mut ys = vec![self.state().y.clone()];
         let mut ydots = vec![self.state().dy.clone()];
@@ -450,7 +453,7 @@ where
         assert_eq!(step_reason, OdeSolverStopReason::TstopReached);
 
         // add final checkpoint
-        checkpoints.push(self.checkpoint());
+        checkpoints.push(self.state_clone());
 
         // construct the adjoint equations
         let last_segment = HermiteInterpolator::new(ys, ydots, ts);
