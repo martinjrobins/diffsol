@@ -251,9 +251,11 @@ pub fn exponential_decay_problem<M: Matrix + 'static>(
         .build()
         .unwrap();
     let p = [M::T::from_f64(k).unwrap(), M::T::from_f64(y0).unwrap()];
-    let mut soln = OdeSolverSolution::default();
-    soln.rtol = problem.rtol;
-    soln.atol = problem.atol.clone();
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
     for i in 0..10 {
         let t = M::T::from_f64(i as f64).unwrap();
         let y0: M::V = problem.eqn.init().call(M::T::zero());
@@ -283,9 +285,11 @@ pub fn exponential_decay_problem_with_mass<M: Matrix + 'static>(
         .build()
         .unwrap();
     let p = [M::T::from_f64(k).unwrap(), M::T::from_f64(y0).unwrap()];
-    let mut soln = OdeSolverSolution::default();
-    soln.rtol = problem.rtol;
-    soln.atol = problem.atol.clone();
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
     for i in 0..10 {
         let t = M::T::from_f64(i as f64).unwrap();
         let y0: M::V = problem.eqn.init().call(M::T::zero());
@@ -322,9 +326,11 @@ pub fn exponential_decay_problem_with_root<M: MatrixHost + 'static>(
         .build()
         .unwrap();
     let p = [M::T::from_f64(k).unwrap(), M::T::from_f64(y0).unwrap()];
-    let mut soln = OdeSolverSolution::default();
-    soln.rtol = problem.rtol;
-    soln.atol = problem.atol.clone();
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
     for i in 0..10 {
         let t = M::T::from_f64(i as f64).unwrap();
         let y0: M::V = problem.eqn.init().call(M::T::zero());
