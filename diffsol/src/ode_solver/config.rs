@@ -56,10 +56,18 @@ impl<T: Scalar> BdfConfig<T> {
             minimum_timestep: ode_options.min_timestep,
             maximum_error_test_failures: ode_options.max_error_test_failures,
             maximum_newton_fails: ode_options.max_nonlinear_solver_failures,
-            maximum_timestep_growth: T::from_f64(2.0).unwrap(),
-            minimum_timestep_growth: T::from_f64(2.0).unwrap(),
-            maximum_timestep_shrink: T::from_f64(0.9).unwrap(),
-            minimum_timestep_shrink: T::from_f64(0.5).unwrap(),
+            maximum_timestep_growth: ode_options
+                .max_timestep_growth
+                .unwrap_or_else(|| T::from_f64(2.0).unwrap()),
+            minimum_timestep_growth: ode_options
+                .min_timestep_growth
+                .unwrap_or_else(|| T::from_f64(2.0).unwrap()),
+            maximum_timestep_shrink: ode_options
+                .max_timestep_shrink
+                .unwrap_or_else(|| T::from_f64(0.9).unwrap()),
+            minimum_timestep_shrink: ode_options
+                .min_timestep_shrink
+                .unwrap_or_else(|| T::from_f64(0.5).unwrap()),
             maximum_newton_iterations: ode_options.max_nonlinear_solver_iterations,
         }
     }
@@ -82,10 +90,18 @@ impl<T: Scalar> SdirkConfig<T> {
         Self {
             minimum_timestep: ode_options.min_timestep,
             maximum_error_test_failures: ode_options.max_error_test_failures,
-            maximum_timestep_growth: T::from_f64(2.0).unwrap(),
-            minimum_timestep_growth: T::from_f64(2.0).unwrap(),
-            maximum_timestep_shrink: T::from_f64(0.9).unwrap(),
-            minimum_timestep_shrink: T::from_f64(0.5).unwrap(),
+            maximum_timestep_growth: ode_options
+                .max_timestep_growth
+                .unwrap_or_else(|| T::from_f64(2.0).unwrap()),
+            minimum_timestep_growth: ode_options
+                .min_timestep_growth
+                .unwrap_or_else(|| T::from_f64(2.0).unwrap()),
+            maximum_timestep_shrink: ode_options
+                .max_timestep_shrink
+                .unwrap_or_else(|| T::from_f64(0.9).unwrap()),
+            minimum_timestep_shrink: ode_options
+                .min_timestep_shrink
+                .unwrap_or_else(|| T::from_f64(0.5).unwrap()),
             maximum_newton_iterations: ode_options.max_nonlinear_solver_iterations,
             maximum_newton_fails: ode_options.max_nonlinear_solver_failures,
         }
@@ -127,10 +143,18 @@ impl<T: Scalar> ExplicitRkConfig<T> {
         Self {
             minimum_timestep: ode_options.min_timestep,
             maximum_error_test_failures: ode_options.max_error_test_failures,
-            maximum_timestep_growth: T::from_f64(2.0).unwrap(),
-            minimum_timestep_growth: T::from_f64(1.0).unwrap(),
-            maximum_timestep_shrink: T::from_f64(1.0).unwrap(),
-            minimum_timestep_shrink: T::from_f64(0.5).unwrap(),
+            maximum_timestep_growth: ode_options
+                .max_timestep_growth
+                .unwrap_or_else(|| T::from_f64(2.0).unwrap()),
+            minimum_timestep_growth: ode_options
+                .min_timestep_growth
+                .unwrap_or_else(|| T::from_f64(1.0).unwrap()),
+            maximum_timestep_shrink: ode_options
+                .max_timestep_shrink
+                .unwrap_or_else(|| T::from_f64(1.0).unwrap()),
+            minimum_timestep_shrink: ode_options
+                .min_timestep_shrink
+                .unwrap_or_else(|| T::from_f64(0.5).unwrap()),
         }
     }
 }

@@ -1017,6 +1017,18 @@ where
             max_error_test_failures: ode_options.max_error_test_failures,
             max_nonlinear_solver_iterations: ode_options.max_nonlinear_solver_iterations,
             min_timestep: T::from_f64(ode_options.min_timestep).unwrap(),
+            max_timestep_growth: ode_options
+                .max_timestep_growth
+                .map(|value| T::from_f64(value).unwrap()),
+            min_timestep_growth: ode_options
+                .min_timestep_growth
+                .map(|value| T::from_f64(value).unwrap()),
+            max_timestep_shrink: ode_options
+                .max_timestep_shrink
+                .map(|value| T::from_f64(value).unwrap()),
+            min_timestep_shrink: ode_options
+                .min_timestep_shrink
+                .map(|value| T::from_f64(value).unwrap()),
             update_jacobian_after_steps: ode_options.update_jacobian_after_steps,
             update_rhs_jacobian_after_steps: ode_options.update_rhs_jacobian_after_steps,
             threshold_to_update_jacobian: T::from_f64(ode_options.threshold_to_update_jacobian)
@@ -1026,6 +1038,8 @@ where
             )
             .unwrap(),
             max_nonlinear_solver_failures: ode_options.max_nonlinear_solver_failures,
+            nonlinear_solver_tolerance: T::from_f64(ode_options.nonlinear_solver_tolerance)
+                .unwrap(),
         }
     }
 
