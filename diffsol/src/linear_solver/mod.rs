@@ -1,3 +1,12 @@
+//! Linear solver implementations and traits.
+//!
+//! This module defines the [`LinearSolver`] trait for solving linear systems and provides implementations:
+//! - Direct solvers: [`NalgebraLU`], [`FaerLU`], [`FaerSparseLU`](crate::FaerSparseLU)
+//! - Optional sparse solvers: `KLU` (requires the `suitesparse` feature)
+//! - GPU solvers: `CudaLU` (requires the `cuda` feature)
+//!
+//! The linear solver is a critical component used internally by nonlinear solvers to solve Newton systems.
+
 use crate::{error::DiffsolError, Matrix, NonLinearOpJacobian};
 
 #[cfg(feature = "nalgebra")]

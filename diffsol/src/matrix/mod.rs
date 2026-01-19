@@ -1,3 +1,15 @@
+//! Matrix types and operations.
+//!
+//! This module defines the [`Matrix`] trait and related traits for matrix operations:
+//! - [`DenseMatrix`] for dense column-major matrices
+//! - [`MatrixView`] and [`MatrixViewMut`] for borrowed views
+//! - Sparsity detection and handling
+//!
+//! Implementations are provided for:
+//! - Dense matrices: [`NalgebraMat`](crate::NalgebraMat), [`FaerMat`](crate::FaerMat)
+//! - Sparse matrices: [`FaerSparseMat`](crate::FaerSparseMat)
+//! - GPU matrices: `CudaMat` (requires the `cuda` feature)
+
 use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 

@@ -1,3 +1,12 @@
+//! ODE solver implementations and traits.
+//!
+//! This module provides the complete ODE solving interface including:
+//! - [`OdeSolverMethod`](crate::OdeSolverMethod) trait with implementations: [`Bdf`](crate::Bdf), [`Sdirk`](crate::Sdirk), [`ExplicitRk`](crate::ExplicitRk)
+//! - [`OdeSolverProblem`](crate::OdeSolverProblem) for problem setup (equations, parameters, tolerances, solver options etc.)
+//! - [`OdeSolverState`](crate::OdeSolverState) for managing solution state (including state vector, sensitivities, time, step size etc.)
+//! - [`OdeBuilder`](crate::OdeBuilder) for convenient problem construction (builds and configures [`OdeSolverProblem`](crate::OdeSolverProblem))
+//! - [`Checkpointing`](crate::Checkpointing) and [`HermiteInterpolator`](crate::HermiteInterpolator) for solution interpolation
+
 pub mod adjoint;
 pub mod bdf;
 pub mod bdf_state;

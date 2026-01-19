@@ -1,3 +1,9 @@
+//! Context objects for managing device resources for vectors and matrices (e.g. device streams, threading pools, etc.).
+//!
+//! This module provides context types that encapsulate where data is stored and computed (CPU, GPU, etc.).
+//! Different backends like nalgebra and faer may require different context implementations. The [`Context`]
+//! trait defines the interface that must be implemented.
+
 use crate::{DefaultDenseMatrix, Matrix, Vector};
 
 #[cfg(feature = "cuda")]

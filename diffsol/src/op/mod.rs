@@ -1,3 +1,16 @@
+//! Operator types and traits (e.g. non-linear, linear and constant operators; as well as their Jacobians).
+//!
+//! This module defines fundamental operator traits, for example:
+//! - [`NonLinearOp`] and variants for Jacobians and sensitivities
+//! - [`LinearOp`] for linear operators
+//! - [`ConstantOp`] for constants
+//!
+//! It also provides concrete implementations, for example:
+//! - [`closure::Closure`] for wrapping user-provided closures
+//! - [`linear_closure::LinearClosure`] for linear operators
+//! - [`constant_closure::ConstantClosure`] for constants
+//! - [`matrix::MatrixOp`] for explicit matrix operators
+
 use crate::{
     ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, Context, LinearOp, LinearOpTranspose,
     Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, Scalar,

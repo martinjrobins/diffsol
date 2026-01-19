@@ -142,122 +142,26 @@ pub use diffsl::CraneliftJitModule;
 #[cfg(feature = "diffsl-llvm")]
 pub use diffsl::LlvmModule;
 
-/// Context objects for managing device resources for vectors and matrices (e.g. device streams, threading pools, etc.).
-///
-/// This module provides context types that encapsulate information about where data is stored and computed
-/// (CPU, GPU, etc.). Different backends like nalgebra and faer may require different context implementations.
-/// The [Context] trait defines the interface that must be implemented.
 pub mod context;
 
-/// Jacobian computation and coloring algorithms for efficient Jacobian evaluation.
-///
-/// This module provides utilities for:
-/// - Detecting the sparsity pattern of Jacobian matrices using NaN propagation
-/// - Computing efficient graph colorings of the Jacobian sparsity pattern
-/// - Using the coloring to compute sparse Jacobians with fewer function evaluations
-///
-/// The [JacobianColoring] struct is the main entry point for computing Jacobians efficiently.
 pub mod jacobian;
 
-/// Linear solver implementations and traits.
-///
-/// This module defines the [LinearSolver] trait for solving linear systems and provides implementations:
-/// - Direct solvers: [NalgebraLU], [FaerLU], [FaerSparseLU]
-/// - Optional sparse solvers: `KLU` (requires `suitesparse` feature)
-/// - GPU solvers: `CudaLU` (requires `cuda` feature)
-///
-/// The linear solver is a critical component used internally by nonlinear solvers to solve Newton systems.
 pub mod linear_solver;
 
-/// Matrix types and operations.
-///
-/// This module defines the [Matrix] trait and related traits for matrix operations:
-/// - [DenseMatrix] for dense column-major matrices
-/// - [MatrixView] and [MatrixViewMut] for borrowed views
-/// - Sparsity detection and handling
-///
-/// Implementations are provided for:
-/// - Dense matrices: [NalgebraMat], [FaerMat]
-/// - Sparse matrices: [FaerSparseMat]
-/// - GPU matrices: `CudaMat` (requires `cuda` feature)
 pub mod matrix;
 
-/// Nonlinear solver implementations and traits.
-///
-/// This module defines the [NonLinearSolver] trait and provides the [NewtonNonlinearSolver] implementation.
-/// It also includes:
-/// - [LineSearch] implementations for globalization ([NoLineSearch], [BacktrackingLineSearch])
-/// - Root finding algorithms via [RootFinder]
-/// - Convergence testing via [Convergence]
-///
-/// Nonlinear solvers are used internally by ODE solvers to solve implicit equations.
 pub mod nonlinear_solver;
 
-/// ODE equations and traits.
-///
-/// This module defines the [OdeEquations] trait and specialized variants:
-/// - [OdeEquationsImplicit] for implicit ODEs with mass matrices
-/// - [OdeEquationsImplicitSens] for forward sensitivity equations
-/// - [OdeEquationsAdjoint] for adjoint sensitivity equations
-///
-/// It also provides implementations:
-/// - [DiffSl] for equations specified in the DiffSL domain-specific language
-/// - [SensEquations] and [AdjointEquations] for sensitivity computations
-///
-/// All the test equations used in Diffsol's test suite are also provided here.
 pub mod ode_equations;
 
-/// ODE solver implementations and traits.
-///
-/// This module provides the complete ODE solving interface including:
-/// - [OdeSolverMethod] trait with implementations: [Bdf], [Sdirk], [ExplicitRk]
-/// - [OdeSolverProblem] for problem setup (equations, parameters, tolerances, solver options etc.)
-/// - [OdeSolverState] for managing solution state (including state vector, sensitivities, time, step size etc.)
-/// - [OdeBuilder] for convenient problem construction (builds and configures [OdeSolverProblem])
-/// - [Checkpointing] and [HermiteInterpolator] for solution interpolation
 pub mod ode_solver;
 
-/// Operator types and traits (e.g. non-linear, linear and constant operators; as well as their jacobians).
-///
-/// This module defines fundamental operator traits, for example:
-/// - [NonLinearOp] and variants for Jacobians and sensitivities
-/// - [LinearOp] for linear operators
-/// - [ConstantOp] for constants
-///
-/// It also provides concrete implementations, for example:
-/// - [Closure] for wrapping user-provided closures
-/// - [LinearClosure] for linear operators
-/// - [ConstantClosure] for constants
-/// - [MatrixOp] for explicit matrix operators
 pub mod op;
 
-/// Scalar types and traits.
-///
-/// This module defines the [Scalar] trait that all floating-point types used in DiffSol must implement.
-/// It aggregates requirements from nalgebra, faer, and num_traits to ensure compatibility with linear algebra operations.
-///
-/// Implementations are provided for `f32` and `f64`.
-/// GPU scalar types are available via `ScalarCuda` (requires `cuda` feature).
 pub mod scalar;
 
-/// Vector types and traits.
-///
-/// This module defines the [Vector] trait and related traits for vector operations:
-/// - [VectorView] and [VectorViewMut] for borrowed views
-/// - [VectorIndex] for index collections
-/// - [VectorHost] for CPU-resident vectors with direct access
-///
-/// Implementations are provided for:
-/// - [NalgebraVec] using nalgebra vectors
-/// - [FaerVec] using faer vectors
-/// - `CudaVec` for GPU computation (requires `cuda` feature)
 pub mod vector;
 
-/// Error types and handling.
-///
-/// This module defines the [DiffsolError] enum and specialized error variants
-/// for different failure modes in ODE solving, including parsing, compilation,
-/// and numerical errors.
 pub mod error;
 
 pub use error::DiffsolError;

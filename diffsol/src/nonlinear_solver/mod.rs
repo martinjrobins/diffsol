@@ -1,3 +1,13 @@
+//! Nonlinear solver implementations and traits.
+//!
+//! This module defines the [`NonLinearSolver`] trait and provides the [`NewtonNonlinearSolver`](crate::NewtonNonlinearSolver) implementation.
+//! It also includes:
+//! - [`LineSearch`](crate::nonlinear_solver::line_search::LineSearch) implementations for globalization ([`NoLineSearch`](crate::NoLineSearch), [`BacktrackingLineSearch`](crate::BacktrackingLineSearch))
+//! - Root finding algorithms via [`RootFinder`](crate::nonlinear_solver::root::RootFinder)
+//! - Convergence testing via [`Convergence`]
+//!
+//! Nonlinear solvers are used internally by ODE solvers to solve implicit equations.
+
 use crate::{error::DiffsolError, Matrix, NonLinearOp, NonLinearOpJacobian};
 use convergence::Convergence;
 

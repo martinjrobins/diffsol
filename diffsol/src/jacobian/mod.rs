@@ -1,3 +1,12 @@
+//! Jacobian computation and coloring algorithms for efficient Jacobian evaluation.
+//!
+//! This module provides utilities for:
+//! - Detecting the sparsity pattern of Jacobian matrices using NaN propagation
+//! - Computing efficient graph colorings of the Jacobian sparsity pattern
+//! - Using the coloring to compute sparse Jacobians with fewer function evaluations
+//!
+//! The [`JacobianColoring`] struct is the main entry point for computing Jacobians efficiently.
+
 use std::collections::HashSet;
 
 use crate::{

@@ -1,3 +1,15 @@
+//! Vector types and traits.
+//!
+//! This module defines the [`Vector`] trait and related traits for vector operations:
+//! - [`VectorView`] and [`VectorViewMut`] for borrowed views
+//! - [`VectorIndex`] for index collections
+//! - [`VectorHost`] for CPU-resident vectors with direct access
+//!
+//! Implementations are provided for:
+//! - [`NalgebraVec`](crate::NalgebraVec) using nalgebra vectors
+//! - [`FaerVec`](crate::FaerVec) using faer vectors
+//! - `CudaVec` for GPU computation (requires the `cuda` feature)
+
 use crate::matrix::DenseMatrix;
 use crate::scalar::Scale;
 use crate::{Context, IndexType, Scalar};

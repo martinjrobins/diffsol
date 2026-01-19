@@ -1,3 +1,10 @@
+//! Scalar types and traits.
+//!
+//! This module defines the [`Scalar`] trait that all floating-point types used in Diffsol must implement.
+//! It aggregates requirements from nalgebra, faer, and num_traits to ensure compatibility with linear algebra operations.
+//!
+//! Implementations are provided for `f32` and `f64`. GPU scalar types are available via `ScalarCuda` (requires the `cuda` feature).
+
 use std::{
     fmt::Display,
     ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign},

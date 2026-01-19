@@ -1,3 +1,16 @@
+//! ODE equations and traits.
+//!
+//! This module defines the [`OdeEquations`] trait and specialized variants:
+//! - [`OdeEquationsImplicit`] for implicit ODEs with mass matrices
+//! - [`OdeEquationsImplicitSens`] for forward sensitivity equations
+//! - [`OdeEquationsAdjoint`] for adjoint sensitivity equations
+//!
+//! It also provides implementations:
+//! - [`DiffSl`](crate::DiffSl) for equations specified in the DiffSL domain-specific language
+//! - [`SensEquations`](crate::ode_equations::sens_equations::SensEquations) and [`AdjointEquations`](crate::ode_equations::adjoint_equations::AdjointEquations) for sensitivity computations
+//!
+//! All the test equations used in Diffsol's test suite are also provided here.
+
 use crate::{
     op::{constant_op::ConstantOpSensAdjoint, linear_op::LinearOpTranspose, ParameterisedOp},
     ConstantOp, ConstantOpSens, LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint,

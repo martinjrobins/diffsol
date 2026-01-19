@@ -1,3 +1,8 @@
+//! Error types and handling.
+//!
+//! This module defines the [`DiffsolError`] enum and specialized error variants for different failure modes
+//! in ODE solving, including parsing, compilation, and numerical errors.
+
 use faer::sparse::CreationError;
 use thiserror::Error;
 
