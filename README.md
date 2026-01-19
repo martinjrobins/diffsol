@@ -31,7 +31,7 @@ You can add diffsol using `cargo add diffsol` or directly in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-diffsol = "0.8"
+diffsol = "0.10"
 ```
 
 Diffsol has the following features that can be enabled or disabled:
@@ -46,7 +46,7 @@ You can add any of the above features by specifying them in your `Cargo.toml`. F
 
 ```toml
 [dependencies]
-diffsol = { version = "0.8", features = "diffsl-cranelift" }
+diffsol = { version = "0.10", features = "diffsl-cranelift" }
 ```
 
 See the [Cargo.toml documentation](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html) for more information on specifying features.
