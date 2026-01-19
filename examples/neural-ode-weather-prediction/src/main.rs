@@ -15,6 +15,7 @@ use ndarray::Array1;
 use ort::error::Result;
 use ort::inputs;
 use ort::session::{builder::GraphOptimizationLevel, Session};
+use ort::value::{TensorRef, ValueType};
 use plotly::common::{DashType, Line, Mode};
 use plotly::layout::{Axis, GridPattern, LayoutGrid};
 use plotly::{Layout, Plot, Scatter};
@@ -31,10 +32,10 @@ const BASE_DATA_DIR: &str = "examples/neural-ode-weather-prediction/src/data/";
 const BASE_OUTPUT_DIR: &str = "examples/neural-ode-weather-prediction/";
 
 struct NeuralOde {
-    rhs: Session,
-    rhs_jac_mul: Session,
-    rhs_jac_transpose_mul: Session,
-    rhs_sens_transpose_mul: Session,
+    rhs: RefCell<Session>,
+    rhs_jac_mul: RefCell<Session>,
+    rhs_jac_transpose_mul: RefCell<Session>,
+    rhs_sens_transpose_mul: RefCell<Session>,
     input_y: RefCell<Array1<f32>>,
     input_v: RefCell<Array1<f32>>,
     input_p: Array1<f32>,
@@ -58,8 +59,17 @@ impl NeuralOde {
         let mut nparams = 0;
         for input in rhs.inputs.iter() {
             if input.name == "p" {
-                nparams = input.input_type.tensor_dimensions().unwrap()[0] as usize;
-                break;
+                if let ValueType::Tensor { shape, .. } = &input.input_type {
+                    let dim = shape
+                        .get(0)
+                        .copied()
+                        .expect("p input should have at least one dimension");
+                    if dim < 0 {
+                        panic!("p input has dynamic dimension; cannot infer parameter count");
+                    }
+                    nparams = dim as usize;
+                    break;
+                }
             }
         }
         let mut rng = rand::rng();
@@ -69,10 +79,10 @@ impl NeuralOde {
 
         Ok(Self {
             y0,
-            rhs,
-            rhs_jac_mul,
-            rhs_jac_transpose_mul,
-            rhs_sens_transpose_mul,
+            rhs: RefCell::new(rhs),
+            rhs_jac_mul: RefCell::new(rhs_jac_mul),
+            rhs_jac_transpose_mul: RefCell::new(rhs_jac_transpose_mul),
+            rhs_sens_transpose_mul: RefCell::new(rhs_sens_transpose_mul),
             input_p: params,
             input_v: RefCell::new(y0_ndarray.clone()),
             input_y: RefCell::new(y0_ndarray),
@@ -200,21 +210,19 @@ impl NonLinearOp for Rhs<'_> {
             .iter_mut()
             .zip(x.inner().iter())
             .for_each(|(y, x)| *y = *x as f32);
-        let outputs = self
-            .0
-            .rhs
-            .run(
-                inputs![
-                    "p" => self.0.input_p.view(),
-                    "y" => y_input.view(),
-                ]
-                .unwrap(),
-            )
+        let p_slice = self.0.input_p.as_slice().unwrap();
+        let y_slice = y_input.as_slice().unwrap();
+        let mut rhs = self.0.rhs.borrow_mut();
+        let outputs = rhs
+            .run(inputs![
+                "p" => TensorRef::from_array_view(([p_slice.len()], p_slice)).unwrap(),
+                "y" => TensorRef::from_array_view(([y_slice.len()], y_slice)).unwrap(),
+            ])
             .unwrap();
-        let y_data = outputs["Identity_1:0"].try_extract_tensor::<f32>().unwrap();
+        let (_shape, y_data) = outputs["Identity_1:0"].try_extract_tensor::<f32>().unwrap();
         y.inner_mut()
             .iter_mut()
-            .zip(y_data.as_slice().unwrap())
+            .zip(y_data.iter())
             .for_each(|(y, x)| *y = *x as f64);
     }
 }
@@ -231,22 +239,21 @@ impl NonLinearOpJacobian for Rhs<'_> {
             .iter_mut()
             .zip(v.inner().iter())
             .for_each(|(v, x)| *v = *x as f32);
-        let outputs = self
-            .0
-            .rhs_jac_mul
-            .run(
-                inputs![
-                    "y" => y_input.view(),
-                    "v" => v_input.view(),
-                    "p" => self.0.input_p.view(),
-                ]
-                .unwrap(),
-            )
+        let p_slice = self.0.input_p.as_slice().unwrap();
+        let y_slice = y_input.as_slice().unwrap();
+        let v_slice = v_input.as_slice().unwrap();
+        let mut rhs_jac_mul = self.0.rhs_jac_mul.borrow_mut();
+        let outputs = rhs_jac_mul
+            .run(inputs![
+                "y" => TensorRef::from_array_view(([y_slice.len()], y_slice)).unwrap(),
+                "v" => TensorRef::from_array_view(([v_slice.len()], v_slice)).unwrap(),
+                "p" => TensorRef::from_array_view(([p_slice.len()], p_slice)).unwrap(),
+            ])
             .unwrap();
-        let y_data = outputs["Identity_1:0"].try_extract_tensor::<f32>().unwrap();
+        let (_shape, y_data) = outputs["Identity_1:0"].try_extract_tensor::<f32>().unwrap();
         y.inner_mut()
             .iter_mut()
-            .zip(y_data.as_slice().unwrap())
+            .zip(y_data.iter())
             .for_each(|(y, x)| *y = *x as f64);
     }
 }
@@ -263,22 +270,21 @@ impl NonLinearOpAdjoint for Rhs<'_> {
             .iter_mut()
             .zip(v.inner().iter())
             .for_each(|(v, x)| *v = *x as f32);
-        let outputs = self
-            .0
-            .rhs_jac_transpose_mul
-            .run(
-                inputs![
-                    "y" => y_input.view(),
-                    "v" => v_input.view(),
-                    "p" => self.0.input_p.view(),
-                ]
-                .unwrap(),
-            )
+        let p_slice = self.0.input_p.as_slice().unwrap();
+        let y_slice = y_input.as_slice().unwrap();
+        let v_slice = v_input.as_slice().unwrap();
+        let mut rhs_jac_transpose_mul = self.0.rhs_jac_transpose_mul.borrow_mut();
+        let outputs = rhs_jac_transpose_mul
+            .run(inputs![
+                "y" => TensorRef::from_array_view(([y_slice.len()], y_slice)).unwrap(),
+                "v" => TensorRef::from_array_view(([v_slice.len()], v_slice)).unwrap(),
+                "p" => TensorRef::from_array_view(([p_slice.len()], p_slice)).unwrap(),
+            ])
             .unwrap();
-        let y_data = outputs["Identity_1:0"].try_extract_tensor::<f32>().unwrap();
+        let (_shape, y_data) = outputs["Identity_1:0"].try_extract_tensor::<f32>().unwrap();
         y.inner_mut()
             .iter_mut()
-            .zip(y_data.as_slice().unwrap())
+            .zip(y_data.iter())
             .for_each(|(y, x)| *y = *x as f64);
     }
 }
@@ -295,22 +301,21 @@ impl NonLinearOpSensAdjoint for Rhs<'_> {
             .iter_mut()
             .zip(v.inner().iter())
             .for_each(|(v, x)| *v = *x as f32);
-        let outputs = self
-            .0
-            .rhs_sens_transpose_mul
-            .run(
-                inputs![
-                    "y" => y_input.view(),
-                    "v" => v_input.view(),
-                    "p" => self.0.input_p.view(),
-                ]
-                .unwrap(),
-            )
+        let p_slice = self.0.input_p.as_slice().unwrap();
+        let y_slice = y_input.as_slice().unwrap();
+        let v_slice = v_input.as_slice().unwrap();
+        let mut rhs_sens_transpose_mul = self.0.rhs_sens_transpose_mul.borrow_mut();
+        let outputs = rhs_sens_transpose_mul
+            .run(inputs![
+                "y" => TensorRef::from_array_view(([y_slice.len()], y_slice)).unwrap(),
+                "v" => TensorRef::from_array_view(([v_slice.len()], v_slice)).unwrap(),
+                "p" => TensorRef::from_array_view(([p_slice.len()], p_slice)).unwrap(),
+            ])
             .unwrap();
-        let y_data = outputs["Identity_1:0"].try_extract_tensor::<f32>().unwrap();
+        let (_shape, y_data) = outputs["Identity_1:0"].try_extract_tensor::<f32>().unwrap();
         y.inner_mut()
             .iter_mut()
-            .zip(y_data.as_slice().unwrap())
+            .zip(y_data.iter())
             .for_each(|(y, x)| *y = *x as f64);
     }
 }
