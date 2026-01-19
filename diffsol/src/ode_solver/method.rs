@@ -189,8 +189,7 @@ where
                 }
                 OdeSolverStopReason::RootFound(t_root) => {
                     let nstates = self.problem().eqn.rhs().nstates();
-                    let mut y_root =
-                        Eqn::V::zeros(nstates, self.problem().context().clone());
+                    let mut y_root = Eqn::V::zeros(nstates, self.problem().context().clone());
                     self.interpolate_inplace(t_root, &mut y_root)?;
                     let integrate_out = self.problem().integrate_out;
                     let mut g_root = None;
@@ -610,8 +609,8 @@ where
 mod test {
     use crate::{
         error::{DiffsolError, OdeSolverError},
-        matrix::MatrixCommon,
         matrix::dense_nalgebra_serial::NalgebraMat,
+        matrix::MatrixCommon,
         ode_equations::test_models::exponential_decay::{
             exponential_decay_problem, exponential_decay_problem_adjoint,
             exponential_decay_problem_sens, exponential_decay_problem_sens_with_out,
