@@ -8,6 +8,7 @@ from jax.flatten_util import ravel_pytree
 import tf2onnx
 from onnx.tools.net_drawer import GetOpNodeProducer, GetPydotGraph  # noqa: E402
 import os  # noqa: E402
+import pathlib
 
 
 def draw_graph(model_proto, filename):
@@ -88,13 +89,14 @@ v = jax.random.normal(key, (data_dim,))
 print(rhs_sens_transpose_mul(p, y, v))
 
 
-rhs_proto = to_onnx(rhs, ((p, "p"), (y, "y")), "rhs.onnx")
-to_onnx(rhs_jac_mul, ((p, "p"), (y, "y"), (v, "v")), "rhs_jac_mul.onnx")
+base_dir = pathlib.Path(__file__).parent.resolve()
+rhs_proto = to_onnx(rhs, ((p, "p"), (y, "y")), f"{base_dir}/rhs.onnx")
+to_onnx(rhs_jac_mul, ((p, "p"), (y, "y"), (v, "v")), f"{base_dir}/rhs_jac_mul.onnx")
 to_onnx(
-    rhs_jac_transpose_mul, ((p, "p"), (y, "y"), (v, "v")), "rhs_jac_transpose_mul.onnx"
+    rhs_jac_transpose_mul, ((p, "p"), (y, "y"), (v, "v")), f"{base_dir}/rhs_jac_transpose_mul.onnx"
 )
 to_onnx(
     rhs_sens_transpose_mul,
     ((p, "p"), (y, "y"), (v, "v")),
-    "rhs_sens_transpose_mul.onnx",
+    f"{base_dir}/rhs_sens_transpose_mul.onnx",
 )
