@@ -25,8 +25,8 @@ plotly = { version = "0.13.5" }
 argmin = { version = "0.11.0" }
 argmin-math = { version = "0.5.1" }
 argmin-observer-slog = { version = "0.2.0" }
-ort = "=2.0.0-rc.9"
-ort-sys = { version = "=2.0.0-rc.9", default-features = false }
+ort = "=2.0.0-rc.10"
+ort-sys = { version = "=2.0.0-rc.10", default-features = false }
 
 [profile.profiling]
 inherits = "release"
