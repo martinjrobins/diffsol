@@ -252,6 +252,8 @@ pub fn exponential_decay_problem<M: Matrix + 'static>(
         .unwrap();
     let p = [M::T::from_f64(k).unwrap(), M::T::from_f64(y0).unwrap()];
     let mut soln = OdeSolverSolution::default();
+    soln.rtol = problem.rtol;
+    soln.atol = problem.atol.clone();
     for i in 0..10 {
         let t = M::T::from_f64(i as f64).unwrap();
         let y0: M::V = problem.eqn.init().call(M::T::zero());
@@ -282,6 +284,8 @@ pub fn exponential_decay_problem_with_mass<M: Matrix + 'static>(
         .unwrap();
     let p = [M::T::from_f64(k).unwrap(), M::T::from_f64(y0).unwrap()];
     let mut soln = OdeSolverSolution::default();
+    soln.rtol = problem.rtol;
+    soln.atol = problem.atol.clone();
     for i in 0..10 {
         let t = M::T::from_f64(i as f64).unwrap();
         let y0: M::V = problem.eqn.init().call(M::T::zero());
@@ -294,22 +298,33 @@ pub fn exponential_decay_problem_with_mass<M: Matrix + 'static>(
 #[allow(clippy::type_complexity)]
 pub fn exponential_decay_problem_with_root<M: MatrixHost + 'static>(
     use_coloring: bool,
+    integrate_out: bool,
 ) -> (
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let k = 0.1;
     let y0 = 1.0;
+    let out_fn = |_x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V| {
+        y.copy_from(_x);
+    };
+    let out_jac_fn = |_x: &M::V, _p: &M::V, _t: M::T, v: &M::V, y: &mut M::V| {
+        y.copy_from(v);
+    };
     let problem = OdeBuilder::<M>::new()
         .p([k, y0])
         .use_coloring(use_coloring)
         .rhs_implicit(exponential_decay::<M>, exponential_decay_jacobian::<M>)
         .init(exponential_decay_init::<M>, 2)
         .root(exponential_decay_root::<M>, 1)
+        .out_implicit(out_fn, out_jac_fn, 2)
+        .integrate_out(integrate_out)
         .build()
         .unwrap();
     let p = [M::T::from_f64(k).unwrap(), M::T::from_f64(y0).unwrap()];
     let mut soln = OdeSolverSolution::default();
+    soln.rtol = problem.rtol;
+    soln.atol = problem.atol.clone();
     for i in 0..10 {
         let t = M::T::from_f64(i as f64).unwrap();
         let y0: M::V = problem.eqn.init().call(M::T::zero());

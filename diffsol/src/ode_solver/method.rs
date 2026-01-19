@@ -619,6 +619,7 @@ mod test {
         scale, AdjointOdeSolverMethod, DenseMatrix, NalgebraLU, NalgebraVec, OdeEquations,
         OdeSolverMethod, Op, SensitivitiesOdeSolverMethod, Vector, VectorView,
     };
+    use crate::ConstantOp;
 
     #[test]
     fn test_solve() {
@@ -639,7 +640,7 @@ mod test {
 
     #[test]
     fn test_solve_stops_on_root() {
-        let (problem, _soln) = exponential_decay_problem_with_root::<NalgebraMat<f64>>(false);
+        let (problem, _soln) = exponential_decay_problem_with_root::<NalgebraMat<f64>>(false, false);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let (y, t) = s.solve(10.0).unwrap();
@@ -690,7 +691,7 @@ mod test {
 
     #[test]
     fn test_dense_solve_stops_on_root() {
-        let (problem, _soln) = exponential_decay_problem_with_root::<NalgebraMat<f64>>(false);
+        let (problem, _soln) = exponential_decay_problem_with_root::<NalgebraMat<f64>>(false, false);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = (0..=10).map(|i| i as f64).collect::<Vec<_>>();
@@ -701,6 +702,26 @@ mod test {
 
         let y_last = y.column(y.ncols() - 1).into_owned();
         let expected = NalgebraVec::from_vec(vec![0.6, 0.6], *problem.context());
+        y_last.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
+    }
+
+    #[test]
+    fn test_dense_solve_integrate_out_stops_on_root() {
+        let (problem, _soln) = exponential_decay_problem_with_root::<NalgebraMat<f64>>(false, true);
+        let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
+
+        let t_eval = (0..=10).map(|i| i as f64).collect::<Vec<_>>();
+        let y = s.solve_dense(t_eval.as_slice()).unwrap();
+        let k = 0.1;
+        let decay = 0.6_f64;
+        let t_root = -decay.ln() / k;
+        assert!((s.state().t - t_root).abs() < 1e-3);
+        assert!(y.ncols() < t_eval.len());
+
+        let y_last = y.column(y.ncols() - 1).into_owned();
+        let y0 = problem.eqn.init().call(0.0);
+        let integral = (1.0 - decay) / k;
+        let expected = y0 * scale(integral);
         y_last.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
     }
 
