@@ -5,4 +5,5 @@ tensorflow
 tf2onnx
 pydot
 pandas
+matplotlib
 numpy==1.26.4

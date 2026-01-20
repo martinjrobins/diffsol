@@ -33,5 +33,5 @@ python examples/neural-ode-weather-prediction/src/model/model.py
 You can then build and run the example using cargo:
 
 ```bash
-cargo run --example neural-ode-weather-prediction --features onnx --release
+cargo run -p neural-ode-weather-prediction --features onnx --release
 ```
