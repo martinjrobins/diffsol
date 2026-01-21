@@ -254,6 +254,22 @@ where
                     OdeSolverStopReason::InternalTimestep => {}
                     OdeSolverStopReason::TstopReached => break,
                     OdeSolverStopReason::RootFound(t_root) => {
+                        // write out all the t_eval points up to t_root
+                        let mut ii = i;
+                        let mut tt = *t;
+                        while tt < t_root {
+                            dense_write_out(
+                                self,
+                                &mut ret,
+                                tt,
+                                ii,
+                                &mut tmp_nout,
+                                &mut tmp_nstates,
+                            )?;
+                            // move to next t_eval
+                            ii += 1;
+                            tt = t_eval[ii];
+                        }
                         self.interpolate_inplace(t_root, &mut tmp_nstates)?;
                         let integrate_out = self.problem().integrate_out;
                         let mut g_root = None;
@@ -271,7 +287,7 @@ where
                             }
                         }
                         {
-                            let mut y_out = ret.column_mut(i);
+                            let mut y_out = ret.column_mut(ii);
                             if integrate_out {
                                 y_out.copy_from(g_root.as_ref().unwrap());
                             } else {
@@ -284,12 +300,19 @@ where
                                 }
                             }
                         }
-                        ret.resize_cols(i + 1);
+                        ret.resize_cols(ii + 1);
                         return Ok(ret);
                     }
                 }
             }
-            dense_write_out(self, &mut ret, t_eval, i, &mut tmp_nout, &mut tmp_nstates)?;
+            dense_write_out(
+                self,
+                &mut ret,
+                t_eval[i],
+                i,
+                &mut tmp_nout,
+                &mut tmp_nstates,
+            )?;
         }
         Ok(ret)
     }
@@ -448,7 +471,14 @@ where
                     ydots.clear();
                 }
             }
-            dense_write_out(self, &mut ret, t_eval, i, &mut tmp_nout, &mut tmp_nstates)?;
+            dense_write_out(
+                self,
+                &mut ret,
+                t_eval[i],
+                i,
+                &mut tmp_nout,
+                &mut tmp_nstates,
+            )?;
         }
         assert_eq!(step_reason, OdeSolverStopReason::TstopReached);
 
@@ -485,7 +515,7 @@ where
 fn dense_write_out<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     s: &S,
     y_out: &mut <Eqn::V as DefaultDenseMatrix>::M,
-    t_eval: &[Eqn::T],
+    t: Eqn::T,
     i: usize,
     tmp_nout: &mut Eqn::V,
     tmp_nstates: &mut Eqn::V,
@@ -494,7 +524,6 @@ where
     Eqn::V: DefaultDenseMatrix,
 {
     let mut y_out = y_out.column_mut(i);
-    let t = t_eval[i];
     if s.problem().integrate_out {
         s.interpolate_out_inplace(t, tmp_nout)?;
         y_out.copy_from(tmp_nout);
@@ -502,7 +531,7 @@ where
         s.interpolate_inplace(t, tmp_nstates)?;
         match s.problem().eqn.out() {
             Some(out) => {
-                out.call_inplace(tmp_nstates, t_eval[i], tmp_nout);
+                out.call_inplace(tmp_nstates, t, tmp_nout);
                 y_out.copy_from(tmp_nout)
             }
             None => y_out.copy_from(tmp_nstates),
@@ -704,6 +733,14 @@ mod test {
         let t_root = -0.6_f64.ln() / 0.1;
         assert!((s.state().t - t_root).abs() < 1e-3);
         assert!(y.ncols() < t_eval.len());
+
+        let t_root_minus_one = t_eval.iter().position(|x| x >= &t_root).unwrap() - 1;
+        let y_root_minus_one = y.column(t_root_minus_one).into_owned();
+        let expected_minus_one = NalgebraVec::from_vec(
+            vec![f64::exp(-0.1 * t_eval[t_root_minus_one]); 2],
+            *problem.context(),
+        );
+        y_root_minus_one.assert_eq_norm(&expected_minus_one, &problem.atol, problem.rtol, 15.0);
 
         let y_last = y.column(y.ncols() - 1).into_owned();
         let expected = NalgebraVec::from_vec(vec![0.6, 0.6], *problem.context());
