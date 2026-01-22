@@ -594,13 +594,13 @@ where
         }
 
         // do the same for sensitivities
-        if self.s_op.is_some() {
-            for i in 0..self.s_op.as_ref().unwrap().eqn().max_index() {
+        if let Some(s_op) = self.s_op.as_ref() {
+            for i in 0..s_op.eqn().max_index() {
                 // update sensitivity differences
                 Self::_update_diff(order, &self.s_deltas[i], &mut state.sdiff[i]);
 
                 // integrate sensitivity output equations
-                if self.s_op.as_ref().unwrap().eqn().out().is_some() {
+                if s_op.eqn().out().is_some() {
                     Self::_predict_using_diff(&mut state.sg[i], &state.sgdiff[i], order);
                     state.sg[i].axpy(Eqn::T::one(), &self.sg_deltas[i], Eqn::T::one());
 
@@ -718,9 +718,9 @@ where
         if self.ode_problem.integrate_out {
             self.state.initialise_gdiff_to_first_order();
         }
-        if self.s_op.is_some() {
+        if let Some(s_op) = self.s_op.as_ref() {
             self.state.initialise_sdiff_to_first_order();
-            if self.s_op.as_ref().unwrap().eqn().out().is_some() {
+            if s_op.eqn().out().is_some() {
                 self.state.initialise_sgdiff_to_first_order();
             }
         }
