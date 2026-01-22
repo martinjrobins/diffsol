@@ -61,29 +61,19 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> Di
             1 => diffsl::execution::compiler::CompilerMode::SingleThreaded,
             _ => diffsl::execution::compiler::CompilerMode::MultiThreaded(Some(nthreads)),
         };
+        let options = diffsl::execution::compiler::CompilerOptions {
+            mode,
+            ..Default::default()
+        };
         let model =
             parse_ds_string(text).map_err(|e| DiffsolError::DiffslParserError(e.to_string()))?;
         let mut model = DiscreteModel::build("diffsol", &model)
             .map_err(|e| DiffsolError::DiffslCompilerError(e.as_error_message(text)))?;
-        let compiler = Compiler::from_discrete_model(&model, mode)
+        let compiler = Compiler::from_discrete_model(&model, options, Some(text))
             .map_err(|e| DiffsolError::DiffslCompilerError(e.to_string()))?;
         let rhs_state_deps = model.take_rhs_state_deps();
         let rhs_input_deps = model.take_rhs_input_deps();
         let mass_state_deps = model.take_mass_state_deps();
-        let (nstates, _nparams, _nout, _ndata, _nroots, _has_mass) = compiler.get_dims();
-
-        let compiler = if nthreads == 0 {
-            let num_cpus = std::thread::available_parallelism().unwrap().get();
-            let nthreads = num_cpus.min(nstates / 1000).max(1);
-            Compiler::from_discrete_str(
-                text,
-                diffsl::execution::compiler::CompilerMode::MultiThreaded(Some(nthreads)),
-            )
-            .map_err(|e| DiffsolError::Other(e.to_string()))?
-        } else {
-            compiler
-        };
-
         let (nstates, nparams, nout, _ndata, nroots, has_mass) = compiler.get_dims();
 
         let has_root = nroots > 0;
