@@ -1,6 +1,8 @@
-mod rhs_network;
+mod backend;
 mod equations;
-mod ode_backend;
+mod rhs;
+mod rhs_network;
+mod vector;
 
 fn main() {
     println!("Hello, world!");

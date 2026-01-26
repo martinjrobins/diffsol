@@ -367,6 +367,20 @@ pub trait VectorHost:
     fn as_mut_slice(&mut self) -> &mut [Self::T];
 }
 
+/// A vector view hosted on the CPU, supporting direct indexing and slice access.
+///
+/// This trait extends `Vector` with the ability to directly access vector elements via indexing
+/// (`v[i]`) and to get slices of the underlying data. This is useful for algorithms that need
+/// direct CPU-side access to vector data. GPU vectors typically do not implement this trait.
+pub trait VectorViewHost<'a>:
+    VectorView<'a>
+    + Index<IndexType, Output = Self::T>
+{
+    /// Get the vector view data as an immutable slice.
+    fn as_slice(&self) -> &'a[Self::T];
+}
+
+
 /// Marker trait for vectors that have a default associated dense matrix type.
 ///
 /// This trait associates a vector type with its corresponding dense matrix representation,

@@ -3,6 +3,7 @@ use std::slice;
 
 use faer::{unzip, zip, Col, ColMut, ColRef};
 
+use crate::vector::VectorViewHost;
 use crate::{scalar::Scale, FaerContext, IndexType, Scalar, Vector};
 
 use crate::{FaerMat, VectorCommon, VectorHost, VectorIndex, VectorView, VectorViewMut};
@@ -164,6 +165,12 @@ impl<T: Scalar> VectorHost for FaerVec<T> {
     }
     fn as_slice(&self) -> &[Self::T] {
         unsafe { slice::from_raw_parts(self.data.as_ptr(), self.len()) }
+    }
+}
+
+impl<'a, T: Scalar> VectorViewHost<'a> for FaerVecRef<'a, T> {
+    fn as_slice(&self) -> &'a [Self::T] {
+        unsafe { slice::from_raw_parts(self.data.as_ptr(), self.data.nrows()) }
     }
 }
 
@@ -376,6 +383,7 @@ impl<'a, T: Scalar> VectorViewMut<'a> for FaerVecMut<'a, T> {
             .for_each(|unzip!(si, xi)| *si = *si * beta + *xi * alpha);
     }
 }
+
 
 // tests
 #[cfg(test)]

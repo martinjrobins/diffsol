@@ -47,7 +47,7 @@ where
 
     /// The configuration type used by the solver
     type Config: OdeSolverConfig<Eqn::T>;
-
+    
     /// Get the current problem
     fn problem(&self) -> &'a OdeSolverProblem<Eqn>;
 

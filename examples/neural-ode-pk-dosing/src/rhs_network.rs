@@ -1,4 +1,7 @@
-use burn::{nn::{Linear, Relu}, prelude::*};
+use burn::{
+    nn::{Linear, LinearConfig, Relu},
+    prelude::*,
+};
 
 #[derive(Debug, Module)]
 pub struct RhsNN<B: Backend> {
@@ -6,7 +9,6 @@ pub struct RhsNN<B: Backend> {
     linear2: Linear<B>,
     linear3: Linear<B>,
     activation: Relu,
-    
 }
 
 impl<B: Backend> RhsNN<B> {
@@ -30,11 +32,10 @@ pub struct RhsNNConfig {
 impl RhsNNConfig {
     pub fn init<B: Backend>(&self) -> RhsNN<B> {
         RhsNN {
-            linear1: Linear::new(self.input_dim, self.hidden_dim),
-            linear2: Linear::new(self.hidden_dim, self.hidden_dim),
-            linear3: Linear::new(self.hidden_dim, self.output_dim),
+            linear1: LinearConfig::new(self.input_dim, self.hidden_dim).init(&Default::default()),
+            linear2: LinearConfig::new(self.hidden_dim, self.hidden_dim).init(&Default::default()),
+            linear3: LinearConfig::new(self.hidden_dim, self.output_dim).init(&Default::default()),
             activation: Relu,
         }
     }
 }
-

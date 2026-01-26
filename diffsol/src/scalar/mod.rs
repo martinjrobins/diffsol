@@ -8,6 +8,11 @@ pub mod cuda;
 
 use crate::vector::VectorView;
 
+pub enum ScalarEnum {
+    F32,
+    F64,
+}
+
 /// A scalar type suitable for numerical computations in ODE solvers.
 ///
 /// This trait aggregates multiple trait bounds from nalgebra, faer, and num_traits to ensure
@@ -47,6 +52,8 @@ pub trait Scalar:
     const NAN: Self;
     /// Check if this value is NaN.
     fn is_nan(self) -> bool;
+    /// Convert this scalar type to its corresponding `ScalarEnum` variant.
+    fn as_enum() -> ScalarEnum;
 }
 
 /// The index type used throughout DiffSol for indexing vectors and matrices.
@@ -59,6 +66,9 @@ impl Scalar for f64 {
     fn is_nan(self) -> bool {
         self.is_nan()
     }
+    fn as_enum() -> ScalarEnum {
+        ScalarEnum::F64
+    }
 }
 
 impl Scalar for f32 {
@@ -67,6 +77,9 @@ impl Scalar for f32 {
     const NAN: Self = f32::NAN;
     fn is_nan(self) -> bool {
         self.is_nan()
+    }
+    fn as_enum() -> ScalarEnum {
+        ScalarEnum::F32
     }
 }
 
