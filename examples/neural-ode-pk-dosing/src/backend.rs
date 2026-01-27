@@ -1,5 +1,6 @@
+use burn::backend::autodiff::checkpoint::strategy::CheckpointStrategy;
 use burn::backend::ndarray::NdArrayTensor;
-use burn::backend::NdArray;
+use burn::backend::{Autodiff, NdArray};
 use burn::tensor::{DType, TensorMetadata};
 use burn::{prelude::Backend, tensor::ops::FloatTensor};
 use diffsol::matrix::MatrixRef;
@@ -89,6 +90,37 @@ pub trait Solve<V: Vector>: Backend {
     fn copy_tensor_to_v(t: FloatTensor<Self>, v: &mut V);
     fn v_to_tensor(v: &V) -> FloatTensor<Self>;
     fn m_to_tensor(m: <V as DefaultDenseMatrix>::M) -> FloatTensor<Self>;
+}
+
+impl<B: Backend, V: Vector, C: CheckpointStrategy> Solve<V> for Autodiff<B, C> {
+    fn solve(
+        y0: FloatTensor<Self>,
+        params: FloatTensor<Self>,
+        t_eval: FloatTensor<Self>,
+        m: &impl Rhs<Self>,
+    ) -> FloatTensor<Self>
+    where
+        for<'b> &'b V: VectorRef<V>,
+        for<'b> &'b <V as DefaultDenseMatrix>::M: MatrixRef<<V as DefaultDenseMatrix>::M>,
+    {
+    }
+    
+    fn tensor_to_vec(t: FloatTensor<Self>) -> Vec<<B>::T> {
+        todo!()
+    }
+    
+    fn copy_tensor_to_v(t: FloatTensor<Self>, v: &mut B) {
+        todo!()
+    }
+    
+    fn v_to_tensor(v: &B) -> FloatTensor<Self> {
+        todo!()
+    }
+    
+    fn m_to_tensor(m: <B as DefaultDenseMatrix>::M) -> FloatTensor<Self> {
+        todo!()
+    }
+
 }
 
 impl<V: Vector<T = f32>> Solve<V> for NdArray
