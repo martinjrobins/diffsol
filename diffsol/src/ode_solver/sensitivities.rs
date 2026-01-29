@@ -1,8 +1,7 @@
 use crate::{
     error::DiffsolError, error::OdeSolverError, ode_solver_error, AugmentedOdeSolverMethod,
-    Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix, NonLinearOp, NonLinearOpJacobian,
-    NonLinearOpSens, OdeEquationsImplicitSens, OdeSolverStopReason, Op, SensEquations, Vector,
-    VectorViewMut,
+    Context, DefaultDenseMatrix, DenseMatrix, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens,
+    OdeEquationsImplicitSens, OdeSolverStopReason, Op, SensEquations, Vector, VectorViewMut,
 };
 use num_traits::{One, Zero};
 use std::ops::AddAssign;
@@ -29,7 +28,6 @@ where
     >
     where
         Eqn: OdeEquationsImplicitSens,
-        Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
