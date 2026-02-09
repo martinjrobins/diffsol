@@ -19,6 +19,7 @@ faer = { version = "0.23.2", default-features = false, features = [
     "rand",
     "npy",
 ] }
+faer-traits = "0.23.2"
 cudarc = { version = "0.16.4", default-features = false }
 
 plotly = { version = "0.13.5" }

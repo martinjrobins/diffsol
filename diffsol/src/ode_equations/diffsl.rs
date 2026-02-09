@@ -3,6 +3,8 @@ use num_traits::{One, Zero};
 use std::ops::MulAssign;
 use std::{cell::RefCell, mem};
 
+#[cfg(feature = "diffsl-external")]
+use diffsl::execution::external::{ExternSymbols, ExternalModule};
 use diffsl::{
     discretise::DiscreteModel,
     execution::{
@@ -44,6 +46,59 @@ pub struct DiffSlContext<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
     rhs_state_deps: Vec<(usize, usize)>,
     rhs_input_deps: Vec<(usize, usize)>,
     mass_state_deps: Vec<(usize, usize)>,
+}
+
+#[cfg(feature = "diffsl-external")]
+impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSlContext<M, ExternalModule<M::T>> {
+    pub fn new_external(
+        nthreads: usize,
+        rhs_state_deps: Vec<(usize, usize)>,
+        rhs_input_deps: Vec<(usize, usize)>,
+        mass_state_deps: Vec<(usize, usize)>,
+        ctx: M::C,
+    ) -> Result<Self, DiffsolError> {
+        let mode = match nthreads {
+            0 => diffsl::execution::compiler::CompilerMode::MultiThreaded(None),
+            1 => diffsl::execution::compiler::CompilerMode::SingleThreaded,
+            _ => diffsl::execution::compiler::CompilerMode::MultiThreaded(Some(nthreads)),
+        };
+        let module = ExternalModule::default();
+        let compiler = Compiler::from_codegen_module(module, mode)
+            .map_err(|e| DiffsolError::DiffslCompilerError(e.to_string()))?;
+        let (nstates, nparams, nout, _ndata, nroots, has_mass) = compiler.get_dims();
+
+        let has_root = nroots > 0;
+        let has_out = nout > 0;
+        let data = RefCell::new(compiler.get_new_data());
+        let ddata = RefCell::new(compiler.get_new_data());
+        let sens_data = RefCell::new(compiler.get_new_data());
+        let tmp = RefCell::new(M::V::zeros(nstates, ctx.clone()));
+        let tmp2 = RefCell::new(M::V::zeros(nstates, ctx.clone()));
+        let tmp_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
+        let tmp2_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
+
+        Ok(Self {
+            compiler,
+            data,
+            ddata,
+            sens_data,
+            nparams,
+            nstates,
+            tmp,
+            tmp2,
+            tmp_out,
+            tmp2_out,
+            nroots,
+            nout,
+            has_mass,
+            has_root,
+            has_out,
+            ctx,
+            rhs_state_deps,
+            rhs_input_deps,
+            mass_state_deps,
+        })
+    }
 }
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> DiffSlContext<M, CG> {
@@ -147,37 +202,7 @@ pub struct DiffSl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
     rhs_sens_adjoint_coloring: Option<JacobianColoring<M>>,
 }
 
-impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModuleJit + CodegenModuleCompile> DiffSl<M, CG> {
-    /// Compile DiffSL code into ODE equations.
-    ///
-    /// This is a convenience function that creates a new `DiffSlContext` from the provided code
-    /// and then calls `from_context` to create the `DiffSl` instance. For more control over
-    /// the compilation process (e.g., number of threads), create the context directly using
-    /// `DiffSlContext::new` and then call `from_context`.
-    ///
-    /// # Arguments
-    ///
-    /// * `code` - The DiffSL code defining the ODE system
-    /// * `ctx` - The context for creating vectors and matrices (typically `Default::default()`)
-    /// * `include_sensitivities` - Whether to extract sparsity patterns for sensitivity computations.
-    ///   Set to `true` if you plan to compute sensitivities or adjoints.
-    ///
-    /// # Returns
-    ///
-    /// A new `DiffSl` instance that implements `OdeEquations` and can be used with ODE solvers.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the DiffSL code cannot be parsed or compiled.
-    pub fn compile(
-        code: &str,
-        ctx: M::C,
-        include_sensitivities: bool,
-    ) -> Result<Self, DiffsolError> {
-        let context = DiffSlContext::<M, CG>::new(code, 1, ctx)?;
-        Ok(Self::from_context(context, include_sensitivities))
-    }
-
+impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> DiffSl<M, CG> {
     /// Create a `DiffSl` instance from a pre-compiled `DiffSlContext`.
     ///
     /// This function extracts the sparsity patterns and Jacobian colorings from the compiled
@@ -279,6 +304,74 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModuleJit + CodegenModuleCompile
             }
         }
         ret
+    }
+}
+
+#[cfg(feature = "diffsl-external")]
+impl<M: MatrixHost<T: DiffSlScalar + ExternSymbols>> DiffSl<M, ExternalModule<M::T>> {
+    /// Create a `DiffSl` instance using externally-provided functions & sparsity patterns.
+    ///
+    /// # Arguments
+    ///
+    /// * `ctx` - The computational context for vector and matrix operations (e.g., CPU, GPU)
+    /// * `rhs_state_deps` - Sparsity pattern for the RHS Jacobian (∂f/∂y) as pairs (row, col)
+    /// * `rhs_input_deps` - Sparsity pattern for the RHS sensitivity matrix (∂f/∂p) as pairs (row, col)
+    /// * `mass_state_deps` - Sparsity pattern for the mass matrix Jacobian (∂M/∂y) as pairs (row, col)
+    /// * `include_sensitivities` - Whether to set up sparsity patterns for sensitivity computations.
+    ///   If `true`, enables forward and adjoint sensitivity analysis. Set to `false` to skip
+    ///   sensitivity setup for better memory efficiency when sensitivities are not needed.
+    ///
+    /// # Returns
+    ///
+    /// A new `DiffSl` instance with Jacobian colorings configured for efficient matrix computation,
+    /// or an error if the context creation fails.
+    pub fn from_external(
+        ctx: M::C,
+        rhs_state_deps: Vec<(usize, usize)>,
+        rhs_input_deps: Vec<(usize, usize)>,
+        mass_state_deps: Vec<(usize, usize)>,
+        include_sensitivities: bool,
+    ) -> Result<Self, DiffsolError> {
+        let context = DiffSlContext::<M, ExternalModule<M::T>>::new_external(
+            1,
+            rhs_state_deps,
+            rhs_input_deps,
+            mass_state_deps,
+            ctx,
+        )?;
+        Ok(Self::from_context(context, include_sensitivities))
+    }
+}
+
+impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModuleJit + CodegenModuleCompile> DiffSl<M, CG> {
+    /// Compile DiffSL code into ODE equations.
+    ///
+    /// This is a convenience function that creates a new `DiffSlContext` from the provided code
+    /// and then calls `from_context` to create the `DiffSl` instance. For more control over
+    /// the compilation process (e.g., number of threads), create the context directly using
+    /// `DiffSlContext::new` and then call `from_context`.
+    ///
+    /// # Arguments
+    ///
+    /// * `code` - The DiffSL code defining the ODE system
+    /// * `ctx` - The context for creating vectors and matrices (typically `Default::default()`)
+    /// * `include_sensitivities` - Whether to extract sparsity patterns for sensitivity computations.
+    ///   Set to `true` if you plan to compute sensitivities or adjoints.
+    ///
+    /// # Returns
+    ///
+    /// A new `DiffSl` instance that implements `OdeEquations` and can be used with ODE solvers.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the DiffSL code cannot be parsed or compiled.
+    pub fn compile(
+        code: &str,
+        ctx: M::C,
+        include_sensitivities: bool,
+    ) -> Result<Self, DiffsolError> {
+        let context = DiffSlContext::<M, CG>::new(code, 1, ctx)?;
+        Ok(Self::from_context(context, include_sensitivities))
     }
 }
 
