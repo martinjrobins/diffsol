@@ -43,6 +43,7 @@
 - [Using Diffsol from other languages](./use/use_from_other_languages.md)
   - [Python](./use/python.md)
   - [WebAssembly](./use/webassembly.md)
+  - [WebAssembly with JIT](./use/webassembly-jit.md)
 - [Benchmarks](./benchmarks/benchmarks.md)
   - [Sundials](./benchmarks/sundials.md)
   - [Python (Diffrax & Casadi)](./benchmarks/python.md)

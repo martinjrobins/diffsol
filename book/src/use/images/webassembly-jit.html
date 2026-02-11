@@ -1,0 +1,53 @@
+<!-- Load Plotly from CDN -->
+<script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
+
+<!-- Load DiffSol styles and bundle -->
+<link rel="stylesheet" href="https://diffsol-js.fly.dev/interactive-solver.css" />
+<script src="https://diffsol-js.fly.dev/diffsol.min.js"></script>
+
+<div id="solver" style="background-color: white; border-radius: 10px; padding: 20px;"></div>
+
+<script>
+// Access DiffSol from global namespace
+const { createInteractiveSolver, MatrixType, LinearSolverType, OdeSolverType } = window.DiffSol;
+
+// Create interactive solver (styles and errors are handled automatically)
+createInteractiveSolver({
+  divId: 'solver',
+  diffslCode: `in_i { y0 = 1.0 }
+a { 2.0/3.0 } b { 4.0/3.0 } 
+c { 1.0 } d { 1.0 }
+u_i {
+    y1 = y0,
+    y2 = y0,
+}
+F_i {
+    a * y1 - b * y1 * y2,
+    c * y1 * y2 - d * y2,
+}`,
+  sliders: {
+    y0: {
+      label: 'Initial Value (y0)',
+      min: 0.1,
+      max: 5,
+      initial: 1,
+    },
+  },
+  outputs: {
+    y1: {
+      label: 'prey (y1)',
+    },
+    y2: {
+      label: 'predator (y2)',
+    },
+  },
+  moduleConfig: {
+    backendUrl: 'https://diffsol-js.fly.dev',
+  },
+  finalTime: 20.0,
+  matrixType: MatrixType.FaerDense,
+  linearSolverType: LinearSolverType.Lu,
+  odeSolverType: OdeSolverType.Bdf,
+});
+// Note: No .catch() needed - errors are displayed in the UI automatically
+</script>
