@@ -1,17 +1,11 @@
-<!-- Load Plotly from CDN -->
 <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
-
-<!-- Load DiffSol styles and bundle -->
-<link rel="stylesheet" href="https://diffsol-js.fly.dev/interactive-solver.css" />
 <script src="https://diffsol-js.fly.dev/diffsol.min.js"></script>
+<link rel="stylesheet" href="https://diffsol-js.fly.dev/interactive-solver.css" />
 
 <div id="solver" style="background-color: white; border-radius: 10px; padding: 20px;"></div>
 
 <script>
-// Access DiffSol from global namespace
 const { createInteractiveSolver, MatrixType, LinearSolverType, OdeSolverType } = window.DiffSol;
-
-// Create interactive solver (styles and errors are handled automatically)
 createInteractiveSolver({
   divId: 'solver',
   diffslCode: `in_i { y0 = 1.0 }
@@ -47,7 +41,6 @@ F_i {
   finalTime: 20.0,
   matrixType: MatrixType.FaerDense,
   linearSolverType: LinearSolverType.Lu,
-  odeSolverType: OdeSolverType.Bdf,
+  showCodeEditor: true,
 });
-// Note: No .catch() needed - errors are displayed in the UI automatically
 </script>
