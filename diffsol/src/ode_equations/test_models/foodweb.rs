@@ -813,6 +813,7 @@ where
     type Rhs = FoodWebRhs<'a, M, NX>;
     type Mass = FoodWebMass<'a, M, NX>;
     type Root = ParameterisedOp<'a, UnitCallable<M>>;
+    type Force = ParameterisedOp<'a, UnitCallable<M>>;
     type Out = FoodWebOut<'a, M, NX>;
 }
 
@@ -833,6 +834,9 @@ where
         Some(FoodWebOut::new(self))
     }
     fn root(&self) -> Option<<Self as OdeEquationsRef<'_>>::Root> {
+        None
+    }
+    fn force(&self) -> Option<<Self as OdeEquationsRef<'_>>::Force> {
         None
     }
     fn set_params(&mut self, _p: &Self::V) {

@@ -521,6 +521,7 @@ mod tests {
         type Mass = ParameterisedOp<'a, UnitCallable<M>>;
         type Root = ParameterisedOp<'a, UnitCallable<M>>;
         type Init = &'a TestEqnInit<M>;
+        type Force = ParameterisedOp<'a, UnitCallable<M>>;
         type Out = &'a TestEqnOut<M>;
     }
 
@@ -539,6 +540,10 @@ mod tests {
 
         fn init(&self) -> &TestEqnInit<M> {
             &self.init
+        }
+
+        fn force(&self) -> Option<<Self as OdeEquationsRef<'_>>::Force> {
+            None
         }
 
         fn out(&self) -> Option<<Self as OdeEquationsRef<'_>>::Out> {

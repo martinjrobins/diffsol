@@ -109,6 +109,7 @@ impl<'a, Eqn: OdeEquations> OdeEquationsRef<'a> for NoAug<Eqn> {
     type Rhs = <Eqn as OdeEquationsRef<'a>>::Rhs;
     type Root = <Eqn as OdeEquationsRef<'a>>::Root;
     type Init = <Eqn as OdeEquationsRef<'a>>::Init;
+    type Force = <Eqn as OdeEquationsRef<'a>>::Force;
     type Out = <Eqn as OdeEquationsRef<'a>>::Out;
 }
 
@@ -130,6 +131,10 @@ impl<Eqn: OdeEquations> OdeEquations for NoAug<Eqn> {
     }
 
     fn init(&self) -> <Self as OdeEquationsRef<'_>>::Init {
+        panic!("This should never be called")
+    }
+
+    fn force(&self) -> Option<<Self as OdeEquationsRef<'_>>::Force> {
         panic!("This should never be called")
     }
 
@@ -186,6 +191,7 @@ impl<Eqn: OdeEquations> AugmentedOdeEquations<Eqn> for NoAug<Eqn> {
 /// The ODE equations are defined by:
 /// - the right-hand side function `F(t, y)`, which is given as a [NonLinearOp] using the `Rhs` associated type and [OdeEquations::rhs] function,
 /// - the initial condition `y_0(t_0)`, which is given as a [ConstantOp] using the `Init` associated type and [OdeEquations::init] function.
+/// - an optional forcing term applied at the initial time, which is given as a [NonLinearOp] using the `Force` associated type and [OdeEquations::force] function.
 ///
 /// Optionally, the ODE equations can also include:
 /// - the mass matrix `M` which is given as a [LinearOp] using the `Mass` associated type and the [OdeEquations::mass] function,
@@ -196,6 +202,7 @@ pub trait OdeEquationsRef<'a, ImplicitBounds: Sealed = Bounds<&'a Self>>: Op {
     type Rhs: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
     type Root: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
     type Init: ConstantOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
+    type Force: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
     type Out: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
 }
 
@@ -204,6 +211,7 @@ impl<'a, T: OdeEquationsRef<'a>> OdeEquationsRef<'a> for &T {
     type Rhs = <T as OdeEquationsRef<'a>>::Rhs;
     type Root = <T as OdeEquationsRef<'a>>::Root;
     type Init = <T as OdeEquationsRef<'a>>::Init;
+    type Force = <T as OdeEquationsRef<'a>>::Force;
     type Out = <T as OdeEquationsRef<'a>>::Out;
 }
 
@@ -225,6 +233,7 @@ use sealed::{Bounds, Sealed};
 /// The ODE equations are defined by:
 /// - the right-hand side function `F(t, y)`, which is given as a [NonLinearOp] using the `Rhs` associated type and [OdeEquations::rhs] function,
 /// - the initial condition `y_0(t_0)`, which is given as a [ConstantOp] using the `Init` associated type and [OdeEquations::init] function.
+/// - an optional forcing term applied at the initial time, which is given as a [NonLinearOp] using the `Force` associated type and [OdeEquations::force] function.
 ///
 /// Optionally, the ODE equations can also include:
 /// - the mass matrix `M` which is given as a [LinearOp] using the `Mass` associated type and the [OdeEquations::mass] function,
@@ -249,6 +258,11 @@ pub trait OdeEquations: for<'a> OdeEquationsRef<'a> {
 
     /// returns the initial condition, i.e. `y(t)`, where `t` is the initial time
     fn init(&self) -> <Self as OdeEquationsRef<'_>>::Init;
+
+    /// returns the optional forcing term applied at the initial time
+    fn force(&self) -> Option<<Self as OdeEquationsRef<'_>>::Force> {
+        None
+    }
 
     /// sets the current parameters of the equations
     fn set_params(&mut self, p: &Self::V);
@@ -278,6 +292,10 @@ impl<T: OdeEquations> OdeEquations for &'_ T {
         (*self).init()
     }
 
+    fn force(&self) -> Option<<Self as OdeEquationsRef<'_>>::Force> {
+        (*self).force()
+    }
+
     fn set_params(&mut self, _p: &Self::V) {
         unimplemented!()
     }
@@ -288,12 +306,18 @@ impl<T: OdeEquations> OdeEquations for &'_ T {
 }
 
 pub trait OdeEquationsImplicit:
-    OdeEquations<Rhs: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T, C = Self::C>>
+    OdeEquations<
+    Rhs: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Force: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+>
 {
 }
 
 impl<T> OdeEquationsImplicit for T where
-    T: OdeEquations<Rhs: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>>
+    T: OdeEquations<
+        Rhs: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Force: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>,
+    >
 {
 }
 
@@ -316,6 +340,7 @@ impl<T> OdeEquationsStoch for T where
 pub trait OdeEquationsImplicitSens:
     OdeEquationsImplicit<
     Rhs: NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Force: NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
     Out: NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
              + NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
     Init: ConstantOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
@@ -326,6 +351,7 @@ pub trait OdeEquationsImplicitSens:
 impl<T> OdeEquationsImplicitSens for T where
     T: OdeEquationsImplicit<
         Rhs: NonLinearOpSens<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Force: NonLinearOpSens<M = T::M, V = T::V, T = T::T, C = T::C>,
         Out: NonLinearOpSens<M = T::M, V = T::V, T = T::T, C = T::C>
                  + NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>,
         Init: ConstantOpSens<M = T::M, V = T::V, T = T::T, C = T::C>,
@@ -336,6 +362,8 @@ impl<T> OdeEquationsImplicitSens for T where
 pub trait OdeEquationsImplicitAdjoint:
     OdeEquationsImplicit<
     Rhs: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+             + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Force: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
              + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
     Init: ConstantOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
     Out: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
@@ -349,6 +377,8 @@ impl<T> OdeEquationsImplicitAdjoint for T where
     T: OdeEquationsImplicit<
         Rhs: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
                  + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Force: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
+                 + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
         Init: ConstantOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
         Out: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
                  + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
@@ -361,6 +391,8 @@ pub trait OdeEquationsAdjoint:
     OdeEquations<
     Rhs: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
              + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Force: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+             + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
     Init: ConstantOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
     Out: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
              + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
@@ -372,6 +404,8 @@ pub trait OdeEquationsAdjoint:
 impl<T> OdeEquationsAdjoint for T where
     T: OdeEquations<
         Rhs: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
+                 + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Force: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
                  + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
         Init: ConstantOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
         Out: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
@@ -391,7 +425,7 @@ impl<T> OdeEquationsAdjoint for T where
 /// which define a nonlinear operator or function `F` that maps an input vector `x` to an output vector `y`, (i.e. `y = F(x)`).
 /// Once you have implemented this trait, you can then pass an instance of your struct to the `rhs` argument of the [Self::new] method.
 /// Once you have created an instance of [OdeSolverEquations], you can then use [crate::OdeBuilder::build_from_eqn] to create a problem.
-pub struct OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
+pub struct OdeSolverEquations<M, Rhs, Init, Mass, Root, Force, Out>
 where
     M: Matrix,
 {
@@ -399,11 +433,13 @@ where
     mass: Option<Mass>,
     root: Option<Root>,
     init: Init,
+    force: Option<Force>,
     out: Option<Out>,
     p: M::V,
 }
 
-impl<M, Rhs, Init, Mass, Root, Out> OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
+impl<M, Rhs, Init, Mass, Root, Force, Out>
+    OdeSolverEquations<M, Rhs, Init, Mass, Root, Force, Out>
 where
     M: Matrix,
 {
@@ -413,6 +449,7 @@ where
         init: Init,
         mass: Option<Mass>,
         root: Option<Root>,
+        force: Option<Force>,
         out: Option<Out>,
         p: M::V,
     ) -> Self {
@@ -421,6 +458,7 @@ where
             mass,
             root,
             init,
+            force,
             out,
             p,
         }
@@ -433,13 +471,15 @@ where
     }
 }
 
-impl<M, Rhs, Init, Mass, Root, Out> Op for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
+impl<M, Rhs, Init, Mass, Root, Force, Out>
+    Op for OdeSolverEquations<M, Rhs, Init, Mass, Root, Force, Out>
 where
     M: Matrix,
     Init: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Rhs: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Mass: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Root: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Force: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Out: Op<M = M, V = M::V, T = M::T, C = M::C>,
 {
     type T = M::T;
@@ -466,41 +506,46 @@ where
     }
 }
 
-impl<'a, M, Rhs, Init, Mass, Root, Out> OdeEquationsRef<'a>
-    for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
+impl<'a, M, Rhs, Init, Mass, Root, Force, Out> OdeEquationsRef<'a>
+    for OdeSolverEquations<M, Rhs, Init, Mass, Root, Force, Out>
 where
     M: Matrix,
     Rhs: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Init: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Mass: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Root: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Force: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Out: Op<M = M, V = M::V, T = M::T, C = M::C>,
     ParameterisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
     ParameterisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T, C = M::C>,
     ParameterisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T, C = M::C>,
     ParameterisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+    ParameterisedOp<'a, Force>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
     ParameterisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
 {
     type Rhs = ParameterisedOp<'a, Rhs>;
     type Mass = ParameterisedOp<'a, Mass>;
     type Root = ParameterisedOp<'a, Root>;
     type Init = ParameterisedOp<'a, Init>;
+    type Force = ParameterisedOp<'a, Force>;
     type Out = ParameterisedOp<'a, Out>;
 }
 
-impl<M, Rhs, Init, Mass, Root, Out> OdeEquations
-    for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
+impl<M, Rhs, Init, Mass, Root, Force, Out> OdeEquations
+    for OdeSolverEquations<M, Rhs, Init, Mass, Root, Force, Out>
 where
     M: Matrix,
     Rhs: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Init: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Mass: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Root: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Force: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Out: Op<M = M, V = M::V, T = M::T, C = M::C>,
     for<'a> ParameterisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
     for<'a> ParameterisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T, C = M::C>,
     for<'a> ParameterisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T, C = M::C>,
     for<'a> ParameterisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+    for<'a> ParameterisedOp<'a, Force>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
     for<'a> ParameterisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
 {
     fn rhs(&self) -> ParameterisedOp<'_, Rhs> {
@@ -518,6 +563,11 @@ where
     }
     fn init(&self) -> ParameterisedOp<'_, Init> {
         ParameterisedOp::new(&self.init, self.params())
+    }
+    fn force(&self) -> Option<ParameterisedOp<'_, Force>> {
+        self.force
+            .as_ref()
+            .map(|force| ParameterisedOp::new(force, self.params()))
     }
     fn out(&self) -> Option<ParameterisedOp<'_, Out>> {
         self.out

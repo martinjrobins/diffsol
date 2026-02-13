@@ -579,6 +579,7 @@ where
     type Mass = &'a AdjointMass<'b, Eqn>;
     type Root = <Eqn as OdeEquationsRef<'a>>::Root;
     type Init = &'a AdjointInit<'b, Eqn>;
+    type Force = <Eqn as OdeEquationsRef<'a>>::Force;
     type Out = &'a AdjointOut<'b, Eqn, Method>;
 }
 
@@ -598,6 +599,9 @@ where
     }
     fn init(&self) -> &AdjointInit<'a, Eqn> {
         &self.init
+    }
+    fn force(&self) -> Option<<Eqn as OdeEquationsRef<'_>>::Force> {
+        None
     }
     fn out(&self) -> Option<&AdjointOut<'a, Eqn, Method>> {
         Some(&self.out)

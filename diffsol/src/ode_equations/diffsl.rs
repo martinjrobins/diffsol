@@ -19,8 +19,8 @@ use crate::{
     error::DiffsolError, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
     op::nonlinear_op::NonLinearOpJacobian, ConstantOp, ConstantOpSens, ConstantOpSensAdjoint,
     LinearOp, LinearOpTranspose, Matrix, MatrixHost, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scale, Vector,
-    VectorHost,
+    NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scale,
+    UnitCallable, Vector, VectorHost,
 };
 
 /// Context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
@@ -875,6 +875,7 @@ impl<'a, M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> OdeEquationsRef<'a> 
     type Rhs = DiffSlRhs<'a, M, CG>;
     type Root = DiffSlRoot<'a, M, CG>;
     type Init = DiffSlInit<'a, M, CG>;
+    type Force = UnitCallable<M>;
     type Out = DiffSlOut<'a, M, CG>;
 }
 
@@ -893,6 +894,10 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> OdeEquations for DiffSl<
 
     fn init(&self) -> DiffSlInit<'_, M, CG> {
         DiffSlInit(self)
+    }
+
+    fn force(&self) -> Option<UnitCallable<M>> {
+        None
     }
 
     fn out(&self) -> Option<DiffSlOut<'_, M, CG>> {

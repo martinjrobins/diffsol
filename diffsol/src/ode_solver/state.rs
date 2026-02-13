@@ -347,7 +347,11 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     {
         let t = ode_problem.t0;
         let h = ode_problem.h0;
-        let y = ode_problem.eqn.init().call(t);
+        let mut y = ode_problem.eqn.init().call(t);
+        if let Some(force) = ode_problem.eqn.force() {
+            let force_y = force.call(&y, t);
+            y.axpy(V::T::one(), &force_y, V::T::one());
+        }
         let dy = ode_problem.eqn.rhs().call(&y, t);
         let (s, ds) = (vec![], vec![]);
         let (dg, g) = if ode_problem.integrate_out {
@@ -653,7 +657,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
 mod test {
     use crate::{
         ode_equations::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
-        LinearSolver, Matrix, OdeSolverState, Vector, VectorHost,
+        LinearSolver, Matrix, OdeBuilder, OdeSolverState, Vector, VectorHost,
     };
     use num_traits::FromPrimitive;
 
@@ -687,6 +691,29 @@ mod test {
         type V = crate::FaerVec<f64>;
         type LS = crate::FaerSparseLU<f64>;
         test_consistent_initialisation::<M, crate::RkState<V>, LS>();
+    }
+
+    #[test]
+    fn test_force_applied_to_initial_state() {
+        type M = crate::NalgebraMat<f64>;
+        type V = crate::NalgebraVec<f64>;
+
+        let problem = OdeBuilder::<M>::new()
+            .rhs(|x, _p, _t, y| {
+                y[0] = -x[0];
+            })
+            .init(|_p, _t, y| {
+                y[0] = 1.0;
+            }, 1)
+            .force(|_x, _p, _t, y| {
+                y[0] = 2.0;
+            })
+            .build()
+            .unwrap();
+
+        let state = crate::RkState::<V>::new(&problem, 1).unwrap();
+        assert_eq!(state.as_ref().y[0], 3.0);
+        assert_eq!(state.as_ref().dy[0], -3.0);
     }
 
     fn test_consistent_initialisation<

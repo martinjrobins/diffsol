@@ -291,6 +291,7 @@ where
     type Mass = <Eqn as OdeEquationsRef<'a>>::Mass;
     type Root = <Eqn as OdeEquationsRef<'a>>::Root;
     type Init = &'a SensInit<'b, Eqn>;
+    type Force = <Eqn as OdeEquationsRef<'a>>::Force;
     type Out = <Eqn as OdeEquationsRef<'a>>::Out;
 }
 
@@ -309,6 +310,9 @@ where
     }
     fn init(&self) -> &SensInit<'a, Eqn> {
         &self.init
+    }
+    fn force(&self) -> Option<<Eqn as OdeEquationsRef<'_>>::Force> {
+        None
     }
     fn out(&self) -> Option<<Eqn as OdeEquationsRef<'_>>::Out> {
         None
