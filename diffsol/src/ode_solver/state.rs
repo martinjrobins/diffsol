@@ -8,9 +8,9 @@ use crate::{
     error::{DiffsolError, OdeSolverError},
     nonlinear_solver::{convergence::Convergence, NonLinearSolver},
     ode_solver_error, scale, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp,
-    InitOp, LinearOp, LinearSolver, Matrix, NewtonNonlinearSolver, NonLinearOp, OdeEquations,
-    OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverProblem, Op, SensEquations, Vector,
-    VectorIndex,
+    InitOp, LinearOp, LinearSolver, Matrix, NewtonNonlinearSolver, NonLinearOp,
+    OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitSens,
+    OdeSolverProblem, Op, SensEquations, Vector, VectorIndex,
 };
 use crate::{non_linear_solver_error, BacktrackingLineSearch, NoLineSearch};
 
@@ -395,12 +395,11 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let naug = augmented_eqn.max_index();
         let mut s = Vec::with_capacity(naug);
         let mut ds = Vec::with_capacity(naug);
-        let nstates = augmented_eqn.rhs().nstates();
         let ctx = ode_problem.context();
-        for i in 0..naug {
-            augmented_eqn.set_index(i);
+        for _i in 0..naug {
+            augmented_eqn.set_index(_i);
             let si = augmented_eqn.init().call(state.t);
-            let dsi = V::zeros(nstates, ctx.clone());
+            let dsi = V::zeros(augmented_eqn.rhs().nstates(), ctx.clone());
             s.push(si);
             ds.push(dsi);
         }
@@ -657,7 +656,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
 mod test {
     use crate::{
         ode_equations::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
-        LinearSolver, Matrix, OdeBuilder, OdeSolverState, Vector, VectorHost,
+        DefaultSolver, LinearSolver, Matrix, OdeBuilder, OdeSolverState, Vector, VectorHost,
     };
     use num_traits::FromPrimitive;
 
@@ -717,7 +716,7 @@ mod test {
     }
 
     fn test_consistent_initialisation<
-        M: Matrix<V: VectorHost>,
+        M: Matrix<V: VectorHost> + DefaultSolver,
         S: OdeSolverState<M::V>,
         LS: LinearSolver<M>,
     >() {

@@ -68,6 +68,14 @@ where
 {
     fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
         self.eqn.init().sens_mul_inplace(self.t0, &self.tmp, y);
+        if let Some(force) = self.eqn.force() {
+            let mut y0 = self.eqn.init().call(self.t0);
+            let force_y = force.call(&y0, self.t0);
+            y0.axpy(Eqn::T::one(), &force_y, Eqn::T::one());
+            let mut force_sens = Eqn::V::zeros(y0.len(), self.eqn.context().clone());
+            force.sens_mul_inplace(&y0, self.t0, &self.tmp, &mut force_sens);
+            y.axpy(Eqn::T::one(), &force_sens, Eqn::T::one());
+        }
     }
 }
 
