@@ -201,6 +201,40 @@ jobs:
       if: matrix.book == true
       with:
         path: "book/book/"
+        
+  gpu-tests:
+    name: "CUDA Tests - Ubuntu - stable"
+    runs-on:
+      - codebuild-diffsol-${{ github.run_id }}-${{ github.run_attempt }}
+    continue-on-error: true
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ${{ env.CARGO_HOME }}
+          target
+        key: diffsol-github
+    - name: Set up Rust
+      run: rustup default ${{ matrix.toolchain }} && rustup update ${{ matrix.toolchain }} --no-self-update && rustup component add clippy
+    - name: Rust version
+      run: rustc -Vv
+    - name: Install LLVM and Clang
+      uses: KyleMayes/install-llvm-action@v2
+      with:
+        version: ${{ env.LLVM_VERSION }}
+    - uses: Jimver/cuda-toolkit@master
+      with:
+        cuda: "13.1.0"
+    - name: Set features variable and install dependencies
+      run: |
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse --features diffsl-external-f64 --features cuda" >> $GITHUB_ENV
+        sudo apt-get update
+        sudo apt-get install -y libsuitesparse-dev
+    - name: Run tests - all features
+      run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }} --workspace
+    - name: Clippy - all features
+      run: cargo clippy --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}} --workspace
 
   deploy:
     if: ${{ github.ref == 'refs/heads/main' }}
