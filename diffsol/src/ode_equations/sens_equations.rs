@@ -68,6 +68,7 @@ where
 {
     fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
         self.eqn.init().sens_mul_inplace(self.t0, &self.tmp, y);
+        // (M - g_y) s_k^+ = M s_k^- g_{p_k} - M_{p_k} \Delta y
         if let Some(force) = self.eqn.force() {
             let mut y0 = self.eqn.init().call(self.t0);
             let force_y = force.call(&y0, self.t0);

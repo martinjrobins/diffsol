@@ -1128,6 +1128,17 @@ where
         self.state.as_mut()
     }
 
+    fn apply_force(&mut self) -> Result<(), DiffsolError> {
+        if let Some(force) = self.problem().eqn.force() {
+            let t = self.state.t;
+            let force_y = force.call(&self.state.y, t);
+            self.state.y.axpy(Eqn::T::one(), &force_y, Eqn::T::one());
+            self.problem().eqn.rhs().call_inplace(&self.state.y, t, &mut self.state.dy);
+            self.is_state_modified = true;
+        }
+        Ok(())
+    }
+
     fn checkpoint(&mut self) -> Self::State {
         debug!("Taking checkpoint");
         self._jacobian_updates(

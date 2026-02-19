@@ -348,10 +348,6 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let t = ode_problem.t0;
         let h = ode_problem.h0;
         let mut y = ode_problem.eqn.init().call(t);
-        if let Some(force) = ode_problem.eqn.force() {
-            let force_y = force.call(&y, t);
-            y.axpy(V::T::one(), &force_y, V::T::one());
-        }
         let dy = ode_problem.eqn.rhs().call(&y, t);
         let (s, ds) = (vec![], vec![]);
         let (dg, g) = if ode_problem.integrate_out {

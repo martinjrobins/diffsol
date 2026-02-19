@@ -9,7 +9,8 @@ use crate::RkState;
 use crate::Tableau;
 use crate::{
     AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, ExplicitRkConfig, OdeEquations,
-    OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut, NonLinearOp,
+    Vector,
 };
 use log::debug;
 use num_traits::One;
@@ -212,6 +213,16 @@ where
 
     fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
         self.rk.set_stop_time(tstop)
+    }
+
+    fn apply_force(&mut self) -> Result<(), DiffsolError> {
+        if let Some(force) = self.problem().eqn.force() {
+            let t = self.rk.state().t;
+            let force_y = force.call(&self.rk.state().y, t);
+            self.rk.state_mut().y.axpy(Eqn::T::one(), &force_y, Eqn::T::one());
+            self.problem().eqn.rhs().call_inplace(&self.rk.state().y, t, &mut self.rk.state_mut().dy);
+        }
+        Ok(())
     }
 
     fn interpolate_sens_inplace(

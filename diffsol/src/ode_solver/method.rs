@@ -100,6 +100,10 @@ where
     /// Once it stops, the stop time is unset. If `tstop` is at or before the current internal time, an error is returned.
     fn set_stop_time(&mut self, tstop: Eqn::T) -> Result<(), DiffsolError>;
 
+    /// Apply the force operator to the current state at the current time. The force is added to the state and the
+    /// derivatives are recomputed. This method does nothing if no force operator is defined.
+    fn apply_force(&mut self) -> Result<(), DiffsolError>;
+
     /// Interpolate the solution at a given time. This time should be between the current time and the last solver time step
     fn interpolate(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
         let nstates = self.problem().eqn.rhs().nstates();
