@@ -216,7 +216,9 @@ jobs:
           target
         key: diffsol-github
     - name: Install Rustup
-      run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+      run: |
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+        source $HOME/.cargo/env
     - name: Set up Rust
       run: rustup default stable && rustup update stable --no-self-update && rustup component add clippy
     - name: Rust version
