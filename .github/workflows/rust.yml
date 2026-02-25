@@ -215,12 +215,8 @@ jobs:
           ${{ env.CARGO_HOME }}
           target
         key: diffsol-github
-    - name: Install Rustup
-      run: |
-        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
-        source .cargo/env
-    - name: Set up Rust
-      run: rustup default stable && rustup update stable --no-self-update && rustup component add clippy
+    - name: install rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
     - name: Rust version
       run: rustc -Vv
     - name: Install LLVM and Clang
