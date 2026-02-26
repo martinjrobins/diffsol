@@ -230,7 +230,7 @@ jobs:
       run: |
         echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse --features diffsl-external-f64 --features cuda" >> $GITHUB_ENV
         sudo apt-get update
-        sudo apt-get install -y libsuitesparse-dev
+        sudo apt-get install -y libsuitesparse-dev cmake
     - name: Run tests - all features
       run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }} --workspace
     - name: Clippy - all features
