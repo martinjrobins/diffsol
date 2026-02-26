@@ -104,8 +104,9 @@ All solvers feature:
 
 If you use diffsol in your research, please cite it:
 
-- [Robinson et al., (2026). diffsol: Rust crate for solving differential equations. Journal of Open Source Software, 11(117), 9384, https://doi.org/10.21105/joss.09384](https://doi.org/10.21105/joss.09384)
-- See the [CITATION.cff](CITATION.cff) file for citation formats.
+[Robinson et al., (2026). diffsol: Rust crate for solving differential equations. Journal of Open Source Software, 11(117), 9384, https://doi.org/10.21105/joss.09384](https://doi.org/10.21105/joss.09384)
+
+See the [CITATION.cff](CITATION.cff) file for citation formats.
 
 ## Contributing
 
