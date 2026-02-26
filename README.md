@@ -100,6 +100,13 @@ All solvers feature:
 - Forward sensitivity analysis, calculating the gradient of an output function or the solver states $y$ with respect to the parameters $p$.
 - Adjoint sensitivity analysis, calculating the gradient of cost function $G(p)$ with respect to the parameters $p$. The cost function can be the integral of a continuous output function $g(t, y, p)$ or a sum of a set of discrete functions $h_i(t_i, y_i, p)$ at time points $t_i$.
 
+## Citation
+
+If you use diffsol in your research, please cite it:
+
+- [Robinson et al., (2026). diffsol: Rust crate for solving differential equations. Journal of Open Source Software, 11(117), 9384, https://doi.org/10.21105/joss.09384](https://doi.org/10.21105/joss.09384)
+- See the [CITATION.cff](CITATION.cff) file for citation formats.
+
 ## Contributing
 
 Contributions are very welcome, as are bug reports! Please see the [contributing guidelines](CONTRIBUTING.md) for more information, but in summary:
@@ -110,7 +117,7 @@ Contributions are very welcome, as are bug reports! Please see the [contributing
   - [diffsl](https://github.com/martinjrobins/diffsl) - the DiffSL DSL compiler and JIT backends
   - [pydiffsol](https://github.com/alexallmont/pydiffsol) - Python bindings
 - Feel free to submit a pull request with your changes or improvements, but please open an issue first if the change is significant. The [contributing guidelines](CONTRIBUTING.md) describe how to set up a development environment, run tests, and format code.
-  
+
 ## Wanted - Developers for higher-level language wrappers
 
 Diffsol is designed to be easy to use from higher-level languages like Python or R. I'd prefer not to split my focus away from the core library, so I'm looking for developers who would like to lead the development of these wrappers. If you're interested, please get in touch.
