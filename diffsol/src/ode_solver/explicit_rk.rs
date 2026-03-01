@@ -372,7 +372,7 @@ mod test {
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 32
+        number_of_calls: 56
         number_of_jac_muls: 0
         number_of_matrix_evals: 0
         number_of_jac_adj_muls: 0
