@@ -223,9 +223,11 @@ jobs:
       uses: KyleMayes/install-llvm-action@v2
       with:
         version: ${{ env.LLVM_VERSION }}
+    - name: Check GPU driver version
+      run: nvidia-smi
     - uses: Jimver/cuda-toolkit@master
       with:
-        cuda: "13.0.2"
+        cuda: "11.8.0"
     - name: Set features variable and install dependencies
       run: |
         echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse --features diffsl-external-f64 --features cuda" >> $GITHUB_ENV
