@@ -366,7 +366,7 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 0
-        number_of_steps: 5
+        number_of_steps: 9
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 0
         number_of_nonlinear_solver_fails: 0

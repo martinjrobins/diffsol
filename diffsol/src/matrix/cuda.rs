@@ -1236,11 +1236,13 @@ mod tests {
     #[test]
     fn test_cudamat_resize_cols() {
         let ctx = CudaContext::default();
-        let mut mat = CudaMat::from_vec(2, 2, vec![1.0, 2.0, 3.0, 4.0], ctx.clone());
+        let mut mat = CudaMat::from_vec(2, 2, vec![1.0, 3.0, 2.0, 4.0], ctx.clone());
         mat.resize_cols(3);
         assert_eq!(mat.nrows(), 2);
         assert_eq!(mat.ncols(), 3);
         assert_eq!(mat.get_index(0, 0), 1.0);
+        assert_eq!(mat.get_index(0, 1), 2.0);
+        assert_eq!(mat.get_index(1, 0), 3.0);
         assert_eq!(mat.get_index(1, 1), 4.0);
         assert_eq!(mat.get_index(0, 2), 0.0);
         assert_eq!(mat.get_index(1, 2), 0.0);
