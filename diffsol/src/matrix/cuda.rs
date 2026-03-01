@@ -182,7 +182,7 @@ impl<T: ScalarCuda> CudaMat<T> {
         let index = self.col_major_index(i, j);
         self.context
             .stream
-            .memcpy_dtov(&self.data.slice(index..index + 1))
+            .clone_dtoh(&self.data.slice(index..index + 1))
             .expect("Failed to copy data from device to host")[0]
     }
     fn set_index(&mut self, i: IndexType, j: IndexType, value: T) {
@@ -619,6 +619,39 @@ impl<T: ScalarCuda> DenseMatrix for CudaMat<T> {
     type View<'a> = CudaMatRef<'a, T>;
     type ViewMut<'a> = CudaMatMut<'a, T>;
 
+    fn resize_cols(&mut self, new_ncols: IndexType) {
+        if new_ncols == self.ncols {
+            return;
+        }
+        let mut new_data = unsafe {
+            self.context
+                .stream
+                .alloc(self.nrows * new_ncols)
+                .expect("Failed to allocate memory for resized CudaMat")
+        };
+        let cols_to_copy = self.ncols.min(new_ncols);
+        let elements_to_copy = self.nrows * cols_to_copy;
+        if new_ncols > self.ncols {
+            self.context
+                .stream
+                .memcpy_dtod(&self.data, &mut new_data.slice_mut(0..elements_to_copy))
+                .expect("Failed to copy data from old matrix to resized matrix");
+
+            // if we're increasing the number of columns, we need to zero out the new columns
+            self.context
+                .stream
+                .memset_zeros(&mut new_data.slice_mut(elements_to_copy..new_data.len()))
+                .expect("Failed to zero out new columns in resized CudaMat");
+        } else {
+            self.context
+                .stream
+                .memcpy_dtod(&self.data.slice(0..elements_to_copy), &mut new_data)
+                .expect("Failed to copy data from old matrix to resized matrix");
+        }
+        self.data = new_data;
+        self.ncols = new_ncols;
+    }
+
     fn from_vec(nrows: IndexType, ncols: IndexType, data: Vec<Self::T>, ctx: Self::C) -> Self {
         assert_eq!(data.len(), nrows * ncols);
         let mut device_data = unsafe {
@@ -798,7 +831,7 @@ impl<T: ScalarCuda> Matrix for CudaMat<T> {
         let data = self
             .context
             .stream
-            .memcpy_dtov(&self.data)
+            .clone_dtoh(&self.data)
             .expect("Failed to copy data from device to host");
         DenseMatTripletIter::new(data, self.nrows(), self.ncols())
     }
@@ -1198,5 +1231,26 @@ mod tests {
         let cols = cols.into_owned();
         assert_eq!(cols.get_index(0, 0), 3.0);
         assert_eq!(cols.get_index(1, 1), 6.0);
+    }
+
+    #[test]
+    fn test_cudamat_resize_cols() {
+        let ctx = CudaContext::default();
+        let mut mat = CudaMat::from_vec(2, 2, vec![1.0, 3.0, 2.0, 4.0], ctx.clone());
+        mat.resize_cols(3);
+        assert_eq!(mat.nrows(), 2);
+        assert_eq!(mat.ncols(), 3);
+        assert_eq!(mat.get_index(0, 0), 1.0);
+        assert_eq!(mat.get_index(0, 1), 2.0);
+        assert_eq!(mat.get_index(1, 0), 3.0);
+        assert_eq!(mat.get_index(1, 1), 4.0);
+        assert_eq!(mat.get_index(0, 2), 0.0);
+        assert_eq!(mat.get_index(1, 2), 0.0);
+
+        mat.resize_cols(1);
+        assert_eq!(mat.nrows(), 2);
+        assert_eq!(mat.ncols(), 1);
+        assert_eq!(mat.get_index(0, 0), 1.0);
+        assert_eq!(mat.get_index(1, 0), 3.0);
     }
 }
