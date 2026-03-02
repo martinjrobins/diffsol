@@ -217,6 +217,8 @@ jobs:
         key: diffsol-github
     - name: install rust
       uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        components: clippy
     - name: Rust version
       run: rustc -Vv
     - name: Install LLVM and Clang
