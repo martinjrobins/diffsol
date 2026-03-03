@@ -239,6 +239,16 @@ jobs:
       run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }} --workspace
     - name: Clippy - all features
       run: cargo clippy --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}} --workspace
+    - name: Install tarpaulin
+      run: cargo install cargo-tarpaulin
+    - name: Generate coverage report
+      run: cargo tarpaulin --out Xml --packages diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
+    - name: Upload coverage
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: cobertura.xml
+        flags: gpu
 
   deploy:
     if: ${{ github.ref == 'refs/heads/main' }}
