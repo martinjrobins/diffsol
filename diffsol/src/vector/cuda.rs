@@ -1,7 +1,7 @@
 use std::ffi::c_int;
 use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Sub, SubAssign};
 
-use super::{utils::*, VectorIndex, VectorView, VectorViewMut};
+use super::{VectorIndex, VectorView, VectorViewMut};
 use cudarc::cublas::sys as cublas;
 use cudarc::cublas::CudaBlas;
 use cudarc::driver::{
@@ -106,7 +106,7 @@ impl CudaContext {
                 let status = unsafe {
                     cublas::cublasDnrm2_v2(*blas.handle(), n, x, 1, &mut result_f64 as *mut f64)
                 };
-                result = result_f64.into();
+                result = T::from_f64(result_f64).unwrap();
                 status
             }
         }
@@ -150,7 +150,7 @@ impl CudaContext {
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
         let partial_sums = self
             .stream
-            .memcpy_dtov(&partial_sums)
+            .clone_dtoh(&partial_sums)
             .expect("Failed to copy data from device to host");
         partial_sums.into_iter().fold(T::zero(), |acc, x| acc + x)
     }
@@ -190,7 +190,7 @@ impl CudaContext {
         unsafe { build.launch(config) }.expect("Failed to launch kernel");
         let partial_sums = self
             .stream
-            .memcpy_dtov(&partial_sums)
+            .clone_dtoh(&partial_sums)
             .expect("Failed to copy data from device to host");
         partial_sums.into_iter().fold(T::zero(), |acc, x| acc + x)
     }
@@ -236,8 +236,6 @@ macro_rules! impl_vector_common {
         }
     };
 }
-pub(crate) use impl_vector_common;
-
 macro_rules! impl_vector_common_ref {
     ($vec:ty, $con:ty, $in:ty) => {
         impl<'a, T: ScalarCuda> VectorCommon for $vec {
@@ -250,8 +248,6 @@ macro_rules! impl_vector_common_ref {
         }
     };
 }
-pub(crate) use impl_vector_common_ref;
-
 impl_vector_common!(CudaVec<T>, CudaContext, CudaSlice<T>);
 impl_vector_common_ref!(CudaVecRef<'a, T>, CudaContext, CudaView<'a, T>);
 impl_vector_common_ref!(CudaVecMut<'a, T>, CudaContext, CudaViewMut<'a, T>);
@@ -645,7 +641,7 @@ impl VectorIndex for CudaIndex {
     fn clone_as_vec(&self) -> Vec<IndexType> {
         self.context
             .stream
-            .memcpy_dtov(&self.data)
+            .clone_dtoh(&self.data)
             .expect("Failed to copy data from device to host")
             .into_iter()
             .map(|x| x as IndexType)
@@ -679,7 +675,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn get_index(&self, index: IndexType) -> Self::T {
         self.context
             .stream
-            .memcpy_dtov(&self.data.slice(index..index + 1))
+            .clone_dtoh(&self.data.slice(index..index + 1))
             .expect("Failed to copy data from device to host")[0]
     }
     fn set_index(&mut self, index: IndexType, value: Self::T) {
@@ -800,7 +796,7 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
     fn clone_as_vec(&self) -> Vec<Self::T> {
         self.context
             .stream
-            .memcpy_dtov(&self.data)
+            .clone_dtoh(&self.data)
             .expect("Failed to copy data from device to host")
     }
     fn component_mul_assign(&mut self, other: &Self) {
@@ -869,17 +865,17 @@ impl<T: ScalarCuda> Vector for CudaVec<T> {
         let h_max_vals = self
             .context
             .stream
-            .memcpy_dtov(&max_vals)
+            .clone_dtoh(&max_vals)
             .expect("Failed to copy data from device to host");
         let h_max_idxs = self
             .context
             .stream
-            .memcpy_dtov(&max_idxs)
+            .clone_dtoh(&max_idxs)
             .expect("Failed to copy data from device to host");
         let h_root_flag = self
             .context
             .stream
-            .memcpy_dtov(&root_flag)
+            .clone_dtoh(&root_flag)
             .expect("Failed to copy data from device to host");
         let root_flag = h_root_flag[0];
         let mut max_val = T::zero();
