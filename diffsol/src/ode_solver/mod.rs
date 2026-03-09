@@ -58,7 +58,7 @@ mod tests {
                 match method.set_stop_time(point.t) {
                     Ok(_) => loop {
                         match method.step() {
-                            Ok(OdeSolverStopReason::RootFound(_)) => {
+                            Ok(OdeSolverStopReason::RootFound(_, _)) => {
                                 assert!(have_root);
                                 return method.state().y.clone();
                             }
@@ -72,7 +72,7 @@ mod tests {
                 }
             } else {
                 while method.state().t.abs() < point.t.abs() {
-                    if let OdeSolverStopReason::RootFound(t) = method.step().unwrap() {
+                    if let OdeSolverStopReason::RootFound(t, _) = method.step().unwrap() {
                         assert!(have_root);
                         return method.interpolate(t).unwrap();
                     }
@@ -522,6 +522,7 @@ mod tests {
         type Root = ParameterisedOp<'a, UnitCallable<M>>;
         type Init = &'a TestEqnInit<M>;
         type Out = &'a TestEqnOut<M>;
+        type Reset = ParameterisedOp<'a, UnitCallable<M>>;
     }
 
     impl<M: Matrix> OdeEquations for TestEqn<M> {
@@ -735,7 +736,7 @@ mod tests {
         loop {
             match solver.step() {
                 Ok(OdeSolverStopReason::InternalTimestep) => (),
-                Ok(OdeSolverStopReason::RootFound(t)) => {
+                Ok(OdeSolverStopReason::RootFound(t, _)) => {
                     // get the state when the event occurred
                     let mut y = solver.interpolate(t).unwrap();
 
@@ -767,7 +768,7 @@ mod tests {
             t.push(solver.state().t);
             match ret {
                 Ok(OdeSolverStopReason::InternalTimestep) => (),
-                Ok(OdeSolverStopReason::RootFound(_)) => {
+                Ok(OdeSolverStopReason::RootFound(_, _)) => {
                     panic!("should be an internal timestep but found a root")
                 }
                 Ok(OdeSolverStopReason::TstopReached) => break,
@@ -870,6 +871,115 @@ mod tests {
                 error_norm,
                 point.t
             );
+        }
+    }
+
+    /// Test that `step()` returns `RootFound(t, index)` with the correct root index.
+    ///
+    /// The problem must have a root function with **two** outputs and **no** Reset:
+    ///   - Root 0 fires first (at `t ≈ 5.108`, `y[0] ≈ 0.6` for the exponential-decay test model)
+    ///   - Root 1 fires second
+    ///
+    /// The test asserts that the first `RootFound` reports index 0 and the time
+    /// matches `t_root_0_expected` within `tol`.
+    pub fn test_root_found_index<'a, Eqn, Method>(
+        mut solver: Method,
+        soln: &OdeSolverSolution<Eqn::V>,
+        expected_root_index: usize,
+        tol: Eqn::T,
+    ) where
+        Eqn: OdeEquations + 'a,
+        Method: OdeSolverMethod<'a, Eqn>,
+    {
+        let t_root_expected = soln.solution_points[0].t;
+        solver
+            .set_stop_time(Eqn::T::from_f64(100.0).unwrap())
+            .unwrap();
+        loop {
+            match solver.step().unwrap() {
+                // RED: `RootFound` currently has one field; adding `index` makes this fail.
+                OdeSolverStopReason::RootFound(t, index) => {
+                    assert_eq!(
+                        index, expected_root_index,
+                        "expected root index {expected_root_index} but got {index}",
+                    );
+                    assert!(
+                        (t - t_root_expected).abs() < tol,
+                        "expected t ≈ {t_root_expected:?}, got {t:?}",
+                    );
+                    break;
+                }
+                OdeSolverStopReason::TstopReached => {
+                    panic!("reached tstop without finding a root")
+                }
+                OdeSolverStopReason::InternalTimestep => {}
+            }
+        }
+    }
+
+    /// Test that `solve()` applies the Reset function when root index 0 fires
+    /// and continues integration, only stopping when the non-reset root (index 1) fires.
+    ///
+    /// For the exponential-decay test model (`dy/dt = -0.1*y`, `y(0)=[1,1]`, reset→`[1,1]`):
+    ///   - `t ≈ 5.108`: root 0 (`y[0] = 0.6`) → reset applied, integration continues.
+    ///   - `t ≈ 17.148`: root 1 (`y[0] = 0.3`) → `solve()` returns.
+    ///
+    /// `t_stop_expected` and `y_stop_expected` are the expected stop time and
+    /// `y[0]` value at termination; `tol` is the absolute tolerance for both checks.
+    ///
+    /// The ODE system **must** have a Reset function attached (root index 0 is the trigger).
+    pub fn test_solve_with_reset<'a, Eqn, Method>(
+        mut solver: Method,
+        soln: &OdeSolverSolution<Eqn::V>,
+    ) where
+        Eqn: OdeEquations + 'a,
+        Eqn::V: DefaultDenseMatrix,
+        Method: OdeSolverMethod<'a, Eqn>,
+    {
+        let final_time = Eqn::T::from_f64(100.0).unwrap();
+        let (ys, ts) = solver.solve(final_time).unwrap();
+
+        // Search for each expected solution point sequentially in the output.
+        // The expected points are (in order):
+        //   1. pre-reset state  at t_root_0
+        //   2. post-reset state at t_root_0
+        //   3. stop state       at t_root_1
+        let error_threshold = Eqn::T::from_f64(20.0).unwrap();
+        let mut search_start = 0;
+        for (point_idx, expected) in soln.solution_points.iter().enumerate() {
+            // Use the provided time tolerance for matching root event times;
+            // root-finding accuracy varies across solvers.
+            let time_tol = soln.rtol * expected.t.abs() + soln.atol.get_index(0);
+            let col = ts
+                .iter()
+                .enumerate()
+                .skip(search_start)
+                .find(|(_, &t)| (t - expected.t).abs() < time_tol)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "solution point {point_idx} (t ≈ {:?}) not found in solve() output \
+                         (searching from index {search_start}); ts = {:?}",
+                        expected.t, ts,
+                    )
+                })
+                .0;
+            // Build an owned vector from the dense-matrix column and check WRMS norm.
+            let n = expected.state.len();
+            let ctx = soln.atol.context().clone();
+            let mut actual = Eqn::V::zeros(n, ctx);
+            for j in 0..n {
+                actual.set_index(j, ys.get_index(j, col));
+            }
+            let error = actual - &expected.state;
+            let error_norm = error
+                .squared_norm(&expected.state, &soln.atol, soln.rtol)
+                .sqrt();
+            assert!(
+                error_norm < error_threshold,
+                "solution point {point_idx} (t ≈ {:?}): WRMS error norm {error_norm:?} ≥ {error_threshold:?}",
+                expected.t,
+            );
+            search_start = col + 1;
         }
     }
 }

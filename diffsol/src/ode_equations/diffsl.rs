@@ -17,9 +17,9 @@ use diffsl::{
 
 use crate::{
     error::DiffsolError, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
-    op::nonlinear_op::NonLinearOpJacobian, ConstantOp, ConstantOpSens, ConstantOpSensAdjoint,
+    op::nonlinear_op::NonLinearOpJacobian, op::ParameterisedOp, ConstantOp, ConstantOpSens, ConstantOpSensAdjoint,
     LinearOp, LinearOpTranspose, Matrix, MatrixHost, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scale, Vector,
+    NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scale, UnitCallable, Vector,
     VectorHost,
 };
 
@@ -876,6 +876,7 @@ impl<'a, M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> OdeEquationsRef<'a> 
     type Root = DiffSlRoot<'a, M, CG>;
     type Init = DiffSlInit<'a, M, CG>;
     type Out = DiffSlOut<'a, M, CG>;
+    type Reset = ParameterisedOp<'a, UnitCallable<M>>;
 }
 
 impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> OdeEquations for DiffSl<M, CG> {

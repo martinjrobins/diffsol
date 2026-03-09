@@ -1432,9 +1432,9 @@ where
                 self.state.as_ref().y,
                 self.state.as_ref().t,
             );
-            if let Some(root) = ret {
+            if let Some((root, root_idx)) = ret {
                 debug!("Root found at time {}", root);
-                return Ok(OdeSolverStopReason::RootFound(root));
+                return Ok(OdeSolverStopReason::RootFound(root, root_idx));
             }
         }
 
@@ -2213,5 +2213,31 @@ mod test {
                 expected_t[i]
             );
         }
+    }
+
+    /// Test that `step()` includes the root index in `RootFound(t, index)`.
+    ///
+    /// Uses a two-output root function (no Reset); root 0 fires at t ≈ 5.108
+    /// (exponential decay y[0] = 0.6, k=0.1) and the test verifies the returned index is 0.
+    #[test]
+    fn test_root_found_index_bdf() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_two_roots_problem;
+        use crate::ode_solver::tests::test_root_found_index;
+        let (problem, soln) = exponential_decay_with_two_roots_problem::<M>();
+        let solver = problem.bdf::<LS>().unwrap();
+        test_root_found_index(solver, &soln, 0, 1e-4);
+    }
+
+    /// Test that `solve()` applies the Reset function (root index 0) and continues,
+    /// only stopping when the stopping root (index 1) fires.
+    ///
+    /// Timeline: reset at t ≈ 5.108 (y=0.6→0.4), stop at t ≈ 7.985 (y=0.3, after reset).
+    #[test]
+    fn test_solve_with_reset_bdf() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
+        use crate::ode_solver::tests::test_solve_with_reset;
+        let (problem, soln) = exponential_decay_with_reset_problem::<M>();
+        let solver = problem.bdf::<LS>().unwrap();
+        test_solve_with_reset(solver, &soln);
     }
 }

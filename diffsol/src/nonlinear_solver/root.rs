@@ -42,13 +42,26 @@ impl<V: Vector> RootFinder<V> {
     /// or previous iterations of [Self::check_root]
     ///
     /// We find the root of a function using the method proposed by Sundials [docs](https://sundials.readthedocs.io/en/latest/cvode/Mathematics_link.html#rootfinding)
+    fn find_zero_index(g: &V) -> usize {
+        let mut min_idx = 0usize;
+        let mut min_val = abs(g.get_index(0));
+        for i in 1..g.len() {
+            let v = abs(g.get_index(i));
+            if v < min_val {
+                min_val = v;
+                min_idx = i;
+            }
+        }
+        min_idx
+    }
+
     pub fn check_root(
         &self,
         interpolate_inplace: &impl Fn(V::T, &mut V) -> Result<(), DiffsolError>,
         root_fn: &impl NonLinearOp<V = V, T = V::T>,
         y: &V,
         t: V::T,
-    ) -> Option<V::T> {
+    ) -> Option<(V::T, usize)> {
         let g1 = &mut *self.g1.borrow_mut();
         let g0 = &mut *self.g0.borrow_mut();
         let gmid = &mut *self.gmid.borrow_mut();
@@ -64,7 +77,8 @@ impl<V: Vector> RootFinder<V> {
             self.t0.replace(t);
             return if rootfnd {
                 // found a root at the upper boundary and no other sign change, return the root
-                Some(t)
+                let idx = Self::find_zero_index(g0); // g0 now holds the newly-swapped g1
+                Some((t, idx))
             } else {
                 // no root found or sign change, return None
                 None
@@ -124,7 +138,7 @@ impl<V: Vector> RootFinder<V> {
                 root_fn.call_inplace(y, t, g0);
 
                 // No sign change in (tlo,tmid), but g = 0 at tmid; return root tmid.
-                return Some(t_mid);
+                return Some((t_mid, imax));
             } else {
                 // No sign change in (tlo,tmid), and no zero at tmid. Sign change must be in (tmid,thi).  Replace tlo with tmid.
                 t0 = t_mid;
@@ -145,7 +159,7 @@ impl<V: Vector> RootFinder<V> {
         }
         // we are returning so make sure g0 is set for next iteration
         root_fn.call_inplace(y, t, g0);
-        Some(t1)
+        Some((t1, imax))
     }
 }
 
@@ -197,7 +211,7 @@ mod tests {
             &Vector::from_vec(vec![1.3], ctx),
             1.3,
         );
-        if let Some(root) = root {
+        if let Some((root, _idx)) = root {
             assert!((root - 0.4).abs() < 1e-10);
         } else {
             unreachable!();

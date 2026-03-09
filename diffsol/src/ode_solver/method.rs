@@ -11,7 +11,7 @@ use crate::{
 #[derive(Debug, PartialEq)]
 pub enum OdeSolverStopReason<T: Scalar> {
     InternalTimestep,
-    RootFound(T),
+    RootFound(T, usize),
     TstopReached,
 }
 
@@ -190,7 +190,7 @@ where
                     write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
                     break;
                 }
-                OdeSolverStopReason::RootFound(t_root) => {
+                OdeSolverStopReason::RootFound(t_root, root_idx) => {
                     let nstates = self.problem().eqn.rhs().nstates();
                     let mut y_root = Eqn::V::zeros(nstates, self.problem().context().clone());
                     self.interpolate_inplace(t_root, &mut y_root)?;
@@ -210,6 +210,22 @@ where
                         }
                     }
                     write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
+
+                    // If a reset function is defined and this was root index 0,
+                    // apply the reset and continue integration.
+                    if root_idx == 0 {
+                        if let Some(reset_fn) = self.problem().eqn.reset() {
+                            let mut y_new = Eqn::V::zeros(nstates, self.problem().context().clone());
+                            reset_fn.call_inplace(&y_root, t_root, &mut y_new);
+                            {
+                                let state = self.state_mut();
+                                state.y.copy_from(&y_new);
+                            }
+                            write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
+                            self.set_stop_time(final_time)?;
+                            continue;
+                        }
+                    }
                     break;
                 }
             }
@@ -253,7 +269,7 @@ where
                 match self.step()? {
                     OdeSolverStopReason::InternalTimestep => {}
                     OdeSolverStopReason::TstopReached => break,
-                    OdeSolverStopReason::RootFound(t_root) => {
+                    OdeSolverStopReason::RootFound(t_root, root_idx) => {
                         // write out all the t_eval points up to t_root
                         let mut ii = i;
                         let mut tt = *t;
@@ -286,6 +302,38 @@ where
                                 state.g.copy_from(g);
                             }
                         }
+
+                        // If a reset function is defined and this was root index 0,
+                        // apply the reset, write the pre-reset and post-reset points,
+                        // then continue integration.
+                        if root_idx == 0 {
+                            if let Some(reset_fn) = self.problem().eqn.reset() {
+                                {
+                                    let mut y_out = ret.column_mut(ii);
+                                    if integrate_out {
+                                        y_out.copy_from(g_root.as_ref().unwrap());
+                                    } else {
+                                        match self.problem().eqn.out() {
+                                            Some(out) => {
+                                                out.call_inplace(&tmp_nstates, t_root, &mut tmp_nout);
+                                                y_out.copy_from(&tmp_nout);
+                                            }
+                                            None => y_out.copy_from(&tmp_nstates),
+                                        }
+                                    }
+                                }
+                                let nstates = tmp_nstates.len();
+                                let mut y_new = Eqn::V::zeros(nstates, self.problem().context().clone());
+                                reset_fn.call_inplace(&tmp_nstates, t_root, &mut y_new);
+                                {
+                                    let state = self.state_mut();
+                                    state.y.copy_from(&y_new);
+                                }
+                                self.set_stop_time(t_eval[t_eval.len() - 1])?;
+                                break; // break inner while, continue outer for loop at same ii
+                            }
+                        }
+
                         {
                             let mut y_out = ret.column_mut(ii);
                             if integrate_out {

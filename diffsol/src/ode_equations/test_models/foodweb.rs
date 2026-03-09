@@ -814,6 +814,7 @@ where
     type Mass = FoodWebMass<'a, M, NX>;
     type Root = ParameterisedOp<'a, UnitCallable<M>>;
     type Out = FoodWebOut<'a, M, NX>;
+    type Reset = ParameterisedOp<'a, UnitCallable<M>>;
 }
 
 impl<M, const NX: usize> OdeEquations for FoodWeb<M, NX>

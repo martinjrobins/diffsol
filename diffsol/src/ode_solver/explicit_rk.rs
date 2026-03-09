@@ -510,4 +510,25 @@ mod test {
             assert!((t - expected_t[i]).abs() < 1e-4);
         }
     }
+
+    /// Test that `step()` includes the root index in `RootFound(t, index)`.
+    #[test]
+    fn test_root_found_index_tsit45() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_two_roots_problem;
+        use crate::ode_solver::tests::test_root_found_index;
+        let (problem, soln) = exponential_decay_with_two_roots_problem::<M>();
+        let solver = problem.tsit45().unwrap();
+        test_root_found_index(solver, &soln, 0, 1e-4);
+    }
+
+    /// Test that `solve()` applies the Reset function (root index 0) and continues,
+    /// only stopping when the stopping root (index 1) fires.
+    #[test]
+    fn test_solve_with_reset_tsit45() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
+        use crate::ode_solver::tests::test_solve_with_reset;
+        let (problem, soln) = exponential_decay_with_reset_problem::<M>();
+        let solver = problem.tsit45().unwrap();
+        test_solve_with_reset(solver, &soln);
+    }
 }

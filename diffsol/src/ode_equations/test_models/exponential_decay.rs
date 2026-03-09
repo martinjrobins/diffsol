@@ -525,6 +525,118 @@ pub fn exponential_decay_problem_sens_with_out<M: MatrixHost + 'static>(
     (problem, soln)
 }
 
+// ------------------------------------------------------------------
+// Exponential-decay problem extended with a Reset feature
+//
+// Reuses the standard exponential_decay / exponential_decay_jacobian /
+// exponential_decay_init functions (p = [k, y0], nstates = 2).
+//
+// Root 0: y[0] - 0.6  (reset trigger, fires at t ≈ 5.108)
+// Root 1: y[0] - 0.3  (stop condition, fires after reset at t ≈ 17.148)
+// Reset:  y → [y0, y0] = [1.0, 1.0]
+// ------------------------------------------------------------------
+
+fn exponential_decay_two_root<M: MatrixHost>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+    // index 0: reset trigger (y[0] = 0.6)
+    y.set_index(0, x.get_index(0) - M::T::from_f64(0.6).unwrap());
+    // index 1: stopping condition (y[0] = 0.3)
+    y.set_index(1, x.get_index(0) - M::T::from_f64(0.3).unwrap());
+}
+
+fn exponential_decay_reset<M: Matrix>(_x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+    // Reset state to 0.4 — below root-0 threshold (0.6) so root 0 won't fire
+    // again, but above root-1 threshold (0.3) so root 1 can still fire.
+    y.fill(M::T::from_f64(0.4).unwrap());
+}
+
+/// Exponential decay problem with a Root function (2 outputs) **and** a Reset
+/// (triggered by root index 0).
+///
+/// Uses the standard `dy/dt = -k*y` equations with `k=0.1`, `y(0)=[1,1]`.
+/// Root 0 fires at t ≈ 5.108 and triggers a reset (y → [0.4, 0.4]).
+/// After the reset, y[0] = 0.4 < 0.6 so root 0 cannot fire again.
+/// Root 1 fires at t ≈ 5.108 + ln(4/3)/0.1 ≈ 7.985 and causes `solve()` to stop.
+///
+/// Returns the problem alongside a three-point `OdeSolverSolution`:
+///   1. pre-reset  state `y = [0.6, 0.6]` at t ≈ 5.108
+///   2. post-reset state `y = [0.4, 0.4]` at t ≈ 5.108
+///   3. stop state `y = [0.3, 0.3]` at t ≈ 7.985
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_with_reset_problem<M: MatrixHost + 'static>(
+) -> (
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverSolution<M::V>,
+) {
+    let problem = OdeBuilder::<M>::new()
+        .p([0.1, 1.0])
+        .rhs_implicit(exponential_decay::<M>, exponential_decay_jacobian::<M>)
+        .init(exponential_decay_init::<M>, 2)
+        .root(exponential_decay_two_root::<M>, 2)
+        .reset(exponential_decay_reset::<M>)
+        .build()
+        .unwrap();
+    // Root 0 fires when y[0] = 0.6: t_root_0 = -ln(0.6)/0.1
+    let t_root_0 = M::T::from_f64(0.6_f64.ln().abs() / 0.1).unwrap();
+    // After reset to y=[0.4,0.4], root 1 fires when y[0]=0.3:
+    //   t_from_reset = -ln(0.3/0.4)/0.1 = ln(4/3)/0.1
+    let t_from_reset = M::T::from_f64((4.0_f64 / 3.0_f64).ln() / 0.1).unwrap();
+    let t_stop = t_root_0 + t_from_reset;
+    let y0: M::V = problem.eqn.init().call(M::T::zero());
+    let reset_val = M::T::from_f64(0.4).unwrap();
+    let ctx = y0.context().clone();
+    let nstates = y0.len();
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
+    // Point 1: state just before reset (y[0] decayed to 0.6)
+    soln.push(y0.clone() * scale(M::T::from_f64(0.6).unwrap()), t_root_0);
+    // Point 2: state just after reset (y → [0.4, 0.4])
+    let mut y_reset = M::V::zeros(nstates, ctx);
+    y_reset.fill(reset_val);
+    soln.push(y_reset, t_root_0);
+    // Point 3: state at stop (y[0] decayed from 0.4 to 0.3 after reset)
+    // y_stop = 0.4 * exp(-0.1 * t_from_reset) = 0.4 * (3/4) = 0.3
+    soln.push(
+        M::V::from_element(nstates, M::T::from_f64(0.3).unwrap(), y0.context().clone()),
+        t_stop,
+    );
+    (problem, soln)
+}
+
+/// Same equations but **without** Reset — used to test that `step()` returns
+/// `RootFound(t, index)` with the correct root index.
+/// Root 0 fires first at t ≈ 5.108.
+///
+/// Returns the problem alongside a one-point `OdeSolverSolution` whose single
+/// entry is the expected root-0 state `y = [0.6, 0.6]` at t ≈ 5.108.
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_with_two_roots_problem<M: MatrixHost + 'static>(
+) -> (
+    OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverSolution<M::V>,
+) {
+    let problem = OdeBuilder::<M>::new()
+        .p([0.1, 1.0])
+        .rhs_implicit(exponential_decay::<M>, exponential_decay_jacobian::<M>)
+        .init(exponential_decay_init::<M>, 2)
+        .root(exponential_decay_two_root::<M>, 2)
+        .build()
+        .unwrap();
+    // Root 0 fires when y[0] = 0.6: t = -ln(0.6)/0.1
+    let t_root_0 = M::T::from_f64(0.6_f64.ln().abs() / 0.1).unwrap();
+    let y0: M::V = problem.eqn.init().call(M::T::zero());
+    let y_root_0 = y0 * scale(M::T::from_f64(0.6).unwrap());
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
+    soln.push(y_root_0, t_root_0);
+    (problem, soln)
+}
+
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "diffsl-llvm")]

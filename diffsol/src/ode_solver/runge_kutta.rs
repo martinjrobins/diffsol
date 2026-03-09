@@ -876,8 +876,8 @@ where
                 &self.state.y,
                 self.state.t,
             );
-            if let Some(root) = ret {
-                return Ok(OdeSolverStopReason::RootFound(root));
+            if let Some((root, root_idx)) = ret {
+                return Ok(OdeSolverStopReason::RootFound(root, root_idx));
             }
         }
 

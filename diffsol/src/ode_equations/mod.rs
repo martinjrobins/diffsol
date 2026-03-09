@@ -1,7 +1,7 @@
 use crate::{
     op::{constant_op::ConstantOpSensAdjoint, linear_op::LinearOpTranspose, ParameterisedOp},
     ConstantOp, ConstantOpSens, LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Op, StochOp, Vector,
+    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Op, StochOp, UnitCallable, Vector,
 };
 use serde::Serialize;
 
@@ -110,6 +110,7 @@ impl<'a, Eqn: OdeEquations> OdeEquationsRef<'a> for NoAug<Eqn> {
     type Root = <Eqn as OdeEquationsRef<'a>>::Root;
     type Init = <Eqn as OdeEquationsRef<'a>>::Init;
     type Out = <Eqn as OdeEquationsRef<'a>>::Out;
+    type Reset = <Eqn as OdeEquationsRef<'a>>::Reset;
 }
 
 impl<Eqn: OdeEquations> OdeEquations for NoAug<Eqn> {
@@ -126,6 +127,10 @@ impl<Eqn: OdeEquations> OdeEquations for NoAug<Eqn> {
     }
 
     fn out(&self) -> Option<<Self as OdeEquationsRef<'_>>::Out> {
+        panic!("This should never be called")
+    }
+
+    fn reset(&self) -> Option<<Self as OdeEquationsRef<'_>>::Reset> {
         panic!("This should never be called")
     }
 
@@ -197,6 +202,7 @@ pub trait OdeEquationsRef<'a, ImplicitBounds: Sealed = Bounds<&'a Self>>: Op {
     type Root: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
     type Init: ConstantOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
     type Out: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
+    type Reset: NonLinearOp<M = Self::M, V = Self::V, T = Self::T, C = Self::C>;
 }
 
 impl<'a, T: OdeEquationsRef<'a>> OdeEquationsRef<'a> for &T {
@@ -205,6 +211,7 @@ impl<'a, T: OdeEquationsRef<'a>> OdeEquationsRef<'a> for &T {
     type Root = <T as OdeEquationsRef<'a>>::Root;
     type Init = <T as OdeEquationsRef<'a>>::Init;
     type Out = <T as OdeEquationsRef<'a>>::Out;
+    type Reset = <T as OdeEquationsRef<'a>>::Reset;
 }
 
 // seal the trait so that users must use the provided default type for ImplicitBounds
@@ -247,6 +254,12 @@ pub trait OdeEquations: for<'a> OdeEquationsRef<'a> {
         None
     }
 
+    /// returns the optional reset function `R(y)` as a [NonLinearOp].
+    /// When provided, this is called after a root event at index 0 to reset the state.
+    fn reset(&self) -> Option<<Self as OdeEquationsRef<'_>>::Reset> {
+        None
+    }
+
     /// returns the initial condition, i.e. `y(t)`, where `t` is the initial time
     fn init(&self) -> <Self as OdeEquationsRef<'_>>::Init;
 
@@ -272,6 +285,10 @@ impl<T: OdeEquations> OdeEquations for &'_ T {
 
     fn out(&self) -> Option<<Self as OdeEquationsRef<'_>>::Out> {
         (*self).out()
+    }
+
+    fn reset(&self) -> Option<<Self as OdeEquationsRef<'_>>::Reset> {
+        (*self).reset()
     }
 
     fn init(&self) -> <Self as OdeEquationsRef<'_>>::Init {
@@ -391,7 +408,7 @@ impl<T> OdeEquationsAdjoint for T where
 /// which define a nonlinear operator or function `F` that maps an input vector `x` to an output vector `y`, (i.e. `y = F(x)`).
 /// Once you have implemented this trait, you can then pass an instance of your struct to the `rhs` argument of the [Self::new] method.
 /// Once you have created an instance of [OdeSolverEquations], you can then use [crate::OdeBuilder::build_from_eqn] to create a problem.
-pub struct OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
+pub struct OdeSolverEquations<M, Rhs, Init, Mass, Root, Out, Reset = UnitCallable<M>>
 where
     M: Matrix,
 {
@@ -400,10 +417,11 @@ where
     root: Option<Root>,
     init: Init,
     out: Option<Out>,
+    reset: Option<Reset>,
     p: M::V,
 }
 
-impl<M, Rhs, Init, Mass, Root, Out> OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
+impl<M, Rhs, Init, Mass, Root, Out, Reset> OdeSolverEquations<M, Rhs, Init, Mass, Root, Out, Reset>
 where
     M: Matrix,
 {
@@ -414,6 +432,7 @@ where
         mass: Option<Mass>,
         root: Option<Root>,
         out: Option<Out>,
+        reset: Option<Reset>,
         p: M::V,
     ) -> Self {
         Self {
@@ -422,6 +441,7 @@ where
             root,
             init,
             out,
+            reset,
             p,
         }
     }
@@ -433,7 +453,7 @@ where
     }
 }
 
-impl<M, Rhs, Init, Mass, Root, Out> Op for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
+impl<M, Rhs, Init, Mass, Root, Out, Reset> Op for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out, Reset>
 where
     M: Matrix,
     Init: Op<M = M, V = M::V, T = M::T, C = M::C>,
@@ -441,6 +461,7 @@ where
     Mass: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Root: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Out: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Reset: Op<M = M, V = M::V, T = M::T, C = M::C>,
 {
     type T = M::T;
     type V = M::V;
@@ -466,8 +487,8 @@ where
     }
 }
 
-impl<'a, M, Rhs, Init, Mass, Root, Out> OdeEquationsRef<'a>
-    for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
+impl<'a, M, Rhs, Init, Mass, Root, Out, Reset> OdeEquationsRef<'a>
+    for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out, Reset>
 where
     M: Matrix,
     Rhs: Op<M = M, V = M::V, T = M::T, C = M::C>,
@@ -475,21 +496,24 @@ where
     Mass: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Root: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Out: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Reset: Op<M = M, V = M::V, T = M::T, C = M::C>,
     ParameterisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
     ParameterisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T, C = M::C>,
     ParameterisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T, C = M::C>,
     ParameterisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
     ParameterisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+    ParameterisedOp<'a, Reset>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
 {
     type Rhs = ParameterisedOp<'a, Rhs>;
     type Mass = ParameterisedOp<'a, Mass>;
     type Root = ParameterisedOp<'a, Root>;
     type Init = ParameterisedOp<'a, Init>;
     type Out = ParameterisedOp<'a, Out>;
+    type Reset = ParameterisedOp<'a, Reset>;
 }
 
-impl<M, Rhs, Init, Mass, Root, Out> OdeEquations
-    for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>
+impl<M, Rhs, Init, Mass, Root, Out, Reset> OdeEquations
+    for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out, Reset>
 where
     M: Matrix,
     Rhs: Op<M = M, V = M::V, T = M::T, C = M::C>,
@@ -497,11 +521,13 @@ where
     Mass: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Root: Op<M = M, V = M::V, T = M::T, C = M::C>,
     Out: Op<M = M, V = M::V, T = M::T, C = M::C>,
+    Reset: Op<M = M, V = M::V, T = M::T, C = M::C>,
     for<'a> ParameterisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
     for<'a> ParameterisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T, C = M::C>,
     for<'a> ParameterisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T, C = M::C>,
     for<'a> ParameterisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
     for<'a> ParameterisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+    for<'a> ParameterisedOp<'a, Reset>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
 {
     fn rhs(&self) -> ParameterisedOp<'_, Rhs> {
         ParameterisedOp::new(&self.rhs, self.params())
@@ -515,6 +541,11 @@ where
         self.root
             .as_ref()
             .map(|root| ParameterisedOp::new(root, self.params()))
+    }
+    fn reset(&self) -> Option<ParameterisedOp<'_, Reset>> {
+        self.reset
+            .as_ref()
+            .map(|reset| ParameterisedOp::new(reset, self.params()))
     }
     fn init(&self) -> ParameterisedOp<'_, Init> {
         ParameterisedOp::new(&self.init, self.params())

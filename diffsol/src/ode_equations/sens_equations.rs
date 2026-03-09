@@ -292,6 +292,7 @@ where
     type Root = <Eqn as OdeEquationsRef<'a>>::Root;
     type Init = &'a SensInit<'b, Eqn>;
     type Out = <Eqn as OdeEquationsRef<'a>>::Out;
+    type Reset = <Eqn as OdeEquationsRef<'a>>::Reset;
 }
 
 impl<'a, Eqn> OdeEquations for SensEquations<'a, Eqn>
