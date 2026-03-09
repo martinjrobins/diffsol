@@ -157,6 +157,45 @@ where
     /// Interpolate the sensitivity vectors at a given time and place in `sens`. This time should be between the current time and the last solver time step
     fn interpolate_sens_inplace(&self, t: Eqn::T, sens: &mut [Eqn::V]) -> Result<(), DiffsolError>;
 
+    /// Apply a non-linear operator to the current state in-place, replacing `state.y` with
+    /// `op(state.y, state.t)`. The current time and state vector are read from the solver state,
+    /// and the result is written back to `state.y`.
+    fn state_mut_op<O>(&mut self, op: &O)
+    where
+        O: NonLinearOp<T = Eqn::T, V = Eqn::V, M = Eqn::M>,
+    {
+        let nstates = self.problem().eqn.rhs().nstates();
+        let mut y_out = Eqn::V::zeros(nstates, self.problem().context().clone());
+        op.call_inplace(&self.state().y, self.state().t, &mut y_out);
+        self.state_mut().y.copy_from(&y_out);
+    }
+
+    /// Move the solver state back to time `t` by interpolating `y`, `dy`, and (if
+    /// `integrate_out` is set) `g` to that time and writing them into the current state.
+    /// This is typically called after a root is found to pin the state to the root time.
+    fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError> {
+        let nstates = self.problem().eqn.rhs().nstates();
+        let mut y = Eqn::V::zeros(nstates, self.problem().context().clone());
+        self.interpolate_inplace(t, &mut y)?;
+        let mut dy = Eqn::V::zeros(nstates, self.problem().context().clone());
+        self.interpolate_dy_inplace(t, &mut dy)?;
+        let g = if self.problem().integrate_out {
+            let mut g = self.state().g.clone();
+            self.interpolate_out_inplace(t, &mut g)?;
+            Some(g)
+        } else {
+            None
+        };
+        let state = self.state_mut();
+        state.y.copy_from(&y);
+        state.dy.copy_from(&dy);
+        *state.t = t;
+        if let Some(g) = g.as_ref() {
+            state.g.copy_from(g);
+        }
+        Ok(())
+    }
+
     /// Get the current order of accuracy of the solver (e.g. explict euler method is first-order)
     fn order(&self) -> usize;
 
@@ -202,37 +241,14 @@ where
                     break;
                 }
                 OdeSolverStopReason::RootFound(t_root, root_idx) => {
-                    let nstates = self.problem().eqn.rhs().nstates();
-                    let mut y_root = Eqn::V::zeros(nstates, self.problem().context().clone());
-                    self.interpolate_inplace(t_root, &mut y_root)?;
-                    let integrate_out = self.problem().integrate_out;
-                    let mut g_root = None;
-                    if integrate_out {
-                        let mut g = self.state().g.clone();
-                        self.interpolate_out_inplace(t_root, &mut g)?;
-                        g_root = Some(g);
-                    }
-                    {
-                        let state = self.state_mut();
-                        state.y.copy_from(&y_root);
-                        *state.t = t_root;
-                        if let Some(g) = g_root.as_ref() {
-                            state.g.copy_from(g);
-                        }
-                    }
+                    self.state_mut_back(t_root)?;
                     write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
 
                     // If a reset function is defined and this was root index 0,
                     // apply the reset and continue integration.
                     if root_idx == 0 {
                         if let Some(reset_fn) = self.problem().eqn.reset() {
-                            let mut y_new =
-                                Eqn::V::zeros(nstates, self.problem().context().clone());
-                            reset_fn.call_inplace(&y_root, t_root, &mut y_new);
-                            {
-                                let state = self.state_mut();
-                                state.y.copy_from(&y_new);
-                            }
+                            self.state_mut_op(&reset_fn);
                             write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
                             self.set_stop_time(final_time)?;
                             continue;
@@ -298,22 +314,7 @@ where
                             ii += 1;
                             tt = t_eval[ii];
                         }
-                        self.interpolate_inplace(t_root, &mut tmp_nstates)?;
-                        let integrate_out = self.problem().integrate_out;
-                        let mut g_root = None;
-                        if integrate_out {
-                            let mut g = self.state().g.clone();
-                            self.interpolate_out_inplace(t_root, &mut g)?;
-                            g_root = Some(g);
-                        }
-                        {
-                            let state = self.state_mut();
-                            state.y.copy_from(&tmp_nstates);
-                            *state.t = t_root;
-                            if let Some(g) = g_root.as_ref() {
-                                state.g.copy_from(g);
-                            }
-                        }
+                        self.state_mut_back(t_root)?;
 
                         // If a reset function is defined and this was root index 0,
                         // apply the reset, write the pre-reset and post-reset points,
@@ -321,47 +322,44 @@ where
                         if root_idx == 0 {
                             if let Some(reset_fn) = self.problem().eqn.reset() {
                                 {
+                                    let y_at_root = self.state().y.clone();
+                                    let g_at_root = self.state().g.clone();
                                     let mut y_out = ret.column_mut(ii);
-                                    if integrate_out {
-                                        y_out.copy_from(g_root.as_ref().unwrap());
+                                    if self.problem().integrate_out {
+                                        y_out.copy_from(&g_at_root);
                                     } else {
                                         match self.problem().eqn.out() {
                                             Some(out) => {
                                                 out.call_inplace(
-                                                    &tmp_nstates,
+                                                    &y_at_root,
                                                     t_root,
                                                     &mut tmp_nout,
                                                 );
                                                 y_out.copy_from(&tmp_nout);
                                             }
-                                            None => y_out.copy_from(&tmp_nstates),
+                                            None => y_out.copy_from(&y_at_root),
                                         }
                                     }
                                 }
-                                let nstates = tmp_nstates.len();
-                                let mut y_new =
-                                    Eqn::V::zeros(nstates, self.problem().context().clone());
-                                reset_fn.call_inplace(&tmp_nstates, t_root, &mut y_new);
-                                {
-                                    let state = self.state_mut();
-                                    state.y.copy_from(&y_new);
-                                }
+                                self.state_mut_op(&reset_fn);
                                 self.set_stop_time(t_eval[t_eval.len() - 1])?;
                                 break; // break inner while, continue outer for loop at same ii
                             }
                         }
 
                         {
+                            let y_at_root = self.state().y.clone();
+                            let g_at_root = self.state().g.clone();
                             let mut y_out = ret.column_mut(ii);
-                            if integrate_out {
-                                y_out.copy_from(g_root.as_ref().unwrap());
+                            if self.problem().integrate_out {
+                                y_out.copy_from(&g_at_root);
                             } else {
                                 match self.problem().eqn.out() {
                                     Some(out) => {
-                                        out.call_inplace(&tmp_nstates, t_root, &mut tmp_nout);
+                                        out.call_inplace(&y_at_root, t_root, &mut tmp_nout);
                                         y_out.copy_from(&tmp_nout);
                                     }
-                                    None => y_out.copy_from(&tmp_nstates),
+                                    None => y_out.copy_from(&y_at_root),
                                 }
                             }
                         }
