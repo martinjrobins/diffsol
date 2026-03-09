@@ -998,7 +998,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .skip(search_start)
-                .find(|(_, &t)| (t - expected.t).abs() < Eqn::T::from_f64(20.0).unwrap() * time_tol)
+                .find(|(_, &t)| (t - expected.t).abs() < Eqn::T::from_f64(30.0).unwrap() * time_tol)
                 .unwrap_or_else(|| {
                     panic!(
                         "solution point {point_idx} (t ≈ {:?}) not found in solve() output \

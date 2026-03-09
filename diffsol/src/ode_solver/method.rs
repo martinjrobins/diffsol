@@ -159,8 +159,10 @@ where
 
     /// Apply a non-linear operator to the current state in-place, replacing `state.y` with
     /// `op(state.y, state.t)`. The current time and state vector are read from the solver state,
-    /// and the result is written back to `state.y`.
-    fn state_mut_op<O>(&mut self, op: &O)
+    /// and the result is written back to `state.y`. `state.dy` is also updated to `rhs(state.y, state.t)`
+    /// 
+    /// Note: mass matrix is not supported for this operation, and will return an error if the problem has a mass matrix
+    fn state_mut_op<O>(&mut self, op: &O) -> Result<(), DiffsolError>
     where
         O: NonLinearOp<T = Eqn::T, V = Eqn::V, M = Eqn::M>,
     {
@@ -168,6 +170,14 @@ where
         let mut y_out = Eqn::V::zeros(nstates, self.problem().context().clone());
         op.call_inplace(&self.state().y, self.state().t, &mut y_out);
         self.state_mut().y.copy_from(&y_out);
+        
+        // only support identity mass matrix for now
+        if self.problem().eqn.mass().is_some() {
+            return Err(ode_solver_error!(MassMatrixNotSupported));
+        }
+        self.problem().eqn.rhs().call_inplace(&self.state().y, self.state().t, &mut y_out);
+        self.state_mut().dy.copy_from(&y_out);
+        Ok(())
     }
 
     /// Move the solver state back to time `t` by interpolating `y`, `dy`, and (if
@@ -248,7 +258,7 @@ where
                     // apply the reset and continue integration.
                     if root_idx == 0 {
                         if let Some(reset_fn) = self.problem().eqn.reset() {
-                            self.state_mut_op(&reset_fn);
+                            self.state_mut_op(&reset_fn)?;
                             write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
                             self.set_stop_time(final_time)?;
                             continue;
@@ -339,7 +349,7 @@ where
                                         }
                                     }
                                 }
-                                self.state_mut_op(&reset_fn);
+                                self.state_mut_op(&reset_fn)?;
                                 self.set_stop_time(t_eval[t_eval.len() - 1])?;
                                 break; // break inner while, continue outer for loop at same ii
                             }
