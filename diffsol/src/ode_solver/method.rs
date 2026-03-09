@@ -322,22 +322,20 @@ where
                         if root_idx == 0 {
                             if let Some(reset_fn) = self.problem().eqn.reset() {
                                 {
-                                    let y_at_root = self.state().y.clone();
-                                    let g_at_root = self.state().g.clone();
                                     let mut y_out = ret.column_mut(ii);
                                     if self.problem().integrate_out {
-                                        y_out.copy_from(&g_at_root);
+                                        y_out.copy_from(&self.state().g);
                                     } else {
                                         match self.problem().eqn.out() {
                                             Some(out) => {
                                                 out.call_inplace(
-                                                    &y_at_root,
+                                                    &self.state().y,
                                                     t_root,
                                                     &mut tmp_nout,
                                                 );
                                                 y_out.copy_from(&tmp_nout);
                                             }
-                                            None => y_out.copy_from(&y_at_root),
+                                            None => y_out.copy_from(&self.state().y),
                                         }
                                     }
                                 }
@@ -348,18 +346,16 @@ where
                         }
 
                         {
-                            let y_at_root = self.state().y.clone();
-                            let g_at_root = self.state().g.clone();
                             let mut y_out = ret.column_mut(ii);
                             if self.problem().integrate_out {
-                                y_out.copy_from(&g_at_root);
+                                y_out.copy_from(&self.state().g);
                             } else {
                                 match self.problem().eqn.out() {
                                     Some(out) => {
-                                        out.call_inplace(&y_at_root, t_root, &mut tmp_nout);
+                                        out.call_inplace(&self.state().y, t_root, &mut tmp_nout);
                                         y_out.copy_from(&tmp_nout);
                                     }
-                                    None => y_out.copy_from(&y_at_root),
+                                    None => y_out.copy_from(&self.state().y),
                                 }
                             }
                         }
