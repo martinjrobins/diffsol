@@ -678,7 +678,7 @@ mod tests {
         // t after current time should return error
         assert!(s.interpolate_dy(t1 + M::T::from_f64(1e6).unwrap()).is_err());
 
-        // interpolate_dy should be consistent with finite-difference of interpolate
+        // interpolate_dy should be consistent with finite-difference of interpolate (step 1)
         let eps = dt.abs() * M::T::from_f64(1e-5).unwrap();
         let y_plus = s.interpolate(tmid + eps).unwrap();
         let y_minus = s.interpolate(tmid - eps).unwrap();
@@ -686,6 +686,25 @@ mod tests {
         let dy = s.interpolate_dy(tmid).unwrap();
         dy.assert_eq_norm(
             &fd_dy,
+            &s.problem().atol,
+            s.problem().rtol,
+            M::T::from_f64(1e3).unwrap(),
+        );
+
+        // take a second step and check consistency again
+        let t1 = s.state().t;
+        s.step().unwrap();
+        let t2 = s.state().t;
+        let dt2 = t2 - t1;
+        let tmid2 = t1 + dt2 / M::T::from_f64(2.0).unwrap();
+        let eps2 = dt2.abs() * M::T::from_f64(1e-5).unwrap();
+        let y_plus = s.interpolate(tmid2 + eps2).unwrap();
+        let y_minus = s.interpolate(tmid2 - eps2).unwrap();
+        let fd_dy2 =
+            (y_plus - y_minus) * Scale(M::T::one() / (M::T::from_f64(2.0).unwrap() * eps2));
+        let dy2 = s.interpolate_dy(tmid2).unwrap();
+        dy2.assert_eq_norm(
+            &fd_dy2,
             &s.problem().atol,
             s.problem().rtol,
             M::T::from_f64(1e3).unwrap(),
