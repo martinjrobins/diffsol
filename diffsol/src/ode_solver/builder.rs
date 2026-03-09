@@ -5,8 +5,8 @@ use crate::{
     op::{linear_closure_with_adjoint::LinearClosureWithAdjoint, BuilderOp},
     Closure, ClosureNoJac, ClosureWithAdjoint, ClosureWithSens, ConstantClosure,
     ConstantClosureWithAdjoint, ConstantClosureWithSens, ConstantOp, InitialConditionSolverOptions,
-    LinearClosure, LinearOp, Matrix, NonLinearOp, OdeEquations,
-    OdeSolverOptions, OdeSolverProblem, Op, ParameterisedOp, Scalar, UnitCallable, Vector,
+    LinearClosure, LinearOp, Matrix, NonLinearOp, OdeEquations, OdeSolverOptions, OdeSolverProblem,
+    Op, ParameterisedOp, Scalar, UnitCallable, Vector,
 };
 
 #[cfg(feature = "diffsl")]
@@ -618,7 +618,6 @@ where
         }
     }
 
-
     /// Set the reset function of the ODE.
     ///
     /// The reset function is called after a root event at index 0 to update the state.
@@ -627,10 +626,7 @@ where
     ///
     /// # Arguments
     /// - `reset`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the new state.
-    pub fn reset<F>(
-        self,
-        reset: F,
-    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Out, ClosureNoJac<M, F>>
+    pub fn reset<F>(self, reset: F) -> OdeBuilder<M, Rhs, Init, Mass, Root, Out, ClosureNoJac<M, F>>
     where
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
     {
@@ -1176,7 +1172,10 @@ where
     #[allow(clippy::type_complexity)]
     pub fn build(
         self,
-    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, Rhs, Init, Mass, Root, Out, Reset>>, DiffsolError>
+    ) -> Result<
+        OdeSolverProblem<OdeSolverEquations<M, Rhs, Init, Mass, Root, Out, Reset>>,
+        DiffsolError,
+    >
     where
         M: Matrix,
         Rhs: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,

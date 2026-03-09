@@ -111,6 +111,17 @@ where
     /// Interpolate the solution at a given time and place in `y`. This time should be between the current time and the last solver time step
     fn interpolate_inplace(&self, t: Eqn::T, y: &mut Eqn::V) -> Result<(), DiffsolError>;
 
+    /// Interpolate the time derivative dy/dt at a given time. This time should be between the current time and the last solver time step
+    fn interpolate_dy(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
+        let nstates = self.problem().eqn.rhs().nstates();
+        let mut dy = Eqn::V::zeros(nstates, self.problem().context().clone());
+        self.interpolate_dy_inplace(t, &mut dy)?;
+        Ok(dy)
+    }
+
+    /// Interpolate the time derivative dy/dt at a given time and place in `dy`. This time should be between the current time and the last solver time step
+    fn interpolate_dy_inplace(&self, t: Eqn::T, dy: &mut Eqn::V) -> Result<(), DiffsolError>;
+
     /// Interpolate the integral of the output function at a given time. This time should be between the current time and the last solver time step
     fn interpolate_out(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
         let nout = if let Some(out) = self.problem().eqn.out() {
@@ -215,7 +226,8 @@ where
                     // apply the reset and continue integration.
                     if root_idx == 0 {
                         if let Some(reset_fn) = self.problem().eqn.reset() {
-                            let mut y_new = Eqn::V::zeros(nstates, self.problem().context().clone());
+                            let mut y_new =
+                                Eqn::V::zeros(nstates, self.problem().context().clone());
                             reset_fn.call_inplace(&y_root, t_root, &mut y_new);
                             {
                                 let state = self.state_mut();
@@ -315,7 +327,11 @@ where
                                     } else {
                                         match self.problem().eqn.out() {
                                             Some(out) => {
-                                                out.call_inplace(&tmp_nstates, t_root, &mut tmp_nout);
+                                                out.call_inplace(
+                                                    &tmp_nstates,
+                                                    t_root,
+                                                    &mut tmp_nout,
+                                                );
                                                 y_out.copy_from(&tmp_nout);
                                             }
                                             None => y_out.copy_from(&tmp_nstates),
@@ -323,7 +339,8 @@ where
                                     }
                                 }
                                 let nstates = tmp_nstates.len();
-                                let mut y_new = Eqn::V::zeros(nstates, self.problem().context().clone());
+                                let mut y_new =
+                                    Eqn::V::zeros(nstates, self.problem().context().clone());
                                 reset_fn.call_inplace(&tmp_nstates, t_root, &mut y_new);
                                 {
                                     let state = self.state_mut();

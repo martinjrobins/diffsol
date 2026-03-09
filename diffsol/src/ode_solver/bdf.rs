@@ -749,6 +749,34 @@ where
         }
     }
 
+    // Interpolate the time derivative dy/dt of the BDF polynomial at time t.
+    // Uses the product-rule differentiation of the interpolating polynomial from page 7 of [1].
+    // For each term pi_i(t) = prod_{j=0}^{i-1} (t - (t1 - j*h)) / ((j+1)*h),
+    // we maintain pi (the product) and d_pi (its derivative) iteratively.
+    fn interpolate_derivative_from_diff(
+        t: Eqn::T,
+        diff: &M,
+        t1: Eqn::T,
+        h: Eqn::T,
+        order: usize,
+        dy: &mut Eqn::V,
+    ) {
+        let mut pi = Eqn::T::one();
+        let mut d_pi = Eqn::T::zero();
+        dy.fill(Eqn::T::zero());
+        for i in 0..order {
+            let i_t = <Eqn::T as FromPrimitive>::from_f64(i as f64).unwrap();
+            let denom = h * (Eqn::T::one() + i_t);
+            let w = (t - (t1 - h * i_t)) / denom;
+            let dw = Eqn::T::one() / denom;
+            // d(pi_{i+1})/dt = d(pi_i)/dt * w + pi_i * dw
+            let new_d_pi = d_pi * w + pi * dw;
+            pi = pi * w;
+            d_pi = new_d_pi;
+            dy.axpy_v(d_pi, &diff.column(i + 1), Eqn::T::one());
+        }
+    }
+
     fn error_control(&self) -> Eqn::T {
         let state = &self.state;
         let order = state.order;
@@ -1031,6 +1059,32 @@ where
             return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
         }
         Self::interpolate_from_diff(t, &state.diff, state.t, state.h, state.order, y);
+        Ok(())
+    }
+
+    fn interpolate_dy_inplace(&self, t: Eqn::T, dy: &mut Eqn::V) -> Result<(), DiffsolError> {
+        if dy.len() != self.state.y.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::InterpolationVectorWrongSize {
+                    expected: self.state.y.len(),
+                    found: dy.len(),
+                },
+            ));
+        }
+        let state = &self.state;
+        if self.is_state_modified {
+            if t == state.t {
+                dy.copy_from(&state.dy);
+                return Ok(());
+            } else {
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+            }
+        }
+        let is_forward = state.h > Eqn::T::zero();
+        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
+            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
+        }
+        Self::interpolate_derivative_from_diff(t, &state.diff, state.t, state.h, state.order, dy);
         Ok(())
     }
 
@@ -1485,7 +1539,8 @@ mod test {
         ode_solver::tests::{
             setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
             test_adjoint_sum_squares, test_checkpointing, test_config, test_interpolate,
-            test_ode_solver, test_problem, test_state_mut, test_state_mut_on_problem,
+            test_interpolate_dy, test_ode_solver, test_problem, test_state_mut,
+            test_state_mut_on_problem,
         },
         scale, ConstantOp, Context, DenseMatrix, FaerLU, FaerMat, FaerSparseLU, FaerSparseMat,
         MatrixCommon, NalgebraLU, OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
@@ -1516,6 +1571,11 @@ mod test {
     #[test]
     fn bdf_test_interpolate_sens() {
         test_interpolate(test_problem::<M>(false).bdf_sens::<LS>().unwrap());
+    }
+
+    #[test]
+    fn bdf_test_interpolate_dy() {
+        test_interpolate_dy(test_problem::<M>(false).bdf::<LS>().unwrap());
     }
 
     #[test]

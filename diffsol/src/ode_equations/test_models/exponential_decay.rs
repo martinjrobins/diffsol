@@ -562,8 +562,7 @@ fn exponential_decay_reset<M: Matrix>(_x: &M::V, _p: &M::V, _t: M::T, y: &mut M:
 ///   2. post-reset state `y = [0.4, 0.4]` at t ≈ 5.108
 ///   3. stop state `y = [0.3, 0.3]` at t ≈ 7.985
 #[allow(clippy::type_complexity)]
-pub fn exponential_decay_with_reset_problem<M: MatrixHost + 'static>(
-) -> (
+pub fn exponential_decay_with_reset_problem<M: MatrixHost + 'static>() -> (
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
@@ -612,8 +611,7 @@ pub fn exponential_decay_with_reset_problem<M: MatrixHost + 'static>(
 /// Returns the problem alongside a one-point `OdeSolverSolution` whose single
 /// entry is the expected root-0 state `y = [0.6, 0.6]` at t ≈ 5.108.
 #[allow(clippy::type_complexity)]
-pub fn exponential_decay_with_two_roots_problem<M: MatrixHost + 'static>(
-) -> (
+pub fn exponential_decay_with_two_roots_problem<M: MatrixHost + 'static>() -> (
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {

@@ -17,10 +17,10 @@ use diffsl::{
 
 use crate::{
     error::DiffsolError, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
-    op::nonlinear_op::NonLinearOpJacobian, op::ParameterisedOp, ConstantOp, ConstantOpSens, ConstantOpSensAdjoint,
-    LinearOp, LinearOpTranspose, Matrix, MatrixHost, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scale, UnitCallable, Vector,
-    VectorHost,
+    op::nonlinear_op::NonLinearOpJacobian, op::ParameterisedOp, ConstantOp, ConstantOpSens,
+    ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix, MatrixHost, NonLinearOp,
+    NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op,
+    Scale, UnitCallable, Vector, VectorHost,
 };
 
 /// Context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).

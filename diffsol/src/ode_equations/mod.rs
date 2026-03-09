@@ -1,7 +1,8 @@
 use crate::{
     op::{constant_op::ConstantOpSensAdjoint, linear_op::LinearOpTranspose, ParameterisedOp},
     ConstantOp, ConstantOpSens, LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Op, StochOp, UnitCallable, Vector,
+    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Op, StochOp, UnitCallable,
+    Vector,
 };
 use serde::Serialize;
 
@@ -453,7 +454,8 @@ where
     }
 }
 
-impl<M, Rhs, Init, Mass, Root, Out, Reset> Op for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out, Reset>
+impl<M, Rhs, Init, Mass, Root, Out, Reset> Op
+    for OdeSolverEquations<M, Rhs, Init, Mass, Root, Out, Reset>
 where
     M: Matrix,
     Init: Op<M = M, V = M::V, T = M::T, C = M::C>,

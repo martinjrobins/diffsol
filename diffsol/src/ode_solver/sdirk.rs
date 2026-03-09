@@ -490,6 +490,10 @@ where
         self.rk.interpolate_inplace(t, y)
     }
 
+    fn interpolate_dy_inplace(&self, t: <Eqn>::T, dy: &mut Eqn::V) -> Result<(), DiffsolError> {
+        self.rk.interpolate_dy_inplace(t, dy)
+    }
+
     fn interpolate_out_inplace(&self, t: <Eqn>::T, g: &mut Eqn::V) -> Result<(), DiffsolError> {
         self.rk.interpolate_out_inplace(t, g)
     }
@@ -524,7 +528,8 @@ mod test {
         ode_solver::tests::{
             setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
             test_adjoint_sum_squares, test_checkpointing, test_config, test_interpolate,
-            test_ode_solver, test_problem, test_state_mut, test_state_mut_on_problem,
+            test_interpolate_dy, test_ode_solver, test_problem, test_state_mut,
+            test_state_mut_on_problem,
         },
         scale, ConstantOp, Context, DenseMatrix, FaerSparseLU, FaerSparseMat, MatrixCommon,
         NalgebraLU, NalgebraVec, OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
@@ -555,6 +560,11 @@ mod test {
     #[test]
     fn sdirk_test_interpolate_sens() {
         test_interpolate(test_problem::<M>(false).tr_bdf2_sens::<LS>().unwrap());
+    }
+
+    #[test]
+    fn sdirk_test_interpolate_dy() {
+        test_interpolate_dy(test_problem::<M>(false).tr_bdf2::<LS>().unwrap());
     }
 
     #[test]

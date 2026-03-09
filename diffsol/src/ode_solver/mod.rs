@@ -658,6 +658,40 @@ mod tests {
         }
     }
 
+    pub fn test_interpolate_dy<'a, M: Matrix, Method: OdeSolverMethod<'a, TestEqn<M>>>(
+        mut s: Method,
+    ) {
+        // Error before first step: t is in the future
+        let t_future = s.state().t + M::T::from_f64(1e6).unwrap();
+        assert!(s.interpolate_dy(t_future).is_err());
+
+        let t0 = s.state().t;
+        s.step().unwrap();
+        let t1 = s.state().t;
+        let dt = t1 - t0;
+        let tmid = t0 + dt / M::T::from_f64(2.0).unwrap();
+
+        // Wrong vector length should return error
+        let mut dy_wrong = M::V::zeros(2, s.problem().context().clone());
+        assert!(s.interpolate_dy_inplace(t1, &mut dy_wrong).is_err());
+
+        // t after current time should return error
+        assert!(s.interpolate_dy(t1 + M::T::from_f64(1e6).unwrap()).is_err());
+
+        // interpolate_dy should be consistent with finite-difference of interpolate
+        let eps = dt.abs() * M::T::from_f64(1e-5).unwrap();
+        let y_plus = s.interpolate(tmid + eps).unwrap();
+        let y_minus = s.interpolate(tmid - eps).unwrap();
+        let fd_dy = (y_plus - y_minus) * Scale(M::T::one() / (M::T::from_f64(2.0).unwrap() * eps));
+        let dy = s.interpolate_dy(tmid).unwrap();
+        dy.assert_eq_norm(
+            &fd_dy,
+            &s.problem().atol,
+            s.problem().rtol,
+            M::T::from_f64(1e3).unwrap(),
+        );
+    }
+
     pub fn test_config<'a, Eqn: OdeEquations + 'a, Method: OdeSolverMethod<'a, Eqn>>(
         mut s: Method,
     ) {
@@ -920,14 +954,10 @@ mod tests {
     /// Test that `solve()` applies the Reset function when root index 0 fires
     /// and continues integration, only stopping when the non-reset root (index 1) fires.
     ///
-    /// For the exponential-decay test model (`dy/dt = -0.1*y`, `y(0)=[1,1]`, reset→`[1,1]`):
-    ///   - `t ≈ 5.108`: root 0 (`y[0] = 0.6`) → reset applied, integration continues.
-    ///   - `t ≈ 17.148`: root 1 (`y[0] = 0.3`) → `solve()` returns.
-    ///
-    /// `t_stop_expected` and `y_stop_expected` are the expected stop time and
-    /// `y[0]` value at termination; `tol` is the absolute tolerance for both checks.
-    ///
-    /// The ODE system **must** have a Reset function attached (root index 0 is the trigger).
+    /// The soln has three expected solution points, which must be found sequentially in the output of `solve()`:
+    ///  1. pre-reset state  at t_root_0
+    ///  2. post-reset state at t_root_0
+    ///  3. stop state       at t_root_1
     pub fn test_solve_with_reset<'a, Eqn, Method>(
         mut solver: Method,
         soln: &OdeSolverSolution<Eqn::V>,
@@ -940,11 +970,6 @@ mod tests {
         let (ys, ts) = solver.solve(final_time).unwrap();
 
         // Search for each expected solution point sequentially in the output.
-        // The expected points are (in order):
-        //   1. pre-reset state  at t_root_0
-        //   2. post-reset state at t_root_0
-        //   3. stop state       at t_root_1
-        let error_threshold = Eqn::T::from_f64(20.0).unwrap();
         let mut search_start = 0;
         for (point_idx, expected) in soln.solution_points.iter().enumerate() {
             // Use the provided time tolerance for matching root event times;
@@ -954,7 +979,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .skip(search_start)
-                .find(|(_, &t)| (t - expected.t).abs() < time_tol)
+                .find(|(_, &t)| (t - expected.t).abs() < Eqn::T::from_f64(20.0).unwrap() * time_tol)
                 .unwrap_or_else(|| {
                     panic!(
                         "solution point {point_idx} (t ≈ {:?}) not found in solve() output \
@@ -974,6 +999,7 @@ mod tests {
             let error_norm = error
                 .squared_norm(&expected.state, &soln.atol, soln.rtol)
                 .sqrt();
+            let error_threshold = Eqn::T::from_f64(20.0).unwrap();
             assert!(
                 error_norm < error_threshold,
                 "solution point {point_idx} (t ≈ {:?}): WRMS error norm {error_norm:?} ≥ {error_threshold:?}",
