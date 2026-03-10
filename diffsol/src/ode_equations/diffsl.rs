@@ -1063,8 +1063,9 @@ mod tests {
 
     use crate::{
         matrix::MatrixRef, ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix,
-        LinearOp, Matrix, NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations,
-        OdeSolverMethod, Vector, VectorHost, VectorRef, VectorView,
+        LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
+        NonLinearOpSensAdjoint, OdeBuilder, OdeEquations, OdeSolverMethod, Vector, VectorHost,
+        VectorRef, VectorView,
     };
 
     use super::{DiffSl, DiffSlContext};
@@ -1110,6 +1111,159 @@ mod tests {
     }
 
     generate_tests!(diffsl_logistic_growth);
+    generate_tests!(diffsl_reset_call_and_jac_mul);
+
+    // Sensitivity and reverse-mode (adjoint) require LLVM — Cranelift supports neither.
+    macro_rules! generate_tests_llvm_only {
+        ($test_fn:ident) => {
+            generate_tests!(@impl $test_fn, llvm_dense_f64, crate::LlvmModule, crate::NalgebraMat<f64>, "diffsl-llvm");
+            generate_tests!(@impl $test_fn, llvm_sparse_f64, crate::LlvmModule, crate::FaerSparseMat<f64>, "diffsl-llvm");
+            generate_tests!(@impl $test_fn, llvm_dense_f32, crate::LlvmModule, crate::NalgebraMat<f32>, "diffsl-llvm");
+            generate_tests!(@impl $test_fn, llvm_sparse_f32, crate::LlvmModule, crate::FaerSparseMat<f32>, "diffsl-llvm");
+        };
+    }
+
+    generate_tests_llvm_only!(diffsl_reset_sens_and_adjoint_gradients);
+
+    /// Tests forward evaluation and Jacobian-vector product for DiffSlReset.
+    /// Runs on all backends (Cranelift + LLVM).
+    ///
+    /// Model: reset_i { 2 * y + a, z + a }  with a=3, (y,z)=(3,2), t=0.
+    ///   J = d(reset)/d(x) = [[2, 0], [0, 1]]
+    fn diffsl_reset_call_and_jac_mul<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        let text = "
+            in { a = 1 }
+            u_i {
+                y = a,
+                z = 2,
+            }
+            F_i {
+                y,
+                z,
+            }
+            reset_i {
+                2 * y + a,
+                z + a,
+            }
+            stop_i {
+                y - 0.5,
+            }
+            out_i {
+                y,
+                z,
+            }
+        ";
+
+        let ctx = M::C::default();
+        let a = M::T::from_f64(3.0).unwrap();
+        let p = ctx.vector_from_vec(vec![a]);
+        let mut eqn = DiffSl::<M, CG>::compile(text, ctx.clone(), false).unwrap();
+        eqn.set_params(&p);
+
+        // x = (y, z) = (a, 2) = (3, 2) after set_params
+        let x = eqn.init().call(M::T::zero());
+        let t = M::T::zero();
+        let reset_op = eqn.reset().expect("model must have a reset operator");
+
+        // reset(x, t) = [2*3+3, 2+3] = [9, 5]
+        let reset_val = reset_op.call(&x, t);
+        let reset_expected = ctx.vector_from_vec(vec![
+            M::T::from_f64(9.0).unwrap(),
+            M::T::from_f64(5.0).unwrap(),
+        ]);
+        reset_val.assert_eq_st(&reset_expected, M::T::from_f64(1e-10).unwrap());
+
+        // jac_mul: J*v, J=[[2,0],[0,1]], v=[3,-1] => [6,-1]
+        let v = ctx.vector_from_vec(vec![M::T::from_f64(3.0).unwrap(), -M::T::one()]);
+        let mut y = ctx.vector_from_vec(vec![M::T::zero(), M::T::zero()]);
+        reset_op.jac_mul_inplace(&x, t, &v, &mut y);
+        let jac_mul_expected =
+            ctx.vector_from_vec(vec![M::T::from_f64(6.0).unwrap(), -M::T::one()]);
+        y.assert_eq_st(&jac_mul_expected, M::T::from_f64(1e-10).unwrap());
+    }
+
+    /// Tests sensitivity and adjoint gradient products for DiffSlReset.
+    /// Requires LLVM — Cranelift does not compile sensitivity or reverse-mode autograd.
+    ///
+    /// Model: reset_i { 2 * y + a, z + a }  with a=3, (y,z)=(3,2), t=0.
+    ///   d(reset)/d(a) = [1, 1]
+    ///   J^T = [[2, 0], [0, 1]] (diagonal, same as J)
+    ///
+    /// Note: jac_transpose_mul and sens_transpose_mul return negated values
+    ///       (same convention as rhs adjoint).
+    fn diffsl_reset_sens_and_adjoint_gradients<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        let text = "
+            in { a = 1 }
+            u_i {
+                y = a,
+                z = 2,
+            }
+            F_i {
+                y,
+                z,
+            }
+            reset_i {
+                2 * y + a,
+                z + a,
+            }
+            stop_i {
+                y - 0.5,
+            }
+            out_i {
+                y,
+                z,
+            }
+        ";
+
+        let ctx = M::C::default();
+        let a = M::T::from_f64(3.0).unwrap();
+        let p = ctx.vector_from_vec(vec![a]);
+        let mut eqn = DiffSl::<M, CG>::compile(text, ctx.clone(), false).unwrap();
+        eqn.set_params(&p);
+
+        let x = eqn.init().call(M::T::zero());
+        let t = M::T::zero();
+        let reset_op = eqn.reset().expect("model must have a reset operator");
+
+        let v = ctx.vector_from_vec(vec![M::T::from_f64(3.0).unwrap(), -M::T::one()]);
+
+        // sens_mul: (d_reset/d_a)*vp, d/da=[1,1], vp=[2] => [2,2]
+        let vp = ctx.vector_from_vec(vec![M::T::from_f64(2.0).unwrap()]);
+        let mut y = ctx.vector_from_vec(vec![M::T::zero(), M::T::zero()]);
+        reset_op.sens_mul_inplace(&x, t, &vp, &mut y);
+        let sens_expected = ctx.vector_from_vec(vec![
+            M::T::from_f64(2.0).unwrap(),
+            M::T::from_f64(2.0).unwrap(),
+        ]);
+        y.assert_eq_st(&sens_expected, M::T::from_f64(1e-10).unwrap());
+
+        // jac_transpose_mul: -J^T*v, J=[[2,0],[0,1]], v=[3,-1] => -[6,-1] = [-6,1]
+        let mut y = ctx.vector_from_vec(vec![M::T::zero(), M::T::zero()]);
+        reset_op.jac_transpose_mul_inplace(&x, t, &v, &mut y);
+        let jac_adj_expected =
+            ctx.vector_from_vec(vec![M::T::from_f64(-6.0).unwrap(), M::T::one()]);
+        y.assert_eq_st(&jac_adj_expected, M::T::from_f64(1e-10).unwrap());
+
+        // sens_transpose_mul: -(d_reset/d_a)^T*v = -(1*3 + 1*(-1)) = -2
+        let mut y_p = ctx.vector_from_vec(vec![M::T::zero()]);
+        reset_op.sens_transpose_mul_inplace(&x, t, &v, &mut y_p);
+        let sens_adj_expected = ctx.vector_from_vec(vec![M::T::from_f64(-2.0).unwrap()]);
+        y_p.assert_eq_st(&sens_adj_expected, M::T::from_f64(1e-10).unwrap());
+    }
 
     fn diffsl_logistic_growth<
         CG: CodegenModuleJit + CodegenModuleCompile,
