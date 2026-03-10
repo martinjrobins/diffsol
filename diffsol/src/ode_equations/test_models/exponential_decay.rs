@@ -748,13 +748,28 @@ pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
     let s_y0_val = M::T::from_f64(0.6 * 10.0 / 13.0).unwrap();
 
     let s_k = M::V::from_element(2, s_k_val, ctx.clone());
-    let s_y0 = M::V::from_element(2, s_y0_val, ctx);
+    let s_y0 = M::V::from_element(2, s_y0_val, ctx.clone());
+
+    // Pre-reset and post-reset sensitivities at t_root.
+    // s_k_root = -t_root · 0.6  (since s_k(t) = -t · exp(-k·t) · y0 = -t · y(t))
+    // s_y0_root = 0.6           (since s_y0(t) = exp(-k·t))
+    // Because J_R = I the post-reset sensitivities equal the pre-reset sensitivities.
+    let t_root_f64 = 10.0 * (5.0_f64 / 3.0_f64).ln();
+    let s_k_root_val = M::T::from_f64(-t_root_f64 * 0.6).unwrap();
+    let s_y0_root_val = M::T::from_f64(0.6).unwrap();
+    let s_k_root = M::V::from_element(2, s_k_root_val, ctx.clone());
+    let s_y0_root = M::V::from_element(2, s_y0_root_val, ctx.clone());
+
+    let y_before = M::V::from_element(2, M::T::from_f64(0.6).unwrap(), ctx.clone());
+    let y_after = M::V::from_element(2, M::T::from_f64(2.6).unwrap(), ctx.clone());
 
     let mut soln = OdeSolverSolution {
         atol: problem.atol.clone(),
         rtol: problem.rtol,
         ..Default::default()
     };
+    soln.push_sens(y_before, t_root, &[s_k_root.clone(), s_y0_root.clone()]);
+    soln.push_sens(y_after, t_root, &[s_k_root, s_y0_root]);
     soln.push_sens(y_stop, t_stop, &[s_k, s_y0]);
 
     (problem, soln)

@@ -1,7 +1,8 @@
 use crate::{
     error::DiffsolError, error::OdeSolverError, ode_solver_error, AugmentedOdeSolverMethod,
-    Context, DefaultDenseMatrix, DenseMatrix, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens,
-    OdeEquationsImplicitSens, OdeSolverStopReason, Op, SensEquations, Vector, VectorViewMut,
+    Context, DefaultDenseMatrix, DenseMatrix, MatrixCommon, NonLinearOp, NonLinearOpJacobian,
+    NonLinearOpSens, OdeEquationsImplicitSens, OdeSolverStopReason, Op, SensEquations, Vector,
+    VectorViewMut,
 };
 use num_traits::{One, Zero};
 use std::ops::AddAssign;
@@ -118,7 +119,7 @@ where
 
                         // Pin state (y, dy, t, s) to t_root via interpolation.
                         self.state_mut_back(t_root)?;
-                        // Populate local buffers from the pinned state for possible output writing.
+                        // Populate local buffers from the pinned state.
                         y.copy_from(self.state().y);
                         for (j, s_j) in s.iter_mut().enumerate() {
                             s_j.copy_from(&self.state().s[j]);
@@ -127,9 +128,71 @@ where
                         // ----- Handle reset at root index 0 -----
                         if root_idx == 0 {
                             if let Some(reset_fn) = self.problem().eqn.reset() {
+                                // Ensure capacity for two extra columns (pre + post reset).
+                                if col + 1 >= ret.ncols() {
+                                    let new_ncols = (col + 2).max(ret.ncols() * 2);
+                                    ret.resize_cols(new_ncols);
+                                    for rs in ret_sens.iter_mut() {
+                                        rs.resize_cols(new_ncols);
+                                    }
+                                }
+
+                                // Emit pre-reset column.
+                                if let Some(out) = self.problem().eqn.out() {
+                                    let tmp_nout = tmp_nout.as_mut().unwrap();
+                                    let tmp_nparams = tmp_nparms.as_mut().unwrap();
+                                    out.call_inplace(&y, t_root, tmp_nout);
+                                    ret.column_mut(col).copy_from(&*tmp_nout);
+                                    for (j, s_j) in s.iter_mut().enumerate() {
+                                        let mut col_v = ret_sens[j].column_mut(col);
+                                        tmp_nparams.set_index(j, Eqn::T::one());
+                                        out.jac_mul_inplace(&y, t_root, s_j, tmp_nout);
+                                        col_v.copy_from(&*tmp_nout);
+                                        out.sens_mul_inplace(&y, t_root, tmp_nparams, tmp_nout);
+                                        col_v.add_assign(&*tmp_nout);
+                                        tmp_nparams.set_index(j, Eqn::T::zero());
+                                    }
+                                } else {
+                                    ret.column_mut(col).copy_from(&y);
+                                    for (j, s_j) in s.iter().enumerate() {
+                                        ret_sens[j].column_mut(col).copy_from(s_j);
+                                    }
+                                }
+                                col += 1;
+
                                 // Apply reset: updates state.y, state.dy, and
                                 // s_new[j] = J_R(y_before, t_root) · s_old[j].
                                 self.state_mut_op_with_sens(&reset_fn)?;
+
+                                // Populate buffers with post-reset state.
+                                y.copy_from(self.state().y);
+                                for (j, s_j) in s.iter_mut().enumerate() {
+                                    s_j.copy_from(&self.state().s[j]);
+                                }
+
+                                // Emit post-reset column.
+                                if let Some(out) = self.problem().eqn.out() {
+                                    let tmp_nout = tmp_nout.as_mut().unwrap();
+                                    let tmp_nparams = tmp_nparms.as_mut().unwrap();
+                                    out.call_inplace(&y, t_root, tmp_nout);
+                                    ret.column_mut(col).copy_from(&*tmp_nout);
+                                    for (j, s_j) in s.iter_mut().enumerate() {
+                                        let mut col_v = ret_sens[j].column_mut(col);
+                                        tmp_nparams.set_index(j, Eqn::T::one());
+                                        out.jac_mul_inplace(&y, t_root, s_j, tmp_nout);
+                                        col_v.copy_from(&*tmp_nout);
+                                        out.sens_mul_inplace(&y, t_root, tmp_nparams, tmp_nout);
+                                        col_v.add_assign(&*tmp_nout);
+                                        tmp_nparams.set_index(j, Eqn::T::zero());
+                                    }
+                                } else {
+                                    ret.column_mut(col).copy_from(&y);
+                                    for (j, s_j) in s.iter().enumerate() {
+                                        ret_sens[j].column_mut(col).copy_from(s_j);
+                                    }
+                                }
+                                col += 1;
+
                                 self.set_stop_time(t_final)?;
                                 continue 'outer;
                             }

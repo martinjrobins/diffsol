@@ -1089,13 +1089,14 @@ mod tests {
     }
 
     /// Test that `solve_dense_sensitivities()` correctly handles a reset event:
+    /// - Emits a pre-reset column (y/s before the reset) and a post-reset column (y/s after).
     /// - Applies the reset to `y` and updates forward sensitivities via the reset Jacobian
     ///   (`s_new_j = J_R · s_old_j`).
     /// - Continues integration after the reset.
     /// - Truncates output when the non-reset stop root (index 1) fires.
     ///
-    /// `soln` must contain one solution point at `t_stop` with exact `y` and sensitivity
-    /// vectors for comparison.
+    /// `soln` must contain three solution points (pre-reset, post-reset, t_stop) with exact
+    /// `y` and sensitivity vectors for comparison.
     pub fn test_solve_dense_sensitivities_with_reset<'a, Eqn, Method>(
         mut solver: Method,
         soln: &OdeSolverSolution<Eqn::V>,
@@ -1104,8 +1105,8 @@ mod tests {
         Eqn::V: DefaultDenseMatrix,
         Method: SensitivitiesOdeSolverMethod<'a, Eqn>,
     {
-        let expected = &soln.solution_points[0];
-        let t_stop = expected.t;
+        // soln has 3 points: [0] pre-reset, [1] post-reset (both at t_root), [2] t_stop.
+        let t_stop = soln.solution_points[2].t;
 
         let n_steps = 20usize;
         let final_time = t_stop * Eqn::T::from_f64(2.0).unwrap();
@@ -1124,43 +1125,45 @@ mod tests {
             t_eval.len(),
         );
 
-        let n = expected.state.len();
+        let n = soln.solution_points[0].state.len();
         let ctx = soln.atol.context().clone();
-        let last_col = ncols - 1;
         let error_threshold = Eqn::T::from_f64(50.0).unwrap();
+        let sens_points = soln.sens_solution_points.as_ref().unwrap();
 
-        // Check the last column: y at t_stop.
-        let mut actual_y = Eqn::V::zeros(n, ctx.clone());
-        for j in 0..n {
-            actual_y.set_index(j, ret.get_index(j, last_col));
-        }
-        let error_y = actual_y - &expected.state;
-        let error_norm_y = error_y
-            .squared_norm(&expected.state, &soln.atol, soln.rtol)
-            .sqrt();
-        assert!(
-            error_norm_y < error_threshold,
-            "y at t_stop WRMS norm {error_norm_y:?} ≥ {error_threshold:?} (expected {:?})",
-            expected.state,
-        );
-
-        // Check sensitivities at the last column.
-        if let Some(sens_points) = soln.sens_solution_points.as_ref() {
-            for (param_j, sens_points_j) in sens_points.iter().enumerate() {
-                let expected_s = &sens_points_j[0].state;
-                let mut actual_s = Eqn::V::zeros(n, ctx.clone());
+        // For each of the 3 expected solution points, scan every column in `ret` and
+        // find the closest match (combined WRMS norm over y and all sensitivity vectors).
+        for (pt_idx, expected) in soln.solution_points.iter().enumerate() {
+            let mut best_norm = Eqn::T::from_f64(f64::MAX).unwrap();
+            for c in 0..ncols {
+                // y component
+                let mut actual_y = Eqn::V::zeros(n, ctx.clone());
                 for k in 0..n {
-                    actual_s.set_index(k, ret_sens[param_j].get_index(k, last_col));
+                    actual_y.set_index(k, ret.get_index(k, c));
                 }
-                let error_s = actual_s - expected_s;
-                let error_norm_s = error_s
-                    .squared_norm(expected_s, &soln.atol, soln.rtol)
-                    .sqrt();
-                assert!(
-                    error_norm_s < error_threshold,
-                    "sensitivity[{param_j}] at t_stop WRMS norm {error_norm_s:?} ≥ {error_threshold:?}",
-                );
+                let ey = actual_y - &expected.state;
+                let mut combined = ey.squared_norm(&expected.state, &soln.atol, soln.rtol);
+
+                // sensitivity components
+                for (param_j, sens_pts_j) in sens_points.iter().enumerate() {
+                    let expected_s = &sens_pts_j[pt_idx].state;
+                    let mut actual_s = Eqn::V::zeros(n, ctx.clone());
+                    for k in 0..n {
+                        actual_s.set_index(k, ret_sens[param_j].get_index(k, c));
+                    }
+                    let es = actual_s - expected_s;
+                    combined += es.squared_norm(expected_s, &soln.atol, soln.rtol);
+                }
+
+                let norm = combined.sqrt();
+                if norm < best_norm {
+                    best_norm = norm;
+                }
             }
+            assert!(
+                best_norm < error_threshold,
+                "solution point {pt_idx} not found in output; \
+                 best combined WRMS {best_norm:?} ≥ {error_threshold:?}",
+            );
         }
     }
 }
