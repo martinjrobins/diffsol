@@ -577,8 +577,91 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOp for DiffSlRe
 impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpJacobian
     for DiffSlReset<'_, M, CG>
 {
-    fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
+    fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        let tmp = self.0.context.tmp.borrow();
+        self.0.context.compiler.reset_grad(
+            t,
+            x.as_slice(),
+            v.as_slice(),
+            self.0.context.data.borrow_mut().as_slice(),
+            self.0.context.ddata.borrow_mut().as_mut_slice(),
+            tmp.as_slice(),
+            y.as_mut_slice(),
+        );
+    }
+}
+
+impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpAdjoint
+    for DiffSlReset<'_, M, CG>
+{
+    fn jac_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        // copy v to tmp2
+        let mut tmp2 = self.0.context.tmp2.borrow_mut();
+        tmp2.copy_from(v);
+        // zero out ddata
+        self.0.context.ddata.borrow_mut().fill(M::T::zero());
+        // zero y
         y.fill(M::T::zero());
+        self.0.context.compiler.reset_rgrad(
+            t,
+            x.as_slice(),
+            y.as_mut_slice(),
+            self.0.context.data.borrow().as_slice(),
+            self.0.context.ddata.borrow_mut().as_mut_slice(),
+            self.0.context.tmp.borrow().as_slice(),
+            tmp2.as_mut_slice(),
+        );
+        // negate y
+        y.mul_assign(Scale(-M::T::one()));
+    }
+}
+
+impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens
+    for DiffSlReset<'_, M, CG>
+{
+    fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        let tmp = self.0.context.tmp.borrow();
+        self.0.context.compiler.set_inputs(
+            v.as_slice(),
+            self.0.context.sens_data.borrow_mut().as_mut_slice(),
+            0u32,
+        );
+        self.0.context.compiler.reset_sgrad(
+            t,
+            x.as_slice(),
+            self.0.context.data.borrow_mut().as_slice(),
+            self.0.context.sens_data.borrow_mut().as_mut_slice(),
+            tmp.as_slice(),
+            y.as_mut_slice(),
+        );
+    }
+}
+
+impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSensAdjoint
+    for DiffSlReset<'_, M, CG>
+{
+    fn sens_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        let tmp = self.0.context.tmp.borrow();
+        // copy v to tmp2
+        let mut tmp2 = self.0.context.tmp2.borrow_mut();
+        tmp2.copy_from(v);
+        // zero out sens_data
+        self.0.context.sens_data.borrow_mut().fill(M::T::zero());
+        self.0.context.compiler.reset_srgrad(
+            t,
+            x.as_slice(),
+            self.0.context.data.borrow_mut().as_mut_slice(),
+            self.0.context.sens_data.borrow_mut().as_mut_slice(),
+            tmp.as_slice(),
+            tmp2.as_mut_slice(),
+        );
+        // get inputs
+        self.0.context.compiler.get_inputs(
+            y.as_mut_slice(),
+            self.0.context.sens_data.borrow().as_slice(),
+        );
+        // negate y
+        y.mul_assign(Scale(-M::T::one()));
     }
 }
 
