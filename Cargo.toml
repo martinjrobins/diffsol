@@ -32,3 +32,6 @@ ort-sys = { version = "=2.0.0-rc.10", default-features = false }
 [profile.profiling]
 inherits = "release"
 debug = true
+
+[patch.crates-io]
+diffsl = { path = "/home/mrobins/git/diffsl/diffsl" }

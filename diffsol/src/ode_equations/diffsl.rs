@@ -17,10 +17,10 @@ use diffsl::{
 
 use crate::{
     error::DiffsolError, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
-    op::nonlinear_op::NonLinearOpJacobian, op::ParameterisedOp, ConstantOp, ConstantOpSens,
+    op::nonlinear_op::NonLinearOpJacobian, ConstantOp, ConstantOpSens,
     ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix, MatrixHost, NonLinearOp,
     NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op,
-    Scale, UnitCallable, Vector, VectorHost,
+    Scale, Vector, VectorHost,
 };
 
 /// Context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
@@ -40,6 +40,7 @@ pub struct DiffSlContext<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
     nparams: usize,
     has_mass: bool,
     has_root: bool,
+    has_reset: bool,
     has_out: bool,
     nout: usize,
     ctx: M::C,
@@ -65,7 +66,7 @@ impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSlContext<M, ExternalModule
         let module = ExternalModule::default();
         let compiler = Compiler::from_codegen_module(module, mode)
             .map_err(|e| DiffsolError::DiffslCompilerError(e.to_string()))?;
-        let (nstates, nparams, nout, _ndata, nroots, has_mass) = compiler.get_dims();
+        let (nstates, nparams, nout, _ndata, nroots, has_mass, has_reset) = compiler.get_dims();
 
         let has_root = nroots > 0;
         let has_out = nout > 0;
@@ -92,6 +93,7 @@ impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSlContext<M, ExternalModule
             nout,
             has_mass,
             has_root,
+            has_reset,
             has_out,
             ctx,
             rhs_state_deps,
@@ -129,7 +131,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> Di
         let rhs_state_deps = model.take_rhs_state_deps();
         let rhs_input_deps = model.take_rhs_input_deps();
         let mass_state_deps = model.take_mass_state_deps();
-        let (nstates, nparams, nout, _ndata, nroots, has_mass) = compiler.get_dims();
+        let (nstates, nparams, nout, _ndata, nroots, has_mass, has_reset) = compiler.get_dims();
 
         let has_root = nroots > 0;
         let has_out = nout > 0;
@@ -156,6 +158,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> Di
             nout,
             has_mass,
             has_root,
+            has_reset,
             has_out,
             ctx,
             rhs_state_deps,
@@ -376,6 +379,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModuleJit + CodegenModuleCompile
 }
 
 pub struct DiffSlRoot<'a, M: Matrix<T: DiffSlScalar>, CG: CodegenModule>(&'a DiffSl<M, CG>);
+pub struct DiffSlReset<'a, M: Matrix<T: DiffSlScalar>, CG: CodegenModule>(&'a DiffSl<M, CG>);
 pub struct DiffSlOut<'a, M: Matrix<T: DiffSlScalar>, CG: CodegenModule>(&'a DiffSl<M, CG>);
 pub struct DiffSlRhs<'a, M: Matrix<T: DiffSlScalar>, CG: CodegenModule>(&'a DiffSl<M, CG>);
 pub struct DiffSlMass<'a, M: Matrix<T: DiffSlScalar>, CG: CodegenModule>(&'a DiffSl<M, CG>);
@@ -451,6 +455,26 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> Op for DiffSlRoot<'_, M, CG>
     }
 }
 
+impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> Op for DiffSlReset<'_, M, CG> {
+    type M = M;
+    type T = M::T;
+    type V = M::V;
+    type C = M::C;
+
+    fn nstates(&self) -> usize {
+        self.0.context.nstates
+    }
+    fn nout(&self) -> usize {
+        self.0.context.nstates
+    }
+    fn nparams(&self) -> usize {
+        self.0.context.nparams
+    }
+    fn context(&self) -> &Self::C {
+        &self.0.context.ctx
+    }
+}
+
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> Op for DiffSlOut<'_, M, CG> {
     type M = M;
     type T = M::T;
@@ -485,6 +509,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> ConstantOpSens for DiffS
         self.0.context.compiler.set_inputs(
             v.as_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
+            0u32,
         );
         self.0.context.compiler.set_u0_sgrad(
             self.0.context.tmp.borrow().as_slice(),
@@ -532,6 +557,25 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOp for DiffSlRo
 
 impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpJacobian
     for DiffSlRoot<'_, M, CG>
+{
+    fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
+        y.fill(M::T::zero());
+    }
+}
+
+impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOp for DiffSlReset<'_, M, CG> {
+    fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
+        self.0.context.compiler.reset(
+            t,
+            x.as_slice(),
+            self.0.context.data.borrow_mut().as_mut_slice(),
+            y.as_mut_slice(),
+        );
+    }
+}
+
+impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpJacobian
+    for DiffSlReset<'_, M, CG>
 {
     fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
         y.fill(M::T::zero());
@@ -599,6 +643,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for Diff
         self.0.context.compiler.set_inputs(
             v.as_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
+            0u32,
         );
         self.0.context.compiler.calc_out_sgrad(
             t,
@@ -723,6 +768,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for Diff
         self.0.context.compiler.set_inputs(
             v.as_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
+            0u32,
         );
         self.0.context.compiler.rhs_sgrad(
             t,
@@ -876,7 +922,7 @@ impl<'a, M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> OdeEquationsRef<'a> 
     type Root = DiffSlRoot<'a, M, CG>;
     type Init = DiffSlInit<'a, M, CG>;
     type Out = DiffSlOut<'a, M, CG>;
-    type Reset = ParameterisedOp<'a, UnitCallable<M>>;
+    type Reset = DiffSlReset<'a, M, CG>;
 }
 
 impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> OdeEquations for DiffSl<M, CG> {
@@ -900,11 +946,15 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> OdeEquations for DiffSl<
         self.context.has_out.then_some(DiffSlOut(self))
     }
 
+    fn reset(&self) -> Option<DiffSlReset<'_, M, CG>> {
+        self.context.has_reset.then_some(DiffSlReset(self))
+    }
+
     fn set_params(&mut self, p: &Self::V) {
         // set the parameters in data
         self.context
             .compiler
-            .set_inputs(p.as_slice(), self.context.data.borrow_mut().as_mut_slice());
+            .set_inputs(p.as_slice(), self.context.data.borrow_mut().as_mut_slice(), 0u32);
 
         // set_u0 will calculate all the constants in the equations based on the params
         let mut dummy = M::V::zeros(self.context.nstates, self.context().clone());
