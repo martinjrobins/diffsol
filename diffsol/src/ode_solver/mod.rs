@@ -31,13 +31,15 @@ mod tests {
     use crate::{
         op::OpStatistics, AdjointOdeSolverMethod, Context, DenseMatrix, MatrixCommon, MatrixRef,
         NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
-        OdeEquationsRef, OdeSolverConfig, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-        OdeSolverStopReason, Scale, VectorRef, VectorView, VectorViewMut,
+        OdeEquationsImplicitSens, OdeEquationsRef, OdeSolverConfig, OdeSolverMethod,
+        OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Scale, VectorRef, VectorView,
+        VectorViewMut,
     };
     use crate::{
         ConstantOp, ConstantOpSens, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp,
         NonLinearOpSens, Op, Vector,
     };
+    use crate::ode_solver::sensitivities::SensitivitiesOdeSolverMethod;
     use num_traits::{FromPrimitive, One, Zero};
 
     pub fn test_ode_solver<'a, M, Eqn, Method>(
@@ -1084,5 +1086,81 @@ mod tests {
              WRMS norm {error_norm:?} ≥ {error_threshold:?}",
             t_stop,
         );
+    }
+
+    /// Test that `solve_dense_sensitivities()` correctly handles a reset event:
+    /// - Applies the reset to `y` and updates forward sensitivities via the reset Jacobian
+    ///   (`s_new_j = J_R · s_old_j`).
+    /// - Continues integration after the reset.
+    /// - Truncates output when the non-reset stop root (index 1) fires.
+    ///
+    /// `soln` must contain one solution point at `t_stop` with exact `y` and sensitivity
+    /// vectors for comparison.
+    pub fn test_solve_dense_sensitivities_with_reset<'a, Eqn, Method>(
+        mut solver: Method,
+        soln: &OdeSolverSolution<Eqn::V>,
+    ) where
+        Eqn: OdeEquationsImplicitSens + 'a,
+        Eqn::V: DefaultDenseMatrix,
+        Method: SensitivitiesOdeSolverMethod<'a, Eqn>,
+    {
+        let expected = &soln.solution_points[0];
+        let t_stop = expected.t;
+
+        let n_steps = 20usize;
+        let final_time = t_stop * Eqn::T::from_f64(2.0).unwrap();
+        let dt = final_time / Eqn::T::from_f64(n_steps as f64).unwrap();
+        let t_eval: Vec<Eqn::T> = (0..=n_steps)
+            .map(|i| dt * Eqn::T::from_f64(i as f64).unwrap())
+            .collect();
+
+        let (ret, ret_sens) = solver.solve_dense_sensitivities(&t_eval).unwrap();
+        let ncols = ret.ncols();
+
+        // The stop root fires before the final t_eval → output must be truncated.
+        assert!(
+            ncols < t_eval.len(),
+            "expected early stop: ncols ({ncols}) should be < t_eval.len() ({})",
+            t_eval.len(),
+        );
+
+        let n = expected.state.len();
+        let ctx = soln.atol.context().clone();
+        let last_col = ncols - 1;
+        let error_threshold = Eqn::T::from_f64(50.0).unwrap();
+
+        // Check the last column: y at t_stop.
+        let mut actual_y = Eqn::V::zeros(n, ctx.clone());
+        for j in 0..n {
+            actual_y.set_index(j, ret.get_index(j, last_col));
+        }
+        let error_y = actual_y - &expected.state;
+        let error_norm_y = error_y
+            .squared_norm(&expected.state, &soln.atol, soln.rtol)
+            .sqrt();
+        assert!(
+            error_norm_y < error_threshold,
+            "y at t_stop WRMS norm {error_norm_y:?} ≥ {error_threshold:?} (expected {:?})",
+            expected.state,
+        );
+
+        // Check sensitivities at the last column.
+        if let Some(sens_points) = soln.sens_solution_points.as_ref() {
+            for (param_j, sens_points_j) in sens_points.iter().enumerate() {
+                let expected_s = &sens_points_j[0].state;
+                let mut actual_s = Eqn::V::zeros(n, ctx.clone());
+                for k in 0..n {
+                    actual_s.set_index(k, ret_sens[param_j].get_index(k, last_col));
+                }
+                let error_s = actual_s - expected_s;
+                let error_norm_s = error_s
+                    .squared_norm(expected_s, &soln.atol, soln.rtol)
+                    .sqrt();
+                assert!(
+                    error_norm_s < error_threshold,
+                    "sensitivity[{param_j}] at t_stop WRMS norm {error_norm_s:?} ≥ {error_threshold:?}",
+                );
+            }
+        }
     }
 }

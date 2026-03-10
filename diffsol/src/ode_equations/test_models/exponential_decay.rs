@@ -635,6 +635,131 @@ pub fn exponential_decay_with_two_roots_problem<M: MatrixHost + 'static>() -> (
     (problem, soln)
 }
 
+// ------------------------------------------------------------------
+// Exponential-decay problem with Reset (R(y) = y + 2) and forward
+// sensitivity equations. Because J_R = I the sensitivity vectors
+// are invariant through the reset; integration restarts from the
+// same sensitivity values but from the new state y + 2.
+//
+// Root 0: y[0] - 0.6  (reset trigger, fires at t_root = 10·ln(5/3) ≈ 5.108)
+// Root 1: y[0] - 2.0  (stop condition, fires at t_stop ≈ 7.732)
+// Reset:  y → y + 2   (component-wise; y_new = [2.6, 2.6])
+//
+// Root 0 would fire a second time at t_root + 10·ln(13/3) ≈ 19.7,
+// which is far beyond t_stop — so only one reset occurs.
+// ------------------------------------------------------------------
+
+fn exponential_decay_reset_y_plus_2<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+    // R(y) = y + 2  (component-wise)
+    let nstates = 2;
+    for i in 0..nstates {
+        y.set_index(i, x.get_index(i) + M::T::from_f64(2.0).unwrap());
+    }
+}
+
+fn exponential_decay_reset_y_plus_2_jac<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    v: &M::V,
+    y: &mut M::V,
+) {
+    // J_R = I  →  J_R · v = v
+    y.copy_from(v);
+}
+
+fn exponential_decay_root_0_6_and_2_0<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+    // Root 0: y[0] = 0.6  (reset trigger)
+    y.set_index(0, x.get_index(0) - M::T::from_f64(0.6).unwrap());
+    // Root 1: y[0] = 2.0  (stop; fires after reset when y decays from 2.6 to 2.0)
+    y.set_index(1, x.get_index(0) - M::T::from_f64(2.0).unwrap());
+}
+
+/// Exponential decay with a root-triggered reset **and** forward sensitivity equations.
+///
+/// `dy/dt = -k·y`, `y(0) = [y0, y0]`, `p = [k, y0] = [0.1, 1.0]`, 2 states, 2 params.
+///
+/// At t_root ≈ 5.108 root 0 fires; the reset `R(y) = y + 2` maps `[0.6, 0.6] → [2.6, 2.6]`.
+/// Because `J_R = I`, the forward sensitivities ∂y/∂k and ∂y/∂y₀ are unchanged by the reset.
+/// Integration then continues until root 1 fires at t_stop ≈ 7.732 when `y[0] = 2.0`.
+///
+/// Returns the problem with a single solution point at t_stop containing the exact y and
+/// sensitivity vectors for comparison.
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
+    OdeSolverProblem<impl OdeEquationsImplicitSens<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverSolution<M::V>,
+) {
+    let problem = OdeBuilder::<M>::new()
+        .p([0.1, 1.0])
+        .sens_rtol(1e-6)
+        .sens_atol([1e-6, 1e-6])
+        .rhs_sens_implicit(
+            exponential_decay::<M>,
+            exponential_decay_jacobian::<M>,
+            exponential_decay_sens::<M>,
+        )
+        .init_sens(
+            exponential_decay_init::<M>,
+            exponential_decay_init_sens::<M>,
+            2,
+        )
+        .root(exponential_decay_root_0_6_and_2_0::<M>, 2)
+        .reset_implicit(
+            exponential_decay_reset_y_plus_2::<M>,
+            exponential_decay_reset_y_plus_2_jac::<M>,
+        )
+        .build()
+        .unwrap();
+
+    // t_root: y[0] = exp(-0.1·t) = 0.6  →  t_root = 10·ln(5/3)
+    let t_root = M::T::from_f64(10.0 * (5.0_f64 / 3.0_f64).ln()).unwrap();
+    // dt to stop: 2.6·exp(-0.1·dt) = 2.0  →  dt = 10·ln(1.3)
+    let dt = M::T::from_f64(10.0 * 1.3_f64.ln()).unwrap();
+    let t_stop = t_root + dt;
+
+    // y at t_stop: both components = 2.0 (by construction of root 1)
+    let y0 = problem.eqn.init().call(M::T::zero());
+    let ctx = y0.context().clone();
+    let y_stop = M::V::from_element(2, M::T::from_f64(2.0).unwrap(), ctx.clone());
+
+    // ---------------------------------------------------------------
+    // Exact sensitivities at t_stop
+    //
+    // J_R = I  →  s_new = s_old at the reset.  Post-reset base state
+    // is y_new(t) = 2.6·exp(−k·τ) where τ = t − t_root.
+    //
+    // Sensitivity w.r.t. k:
+    //   ds_k/dτ = −k·s_k − y_new(τ)   (from d/dk of F = −k·y)
+    //   Initial:  s_k(0) = −t_root · 0.6
+    //   Solution: s_k(τ) = exp(−k·τ)·(s_k(0) − 2.6·τ)
+    //   At τ=dt: exp(−k·dt) = 10/13  and  2.6·dt = 26·ln(1.3)
+    //   → s_k_i = −(10/13)·(6·ln(5/3) + 26·ln(1.3))
+    //
+    // Sensitivity w.r.t. y0:
+    //   ds_y0/dτ = −k·s_y0   (∂F/∂y0 = 0)
+    //   Initial:  s_y0(0) = exp(−k·t_root) = 0.6
+    //   → s_y0_i = 0.6·exp(−k·dt) = 0.6·(10/13) = 6/13
+    // ---------------------------------------------------------------
+    let exp_neg_k_dt = M::T::from_f64(10.0 / 13.0).unwrap();
+    let s_k_val = -exp_neg_k_dt
+        * (M::T::from_f64(6.0).unwrap() * M::T::from_f64((5.0_f64 / 3.0_f64).ln()).unwrap()
+            + M::T::from_f64(26.0).unwrap() * M::T::from_f64(1.3_f64.ln()).unwrap());
+    let s_y0_val = M::T::from_f64(0.6 * 10.0 / 13.0).unwrap();
+
+    let s_k = M::V::from_element(2, s_k_val, ctx.clone());
+    let s_y0 = M::V::from_element(2, s_y0_val, ctx);
+
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
+    soln.push_sens(y_stop, t_stop, &[s_k, s_y0]);
+
+    (problem, soln)
+}
+
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "diffsl-llvm")]

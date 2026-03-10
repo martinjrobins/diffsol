@@ -50,18 +50,12 @@ where
             (None, None, self.problem().eqn.rhs().nout())
         };
 
-        let mut y = Eqn::V::zeros(
-            self.problem().eqn.rhs().nstates(),
-            self.problem().context().clone(),
-        );
+        let nstates = self.problem().eqn.rhs().nstates();
+        let nparams = self.problem().eqn.rhs().nparams();
+        let ctx = self.problem().context().clone();
 
-        let mut s = vec![
-            Eqn::V::zeros(
-                self.problem().eqn.rhs().nstates(),
-                self.problem().context().clone(),
-            );
-            self.problem().eqn.rhs().nparams()
-        ];
+        let mut y = Eqn::V::zeros(nstates, ctx.clone());
+        let mut s = vec![Eqn::V::zeros(nstates, ctx.clone()); nparams];
 
         let mut ret = self
             .problem()
@@ -71,77 +65,139 @@ where
             self.problem()
                 .context()
                 .dense_mat_zeros::<Eqn::V>(nrows, t_eval.len());
-            self.problem().eqn.rhs().nparams()
+            nparams
         ];
 
-        // check t_eval is increasing and all values are greater than or equal to the current time
+        // check t_eval is increasing and all values are >= the current time
         let t0 = self.state().t;
         if t_eval.windows(2).any(|w| w[0] > w[1] || w[0] < t0) {
             return Err(ode_solver_error!(InvalidTEval));
         }
 
-        // do loop
-        self.set_stop_time(t_eval[t_eval.len() - 1])?;
-        let mut step_reason = OdeSolverStopReason::InternalTimestep;
-        for (i, t) in t_eval.iter().take(t_eval.len() - 1).enumerate() {
-            while self.state().t < *t {
-                step_reason = self.step()?;
+        let t_final = *t_eval.last().unwrap();
+        self.set_stop_time(t_final)?;
+
+        let mut col = 0usize;
+        let mut t_i = 0usize;
+
+        'outer: while t_i < t_eval.len() {
+            let t_target = t_eval[t_i];
+
+            while self.state().t < t_target {
+                match self.step()? {
+                    OdeSolverStopReason::InternalTimestep => {}
+                    OdeSolverStopReason::TstopReached => break,
+                    OdeSolverStopReason::RootFound(t_root, root_idx) => {
+                        // ----- write t_eval points strictly before t_root -----
+                        while t_i < t_eval.len() && t_eval[t_i] < t_root {
+                            self.interpolate_inplace(t_eval[t_i], &mut y)?;
+                            self.interpolate_sens_inplace(t_eval[t_i], &mut s)?;
+                            if let Some(out) = self.problem().eqn.out() {
+                                let tmp_nout = tmp_nout.as_mut().unwrap();
+                                let tmp_nparams = tmp_nparms.as_mut().unwrap();
+                                out.call_inplace(&y, t_eval[t_i], tmp_nout);
+                                ret.column_mut(col).copy_from(&*tmp_nout);
+                                for (j, s_j) in s.iter_mut().enumerate() {
+                                    let mut col_v = ret_sens[j].column_mut(col);
+                                    tmp_nparams.set_index(j, Eqn::T::one());
+                                    out.jac_mul_inplace(&y, t_eval[t_i], s_j, tmp_nout);
+                                    col_v.copy_from(&*tmp_nout);
+                                    out.sens_mul_inplace(&y, t_eval[t_i], tmp_nparams, tmp_nout);
+                                    col_v.add_assign(&*tmp_nout);
+                                    tmp_nparams.set_index(j, Eqn::T::zero());
+                                }
+                            } else {
+                                ret.column_mut(col).copy_from(&y);
+                                for (j, s_j) in s.iter().enumerate() {
+                                    ret_sens[j].column_mut(col).copy_from(s_j);
+                                }
+                            }
+                            col += 1;
+                            t_i += 1;
+                        }
+
+                        // Pin state (y, dy, t, s) to t_root via interpolation.
+                        self.state_mut_back(t_root)?;
+                        // Populate local buffers from the pinned state for possible output writing.
+                        y.copy_from(self.state().y);
+                        for (j, s_j) in s.iter_mut().enumerate() {
+                            s_j.copy_from(&self.state().s[j]);
+                        }
+
+                        // ----- Handle reset at root index 0 -----
+                        if root_idx == 0 {
+                            if let Some(reset_fn) = self.problem().eqn.reset() {
+                                // Apply reset: updates state.y, state.dy, and
+                                // s_new[j] = J_R(y_before, t_root) · s_old[j].
+                                self.state_mut_op_with_sens(&reset_fn)?;
+                                self.set_stop_time(t_final)?;
+                                continue 'outer;
+                            }
+                        }
+
+                        // ----- Non-reset root: write root state and return early -----
+                        // y and s are already interpolated at t_root
+                        if let Some(out) = self.problem().eqn.out() {
+                            let tmp_nout = tmp_nout.as_mut().unwrap();
+                            let tmp_nparams = tmp_nparms.as_mut().unwrap();
+                            out.call_inplace(&y, t_root, tmp_nout);
+                            ret.column_mut(col).copy_from(&*tmp_nout);
+                            for (j, s_j) in s.iter_mut().enumerate() {
+                                let mut col_v = ret_sens[j].column_mut(col);
+                                tmp_nparams.set_index(j, Eqn::T::one());
+                                out.jac_mul_inplace(&y, t_root, s_j, tmp_nout);
+                                col_v.copy_from(&*tmp_nout);
+                                out.sens_mul_inplace(&y, t_root, tmp_nparams, tmp_nout);
+                                col_v.add_assign(&*tmp_nout);
+                                tmp_nparams.set_index(j, Eqn::T::zero());
+                            }
+                        } else {
+                            ret.column_mut(col).copy_from(&y);
+                            for (j, s_j) in s.iter().enumerate() {
+                                ret_sens[j].column_mut(col).copy_from(s_j);
+                            }
+                        }
+                        col += 1;
+                        ret.resize_cols(col);
+                        for rs in ret_sens.iter_mut() {
+                            rs.resize_cols(col);
+                        }
+                        return Ok((ret, ret_sens));
+                    }
+                }
             }
-            self.interpolate_inplace(*t, &mut y)?;
-            self.interpolate_sens_inplace(*t, &mut s)?;
+
+            // Write t_eval[t_i] to output using interpolation
+            self.interpolate_inplace(t_target, &mut y)?;
+            self.interpolate_sens_inplace(t_target, &mut s)?;
             if let Some(out) = self.problem().eqn.out() {
                 let tmp_nout = tmp_nout.as_mut().unwrap();
                 let tmp_nparams = tmp_nparms.as_mut().unwrap();
-                out.call_inplace(&y, *t, tmp_nout);
-                ret.column_mut(i).copy_from(tmp_nout);
+                out.call_inplace(&y, t_target, tmp_nout);
+                ret.column_mut(col).copy_from(&*tmp_nout);
                 for (j, s_j) in s.iter_mut().enumerate() {
-                    // compute J * s_j + dF/dp * e_j where e_j is the jth basis vector
-                    let mut ret_sens = ret_sens[j].column_mut(i);
+                    let mut col_v = ret_sens[j].column_mut(col);
                     tmp_nparams.set_index(j, Eqn::T::one());
-                    out.jac_mul_inplace(&y, *t, s_j, tmp_nout);
-                    ret_sens.copy_from(tmp_nout);
-                    out.sens_mul_inplace(&y, *t, tmp_nparams, tmp_nout);
-                    ret_sens.add_assign(&*tmp_nout);
+                    out.jac_mul_inplace(&y, t_target, s_j, tmp_nout);
+                    col_v.copy_from(&*tmp_nout);
+                    out.sens_mul_inplace(&y, t_target, tmp_nparams, tmp_nout);
+                    col_v.add_assign(&*tmp_nout);
                     tmp_nparams.set_index(j, Eqn::T::zero());
                 }
             } else {
-                ret.column_mut(i).copy_from(&y);
+                ret.column_mut(col).copy_from(&y);
                 for (j, s_j) in s.iter().enumerate() {
-                    ret_sens[j].column_mut(i).copy_from(s_j);
+                    ret_sens[j].column_mut(col).copy_from(s_j);
                 }
             }
+            col += 1;
+            t_i += 1;
         }
 
-        // do final step
-        while step_reason != OdeSolverStopReason::TstopReached {
-            step_reason = self.step()?;
+        ret.resize_cols(col);
+        for rs in ret_sens.iter_mut() {
+            rs.resize_cols(col);
         }
-        let y = self.state().y;
-        let s = self.state().s;
-        let i = t_eval.len() - 1;
-        let t = t_eval.last().unwrap();
-        if let Some(out) = self.problem().eqn.out() {
-            let tmp_nout = tmp_nout.as_mut().unwrap();
-            let tmp_nparams = tmp_nparms.as_mut().unwrap();
-            out.call_inplace(y, *t, tmp_nout);
-            ret.column_mut(i).copy_from(tmp_nout);
-            for (j, s_j) in s.iter().enumerate() {
-                // compute J * s_j + dF/dp * e_j where e_j is the jth basis vector
-                let mut ret_sens = ret_sens[j].column_mut(i);
-                tmp_nparams.set_index(j, Eqn::T::one());
-                out.jac_mul_inplace(y, *t, s_j, tmp_nout);
-                ret_sens.copy_from(tmp_nout);
-                out.sens_mul_inplace(y, *t, tmp_nparams, tmp_nout);
-                ret_sens.add_assign(&*tmp_nout);
-                tmp_nparams.set_index(j, Eqn::T::zero());
-            }
-        } else {
-            ret.column_mut(i).copy_from(y);
-            for (j, s_j) in s.iter().enumerate() {
-                ret_sens[j].column_mut(i).copy_from(s_j);
-            }
-        }
-
         Ok((ret, ret_sens))
     }
 }

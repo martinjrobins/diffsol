@@ -2311,4 +2311,14 @@ mod test {
         let solver = problem.bdf::<LS>().unwrap();
         test_solve_dense_with_reset(solver, &soln);
     }
+
+    /// Test that `solve_dense_sensitivities()` correctly handles a reset event for BDF.
+    #[test]
+    fn test_solve_dense_sensitivities_with_reset_bdf() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem_sens;
+        use crate::ode_solver::tests::test_solve_dense_sensitivities_with_reset;
+        let (problem, soln) = exponential_decay_with_reset_problem_sens::<M>();
+        let solver = problem.bdf_sens::<LS>().unwrap();
+        test_solve_dense_sensitivities_with_reset(solver, &soln);
+    }
 }

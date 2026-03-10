@@ -5,8 +5,9 @@ use crate::{
     ode_solver_error,
     scalar::Scalar,
     AugmentedOdeEquations, Checkpointing, Context, DefaultDenseMatrix, DenseMatrix,
-    HermiteInterpolator, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverConfig,
-    OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut, Vector, VectorViewMut,
+    HermiteInterpolator, MatrixCommon, NonLinearOp, NonLinearOpJacobian, OdeEquations,
+    OdeSolverConfig, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut, Vector,
+    VectorViewMut,
 };
 #[derive(Debug, PartialEq)]
 pub enum OdeSolverStopReason<T: Scalar> {
@@ -159,9 +160,11 @@ where
 
     /// Apply a non-linear operator to the current state in-place, replacing `state.y` with
     /// `op(state.y, state.t)`. The current time and state vector are read from the solver state,
-    /// and the result is written back to `state.y`. `state.dy` is also updated to `rhs(state.y, state.t)`
-    /// 
-    /// Note: mass matrix is not supported for this operation, and will return an error if the problem has a mass matrix
+    /// and the result is written back to `state.y`. `state.dy` is also updated to
+    /// `rhs(state.y, state.t)`.
+    ///
+    /// Note: mass matrix is not supported for this operation, and will return an error if the
+    /// problem has a mass matrix.
     fn state_mut_op<O>(&mut self, op: &O) -> Result<(), DiffsolError>
     where
         O: NonLinearOp<T = Eqn::T, V = Eqn::V, M = Eqn::M>,
@@ -170,7 +173,6 @@ where
         let mut y_out = Eqn::V::zeros(nstates, self.problem().context().clone());
         op.call_inplace(self.state().y, self.state().t, &mut y_out);
         self.state_mut().y.copy_from(&y_out);
-        
         // only support identity mass matrix for now
         if self.problem().eqn.mass().is_some() {
             return Err(ode_solver_error!(MassMatrixNotSupported));
@@ -180,14 +182,60 @@ where
         Ok(())
     }
 
+    /// Like [`state_mut_op`], but also updates each sensitivity vector in the state via the
+    /// Jacobian of `op`: `s_new[j] = J_op(y_before, t) · s_old[j]`.
+    ///
+    /// This variant requires `O: NonLinearOpJacobian` so that the Jacobian-vector product is
+    /// available.  Use it when the equation type guarantees the reset operator implements
+    /// `NonLinearOpJacobian` (e.g. when `Eqn: OdeEquationsImplicitSens`).
+    ///
+    /// Note: mass matrix is not supported for this operation.
+    fn state_mut_op_with_sens<O>(&mut self, op: &O) -> Result<(), DiffsolError>
+    where
+        O: NonLinearOpJacobian<T = Eqn::T, V = Eqn::V, M = Eqn::M>,
+    {
+        let nstates = self.problem().eqn.rhs().nstates();
+        let ctx = self.problem().context().clone();
+        let mut y_out = Eqn::V::zeros(nstates, ctx.clone());
+
+        // Capture y and s before applying the operator (needed for Jacobian evaluation).
+        let y_before = self.state().y.clone();
+        let t = self.state().t;
+        let nparams = self.state().s.len();
+        let s_before: Vec<Eqn::V> = (0..nparams)
+            .map(|j| self.state().s[j].clone())
+            .collect();
+
+        op.call_inplace(&y_before, t, &mut y_out);
+        self.state_mut().y.copy_from(&y_out);
+
+        // only support identity mass matrix for now
+        if self.problem().eqn.mass().is_some() {
+            return Err(ode_solver_error!(MassMatrixNotSupported));
+        }
+        self.problem().eqn.rhs().call_inplace(self.state().y, t, &mut y_out);
+        self.state_mut().dy.copy_from(&y_out);
+
+        // s_new[j] = J_op(y_before, t) · s_old[j]
+        let mut s_new_j = Eqn::V::zeros(nstates, ctx);
+        for (j, s_old_j) in s_before.iter().enumerate() {
+            op.jac_mul_inplace(&y_before, t, s_old_j, &mut s_new_j);
+            self.state_mut().s[j].copy_from(&s_new_j);
+        }
+
+        Ok(())
+    }
+
     /// Move the solver state back to time `t` by interpolating `y`, `dy`, and (if
     /// `integrate_out` is set) `g` to that time and writing them into the current state.
+    /// If the state contains sensitivity vectors they are also interpolated to time `t`.
     /// This is typically called after a root is found to pin the state to the root time.
     fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError> {
         let nstates = self.problem().eqn.rhs().nstates();
-        let mut y = Eqn::V::zeros(nstates, self.problem().context().clone());
+        let ctx = self.problem().context().clone();
+        let mut y = Eqn::V::zeros(nstates, ctx.clone());
         self.interpolate_inplace(t, &mut y)?;
-        let mut dy = Eqn::V::zeros(nstates, self.problem().context().clone());
+        let mut dy = Eqn::V::zeros(nstates, ctx.clone());
         self.interpolate_dy_inplace(t, &mut dy)?;
         let g = if self.problem().integrate_out {
             let mut g = self.state().g.clone();
@@ -196,12 +244,24 @@ where
         } else {
             None
         };
+        // Interpolate sensitivity vectors if the state has them.
+        let nparams = self.state().s.len();
+        let s_interp: Vec<Eqn::V> = if nparams > 0 {
+            let mut s = vec![Eqn::V::zeros(nstates, ctx); nparams];
+            self.interpolate_sens_inplace(t, &mut s)?;
+            s
+        } else {
+            vec![]
+        };
         let state = self.state_mut();
         state.y.copy_from(&y);
         state.dy.copy_from(&dy);
         *state.t = t;
         if let Some(g) = g.as_ref() {
             state.g.copy_from(g);
+        }
+        for (j, s_j) in s_interp.iter().enumerate() {
+            state.s[j].copy_from(s_j);
         }
         Ok(())
     }

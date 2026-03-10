@@ -337,6 +337,7 @@ pub trait OdeEquationsImplicitSens:
     Out: NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
              + NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
     Init: ConstantOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Reset: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
 >
 {
 }
@@ -347,6 +348,7 @@ impl<T> OdeEquationsImplicitSens for T where
         Out: NonLinearOpSens<M = T::M, V = T::V, T = T::T, C = T::C>
                  + NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>,
         Init: ConstantOpSens<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Reset: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>,
     >
 {
 }
