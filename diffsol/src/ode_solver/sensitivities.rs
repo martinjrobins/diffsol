@@ -54,6 +54,7 @@ where
         let nstates = self.problem().eqn.rhs().nstates();
         let nparams = self.problem().eqn.rhs().nparams();
         let ctx = self.problem().context().clone();
+        let eqn_out = self.problem().eqn.out();
 
         let mut y = Eqn::V::zeros(nstates, ctx.clone());
         let mut s = vec![Eqn::V::zeros(nstates, ctx.clone()); nparams];
@@ -81,6 +82,39 @@ where
         let mut col = 0usize;
         let mut t_i = 0usize;
 
+        // Write one column of (y, s) output at time t into ret/ret_sens[col].
+        // ret, ret_sens, and col are passed explicitly so they remain directly accessible
+        // outside the closure (avoiding borrow conflicts with resize/return).
+        let mut write_col = |y: &Eqn::V,
+                              s: &[Eqn::V],
+                              t: Eqn::T,
+                              col: usize,
+                              ret: &mut <Eqn::V as DefaultDenseMatrix>::M,
+                              ret_sens: &mut [<Eqn::V as DefaultDenseMatrix>::M]|
+         -> Result<(), DiffsolError> {
+            if let Some(out) = eqn_out.as_ref() {
+                let tmp_nout = tmp_nout.as_mut().unwrap();
+                let tmp_nparams = tmp_nparms.as_mut().unwrap();
+                out.call_inplace(y, t, tmp_nout);
+                ret.column_mut(col).copy_from(&*tmp_nout);
+                for (j, s_j) in s.iter().enumerate() {
+                    let mut col_v = ret_sens[j].column_mut(col);
+                    tmp_nparams.set_index(j, Eqn::T::one());
+                    out.jac_mul_inplace(y, t, s_j, tmp_nout);
+                    col_v.copy_from(&*tmp_nout);
+                    out.sens_mul_inplace(y, t, tmp_nparams, tmp_nout);
+                    col_v.add_assign(&*tmp_nout);
+                    tmp_nparams.set_index(j, Eqn::T::zero());
+                }
+            } else {
+                ret.column_mut(col).copy_from(y);
+                for (j, s_j) in s.iter().enumerate() {
+                    ret_sens[j].column_mut(col).copy_from(s_j);
+                }
+            }
+            Ok(())
+        };
+
         'outer: while t_i < t_eval.len() {
             let t_target = t_eval[t_i];
 
@@ -89,137 +123,31 @@ where
                     OdeSolverStopReason::InternalTimestep => {}
                     OdeSolverStopReason::TstopReached => break,
                     OdeSolverStopReason::RootFound(t_root, root_idx) => {
-                        // ----- write t_eval points strictly before t_root -----
+                        // Write any t_eval points strictly before t_root.
                         while t_i < t_eval.len() && t_eval[t_i] < t_root {
                             self.interpolate_inplace(t_eval[t_i], &mut y)?;
                             self.interpolate_sens_inplace(t_eval[t_i], &mut s)?;
-                            if let Some(out) = self.problem().eqn.out() {
-                                let tmp_nout = tmp_nout.as_mut().unwrap();
-                                let tmp_nparams = tmp_nparms.as_mut().unwrap();
-                                out.call_inplace(&y, t_eval[t_i], tmp_nout);
-                                ret.column_mut(col).copy_from(&*tmp_nout);
-                                for (j, s_j) in s.iter_mut().enumerate() {
-                                    let mut col_v = ret_sens[j].column_mut(col);
-                                    tmp_nparams.set_index(j, Eqn::T::one());
-                                    out.jac_mul_inplace(&y, t_eval[t_i], s_j, tmp_nout);
-                                    col_v.copy_from(&*tmp_nout);
-                                    out.sens_mul_inplace(&y, t_eval[t_i], tmp_nparams, tmp_nout);
-                                    col_v.add_assign(&*tmp_nout);
-                                    tmp_nparams.set_index(j, Eqn::T::zero());
-                                }
-                            } else {
-                                ret.column_mut(col).copy_from(&y);
-                                for (j, s_j) in s.iter().enumerate() {
-                                    ret_sens[j].column_mut(col).copy_from(s_j);
-                                }
-                            }
+                            write_col(&y, &s, t_eval[t_i], col, &mut ret, &mut ret_sens)?;
                             col += 1;
                             t_i += 1;
                         }
 
-                        // Pin state (y, dy, t, s) to t_root via interpolation.
                         self.state_mut_back(t_root)?;
-                        // Populate local buffers from the pinned state.
-                        y.copy_from(self.state().y);
-                        for (j, s_j) in s.iter_mut().enumerate() {
-                            s_j.copy_from(&self.state().s[j]);
-                        }
 
-                        // ----- Handle reset at root index 0 -----
                         if root_idx == 0 {
                             if let Some(reset_fn) = self.problem().eqn.reset() {
-                                // Ensure capacity for two extra columns (pre + post reset).
-                                if col + 1 >= ret.ncols() {
-                                    let new_ncols = (col + 2).max(ret.ncols() * 2);
-                                    ret.resize_cols(new_ncols);
-                                    for rs in ret_sens.iter_mut() {
-                                        rs.resize_cols(new_ncols);
-                                    }
-                                }
-
-                                // Emit pre-reset column.
-                                if let Some(out) = self.problem().eqn.out() {
-                                    let tmp_nout = tmp_nout.as_mut().unwrap();
-                                    let tmp_nparams = tmp_nparms.as_mut().unwrap();
-                                    out.call_inplace(&y, t_root, tmp_nout);
-                                    ret.column_mut(col).copy_from(&*tmp_nout);
-                                    for (j, s_j) in s.iter_mut().enumerate() {
-                                        let mut col_v = ret_sens[j].column_mut(col);
-                                        tmp_nparams.set_index(j, Eqn::T::one());
-                                        out.jac_mul_inplace(&y, t_root, s_j, tmp_nout);
-                                        col_v.copy_from(&*tmp_nout);
-                                        out.sens_mul_inplace(&y, t_root, tmp_nparams, tmp_nout);
-                                        col_v.add_assign(&*tmp_nout);
-                                        tmp_nparams.set_index(j, Eqn::T::zero());
-                                    }
-                                } else {
-                                    ret.column_mut(col).copy_from(&y);
-                                    for (j, s_j) in s.iter().enumerate() {
-                                        ret_sens[j].column_mut(col).copy_from(s_j);
-                                    }
-                                }
-                                col += 1;
-
-                                // Apply reset: updates state.y, state.dy, and
-                                // s_new[j] = J_R(y_before, t_root) · s_old[j].
                                 self.state_mut_op_with_sens(&reset_fn)?;
-
-                                // Populate buffers with post-reset state.
-                                y.copy_from(self.state().y);
-                                for (j, s_j) in s.iter_mut().enumerate() {
-                                    s_j.copy_from(&self.state().s[j]);
-                                }
-
-                                // Emit post-reset column.
-                                if let Some(out) = self.problem().eqn.out() {
-                                    let tmp_nout = tmp_nout.as_mut().unwrap();
-                                    let tmp_nparams = tmp_nparms.as_mut().unwrap();
-                                    out.call_inplace(&y, t_root, tmp_nout);
-                                    ret.column_mut(col).copy_from(&*tmp_nout);
-                                    for (j, s_j) in s.iter_mut().enumerate() {
-                                        let mut col_v = ret_sens[j].column_mut(col);
-                                        tmp_nparams.set_index(j, Eqn::T::one());
-                                        out.jac_mul_inplace(&y, t_root, s_j, tmp_nout);
-                                        col_v.copy_from(&*tmp_nout);
-                                        out.sens_mul_inplace(&y, t_root, tmp_nparams, tmp_nout);
-                                        col_v.add_assign(&*tmp_nout);
-                                        tmp_nparams.set_index(j, Eqn::T::zero());
-                                    }
-                                } else {
-                                    ret.column_mut(col).copy_from(&y);
-                                    for (j, s_j) in s.iter().enumerate() {
-                                        ret_sens[j].column_mut(col).copy_from(s_j);
-                                    }
-                                }
-                                col += 1;
-
                                 self.set_stop_time(t_final)?;
                                 continue 'outer;
                             }
                         }
 
-                        // ----- Non-reset root: write root state and return early -----
-                        // y and s are already interpolated at t_root
-                        if let Some(out) = self.problem().eqn.out() {
-                            let tmp_nout = tmp_nout.as_mut().unwrap();
-                            let tmp_nparams = tmp_nparms.as_mut().unwrap();
-                            out.call_inplace(&y, t_root, tmp_nout);
-                            ret.column_mut(col).copy_from(&*tmp_nout);
-                            for (j, s_j) in s.iter_mut().enumerate() {
-                                let mut col_v = ret_sens[j].column_mut(col);
-                                tmp_nparams.set_index(j, Eqn::T::one());
-                                out.jac_mul_inplace(&y, t_root, s_j, tmp_nout);
-                                col_v.copy_from(&*tmp_nout);
-                                out.sens_mul_inplace(&y, t_root, tmp_nparams, tmp_nout);
-                                col_v.add_assign(&*tmp_nout);
-                                tmp_nparams.set_index(j, Eqn::T::zero());
-                            }
-                        } else {
-                            ret.column_mut(col).copy_from(&y);
-                            for (j, s_j) in s.iter().enumerate() {
-                                ret_sens[j].column_mut(col).copy_from(s_j);
-                            }
+                        // Non-reset root: write root state and return early.
+                        y.copy_from(self.state().y);
+                        for (j, s_j) in s.iter_mut().enumerate() {
+                            s_j.copy_from(&self.state().s[j]);
                         }
+                        write_col(&y, &s, t_root, col, &mut ret, &mut ret_sens)?;
                         col += 1;
                         ret.resize_cols(col);
                         for rs in ret_sens.iter_mut() {
@@ -230,29 +158,9 @@ where
                 }
             }
 
-            // Write t_eval[t_i] to output using interpolation
             self.interpolate_inplace(t_target, &mut y)?;
             self.interpolate_sens_inplace(t_target, &mut s)?;
-            if let Some(out) = self.problem().eqn.out() {
-                let tmp_nout = tmp_nout.as_mut().unwrap();
-                let tmp_nparams = tmp_nparms.as_mut().unwrap();
-                out.call_inplace(&y, t_target, tmp_nout);
-                ret.column_mut(col).copy_from(&*tmp_nout);
-                for (j, s_j) in s.iter_mut().enumerate() {
-                    let mut col_v = ret_sens[j].column_mut(col);
-                    tmp_nparams.set_index(j, Eqn::T::one());
-                    out.jac_mul_inplace(&y, t_target, s_j, tmp_nout);
-                    col_v.copy_from(&*tmp_nout);
-                    out.sens_mul_inplace(&y, t_target, tmp_nparams, tmp_nout);
-                    col_v.add_assign(&*tmp_nout);
-                    tmp_nparams.set_index(j, Eqn::T::zero());
-                }
-            } else {
-                ret.column_mut(col).copy_from(&y);
-                for (j, s_j) in s.iter().enumerate() {
-                    ret_sens[j].column_mut(col).copy_from(s_j);
-                }
-            }
+            write_col(&y, &s, t_target, col, &mut ret, &mut ret_sens)?;
             col += 1;
             t_i += 1;
         }

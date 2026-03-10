@@ -162,6 +162,8 @@ where
     /// `op(state.y, state.t)`. The current time and state vector are read from the solver state,
     /// and the result is written back to `state.y`. `state.dy` is also updated to
     /// `rhs(state.y, state.t)`.
+    /// 
+    /// Note: does not update sensitivity vectors if present; use `state_mut_op_with_sens` for that. 
     ///
     /// Note: mass matrix is not supported for this operation, and will return an error if the
     /// problem has a mass matrix.
@@ -196,32 +198,34 @@ where
     {
         let nstates = self.problem().eqn.rhs().nstates();
         let ctx = self.problem().context().clone();
-        let mut y_out = Eqn::V::zeros(nstates, ctx.clone());
-
-        // Capture y and s before applying the operator (needed for Jacobian evaluation).
-        let y_before = self.state().y.clone();
+        // Only two allocations regardless of the number of parameters.
+        let mut y_new = Eqn::V::zeros(nstates, ctx.clone());
+        let mut tmp = Eqn::V::zeros(nstates, ctx);
         let t = self.state().t;
         let nparams = self.state().s.len();
-        let s_before: Vec<Eqn::V> = (0..nparams)
-            .map(|j| self.state().s[j].clone())
-            .collect();
-
-        op.call_inplace(&y_before, t, &mut y_out);
-        self.state_mut().y.copy_from(&y_out);
 
         // only support identity mass matrix for now
         if self.problem().eqn.mass().is_some() {
             return Err(ode_solver_error!(MassMatrixNotSupported));
         }
-        self.problem().eqn.rhs().call_inplace(self.state().y, t, &mut y_out);
-        self.state_mut().dy.copy_from(&y_out);
 
-        // s_new[j] = J_op(y_before, t) · s_old[j]
-        let mut s_new_j = Eqn::V::zeros(nstates, ctx);
-        for (j, s_old_j) in s_before.iter().enumerate() {
-            op.jac_mul_inplace(&y_before, t, s_old_j, &mut s_new_j);
-            self.state_mut().s[j].copy_from(&s_new_j);
+        // Compute y_new = op(y_before) while leaving state.y = y_before intact for
+        // the Jacobian-vector products below.
+        op.call_inplace(self.state().y, t, &mut y_new);
+
+        // s_new[j] = J_op(y_before, t) · s_old[j].  state.y is still y_before here;
+        // process each j one at a time with a single temp, avoiding nparams clones.
+        for j in 0..nparams {
+            op.jac_mul_inplace(self.state().y, t, &self.state().s[j], &mut tmp);
+            self.state_mut().s[j].copy_from(&tmp);
         }
+
+        // Compute dy = rhs(y_new, t) and reuse tmp.
+        self.problem().eqn.rhs().call_inplace(&y_new, t, &mut tmp);
+        self.state_mut().dy.copy_from(&tmp);
+
+        // Write the updated state vector last so y_before remains available above.
+        self.state_mut().y.copy_from(&y_new);
 
         Ok(())
     }

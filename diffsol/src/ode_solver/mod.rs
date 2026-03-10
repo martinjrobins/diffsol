@@ -975,10 +975,9 @@ mod tests {
     /// Test that `solve()` applies the Reset function when root index 0 fires
     /// and continues integration, only stopping when the non-reset root (index 1) fires.
     ///
-    /// The soln has three expected solution points, which must be found sequentially in the output of `solve()`:
-    ///  1. pre-reset state  at t_root_0
-    ///  2. post-reset state at t_root_0
-    ///  3. stop state       at t_root_1
+    /// `soln` must contain one solution point at `t_stop` (the state when the
+    /// non-reset root fires).  The test searches the `solve()` output columns for
+    /// a column whose time and state match within tolerance.
     pub fn test_solve_with_reset<'a, Eqn, Method>(
         mut solver: Method,
         soln: &OdeSolverSolution<Eqn::V>,
@@ -1033,12 +1032,11 @@ mod tests {
     /// Test that `solve_dense()` applies the Reset function silently (no extra columns) when
     /// root index 0 fires, continues integration, and stops when the non-reset root (index 1) fires.
     ///
-    /// The soln has three expected solution points, but only the last (stop state) appears in the
-    /// dense output; the pre/post-reset states are not emitted as separate columns.
+    /// `soln` must contain one solution point at `t_stop`.
     ///
     /// The test verifies that:
     ///  - The output matrix is truncated (fewer columns than t_eval.len())
-    ///  - The last column matches the stop state (soln[2])
+    ///  - The last column matches the stop state (soln[0])
     pub fn test_solve_dense_with_reset<'a, Eqn, Method>(
         mut solver: Method,
         soln: &OdeSolverSolution<Eqn::V>,
@@ -1047,7 +1045,7 @@ mod tests {
         Eqn::V: DefaultDenseMatrix,
         Method: OdeSolverMethod<'a, Eqn>,
     {
-        let t_stop = soln.solution_points[2].t;
+        let t_stop = soln.solution_points[0].t;
 
         let n_steps = 20usize;
         let final_time = t_stop * Eqn::T::from_f64(2.0).unwrap();
@@ -1066,37 +1064,29 @@ mod tests {
             t_eval.len(),
         );
 
-        let n = soln.solution_points[2].state.len();
-        let ctx = soln.atol.context().clone();
         let error_threshold = Eqn::T::from_f64(20.0).unwrap();
 
-        // The last column should be the stop state (soln[2]).
+        // The last column should be the stop state (soln[0]).
         let last_col = ncols - 1;
-        let mut actual = Eqn::V::zeros(n, ctx);
-        for j in 0..n {
-            actual.set_index(j, ret.get_index(j, last_col));
-        }
-        let error = actual - &soln.solution_points[2].state;
+        let actual = ret.column(last_col).into_owned();
+        let error = actual - &soln.solution_points[0].state;
         let error_norm = error
-            .squared_norm(&soln.solution_points[2].state, &soln.atol, soln.rtol)
+            .squared_norm(&soln.solution_points[0].state, &soln.atol, soln.rtol)
             .sqrt();
         assert!(
             error_norm < error_threshold,
-            "stop state (soln[2], t ≈ {:?}) not found in last column ({last_col}); \
+            "stop state (soln[0], t ≈ {:?}) not found in last column ({last_col}); \
              WRMS norm {error_norm:?} ≥ {error_threshold:?}",
             t_stop,
         );
     }
 
     /// Test that `solve_dense_sensitivities()` correctly handles a reset event:
-    /// - Emits a pre-reset column (y/s before the reset) and a post-reset column (y/s after).
-    /// - Applies the reset to `y` and updates forward sensitivities via the reset Jacobian
-    ///   (`s_new_j = J_R · s_old_j`).
+    /// - Applies the reset silently (no extra columns emitted).
     /// - Continues integration after the reset.
     /// - Truncates output when the non-reset stop root (index 1) fires.
     ///
-    /// `soln` must contain three solution points (pre-reset, post-reset, t_stop) with exact
-    /// `y` and sensitivity vectors for comparison.
+    /// `soln` must contain one solution point at `t_stop` with exact `y` and sensitivity vectors.
     pub fn test_solve_dense_sensitivities_with_reset<'a, Eqn, Method>(
         mut solver: Method,
         soln: &OdeSolverSolution<Eqn::V>,
@@ -1105,8 +1095,7 @@ mod tests {
         Eqn::V: DefaultDenseMatrix,
         Method: SensitivitiesOdeSolverMethod<'a, Eqn>,
     {
-        // soln has 3 points: [0] pre-reset, [1] post-reset (both at t_root), [2] t_stop.
-        let t_stop = soln.solution_points[2].t;
+        let t_stop = soln.solution_points[0].t;
 
         let n_steps = 20usize;
         let final_time = t_stop * Eqn::T::from_f64(2.0).unwrap();
@@ -1125,45 +1114,23 @@ mod tests {
             t_eval.len(),
         );
 
-        let n = soln.solution_points[0].state.len();
-        let ctx = soln.atol.context().clone();
+        // Check the last column matches the expected solution at t_stop.
+        let expected = &soln.solution_points[0];
         let error_threshold = Eqn::T::from_f64(50.0).unwrap();
         let sens_points = soln.sens_solution_points.as_ref().unwrap();
 
-        // For each of the 3 expected solution points, scan every column in `ret` and
-        // find the closest match (combined WRMS norm over y and all sensitivity vectors).
-        for (pt_idx, expected) in soln.solution_points.iter().enumerate() {
-            let mut best_norm = Eqn::T::from_f64(f64::MAX).unwrap();
-            for c in 0..ncols {
-                // y component
-                let mut actual_y = Eqn::V::zeros(n, ctx.clone());
-                for k in 0..n {
-                    actual_y.set_index(k, ret.get_index(k, c));
-                }
-                let ey = actual_y - &expected.state;
-                let mut combined = ey.squared_norm(&expected.state, &soln.atol, soln.rtol);
-
-                // sensitivity components
-                for (param_j, sens_pts_j) in sens_points.iter().enumerate() {
-                    let expected_s = &sens_pts_j[pt_idx].state;
-                    let mut actual_s = Eqn::V::zeros(n, ctx.clone());
-                    for k in 0..n {
-                        actual_s.set_index(k, ret_sens[param_j].get_index(k, c));
-                    }
-                    let es = actual_s - expected_s;
-                    combined += es.squared_norm(expected_s, &soln.atol, soln.rtol);
-                }
-
-                let norm = combined.sqrt();
-                if norm < best_norm {
-                    best_norm = norm;
-                }
-            }
-            assert!(
-                best_norm < error_threshold,
-                "solution point {pt_idx} not found in output; \
-                 best combined WRMS {best_norm:?} ≥ {error_threshold:?}",
-            );
+        let last_col = ncols - 1;
+        let ey = ret.column(last_col).into_owned() - &expected.state;
+        let mut combined = ey.squared_norm(&expected.state, &soln.atol, soln.rtol);
+        for (param_j, sens_pts_j) in sens_points.iter().enumerate() {
+            let expected_s = &sens_pts_j[0].state;
+            let es = ret_sens[param_j].column(last_col).into_owned() - expected_s;
+            combined += es.squared_norm(expected_s, &soln.atol, soln.rtol);
         }
+        let norm = combined.sqrt();
+        assert!(
+            norm < error_threshold,
+            "t_stop solution not found in last column; combined WRMS {norm:?} ≥ {error_threshold:?}",
+        );
     }
 }

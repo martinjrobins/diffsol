@@ -557,10 +557,8 @@ fn exponential_decay_reset<M: Matrix>(_x: &M::V, _p: &M::V, _t: M::T, y: &mut M:
 /// After the reset, y[0] = 0.4 < 0.6 so root 0 cannot fire again.
 /// Root 1 fires at t ≈ 5.108 + ln(4/3)/0.1 ≈ 7.985 and causes `solve()` to stop.
 ///
-/// Returns the problem alongside a three-point `OdeSolverSolution`:
-///   1. pre-reset  state `y = [0.6, 0.6]` at t ≈ 5.108
-///   2. post-reset state `y = [0.4, 0.4]` at t ≈ 5.108
-///   3. stop state `y = [0.3, 0.3]` at t ≈ 7.985
+/// Returns the problem alongside a one-point `OdeSolverSolution`:
+///   1. stop state `y = [0.3, 0.3]` at t ≈ 7.985
 #[allow(clippy::type_complexity)]
 pub fn exponential_decay_with_reset_problem<M: MatrixHost + 'static>() -> (
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
@@ -580,25 +578,17 @@ pub fn exponential_decay_with_reset_problem<M: MatrixHost + 'static>() -> (
     //   t_from_reset = -ln(0.3/0.4)/0.1 = ln(4/3)/0.1
     let t_from_reset = M::T::from_f64((4.0_f64 / 3.0_f64).ln() / 0.1).unwrap();
     let t_stop = t_root_0 + t_from_reset;
-    let y0: M::V = problem.eqn.init().call(M::T::zero());
-    let reset_val = M::T::from_f64(0.4).unwrap();
-    let ctx = y0.context().clone();
-    let nstates = y0.len();
+    let nstates = problem.eqn.nstates();
+    let ctx = problem.context().clone();
     let mut soln = OdeSolverSolution {
         atol: problem.atol.clone(),
         rtol: problem.rtol,
         ..Default::default()
     };
-    // Point 1: state just before reset (y[0] decayed to 0.6)
-    soln.push(y0.clone() * scale(M::T::from_f64(0.6).unwrap()), t_root_0);
-    // Point 2: state just after reset (y → [0.4, 0.4])
-    let mut y_reset = M::V::zeros(nstates, ctx);
-    y_reset.fill(reset_val);
-    soln.push(y_reset, t_root_0);
-    // Point 3: state at stop (y[0] decayed from 0.4 to 0.3 after reset)
+    // Only point: stop state (y[0] decayed from 0.4 to 0.3 after reset)
     // y_stop = 0.4 * exp(-0.1 * t_from_reset) = 0.4 * (3/4) = 0.3
     soln.push(
-        M::V::from_element(nstates, M::T::from_f64(0.3).unwrap(), y0.context().clone()),
+        M::V::from_element(nstates, M::T::from_f64(0.3).unwrap(), ctx),
         t_stop,
     );
     (problem, soln)
@@ -760,16 +750,11 @@ pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
     let s_k_root = M::V::from_element(2, s_k_root_val, ctx.clone());
     let s_y0_root = M::V::from_element(2, s_y0_root_val, ctx.clone());
 
-    let y_before = M::V::from_element(2, M::T::from_f64(0.6).unwrap(), ctx.clone());
-    let y_after = M::V::from_element(2, M::T::from_f64(2.6).unwrap(), ctx.clone());
-
     let mut soln = OdeSolverSolution {
         atol: problem.atol.clone(),
         rtol: problem.rtol,
         ..Default::default()
     };
-    soln.push_sens(y_before, t_root, &[s_k_root.clone(), s_y0_root.clone()]);
-    soln.push_sens(y_after, t_root, &[s_k_root, s_y0_root]);
     soln.push_sens(y_stop, t_stop, &[s_k, s_y0]);
 
     (problem, soln)
