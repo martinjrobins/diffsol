@@ -963,4 +963,15 @@ mod test {
         let solver = problem.tr_bdf2::<LS>().unwrap();
         test_solve_with_reset(solver, &soln);
     }
+
+    /// Test that `solve_dense()` applies the Reset function (root index 0) and continues,
+    /// only stopping when the stopping root (index 1) fires.
+    #[test]
+    fn test_solve_dense_with_reset_tr_bdf2() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
+        use crate::ode_solver::tests::test_solve_dense_with_reset;
+        let (problem, soln) = exponential_decay_with_reset_problem::<M>();
+        let solver = problem.tr_bdf2::<LS>().unwrap();
+        test_solve_dense_with_reset(solver, &soln);
+    }
 }

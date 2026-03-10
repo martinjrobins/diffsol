@@ -1027,4 +1027,62 @@ mod tests {
             search_start = col + 1;
         }
     }
+
+    /// Test that `solve_dense()` applies the Reset function silently (no extra columns) when
+    /// root index 0 fires, continues integration, and stops when the non-reset root (index 1) fires.
+    ///
+    /// The soln has three expected solution points, but only the last (stop state) appears in the
+    /// dense output; the pre/post-reset states are not emitted as separate columns.
+    ///
+    /// The test verifies that:
+    ///  - The output matrix is truncated (fewer columns than t_eval.len())
+    ///  - The last column matches the stop state (soln[2])
+    pub fn test_solve_dense_with_reset<'a, Eqn, Method>(
+        mut solver: Method,
+        soln: &OdeSolverSolution<Eqn::V>,
+    ) where
+        Eqn: OdeEquations + 'a,
+        Eqn::V: DefaultDenseMatrix,
+        Method: OdeSolverMethod<'a, Eqn>,
+    {
+        let t_stop = soln.solution_points[2].t;
+
+        let n_steps = 20usize;
+        let final_time = t_stop * Eqn::T::from_f64(2.0).unwrap();
+        let dt = final_time / Eqn::T::from_f64(n_steps as f64).unwrap();
+        let t_eval: Vec<Eqn::T> = (0..=n_steps)
+            .map(|i| dt * Eqn::T::from_f64(i as f64).unwrap())
+            .collect();
+
+        let ret = solver.solve_dense(&t_eval).unwrap();
+        let ncols = ret.ncols();
+
+        // The stop root fires before the last t_eval, so the matrix should be truncated.
+        assert!(
+            ncols < t_eval.len(),
+            "expected early stop: ncols ({ncols}) should be < t_eval.len() ({})",
+            t_eval.len(),
+        );
+
+        let n = soln.solution_points[2].state.len();
+        let ctx = soln.atol.context().clone();
+        let error_threshold = Eqn::T::from_f64(20.0).unwrap();
+
+        // The last column should be the stop state (soln[2]).
+        let last_col = ncols - 1;
+        let mut actual = Eqn::V::zeros(n, ctx);
+        for j in 0..n {
+            actual.set_index(j, ret.get_index(j, last_col));
+        }
+        let error = actual - &soln.solution_points[2].state;
+        let error_norm = error
+            .squared_norm(&soln.solution_points[2].state, &soln.atol, soln.rtol)
+            .sqrt();
+        assert!(
+            error_norm < error_threshold,
+            "stop state (soln[2], t ≈ {:?}) not found in last column ({last_col}); \
+             WRMS norm {error_norm:?} ≥ {error_threshold:?}",
+            t_stop,
+        );
+    }
 }

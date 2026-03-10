@@ -168,14 +168,14 @@ where
     {
         let nstates = self.problem().eqn.rhs().nstates();
         let mut y_out = Eqn::V::zeros(nstates, self.problem().context().clone());
-        op.call_inplace(&self.state().y, self.state().t, &mut y_out);
+        op.call_inplace(self.state().y, self.state().t, &mut y_out);
         self.state_mut().y.copy_from(&y_out);
         
         // only support identity mass matrix for now
         if self.problem().eqn.mass().is_some() {
             return Err(ode_solver_error!(MassMatrixNotSupported));
         }
-        self.problem().eqn.rhs().call_inplace(&self.state().y, self.state().t, &mut y_out);
+        self.problem().eqn.rhs().call_inplace(self.state().y, self.state().t, &mut y_out);
         self.state_mut().dy.copy_from(&y_out);
         Ok(())
     }
@@ -284,11 +284,14 @@ where
     /// - `t_eval`: A slice of times at which to evaluate the solution. Times should be in increasing order.
     ///
     /// # Returns
-    /// A dense matrix with one column per evaluation time (in the same order as `t_eval`) and one row per state variable.
+    /// A dense matrix with one column per evaluation time (in the same order as `t_eval`) and one row per state variable,
+    /// plus one final column at the stop-root time if a non-reset root fires before `t_eval` is exhausted.
+    ///
+    /// If a reset root (index 0) fires, the reset is applied and integration continues; no extra columns are inserted.
     ///
     /// # Post-condition
     /// After the solver finishes, the internal state of the solver is at time `t_eval[t_eval.len()-1]`.
-    /// If a root is found, the solver stops early. The internal state is moved to the root time,
+    /// If a non-reset root is found, the solver stops early. The internal state is moved to the root time,
     /// and the last column corresponds to the root time (which may not be in `t_eval`).
     fn solve_dense(
         &mut self,
@@ -300,76 +303,65 @@ where
     {
         let (mut ret, mut tmp_nout, mut tmp_nstates) = dense_allocate_return(self, t_eval)?;
 
-        // do loop
         self.set_stop_time(t_eval[t_eval.len() - 1])?;
-        for (i, t) in t_eval.iter().enumerate() {
-            while self.state().t < *t {
+
+        let mut col = 0usize;
+        let mut t_i = 0usize;
+        'outer: while t_i < t_eval.len() {
+            if col >= ret.ncols() {
+                ret.resize_cols((col + 1).max(ret.ncols() * 2));
+            }
+            while self.state().t < t_eval[t_i] {
                 match self.step()? {
                     OdeSolverStopReason::InternalTimestep => {}
                     OdeSolverStopReason::TstopReached => break,
                     OdeSolverStopReason::RootFound(t_root, root_idx) => {
-                        // write out all the t_eval points up to t_root
-                        let mut ii = i;
-                        let mut tt = *t;
-                        while tt < t_root {
+                        // Write any t_eval points that fall strictly before t_root.
+                        while t_i < t_eval.len() && t_eval[t_i] < t_root {
+                            if col >= ret.ncols() {
+                                ret.resize_cols((col + 1).max(ret.ncols() * 2));
+                            }
                             dense_write_out(
                                 self,
                                 &mut ret,
-                                tt,
-                                ii,
+                                t_eval[t_i],
+                                col,
                                 &mut tmp_nout,
                                 &mut tmp_nstates,
                             )?;
-                            // move to next t_eval
-                            ii += 1;
-                            tt = t_eval[ii];
+                            col += 1;
+                            t_i += 1;
                         }
                         self.state_mut_back(t_root)?;
 
-                        // If a reset function is defined and this was root index 0,
-                        // apply the reset, write the pre-reset and post-reset points,
-                        // then continue integration.
                         if root_idx == 0 {
                             if let Some(reset_fn) = self.problem().eqn.reset() {
-                                {
-                                    let mut y_out = ret.column_mut(ii);
-                                    if self.problem().integrate_out {
-                                        y_out.copy_from(&self.state().g);
-                                    } else {
-                                        match self.problem().eqn.out() {
-                                            Some(out) => {
-                                                out.call_inplace(
-                                                    &self.state().y,
-                                                    t_root,
-                                                    &mut tmp_nout,
-                                                );
-                                                y_out.copy_from(&tmp_nout);
-                                            }
-                                            None => y_out.copy_from(&self.state().y),
-                                        }
-                                    }
-                                }
+                                // Apply reset silently, no extra columns emitted.
                                 self.state_mut_op(&reset_fn)?;
                                 self.set_stop_time(t_eval[t_eval.len() - 1])?;
-                                break; // break inner while, continue outer for loop at same ii
+                                // t_eval[t_i] is at or after t_root; process it next.
+                                continue 'outer;
                             }
                         }
 
-                        {
-                            let mut y_out = ret.column_mut(ii);
+                        // Non-reset root: write the root state as the final column only if
+                        // the root fired before all t_eval points were consumed.
+                        if col < ret.ncols() {
+                            let mut y_out = ret.column_mut(col);
                             if self.problem().integrate_out {
-                                y_out.copy_from(&self.state().g);
+                                y_out.copy_from(self.state().g);
                             } else {
                                 match self.problem().eqn.out() {
                                     Some(out) => {
-                                        out.call_inplace(&self.state().y, t_root, &mut tmp_nout);
+                                        out.call_inplace(self.state().y, t_root, &mut tmp_nout);
                                         y_out.copy_from(&tmp_nout);
                                     }
-                                    None => y_out.copy_from(&self.state().y),
+                                    None => y_out.copy_from(self.state().y),
                                 }
                             }
+                            col += 1;
                         }
-                        ret.resize_cols(ii + 1);
+                        ret.resize_cols(col);
                         return Ok(ret);
                     }
                 }
@@ -377,12 +369,15 @@ where
             dense_write_out(
                 self,
                 &mut ret,
-                t_eval[i],
-                i,
+                t_eval[t_i],
+                col,
                 &mut tmp_nout,
                 &mut tmp_nstates,
             )?;
+            col += 1;
+            t_i += 1;
         }
+        ret.resize_cols(col);
         Ok(ret)
     }
 
