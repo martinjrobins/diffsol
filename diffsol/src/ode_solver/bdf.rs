@@ -1182,6 +1182,49 @@ where
         self.state.as_mut()
     }
 
+    fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError> {
+        let state = &mut self.state;
+        if self.is_state_modified {
+            if t != state.t {
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+            }
+            // already at the requested time, nothing to do
+            return Ok(());
+        }
+        let is_forward = state.h > Eqn::T::zero();
+        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
+            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
+        }
+        let current_t = state.t;
+        let current_h = state.h;
+        let order = state.order;
+        Self::interpolate_from_diff(t, &state.diff, current_t, current_h, order, &mut state.y);
+        Self::interpolate_derivative_from_diff(
+            t,
+            &state.diff,
+            current_t,
+            current_h,
+            order,
+            &mut state.dy,
+        );
+        if self.ode_problem.integrate_out {
+            Self::interpolate_from_diff(
+                t,
+                &state.gdiff,
+                current_t,
+                current_h,
+                order,
+                &mut state.g,
+            );
+        }
+        for (s, sdiff) in state.s.iter_mut().zip(state.sdiff.iter()) {
+            Self::interpolate_from_diff(t, sdiff, current_t, current_h, order, s);
+        }
+        state.t = t;
+        self.is_state_modified = true;
+        Ok(())
+    }
+
     fn checkpoint(&mut self) -> Self::State {
         debug!("Taking checkpoint");
         self._jacobian_updates(

@@ -230,41 +230,7 @@ where
     /// `integrate_out` is set) `g` to that time and writing them into the current state.
     /// If the state contains sensitivity vectors they are also interpolated to time `t`.
     /// This is typically called after a root is found to pin the state to the root time.
-    fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError> {
-        let nstates = self.problem().eqn.rhs().nstates();
-        let ctx = self.problem().context().clone();
-        let mut y = Eqn::V::zeros(nstates, ctx.clone());
-        self.interpolate_inplace(t, &mut y)?;
-        let mut dy = Eqn::V::zeros(nstates, ctx.clone());
-        self.interpolate_dy_inplace(t, &mut dy)?;
-        let g = if self.problem().integrate_out {
-            let mut g = self.state().g.clone();
-            self.interpolate_out_inplace(t, &mut g)?;
-            Some(g)
-        } else {
-            None
-        };
-        // Interpolate sensitivity vectors if the state has them.
-        let nparams = self.state().s.len();
-        let s_interp: Vec<Eqn::V> = if nparams > 0 {
-            let mut s = vec![Eqn::V::zeros(nstates, ctx); nparams];
-            self.interpolate_sens_inplace(t, &mut s)?;
-            s
-        } else {
-            vec![]
-        };
-        let state = self.state_mut();
-        state.y.copy_from(&y);
-        state.dy.copy_from(&dy);
-        *state.t = t;
-        if let Some(g) = g.as_ref() {
-            state.g.copy_from(g);
-        }
-        for (j, s_j) in s_interp.iter().enumerate() {
-            state.s[j].copy_from(s_j);
-        }
-        Ok(())
-    }
+    fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError>;
 
     /// Get the current order of accuracy of the solver (e.g. explict euler method is first-order)
     fn order(&self) -> usize;

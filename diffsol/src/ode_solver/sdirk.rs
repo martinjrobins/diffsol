@@ -505,6 +505,11 @@ where
     fn state_mut(&mut self) -> StateRefMut<'_, Eqn::V> {
         self.rk.state_mut().as_mut()
     }
+
+    fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError> {
+        let integrate_out = self.rk.problem().integrate_out;
+        self.rk.state_mut_back(t, integrate_out)
+    }
 }
 
 #[cfg(test)]

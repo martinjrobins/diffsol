@@ -378,6 +378,42 @@ where
         &mut self.state
     }
 
+    pub(crate) fn state_mut_back(&mut self, t: M::T, integrate_out: bool) -> Result<(), DiffsolError> {
+        let nstates = self.state.y.len();
+        let ctx = self.state.y.context().clone();
+        let mut y = Eqn::V::zeros(nstates, ctx.clone());
+        self.interpolate_inplace(t, &mut y)?;
+        let mut dy = Eqn::V::zeros(nstates, ctx.clone());
+        self.interpolate_dy_inplace(t, &mut dy)?;
+        let g = if integrate_out {
+            let nout = self.state.g.len();
+            let mut g = Eqn::V::zeros(nout, ctx.clone());
+            self.interpolate_out_inplace(t, &mut g)?;
+            Some(g)
+        } else {
+            None
+        };
+        let nparams = self.state.s.len();
+        let s_interp: Vec<Eqn::V> = if nparams > 0 {
+            let mut s = vec![Eqn::V::zeros(nstates, ctx); nparams];
+            self.interpolate_sens_inplace(t, &mut s)?;
+            s
+        } else {
+            vec![]
+        };
+        let state = self.state_mut();
+        state.y.copy_from(&y);
+        state.dy.copy_from(&dy);
+        state.t = t;
+        if let Some(g) = g.as_ref() {
+            state.g.copy_from(g);
+        }
+        for (j, s_j) in s_interp.iter().enumerate() {
+            state.s[j].copy_from(s_j);
+        }
+        Ok(())
+    }
+
     pub(crate) fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
         self.tstop = Some(tstop);
         if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
