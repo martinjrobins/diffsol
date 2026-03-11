@@ -11,19 +11,19 @@ pub trait SensitivitiesOdeSolverMethod<'a, Eqn>:
 where
     Eqn: OdeEquationsImplicitSens + 'a,
 {
-    /// Solve the ODE and the forward sensitivity equations from the current time to `t_eval[t_eval.len()-1]`, 
+    /// Solve the ODE and the forward sensitivity equations from the current time to `t_eval[t_eval.len()-1]`,
     /// evaluating at specified times.
     ///
     /// This method integrates the system and returns the solution interpolated at the specified times.
     /// The solver uses its own internal timesteps for accuracy, but the output is interpolated to the
     /// requested evaluation times. This is useful when you need the solution at specific timepoints
     /// and want the solver's adaptive stepping for accuracy.
-    /// 
+    ///
     /// If a root function is provided, the solver will stop if any of the root function elements change sign.
     /// The internal state of the solver is set to the time that the zero-crossing occured.
-    /// 
-    /// If a root and a reset function are provided, then if index 0 of the root function has a zero-crossing 
-    /// then the reset is applied, the sensitivities are update appropriately and the solver continues on until `final_time`. 
+    ///
+    /// If a root and a reset function are provided, then if index 0 of the root function has a zero-crossing
+    /// then the reset is applied, the sensitivities are update appropriately and the solver continues on until `final_time`.
     /// If any of the other indices of the root function have a zero-crossing, then the solver will stop as normal.
     ///
     /// # Arguments
@@ -31,12 +31,12 @@ where
     ///
     /// # Returns
     /// A tuple of the ODE solution and sensitivities at the specified evaluation times.
-    /// 
+    ///
     /// The ODE solution is a dense matrix with one column per evaluation time (in the same order as `t_eval`) and one row per state variable,
     /// plus one final column at the stop-root time if a non-reset root fires before `t_eval` is exhausted.
     /// If a reset root (index 0) fires, the reset is applied and integration continues; no extra columns are inserted.
-    /// 
-    /// The sensitivities are returned as a Vec of dense matrices of identical shape as the ODE solution, 
+    ///
+    /// The sensitivities are returned as a Vec of dense matrices of identical shape as the ODE solution,
     /// where the ith element of the Vec corresponds to the sensitivities with respect to the ith parameter.
     ///
     /// # Post-condition
