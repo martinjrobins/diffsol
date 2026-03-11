@@ -38,6 +38,7 @@ pub struct DiffSlContext<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
     nstates: usize,
     nroots: usize,
     nparams: usize,
+    model_index: u32,
     has_mass: bool,
     has_root: bool,
     has_reset: bool,
@@ -77,6 +78,7 @@ impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSlContext<M, ExternalModule
         let tmp2 = RefCell::new(M::V::zeros(nstates, ctx.clone()));
         let tmp_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
         let tmp2_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
+        let model_index = 0;
 
         Ok(Self {
             compiler,
@@ -99,6 +101,7 @@ impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSlContext<M, ExternalModule
             rhs_state_deps,
             rhs_input_deps,
             mass_state_deps,
+            model_index,
         })
     }
 }
@@ -142,6 +145,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> Di
         let tmp2 = RefCell::new(M::V::zeros(nstates, ctx.clone()));
         let tmp_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
         let tmp2_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
+        let model_index = 0;
 
         Ok(Self {
             compiler,
@@ -149,6 +153,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> Di
             ddata,
             sens_data,
             nparams,
+            model_index,
             nstates,
             tmp,
             tmp2,
@@ -510,7 +515,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> ConstantOpSens for DiffS
         self.0.context.compiler.set_inputs(
             v.as_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
-            0u32,
+            self.0.context.model_index,
         );
         self.0.context.compiler.set_u0_sgrad(
             self.0.context.tmp.borrow().as_slice(),
@@ -623,7 +628,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for Diff
         self.0.context.compiler.set_inputs(
             v.as_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
-            0u32,
+            self.0.context.model_index,
         );
         self.0.context.compiler.reset_sgrad(
             t,
@@ -725,7 +730,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for Diff
         self.0.context.compiler.set_inputs(
             v.as_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
-            0u32,
+            self.0.context.model_index,
         );
         self.0.context.compiler.calc_out_sgrad(
             t,
@@ -850,7 +855,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for Diff
         self.0.context.compiler.set_inputs(
             v.as_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
-            0u32,
+            self.0.context.model_index,
         );
         self.0.context.compiler.rhs_sgrad(
             t,
@@ -1031,13 +1036,24 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> OdeEquations for DiffSl<
     fn reset(&self) -> Option<DiffSlReset<'_, M, CG>> {
         self.context.has_reset.then_some(DiffSlReset(self))
     }
+    
+    fn set_model_index(&mut self, index: usize) {
+        self.context.model_index = index as u32;
+    }
+    
+    fn get_model_index(&self) -> usize {
+        self.context.model_index as usize
+    }
 
     fn set_params(&mut self, p: &Self::V) {
+        // reset model index to 0 when setting params, so that we always start from the first model in the code
+        self.context.model_index = 0;
+
         // set the parameters in data
         self.context.compiler.set_inputs(
             p.as_slice(),
             self.context.data.borrow_mut().as_mut_slice(),
-            0u32,
+            self.context.model_index,
         );
 
         // set_u0 will calculate all the constants in the equations based on the params
