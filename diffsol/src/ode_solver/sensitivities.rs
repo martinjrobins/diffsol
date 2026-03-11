@@ -136,7 +136,6 @@ where
                         if root_idx == 0 {
                             if let Some(reset_fn) = self.problem().eqn.reset() {
                                 self.state_mut_op_with_sens(&reset_fn)?;
-                                self.set_stop_time(t_final)?;
                                 continue 'outer;
                             }
                         }

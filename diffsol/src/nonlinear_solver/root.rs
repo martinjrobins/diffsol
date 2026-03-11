@@ -36,7 +36,7 @@ impl<V: Vector> RootFinder<V> {
     }
 
     /// Set the upper boundary of the root search and checks for a zero crossing.
-    /// If a zero crossing is found, the index of the crossing is returned
+    /// If a zero crossing is found, the index of the crossing and the index of the root is returned
     ///
     /// This function assumes that g0 and t0 have already beeen set via [Self::init]
     /// or previous iterations of [Self::check_root]

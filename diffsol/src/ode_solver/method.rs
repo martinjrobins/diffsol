@@ -171,14 +171,15 @@ where
     where
         O: NonLinearOp<T = Eqn::T, V = Eqn::V, M = Eqn::M>,
     {
-        let nstates = self.problem().eqn.rhs().nstates();
-        let mut y_out = Eqn::V::zeros(nstates, self.problem().context().clone());
-        op.call_inplace(self.state().y, self.state().t, &mut y_out);
-        self.state_mut().y.copy_from(&y_out);
         // only support identity mass matrix for now
         if self.problem().eqn.mass().is_some() {
             return Err(ode_solver_error!(MassMatrixNotSupported));
         }
+
+        let nstates = self.problem().eqn.rhs().nstates();
+        let mut y_out = Eqn::V::zeros(nstates, self.problem().context().clone());
+        op.call_inplace(self.state().y, self.state().t, &mut y_out);
+        self.state_mut().y.copy_from(&y_out);
         self.problem()
             .eqn
             .rhs()
@@ -293,7 +294,6 @@ where
                         if let Some(reset_fn) = self.problem().eqn.reset() {
                             self.state_mut_op(&reset_fn)?;
                             write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
-                            self.set_stop_time(final_time)?;
                             continue;
                         }
                     }
@@ -323,7 +323,7 @@ where
     /// If a reset root (index 0) fires, the reset is applied and integration continues; no extra columns are inserted.
     ///
     /// # Post-condition
-    /// After the solver finishes, the internal state of the solver is at time `t_eval[t_eval.len()-1]`.
+    /// In the case that no roots are found that stop the solve early, the internal state is at time `t_eval[t_eval.len()-1]`.
     /// If a non-reset root is found, the solver stops early. The internal state is moved to the root time,
     /// and the last column corresponds to the root time (which may not be in `t_eval`).
     fn solve_dense(
@@ -371,7 +371,6 @@ where
                             if let Some(reset_fn) = self.problem().eqn.reset() {
                                 // Apply reset silently, no extra columns emitted.
                                 self.state_mut_op(&reset_fn)?;
-                                self.set_stop_time(t_eval[t_eval.len() - 1])?;
                                 // t_eval[t_i] is at or after t_root; process it next.
                                 continue 'outer;
                             }
