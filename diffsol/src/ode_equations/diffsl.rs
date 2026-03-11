@@ -1,7 +1,10 @@
 use core::panic;
 use num_traits::{One, Zero};
 use std::ops::MulAssign;
-use std::{cell::RefCell, mem};
+use std::{
+    cell::{Cell, RefCell},
+    mem,
+};
 
 #[cfg(feature = "diffsl-external")]
 use diffsl::execution::external::{ExternSymbols, ExternalModule};
@@ -38,7 +41,7 @@ pub struct DiffSlContext<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
     nstates: usize,
     nroots: usize,
     nparams: usize,
-    model_index: u32,
+    model_index: Cell<u32>,
     has_mass: bool,
     has_root: bool,
     has_reset: bool,
@@ -78,7 +81,7 @@ impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSlContext<M, ExternalModule
         let tmp2 = RefCell::new(M::V::zeros(nstates, ctx.clone()));
         let tmp_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
         let tmp2_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
-        let model_index = 0;
+        let model_index = Cell::new(0);
 
         Ok(Self {
             compiler,
@@ -145,7 +148,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> Di
         let tmp2 = RefCell::new(M::V::zeros(nstates, ctx.clone()));
         let tmp_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
         let tmp2_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
-        let model_index = 0;
+        let model_index = Cell::new(0);
 
         Ok(Self {
             compiler,
@@ -515,7 +518,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> ConstantOpSens for DiffS
         self.0.context.compiler.set_inputs(
             v.as_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
-            self.0.context.model_index,
+            self.0.context.model_index.get(),
         );
         self.0.context.compiler.set_u0_sgrad(
             self.0.context.tmp.borrow().as_slice(),
@@ -577,6 +580,26 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOp for DiffSlRe
             self.0.context.data.borrow_mut().as_mut_slice(),
             y.as_mut_slice(),
         );
+
+        let mut params = vec![M::T::zero(); self.0.context.nparams];
+        self.0.context.compiler.get_inputs(
+            params.as_mut_slice(),
+            self.0.context.data.borrow().as_slice(),
+        );
+        self.0
+            .context
+            .model_index
+            .set(self.0.context.model_index.get() + 1);
+        self.0.context.compiler.set_inputs(
+            params.as_slice(),
+            self.0.context.data.borrow_mut().as_mut_slice(),
+            self.0.context.model_index.get(),
+        );
+        let mut dummy = M::V::zeros(self.0.context.nstates, self.0.context.ctx.clone());
+        self.0.context.compiler.set_u0(
+            dummy.as_mut_slice(),
+            self.0.context.data.borrow_mut().as_mut_slice(),
+        );
     }
 }
 
@@ -628,7 +651,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for Diff
         self.0.context.compiler.set_inputs(
             v.as_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
-            self.0.context.model_index,
+            self.0.context.model_index.get(),
         );
         self.0.context.compiler.reset_sgrad(
             t,
@@ -730,7 +753,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for Diff
         self.0.context.compiler.set_inputs(
             v.as_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
-            self.0.context.model_index,
+            self.0.context.model_index.get(),
         );
         self.0.context.compiler.calc_out_sgrad(
             t,
@@ -855,7 +878,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for Diff
         self.0.context.compiler.set_inputs(
             v.as_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
-            self.0.context.model_index,
+            self.0.context.model_index.get(),
         );
         self.0.context.compiler.rhs_sgrad(
             t,
@@ -1036,24 +1059,16 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> OdeEquations for DiffSl<
     fn reset(&self) -> Option<DiffSlReset<'_, M, CG>> {
         self.context.has_reset.then_some(DiffSlReset(self))
     }
-    
-    fn set_model_index(&mut self, index: usize) {
-        self.context.model_index = index as u32;
-    }
-    
-    fn get_model_index(&self) -> usize {
-        self.context.model_index as usize
-    }
 
     fn set_params(&mut self, p: &Self::V) {
         // reset model index to 0 when setting params, so that we always start from the first model in the code
-        self.context.model_index = 0;
+        self.context.model_index.set(0);
 
         // set the parameters in data
         self.context.compiler.set_inputs(
             p.as_slice(),
             self.context.data.borrow_mut().as_mut_slice(),
-            self.context.model_index,
+            self.context.model_index.get(),
         );
 
         // set_u0 will calculate all the constants in the equations based on the params
@@ -1081,8 +1096,8 @@ mod tests {
     use crate::{
         matrix::MatrixRef, ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix,
         LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
-        NonLinearOpSensAdjoint, OdeBuilder, OdeEquations, OdeSolverMethod, Vector, VectorHost,
-        VectorRef, VectorView,
+        NonLinearOpSensAdjoint, OdeBuilder, OdeEquations, OdeSolverMethod,
+        SensitivitiesOdeSolverMethod, Vector, VectorHost, VectorRef, VectorView,
     };
 
     use super::{DiffSl, DiffSlContext};
@@ -1128,6 +1143,7 @@ mod tests {
     }
 
     generate_tests!(diffsl_logistic_growth);
+    generate_tests!(diffsl_logistic_growth_with_model_index);
     generate_tests!(diffsl_reset_call_and_jac_mul);
 
     // Sensitivity and reverse-mode (adjoint) require LLVM — Cranelift supports neither.
@@ -1141,7 +1157,6 @@ mod tests {
     }
 
     generate_tests_llvm_only!(diffsl_reset_sens_and_adjoint_gradients);
-
     /// Tests forward evaluation and Jacobian-vector product for DiffSlReset.
     /// Runs on all backends (Cranelift + LLVM).
     ///
@@ -1396,5 +1411,120 @@ mod tests {
                 M::T::from_f64(10.0).unwrap(),
             );
         }
+    }
+
+    fn diffsl_logistic_growth_with_model_index<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        let text = "
+            r_i {
+                1,
+                2,
+                4,
+            }
+            u_i {
+                y = 0.1,
+            }
+            reset_i {
+                y,
+            }
+            F_i {
+                r_i[N] * y,
+            }
+        ";
+
+        let ctx = M::C::default();
+        let eqn = DiffSl::<M, CG>::compile(text, ctx.clone(), false).unwrap();
+        let t = M::T::zero();
+        let y = eqn.init().call(t);
+        let tol = M::T::from_f64(1e-10).unwrap();
+        let one_tenth = M::T::from_f64(0.1).unwrap();
+
+        let rhs_model_0 = eqn.rhs().call(&y, t);
+        let rhs_model_0_expected =
+            ctx.vector_from_vec(vec![M::T::from_f64(1.0).unwrap() * one_tenth]);
+        rhs_model_0.assert_eq_st(&rhs_model_0_expected, tol);
+
+        let reset_op = eqn.reset().unwrap();
+        let _ = reset_op.call(&y, t);
+        let rhs_model_1 = eqn.rhs().call(&y, t);
+        let rhs_model_1_expected =
+            ctx.vector_from_vec(vec![M::T::from_f64(2.0).unwrap() * one_tenth]);
+        rhs_model_1.assert_eq_st(&rhs_model_1_expected, tol);
+
+        let _ = reset_op.call(&y, t);
+        let rhs_model_2 = eqn.rhs().call(&y, t);
+        let rhs_model_2_expected =
+            ctx.vector_from_vec(vec![M::T::from_f64(4.0).unwrap() * one_tenth]);
+        rhs_model_2.assert_eq_st(&rhs_model_2_expected, tol);
+    }
+
+    #[allow(dead_code)]
+    fn diffsl_model_index_increment<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        let text = "
+            in { a = 1.0 }
+            r_i { 1.0, 2.0 }
+            u_i { y = 1.0 }
+            F_i { -(a * r_i[N]) * y }
+            stop_i { y - 0.5 }
+            reset_i { y }
+        ";
+
+        let t_final = M::T::from_f64(2.0).unwrap();
+        let t_evals = vec![0.0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0]
+            .into_iter()
+            .map(|t| M::T::from_f64(t).unwrap())
+            .collect::<Vec<_>>();
+
+        let ctx = M::C::default();
+        let eqn = DiffSl::<M, CG>::compile(text, ctx.clone(), true).unwrap();
+        let mut problem = OdeBuilder::<M>::new()
+            .p([1.0])
+            .rtol(1e-8)
+            .atol([1e-8])
+            .sens_rtol(1e-8)
+            .sens_atol([1e-8])
+            .build_from_eqn(eqn)
+            .unwrap();
+        let params = ctx.vector_from_vec(vec![M::T::from_f64(1.0).unwrap()]);
+
+        problem.eqn.set_params(&params);
+        {
+            let mut solver = problem.bdf::<<M as DefaultSolver>::LS>().unwrap();
+            let _ = solver.solve(t_final).unwrap();
+            assert_eq!(solver.problem().eqn.context.model_index.get(), 1);
+        }
+
+        problem.eqn.set_params(&params);
+        {
+            let mut solver = problem.bdf::<<M as DefaultSolver>::LS>().unwrap();
+            let _ = solver.solve_dense(&t_evals).unwrap();
+            assert_eq!(solver.problem().eqn.context.model_index.get(), 1);
+        }
+
+        problem.eqn.set_params(&params);
+        {
+            let mut solver = problem.bdf_sens::<<M as DefaultSolver>::LS>().unwrap();
+            let _ = solver.solve_dense_sensitivities(&t_evals).unwrap();
+            assert_eq!(solver.problem().eqn.context.model_index.get(), 1);
+        }
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn diffsl_model_index_increment_llvm_dense_f64() {
+        diffsl_model_index_increment::<crate::LlvmModule, crate::NalgebraMat<f64>>();
     }
 }

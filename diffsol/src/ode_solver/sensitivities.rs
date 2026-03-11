@@ -83,7 +83,6 @@ where
         let ctx = self.problem().context().clone();
         let eqn_out = self.problem().eqn.out();
 
-        let mut model_index = self.problem().eqn.get_model();
         let mut y = Eqn::V::zeros(nstates, ctx.clone());
         let mut s = vec![Eqn::V::zeros(nstates, ctx.clone()); nparams];
 
@@ -165,8 +164,6 @@ where
                         if root_idx == 0 {
                             if let Some(reset_fn) = self.problem().eqn.reset() {
                                 self.state_mut_op_with_sens(&reset_fn)?;
-                                model_index += 1;
-                                self.problem().eqn.set_model(model_index);
                                 continue 'outer;
                             }
                         }

@@ -279,8 +279,6 @@ where
     {
         let mut ret_t = Vec::new();
         let (mut ret_y, mut tmp_nout) = allocate_return(self)?;
-        let mut model_index = self.problem().eqn.get_model();
-
         // do the main loop
         write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
         self.set_stop_time(final_time)?;
@@ -301,9 +299,7 @@ where
                     // apply the reset and continue integration.
                     if root_idx == 0 {
                         if let Some(reset_fn) = self.problem().eqn.reset() {
-                            model_index += 1;
                             self.state_mut_op(&reset_fn)?;
-                            self.problem().eqn.set_model(model_index);
                             write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
                             continue;
                         }
@@ -353,8 +349,6 @@ where
         Self: Sized,
     {
         let (mut ret, mut tmp_nout, mut tmp_nstates) = dense_allocate_return(self, t_eval)?;
-        let mut model_index = self.problem().eqn.get_model();
-
         self.set_stop_time(t_eval[t_eval.len() - 1])?;
 
         let mut col = 0usize;
@@ -390,8 +384,6 @@ where
                             if let Some(reset_fn) = self.problem().eqn.reset() {
                                 // Apply reset silently, no extra columns emitted.
                                 self.state_mut_op(&reset_fn)?;
-                                model_index += 1;
-                                self.problem().eqn.set_model(model_index);
                                 // t_eval[t_i] is at or after t_root; process it next.
                                 continue 'outer;
                             }
