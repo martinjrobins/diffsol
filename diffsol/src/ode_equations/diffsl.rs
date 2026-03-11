@@ -1199,6 +1199,7 @@ mod tests {
     ///
     /// Note: jac_transpose_mul and sens_transpose_mul return negated values
     ///       (same convention as rhs adjoint).
+    #[allow(dead_code)]
     fn diffsl_reset_sens_and_adjoint_gradients<
         CG: CodegenModuleJit + CodegenModuleCompile,
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
