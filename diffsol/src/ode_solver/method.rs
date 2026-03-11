@@ -188,7 +188,7 @@ where
         Ok(())
     }
 
-    /// Like [`state_mut_op`], but also updates each sensitivity vector in the state via the
+    /// Like `state_mut_op`, but also updates each sensitivity vector in the state via the
     /// Jacobian of `op`: `s_new[j] = J_op(y_before, t) · s_old[j]`.
     ///
     /// This variant requires `O: NonLinearOpJacobian` so that the Jacobian-vector product is

@@ -554,7 +554,7 @@ fn exponential_decay_reset<M: Matrix>(_x: &M::V, _p: &M::V, _t: M::T, y: &mut M:
 ///
 /// Uses the standard `dy/dt = -k*y` equations with `k=0.1`, `y(0)=[1,1]`.
 /// Root 0 fires at t ≈ 5.108 and triggers a reset (y → [0.4, 0.4]).
-/// After the reset, y[0] = 0.4 < 0.6 so root 0 cannot fire again.
+/// After the reset, y\[0\] = 0.4 < 0.6 so root 0 cannot fire again.
 /// Root 1 fires at t ≈ 5.108 + ln(4/3)/0.1 ≈ 7.985 and causes `solve()` to stop.
 ///
 /// Returns the problem alongside a one-point `OdeSolverSolution`:
