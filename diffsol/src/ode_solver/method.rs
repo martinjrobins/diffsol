@@ -247,6 +247,14 @@ where
     ///
     /// This method integrates the system and returns the solution at adaptive timepoints chosen by the solver's
     /// internal error control mechanism. This is useful when you want the minimal number of timepoints for a given accuracy.
+    /// 
+    /// If a root function is provided, the solver will stop if any of the root function elements change sign.
+    /// The internal state of the solver is set to the time that the zero-crossing occured.
+    /// 
+    /// If a root and a reset function are provided, then if index 0 of the root function has a zero-crossing 
+    /// then the reset is applied (the pre-reset and post-reset states are added to the solution) 
+    /// and the solver continues on until `final_time`. If any of the other indices of the root function have 
+    /// a zero-crossing, then the solver will stop as normal.
     ///
     /// # Arguments
     /// - `final_time`: The time to integrate to
@@ -312,6 +320,13 @@ where
     /// The solver uses its own internal timesteps for accuracy, but the output is interpolated to the
     /// requested evaluation times. This is useful when you need the solution at specific timepoints
     /// and want the solver's adaptive stepping for accuracy.
+    /// 
+    /// If a root function is provided, the solver will stop if any of the root function elements change sign.
+    /// The internal state of the solver is set to the time that the zero-crossing occured.
+    /// 
+    /// If a root and a reset function are provided, then if index 0 of the root function has a zero-crossing 
+    /// then the reset is applied and the solver continues on until `final_time`. 
+    /// If any of the other indices of the root function have a zero-crossing, then the solver will stop as normal.
     ///
     /// # Arguments
     /// - `t_eval`: A slice of times at which to evaluate the solution. Times should be in increasing order.
