@@ -23,6 +23,7 @@ pub struct OdeBuilder<
     Mass = UnitCallable<M>,
     Root = UnitCallable<M>,
     Out = UnitCallable<M>,
+    Reset = UnitCallable<M>,
 > {
     t0: M::T,
     h0: M::T,
@@ -42,6 +43,7 @@ pub struct OdeBuilder<
     mass: Option<Mass>,
     root: Option<Root>,
     out: Option<Out>,
+    reset: Option<Reset>,
     ic_options: InitialConditionSolverOptions<f64>,
     ode_options: OdeSolverOptions<f64>,
     ctx: M::C,
@@ -91,7 +93,7 @@ impl Default for OdeBuilder {
 /// let y = solver.interpolate(t);
 /// ```
 ///
-impl<M, Rhs, Init, Mass, Root, Out> OdeBuilder<M, Rhs, Init, Mass, Root, Out>
+impl<M, Rhs, Init, Mass, Root, Out, Reset> OdeBuilder<M, Rhs, Init, Mass, Root, Out, Reset>
 where
     M: Matrix,
 {
@@ -112,6 +114,7 @@ where
             mass: None,
             root: None,
             out: None,
+            reset: None,
             t0: M::T::zero(),
             h0: M::T::one(),
             rtol: default_rtol,
@@ -136,12 +139,12 @@ where
     /// # Arguments
     ///
     /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
-    pub fn rhs<F>(self, rhs: F) -> OdeBuilder<M, ClosureNoJac<M, F>, Init, Mass, Root, Out>
+    pub fn rhs<F>(self, rhs: F) -> OdeBuilder<M, ClosureNoJac<M, F>, Init, Mass, Root, Out, Reset>
     where
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, ClosureNoJac<M, F>, Init, Mass, Root, Out> {
+        OdeBuilder::<M, ClosureNoJac<M, F>, Init, Mass, Root, Out, Reset> {
             rhs: Some(ClosureNoJac::new(
                 rhs,
                 nstates,
@@ -154,6 +157,7 @@ where
             root: self.root,
             out: self.out,
 
+            reset: self.reset,
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -183,13 +187,13 @@ where
         self,
         rhs: F,
         rhs_jac: G,
-    ) -> OdeBuilder<M, Closure<M, F, G>, Init, Mass, Root, Out>
+    ) -> OdeBuilder<M, Closure<M, F, G>, Init, Mass, Root, Out, Reset>
     where
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
         G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, Closure<M, F, G>, Init, Mass, Root, Out> {
+        OdeBuilder::<M, Closure<M, F, G>, Init, Mass, Root, Out, Reset> {
             rhs: Some(Closure::new(
                 rhs,
                 rhs_jac,
@@ -203,6 +207,7 @@ where
             root: self.root,
             out: self.out,
 
+            reset: self.reset,
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -228,19 +233,20 @@ where
     /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
     /// - `rhs_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
     /// - `rhs_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the rhs wrt the parameters, with the vector v.
+    #[allow(clippy::type_complexity)]
     pub fn rhs_sens_implicit<F, G, H>(
         self,
         rhs: F,
         rhs_jac: G,
         rhs_sens: H,
-    ) -> OdeBuilder<M, ClosureWithSens<M, F, G, H>, Init, Mass, Root, Out>
+    ) -> OdeBuilder<M, ClosureWithSens<M, F, G, H>, Init, Mass, Root, Out, Reset>
     where
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
         G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
         H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, ClosureWithSens<M, F, G, H>, Init, Mass, Root, Out> {
+        OdeBuilder::<M, ClosureWithSens<M, F, G, H>, Init, Mass, Root, Out, Reset> {
             rhs: Some(ClosureWithSens::new(
                 rhs,
                 rhs_jac,
@@ -255,6 +261,7 @@ where
             root: self.root,
             out: self.out,
 
+            reset: self.reset,
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -291,7 +298,7 @@ where
         rhs_jac: G,
         rhs_adjoint: H,
         rhs_sens_adjoint: I,
-    ) -> OdeBuilder<M, ClosureWithAdjoint<M, F, G, H, I>, Init, Mass, Root, Out>
+    ) -> OdeBuilder<M, ClosureWithAdjoint<M, F, G, H, I>, Init, Mass, Root, Out, Reset>
     where
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
         G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
@@ -299,7 +306,7 @@ where
         I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, ClosureWithAdjoint<M, F, G, H, I>, Init, Mass, Root, Out> {
+        OdeBuilder::<M, ClosureWithAdjoint<M, F, G, H, I>, Init, Mass, Root, Out, Reset> {
             rhs: Some(ClosureWithAdjoint::new(
                 rhs,
                 rhs_jac,
@@ -315,6 +322,7 @@ where
             root: self.root,
             out: self.out,
 
+            reset: self.reset,
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -342,17 +350,18 @@ where
         self,
         init: F,
         nstates: usize,
-    ) -> OdeBuilder<M, Rhs, ConstantClosure<M, F>, Mass, Root, Out>
+    ) -> OdeBuilder<M, Rhs, ConstantClosure<M, F>, Mass, Root, Out, Reset>
     where
         F: Fn(&M::V, M::T, &mut M::V),
     {
-        OdeBuilder::<M, Rhs, ConstantClosure<M, F>, Mass, Root, Out> {
+        OdeBuilder::<M, Rhs, ConstantClosure<M, F>, Mass, Root, Out, Reset> {
             rhs: self.rhs,
             init: Some(ConstantClosure::new(init, nstates, 0, self.ctx.clone())),
             mass: self.mass,
             root: self.root,
             out: self.out,
 
+            reset: self.reset,
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -382,12 +391,12 @@ where
         init: F,
         init_sens: G,
         nstates: usize,
-    ) -> OdeBuilder<M, Rhs, ConstantClosureWithSens<M, F, G>, Mass, Root, Out>
+    ) -> OdeBuilder<M, Rhs, ConstantClosureWithSens<M, F, G>, Mass, Root, Out, Reset>
     where
         F: Fn(&M::V, M::T, &mut M::V),
         G: Fn(&M::V, M::T, &M::V, &mut M::V),
     {
-        OdeBuilder::<M, Rhs, ConstantClosureWithSens<M, F, G>, Mass, Root, Out> {
+        OdeBuilder::<M, Rhs, ConstantClosureWithSens<M, F, G>, Mass, Root, Out, Reset> {
             rhs: self.rhs,
             init: Some(ConstantClosureWithSens::new(
                 init,
@@ -400,6 +409,7 @@ where
             root: self.root,
             out: self.out,
 
+            reset: self.reset,
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -430,12 +440,12 @@ where
         init: F,
         init_sens_adjoint: G,
         nstates: usize,
-    ) -> OdeBuilder<M, Rhs, ConstantClosureWithAdjoint<M, F, G>, Mass, Root, Out>
+    ) -> OdeBuilder<M, Rhs, ConstantClosureWithAdjoint<M, F, G>, Mass, Root, Out, Reset>
     where
         F: Fn(&M::V, M::T, &mut M::V),
         G: Fn(&M::V, M::T, &M::V, &mut M::V),
     {
-        OdeBuilder::<M, Rhs, ConstantClosureWithAdjoint<M, F, G>, Mass, Root, Out> {
+        OdeBuilder::<M, Rhs, ConstantClosureWithAdjoint<M, F, G>, Mass, Root, Out, Reset> {
             rhs: self.rhs,
             init: Some(ConstantClosureWithAdjoint::new(
                 init,
@@ -448,6 +458,7 @@ where
             root: self.root,
             out: self.out,
 
+            reset: self.reset,
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -471,12 +482,12 @@ where
     ///
     /// # Arguments
     /// - `mass`: Function of type Fn(v: &V, p: &V, t: S, beta: S, y: &mut V) that computes a gemv multiplication of the mass matrix with the vector v (i.e. y = M * v + beta * y).
-    pub fn mass<F>(self, mass: F) -> OdeBuilder<M, Rhs, Init, LinearClosure<M, F>, Root, Out>
+    pub fn mass<F>(self, mass: F) -> OdeBuilder<M, Rhs, Init, LinearClosure<M, F>, Root, Out, Reset>
     where
         F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, Rhs, Init, LinearClosure<M, F>, Root, Out> {
+        OdeBuilder::<M, Rhs, Init, LinearClosure<M, F>, Root, Out, Reset> {
             rhs: self.rhs,
             init: self.init,
             mass: Some(LinearClosure::new(
@@ -489,6 +500,7 @@ where
             root: self.root,
             out: self.out,
 
+            reset: self.reset,
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -520,13 +532,13 @@ where
         self,
         mass: F,
         mass_adjoint: G,
-    ) -> OdeBuilder<M, Rhs, Init, LinearClosureWithAdjoint<M, F, G>, Root, Out>
+    ) -> OdeBuilder<M, Rhs, Init, LinearClosureWithAdjoint<M, F, G>, Root, Out, Reset>
     where
         F: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
         G: Fn(&M::V, &M::V, M::T, M::T, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, Rhs, Init, LinearClosureWithAdjoint<M, F, G>, Root, Out> {
+        OdeBuilder::<M, Rhs, Init, LinearClosureWithAdjoint<M, F, G>, Root, Out, Reset> {
             rhs: self.rhs,
             init: self.init,
             mass: Some(LinearClosureWithAdjoint::new(
@@ -540,6 +552,7 @@ where
             root: self.root,
             out: self.out,
 
+            reset: self.reset,
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -568,12 +581,12 @@ where
         self,
         root: F,
         nroots: usize,
-    ) -> OdeBuilder<M, Rhs, Init, Mass, ClosureNoJac<M, F>, Out>
+    ) -> OdeBuilder<M, Rhs, Init, Mass, ClosureNoJac<M, F>, Out, Reset>
     where
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, Rhs, Init, Mass, ClosureNoJac<M, F>, Out> {
+        OdeBuilder::<M, Rhs, Init, Mass, ClosureNoJac<M, F>, Out, Reset> {
             rhs: self.rhs,
             init: self.init,
             mass: self.mass,
@@ -586,6 +599,104 @@ where
             )),
             out: self.out,
 
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the reset function of the ODE.
+    ///
+    /// The reset function is called after a root event at index 0 to update the state.
+    /// It computes the new state from the current state. No Jacobian is required.
+    /// The number of outputs equals the number of states and is set automatically.
+    ///
+    /// # Arguments
+    /// - `reset`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the new state.
+    pub fn reset<F>(self, reset: F) -> OdeBuilder<M, Rhs, Init, Mass, Root, Out, ClosureNoJac<M, F>>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, Root, Out, ClosureNoJac<M, F>> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+            reset: Some(ClosureNoJac::new(
+                reset,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the reset function of the ODE, providing an explicit Jacobian.
+    ///
+    /// Like [`reset`](Self::reset) but also accepts a Jacobian function, enabling
+    /// use with implicit solvers that may need the Jacobian of the reset map.
+    /// The number of outputs equals the number of states and is set automatically.
+    ///
+    /// # Arguments
+    /// - `reset`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the new state.
+    /// - `reset_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the reset function with the vector v.
+    pub fn reset_implicit<F, G>(
+        self,
+        reset: F,
+        reset_jac: G,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Out, Closure<M, F, G>>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, Root, Out, Closure<M, F, G>> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+            reset: Some(Closure::new(
+                reset,
+                reset_jac,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -619,13 +730,13 @@ where
         out: F,
         out_jac: G,
         nout: usize,
-    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Closure<M, F, G>>
+    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Closure<M, F, G>, Reset>
     where
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
         G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, Rhs, Init, Mass, Root, Closure<M, F, G>> {
+        OdeBuilder::<M, Rhs, Init, Mass, Root, Closure<M, F, G>, Reset> {
             rhs: self.rhs,
             init: self.init,
             mass: self.mass,
@@ -638,6 +749,7 @@ where
                 nstates,
                 self.ctx.clone(),
             )),
+            reset: self.reset,
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -667,20 +779,21 @@ where
     /// - `out_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the output with the vector v.
     /// - `out_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the output wrt the parameters, with the vector v.
     /// - `nout`: Number of output equations (i.e. size of the output vector `y`).
+    #[allow(clippy::type_complexity)]
     pub fn out_sens_implicit<F, G, H>(
         self,
         out: F,
         out_jac: G,
         out_sens: H,
         nout: usize,
-    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, ClosureWithSens<M, F, G, H>>
+    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, ClosureWithSens<M, F, G, H>, Reset>
     where
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
         G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
         H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, Rhs, Init, Mass, Root, ClosureWithSens<M, F, G, H>> {
+        OdeBuilder::<M, Rhs, Init, Mass, Root, ClosureWithSens<M, F, G, H>, Reset> {
             rhs: self.rhs,
             init: self.init,
             mass: self.mass,
@@ -694,6 +807,7 @@ where
                 nout,
                 self.ctx.clone(),
             )),
+            reset: self.reset,
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -732,7 +846,7 @@ where
         out_adjoint: H,
         out_sens_adjoint: I,
         nout: usize,
-    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, ClosureWithAdjoint<M, F, G, H, I>>
+    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, ClosureWithAdjoint<M, F, G, H, I>, Reset>
     where
         F: Fn(&M::V, &M::V, M::T, &mut M::V),
         G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
@@ -740,7 +854,7 @@ where
         I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
     {
         let nstates = 0;
-        OdeBuilder::<M, Rhs, Init, Mass, Root, ClosureWithAdjoint<M, F, G, H, I>> {
+        OdeBuilder::<M, Rhs, Init, Mass, Root, ClosureWithAdjoint<M, F, G, H, I>, Reset> {
             rhs: self.rhs,
             init: self.init,
             mass: self.mass,
@@ -755,6 +869,7 @@ where
                 nstates,
                 self.ctx.clone(),
             )),
+            reset: self.reset,
             t0: self.t0,
             h0: self.h0,
             rtol: self.rtol,
@@ -1059,7 +1174,10 @@ where
     #[allow(clippy::type_complexity)]
     pub fn build(
         self,
-    ) -> Result<OdeSolverProblem<OdeSolverEquations<M, Rhs, Init, Mass, Root, Out>>, DiffsolError>
+    ) -> Result<
+        OdeSolverProblem<OdeSolverEquations<M, Rhs, Init, Mass, Root, Out, Reset>>,
+        DiffsolError,
+    >
     where
         M: Matrix,
         Rhs: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
@@ -1067,11 +1185,13 @@ where
         Mass: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
         Root: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
         Out: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
+        Reset: BuilderOp<V = M::V, T = M::T, M = M, C = M::C>,
         for<'a> ParameterisedOp<'a, Rhs>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
         for<'a> ParameterisedOp<'a, Init>: ConstantOp<M = M, V = M::V, T = M::T, C = M::C>,
         for<'a> ParameterisedOp<'a, Mass>: LinearOp<M = M, V = M::V, T = M::T, C = M::C>,
         for<'a> ParameterisedOp<'a, Root>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
         for<'a> ParameterisedOp<'a, Out>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
+        for<'a> ParameterisedOp<'a, Reset>: NonLinearOp<M = M, V = M::V, T = M::T, C = M::C>,
     {
         let p = Self::build_p(self.p, self.ctx.clone());
         let nparams = p.len();
@@ -1084,6 +1204,7 @@ where
         let mut mass = self.mass;
         let mut root = self.root;
         let mut out = self.out;
+        let mut reset = self.reset;
 
         let init_op = ParameterisedOp::new(&init, &p);
         let y0 = init_op.call(self.t0);
@@ -1112,6 +1233,12 @@ where
             out.set_nparams(nparams);
         }
 
+        if let Some(ref mut reset) = reset {
+            reset.set_nstates(nstates);
+            reset.set_nout(nstates);
+            reset.set_nparams(nparams);
+        }
+
         if self.use_coloring || M::is_sparse() {
             rhs.calculate_sparsity(&y0, self.t0, &p);
             if let Some(ref mut mass) = mass {
@@ -1119,7 +1246,7 @@ where
             }
         }
         let nout = out.as_ref().map(|out| out.nout());
-        let eqn = OdeSolverEquations::new(rhs, init, mass, root, out, p);
+        let eqn = OdeSolverEquations::new(rhs, init, mass, root, out, reset, p);
         let ic_options = Self::build_ic_options::<M::T>(self.ic_options);
         let ode_options = Self::build_ode_options::<M::T>(self.ode_options);
 

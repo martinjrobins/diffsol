@@ -5,13 +5,14 @@ use crate::{
     ode_solver_error,
     scalar::Scalar,
     AugmentedOdeEquations, Checkpointing, Context, DefaultDenseMatrix, DenseMatrix,
-    HermiteInterpolator, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverConfig,
-    OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut, Vector, VectorViewMut,
+    HermiteInterpolator, MatrixCommon, NonLinearOp, NonLinearOpJacobian, OdeEquations,
+    OdeSolverConfig, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut, Vector,
+    VectorViewMut,
 };
 #[derive(Debug, PartialEq)]
 pub enum OdeSolverStopReason<T: Scalar> {
     InternalTimestep,
-    RootFound(T),
+    RootFound(T, usize),
     TstopReached,
 }
 
@@ -111,6 +112,17 @@ where
     /// Interpolate the solution at a given time and place in `y`. This time should be between the current time and the last solver time step
     fn interpolate_inplace(&self, t: Eqn::T, y: &mut Eqn::V) -> Result<(), DiffsolError>;
 
+    /// Interpolate the time derivative dy/dt at a given time. This time should be between the current time and the last solver time step
+    fn interpolate_dy(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
+        let nstates = self.problem().eqn.rhs().nstates();
+        let mut dy = Eqn::V::zeros(nstates, self.problem().context().clone());
+        self.interpolate_dy_inplace(t, &mut dy)?;
+        Ok(dy)
+    }
+
+    /// Interpolate the time derivative dy/dt at a given time and place in `dy`. This time should be between the current time and the last solver time step
+    fn interpolate_dy_inplace(&self, t: Eqn::T, dy: &mut Eqn::V) -> Result<(), DiffsolError>;
+
     /// Interpolate the integral of the output function at a given time. This time should be between the current time and the last solver time step
     fn interpolate_out(&self, t: Eqn::T) -> Result<Eqn::V, DiffsolError> {
         let nout = if let Some(out) = self.problem().eqn.out() {
@@ -146,6 +158,88 @@ where
     /// Interpolate the sensitivity vectors at a given time and place in `sens`. This time should be between the current time and the last solver time step
     fn interpolate_sens_inplace(&self, t: Eqn::T, sens: &mut [Eqn::V]) -> Result<(), DiffsolError>;
 
+    /// Apply a non-linear operator to the current state in-place, replacing `state.y` with
+    /// `op(state.y, state.t)`. The current time and state vector are read from the solver state,
+    /// and the result is written back to `state.y`. `state.dy` is also updated to
+    /// `rhs(state.y, state.t)`.
+    ///
+    /// Note: does not update sensitivity vectors if present; use `state_mut_op_with_sens` for that.
+    ///
+    /// Note: mass matrix is not supported for this operation, and will return an error if the
+    /// problem has a mass matrix.
+    fn state_mut_op<O>(&mut self, op: &O) -> Result<(), DiffsolError>
+    where
+        O: NonLinearOp<T = Eqn::T, V = Eqn::V, M = Eqn::M>,
+    {
+        // only support identity mass matrix for now
+        if self.problem().eqn.mass().is_some() {
+            return Err(ode_solver_error!(MassMatrixNotSupported));
+        }
+
+        let nstates = self.problem().eqn.rhs().nstates();
+        let mut y_out = Eqn::V::zeros(nstates, self.problem().context().clone());
+        op.call_inplace(self.state().y, self.state().t, &mut y_out);
+        self.state_mut().y.copy_from(&y_out);
+        self.problem()
+            .eqn
+            .rhs()
+            .call_inplace(self.state().y, self.state().t, &mut y_out);
+        self.state_mut().dy.copy_from(&y_out);
+        Ok(())
+    }
+
+    /// Like `state_mut_op`, but also updates each sensitivity vector in the state via the
+    /// Jacobian of `op`: `s_new[j] = J_op(y_before, t) · s_old[j]`.
+    ///
+    /// This variant requires `O: NonLinearOpJacobian` so that the Jacobian-vector product is
+    /// available.  Use it when the equation type guarantees the reset operator implements
+    /// `NonLinearOpJacobian` (e.g. when `Eqn: OdeEquationsImplicitSens`).
+    ///
+    /// Note: mass matrix is not supported for this operation.
+    fn state_mut_op_with_sens<O>(&mut self, op: &O) -> Result<(), DiffsolError>
+    where
+        O: NonLinearOpJacobian<T = Eqn::T, V = Eqn::V, M = Eqn::M>,
+    {
+        let nstates = self.problem().eqn.rhs().nstates();
+        let ctx = self.problem().context().clone();
+        // Only two allocations regardless of the number of parameters.
+        let mut y_new = Eqn::V::zeros(nstates, ctx.clone());
+        let mut tmp = Eqn::V::zeros(nstates, ctx);
+        let t = self.state().t;
+        let nparams = self.state().s.len();
+
+        // only support identity mass matrix for now
+        if self.problem().eqn.mass().is_some() {
+            return Err(ode_solver_error!(MassMatrixNotSupported));
+        }
+
+        // Compute y_new = op(y_before) while leaving state.y = y_before intact for
+        // the Jacobian-vector products below.
+        op.call_inplace(self.state().y, t, &mut y_new);
+
+        // s_new[j] = J_op(y_before, t) · s_old[j].  state.y is still y_before here;
+        // process each j one at a time with a single temp, avoiding nparams clones.
+        for j in 0..nparams {
+            op.jac_mul_inplace(self.state().y, t, &self.state().s[j], &mut tmp);
+            self.state_mut().s[j].copy_from(&tmp);
+        }
+
+        // Compute dy = rhs(y_new, t) and reuse tmp.
+        self.problem().eqn.rhs().call_inplace(&y_new, t, &mut tmp);
+        self.state_mut().dy.copy_from(&tmp);
+
+        // Write the updated state vector last so y_before remains available above.
+        self.state_mut().y.copy_from(&y_new);
+
+        Ok(())
+    }
+
+    /// Move the solver state back to time `t` by interpolating `y`, `dy`, and (if
+    /// `integrate_out` is set) `g` to that time and writing them into the current state.
+    /// If the state contains sensitivity vectors they are also interpolated to time `t`.
+    /// This is typically called after a root is found to pin the state to the root time.
+    fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError>;
+
     /// Get the current order of accuracy of the solver (e.g. explict euler method is first-order)
     fn order(&self) -> usize;
 
@@ -153,6 +247,14 @@ where
     ///
     /// This method integrates the system and returns the solution at adaptive timepoints chosen by the solver's
     /// internal error control mechanism. This is useful when you want the minimal number of timepoints for a given accuracy.
+    ///
+    /// If a root function is provided, the solver will stop if any of the root function elements change sign.
+    /// The internal state of the solver is set to the time that the zero-crossing occured.
+    ///
+    /// If a root and a reset function are provided, then if index 0 of the root function has a zero-crossing
+    /// then the reset is applied (the pre-reset and post-reset states are added to the solution)
+    /// and the solver continues on until `final_time`. If any of the other indices of the root function have
+    /// a zero-crossing, then the solver will stop as normal.
     ///
     /// # Arguments
     /// - `final_time`: The time to integrate to
@@ -190,26 +292,19 @@ where
                     write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
                     break;
                 }
-                OdeSolverStopReason::RootFound(t_root) => {
-                    let nstates = self.problem().eqn.rhs().nstates();
-                    let mut y_root = Eqn::V::zeros(nstates, self.problem().context().clone());
-                    self.interpolate_inplace(t_root, &mut y_root)?;
-                    let integrate_out = self.problem().integrate_out;
-                    let mut g_root = None;
-                    if integrate_out {
-                        let mut g = self.state().g.clone();
-                        self.interpolate_out_inplace(t_root, &mut g)?;
-                        g_root = Some(g);
-                    }
-                    {
-                        let state = self.state_mut();
-                        state.y.copy_from(&y_root);
-                        *state.t = t_root;
-                        if let Some(g) = g_root.as_ref() {
-                            state.g.copy_from(g);
+                OdeSolverStopReason::RootFound(t_root, root_idx) => {
+                    self.state_mut_back(t_root)?;
+                    write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
+
+                    // If a reset function is defined and this was root index 0,
+                    // apply the reset and continue integration.
+                    if root_idx == 0 {
+                        if let Some(reset_fn) = self.problem().eqn.reset() {
+                            self.state_mut_op(&reset_fn)?;
+                            write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
+                            continue;
                         }
                     }
-                    write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
                     break;
                 }
             }
@@ -226,15 +321,25 @@ where
     /// requested evaluation times. This is useful when you need the solution at specific timepoints
     /// and want the solver's adaptive stepping for accuracy.
     ///
+    /// If a root function is provided, the solver will stop if any of the root function elements change sign.
+    /// The internal state of the solver is set to the time that the zero-crossing occured.
+    ///
+    /// If a root and a reset function are provided, then if index 0 of the root function has a zero-crossing
+    /// then the reset is applied and the solver continues on until `final_time`.
+    /// If any of the other indices of the root function have a zero-crossing, then the solver will stop as normal.
+    ///
     /// # Arguments
     /// - `t_eval`: A slice of times at which to evaluate the solution. Times should be in increasing order.
     ///
     /// # Returns
-    /// A dense matrix with one column per evaluation time (in the same order as `t_eval`) and one row per state variable.
+    /// A dense matrix with one column per evaluation time (in the same order as `t_eval`) and one row per state variable,
+    /// plus one final column at the stop-root time if a non-reset root fires before `t_eval` is exhausted.
+    ///
+    /// If a reset root (index 0) fires, the reset is applied and integration continues; no extra columns are inserted.
     ///
     /// # Post-condition
-    /// After the solver finishes, the internal state of the solver is at time `t_eval[t_eval.len()-1]`.
-    /// If a root is found, the solver stops early. The internal state is moved to the root time,
+    /// In the case that no roots are found that stop the solve early, the internal state is at time `t_eval[t_eval.len()-1]`.
+    /// If a non-reset root is found, the solver stops early. The internal state is moved to the root time,
     /// and the last column corresponds to the root time (which may not be in `t_eval`).
     fn solve_dense(
         &mut self,
@@ -246,61 +351,64 @@ where
     {
         let (mut ret, mut tmp_nout, mut tmp_nstates) = dense_allocate_return(self, t_eval)?;
 
-        // do loop
         self.set_stop_time(t_eval[t_eval.len() - 1])?;
-        for (i, t) in t_eval.iter().enumerate() {
-            while self.state().t < *t {
+
+        let mut col = 0usize;
+        let mut t_i = 0usize;
+        'outer: while t_i < t_eval.len() {
+            if col >= ret.ncols() {
+                ret.resize_cols((col + 1).max(ret.ncols() * 2));
+            }
+            while self.state().t < t_eval[t_i] {
                 match self.step()? {
                     OdeSolverStopReason::InternalTimestep => {}
                     OdeSolverStopReason::TstopReached => break,
-                    OdeSolverStopReason::RootFound(t_root) => {
-                        // write out all the t_eval points up to t_root
-                        let mut ii = i;
-                        let mut tt = *t;
-                        while tt < t_root {
+                    OdeSolverStopReason::RootFound(t_root, root_idx) => {
+                        // Write any t_eval points that fall strictly before t_root.
+                        while t_i < t_eval.len() && t_eval[t_i] < t_root {
+                            if col >= ret.ncols() {
+                                ret.resize_cols((col + 1).max(ret.ncols() * 2));
+                            }
                             dense_write_out(
                                 self,
                                 &mut ret,
-                                tt,
-                                ii,
+                                t_eval[t_i],
+                                col,
                                 &mut tmp_nout,
                                 &mut tmp_nstates,
                             )?;
-                            // move to next t_eval
-                            ii += 1;
-                            tt = t_eval[ii];
+                            col += 1;
+                            t_i += 1;
                         }
-                        self.interpolate_inplace(t_root, &mut tmp_nstates)?;
-                        let integrate_out = self.problem().integrate_out;
-                        let mut g_root = None;
-                        if integrate_out {
-                            let mut g = self.state().g.clone();
-                            self.interpolate_out_inplace(t_root, &mut g)?;
-                            g_root = Some(g);
-                        }
-                        {
-                            let state = self.state_mut();
-                            state.y.copy_from(&tmp_nstates);
-                            *state.t = t_root;
-                            if let Some(g) = g_root.as_ref() {
-                                state.g.copy_from(g);
+                        self.state_mut_back(t_root)?;
+
+                        if root_idx == 0 {
+                            if let Some(reset_fn) = self.problem().eqn.reset() {
+                                // Apply reset silently, no extra columns emitted.
+                                self.state_mut_op(&reset_fn)?;
+                                // t_eval[t_i] is at or after t_root; process it next.
+                                continue 'outer;
                             }
                         }
-                        {
-                            let mut y_out = ret.column_mut(ii);
-                            if integrate_out {
-                                y_out.copy_from(g_root.as_ref().unwrap());
+
+                        // Non-reset root: write the root state as the final column only if
+                        // the root fired before all t_eval points were consumed.
+                        if col < ret.ncols() {
+                            let mut y_out = ret.column_mut(col);
+                            if self.problem().integrate_out {
+                                y_out.copy_from(self.state().g);
                             } else {
                                 match self.problem().eqn.out() {
                                     Some(out) => {
-                                        out.call_inplace(&tmp_nstates, t_root, &mut tmp_nout);
+                                        out.call_inplace(self.state().y, t_root, &mut tmp_nout);
                                         y_out.copy_from(&tmp_nout);
                                     }
-                                    None => y_out.copy_from(&tmp_nstates),
+                                    None => y_out.copy_from(self.state().y),
                                 }
                             }
+                            col += 1;
                         }
-                        ret.resize_cols(ii + 1);
+                        ret.resize_cols(col);
                         return Ok(ret);
                     }
                 }
@@ -308,12 +416,15 @@ where
             dense_write_out(
                 self,
                 &mut ret,
-                t_eval[i],
-                i,
+                t_eval[t_i],
+                col,
                 &mut tmp_nout,
                 &mut tmp_nstates,
             )?;
+            col += 1;
+            t_i += 1;
         }
+        ret.resize_cols(col);
         Ok(ret)
     }
 

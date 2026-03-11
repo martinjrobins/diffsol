@@ -226,6 +226,10 @@ where
         self.rk.interpolate_inplace(t, y)
     }
 
+    fn interpolate_dy_inplace(&self, t: <Eqn>::T, dy: &mut Eqn::V) -> Result<(), DiffsolError> {
+        self.rk.interpolate_dy_inplace(t, dy)
+    }
+
     fn interpolate_out_inplace(&self, t: <Eqn>::T, g: &mut Eqn::V) -> Result<(), DiffsolError> {
         self.rk.interpolate_out_inplace(t, g)
     }
@@ -236,6 +240,11 @@ where
 
     fn state_mut(&mut self) -> StateRefMut<'_, Eqn::V> {
         self.rk.state_mut().as_mut()
+    }
+
+    fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError> {
+        let integrate_out = self.rk.problem().integrate_out;
+        self.rk.state_mut_back(t, integrate_out)
     }
 }
 
@@ -254,7 +263,8 @@ mod test {
         ode_solver::tests::{
             setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
             test_adjoint_sum_squares, test_checkpointing, test_config, test_interpolate,
-            test_ode_solver, test_problem, test_state_mut, test_state_mut_on_problem,
+            test_interpolate_dy, test_ode_solver, test_problem, test_state_mut,
+            test_state_mut_on_problem,
         },
         scale, ConstantOp, Context, DenseMatrix, MatrixCommon, NalgebraLU, NalgebraVec,
         OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
@@ -284,6 +294,11 @@ mod test {
     #[test]
     fn explicit_rk_test_interpolate_sens() {
         test_interpolate(test_problem::<M>(false).tsit45_sens().unwrap());
+    }
+
+    #[test]
+    fn explicit_rk_test_interpolate_dy() {
+        test_interpolate_dy(test_problem::<M>(false).tsit45().unwrap());
     }
 
     #[test]
@@ -509,5 +524,47 @@ mod test {
             assert!((v - expected_v[i]).abs() < 1e-4);
             assert!((t - expected_t[i]).abs() < 1e-4);
         }
+    }
+
+    /// Test that `step()` includes the root index in `RootFound(t, index)`.
+    #[test]
+    fn test_root_found_index_tsit45() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_two_roots_problem;
+        use crate::ode_solver::tests::test_root_found_index;
+        let (problem, soln) = exponential_decay_with_two_roots_problem::<M>();
+        let solver = problem.tsit45().unwrap();
+        test_root_found_index(solver, &soln, 0, 1e-4);
+    }
+
+    /// Test that `solve()` applies the Reset function (root index 0) and continues,
+    /// only stopping when the stopping root (index 1) fires.
+    #[test]
+    fn test_solve_with_reset_tsit45() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
+        use crate::ode_solver::tests::test_solve_with_reset;
+        let (problem, soln) = exponential_decay_with_reset_problem::<M>();
+        let solver = problem.tsit45().unwrap();
+        test_solve_with_reset(solver, &soln);
+    }
+
+    /// Test that `solve_dense()` applies the Reset function (root index 0) and continues,
+    /// only stopping when the stopping root (index 1) fires.
+    #[test]
+    fn test_solve_dense_with_reset_tsit45() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
+        use crate::ode_solver::tests::test_solve_dense_with_reset;
+        let (problem, soln) = exponential_decay_with_reset_problem::<M>();
+        let solver = problem.tsit45().unwrap();
+        test_solve_dense_with_reset(solver, &soln);
+    }
+
+    /// Test that `solve_dense_sensitivities()` correctly handles a reset event for Tsit45.
+    #[test]
+    fn test_solve_dense_sensitivities_with_reset_tsit45() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem_sens;
+        use crate::ode_solver::tests::test_solve_dense_sensitivities_with_reset;
+        let (problem, soln) = exponential_decay_with_reset_problem_sens::<M>();
+        let solver = problem.tsit45_sens().unwrap();
+        test_solve_dense_sensitivities_with_reset(solver, &soln);
     }
 }

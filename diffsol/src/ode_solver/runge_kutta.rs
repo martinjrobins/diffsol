@@ -378,6 +378,46 @@ where
         &mut self.state
     }
 
+    pub(crate) fn state_mut_back(
+        &mut self,
+        t: M::T,
+        integrate_out: bool,
+    ) -> Result<(), DiffsolError> {
+        let nstates = self.state.y.len();
+        let ctx = self.state.y.context().clone();
+        let mut y = Eqn::V::zeros(nstates, ctx.clone());
+        self.interpolate_inplace(t, &mut y)?;
+        let mut dy = Eqn::V::zeros(nstates, ctx.clone());
+        self.interpolate_dy_inplace(t, &mut dy)?;
+        let g = if integrate_out {
+            let nout = self.state.g.len();
+            let mut g = Eqn::V::zeros(nout, ctx.clone());
+            self.interpolate_out_inplace(t, &mut g)?;
+            Some(g)
+        } else {
+            None
+        };
+        let nparams = self.state.s.len();
+        let s_interp: Vec<Eqn::V> = if nparams > 0 {
+            let mut s = vec![Eqn::V::zeros(nstates, ctx); nparams];
+            self.interpolate_sens_inplace(t, &mut s)?;
+            s
+        } else {
+            vec![]
+        };
+        let state = self.state_mut();
+        state.y.copy_from(&y);
+        state.dy.copy_from(&dy);
+        state.t = t;
+        if let Some(g) = g.as_ref() {
+            state.g.copy_from(g);
+        }
+        for (j, s_j) in s_interp.iter().enumerate() {
+            state.s[j].copy_from(s_j);
+        }
+        Ok(())
+    }
+
     pub(crate) fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
         self.tstop = Some(tstop);
         if let Some(OdeSolverStopReason::TstopReached) = self.handle_tstop(tstop)? {
@@ -876,8 +916,8 @@ where
                 &self.state.y,
                 self.state.t,
             );
-            if let Some(root) = ret {
-                return Ok(OdeSolverStopReason::RootFound(root));
+            if let Some((root, root_idx)) = ret {
+                return Ok(OdeSolverStopReason::RootFound(root, root_idx));
             }
         }
 
@@ -914,6 +954,27 @@ where
         beta_f
     }
 
+    // Derivative of interpolate_beta_function w.r.t theta.
+    // d/dtheta [theta, theta^2, ..., theta^p] = [1, 2*theta, ..., p*theta^{p-1}]
+    fn interpolate_beta_function_deriv(theta: M::T, beta: &M) -> M::V {
+        let poly_order = beta.ncols();
+        let s_star = beta.nrows();
+        // d_thetav[0] = 1 (d/dtheta theta)
+        // d_thetav[i] = (i+1) * theta^i for i >= 1, computed iteratively
+        let mut d_thetav = Vec::with_capacity(poly_order);
+        d_thetav.push(M::T::one());
+        let mut theta_pow = theta; // theta^1
+        for i in 1..poly_order {
+            let coeff = M::T::from_f64(i as f64 + 1.0).unwrap();
+            d_thetav.push(coeff * theta_pow); // (i+1) * theta^i
+            theta_pow *= theta; // theta^{i+1} for next iteration
+        }
+        let d_thetav = M::V::from_vec(d_thetav, beta.context().clone());
+        let mut d_beta_f = <M::V as Vector>::zeros(s_star, beta.context().clone());
+        beta.gemv(M::T::one(), &d_thetav, M::T::zero(), &mut d_beta_f);
+        d_beta_f
+    }
+
     fn interpolate_hermite(
         scale_diff: M::T,
         theta: M::T,
@@ -935,6 +996,59 @@ where
         y.axpy_v(scale_diff * theta, &f1, M::T::one());
         y.axpy(M::T::one() - theta, u0, theta * (theta - M::T::one()));
         y.axpy(theta, u1, M::T::one());
+    }
+
+    // Derivative of the Hermite interpolant w.r.t. t.
+    //
+    // The Hermite polynomial is p(theta) = theta*(theta-1)*Q(theta) + (1-theta)*u0 + theta*u1
+    // where Q(theta) = (1-2*theta)*(u1-u0) + scale_diff*(theta-1)*f0 + scale_diff*theta*f1
+    //
+    // Its derivative w.r.t. theta is:
+    //   p'(theta) = (2*theta-1)*Q(theta) + theta*(theta-1)*Q'(theta) + (u1-u0)
+    // where Q'(theta) = -2*(u1-u0) + scale_diff*(f0 + f1)
+    //
+    // And dy/dt = p'(theta) / dt.
+    fn interpolate_hermite_deriv(
+        scale_diff: M::T,
+        theta: M::T,
+        dt: M::T,
+        u0: &M::V,
+        u1: &M::V,
+        diff: &M,
+        dy: &mut M::V,
+    ) {
+        let f0 = diff.column(0);
+        let f1 = diff.column(diff.ncols() - 1);
+        let nstates = dy.len();
+
+        // Build Q(theta) into a temporary
+        let mut q = <M::V as Vector>::zeros(nstates, diff.context().clone());
+        q.copy_from(u1);
+        q.sub_assign(u0); // q = u1 - u0
+        q.axpy_v(
+            scale_diff * (theta - M::T::one()),
+            &f0,
+            M::T::one() - M::T::from_f64(2.0).unwrap() * theta,
+        ); // q = (1-2*theta)*(u1-u0) + scale_diff*(theta-1)*f0
+        q.axpy_v(scale_diff * theta, &f1, M::T::one()); // q = Q(theta)
+
+        // dy = (u1-u0)/dt + (2*theta-1)/dt * Q(theta)
+        dy.copy_from(u1);
+        dy.sub_assign(u0); // dy = u1 - u0
+        dy.axpy(
+            (M::T::from_f64(2.0).unwrap() * theta - M::T::one()) / dt,
+            &q,
+            M::T::one() / dt,
+        ); // dy = (1/dt)*(u1-u0) + (2*theta-1)/dt * Q(theta)
+
+        // Reuse q for Q'(theta) = 2*(u0-u1) + scale_diff*(f0 + f1)
+        q.copy_from(u0);
+        q.sub_assign(u1); // q = u0 - u1
+        q.axpy_v(scale_diff, &f0, M::T::from_f64(2.0).unwrap()); // q = 2*(u0-u1) + scale_diff*f0
+        q.axpy_v(scale_diff, &f1, M::T::one()); // q = Q'(theta)
+
+        // dy += theta*(theta-1)/dt * Q'(theta)
+        dy.axpy(theta * (theta - M::T::one()) / dt, &q, M::T::one());
     }
 
     pub(crate) fn interpolate_inplace(&self, t: M::T, ret: &mut M::V) -> Result<(), DiffsolError> {
@@ -981,6 +1095,61 @@ where
                 &self.state.y,
                 &self.diff,
                 ret,
+            );
+        }
+        Ok(())
+    }
+
+    pub(crate) fn interpolate_dy_inplace(
+        &self,
+        t: M::T,
+        dy: &mut M::V,
+    ) -> Result<(), DiffsolError> {
+        if dy.len() != self.state.y.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::InterpolationVectorWrongSize {
+                    expected: self.state.y.len(),
+                    found: dy.len(),
+                },
+            ));
+        }
+        if self.is_state_mutated {
+            if t == self.state.t {
+                dy.copy_from(&self.state.dy);
+                return Ok(());
+            } else {
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+            }
+        }
+
+        // check that t is within the current step depending on the direction
+        let is_forward = self.state.h > M::T::zero();
+        if (is_forward && (t > self.state.t || t < self.old_state.t))
+            || (!is_forward && (t < self.state.t || t > self.old_state.t))
+        {
+            return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+        }
+
+        let dt = self.state.t - self.old_state.t;
+        if dt == M::T::zero() {
+            dy.copy_from(&self.state.dy);
+            return Ok(());
+        }
+        let theta = (t - self.old_state.t) / dt;
+        let scale_diff = Eqn::T::one();
+        if let Some(beta) = self.tableau.beta() {
+            let d_beta_f = Self::interpolate_beta_function_deriv(theta, beta);
+            // dy/dt = (scale_diff / dt) * diff * d_beta_f
+            self.diff.gemv(scale_diff / dt, &d_beta_f, M::T::zero(), dy);
+        } else {
+            Self::interpolate_hermite_deriv(
+                scale_diff,
+                theta,
+                dt,
+                &self.old_state.y,
+                &self.state.y,
+                &self.diff,
+                dy,
             );
         }
         Ok(())

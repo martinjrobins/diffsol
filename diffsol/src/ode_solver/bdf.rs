@@ -749,6 +749,34 @@ where
         }
     }
 
+    // Interpolate the time derivative dy/dt of the BDF polynomial at time t.
+    // Uses the product-rule differentiation of the interpolating polynomial from page 7 of [1].
+    // For each term pi_i(t) = prod_{j=0}^{i-1} (t - (t1 - j*h)) / ((j+1)*h),
+    // we maintain pi (the product) and d_pi (its derivative) iteratively.
+    fn interpolate_derivative_from_diff(
+        t: Eqn::T,
+        diff: &M,
+        t1: Eqn::T,
+        h: Eqn::T,
+        order: usize,
+        dy: &mut Eqn::V,
+    ) {
+        let mut pi = Eqn::T::one();
+        let mut d_pi = Eqn::T::zero();
+        dy.fill(Eqn::T::zero());
+        for i in 0..order {
+            let i_t = <Eqn::T as FromPrimitive>::from_f64(i as f64).unwrap();
+            let denom = h * (Eqn::T::one() + i_t);
+            let w = (t - (t1 - h * i_t)) / denom;
+            let dw = Eqn::T::one() / denom;
+            // d(pi_{i+1})/dt = d(pi_i)/dt * w + pi_i * dw
+            let new_d_pi = d_pi * w + pi * dw;
+            pi *= w;
+            d_pi = new_d_pi;
+            dy.axpy_v(d_pi, &diff.column(i + 1), Eqn::T::one());
+        }
+    }
+
     fn error_control(&self) -> Eqn::T {
         let state = &self.state;
         let order = state.order;
@@ -1034,6 +1062,32 @@ where
         Ok(())
     }
 
+    fn interpolate_dy_inplace(&self, t: Eqn::T, dy: &mut Eqn::V) -> Result<(), DiffsolError> {
+        if dy.len() != self.state.y.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::InterpolationVectorWrongSize {
+                    expected: self.state.y.len(),
+                    found: dy.len(),
+                },
+            ));
+        }
+        let state = &self.state;
+        if self.is_state_modified {
+            if t == state.t {
+                dy.copy_from(&state.dy);
+                return Ok(());
+            } else {
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+            }
+        }
+        let is_forward = state.h > Eqn::T::zero();
+        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
+            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
+        }
+        Self::interpolate_derivative_from_diff(t, &state.diff, state.t, state.h, state.order, dy);
+        Ok(())
+    }
+
     fn interpolate_out_inplace(&self, t: Eqn::T, g: &mut Eqn::V) -> Result<(), DiffsolError> {
         if g.len() != self.state.g.len() {
             return Err(DiffsolError::from(
@@ -1126,6 +1180,42 @@ where
     fn state_mut(&mut self) -> StateRefMut<'_, Eqn::V> {
         self.is_state_modified = true;
         self.state.as_mut()
+    }
+
+    fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError> {
+        let state = &mut self.state;
+        if self.is_state_modified {
+            if t != state.t {
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+            }
+            // already at the requested time, nothing to do
+            return Ok(());
+        }
+        let is_forward = state.h > Eqn::T::zero();
+        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
+            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
+        }
+        let current_t = state.t;
+        let current_h = state.h;
+        let order = state.order;
+        Self::interpolate_from_diff(t, &state.diff, current_t, current_h, order, &mut state.y);
+        Self::interpolate_derivative_from_diff(
+            t,
+            &state.diff,
+            current_t,
+            current_h,
+            order,
+            &mut state.dy,
+        );
+        if self.ode_problem.integrate_out {
+            Self::interpolate_from_diff(t, &state.gdiff, current_t, current_h, order, &mut state.g);
+        }
+        for (s, sdiff) in state.s.iter_mut().zip(state.sdiff.iter()) {
+            Self::interpolate_from_diff(t, sdiff, current_t, current_h, order, s);
+        }
+        state.t = t;
+        self.is_state_modified = true;
+        Ok(())
     }
 
     fn checkpoint(&mut self) -> Self::State {
@@ -1432,9 +1522,9 @@ where
                 self.state.as_ref().y,
                 self.state.as_ref().t,
             );
-            if let Some(root) = ret {
+            if let Some((root, root_idx)) = ret {
                 debug!("Root found at time {}", root);
-                return Ok(OdeSolverStopReason::RootFound(root));
+                return Ok(OdeSolverStopReason::RootFound(root, root_idx));
             }
         }
 
@@ -1485,7 +1575,8 @@ mod test {
         ode_solver::tests::{
             setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
             test_adjoint_sum_squares, test_checkpointing, test_config, test_interpolate,
-            test_ode_solver, test_problem, test_state_mut, test_state_mut_on_problem,
+            test_interpolate_dy, test_ode_solver, test_problem, test_state_mut,
+            test_state_mut_on_problem,
         },
         scale, ConstantOp, Context, DenseMatrix, FaerLU, FaerMat, FaerSparseLU, FaerSparseMat,
         MatrixCommon, NalgebraLU, OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
@@ -1516,6 +1607,11 @@ mod test {
     #[test]
     fn bdf_test_interpolate_sens() {
         test_interpolate(test_problem::<M>(false).bdf_sens::<LS>().unwrap());
+    }
+
+    #[test]
+    fn bdf_test_interpolate_dy() {
+        test_interpolate_dy(test_problem::<M>(false).bdf::<LS>().unwrap());
     }
 
     #[test]
@@ -2213,5 +2309,52 @@ mod test {
                 expected_t[i]
             );
         }
+    }
+
+    /// Test that `step()` includes the root index in `RootFound(t, index)`.
+    ///
+    /// Uses a two-output root function (no Reset); root 0 fires at t ≈ 5.108
+    /// (exponential decay y[0] = 0.6, k=0.1) and the test verifies the returned index is 0.
+    #[test]
+    fn test_root_found_index_bdf() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_two_roots_problem;
+        use crate::ode_solver::tests::test_root_found_index;
+        let (problem, soln) = exponential_decay_with_two_roots_problem::<M>();
+        let solver = problem.bdf::<LS>().unwrap();
+        test_root_found_index(solver, &soln, 0, 1e-4);
+    }
+
+    /// Test that `solve()` applies the Reset function (root index 0) and continues,
+    /// only stopping when the stopping root (index 1) fires.
+    ///
+    /// Timeline: reset at t ≈ 5.108 (y=0.6→0.4), stop at t ≈ 7.985 (y=0.3, after reset).
+    #[test]
+    fn test_solve_with_reset_bdf() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
+        use crate::ode_solver::tests::test_solve_with_reset;
+        let (problem, soln) = exponential_decay_with_reset_problem::<M>();
+        let solver = problem.bdf::<LS>().unwrap();
+        test_solve_with_reset(solver, &soln);
+    }
+
+    /// Test that `solve_dense()` applies the Reset function (root index 0) and continues,
+    /// only stopping when the stopping root (index 1) fires.
+    #[test]
+    fn test_solve_dense_with_reset_bdf() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
+        use crate::ode_solver::tests::test_solve_dense_with_reset;
+        let (problem, soln) = exponential_decay_with_reset_problem::<M>();
+        let solver = problem.bdf::<LS>().unwrap();
+        test_solve_dense_with_reset(solver, &soln);
+    }
+
+    /// Test that `solve_dense_sensitivities()` correctly handles a reset event for BDF.
+    #[test]
+    fn test_solve_dense_sensitivities_with_reset_bdf() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem_sens;
+        use crate::ode_solver::tests::test_solve_dense_sensitivities_with_reset;
+        let (problem, soln) = exponential_decay_with_reset_problem_sens::<M>();
+        let solver = problem.bdf_sens::<LS>().unwrap();
+        test_solve_dense_sensitivities_with_reset(solver, &soln);
     }
 }

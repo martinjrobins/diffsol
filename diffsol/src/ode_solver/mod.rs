@@ -26,13 +26,15 @@ mod tests {
     use super::*;
     use crate::error::{DiffsolError, OdeSolverError};
     use crate::matrix::Matrix;
+    use crate::ode_solver::sensitivities::SensitivitiesOdeSolverMethod;
     use crate::op::unit::UnitCallable;
     use crate::op::ParameterisedOp;
     use crate::{
         op::OpStatistics, AdjointOdeSolverMethod, Context, DenseMatrix, MatrixCommon, MatrixRef,
         NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
-        OdeEquationsRef, OdeSolverConfig, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-        OdeSolverStopReason, Scale, VectorRef, VectorView, VectorViewMut,
+        OdeEquationsImplicitSens, OdeEquationsRef, OdeSolverConfig, OdeSolverMethod,
+        OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Scale, VectorRef, VectorView,
+        VectorViewMut,
     };
     use crate::{
         ConstantOp, ConstantOpSens, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp,
@@ -58,7 +60,7 @@ mod tests {
                 match method.set_stop_time(point.t) {
                     Ok(_) => loop {
                         match method.step() {
-                            Ok(OdeSolverStopReason::RootFound(_)) => {
+                            Ok(OdeSolverStopReason::RootFound(_, _)) => {
                                 assert!(have_root);
                                 return method.state().y.clone();
                             }
@@ -72,7 +74,7 @@ mod tests {
                 }
             } else {
                 while method.state().t.abs() < point.t.abs() {
-                    if let OdeSolverStopReason::RootFound(t) = method.step().unwrap() {
+                    if let OdeSolverStopReason::RootFound(t, _) = method.step().unwrap() {
                         assert!(have_root);
                         return method.interpolate(t).unwrap();
                     }
@@ -522,6 +524,7 @@ mod tests {
         type Root = ParameterisedOp<'a, UnitCallable<M>>;
         type Init = &'a TestEqnInit<M>;
         type Out = &'a TestEqnOut<M>;
+        type Reset = ParameterisedOp<'a, UnitCallable<M>>;
     }
 
     impl<M: Matrix> OdeEquations for TestEqn<M> {
@@ -657,6 +660,59 @@ mod tests {
         }
     }
 
+    pub fn test_interpolate_dy<'a, M: Matrix, Method: OdeSolverMethod<'a, TestEqn<M>>>(
+        mut s: Method,
+    ) {
+        // Error before first step: t is in the future
+        let t_future = s.state().t + M::T::from_f64(1e6).unwrap();
+        assert!(s.interpolate_dy(t_future).is_err());
+
+        let t0 = s.state().t;
+        s.step().unwrap();
+        let t1 = s.state().t;
+        let dt = t1 - t0;
+        let tmid = t0 + dt / M::T::from_f64(2.0).unwrap();
+
+        // Wrong vector length should return error
+        let mut dy_wrong = M::V::zeros(2, s.problem().context().clone());
+        assert!(s.interpolate_dy_inplace(t1, &mut dy_wrong).is_err());
+
+        // t after current time should return error
+        assert!(s.interpolate_dy(t1 + M::T::from_f64(1e6).unwrap()).is_err());
+
+        // interpolate_dy should be consistent with finite-difference of interpolate (step 1)
+        let eps = dt.abs() * M::T::from_f64(1e-5).unwrap();
+        let y_plus = s.interpolate(tmid + eps).unwrap();
+        let y_minus = s.interpolate(tmid - eps).unwrap();
+        let fd_dy = (y_plus - y_minus) * Scale(M::T::one() / (M::T::from_f64(2.0).unwrap() * eps));
+        let dy = s.interpolate_dy(tmid).unwrap();
+        dy.assert_eq_norm(
+            &fd_dy,
+            &s.problem().atol,
+            s.problem().rtol,
+            M::T::from_f64(1e3).unwrap(),
+        );
+
+        // take a second step and check consistency again
+        let t1 = s.state().t;
+        s.step().unwrap();
+        let t2 = s.state().t;
+        let dt2 = t2 - t1;
+        let tmid2 = t1 + dt2 / M::T::from_f64(2.0).unwrap();
+        let eps2 = dt2.abs() * M::T::from_f64(1e-5).unwrap();
+        let y_plus = s.interpolate(tmid2 + eps2).unwrap();
+        let y_minus = s.interpolate(tmid2 - eps2).unwrap();
+        let fd_dy2 =
+            (y_plus - y_minus) * Scale(M::T::one() / (M::T::from_f64(2.0).unwrap() * eps2));
+        let dy2 = s.interpolate_dy(tmid2).unwrap();
+        dy2.assert_eq_norm(
+            &fd_dy2,
+            &s.problem().atol,
+            s.problem().rtol,
+            M::T::from_f64(1e3).unwrap(),
+        );
+    }
+
     pub fn test_config<'a, Eqn: OdeEquations + 'a, Method: OdeSolverMethod<'a, Eqn>>(
         mut s: Method,
     ) {
@@ -735,7 +791,7 @@ mod tests {
         loop {
             match solver.step() {
                 Ok(OdeSolverStopReason::InternalTimestep) => (),
-                Ok(OdeSolverStopReason::RootFound(t)) => {
+                Ok(OdeSolverStopReason::RootFound(t, _)) => {
                     // get the state when the event occurred
                     let mut y = solver.interpolate(t).unwrap();
 
@@ -767,7 +823,7 @@ mod tests {
             t.push(solver.state().t);
             match ret {
                 Ok(OdeSolverStopReason::InternalTimestep) => (),
-                Ok(OdeSolverStopReason::RootFound(_)) => {
+                Ok(OdeSolverStopReason::RootFound(_, _)) => {
                     panic!("should be an internal timestep but found a root")
                 }
                 Ok(OdeSolverStopReason::TstopReached) => break,
@@ -871,5 +927,210 @@ mod tests {
                 point.t
             );
         }
+    }
+
+    /// Test that `step()` returns `RootFound(t, index)` with the correct root index.
+    ///
+    /// The problem must have a root function with **two** outputs and **no** Reset:
+    ///   - Root 0 fires first (at `t ≈ 5.108`, `y[0] ≈ 0.6` for the exponential-decay test model)
+    ///   - Root 1 fires second
+    ///
+    /// The test asserts that the first `RootFound` reports index 0 and the time
+    /// matches `t_root_0_expected` within `tol`.
+    pub fn test_root_found_index<'a, Eqn, Method>(
+        mut solver: Method,
+        soln: &OdeSolverSolution<Eqn::V>,
+        expected_root_index: usize,
+        tol: Eqn::T,
+    ) where
+        Eqn: OdeEquations + 'a,
+        Method: OdeSolverMethod<'a, Eqn>,
+    {
+        let t_root_expected = soln.solution_points[0].t;
+        solver
+            .set_stop_time(Eqn::T::from_f64(100.0).unwrap())
+            .unwrap();
+        loop {
+            match solver.step().unwrap() {
+                // RED: `RootFound` currently has one field; adding `index` makes this fail.
+                OdeSolverStopReason::RootFound(t, index) => {
+                    assert_eq!(
+                        index, expected_root_index,
+                        "expected root index {expected_root_index} but got {index}",
+                    );
+                    assert!(
+                        (t - t_root_expected).abs() < tol,
+                        "expected t ≈ {t_root_expected:?}, got {t:?}",
+                    );
+                    break;
+                }
+                OdeSolverStopReason::TstopReached => {
+                    panic!("reached tstop without finding a root")
+                }
+                OdeSolverStopReason::InternalTimestep => {}
+            }
+        }
+    }
+
+    /// Test that `solve()` applies the Reset function when root index 0 fires
+    /// and continues integration, only stopping when the non-reset root (index 1) fires.
+    ///
+    /// `soln` must contain one solution point at `t_stop` (the state when the
+    /// non-reset root fires).  The test searches the `solve()` output columns for
+    /// a column whose time and state match within tolerance.
+    pub fn test_solve_with_reset<'a, Eqn, Method>(
+        mut solver: Method,
+        soln: &OdeSolverSolution<Eqn::V>,
+    ) where
+        Eqn: OdeEquations + 'a,
+        Eqn::V: DefaultDenseMatrix,
+        Method: OdeSolverMethod<'a, Eqn>,
+    {
+        let final_time = Eqn::T::from_f64(100.0).unwrap();
+        let (ys, ts) = solver.solve(final_time).unwrap();
+
+        // Search for each expected solution point sequentially in the output.
+        let mut search_start = 0;
+        for (point_idx, expected) in soln.solution_points.iter().enumerate() {
+            // Use the provided time tolerance for matching root event times;
+            // root-finding accuracy varies across solvers.
+            let time_tol = soln.rtol * expected.t.abs() + soln.atol.get_index(0);
+            let col = ts
+                .iter()
+                .enumerate()
+                .skip(search_start)
+                .find(|(_, &t)| (t - expected.t).abs() < Eqn::T::from_f64(30.0).unwrap() * time_tol)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "solution point {point_idx} (t ≈ {:?}) not found in solve() output \
+                         (searching from index {search_start}); ts = {:?}",
+                        expected.t, ts,
+                    )
+                })
+                .0;
+            // Build an owned vector from the dense-matrix column and check WRMS norm.
+            let n = expected.state.len();
+            let ctx = soln.atol.context().clone();
+            let mut actual = Eqn::V::zeros(n, ctx);
+            for j in 0..n {
+                actual.set_index(j, ys.get_index(j, col));
+            }
+            let error = actual - &expected.state;
+            let error_norm = error
+                .squared_norm(&expected.state, &soln.atol, soln.rtol)
+                .sqrt();
+            let error_threshold = Eqn::T::from_f64(20.0).unwrap();
+            assert!(
+                error_norm < error_threshold,
+                "solution point {point_idx} (t ≈ {:?}): WRMS error norm {error_norm:?} ≥ {error_threshold:?}",
+                expected.t,
+            );
+            search_start = col + 1;
+        }
+    }
+
+    /// Test that `solve_dense()` applies the Reset function silently (no extra columns) when
+    /// root index 0 fires, continues integration, and stops when the non-reset root (index 1) fires.
+    ///
+    /// `soln` must contain one solution point at `t_stop`.
+    ///
+    /// The test verifies that:
+    ///  - The output matrix is truncated (fewer columns than t_eval.len())
+    ///  - The last column matches the stop state (soln[0])
+    pub fn test_solve_dense_with_reset<'a, Eqn, Method>(
+        mut solver: Method,
+        soln: &OdeSolverSolution<Eqn::V>,
+    ) where
+        Eqn: OdeEquations + 'a,
+        Eqn::V: DefaultDenseMatrix,
+        Method: OdeSolverMethod<'a, Eqn>,
+    {
+        let t_stop = soln.solution_points[0].t;
+
+        let n_steps = 20usize;
+        let final_time = t_stop * Eqn::T::from_f64(2.0).unwrap();
+        let dt = final_time / Eqn::T::from_f64(n_steps as f64).unwrap();
+        let t_eval: Vec<Eqn::T> = (0..=n_steps)
+            .map(|i| dt * Eqn::T::from_f64(i as f64).unwrap())
+            .collect();
+
+        let ret = solver.solve_dense(&t_eval).unwrap();
+        let ncols = ret.ncols();
+
+        // The stop root fires before the last t_eval, so the matrix should be truncated.
+        assert!(
+            ncols < t_eval.len(),
+            "expected early stop: ncols ({ncols}) should be < t_eval.len() ({})",
+            t_eval.len(),
+        );
+
+        let error_threshold = Eqn::T::from_f64(20.0).unwrap();
+
+        // The last column should be the stop state (soln[0]).
+        let last_col = ncols - 1;
+        let actual = ret.column(last_col).into_owned();
+        let error = actual - &soln.solution_points[0].state;
+        let error_norm = error
+            .squared_norm(&soln.solution_points[0].state, &soln.atol, soln.rtol)
+            .sqrt();
+        assert!(
+            error_norm < error_threshold,
+            "stop state (soln[0], t ≈ {:?}) not found in last column ({last_col}); \
+             WRMS norm {error_norm:?} ≥ {error_threshold:?}",
+            t_stop,
+        );
+    }
+
+    /// Test that `solve_dense_sensitivities()` correctly handles a reset event:
+    /// - Applies the reset silently (no extra columns emitted).
+    /// - Continues integration after the reset.
+    /// - Truncates output when the non-reset stop root (index 1) fires.
+    ///
+    /// `soln` must contain one solution point at `t_stop` with exact `y` and sensitivity vectors.
+    pub fn test_solve_dense_sensitivities_with_reset<'a, Eqn, Method>(
+        mut solver: Method,
+        soln: &OdeSolverSolution<Eqn::V>,
+    ) where
+        Eqn: OdeEquationsImplicitSens + 'a,
+        Eqn::V: DefaultDenseMatrix,
+        Method: SensitivitiesOdeSolverMethod<'a, Eqn>,
+    {
+        let t_stop = soln.solution_points[0].t;
+
+        let n_steps = 20usize;
+        let final_time = t_stop * Eqn::T::from_f64(2.0).unwrap();
+        let dt = final_time / Eqn::T::from_f64(n_steps as f64).unwrap();
+        let t_eval: Vec<Eqn::T> = (0..=n_steps)
+            .map(|i| dt * Eqn::T::from_f64(i as f64).unwrap())
+            .collect();
+
+        let (ret, ret_sens) = solver.solve_dense_sensitivities(&t_eval).unwrap();
+        let ncols = ret.ncols();
+
+        // The stop root fires before the final t_eval → output must be truncated.
+        assert!(
+            ncols < t_eval.len(),
+            "expected early stop: ncols ({ncols}) should be < t_eval.len() ({})",
+            t_eval.len(),
+        );
+
+        // Check the last column matches the expected solution at t_stop.
+        let expected = &soln.solution_points[0];
+        let error_threshold = Eqn::T::from_f64(50.0).unwrap();
+        let sens_points = soln.sens_solution_points.as_ref().unwrap();
+
+        let last_col = ncols - 1;
+        let ey = ret.column(last_col).into_owned() - &expected.state;
+        let mut combined = ey.squared_norm(&expected.state, &soln.atol, soln.rtol);
+        for (param_j, sens_pts_j) in sens_points.iter().enumerate() {
+            let expected_s = &sens_pts_j[0].state;
+            let es = ret_sens[param_j].column(last_col).into_owned() - expected_s;
+            combined += es.squared_norm(expected_s, &soln.atol, soln.rtol);
+        }
+        let norm = combined.sqrt();
+        assert!(
+            norm < error_threshold,
+            "t_stop solution not found in last column; combined WRMS {norm:?} ≥ {error_threshold:?}",
+        );
     }
 }

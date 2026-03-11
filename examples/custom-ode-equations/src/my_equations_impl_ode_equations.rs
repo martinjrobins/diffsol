@@ -1,5 +1,5 @@
-use crate::{MyEquations, MyInit, MyMass, MyOut, MyRhs, MyRoot, V};
-use diffsol::{OdeEquations, OdeEquationsRef, Vector};
+use crate::{MyEquations, MyInit, MyMass, MyOut, MyRhs, MyRoot, M, V};
+use diffsol::{OdeEquations, OdeEquationsRef, UnitCallable, Vector};
 
 impl<'a> OdeEquationsRef<'a> for MyEquations {
     type Rhs = MyRhs<'a>;
@@ -7,6 +7,7 @@ impl<'a> OdeEquationsRef<'a> for MyEquations {
     type Init = MyInit<'a>;
     type Root = MyRoot<'a>;
     type Out = MyOut<'a>;
+    type Reset = UnitCallable<M>;
 }
 
 impl OdeEquations for MyEquations {
@@ -24,6 +25,9 @@ impl OdeEquations for MyEquations {
     }
     fn out(&self) -> Option<<MyEquations as OdeEquationsRef<'_>>::Out> {
         Some(MyOut { p: &self.p })
+    }
+    fn reset(&self) -> Option<<MyEquations as OdeEquationsRef<'_>>::Reset> {
+        None
     }
     fn set_params(&mut self, p: &V) {
         self.p.copy_from(p);
