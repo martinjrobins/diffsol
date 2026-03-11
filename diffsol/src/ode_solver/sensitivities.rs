@@ -1,8 +1,7 @@
 use crate::{
     error::DiffsolError, error::OdeSolverError, ode_solver_error, AugmentedOdeSolverMethod,
-    Context, DefaultDenseMatrix, DenseMatrix, MatrixCommon, NonLinearOp, NonLinearOpJacobian,
-    NonLinearOpSens, OdeEquationsImplicitSens, OdeSolverStopReason, Op, SensEquations, Vector,
-    VectorViewMut,
+    Context, DefaultDenseMatrix, DenseMatrix, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens,
+    OdeEquationsImplicitSens, OdeSolverStopReason, Op, SensEquations, Vector, VectorViewMut,
 };
 use num_traits::{One, Zero};
 use std::ops::AddAssign;
@@ -86,11 +85,11 @@ where
         // ret, ret_sens, and col are passed explicitly so they remain directly accessible
         // outside the closure (avoiding borrow conflicts with resize/return).
         let mut write_col = |y: &Eqn::V,
-                              s: &[Eqn::V],
-                              t: Eqn::T,
-                              col: usize,
-                              ret: &mut <Eqn::V as DefaultDenseMatrix>::M,
-                              ret_sens: &mut [<Eqn::V as DefaultDenseMatrix>::M]|
+                             s: &[Eqn::V],
+                             t: Eqn::T,
+                             col: usize,
+                             ret: &mut <Eqn::V as DefaultDenseMatrix>::M,
+                             ret_sens: &mut [<Eqn::V as DefaultDenseMatrix>::M]|
          -> Result<(), DiffsolError> {
             if let Some(out) = eqn_out.as_ref() {
                 let tmp_nout = tmp_nout.as_mut().unwrap();

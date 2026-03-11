@@ -26,6 +26,7 @@ mod tests {
     use super::*;
     use crate::error::{DiffsolError, OdeSolverError};
     use crate::matrix::Matrix;
+    use crate::ode_solver::sensitivities::SensitivitiesOdeSolverMethod;
     use crate::op::unit::UnitCallable;
     use crate::op::ParameterisedOp;
     use crate::{
@@ -39,7 +40,6 @@ mod tests {
         ConstantOp, ConstantOpSens, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp,
         NonLinearOpSens, Op, Vector,
     };
-    use crate::ode_solver::sensitivities::SensitivitiesOdeSolverMethod;
     use num_traits::{FromPrimitive, One, Zero};
 
     pub fn test_ode_solver<'a, M, Eqn, Method>(

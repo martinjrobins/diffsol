@@ -378,7 +378,11 @@ where
         &mut self.state
     }
 
-    pub(crate) fn state_mut_back(&mut self, t: M::T, integrate_out: bool) -> Result<(), DiffsolError> {
+    pub(crate) fn state_mut_back(
+        &mut self,
+        t: M::T,
+        integrate_out: bool,
+    ) -> Result<(), DiffsolError> {
         let nstates = self.state.y.len();
         let ctx = self.state.y.context().clone();
         let mut y = Eqn::V::zeros(nstates, ctx.clone());
@@ -963,7 +967,7 @@ where
         for i in 1..poly_order {
             let coeff = M::T::from_f64(i as f64 + 1.0).unwrap();
             d_thetav.push(coeff * theta_pow); // (i+1) * theta^i
-            theta_pow = theta_pow * theta; // theta^{i+1} for next iteration
+            theta_pow *= theta; // theta^{i+1} for next iteration
         }
         let d_thetav = M::V::from_vec(d_thetav, beta.context().clone());
         let mut d_beta_f = <M::V as Vector>::zeros(s_star, beta.context().clone());

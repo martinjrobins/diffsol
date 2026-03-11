@@ -747,8 +747,8 @@ pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
     let t_root_f64 = 10.0 * (5.0_f64 / 3.0_f64).ln();
     let s_k_root_val = M::T::from_f64(-t_root_f64 * 0.6).unwrap();
     let s_y0_root_val = M::T::from_f64(0.6).unwrap();
-    let s_k_root = M::V::from_element(2, s_k_root_val, ctx.clone());
-    let s_y0_root = M::V::from_element(2, s_y0_root_val, ctx.clone());
+    let _s_k_root = M::V::from_element(2, s_k_root_val, ctx.clone());
+    let _s_y0_root = M::V::from_element(2, s_y0_root_val, ctx.clone());
 
     let mut soln = OdeSolverSolution {
         atol: problem.atol.clone(),

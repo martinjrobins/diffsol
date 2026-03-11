@@ -162,8 +162,8 @@ where
     /// `op(state.y, state.t)`. The current time and state vector are read from the solver state,
     /// and the result is written back to `state.y`. `state.dy` is also updated to
     /// `rhs(state.y, state.t)`.
-    /// 
-    /// Note: does not update sensitivity vectors if present; use `state_mut_op_with_sens` for that. 
+    ///
+    /// Note: does not update sensitivity vectors if present; use `state_mut_op_with_sens` for that.
     ///
     /// Note: mass matrix is not supported for this operation, and will return an error if the
     /// problem has a mass matrix.
@@ -179,7 +179,10 @@ where
         if self.problem().eqn.mass().is_some() {
             return Err(ode_solver_error!(MassMatrixNotSupported));
         }
-        self.problem().eqn.rhs().call_inplace(self.state().y, self.state().t, &mut y_out);
+        self.problem()
+            .eqn
+            .rhs()
+            .call_inplace(self.state().y, self.state().t, &mut y_out);
         self.state_mut().dy.copy_from(&y_out);
         Ok(())
     }

@@ -17,10 +17,10 @@ use diffsl::{
 
 use crate::{
     error::DiffsolError, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
-    op::nonlinear_op::NonLinearOpJacobian, ConstantOp, ConstantOpSens,
-    ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix, MatrixHost, NonLinearOp,
-    NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op,
-    Scale, Vector, VectorHost,
+    op::nonlinear_op::NonLinearOpJacobian, ConstantOp, ConstantOpSens, ConstantOpSensAdjoint,
+    LinearOp, LinearOpTranspose, Matrix, MatrixHost, NonLinearOp, NonLinearOpAdjoint,
+    NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scale, Vector,
+    VectorHost,
 };
 
 /// Context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
@@ -464,6 +464,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> Op for DiffSlReset<'_, M, CG
     fn nstates(&self) -> usize {
         self.0.context.nstates
     }
+    #[allow(clippy::misnamed_getters)]
     fn nout(&self) -> usize {
         self.0.context.nstates
     }
@@ -616,9 +617,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpAdjoint
     }
 }
 
-impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens
-    for DiffSlReset<'_, M, CG>
-{
+impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for DiffSlReset<'_, M, CG> {
     fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         let tmp = self.0.context.tmp.borrow();
         self.0.context.compiler.set_inputs(
@@ -1035,9 +1034,11 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> OdeEquations for DiffSl<
 
     fn set_params(&mut self, p: &Self::V) {
         // set the parameters in data
-        self.context
-            .compiler
-            .set_inputs(p.as_slice(), self.context.data.borrow_mut().as_mut_slice(), 0u32);
+        self.context.compiler.set_inputs(
+            p.as_slice(),
+            self.context.data.borrow_mut().as_mut_slice(),
+            0u32,
+        );
 
         // set_u0 will calculate all the constants in the equations based on the params
         let mut dummy = M::V::zeros(self.context.nstates, self.context().clone());

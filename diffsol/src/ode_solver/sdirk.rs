@@ -571,7 +571,7 @@ mod test {
     fn sdirk_test_interpolate_dy() {
         test_interpolate_dy(test_problem::<M>(false).tr_bdf2::<LS>().unwrap());
     }
-    
+
     #[test]
     fn sdirk_test_esdirk34_interpolate_dy() {
         test_interpolate_dy(test_problem::<M>(false).esdirk34::<LS>().unwrap());

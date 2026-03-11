@@ -233,6 +233,7 @@ where
     /// - `rhs`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the right-hand side of the ODE.
     /// - `rhs_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the right-hand side with the vector v.
     /// - `rhs_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the rhs wrt the parameters, with the vector v.
+    #[allow(clippy::type_complexity)]
     pub fn rhs_sens_implicit<F, G, H>(
         self,
         rhs: F,
@@ -778,6 +779,7 @@ where
     /// - `out_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the output with the vector v.
     /// - `out_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the output wrt the parameters, with the vector v.
     /// - `nout`: Number of output equations (i.e. size of the output vector `y`).
+    #[allow(clippy::type_complexity)]
     pub fn out_sens_implicit<F, G, H>(
         self,
         out: F,

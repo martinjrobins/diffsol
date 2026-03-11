@@ -771,7 +771,7 @@ where
             let dw = Eqn::T::one() / denom;
             // d(pi_{i+1})/dt = d(pi_i)/dt * w + pi_i * dw
             let new_d_pi = d_pi * w + pi * dw;
-            pi = pi * w;
+            pi *= w;
             d_pi = new_d_pi;
             dy.axpy_v(d_pi, &diff.column(i + 1), Eqn::T::one());
         }
@@ -1208,14 +1208,7 @@ where
             &mut state.dy,
         );
         if self.ode_problem.integrate_out {
-            Self::interpolate_from_diff(
-                t,
-                &state.gdiff,
-                current_t,
-                current_h,
-                order,
-                &mut state.g,
-            );
+            Self::interpolate_from_diff(t, &state.gdiff, current_t, current_h, order, &mut state.g);
         }
         for (s, sdiff) in state.s.iter_mut().zip(state.sdiff.iter()) {
             Self::interpolate_from_diff(t, sdiff, current_t, current_h, order, s);
