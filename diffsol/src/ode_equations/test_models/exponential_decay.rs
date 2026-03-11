@@ -532,8 +532,8 @@ pub fn exponential_decay_problem_sens_with_out<M: MatrixHost + 'static>(
 // exponential_decay_init functions (p = [k, y0], nstates = 2).
 //
 // Root 0: y[0] - 0.6  (reset trigger, fires at t ≈ 5.108)
-// Root 1: y[0] - 0.3  (stop condition, fires after reset at t ≈ 17.148)
-// Reset:  y → [y0, y0] = [1.0, 1.0]
+// Root 1: y[0] - 0.3  (stop condition, fires after reset at t ≈ 7.985)
+// Reset:  y → [0.4, 0.4]
 // ------------------------------------------------------------------
 
 fn exponential_decay_two_root<M: MatrixHost>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
