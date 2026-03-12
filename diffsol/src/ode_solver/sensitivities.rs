@@ -22,9 +22,10 @@ where
     /// If a root function is provided, the solver will stop if any of the root function elements change sign.
     /// The internal state of the solver is set to the time that the zero-crossing occured.
     ///
-    /// If a root and a reset function are provided, then if index 0 of the root function has a zero-crossing
-    /// then the reset is applied, the sensitivities are update appropriately and the solver continues on until `final_time`.
-    /// If any of the other indices of the root function have a zero-crossing, then the solver will stop as normal.
+    /// If a root and a reset function are provided, then if the configured
+    /// `problem.reset_on_root_index` has a zero-crossing then the reset is applied,
+    /// sensitivities are updated appropriately, and the solver continues on until `final_time`.
+    /// Other root indices stop the solve.
     ///
     /// # Arguments
     /// - `t_eval`: A slice of times at which to evaluate the solution. Times should be in increasing order.
@@ -34,7 +35,7 @@ where
     ///
     /// The ODE solution is a dense matrix with one column per evaluation time (in the same order as `t_eval`) and one row per state variable,
     /// plus one final column at the stop-root time if a non-reset root fires before `t_eval` is exhausted.
-    /// If a reset root (index 0) fires, the reset is applied and integration continues; no extra columns are inserted.
+    /// If the configured reset root fires, the reset is applied and integration continues; no extra columns are inserted.
     ///
     /// The sensitivities are returned as a Vec of dense matrices of identical shape as the ODE solution,
     /// where the ith element of the Vec corresponds to the sensitivities with respect to the ith parameter.
@@ -105,6 +106,7 @@ where
 
         let t_final = *t_eval.last().unwrap();
         self.set_stop_time(t_final)?;
+        let reset_on_root_index = self.problem().reset_on_root_index;
 
         let mut col = 0usize;
         let mut t_i = 0usize;
@@ -161,7 +163,7 @@ where
 
                         self.state_mut_back(t_root)?;
 
-                        if root_idx == 0 {
+                        if Some(root_idx) == reset_on_root_index {
                             if let Some(reset_fn) = self.problem().eqn.reset() {
                                 self.state_mut_op_with_sens(&reset_fn)?;
                                 continue 'outer;

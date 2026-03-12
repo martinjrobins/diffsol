@@ -570,6 +570,7 @@ pub fn exponential_decay_with_reset_problem<M: MatrixHost + 'static>() -> (
         .init(exponential_decay_init::<M>, 2)
         .root(exponential_decay_two_root::<M>, 2)
         .reset(exponential_decay_reset::<M>)
+        .reset_on_root_index(Some(0))
         .build()
         .unwrap();
     // Root 0 fires when y[0] = 0.6: t_root_0 = -ln(0.6)/0.1
@@ -699,6 +700,7 @@ pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
             exponential_decay_reset_y_plus_2::<M>,
             exponential_decay_reset_y_plus_2_jac::<M>,
         )
+        .reset_on_root_index(Some(0))
         .build()
         .unwrap();
 

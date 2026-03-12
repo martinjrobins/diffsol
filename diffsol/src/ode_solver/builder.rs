@@ -38,6 +38,7 @@ pub struct OdeBuilder<
     p: Vec<M::T>,
     use_coloring: bool,
     integrate_out: bool,
+    reset_on_root_index: Option<usize>,
     rhs: Option<Rhs>,
     init: Option<Init>,
     mass: Option<Mass>,
@@ -122,6 +123,7 @@ where
             p: vec![],
             use_coloring: false,
             integrate_out: false,
+            reset_on_root_index: None,
             out_rtol: Some(default_rtol),
             out_atol: Some(default_atol.clone()),
             param_rtol: Some(default_rtol),
@@ -171,6 +173,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            reset_on_root_index: self.reset_on_root_index,
             ctx: self.ctx,
             ic_options: self.ic_options,
             ode_options: self.ode_options,
@@ -221,6 +224,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            reset_on_root_index: self.reset_on_root_index,
             ctx: self.ctx,
             ic_options: self.ic_options,
             ode_options: self.ode_options,
@@ -275,6 +279,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            reset_on_root_index: self.reset_on_root_index,
             ctx: self.ctx,
             ic_options: self.ic_options,
             ode_options: self.ode_options,
@@ -336,6 +341,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            reset_on_root_index: self.reset_on_root_index,
             ctx: self.ctx,
             ic_options: self.ic_options,
             ode_options: self.ode_options,
@@ -375,6 +381,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            reset_on_root_index: self.reset_on_root_index,
             ctx: self.ctx,
             ic_options: self.ic_options,
             ode_options: self.ode_options,
@@ -423,6 +430,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            reset_on_root_index: self.reset_on_root_index,
             ctx: self.ctx,
             ic_options: self.ic_options,
             ode_options: self.ode_options,
@@ -472,6 +480,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            reset_on_root_index: self.reset_on_root_index,
             ctx: self.ctx,
             ic_options: self.ic_options,
             ode_options: self.ode_options,
@@ -514,6 +523,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            reset_on_root_index: self.reset_on_root_index,
             ctx: self.ctx,
             ic_options: self.ic_options,
             ode_options: self.ode_options,
@@ -566,6 +576,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            reset_on_root_index: self.reset_on_root_index,
             ctx: self.ctx,
             ic_options: self.ic_options,
             ode_options: self.ode_options,
@@ -613,6 +624,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            reset_on_root_index: self.reset_on_root_index,
             ctx: self.ctx,
             ic_options: self.ic_options,
             ode_options: self.ode_options,
@@ -658,6 +670,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            reset_on_root_index: self.reset_on_root_index,
             ctx: self.ctx,
             ic_options: self.ic_options,
             ode_options: self.ode_options,
@@ -710,6 +723,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            reset_on_root_index: self.reset_on_root_index,
             ctx: self.ctx,
             ic_options: self.ic_options,
             ode_options: self.ode_options,
@@ -763,6 +777,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            reset_on_root_index: self.reset_on_root_index,
             ctx: self.ctx,
             ic_options: self.ic_options,
             ode_options: self.ode_options,
@@ -821,6 +836,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            reset_on_root_index: self.reset_on_root_index,
             ctx: self.ctx,
             ic_options: self.ic_options,
             ode_options: self.ode_options,
@@ -883,6 +899,7 @@ where
             p: self.p,
             use_coloring: self.use_coloring,
             integrate_out: self.integrate_out,
+            reset_on_root_index: self.reset_on_root_index,
             ctx: self.ctx,
             ic_options: self.ic_options,
             ode_options: self.ode_options,
@@ -1000,6 +1017,14 @@ where
     /// If true, the output will be integrated using the same method as the ODE.
     pub fn integrate_out(mut self, integrate_out: bool) -> Self {
         self.integrate_out = integrate_out;
+        self
+    }
+
+    /// Set which root index should apply `reset` and continue integration.
+    ///
+    /// If `None` (default), all roots stop the solve.
+    pub fn reset_on_root_index(mut self, reset_on_root_index: Option<usize>) -> Self {
+        self.reset_on_root_index = reset_on_root_index;
         self
     }
 
@@ -1273,6 +1298,7 @@ where
             self.t0,
             self.h0,
             self.integrate_out,
+            self.reset_on_root_index,
             ic_options,
             ode_options,
         )
@@ -1364,6 +1390,7 @@ where
             self.t0,
             self.h0,
             self.integrate_out,
+            self.reset_on_root_index,
             ic_options,
             ode_options,
         )

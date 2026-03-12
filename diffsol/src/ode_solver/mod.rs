@@ -573,6 +573,7 @@ mod tests {
             M::T::zero(),
             M::T::one(),
             integrate_out,
+            None,
             Default::default(),
             Default::default(),
         )
