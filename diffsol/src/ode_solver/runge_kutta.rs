@@ -4,6 +4,7 @@ use crate::op::sdirk::SdirkCallable;
 use crate::scale;
 use crate::AugmentedOdeEquationsImplicit;
 use crate::OdeEquationsImplicit;
+use crate::OdeEquationsImplicitSens;
 use crate::OdeSolverStopReason;
 use crate::RkState;
 use crate::RootFinder;
@@ -376,6 +377,26 @@ where
     pub(crate) fn state_mut(&mut self) -> &mut RkState<Eqn::V> {
         self.is_state_mutated = true;
         &mut self.state
+    }
+
+    pub(crate) fn reset(&mut self) -> Result<(), DiffsolError> {
+        if let Some(reset_fn) = self.problem.eqn.reset() {
+            self.state.state_mut_op(&self.problem.eqn, &reset_fn)?;
+            self.is_state_mutated = true;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn reset_with_sens(&mut self) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitSens,
+    {
+        if let Some(reset_fn) = self.problem.eqn.reset() {
+            self.state
+                .state_mut_op_with_sens(&self.problem.eqn, &reset_fn)?;
+            self.is_state_mutated = true;
+        }
+        Ok(())
     }
 
     pub(crate) fn state_mut_back(

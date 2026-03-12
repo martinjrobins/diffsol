@@ -1,11 +1,14 @@
 use super::method::AugmentedOdeSolverMethod;
 use super::runge_kutta::Rk;
+use super::sensitivities::SensitivitiesOdeSolverMethod;
 use crate::error::DiffsolError;
 use crate::ode_solver::bdf::BdfStatistics;
 use crate::vector::VectorRef;
 use crate::NoAug;
+use crate::OdeEquationsImplicitSens;
 use crate::OdeSolverStopReason;
 use crate::RkState;
+use crate::SensEquations;
 use crate::Tableau;
 use crate::{
     AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, ExplicitRkConfig, OdeEquations,
@@ -31,6 +34,19 @@ where
     }
     fn augmented_eqn_mut(&mut self) -> Option<&mut AugEqn> {
         self.augmented_eqn.as_mut()
+    }
+}
+
+impl<'a, Eqn, M> SensitivitiesOdeSolverMethod<'a, Eqn>
+    for ExplicitRk<'a, Eqn, M, SensEquations<'a, Eqn>>
+where
+    Eqn: OdeEquationsImplicitSens + 'a,
+    M: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+{
+    fn reset_with_sens(&mut self) -> Result<(), DiffsolError> {
+        self.rk.reset_with_sens()
     }
 }
 
@@ -245,6 +261,10 @@ where
     fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError> {
         let integrate_out = self.rk.problem().integrate_out;
         self.rk.state_mut_back(t, integrate_out)
+    }
+
+    fn reset(&mut self) -> Result<(), DiffsolError> {
+        self.rk.reset()
     }
 }
 

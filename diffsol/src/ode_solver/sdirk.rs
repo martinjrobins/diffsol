@@ -12,8 +12,8 @@ use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, DenseMatrix, JacobianUpdate,
-    Matrix, NoLineSearch, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-    Op, StateRef, StateRefMut,
+    Matrix, NoLineSearch, OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverMethod,
+    OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut,
 };
 use log::debug;
 use log::trace;
@@ -24,6 +24,7 @@ use super::bdf::BdfStatistics;
 use super::config::SdirkConfig;
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
+use super::sensitivities::SensitivitiesOdeSolverMethod;
 
 impl<'a, M, Eqn, LS, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
     for Sdirk<'a, Eqn, LS, M, AugEqn>
@@ -44,6 +45,21 @@ where
     }
     fn augmented_eqn_mut(&mut self) -> Option<&mut AugEqn> {
         self.s_op.as_mut().map(|op| &mut op.eqn)
+    }
+}
+
+impl<'a, M, Eqn, LS> SensitivitiesOdeSolverMethod<'a, Eqn>
+    for Sdirk<'a, Eqn, LS, M, SensEquations<'a, Eqn>>
+where
+    Eqn: OdeEquationsImplicitSens + 'a,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    LS: LinearSolver<Eqn::M>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+{
+    fn reset_with_sens(&mut self) -> Result<(), DiffsolError> {
+        self.rk.reset_with_sens()
     }
 }
 
@@ -509,6 +525,10 @@ where
     fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError> {
         let integrate_out = self.rk.problem().integrate_out;
         self.rk.state_mut_back(t, integrate_out)
+    }
+
+    fn reset(&mut self) -> Result<(), DiffsolError> {
+        self.rk.reset()
     }
 }
 

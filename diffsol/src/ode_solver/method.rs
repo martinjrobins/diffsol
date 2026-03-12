@@ -5,9 +5,8 @@ use crate::{
     ode_solver_error,
     scalar::Scalar,
     AugmentedOdeEquations, Checkpointing, Context, DefaultDenseMatrix, DenseMatrix,
-    HermiteInterpolator, MatrixCommon, NonLinearOp, NonLinearOpJacobian, OdeEquations,
-    OdeSolverConfig, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut, Vector,
-    VectorViewMut,
+    HermiteInterpolator, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverConfig,
+    OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut, Vector, VectorViewMut,
 };
 #[derive(Debug, PartialEq)]
 pub enum OdeSolverStopReason<T: Scalar> {
@@ -158,81 +157,8 @@ where
     /// Interpolate the sensitivity vectors at a given time and place in `sens`. This time should be between the current time and the last solver time step
     fn interpolate_sens_inplace(&self, t: Eqn::T, sens: &mut [Eqn::V]) -> Result<(), DiffsolError>;
 
-    /// Apply a non-linear operator to the current state in-place, replacing `state.y` with
-    /// `op(state.y, state.t)`. The current time and state vector are read from the solver state,
-    /// and the result is written back to `state.y`. `state.dy` is also updated to
-    /// `rhs(state.y, state.t)`.
-    ///
-    /// Note: does not update sensitivity vectors if present; use `state_mut_op_with_sens` for that.
-    ///
-    /// Note: mass matrix is not supported for this operation, and will return an error if the
-    /// problem has a mass matrix.
-    fn state_mut_op<O>(&mut self, op: &O) -> Result<(), DiffsolError>
-    where
-        O: NonLinearOp<T = Eqn::T, V = Eqn::V, M = Eqn::M>,
-    {
-        // only support identity mass matrix for now
-        if self.problem().eqn.mass().is_some() {
-            return Err(ode_solver_error!(MassMatrixNotSupported));
-        }
-
-        let nstates = self.problem().eqn.rhs().nstates();
-        let mut y_out = Eqn::V::zeros(nstates, self.problem().context().clone());
-        op.call_inplace(self.state().y, self.state().t, &mut y_out);
-        self.state_mut().y.copy_from(&y_out);
-        self.problem()
-            .eqn
-            .rhs()
-            .call_inplace(self.state().y, self.state().t, &mut y_out);
-        self.state_mut().dy.copy_from(&y_out);
-        Ok(())
-    }
-
-    /// Like `state_mut_op`, but also updates each sensitivity vector in the state via the
-    /// Jacobian of `op`: `s_new[j] = J_op(y_before, t) · s_old[j]`.
-    ///
-    /// This variant requires `O: NonLinearOpJacobian` so that the Jacobian-vector product is
-    /// available.  Use it when the equation type guarantees the reset operator implements
-    /// `NonLinearOpJacobian` (e.g. when `Eqn: OdeEquationsImplicitSens`).
-    ///
-    /// Note: mass matrix is not supported for this operation.
-    fn state_mut_op_with_sens<O>(&mut self, op: &O) -> Result<(), DiffsolError>
-    where
-        O: NonLinearOpJacobian<T = Eqn::T, V = Eqn::V, M = Eqn::M>,
-    {
-        let nstates = self.problem().eqn.rhs().nstates();
-        let ctx = self.problem().context().clone();
-        // Only two allocations regardless of the number of parameters.
-        let mut y_new = Eqn::V::zeros(nstates, ctx.clone());
-        let mut tmp = Eqn::V::zeros(nstates, ctx);
-        let t = self.state().t;
-        let nparams = self.state().s.len();
-
-        // only support identity mass matrix for now
-        if self.problem().eqn.mass().is_some() {
-            return Err(ode_solver_error!(MassMatrixNotSupported));
-        }
-
-        // Compute y_new = op(y_before) while leaving state.y = y_before intact for
-        // the Jacobian-vector products below.
-        op.call_inplace(self.state().y, t, &mut y_new);
-
-        // s_new[j] = J_op(y_before, t) · s_old[j].  state.y is still y_before here;
-        // process each j one at a time with a single temp, avoiding nparams clones.
-        for j in 0..nparams {
-            op.jac_mul_inplace(self.state().y, t, &self.state().s[j], &mut tmp);
-            self.state_mut().s[j].copy_from(&tmp);
-        }
-
-        // Compute dy = rhs(y_new, t) and reuse tmp.
-        self.problem().eqn.rhs().call_inplace(&y_new, t, &mut tmp);
-        self.state_mut().dy.copy_from(&tmp);
-
-        // Write the updated state vector last so y_before remains available above.
-        self.state_mut().y.copy_from(&y_new);
-
-        Ok(())
-    }
+    /// Apply the equations' reset function to the current state.
+    fn reset(&mut self) -> Result<(), DiffsolError>;
 
     /// Move the solver state back to time `t` by interpolating `y`, `dy`, and (if
     /// `integrate_out` is set) `g` to that time and writing them into the current state.
@@ -298,12 +224,11 @@ where
 
                     // If a reset function is defined and this was the configured reset root index,
                     // apply the reset and continue integration.
-                    if Some(root_idx) == reset_on_root_index {
-                        if let Some(reset_fn) = self.problem().eqn.reset() {
-                            self.state_mut_op(&reset_fn)?;
-                            write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
-                            continue;
-                        }
+                    if Some(root_idx) == reset_on_root_index && self.problem().eqn.reset().is_some()
+                    {
+                        self.reset()?;
+                        write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
+                        continue;
                     }
                     break;
                 }
@@ -382,13 +307,13 @@ where
                         }
                         self.state_mut_back(t_root)?;
 
-                        if Some(root_idx) == reset_on_root_index {
-                            if let Some(reset_fn) = self.problem().eqn.reset() {
-                                // Apply reset silently, no extra columns emitted.
-                                self.state_mut_op(&reset_fn)?;
-                                // t_eval[t_i] is at or after t_root; process it next.
-                                continue 'outer;
-                            }
+                        if Some(root_idx) == reset_on_root_index
+                            && self.problem().eqn.reset().is_some()
+                        {
+                            // Apply reset silently, no extra columns emitted.
+                            self.reset()?;
+                            // t_eval[t_i] is at or after t_root; process it next.
+                            continue 'outer;
                         }
 
                         // Non-reset root: write the root state as the final column only if

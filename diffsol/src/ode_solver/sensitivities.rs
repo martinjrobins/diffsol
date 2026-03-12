@@ -11,6 +11,9 @@ pub trait SensitivitiesOdeSolverMethod<'a, Eqn>:
 where
     Eqn: OdeEquationsImplicitSens + 'a,
 {
+    /// Apply the equations' reset function and propagate sensitivities through its Jacobian.
+    fn reset_with_sens(&mut self) -> Result<(), DiffsolError>;
+
     /// Solve the ODE and the forward sensitivity equations from the current time to `t_eval[t_eval.len()-1]`,
     /// evaluating at specified times.
     ///
@@ -163,11 +166,11 @@ where
 
                         self.state_mut_back(t_root)?;
 
-                        if Some(root_idx) == reset_on_root_index {
-                            if let Some(reset_fn) = self.problem().eqn.reset() {
-                                self.state_mut_op_with_sens(&reset_fn)?;
-                                continue 'outer;
-                            }
+                        if Some(root_idx) == reset_on_root_index
+                            && self.problem().eqn.reset().is_some()
+                        {
+                            self.reset_with_sens()?;
+                            continue 'outer;
                         }
 
                         // Non-reset root: write root state and return early.
@@ -199,11 +202,4 @@ where
         }
         Ok((ret, ret_sens))
     }
-}
-
-impl<'a, M, Eqn> SensitivitiesOdeSolverMethod<'a, Eqn> for M
-where
-    M: AugmentedOdeSolverMethod<'a, Eqn, SensEquations<'a, Eqn>>,
-    Eqn: OdeEquationsImplicitSens + 'a,
-{
 }

@@ -15,13 +15,15 @@ use crate::ode_solver_error;
 use crate::{
     matrix::MatrixRef, nonlinear_solver::root::RootFinder, op::bdf::BdfCallable, scalar::scale,
     AugmentedOdeEquations, BdfState, DenseMatrix, JacobianUpdate, MatrixViewMut, NonLinearOp,
-    NonLinearSolver, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-    OdeSolverStopReason, Op, Scalar, Vector, VectorRef, VectorView, VectorViewMut,
+    NonLinearSolver, OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverMethod,
+    OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar, SensEquations, Vector,
+    VectorRef, VectorView, VectorViewMut,
 };
 
 use super::config::BdfConfig;
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
+use super::sensitivities::SensitivitiesOdeSolverMethod;
 
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct BdfStatistics {
@@ -59,6 +61,26 @@ where
     }
     fn augmented_eqn_mut(&mut self) -> Option<&mut AugEqn> {
         self.s_op.as_mut().map(|op| &mut op.eqn)
+    }
+}
+
+impl<'a, M, Eqn, Nls> SensitivitiesOdeSolverMethod<'a, Eqn>
+    for Bdf<'a, Eqn, Nls, M, SensEquations<'a, Eqn>>
+where
+    Eqn: OdeEquationsImplicitSens + 'a,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+    Nls: NonLinearSolver<Eqn::M>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
+{
+    fn reset_with_sens(&mut self) -> Result<(), DiffsolError> {
+        let eqn = &self.ode_problem.eqn;
+        if let Some(reset_fn) = eqn.reset() {
+            self.is_state_modified = true;
+            self.state.state_mut_op_with_sens(eqn, &reset_fn)?;
+        }
+        Ok(())
     }
 }
 
@@ -1215,6 +1237,15 @@ where
         }
         state.t = t;
         self.is_state_modified = true;
+        Ok(())
+    }
+
+    fn reset(&mut self) -> Result<(), DiffsolError> {
+        let eqn = &self.ode_problem.eqn;
+        if let Some(reset_fn) = eqn.reset() {
+            self.is_state_modified = true;
+            self.state.state_mut_op(eqn, &reset_fn)?;
+        }
         Ok(())
     }
 
