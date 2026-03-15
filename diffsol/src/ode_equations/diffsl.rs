@@ -1077,7 +1077,7 @@ mod tests {
         matrix::MatrixRef, ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix,
         LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
         NonLinearOpSensAdjoint, OdeBuilder, OdeEquations, OdeSolverMethod,
-        SensitivitiesOdeSolverMethod, Vector, VectorHost, VectorRef, VectorView,
+        Vector, VectorHost, VectorRef, VectorView,
     };
 
     use super::{DiffSl, DiffSlContext};
