@@ -1076,8 +1076,8 @@ mod tests {
     use crate::{
         matrix::MatrixRef, ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix,
         LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
-        NonLinearOpSensAdjoint, OdeBuilder, OdeEquations, OdeSolverMethod,
-        Vector, VectorHost, VectorRef, VectorView,
+        NonLinearOpSensAdjoint, OdeBuilder, OdeEquations, OdeSolverMethod, Vector, VectorHost,
+        VectorRef, VectorView,
     };
 
     use super::{DiffSl, DiffSlContext};
