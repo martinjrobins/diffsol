@@ -34,7 +34,7 @@ impl CostFunction for Problem {
             .set_params(&V::from_vec(param.clone(), ctx));
         let mut solver = problem.bdf::<LS>().unwrap();
         let ys = match solver.solve_dense(&self.ts_data) {
-            Ok(ys) => ys,
+            Ok((ys, _stop_reason)) => ys,
             Err(_) => return Ok(f64::MAX / 1000.),
         };
         let loss = ys
@@ -59,7 +59,7 @@ impl Gradient for Problem {
             .set_params(&V::from_vec(param.clone(), ctx));
         let mut solver = problem.bdf_sens::<LS>().unwrap();
         let (ys, sens) = match solver.solve_dense_sensitivities(&self.ts_data) {
-            Ok((ys, sens)) => (ys, sens),
+            Ok((ys, sens, _stop_reason)) => (ys, sens),
             Err(_) => return Ok(vec![f64::MAX / 1000.; param.len()]),
         };
         let dlossdp = sens
@@ -106,7 +106,7 @@ pub fn main() {
         .unwrap();
     let ys_data = {
         let mut solver = problem.bdf::<LS>().unwrap();
-        solver.solve_dense(&t_data).unwrap()
+        solver.solve_dense(&t_data).unwrap().0
     };
 
     let cost = Problem {

@@ -30,7 +30,7 @@ fn solve() {
         )
         .unwrap();
     let mut solver = problem.bdf::<LS>().unwrap();
-    let (ys, ts) = solver.solve(40.0).unwrap();
+    let (ys, ts, _stop_reason) = solver.solve(40.0).unwrap();
 
     let prey: Vec<_> = ys.inner().row(0).into_iter().copied().collect();
     let predator: Vec<_> = ys.inner().row(1).into_iter().copied().collect();
@@ -81,7 +81,7 @@ fn phase_plane() {
         problem.eqn_mut().set_params(&p);
 
         let mut solver = problem.bdf::<LS>().unwrap();
-        let (ys, _ts) = solver.solve(40.0).unwrap();
+        let (ys, _ts, _stop_reason) = solver.solve(40.0).unwrap();
 
         let prey: Vec<_> = ys.inner().row(0).into_iter().copied().collect();
         let predator: Vec<_> = ys.inner().row(1).into_iter().copied().collect();
