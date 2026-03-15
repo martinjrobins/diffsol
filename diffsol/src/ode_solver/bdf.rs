@@ -2289,7 +2289,7 @@ mod test {
         for p in ps {
             problem.eqn_mut().set_params(&p);
             let mut s = problem.bdf::<LS>().unwrap();
-            let (ys, _ts) = s.solve(10.0).unwrap();
+            let (ys, _ts, _stop_reason) = s.solve(10.0).unwrap();
             // check that the new solution is different from the old one
             if let Some(old_soln) = &mut old_soln {
                 let new_soln = ys.column(ys.ncols() - 1).into_owned();

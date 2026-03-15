@@ -29,13 +29,14 @@ where
     /// - `t_eval`: A slice of times at which to evaluate the solution. Times should be in increasing order.
     ///
     /// # Returns
-    /// A tuple of the ODE solution and sensitivities at the specified evaluation times.
+    /// A tuple of `(ode_solution, sensitivities, stop_reason)` at the specified evaluation times.
     ///
     /// The ODE solution is a dense matrix with one column per evaluation time (in the same order as `t_eval`) and one row per state variable,
     /// plus one final column at the root time if a root fires before `t_eval` is exhausted.
     ///
     /// The sensitivities are returned as a Vec of dense matrices of identical shape as the ODE solution,
     /// where the ith element of the Vec corresponds to the sensitivities with respect to the ith parameter.
+    /// `stop_reason` indicates whether the solve reached `t_eval[t_eval.len()-1]` or stopped on a root.
     ///
     /// # Post-condition
     /// In the case that no roots are found that stop the solve early, the internal state is at time `t_eval[t_eval.len()-1]`.
@@ -49,6 +50,7 @@ where
         (
             <Eqn::V as DefaultDenseMatrix>::M,
             Vec<<Eqn::V as DefaultDenseMatrix>::M>,
+            OdeSolverStopReason<Eqn::T>,
         ),
         DiffsolError,
     >
@@ -147,7 +149,7 @@ where
                 match self.step()? {
                     OdeSolverStopReason::InternalTimestep => {}
                     OdeSolverStopReason::TstopReached => break,
-                    OdeSolverStopReason::RootFound(t_root, _root_idx) => {
+                    OdeSolverStopReason::RootFound(t_root, root_idx) => {
                         // Write any t_eval points strictly before t_root.
                         while t_i < t_eval.len() && t_eval[t_i] < t_root {
                             self.interpolate_inplace(t_eval[t_i], &mut y)?;
@@ -170,7 +172,11 @@ where
                         for rs in ret_sens.iter_mut() {
                             rs.resize_cols(col);
                         }
-                        return Ok((ret, ret_sens));
+                        return Ok((
+                            ret,
+                            ret_sens,
+                            OdeSolverStopReason::RootFound(t_root, root_idx),
+                        ));
                     }
                 }
             }
@@ -186,6 +192,6 @@ where
         for rs in ret_sens.iter_mut() {
             rs.resize_cols(col);
         }
-        Ok((ret, ret_sens))
+        Ok((ret, ret_sens, OdeSolverStopReason::TstopReached))
     }
 }

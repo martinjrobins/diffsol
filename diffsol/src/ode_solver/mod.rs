@@ -257,7 +257,7 @@ mod tests {
         problem.eqn.set_params(&p_data);
         let data = {
             let mut s = problem.bdf::<LS>().unwrap();
-            s.solve_dense(times).unwrap()
+            s.solve_dense(times).unwrap().0
         };
 
         for i in 0..nparams {
@@ -265,7 +265,7 @@ mod tests {
             problem.eqn.set_params(&p_0);
             let g_pos = {
                 let mut s = problem.bdf::<LS>().unwrap();
-                let v = s.solve_dense(times).unwrap();
+                let v = s.solve_dense(times).unwrap().0;
                 sum_squares(&v, &data)
             };
 
@@ -273,7 +273,7 @@ mod tests {
             problem.eqn.set_params(&p_0);
             let g_neg = {
                 let mut s = problem.bdf::<LS>().unwrap();
-                let v = s.solve_dense(times).unwrap();
+                let v = s.solve_dense(times).unwrap().0;
                 sum_squares(&v, &data)
             };
 
@@ -986,7 +986,11 @@ mod tests {
         Method: OdeSolverMethod<'a, Eqn>,
     {
         let final_time = Eqn::T::from_f64(100.0).unwrap();
-        let (_ys_first, ts_first) = solver.solve(final_time).unwrap();
+        let (_ys_first, ts_first, stop_reason_first) = solver.solve(final_time).unwrap();
+        assert!(matches!(
+            stop_reason_first,
+            OdeSolverStopReason::RootFound(_, _)
+        ));
         let t_first_root = *ts_first.last().unwrap();
         assert!(
             t_first_root < final_time,
@@ -995,7 +999,11 @@ mod tests {
 
         // Manually apply reset at the first root and continue to the next root.
         solver.reset().unwrap();
-        let (ys_second, ts_second) = solver.solve(final_time).unwrap();
+        let (ys_second, ts_second, stop_reason_second) = solver.solve(final_time).unwrap();
+        assert!(matches!(
+            stop_reason_second,
+            OdeSolverStopReason::RootFound(_, _)
+        ));
 
         let expected = &soln.solution_points[0];
         let t_second_root = *ts_second.last().unwrap();
@@ -1050,7 +1058,11 @@ mod tests {
             .map(|i| dt * Eqn::T::from_f64(i as f64).unwrap())
             .collect();
 
-        let ret_first = solver.solve_dense(&t_eval).unwrap();
+        let (ret_first, stop_reason_first) = solver.solve_dense(&t_eval).unwrap();
+        assert!(matches!(
+            stop_reason_first,
+            OdeSolverStopReason::RootFound(_, _)
+        ));
         let ncols_first = ret_first.ncols();
 
         // First pass should halt at the first root.
@@ -1074,7 +1086,11 @@ mod tests {
             "expected at least one evaluation time after first root"
         );
 
-        let ret_second = solver.solve_dense(&t_eval_after_reset).unwrap();
+        let (ret_second, stop_reason_second) = solver.solve_dense(&t_eval_after_reset).unwrap();
+        assert!(matches!(
+            stop_reason_second,
+            OdeSolverStopReason::RootFound(_, _)
+        ));
         let ncols = ret_second.ncols();
 
         // The second root fires before the last t_eval_after_reset, so the matrix should be truncated.
@@ -1132,7 +1148,12 @@ mod tests {
             .map(|i| dt * Eqn::T::from_f64(i as f64).unwrap())
             .collect();
 
-        let (ret_first, _ret_sens_first) = solver.solve_dense_sensitivities(&t_eval).unwrap();
+        let (ret_first, _ret_sens_first, stop_reason_first) =
+            solver.solve_dense_sensitivities(&t_eval).unwrap();
+        assert!(matches!(
+            stop_reason_first,
+            OdeSolverStopReason::RootFound(_, _)
+        ));
         let ncols_first = ret_first.ncols();
 
         // First pass should halt at the first root.
@@ -1156,9 +1177,13 @@ mod tests {
             "expected at least one evaluation time after first root"
         );
 
-        let (ret_second, ret_sens_second) = solver
+        let (ret_second, ret_sens_second, stop_reason_second) = solver
             .solve_dense_sensitivities(&t_eval_after_reset)
             .unwrap();
+        assert!(matches!(
+            stop_reason_second,
+            OdeSolverStopReason::RootFound(_, _)
+        ));
         let ncols = ret_second.ncols();
 
         // The second root fires before the final t_eval_after_reset → output must be truncated.

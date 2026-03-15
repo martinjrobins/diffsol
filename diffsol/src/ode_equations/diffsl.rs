@@ -1353,7 +1353,7 @@ mod tests {
             .unwrap();
         let mut solver = problem.bdf::<<M as DefaultSolver>::LS>().unwrap();
         let t = M::T::one();
-        let (ys, ts) = solver.solve(t).unwrap();
+        let (ys, ts, _stop_reason) = solver.solve(t).unwrap();
         for (i, t) in ts.iter().enumerate() {
             let y_expect = k / (M::T::one() + (k - y0) * (-r * *t).exp() / y0);
             let z_expect = M::T::from_f64(2.0).unwrap() * y_expect;
@@ -1376,7 +1376,7 @@ mod tests {
             .map(|t| M::T::from_f64(t).unwrap())
             .collect::<Vec<_>>();
         let mut solver = problem.bdf::<<M as DefaultSolver>::LS>().unwrap();
-        let ys = solver.solve_dense(&t_evals).unwrap();
+        let (ys, _stop_reason) = solver.solve_dense(&t_evals).unwrap();
         for (i, t) in t_evals.iter().enumerate() {
             let y_expect = k / (M::T::one() + (k - y0) * (-r * *t).exp() / y0);
             let z_expect = M::T::from_f64(2.0).unwrap() * y_expect;

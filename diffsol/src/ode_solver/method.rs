@@ -181,9 +181,10 @@ where
     /// - `final_time`: The time to integrate to
     ///
     /// # Returns
-    /// A tuple of `(solution_matrix, times)` where:
+    /// A tuple of `(solution_matrix, times, stop_reason)` where:
     /// - `solution_matrix` is a dense matrix with one column per solution time and one row per state variable
     /// - `times` is a vector of times at which the solution was evaluated
+    /// - `stop_reason` indicates whether the solve reached `final_time` or stopped on a root
     ///
     /// # Post-condition
     /// After the solver finishes, the internal state of the solver is at time `final_time`.
@@ -193,7 +194,14 @@ where
     fn solve(
         &mut self,
         final_time: Eqn::T,
-    ) -> Result<(<Eqn::V as DefaultDenseMatrix>::M, Vec<Eqn::T>), DiffsolError>
+    ) -> Result<
+        (
+            <Eqn::V as DefaultDenseMatrix>::M,
+            Vec<Eqn::T>,
+            OdeSolverStopReason<Eqn::T>,
+        ),
+        DiffsolError,
+    >
     where
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
@@ -203,25 +211,25 @@ where
         // do the main loop
         write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
         self.set_stop_time(final_time)?;
-        loop {
+        let stop_reason = loop {
             match self.step()? {
                 OdeSolverStopReason::InternalTimestep => {
                     write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
                 }
                 OdeSolverStopReason::TstopReached => {
                     write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
-                    break;
+                    break OdeSolverStopReason::TstopReached;
                 }
-                OdeSolverStopReason::RootFound(t_root, _root_idx) => {
+                OdeSolverStopReason::RootFound(t_root, root_idx) => {
                     self.state_mut_back(t_root)?;
                     write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
-                    break;
+                    break OdeSolverStopReason::RootFound(t_root, root_idx);
                 }
             }
-        }
+        };
         let ntimes = ret_t.len();
         ret_y.resize_cols(ntimes);
-        Ok((ret_y, ret_t))
+        Ok((ret_y, ret_t, stop_reason))
     }
 
     /// Solve the ODE from the current time to `t_eval[t_eval.len()-1]`, evaluating at specified times.
@@ -238,8 +246,10 @@ where
     /// - `t_eval`: A slice of times at which to evaluate the solution. Times should be in increasing order.
     ///
     /// # Returns
-    /// A dense matrix with one column per evaluation time (in the same order as `t_eval`) and one row per state variable,
-    /// plus one final column at the root time if a root fires before `t_eval` is exhausted.
+    /// A tuple of `(solution_matrix, stop_reason)` where:
+    /// - `solution_matrix` has one column per evaluation time (in the same order as `t_eval`) and one row per state variable,
+    ///   plus one final column at the root time if a root fires before `t_eval` is exhausted.
+    /// - `stop_reason` indicates whether the solve reached `t_eval[t_eval.len()-1]` or stopped on a root.
     ///
     /// # Post-condition
     /// In the case that no roots are found that stop the solve early, the internal state is at time `t_eval[t_eval.len()-1]`.
@@ -248,7 +258,13 @@ where
     fn solve_dense(
         &mut self,
         t_eval: &[Eqn::T],
-    ) -> Result<<Eqn::V as DefaultDenseMatrix>::M, DiffsolError>
+    ) -> Result<
+        (
+            <Eqn::V as DefaultDenseMatrix>::M,
+            OdeSolverStopReason<Eqn::T>,
+        ),
+        DiffsolError,
+    >
     where
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
@@ -266,7 +282,7 @@ where
                 match self.step()? {
                     OdeSolverStopReason::InternalTimestep => {}
                     OdeSolverStopReason::TstopReached => break,
-                    OdeSolverStopReason::RootFound(t_root, _root_idx) => {
+                    OdeSolverStopReason::RootFound(t_root, root_idx) => {
                         // Write any t_eval points that fall strictly before t_root.
                         while t_i < t_eval.len() && t_eval[t_i] < t_root {
                             if col >= ret.ncols() {
@@ -303,7 +319,7 @@ where
                             col += 1;
                         }
                         ret.resize_cols(col);
-                        return Ok(ret);
+                        return Ok((ret, OdeSolverStopReason::RootFound(t_root, root_idx)));
                     }
                 }
             }
@@ -319,7 +335,7 @@ where
             t_i += 1;
         }
         ret.resize_cols(col);
-        Ok(ret)
+        Ok((ret, OdeSolverStopReason::TstopReached))
     }
 
     /// Solve the ODE from the current time to `final_time`, saving checkpoints at regular intervals.
@@ -655,7 +671,7 @@ mod test {
             exponential_decay_problem_with_root,
         },
         scale, AdjointOdeSolverMethod, DenseMatrix, NalgebraLU, NalgebraVec, OdeEquations,
-        OdeSolverMethod, Op, SensitivitiesOdeSolverMethod, Vector, VectorView,
+        OdeSolverMethod, OdeSolverStopReason, Op, SensitivitiesOdeSolverMethod, Vector, VectorView,
     };
 
     #[test]
@@ -666,7 +682,8 @@ mod test {
         let k = 0.1;
         let y0 = NalgebraVec::from_vec(vec![1.0, 1.0], *problem.context());
         let expect = |t: f64| &y0 * scale(f64::exp(-k * t));
-        let (y, t) = s.solve(10.0).unwrap();
+        let (y, t, stop_reason) = s.solve(10.0).unwrap();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         assert!((t[0] - 0.0).abs() < 1e-10);
         assert!((t[t.len() - 1] - 10.0).abs() < 1e-10);
         for (i, t_i) in t.iter().enumerate() {
@@ -681,7 +698,8 @@ mod test {
             exponential_decay_problem_with_root::<NalgebraMat<f64>>(false, false);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
-        let (y, t) = s.solve(10.0).unwrap();
+        let (y, t, stop_reason) = s.solve(10.0).unwrap();
+        assert!(matches!(stop_reason, OdeSolverStopReason::RootFound(_, _)));
         let t_root = -0.6_f64.ln() / 0.1;
         let t_last = *t.last().unwrap();
         assert!((t_last - t_root).abs() < 1e-3);
@@ -707,7 +725,8 @@ mod test {
                 *problem.context(),
             )
         };
-        let (y, t) = s.solve(10.0).unwrap();
+        let (y, t, stop_reason) = s.solve(10.0).unwrap();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         for (i, t_i) in t.iter().enumerate() {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&expect(*t_i), &problem.atol, problem.rtol, 15.0);
@@ -720,7 +739,8 @@ mod test {
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
-        let y = s.solve_dense(t_eval.as_slice()).unwrap();
+        let (y, stop_reason) = s.solve_dense(t_eval.as_slice()).unwrap();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
@@ -734,7 +754,8 @@ mod test {
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = (0..=10).map(|i| i as f64).collect::<Vec<_>>();
-        let y = s.solve_dense(t_eval.as_slice()).unwrap();
+        let (y, stop_reason) = s.solve_dense(t_eval.as_slice()).unwrap();
+        assert!(matches!(stop_reason, OdeSolverStopReason::RootFound(_, _)));
         let t_root = -0.6_f64.ln() / 0.1;
         assert!((s.state().t - t_root).abs() < 1e-3);
         assert!(y.ncols() < t_eval.len());
@@ -758,7 +779,8 @@ mod test {
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = (0..=10).map(|i| i as f64).collect::<Vec<_>>();
-        let y = s.solve_dense(t_eval.as_slice()).unwrap();
+        let (y, stop_reason) = s.solve_dense(t_eval.as_slice()).unwrap();
+        assert!(matches!(stop_reason, OdeSolverStopReason::RootFound(_, _)));
         let k = 0.1;
         let decay = 0.6_f64;
         let t_root = -decay.ln() / k;
@@ -778,7 +800,8 @@ mod test {
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
-        let y = s.solve_dense(t_eval.as_slice()).unwrap();
+        let (y, stop_reason) = s.solve_dense(t_eval.as_slice()).unwrap();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
@@ -803,7 +826,8 @@ mod test {
         let mut s = problem.bdf_sens::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
-        let (y, sens) = s.solve_dense_sensitivities(t_eval.as_slice()).unwrap();
+        let (y, sens, stop_reason) = s.solve_dense_sensitivities(t_eval.as_slice()).unwrap();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
@@ -827,7 +851,8 @@ mod test {
         let mut s = problem.bdf_sens::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
-        let (y, sens) = s.solve_dense_sensitivities(t_eval.as_slice()).unwrap();
+        let (y, sens, stop_reason) = s.solve_dense_sensitivities(t_eval.as_slice()).unwrap();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
