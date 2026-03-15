@@ -25,11 +25,6 @@ where
     /// If a root function is provided, the solver will stop if any of the root function elements change sign.
     /// The internal state of the solver is set to the time that the zero-crossing occured.
     ///
-    /// If a root and a reset function are provided, then if the configured
-    /// `problem.reset_on_root_index` has a zero-crossing then the reset is applied,
-    /// sensitivities are updated appropriately, and the solver continues on until `final_time`.
-    /// Other root indices stop the solve.
-    ///
     /// # Arguments
     /// - `t_eval`: A slice of times at which to evaluate the solution. Times should be in increasing order.
     ///
@@ -37,15 +32,14 @@ where
     /// A tuple of the ODE solution and sensitivities at the specified evaluation times.
     ///
     /// The ODE solution is a dense matrix with one column per evaluation time (in the same order as `t_eval`) and one row per state variable,
-    /// plus one final column at the stop-root time if a non-reset root fires before `t_eval` is exhausted.
-    /// If the configured reset root fires, the reset is applied and integration continues; no extra columns are inserted.
+    /// plus one final column at the root time if a root fires before `t_eval` is exhausted.
     ///
     /// The sensitivities are returned as a Vec of dense matrices of identical shape as the ODE solution,
     /// where the ith element of the Vec corresponds to the sensitivities with respect to the ith parameter.
     ///
     /// # Post-condition
     /// In the case that no roots are found that stop the solve early, the internal state is at time `t_eval[t_eval.len()-1]`.
-    /// If a non-reset root is found, the solver stops early. The internal state is moved to the root time,
+    /// If a root is found, the solver stops early. The internal state is moved to the root time,
     /// and the last column corresponds to the root time (which may not be in `t_eval`).
     #[allow(clippy::type_complexity)]
     fn solve_dense_sensitivities(
@@ -109,7 +103,6 @@ where
 
         let t_final = *t_eval.last().unwrap();
         self.set_stop_time(t_final)?;
-        let reset_on_root_index = self.problem().reset_on_root_index;
 
         let mut col = 0usize;
         let mut t_i = 0usize;
@@ -147,14 +140,14 @@ where
             Ok(())
         };
 
-        'outer: while t_i < t_eval.len() {
+        while t_i < t_eval.len() {
             let t_target = t_eval[t_i];
 
             while self.state().t < t_target {
                 match self.step()? {
                     OdeSolverStopReason::InternalTimestep => {}
                     OdeSolverStopReason::TstopReached => break,
-                    OdeSolverStopReason::RootFound(t_root, root_idx) => {
+                    OdeSolverStopReason::RootFound(t_root, _root_idx) => {
                         // Write any t_eval points strictly before t_root.
                         while t_i < t_eval.len() && t_eval[t_i] < t_root {
                             self.interpolate_inplace(t_eval[t_i], &mut y)?;
@@ -166,14 +159,7 @@ where
 
                         self.state_mut_back(t_root)?;
 
-                        if Some(root_idx) == reset_on_root_index
-                            && self.problem().eqn.reset().is_some()
-                        {
-                            self.reset_with_sens()?;
-                            continue 'outer;
-                        }
-
-                        // Non-reset root: write root state and return early.
+                        // Write root state and return early.
                         y.copy_from(self.state().y);
                         for (j, s_j) in s.iter_mut().enumerate() {
                             s_j.copy_from(&self.state().s[j]);

@@ -177,11 +177,6 @@ where
     /// If a root function is provided, the solver will stop if any of the root function elements change sign.
     /// The internal state of the solver is set to the time that the zero-crossing occured.
     ///
-    /// If a root and a reset function are provided, then if the configured
-    /// `problem.reset_on_root_index` has a zero-crossing then the reset is applied
-    /// (the pre-reset and post-reset states are added to the solution) and the solver
-    /// continues on until `final_time`. Other root indices stop the solve.
-    ///
     /// # Arguments
     /// - `final_time`: The time to integrate to
     ///
@@ -205,7 +200,6 @@ where
     {
         let mut ret_t = Vec::new();
         let (mut ret_y, mut tmp_nout) = allocate_return(self)?;
-        let reset_on_root_index = self.problem().reset_on_root_index;
         // do the main loop
         write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
         self.set_stop_time(final_time)?;
@@ -218,18 +212,9 @@ where
                     write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
                     break;
                 }
-                OdeSolverStopReason::RootFound(t_root, root_idx) => {
+                OdeSolverStopReason::RootFound(t_root, _root_idx) => {
                     self.state_mut_back(t_root)?;
                     write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
-
-                    // If a reset function is defined and this was the configured reset root index,
-                    // apply the reset and continue integration.
-                    if Some(root_idx) == reset_on_root_index && self.problem().eqn.reset().is_some()
-                    {
-                        self.reset()?;
-                        write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
-                        continue;
-                    }
                     break;
                 }
             }
@@ -249,22 +234,16 @@ where
     /// If a root function is provided, the solver will stop if any of the root function elements change sign.
     /// The internal state of the solver is set to the time that the zero-crossing occured.
     ///
-    /// If a root and a reset function are provided, then if the configured
-    /// `problem.reset_on_root_index` has a zero-crossing then the reset is applied and
-    /// the solver continues on until `final_time`. Other root indices stop the solve.
-    ///
     /// # Arguments
     /// - `t_eval`: A slice of times at which to evaluate the solution. Times should be in increasing order.
     ///
     /// # Returns
     /// A dense matrix with one column per evaluation time (in the same order as `t_eval`) and one row per state variable,
-    /// plus one final column at the stop-root time if a non-reset root fires before `t_eval` is exhausted.
-    ///
-    /// If the configured reset root fires, the reset is applied and integration continues; no extra columns are inserted.
+    /// plus one final column at the root time if a root fires before `t_eval` is exhausted.
     ///
     /// # Post-condition
     /// In the case that no roots are found that stop the solve early, the internal state is at time `t_eval[t_eval.len()-1]`.
-    /// If a non-reset root is found, the solver stops early. The internal state is moved to the root time,
+    /// If a root is found, the solver stops early. The internal state is moved to the root time,
     /// and the last column corresponds to the root time (which may not be in `t_eval`).
     fn solve_dense(
         &mut self,
@@ -275,12 +254,11 @@ where
         Self: Sized,
     {
         let (mut ret, mut tmp_nout, mut tmp_nstates) = dense_allocate_return(self, t_eval)?;
-        let reset_on_root_index = self.problem().reset_on_root_index;
         self.set_stop_time(t_eval[t_eval.len() - 1])?;
 
         let mut col = 0usize;
         let mut t_i = 0usize;
-        'outer: while t_i < t_eval.len() {
+        while t_i < t_eval.len() {
             if col >= ret.ncols() {
                 ret.resize_cols((col + 1).max(ret.ncols() * 2));
             }
@@ -288,7 +266,7 @@ where
                 match self.step()? {
                     OdeSolverStopReason::InternalTimestep => {}
                     OdeSolverStopReason::TstopReached => break,
-                    OdeSolverStopReason::RootFound(t_root, root_idx) => {
+                    OdeSolverStopReason::RootFound(t_root, _root_idx) => {
                         // Write any t_eval points that fall strictly before t_root.
                         while t_i < t_eval.len() && t_eval[t_i] < t_root {
                             if col >= ret.ncols() {
@@ -307,16 +285,7 @@ where
                         }
                         self.state_mut_back(t_root)?;
 
-                        if Some(root_idx) == reset_on_root_index
-                            && self.problem().eqn.reset().is_some()
-                        {
-                            // Apply reset silently, no extra columns emitted.
-                            self.reset()?;
-                            // t_eval[t_i] is at or after t_root; process it next.
-                            continue 'outer;
-                        }
-
-                        // Non-reset root: write the root state as the final column only if
+                        // Write the root state as the final column only if
                         // the root fired before all t_eval points were consumed.
                         if col < ret.ncols() {
                             let mut y_out = ret.column_mut(col);

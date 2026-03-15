@@ -526,13 +526,13 @@ pub fn exponential_decay_problem_sens_with_out<M: MatrixHost + 'static>(
 }
 
 // ------------------------------------------------------------------
-// Exponential-decay problem extended with a Reset feature
+// Exponential-decay problem with a Reset feature present
 //
 // Reuses the standard exponential_decay / exponential_decay_jacobian /
 // exponential_decay_init functions (p = [k, y0], nstates = 2).
 //
-// Root 0: y[0] - 0.6  (reset trigger, fires at t ≈ 5.108)
-// Root 1: y[0] - 0.3  (stop condition, fires after reset at t ≈ 7.985)
+// Root 0: y[0] - 0.6  (first root, fires at t ≈ 5.108)
+// Root 1: y[0] - 0.3  (later root, not reached because solve halts at first root)
 // Reset:  y → [0.4, 0.4]
 // ------------------------------------------------------------------
 
@@ -549,16 +549,15 @@ fn exponential_decay_reset<M: Matrix>(_x: &M::V, _p: &M::V, _t: M::T, y: &mut M:
     y.fill(M::T::from_f64(0.4).unwrap());
 }
 
-/// Exponential decay problem with a Root function (2 outputs) **and** a Reset
-/// (triggered by root index 0).
+/// Exponential decay problem with a Root function (2 outputs) and a Reset.
 ///
 /// Uses the standard `dy/dt = -k*y` equations with `k=0.1`, `y(0)=[1,1]`.
-/// Root 0 fires at t ≈ 5.108 and triggers a reset (y → [0.4, 0.4]).
-/// After the reset, y\[0\] = 0.4 < 0.6 so root 0 cannot fire again.
-/// Root 1 fires at t ≈ 5.108 + ln(4/3)/0.1 ≈ 7.985 and causes `solve()` to stop.
+/// Root 0 fires first at t ≈ 5.108.
+/// If reset is applied manually (`y -> [0.4, 0.4]`), root 1 then fires at
+/// t ≈ 5.108 + ln(4/3)/0.1 ≈ 7.985.
 ///
 /// Returns the problem alongside a one-point `OdeSolverSolution`:
-///   1. stop state `y = [0.3, 0.3]` at t ≈ 7.985
+///   1. second-root state `y = [0.3, 0.3]` at t ≈ 7.985 (for manual-reset continuation tests)
 #[allow(clippy::type_complexity)]
 pub fn exponential_decay_with_reset_problem<M: MatrixHost + 'static>() -> (
     OdeSolverProblem<impl OdeEquationsImplicit<M = M, V = M::V, T = M::T, C = M::C>>,
@@ -570,12 +569,11 @@ pub fn exponential_decay_with_reset_problem<M: MatrixHost + 'static>() -> (
         .init(exponential_decay_init::<M>, 2)
         .root(exponential_decay_two_root::<M>, 2)
         .reset(exponential_decay_reset::<M>)
-        .reset_on_root_index(Some(0))
         .build()
         .unwrap();
     // Root 0 fires when y[0] = 0.6: t_root_0 = -ln(0.6)/0.1
-    let t_root_0 = M::T::from_f64(0.6_f64.ln().abs() / 0.1).unwrap();
-    // After reset to y=[0.4,0.4], root 1 fires when y[0]=0.3:
+    let t_root_0 = M::T::from_f64(-(0.6_f64.ln()) / 0.1).unwrap();
+    // After manual reset to y=[0.4, 0.4], root 1 fires when y[0]=0.3:
     //   t_from_reset = -ln(0.3/0.4)/0.1 = ln(4/3)/0.1
     let t_from_reset = M::T::from_f64((4.0_f64 / 3.0_f64).ln() / 0.1).unwrap();
     let t_stop = t_root_0 + t_from_reset;
@@ -586,8 +584,7 @@ pub fn exponential_decay_with_reset_problem<M: MatrixHost + 'static>() -> (
         rtol: problem.rtol,
         ..Default::default()
     };
-    // Only point: stop state (y[0] decayed from 0.4 to 0.3 after reset)
-    // y_stop = 0.4 * exp(-0.1 * t_from_reset) = 0.4 * (3/4) = 0.3
+    // Only point: second-root stop state after manual reset.
     soln.push(
         M::V::from_element(nstates, M::T::from_f64(0.3).unwrap(), ctx),
         t_stop,
@@ -628,16 +625,12 @@ pub fn exponential_decay_with_two_roots_problem<M: MatrixHost + 'static>() -> (
 
 // ------------------------------------------------------------------
 // Exponential-decay problem with Reset (R(y) = y + 2) and forward
-// sensitivity equations. Because J_R = I the sensitivity vectors
-// are invariant through the reset; integration restarts from the
-// same sensitivity values but from the new state y + 2.
+// sensitivity equations. Solve methods halt at the first root event,
+// so the reset is not applied automatically.
 //
-// Root 0: y[0] - 0.6  (reset trigger, fires at t_root = 10·ln(5/3) ≈ 5.108)
-// Root 1: y[0] - 2.0  (stop condition, fires at t_stop ≈ 7.732)
+// Root 0: y[0] - 0.6  (first root, fires at t_root = 10·ln(5/3) ≈ 5.108)
+// Root 1: y[0] - 2.0  (later root, not reached because solve halts at root 0)
 // Reset:  y → y + 2   (component-wise; y_new = [2.6, 2.6])
-//
-// Root 0 would fire a second time at t_root + 10·ln(13/3) ≈ 19.7,
-// which is far beyond t_stop — so only one reset occurs.
 // ------------------------------------------------------------------
 
 fn exponential_decay_reset_y_plus_2<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
@@ -666,16 +659,15 @@ fn exponential_decay_root_0_6_and_2_0<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, 
     y.set_index(1, x.get_index(0) - M::T::from_f64(2.0).unwrap());
 }
 
-/// Exponential decay with a root-triggered reset **and** forward sensitivity equations.
+/// Exponential decay with a root function, reset map, and forward sensitivity equations.
 ///
 /// `dy/dt = -k·y`, `y(0) = [y0, y0]`, `p = [k, y0] = [0.1, 1.0]`, 2 states, 2 params.
 ///
-/// At t_root ≈ 5.108 root 0 fires; the reset `R(y) = y + 2` maps `[0.6, 0.6] → [2.6, 2.6]`.
-/// Because `J_R = I`, the forward sensitivities ∂y/∂k and ∂y/∂y₀ are unchanged by the reset.
-/// Integration then continues until root 1 fires at t_stop ≈ 7.732 when `y[0] = 2.0`.
+/// At t_root ≈ 5.108 root 0 fires. If reset is applied manually (`y -> y + 2`),
+/// root 1 then fires at t_stop ≈ 7.732.
 ///
 /// Returns the problem with a single solution point at t_stop containing the exact y and
-/// sensitivity vectors for comparison.
+/// sensitivity vectors for comparison in manual-reset continuation tests.
 #[allow(clippy::type_complexity)]
 pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
     OdeSolverProblem<impl OdeEquationsImplicitSens<M = M, V = M::V, T = M::T, C = M::C>>,
@@ -700,13 +692,12 @@ pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
             exponential_decay_reset_y_plus_2::<M>,
             exponential_decay_reset_y_plus_2_jac::<M>,
         )
-        .reset_on_root_index(Some(0))
         .build()
         .unwrap();
 
     // t_root: y[0] = exp(-0.1·t) = 0.6  →  t_root = 10·ln(5/3)
     let t_root = M::T::from_f64(10.0 * (5.0_f64 / 3.0_f64).ln()).unwrap();
-    // dt to stop: 2.6·exp(-0.1·dt) = 2.0  →  dt = 10·ln(1.3)
+    // dt to stop after reset: 2.6·exp(-0.1·dt) = 2.0  →  dt = 10·ln(1.3)
     let dt = M::T::from_f64(10.0 * 1.3_f64.ln()).unwrap();
     let t_stop = t_root + dt;
 
@@ -715,24 +706,9 @@ pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
     let ctx = y0.context().clone();
     let y_stop = M::V::from_element(2, M::T::from_f64(2.0).unwrap(), ctx.clone());
 
-    // ---------------------------------------------------------------
-    // Exact sensitivities at t_stop
-    //
-    // J_R = I  →  s_new = s_old at the reset.  Post-reset base state
-    // is y_new(t) = 2.6·exp(−k·τ) where τ = t − t_root.
-    //
-    // Sensitivity w.r.t. k:
-    //   ds_k/dτ = −k·s_k − y_new(τ)   (from d/dk of F = −k·y)
-    //   Initial:  s_k(0) = −t_root · 0.6
-    //   Solution: s_k(τ) = exp(−k·τ)·(s_k(0) − 2.6·τ)
-    //   At τ=dt: exp(−k·dt) = 10/13  and  2.6·dt = 26·ln(1.3)
-    //   → s_k_i = −(10/13)·(6·ln(5/3) + 26·ln(1.3))
-    //
-    // Sensitivity w.r.t. y0:
-    //   ds_y0/dτ = −k·s_y0   (∂F/∂y0 = 0)
-    //   Initial:  s_y0(0) = exp(−k·t_root) = 0.6
-    //   → s_y0_i = 0.6·exp(−k·dt) = 0.6·(10/13) = 6/13
-    // ---------------------------------------------------------------
+    // Exact sensitivities at t_stop after manual reset (R(y)=y+2, J_R=I):
+    //   s_k(dt) = exp(-k*dt) * (s_k(t_root) - 2.6*dt), with s_k(t_root) = -0.6*t_root
+    //   s_y0(dt) = 0.6 * exp(-k*dt)
     let exp_neg_k_dt = M::T::from_f64(10.0 / 13.0).unwrap();
     let s_k_val = -exp_neg_k_dt
         * (M::T::from_f64(6.0).unwrap() * M::T::from_f64((5.0_f64 / 3.0_f64).ln()).unwrap()
@@ -741,16 +717,6 @@ pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
 
     let s_k = M::V::from_element(2, s_k_val, ctx.clone());
     let s_y0 = M::V::from_element(2, s_y0_val, ctx.clone());
-
-    // Pre-reset and post-reset sensitivities at t_root.
-    // s_k_root = -t_root · 0.6  (since s_k(t) = -t · exp(-k·t) · y0 = -t · y(t))
-    // s_y0_root = 0.6           (since s_y0(t) = exp(-k·t))
-    // Because J_R = I the post-reset sensitivities equal the pre-reset sensitivities.
-    let t_root_f64 = 10.0 * (5.0_f64 / 3.0_f64).ln();
-    let s_k_root_val = M::T::from_f64(-t_root_f64 * 0.6).unwrap();
-    let s_y0_root_val = M::T::from_f64(0.6).unwrap();
-    let _s_k_root = M::V::from_element(2, s_k_root_val, ctx.clone());
-    let _s_y0_root = M::V::from_element(2, s_y0_root_val, ctx.clone());
 
     let mut soln = OdeSolverSolution {
         atol: problem.atol.clone(),

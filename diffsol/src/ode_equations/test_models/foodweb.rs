@@ -1095,7 +1095,6 @@ where
         t0,
         h0,
         false,
-        None,
         Default::default(),
         Default::default(),
     )

@@ -118,10 +118,6 @@ where
     pub h0: Eqn::T,
     /// Whether to integrate the output equations alongside the state equations.
     pub integrate_out: bool,
-    /// By default all the stop conditions result in the solver stopping at the root of the condition.
-    /// Setting this option allows the user to specify that stop condition `i` should instead reset the
-    /// state according to the `reset` function and continue the integration.
-    pub reset_on_root_index: Option<usize>,
     /// Relative tolerance for the forward sensitivity equations or the adjoint equations, if sensitivities are being computed. If `None`, sensitivities are not included in error control.
     pub sens_rtol: Option<Eqn::T>,
     /// Absolute tolerance for the forward sensitivity equations or the adjoint equations, if sensitivities are being computed. If `None`, sensitivities are not included in error control.
@@ -400,7 +396,6 @@ where
         t0: Eqn::T,
         h0: Eqn::T,
         integrate_out: bool,
-        reset_on_root_index: Option<usize>,
         ic_options: InitialConditionSolverOptions<Eqn::T>,
         ode_options: OdeSolverOptions<Eqn::T>,
     ) -> Result<Self, DiffsolError> {
@@ -417,7 +412,6 @@ where
             t0,
             h0,
             integrate_out,
-            reset_on_root_index,
             ic_options,
             ode_options,
         })

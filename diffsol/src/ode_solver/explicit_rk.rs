@@ -556,8 +556,7 @@ mod test {
         test_root_found_index(solver, &soln, 0, 1e-4);
     }
 
-    /// Test that `solve()` applies the Reset function (root index 0) and continues,
-    /// only stopping when the stopping root (index 1) fires.
+    /// Test that `solve()` halts on the first root, even when a reset function is configured.
     #[test]
     fn test_solve_with_reset_tsit45() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
@@ -567,8 +566,7 @@ mod test {
         test_solve_with_reset(solver, &soln);
     }
 
-    /// Test that `solve_dense()` applies the Reset function (root index 0) and continues,
-    /// only stopping when the stopping root (index 1) fires.
+    /// Test that `solve_dense()` halts on the first root, even when a reset function is configured.
     #[test]
     fn test_solve_dense_with_reset_tsit45() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
@@ -578,7 +576,7 @@ mod test {
         test_solve_dense_with_reset(solver, &soln);
     }
 
-    /// Test that `solve_dense_sensitivities()` correctly handles a reset event for Tsit45.
+    /// Test that `solve_dense_sensitivities()` halts on the first root for Tsit45.
     #[test]
     fn test_solve_dense_sensitivities_with_reset_tsit45() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem_sens;
