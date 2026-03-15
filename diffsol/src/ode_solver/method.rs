@@ -255,6 +255,7 @@ where
     /// In the case that no roots are found that stop the solve early, the internal state is at time `t_eval[t_eval.len()-1]`.
     /// If a root is found, the solver stops early. The internal state is moved to the root time,
     /// and the last column corresponds to the root time (which may not be in `t_eval`).
+    #[allow(clippy::type_complexity)]
     fn solve_dense(
         &mut self,
         t_eval: &[Eqn::T],
