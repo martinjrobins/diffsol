@@ -5,9 +5,8 @@ use crate::{
     ode_solver_error,
     scalar::Scalar,
     AugmentedOdeEquations, Checkpointing, Context, DefaultDenseMatrix, DenseMatrix,
-    HermiteInterpolator, MatrixCommon, NonLinearOp, NonLinearOpJacobian, OdeEquations,
-    OdeSolverConfig, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut, Vector,
-    VectorViewMut,
+    HermiteInterpolator, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverConfig,
+    OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut, Vector, VectorViewMut,
 };
 #[derive(Debug, PartialEq)]
 pub enum OdeSolverStopReason<T: Scalar> {
@@ -158,81 +157,8 @@ where
     /// Interpolate the sensitivity vectors at a given time and place in `sens`. This time should be between the current time and the last solver time step
     fn interpolate_sens_inplace(&self, t: Eqn::T, sens: &mut [Eqn::V]) -> Result<(), DiffsolError>;
 
-    /// Apply a non-linear operator to the current state in-place, replacing `state.y` with
-    /// `op(state.y, state.t)`. The current time and state vector are read from the solver state,
-    /// and the result is written back to `state.y`. `state.dy` is also updated to
-    /// `rhs(state.y, state.t)`.
-    ///
-    /// Note: does not update sensitivity vectors if present; use `state_mut_op_with_sens` for that.
-    ///
-    /// Note: mass matrix is not supported for this operation, and will return an error if the
-    /// problem has a mass matrix.
-    fn state_mut_op<O>(&mut self, op: &O) -> Result<(), DiffsolError>
-    where
-        O: NonLinearOp<T = Eqn::T, V = Eqn::V, M = Eqn::M>,
-    {
-        // only support identity mass matrix for now
-        if self.problem().eqn.mass().is_some() {
-            return Err(ode_solver_error!(MassMatrixNotSupported));
-        }
-
-        let nstates = self.problem().eqn.rhs().nstates();
-        let mut y_out = Eqn::V::zeros(nstates, self.problem().context().clone());
-        op.call_inplace(self.state().y, self.state().t, &mut y_out);
-        self.state_mut().y.copy_from(&y_out);
-        self.problem()
-            .eqn
-            .rhs()
-            .call_inplace(self.state().y, self.state().t, &mut y_out);
-        self.state_mut().dy.copy_from(&y_out);
-        Ok(())
-    }
-
-    /// Like `state_mut_op`, but also updates each sensitivity vector in the state via the
-    /// Jacobian of `op`: `s_new[j] = J_op(y_before, t) · s_old[j]`.
-    ///
-    /// This variant requires `O: NonLinearOpJacobian` so that the Jacobian-vector product is
-    /// available.  Use it when the equation type guarantees the reset operator implements
-    /// `NonLinearOpJacobian` (e.g. when `Eqn: OdeEquationsImplicitSens`).
-    ///
-    /// Note: mass matrix is not supported for this operation.
-    fn state_mut_op_with_sens<O>(&mut self, op: &O) -> Result<(), DiffsolError>
-    where
-        O: NonLinearOpJacobian<T = Eqn::T, V = Eqn::V, M = Eqn::M>,
-    {
-        let nstates = self.problem().eqn.rhs().nstates();
-        let ctx = self.problem().context().clone();
-        // Only two allocations regardless of the number of parameters.
-        let mut y_new = Eqn::V::zeros(nstates, ctx.clone());
-        let mut tmp = Eqn::V::zeros(nstates, ctx);
-        let t = self.state().t;
-        let nparams = self.state().s.len();
-
-        // only support identity mass matrix for now
-        if self.problem().eqn.mass().is_some() {
-            return Err(ode_solver_error!(MassMatrixNotSupported));
-        }
-
-        // Compute y_new = op(y_before) while leaving state.y = y_before intact for
-        // the Jacobian-vector products below.
-        op.call_inplace(self.state().y, t, &mut y_new);
-
-        // s_new[j] = J_op(y_before, t) · s_old[j].  state.y is still y_before here;
-        // process each j one at a time with a single temp, avoiding nparams clones.
-        for j in 0..nparams {
-            op.jac_mul_inplace(self.state().y, t, &self.state().s[j], &mut tmp);
-            self.state_mut().s[j].copy_from(&tmp);
-        }
-
-        // Compute dy = rhs(y_new, t) and reuse tmp.
-        self.problem().eqn.rhs().call_inplace(&y_new, t, &mut tmp);
-        self.state_mut().dy.copy_from(&tmp);
-
-        // Write the updated state vector last so y_before remains available above.
-        self.state_mut().y.copy_from(&y_new);
-
-        Ok(())
-    }
+    /// Apply the equations' reset function to the current state.
+    fn reset(&mut self) -> Result<(), DiffsolError>;
 
     /// Move the solver state back to time `t` by interpolating `y`, `dy`, and (if
     /// `integrate_out` is set) `g` to that time and writing them into the current state.
@@ -251,18 +177,14 @@ where
     /// If a root function is provided, the solver will stop if any of the root function elements change sign.
     /// The internal state of the solver is set to the time that the zero-crossing occured.
     ///
-    /// If a root and a reset function are provided, then if index 0 of the root function has a zero-crossing
-    /// then the reset is applied (the pre-reset and post-reset states are added to the solution)
-    /// and the solver continues on until `final_time`. If any of the other indices of the root function have
-    /// a zero-crossing, then the solver will stop as normal.
-    ///
     /// # Arguments
     /// - `final_time`: The time to integrate to
     ///
     /// # Returns
-    /// A tuple of `(solution_matrix, times)` where:
+    /// A tuple of `(solution_matrix, times, stop_reason)` where:
     /// - `solution_matrix` is a dense matrix with one column per solution time and one row per state variable
     /// - `times` is a vector of times at which the solution was evaluated
+    /// - `stop_reason` indicates whether the solve reached `final_time` or stopped on a root
     ///
     /// # Post-condition
     /// After the solver finishes, the internal state of the solver is at time `final_time`.
@@ -272,46 +194,42 @@ where
     fn solve(
         &mut self,
         final_time: Eqn::T,
-    ) -> Result<(<Eqn::V as DefaultDenseMatrix>::M, Vec<Eqn::T>), DiffsolError>
+    ) -> Result<
+        (
+            <Eqn::V as DefaultDenseMatrix>::M,
+            Vec<Eqn::T>,
+            OdeSolverStopReason<Eqn::T>,
+        ),
+        DiffsolError,
+    >
     where
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
         let mut ret_t = Vec::new();
         let (mut ret_y, mut tmp_nout) = allocate_return(self)?;
-
         // do the main loop
         write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
         self.set_stop_time(final_time)?;
-        loop {
+        let stop_reason = loop {
             match self.step()? {
                 OdeSolverStopReason::InternalTimestep => {
                     write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
                 }
                 OdeSolverStopReason::TstopReached => {
                     write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
-                    break;
+                    break OdeSolverStopReason::TstopReached;
                 }
                 OdeSolverStopReason::RootFound(t_root, root_idx) => {
                     self.state_mut_back(t_root)?;
                     write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
-
-                    // If a reset function is defined and this was root index 0,
-                    // apply the reset and continue integration.
-                    if root_idx == 0 {
-                        if let Some(reset_fn) = self.problem().eqn.reset() {
-                            self.state_mut_op(&reset_fn)?;
-                            write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
-                            continue;
-                        }
-                    }
-                    break;
+                    break OdeSolverStopReason::RootFound(t_root, root_idx);
                 }
             }
-        }
+        };
         let ntimes = ret_t.len();
         ret_y.resize_cols(ntimes);
-        Ok((ret_y, ret_t))
+        Ok((ret_y, ret_t, stop_reason))
     }
 
     /// Solve the ODE from the current time to `t_eval[t_eval.len()-1]`, evaluating at specified times.
@@ -324,38 +242,40 @@ where
     /// If a root function is provided, the solver will stop if any of the root function elements change sign.
     /// The internal state of the solver is set to the time that the zero-crossing occured.
     ///
-    /// If a root and a reset function are provided, then if index 0 of the root function has a zero-crossing
-    /// then the reset is applied and the solver continues on until `final_time`.
-    /// If any of the other indices of the root function have a zero-crossing, then the solver will stop as normal.
-    ///
     /// # Arguments
     /// - `t_eval`: A slice of times at which to evaluate the solution. Times should be in increasing order.
     ///
     /// # Returns
-    /// A dense matrix with one column per evaluation time (in the same order as `t_eval`) and one row per state variable,
-    /// plus one final column at the stop-root time if a non-reset root fires before `t_eval` is exhausted.
-    ///
-    /// If a reset root (index 0) fires, the reset is applied and integration continues; no extra columns are inserted.
+    /// A tuple of `(solution_matrix, stop_reason)` where:
+    /// - `solution_matrix` has one column per evaluation time (in the same order as `t_eval`) and one row per state variable,
+    ///   plus one final column at the root time if a root fires before `t_eval` is exhausted.
+    /// - `stop_reason` indicates whether the solve reached `t_eval[t_eval.len()-1]` or stopped on a root.
     ///
     /// # Post-condition
     /// In the case that no roots are found that stop the solve early, the internal state is at time `t_eval[t_eval.len()-1]`.
-    /// If a non-reset root is found, the solver stops early. The internal state is moved to the root time,
+    /// If a root is found, the solver stops early. The internal state is moved to the root time,
     /// and the last column corresponds to the root time (which may not be in `t_eval`).
+    #[allow(clippy::type_complexity)]
     fn solve_dense(
         &mut self,
         t_eval: &[Eqn::T],
-    ) -> Result<<Eqn::V as DefaultDenseMatrix>::M, DiffsolError>
+    ) -> Result<
+        (
+            <Eqn::V as DefaultDenseMatrix>::M,
+            OdeSolverStopReason<Eqn::T>,
+        ),
+        DiffsolError,
+    >
     where
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
         let (mut ret, mut tmp_nout, mut tmp_nstates) = dense_allocate_return(self, t_eval)?;
-
         self.set_stop_time(t_eval[t_eval.len() - 1])?;
 
         let mut col = 0usize;
         let mut t_i = 0usize;
-        'outer: while t_i < t_eval.len() {
+        while t_i < t_eval.len() {
             if col >= ret.ncols() {
                 ret.resize_cols((col + 1).max(ret.ncols() * 2));
             }
@@ -382,16 +302,7 @@ where
                         }
                         self.state_mut_back(t_root)?;
 
-                        if root_idx == 0 {
-                            if let Some(reset_fn) = self.problem().eqn.reset() {
-                                // Apply reset silently, no extra columns emitted.
-                                self.state_mut_op(&reset_fn)?;
-                                // t_eval[t_i] is at or after t_root; process it next.
-                                continue 'outer;
-                            }
-                        }
-
-                        // Non-reset root: write the root state as the final column only if
+                        // Write the root state as the final column only if
                         // the root fired before all t_eval points were consumed.
                         if col < ret.ncols() {
                             let mut y_out = ret.column_mut(col);
@@ -409,7 +320,7 @@ where
                             col += 1;
                         }
                         ret.resize_cols(col);
-                        return Ok(ret);
+                        return Ok((ret, OdeSolverStopReason::RootFound(t_root, root_idx)));
                     }
                 }
             }
@@ -425,7 +336,7 @@ where
             t_i += 1;
         }
         ret.resize_cols(col);
-        Ok(ret)
+        Ok((ret, OdeSolverStopReason::TstopReached))
     }
 
     /// Solve the ODE from the current time to `final_time`, saving checkpoints at regular intervals.
@@ -761,7 +672,7 @@ mod test {
             exponential_decay_problem_with_root,
         },
         scale, AdjointOdeSolverMethod, DenseMatrix, NalgebraLU, NalgebraVec, OdeEquations,
-        OdeSolverMethod, Op, SensitivitiesOdeSolverMethod, Vector, VectorView,
+        OdeSolverMethod, OdeSolverStopReason, Op, SensitivitiesOdeSolverMethod, Vector, VectorView,
     };
 
     #[test]
@@ -772,7 +683,8 @@ mod test {
         let k = 0.1;
         let y0 = NalgebraVec::from_vec(vec![1.0, 1.0], *problem.context());
         let expect = |t: f64| &y0 * scale(f64::exp(-k * t));
-        let (y, t) = s.solve(10.0).unwrap();
+        let (y, t, stop_reason) = s.solve(10.0).unwrap();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         assert!((t[0] - 0.0).abs() < 1e-10);
         assert!((t[t.len() - 1] - 10.0).abs() < 1e-10);
         for (i, t_i) in t.iter().enumerate() {
@@ -787,7 +699,8 @@ mod test {
             exponential_decay_problem_with_root::<NalgebraMat<f64>>(false, false);
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
-        let (y, t) = s.solve(10.0).unwrap();
+        let (y, t, stop_reason) = s.solve(10.0).unwrap();
+        assert!(matches!(stop_reason, OdeSolverStopReason::RootFound(_, _)));
         let t_root = -0.6_f64.ln() / 0.1;
         let t_last = *t.last().unwrap();
         assert!((t_last - t_root).abs() < 1e-3);
@@ -813,7 +726,8 @@ mod test {
                 *problem.context(),
             )
         };
-        let (y, t) = s.solve(10.0).unwrap();
+        let (y, t, stop_reason) = s.solve(10.0).unwrap();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         for (i, t_i) in t.iter().enumerate() {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&expect(*t_i), &problem.atol, problem.rtol, 15.0);
@@ -826,7 +740,8 @@ mod test {
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
-        let y = s.solve_dense(t_eval.as_slice()).unwrap();
+        let (y, stop_reason) = s.solve_dense(t_eval.as_slice()).unwrap();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
@@ -840,7 +755,8 @@ mod test {
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = (0..=10).map(|i| i as f64).collect::<Vec<_>>();
-        let y = s.solve_dense(t_eval.as_slice()).unwrap();
+        let (y, stop_reason) = s.solve_dense(t_eval.as_slice()).unwrap();
+        assert!(matches!(stop_reason, OdeSolverStopReason::RootFound(_, _)));
         let t_root = -0.6_f64.ln() / 0.1;
         assert!((s.state().t - t_root).abs() < 1e-3);
         assert!(y.ncols() < t_eval.len());
@@ -864,7 +780,8 @@ mod test {
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = (0..=10).map(|i| i as f64).collect::<Vec<_>>();
-        let y = s.solve_dense(t_eval.as_slice()).unwrap();
+        let (y, stop_reason) = s.solve_dense(t_eval.as_slice()).unwrap();
+        assert!(matches!(stop_reason, OdeSolverStopReason::RootFound(_, _)));
         let k = 0.1;
         let decay = 0.6_f64;
         let t_root = -decay.ln() / k;
@@ -884,7 +801,8 @@ mod test {
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
-        let y = s.solve_dense(t_eval.as_slice()).unwrap();
+        let (y, stop_reason) = s.solve_dense(t_eval.as_slice()).unwrap();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
@@ -909,7 +827,8 @@ mod test {
         let mut s = problem.bdf_sens::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
-        let (y, sens) = s.solve_dense_sensitivities(t_eval.as_slice()).unwrap();
+        let (y, sens, stop_reason) = s.solve_dense_sensitivities(t_eval.as_slice()).unwrap();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
@@ -933,7 +852,8 @@ mod test {
         let mut s = problem.bdf_sens::<NalgebraLU<f64>>().unwrap();
 
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
-        let (y, sens) = s.solve_dense_sensitivities(t_eval.as_slice()).unwrap();
+        let (y, sens, stop_reason) = s.solve_dense_sensitivities(t_eval.as_slice()).unwrap();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         for (i, soln_pt) in soln.solution_points.iter().enumerate() {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);

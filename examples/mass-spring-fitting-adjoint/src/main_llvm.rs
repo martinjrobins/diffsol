@@ -35,7 +35,7 @@ impl CostFunction for Problem {
             .set_params(&V::from_vec(param.clone(), context));
         let mut solver = problem.bdf::<LS>().unwrap();
         let ys = match solver.solve_dense(&self.ts_data) {
-            Ok(ys) => ys,
+            Ok((ys, _stop_reason)) => ys,
             Err(_) => return Ok(f64::MAX / 1000.),
         };
         let loss = ys
@@ -108,7 +108,7 @@ pub fn main() {
         .unwrap();
     let ys_data = {
         let mut solver = problem.bdf::<LS>().unwrap();
-        solver.solve_dense(&t_data).unwrap()
+        solver.solve_dense(&t_data).unwrap().0
     };
 
     let cost = Problem {

@@ -15,13 +15,15 @@ use crate::ode_solver_error;
 use crate::{
     matrix::MatrixRef, nonlinear_solver::root::RootFinder, op::bdf::BdfCallable, scalar::scale,
     AugmentedOdeEquations, BdfState, DenseMatrix, JacobianUpdate, MatrixViewMut, NonLinearOp,
-    NonLinearSolver, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-    OdeSolverStopReason, Op, Scalar, Vector, VectorRef, VectorView, VectorViewMut,
+    NonLinearSolver, OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverMethod,
+    OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar, SensEquations, Vector,
+    VectorRef, VectorView, VectorViewMut,
 };
 
 use super::config::BdfConfig;
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
+use super::sensitivities::SensitivitiesOdeSolverMethod;
 
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct BdfStatistics {
@@ -59,6 +61,26 @@ where
     }
     fn augmented_eqn_mut(&mut self) -> Option<&mut AugEqn> {
         self.s_op.as_mut().map(|op| &mut op.eqn)
+    }
+}
+
+impl<'a, M, Eqn, Nls> SensitivitiesOdeSolverMethod<'a, Eqn>
+    for Bdf<'a, Eqn, Nls, M, SensEquations<'a, Eqn>>
+where
+    Eqn: OdeEquationsImplicitSens + 'a,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+    Nls: NonLinearSolver<Eqn::M>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
+{
+    fn reset_with_sens(&mut self) -> Result<(), DiffsolError> {
+        let eqn = &self.ode_problem.eqn;
+        if let Some(reset_fn) = eqn.reset() {
+            self.is_state_modified = true;
+            self.state.state_mut_op_with_sens(eqn, &reset_fn)?;
+        }
+        Ok(())
     }
 }
 
@@ -1218,6 +1240,15 @@ where
         Ok(())
     }
 
+    fn reset(&mut self) -> Result<(), DiffsolError> {
+        let eqn = &self.ode_problem.eqn;
+        if let Some(reset_fn) = eqn.reset() {
+            self.is_state_modified = true;
+            self.state.state_mut_op(eqn, &reset_fn)?;
+        }
+        Ok(())
+    }
+
     fn checkpoint(&mut self) -> Self::State {
         debug!("Taking checkpoint");
         self._jacobian_updates(
@@ -2258,7 +2289,7 @@ mod test {
         for p in ps {
             problem.eqn_mut().set_params(&p);
             let mut s = problem.bdf::<LS>().unwrap();
-            let (ys, _ts) = s.solve(10.0).unwrap();
+            let (ys, _ts, _stop_reason) = s.solve(10.0).unwrap();
             // check that the new solution is different from the old one
             if let Some(old_soln) = &mut old_soln {
                 let new_soln = ys.column(ys.ncols() - 1).into_owned();
@@ -2324,10 +2355,7 @@ mod test {
         test_root_found_index(solver, &soln, 0, 1e-4);
     }
 
-    /// Test that `solve()` applies the Reset function (root index 0) and continues,
-    /// only stopping when the stopping root (index 1) fires.
-    ///
-    /// Timeline: reset at t ≈ 5.108 (y=0.6→0.4), stop at t ≈ 7.985 (y=0.3, after reset).
+    /// Test that `solve()` halts on the first root, even when a reset function is configured.
     #[test]
     fn test_solve_with_reset_bdf() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
@@ -2337,8 +2365,7 @@ mod test {
         test_solve_with_reset(solver, &soln);
     }
 
-    /// Test that `solve_dense()` applies the Reset function (root index 0) and continues,
-    /// only stopping when the stopping root (index 1) fires.
+    /// Test that `solve_dense()` halts on the first root, even when a reset function is configured.
     #[test]
     fn test_solve_dense_with_reset_bdf() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
@@ -2348,7 +2375,7 @@ mod test {
         test_solve_dense_with_reset(solver, &soln);
     }
 
-    /// Test that `solve_dense_sensitivities()` correctly handles a reset event for BDF.
+    /// Test that `solve_dense_sensitivities()` halts on the first root for BDF.
     #[test]
     fn test_solve_dense_sensitivities_with_reset_bdf() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem_sens;

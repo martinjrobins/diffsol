@@ -1,11 +1,14 @@
 use super::method::AugmentedOdeSolverMethod;
 use super::runge_kutta::Rk;
+use super::sensitivities::SensitivitiesOdeSolverMethod;
 use crate::error::DiffsolError;
 use crate::ode_solver::bdf::BdfStatistics;
 use crate::vector::VectorRef;
 use crate::NoAug;
+use crate::OdeEquationsImplicitSens;
 use crate::OdeSolverStopReason;
 use crate::RkState;
+use crate::SensEquations;
 use crate::Tableau;
 use crate::{
     AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, ExplicitRkConfig, OdeEquations,
@@ -31,6 +34,19 @@ where
     }
     fn augmented_eqn_mut(&mut self) -> Option<&mut AugEqn> {
         self.augmented_eqn.as_mut()
+    }
+}
+
+impl<'a, Eqn, M> SensitivitiesOdeSolverMethod<'a, Eqn>
+    for ExplicitRk<'a, Eqn, M, SensEquations<'a, Eqn>>
+where
+    Eqn: OdeEquationsImplicitSens + 'a,
+    M: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+{
+    fn reset_with_sens(&mut self) -> Result<(), DiffsolError> {
+        self.rk.reset_with_sens()
     }
 }
 
@@ -245,6 +261,10 @@ where
     fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError> {
         let integrate_out = self.rk.problem().integrate_out;
         self.rk.state_mut_back(t, integrate_out)
+    }
+
+    fn reset(&mut self) -> Result<(), DiffsolError> {
+        self.rk.reset()
     }
 }
 
@@ -493,7 +513,7 @@ mod test {
         for p in ps {
             problem.eqn_mut().set_params(&p);
             let mut s = problem.tsit45().unwrap();
-            let (ys, _ts) = s.solve(10.0).unwrap();
+            let (ys, _ts, _stop_reason) = s.solve(10.0).unwrap();
             // check that the new solution is different from the old one
             if let Some(old_soln) = &mut old_soln {
                 let new_soln = ys.column(ys.ncols() - 1).into_owned();
@@ -536,8 +556,7 @@ mod test {
         test_root_found_index(solver, &soln, 0, 1e-4);
     }
 
-    /// Test that `solve()` applies the Reset function (root index 0) and continues,
-    /// only stopping when the stopping root (index 1) fires.
+    /// Test that `solve()` halts on the first root, even when a reset function is configured.
     #[test]
     fn test_solve_with_reset_tsit45() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
@@ -547,8 +566,7 @@ mod test {
         test_solve_with_reset(solver, &soln);
     }
 
-    /// Test that `solve_dense()` applies the Reset function (root index 0) and continues,
-    /// only stopping when the stopping root (index 1) fires.
+    /// Test that `solve_dense()` halts on the first root, even when a reset function is configured.
     #[test]
     fn test_solve_dense_with_reset_tsit45() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
@@ -558,7 +576,7 @@ mod test {
         test_solve_dense_with_reset(solver, &soln);
     }
 
-    /// Test that `solve_dense_sensitivities()` correctly handles a reset event for Tsit45.
+    /// Test that `solve_dense_sensitivities()` halts on the first root for Tsit45.
     #[test]
     fn test_solve_dense_sensitivities_with_reset_tsit45() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem_sens;

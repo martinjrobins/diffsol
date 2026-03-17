@@ -38,6 +38,7 @@ pub struct DiffSlContext<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
     nstates: usize,
     nroots: usize,
     nparams: usize,
+    model_index: u32,
     has_mass: bool,
     has_root: bool,
     has_reset: bool,
@@ -77,6 +78,7 @@ impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSlContext<M, ExternalModule
         let tmp2 = RefCell::new(M::V::zeros(nstates, ctx.clone()));
         let tmp_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
         let tmp2_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
+        let model_index = 0;
 
         Ok(Self {
             compiler,
@@ -99,6 +101,7 @@ impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSlContext<M, ExternalModule
             rhs_state_deps,
             rhs_input_deps,
             mass_state_deps,
+            model_index,
         })
     }
 }
@@ -142,6 +145,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> Di
         let tmp2 = RefCell::new(M::V::zeros(nstates, ctx.clone()));
         let tmp_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
         let tmp2_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
+        let model_index = 0;
 
         Ok(Self {
             compiler,
@@ -149,6 +153,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> Di
             ddata,
             sens_data,
             nparams,
+            model_index,
             nstates,
             tmp,
             tmp2,
@@ -307,6 +312,23 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> DiffSl<M, CG> {
             }
         }
         ret
+    }
+
+    /// Set the active DiffSL model index together with parameters.
+    ///
+    /// This updates the compiler input block and then recomputes constants via `set_u0`.
+    pub fn set_params_and_model(&mut self, p: &M::V, model_index: u32) {
+        self.context.model_index = model_index;
+        self.context.compiler.set_inputs(
+            p.as_slice(),
+            self.context.data.borrow_mut().as_mut_slice(),
+            self.context.model_index,
+        );
+        let mut dummy = M::V::zeros(self.context.nstates, self.context.ctx.clone());
+        self.context.compiler.set_u0(
+            dummy.as_mut_slice(),
+            self.context.data.borrow_mut().as_mut_slice(),
+        );
     }
 }
 
@@ -510,7 +532,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> ConstantOpSens for DiffS
         self.0.context.compiler.set_inputs(
             v.as_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
-            0u32,
+            self.0.context.model_index,
         );
         self.0.context.compiler.set_u0_sgrad(
             self.0.context.tmp.borrow().as_slice(),
@@ -623,7 +645,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for Diff
         self.0.context.compiler.set_inputs(
             v.as_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
-            0u32,
+            self.0.context.model_index,
         );
         self.0.context.compiler.reset_sgrad(
             t,
@@ -725,7 +747,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for Diff
         self.0.context.compiler.set_inputs(
             v.as_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
-            0u32,
+            self.0.context.model_index,
         );
         self.0.context.compiler.calc_out_sgrad(
             t,
@@ -850,7 +872,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for Diff
         self.0.context.compiler.set_inputs(
             v.as_slice(),
             self.0.context.sens_data.borrow_mut().as_mut_slice(),
-            0u32,
+            self.0.context.model_index,
         );
         self.0.context.compiler.rhs_sgrad(
             t,
@@ -1033,19 +1055,8 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> OdeEquations for DiffSl<
     }
 
     fn set_params(&mut self, p: &Self::V) {
-        // set the parameters in data
-        self.context.compiler.set_inputs(
-            p.as_slice(),
-            self.context.data.borrow_mut().as_mut_slice(),
-            0u32,
-        );
-
-        // set_u0 will calculate all the constants in the equations based on the params
-        let mut dummy = M::V::zeros(self.context.nstates, self.context().clone());
-        self.context.compiler.set_u0(
-            dummy.as_mut_slice(),
-            self.context.data.borrow_mut().as_mut_slice(),
-        );
+        // `set_params` preserves the current model index.
+        self.set_params_and_model(p, self.context.model_index);
     }
 
     fn get_params(&self, p: &mut Self::V) {
@@ -1112,6 +1123,7 @@ mod tests {
     }
 
     generate_tests!(diffsl_logistic_growth);
+    generate_tests!(diffsl_logistic_growth_with_model_index);
     generate_tests!(diffsl_reset_call_and_jac_mul);
 
     // Sensitivity and reverse-mode (adjoint) require LLVM — Cranelift supports neither.
@@ -1125,7 +1137,6 @@ mod tests {
     }
 
     generate_tests_llvm_only!(diffsl_reset_sens_and_adjoint_gradients);
-
     /// Tests forward evaluation and Jacobian-vector product for DiffSlReset.
     /// Runs on all backends (Cranelift + LLVM).
     ///
@@ -1342,7 +1353,7 @@ mod tests {
             .unwrap();
         let mut solver = problem.bdf::<<M as DefaultSolver>::LS>().unwrap();
         let t = M::T::one();
-        let (ys, ts) = solver.solve(t).unwrap();
+        let (ys, ts, _stop_reason) = solver.solve(t).unwrap();
         for (i, t) in ts.iter().enumerate() {
             let y_expect = k / (M::T::one() + (k - y0) * (-r * *t).exp() / y0);
             let z_expect = M::T::from_f64(2.0).unwrap() * y_expect;
@@ -1365,7 +1376,7 @@ mod tests {
             .map(|t| M::T::from_f64(t).unwrap())
             .collect::<Vec<_>>();
         let mut solver = problem.bdf::<<M as DefaultSolver>::LS>().unwrap();
-        let ys = solver.solve_dense(&t_evals).unwrap();
+        let (ys, _stop_reason) = solver.solve_dense(&t_evals).unwrap();
         for (i, t) in t_evals.iter().enumerate() {
             let y_expect = k / (M::T::one() + (k - y0) * (-r * *t).exp() / y0);
             let z_expect = M::T::from_f64(2.0).unwrap() * y_expect;
@@ -1380,5 +1391,61 @@ mod tests {
                 M::T::from_f64(10.0).unwrap(),
             );
         }
+    }
+
+    fn diffsl_logistic_growth_with_model_index<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        let text = "
+            r_i {
+                1,
+                2,
+                4,
+            }
+            u_i {
+                y = 0.1,
+            }
+            reset_i {
+                y,
+            }
+            F_i {
+                r_i[N] * y,
+            }
+        ";
+
+        let ctx = M::C::default();
+        let mut eqn = DiffSl::<M, CG>::compile(text, ctx.clone(), false).unwrap();
+        let t = M::T::zero();
+        let y = eqn.init().call(t);
+        let tol = M::T::from_f64(1e-10).unwrap();
+        let one_tenth = M::T::from_f64(0.1).unwrap();
+        let p = ctx.vector_from_vec(Vec::<M::T>::new());
+
+        let rhs_model_0 = eqn.rhs().call(&y, t);
+        let rhs_model_0_expected =
+            ctx.vector_from_vec(vec![M::T::from_f64(1.0).unwrap() * one_tenth]);
+        rhs_model_0.assert_eq_st(&rhs_model_0_expected, tol);
+
+        eqn.set_params_and_model(&p, 1);
+        let rhs_model_1 = eqn.rhs().call(&y, t);
+        let rhs_model_1_expected =
+            ctx.vector_from_vec(vec![M::T::from_f64(2.0).unwrap() * one_tenth]);
+        rhs_model_1.assert_eq_st(&rhs_model_1_expected, tol);
+
+        eqn.set_params_and_model(&p, 2);
+        let rhs_model_2 = eqn.rhs().call(&y, t);
+        let rhs_model_2_expected =
+            ctx.vector_from_vec(vec![M::T::from_f64(4.0).unwrap() * one_tenth]);
+        rhs_model_2.assert_eq_st(&rhs_model_2_expected, tol);
+
+        // set_params preserves the current model index.
+        eqn.set_params(&p);
+        let rhs_after_set_params = eqn.rhs().call(&y, t);
+        rhs_after_set_params.assert_eq_st(&rhs_model_2_expected, tol);
     }
 }

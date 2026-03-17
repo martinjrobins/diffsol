@@ -300,8 +300,8 @@ impl<T: OdeEquations> OdeEquations for &'_ T {
         unimplemented!()
     }
 
-    fn get_params(&self, _p: &mut Self::V) {
-        unimplemented!()
+    fn get_params(&self, p: &mut Self::V) {
+        (*self).get_params(p)
     }
 }
 

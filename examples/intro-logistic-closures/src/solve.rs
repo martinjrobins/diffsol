@@ -6,5 +6,5 @@ where
     Solver: OdeSolverMethod<'a, Eqn>,
     Eqn: OdeEquations<T = T, V = V> + 'a,
 {
-    let (_ys, _ts) = solver.solve(10.0).unwrap();
+    let (_ys, _ts, _stop_reason) = solver.solve(10.0).unwrap();
 }

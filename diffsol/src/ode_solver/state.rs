@@ -8,9 +8,9 @@ use crate::{
     error::{DiffsolError, OdeSolverError},
     nonlinear_solver::{convergence::Convergence, NonLinearSolver},
     ode_solver_error, scale, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp,
-    InitOp, LinearOp, LinearSolver, Matrix, NewtonNonlinearSolver, NonLinearOp, OdeEquations,
-    OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverProblem, Op, SensEquations, Vector,
-    VectorIndex,
+    InitOp, LinearOp, LinearSolver, Matrix, NewtonNonlinearSolver, NonLinearOp,
+    NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitSens,
+    OdeSolverProblem, Op, SensEquations, Vector, VectorIndex,
 };
 use crate::{non_linear_solver_error, BacktrackingLineSearch, NoLineSearch};
 
@@ -145,6 +145,67 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         }
         if !state.ds.is_empty() && state.ds[0].len() != problem.eqn.rhs().nstates() {
             return Err(ode_solver_error!(StateProblemMismatch));
+        }
+        Ok(())
+    }
+
+    /// Apply a non-linear operator to the current state in-place, replacing `state.y` with
+    /// `op(state.y, state.t)` and recomputing `state.dy = rhs(state.y, state.t)`.
+    ///
+    /// Note: mass matrix equations are not supported for this operation.
+    fn state_mut_op<Eqn, O>(&mut self, eqn: &Eqn, op: &O) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
+        O: NonLinearOp<T = V::T, V = V, M = Eqn::M>,
+    {
+        if eqn.mass().is_some() {
+            return Err(ode_solver_error!(MassMatrixNotSupported));
+        }
+
+        let nstates = eqn.rhs().nstates();
+        let mut y_out = V::zeros(nstates, eqn.context().clone());
+        op.call_inplace(self.as_ref().y, self.as_ref().t, &mut y_out);
+
+        {
+            let state = self.as_mut();
+            state.y.copy_from(&y_out);
+            eqn.rhs().call_inplace(state.y, *state.t, &mut y_out);
+            state.dy.copy_from(&y_out);
+        }
+        Ok(())
+    }
+
+    /// Like `state_mut_op`, but also updates each sensitivity vector in-place using the
+    /// operator Jacobian: `s_new[j] = J_op(y_before, t) · s_old[j]`.
+    ///
+    /// Note: mass matrix equations are not supported for this operation.
+    fn state_mut_op_with_sens<Eqn, O>(&mut self, eqn: &Eqn, op: &O) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
+        O: NonLinearOpJacobian<T = V::T, V = V, M = Eqn::M>,
+    {
+        if eqn.mass().is_some() {
+            return Err(ode_solver_error!(MassMatrixNotSupported));
+        }
+
+        let nstates = eqn.rhs().nstates();
+        let ctx = eqn.context().clone();
+        let mut y_new = V::zeros(nstates, ctx.clone());
+        let mut tmp = V::zeros(nstates, ctx);
+        let t = self.as_ref().t;
+        let nparams = self.as_ref().s.len();
+
+        op.call_inplace(self.as_ref().y, t, &mut y_new);
+        for j in 0..nparams {
+            op.jac_mul_inplace(self.as_ref().y, t, &self.as_ref().s[j], &mut tmp);
+            self.as_mut().s[j].copy_from(&tmp);
+        }
+
+        eqn.rhs().call_inplace(&y_new, t, &mut tmp);
+        {
+            let state = self.as_mut();
+            state.dy.copy_from(&tmp);
+            state.y.copy_from(&y_new);
         }
         Ok(())
     }

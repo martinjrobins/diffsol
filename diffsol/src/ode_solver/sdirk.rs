@@ -12,8 +12,8 @@ use crate::Tableau;
 use crate::{
     nonlinear_solver::NonLinearSolver, op::sdirk::SdirkCallable, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, DenseMatrix, JacobianUpdate,
-    Matrix, NoLineSearch, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-    Op, StateRef, StateRefMut,
+    Matrix, NoLineSearch, OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverMethod,
+    OdeSolverProblem, OdeSolverState, Op, SensEquations, StateRef, StateRefMut,
 };
 use log::debug;
 use log::trace;
@@ -24,6 +24,7 @@ use super::bdf::BdfStatistics;
 use super::config::SdirkConfig;
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
+use super::sensitivities::SensitivitiesOdeSolverMethod;
 
 impl<'a, M, Eqn, LS, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
     for Sdirk<'a, Eqn, LS, M, AugEqn>
@@ -44,6 +45,21 @@ where
     }
     fn augmented_eqn_mut(&mut self) -> Option<&mut AugEqn> {
         self.s_op.as_mut().map(|op| &mut op.eqn)
+    }
+}
+
+impl<'a, M, Eqn, LS> SensitivitiesOdeSolverMethod<'a, Eqn>
+    for Sdirk<'a, Eqn, LS, M, SensEquations<'a, Eqn>>
+where
+    Eqn: OdeEquationsImplicitSens + 'a,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    LS: LinearSolver<Eqn::M>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+{
+    fn reset_with_sens(&mut self) -> Result<(), DiffsolError> {
+        self.rk.reset_with_sens()
     }
 }
 
@@ -510,6 +526,10 @@ where
         let integrate_out = self.rk.problem().integrate_out;
         self.rk.state_mut_back(t, integrate_out)
     }
+
+    fn reset(&mut self) -> Result<(), DiffsolError> {
+        self.rk.reset()
+    }
 }
 
 #[cfg(test)]
@@ -914,7 +934,7 @@ mod test {
         for p in ps {
             problem.eqn_mut().set_params(&p);
             let mut s = problem.tr_bdf2::<LS>().unwrap();
-            let (ys, _ts) = s.solve(10.0).unwrap();
+            let (ys, _ts, _stop_reason) = s.solve(10.0).unwrap();
             // check that the new solution is different from the old one
             if let Some(old_soln) = &mut old_soln {
                 let new_soln = ys.column(ys.ncols() - 1).into_owned();
@@ -958,8 +978,7 @@ mod test {
         test_root_found_index(solver, &soln, 0, 1e-4);
     }
 
-    /// Test that `solve()` applies the Reset function (root index 0) and continues,
-    /// only stopping when the stopping root (index 1) fires.
+    /// Test that `solve()` halts on the first root, even when a reset function is configured.
     #[test]
     fn test_solve_with_reset_tr_bdf2() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
@@ -969,8 +988,7 @@ mod test {
         test_solve_with_reset(solver, &soln);
     }
 
-    /// Test that `solve_dense()` applies the Reset function (root index 0) and continues,
-    /// only stopping when the stopping root (index 1) fires.
+    /// Test that `solve_dense()` halts on the first root, even when a reset function is configured.
     #[test]
     fn test_solve_dense_with_reset_tr_bdf2() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
@@ -980,7 +998,7 @@ mod test {
         test_solve_dense_with_reset(solver, &soln);
     }
 
-    /// Test that `solve_dense_sensitivities()` correctly handles a reset event for TR-BDF2.
+    /// Test that `solve_dense_sensitivities()` halts on the first root for TR-BDF2.
     #[test]
     fn test_solve_dense_sensitivities_with_reset_tr_bdf2() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem_sens;

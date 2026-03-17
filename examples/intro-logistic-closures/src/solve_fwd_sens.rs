@@ -7,7 +7,7 @@ where
     Eqn: OdeEquationsImplicitSens<T = T, V = V, M = M> + 'a,
 {
     let t_evals = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
-    let (y, sens) = solver
+    let (y, sens, _stop_reason) = solver
         .solve_dense_sensitivities(t_evals.as_slice())
         .unwrap();
     println!("solution: {y:?}");

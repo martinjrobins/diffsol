@@ -407,7 +407,10 @@ fn predict_fn(
     ts_data: &[T],
 ) -> Result<M, DiffsolError> {
     problem.eqn.set_params(p);
-    problem.bdf::<LS>()?.solve_dense(ts_data)
+    problem
+        .bdf::<LS>()?
+        .solve_dense(ts_data)
+        .map(|(ys, _stop_reason)| ys)
 }
 
 fn train_one_round(

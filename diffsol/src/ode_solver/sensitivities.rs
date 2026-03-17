@@ -11,6 +11,9 @@ pub trait SensitivitiesOdeSolverMethod<'a, Eqn>:
 where
     Eqn: OdeEquationsImplicitSens + 'a,
 {
+    /// Apply the equations' reset function and propagate sensitivities through its Jacobian.
+    fn reset_with_sens(&mut self) -> Result<(), DiffsolError>;
+
     /// Solve the ODE and the forward sensitivity equations from the current time to `t_eval[t_eval.len()-1]`,
     /// evaluating at specified times.
     ///
@@ -22,26 +25,22 @@ where
     /// If a root function is provided, the solver will stop if any of the root function elements change sign.
     /// The internal state of the solver is set to the time that the zero-crossing occured.
     ///
-    /// If a root and a reset function are provided, then if index 0 of the root function has a zero-crossing
-    /// then the reset is applied, the sensitivities are update appropriately and the solver continues on until `final_time`.
-    /// If any of the other indices of the root function have a zero-crossing, then the solver will stop as normal.
-    ///
     /// # Arguments
     /// - `t_eval`: A slice of times at which to evaluate the solution. Times should be in increasing order.
     ///
     /// # Returns
-    /// A tuple of the ODE solution and sensitivities at the specified evaluation times.
+    /// A tuple of `(ode_solution, sensitivities, stop_reason)` at the specified evaluation times.
     ///
     /// The ODE solution is a dense matrix with one column per evaluation time (in the same order as `t_eval`) and one row per state variable,
-    /// plus one final column at the stop-root time if a non-reset root fires before `t_eval` is exhausted.
-    /// If a reset root (index 0) fires, the reset is applied and integration continues; no extra columns are inserted.
+    /// plus one final column at the root time if a root fires before `t_eval` is exhausted.
     ///
     /// The sensitivities are returned as a Vec of dense matrices of identical shape as the ODE solution,
     /// where the ith element of the Vec corresponds to the sensitivities with respect to the ith parameter.
+    /// `stop_reason` indicates whether the solve reached `t_eval[t_eval.len()-1]` or stopped on a root.
     ///
     /// # Post-condition
     /// In the case that no roots are found that stop the solve early, the internal state is at time `t_eval[t_eval.len()-1]`.
-    /// If a non-reset root is found, the solver stops early. The internal state is moved to the root time,
+    /// If a root is found, the solver stops early. The internal state is moved to the root time,
     /// and the last column corresponds to the root time (which may not be in `t_eval`).
     #[allow(clippy::type_complexity)]
     fn solve_dense_sensitivities(
@@ -51,6 +50,7 @@ where
         (
             <Eqn::V as DefaultDenseMatrix>::M,
             Vec<<Eqn::V as DefaultDenseMatrix>::M>,
+            OdeSolverStopReason<Eqn::T>,
         ),
         DiffsolError,
     >
@@ -142,7 +142,7 @@ where
             Ok(())
         };
 
-        'outer: while t_i < t_eval.len() {
+        while t_i < t_eval.len() {
             let t_target = t_eval[t_i];
 
             while self.state().t < t_target {
@@ -161,14 +161,7 @@ where
 
                         self.state_mut_back(t_root)?;
 
-                        if root_idx == 0 {
-                            if let Some(reset_fn) = self.problem().eqn.reset() {
-                                self.state_mut_op_with_sens(&reset_fn)?;
-                                continue 'outer;
-                            }
-                        }
-
-                        // Non-reset root: write root state and return early.
+                        // Write root state and return early.
                         y.copy_from(self.state().y);
                         for (j, s_j) in s.iter_mut().enumerate() {
                             s_j.copy_from(&self.state().s[j]);
@@ -179,7 +172,11 @@ where
                         for rs in ret_sens.iter_mut() {
                             rs.resize_cols(col);
                         }
-                        return Ok((ret, ret_sens));
+                        return Ok((
+                            ret,
+                            ret_sens,
+                            OdeSolverStopReason::RootFound(t_root, root_idx),
+                        ));
                     }
                 }
             }
@@ -195,13 +192,6 @@ where
         for rs in ret_sens.iter_mut() {
             rs.resize_cols(col);
         }
-        Ok((ret, ret_sens))
+        Ok((ret, ret_sens, OdeSolverStopReason::TstopReached))
     }
-}
-
-impl<'a, M, Eqn> SensitivitiesOdeSolverMethod<'a, Eqn> for M
-where
-    M: AugmentedOdeSolverMethod<'a, Eqn, SensEquations<'a, Eqn>>,
-    Eqn: OdeEquationsImplicitSens + 'a,
-{
 }

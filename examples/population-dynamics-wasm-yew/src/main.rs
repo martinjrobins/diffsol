@@ -43,7 +43,7 @@ fn App() -> Html {
     let oninput_a: Callback<InputEvent> = onchange(0);
     let oninput_b: Callback<InputEvent> = onchange(1);
 
-    let (ys, ts) = {
+    let (ys, ts, _stop_reason) = {
         let problem = problem.borrow();
         let mut solver = problem.tsit45().unwrap();
         solver.solve(40.0).unwrap()

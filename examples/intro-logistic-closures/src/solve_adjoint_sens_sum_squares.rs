@@ -11,7 +11,7 @@ where
     Eqn: OdeEquationsImplicitAdjoint<T = T, V = V, C = C, M = M> + 'a,
 {
     let t_data = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
-    let y_data = solver.solve_dense(t_data.as_slice()).unwrap();
+    let (y_data, _stop_reason) = solver.solve_dense(t_data.as_slice()).unwrap();
     let problem = solver.problem();
 
     let (checkpointing, soln) = solver
