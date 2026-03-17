@@ -532,7 +532,7 @@ pub fn exponential_decay_problem_sens_with_out<M: MatrixHost + 'static>(
 // exponential_decay_init functions (p = [k, y0], nstates = 2).
 //
 // Root 0: y[0] - 0.6  (first root, fires at t ≈ 5.108)
-// Root 1: y[0] - 0.3  (later root, not reached because solve halts at first root)
+// Root 1: y[0] - 0.3  (later root, reached at t = 7.985 if solve is continued after reset)
 // Reset:  y → [0.4, 0.4]
 // ------------------------------------------------------------------
 
