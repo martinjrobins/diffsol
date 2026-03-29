@@ -227,18 +227,37 @@ where
     /// [`Self::solve_dense`], so the caller can apply resets or parameter changes before resuming.
     ///
     /// # Example
-    /// ```ignore
-    /// let t_final = Eqn::T::from_f64(100.0).unwrap();
-    /// let mut state = self.bdf_state::<LS>()?;
-    /// let mut soln = Solution::new(t_final, self.eqn());
+    /// ```
+    /// use diffsol::{
+    ///     OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverStopReason, Solution,
+    ///     NalgebraLU, NalgebraMat, NalgebraVec, Vector,
+    /// };
+    /// type M = NalgebraMat<f64>;
+    /// type V = NalgebraVec<f64>;
+    /// type LS = NalgebraLU<f64>;
+    ///
+    /// let mut problem = OdeBuilder::<M>::new()
+    ///     .p([0.1])
+    ///     .rhs_implicit(
+    ///         |x, p, _t, y| { y[0] = -p[0] * x[0]; },
+    ///         |_x, p, _t, v, y| { y[0] = -p[0] * v[0]; },
+    ///     )
+    ///     .root(|x, _p, _t, y| { y[0] = x[0] - 0.1; }, 1)
+    ///     .init(|_p, _t, y| { y[0] = 1.0; }, 1)
+    ///     .build()
+    ///     .unwrap();
+    ///
+    /// let t_final = 10.0_f64;
+    /// let mut state = problem.bdf_state::<LS>().unwrap();
+    /// let mut soln = Solution::new(t_final, problem.eqn());
     ///
     /// while !soln.is_complete() {
-    ///     state = self.bdf_solver(state)?.solve_soln(&mut soln)?.into_state();
-    ///     if let Some(OdeSolverStopReason::RootFound(_t, idx)) = soln.stop_reason {
-    ///         self.eqn_mut().set_model_index(idx);
-    ///         if let Some(reset) = self.eqn().reset() {
-    ///             state.state_mut_op(self.eqn(), reset)?;
-    ///         }
+    ///     state = problem.bdf_solver::<LS>(state).unwrap()
+    ///         .solve_soln(&mut soln).unwrap()
+    ///         .into_state();
+    ///     if let Some(OdeSolverStopReason::RootFound(_, _)) = &soln.stop_reason {
+    ///         let p_new = V::from_vec(vec![0.2], *problem.context());
+    ///         problem.eqn_mut().set_params(&p_new);
     ///     }
     /// }
     /// ```
@@ -568,7 +587,7 @@ where
                 assert!(col == t_eval.len(), "Solver reached stop time before consuming all t_eval points, this should not happen");
                 break;
             }
-            OdeSolverStopReason::RootFound(t_root, root_idx) => {
+            OdeSolverStopReason::RootFound(t_root, _root_idx) => {
                 s.state_mut_back(t_root)?;
                 break;
             }

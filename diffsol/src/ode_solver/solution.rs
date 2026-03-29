@@ -29,7 +29,7 @@ impl<V: DefaultDenseMatrix> Solution<V>
             SolutionMode::Tfinal(t_final) => self.ts.last().map(|&t| t >= t_final).unwrap_or(false)
         }
     }
-    pub(crate) fn new(t_final: V::T, eq: &impl OdeEquations<T=V::T, V=V, C=V::C>) -> Self {
+    pub fn new(t_final: V::T, eq: &impl OdeEquations<T=V::T, V=V, C=V::C>) -> Self {
         let nrows = if eq.out().is_some() {
             eq.out().unwrap().nout()
         } else {
@@ -57,7 +57,7 @@ impl<V: DefaultDenseMatrix> Solution<V>
         }
     }
     
-    pub(crate) fn new_dense(t_evals: Vec<V::T>, eq: &impl OdeEquations<T=V::T, V=V, C=V::C>) -> Result<Self, DiffsolError> {
+    pub fn new_dense(t_evals: Vec<V::T>, eq: &impl OdeEquations<T=V::T, V=V, C=V::C>) -> Result<Self, DiffsolError> {
         let nrows = if eq.out().is_some() {
             eq.out().unwrap().nout()
         } else {
