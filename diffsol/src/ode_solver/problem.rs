@@ -1,13 +1,9 @@
+use faer::linalg::cholesky::lblt::solve;
 use num_traits::FromPrimitive;
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    error::DiffsolError, vector::Vector, AdjointContext, AdjointEquations, AugmentedOdeEquations,
-    AugmentedOdeEquationsImplicit, Bdf, BdfState, Checkpointing, DefaultDenseMatrix, DenseMatrix,
-    ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch, NonLinearOp,
-    OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
-    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Scalar, Sdirk,
-    SensEquations, Tableau, VectorRef,
+    AdjointContext, AdjointEquations, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, Bdf, BdfState, Checkpointing, DefaultDenseMatrix, DenseMatrix, ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch, NonLinearOp, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, OdeSolverStopReason, RkState, Scalar, Sdirk, SensEquations, Solution, Tableau, VectorRef, error::DiffsolError, vector::Vector
 };
 
 /// Options for the initial condition solver used to find consistent initial conditions
@@ -649,7 +645,27 @@ where
         let state = self.bdf_state_sens::<LS>()?;
         self.bdf_solver_sens(state)
     }
-
+    
+    pub fn bdf_solve_soln<LS: LinearSolver<Eqn::M>>(&self) -> Result<Solution<Eqn::V>, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit,
+    {
+        let t_final = Eqn::T::from_f64(100.0).unwrap();
+        let state = self.bdf_state::<LS>()?;
+        let mut soln = Solution::new(t_final, self.eqn());
+        let mut model = 0;
+        while !soln.is_complete() {
+            state = self.bdf_solver(state)?.solve_soln(&mut soln)?.into_state();
+            if let Some(OdeSolverStopReason::RootFound(t, idx)) = soln.stop_reason {
+                self.eqn_mut().set_params(p, idx);
+                if let Some(reset) = self.eqn().reset() {
+                    state.state_mut_op(self.eqn(), reset)?;
+                }
+            }
+        }
+        Ok(Solution::new(solver))
+    }
+    
     /// Create a new state for the Runge-Kutta solvers (explict or implicit).
     /// Note: This function will not provide a consistent initial state for
     /// problems with a mass matrix, for this case please use [Self::rk_state_and_consistent]

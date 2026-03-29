@@ -330,6 +330,7 @@ pub use ode_solver::{
     sensitivities::SensitivitiesOdeSolverMethod,
     state::OdeSolverState,
     tableau::Tableau,
+    solution::Solution,
 };
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};

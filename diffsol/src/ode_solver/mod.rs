@@ -8,6 +8,7 @@ pub mod explicit_rk;
 pub mod jacobian_update;
 pub mod method;
 pub mod problem;
+pub mod solution;
 pub mod runge_kutta;
 pub mod sde;
 pub mod sdirk;
