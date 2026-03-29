@@ -1,9 +1,8 @@
-use faer::linalg::cholesky::lblt::solve;
 use num_traits::FromPrimitive;
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    AdjointContext, AdjointEquations, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, Bdf, BdfState, Checkpointing, DefaultDenseMatrix, DenseMatrix, ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch, NonLinearOp, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, OdeSolverStopReason, RkState, Scalar, Sdirk, SensEquations, Solution, Tableau, VectorRef, error::DiffsolError, vector::Vector
+    AdjointContext, AdjointEquations, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, Bdf, BdfState, Checkpointing, DefaultDenseMatrix, DenseMatrix, ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch, NonLinearOp, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Scalar, Sdirk, SensEquations, Tableau, VectorRef, error::DiffsolError, vector::Vector
 };
 
 /// Options for the initial condition solver used to find consistent initial conditions

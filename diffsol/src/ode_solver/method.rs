@@ -310,7 +310,7 @@ where
         let (stop_reason, col) = solve_dense(&mut ret, t_eval, &mut tmp_nout, &mut tmp_nstates, self, 0)?;
 
         // if we stopped on a root before exhausting t_eval, we need to write_out the solution at the root time to the last column of ret
-        if let OdeSolverStopReason::RootFound(t_root, _) = stop_reason {
+        if let OdeSolverStopReason::RootFound(_, _) = stop_reason {
             if col < t_eval.len() {
                 let t = self.state().t;
                 let y = self.state().y;
@@ -329,7 +329,7 @@ where
                     }
                 }
                 if col + 1 < ret.ncols() {
-                    ret.resize_cols(col);
+                    ret.resize_cols(col + 1);
                 }
             }
         }
@@ -541,7 +541,7 @@ where
     Eqn::V: DefaultDenseMatrix,
 {
     s.set_stop_time(t_eval[t_eval.len() - 1])?;
-    let mut stop_reason = OdeSolverStopReason::InternalTimestep;
+    let mut stop_reason: OdeSolverStopReason<Eqn::T>;
     let mut col = start_col;
     loop {
         stop_reason = s.step()?;
