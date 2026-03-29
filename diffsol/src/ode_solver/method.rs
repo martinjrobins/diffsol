@@ -235,7 +235,7 @@ where
     /// while !soln.is_complete() {
     ///     state = self.bdf_solver(state)?.solve_soln(&mut soln)?.into_state();
     ///     if let Some(OdeSolverStopReason::RootFound(_t, idx)) = soln.stop_reason {
-    ///         self.eqn_mut().set_params(p, idx);
+    ///         self.eqn_mut().set_model_index(idx);
     ///         if let Some(reset) = self.eqn().reset() {
     ///             state.state_mut_op(self.eqn(), reset)?;
     ///         }

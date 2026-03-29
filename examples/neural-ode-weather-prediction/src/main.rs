@@ -119,6 +119,7 @@ impl<'a> OdeEquationsRef<'a> for NeuralOde {
     type Root = UnitCallable<M>;
     type Init = Init<'a>;
     type Out = UnitCallable<M>;
+    type Reset = UnitCallable<M>;
 }
 
 impl OdeEquations for NeuralOde {

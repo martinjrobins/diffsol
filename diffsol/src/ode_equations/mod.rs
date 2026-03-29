@@ -143,6 +143,10 @@ impl<Eqn: OdeEquations> OdeEquations for NoAug<Eqn> {
         panic!("This should never be called")
     }
 
+    fn set_model_index(&mut self, _m: usize) {
+        panic!("This should never be called")
+    }
+
     fn get_params(&self, _p: &mut Self::V) {
         panic!("This should never be called")
     }
@@ -267,6 +271,11 @@ pub trait OdeEquations: for<'a> OdeEquationsRef<'a> {
     /// sets the current parameters of the equations
     fn set_params(&mut self, p: &Self::V);
 
+    /// sets the current model index of the equations
+    ///
+    /// Implementations that do not support multiple models may ignore `m`.
+    fn set_model_index(&mut self, _m: usize) {}
+
     /// gets the current parameters of the equations
     fn get_params(&self, p: &mut Self::V);
 }
@@ -297,6 +306,10 @@ impl<T: OdeEquations> OdeEquations for &'_ T {
     }
 
     fn set_params(&mut self, _p: &Self::V) {
+        unimplemented!()
+    }
+
+    fn set_model_index(&mut self, _m: usize) {
         unimplemented!()
     }
 
