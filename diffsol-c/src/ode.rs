@@ -1,5 +1,7 @@
 use std::sync::{Arc, Mutex};
 
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+use crate::jit::JitBackendType;
 use crate::{
     error::DiffsolJsError, host_array::HostArray,
     initial_condition_options::InitialConditionSolverOptions, linear_solver_type::LinearSolverType,
@@ -44,11 +46,8 @@ impl OdeWrapper {
     }
 
     /// Construct an ODE solver backed by externally-provided DiffSL symbols.
-    #[cfg(all(
-        feature = "external",
-        not(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))
-    ))]
-    pub(crate) fn new(
+    #[cfg(feature = "external")]
+    pub(crate) fn new_external(
         rhs_state_deps: Vec<(usize, usize)>,
         rhs_input_deps: Vec<(usize, usize)>,
         mass_state_deps: Vec<(usize, usize)>,
@@ -57,7 +56,7 @@ impl OdeWrapper {
         linear_solver: LinearSolverType,
         ode_solver: OdeSolverType,
     ) -> Result<Self, DiffsolJsError> {
-        let solve = crate::solve::solve_factory(
+        let solve = crate::solve::solve_factory_external(
             rhs_state_deps,
             rhs_input_deps,
             mass_state_deps,
@@ -68,18 +67,16 @@ impl OdeWrapper {
     }
 
     /// Construct an ODE solver by JIT-compiling DiffSL code immediately.
-    #[cfg(all(
-        any(feature = "diffsl-cranelift", feature = "diffsl-llvm"),
-        not(feature = "external")
-    ))]
-    pub(crate) fn new(
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+    pub(crate) fn new_jit(
         code: &str,
+        jit_backend: JitBackendType,
         scalar_type: ScalarType,
         matrix_type: MatrixType,
         linear_solver: LinearSolverType,
         ode_solver: OdeSolverType,
     ) -> Result<Self, DiffsolJsError> {
-        let solve = crate::solve::solve_factory(code, matrix_type, scalar_type)?;
+        let solve = crate::solve::solve_factory_jit(code, jit_backend, matrix_type, scalar_type)?;
         Self::build(code.to_owned(), solve, linear_solver, ode_solver)
     }
 
@@ -316,7 +313,7 @@ impl OdeWrapper {
     }
 }
 
-#[cfg(all(test, feature = "external-f64"))]
+#[cfg(all(test, feature = "diffsl-external-f64"))]
 mod tests {
     use crate::host_array::FromHostArray;
     use crate::linear_solver_type::LinearSolverType;
@@ -330,7 +327,7 @@ mod tests {
     use super::*;
 
     fn make_ode(matrix_type: MatrixType, ode_solver: OdeSolverType) -> OdeWrapper {
-        OdeWrapper::new(
+        OdeWrapper::new_external(
             rhs_state_deps(),
             rhs_input_deps(),
             mass_state_deps(),
@@ -498,40 +495,29 @@ mod tests {
     }
 }
 
-#[cfg(all(
-    test,
-    any(feature = "diffsl-cranelift", feature = "diffsl-llvm"),
-    not(feature = "external")
-))]
+#[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
 mod jit_tests {
     use crate::host_array::FromHostArray;
+    use crate::jit::JitBackendType;
     use crate::linear_solver_type::LinearSolverType;
     use crate::scalar_type::ScalarType;
     use crate::test_support::{
         ASSERT_TOL, LOGISTIC_X0, assert_close, assert_current_state, assert_solution_tail,
-        logistic_diffsl_code, logistic_state, vector_host,
+        available_jit_backends, logistic_diffsl_code, logistic_state, vector_host,
     };
     #[cfg(feature = "diffsl-llvm")]
-    use crate::test_support::{logistic_diffsl_code_with_y0, logistic_integral, logistic_state_dr};
+    use crate::test_support::{logistic_integral, logistic_state_dr};
 
     use super::*;
 
-    fn make_ode(matrix_type: MatrixType, ode_solver: OdeSolverType) -> OdeWrapper {
-        OdeWrapper::new(
+    fn make_ode(
+        jit_backend: JitBackendType,
+        matrix_type: MatrixType,
+        ode_solver: OdeSolverType,
+    ) -> OdeWrapper {
+        OdeWrapper::new_jit(
             logistic_diffsl_code(),
-            ScalarType::F64,
-            matrix_type,
-            LinearSolverType::Default,
-            ode_solver,
-        )
-        .unwrap()
-    }
-
-    #[cfg(feature = "diffsl-llvm")]
-    fn make_ode_with_y0(matrix_type: MatrixType, ode_solver: OdeSolverType, x0: f64) -> OdeWrapper {
-        let code = logistic_diffsl_code_with_y0(x0);
-        OdeWrapper::new(
-            &code,
+            jit_backend,
             ScalarType::F64,
             matrix_type,
             LinearSolverType::Default,
@@ -549,8 +535,8 @@ mod jit_tests {
         solution
     }
 
-    fn assert_runtime_dispatch(matrix_type: MatrixType) {
-        let mut ode = make_ode(matrix_type, OdeSolverType::Bdf);
+    fn assert_runtime_dispatch(jit_backend: JitBackendType, matrix_type: MatrixType) {
+        let mut ode = make_ode(jit_backend, matrix_type, OdeSolverType::Bdf);
         assert_eq!(ode.get_matrix_type().unwrap(), matrix_type);
         assert_eq!(ode.get_code().unwrap(), logistic_diffsl_code());
 
@@ -583,8 +569,12 @@ mod jit_tests {
         );
     }
 
-    fn assert_solver_continuation(matrix_type: MatrixType, ode_solver: OdeSolverType) {
-        let mut ode = make_ode(matrix_type, ode_solver);
+    fn assert_solver_continuation(
+        jit_backend: JitBackendType,
+        matrix_type: MatrixType,
+        ode_solver: OdeSolverType,
+    ) {
+        let mut ode = make_ode(jit_backend, matrix_type, ode_solver);
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
 
@@ -604,87 +594,99 @@ mod jit_tests {
 
     #[test]
     fn runtime_dispatch_matches_requested_matrix_type_from_diffsl() {
-        for matrix_type in [
-            MatrixType::NalgebraDense,
-            MatrixType::FaerDense,
-            MatrixType::FaerSparse,
-        ] {
-            assert_runtime_dispatch(matrix_type);
+        for jit_backend in available_jit_backends() {
+            for matrix_type in [
+                MatrixType::NalgebraDense,
+                MatrixType::FaerDense,
+                MatrixType::FaerSparse,
+            ] {
+                assert_runtime_dispatch(jit_backend, matrix_type);
+            }
         }
     }
 
     #[test]
     fn solver_continuation_matches_logistic_solution_from_diffsl() {
-        for (matrix_type, solver) in [
-            (MatrixType::FaerDense, OdeSolverType::Esdirk34),
-            (MatrixType::FaerSparse, OdeSolverType::TrBdf2),
-            (MatrixType::NalgebraDense, OdeSolverType::Tsit45),
-        ] {
-            assert_solver_continuation(matrix_type, solver);
+        for jit_backend in available_jit_backends() {
+            for (matrix_type, solver) in [
+                (MatrixType::FaerDense, OdeSolverType::Esdirk34),
+                (MatrixType::FaerSparse, OdeSolverType::TrBdf2),
+                (MatrixType::NalgebraDense, OdeSolverType::Tsit45),
+            ] {
+                assert_solver_continuation(jit_backend, matrix_type, solver);
+            }
         }
     }
 
     #[test]
     fn bdf_dense_solution_matches_logistic_diffsl_model() {
-        let mut ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
-        ode.set_rtol(1e-8).unwrap();
-        ode.set_atol(1e-8).unwrap();
+        for jit_backend in available_jit_backends() {
+            let mut ode = make_ode(jit_backend, MatrixType::NalgebraDense, OdeSolverType::Bdf);
+            ode.set_rtol(1e-8).unwrap();
+            ode.set_atol(1e-8).unwrap();
 
-        let t_eval = [0.25, 0.5, 1.0];
-        let solution = ode
-            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval), None)
-            .unwrap();
+            let t_eval = [0.25, 0.5, 1.0];
+            let solution = ode
+                .solve_dense(vector_host(&[2.0]), vector_host(&t_eval), None)
+                .unwrap();
 
-        assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
-        assert_current_state(
-            &solution,
-            &[logistic_state(LOGISTIC_X0, 2.0, *t_eval.last().unwrap())],
-            5e-4,
-        );
+            assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
+            assert_current_state(
+                &solution,
+                &[logistic_state(LOGISTIC_X0, 2.0, *t_eval.last().unwrap())],
+                5e-4,
+            );
+        }
     }
 
     #[test]
     fn bdf_solution_matches_logistic_diffsl_model() {
-        let x0 = LOGISTIC_X0;
-        let r = 2.0;
-        let mut ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
-        ode.set_rtol(1e-8).unwrap();
-        ode.set_atol(1e-8).unwrap();
+        for jit_backend in available_jit_backends() {
+            let x0 = LOGISTIC_X0;
+            let r = 2.0;
+            let mut ode = make_ode(jit_backend, MatrixType::NalgebraDense, OdeSolverType::Bdf);
+            ode.set_rtol(1e-8).unwrap();
+            ode.set_atol(1e-8).unwrap();
 
-        let final_time = 1.0;
-        let solution = ode.solve(vector_host(&[r]), final_time, None).unwrap();
+            let final_time = 1.0;
+            let solution = ode.solve(vector_host(&[r]), final_time, None).unwrap();
 
-        let ys = solution.get_ys().unwrap();
-        let ys = ys.as_array::<f64>().unwrap();
-        let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+            let ys = solution.get_ys().unwrap();
+            let ys = ys.as_array::<f64>().unwrap();
+            let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
 
-        assert_eq!(ys.nrows(), 1);
-        assert_eq!(ys.ncols(), ts.len());
-        assert!(
-            !ts.is_empty(),
-            "expected solve() to record at least one time point"
-        );
-        assert_close(
-            *ts.last().unwrap(),
-            final_time,
-            ASSERT_TOL,
-            "solve final time",
-        );
-        for (i, &t) in ts.iter().enumerate() {
-            assert_close(
-                ys[(0, i)],
-                logistic_state(x0, r, t),
-                5e-4,
-                &format!("solve value[{i}]"),
+            assert_eq!(ys.nrows(), 1);
+            assert_eq!(ys.ncols(), ts.len());
+            assert!(
+                !ts.is_empty(),
+                "expected solve() to record at least one time point"
             );
+            assert_close(
+                *ts.last().unwrap(),
+                final_time,
+                ASSERT_TOL,
+                "solve final time",
+            );
+            for (i, &t) in ts.iter().enumerate() {
+                assert_close(
+                    ys[(0, i)],
+                    logistic_state(x0, r, t),
+                    5e-4,
+                    &format!("solve value[{i}]"),
+                );
+            }
+            assert_current_state(&solution, &[logistic_state(x0, r, final_time)], 5e-4);
         }
-        assert_current_state(&solution, &[logistic_state(x0, r, final_time)], 5e-4);
     }
 
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_forward_sensitivities_match_logistic_derivative_from_diffsl() {
-        let mut ode = make_ode_with_y0(MatrixType::NalgebraDense, OdeSolverType::Bdf, LOGISTIC_X0);
+        let mut ode = make_ode(
+            JitBackendType::Llvm,
+            MatrixType::NalgebraDense,
+            OdeSolverType::Bdf,
+        );
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
 
@@ -712,7 +714,11 @@ mod jit_tests {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_sum_squares_adjoint_matches_logistic_diffsl_model() {
-        let mut ode = make_ode_with_y0(MatrixType::NalgebraDense, OdeSolverType::Bdf, LOGISTIC_X0);
+        let mut ode = make_ode(
+            JitBackendType::Llvm,
+            MatrixType::NalgebraDense,
+            OdeSolverType::Bdf,
+        );
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
 

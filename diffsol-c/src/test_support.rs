@@ -1,14 +1,15 @@
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 use std::ffi::CStr;
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 use std::ffi::CString;
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 use std::os::raw::c_char;
 
-#[cfg(any(feature = "external-f64", feature = "diffsl-llvm"))]
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
 use nalgebra::DMatrix;
 
 use crate::error_c::diffsol_clear_last_error;
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 use crate::error_c::{
     diffsol_error_code, diffsol_last_error_file, diffsol_last_error_line,
     diffsol_last_error_message,
@@ -18,7 +19,7 @@ use crate::host_array_c::{
     diffsol_host_array_dim, diffsol_host_array_dtype, diffsol_host_array_free,
     diffsol_host_array_ndim, diffsol_host_array_ptr, diffsol_host_array_stride,
 };
-#[cfg(any(feature = "external-f64", feature = "diffsl-llvm"))]
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
 use crate::ode_c::diffsol_host_array_list_free;
 use crate::scalar_type::ScalarType;
 use crate::scalar_type_c::scalar_type_to_i32;
@@ -27,33 +28,29 @@ use crate::solution_wrapper_c::diffsol_solution_wrapper_free;
 
 pub(crate) const ASSERT_TOL: f64 = 1e-5;
 #[cfg(any(
-    feature = "external-f64",
+    feature = "diffsl-external-f64",
     feature = "diffsl-cranelift",
     feature = "diffsl-llvm"
 ))]
 pub(crate) const LOGISTIC_X0: f64 = 0.1;
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 pub(crate) fn rhs_state_deps() -> Vec<(usize, usize)> {
     vec![(0, 0)]
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 pub(crate) fn rhs_input_deps() -> Vec<(usize, usize)> {
     vec![(0, 0)]
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 pub(crate) fn mass_state_deps() -> Vec<(usize, usize)> {
     Vec::new()
 }
 
-#[cfg(feature = "external-f64")]
-pub(crate) fn dummy_code() -> CString {
-    CString::new("ignored-by-diffsol-c").unwrap()
-}
-
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+#[cfg_attr(feature = "external", allow(dead_code))]
 pub(crate) fn logistic_diffsl_code() -> &'static str {
     r#"
         in_i { r = 1 }
@@ -65,28 +62,27 @@ pub(crate) fn logistic_diffsl_code() -> &'static str {
 }
 
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+#[cfg_attr(feature = "external", allow(dead_code))]
 pub(crate) fn logistic_diffsl_code_cstring() -> CString {
     CString::new(logistic_diffsl_code()).unwrap()
 }
 
-#[cfg(feature = "diffsl-llvm")]
-pub(crate) fn logistic_diffsl_code_with_y0(y0: f64) -> String {
-    format!(
-        r#"
-        in_i {{ r = 1 }}
-        u_i {{ y = {y0:.17} }}
-        dudt_i {{ dydt = 0 }}
-        F_i {{ (r * y) * (1 - y) }}
-        out_i {{ y }}
-    "#
-    )
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+#[cfg_attr(feature = "external", allow(dead_code))]
+pub(crate) fn available_jit_backends() -> Vec<crate::jit::JitBackendType> {
+    let mut backends = Vec::new();
+    #[cfg(feature = "diffsl-cranelift")]
+    backends.push(crate::jit::JitBackendType::Cranelift);
+    #[cfg(feature = "diffsl-llvm")]
+    backends.push(crate::jit::JitBackendType::Llvm);
+    backends
 }
 
 pub(crate) fn vector_host(values: &[f64]) -> HostArray {
     values.to_vec().to_host_array()
 }
 
-#[cfg(any(feature = "external-f64", feature = "diffsl-llvm"))]
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
 pub(crate) fn matrix_host(rows: usize, cols: usize, values_col_major: &[f64]) -> HostArray {
     DMatrix::from_column_slice(rows, cols, values_col_major).to_host_array()
 }
@@ -96,13 +92,13 @@ pub(crate) fn logistic_state(x0: f64, r: f64, t: f64) -> f64 {
     (x0 * exp_rt) / (1.0 - x0 + x0 * exp_rt)
 }
 
-#[cfg(any(feature = "external-f64", feature = "diffsl-llvm"))]
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
 pub(crate) fn logistic_state_dr(x0: f64, r: f64, t: f64) -> f64 {
     let x = logistic_state(x0, r, t);
     t * x * (1.0 - x)
 }
 
-#[cfg(any(feature = "external-f64", feature = "diffsl-llvm"))]
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
 pub(crate) fn logistic_integral(x0: f64, r: f64, t: f64) -> f64 {
     let a = (1.0 - x0) / x0;
     t + ((1.0 + a * (-r * t).exp()).ln() - (1.0 + a).ln()) / r
@@ -231,7 +227,7 @@ pub(crate) unsafe fn ffi_read_host_array_matrix(ptr: *mut HostArray) -> (usize, 
     (rows, cols, values)
 }
 
-#[cfg(any(feature = "external-f64", feature = "diffsl-llvm"))]
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
 pub(crate) unsafe fn ffi_read_host_array_list_matrices(
     list: *mut *mut HostArray,
     len: usize,
@@ -248,13 +244,13 @@ pub(crate) unsafe fn ffi_read_host_array_list_matrices(
     arrays
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 pub(crate) unsafe fn c_string(ptr: *const c_char) -> String {
     assert!(!ptr.is_null(), "expected non-null C string");
     unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_owned()
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 pub(crate) unsafe fn assert_last_error_contains(expected_substring: &str) {
     assert_eq!(
         unsafe { diffsol_error_code() },
@@ -281,26 +277,26 @@ pub(crate) fn clear_last_error() {
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 const STATES: u32 = 1;
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 const INPUTS: u32 = 1;
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 const OUTPUTS: u32 = 1;
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 const DATA: u32 = 1;
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 const STOP: u32 = 1;
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn barrier_init() {}
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_constants(_thread_id: u32, _thread_dim: u32) {}
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_u0(u: *mut f64, _data: *mut f64, _thread_id: u32, _thread_dim: u32) {
     if !u.is_null() {
@@ -310,7 +306,7 @@ pub unsafe extern "C" fn set_u0(u: *mut f64, _data: *mut f64, _thread_id: u32, _
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn reset(
     _time: f64,
@@ -328,7 +324,7 @@ pub unsafe extern "C" fn reset(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn reset_grad(
     _time: f64,
@@ -350,7 +346,7 @@ pub unsafe extern "C" fn reset_grad(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn reset_rgrad(
     _time: f64,
@@ -372,7 +368,7 @@ pub unsafe extern "C" fn reset_rgrad(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn reset_sgrad(
     _time: f64,
@@ -393,7 +389,7 @@ pub unsafe extern "C" fn reset_sgrad(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn reset_srgrad(
     _time: f64,
@@ -414,7 +410,7 @@ pub unsafe extern "C" fn reset_srgrad(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rhs(
     _time: f64,
@@ -434,7 +430,7 @@ pub unsafe extern "C" fn rhs(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rhs_grad(
     _time: f64,
@@ -459,7 +455,7 @@ pub unsafe extern "C" fn rhs_grad(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rhs_rgrad(
     _time: f64,
@@ -483,7 +479,7 @@ pub unsafe extern "C" fn rhs_rgrad(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rhs_sgrad(
     _time: f64,
@@ -505,7 +501,7 @@ pub unsafe extern "C" fn rhs_sgrad(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn rhs_srgrad(
     _time: f64,
@@ -529,7 +525,7 @@ pub unsafe extern "C" fn rhs_srgrad(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mass(
     _time: f64,
@@ -547,7 +543,7 @@ pub unsafe extern "C" fn mass(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mass_rgrad(
     _time: f64,
@@ -568,7 +564,7 @@ pub unsafe extern "C" fn mass_rgrad(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_u0_grad(
     _u: *const f64,
@@ -580,7 +576,7 @@ pub unsafe extern "C" fn set_u0_grad(
 ) {
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_u0_rgrad(
     _u: *const f64,
@@ -592,7 +588,7 @@ pub unsafe extern "C" fn set_u0_rgrad(
 ) {
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_u0_sgrad(
     _u: *const f64,
@@ -604,7 +600,7 @@ pub unsafe extern "C" fn set_u0_sgrad(
 ) {
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn calc_out(
     _time: f64,
@@ -622,7 +618,7 @@ pub unsafe extern "C" fn calc_out(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn calc_out_grad(
     _time: f64,
@@ -644,7 +640,7 @@ pub unsafe extern "C" fn calc_out_grad(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn calc_out_rgrad(
     _time: f64,
@@ -665,7 +661,7 @@ pub unsafe extern "C" fn calc_out_rgrad(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn calc_out_sgrad(
     _time: f64,
@@ -689,7 +685,7 @@ pub unsafe extern "C" fn calc_out_sgrad(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn calc_out_srgrad(
     _time: f64,
@@ -713,7 +709,7 @@ pub unsafe extern "C" fn calc_out_srgrad(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn calc_stop(
     _time: f64,
@@ -731,7 +727,7 @@ pub unsafe extern "C" fn calc_stop(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_id(id: *mut f64) {
     if !id.is_null() {
@@ -741,7 +737,7 @@ pub unsafe extern "C" fn set_id(id: *mut f64) {
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn get_dims(
     states: *mut u32,
@@ -789,7 +785,7 @@ pub unsafe extern "C" fn get_dims(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_inputs(inputs: *const f64, data: *mut f64, _model_index: u32) {
     if inputs.is_null() || data.is_null() {
@@ -800,7 +796,7 @@ pub unsafe extern "C" fn set_inputs(inputs: *const f64, data: *mut f64, _model_i
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn get_inputs(inputs: *mut f64, data: *const f64) {
     if inputs.is_null() || data.is_null() {
@@ -811,7 +807,7 @@ pub unsafe extern "C" fn get_inputs(inputs: *mut f64, data: *const f64) {
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_inputs_grad(
     _inputs: *const f64,
@@ -828,7 +824,7 @@ pub unsafe extern "C" fn set_inputs_grad(
     }
 }
 
-#[cfg(feature = "external-f64")]
+#[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_inputs_rgrad(
     _inputs: *const f64,

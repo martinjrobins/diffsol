@@ -8,13 +8,15 @@ use diffsol::{
     error::DiffsolError,
     matrix::{MatrixHost, MatrixRef},
 };
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+use diffsol::{CodegenModuleCompile, CodegenModuleJit};
 use num_traits::{FromPrimitive, ToPrimitive}; // for from_f64 and to_f64
 use paste::paste;
 
 use crate::error::DiffsolJsError;
 use crate::host_array::{HostArray, ToHostArray};
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-use crate::jit::JitBackend;
+use crate::jit::JitBackendType;
 #[cfg(feature = "external")]
 use crate::scalar_type::ExternalScalar;
 use crate::scalar_type::{Scalar, ScalarType};
@@ -118,11 +120,8 @@ pub(crate) trait Solve {
     }
 }
 // Public factory method for generating an instance based on matrix type
-#[cfg(all(
-    feature = "external",
-    not(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))
-))]
-pub(crate) fn solve_factory(
+#[cfg(feature = "external")]
+pub(crate) fn solve_factory_external(
     rhs_state_deps: Vec<(usize, usize)>,
     rhs_input_deps: Vec<(usize, usize)>,
     mass_state_deps: Vec<(usize, usize)>,
@@ -131,14 +130,14 @@ pub(crate) fn solve_factory(
 ) -> Result<Box<dyn Solve>, DiffsolJsError> {
     let solve: Box<dyn Solve> = match matrix_type {
         MatrixType::NalgebraDense => match scalar_type {
-            #[cfg(feature = "external-f32")]
+            #[cfg(feature = "diffsl-external-f32")]
             ScalarType::F32 => Box::new(GenericSolve::<
                 diffsol::NalgebraMat<f32>,
                 diffsl::ExternalModule<f32>,
             >::from_external(
                 rhs_state_deps, rhs_input_deps, mass_state_deps, false
             )?),
-            #[cfg(feature = "external-f64")]
+            #[cfg(feature = "diffsl-external-f64")]
             ScalarType::F64 => Box::new(GenericSolve::<
                 diffsol::NalgebraMat<f64>,
                 diffsl::ExternalModule<f64>,
@@ -152,14 +151,14 @@ pub(crate) fn solve_factory(
             }
         },
         MatrixType::FaerDense => match scalar_type {
-            #[cfg(feature = "external-f32")]
+            #[cfg(feature = "diffsl-external-f32")]
             ScalarType::F32 => Box::new(GenericSolve::<
                 diffsol::FaerMat<f32>,
                 diffsl::ExternalModule<f32>,
             >::from_external(
                 rhs_state_deps, rhs_input_deps, mass_state_deps, false
             )?),
-            #[cfg(feature = "external-f64")]
+            #[cfg(feature = "diffsl-external-f64")]
             ScalarType::F64 => Box::new(GenericSolve::<
                 diffsol::FaerMat<f64>,
                 diffsl::ExternalModule<f64>,
@@ -173,14 +172,14 @@ pub(crate) fn solve_factory(
             }
         },
         MatrixType::FaerSparse => match scalar_type {
-            #[cfg(feature = "external-f32")]
+            #[cfg(feature = "diffsl-external-f32")]
             ScalarType::F32 => Box::new(GenericSolve::<
                 diffsol::FaerSparseMat<f32>,
                 diffsl::ExternalModule<f32>,
             >::from_external(
                 rhs_state_deps, rhs_input_deps, mass_state_deps, false
             )?),
-            #[cfg(feature = "external-f64")]
+            #[cfg(feature = "diffsl-external-f64")]
             ScalarType::F64 => Box::new(GenericSolve::<
                 diffsol::FaerSparseMat<f64>,
                 diffsl::ExternalModule<f64>,
@@ -197,39 +196,72 @@ pub(crate) fn solve_factory(
     Ok(solve)
 }
 
-#[cfg(all(
-    any(feature = "diffsl-cranelift", feature = "diffsl-llvm"),
-    not(feature = "external")
-))]
-pub(crate) fn solve_factory(
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+pub(crate) fn solve_factory_jit(
     code: &str,
+    jit_backend: JitBackendType,
     matrix_type: MatrixType,
     scalar_type: ScalarType,
 ) -> Result<Box<dyn Solve>, DiffsolJsError> {
+    match jit_backend {
+        #[cfg(feature = "diffsl-cranelift")]
+        JitBackendType::Cranelift => solve_factory_with_jit_backend::<diffsol::CraneliftJitModule>(
+            code,
+            matrix_type,
+            scalar_type,
+        ),
+        #[cfg(feature = "diffsl-llvm")]
+        JitBackendType::Llvm => {
+            solve_factory_with_jit_backend::<diffsol::LlvmModule>(code, matrix_type, scalar_type)
+        }
+    }
+}
+
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+fn solve_factory_with_jit_backend<CG: CodegenModule>(
+    code: &str,
+    matrix_type: MatrixType,
+    scalar_type: ScalarType,
+) -> Result<Box<dyn Solve>, DiffsolJsError>
+where
+    CG: CodegenModuleJit + CodegenModuleCompile,
+{
     let solve: Box<dyn Solve> = match matrix_type {
         MatrixType::NalgebraDense => match scalar_type {
             ScalarType::F32 => {
-                Box::new(GenericSolve::<diffsol::NalgebraMat<f32>, JitBackend>::from_diffsl(code)?)
+                let problem =
+                    OdeBuilder::<diffsol::NalgebraMat<f32>>::new().build_from_diffsl::<CG>(code)?;
+                Box::new(GenericSolve { problem })
             }
             ScalarType::F64 => {
-                Box::new(GenericSolve::<diffsol::NalgebraMat<f64>, JitBackend>::from_diffsl(code)?)
+                let problem =
+                    OdeBuilder::<diffsol::NalgebraMat<f64>>::new().build_from_diffsl::<CG>(code)?;
+                Box::new(GenericSolve { problem })
             }
         },
         MatrixType::FaerDense => match scalar_type {
             ScalarType::F32 => {
-                Box::new(GenericSolve::<diffsol::FaerMat<f32>, JitBackend>::from_diffsl(code)?)
+                let problem =
+                    OdeBuilder::<diffsol::FaerMat<f32>>::new().build_from_diffsl::<CG>(code)?;
+                Box::new(GenericSolve { problem })
             }
             ScalarType::F64 => {
-                Box::new(GenericSolve::<diffsol::FaerMat<f64>, JitBackend>::from_diffsl(code)?)
+                let problem =
+                    OdeBuilder::<diffsol::FaerMat<f64>>::new().build_from_diffsl::<CG>(code)?;
+                Box::new(GenericSolve { problem })
             }
         },
         MatrixType::FaerSparse => match scalar_type {
-            ScalarType::F32 => Box::new(
-                GenericSolve::<diffsol::FaerSparseMat<f32>, JitBackend>::from_diffsl(code)?,
-            ),
-            ScalarType::F64 => Box::new(
-                GenericSolve::<diffsol::FaerSparseMat<f64>, JitBackend>::from_diffsl(code)?,
-            ),
+            ScalarType::F32 => {
+                let problem = OdeBuilder::<diffsol::FaerSparseMat<f32>>::new()
+                    .build_from_diffsl::<CG>(code)?;
+                Box::new(GenericSolve { problem })
+            }
+            ScalarType::F64 => {
+                let problem = OdeBuilder::<diffsol::FaerSparseMat<f64>>::new()
+                    .build_from_diffsl::<CG>(code)?;
+                Box::new(GenericSolve { problem })
+            }
         },
     };
     Ok(solve)
@@ -329,18 +361,6 @@ where
         )?;
         let default_p = vec![0.0; eqn.nparams()];
         let problem = OdeBuilder::<M>::new().p(default_p).build_from_eqn(eqn)?;
-        Ok(GenericSolve { problem })
-    }
-}
-
-#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-impl<M> GenericSolve<M, JitBackend>
-where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
-{
-    pub fn from_diffsl(code: &str) -> Result<Self, DiffsolJsError> {
-        let problem = OdeBuilder::<M>::new().build_from_diffsl::<JitBackend>(code)?;
         Ok(GenericSolve { problem })
     }
 }

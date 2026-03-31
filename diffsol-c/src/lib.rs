@@ -16,15 +16,6 @@ use dlmalloc::GlobalDlmalloc;
 #[global_allocator]
 static ALLOCATOR: GlobalDlmalloc = GlobalDlmalloc;
 
-#[cfg(all(
-    feature = "external",
-    any(feature = "diffsl-cranelift", feature = "diffsl-llvm")
-))]
-compile_error!("diffsol-c cannot be built with both external and JIT backends enabled.");
-
-#[cfg(all(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-compile_error!("diffsol-c cannot enable both `diffsl-cranelift` and `diffsl-llvm*` backends.");
-
 #[cfg(all(feature = "diffsl-llvm15", feature = "diffsl-llvm16"))]
 compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
 #[cfg(all(feature = "diffsl-llvm15", feature = "diffsl-llvm17"))]
@@ -79,6 +70,8 @@ pub mod initial_condition_options;
 #[path = "initial_condition_options_c.rs"]
 pub mod initial_condition_options_c;
 pub mod jit;
+#[path = "jit_c.rs"]
+pub mod jit_c;
 pub mod linear_solver_type;
 #[path = "linear_solver_type_c.rs"]
 pub mod linear_solver_type_c;
