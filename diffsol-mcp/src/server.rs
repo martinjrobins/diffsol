@@ -20,6 +20,9 @@ use crate::{
     problem::{parse_problem_uri, ProblemRecord, ProblemStore, ProblemSummary, PROBLEMS_URI},
 };
 
+const DIFFSL_DOCS_URI: &str = "diffsol://docs/diffsl";
+const DIFFSL_DOCS_TEXT: &str = include_str!("../docs/diffsl.md");
+
 #[derive(Clone)]
 pub struct DiffsolMcpServer {
     tool_router: ToolRouter<Self>,
@@ -167,7 +170,7 @@ impl ServerHandler for DiffsolMcpServer {
                 .build(),
         )
         .with_instructions(
-            "Create session-scoped diffsol ODE problems from DiffSL code, inspect them as resources, and solve them with runtime-selected solvers.",
+            "Create session-scoped diffsol ODE problems from DiffSL code, inspect them as resources, solve them with runtime-selected solvers, and read `diffsol://docs/diffsl` for the DiffSL syntax reference.",
         )
     }
 
@@ -177,11 +180,18 @@ impl ServerHandler for DiffsolMcpServer {
         _context: rmcp::service::RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ListResourcesResult, rmcp::ErrorData>> + Send + '_ {
         async move {
-            let mut resources = vec![RawResource::new(PROBLEMS_URI, "diffsol problems")
-                .with_title("diffsol session problems")
-                .with_description("JSON list of all problems created in this MCP session")
-                .with_mime_type("application/json")
-                .no_annotation()];
+            let mut resources = vec![
+                RawResource::new(DIFFSL_DOCS_URI, "DiffSL DSL reference")
+                    .with_title("DiffSL DSL reference")
+                    .with_description("Markdown reference for DiffSL syntax, tensors, ODE definitions, and grammar")
+                    .with_mime_type("text/markdown")
+                    .no_annotation(),
+                RawResource::new(PROBLEMS_URI, "diffsol problems")
+                    .with_title("diffsol session problems")
+                    .with_description("JSON list of all problems created in this MCP session")
+                    .with_mime_type("application/json")
+                    .no_annotation(),
+            ];
 
             resources.extend(self.problems.list().await.into_iter().map(|problem| {
                 RawResource::new(problem.resource_uri(), problem.display_name())
@@ -216,6 +226,14 @@ impl ServerHandler for DiffsolMcpServer {
         _context: rmcp::service::RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<ReadResourceResult, rmcp::ErrorData>> + Send + '_ {
         async move {
+            if request.uri == DIFFSL_DOCS_URI {
+                return Ok(text_resource(
+                    DIFFSL_DOCS_URI,
+                    DIFFSL_DOCS_TEXT,
+                    "text/markdown",
+                ));
+            }
+
             if request.uri == PROBLEMS_URI {
                 let summaries = self.list_problem_summaries().await;
                 return Ok(json_resource(PROBLEMS_URI, &summaries)?);
@@ -244,10 +262,13 @@ pub async fn run_stdio() -> Result<(), Box<dyn std::error::Error>> {
 fn json_resource(uri: &str, value: &impl Serialize) -> Result<ReadResourceResult, rmcp::ErrorData> {
     let text = serde_json::to_string_pretty(value)
         .map_err(|error| rmcp::ErrorData::internal_error(error.to_string(), None))?;
-    Ok(ReadResourceResult::new(vec![ResourceContents::text(
-        text, uri,
-    )
-    .with_mime_type("application/json")]))
+    Ok(text_resource(uri, &text, "application/json"))
+}
+
+fn text_resource(uri: &str, text: &str, mime_type: &str) -> ReadResourceResult {
+    ReadResourceResult::new(vec![
+        ResourceContents::text(text.to_string(), uri).with_mime_type(mime_type)
+    ])
 }
 
 fn invalid_params(error: DiffsolMcpError) -> rmcp::ErrorData {
@@ -329,8 +350,19 @@ mod tests {
             .into_typed()?;
 
         let resources = client.peer().list_all_resources().await?;
-        assert_eq!(resources.len(), 2);
+        assert_eq!(resources.len(), 3);
+        assert!(resources
+            .iter()
+            .any(|resource| resource.uri == DIFFSL_DOCS_URI));
         assert!(resources.iter().any(|resource| resource.uri == created.uri));
+
+        let docs = client
+            .peer()
+            .read_resource(ReadResourceRequestParams::new(DIFFSL_DOCS_URI))
+            .await?;
+        let docs_text = read_text(&docs.contents);
+        assert!(docs_text.contains("# DiffSL DSL Reference"));
+        assert!(docs_text.contains("```pest"));
 
         let collection = client
             .peer()
