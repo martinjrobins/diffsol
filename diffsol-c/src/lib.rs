@@ -116,6 +116,17 @@ pub mod solver {
     }
 }
 
+pub use error::DiffsolJsError;
+pub use initial_condition_options::InitialConditionSolverOptions;
+pub use jit::{JitBackendType, default_enabled_jit_backend};
+pub use linear_solver_type::LinearSolverType;
+pub use matrix_type::MatrixType;
+pub use ode::OdeWrapper;
+pub use ode_options::OdeSolverOptions;
+pub use ode_solver_type::OdeSolverType;
+pub use scalar_type::ScalarType;
+pub use solution_wrapper::SolutionWrapper;
+
 #[cfg(test)]
 mod solver_tests {
     use super::solver;

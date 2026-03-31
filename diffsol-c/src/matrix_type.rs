@@ -1,13 +1,16 @@
 // Matrix type Python enum
 
 use diffsol::{Matrix, Scalar};
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// Enumerates the possible matrix types for diffsol
 ///
 /// :attr nalgebra_dense: dense matrix using nalgebra crate (https://nalgebra.rs/)
 /// :attr faer_dense: dense matrix using faer crate (https://faer.veganb.tw/)
 /// :attr faer_sparse: sparse matrix using faer crate (https://faer.veganb.tw/)
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum MatrixType {
     NalgebraDense,
     FaerDense,

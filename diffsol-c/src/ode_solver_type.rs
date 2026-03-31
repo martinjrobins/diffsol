@@ -13,6 +13,8 @@ use diffsol::{
 use nalgebra::ComplexField;
 use ndarray::ArrayView2;
 use num_traits::{FromPrimitive, Zero}; // for generic nums in _solve_sum_squares_adj
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 use crate::scalar_type::Scalar;
 use crate::solution::GenericState;
@@ -28,7 +30,8 @@ use crate::{
 /// :attr esdirk34: Explicit Singly Diagonally Implicit Runge-Kutta (ESDIRK) method for moderately stiff ODEs and singular mass matrices.
 /// :attr tr_bdf2: Trapezoidal Backward Differentiation Formula of order 2 (TR-BDF2) method for moderately stiff ODEs and singular mass matrices.
 /// :attr tsit45: Tsitouras 4/5th order Explicit Runge-Kutta (TSIT45) method for non-stiff ODEs. This is an explicit method, it cannot handle singular mass matrices and does not require a linear solver.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum OdeSolverType {
     Bdf,
     Esdirk34,

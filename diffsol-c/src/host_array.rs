@@ -73,9 +73,56 @@ impl<'h, T: Scalar> FromHostArray<ArrayView2<'h, T>> for ArrayView2<'h, T> {
     }
 }
 
-impl<T: Scalar> FromHostArray<Vec<T>> for Vec<T> {
+impl FromHostArray<Vec<f32>> for Vec<f32> {
     fn from_host_array(array: HostArray) -> Result<Self, DiffsolJsError> {
-        array.as_slice::<T>().map(|slice| slice.to_vec())
+        array.as_slice::<f32>().map(|slice| slice.to_vec())
+    }
+}
+
+impl FromHostArray<Vec<f64>> for Vec<f64> {
+    fn from_host_array(array: HostArray) -> Result<Self, DiffsolJsError> {
+        match array.dtype() {
+            ScalarType::F32 => Ok(array
+                .as_slice::<f32>()?
+                .iter()
+                .map(|&value| value as f64)
+                .collect()),
+            ScalarType::F64 => Ok(array.as_slice::<f64>()?.to_vec()),
+        }
+    }
+}
+
+impl FromHostArray<Vec<Vec<f32>>> for Vec<Vec<f32>> {
+    fn from_host_array(array: HostArray) -> Result<Self, DiffsolJsError> {
+        array.expect_ndim(2)?;
+        let view = array.as_array::<f32>()?;
+        Ok((0..view.nrows())
+            .map(|row| (0..view.ncols()).map(|col| view[(row, col)]).collect())
+            .collect())
+    }
+}
+
+impl FromHostArray<Vec<Vec<f64>>> for Vec<Vec<f64>> {
+    fn from_host_array(array: HostArray) -> Result<Self, DiffsolJsError> {
+        array.expect_ndim(2)?;
+        match array.dtype() {
+            ScalarType::F32 => {
+                let view = array.as_array::<f32>()?;
+                Ok((0..view.nrows())
+                    .map(|row| {
+                        (0..view.ncols())
+                            .map(|col| view[(row, col)] as f64)
+                            .collect()
+                    })
+                    .collect())
+            }
+            ScalarType::F64 => {
+                let view = array.as_array::<f64>()?;
+                Ok((0..view.nrows())
+                    .map(|row| (0..view.ncols()).map(|col| view[(row, col)]).collect())
+                    .collect())
+            }
+        }
     }
 }
 
@@ -168,12 +215,16 @@ impl HostArray {
     pub(crate) fn dtype(&self) -> ScalarType {
         self.dtype
     }
-    pub fn as_array<'h, T: Scalar>(&self) -> Result<ArrayView2<'h, T>, DiffsolJsError> {
-        if self.shape.len() != 2 {
+    fn expect_ndim(&self, expected: usize) -> Result<(), DiffsolJsError> {
+        if self.shape.len() != expected {
             return Err(DiffsolJsError::from(diffsol::error::DiffsolError::Other(
-                "Expected a 2D array".to_string(),
+                format!("Expected a {expected}D array"),
             )));
         }
+        Ok(())
+    }
+    pub fn as_array<'h, T: Scalar>(&self) -> Result<ArrayView2<'h, T>, DiffsolJsError> {
+        self.expect_ndim(2)?;
         if self.dtype != T::scalar_type() {
             return Err(DiffsolJsError::from(diffsol::error::DiffsolError::Other(
                 "Data type mismatch".to_string(),
@@ -193,11 +244,7 @@ impl HostArray {
         }
     }
     pub fn as_slice<T: Scalar>(&self) -> Result<&[T], DiffsolJsError> {
-        if self.shape.len() != 1 {
-            return Err(DiffsolJsError::from(diffsol::error::DiffsolError::Other(
-                "Expected a 1D array".to_string(),
-            )));
-        }
+        self.expect_ndim(1)?;
         if self.dtype != T::scalar_type() {
             return Err(DiffsolJsError::from(diffsol::error::DiffsolError::Other(
                 "Data type mismatch".to_string(),
@@ -213,5 +260,44 @@ impl Drop for HostArray {
         if let Some(owner) = self.owner.take() {
             drop(owner);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FromHostArray, HostArray, ToHostArray};
+
+    #[test]
+    fn vector_from_host_array_rejects_non_1d_input() {
+        let array = vec![vec![1.0f64, 2.0], vec![3.0, 4.0]]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
+        let host = HostArray::new_col_major(
+            array.as_ptr() as *mut u8,
+            2,
+            2,
+            1,
+            2,
+            super::ScalarType::F64,
+        );
+        let error = Vec::<f64>::from_host_array(host).unwrap_err().to_string();
+        assert!(error.contains("Expected a 1D array"));
+    }
+
+    #[test]
+    fn vector_round_trips_from_1d_host_array() {
+        let host = vec![1.0f64, 2.0, 3.0].to_host_array();
+        let values = Vec::<f64>::from_host_array(host).unwrap();
+        assert_eq!(values, vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn matrix_from_host_array_rejects_non_2d_input() {
+        let host = vec![1.0f64, 2.0, 3.0].to_host_array();
+        let error = Vec::<Vec<f64>>::from_host_array(host)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("Expected a 2D array"));
     }
 }
