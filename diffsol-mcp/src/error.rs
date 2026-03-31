@@ -7,6 +7,7 @@ pub enum DiffsolMcpError {
     Message(String),
     #[error("problem `{0}` was not found")]
     ProblemNotFound(Uuid),
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     #[error("DiffSL JIT backend is ambiguous; specify `jit_backend` in the problem config")]
     AmbiguousJitBackend,
     #[error("no DiffSL JIT backend is enabled for this build")]

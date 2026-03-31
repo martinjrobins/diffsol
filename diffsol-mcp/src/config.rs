@@ -1,7 +1,6 @@
-use diffsol_c::{
-    default_enabled_jit_backend, JitBackendType, LinearSolverType, MatrixType, OdeSolverType,
-    OdeWrapper, ScalarType,
-};
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+use diffsol_c::{default_enabled_jit_backend, LinearSolverType, OdeSolverType};
+use diffsol_c::{JitBackendType, MatrixType, OdeWrapper, ScalarType};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -56,22 +55,32 @@ impl ProblemConfig {
         code: &str,
         input: Option<&ProblemConfigInput>,
     ) -> Result<OdeWrapper, DiffsolMcpError> {
-        let input = input.cloned().unwrap_or_default();
-        let jit_backend = resolve_jit_backend(input.jit_backend)?;
-        let matrix_type = input.matrix_type.unwrap_or(MatrixType::NalgebraDense);
-        let scalar_type = input.scalar_type.unwrap_or(ScalarType::F64);
+        #[cfg(not(any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
+        {
+            let _ = code;
+            let _ = input;
+            return Err(DiffsolMcpError::NoJitBackendEnabled);
+        }
 
-        let ode = OdeWrapper::new_jit(
-            code,
-            jit_backend.into(),
-            scalar_type,
-            matrix_type,
-            LinearSolverType::Default,
-            OdeSolverType::Bdf,
-        )?;
+        #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+        {
+            let input = input.cloned().unwrap_or_default();
+            let jit_backend = resolve_jit_backend(input.jit_backend)?;
+            let matrix_type = input.matrix_type.unwrap_or(MatrixType::NalgebraDense);
+            let scalar_type = input.scalar_type.unwrap_or(ScalarType::F64);
 
-        Self::apply_input_to(&ode, &input)?;
-        Ok(ode)
+            let ode = OdeWrapper::new_jit(
+                code,
+                jit_backend.into(),
+                scalar_type,
+                matrix_type,
+                LinearSolverType::Default,
+                OdeSolverType::Bdf,
+            )?;
+
+            Self::apply_input_to(&ode, &input)?;
+            Ok(ode)
+        }
     }
 
     pub fn from_ode(ode: &OdeWrapper) -> Result<Self, DiffsolMcpError> {
@@ -88,6 +97,7 @@ impl ProblemConfig {
         })
     }
 
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     fn apply_input_to(ode: &OdeWrapper, input: &ProblemConfigInput) -> Result<(), DiffsolMcpError> {
         if let Some(rtol) = input.rtol {
             ode.set_rtol(rtol)?;
@@ -147,6 +157,7 @@ impl ProblemConfig {
     }
 }
 
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 fn resolve_jit_backend(config: Option<JitBackendType>) -> Result<JitBackendType, DiffsolMcpError> {
     if let Some(configured) = config {
         return Ok(configured);
@@ -155,7 +166,7 @@ fn resolve_jit_backend(config: Option<JitBackendType>) -> Result<JitBackendType,
     match default_enabled_jit_backend() {
         Some(backend) => Ok(backend),
         None => {
-            if cfg!(all(feature = "diffsl-cranelift", feature = "diffsl-llvm21")) {
+            if cfg!(all(feature = "diffsl-cranelift", feature = "diffsl-llvm")) {
                 Err(DiffsolMcpError::AmbiguousJitBackend)
             } else {
                 Err(DiffsolMcpError::NoJitBackendEnabled)
