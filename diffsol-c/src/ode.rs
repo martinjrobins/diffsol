@@ -566,7 +566,7 @@ mod jit_tests {
     }
 
     fn assert_runtime_dispatch(jit_backend: JitBackendType, matrix_type: MatrixType) {
-        let mut ode = make_ode(jit_backend, matrix_type, OdeSolverType::Bdf);
+        let ode = make_ode(jit_backend, matrix_type, OdeSolverType::Bdf);
         assert_eq!(ode.get_matrix_type().unwrap(), matrix_type);
         assert_eq!(ode.get_code().unwrap(), logistic_diffsl_code());
 
@@ -651,7 +651,7 @@ mod jit_tests {
     #[test]
     fn bdf_dense_solution_matches_logistic_diffsl_model() {
         for jit_backend in available_jit_backends() {
-            let mut ode = make_ode(jit_backend, MatrixType::NalgebraDense, OdeSolverType::Bdf);
+            let ode = make_ode(jit_backend, MatrixType::NalgebraDense, OdeSolverType::Bdf);
             ode.set_rtol(1e-8).unwrap();
             ode.set_atol(1e-8).unwrap();
 
@@ -674,7 +674,7 @@ mod jit_tests {
         for jit_backend in available_jit_backends() {
             let x0 = LOGISTIC_X0;
             let r = 2.0;
-            let mut ode = make_ode(jit_backend, MatrixType::NalgebraDense, OdeSolverType::Bdf);
+            let ode = make_ode(jit_backend, MatrixType::NalgebraDense, OdeSolverType::Bdf);
             ode.set_rtol(1e-8).unwrap();
             ode.set_atol(1e-8).unwrap();
 
