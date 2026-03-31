@@ -1,0 +1,32 @@
+[package]
+name = "diffsol-c"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = ["wasm", "external-f64"]
+wasm = ["getrandom/js"]
+suitesparse = []
+external-f64 = ["diffsol/diffsl-external-f64", "diffsl/external_f64"]
+external-f32 = ["diffsol/diffsl-external-f32", "diffsl/external_f32"]
+
+[dependencies]
+diffsl = { workspace = true }
+diffsol = { path = "../diffsol", features = ["diffsl"] }
+dlmalloc = { version = "0.2", features = ["global"] }
+faer = { version = "0.23.2", default-features = false, features = ["std", "sparse-linalg", "rand", "npy",] }
+nalgebra = { version = "0.34.1", features = ["std"] }
+ndarray = { version = "0.17.2" }
+num-traits = "0.2.19"
+paste = "1.0.15"
+getrandom = { version = "0.2", optional = true }
+
+
+[target.wasm32-unknown-unknown.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+
+[target.wasm32-wasip1.dependencies]
+getrandom = { version = "0.2", features = ["js"] }

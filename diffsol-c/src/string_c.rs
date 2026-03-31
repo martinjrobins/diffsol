@@ -1,0 +1,62 @@
+use std::alloc::{Layout, alloc, dealloc};
+use std::ffi::c_char;
+
+/// Allocate memory for a string of given size (including null terminator)
+/// Returns a pointer to writable memory that TypeScript can write to
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_alloc_string(size: usize) -> *mut c_char {
+    if size == 0 {
+        return std::ptr::null_mut();
+    }
+
+    // Create a Vec with the requested capacity and length
+    let mut buffer = vec![0u8; size];
+    let ptr = buffer.as_mut_ptr();
+    std::mem::forget(buffer); // Prevent the Vec from being dropped
+
+    ptr as *mut c_char
+}
+
+/// Allocate aligned memory for arbitrary data
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_alloc(size: usize, align: usize) -> *mut u8 {
+    if size == 0 {
+        return std::ptr::null_mut();
+    }
+    let align = if align == 0 { 1 } else { align };
+    let layout = match Layout::from_size_align(size, align) {
+        Ok(layout) => layout,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let ptr = unsafe { alloc(layout) };
+    if ptr.is_null() {
+        return std::ptr::null_mut();
+    }
+    ptr
+}
+
+/// Free aligned memory allocated by diffsol_alloc
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_free(ptr: *mut u8, size: usize, align: usize) {
+    if ptr.is_null() || size == 0 {
+        return;
+    }
+    let align = if align == 0 { 1 } else { align };
+    let layout = match Layout::from_size_align(size, align) {
+        Ok(layout) => layout,
+        Err(_) => return,
+    };
+    unsafe { dealloc(ptr, layout) };
+}
+
+/// Free memory allocated by diffsol_alloc_string
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_free_string(ptr: *mut c_char, size: usize) {
+    if ptr.is_null() || size == 0 {
+        return;
+    }
+
+    // Reconstruct the Vec from the raw pointer and drop it
+    let _ = unsafe { Vec::from_raw_parts(ptr as *mut u8, size, size) };
+    // Vec will be dropped here, freeing the memory
+}
