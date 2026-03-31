@@ -1,7 +1,13 @@
 use std::cell::Ref;
 
 use crate::{
-    AugmentedOdeEquations, Checkpointing, Context, DefaultDenseMatrix, DenseMatrix, HermiteInterpolator, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverConfig, OdeSolverProblem, OdeSolverState, Op, Solution, StateRef, StateRefMut, Vector, VectorViewMut, error::{DiffsolError, OdeSolverError}, ode_solver::solution::SolutionMode, ode_solver_error, scalar::Scalar
+    error::{DiffsolError, OdeSolverError},
+    ode_solver::solution::SolutionMode,
+    ode_solver_error,
+    scalar::Scalar,
+    AugmentedOdeEquations, Checkpointing, Context, DefaultDenseMatrix, DenseMatrix,
+    HermiteInterpolator, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverConfig,
+    OdeSolverProblem, OdeSolverState, Op, Solution, StateRef, StateRefMut, Vector, VectorViewMut,
 };
 #[derive(Debug, PartialEq)]
 pub enum OdeSolverStopReason<T: Scalar> {
@@ -265,21 +271,31 @@ where
     /// # Returns
     /// The updated solver, allowing ownership of the solver state to be threaded through repeated
     /// calls to `solve_soln`.
-    fn solve_soln(
-        mut self,
-        soln: &mut Solution<Eqn::V>,
-    ) -> Result<Self, DiffsolError>
+    fn solve_soln(mut self, soln: &mut Solution<Eqn::V>) -> Result<Self, DiffsolError>
     where
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
         match soln.mode {
-             SolutionMode::Tfinal(t_final) => {
-                let stop_reason = solve(&mut soln.ys, &mut soln.ts, &mut soln.tmp_nout, &mut self, t_final)?;
+            SolutionMode::Tfinal(t_final) => {
+                let stop_reason = solve(
+                    &mut soln.ys,
+                    &mut soln.ts,
+                    &mut soln.tmp_nout,
+                    &mut self,
+                    t_final,
+                )?;
                 soln.stop_reason = Some(stop_reason);
             }
             SolutionMode::Tevals(start_col) => {
-                let (stop_reason, col) = solve_dense(&mut soln.ys, &soln.ts, &mut soln.tmp_nout, &mut soln.tmp_nstates, &mut self, start_col)?;
+                let (stop_reason, col) = solve_dense(
+                    &mut soln.ys,
+                    &soln.ts,
+                    &mut soln.tmp_nout,
+                    &mut soln.tmp_nstates,
+                    &mut self,
+                    start_col,
+                )?;
                 soln.stop_reason = Some(stop_reason);
                 soln.mode = SolutionMode::Tevals(col);
             }
@@ -326,7 +342,8 @@ where
         Self: Sized,
     {
         let (mut ret, mut tmp_nout, mut tmp_nstates) = dense_allocate_return(self, t_eval)?;
-        let (stop_reason, col) = solve_dense(&mut ret, t_eval, &mut tmp_nout, &mut tmp_nstates, self, 0)?;
+        let (stop_reason, col) =
+            solve_dense(&mut ret, t_eval, &mut tmp_nout, &mut tmp_nstates, self, 0)?;
 
         // if we stopped on a root before exhausting t_eval, we need to write_out the solution at the root time to the last column of ret
         if let OdeSolverStopReason::RootFound(_, _) = stop_reason {
@@ -571,14 +588,7 @@ where
         };
         // Write any t_eval points that fall at or before t_current
         while col < t_eval.len() && t_eval[col] <= t_current {
-            dense_write_out(
-                s,
-                ret,
-                t_eval[col],
-                col,
-                tmp_nout,
-                tmp_nstates,
-            )?;
+            dense_write_out(s, ret, t_eval[col], col, tmp_nout, tmp_nstates)?;
             col += 1;
         }
         match stop_reason {

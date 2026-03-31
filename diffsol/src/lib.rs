@@ -328,9 +328,9 @@ pub use ode_solver::{
     sdirk::Sdirk,
     sdirk_state::RkState,
     sensitivities::SensitivitiesOdeSolverMethod,
+    solution::Solution,
     state::OdeSolverState,
     tableau::Tableau,
-    solution::Solution,
 };
 pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};

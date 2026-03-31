@@ -2,7 +2,12 @@ use num_traits::FromPrimitive;
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    AdjointContext, AdjointEquations, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, Bdf, BdfState, Checkpointing, DefaultDenseMatrix, DenseMatrix, ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch, NonLinearOp, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Scalar, Sdirk, SensEquations, Tableau, VectorRef, error::DiffsolError, vector::Vector
+    error::DiffsolError, vector::Vector, AdjointContext, AdjointEquations, AugmentedOdeEquations,
+    AugmentedOdeEquationsImplicit, Bdf, BdfState, Checkpointing, DefaultDenseMatrix, DenseMatrix,
+    ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch, NonLinearOp,
+    OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
+    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Scalar, Sdirk,
+    SensEquations, Tableau, VectorRef,
 };
 
 /// Options for the initial condition solver used to find consistent initial conditions
@@ -644,7 +649,7 @@ where
         let state = self.bdf_state_sens::<LS>()?;
         self.bdf_solver_sens(state)
     }
-    
+
     /// Create a new state for the Runge-Kutta solvers (explict or implicit).
     /// Note: This function will not provide a consistent initial state for
     /// problems with a mass matrix, for this case please use [Self::rk_state_and_consistent]
