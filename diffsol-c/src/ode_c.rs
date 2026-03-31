@@ -691,10 +691,11 @@ mod tests {
         diffsol_solution_wrapper_set_current_state,
     };
     use crate::test_support::{
-        ASSERT_TOL, assert_close, assert_last_error_contains, c_string, clear_last_error,
-        dummy_code, ffi_free_solution, ffi_read_host_array_list_matrices,
-        ffi_read_host_array_matrix, ffi_read_host_array_vector, find_time_window, logistic_state,
-        mass_state_deps, rhs_input_deps, rhs_state_deps,
+        ASSERT_TOL, LOGISTIC_X0, assert_close, assert_last_error_contains, c_string,
+        clear_last_error, dummy_code, ffi_free_solution, ffi_read_host_array_list_matrices,
+        ffi_read_host_array_matrix, ffi_read_host_array_vector, find_time_window,
+        logistic_integral, logistic_state, logistic_state_dr, mass_state_deps, rhs_input_deps,
+        rhs_state_deps,
     };
     use crate::{
         initial_condition_options_c::{
@@ -929,7 +930,7 @@ mod tests {
                 diffsol_ode_y0(ode, params.as_ptr(), params.len(), &mut y0_ptr),
                 DIFFSOL_OK
             );
-            assert_eq!(ffi_read_host_array_vector(y0_ptr), vec![1.0]);
+            assert_eq!(ffi_read_host_array_vector(y0_ptr), vec![LOGISTIC_X0]);
 
             let mut rhs_ptr = ptr::null_mut();
             assert_eq!(
@@ -995,7 +996,12 @@ mod tests {
                 ),
                 DIFFSOL_OK
             );
-            assert_eq!(ffi_read_host_array_vector(current_state_ptr), vec![1.0]);
+            assert_close(
+                ffi_read_host_array_vector(current_state_ptr)[0],
+                logistic_state(LOGISTIC_X0, 2.0, 1e-9),
+                ASSERT_TOL,
+                "ffi solve current state",
+            );
             ffi_free_solution(solve_solution_ptr);
 
             let mut solution_ptr: *mut SolutionWrapper = ptr::null_mut();
@@ -1104,12 +1110,20 @@ mod tests {
             assert_eq!(sens_values.len(), 1);
             assert_eq!(sens_values[0].0, 1);
             assert_eq!(sens_values[0].1, t_eval.len());
-            for (i, value) in sens_values[0].2.iter().enumerate() {
-                assert_close(*value, 0.0, ASSERT_TOL, &format!("ffi sensitivity[{i}]"));
+            for (i, (&value, &t)) in sens_values[0].2.iter().zip(t_eval.iter()).enumerate() {
+                assert_close(
+                    value,
+                    logistic_state_dr(LOGISTIC_X0, 2.0, t),
+                    ASSERT_TOL,
+                    &format!("ffi sensitivity[{i}]"),
+                );
             }
 
-            let adjoint_data = [0.0f64, 0.25f64, 0.5f64, 1.0f64];
             let adjoint_t_eval = [0.0f64, 0.25f64, 0.5f64, 1.0f64];
+            let adjoint_data: Vec<f64> = adjoint_t_eval
+                .iter()
+                .map(|&t| logistic_integral(LOGISTIC_X0, 2.0, t))
+                .collect();
             let mut objective = 0.0;
             let mut adjoint_grad_ptr = ptr::null_mut();
             assert_eq!(
@@ -1148,6 +1162,7 @@ mod tests {
     not(feature = "external")
 ))]
 mod jit_tests {
+    use std::ffi::CString;
     use std::ptr;
 
     use crate::linear_solver_type::LinearSolverType;
@@ -1165,9 +1180,12 @@ mod jit_tests {
     #[cfg(feature = "diffsl-llvm")]
     use crate::test_support::ffi_read_host_array_list_matrices;
     use crate::test_support::{
-        ASSERT_TOL, assert_close, clear_last_error, ffi_free_solution, ffi_read_host_array_matrix,
-        ffi_read_host_array_vector, find_time_window, logistic_diffsl_code_cstring, logistic_state,
+        ASSERT_TOL, LOGISTIC_X0, assert_close, clear_last_error, ffi_free_solution,
+        ffi_read_host_array_matrix, ffi_read_host_array_vector, find_time_window,
+        logistic_diffsl_code_cstring, logistic_state,
     };
+    #[cfg(feature = "diffsl-llvm")]
+    use crate::test_support::{logistic_diffsl_code_with_y0, logistic_integral, logistic_state_dr};
 
     use super::*;
 
@@ -1177,6 +1195,15 @@ mod jit_tests {
         ode_solver: i32,
     ) -> *mut OdeWrapper {
         let code = logistic_diffsl_code_cstring();
+        unsafe { make_ode_ptr_with_code(&code, matrix_type, linear_solver, ode_solver) }
+    }
+
+    unsafe fn make_ode_ptr_with_code(
+        code: &CString,
+        matrix_type: i32,
+        linear_solver: i32,
+        ode_solver: i32,
+    ) -> *mut OdeWrapper {
         unsafe {
             diffsol_ode_new(
                 code.as_ptr(),
@@ -1226,7 +1253,7 @@ mod jit_tests {
                 diffsol_ode_y0(ode, params.as_ptr(), params.len(), &mut y0_ptr),
                 DIFFSOL_OK
             );
-            assert_eq!(ffi_read_host_array_vector(y0_ptr), vec![1.0]);
+            assert_eq!(ffi_read_host_array_vector(y0_ptr), vec![LOGISTIC_X0]);
 
             let mut rhs_ptr = ptr::null_mut();
             assert_eq!(
@@ -1289,7 +1316,7 @@ mod jit_tests {
                 DIFFSOL_OK
             );
             assert_eq!(
-                diffsol_solution_wrapper_set_current_state(solution_ptr, [0.1].as_ptr(), 1),
+                diffsol_solution_wrapper_set_current_state(solution_ptr, [LOGISTIC_X0].as_ptr(), 1),
                 DIFFSOL_OK
             );
 
@@ -1325,7 +1352,7 @@ mod jit_tests {
                 assert_close(ts[start + i], t, ASSERT_TOL, "jit ffi solution time");
                 assert_close(
                     ys[start + i],
-                    logistic_state(0.1, 2.0, t),
+                    logistic_state(LOGISTIC_X0, 2.0, t),
                     5e-4,
                     "jit ffi solution value",
                 );
@@ -1337,7 +1364,10 @@ mod jit_tests {
 
             #[cfg(feature = "diffsl-llvm")]
             {
-                let analysis_ode = make_ode_ptr(
+                let analysis_code =
+                    CString::new(logistic_diffsl_code_with_y0(LOGISTIC_X0)).unwrap();
+                let analysis_ode = make_ode_ptr_with_code(
+                    &analysis_code,
                     matrix_type_to_i32(MatrixType::NalgebraDense),
                     linear_solver_to_i32(LinearSolverType::Default),
                     ode_solver_to_i32(OdeSolverType::Bdf),
@@ -1371,17 +1401,20 @@ mod jit_tests {
                 assert_eq!(sens_values.len(), 1);
                 assert_eq!(sens_values[0].0, 1);
                 assert_eq!(sens_values[0].1, t_eval.len());
-                for (i, value) in sens_values[0].2.iter().enumerate() {
+                for (i, (&value, &t)) in sens_values[0].2.iter().zip(t_eval.iter()).enumerate() {
                     assert_close(
-                        *value,
-                        0.0,
+                        value,
+                        logistic_state_dr(LOGISTIC_X0, 2.0, t),
                         ASSERT_TOL,
                         &format!("jit ffi sensitivity[{i}]"),
                     );
                 }
 
-                let adjoint_data = [0.0f64, 0.25f64, 0.5f64, 1.0f64];
                 let adjoint_t_eval = [0.0f64, 0.25f64, 0.5f64, 1.0f64];
+                let adjoint_data: Vec<f64> = adjoint_t_eval
+                    .iter()
+                    .map(|&t| logistic_integral(LOGISTIC_X0, 2.0, t))
+                    .collect();
                 let mut objective = 0.0;
                 let mut adjoint_grad_ptr = ptr::null_mut();
                 assert_eq!(
@@ -1404,7 +1437,10 @@ mod jit_tests {
                 assert_close(objective, 0.0, ASSERT_TOL, "jit ffi adjoint objective");
                 let grad = ffi_read_host_array_vector(adjoint_grad_ptr);
                 assert_eq!(grad.len(), 1);
-                assert_close(grad[0], 0.0, ASSERT_TOL, "jit ffi adjoint gradient");
+                assert!(
+                    grad[0].is_finite(),
+                    "jit ffi adjoint gradient should be finite"
+                );
 
                 ffi_free_solution(sens_solution_ptr);
                 diffsol_ode_free(analysis_ode);

@@ -597,6 +597,7 @@ where
             Ok(state) => state,
             Err(err) => return Err((err, solution)),
         };
+
         let solve_result = match linear_solver {
             LinearSolverType::Default => method.solve_fwd_sens::<M, CG, <M as DefaultSolver>::LS>(
                 &mut self.problem,

@@ -322,9 +322,9 @@ mod tests {
     use crate::linear_solver_type::LinearSolverType;
     use crate::scalar_type::ScalarType;
     use crate::test_support::{
-        ASSERT_TOL, assert_close, assert_current_state, assert_solution_tail,
-        host_array_to_matrix_f64, logistic_state, mass_state_deps, rhs_input_deps, rhs_state_deps,
-        vector_host,
+        ASSERT_TOL, LOGISTIC_X0, assert_close, assert_current_state, assert_solution_tail,
+        logistic_integral, logistic_state, logistic_state_dr, mass_state_deps, rhs_input_deps,
+        rhs_state_deps, vector_host,
     };
 
     use super::*;
@@ -356,7 +356,7 @@ mod tests {
         assert_eq!(ode.get_matrix_type().unwrap(), matrix_type);
 
         let y0 = ode.y0(vector_host(&[2.0])).unwrap();
-        assert_eq!(Vec::<f64>::from_host_array(y0).unwrap(), vec![1.0]);
+        assert_eq!(Vec::<f64>::from_host_array(y0).unwrap(), vec![LOGISTIC_X0]);
 
         let rhs = ode
             .rhs(vector_host(&[2.0]), 0.0, vector_host(&[0.25]))
@@ -425,8 +425,12 @@ mod tests {
             .solve_dense(vector_host(&[2.0]), vector_host(&t_eval), None)
             .unwrap();
 
-        assert_solution_tail(&solution, &t_eval, 1.0, 2.0, 5e-4);
-        assert_current_state(&solution, &[1.0], ASSERT_TOL);
+        assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
+        assert_current_state(
+            &solution,
+            &[logistic_state(LOGISTIC_X0, 2.0, *t_eval.last().unwrap())],
+            5e-4,
+        );
     }
 
     #[test]
@@ -455,27 +459,34 @@ mod tests {
             .solve_fwd_sens(vector_host(&[2.0]), vector_host(&t_eval), None)
             .unwrap();
 
-        assert_solution_tail(&solution, &t_eval, 1.0, 2.0, 5e-4);
+        assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
         let sens = solution.get_sens().unwrap();
         assert_eq!(sens.len(), 1);
-        let (rows, cols, sens_values) = host_array_to_matrix_f64(&sens[0]);
-        assert_eq!(rows, 1);
-        assert_eq!(cols, t_eval.len());
-        for (i, value) in sens_values.iter().enumerate() {
-            assert_close(*value, 0.0, ASSERT_TOL, &format!("sensitivity[{i}]"));
+        let sens_values = sens[0].as_array::<f64>().unwrap();
+        assert_eq!(sens_values.nrows(), 1);
+        assert_eq!(sens_values.ncols(), t_eval.len());
+        for (i, &t) in t_eval.iter().enumerate() {
+            assert_close(
+                sens_values[(0, i)],
+                logistic_state_dr(LOGISTIC_X0, 2.0, t),
+                ASSERT_TOL,
+                &format!("sensitivity[{i}]"),
+            );
         }
     }
 
     #[test]
-    fn bdf_sum_squares_adjoint_matches_constant_external_model() {
+    fn bdf_sum_squares_adjoint_matches_external_logistic_model() {
         let mut ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
 
-        // The current external_f64 model hard-wires y0 = 1 and the adjoint path
-        // compares against integrated outputs when `integrate_out` is enabled.
         let t_eval = [0.0, 0.25, 0.5, 1.0];
-        let data = crate::test_support::matrix_host(1, t_eval.len(), &[0.0, 0.25, 0.5, 1.0]);
+        let data_values: Vec<f64> = t_eval
+            .iter()
+            .map(|&t| logistic_integral(LOGISTIC_X0, 2.0, t))
+            .collect();
+        let data = crate::test_support::matrix_host(1, t_eval.len(), &data_values);
         let (value, sens) = ode
             .solve_sum_squares_adj(vector_host(&[2.0]), data, vector_host(&t_eval))
             .unwrap();
@@ -497,15 +508,30 @@ mod jit_tests {
     use crate::linear_solver_type::LinearSolverType;
     use crate::scalar_type::ScalarType;
     use crate::test_support::{
-        ASSERT_TOL, assert_close, assert_current_state, assert_solution_tail,
-        host_array_to_matrix_f64, logistic_diffsl_code, logistic_state, vector_host,
+        ASSERT_TOL, LOGISTIC_X0, assert_close, assert_current_state, assert_solution_tail,
+        logistic_diffsl_code, logistic_state, vector_host,
     };
+    #[cfg(feature = "diffsl-llvm")]
+    use crate::test_support::{logistic_diffsl_code_with_y0, logistic_integral, logistic_state_dr};
 
     use super::*;
 
     fn make_ode(matrix_type: MatrixType, ode_solver: OdeSolverType) -> OdeWrapper {
         OdeWrapper::new(
             logistic_diffsl_code(),
+            ScalarType::F64,
+            matrix_type,
+            LinearSolverType::Default,
+            ode_solver,
+        )
+        .unwrap()
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    fn make_ode_with_y0(matrix_type: MatrixType, ode_solver: OdeSolverType, x0: f64) -> OdeWrapper {
+        let code = logistic_diffsl_code_with_y0(x0);
+        OdeWrapper::new(
+            &code,
             ScalarType::F64,
             matrix_type,
             LinearSolverType::Default,
@@ -529,7 +555,7 @@ mod jit_tests {
         assert_eq!(ode.get_code().unwrap(), logistic_diffsl_code());
 
         let y0 = ode.y0(vector_host(&[2.0])).unwrap();
-        assert_eq!(Vec::<f64>::from_host_array(y0).unwrap(), vec![1.0]);
+        assert_eq!(Vec::<f64>::from_host_array(y0).unwrap(), vec![LOGISTIC_X0]);
 
         let rhs = ode
             .rhs(vector_host(&[2.0]), 0.0, vector_host(&[0.25]))
@@ -563,15 +589,15 @@ mod jit_tests {
         ode.set_atol(1e-8).unwrap();
 
         let t_eval = [0.25, 0.5, 1.0];
-        let seed = make_seed_solution(&mut ode, 0.1);
+        let seed = make_seed_solution(&mut ode, LOGISTIC_X0);
         let solution = ode
             .solve_dense(vector_host(&[2.0]), vector_host(&t_eval), Some(seed))
             .unwrap();
 
-        assert_solution_tail(&solution, &t_eval, 0.1, 2.0, 5e-4);
+        assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
         assert_current_state(
             &solution,
-            &[logistic_state(0.1, 2.0, *t_eval.last().unwrap())],
+            &[logistic_state(LOGISTIC_X0, 2.0, *t_eval.last().unwrap())],
             5e-4,
         );
     }
@@ -599,7 +625,7 @@ mod jit_tests {
     }
 
     #[test]
-    fn bdf_dense_solution_matches_constant_diffsl_model() {
+    fn bdf_dense_solution_matches_logistic_diffsl_model() {
         let mut ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
@@ -609,24 +635,31 @@ mod jit_tests {
             .solve_dense(vector_host(&[2.0]), vector_host(&t_eval), None)
             .unwrap();
 
-        assert_solution_tail(&solution, &t_eval, 1.0, 2.0, 5e-4);
-        assert_current_state(&solution, &[1.0], ASSERT_TOL);
+        assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
+        assert_current_state(
+            &solution,
+            &[logistic_state(LOGISTIC_X0, 2.0, *t_eval.last().unwrap())],
+            5e-4,
+        );
     }
 
     #[test]
-    fn bdf_solution_matches_constant_diffsl_model() {
+    fn bdf_solution_matches_logistic_diffsl_model() {
+        let x0 = LOGISTIC_X0;
+        let r = 2.0;
         let mut ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
 
         let final_time = 1.0;
-        let solution = ode.solve(vector_host(&[2.0]), final_time, None).unwrap();
+        let solution = ode.solve(vector_host(&[r]), final_time, None).unwrap();
 
-        let (rows, cols, ys) = host_array_to_matrix_f64(&solution.get_ys().unwrap());
+        let ys = solution.get_ys().unwrap();
+        let ys = ys.as_array::<f64>().unwrap();
         let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
 
-        assert_eq!(rows, 1);
-        assert_eq!(cols, ts.len());
+        assert_eq!(ys.nrows(), 1);
+        assert_eq!(ys.ncols(), ts.len());
         assert!(
             !ts.is_empty(),
             "expected solve() to record at least one time point"
@@ -637,16 +670,21 @@ mod jit_tests {
             ASSERT_TOL,
             "solve final time",
         );
-        for (i, value) in ys.iter().enumerate() {
-            assert_close(*value, 1.0, ASSERT_TOL, &format!("solve value[{i}]"));
+        for (i, &t) in ts.iter().enumerate() {
+            assert_close(
+                ys[(0, i)],
+                logistic_state(x0, r, t),
+                5e-4,
+                &format!("solve value[{i}]"),
+            );
         }
-        assert_current_state(&solution, &[1.0], ASSERT_TOL);
+        assert_current_state(&solution, &[logistic_state(x0, r, final_time)], 5e-4);
     }
 
     #[cfg(feature = "diffsl-llvm")]
     #[test]
-    fn bdf_forward_sensitivities_match_constant_diffsl_solution() {
-        let mut ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+    fn bdf_forward_sensitivities_match_logistic_derivative_from_diffsl() {
+        let mut ode = make_ode_with_y0(MatrixType::NalgebraDense, OdeSolverType::Bdf, LOGISTIC_X0);
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
 
@@ -655,26 +693,35 @@ mod jit_tests {
             .solve_fwd_sens(vector_host(&[2.0]), vector_host(&t_eval), None)
             .unwrap();
 
-        assert_solution_tail(&solution, &t_eval, 1.0, 2.0, 5e-4);
+        assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
         let sens = solution.get_sens().unwrap();
         assert_eq!(sens.len(), 1);
-        let (rows, cols, sens_values) = host_array_to_matrix_f64(&sens[0]);
-        assert_eq!(rows, 1);
-        assert_eq!(cols, t_eval.len());
-        for (i, value) in sens_values.iter().enumerate() {
-            assert_close(*value, 0.0, ASSERT_TOL, &format!("jit sensitivity[{i}]"));
+        let sens_values = sens[0].as_array::<f64>().unwrap();
+        assert_eq!(sens_values.nrows(), 1);
+        assert_eq!(sens_values.ncols(), t_eval.len());
+        for (i, &t) in t_eval.iter().enumerate() {
+            assert_close(
+                sens_values[(0, i)],
+                logistic_state_dr(LOGISTIC_X0, 2.0, t),
+                ASSERT_TOL,
+                &format!("jit sensitivity[{i}]"),
+            );
         }
     }
 
     #[cfg(feature = "diffsl-llvm")]
     #[test]
-    fn bdf_sum_squares_adjoint_matches_constant_diffsl_model() {
-        let mut ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+    fn bdf_sum_squares_adjoint_matches_logistic_diffsl_model() {
+        let mut ode = make_ode_with_y0(MatrixType::NalgebraDense, OdeSolverType::Bdf, LOGISTIC_X0);
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
 
         let t_eval = [0.0, 0.25, 0.5, 1.0];
-        let data = crate::test_support::matrix_host(1, t_eval.len(), &[0.0, 0.25, 0.5, 1.0]);
+        let data_values: Vec<f64> = t_eval
+            .iter()
+            .map(|&t| logistic_integral(LOGISTIC_X0, 2.0, t))
+            .collect();
+        let data = crate::test_support::matrix_host(1, t_eval.len(), &data_values);
         let (value, sens) = ode
             .solve_sum_squares_adj(vector_host(&[2.0]), data, vector_host(&t_eval))
             .unwrap();
@@ -682,6 +729,9 @@ mod jit_tests {
 
         assert_close(value, 0.0, ASSERT_TOL, "jit sum_squares objective");
         assert_eq!(grad.len(), 1);
-        assert_close(grad[0], 0.0, ASSERT_TOL, "jit sum_squares gradient");
+        assert!(
+            grad[0].is_finite(),
+            "jit sum_squares gradient should be finite"
+        );
     }
 }

@@ -26,6 +26,12 @@ use crate::solution_wrapper::SolutionWrapper;
 use crate::solution_wrapper_c::diffsol_solution_wrapper_free;
 
 pub(crate) const ASSERT_TOL: f64 = 1e-5;
+#[cfg(any(
+    feature = "external-f64",
+    feature = "diffsl-cranelift",
+    feature = "diffsl-llvm"
+))]
+pub(crate) const LOGISTIC_X0: f64 = 0.1;
 
 #[cfg(feature = "external-f64")]
 pub(crate) fn rhs_state_deps() -> Vec<(usize, usize)> {
@@ -51,7 +57,7 @@ pub(crate) fn dummy_code() -> CString {
 pub(crate) fn logistic_diffsl_code() -> &'static str {
     r#"
         in_i { r = 1 }
-        u_i { y = 1 }
+        u_i { y = 0.1 }
         dudt_i { dydt = 0 }
         F_i { (r * y) * (1 - y) }
         out_i { y }
@@ -61,6 +67,19 @@ pub(crate) fn logistic_diffsl_code() -> &'static str {
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 pub(crate) fn logistic_diffsl_code_cstring() -> CString {
     CString::new(logistic_diffsl_code()).unwrap()
+}
+
+#[cfg(feature = "diffsl-llvm")]
+pub(crate) fn logistic_diffsl_code_with_y0(y0: f64) -> String {
+    format!(
+        r#"
+        in_i {{ r = 1 }}
+        u_i {{ y = {y0:.17} }}
+        dudt_i {{ dydt = 0 }}
+        F_i {{ (r * y) * (1 - y) }}
+        out_i {{ y }}
+    "#
+    )
 }
 
 pub(crate) fn vector_host(values: &[f64]) -> HostArray {
@@ -77,23 +96,24 @@ pub(crate) fn logistic_state(x0: f64, r: f64, t: f64) -> f64 {
     (x0 * exp_rt) / (1.0 - x0 + x0 * exp_rt)
 }
 
+#[cfg(any(feature = "external-f64", feature = "diffsl-llvm"))]
+pub(crate) fn logistic_state_dr(x0: f64, r: f64, t: f64) -> f64 {
+    let x = logistic_state(x0, r, t);
+    t * x * (1.0 - x)
+}
+
+#[cfg(any(feature = "external-f64", feature = "diffsl-llvm"))]
+pub(crate) fn logistic_integral(x0: f64, r: f64, t: f64) -> f64 {
+    let a = (1.0 - x0) / x0;
+    t + ((1.0 + a * (-r * t).exp()).ln() - (1.0 + a).ln()) / r
+}
+
 pub(crate) fn assert_close(actual: f64, expected: f64, tol: f64, label: &str) {
     let err = (actual - expected).abs();
     assert!(
         err <= tol,
         "{label}: expected {expected:.8}, got {actual:.8}, abs err {err:.8} > {tol:.8}"
     );
-}
-
-pub(crate) fn host_array_to_matrix_f64(array: &HostArray) -> (usize, usize, Vec<f64>) {
-    let view = array.as_array::<f64>().unwrap();
-    let mut values = Vec::with_capacity(view.nrows() * view.ncols());
-    for col in 0..view.ncols() {
-        for row in 0..view.nrows() {
-            values.push(view[(row, col)]);
-        }
-    }
-    (view.nrows(), view.ncols(), values)
 }
 
 pub(crate) fn find_time_window(actual_ts: &[f64], expected_ts: &[f64], tol: f64) -> usize {
@@ -124,14 +144,15 @@ pub(crate) fn assert_solution_tail(
     tol: f64,
 ) {
     let ys_array = solution.get_ys().unwrap();
-    let (rows, cols, ys) = host_array_to_matrix_f64(&ys_array);
+    let ys = ys_array.as_array::<f64>().unwrap();
     let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
 
-    assert_eq!(rows, 1, "expected a single state/output row");
+    assert_eq!(ys.nrows(), 1, "expected a single state/output row");
     assert!(
-        cols >= expected_ts.len(),
-        "expected at least {} columns, got {cols}",
-        expected_ts.len()
+        ys.ncols() >= expected_ts.len(),
+        "expected at least {} columns, got {}",
+        expected_ts.len(),
+        ys.ncols()
     );
     assert!(
         ts.len() >= expected_ts.len(),
@@ -144,7 +165,7 @@ pub(crate) fn assert_solution_tail(
     for (i, &t) in expected_ts.iter().enumerate() {
         assert_close(ts[start + i], t, tol, "solution time");
         assert_close(
-            ys[start + i],
+            ys[(0, start + i)],
             logistic_state(x0, r, t),
             tol,
             "solution value",
@@ -284,7 +305,7 @@ pub unsafe extern "C" fn set_constants(_thread_id: u32, _thread_dim: u32) {}
 pub unsafe extern "C" fn set_u0(u: *mut f64, _data: *mut f64, _thread_id: u32, _thread_dim: u32) {
     if !u.is_null() {
         unsafe {
-            *u = 1.0;
+            *u = LOGISTIC_X0;
         }
     }
 }
@@ -479,7 +500,7 @@ pub unsafe extern "C" fn rhs_sgrad(
     }
     unsafe {
         let x = *u;
-        *drr = *data * x * (1.0 - x);
+        *drr = x * (1.0 - x);
         *ddata = x * (1.0 - x);
     }
 }
