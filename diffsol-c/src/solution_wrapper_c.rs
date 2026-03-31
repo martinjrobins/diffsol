@@ -15,6 +15,11 @@ fn boxed_host_array_list(arrays: Vec<HostArray>) -> (*mut *mut HostArray, usize)
     (ptr, len)
 }
 
+/// Free a solution wrapper previously returned by this library.
+///
+/// # Safety
+/// `solution` must be either null or a pointer returned by this library that
+/// has not already been freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_solution_wrapper_free(solution: *mut SolutionWrapper) {
     if solution.is_null() {
@@ -26,6 +31,11 @@ pub unsafe extern "C" fn diffsol_solution_wrapper_free(solution: *mut SolutionWr
     }
 }
 
+/// Return the recorded solution values as a host array.
+///
+/// # Safety
+/// `solution` must be a valid pointer created by this library. `out_array`
+/// must be a valid, writable pointer to receive ownership of the returned array.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_solution_wrapper_get_ys(
     solution: *const SolutionWrapper,
@@ -50,6 +60,11 @@ pub unsafe extern "C" fn diffsol_solution_wrapper_get_ys(
     }
 }
 
+/// Return the recorded solution times as a host array.
+///
+/// # Safety
+/// `solution` must be a valid pointer created by this library. `out_array`
+/// must be a valid, writable pointer to receive ownership of the returned array.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_solution_wrapper_get_ts(
     solution: *const SolutionWrapper,
@@ -74,6 +89,11 @@ pub unsafe extern "C" fn diffsol_solution_wrapper_get_ts(
     }
 }
 
+/// Return the recorded forward sensitivities as a list of host arrays.
+///
+/// # Safety
+/// `solution` must be a valid pointer created by this library. `out_sens` and
+/// `out_sens_len` must be valid, writable pointers to receive the result.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_solution_wrapper_get_sens(
     solution: *const SolutionWrapper,
@@ -101,6 +121,12 @@ pub unsafe extern "C" fn diffsol_solution_wrapper_get_sens(
     }
 }
 
+/// Overwrite the current solver state stored in a solution wrapper.
+///
+/// # Safety
+/// `solution` must be a valid mutable pointer created by this library. `y_ptr`
+/// must be either null with `y_len == 0` or point to `y_len` readable `f64`
+/// values for the duration of this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_solution_wrapper_set_current_state(
     solution: *mut SolutionWrapper,
@@ -122,6 +148,11 @@ pub unsafe extern "C" fn diffsol_solution_wrapper_set_current_state(
     }
 }
 
+/// Return the current solver state stored in a solution wrapper.
+///
+/// # Safety
+/// `solution` must be a valid pointer created by this library. `out_array`
+/// must be a valid, writable pointer to receive ownership of the returned array.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_solution_wrapper_get_current_state(
     solution: *const SolutionWrapper,

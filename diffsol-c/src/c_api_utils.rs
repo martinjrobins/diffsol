@@ -120,6 +120,11 @@ macro_rules! c_null_err {
 macro_rules! c_getter_simple {
     ($prefix:ident, $opt_ty:ty, $out_ty:ty, $field:ident) => {
         ::paste::paste! {
+            #[doc = "Get a solver option value."]
+            #[doc = ""]
+            #[doc = "# Safety"]
+            #[doc = "`options` must be a valid pointer created by this library. `out_value` must"]
+            #[doc = "be a valid, writable pointer for a single output value."]
             #[unsafe(no_mangle)]
             pub unsafe extern "C" fn [<$prefix _get_ $field>](options: *const $opt_ty, out_value: *mut $out_ty) -> i32 {
                 if options.is_null() || out_value.is_null() {
@@ -148,6 +153,10 @@ macro_rules! c_getter_simple {
 macro_rules! c_setter_simple {
     ($prefix:ident, $opt_ty:ty, $in_ty:ty, $field:ident) => {
         ::paste::paste! {
+            #[doc = "Set a solver option value."]
+            #[doc = ""]
+            #[doc = "# Safety"]
+            #[doc = "`options` must be a valid mutable pointer created by this library."]
             #[unsafe(no_mangle)]
             pub unsafe extern "C" fn [<$prefix _set_ $field>](options: *mut $opt_ty, value: $in_ty) -> i32 {
                 if options.is_null() {

@@ -82,6 +82,11 @@ fn parse_ode_new_jit_args(
     Some((code, matrix_type, linear_solver, ode_solver))
 }
 
+/// Free a list of host arrays previously returned by this library.
+///
+/// # Safety
+/// `list` must be either null or a pointer returned by this library for a list
+/// of length `len`. Each pointed-to element remains owned separately.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_host_array_list_free(list: *mut *mut HostArray, len: usize) {
     if list.is_null() {
@@ -94,6 +99,12 @@ pub unsafe extern "C" fn diffsol_host_array_list_free(list: *mut *mut HostArray,
 }
 
 #[cfg(feature = "external")]
+/// Construct an external-backed ODE wrapper.
+///
+/// # Safety
+/// Dependency pointers must be either null with length `0` or point to valid
+/// memory containing `(usize, usize)` pairs for the specified lengths for the
+/// duration of this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_new_external(
     matrix_type: i32,
@@ -167,6 +178,12 @@ pub unsafe extern "C" fn diffsol_ode_new_external(
 }
 
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+/// Construct a JIT-backed ODE wrapper from DiffSL source code.
+///
+/// # Safety
+/// `code` must be a valid, null-terminated UTF-8 string for the duration of
+/// this call. The backend and solver enum values must be valid values defined by
+/// this library.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_new_jit(
     code: *const c_char,
@@ -204,6 +221,11 @@ pub unsafe extern "C" fn diffsol_ode_new_jit(
     }
 }
 
+/// Free an ODE wrapper previously returned by this library.
+///
+/// # Safety
+/// `ode` must be either null or a pointer returned by this library that has not
+/// already been freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_free(ode: *mut OdeWrapper) {
     if ode.is_null() {
@@ -215,6 +237,12 @@ pub unsafe extern "C" fn diffsol_ode_free(ode: *mut OdeWrapper) {
     }
 }
 
+/// Return a handle to the initial-condition solver options for an ODE.
+///
+/// # Safety
+/// `ode` must be a valid pointer created by this library. `out_options` must be
+/// a valid, writable pointer to receive ownership of the returned options
+/// object.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_get_ic_options(
     ode: *const OdeWrapper,
@@ -232,6 +260,12 @@ pub unsafe extern "C" fn diffsol_ode_get_ic_options(
     DIFFSOL_OK
 }
 
+/// Return a handle to the ODE solver options for an ODE.
+///
+/// # Safety
+/// `ode` must be a valid pointer created by this library. `out_options` must be
+/// a valid, writable pointer to receive ownership of the returned options
+/// object.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_get_options(
     ode: *const OdeWrapper,
@@ -249,6 +283,12 @@ pub unsafe extern "C" fn diffsol_ode_get_options(
     DIFFSOL_OK
 }
 
+/// Evaluate the initial condition vector for an ODE.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library. `params_ptr`
+/// must be either null with `params_len == 0` or point to `params_len`
+/// readable `f64` values. `out_array` must be a valid, writable pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_y0(
     ode: *mut OdeWrapper,
@@ -277,6 +317,12 @@ pub unsafe extern "C" fn diffsol_ode_y0(
     }
 }
 
+/// Evaluate the ODE right-hand side at a given time and state.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library. `params_ptr`
+/// and `y_ptr` must point to readable `f64` buffers of the specified lengths,
+/// unless the corresponding length is zero. `out_array` must be writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_rhs(
     ode: *mut OdeWrapper,
@@ -313,6 +359,13 @@ pub unsafe extern "C" fn diffsol_ode_rhs(
     }
 }
 
+/// Evaluate the ODE Jacobian-vector product at a given time and state.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library. `params_ptr`,
+/// `y_ptr`, and `v_ptr` must point to readable `f64` buffers of the specified
+/// lengths, unless the corresponding length is zero. `out_array` must be
+/// writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_rhs_jac_mul(
     ode: *mut OdeWrapper,
@@ -353,6 +406,13 @@ pub unsafe extern "C" fn diffsol_ode_rhs_jac_mul(
     }
 }
 
+/// Solve an ODE up to a final time.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library. `params_ptr`
+/// must point to `params_len` readable `f64` values unless `params_len == 0`.
+/// If non-null, `solution` must be a valid pointer created by this library.
+/// `out_solution` must be a valid, writable pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_solve(
     ode: *mut OdeWrapper,
@@ -392,6 +452,13 @@ pub unsafe extern "C" fn diffsol_ode_solve(
     }
 }
 
+/// Solve an ODE and sample the solution at requested times.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library. `params_ptr`
+/// and `t_eval_ptr` must point to readable `f64` buffers of the specified
+/// lengths, unless the corresponding length is zero. If non-null, `solution`
+/// must be valid. `out_solution` must be writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_solve_dense(
     ode: *mut OdeWrapper,
@@ -437,6 +504,13 @@ pub unsafe extern "C" fn diffsol_ode_solve_dense(
     }
 }
 
+/// Solve an ODE and sample forward sensitivities at requested times.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library. `params_ptr`
+/// and `t_eval_ptr` must point to readable `f64` buffers of the specified
+/// lengths, unless the corresponding length is zero. If non-null, `solution`
+/// must be valid. `out_solution` must be writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_solve_fwd_sens(
     ode: *mut OdeWrapper,
@@ -482,6 +556,13 @@ pub unsafe extern "C" fn diffsol_ode_solve_fwd_sens(
     }
 }
 
+/// Solve the sum-of-squares adjoint problem for an ODE.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library. `params_ptr`,
+/// `data_ptr`, and `t_eval_ptr` must point to readable buffers matching the
+/// provided dimensions. `out_value` and `out_sens` must be valid, writable
+/// pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_solve_sum_squares_adj(
     ode: *mut OdeWrapper,
@@ -534,6 +615,10 @@ pub unsafe extern "C" fn diffsol_ode_solve_sum_squares_adj(
     }
 }
 
+/// Return the matrix type configured for an ODE.
+///
+/// # Safety
+/// `ode` must be a valid pointer created by this library.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_get_matrix_type(ode: *const OdeWrapper) -> i32 {
     if ode.is_null() {
@@ -550,6 +635,10 @@ pub unsafe extern "C" fn diffsol_ode_get_matrix_type(ode: *const OdeWrapper) -> 
     }
 }
 
+/// Return the ODE solver enum configured for an ODE.
+///
+/// # Safety
+/// `ode` must be a valid pointer created by this library.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_get_ode_solver(ode: *const OdeWrapper) -> i32 {
     if ode.is_null() {
@@ -566,6 +655,10 @@ pub unsafe extern "C" fn diffsol_ode_get_ode_solver(ode: *const OdeWrapper) -> i
     }
 }
 
+/// Set the ODE solver enum for an ODE.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_set_ode_solver(ode: *mut OdeWrapper, value: i32) -> i32 {
     if ode.is_null() {
@@ -586,6 +679,10 @@ pub unsafe extern "C" fn diffsol_ode_set_ode_solver(ode: *mut OdeWrapper, value:
     }
 }
 
+/// Return the linear solver enum configured for an ODE.
+///
+/// # Safety
+/// `ode` must be a valid pointer created by this library.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_get_linear_solver(ode: *const OdeWrapper) -> i32 {
     if ode.is_null() {
@@ -602,6 +699,10 @@ pub unsafe extern "C" fn diffsol_ode_get_linear_solver(ode: *const OdeWrapper) -
     }
 }
 
+/// Set the linear solver enum for an ODE.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_set_linear_solver(ode: *mut OdeWrapper, value: i32) -> i32 {
     if ode.is_null() {
@@ -622,6 +723,11 @@ pub unsafe extern "C" fn diffsol_ode_set_linear_solver(ode: *mut OdeWrapper, val
     }
 }
 
+/// Return the relative tolerance configured for an ODE.
+///
+/// # Safety
+/// `ode` must be a valid pointer created by this library. `out_value` must be a
+/// valid, writable pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_get_rtol(ode: *const OdeWrapper, out_value: *mut f64) -> i32 {
     if ode.is_null() || out_value.is_null() {
@@ -640,6 +746,10 @@ pub unsafe extern "C" fn diffsol_ode_get_rtol(ode: *const OdeWrapper, out_value:
     }
 }
 
+/// Set the relative tolerance for an ODE.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_set_rtol(ode: *mut OdeWrapper, value: f64) -> i32 {
     if ode.is_null() {
@@ -653,6 +763,11 @@ pub unsafe extern "C" fn diffsol_ode_set_rtol(ode: *mut OdeWrapper, value: f64) 
     }
 }
 
+/// Return the absolute tolerance configured for an ODE.
+///
+/// # Safety
+/// `ode` must be a valid pointer created by this library. `out_value` must be a
+/// valid, writable pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_get_atol(ode: *const OdeWrapper, out_value: *mut f64) -> i32 {
     if ode.is_null() || out_value.is_null() {
@@ -671,6 +786,10 @@ pub unsafe extern "C" fn diffsol_ode_get_atol(ode: *const OdeWrapper, out_value:
     }
 }
 
+/// Set the absolute tolerance for an ODE.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_set_atol(ode: *mut OdeWrapper, value: f64) -> i32 {
     if ode.is_null() {

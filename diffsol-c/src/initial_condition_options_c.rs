@@ -1,6 +1,11 @@
 use crate::initial_condition_options::InitialConditionSolverOptions;
 use crate::{c_getter_simple, c_invalid_arg, c_setter_simple};
 
+/// Free an initial-condition options object previously returned by this library.
+///
+/// # Safety
+/// `options` must be either null or a pointer returned by this library that has
+/// not already been freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ic_options_free(options: *mut InitialConditionSolverOptions) {
     if options.is_null() {

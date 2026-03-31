@@ -218,13 +218,13 @@ pub(crate) fn solve_factory_jit(
 }
 
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-fn solve_factory_with_jit_backend<CG: CodegenModule>(
+fn solve_factory_with_jit_backend<CG>(
     code: &str,
     matrix_type: MatrixType,
     scalar_type: ScalarType,
 ) -> Result<Box<dyn Solve>, DiffsolJsError>
 where
-    CG: CodegenModuleJit + CodegenModuleCompile,
+    CG: CodegenModule + CodegenModuleJit + CodegenModuleCompile,
 {
     let solve: Box<dyn Solve> = match matrix_type {
         MatrixType::NalgebraDense => match scalar_type {

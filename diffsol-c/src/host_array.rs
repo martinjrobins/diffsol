@@ -18,8 +18,8 @@ impl<T: Scalar + 'static> ToHostArray<T> for faer::Mat<T> {
         let owner = Box::new(self);
         let nrows = owner.nrows();
         let ncols = owner.ncols();
-        let row_stride = owner.row_stride() as isize;
-        let col_stride = owner.col_stride() as isize;
+        let row_stride = owner.row_stride();
+        let col_stride = owner.col_stride();
         let ptr = owner.as_ptr() as *mut u8;
         HostArray::new_col_major(ptr, nrows, ncols, row_stride, col_stride, T::scalar_type())
             .with_owner(owner)

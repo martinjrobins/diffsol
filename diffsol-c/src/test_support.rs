@@ -1,3 +1,5 @@
+#![allow(clippy::missing_safety_doc)]
+
 #[cfg(feature = "diffsl-external-f64")]
 use std::ffi::CStr;
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
@@ -70,12 +72,15 @@ pub(crate) fn logistic_diffsl_code_cstring() -> CString {
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 #[cfg_attr(feature = "external", allow(dead_code))]
 pub(crate) fn available_jit_backends() -> Vec<crate::jit::JitBackendType> {
-    let mut backends = Vec::new();
-    #[cfg(feature = "diffsl-cranelift")]
-    backends.push(crate::jit::JitBackendType::Cranelift);
-    #[cfg(feature = "diffsl-llvm")]
-    backends.push(crate::jit::JitBackendType::Llvm);
-    backends
+    [
+        #[cfg(feature = "diffsl-cranelift")]
+        Some(crate::jit::JitBackendType::Cranelift),
+        #[cfg(feature = "diffsl-llvm")]
+        Some(crate::jit::JitBackendType::Llvm),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
 }
 
 pub(crate) fn vector_host(values: &[f64]) -> HostArray {
@@ -123,7 +128,7 @@ pub(crate) fn find_time_window(actual_ts: &[f64], expected_ts: &[f64], tol: f64)
                 .all(|(&actual, &expected)| (actual - expected).abs() <= tol)
                 .then_some(start)
         })
-        .last()
+        .next_back()
         .unwrap_or_else(|| {
             panic!(
                 "could not find expected time window {:?} inside actual times {:?}",

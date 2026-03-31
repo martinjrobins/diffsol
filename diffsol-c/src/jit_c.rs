@@ -33,11 +33,21 @@ pub(crate) fn jit_backend_to_i32(value: JitBackendType) -> i32 {
     }
 }
 
+/// Return the number of JIT backends compiled into this library.
+///
+/// # Safety
+/// This function is safe to call from C. It does not dereference any
+/// caller-provided pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_jit_backend_type_count() -> usize {
     usize::from(cfg!(feature = "diffsl-cranelift")) + usize::from(cfg!(feature = "diffsl-llvm"))
 }
 
+/// Return whether a JIT backend enum value is valid.
+///
+/// # Safety
+/// This function is safe to call from C. It does not dereference any
+/// caller-provided pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_jit_backend_type_is_valid(value: i32) -> i32 {
     if jit_backend_from_i32(value).is_some() {
@@ -48,6 +58,11 @@ pub unsafe extern "C" fn diffsol_jit_backend_type_is_valid(value: i32) -> i32 {
     }
 }
 
+/// Return the name of a JIT backend enum value.
+///
+/// # Safety
+/// The returned pointer is borrowed from static storage owned by this library
+/// and must not be freed or mutated by the caller.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_jit_backend_type_name(value: i32) -> *const c_char {
     match jit_backend_from_i32(value) {

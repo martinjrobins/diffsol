@@ -16,6 +16,9 @@ pub struct Ode {
     ode_solver: OdeSolverType,
 }
 
+unsafe impl Send for Ode {}
+unsafe impl Sync for Ode {}
+
 pub struct OdeWrapper(Arc<Mutex<Ode>>);
 type SolveCallResult = Result<Box<dyn Solution>, (DiffsolJsError, Option<Box<dyn Solution>>)>;
 

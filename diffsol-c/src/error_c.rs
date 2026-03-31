@@ -10,7 +10,7 @@ struct LastError {
 }
 
 thread_local! {
-    static LAST_ERROR: RefCell<Option<LastError>> = RefCell::new(None);
+    static LAST_ERROR: RefCell<Option<LastError>> = const { RefCell::new(None) };
 }
 
 fn cstring_from_str(value: &str) -> CString {
@@ -45,11 +45,21 @@ pub(crate) fn clear_last_error() {
     });
 }
 
+/// Return whether thread-local error state is currently set.
+///
+/// # Safety
+/// This function is safe to call from C. It relies on thread-local state managed
+/// by this library and does not dereference any caller-provided pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_error_code() -> i32 {
     LAST_ERROR.with(|slot| if slot.borrow().is_some() { 1 } else { 0 })
 }
 
+/// Return the last error message for the current thread, if any.
+///
+/// # Safety
+/// The returned pointer is borrowed from thread-local storage owned by this
+/// library and must not be freed or mutated by the caller.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_error() -> *const c_char {
     LAST_ERROR.with(|slot| {
@@ -60,6 +70,11 @@ pub unsafe extern "C" fn diffsol_error() -> *const c_char {
     })
 }
 
+/// Return the last error message for the current thread, if any.
+///
+/// # Safety
+/// The returned pointer is borrowed from thread-local storage owned by this
+/// library and must not be freed or mutated by the caller.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_last_error_message() -> *const c_char {
     LAST_ERROR.with(|slot| {
@@ -70,6 +85,11 @@ pub unsafe extern "C" fn diffsol_last_error_message() -> *const c_char {
     })
 }
 
+/// Return the source file associated with the last error for the current thread.
+///
+/// # Safety
+/// The returned pointer is borrowed from thread-local storage owned by this
+/// library and must not be freed or mutated by the caller.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_last_error_file() -> *const c_char {
     LAST_ERROR.with(|slot| {
@@ -80,11 +100,21 @@ pub unsafe extern "C" fn diffsol_last_error_file() -> *const c_char {
     })
 }
 
+/// Return the source line associated with the last error for the current thread.
+///
+/// # Safety
+/// This function is safe to call from C. It does not dereference any
+/// caller-provided pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_last_error_line() -> u32 {
     LAST_ERROR.with(|slot| slot.borrow().as_ref().map(|err| err.line).unwrap_or(0))
 }
 
+/// Clear the last error for the current thread.
+///
+/// # Safety
+/// This function is safe to call from C. It only mutates thread-local state
+/// owned by this library.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_clear_last_error() {
     clear_last_error();

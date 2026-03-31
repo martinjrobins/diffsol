@@ -9,11 +9,11 @@ use crate::error::DiffsolJsError;
 use crate::host_array::{HostArray, ToHostArray};
 
 pub(crate) trait Solution: Any + Send + Sync {
-    fn get_ys<'py>(&self) -> HostArray;
-    fn get_ts<'py>(&self) -> HostArray;
-    fn get_sens<'py>(&self) -> Vec<HostArray>;
+    fn get_ys(&self) -> HostArray;
+    fn get_ts(&self) -> HostArray;
+    fn get_sens(&self) -> Vec<HostArray>;
     fn set_state_y(&mut self, y: &[f64]) -> Result<(), DiffsolJsError>;
-    fn get_state_y<'py>(&self) -> HostArray;
+    fn get_state_y(&self) -> HostArray;
 }
 
 impl dyn Solution + '_ {
@@ -188,21 +188,21 @@ where
         }
     }
 
-    fn get_state_y<'py>(&self) -> HostArray {
+    fn get_state_y(&self) -> HostArray {
         match self.current_state() {
             GenericState::Bdf(state) => (*state.as_ref().y.inner()).clone().to_host_array(),
             GenericState::Rk(state) => (*state.as_ref().y.inner()).clone().to_host_array(),
         }
     }
 
-    fn get_sens<'py>(&self) -> Vec<HostArray> {
+    fn get_sens(&self) -> Vec<HostArray> {
         self.sens
             .iter()
             .map(|s| (*s.inner()).clone().to_host_array())
             .collect()
     }
 
-    fn get_ts<'py>(&self) -> HostArray {
+    fn get_ts(&self) -> HostArray {
         let ctx = match self.current_state() {
             GenericState::Bdf(state) => state.as_ref().y.context().clone(),
             GenericState::Rk(state) => state.as_ref().y.context().clone(),
@@ -212,7 +212,7 @@ where
             .to_host_array()
     }
 
-    fn get_ys<'py>(&self) -> HostArray {
+    fn get_ys(&self) -> HostArray {
         (*self.ys.inner()).clone().to_host_array()
     }
 }

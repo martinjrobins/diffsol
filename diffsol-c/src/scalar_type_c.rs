@@ -22,11 +22,21 @@ pub(crate) fn scalar_type_to_i32(value: ScalarType) -> i32 {
     }
 }
 
+/// Return the number of scalar type enum values.
+///
+/// # Safety
+/// This function is safe to call from C. It does not dereference any
+/// caller-provided pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_scalar_type_count() -> usize {
     2
 }
 
+/// Return whether a scalar type enum value is valid.
+///
+/// # Safety
+/// This function is safe to call from C. It does not dereference any
+/// caller-provided pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_scalar_type_is_valid(value: i32) -> i32 {
     if scalar_type_from_i32(value).is_some() {
@@ -37,6 +47,11 @@ pub unsafe extern "C" fn diffsol_scalar_type_is_valid(value: i32) -> i32 {
     }
 }
 
+/// Return the name of a scalar type enum value.
+///
+/// # Safety
+/// The returned pointer is borrowed from static storage owned by this library
+/// and must not be freed or mutated by the caller.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_scalar_type_name(value: i32) -> *const c_char {
     match scalar_type_from_i32(value) {

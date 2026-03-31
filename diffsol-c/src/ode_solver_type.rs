@@ -36,20 +36,16 @@ pub enum OdeSolverType {
     Tsit45,
 }
 
+type SolveOutput<V, T> = (<V as DefaultDenseMatrix>::M, Vec<T>, GenericState<V>);
+type DenseSolveOutput<V> = (<V as DefaultDenseMatrix>::M, GenericState<V>);
+
 impl OdeSolverType {
     pub(crate) fn solve<M, CG, LS>(
         &self,
         problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
         final_time: M::T,
         initial_state: Option<GenericState<M::V>>,
-    ) -> Result<
-        (
-            <M::V as DefaultDenseMatrix>::M,
-            Vec<M::T>,
-            GenericState<M::V>,
-        ),
-        DiffsolError,
-    >
+    ) -> Result<SolveOutput<M::V, M::T>, DiffsolError>
     where
         M: Matrix<T: Scalar>,
         CG: CodegenModule,
@@ -124,7 +120,7 @@ impl OdeSolverType {
         problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
         t_eval: &[M::T],
         initial_state: Option<GenericState<M::V>>,
-    ) -> Result<(<M::V as DefaultDenseMatrix>::M, GenericState<M::V>), DiffsolError>
+    ) -> Result<DenseSolveOutput<M::V>, DiffsolError>
     where
         M: Matrix<T: Scalar>,
         CG: CodegenModule,

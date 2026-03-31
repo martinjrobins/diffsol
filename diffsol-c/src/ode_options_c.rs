@@ -1,6 +1,11 @@
 use crate::ode_options::OdeSolverOptions;
 use crate::{c_getter_simple, c_invalid_arg, c_setter_simple};
 
+/// Free an ODE options object previously returned by this library.
+///
+/// # Safety
+/// `options` must be either null or a pointer returned by this library that has
+/// not already been freed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_options_free(options: *mut OdeSolverOptions) {
     if options.is_null() {

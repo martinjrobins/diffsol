@@ -25,11 +25,21 @@ pub(crate) fn linear_solver_to_i32(value: LinearSolverType) -> i32 {
     }
 }
 
+/// Return the number of linear solver enum values.
+///
+/// # Safety
+/// This function is safe to call from C. It does not dereference any
+/// caller-provided pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_linear_solver_type_count() -> usize {
     3
 }
 
+/// Return whether a linear solver enum value is valid.
+///
+/// # Safety
+/// This function is safe to call from C. It does not dereference any
+/// caller-provided pointers.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_linear_solver_type_is_valid(value: i32) -> i32 {
     if linear_solver_from_i32(value).is_some() {
@@ -40,6 +50,11 @@ pub unsafe extern "C" fn diffsol_linear_solver_type_is_valid(value: i32) -> i32 
     }
 }
 
+/// Return the name of a linear solver enum value.
+///
+/// # Safety
+/// The returned pointer is borrowed from static storage owned by this library
+/// and must not be freed or mutated by the caller.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_linear_solver_type_name(value: i32) -> *const c_char {
     match linear_solver_from_i32(value) {
