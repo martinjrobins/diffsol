@@ -1,5 +1,6 @@
 // Data type Python enum
 
+#[cfg(feature = "external")]
 use diffsl::execution::external::ExternSymbols;
 use diffsol::DiffSlScalar;
 
@@ -9,9 +10,15 @@ pub enum ScalarType {
     F64,
 }
 
-pub trait Scalar: DiffSlScalar + ToScalarType + ExternSymbols {}
+pub trait Scalar: DiffSlScalar + ToScalarType {}
 
-impl<T: DiffSlScalar + ToScalarType + ExternSymbols> Scalar for T {}
+impl<T: DiffSlScalar + ToScalarType> Scalar for T {}
+
+#[cfg(feature = "external")]
+pub trait ExternalScalar: Scalar + ExternSymbols {}
+
+#[cfg(feature = "external")]
+impl<T: Scalar + ExternSymbols> ExternalScalar for T {}
 
 pub trait ToScalarType {
     fn scalar_type() -> ScalarType;

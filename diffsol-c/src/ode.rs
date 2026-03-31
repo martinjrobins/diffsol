@@ -1,17 +1,10 @@
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    error::DiffsolJsError,
-    host_array::HostArray,
-    initial_condition_options::InitialConditionSolverOptions,
-    linear_solver_type::LinearSolverType,
-    matrix_type::MatrixType,
-    ode_options::OdeSolverOptions,
-    ode_solver_type::OdeSolverType,
-    scalar_type::ScalarType,
-    solution::Solution,
-    solution_wrapper::SolutionWrapper,
-    solve::{Solve, solve_factory},
+    error::DiffsolJsError, host_array::HostArray,
+    initial_condition_options::InitialConditionSolverOptions, linear_solver_type::LinearSolverType,
+    matrix_type::MatrixType, ode_options::OdeSolverOptions, ode_solver_type::OdeSolverType,
+    scalar_type::ScalarType, solution::Solution, solution_wrapper::SolutionWrapper, solve::Solve,
 };
 
 pub struct Ode {
@@ -35,11 +28,26 @@ impl OdeWrapper {
 }
 
 impl OdeWrapper {
-    /// Construct an ODE solver for specified diffsol using a given matrix type.
-    /// The code is JIT-compiled immediately based on the matrix type, so after
-    /// construction, both code and matrix_type fields are read-only.
-    /// All other fields are editable, for example setting the solver type or
-    /// method, or changing solver tolerances.
+    fn build(
+        code: String,
+        solve: Box<dyn Solve>,
+        linear_solver: LinearSolverType,
+        ode_solver: OdeSolverType,
+    ) -> Result<Self, DiffsolJsError> {
+        solve.check(linear_solver)?;
+        Ok(OdeWrapper(Arc::new(Mutex::new(Ode {
+            code,
+            solve,
+            linear_solver,
+            ode_solver,
+        }))))
+    }
+
+    /// Construct an ODE solver backed by externally-provided DiffSL symbols.
+    #[cfg(all(
+        feature = "external",
+        not(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))
+    ))]
     pub(crate) fn new(
         rhs_state_deps: Vec<(usize, usize)>,
         rhs_input_deps: Vec<(usize, usize)>,
@@ -49,20 +57,30 @@ impl OdeWrapper {
         linear_solver: LinearSolverType,
         ode_solver: OdeSolverType,
     ) -> Result<Self, DiffsolJsError> {
-        let solve = solve_factory(
+        let solve = crate::solve::solve_factory(
             rhs_state_deps,
             rhs_input_deps,
             mass_state_deps,
             matrix_type,
             scalar_type,
         )?;
-        solve.check(linear_solver)?;
-        Ok(OdeWrapper(Arc::new(Mutex::new(Ode {
-            code: String::new(),
-            solve,
-            linear_solver,
-            ode_solver,
-        }))))
+        Self::build(String::new(), solve, linear_solver, ode_solver)
+    }
+
+    /// Construct an ODE solver by JIT-compiling DiffSL code immediately.
+    #[cfg(all(
+        any(feature = "diffsl-cranelift", feature = "diffsl-llvm"),
+        not(feature = "external")
+    ))]
+    pub(crate) fn new(
+        code: &str,
+        scalar_type: ScalarType,
+        matrix_type: MatrixType,
+        linear_solver: LinearSolverType,
+        ode_solver: OdeSolverType,
+    ) -> Result<Self, DiffsolJsError> {
+        let solve = crate::solve::solve_factory(code, matrix_type, scalar_type)?;
+        Self::build(code.to_owned(), solve, linear_solver, ode_solver)
     }
 
     fn run_solve_call<F>(
@@ -298,7 +316,7 @@ impl OdeWrapper {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "external-f64"))]
 mod tests {
     use crate::host_array::FromHostArray;
     use crate::linear_solver_type::LinearSolverType;
@@ -466,5 +484,204 @@ mod tests {
         assert_close(value, 0.0, ASSERT_TOL, "sum_squares objective");
         assert_eq!(grad.len(), 1);
         assert_close(grad[0], 0.0, ASSERT_TOL, "sum_squares gradient");
+    }
+}
+
+#[cfg(all(
+    test,
+    any(feature = "diffsl-cranelift", feature = "diffsl-llvm"),
+    not(feature = "external")
+))]
+mod jit_tests {
+    use crate::host_array::FromHostArray;
+    use crate::linear_solver_type::LinearSolverType;
+    use crate::scalar_type::ScalarType;
+    use crate::test_support::{
+        ASSERT_TOL, assert_close, assert_current_state, assert_solution_tail,
+        host_array_to_matrix_f64, logistic_diffsl_code, logistic_state, vector_host,
+    };
+
+    use super::*;
+
+    fn make_ode(matrix_type: MatrixType, ode_solver: OdeSolverType) -> OdeWrapper {
+        OdeWrapper::new(
+            logistic_diffsl_code(),
+            ScalarType::F64,
+            matrix_type,
+            LinearSolverType::Default,
+            ode_solver,
+        )
+        .unwrap()
+    }
+
+    fn make_seed_solution(ode: &mut OdeWrapper, x0: f64) -> SolutionWrapper {
+        let solution = ode
+            .solve_dense(vector_host(&[2.0]), vector_host(&[1e-9]), None)
+            .unwrap();
+        solution.set_current_state(&[x0]).unwrap();
+        assert_current_state(&solution, &[x0], ASSERT_TOL);
+        solution
+    }
+
+    fn assert_runtime_dispatch(matrix_type: MatrixType) {
+        let mut ode = make_ode(matrix_type, OdeSolverType::Bdf);
+        assert_eq!(ode.get_matrix_type().unwrap(), matrix_type);
+        assert_eq!(ode.get_code().unwrap(), logistic_diffsl_code());
+
+        let y0 = ode.y0(vector_host(&[2.0])).unwrap();
+        assert_eq!(Vec::<f64>::from_host_array(y0).unwrap(), vec![1.0]);
+
+        let rhs = ode
+            .rhs(vector_host(&[2.0]), 0.0, vector_host(&[0.25]))
+            .unwrap();
+        assert_close(
+            Vec::<f64>::from_host_array(rhs).unwrap()[0],
+            0.375,
+            ASSERT_TOL,
+            "jit rhs(0.25)",
+        );
+
+        let rhs_jac_mul = ode
+            .rhs_jac_mul(
+                vector_host(&[2.0]),
+                0.0,
+                vector_host(&[0.25]),
+                vector_host(&[3.0]),
+            )
+            .unwrap();
+        assert_close(
+            Vec::<f64>::from_host_array(rhs_jac_mul).unwrap()[0],
+            3.0,
+            ASSERT_TOL,
+            "jit rhs_jac_mul(0.25, 3.0)",
+        );
+    }
+
+    fn assert_solver_continuation(matrix_type: MatrixType, ode_solver: OdeSolverType) {
+        let mut ode = make_ode(matrix_type, ode_solver);
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let t_eval = [0.25, 0.5, 1.0];
+        let seed = make_seed_solution(&mut ode, 0.1);
+        let solution = ode
+            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval), Some(seed))
+            .unwrap();
+
+        assert_solution_tail(&solution, &t_eval, 0.1, 2.0, 5e-4);
+        assert_current_state(
+            &solution,
+            &[logistic_state(0.1, 2.0, *t_eval.last().unwrap())],
+            5e-4,
+        );
+    }
+
+    #[test]
+    fn runtime_dispatch_matches_requested_matrix_type_from_diffsl() {
+        for matrix_type in [
+            MatrixType::NalgebraDense,
+            MatrixType::FaerDense,
+            MatrixType::FaerSparse,
+        ] {
+            assert_runtime_dispatch(matrix_type);
+        }
+    }
+
+    #[test]
+    fn solver_continuation_matches_logistic_solution_from_diffsl() {
+        for (matrix_type, solver) in [
+            (MatrixType::FaerDense, OdeSolverType::Esdirk34),
+            (MatrixType::FaerSparse, OdeSolverType::TrBdf2),
+            (MatrixType::NalgebraDense, OdeSolverType::Tsit45),
+        ] {
+            assert_solver_continuation(matrix_type, solver);
+        }
+    }
+
+    #[test]
+    fn bdf_dense_solution_matches_constant_diffsl_model() {
+        let mut ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let t_eval = [0.25, 0.5, 1.0];
+        let solution = ode
+            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval), None)
+            .unwrap();
+
+        assert_solution_tail(&solution, &t_eval, 1.0, 2.0, 5e-4);
+        assert_current_state(&solution, &[1.0], ASSERT_TOL);
+    }
+
+    #[test]
+    fn bdf_solution_matches_constant_diffsl_model() {
+        let mut ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let final_time = 1.0;
+        let solution = ode.solve(vector_host(&[2.0]), final_time, None).unwrap();
+
+        let (rows, cols, ys) = host_array_to_matrix_f64(&solution.get_ys().unwrap());
+        let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+
+        assert_eq!(rows, 1);
+        assert_eq!(cols, ts.len());
+        assert!(
+            !ts.is_empty(),
+            "expected solve() to record at least one time point"
+        );
+        assert_close(
+            *ts.last().unwrap(),
+            final_time,
+            ASSERT_TOL,
+            "solve final time",
+        );
+        for (i, value) in ys.iter().enumerate() {
+            assert_close(*value, 1.0, ASSERT_TOL, &format!("solve value[{i}]"));
+        }
+        assert_current_state(&solution, &[1.0], ASSERT_TOL);
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn bdf_forward_sensitivities_match_constant_diffsl_solution() {
+        let mut ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let t_eval = [0.25, 0.5, 1.0];
+        let solution = ode
+            .solve_fwd_sens(vector_host(&[2.0]), vector_host(&t_eval), None)
+            .unwrap();
+
+        assert_solution_tail(&solution, &t_eval, 1.0, 2.0, 5e-4);
+        let sens = solution.get_sens().unwrap();
+        assert_eq!(sens.len(), 1);
+        let (rows, cols, sens_values) = host_array_to_matrix_f64(&sens[0]);
+        assert_eq!(rows, 1);
+        assert_eq!(cols, t_eval.len());
+        for (i, value) in sens_values.iter().enumerate() {
+            assert_close(*value, 0.0, ASSERT_TOL, &format!("jit sensitivity[{i}]"));
+        }
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn bdf_sum_squares_adjoint_matches_constant_diffsl_model() {
+        let mut ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let t_eval = [0.0, 0.25, 0.5, 1.0];
+        let data = crate::test_support::matrix_host(1, t_eval.len(), &[0.0, 0.25, 0.5, 1.0]);
+        let (value, sens) = ode
+            .solve_sum_squares_adj(vector_host(&[2.0]), data, vector_host(&t_eval))
+            .unwrap();
+        let grad = Vec::<f64>::from_host_array(sens).unwrap();
+
+        assert_close(value, 0.0, ASSERT_TOL, "jit sum_squares objective");
+        assert_eq!(grad.len(), 1);
+        assert_close(grad[0], 0.0, ASSERT_TOL, "jit sum_squares gradient");
     }
 }

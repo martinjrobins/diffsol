@@ -1,10 +1,16 @@
-use std::ffi::{CStr, CString};
+#[cfg(feature = "external-f64")]
+use std::ffi::CStr;
+use std::ffi::CString;
+#[cfg(feature = "external-f64")]
 use std::os::raw::c_char;
 
+#[cfg(any(feature = "external-f64", feature = "diffsl-llvm"))]
 use nalgebra::DMatrix;
 
+use crate::error_c::diffsol_clear_last_error;
+#[cfg(feature = "external-f64")]
 use crate::error_c::{
-    diffsol_clear_last_error, diffsol_error_code, diffsol_last_error_file, diffsol_last_error_line,
+    diffsol_error_code, diffsol_last_error_file, diffsol_last_error_line,
     diffsol_last_error_message,
 };
 use crate::host_array::{FromHostArray, HostArray, ToHostArray};
@@ -12,6 +18,7 @@ use crate::host_array_c::{
     diffsol_host_array_dim, diffsol_host_array_dtype, diffsol_host_array_free,
     diffsol_host_array_ndim, diffsol_host_array_ptr, diffsol_host_array_stride,
 };
+#[cfg(any(feature = "external-f64", feature = "diffsl-llvm"))]
 use crate::ode_c::diffsol_host_array_list_free;
 use crate::scalar_type::ScalarType;
 use crate::scalar_type_c::scalar_type_to_i32;
@@ -20,26 +27,47 @@ use crate::solution_wrapper_c::diffsol_solution_wrapper_free;
 
 pub(crate) const ASSERT_TOL: f64 = 1e-5;
 
+#[cfg(feature = "external-f64")]
 pub(crate) fn rhs_state_deps() -> Vec<(usize, usize)> {
     vec![(0, 0)]
 }
 
+#[cfg(feature = "external-f64")]
 pub(crate) fn rhs_input_deps() -> Vec<(usize, usize)> {
     vec![(0, 0)]
 }
 
+#[cfg(feature = "external-f64")]
 pub(crate) fn mass_state_deps() -> Vec<(usize, usize)> {
     Vec::new()
 }
 
+#[cfg(feature = "external-f64")]
 pub(crate) fn dummy_code() -> CString {
     CString::new("ignored-by-diffsol-c").unwrap()
+}
+
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+pub(crate) fn logistic_diffsl_code() -> &'static str {
+    r#"
+        in_i { r = 1 }
+        u_i { y = 1 }
+        dudt_i { dydt = 0 }
+        F_i { (r * y) * (1 - y) }
+        out_i { y }
+    "#
+}
+
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+pub(crate) fn logistic_diffsl_code_cstring() -> CString {
+    CString::new(logistic_diffsl_code()).unwrap()
 }
 
 pub(crate) fn vector_host(values: &[f64]) -> HostArray {
     values.to_vec().to_host_array()
 }
 
+#[cfg(any(feature = "external-f64", feature = "diffsl-llvm"))]
 pub(crate) fn matrix_host(rows: usize, cols: usize, values_col_major: &[f64]) -> HostArray {
     DMatrix::from_column_slice(rows, cols, values_col_major).to_host_array()
 }
@@ -182,6 +210,7 @@ pub(crate) unsafe fn ffi_read_host_array_matrix(ptr: *mut HostArray) -> (usize, 
     (rows, cols, values)
 }
 
+#[cfg(any(feature = "external-f64", feature = "diffsl-llvm"))]
 pub(crate) unsafe fn ffi_read_host_array_list_matrices(
     list: *mut *mut HostArray,
     len: usize,
@@ -198,11 +227,13 @@ pub(crate) unsafe fn ffi_read_host_array_list_matrices(
     arrays
 }
 
+#[cfg(feature = "external-f64")]
 pub(crate) unsafe fn c_string(ptr: *const c_char) -> String {
     assert!(!ptr.is_null(), "expected non-null C string");
     unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_owned()
 }
 
+#[cfg(feature = "external-f64")]
 pub(crate) unsafe fn assert_last_error_contains(expected_substring: &str) {
     assert_eq!(
         unsafe { diffsol_error_code() },

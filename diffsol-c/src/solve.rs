@@ -2,9 +2,9 @@
 // in Rust.
 
 use diffsol::{
-    ConstantOp, DefaultDenseMatrix, DefaultSolver, DiffSl, MatrixCommon, NonLinearOp,
-    NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Vector,
-    VectorCommon, VectorHost, VectorRef,
+    CodegenModule, ConstantOp, DefaultDenseMatrix, DefaultSolver, DiffSl, MatrixCommon,
+    NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeSolverProblem, OdeSolverState,
+    Op, Vector, VectorCommon, VectorHost, VectorRef,
     error::DiffsolError,
     matrix::{MatrixHost, MatrixRef},
 };
@@ -13,7 +13,10 @@ use paste::paste;
 
 use crate::error::DiffsolJsError;
 use crate::host_array::{HostArray, ToHostArray};
-use crate::jit::JitModule;
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+use crate::jit::JitBackend;
+#[cfg(feature = "external")]
+use crate::scalar_type::ExternalScalar;
 use crate::scalar_type::{Scalar, ScalarType};
 use crate::{
     generate_ic_option_accessors, generate_ode_option_accessors, generate_option_accessors,
@@ -115,6 +118,10 @@ pub(crate) trait Solve {
     }
 }
 // Public factory method for generating an instance based on matrix type
+#[cfg(all(
+    feature = "external",
+    not(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))
+))]
 pub(crate) fn solve_factory(
     rhs_state_deps: Vec<(usize, usize)>,
     rhs_input_deps: Vec<(usize, usize)>,
@@ -125,18 +132,18 @@ pub(crate) fn solve_factory(
     let solve: Box<dyn Solve> = match matrix_type {
         MatrixType::NalgebraDense => match scalar_type {
             #[cfg(feature = "external-f32")]
-            ScalarType::F32 => Box::new(GenericSolve::<diffsol::NalgebraMat<f32>>::new(
-                rhs_state_deps,
-                rhs_input_deps,
-                mass_state_deps,
-                false,
+            ScalarType::F32 => Box::new(GenericSolve::<
+                diffsol::NalgebraMat<f32>,
+                diffsl::ExternalModule<f32>,
+            >::from_external(
+                rhs_state_deps, rhs_input_deps, mass_state_deps, false
             )?),
             #[cfg(feature = "external-f64")]
-            ScalarType::F64 => Box::new(GenericSolve::<diffsol::NalgebraMat<f64>>::new(
-                rhs_state_deps,
-                rhs_input_deps,
-                mass_state_deps,
-                false,
+            ScalarType::F64 => Box::new(GenericSolve::<
+                diffsol::NalgebraMat<f64>,
+                diffsl::ExternalModule<f64>,
+            >::from_external(
+                rhs_state_deps, rhs_input_deps, mass_state_deps, false
             )?),
             _ => {
                 return Err(DiffsolJsError::from(DiffsolError::Other(
@@ -146,18 +153,18 @@ pub(crate) fn solve_factory(
         },
         MatrixType::FaerDense => match scalar_type {
             #[cfg(feature = "external-f32")]
-            ScalarType::F32 => Box::new(GenericSolve::<diffsol::FaerMat<f32>>::new(
-                rhs_state_deps,
-                rhs_input_deps,
-                mass_state_deps,
-                false,
+            ScalarType::F32 => Box::new(GenericSolve::<
+                diffsol::FaerMat<f32>,
+                diffsl::ExternalModule<f32>,
+            >::from_external(
+                rhs_state_deps, rhs_input_deps, mass_state_deps, false
             )?),
             #[cfg(feature = "external-f64")]
-            ScalarType::F64 => Box::new(GenericSolve::<diffsol::FaerMat<f64>>::new(
-                rhs_state_deps,
-                rhs_input_deps,
-                mass_state_deps,
-                false,
+            ScalarType::F64 => Box::new(GenericSolve::<
+                diffsol::FaerMat<f64>,
+                diffsl::ExternalModule<f64>,
+            >::from_external(
+                rhs_state_deps, rhs_input_deps, mass_state_deps, false
             )?),
             _ => {
                 return Err(DiffsolJsError::from(DiffsolError::Other(
@@ -167,18 +174,18 @@ pub(crate) fn solve_factory(
         },
         MatrixType::FaerSparse => match scalar_type {
             #[cfg(feature = "external-f32")]
-            ScalarType::F32 => Box::new(GenericSolve::<diffsol::FaerSparseMat<f32>>::new(
-                rhs_state_deps,
-                rhs_input_deps,
-                mass_state_deps,
-                false,
+            ScalarType::F32 => Box::new(GenericSolve::<
+                diffsol::FaerSparseMat<f32>,
+                diffsl::ExternalModule<f32>,
+            >::from_external(
+                rhs_state_deps, rhs_input_deps, mass_state_deps, false
             )?),
             #[cfg(feature = "external-f64")]
-            ScalarType::F64 => Box::new(GenericSolve::<diffsol::FaerSparseMat<f64>>::new(
-                rhs_state_deps,
-                rhs_input_deps,
-                mass_state_deps,
-                false,
+            ScalarType::F64 => Box::new(GenericSolve::<
+                diffsol::FaerSparseMat<f64>,
+                diffsl::ExternalModule<f64>,
+            >::from_external(
+                rhs_state_deps, rhs_input_deps, mass_state_deps, false
             )?),
             _ => {
                 return Err(DiffsolJsError::from(DiffsolError::Other(
@@ -190,37 +197,59 @@ pub(crate) fn solve_factory(
     Ok(solve)
 }
 
-pub(crate) struct GenericSolve<M>
+#[cfg(all(
+    any(feature = "diffsl-cranelift", feature = "diffsl-llvm"),
+    not(feature = "external")
+))]
+pub(crate) fn solve_factory(
+    code: &str,
+    matrix_type: MatrixType,
+    scalar_type: ScalarType,
+) -> Result<Box<dyn Solve>, DiffsolJsError> {
+    let solve: Box<dyn Solve> = match matrix_type {
+        MatrixType::NalgebraDense => match scalar_type {
+            ScalarType::F32 => {
+                Box::new(GenericSolve::<diffsol::NalgebraMat<f32>, JitBackend>::from_diffsl(code)?)
+            }
+            ScalarType::F64 => {
+                Box::new(GenericSolve::<diffsol::NalgebraMat<f64>, JitBackend>::from_diffsl(code)?)
+            }
+        },
+        MatrixType::FaerDense => match scalar_type {
+            ScalarType::F32 => {
+                Box::new(GenericSolve::<diffsol::FaerMat<f32>, JitBackend>::from_diffsl(code)?)
+            }
+            ScalarType::F64 => {
+                Box::new(GenericSolve::<diffsol::FaerMat<f64>, JitBackend>::from_diffsl(code)?)
+            }
+        },
+        MatrixType::FaerSparse => match scalar_type {
+            ScalarType::F32 => Box::new(
+                GenericSolve::<diffsol::FaerSparseMat<f32>, JitBackend>::from_diffsl(code)?,
+            ),
+            ScalarType::F64 => Box::new(
+                GenericSolve::<diffsol::FaerSparseMat<f64>, JitBackend>::from_diffsl(code)?,
+            ),
+        },
+    };
+    Ok(solve)
+}
+
+pub(crate) struct GenericSolve<M, CG>
 where
     M: MatrixHost<T: Scalar>,
     M::V: Vector + VectorHost,
+    CG: CodegenModule,
 {
-    problem: OdeSolverProblem<DiffSl<M, JitModule<M::T>>>,
+    problem: OdeSolverProblem<DiffSl<M, CG>>,
 }
 
-impl<M> GenericSolve<M>
+impl<M, CG> GenericSolve<M, CG>
 where
     M: MatrixHost<T: Scalar>,
     M::V: Vector + VectorHost + DefaultDenseMatrix,
+    CG: CodegenModule,
 {
-    pub fn new(
-        rhs_state_deps: Vec<(usize, usize)>,
-        rhs_input_deps: Vec<(usize, usize)>,
-        mass_state_deps: Vec<(usize, usize)>,
-        include_sensitivities: bool,
-    ) -> Result<Self, DiffsolJsError> {
-        let eqn = DiffSl::<M, JitModule<M::T>>::from_external(
-            M::C::default(),
-            rhs_state_deps,
-            rhs_input_deps,
-            mass_state_deps,
-            include_sensitivities,
-        )?;
-        let default_p = vec![0.0; eqn.nparams()];
-        let problem = OdeBuilder::<M>::new().p(default_p).build_from_eqn(eqn)?;
-        Ok(GenericSolve { problem })
-    }
-
     pub(crate) fn setup_problem(&mut self, params: &[f64]) -> Result<(), DiffsolJsError> {
         let params: Vec<M::T> = params.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
         let params = M::V::from_slice(&params, M::C::default());
@@ -279,13 +308,51 @@ where
     }
 }
 
-impl<M> Solve for GenericSolve<M>
+#[cfg(feature = "external")]
+impl<M> GenericSolve<M, diffsl::ExternalModule<M::T>>
+where
+    M: MatrixHost<T: ExternalScalar>,
+    M::V: Vector + VectorHost + DefaultDenseMatrix,
+{
+    pub fn from_external(
+        rhs_state_deps: Vec<(usize, usize)>,
+        rhs_input_deps: Vec<(usize, usize)>,
+        mass_state_deps: Vec<(usize, usize)>,
+        include_sensitivities: bool,
+    ) -> Result<Self, DiffsolJsError> {
+        let eqn = DiffSl::<M, diffsl::ExternalModule<M::T>>::from_external(
+            M::C::default(),
+            rhs_state_deps,
+            rhs_input_deps,
+            mass_state_deps,
+            include_sensitivities,
+        )?;
+        let default_p = vec![0.0; eqn.nparams()];
+        let problem = OdeBuilder::<M>::new().p(default_p).build_from_eqn(eqn)?;
+        Ok(GenericSolve { problem })
+    }
+}
+
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+impl<M> GenericSolve<M, JitBackend>
+where
+    M: MatrixHost<T: Scalar>,
+    M::V: Vector + VectorHost + DefaultDenseMatrix,
+{
+    pub fn from_diffsl(code: &str) -> Result<Self, DiffsolJsError> {
+        let problem = OdeBuilder::<M>::new().build_from_diffsl::<JitBackend>(code)?;
+        Ok(GenericSolve { problem })
+    }
+}
+
+impl<M, CG> Solve for GenericSolve<M, CG>
 where
     M: MatrixHost<T: Scalar + ToPrimitive>
         + DefaultSolver
         + LuValidator<M>
         + KluValidator<M>
         + MatrixKind,
+    CG: CodegenModule,
     for<'b> <<M::V as DefaultDenseMatrix>::M as MatrixCommon>::Inner: ToHostArray<M::T> + Clone,
     for<'b> <M::V as VectorCommon>::Inner: ToHostArray<M::T> + Clone,
     M::V: VectorHost + DefaultDenseMatrix + Send + Sync + 'static,
@@ -415,17 +482,17 @@ where
             Err(err) => return Err((err, solution)),
         };
         let solve_result = match linear_solver {
-            LinearSolverType::Default => method.solve::<M, <M as DefaultSolver>::LS>(
+            LinearSolverType::Default => method.solve::<M, CG, <M as DefaultSolver>::LS>(
                 &mut self.problem,
                 final_time,
                 initial_state,
             ),
-            LinearSolverType::Lu => method.solve::<M, <M as LuValidator<M>>::LS>(
+            LinearSolverType::Lu => method.solve::<M, CG, <M as LuValidator<M>>::LS>(
                 &mut self.problem,
                 final_time,
                 initial_state,
             ),
-            LinearSolverType::Klu => method.solve::<M, <M as KluValidator<M>>::LS>(
+            LinearSolverType::Klu => method.solve::<M, CG, <M as KluValidator<M>>::LS>(
                 &mut self.problem,
                 final_time,
                 initial_state,
@@ -464,17 +531,17 @@ where
             Err(err) => return Err((err, solution)),
         };
         let solve_result = match linear_solver {
-            LinearSolverType::Default => method.solve_dense::<M, <M as DefaultSolver>::LS>(
+            LinearSolverType::Default => method.solve_dense::<M, CG, <M as DefaultSolver>::LS>(
                 &mut self.problem,
                 &t_eval,
                 initial_state,
             ),
-            LinearSolverType::Lu => method.solve_dense::<M, <M as LuValidator<M>>::LS>(
+            LinearSolverType::Lu => method.solve_dense::<M, CG, <M as LuValidator<M>>::LS>(
                 &mut self.problem,
                 &t_eval,
                 initial_state,
             ),
-            LinearSolverType::Klu => method.solve_dense::<M, <M as KluValidator<M>>::LS>(
+            LinearSolverType::Klu => method.solve_dense::<M, CG, <M as KluValidator<M>>::LS>(
                 &mut self.problem,
                 &t_eval,
                 initial_state,
@@ -531,17 +598,17 @@ where
             Err(err) => return Err((err, solution)),
         };
         let solve_result = match linear_solver {
-            LinearSolverType::Default => method.solve_fwd_sens::<M, <M as DefaultSolver>::LS>(
+            LinearSolverType::Default => method.solve_fwd_sens::<M, CG, <M as DefaultSolver>::LS>(
                 &mut self.problem,
                 &t_eval,
                 initial_state,
             ),
-            LinearSolverType::Lu => method.solve_fwd_sens::<M, <M as LuValidator<M>>::LS>(
+            LinearSolverType::Lu => method.solve_fwd_sens::<M, CG, <M as LuValidator<M>>::LS>(
                 &mut self.problem,
                 &t_eval,
                 initial_state,
             ),
-            LinearSolverType::Klu => method.solve_fwd_sens::<M, <M as KluValidator<M>>::LS>(
+            LinearSolverType::Klu => method.solve_fwd_sens::<M, CG, <M as KluValidator<M>>::LS>(
                 &mut self.problem,
                 &t_eval,
                 initial_state,
@@ -594,27 +661,29 @@ where
         self.problem.integrate_out = true;
         let result = match linear_solver {
             LinearSolverType::Default => method
-                .solve_sum_squares_adj::<M, <M as DefaultSolver>::LS>(
+                .solve_sum_squares_adj::<M, CG, <M as DefaultSolver>::LS>(
                     &mut self.problem,
                     data,
                     &t_eval,
                     backwards_method,
                     backwards_linear_solver,
                 ),
-            LinearSolverType::Lu => method.solve_sum_squares_adj::<M, <M as LuValidator<M>>::LS>(
-                &mut self.problem,
-                data,
-                &t_eval,
-                backwards_method,
-                backwards_linear_solver,
-            ),
-            LinearSolverType::Klu => method.solve_sum_squares_adj::<M, <M as KluValidator<M>>::LS>(
-                &mut self.problem,
-                data,
-                &t_eval,
-                backwards_method,
-                backwards_linear_solver,
-            ),
+            LinearSolverType::Lu => method
+                .solve_sum_squares_adj::<M, CG, <M as LuValidator<M>>::LS>(
+                    &mut self.problem,
+                    data,
+                    &t_eval,
+                    backwards_method,
+                    backwards_linear_solver,
+                ),
+            LinearSolverType::Klu => method
+                .solve_sum_squares_adj::<M, CG, <M as KluValidator<M>>::LS>(
+                    &mut self.problem,
+                    data,
+                    &t_eval,
+                    backwards_method,
+                    backwards_linear_solver,
+                ),
         };
         self.problem.integrate_out = previous_integrate_out;
         let (y, y_sens) = result?;

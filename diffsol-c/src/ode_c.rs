@@ -75,6 +75,7 @@ pub unsafe extern "C" fn diffsol_ode_new(
     };
 
     // Convert dependency pointers to vectors of tuples
+    #[cfg(feature = "external")]
     let rhs_state_deps = if !rhs_state_deps_ptr.is_null() && rhs_state_deps_len > 0 {
         unsafe {
             let slice = std::slice::from_raw_parts(
@@ -87,6 +88,7 @@ pub unsafe extern "C" fn diffsol_ode_new(
         Vec::new()
     };
 
+    #[cfg(feature = "external")]
     let rhs_input_deps = if !rhs_input_deps_ptr.is_null() && rhs_input_deps_len > 0 {
         unsafe {
             let slice = std::slice::from_raw_parts(
@@ -99,6 +101,7 @@ pub unsafe extern "C" fn diffsol_ode_new(
         Vec::new()
     };
 
+    #[cfg(feature = "external")]
     let mass_state_deps = if !mass_state_deps_ptr.is_null() && mass_state_deps_len > 0 {
         unsafe {
             let slice = std::slice::from_raw_parts(
@@ -113,20 +116,64 @@ pub unsafe extern "C" fn diffsol_ode_new(
 
     let scalar_type = ScalarType::F64;
 
-    match OdeWrapper::new(
-        rhs_state_deps,
-        rhs_input_deps,
-        mass_state_deps,
-        scalar_type,
-        matrix_type,
-        linear_solver,
-        ode_solver,
-    ) {
-        Ok(ode) => Box::into_raw(Box::new(ode)),
-        Err(err) => {
-            c_error!(&format!("{}", err));
-            ptr::null_mut()
-        }
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+    let _ = (
+        rhs_state_deps_ptr,
+        rhs_state_deps_len,
+        rhs_input_deps_ptr,
+        rhs_input_deps_len,
+        mass_state_deps_ptr,
+        mass_state_deps_len,
+    );
+
+    #[cfg(all(
+        feature = "external",
+        not(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))
+    ))]
+    {
+        return match OdeWrapper::new(
+            rhs_state_deps,
+            rhs_input_deps,
+            mass_state_deps,
+            scalar_type,
+            matrix_type,
+            linear_solver,
+            ode_solver,
+        ) {
+            Ok(ode) => Box::into_raw(Box::new(ode)),
+            Err(err) => {
+                c_error!(&format!("{}", err));
+                ptr::null_mut()
+            }
+        };
+    }
+
+    #[cfg(all(
+        any(feature = "diffsl-cranelift", feature = "diffsl-llvm"),
+        not(feature = "external")
+    ))]
+    {
+        return match OdeWrapper::new(_code, scalar_type, matrix_type, linear_solver, ode_solver) {
+            Ok(ode) => Box::into_raw(Box::new(ode)),
+            Err(err) => {
+                c_error!(&format!("{}", err));
+                ptr::null_mut()
+            }
+        };
+    }
+
+    #[cfg(not(any(
+        all(
+            feature = "external",
+            not(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))
+        ),
+        all(
+            any(feature = "diffsl-cranelift", feature = "diffsl-llvm"),
+            not(feature = "external")
+        )
+    )))]
+    {
+        ptr::null_mut()
     }
 }
 
@@ -610,7 +657,7 @@ pub unsafe extern "C" fn diffsol_ode_set_atol(ode: *mut OdeWrapper, value: f64) 
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "external-f64"))]
 mod tests {
     use std::ptr;
 
@@ -1089,6 +1136,279 @@ mod tests {
 
             ffi_free_solution(sens_solution_ptr);
             diffsol_ode_free(analysis_ode);
+            ffi_free_solution(solution_ptr);
+            diffsol_ode_free(ode);
+        }
+    }
+}
+
+#[cfg(all(
+    test,
+    any(feature = "diffsl-cranelift", feature = "diffsl-llvm"),
+    not(feature = "external")
+))]
+mod jit_tests {
+    use std::ptr;
+
+    use crate::linear_solver_type::LinearSolverType;
+    use crate::linear_solver_type_c::linear_solver_to_i32;
+    use crate::matrix_type::MatrixType;
+    use crate::matrix_type_c::matrix_type_to_i32;
+    use crate::ode_solver_type::OdeSolverType;
+    use crate::ode_solver_type_c::ode_solver_to_i32;
+    #[cfg(feature = "diffsl-llvm")]
+    use crate::solution_wrapper_c::diffsol_solution_wrapper_get_sens;
+    use crate::solution_wrapper_c::{
+        diffsol_solution_wrapper_get_ts, diffsol_solution_wrapper_get_ys,
+        diffsol_solution_wrapper_set_current_state,
+    };
+    #[cfg(feature = "diffsl-llvm")]
+    use crate::test_support::ffi_read_host_array_list_matrices;
+    use crate::test_support::{
+        ASSERT_TOL, assert_close, clear_last_error, ffi_free_solution, ffi_read_host_array_matrix,
+        ffi_read_host_array_vector, find_time_window, logistic_diffsl_code_cstring, logistic_state,
+    };
+
+    use super::*;
+
+    unsafe fn make_ode_ptr(
+        matrix_type: i32,
+        linear_solver: i32,
+        ode_solver: i32,
+    ) -> *mut OdeWrapper {
+        let code = logistic_diffsl_code_cstring();
+        unsafe {
+            diffsol_ode_new(
+                code.as_ptr(),
+                matrix_type,
+                linear_solver,
+                ode_solver,
+                ptr::null(),
+                0,
+                ptr::null(),
+                0,
+                ptr::null(),
+                0,
+            )
+        }
+    }
+
+    #[test]
+    fn c_api_full_lifecycle_matches_jit_logistic_model() {
+        clear_last_error();
+        unsafe {
+            let ode = make_ode_ptr(
+                matrix_type_to_i32(MatrixType::NalgebraDense),
+                linear_solver_to_i32(LinearSolverType::Default),
+                ode_solver_to_i32(OdeSolverType::Bdf),
+            );
+            assert!(!ode.is_null());
+
+            assert_eq!(
+                diffsol_ode_get_matrix_type(ode),
+                matrix_type_to_i32(MatrixType::NalgebraDense)
+            );
+            assert_eq!(
+                diffsol_ode_get_ode_solver(ode),
+                ode_solver_to_i32(OdeSolverType::Bdf)
+            );
+            assert_eq!(
+                diffsol_ode_get_linear_solver(ode),
+                linear_solver_to_i32(LinearSolverType::Default)
+            );
+
+            let params = [2.0f64];
+            let y = [0.25f64];
+            let v = [3.0f64];
+
+            let mut y0_ptr = ptr::null_mut();
+            assert_eq!(
+                diffsol_ode_y0(ode, params.as_ptr(), params.len(), &mut y0_ptr),
+                DIFFSOL_OK
+            );
+            assert_eq!(ffi_read_host_array_vector(y0_ptr), vec![1.0]);
+
+            let mut rhs_ptr = ptr::null_mut();
+            assert_eq!(
+                diffsol_ode_rhs(
+                    ode,
+                    params.as_ptr(),
+                    params.len(),
+                    0.0,
+                    y.as_ptr(),
+                    y.len(),
+                    &mut rhs_ptr,
+                ),
+                DIFFSOL_OK
+            );
+            assert_close(
+                ffi_read_host_array_vector(rhs_ptr)[0],
+                0.375,
+                ASSERT_TOL,
+                "jit ffi rhs",
+            );
+
+            let mut rhs_jac_mul_ptr = ptr::null_mut();
+            assert_eq!(
+                diffsol_ode_rhs_jac_mul(
+                    ode,
+                    params.as_ptr(),
+                    params.len(),
+                    0.0,
+                    y.as_ptr(),
+                    y.len(),
+                    v.as_ptr(),
+                    v.len(),
+                    &mut rhs_jac_mul_ptr,
+                ),
+                DIFFSOL_OK
+            );
+            assert_close(
+                ffi_read_host_array_vector(rhs_jac_mul_ptr)[0],
+                3.0,
+                ASSERT_TOL,
+                "jit ffi rhs_jac_mul",
+            );
+
+            let mut solution_ptr: *mut SolutionWrapper = ptr::null_mut();
+            let seed_t_eval = [1e-9f64];
+            assert_eq!(
+                diffsol_ode_set_ode_solver(ode, ode_solver_to_i32(OdeSolverType::Tsit45)),
+                DIFFSOL_OK
+            );
+            assert_eq!(
+                diffsol_ode_solve_dense(
+                    ode,
+                    params.as_ptr(),
+                    params.len(),
+                    seed_t_eval.as_ptr(),
+                    seed_t_eval.len(),
+                    ptr::null_mut(),
+                    &mut solution_ptr,
+                ),
+                DIFFSOL_OK
+            );
+            assert_eq!(
+                diffsol_solution_wrapper_set_current_state(solution_ptr, [0.1].as_ptr(), 1),
+                DIFFSOL_OK
+            );
+
+            let t_eval = [0.25f64, 0.5f64, 1.0f64];
+            assert_eq!(
+                diffsol_ode_solve_dense(
+                    ode,
+                    params.as_ptr(),
+                    params.len(),
+                    t_eval.as_ptr(),
+                    t_eval.len(),
+                    solution_ptr,
+                    &mut solution_ptr,
+                ),
+                DIFFSOL_OK
+            );
+            let mut ys_ptr = ptr::null_mut();
+            let mut ts_ptr = ptr::null_mut();
+            assert_eq!(
+                diffsol_solution_wrapper_get_ys(solution_ptr, &mut ys_ptr),
+                DIFFSOL_OK
+            );
+            assert_eq!(
+                diffsol_solution_wrapper_get_ts(solution_ptr, &mut ts_ptr),
+                DIFFSOL_OK
+            );
+            let (rows, cols, ys) = ffi_read_host_array_matrix(ys_ptr);
+            let ts = ffi_read_host_array_vector(ts_ptr);
+            assert_eq!(rows, 1);
+            assert_eq!(cols, ts.len());
+            let start = find_time_window(&ts, &t_eval, ASSERT_TOL);
+            for (i, &t) in t_eval.iter().enumerate() {
+                assert_close(ts[start + i], t, ASSERT_TOL, "jit ffi solution time");
+                assert_close(
+                    ys[start + i],
+                    logistic_state(0.1, 2.0, t),
+                    5e-4,
+                    "jit ffi solution value",
+                );
+            }
+            assert_eq!(
+                diffsol_ode_set_ode_solver(ode, ode_solver_to_i32(OdeSolverType::Bdf)),
+                DIFFSOL_OK
+            );
+
+            #[cfg(feature = "diffsl-llvm")]
+            {
+                let analysis_ode = make_ode_ptr(
+                    matrix_type_to_i32(MatrixType::NalgebraDense),
+                    linear_solver_to_i32(LinearSolverType::Default),
+                    ode_solver_to_i32(OdeSolverType::Bdf),
+                );
+                assert!(!analysis_ode.is_null());
+
+                let mut sens_solution_ptr: *mut SolutionWrapper = ptr::null_mut();
+                assert_eq!(
+                    diffsol_ode_solve_fwd_sens(
+                        analysis_ode,
+                        params.as_ptr(),
+                        params.len(),
+                        t_eval.as_ptr(),
+                        t_eval.len(),
+                        ptr::null_mut(),
+                        &mut sens_solution_ptr,
+                    ),
+                    DIFFSOL_OK
+                );
+                let mut sens_list = ptr::null_mut();
+                let mut sens_len = 0usize;
+                assert_eq!(
+                    diffsol_solution_wrapper_get_sens(
+                        sens_solution_ptr,
+                        &mut sens_list,
+                        &mut sens_len
+                    ),
+                    DIFFSOL_OK
+                );
+                let sens_values = ffi_read_host_array_list_matrices(sens_list, sens_len);
+                assert_eq!(sens_values.len(), 1);
+                assert_eq!(sens_values[0].0, 1);
+                assert_eq!(sens_values[0].1, t_eval.len());
+                for (i, value) in sens_values[0].2.iter().enumerate() {
+                    assert_close(
+                        *value,
+                        0.0,
+                        ASSERT_TOL,
+                        &format!("jit ffi sensitivity[{i}]"),
+                    );
+                }
+
+                let adjoint_data = [0.0f64, 0.25f64, 0.5f64, 1.0f64];
+                let adjoint_t_eval = [0.0f64, 0.25f64, 0.5f64, 1.0f64];
+                let mut objective = 0.0;
+                let mut adjoint_grad_ptr = ptr::null_mut();
+                assert_eq!(
+                    diffsol_ode_solve_sum_squares_adj(
+                        analysis_ode,
+                        params.as_ptr(),
+                        params.len(),
+                        adjoint_data.as_ptr(),
+                        1,
+                        adjoint_t_eval.len(),
+                        1,
+                        1,
+                        adjoint_t_eval.as_ptr(),
+                        adjoint_t_eval.len(),
+                        &mut objective,
+                        &mut adjoint_grad_ptr,
+                    ),
+                    DIFFSOL_OK
+                );
+                assert_close(objective, 0.0, ASSERT_TOL, "jit ffi adjoint objective");
+                let grad = ffi_read_host_array_vector(adjoint_grad_ptr);
+                assert_eq!(grad.len(), 1);
+                assert_close(grad[0], 0.0, ASSERT_TOL, "jit ffi adjoint gradient");
+
+                ffi_free_solution(sens_solution_ptr);
+                diffsol_ode_free(analysis_ode);
+            }
             ffi_free_solution(solution_ptr);
             diffsol_ode_free(ode);
         }

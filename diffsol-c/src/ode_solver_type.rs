@@ -3,7 +3,7 @@
 
 use diffsol::error::DiffsolError;
 use diffsol::{
-    AdjointOdeSolverMethod, Checkpointing, DefaultSolver, DenseMatrix, MatrixCommon,
+    AdjointOdeSolverMethod, Checkpointing, CodegenModule, DefaultSolver, DenseMatrix, MatrixCommon,
     OdeSolverState, Op, SensitivitiesOdeSolverMethod, VectorViewMut,
 };
 use diffsol::{
@@ -14,7 +14,6 @@ use nalgebra::ComplexField;
 use ndarray::ArrayView2;
 use num_traits::{FromPrimitive, Zero}; // for generic nums in _solve_sum_squares_adj
 
-use crate::jit::JitModule;
 use crate::scalar_type::Scalar;
 use crate::solution::GenericState;
 use crate::utils::is_sens_available;
@@ -38,9 +37,9 @@ pub enum OdeSolverType {
 }
 
 impl OdeSolverType {
-    pub(crate) fn solve<M, LS>(
+    pub(crate) fn solve<M, CG, LS>(
         &self,
-        problem: &mut OdeSolverProblem<DiffSl<M, JitModule<M::T>>>,
+        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
         final_time: M::T,
         initial_state: Option<GenericState<M::V>>,
     ) -> Result<
@@ -53,6 +52,7 @@ impl OdeSolverType {
     >
     where
         M: Matrix<T: Scalar>,
+        CG: CodegenModule,
         M::V: VectorHost + DefaultDenseMatrix,
         LS: LinearSolver<M>,
         for<'b> &'b M::V: VectorRef<M::V>,
@@ -119,14 +119,15 @@ impl OdeSolverType {
         }
     }
 
-    pub(crate) fn solve_dense<M, LS>(
+    pub(crate) fn solve_dense<M, CG, LS>(
         &self,
-        problem: &mut OdeSolverProblem<DiffSl<M, JitModule<M::T>>>,
+        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
         t_eval: &[M::T],
         initial_state: Option<GenericState<M::V>>,
     ) -> Result<(<M::V as DefaultDenseMatrix>::M, GenericState<M::V>), DiffsolError>
     where
         M: Matrix<T: Scalar>,
+        CG: CodegenModule,
         M::V: VectorHost + DefaultDenseMatrix,
         LS: LinearSolver<M>,
         for<'b> &'b M::V: VectorRef<M::V>,
@@ -198,9 +199,9 @@ impl OdeSolverType {
     }
 
     #[allow(clippy::type_complexity)]
-    pub(crate) fn solve_fwd_sens<M, LS>(
+    pub(crate) fn solve_fwd_sens<M, CG, LS>(
         &self,
-        problem: &mut OdeSolverProblem<DiffSl<M, JitModule<M::T>>>,
+        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
         t_eval: &[M::T],
         initial_state: Option<GenericState<M::V>>,
     ) -> Result<
@@ -213,6 +214,7 @@ impl OdeSolverType {
     >
     where
         M: Matrix<T: Scalar> + DefaultSolver,
+        CG: CodegenModule,
         M::V: VectorHost + DefaultDenseMatrix,
         LS: LinearSolver<M>,
         for<'b> &'b M::V: VectorRef<M::V>,
@@ -279,9 +281,9 @@ impl OdeSolverType {
         }
     }
 
-    pub(crate) fn solve_sum_squares_adj<'a, M, LS>(
+    pub(crate) fn solve_sum_squares_adj<'a, M, CG, LS>(
         &self,
-        problem: &mut OdeSolverProblem<DiffSl<M, JitModule<M::T>>>,
+        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
         data: ArrayView2<'a, M::T>,
         t_eval: &[M::T],
         backwards_method: OdeSolverType,
@@ -289,6 +291,7 @@ impl OdeSolverType {
     ) -> Result<(M::T, M::V), DiffsolError>
     where
         M: Matrix<T: Scalar> + DefaultSolver + LuValidator<M> + KluValidator<M>,
+        CG: CodegenModule,
         M::V: VectorHost + DefaultDenseMatrix,
         LS: LinearSolver<M>,
         for<'b> &'b M::V: VectorRef<M::V>,
@@ -327,7 +330,7 @@ impl OdeSolverType {
         }
     }
 
-    pub(crate) fn _solve_sum_squares_adj<'data, 'solver, M, S>(
+    pub(crate) fn _solve_sum_squares_adj<'data, 'solver, M, CG, S>(
         &self,
         mut solver: S,
         data: ArrayView2<'data, M::T>,
@@ -337,8 +340,9 @@ impl OdeSolverType {
     ) -> Result<(M::T, M::V), DiffsolError>
     where
         M: Matrix<T: Scalar> + DefaultSolver + LuValidator<M> + KluValidator<M>,
+        CG: CodegenModule,
         M::V: VectorHost + DefaultDenseMatrix,
-        S: OdeSolverMethod<'solver, DiffSl<M, JitModule<M::T>>>,
+        S: OdeSolverMethod<'solver, DiffSl<M, CG>>,
         for<'b> &'b M::V: VectorRef<M::V>,
         for<'b> &'b M: MatrixRef<M>,
     {
@@ -364,7 +368,7 @@ impl OdeSolverType {
         }
         let mut y_sens = match backwards_linear_solver {
             LinearSolverType::Default => backwards_method
-                .solve_adjoint_backwards::<M, <M as DefaultSolver>::LS, S>(
+                .solve_adjoint_backwards::<M, CG, <M as DefaultSolver>::LS, S>(
                     solver.problem(),
                     chk,
                     &g_m,
@@ -372,7 +376,7 @@ impl OdeSolverType {
                     Some(1),
                 )?,
             LinearSolverType::Lu => backwards_method
-                .solve_adjoint_backwards::<M, <M as LuValidator<M>>::LS, S>(
+                .solve_adjoint_backwards::<M, CG, <M as LuValidator<M>>::LS, S>(
                     solver.problem(),
                     chk,
                     &g_m,
@@ -380,7 +384,7 @@ impl OdeSolverType {
                     Some(1),
                 )?,
             LinearSolverType::Klu => backwards_method
-                .solve_adjoint_backwards::<M, <M as KluValidator<M>>::LS, S>(
+                .solve_adjoint_backwards::<M, CG, <M as KluValidator<M>>::LS, S>(
                     solver.problem(),
                     chk,
                     &g_m,
@@ -391,18 +395,19 @@ impl OdeSolverType {
         Ok((y, y_sens.pop().unwrap()))
     }
 
-    pub(crate) fn solve_adjoint_backwards<'solver, M, LS, S>(
+    pub(crate) fn solve_adjoint_backwards<'solver, M, CG, LS, S>(
         &self,
-        problem: &'solver OdeSolverProblem<DiffSl<M, JitModule<M::T>>>,
-        checkpointing: Checkpointing<'solver, DiffSl<M, JitModule<M::T>>, S>,
+        problem: &'solver OdeSolverProblem<DiffSl<M, CG>>,
+        checkpointing: Checkpointing<'solver, DiffSl<M, CG>, S>,
         g_m: &<M::V as DefaultDenseMatrix>::M,
         t_eval: &[M::T],
         nout_override: Option<usize>,
     ) -> Result<Vec<M::V>, DiffsolError>
     where
         M: Matrix<T: Scalar> + DefaultSolver,
+        CG: CodegenModule,
         M::V: VectorHost + DefaultDenseMatrix,
-        S: OdeSolverMethod<'solver, DiffSl<M, JitModule<M::T>>>,
+        S: OdeSolverMethod<'solver, DiffSl<M, CG>>,
         LS: LinearSolver<M>,
         for<'b> &'b M::V: VectorRef<M::V>,
         for<'b> &'b M: MatrixRef<M>,

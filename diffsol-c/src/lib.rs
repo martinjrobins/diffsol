@@ -7,6 +7,67 @@ use dlmalloc::GlobalDlmalloc;
 #[global_allocator]
 static ALLOCATOR: GlobalDlmalloc = GlobalDlmalloc;
 
+#[cfg(not(any(
+    feature = "external",
+    feature = "diffsl-cranelift",
+    feature = "diffsl-llvm"
+)))]
+compile_error!(
+    "diffsol-c requires exactly one backend mode: enable `external-*`, `diffsl-cranelift`, or one `diffsl-llvm*` feature."
+);
+
+#[cfg(all(
+    feature = "external",
+    any(feature = "diffsl-cranelift", feature = "diffsl-llvm")
+))]
+compile_error!("diffsol-c cannot be built with both external and JIT backends enabled.");
+
+#[cfg(all(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+compile_error!("diffsol-c cannot enable both `diffsl-cranelift` and `diffsl-llvm*` backends.");
+
+#[cfg(all(feature = "diffsl-llvm15", feature = "diffsl-llvm16"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm15", feature = "diffsl-llvm17"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm15", feature = "diffsl-llvm18"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm15", feature = "diffsl-llvm19"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm15", feature = "diffsl-llvm20"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm15", feature = "diffsl-llvm21"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm16", feature = "diffsl-llvm17"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm16", feature = "diffsl-llvm18"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm16", feature = "diffsl-llvm19"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm16", feature = "diffsl-llvm20"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm16", feature = "diffsl-llvm21"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm17", feature = "diffsl-llvm18"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm17", feature = "diffsl-llvm19"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm17", feature = "diffsl-llvm20"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm17", feature = "diffsl-llvm21"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm18", feature = "diffsl-llvm19"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm18", feature = "diffsl-llvm20"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm18", feature = "diffsl-llvm21"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm19", feature = "diffsl-llvm20"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm19", feature = "diffsl-llvm21"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+#[cfg(all(feature = "diffsl-llvm20", feature = "diffsl-llvm21"))]
+compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
+
 pub mod c_api_utils;
 pub mod error;
 #[path = "error_c.rs"]
