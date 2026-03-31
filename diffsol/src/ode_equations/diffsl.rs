@@ -1122,8 +1122,11 @@ mod tests {
         };
     }
 
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     generate_tests!(diffsl_logistic_growth);
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     generate_tests!(diffsl_logistic_growth_with_model_index);
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     generate_tests!(diffsl_reset_call_and_jac_mul);
 
     // Sensitivity and reverse-mode (adjoint) require LLVM — Cranelift supports neither.
@@ -1142,6 +1145,7 @@ mod tests {
     ///
     /// Model: reset_i { 2 * y + a, z + a }  with a=3, (y,z)=(3,2), t=0.
     ///   J = d(reset)/d(x) = [[2, 0], [0, 1]]
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     fn diffsl_reset_call_and_jac_mul<
         CG: CodegenModuleJit + CodegenModuleCompile,
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
@@ -1278,6 +1282,7 @@ mod tests {
         y_p.assert_eq_st(&sens_adj_expected, M::T::from_f64(1e-10).unwrap());
     }
 
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     fn diffsl_logistic_growth<
         CG: CodegenModuleJit + CodegenModuleCompile,
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
@@ -1393,6 +1398,7 @@ mod tests {
         }
     }
 
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     fn diffsl_logistic_growth_with_model_index<
         CG: CodegenModuleJit + CodegenModuleCompile,
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
