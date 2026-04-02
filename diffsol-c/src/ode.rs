@@ -379,7 +379,7 @@ mod tests {
     }
 
     fn assert_runtime_dispatch(matrix_type: MatrixType) {
-        let mut ode = make_ode(matrix_type, OdeSolverType::Bdf);
+        let ode = make_ode(matrix_type, OdeSolverType::Bdf);
         assert_eq!(ode.get_matrix_type().unwrap(), matrix_type);
 
         let y0 = ode.y0(vector_host(&[2.0])).unwrap();
@@ -443,7 +443,7 @@ mod tests {
 
     #[test]
     fn bdf_dense_continuation_matches_logistic_solution() {
-        let mut ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
 
@@ -477,7 +477,7 @@ mod tests {
 
     #[test]
     fn bdf_forward_sensitivities_match_logistic_derivative() {
-        let mut ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
 
@@ -504,7 +504,7 @@ mod tests {
 
     #[test]
     fn bdf_sum_squares_adjoint_matches_external_logistic_model() {
-        let mut ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
 
@@ -712,7 +712,7 @@ mod jit_tests {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_forward_sensitivities_match_logistic_derivative_from_diffsl() {
-        let mut ode = make_ode(
+        let ode = make_ode(
             JitBackendType::Llvm,
             MatrixType::NalgebraDense,
             OdeSolverType::Bdf,
@@ -744,7 +744,7 @@ mod jit_tests {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_sum_squares_adjoint_matches_logistic_diffsl_model() {
-        let mut ode = make_ode(
+        let ode = make_ode(
             JitBackendType::Llvm,
             MatrixType::NalgebraDense,
             OdeSolverType::Bdf,
