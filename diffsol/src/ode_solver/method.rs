@@ -776,8 +776,9 @@ mod test {
             exponential_decay_problem_sens, exponential_decay_problem_sens_with_out,
             exponential_decay_problem_with_root,
         },
-        scale, AdjointOdeSolverMethod, DenseMatrix, NalgebraLU, NalgebraVec, OdeEquations,
-        OdeSolverMethod, OdeSolverStopReason, Op, SensitivitiesOdeSolverMethod, Vector, VectorView,
+        scale, AdjointOdeSolverMethod, DenseMatrix, NalgebraLU, NalgebraVec, OdeBuilder,
+        OdeEquations, OdeSolverMethod, OdeSolverStopReason, Op, SensitivitiesOdeSolverMethod,
+        Solution, Vector, VectorView,
     };
 
     #[test]
@@ -974,6 +975,58 @@ mod test {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_solve_soln_multi_stage_matches_piecewise_analytical_solution() {
+        type LS = NalgebraLU<f64>;
+
+        let k = 0.1_f64;
+        let x0 = 1.0_f64;
+        let t_final = 10.0_f64;
+
+        let problem = OdeBuilder::<NalgebraMat<f64>>::new()
+            .p([k])
+            .rhs_implicit(
+                |x, p, _t, y| {
+                    y[0] = -p[0] * x[0];
+                },
+                |_x, p, _t, v, y| {
+                    y[0] = -p[0] * v[0];
+                },
+            )
+            .root(|x, _p, _t, y| y[0] = x[0] - 0.1, 1)
+            .init(|_p, _t, y| y[0] = x0, 1)
+            .build()
+            .unwrap();
+
+        let mut state = problem.bdf_state::<LS>().unwrap();
+        let mut soln = Solution::new(t_final, problem.eqn());
+        let mut stages = 0_usize;
+
+        while !soln.is_complete() {
+            stages += 1;
+            assert!(stages < 32, "solve_soln did not converge in expected stages");
+            let stage_t0 = state.t;
+            let stage_y0 = state.y.clone();
+            let old_len = soln.ts.len();
+            state = problem
+                .bdf_solver::<LS>(state)
+                .unwrap()
+                .solve_soln(&mut soln)
+                .unwrap()
+                .into_state();
+
+            for i in old_len..soln.ts.len() {
+                let t = soln.ts[i];
+                let expected = &stage_y0 * scale(f64::exp(-k * (t - stage_t0)));
+                let got = soln.ys.column(i).into_owned();
+                got.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
+            }
+        }
+
+        assert!(!soln.ts.is_empty());
+        assert!((soln.ts.last().copied().unwrap() - t_final).abs() < 1e-8);
     }
 
     #[test]
