@@ -221,12 +221,13 @@ where
     /// inspect [`Solution::stop_reason`], mutate the equations or state, and then resume the
     /// solve by calling `solve_soln` again with the returned solver state.
     ///
-    /// The behavior depends on `soln.mode`, which is set when the `Solution` is created:
-    /// - [`SolutionMode::Tfinal`] behaves like [`Self::solve`], appending solution values at
-    ///   the solver's adaptive internal timesteps until `t_final` is reached or a root is found.
-    /// - [`SolutionMode::Tevals`] behaves like [`Self::solve_dense`], filling the remaining
-    ///   evaluation points starting at the stored column index and updating the mode with the
-    ///   next column to be written on a subsequent call.
+    /// The behavior depends on how the [`Solution`] was created:
+    /// - If created with [`Solution::new`], this method behaves like [`Self::solve`], appending
+    ///   solution values at the solver's adaptive internal timesteps until the target time is
+    ///   reached or a root is found.
+    /// - If created with [`Solution::new_dense`], this method behaves like [`Self::solve_dense`],
+    ///   filling the remaining evaluation points and updating internal tracking to resume at the
+    ///   next point on a subsequent call.
     ///
     /// On return, `soln.stop_reason` contains the reason this stage stopped. If a root is found,
     /// the solver state is moved back to the root time in the same way as [`Self::solve`] and
