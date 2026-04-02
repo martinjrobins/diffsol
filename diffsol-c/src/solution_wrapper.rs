@@ -1,8 +1,13 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use diffsol::DiffsolError;
+use serde::{Serialize, Serializer, ser::SerializeStruct};
 
-use crate::{error::DiffsolJsError, host_array::HostArray, solution::Solution};
+use crate::{
+    error::DiffsolJsError,
+    host_array::{FromHostArray, HostArray},
+    solution::Solution,
+};
 
 #[derive(Clone)]
 pub struct SolutionWrapper(Arc<Mutex<Option<Box<dyn Solution>>>>);
@@ -61,7 +66,7 @@ impl SolutionWrapper {
         Ok(solution.get_sens())
     }
 
-    pub(crate) fn set_current_state(&self, y: &[f64]) -> Result<(), DiffsolJsError> {
+    pub fn set_current_state(&self, y: &[f64]) -> Result<(), DiffsolJsError> {
         let mut guard = self.guard()?;
         let solution = guard
             .as_mut()
@@ -70,11 +75,43 @@ impl SolutionWrapper {
         Ok(())
     }
 
-    pub(crate) fn get_current_state(&self) -> Result<HostArray, DiffsolJsError> {
+    pub fn get_current_state(&self) -> Result<HostArray, DiffsolJsError> {
         let guard = self.guard()?;
         let solution = guard
             .as_ref()
             .ok_or_else(|| DiffsolError::Other("Solution payload missing".to_string()))?;
         Ok(solution.get_state_y())
+    }
+}
+
+impl Serialize for SolutionWrapper {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let ts_host = self.get_ts().map_err(serde::ser::Error::custom)?;
+        let ys_host = self.get_ys().map_err(serde::ser::Error::custom)?;
+        let current_state_host = self
+            .get_current_state()
+            .map_err(serde::ser::Error::custom)?;
+
+        let ts = Vec::<f64>::from_host_array(ts_host).map_err(serde::ser::Error::custom)?;
+        let ys = Vec::<Vec<f64>>::from_host_array(ys_host).map_err(serde::ser::Error::custom)?;
+        let current_state =
+            Vec::<f64>::from_host_array(current_state_host).map_err(serde::ser::Error::custom)?;
+        let sensitivities = self
+            .get_sens()
+            .map_err(serde::ser::Error::custom)?
+            .into_iter()
+            .map(Vec::<Vec<f64>>::from_host_array)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(serde::ser::Error::custom)?;
+
+        let mut state = serializer.serialize_struct("SolutionWrapper", 4)?;
+        state.serialize_field("ts", &ts)?;
+        state.serialize_field("ys", &ys)?;
+        state.serialize_field("current_state", &current_state)?;
+        state.serialize_field("sensitivities", &sensitivities)?;
+        state.end()
     }
 }

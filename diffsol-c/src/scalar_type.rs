@@ -3,8 +3,11 @@
 #[cfg(feature = "external")]
 use diffsl::execution::external::ExternSymbols;
 use diffsol::DiffSlScalar;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub enum ScalarType {
     F32,
     F64,

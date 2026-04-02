@@ -12,6 +12,8 @@ impl fmt::Display for DiffsolJsError {
     }
 }
 
+impl std::error::Error for DiffsolJsError {}
+
 impl From<DiffsolError> for DiffsolJsError {
     fn from(other: DiffsolError) -> Self {
         DiffsolJsError(other)

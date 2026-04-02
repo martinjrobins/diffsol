@@ -1,6 +1,5 @@
 use std::sync::{Arc, Mutex};
 
-#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 use crate::jit::JitBackendType;
 use crate::{
     error::DiffsolJsError, host_array::HostArray,
@@ -12,6 +11,8 @@ use crate::{
 pub struct Ode {
     pub(crate) solve: Box<dyn Solve>,
     code: String,
+    scalar_type: ScalarType,
+    jit_backend: Option<JitBackendType>,
     linear_solver: LinearSolverType,
     ode_solver: OdeSolverType,
 }
@@ -35,14 +36,18 @@ impl OdeWrapper {
 impl OdeWrapper {
     fn build(
         code: String,
+        scalar_type: ScalarType,
         solve: Box<dyn Solve>,
+        jit_backend: Option<JitBackendType>,
         linear_solver: LinearSolverType,
         ode_solver: OdeSolverType,
     ) -> Result<Self, DiffsolJsError> {
         solve.check(linear_solver)?;
         Ok(OdeWrapper(Arc::new(Mutex::new(Ode {
             code,
+            scalar_type,
             solve,
+            jit_backend,
             linear_solver,
             ode_solver,
         }))))
@@ -50,7 +55,7 @@ impl OdeWrapper {
 
     /// Construct an ODE solver backed by externally-provided DiffSL symbols.
     #[cfg(feature = "external")]
-    pub(crate) fn new_external(
+    pub fn new_external(
         rhs_state_deps: Vec<(usize, usize)>,
         rhs_input_deps: Vec<(usize, usize)>,
         mass_state_deps: Vec<(usize, usize)>,
@@ -66,12 +71,19 @@ impl OdeWrapper {
             matrix_type,
             scalar_type,
         )?;
-        Self::build(String::new(), solve, linear_solver, ode_solver)
+        Self::build(
+            String::new(),
+            scalar_type,
+            solve,
+            None,
+            linear_solver,
+            ode_solver,
+        )
     }
 
     /// Construct an ODE solver by JIT-compiling DiffSL code immediately.
     #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-    pub(crate) fn new_jit(
+    pub fn new_jit(
         code: &str,
         jit_backend: JitBackendType,
         scalar_type: ScalarType,
@@ -80,7 +92,14 @@ impl OdeWrapper {
         ode_solver: OdeSolverType,
     ) -> Result<Self, DiffsolJsError> {
         let solve = crate::solve::solve_factory_jit(code, jit_backend, matrix_type, scalar_type)?;
-        Self::build(code.to_owned(), solve, linear_solver, ode_solver)
+        Self::build(
+            code.to_owned(),
+            scalar_type,
+            solve,
+            Some(jit_backend),
+            linear_solver,
+            ode_solver,
+        )
     }
 
     fn run_solve_call<F>(
@@ -109,48 +128,48 @@ impl OdeWrapper {
     }
 
     /// Matrix type used in the ODE solver. This is fixed after construction.
-    pub(crate) fn get_matrix_type(&self) -> Result<MatrixType, DiffsolJsError> {
+    pub fn get_matrix_type(&self) -> Result<MatrixType, DiffsolJsError> {
         Ok(self.guard()?.solve.matrix_type())
     }
 
     /// Ode solver method, default Bdf (backward differentiation formula).
-    pub(crate) fn get_ode_solver(&self) -> Result<OdeSolverType, DiffsolJsError> {
+    pub fn get_ode_solver(&self) -> Result<OdeSolverType, DiffsolJsError> {
         Ok(self.guard()?.ode_solver)
     }
 
-    pub(crate) fn set_ode_solver(&self, value: OdeSolverType) -> Result<(), DiffsolJsError> {
+    pub fn set_ode_solver(&self, value: OdeSolverType) -> Result<(), DiffsolJsError> {
         self.guard()?.ode_solver = value;
         Ok(())
     }
 
     /// Linear solver type used in the ODE solver. Set to default to use the
     /// solver's default choice, which is typically an LU solver.
-    pub(crate) fn get_linear_solver(&self) -> Result<LinearSolverType, DiffsolJsError> {
+    pub fn get_linear_solver(&self) -> Result<LinearSolverType, DiffsolJsError> {
         Ok(self.guard()?.linear_solver)
     }
 
-    pub(crate) fn set_linear_solver(&self, value: LinearSolverType) -> Result<(), DiffsolJsError> {
+    pub fn set_linear_solver(&self, value: LinearSolverType) -> Result<(), DiffsolJsError> {
         self.guard()?.solve.check(value)?;
         self.guard()?.linear_solver = value;
         Ok(())
     }
 
     /// Relative tolerance for the solver, default 1e-6. Governs the error relative to the solution size.
-    pub(crate) fn get_rtol(&self) -> Result<f64, DiffsolJsError> {
+    pub fn get_rtol(&self) -> Result<f64, DiffsolJsError> {
         Ok(self.guard()?.solve.rtol())
     }
 
-    pub(crate) fn set_rtol(&self, value: f64) -> Result<(), DiffsolJsError> {
+    pub fn set_rtol(&self, value: f64) -> Result<(), DiffsolJsError> {
         self.guard()?.solve.set_rtol(value);
         Ok(())
     }
 
     /// Absolute tolerance for the solver, default 1e-6. Governs the error as the solution goes to zero.
-    pub(crate) fn get_atol(&self) -> Result<f64, DiffsolJsError> {
+    pub fn get_atol(&self) -> Result<f64, DiffsolJsError> {
         Ok(self.guard()?.solve.atol())
     }
 
-    pub(crate) fn set_atol(&self, value: f64) -> Result<(), DiffsolJsError> {
+    pub fn set_atol(&self, value: f64) -> Result<(), DiffsolJsError> {
         self.guard()?.solve.set_atol(value);
         Ok(())
     }
@@ -159,23 +178,31 @@ impl OdeWrapper {
         Ok(self.guard()?.code.clone())
     }
 
-    pub(crate) fn get_ic_options(&self) -> InitialConditionSolverOptions {
+    pub fn get_scalar_type(&self) -> Result<ScalarType, DiffsolJsError> {
+        Ok(self.guard()?.scalar_type)
+    }
+
+    pub fn get_jit_backend(&self) -> Result<Option<JitBackendType>, DiffsolJsError> {
+        Ok(self.guard()?.jit_backend)
+    }
+
+    pub fn get_ic_options(&self) -> InitialConditionSolverOptions {
         InitialConditionSolverOptions::new(self.0.clone())
     }
 
-    pub(crate) fn get_options(&self) -> OdeSolverOptions {
+    pub fn get_options(&self) -> OdeSolverOptions {
         OdeSolverOptions::new(self.0.clone())
     }
 
     /// Get the initial condition vector y0 as a 1D numpy array.
-    pub(crate) fn y0(&mut self, params: HostArray) -> Result<HostArray, DiffsolJsError> {
+    pub fn y0(&self, params: HostArray) -> Result<HostArray, DiffsolJsError> {
         let mut self_guard = self.guard()?;
         self_guard.solve.y0(params.as_slice()?)
     }
 
     /// evaluate the right-hand side function at time `t` and state `y`.
-    pub(crate) fn rhs(
-        &mut self,
+    pub fn rhs(
+        &self,
         params: HostArray,
         t: f64,
         y: HostArray,
@@ -185,8 +212,8 @@ impl OdeWrapper {
     }
 
     /// evaluate the right-hand side Jacobian-vector product `Jv`` at time `t` and state `y`.
-    pub(crate) fn rhs_jac_mul(
-        &mut self,
+    pub fn rhs_jac_mul(
+        &self,
         params: HostArray,
         t: f64,
         y: HostArray,
@@ -216,8 +243,8 @@ impl OdeWrapper {
     /// Example:
     ///     >>> print(ode.solve(np.array([]), 0.5))
     #[allow(clippy::type_complexity)]
-    pub(crate) fn solve(
-        &mut self,
+    pub fn solve(
+        &self,
         params: HostArray,
         final_time: f64,
         solution: Option<SolutionWrapper>,
@@ -244,8 +271,8 @@ impl OdeWrapper {
     /// :type params: numpy.ndarray
     /// :return: 2D array of values at times `t_eval`
     /// :rtype: numpy.ndarray
-    pub(crate) fn solve_dense(
-        &mut self,
+    pub fn solve_dense(
+        &self,
         params: HostArray,
         t_eval: HostArray,
         solution: Option<SolutionWrapper>,
@@ -274,7 +301,7 @@ impl OdeWrapper {
     /// :rtype: (numpy.ndarray, List[numpy.ndarray])
     #[allow(clippy::type_complexity)]
     pub(crate) fn solve_fwd_sens(
-        &mut self,
+        &self,
         params: HostArray,
         t_eval: HostArray,
         solution: Option<SolutionWrapper>,
@@ -295,7 +322,7 @@ impl OdeWrapper {
     /// for each parameter.
     #[allow(clippy::type_complexity)]
     pub(crate) fn solve_sum_squares_adj(
-        &mut self,
+        &self,
         params: HostArray,
         data: HostArray,
         t_eval: HostArray,
@@ -352,7 +379,7 @@ mod tests {
     }
 
     fn assert_runtime_dispatch(matrix_type: MatrixType) {
-        let mut ode = make_ode(matrix_type, OdeSolverType::Bdf);
+        let ode = make_ode(matrix_type, OdeSolverType::Bdf);
         assert_eq!(ode.get_matrix_type().unwrap(), matrix_type);
 
         let y0 = ode.y0(vector_host(&[2.0])).unwrap();
@@ -416,7 +443,7 @@ mod tests {
 
     #[test]
     fn bdf_dense_continuation_matches_logistic_solution() {
-        let mut ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
 
@@ -450,7 +477,7 @@ mod tests {
 
     #[test]
     fn bdf_forward_sensitivities_match_logistic_derivative() {
-        let mut ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
 
@@ -477,7 +504,7 @@ mod tests {
 
     #[test]
     fn bdf_sum_squares_adjoint_matches_external_logistic_model() {
-        let mut ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
 
@@ -539,7 +566,7 @@ mod jit_tests {
     }
 
     fn assert_runtime_dispatch(jit_backend: JitBackendType, matrix_type: MatrixType) {
-        let mut ode = make_ode(jit_backend, matrix_type, OdeSolverType::Bdf);
+        let ode = make_ode(jit_backend, matrix_type, OdeSolverType::Bdf);
         assert_eq!(ode.get_matrix_type().unwrap(), matrix_type);
         assert_eq!(ode.get_code().unwrap(), logistic_diffsl_code());
 
@@ -624,7 +651,7 @@ mod jit_tests {
     #[test]
     fn bdf_dense_solution_matches_logistic_diffsl_model() {
         for jit_backend in available_jit_backends() {
-            let mut ode = make_ode(jit_backend, MatrixType::NalgebraDense, OdeSolverType::Bdf);
+            let ode = make_ode(jit_backend, MatrixType::NalgebraDense, OdeSolverType::Bdf);
             ode.set_rtol(1e-8).unwrap();
             ode.set_atol(1e-8).unwrap();
 
@@ -647,7 +674,7 @@ mod jit_tests {
         for jit_backend in available_jit_backends() {
             let x0 = LOGISTIC_X0;
             let r = 2.0;
-            let mut ode = make_ode(jit_backend, MatrixType::NalgebraDense, OdeSolverType::Bdf);
+            let ode = make_ode(jit_backend, MatrixType::NalgebraDense, OdeSolverType::Bdf);
             ode.set_rtol(1e-8).unwrap();
             ode.set_atol(1e-8).unwrap();
 
@@ -685,7 +712,7 @@ mod jit_tests {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_forward_sensitivities_match_logistic_derivative_from_diffsl() {
-        let mut ode = make_ode(
+        let ode = make_ode(
             JitBackendType::Llvm,
             MatrixType::NalgebraDense,
             OdeSolverType::Bdf,
@@ -717,7 +744,7 @@ mod jit_tests {
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn bdf_sum_squares_adjoint_matches_logistic_diffsl_model() {
-        let mut ode = make_ode(
+        let ode = make_ode(
             JitBackendType::Llvm,
             MatrixType::NalgebraDense,
             OdeSolverType::Bdf,
