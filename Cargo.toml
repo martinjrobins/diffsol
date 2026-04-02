@@ -1,6 +1,6 @@
 [workspace]
-members = ["diffsol", "examples/*"]
-default-members = ["diffsol"]
+members = ["diffsol", "diffsol-c", "examples/*"]
+default-members = ["diffsol", "diffsol-c"]
 exclude = ["book"]
 resolver = "2"
 
@@ -21,6 +21,7 @@ faer = { version = "0.23.2", default-features = false, features = [
 ] }
 faer-traits = "0.23.2"
 cudarc = { version = "0.19.3", default-features = false }
+diffsl = { version = "0.10.0", features = ["rayon"] }
 
 plotly = { version = "0.13.5" }
 argmin = { version = "0.11.0" }
