@@ -20,6 +20,7 @@ pub struct Ode {
 unsafe impl Send for Ode {}
 unsafe impl Sync for Ode {}
 
+#[derive(Clone)]
 pub struct OdeWrapper(Arc<Mutex<Ode>>);
 type SolveCallResult = Result<Box<dyn Solution>, (DiffsolJsError, Option<Box<dyn Solution>>)>;
 
@@ -300,7 +301,7 @@ impl OdeWrapper {
     /// :return: 2D array of values at times `t_eval` and a list of 2D arrays of sensitivities at the same timepoints
     /// :rtype: (numpy.ndarray, List[numpy.ndarray])
     #[allow(clippy::type_complexity)]
-    pub(crate) fn solve_fwd_sens(
+    pub fn solve_fwd_sens(
         &self,
         params: HostArray,
         t_eval: HostArray,
