@@ -1,6 +1,6 @@
 [workspace]
-members = ["diffsol", "diffsol-c", "diffsol-mcp", "examples/*"]
-default-members = ["diffsol", "diffsol-c", "diffsol-mcp"]
+members = ["diffsol", "diffsol-c", "examples/*"]
+default-members = ["diffsol", "diffsol-c"]
 exclude = ["book"]
 resolver = "2"
 
