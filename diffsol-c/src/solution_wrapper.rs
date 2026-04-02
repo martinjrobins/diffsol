@@ -42,7 +42,7 @@ impl SolutionWrapper {
         Ok(())
     }
 
-    pub(crate) fn get_ys(&self) -> Result<HostArray, DiffsolJsError> {
+    pub fn get_ys(&self) -> Result<HostArray, DiffsolJsError> {
         let guard = self.guard()?;
         let solution = guard
             .as_ref()
@@ -50,7 +50,7 @@ impl SolutionWrapper {
         Ok(solution.get_ys())
     }
 
-    pub(crate) fn get_ts(&self) -> Result<HostArray, DiffsolJsError> {
+    pub fn get_ts(&self) -> Result<HostArray, DiffsolJsError> {
         let guard = self.guard()?;
         let solution = guard
             .as_ref()
@@ -58,7 +58,7 @@ impl SolutionWrapper {
         Ok(solution.get_ts())
     }
 
-    pub(crate) fn get_sens(&self) -> Result<Vec<HostArray>, DiffsolJsError> {
+    pub fn get_sens(&self) -> Result<Vec<HostArray>, DiffsolJsError> {
         let guard = self.guard()?;
         let solution = guard
             .as_ref()
