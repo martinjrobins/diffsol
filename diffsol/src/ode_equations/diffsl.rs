@@ -1059,6 +1059,13 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> OdeEquations for DiffSl<
         self.set_params_and_model(p, self.context.model_index);
     }
 
+    fn set_model_index(&mut self, m: usize) {
+        self.context.model_index = m as u32;
+        let mut p = M::V::zeros(self.nparams(), self.context.ctx.clone());
+        self.get_params(&mut p);
+        self.set_params_and_model(&p, self.context.model_index);
+    }
+
     fn get_params(&self, p: &mut Self::V) {
         self.context
             .compiler
@@ -1437,13 +1444,13 @@ mod tests {
             ctx.vector_from_vec(vec![M::T::from_f64(1.0).unwrap() * one_tenth]);
         rhs_model_0.assert_eq_st(&rhs_model_0_expected, tol);
 
-        eqn.set_params_and_model(&p, 1);
+        eqn.set_model_index(1);
         let rhs_model_1 = eqn.rhs().call(&y, t);
         let rhs_model_1_expected =
             ctx.vector_from_vec(vec![M::T::from_f64(2.0).unwrap() * one_tenth]);
         rhs_model_1.assert_eq_st(&rhs_model_1_expected, tol);
 
-        eqn.set_params_and_model(&p, 2);
+        eqn.set_model_index(2);
         let rhs_model_2 = eqn.rhs().call(&y, t);
         let rhs_model_2_expected =
             ctx.vector_from_vec(vec![M::T::from_f64(4.0).unwrap() * one_tenth]);

@@ -13,6 +13,7 @@ pub mod sde;
 pub mod sdirk;
 pub mod sdirk_state;
 pub mod sensitivities;
+pub mod solution;
 pub mod state;
 pub mod tableau;
 

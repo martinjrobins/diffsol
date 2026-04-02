@@ -328,6 +328,7 @@ pub use ode_solver::{
     sdirk::Sdirk,
     sdirk_state::RkState,
     sensitivities::SensitivitiesOdeSolverMethod,
+    solution::Solution,
     state::OdeSolverState,
     tableau::Tableau,
 };

@@ -606,6 +606,9 @@ where
     fn set_params(&mut self, p: &Self::V) {
         self.eqn.set_params(p);
     }
+    fn set_model_index(&mut self, m: usize) {
+        self.eqn.set_model_index(m);
+    }
     fn get_params(&self, p: &mut Self::V) {
         self.eqn.get_params(p);
     }
