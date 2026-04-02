@@ -211,7 +211,8 @@ mod test {
 
     #[test]
     fn test_solution_new_with_out_eqn_sets_complete() {
-        let (problem, _soln) = exponential_decay_problem_with_root::<NalgebraMat<f64>>(false, false);
+        let (problem, _soln) =
+            exponential_decay_problem_with_root::<NalgebraMat<f64>>(false, false);
         let t_final = 2.0_f64;
         let k = 0.1_f64;
         let mut state = problem.bdf_state::<NalgebraLU<f64>>().unwrap();
@@ -234,7 +235,8 @@ mod test {
 
     #[test]
     fn test_solution_new_dense_with_out_eqn_sets_complete() {
-        let (problem, _soln) = exponential_decay_problem_with_root::<NalgebraMat<f64>>(false, false);
+        let (problem, _soln) =
+            exponential_decay_problem_with_root::<NalgebraMat<f64>>(false, false);
         let k = 0.1_f64;
         let t_eval = vec![0.0, 0.5, 1.0, 1.5, 2.0];
         let mut state = problem.bdf_state::<NalgebraLU<f64>>().unwrap();

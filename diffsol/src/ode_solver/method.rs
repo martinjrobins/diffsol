@@ -1006,7 +1006,10 @@ mod test {
 
         while !soln.is_complete() {
             stages += 1;
-            assert!(stages < 32, "solve_soln did not converge in expected stages");
+            assert!(
+                stages < 32,
+                "solve_soln did not converge in expected stages"
+            );
             let stage_t0 = state.t;
             let stage_y0 = state.y.clone();
             let old_len = soln.ts.len();
