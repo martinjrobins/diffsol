@@ -28,9 +28,11 @@ pub(crate) const INITIAL_NCOLS: usize = 10;
 /// ```
 /// use diffsol::{
 ///     OdeBuilder, OdeSolverMethod, Solution, NalgebraLU, NalgebraMat,
+///     NalgebraVec,
 /// };
 ///
 /// type M = NalgebraMat<f64>;
+/// type V = NalgebraVec<f64>;
 /// type LS = NalgebraLU<f64>;
 ///
 /// let problem = OdeBuilder::<M>::new()
@@ -50,7 +52,7 @@ pub(crate) const INITIAL_NCOLS: usize = 10;
 ///     .unwrap();
 ///
 /// let mut state = problem.bdf_state::<LS>().unwrap();
-/// let mut soln = Solution::<M::V>::new(1.0_f64);
+/// let mut soln = Solution::<V>::new(1.0_f64);
 ///
 /// while !soln.is_complete() {
 ///     state = problem
