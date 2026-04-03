@@ -1,7 +1,10 @@
 use crate::{
-    error::DiffsolError, error::OdeSolverError, ode_solver_error, AugmentedOdeSolverMethod,
-    Context, DefaultDenseMatrix, DenseMatrix, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens,
-    OdeEquationsImplicitSens, OdeSolverStopReason, Op, SensEquations, Vector, VectorViewMut,
+    error::DiffsolError,
+    error::OdeSolverError,
+    ode_solver::solution::{Solution, SolutionMode},
+    ode_solver_error, AugmentedOdeSolverMethod, Context, DefaultDenseMatrix, DenseMatrix,
+    MatrixCommon, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens, OdeEquationsImplicitSens,
+    OdeSolverStopReason, Op, SensEquations, Vector, VectorViewMut,
 };
 use num_traits::{One, Zero};
 use std::ops::AddAssign;
@@ -13,6 +16,77 @@ where
 {
     /// Apply the equations' reset function and propagate sensitivities through its Jacobian.
     fn reset_with_sens(&mut self) -> Result<(), DiffsolError>;
+
+    /// Continue solving ODE and forward sensitivities into an existing dense [`Solution`].
+    ///
+    /// This method requires a [`Solution`] created with [`Solution::new_dense`]. It reuses the
+    /// solution's storage so staged integrations can stop on roots, apply resets or parameter
+    /// changes, and resume without reallocating the dense output buffers.
+    fn solve_soln_sensitivities(mut self, soln: &mut Solution<Eqn::V>) -> Result<Self, DiffsolError>
+    where
+        Eqn::V: DefaultDenseMatrix,
+        Self: Sized,
+    {
+        if self.problem().integrate_out {
+            return Err(ode_solver_error!(
+                Other,
+                "Cannot integrate out when solving for sensitivities"
+            ));
+        }
+
+        let start_col = match soln.mode {
+            SolutionMode::Tevals(start_col) => start_col,
+            SolutionMode::Tfinal(_) => {
+                return Err(ode_solver_error!(
+                    Other,
+                    "solve_soln_sensitivities requires Solution::new_dense"
+                ));
+            }
+        };
+
+        let ctx = self.problem().context().clone();
+        let nstates = self.problem().eqn.rhs().nstates();
+        let nparams = self.problem().eqn.rhs().nparams();
+
+        if soln.y_sens.len() != nparams {
+            soln.y_sens =
+                vec![ctx.dense_mat_zeros::<Eqn::V>(soln.ys.nrows(), soln.ys.ncols()); nparams];
+        }
+        if soln.tmp_nstates.len() != nstates {
+            soln.tmp_nstates = Eqn::V::zeros(nstates, ctx.clone());
+        }
+        if soln.tmp_nsens.len() != nparams {
+            soln.tmp_nsens = vec![Eqn::V::zeros(nstates, ctx.clone()); nparams];
+        }
+        let nout = self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0);
+        if soln.tmp_nout.len() != nout {
+            soln.tmp_nout = Eqn::V::zeros(nout, ctx.clone());
+        }
+        let nout_params = self
+            .problem()
+            .eqn
+            .out()
+            .map(|out| out.nparams())
+            .unwrap_or(0);
+        if soln.tmp_nparams.len() != nout_params {
+            soln.tmp_nparams = Eqn::V::zeros(nout_params, ctx);
+        }
+
+        let (stop_reason, col) = solve_dense_sensitivities(
+            &mut soln.ys,
+            &mut soln.y_sens,
+            &soln.ts,
+            &mut soln.tmp_nout,
+            &mut soln.tmp_nparams,
+            &mut soln.tmp_nstates,
+            &mut soln.tmp_nsens,
+            &mut self,
+            start_col,
+        )?;
+        soln.stop_reason = Some(stop_reason);
+        soln.mode = SolutionMode::Tevals(col);
+        Ok(self)
+    }
 
     /// Solve the ODE and the forward sensitivity equations from the current time to `t_eval[t_eval.len()-1]`,
     /// evaluating at specified times.
@@ -65,37 +139,31 @@ where
                 "Cannot integrate out when solving for sensitivities"
             ));
         }
-        let (mut tmp_nout, mut tmp_nparms, nrows) = if let Some(out) = self.problem().eqn.out() {
-            (
-                Some(Eqn::V::zeros(out.nout(), self.problem().context().clone())),
-                Some(Eqn::V::zeros(
-                    out.nparams(),
-                    self.problem().context().clone(),
-                )),
-                out.nout(),
-            )
+        let nrows = if let Some(out) = self.problem().eqn.out() {
+            out.nout()
         } else {
-            (None, None, self.problem().eqn.rhs().nout())
+            self.problem().eqn.rhs().nout()
         };
-
         let nstates = self.problem().eqn.rhs().nstates();
         let nparams = self.problem().eqn.rhs().nparams();
         let ctx = self.problem().context().clone();
-        let eqn_out = self.problem().eqn.out();
 
-        let mut y = Eqn::V::zeros(nstates, ctx.clone());
-        let mut s = vec![Eqn::V::zeros(nstates, ctx.clone()); nparams];
-
-        let mut ret = self
-            .problem()
-            .context()
-            .dense_mat_zeros::<Eqn::V>(nrows, t_eval.len());
-        let mut ret_sens = vec![
+        let mut ret = ctx.dense_mat_zeros::<Eqn::V>(nrows, t_eval.len());
+        let mut ret_sens = vec![ctx.dense_mat_zeros::<Eqn::V>(nrows, t_eval.len()); nparams];
+        let mut tmp_nout = Eqn::V::zeros(
+            self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0),
+            ctx.clone(),
+        );
+        let mut tmp_nparams = Eqn::V::zeros(
             self.problem()
-                .context()
-                .dense_mat_zeros::<Eqn::V>(nrows, t_eval.len());
-            nparams
-        ];
+                .eqn
+                .out()
+                .map(|out| out.nparams())
+                .unwrap_or(0),
+            ctx.clone(),
+        );
+        let mut tmp_nstates = Eqn::V::zeros(nstates, ctx.clone());
+        let mut tmp_nsens = vec![Eqn::V::zeros(nstates, ctx); nparams];
 
         // check t_eval is increasing and all values are >= the current time
         let t0 = self.state().t;
@@ -103,95 +171,137 @@ where
             return Err(ode_solver_error!(InvalidTEval));
         }
 
-        let t_final = *t_eval.last().unwrap();
-        self.set_stop_time(t_final)?;
+        let (stop_reason, col) = solve_dense_sensitivities(
+            &mut ret,
+            &mut ret_sens,
+            t_eval,
+            &mut tmp_nout,
+            &mut tmp_nparams,
+            &mut tmp_nstates,
+            &mut tmp_nsens,
+            self,
+            0,
+        )?;
 
-        let mut col = 0usize;
-        let mut t_i = 0usize;
-
-        // Write one column of (y, s) output at time t into ret/ret_sens[col].
-        // ret, ret_sens, and col are passed explicitly so they remain directly accessible
-        // outside the closure (avoiding borrow conflicts with resize/return).
-        let mut write_col = |y: &Eqn::V,
-                             s: &[Eqn::V],
-                             t: Eqn::T,
-                             col: usize,
-                             ret: &mut <Eqn::V as DefaultDenseMatrix>::M,
-                             ret_sens: &mut [<Eqn::V as DefaultDenseMatrix>::M]|
-         -> Result<(), DiffsolError> {
-            if let Some(out) = eqn_out.as_ref() {
-                let tmp_nout = tmp_nout.as_mut().unwrap();
-                let tmp_nparams = tmp_nparms.as_mut().unwrap();
-                out.call_inplace(y, t, tmp_nout);
-                ret.column_mut(col).copy_from(&*tmp_nout);
-                for (j, s_j) in s.iter().enumerate() {
-                    let mut col_v = ret_sens[j].column_mut(col);
-                    tmp_nparams.set_index(j, Eqn::T::one());
-                    out.jac_mul_inplace(y, t, s_j, tmp_nout);
-                    col_v.copy_from(&*tmp_nout);
-                    out.sens_mul_inplace(y, t, tmp_nparams, tmp_nout);
-                    col_v.add_assign(&*tmp_nout);
-                    tmp_nparams.set_index(j, Eqn::T::zero());
-                }
-            } else {
-                ret.column_mut(col).copy_from(y);
-                for (j, s_j) in s.iter().enumerate() {
-                    ret_sens[j].column_mut(col).copy_from(s_j);
-                }
-            }
-            Ok(())
-        };
-
-        while t_i < t_eval.len() {
-            let t_target = t_eval[t_i];
-
-            while self.state().t < t_target {
-                match self.step()? {
-                    OdeSolverStopReason::InternalTimestep => {}
-                    OdeSolverStopReason::TstopReached => break,
-                    OdeSolverStopReason::RootFound(t_root, root_idx) => {
-                        // Write any t_eval points strictly before t_root.
-                        while t_i < t_eval.len() && t_eval[t_i] < t_root {
-                            self.interpolate_inplace(t_eval[t_i], &mut y)?;
-                            self.interpolate_sens_inplace(t_eval[t_i], &mut s)?;
-                            write_col(&y, &s, t_eval[t_i], col, &mut ret, &mut ret_sens)?;
-                            col += 1;
-                            t_i += 1;
-                        }
-
-                        self.state_mut_back(t_root)?;
-
-                        // Write root state and return early.
-                        y.copy_from(self.state().y);
-                        for (j, s_j) in s.iter_mut().enumerate() {
-                            s_j.copy_from(&self.state().s[j]);
-                        }
-                        write_col(&y, &s, t_root, col, &mut ret, &mut ret_sens)?;
-                        col += 1;
-                        ret.resize_cols(col);
-                        for rs in ret_sens.iter_mut() {
-                            rs.resize_cols(col);
-                        }
-                        return Ok((
-                            ret,
-                            ret_sens,
-                            OdeSolverStopReason::RootFound(t_root, root_idx),
-                        ));
+        if let OdeSolverStopReason::RootFound(_, _) = stop_reason {
+            if col < t_eval.len() {
+                let t = self.state().t;
+                dense_write_out_sensitivities(
+                    self,
+                    &mut ret,
+                    &mut ret_sens,
+                    t,
+                    col,
+                    &mut tmp_nout,
+                    &mut tmp_nparams,
+                    &mut tmp_nstates,
+                    &mut tmp_nsens,
+                )?;
+                if col + 1 < ret.ncols() {
+                    ret.resize_cols(col + 1);
+                    for rs in &mut ret_sens {
+                        rs.resize_cols(col + 1);
                     }
                 }
             }
-
-            self.interpolate_inplace(t_target, &mut y)?;
-            self.interpolate_sens_inplace(t_target, &mut s)?;
-            write_col(&y, &s, t_target, col, &mut ret, &mut ret_sens)?;
-            col += 1;
-            t_i += 1;
         }
-
-        ret.resize_cols(col);
-        for rs in ret_sens.iter_mut() {
-            rs.resize_cols(col);
-        }
-        Ok((ret, ret_sens, OdeSolverStopReason::TstopReached))
+        Ok((ret, ret_sens, stop_reason))
     }
+}
+
+fn solve_dense_sensitivities<'a, Eqn, S>(
+    ret: &mut <Eqn::V as DefaultDenseMatrix>::M,
+    ret_sens: &mut [<Eqn::V as DefaultDenseMatrix>::M],
+    t_eval: &[Eqn::T],
+    tmp_nout: &mut Eqn::V,
+    tmp_nparams: &mut Eqn::V,
+    tmp_nstates: &mut Eqn::V,
+    tmp_nsens: &mut [Eqn::V],
+    s: &mut S,
+    start_col: usize,
+) -> Result<(OdeSolverStopReason<Eqn::T>, usize), DiffsolError>
+where
+    Eqn: OdeEquationsImplicitSens + 'a,
+    Eqn::V: DefaultDenseMatrix,
+    S: SensitivitiesOdeSolverMethod<'a, Eqn>,
+{
+    s.set_stop_time(t_eval[t_eval.len() - 1])?;
+    let mut stop_reason: OdeSolverStopReason<Eqn::T>;
+    let mut col = start_col;
+    loop {
+        stop_reason = s.step()?;
+        let t_current = if let OdeSolverStopReason::RootFound(t, _) = stop_reason {
+            t
+        } else {
+            s.state().t
+        };
+        while col < t_eval.len() && t_eval[col] <= t_current {
+            dense_write_out_sensitivities(
+                s,
+                ret,
+                ret_sens,
+                t_eval[col],
+                col,
+                tmp_nout,
+                tmp_nparams,
+                tmp_nstates,
+                tmp_nsens,
+            )?;
+            col += 1;
+        }
+        match stop_reason {
+            OdeSolverStopReason::InternalTimestep => {}
+            OdeSolverStopReason::TstopReached => {
+                assert!(
+                    col == t_eval.len(),
+                    "Solver reached stop time before consuming all t_eval points, this should not happen"
+                );
+                break;
+            }
+            OdeSolverStopReason::RootFound(t_root, _) => {
+                s.state_mut_back(t_root)?;
+                break;
+            }
+        }
+    }
+    Ok((stop_reason, col))
+}
+
+fn dense_write_out_sensitivities<'a, Eqn, S>(
+    s: &S,
+    ret: &mut <Eqn::V as DefaultDenseMatrix>::M,
+    ret_sens: &mut [<Eqn::V as DefaultDenseMatrix>::M],
+    t: Eqn::T,
+    col: usize,
+    tmp_nout: &mut Eqn::V,
+    tmp_nparams: &mut Eqn::V,
+    tmp_nstates: &mut Eqn::V,
+    tmp_nsens: &mut [Eqn::V],
+) -> Result<(), DiffsolError>
+where
+    Eqn: OdeEquationsImplicitSens + 'a,
+    Eqn::V: DefaultDenseMatrix,
+    S: SensitivitiesOdeSolverMethod<'a, Eqn>,
+{
+    s.interpolate_inplace(t, tmp_nstates)?;
+    s.interpolate_sens_inplace(t, tmp_nsens)?;
+    if let Some(out) = s.problem().eqn.out() {
+        out.call_inplace(tmp_nstates, t, tmp_nout);
+        ret.column_mut(col).copy_from(tmp_nout);
+        for (j, s_j) in tmp_nsens.iter().enumerate() {
+            let mut col_v = ret_sens[j].column_mut(col);
+            tmp_nparams.set_index(j, Eqn::T::one());
+            out.jac_mul_inplace(tmp_nstates, t, s_j, tmp_nout);
+            col_v.copy_from(&*tmp_nout);
+            out.sens_mul_inplace(tmp_nstates, t, tmp_nparams, tmp_nout);
+            col_v.add_assign(&*tmp_nout);
+            tmp_nparams.set_index(j, Eqn::T::zero());
+        }
+    } else {
+        ret.column_mut(col).copy_from(tmp_nstates);
+        for (j, s_j) in tmp_nsens.iter().enumerate() {
+            ret_sens[j].column_mut(col).copy_from(s_j);
+        }
+    }
+    Ok(())
 }

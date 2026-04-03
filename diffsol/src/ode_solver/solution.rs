@@ -68,7 +68,9 @@ pub struct Solution<V: DefaultDenseMatrix> {
     pub y_sens: Vec<<V as DefaultDenseMatrix>::M>,
     pub stop_reason: Option<OdeSolverStopReason<V::T>>,
     pub(crate) tmp_nout: V,
+    pub(crate) tmp_nparams: V,
     pub(crate) tmp_nstates: V,
+    pub(crate) tmp_nsens: Vec<V>,
     pub(crate) mode: SolutionMode<V::T>,
 }
 
@@ -100,7 +102,9 @@ impl<V: DefaultDenseMatrix> Solution<V> {
             y_sens: Vec::new(),
             stop_reason: None,
             tmp_nout,
+            tmp_nparams: V::zeros(0, eq.context().clone()),
             tmp_nstates,
+            tmp_nsens: Vec::new(),
             mode: SolutionMode::Tfinal(t_final),
         }
     }
@@ -132,7 +136,9 @@ impl<V: DefaultDenseMatrix> Solution<V> {
             y_sens: Vec::new(),
             stop_reason: None,
             tmp_nout,
+            tmp_nparams: V::zeros(0, eq.context().clone()),
             tmp_nstates,
+            tmp_nsens: Vec::new(),
             mode: SolutionMode::Tevals(0),
         })
     }
