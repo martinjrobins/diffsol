@@ -440,6 +440,40 @@ pub unsafe extern "C" fn diffsol_ode_solve(
     }
 }
 
+/// Solve a hybrid ODE up to a final time, automatically applying resets after roots.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library. `params_ptr`
+/// must point to `params_len` readable `f64` values unless `params_len == 0`.
+/// `out_solution` must be a valid, writable pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_solve_hybrid(
+    ode: *mut OdeWrapper,
+    params_ptr: *const f64,
+    params_len: usize,
+    final_time: f64,
+    out_solution: *mut *mut SolutionWrapper,
+) -> i32 {
+    if ode.is_null() || out_solution.is_null() || !valid_f64_ptr(params_ptr, params_len) {
+        c_invalid_arg!("invalid arguments to diffsol_ode_solve_hybrid");
+        return DIFFSOL_BAD_ARG;
+    }
+    let params = HostArray::new_vector(params_ptr as *mut u8, params_len, ScalarType::F64);
+    let ode = unsafe { &mut *ode };
+    match ode.solve_hybrid(params, final_time) {
+        Ok(new_solution) => {
+            unsafe {
+                *out_solution = Box::into_raw(Box::new(new_solution));
+            }
+            DIFFSOL_OK
+        }
+        Err(err) => {
+            c_error!(&format!("{}", err));
+            DIFFSOL_ERR
+        }
+    }
+}
+
 /// Solve an ODE and sample the solution at requested times.
 ///
 /// # Safety
@@ -480,6 +514,46 @@ pub unsafe extern "C" fn diffsol_ode_solve_dense(
     }
 }
 
+/// Solve a hybrid ODE and sample the solution at requested times.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library. `params_ptr`
+/// and `t_eval_ptr` must point to readable `f64` buffers of the specified
+/// lengths, unless the corresponding length is zero. `out_solution` must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_solve_hybrid_dense(
+    ode: *mut OdeWrapper,
+    params_ptr: *const f64,
+    params_len: usize,
+    t_eval_ptr: *const f64,
+    t_eval_len: usize,
+    out_solution: *mut *mut SolutionWrapper,
+) -> i32 {
+    if ode.is_null()
+        || out_solution.is_null()
+        || !valid_f64_ptr(params_ptr, params_len)
+        || !valid_f64_ptr(t_eval_ptr, t_eval_len)
+    {
+        c_invalid_arg!("invalid arguments to diffsol_ode_solve_hybrid_dense");
+        return DIFFSOL_BAD_ARG;
+    }
+    let params = HostArray::new_vector(params_ptr as *mut u8, params_len, ScalarType::F64);
+    let t_eval = HostArray::new_vector(t_eval_ptr as *mut u8, t_eval_len, ScalarType::F64);
+    let ode = unsafe { &mut *ode };
+    match ode.solve_hybrid_dense(params, t_eval) {
+        Ok(new_solution) => {
+            unsafe {
+                *out_solution = Box::into_raw(Box::new(new_solution));
+            }
+            DIFFSOL_OK
+        }
+        Err(err) => {
+            c_error!(&format!("{}", err));
+            DIFFSOL_ERR
+        }
+    }
+}
+
 /// Solve an ODE and sample forward sensitivities at requested times.
 ///
 /// # Safety
@@ -507,6 +581,46 @@ pub unsafe extern "C" fn diffsol_ode_solve_fwd_sens(
     let t_eval = HostArray::new_vector(t_eval_ptr as *mut u8, t_eval_len, ScalarType::F64);
     let ode = unsafe { &mut *ode };
     match ode.solve_fwd_sens(params, t_eval) {
+        Ok(new_solution) => {
+            unsafe {
+                *out_solution = Box::into_raw(Box::new(new_solution));
+            }
+            DIFFSOL_OK
+        }
+        Err(err) => {
+            c_error!(&format!("{}", err));
+            DIFFSOL_ERR
+        }
+    }
+}
+
+/// Solve a hybrid ODE with forward sensitivities at requested times.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library. `params_ptr`
+/// and `t_eval_ptr` must point to readable `f64` buffers of the specified
+/// lengths, unless the corresponding length is zero. `out_solution` must be writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_solve_hybrid_fwd_sens(
+    ode: *mut OdeWrapper,
+    params_ptr: *const f64,
+    params_len: usize,
+    t_eval_ptr: *const f64,
+    t_eval_len: usize,
+    out_solution: *mut *mut SolutionWrapper,
+) -> i32 {
+    if ode.is_null()
+        || out_solution.is_null()
+        || !valid_f64_ptr(params_ptr, params_len)
+        || !valid_f64_ptr(t_eval_ptr, t_eval_len)
+    {
+        c_invalid_arg!("invalid arguments to diffsol_ode_solve_hybrid_fwd_sens");
+        return DIFFSOL_BAD_ARG;
+    }
+    let params = HostArray::new_vector(params_ptr as *mut u8, params_len, ScalarType::F64);
+    let t_eval = HostArray::new_vector(t_eval_ptr as *mut u8, t_eval_len, ScalarType::F64);
+    let ode = unsafe { &mut *ode };
+    match ode.solve_hybrid_fwd_sens(params, t_eval) {
         Ok(new_solution) => {
             unsafe {
                 *out_solution = Box::into_raw(Box::new(new_solution));
@@ -1169,6 +1283,63 @@ mod tests {
                 diffsol_ode_set_ode_solver(ode, ode_solver_to_i32(OdeSolverType::Bdf)),
                 DIFFSOL_OK
             );
+
+            let hybrid_t_eval = [0.5f64, 1.0, 1.25, 1.5, 2.0];
+            let hybrid_ode = make_ode_ptr(
+                matrix_type_to_i32(MatrixType::NalgebraDense),
+                linear_solver_to_i32(LinearSolverType::Default),
+                ode_solver_to_i32(OdeSolverType::Bdf),
+            );
+            assert!(!hybrid_ode.is_null());
+            let mut hybrid_solution_ptr: *mut SolutionWrapper = ptr::null_mut();
+            assert_eq!(
+                diffsol_ode_solve_hybrid_dense(
+                    hybrid_ode,
+                    params.as_ptr(),
+                    params.len(),
+                    hybrid_t_eval.as_ptr(),
+                    hybrid_t_eval.len(),
+                    &mut hybrid_solution_ptr,
+                ),
+                DIFFSOL_OK
+            );
+            let mut hybrid_ys_ptr = ptr::null_mut();
+            let mut hybrid_ts_ptr = ptr::null_mut();
+            assert_eq!(
+                diffsol_solution_wrapper_get_ys(hybrid_solution_ptr, &mut hybrid_ys_ptr),
+                DIFFSOL_OK
+            );
+            assert_eq!(
+                diffsol_solution_wrapper_get_ts(hybrid_solution_ptr, &mut hybrid_ts_ptr),
+                DIFFSOL_OK
+            );
+            let (hybrid_rows, hybrid_cols, hybrid_ys) = ffi_read_host_array_matrix(hybrid_ys_ptr);
+            let hybrid_ts = ffi_read_host_array_vector(hybrid_ts_ptr);
+            assert_eq!(hybrid_rows, 1);
+            assert_eq!(hybrid_cols, hybrid_t_eval.len());
+            assert_eq!(hybrid_ts, hybrid_t_eval);
+            assert_close(
+                hybrid_ys[0],
+                logistic_state(LOGISTIC_X0, 2.0, hybrid_t_eval[0]),
+                5e-4,
+                "ffi hybrid dense pre-root value",
+            );
+            assert_close(
+                hybrid_ys[1],
+                logistic_state(LOGISTIC_X0, 2.0, hybrid_t_eval[1]),
+                5e-4,
+                "ffi hybrid dense near-root value",
+            );
+            for (i, value) in hybrid_ys.iter().enumerate().skip(2) {
+                assert_close(
+                    *value,
+                    1.0,
+                    5e-4,
+                    &format!("ffi hybrid dense post-root value[{i}]"),
+                );
+            }
+            ffi_free_solution(hybrid_solution_ptr);
+            diffsol_ode_free(hybrid_ode);
 
             let analysis_ode = make_ode_ptr(
                 matrix_type_to_i32(MatrixType::NalgebraDense),
