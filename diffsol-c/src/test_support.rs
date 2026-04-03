@@ -65,6 +65,20 @@ pub(crate) fn logistic_diffsl_code() -> &'static str {
 
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 #[cfg_attr(feature = "external", allow(dead_code))]
+pub(crate) fn hybrid_logistic_diffsl_code() -> &'static str {
+    r#"
+        in_i { r = 1 }
+        u_i { y = 0.1 }
+        dudt_i { dydt = 0 }
+        F_i { (r * y) * (1 - y) }
+        stop_i { y - 0.9 }
+        reset_i { 0.1 }
+        out_i { y }
+    "#
+}
+
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+#[cfg_attr(feature = "external", allow(dead_code))]
 pub(crate) fn logistic_diffsl_code_cstring() -> CString {
     CString::new(logistic_diffsl_code()).unwrap()
 }
@@ -97,10 +111,40 @@ pub(crate) fn logistic_state(x0: f64, r: f64, t: f64) -> f64 {
     (x0 * exp_rt) / (1.0 - x0 + x0 * exp_rt)
 }
 
+#[cfg(any(
+    feature = "diffsl-external-f64",
+    feature = "diffsl-cranelift",
+    feature = "diffsl-llvm"
+))]
+pub(crate) fn hybrid_logistic_period(r: f64) -> f64 {
+    81.0_f64.ln() / r
+}
+
+#[cfg(any(
+    feature = "diffsl-external-f64",
+    feature = "diffsl-cranelift",
+    feature = "diffsl-llvm"
+))]
+pub(crate) fn hybrid_logistic_state(r: f64, t: f64) -> f64 {
+    let tau = hybrid_logistic_period(r);
+    let cycles = (t / tau).floor();
+    let local_t = t - cycles * tau;
+    logistic_state(LOGISTIC_X0, r, local_t)
+}
+
 #[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
 pub(crate) fn logistic_state_dr(x0: f64, r: f64, t: f64) -> f64 {
     let x = logistic_state(x0, r, t);
     t * x * (1.0 - x)
+}
+
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+pub(crate) fn hybrid_logistic_state_dr(r: f64, t: f64) -> f64 {
+    let tau = hybrid_logistic_period(r);
+    let cycles = (t / tau).floor();
+    let local_t = t - cycles * tau;
+    let x = hybrid_logistic_state(r, t);
+    local_t * x * (1.0 - x)
 }
 
 #[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
@@ -171,14 +215,6 @@ pub(crate) fn assert_solution_tail(
             tol,
             "solution value",
         );
-    }
-}
-
-pub(crate) fn assert_current_state(solution: &SolutionWrapper, expected: &[f64], tol: f64) {
-    let actual = Vec::<f64>::from_host_array(solution.get_current_state().unwrap()).unwrap();
-    assert_eq!(actual.len(), expected.len());
-    for (i, (&actual, &expected)) in actual.iter().zip(expected.iter()).enumerate() {
-        assert_close(actual, expected, tol, &format!("current_state[{i}]"));
     }
 }
 

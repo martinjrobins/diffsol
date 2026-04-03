@@ -4,7 +4,8 @@
 use diffsol::error::DiffsolError;
 use diffsol::{
     AdjointOdeSolverMethod, Checkpointing, CodegenModule, DefaultSolver, DenseMatrix, MatrixCommon,
-    OdeSolverState, Op, SensitivitiesOdeSolverMethod, VectorViewMut,
+    OdeEquations, OdeSolverState, OdeSolverStopReason, Op, SensitivitiesOdeSolverMethod, Solution,
+    VectorViewMut,
 };
 use diffsol::{
     DefaultDenseMatrix, DiffSl, LinearSolver, Matrix, OdeSolverMethod, OdeSolverProblem, Vector,
@@ -17,7 +18,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::scalar_type::Scalar;
-use crate::solution::GenericState;
 use crate::utils::is_sens_available;
 use crate::{
     linear_solver_type::LinearSolverType,
@@ -39,16 +39,12 @@ pub enum OdeSolverType {
     Tsit45,
 }
 
-type SolveOutput<V, T> = (<V as DefaultDenseMatrix>::M, Vec<T>, GenericState<V>);
-type DenseSolveOutput<V> = (<V as DefaultDenseMatrix>::M, GenericState<V>);
-
 impl OdeSolverType {
     pub(crate) fn solve<M, CG, LS>(
         &self,
         problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
         final_time: M::T,
-        initial_state: Option<GenericState<M::V>>,
-    ) -> Result<SolveOutput<M::V, M::T>, DiffsolError>
+    ) -> Result<Solution<M::V>, DiffsolError>
     where
         M: Matrix<T: Scalar>,
         CG: CodegenModule,
@@ -57,63 +53,30 @@ impl OdeSolverType {
         for<'b> &'b M::V: VectorRef<M::V>,
         for<'b> &'b M: MatrixRef<M>,
     {
-        use crate::solution::GenericState;
         match self {
             OdeSolverType::Bdf => {
-                let mut solver = match initial_state {
-                    Some(GenericState::Bdf(state)) => {
-                        let mut solver = problem.bdf_solver::<LS>(state)?;
-                        solver.state_mut();
-                        solver
-                    }
-                    Some(GenericState::Rk(_)) => {
-                        return Err(DiffsolError::Other(
-                            "Expected a BDF state for bdf method".to_string(),
-                        ));
-                    }
-                    None => problem.bdf::<LS>()?,
-                };
-                let (ys, ts, _) = solver.solve(final_time)?;
-                Ok((ys, ts, GenericState::Bdf(solver.into_state())))
+                let solver = problem.bdf::<LS>()?;
+                let mut soln = Solution::new(final_time);
+                solver.solve_soln(&mut soln)?;
+                Ok(soln)
             }
             OdeSolverType::Esdirk34 => {
-                let mut solver = match initial_state {
-                    Some(GenericState::Rk(state)) => problem.esdirk34_solver::<LS>(state)?,
-                    Some(GenericState::Bdf(_)) => {
-                        return Err(DiffsolError::Other(
-                            "Expected an RK state for esdirk34 method".to_string(),
-                        ));
-                    }
-                    None => problem.esdirk34::<LS>()?,
-                };
-                let (ys, ts, _) = solver.solve(final_time)?;
-                Ok((ys, ts, GenericState::Rk(solver.into_state())))
+                let solver = problem.esdirk34::<LS>()?;
+                let mut soln = Solution::new(final_time);
+                solver.solve_soln(&mut soln)?;
+                Ok(soln)
             }
             OdeSolverType::TrBdf2 => {
-                let mut solver = match initial_state {
-                    Some(GenericState::Rk(state)) => problem.tr_bdf2_solver::<LS>(state)?,
-                    Some(GenericState::Bdf(_)) => {
-                        return Err(DiffsolError::Other(
-                            "Expected an RK state for tr_bdf2 method".to_string(),
-                        ));
-                    }
-                    None => problem.tr_bdf2::<LS>()?,
-                };
-                let (ys, ts, _) = solver.solve(final_time)?;
-                Ok((ys, ts, GenericState::Rk(solver.into_state())))
+                let solver = problem.tr_bdf2::<LS>()?;
+                let mut soln = Solution::new(final_time);
+                solver.solve_soln(&mut soln)?;
+                Ok(soln)
             }
             OdeSolverType::Tsit45 => {
-                let mut solver = match initial_state {
-                    Some(GenericState::Rk(state)) => problem.tsit45_solver(state)?,
-                    Some(GenericState::Bdf(_)) => {
-                        return Err(DiffsolError::Other(
-                            "Expected an RK state for tsit45 method".to_string(),
-                        ));
-                    }
-                    None => problem.tsit45()?,
-                };
-                let (ys, ts, _) = solver.solve(final_time)?;
-                Ok((ys, ts, GenericState::Rk(solver.into_state())))
+                let solver = problem.tsit45()?;
+                let mut soln = Solution::new(final_time);
+                solver.solve_soln(&mut soln)?;
+                Ok(soln)
             }
         }
     }
@@ -122,8 +85,7 @@ impl OdeSolverType {
         &self,
         problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
         t_eval: &[M::T],
-        initial_state: Option<GenericState<M::V>>,
-    ) -> Result<DenseSolveOutput<M::V>, DiffsolError>
+    ) -> Result<Solution<M::V>, DiffsolError>
     where
         M: Matrix<T: Scalar>,
         CG: CodegenModule,
@@ -134,56 +96,230 @@ impl OdeSolverType {
     {
         match self {
             OdeSolverType::Bdf => {
-                let mut solver = match initial_state {
-                    Some(GenericState::Bdf(state)) => problem.bdf_solver::<LS>(state)?,
-                    Some(GenericState::Rk(_)) => {
-                        return Err(DiffsolError::Other(
-                            "Expected a BDF state for bdf method".to_string(),
-                        ));
-                    }
-                    None => problem.bdf::<LS>()?,
-                };
-                let (ys, _) = solver.solve_dense(t_eval)?;
-                Ok((ys, GenericState::Bdf(solver.into_state())))
+                let solver = problem.bdf::<LS>()?;
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                solver.solve_soln(&mut soln)?;
+                Ok(soln)
             }
             OdeSolverType::Esdirk34 => {
-                let mut solver = match initial_state {
-                    Some(GenericState::Rk(state)) => problem.esdirk34_solver::<LS>(state)?,
-                    Some(GenericState::Bdf(_)) => {
-                        return Err(DiffsolError::Other(
-                            "Expected an RK state for esdirk34 method".to_string(),
-                        ));
-                    }
-                    None => problem.esdirk34::<LS>()?,
-                };
-                let (ys, _) = solver.solve_dense(t_eval)?;
-                Ok((ys, GenericState::Rk(solver.into_state())))
+                let solver = problem.esdirk34::<LS>()?;
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                solver.solve_soln(&mut soln)?;
+                Ok(soln)
             }
             OdeSolverType::TrBdf2 => {
-                let mut solver = match initial_state {
-                    Some(GenericState::Rk(state)) => problem.tr_bdf2_solver::<LS>(state)?,
-                    Some(GenericState::Bdf(_)) => {
-                        return Err(DiffsolError::Other(
-                            "Expected an RK state for tr_bdf2 method".to_string(),
-                        ));
-                    }
-                    None => problem.tr_bdf2::<LS>()?,
-                };
-                let (ys, _) = solver.solve_dense(t_eval)?;
-                Ok((ys, GenericState::Rk(solver.into_state())))
+                let solver = problem.tr_bdf2::<LS>()?;
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                solver.solve_soln(&mut soln)?;
+                Ok(soln)
             }
             OdeSolverType::Tsit45 => {
-                let mut solver = match initial_state {
-                    Some(GenericState::Rk(state)) => problem.tsit45_solver(state)?,
-                    Some(GenericState::Bdf(_)) => {
-                        return Err(DiffsolError::Other(
-                            "Expected an RK state for tsit45 method".to_string(),
-                        ));
-                    }
-                    None => problem.tsit45()?,
-                };
-                let (ys, _) = solver.solve_dense(t_eval)?;
-                Ok((ys, GenericState::Rk(solver.into_state())))
+                let solver = problem.tsit45()?;
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                solver.solve_soln(&mut soln)?;
+                Ok(soln)
+            }
+        }
+    }
+
+    pub(crate) fn solve_hybrid<M, CG, LS>(
+        &self,
+        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+        final_time: M::T,
+    ) -> Result<Solution<M::V>, DiffsolError>
+    where
+        M: Matrix<T: Scalar>,
+        CG: CodegenModule,
+        M::V: VectorHost + DefaultDenseMatrix,
+        LS: LinearSolver<M>,
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        match self {
+            OdeSolverType::Bdf => {
+                let mut soln = Solution::new(final_time);
+                let mut solver = problem.bdf::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.bdf_solver::<LS>(state)?;
+                    restarted_solver.reset()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::Esdirk34 => {
+                let mut soln = Solution::new(final_time);
+                let mut solver = problem.esdirk34::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.esdirk34_solver::<LS>(state)?;
+                    restarted_solver.reset()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::TrBdf2 => {
+                let mut soln = Solution::new(final_time);
+                let mut solver = problem.tr_bdf2::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.tr_bdf2_solver::<LS>(state)?;
+                    restarted_solver.reset()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::Tsit45 => {
+                let mut soln = Solution::new(final_time);
+                let mut solver = problem.tsit45()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.tsit45_solver(state)?;
+                    restarted_solver.reset()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+        }
+    }
+
+    pub(crate) fn solve_hybrid_dense<M, CG, LS>(
+        &self,
+        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+        t_eval: &[M::T],
+    ) -> Result<Solution<M::V>, DiffsolError>
+    where
+        M: Matrix<T: Scalar>,
+        CG: CodegenModule,
+        M::V: VectorHost + DefaultDenseMatrix,
+        LS: LinearSolver<M>,
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        match self {
+            OdeSolverType::Bdf => {
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                let mut solver = problem.bdf::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.bdf_solver::<LS>(state)?;
+                    restarted_solver.reset()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::Esdirk34 => {
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                let mut solver = problem.esdirk34::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.esdirk34_solver::<LS>(state)?;
+                    restarted_solver.reset()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::TrBdf2 => {
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                let mut solver = problem.tr_bdf2::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.tr_bdf2_solver::<LS>(state)?;
+                    restarted_solver.reset()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::Tsit45 => {
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                let mut solver = problem.tsit45()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.tsit45_solver(state)?;
+                    restarted_solver.reset()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
             }
         }
     }
@@ -202,15 +338,7 @@ impl OdeSolverType {
         &self,
         problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
         t_eval: &[M::T],
-        initial_state: Option<GenericState<M::V>>,
-    ) -> Result<
-        (
-            <M::V as DefaultDenseMatrix>::M,
-            Vec<<M::V as DefaultDenseMatrix>::M>,
-            GenericState<M::V>,
-        ),
-        DiffsolError,
-    >
+    ) -> Result<Solution<M::V>, DiffsolError>
     where
         M: Matrix<T: Scalar> + DefaultSolver,
         CG: CodegenModule,
@@ -222,60 +350,131 @@ impl OdeSolverType {
         Self::check_sens_available()?;
         match self {
             OdeSolverType::Bdf => {
-                let mut solver = match initial_state {
-                    Some(GenericState::Bdf(state)) => {
-                        let mut solver = problem.bdf_solver_sens::<LS>(state)?;
-                        solver.state_mut();
-                        solver
-                    }
-                    Some(GenericState::Rk(_)) => {
-                        return Err(DiffsolError::Other(
-                            "Expected a BDF state for bdf method".to_string(),
-                        ));
-                    }
-                    None => problem.bdf_sens::<LS>()?,
-                };
-                let (ys, sens, _) = solver.solve_dense_sensitivities(t_eval)?;
-                Ok((ys, sens, GenericState::Bdf(solver.into_state())))
+                let solver = problem.bdf_sens::<LS>()?;
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                solver.solve_soln_sensitivities(&mut soln)?;
+                Ok(soln)
             }
             OdeSolverType::Esdirk34 => {
-                let mut solver = match initial_state {
-                    Some(GenericState::Rk(state)) => problem.esdirk34_solver_sens::<LS>(state)?,
-                    Some(GenericState::Bdf(_)) => {
-                        return Err(DiffsolError::Other(
-                            "Expected an RK state for esdirk34 method".to_string(),
-                        ));
-                    }
-                    None => problem.esdirk34_sens::<LS>()?,
-                };
-                let (ys, sens, _) = solver.solve_dense_sensitivities(t_eval)?;
-                Ok((ys, sens, GenericState::Rk(solver.into_state())))
+                let solver = problem.esdirk34_sens::<LS>()?;
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                solver.solve_soln_sensitivities(&mut soln)?;
+                Ok(soln)
             }
             OdeSolverType::TrBdf2 => {
-                let mut solver = match initial_state {
-                    Some(GenericState::Rk(state)) => problem.tr_bdf2_solver_sens::<LS>(state)?,
-                    Some(GenericState::Bdf(_)) => {
-                        return Err(DiffsolError::Other(
-                            "Expected an RK state for tr_bdf2 method".to_string(),
-                        ));
-                    }
-                    None => problem.tr_bdf2_sens::<LS>()?,
-                };
-                let (ys, sens, _) = solver.solve_dense_sensitivities(t_eval)?;
-                Ok((ys, sens, GenericState::Rk(solver.into_state())))
+                let solver = problem.tr_bdf2_sens::<LS>()?;
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                solver.solve_soln_sensitivities(&mut soln)?;
+                Ok(soln)
             }
             OdeSolverType::Tsit45 => {
-                let mut solver = match initial_state {
-                    Some(GenericState::Rk(state)) => problem.tsit45_solver_sens(state)?,
-                    Some(GenericState::Bdf(_)) => {
-                        return Err(DiffsolError::Other(
-                            "Expected an RK state for tsit45 method".to_string(),
-                        ));
-                    }
-                    None => problem.tsit45_sens()?,
-                };
-                let (ys, sens, _) = solver.solve_dense_sensitivities(t_eval)?;
-                Ok((ys, sens, GenericState::Rk(solver.into_state())))
+                let solver = problem.tsit45_sens()?;
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                solver.solve_soln_sensitivities(&mut soln)?;
+                Ok(soln)
+            }
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn solve_hybrid_fwd_sens<M, CG, LS>(
+        &self,
+        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+        t_eval: &[M::T],
+    ) -> Result<Solution<M::V>, DiffsolError>
+    where
+        M: Matrix<T: Scalar> + DefaultSolver,
+        CG: CodegenModule,
+        M::V: VectorHost + DefaultDenseMatrix,
+        LS: LinearSolver<M>,
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        Self::check_sens_available()?;
+        match self {
+            OdeSolverType::Bdf => {
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                let mut solver = problem.bdf_sens::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln_sensitivities(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.bdf_solver_sens::<LS>(state)?;
+                    restarted_solver.reset_with_sens()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::Esdirk34 => {
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                let mut solver = problem.esdirk34_sens::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln_sensitivities(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.esdirk34_solver_sens::<LS>(state)?;
+                    restarted_solver.reset_with_sens()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::TrBdf2 => {
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                let mut solver = problem.tr_bdf2_sens::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln_sensitivities(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.tr_bdf2_solver_sens::<LS>(state)?;
+                    restarted_solver.reset_with_sens()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::Tsit45 => {
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                let mut solver = problem.tsit45_sens()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln_sensitivities(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.tsit45_solver_sens(state)?;
+                    restarted_solver.reset_with_sens()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
             }
         }
     }

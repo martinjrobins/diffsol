@@ -2,7 +2,7 @@ use std::cell::Ref;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
-    ode_solver::solution::SolutionMode,
+    ode_solver::solution::{SolutionMode, INITIAL_NCOLS},
     ode_solver_error,
     scalar::Scalar,
     AugmentedOdeEquations, Checkpointing, Context, DefaultDenseMatrix, DenseMatrix,
@@ -256,7 +256,7 @@ where
     ///
     /// let t_final = 10.0_f64;
     /// let mut state = problem.bdf_state::<LS>().unwrap();
-    /// let mut soln = Solution::new(t_final, problem.eqn());
+    /// let mut soln = Solution::<V>::new(t_final);
     ///
     /// while !soln.is_complete() {
     ///     state = problem.bdf_solver::<LS>(state).unwrap()
@@ -277,6 +277,15 @@ where
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
+        let nrows = if let Some(out) = self.problem().eqn.out() {
+            out.nout()
+        } else {
+            self.problem().eqn.rhs().nstates()
+        };
+        let nout = self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0);
+        let nstates = self.problem().eqn.rhs().nstates();
+        soln.ensure_ode_allocation(self.problem().context(), nrows, nout, nstates)?;
+
         match soln.mode {
             SolutionMode::Tfinal(t_final) => {
                 let stop_reason = solve(
@@ -714,7 +723,6 @@ where
     } else {
         s.problem().eqn.rhs().nstates()
     };
-    const INITIAL_NCOLS: usize = 10;
     let ret = s
         .problem()
         .context()
@@ -775,7 +783,7 @@ mod test {
         ode_equations::test_models::exponential_decay::{
             exponential_decay_problem, exponential_decay_problem_adjoint,
             exponential_decay_problem_sens, exponential_decay_problem_sens_with_out,
-            exponential_decay_problem_with_root,
+            exponential_decay_problem_with_root, exponential_decay_with_reset_problem_sens,
         },
         scale, AdjointOdeSolverMethod, DenseMatrix, NalgebraLU, NalgebraVec, OdeBuilder,
         OdeEquations, OdeSolverMethod, OdeSolverStopReason, Op, SensitivitiesOdeSolverMethod,
@@ -979,6 +987,89 @@ mod test {
     }
 
     #[test]
+    fn test_solve_soln_sensitivities_dense() {
+        type LS = NalgebraLU<f64>;
+
+        let (problem, soln) = exponential_decay_problem_sens::<NalgebraMat<f64>>(false);
+        let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
+        let mut state = problem.bdf_state_sens::<LS>().unwrap();
+        let mut dense_soln = Solution::new_dense(t_eval.clone()).unwrap();
+
+        while !dense_soln.is_complete() {
+            state = problem
+                .bdf_solver_sens::<LS>(state)
+                .unwrap()
+                .solve_soln_sensitivities(&mut dense_soln)
+                .unwrap()
+                .into_state();
+        }
+
+        assert_eq!(dense_soln.ts, t_eval);
+        for (i, soln_pt) in soln.solution_points.iter().enumerate() {
+            let y_i = dense_soln.ys.column(i).into_owned();
+            y_i.assert_eq_norm(&soln_pt.state, &problem.atol, problem.rtol, 15.0);
+        }
+        for (j, soln_pts) in soln.sens_solution_points.unwrap().iter().enumerate() {
+            for (i, soln_pt) in soln_pts.iter().enumerate() {
+                let sens_i = dense_soln.y_sens[j].column(i).into_owned();
+                sens_i.assert_eq_norm(
+                    &soln_pt.state,
+                    problem.sens_atol.as_ref().unwrap(),
+                    problem.sens_rtol.unwrap(),
+                    15.0,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_solve_soln_sensitivities_stops_on_root_without_writing_root_column() {
+        type LS = NalgebraLU<f64>;
+
+        let (problem, _soln) = exponential_decay_with_reset_problem_sens::<NalgebraMat<f64>>();
+        let t_eval = vec![1.0_f64, 6.0_f64];
+        let mut state = problem.bdf_state_sens::<LS>().unwrap();
+        let mut dense_soln = Solution::new_dense(t_eval.clone()).unwrap();
+        state = problem
+            .bdf_solver_sens::<LS>(state)
+            .unwrap()
+            .solve_soln_sensitivities(&mut dense_soln)
+            .unwrap()
+            .into_state();
+
+        assert!(matches!(
+            dense_soln.stop_reason,
+            Some(OdeSolverStopReason::RootFound(_, _))
+        ));
+        assert!(!dense_soln.is_complete());
+        assert!(state.t < t_eval[1]);
+
+        let decay = f64::exp(-0.1 * t_eval[0]);
+        let expected = NalgebraVec::from_vec(vec![decay; 2], *problem.context());
+        dense_soln.ys.column(0).into_owned().assert_eq_norm(
+            &expected,
+            &problem.atol,
+            problem.rtol,
+            15.0,
+        );
+
+        let s_k = NalgebraVec::from_vec(vec![-t_eval[0] * decay; 2], *problem.context());
+        let s_y0 = NalgebraVec::from_vec(vec![decay; 2], *problem.context());
+        dense_soln.y_sens[0].column(0).into_owned().assert_eq_norm(
+            &s_k,
+            problem.sens_atol.as_ref().unwrap(),
+            problem.sens_rtol.unwrap(),
+            15.0,
+        );
+        dense_soln.y_sens[1].column(0).into_owned().assert_eq_norm(
+            &s_y0,
+            problem.sens_atol.as_ref().unwrap(),
+            problem.sens_rtol.unwrap(),
+            15.0,
+        );
+    }
+
+    #[test]
     fn test_solve_soln_multi_stage_matches_piecewise_analytical_solution() {
         type LS = NalgebraLU<f64>;
 
@@ -1002,7 +1093,7 @@ mod test {
             .unwrap();
 
         let mut state = problem.bdf_state::<LS>().unwrap();
-        let mut soln = Solution::new(t_final, problem.eqn());
+        let mut soln = Solution::new(t_final);
         let mut stages = 0_usize;
 
         while !soln.is_complete() {

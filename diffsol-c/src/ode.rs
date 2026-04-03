@@ -5,7 +5,7 @@ use crate::{
     error::DiffsolJsError, host_array::HostArray,
     initial_condition_options::InitialConditionSolverOptions, linear_solver_type::LinearSolverType,
     matrix_type::MatrixType, ode_options::OdeSolverOptions, ode_solver_type::OdeSolverType,
-    scalar_type::ScalarType, solution::Solution, solution_wrapper::SolutionWrapper, solve::Solve,
+    scalar_type::ScalarType, solution_wrapper::SolutionWrapper, solve::Solve,
 };
 
 pub struct Ode {
@@ -22,7 +22,6 @@ unsafe impl Sync for Ode {}
 
 #[derive(Clone)]
 pub struct OdeWrapper(Arc<Mutex<Ode>>);
-type SolveCallResult = Result<Box<dyn Solution>, (DiffsolJsError, Option<Box<dyn Solution>>)>;
 
 impl OdeWrapper {
     fn guard(&self) -> Result<std::sync::MutexGuard<'_, Ode>, DiffsolJsError> {
@@ -101,31 +100,6 @@ impl OdeWrapper {
             linear_solver,
             ode_solver,
         )
-    }
-
-    fn run_solve_call<F>(
-        py_solve: &mut dyn Solve,
-        solution: Option<SolutionWrapper>,
-        solve_call: F,
-    ) -> Result<SolutionWrapper, DiffsolJsError>
-    where
-        F: FnOnce(&mut dyn Solve, Option<Box<dyn Solution>>) -> SolveCallResult,
-    {
-        if let Some(solution) = solution {
-            let old_solution = solution.take_solution()?;
-            match solve_call(py_solve, Some(old_solution)) {
-                Ok(new_solution) => Ok(SolutionWrapper::new(new_solution)),
-                Err((err, maybe_old_solution)) => {
-                    if let Some(old_solution) = maybe_old_solution {
-                        solution.replace_solution(old_solution)?;
-                    }
-                    Err(err)
-                }
-            }
-        } else {
-            let new_solution = solve_call(py_solve, None).map_err(|(err, _)| err)?;
-            Ok(SolutionWrapper::new(new_solution))
-        }
     }
 
     /// Matrix type used in the ODE solver. This is fixed after construction.
@@ -248,15 +222,32 @@ impl OdeWrapper {
         &self,
         params: HostArray,
         final_time: f64,
-        solution: Option<SolutionWrapper>,
     ) -> Result<SolutionWrapper, DiffsolJsError> {
         let mut self_guard = self.guard()?;
         let params = params.as_slice()?;
         let linear_solver = self_guard.linear_solver;
         let method = self_guard.ode_solver;
-        Self::run_solve_call(&mut *self_guard.solve, solution, |py_solve, py_solution| {
-            py_solve.solve(method, linear_solver, params, final_time, py_solution)
-        })
+        let solution = self_guard
+            .solve
+            .solve(method, linear_solver, params, final_time)?;
+        Ok(SolutionWrapper::new(solution))
+    }
+
+    /// Solve a hybrid ODE up to `final_time`, automatically applying reset
+    /// functions and continuing after root events until the solution completes.
+    pub fn solve_hybrid(
+        &self,
+        params: HostArray,
+        final_time: f64,
+    ) -> Result<SolutionWrapper, DiffsolJsError> {
+        let mut self_guard = self.guard()?;
+        let params = params.as_slice()?;
+        let linear_solver = self_guard.linear_solver;
+        let method = self_guard.ode_solver;
+        let solution = self_guard
+            .solve
+            .solve_hybrid(method, linear_solver, params, final_time)?;
+        Ok(SolutionWrapper::new(solution))
     }
 
     /// Using the provided state, solve the problem up to time
@@ -276,16 +267,36 @@ impl OdeWrapper {
         &self,
         params: HostArray,
         t_eval: HostArray,
-        solution: Option<SolutionWrapper>,
     ) -> Result<SolutionWrapper, DiffsolJsError> {
         let mut self_guard = self.guard()?;
         let params = params.as_slice()?;
         let t_eval = t_eval.as_slice()?;
         let linear_solver = self_guard.linear_solver;
         let method = self_guard.ode_solver;
-        Self::run_solve_call(&mut *self_guard.solve, solution, |py_solve, py_solution| {
-            py_solve.solve_dense(method, linear_solver, params, t_eval, py_solution)
-        })
+        let solution = self_guard
+            .solve
+            .solve_dense(method, linear_solver, params, t_eval)?;
+        Ok(SolutionWrapper::new(solution))
+    }
+
+    /// Solve a hybrid ODE at dense evaluation times, automatically applying
+    /// reset functions and continuing after root events until all requested
+    /// output points are filled.
+    pub fn solve_hybrid_dense(
+        &self,
+        params: HostArray,
+        t_eval: HostArray,
+    ) -> Result<SolutionWrapper, DiffsolJsError> {
+        let mut self_guard = self.guard()?;
+        let params = params.as_slice()?;
+        let t_eval = t_eval.as_slice()?;
+        let linear_solver = self_guard.linear_solver;
+        let method = self_guard.ode_solver;
+        let solution =
+            self_guard
+                .solve
+                .solve_hybrid_dense(method, linear_solver, params, t_eval)?;
+        Ok(SolutionWrapper::new(solution))
     }
 
     /// Using the provided state, solve the problem up to time `t_eval[t_eval.len()-1]`.
@@ -305,16 +316,37 @@ impl OdeWrapper {
         &self,
         params: HostArray,
         t_eval: HostArray,
-        solution: Option<SolutionWrapper>,
     ) -> Result<SolutionWrapper, DiffsolJsError> {
         let mut self_guard = self.guard()?;
         let params = params.as_slice()?;
         let t_eval = t_eval.as_slice()?;
         let linear_solver = self_guard.linear_solver;
         let method = self_guard.ode_solver;
-        Self::run_solve_call(&mut *self_guard.solve, solution, |py_solve, py_solution| {
-            py_solve.solve_fwd_sens(method, linear_solver, params, t_eval, py_solution)
-        })
+        let solution = self_guard
+            .solve
+            .solve_fwd_sens(method, linear_solver, params, t_eval)?;
+        Ok(SolutionWrapper::new(solution))
+    }
+
+    /// Solve a hybrid ODE with forward sensitivities at dense evaluation times,
+    /// automatically applying sensitivity-aware reset functions and continuing
+    /// after root events until all requested output points are filled.
+    #[allow(clippy::type_complexity)]
+    pub fn solve_hybrid_fwd_sens(
+        &self,
+        params: HostArray,
+        t_eval: HostArray,
+    ) -> Result<SolutionWrapper, DiffsolJsError> {
+        let mut self_guard = self.guard()?;
+        let params = params.as_slice()?;
+        let t_eval = t_eval.as_slice()?;
+        let linear_solver = self_guard.linear_solver;
+        let method = self_guard.ode_solver;
+        let solution =
+            self_guard
+                .solve
+                .solve_hybrid_fwd_sens(method, linear_solver, params, t_eval)?;
+        Ok(SolutionWrapper::new(solution))
     }
 
     /// Using the provided state, solve the adjoint problem for the sum of squares
@@ -350,9 +382,9 @@ mod tests {
     use crate::linear_solver_type::LinearSolverType;
     use crate::scalar_type::ScalarType;
     use crate::test_support::{
-        ASSERT_TOL, LOGISTIC_X0, assert_close, assert_current_state, assert_solution_tail,
-        logistic_integral, logistic_state, logistic_state_dr, mass_state_deps, rhs_input_deps,
-        rhs_state_deps, vector_host,
+        ASSERT_TOL, LOGISTIC_X0, assert_close, assert_solution_tail, logistic_integral,
+        logistic_state, logistic_state_dr, mass_state_deps, rhs_input_deps, rhs_state_deps,
+        vector_host,
     };
 
     use super::*;
@@ -368,15 +400,6 @@ mod tests {
             ode_solver,
         )
         .unwrap()
-    }
-
-    fn make_seed_solution(ode: &mut OdeWrapper, x0: f64) -> SolutionWrapper {
-        let solution = ode
-            .solve_dense(vector_host(&[2.0]), vector_host(&[1e-9]), None)
-            .unwrap();
-        solution.set_current_state(&[x0]).unwrap();
-        assert_current_state(&solution, &[x0], ASSERT_TOL);
-        solution
     }
 
     fn assert_runtime_dispatch(matrix_type: MatrixType) {
@@ -412,23 +435,21 @@ mod tests {
         );
     }
 
-    fn assert_solver_continuation(matrix_type: MatrixType, ode_solver: OdeSolverType) {
-        let mut ode = make_ode(matrix_type, ode_solver);
+    fn assert_solver_dense_solution(matrix_type: MatrixType, ode_solver: OdeSolverType) {
+        let ode = make_ode(matrix_type, ode_solver);
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
 
         let t_eval = [0.25, 0.5, 1.0];
-        let seed = make_seed_solution(&mut ode, 0.1);
         let solution = ode
-            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval), Some(seed))
+            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
             .unwrap();
 
-        assert_solution_tail(&solution, &t_eval, 0.1, 2.0, 5e-4);
-        assert_current_state(
-            &solution,
-            &[logistic_state(0.1, 2.0, *t_eval.last().unwrap())],
-            5e-4,
-        );
+        assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
+    }
+
+    fn hybrid_root_time() -> f64 {
+        0.5 * 9.0_f64.ln()
     }
 
     #[test]
@@ -443,37 +464,32 @@ mod tests {
     }
 
     #[test]
-    fn bdf_dense_continuation_matches_logistic_solution() {
+    fn bdf_dense_solution_matches_logistic_solution() {
         let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
 
         let t_eval = [0.25, 0.5, 1.0];
         let solution = ode
-            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval), None)
+            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
             .unwrap();
 
         assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
-        assert_current_state(
-            &solution,
-            &[logistic_state(LOGISTIC_X0, 2.0, *t_eval.last().unwrap())],
-            5e-4,
-        );
     }
 
     #[test]
-    fn esdirk34_dense_continuation_matches_logistic_solution() {
-        assert_solver_continuation(MatrixType::FaerDense, OdeSolverType::Esdirk34);
+    fn esdirk34_dense_solution_matches_logistic_solution() {
+        assert_solver_dense_solution(MatrixType::FaerDense, OdeSolverType::Esdirk34);
     }
 
     #[test]
-    fn tr_bdf2_sparse_continuation_matches_logistic_solution() {
-        assert_solver_continuation(MatrixType::FaerSparse, OdeSolverType::TrBdf2);
+    fn tr_bdf2_sparse_solution_matches_logistic_solution() {
+        assert_solver_dense_solution(MatrixType::FaerSparse, OdeSolverType::TrBdf2);
     }
 
     #[test]
-    fn tsit45_dense_continuation_matches_logistic_solution() {
-        assert_solver_continuation(MatrixType::NalgebraDense, OdeSolverType::Tsit45);
+    fn tsit45_dense_solution_matches_logistic_solution() {
+        assert_solver_dense_solution(MatrixType::NalgebraDense, OdeSolverType::Tsit45);
     }
 
     #[test]
@@ -484,7 +500,7 @@ mod tests {
 
         let t_eval = [0.25, 0.5, 1.0];
         let solution = ode
-            .solve_fwd_sens(vector_host(&[2.0]), vector_host(&t_eval), None)
+            .solve_fwd_sens(vector_host(&[2.0]), vector_host(&t_eval))
             .unwrap();
 
         assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
@@ -524,6 +540,106 @@ mod tests {
         assert_eq!(grad.len(), 1);
         assert_close(grad[0], 0.0, ASSERT_TOL, "sum_squares gradient");
     }
+
+    #[test]
+    fn bdf_hybrid_solution_applies_reset_after_root() {
+        let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let final_time = 2.0;
+        let solution = ode.solve_hybrid(vector_host(&[2.0]), final_time).unwrap();
+        let ys = solution.get_ys().unwrap();
+        let ys = ys.as_array::<f64>().unwrap();
+        let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+        let root_time = hybrid_root_time();
+
+        assert_eq!(ys.nrows(), 1);
+        assert_eq!(ys.ncols(), ts.len());
+        assert!(!ts.is_empty(), "expected hybrid solve to produce output");
+        assert_close(
+            *ts.last().unwrap(),
+            final_time,
+            ASSERT_TOL,
+            "hybrid final time",
+        );
+        assert_close(ys[(0, ys.ncols() - 1)], 1.0, 5e-4, "hybrid final value");
+        assert!(
+            ts.iter().any(|&t| t < root_time),
+            "expected pre-root samples"
+        );
+        assert!(
+            ts.iter().any(|&t| t > root_time),
+            "expected post-root samples after reset"
+        );
+    }
+
+    #[test]
+    fn bdf_hybrid_dense_solution_continues_after_reset() {
+        let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let t_eval = [0.5, 1.0, 1.25, 1.5, 2.0];
+        let solution = ode
+            .solve_hybrid_dense(vector_host(&[2.0]), vector_host(&t_eval))
+            .unwrap();
+        let ys = solution.get_ys().unwrap();
+        let ys = ys.as_array::<f64>().unwrap();
+
+        assert_eq!(ys.nrows(), 1);
+        assert_eq!(ys.ncols(), t_eval.len());
+        assert_close(
+            ys[(0, 0)],
+            logistic_state(LOGISTIC_X0, 2.0, t_eval[0]),
+            5e-4,
+            "hybrid dense pre-root value",
+        );
+        assert_close(
+            ys[(0, 1)],
+            logistic_state(LOGISTIC_X0, 2.0, t_eval[1]),
+            5e-4,
+            "hybrid dense near-root value",
+        );
+        for col in 2..t_eval.len() {
+            assert_close(ys[(0, col)], 1.0, 5e-4, "hybrid dense post-root value");
+        }
+    }
+
+    #[test]
+    fn bdf_hybrid_forward_sensitivities_complete_across_reset() {
+        let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let t_eval = [0.5, 1.0, 1.25, 1.5, 2.0];
+        let solution = ode
+            .solve_hybrid_fwd_sens(vector_host(&[2.0]), vector_host(&t_eval))
+            .unwrap();
+        let ys = solution.get_ys().unwrap();
+        let ys = ys.as_array::<f64>().unwrap();
+        let sens = solution.get_sens().unwrap();
+
+        assert_eq!(ys.nrows(), 1);
+        assert_eq!(ys.ncols(), t_eval.len());
+        assert_eq!(sens.len(), 1);
+        let sens_values = sens[0].as_array::<f64>().unwrap();
+        assert_eq!(sens_values.nrows(), 1);
+        assert_eq!(sens_values.ncols(), t_eval.len());
+        assert_close(
+            ys[(0, 0)],
+            logistic_state(LOGISTIC_X0, 2.0, t_eval[0]),
+            5e-4,
+            "hybrid sens pre-root value",
+        );
+        for col in 2..t_eval.len() {
+            assert_close(ys[(0, col)], 1.0, 5e-4, "hybrid sens post-root value");
+            assert!(
+                sens_values[(0, col)].is_finite(),
+                "expected finite post-root sensitivity at column {col}"
+            );
+        }
+    }
 }
 
 #[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
@@ -533,8 +649,9 @@ mod jit_tests {
     use crate::linear_solver_type::LinearSolverType;
     use crate::scalar_type::ScalarType;
     use crate::test_support::{
-        ASSERT_TOL, LOGISTIC_X0, assert_close, assert_current_state, assert_solution_tail,
-        available_jit_backends, logistic_diffsl_code, logistic_state, vector_host,
+        ASSERT_TOL, LOGISTIC_X0, assert_close, assert_solution_tail, available_jit_backends,
+        hybrid_logistic_diffsl_code, hybrid_logistic_period, hybrid_logistic_state,
+        hybrid_logistic_state_dr, logistic_diffsl_code, logistic_state, vector_host,
     };
     #[cfg(feature = "diffsl-llvm")]
     use crate::test_support::{logistic_integral, logistic_state_dr};
@@ -557,13 +674,20 @@ mod jit_tests {
         .unwrap()
     }
 
-    fn make_seed_solution(ode: &mut OdeWrapper, x0: f64) -> SolutionWrapper {
-        let solution = ode
-            .solve_dense(vector_host(&[2.0]), vector_host(&[1e-9]), None)
-            .unwrap();
-        solution.set_current_state(&[x0]).unwrap();
-        assert_current_state(&solution, &[x0], ASSERT_TOL);
-        solution
+    fn make_hybrid_ode(
+        jit_backend: JitBackendType,
+        matrix_type: MatrixType,
+        ode_solver: OdeSolverType,
+    ) -> OdeWrapper {
+        OdeWrapper::new_jit(
+            hybrid_logistic_diffsl_code(),
+            jit_backend,
+            ScalarType::F64,
+            matrix_type,
+            LinearSolverType::Default,
+            ode_solver,
+        )
+        .unwrap()
     }
 
     fn assert_runtime_dispatch(jit_backend: JitBackendType, matrix_type: MatrixType) {
@@ -600,27 +724,25 @@ mod jit_tests {
         );
     }
 
-    fn assert_solver_continuation(
+    fn assert_solver_dense_solution(
         jit_backend: JitBackendType,
         matrix_type: MatrixType,
         ode_solver: OdeSolverType,
     ) {
-        let mut ode = make_ode(jit_backend, matrix_type, ode_solver);
+        let ode = make_ode(jit_backend, matrix_type, ode_solver);
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
 
         let t_eval = [0.25, 0.5, 1.0];
-        let seed = make_seed_solution(&mut ode, LOGISTIC_X0);
         let solution = ode
-            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval), Some(seed))
+            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
             .unwrap();
 
         assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
-        assert_current_state(
-            &solution,
-            &[logistic_state(LOGISTIC_X0, 2.0, *t_eval.last().unwrap())],
-            5e-4,
-        );
+    }
+
+    fn hybrid_t_eval() -> [f64; 7] {
+        [0.5, 1.0, 2.0, 2.5, 3.0, 4.0, 4.8]
     }
 
     #[test]
@@ -637,14 +759,14 @@ mod jit_tests {
     }
 
     #[test]
-    fn solver_continuation_matches_logistic_solution_from_diffsl() {
+    fn dense_solution_matches_logistic_solution_from_diffsl() {
         for jit_backend in available_jit_backends() {
             for (matrix_type, solver) in [
                 (MatrixType::FaerDense, OdeSolverType::Esdirk34),
                 (MatrixType::FaerSparse, OdeSolverType::TrBdf2),
                 (MatrixType::NalgebraDense, OdeSolverType::Tsit45),
             ] {
-                assert_solver_continuation(jit_backend, matrix_type, solver);
+                assert_solver_dense_solution(jit_backend, matrix_type, solver);
             }
         }
     }
@@ -658,15 +780,10 @@ mod jit_tests {
 
             let t_eval = [0.25, 0.5, 1.0];
             let solution = ode
-                .solve_dense(vector_host(&[2.0]), vector_host(&t_eval), None)
+                .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
                 .unwrap();
 
             assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
-            assert_current_state(
-                &solution,
-                &[logistic_state(LOGISTIC_X0, 2.0, *t_eval.last().unwrap())],
-                5e-4,
-            );
         }
     }
 
@@ -680,7 +797,7 @@ mod jit_tests {
             ode.set_atol(1e-8).unwrap();
 
             let final_time = 1.0;
-            let solution = ode.solve(vector_host(&[r]), final_time, None).unwrap();
+            let solution = ode.solve(vector_host(&[r]), final_time).unwrap();
 
             let ys = solution.get_ys().unwrap();
             let ys = ys.as_array::<f64>().unwrap();
@@ -706,7 +823,82 @@ mod jit_tests {
                     &format!("solve value[{i}]"),
                 );
             }
-            assert_current_state(&solution, &[logistic_state(x0, r, final_time)], 5e-4);
+        }
+    }
+
+    #[test]
+    fn hybrid_solution_matches_piecewise_logistic_diffsl_model() {
+        let r = 2.0;
+        let final_time = 5.0;
+        let tau = hybrid_logistic_period(r);
+        for jit_backend in available_jit_backends() {
+            let ode = make_hybrid_ode(jit_backend, MatrixType::NalgebraDense, OdeSolverType::Bdf);
+            ode.set_rtol(1e-8).unwrap();
+            ode.set_atol(1e-8).unwrap();
+
+            let solution = ode.solve_hybrid(vector_host(&[r]), final_time).unwrap();
+            let ys = solution.get_ys().unwrap();
+            let ys = ys.as_array::<f64>().unwrap();
+            let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+
+            assert_eq!(ys.nrows(), 1);
+            assert_eq!(ys.ncols(), ts.len());
+            assert!(!ts.is_empty(), "expected hybrid solve to produce output");
+            assert_close(
+                *ts.last().unwrap(),
+                final_time,
+                ASSERT_TOL,
+                "jit hybrid final time",
+            );
+            assert_close(
+                ys[(0, ys.ncols() - 1)],
+                hybrid_logistic_state(r, final_time),
+                5e-4,
+                "jit hybrid final value",
+            );
+            assert!(ts.iter().any(|&t| (t - tau).abs() < 1e-3));
+            assert!(ts.iter().any(|&t| (t - 2.0 * tau).abs() < 1e-3));
+            for (col, &t) in ts.iter().enumerate() {
+                if ((t / tau).round() * tau - t).abs() < 1e-3 {
+                    continue;
+                }
+                assert_close(
+                    ys[(0, col)],
+                    hybrid_logistic_state(r, t),
+                    5e-4,
+                    &format!("jit hybrid value[{col}]"),
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hybrid_dense_solution_matches_piecewise_logistic_diffsl_model() {
+        let r = 2.0;
+        let t_eval = hybrid_t_eval();
+        for jit_backend in available_jit_backends() {
+            let ode = make_hybrid_ode(jit_backend, MatrixType::NalgebraDense, OdeSolverType::Bdf);
+            ode.set_rtol(1e-8).unwrap();
+            ode.set_atol(1e-8).unwrap();
+
+            let solution = ode
+                .solve_hybrid_dense(vector_host(&[r]), vector_host(&t_eval))
+                .unwrap();
+            let ys = solution.get_ys().unwrap();
+            let ys = ys.as_array::<f64>().unwrap();
+            let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+
+            assert_eq!(ys.nrows(), 1);
+            assert_eq!(ys.ncols(), t_eval.len());
+            assert_eq!(ts, t_eval);
+            for (col, &t) in t_eval.iter().enumerate() {
+                assert_close(
+                    ys[(0, col)],
+                    hybrid_logistic_state(r, t),
+                    5e-4,
+                    &format!("jit hybrid dense value[{col}]"),
+                );
+            }
         }
     }
 
@@ -723,7 +915,7 @@ mod jit_tests {
 
         let t_eval = [0.25, 0.5, 1.0];
         let solution = ode
-            .solve_fwd_sens(vector_host(&[2.0]), vector_host(&t_eval), None)
+            .solve_fwd_sens(vector_host(&[2.0]), vector_host(&t_eval))
             .unwrap();
 
         assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
@@ -738,6 +930,48 @@ mod jit_tests {
                 logistic_state_dr(LOGISTIC_X0, 2.0, t),
                 ASSERT_TOL,
                 &format!("jit sensitivity[{i}]"),
+            );
+        }
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn hybrid_forward_sensitivities_match_piecewise_logistic_diffsl_model() {
+        let r = 2.0;
+        let t_eval = hybrid_t_eval();
+        let ode = make_hybrid_ode(
+            JitBackendType::Llvm,
+            MatrixType::NalgebraDense,
+            OdeSolverType::Bdf,
+        );
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let solution = ode
+            .solve_hybrid_fwd_sens(vector_host(&[r]), vector_host(&t_eval))
+            .unwrap();
+        let ys = solution.get_ys().unwrap();
+        let ys = ys.as_array::<f64>().unwrap();
+        let sens = solution.get_sens().unwrap();
+
+        assert_eq!(ys.nrows(), 1);
+        assert_eq!(ys.ncols(), t_eval.len());
+        assert_eq!(sens.len(), 1);
+        let sens_values = sens[0].as_array::<f64>().unwrap();
+        assert_eq!(sens_values.nrows(), 1);
+        assert_eq!(sens_values.ncols(), t_eval.len());
+        for (col, &t) in t_eval.iter().enumerate() {
+            assert_close(
+                ys[(0, col)],
+                hybrid_logistic_state(r, t),
+                5e-4,
+                &format!("jit hybrid sens value[{col}]"),
+            );
+            assert_close(
+                sens_values[(0, col)],
+                hybrid_logistic_state_dr(r, t),
+                5e-4,
+                &format!("jit hybrid sensitivity[{col}]"),
             );
         }
     }

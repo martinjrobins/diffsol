@@ -1,4 +1,4 @@
-use crate::c_api_utils::{DIFFSOL_BAD_ARG, DIFFSOL_ERR, DIFFSOL_OK, valid_f64_ptr};
+use crate::c_api_utils::{DIFFSOL_BAD_ARG, DIFFSOL_ERR, DIFFSOL_OK};
 use crate::host_array::HostArray;
 use crate::solution_wrapper::SolutionWrapper;
 use crate::{c_error, c_invalid_arg};
@@ -111,62 +111,6 @@ pub unsafe extern "C" fn diffsol_solution_wrapper_get_sens(
             unsafe {
                 *out_sens = sens_ptr;
                 *out_sens_len = sens_len;
-            }
-            DIFFSOL_OK
-        }
-        Err(err) => {
-            c_error!(&format!("{}", err));
-            DIFFSOL_ERR
-        }
-    }
-}
-
-/// Overwrite the current solver state stored in a solution wrapper.
-///
-/// # Safety
-/// `solution` must be a valid mutable pointer created by this library. `y_ptr`
-/// must be either null with `y_len == 0` or point to `y_len` readable `f64`
-/// values for the duration of this call.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn diffsol_solution_wrapper_set_current_state(
-    solution: *mut SolutionWrapper,
-    y_ptr: *const f64,
-    y_len: usize,
-) -> i32 {
-    if solution.is_null() || !valid_f64_ptr(y_ptr, y_len) {
-        c_invalid_arg!("invalid arguments to diffsol_solution_wrapper_set_current_state");
-        return DIFFSOL_BAD_ARG;
-    }
-    let solution = unsafe { &mut *solution };
-    let y = unsafe { std::slice::from_raw_parts(y_ptr, y_len) };
-    match solution.set_current_state(y) {
-        Ok(()) => DIFFSOL_OK,
-        Err(err) => {
-            c_error!(&format!("{}", err));
-            DIFFSOL_ERR
-        }
-    }
-}
-
-/// Return the current solver state stored in a solution wrapper.
-///
-/// # Safety
-/// `solution` must be a valid pointer created by this library. `out_array`
-/// must be a valid, writable pointer to receive ownership of the returned array.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn diffsol_solution_wrapper_get_current_state(
-    solution: *const SolutionWrapper,
-    out_array: *mut *mut HostArray,
-) -> i32 {
-    if solution.is_null() || out_array.is_null() {
-        c_invalid_arg!("invalid arguments to diffsol_solution_wrapper_get_current_state");
-        return DIFFSOL_BAD_ARG;
-    }
-    let solution = unsafe { &*solution };
-    match solution.get_current_state() {
-        Ok(array) => {
-            unsafe {
-                *out_array = boxed_host_array(array);
             }
             DIFFSOL_OK
         }
