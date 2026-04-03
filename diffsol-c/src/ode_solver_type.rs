@@ -4,7 +4,8 @@
 use diffsol::error::DiffsolError;
 use diffsol::{
     AdjointOdeSolverMethod, Checkpointing, CodegenModule, DefaultSolver, DenseMatrix, MatrixCommon,
-    OdeSolverState, Op, SensitivitiesOdeSolverMethod, Solution, VectorViewMut,
+    OdeEquations, OdeSolverState, OdeSolverStopReason, Op, SensitivitiesOdeSolverMethod, Solution,
+    VectorViewMut,
 };
 use diffsol::{
     DefaultDenseMatrix, DiffSl, LinearSolver, Matrix, OdeSolverMethod, OdeSolverProblem, Vector,
@@ -121,6 +122,208 @@ impl OdeSolverType {
         }
     }
 
+    pub(crate) fn solve_hybrid<M, CG, LS>(
+        &self,
+        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+        final_time: M::T,
+    ) -> Result<Solution<M::V>, DiffsolError>
+    where
+        M: Matrix<T: Scalar>,
+        CG: CodegenModule,
+        M::V: VectorHost + DefaultDenseMatrix,
+        LS: LinearSolver<M>,
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        match self {
+            OdeSolverType::Bdf => {
+                let mut soln = Solution::new(final_time);
+                let mut solver = problem.bdf::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.bdf_solver::<LS>(state)?;
+                    restarted_solver.reset()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::Esdirk34 => {
+                let mut soln = Solution::new(final_time);
+                let mut solver = problem.esdirk34::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.esdirk34_solver::<LS>(state)?;
+                    restarted_solver.reset()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::TrBdf2 => {
+                let mut soln = Solution::new(final_time);
+                let mut solver = problem.tr_bdf2::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.tr_bdf2_solver::<LS>(state)?;
+                    restarted_solver.reset()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::Tsit45 => {
+                let mut soln = Solution::new(final_time);
+                let mut solver = problem.tsit45()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.tsit45_solver(state)?;
+                    restarted_solver.reset()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+        }
+    }
+
+    pub(crate) fn solve_hybrid_dense<M, CG, LS>(
+        &self,
+        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+        t_eval: &[M::T],
+    ) -> Result<Solution<M::V>, DiffsolError>
+    where
+        M: Matrix<T: Scalar>,
+        CG: CodegenModule,
+        M::V: VectorHost + DefaultDenseMatrix,
+        LS: LinearSolver<M>,
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        match self {
+            OdeSolverType::Bdf => {
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                let mut solver = problem.bdf::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.bdf_solver::<LS>(state)?;
+                    restarted_solver.reset()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::Esdirk34 => {
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                let mut solver = problem.esdirk34::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.esdirk34_solver::<LS>(state)?;
+                    restarted_solver.reset()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::TrBdf2 => {
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                let mut solver = problem.tr_bdf2::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.tr_bdf2_solver::<LS>(state)?;
+                    restarted_solver.reset()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::Tsit45 => {
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                let mut solver = problem.tsit45()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.tsit45_solver(state)?;
+                    restarted_solver.reset()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+        }
+    }
+
     fn check_sens_available() -> Result<(), DiffsolError> {
         if !is_sens_available() {
             return Err(DiffsolError::Other(
@@ -168,6 +371,109 @@ impl OdeSolverType {
                 let solver = problem.tsit45_sens()?;
                 let mut soln = Solution::new_dense(t_eval.to_vec())?;
                 solver.solve_soln_sensitivities(&mut soln)?;
+                Ok(soln)
+            }
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn solve_hybrid_fwd_sens<M, CG, LS>(
+        &self,
+        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+        t_eval: &[M::T],
+    ) -> Result<Solution<M::V>, DiffsolError>
+    where
+        M: Matrix<T: Scalar> + DefaultSolver,
+        CG: CodegenModule,
+        M::V: VectorHost + DefaultDenseMatrix,
+        LS: LinearSolver<M>,
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        Self::check_sens_available()?;
+        match self {
+            OdeSolverType::Bdf => {
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                let mut solver = problem.bdf_sens::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln_sensitivities(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.bdf_solver_sens::<LS>(state)?;
+                    restarted_solver.reset_with_sens()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::Esdirk34 => {
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                let mut solver = problem.esdirk34_sens::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln_sensitivities(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.esdirk34_solver_sens::<LS>(state)?;
+                    restarted_solver.reset_with_sens()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::TrBdf2 => {
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                let mut solver = problem.tr_bdf2_sens::<LS>()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln_sensitivities(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.tr_bdf2_solver_sens::<LS>(state)?;
+                    restarted_solver.reset_with_sens()?;
+                    solver = restarted_solver;
+                }
+                Ok(soln)
+            }
+            OdeSolverType::Tsit45 => {
+                let mut soln = Solution::new_dense(t_eval.to_vec())?;
+                let mut solver = problem.tsit45_sens()?;
+                while !soln.is_complete() {
+                    solver = solver.solve_soln_sensitivities(&mut soln)?;
+                    let root_idx = match soln.stop_reason {
+                        Some(OdeSolverStopReason::RootFound(_, root_idx))
+                            if !soln.is_complete() =>
+                        {
+                            root_idx
+                        }
+                        _ => continue,
+                    };
+                    let state = solver.into_state();
+                    problem.eqn.set_model_index(root_idx);
+                    let mut restarted_solver = problem.tsit45_solver_sens(state)?;
+                    restarted_solver.reset_with_sens()?;
+                    solver = restarted_solver;
+                }
                 Ok(soln)
             }
         }

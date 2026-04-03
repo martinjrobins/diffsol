@@ -68,6 +68,14 @@ pub(crate) trait Solve {
         final_time: f64,
     ) -> SolveResult;
 
+    fn solve_hybrid(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        params: &[f64],
+        final_time: f64,
+    ) -> SolveResult;
+
     fn solve_dense(
         &mut self,
         method: OdeSolverType,
@@ -76,7 +84,23 @@ pub(crate) trait Solve {
         t_eval: &[f64],
     ) -> SolveResult;
 
+    fn solve_hybrid_dense(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        params: &[f64],
+        t_eval: &[f64],
+    ) -> SolveResult;
+
     fn solve_fwd_sens(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        params: &[f64],
+        t_eval: &[f64],
+    ) -> SolveResult;
+
+    fn solve_hybrid_fwd_sens(
         &mut self,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
@@ -483,6 +507,27 @@ where
         Ok(Box::new(soln?))
     }
 
+    fn solve_hybrid(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        params: &[f64],
+        final_time: f64,
+    ) -> SolveResult {
+        self.check(linear_solver)?;
+        self.setup_problem(params)?;
+        let final_time = M::T::from_f64(final_time).unwrap();
+        let soln = match linear_solver {
+            LinearSolverType::Default => method
+                .solve_hybrid::<M, CG, <M as DefaultSolver>::LS>(&mut self.problem, final_time),
+            LinearSolverType::Lu => method
+                .solve_hybrid::<M, CG, <M as LuValidator<M>>::LS>(&mut self.problem, final_time),
+            LinearSolverType::Klu => method
+                .solve_hybrid::<M, CG, <M as KluValidator<M>>::LS>(&mut self.problem, final_time),
+        };
+        Ok(Box::new(soln?))
+    }
+
     fn solve_fwd_sens(
         &mut self,
         method: OdeSolverType,
@@ -502,6 +547,62 @@ where
                 .solve_fwd_sens::<M, CG, <M as LuValidator<M>>::LS>(&mut self.problem, &t_eval),
             LinearSolverType::Klu => method
                 .solve_fwd_sens::<M, CG, <M as KluValidator<M>>::LS>(&mut self.problem, &t_eval),
+        };
+        Ok(Box::new(soln?))
+    }
+
+    fn solve_hybrid_dense(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        params: &[f64],
+        t_eval: &[f64],
+    ) -> SolveResult {
+        self.check(linear_solver)?;
+        self.setup_problem(params)?;
+
+        let t_eval: Vec<M::T> = t_eval.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
+        let soln = match linear_solver {
+            LinearSolverType::Default => method
+                .solve_hybrid_dense::<M, CG, <M as DefaultSolver>::LS>(&mut self.problem, &t_eval),
+            LinearSolverType::Lu => method
+                .solve_hybrid_dense::<M, CG, <M as LuValidator<M>>::LS>(&mut self.problem, &t_eval),
+            LinearSolverType::Klu => method
+                .solve_hybrid_dense::<M, CG, <M as KluValidator<M>>::LS>(
+                    &mut self.problem,
+                    &t_eval,
+                ),
+        };
+        Ok(Box::new(soln?))
+    }
+
+    fn solve_hybrid_fwd_sens(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        params: &[f64],
+        t_eval: &[f64],
+    ) -> SolveResult {
+        self.check(linear_solver)?;
+        self.setup_problem(params)?;
+
+        let t_eval: Vec<M::T> = t_eval.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
+        let soln = match linear_solver {
+            LinearSolverType::Default => method
+                .solve_hybrid_fwd_sens::<M, CG, <M as DefaultSolver>::LS>(
+                    &mut self.problem,
+                    &t_eval,
+                ),
+            LinearSolverType::Lu => method
+                .solve_hybrid_fwd_sens::<M, CG, <M as LuValidator<M>>::LS>(
+                    &mut self.problem,
+                    &t_eval,
+                ),
+            LinearSolverType::Klu => method
+                .solve_hybrid_fwd_sens::<M, CG, <M as KluValidator<M>>::LS>(
+                    &mut self.problem,
+                    &t_eval,
+                ),
         };
         Ok(Box::new(soln?))
     }

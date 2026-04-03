@@ -233,6 +233,23 @@ impl OdeWrapper {
         Ok(SolutionWrapper::new(solution))
     }
 
+    /// Solve a hybrid ODE up to `final_time`, automatically applying reset
+    /// functions and continuing after root events until the solution completes.
+    pub fn solve_hybrid(
+        &self,
+        params: HostArray,
+        final_time: f64,
+    ) -> Result<SolutionWrapper, DiffsolJsError> {
+        let mut self_guard = self.guard()?;
+        let params = params.as_slice()?;
+        let linear_solver = self_guard.linear_solver;
+        let method = self_guard.ode_solver;
+        let solution = self_guard
+            .solve
+            .solve_hybrid(method, linear_solver, params, final_time)?;
+        Ok(SolutionWrapper::new(solution))
+    }
+
     /// Using the provided state, solve the problem up to time
     /// `t_eval[t_eval.len()-1]`. Returns 2D array of solution values at
     /// timepoints given by `t_eval`.
@@ -262,6 +279,26 @@ impl OdeWrapper {
         Ok(SolutionWrapper::new(solution))
     }
 
+    /// Solve a hybrid ODE at dense evaluation times, automatically applying
+    /// reset functions and continuing after root events until all requested
+    /// output points are filled.
+    pub fn solve_hybrid_dense(
+        &self,
+        params: HostArray,
+        t_eval: HostArray,
+    ) -> Result<SolutionWrapper, DiffsolJsError> {
+        let mut self_guard = self.guard()?;
+        let params = params.as_slice()?;
+        let t_eval = t_eval.as_slice()?;
+        let linear_solver = self_guard.linear_solver;
+        let method = self_guard.ode_solver;
+        let solution =
+            self_guard
+                .solve
+                .solve_hybrid_dense(method, linear_solver, params, t_eval)?;
+        Ok(SolutionWrapper::new(solution))
+    }
+
     /// Using the provided state, solve the problem up to time `t_eval[t_eval.len()-1]`.
     /// Returns 2D array of solution values at timepoints given by `t_eval`.
     /// Also returns a list of 2D arrays of sensitivities at the same timepoints
@@ -288,6 +325,27 @@ impl OdeWrapper {
         let solution = self_guard
             .solve
             .solve_fwd_sens(method, linear_solver, params, t_eval)?;
+        Ok(SolutionWrapper::new(solution))
+    }
+
+    /// Solve a hybrid ODE with forward sensitivities at dense evaluation times,
+    /// automatically applying sensitivity-aware reset functions and continuing
+    /// after root events until all requested output points are filled.
+    #[allow(clippy::type_complexity)]
+    pub fn solve_hybrid_fwd_sens(
+        &self,
+        params: HostArray,
+        t_eval: HostArray,
+    ) -> Result<SolutionWrapper, DiffsolJsError> {
+        let mut self_guard = self.guard()?;
+        let params = params.as_slice()?;
+        let t_eval = t_eval.as_slice()?;
+        let linear_solver = self_guard.linear_solver;
+        let method = self_guard.ode_solver;
+        let solution =
+            self_guard
+                .solve
+                .solve_hybrid_fwd_sens(method, linear_solver, params, t_eval)?;
         Ok(SolutionWrapper::new(solution))
     }
 
@@ -325,7 +383,8 @@ mod tests {
     use crate::scalar_type::ScalarType;
     use crate::test_support::{
         ASSERT_TOL, LOGISTIC_X0, assert_close, assert_solution_tail, logistic_integral,
-        logistic_state_dr, mass_state_deps, rhs_input_deps, rhs_state_deps, vector_host,
+        logistic_state, logistic_state_dr, mass_state_deps, rhs_input_deps, rhs_state_deps,
+        vector_host,
     };
 
     use super::*;
@@ -387,6 +446,10 @@ mod tests {
             .unwrap();
 
         assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
+    }
+
+    fn hybrid_root_time() -> f64 {
+        0.5 * 9.0_f64.ln()
     }
 
     #[test]
@@ -476,6 +539,106 @@ mod tests {
         assert_close(value, 0.0, ASSERT_TOL, "sum_squares objective");
         assert_eq!(grad.len(), 1);
         assert_close(grad[0], 0.0, ASSERT_TOL, "sum_squares gradient");
+    }
+
+    #[test]
+    fn bdf_hybrid_solution_applies_reset_after_root() {
+        let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let final_time = 2.0;
+        let solution = ode.solve_hybrid(vector_host(&[2.0]), final_time).unwrap();
+        let ys = solution.get_ys().unwrap();
+        let ys = ys.as_array::<f64>().unwrap();
+        let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+        let root_time = hybrid_root_time();
+
+        assert_eq!(ys.nrows(), 1);
+        assert_eq!(ys.ncols(), ts.len());
+        assert!(!ts.is_empty(), "expected hybrid solve to produce output");
+        assert_close(
+            *ts.last().unwrap(),
+            final_time,
+            ASSERT_TOL,
+            "hybrid final time",
+        );
+        assert_close(ys[(0, ys.ncols() - 1)], 1.0, 5e-4, "hybrid final value");
+        assert!(
+            ts.iter().any(|&t| t < root_time),
+            "expected pre-root samples"
+        );
+        assert!(
+            ts.iter().any(|&t| t > root_time),
+            "expected post-root samples after reset"
+        );
+    }
+
+    #[test]
+    fn bdf_hybrid_dense_solution_continues_after_reset() {
+        let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let t_eval = [0.5, 1.0, 1.25, 1.5, 2.0];
+        let solution = ode
+            .solve_hybrid_dense(vector_host(&[2.0]), vector_host(&t_eval))
+            .unwrap();
+        let ys = solution.get_ys().unwrap();
+        let ys = ys.as_array::<f64>().unwrap();
+
+        assert_eq!(ys.nrows(), 1);
+        assert_eq!(ys.ncols(), t_eval.len());
+        assert_close(
+            ys[(0, 0)],
+            logistic_state(LOGISTIC_X0, 2.0, t_eval[0]),
+            5e-4,
+            "hybrid dense pre-root value",
+        );
+        assert_close(
+            ys[(0, 1)],
+            logistic_state(LOGISTIC_X0, 2.0, t_eval[1]),
+            5e-4,
+            "hybrid dense near-root value",
+        );
+        for col in 2..t_eval.len() {
+            assert_close(ys[(0, col)], 1.0, 5e-4, "hybrid dense post-root value");
+        }
+    }
+
+    #[test]
+    fn bdf_hybrid_forward_sensitivities_complete_across_reset() {
+        let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let t_eval = [0.5, 1.0, 1.25, 1.5, 2.0];
+        let solution = ode
+            .solve_hybrid_fwd_sens(vector_host(&[2.0]), vector_host(&t_eval))
+            .unwrap();
+        let ys = solution.get_ys().unwrap();
+        let ys = ys.as_array::<f64>().unwrap();
+        let sens = solution.get_sens().unwrap();
+
+        assert_eq!(ys.nrows(), 1);
+        assert_eq!(ys.ncols(), t_eval.len());
+        assert_eq!(sens.len(), 1);
+        let sens_values = sens[0].as_array::<f64>().unwrap();
+        assert_eq!(sens_values.nrows(), 1);
+        assert_eq!(sens_values.ncols(), t_eval.len());
+        assert_close(
+            ys[(0, 0)],
+            logistic_state(LOGISTIC_X0, 2.0, t_eval[0]),
+            5e-4,
+            "hybrid sens pre-root value",
+        );
+        for col in 2..t_eval.len() {
+            assert_close(ys[(0, col)], 1.0, 5e-4, "hybrid sens post-root value");
+            assert!(
+                sens_values[(0, col)].is_finite(),
+                "expected finite post-root sensitivity at column {col}"
+            );
+        }
     }
 }
 
