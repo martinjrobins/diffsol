@@ -174,14 +174,6 @@ pub(crate) fn assert_solution_tail(
     }
 }
 
-pub(crate) fn assert_current_state(solution: &SolutionWrapper, expected: &[f64], tol: f64) {
-    let actual = Vec::<f64>::from_host_array(solution.get_current_state().unwrap()).unwrap();
-    assert_eq!(actual.len(), expected.len());
-    for (i, (&actual, &expected)) in actual.iter().zip(expected.iter()).enumerate() {
-        assert_close(actual, expected, tol, &format!("current_state[{i}]"));
-    }
-}
-
 pub(crate) unsafe fn ffi_free_solution(ptr: *mut SolutionWrapper) {
     if !ptr.is_null() {
         unsafe {

@@ -411,7 +411,6 @@ pub unsafe extern "C" fn diffsol_ode_rhs_jac_mul(
 /// # Safety
 /// `ode` must be a valid mutable pointer created by this library. `params_ptr`
 /// must point to `params_len` readable `f64` values unless `params_len == 0`.
-/// If non-null, `solution` must be a valid pointer created by this library.
 /// `out_solution` must be a valid, writable pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_solve(
@@ -419,7 +418,6 @@ pub unsafe extern "C" fn diffsol_ode_solve(
     params_ptr: *const f64,
     params_len: usize,
     final_time: f64,
-    solution: *mut SolutionWrapper,
     out_solution: *mut *mut SolutionWrapper,
 ) -> i32 {
     if ode.is_null() || out_solution.is_null() || !valid_f64_ptr(params_ptr, params_len) {
@@ -427,21 +425,11 @@ pub unsafe extern "C" fn diffsol_ode_solve(
         return DIFFSOL_BAD_ARG;
     }
     let params = HostArray::new_vector(params_ptr as *mut u8, params_len, ScalarType::F64);
-    let solution_in = if solution.is_null() {
-        None
-    } else {
-        Some(unsafe { (&*solution).clone() })
-    };
     let ode = unsafe { &mut *ode };
-    match ode.solve(params, final_time, solution_in) {
+    match ode.solve(params, final_time) {
         Ok(new_solution) => {
             unsafe {
-                if solution.is_null() {
-                    *out_solution = Box::into_raw(Box::new(new_solution));
-                } else {
-                    *solution = new_solution;
-                    *out_solution = solution;
-                }
+                *out_solution = Box::into_raw(Box::new(new_solution));
             }
             DIFFSOL_OK
         }
@@ -457,8 +445,7 @@ pub unsafe extern "C" fn diffsol_ode_solve(
 /// # Safety
 /// `ode` must be a valid mutable pointer created by this library. `params_ptr`
 /// and `t_eval_ptr` must point to readable `f64` buffers of the specified
-/// lengths, unless the corresponding length is zero. If non-null, `solution`
-/// must be valid. `out_solution` must be writable.
+/// lengths, unless the corresponding length is zero. `out_solution` must be writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_solve_dense(
     ode: *mut OdeWrapper,
@@ -466,7 +453,6 @@ pub unsafe extern "C" fn diffsol_ode_solve_dense(
     params_len: usize,
     t_eval_ptr: *const f64,
     t_eval_len: usize,
-    solution: *mut SolutionWrapper,
     out_solution: *mut *mut SolutionWrapper,
 ) -> i32 {
     if ode.is_null()
@@ -479,21 +465,11 @@ pub unsafe extern "C" fn diffsol_ode_solve_dense(
     }
     let params = HostArray::new_vector(params_ptr as *mut u8, params_len, ScalarType::F64);
     let t_eval = HostArray::new_vector(t_eval_ptr as *mut u8, t_eval_len, ScalarType::F64);
-    let solution_in = if solution.is_null() {
-        None
-    } else {
-        Some(unsafe { (&*solution).clone() })
-    };
     let ode = unsafe { &mut *ode };
-    match ode.solve_dense(params, t_eval, solution_in) {
+    match ode.solve_dense(params, t_eval) {
         Ok(new_solution) => {
             unsafe {
-                if solution.is_null() {
-                    *out_solution = Box::into_raw(Box::new(new_solution));
-                } else {
-                    *solution = new_solution;
-                    *out_solution = solution;
-                }
+                *out_solution = Box::into_raw(Box::new(new_solution));
             }
             DIFFSOL_OK
         }
@@ -509,8 +485,7 @@ pub unsafe extern "C" fn diffsol_ode_solve_dense(
 /// # Safety
 /// `ode` must be a valid mutable pointer created by this library. `params_ptr`
 /// and `t_eval_ptr` must point to readable `f64` buffers of the specified
-/// lengths, unless the corresponding length is zero. If non-null, `solution`
-/// must be valid. `out_solution` must be writable.
+/// lengths, unless the corresponding length is zero. `out_solution` must be writable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_solve_fwd_sens(
     ode: *mut OdeWrapper,
@@ -518,7 +493,6 @@ pub unsafe extern "C" fn diffsol_ode_solve_fwd_sens(
     params_len: usize,
     t_eval_ptr: *const f64,
     t_eval_len: usize,
-    solution: *mut SolutionWrapper,
     out_solution: *mut *mut SolutionWrapper,
 ) -> i32 {
     if ode.is_null()
@@ -531,21 +505,11 @@ pub unsafe extern "C" fn diffsol_ode_solve_fwd_sens(
     }
     let params = HostArray::new_vector(params_ptr as *mut u8, params_len, ScalarType::F64);
     let t_eval = HostArray::new_vector(t_eval_ptr as *mut u8, t_eval_len, ScalarType::F64);
-    let solution_in = if solution.is_null() {
-        None
-    } else {
-        Some(unsafe { (&*solution).clone() })
-    };
     let ode = unsafe { &mut *ode };
-    match ode.solve_fwd_sens(params, t_eval, solution_in) {
+    match ode.solve_fwd_sens(params, t_eval) {
         Ok(new_solution) => {
             unsafe {
-                if solution.is_null() {
-                    *out_solution = Box::into_raw(Box::new(new_solution));
-                } else {
-                    *solution = new_solution;
-                    *out_solution = solution;
-                }
+                *out_solution = Box::into_raw(Box::new(new_solution));
             }
             DIFFSOL_OK
         }
@@ -832,9 +796,8 @@ mod tests {
         scalar_type_to_i32,
     };
     use crate::solution_wrapper_c::{
-        diffsol_solution_wrapper_get_current_state, diffsol_solution_wrapper_get_sens,
-        diffsol_solution_wrapper_get_ts, diffsol_solution_wrapper_get_ys,
-        diffsol_solution_wrapper_set_current_state,
+        diffsol_solution_wrapper_get_sens, diffsol_solution_wrapper_get_ts,
+        diffsol_solution_wrapper_get_ys,
     };
     use crate::test_support::{
         ASSERT_TOL, LOGISTIC_X0, assert_close, assert_last_error_contains, c_string,
@@ -1125,61 +1088,45 @@ mod tests {
                     params.as_ptr(),
                     params.len(),
                     1e-9,
-                    ptr::null_mut(),
                     &mut solve_solution_ptr
                 ),
                 DIFFSOL_OK
             );
             assert!(!solve_solution_ptr.is_null());
 
-            let mut current_state_ptr = ptr::null_mut();
+            let mut solve_ys_ptr = ptr::null_mut();
+            let mut solve_ts_ptr = ptr::null_mut();
             assert_eq!(
-                diffsol_solution_wrapper_get_current_state(
-                    solve_solution_ptr,
-                    &mut current_state_ptr
-                ),
+                diffsol_solution_wrapper_get_ys(solve_solution_ptr, &mut solve_ys_ptr),
                 DIFFSOL_OK
             );
+            assert_eq!(
+                diffsol_solution_wrapper_get_ts(solve_solution_ptr, &mut solve_ts_ptr),
+                DIFFSOL_OK
+            );
+            let (solve_rows, solve_cols, solve_ys) = ffi_read_host_array_matrix(solve_ys_ptr);
+            let solve_ts = ffi_read_host_array_vector(solve_ts_ptr);
+            assert_eq!(solve_rows, 1);
+            assert_eq!(solve_cols, solve_ts.len());
+            assert!(!solve_ts.is_empty());
             assert_close(
-                ffi_read_host_array_vector(current_state_ptr)[0],
+                *solve_ts.last().unwrap(),
+                1e-9,
+                ASSERT_TOL,
+                "ffi solve final time",
+            );
+            assert_close(
+                *solve_ys.last().unwrap(),
                 logistic_state(LOGISTIC_X0, 2.0, 1e-9),
                 ASSERT_TOL,
-                "ffi solve current state",
+                "ffi solve final value",
             );
             ffi_free_solution(solve_solution_ptr);
 
             let mut solution_ptr: *mut SolutionWrapper = ptr::null_mut();
-            let seed_t_eval = [1e-9f64];
             assert_eq!(
                 diffsol_ode_set_ode_solver(ode, ode_solver_to_i32(OdeSolverType::Tsit45)),
                 DIFFSOL_OK
-            );
-            assert_eq!(
-                diffsol_ode_solve_dense(
-                    ode,
-                    params.as_ptr(),
-                    params.len(),
-                    seed_t_eval.as_ptr(),
-                    seed_t_eval.len(),
-                    ptr::null_mut(),
-                    &mut solution_ptr,
-                ),
-                DIFFSOL_OK
-            );
-            assert_eq!(
-                diffsol_solution_wrapper_set_current_state(solution_ptr, [0.1].as_ptr(), 1),
-                DIFFSOL_OK
-            );
-            let mut updated_state_ptr = ptr::null_mut();
-            assert_eq!(
-                diffsol_solution_wrapper_get_current_state(solution_ptr, &mut updated_state_ptr),
-                DIFFSOL_OK
-            );
-            assert_close(
-                ffi_read_host_array_vector(updated_state_ptr)[0],
-                0.1,
-                ASSERT_TOL,
-                "ffi current state",
             );
 
             let t_eval = [0.25f64, 0.5f64, 1.0f64];
@@ -1190,7 +1137,6 @@ mod tests {
                     params.len(),
                     t_eval.as_ptr(),
                     t_eval.len(),
-                    solution_ptr,
                     &mut solution_ptr,
                 ),
                 DIFFSOL_OK
@@ -1239,7 +1185,6 @@ mod tests {
                     params.len(),
                     t_eval.as_ptr(),
                     t_eval.len(),
-                    ptr::null_mut(),
                     &mut sens_solution_ptr,
                 ),
                 DIFFSOL_OK
@@ -1316,7 +1261,6 @@ mod jit_tests {
     use crate::solution_wrapper_c::diffsol_solution_wrapper_get_sens;
     use crate::solution_wrapper_c::{
         diffsol_solution_wrapper_get_ts, diffsol_solution_wrapper_get_ys,
-        diffsol_solution_wrapper_set_current_state,
     };
     #[cfg(feature = "diffsl-llvm")]
     use crate::test_support::ffi_read_host_array_list_matrices;
@@ -1446,7 +1390,7 @@ mod jit_tests {
                 );
 
                 let mut solution_ptr: *mut SolutionWrapper = ptr::null_mut();
-                let seed_t_eval = [1e-9f64];
+                let t_eval = [0.25f64, 0.5f64, 1.0f64];
                 assert_eq!(
                     diffsol_ode_set_ode_solver(ode, ode_solver_to_i32(OdeSolverType::Tsit45)),
                     DIFFSOL_OK
@@ -1456,31 +1400,8 @@ mod jit_tests {
                         ode,
                         params.as_ptr(),
                         params.len(),
-                        seed_t_eval.as_ptr(),
-                        seed_t_eval.len(),
-                        ptr::null_mut(),
-                        &mut solution_ptr,
-                    ),
-                    DIFFSOL_OK
-                );
-                assert_eq!(
-                    diffsol_solution_wrapper_set_current_state(
-                        solution_ptr,
-                        [LOGISTIC_X0].as_ptr(),
-                        1
-                    ),
-                    DIFFSOL_OK
-                );
-
-                let t_eval = [0.25f64, 0.5f64, 1.0f64];
-                assert_eq!(
-                    diffsol_ode_solve_dense(
-                        ode,
-                        params.as_ptr(),
-                        params.len(),
                         t_eval.as_ptr(),
                         t_eval.len(),
-                        solution_ptr,
                         &mut solution_ptr,
                     ),
                     DIFFSOL_OK
@@ -1534,7 +1455,6 @@ mod jit_tests {
                             params.len(),
                             t_eval.as_ptr(),
                             t_eval.len(),
-                            ptr::null_mut(),
                             &mut sens_solution_ptr,
                         ),
                         DIFFSOL_OK

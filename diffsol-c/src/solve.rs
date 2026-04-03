@@ -3,8 +3,8 @@
 
 use diffsol::{
     CodegenModule, ConstantOp, DefaultDenseMatrix, DefaultSolver, DiffSl, MatrixCommon,
-    NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeSolverProblem, OdeSolverState,
-    Op, Vector, VectorCommon, VectorHost, VectorRef,
+    NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeSolverProblem, Op, Vector,
+    VectorCommon, VectorHost, VectorRef,
     error::DiffsolError,
     matrix::{MatrixHost, MatrixRef},
 };
@@ -35,9 +35,8 @@ use crate::{
 
 // Each matrix type implements PySolve as bridge between diffsol and Host
 
-use crate::solution::{GenericSolution, GenericState, Solution};
-pub(crate) type SolveError = (DiffsolJsError, Option<Box<dyn Solution>>);
-pub(crate) type SolveResult = Result<Box<dyn Solution>, SolveError>;
+use crate::solution::Solution;
+pub(crate) type SolveResult = Result<Box<dyn Solution>, DiffsolJsError>;
 
 pub(crate) trait Solve {
     fn matrix_type(&self) -> MatrixType;
@@ -67,7 +66,6 @@ pub(crate) trait Solve {
         linear_solver: LinearSolverType,
         params: &[f64],
         final_time: f64,
-        solution: Option<Box<dyn Solution>>,
     ) -> SolveResult;
 
     fn solve_dense(
@@ -76,7 +74,6 @@ pub(crate) trait Solve {
         linear_solver: LinearSolverType,
         params: &[f64],
         t_eval: &[f64],
-        solution: Option<Box<dyn Solution>>,
     ) -> SolveResult;
 
     fn solve_fwd_sens(
@@ -85,7 +82,6 @@ pub(crate) trait Solve {
         linear_solver: LinearSolverType,
         params: &[f64],
         t_eval: &[f64],
-        solution: Option<Box<dyn Solution>>,
     ) -> SolveResult;
 
     #[allow(clippy::type_complexity)]
@@ -300,44 +296,6 @@ where
             .into())
         }
     }
-
-    fn get_initial_state(
-        &self,
-        solution: &dyn Solution,
-    ) -> Result<GenericState<M::V>, DiffsolJsError>
-    where
-        M::V: 'static,
-    {
-        solution.downcast_typed_solution::<M::V>()?.state_clone()
-    }
-
-    fn create_or_append_solution(
-        &self,
-        solution: Option<Box<dyn Solution>>,
-        state: GenericState<M::V>,
-        ys: <M::V as DefaultDenseMatrix>::M,
-        ts: Vec<M::T>,
-        sens: Vec<<M::V as DefaultDenseMatrix>::M>,
-    ) -> SolveResult
-    where
-        M::V: Send + Sync + 'static,
-        <M::V as DefaultDenseMatrix>::M: Send + Sync,
-        <M::V as VectorCommon>::Inner: ToHostArray<M::T> + Clone,
-        <<M::V as DefaultDenseMatrix>::M as MatrixCommon>::Inner: ToHostArray<M::T> + Clone,
-    {
-        if let Some(mut solution) = solution {
-            let solution_typed = match solution.downcast_typed_solution_mut::<M::V>() {
-                Ok(s) => s,
-                Err(err) => return Err((err, Some(solution))),
-            };
-            if let Err(err) = solution_typed.append(state, ys, ts, sens) {
-                return Err((DiffsolError::Other(err).into(), Some(solution)));
-            }
-            Ok(solution)
-        } else {
-            Ok(Box::new(GenericSolution::<M::V>::new(state, ys, ts, sens)))
-        }
-    }
 }
 
 #[cfg(feature = "external")]
@@ -484,46 +442,22 @@ where
         linear_solver: LinearSolverType,
         params: &[f64],
         final_time: f64,
-        solution: Option<Box<dyn Solution>>,
     ) -> SolveResult {
-        if let Err(err) = self.check(linear_solver) {
-            return Err((err, solution));
-        }
-        if let Err(err) = self.setup_problem(params) {
-            return Err((err, solution));
-        }
+        self.check(linear_solver)?;
+        self.setup_problem(params)?;
         let final_time = M::T::from_f64(final_time).unwrap();
-        let initial_state = match solution
-            .as_deref()
-            .map(|solution| self.get_initial_state(solution))
-            .transpose()
-        {
-            Ok(state) => state,
-            Err(err) => return Err((err, solution)),
+        let soln = match linear_solver {
+            LinearSolverType::Default => {
+                method.solve::<M, CG, <M as DefaultSolver>::LS>(&mut self.problem, final_time)
+            }
+            LinearSolverType::Lu => {
+                method.solve::<M, CG, <M as LuValidator<M>>::LS>(&mut self.problem, final_time)
+            }
+            LinearSolverType::Klu => {
+                method.solve::<M, CG, <M as KluValidator<M>>::LS>(&mut self.problem, final_time)
+            }
         };
-        let solve_result = match linear_solver {
-            LinearSolverType::Default => method.solve::<M, CG, <M as DefaultSolver>::LS>(
-                &mut self.problem,
-                final_time,
-                initial_state,
-            ),
-            LinearSolverType::Lu => method.solve::<M, CG, <M as LuValidator<M>>::LS>(
-                &mut self.problem,
-                final_time,
-                initial_state,
-            ),
-            LinearSolverType::Klu => method.solve::<M, CG, <M as KluValidator<M>>::LS>(
-                &mut self.problem,
-                final_time,
-                initial_state,
-            ),
-        };
-        let (ys, ts, state) = match solve_result {
-            Ok(res) => res,
-            Err(err) => return Err((err.into(), solution)),
-        };
-
-        self.create_or_append_solution(solution, state, ys, ts, Vec::new())
+        Ok(Box::new(soln?))
     }
 
     fn solve_dense(
@@ -532,65 +466,21 @@ where
         linear_solver: LinearSolverType,
         params: &[f64],
         t_eval: &[f64],
-        solution: Option<Box<dyn Solution>>,
     ) -> SolveResult {
-        if let Err(err) = self.check(linear_solver) {
-            return Err((err, solution));
-        }
-        if let Err(err) = self.setup_problem(params) {
-            return Err((err, solution));
-        }
+        self.check(linear_solver)?;
+        self.setup_problem(params)?;
 
         let t_eval: Vec<M::T> = t_eval.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
-        let initial_state = match solution
-            .as_deref()
-            .map(|solution| self.get_initial_state(solution))
-            .transpose()
-        {
-            Ok(state) => state,
-            Err(err) => return Err((err, solution)),
-        };
-        let solve_result = match linear_solver {
-            LinearSolverType::Default => method.solve_dense::<M, CG, <M as DefaultSolver>::LS>(
-                &mut self.problem,
-                &t_eval,
-                initial_state,
-            ),
-            LinearSolverType::Lu => method.solve_dense::<M, CG, <M as LuValidator<M>>::LS>(
-                &mut self.problem,
-                &t_eval,
-                initial_state,
-            ),
-            LinearSolverType::Klu => method.solve_dense::<M, CG, <M as KluValidator<M>>::LS>(
-                &mut self.problem,
-                &t_eval,
-                initial_state,
-            ),
-        };
-        let (ys, state) = match solve_result {
-            Ok(res) => res,
-            Err(err) => return Err((err.into(), solution)),
-        };
-
-        let ncols = ys.ncols();
-        let ts = if ncols == t_eval.len() {
-            t_eval
-        } else {
-            let mut ts: Vec<M::T> = t_eval
-                .iter()
-                .copied()
-                .take(ncols.saturating_sub(1))
-                .collect();
-            if ncols > 0 {
-                let final_t = match &state {
-                    GenericState::Bdf(s) => s.as_ref().t,
-                    GenericState::Rk(s) => s.as_ref().t,
-                };
-                ts.push(final_t);
-            }
-            ts
-        };
-        self.create_or_append_solution(solution, state, ys, ts, Vec::new())
+        let soln =
+            match linear_solver {
+                LinearSolverType::Default => method
+                    .solve_dense::<M, CG, <M as DefaultSolver>::LS>(&mut self.problem, &t_eval),
+                LinearSolverType::Lu => method
+                    .solve_dense::<M, CG, <M as LuValidator<M>>::LS>(&mut self.problem, &t_eval),
+                LinearSolverType::Klu => method
+                    .solve_dense::<M, CG, <M as KluValidator<M>>::LS>(&mut self.problem, &t_eval),
+            };
+        Ok(Box::new(soln?))
     }
 
     fn solve_fwd_sens(
@@ -599,66 +489,21 @@ where
         linear_solver: LinearSolverType,
         params: &[f64],
         t_eval: &[f64],
-        solution: Option<Box<dyn Solution>>,
     ) -> SolveResult {
-        if let Err(err) = self.check(linear_solver) {
-            return Err((err, solution));
-        }
-        if let Err(err) = self.setup_problem(params) {
-            return Err((err, solution));
-        }
+        self.check(linear_solver)?;
+        self.setup_problem(params)?;
 
         let t_eval: Vec<M::T> = t_eval.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
-        let initial_state = match solution
-            .as_deref()
-            .map(|solution| self.get_initial_state(solution))
-            .transpose()
-        {
-            Ok(state) => state,
-            Err(err) => return Err((err, solution)),
-        };
-
-        let solve_result = match linear_solver {
-            LinearSolverType::Default => method.solve_fwd_sens::<M, CG, <M as DefaultSolver>::LS>(
-                &mut self.problem,
-                &t_eval,
-                initial_state,
-            ),
-            LinearSolverType::Lu => method.solve_fwd_sens::<M, CG, <M as LuValidator<M>>::LS>(
-                &mut self.problem,
-                &t_eval,
-                initial_state,
-            ),
-            LinearSolverType::Klu => method.solve_fwd_sens::<M, CG, <M as KluValidator<M>>::LS>(
-                &mut self.problem,
-                &t_eval,
-                initial_state,
-            ),
-        };
-        let (ys, sens, state) = match solve_result {
-            Ok(res) => res,
-            Err(err) => return Err((err.into(), solution)),
-        };
-
-        let ncols = ys.ncols();
-        let ts = if ncols == t_eval.len() {
-            t_eval
-        } else {
-            let mut ts: Vec<M::T> = t_eval
-                .iter()
-                .copied()
-                .take(ncols.saturating_sub(1))
-                .collect();
-            if ncols > 0 {
-                let final_t = match &state {
-                    GenericState::Bdf(s) => s.as_ref().t,
-                    GenericState::Rk(s) => s.as_ref().t,
-                };
-                ts.push(final_t);
+        let soln = match linear_solver {
+            LinearSolverType::Default => {
+                method.solve_fwd_sens::<M, CG, <M as DefaultSolver>::LS>(&mut self.problem, &t_eval)
             }
-            ts
+            LinearSolverType::Lu => method
+                .solve_fwd_sens::<M, CG, <M as LuValidator<M>>::LS>(&mut self.problem, &t_eval),
+            LinearSolverType::Klu => method
+                .solve_fwd_sens::<M, CG, <M as KluValidator<M>>::LS>(&mut self.problem, &t_eval),
         };
-        self.create_or_append_solution(solution, state, ys, ts, sens)
+        Ok(Box::new(soln?))
     }
 
     fn solve_sum_squares_adj(
