@@ -1,6 +1,6 @@
 use crate::{
-    error::OdeSolverError, ode_solver_error, Context, DefaultDenseMatrix, DiffsolError,
-    OdeEquations, OdeSolverStopReason, Op, Scalar,
+    error::OdeSolverError, ode_solver_error, DefaultDenseMatrix, DiffsolError, Matrix,
+    MatrixCommon, OdeSolverStopReason, Scalar,
 };
 
 pub(crate) enum SolutionMode<T: Scalar> {
@@ -11,6 +11,8 @@ pub(crate) enum SolutionMode<T: Scalar> {
     /// The T is the final time.
     Tfinal(T),
 }
+
+pub(crate) const INITIAL_NCOLS: usize = 10;
 
 /// Stores ODE solve output and continuation state for staged integrations.
 ///
@@ -48,7 +50,7 @@ pub(crate) enum SolutionMode<T: Scalar> {
 ///     .unwrap();
 ///
 /// let mut state = problem.bdf_state::<LS>().unwrap();
-/// let mut soln = Solution::new(1.0_f64, problem.eqn());
+/// let mut soln = Solution::<M::V>::new(1.0_f64);
 ///
 /// while !soln.is_complete() {
 ///     state = problem
@@ -81,66 +83,153 @@ impl<V: DefaultDenseMatrix> Solution<V> {
             SolutionMode::Tfinal(t_final) => self.ts.last().map(|&t| t >= t_final).unwrap_or(false),
         }
     }
-    pub fn new(t_final: V::T, eq: &impl OdeEquations<T = V::T, V = V, C = V::C>) -> Self {
-        let nrows = if eq.out().is_some() {
-            eq.out().unwrap().nout()
-        } else {
-            eq.rhs().nstates()
-        };
-        const INITIAL_NCOLS: usize = 10;
-        let ret = eq.context().dense_mat_zeros::<V>(nrows, INITIAL_NCOLS);
-
-        let tmp_nout = if let Some(out) = eq.out() {
-            V::zeros(out.nout(), eq.context().clone())
-        } else {
-            V::zeros(0, eq.context().clone())
-        };
-        let tmp_nstates = V::zeros(0, eq.context().clone());
+    pub fn new(t_final: V::T) -> Self {
+        let ctx = V::C::default();
         Self {
             ts: Vec::new(),
-            ys: ret,
+            ys: <V as DefaultDenseMatrix>::M::zeros(0, 0, ctx.clone()),
             y_sens: Vec::new(),
             stop_reason: None,
-            tmp_nout,
-            tmp_nparams: V::zeros(0, eq.context().clone()),
-            tmp_nstates,
+            tmp_nout: V::zeros(0, ctx.clone()),
+            tmp_nparams: V::zeros(0, ctx.clone()),
+            tmp_nstates: V::zeros(0, ctx.clone()),
             tmp_nsens: Vec::new(),
             mode: SolutionMode::Tfinal(t_final),
         }
     }
 
-    pub fn new_dense(
-        t_evals: Vec<V::T>,
-        eq: &impl OdeEquations<T = V::T, V = V, C = V::C>,
-    ) -> Result<Self, DiffsolError> {
-        let nrows = if eq.out().is_some() {
-            eq.out().unwrap().nout()
-        } else {
-            eq.rhs().nstates()
-        };
-        let ret = eq.context().dense_mat_zeros::<V>(nrows, t_evals.len());
-
+    pub fn new_dense(t_evals: Vec<V::T>) -> Result<Self, DiffsolError> {
         // check t_eval is increasing
         if t_evals.windows(2).any(|w| w[0] > w[1]) {
             return Err(ode_solver_error!(InvalidTEval));
         }
-        let tmp_nout = if let Some(out) = eq.out() {
-            V::zeros(out.nout(), eq.context().clone())
-        } else {
-            V::zeros(0, eq.context().clone())
-        };
-        let tmp_nstates = V::zeros(eq.rhs().nstates(), eq.context().clone());
+        let ctx = V::C::default();
         Ok(Self {
             ts: t_evals,
-            ys: ret,
+            ys: <V as DefaultDenseMatrix>::M::zeros(0, 0, ctx.clone()),
             y_sens: Vec::new(),
             stop_reason: None,
-            tmp_nout,
-            tmp_nparams: V::zeros(0, eq.context().clone()),
-            tmp_nstates,
+            tmp_nout: V::zeros(0, ctx.clone()),
+            tmp_nparams: V::zeros(0, ctx.clone()),
+            tmp_nstates: V::zeros(0, ctx.clone()),
             tmp_nsens: Vec::new(),
             mode: SolutionMode::Tevals(0),
         })
+    }
+
+    pub(crate) fn ensure_ode_allocation(
+        &mut self,
+        ctx: &V::C,
+        nrows: usize,
+        nout: usize,
+        nstates: usize,
+    ) -> Result<(), DiffsolError> {
+        match self.mode {
+            SolutionMode::Tfinal(_) => {
+                if self.ys.nrows() == 0 && self.ys.ncols() == 0 {
+                    self.ys =
+                        <V as DefaultDenseMatrix>::M::zeros(nrows, INITIAL_NCOLS, ctx.clone());
+                } else if self.ys.nrows() != nrows {
+                    return Err(ode_solver_error!(
+                        Other,
+                        "Solution is incompatible with the current equations: output size changed"
+                    ));
+                }
+            }
+            SolutionMode::Tevals(_) => {
+                if self.ys.nrows() == 0 && self.ys.ncols() == 0 {
+                    self.ys =
+                        <V as DefaultDenseMatrix>::M::zeros(nrows, self.ts.len(), ctx.clone());
+                } else if self.ys.nrows() != nrows || self.ys.ncols() != self.ts.len() {
+                    return Err(ode_solver_error!(
+                        Other,
+                        "Solution is incompatible with the current equations: output size changed"
+                    ));
+                }
+            }
+        }
+
+        if self.tmp_nout.len() == 0 {
+            self.tmp_nout = V::zeros(nout, ctx.clone());
+        } else if self.tmp_nout.len() != nout {
+            return Err(ode_solver_error!(
+                Other,
+                "Solution is incompatible with the current equations: output size changed"
+            ));
+        }
+
+        match self.mode {
+            SolutionMode::Tfinal(_) => {
+                if self.tmp_nstates.len() != 0 && self.tmp_nstates.len() != nstates {
+                    return Err(ode_solver_error!(
+                        Other,
+                        "Solution is incompatible with the current equations: state size changed"
+                    ));
+                }
+            }
+            SolutionMode::Tevals(_) => {
+                if self.tmp_nstates.len() == 0 {
+                    self.tmp_nstates = V::zeros(nstates, ctx.clone());
+                } else if self.tmp_nstates.len() != nstates {
+                    return Err(ode_solver_error!(
+                        Other,
+                        "Solution is incompatible with the current equations: state size changed"
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn ensure_sens_allocation(
+        &mut self,
+        ctx: &V::C,
+        nrows: usize,
+        nout: usize,
+        nout_params: usize,
+        nstates: usize,
+        nparams: usize,
+    ) -> Result<(), DiffsolError> {
+        self.ensure_ode_allocation(ctx, nrows, nout, nstates)?;
+
+        if self.y_sens.is_empty() {
+            self.y_sens =
+                vec![
+                    <V as DefaultDenseMatrix>::M::zeros(nrows, self.ts.len(), ctx.clone());
+                    nparams
+                ];
+        } else if self.y_sens.len() != nparams
+            || self
+                .y_sens
+                .iter()
+                .any(|m| m.nrows() != nrows || m.ncols() != self.ts.len())
+        {
+            return Err(ode_solver_error!(
+                Other,
+                "Solution is incompatible with the current equations: sensitivity size changed"
+            ));
+        }
+
+        if self.tmp_nparams.len() == 0 {
+            self.tmp_nparams = V::zeros(nout_params, ctx.clone());
+        } else if self.tmp_nparams.len() != nout_params {
+            return Err(ode_solver_error!(
+                Other,
+                "Solution is incompatible with the current equations: output sensitivity size changed"
+            ));
+        }
+
+        if self.tmp_nsens.is_empty() {
+            self.tmp_nsens = vec![V::zeros(nstates, ctx.clone()); nparams];
+        } else if self.tmp_nsens.len() != nparams
+            || self.tmp_nsens.iter().any(|v| v.len() != nstates)
+        {
+            return Err(ode_solver_error!(
+                Other,
+                "Solution is incompatible with the current equations: sensitivity size changed"
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -152,7 +241,7 @@ mod test {
         ode_equations::test_models::exponential_decay::{
             exponential_decay_problem, exponential_decay_problem_with_root,
         },
-        NalgebraLU, NalgebraVec, OdeSolverMethod,
+        NalgebraLU, NalgebraVec, OdeBuilder, OdeSolverMethod,
     };
 
     use super::Solution;
@@ -177,7 +266,7 @@ mod test {
         let k = 0.1_f64;
         let mut state = problem.bdf_state::<NalgebraLU<f64>>().unwrap();
 
-        let mut soln = Solution::new(t_final, problem.eqn());
+        let mut soln = Solution::new(t_final);
         assert!(!soln.is_complete());
         while !soln.is_complete() {
             state = problem
@@ -200,7 +289,7 @@ mod test {
         let t_eval = (0..=10).map(|i| i as f64).collect::<Vec<_>>();
         let mut state = problem.bdf_state::<NalgebraLU<f64>>().unwrap();
 
-        let mut soln = Solution::new_dense(t_eval.clone(), problem.eqn()).unwrap();
+        let mut soln = Solution::new_dense(t_eval.clone()).unwrap();
         assert!(!soln.is_complete());
         while !soln.is_complete() {
             state = problem
@@ -223,7 +312,7 @@ mod test {
         let k = 0.1_f64;
         let mut state = problem.bdf_state::<NalgebraLU<f64>>().unwrap();
 
-        let mut soln = Solution::new(t_final, problem.eqn());
+        let mut soln = Solution::new(t_final);
         assert!(!soln.is_complete());
         while !soln.is_complete() {
             state = problem
@@ -247,7 +336,7 @@ mod test {
         let t_eval = vec![0.0, 0.5, 1.0, 1.5, 2.0];
         let mut state = problem.bdf_state::<NalgebraLU<f64>>().unwrap();
 
-        let mut soln = Solution::new_dense(t_eval.clone(), problem.eqn()).unwrap();
+        let mut soln = Solution::new_dense(t_eval.clone()).unwrap();
         assert!(!soln.is_complete());
         while !soln.is_complete() {
             state = problem
@@ -264,12 +353,61 @@ mod test {
 
     #[test]
     fn test_solution_new_dense_errors_on_non_increasing_t_evals() {
-        let (problem, _soln) = exponential_decay_problem::<NalgebraMat<f64>>(false);
         let t_eval = vec![0.0, 1.0, 0.5, 2.0];
-        let err = Solution::new_dense(t_eval, problem.eqn());
+        let err = Solution::<NalgebraVec<f64>>::new_dense(t_eval);
         assert!(matches!(
             err,
             Err(DiffsolError::OdeSolverError(OdeSolverError::InvalidTEval))
+        ));
+    }
+
+    #[test]
+    fn test_solution_solve_soln_errors_on_incompatible_equations() {
+        type M = NalgebraMat<f64>;
+        type LS = NalgebraLU<f64>;
+
+        let problem1 = OdeBuilder::<M>::new()
+            .p([0.1])
+            .rhs_implicit(
+                |x, p, _t, y| y[0] = -p[0] * x[0],
+                |_x, p, _t, v, y| y[0] = -p[0] * v[0],
+            )
+            .init(|_p, _t, y| y[0] = 1.0, 1)
+            .build()
+            .unwrap();
+
+        let problem2 = OdeBuilder::<M>::new()
+            .p([0.1])
+            .rhs_implicit(
+                |x, p, _t, y| {
+                    y[0] = -p[0] * x[0];
+                    y[1] = -p[0] * x[1];
+                },
+                |_x, p, _t, v, y| {
+                    y[0] = -p[0] * v[0];
+                    y[1] = -p[0] * v[1];
+                },
+            )
+            .init(
+                |_p, _t, y| {
+                    y[0] = 1.0;
+                    y[1] = 1.0;
+                },
+                2,
+            )
+            .build()
+            .unwrap();
+
+        let mut soln = Solution::<NalgebraVec<f64>>::new_dense(vec![0.0, 1.0]).unwrap();
+        problem1.bdf::<LS>().unwrap().solve_soln(&mut soln).unwrap();
+
+        let err = match problem2.bdf::<LS>().unwrap().solve_soln(&mut soln) {
+            Ok(_) => panic!("expected incompatible solution error"),
+            Err(err) => err,
+        };
+        assert!(matches!(
+            err,
+            DiffsolError::OdeSolverError(OdeSolverError::Other(_))
         ));
     }
 }

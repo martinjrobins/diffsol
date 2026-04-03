@@ -45,32 +45,22 @@ where
         };
 
         let ctx = self.problem().context().clone();
+        let nrows = self
+            .problem()
+            .eqn
+            .out()
+            .map(|out| out.nout())
+            .unwrap_or_else(|| self.problem().eqn.rhs().nout());
         let nstates = self.problem().eqn.rhs().nstates();
         let nparams = self.problem().eqn.rhs().nparams();
-
-        if soln.y_sens.len() != nparams {
-            soln.y_sens =
-                vec![ctx.dense_mat_zeros::<Eqn::V>(soln.ys.nrows(), soln.ys.ncols()); nparams];
-        }
-        if soln.tmp_nstates.len() != nstates {
-            soln.tmp_nstates = Eqn::V::zeros(nstates, ctx.clone());
-        }
-        if soln.tmp_nsens.len() != nparams {
-            soln.tmp_nsens = vec![Eqn::V::zeros(nstates, ctx.clone()); nparams];
-        }
         let nout = self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0);
-        if soln.tmp_nout.len() != nout {
-            soln.tmp_nout = Eqn::V::zeros(nout, ctx.clone());
-        }
         let nout_params = self
             .problem()
             .eqn
             .out()
             .map(|out| out.nparams())
             .unwrap_or(0);
-        if soln.tmp_nparams.len() != nout_params {
-            soln.tmp_nparams = Eqn::V::zeros(nout_params, ctx);
-        }
+        soln.ensure_sens_allocation(&ctx, nrows, nout, nout_params, nstates, nparams)?;
 
         let (stop_reason, col) = solve_dense_sensitivities(
             &mut soln.ys,

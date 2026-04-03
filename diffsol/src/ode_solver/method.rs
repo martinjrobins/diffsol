@@ -2,7 +2,7 @@ use std::cell::Ref;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
-    ode_solver::solution::SolutionMode,
+    ode_solver::solution::{SolutionMode, INITIAL_NCOLS},
     ode_solver_error,
     scalar::Scalar,
     AugmentedOdeEquations, Checkpointing, Context, DefaultDenseMatrix, DenseMatrix,
@@ -256,7 +256,7 @@ where
     ///
     /// let t_final = 10.0_f64;
     /// let mut state = problem.bdf_state::<LS>().unwrap();
-    /// let mut soln = Solution::new(t_final, problem.eqn());
+    /// let mut soln = Solution::<V>::new(t_final);
     ///
     /// while !soln.is_complete() {
     ///     state = problem.bdf_solver::<LS>(state).unwrap()
@@ -277,6 +277,15 @@ where
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
+        let nrows = if let Some(out) = self.problem().eqn.out() {
+            out.nout()
+        } else {
+            self.problem().eqn.rhs().nstates()
+        };
+        let nout = self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0);
+        let nstates = self.problem().eqn.rhs().nstates();
+        soln.ensure_ode_allocation(self.problem().context(), nrows, nout, nstates)?;
+
         match soln.mode {
             SolutionMode::Tfinal(t_final) => {
                 let stop_reason = solve(
@@ -714,7 +723,6 @@ where
     } else {
         s.problem().eqn.rhs().nstates()
     };
-    const INITIAL_NCOLS: usize = 10;
     let ret = s
         .problem()
         .context()
@@ -985,7 +993,7 @@ mod test {
         let (problem, soln) = exponential_decay_problem_sens::<NalgebraMat<f64>>(false);
         let t_eval = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
         let mut state = problem.bdf_state_sens::<LS>().unwrap();
-        let mut dense_soln = Solution::new_dense(t_eval.clone(), problem.eqn()).unwrap();
+        let mut dense_soln = Solution::new_dense(t_eval.clone()).unwrap();
 
         while !dense_soln.is_complete() {
             state = problem
@@ -1021,7 +1029,7 @@ mod test {
         let (problem, _soln) = exponential_decay_with_reset_problem_sens::<NalgebraMat<f64>>();
         let t_eval = vec![1.0_f64, 6.0_f64];
         let mut state = problem.bdf_state_sens::<LS>().unwrap();
-        let mut dense_soln = Solution::new_dense(t_eval.clone(), problem.eqn()).unwrap();
+        let mut dense_soln = Solution::new_dense(t_eval.clone()).unwrap();
         state = problem
             .bdf_solver_sens::<LS>(state)
             .unwrap()
@@ -1085,7 +1093,7 @@ mod test {
             .unwrap();
 
         let mut state = problem.bdf_state::<LS>().unwrap();
-        let mut soln = Solution::new(t_final, problem.eqn());
+        let mut soln = Solution::new(t_final);
         let mut stages = 0_usize;
 
         while !soln.is_complete() {
