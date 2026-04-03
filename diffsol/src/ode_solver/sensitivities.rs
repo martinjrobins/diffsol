@@ -199,6 +199,7 @@ where
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn solve_dense_sensitivities<'a, Eqn, S>(
     ret: &mut <Eqn::V as DefaultDenseMatrix>::M,
     ret_sens: &mut [<Eqn::V as DefaultDenseMatrix>::M],
@@ -257,6 +258,7 @@ where
     Ok((stop_reason, col))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn dense_write_out_sensitivities<'a, Eqn, S>(
     s: &S,
     ret: &mut <Eqn::V as DefaultDenseMatrix>::M,
