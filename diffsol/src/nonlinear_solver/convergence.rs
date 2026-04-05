@@ -1,5 +1,4 @@
 use log::trace;
-use nalgebra::ComplexField;
 use num_traits::{FromPrimitive, One, Pow, ToPrimitive};
 
 use crate::{scalar::IndexType, Scalar, Vector};

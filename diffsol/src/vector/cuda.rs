@@ -1100,7 +1100,10 @@ mod tests {
             .iter()
             .zip([1.0, 2.0, 3.0].iter())
             .zip([0.1, 0.2, 0.3].iter())
-            .map(|((a, b), c)| (a / (b * rtol + c)).powi(2))
+            .map(|((a, b), c)| {
+                let term = a / (b * rtol + c);
+                term * term
+            })
             .sum::<f64>();
         assert!((norm - expected).abs() < 1e-6);
         let norm = vec1.squared_norm(&vec2, &atol, rtol);

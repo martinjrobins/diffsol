@@ -2,7 +2,7 @@ use crate::{
     error::DiffsolJsError,
     scalar_type::{Scalar, ScalarType},
 };
-use diffsol::FaerScalar;
+use diffsol::{FaerScalar, NalgebraScalar};
 use ndarray::{ArrayView2, ShapeBuilder};
 use std::any::Any;
 
@@ -27,7 +27,7 @@ impl<T: Scalar + FaerScalar + 'static> ToHostArray<T> for faer::Mat<T> {
     }
 }
 
-impl<T: Scalar + 'static> ToHostArray<T> for nalgebra::DMatrix<T> {
+impl<T: Scalar + NalgebraScalar + 'static> ToHostArray<T> for nalgebra::DMatrix<T> {
     fn to_host_array(self) -> HostArray {
         let owner = Box::new(self);
         let nrows = owner.nrows();
@@ -41,7 +41,7 @@ impl<T: Scalar + 'static> ToHostArray<T> for nalgebra::DMatrix<T> {
     }
 }
 
-impl<T: Scalar + 'static> ToHostArray<T> for nalgebra::DVector<T> {
+impl<T: Scalar + NalgebraScalar + 'static> ToHostArray<T> for nalgebra::DVector<T> {
     fn to_host_array(self) -> HostArray {
         let owner = Box::new(self);
         let len = owner.len();

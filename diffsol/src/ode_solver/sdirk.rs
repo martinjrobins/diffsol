@@ -17,8 +17,7 @@ use crate::{
 };
 use log::debug;
 use log::trace;
-use nalgebra::ComplexField;
-use num_traits::{FromPrimitive, One, ToPrimitive, Zero};
+use num_traits::{FromPrimitive, One, Signed, ToPrimitive, Zero};
 
 use super::bdf::BdfStatistics;
 use super::config::SdirkConfig;

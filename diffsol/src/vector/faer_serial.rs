@@ -217,7 +217,8 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
             let yi = unsafe { y.data.get_unchecked(i) };
             let ai = unsafe { atol.data.get_unchecked(i) };
             let xi = unsafe { self.data.get_unchecked(i) };
-            acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
+            let term = *xi / (yi.abs() * rtol + *ai);
+            acc += term * term;
         }
         acc / Self::T::from_f64(self.len() as f64).unwrap()
     }
@@ -365,7 +366,8 @@ impl<'a, T: FaerScalar> VectorView<'a> for FaerVecRef<'a, T> {
             let yi = unsafe { y.data.get_unchecked(i) };
             let ai = unsafe { atol.data.get_unchecked(i) };
             let xi = unsafe { self.data.get_unchecked(i) };
-            acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
+            let term = *xi / (yi.abs() * rtol + *ai);
+            acc += term * term;
         }
         acc / Self::T::from_f64(self.data.nrows() as f64).unwrap()
     }

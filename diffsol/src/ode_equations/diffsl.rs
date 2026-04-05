@@ -1080,6 +1080,7 @@ mod tests {
         scalar::Scalar as DiffSlScalar,
     };
 
+    use crate::Scalar;
     use crate::{
         error::DiffsolError, matrix::MatrixRef, ConstantOp, Context, DefaultDenseMatrix,
         DefaultSolver, DenseMatrix, LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint,
@@ -1088,7 +1089,6 @@ mod tests {
     };
 
     use super::{DiffSl, DiffSlContext};
-    use nalgebra::ComplexField;
     use num_traits::{FromPrimitive, One, ToPrimitive, Zero};
     use paste::paste;
 

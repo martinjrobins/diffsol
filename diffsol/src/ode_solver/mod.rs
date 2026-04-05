@@ -22,7 +22,6 @@ mod tests {
     use std::rc::Rc;
 
     use self::problem::OdeSolverSolution;
-    use nalgebra::ComplexField;
 
     use super::*;
     use crate::error::{DiffsolError, OdeSolverError};
@@ -30,6 +29,7 @@ mod tests {
     use crate::ode_solver::sensitivities::SensitivitiesOdeSolverMethod;
     use crate::op::unit::UnitCallable;
     use crate::op::ParameterisedOp;
+    use crate::Scalar;
     use crate::{
         op::OpStatistics, AdjointOdeSolverMethod, Context, DenseMatrix, MatrixCommon, MatrixRef,
         NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
@@ -41,7 +41,7 @@ mod tests {
         ConstantOp, ConstantOpSens, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp,
         NonLinearOpSens, Op, Vector,
     };
-    use num_traits::{FromPrimitive, One, Zero};
+    use num_traits::{FromPrimitive, One, Signed, Zero};
 
     pub fn test_ode_solver<'a, M, Eqn, Method>(
         method: &mut Method,
@@ -197,8 +197,11 @@ mod tests {
             let soln_j = soln.column(j);
             let data_j = data.column(j);
             let delta = soln_j - data_j;
-            ret.set_index(0, ret.get_index(0) + delta.norm(2).powi(2));
-            ret.set_index(1, ret.get_index(1) + delta.norm(4).powi(4));
+            let norm2 = delta.norm(2);
+            ret.set_index(0, ret.get_index(0) + norm2 * norm2);
+            let norm4 = delta.norm(4);
+            let norm4_sq = norm4 * norm4;
+            ret.set_index(1, ret.get_index(1) + norm4_sq * norm4_sq);
         }
         ret
     }

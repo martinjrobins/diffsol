@@ -2,7 +2,7 @@
 // combinations are valid.
 
 use diffsol::error::DiffsolError;
-use diffsol::{FaerScalar, Scalar};
+use diffsol::{FaerScalar, NalgebraScalar};
 
 use crate::{
     error::DiffsolJsError, linear_solver_type::LinearSolverType, matrix_type::MatrixKind,
@@ -71,7 +71,7 @@ impl<T: FaerScalar> KluValidator<diffsol::FaerSparseMat<T>> for diffsol::FaerSpa
     }
 }
 
-impl<T: Scalar> KluValidator<diffsol::NalgebraMat<T>> for diffsol::NalgebraMat<T> {
+impl<T: NalgebraScalar> KluValidator<diffsol::NalgebraMat<T>> for diffsol::NalgebraMat<T> {
     type LS = diffsol::NalgebraLU<T>;
     fn valid() -> bool {
         false
@@ -92,7 +92,7 @@ pub(crate) trait LuValidator<M: diffsol::Matrix> {
     }
 }
 
-impl<T: Scalar> LuValidator<diffsol::NalgebraMat<T>> for diffsol::NalgebraMat<T> {
+impl<T: NalgebraScalar> LuValidator<diffsol::NalgebraMat<T>> for diffsol::NalgebraMat<T> {
     type LS = diffsol::NalgebraLU<T>;
     fn valid() -> bool {
         true

@@ -2,7 +2,7 @@ use std::ops::{Add, AddAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
 use nalgebra::{DMatrix, DMatrixView, DMatrixViewMut};
 
-use crate::{scalar::Scale, IndexType, Scalar, Vector};
+use crate::{scalar::Scale, IndexType, NalgebraScalar, Scalar, Vector};
 
 use super::default_solver::DefaultSolver;
 use super::sparsity::{Dense, DenseRef};
@@ -14,24 +14,24 @@ use crate::{
 };
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct NalgebraMat<T: Scalar> {
+pub struct NalgebraMat<T: NalgebraScalar> {
     pub(crate) data: DMatrix<T>,
     pub(crate) context: NalgebraContext,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct NalgebraMatRef<'a, T: Scalar> {
+pub struct NalgebraMatRef<'a, T: NalgebraScalar> {
     pub(crate) data: DMatrixView<'a, T>,
     pub(crate) context: NalgebraContext,
 }
 
 #[derive(Debug, PartialEq)]
-pub struct NalgebraMatMut<'a, T: Scalar> {
+pub struct NalgebraMatMut<'a, T: NalgebraScalar> {
     pub(crate) data: DMatrixViewMut<'a, T>,
     pub(crate) context: NalgebraContext,
 }
 
-impl<T: Scalar> DefaultSolver for NalgebraMat<T> {
+impl<T: NalgebraScalar> DefaultSolver for NalgebraMat<T> {
     type LS = NalgebraLU<T>;
 }
 
@@ -39,19 +39,27 @@ impl_matrix_common_ref!(
     NalgebraMatMut<'a, T>,
     NalgebraVec<T>,
     NalgebraContext,
-    DMatrixViewMut<'a, T>
+    DMatrixViewMut<'a, T>,
+    NalgebraScalar
 );
 impl_matrix_common_ref!(
     NalgebraMatRef<'a, T>,
     NalgebraVec<T>,
     NalgebraContext,
-    DMatrixView<'a, T>
+    DMatrixView<'a, T>,
+    NalgebraScalar
 );
-impl_matrix_common!(NalgebraMat<T>, NalgebraVec<T>, NalgebraContext, DMatrix<T>);
+impl_matrix_common!(
+    NalgebraMat<T>,
+    NalgebraVec<T>,
+    NalgebraContext,
+    DMatrix<T>,
+    NalgebraScalar
+);
 
 macro_rules! impl_mul_scalar {
     ($mat_type:ty, $out:ty) => {
-        impl<'a, T: Scalar> Mul<Scale<T>> for $mat_type {
+        impl<'a, T: NalgebraScalar> Mul<Scale<T>> for $mat_type {
             type Output = $out;
 
             fn mul(self, rhs: Scale<T>) -> Self::Output {
@@ -67,7 +75,7 @@ macro_rules! impl_mul_scalar {
 
 macro_rules! impl_mul_assign_scalar {
     ($mat_type:ty) => {
-        impl<T: Scalar> MulAssign<Scale<T>> for $mat_type {
+        impl<T: NalgebraScalar> MulAssign<Scale<T>> for $mat_type {
             fn mul_assign(&mut self, rhs: Scale<T>) {
                 let scale = rhs.value();
                 self.data *= scale;
@@ -82,29 +90,75 @@ impl_mul_scalar!(&NalgebraMat<T>, NalgebraMat<T>);
 
 impl_mul_assign_scalar!(NalgebraMatMut<'_, T>);
 
-impl_add!(NalgebraMat<T>, &NalgebraMat<T>, NalgebraMat<T>);
-impl_add!(NalgebraMat<T>, &NalgebraMatRef<'_, T>, NalgebraMat<T>);
-impl_add!(NalgebraMatRef<'_, T>, &NalgebraMat<T>, NalgebraMat<T>);
+impl_add!(
+    NalgebraMat<T>,
+    &NalgebraMat<T>,
+    NalgebraMat<T>,
+    NalgebraScalar
+);
+impl_add!(
+    NalgebraMat<T>,
+    &NalgebraMatRef<'_, T>,
+    NalgebraMat<T>,
+    NalgebraScalar
+);
+impl_add!(
+    NalgebraMatRef<'_, T>,
+    &NalgebraMat<T>,
+    NalgebraMat<T>,
+    NalgebraScalar
+);
 
-impl_sub!(NalgebraMat<T>, &NalgebraMat<T>, NalgebraMat<T>);
-impl_sub!(NalgebraMat<T>, &NalgebraMatRef<'_, T>, NalgebraMat<T>);
-impl_sub!(NalgebraMatRef<'_, T>, &NalgebraMat<T>, NalgebraMat<T>);
+impl_sub!(
+    NalgebraMat<T>,
+    &NalgebraMat<T>,
+    NalgebraMat<T>,
+    NalgebraScalar
+);
+impl_sub!(
+    NalgebraMat<T>,
+    &NalgebraMatRef<'_, T>,
+    NalgebraMat<T>,
+    NalgebraScalar
+);
+impl_sub!(
+    NalgebraMatRef<'_, T>,
+    &NalgebraMat<T>,
+    NalgebraMat<T>,
+    NalgebraScalar
+);
 
-impl_add_assign!(NalgebraMat<T>, &NalgebraMat<T>);
-impl_add_assign!(NalgebraMat<T>, &NalgebraMatRef<'_, T>);
-impl_add_assign!(NalgebraMatMut<'_, T>, &NalgebraMatRef<'_, T>);
-impl_add_assign!(NalgebraMatMut<'_, T>, &NalgebraMatMut<'_, T>);
+impl_add_assign!(NalgebraMat<T>, &NalgebraMat<T>, NalgebraScalar);
+impl_add_assign!(NalgebraMat<T>, &NalgebraMatRef<'_, T>, NalgebraScalar);
+impl_add_assign!(
+    NalgebraMatMut<'_, T>,
+    &NalgebraMatRef<'_, T>,
+    NalgebraScalar
+);
+impl_add_assign!(
+    NalgebraMatMut<'_, T>,
+    &NalgebraMatMut<'_, T>,
+    NalgebraScalar
+);
 
-impl_sub_assign!(NalgebraMat<T>, &NalgebraMat<T>);
-impl_sub_assign!(NalgebraMat<T>, &NalgebraMatRef<'_, T>);
-impl_sub_assign!(NalgebraMatMut<'_, T>, &NalgebraMatRef<'_, T>);
-impl_sub_assign!(NalgebraMatMut<'_, T>, &NalgebraMatMut<'_, T>);
+impl_sub_assign!(NalgebraMat<T>, &NalgebraMat<T>, NalgebraScalar);
+impl_sub_assign!(NalgebraMat<T>, &NalgebraMatRef<'_, T>, NalgebraScalar);
+impl_sub_assign!(
+    NalgebraMatMut<'_, T>,
+    &NalgebraMatRef<'_, T>,
+    NalgebraScalar
+);
+impl_sub_assign!(
+    NalgebraMatMut<'_, T>,
+    &NalgebraMatMut<'_, T>,
+    NalgebraScalar
+);
 
-impl_index!(NalgebraMat<T>);
-impl_index!(NalgebraMatRef<'_, T>);
-impl_index_mut!(NalgebraMat<T>);
+impl_index!(NalgebraMat<T>, NalgebraScalar);
+impl_index!(NalgebraMatRef<'_, T>, NalgebraScalar);
+impl_index_mut!(NalgebraMat<T>, NalgebraScalar);
 
-impl<'a, T: Scalar> MatrixView<'a> for NalgebraMatRef<'a, T> {
+impl<'a, T: NalgebraScalar> MatrixView<'a> for NalgebraMatRef<'a, T> {
     type Owned = NalgebraMat<T>;
 
     fn into_owned(self) -> Self::Owned {
@@ -129,7 +183,7 @@ impl<'a, T: Scalar> MatrixView<'a> for NalgebraMatRef<'a, T> {
     }
 }
 
-impl<'a, T: Scalar> MatrixViewMut<'a> for NalgebraMatMut<'a, T> {
+impl<'a, T: NalgebraScalar> MatrixViewMut<'a> for NalgebraMatMut<'a, T> {
     type Owned = NalgebraMat<T>;
     type View = NalgebraMatRef<'a, T>;
     fn into_owned(self) -> Self::Owned {
@@ -146,7 +200,7 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for NalgebraMatMut<'a, T> {
     }
 }
 
-impl<T: Scalar> Matrix for NalgebraMat<T> {
+impl<T: NalgebraScalar> Matrix for NalgebraMat<T> {
     type Sparsity = Dense<Self>;
     type SparsityRef<'a> = DenseRef<'a, Self>;
 
@@ -262,7 +316,7 @@ impl<T: Scalar> Matrix for NalgebraMat<T> {
     }
 }
 
-impl<T: Scalar> DenseMatrix for NalgebraMat<T> {
+impl<T: NalgebraScalar> DenseMatrix for NalgebraMat<T> {
     type View<'a> = NalgebraMatRef<'a, T>;
     type ViewMut<'a> = NalgebraMatMut<'a, T>;
 
