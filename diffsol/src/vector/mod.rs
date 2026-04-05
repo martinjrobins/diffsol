@@ -1,7 +1,6 @@
 use crate::matrix::DenseMatrix;
 use crate::scalar::Scale;
 use crate::{Context, IndexType, Scalar};
-use nalgebra::ComplexField;
 use num_traits::Zero;
 use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};

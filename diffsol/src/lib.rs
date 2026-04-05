@@ -347,7 +347,7 @@ use op::{
     closure_no_jac::ClosureNoJac, closure_with_sens::ClosureWithSens,
     constant_closure_with_sens::ConstantClosureWithSens, init::InitOp,
 };
-pub use scalar::{IndexType, Scalar, Scale};
+pub use scalar::{FaerScalar, IndexType, NalgebraScalar, Scalar, Scale};
 pub use vector::DefaultDenseMatrix;
 pub use vector::{
     faer_serial::{FaerVec, FaerVecIndex, FaerVecMut, FaerVecRef},

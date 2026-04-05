@@ -1,9 +1,9 @@
 use log::debug;
-use nalgebra::ComplexField;
 use num_traits::FromPrimitive;
-use num_traits::{One, Pow, Zero};
+use num_traits::{One, Pow, Signed, Zero};
 
 use crate::error::NonLinearSolverError;
+use crate::Scalar;
 use crate::{
     error::{DiffsolError, OdeSolverError},
     nonlinear_solver::{convergence::Convergence, NonLinearSolver},

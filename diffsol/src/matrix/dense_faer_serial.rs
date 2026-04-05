@@ -6,41 +6,53 @@ use super::{DenseMatrix, Matrix, MatrixCommon, MatrixView, MatrixViewMut};
 use crate::error::DiffsolError;
 use crate::scalar::{IndexType, Scalar, Scale};
 use crate::VectorIndex;
-use crate::{Dense, DenseRef, FaerContext, FaerVec, Vector, VectorViewMut};
+use crate::{Dense, DenseRef, FaerContext, FaerScalar, FaerVec, Vector, VectorViewMut};
 use crate::{FaerLU, FaerVecMut, FaerVecRef};
 
 use faer::{get_global_parallelism, unzip, zip, Accum};
 use faer::{linalg::matmul::matmul, Mat, MatMut, MatRef};
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct FaerMat<T: Scalar> {
+pub struct FaerMat<T: FaerScalar> {
     pub(crate) data: Mat<T>,
     pub(crate) context: FaerContext,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct FaerMatRef<'a, T: Scalar> {
+pub struct FaerMatRef<'a, T: FaerScalar> {
     pub(crate) data: MatRef<'a, T>,
     pub(crate) context: FaerContext,
 }
 
 #[derive(Debug, PartialEq)]
-pub struct FaerMatMut<'a, T: Scalar> {
+pub struct FaerMatMut<'a, T: FaerScalar> {
     pub(crate) data: MatMut<'a, T>,
     pub(crate) context: FaerContext,
 }
 
-impl<T: Scalar> DefaultSolver for FaerMat<T> {
+impl<T: FaerScalar> DefaultSolver for FaerMat<T> {
     type LS = FaerLU<T>;
 }
 
-impl_matrix_common_ref!(FaerMatMut<'a, T>, FaerVec<T>, FaerContext, MatMut<'a, T>);
-impl_matrix_common_ref!(FaerMatRef<'a, T>, FaerVec<T>, FaerContext, MatRef<'a, T>);
-impl_matrix_common!(FaerMat<T>, FaerVec<T>, FaerContext, Mat<T>);
+impl_matrix_common_ref!(
+    FaerMatMut<'a, T>,
+    FaerVec<T>,
+    FaerContext,
+    MatMut<'a, T>,
+    FaerScalar
+);
+impl_matrix_common_ref!(
+    FaerMatRef<'a, T>,
+    FaerVec<T>,
+    FaerContext,
+    MatRef<'a, T>,
+    FaerScalar
+);
+impl_matrix_common!(FaerMat<T>, FaerVec<T>, FaerContext, Mat<T>, FaerScalar);
 
 macro_rules! impl_mul_scalar {
     ($mat_type:ty, $out:ty) => {
-        impl<'a, T: Scalar> Mul<Scale<T>> for $mat_type {
+        impl<'a, T: FaerScalar> Mul<Scale<T>> for $mat_type {
             type Output = $out;
 
             fn mul(self, rhs: Scale<T>) -> Self::Output {
@@ -56,7 +68,7 @@ macro_rules! impl_mul_scalar {
 
 macro_rules! impl_mul_assign_scalar {
     ($mat_type:ty) => {
-        impl<T: Scalar> MulAssign<Scale<T>> for $mat_type {
+        impl<T: FaerScalar> MulAssign<Scale<T>> for $mat_type {
             fn mul_assign(&mut self, rhs: Scale<T>) {
                 let scale: faer::Scale<T> = rhs.into();
                 self.data *= scale;
@@ -71,29 +83,29 @@ impl_mul_scalar!(&FaerMat<T>, FaerMat<T>);
 
 impl_mul_assign_scalar!(FaerMatMut<'_, T>);
 
-impl_add!(FaerMat<T>, &FaerMat<T>, FaerMat<T>);
-impl_add!(FaerMat<T>, &FaerMatRef<'_, T>, FaerMat<T>);
-impl_add!(FaerMatRef<'_, T>, &FaerMat<T>, FaerMat<T>);
+impl_add!(FaerMat<T>, &FaerMat<T>, FaerMat<T>, FaerScalar);
+impl_add!(FaerMat<T>, &FaerMatRef<'_, T>, FaerMat<T>, FaerScalar);
+impl_add!(FaerMatRef<'_, T>, &FaerMat<T>, FaerMat<T>, FaerScalar);
 
-impl_sub!(FaerMat<T>, &FaerMat<T>, FaerMat<T>);
-impl_sub!(FaerMat<T>, &FaerMatRef<'_, T>, FaerMat<T>);
-impl_sub!(FaerMatRef<'_, T>, &FaerMat<T>, FaerMat<T>);
+impl_sub!(FaerMat<T>, &FaerMat<T>, FaerMat<T>, FaerScalar);
+impl_sub!(FaerMat<T>, &FaerMatRef<'_, T>, FaerMat<T>, FaerScalar);
+impl_sub!(FaerMatRef<'_, T>, &FaerMat<T>, FaerMat<T>, FaerScalar);
 
-impl_add_assign!(FaerMat<T>, &FaerMat<T>);
-impl_add_assign!(FaerMat<T>, &FaerMatRef<'_, T>);
-impl_add_assign!(FaerMatMut<'_, T>, &FaerMatRef<'_, T>);
-impl_add_assign!(FaerMatMut<'_, T>, &FaerMatMut<'_, T>);
+impl_add_assign!(FaerMat<T>, &FaerMat<T>, FaerScalar);
+impl_add_assign!(FaerMat<T>, &FaerMatRef<'_, T>, FaerScalar);
+impl_add_assign!(FaerMatMut<'_, T>, &FaerMatRef<'_, T>, FaerScalar);
+impl_add_assign!(FaerMatMut<'_, T>, &FaerMatMut<'_, T>, FaerScalar);
 
-impl_sub_assign!(FaerMat<T>, &FaerMat<T>);
-impl_sub_assign!(FaerMat<T>, &FaerMatRef<'_, T>);
-impl_sub_assign!(FaerMatMut<'_, T>, &FaerMatRef<'_, T>);
-impl_sub_assign!(FaerMatMut<'_, T>, &FaerMatMut<'_, T>);
+impl_sub_assign!(FaerMat<T>, &FaerMat<T>, FaerScalar);
+impl_sub_assign!(FaerMat<T>, &FaerMatRef<'_, T>, FaerScalar);
+impl_sub_assign!(FaerMatMut<'_, T>, &FaerMatRef<'_, T>, FaerScalar);
+impl_sub_assign!(FaerMatMut<'_, T>, &FaerMatMut<'_, T>, FaerScalar);
 
-impl_index!(FaerMat<T>);
-impl_index!(FaerMatRef<'_, T>);
-impl_index_mut!(FaerMat<T>);
+impl_index!(FaerMat<T>, FaerScalar);
+impl_index!(FaerMatRef<'_, T>, FaerScalar);
+impl_index_mut!(FaerMat<T>, FaerScalar);
 
-impl<'a, T: Scalar> MatrixView<'a> for FaerMatRef<'a, T> {
+impl<'a, T: FaerScalar> MatrixView<'a> for FaerMatRef<'a, T> {
     type Owned = FaerMat<T>;
 
     fn into_owned(self) -> Self::Owned {
@@ -133,7 +145,7 @@ impl<'a, T: Scalar> MatrixView<'a> for FaerMatRef<'a, T> {
     }
 }
 
-impl<'a, T: Scalar> MatrixViewMut<'a> for FaerMatMut<'a, T> {
+impl<'a, T: FaerScalar> MatrixViewMut<'a> for FaerMatMut<'a, T> {
     type Owned = FaerMat<T>;
     type View = FaerMatRef<'a, T>;
 
@@ -168,7 +180,7 @@ impl<'a, T: Scalar> MatrixViewMut<'a> for FaerMatMut<'a, T> {
     }
 }
 
-impl<T: Scalar> DenseMatrix for FaerMat<T> {
+impl<T: FaerScalar> DenseMatrix for FaerMat<T> {
     type View<'a> = FaerMatRef<'a, T>;
     type ViewMut<'a> = FaerMatMut<'a, T>;
 
@@ -253,7 +265,7 @@ impl<T: Scalar> DenseMatrix for FaerMat<T> {
     }
 }
 
-impl<T: Scalar> Matrix for FaerMat<T> {
+impl<T: FaerScalar> Matrix for FaerMat<T> {
     type Sparsity = Dense<Self>;
     type SparsityRef<'a> = DenseRef<'a, Self>;
 

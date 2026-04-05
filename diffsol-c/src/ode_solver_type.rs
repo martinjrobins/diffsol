@@ -11,7 +11,6 @@ use diffsol::{
     DefaultDenseMatrix, DiffSl, LinearSolver, Matrix, OdeSolverMethod, OdeSolverProblem, Vector,
     VectorHost, VectorRef, matrix::MatrixRef,
 };
-use nalgebra::ComplexField;
 use ndarray::ArrayView2;
 use num_traits::{FromPrimitive, Zero}; // for generic nums in _solve_sum_squares_adj
 use schemars::JsonSchema;
@@ -562,7 +561,8 @@ impl OdeSolverType {
             g_m.column_mut(j).copy_from(&tmp);
 
             // y = (1/4) * dot(tmp, tmp) + y
-            y += M::T::from_f64(1.0 / 4.0).unwrap() * tmp.norm(2).powi(2);
+            let norm = tmp.norm(2);
+            y += M::T::from_f64(1.0 / 4.0).unwrap() * norm * norm;
         }
         let mut y_sens = match backwards_linear_solver {
             LinearSolverType::Default => backwards_method

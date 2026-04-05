@@ -1,5 +1,4 @@
 use log::{debug, info, trace};
-use nalgebra::ComplexField;
 use std::ops::AddAssign;
 use std::{cell::Ref, fmt::Display};
 
@@ -8,7 +7,7 @@ use crate::{
     AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, NoAug, StateRef, StateRefMut,
 };
 
-use num_traits::{abs, FromPrimitive, One, Pow, ToPrimitive, Zero};
+use num_traits::{abs, FromPrimitive, One, Pow, Signed, ToPrimitive, Zero};
 use serde::Serialize;
 
 use crate::ode_solver_error;
@@ -270,7 +269,8 @@ where
             let one_over_i_plus_one = Eqn::T::one() / (i_t + Eqn::T::one());
             gamma.push(gamma[i - 1] + one_over_i);
             alpha.push(Eqn::T::one() / ((Eqn::T::one() - kappa[i]) * gamma[i]));
-            error_const2.push((kappa[i] * gamma[i] + one_over_i_plus_one).powi(2));
+            let error_const2_i = kappa[i] * gamma[i] + one_over_i_plus_one;
+            error_const2.push(error_const2_i * error_const2_i);
         }
 
         state.check_consistent_with_problem(problem)?;

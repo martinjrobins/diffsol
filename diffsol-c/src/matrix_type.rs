@@ -1,6 +1,6 @@
 // Matrix type Python enum
 
-use diffsol::{Matrix, Scalar};
+use diffsol::{FaerScalar, Matrix, NalgebraScalar};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -22,15 +22,15 @@ pub(crate) trait MatrixKind {
     const MATRIX_TYPE: MatrixType;
 }
 
-impl<T: Scalar> MatrixKind for diffsol::NalgebraMat<T> {
+impl<T: NalgebraScalar> MatrixKind for diffsol::NalgebraMat<T> {
     const MATRIX_TYPE: MatrixType = MatrixType::NalgebraDense;
 }
 
-impl<T: Scalar> MatrixKind for diffsol::FaerMat<T> {
+impl<T: FaerScalar> MatrixKind for diffsol::FaerMat<T> {
     const MATRIX_TYPE: MatrixType = MatrixType::FaerDense;
 }
 
-impl<T: Scalar> MatrixKind for diffsol::FaerSparseMat<T> {
+impl<T: FaerScalar> MatrixKind for diffsol::FaerSparseMat<T> {
     const MATRIX_TYPE: MatrixType = MatrixType::FaerSparse;
 }
 

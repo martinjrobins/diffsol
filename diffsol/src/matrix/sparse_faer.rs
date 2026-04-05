@@ -6,7 +6,7 @@ use super::sparsity::MatrixSparsityRef;
 use super::utils::*;
 use super::{Matrix, MatrixCommon, MatrixSparsity};
 use crate::error::{DiffsolError, MatrixError};
-use crate::{DefaultSolver, FaerSparseLU, IndexType, Scalar, Scale};
+use crate::{DefaultSolver, FaerScalar, FaerSparseLU, IndexType, Scalar, Scale};
 use crate::{FaerContext, FaerVec, FaerVecIndex, Vector, VectorIndex};
 
 use faer::reborrow::{Reborrow, ReborrowMut};
@@ -14,20 +14,26 @@ use faer::sparse::ops::{ternary_op_assign_into, union_symbolic};
 use faer::sparse::{Pair, SparseColMat, SymbolicSparseColMat, SymbolicSparseColMatRef, Triplet};
 
 #[derive(Clone, Debug)]
-pub struct FaerSparseMat<T: Scalar> {
+pub struct FaerSparseMat<T: FaerScalar> {
     pub(crate) data: SparseColMat<IndexType, T>,
     pub(crate) context: FaerContext,
 }
 
-impl<T: Scalar> DefaultSolver for FaerSparseMat<T> {
+impl<T: FaerScalar> DefaultSolver for FaerSparseMat<T> {
     type LS = FaerSparseLU<T>;
 }
 
-impl_matrix_common!(FaerSparseMat<T>, FaerVec<T>, FaerContext, SparseColMat<IndexType, T>);
+impl_matrix_common!(
+    FaerSparseMat<T>,
+    FaerVec<T>,
+    FaerContext,
+    SparseColMat<IndexType, T>,
+    FaerScalar
+);
 
 macro_rules! impl_mul_scalar {
     ($mat_type:ty, $out:ty) => {
-        impl<'a, T: Scalar> Mul<Scale<T>> for $mat_type {
+        impl<'a, T: FaerScalar> Mul<Scale<T>> for $mat_type {
             type Output = $out;
 
             fn mul(self, rhs: Scale<T>) -> Self::Output {
@@ -44,11 +50,21 @@ macro_rules! impl_mul_scalar {
 impl_mul_scalar!(FaerSparseMat<T>, FaerSparseMat<T>);
 impl_mul_scalar!(&FaerSparseMat<T>, FaerSparseMat<T>);
 
-impl_add!(FaerSparseMat<T>, &FaerSparseMat<T>, FaerSparseMat<T>);
+impl_add!(
+    FaerSparseMat<T>,
+    &FaerSparseMat<T>,
+    FaerSparseMat<T>,
+    FaerScalar
+);
 
-impl_sub!(FaerSparseMat<T>, &FaerSparseMat<T>, FaerSparseMat<T>);
+impl_sub!(
+    FaerSparseMat<T>,
+    &FaerSparseMat<T>,
+    FaerSparseMat<T>,
+    FaerScalar
+);
 
-impl<T: Scalar> MatrixSparsity<FaerSparseMat<T>> for SymbolicSparseColMat<IndexType> {
+impl<T: FaerScalar> MatrixSparsity<FaerSparseMat<T>> for SymbolicSparseColMat<IndexType> {
     fn union(
         self,
         other: SymbolicSparseColMatRef<IndexType>,
@@ -134,7 +150,7 @@ impl<T: Scalar> MatrixSparsity<FaerSparseMat<T>> for SymbolicSparseColMat<IndexT
     }
 }
 
-impl<'a, T: Scalar> MatrixSparsityRef<'a, FaerSparseMat<T>>
+impl<'a, T: FaerScalar> MatrixSparsityRef<'a, FaerSparseMat<T>>
     for SymbolicSparseColMatRef<'a, IndexType>
 {
     fn to_owned(&self) -> SymbolicSparseColMat<IndexType> {
@@ -233,7 +249,7 @@ impl<'a, T: Scalar> MatrixSparsityRef<'a, FaerSparseMat<T>>
     }
 }
 
-impl<T: Scalar> Matrix for FaerSparseMat<T> {
+impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
     type Sparsity = SymbolicSparseColMat<IndexType>;
     type SparsityRef<'a> = SymbolicSparseColMatRef<'a, IndexType>;
 

@@ -10,8 +10,7 @@ use crate::vector::VectorView;
 
 /// A scalar type suitable for numerical computations in ODE solvers.
 ///
-/// This trait aggregates multiple trait bounds from nalgebra, faer, and num_traits to ensure
-/// scalar types are suitable for all operations within diffsol.
+/// This trait aggregates the crate-local numeric requirements shared across diffsol.
 ///
 /// # Implementations
 /// DiffSol provides implementations for `f64` and `f32`.
@@ -25,19 +24,23 @@ use crate::vector::VectorView;
 /// }
 /// ```
 pub trait Scalar:
-    nalgebra::Scalar
-    + faer::traits::ComplexField
-    + faer::traits::RealField
-    + nalgebra::SimdRealField
-    + nalgebra::ComplexField<RealField = Self>
-    + num_traits::Signed
+    num_traits::Signed
     + num_traits::Pow<Self, Output = Self>
     + num_traits::Pow<i32, Output = Self>
     + num_traits::FromPrimitive
     + num_traits::ToPrimitive
     + Display
+    + std::fmt::Debug
     + Copy
+    + PartialEq
     + PartialOrd
+    + AddAssign
+    + SubAssign
+    + MulAssign
+    + std::ops::DivAssign
+    + Send
+    + Sync
+    + 'static
 {
     /// Machine epsilon for this scalar type (smallest representable positive value such that 1.0 + EPSILON != 1.0).
     const EPSILON: Self;
@@ -47,7 +50,34 @@ pub trait Scalar:
     const NAN: Self;
     /// Check if this value is NaN.
     fn is_nan(self) -> bool;
+    /// Square root.
+    fn sqrt(self) -> Self;
+    /// Exponential.
+    fn exp(self) -> Self;
+    /// Sine.
+    fn sin(self) -> Self;
+    /// Cosine.
+    fn cos(self) -> Self;
 }
+
+/// A [`Scalar`] that also satisfies nalgebra's numeric field requirements.
+pub trait NalgebraScalar:
+    Scalar + nalgebra::Scalar + nalgebra::SimdRealField + nalgebra::ComplexField<RealField = Self>
+{
+}
+
+impl<T> NalgebraScalar for T where
+    T: Scalar
+        + nalgebra::Scalar
+        + nalgebra::SimdRealField
+        + nalgebra::ComplexField<RealField = Self>
+{
+}
+
+/// A [`Scalar`] that also satisfies faer's numeric field requirements.
+pub trait FaerScalar: Scalar + faer::traits::ComplexField + faer::traits::RealField {}
+
+impl<T> FaerScalar for T where T: Scalar + faer::traits::ComplexField + faer::traits::RealField {}
 
 /// The index type used throughout DiffSol for indexing vectors and matrices.
 pub type IndexType = usize;
@@ -59,6 +89,18 @@ impl Scalar for f64 {
     fn is_nan(self) -> bool {
         self.is_nan()
     }
+    fn sqrt(self) -> Self {
+        self.sqrt()
+    }
+    fn exp(self) -> Self {
+        self.exp()
+    }
+    fn sin(self) -> Self {
+        self.sin()
+    }
+    fn cos(self) -> Self {
+        self.cos()
+    }
 }
 
 impl Scalar for f32 {
@@ -68,14 +110,26 @@ impl Scalar for f32 {
     fn is_nan(self) -> bool {
         self.is_nan()
     }
+    fn sqrt(self) -> Self {
+        self.sqrt()
+    }
+    fn exp(self) -> Self {
+        self.exp()
+    }
+    fn sin(self) -> Self {
+        self.sin()
+    }
+    fn cos(self) -> Self {
+        self.cos()
+    }
 }
 
-impl<T: Scalar> From<faer::Scale<T>> for Scale<T> {
+impl<T: FaerScalar> From<faer::Scale<T>> for Scale<T> {
     fn from(s: faer::Scale<T>) -> Self {
         Scale(s.0)
     }
 }
-impl<T: Scalar> From<Scale<T>> for faer::Scale<T> {
+impl<T: FaerScalar> From<Scale<T>> for faer::Scale<T> {
     fn from(s: Scale<T>) -> Self {
         faer::Scale(s.value())
     }

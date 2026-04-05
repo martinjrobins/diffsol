@@ -3,7 +3,7 @@ use std::slice;
 
 use faer::{unzip, zip, Col, ColMut, ColRef};
 
-use crate::{scalar::Scale, FaerContext, IndexType, Scalar, Vector};
+use crate::{scalar::Scale, FaerContext, FaerScalar, IndexType, Scalar, Vector};
 
 use crate::{FaerMat, VectorCommon, VectorHost, VectorIndex, VectorView, VectorViewMut};
 
@@ -11,7 +11,7 @@ use super::utils::*;
 use super::DefaultDenseMatrix;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct FaerVec<T: Scalar> {
+pub struct FaerVec<T: FaerScalar> {
     pub(crate) data: Col<T>,
     pub(crate) context: FaerContext,
 }
@@ -23,18 +23,18 @@ pub struct FaerVecIndex {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct FaerVecRef<'a, T: Scalar> {
+pub struct FaerVecRef<'a, T: FaerScalar> {
     pub(crate) data: ColRef<'a, T>,
     pub(crate) context: FaerContext,
 }
 
 #[derive(Debug, PartialEq)]
-pub struct FaerVecMut<'a, T: Scalar> {
+pub struct FaerVecMut<'a, T: FaerScalar> {
     pub(crate) data: ColMut<'a, T>,
     pub(crate) context: FaerContext,
 }
 
-impl<T: Scalar> From<Col<T>> for FaerVec<T> {
+impl<T: FaerScalar> From<Col<T>> for FaerVec<T> {
     fn from(data: Col<T>) -> Self {
         Self {
             data,
@@ -43,17 +43,17 @@ impl<T: Scalar> From<Col<T>> for FaerVec<T> {
     }
 }
 
-impl<T: Scalar> DefaultDenseMatrix for FaerVec<T> {
+impl<T: FaerScalar> DefaultDenseMatrix for FaerVec<T> {
     type M = FaerMat<T>;
 }
 
-impl_vector_common!(FaerVec<T>, FaerContext, Col<T>);
-impl_vector_common_ref!(FaerVecRef<'a, T>, FaerContext, ColRef<'a, T>);
-impl_vector_common_ref!(FaerVecMut<'a, T>, FaerContext, ColMut<'a, T>);
+impl_vector_common!(FaerVec<T>, FaerContext, Col<T>, FaerScalar);
+impl_vector_common_ref!(FaerVecRef<'a, T>, FaerContext, ColRef<'a, T>, FaerScalar);
+impl_vector_common_ref!(FaerVecMut<'a, T>, FaerContext, ColMut<'a, T>, FaerScalar);
 
 macro_rules! impl_mul_scalar {
     ($lhs:ty, $out:ty, $scalar:ty) => {
-        impl<T: Scalar> Mul<Scale<T>> for $lhs {
+        impl<T: FaerScalar> Mul<Scale<T>> for $lhs {
             type Output = $out;
             #[inline]
             fn mul(self, rhs: Scale<T>) -> Self::Output {
@@ -69,7 +69,7 @@ macro_rules! impl_mul_scalar {
 
 macro_rules! impl_div_scalar {
     ($lhs:ty, $out:ty, $scalar:expr) => {
-        impl<'a, T: Scalar> Div<Scale<T>> for $lhs {
+        impl<'a, T: FaerScalar> Div<Scale<T>> for $lhs {
             type Output = $out;
             #[inline]
             fn div(self, rhs: Scale<T>) -> Self::Output {
@@ -86,7 +86,7 @@ macro_rules! impl_div_scalar {
 
 macro_rules! impl_mul_assign_scalar {
     ($col_type:ty, $scalar:ty) => {
-        impl<'a, T: Scalar> MulAssign<Scale<T>> for $col_type {
+        impl<'a, T: FaerScalar> MulAssign<Scale<T>> for $col_type {
             #[inline]
             fn mul_assign(&mut self, rhs: Scale<T>) {
                 let scale = faer::Scale(rhs.value());
@@ -104,61 +104,71 @@ impl_div_scalar!(FaerVec<T>, FaerVec<T>, faer::Scale::<T>);
 impl_mul_assign_scalar!(FaerVecMut<'a, T>, faer::Scale<T>);
 impl_mul_assign_scalar!(FaerVec<T>, faer::Scale<T>);
 
-impl_sub_assign!(FaerVec<T>, FaerVec<T>);
-impl_sub_assign!(FaerVec<T>, &FaerVec<T>);
-impl_sub_assign!(FaerVec<T>, FaerVecRef<'_, T>);
-impl_sub_assign!(FaerVec<T>, &FaerVecRef<'_, T>);
+impl_sub_assign!(FaerVec<T>, FaerVec<T>, FaerScalar);
+impl_sub_assign!(FaerVec<T>, &FaerVec<T>, FaerScalar);
+impl_sub_assign!(FaerVec<T>, FaerVecRef<'_, T>, FaerScalar);
+impl_sub_assign!(FaerVec<T>, &FaerVecRef<'_, T>, FaerScalar);
 
-impl_sub_assign!(FaerVecMut<'_, T>, FaerVec<T>);
-impl_sub_assign!(FaerVecMut<'_, T>, &FaerVec<T>);
-impl_sub_assign!(FaerVecMut<'_, T>, FaerVecRef<'_, T>);
-impl_sub_assign!(FaerVecMut<'_, T>, &FaerVecRef<'_, T>);
+impl_sub_assign!(FaerVecMut<'_, T>, FaerVec<T>, FaerScalar);
+impl_sub_assign!(FaerVecMut<'_, T>, &FaerVec<T>, FaerScalar);
+impl_sub_assign!(FaerVecMut<'_, T>, FaerVecRef<'_, T>, FaerScalar);
+impl_sub_assign!(FaerVecMut<'_, T>, &FaerVecRef<'_, T>, FaerScalar);
 
-impl_add_assign!(FaerVec<T>, FaerVec<T>);
-impl_add_assign!(FaerVec<T>, &FaerVec<T>);
-impl_add_assign!(FaerVec<T>, FaerVecRef<'_, T>);
-impl_add_assign!(FaerVec<T>, &FaerVecRef<'_, T>);
+impl_add_assign!(FaerVec<T>, FaerVec<T>, FaerScalar);
+impl_add_assign!(FaerVec<T>, &FaerVec<T>, FaerScalar);
+impl_add_assign!(FaerVec<T>, FaerVecRef<'_, T>, FaerScalar);
+impl_add_assign!(FaerVec<T>, &FaerVecRef<'_, T>, FaerScalar);
 
-impl_add_assign!(FaerVecMut<'_, T>, FaerVec<T>);
-impl_add_assign!(FaerVecMut<'_, T>, &FaerVec<T>);
-impl_add_assign!(FaerVecMut<'_, T>, FaerVecRef<'_, T>);
-impl_add_assign!(FaerVecMut<'_, T>, &FaerVecRef<'_, T>);
+impl_add_assign!(FaerVecMut<'_, T>, FaerVec<T>, FaerScalar);
+impl_add_assign!(FaerVecMut<'_, T>, &FaerVec<T>, FaerScalar);
+impl_add_assign!(FaerVecMut<'_, T>, FaerVecRef<'_, T>, FaerScalar);
+impl_add_assign!(FaerVecMut<'_, T>, &FaerVecRef<'_, T>, FaerScalar);
 
-impl_sub_both_ref!(&FaerVec<T>, &FaerVec<T>, FaerVec<T>);
-impl_sub_rhs!(&FaerVec<T>, FaerVec<T>, FaerVec<T>);
-impl_sub_both_ref!(&FaerVec<T>, FaerVecRef<'_, T>, FaerVec<T>);
-impl_sub_both_ref!(&FaerVec<T>, &FaerVecRef<'_, T>, FaerVec<T>);
+impl_sub_both_ref!(&FaerVec<T>, &FaerVec<T>, FaerVec<T>, FaerScalar);
+impl_sub_rhs!(&FaerVec<T>, FaerVec<T>, FaerVec<T>, FaerScalar);
+impl_sub_both_ref!(&FaerVec<T>, FaerVecRef<'_, T>, FaerVec<T>, FaerScalar);
+impl_sub_both_ref!(&FaerVec<T>, &FaerVecRef<'_, T>, FaerVec<T>, FaerScalar);
 
-impl_sub_lhs!(FaerVec<T>, FaerVec<T>, FaerVec<T>);
-impl_sub_lhs!(FaerVec<T>, &FaerVec<T>, FaerVec<T>);
-impl_sub_lhs!(FaerVec<T>, FaerVecRef<'_, T>, FaerVec<T>);
-impl_sub_lhs!(FaerVec<T>, &FaerVecRef<'_, T>, FaerVec<T>);
+impl_sub_lhs!(FaerVec<T>, FaerVec<T>, FaerVec<T>, FaerScalar);
+impl_sub_lhs!(FaerVec<T>, &FaerVec<T>, FaerVec<T>, FaerScalar);
+impl_sub_lhs!(FaerVec<T>, FaerVecRef<'_, T>, FaerVec<T>, FaerScalar);
+impl_sub_lhs!(FaerVec<T>, &FaerVecRef<'_, T>, FaerVec<T>, FaerScalar);
 
-impl_sub_rhs!(FaerVecRef<'_, T>, FaerVec<T>, FaerVec<T>);
-impl_sub_both_ref!(FaerVecRef<'_, T>, &FaerVec<T>, FaerVec<T>);
-impl_sub_both_ref!(FaerVecRef<'_, T>, FaerVecRef<'_, T>, FaerVec<T>);
-impl_sub_both_ref!(FaerVecRef<'_, T>, &FaerVecRef<'_, T>, FaerVec<T>);
+impl_sub_rhs!(FaerVecRef<'_, T>, FaerVec<T>, FaerVec<T>, FaerScalar);
+impl_sub_both_ref!(FaerVecRef<'_, T>, &FaerVec<T>, FaerVec<T>, FaerScalar);
+impl_sub_both_ref!(FaerVecRef<'_, T>, FaerVecRef<'_, T>, FaerVec<T>, FaerScalar);
+impl_sub_both_ref!(
+    FaerVecRef<'_, T>,
+    &FaerVecRef<'_, T>,
+    FaerVec<T>,
+    FaerScalar
+);
 
-impl_add_both_ref!(&FaerVec<T>, &FaerVec<T>, FaerVec<T>);
-impl_add_rhs!(&FaerVec<T>, FaerVec<T>, FaerVec<T>);
-impl_add_both_ref!(&FaerVec<T>, FaerVecRef<'_, T>, FaerVec<T>);
-impl_add_both_ref!(&FaerVec<T>, &FaerVecRef<'_, T>, FaerVec<T>);
+impl_add_both_ref!(&FaerVec<T>, &FaerVec<T>, FaerVec<T>, FaerScalar);
+impl_add_rhs!(&FaerVec<T>, FaerVec<T>, FaerVec<T>, FaerScalar);
+impl_add_both_ref!(&FaerVec<T>, FaerVecRef<'_, T>, FaerVec<T>, FaerScalar);
+impl_add_both_ref!(&FaerVec<T>, &FaerVecRef<'_, T>, FaerVec<T>, FaerScalar);
 
-impl_add_lhs!(FaerVec<T>, FaerVec<T>, FaerVec<T>);
-impl_add_lhs!(FaerVec<T>, &FaerVec<T>, FaerVec<T>);
-impl_add_lhs!(FaerVec<T>, FaerVecRef<'_, T>, FaerVec<T>);
-impl_add_lhs!(FaerVec<T>, &FaerVecRef<'_, T>, FaerVec<T>);
+impl_add_lhs!(FaerVec<T>, FaerVec<T>, FaerVec<T>, FaerScalar);
+impl_add_lhs!(FaerVec<T>, &FaerVec<T>, FaerVec<T>, FaerScalar);
+impl_add_lhs!(FaerVec<T>, FaerVecRef<'_, T>, FaerVec<T>, FaerScalar);
+impl_add_lhs!(FaerVec<T>, &FaerVecRef<'_, T>, FaerVec<T>, FaerScalar);
 
-impl_add_rhs!(FaerVecRef<'_, T>, FaerVec<T>, FaerVec<T>);
-impl_add_both_ref!(FaerVecRef<'_, T>, &FaerVec<T>, FaerVec<T>);
-impl_add_both_ref!(FaerVecRef<'_, T>, FaerVecRef<'_, T>, FaerVec<T>);
-impl_add_both_ref!(FaerVecRef<'_, T>, &FaerVecRef<'_, T>, FaerVec<T>);
+impl_add_rhs!(FaerVecRef<'_, T>, FaerVec<T>, FaerVec<T>, FaerScalar);
+impl_add_both_ref!(FaerVecRef<'_, T>, &FaerVec<T>, FaerVec<T>, FaerScalar);
+impl_add_both_ref!(FaerVecRef<'_, T>, FaerVecRef<'_, T>, FaerVec<T>, FaerScalar);
+impl_add_both_ref!(
+    FaerVecRef<'_, T>,
+    &FaerVecRef<'_, T>,
+    FaerVec<T>,
+    FaerScalar
+);
 
-impl_index!(FaerVec<T>);
-impl_index_mut!(FaerVec<T>);
-impl_index!(FaerVecRef<'_, T>);
+impl_index!(FaerVec<T>, FaerScalar);
+impl_index_mut!(FaerVec<T>, FaerScalar);
+impl_index!(FaerVecRef<'_, T>, FaerScalar);
 
-impl<T: Scalar> VectorHost for FaerVec<T> {
+impl<T: FaerScalar> VectorHost for FaerVec<T> {
     fn as_mut_slice(&mut self) -> &mut [Self::T] {
         unsafe { slice::from_raw_parts_mut(self.data.as_ptr_mut(), self.len()) }
     }
@@ -167,7 +177,7 @@ impl<T: Scalar> VectorHost for FaerVec<T> {
     }
 }
 
-impl<T: Scalar> Vector for FaerVec<T> {
+impl<T: FaerScalar> Vector for FaerVec<T> {
     type View<'a> = FaerVecRef<'a, T>;
     type ViewMut<'a> = FaerVecMut<'a, T>;
     type Index = FaerVecIndex;
@@ -207,7 +217,8 @@ impl<T: Scalar> Vector for FaerVec<T> {
             let yi = unsafe { y.data.get_unchecked(i) };
             let ai = unsafe { atol.data.get_unchecked(i) };
             let xi = unsafe { self.data.get_unchecked(i) };
-            acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
+            let term = *xi / (yi.abs() * rtol + *ai);
+            acc += term * term;
         }
         acc / Self::T::from_f64(self.len() as f64).unwrap()
     }
@@ -338,7 +349,7 @@ impl VectorIndex for FaerVecIndex {
     }
 }
 
-impl<'a, T: Scalar> VectorView<'a> for FaerVecRef<'a, T> {
+impl<'a, T: FaerScalar> VectorView<'a> for FaerVecRef<'a, T> {
     type Owned = FaerVec<T>;
     fn into_owned(self) -> FaerVec<T> {
         FaerVec {
@@ -355,13 +366,14 @@ impl<'a, T: Scalar> VectorView<'a> for FaerVecRef<'a, T> {
             let yi = unsafe { y.data.get_unchecked(i) };
             let ai = unsafe { atol.data.get_unchecked(i) };
             let xi = unsafe { self.data.get_unchecked(i) };
-            acc += (*xi / (yi.abs() * rtol + *ai)).powi(2);
+            let term = *xi / (yi.abs() * rtol + *ai);
+            acc += term * term;
         }
         acc / Self::T::from_f64(self.data.nrows() as f64).unwrap()
     }
 }
 
-impl<'a, T: Scalar> VectorViewMut<'a> for FaerVecMut<'a, T> {
+impl<'a, T: FaerScalar> VectorViewMut<'a> for FaerVecMut<'a, T> {
     type Owned = FaerVec<T>;
     type View = FaerVecRef<'a, T>;
     type Index = FaerVecIndex;
