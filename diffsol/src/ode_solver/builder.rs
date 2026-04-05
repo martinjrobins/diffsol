@@ -1372,17 +1372,17 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     use crate::{Context, OdeBuilder, OdeEquations, Op, Vector};
-
-    #[cfg(feature = "diffsl")]
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     use diffsl::execution::{
         module::{CodegenModuleCompile, CodegenModuleJit},
         scalar::Scalar as DiffSlScalar,
     };
-    #[cfg(feature = "diffsl")]
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     use num_traits::Zero;
 
-    #[cfg(feature = "diffsl")]
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     fn logistic_diffsl_code() -> &'static str {
         r#"
             in_i { r = 1 }
@@ -1393,7 +1393,7 @@ mod tests {
         "#
     }
 
-    #[cfg(feature = "diffsl")]
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     fn build_from_diffsl_resizes_empty_params<CG, M>()
     where
         CG: CodegenModuleJit + CodegenModuleCompile,
@@ -1408,7 +1408,7 @@ mod tests {
         assert_eq!(params.get_index(0), M::T::zero());
     }
 
-    #[cfg(feature = "diffsl")]
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     fn build_from_diffsl_rejects_parameter_mismatch<CG>()
     where
         CG: CodegenModuleJit + CodegenModuleCompile,
@@ -1423,7 +1423,7 @@ mod tests {
         assert!(err.to_string().contains("Number of parameters on builder"));
     }
 
-    #[cfg(feature = "diffsl")]
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     fn build_from_diffsl_sparse_problem_compiles<CG>()
     where
         CG: CodegenModuleJit + CodegenModuleCompile,
