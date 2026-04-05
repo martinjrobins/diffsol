@@ -713,8 +713,11 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
 #[cfg(test)]
 mod test {
     use crate::{
-        ode_equations::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
-        LinearSolver, Matrix, OdeSolverState, Vector, VectorHost,
+        ode_equations::test_models::{
+            exponential_decay::exponential_decay_problem,
+            exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
+        },
+        BdfState, LinearSolver, Matrix, OdeBuilder, OdeSolverState, Vector, VectorHost,
     };
     use num_traits::FromPrimitive;
 
@@ -785,5 +788,36 @@ mod test {
                 );
             }
         }
+    }
+
+    #[test]
+    fn step_size_preserves_negative_direction() {
+        type M = crate::NalgebraMat<f64>;
+        type V = crate::NalgebraVec<f64>;
+
+        let (mut problem, _soln) = exponential_decay_problem::<M>(false);
+        problem.h0 = -problem.h0.abs();
+
+        let mut state = BdfState::<V>::new_without_initialise(&problem).unwrap();
+        state.set_step_size(problem.h0, &problem.atol, problem.rtol, &problem.eqn, 1);
+
+        assert!(state.as_ref().h < 0.0);
+    }
+
+    #[test]
+    fn step_size_clamps_tiny_initial_conditions() {
+        type M = crate::NalgebraMat<f64>;
+        type V = crate::NalgebraVec<f64>;
+
+        let problem = OdeBuilder::<M>::new()
+            .rhs(|_x, _p, _t, y| y[0] = 0.0)
+            .init(|_p, _t, y| y[0] = 0.0, 1)
+            .build()
+            .unwrap();
+        let mut state = BdfState::<V>::new_without_initialise(&problem).unwrap();
+
+        state.set_step_size(problem.h0, &problem.atol, problem.rtol, &problem.eqn, 1);
+
+        assert!((state.as_ref().h - 1e-6).abs() < 1e-12);
     }
 }

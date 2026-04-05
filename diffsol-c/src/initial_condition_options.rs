@@ -111,3 +111,59 @@ impl Serialize for InitialConditionSolverOptions {
         state.end()
     }
 }
+
+#[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
+mod tests {
+    use crate::{
+        jit::JitBackendType,
+        linear_solver_type::LinearSolverType,
+        matrix_type::MatrixType,
+        ode::OdeWrapper,
+        ode_solver_type::OdeSolverType,
+        scalar_type::ScalarType,
+        test_support::{available_jit_backends, logistic_diffsl_code},
+    };
+
+    use super::InitialConditionSolverOptions;
+
+    fn make_options(jit_backend: JitBackendType) -> InitialConditionSolverOptions {
+        OdeWrapper::new_jit(
+            logistic_diffsl_code(),
+            jit_backend,
+            ScalarType::F64,
+            MatrixType::NalgebraDense,
+            LinearSolverType::Default,
+            OdeSolverType::Bdf,
+        )
+        .unwrap()
+        .get_ic_options()
+    }
+
+    #[test]
+    fn initial_condition_options_roundtrip_and_serialize() {
+        for jit_backend in available_jit_backends() {
+            let options = make_options(jit_backend);
+            options.set_use_linesearch(true).unwrap();
+            options.set_max_linesearch_iterations(13).unwrap();
+            options.set_max_newton_iterations(17).unwrap();
+            options.set_max_linear_solver_setups(19).unwrap();
+            options.set_step_reduction_factor(0.5).unwrap();
+            options.set_armijo_constant(1e-4).unwrap();
+
+            assert!(options.get_use_linesearch().unwrap());
+            assert_eq!(options.get_max_linesearch_iterations().unwrap(), 13);
+            assert_eq!(options.get_max_newton_iterations().unwrap(), 17);
+            assert_eq!(options.get_max_linear_solver_setups().unwrap(), 19);
+            assert_eq!(options.get_step_reduction_factor().unwrap(), 0.5);
+            assert_eq!(options.get_armijo_constant().unwrap(), 1e-4);
+
+            let value = serde_json::to_value(&options).unwrap();
+            assert_eq!(value["use_linesearch"], true);
+            assert_eq!(value["max_linesearch_iterations"], 13);
+            assert_eq!(value["max_newton_iterations"], 17);
+            assert_eq!(value["max_linear_solver_setups"], 19);
+            assert_eq!(value["step_reduction_factor"], 0.5);
+            assert_eq!(value["armijo_constant"], 1e-4);
+        }
+    }
+}

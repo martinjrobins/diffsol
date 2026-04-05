@@ -290,3 +290,194 @@ impl<C: ConstantOpSensAdjoint> ConstantOpSensAdjoint for &C {
         C::sens_adjoint_sparsity(*self)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+
+    use crate::{
+        context::nalgebra::NalgebraContext, matrix::dense_nalgebra_serial::NalgebraMat, ConstantOp,
+        ConstantOpSens, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, NonLinearOp,
+        NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Vector,
+    };
+
+    use super::{Op, OpStatistics, ParameterisedOp};
+
+    type M = NalgebraMat<f64>;
+
+    struct ForwardingOp {
+        ctx: NalgebraContext,
+        stats: RefCell<OpStatistics>,
+    }
+
+    impl ForwardingOp {
+        fn new() -> Self {
+            Self {
+                ctx: NalgebraContext,
+                stats: RefCell::new(OpStatistics::new()),
+            }
+        }
+    }
+
+    impl Op for ForwardingOp {
+        type T = f64;
+        type V = crate::NalgebraVec<f64>;
+        type M = M;
+        type C = NalgebraContext;
+
+        fn context(&self) -> &Self::C {
+            &self.ctx
+        }
+        fn nstates(&self) -> usize {
+            2
+        }
+        fn nout(&self) -> usize {
+            2
+        }
+        fn nparams(&self) -> usize {
+            2
+        }
+        fn statistics(&self) -> OpStatistics {
+            self.stats.borrow().clone()
+        }
+    }
+
+    impl NonLinearOp for ForwardingOp {
+        fn call_inplace(&self, x: &Self::V, _t: Self::T, y: &mut Self::V) {
+            self.stats.borrow_mut().increment_call();
+            y.copy_from(x);
+        }
+    }
+
+    impl NonLinearOpJacobian for ForwardingOp {
+        fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
+            self.stats.borrow_mut().increment_jac_mul();
+            y.copy_from(v);
+        }
+    }
+
+    impl NonLinearOpAdjoint for ForwardingOp {
+        fn jac_transpose_mul_inplace(
+            &self,
+            _x: &Self::V,
+            _t: Self::T,
+            v: &Self::V,
+            y: &mut Self::V,
+        ) {
+            self.stats.borrow_mut().increment_jac_adj_mul();
+            y.copy_from(v);
+        }
+    }
+
+    impl NonLinearOpSens for ForwardingOp {
+        fn sens_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
+            y.fill(0.0);
+        }
+    }
+
+    impl NonLinearOpSensAdjoint for ForwardingOp {
+        fn sens_transpose_mul_inplace(
+            &self,
+            _x: &Self::V,
+            _t: Self::T,
+            _v: &Self::V,
+            y: &mut Self::V,
+        ) {
+            y.fill(0.0);
+        }
+    }
+
+    impl LinearOp for ForwardingOp {
+        fn gemv_inplace(&self, x: &Self::V, _t: Self::T, beta: Self::T, y: &mut Self::V) {
+            self.stats.borrow_mut().increment_call();
+            y.axpy(1.0, x, beta);
+        }
+    }
+
+    impl LinearOpTranspose for ForwardingOp {
+        fn gemv_transpose_inplace(&self, x: &Self::V, _t: Self::T, beta: Self::T, y: &mut Self::V) {
+            self.stats.borrow_mut().increment_jac_adj_mul();
+            y.axpy(1.0, x, beta);
+        }
+    }
+
+    impl ConstantOp for ForwardingOp {
+        fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
+            self.stats.borrow_mut().increment_call();
+            y.copy_from(&Self::V::from_vec(vec![1.0, 2.0], self.ctx));
+        }
+    }
+
+    impl ConstantOpSens for ForwardingOp {
+        fn sens_mul_inplace(&self, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
+            y.fill(0.0);
+        }
+    }
+
+    impl ConstantOpSensAdjoint for ForwardingOp {
+        fn sens_transpose_mul_inplace(&self, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
+            y.fill(0.0);
+        }
+    }
+
+    #[test]
+    fn op_statistics_increment_methods_update_counters() {
+        let mut stats = OpStatistics::new();
+        stats.increment_call();
+        stats.increment_jac_mul();
+        stats.increment_jac_adj_mul();
+        stats.increment_matrix();
+        assert_eq!(stats.number_of_calls, 1);
+        assert_eq!(stats.number_of_jac_muls, 1);
+        assert_eq!(stats.number_of_jac_adj_muls, 1);
+        assert_eq!(stats.number_of_matrix_evals, 1);
+    }
+
+    #[test]
+    fn parameterised_op_and_reference_forwarding_delegate_to_inner_operator() {
+        let op = ForwardingOp::new();
+        let p = crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext);
+        let pop = ParameterisedOp::new(&op, &p);
+        assert_eq!(pop.nstates(), 2);
+        assert_eq!(pop.nout(), 2);
+        assert_eq!(pop.nparams(), 2);
+
+        let x = crate::NalgebraVec::from_vec(vec![3.0, 4.0], NalgebraContext);
+        let mut y = crate::NalgebraVec::zeros(2, NalgebraContext);
+        NonLinearOp::call_inplace(&&op, &x, 0.0, &mut y);
+        y.assert_eq_st(&x, 1e-12);
+
+        (&op).jac_mul_inplace(&x, 0.0, &x, &mut y);
+        y.assert_eq_st(&x, 1e-12);
+
+        (&op).jac_transpose_mul_inplace(&x, 0.0, &x, &mut y);
+        y.assert_eq_st(&x, 1e-12);
+
+        NonLinearOpSens::sens_mul_inplace(&&op, &x, 0.0, &x, &mut y);
+        y.assert_eq_st(&crate::NalgebraVec::zeros(2, NalgebraContext), 1e-12);
+
+        NonLinearOpSensAdjoint::sens_transpose_mul_inplace(&&op, &x, 0.0, &x, &mut y);
+        y.assert_eq_st(&crate::NalgebraVec::zeros(2, NalgebraContext), 1e-12);
+
+        (&op).gemv_inplace(&x, 0.0, 0.0, &mut y);
+        y.assert_eq_st(&x, 1e-12);
+
+        (&op).gemv_transpose_inplace(&x, 0.0, 0.0, &mut y);
+        y.assert_eq_st(&x, 1e-12);
+
+        let mut y_const = crate::NalgebraVec::zeros(2, NalgebraContext);
+        <&ForwardingOp as ConstantOp>::call_inplace(&&op, 0.0, &mut y_const);
+        y_const.assert_eq_st(
+            &crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext),
+            1e-12,
+        );
+
+        let op_ref_stats = pop.statistics();
+        assert!(op_ref_stats.number_of_calls >= 1);
+
+        let mut op_mut = ForwardingOp::new();
+        assert_eq!((&mut op_mut).nstates(), 2);
+        assert_eq!((&mut op_mut).nout(), 2);
+        assert_eq!((&mut op_mut).nparams(), 2);
+    }
+}

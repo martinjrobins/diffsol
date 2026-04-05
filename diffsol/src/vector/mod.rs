@@ -377,7 +377,11 @@ pub trait DefaultDenseMatrix: Vector {
 
 #[cfg(test)]
 mod tests {
-    use super::Vector;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    use super::{Vector, VectorCommon};
+    use crate::context::nalgebra::NalgebraContext;
+    use crate::vector::nalgebra_serial::NalgebraVec;
     use num_traits::FromPrimitive;
 
     pub fn test_root_finding<V: Vector>() {
@@ -443,5 +447,87 @@ mod tests {
         assert!(!found_root);
         assert_eq!(max_frac, V::T::from_f64(0.0).unwrap());
         assert_eq!(max_frac_index, -1);
+    }
+
+    #[test]
+    fn vector_common_for_references_and_default_helpers_work() {
+        let mut v = NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext);
+        assert_eq!(<NalgebraVec<f64> as VectorCommon>::inner(&v).len(), 2);
+        assert_eq!(<&NalgebraVec<f64> as VectorCommon>::inner(&&v).len(), 2);
+        assert_eq!(
+            <&mut NalgebraVec<f64> as VectorCommon>::inner(&&mut v).len(),
+            2
+        );
+
+        let empty = NalgebraVec::<f64>::zeros(0, NalgebraContext);
+        assert!(empty.is_empty());
+
+        let non_empty = NalgebraVec::<f64>::zeros(2, NalgebraContext);
+        assert!(!non_empty.is_empty());
+        assert_eq!(non_empty.clone_as_vec(), vec![0.0, 0.0]);
+    }
+
+    #[test]
+    fn vector_assert_eq_panics_for_length_mismatch() {
+        let left = NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext);
+        let right = NalgebraVec::from_vec(vec![1.0], NalgebraContext);
+        let tol = NalgebraVec::from_vec(vec![0.0, 0.0], NalgebraContext);
+        assert!(catch_unwind(AssertUnwindSafe(|| left.assert_eq(&right, &tol))).is_err());
+    }
+
+    #[test]
+    fn vector_assert_helpers_cover_success_and_failure_paths() {
+        let left = NalgebraVec::from_vec(vec![1.0, 2.0, 3.0], NalgebraContext);
+        let right = NalgebraVec::from_vec(vec![1.0, 2.0, 3.0], NalgebraContext);
+        let tol = NalgebraVec::from_vec(vec![0.0, 0.0, 0.0], NalgebraContext);
+        left.assert_eq(&right, &tol);
+        left.assert_eq_st(&right, 0.0);
+        left.assert_eq_norm(&right, &tol, 1e-6, 1.0);
+
+        let perturbed = NalgebraVec::from_vec(vec![1.1, 2.0, 3.0], NalgebraContext);
+        assert!(catch_unwind(AssertUnwindSafe(
+            || left.assert_eq_norm(&perturbed, &tol, 1e-6, 0.01)
+        ))
+        .is_err());
+    }
+
+    #[test]
+    fn vector_assert_eq_vec_panics_for_short_vector_mismatch() {
+        assert!(catch_unwind(AssertUnwindSafe(|| {
+            <NalgebraVec<f64> as Vector>::assert_eq_vec(
+                vec![1.0, 2.0, 3.0],
+                vec![0.0, 2.0, 3.0],
+                vec![0.0, 0.0, 0.0],
+            )
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn vector_assert_eq_vec_panics_for_first_middle_and_last_mismatch_in_long_vectors() {
+        assert!(catch_unwind(AssertUnwindSafe(|| {
+            <NalgebraVec<f64> as Vector>::assert_eq_vec(
+                vec![1.0, 2.0, 3.0, 4.0],
+                vec![0.0, 2.0, 3.0, 4.0],
+                vec![0.0, 0.0, 0.0, 0.0],
+            )
+        }))
+        .is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| {
+            <NalgebraVec<f64> as Vector>::assert_eq_vec(
+                vec![1.0, 2.0, 3.0, 4.0, 5.0],
+                vec![1.0, 2.0, 0.0, 4.0, 5.0],
+                vec![0.0, 0.0, 0.0, 0.0, 0.0],
+            )
+        }))
+        .is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| {
+            <NalgebraVec<f64> as Vector>::assert_eq_vec(
+                vec![1.0, 2.0, 3.0, 4.0],
+                vec![1.0, 2.0, 3.0, 0.0],
+                vec![0.0, 0.0, 0.0, 0.0],
+            )
+        }))
+        .is_err());
     }
 }

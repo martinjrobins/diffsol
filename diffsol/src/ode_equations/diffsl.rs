@@ -1081,10 +1081,10 @@ mod tests {
     };
 
     use crate::{
-        matrix::MatrixRef, ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, DenseMatrix,
-        LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
-        NonLinearOpSensAdjoint, OdeBuilder, OdeEquations, OdeSolverMethod, Vector, VectorHost,
-        VectorRef, VectorView,
+        error::DiffsolError, matrix::MatrixRef, ConstantOp, Context, DefaultDenseMatrix,
+        DefaultSolver, DenseMatrix, LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint,
+        NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, OdeBuilder, OdeEquations,
+        OdeSolverMethod, Vector, VectorHost, VectorRef, VectorView,
     };
 
     use super::{DiffSl, DiffSlContext};
@@ -1135,6 +1135,12 @@ mod tests {
     generate_tests!(diffsl_logistic_growth_with_model_index);
     #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     generate_tests!(diffsl_reset_call_and_jac_mul);
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+    generate_tests!(diffsl_context_handles_thread_modes);
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+    generate_tests!(diffsl_context_reports_parser_and_compiler_errors);
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+    generate_tests!(diffsl_root_and_output_operators_work);
 
     // Sensitivity and reverse-mode (adjoint) require LLVM — Cranelift supports neither.
     macro_rules! generate_tests_llvm_only {
@@ -1403,6 +1409,110 @@ mod tests {
                 M::T::from_f64(10.0).unwrap(),
             );
         }
+    }
+
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+    fn diffsl_context_handles_thread_modes<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >() {
+        let text = "
+            in_i { r = 1 }
+            u_i { y = 0.1 }
+            F_i { r * y }
+            out_i { y }
+        ";
+
+        for nthreads in [0, 1, 4] {
+            let context = DiffSlContext::<M, CG>::new(text, nthreads, M::C::default()).unwrap();
+            assert_eq!(context.nstates, 1);
+            assert_eq!(context.nparams, 1);
+            assert_eq!(context.nout, 1);
+            assert!(!context.has_mass);
+            assert!(!context.has_root);
+            assert!(!context.has_reset);
+            assert!(context.has_out);
+        }
+    }
+
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+    fn diffsl_context_reports_parser_and_compiler_errors<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >() {
+        let parser_err = match DiffSlContext::<M, CG>::new("this is not diffsl", 1, M::C::default())
+        {
+            Ok(_) => panic!("expected parser error"),
+            Err(err) => err,
+        };
+        assert!(matches!(parser_err, DiffsolError::DiffslParserError(_)));
+
+        let compiler_err = match DiffSlContext::<M, CG>::new(
+            "
+                u_i { y = 1 }
+                F_i { missing_symbol }
+            ",
+            1,
+            M::C::default(),
+        ) {
+            Ok(_) => panic!("expected compiler error"),
+            Err(err) => err,
+        };
+        assert!(matches!(compiler_err, DiffsolError::DiffslCompilerError(_)));
+    }
+
+    #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+    fn diffsl_root_and_output_operators_work<
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
+    >()
+    where
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        let text = "
+            in_i { a = 1 }
+            u_i {
+                y = a,
+                z = 2,
+            }
+            F_i {
+                y,
+                z,
+            }
+            stop_i {
+                y - 0.5,
+            }
+            reset_i {
+                2 * y + a,
+                z + a,
+            }
+            out_i {
+                3 * y,
+                4 * z,
+            }
+        ";
+
+        let ctx = M::C::default();
+        let mut eqn = DiffSl::<M, CG>::compile(text, ctx.clone(), false).unwrap();
+        let p = ctx.vector_from_vec(vec![M::T::from_f64(3.0).unwrap()]);
+        eqn.set_params(&p);
+
+        let x = eqn.init().call(M::T::zero());
+        let root = eqn.root().unwrap().call(&x, M::T::zero());
+        root.assert_eq_st(
+            &ctx.vector_from_vec(vec![M::T::from_f64(2.5).unwrap()]),
+            M::T::from_f64(1e-10).unwrap(),
+        );
+
+        let out = eqn.out().unwrap().call(&x, M::T::zero());
+        out.assert_eq_st(
+            &ctx.vector_from_vec(vec![
+                M::T::from_f64(9.0).unwrap(),
+                M::T::from_f64(8.0).unwrap(),
+            ]),
+            M::T::from_f64(1e-10).unwrap(),
+        );
     }
 
     #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]

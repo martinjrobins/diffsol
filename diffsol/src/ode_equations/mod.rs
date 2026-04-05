@@ -582,14 +582,108 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+
+    use crate::context::nalgebra::NalgebraContext;
     use crate::matrix::dense_nalgebra_serial::NalgebraMat;
     use crate::ode_equations::test_models::exponential_decay::exponential_decay_problem;
+    use crate::ode_equations::test_models::exponential_decay::{
+        exponential_decay_problem_with_root, exponential_decay_with_reset_problem,
+    };
     use crate::ode_equations::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem;
     use crate::vector::Vector;
     use crate::OdeEquations;
-    use crate::{Context, DenseMatrix, LinearOp, NonLinearOp, NonLinearOpJacobian};
+    use crate::{
+        ConstantOp, Context, DenseMatrix, LinearOp, NonLinearOp, NonLinearOpJacobian, Op,
+        UnitCallable,
+    };
+
+    use super::{AugmentedOdeEquations, NoAug, OdeEquationsStatistics};
 
     type Mcpu = NalgebraMat<f64>;
+
+    #[derive(Clone)]
+    struct FakeEqn {
+        ctx: NalgebraContext,
+    }
+
+    #[derive(Clone)]
+    struct FakeInit {
+        ctx: NalgebraContext,
+    }
+
+    impl Op for FakeEqn {
+        type T = f64;
+        type V = crate::NalgebraVec<f64>;
+        type M = Mcpu;
+        type C = NalgebraContext;
+
+        fn context(&self) -> &Self::C {
+            &self.ctx
+        }
+        fn nstates(&self) -> usize {
+            1
+        }
+        fn nout(&self) -> usize {
+            1
+        }
+        fn nparams(&self) -> usize {
+            0
+        }
+    }
+
+    impl<'a> super::OdeEquationsRef<'a> for FakeEqn {
+        type Mass = UnitCallable<Mcpu>;
+        type Rhs = UnitCallable<Mcpu>;
+        type Root = UnitCallable<Mcpu>;
+        type Init = FakeInit;
+        type Out = UnitCallable<Mcpu>;
+        type Reset = UnitCallable<Mcpu>;
+    }
+
+    impl Op for FakeInit {
+        type T = f64;
+        type V = crate::NalgebraVec<f64>;
+        type M = Mcpu;
+        type C = NalgebraContext;
+
+        fn context(&self) -> &Self::C {
+            &self.ctx
+        }
+        fn nstates(&self) -> usize {
+            1
+        }
+        fn nout(&self) -> usize {
+            1
+        }
+        fn nparams(&self) -> usize {
+            0
+        }
+    }
+
+    impl ConstantOp for FakeInit {
+        fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
+            y.fill(0.0);
+        }
+    }
+
+    impl OdeEquations for FakeEqn {
+        fn rhs(&self) -> <Self as super::OdeEquationsRef<'_>>::Rhs {
+            UnitCallable::new(1, self.ctx)
+        }
+
+        fn mass(&self) -> Option<<Self as super::OdeEquationsRef<'_>>::Mass> {
+            None
+        }
+
+        fn init(&self) -> <Self as super::OdeEquationsRef<'_>>::Init {
+            FakeInit { ctx: self.ctx }
+        }
+
+        fn set_params(&mut self, _p: &Self::V) {}
+
+        fn get_params(&self, _p: &mut Self::V) {}
+    }
 
     #[test]
     fn ode_equation_test() {
@@ -639,5 +733,126 @@ mod tests {
         assert_eq!(jac.get_index(2, 0), 0.0);
         assert_eq!(jac.get_index(1, 2), 0.0);
         assert_eq!(jac.get_index(2, 1), -1.0);
+    }
+
+    #[test]
+    fn ode_equations_statistics_new_matches_default() {
+        let stats = OdeEquationsStatistics::new();
+        let default_stats = OdeEquationsStatistics::default();
+        assert_eq!(stats.number_of_rhs_evals, default_stats.number_of_rhs_evals);
+        assert_eq!(
+            stats.number_of_jac_mul_evals,
+            default_stats.number_of_jac_mul_evals
+        );
+        assert_eq!(
+            stats.number_of_mass_evals,
+            default_stats.number_of_mass_evals
+        );
+        assert_eq!(
+            stats.number_of_mass_matrix_evals,
+            default_stats.number_of_mass_matrix_evals
+        );
+        assert_eq!(
+            stats.number_of_jacobian_matrix_evals,
+            default_stats.number_of_jacobian_matrix_evals
+        );
+    }
+
+    #[test]
+    fn ode_solver_equations_optional_members_and_param_roundtrip_work() {
+        let (mut problem, _soln) = exponential_decay_problem::<Mcpu>(false);
+        assert_eq!(problem.eqn.nout(), problem.eqn.rhs().nout());
+        assert!(problem.eqn.mass().is_none());
+        assert!(problem.eqn.root().is_none());
+        assert!(problem.eqn.out().is_none());
+        assert!(problem.eqn.reset().is_none());
+
+        let p = problem.context().vector_from_vec(vec![0.2, 3.0]);
+        problem.eqn.set_params(&p);
+        let mut out = problem.context().vector_zeros(2);
+        problem.eqn.get_params(&mut out);
+        out.assert_eq_st(&p, 1e-12);
+    }
+
+    #[test]
+    fn ode_solver_equations_expose_optional_root_and_reset_members() {
+        let (problem_with_root, _) = exponential_decay_problem_with_root::<Mcpu>(false, false);
+        assert!(problem_with_root.eqn.root().is_some());
+        assert!(problem_with_root.eqn.reset().is_none());
+
+        let (problem_with_reset, _) = exponential_decay_with_reset_problem::<Mcpu>();
+        assert!(problem_with_reset.eqn.root().is_some());
+        assert!(problem_with_reset.eqn.reset().is_some());
+    }
+
+    #[test]
+    fn ode_equations_reference_impl_forwards_reads() {
+        let (problem, _soln) = exponential_decay_problem::<Mcpu>(false);
+        let eqn_ref = &problem.eqn;
+        let y = problem.context().vector_from_vec(vec![1.0, 1.0]);
+        eqn_ref
+            .rhs()
+            .call(&y, 0.0)
+            .assert_eq_st(&problem.context().vector_from_vec(vec![-0.1, -0.1]), 1e-12);
+        assert!(eqn_ref.mass().is_none());
+        assert!(eqn_ref.root().is_none());
+        assert!(eqn_ref.out().is_none());
+        assert!(eqn_ref.reset().is_none());
+        eqn_ref
+            .init()
+            .call(0.0)
+            .assert_eq_st(&problem.context().vector_from_vec(vec![1.0, 1.0]), 1e-12);
+
+        let mut p = problem.context().vector_zeros(2);
+        eqn_ref.get_params(&mut p);
+        p.assert_eq_st(&problem.context().vector_from_vec(vec![0.1, 1.0]), 1e-12);
+    }
+
+    #[test]
+    fn no_aug_panics_for_all_runtime_methods() {
+        let no_aug = NoAug::<FakeEqn> {
+            _phantom: std::marker::PhantomData,
+        };
+        let mut v = crate::NalgebraVec::zeros(0, NalgebraContext);
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.nout())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.nparams())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.nstates())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.statistics())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.context())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.rhs())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.mass())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.root())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.out())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.reset())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.init())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| {
+            let mut no_aug = no_aug.clone();
+            no_aug.set_params(&v)
+        }))
+        .is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| {
+            let mut no_aug = no_aug.clone();
+            no_aug.set_model_index(0)
+        }))
+        .is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.get_params(&mut v))).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| {
+            let mut no_aug = no_aug.clone();
+            no_aug.update_rhs_out_state(&v, &v, 0.0)
+        }))
+        .is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| {
+            let mut no_aug = no_aug.clone();
+            no_aug.set_index(0)
+        }))
+        .is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.atol())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.include_out_in_error_control())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.out_atol())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.out_rtol())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.rtol())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.max_index())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.include_in_error_control())).is_err());
+        assert!(catch_unwind(AssertUnwindSafe(|| no_aug.integrate_main_eqn())).is_err());
     }
 }

@@ -155,3 +155,126 @@ impl<M: Matrix> LinearOpTranspose for UnitCallable<M> {
         y.axpy(Self::T::one(), x, beta);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        context::nalgebra::NalgebraContext, matrix::dense_nalgebra_serial::NalgebraMat, Context,
+        LinearOp, LinearOpSens, LinearOpTranspose, NonLinearOp, NonLinearOpAdjoint,
+        NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Op, Vector,
+    };
+
+    use super::{BuilderOp, ParameterisedOp, UnitCallable};
+
+    type M = NalgebraMat<f64>;
+
+    fn assert_raw_and_parameterised_unit(op: &UnitCallable<M>) {
+        let ctx = op.context().clone();
+        let x = ctx.vector_from_vec(vec![1.0, -2.0, 3.0]);
+        let v = ctx.vector_from_vec(vec![0.5, -1.5, 2.0]);
+        let mut y: crate::NalgebraVec<f64> = ctx.vector_from_vec(vec![9.0, 8.0, 7.0]);
+
+        NonLinearOp::call_inplace(op, &x, 0.0, &mut y);
+        y.assert_eq_st(&x, 1e-12);
+
+        y = ctx.vector_from_vec(vec![9.0, 8.0, 7.0]);
+        op.gemv_inplace(&x, 0.0, 2.0, &mut y);
+        y.assert_eq_st(&ctx.vector_from_vec(vec![19.0, 14.0, 17.0]), 1e-12);
+
+        y = ctx.vector_from_vec(vec![9.0, 8.0, 7.0]);
+        op.gemv_transpose_inplace(&x, 0.0, 2.0, &mut y);
+        y.assert_eq_st(&ctx.vector_from_vec(vec![19.0, 14.0, 17.0]), 1e-12);
+
+        y = ctx.vector_zeros(3);
+        op.jac_mul_inplace(&x, 0.0, &v, &mut y);
+        y.assert_eq_st(&v, 1e-12);
+
+        y = ctx.vector_zeros(3);
+        op.jac_transpose_mul_inplace(&x, 0.0, &v, &mut y);
+        y.assert_eq_st(&v, 1e-12);
+
+        y = ctx.vector_from_vec(vec![1.0, 1.0, 1.0]);
+        <UnitCallable<M> as NonLinearOpSens>::sens_mul_inplace(op, &x, 0.0, &v, &mut y);
+        y.assert_eq_st(&ctx.vector_zeros(3), 1e-12);
+
+        y = ctx.vector_from_vec(vec![1.0, 1.0, 1.0]);
+        <UnitCallable<M> as NonLinearOpSensAdjoint>::sens_transpose_mul_inplace(
+            op, &x, 0.0, &v, &mut y,
+        );
+        y.assert_eq_st(&ctx.vector_zeros(3), 1e-12);
+
+        y = ctx.vector_from_vec(vec![1.0, 1.0, 1.0]);
+        <UnitCallable<M> as LinearOpSens>::sens_mul_inplace(op, &x, 0.0, &v, &mut y);
+        y.assert_eq_st(&ctx.vector_zeros(3), 1e-12);
+
+        let p = ctx.vector_zeros(0);
+        let pop = ParameterisedOp::new(op, &p);
+
+        y = ctx.vector_zeros(3);
+        NonLinearOp::call_inplace(&pop, &x, 0.0, &mut y);
+        y.assert_eq_st(&x, 1e-12);
+
+        y = ctx.vector_from_vec(vec![1.0, 2.0, 3.0]);
+        pop.gemv_inplace(&x, 0.0, -1.0, &mut y);
+        y.assert_eq_st(&ctx.vector_from_vec(vec![0.0, -4.0, 0.0]), 1e-12);
+
+        y = ctx.vector_zeros(3);
+        pop.jac_mul_inplace(&x, 0.0, &v, &mut y);
+        y.assert_eq_st(&v, 1e-12);
+
+        y = ctx.vector_zeros(3);
+        pop.jac_transpose_mul_inplace(&x, 0.0, &v, &mut y);
+        y.assert_eq_st(&v, 1e-12);
+
+        y = ctx.vector_from_vec(vec![1.0, 1.0, 1.0]);
+        <ParameterisedOp<'_, UnitCallable<M>> as NonLinearOpSens>::sens_mul_inplace(
+            &pop, &x, 0.0, &v, &mut y,
+        );
+        y.assert_eq_st(&ctx.vector_zeros(3), 1e-12);
+
+        y = ctx.vector_from_vec(vec![1.0, 1.0, 1.0]);
+        <ParameterisedOp<'_, UnitCallable<M>> as NonLinearOpSensAdjoint>::sens_transpose_mul_inplace(
+            &pop, &x, 0.0, &v, &mut y,
+        );
+        y.assert_eq_st(&ctx.vector_zeros(3), 1e-12);
+
+        y = ctx.vector_from_vec(vec![1.0, 1.0, 1.0]);
+        <ParameterisedOp<'_, UnitCallable<M>> as LinearOpSens>::sens_mul_inplace(
+            &pop, &x, 0.0, &v, &mut y,
+        );
+        y.assert_eq_st(&ctx.vector_zeros(3), 1e-12);
+
+        y = ctx.vector_from_vec(vec![1.0, 2.0, 3.0]);
+        pop.gemv_transpose_inplace(&x, 0.0, 1.0, &mut y);
+        y.assert_eq_st(&ctx.vector_from_vec(vec![2.0, 0.0, 6.0]), 1e-12);
+    }
+
+    #[test]
+    fn unit_callable_behaves_as_identity_and_zero_sens_operator() {
+        let ctx = NalgebraContext;
+        let mut op = UnitCallable::<M>::default();
+        assert_eq!(op.nstates(), 1);
+        assert_eq!(op.nout(), 1);
+        assert_eq!(op.nparams(), 0);
+
+        op.set_nout(3);
+        op.set_nstates(3);
+        op.set_nparams(99);
+        op.calculate_sparsity(&ctx.vector_zeros(3), 0.0, &ctx.vector_zeros(0));
+
+        assert_eq!(op.nstates(), 3);
+        assert_eq!(op.nout(), 3);
+        assert_eq!(op.nparams(), 0);
+
+        assert_raw_and_parameterised_unit(&op);
+    }
+
+    #[test]
+    fn unit_callable_new_uses_supplied_context() {
+        let op = UnitCallable::<M>::new(3, NalgebraContext);
+        assert_eq!(op.nstates(), 3);
+        assert_eq!(op.nout(), 3);
+        assert_eq!(op.nparams(), 0);
+        assert_raw_and_parameterised_unit(&op);
+    }
+}

@@ -1418,14 +1418,18 @@ mod tests {
 
 #[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
 mod jit_tests {
+    use std::ffi::{CStr, CString};
     use std::ptr;
 
+    use crate::error_c::{diffsol_error_code, diffsol_last_error_message};
+    use crate::initial_condition_options_c::diffsol_ic_options_free;
     use crate::jit::JitBackendType;
     use crate::jit_c::jit_backend_to_i32;
     use crate::linear_solver_type::LinearSolverType;
     use crate::linear_solver_type_c::linear_solver_to_i32;
     use crate::matrix_type::MatrixType;
     use crate::matrix_type_c::matrix_type_to_i32;
+    use crate::ode_options_c::diffsol_ode_options_free;
     use crate::ode_solver_type::OdeSolverType;
     use crate::ode_solver_type_c::ode_solver_to_i32;
     #[cfg(feature = "diffsl-llvm")]
@@ -1438,10 +1442,11 @@ mod jit_tests {
     use crate::test_support::{
         ASSERT_TOL, LOGISTIC_X0, assert_close, available_jit_backends, clear_last_error,
         ffi_free_solution, ffi_read_host_array_matrix, ffi_read_host_array_vector,
-        find_time_window, logistic_diffsl_code_cstring, logistic_state,
+        find_time_window, hybrid_logistic_diffsl_code, hybrid_logistic_state,
+        logistic_diffsl_code_cstring, logistic_state,
     };
     #[cfg(feature = "diffsl-llvm")]
-    use crate::test_support::{logistic_integral, logistic_state_dr};
+    use crate::test_support::{hybrid_logistic_state_dr, logistic_integral, logistic_state_dr};
 
     use super::*;
 
@@ -1479,6 +1484,13 @@ mod jit_tests {
                 ode_solver,
             )
         }
+    }
+
+    unsafe fn last_error_message() -> String {
+        let ptr = unsafe { diffsol_last_error_message() };
+        assert_eq!(unsafe { diffsol_error_code() }, 1);
+        assert!(!ptr.is_null());
+        unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_owned()
     }
 
     #[test]
@@ -1690,6 +1702,580 @@ mod jit_tests {
                     diffsol_ode_free(analysis_ode);
                 }
                 ffi_free_solution(solution_ptr);
+                diffsol_ode_free(ode);
+            }
+        }
+    }
+
+    #[test]
+    fn c_api_rejects_invalid_jit_arguments() {
+        unsafe {
+            clear_last_error();
+            assert!(
+                diffsol_ode_new_jit(
+                    ptr::null(),
+                    jit_backend_to_i32(available_jit_backends()[0]),
+                    matrix_type_to_i32(MatrixType::NalgebraDense),
+                    linear_solver_to_i32(LinearSolverType::Default),
+                    ode_solver_to_i32(OdeSolverType::Bdf),
+                )
+                .is_null()
+            );
+            assert!(last_error_message().contains("code is null"));
+
+            clear_last_error();
+            let invalid_utf8 = CString::from_vec_with_nul(vec![0xff, 0]).unwrap();
+            assert!(
+                diffsol_ode_new_jit(
+                    invalid_utf8.as_ptr(),
+                    jit_backend_to_i32(available_jit_backends()[0]),
+                    matrix_type_to_i32(MatrixType::NalgebraDense),
+                    linear_solver_to_i32(LinearSolverType::Default),
+                    ode_solver_to_i32(OdeSolverType::Bdf),
+                )
+                .is_null()
+            );
+            assert!(last_error_message().contains("valid UTF-8"));
+
+            clear_last_error();
+            let code = logistic_diffsl_code_cstring();
+            assert!(
+                diffsol_ode_new_jit(
+                    code.as_ptr(),
+                    99,
+                    matrix_type_to_i32(MatrixType::NalgebraDense),
+                    linear_solver_to_i32(LinearSolverType::Default),
+                    ode_solver_to_i32(OdeSolverType::Bdf),
+                )
+                .is_null()
+            );
+            assert!(last_error_message().contains("invalid jit_backend_type"));
+
+            clear_last_error();
+            assert!(
+                diffsol_ode_new_jit(
+                    code.as_ptr(),
+                    jit_backend_to_i32(available_jit_backends()[0]),
+                    99,
+                    linear_solver_to_i32(LinearSolverType::Default),
+                    ode_solver_to_i32(OdeSolverType::Bdf),
+                )
+                .is_null()
+            );
+            assert!(last_error_message().contains("invalid matrix_type"));
+
+            clear_last_error();
+            assert!(
+                diffsol_ode_new_jit(
+                    code.as_ptr(),
+                    jit_backend_to_i32(available_jit_backends()[0]),
+                    matrix_type_to_i32(MatrixType::NalgebraDense),
+                    99,
+                    ode_solver_to_i32(OdeSolverType::Bdf),
+                )
+                .is_null()
+            );
+            assert!(last_error_message().contains("invalid linear_solver"));
+
+            clear_last_error();
+            assert!(
+                diffsol_ode_new_jit(
+                    code.as_ptr(),
+                    jit_backend_to_i32(available_jit_backends()[0]),
+                    matrix_type_to_i32(MatrixType::NalgebraDense),
+                    linear_solver_to_i32(LinearSolverType::Default),
+                    99,
+                )
+                .is_null()
+            );
+            assert!(last_error_message().contains("invalid ode_solver"));
+
+            clear_last_error();
+            let invalid_code = CString::new("not valid diffsl").unwrap();
+            assert!(
+                diffsol_ode_new_jit(
+                    invalid_code.as_ptr(),
+                    jit_backend_to_i32(available_jit_backends()[0]),
+                    matrix_type_to_i32(MatrixType::NalgebraDense),
+                    linear_solver_to_i32(LinearSolverType::Default),
+                    ode_solver_to_i32(OdeSolverType::Bdf),
+                )
+                .is_null()
+            );
+            assert!(diffsol_error_code() != 0);
+
+            let mut ic_options = ptr::null_mut();
+            assert_eq!(
+                diffsol_ode_get_ic_options(ptr::null_mut(), &mut ic_options),
+                DIFFSOL_BAD_ARG
+            );
+            let mut ode_options = ptr::null_mut();
+            assert_eq!(
+                diffsol_ode_get_options(ptr::null_mut(), &mut ode_options),
+                DIFFSOL_BAD_ARG
+            );
+
+            let mut out_array = ptr::null_mut();
+            assert_eq!(
+                diffsol_ode_y0(ptr::null_mut(), ptr::null(), 0, &mut out_array),
+                DIFFSOL_BAD_ARG
+            );
+            assert_eq!(
+                diffsol_ode_rhs(
+                    ptr::null_mut(),
+                    ptr::null(),
+                    0,
+                    0.0,
+                    ptr::null(),
+                    0,
+                    &mut out_array,
+                ),
+                DIFFSOL_BAD_ARG
+            );
+            assert_eq!(
+                diffsol_ode_rhs_jac_mul(
+                    ptr::null_mut(),
+                    ptr::null(),
+                    0,
+                    0.0,
+                    ptr::null(),
+                    0,
+                    ptr::null(),
+                    0,
+                    &mut out_array,
+                ),
+                DIFFSOL_BAD_ARG
+            );
+
+            clear_last_error();
+            diffsol_ode_free(ptr::null_mut());
+            assert!(last_error_message().contains("ode is null"));
+
+            clear_last_error();
+            diffsol_host_array_list_free(ptr::null_mut(), 0);
+            assert!(last_error_message().contains("host array list is null"));
+        }
+    }
+
+    #[test]
+    fn c_api_jit_wrapper_branches_cover_runtime_success_and_errors() {
+        for jit_backend in available_jit_backends() {
+            unsafe {
+                let ode = make_ode_ptr(
+                    jit_backend,
+                    matrix_type_to_i32(MatrixType::NalgebraDense),
+                    linear_solver_to_i32(LinearSolverType::Default),
+                    ode_solver_to_i32(OdeSolverType::Bdf),
+                );
+                assert!(!ode.is_null());
+
+                let mut ic_options = ptr::null_mut();
+                let mut ode_options = ptr::null_mut();
+                assert_eq!(diffsol_ode_get_ic_options(ode, &mut ic_options), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_get_options(ode, &mut ode_options), DIFFSOL_OK);
+                diffsol_ic_options_free(ic_options);
+                diffsol_ode_options_free(ode_options);
+
+                let mut out_value = 0.0;
+                assert_eq!(diffsol_ode_get_rtol(ode, &mut out_value), DIFFSOL_OK);
+                assert_close(out_value, 1e-6, ASSERT_TOL, "jit ffi default rtol");
+                assert_eq!(diffsol_ode_set_rtol(ode, 1e-4), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_get_rtol(ode, &mut out_value), DIFFSOL_OK);
+                assert_close(out_value, 1e-4, ASSERT_TOL, "jit ffi updated rtol");
+
+                assert_eq!(diffsol_ode_get_atol(ode, &mut out_value), DIFFSOL_OK);
+                assert_close(out_value, 1e-6, ASSERT_TOL, "jit ffi default atol");
+                assert_eq!(diffsol_ode_set_atol(ode, 1e-5), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_get_atol(ode, &mut out_value), DIFFSOL_OK);
+                assert_close(out_value, 1e-5, ASSERT_TOL, "jit ffi updated atol");
+
+                assert_eq!(
+                    diffsol_ode_set_linear_solver(ode, linear_solver_to_i32(LinearSolverType::Lu)),
+                    DIFFSOL_OK
+                );
+                assert_eq!(
+                    diffsol_ode_get_linear_solver(ode),
+                    linear_solver_to_i32(LinearSolverType::Lu)
+                );
+                assert_eq!(
+                    diffsol_ode_set_ode_solver(ode, ode_solver_to_i32(OdeSolverType::Tsit45)),
+                    DIFFSOL_OK
+                );
+                assert_eq!(
+                    diffsol_ode_get_ode_solver(ode),
+                    ode_solver_to_i32(OdeSolverType::Tsit45)
+                );
+                assert_eq!(
+                    diffsol_ode_get_matrix_type(ode),
+                    matrix_type_to_i32(MatrixType::NalgebraDense)
+                );
+
+                let params = [2.0f64];
+                let mut solution_ptr: *mut SolutionWrapper = ptr::null_mut();
+                assert_eq!(
+                    diffsol_ode_solve(ode, params.as_ptr(), params.len(), 1.0, &mut solution_ptr),
+                    DIFFSOL_OK
+                );
+                ffi_free_solution(solution_ptr);
+
+                let t_eval = [0.25f64, 0.5f64, 1.0f64];
+                let mut dense_solution_ptr: *mut SolutionWrapper = ptr::null_mut();
+                assert_eq!(
+                    diffsol_ode_solve_dense(
+                        ode,
+                        params.as_ptr(),
+                        params.len(),
+                        t_eval.as_ptr(),
+                        t_eval.len(),
+                        &mut dense_solution_ptr,
+                    ),
+                    DIFFSOL_OK
+                );
+                ffi_free_solution(dense_solution_ptr);
+
+                let no_params: [f64; 0] = [];
+                let y = [0.25f64];
+                let v = [3.0f64];
+                let mut out_array = ptr::null_mut();
+                assert_eq!(
+                    diffsol_ode_y0(ode, no_params.as_ptr(), no_params.len(), &mut out_array),
+                    DIFFSOL_ERR
+                );
+                assert_eq!(
+                    diffsol_ode_rhs(
+                        ode,
+                        no_params.as_ptr(),
+                        no_params.len(),
+                        0.0,
+                        y.as_ptr(),
+                        y.len(),
+                        &mut out_array,
+                    ),
+                    DIFFSOL_ERR
+                );
+                assert_eq!(
+                    diffsol_ode_rhs_jac_mul(
+                        ode,
+                        no_params.as_ptr(),
+                        no_params.len(),
+                        0.0,
+                        y.as_ptr(),
+                        y.len(),
+                        v.as_ptr(),
+                        v.len(),
+                        &mut out_array,
+                    ),
+                    DIFFSOL_ERR
+                );
+
+                let mut err_solution_ptr: *mut SolutionWrapper = ptr::null_mut();
+                assert_eq!(
+                    diffsol_ode_solve(
+                        ode,
+                        no_params.as_ptr(),
+                        no_params.len(),
+                        1.0,
+                        &mut err_solution_ptr,
+                    ),
+                    DIFFSOL_ERR
+                );
+                assert_eq!(
+                    diffsol_ode_solve_hybrid(
+                        ode,
+                        no_params.as_ptr(),
+                        no_params.len(),
+                        1.0,
+                        &mut err_solution_ptr,
+                    ),
+                    DIFFSOL_ERR
+                );
+                assert_eq!(
+                    diffsol_ode_solve_dense(
+                        ode,
+                        no_params.as_ptr(),
+                        no_params.len(),
+                        t_eval.as_ptr(),
+                        t_eval.len(),
+                        &mut err_solution_ptr,
+                    ),
+                    DIFFSOL_ERR
+                );
+                assert_eq!(
+                    diffsol_ode_solve_hybrid_dense(
+                        ode,
+                        no_params.as_ptr(),
+                        no_params.len(),
+                        t_eval.as_ptr(),
+                        t_eval.len(),
+                        &mut err_solution_ptr,
+                    ),
+                    DIFFSOL_ERR
+                );
+
+                #[cfg(feature = "diffsl-llvm")]
+                if matches!(jit_backend, JitBackendType::Llvm) {
+                    assert_eq!(
+                        diffsol_ode_solve_fwd_sens(
+                            ode,
+                            no_params.as_ptr(),
+                            no_params.len(),
+                            t_eval.as_ptr(),
+                            t_eval.len(),
+                            &mut err_solution_ptr,
+                        ),
+                        DIFFSOL_ERR
+                    );
+                    assert_eq!(
+                        diffsol_ode_solve_hybrid_fwd_sens(
+                            ode,
+                            no_params.as_ptr(),
+                            no_params.len(),
+                            t_eval.as_ptr(),
+                            t_eval.len(),
+                            &mut err_solution_ptr,
+                        ),
+                        DIFFSOL_ERR
+                    );
+
+                    let adjoint_data: Vec<f64> = t_eval
+                        .iter()
+                        .map(|&t| logistic_integral(LOGISTIC_X0, 2.0, t))
+                        .collect();
+                    let mut objective = 0.0;
+                    let mut sens_ptr = ptr::null_mut();
+                    assert_eq!(
+                        diffsol_ode_solve_sum_squares_adj(
+                            ode,
+                            no_params.as_ptr(),
+                            no_params.len(),
+                            adjoint_data.as_ptr(),
+                            1,
+                            t_eval.len(),
+                            1,
+                            1,
+                            t_eval.as_ptr(),
+                            t_eval.len(),
+                            &mut objective,
+                            &mut sens_ptr,
+                        ),
+                        DIFFSOL_ERR
+                    );
+                }
+
+                assert_eq!(diffsol_ode_get_matrix_type(ptr::null()), -1);
+                assert_eq!(diffsol_ode_get_ode_solver(ptr::null()), -1);
+                assert_eq!(diffsol_ode_get_linear_solver(ptr::null()), -1);
+                assert_eq!(
+                    diffsol_ode_set_ode_solver(ptr::null_mut(), 0),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_set_linear_solver(ptr::null_mut(), 0),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(diffsol_ode_set_ode_solver(ode, 99), DIFFSOL_BAD_ARG);
+                assert_eq!(diffsol_ode_set_linear_solver(ode, 99), DIFFSOL_BAD_ARG);
+                assert_eq!(
+                    diffsol_ode_get_rtol(ptr::null(), &mut out_value),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(diffsol_ode_get_rtol(ode, ptr::null_mut()), DIFFSOL_BAD_ARG);
+                assert_eq!(diffsol_ode_set_rtol(ptr::null_mut(), 1e-3), DIFFSOL_BAD_ARG);
+                assert_eq!(
+                    diffsol_ode_get_atol(ptr::null(), &mut out_value),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(diffsol_ode_get_atol(ode, ptr::null_mut()), DIFFSOL_BAD_ARG);
+                assert_eq!(diffsol_ode_set_atol(ptr::null_mut(), 1e-3), DIFFSOL_BAD_ARG);
+                assert_eq!(
+                    diffsol_ode_solve(ode, params.as_ptr(), params.len(), 1.0, ptr::null_mut()),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_solve_hybrid(
+                        ode,
+                        params.as_ptr(),
+                        params.len(),
+                        1.0,
+                        ptr::null_mut(),
+                    ),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_solve_dense(
+                        ode,
+                        params.as_ptr(),
+                        params.len(),
+                        t_eval.as_ptr(),
+                        t_eval.len(),
+                        ptr::null_mut(),
+                    ),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_solve_hybrid_dense(
+                        ode,
+                        params.as_ptr(),
+                        params.len(),
+                        t_eval.as_ptr(),
+                        t_eval.len(),
+                        ptr::null_mut(),
+                    ),
+                    DIFFSOL_BAD_ARG
+                );
+                #[cfg(feature = "diffsl-llvm")]
+                if matches!(jit_backend, JitBackendType::Llvm) {
+                    assert_eq!(
+                        diffsol_ode_solve_fwd_sens(
+                            ode,
+                            params.as_ptr(),
+                            params.len(),
+                            t_eval.as_ptr(),
+                            t_eval.len(),
+                            ptr::null_mut(),
+                        ),
+                        DIFFSOL_BAD_ARG
+                    );
+                    assert_eq!(
+                        diffsol_ode_solve_hybrid_fwd_sens(
+                            ode,
+                            params.as_ptr(),
+                            params.len(),
+                            t_eval.as_ptr(),
+                            t_eval.len(),
+                            ptr::null_mut(),
+                        ),
+                        DIFFSOL_BAD_ARG
+                    );
+                    let mut objective = 0.0;
+                    let mut sens_ptr = ptr::null_mut();
+                    assert_eq!(
+                        diffsol_ode_solve_sum_squares_adj(
+                            ode,
+                            params.as_ptr(),
+                            params.len(),
+                            t_eval.as_ptr(),
+                            1,
+                            t_eval.len(),
+                            1,
+                            1,
+                            t_eval.as_ptr(),
+                            t_eval.len(),
+                            ptr::null_mut(),
+                            &mut sens_ptr,
+                        ),
+                        DIFFSOL_BAD_ARG
+                    );
+                    assert_eq!(
+                        diffsol_ode_solve_sum_squares_adj(
+                            ode,
+                            params.as_ptr(),
+                            params.len(),
+                            t_eval.as_ptr(),
+                            1,
+                            t_eval.len(),
+                            1,
+                            1,
+                            t_eval.as_ptr(),
+                            t_eval.len(),
+                            &mut objective,
+                            ptr::null_mut(),
+                        ),
+                        DIFFSOL_BAD_ARG
+                    );
+                }
+
+                diffsol_ode_free(ode);
+            }
+        }
+    }
+
+    #[test]
+    fn c_api_hybrid_jit_solver_paths_match_expected_values() {
+        for jit_backend in available_jit_backends() {
+            unsafe {
+                let code = CString::new(hybrid_logistic_diffsl_code()).unwrap();
+                let ode = make_ode_ptr_with_code(
+                    jit_backend,
+                    code.as_ptr(),
+                    matrix_type_to_i32(MatrixType::NalgebraDense),
+                    linear_solver_to_i32(LinearSolverType::Default),
+                    ode_solver_to_i32(OdeSolverType::Bdf),
+                );
+                assert!(!ode.is_null());
+
+                let params = [2.0f64];
+                let mut solution_ptr: *mut SolutionWrapper = ptr::null_mut();
+                assert_eq!(
+                    diffsol_ode_solve_hybrid(
+                        ode,
+                        params.as_ptr(),
+                        params.len(),
+                        2.0,
+                        &mut solution_ptr
+                    ),
+                    DIFFSOL_OK
+                );
+                let mut ys_ptr = ptr::null_mut();
+                let mut ts_ptr = ptr::null_mut();
+                assert_eq!(
+                    diffsol_solution_wrapper_get_ys(solution_ptr, &mut ys_ptr),
+                    DIFFSOL_OK
+                );
+                assert_eq!(
+                    diffsol_solution_wrapper_get_ts(solution_ptr, &mut ts_ptr),
+                    DIFFSOL_OK
+                );
+                let (_rows, cols, ys) = ffi_read_host_array_matrix(ys_ptr);
+                let ts = ffi_read_host_array_vector(ts_ptr);
+                assert!(cols >= 1);
+                assert_close(*ts.last().unwrap(), 2.0, 5e-4, "jit hybrid solve time");
+                assert_close(
+                    *ys.last().unwrap(),
+                    hybrid_logistic_state(2.0, 2.0),
+                    5e-4,
+                    "jit hybrid solve value",
+                );
+                ffi_free_solution(solution_ptr);
+
+                #[cfg(feature = "diffsl-llvm")]
+                if matches!(jit_backend, JitBackendType::Llvm) {
+                    let t_eval = [0.25f64, 0.5f64, 1.0f64];
+                    let mut sens_solution_ptr: *mut SolutionWrapper = ptr::null_mut();
+                    assert_eq!(
+                        diffsol_ode_solve_hybrid_fwd_sens(
+                            ode,
+                            params.as_ptr(),
+                            params.len(),
+                            t_eval.as_ptr(),
+                            t_eval.len(),
+                            &mut sens_solution_ptr,
+                        ),
+                        DIFFSOL_OK
+                    );
+                    let mut sens_list = ptr::null_mut();
+                    let mut sens_len = 0usize;
+                    assert_eq!(
+                        diffsol_solution_wrapper_get_sens(
+                            sens_solution_ptr,
+                            &mut sens_list,
+                            &mut sens_len
+                        ),
+                        DIFFSOL_OK
+                    );
+                    let sens_values = ffi_read_host_array_list_matrices(sens_list, sens_len);
+                    for (i, (&value, &t)) in sens_values[0].2.iter().zip(t_eval.iter()).enumerate()
+                    {
+                        assert_close(
+                            value,
+                            hybrid_logistic_state_dr(2.0, t),
+                            5e-4,
+                            &format!("jit hybrid sensitivity[{i}]"),
+                        );
+                    }
+                    ffi_free_solution(sens_solution_ptr);
+                }
+
                 diffsol_ode_free(ode);
             }
         }
