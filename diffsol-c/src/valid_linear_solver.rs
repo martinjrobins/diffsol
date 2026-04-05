@@ -1,8 +1,8 @@
 // Validation used by py_solve to determine that solver type and matrix type
 // combinations are valid.
 
-use diffsol::Scalar;
 use diffsol::error::DiffsolError;
+use diffsol::{FaerScalar, Scalar};
 
 use crate::{
     error::DiffsolJsError, linear_solver_type::LinearSolverType, matrix_type::MatrixKind,
@@ -64,7 +64,7 @@ impl KluValidator<diffsol::FaerSparseMat<f32>> for diffsol::FaerSparseMat<f32> {
 }
 
 #[cfg(not(feature = "suitesparse"))]
-impl<T: Scalar> KluValidator<diffsol::FaerSparseMat<T>> for diffsol::FaerSparseMat<T> {
+impl<T: FaerScalar> KluValidator<diffsol::FaerSparseMat<T>> for diffsol::FaerSparseMat<T> {
     type LS = diffsol::FaerSparseLU<T>;
     fn valid() -> bool {
         false
@@ -78,7 +78,7 @@ impl<T: Scalar> KluValidator<diffsol::NalgebraMat<T>> for diffsol::NalgebraMat<T
     }
 }
 
-impl<T: Scalar> KluValidator<diffsol::FaerMat<T>> for diffsol::FaerMat<T> {
+impl<T: FaerScalar> KluValidator<diffsol::FaerMat<T>> for diffsol::FaerMat<T> {
     type LS = diffsol::FaerLU<T>;
     fn valid() -> bool {
         false
@@ -99,14 +99,14 @@ impl<T: Scalar> LuValidator<diffsol::NalgebraMat<T>> for diffsol::NalgebraMat<T>
     }
 }
 
-impl<T: Scalar> LuValidator<diffsol::FaerMat<T>> for diffsol::FaerMat<T> {
+impl<T: FaerScalar> LuValidator<diffsol::FaerMat<T>> for diffsol::FaerMat<T> {
     type LS = diffsol::FaerLU<T>;
     fn valid() -> bool {
         true
     }
 }
 
-impl<T: Scalar> LuValidator<diffsol::FaerSparseMat<T>> for diffsol::FaerSparseMat<T> {
+impl<T: FaerScalar> LuValidator<diffsol::FaerSparseMat<T>> for diffsol::FaerSparseMat<T> {
     type LS = diffsol::FaerSparseLU<T>;
     fn valid() -> bool {
         true

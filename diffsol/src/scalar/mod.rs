@@ -10,7 +10,7 @@ use crate::vector::VectorView;
 
 /// A scalar type suitable for numerical computations in ODE solvers.
 ///
-/// This trait aggregates multiple trait bounds from nalgebra, faer, and num_traits to ensure
+/// This trait aggregates multiple trait bounds from nalgebra and num_traits to ensure
 /// scalar types are suitable for all operations within diffsol.
 ///
 /// # Implementations
@@ -26,8 +26,6 @@ use crate::vector::VectorView;
 /// ```
 pub trait Scalar:
     nalgebra::Scalar
-    + faer::traits::ComplexField
-    + faer::traits::RealField
     + nalgebra::SimdRealField
     + nalgebra::ComplexField<RealField = Self>
     + num_traits::Signed
@@ -48,6 +46,11 @@ pub trait Scalar:
     /// Check if this value is NaN.
     fn is_nan(self) -> bool;
 }
+
+/// A [`Scalar`] that also satisfies faer's numeric field requirements.
+pub trait FaerScalar: Scalar + faer::traits::ComplexField + faer::traits::RealField {}
+
+impl<T> FaerScalar for T where T: Scalar + faer::traits::ComplexField + faer::traits::RealField {}
 
 /// The index type used throughout DiffSol for indexing vectors and matrices.
 pub type IndexType = usize;
@@ -70,12 +73,12 @@ impl Scalar for f32 {
     }
 }
 
-impl<T: Scalar> From<faer::Scale<T>> for Scale<T> {
+impl<T: FaerScalar> From<faer::Scale<T>> for Scale<T> {
     fn from(s: faer::Scale<T>) -> Self {
         Scale(s.0)
     }
 }
-impl<T: Scalar> From<Scale<T>> for faer::Scale<T> {
+impl<T: FaerScalar> From<Scale<T>> for faer::Scale<T> {
     fn from(s: Scale<T>) -> Self {
         faer::Scale(s.value())
     }

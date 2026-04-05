@@ -32,6 +32,7 @@ ndarray = { version = "0.17.2" }
 num-traits = { workspace = true }
 schemars = "1.1.0"
 serde = { workspace = true }
+paste = { workspace = true }
 
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -44,4 +45,3 @@ faer = { workspace = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
-paste = { workspace = true }
