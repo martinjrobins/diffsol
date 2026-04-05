@@ -229,7 +229,10 @@ mod tests {
     impl NonLinearOp for FakeNonLinearOp {
         fn call_inplace(&self, x: &Self::V, _t: Self::T, y: &mut Self::V) {
             y.copy_from(&Self::V::from_vec(
-                vec![2.0 * x.get_index(0) + 3.0 * x.get_index(1), -x.get_index(0) + 4.0 * x.get_index(1)],
+                vec![
+                    2.0 * x.get_index(0) + 3.0 * x.get_index(1),
+                    -x.get_index(0) + 4.0 * x.get_index(1),
+                ],
                 NalgebraContext,
             ));
         }
@@ -238,16 +241,28 @@ mod tests {
     impl NonLinearOpJacobian for FakeNonLinearOp {
         fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
             y.copy_from(&Self::V::from_vec(
-                vec![2.0 * v.get_index(0) + 3.0 * v.get_index(1), -v.get_index(0) + 4.0 * v.get_index(1)],
+                vec![
+                    2.0 * v.get_index(0) + 3.0 * v.get_index(1),
+                    -v.get_index(0) + 4.0 * v.get_index(1),
+                ],
                 NalgebraContext,
             ));
         }
     }
 
     impl NonLinearOpAdjoint for FakeNonLinearOp {
-        fn jac_transpose_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
+        fn jac_transpose_mul_inplace(
+            &self,
+            _x: &Self::V,
+            _t: Self::T,
+            v: &Self::V,
+            y: &mut Self::V,
+        ) {
             y.copy_from(&Self::V::from_vec(
-                vec![-2.0 * v.get_index(0) + v.get_index(1), -3.0 * v.get_index(0) - 4.0 * v.get_index(1)],
+                vec![
+                    -2.0 * v.get_index(0) + v.get_index(1),
+                    -3.0 * v.get_index(0) - 4.0 * v.get_index(1),
+                ],
                 NalgebraContext,
             ));
         }
@@ -256,16 +271,28 @@ mod tests {
     impl NonLinearOpSens for FakeNonLinearOp {
         fn sens_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
             y.copy_from(&Self::V::from_vec(
-                vec![v.get_index(0) + 2.0 * v.get_index(1), 3.0 * v.get_index(0) + 4.0 * v.get_index(1)],
+                vec![
+                    v.get_index(0) + 2.0 * v.get_index(1),
+                    3.0 * v.get_index(0) + 4.0 * v.get_index(1),
+                ],
                 NalgebraContext,
             ));
         }
     }
 
     impl NonLinearOpSensAdjoint for FakeNonLinearOp {
-        fn sens_transpose_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
+        fn sens_transpose_mul_inplace(
+            &self,
+            _x: &Self::V,
+            _t: Self::T,
+            v: &Self::V,
+            y: &mut Self::V,
+        ) {
             y.copy_from(&Self::V::from_vec(
-                vec![-v.get_index(0) - 3.0 * v.get_index(1), -2.0 * v.get_index(0) - 4.0 * v.get_index(1)],
+                vec![
+                    -v.get_index(0) - 3.0 * v.get_index(1),
+                    -2.0 * v.get_index(0) - 4.0 * v.get_index(1),
+                ],
                 NalgebraContext,
             ));
         }
@@ -279,21 +306,18 @@ mod tests {
         let x = crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext);
         let v = crate::NalgebraVec::from_vec(vec![3.0, -1.0], NalgebraContext);
 
-        op.call(&x, 0.0)
-            .assert_eq_st(
-                &crate::NalgebraVec::from_vec(vec![8.0, 7.0], NalgebraContext),
-                1e-12,
-            );
-        op.jac_mul(&x, 0.0, &v)
-            .assert_eq_st(
-                &crate::NalgebraVec::from_vec(vec![3.0, -7.0], NalgebraContext),
-                1e-12,
-            );
-        op.sens_mul(&x, 0.0, &v)
-            .assert_eq_st(
-                &crate::NalgebraVec::from_vec(vec![1.0, 5.0], NalgebraContext),
-                1e-12,
-            );
+        op.call(&x, 0.0).assert_eq_st(
+            &crate::NalgebraVec::from_vec(vec![8.0, 7.0], NalgebraContext),
+            1e-12,
+        );
+        op.jac_mul(&x, 0.0, &v).assert_eq_st(
+            &crate::NalgebraVec::from_vec(vec![3.0, -7.0], NalgebraContext),
+            1e-12,
+        );
+        op.sens_mul(&x, 0.0, &v).assert_eq_st(
+            &crate::NalgebraVec::from_vec(vec![1.0, 5.0], NalgebraContext),
+            1e-12,
+        );
 
         let jac = op.jacobian(&x, 0.0);
         assert_eq!(jac.get_index(0, 0), 2.0);

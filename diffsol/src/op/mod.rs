@@ -296,10 +296,9 @@ mod tests {
     use std::cell::RefCell;
 
     use crate::{
-        context::nalgebra::NalgebraContext, matrix::dense_nalgebra_serial::NalgebraMat,
-        ConstantOp, ConstantOpSens, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose,
-        NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
-        NonLinearOpSensAdjoint, Vector,
+        context::nalgebra::NalgebraContext, matrix::dense_nalgebra_serial::NalgebraMat, ConstantOp,
+        ConstantOpSens, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, NonLinearOp,
+        NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Vector,
     };
 
     use super::{Op, OpStatistics, ParameterisedOp};
@@ -358,7 +357,13 @@ mod tests {
     }
 
     impl NonLinearOpAdjoint for ForwardingOp {
-        fn jac_transpose_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
+        fn jac_transpose_mul_inplace(
+            &self,
+            _x: &Self::V,
+            _t: Self::T,
+            v: &Self::V,
+            y: &mut Self::V,
+        ) {
             self.stats.borrow_mut().increment_jac_adj_mul();
             y.copy_from(v);
         }
@@ -371,7 +376,13 @@ mod tests {
     }
 
     impl NonLinearOpSensAdjoint for ForwardingOp {
-        fn sens_transpose_mul_inplace(&self, _x: &Self::V, _t: Self::T, _v: &Self::V, y: &mut Self::V) {
+        fn sens_transpose_mul_inplace(
+            &self,
+            _x: &Self::V,
+            _t: Self::T,
+            _v: &Self::V,
+            y: &mut Self::V,
+        ) {
             y.fill(0.0);
         }
     }

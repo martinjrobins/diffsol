@@ -1307,8 +1307,8 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{
-        error::{DiffsolError, OdeSolverError},
         context::nalgebra::NalgebraContext,
+        error::{DiffsolError, OdeSolverError},
         matrix::dense_nalgebra_serial::NalgebraMat,
         ode_equations::test_models::{
             exponential_decay::exponential_decay_problem,
@@ -1367,8 +1367,8 @@ mod tests {
     #[test]
     fn explicit_rk_rejects_mass_matrices() {
         let (problem, _soln) = exponential_decay_with_algebraic_problem::<M>(false);
-        let err = Rk::check_explicit_rk(&problem, &Tableau::<M>::tsit45(Default::default()))
-            .unwrap_err();
+        let err =
+            Rk::check_explicit_rk(&problem, &Tableau::<M>::tsit45(Default::default())).unwrap_err();
         assert!(matches!(
             err,
             DiffsolError::OdeSolverError(OdeSolverError::MassMatrixNotSupported)

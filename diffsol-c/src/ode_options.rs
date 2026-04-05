@@ -164,18 +164,12 @@ mod tests {
     fn ode_solver_options_roundtrip_and_serialize() {
         for jit_backend in available_jit_backends() {
             let options = make_options(jit_backend);
-            options
-                .set_max_nonlinear_solver_iterations(17)
-                .unwrap();
+            options.set_max_nonlinear_solver_iterations(17).unwrap();
             options.set_max_error_test_failures(19).unwrap();
             options.set_update_jacobian_after_steps(23).unwrap();
-            options
-                .set_update_rhs_jacobian_after_steps(29)
-                .unwrap();
+            options.set_update_rhs_jacobian_after_steps(29).unwrap();
             options.set_threshold_to_update_jacobian(1e-3).unwrap();
-            options
-                .set_threshold_to_update_rhs_jacobian(2e-3)
-                .unwrap();
+            options.set_threshold_to_update_rhs_jacobian(2e-3).unwrap();
             options.set_min_timestep(1e-4).unwrap();
 
             assert_eq!(options.get_max_nonlinear_solver_iterations().unwrap(), 17);
@@ -183,7 +177,10 @@ mod tests {
             assert_eq!(options.get_update_jacobian_after_steps().unwrap(), 23);
             assert_eq!(options.get_update_rhs_jacobian_after_steps().unwrap(), 29);
             assert_eq!(options.get_threshold_to_update_jacobian().unwrap(), 1e-3);
-            assert_eq!(options.get_threshold_to_update_rhs_jacobian().unwrap(), 2e-3);
+            assert_eq!(
+                options.get_threshold_to_update_rhs_jacobian().unwrap(),
+                2e-3
+            );
             assert_eq!(options.get_min_timestep().unwrap(), 1e-4);
 
             let value = serde_json::to_value(&options).unwrap();

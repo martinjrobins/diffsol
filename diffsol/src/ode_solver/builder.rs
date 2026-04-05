@@ -1439,7 +1439,8 @@ mod tests {
     #[cfg(feature = "diffsl-cranelift")]
     #[test]
     fn build_from_diffsl_resizes_empty_params_for_cranelift() {
-        build_from_diffsl_resizes_empty_params::<crate::CraneliftJitModule, crate::NalgebraMat<f64>>();
+        build_from_diffsl_resizes_empty_params::<crate::CraneliftJitModule, crate::NalgebraMat<f64>>(
+        );
     }
 
     #[cfg(feature = "diffsl-llvm")]

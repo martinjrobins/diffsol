@@ -379,8 +379,8 @@ pub trait DefaultDenseMatrix: Vector {
 mod tests {
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
-    use crate::context::nalgebra::NalgebraContext;
     use super::{Vector, VectorCommon};
+    use crate::context::nalgebra::NalgebraContext;
     use crate::vector::nalgebra_serial::NalgebraVec;
     use num_traits::FromPrimitive;
 
@@ -454,7 +454,10 @@ mod tests {
         let mut v = NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext);
         assert_eq!(<NalgebraVec<f64> as VectorCommon>::inner(&v).len(), 2);
         assert_eq!(<&NalgebraVec<f64> as VectorCommon>::inner(&&v).len(), 2);
-        assert_eq!(<&mut NalgebraVec<f64> as VectorCommon>::inner(&&mut v).len(), 2);
+        assert_eq!(
+            <&mut NalgebraVec<f64> as VectorCommon>::inner(&&mut v).len(),
+            2
+        );
 
         let empty = NalgebraVec::<f64>::zeros(0, NalgebraContext);
         assert!(empty.is_empty());
@@ -482,10 +485,10 @@ mod tests {
         left.assert_eq_norm(&right, &tol, 1e-6, 1.0);
 
         let perturbed = NalgebraVec::from_vec(vec![1.1, 2.0, 3.0], NalgebraContext);
-        assert!(
-            catch_unwind(AssertUnwindSafe(|| left.assert_eq_norm(&perturbed, &tol, 1e-6, 0.01)))
-                .is_err()
-        );
+        assert!(catch_unwind(AssertUnwindSafe(
+            || left.assert_eq_norm(&perturbed, &tol, 1e-6, 0.01)
+        ))
+        .is_err());
     }
 
     #[test]

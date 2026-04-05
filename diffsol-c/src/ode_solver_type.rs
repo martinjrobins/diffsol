@@ -632,11 +632,11 @@ impl OdeSolverType {
 
 #[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
 mod tests {
+    use diffsol::Vector;
     use diffsol::{
         CodegenModuleCompile, CodegenModuleJit, DefaultSolver, DenseMatrix, OdeBuilder,
         OdeSolverProblem,
     };
-    use diffsol::Vector;
     use ndarray::Array2;
 
     use crate::linear_solver_type::LinearSolverType;
@@ -1062,7 +1062,9 @@ mod tests {
     fn runtime_dispatch_solves_all_hybrid_variants_for_llvm() {
         test_all_hybrid_solver_variants::<diffsol::LlvmModule>();
         test_all_hybrid_solver_variants_with_lu::<diffsol::LlvmModule>();
-        assert_direct_hybrid_restart_path_for_method::<diffsol::LlvmModule>(OdeSolverType::Esdirk34);
+        assert_direct_hybrid_restart_path_for_method::<diffsol::LlvmModule>(
+            OdeSolverType::Esdirk34,
+        );
         assert_direct_hybrid_restart_path_for_method::<diffsol::LlvmModule>(OdeSolverType::TrBdf2);
         assert_direct_hybrid_restart_path_for_method::<diffsol::LlvmModule>(OdeSolverType::Tsit45);
     }

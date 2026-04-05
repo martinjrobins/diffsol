@@ -1711,83 +1711,97 @@ mod jit_tests {
     fn c_api_rejects_invalid_jit_arguments() {
         unsafe {
             clear_last_error();
-            assert!(diffsol_ode_new_jit(
-                ptr::null(),
-                jit_backend_to_i32(available_jit_backends()[0]),
-                matrix_type_to_i32(MatrixType::NalgebraDense),
-                linear_solver_to_i32(LinearSolverType::Default),
-                ode_solver_to_i32(OdeSolverType::Bdf),
-            )
-            .is_null());
+            assert!(
+                diffsol_ode_new_jit(
+                    ptr::null(),
+                    jit_backend_to_i32(available_jit_backends()[0]),
+                    matrix_type_to_i32(MatrixType::NalgebraDense),
+                    linear_solver_to_i32(LinearSolverType::Default),
+                    ode_solver_to_i32(OdeSolverType::Bdf),
+                )
+                .is_null()
+            );
             assert!(last_error_message().contains("code is null"));
 
             clear_last_error();
             let invalid_utf8 = CString::from_vec_with_nul(vec![0xff, 0]).unwrap();
-            assert!(diffsol_ode_new_jit(
-                invalid_utf8.as_ptr(),
-                jit_backend_to_i32(available_jit_backends()[0]),
-                matrix_type_to_i32(MatrixType::NalgebraDense),
-                linear_solver_to_i32(LinearSolverType::Default),
-                ode_solver_to_i32(OdeSolverType::Bdf),
-            )
-            .is_null());
+            assert!(
+                diffsol_ode_new_jit(
+                    invalid_utf8.as_ptr(),
+                    jit_backend_to_i32(available_jit_backends()[0]),
+                    matrix_type_to_i32(MatrixType::NalgebraDense),
+                    linear_solver_to_i32(LinearSolverType::Default),
+                    ode_solver_to_i32(OdeSolverType::Bdf),
+                )
+                .is_null()
+            );
             assert!(last_error_message().contains("valid UTF-8"));
 
             clear_last_error();
             let code = logistic_diffsl_code_cstring();
-            assert!(diffsol_ode_new_jit(
-                code.as_ptr(),
-                99,
-                matrix_type_to_i32(MatrixType::NalgebraDense),
-                linear_solver_to_i32(LinearSolverType::Default),
-                ode_solver_to_i32(OdeSolverType::Bdf),
-            )
-            .is_null());
+            assert!(
+                diffsol_ode_new_jit(
+                    code.as_ptr(),
+                    99,
+                    matrix_type_to_i32(MatrixType::NalgebraDense),
+                    linear_solver_to_i32(LinearSolverType::Default),
+                    ode_solver_to_i32(OdeSolverType::Bdf),
+                )
+                .is_null()
+            );
             assert!(last_error_message().contains("invalid jit_backend_type"));
 
             clear_last_error();
-            assert!(diffsol_ode_new_jit(
-                code.as_ptr(),
-                jit_backend_to_i32(available_jit_backends()[0]),
-                99,
-                linear_solver_to_i32(LinearSolverType::Default),
-                ode_solver_to_i32(OdeSolverType::Bdf),
-            )
-            .is_null());
+            assert!(
+                diffsol_ode_new_jit(
+                    code.as_ptr(),
+                    jit_backend_to_i32(available_jit_backends()[0]),
+                    99,
+                    linear_solver_to_i32(LinearSolverType::Default),
+                    ode_solver_to_i32(OdeSolverType::Bdf),
+                )
+                .is_null()
+            );
             assert!(last_error_message().contains("invalid matrix_type"));
 
             clear_last_error();
-            assert!(diffsol_ode_new_jit(
-                code.as_ptr(),
-                jit_backend_to_i32(available_jit_backends()[0]),
-                matrix_type_to_i32(MatrixType::NalgebraDense),
-                99,
-                ode_solver_to_i32(OdeSolverType::Bdf),
-            )
-            .is_null());
+            assert!(
+                diffsol_ode_new_jit(
+                    code.as_ptr(),
+                    jit_backend_to_i32(available_jit_backends()[0]),
+                    matrix_type_to_i32(MatrixType::NalgebraDense),
+                    99,
+                    ode_solver_to_i32(OdeSolverType::Bdf),
+                )
+                .is_null()
+            );
             assert!(last_error_message().contains("invalid linear_solver"));
 
             clear_last_error();
-            assert!(diffsol_ode_new_jit(
-                code.as_ptr(),
-                jit_backend_to_i32(available_jit_backends()[0]),
-                matrix_type_to_i32(MatrixType::NalgebraDense),
-                linear_solver_to_i32(LinearSolverType::Default),
-                99,
-            )
-            .is_null());
+            assert!(
+                diffsol_ode_new_jit(
+                    code.as_ptr(),
+                    jit_backend_to_i32(available_jit_backends()[0]),
+                    matrix_type_to_i32(MatrixType::NalgebraDense),
+                    linear_solver_to_i32(LinearSolverType::Default),
+                    99,
+                )
+                .is_null()
+            );
             assert!(last_error_message().contains("invalid ode_solver"));
 
             clear_last_error();
             let invalid_code = CString::new("not valid diffsl").unwrap();
-            assert!(diffsol_ode_new_jit(
-                invalid_code.as_ptr(),
-                jit_backend_to_i32(available_jit_backends()[0]),
-                matrix_type_to_i32(MatrixType::NalgebraDense),
-                linear_solver_to_i32(LinearSolverType::Default),
-                ode_solver_to_i32(OdeSolverType::Bdf),
-            )
-            .is_null());
+            assert!(
+                diffsol_ode_new_jit(
+                    invalid_code.as_ptr(),
+                    jit_backend_to_i32(available_jit_backends()[0]),
+                    matrix_type_to_i32(MatrixType::NalgebraDense),
+                    linear_solver_to_i32(LinearSolverType::Default),
+                    ode_solver_to_i32(OdeSolverType::Bdf),
+                )
+                .is_null()
+            );
             assert!(diffsol_error_code() != 0);
 
             let mut ic_options = ptr::null_mut();
@@ -1887,8 +1901,14 @@ mod jit_tests {
                     diffsol_ode_set_ode_solver(ode, ode_solver_to_i32(OdeSolverType::Tsit45)),
                     DIFFSOL_OK
                 );
-                assert_eq!(diffsol_ode_get_ode_solver(ode), ode_solver_to_i32(OdeSolverType::Tsit45));
-                assert_eq!(diffsol_ode_get_matrix_type(ode), matrix_type_to_i32(MatrixType::NalgebraDense));
+                assert_eq!(
+                    diffsol_ode_get_ode_solver(ode),
+                    ode_solver_to_i32(OdeSolverType::Tsit45)
+                );
+                assert_eq!(
+                    diffsol_ode_get_matrix_type(ode),
+                    matrix_type_to_i32(MatrixType::NalgebraDense)
+                );
 
                 let params = [2.0f64];
                 let mut solution_ptr: *mut SolutionWrapper = ptr::null_mut();
@@ -2045,14 +2065,26 @@ mod jit_tests {
                 assert_eq!(diffsol_ode_get_matrix_type(ptr::null()), -1);
                 assert_eq!(diffsol_ode_get_ode_solver(ptr::null()), -1);
                 assert_eq!(diffsol_ode_get_linear_solver(ptr::null()), -1);
-                assert_eq!(diffsol_ode_set_ode_solver(ptr::null_mut(), 0), DIFFSOL_BAD_ARG);
-                assert_eq!(diffsol_ode_set_linear_solver(ptr::null_mut(), 0), DIFFSOL_BAD_ARG);
+                assert_eq!(
+                    diffsol_ode_set_ode_solver(ptr::null_mut(), 0),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_set_linear_solver(ptr::null_mut(), 0),
+                    DIFFSOL_BAD_ARG
+                );
                 assert_eq!(diffsol_ode_set_ode_solver(ode, 99), DIFFSOL_BAD_ARG);
                 assert_eq!(diffsol_ode_set_linear_solver(ode, 99), DIFFSOL_BAD_ARG);
-                assert_eq!(diffsol_ode_get_rtol(ptr::null(), &mut out_value), DIFFSOL_BAD_ARG);
+                assert_eq!(
+                    diffsol_ode_get_rtol(ptr::null(), &mut out_value),
+                    DIFFSOL_BAD_ARG
+                );
                 assert_eq!(diffsol_ode_get_rtol(ode, ptr::null_mut()), DIFFSOL_BAD_ARG);
                 assert_eq!(diffsol_ode_set_rtol(ptr::null_mut(), 1e-3), DIFFSOL_BAD_ARG);
-                assert_eq!(diffsol_ode_get_atol(ptr::null(), &mut out_value), DIFFSOL_BAD_ARG);
+                assert_eq!(
+                    diffsol_ode_get_atol(ptr::null(), &mut out_value),
+                    DIFFSOL_BAD_ARG
+                );
                 assert_eq!(diffsol_ode_get_atol(ode, ptr::null_mut()), DIFFSOL_BAD_ARG);
                 assert_eq!(diffsol_ode_set_atol(ptr::null_mut(), 1e-3), DIFFSOL_BAD_ARG);
                 assert_eq!(
@@ -2175,7 +2207,13 @@ mod jit_tests {
                 let params = [2.0f64];
                 let mut solution_ptr: *mut SolutionWrapper = ptr::null_mut();
                 assert_eq!(
-                    diffsol_ode_solve_hybrid(ode, params.as_ptr(), params.len(), 2.0, &mut solution_ptr),
+                    diffsol_ode_solve_hybrid(
+                        ode,
+                        params.as_ptr(),
+                        params.len(),
+                        2.0,
+                        &mut solution_ptr
+                    ),
                     DIFFSOL_OK
                 );
                 let mut ys_ptr = ptr::null_mut();

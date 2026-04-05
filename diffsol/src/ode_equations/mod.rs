@@ -744,7 +744,10 @@ mod tests {
             stats.number_of_jac_mul_evals,
             default_stats.number_of_jac_mul_evals
         );
-        assert_eq!(stats.number_of_mass_evals, default_stats.number_of_mass_evals);
+        assert_eq!(
+            stats.number_of_mass_evals,
+            default_stats.number_of_mass_evals
+        );
         assert_eq!(
             stats.number_of_mass_matrix_evals,
             default_stats.number_of_mass_matrix_evals

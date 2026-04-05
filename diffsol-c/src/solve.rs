@@ -681,7 +681,7 @@ mod tests {
         },
     };
 
-    use super::{solve_factory_with_jit_backend, GenericSolve, Solve};
+    use super::{GenericSolve, Solve, solve_factory_with_jit_backend};
 
     fn make_generic_solve<CG>() -> GenericSolve<diffsol::NalgebraMat<f64>, CG>
     where
@@ -764,7 +764,12 @@ mod tests {
 
         let mut solve = make_generic_solve::<CG>();
         let dense = solve
-            .solve_dense(OdeSolverType::Tsit45, LinearSolverType::Lu, &[2.0], &[0.25, 0.5, 1.0])
+            .solve_dense(
+                OdeSolverType::Tsit45,
+                LinearSolverType::Lu,
+                &[2.0],
+                &[0.25, 0.5, 1.0],
+            )
             .unwrap();
         let ts = Vec::<f64>::from_host_array(dense.get_ts()).unwrap();
         let ys = Vec::<Vec<f64>>::from_host_array(dense.get_ys()).unwrap();
@@ -796,7 +801,12 @@ mod tests {
             .unwrap();
         let hybrid_ts = Vec::<f64>::from_host_array(hybrid.get_ts()).unwrap();
         let hybrid_ys = Vec::<Vec<f64>>::from_host_array(hybrid.get_ys()).unwrap();
-        assert_close(*hybrid_ts.last().unwrap(), 2.0, 5e-4, "solve_hybrid final time");
+        assert_close(
+            *hybrid_ts.last().unwrap(),
+            2.0,
+            5e-4,
+            "solve_hybrid final time",
+        );
         assert_close(
             hybrid_ys[0][hybrid_ts.len() - 1],
             hybrid_logistic_state(2.0, 2.0),
@@ -837,17 +847,12 @@ mod tests {
 
         let mut solve = make_generic_solve::<diffsol::LlvmModule>();
         let sens = solve
-            .solve_fwd_sens(
-                OdeSolverType::Bdf,
-                LinearSolverType::Lu,
-                &[2.0],
-                &t_eval,
-            )
+            .solve_fwd_sens(OdeSolverType::Bdf, LinearSolverType::Lu, &[2.0], &t_eval)
             .unwrap();
         let sens_values = sens.get_sens();
         assert_eq!(sens_values.len(), 1);
-        let sens_matrix = Vec::<Vec<f64>>::from_host_array(sens_values.into_iter().next().unwrap())
-            .unwrap();
+        let sens_matrix =
+            Vec::<Vec<f64>>::from_host_array(sens_values.into_iter().next().unwrap()).unwrap();
         for (i, &t) in t_eval.iter().enumerate() {
             assert_close(
                 sens_matrix[0][i],
@@ -864,16 +869,11 @@ mod tests {
             problem: hybrid_problem,
         };
         let hybrid_sens = solve
-            .solve_hybrid_fwd_sens(
-                OdeSolverType::Bdf,
-                LinearSolverType::Lu,
-                &[2.0],
-                &t_eval,
-            )
+            .solve_hybrid_fwd_sens(OdeSolverType::Bdf, LinearSolverType::Lu, &[2.0], &t_eval)
             .unwrap();
         let sens_values = hybrid_sens.get_sens();
-        let sens_matrix = Vec::<Vec<f64>>::from_host_array(sens_values.into_iter().next().unwrap())
-            .unwrap();
+        let sens_matrix =
+            Vec::<Vec<f64>>::from_host_array(sens_values.into_iter().next().unwrap()).unwrap();
         for (i, &t) in t_eval.iter().enumerate() {
             assert_close(
                 sens_matrix[0][i],

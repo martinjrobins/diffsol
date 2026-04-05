@@ -1454,8 +1454,7 @@ mod tests {
             ",
             1,
             M::C::default(),
-        )
-        {
+        ) {
             Ok(_) => panic!("expected compiler error"),
             Err(err) => err,
         };

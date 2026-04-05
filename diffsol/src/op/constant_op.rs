@@ -93,9 +93,8 @@ pub trait ConstantOpSensAdjoint: ConstantOp {
 #[cfg(test)]
 mod tests {
     use crate::{
-        context::nalgebra::NalgebraContext,
-        matrix::dense_nalgebra_serial::NalgebraMat, ConstantOp, ConstantOpSens,
-        ConstantOpSensAdjoint, DenseMatrix, Matrix, Op, Vector,
+        context::nalgebra::NalgebraContext, matrix::dense_nalgebra_serial::NalgebraMat, ConstantOp,
+        ConstantOpSens, ConstantOpSensAdjoint, DenseMatrix, Matrix, Op, Vector,
     };
 
     type M = NalgebraMat<f64>;
@@ -141,7 +140,10 @@ mod tests {
     impl ConstantOpSens for FakeConstantOp {
         fn sens_mul_inplace(&self, _t: Self::T, v: &Self::V, y: &mut Self::V) {
             y.copy_from(&Self::V::from_vec(
-                vec![v.get_index(0) + 2.0 * v.get_index(1), 3.0 * v.get_index(0) - v.get_index(1)],
+                vec![
+                    v.get_index(0) + 2.0 * v.get_index(1),
+                    3.0 * v.get_index(0) - v.get_index(1),
+                ],
                 self.ctx,
             ));
         }
@@ -150,7 +152,10 @@ mod tests {
     impl ConstantOpSensAdjoint for FakeConstantOp {
         fn sens_transpose_mul_inplace(&self, _t: Self::T, v: &Self::V, y: &mut Self::V) {
             y.copy_from(&Self::V::from_vec(
-                vec![-v.get_index(0) - 3.0 * v.get_index(1), -2.0 * v.get_index(0) + v.get_index(1)],
+                vec![
+                    -v.get_index(0) - 3.0 * v.get_index(1),
+                    -2.0 * v.get_index(0) + v.get_index(1),
+                ],
                 self.ctx,
             ));
         }

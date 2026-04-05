@@ -171,7 +171,10 @@ mod tests {
     impl LinearOp for FakeLinearOp {
         fn gemv_inplace(&self, x: &Self::V, _t: Self::T, beta: Self::T, y: &mut Self::V) {
             let out = Self::V::from_vec(
-                vec![2.0 * x.get_index(0) + 3.0 * x.get_index(1), -x.get_index(0) + 4.0 * x.get_index(1)],
+                vec![
+                    2.0 * x.get_index(0) + 3.0 * x.get_index(1),
+                    -x.get_index(0) + 4.0 * x.get_index(1),
+                ],
                 NalgebraContext,
             );
             y.axpy(1.0, &out, beta);
@@ -181,7 +184,10 @@ mod tests {
     impl LinearOpTranspose for FakeLinearOp {
         fn gemv_transpose_inplace(&self, x: &Self::V, _t: Self::T, beta: Self::T, y: &mut Self::V) {
             let out = Self::V::from_vec(
-                vec![2.0 * x.get_index(0) - x.get_index(1), 3.0 * x.get_index(0) + 4.0 * x.get_index(1)],
+                vec![
+                    2.0 * x.get_index(0) - x.get_index(1),
+                    3.0 * x.get_index(0) + 4.0 * x.get_index(1),
+                ],
                 NalgebraContext,
             );
             y.axpy(1.0, &out, beta);
@@ -191,7 +197,10 @@ mod tests {
     impl LinearOpSens for FakeLinearOp {
         fn sens_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
             y.copy_from(&Self::V::from_vec(
-                vec![v.get_index(0) + 2.0 * v.get_index(1), 3.0 * v.get_index(0) + 4.0 * v.get_index(1)],
+                vec![
+                    v.get_index(0) + 2.0 * v.get_index(1),
+                    3.0 * v.get_index(0) + 4.0 * v.get_index(1),
+                ],
                 NalgebraContext,
             ));
         }
@@ -238,10 +247,9 @@ mod tests {
         assert_eq!(sens.get_index(0, 1), 2.0);
         assert_eq!(sens.get_index(1, 1), 4.0);
 
-        op.sens_mul(&x, 0.0, &v)
-            .assert_eq_st(
-                &crate::NalgebraVec::from_vec(vec![1.0, 5.0], NalgebraContext),
-                1e-12,
-            );
+        op.sens_mul(&x, 0.0, &v).assert_eq_st(
+            &crate::NalgebraVec::from_vec(vec![1.0, 5.0], NalgebraContext),
+            1e-12,
+        );
     }
 }

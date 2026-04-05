@@ -212,7 +212,9 @@ mod tests {
         y.axpy(1.0, &out, beta);
     }
 
-    fn make_op() -> LinearClosureWithAdjoint<M, fn(&V, &V, f64, f64, &mut V), fn(&V, &V, f64, f64, &mut V)> {
+    fn make_op(
+    ) -> LinearClosureWithAdjoint<M, fn(&V, &V, f64, f64, &mut V), fn(&V, &V, f64, f64, &mut V)>
+    {
         LinearClosureWithAdjoint::new(forward, adjoint, 2, 2, 2, NalgebraContext)
     }
 
