@@ -27,21 +27,21 @@ diffsl-llvm21 = ["diffsol/diffsl-llvm21", "diffsl-llvm"]
 diffsl = { workspace = true }
 diffsol = { path = "../diffsol", features = ["diffsl"] }
 dlmalloc = { version = "0.2", features = ["global"] }
-faer = { version = "0.23.2", default-features = false, features = ["std", "sparse-linalg", "rand", "npy",] }
-nalgebra = { version = "0.34.1", features = ["std"] }
+nalgebra = { workspace = true, features = ["std"] }
 ndarray = { version = "0.17.2" }
-num-traits = "0.2.19"
-paste = "1.0.15"
-getrandom = { version = "0.2", optional = true }
+num-traits = { workspace = true }
 schemars = "1.1.0"
-serde = "1.0"
+serde = { workspace = true }
 
 
-[target.wasm32-unknown-unknown.dependencies]
+[target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
+faer = { workspace = true, features = [ "rayon" ] } 
 
-[target.wasm32-wasip1.dependencies]
-getrandom = { version = "0.2", features = ["js"] }
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+getrandom = { version = "0.2", optional = true }
+faer = { workspace = true }
 
 [dev-dependencies]
-serde_json = "1.0"
+serde_json = { workspace = true }
+paste = { workspace = true }
