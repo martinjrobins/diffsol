@@ -661,3 +661,306 @@ where
         ))
     }
 }
+
+#[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
+mod tests {
+    use diffsol::{
+        CodegenModuleCompile, CodegenModuleJit, Context, OdeBuilder, OdeEquations, Vector,
+    };
+
+    use crate::{
+        host_array::FromHostArray,
+        linear_solver_type::LinearSolverType,
+        matrix_type::MatrixType,
+        ode_solver_type::OdeSolverType,
+        scalar_type::ScalarType,
+        test_support::{
+            LOGISTIC_X0, assert_close, hybrid_logistic_diffsl_code, hybrid_logistic_state,
+            hybrid_logistic_state_dr, logistic_diffsl_code, logistic_integral, logistic_state,
+            logistic_state_dr, matrix_host,
+        },
+    };
+
+    use super::{solve_factory_with_jit_backend, GenericSolve, Solve};
+
+    fn make_generic_solve<CG>() -> GenericSolve<diffsol::NalgebraMat<f64>, CG>
+    where
+        CG: diffsol::CodegenModule + CodegenModuleJit + CodegenModuleCompile,
+    {
+        let problem = OdeBuilder::<diffsol::NalgebraMat<f64>>::new()
+            .build_from_diffsl::<CG>(logistic_diffsl_code())
+            .unwrap();
+        GenericSolve { problem }
+    }
+
+    fn assert_factory_supports_all_matrix_and_scalar_types<CG>()
+    where
+        CG: diffsol::CodegenModule + CodegenModuleJit + CodegenModuleCompile,
+    {
+        for matrix_type in [
+            MatrixType::NalgebraDense,
+            MatrixType::FaerDense,
+            MatrixType::FaerSparse,
+        ] {
+            for scalar_type in [ScalarType::F32, ScalarType::F64] {
+                assert!(
+                    solve_factory_with_jit_backend::<CG>(
+                        logistic_diffsl_code(),
+                        matrix_type,
+                        scalar_type,
+                    )
+                    .is_ok()
+                );
+            }
+        }
+    }
+
+    fn assert_solve_metadata_and_helpers<CG>()
+    where
+        CG: diffsol::CodegenModule + CodegenModuleJit + CodegenModuleCompile,
+    {
+        let mut solve = make_generic_solve::<CG>();
+        assert_eq!(solve.matrix_type(), MatrixType::NalgebraDense);
+        assert!(solve.check(LinearSolverType::Default).is_ok());
+        assert!(solve.check(LinearSolverType::Lu).is_ok());
+        assert!(solve.check(LinearSolverType::Klu).is_err());
+
+        solve.set_atol(1e-5);
+        solve.set_rtol(1e-4);
+        assert_close(solve.atol(), 1e-5, 1e-12, "solve atol");
+        assert_close(solve.rtol(), 1e-4, 1e-12, "solve rtol");
+
+        let y0 = Vec::<f64>::from_host_array(solve.y0(&[2.0]).unwrap()).unwrap();
+        assert_eq!(y0, vec![LOGISTIC_X0]);
+
+        let rhs = Vec::<f64>::from_host_array(solve.rhs(&[2.0], 0.0, &[0.25]).unwrap()).unwrap();
+        assert_eq!(rhs.len(), 1);
+        assert_close(rhs[0], 0.375, 1e-12, "solve rhs");
+
+        let jac_mul =
+            Vec::<f64>::from_host_array(solve.rhs_jac_mul(&[2.0], 0.0, &[0.25], &[3.0]).unwrap())
+                .unwrap();
+        assert_eq!(jac_mul.len(), 1);
+        assert_close(jac_mul[0], 3.0, 1e-12, "solve rhs jac mul");
+    }
+
+    fn assert_solve_runtime_paths<CG>()
+    where
+        CG: diffsol::CodegenModule + CodegenModuleJit + CodegenModuleCompile,
+    {
+        let mut solve = make_generic_solve::<CG>();
+        let soln = solve
+            .solve(OdeSolverType::Bdf, LinearSolverType::Lu, &[2.0], 1.0)
+            .unwrap();
+        let ts = Vec::<f64>::from_host_array(soln.get_ts()).unwrap();
+        let ys = Vec::<Vec<f64>>::from_host_array(soln.get_ys()).unwrap();
+        assert_close(*ts.last().unwrap(), 1.0, 5e-4, "solve final time");
+        assert_close(
+            ys[0][ts.len() - 1],
+            logistic_state(LOGISTIC_X0, 2.0, 1.0),
+            5e-4,
+            "solve final value",
+        );
+
+        let mut solve = make_generic_solve::<CG>();
+        let dense = solve
+            .solve_dense(OdeSolverType::Tsit45, LinearSolverType::Lu, &[2.0], &[0.25, 0.5, 1.0])
+            .unwrap();
+        let ts = Vec::<f64>::from_host_array(dense.get_ts()).unwrap();
+        let ys = Vec::<Vec<f64>>::from_host_array(dense.get_ys()).unwrap();
+        assert_eq!(ts, vec![0.25, 0.5, 1.0]);
+        for (i, &t) in ts.iter().enumerate() {
+            assert_close(
+                ys[0][i],
+                logistic_state(LOGISTIC_X0, 2.0, t),
+                5e-4,
+                &format!("solve_dense[{i}]"),
+            );
+        }
+
+        let mut solve = make_generic_solve::<CG>();
+        let err = match solve.solve(OdeSolverType::Bdf, LinearSolverType::Default, &[], 1.0) {
+            Ok(_) => panic!("expected parameter count mismatch"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("Expecting 1 params but got 0"));
+
+        let hybrid_problem = OdeBuilder::<diffsol::NalgebraMat<f64>>::new()
+            .build_from_diffsl::<CG>(hybrid_logistic_diffsl_code())
+            .unwrap();
+        let mut hybrid_solve = GenericSolve {
+            problem: hybrid_problem,
+        };
+        let hybrid = hybrid_solve
+            .solve_hybrid(OdeSolverType::Bdf, LinearSolverType::Lu, &[2.0], 2.0)
+            .unwrap();
+        let hybrid_ts = Vec::<f64>::from_host_array(hybrid.get_ts()).unwrap();
+        let hybrid_ys = Vec::<Vec<f64>>::from_host_array(hybrid.get_ys()).unwrap();
+        assert_close(*hybrid_ts.last().unwrap(), 2.0, 5e-4, "solve_hybrid final time");
+        assert_close(
+            hybrid_ys[0][hybrid_ts.len() - 1],
+            hybrid_logistic_state(2.0, 2.0),
+            5e-4,
+            "solve_hybrid final value",
+        );
+
+        let hybrid_problem = OdeBuilder::<diffsol::NalgebraMat<f64>>::new()
+            .build_from_diffsl::<CG>(hybrid_logistic_diffsl_code())
+            .unwrap();
+        let mut hybrid_solve = GenericSolve {
+            problem: hybrid_problem,
+        };
+        let hybrid_dense = hybrid_solve
+            .solve_hybrid_dense(
+                OdeSolverType::Tsit45,
+                LinearSolverType::Lu,
+                &[2.0],
+                &[0.5, 1.0, 1.5, 2.0],
+            )
+            .unwrap();
+        let hybrid_dense_ts = Vec::<f64>::from_host_array(hybrid_dense.get_ts()).unwrap();
+        let hybrid_dense_ys = Vec::<Vec<f64>>::from_host_array(hybrid_dense.get_ys()).unwrap();
+        assert_eq!(hybrid_dense_ts, vec![0.5, 1.0, 1.5, 2.0]);
+        for (i, &t) in hybrid_dense_ts.iter().enumerate() {
+            assert_close(
+                hybrid_dense_ys[0][i],
+                hybrid_logistic_state(2.0, t),
+                5e-4,
+                &format!("solve_hybrid_dense[{i}]"),
+            );
+        }
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    fn assert_solve_sensitivity_paths() {
+        let t_eval = [0.25, 0.5, 1.0];
+
+        let mut solve = make_generic_solve::<diffsol::LlvmModule>();
+        let sens = solve
+            .solve_fwd_sens(
+                OdeSolverType::Bdf,
+                LinearSolverType::Lu,
+                &[2.0],
+                &t_eval,
+            )
+            .unwrap();
+        let sens_values = sens.get_sens();
+        assert_eq!(sens_values.len(), 1);
+        let sens_matrix = Vec::<Vec<f64>>::from_host_array(sens_values.into_iter().next().unwrap())
+            .unwrap();
+        for (i, &t) in t_eval.iter().enumerate() {
+            assert_close(
+                sens_matrix[0][i],
+                logistic_state_dr(LOGISTIC_X0, 2.0, t),
+                5e-4,
+                &format!("solve_fwd_sens[{i}]"),
+            );
+        }
+
+        let hybrid_problem = OdeBuilder::<diffsol::NalgebraMat<f64>>::new()
+            .build_from_diffsl::<diffsol::LlvmModule>(hybrid_logistic_diffsl_code())
+            .unwrap();
+        let mut solve = GenericSolve {
+            problem: hybrid_problem,
+        };
+        let hybrid_sens = solve
+            .solve_hybrid_fwd_sens(
+                OdeSolverType::Bdf,
+                LinearSolverType::Lu,
+                &[2.0],
+                &t_eval,
+            )
+            .unwrap();
+        let sens_values = hybrid_sens.get_sens();
+        let sens_matrix = Vec::<Vec<f64>>::from_host_array(sens_values.into_iter().next().unwrap())
+            .unwrap();
+        for (i, &t) in t_eval.iter().enumerate() {
+            assert_close(
+                sens_matrix[0][i],
+                hybrid_logistic_state_dr(2.0, t),
+                5e-4,
+                &format!("solve_hybrid_fwd_sens[{i}]"),
+            );
+        }
+
+        let adjoint_t_eval = [0.0, 0.25, 0.5, 1.0];
+        let adjoint_data: Vec<f64> = adjoint_t_eval
+            .iter()
+            .map(|&t| logistic_integral(LOGISTIC_X0, 2.0, t))
+            .collect();
+        let mut solve = make_generic_solve::<diffsol::LlvmModule>();
+        let (objective, gradient) = solve
+            .solve_sum_squares_adj(
+                OdeSolverType::Bdf,
+                LinearSolverType::Lu,
+                OdeSolverType::TrBdf2,
+                LinearSolverType::Lu,
+                &[2.0],
+                matrix_host(1, adjoint_t_eval.len(), &adjoint_data),
+                &adjoint_t_eval,
+            )
+            .unwrap();
+        assert!(objective.is_finite());
+        let gradient = Vec::<f64>::from_host_array(gradient).unwrap();
+        assert_eq!(gradient.len(), 1);
+        assert!(gradient[0].is_finite());
+    }
+
+    #[cfg(feature = "diffsl-cranelift")]
+    #[test]
+    fn solve_factory_supports_all_jit_matrix_and_scalar_types_for_cranelift() {
+        assert_factory_supports_all_matrix_and_scalar_types::<diffsol::CraneliftJitModule>();
+    }
+
+    #[cfg(feature = "diffsl-cranelift")]
+    #[test]
+    fn solve_trait_helpers_and_runtime_paths_for_cranelift() {
+        assert_solve_metadata_and_helpers::<diffsol::CraneliftJitModule>();
+        assert_solve_runtime_paths::<diffsol::CraneliftJitModule>();
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn solve_factory_supports_all_jit_matrix_and_scalar_types_for_llvm() {
+        assert_factory_supports_all_matrix_and_scalar_types::<diffsol::LlvmModule>();
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn solve_trait_helpers_and_runtime_paths_for_llvm() {
+        assert_solve_metadata_and_helpers::<diffsol::LlvmModule>();
+        assert_solve_runtime_paths::<diffsol::LlvmModule>();
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn solve_trait_sensitivity_paths_for_llvm() {
+        assert_solve_sensitivity_paths();
+    }
+
+    #[cfg(feature = "diffsl-cranelift")]
+    #[test]
+    fn setup_problem_validates_parameter_count_for_cranelift() {
+        let mut solve = make_generic_solve::<diffsol::CraneliftJitModule>();
+        let err = solve.setup_problem(&[]).unwrap_err();
+        assert!(err.to_string().contains("Expecting 1 params but got 0"));
+
+        solve.setup_problem(&[2.0]).unwrap();
+        let mut params = solve.problem.context().vector_zeros(1);
+        solve.problem.eqn.get_params(&mut params);
+        assert_eq!(params.get_index(0), 2.0);
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn setup_problem_validates_parameter_count_for_llvm() {
+        let mut solve = make_generic_solve::<diffsol::LlvmModule>();
+        let err = solve.setup_problem(&[]).unwrap_err();
+        assert!(err.to_string().contains("Expecting 1 params but got 0"));
+
+        solve.setup_problem(&[2.0]).unwrap();
+        let mut params = solve.problem.context().vector_zeros(1);
+        solve.problem.eqn.get_params(&mut params);
+        assert_eq!(params.get_index(0), 2.0);
+    }
+}

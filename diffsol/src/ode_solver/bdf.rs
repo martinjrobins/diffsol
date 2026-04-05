@@ -2384,4 +2384,36 @@ mod test {
         let solver = problem.bdf_sens::<LS>().unwrap();
         test_solve_dense_sensitivities_with_reset(solver, &soln);
     }
+
+    #[test]
+    fn bdf_clone_resets_statistics_and_preserves_operator_presence() {
+        let (problem, _soln) = exponential_decay_problem::<M>(false);
+        let mut solver = problem.bdf::<LS>().unwrap();
+        solver.step().unwrap();
+        assert!(solver.get_statistics().number_of_steps > 0);
+        assert!(solver.op.is_some());
+        assert!(solver.s_op.is_none());
+
+        let cloned = solver.clone();
+        assert!(cloned.op.is_some());
+        assert!(cloned.s_op.is_none());
+        assert_eq!(cloned.get_statistics().number_of_steps, 0);
+        assert_eq!(cloned.state().t, solver.state().t);
+    }
+
+    #[test]
+    fn bdf_clone_preserves_sensitivity_operator_and_resets_statistics() {
+        let (problem, _soln) = exponential_decay_problem_sens::<M>(false);
+        let mut solver = problem.bdf_sens::<LS>().unwrap();
+        solver.step().unwrap();
+        assert!(solver.get_statistics().number_of_steps > 0);
+        assert!(solver.op.is_some());
+        assert!(solver.s_op.is_some());
+
+        let cloned = solver.clone();
+        assert!(cloned.op.is_some());
+        assert!(cloned.s_op.is_some());
+        assert_eq!(cloned.get_statistics().number_of_steps, 0);
+        assert_eq!(cloned.state().s.len(), solver.state().s.len());
+    }
 }

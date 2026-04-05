@@ -1303,3 +1303,89 @@ where
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        error::{DiffsolError, OdeSolverError},
+        context::nalgebra::NalgebraContext,
+        matrix::dense_nalgebra_serial::NalgebraMat,
+        ode_equations::test_models::{
+            exponential_decay::exponential_decay_problem,
+            exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem,
+        },
+        DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverProblem, Tableau,
+    };
+
+    use super::Rk;
+
+    type M = NalgebraMat<f64>;
+
+    fn check_sdirk_for_problem<Eqn>(
+        _problem: &OdeSolverProblem<Eqn>,
+        tableau: &Tableau<M>,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquations<T = f64, V = crate::NalgebraVec<f64>, C = NalgebraContext>,
+        Eqn::V: DefaultDenseMatrix<T = f64, C = NalgebraContext, M = M>,
+    {
+        Rk::<Eqn, M>::check_sdirk_rk(tableau)
+    }
+
+    fn make_invalid_explicit_tableau() -> Tableau<M> {
+        let base = Tableau::<M>::tsit45(Default::default());
+        let mut a = base.a().clone();
+        a.set_index(0, 0, 1.0);
+        Tableau::new(
+            a,
+            base.b().clone(),
+            base.c().clone(),
+            base.d().clone(),
+            base.order(),
+            base.beta().cloned(),
+        )
+    }
+
+    fn make_invalid_sdirk_tableau() -> Tableau<M> {
+        let base = Tableau::<M>::tr_bdf2(Default::default());
+        let mut a = base.a().clone();
+        a.set_index(0, 0, 0.25);
+        Tableau::new(
+            a,
+            base.b().clone(),
+            base.c().clone(),
+            base.d().clone(),
+            base.order(),
+            base.beta().cloned(),
+        )
+    }
+
+    fn expect_invalid_tableau(err: DiffsolError) {
+        assert!(err.to_string().contains("Invalid tableau"));
+    }
+
+    #[test]
+    fn explicit_rk_rejects_mass_matrices() {
+        let (problem, _soln) = exponential_decay_with_algebraic_problem::<M>(false);
+        let err = Rk::check_explicit_rk(&problem, &Tableau::<M>::tsit45(Default::default()))
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DiffsolError::OdeSolverError(OdeSolverError::MassMatrixNotSupported)
+        ));
+    }
+
+    #[test]
+    fn explicit_rk_rejects_invalid_a_diagonal() {
+        let (problem, _soln) = exponential_decay_problem::<M>(false);
+        let err = Rk::check_explicit_rk(&problem, &make_invalid_explicit_tableau()).unwrap_err();
+        expect_invalid_tableau(err);
+    }
+
+    #[test]
+    fn sdirk_rk_rejects_invalid_first_diagonal_entry() {
+        let (problem, _soln) = exponential_decay_problem::<M>(false);
+        let err = check_sdirk_for_problem(&problem, &make_invalid_sdirk_tableau()).unwrap_err();
+        expect_invalid_tableau(err);
+    }
+}

@@ -132,3 +132,68 @@ impl Serialize for OdeSolverOptions {
         state.end()
     }
 }
+
+#[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
+mod tests {
+    use crate::{
+        jit::JitBackendType,
+        linear_solver_type::LinearSolverType,
+        matrix_type::MatrixType,
+        ode::OdeWrapper,
+        ode_solver_type::OdeSolverType,
+        scalar_type::ScalarType,
+        test_support::{available_jit_backends, logistic_diffsl_code},
+    };
+
+    use super::OdeSolverOptions;
+
+    fn make_options(jit_backend: JitBackendType) -> OdeSolverOptions {
+        OdeWrapper::new_jit(
+            logistic_diffsl_code(),
+            jit_backend,
+            ScalarType::F64,
+            MatrixType::NalgebraDense,
+            LinearSolverType::Default,
+            OdeSolverType::Bdf,
+        )
+        .unwrap()
+        .get_options()
+    }
+
+    #[test]
+    fn ode_solver_options_roundtrip_and_serialize() {
+        for jit_backend in available_jit_backends() {
+            let options = make_options(jit_backend);
+            options
+                .set_max_nonlinear_solver_iterations(17)
+                .unwrap();
+            options.set_max_error_test_failures(19).unwrap();
+            options.set_update_jacobian_after_steps(23).unwrap();
+            options
+                .set_update_rhs_jacobian_after_steps(29)
+                .unwrap();
+            options.set_threshold_to_update_jacobian(1e-3).unwrap();
+            options
+                .set_threshold_to_update_rhs_jacobian(2e-3)
+                .unwrap();
+            options.set_min_timestep(1e-4).unwrap();
+
+            assert_eq!(options.get_max_nonlinear_solver_iterations().unwrap(), 17);
+            assert_eq!(options.get_max_error_test_failures().unwrap(), 19);
+            assert_eq!(options.get_update_jacobian_after_steps().unwrap(), 23);
+            assert_eq!(options.get_update_rhs_jacobian_after_steps().unwrap(), 29);
+            assert_eq!(options.get_threshold_to_update_jacobian().unwrap(), 1e-3);
+            assert_eq!(options.get_threshold_to_update_rhs_jacobian().unwrap(), 2e-3);
+            assert_eq!(options.get_min_timestep().unwrap(), 1e-4);
+
+            let value = serde_json::to_value(&options).unwrap();
+            assert_eq!(value["max_nonlinear_solver_iterations"], 17);
+            assert_eq!(value["max_error_test_failures"], 19);
+            assert_eq!(value["update_jacobian_after_steps"], 23);
+            assert_eq!(value["update_rhs_jacobian_after_steps"], 29);
+            assert_eq!(value["threshold_to_update_jacobian"], 1e-3);
+            assert_eq!(value["threshold_to_update_rhs_jacobian"], 2e-3);
+            assert_eq!(value["min_timestep"], 1e-4);
+        }
+    }
+}

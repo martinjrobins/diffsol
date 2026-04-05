@@ -1369,3 +1369,106 @@ where
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{Context, OdeBuilder, OdeEquations, Op, Vector};
+
+    #[cfg(feature = "diffsl")]
+    use diffsl::execution::{
+        module::{CodegenModuleCompile, CodegenModuleJit},
+        scalar::Scalar as DiffSlScalar,
+    };
+    #[cfg(feature = "diffsl")]
+    use num_traits::Zero;
+
+    #[cfg(feature = "diffsl")]
+    fn logistic_diffsl_code() -> &'static str {
+        r#"
+            in_i { r = 1 }
+            u_i { y = 0.1 }
+            dudt_i { dydt = 0 }
+            F_i { (r * y) * (1 - y) }
+            out_i { y }
+        "#
+    }
+
+    #[cfg(feature = "diffsl")]
+    fn build_from_diffsl_resizes_empty_params<CG, M>()
+    where
+        CG: CodegenModuleJit + CodegenModuleCompile,
+        M: crate::Matrix<V: crate::VectorHost, T: DiffSlScalar>,
+    {
+        let problem = OdeBuilder::<M>::new()
+            .build_from_diffsl::<CG>(logistic_diffsl_code())
+            .unwrap();
+        let mut params = problem.context().vector_zeros(problem.eqn.nparams());
+        problem.eqn.get_params(&mut params);
+        assert_eq!(params.len(), 1);
+        assert_eq!(params.get_index(0), M::T::zero());
+    }
+
+    #[cfg(feature = "diffsl")]
+    fn build_from_diffsl_rejects_parameter_mismatch<CG>()
+    where
+        CG: CodegenModuleJit + CodegenModuleCompile,
+    {
+        let err = match OdeBuilder::<crate::NalgebraMat<f64>>::new()
+            .p([1.0, 2.0])
+            .build_from_diffsl::<CG>(logistic_diffsl_code())
+        {
+            Ok(_) => panic!("expected parameter mismatch"),
+            Err(err) => err,
+        };
+        assert!(err.to_string().contains("Number of parameters on builder"));
+    }
+
+    #[cfg(feature = "diffsl")]
+    fn build_from_diffsl_sparse_problem_compiles<CG>()
+    where
+        CG: CodegenModuleJit + CodegenModuleCompile,
+    {
+        use crate::NonLinearOpJacobian;
+
+        let problem = OdeBuilder::<crate::FaerSparseMat<f64>>::new()
+            .build_from_diffsl::<CG>(logistic_diffsl_code())
+            .unwrap();
+        assert!(problem.eqn.rhs().jacobian_sparsity().is_some());
+    }
+
+    #[cfg(feature = "diffsl-cranelift")]
+    #[test]
+    fn build_from_diffsl_resizes_empty_params_for_cranelift() {
+        build_from_diffsl_resizes_empty_params::<crate::CraneliftJitModule, crate::NalgebraMat<f64>>();
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn build_from_diffsl_resizes_empty_params_for_llvm() {
+        build_from_diffsl_resizes_empty_params::<crate::LlvmModule, crate::NalgebraMat<f64>>();
+    }
+
+    #[cfg(feature = "diffsl-cranelift")]
+    #[test]
+    fn build_from_diffsl_rejects_parameter_mismatch_for_cranelift() {
+        build_from_diffsl_rejects_parameter_mismatch::<crate::CraneliftJitModule>();
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn build_from_diffsl_rejects_parameter_mismatch_for_llvm() {
+        build_from_diffsl_rejects_parameter_mismatch::<crate::LlvmModule>();
+    }
+
+    #[cfg(feature = "diffsl-cranelift")]
+    #[test]
+    fn build_from_diffsl_sparse_problem_compiles_for_cranelift() {
+        build_from_diffsl_sparse_problem_compiles::<crate::CraneliftJitModule>();
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn build_from_diffsl_sparse_problem_compiles_for_llvm() {
+        build_from_diffsl_sparse_problem_compiles::<crate::LlvmModule>();
+    }
+}
