@@ -4,7 +4,7 @@ use std::ffi::CStr;
 use std::os::raw::c_char;
 use std::ptr;
 
-use crate::c_api_utils::{DIFFSOL_BAD_ARG, DIFFSOL_ERR, DIFFSOL_OK, valid_f64_ptr};
+use crate::c_api_utils::{valid_f64_ptr, DIFFSOL_BAD_ARG, DIFFSOL_ERR, DIFFSOL_OK};
 use crate::host_array::HostArray;
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 use crate::jit_c::jit_backend_from_i32;
@@ -914,11 +914,10 @@ mod tests {
         diffsol_solution_wrapper_get_ys,
     };
     use crate::test_support::{
-        ASSERT_TOL, LOGISTIC_X0, assert_close, assert_last_error_contains, c_string,
-        clear_last_error, ffi_free_solution, ffi_read_host_array_list_matrices,
-        ffi_read_host_array_matrix, ffi_read_host_array_vector, find_time_window,
-        logistic_integral, logistic_state, logistic_state_dr, mass_state_deps, rhs_input_deps,
-        rhs_state_deps,
+        assert_close, assert_last_error_contains, c_string, clear_last_error, ffi_free_solution,
+        ffi_read_host_array_list_matrices, ffi_read_host_array_matrix, ffi_read_host_array_vector,
+        find_time_window, logistic_integral, logistic_state, logistic_state_dr, mass_state_deps,
+        rhs_input_deps, rhs_state_deps, ASSERT_TOL, LOGISTIC_X0,
     };
     use crate::{
         initial_condition_options_c::{
@@ -1440,10 +1439,10 @@ mod jit_tests {
     #[cfg(feature = "diffsl-llvm")]
     use crate::test_support::ffi_read_host_array_list_matrices;
     use crate::test_support::{
-        ASSERT_TOL, LOGISTIC_X0, assert_close, available_jit_backends, clear_last_error,
-        ffi_free_solution, ffi_read_host_array_matrix, ffi_read_host_array_vector,
-        find_time_window, hybrid_logistic_diffsl_code, hybrid_logistic_state,
-        logistic_diffsl_code_cstring, logistic_state,
+        assert_close, available_jit_backends, clear_last_error, ffi_free_solution,
+        ffi_read_host_array_matrix, ffi_read_host_array_vector, find_time_window,
+        hybrid_logistic_diffsl_code, hybrid_logistic_state, logistic_diffsl_code_cstring,
+        logistic_state, ASSERT_TOL, LOGISTIC_X0,
     };
     #[cfg(feature = "diffsl-llvm")]
     use crate::test_support::{hybrid_logistic_state_dr, logistic_integral, logistic_state_dr};
@@ -1711,97 +1710,83 @@ mod jit_tests {
     fn c_api_rejects_invalid_jit_arguments() {
         unsafe {
             clear_last_error();
-            assert!(
-                diffsol_ode_new_jit(
-                    ptr::null(),
-                    jit_backend_to_i32(available_jit_backends()[0]),
-                    matrix_type_to_i32(MatrixType::NalgebraDense),
-                    linear_solver_to_i32(LinearSolverType::Default),
-                    ode_solver_to_i32(OdeSolverType::Bdf),
-                )
-                .is_null()
-            );
+            assert!(diffsol_ode_new_jit(
+                ptr::null(),
+                jit_backend_to_i32(available_jit_backends()[0]),
+                matrix_type_to_i32(MatrixType::NalgebraDense),
+                linear_solver_to_i32(LinearSolverType::Default),
+                ode_solver_to_i32(OdeSolverType::Bdf),
+            )
+            .is_null());
             assert!(last_error_message().contains("code is null"));
 
             clear_last_error();
             let invalid_utf8 = CString::from_vec_with_nul(vec![0xff, 0]).unwrap();
-            assert!(
-                diffsol_ode_new_jit(
-                    invalid_utf8.as_ptr(),
-                    jit_backend_to_i32(available_jit_backends()[0]),
-                    matrix_type_to_i32(MatrixType::NalgebraDense),
-                    linear_solver_to_i32(LinearSolverType::Default),
-                    ode_solver_to_i32(OdeSolverType::Bdf),
-                )
-                .is_null()
-            );
+            assert!(diffsol_ode_new_jit(
+                invalid_utf8.as_ptr(),
+                jit_backend_to_i32(available_jit_backends()[0]),
+                matrix_type_to_i32(MatrixType::NalgebraDense),
+                linear_solver_to_i32(LinearSolverType::Default),
+                ode_solver_to_i32(OdeSolverType::Bdf),
+            )
+            .is_null());
             assert!(last_error_message().contains("valid UTF-8"));
 
             clear_last_error();
             let code = logistic_diffsl_code_cstring();
-            assert!(
-                diffsol_ode_new_jit(
-                    code.as_ptr(),
-                    99,
-                    matrix_type_to_i32(MatrixType::NalgebraDense),
-                    linear_solver_to_i32(LinearSolverType::Default),
-                    ode_solver_to_i32(OdeSolverType::Bdf),
-                )
-                .is_null()
-            );
+            assert!(diffsol_ode_new_jit(
+                code.as_ptr(),
+                99,
+                matrix_type_to_i32(MatrixType::NalgebraDense),
+                linear_solver_to_i32(LinearSolverType::Default),
+                ode_solver_to_i32(OdeSolverType::Bdf),
+            )
+            .is_null());
             assert!(last_error_message().contains("invalid jit_backend_type"));
 
             clear_last_error();
-            assert!(
-                diffsol_ode_new_jit(
-                    code.as_ptr(),
-                    jit_backend_to_i32(available_jit_backends()[0]),
-                    99,
-                    linear_solver_to_i32(LinearSolverType::Default),
-                    ode_solver_to_i32(OdeSolverType::Bdf),
-                )
-                .is_null()
-            );
+            assert!(diffsol_ode_new_jit(
+                code.as_ptr(),
+                jit_backend_to_i32(available_jit_backends()[0]),
+                99,
+                linear_solver_to_i32(LinearSolverType::Default),
+                ode_solver_to_i32(OdeSolverType::Bdf),
+            )
+            .is_null());
             assert!(last_error_message().contains("invalid matrix_type"));
 
             clear_last_error();
-            assert!(
-                diffsol_ode_new_jit(
-                    code.as_ptr(),
-                    jit_backend_to_i32(available_jit_backends()[0]),
-                    matrix_type_to_i32(MatrixType::NalgebraDense),
-                    99,
-                    ode_solver_to_i32(OdeSolverType::Bdf),
-                )
-                .is_null()
-            );
+            assert!(diffsol_ode_new_jit(
+                code.as_ptr(),
+                jit_backend_to_i32(available_jit_backends()[0]),
+                matrix_type_to_i32(MatrixType::NalgebraDense),
+                99,
+                ode_solver_to_i32(OdeSolverType::Bdf),
+            )
+            .is_null());
             assert!(last_error_message().contains("invalid linear_solver"));
 
             clear_last_error();
-            assert!(
-                diffsol_ode_new_jit(
-                    code.as_ptr(),
-                    jit_backend_to_i32(available_jit_backends()[0]),
-                    matrix_type_to_i32(MatrixType::NalgebraDense),
-                    linear_solver_to_i32(LinearSolverType::Default),
-                    99,
-                )
-                .is_null()
-            );
+            assert!(diffsol_ode_new_jit(
+                code.as_ptr(),
+                jit_backend_to_i32(available_jit_backends()[0]),
+                matrix_type_to_i32(MatrixType::NalgebraDense),
+                linear_solver_to_i32(LinearSolverType::Default),
+                99,
+            )
+            .is_null());
             assert!(last_error_message().contains("invalid ode_solver"));
 
             clear_last_error();
             let invalid_code = CString::new("not valid diffsl").unwrap();
-            assert!(
-                diffsol_ode_new_jit(
-                    invalid_code.as_ptr(),
-                    jit_backend_to_i32(available_jit_backends()[0]),
-                    matrix_type_to_i32(MatrixType::NalgebraDense),
-                    linear_solver_to_i32(LinearSolverType::Default),
-                    ode_solver_to_i32(OdeSolverType::Bdf),
-                )
-                .is_null()
-            );
+            assert!(diffsol_ode_new_jit(
+                invalid_code.as_ptr(),
+                jit_backend_to_i32(available_jit_backends()[0]),
+                matrix_type_to_i32(MatrixType::NalgebraDense),
+                linear_solver_to_i32(LinearSolverType::Default),
+                ode_solver_to_i32(OdeSolverType::Bdf),
+            )
+            .is_null());
             assert!(diffsol_error_code() != 0);
 
             let mut ic_options = ptr::null_mut();

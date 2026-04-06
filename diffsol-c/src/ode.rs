@@ -382,9 +382,8 @@ mod tests {
     use crate::linear_solver_type::LinearSolverType;
     use crate::scalar_type::ScalarType;
     use crate::test_support::{
-        ASSERT_TOL, LOGISTIC_X0, assert_close, assert_solution_tail, logistic_integral,
-        logistic_state, logistic_state_dr, mass_state_deps, rhs_input_deps, rhs_state_deps,
-        vector_host,
+        assert_close, assert_solution_tail, logistic_integral, logistic_state, logistic_state_dr,
+        mass_state_deps, rhs_input_deps, rhs_state_deps, vector_host, ASSERT_TOL, LOGISTIC_X0,
     };
 
     use super::*;
@@ -649,9 +648,9 @@ mod jit_tests {
     use crate::linear_solver_type::LinearSolverType;
     use crate::scalar_type::ScalarType;
     use crate::test_support::{
-        ASSERT_TOL, LOGISTIC_X0, assert_close, assert_solution_tail, available_jit_backends,
-        hybrid_logistic_diffsl_code, hybrid_logistic_period, hybrid_logistic_state,
-        hybrid_logistic_state_dr, logistic_diffsl_code, logistic_state, vector_host,
+        assert_close, assert_solution_tail, available_jit_backends, hybrid_logistic_diffsl_code,
+        hybrid_logistic_period, hybrid_logistic_state, hybrid_logistic_state_dr,
+        logistic_diffsl_code, logistic_state, vector_host, ASSERT_TOL, LOGISTIC_X0,
     };
     #[cfg(feature = "diffsl-llvm")]
     use crate::test_support::{logistic_integral, logistic_state_dr};

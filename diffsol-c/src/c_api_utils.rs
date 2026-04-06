@@ -41,7 +41,11 @@ impl_c_map_identity!(bool);
 impl CMapTo<i32> for bool {
     #[inline]
     fn c_map_to(self) -> i32 {
-        if self { 1 } else { 0 }
+        if self {
+            1
+        } else {
+            0
+        }
     }
 }
 

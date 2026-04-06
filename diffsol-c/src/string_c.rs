@@ -1,4 +1,4 @@
-use std::alloc::{Layout, alloc, dealloc};
+use std::alloc::{alloc, dealloc, Layout};
 use std::ffi::c_char;
 
 /// Allocate memory for a string of given size (including null terminator)

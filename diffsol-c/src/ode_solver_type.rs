@@ -3,13 +3,13 @@
 
 use diffsol::error::DiffsolError;
 use diffsol::{
+    matrix::MatrixRef, DefaultDenseMatrix, DiffSl, LinearSolver, Matrix, OdeSolverMethod,
+    OdeSolverProblem, Vector, VectorHost, VectorRef,
+};
+use diffsol::{
     AdjointOdeSolverMethod, Checkpointing, CodegenModule, DefaultSolver, DenseMatrix, MatrixCommon,
     OdeEquations, OdeSolverState, OdeSolverStopReason, Op, SensitivitiesOdeSolverMethod, Solution,
     VectorViewMut,
-};
-use diffsol::{
-    DefaultDenseMatrix, DiffSl, LinearSolver, Matrix, OdeSolverMethod, OdeSolverProblem, Vector,
-    VectorHost, VectorRef, matrix::MatrixRef,
 };
 use ndarray::ArrayView2;
 use num_traits::{FromPrimitive, Zero}; // for generic nums in _solve_sum_squares_adj
@@ -641,9 +641,8 @@ mod tests {
 
     use crate::linear_solver_type::LinearSolverType;
     use crate::test_support::{
-        LOGISTIC_X0, assert_close, hybrid_logistic_diffsl_code, hybrid_logistic_state,
-        hybrid_logistic_state_dr, logistic_diffsl_code, logistic_integral, logistic_state,
-        logistic_state_dr,
+        assert_close, hybrid_logistic_diffsl_code, hybrid_logistic_state, hybrid_logistic_state_dr,
+        logistic_diffsl_code, logistic_integral, logistic_state, logistic_state_dr, LOGISTIC_X0,
     };
     use crate::valid_linear_solver::LuValidator;
 
@@ -987,10 +986,9 @@ mod tests {
                 LinearSolverType::Default,
             )
             .unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("Tsit45 solver does not support adjoint sensitivity analysis")
-        );
+        assert!(err
+            .to_string()
+            .contains("Tsit45 solver does not support adjoint sensitivity analysis"));
     }
 
     #[cfg(feature = "diffsl-llvm")]

@@ -118,7 +118,7 @@ pub mod solver {
 
 pub use error::DiffsolJsError;
 pub use initial_condition_options::InitialConditionSolverOptions;
-pub use jit::{JitBackendType, default_enabled_jit_backend};
+pub use jit::{default_enabled_jit_backend, JitBackendType};
 pub use linear_solver_type::LinearSolverType;
 pub use matrix_type::MatrixType;
 pub use ode::OdeWrapper;

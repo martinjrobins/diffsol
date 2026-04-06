@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use serde::{Serialize, Serializer, ser::SerializeStruct};
+use serde::{ser::SerializeStruct, Serialize, Serializer};
 
 use crate::{error::DiffsolJsError, ode::Ode};
 

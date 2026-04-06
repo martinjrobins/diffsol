@@ -2,11 +2,11 @@
 // in Rust.
 
 use diffsol::{
+    error::DiffsolError,
+    matrix::{MatrixHost, MatrixRef},
     CodegenModule, ConstantOp, DefaultDenseMatrix, DefaultSolver, DiffSl, MatrixCommon,
     NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeSolverProblem, Op, Vector,
     VectorCommon, VectorHost, VectorRef,
-    error::DiffsolError,
-    matrix::{MatrixHost, MatrixRef},
 };
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 use diffsol::{CodegenModuleCompile, CodegenModuleJit};
@@ -30,7 +30,7 @@ use crate::{
     linear_solver_type::LinearSolverType,
     matrix_type::{MatrixKind, MatrixType},
     ode_solver_type::OdeSolverType,
-    valid_linear_solver::{KluValidator, LuValidator, validate_linear_solver},
+    valid_linear_solver::{validate_linear_solver, KluValidator, LuValidator},
 };
 
 // Each matrix type implements PySolve as bridge between diffsol and Host
@@ -675,13 +675,13 @@ mod tests {
         ode_solver_type::OdeSolverType,
         scalar_type::ScalarType,
         test_support::{
-            LOGISTIC_X0, assert_close, hybrid_logistic_diffsl_code, hybrid_logistic_state,
+            assert_close, hybrid_logistic_diffsl_code, hybrid_logistic_state,
             hybrid_logistic_state_dr, logistic_diffsl_code, logistic_integral, logistic_state,
-            logistic_state_dr, matrix_host,
+            logistic_state_dr, matrix_host, LOGISTIC_X0,
         },
     };
 
-    use super::{GenericSolve, Solve, solve_factory_with_jit_backend};
+    use super::{solve_factory_with_jit_backend, GenericSolve, Solve};
 
     fn make_generic_solve<CG>() -> GenericSolve<diffsol::NalgebraMat<f64>, CG>
     where
@@ -703,14 +703,12 @@ mod tests {
             MatrixType::FaerSparse,
         ] {
             for scalar_type in [ScalarType::F32, ScalarType::F64] {
-                assert!(
-                    solve_factory_with_jit_backend::<CG>(
-                        logistic_diffsl_code(),
-                        matrix_type,
-                        scalar_type,
-                    )
-                    .is_ok()
-                );
+                assert!(solve_factory_with_jit_backend::<CG>(
+                    logistic_diffsl_code(),
+                    matrix_type,
+                    scalar_type,
+                )
+                .is_ok());
             }
         }
     }
