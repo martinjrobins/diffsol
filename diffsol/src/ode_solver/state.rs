@@ -9,8 +9,8 @@ use crate::{
     nonlinear_solver::{convergence::Convergence, NonLinearSolver},
     ode_solver_error, scale, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp,
     InitOp, LinearOp, LinearSolver, Matrix, NewtonNonlinearSolver, NonLinearOp,
-    NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitSens,
-    OdeSolverProblem, Op, SensEquations, Vector, VectorIndex,
+    NonLinearOpJacobian, NonLinearOpSens, OdeEquations, OdeEquationsImplicit,
+    OdeEquationsImplicitSens, OdeSolverProblem, Op, SensEquations, Vector, VectorIndex,
 };
 use crate::{non_linear_solver_error, BacktrackingLineSearch, NoLineSearch};
 
@@ -206,6 +206,152 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
             let state = self.as_mut();
             state.dy.copy_from(&tmp);
             state.y.copy_from(&y_new);
+        }
+        Ok(())
+    }
+
+    /// Apply a reset operator to the current state and propagate sensitivities through a
+    /// time-dependent root-triggered event correction.
+    ///
+    /// The active root component is selected by `root_idx`. Optional `reset_t` and `root_t`
+    /// provide explicit time derivatives `∂g/∂t` and `∂r/∂t`; when omitted they are estimated
+    /// internally using central finite differences at the pre-event state.
+    ///
+    /// Note: mass matrix equations are not supported for this operation.
+    fn state_mut_op_with_sens_and_reset<Eqn, G, R>(
+        &mut self,
+        eqn: &Eqn,
+        reset_op: &G,
+        root_op: &R,
+        root_idx: usize,
+        reset_t: Option<&V>,
+        root_t: Option<&V>,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
+        G: NonLinearOpJacobian<T = V::T, V = V, M = Eqn::M>
+            + NonLinearOpSens<T = V::T, V = V, M = Eqn::M>,
+        R: NonLinearOpJacobian<T = V::T, V = V, M = Eqn::M>
+            + NonLinearOpSens<T = V::T, V = V, M = Eqn::M>,
+    {
+        if eqn.mass().is_some() {
+            return Err(ode_solver_error!(MassMatrixNotSupported));
+        }
+
+        let nstates = eqn.rhs().nstates();
+        let nroots = root_op.nout();
+        if root_idx >= nroots {
+            return Err(ode_solver_error!(
+                Other,
+                format!(
+                    "root index {root_idx} out of bounds for root function with {nroots} outputs"
+                )
+            ));
+        }
+        if let Some(root_t) = root_t {
+            if root_t.len() != nroots {
+                return Err(ode_solver_error!(
+                    Other,
+                    format!("root_t has length {}, expected {}", root_t.len(), nroots)
+                ));
+            }
+        }
+        if let Some(reset_t) = reset_t {
+            if reset_t.len() != nstates {
+                return Err(ode_solver_error!(
+                    Other,
+                    format!("reset_t has length {}, expected {}", reset_t.len(), nstates)
+                ));
+            }
+        }
+
+        let ctx = eqn.context().clone();
+        let t = self.as_ref().t;
+        let (y_before, f_minus, s_before) = {
+            let state = self.as_ref();
+            (state.y.clone(), state.dy.clone(), state.s.to_vec())
+        };
+        let nparams = s_before.len();
+
+        fn estimate_time_partial<V, O>(op: &O, x: &V, t: V::T, nout: usize, ctx: &V::C) -> V
+        where
+            V: Vector,
+            O: NonLinearOp<T = V::T, V = V>,
+        {
+            let eps_sqrt = V::T::EPSILON.sqrt();
+            let h = (V::T::one() + t.abs()) * eps_sqrt;
+            let mut y_plus = V::zeros(nout, ctx.clone());
+            let mut y_minus = V::zeros(nout, ctx.clone());
+            let mut dydt = V::zeros(nout, ctx.clone());
+            op.call_inplace(x, t + h, &mut y_plus);
+            op.call_inplace(x, t - h, &mut y_minus);
+            dydt.copy_from(&y_plus);
+            dydt -= &y_minus;
+            dydt *= scale(V::T::one() / (h + h));
+            dydt
+        }
+        let reset_t = reset_t
+            .cloned()
+            .unwrap_or_else(|| estimate_time_partial(reset_op, &y_before, t, nstates, &ctx));
+        let root_t = root_t
+            .cloned()
+            .unwrap_or_else(|| estimate_time_partial(root_op, &y_before, t, nroots, &ctx));
+
+        let mut y_plus = V::zeros(nstates, ctx.clone());
+        reset_op.call_inplace(&y_before, t, &mut y_plus);
+
+        let mut f_plus = V::zeros(nstates, ctx.clone());
+        eqn.rhs().call_inplace(&y_plus, t, &mut f_plus);
+
+        let mut correction_dir = V::zeros(nstates, ctx.clone());
+        reset_op.jac_mul_inplace(&y_before, t, &f_minus, &mut correction_dir);
+        correction_dir += &reset_t;
+        correction_dir -= &f_plus;
+
+        let mut root_flow = V::zeros(nroots, ctx.clone());
+        root_op.jac_mul_inplace(&y_before, t, &f_minus, &mut root_flow);
+        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
+        let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
+        if denom.abs() <= denom_tol {
+            return Err(ode_solver_error!(
+                Other,
+                "reset sensitivity correction undefined: active root derivative along flow is zero"
+            ));
+        }
+
+        let mut basis = V::zeros(nparams, ctx.clone());
+        let mut reset_jac_s = V::zeros(nstates, ctx.clone());
+        let mut reset_sens = V::zeros(nstates, ctx.clone());
+        let mut root_jac_s = V::zeros(nroots, ctx.clone());
+        let mut root_sens = V::zeros(nroots, ctx);
+        let mut s_plus = Vec::with_capacity(nparams);
+        for (j, s_j_before) in s_before.iter().enumerate() {
+            basis.set_index(j, V::T::one());
+
+            reset_op.jac_mul_inplace(&y_before, t, s_j_before, &mut reset_jac_s);
+            reset_op.sens_mul_inplace(&y_before, t, &basis, &mut reset_sens);
+
+            root_op.jac_mul_inplace(&y_before, t, s_j_before, &mut root_jac_s);
+            root_op.sens_mul_inplace(&y_before, t, &basis, &mut root_sens);
+
+            let numerator = root_jac_s.get_index(root_idx) + root_sens.get_index(root_idx);
+            let tau_p = -numerator / denom;
+
+            let mut s_j_plus = reset_jac_s.clone();
+            s_j_plus += &reset_sens;
+            s_j_plus.axpy(tau_p, &correction_dir, V::T::one());
+            s_plus.push(s_j_plus);
+
+            basis.set_index(j, V::T::zero());
+        }
+
+        {
+            let state = self.as_mut();
+            state.y.copy_from(&y_plus);
+            state.dy.copy_from(&f_plus);
+            for (dst, src) in state.s.iter_mut().zip(s_plus.iter()) {
+                dst.copy_from(src);
+            }
         }
         Ok(())
     }
@@ -713,11 +859,15 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
 #[cfg(test)]
 mod test {
     use crate::{
+        error::{DiffsolError, OdeSolverError},
+        matrix::dense_nalgebra_serial::NalgebraMat,
         ode_equations::test_models::{
             exponential_decay::exponential_decay_problem,
             exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
         },
-        BdfState, LinearSolver, Matrix, OdeBuilder, OdeSolverState, Vector, VectorHost,
+        op::closure_with_sens::ClosureWithSens,
+        BdfState, LinearSolver, Matrix, NonLinearOp, OdeBuilder, OdeSolverState, ParameterisedOp,
+        Vector, VectorHost,
     };
     use num_traits::FromPrimitive;
 
@@ -819,5 +969,533 @@ mod test {
         state.set_step_size(problem.h0, &problem.atol, problem.rtol, &problem.eqn, 1);
 
         assert!((state.as_ref().h - 1e-6).abs() < 1e-12);
+    }
+
+    type TestMat = NalgebraMat<f64>;
+    type TestVec = crate::NalgebraVec<f64>;
+    type TestState = BdfState<TestVec>;
+
+    fn scalar_problem(
+        lambda: f64,
+    ) -> crate::OdeSolverProblem<
+        impl crate::OdeEquationsImplicitSens<
+            M = TestMat,
+            V = TestVec,
+            T = f64,
+            C = crate::NalgebraContext,
+        >,
+    > {
+        OdeBuilder::<TestMat>::new()
+            .p([1.0, -2.0])
+            .rhs_sens_implicit(
+                move |x, _p, _t, y| y[0] = lambda * x[0],
+                move |_x, _p, _t, v, y| y[0] = lambda * v[0],
+                |_x, _p, _t, _v, y| y[0] = 0.0,
+            )
+            .init_sens(|_p, _t, y| y[0] = 0.0, |_p, _t, _v, y| y[0] = 0.0, 1)
+            .build()
+            .unwrap()
+    }
+
+    fn scalar_problem_with_mass(
+        lambda: f64,
+    ) -> crate::OdeSolverProblem<
+        impl crate::OdeEquationsImplicit<M = TestMat, V = TestVec, T = f64, C = crate::NalgebraContext>,
+    > {
+        OdeBuilder::<TestMat>::new()
+            .p([1.0, -2.0])
+            .rhs_implicit(
+                move |x, _p, _t, y| y[0] = lambda * x[0],
+                move |_x, _p, _t, v, y| y[0] = lambda * v[0],
+            )
+            .mass(|v, _p, _t, beta, y| y.axpy(1.0, v, beta))
+            .init(|_p, _t, y| y[0] = 0.0, 1)
+            .build()
+            .unwrap()
+    }
+
+    fn make_state(
+        problem: &crate::OdeSolverProblem<
+            impl crate::OdeEquationsImplicitSens<
+                M = TestMat,
+                V = TestVec,
+                T = f64,
+                C = crate::NalgebraContext,
+            >,
+        >,
+        t: f64,
+        y: f64,
+        s: [f64; 2],
+    ) -> TestState {
+        let mut state = TestState::new_with_sensitivities(problem, 1).unwrap();
+        let state_mut = state.as_mut();
+        *state_mut.t = t;
+        state_mut.y[0] = y;
+        state_mut.dy[0] = problem.eqn.rhs().call(state_mut.y, t)[0];
+        state_mut.s[0][0] = s[0];
+        state_mut.s[1][0] = s[1];
+        state
+    }
+
+    fn assert_scalar_close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 1e-12,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    fn assert_scalar_close_tol(actual: f64, expected: f64, tol: f64) {
+        assert!(
+            (actual - expected).abs() < tol,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    fn assert_other_error(err: DiffsolError, needle: &str) {
+        match err {
+            DiffsolError::OdeSolverError(OdeSolverError::Other(msg)) => {
+                assert!(
+                    msg.contains(needle),
+                    "expected error containing {needle:?}, got {msg:?}"
+                );
+            }
+            other => panic!("expected OdeSolverError::Other, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn state_mut_op_with_sens_and_reset_matches_autonomous_formula() {
+        let problem = scalar_problem(0.25);
+        let p = TestVec::from_vec(vec![1.2, -0.7], crate::NalgebraContext);
+        let mut state = make_state(&problem, 0.0, 2.0, [0.3, -0.4]);
+
+        let reset = ClosureWithSens::<TestMat, _, _, _>::new(
+            |x: &TestVec, p: &TestVec, _t, y: &mut TestVec| {
+                y[0] = 1.5 * x[0] + 0.2 * p[0] - 0.1 * p[1]
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = 1.5 * v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = 0.2 * v[0] - 0.1 * v[1]
+            },
+            1,
+            2,
+            1,
+            crate::NalgebraContext,
+        );
+        let reset = ParameterisedOp::new(&reset, &p);
+
+        let root = ClosureWithSens::<TestMat, _, _, _>::new(
+            |_x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| {
+                y[0] = 0.0;
+                y[1] = 0.0;
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = 4.0 * v[0];
+                y[1] = -2.0 * v[0];
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = v[0];
+                y[1] = 0.5 * v[0] - 1.5 * v[1];
+            },
+            1,
+            2,
+            2,
+            crate::NalgebraContext,
+        );
+        let root = ParameterisedOp::new(&root, &p);
+
+        state
+            .state_mut_op_with_sens_and_reset(&problem.eqn, &reset, &root, 1, None, None)
+            .unwrap();
+
+        assert_scalar_close(state.as_ref().y[0], 3.31);
+        assert_scalar_close(state.as_ref().dy[0], 0.8275);
+        assert_scalar_close(state.as_ref().s[0][0], 0.65775);
+        assert_scalar_close(state.as_ref().s[1][0], -0.64575);
+    }
+
+    #[test]
+    fn state_mut_op_with_sens_and_reset_uses_selected_root_component() {
+        let problem = scalar_problem(0.25);
+        let p = TestVec::from_vec(vec![1.2, -0.7], crate::NalgebraContext);
+        let mut state_root0 = make_state(&problem, 0.0, 2.0, [0.3, -0.4]);
+        let mut state_root1 = state_root0.clone();
+
+        let reset = ClosureWithSens::<TestMat, _, _, _>::new(
+            |x: &TestVec, p: &TestVec, _t, y: &mut TestVec| {
+                y[0] = 1.5 * x[0] + 0.2 * p[0] - 0.1 * p[1]
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = 1.5 * v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = 0.2 * v[0] - 0.1 * v[1]
+            },
+            1,
+            2,
+            1,
+            crate::NalgebraContext,
+        );
+        let reset = ParameterisedOp::new(&reset, &p);
+
+        let root = ClosureWithSens::<TestMat, _, _, _>::new(
+            |_x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| {
+                y[0] = 0.0;
+                y[1] = 0.0;
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = 4.0 * v[0];
+                y[1] = -2.0 * v[0];
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = v[0];
+                y[1] = 0.5 * v[0] - 1.5 * v[1];
+            },
+            1,
+            2,
+            2,
+            crate::NalgebraContext,
+        );
+        let root = ParameterisedOp::new(&root, &p);
+
+        state_root0
+            .state_mut_op_with_sens_and_reset(&problem.eqn, &reset, &root, 0, None, None)
+            .unwrap();
+        state_root1
+            .state_mut_op_with_sens_and_reset(&problem.eqn, &reset, &root, 1, None, None)
+            .unwrap();
+
+        assert!(
+            (state_root0.as_ref().s[0][0] - state_root1.as_ref().s[0][0]).abs() > 1e-6,
+            "different root components should produce different sensitivity updates"
+        );
+    }
+
+    #[test]
+    fn state_mut_op_with_sens_and_reset_supports_root_time_dependence_without_state_dependence() {
+        let problem = scalar_problem(0.5);
+        let p = TestVec::from_vec(vec![1.0, 2.0], crate::NalgebraContext);
+        let mut state = make_state(&problem, 1.5, 1.2, [0.1, -0.2]);
+
+        let reset = ClosureWithSens::<TestMat, _, _, _>::new(
+            |x: &TestVec, p: &TestVec, _t, y: &mut TestVec| y[0] = x[0] + 0.5 * p[0] + 0.25 * p[1],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = 0.5 * v[0] + 0.25 * v[1]
+            },
+            1,
+            2,
+            1,
+            crate::NalgebraContext,
+        );
+        let reset = ParameterisedOp::new(&reset, &p);
+
+        let root = ClosureWithSens::<TestMat, _, _, _>::new(
+            |_x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = 0.0,
+            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y[0] = 0.0,
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = 2.0 * v[0] - 3.0 * v[1]
+            },
+            1,
+            2,
+            1,
+            crate::NalgebraContext,
+        );
+        let root = ParameterisedOp::new(&root, &p);
+        let root_t = TestVec::from_vec(vec![4.0], crate::NalgebraContext);
+
+        state
+            .state_mut_op_with_sens_and_reset(&problem.eqn, &reset, &root, 0, None, Some(&root_t))
+            .unwrap();
+
+        assert_scalar_close(state.as_ref().y[0], 2.2);
+        assert_scalar_close(state.as_ref().dy[0], 1.1);
+        assert_scalar_close(state.as_ref().s[0][0], 0.85);
+        assert_scalar_close(state.as_ref().s[1][0], -0.325);
+    }
+
+    #[test]
+    fn state_mut_op_with_sens_and_reset_matches_time_dependent_formula() {
+        let problem = scalar_problem(0.1);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let mut state = make_state(&problem, 3.0, 2.0, [0.2, -0.1]);
+
+        let reset = ClosureWithSens::<TestMat, _, _, _>::new(
+            |x: &TestVec, p: &TestVec, t, y: &mut TestVec| {
+                y[0] = 1.2 * x[0] + 0.4 * p[0] - 0.3 * p[1] + 0.8 * t
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = 1.2 * v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = 0.4 * v[0] - 0.3 * v[1]
+            },
+            1,
+            2,
+            1,
+            crate::NalgebraContext,
+        );
+        let reset = ParameterisedOp::new(&reset, &p);
+
+        let root = ClosureWithSens::<TestMat, _, _, _>::new(
+            |x: &TestVec, p: &TestVec, t, y: &mut TestVec| {
+                y[0] = 0.5 * x[0] - 0.7 * p[0] + 1.1 * p[1] - 0.2 * t
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = 0.5 * v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = -0.7 * v[0] + 1.1 * v[1]
+            },
+            1,
+            2,
+            1,
+            crate::NalgebraContext,
+        );
+        let root = ParameterisedOp::new(&root, &p);
+        let reset_t = TestVec::from_vec(vec![0.8], crate::NalgebraContext);
+        let root_t = TestVec::from_vec(vec![-0.2], crate::NalgebraContext);
+
+        state
+            .state_mut_op_with_sens_and_reset(
+                &problem.eqn,
+                &reset,
+                &root,
+                0,
+                Some(&reset_t),
+                Some(&root_t),
+            )
+            .unwrap();
+
+        assert_scalar_close(state.as_ref().y[0], 5.8);
+        assert_scalar_close(state.as_ref().dy[0], 0.58);
+        assert_scalar_close(state.as_ref().s[0][0], -2.12);
+        assert_scalar_close(state.as_ref().s[1][0], 4.41);
+    }
+
+    #[test]
+    fn state_mut_op_with_sens_and_reset_estimates_time_derivatives_via_finite_difference() {
+        let problem = scalar_problem(0.1);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let mut state_fd = make_state(&problem, 3.0, 2.0, [0.2, -0.1]);
+        let mut state_exact = state_fd.clone();
+
+        let reset = ClosureWithSens::<TestMat, _, _, _>::new(
+            |x: &TestVec, p: &TestVec, t, y: &mut TestVec| {
+                y[0] = 1.2 * x[0] + 0.4 * p[0] - 0.3 * p[1] + 0.8 * t
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = 1.2 * v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = 0.4 * v[0] - 0.3 * v[1]
+            },
+            1,
+            2,
+            1,
+            crate::NalgebraContext,
+        );
+        let reset = ParameterisedOp::new(&reset, &p);
+
+        let root = ClosureWithSens::<TestMat, _, _, _>::new(
+            |x: &TestVec, p: &TestVec, t, y: &mut TestVec| {
+                y[0] = 0.5 * x[0] - 0.7 * p[0] + 1.1 * p[1] - 0.2 * t
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = 0.5 * v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = -0.7 * v[0] + 1.1 * v[1]
+            },
+            1,
+            2,
+            1,
+            crate::NalgebraContext,
+        );
+        let root = ParameterisedOp::new(&root, &p);
+        let reset_t = TestVec::from_vec(vec![0.8], crate::NalgebraContext);
+        let root_t = TestVec::from_vec(vec![-0.2], crate::NalgebraContext);
+
+        state_fd
+            .state_mut_op_with_sens_and_reset(&problem.eqn, &reset, &root, 0, None, None)
+            .unwrap();
+        state_exact
+            .state_mut_op_with_sens_and_reset(
+                &problem.eqn,
+                &reset,
+                &root,
+                0,
+                Some(&reset_t),
+                Some(&root_t),
+            )
+            .unwrap();
+
+        assert_scalar_close(state_fd.as_ref().y[0], state_exact.as_ref().y[0]);
+        assert_scalar_close(state_fd.as_ref().dy[0], state_exact.as_ref().dy[0]);
+        assert_scalar_close_tol(
+            state_fd.as_ref().s[0][0],
+            state_exact.as_ref().s[0][0],
+            1e-8,
+        );
+        assert_scalar_close_tol(
+            state_fd.as_ref().s[1][0],
+            state_exact.as_ref().s[1][0],
+            1e-8,
+        );
+    }
+
+    #[test]
+    fn state_mut_op_with_sens_and_reset_rejects_invalid_root_index() {
+        let problem = scalar_problem(0.25);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let mut state = make_state(&problem, 0.0, 1.0, [0.0, 0.0]);
+
+        let reset = ClosureWithSens::<TestMat, _, _, _>::new(
+            |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
+            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y[0] = 0.0,
+            1,
+            2,
+            1,
+            crate::NalgebraContext,
+        );
+        let reset = ParameterisedOp::new(&reset, &p);
+        let root = ClosureWithSens::<TestMat, _, _, _>::new(
+            |_x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| {
+                y[0] = 0.0;
+                y[1] = 0.0;
+            },
+            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| {
+                y[0] = 1.0;
+                y[1] = 1.0;
+            },
+            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| {
+                y[0] = 0.0;
+                y[1] = 0.0;
+            },
+            1,
+            2,
+            2,
+            crate::NalgebraContext,
+        );
+        let root = ParameterisedOp::new(&root, &p);
+
+        let err = state
+            .state_mut_op_with_sens_and_reset(&problem.eqn, &reset, &root, 2, None, None)
+            .unwrap_err();
+        assert_other_error(err, "root index 2 out of bounds");
+    }
+
+    #[test]
+    fn state_mut_op_with_sens_and_reset_rejects_invalid_time_derivative_lengths() {
+        let problem = scalar_problem(0.25);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let mut state = make_state(&problem, 0.0, 1.0, [0.0, 0.0]);
+
+        let reset = ClosureWithSens::<TestMat, _, _, _>::new(
+            |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
+            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y[0] = 0.0,
+            1,
+            2,
+            1,
+            crate::NalgebraContext,
+        );
+        let reset = ParameterisedOp::new(&reset, &p);
+        let root = ClosureWithSens::<TestMat, _, _, _>::new(
+            |_x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = 0.0,
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
+            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y[0] = 0.0,
+            1,
+            2,
+            1,
+            crate::NalgebraContext,
+        );
+        let root = ParameterisedOp::new(&root, &p);
+        let bad_reset_t = TestVec::from_vec(vec![0.0, 1.0], crate::NalgebraContext);
+        let bad_root_t = TestVec::from_vec(vec![0.0, 1.0], crate::NalgebraContext);
+
+        let err = state
+            .state_mut_op_with_sens_and_reset(
+                &problem.eqn,
+                &reset,
+                &root,
+                0,
+                Some(&bad_reset_t),
+                None,
+            )
+            .unwrap_err();
+        assert_other_error(err, "reset_t has length 2, expected 1");
+
+        let err = state
+            .state_mut_op_with_sens_and_reset(
+                &problem.eqn,
+                &reset,
+                &root,
+                0,
+                None,
+                Some(&bad_root_t),
+            )
+            .unwrap_err();
+        assert_other_error(err, "root_t has length 2, expected 1");
+    }
+
+    #[test]
+    fn state_mut_op_with_sens_and_reset_rejects_zero_event_denominator() {
+        let problem = scalar_problem(0.0);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let mut state = make_state(&problem, 0.0, 0.0, [0.0, 0.0]);
+
+        let reset = ClosureWithSens::<TestMat, _, _, _>::new(
+            |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
+            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y[0] = 0.0,
+            1,
+            2,
+            1,
+            crate::NalgebraContext,
+        );
+        let reset = ParameterisedOp::new(&reset, &p);
+        let root = ClosureWithSens::<TestMat, _, _, _>::new(
+            |_x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = 0.0,
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
+            1,
+            2,
+            1,
+            crate::NalgebraContext,
+        );
+        let root = ParameterisedOp::new(&root, &p);
+
+        let err = state
+            .state_mut_op_with_sens_and_reset(&problem.eqn, &reset, &root, 0, None, None)
+            .unwrap_err();
+        assert_other_error(err, "active root derivative along flow is zero");
+    }
+
+    #[test]
+    fn state_mut_op_with_sens_and_reset_rejects_mass_matrix_equations() {
+        let problem = scalar_problem_with_mass(0.25);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let mut state = TestState::new_without_initialise(&problem).unwrap();
+
+        let reset = ClosureWithSens::<TestMat, _, _, _>::new(
+            |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
+            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y[0] = 0.0,
+            1,
+            2,
+            1,
+            crate::NalgebraContext,
+        );
+        let reset = ParameterisedOp::new(&reset, &p);
+        let root = ClosureWithSens::<TestMat, _, _, _>::new(
+            |_x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = 0.0,
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
+            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y[0] = 0.0,
+            1,
+            2,
+            1,
+            crate::NalgebraContext,
+        );
+        let root = ParameterisedOp::new(&root, &p);
+
+        let err = state
+            .state_mut_op_with_sens_and_reset(&problem.eqn, &reset, &root, 0, None, None)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DiffsolError::OdeSolverError(OdeSolverError::MassMatrixNotSupported)
+        ));
     }
 }
