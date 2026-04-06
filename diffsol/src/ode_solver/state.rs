@@ -214,8 +214,24 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
     /// Apply a reset operator to the current state and propagate sensitivities through a
     /// time-dependent root-triggered event correction.
     ///
-    /// The active root component is selected by `root_idx`. Explicit time derivatives `∂g/∂t`
-    /// and `∂r/∂t` are obtained from [`NonLinearOpTimePartial`].
+    /// If the pre-event state is `x^-` and the reset map is `g(x, t, p)`, this method updates
+    /// the state to
+    /// `x^+ = g(x^-, t, p)`,
+    /// then recomputes the post-event vector field
+    /// `f^+ = rhs(x^+, t, p)`.
+    ///
+    /// For the active root component `r_k(x, t, p) = 0` selected by `root_idx`, the event-time
+    /// sensitivity in parameter direction `p_j` is
+    /// `τ'_j = -([r_x s^-_j]_k + [r_p e_j]_k) / ([r_x f^-]_k + [r_t]_k)`,
+    /// where `s^-_j = ∂x^-/∂p_j`, `f^- = dx^-/dt`, `e_j` is the jth parameter basis vector,
+    /// `r_x = ∂r/∂x`, `r_p = ∂r/∂p`, and `r_t = ∂r/∂t`.
+    ///
+    /// The post-event sensitivity is then updated as
+    /// `s^+_j = g_x s^-_j + g_p e_j + (g_x f^- + g_t - f^+) τ'_j`,
+    /// where `g_x = ∂g/∂x`, `g_p = ∂g/∂p`, and `g_t = ∂g/∂t`.
+    ///
+    /// Explicit time derivatives `∂g/∂t` and `∂r/∂t` are obtained from
+    /// [`NonLinearOpTimePartial`].
     ///
     /// Note: mass matrix equations are not supported for this operation.
     fn state_mut_op_with_sens_and_reset<Eqn, G, R>(

@@ -407,7 +407,7 @@ impl OdeSolverType {
                     let state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
                     let mut restarted_solver = problem.bdf_solver_sens::<LS>(state)?;
-                    restarted_solver.reset_with_sens()?;
+                    restarted_solver.reset_with_sens_at_root(root_idx)?;
                     solver = restarted_solver;
                 }
                 Ok(soln)
@@ -428,7 +428,7 @@ impl OdeSolverType {
                     let state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
                     let mut restarted_solver = problem.esdirk34_solver_sens::<LS>(state)?;
-                    restarted_solver.reset_with_sens()?;
+                    restarted_solver.reset_with_sens_at_root(root_idx)?;
                     solver = restarted_solver;
                 }
                 Ok(soln)
@@ -449,7 +449,7 @@ impl OdeSolverType {
                     let state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
                     let mut restarted_solver = problem.tr_bdf2_solver_sens::<LS>(state)?;
-                    restarted_solver.reset_with_sens()?;
+                    restarted_solver.reset_with_sens_at_root(root_idx)?;
                     solver = restarted_solver;
                 }
                 Ok(soln)
@@ -470,7 +470,7 @@ impl OdeSolverType {
                     let state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
                     let mut restarted_solver = problem.tsit45_solver_sens(state)?;
-                    restarted_solver.reset_with_sens()?;
+                    restarted_solver.reset_with_sens_at_root(root_idx)?;
                     solver = restarted_solver;
                 }
                 Ok(soln)

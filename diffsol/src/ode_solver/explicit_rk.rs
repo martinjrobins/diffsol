@@ -45,8 +45,18 @@ where
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
 {
-    fn reset_with_sens(&mut self) -> Result<(), DiffsolError> {
-        self.rk.reset_with_sens()
+    fn reset_with_sens_at_root(&mut self, root_idx: usize) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitSens<
+            Reset: crate::NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
+                       + crate::NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
+                       + crate::NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+            Root: crate::NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
+                      + crate::NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
+                      + crate::NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+        >,
+    {
+        self.rk.reset_with_sens_at_root(root_idx)
     }
 }
 

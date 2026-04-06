@@ -11,8 +11,9 @@ use crate::RootFinder;
 use crate::Tableau;
 use crate::{
     ode_solver_error, AugmentedOdeEquations, Convergence, DefaultDenseMatrix, DenseMatrix,
-    MatrixView, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op,
-    Scalar, Vector, VectorViewMut,
+    MatrixView, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpTimePartial,
+    NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Scalar, Vector,
+    VectorViewMut,
 };
 use log::info;
 use log::trace;
@@ -387,15 +388,37 @@ where
         Ok(())
     }
 
-    pub(crate) fn reset_with_sens(&mut self) -> Result<(), DiffsolError>
+    pub(crate) fn reset_with_sens_at_root(&mut self, root_idx: usize) -> Result<(), DiffsolError>
     where
-        Eqn: OdeEquationsImplicitSens,
+        Eqn: OdeEquationsImplicitSens<
+            Reset: NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
+                       + NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
+                       + NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+            Root: NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
+                      + NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
+                      + NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+        >,
     {
-        if let Some(reset_fn) = self.problem.eqn.reset() {
-            self.state
-                .state_mut_op_with_sens(&self.problem.eqn, &reset_fn)?;
-            self.is_state_mutated = true;
-        }
+        let reset_fn = self.problem.eqn.reset().ok_or_else(|| {
+            ode_solver_error!(
+                Other,
+                "reset_with_sens_at_root requires the equations to define a reset operator"
+            )
+        })?;
+        let root_fn = self.problem.eqn.root().ok_or_else(|| {
+            ode_solver_error!(
+                Other,
+                "reset_with_sens_at_root requires the equations to define a root operator"
+            )
+        })?;
+
+        self.state.state_mut_op_with_sens_and_reset(
+            &self.problem.eqn,
+            &reset_fn,
+            &root_fn,
+            root_idx,
+        )?;
+        self.is_state_mutated = true;
         Ok(())
     }
 

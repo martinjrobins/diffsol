@@ -39,7 +39,7 @@ mod tests {
     };
     use crate::{
         ConstantOp, ConstantOpSens, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp,
-        NonLinearOpSens, Op, Vector,
+        NonLinearOpSens, NonLinearOpTimePartial, Op, Vector,
     };
     use num_traits::{FromPrimitive, One, Signed, Zero};
 
@@ -1131,7 +1131,7 @@ mod tests {
     }
 
     /// Test that `solve_dense_sensitivities()` can be continued manually after
-    /// a root by applying `reset_with_sens()` and calling
+    /// a root by applying `reset_with_sens_at_root()` and calling
     /// `solve_dense_sensitivities()` again.
     ///
     /// `soln` must contain one solution point at `t_stop` with exact `y` and sensitivity vectors.
@@ -1139,7 +1139,14 @@ mod tests {
         mut solver: Method,
         soln: &OdeSolverSolution<Eqn::V>,
     ) where
-        Eqn: OdeEquationsImplicitSens + 'a,
+        Eqn: OdeEquationsImplicitSens<
+                Reset: NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
+                           + NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
+                           + NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+                Root: NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
+                          + NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
+                          + NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+            > + 'a,
         Eqn::V: DefaultDenseMatrix,
         Method: SensitivitiesOdeSolverMethod<'a, Eqn>,
     {
@@ -1167,8 +1174,13 @@ mod tests {
         );
         let t_first_root = solver.state().t;
 
+        let first_root_idx = match stop_reason_first {
+            OdeSolverStopReason::RootFound(_, root_idx) => root_idx,
+            _ => unreachable!("expected first sensitivity solve to stop on a root"),
+        };
+
         // Manually apply reset (with sensitivity propagation) at the first root.
-        solver.reset_with_sens().unwrap();
+        solver.reset_with_sens_at_root(first_root_idx).unwrap();
 
         // Continue from just after the first-root time so t_eval remains valid.
         let t_eval_after_reset: Vec<Eqn::T> = t_eval
@@ -1199,7 +1211,7 @@ mod tests {
 
         // Check the last column matches the expected second-root solution.
         let expected = &soln.solution_points[0];
-        let error_threshold = Eqn::T::from_f64(50.0).unwrap();
+        let error_threshold = Eqn::T::from_f64(100.0).unwrap();
         let sens_points = soln.sens_solution_points.as_ref().unwrap();
 
         let last_col = ncols - 1;

@@ -73,12 +73,34 @@ where
     Nls: NonLinearSolver<Eqn::M>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
 {
-    fn reset_with_sens(&mut self) -> Result<(), DiffsolError> {
+    fn reset_with_sens_at_root(&mut self, root_idx: usize) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitSens<
+            Reset: crate::NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
+                       + crate::NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
+                       + crate::NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+            Root: crate::NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
+                      + crate::NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
+                      + crate::NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+        >,
+    {
         let eqn = &self.ode_problem.eqn;
-        if let Some(reset_fn) = eqn.reset() {
-            self.is_state_modified = true;
-            self.state.state_mut_op_with_sens(eqn, &reset_fn)?;
-        }
+        let reset_fn = eqn.reset().ok_or_else(|| {
+            ode_solver_error!(
+                Other,
+                "reset_with_sens_at_root requires the equations to define a reset operator"
+            )
+        })?;
+        let root_fn = eqn.root().ok_or_else(|| {
+            ode_solver_error!(
+                Other,
+                "reset_with_sens_at_root requires the equations to define a root operator"
+            )
+        })?;
+
+        self.is_state_modified = true;
+        self.state
+            .state_mut_op_with_sens_and_reset(eqn, &reset_fn, &root_fn, root_idx)?;
         Ok(())
     }
 }
