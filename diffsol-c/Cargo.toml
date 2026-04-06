@@ -1,7 +1,12 @@
 [package]
 name = "diffsol-c"
 version = "0.1.0"
-edition = "2024"
+edition.workspace = true
+description = "A diffsol wrapper featuring runtime scalar/matrix/solver types and a C API"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "../README.md"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
