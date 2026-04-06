@@ -31,15 +31,15 @@ mod tests {
     use crate::op::ParameterisedOp;
     use crate::Scalar;
     use crate::{
-        op::OpStatistics, AdjointOdeSolverMethod, Context, DenseMatrix, MatrixCommon, MatrixRef,
-        NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
-        OdeEquationsImplicitSens, OdeEquationsRef, OdeSolverConfig, OdeSolverMethod,
-        OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Scale, VectorRef, VectorView,
-        VectorViewMut,
+        ode_equations::OdeEquationsImplicitSensWithReset, op::OpStatistics, AdjointOdeSolverMethod,
+        Context, DenseMatrix, MatrixCommon, MatrixRef, NonLinearOpJacobian, OdeEquations,
+        OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens,
+        OdeEquationsRef, OdeSolverConfig, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+        OdeSolverStopReason, Scale, VectorRef, VectorView, VectorViewMut,
     };
     use crate::{
         ConstantOp, ConstantOpSens, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp,
-        NonLinearOpSens, NonLinearOpTimePartial, Op, Vector,
+        NonLinearOpSens, Op, Vector,
     };
     use num_traits::{FromPrimitive, One, Signed, Zero};
 
@@ -1139,14 +1139,7 @@ mod tests {
         mut solver: Method,
         soln: &OdeSolverSolution<Eqn::V>,
     ) where
-        Eqn: OdeEquationsImplicitSens<
-                Reset: NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                           + NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                           + NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
-                Root: NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                          + NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                          + NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
-            > + 'a,
+        Eqn: OdeEquationsImplicitSensWithReset + 'a,
         Eqn::V: DefaultDenseMatrix,
         Method: SensitivitiesOdeSolverMethod<'a, Eqn>,
     {

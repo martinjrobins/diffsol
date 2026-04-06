@@ -1,10 +1,11 @@
 use crate::{
     error::DiffsolError,
     error::OdeSolverError,
+    ode_equations::OdeEquationsImplicitSensWithReset,
     ode_solver::solution::{Solution, SolutionMode},
     ode_solver_error, AugmentedOdeSolverMethod, Context, DefaultDenseMatrix, DenseMatrix,
-    MatrixCommon, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpTimePartial,
-    OdeEquationsImplicitSens, OdeSolverStopReason, Op, SensEquations, Vector, VectorViewMut,
+    MatrixCommon, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens, OdeEquationsImplicitSens,
+    OdeSolverStopReason, Op, SensEquations, Vector, VectorViewMut,
 };
 use num_traits::{One, Zero};
 use std::ops::AddAssign;
@@ -18,14 +19,7 @@ where
     /// through the root-aware reset correction for the active `root_idx`.
     fn reset_with_sens_at_root(&mut self, root_idx: usize) -> Result<(), DiffsolError>
     where
-        Eqn: OdeEquationsImplicitSens<
-            Reset: NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                       + NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                       + NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
-            Root: NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                      + NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                      + NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
-        >;
+        Eqn: OdeEquationsImplicitSensWithReset;
 
     /// Continue solving ODE and forward sensitivities into an existing dense [`Solution`].
     ///

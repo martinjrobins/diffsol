@@ -2,6 +2,7 @@ use log::{debug, info, trace};
 use std::ops::AddAssign;
 use std::{cell::Ref, fmt::Display};
 
+use crate::ode_equations::OdeEquationsImplicitSensWithReset;
 use crate::{
     error::{DiffsolError, OdeSolverError},
     AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, NoAug, StateRef, StateRefMut,
@@ -75,33 +76,19 @@ where
 {
     fn reset_with_sens_at_root(&mut self, root_idx: usize) -> Result<(), DiffsolError>
     where
-        Eqn: OdeEquationsImplicitSens<
-            Reset: crate::NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                       + crate::NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                       + crate::NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
-            Root: crate::NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                      + crate::NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                      + crate::NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
-        >,
+        Eqn: OdeEquationsImplicitSensWithReset,
     {
         let eqn = &self.ode_problem.eqn;
-        let reset_fn = eqn.reset().ok_or_else(|| {
-            ode_solver_error!(
-                Other,
-                "reset_with_sens_at_root requires the equations to define a reset operator"
-            )
-        })?;
-        let root_fn = eqn.root().ok_or_else(|| {
-            ode_solver_error!(
-                Other,
-                "reset_with_sens_at_root requires the equations to define a root operator"
-            )
-        })?;
-
-        self.is_state_modified = true;
-        self.state
-            .state_mut_op_with_sens_and_reset(eqn, &reset_fn, &root_fn, root_idx)?;
-        Ok(())
+        match (eqn.reset(), eqn.root()) {
+            (None, _) => Ok(()),
+            (Some(_reset_fn), None) => Err(ode_solver_error!(ResetRequiresRootOperator)),
+            (Some(reset_fn), Some(root_fn)) => {
+                self.is_state_modified = true;
+                self.state
+                    .state_mut_op_with_sens_and_reset(eqn, &reset_fn, &root_fn, root_idx)?;
+                Ok(())
+            }
+        }
     }
 }
 

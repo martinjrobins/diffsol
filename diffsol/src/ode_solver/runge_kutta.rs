@@ -1,5 +1,6 @@
 use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
+use crate::ode_equations::OdeEquationsImplicitSensWithReset;
 use crate::op::sdirk::SdirkCallable;
 use crate::scale;
 use crate::AugmentedOdeEquationsImplicit;
@@ -390,36 +391,22 @@ where
 
     pub(crate) fn reset_with_sens_at_root(&mut self, root_idx: usize) -> Result<(), DiffsolError>
     where
-        Eqn: OdeEquationsImplicitSens<
-            Reset: NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                       + NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                       + NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
-            Root: NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                      + NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                      + NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
-        >,
+        Eqn: OdeEquationsImplicitSensWithReset,
     {
-        let reset_fn = self.problem.eqn.reset().ok_or_else(|| {
-            ode_solver_error!(
-                Other,
-                "reset_with_sens_at_root requires the equations to define a reset operator"
-            )
-        })?;
-        let root_fn = self.problem.eqn.root().ok_or_else(|| {
-            ode_solver_error!(
-                Other,
-                "reset_with_sens_at_root requires the equations to define a root operator"
-            )
-        })?;
-
-        self.state.state_mut_op_with_sens_and_reset(
-            &self.problem.eqn,
-            &reset_fn,
-            &root_fn,
-            root_idx,
-        )?;
-        self.is_state_mutated = true;
-        Ok(())
+        match (self.problem.eqn.reset(), self.problem.eqn.root()) {
+            (None, _) => Ok(()),
+            (Some(_reset_fn), None) => Err(ode_solver_error!(ResetRequiresRootOperator)),
+            (Some(reset_fn), Some(root_fn)) => {
+                self.state.state_mut_op_with_sens_and_reset(
+                    &self.problem.eqn,
+                    &reset_fn,
+                    &root_fn,
+                    root_idx,
+                )?;
+                self.is_state_mutated = true;
+                Ok(())
+            }
+        }
     }
 
     pub(crate) fn state_mut_back(

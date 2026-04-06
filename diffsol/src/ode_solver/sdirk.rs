@@ -1,6 +1,7 @@
 use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
 use crate::matrix::MatrixRef;
+use crate::ode_equations::OdeEquationsImplicitSensWithReset;
 use crate::ode_solver::runge_kutta::Rk;
 use crate::vector::VectorRef;
 use crate::LinearSolver;
@@ -59,14 +60,7 @@ where
 {
     fn reset_with_sens_at_root(&mut self, root_idx: usize) -> Result<(), DiffsolError>
     where
-        Eqn: OdeEquationsImplicitSens<
-            Reset: crate::NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                       + crate::NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                       + crate::NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
-            Root: crate::NonLinearOpJacobian<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                      + crate::NonLinearOpSens<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>
-                      + crate::NonLinearOpTimePartial<M = Eqn::M, V = Eqn::V, T = Eqn::T, C = Eqn::C>,
-        >,
+        Eqn: OdeEquationsImplicitSensWithReset,
     {
         self.rk.reset_with_sens_at_root(root_idx)
     }
