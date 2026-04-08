@@ -677,6 +677,7 @@ where
     /// - `root_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the root function with the vector v.
     /// - `root_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the root function wrt the parameters with the vector v.
     /// - `nroots`: Number of root outputs.
+    #[allow(clippy::type_complexity)]
     pub fn root_sens_implicit<F, G, H>(
         self,
         root: F,
@@ -828,6 +829,7 @@ where
     /// - `reset`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the new state.
     /// - `reset_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the reset function with the vector v.
     /// - `reset_sens`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the partial derivative of the reset function wrt the parameters with the vector v.
+    #[allow(clippy::type_complexity)]
     pub fn reset_sens_implicit<F, G, H>(
         self,
         reset: F,
