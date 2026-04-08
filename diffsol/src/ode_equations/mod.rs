@@ -1,8 +1,8 @@
 use crate::{
     op::{constant_op::ConstantOpSensAdjoint, linear_op::LinearOpTranspose, ParameterisedOp},
     ConstantOp, ConstantOpSens, LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, Op, StochOp, UnitCallable,
-    Vector,
+    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, NonLinearOpTimePartial, Op,
+    StochOp, UnitCallable, Vector,
 };
 use serde::Serialize;
 
@@ -362,6 +362,30 @@ impl<T> OdeEquationsImplicitSens for T where
                  + NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>,
         Init: ConstantOpSens<M = T::M, V = T::V, T = T::T, C = T::C>,
         Reset: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>,
+    >
+{
+}
+
+pub trait OdeEquationsImplicitSensWithReset:
+    OdeEquationsImplicitSens<
+    Reset: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+               + NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+               + NonLinearOpTimePartial<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Root: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+              + NonLinearOpSens<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+              + NonLinearOpTimePartial<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+>
+{
+}
+
+impl<T> OdeEquationsImplicitSensWithReset for T where
+    T: OdeEquationsImplicitSens<
+        Reset: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>
+                   + NonLinearOpSens<M = T::M, V = T::V, T = T::T, C = T::C>
+                   + NonLinearOpTimePartial<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Root: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>
+                  + NonLinearOpSens<M = T::M, V = T::V, T = T::T, C = T::C>
+                  + NonLinearOpTimePartial<M = T::M, V = T::V, T = T::T, C = T::C>,
     >
 {
 }

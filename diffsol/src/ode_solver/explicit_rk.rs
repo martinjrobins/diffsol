@@ -2,6 +2,7 @@ use super::method::AugmentedOdeSolverMethod;
 use super::runge_kutta::Rk;
 use super::sensitivities::SensitivitiesOdeSolverMethod;
 use crate::error::DiffsolError;
+use crate::ode_equations::OdeEquationsImplicitSensWithReset;
 use crate::ode_solver::bdf::BdfStatistics;
 use crate::vector::VectorRef;
 use crate::NoAug;
@@ -45,8 +46,11 @@ where
     Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
 {
-    fn reset_with_sens(&mut self) -> Result<(), DiffsolError> {
-        self.rk.reset_with_sens()
+    fn reset_with_sens_at_root(&mut self, root_idx: usize) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitSensWithReset,
+    {
+        self.rk.reset_with_sens_at_root(root_idx)
     }
 }
 

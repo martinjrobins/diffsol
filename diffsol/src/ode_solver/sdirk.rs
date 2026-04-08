@@ -1,6 +1,7 @@
 use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
 use crate::matrix::MatrixRef;
+use crate::ode_equations::OdeEquationsImplicitSensWithReset;
 use crate::ode_solver::runge_kutta::Rk;
 use crate::vector::VectorRef;
 use crate::LinearSolver;
@@ -57,8 +58,11 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
-    fn reset_with_sens(&mut self) -> Result<(), DiffsolError> {
-        self.rk.reset_with_sens()
+    fn reset_with_sens_at_root(&mut self, root_idx: usize) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitSensWithReset,
+    {
+        self.rk.reset_with_sens_at_root(root_idx)
     }
 }
 

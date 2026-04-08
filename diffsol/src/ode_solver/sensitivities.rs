@@ -1,6 +1,7 @@
 use crate::{
     error::DiffsolError,
     error::OdeSolverError,
+    ode_equations::OdeEquationsImplicitSensWithReset,
     ode_solver::solution::{Solution, SolutionMode},
     ode_solver_error, AugmentedOdeSolverMethod, Context, DefaultDenseMatrix, DenseMatrix,
     MatrixCommon, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens, OdeEquationsImplicitSens,
@@ -14,8 +15,11 @@ pub trait SensitivitiesOdeSolverMethod<'a, Eqn>:
 where
     Eqn: OdeEquationsImplicitSens + 'a,
 {
-    /// Apply the equations' reset function and propagate sensitivities through its Jacobian.
-    fn reset_with_sens(&mut self) -> Result<(), DiffsolError>;
+    /// Apply the equations' reset function at a detected root and propagate sensitivities
+    /// through the root-aware reset correction for the active `root_idx`.
+    fn reset_with_sens_at_root(&mut self, root_idx: usize) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitSensWithReset;
 
     /// Continue solving ODE and forward sensitivities into an existing dense [`Solution`].
     ///

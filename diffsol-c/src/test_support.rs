@@ -111,20 +111,12 @@ pub(crate) fn logistic_state(x0: f64, r: f64, t: f64) -> f64 {
     (x0 * exp_rt) / (1.0 - x0 + x0 * exp_rt)
 }
 
-#[cfg(any(
-    feature = "diffsl-external-f64",
-    feature = "diffsl-cranelift",
-    feature = "diffsl-llvm"
-))]
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 pub(crate) fn hybrid_logistic_period(r: f64) -> f64 {
     81.0_f64.ln() / r
 }
 
-#[cfg(any(
-    feature = "diffsl-external-f64",
-    feature = "diffsl-cranelift",
-    feature = "diffsl-llvm"
-))]
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 pub(crate) fn hybrid_logistic_state(r: f64, t: f64) -> f64 {
     let tau = hybrid_logistic_period(r);
     let cycles = (t / tau).floor();
@@ -144,7 +136,13 @@ pub(crate) fn hybrid_logistic_state_dr(r: f64, t: f64) -> f64 {
     let cycles = (t / tau).floor();
     let local_t = t - cycles * tau;
     let x = hybrid_logistic_state(r, t);
-    local_t * x * (1.0 - x)
+    // On each segment, the fixed-local-time sensitivity is local_t * x * (1 - x).
+    // For the hybrid solution at fixed global time, the stop time also moves with r.
+    // With stop(y) = y - 0.9, we have s_y = 1 and s_r = 0, so implicit differentiation
+    // of stop(y(tau(r), r)) = 0 gives d tau / d r = -tau / r. Each completed cycle
+    // therefore contributes tau * x * (1 - x), so the total is:
+    //   (local_t + cycles * tau) * x * (1 - x) = t * x * (1 - x).
+    (local_t + cycles * tau) * x * (1.0 - x)
 }
 
 #[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
@@ -765,6 +763,106 @@ pub unsafe extern "C" fn calc_stop(
     }
     unsafe {
         *root = *u - 0.5;
+    }
+}
+
+#[cfg(feature = "diffsl-external-f64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn calc_stop_grad(
+    _time: f64,
+    _u: *const f64,
+    du: *const f64,
+    _data: *const f64,
+    ddata: *mut f64,
+    _root: *const f64,
+    droot: *mut f64,
+    _thread_id: u32,
+    _thread_dim: u32,
+) {
+    if du.is_null() || droot.is_null() {
+        return;
+    }
+    unsafe {
+        *droot = *du;
+    }
+    if !ddata.is_null() {
+        unsafe {
+            *ddata = 0.0;
+        }
+    }
+}
+
+#[cfg(feature = "diffsl-external-f64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn calc_stop_rgrad(
+    _time: f64,
+    _u: *const f64,
+    du: *mut f64,
+    _data: *const f64,
+    ddata: *mut f64,
+    _root: *const f64,
+    droot: *mut f64,
+    _thread_id: u32,
+    _thread_dim: u32,
+) {
+    if du.is_null() || droot.is_null() {
+        return;
+    }
+    unsafe {
+        *du += *droot;
+    }
+    if !ddata.is_null() {
+        unsafe {
+            *ddata = 0.0;
+        }
+    }
+}
+
+#[cfg(feature = "diffsl-external-f64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn calc_stop_sgrad(
+    _time: f64,
+    _u: *const f64,
+    _data: *const f64,
+    ddata: *mut f64,
+    _root: *const f64,
+    droot: *mut f64,
+    _thread_id: u32,
+    _thread_dim: u32,
+) {
+    if !droot.is_null() {
+        unsafe {
+            *droot = 0.0;
+        }
+    }
+    if !ddata.is_null() {
+        unsafe {
+            *ddata = 0.0;
+        }
+    }
+}
+
+#[cfg(feature = "diffsl-external-f64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn calc_stop_srgrad(
+    _time: f64,
+    _u: *const f64,
+    _data: *const f64,
+    ddata: *mut f64,
+    _root: *const f64,
+    droot: *mut f64,
+    _thread_id: u32,
+    _thread_dim: u32,
+) {
+    if !droot.is_null() {
+        unsafe {
+            *droot = 0.0;
+        }
+    }
+    if !ddata.is_null() {
+        unsafe {
+            *ddata = 0.0;
+        }
     }
 }
 

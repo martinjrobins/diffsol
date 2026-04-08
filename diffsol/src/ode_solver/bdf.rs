@@ -2,6 +2,7 @@ use log::{debug, info, trace};
 use std::ops::AddAssign;
 use std::{cell::Ref, fmt::Display};
 
+use crate::ode_equations::OdeEquationsImplicitSensWithReset;
 use crate::{
     error::{DiffsolError, OdeSolverError},
     AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, NoAug, StateRef, StateRefMut,
@@ -73,13 +74,21 @@ where
     Nls: NonLinearSolver<Eqn::M>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
 {
-    fn reset_with_sens(&mut self) -> Result<(), DiffsolError> {
+    fn reset_with_sens_at_root(&mut self, root_idx: usize) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitSensWithReset,
+    {
         let eqn = &self.ode_problem.eqn;
-        if let Some(reset_fn) = eqn.reset() {
-            self.is_state_modified = true;
-            self.state.state_mut_op_with_sens(eqn, &reset_fn)?;
+        match (eqn.reset(), eqn.root()) {
+            (None, _) => Ok(()),
+            (Some(_reset_fn), None) => Err(ode_solver_error!(ResetRequiresRootOperator)),
+            (Some(reset_fn), Some(root_fn)) => {
+                self.is_state_modified = true;
+                self.state
+                    .state_mut_op_with_sens_and_reset(eqn, &reset_fn, &root_fn, root_idx)?;
+                Ok(())
+            }
         }
-        Ok(())
     }
 }
 

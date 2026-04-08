@@ -1,8 +1,9 @@
 use crate::{
     ode_solver::problem::OdeSolverSolution,
     scalar::{scale, Scalar},
-    ConstantOp, Matrix, MatrixHost, OdeBuilder, OdeEquations, OdeEquationsImplicit,
-    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
+    ConstantOp, Matrix, MatrixHost, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpTimePartial,
+    OdeBuilder, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
+    OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
 use std::ops::MulAssign;
@@ -659,6 +660,37 @@ fn exponential_decay_root_0_6_and_2_0<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, 
     y.set_index(1, x.get_index(0) - M::T::from_f64(2.0).unwrap());
 }
 
+fn exponential_decay_root_0_6_and_2_0_jac<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    v: &M::V,
+    y: &mut M::V,
+) {
+    y.set_index(0, v.get_index(0));
+    y.set_index(1, v.get_index(0));
+}
+
+fn exponential_decay_root_0_6_and_2_0_sens<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+fn exponential_decay_reset_y_plus_2_sens<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
 /// Exponential decay with a root function, reset map, and forward sensitivity equations.
 ///
 /// `dy/dt = -k·y`, `y(0) = [y0, y0]`, `p = [k, y0] = [0.1, 1.0]`, 2 states, 2 params.
@@ -670,7 +702,20 @@ fn exponential_decay_root_0_6_and_2_0<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, 
 /// sensitivity vectors for comparison in manual-reset continuation tests.
 #[allow(clippy::type_complexity)]
 pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
-    OdeSolverProblem<impl OdeEquationsImplicitSens<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverProblem<
+        impl OdeEquationsImplicitSens<
+            M = M,
+            V = M::V,
+            T = M::T,
+            C = M::C,
+            Reset: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpSens<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpTimePartial<M = M, V = M::V, T = M::T, C = M::C>,
+            Root: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpSens<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpTimePartial<M = M, V = M::V, T = M::T, C = M::C>,
+        >,
+    >,
     OdeSolverSolution<M::V>,
 ) {
     let problem = OdeBuilder::<M>::new()
@@ -687,10 +732,16 @@ pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
             exponential_decay_init_sens::<M>,
             2,
         )
-        .root(exponential_decay_root_0_6_and_2_0::<M>, 2)
-        .reset_implicit(
+        .root_sens_implicit(
+            exponential_decay_root_0_6_and_2_0::<M>,
+            exponential_decay_root_0_6_and_2_0_jac::<M>,
+            exponential_decay_root_0_6_and_2_0_sens::<M>,
+            2,
+        )
+        .reset_sens_implicit(
             exponential_decay_reset_y_plus_2::<M>,
             exponential_decay_reset_y_plus_2_jac::<M>,
+            exponential_decay_reset_y_plus_2_sens::<M>,
         )
         .build()
         .unwrap();
@@ -706,14 +757,13 @@ pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
     let ctx = y0.context().clone();
     let y_stop = M::V::from_element(2, M::T::from_f64(2.0).unwrap(), ctx.clone());
 
-    // Exact sensitivities at t_stop after manual reset (R(y)=y+2, J_R=I):
-    //   s_k(dt) = exp(-k*dt) * (s_k(t_root) - 2.6*dt), with s_k(t_root) = -0.6*t_root
-    //   s_y0(dt) = 0.6 * exp(-k*dt)
-    let exp_neg_k_dt = M::T::from_f64(10.0 / 13.0).unwrap();
-    let s_k_val = -exp_neg_k_dt
-        * (M::T::from_f64(6.0).unwrap() * M::T::from_f64((5.0_f64 / 3.0_f64).ln()).unwrap()
-            + M::T::from_f64(26.0).unwrap() * M::T::from_f64(1.3_f64.ln()).unwrap());
-    let s_y0_val = M::T::from_f64(0.6 * 10.0 / 13.0).unwrap();
+    // Exact fixed-time sensitivities at t_stop after a root-aware reset:
+    // for t >= t_root, x(t) = 2.6 * exp(-k * (t - t_root(k, y0))).
+    // Evaluated at the nominal fixed time t_stop:
+    //   s_k(t_stop) = -2 * t_stop
+    //   s_y0(t_stop) = 2 / y0 = 2
+    let s_k_val = -M::T::from_f64(2.0).unwrap() * t_stop;
+    let s_y0_val = M::T::from_f64(2.0).unwrap();
 
     let s_k = M::V::from_element(2, s_k_val, ctx.clone());
     let s_y0 = M::V::from_element(2, s_y0_val, ctx.clone());

@@ -336,6 +336,7 @@ pub use op::constant_op::{ConstantOp, ConstantOpSens, ConstantOpSensAdjoint};
 pub use op::linear_op::{LinearOp, LinearOpSens, LinearOpTranspose};
 pub use op::nonlinear_op::{
     NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint,
+    NonLinearOpTimePartial,
 };
 pub use op::stoch::{StochOp, StochOpKind};
 pub use op::{
