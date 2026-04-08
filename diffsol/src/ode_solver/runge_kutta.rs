@@ -5,14 +5,13 @@ use crate::op::sdirk::SdirkCallable;
 use crate::scale;
 use crate::AugmentedOdeEquationsImplicit;
 use crate::OdeEquationsImplicit;
-use crate::OdeEquationsImplicitSens;
 use crate::OdeSolverStopReason;
 use crate::RkState;
 use crate::RootFinder;
 use crate::Tableau;
 use crate::{
     ode_solver_error, AugmentedOdeEquations, Convergence, DefaultDenseMatrix, DenseMatrix,
-    MatrixView, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpTimePartial,
+    MatrixView, NonLinearOp,
     NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Scalar, Vector,
     VectorViewMut,
 };

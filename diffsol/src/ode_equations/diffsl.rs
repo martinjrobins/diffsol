@@ -1598,6 +1598,9 @@ mod tests {
             reset_i {
                 y,
             }
+            stop_i {
+                y - 0.5,
+            }
             F_i {
                 r_i[N] * y,
             }

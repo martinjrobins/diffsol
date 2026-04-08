@@ -33,7 +33,7 @@ mod tests {
     use crate::{
         ode_equations::OdeEquationsImplicitSensWithReset, op::OpStatistics, AdjointOdeSolverMethod,
         Context, DenseMatrix, MatrixCommon, MatrixRef, NonLinearOpJacobian, OdeEquations,
-        OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens,
+        OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
         OdeEquationsRef, OdeSolverConfig, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
         OdeSolverStopReason, Scale, VectorRef, VectorView, VectorViewMut,
     };
