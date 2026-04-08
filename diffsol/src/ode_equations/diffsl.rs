@@ -34,6 +34,7 @@ pub struct DiffSlContext<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
     tmp: RefCell<M::V>,
     tmp2: RefCell<M::V>,
     tmp_root: RefCell<M::V>,
+    tmp2_root: RefCell<M::V>,
     tmp_out: RefCell<M::V>,
     tmp2_out: RefCell<M::V>,
     nstates: usize,
@@ -78,6 +79,7 @@ impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSlContext<M, ExternalModule
         let tmp = RefCell::new(M::V::zeros(nstates, ctx.clone()));
         let tmp2 = RefCell::new(M::V::zeros(nstates, ctx.clone()));
         let tmp_root = RefCell::new(M::V::zeros(nroots, ctx.clone()));
+        let tmp2_root = RefCell::new(M::V::zeros(nroots, ctx.clone()));
         let tmp_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
         let tmp2_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
         let model_index = 0;
@@ -92,6 +94,7 @@ impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSlContext<M, ExternalModule
             tmp,
             tmp2,
             tmp_root,
+            tmp2_root,
             tmp_out,
             tmp2_out,
             nroots,
@@ -147,6 +150,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> Di
         let tmp = RefCell::new(M::V::zeros(nstates, ctx.clone()));
         let tmp2 = RefCell::new(M::V::zeros(nstates, ctx.clone()));
         let tmp_root = RefCell::new(M::V::zeros(nroots, ctx.clone()));
+        let tmp2_root = RefCell::new(M::V::zeros(nroots, ctx.clone()));
         let tmp_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
         let tmp2_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
         let model_index = 0;
@@ -162,6 +166,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> Di
             tmp,
             tmp2,
             tmp_root,
+            tmp2_root,
             tmp_out,
             tmp2_out,
             nroots,
@@ -600,6 +605,28 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpJacobian
     }
 }
 
+impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpAdjoint
+    for DiffSlRoot<'_, M, CG>
+{
+    fn jac_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        let stop = self.0.context.tmp_root.borrow();
+        let mut tmp2_root = self.0.context.tmp2_root.borrow_mut();
+        tmp2_root.copy_from(v);
+        self.0.context.ddata.borrow_mut().fill(M::T::zero());
+        y.fill(M::T::zero());
+        self.0.context.compiler.calc_stop_rgrad(
+            t,
+            x.as_slice(),
+            y.as_mut_slice(),
+            self.0.context.data.borrow().as_slice(),
+            self.0.context.ddata.borrow_mut().as_mut_slice(),
+            stop.as_slice(),
+            tmp2_root.as_mut_slice(),
+        );
+        y.mul_assign(Scale(-M::T::one()));
+    }
+}
+
 impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for DiffSlRoot<'_, M, CG> {
     fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
         if self.0.context.compiler.supports_reverse_autodiff() {
@@ -664,6 +691,30 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for Diff
         y.copy_from(&y_plus);
         *y -= &y_minus;
         y.mul_assign(Scale(M::T::one() / (h + h)));
+    }
+}
+
+impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSensAdjoint
+    for DiffSlRoot<'_, M, CG>
+{
+    fn sens_transpose_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        let stop = self.0.context.tmp_root.borrow();
+        let mut tmp2_root = self.0.context.tmp2_root.borrow_mut();
+        tmp2_root.copy_from(v);
+        self.0.context.sens_data.borrow_mut().fill(M::T::zero());
+        self.0.context.compiler.calc_stop_srgrad(
+            t,
+            x.as_slice(),
+            self.0.context.data.borrow().as_slice(),
+            self.0.context.sens_data.borrow_mut().as_mut_slice(),
+            stop.as_slice(),
+            tmp2_root.as_mut_slice(),
+        );
+        self.0.context.compiler.get_inputs(
+            y.as_mut_slice(),
+            self.0.context.sens_data.borrow().as_slice(),
+        );
+        y.mul_assign(Scale(-M::T::one()));
     }
 }
 
@@ -1643,6 +1694,21 @@ mod tests {
         root_op.sens_mul_inplace(&x, M::T::zero(), &vp, &mut y);
         y.assert_eq_st(
             &ctx.vector_from_vec(vec![M::T::from_f64(2.0).unwrap()]),
+            M::T::from_f64(1e-10).unwrap(),
+        );
+
+        let v = ctx.vector_from_vec(vec![M::T::from_f64(3.0).unwrap()]);
+        let mut y_x = ctx.vector_from_vec(vec![M::T::zero(), M::T::zero()]);
+        root_op.jac_transpose_mul_inplace(&x, M::T::zero(), &v, &mut y_x);
+        y_x.assert_eq_st(
+            &ctx.vector_from_vec(vec![-M::T::from_f64(3.0).unwrap(), M::T::zero()]),
+            M::T::from_f64(1e-10).unwrap(),
+        );
+
+        let mut y_p = ctx.vector_from_vec(vec![M::T::zero()]);
+        root_op.sens_transpose_mul_inplace(&x, M::T::zero(), &v, &mut y_p);
+        y_p.assert_eq_st(
+            &ctx.vector_from_vec(vec![-M::T::from_f64(3.0).unwrap()]),
             M::T::from_f64(1e-10).unwrap(),
         );
     }
