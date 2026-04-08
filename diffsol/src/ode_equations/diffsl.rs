@@ -19,8 +19,8 @@ use crate::{
     error::DiffsolError, jacobian::JacobianColoring, matrix::sparsity::MatrixSparsity,
     op::nonlinear_op::NonLinearOpJacobian, ConstantOp, ConstantOpSens, ConstantOpSensAdjoint,
     LinearOp, LinearOpTranspose, Matrix, MatrixHost, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scalar, Scale,
-    Vector, VectorHost,
+    NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsRef, Op, Scale, Vector,
+    VectorHost,
 };
 
 /// Context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
@@ -629,68 +629,20 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpAdjoint
 
 impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpSens for DiffSlRoot<'_, M, CG> {
     fn sens_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
-        if self.0.context.compiler.supports_reverse_autodiff() {
-            let stop = self.0.context.tmp_root.borrow();
-            self.0.context.compiler.set_inputs(
-                v.as_slice(),
-                self.0.context.sens_data.borrow_mut().as_mut_slice(),
-                self.0.context.model_index,
-            );
-            self.0.context.compiler.calc_stop_sgrad(
-                t,
-                x.as_slice(),
-                self.0.context.data.borrow().as_slice(),
-                self.0.context.sens_data.borrow_mut().as_mut_slice(),
-                stop.as_slice(),
-                y.as_mut_slice(),
-            );
-            return;
-        }
-
-        let h = M::T::EPSILON.sqrt();
-        let mut p = Self::V::zeros(self.nparams(), self.context().clone());
-        self.0
-            .context
-            .compiler
-            .get_inputs(p.as_mut_slice(), self.0.context.data.borrow().as_slice());
-
-        let mut p_plus = p.clone();
-        p_plus.axpy(h, v, M::T::one());
-        let mut p_minus = p.clone();
-        p_minus.axpy(-h, v, M::T::one());
-
-        let mut y_plus = Self::V::zeros(self.nout(), self.context().clone());
-        let mut y_minus = Self::V::zeros(self.nout(), self.context().clone());
-        {
-            let mut data = self.0.context.data.borrow_mut();
-            self.0.context.compiler.set_inputs(
-                p_plus.as_slice(),
-                data.as_mut_slice(),
-                self.0.context.model_index,
-            );
-        }
-        self.call_inplace(x, t, &mut y_plus);
-        {
-            let mut data = self.0.context.data.borrow_mut();
-            self.0.context.compiler.set_inputs(
-                p_minus.as_slice(),
-                data.as_mut_slice(),
-                self.0.context.model_index,
-            );
-        }
-        self.call_inplace(x, t, &mut y_minus);
-        {
-            let mut data = self.0.context.data.borrow_mut();
-            self.0.context.compiler.set_inputs(
-                p.as_slice(),
-                data.as_mut_slice(),
-                self.0.context.model_index,
-            );
-        }
-
-        y.copy_from(&y_plus);
-        *y -= &y_minus;
-        y.mul_assign(Scale(M::T::one() / (h + h)));
+        let stop = self.0.context.tmp_root.borrow();
+        self.0.context.compiler.set_inputs(
+            v.as_slice(),
+            self.0.context.sens_data.borrow_mut().as_mut_slice(),
+            self.0.context.model_index,
+        );
+        self.0.context.compiler.calc_stop_sgrad(
+            t,
+            x.as_slice(),
+            self.0.context.data.borrow().as_slice(),
+            self.0.context.sens_data.borrow_mut().as_mut_slice(),
+            stop.as_slice(),
+            y.as_mut_slice(),
+        );
     }
 }
 

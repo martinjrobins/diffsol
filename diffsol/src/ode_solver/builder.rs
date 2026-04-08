@@ -619,57 +619,6 @@ where
         }
     }
 
-    /// Set a root equation for the ODE, providing an explicit Jacobian.
-    ///
-    /// # Arguments
-    /// - `root`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the root function.
-    /// - `root_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the root function with the vector v.
-    /// - `nroots`: Number of root outputs.
-    pub fn root_implicit<F, G>(
-        self,
-        root: F,
-        root_jac: G,
-        nroots: usize,
-    ) -> OdeBuilder<M, Rhs, Init, Mass, Closure<M, F, G>, Out, Reset>
-    where
-        F: Fn(&M::V, &M::V, M::T, &mut M::V),
-        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
-    {
-        let nstates = 0;
-        OdeBuilder::<M, Rhs, Init, Mass, Closure<M, F, G>, Out, Reset> {
-            rhs: self.rhs,
-            init: self.init,
-            mass: self.mass,
-            root: Some(Closure::new(
-                root,
-                root_jac,
-                nstates,
-                nroots,
-                nroots,
-                self.ctx.clone(),
-            )),
-            out: self.out,
-
-            reset: self.reset,
-            t0: self.t0,
-            h0: self.h0,
-            rtol: self.rtol,
-            atol: self.atol,
-            sens_atol: self.sens_atol,
-            sens_rtol: self.sens_rtol,
-            out_rtol: self.out_rtol,
-            out_atol: self.out_atol,
-            param_rtol: self.param_rtol,
-            param_atol: self.param_atol,
-            p: self.p,
-            use_coloring: self.use_coloring,
-            integrate_out: self.integrate_out,
-            ctx: self.ctx,
-            ic_options: self.ic_options,
-            ode_options: self.ode_options,
-        }
-    }
-
     /// Set a root equation for the ODE for forward sensitivity analysis.
     ///
     /// # Arguments

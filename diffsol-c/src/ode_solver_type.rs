@@ -924,7 +924,7 @@ mod tests {
 
     #[cfg(feature = "diffsl-llvm")]
     fn test_direct_hybrid_sensitivity_restart_paths() {
-        let t_eval = [0.25, 0.5, 1.0];
+        let t_eval = [0.5, 1.0, 2.5, 3.0, 4.5];
         for method in [
             OdeSolverType::Esdirk34,
             OdeSolverType::TrBdf2,
@@ -938,6 +938,12 @@ mod tests {
                 )
                 .unwrap();
             for (i, &t) in t_eval.iter().enumerate() {
+                assert_close(
+                    soln.ys.get_index(0, i),
+                    hybrid_logistic_state(2.0, t),
+                    5e-4,
+                    &format!("direct hybrid value[{i}]"),
+                );
                 assert_close(
                     soln.y_sens[0].get_index(0, i),
                     hybrid_logistic_state_dr(2.0, t),
