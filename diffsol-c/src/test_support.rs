@@ -111,20 +111,12 @@ pub(crate) fn logistic_state(x0: f64, r: f64, t: f64) -> f64 {
     (x0 * exp_rt) / (1.0 - x0 + x0 * exp_rt)
 }
 
-#[cfg(any(
-    feature = "diffsl-external-f64",
-    feature = "diffsl-cranelift",
-    feature = "diffsl-llvm"
-))]
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 pub(crate) fn hybrid_logistic_period(r: f64) -> f64 {
     81.0_f64.ln() / r
 }
 
-#[cfg(any(
-    feature = "diffsl-external-f64",
-    feature = "diffsl-cranelift",
-    feature = "diffsl-llvm"
-))]
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 pub(crate) fn hybrid_logistic_state(r: f64, t: f64) -> f64 {
     let tau = hybrid_logistic_period(r);
     let cycles = (t / tau).floor();
