@@ -144,7 +144,13 @@ pub(crate) fn hybrid_logistic_state_dr(r: f64, t: f64) -> f64 {
     let cycles = (t / tau).floor();
     let local_t = t - cycles * tau;
     let x = hybrid_logistic_state(r, t);
-    local_t * x * (1.0 - x)
+    // On each segment, the fixed-local-time sensitivity is local_t * x * (1 - x).
+    // For the hybrid solution at fixed global time, the stop time also moves with r.
+    // With stop(y) = y - 0.9, we have s_y = 1 and s_r = 0, so implicit differentiation
+    // of stop(y(tau(r), r)) = 0 gives d tau / d r = -tau / r. Each completed cycle
+    // therefore contributes tau * x * (1 - x), so the total is:
+    //   (local_t + cycles * tau) * x * (1 - x) = t * x * (1 - x).
+    (local_t + cycles * tau) * x * (1.0 - x)
 }
 
 #[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]

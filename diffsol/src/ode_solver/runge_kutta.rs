@@ -11,9 +11,8 @@ use crate::RootFinder;
 use crate::Tableau;
 use crate::{
     ode_solver_error, AugmentedOdeEquations, Convergence, DefaultDenseMatrix, DenseMatrix,
-    MatrixView, NonLinearOp,
-    NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op, Scalar, Vector,
-    VectorViewMut,
+    MatrixView, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op,
+    Scalar, Vector, VectorViewMut,
 };
 use log::info;
 use log::trace;
