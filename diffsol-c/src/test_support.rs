@@ -776,6 +776,106 @@ pub unsafe extern "C" fn calc_stop(
 
 #[cfg(feature = "diffsl-external-f64")]
 #[unsafe(no_mangle)]
+pub unsafe extern "C" fn calc_stop_grad(
+    _time: f64,
+    _u: *const f64,
+    du: *const f64,
+    _data: *const f64,
+    ddata: *mut f64,
+    _root: *const f64,
+    droot: *mut f64,
+    _thread_id: u32,
+    _thread_dim: u32,
+) {
+    if du.is_null() || droot.is_null() {
+        return;
+    }
+    unsafe {
+        *droot = *du;
+    }
+    if !ddata.is_null() {
+        unsafe {
+            *ddata = 0.0;
+        }
+    }
+}
+
+#[cfg(feature = "diffsl-external-f64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn calc_stop_rgrad(
+    _time: f64,
+    _u: *const f64,
+    du: *mut f64,
+    _data: *const f64,
+    ddata: *mut f64,
+    _root: *const f64,
+    droot: *mut f64,
+    _thread_id: u32,
+    _thread_dim: u32,
+) {
+    if du.is_null() || droot.is_null() {
+        return;
+    }
+    unsafe {
+        *du += *droot;
+    }
+    if !ddata.is_null() {
+        unsafe {
+            *ddata = 0.0;
+        }
+    }
+}
+
+#[cfg(feature = "diffsl-external-f64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn calc_stop_sgrad(
+    _time: f64,
+    _u: *const f64,
+    _data: *const f64,
+    ddata: *mut f64,
+    _root: *const f64,
+    droot: *mut f64,
+    _thread_id: u32,
+    _thread_dim: u32,
+) {
+    if !droot.is_null() {
+        unsafe {
+            *droot = 0.0;
+        }
+    }
+    if !ddata.is_null() {
+        unsafe {
+            *ddata = 0.0;
+        }
+    }
+}
+
+#[cfg(feature = "diffsl-external-f64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn calc_stop_srgrad(
+    _time: f64,
+    _u: *const f64,
+    _data: *const f64,
+    ddata: *mut f64,
+    _root: *const f64,
+    droot: *mut f64,
+    _thread_id: u32,
+    _thread_dim: u32,
+) {
+    if !droot.is_null() {
+        unsafe {
+            *droot = 0.0;
+        }
+    }
+    if !ddata.is_null() {
+        unsafe {
+            *ddata = 0.0;
+        }
+    }
+}
+
+#[cfg(feature = "diffsl-external-f64")]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn set_id(id: *mut f64) {
     if !id.is_null() {
         unsafe {
