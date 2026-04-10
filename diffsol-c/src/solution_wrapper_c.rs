@@ -8,10 +8,13 @@ fn boxed_host_array(array: HostArray) -> *mut HostArray {
 }
 
 fn boxed_host_array_list(arrays: Vec<HostArray>) -> (*mut *mut HostArray, usize) {
-    let mut boxed: Vec<*mut HostArray> = arrays.into_iter().map(boxed_host_array).collect();
+    let boxed = arrays
+        .into_iter()
+        .map(boxed_host_array)
+        .collect::<Vec<_>>()
+        .into_boxed_slice();
     let len = boxed.len();
-    let ptr = boxed.as_mut_ptr();
-    std::mem::forget(boxed);
+    let ptr = Box::into_raw(boxed) as *mut *mut HostArray;
     (ptr, len)
 }
 
