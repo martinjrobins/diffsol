@@ -94,7 +94,7 @@ pub unsafe extern "C" fn diffsol_host_array_list_free(list: *mut *mut HostArray,
         return;
     }
     unsafe {
-        drop(Vec::from_raw_parts(list, len, len));
+        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(list, len)));
     }
 }
 
