@@ -40,6 +40,10 @@ pub(crate) type SolveResult = Result<Box<dyn Solution>, DiffsolJsError>;
 
 pub(crate) trait Solve {
     fn matrix_type(&self) -> MatrixType;
+    fn nstates(&self) -> usize;
+    fn nparams(&self) -> usize;
+    fn nout(&self) -> usize;
+    fn has_stop(&self) -> bool;
 
     fn rhs(&mut self, params: &[f64], t: f64, y: &[f64]) -> Result<HostArray, DiffsolJsError>;
 
@@ -366,6 +370,22 @@ where
         MatrixType::from_diffsol::<M>()
     }
 
+    fn nstates(&self) -> usize {
+        self.problem.eqn.nstates()
+    }
+
+    fn nparams(&self) -> usize {
+        self.problem.eqn.nparams()
+    }
+
+    fn nout(&self) -> usize {
+        self.problem.eqn.nout()
+    }
+
+    fn has_stop(&self) -> bool {
+        self.problem.eqn.root().is_some()
+    }
+
     fn check(&self, linear_solver: LinearSolverType) -> Result<(), DiffsolJsError> {
         validate_linear_solver::<M>(linear_solver)
     }
@@ -668,6 +688,10 @@ mod tests {
         CodegenModuleCompile, CodegenModuleJit, Context, OdeBuilder, OdeEquations, Vector,
     };
 
+    #[cfg(feature = "diffsl-llvm")]
+    use crate::test_support::{
+        hybrid_logistic_state_dr, logistic_integral, logistic_state_dr, matrix_host,
+    };
     use crate::{
         host_array::FromHostArray,
         linear_solver_type::LinearSolverType,
@@ -675,9 +699,8 @@ mod tests {
         ode_solver_type::OdeSolverType,
         scalar_type::ScalarType,
         test_support::{
-            assert_close, hybrid_logistic_diffsl_code, hybrid_logistic_state,
-            hybrid_logistic_state_dr, logistic_diffsl_code, logistic_integral, logistic_state,
-            logistic_state_dr, matrix_host, LOGISTIC_X0,
+            assert_close, hybrid_logistic_diffsl_code, hybrid_logistic_state, logistic_diffsl_code,
+            logistic_state, LOGISTIC_X0,
         },
     };
 
@@ -719,6 +742,10 @@ mod tests {
     {
         let mut solve = make_generic_solve::<CG>();
         assert_eq!(solve.matrix_type(), MatrixType::NalgebraDense);
+        assert_eq!(solve.nstates(), 1);
+        assert_eq!(solve.nparams(), 1);
+        assert_eq!(solve.nout(), 1);
+        assert!(!solve.has_stop());
         assert!(solve.check(LinearSolverType::Default).is_ok());
         assert!(solve.check(LinearSolverType::Lu).is_ok());
         assert!(solve.check(LinearSolverType::Klu).is_err());

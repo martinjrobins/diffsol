@@ -107,6 +107,22 @@ impl OdeWrapper {
         Ok(self.guard()?.solve.matrix_type())
     }
 
+    pub fn get_nstates(&self) -> Result<usize, DiffsolJsError> {
+        Ok(self.guard()?.solve.nstates())
+    }
+
+    pub fn get_nparams(&self) -> Result<usize, DiffsolJsError> {
+        Ok(self.guard()?.solve.nparams())
+    }
+
+    pub fn get_nout(&self) -> Result<usize, DiffsolJsError> {
+        Ok(self.guard()?.solve.nout())
+    }
+
+    pub fn has_stop(&self) -> Result<bool, DiffsolJsError> {
+        Ok(self.guard()?.solve.has_stop())
+    }
+
     /// Ode solver method, default Bdf (backward differentiation formula).
     pub fn get_ode_solver(&self) -> Result<OdeSolverType, DiffsolJsError> {
         Ok(self.guard()?.ode_solver)
@@ -354,7 +370,7 @@ impl OdeWrapper {
     /// Returns the objective value and a list of 1D arrays of adjoint sensitivities
     /// for each parameter.
     #[allow(clippy::type_complexity)]
-    pub(crate) fn solve_sum_squares_adj(
+    pub fn solve_sum_squares_adj(
         &self,
         params: HostArray,
         data: HostArray,
@@ -404,6 +420,10 @@ mod tests {
     fn assert_runtime_dispatch(matrix_type: MatrixType) {
         let ode = make_ode(matrix_type, OdeSolverType::Bdf);
         assert_eq!(ode.get_matrix_type().unwrap(), matrix_type);
+        assert_eq!(ode.get_nstates().unwrap(), 1);
+        assert_eq!(ode.get_nparams().unwrap(), 1);
+        assert_eq!(ode.get_nout().unwrap(), 1);
+        assert!(!ode.has_stop().unwrap());
 
         let y0 = ode.y0(vector_host(&[2.0])).unwrap();
         assert_eq!(Vec::<f64>::from_host_array(y0).unwrap(), vec![LOGISTIC_X0]);
@@ -649,8 +669,8 @@ mod jit_tests {
     use crate::scalar_type::ScalarType;
     use crate::test_support::{
         assert_close, assert_solution_tail, available_jit_backends, hybrid_logistic_diffsl_code,
-        hybrid_logistic_period, hybrid_logistic_state, hybrid_logistic_state_dr,
-        logistic_diffsl_code, logistic_state, vector_host, ASSERT_TOL, LOGISTIC_X0,
+        hybrid_logistic_period, hybrid_logistic_state, logistic_diffsl_code, logistic_state,
+        vector_host, ASSERT_TOL, LOGISTIC_X0,
     };
     #[cfg(feature = "diffsl-llvm")]
     use crate::test_support::{logistic_integral, logistic_state_dr};
@@ -693,6 +713,10 @@ mod jit_tests {
         let ode = make_ode(jit_backend, matrix_type, OdeSolverType::Bdf);
         assert_eq!(ode.get_matrix_type().unwrap(), matrix_type);
         assert_eq!(ode.get_code().unwrap(), logistic_diffsl_code());
+        assert_eq!(ode.get_nstates().unwrap(), 1);
+        assert_eq!(ode.get_nparams().unwrap(), 1);
+        assert_eq!(ode.get_nout().unwrap(), 1);
+        assert!(!ode.has_stop().unwrap());
 
         let y0 = ode.y0(vector_host(&[2.0])).unwrap();
         assert_eq!(Vec::<f64>::from_host_array(y0).unwrap(), vec![LOGISTIC_X0]);
@@ -834,6 +858,10 @@ mod jit_tests {
             let ode = make_hybrid_ode(jit_backend, MatrixType::NalgebraDense, OdeSolverType::Bdf);
             ode.set_rtol(1e-8).unwrap();
             ode.set_atol(1e-8).unwrap();
+            assert_eq!(ode.get_nstates().unwrap(), 1);
+            assert_eq!(ode.get_nparams().unwrap(), 1);
+            assert_eq!(ode.get_nout().unwrap(), 1);
+            assert!(ode.has_stop().unwrap());
 
             let solution = ode.solve_hybrid(vector_host(&[r]), final_time).unwrap();
             let ys = solution.get_ys().unwrap();
