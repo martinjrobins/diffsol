@@ -423,7 +423,7 @@ mod tests {
         assert_eq!(ode.get_nstates().unwrap(), 1);
         assert_eq!(ode.get_nparams().unwrap(), 1);
         assert_eq!(ode.get_nout().unwrap(), 1);
-        assert!(!ode.has_stop().unwrap());
+        assert!(ode.has_stop().unwrap());
 
         let y0 = ode.y0(vector_host(&[2.0])).unwrap();
         assert_eq!(Vec::<f64>::from_host_array(y0).unwrap(), vec![LOGISTIC_X0]);
