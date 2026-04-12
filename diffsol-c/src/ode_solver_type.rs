@@ -632,19 +632,22 @@ impl OdeSolverType {
 
 #[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
 mod tests {
-    use diffsol::Vector;
     use diffsol::{
         CodegenModuleCompile, CodegenModuleJit, DefaultSolver, DenseMatrix, OdeBuilder,
-        OdeSolverProblem,
+        OdeSolverProblem, Vector,
     };
-    use ndarray::Array2;
 
+    #[cfg(feature = "diffsl-llvm")]
     use crate::linear_solver_type::LinearSolverType;
     use crate::test_support::{
-        assert_close, hybrid_logistic_diffsl_code, hybrid_logistic_state, hybrid_logistic_state_dr,
-        logistic_diffsl_code, logistic_integral, logistic_state, logistic_state_dr, LOGISTIC_X0,
+        assert_close, hybrid_logistic_diffsl_code, hybrid_logistic_state, logistic_diffsl_code,
+        logistic_state, LOGISTIC_X0,
     };
+    #[cfg(feature = "diffsl-llvm")]
+    use crate::test_support::{hybrid_logistic_state_dr, logistic_integral, logistic_state_dr};
     use crate::valid_linear_solver::LuValidator;
+    #[cfg(feature = "diffsl-llvm")]
+    use ndarray::Array2;
 
     use super::OdeSolverType;
 
