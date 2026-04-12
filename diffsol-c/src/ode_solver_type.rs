@@ -634,7 +634,7 @@ impl OdeSolverType {
 mod tests {
     use diffsol::{
         CodegenModuleCompile, CodegenModuleJit, DefaultSolver, DenseMatrix, OdeBuilder,
-        OdeSolverProblem,
+        OdeSolverProblem, Vector,
     };
 
     #[cfg(feature = "diffsl-llvm")]

@@ -673,7 +673,7 @@ mod jit_tests {
         vector_host, ASSERT_TOL, LOGISTIC_X0,
     };
     #[cfg(feature = "diffsl-llvm")]
-    use crate::test_support::{logistic_integral, logistic_state_dr};
+    use crate::test_support::{hybrid_logistic_state_dr, logistic_integral, logistic_state_dr};
 
     use super::*;
 
