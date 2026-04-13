@@ -57,15 +57,6 @@ pub struct DiffSlContext<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
 }
 
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> DiffSlContext<M, CG> {
-    fn validate_sparse_nonzeros(name: &str, deps: &[(usize, usize)]) -> Result<(), DiffsolError> {
-        if deps.is_empty() {
-            return Err(DiffsolError::DiffslCompilerError(format!(
-                "Sparse {name} dependencies must contain at least one non-zero index"
-            )));
-        }
-        Ok(())
-    }
-
     fn new_common(
         compiler: Compiler<CG, M::T>,
         rhs_state_deps: Vec<(usize, usize)>,
@@ -74,17 +65,6 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> DiffSlContext<M, CG> {
         ctx: M::C,
     ) -> Result<Self, DiffsolError> {
         let (nstates, nparams, nout, _ndata, nroots, has_mass, has_reset) = compiler.get_dims();
-
-        if M::is_sparse() {
-            Self::validate_sparse_nonzeros("rhs_state", &rhs_state_deps)?;
-            if nparams > 0 {
-                Self::validate_sparse_nonzeros("rhs_input", &rhs_input_deps)?;
-            }
-            if has_mass {
-                Self::validate_sparse_nonzeros("mass_state", &mass_state_deps)?;
-            }
-        }
-
         let has_root = nroots > 0;
         let has_out = nout > 0;
         let data = RefCell::new(compiler.get_new_data());
