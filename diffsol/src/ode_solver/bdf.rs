@@ -2,7 +2,6 @@ use log::{debug, info, trace};
 use std::ops::AddAssign;
 use std::{cell::Ref, fmt::Display};
 
-use crate::ode_equations::OdeEquationsImplicitSensWithReset;
 use crate::{
     error::{DiffsolError, OdeSolverError},
     AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, NoAug, StateRef, StateRefMut,
@@ -15,11 +14,12 @@ use crate::ode_solver_error;
 use crate::{
     matrix::MatrixRef, nonlinear_solver::root::RootFinder, op::bdf::BdfCallable, scalar::scale,
     AugmentedOdeEquations, BdfState, DenseMatrix, JacobianUpdate, MatrixViewMut, NonLinearOp,
-    NonLinearSolver, OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverMethod,
-    OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar, SensEquations, Vector,
-    VectorRef, VectorView, VectorViewMut,
+    NonLinearSolver, OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar,
+    SensEquations, Vector, VectorRef, VectorView, VectorViewMut,
 };
 
+use super::adjoint::AdjointOdeSolverMethod;
 use super::config::BdfConfig;
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
@@ -74,22 +74,19 @@ where
     Nls: NonLinearSolver<Eqn::M>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
 {
-    fn reset_with_sens_at_root(&mut self, root_idx: usize) -> Result<(), DiffsolError>
-    where
-        Eqn: OdeEquationsImplicitSensWithReset,
-    {
-        let eqn = &self.ode_problem.eqn;
-        match (eqn.reset(), eqn.root()) {
-            (None, _) => Ok(()),
-            (Some(_reset_fn), None) => Err(ode_solver_error!(ResetRequiresRootOperator)),
-            (Some(reset_fn), Some(root_fn)) => {
-                self.is_state_modified = true;
-                self.state
-                    .state_mut_op_with_sens_and_reset(eqn, &reset_fn, &root_fn, root_idx)?;
-                Ok(())
-            }
-        }
-    }
+}
+
+impl<'a, M, Eqn, Nls, Solver> AdjointOdeSolverMethod<'a, Eqn, Solver>
+    for Bdf<'a, Eqn, Nls, M, crate::AdjointEquations<'a, Eqn, Solver>>
+where
+    Eqn: OdeEquationsImplicitAdjoint + 'a,
+    Solver: OdeSolverMethod<'a, Eqn>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+    Nls: NonLinearSolver<Eqn::M>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
+{
 }
 
 // notes quadrature.
@@ -1246,15 +1243,6 @@ where
         }
         state.t = t;
         self.is_state_modified = true;
-        Ok(())
-    }
-
-    fn reset(&mut self) -> Result<(), DiffsolError> {
-        let eqn = &self.ode_problem.eqn;
-        if let Some(reset_fn) = eqn.reset() {
-            self.is_state_modified = true;
-            self.state.state_mut_op(eqn, &reset_fn)?;
-        }
         Ok(())
     }
 

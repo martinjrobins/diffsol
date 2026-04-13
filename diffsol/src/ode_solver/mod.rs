@@ -1001,8 +1001,15 @@ mod tests {
             "expected first solve() call to stop at a root before final_time"
         );
 
-        // Manually apply reset at the first root and continue to the next root.
-        solver.reset().unwrap();
+        // Manually apply the reset on the solver state and continue to the next root.
+        let mut state = solver.state_clone();
+        {
+            let problem = solver.problem();
+            if let Some(reset_fn) = problem.eqn.reset() {
+                state.state_mut_op(&problem.eqn, &reset_fn).unwrap();
+            }
+        }
+        solver.set_state(state);
         let (ys_second, ts_second, stop_reason_second) = solver.solve(final_time).unwrap();
         assert!(matches!(
             stop_reason_second,
@@ -1038,7 +1045,7 @@ mod tests {
     }
 
     /// Test that `solve_dense()` can be continued manually after a root by
-    /// applying `reset()` and calling `solve_dense()` again.
+    /// applying the reset directly to the solver state and calling `solve_dense()` again.
     ///
     /// `soln` must contain one solution point at `t_stop`.
     ///
@@ -1076,8 +1083,15 @@ mod tests {
         );
         let t_first_root = solver.state().t;
 
-        // Manually apply reset at the first root.
-        solver.reset().unwrap();
+        // Manually apply the reset directly to the solver state.
+        let mut state = solver.state_clone();
+        {
+            let problem = solver.problem();
+            if let Some(reset_fn) = problem.eqn.reset() {
+                state.state_mut_op(&problem.eqn, &reset_fn).unwrap();
+            }
+        }
+        solver.set_state(state);
 
         // Continue from just after the first-root time so t_eval remains valid.
         let t_eval_after_reset: Vec<Eqn::T> = t_eval
@@ -1131,8 +1145,8 @@ mod tests {
     }
 
     /// Test that `solve_dense_sensitivities()` can be continued manually after
-    /// a root by applying `reset_with_sens_at_root()` and calling
-    /// `solve_dense_sensitivities()` again.
+    /// a root by applying the root-aware reset directly to the solver state and
+    /// calling `solve_dense_sensitivities()` again.
     ///
     /// `soln` must contain one solution point at `t_stop` with exact `y` and sensitivity vectors.
     pub fn test_solve_dense_sensitivities_with_reset<'a, Eqn, Method>(
@@ -1172,8 +1186,17 @@ mod tests {
             _ => unreachable!("expected first sensitivity solve to stop on a root"),
         };
 
-        // Manually apply reset (with sensitivity propagation) at the first root.
-        solver.reset_with_sens_at_root(first_root_idx).unwrap();
+        // Manually apply the root-aware reset directly to the solver state.
+        let mut state = solver.state_clone();
+        {
+            let problem = solver.problem();
+            let reset_fn = problem.eqn.reset().unwrap();
+            let root_fn = problem.eqn.root().unwrap();
+            state
+                .state_mut_op_with_sens_and_reset(&problem.eqn, &reset_fn, &root_fn, first_root_idx)
+                .unwrap();
+        }
+        solver.set_state(state);
 
         // Continue from just after the first-root time so t_eval remains valid.
         let t_eval_after_reset: Vec<Eqn::T> = t_eval

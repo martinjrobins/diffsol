@@ -158,9 +158,6 @@ where
     /// Interpolate the sensitivity vectors at a given time and place in `sens`. This time should be between the current time and the last solver time step
     fn interpolate_sens_inplace(&self, t: Eqn::T, sens: &mut [Eqn::V]) -> Result<(), DiffsolError>;
 
-    /// Apply the equations' reset function to the current state.
-    fn reset(&mut self) -> Result<(), DiffsolError>;
-
     /// Move the solver state back to time `t` by interpolating `y`, `dy`, and (if
     /// `integrate_out` is set) `g` to that time and writing them into the current state.
     /// If the state contains sensitivity vectors they are also interpolated to time `t`.

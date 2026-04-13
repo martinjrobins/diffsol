@@ -8,10 +8,10 @@ use crate::{
     error::{DiffsolError, OdeSolverError},
     nonlinear_solver::{convergence::Convergence, NonLinearSolver},
     ode_solver_error, scale, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp,
-    InitOp, LinearOp, LinearSolver, Matrix, NewtonNonlinearSolver, NonLinearOp,
-    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpTimePartial, OdeEquations,
-    OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverProblem, Op, SensEquations, Vector,
-    VectorIndex,
+    InitOp, LinearOp, LinearSolver, Matrix, NewtonNonlinearSolver, NonLinearOp, NonLinearOpAdjoint,
+    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, NonLinearOpTimePartial,
+    OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverProblem, Op,
+    SensEquations, Vector, VectorIndex,
 };
 use crate::{non_linear_solver_error, BacktrackingLineSearch, NoLineSearch};
 
@@ -176,41 +176,6 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         Ok(())
     }
 
-    /// Like `state_mut_op`, but also updates each sensitivity vector in-place using the
-    /// operator Jacobian: `s_new[j] = J_op(y_before, t) · s_old[j]`.
-    ///
-    /// Note: mass matrix equations are not supported for this operation.
-    fn state_mut_op_with_sens<Eqn, O>(&mut self, eqn: &Eqn, op: &O) -> Result<(), DiffsolError>
-    where
-        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
-        O: NonLinearOpJacobian<T = V::T, V = V, M = Eqn::M>,
-    {
-        if eqn.mass().is_some() {
-            return Err(ode_solver_error!(MassMatrixNotSupported));
-        }
-
-        let nstates = eqn.rhs().nstates();
-        let ctx = eqn.context().clone();
-        let mut y_new = V::zeros(nstates, ctx.clone());
-        let mut tmp = V::zeros(nstates, ctx);
-        let t = self.as_ref().t;
-        let nparams = self.as_ref().s.len();
-
-        op.call_inplace(self.as_ref().y, t, &mut y_new);
-        for j in 0..nparams {
-            op.jac_mul_inplace(self.as_ref().y, t, &self.as_ref().s[j], &mut tmp);
-            self.as_mut().s[j].copy_from(&tmp);
-        }
-
-        eqn.rhs().call_inplace(&y_new, t, &mut tmp);
-        {
-            let state = self.as_mut();
-            state.dy.copy_from(&tmp);
-            state.y.copy_from(&y_new);
-        }
-        Ok(())
-    }
-
     /// Apply a reset operator to the current state and propagate sensitivities through a
     /// time-dependent root-triggered event correction.
     ///
@@ -328,6 +293,143 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
             state.y.copy_from(&y_plus);
             state.dy.copy_from(&f_plus);
             for (dst, src) in state.s.iter_mut().zip(s_plus.iter()) {
+                dst.copy_from(src);
+            }
+        }
+        Ok(())
+    }
+
+    /// Propagate adjoint variables through a time-dependent root-triggered reset.
+    ///
+    /// This method assumes `self` stores the post-event adjoint state `(lambda^+, q^+)`,
+    /// while `fwd_state_minus` and `fwd_state_plus` provide the forward state derivatives
+    /// immediately before and after the reset. The forward state vectors in `self` are left
+    /// untouched; only `self.s` and `self.sg` are updated to the pre-event values.
+    ///
+    /// If the pre-event forward state is `x^-`, the post-event state is `x^+ = g(x^-, t, p)`,
+    /// and the active root is `r_k(x^-, t, p) = 0`, define
+    /// `f^- = dx^-/dt`,
+    /// `f^+ = dx^+/dt`,
+    /// `c = g_x f^- + g_t - f^+`,
+    /// and
+    /// `d = [r_x f^-]_k + [r_t]_k`.
+    ///
+    /// For each adjoint channel with post-event adjoint `lambda^+` and post-event parameter
+    /// gradient `q^+`, the pre-event values are
+    /// `alpha = (lambda^+ · c) / d`,
+    /// `lambda^- = g_x^T lambda^+ - r_{x,k}^T alpha`,
+    /// and
+    /// `q^- = q^+ + g_p^T lambda^+ - r_{p,k}^T alpha`.
+    ///
+    /// Here `g_x = ∂g/∂x`, `g_t = ∂g/∂t`, `g_p = ∂g/∂p`, `r_x = ∂r/∂x`,
+    /// `r_t = ∂r/∂t`, and `r_p = ∂r/∂p`, all evaluated at `(x^-, t, p)`.
+    ///
+    /// Note: mass matrix equations are not supported for this operation.
+    fn state_mut_op_with_adjoint_and_reset<Eqn, G, R>(
+        &mut self,
+        eqn: &Eqn,
+        reset_op: &G,
+        root_op: &R,
+        root_idx: usize,
+        fwd_state_minus: &Self,
+        fwd_state_plus: &Self,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
+        G: NonLinearOpJacobian<T = V::T, V = V, M = Eqn::M>
+            + NonLinearOpAdjoint<T = V::T, V = V, M = Eqn::M>
+            + NonLinearOpSensAdjoint<T = V::T, V = V, M = Eqn::M>
+            + NonLinearOpTimePartial<T = V::T, V = V, M = Eqn::M>,
+        R: NonLinearOpJacobian<T = V::T, V = V, M = Eqn::M>
+            + NonLinearOpAdjoint<T = V::T, V = V, M = Eqn::M>
+            + NonLinearOpSensAdjoint<T = V::T, V = V, M = Eqn::M>
+            + NonLinearOpTimePartial<T = V::T, V = V, M = Eqn::M>,
+    {
+        if eqn.mass().is_some() {
+            return Err(ode_solver_error!(MassMatrixNotSupported));
+        }
+
+        let nroots = root_op.nout();
+        if root_idx >= nroots {
+            return Err(ode_solver_error!(
+                Other,
+                format!(
+                    "root index {root_idx} out of bounds for root function with {nroots} outputs"
+                )
+            ));
+        }
+
+        let ctx = eqn.context().clone();
+        let t = self.as_ref().t;
+        let y_minus = fwd_state_minus.as_ref().y.clone();
+        let f_minus = fwd_state_minus.as_ref().dy.clone();
+        let f_plus = fwd_state_plus.as_ref().dy.clone();
+        let (lambda_plus, q_plus) = {
+            let state = self.as_ref();
+            (state.s.to_vec(), state.sg.to_vec())
+        };
+        let nstates = y_minus.len();
+        let nparams = eqn.rhs().nparams();
+
+        let reset_t = reset_op.time_derive(&y_minus, t);
+        let root_t = root_op.time_derive(&y_minus, t);
+
+        let mut correction_dir = V::zeros(nstates, ctx.clone());
+        reset_op.jac_mul_inplace(&y_minus, t, &f_minus, &mut correction_dir);
+        correction_dir += &reset_t;
+        correction_dir -= &f_plus;
+
+        let mut root_flow = V::zeros(nroots, ctx.clone());
+        root_op.jac_mul_inplace(&y_minus, t, &f_minus, &mut root_flow);
+        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
+        let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
+        if denom.abs() <= denom_tol {
+            return Err(ode_solver_error!(
+                Other,
+                "reset adjoint correction undefined: active root derivative along flow is zero"
+            ));
+        }
+
+        let mut root_basis = V::zeros(nroots, ctx.clone());
+        let mut reset_adj = V::zeros(nstates, ctx.clone());
+        let mut root_adj = V::zeros(nstates, ctx.clone());
+        let mut reset_sens_adj = V::zeros(nparams, ctx.clone());
+        let mut root_sens_adj = V::zeros(nparams, ctx);
+        let mut lambda_minus = Vec::with_capacity(lambda_plus.len());
+        let mut q_minus = Vec::with_capacity(q_plus.len());
+
+        for (lambda_i_plus, q_i_plus) in lambda_plus.iter().zip(q_plus.iter()) {
+            let mut alpha_num = V::T::zero();
+            for j in 0..nstates {
+                alpha_num += lambda_i_plus.get_index(j) * correction_dir.get_index(j);
+            }
+            let alpha = alpha_num / denom;
+
+            reset_op.jac_transpose_mul_inplace(&y_minus, t, lambda_i_plus, &mut reset_adj);
+            root_basis.set_index(root_idx, alpha);
+            root_op.jac_transpose_mul_inplace(&y_minus, t, &root_basis, &mut root_adj);
+
+            let mut lambda_i_minus = reset_adj.clone() * scale(-V::T::one());
+            lambda_i_minus += &root_adj;
+            lambda_minus.push(lambda_i_minus);
+
+            reset_op.sens_transpose_mul_inplace(&y_minus, t, lambda_i_plus, &mut reset_sens_adj);
+            root_op.sens_transpose_mul_inplace(&y_minus, t, &root_basis, &mut root_sens_adj);
+
+            let mut q_i_minus = q_i_plus.clone();
+            q_i_minus -= &reset_sens_adj;
+            q_i_minus += &root_sens_adj;
+            q_minus.push(q_i_minus);
+
+            root_basis.set_index(root_idx, V::T::zero());
+        }
+
+        {
+            let state = self.as_mut();
+            for (dst, src) in state.s.iter_mut().zip(lambda_minus.iter()) {
+                dst.copy_from(src);
+            }
+            for (dst, src) in state.sg.iter_mut().zip(q_minus.iter()) {
                 dst.copy_from(src);
             }
         }
@@ -836,6 +938,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
 
 #[cfg(test)]
 mod test {
+    use super::StateCommon;
     use crate::{
         error::{DiffsolError, OdeSolverError},
         matrix::dense_nalgebra_serial::NalgebraMat,
@@ -843,6 +946,7 @@ mod test {
             exponential_decay::exponential_decay_problem,
             exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
         },
+        op::closure_with_adjoint::ClosureWithAdjoint,
         op::closure_with_sens::ClosureWithSens,
         BdfState, LinearSolver, Matrix, NonLinearOp, NonLinearOpTimePartial, OdeBuilder,
         OdeSolverState, ParameterisedOp, Vector, VectorHost,
@@ -1013,6 +1117,38 @@ mod test {
         state_mut.s[0][0] = s[0];
         state_mut.s[1][0] = s[1];
         state
+    }
+
+    fn make_adjoint_state(
+        problem: &crate::OdeSolverProblem<
+            impl crate::OdeEquationsImplicitSens<
+                M = TestMat,
+                V = TestVec,
+                T = f64,
+                C = crate::NalgebraContext,
+            >,
+        >,
+        t: f64,
+        y: f64,
+        dy: f64,
+        lambda: [f64; 2],
+        q: [[f64; 2]; 2],
+    ) -> TestState {
+        let mut state = TestState::new_with_sensitivities(problem, 1)
+            .unwrap()
+            .into_common();
+        state.t = t;
+        state.y[0] = y;
+        state.dy[0] = dy;
+        for (i, lambda_i) in lambda.iter().enumerate() {
+            state.s[i][0] = *lambda_i;
+        }
+        state.sg = q
+            .iter()
+            .map(|q_i| TestVec::from_vec(q_i.to_vec(), crate::NalgebraContext))
+            .collect();
+        state.dsg = vec![TestVec::zeros(2, crate::NalgebraContext); state.sg.len()];
+        TestState::new_from_common(state)
     }
 
     fn assert_scalar_close(actual: f64, expected: f64) {
@@ -1380,6 +1516,418 @@ mod test {
 
         let err = state
             .state_mut_op_with_sens_and_reset(&problem.eqn, &reset, &root, 0)
+            .unwrap_err();
+        assert!(matches!(
+            err,
+            DiffsolError::OdeSolverError(OdeSolverError::MassMatrixNotSupported)
+        ));
+    }
+
+    #[test]
+    fn state_mut_op_with_adjoint_and_reset_matches_autonomous_formula() {
+        let problem = scalar_problem(0.25);
+        let p = TestVec::from_vec(vec![1.2, -0.7], crate::NalgebraContext);
+        let mut state = make_adjoint_state(
+            &problem,
+            0.0,
+            7.0,
+            -3.0,
+            [0.3, -0.4],
+            [[0.1, -0.2], [0.5, 0.6]],
+        );
+        let mut fwd_state_minus = make_state(&problem, 0.0, 2.0, [0.0, 0.0]);
+        fwd_state_minus.as_mut().dy[0] = 0.5;
+        let mut fwd_state_plus = fwd_state_minus.clone();
+        fwd_state_plus.as_mut().dy[0] = 0.8275;
+
+        let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
+            |x: &TestVec, p: &TestVec, _t, y: &mut TestVec| {
+                y[0] = 1.5 * x[0] + 0.2 * p[0] - 0.1 * p[1]
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = 1.5 * v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = -1.5 * v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = -0.2 * v[0];
+                y[1] = 0.1 * v[0];
+            },
+            1,
+            1,
+            2,
+            crate::NalgebraContext,
+        );
+        let reset = ParameterisedOp::new(&reset, &p);
+
+        let root = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
+            |_x: &TestVec, _p: &TestVec, t, y: &mut TestVec| {
+                y[0] = 0.3 * t;
+                y[1] = 0.0;
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = 3.0 * v[0];
+                y[1] = -2.0 * v[0];
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = -(3.0 * v[0] - 2.0 * v[1]);
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = -(0.8 * v[0] + 0.5 * v[1]);
+                y[1] = -(-1.5 * v[1]);
+            },
+            1,
+            2,
+            2,
+            crate::NalgebraContext,
+        );
+        let root = ParameterisedOp::new(&root, &p);
+
+        let y_before = state.as_ref().y[0];
+        let dy_before = state.as_ref().dy[0];
+
+        state
+            .state_mut_op_with_adjoint_and_reset(
+                &problem.eqn,
+                &reset,
+                &root,
+                1,
+                &fwd_state_minus,
+                &fwd_state_plus,
+            )
+            .unwrap();
+
+        assert_scalar_close(state.as_ref().y[0], y_before);
+        assert_scalar_close(state.as_ref().dy[0], dy_before);
+        assert_scalar_close(state.as_ref().s[0][0], 0.4965);
+        assert_scalar_close(state.as_ref().s[1][0], -0.662);
+        assert_scalar_close(state.as_ref().sg[0][0], 0.148375);
+        assert_scalar_close(state.as_ref().sg[0][1], -0.195125);
+        assert_scalar_close(state.as_ref().sg[1][0], 0.4355);
+        assert_scalar_close(state.as_ref().sg[1][1], 0.5935);
+    }
+
+    #[test]
+    fn state_mut_op_with_adjoint_and_reset_uses_selected_root_component() {
+        let problem = scalar_problem(0.25);
+        let p = TestVec::from_vec(vec![1.2, -0.7], crate::NalgebraContext);
+        let mut state_root0 = make_adjoint_state(
+            &problem,
+            0.0,
+            7.0,
+            -3.0,
+            [0.3, -0.4],
+            [[0.1, -0.2], [0.5, 0.6]],
+        );
+        let mut state_root1 = state_root0.clone();
+        let mut fwd_state_minus = make_state(&problem, 0.0, 2.0, [0.0, 0.0]);
+        fwd_state_minus.as_mut().dy[0] = 0.5;
+        let mut fwd_state_plus = fwd_state_minus.clone();
+        fwd_state_plus.as_mut().dy[0] = 0.8275;
+
+        let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
+            |x: &TestVec, p: &TestVec, _t, y: &mut TestVec| {
+                y[0] = 1.5 * x[0] + 0.2 * p[0] - 0.1 * p[1]
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = 1.5 * v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = -1.5 * v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = -0.2 * v[0];
+                y[1] = 0.1 * v[0];
+            },
+            1,
+            1,
+            2,
+            crate::NalgebraContext,
+        );
+        let reset = ParameterisedOp::new(&reset, &p);
+
+        let root = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
+            |_x: &TestVec, _p: &TestVec, t, y: &mut TestVec| {
+                y[0] = 0.3 * t;
+                y[1] = 0.0;
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = 3.0 * v[0];
+                y[1] = -2.0 * v[0];
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = -(3.0 * v[0] - 2.0 * v[1]);
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = -(0.8 * v[0] + 0.5 * v[1]);
+                y[1] = -(-1.5 * v[1]);
+            },
+            1,
+            2,
+            2,
+            crate::NalgebraContext,
+        );
+        let root = ParameterisedOp::new(&root, &p);
+
+        state_root0
+            .state_mut_op_with_adjoint_and_reset(
+                &problem.eqn,
+                &reset,
+                &root,
+                0,
+                &fwd_state_minus,
+                &fwd_state_plus,
+            )
+            .unwrap();
+        state_root1
+            .state_mut_op_with_adjoint_and_reset(
+                &problem.eqn,
+                &reset,
+                &root,
+                1,
+                &fwd_state_minus,
+                &fwd_state_plus,
+            )
+            .unwrap();
+
+        assert!(
+            (state_root0.as_ref().s[0][0] - state_root1.as_ref().s[0][0]).abs() > 1e-6,
+            "different root components should produce different adjoint updates"
+        );
+    }
+
+    #[test]
+    fn state_mut_op_with_adjoint_and_reset_matches_time_dependent_formula() {
+        let problem = scalar_problem(0.1);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let mut state = make_adjoint_state(
+            &problem,
+            3.0,
+            7.0,
+            -3.0,
+            [0.2, -0.1],
+            [[0.3, -0.4], [0.5, 0.2]],
+        );
+        let mut fwd_state_minus = make_state(&problem, 3.0, 2.0, [0.0, 0.0]);
+        fwd_state_minus.as_mut().dy[0] = 0.2;
+        let mut fwd_state_plus = fwd_state_minus.clone();
+        fwd_state_plus.as_mut().dy[0] = 0.58;
+
+        let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
+            |x: &TestVec, p: &TestVec, t, y: &mut TestVec| {
+                y[0] = 1.2 * x[0] + 0.4 * p[0] - 0.3 * p[1] + 0.8 * t
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = 1.2 * v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = -1.2 * v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = -0.4 * v[0];
+                y[1] = 0.3 * v[0];
+            },
+            1,
+            1,
+            2,
+            crate::NalgebraContext,
+        );
+        let reset = ParameterisedOp::new(&reset, &p);
+
+        let root = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
+            |x: &TestVec, p: &TestVec, t, y: &mut TestVec| {
+                y[0] = 0.5 * x[0] - 0.7 * p[0] + 1.1 * p[1] - 0.2 * t
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = 0.5 * v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = -0.5 * v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = 0.7 * v[0];
+                y[1] = -1.1 * v[0];
+            },
+            1,
+            1,
+            2,
+            crate::NalgebraContext,
+        );
+        let root = ParameterisedOp::new(&root, &p);
+
+        let y_before = state.as_ref().y[0];
+        let dy_before = state.as_ref().dy[0];
+
+        state
+            .state_mut_op_with_adjoint_and_reset(
+                &problem.eqn,
+                &reset,
+                &root,
+                0,
+                &fwd_state_minus,
+                &fwd_state_plus,
+            )
+            .unwrap();
+
+        assert_scalar_close(state.as_ref().y[0], y_before);
+        assert_scalar_close(state.as_ref().dy[0], dy_before);
+        assert_scalar_close_tol(state.as_ref().s[0][0], 0.7, 1e-8);
+        assert_scalar_close_tol(state.as_ref().s[1][0], -0.35, 1e-8);
+        assert_scalar_close_tol(state.as_ref().sg[0][0], -0.264, 1e-8);
+        assert_scalar_close_tol(state.as_ref().sg[0][1], 0.552, 1e-8);
+        assert_scalar_close_tol(state.as_ref().sg[1][0], 0.782, 1e-8);
+        assert_scalar_close_tol(state.as_ref().sg[1][1], -0.276, 1e-8);
+    }
+
+    #[test]
+    fn state_mut_op_with_adjoint_and_reset_rejects_invalid_root_index() {
+        let problem = scalar_problem(0.25);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let mut state = make_adjoint_state(
+            &problem,
+            0.0,
+            7.0,
+            -3.0,
+            [0.0, 0.0],
+            [[0.0, 0.0], [0.0, 0.0]],
+        );
+        let mut fwd_state_minus = make_state(&problem, 0.0, 1.0, [0.0, 0.0]);
+        fwd_state_minus.as_mut().dy[0] = 1.0;
+        let fwd_state_plus = fwd_state_minus.clone();
+
+        let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
+            |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = -v[0],
+            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y.fill(0.0),
+            1,
+            1,
+            2,
+            crate::NalgebraContext,
+        );
+        let reset = ParameterisedOp::new(&reset, &p);
+        let root = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
+            |_x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| {
+                y[0] = 0.0;
+                y[1] = 0.0;
+            },
+            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| {
+                y[0] = 1.0;
+                y[1] = 1.0;
+            },
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| {
+                y[0] = -(v[0] + v[1]);
+            },
+            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y.fill(0.0),
+            1,
+            2,
+            2,
+            crate::NalgebraContext,
+        );
+        let root = ParameterisedOp::new(&root, &p);
+
+        let err = state
+            .state_mut_op_with_adjoint_and_reset(
+                &problem.eqn,
+                &reset,
+                &root,
+                2,
+                &fwd_state_minus,
+                &fwd_state_plus,
+            )
+            .unwrap_err();
+        assert_other_error(err, "root index 2 out of bounds");
+    }
+
+    #[test]
+    fn state_mut_op_with_adjoint_and_reset_rejects_zero_event_denominator() {
+        let problem = scalar_problem(0.0);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let mut state = make_adjoint_state(
+            &problem,
+            0.0,
+            7.0,
+            -3.0,
+            [0.0, 0.0],
+            [[0.0, 0.0], [0.0, 0.0]],
+        );
+        let mut fwd_state_minus = make_state(&problem, 0.0, 0.0, [0.0, 0.0]);
+        fwd_state_minus.as_mut().dy[0] = 0.0;
+        let fwd_state_plus = fwd_state_minus.clone();
+
+        let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
+            |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = -v[0],
+            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y.fill(0.0),
+            1,
+            1,
+            2,
+            crate::NalgebraContext,
+        );
+        let reset = ParameterisedOp::new(&reset, &p);
+        let root = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
+            |_x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = 0.0,
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = -v[0],
+            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y.fill(0.0),
+            1,
+            1,
+            2,
+            crate::NalgebraContext,
+        );
+        let root = ParameterisedOp::new(&root, &p);
+
+        let err = state
+            .state_mut_op_with_adjoint_and_reset(
+                &problem.eqn,
+                &reset,
+                &root,
+                0,
+                &fwd_state_minus,
+                &fwd_state_plus,
+            )
+            .unwrap_err();
+        assert_other_error(err, "active root derivative along flow is zero");
+    }
+
+    #[test]
+    fn state_mut_op_with_adjoint_and_reset_rejects_mass_matrix_equations() {
+        let problem = scalar_problem_with_mass(0.25);
+        let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
+        let common = StateCommon {
+            y: TestVec::zeros(1, crate::NalgebraContext),
+            dy: TestVec::zeros(1, crate::NalgebraContext),
+            g: TestVec::zeros(0, crate::NalgebraContext),
+            dg: TestVec::zeros(0, crate::NalgebraContext),
+            s: vec![TestVec::zeros(1, crate::NalgebraContext)],
+            ds: vec![TestVec::zeros(1, crate::NalgebraContext)],
+            sg: vec![TestVec::zeros(2, crate::NalgebraContext)],
+            dsg: vec![TestVec::zeros(2, crate::NalgebraContext)],
+            t: 0.0,
+            h: 0.0,
+        };
+        let mut state = TestState::new_from_common(common);
+        let fwd_state_minus = state.clone();
+        let fwd_state_plus = state.clone();
+
+        let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
+            |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = -v[0],
+            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y.fill(0.0),
+            1,
+            1,
+            2,
+            crate::NalgebraContext,
+        );
+        let reset = ParameterisedOp::new(&reset, &p);
+        let root = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
+            |_x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = 0.0,
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
+            |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = -v[0],
+            |_x: &TestVec, _p: &TestVec, _t, _v: &TestVec, y: &mut TestVec| y.fill(0.0),
+            1,
+            1,
+            2,
+            crate::NalgebraContext,
+        );
+        let root = ParameterisedOp::new(&root, &p);
+
+        let err = state
+            .state_mut_op_with_adjoint_and_reset(
+                &problem.eqn,
+                &reset,
+                &root,
+                0,
+                &fwd_state_minus,
+                &fwd_state_plus,
+            )
             .unwrap_err();
         assert!(matches!(
             err,
