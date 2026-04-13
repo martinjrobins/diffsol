@@ -126,13 +126,13 @@ jobs:
     - name: Set features variable and install dependencies (Ubuntu - not coverage)
       if: matrix.os == 'ubuntu-latest' && matrix.book == false && matrix.coverage == false
       run: |
-        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse --features diffsl-external-f64" >> $GITHUB_ENV
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse --features diffsl-external-f64 --features diffsl-external-dynamic" >> $GITHUB_ENV
         sudo apt-get update
         sudo apt-get install -y libsuitesparse-dev
     - name: Set features variable and install dependencies (Ubuntu - coverage)
       if: matrix.os == 'ubuntu-latest' && matrix.book == false && matrix.coverage == true
       run: |
-        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse" >> $GITHUB_ENV
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse --features diffsl-external-dynamic" >> $GITHUB_ENV
         sudo apt-get update
         sudo apt-get install -y libsuitesparse-dev
     - name: Install Trunk
@@ -149,11 +149,11 @@ jobs:
     - name: Set features variable and install dependencies (macOS)
       if: matrix.os == 'macos-15-intel' || matrix.os == 'macos-latest'
       run: |
-        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift" >> $GITHUB_ENV
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features diffsl-external-dynamic" >> $GITHUB_ENV
     - name: Set features variable and install dependencies (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-cranelift" >> $GITHUB_ENV
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-cranelift --features diffsl-external-dynamic" >> $GITHUB_ENV
     - name: Free Disk Space (Ubuntu)
       if: matrix.os == 'ubuntu-latest'
       uses: jlumbroso/free-disk-space@main

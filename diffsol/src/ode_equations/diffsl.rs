@@ -1,6 +1,10 @@
 use core::panic;
+#[cfg(feature = "diffsl-external-dynamic")]
+use diffsl::ExternalDynModule;
 use num_traits::{One, Zero};
 use std::ops::MulAssign;
+#[cfg(feature = "diffsl-external-dynamic")]
+use std::path::PathBuf;
 use std::{cell::RefCell, mem};
 
 #[cfg(feature = "diffsl-external")]
@@ -52,25 +56,15 @@ pub struct DiffSlContext<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
     mass_state_deps: Vec<(usize, usize)>,
 }
 
-#[cfg(feature = "diffsl-external")]
-impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSlContext<M, ExternalModule<M::T>> {
-    pub fn new_external(
-        nthreads: usize,
+impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> DiffSlContext<M, CG> {
+    fn new_common(
+        compiler: Compiler<CG, M::T>,
         rhs_state_deps: Vec<(usize, usize)>,
         rhs_input_deps: Vec<(usize, usize)>,
         mass_state_deps: Vec<(usize, usize)>,
         ctx: M::C,
     ) -> Result<Self, DiffsolError> {
-        let mode = match nthreads {
-            0 => diffsl::execution::compiler::CompilerMode::MultiThreaded(None),
-            1 => diffsl::execution::compiler::CompilerMode::SingleThreaded,
-            _ => diffsl::execution::compiler::CompilerMode::MultiThreaded(Some(nthreads)),
-        };
-        let module = ExternalModule::default();
-        let compiler = Compiler::from_codegen_module(module, mode)
-            .map_err(|e| DiffsolError::DiffslCompilerError(e.to_string()))?;
         let (nstates, nparams, nout, _ndata, nroots, has_mass, has_reset) = compiler.get_dims();
-
         let has_root = nroots > 0;
         let has_out = nout > 0;
         let data = RefCell::new(compiler.get_new_data());
@@ -112,6 +106,64 @@ impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSlContext<M, ExternalModule
     }
 }
 
+#[cfg(feature = "diffsl-external-dynamic")]
+impl<M: Matrix<T: DiffSlScalar>> DiffSlContext<M, ExternalDynModule<M::T>> {
+    pub fn new_external_dynamic(
+        path: impl Into<PathBuf>,
+        nthreads: usize,
+        rhs_state_deps: Vec<(usize, usize)>,
+        rhs_input_deps: Vec<(usize, usize)>,
+        mass_state_deps: Vec<(usize, usize)>,
+        ctx: M::C,
+    ) -> Result<Self, DiffsolError> {
+        let mode = match nthreads {
+            0 => diffsl::execution::compiler::CompilerMode::MultiThreaded(None),
+            1 => diffsl::execution::compiler::CompilerMode::SingleThreaded,
+            _ => diffsl::execution::compiler::CompilerMode::MultiThreaded(Some(nthreads)),
+        };
+        let module = ExternalDynModule::new(path)
+            .map_err(|e| DiffsolError::DiffslCompilerError(e.to_string()))?;
+        let compiler = Compiler::from_codegen_module(module, mode)
+            .map_err(|e| DiffsolError::DiffslCompilerError(e.to_string()))?;
+
+        Self::new_common(
+            compiler,
+            rhs_state_deps,
+            rhs_input_deps,
+            mass_state_deps,
+            ctx,
+        )
+    }
+}
+
+#[cfg(feature = "diffsl-external")]
+impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSlContext<M, ExternalModule<M::T>> {
+    pub fn new_external(
+        nthreads: usize,
+        rhs_state_deps: Vec<(usize, usize)>,
+        rhs_input_deps: Vec<(usize, usize)>,
+        mass_state_deps: Vec<(usize, usize)>,
+        ctx: M::C,
+    ) -> Result<Self, DiffsolError> {
+        let mode = match nthreads {
+            0 => diffsl::execution::compiler::CompilerMode::MultiThreaded(None),
+            1 => diffsl::execution::compiler::CompilerMode::SingleThreaded,
+            _ => diffsl::execution::compiler::CompilerMode::MultiThreaded(Some(nthreads)),
+        };
+        let module = ExternalModule::default();
+        let compiler = Compiler::from_codegen_module(module, mode)
+            .map_err(|e| DiffsolError::DiffslCompilerError(e.to_string()))?;
+
+        Self::new_common(
+            compiler,
+            rhs_state_deps,
+            rhs_input_deps,
+            mass_state_deps,
+            ctx,
+        )
+    }
+}
+
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> DiffSlContext<M, CG> {
     /// Create a new context for the ODE equations specified using the [DiffSL language](https://martinjrobins.github.io/diffsl/).
     /// The input parameters are not initialized and must be set using the [OdeEquations::set_params] function before solving the ODE.
@@ -140,46 +192,14 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> Di
         let rhs_state_deps = model.take_rhs_state_deps();
         let rhs_input_deps = model.take_rhs_input_deps();
         let mass_state_deps = model.take_mass_state_deps();
-        let (nstates, nparams, nout, _ndata, nroots, has_mass, has_reset) = compiler.get_dims();
 
-        let has_root = nroots > 0;
-        let has_out = nout > 0;
-        let data = RefCell::new(compiler.get_new_data());
-        let ddata = RefCell::new(compiler.get_new_data());
-        let sens_data = RefCell::new(compiler.get_new_data());
-        let tmp = RefCell::new(M::V::zeros(nstates, ctx.clone()));
-        let tmp2 = RefCell::new(M::V::zeros(nstates, ctx.clone()));
-        let tmp_root = RefCell::new(M::V::zeros(nroots, ctx.clone()));
-        let tmp2_root = RefCell::new(M::V::zeros(nroots, ctx.clone()));
-        let tmp_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
-        let tmp2_out = RefCell::new(M::V::zeros(nout, ctx.clone()));
-        let model_index = 0;
-
-        Ok(Self {
+        Self::new_common(
             compiler,
-            data,
-            ddata,
-            sens_data,
-            nparams,
-            model_index,
-            nstates,
-            tmp,
-            tmp2,
-            tmp_root,
-            tmp2_root,
-            tmp_out,
-            tmp2_out,
-            nroots,
-            nout,
-            has_mass,
-            has_root,
-            has_reset,
-            has_out,
-            ctx,
             rhs_state_deps,
             rhs_input_deps,
             mass_state_deps,
-        })
+            ctx,
+        )
     }
 }
 
@@ -342,6 +362,45 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> DiffSl<M, CG> {
     }
 }
 
+#[cfg(feature = "diffsl-external-dynamic")]
+impl<M: MatrixHost<T: DiffSlScalar>> DiffSl<M, ExternalDynModule<M::T>> {
+    /// Create a `DiffSl` instance using externally-provided functions & sparsity patterns.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path to the external dynamic library
+    /// * `ctx` - The computational context for vector and matrix operations (e.g., CPU, GPU)
+    /// * `rhs_state_deps` - Sparsity pattern for the RHS Jacobian (∂f/∂y) as pairs (row, col). Can be empty if M is dense.
+    /// * `rhs_input_deps` - Sparsity pattern for the RHS sensitivity matrix (∂f/∂p) as pairs (row, col). Can be empty if M is dense or if there are no parameters.
+    /// * `mass_state_deps` - Sparsity pattern for the mass matrix Jacobian (∂M/∂y) as pairs (row, col). Can be empty if there is no mass matrix or if M is dense.
+    /// * `include_sensitivities` - Whether to set up sparsity patterns for sensitivity computations.
+    ///   If `true`, enables forward and adjoint sensitivity analysis. Set to `false` to skip
+    ///   sensitivity setup for better memory efficiency when sensitivities are not needed.
+    ///
+    /// # Returns
+    ///
+    /// A new `DiffSl` instance with Jacobian colorings configured for efficient matrix computation,
+    /// or an error if the context creation fails.
+    pub fn from_external_dynamic(
+        path: impl Into<PathBuf>,
+        ctx: M::C,
+        rhs_state_deps: Vec<(usize, usize)>,
+        rhs_input_deps: Vec<(usize, usize)>,
+        mass_state_deps: Vec<(usize, usize)>,
+        include_sensitivities: bool,
+    ) -> Result<Self, DiffsolError> {
+        let context = DiffSlContext::<M, ExternalDynModule<M::T>>::new_external_dynamic(
+            path,
+            1,
+            rhs_state_deps,
+            rhs_input_deps,
+            mass_state_deps,
+            ctx,
+        )?;
+        Ok(Self::from_context(context, include_sensitivities))
+    }
+}
+
 #[cfg(feature = "diffsl-external")]
 impl<M: MatrixHost<T: DiffSlScalar + ExternSymbols>> DiffSl<M, ExternalModule<M::T>> {
     /// Create a `DiffSl` instance using externally-provided functions & sparsity patterns.
@@ -349,9 +408,9 @@ impl<M: MatrixHost<T: DiffSlScalar + ExternSymbols>> DiffSl<M, ExternalModule<M:
     /// # Arguments
     ///
     /// * `ctx` - The computational context for vector and matrix operations (e.g., CPU, GPU)
-    /// * `rhs_state_deps` - Sparsity pattern for the RHS Jacobian (∂f/∂y) as pairs (row, col)
-    /// * `rhs_input_deps` - Sparsity pattern for the RHS sensitivity matrix (∂f/∂p) as pairs (row, col)
-    /// * `mass_state_deps` - Sparsity pattern for the mass matrix Jacobian (∂M/∂y) as pairs (row, col)
+    /// * `rhs_state_deps` - Sparsity pattern for the RHS Jacobian (∂f/∂y) as pairs (row, col). Can be empty if M is dense.
+    /// * `rhs_input_deps` - Sparsity pattern for the RHS sensitivity matrix (∂f/∂p) as pairs (row, col). Can be empty if M is dense or if there are no parameters.
+    /// * `mass_state_deps` - Sparsity pattern for the mass matrix Jacobian (∂M/∂y) as pairs (row, col). Can be empty if there is no mass matrix or if M is dense.
     /// * `include_sensitivities` - Whether to set up sparsity patterns for sensitivity computations.
     ///   If `true`, enables forward and adjoint sensitivity analysis. Set to `false` to skip
     ///   sensitivity setup for better memory efficiency when sensitivities are not needed.
