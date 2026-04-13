@@ -23,6 +23,7 @@ diffsl-cranelift = ["diffsl/cranelift", "diffsl"]
 diffsl-external-f64 = ["diffsl-external", "diffsl/external_f64", "diffsl"]
 diffsl-external-f32 = ["diffsl-external", "diffsl/external_f32", "diffsl"]
 diffsl-external = []
+diffsl-external-dynamic = ["diffsl", "diffsl/external_dynamic"]
 diffsl-llvm = []
 diffsl-llvm15 = ["diffsl/llvm15-0", "diffsl", "diffsl-llvm"]
 diffsl-llvm16 = ["diffsl/llvm16-0", "diffsl", "diffsl-llvm"]
@@ -83,4 +84,4 @@ name = "pybamm_dfn"
 harness = false
 
 [package.metadata.docs.rs]
-features = ["diffsl-llvm15", "diffsl-cranelift"]
+features = ["diffsl-llvm15", "diffsl-cranelift", "diffsl-external-dynamic"]
