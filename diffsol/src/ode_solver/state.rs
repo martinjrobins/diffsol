@@ -7,10 +7,11 @@ use crate::Scalar;
 use crate::{
     error::{DiffsolError, OdeSolverError},
     nonlinear_solver::{convergence::Convergence, NonLinearSolver},
-    ode_solver_error, scale, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp,
-    InitOp, LinearOp, LinearSolver, Matrix, NewtonNonlinearSolver, NonLinearOp, NonLinearOpAdjoint,
-    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, NonLinearOpTimePartial,
-    OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverProblem, Op,
+    ode_solver_error, scale, AdjointEquations, AugmentedOdeEquations,
+    AugmentedOdeEquationsImplicit, ConstantOp, InitOp, LinearOp, LinearSolver, Matrix,
+    NewtonNonlinearSolver, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
+    NonLinearOpSensAdjoint, NonLinearOpTimePartial, OdeEquations, OdeEquationsAdjoint,
+    OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverProblem, Op,
     SensEquations, Vector, VectorIndex,
 };
 use crate::{non_linear_solver_error, BacktrackingLineSearch, NoLineSearch};
@@ -436,6 +437,133 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         Ok(())
     }
 
+    /// Add the terminal-root adjoint correction for a root-defined final time.
+    ///
+    /// Given a forward terminal state `(y_f, f_f, t_f)` satisfying the active root condition
+    /// `r_k(y_f, t_f, p) = 0`, this method adds the terminal contribution
+    /// `lambda_f += r_{x,k}^T * (u_k / d)` and `q_f += r_{p,k}^T * (u_k / d)` to each adjoint
+    /// channel, where `u_k` is the corresponding model output component and
+    /// `d = [r_x f_f]_k + [r_t]_k`.
+    ///
+    /// The current `self.s` and `self.sg` values are updated in place. If `root_idx` is `None`,
+    /// or if no model output is available, this method is a no-op.
+    fn state_mut_refresh_augmented<Eqn, AugmentedEqn>(
+        &mut self,
+        augmented_eqn: &mut AugmentedEqn,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
+        AugmentedEqn: AugmentedOdeEquations<Eqn>,
+    {
+        let state = self.as_mut();
+        augmented_eqn.update_rhs_out_state(state.y, state.dy, *state.t);
+        let naug = augmented_eqn.max_index();
+        for i in 0..naug {
+            augmented_eqn.set_index(i);
+            augmented_eqn
+                .rhs()
+                .call_inplace(&state.s[i], *state.t, &mut state.ds[i]);
+            if let Some(out) = augmented_eqn.out() {
+                out.call_inplace(&state.s[i], *state.t, &mut state.dsg[i]);
+            }
+        }
+        Ok(())
+    }
+
+    fn state_mut_adjoint_terminal_root<'a, Eqn, Method>(
+        &mut self,
+        adj_eqn: &mut AdjointEquations<'a, Eqn, Method>,
+        root_idx: Option<usize>,
+        forward_y: &V,
+        _forward_dy: &V,
+        forward_t: V::T,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsAdjoint<
+            T = V::T,
+            V = V,
+            C = V::C,
+            Root: NonLinearOpJacobian<T = V::T, V = V, M = Eqn::M>
+                      + NonLinearOpAdjoint<T = V::T, V = V, M = Eqn::M>
+                      + NonLinearOpSensAdjoint<T = V::T, V = V, M = Eqn::M>
+                      + NonLinearOpTimePartial<T = V::T, V = V, M = Eqn::M>,
+            Out: NonLinearOp<T = V::T, V = V, M = Eqn::M>,
+        >,
+        Method: OdeSolverMethod<'a, Eqn>,
+    {
+        let Some(root_idx) = root_idx else {
+            return Ok(());
+        };
+        let eqn = adj_eqn.eqn();
+
+        if eqn.mass().is_some() {
+            return Err(ode_solver_error!(MassMatrixNotSupported));
+        }
+
+        let Some(out_op) = eqn.out() else {
+            return Ok(());
+        };
+        let Some(root_op) = eqn.root() else {
+            return Ok(());
+        };
+
+        let nout = out_op.nout();
+        let state = self.as_ref();
+        if state.s.len() != nout || state.sg.len() != nout || state.dsg.len() != nout {
+            return Ok(());
+        }
+
+        let nroots = root_op.nout();
+        if root_idx >= nroots {
+            return Err(ode_solver_error!(
+                Other,
+                format!(
+                    "root index {root_idx} out of bounds for root function with {nroots} outputs"
+                )
+            ));
+        }
+
+        let ctx = eqn.context().clone();
+        let out = out_op.call(forward_y, forward_t);
+        let forward_dy = eqn.rhs().call(forward_y, forward_t);
+        let root_t = root_op.time_derive(forward_y, forward_t);
+        let mut root_flow = V::zeros(nroots, ctx.clone());
+        root_op.jac_mul_inplace(forward_y, forward_t, &forward_dy, &mut root_flow);
+        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
+        let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
+        if denom.abs() <= denom_tol {
+            return Err(ode_solver_error!(
+                Other,
+                "terminal root adjoint correction undefined: active root derivative along flow is zero"
+            ));
+        }
+
+        let nstates = eqn.rhs().nstates();
+        let nparams = eqn.rhs().nparams();
+        let mut root_basis = V::zeros(nroots, ctx.clone());
+        let mut lambda_corr = V::zeros(nstates, ctx.clone());
+        let mut q_corr = V::zeros(nparams, ctx.clone());
+        let mut lambda_terms = Vec::with_capacity(nout);
+        let mut q_terms = Vec::with_capacity(nout);
+        for i in 0..nout {
+            root_basis.set_index(root_idx, out.get_index(i) / denom);
+            root_op.jac_transpose_mul_inplace(forward_y, forward_t, &root_basis, &mut lambda_corr);
+            root_op.sens_transpose_mul_inplace(forward_y, forward_t, &root_basis, &mut q_corr);
+            lambda_terms.push(lambda_corr.clone());
+            q_terms.push(q_corr.clone());
+            lambda_corr.fill(V::T::zero());
+            q_corr.fill(V::T::zero());
+            root_basis.set_index(root_idx, V::T::zero());
+        }
+
+        let state = self.as_mut();
+        for i in 0..nout {
+            state.s[i] += &lambda_terms[i];
+            state.sg[i] += &q_terms[i];
+        }
+        self.state_mut_refresh_augmented::<Eqn, _>(adj_eqn)
+    }
+
     /// Create a new solver state from an ODE problem.
     /// This function will set the initial step size based on the given solver.
     /// If you want to create a state without this default initialisation, use [Self::new_without_initialise] instead.
@@ -599,14 +727,13 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let (dsg, sg) = if augmented_eqn.out().is_some() {
             let mut sg = Vec::with_capacity(naug);
             let mut dsg = Vec::with_capacity(naug);
-            for i in 0..naug {
-                augmented_eqn.set_index(i);
+            for _ in 0..naug {
                 let out = augmented_eqn
                     .out()
                     .ok_or(ode_solver_error!(StateProblemMismatch))?;
-                let dsgi = out.call(&state.s[i], state.t);
                 let sgi = V::zeros(out.nout(), ctx.clone());
                 sg.push(sgi);
+                let dsgi = out.call(&state.s[dsg.len()], state.t);
                 dsg.push(dsgi);
             }
             (dsg, sg)
@@ -675,6 +802,37 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         AugmentedEqn: AugmentedOdeEquations<Eqn>,
     {
         let mut state = Self::new_without_initialise(ode_problem)?.into_common();
+        Self::initialise_augmented_state(augmented_eqn, ode_problem, &mut state)?;
+        Ok(Self::new_from_common(state))
+    }
+
+    /// Create a new solver state with augmented equations from an ODE problem, evaluating the
+    /// augmented initial/output operators at a caller-supplied time while leaving the base state
+    /// allocation behavior unchanged.
+    fn new_without_initialise_augmented_at<Eqn, AugmentedEqn>(
+        ode_problem: &OdeSolverProblem<Eqn>,
+        augmented_eqn: &mut AugmentedEqn,
+        t: V::T,
+    ) -> Result<Self, DiffsolError>
+    where
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
+        AugmentedEqn: AugmentedOdeEquations<Eqn>,
+    {
+        let mut state = Self::new_without_initialise(ode_problem)?.into_common();
+        state.t = t;
+        Self::initialise_augmented_state(augmented_eqn, ode_problem, &mut state)?;
+        Ok(Self::new_from_common(state))
+    }
+
+    fn initialise_augmented_state<Eqn, AugmentedEqn>(
+        augmented_eqn: &mut AugmentedEqn,
+        ode_problem: &OdeSolverProblem<Eqn>,
+        state: &mut StateCommon<V>,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
+        AugmentedEqn: AugmentedOdeEquations<Eqn>,
+    {
         let naug = augmented_eqn.max_index();
         let mut s = Vec::with_capacity(naug);
         let mut ds = Vec::with_capacity(naug);
@@ -708,7 +866,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         };
         state.sg = sg;
         state.dsg = dsg;
-        Ok(Self::new_from_common(state))
+        Ok(())
     }
 
     /// Calculate a consistent state and time derivative of the state, based on the equations of the problem.

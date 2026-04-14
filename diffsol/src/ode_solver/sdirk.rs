@@ -738,7 +738,8 @@ mod test {
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let mut s = problem.esdirk34::<LS>().unwrap();
-        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
             .esdirk34_solver_adjoint::<LS, _>(checkpointer, None)
             .unwrap();
@@ -758,7 +759,7 @@ mod test {
         let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
         let (problem, _soln) = exponential_decay_with_algebraic_adjoint_problem::<M>(false);
         let mut s = problem.esdirk34::<LS>().unwrap();
-        let (checkpointer, soln) = s
+        let (checkpointer, soln, _stop_reason) = s
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
@@ -779,7 +780,8 @@ mod test {
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let mut s = problem.esdirk34::<LS>().unwrap();
-        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
             .esdirk34_solver_adjoint::<LS, _>(checkpointer, None)
             .unwrap();
@@ -1012,5 +1014,23 @@ mod test {
         let (problem, soln) = exponential_decay_with_reset_problem_sens::<M>();
         let solver = problem.tr_bdf2_sens::<LS>().unwrap();
         test_solve_dense_sensitivities_with_reset(solver, &soln);
+    }
+
+    #[test]
+    fn test_solve_adjoint_with_single_reset_root_tr_bdf2() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_single_reset_root_problem_adjoint;
+        use crate::ode_solver::tests::test_solve_adjoint_with_single_reset_root;
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>();
+        test_solve_adjoint_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.tr_bdf2_solver::<LS>(state),
+                None => problem.tr_bdf2::<LS>(),
+            },
+            &soln,
+            |checkpointer| problem.tr_bdf2_state_adjoint::<LS, _>(checkpointer, None),
+            |state, checkpointer| {
+                problem.tr_bdf2_solver_adjoint_from_state::<LS, _>(state, checkpointer, None)
+            },
+        );
     }
 }

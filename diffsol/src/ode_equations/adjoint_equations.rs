@@ -130,25 +130,36 @@ where
     }
 }
 
-pub struct AdjointInit<'a, Eqn>
+pub struct AdjointInit<'a, Eqn, Method>
 where
     Eqn: OdeEquations,
+    Method: OdeSolverMethod<'a, Eqn>,
 {
     eqn: &'a Eqn,
+    _marker: std::marker::PhantomData<Method>,
 }
 
-impl<'a, Eqn> AdjointInit<'a, Eqn>
+impl<'a, Eqn, Method> AdjointInit<'a, Eqn, Method>
 where
     Eqn: OdeEquations,
+    Method: OdeSolverMethod<'a, Eqn>,
 {
-    pub fn new(eqn: &'a Eqn) -> Self {
-        Self { eqn }
+    pub fn new(
+        eqn: &'a Eqn,
+        _context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
+        _with_out: bool,
+    ) -> Self {
+        Self {
+            eqn,
+            _marker: std::marker::PhantomData,
+        }
     }
 }
 
-impl<Eqn> Op for AdjointInit<'_, Eqn>
+impl<'a, Eqn, Method> Op for AdjointInit<'a, Eqn, Method>
 where
     Eqn: OdeEquations,
+    Method: OdeSolverMethod<'a, Eqn>,
 {
     type T = Eqn::T;
     type V = Eqn::V;
@@ -169,9 +180,10 @@ where
     }
 }
 
-impl<Eqn> ConstantOp for AdjointInit<'_, Eqn>
+impl<'a, Eqn, Method> ConstantOp for AdjointInit<'a, Eqn, Method>
 where
     Eqn: OdeEquations,
+    Method: OdeSolverMethod<'a, Eqn>,
 {
     fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
         y.fill(Eqn::T::zero());
@@ -421,7 +433,7 @@ where
     context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
     tmp: RefCell<Eqn::V>,
     tmp2: RefCell<Eqn::V>,
-    init: AdjointInit<'a, Eqn>,
+    init: AdjointInit<'a, Eqn, Method>,
     atol: Option<&'a Eqn::V>,
     rtol: Option<Eqn::T>,
     out_rtol: Option<Eqn::T>,
@@ -439,7 +451,7 @@ where
             self.context.borrow().max_index,
         )));
         let rhs = AdjointRhs::new(self.eqn, context.clone(), self.rhs.with_out);
-        let init = AdjointInit::new(self.eqn);
+        let init = AdjointInit::new(self.eqn, context.clone(), self.rhs.with_out);
         let out = AdjointOut::new(self.eqn, context.clone(), self.out.with_out);
         let tmp = self.tmp.clone();
         let tmp2 = self.tmp2.clone();
@@ -477,7 +489,7 @@ where
     ) -> Self {
         let eqn = &problem.eqn;
         let rhs = AdjointRhs::new(eqn, context.clone(), with_out);
-        let init = AdjointInit::new(eqn);
+        let init = AdjointInit::new(eqn, context.clone(), with_out);
         let out = AdjointOut::new(eqn, context.clone(), with_out);
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(
             eqn.rhs().nparams(),
@@ -578,7 +590,7 @@ where
     type Rhs = &'a AdjointRhs<'b, Eqn, Method>;
     type Mass = &'a AdjointMass<'b, Eqn>;
     type Root = <Eqn as OdeEquationsRef<'a>>::Root;
-    type Init = &'a AdjointInit<'b, Eqn>;
+    type Init = &'a AdjointInit<'b, Eqn, Method>;
     type Out = &'a AdjointOut<'b, Eqn, Method>;
     type Reset = <Eqn as OdeEquationsRef<'a>>::Reset;
 }
@@ -597,7 +609,7 @@ where
     fn root(&self) -> Option<<Eqn as OdeEquationsRef<'_>>::Root> {
         None
     }
-    fn init(&self) -> &AdjointInit<'a, Eqn> {
+    fn init(&self) -> &AdjointInit<'a, Eqn, Method> {
         &self.init
     }
     fn out(&self) -> Option<&AdjointOut<'a, Eqn, Method>> {
