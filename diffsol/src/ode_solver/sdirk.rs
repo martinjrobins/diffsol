@@ -1,7 +1,6 @@
 use crate::error::DiffsolError;
 use crate::error::OdeSolverError;
 use crate::matrix::MatrixRef;
-use crate::ode_equations::OdeEquationsImplicitSensWithReset;
 use crate::ode_solver::runge_kutta::Rk;
 use crate::vector::VectorRef;
 use crate::LinearSolver;
@@ -20,6 +19,7 @@ use log::debug;
 use log::trace;
 use num_traits::{FromPrimitive, One, Signed, ToPrimitive, Zero};
 
+use super::adjoint::AdjointOdeSolverMethod;
 use super::bdf::BdfStatistics;
 use super::config::SdirkConfig;
 use super::jacobian_update::SolverState;
@@ -58,12 +58,19 @@ where
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
 {
-    fn reset_with_sens_at_root(&mut self, root_idx: usize) -> Result<(), DiffsolError>
-    where
-        Eqn: OdeEquationsImplicitSensWithReset,
-    {
-        self.rk.reset_with_sens_at_root(root_idx)
-    }
+}
+
+impl<'a, M, Eqn, LS, Solver> AdjointOdeSolverMethod<'a, Eqn, Solver>
+    for Sdirk<'a, Eqn, LS, M, crate::AdjointEquations<'a, Eqn, Solver>>
+where
+    Eqn: crate::OdeEquationsImplicitAdjoint + 'a,
+    Solver: OdeSolverMethod<'a, Eqn>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    LS: LinearSolver<Eqn::M>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+{
 }
 
 /// A singly diagonally implicit Runge-Kutta method. Can optionally have an explicit first stage for ESDIRK methods.
@@ -528,10 +535,6 @@ where
     fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError> {
         let integrate_out = self.rk.problem().integrate_out;
         self.rk.state_mut_back(t, integrate_out)
-    }
-
-    fn reset(&mut self) -> Result<(), DiffsolError> {
-        self.rk.reset()
     }
 }
 

@@ -1,15 +1,16 @@
 // Solver method Python enum. This is used to select the overarching solver
 // stragegy like bdf or esdirk34 in diffsol.
 
-use diffsol::error::DiffsolError;
+use diffsol::error::{DiffsolError, OdeSolverError};
+use diffsol::ode_equations::OdeEquationsImplicitSensWithReset;
 use diffsol::{
     matrix::MatrixRef, DefaultDenseMatrix, DiffSl, LinearSolver, Matrix, OdeSolverMethod,
-    OdeSolverProblem, Vector, VectorHost, VectorRef,
+    OdeSolverProblem, OdeSolverState, Vector, VectorHost, VectorRef,
 };
 use diffsol::{
-    AdjointOdeSolverMethod, Checkpointing, CodegenModule, DefaultSolver, DenseMatrix, MatrixCommon,
-    OdeEquations, OdeSolverState, OdeSolverStopReason, Op, SensitivitiesOdeSolverMethod, Solution,
-    VectorViewMut,
+    ode_solver_error, AdjointOdeSolverMethod, Checkpointing, CodegenModule, DefaultSolver,
+    DenseMatrix, MatrixCommon, OdeEquations, OdeSolverStopReason, Op, SensitivitiesOdeSolverMethod,
+    Solution, VectorViewMut,
 };
 use ndarray::ArrayView2;
 use num_traits::{FromPrimitive, Zero}; // for generic nums in _solve_sum_squares_adj
@@ -36,6 +37,41 @@ pub enum OdeSolverType {
     Esdirk34,
     TrBdf2,
     Tsit45,
+}
+
+fn apply_state_reset<Eqn, S>(
+    problem: &OdeSolverProblem<Eqn>,
+    state: &mut S,
+) -> Result<(), DiffsolError>
+where
+    Eqn: OdeEquations,
+    S: OdeSolverState<Eqn::V>,
+{
+    let eqn = &problem.eqn;
+    if let Some(reset_fn) = eqn.reset() {
+        state.state_mut_op(eqn, &reset_fn)?;
+    }
+    Ok(())
+}
+
+fn apply_state_reset_with_sens<Eqn, S>(
+    problem: &OdeSolverProblem<Eqn>,
+    state: &mut S,
+    root_idx: usize,
+) -> Result<(), DiffsolError>
+where
+    Eqn: OdeEquationsImplicitSensWithReset,
+    S: OdeSolverState<Eqn::V>,
+{
+    let eqn = &problem.eqn;
+    match (eqn.reset(), eqn.root()) {
+        (None, _) => Ok(()),
+        (Some(_), None) => Err(ode_solver_error!(ResetRequiresRootOperator)),
+        (Some(reset_fn), Some(root_fn)) => {
+            state.state_mut_op_with_sens_and_reset(eqn, &reset_fn, &root_fn, root_idx)?;
+            Ok(())
+        }
+    }
 }
 
 impl OdeSolverType {
@@ -148,11 +184,10 @@ impl OdeSolverType {
                         }
                         _ => continue,
                     };
-                    let state = solver.into_state();
+                    let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
-                    let mut restarted_solver = problem.bdf_solver::<LS>(state)?;
-                    restarted_solver.reset()?;
-                    solver = restarted_solver;
+                    apply_state_reset(problem, &mut state)?;
+                    solver = problem.bdf_solver::<LS>(state)?;
                 }
                 Ok(soln)
             }
@@ -169,11 +204,10 @@ impl OdeSolverType {
                         }
                         _ => continue,
                     };
-                    let state = solver.into_state();
+                    let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
-                    let mut restarted_solver = problem.esdirk34_solver::<LS>(state)?;
-                    restarted_solver.reset()?;
-                    solver = restarted_solver;
+                    apply_state_reset(problem, &mut state)?;
+                    solver = problem.esdirk34_solver::<LS>(state)?;
                 }
                 Ok(soln)
             }
@@ -190,11 +224,10 @@ impl OdeSolverType {
                         }
                         _ => continue,
                     };
-                    let state = solver.into_state();
+                    let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
-                    let mut restarted_solver = problem.tr_bdf2_solver::<LS>(state)?;
-                    restarted_solver.reset()?;
-                    solver = restarted_solver;
+                    apply_state_reset(problem, &mut state)?;
+                    solver = problem.tr_bdf2_solver::<LS>(state)?;
                 }
                 Ok(soln)
             }
@@ -211,11 +244,10 @@ impl OdeSolverType {
                         }
                         _ => continue,
                     };
-                    let state = solver.into_state();
+                    let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
-                    let mut restarted_solver = problem.tsit45_solver(state)?;
-                    restarted_solver.reset()?;
-                    solver = restarted_solver;
+                    apply_state_reset(problem, &mut state)?;
+                    solver = problem.tsit45_solver(state)?;
                 }
                 Ok(soln)
             }
@@ -249,11 +281,10 @@ impl OdeSolverType {
                         }
                         _ => continue,
                     };
-                    let state = solver.into_state();
+                    let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
-                    let mut restarted_solver = problem.bdf_solver::<LS>(state)?;
-                    restarted_solver.reset()?;
-                    solver = restarted_solver;
+                    apply_state_reset(problem, &mut state)?;
+                    solver = problem.bdf_solver::<LS>(state)?;
                 }
                 Ok(soln)
             }
@@ -270,11 +301,10 @@ impl OdeSolverType {
                         }
                         _ => continue,
                     };
-                    let state = solver.into_state();
+                    let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
-                    let mut restarted_solver = problem.esdirk34_solver::<LS>(state)?;
-                    restarted_solver.reset()?;
-                    solver = restarted_solver;
+                    apply_state_reset(problem, &mut state)?;
+                    solver = problem.esdirk34_solver::<LS>(state)?;
                 }
                 Ok(soln)
             }
@@ -291,11 +321,10 @@ impl OdeSolverType {
                         }
                         _ => continue,
                     };
-                    let state = solver.into_state();
+                    let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
-                    let mut restarted_solver = problem.tr_bdf2_solver::<LS>(state)?;
-                    restarted_solver.reset()?;
-                    solver = restarted_solver;
+                    apply_state_reset(problem, &mut state)?;
+                    solver = problem.tr_bdf2_solver::<LS>(state)?;
                 }
                 Ok(soln)
             }
@@ -312,11 +341,10 @@ impl OdeSolverType {
                         }
                         _ => continue,
                     };
-                    let state = solver.into_state();
+                    let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
-                    let mut restarted_solver = problem.tsit45_solver(state)?;
-                    restarted_solver.reset()?;
-                    solver = restarted_solver;
+                    apply_state_reset(problem, &mut state)?;
+                    solver = problem.tsit45_solver(state)?;
                 }
                 Ok(soln)
             }
@@ -404,11 +432,10 @@ impl OdeSolverType {
                         }
                         _ => continue,
                     };
-                    let state = solver.into_state();
+                    let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
-                    let mut restarted_solver = problem.bdf_solver_sens::<LS>(state)?;
-                    restarted_solver.reset_with_sens_at_root(root_idx)?;
-                    solver = restarted_solver;
+                    apply_state_reset_with_sens(problem, &mut state, root_idx)?;
+                    solver = problem.bdf_solver_sens::<LS>(state)?;
                 }
                 Ok(soln)
             }
@@ -425,11 +452,10 @@ impl OdeSolverType {
                         }
                         _ => continue,
                     };
-                    let state = solver.into_state();
+                    let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
-                    let mut restarted_solver = problem.esdirk34_solver_sens::<LS>(state)?;
-                    restarted_solver.reset_with_sens_at_root(root_idx)?;
-                    solver = restarted_solver;
+                    apply_state_reset_with_sens(problem, &mut state, root_idx)?;
+                    solver = problem.esdirk34_solver_sens::<LS>(state)?;
                 }
                 Ok(soln)
             }
@@ -446,11 +472,10 @@ impl OdeSolverType {
                         }
                         _ => continue,
                     };
-                    let state = solver.into_state();
+                    let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
-                    let mut restarted_solver = problem.tr_bdf2_solver_sens::<LS>(state)?;
-                    restarted_solver.reset_with_sens_at_root(root_idx)?;
-                    solver = restarted_solver;
+                    apply_state_reset_with_sens(problem, &mut state, root_idx)?;
+                    solver = problem.tr_bdf2_solver_sens::<LS>(state)?;
                 }
                 Ok(soln)
             }
@@ -467,11 +492,10 @@ impl OdeSolverType {
                         }
                         _ => continue,
                     };
-                    let state = solver.into_state();
+                    let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
-                    let mut restarted_solver = problem.tsit45_solver_sens(state)?;
-                    restarted_solver.reset_with_sens_at_root(root_idx)?;
-                    solver = restarted_solver;
+                    apply_state_reset_with_sens(problem, &mut state, root_idx)?;
+                    solver = problem.tsit45_solver_sens(state)?;
                 }
                 Ok(soln)
             }

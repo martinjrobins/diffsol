@@ -138,14 +138,6 @@ where
     }
 }
 
-impl<'a, Eqn, S, Solver> AdjointOdeSolverMethod<'a, Eqn, S> for Solver
-where
-    Eqn: OdeEquationsImplicitAdjoint + 'a,
-    S: OdeSolverMethod<'a, Eqn>,
-    Solver: AugmentedOdeSolverMethod<'a, Eqn, AdjointEquations<'a, Eqn, S>>,
-{
-}
-
 struct BlockInfoSol<M: Matrix, LS: LinearSolver<M>> {
     pub block: MatrixOp<M>,
     pub src_indices: <M::V as Vector>::Index,
