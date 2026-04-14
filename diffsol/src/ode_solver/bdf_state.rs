@@ -257,6 +257,10 @@ where
     }
 
     fn as_mut(&mut self) -> StateRefMut<'_, V> {
+        self.diff_initialised = false;
+        self.sdiff_initialised = false;
+        self.gdiff_initialised = false;
+        self.sgdiff_initialised = false;
         StateRefMut {
             y: &mut self.y,
             dy: &mut self.dy,
