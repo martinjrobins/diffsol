@@ -1401,22 +1401,22 @@ mod test {
         lambda: [f64; 2],
         q: [[f64; 2]; 2],
     ) -> TestState {
-        let ctx = problem.context().clone();
+        let ctx = *problem.context();
         let s = lambda
             .iter()
-            .map(|lambda_i| TestVec::from_vec(vec![*lambda_i], ctx.clone()))
+            .map(|lambda_i| TestVec::from_vec(vec![*lambda_i], ctx))
             .collect::<Vec<_>>();
-        let ds = vec![TestVec::zeros(1, ctx.clone()); s.len()];
+        let ds = vec![TestVec::zeros(1, ctx); s.len()];
         let sg = q
             .iter()
-            .map(|q_i| TestVec::from_vec(q_i.to_vec(), ctx.clone()))
+            .map(|q_i| TestVec::from_vec(q_i.to_vec(), ctx))
             .collect::<Vec<_>>();
-        let dsg = vec![TestVec::zeros(2, ctx.clone()); sg.len()];
+        let dsg = vec![TestVec::zeros(2, ctx); sg.len()];
         TestState::new_from_common(StateCommon {
-            y: TestVec::from_vec(vec![y], ctx.clone()),
-            dy: TestVec::from_vec(vec![dy], ctx.clone()),
-            g: TestVec::zeros(0, ctx.clone()),
-            dg: TestVec::zeros(0, ctx.clone()),
+            y: TestVec::from_vec(vec![y], ctx),
+            dy: TestVec::from_vec(vec![dy], ctx),
+            g: TestVec::zeros(0, ctx),
+            dg: TestVec::zeros(0, ctx),
             s,
             ds,
             sg,

@@ -1100,8 +1100,8 @@ where
     >(
         &'a self,
         tableau: Tableau<DM>,
-        mut state: RkState<Eqn::V>,
-        mut augmented_eqn: AdjointEquations<'a, Eqn, S>,
+        state: RkState<Eqn::V>,
+        augmented_eqn: AdjointEquations<'a, Eqn, S>,
     ) -> Result<ExplicitRk<'a, Eqn, DM, AdjointEquations<'a, Eqn, S>>, DiffsolError>
     where
         Eqn: OdeEquationsAdjoint,
