@@ -1,4 +1,4 @@
-use num_traits::{One, Zero};
+use num_traits::{One, Signed, Zero};
 use std::{
     cell::RefCell,
     ops::{AddAssign, SubAssign},
@@ -9,7 +9,7 @@ use crate::{
     error::DiffsolError, op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations,
     Checkpointing, ConstantOp, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
     NonLinearOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint,
-    OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, Op, Vector,
+    OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, Op, Scalar, Vector,
 };
 
 pub struct AdjointContext<'a, Eqn, Method>
@@ -52,12 +52,29 @@ where
                 return;
             }
         }
-        self.last_t = Some(t);
-        self.checkpointer.interpolate(t, &mut self.x).unwrap();
+        // clamp tiny boundary overshoots to the boundary values to avoid interpolation errors
+        let t0 = self.checkpointer.problem().t0;
+        let t1 = self.checkpointer.last_t();
+        let boundary_tol = Eqn::T::EPSILON.sqrt() * (t.abs() + t1.abs() + Eqn::T::one());
+        let t_interp = if t > t1 && t - t1 <= boundary_tol {
+            t1
+        } else if t < t0 && t0 - t <= boundary_tol {
+            t0
+        } else {
+            t
+        };
+        self.last_t = Some(t_interp);
+        self.checkpointer
+            .interpolate(t_interp, &mut self.x)
+            .unwrap();
         // for diffsl, we need to set data for the adjoint state!
         // basically just involves calling the normal rhs function with the new self.x
         // todo: this seems a bit hacky, perhaps a dedicated function on the trait for this?
-        self.checkpointer.problem().eqn.rhs().call(&self.x, t);
+        self.checkpointer
+            .problem()
+            .eqn
+            .rhs()
+            .call(&self.x, t_interp);
     }
 
     pub fn state(&self) -> &Eqn::V {
@@ -530,6 +547,10 @@ where
 
     pub fn last_h(&self) -> Option<Eqn::T> {
         self.context.borrow().checkpointer.last_h()
+    }
+
+    pub fn with_out(&self) -> bool {
+        self.rhs.with_out
     }
 
     pub fn correct_sg_for_init(&self, t: Eqn::T, s: &[Eqn::V], sg: &mut [Eqn::V]) {

@@ -1082,7 +1082,6 @@ where
         if let Some(h) = h {
             *state.as_mut().h = -h;
         }
-        state.state_mut_refresh_augmented::<Eqn, _>(augmented_eqn)?;
 
         state.set_step_size(
             state.h,
@@ -1107,7 +1106,6 @@ where
     where
         Eqn: OdeEquationsAdjoint,
     {
-        state.state_mut_refresh_augmented::<Eqn, _>(&mut augmented_eqn)?;
         ExplicitRk::new_augmented(self, state, tableau, augmented_eqn)
     }
 
