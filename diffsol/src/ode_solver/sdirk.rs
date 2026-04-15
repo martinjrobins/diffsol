@@ -1027,9 +1027,9 @@ mod test {
                 None => problem.tr_bdf2::<LS>(),
             },
             &soln,
-            |checkpointer| problem.tr_bdf2_state_adjoint::<LS, _>(checkpointer, None),
-            |state, checkpointer| {
-                problem.tr_bdf2_solver_adjoint_from_state::<LS, _>(state, checkpointer, None)
+            |adjoint_eqn| problem.tr_bdf2_state_adjoint::<LS, _>(adjoint_eqn),
+            |state, adjoint_eqn| {
+                problem.tr_bdf2_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn)
             },
         );
     }

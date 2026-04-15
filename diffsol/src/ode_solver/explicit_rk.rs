@@ -604,10 +604,8 @@ mod test {
                 None => problem.tsit45(),
             },
             &soln,
-            |checkpointer| problem.tsit45_state_adjoint(checkpointer, None),
-            |state, checkpointer| {
-                problem.tsit45_solver_adjoint_from_state(state, checkpointer, None)
-            },
+            |adjoint_eqn| problem.tsit45_state_adjoint(adjoint_eqn),
+            |state, adjoint_eqn| problem.tsit45_solver_adjoint_from_state(state, adjoint_eqn),
         );
     }
 }

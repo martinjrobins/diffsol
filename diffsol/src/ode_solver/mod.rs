@@ -33,7 +33,7 @@ mod tests {
     use crate::{
         ode_equations::{OdeEquationsImplicitAdjointWithReset, OdeEquationsImplicitSensWithReset},
         op::OpStatistics,
-        AdjointOdeSolverMethod, Checkpointing, Context, DenseMatrix, MatrixCommon, MatrixRef,
+        AdjointEquations, AdjointOdeSolverMethod, Context, DenseMatrix, MatrixCommon, MatrixRef,
         NonLinearOp, NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit,
         OdeEquationsImplicitAdjoint, OdeEquationsRef, OdeSolverConfig, OdeSolverMethod,
         OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Scale, VectorRef, VectorView,
@@ -1277,9 +1277,9 @@ mod tests {
         MethodB: AdjointOdeSolverMethod<'a, Eqn, MethodF, State = MethodF::State>,
         BuildForward: Fn(Option<MethodF::State>) -> Result<MethodF, DiffsolError>,
         BuildAdjointState:
-            Fn(&Checkpointing<'a, Eqn, MethodF>) -> Result<MethodF::State, DiffsolError>,
+            Fn(&mut AdjointEquations<'a, Eqn, MethodF>) -> Result<MethodF::State, DiffsolError>,
         BuildAdjointFromState:
-            Fn(MethodF::State, Checkpointing<'a, Eqn, MethodF>) -> Result<MethodB, DiffsolError>,
+            Fn(MethodF::State, AdjointEquations<'a, Eqn, MethodF>) -> Result<MethodB, DiffsolError>,
     {
         let expected_out = &soln.solution_points[0];
         let forward_stop_time = expected_out.t + Eqn::T::from_f64(1.0).unwrap();
@@ -1324,7 +1324,9 @@ mod tests {
             t_second_root,
         );
 
-        let mut post_reset_adjoint_state = build_adjoint_state(&post_reset_checkpointer).unwrap();
+        let mut post_reset_adjoint_eqn =
+            problem.adjoint_equations(post_reset_checkpointer.clone(), None);
+        let mut post_reset_adjoint_state = build_adjoint_state(&mut post_reset_adjoint_eqn).unwrap();
         let post_reset_root_idx = match post_reset_stop_reason {
             OdeSolverStopReason::RootFound(_, idx) => idx,
             OdeSolverStopReason::TstopReached => {
@@ -1335,11 +1337,10 @@ mod tests {
             }
         };
         {
-            let mut adjoint_eqn = problem.adjoint_eqn(post_reset_checkpointer.clone(), None);
             let terminal_state = final_forward_state.as_ref();
             post_reset_adjoint_state
                 .state_mut_adjoint_terminal_root(
-                    &mut adjoint_eqn,
+                    &mut post_reset_adjoint_eqn,
                     Some(post_reset_root_idx),
                     terminal_state.y,
                     terminal_state.dy,
@@ -1347,15 +1348,16 @@ mod tests {
                 )
                 .unwrap();
         }
-        let post_reset_adjoint_fixed_state = build_adjoint_state(&post_reset_checkpointer).unwrap();
+        let mut post_reset_adjoint_fixed_eqn =
+            problem.adjoint_equations(post_reset_checkpointer.clone(), None);
+        let post_reset_adjoint_fixed_state =
+            build_adjoint_state(&mut post_reset_adjoint_fixed_eqn).unwrap();
         let mut post_reset_adjoint =
-            build_adjoint_from_state(post_reset_adjoint_state, post_reset_checkpointer.clone())
+            build_adjoint_from_state(post_reset_adjoint_state, post_reset_adjoint_eqn)
                 .unwrap();
-        let mut post_reset_adjoint_fixed = build_adjoint_from_state(
-            post_reset_adjoint_fixed_state,
-            post_reset_checkpointer.clone(),
-        )
-        .unwrap();
+        let mut post_reset_adjoint_fixed =
+            build_adjoint_from_state(post_reset_adjoint_fixed_state, post_reset_adjoint_fixed_eqn)
+                .unwrap();
         post_reset_adjoint.set_stop_time(t_first_root).unwrap();
         while post_reset_adjoint.step().unwrap() != OdeSolverStopReason::TstopReached {}
         post_reset_adjoint_fixed
@@ -1393,8 +1395,8 @@ mod tests {
 
         let t0 = pre_reset_checkpointer.problem().t0;
         let ctx = pre_reset_checkpointer.problem().context().clone();
-        let pre_reset_adjoint =
-            build_adjoint_from_state(adjoint_state, pre_reset_checkpointer).unwrap();
+        let pre_reset_adjoint_eqn = problem.adjoint_equations(pre_reset_checkpointer, None);
+        let pre_reset_adjoint = build_adjoint_from_state(adjoint_state, pre_reset_adjoint_eqn).unwrap();
         let adjoint_state = pre_reset_adjoint
             .solve_adjoint_backwards_pass(&[], &[])
             .unwrap();

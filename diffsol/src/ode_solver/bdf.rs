@@ -2398,10 +2398,8 @@ mod test {
                 None => problem.bdf::<LS>(),
             },
             &soln,
-            |checkpointer| problem.bdf_state_adjoint::<LS, _>(checkpointer, None),
-            |state, checkpointer| {
-                problem.bdf_solver_adjoint_from_state::<LS, _>(state, checkpointer, None)
-            },
+            |adjoint_eqn| problem.bdf_state_adjoint::<LS, _>(adjoint_eqn),
+            |state, adjoint_eqn| problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn),
         );
     }
 

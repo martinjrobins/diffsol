@@ -524,6 +524,14 @@ where
         self.eqn
     }
 
+    pub fn last_t(&self) -> Eqn::T {
+        self.context.borrow().checkpointer.last_t()
+    }
+
+    pub fn last_h(&self) -> Option<Eqn::T> {
+        self.context.borrow().checkpointer.last_h()
+    }
+
     pub fn correct_sg_for_init(&self, t: Eqn::T, s: &[Eqn::V], sg: &mut [Eqn::V]) {
         let mut tmp = self.tmp.borrow_mut();
         for (s_i, sg_i) in s.iter().zip(sg.iter_mut()) {
