@@ -1020,7 +1020,7 @@ mod test {
     fn test_solve_adjoint_with_single_reset_root_tr_bdf2() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_single_reset_root_problem_adjoint;
         use crate::ode_solver::tests::test_solve_adjoint_with_single_reset_root;
-        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>();
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(true);
         test_solve_adjoint_with_single_reset_root(
             |state| match state {
                 Some(state) => problem.tr_bdf2_solver::<LS>(state),
@@ -1031,6 +1031,38 @@ mod test {
             |state, adjoint_eqn| {
                 problem.tr_bdf2_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn)
             },
+        );
+    }
+
+    #[test]
+    fn test_solve_adjoint_sum_squares_with_single_reset_root_tr_bdf2() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_single_reset_root_problem_adjoint;
+        use crate::ode_solver::tests::{
+            setup_test_adjoint_sum_squares_with_single_reset_root,
+            single_reset_root_discrete_times,
+            test_solve_adjoint_sum_squares_with_single_reset_root,
+        };
+        let (mut problem, soln) =
+            exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        let times = single_reset_root_discrete_times(soln.solution_points[0].t);
+        let (dgdp, data) = setup_test_adjoint_sum_squares_with_single_reset_root::<LS, _>(
+            &mut problem,
+            times.as_slice(),
+        );
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        test_solve_adjoint_sum_squares_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.tr_bdf2_solver::<LS>(state),
+                None => problem.tr_bdf2::<LS>(),
+            },
+            &soln,
+            |adjoint_eqn| problem.tr_bdf2_state_adjoint::<LS, _>(adjoint_eqn),
+            |state, adjoint_eqn| {
+                problem.tr_bdf2_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn)
+            },
+            dgdp,
+            data,
+            times.as_slice(),
         );
     }
 }

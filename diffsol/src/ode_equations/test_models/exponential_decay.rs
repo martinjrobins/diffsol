@@ -536,7 +536,9 @@ fn exponential_decay_out_first_state_sens_adj<M: MatrixHost>(
 }
 
 #[allow(clippy::type_complexity)]
-pub fn exponential_decay_with_single_reset_root_problem_adjoint<M: MatrixHost + 'static>() -> (
+pub fn exponential_decay_with_single_reset_root_problem_adjoint<M: MatrixHost + 'static>(
+    integrate_out: bool,
+) -> (
     OdeSolverProblem<
         impl OdeEquationsImplicitAdjointWithReset<
             M = M,
@@ -559,7 +561,7 @@ pub fn exponential_decay_with_single_reset_root_problem_adjoint<M: MatrixHost + 
     let r = 0.25;
     let problem = OdeBuilder::<M>::new()
         .p([k, r])
-        .integrate_out(true)
+        .integrate_out(integrate_out)
         .rhs_adjoint_implicit(
             exponential_decay::<M>,
             exponential_decay_jacobian::<M>,
