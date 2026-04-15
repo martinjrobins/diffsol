@@ -1157,7 +1157,7 @@ mod test {
             .bdf_solver_adjoint::<NalgebraLU<f64>, _>(checkpointer, None)
             .unwrap();
         let state = adjoint_solver
-            .solve_adjoint_backwards_pass(&[], &[])
+            .solve_adjoint_backwards_pass(None, &[], &[])
             .unwrap();
 
         let gs_adj = state.sg;

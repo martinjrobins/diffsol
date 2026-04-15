@@ -395,11 +395,6 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
 
         let ctx = eqn.context().clone();
         let t_event = fwd_state_minus.as_ref().t;
-        let t_state = if adj_eqn.last_t() < t_event {
-            adj_eqn.last_t()
-        } else {
-            t_event
-        };
         let y_minus = fwd_state_minus.as_ref().y;
         let y_plus = fwd_state_plus.as_ref().y;
         let f_minus = fwd_state_minus.as_ref().dy;
@@ -486,7 +481,6 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
 
         {
             let state = self.as_mut();
-            *state.t = t_state;
             for (dst, src) in state.s.iter_mut().zip(lambda_minus.iter()) {
                 dst.copy_from(src);
             }
@@ -530,6 +524,10 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
 
         if eqn.mass().is_some() {
             return Err(ode_solver_error!(MassMatrixNotSupported));
+        }
+
+        if !adj_eqn.with_out() {
+            return Ok(());
         }
 
         let Some(out_op) = eqn.out() else {

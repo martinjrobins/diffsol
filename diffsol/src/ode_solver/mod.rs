@@ -317,7 +317,7 @@ mod tests {
         );
         let rtol = Eqn::T::from_f64(1e-6).unwrap();
         let state = backwards_solver
-            .solve_adjoint_backwards_pass(times, dgdu.iter().collect::<Vec<_>>().as_slice())
+            .solve_adjoint_backwards_pass(None, times, dgdu.iter().collect::<Vec<_>>().as_slice())
             .unwrap();
         let gs_adj = state.into_common().sg;
         #[allow(clippy::needless_range_loop)]
@@ -349,7 +349,7 @@ mod tests {
         );
         let rtol = Eqn::T::from_f64(1e-6).unwrap();
         let state = backwards_solver
-            .solve_adjoint_backwards_pass(&[], &[])
+            .solve_adjoint_backwards_pass(None, &[], &[])
             .unwrap();
         let gs_adj = state.into_common().sg;
         #[allow(clippy::needless_range_loop)]
@@ -1342,13 +1342,11 @@ mod tests {
                 &final_forward_state,
             )
             .unwrap();
-        let mut post_reset_adjoint =
+        let post_reset_adjoint =
             build_adjoint_from_state(post_reset_adjoint_state, post_reset_adjoint_eqn).unwrap();
-        post_reset_adjoint
-            .set_stop_time(fwd_state_minus.as_ref().t)
+        let mut adjoint_state = post_reset_adjoint
+            .solve_adjoint_backwards_pass(Some(fwd_state_minus.as_ref().t), &[], &[])
             .unwrap();
-        while post_reset_adjoint.step().unwrap() != OdeSolverStopReason::TstopReached {}
-        let mut adjoint_state = post_reset_adjoint.into_state();
         let t0 = pre_reset_checkpointer.problem().t0;
         let ctx = pre_reset_checkpointer.problem().context().clone();
         let reset_problem = pre_reset_checkpointer.problem();
@@ -1370,7 +1368,7 @@ mod tests {
         let pre_reset_adjoint =
             build_adjoint_from_state(adjoint_state, pre_reset_adjoint_eqn).unwrap();
         let adjoint_state = pre_reset_adjoint
-            .solve_adjoint_backwards_pass(&[], &[])
+            .solve_adjoint_backwards_pass(None, &[], &[])
             .unwrap();
 
         let sens_points = soln.sens_solution_points.as_ref().unwrap();
