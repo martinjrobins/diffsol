@@ -726,59 +726,6 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         Ok(ret)
     }
 
-    /// Convert the state to an adjoint state by reversing the time direction and initializing the adjoint variables.
-    /// This is typically used as the starting point for adjoint sensitivity analysis.
-    fn into_adjoint<LS, Eqn, AugmentedEqn>(
-        self,
-        ode_problem: &OdeSolverProblem<Eqn>,
-        augmented_eqn: &mut AugmentedEqn,
-    ) -> Result<Self, DiffsolError>
-    where
-        Eqn: OdeEquationsImplicit<T = V::T, V = V, C = V::C>,
-        AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> + std::fmt::Debug,
-        LS: LinearSolver<AugmentedEqn::M>,
-    {
-        let mut state = self.into_common();
-        state.h = -state.h;
-        let naug = augmented_eqn.max_index();
-        let mut s = Vec::with_capacity(naug);
-        let mut ds = Vec::with_capacity(naug);
-        let nstates = augmented_eqn.rhs().nstates();
-        let ctx = ode_problem.context();
-        for i in 0..naug {
-            augmented_eqn.set_index(i);
-            let si = augmented_eqn.init().call(state.t);
-            let dsi = V::zeros(nstates, ctx.clone());
-            s.push(si);
-            ds.push(dsi);
-        }
-        state.s = s;
-        state.ds = ds;
-        let (dsg, sg) = if augmented_eqn.out().is_some() {
-            let mut sg = Vec::with_capacity(naug);
-            let mut dsg = Vec::with_capacity(naug);
-            for _ in 0..naug {
-                let out = augmented_eqn
-                    .out()
-                    .ok_or(ode_solver_error!(StateProblemMismatch))?;
-                let sgi = V::zeros(out.nout(), ctx.clone());
-                sg.push(sgi);
-                let dsgi = out.call(&state.s[dsg.len()], state.t);
-                dsg.push(dsgi);
-            }
-            (dsg, sg)
-        } else {
-            (vec![], vec![])
-        };
-        state.sg = sg;
-        state.dsg = dsg;
-        let mut state = Self::new_from_common(state);
-        let mut root_solver_sens =
-            NewtonNonlinearSolver::new(LS::default(), BacktrackingLineSearch::default());
-        state.set_consistent_augmented(ode_problem, augmented_eqn, &mut root_solver_sens)?;
-        Ok(state)
-    }
-
     /// Create a new solver state from an ODE problem, without any initialisation apart from setting the initial time state vector y,
     /// the initial time derivative dy and if applicable the sensitivity vectors s.
     /// This is useful if you want to set up the state yourself, or if you want to use a different nonlinear solver to make the state consistent,
