@@ -9,13 +9,14 @@ where
     Solver: OdeSolverMethod<'a, Eqn>,
     Eqn: OdeEquationsImplicitAdjoint<T = T, V = V, C = C, M = M> + 'a,
 {
-    let (checkpointing, _soln, _times) = solver.solve_with_checkpointing(10.0, None).unwrap();
+    let (checkpointing, _soln, _times, _stop_reason) =
+        solver.solve_with_checkpointing(10.0, None).unwrap();
     let adjoint_solver = solver
         .problem()
         .bdf_solver_adjoint::<LS, _>(checkpointing, Some(1))
         .unwrap();
     let final_state = adjoint_solver
-        .solve_adjoint_backwards_pass(&[], &[])
+        .solve_adjoint_backwards_pass(None, &[], &[])
         .unwrap();
     for (i, dgdp_i) in final_state.as_ref().sg.iter().enumerate() {
         println!("sens wrt parameter {i}: {dgdp_i:?}");

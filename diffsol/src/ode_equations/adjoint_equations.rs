@@ -1,4 +1,4 @@
-use num_traits::{One, Zero};
+use num_traits::{One, Signed, Zero};
 use std::{
     cell::RefCell,
     ops::{AddAssign, SubAssign},
@@ -9,7 +9,7 @@ use crate::{
     error::DiffsolError, op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations,
     Checkpointing, ConstantOp, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
     NonLinearOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint,
-    OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, Op, Vector,
+    OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, Op, Scalar, Vector,
 };
 
 pub struct AdjointContext<'a, Eqn, Method>
@@ -52,12 +52,29 @@ where
                 return;
             }
         }
-        self.last_t = Some(t);
-        self.checkpointer.interpolate(t, &mut self.x).unwrap();
+        // clamp tiny boundary overshoots to the boundary values to avoid interpolation errors
+        let t0 = self.checkpointer.problem().t0;
+        let t1 = self.checkpointer.last_t();
+        let boundary_tol = Eqn::T::EPSILON.sqrt() * (t.abs() + t1.abs() + Eqn::T::one());
+        let t_interp = if t > t1 && t - t1 <= boundary_tol {
+            t1
+        } else if t < t0 && t0 - t <= boundary_tol {
+            t0
+        } else {
+            t
+        };
+        self.last_t = Some(t_interp);
+        self.checkpointer
+            .interpolate(t_interp, &mut self.x)
+            .unwrap();
         // for diffsl, we need to set data for the adjoint state!
         // basically just involves calling the normal rhs function with the new self.x
         // todo: this seems a bit hacky, perhaps a dedicated function on the trait for this?
-        self.checkpointer.problem().eqn.rhs().call(&self.x, t);
+        self.checkpointer
+            .problem()
+            .eqn
+            .rhs()
+            .call(&self.x, t_interp);
     }
 
     pub fn state(&self) -> &Eqn::V {
@@ -130,25 +147,36 @@ where
     }
 }
 
-pub struct AdjointInit<'a, Eqn>
+pub struct AdjointInit<'a, Eqn, Method>
 where
     Eqn: OdeEquations,
+    Method: OdeSolverMethod<'a, Eqn>,
 {
     eqn: &'a Eqn,
+    _marker: std::marker::PhantomData<Method>,
 }
 
-impl<'a, Eqn> AdjointInit<'a, Eqn>
+impl<'a, Eqn, Method> AdjointInit<'a, Eqn, Method>
 where
     Eqn: OdeEquations,
+    Method: OdeSolverMethod<'a, Eqn>,
 {
-    pub fn new(eqn: &'a Eqn) -> Self {
-        Self { eqn }
+    pub fn new(
+        eqn: &'a Eqn,
+        _context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
+        _with_out: bool,
+    ) -> Self {
+        Self {
+            eqn,
+            _marker: std::marker::PhantomData,
+        }
     }
 }
 
-impl<Eqn> Op for AdjointInit<'_, Eqn>
+impl<'a, Eqn, Method> Op for AdjointInit<'a, Eqn, Method>
 where
     Eqn: OdeEquations,
+    Method: OdeSolverMethod<'a, Eqn>,
 {
     type T = Eqn::T;
     type V = Eqn::V;
@@ -169,9 +197,10 @@ where
     }
 }
 
-impl<Eqn> ConstantOp for AdjointInit<'_, Eqn>
+impl<'a, Eqn, Method> ConstantOp for AdjointInit<'a, Eqn, Method>
 where
     Eqn: OdeEquations,
+    Method: OdeSolverMethod<'a, Eqn>,
 {
     fn call_inplace(&self, _t: Self::T, y: &mut Self::V) {
         y.fill(Eqn::T::zero());
@@ -421,7 +450,7 @@ where
     context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
     tmp: RefCell<Eqn::V>,
     tmp2: RefCell<Eqn::V>,
-    init: AdjointInit<'a, Eqn>,
+    init: AdjointInit<'a, Eqn, Method>,
     atol: Option<&'a Eqn::V>,
     rtol: Option<Eqn::T>,
     out_rtol: Option<Eqn::T>,
@@ -439,7 +468,7 @@ where
             self.context.borrow().max_index,
         )));
         let rhs = AdjointRhs::new(self.eqn, context.clone(), self.rhs.with_out);
-        let init = AdjointInit::new(self.eqn);
+        let init = AdjointInit::new(self.eqn, context.clone(), self.rhs.with_out);
         let out = AdjointOut::new(self.eqn, context.clone(), self.out.with_out);
         let tmp = self.tmp.clone();
         let tmp2 = self.tmp2.clone();
@@ -477,7 +506,7 @@ where
     ) -> Self {
         let eqn = &problem.eqn;
         let rhs = AdjointRhs::new(eqn, context.clone(), with_out);
-        let init = AdjointInit::new(eqn);
+        let init = AdjointInit::new(eqn, context.clone(), with_out);
         let out = AdjointOut::new(eqn, context.clone(), with_out);
         let tmp = RefCell::new(<Eqn::V as Vector>::zeros(
             eqn.rhs().nparams(),
@@ -510,6 +539,18 @@ where
 
     pub fn eqn(&self) -> &'a Eqn {
         self.eqn
+    }
+
+    pub fn last_t(&self) -> Eqn::T {
+        self.context.borrow().checkpointer.last_t()
+    }
+
+    pub fn last_h(&self) -> Option<Eqn::T> {
+        self.context.borrow().checkpointer.last_h()
+    }
+
+    pub fn with_out(&self) -> bool {
+        self.rhs.with_out
     }
 
     pub fn correct_sg_for_init(&self, t: Eqn::T, s: &[Eqn::V], sg: &mut [Eqn::V]) {
@@ -578,7 +619,7 @@ where
     type Rhs = &'a AdjointRhs<'b, Eqn, Method>;
     type Mass = &'a AdjointMass<'b, Eqn>;
     type Root = <Eqn as OdeEquationsRef<'a>>::Root;
-    type Init = &'a AdjointInit<'b, Eqn>;
+    type Init = &'a AdjointInit<'b, Eqn, Method>;
     type Out = &'a AdjointOut<'b, Eqn, Method>;
     type Reset = <Eqn as OdeEquationsRef<'a>>::Reset;
 }
@@ -597,7 +638,7 @@ where
     fn root(&self) -> Option<<Eqn as OdeEquationsRef<'_>>::Root> {
         None
     }
-    fn init(&self) -> &AdjointInit<'a, Eqn> {
+    fn init(&self) -> &AdjointInit<'a, Eqn, Method> {
         &self.init
     }
     fn out(&self) -> Option<&AdjointOut<'a, Eqn, Method>> {

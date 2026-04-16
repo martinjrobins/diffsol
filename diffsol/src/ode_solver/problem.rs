@@ -4,8 +4,8 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     error::DiffsolError, vector::Vector, AdjointContext, AdjointEquations, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, Bdf, BdfState, Checkpointing, DefaultDenseMatrix, DenseMatrix,
-    ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch, NonLinearOp,
-    OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
+    ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch, OdeEquations,
+    OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
     OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Scalar, Sdirk,
     SensEquations, Tableau, VectorRef,
 };
@@ -137,7 +137,7 @@ where
 }
 
 macro_rules! sdirk_solver_from_tableau {
-    ($method:ident, $method_sens:ident, $method_solver:ident, $method_solver_sens:ident, $method_solver_adjoint:ident, $tableau:ident) => {
+    ($method:ident, $method_sens:ident, $method_solver:ident, $method_solver_sens:ident, $method_state_adjoint:ident, $method_solver_adjoint:ident, $method_solver_adjoint_from_state:ident, $tableau:ident) => {
         #[doc = concat!("Create a new ", stringify!($tableau), " SDIRK solver instance with the given initial state.\n\n",
             "This method uses the built-in ", stringify!($tableau), " Butcher tableau.\n\n",
             "# Type Parameters\n",
@@ -213,6 +213,43 @@ macro_rules! sdirk_solver_from_tableau {
             )
         }
 
+        #[doc = concat!("Create a new ", stringify!($tableau), " SDIRK adjoint initial state.")]
+        pub fn $method_state_adjoint<'a, LS: LinearSolver<Eqn::M>, S: OdeSolverMethod<'a, Eqn>>(
+            &'a self,
+            adjoint_eqn: &mut AdjointEquations<'a, Eqn, S>,
+        ) -> Result<RkState<Eqn::V>, DiffsolError>
+        where
+            Eqn: OdeEquationsImplicitAdjoint,
+        {
+            self.sdirk_state_adjoint::<LS, _, _>(
+                Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(self.context().clone()),
+                adjoint_eqn,
+            )
+        }
+
+        #[doc = concat!("Create a new ", stringify!($tableau), " SDIRK adjoint solver instance from an existing state.")]
+        pub fn $method_solver_adjoint_from_state<
+            'a,
+            LS: LinearSolver<Eqn::M>,
+            S: OdeSolverMethod<'a, Eqn>,
+        >(
+            &'a self,
+            state: RkState<Eqn::V>,
+            adjoint_eqn: AdjointEquations<'a, Eqn, S>,
+        ) -> Result<
+            Sdirk<'a, Eqn, LS, <Eqn::V as DefaultDenseMatrix>::M, AdjointEquations<'a, Eqn, S>>,
+            DiffsolError,
+        >
+        where
+            Eqn: OdeEquationsImplicitAdjoint,
+        {
+            self.sdirk_solver_adjoint_from_state(
+                Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(self.context().clone()),
+                state,
+                adjoint_eqn,
+            )
+        }
+
         #[doc = concat!("Create a new ", stringify!($tableau), " SDIRK solver instance with a consistent initial state.\n\n",
             "This convenience method combines state creation and solver initialization using the\n",
             "built-in ", stringify!($tableau), " Butcher tableau. It will create a consistent initial state,\n",
@@ -257,7 +294,7 @@ macro_rules! sdirk_solver_from_tableau {
 }
 
 macro_rules! rk_solver_from_tableau {
-    ($method:ident, $method_sens:ident, $method_solver:ident, $method_solver_sens:ident, $method_solver_adjoint:ident, $tableau:ident) => {
+    ($method:ident, $method_sens:ident, $method_solver:ident, $method_solver_sens:ident, $method_state_adjoint:ident, $method_solver_adjoint:ident, $method_solver_adjoint_from_state:ident, $tableau:ident) => {
         #[doc = concat!("Create a new ", stringify!($tableau), " explicit Runge-Kutta solver instance with the given initial state.\n\n",
             "This method uses the built-in ", stringify!($tableau), " Butcher tableau.\n\n",
             "# Arguments\n",
@@ -325,6 +362,39 @@ macro_rules! rk_solver_from_tableau {
                 Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(self.context().clone()),
                 checkpointer,
                 nout_override,
+            )
+        }
+
+        #[doc = concat!("Create a new ", stringify!($tableau), " explicit Runge-Kutta adjoint initial state.")]
+        pub fn $method_state_adjoint<'a, S: OdeSolverMethod<'a, Eqn>>(
+            &'a self,
+            adjoint_eqn: &mut AdjointEquations<'a, Eqn, S>,
+        ) -> Result<RkState<Eqn::V>, DiffsolError>
+        where
+            Eqn: OdeEquationsAdjoint,
+        {
+            self.explicit_rk_state_adjoint(
+                Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(self.context().clone()),
+                adjoint_eqn,
+            )
+        }
+
+        #[doc = concat!("Create a new ", stringify!($tableau), " explicit Runge-Kutta adjoint solver instance from an existing state.")]
+        pub fn $method_solver_adjoint_from_state<'a, S: OdeSolverMethod<'a, Eqn>>(
+            &'a self,
+            state: RkState<Eqn::V>,
+            adjoint_eqn: AdjointEquations<'a, Eqn, S>,
+        ) -> Result<
+            ExplicitRk<'a, Eqn, <Eqn::V as DefaultDenseMatrix>::M, AdjointEquations<'a, Eqn, S>>,
+            DiffsolError,
+        >
+        where
+            Eqn: OdeEquationsAdjoint,
+        {
+            self.explicit_rk_solver_adjoint_from_state(
+                Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(self.context().clone()),
+                state,
+                adjoint_eqn,
             )
         }
 
@@ -428,6 +498,21 @@ where
     /// Returns a reference to the context associated with the ODE equations.
     pub fn context(&self) -> &Eqn::C {
         self.eqn.context()
+    }
+}
+
+impl<Eqn> OdeSolverProblem<Eqn>
+where
+    Eqn: OdeEquationsAdjoint,
+{
+    pub fn adjoint_equations<'a, S: OdeSolverMethod<'a, Eqn>>(
+        &'a self,
+        checkpointer: Checkpointing<'a, Eqn, S>,
+        nout_override: Option<usize>,
+    ) -> AdjointEquations<'a, Eqn, S> {
+        let nout = nout_override.unwrap_or_else(|| self.eqn.nout());
+        let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer, nout)));
+        AdjointEquations::new(self, context, self.integrate_out)
     }
 }
 
@@ -544,7 +629,69 @@ where
     /// - `nout_override`: Optional override for the number of output equations
     ///
     /// # Returns
-    /// A BDF solver instance configured for adjoint sensitivity analysis
+    /// An initial BDF state configured for adjoint sensitivity analysis
+    #[allow(clippy::type_complexity)]
+    pub fn bdf_state_adjoint<'a, LS: LinearSolver<Eqn::M>, S: OdeSolverMethod<'a, Eqn>>(
+        &'a self,
+        augmented_eqn: &mut AdjointEquations<'a, Eqn, S>,
+    ) -> Result<BdfState<Eqn::V>, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitAdjoint,
+    {
+        let h = augmented_eqn.last_h();
+        let t = augmented_eqn.last_t();
+        let mut newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
+        let mut state = BdfState::new_without_initialise_augmented_at(self, augmented_eqn, t)?;
+        *state.as_mut().t = t;
+        if let Some(h) = h {
+            *state.as_mut().h = -h;
+        }
+        state.set_consistent(self, &mut newton_solver)?;
+        state.set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
+        state.set_step_size(
+            state.h,
+            augmented_eqn.atol().unwrap(),
+            augmented_eqn.rtol().unwrap(),
+            augmented_eqn,
+            1,
+        );
+        Ok(state)
+    }
+
+    /// Create a new BDF solver instance for the backwards solve for the adjoint equations, using
+    /// a caller-supplied state.
+    #[allow(clippy::type_complexity)]
+    pub fn bdf_solver_adjoint_from_state<
+        'a,
+        LS: LinearSolver<Eqn::M>,
+        S: OdeSolverMethod<'a, Eqn>,
+    >(
+        &'a self,
+        state: BdfState<Eqn::V>,
+        mut augmented_eqn: AdjointEquations<'a, Eqn, S>,
+    ) -> Result<
+        Bdf<
+            'a,
+            Eqn,
+            NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>,
+            <Eqn::V as DefaultDenseMatrix>::M,
+            AdjointEquations<'a, Eqn, S>,
+        >,
+        DiffsolError,
+    >
+    where
+        Eqn: OdeEquationsImplicitAdjoint,
+    {
+        let mut newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
+        let mut state = state;
+        state.set_consistent(self, &mut newton_solver)?;
+        state.set_consistent_augmented(self, &mut augmented_eqn, &mut newton_solver)?;
+        let newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
+        Bdf::new_augmented(state, self, augmented_eqn, newton_solver)
+    }
+
+    /// Create a new BDF solver instance for the backwards solve for the adjoint equations. This requires
+    /// a checkpointer to provide the forward solution during the backward solve.
     #[allow(clippy::type_complexity)]
     pub fn bdf_solver_adjoint<'a, LS: LinearSolver<Eqn::M>, S: OdeSolverMethod<'a, Eqn>>(
         &'a self,
@@ -563,27 +710,9 @@ where
     where
         Eqn: OdeEquationsImplicitAdjoint,
     {
-        let h = checkpointer.last_h();
-        let t = checkpointer.last_t();
-        let nout = nout_override.unwrap_or_else(|| self.eqn.nout());
-        let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer, nout)));
-        let mut augmented_eqn = AdjointEquations::new(self, context, self.integrate_out);
-        let mut newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
-        let mut state = BdfState::new_without_initialise_augmented(self, &mut augmented_eqn)?;
-        *state.as_mut().t = t;
-        if let Some(h) = h {
-            *state.as_mut().h = -h;
-        }
-        state.set_consistent(self, &mut newton_solver)?;
-        state.set_consistent_augmented(self, &mut augmented_eqn, &mut newton_solver)?;
-        state.set_step_size(
-            state.h,
-            augmented_eqn.atol().unwrap(),
-            augmented_eqn.rtol().unwrap(),
-            &augmented_eqn,
-            1,
-        );
-        Bdf::new_augmented(state, self, augmented_eqn, newton_solver)
+        let mut augmented_eqn = self.adjoint_equations(checkpointer, nout_override);
+        let state = self.bdf_state_adjoint::<LS, _>(&mut augmented_eqn)?;
+        self.bdf_solver_adjoint_from_state::<LS, _>(state, augmented_eqn)
     }
 
     /// Create a new BDF solver instance for the problem with forward sensitivities, given the initial state.
@@ -766,26 +895,61 @@ where
     where
         Eqn: OdeEquationsImplicitAdjoint,
     {
-        let t = checkpointer.last_t();
-        let h = checkpointer.last_h();
-        let nout = nout_override.unwrap_or_else(|| self.eqn.nout());
-        let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer, nout)));
-        let mut augmented_eqn = AdjointEquations::new(self, context, self.integrate_out);
-        let mut state = RkState::new_without_initialise_augmented(self, &mut augmented_eqn)?;
+        let mut augmented_eqn = self.adjoint_equations(checkpointer, nout_override);
+        let state = self.sdirk_state_adjoint::<LS, _, _>(tableau.clone(), &mut augmented_eqn)?;
+        self.sdirk_solver_adjoint_from_state::<LS, DM, _>(tableau, state, augmented_eqn)
+    }
+
+    pub(crate) fn sdirk_state_adjoint<
+        'a,
+        LS: LinearSolver<Eqn::M>,
+        DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+        S: OdeSolverMethod<'a, Eqn>,
+    >(
+        &'a self,
+        tableau: Tableau<DM>,
+        augmented_eqn: &mut AdjointEquations<'a, Eqn, S>,
+    ) -> Result<RkState<Eqn::V>, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitAdjoint,
+    {
+        let t = augmented_eqn.last_t();
+        let h = augmented_eqn.last_h();
+        let mut state = RkState::new_without_initialise_augmented_at(self, augmented_eqn, t)?;
         *state.as_mut().t = t;
         if let Some(h) = h {
             *state.as_mut().h = -h;
         }
         let mut newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
         state.set_consistent(self, &mut newton_solver)?;
-        state.set_consistent_augmented(self, &mut augmented_eqn, &mut newton_solver)?;
+        state.set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
         state.set_step_size(
             state.h,
             augmented_eqn.atol().unwrap(),
             augmented_eqn.rtol().unwrap(),
-            &augmented_eqn,
+            augmented_eqn,
             tableau.order(),
         );
+        Ok(state)
+    }
+
+    pub(crate) fn sdirk_solver_adjoint_from_state<
+        'a,
+        LS: LinearSolver<Eqn::M>,
+        DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+        S: OdeSolverMethod<'a, Eqn>,
+    >(
+        &'a self,
+        tableau: Tableau<DM>,
+        mut state: RkState<Eqn::V>,
+        mut augmented_eqn: AdjointEquations<'a, Eqn, S>,
+    ) -> Result<Sdirk<'a, Eqn, LS, DM, AdjointEquations<'a, Eqn, S>>, DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitAdjoint,
+    {
+        let mut newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
+        state.set_consistent(self, &mut newton_solver)?;
+        state.set_consistent_augmented(self, &mut augmented_eqn, &mut newton_solver)?;
         Sdirk::new_augmented(self, state, tableau, LS::default(), augmented_eqn)
     }
 
@@ -825,7 +989,9 @@ where
         tr_bdf2_sens,
         tr_bdf2_solver,
         tr_bdf2_solver_sens,
+        tr_bdf2_state_adjoint,
         tr_bdf2_solver_adjoint,
+        tr_bdf2_solver_adjoint_from_state,
         tr_bdf2
     );
     sdirk_solver_from_tableau!(
@@ -833,7 +999,9 @@ where
         esdirk34_sens,
         esdirk34_solver,
         esdirk34_solver_sens,
+        esdirk34_state_adjoint,
         esdirk34_solver_adjoint,
+        esdirk34_solver_adjoint_from_state,
         esdirk34
     );
 
@@ -890,35 +1058,54 @@ where
     where
         Eqn: OdeEquationsAdjoint,
     {
-        let t = checkpointer.last_t();
-        let h = checkpointer.last_h();
-        let nout = nout_override.unwrap_or_else(|| self.eqn.nout());
-        let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer, nout)));
-        let mut augmented_eqn = AdjointEquations::new(self, context, self.integrate_out);
-        let mut state = RkState::new_without_initialise_augmented(self, &mut augmented_eqn)?;
+        let mut augmented_eqn = self.adjoint_equations(checkpointer, nout_override);
+        let state = self.explicit_rk_state_adjoint(tableau.clone(), &mut augmented_eqn)?;
+        self.explicit_rk_solver_adjoint_from_state(tableau, state, augmented_eqn)
+    }
+
+    pub(crate) fn explicit_rk_state_adjoint<
+        'a,
+        DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+        S: OdeSolverMethod<'a, Eqn>,
+    >(
+        &'a self,
+        tableau: Tableau<DM>,
+        augmented_eqn: &mut AdjointEquations<'a, Eqn, S>,
+    ) -> Result<RkState<Eqn::V>, DiffsolError>
+    where
+        Eqn: OdeEquationsAdjoint,
+    {
+        let t = augmented_eqn.last_t();
+        let h = augmented_eqn.last_h();
+        let mut state = RkState::new_without_initialise_augmented_at(self, augmented_eqn, t)?;
         *state.as_mut().t = t;
         if let Some(h) = h {
             *state.as_mut().h = -h;
-        }
-
-        // eval the rhs since we're not calling set_consistent_augmented
-        let state_mut = state.as_mut();
-        augmented_eqn.update_rhs_out_state(state_mut.y, state_mut.dy, *state_mut.t);
-        let naug = augmented_eqn.max_index();
-        for i in 0..naug {
-            augmented_eqn.set_index(i);
-            augmented_eqn
-                .rhs()
-                .call_inplace(&state_mut.s[i], *state_mut.t, &mut state_mut.ds[i]);
         }
 
         state.set_step_size(
             state.h,
             augmented_eqn.atol().unwrap(),
             augmented_eqn.rtol().unwrap(),
-            &augmented_eqn,
+            augmented_eqn,
             tableau.order(),
         );
+        Ok(state)
+    }
+
+    pub(crate) fn explicit_rk_solver_adjoint_from_state<
+        'a,
+        DM: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+        S: OdeSolverMethod<'a, Eqn>,
+    >(
+        &'a self,
+        tableau: Tableau<DM>,
+        state: RkState<Eqn::V>,
+        augmented_eqn: AdjointEquations<'a, Eqn, S>,
+    ) -> Result<ExplicitRk<'a, Eqn, DM, AdjointEquations<'a, Eqn, S>>, DiffsolError>
+    where
+        Eqn: OdeEquationsAdjoint,
+    {
         ExplicitRk::new_augmented(self, state, tableau, augmented_eqn)
     }
 
@@ -953,7 +1140,9 @@ where
         tsit45_sens,
         tsit45_solver,
         tsit45_solver_sens,
+        tsit45_state_adjoint,
         tsit45_solver_adjoint,
+        tsit45_solver_adjoint_from_state,
         tsit45
     );
 }

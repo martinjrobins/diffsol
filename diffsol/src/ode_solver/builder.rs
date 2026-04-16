@@ -675,6 +675,66 @@ where
         }
     }
 
+    /// Set a root equation for the ODE for adjoint sensitivity analysis.
+    ///
+    /// # Arguments
+    /// - `root`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the root function.
+    /// - `root_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the root function with the vector v.
+    /// - `root_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the Jacobian of the root function with the vector v.
+    /// - `root_sens_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the partial derivative of the root function wrt the parameters with the vector v.
+    /// - `nroots`: Number of root outputs.
+    #[allow(clippy::type_complexity)]
+    pub fn root_adjoint_implicit<F, G, H, I>(
+        self,
+        root: F,
+        root_jac: G,
+        root_adjoint: H,
+        root_sens_adjoint: I,
+        nroots: usize,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, ClosureWithAdjoint<M, F, G, H, I>, Out, Reset>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, ClosureWithAdjoint<M, F, G, H, I>, Out, Reset> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: Some(ClosureWithAdjoint::new(
+                root,
+                root_jac,
+                root_adjoint,
+                root_sens_adjoint,
+                nstates,
+                nroots,
+                nroots,
+                self.ctx.clone(),
+            )),
+            out: self.out,
+
+            reset: self.reset,
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
     /// Set the reset function of the ODE.
     ///
     /// The reset function is called after a root event at index 0 to update the state.
@@ -801,6 +861,63 @@ where
                 reset,
                 reset_jac,
                 reset_sens,
+                nstates,
+                nstates,
+                nstates,
+                self.ctx.clone(),
+            )),
+            t0: self.t0,
+            h0: self.h0,
+            rtol: self.rtol,
+            atol: self.atol,
+            sens_atol: self.sens_atol,
+            sens_rtol: self.sens_rtol,
+            out_rtol: self.out_rtol,
+            out_atol: self.out_atol,
+            param_rtol: self.param_rtol,
+            param_atol: self.param_atol,
+            p: self.p,
+            use_coloring: self.use_coloring,
+            integrate_out: self.integrate_out,
+            ctx: self.ctx,
+            ic_options: self.ic_options,
+            ode_options: self.ode_options,
+        }
+    }
+
+    /// Set the reset function of the ODE for adjoint sensitivity analysis.
+    ///
+    /// # Arguments
+    /// - `reset`: Function of type Fn(x: &V, p: &V, t: S, y: &mut V) that computes the new state.
+    /// - `reset_jac`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the Jacobian of the reset function with the vector v.
+    /// - `reset_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the Jacobian of the reset function with the vector v.
+    /// - `reset_sens_adjoint`: Function of type Fn(x: &V, p: &V, t: S, v: &V, y: &mut V) that computes the multiplication of the transpose of the partial derivative of the reset function wrt the parameters with the vector v.
+    #[allow(clippy::type_complexity)]
+    pub fn reset_adjoint_implicit<F, G, H, I>(
+        self,
+        reset: F,
+        reset_jac: G,
+        reset_adjoint: H,
+        reset_sens_adjoint: I,
+    ) -> OdeBuilder<M, Rhs, Init, Mass, Root, Out, ClosureWithAdjoint<M, F, G, H, I>>
+    where
+        F: Fn(&M::V, &M::V, M::T, &mut M::V),
+        G: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        H: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+        I: Fn(&M::V, &M::V, M::T, &M::V, &mut M::V),
+    {
+        let nstates = 0;
+        OdeBuilder::<M, Rhs, Init, Mass, Root, Out, ClosureWithAdjoint<M, F, G, H, I>> {
+            rhs: self.rhs,
+            init: self.init,
+            mass: self.mass,
+            root: self.root,
+            out: self.out,
+            reset: Some(ClosureWithAdjoint::new(
+                reset,
+                reset_jac,
+                reset_adjoint,
+                reset_sens_adjoint,
                 nstates,
                 nstates,
                 nstates,

@@ -1783,16 +1783,17 @@ mod test {
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let (problem, _soln) = exponential_decay_problem_adjoint::<M>(true);
         let mut s = problem.bdf::<LS>().unwrap();
-        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdu.ncols()))
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 160
+        number_of_calls: 159
         number_of_jac_muls: 2
         number_of_matrix_evals: 1
-        number_of_jac_adj_muls: 220
+        number_of_jac_adj_muls: 222
         "###);
     }
 
@@ -1803,7 +1804,7 @@ mod test {
         let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
         let (problem, _soln) = exponential_decay_problem_adjoint::<M>(false);
         let mut s = problem.bdf::<LS>().unwrap();
-        let (checkpointer, soln) = s
+        let (checkpointer, soln, _stop_reason) = s
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
@@ -1811,10 +1812,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 588
-        number_of_jac_muls: 6
-        number_of_matrix_evals: 3
-        number_of_jac_adj_muls: 1054
+        number_of_calls: 546
+        number_of_jac_muls: 4
+        number_of_matrix_evals: 2
+        number_of_jac_adj_muls: 1056
         "###);
     }
 
@@ -1826,7 +1827,8 @@ mod test {
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let mut s = problem.bdf::<LS>().unwrap();
-        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdu.ncols()))
             .unwrap();
@@ -1843,7 +1845,8 @@ mod test {
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let mut s = problem.bdf::<LS>().unwrap();
-        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdu.ncols()))
             .unwrap();
@@ -1857,16 +1860,17 @@ mod test {
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let (problem, _soln) = exponential_decay_with_algebraic_adjoint_problem::<M>(true);
         let mut s = problem.bdf::<LS>().unwrap();
-        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdu.ncols()))
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 163
-        number_of_jac_muls: 12
-        number_of_matrix_evals: 4
-        number_of_jac_adj_muls: 106
+        number_of_calls: 151
+        number_of_jac_muls: 15
+        number_of_matrix_evals: 5
+        number_of_jac_adj_muls: 96
         "###);
     }
 
@@ -1877,7 +1881,7 @@ mod test {
         let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
         let (problem, _soln) = exponential_decay_with_algebraic_adjoint_problem::<M>(false);
         let mut s = problem.bdf::<LS>().unwrap();
-        let (checkpointer, soln) = s
+        let (checkpointer, soln, _stop_reason) = s
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
@@ -1886,9 +1890,9 @@ mod test {
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 220
-        number_of_jac_muls: 12
-        number_of_matrix_evals: 4
-        number_of_jac_adj_muls: 404
+        number_of_jac_muls: 15
+        number_of_matrix_evals: 5
+        number_of_jac_adj_muls: 414
         "###);
     }
 
@@ -1901,7 +1905,8 @@ mod test {
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let mut s = problem.bdf::<LS>().unwrap();
-        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpointer, None)
             .unwrap();
@@ -2039,7 +2044,7 @@ mod test {
         let (mut problem, _soln) = robertson_ode::robertson_ode_diffsl_problem::<M, LlvmModule>();
         problem.ode_options.max_nonlinear_solver_failures = 1000;
         let mut s = problem.bdf::<LS>().unwrap();
-        let (checkpointer, soln) = s
+        let (checkpointer, soln, _stop_reason) = s
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
@@ -2380,6 +2385,52 @@ mod test {
         let (problem, soln) = exponential_decay_with_reset_problem_sens::<M>();
         let solver = problem.bdf_sens::<LS>().unwrap();
         test_solve_dense_sensitivities_with_reset(solver, &soln);
+    }
+
+    #[test]
+    fn test_solve_adjoint_with_single_reset_root_bdf() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_single_reset_root_problem_adjoint;
+        use crate::ode_solver::tests::test_solve_adjoint_with_single_reset_root;
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(true);
+        test_solve_adjoint_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.bdf_solver(state),
+                None => problem.bdf::<LS>(),
+            },
+            &soln,
+            |adjoint_eqn| problem.bdf_state_adjoint::<LS, _>(adjoint_eqn),
+            |state, adjoint_eqn| problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn),
+        );
+    }
+
+    #[test]
+    fn test_solve_adjoint_sum_squares_with_single_reset_root_bdf() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_single_reset_root_problem_adjoint;
+        use crate::ode_solver::tests::{
+            setup_test_adjoint_sum_squares_with_single_reset_root,
+            single_reset_root_discrete_times,
+            test_solve_adjoint_sum_squares_with_single_reset_root,
+        };
+        let (mut problem, soln) =
+            exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        let times = single_reset_root_discrete_times(soln.solution_points[0].t);
+        let (dgdp, data) = setup_test_adjoint_sum_squares_with_single_reset_root::<LS, _>(
+            &mut problem,
+            times.as_slice(),
+        );
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        test_solve_adjoint_sum_squares_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.bdf_solver(state),
+                None => problem.bdf::<LS>(),
+            },
+            &soln,
+            |adjoint_eqn| problem.bdf_state_adjoint::<LS, _>(adjoint_eqn),
+            |state, adjoint_eqn| problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn),
+            dgdp,
+            data,
+            times.as_slice(),
+        );
     }
 
     #[test]

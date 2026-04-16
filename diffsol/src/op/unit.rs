@@ -169,7 +169,7 @@ mod tests {
     type M = NalgebraMat<f64>;
 
     fn assert_raw_and_parameterised_unit(op: &UnitCallable<M>) {
-        let ctx = op.context().clone();
+        let ctx = *op.context();
         let x = ctx.vector_from_vec(vec![1.0, -2.0, 3.0]);
         let v = ctx.vector_from_vec(vec![0.5, -1.5, 2.0]);
         let mut y: crate::NalgebraVec<f64> = ctx.vector_from_vec(vec![9.0, 8.0, 7.0]);

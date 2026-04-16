@@ -447,10 +447,10 @@ mod tests {
         NonLinearOp::call_inplace(&&op, &x, 0.0, &mut y);
         y.assert_eq_st(&x, 1e-12);
 
-        (&op).jac_mul_inplace(&x, 0.0, &x, &mut y);
+        op.jac_mul_inplace(&x, 0.0, &x, &mut y);
         y.assert_eq_st(&x, 1e-12);
 
-        (&op).jac_transpose_mul_inplace(&x, 0.0, &x, &mut y);
+        op.jac_transpose_mul_inplace(&x, 0.0, &x, &mut y);
         y.assert_eq_st(&x, 1e-12);
 
         NonLinearOpSens::sens_mul_inplace(&&op, &x, 0.0, &x, &mut y);
@@ -459,10 +459,10 @@ mod tests {
         NonLinearOpSensAdjoint::sens_transpose_mul_inplace(&&op, &x, 0.0, &x, &mut y);
         y.assert_eq_st(&crate::NalgebraVec::zeros(2, NalgebraContext), 1e-12);
 
-        (&op).gemv_inplace(&x, 0.0, 0.0, &mut y);
+        op.gemv_inplace(&x, 0.0, 0.0, &mut y);
         y.assert_eq_st(&x, 1e-12);
 
-        (&op).gemv_transpose_inplace(&x, 0.0, 0.0, &mut y);
+        op.gemv_transpose_inplace(&x, 0.0, 0.0, &mut y);
         y.assert_eq_st(&x, 1e-12);
 
         let mut y_const = crate::NalgebraVec::zeros(2, NalgebraContext);
@@ -475,9 +475,9 @@ mod tests {
         let op_ref_stats = pop.statistics();
         assert!(op_ref_stats.number_of_calls >= 1);
 
-        let mut op_mut = ForwardingOp::new();
-        assert_eq!((&mut op_mut).nstates(), 2);
-        assert_eq!((&mut op_mut).nout(), 2);
-        assert_eq!((&mut op_mut).nparams(), 2);
+        let op_mut = ForwardingOp::new();
+        assert_eq!(op_mut.nstates(), 2);
+        assert_eq!(op_mut.nout(), 2);
+        assert_eq!(op_mut.nparams(), 2);
     }
 }

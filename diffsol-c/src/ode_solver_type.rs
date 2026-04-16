@@ -567,7 +567,7 @@ impl OdeSolverType {
         for<'b> &'b M::V: VectorRef<M::V>,
         for<'b> &'b M: MatrixRef<M>,
     {
-        let (chk, ys) = solver.solve_dense_with_checkpointing(t_eval, None)?;
+        let (chk, ys, stop_reason) = solver.solve_dense_with_checkpointing(t_eval, None)?;
         let eqn = solver.problem().eqn();
         let ctx = eqn.context();
         let mut g_m = <M::V as DefaultDenseMatrix>::M::zeros(eqn.nout(), t_eval.len(), ctx.clone());
@@ -593,6 +593,7 @@ impl OdeSolverType {
                 .solve_adjoint_backwards::<M, CG, <M as DefaultSolver>::LS, S>(
                     solver.problem(),
                     chk,
+                    stop_reason,
                     &g_m,
                     t_eval,
                     Some(1),
@@ -601,6 +602,7 @@ impl OdeSolverType {
                 .solve_adjoint_backwards::<M, CG, <M as LuValidator<M>>::LS, S>(
                     solver.problem(),
                     chk,
+                    stop_reason,
                     &g_m,
                     t_eval,
                     Some(1),
@@ -609,6 +611,7 @@ impl OdeSolverType {
                 .solve_adjoint_backwards::<M, CG, <M as KluValidator<M>>::LS, S>(
                     solver.problem(),
                     chk,
+                    stop_reason,
                     &g_m,
                     t_eval,
                     Some(1),
@@ -621,6 +624,7 @@ impl OdeSolverType {
         &self,
         problem: &'solver OdeSolverProblem<DiffSl<M, CG>>,
         checkpointing: Checkpointing<'solver, DiffSl<M, CG>, S>,
+        _stop_reason: OdeSolverStopReason<M::T>,
         g_m: &<M::V as DefaultDenseMatrix>::M,
         t_eval: &[M::T],
         nout_override: Option<usize>,
@@ -637,15 +641,15 @@ impl OdeSolverType {
         match self {
             OdeSolverType::Bdf => problem
                 .bdf_solver_adjoint::<LS, _>(checkpointing, nout_override)?
-                .solve_adjoint_backwards_pass(t_eval, &[g_m])
+                .solve_adjoint_backwards_pass(None, t_eval, &[g_m])
                 .map(|res| res.into_common().sg),
             OdeSolverType::Esdirk34 => problem
                 .esdirk34_solver_adjoint::<LS, _>(checkpointing, nout_override)?
-                .solve_adjoint_backwards_pass(t_eval, &[g_m])
+                .solve_adjoint_backwards_pass(None, t_eval, &[g_m])
                 .map(|res| res.into_common().sg),
             OdeSolverType::TrBdf2 => problem
                 .tr_bdf2_solver_adjoint::<LS, _>(checkpointing, nout_override)?
-                .solve_adjoint_backwards_pass(t_eval, &[g_m])
+                .solve_adjoint_backwards_pass(None, t_eval, &[g_m])
                 .map(|res| res.into_common().sg),
             OdeSolverType::Tsit45 => Err(DiffsolError::Other(
                 "Tsit45 solver does not support adjoint sensitivity analysis.".to_string(),

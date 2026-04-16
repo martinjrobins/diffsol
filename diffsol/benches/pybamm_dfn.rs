@@ -1,7 +1,10 @@
 use criterion::{criterion_group, criterion_main, Criterion};
+#[cfg(feature = "diffsl-llvm")]
 use diffsol::{OdeBuilder, OdeSolverMethod};
 
+#[cfg(feature = "diffsl-llvm")]
 type M = diffsol::FaerSparseMat<f64>;
+#[cfg(feature = "diffsl-llvm")]
 type LS = diffsol::FaerSparseLU<f64>;
 
 fn criterion_benchmark(c: &mut Criterion) {

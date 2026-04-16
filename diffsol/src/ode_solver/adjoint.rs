@@ -45,8 +45,12 @@ where
     /// element of the vector is a dense matrix of size `n_o x n`, where `n_o`` is the number of outputs in the model
     /// and `n` is the number of timepoints. The i-th column of `dgdu_eval` is the gradient of `g_i` with respect to `u_i`.
     /// The input `t_eval` is a vector of length `n`, where the i-th element is the timepoint `t_i`.
+    ///
+    /// When solving only part of a checkpointed trajectory by passing `t0`, any `t_eval` entries
+    /// outside the active backwards integration window `[t0, self.state().t]` are ignored.
     fn solve_adjoint_backwards_pass(
         mut self,
+        t0: Option<Eqn::T>,
         t_eval: &[Eqn::T],
         dgdu_eval: &[&<Eqn::V as DefaultDenseMatrix>::M],
     ) -> Result<Self::State, DiffsolError>
@@ -103,9 +107,18 @@ where
         } else {
             None
         };
+        let problem_t0 = self.problem().t0;
+        let solve_t0 = t0.unwrap_or(problem_t0);
+        let solve_t1 = self.state().t;
 
-        // solve the adjoint problem stopping at each t_eval
-        for (i, t) in t_eval.iter().enumerate().rev() {
+        // solve the adjoint problem stopping at each t_eval at or after the requested stop time
+        for (i, t) in t_eval
+            .iter()
+            .enumerate()
+            .rev()
+            .filter(|(_, t)| **t <= solve_t1)
+            .take_while(|(_, t)| **t >= solve_t0)
+        {
             // integrate to t if not already there
             match self.set_stop_time(*t) {
                 Ok(_) => while self.step()? != OdeSolverStopReason::TstopReached {},
@@ -119,19 +132,21 @@ where
             }
         }
 
-        // keep integrating until t0
-        let t0 = self.problem().t0;
-        match self.set_stop_time(t0) {
+        // keep integrating until the requested stop time
+        match self.set_stop_time(solve_t0) {
             Ok(_) => while self.step()? != OdeSolverStopReason::TstopReached {},
             Err(DiffsolError::OdeSolverError(OdeSolverError::StopTimeAtCurrentTime)) => {}
             e => e?,
         }
 
-        // correct the adjoint solution for the initial conditions
+        // correct the adjoint solution for the initial conditions only when solving
+        // all the way back to the problem's initial time
         let (mut state, aug_eqn) = self.into_state_and_eqn();
         let aug_eqn = aug_eqn.unwrap();
-        let state_mut = state.as_mut();
-        aug_eqn.correct_sg_for_init(t0, state_mut.s, state_mut.sg);
+        if t0.is_none() {
+            let state_mut = state.as_mut();
+            aug_eqn.correct_sg_for_init(problem_t0, state_mut.s, state_mut.sg);
+        }
 
         // return the solution
         Ok(state)

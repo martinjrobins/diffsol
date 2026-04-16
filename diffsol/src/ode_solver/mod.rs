@@ -27,18 +27,21 @@ mod tests {
     use crate::error::{DiffsolError, OdeSolverError};
     use crate::matrix::Matrix;
     use crate::ode_solver::sensitivities::SensitivitiesOdeSolverMethod;
+    use crate::ode_solver::solution::Solution;
     use crate::op::unit::UnitCallable;
     use crate::op::ParameterisedOp;
     use crate::Scalar;
     use crate::{
-        ode_equations::OdeEquationsImplicitSensWithReset, op::OpStatistics, AdjointOdeSolverMethod,
-        Context, DenseMatrix, MatrixCommon, MatrixRef, NonLinearOpJacobian, OdeEquations,
-        OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsRef, OdeSolverConfig,
-        OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Scale, VectorRef,
-        VectorView, VectorViewMut,
+        ode_equations::{OdeEquationsImplicitAdjointWithReset, OdeEquationsImplicitSensWithReset},
+        op::OpStatistics,
+        AdjointEquations, AdjointOdeSolverMethod, Context, DenseMatrix, MatrixCommon, MatrixRef,
+        NonLinearOp, NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit,
+        OdeEquationsImplicitAdjoint, OdeEquationsRef, OdeSolverConfig, OdeSolverMethod,
+        OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Scale, VectorRef, VectorView,
+        VectorViewMut,
     };
     use crate::{
-        ConstantOp, ConstantOpSens, DefaultDenseMatrix, DefaultSolver, LinearSolver, NonLinearOp,
+        ConstantOp, ConstantOpSens, DefaultDenseMatrix, DefaultSolver, LinearSolver,
         NonLinearOpSens, Op, Vector,
     };
     use num_traits::{FromPrimitive, One, Signed, Zero};
@@ -292,6 +295,134 @@ mod tests {
         (dgdp, data)
     }
 
+    pub fn single_reset_root_discrete_times<T: Scalar>(t_stop: T) -> Vec<T> {
+        let t_root = t_stop / T::from_f64(2.0).unwrap();
+        [0.25, 0.75, 1.25, 1.75]
+            .into_iter()
+            .map(|factor| t_root * T::from_f64(factor).unwrap())
+            .collect()
+    }
+
+    fn solve_dense_with_single_reset_root<'a, Eqn, Method, BuildForward>(
+        build_forward: BuildForward,
+        times: &[Eqn::T],
+    ) -> <Eqn::V as DefaultDenseMatrix>::M
+    where
+        Eqn: OdeEquationsImplicitAdjointWithReset + 'a,
+        Eqn::V: DefaultDenseMatrix,
+        Method: OdeSolverMethod<'a, Eqn>,
+        BuildForward: Fn(Option<Method::State>) -> Result<Method, DiffsolError>,
+    {
+        let mut soln = Solution::<Eqn::V>::new_dense(times.to_vec()).unwrap();
+        let first_forward_solver = build_forward(None).unwrap().solve_soln(&mut soln).unwrap();
+        match soln.stop_reason {
+            Some(OdeSolverStopReason::RootFound(_, 0)) => {}
+            Some(OdeSolverStopReason::RootFound(_, idx)) => {
+                panic!("expected first solve_soln() segment to stop on root 0, got root {idx}")
+            }
+            Some(OdeSolverStopReason::TstopReached) => {
+                panic!("expected first solve_soln() segment to stop on the interior root")
+            }
+            Some(OdeSolverStopReason::InternalTimestep) | None => {
+                panic!("first solve_soln() segment did not finish with a terminal stop reason")
+            }
+        }
+
+        let mut state_after_reset = first_forward_solver.state_clone();
+        {
+            let problem = first_forward_solver.problem();
+            let reset_fn = problem.eqn.reset().unwrap();
+            state_after_reset
+                .state_mut_op(&problem.eqn, &reset_fn)
+                .unwrap();
+        }
+
+        build_forward(Some(state_after_reset))
+            .unwrap()
+            .solve_soln(&mut soln)
+            .unwrap();
+        assert!(
+            soln.is_complete(),
+            "expected stitched solve_soln() output to cover all requested observation times",
+        );
+        soln.ys
+    }
+
+    pub fn setup_test_adjoint_sum_squares_with_single_reset_root<'a, LS, Eqn>(
+        problem: &'a mut OdeSolverProblem<Eqn>,
+        times: &[Eqn::T],
+    ) -> (
+        <Eqn::V as DefaultDenseMatrix>::M,
+        <Eqn::V as DefaultDenseMatrix>::M,
+    )
+    where
+        Eqn: OdeEquationsImplicitAdjointWithReset + 'a,
+        LS: LinearSolver<Eqn::M>,
+        Eqn::V: DefaultDenseMatrix,
+        for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+        for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+    {
+        let nparams = problem.eqn.nparams();
+        let nout = 2;
+        let ctx = problem.eqn.context();
+        let mut dgdp = <Eqn::V as DefaultDenseMatrix>::M::zeros(nparams, nout, ctx.clone());
+
+        let mut p_0 = ctx.vector_zeros(nparams);
+        problem.eqn.get_params(&mut p_0);
+        let h_base = Eqn::T::from_f64(1e-10).unwrap();
+        let mut h = Eqn::V::from_element(nparams, h_base, ctx.clone());
+        h.axpy(h_base, &p_0, Eqn::T::one());
+        let mut p_data = p_0.clone();
+        p_data.axpy(Eqn::T::from_f64(0.1).unwrap(), &p_0, Eqn::T::one());
+        let p_base = p_0.clone();
+
+        problem.eqn.set_params(&p_data);
+        let data = solve_dense_with_single_reset_root::<Eqn, _, _>(
+            |state| match state {
+                Some(state) => problem.bdf_solver(state),
+                None => problem.bdf::<LS>(),
+            },
+            times,
+        );
+
+        for i in 0..nparams {
+            p_0.set_index(i, p_base.get_index(i) + h.get_index(i));
+            problem.eqn.set_params(&p_0);
+            let g_pos = {
+                let v = solve_dense_with_single_reset_root::<Eqn, _, _>(
+                    |state| match state {
+                        Some(state) => problem.bdf_solver(state),
+                        None => problem.bdf::<LS>(),
+                    },
+                    times,
+                );
+                sum_squares(&v, &data)
+            };
+
+            p_0.set_index(i, p_base.get_index(i) - h.get_index(i));
+            problem.eqn.set_params(&p_0);
+            let g_neg = {
+                let v = solve_dense_with_single_reset_root::<Eqn, _, _>(
+                    |state| match state {
+                        Some(state) => problem.bdf_solver(state),
+                        None => problem.bdf::<LS>(),
+                    },
+                    times,
+                );
+                sum_squares(&v, &data)
+            };
+
+            p_0.set_index(i, p_base.get_index(i));
+
+            let delta = (g_pos - g_neg) / Scale(Eqn::T::from_f64(2.).unwrap() * h.get_index(i));
+            for j in 0..nout {
+                dgdp.set_index(i, j, delta.get_index(j));
+            }
+        }
+        problem.eqn.set_params(&p_base);
+        (dgdp, data)
+    }
+
     pub fn test_adjoint_sum_squares<'a, Eqn, SolverF, SolverB>(
         backwards_solver: SolverB,
         dgdp_check: <Eqn::V as DefaultDenseMatrix>::M,
@@ -315,7 +446,7 @@ mod tests {
         );
         let rtol = Eqn::T::from_f64(1e-6).unwrap();
         let state = backwards_solver
-            .solve_adjoint_backwards_pass(times, dgdu.iter().collect::<Vec<_>>().as_slice())
+            .solve_adjoint_backwards_pass(None, times, dgdu.iter().collect::<Vec<_>>().as_slice())
             .unwrap();
         let gs_adj = state.into_common().sg;
         #[allow(clippy::needless_range_loop)]
@@ -347,7 +478,7 @@ mod tests {
         );
         let rtol = Eqn::T::from_f64(1e-6).unwrap();
         let state = backwards_solver
-            .solve_adjoint_backwards_pass(&[], &[])
+            .solve_adjoint_backwards_pass(None, &[], &[])
             .unwrap();
         let gs_adj = state.into_common().sg;
         #[allow(clippy::needless_range_loop)]
@@ -1252,5 +1383,300 @@ mod tests {
             t_stop,
             t_second_root,
         );
+    }
+
+    pub fn test_solve_adjoint_with_single_reset_root<
+        'a,
+        Eqn,
+        MethodF,
+        MethodB,
+        BuildForward,
+        BuildAdjointState,
+        BuildAdjointFromState,
+    >(
+        build_forward: BuildForward,
+        soln: &OdeSolverSolution<Eqn::V>,
+        build_adjoint_state: BuildAdjointState,
+        build_adjoint_from_state: BuildAdjointFromState,
+    ) where
+        Eqn: OdeEquationsImplicitAdjointWithReset + 'a,
+        Eqn::M: DefaultSolver,
+        Eqn::V: DefaultDenseMatrix,
+        MethodF: OdeSolverMethod<'a, Eqn>,
+        MethodB: AdjointOdeSolverMethod<'a, Eqn, MethodF, State = MethodF::State>,
+        BuildForward: Fn(Option<MethodF::State>) -> Result<MethodF, DiffsolError>,
+        BuildAdjointState:
+            Fn(&mut AdjointEquations<'a, Eqn, MethodF>) -> Result<MethodF::State, DiffsolError>,
+        BuildAdjointFromState:
+            Fn(MethodF::State, AdjointEquations<'a, Eqn, MethodF>) -> Result<MethodB, DiffsolError>,
+    {
+        let expected_out = &soln.solution_points[0];
+        let forward_stop_time = expected_out.t + Eqn::T::from_f64(1.0).unwrap();
+
+        let mut first_forward_solver = build_forward(None).unwrap();
+        let (pre_reset_checkpointer, _, _, _) = first_forward_solver
+            .solve_with_checkpointing(forward_stop_time, None)
+            .unwrap();
+        let fwd_state_minus = first_forward_solver.into_state();
+        let mut state_after_reset = fwd_state_minus.clone();
+        let problem = pre_reset_checkpointer.problem();
+        let reset_fn = problem.eqn.reset().unwrap();
+        state_after_reset
+            .state_mut_op(&problem.eqn, &reset_fn)
+            .unwrap();
+        let fwd_state_plus = state_after_reset.clone();
+
+        let mut second_forward_solver = build_forward(Some(state_after_reset)).unwrap();
+        let (post_reset_checkpointer, _, _, post_reset_stop_reason) = second_forward_solver
+            .solve_with_checkpointing(forward_stop_time, None)
+            .unwrap();
+        let final_forward_state = second_forward_solver.into_state();
+        let t_second_root = final_forward_state.as_ref().t;
+
+        let out_error = final_forward_state.as_ref().g.clone() - &expected_out.state;
+        let out_norm = out_error
+            .squared_norm(&expected_out.state, &soln.atol, soln.rtol)
+            .sqrt();
+        assert!(
+            out_norm < Eqn::T::from_f64(50.0).unwrap(),
+            "forward integrated output mismatch at second root: actual {:?}, expected {:?}, WRMS {out_norm:?}",
+            final_forward_state.as_ref().g,
+            expected_out.state,
+        );
+        let time_tol = soln.rtol * expected_out.t.abs() + soln.atol.get_index(0);
+        assert!(
+            (t_second_root - expected_out.t).abs() < Eqn::T::from_f64(30.0).unwrap() * time_tol,
+            "expected second root time ≈ {:?}, got {:?}",
+            expected_out.t,
+            t_second_root,
+        );
+
+        let mut post_reset_adjoint_eqn =
+            problem.adjoint_equations(post_reset_checkpointer.clone(), None);
+        let mut post_reset_adjoint_state =
+            build_adjoint_state(&mut post_reset_adjoint_eqn).unwrap();
+        let post_reset_root_idx = match post_reset_stop_reason {
+            OdeSolverStopReason::RootFound(_, idx) => idx,
+            OdeSolverStopReason::TstopReached => {
+                panic!("expected second forward segment to stop on a root, got TstopReached")
+            }
+            OdeSolverStopReason::InternalTimestep => {
+                panic!("expected second forward segment to stop on a root, got InternalTimestep")
+            }
+        };
+        post_reset_adjoint_state
+            .state_mut_adjoint_terminal_root(
+                &mut post_reset_adjoint_eqn,
+                post_reset_root_idx,
+                &final_forward_state,
+            )
+            .unwrap();
+        let post_reset_adjoint =
+            build_adjoint_from_state(post_reset_adjoint_state, post_reset_adjoint_eqn).unwrap();
+        let mut adjoint_state = post_reset_adjoint
+            .solve_adjoint_backwards_pass(Some(fwd_state_minus.as_ref().t), &[], &[])
+            .unwrap();
+        let t0 = pre_reset_checkpointer.problem().t0;
+        let ctx = pre_reset_checkpointer.problem().context().clone();
+        let reset_problem = pre_reset_checkpointer.problem();
+        let mut pre_reset_adjoint_eqn = problem.adjoint_equations(pre_reset_checkpointer, None);
+        {
+            let reset_fn = reset_problem.eqn.reset().unwrap();
+            let root_fn = reset_problem.eqn.root().unwrap();
+            adjoint_state
+                .state_mut_op_with_adjoint_and_reset(
+                    &mut pre_reset_adjoint_eqn,
+                    &reset_fn,
+                    &root_fn,
+                    0,
+                    &fwd_state_minus,
+                    &fwd_state_plus,
+                )
+                .unwrap();
+        }
+        let pre_reset_adjoint =
+            build_adjoint_from_state(adjoint_state, pre_reset_adjoint_eqn).unwrap();
+        let adjoint_state = pre_reset_adjoint
+            .solve_adjoint_backwards_pass(None, &[], &[])
+            .unwrap();
+
+        let sens_points = soln.sens_solution_points.as_ref().unwrap();
+        let expected_grad = Eqn::V::from_vec(
+            sens_points
+                .iter()
+                .map(|pts| pts[0].state.get_index(0))
+                .collect(),
+            ctx.clone(),
+        );
+        let atol = Eqn::V::from_element(expected_grad.len(), Eqn::T::from_f64(1e-6).unwrap(), ctx);
+        let t0_tol = Eqn::T::from_f64(10.0).unwrap() * Eqn::T::EPSILON;
+        assert!(
+            (adjoint_state.as_ref().t - t0).abs() <= t0_tol,
+            "expected adjoint final time {:?}, got {:?}",
+            t0,
+            adjoint_state.as_ref().t,
+        );
+        adjoint_state.as_ref().sg[0].assert_eq_norm(
+            &expected_grad,
+            &atol,
+            Eqn::T::from_f64(1e-6).unwrap(),
+            Eqn::T::from_f64(60.0).unwrap(),
+        );
+    }
+
+    pub fn test_solve_adjoint_sum_squares_with_single_reset_root<
+        'a,
+        Eqn,
+        MethodF,
+        MethodB,
+        BuildForward,
+        BuildAdjointState,
+        BuildAdjointFromState,
+    >(
+        build_forward: BuildForward,
+        soln: &OdeSolverSolution<Eqn::V>,
+        build_adjoint_state: BuildAdjointState,
+        build_adjoint_from_state: BuildAdjointFromState,
+        dgdp_check: <Eqn::V as DefaultDenseMatrix>::M,
+        data: <Eqn::V as DefaultDenseMatrix>::M,
+        times: &[Eqn::T],
+    ) where
+        Eqn: OdeEquationsImplicitAdjointWithReset + 'a,
+        Eqn::M: DefaultSolver,
+        Eqn::V: DefaultDenseMatrix,
+        MethodF: OdeSolverMethod<'a, Eqn>,
+        MethodB: AdjointOdeSolverMethod<'a, Eqn, MethodF, State = MethodF::State>,
+        BuildForward: Fn(Option<MethodF::State>) -> Result<MethodF, DiffsolError>,
+        BuildAdjointState:
+            Fn(&mut AdjointEquations<'a, Eqn, MethodF>) -> Result<MethodF::State, DiffsolError>,
+        BuildAdjointFromState:
+            Fn(MethodF::State, AdjointEquations<'a, Eqn, MethodF>) -> Result<MethodB, DiffsolError>,
+    {
+        let expected_out = &soln.solution_points[0];
+        let forward_stop_time = expected_out.t + Eqn::T::from_f64(1.0).unwrap();
+        let forwards_soln =
+            solve_dense_with_single_reset_root::<Eqn, MethodF, _>(&build_forward, times);
+        assert_eq!(
+            forwards_soln.ncols(),
+            times.len(),
+            "expected stitched forward samples to cover every requested observation time",
+        );
+        let dgdu = dsum_squaresdp(&forwards_soln, &data);
+        let dgdu_refs = dgdu.iter().collect::<Vec<_>>();
+
+        let mut first_forward_solver = build_forward(None).unwrap();
+        let (pre_reset_checkpointer, _, _, pre_reset_stop_reason) = first_forward_solver
+            .solve_with_checkpointing(forward_stop_time, None)
+            .unwrap();
+        let fwd_state_minus = first_forward_solver.into_state();
+        match pre_reset_stop_reason {
+            OdeSolverStopReason::RootFound(_, 0) => {}
+            OdeSolverStopReason::RootFound(_, idx) => {
+                panic!("expected first checkpointed segment to stop on root 0, got root {idx}")
+            }
+            OdeSolverStopReason::TstopReached => {
+                panic!("expected first checkpointed segment to stop on the interior root")
+            }
+            OdeSolverStopReason::InternalTimestep => {
+                panic!("first checkpointed segment ended without a terminal stop reason")
+            }
+        }
+
+        let mut state_after_reset = fwd_state_minus.clone();
+        let problem = pre_reset_checkpointer.problem();
+        let reset_fn = problem.eqn.reset().unwrap();
+        state_after_reset
+            .state_mut_op(&problem.eqn, &reset_fn)
+            .unwrap();
+        let fwd_state_plus = state_after_reset.clone();
+
+        let mut second_forward_solver = build_forward(Some(state_after_reset)).unwrap();
+        let (post_reset_checkpointer, _, _, post_reset_stop_reason) = second_forward_solver
+            .solve_with_checkpointing(forward_stop_time, None)
+            .unwrap();
+        let final_forward_state = second_forward_solver.into_state();
+        let t_second_root = final_forward_state.as_ref().t;
+
+        let time_tol = soln.rtol * expected_out.t.abs() + soln.atol.get_index(0);
+        assert!(
+            (t_second_root - expected_out.t).abs() < Eqn::T::from_f64(30.0).unwrap() * time_tol,
+            "expected second root time ≈ {:?}, got {:?}",
+            expected_out.t,
+            t_second_root,
+        );
+
+        let mut post_reset_adjoint_eqn =
+            problem.adjoint_equations(post_reset_checkpointer.clone(), Some(dgdu.len()));
+        let mut post_reset_adjoint_state =
+            build_adjoint_state(&mut post_reset_adjoint_eqn).unwrap();
+        let post_reset_root_idx = match post_reset_stop_reason {
+            OdeSolverStopReason::RootFound(_, idx) => idx,
+            OdeSolverStopReason::TstopReached => {
+                panic!("expected second forward segment to stop on a root, got TstopReached")
+            }
+            OdeSolverStopReason::InternalTimestep => {
+                panic!("expected second forward segment to stop on a root, got InternalTimestep")
+            }
+        };
+        post_reset_adjoint_state
+            .state_mut_adjoint_terminal_root(
+                &mut post_reset_adjoint_eqn,
+                post_reset_root_idx,
+                &final_forward_state,
+            )
+            .unwrap();
+        let post_reset_adjoint =
+            build_adjoint_from_state(post_reset_adjoint_state, post_reset_adjoint_eqn).unwrap();
+        let mut adjoint_state = post_reset_adjoint
+            .solve_adjoint_backwards_pass(
+                Some(fwd_state_minus.as_ref().t),
+                times,
+                dgdu_refs.as_slice(),
+            )
+            .unwrap();
+
+        let t0 = pre_reset_checkpointer.problem().t0;
+        let ctx = pre_reset_checkpointer.problem().context().clone();
+        let reset_problem = pre_reset_checkpointer.problem();
+        let mut pre_reset_adjoint_eqn =
+            problem.adjoint_equations(pre_reset_checkpointer, Some(dgdu.len()));
+        {
+            let reset_fn = reset_problem.eqn.reset().unwrap();
+            let root_fn = reset_problem.eqn.root().unwrap();
+            adjoint_state
+                .state_mut_op_with_adjoint_and_reset(
+                    &mut pre_reset_adjoint_eqn,
+                    &reset_fn,
+                    &root_fn,
+                    0,
+                    &fwd_state_minus,
+                    &fwd_state_plus,
+                )
+                .unwrap();
+        }
+        let pre_reset_adjoint =
+            build_adjoint_from_state(adjoint_state, pre_reset_adjoint_eqn).unwrap();
+        let adjoint_state = pre_reset_adjoint
+            .solve_adjoint_backwards_pass(None, times, dgdu_refs.as_slice())
+            .unwrap();
+
+        let nparams = dgdp_check.nrows();
+        let atol = Eqn::V::from_element(nparams, Eqn::T::from_f64(1e-6).unwrap(), ctx);
+        let t0_tol = Eqn::T::from_f64(10.0).unwrap() * Eqn::T::EPSILON;
+        assert!(
+            (adjoint_state.as_ref().t - t0).abs() <= t0_tol,
+            "expected adjoint final time {:?}, got {:?}",
+            t0,
+            adjoint_state.as_ref().t,
+        );
+        #[allow(clippy::needless_range_loop)]
+        for j in 0..dgdp_check.ncols() {
+            adjoint_state.as_ref().sg[j].assert_eq_norm(
+                &dgdp_check.column(j).into_owned(),
+                &atol,
+                Eqn::T::from_f64(1e-6).unwrap(),
+                Eqn::T::from_f64(260.0).unwrap(),
+            );
+        }
     }
 }

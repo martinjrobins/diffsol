@@ -397,6 +397,10 @@ pub trait OdeEquationsImplicitAdjoint:
     Init: ConstantOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
     Out: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
              + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Root: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+              + NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+              + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+              + NonLinearOpTimePartial<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
     Mass: LinearOpTranspose<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
 >
 {
@@ -409,6 +413,10 @@ impl<T> OdeEquationsImplicitAdjoint for T where
         Init: ConstantOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
         Out: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
                  + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Root: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>
+                  + NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
+                  + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
+                  + NonLinearOpTimePartial<M = T::M, V = T::V, T = T::T, C = T::C>,
         Mass: LinearOpTranspose<M = T::M, V = T::V, T = T::T, C = T::C>,
     >
 {
@@ -449,6 +457,10 @@ pub trait OdeEquationsAdjoint:
     Init: ConstantOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
     Out: NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
              + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Root: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+              + NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+              + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+              + NonLinearOpTimePartial<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
     Mass: LinearOpTranspose<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
 >
 {
@@ -461,6 +473,10 @@ impl<T> OdeEquationsAdjoint for T where
         Init: ConstantOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
         Out: NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
                  + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Root: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>
+                  + NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
+                  + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
+                  + NonLinearOpTimePartial<M = T::M, V = T::V, T = T::T, C = T::C>,
         Mass: LinearOpTranspose<M = T::M, V = T::V, T = T::T, C = T::C>,
     >
 {

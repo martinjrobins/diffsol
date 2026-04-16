@@ -738,16 +738,17 @@ mod test {
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let mut s = problem.esdirk34::<LS>().unwrap();
-        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
             .esdirk34_solver_adjoint::<LS, _>(checkpointer, None)
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 419
+        number_of_calls: 418
         number_of_jac_muls: 10
         number_of_matrix_evals: 5
-        number_of_jac_adj_muls: 271
+        number_of_jac_adj_muls: 273
         "###);
     }
 
@@ -758,7 +759,7 @@ mod test {
         let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
         let (problem, _soln) = exponential_decay_with_algebraic_adjoint_problem::<M>(false);
         let mut s = problem.esdirk34::<LS>().unwrap();
-        let (checkpointer, soln) = s
+        let (checkpointer, soln, _stop_reason) = s
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
@@ -767,9 +768,9 @@ mod test {
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
         number_of_calls: 362
-        number_of_jac_muls: 9
-        number_of_matrix_evals: 3
-        number_of_jac_adj_muls: 686
+        number_of_jac_muls: 12
+        number_of_matrix_evals: 4
+        number_of_jac_adj_muls: 696
         "###);
     }
 
@@ -779,16 +780,17 @@ mod test {
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let mut s = problem.esdirk34::<LS>().unwrap();
-        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
             .esdirk34_solver_adjoint::<LS, _>(checkpointer, None)
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 433
-        number_of_jac_muls: 27
-        number_of_matrix_evals: 9
-        number_of_jac_adj_muls: 169
+        number_of_calls: 379
+        number_of_jac_muls: 30
+        number_of_matrix_evals: 10
+        number_of_jac_adj_muls: 107
         "###);
     }
 
@@ -1012,5 +1014,55 @@ mod test {
         let (problem, soln) = exponential_decay_with_reset_problem_sens::<M>();
         let solver = problem.tr_bdf2_sens::<LS>().unwrap();
         test_solve_dense_sensitivities_with_reset(solver, &soln);
+    }
+
+    #[test]
+    fn test_solve_adjoint_with_single_reset_root_tr_bdf2() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_single_reset_root_problem_adjoint;
+        use crate::ode_solver::tests::test_solve_adjoint_with_single_reset_root;
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(true);
+        test_solve_adjoint_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.tr_bdf2_solver::<LS>(state),
+                None => problem.tr_bdf2::<LS>(),
+            },
+            &soln,
+            |adjoint_eqn| problem.tr_bdf2_state_adjoint::<LS, _>(adjoint_eqn),
+            |state, adjoint_eqn| {
+                problem.tr_bdf2_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn)
+            },
+        );
+    }
+
+    #[test]
+    fn test_solve_adjoint_sum_squares_with_single_reset_root_tr_bdf2() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_single_reset_root_problem_adjoint;
+        use crate::ode_solver::tests::{
+            setup_test_adjoint_sum_squares_with_single_reset_root,
+            single_reset_root_discrete_times,
+            test_solve_adjoint_sum_squares_with_single_reset_root,
+        };
+        let (mut problem, soln) =
+            exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        let times = single_reset_root_discrete_times(soln.solution_points[0].t);
+        let (dgdp, data) = setup_test_adjoint_sum_squares_with_single_reset_root::<LS, _>(
+            &mut problem,
+            times.as_slice(),
+        );
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        test_solve_adjoint_sum_squares_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.tr_bdf2_solver::<LS>(state),
+                None => problem.tr_bdf2::<LS>(),
+            },
+            &soln,
+            |adjoint_eqn| problem.tr_bdf2_state_adjoint::<LS, _>(adjoint_eqn),
+            |state, adjoint_eqn| {
+                problem.tr_bdf2_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn)
+            },
+            dgdp,
+            data,
+            times.as_slice(),
+        );
     }
 }
