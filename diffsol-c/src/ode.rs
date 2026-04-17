@@ -653,7 +653,7 @@ mod tests {
         let t_eval = [0.0, 0.25, 0.5, 1.0];
         let data_values: Vec<f64> = t_eval
             .iter()
-            .map(|&t| logistic_integral(LOGISTIC_X0, 2.0, t))
+            .map(|&t| logistic_state(LOGISTIC_X0, 2.0, t))
             .collect();
         let data = crate::test_support::matrix_host(1, t_eval.len(), &data_values);
         let (value, sens) = ode
@@ -700,7 +700,7 @@ mod jit_tests {
         vector_host, ASSERT_TOL, LOGISTIC_X0,
     };
     #[cfg(feature = "diffsl-llvm")]
-    use crate::test_support::{hybrid_logistic_state_dr, logistic_integral, logistic_state_dr};
+    use crate::test_support::{hybrid_logistic_state_dr, logistic_state_dr};
 
     use super::*;
 
@@ -1082,7 +1082,7 @@ mod jit_tests {
         let t_eval = [0.0, 0.25, 0.5, 1.0];
         let data_values: Vec<f64> = t_eval
             .iter()
-            .map(|&t| logistic_integral(LOGISTIC_X0, 2.0, t))
+            .map(|&t| logistic_state(LOGISTIC_X0, 2.0, t))
             .collect();
         let data = crate::test_support::matrix_host(1, t_eval.len(), &data_values);
         let (value, sens) = ode

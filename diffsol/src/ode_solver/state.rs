@@ -825,7 +825,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         }
         state.s = s;
         state.ds = ds;
-        let (dsg, sg) = if ode_problem.integrate_out {
+        let (dsg, sg) = if augmented_eqn.out().is_some() {
             let mut sg = Vec::with_capacity(naug);
             let mut dsg = Vec::with_capacity(naug);
             for i in 0..naug {

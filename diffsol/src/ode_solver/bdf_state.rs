@@ -153,12 +153,8 @@ where
         if self.sdiff.len() != naug || self.sdiff[0].nrows() != nstates {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
-        let (sgdiff_len, sgdiff_size) = if ode_problem.integrate_out {
-            if let Some(out) = augmented_eqn.out() {
-                (naug, out.nout())
-            } else {
-                (naug, ode_problem.eqn.nout())
-            }
+        let (sgdiff_len, sgdiff_size) = if let Some(out) = augmented_eqn.out() {
+            (naug, out.nout())
         } else {
             (0, 0)
         };
