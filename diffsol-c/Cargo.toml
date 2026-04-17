@@ -30,7 +30,7 @@ diffsl-llvm21 = ["diffsol/diffsl-llvm21", "diffsl-llvm"]
 
 [dependencies]
 diffsl = { workspace = true }
-diffsol = { path = "../diffsol", version = "0.11.0", features = ["diffsl"] }
+diffsol = { path = "../diffsol", version = "0.12.0", features = ["diffsl"] }
 dlmalloc = { version = "0.2", features = ["global"] }
 nalgebra = { workspace = true, features = ["std"] }
 ndarray = { version = "0.17.2" }
