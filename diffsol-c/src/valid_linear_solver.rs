@@ -5,7 +5,7 @@ use diffsol::error::DiffsolError;
 use diffsol::{FaerScalar, NalgebraScalar};
 
 use crate::{
-    error::DiffsolJsError, linear_solver_type::LinearSolverType, matrix_type::MatrixKind,
+    error::DiffsolRtError, linear_solver_type::LinearSolverType, matrix_type::MatrixKind,
     matrix_type::MatrixType,
 };
 
@@ -13,7 +13,7 @@ pub(crate) fn validate_linear_solver<
     M: diffsol::Matrix + LuValidator<M> + KluValidator<M> + MatrixKind,
 >(
     linear_solver: LinearSolverType,
-) -> Result<(), DiffsolJsError> {
+) -> Result<(), DiffsolRtError> {
     match linear_solver {
         LinearSolverType::Default => Ok(()),
         LinearSolverType::Lu => {

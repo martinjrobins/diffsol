@@ -4,7 +4,7 @@ use diffsol::DiffsolError;
 use serde::{ser::SerializeStruct, Serialize, Serializer};
 
 use crate::{
-    error::DiffsolJsError,
+    error::DiffsolRtError,
     host_array::{FromHostArray, HostArray},
     solution::Solution,
 };
@@ -17,23 +17,23 @@ impl SolutionWrapper {
         Self(Arc::new(Mutex::new(solution)))
     }
 
-    fn guard(&self) -> Result<MutexGuard<'_, Box<dyn Solution>>, DiffsolJsError> {
+    fn guard(&self) -> Result<MutexGuard<'_, Box<dyn Solution>>, DiffsolRtError> {
         self.0
             .lock()
             .map_err(|_| DiffsolError::Other("Solution mutex poisoned".to_string()).into())
     }
 
-    pub fn get_ys(&self) -> Result<HostArray, DiffsolJsError> {
+    pub fn get_ys(&self) -> Result<HostArray, DiffsolRtError> {
         let guard = self.guard()?;
         Ok(guard.get_ys())
     }
 
-    pub fn get_ts(&self) -> Result<HostArray, DiffsolJsError> {
+    pub fn get_ts(&self) -> Result<HostArray, DiffsolRtError> {
         let guard = self.guard()?;
         Ok(guard.get_ts())
     }
 
-    pub fn get_sens(&self) -> Result<Vec<HostArray>, DiffsolJsError> {
+    pub fn get_sens(&self) -> Result<Vec<HostArray>, DiffsolRtError> {
         let guard = self.guard()?;
         Ok(guard.get_sens())
     }

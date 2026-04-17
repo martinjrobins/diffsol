@@ -1,5 +1,5 @@
 use crate::{
-    error::DiffsolJsError,
+    error::DiffsolRtError,
     scalar_type::{Scalar, ScalarType},
 };
 use diffsol::{FaerScalar, NalgebraScalar};
@@ -11,7 +11,7 @@ pub trait ToHostArray<T> {
 }
 
 pub trait FromHostArray<T> {
-    fn from_host_array(array: HostArray) -> Result<T, DiffsolJsError>;
+    fn from_host_array(array: HostArray) -> Result<T, DiffsolRtError>;
 }
 
 impl<T: Scalar + FaerScalar + 'static> ToHostArray<T> for faer::Mat<T> {
@@ -69,19 +69,19 @@ impl<T: Scalar + 'static> ToHostArray<T> for Vec<T> {
 }
 
 impl<'h, T: Scalar> FromHostArray<ArrayView2<'h, T>> for ArrayView2<'h, T> {
-    fn from_host_array(array: HostArray) -> Result<Self, DiffsolJsError> {
+    fn from_host_array(array: HostArray) -> Result<Self, DiffsolRtError> {
         array.as_array()
     }
 }
 
 impl FromHostArray<Vec<f32>> for Vec<f32> {
-    fn from_host_array(array: HostArray) -> Result<Self, DiffsolJsError> {
+    fn from_host_array(array: HostArray) -> Result<Self, DiffsolRtError> {
         array.as_slice::<f32>().map(|slice| slice.to_vec())
     }
 }
 
 impl FromHostArray<Vec<f64>> for Vec<f64> {
-    fn from_host_array(array: HostArray) -> Result<Self, DiffsolJsError> {
+    fn from_host_array(array: HostArray) -> Result<Self, DiffsolRtError> {
         match array.dtype() {
             ScalarType::F32 => Ok(array
                 .as_slice::<f32>()?
@@ -94,7 +94,7 @@ impl FromHostArray<Vec<f64>> for Vec<f64> {
 }
 
 impl FromHostArray<Vec<Vec<f32>>> for Vec<Vec<f32>> {
-    fn from_host_array(array: HostArray) -> Result<Self, DiffsolJsError> {
+    fn from_host_array(array: HostArray) -> Result<Self, DiffsolRtError> {
         array.expect_ndim(2)?;
         let view = array.as_array::<f32>()?;
         Ok((0..view.nrows())
@@ -104,7 +104,7 @@ impl FromHostArray<Vec<Vec<f32>>> for Vec<Vec<f32>> {
 }
 
 impl FromHostArray<Vec<Vec<f64>>> for Vec<Vec<f64>> {
-    fn from_host_array(array: HostArray) -> Result<Self, DiffsolJsError> {
+    fn from_host_array(array: HostArray) -> Result<Self, DiffsolRtError> {
         array.expect_ndim(2)?;
         match array.dtype() {
             ScalarType::F32 => {
@@ -216,18 +216,18 @@ impl HostArray {
     pub(crate) fn dtype(&self) -> ScalarType {
         self.dtype
     }
-    fn expect_ndim(&self, expected: usize) -> Result<(), DiffsolJsError> {
+    fn expect_ndim(&self, expected: usize) -> Result<(), DiffsolRtError> {
         if self.shape.len() != expected {
-            return Err(DiffsolJsError::from(diffsol::error::DiffsolError::Other(
+            return Err(DiffsolRtError::from(diffsol::error::DiffsolError::Other(
                 format!("Expected a {expected}D array"),
             )));
         }
         Ok(())
     }
-    pub fn as_array<'h, T: Scalar>(&self) -> Result<ArrayView2<'h, T>, DiffsolJsError> {
+    pub fn as_array<'h, T: Scalar>(&self) -> Result<ArrayView2<'h, T>, DiffsolRtError> {
         self.expect_ndim(2)?;
         if self.dtype != T::scalar_type() {
-            return Err(DiffsolJsError::from(diffsol::error::DiffsolError::Other(
+            return Err(DiffsolRtError::from(diffsol::error::DiffsolError::Other(
                 "Data type mismatch".to_string(),
             )));
         }
@@ -244,10 +244,10 @@ impl HostArray {
             ))
         }
     }
-    pub fn as_slice<T: Scalar>(&self) -> Result<&[T], DiffsolJsError> {
+    pub fn as_slice<T: Scalar>(&self) -> Result<&[T], DiffsolRtError> {
         self.expect_ndim(1)?;
         if self.dtype != T::scalar_type() {
-            return Err(DiffsolJsError::from(diffsol::error::DiffsolError::Other(
+            return Err(DiffsolRtError::from(diffsol::error::DiffsolError::Other(
                 "Data type mismatch".to_string(),
             )));
         }
