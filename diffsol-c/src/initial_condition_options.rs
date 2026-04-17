@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::{ser::SerializeStruct, Serialize, Serializer};
 
-use crate::{error::DiffsolJsError, ode::Ode};
+use crate::{error::DiffsolRtError, ode::Ode};
 
 #[derive(Clone)]
 pub struct InitialConditionSolverOptions {
@@ -12,9 +12,9 @@ impl InitialConditionSolverOptions {
     pub(crate) fn new(ode: Arc<Mutex<Ode>>) -> Self {
         Self { ode }
     }
-    fn guard(&self) -> Result<std::sync::MutexGuard<'_, Ode>, DiffsolJsError> {
+    fn guard(&self) -> Result<std::sync::MutexGuard<'_, Ode>, DiffsolRtError> {
         self.ode.lock().map_err(|_| {
-            DiffsolJsError::from(diffsol::error::DiffsolError::Other(
+            DiffsolRtError::from(diffsol::error::DiffsolError::Other(
                 "Failed to acquire lock on ODE solver".to_string(),
             ))
         })
@@ -22,45 +22,45 @@ impl InitialConditionSolverOptions {
 }
 
 impl InitialConditionSolverOptions {
-    pub fn get_use_linesearch(&self) -> Result<bool, DiffsolJsError> {
+    pub fn get_use_linesearch(&self) -> Result<bool, DiffsolRtError> {
         Ok(self.guard()?.solve.ic_use_linesearch())
     }
-    pub fn set_use_linesearch(&self, value: bool) -> Result<(), DiffsolJsError> {
+    pub fn set_use_linesearch(&self, value: bool) -> Result<(), DiffsolRtError> {
         self.guard()?.solve.set_ic_use_linesearch(value);
         Ok(())
     }
-    pub fn get_max_linesearch_iterations(&self) -> Result<usize, DiffsolJsError> {
+    pub fn get_max_linesearch_iterations(&self) -> Result<usize, DiffsolRtError> {
         Ok(self.guard()?.solve.ic_max_linesearch_iterations())
     }
-    pub fn set_max_linesearch_iterations(&self, value: usize) -> Result<(), DiffsolJsError> {
+    pub fn set_max_linesearch_iterations(&self, value: usize) -> Result<(), DiffsolRtError> {
         self.guard()?.solve.set_ic_max_linesearch_iterations(value);
         Ok(())
     }
-    pub fn get_max_newton_iterations(&self) -> Result<usize, DiffsolJsError> {
+    pub fn get_max_newton_iterations(&self) -> Result<usize, DiffsolRtError> {
         Ok(self.guard()?.solve.ic_max_newton_iterations())
     }
-    pub fn set_max_newton_iterations(&self, value: usize) -> Result<(), DiffsolJsError> {
+    pub fn set_max_newton_iterations(&self, value: usize) -> Result<(), DiffsolRtError> {
         self.guard()?.solve.set_ic_max_newton_iterations(value);
         Ok(())
     }
-    pub fn get_max_linear_solver_setups(&self) -> Result<usize, DiffsolJsError> {
+    pub fn get_max_linear_solver_setups(&self) -> Result<usize, DiffsolRtError> {
         Ok(self.guard()?.solve.ic_max_linear_solver_setups())
     }
-    pub fn set_max_linear_solver_setups(&self, value: usize) -> Result<(), DiffsolJsError> {
+    pub fn set_max_linear_solver_setups(&self, value: usize) -> Result<(), DiffsolRtError> {
         self.guard()?.solve.set_ic_max_linear_solver_setups(value);
         Ok(())
     }
-    pub fn get_step_reduction_factor(&self) -> Result<f64, DiffsolJsError> {
+    pub fn get_step_reduction_factor(&self) -> Result<f64, DiffsolRtError> {
         Ok(self.guard()?.solve.ic_step_reduction_factor())
     }
-    pub fn set_step_reduction_factor(&self, value: f64) -> Result<(), DiffsolJsError> {
+    pub fn set_step_reduction_factor(&self, value: f64) -> Result<(), DiffsolRtError> {
         self.guard()?.solve.set_ic_step_reduction_factor(value);
         Ok(())
     }
-    pub fn get_armijo_constant(&self) -> Result<f64, DiffsolJsError> {
+    pub fn get_armijo_constant(&self) -> Result<f64, DiffsolRtError> {
         Ok(self.guard()?.solve.ic_armijo_constant())
     }
-    pub fn set_armijo_constant(&self, value: f64) -> Result<(), DiffsolJsError> {
+    pub fn set_armijo_constant(&self, value: f64) -> Result<(), DiffsolRtError> {
         self.guard()?.solve.set_ic_armijo_constant(value);
         Ok(())
     }

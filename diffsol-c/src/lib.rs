@@ -116,7 +116,7 @@ pub mod solver {
     }
 }
 
-pub use error::DiffsolJsError;
+pub use error::DiffsolRtError;
 pub use initial_condition_options::InitialConditionSolverOptions;
 pub use jit::{default_enabled_jit_backend, JitBackendType};
 pub use linear_solver_type::LinearSolverType;
