@@ -1,6 +1,6 @@
 [package]
 name = "diffsol-c"
-version = "0.2.0"
+version = "0.2.1"
 edition.workspace = true
 description = "A diffsol wrapper featuring runtime scalar/matrix/solver types and a C API"
 license.workspace = true
@@ -30,7 +30,7 @@ diffsl-llvm21 = ["diffsol/diffsl-llvm21", "diffsl-llvm"]
 
 [dependencies]
 diffsl = { workspace = true }
-diffsol = { path = "../diffsol", version = "0.12.0", features = ["diffsl"] }
+diffsol = { path = "../diffsol", version = "0.12.1", features = ["diffsl"] }
 dlmalloc = { version = "0.2", features = ["global"] }
 nalgebra = { workspace = true, features = ["std"] }
 ndarray = { version = "0.17.2" }
