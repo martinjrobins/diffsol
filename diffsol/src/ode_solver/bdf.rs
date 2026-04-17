@@ -322,8 +322,8 @@ where
         let y_delta = <Eqn::V as Vector>::zeros(nstates, ctx.clone());
         let y_predict = <Eqn::V as Vector>::zeros(nstates, ctx.clone());
 
-        let nout = if let Some(out) = problem.eqn.out() {
-            out.nout()
+        let nout = if problem.integrate_out {
+            problem.eqn.nout()
         } else {
             0
         };
@@ -1596,6 +1596,7 @@ mod test {
             foodweb::foodweb_problem,
             gaussian_decay::gaussian_decay_problem,
             heat2d::head2d_problem,
+            logistic::logistic_problem_adjoint_no_out,
             robertson::{robertson, robertson_sens},
             robertson_ode::robertson_ode,
             robertson_ode_with_sens::robertson_ode_with_sens,
@@ -1817,6 +1818,29 @@ mod test {
         number_of_matrix_evals: 2
         number_of_jac_adj_muls: 1056
         "###);
+    }
+
+    #[test]
+    fn bdf_test_nalgebra_logistic_without_out() {
+        let (problem, soln) = logistic_problem_adjoint_no_out::<M>();
+        let mut s = problem.bdf::<LS>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[test]
+    fn bdf_test_nalgebra_logistic_without_out_adjoint_sum_squares() {
+        let (mut problem, soln) = logistic_problem_adjoint_no_out::<M>();
+        let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
+        let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
+        let (problem, _soln) = logistic_problem_adjoint_no_out::<M>();
+        let mut s = problem.bdf::<LS>().unwrap();
+        let (checkpointer, soln, _stop_reason) = s
+            .solve_dense_with_checkpointing(times.as_slice(), None)
+            .unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdp.ncols()))
+            .unwrap();
+        test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
     }
 
     #[cfg(feature = "diffsl-llvm")]

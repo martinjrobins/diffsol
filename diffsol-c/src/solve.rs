@@ -644,8 +644,6 @@ where
         let data = data.as_array()?;
         let t_eval: Vec<M::T> = t_eval.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
 
-        let previous_integrate_out = self.problem.integrate_out;
-        self.problem.integrate_out = true;
         let result = match linear_solver {
             LinearSolverType::Default => method
                 .solve_sum_squares_adj::<M, CG, <M as DefaultSolver>::LS>(
@@ -672,7 +670,6 @@ where
                     backwards_linear_solver,
                 ),
         };
-        self.problem.integrate_out = previous_integrate_out;
         let (y, y_sens) = result?;
 
         Ok((
@@ -689,9 +686,7 @@ mod tests {
     };
 
     #[cfg(feature = "diffsl-llvm")]
-    use crate::test_support::{
-        hybrid_logistic_state_dr, logistic_integral, logistic_state_dr, matrix_host,
-    };
+    use crate::test_support::{hybrid_logistic_state_dr, logistic_state_dr, matrix_host};
     use crate::{
         host_array::FromHostArray,
         linear_solver_type::LinearSolverType,
@@ -911,7 +906,7 @@ mod tests {
         let adjoint_t_eval = [0.0, 0.25, 0.5, 1.0];
         let adjoint_data: Vec<f64> = adjoint_t_eval
             .iter()
-            .map(|&t| logistic_integral(LOGISTIC_X0, 2.0, t))
+            .map(|&t| logistic_state(LOGISTIC_X0, 2.0, t))
             .collect();
         let mut solve = make_generic_solve::<diffsol::LlvmModule>();
         let (objective, gradient) = solve

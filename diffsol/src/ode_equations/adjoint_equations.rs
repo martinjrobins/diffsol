@@ -288,12 +288,14 @@ where
         // y = -f^T_x(x, t) λ - g^T_x(x,t)
         if self.with_out {
             let col = context.col();
-            let mut tmp = self.tmp.borrow_mut();
-            self.eqn
-                .out()
-                .unwrap()
-                .jac_transpose_mul_inplace(x, t, col, &mut tmp);
-            y.add_assign(&*tmp);
+            if let Some(out) = self.eqn.out() {
+                let mut tmp = self.tmp.borrow_mut();
+                out.jac_transpose_mul_inplace(x, t, col, &mut tmp);
+                y.add_assign(&*tmp);
+            } else {
+                // Default output is identity on state when no explicit out is defined.
+                y.add_assign(col);
+            }
         }
     }
 }
@@ -399,12 +401,11 @@ where
 
         if self.with_out {
             let col = context.col();
-            let mut tmp = self.tmp.borrow_mut();
-            self.eqn
-                .out()
-                .unwrap()
-                .sens_transpose_mul_inplace(x, t, col, &mut tmp);
-            y.add_assign(&*tmp);
+            if let Some(out) = self.eqn.out() {
+                let mut tmp = self.tmp.borrow_mut();
+                out.sens_transpose_mul_inplace(x, t, col, &mut tmp);
+                y.add_assign(&*tmp);
+            }
         }
     }
 }

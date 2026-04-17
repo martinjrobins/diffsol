@@ -126,12 +126,8 @@ where
         if self.diff.nrows() != nstates {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
-        let expected_gdiff_len = if let Some(out) = ode_problem.eqn.out() {
-            if ode_problem.integrate_out {
-                out.nout()
-            } else {
-                0
-            }
+        let expected_gdiff_len = if ode_problem.integrate_out {
+            ode_problem.eqn.nout()
         } else {
             0
         };
@@ -157,12 +153,8 @@ where
         if self.sdiff.len() != naug || self.sdiff[0].nrows() != nstates {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
-        let (sgdiff_len, sgdiff_size) = if let Some(_out) = augmented_eqn.out() {
-            if let Some(out) = augmented_eqn.out() {
-                (naug, out.nout())
-            } else {
-                (0, 0)
-            }
+        let (sgdiff_len, sgdiff_size) = if let Some(out) = augmented_eqn.out() {
+            (naug, out.nout())
         } else {
             (0, 0)
         };

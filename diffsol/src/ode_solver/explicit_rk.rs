@@ -283,6 +283,7 @@ mod test {
                 exponential_decay_problem_sens, exponential_decay_problem_with_root,
                 negative_exponential_decay_problem,
             },
+            logistic::logistic_problem_adjoint_no_out,
             robertson_ode::robertson_ode,
         },
         ode_solver::tests::{
@@ -478,6 +479,29 @@ mod test {
         number_of_matrix_evals: 0
         number_of_jac_adj_muls: 2233
         "###);
+    }
+
+    #[test]
+    fn explicit_rk_test_nalgebra_logistic_without_out() {
+        let (problem, soln) = logistic_problem_adjoint_no_out::<M>();
+        let mut s = problem.tsit45().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[test]
+    fn explicit_rk_test_nalgebra_logistic_without_out_adjoint_sum_squares() {
+        let (mut problem, soln) = logistic_problem_adjoint_no_out::<M>();
+        let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
+        let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
+        let (problem, _soln) = logistic_problem_adjoint_no_out::<M>();
+        let mut s = problem.tsit45().unwrap();
+        let (checkpointer, soln, _stop_reason) = s
+            .solve_dense_with_checkpointing(times.as_slice(), None)
+            .unwrap();
+        let adjoint_solver = problem
+            .tsit45_solver_adjoint(checkpointer, Some(dgdp.ncols()))
+            .unwrap();
+        test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
     }
 
     #[test]
