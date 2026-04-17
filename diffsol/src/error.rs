@@ -112,9 +112,9 @@ pub enum OdeSolverError {
     FailedToGetMutableReference,
     #[error("Builder error: {0}")]
     BuilderError(String),
-    #[error("t_eval must be increasing and all values must be greater than or equal to the current time")]
-    StateProblemMismatch,
     #[error("State is not consistent with the problem equations")]
+    StateProblemMismatch,
+    #[error("t_eval must be increasing and all values must be greater than or equal to the current time")]
     InvalidTEval,
     #[error("Sundials error: {0}")]
     SundialsError(String),
