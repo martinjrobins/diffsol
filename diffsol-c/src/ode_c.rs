@@ -916,8 +916,8 @@ mod tests {
     use crate::test_support::{
         assert_close, assert_last_error_contains, c_string, clear_last_error, ffi_free_solution,
         ffi_read_host_array_list_matrices, ffi_read_host_array_matrix, ffi_read_host_array_vector,
-        find_time_window, logistic_integral, logistic_state, logistic_state_dr, mass_state_deps,
-        rhs_input_deps, rhs_state_deps, ASSERT_TOL, LOGISTIC_X0,
+        find_time_window, logistic_state, logistic_state_dr, mass_state_deps, rhs_input_deps,
+        rhs_state_deps, ASSERT_TOL, LOGISTIC_X0,
     };
     use crate::{
         initial_condition_options_c::{
@@ -1381,7 +1381,7 @@ mod tests {
             let adjoint_t_eval = [0.0f64, 0.25f64, 0.5f64, 1.0f64];
             let adjoint_data: Vec<f64> = adjoint_t_eval
                 .iter()
-                .map(|&t| logistic_integral(LOGISTIC_X0, 2.0, t))
+                .map(|&t| logistic_state(LOGISTIC_X0, 2.0, t))
                 .collect();
             let mut objective = 0.0;
             let mut adjoint_grad_ptr = ptr::null_mut();
@@ -1445,7 +1445,7 @@ mod jit_tests {
         logistic_state, ASSERT_TOL, LOGISTIC_X0,
     };
     #[cfg(feature = "diffsl-llvm")]
-    use crate::test_support::{hybrid_logistic_state_dr, logistic_integral, logistic_state_dr};
+    use crate::test_support::{hybrid_logistic_state_dr, logistic_state_dr};
 
     use super::*;
 
@@ -1668,7 +1668,7 @@ mod jit_tests {
                     let adjoint_t_eval = [0.0f64, 0.25f64, 0.5f64, 1.0f64];
                     let adjoint_data: Vec<f64> = adjoint_t_eval
                         .iter()
-                        .map(|&t| logistic_integral(LOGISTIC_X0, 2.0, t))
+                        .map(|&t| logistic_state(LOGISTIC_X0, 2.0, t))
                         .collect();
                     let mut objective = 0.0;
                     let mut adjoint_grad_ptr = ptr::null_mut();
@@ -2024,7 +2024,7 @@ mod jit_tests {
 
                     let adjoint_data: Vec<f64> = t_eval
                         .iter()
-                        .map(|&t| logistic_integral(LOGISTIC_X0, 2.0, t))
+                        .map(|&t| logistic_state(LOGISTIC_X0, 2.0, t))
                         .collect();
                     let mut objective = 0.0;
                     let mut sens_ptr = ptr::null_mut();

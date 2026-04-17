@@ -1,6 +1,6 @@
 use crate::{
-    ode_solver::problem::OdeSolverSolution,
-    MatrixHost, OdeBuilder, OdeEquationsImplicitAdjoint, OdeSolverProblem, Op, Vector,
+    ode_solver::problem::OdeSolverSolution, MatrixHost, OdeBuilder, OdeEquationsImplicitAdjoint,
+    OdeSolverProblem, Op, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
 
@@ -71,7 +71,10 @@ pub fn logistic_problem_adjoint_no_out<M: MatrixHost + 'static>() -> (
     };
     for i in 0..10 {
         let t = M::T::from_f64(i as f64).unwrap();
-        let y = M::V::from_vec(vec![logistic_state(r, k, y0, t)], problem.eqn.context().clone());
+        let y = M::V::from_vec(
+            vec![logistic_state(r, k, y0, t)],
+            problem.eqn.context().clone(),
+        );
         soln.push(y, t);
     }
     (problem, soln)
