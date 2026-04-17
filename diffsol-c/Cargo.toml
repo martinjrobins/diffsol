@@ -1,6 +1,6 @@
 [package]
 name = "diffsol-c"
-version = "0.2.1"
+version = "0.2.2"
 edition.workspace = true
 description = "A diffsol wrapper featuring runtime scalar/matrix/solver types and a C API"
 license.workspace = true
@@ -14,7 +14,6 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = []
 wasm = ["getrandom/js"]
-suitesparse = []
 external = []
 diffsl-external-f64 = ["external", "diffsol/diffsl-external-f64", "diffsl/external_f64"]
 diffsl-external-f32 = ["external", "diffsol/diffsl-external-f32", "diffsl/external_f32"]
@@ -27,6 +26,7 @@ diffsl-llvm18 = ["diffsol/diffsl-llvm18", "diffsl-llvm"]
 diffsl-llvm19 = ["diffsol/diffsl-llvm19", "diffsl-llvm"]
 diffsl-llvm20 = ["diffsol/diffsl-llvm20", "diffsl-llvm"]
 diffsl-llvm21 = ["diffsol/diffsl-llvm21", "diffsl-llvm"]
+suitesparse = ["diffsol/suitesparse"]
 
 [dependencies]
 diffsl = { workspace = true }
