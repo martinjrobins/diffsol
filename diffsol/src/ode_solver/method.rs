@@ -368,7 +368,13 @@ where
                                 ret_y_col.copy_from(&tmp_nout);
                             }
                         }
-                        None => ret_y_col.copy_from(y),
+                        None => {
+                            if self.problem().integrate_out {
+                                ret_y_col.copy_from(self.state().g);
+                            } else {
+                                ret_y_col.copy_from(y);
+                            }
+                        }
                     }
                 }
                 if col + 1 < ret.ncols() {
@@ -720,7 +726,13 @@ fn write_out<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
                 ret_y_col.copy_from(tmp_nout);
             }
         }
-        None => ret_y_col.copy_from(y),
+        None => {
+            if s.problem().integrate_out {
+                ret_y_col.copy_from(s.state().g);
+            } else {
+                ret_y_col.copy_from(y);
+            }
+        }
     }
 }
 
@@ -732,21 +744,13 @@ fn allocate_return<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
 where
     Eqn::V: DefaultDenseMatrix,
 {
-    let nrows = if s.problem().eqn.out().is_some() {
-        s.problem().eqn.out().unwrap().nout()
-    } else {
-        s.problem().eqn.rhs().nstates()
-    };
+    let nrows = s.problem().eqn.nout();
     let ret = s
         .problem()
         .context()
         .dense_mat_zeros::<Eqn::V>(nrows, INITIAL_NCOLS);
 
-    let tmp_nout = if let Some(out) = s.problem().eqn.out() {
-        Eqn::V::zeros(out.nout(), s.problem().context().clone())
-    } else {
-        Eqn::V::zeros(0, s.problem().context().clone())
-    };
+    let tmp_nout = Eqn::V::zeros(s.problem().eqn.nout(), s.problem().context().clone());
     Ok((ret, tmp_nout))
 }
 
@@ -760,11 +764,7 @@ fn dense_allocate_return<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>
 where
     Eqn::V: DefaultDenseMatrix,
 {
-    let nrows = if s.problem().eqn.out().is_some() {
-        s.problem().eqn.out().unwrap().nout()
-    } else {
-        s.problem().eqn.rhs().nstates()
-    };
+    let nrows = s.problem().eqn.nout();
     let ret = s
         .problem()
         .context()
@@ -775,11 +775,7 @@ where
     if t_eval.windows(2).any(|w| w[0] > w[1] || w[0] < t0) {
         return Err(ode_solver_error!(InvalidTEval));
     }
-    let tmp_nout = if let Some(out) = s.problem().eqn.out() {
-        Eqn::V::zeros(out.nout(), s.problem().context().clone())
-    } else {
-        Eqn::V::zeros(0, s.problem().context().clone())
-    };
+    let tmp_nout = Eqn::V::zeros(s.problem().eqn.nout(), s.problem().context().clone());
     let tmp_nstates = Eqn::V::zeros(
         s.problem().eqn.rhs().nstates(),
         s.problem().context().clone(),

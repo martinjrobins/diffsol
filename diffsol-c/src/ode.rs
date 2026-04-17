@@ -1097,4 +1097,97 @@ mod jit_tests {
             "jit sum_squares gradient should be finite"
         );
     }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn bdf_sum_squares_adjoint_matches_finite_difference_gradient_for_logistic_model() {
+        let logistic_model = r#"
+            in_i { r = 1, k = 1, y0 = 0.1 }
+            u { y0 }
+            F { r * u * (1.0 - u / k) }
+        "#;
+        let ode = OdeWrapper::new_jit(
+            logistic_model,
+            JitBackendType::Llvm,
+            ScalarType::F64,
+            MatrixType::NalgebraDense,
+            LinearSolverType::Default,
+            OdeSolverType::Bdf,
+        )
+        .unwrap();
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let t_eval = [0.0, 0.1, 0.3, 0.7, 1.0];
+        let data_params = [1.2, 0.9, 0.2];
+        let fit_params = [0.8, 1.3, 0.12];
+        let fd_step = 1e-6;
+
+        let data_solution = ode
+            .solve_dense(vector_host(&data_params), vector_host(&t_eval))
+            .unwrap();
+        let data_ys = data_solution.get_ys().unwrap();
+        let data_ys = data_ys.as_array::<f64>().unwrap();
+        let data_values: Vec<f64> = (0..t_eval.len()).map(|col| data_ys[(0, col)]).collect();
+
+        let objective_from_dense = |params: [f64; 3]| -> f64 {
+            let solution = ode
+                .solve_dense(vector_host(&params), vector_host(&t_eval))
+                .unwrap();
+            let ys = solution.get_ys().unwrap();
+            let ys = ys.as_array::<f64>().unwrap();
+            (0..t_eval.len())
+                .map(|col| {
+                    let residual = ys[(0, col)] - data_values[col];
+                    residual * residual
+                })
+                .sum()
+        };
+
+        let objective_fd = objective_from_dense(fit_params);
+        let mut finite_difference_gradient = [0.0; 3];
+        for i in 0..fit_params.len() {
+            let mut plus = fit_params;
+            let mut minus = fit_params;
+            let step = fd_step * fit_params[i].abs().max(1.0);
+            plus[i] += step;
+            minus[i] -= step;
+            finite_difference_gradient[i] =
+                (objective_from_dense(plus) - objective_from_dense(minus)) / (2.0 * step);
+        }
+
+        let data = crate::test_support::matrix_host(1, t_eval.len(), &data_values);
+        let ode_adj = OdeWrapper::new_jit(
+            logistic_model,
+            JitBackendType::Llvm,
+            ScalarType::F64,
+            MatrixType::NalgebraDense,
+            LinearSolverType::Default,
+            OdeSolverType::Bdf,
+        )
+        .unwrap();
+        ode_adj.set_rtol(1e-8).unwrap();
+        ode_adj.set_atol(1e-8).unwrap();
+
+        let (objective_adj, sens) = ode_adj
+            .solve_sum_squares_adj(vector_host(&fit_params), data, vector_host(&t_eval))
+            .unwrap();
+        let adjoint_gradient = Vec::<f64>::from_host_array(sens).unwrap();
+
+        assert_eq!(adjoint_gradient.len(), 3);
+        assert_close(
+            objective_adj,
+            objective_fd,
+            1e-5,
+            "sum_squares objective from dense finite differences",
+        );
+        for i in 0..adjoint_gradient.len() {
+            assert_close(
+                adjoint_gradient[i],
+                finite_difference_gradient[i],
+                5e-4,
+                &format!("sum_squares gradient component {i}"),
+            );
+        }
+    }
 }

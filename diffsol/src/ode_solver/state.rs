@@ -742,11 +742,12 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let dy = ode_problem.eqn.rhs().call(&y, t);
         let (s, ds) = (vec![], vec![]);
         let (dg, g) = if ode_problem.integrate_out {
-            let out = ode_problem
-                .eqn
-                .out()
-                .ok_or(ode_solver_error!(StateProblemMismatch))?;
-            (out.call(&y, t), V::zeros(out.nout(), y.context().clone()))
+            if let Some(out) = ode_problem.eqn.out() {
+                (out.call(&y, t), V::zeros(out.nout(), y.context().clone()))
+            } else {
+                // If no explicit output is defined, default output is identity on state.
+                (y.clone(), V::zeros(y.len(), y.context().clone()))
+            }
         } else {
             (
                 V::zeros(0, y.context().clone()),
@@ -824,16 +825,17 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         }
         state.s = s;
         state.ds = ds;
-        let (dsg, sg) = if augmented_eqn.out().is_some() {
+        let (dsg, sg) = if ode_problem.integrate_out {
             let mut sg = Vec::with_capacity(naug);
             let mut dsg = Vec::with_capacity(naug);
             for i in 0..naug {
                 augmented_eqn.set_index(i);
-                let out = augmented_eqn
-                    .out()
-                    .ok_or(ode_solver_error!(StateProblemMismatch))?;
-                let dsgi = out.call(&state.s[i], state.t);
-                let sgi = V::zeros(out.nout(), ctx.clone());
+                let dsgi = if let Some(out) = augmented_eqn.out() {
+                    out.call(&state.s[i], state.t)
+                } else {
+                    state.s[i].clone()
+                };
+                let sgi = V::zeros(dsgi.len(), ctx.clone());
                 sg.push(sgi);
                 dsg.push(dsgi);
             }

@@ -322,8 +322,8 @@ where
         let y_delta = <Eqn::V as Vector>::zeros(nstates, ctx.clone());
         let y_predict = <Eqn::V as Vector>::zeros(nstates, ctx.clone());
 
-        let nout = if let Some(out) = problem.eqn.out() {
-            out.nout()
+        let nout = if problem.integrate_out {
+            problem.eqn.nout()
         } else {
             0
         };
