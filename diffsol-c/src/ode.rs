@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::jit::JitBackendType;
 use crate::{
-    error::DiffsolJsError, host_array::HostArray,
+    error::DiffsolRtError, host_array::HostArray,
     initial_condition_options::InitialConditionSolverOptions, linear_solver_type::LinearSolverType,
     matrix_type::MatrixType, ode_options::OdeSolverOptions, ode_solver_type::OdeSolverType,
     scalar_type::ScalarType, solution_wrapper::SolutionWrapper, solve::Solve,
@@ -24,9 +24,9 @@ unsafe impl Sync for Ode {}
 pub struct OdeWrapper(Arc<Mutex<Ode>>);
 
 impl OdeWrapper {
-    fn guard(&self) -> Result<std::sync::MutexGuard<'_, Ode>, DiffsolJsError> {
+    fn guard(&self) -> Result<std::sync::MutexGuard<'_, Ode>, DiffsolRtError> {
         self.0.lock().map_err(|_| {
-            DiffsolJsError::from(diffsol::error::DiffsolError::Other(
+            DiffsolRtError::from(diffsol::error::DiffsolError::Other(
                 "Failed to acquire lock on ODE solver".to_string(),
             ))
         })
@@ -41,7 +41,7 @@ impl OdeWrapper {
         jit_backend: Option<JitBackendType>,
         linear_solver: LinearSolverType,
         ode_solver: OdeSolverType,
-    ) -> Result<Self, DiffsolJsError> {
+    ) -> Result<Self, DiffsolRtError> {
         solve.check(linear_solver)?;
         Ok(OdeWrapper(Arc::new(Mutex::new(Ode {
             code,
@@ -63,7 +63,7 @@ impl OdeWrapper {
         matrix_type: MatrixType,
         linear_solver: LinearSolverType,
         ode_solver: OdeSolverType,
-    ) -> Result<Self, DiffsolJsError> {
+    ) -> Result<Self, DiffsolRtError> {
         let solve = crate::solve::solve_factory_external(
             rhs_state_deps,
             rhs_input_deps,
@@ -90,7 +90,7 @@ impl OdeWrapper {
         matrix_type: MatrixType,
         linear_solver: LinearSolverType,
         ode_solver: OdeSolverType,
-    ) -> Result<Self, DiffsolJsError> {
+    ) -> Result<Self, DiffsolRtError> {
         let solve = crate::solve::solve_factory_jit(code, jit_backend, matrix_type, scalar_type)?;
         Self::build(
             code.to_owned(),
@@ -103,77 +103,77 @@ impl OdeWrapper {
     }
 
     /// Matrix type used in the ODE solver. This is fixed after construction.
-    pub fn get_matrix_type(&self) -> Result<MatrixType, DiffsolJsError> {
+    pub fn get_matrix_type(&self) -> Result<MatrixType, DiffsolRtError> {
         Ok(self.guard()?.solve.matrix_type())
     }
 
-    pub fn get_nstates(&self) -> Result<usize, DiffsolJsError> {
+    pub fn get_nstates(&self) -> Result<usize, DiffsolRtError> {
         Ok(self.guard()?.solve.nstates())
     }
 
-    pub fn get_nparams(&self) -> Result<usize, DiffsolJsError> {
+    pub fn get_nparams(&self) -> Result<usize, DiffsolRtError> {
         Ok(self.guard()?.solve.nparams())
     }
 
-    pub fn get_nout(&self) -> Result<usize, DiffsolJsError> {
+    pub fn get_nout(&self) -> Result<usize, DiffsolRtError> {
         Ok(self.guard()?.solve.nout())
     }
 
-    pub fn has_stop(&self) -> Result<bool, DiffsolJsError> {
+    pub fn has_stop(&self) -> Result<bool, DiffsolRtError> {
         Ok(self.guard()?.solve.has_stop())
     }
 
     /// Ode solver method, default Bdf (backward differentiation formula).
-    pub fn get_ode_solver(&self) -> Result<OdeSolverType, DiffsolJsError> {
+    pub fn get_ode_solver(&self) -> Result<OdeSolverType, DiffsolRtError> {
         Ok(self.guard()?.ode_solver)
     }
 
-    pub fn set_ode_solver(&self, value: OdeSolverType) -> Result<(), DiffsolJsError> {
+    pub fn set_ode_solver(&self, value: OdeSolverType) -> Result<(), DiffsolRtError> {
         self.guard()?.ode_solver = value;
         Ok(())
     }
 
     /// Linear solver type used in the ODE solver. Set to default to use the
     /// solver's default choice, which is typically an LU solver.
-    pub fn get_linear_solver(&self) -> Result<LinearSolverType, DiffsolJsError> {
+    pub fn get_linear_solver(&self) -> Result<LinearSolverType, DiffsolRtError> {
         Ok(self.guard()?.linear_solver)
     }
 
-    pub fn set_linear_solver(&self, value: LinearSolverType) -> Result<(), DiffsolJsError> {
+    pub fn set_linear_solver(&self, value: LinearSolverType) -> Result<(), DiffsolRtError> {
         self.guard()?.solve.check(value)?;
         self.guard()?.linear_solver = value;
         Ok(())
     }
 
     /// Relative tolerance for the solver, default 1e-6. Governs the error relative to the solution size.
-    pub fn get_rtol(&self) -> Result<f64, DiffsolJsError> {
+    pub fn get_rtol(&self) -> Result<f64, DiffsolRtError> {
         Ok(self.guard()?.solve.rtol())
     }
 
-    pub fn set_rtol(&self, value: f64) -> Result<(), DiffsolJsError> {
+    pub fn set_rtol(&self, value: f64) -> Result<(), DiffsolRtError> {
         self.guard()?.solve.set_rtol(value);
         Ok(())
     }
 
     /// Absolute tolerance for the solver, default 1e-6. Governs the error as the solution goes to zero.
-    pub fn get_atol(&self) -> Result<f64, DiffsolJsError> {
+    pub fn get_atol(&self) -> Result<f64, DiffsolRtError> {
         Ok(self.guard()?.solve.atol())
     }
 
-    pub fn set_atol(&self, value: f64) -> Result<(), DiffsolJsError> {
+    pub fn set_atol(&self, value: f64) -> Result<(), DiffsolRtError> {
         self.guard()?.solve.set_atol(value);
         Ok(())
     }
 
-    pub fn get_code(&self) -> Result<String, DiffsolJsError> {
+    pub fn get_code(&self) -> Result<String, DiffsolRtError> {
         Ok(self.guard()?.code.clone())
     }
 
-    pub fn get_scalar_type(&self) -> Result<ScalarType, DiffsolJsError> {
+    pub fn get_scalar_type(&self) -> Result<ScalarType, DiffsolRtError> {
         Ok(self.guard()?.scalar_type)
     }
 
-    pub fn get_jit_backend(&self) -> Result<Option<JitBackendType>, DiffsolJsError> {
+    pub fn get_jit_backend(&self) -> Result<Option<JitBackendType>, DiffsolRtError> {
         Ok(self.guard()?.jit_backend)
     }
 
@@ -186,7 +186,7 @@ impl OdeWrapper {
     }
 
     /// Get the initial condition vector y0 as a 1D numpy array.
-    pub fn y0(&self, params: HostArray) -> Result<HostArray, DiffsolJsError> {
+    pub fn y0(&self, params: HostArray) -> Result<HostArray, DiffsolRtError> {
         let mut self_guard = self.guard()?;
         self_guard.solve.y0(params.as_slice()?)
     }
@@ -197,7 +197,7 @@ impl OdeWrapper {
         params: HostArray,
         t: f64,
         y: HostArray,
-    ) -> Result<HostArray, DiffsolJsError> {
+    ) -> Result<HostArray, DiffsolRtError> {
         let mut self_guard = self.guard()?;
         self_guard.solve.rhs(params.as_slice()?, t, y.as_slice()?)
     }
@@ -209,7 +209,7 @@ impl OdeWrapper {
         t: f64,
         y: HostArray,
         v: HostArray,
-    ) -> Result<HostArray, DiffsolJsError> {
+    ) -> Result<HostArray, DiffsolRtError> {
         let mut self_guard = self.guard()?;
         self_guard
             .solve
@@ -238,7 +238,7 @@ impl OdeWrapper {
         &self,
         params: HostArray,
         final_time: f64,
-    ) -> Result<SolutionWrapper, DiffsolJsError> {
+    ) -> Result<SolutionWrapper, DiffsolRtError> {
         let mut self_guard = self.guard()?;
         let params = params.as_slice()?;
         let linear_solver = self_guard.linear_solver;
@@ -255,7 +255,7 @@ impl OdeWrapper {
         &self,
         params: HostArray,
         final_time: f64,
-    ) -> Result<SolutionWrapper, DiffsolJsError> {
+    ) -> Result<SolutionWrapper, DiffsolRtError> {
         let mut self_guard = self.guard()?;
         let params = params.as_slice()?;
         let linear_solver = self_guard.linear_solver;
@@ -283,7 +283,7 @@ impl OdeWrapper {
         &self,
         params: HostArray,
         t_eval: HostArray,
-    ) -> Result<SolutionWrapper, DiffsolJsError> {
+    ) -> Result<SolutionWrapper, DiffsolRtError> {
         let mut self_guard = self.guard()?;
         let params = params.as_slice()?;
         let t_eval = t_eval.as_slice()?;
@@ -302,7 +302,7 @@ impl OdeWrapper {
         &self,
         params: HostArray,
         t_eval: HostArray,
-    ) -> Result<SolutionWrapper, DiffsolJsError> {
+    ) -> Result<SolutionWrapper, DiffsolRtError> {
         let mut self_guard = self.guard()?;
         let params = params.as_slice()?;
         let t_eval = t_eval.as_slice()?;
@@ -332,7 +332,7 @@ impl OdeWrapper {
         &self,
         params: HostArray,
         t_eval: HostArray,
-    ) -> Result<SolutionWrapper, DiffsolJsError> {
+    ) -> Result<SolutionWrapper, DiffsolRtError> {
         let mut self_guard = self.guard()?;
         let params = params.as_slice()?;
         let t_eval = t_eval.as_slice()?;
@@ -352,7 +352,7 @@ impl OdeWrapper {
         &self,
         params: HostArray,
         t_eval: HostArray,
-    ) -> Result<SolutionWrapper, DiffsolJsError> {
+    ) -> Result<SolutionWrapper, DiffsolRtError> {
         let mut self_guard = self.guard()?;
         let params = params.as_slice()?;
         let t_eval = t_eval.as_slice()?;
@@ -375,7 +375,7 @@ impl OdeWrapper {
         params: HostArray,
         data: HostArray,
         t_eval: HostArray,
-    ) -> Result<(f64, HostArray), DiffsolJsError> {
+    ) -> Result<(f64, HostArray), DiffsolRtError> {
         let mut self_guard = self.guard()?;
         let linear_solver = self_guard.linear_solver;
         let ode_solver = self_guard.ode_solver;

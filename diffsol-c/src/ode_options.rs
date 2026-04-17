@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use serde::{ser::SerializeStruct, Serialize, Serializer};
 
-use crate::{error::DiffsolJsError, ode::Ode};
+use crate::{error::DiffsolRtError, ode::Ode};
 
 #[derive(Clone)]
 pub struct OdeSolverOptions {
@@ -12,9 +12,9 @@ impl OdeSolverOptions {
     pub(crate) fn new(ode: Arc<Mutex<Ode>>) -> Self {
         Self { ode }
     }
-    fn guard(&self) -> Result<std::sync::MutexGuard<'_, Ode>, DiffsolJsError> {
+    fn guard(&self) -> Result<std::sync::MutexGuard<'_, Ode>, DiffsolRtError> {
         self.ode.lock().map_err(|_| {
-            DiffsolJsError::from(diffsol::error::DiffsolError::Other(
+            DiffsolRtError::from(diffsol::error::DiffsolError::Other(
                 "Failed to acquire lock on Ode object".to_string(),
             ))
         })
@@ -22,62 +22,62 @@ impl OdeSolverOptions {
 }
 
 impl OdeSolverOptions {
-    pub fn get_max_nonlinear_solver_iterations(&self) -> Result<usize, DiffsolJsError> {
+    pub fn get_max_nonlinear_solver_iterations(&self) -> Result<usize, DiffsolRtError> {
         Ok(self.guard()?.solve.ode_max_nonlinear_solver_iterations())
     }
-    pub fn set_max_nonlinear_solver_iterations(&self, value: usize) -> Result<(), DiffsolJsError> {
+    pub fn set_max_nonlinear_solver_iterations(&self, value: usize) -> Result<(), DiffsolRtError> {
         self.guard()?
             .solve
             .set_ode_max_nonlinear_solver_iterations(value);
         Ok(())
     }
-    pub fn get_max_error_test_failures(&self) -> Result<usize, DiffsolJsError> {
+    pub fn get_max_error_test_failures(&self) -> Result<usize, DiffsolRtError> {
         Ok(self.guard()?.solve.ode_max_error_test_failures())
     }
-    pub fn set_max_error_test_failures(&self, value: usize) -> Result<(), DiffsolJsError> {
+    pub fn set_max_error_test_failures(&self, value: usize) -> Result<(), DiffsolRtError> {
         self.guard()?.solve.set_ode_max_error_test_failures(value);
         Ok(())
     }
-    pub fn get_update_jacobian_after_steps(&self) -> Result<usize, DiffsolJsError> {
+    pub fn get_update_jacobian_after_steps(&self) -> Result<usize, DiffsolRtError> {
         Ok(self.guard()?.solve.ode_update_jacobian_after_steps())
     }
-    pub fn set_update_jacobian_after_steps(&self, value: usize) -> Result<(), DiffsolJsError> {
+    pub fn set_update_jacobian_after_steps(&self, value: usize) -> Result<(), DiffsolRtError> {
         self.guard()?
             .solve
             .set_ode_update_jacobian_after_steps(value);
         Ok(())
     }
-    pub fn get_update_rhs_jacobian_after_steps(&self) -> Result<usize, DiffsolJsError> {
+    pub fn get_update_rhs_jacobian_after_steps(&self) -> Result<usize, DiffsolRtError> {
         Ok(self.guard()?.solve.ode_update_rhs_jacobian_after_steps())
     }
-    pub fn set_update_rhs_jacobian_after_steps(&self, value: usize) -> Result<(), DiffsolJsError> {
+    pub fn set_update_rhs_jacobian_after_steps(&self, value: usize) -> Result<(), DiffsolRtError> {
         self.guard()?
             .solve
             .set_ode_update_rhs_jacobian_after_steps(value);
         Ok(())
     }
-    pub fn get_threshold_to_update_jacobian(&self) -> Result<f64, DiffsolJsError> {
+    pub fn get_threshold_to_update_jacobian(&self) -> Result<f64, DiffsolRtError> {
         Ok(self.guard()?.solve.ode_threshold_to_update_jacobian())
     }
-    pub fn set_threshold_to_update_jacobian(&self, value: f64) -> Result<(), DiffsolJsError> {
+    pub fn set_threshold_to_update_jacobian(&self, value: f64) -> Result<(), DiffsolRtError> {
         self.guard()?
             .solve
             .set_ode_threshold_to_update_jacobian(value);
         Ok(())
     }
-    pub fn get_threshold_to_update_rhs_jacobian(&self) -> Result<f64, DiffsolJsError> {
+    pub fn get_threshold_to_update_rhs_jacobian(&self) -> Result<f64, DiffsolRtError> {
         Ok(self.guard()?.solve.ode_threshold_to_update_rhs_jacobian())
     }
-    pub fn set_threshold_to_update_rhs_jacobian(&self, value: f64) -> Result<(), DiffsolJsError> {
+    pub fn set_threshold_to_update_rhs_jacobian(&self, value: f64) -> Result<(), DiffsolRtError> {
         self.guard()?
             .solve
             .set_ode_threshold_to_update_rhs_jacobian(value);
         Ok(())
     }
-    pub fn get_min_timestep(&self) -> Result<f64, DiffsolJsError> {
+    pub fn get_min_timestep(&self) -> Result<f64, DiffsolRtError> {
         Ok(self.guard()?.solve.ode_min_timestep())
     }
-    pub fn set_min_timestep(&self, value: f64) -> Result<(), DiffsolJsError> {
+    pub fn set_min_timestep(&self, value: f64) -> Result<(), DiffsolRtError> {
         self.guard()?.solve.set_ode_min_timestep(value);
         Ok(())
     }

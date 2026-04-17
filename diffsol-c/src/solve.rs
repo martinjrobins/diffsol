@@ -13,7 +13,7 @@ use diffsol::{CodegenModuleCompile, CodegenModuleJit};
 use num_traits::{FromPrimitive, ToPrimitive}; // for from_f64 and to_f64
 use paste::paste;
 
-use crate::error::DiffsolJsError;
+use crate::error::DiffsolRtError;
 use crate::host_array::{HostArray, ToHostArray};
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 use crate::jit::JitBackendType;
@@ -36,7 +36,7 @@ use crate::{
 // Each matrix type implements PySolve as bridge between diffsol and Host
 
 use crate::solution::Solution;
-pub(crate) type SolveResult = Result<Box<dyn Solution>, DiffsolJsError>;
+pub(crate) type SolveResult = Result<Box<dyn Solution>, DiffsolRtError>;
 
 pub(crate) trait Solve {
     fn matrix_type(&self) -> MatrixType;
@@ -45,7 +45,7 @@ pub(crate) trait Solve {
     fn nout(&self) -> usize;
     fn has_stop(&self) -> bool;
 
-    fn rhs(&mut self, params: &[f64], t: f64, y: &[f64]) -> Result<HostArray, DiffsolJsError>;
+    fn rhs(&mut self, params: &[f64], t: f64, y: &[f64]) -> Result<HostArray, DiffsolRtError>;
 
     fn rhs_jac_mul(
         &mut self,
@@ -53,11 +53,11 @@ pub(crate) trait Solve {
         t: f64,
         y: &[f64],
         v: &[f64],
-    ) -> Result<HostArray, DiffsolJsError>;
+    ) -> Result<HostArray, DiffsolRtError>;
 
-    fn y0(&mut self, params: &[f64]) -> Result<HostArray, DiffsolJsError>;
+    fn y0(&mut self, params: &[f64]) -> Result<HostArray, DiffsolRtError>;
 
-    fn check(&self, linear_solver: LinearSolverType) -> Result<(), DiffsolJsError>;
+    fn check(&self, linear_solver: LinearSolverType) -> Result<(), DiffsolRtError>;
     fn set_rtol(&mut self, rtol: f64);
     fn rtol(&self) -> f64;
     fn set_atol(&mut self, atol: f64);
@@ -123,7 +123,7 @@ pub(crate) trait Solve {
         params: &[f64],
         data: HostArray,
         t_eval: &[f64],
-    ) -> Result<(f64, HostArray), DiffsolJsError>;
+    ) -> Result<(f64, HostArray), DiffsolRtError>;
 
     generate_trait_ic_option_accessors! {
         use_linesearch: bool,
@@ -151,7 +151,7 @@ pub(crate) fn solve_factory_external(
     mass_state_deps: Vec<(usize, usize)>,
     matrix_type: MatrixType,
     scalar_type: ScalarType,
-) -> Result<Box<dyn Solve>, DiffsolJsError> {
+) -> Result<Box<dyn Solve>, DiffsolRtError> {
     let solve: Box<dyn Solve> = match matrix_type {
         MatrixType::NalgebraDense => match scalar_type {
             #[cfg(feature = "diffsl-external-f32")]
@@ -169,7 +169,7 @@ pub(crate) fn solve_factory_external(
                 rhs_state_deps, rhs_input_deps, mass_state_deps, false
             )?),
             _ => {
-                return Err(DiffsolJsError::from(DiffsolError::Other(
+                return Err(DiffsolRtError::from(DiffsolError::Other(
                     "Unsupported scalar type for NalgebraDense".to_string(),
                 )));
             }
@@ -190,7 +190,7 @@ pub(crate) fn solve_factory_external(
                 rhs_state_deps, rhs_input_deps, mass_state_deps, false
             )?),
             _ => {
-                return Err(DiffsolJsError::from(DiffsolError::Other(
+                return Err(DiffsolRtError::from(DiffsolError::Other(
                     "Unsupported scalar type for FaerDense".to_string(),
                 )));
             }
@@ -211,7 +211,7 @@ pub(crate) fn solve_factory_external(
                 rhs_state_deps, rhs_input_deps, mass_state_deps, false
             )?),
             _ => {
-                return Err(DiffsolJsError::from(DiffsolError::Other(
+                return Err(DiffsolRtError::from(DiffsolError::Other(
                     "Unsupported scalar type for FaerSparse".to_string(),
                 )));
             }
@@ -226,7 +226,7 @@ pub(crate) fn solve_factory_jit(
     jit_backend: JitBackendType,
     matrix_type: MatrixType,
     scalar_type: ScalarType,
-) -> Result<Box<dyn Solve>, DiffsolJsError> {
+) -> Result<Box<dyn Solve>, DiffsolRtError> {
     match jit_backend {
         #[cfg(feature = "diffsl-cranelift")]
         JitBackendType::Cranelift => solve_factory_with_jit_backend::<diffsol::CraneliftJitModule>(
@@ -246,7 +246,7 @@ fn solve_factory_with_jit_backend<CG>(
     code: &str,
     matrix_type: MatrixType,
     scalar_type: ScalarType,
-) -> Result<Box<dyn Solve>, DiffsolJsError>
+) -> Result<Box<dyn Solve>, DiffsolRtError>
 where
     CG: CodegenModule + CodegenModuleJit + CodegenModuleCompile,
 {
@@ -306,7 +306,7 @@ where
     M::V: Vector + VectorHost + DefaultDenseMatrix,
     CG: CodegenModule,
 {
-    pub(crate) fn setup_problem(&mut self, params: &[f64]) -> Result<(), DiffsolJsError> {
+    pub(crate) fn setup_problem(&mut self, params: &[f64]) -> Result<(), DiffsolRtError> {
         let params: Vec<M::T> = params.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
         let params = M::V::from_slice(&params, M::C::default());
 
@@ -337,7 +337,7 @@ where
         rhs_input_deps: Vec<(usize, usize)>,
         mass_state_deps: Vec<(usize, usize)>,
         include_sensitivities: bool,
-    ) -> Result<Self, DiffsolJsError> {
+    ) -> Result<Self, DiffsolRtError> {
         let eqn = DiffSl::<M, diffsl::ExternalModule<M::T>>::from_external(
             M::C::default(),
             rhs_state_deps,
@@ -386,7 +386,7 @@ where
         self.problem.eqn.root().is_some()
     }
 
-    fn check(&self, linear_solver: LinearSolverType) -> Result<(), DiffsolJsError> {
+    fn check(&self, linear_solver: LinearSolverType) -> Result<(), DiffsolRtError> {
         validate_linear_solver::<M>(linear_solver)
     }
 
@@ -425,7 +425,7 @@ where
         threshold_to_update_rhs_jacobian: f64
     }
 
-    fn y0(&mut self, params: &[f64]) -> Result<HostArray, DiffsolJsError> {
+    fn y0(&mut self, params: &[f64]) -> Result<HostArray, DiffsolRtError> {
         self.setup_problem(params)?;
         let n = self.problem.eqn.nstates();
         let mut y0 = M::V::zeros(n, M::C::default());
@@ -434,7 +434,7 @@ where
         Ok((*y0.inner()).clone().to_host_array())
     }
 
-    fn rhs(&mut self, params: &[f64], t: f64, y: &[f64]) -> Result<HostArray, DiffsolJsError> {
+    fn rhs(&mut self, params: &[f64], t: f64, y: &[f64]) -> Result<HostArray, DiffsolRtError> {
         self.setup_problem(params)?;
         let n = self.problem.eqn.nstates();
         let y = y
@@ -457,7 +457,7 @@ where
         t: f64,
         y: &[f64],
         v: &[f64],
-    ) -> Result<HostArray, DiffsolJsError> {
+    ) -> Result<HostArray, DiffsolRtError> {
         self.setup_problem(params)?;
         let n = self.problem.eqn.nstates();
         let y = y
@@ -637,7 +637,7 @@ where
         params: &[f64],
         data: HostArray,
         t_eval: &[f64],
-    ) -> Result<(f64, HostArray), DiffsolJsError> {
+    ) -> Result<(f64, HostArray), DiffsolRtError> {
         self.check(linear_solver)?;
         self.setup_problem(params)?;
 
