@@ -1,6 +1,7 @@
 #![cfg_attr(
     not(any(
         feature = "external",
+        feature = "external-dynamic",
         feature = "diffsl-cranelift",
         feature = "diffsl-llvm"
     )),

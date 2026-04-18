@@ -81,6 +81,36 @@ impl OdeWrapper {
         )
     }
 
+    /// Construct an ODE solver backed by DiffSL symbols loaded from a dynamic library.
+    #[cfg(feature = "diffsl-external-dynamic")]
+    pub fn new_external_dynamic(
+        path: impl Into<std::path::PathBuf>,
+        rhs_state_deps: Vec<(usize, usize)>,
+        rhs_input_deps: Vec<(usize, usize)>,
+        mass_state_deps: Vec<(usize, usize)>,
+        scalar_type: ScalarType,
+        matrix_type: MatrixType,
+        linear_solver: LinearSolverType,
+        ode_solver: OdeSolverType,
+    ) -> Result<Self, DiffsolRtError> {
+        let solve = crate::solve::solve_factory_external_dynamic(
+            path.into(),
+            rhs_state_deps,
+            rhs_input_deps,
+            mass_state_deps,
+            matrix_type,
+            scalar_type,
+        )?;
+        Self::build(
+            String::new(),
+            scalar_type,
+            solve,
+            None,
+            linear_solver,
+            ode_solver,
+        )
+    }
+
     /// Construct an ODE solver by JIT-compiling DiffSL code immediately.
     #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
     pub fn new_jit(
@@ -685,6 +715,93 @@ mod tests {
         for ode_solver in all_ode_solvers() {
             assert_hybrid_forward_sensitivities_complete_across_reset(ode_solver);
         }
+    }
+}
+
+#[cfg(all(test, feature = "diffsl-external-dynamic"))]
+mod dynamic_tests {
+    use crate::host_array::FromHostArray;
+    use crate::linear_solver_type::LinearSolverType;
+    use crate::scalar_type::ScalarType;
+    use crate::test_support::{
+        assert_close, assert_solution_tail, external_dynamic_fixture_path, mass_state_deps,
+        rhs_input_deps, rhs_state_deps, vector_host, ASSERT_TOL, LOGISTIC_X0,
+    };
+
+    use super::*;
+
+    fn make_ode(matrix_type: MatrixType, ode_solver: OdeSolverType) -> OdeWrapper {
+        OdeWrapper::new_external_dynamic(
+            external_dynamic_fixture_path(),
+            rhs_state_deps(),
+            rhs_input_deps(),
+            mass_state_deps(),
+            ScalarType::F64,
+            matrix_type,
+            LinearSolverType::Default,
+            ode_solver,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn runtime_dispatch_matches_requested_matrix_type() {
+        for matrix_type in [
+            MatrixType::NalgebraDense,
+            MatrixType::FaerDense,
+            MatrixType::FaerSparse,
+        ] {
+            let ode = make_ode(matrix_type, OdeSolverType::Bdf);
+            assert_eq!(ode.get_matrix_type().unwrap(), matrix_type);
+            assert_eq!(ode.get_code().unwrap(), "");
+            assert_eq!(ode.get_jit_backend().unwrap(), None);
+            assert_eq!(ode.get_nstates().unwrap(), 1);
+            assert_eq!(ode.get_nparams().unwrap(), 1);
+            assert_eq!(ode.get_nout().unwrap(), 1);
+            assert!(ode.has_stop().unwrap());
+
+            let y0 = ode.y0(vector_host(&[2.0])).unwrap();
+            assert_eq!(Vec::<f64>::from_host_array(y0).unwrap(), vec![LOGISTIC_X0]);
+
+            let rhs = ode
+                .rhs(vector_host(&[2.0]), 0.0, vector_host(&[0.25]))
+                .unwrap();
+            assert_close(
+                Vec::<f64>::from_host_array(rhs).unwrap()[0],
+                0.375,
+                ASSERT_TOL,
+                "rhs(0.25)",
+            );
+
+            let rhs_jac_mul = ode
+                .rhs_jac_mul(
+                    vector_host(&[2.0]),
+                    0.0,
+                    vector_host(&[0.25]),
+                    vector_host(&[3.0]),
+                )
+                .unwrap();
+            assert_close(
+                Vec::<f64>::from_host_array(rhs_jac_mul).unwrap()[0],
+                3.0,
+                ASSERT_TOL,
+                "rhs_jac_mul(0.25, 3.0)",
+            );
+        }
+    }
+
+    #[test]
+    fn dense_solution_matches_logistic_solution() {
+        let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let t_eval = [0.25, 0.5, 1.0];
+        let solution = ode
+            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
+            .unwrap();
+
+        assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
     }
 }
 

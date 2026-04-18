@@ -1,6 +1,9 @@
 // Delegate solver types selected at runtime in Host to concrete solver types
 // in Rust.
 
+#[cfg(feature = "diffsl-external-dynamic")]
+use std::path::PathBuf;
+
 use diffsol::{
     error::DiffsolError,
     matrix::{MatrixHost, MatrixRef},
@@ -220,6 +223,86 @@ pub(crate) fn solve_factory_external(
     Ok(solve)
 }
 
+#[cfg(feature = "diffsl-external-dynamic")]
+pub(crate) fn solve_factory_external_dynamic(
+    path: PathBuf,
+    rhs_state_deps: Vec<(usize, usize)>,
+    rhs_input_deps: Vec<(usize, usize)>,
+    mass_state_deps: Vec<(usize, usize)>,
+    matrix_type: MatrixType,
+    scalar_type: ScalarType,
+) -> Result<Box<dyn Solve>, DiffsolRtError> {
+    let solve: Box<dyn Solve> = match matrix_type {
+        MatrixType::NalgebraDense => match scalar_type {
+            ScalarType::F32 => Box::new(GenericSolve::<
+                diffsol::NalgebraMat<f32>,
+                diffsl::ExternalDynModule<f32>,
+            >::from_external_dynamic(
+                path.clone(),
+                rhs_state_deps.clone(),
+                rhs_input_deps.clone(),
+                mass_state_deps.clone(),
+                false,
+            )?),
+            ScalarType::F64 => Box::new(GenericSolve::<
+                diffsol::NalgebraMat<f64>,
+                diffsl::ExternalDynModule<f64>,
+            >::from_external_dynamic(
+                path.clone(),
+                rhs_state_deps.clone(),
+                rhs_input_deps.clone(),
+                mass_state_deps.clone(),
+                false,
+            )?),
+        },
+        MatrixType::FaerDense => match scalar_type {
+            ScalarType::F32 => Box::new(GenericSolve::<
+                diffsol::FaerMat<f32>,
+                diffsl::ExternalDynModule<f32>,
+            >::from_external_dynamic(
+                path.clone(),
+                rhs_state_deps.clone(),
+                rhs_input_deps.clone(),
+                mass_state_deps.clone(),
+                false,
+            )?),
+            ScalarType::F64 => Box::new(GenericSolve::<
+                diffsol::FaerMat<f64>,
+                diffsl::ExternalDynModule<f64>,
+            >::from_external_dynamic(
+                path.clone(),
+                rhs_state_deps.clone(),
+                rhs_input_deps.clone(),
+                mass_state_deps.clone(),
+                false,
+            )?),
+        },
+        MatrixType::FaerSparse => match scalar_type {
+            ScalarType::F32 => Box::new(GenericSolve::<
+                diffsol::FaerSparseMat<f32>,
+                diffsl::ExternalDynModule<f32>,
+            >::from_external_dynamic(
+                path.clone(),
+                rhs_state_deps.clone(),
+                rhs_input_deps.clone(),
+                mass_state_deps.clone(),
+                false,
+            )?),
+            ScalarType::F64 => Box::new(GenericSolve::<
+                diffsol::FaerSparseMat<f64>,
+                diffsl::ExternalDynModule<f64>,
+            >::from_external_dynamic(
+                path,
+                rhs_state_deps,
+                rhs_input_deps,
+                mass_state_deps,
+                false,
+            )?),
+        },
+    };
+    Ok(solve)
+}
+
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 pub(crate) fn solve_factory_jit(
     code: &str,
@@ -339,6 +422,33 @@ where
         include_sensitivities: bool,
     ) -> Result<Self, DiffsolRtError> {
         let eqn = DiffSl::<M, diffsl::ExternalModule<M::T>>::from_external(
+            M::C::default(),
+            rhs_state_deps,
+            rhs_input_deps,
+            mass_state_deps,
+            include_sensitivities,
+        )?;
+        let default_p = vec![0.0; eqn.nparams()];
+        let problem = OdeBuilder::<M>::new().p(default_p).build_from_eqn(eqn)?;
+        Ok(GenericSolve { problem })
+    }
+}
+
+#[cfg(feature = "diffsl-external-dynamic")]
+impl<M> GenericSolve<M, diffsl::ExternalDynModule<M::T>>
+where
+    M: MatrixHost<T: Scalar>,
+    M::V: Vector + VectorHost + DefaultDenseMatrix,
+{
+    pub fn from_external_dynamic(
+        path: impl Into<PathBuf>,
+        rhs_state_deps: Vec<(usize, usize)>,
+        rhs_input_deps: Vec<(usize, usize)>,
+        mass_state_deps: Vec<(usize, usize)>,
+        include_sensitivities: bool,
+    ) -> Result<Self, DiffsolRtError> {
+        let eqn = DiffSl::<M, diffsl::ExternalDynModule<M::T>>::from_external_dynamic(
+            path,
             M::C::default(),
             rhs_state_deps,
             rhs_input_deps,
