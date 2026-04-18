@@ -428,8 +428,8 @@ mod tests {
     use crate::linear_solver_type::LinearSolverType;
     use crate::scalar_type::ScalarType;
     use crate::test_support::{
-        assert_close, assert_solution_tail, logistic_integral, logistic_state, logistic_state_dr,
-        mass_state_deps, rhs_input_deps, rhs_state_deps, vector_host, ASSERT_TOL, LOGISTIC_X0,
+        assert_close, assert_solution_tail, logistic_state, logistic_state_dr, mass_state_deps,
+        rhs_input_deps, rhs_state_deps, vector_host, ASSERT_TOL, LOGISTIC_X0,
     };
 
     use super::*;

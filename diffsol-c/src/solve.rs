@@ -4,12 +4,13 @@
 #[cfg(feature = "diffsl-external-dynamic")]
 use std::path::PathBuf;
 
+use diffsol::OdeBuilder;
 use diffsol::{
     error::DiffsolError,
     matrix::{MatrixHost, MatrixRef},
     CodegenModule, ConstantOp, DefaultDenseMatrix, DefaultSolver, DiffSl, MatrixCommon,
-    NonLinearOp, NonLinearOpJacobian, OdeBuilder, OdeEquations, OdeSolverProblem, Op, Vector,
-    VectorCommon, VectorHost, VectorRef,
+    NonLinearOp, NonLinearOpJacobian, OdeEquations, OdeSolverProblem, Op, Vector, VectorCommon,
+    VectorHost, VectorRef,
 };
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 use diffsol::{CodegenModuleCompile, CodegenModuleJit};
@@ -17,22 +18,25 @@ use num_traits::{FromPrimitive, ToPrimitive}; // for from_f64 and to_f64
 use paste::paste;
 
 use crate::error::DiffsolRtError;
-use crate::host_array::{HostArray, ToHostArray};
+use crate::host_array::HostArray;
+use crate::host_array::ToHostArray;
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 use crate::jit::JitBackendType;
 #[cfg(feature = "external")]
 use crate::scalar_type::ExternalScalar;
-use crate::scalar_type::{Scalar, ScalarType};
+use crate::scalar_type::Scalar;
+use crate::scalar_type::ScalarType;
 use crate::{
     generate_ic_option_accessors, generate_ode_option_accessors, generate_option_accessors,
-    generate_trait_ic_option_accessors, generate_trait_ode_option_accessors,
     option_value_from_store, option_value_to_store,
 };
+use crate::{generate_trait_ic_option_accessors, generate_trait_ode_option_accessors};
 
 use crate::{
-    linear_solver_type::LinearSolverType,
-    matrix_type::{MatrixKind, MatrixType},
-    ode_solver_type::OdeSolverType,
+    linear_solver_type::LinearSolverType, matrix_type::MatrixType, ode_solver_type::OdeSolverType,
+};
+use crate::{
+    matrix_type::MatrixKind,
     valid_linear_solver::{validate_linear_solver, KluValidator, LuValidator},
 };
 

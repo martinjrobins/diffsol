@@ -1,13 +1,13 @@
 #[cfg(any(
+    feature = "diffsl-external-dynamic",
     feature = "diffsl-cranelift",
     feature = "diffsl-llvm",
-    feature = "diffsl-external-dynamic"
 ))]
 use std::ffi::CStr;
 #[cfg(any(
+    feature = "diffsl-external-dynamic",
     feature = "diffsl-cranelift",
     feature = "diffsl-llvm",
-    feature = "diffsl-external-dynamic"
 ))]
 use std::os::raw::c_char;
 #[cfg(feature = "diffsl-external-dynamic")]
@@ -19,7 +19,8 @@ use crate::host_array::HostArray;
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 use crate::jit_c::jit_backend_from_i32;
 use crate::linear_solver_type_c::{linear_solver_from_i32, linear_solver_to_i32};
-use crate::matrix_type_c::{matrix_type_from_i32, matrix_type_to_i32};
+use crate::matrix_type_c::matrix_type_from_i32;
+use crate::matrix_type_c::matrix_type_to_i32;
 use crate::ode::OdeWrapper;
 use crate::ode_solver_type_c::{ode_solver_from_i32, ode_solver_to_i32};
 use crate::scalar_type::ScalarType;
@@ -63,6 +64,7 @@ fn parse_ode_new_common_args(
     Some((matrix_type, linear_solver, ode_solver))
 }
 
+#[cfg(any(feature = "external", feature = "diffsl-external-dynamic"))]
 unsafe fn dependency_pairs_from_raw_parts(
     deps_ptr: *const usize,
     deps_len: usize,

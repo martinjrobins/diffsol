@@ -212,7 +212,7 @@ pub(crate) fn hybrid_logistic_state_dr(r: f64, t: f64) -> f64 {
     (local_t + cycles * tau) * x * (1.0 - x)
 }
 
-#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
+#[cfg(feature = "diffsl-llvm")]
 pub(crate) fn logistic_integral(x0: f64, r: f64, t: f64) -> f64 {
     let a = (1.0 - x0) / x0;
     t + ((1.0 + a * (-r * t).exp()).ln() - (1.0 + a).ln()) / r
