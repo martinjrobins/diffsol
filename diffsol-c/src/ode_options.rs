@@ -1,8 +1,47 @@
 use std::sync::{Arc, Mutex};
 
-use serde::{ser::SerializeStruct, Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 
-use crate::{error::DiffsolRtError, ode::Ode};
+use crate::{error::DiffsolRtError, ode::Ode, solve::Solve};
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OdeSolverOptionsSnapshot {
+    pub max_nonlinear_solver_iterations: usize,
+    pub max_error_test_failures: usize,
+    pub update_jacobian_after_steps: usize,
+    pub update_rhs_jacobian_after_steps: usize,
+    pub threshold_to_update_jacobian: f64,
+    pub threshold_to_update_rhs_jacobian: f64,
+    pub min_timestep: f64,
+}
+
+impl OdeSolverOptionsSnapshot {
+    pub(crate) fn from_solve(solve: &dyn Solve) -> Self {
+        Self {
+            max_nonlinear_solver_iterations: solve.ode_max_nonlinear_solver_iterations(),
+            max_error_test_failures: solve.ode_max_error_test_failures(),
+            update_jacobian_after_steps: solve.ode_update_jacobian_after_steps(),
+            update_rhs_jacobian_after_steps: solve.ode_update_rhs_jacobian_after_steps(),
+            threshold_to_update_jacobian: solve.ode_threshold_to_update_jacobian(),
+            threshold_to_update_rhs_jacobian: solve.ode_threshold_to_update_rhs_jacobian(),
+            min_timestep: solve.ode_min_timestep(),
+        }
+    }
+
+    #[cfg_attr(
+        not(any(feature = "diffsl-cranelift", feature = "diffsl-llvm")),
+        allow(dead_code)
+    )]
+    pub(crate) fn apply_to_solve(&self, solve: &mut dyn Solve) {
+        solve.set_ode_max_nonlinear_solver_iterations(self.max_nonlinear_solver_iterations);
+        solve.set_ode_max_error_test_failures(self.max_error_test_failures);
+        solve.set_ode_update_jacobian_after_steps(self.update_jacobian_after_steps);
+        solve.set_ode_update_rhs_jacobian_after_steps(self.update_rhs_jacobian_after_steps);
+        solve.set_ode_threshold_to_update_jacobian(self.threshold_to_update_jacobian);
+        solve.set_ode_threshold_to_update_rhs_jacobian(self.threshold_to_update_rhs_jacobian);
+        solve.set_ode_min_timestep(self.min_timestep);
+    }
+}
 
 #[derive(Clone)]
 pub struct OdeSolverOptions {
@@ -88,48 +127,8 @@ impl Serialize for OdeSolverOptions {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("OdeSolverOptions", 7)?;
-        state.serialize_field(
-            "max_nonlinear_solver_iterations",
-            &self
-                .get_max_nonlinear_solver_iterations()
-                .map_err(serde::ser::Error::custom)?,
-        )?;
-        state.serialize_field(
-            "max_error_test_failures",
-            &self
-                .get_max_error_test_failures()
-                .map_err(serde::ser::Error::custom)?,
-        )?;
-        state.serialize_field(
-            "update_jacobian_after_steps",
-            &self
-                .get_update_jacobian_after_steps()
-                .map_err(serde::ser::Error::custom)?,
-        )?;
-        state.serialize_field(
-            "update_rhs_jacobian_after_steps",
-            &self
-                .get_update_rhs_jacobian_after_steps()
-                .map_err(serde::ser::Error::custom)?,
-        )?;
-        state.serialize_field(
-            "threshold_to_update_jacobian",
-            &self
-                .get_threshold_to_update_jacobian()
-                .map_err(serde::ser::Error::custom)?,
-        )?;
-        state.serialize_field(
-            "threshold_to_update_rhs_jacobian",
-            &self
-                .get_threshold_to_update_rhs_jacobian()
-                .map_err(serde::ser::Error::custom)?,
-        )?;
-        state.serialize_field(
-            "min_timestep",
-            &self.get_min_timestep().map_err(serde::ser::Error::custom)?,
-        )?;
-        state.end()
+        let guard = self.guard().map_err(serde::ser::Error::custom)?;
+        OdeSolverOptionsSnapshot::from_solve(guard.solve.as_ref()).serialize(serializer)
     }
 }
 

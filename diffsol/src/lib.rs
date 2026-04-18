@@ -134,7 +134,9 @@
 //!
 
 #[cfg(feature = "diffsl")]
-pub use diffsl::execution::module::{CodegenModule, CodegenModuleCompile, CodegenModuleJit};
+pub use diffsl::execution::module::{
+    CodegenModule, CodegenModuleCompile, CodegenModuleEmit, CodegenModuleJit,
+};
 #[cfg(feature = "diffsl")]
 pub use diffsl::execution::scalar::Scalar as DiffSlScalar;
 #[cfg(feature = "diffsl-cranelift")]
@@ -142,11 +144,7 @@ pub use diffsl::CraneliftJitModule;
 #[cfg(feature = "diffsl-llvm")]
 pub use diffsl::LlvmModule;
 #[cfg(feature = "diffsl")]
-pub use ode_equations::diffsl::DiffSlExternalScalarType;
-#[cfg(feature = "diffsl")]
 pub use diffsl::ObjectModule;
-#[cfg(feature = "diffsl")]
-pub use ode_equations::diffsl::DiffSlExternalObject;
 
 /// Context objects for managing device resources for vectors and matrices (e.g. device streams, threading pools, etc.).
 ///

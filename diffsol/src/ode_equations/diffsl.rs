@@ -37,6 +37,7 @@ use crate::{
 /// This contains the compiled code and the data structures needed to evaluate the ODE equations.
 pub struct DiffSlContext<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
     compiler: Compiler<CG, M::T>,
+    source: Option<String>,
     data: RefCell<Vec<M::T>>,
     ddata: RefCell<Vec<M::T>>,
     sens_data: RefCell<Vec<M::T>>,
@@ -59,22 +60,21 @@ pub struct DiffSlContext<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
     rhs_state_deps: Vec<(usize, usize)>,
     rhs_input_deps: Vec<(usize, usize)>,
     mass_state_deps: Vec<(usize, usize)>,
-    object_buffer: Option<Vec<u8>>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DiffSlExternalObject {
-    pub scalar_type: DiffSlExternalScalarType,
-    pub object: Vec<u8>,
-    pub rhs_state_deps: Vec<(usize, usize)>,
-    pub rhs_input_deps: Vec<(usize, usize)>,
-    pub mass_state_deps: Vec<(usize, usize)>,
-    pub include_sensitivities: bool,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct DiffSlExternalObject {
+    scalar_type: DiffSlExternalScalarType,
+    object: Vec<u8>,
+    rhs_state_deps: Vec<(usize, usize)>,
+    rhs_input_deps: Vec<(usize, usize)>,
+    mass_state_deps: Vec<(usize, usize)>,
+    include_sensitivities: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DiffSlExternalScalarType {
+enum DiffSlExternalScalarType {
     F32,
     F64,
 }
@@ -96,11 +96,11 @@ fn diffsl_external_scalar_type<T: DiffSlScalar>() -> Result<DiffSlExternalScalar
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> DiffSlContext<M, CG> {
     fn new_common(
         compiler: Compiler<CG, M::T>,
+        source: Option<String>,
         rhs_state_deps: Vec<(usize, usize)>,
         rhs_input_deps: Vec<(usize, usize)>,
         mass_state_deps: Vec<(usize, usize)>,
         ctx: M::C,
-        object_buffer: Option<Vec<u8>>,
     ) -> Result<Self, DiffsolError> {
         let (nstates, nparams, nout, _ndata, nroots, has_mass, has_reset) = compiler.get_dims();
         let has_root = nroots > 0;
@@ -118,6 +118,7 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> DiffSlContext<M, CG> {
 
         Ok(Self {
             compiler,
+            source,
             data,
             ddata,
             sens_data,
@@ -140,7 +141,6 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> DiffSlContext<M, CG> {
             rhs_input_deps,
             mass_state_deps,
             model_index,
-            object_buffer,
         })
     }
 }
@@ -167,11 +167,11 @@ impl<M: Matrix<T: DiffSlScalar>> DiffSlContext<M, ExternalDynModule<M::T>> {
 
         Self::new_common(
             compiler,
+            None,
             rhs_state_deps,
             rhs_input_deps,
             mass_state_deps,
             ctx,
-            None,
         )
     }
 }
@@ -196,11 +196,11 @@ impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSlContext<M, ExternalModule
 
         Self::new_common(
             compiler,
+            None,
             rhs_state_deps,
             rhs_input_deps,
             mass_state_deps,
             ctx,
-            None,
         )
     }
 }
@@ -224,11 +224,11 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleLink + CodegenModuleJit> DiffS
 
         Self::new_common(
             compiler,
+            None,
             rhs_state_deps,
             rhs_input_deps,
             mass_state_deps,
             ctx,
-            Some(object),
         )
     }
 }
@@ -264,11 +264,11 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> Di
 
         Self::new_common(
             compiler,
+            Some(text.to_owned()),
             rhs_state_deps,
             rhs_input_deps,
             mass_state_deps,
             ctx,
-            None,
         )
     }
 }
@@ -533,33 +533,63 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModuleJit + CodegenModuleCompile
 }
 
 impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule + CodegenModuleEmit> DiffSl<M, CG> {
-    pub fn to_external_object(self) -> Result<DiffSlExternalObject, DiffsolError> {
-        let DiffSl {
-            context,
-            include_sensitivities,
-            ..
-        } = self;
-        let object = context
+    fn to_external_object(&self) -> Result<DiffSlExternalObject, DiffsolError> {
+        let object = self
+            .context
             .compiler
-            .to_module()
+            .module()
             .to_object()
             .map_err(|e| DiffsolError::DiffslCompilerError(e.to_string()))?;
         Ok(DiffSlExternalObject {
             scalar_type: diffsl_external_scalar_type::<M::T>()?,
             object,
-            rhs_state_deps: context.rhs_state_deps,
-            rhs_input_deps: context.rhs_input_deps,
-            mass_state_deps: context.mass_state_deps,
-            include_sensitivities,
+            rhs_state_deps: self.context.rhs_state_deps.clone(),
+            rhs_input_deps: self.context.rhs_input_deps.clone(),
+            mass_state_deps: self.context.mass_state_deps.clone(),
+            include_sensitivities: self.include_sensitivities,
         })
     }
+}
+
+#[cfg(feature = "diffsl-cranelift")]
+fn cranelift_external_object_from_source<T: DiffSlScalar>(
+    text: &str,
+    rhs_state_deps: &[(usize, usize)],
+    rhs_input_deps: &[(usize, usize)],
+    mass_state_deps: &[(usize, usize)],
+    include_sensitivities: bool,
+) -> Result<DiffSlExternalObject, DiffsolError> {
+    let options = diffsl::execution::compiler::CompilerOptions::default();
+    let model =
+        parse_ds_string(text).map_err(|e| DiffsolError::DiffslParserError(e.to_string()))?;
+    let model = DiscreteModel::build("diffsol", &model)
+        .map_err(|e| DiffsolError::DiffslCompilerError(e.as_error_message(text)))?;
+    let module = <diffsl::CraneliftObjectModule as CodegenModuleCompile>::from_discrete_model(
+        &model,
+        options,
+        None,
+        T::as_real_type(),
+        Some(text),
+    )
+    .map_err(|e| DiffsolError::DiffslCompilerError(e.to_string()))?;
+    let object = module
+        .to_object()
+        .map_err(|e| DiffsolError::DiffslCompilerError(e.to_string()))?;
+    Ok(DiffSlExternalObject {
+        scalar_type: diffsl_external_scalar_type::<T>()?,
+        object,
+        rhs_state_deps: rhs_state_deps.to_vec(),
+        rhs_input_deps: rhs_input_deps.to_vec(),
+        mass_state_deps: mass_state_deps.to_vec(),
+        include_sensitivities,
+    })
 }
 
 impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> DiffSl<M, CG>
 where
     CG: CodegenModuleLink + CodegenModuleJit,
 {
-    pub fn from_external_object(
+    fn from_external_object(
         external_object: DiffSlExternalObject,
         ctx: M::C,
     ) -> Result<Self, DiffsolError> {
@@ -585,25 +615,69 @@ where
     }
 }
 
+#[cfg(feature = "diffsl-llvm")]
+impl<M: MatrixHost<T: DiffSlScalar>> Serialize for DiffSl<M, crate::LlvmModule> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.to_external_object()
+            .map_err(serde::ser::Error::custom)?
+            .serialize(serializer)
+    }
+}
+
 impl<M: MatrixHost<T: DiffSlScalar>> Serialize for DiffSl<M, ObjectModule> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        DiffSlExternalObject {
-            scalar_type: diffsl_external_scalar_type::<M::T>()
-                .map_err(serde::ser::Error::custom)?,
-            object: self.context.object_buffer.clone().ok_or_else(|| {
-                serde::ser::Error::custom(
-                    "DiffSl object export is not available for this backend".to_string(),
-                )
-            })?,
-            rhs_state_deps: self.context.rhs_state_deps.clone(),
-            rhs_input_deps: self.context.rhs_input_deps.clone(),
-            mass_state_deps: self.context.mass_state_deps.clone(),
-            include_sensitivities: self.include_sensitivities,
-        }
+        self.to_external_object()
+            .map_err(serde::ser::Error::custom)?
+            .serialize(serializer)
+    }
+}
+
+#[cfg(feature = "diffsl-cranelift")]
+impl<M: MatrixHost<T: DiffSlScalar>> Serialize for DiffSl<M, crate::CraneliftJitModule> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let source = self.context.source.as_deref().ok_or_else(|| {
+            serde::ser::Error::custom(
+                "DiffSl source is unavailable for Cranelift JIT serialization",
+            )
+        })?;
+        cranelift_external_object_from_source::<M::T>(
+            source,
+            &self.context.rhs_state_deps,
+            &self.context.rhs_input_deps,
+            &self.context.mass_state_deps,
+            self.include_sensitivities,
+        )
+        .map_err(serde::ser::Error::custom)?
         .serialize(serializer)
+    }
+}
+
+#[cfg(feature = "diffsl-external")]
+impl<M: MatrixHost<T: DiffSlScalar + ExternSymbols>> Serialize for DiffSl<M, ExternalModule<M::T>> {
+    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        panic!("DiffSl serialization is not supported for ExternalModule backends");
+    }
+}
+
+#[cfg(feature = "diffsl-external-dynamic")]
+impl<M: MatrixHost<T: DiffSlScalar>> Serialize for DiffSl<M, ExternalDynModule<M::T>> {
+    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        panic!("DiffSl serialization is not supported for ExternalDynModule backends");
     }
 }
 
@@ -1967,12 +2041,8 @@ mod tests {
         "
     }
 
-    fn assert_object_roundtrip<M>(
-        rhs_state_deps: Vec<(usize, usize)>,
-        rhs_input_deps: Vec<(usize, usize)>,
-        mass_state_deps: Vec<(usize, usize)>,
-        include_sensitivities: bool,
-    ) where
+    fn assert_object_roundtrip<M>(include_sensitivities: bool)
+    where
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
         for<'b> &'b M::V: VectorRef<M::V>,
         for<'b> &'b M: MatrixRef<M>,
@@ -1989,6 +2059,9 @@ mod tests {
         )
         .unwrap();
         compiled.set_params(&p);
+        let rhs_state_deps = compiled.context.rhs_state_deps.clone();
+        let rhs_input_deps = compiled.context.rhs_input_deps.clone();
+        let mass_state_deps = compiled.context.mass_state_deps.clone();
 
         let t = M::T::zero();
         let x_compiled = compiled.init().call(t);
@@ -2040,7 +2113,6 @@ mod tests {
             DiffSl::<M, crate::LlvmModule>::compile(serialization_test_model(), ctx, true).unwrap();
         let external_object = compiled.to_external_object().unwrap();
         let rhs_state_deps = external_object.rhs_state_deps.clone();
-        let rhs_input_deps = external_object.rhs_input_deps.clone();
         let mass_state_deps = external_object.mass_state_deps.clone();
         let include_sensitivities = external_object.include_sensitivities;
 
@@ -2048,12 +2120,7 @@ mod tests {
         assert!(!mass_state_deps.is_empty());
         assert!(include_sensitivities);
 
-        assert_object_roundtrip::<M>(
-            rhs_state_deps.clone(),
-            rhs_input_deps.clone(),
-            mass_state_deps.clone(),
-            include_sensitivities,
-        );
+        assert_object_roundtrip::<M>(include_sensitivities);
 
         let mut imported = DiffSl::<M, ObjectModule>::from_external_object(
             external_object,
@@ -2072,7 +2139,7 @@ mod tests {
     fn diffsl_external_object_roundtrip_dense_f64() {
         type M = crate::NalgebraMat<f64>;
 
-        assert_object_roundtrip::<M>(Vec::new(), Vec::new(), Vec::new(), false);
+        assert_object_roundtrip::<M>(false);
     }
 
     #[cfg(feature = "diffsl-llvm")]
