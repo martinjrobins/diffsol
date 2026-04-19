@@ -12,7 +12,7 @@ readme = "../README.md"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = []
+default = ["diffsl-external-dynamic"]
 wasm = ["getrandom/js"]
 external = []
 external-dynamic = []
