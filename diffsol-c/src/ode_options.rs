@@ -128,7 +128,7 @@ impl Serialize for OdeSolverOptions {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
 mod tests {
     use crate::{
         jit::JitBackendType,
