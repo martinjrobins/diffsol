@@ -1,17 +1,23 @@
 #![allow(clippy::missing_safety_doc)]
 
-#[cfg(feature = "diffsl-external-f64")]
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-external-dynamic"))]
 use std::ffi::CStr;
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 use std::ffi::CString;
-#[cfg(feature = "diffsl-external-f64")]
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-external-dynamic"))]
 use std::os::raw::c_char;
+#[cfg(feature = "diffsl-external-dynamic")]
+use std::path::PathBuf;
+#[cfg(feature = "diffsl-external-dynamic")]
+use std::process::Command;
+#[cfg(feature = "diffsl-external-dynamic")]
+use std::sync::OnceLock;
 
 #[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
 use nalgebra::DMatrix;
 
 use crate::error_c::diffsol_clear_last_error;
-#[cfg(feature = "diffsl-external-f64")]
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-external-dynamic"))]
 use crate::error_c::{
     diffsol_error_code, diffsol_last_error_file, diffsol_last_error_line,
     diffsol_last_error_message,
@@ -19,40 +25,100 @@ use crate::error_c::{
 use crate::host_array::{FromHostArray, HostArray, ToHostArray};
 use crate::host_array_c::{
     diffsol_host_array_dim, diffsol_host_array_dtype, diffsol_host_array_free,
-    diffsol_host_array_ndim, diffsol_host_array_ptr, diffsol_host_array_stride,
+    diffsol_host_array_ndim, diffsol_host_array_ptr,
 };
 #[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
 use crate::ode_c::diffsol_host_array_list_free;
 use crate::scalar_type::ScalarType;
 use crate::scalar_type_c::scalar_type_to_i32;
 use crate::solution_wrapper::SolutionWrapper;
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
 use crate::solution_wrapper_c::diffsol_solution_wrapper_free;
 
 pub(crate) const ASSERT_TOL: f64 = 1e-5;
 #[cfg(any(
     feature = "diffsl-external-f64",
+    feature = "diffsl-external-dynamic",
     feature = "diffsl-cranelift",
     feature = "diffsl-llvm"
 ))]
 pub(crate) const LOGISTIC_X0: f64 = 0.1;
 
-#[cfg(feature = "diffsl-external-f64")]
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-external-dynamic"))]
 pub(crate) fn rhs_state_deps() -> Vec<(usize, usize)> {
     vec![(0, 0)]
 }
 
-#[cfg(feature = "diffsl-external-f64")]
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-external-dynamic"))]
 pub(crate) fn rhs_input_deps() -> Vec<(usize, usize)> {
     vec![(0, 0)]
 }
 
-#[cfg(feature = "diffsl-external-f64")]
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-external-dynamic"))]
 pub(crate) fn mass_state_deps() -> Vec<(usize, usize)> {
     Vec::new()
 }
 
+#[cfg(feature = "diffsl-external-dynamic")]
+fn external_dynamic_fixture_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/external-dynamic-logistic")
+}
+
+#[cfg(feature = "diffsl-external-dynamic")]
+fn external_dynamic_fixture_filename() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "diffsol_c_external_dynamic_fixture.dll"
+    } else if cfg!(target_os = "macos") {
+        "libdiffsol_c_external_dynamic_fixture.dylib"
+    } else {
+        "libdiffsol_c_external_dynamic_fixture.so"
+    }
+}
+
+#[cfg(feature = "diffsl-external-dynamic")]
+pub(crate) fn external_dynamic_fixture_path() -> PathBuf {
+    static FIXTURE_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+    FIXTURE_PATH
+        .get_or_init(|| {
+            let fixture_dir = external_dynamic_fixture_dir();
+            let manifest_path = fixture_dir.join("Cargo.toml");
+            let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+            let output = Command::new(cargo)
+                .arg("build")
+                .arg("--manifest-path")
+                .arg(&manifest_path)
+                .current_dir(&fixture_dir)
+                .output()
+                .expect("failed to build external dynamic fixture");
+            if !output.status.success() {
+                panic!(
+                    "failed to build external dynamic fixture\nstdout:\n{}\nstderr:\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
+                );
+            }
+
+            let profile_dir = if cfg!(debug_assertions) {
+                "debug"
+            } else {
+                "release"
+            };
+            let library_path = fixture_dir
+                .join("target")
+                .join(profile_dir)
+                .join(external_dynamic_fixture_filename());
+            assert!(
+                library_path.is_file(),
+                "expected built fixture library at {}",
+                library_path.display()
+            );
+            library_path
+        })
+        .clone()
+}
+
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-#[cfg_attr(feature = "external", allow(dead_code))]
 pub(crate) fn logistic_diffsl_code() -> &'static str {
     r#"
         in_i { r = 1 }
@@ -64,7 +130,6 @@ pub(crate) fn logistic_diffsl_code() -> &'static str {
 }
 
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-#[cfg_attr(feature = "external", allow(dead_code))]
 pub(crate) fn hybrid_logistic_diffsl_code() -> &'static str {
     r#"
         in_i { r = 1 }
@@ -78,13 +143,11 @@ pub(crate) fn hybrid_logistic_diffsl_code() -> &'static str {
 }
 
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-#[cfg_attr(feature = "external", allow(dead_code))]
 pub(crate) fn logistic_diffsl_code_cstring() -> CString {
     CString::new(logistic_diffsl_code()).unwrap()
 }
 
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-#[cfg_attr(feature = "external", allow(dead_code))]
 pub(crate) fn available_jit_backends() -> Vec<crate::jit::JitBackendType> {
     [
         #[cfg(feature = "diffsl-cranelift")]
@@ -145,7 +208,7 @@ pub(crate) fn hybrid_logistic_state_dr(r: f64, t: f64) -> f64 {
     (local_t + cycles * tau) * x * (1.0 - x)
 }
 
-#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
+#[cfg(feature = "diffsl-llvm")]
 pub(crate) fn logistic_integral(x0: f64, r: f64, t: f64) -> f64 {
     let a = (1.0 - x0) / x0;
     t + ((1.0 + a * (-r * t).exp()).ln() - (1.0 + a).ln()) / r
@@ -216,6 +279,7 @@ pub(crate) fn assert_solution_tail(
     }
 }
 
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
 pub(crate) unsafe fn ffi_free_solution(ptr: *mut SolutionWrapper) {
     if !ptr.is_null() {
         unsafe {
@@ -240,6 +304,7 @@ pub(crate) unsafe fn ffi_read_host_array_vector(ptr: *mut HostArray) -> Vec<f64>
     values
 }
 
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
 pub(crate) unsafe fn ffi_read_host_array_matrix(ptr: *mut HostArray) -> (usize, usize, Vec<f64>) {
     assert!(!ptr.is_null(), "host array pointer must not be null");
     assert_eq!(unsafe { diffsol_host_array_ndim(ptr) }, 2);
@@ -249,8 +314,8 @@ pub(crate) unsafe fn ffi_read_host_array_matrix(ptr: *mut HostArray) -> (usize, 
     );
     let rows = unsafe { diffsol_host_array_dim(ptr, 0) };
     let cols = unsafe { diffsol_host_array_dim(ptr, 1) };
-    let row_stride = unsafe { diffsol_host_array_stride(ptr, 0) };
-    let col_stride = unsafe { diffsol_host_array_stride(ptr, 1) };
+    let row_stride = unsafe { crate::host_array_c::diffsol_host_array_stride(ptr, 0) };
+    let col_stride = unsafe { crate::host_array_c::diffsol_host_array_stride(ptr, 1) };
     let base_ptr = unsafe { diffsol_host_array_ptr(ptr) };
     let mut values = Vec::with_capacity(rows * cols);
     for col in 0..cols {
@@ -283,19 +348,40 @@ pub(crate) unsafe fn ffi_read_host_array_list_matrices(
     arrays
 }
 
-#[cfg(feature = "diffsl-external-f64")]
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-external-dynamic"))]
 pub(crate) unsafe fn c_string(ptr: *const c_char) -> String {
     assert!(!ptr.is_null(), "expected non-null C string");
     unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_owned()
 }
 
-#[cfg(feature = "diffsl-external-f64")]
-pub(crate) unsafe fn assert_last_error_contains(expected_substring: &str) {
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-external-dynamic"))]
+pub(crate) unsafe fn assert_last_error_set() {
     assert_eq!(
         unsafe { diffsol_error_code() },
         1,
         "expected last error to be set"
     );
+    let message_ptr = unsafe { diffsol_last_error_message() };
+    assert!(
+        !message_ptr.is_null(),
+        "expected last error message to be set"
+    );
+    let message = unsafe { c_string(message_ptr) };
+    assert!(
+        !message.is_empty(),
+        "expected last error message to be non-empty"
+    );
+    let file_ptr = unsafe { diffsol_last_error_file() };
+    assert!(!file_ptr.is_null(), "expected last error file to be set");
+    assert!(
+        unsafe { diffsol_last_error_line() } > 0,
+        "expected last error line to be > 0"
+    );
+}
+
+#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-external-dynamic"))]
+pub(crate) unsafe fn assert_last_error_contains(expected_substring: &str) {
+    unsafe { assert_last_error_set() };
     let message_ptr = unsafe { diffsol_last_error_message() };
     let message = unsafe { c_string(message_ptr) };
     assert!(

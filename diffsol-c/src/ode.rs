@@ -1,11 +1,21 @@
 use std::sync::{Arc, Mutex};
 
+use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize, Serializer};
+
 use crate::jit::JitBackendType;
 use crate::{
-    error::DiffsolRtError, host_array::HostArray,
-    initial_condition_options::InitialConditionSolverOptions, linear_solver_type::LinearSolverType,
-    matrix_type::MatrixType, ode_options::OdeSolverOptions, ode_solver_type::OdeSolverType,
-    scalar_type::ScalarType, solution_wrapper::SolutionWrapper, solve::Solve,
+    error::DiffsolRtError,
+    host_array::HostArray,
+    initial_condition_options::{
+        InitialConditionSolverOptions, InitialConditionSolverOptionsSnapshot,
+    },
+    linear_solver_type::LinearSolverType,
+    matrix_type::MatrixType,
+    ode_options::{OdeSolverOptions, OdeSolverOptionsSnapshot},
+    ode_solver_type::OdeSolverType,
+    scalar_type::ScalarType,
+    solution_wrapper::SolutionWrapper,
+    solve::Solve,
 };
 
 pub struct Ode {
@@ -23,6 +33,21 @@ unsafe impl Sync for Ode {}
 #[derive(Clone)]
 pub struct OdeWrapper(Arc<Mutex<Ode>>);
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct OdeWrapperSnapshot {
+    code: String,
+    equation: Vec<u8>,
+    jit_backend: JitBackendType,
+    scalar_type: ScalarType,
+    matrix_type: MatrixType,
+    linear_solver: LinearSolverType,
+    ode_solver: OdeSolverType,
+    rtol: f64,
+    atol: f64,
+    ic_options: InitialConditionSolverOptionsSnapshot,
+    ode_options: OdeSolverOptionsSnapshot,
+}
+
 impl OdeWrapper {
     fn guard(&self) -> Result<std::sync::MutexGuard<'_, Ode>, DiffsolRtError> {
         self.0.lock().map_err(|_| {
@@ -34,6 +59,28 @@ impl OdeWrapper {
 }
 
 impl OdeWrapper {
+    fn snapshot(&self) -> Result<OdeWrapperSnapshot, DiffsolRtError> {
+        let ode = self.guard()?;
+        let jit_backend = ode.jit_backend.ok_or_else(|| {
+            DiffsolRtError::from(diffsol::error::DiffsolError::Other(
+                "OdeWrapper serialization is only supported for JIT-backed solvers".to_string(),
+            ))
+        })?;
+        Ok(OdeWrapperSnapshot {
+            code: ode.code.clone(),
+            equation: ode.solve.serialized_diffsl()?,
+            jit_backend,
+            scalar_type: ode.scalar_type,
+            matrix_type: ode.solve.matrix_type(),
+            linear_solver: ode.linear_solver,
+            ode_solver: ode.ode_solver,
+            rtol: ode.solve.rtol(),
+            atol: ode.solve.atol(),
+            ic_options: InitialConditionSolverOptionsSnapshot::from_solve(ode.solve.as_ref()),
+            ode_options: OdeSolverOptionsSnapshot::from_solve(ode.solve.as_ref()),
+        })
+    }
+
     fn build(
         code: String,
         scalar_type: ScalarType,
@@ -53,6 +100,30 @@ impl OdeWrapper {
         }))))
     }
 
+    fn from_snapshot(snapshot: OdeWrapperSnapshot) -> Result<Self, DiffsolRtError> {
+        let solve = crate::solve::solve_factory_from_serialized_diffsl(
+            snapshot.equation.as_slice(),
+            snapshot.matrix_type,
+            snapshot.scalar_type,
+        )?;
+        let wrapper = Self::build(
+            snapshot.code,
+            snapshot.scalar_type,
+            solve,
+            Some(snapshot.jit_backend),
+            snapshot.linear_solver,
+            snapshot.ode_solver,
+        )?;
+        {
+            let mut ode = wrapper.guard()?;
+            ode.solve.set_rtol(snapshot.rtol);
+            ode.solve.set_atol(snapshot.atol);
+            snapshot.ic_options.apply_to_solve(ode.solve.as_mut());
+            snapshot.ode_options.apply_to_solve(ode.solve.as_mut());
+        }
+        Ok(wrapper)
+    }
+
     /// Construct an ODE solver backed by externally-provided DiffSL symbols.
     #[cfg(feature = "external")]
     pub fn new_external(
@@ -65,6 +136,36 @@ impl OdeWrapper {
         ode_solver: OdeSolverType,
     ) -> Result<Self, DiffsolRtError> {
         let solve = crate::solve::solve_factory_external(
+            rhs_state_deps,
+            rhs_input_deps,
+            mass_state_deps,
+            matrix_type,
+            scalar_type,
+        )?;
+        Self::build(
+            String::new(),
+            scalar_type,
+            solve,
+            None,
+            linear_solver,
+            ode_solver,
+        )
+    }
+
+    /// Construct an ODE solver backed by DiffSL symbols loaded from a dynamic library.
+    #[cfg(feature = "diffsl-external-dynamic")]
+    pub fn new_external_dynamic(
+        path: impl Into<std::path::PathBuf>,
+        rhs_state_deps: Vec<(usize, usize)>,
+        rhs_input_deps: Vec<(usize, usize)>,
+        mass_state_deps: Vec<(usize, usize)>,
+        scalar_type: ScalarType,
+        matrix_type: MatrixType,
+        linear_solver: LinearSolverType,
+        ode_solver: OdeSolverType,
+    ) -> Result<Self, DiffsolRtError> {
+        let solve = crate::solve::solve_factory_external_dynamic(
+            path.into(),
             rhs_state_deps,
             rhs_input_deps,
             mass_state_deps,
@@ -392,17 +493,37 @@ impl OdeWrapper {
     }
 }
 
+impl Serialize for OdeWrapper {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.snapshot()
+            .map_err(serde::ser::Error::custom)?
+            .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for OdeWrapper {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let snapshot = OdeWrapperSnapshot::deserialize(deserializer)?;
+        Self::from_snapshot(snapshot).map_err(DeError::custom)
+    }
+}
+
 #[cfg(all(test, feature = "diffsl-external-f64"))]
 mod tests {
+    use super::*;
     use crate::host_array::FromHostArray;
     use crate::linear_solver_type::LinearSolverType;
     use crate::scalar_type::ScalarType;
     use crate::test_support::{
-        assert_close, assert_solution_tail, logistic_integral, logistic_state, logistic_state_dr,
-        mass_state_deps, rhs_input_deps, rhs_state_deps, vector_host, ASSERT_TOL, LOGISTIC_X0,
+        assert_close, assert_solution_tail, logistic_state, logistic_state_dr, mass_state_deps,
+        rhs_input_deps, rhs_state_deps, vector_host, ASSERT_TOL, LOGISTIC_X0,
     };
-
-    use super::*;
 
     fn all_ode_solvers() -> [OdeSolverType; 4] {
         [
@@ -688,6 +809,100 @@ mod tests {
     }
 }
 
+#[cfg(all(test, feature = "diffsl-external-dynamic"))]
+mod dynamic_tests {
+    use crate::host_array::FromHostArray;
+    use crate::linear_solver_type::LinearSolverType;
+    use crate::scalar_type::ScalarType;
+    use crate::test_support::{
+        assert_close, assert_solution_tail, external_dynamic_fixture_path, mass_state_deps,
+        rhs_input_deps, rhs_state_deps, vector_host, ASSERT_TOL, LOGISTIC_X0,
+    };
+
+    use super::*;
+
+    fn make_ode(matrix_type: MatrixType, ode_solver: OdeSolverType) -> OdeWrapper {
+        OdeWrapper::new_external_dynamic(
+            external_dynamic_fixture_path(),
+            rhs_state_deps(),
+            rhs_input_deps(),
+            mass_state_deps(),
+            ScalarType::F64,
+            matrix_type,
+            LinearSolverType::Default,
+            ode_solver,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn runtime_dispatch_matches_requested_matrix_type() {
+        for matrix_type in [
+            MatrixType::NalgebraDense,
+            MatrixType::FaerDense,
+            MatrixType::FaerSparse,
+        ] {
+            let ode = make_ode(matrix_type, OdeSolverType::Bdf);
+            assert_eq!(ode.get_matrix_type().unwrap(), matrix_type);
+            assert_eq!(ode.get_code().unwrap(), "");
+            assert_eq!(ode.get_jit_backend().unwrap(), None);
+            assert_eq!(ode.get_nstates().unwrap(), 1);
+            assert_eq!(ode.get_nparams().unwrap(), 1);
+            assert_eq!(ode.get_nout().unwrap(), 1);
+            assert!(ode.has_stop().unwrap());
+
+            let y0 = ode.y0(vector_host(&[2.0])).unwrap();
+            assert_eq!(Vec::<f64>::from_host_array(y0).unwrap(), vec![LOGISTIC_X0]);
+
+            let rhs = ode
+                .rhs(vector_host(&[2.0]), 0.0, vector_host(&[0.25]))
+                .unwrap();
+            assert_close(
+                Vec::<f64>::from_host_array(rhs).unwrap()[0],
+                0.375,
+                ASSERT_TOL,
+                "rhs(0.25)",
+            );
+
+            let rhs_jac_mul = ode
+                .rhs_jac_mul(
+                    vector_host(&[2.0]),
+                    0.0,
+                    vector_host(&[0.25]),
+                    vector_host(&[3.0]),
+                )
+                .unwrap();
+            assert_close(
+                Vec::<f64>::from_host_array(rhs_jac_mul).unwrap()[0],
+                3.0,
+                ASSERT_TOL,
+                "rhs_jac_mul(0.25, 3.0)",
+            );
+        }
+    }
+
+    #[test]
+    fn dense_solution_matches_logistic_solution() {
+        let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let t_eval = [0.25, 0.5, 1.0];
+        let solution = ode
+            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
+            .unwrap();
+
+        assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
+    }
+
+    #[test]
+    fn non_jit_serialization_is_rejected() {
+        let ode = make_ode(MatrixType::NalgebraDense, OdeSolverType::Bdf);
+        let err = serde_json::to_string(&ode).unwrap_err().to_string();
+        assert!(err.contains("JIT-backed"));
+    }
+}
+
 #[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
 mod jit_tests {
     use crate::host_array::FromHostArray;
@@ -701,6 +916,12 @@ mod jit_tests {
     };
     #[cfg(feature = "diffsl-llvm")]
     use crate::test_support::{hybrid_logistic_state_dr, logistic_state_dr};
+    #[cfg(any(
+        all(feature = "diffsl-llvm", not(feature = "diffsl-cranelift")),
+        all(feature = "diffsl-cranelift", not(feature = "diffsl-llvm"))
+    ))]
+    use serde_json::Value;
+    use serde_json::{self};
 
     use super::*;
 
@@ -743,6 +964,117 @@ mod jit_tests {
             ode_solver,
         )
         .unwrap()
+    }
+
+    fn serialized_linear_solver(matrix_type: MatrixType) -> LinearSolverType {
+        match matrix_type {
+            MatrixType::NalgebraDense | MatrixType::FaerDense => LinearSolverType::Lu,
+            MatrixType::FaerSparse => LinearSolverType::Default,
+        }
+    }
+
+    fn configure_serialized_ode(ode: &OdeWrapper, matrix_type: MatrixType) {
+        ode.set_linear_solver(serialized_linear_solver(matrix_type))
+            .unwrap();
+        ode.set_ode_solver(OdeSolverType::TrBdf2).unwrap();
+        ode.set_rtol(1e-7).unwrap();
+        ode.set_atol(1e-9).unwrap();
+
+        let ic_options = ode.get_ic_options();
+        ic_options.set_use_linesearch(true).unwrap();
+        ic_options.set_max_linesearch_iterations(13).unwrap();
+        ic_options.set_max_newton_iterations(17).unwrap();
+        ic_options.set_max_linear_solver_setups(19).unwrap();
+        ic_options.set_step_reduction_factor(0.5).unwrap();
+        ic_options.set_armijo_constant(1e-4).unwrap();
+
+        let options = ode.get_options();
+        options.set_max_nonlinear_solver_iterations(23).unwrap();
+        options.set_max_error_test_failures(29).unwrap();
+        options.set_update_jacobian_after_steps(31).unwrap();
+        options.set_update_rhs_jacobian_after_steps(37).unwrap();
+        options.set_threshold_to_update_jacobian(1e-3).unwrap();
+        options.set_threshold_to_update_rhs_jacobian(2e-3).unwrap();
+        options.set_min_timestep(1e-4).unwrap();
+    }
+
+    fn assert_serialization_roundtrip(jit_backend: JitBackendType, matrix_type: MatrixType) {
+        let ode = make_ode(jit_backend, matrix_type, OdeSolverType::Bdf);
+        configure_serialized_ode(&ode, matrix_type);
+
+        #[cfg(feature = "diffsl-cranelift")]
+        if jit_backend == JitBackendType::Cranelift {
+            let err = serde_json::to_string(&ode).unwrap_err().to_string();
+            assert!(err.contains("not supported for Cranelift"));
+            return;
+        }
+
+        let y0_before = Vec::<f64>::from_host_array(ode.y0(vector_host(&[2.0])).unwrap()).unwrap();
+        let rhs_before = Vec::<f64>::from_host_array(
+            ode.rhs(vector_host(&[2.0]), 0.0, vector_host(&[0.25]))
+                .unwrap(),
+        )
+        .unwrap();
+
+        let encoded = serde_json::to_string(&ode).unwrap();
+        let decoded: OdeWrapper = serde_json::from_str(&encoded).unwrap();
+
+        assert_eq!(decoded.get_jit_backend().unwrap(), Some(jit_backend));
+        assert_eq!(decoded.get_code().unwrap(), logistic_diffsl_code());
+        assert_eq!(decoded.get_scalar_type().unwrap(), ScalarType::F64);
+        assert_eq!(decoded.get_matrix_type().unwrap(), matrix_type);
+        assert_eq!(
+            decoded.get_linear_solver().unwrap(),
+            serialized_linear_solver(matrix_type)
+        );
+        assert_eq!(decoded.get_ode_solver().unwrap(), OdeSolverType::TrBdf2);
+        assert_eq!(decoded.get_rtol().unwrap(), 1e-7);
+        assert_eq!(decoded.get_atol().unwrap(), 1e-9);
+
+        let ic_options = decoded.get_ic_options();
+        assert!(ic_options.get_use_linesearch().unwrap());
+        assert_eq!(ic_options.get_max_linesearch_iterations().unwrap(), 13);
+        assert_eq!(ic_options.get_max_newton_iterations().unwrap(), 17);
+        assert_eq!(ic_options.get_max_linear_solver_setups().unwrap(), 19);
+        assert_eq!(ic_options.get_step_reduction_factor().unwrap(), 0.5);
+        assert_eq!(ic_options.get_armijo_constant().unwrap(), 1e-4);
+
+        let options = decoded.get_options();
+        assert_eq!(options.get_max_nonlinear_solver_iterations().unwrap(), 23);
+        assert_eq!(options.get_max_error_test_failures().unwrap(), 29);
+        assert_eq!(options.get_update_jacobian_after_steps().unwrap(), 31);
+        assert_eq!(options.get_update_rhs_jacobian_after_steps().unwrap(), 37);
+        assert_eq!(options.get_threshold_to_update_jacobian().unwrap(), 1e-3);
+        assert_eq!(
+            options.get_threshold_to_update_rhs_jacobian().unwrap(),
+            2e-3
+        );
+        assert_eq!(options.get_min_timestep().unwrap(), 1e-4);
+
+        let y0_after =
+            Vec::<f64>::from_host_array(decoded.y0(vector_host(&[2.0])).unwrap()).unwrap();
+        let rhs_after = Vec::<f64>::from_host_array(
+            decoded
+                .rhs(vector_host(&[2.0]), 0.0, vector_host(&[0.25]))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(y0_after, y0_before);
+        assert_close(
+            rhs_after[0],
+            rhs_before[0],
+            ASSERT_TOL,
+            "serialized rhs matches",
+        );
+
+        decoded
+            .set_linear_solver(serialized_linear_solver(matrix_type))
+            .unwrap();
+        let t_eval = [0.25, 0.5, 1.0];
+        let solution = decoded
+            .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
+            .unwrap();
+        assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, 2.0, 5e-4);
     }
 
     fn assert_runtime_dispatch(jit_backend: JitBackendType, matrix_type: MatrixType) {
@@ -1002,6 +1334,49 @@ mod jit_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn serialization_roundtrip_restores_full_solver_state() {
+        for jit_backend in available_jit_backends() {
+            for matrix_type in [MatrixType::NalgebraDense, MatrixType::FaerSparse] {
+                assert_serialization_roundtrip(jit_backend, matrix_type);
+            }
+        }
+    }
+
+    #[cfg(all(feature = "diffsl-llvm", not(feature = "diffsl-cranelift")))]
+    #[test]
+    fn deserialization_rejects_unavailable_jit_backend() {
+        let ode = make_ode(
+            JitBackendType::Llvm,
+            MatrixType::NalgebraDense,
+            OdeSolverType::Bdf,
+        );
+        let mut value = serde_json::to_value(&ode).unwrap();
+        value["jit_backend"] = Value::String("cranelift".to_string());
+        let err = serde_json::from_value::<OdeWrapper>(value)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(err.contains("unknown variant"));
+    }
+
+    #[cfg(all(feature = "diffsl-cranelift", not(feature = "diffsl-llvm")))]
+    #[test]
+    fn deserialization_rejects_unavailable_jit_backend() {
+        let ode = make_ode(
+            JitBackendType::Cranelift,
+            MatrixType::NalgebraDense,
+            OdeSolverType::Bdf,
+        );
+        let mut value = serde_json::to_value(&ode).unwrap();
+        value["jit_backend"] = Value::String("llvm".to_string());
+        let err = serde_json::from_value::<OdeWrapper>(value)
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(err.contains("unknown variant"));
     }
 
     #[test]
