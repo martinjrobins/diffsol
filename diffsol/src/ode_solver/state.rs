@@ -457,12 +457,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
 
             {
                 let state = self.as_ref();
-                reset_op.jac_transpose_mul_inplace(
-                    y_minus,
-                    t_event,
-                    &state.s[i],
-                    &mut reset_adj,
-                );
+                reset_op.jac_transpose_mul_inplace(y_minus, t_event, &state.s[i], &mut reset_adj);
                 reset_op.sens_transpose_mul_inplace(
                     y_minus,
                     t_event,
