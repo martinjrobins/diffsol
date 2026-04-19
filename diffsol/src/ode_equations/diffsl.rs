@@ -2022,6 +2022,10 @@ mod tests {
     }
 
     #[cfg(feature = "diffsl-llvm")]
+    #[cfg_attr(
+        all(target_os = "macos", target_arch = "x86_64"),
+        ignore = "from_external_object is unsupported on Intel macOS due to unsupported relocations"
+    )]
     #[test]
     fn diffsl_external_object_roundtrip_sparse_f64() {
         type M = crate::FaerSparseMat<f64>;
@@ -2053,6 +2057,10 @@ mod tests {
     }
 
     #[cfg(feature = "diffsl-llvm")]
+    #[cfg_attr(
+        all(target_os = "macos", target_arch = "x86_64"),
+        ignore = "from_external_object is unsupported on Intel macOS due to unsupported relocations"
+    )]
     #[test]
     fn diffsl_external_object_roundtrip_dense_f64() {
         type M = crate::NalgebraMat<f64>;
@@ -2061,6 +2069,10 @@ mod tests {
     }
 
     #[cfg(feature = "diffsl-llvm")]
+    #[cfg_attr(
+        all(target_os = "macos", target_arch = "x86_64"),
+        ignore = "from_external_object is unsupported on Intel macOS due to unsupported relocations"
+    )]
     #[test]
     fn diffsl_serde_roundtrip_object_module_f64() {
         type M = crate::FaerSparseMat<f64>;
