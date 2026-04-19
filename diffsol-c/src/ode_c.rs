@@ -31,6 +31,23 @@ fn boxed_host_array(array: HostArray) -> *mut HostArray {
     Box::into_raw(Box::new(array))
 }
 
+#[cfg(any(feature = "external", feature = "diffsl-external-dynamic"))]
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+/// C-compatible dependency pair used by the FFI constructors.
+///
+/// Memory layout guarantees:
+/// - `#[repr(C)]` preserves field order exactly as declared.
+/// - The first machine word is `row`, followed by `col`.
+/// - Each field is a `usize`, so size/alignment are target-dependent
+///   (32-bit targets: 4 bytes, 64-bit targets: 8 bytes).
+/// - Arrays of `DiffsolDepPair` are contiguous in memory and can be passed as
+///   pointer/length (`*const DiffsolDepPair`, `usize`) to this API.
+pub struct DiffsolDepPair {
+    pub row: usize,
+    pub col: usize,
+}
+
 fn parse_ode_new_common_args(
     matrix_type: i32,
     linear_solver: i32,
@@ -66,13 +83,16 @@ fn parse_ode_new_common_args(
 
 #[cfg(any(feature = "external", feature = "diffsl-external-dynamic"))]
 unsafe fn dependency_pairs_from_raw_parts(
-    deps_ptr: *const usize,
+    deps_ptr: *const DiffsolDepPair,
     deps_len: usize,
 ) -> Vec<(usize, usize)> {
     if deps_ptr.is_null() || deps_len == 0 {
         Vec::new()
     } else {
-        unsafe { std::slice::from_raw_parts(deps_ptr as *const (usize, usize), deps_len).to_vec() }
+        unsafe { std::slice::from_raw_parts(deps_ptr, deps_len) }
+            .iter()
+            .map(|pair| (pair.row, pair.col))
+            .collect()
     }
 }
 
@@ -155,18 +175,18 @@ pub unsafe extern "C" fn diffsol_host_array_list_free(list: *mut *mut HostArray,
 ///
 /// # Safety
 /// Dependency pointers must be either null with length `0` or point to valid
-/// memory containing `(usize, usize)` pairs for the specified lengths for the
+/// memory containing [`DiffsolDepPair`] values for the specified lengths for the
 /// duration of this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_new_external(
     matrix_type: i32,
     linear_solver: i32,
     ode_solver: i32,
-    rhs_state_deps_ptr: *const usize,
+    rhs_state_deps_ptr: *const DiffsolDepPair,
     rhs_state_deps_len: usize,
-    rhs_input_deps_ptr: *const usize,
+    rhs_input_deps_ptr: *const DiffsolDepPair,
     rhs_input_deps_len: usize,
-    mass_state_deps_ptr: *const usize,
+    mass_state_deps_ptr: *const DiffsolDepPair,
     mass_state_deps_len: usize,
 ) -> *mut OdeWrapper {
     let Some((matrix_type, linear_solver, ode_solver)) =
@@ -206,7 +226,7 @@ pub unsafe extern "C" fn diffsol_ode_new_external(
 /// # Safety
 /// `path` must be a valid, null-terminated UTF-8 string for the duration of
 /// this call. Dependency pointers must be either null with length `0` or point
-/// to valid memory containing `(usize, usize)` pairs for the specified lengths
+/// to valid memory containing [`DiffsolDepPair`] values for the specified lengths
 /// for the duration of this call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn diffsol_ode_new_external_dynamic(
@@ -214,11 +234,11 @@ pub unsafe extern "C" fn diffsol_ode_new_external_dynamic(
     matrix_type: i32,
     linear_solver: i32,
     ode_solver: i32,
-    rhs_state_deps_ptr: *const usize,
+    rhs_state_deps_ptr: *const DiffsolDepPair,
     rhs_state_deps_len: usize,
-    rhs_input_deps_ptr: *const usize,
+    rhs_input_deps_ptr: *const DiffsolDepPair,
     rhs_input_deps_len: usize,
-    mass_state_deps_ptr: *const usize,
+    mass_state_deps_ptr: *const DiffsolDepPair,
     mass_state_deps_len: usize,
 ) -> *mut OdeWrapper {
     let Some((path, matrix_type, linear_solver, ode_solver)) =
@@ -1010,24 +1030,31 @@ mod tests {
 
     use super::*;
 
+    fn to_dep_pairs(values: &[(usize, usize)]) -> Vec<DiffsolDepPair> {
+        values
+            .iter()
+            .map(|&(row, col)| DiffsolDepPair { row, col })
+            .collect()
+    }
+
     unsafe fn make_ode_ptr(
         matrix_type: i32,
         linear_solver: i32,
         ode_solver: i32,
     ) -> *mut OdeWrapper {
-        let rhs_state_deps = rhs_state_deps();
-        let rhs_input_deps = rhs_input_deps();
-        let mass_state_deps = mass_state_deps();
+        let rhs_state_deps = to_dep_pairs(&rhs_state_deps());
+        let rhs_input_deps = to_dep_pairs(&rhs_input_deps());
+        let mass_state_deps = to_dep_pairs(&mass_state_deps());
         unsafe {
             diffsol_ode_new_external(
                 matrix_type,
                 linear_solver,
                 ode_solver,
-                rhs_state_deps.as_ptr() as *const usize,
+                rhs_state_deps.as_ptr(),
                 rhs_state_deps.len(),
-                rhs_input_deps.as_ptr() as *const usize,
+                rhs_input_deps.as_ptr(),
                 rhs_input_deps.len(),
-                mass_state_deps.as_ptr() as *const usize,
+                mass_state_deps.as_ptr(),
                 mass_state_deps.len(),
             )
         }
@@ -1511,6 +1538,13 @@ mod external_dynamic_tests {
 
     use super::*;
 
+    fn to_dep_pairs(values: &[(usize, usize)]) -> Vec<DiffsolDepPair> {
+        values
+            .iter()
+            .map(|&(row, col)| DiffsolDepPair { row, col })
+            .collect()
+    }
+
     unsafe fn make_ode_ptr(
         matrix_type: i32,
         linear_solver: i32,
@@ -1522,20 +1556,20 @@ mod external_dynamic_tests {
                 .into_owned(),
         )
         .unwrap();
-        let rhs_state_deps = rhs_state_deps();
-        let rhs_input_deps = rhs_input_deps();
-        let mass_state_deps = mass_state_deps();
+        let rhs_state_deps = to_dep_pairs(&rhs_state_deps());
+        let rhs_input_deps = to_dep_pairs(&rhs_input_deps());
+        let mass_state_deps = to_dep_pairs(&mass_state_deps());
         unsafe {
             diffsol_ode_new_external_dynamic(
                 path.as_ptr(),
                 matrix_type,
                 linear_solver,
                 ode_solver,
-                rhs_state_deps.as_ptr() as *const usize,
+                rhs_state_deps.as_ptr(),
                 rhs_state_deps.len(),
-                rhs_input_deps.as_ptr() as *const usize,
+                rhs_input_deps.as_ptr(),
                 rhs_input_deps.len(),
-                mass_state_deps.as_ptr() as *const usize,
+                mass_state_deps.as_ptr(),
                 mass_state_deps.len(),
             )
         }
