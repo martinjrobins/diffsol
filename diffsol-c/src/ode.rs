@@ -154,6 +154,7 @@ impl OdeWrapper {
 
     /// Construct an ODE solver backed by DiffSL symbols loaded from a dynamic library.
     #[cfg(feature = "diffsl-external-dynamic")]
+    #[allow(clippy::too_many_arguments)]
     pub fn new_external_dynamic(
         path: impl Into<std::path::PathBuf>,
         rhs_state_deps: Vec<(usize, usize)>,
