@@ -1,8 +1,40 @@
 use std::sync::{Arc, Mutex};
 
-use serde::{ser::SerializeStruct, Serialize, Serializer};
+use serde::{Deserialize, Serialize, Serializer};
 
-use crate::{error::DiffsolRtError, ode::Ode};
+use crate::{error::DiffsolRtError, ode::Ode, solve::Solve};
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct InitialConditionSolverOptionsSnapshot {
+    pub use_linesearch: bool,
+    pub max_linesearch_iterations: usize,
+    pub max_newton_iterations: usize,
+    pub max_linear_solver_setups: usize,
+    pub step_reduction_factor: f64,
+    pub armijo_constant: f64,
+}
+
+impl InitialConditionSolverOptionsSnapshot {
+    pub(crate) fn from_solve(solve: &dyn Solve) -> Self {
+        Self {
+            use_linesearch: solve.ic_use_linesearch(),
+            max_linesearch_iterations: solve.ic_max_linesearch_iterations(),
+            max_newton_iterations: solve.ic_max_newton_iterations(),
+            max_linear_solver_setups: solve.ic_max_linear_solver_setups(),
+            step_reduction_factor: solve.ic_step_reduction_factor(),
+            armijo_constant: solve.ic_armijo_constant(),
+        }
+    }
+
+    pub(crate) fn apply_to_solve(&self, solve: &mut dyn Solve) {
+        solve.set_ic_use_linesearch(self.use_linesearch);
+        solve.set_ic_max_linesearch_iterations(self.max_linesearch_iterations);
+        solve.set_ic_max_newton_iterations(self.max_newton_iterations);
+        solve.set_ic_max_linear_solver_setups(self.max_linear_solver_setups);
+        solve.set_ic_step_reduction_factor(self.step_reduction_factor);
+        solve.set_ic_armijo_constant(self.armijo_constant);
+    }
+}
 
 #[derive(Clone)]
 pub struct InitialConditionSolverOptions {
@@ -71,44 +103,9 @@ impl Serialize for InitialConditionSolverOptions {
     where
         S: Serializer,
     {
-        let mut state = serializer.serialize_struct("InitialConditionSolverOptions", 6)?;
-        state.serialize_field(
-            "use_linesearch",
-            &self
-                .get_use_linesearch()
-                .map_err(serde::ser::Error::custom)?,
-        )?;
-        state.serialize_field(
-            "max_linesearch_iterations",
-            &self
-                .get_max_linesearch_iterations()
-                .map_err(serde::ser::Error::custom)?,
-        )?;
-        state.serialize_field(
-            "max_newton_iterations",
-            &self
-                .get_max_newton_iterations()
-                .map_err(serde::ser::Error::custom)?,
-        )?;
-        state.serialize_field(
-            "max_linear_solver_setups",
-            &self
-                .get_max_linear_solver_setups()
-                .map_err(serde::ser::Error::custom)?,
-        )?;
-        state.serialize_field(
-            "step_reduction_factor",
-            &self
-                .get_step_reduction_factor()
-                .map_err(serde::ser::Error::custom)?,
-        )?;
-        state.serialize_field(
-            "armijo_constant",
-            &self
-                .get_armijo_constant()
-                .map_err(serde::ser::Error::custom)?,
-        )?;
-        state.end()
+        let guard = self.guard().map_err(serde::ser::Error::custom)?;
+        InitialConditionSolverOptionsSnapshot::from_solve(guard.solve.as_ref())
+            .serialize(serializer)
     }
 }
 

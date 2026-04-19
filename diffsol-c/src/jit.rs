@@ -14,12 +14,9 @@ pub enum JitBackendType {
 pub fn default_enabled_jit_backend() -> Option<JitBackendType> {
     #[cfg(all(feature = "diffsl-cranelift", not(feature = "diffsl-llvm")))]
     let backend = Some(JitBackendType::Cranelift);
-    #[cfg(all(feature = "diffsl-llvm", not(feature = "diffsl-cranelift")))]
+    #[cfg(feature = "diffsl-llvm")]
     let backend = Some(JitBackendType::Llvm);
-    #[cfg(any(
-        all(feature = "diffsl-cranelift", feature = "diffsl-llvm"),
-        not(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))
-    ))]
+    #[cfg(all(not(feature = "diffsl-cranelift"), not(feature = "diffsl-llvm")))]
     let backend = None;
 
     backend

@@ -1,16 +1,17 @@
-#![cfg_attr(
-    not(any(
-        feature = "external",
-        feature = "diffsl-cranelift",
-        feature = "diffsl-llvm"
-    )),
-    allow(dead_code, unused_imports, unused_variables)
-)]
-
 // Configure dlmalloc as the global allocator for WASM targets
 // dlmalloc is a maintained alternative to the unmaintained wee_alloc
 #[cfg(target_arch = "wasm32")]
 use dlmalloc::GlobalDlmalloc;
+
+#[cfg(not(any(
+    feature = "external",
+    feature = "external-dynamic",
+    feature = "diffsl-cranelift",
+    feature = "diffsl-llvm"
+)))]
+compile_error!(
+    "diffsol-c requires one of `external`, `external-dynamic`, `diffsl-cranelift`, or `diffsl-llvm`."
+);
 
 #[cfg(target_arch = "wasm32")]
 #[global_allocator]
@@ -96,6 +97,7 @@ pub mod solution_wrapper;
 pub mod solution_wrapper_c;
 pub mod solve;
 pub mod solve_macros;
+mod solve_serialization;
 #[path = "string_c.rs"]
 pub mod string_c;
 pub mod utils;
