@@ -1924,6 +1924,7 @@ mod tests {
         rhs_after_set_params.assert_eq_st(&rhs_model_2_expected, tol);
     }
 
+    #[cfg(feature = "diffsl-llvm")]
     fn serialization_test_model() -> &'static str {
         "
             in_i { a = 1, b = 2 }
@@ -1957,6 +1958,7 @@ mod tests {
         "
     }
 
+    #[cfg(feature = "diffsl-llvm")]
     fn assert_object_roundtrip<M>(include_sensitivities: bool)
     where
         M: Matrix<V: VectorHost + DefaultDenseMatrix, T: DiffSlScalar> + DefaultSolver,
