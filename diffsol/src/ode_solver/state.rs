@@ -399,10 +399,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let y_plus = fwd_state_plus.as_ref().y;
         let f_minus = fwd_state_minus.as_ref().dy;
         let f_plus = fwd_state_plus.as_ref().dy;
-        let (lambda_plus, q_plus) = {
-            let state = self.as_ref();
-            (state.s.to_vec(), state.sg.to_vec())
-        };
+        let nchannels = self.as_ref().s.len();
         let nstates = y_minus.len();
         let nparams = eqn.rhs().nparams();
 
@@ -443,50 +440,47 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let mut root_adj = V::zeros(nstates, ctx.clone());
         let mut reset_sens_adj = V::zeros(nparams, ctx.clone());
         let mut root_sens_adj = V::zeros(nparams, ctx.clone());
-        let mut lambda_minus = Vec::with_capacity(lambda_plus.len());
-        let mut q_minus = Vec::with_capacity(q_plus.len());
 
-        for (i, (lambda_i_plus, q_i_plus)) in lambda_plus.iter().zip(q_plus.iter()).enumerate() {
-            let mut alpha_num = V::T::zero();
-            for j in 0..nstates {
-                alpha_num += lambda_i_plus.get_index(j) * correction_dir.get_index(j);
-            }
-            if let (Some(l_minus), Some(l_plus)) = (&l_minus, &l_plus) {
-                alpha_num += l_minus.get_index(i) - l_plus.get_index(i);
-            }
-            let alpha = alpha_num / denom;
+        for i in 0..nchannels {
+            let alpha = {
+                let state = self.as_ref();
+                let lambda_i = &state.s[i];
+                let mut alpha_num = V::T::zero();
+                for j in 0..nstates {
+                    alpha_num += lambda_i.get_index(j) * correction_dir.get_index(j);
+                }
+                if let (Some(l_minus), Some(l_plus)) = (&l_minus, &l_plus) {
+                    alpha_num += l_minus.get_index(i) - l_plus.get_index(i);
+                }
+                alpha_num / denom
+            };
 
-            reset_op.jac_transpose_mul_inplace(y_minus, t_event, lambda_i_plus, &mut reset_adj);
+            {
+                let state = self.as_ref();
+                reset_op.jac_transpose_mul_inplace(
+                    y_minus,
+                    t_event,
+                    &state.s[i],
+                    &mut reset_adj,
+                );
+                reset_op.sens_transpose_mul_inplace(
+                    y_minus,
+                    t_event,
+                    &state.s[i],
+                    &mut reset_sens_adj,
+                );
+            }
+
             root_basis.set_index(root_idx, alpha);
             root_op.jac_transpose_mul_inplace(y_minus, t_event, &root_basis, &mut root_adj);
-
-            let mut lambda_i_minus = reset_adj.clone() * scale(-V::T::one());
-            lambda_i_minus += &root_adj;
-            lambda_minus.push(lambda_i_minus);
-
-            reset_op.sens_transpose_mul_inplace(
-                y_minus,
-                t_event,
-                lambda_i_plus,
-                &mut reset_sens_adj,
-            );
             root_op.sens_transpose_mul_inplace(y_minus, t_event, &root_basis, &mut root_sens_adj);
-
-            let mut q_i_minus = q_i_plus.clone();
-            q_i_minus -= &reset_sens_adj;
-            q_i_minus += &root_sens_adj;
-            q_minus.push(q_i_minus);
             root_basis.set_index(root_idx, V::T::zero());
-        }
 
-        {
             let state = self.as_mut();
-            for (dst, src) in state.s.iter_mut().zip(lambda_minus.iter()) {
-                dst.copy_from(src);
-            }
-            for (dst, src) in state.sg.iter_mut().zip(q_minus.iter()) {
-                dst.copy_from(src);
-            }
+            state.s[i].copy_from(&root_adj);
+            state.s[i].axpy(-V::T::one(), &reset_adj, V::T::one());
+            state.sg[i] -= &reset_sens_adj;
+            state.sg[i] += &root_sens_adj;
         }
         refresh_augmented_state::<V, _, Eqn, _>(self, adj_eqn)
     }
@@ -573,23 +567,14 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
         let mut root_basis = V::zeros(nroots, ctx.clone());
         let mut lambda_corr = V::zeros(nstates, ctx.clone());
         let mut q_corr = V::zeros(nparams, ctx.clone());
-        let mut lambda_terms = Vec::with_capacity(nout);
-        let mut q_terms = Vec::with_capacity(nout);
         for i in 0..nout {
             root_basis.set_index(root_idx, out.get_index(i) / denom);
             root_op.jac_transpose_mul_inplace(forward.y, forward.t, &root_basis, &mut lambda_corr);
             root_op.sens_transpose_mul_inplace(forward.y, forward.t, &root_basis, &mut q_corr);
-            lambda_terms.push(lambda_corr.clone());
-            q_terms.push(q_corr.clone());
-            lambda_corr.fill(V::T::zero());
-            q_corr.fill(V::T::zero());
             root_basis.set_index(root_idx, V::T::zero());
-        }
-
-        let state = self.as_mut();
-        for i in 0..nout {
-            state.s[i] += &lambda_terms[i];
-            state.sg[i] += &q_terms[i];
+            let state = self.as_mut();
+            state.s[i] += &lambda_corr;
+            state.sg[i] += &q_corr;
         }
         refresh_augmented_state::<V, _, Eqn, _>(self, adj_eqn)
     }
