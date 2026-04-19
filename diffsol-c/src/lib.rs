@@ -97,6 +97,7 @@ pub mod solution_wrapper;
 pub mod solution_wrapper_c;
 pub mod solve;
 pub mod solve_macros;
+mod solve_serialization;
 #[path = "string_c.rs"]
 pub mod string_c;
 pub mod utils;

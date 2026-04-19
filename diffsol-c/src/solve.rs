@@ -9,8 +9,6 @@ use crate::host_array::HostArray;
 use crate::host_array::ToHostArray;
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 use crate::jit::JitBackendType;
-#[cfg(feature = "external")]
-use crate::scalar_type::ExternalScalar;
 use crate::scalar_type::Scalar;
 use crate::scalar_type::ScalarType;
 use crate::{
@@ -32,6 +30,7 @@ use diffsol::{CodegenModuleCompile, CodegenModuleJit};
 use num_traits::{FromPrimitive, ToPrimitive}; // for from_f64 and to_f64
 use paste::paste;
 
+use crate::solve_serialization::{unsupported_serialization_error, SolveSerialization};
 use crate::{
     linear_solver_type::LinearSolverType, matrix_type::MatrixType, ode_solver_type::OdeSolverType,
 };
@@ -70,10 +69,9 @@ pub(crate) trait Solve {
     fn set_atol(&mut self, atol: f64);
     fn atol(&self) -> f64;
     fn serialized_diffsl(&self) -> Result<Vec<u8>, DiffsolRtError> {
-        Err(DiffsolError::Other(
-            "ODE serialization is only supported for JIT-backed solvers".to_string(),
+        unsupported_serialization_error(
+            "ODE serialization is only supported for JIT-backed solvers",
         )
-        .into())
     }
 
     // New API: solution object support
@@ -477,6 +475,14 @@ where
             .into())
         }
     }
+
+    pub(crate) fn serialize_eqn(&self) -> Result<Vec<u8>, DiffsolRtError>
+    where
+        DiffSl<M, CG>: serde::Serialize,
+    {
+        serde_json::to_vec(&self.problem.eqn)
+            .map_err(|e| DiffsolRtError::from(DiffsolError::Other(e.to_string())))
+    }
 }
 
 #[cfg(feature = "external")]
@@ -536,81 +542,6 @@ where
         let eqn = serde_json::from_slice::<DiffSl<M, ObjectModule>>(serialized_diffsl)
             .map_err(|e| DiffsolRtError::from(DiffsolError::Other(e.to_string())))?;
         Self::from_eqn(eqn)
-    }
-}
-
-trait SolveSerialization<M>: CodegenModule
-where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
-{
-    fn serialized_diffsl(solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError>
-    where
-        Self: Sized;
-}
-
-#[cfg(feature = "external")]
-impl<M> SolveSerialization<M> for diffsl::ExternalModule<M::T>
-where
-    M: MatrixHost<T: ExternalScalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
-{
-    fn serialized_diffsl(_solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError> {
-        Err(DiffsolError::Other(
-            "ODE serialization is only supported for JIT-backed solvers".to_string(),
-        )
-        .into())
-    }
-}
-
-#[cfg(feature = "diffsl-external-dynamic")]
-impl<M> SolveSerialization<M> for diffsl::ExternalDynModule<M::T>
-where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
-{
-    fn serialized_diffsl(_solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError> {
-        Err(DiffsolError::Other(
-            "ODE serialization is only supported for JIT-backed solvers".to_string(),
-        )
-        .into())
-    }
-}
-
-#[cfg(feature = "diffsl-llvm")]
-impl<M> SolveSerialization<M> for diffsol::LlvmModule
-where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
-{
-    fn serialized_diffsl(solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError> {
-        serde_json::to_vec(&solve.problem.eqn)
-            .map_err(|e| DiffsolRtError::from(DiffsolError::Other(e.to_string())))
-    }
-}
-
-#[cfg(feature = "diffsl-cranelift")]
-impl<M> SolveSerialization<M> for diffsol::CraneliftJitModule
-where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
-{
-    fn serialized_diffsl(_solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError> {
-        Err(DiffsolError::Other(
-            "ODE serialization is not supported for Cranelift-backed solvers".to_string(),
-        )
-        .into())
-    }
-}
-
-impl<M> SolveSerialization<M> for ObjectModule
-where
-    M: MatrixHost<T: Scalar>,
-    M::V: Vector + VectorHost + DefaultDenseMatrix,
-{
-    fn serialized_diffsl(solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError> {
-        serde_json::to_vec(&solve.problem.eqn)
-            .map_err(|e| DiffsolRtError::from(DiffsolError::Other(e.to_string())))
     }
 }
 
