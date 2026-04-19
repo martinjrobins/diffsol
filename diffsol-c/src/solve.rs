@@ -4,21 +4,6 @@
 #[cfg(feature = "diffsl-external-dynamic")]
 use std::path::PathBuf;
 
-use diffsol::ObjectModule;
-use diffsol::OdeBuilder;
-use diffsol::{
-    error::DiffsolError,
-    matrix::{MatrixHost, MatrixRef},
-    CodegenModule, ConstantOp, DefaultDenseMatrix, DefaultSolver, DiffSl, MatrixCommon,
-    NonLinearOp, NonLinearOpJacobian, OdeEquations, OdeSolverProblem, Op, Vector, VectorCommon,
-    VectorHost, VectorRef,
-};
-#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-use diffsol::{CodegenModuleCompile, CodegenModuleJit};
-use num_traits::{FromPrimitive, ToPrimitive}; // for from_f64 and to_f64
-use paste::paste;
-use serde::Serialize;
-
 use crate::error::DiffsolRtError;
 use crate::host_array::HostArray;
 use crate::host_array::ToHostArray;
@@ -33,6 +18,19 @@ use crate::{
     option_value_from_store, option_value_to_store,
 };
 use crate::{generate_trait_ic_option_accessors, generate_trait_ode_option_accessors};
+use diffsol::ObjectModule;
+use diffsol::OdeBuilder;
+use diffsol::{
+    error::DiffsolError,
+    matrix::{MatrixHost, MatrixRef},
+    CodegenModule, ConstantOp, DefaultDenseMatrix, DefaultSolver, DiffSl, MatrixCommon,
+    NonLinearOp, NonLinearOpJacobian, OdeEquations, OdeSolverProblem, Op, Vector, VectorCommon,
+    VectorHost, VectorRef,
+};
+#[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
+use diffsol::{CodegenModuleCompile, CodegenModuleJit};
+use num_traits::{FromPrimitive, ToPrimitive}; // for from_f64 and to_f64
+use paste::paste;
 
 use crate::{
     linear_solver_type::LinearSolverType, matrix_type::MatrixType, ode_solver_type::OdeSolverType,
@@ -343,13 +341,15 @@ fn solve_factory_with_jit_backend<CG>(
     scalar_type: ScalarType,
 ) -> Result<Box<dyn Solve>, DiffsolRtError>
 where
-    CG: CodegenModule + CodegenModuleJit + CodegenModuleCompile,
-    DiffSl<diffsol::NalgebraMat<f32>, CG>: Serialize,
-    DiffSl<diffsol::NalgebraMat<f64>, CG>: Serialize,
-    DiffSl<diffsol::FaerMat<f32>, CG>: Serialize,
-    DiffSl<diffsol::FaerMat<f64>, CG>: Serialize,
-    DiffSl<diffsol::FaerSparseMat<f32>, CG>: Serialize,
-    DiffSl<diffsol::FaerSparseMat<f64>, CG>: Serialize,
+    CG: CodegenModule
+        + CodegenModuleJit
+        + CodegenModuleCompile
+        + SolveSerialization<diffsol::NalgebraMat<f32>>
+        + SolveSerialization<diffsol::NalgebraMat<f64>>
+        + SolveSerialization<diffsol::FaerMat<f32>>
+        + SolveSerialization<diffsol::FaerMat<f64>>
+        + SolveSerialization<diffsol::FaerSparseMat<f32>>
+        + SolveSerialization<diffsol::FaerSparseMat<f64>>,
 {
     let solve: Box<dyn Solve> = match matrix_type {
         MatrixType::NalgebraDense => match scalar_type {
@@ -539,6 +539,79 @@ where
     }
 }
 
+trait SolveSerialization<M>: CodegenModule
+where
+    M: MatrixHost<T: Scalar>,
+    M::V: Vector + VectorHost + DefaultDenseMatrix,
+{
+    fn serialized_diffsl(solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError>
+    where
+        Self: Sized;
+}
+
+#[cfg(feature = "external")]
+impl<M> SolveSerialization<M> for diffsl::ExternalModule<M::T>
+where
+    M: MatrixHost<T: ExternalScalar>,
+    M::V: Vector + VectorHost + DefaultDenseMatrix,
+{
+    fn serialized_diffsl(_solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError> {
+        Err(DiffsolError::Other(
+            "ODE serialization is only supported for JIT-backed solvers".to_string(),
+        )
+        .into())
+    }
+}
+
+#[cfg(feature = "diffsl-external-dynamic")]
+impl<M> SolveSerialization<M> for diffsl::ExternalDynModule<M::T>
+where
+    M: MatrixHost<T: Scalar>,
+    M::V: Vector + VectorHost + DefaultDenseMatrix,
+{
+    fn serialized_diffsl(_solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError> {
+        Err(DiffsolError::Other(
+            "ODE serialization is only supported for JIT-backed solvers".to_string(),
+        )
+        .into())
+    }
+}
+
+#[cfg(feature = "diffsl-llvm")]
+impl<M> SolveSerialization<M> for diffsol::LlvmModule
+where
+    M: MatrixHost<T: Scalar>,
+    M::V: Vector + VectorHost + DefaultDenseMatrix,
+{
+    fn serialized_diffsl(solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError> {
+        serde_json::to_vec(&solve.problem.eqn)
+            .map_err(|e| DiffsolRtError::from(DiffsolError::Other(e.to_string())))
+    }
+}
+
+#[cfg(feature = "diffsl-cranelift")]
+impl<M> SolveSerialization<M> for diffsol::CraneliftJitModule
+where
+    M: MatrixHost<T: Scalar>,
+    M::V: Vector + VectorHost + DefaultDenseMatrix,
+{
+    fn serialized_diffsl(solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError> {
+        serde_json::to_vec(&solve.problem.eqn)
+            .map_err(|e| DiffsolRtError::from(DiffsolError::Other(e.to_string())))
+    }
+}
+
+impl<M> SolveSerialization<M> for ObjectModule
+where
+    M: MatrixHost<T: Scalar>,
+    M::V: Vector + VectorHost + DefaultDenseMatrix,
+{
+    fn serialized_diffsl(solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError> {
+        serde_json::to_vec(&solve.problem.eqn)
+            .map_err(|e| DiffsolRtError::from(DiffsolError::Other(e.to_string())))
+    }
+}
+
 impl<M, CG> Solve for GenericSolve<M, CG>
 where
     M: MatrixHost<T: Scalar + ToPrimitive>
@@ -553,7 +626,7 @@ where
     <M::V as DefaultDenseMatrix>::M: Send + Sync,
     for<'b> &'b M::V: VectorRef<M::V>,
     for<'b> &'b M: MatrixRef<M>,
-    DiffSl<M, CG>: Serialize,
+    CG: SolveSerialization<M>,
 {
     fn matrix_type(&self) -> MatrixType {
         MatrixType::from_diffsol::<M>()
@@ -588,8 +661,7 @@ where
     }
 
     fn serialized_diffsl(&self) -> Result<Vec<u8>, DiffsolRtError> {
-        serde_json::to_vec(&self.problem.eqn)
-            .map_err(|e| DiffsolRtError::from(DiffsolError::Other(e.to_string())))
+        CG::serialized_diffsl(self)
     }
 
     fn set_rtol(&mut self, rtol: f64) {
@@ -876,9 +948,8 @@ where
 #[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
 mod tests {
     use diffsol::{
-        CodegenModuleCompile, CodegenModuleJit, Context, DiffSl, OdeBuilder, OdeEquations, Vector,
+        CodegenModuleCompile, CodegenModuleJit, Context, OdeBuilder, OdeEquations, Vector,
     };
-    use serde::Serialize;
 
     #[cfg(feature = "diffsl-llvm")]
     use crate::test_support::{hybrid_logistic_state_dr, logistic_state_dr, matrix_host};
@@ -894,12 +965,14 @@ mod tests {
         },
     };
 
-    use super::{solve_factory_with_jit_backend, GenericSolve, Solve};
+    use super::{solve_factory_with_jit_backend, GenericSolve, Solve, SolveSerialization};
 
     fn make_generic_solve<CG>() -> GenericSolve<diffsol::NalgebraMat<f64>, CG>
     where
-        CG: diffsol::CodegenModule + CodegenModuleJit + CodegenModuleCompile,
-        DiffSl<diffsol::NalgebraMat<f64>, CG>: Serialize,
+        CG: diffsol::CodegenModule
+            + CodegenModuleJit
+            + CodegenModuleCompile
+            + SolveSerialization<diffsol::NalgebraMat<f64>>,
     {
         let problem = OdeBuilder::<diffsol::NalgebraMat<f64>>::new()
             .build_from_diffsl::<CG>(logistic_diffsl_code())
@@ -909,13 +982,15 @@ mod tests {
 
     fn assert_factory_supports_all_matrix_and_scalar_types<CG>()
     where
-        CG: diffsol::CodegenModule + CodegenModuleJit + CodegenModuleCompile,
-        DiffSl<diffsol::NalgebraMat<f32>, CG>: Serialize,
-        DiffSl<diffsol::NalgebraMat<f64>, CG>: Serialize,
-        DiffSl<diffsol::FaerMat<f32>, CG>: Serialize,
-        DiffSl<diffsol::FaerMat<f64>, CG>: Serialize,
-        DiffSl<diffsol::FaerSparseMat<f32>, CG>: Serialize,
-        DiffSl<diffsol::FaerSparseMat<f64>, CG>: Serialize,
+        CG: diffsol::CodegenModule
+            + CodegenModuleJit
+            + CodegenModuleCompile
+            + SolveSerialization<diffsol::NalgebraMat<f32>>
+            + SolveSerialization<diffsol::NalgebraMat<f64>>
+            + SolveSerialization<diffsol::FaerMat<f32>>
+            + SolveSerialization<diffsol::FaerMat<f64>>
+            + SolveSerialization<diffsol::FaerSparseMat<f32>>
+            + SolveSerialization<diffsol::FaerSparseMat<f64>>,
     {
         for matrix_type in [
             MatrixType::NalgebraDense,
@@ -935,8 +1010,10 @@ mod tests {
 
     fn assert_solve_metadata_and_helpers<CG>()
     where
-        CG: diffsol::CodegenModule + CodegenModuleJit + CodegenModuleCompile,
-        DiffSl<diffsol::NalgebraMat<f64>, CG>: Serialize,
+        CG: diffsol::CodegenModule
+            + CodegenModuleJit
+            + CodegenModuleCompile
+            + SolveSerialization<diffsol::NalgebraMat<f64>>,
     {
         let mut solve = make_generic_solve::<CG>();
         assert_eq!(solve.matrix_type(), MatrixType::NalgebraDense);
@@ -969,8 +1046,10 @@ mod tests {
 
     fn assert_solve_runtime_paths<CG>()
     where
-        CG: diffsol::CodegenModule + CodegenModuleJit + CodegenModuleCompile,
-        DiffSl<diffsol::NalgebraMat<f64>, CG>: Serialize,
+        CG: diffsol::CodegenModule
+            + CodegenModuleJit
+            + CodegenModuleCompile
+            + SolveSerialization<diffsol::NalgebraMat<f64>>,
     {
         let mut solve = make_generic_solve::<CG>();
         let soln = solve

@@ -661,26 +661,6 @@ impl<M: MatrixHost<T: DiffSlScalar>> Serialize for DiffSl<M, crate::CraneliftJit
     }
 }
 
-#[cfg(feature = "diffsl-external")]
-impl<M: MatrixHost<T: DiffSlScalar + ExternSymbols>> Serialize for DiffSl<M, ExternalModule<M::T>> {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        panic!("DiffSl serialization is not supported for ExternalModule backends");
-    }
-}
-
-#[cfg(feature = "diffsl-external-dynamic")]
-impl<M: MatrixHost<T: DiffSlScalar>> Serialize for DiffSl<M, ExternalDynModule<M::T>> {
-    fn serialize<S>(&self, _serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        panic!("DiffSl serialization is not supported for ExternalDynModule backends");
-    }
-}
-
 impl<'de, M: MatrixHost<T: DiffSlScalar>> Deserialize<'de> for DiffSl<M, ObjectModule> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
