@@ -9,6 +9,8 @@ use crate::host_array::HostArray;
 use crate::host_array::ToHostArray;
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 use crate::jit::JitBackendType;
+#[cfg(feature = "external")]
+use crate::scalar_type::ExternalScalar;
 use crate::scalar_type::Scalar;
 use crate::scalar_type::ScalarType;
 use crate::{
