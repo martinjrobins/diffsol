@@ -26,10 +26,6 @@ impl InitialConditionSolverOptionsSnapshot {
         }
     }
 
-    #[cfg_attr(
-        not(any(feature = "diffsl-cranelift", feature = "diffsl-llvm")),
-        allow(dead_code)
-    )]
     pub(crate) fn apply_to_solve(&self, solve: &mut dyn Solve) {
         solve.set_ic_use_linesearch(self.use_linesearch);
         solve.set_ic_max_linesearch_iterations(self.max_linesearch_iterations);
@@ -113,7 +109,7 @@ impl Serialize for InitialConditionSolverOptions {
     }
 }
 
-#[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
+#[cfg(test)]
 mod tests {
     use crate::{
         jit::JitBackendType,

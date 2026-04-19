@@ -119,7 +119,6 @@ pub(crate) fn external_dynamic_fixture_path() -> PathBuf {
 }
 
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-#[cfg_attr(feature = "external", allow(dead_code))]
 pub(crate) fn logistic_diffsl_code() -> &'static str {
     r#"
         in_i { r = 1 }
@@ -131,7 +130,6 @@ pub(crate) fn logistic_diffsl_code() -> &'static str {
 }
 
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-#[cfg_attr(feature = "external", allow(dead_code))]
 pub(crate) fn hybrid_logistic_diffsl_code() -> &'static str {
     r#"
         in_i { r = 1 }
@@ -145,13 +143,11 @@ pub(crate) fn hybrid_logistic_diffsl_code() -> &'static str {
 }
 
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-#[cfg_attr(feature = "external", allow(dead_code))]
 pub(crate) fn logistic_diffsl_code_cstring() -> CString {
     CString::new(logistic_diffsl_code()).unwrap()
 }
 
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
-#[cfg_attr(feature = "external", allow(dead_code))]
 pub(crate) fn available_jit_backends() -> Vec<crate::jit::JitBackendType> {
     [
         #[cfg(feature = "diffsl-cranelift")]

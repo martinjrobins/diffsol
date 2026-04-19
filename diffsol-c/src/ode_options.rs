@@ -28,10 +28,6 @@ impl OdeSolverOptionsSnapshot {
         }
     }
 
-    #[cfg_attr(
-        not(any(feature = "diffsl-cranelift", feature = "diffsl-llvm")),
-        allow(dead_code)
-    )]
     pub(crate) fn apply_to_solve(&self, solve: &mut dyn Solve) {
         solve.set_ode_max_nonlinear_solver_iterations(self.max_nonlinear_solver_iterations);
         solve.set_ode_max_error_test_failures(self.max_error_test_failures);
@@ -132,7 +128,7 @@ impl Serialize for OdeSolverOptions {
     }
 }
 
-#[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
+#[cfg(test)]
 mod tests {
     use crate::{
         jit::JitBackendType,
