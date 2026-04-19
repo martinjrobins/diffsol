@@ -1002,6 +1002,13 @@ mod jit_tests {
         let ode = make_ode(jit_backend, matrix_type, OdeSolverType::Bdf);
         configure_serialized_ode(&ode, matrix_type);
 
+        #[cfg(feature = "diffsl-cranelift")]
+        if jit_backend == JitBackendType::Cranelift {
+            let err = serde_json::to_string(&ode).unwrap_err().to_string();
+            assert!(err.contains("not supported for Cranelift"));
+            return;
+        }
+
         let y0_before = Vec::<f64>::from_host_array(ode.y0(vector_host(&[2.0])).unwrap()).unwrap();
         let rhs_before = Vec::<f64>::from_host_array(
             ode.rhs(vector_host(&[2.0]), 0.0, vector_host(&[0.25]))

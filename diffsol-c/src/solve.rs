@@ -595,9 +595,11 @@ where
     M: MatrixHost<T: Scalar>,
     M::V: Vector + VectorHost + DefaultDenseMatrix,
 {
-    fn serialized_diffsl(solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError> {
-        serde_json::to_vec(&solve.problem.eqn)
-            .map_err(|e| DiffsolRtError::from(DiffsolError::Other(e.to_string())))
+    fn serialized_diffsl(_solve: &GenericSolve<M, Self>) -> Result<Vec<u8>, DiffsolRtError> {
+        Err(DiffsolError::Other(
+            "ODE serialization is not supported for Cranelift-backed solvers".to_string(),
+        )
+        .into())
     }
 }
 

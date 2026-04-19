@@ -37,7 +37,6 @@ use crate::{
 /// This contains the compiled code and the data structures needed to evaluate the ODE equations.
 pub struct DiffSlContext<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> {
     compiler: Compiler<CG, M::T>,
-    source: Option<String>,
     data: RefCell<Vec<M::T>>,
     ddata: RefCell<Vec<M::T>>,
     sens_data: RefCell<Vec<M::T>>,
@@ -96,7 +95,6 @@ fn diffsl_external_scalar_type<T: DiffSlScalar>() -> Result<DiffSlExternalScalar
 impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> DiffSlContext<M, CG> {
     fn new_common(
         compiler: Compiler<CG, M::T>,
-        source: Option<String>,
         rhs_state_deps: Vec<(usize, usize)>,
         rhs_input_deps: Vec<(usize, usize)>,
         mass_state_deps: Vec<(usize, usize)>,
@@ -118,7 +116,6 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModule> DiffSlContext<M, CG> {
 
         Ok(Self {
             compiler,
-            source,
             data,
             ddata,
             sens_data,
@@ -167,7 +164,6 @@ impl<M: Matrix<T: DiffSlScalar>> DiffSlContext<M, ExternalDynModule<M::T>> {
 
         Self::new_common(
             compiler,
-            None,
             rhs_state_deps,
             rhs_input_deps,
             mass_state_deps,
@@ -196,7 +192,6 @@ impl<M: Matrix<T: DiffSlScalar + ExternSymbols>> DiffSlContext<M, ExternalModule
 
         Self::new_common(
             compiler,
-            None,
             rhs_state_deps,
             rhs_input_deps,
             mass_state_deps,
@@ -224,7 +219,6 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleLink + CodegenModuleJit> DiffS
 
         Self::new_common(
             compiler,
-            None,
             rhs_state_deps,
             rhs_input_deps,
             mass_state_deps,
@@ -264,7 +258,6 @@ impl<M: Matrix<T: DiffSlScalar>, CG: CodegenModuleCompile + CodegenModuleJit> Di
 
         Self::new_common(
             compiler,
-            Some(text.to_owned()),
             rhs_state_deps,
             rhs_input_deps,
             mass_state_deps,
@@ -551,40 +544,6 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule + CodegenModuleEmit> Diff
     }
 }
 
-#[cfg(feature = "diffsl-cranelift")]
-fn cranelift_external_object_from_source<T: DiffSlScalar>(
-    text: &str,
-    rhs_state_deps: &[(usize, usize)],
-    rhs_input_deps: &[(usize, usize)],
-    mass_state_deps: &[(usize, usize)],
-    include_sensitivities: bool,
-) -> Result<DiffSlExternalObject, DiffsolError> {
-    let options = diffsl::execution::compiler::CompilerOptions::default();
-    let model =
-        parse_ds_string(text).map_err(|e| DiffsolError::DiffslParserError(e.to_string()))?;
-    let model = DiscreteModel::build("diffsol", &model)
-        .map_err(|e| DiffsolError::DiffslCompilerError(e.as_error_message(text)))?;
-    let module = <diffsl::CraneliftObjectModule as CodegenModuleCompile>::from_discrete_model(
-        &model,
-        options,
-        None,
-        T::as_real_type(),
-        Some(text),
-    )
-    .map_err(|e| DiffsolError::DiffslCompilerError(e.to_string()))?;
-    let object = module
-        .to_object()
-        .map_err(|e| DiffsolError::DiffslCompilerError(e.to_string()))?;
-    Ok(DiffSlExternalObject {
-        scalar_type: diffsl_external_scalar_type::<T>()?,
-        object,
-        rhs_state_deps: rhs_state_deps.to_vec(),
-        rhs_input_deps: rhs_input_deps.to_vec(),
-        mass_state_deps: mass_state_deps.to_vec(),
-        include_sensitivities,
-    })
-}
-
 impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> DiffSl<M, CG>
 where
     CG: CodegenModuleLink + CodegenModuleJit,
@@ -635,29 +594,6 @@ impl<M: MatrixHost<T: DiffSlScalar>> Serialize for DiffSl<M, ObjectModule> {
         self.to_external_object()
             .map_err(serde::ser::Error::custom)?
             .serialize(serializer)
-    }
-}
-
-#[cfg(feature = "diffsl-cranelift")]
-impl<M: MatrixHost<T: DiffSlScalar>> Serialize for DiffSl<M, crate::CraneliftJitModule> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let source = self.context.source.as_deref().ok_or_else(|| {
-            serde::ser::Error::custom(
-                "DiffSl source is unavailable for Cranelift JIT serialization",
-            )
-        })?;
-        cranelift_external_object_from_source::<M::T>(
-            source,
-            &self.context.rhs_state_deps,
-            &self.context.rhs_input_deps,
-            &self.context.mass_state_deps,
-            self.include_sensitivities,
-        )
-        .map_err(serde::ser::Error::custom)?
-        .serialize(serializer)
     }
 }
 
