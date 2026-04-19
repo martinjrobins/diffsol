@@ -1337,6 +1337,10 @@ mod jit_tests {
         }
     }
 
+    #[cfg_attr(
+        all(target_os = "macos", target_arch = "x86_64"),
+        ignore = "from_external_object is unsupported on Intel macOS due to unsupported relocations"
+    )]
     #[test]
     fn serialization_roundtrip_restores_full_solver_state() {
         for jit_backend in available_jit_backends() {
