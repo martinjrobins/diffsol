@@ -250,15 +250,15 @@ pub(crate) fn assert_solution_tail(
     tol: f64,
 ) {
     let ys_array = solution.get_ys().unwrap();
-    let ys = ys_array.as_array::<f64>().unwrap();
+    let ys = Vec::<Vec<f64>>::from_host_array(ys_array).unwrap();
     let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
 
-    assert_eq!(ys.nrows(), 1, "expected a single state/output row");
+    assert_eq!(ys.len(), 1, "expected a single state/output row");
     assert!(
-        ys.ncols() >= expected_ts.len(),
+        ys[0].len() >= expected_ts.len(),
         "expected at least {} columns, got {}",
         expected_ts.len(),
-        ys.ncols()
+        ys[0].len()
     );
     assert!(
         ts.len() >= expected_ts.len(),
@@ -271,7 +271,7 @@ pub(crate) fn assert_solution_tail(
     for (i, &t) in expected_ts.iter().enumerate() {
         assert_close(ts[start + i], t, tol, "solution time");
         assert_close(
-            ys[(0, start + i)],
+            ys[0][start + i],
             logistic_state(x0, r, t),
             tol,
             "solution value",

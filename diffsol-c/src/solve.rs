@@ -882,7 +882,6 @@ where
 
 #[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
 mod tests {
-    use diffsol::matrix::MatrixHost;
     use diffsol::MatrixCommon;
     use diffsol::{
         CodegenModuleCompile, CodegenModuleJit, Context, OdeBuilder, OdeEquations, Vector,

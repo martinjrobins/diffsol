@@ -937,13 +937,14 @@ mod jit_tests {
 
     fn make_ode(
         jit_backend: JitBackendType,
+        scalar_type: ScalarType,
         matrix_type: MatrixType,
         ode_solver: OdeSolverType,
     ) -> OdeWrapper {
         OdeWrapper::new_jit(
             logistic_diffsl_code(),
             jit_backend,
-            ScalarType::F64,
+            scalar_type,
             matrix_type,
             LinearSolverType::Default,
             ode_solver,
@@ -999,8 +1000,19 @@ mod jit_tests {
         options.set_min_timestep(1e-4).unwrap();
     }
 
-    fn assert_serialization_roundtrip(jit_backend: JitBackendType, matrix_type: MatrixType) {
-        let ode = make_ode(jit_backend, matrix_type, OdeSolverType::Bdf);
+    fn scalar_value(value: f64, scalar_type: ScalarType) -> f64 {
+        match scalar_type {
+            ScalarType::F32 => (value as f32) as f64,
+            ScalarType::F64 => value,
+        }
+    }
+
+    fn assert_serialization_roundtrip(
+        jit_backend: JitBackendType,
+        scalar_type: ScalarType,
+        matrix_type: MatrixType,
+    ) {
+        let ode = make_ode(jit_backend, scalar_type, matrix_type, OdeSolverType::Bdf);
         configure_serialized_ode(&ode, matrix_type);
 
         #[cfg(feature = "diffsl-cranelift")]
@@ -1022,35 +1034,67 @@ mod jit_tests {
 
         assert_eq!(decoded.get_jit_backend().unwrap(), Some(jit_backend));
         assert_eq!(decoded.get_code().unwrap(), logistic_diffsl_code());
-        assert_eq!(decoded.get_scalar_type().unwrap(), ScalarType::F64);
+        assert_eq!(decoded.get_scalar_type().unwrap(), scalar_type);
         assert_eq!(decoded.get_matrix_type().unwrap(), matrix_type);
         assert_eq!(
             decoded.get_linear_solver().unwrap(),
             serialized_linear_solver(matrix_type)
         );
         assert_eq!(decoded.get_ode_solver().unwrap(), OdeSolverType::TrBdf2);
-        assert_eq!(decoded.get_rtol().unwrap(), 1e-7);
-        assert_eq!(decoded.get_atol().unwrap(), 1e-9);
+        assert_close(
+            decoded.get_rtol().unwrap(),
+            scalar_value(1e-7, scalar_type),
+            1e-12,
+            "serialized rtol",
+        );
+        assert_close(
+            decoded.get_atol().unwrap(),
+            scalar_value(1e-9, scalar_type),
+            1e-12,
+            "serialized atol",
+        );
 
         let ic_options = decoded.get_ic_options();
         assert!(ic_options.get_use_linesearch().unwrap());
         assert_eq!(ic_options.get_max_linesearch_iterations().unwrap(), 13);
         assert_eq!(ic_options.get_max_newton_iterations().unwrap(), 17);
         assert_eq!(ic_options.get_max_linear_solver_setups().unwrap(), 19);
-        assert_eq!(ic_options.get_step_reduction_factor().unwrap(), 0.5);
-        assert_eq!(ic_options.get_armijo_constant().unwrap(), 1e-4);
+        assert_close(
+            ic_options.get_step_reduction_factor().unwrap(),
+            scalar_value(0.5, scalar_type),
+            1e-12,
+            "serialized step_reduction_factor",
+        );
+        assert_close(
+            ic_options.get_armijo_constant().unwrap(),
+            scalar_value(1e-4, scalar_type),
+            1e-12,
+            "serialized armijo_constant",
+        );
 
         let options = decoded.get_options();
         assert_eq!(options.get_max_nonlinear_solver_iterations().unwrap(), 23);
         assert_eq!(options.get_max_error_test_failures().unwrap(), 29);
         assert_eq!(options.get_update_jacobian_after_steps().unwrap(), 31);
         assert_eq!(options.get_update_rhs_jacobian_after_steps().unwrap(), 37);
-        assert_eq!(options.get_threshold_to_update_jacobian().unwrap(), 1e-3);
-        assert_eq!(
-            options.get_threshold_to_update_rhs_jacobian().unwrap(),
-            2e-3
+        assert_close(
+            options.get_threshold_to_update_jacobian().unwrap(),
+            scalar_value(1e-3, scalar_type),
+            1e-12,
+            "serialized threshold_to_update_jacobian",
         );
-        assert_eq!(options.get_min_timestep().unwrap(), 1e-4);
+        assert_close(
+            options.get_threshold_to_update_rhs_jacobian().unwrap(),
+            scalar_value(2e-3, scalar_type),
+            1e-12,
+            "serialized threshold_to_update_rhs_jacobian",
+        );
+        assert_close(
+            options.get_min_timestep().unwrap(),
+            scalar_value(1e-4, scalar_type),
+            1e-12,
+            "serialized min_timestep",
+        );
 
         let y0_after =
             Vec::<f64>::from_host_array(decoded.y0(vector_host(&[2.0])).unwrap()).unwrap();
@@ -1079,7 +1123,12 @@ mod jit_tests {
     }
 
     fn assert_runtime_dispatch(jit_backend: JitBackendType, matrix_type: MatrixType) {
-        let ode = make_ode(jit_backend, matrix_type, OdeSolverType::Bdf);
+        let ode = make_ode(
+            jit_backend,
+            ScalarType::F64,
+            matrix_type,
+            OdeSolverType::Bdf,
+        );
         assert_eq!(ode.get_matrix_type().unwrap(), matrix_type);
         assert_eq!(ode.get_code().unwrap(), logistic_diffsl_code());
         assert_eq!(ode.get_nstates().unwrap(), 1);
@@ -1118,10 +1167,11 @@ mod jit_tests {
 
     fn assert_solver_dense_solution(
         jit_backend: JitBackendType,
+        scalar_type: ScalarType,
         matrix_type: MatrixType,
         ode_solver: OdeSolverType,
     ) {
-        let ode = make_ode(jit_backend, matrix_type, ode_solver);
+        let ode = make_ode(jit_backend, scalar_type, matrix_type, ode_solver);
         ode.set_rtol(1e-8).unwrap();
         ode.set_atol(1e-8).unwrap();
 
@@ -1272,12 +1322,14 @@ mod jit_tests {
     #[test]
     fn dense_solution_matches_logistic_solution_from_diffsl() {
         for jit_backend in available_jit_backends() {
-            for (matrix_type, solver) in [
-                (MatrixType::FaerDense, OdeSolverType::Esdirk34),
-                (MatrixType::FaerSparse, OdeSolverType::TrBdf2),
-                (MatrixType::NalgebraDense, OdeSolverType::Tsit45),
-            ] {
-                assert_solver_dense_solution(jit_backend, matrix_type, solver);
+            for scalar_type in [ScalarType::F64, ScalarType::F32] {
+                for (matrix_type, solver) in [
+                    (MatrixType::FaerDense, OdeSolverType::Esdirk34),
+                    (MatrixType::FaerSparse, OdeSolverType::TrBdf2),
+                    (MatrixType::NalgebraDense, OdeSolverType::Tsit45),
+                ] {
+                    assert_solver_dense_solution(jit_backend, scalar_type, matrix_type, solver);
+                }
             }
         }
     }
@@ -1285,7 +1337,12 @@ mod jit_tests {
     #[test]
     fn bdf_dense_solution_matches_logistic_diffsl_model() {
         for jit_backend in available_jit_backends() {
-            let ode = make_ode(jit_backend, MatrixType::NalgebraDense, OdeSolverType::Bdf);
+            let ode = make_ode(
+                jit_backend,
+                ScalarType::F64,
+                MatrixType::NalgebraDense,
+                OdeSolverType::Bdf,
+            );
             ode.set_rtol(1e-8).unwrap();
             ode.set_atol(1e-8).unwrap();
 
@@ -1303,7 +1360,12 @@ mod jit_tests {
         for jit_backend in available_jit_backends() {
             let x0 = LOGISTIC_X0;
             let r = 2.0;
-            let ode = make_ode(jit_backend, MatrixType::NalgebraDense, OdeSolverType::Bdf);
+            let ode = make_ode(
+                jit_backend,
+                ScalarType::F64,
+                MatrixType::NalgebraDense,
+                OdeSolverType::Bdf,
+            );
             ode.set_rtol(1e-8).unwrap();
             ode.set_atol(1e-8).unwrap();
 
@@ -1344,8 +1406,10 @@ mod jit_tests {
     #[test]
     fn serialization_roundtrip_restores_full_solver_state() {
         for jit_backend in available_jit_backends() {
-            for matrix_type in [MatrixType::NalgebraDense, MatrixType::FaerSparse] {
-                assert_serialization_roundtrip(jit_backend, matrix_type);
+            for scalar_type in [ScalarType::F64, ScalarType::F32] {
+                for matrix_type in [MatrixType::NalgebraDense, MatrixType::FaerSparse] {
+                    assert_serialization_roundtrip(jit_backend, scalar_type, matrix_type);
+                }
             }
         }
     }
@@ -1355,6 +1419,7 @@ mod jit_tests {
     fn deserialization_rejects_unavailable_jit_backend() {
         let ode = make_ode(
             JitBackendType::Llvm,
+            ScalarType::F64,
             MatrixType::NalgebraDense,
             OdeSolverType::Bdf,
         );
@@ -1372,6 +1437,7 @@ mod jit_tests {
     fn deserialization_rejects_unavailable_jit_backend() {
         let ode = make_ode(
             JitBackendType::Cranelift,
+            ScalarType::F64,
             MatrixType::NalgebraDense,
             OdeSolverType::Bdf,
         );
@@ -1413,6 +1479,7 @@ mod jit_tests {
     fn bdf_forward_sensitivities_match_logistic_derivative_from_diffsl() {
         let ode = make_ode(
             JitBackendType::Llvm,
+            ScalarType::F64,
             MatrixType::NalgebraDense,
             OdeSolverType::Bdf,
         );
@@ -1453,6 +1520,7 @@ mod jit_tests {
     fn bdf_sum_squares_adjoint_matches_logistic_diffsl_model() {
         let ode = make_ode(
             JitBackendType::Llvm,
+            ScalarType::F64,
             MatrixType::NalgebraDense,
             OdeSolverType::Bdf,
         );
