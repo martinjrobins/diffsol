@@ -21,7 +21,7 @@ faer = { version = "0.24", default-features = false, features = [
 ] }
 faer-traits = "0.24"
 cudarc = { version = "0.19", default-features = false }
-diffsl = { version = "0.11.6", features = ["rayon"] }
+diffsl = { version = "0.11.7", features = ["rayon"] }
 
 plotly = { version = "0.14" }
 argmin = { version = "0.11.0" }
