@@ -17,6 +17,6 @@ pub fn lorenz() -> Result<(), Box<dyn std::error::Error>> {
         ",
     )?;
     let mut solver = problem.bdf::<NalgebraLU<f64>>()?;
-    let (_ys, _ts) = solver.solve(0.0)?;
+    let (_ys, _ts, _stop_reason) = solver.solve(0.0)?;
     Ok(())
 }

@@ -1,6 +1,5 @@
-in = [currentfunctiona]
-currentfunctiona {
-  1
+in { 
+  currentfunctiona = 1
 }
 constant0_i {
   (0:19): 0.0,

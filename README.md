@@ -13,7 +13,6 @@
     <img src="https://codecov.io/gh/martinjrobins/diffsol/branch/main/graph/badge.svg" alt="code coverage">
 </a>
 </div>
----
 
 Diffsol is a library for solving ordinary differential equations (ODEs) or semi-explicit differential algebraic equations (DAEs) in Rust. It can solve equations in the following form:
 
@@ -31,7 +30,7 @@ You can add diffsol using `cargo add diffsol` or directly in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-diffsol = "0.8"
+diffsol = "0.10"
 ```
 
 Diffsol has the following features that can be enabled or disabled:
@@ -40,13 +39,15 @@ Diffsol has the following features that can be enabled or disabled:
 - `faer`: Use faer for linear algebra containers and solvers (enabled by default).
 - `cuda`: Use in-built CUDA linear algebra containers and solvers (disabled by default, experimental).
 - `diffsl-llvm15`, `diffsl-llvm16`, `diffsl-llvm17`, `diffsl-llvm18`, `diffsl-llvm19`, `diffsl-llvm20`, `diffsl-cranelift`: Enable DiffSL with the specified JIT backend (disabled by default). You will need to set the `LLVM_SYS_XXX_PREFIX` (see [`llvm-sys`](https://gitlab.com/taricorp/llvm-sys.rs)) and `LLVM_DIR` environment variables to point to your LLVM installation, where `XXX` is the version number (`150`, `160`, `170`, `181`, `191`, `201`, `211`).
+- `diffsl-external-dynamic`: Use an precompiled external dynamic library for the DiffSL model equations, this is loaded and linked at runtime using the provided library path (disabled by default).
+- `diffsl-external-f64` or `diffsl-external-f32`: Use a precompiled static library for the DiffSL model equations, with f64 or f32 precision respectively. The static library must be linked in at build time (disabled by default).
 - `suitesparse`: Enable SuiteSparse KLU sparse linear solver (disabled by default, requires `faer`).
 
 You can add any of the above features by specifying them in your `Cargo.toml`. For example, to enable the `diffsl-cranelift` JIT backend, you would add:
 
 ```toml
 [dependencies]
-diffsol = { version = "0.8", features = "diffsl-cranelift" }
+diffsol = { version = "0.10", features = "diffsl-cranelift" }
 ```
 
 See the [Cargo.toml documentation](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html) for more information on specifying features.
@@ -77,7 +78,7 @@ pub fn lorenz() -> Result<(), Box<dyn std::error::Error>> {
         ",
     )?;
     let mut solver = problem.bdf::<NalgebraLU<f64>>()?;
-    let (_ys, _ts) = solver.solve(0.0)?;
+    let (_ys, _ts, _stop_reason) = solver.solve(0.0)?;
     Ok(())
 }
 ```
@@ -100,6 +101,12 @@ All solvers feature:
 - Forward sensitivity analysis, calculating the gradient of an output function or the solver states $y$ with respect to the parameters $p$.
 - Adjoint sensitivity analysis, calculating the gradient of cost function $G(p)$ with respect to the parameters $p$. The cost function can be the integral of a continuous output function $g(t, y, p)$ or a sum of a set of discrete functions $h_i(t_i, y_i, p)$ at time points $t_i$.
 
+## Citation
+
+If you use diffsol in your research, please cite it:
+
+[Robinson et al., (2026). diffsol: Rust crate for solving differential equations. Journal of Open Source Software, 11(117), 9384, https://doi.org/10.21105/joss.09384](https://doi.org/10.21105/joss.09384)
+
 ## Contributing
 
 Contributions are very welcome, as are bug reports! Please see the [contributing guidelines](CONTRIBUTING.md) for more information, but in summary:
@@ -110,10 +117,12 @@ Contributions are very welcome, as are bug reports! Please see the [contributing
   - [diffsl](https://github.com/martinjrobins/diffsl) - the DiffSL DSL compiler and JIT backends
   - [pydiffsol](https://github.com/alexallmont/pydiffsol) - Python bindings
 - Feel free to submit a pull request with your changes or improvements, but please open an issue first if the change is significant. The [contributing guidelines](CONTRIBUTING.md) describe how to set up a development environment, run tests, and format code.
-  
+
 ## Wanted - Developers for higher-level language wrappers
 
 Diffsol is designed to be easy to use from higher-level languages like Python or R. I'd prefer not to split my focus away from the core library, so I'm looking for developers who would like to lead the development of these wrappers. If you're interested, please get in touch.
+
+Diffsol makes heavy use of generic programming, which can make it difficult to use from other languages. To help with this, the diffsol-c crate provides a wrapper around the core library using runtime polymorphism, and a C API that can be called via FFI. Combined with the DiffSL DSL, this allows for efficient use of diffsol from other languages without needing to write rust code. The following wrappers are currently planned:
 
 - [x] Python (e.g. using [PyO3](https://pyo3.rs/v0.24.0/)). <https://github.com/alexallmont/pydiffsol>.
 - [ ] Python ML frameworks (e.g. [JAX](https://docs.jax.dev/en/latest/ffi.html), [PyTorch](https://pytorch.org/tutorials/advanced/cpp_extension.html))

@@ -42,7 +42,7 @@ fn main() {
     loop {
         match solver.step() {
             Ok(OdeSolverStopReason::InternalTimestep) => (),
-            Ok(OdeSolverStopReason::RootFound(t)) => {
+            Ok(OdeSolverStopReason::RootFound(t, _idx)) => {
                 // get the state when the event occurred
                 let mut y = solver.interpolate(t).unwrap();
 

@@ -1,16 +1,21 @@
+use super::adjoint::AdjointOdeSolverMethod;
 use super::method::AugmentedOdeSolverMethod;
 use super::runge_kutta::Rk;
+use super::sensitivities::SensitivitiesOdeSolverMethod;
 use crate::error::DiffsolError;
 use crate::ode_solver::bdf::BdfStatistics;
 use crate::vector::VectorRef;
 use crate::NoAug;
+use crate::OdeEquationsImplicitSens;
 use crate::OdeSolverStopReason;
 use crate::RkState;
+use crate::SensEquations;
 use crate::Tableau;
 use crate::{
     AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, ExplicitRkConfig, OdeEquations,
     OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, StateRef, StateRefMut,
 };
+use log::debug;
 use num_traits::One;
 
 impl<'a, Eqn, M, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
@@ -28,6 +33,30 @@ where
     fn augmented_eqn(&self) -> Option<&AugEqn> {
         self.augmented_eqn.as_ref()
     }
+    fn augmented_eqn_mut(&mut self) -> Option<&mut AugEqn> {
+        self.augmented_eqn.as_mut()
+    }
+}
+
+impl<'a, Eqn, M> SensitivitiesOdeSolverMethod<'a, Eqn>
+    for ExplicitRk<'a, Eqn, M, SensEquations<'a, Eqn>>
+where
+    Eqn: OdeEquationsImplicitSens + 'a,
+    M: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+{
+}
+
+impl<'a, Eqn, M, Solver> AdjointOdeSolverMethod<'a, Eqn, Solver>
+    for ExplicitRk<'a, Eqn, M, crate::AdjointEquations<'a, Eqn, Solver>>
+where
+    Eqn: crate::OdeEquationsImplicitAdjoint + 'a,
+    Solver: OdeSolverMethod<'a, Eqn>,
+    M: DenseMatrix<V = Eqn::V, T = Eqn::T, C = Eqn::C>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+{
 }
 
 /// An explicit Runge-Kutta method.
@@ -155,8 +184,17 @@ where
         self.rk.checkpoint()
     }
 
+    fn state_clone(&self) -> Self::State {
+        self.rk.state().clone()
+    }
+
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
         let mut h = self.rk.start_step()?;
+        debug!(
+            "Starting Explicit RK step at t = {:?} with h = {:?}",
+            self.state().t,
+            h
+        );
 
         // loop until step is accepted
         let mut nattempts = 0;
@@ -166,18 +204,27 @@ where
             for i in 1..self.rk.tableau().s() {
                 self.rk.do_stage(i, h, self.augmented_eqn.as_mut());
             }
-            let error_norm = self.rk.error_norm(h, self.augmented_eqn.as_mut());
+            let error_norm =
+                self.rk
+                    .error_norm(h, self.augmented_eqn.as_mut(), |_err: &mut Eqn::V| Ok(()))?;
             let factor = self.rk.factor(
                 error_norm,
                 1.0,
                 self.config.minimum_timestep_shrink,
+                self.config.maximum_timestep_shrink,
+                self.config.minimum_timestep_growth,
                 self.config.maximum_timestep_growth,
             );
             if error_norm < Eqn::T::one() {
+                debug!("Step accepted with error norm = {:?}", error_norm);
                 break factor;
             }
             h *= factor;
             nattempts += 1;
+            debug!(
+                "Step rejected with error norm = {:?}, reducing h to {:?}",
+                error_norm, h
+            );
             self.rk.error_test_fail(
                 h,
                 nattempts,
@@ -204,6 +251,10 @@ where
         self.rk.interpolate_inplace(t, y)
     }
 
+    fn interpolate_dy_inplace(&self, t: <Eqn>::T, dy: &mut Eqn::V) -> Result<(), DiffsolError> {
+        self.rk.interpolate_dy_inplace(t, dy)
+    }
+
     fn interpolate_out_inplace(&self, t: <Eqn>::T, g: &mut Eqn::V) -> Result<(), DiffsolError> {
         self.rk.interpolate_out_inplace(t, g)
     }
@@ -214,6 +265,11 @@ where
 
     fn state_mut(&mut self) -> StateRefMut<'_, Eqn::V> {
         self.rk.state_mut().as_mut()
+    }
+
+    fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError> {
+        let integrate_out = self.rk.problem().integrate_out;
+        self.rk.state_mut_back(t, integrate_out)
     }
 }
 
@@ -227,18 +283,18 @@ mod test {
                 exponential_decay_problem_sens, exponential_decay_problem_with_root,
                 negative_exponential_decay_problem,
             },
+            logistic::logistic_problem_adjoint_no_out,
             robertson_ode::robertson_ode,
         },
         ode_solver::tests::{
             setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
             test_adjoint_sum_squares, test_checkpointing, test_config, test_interpolate,
-            test_ode_solver, test_problem, test_state_mut, test_state_mut_on_problem,
+            test_interpolate_dy, test_ode_solver, test_problem, test_state_mut,
+            test_state_mut_on_problem,
         },
-        Context, DenseMatrix, MatrixCommon, NalgebraLU, NalgebraVec, OdeEquations, OdeSolverMethod,
-        Op, Vector, VectorView,
+        scale, ConstantOp, Context, DenseMatrix, MatrixCommon, NalgebraLU, NalgebraVec,
+        OdeEquations, OdeSolverMethod, OdeSolverStopReason, Op, Vector, VectorView,
     };
-
-    use num_traits::abs;
 
     type M = NalgebraMat<f64>;
     type LS = NalgebraLU<f64>;
@@ -264,6 +320,11 @@ mod test {
     #[test]
     fn explicit_rk_test_interpolate_sens() {
         test_interpolate(test_problem::<M>(false).tsit45_sens().unwrap());
+    }
+
+    #[test]
+    fn explicit_rk_test_interpolate_dy() {
+        test_interpolate_dy(test_problem::<M>(false).tsit45().unwrap());
     }
 
     #[test]
@@ -295,13 +356,13 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 0
-        number_of_steps: 5
+        number_of_steps: 9
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 0
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 32
+        number_of_calls: 56
         number_of_jac_muls: 0
         number_of_matrix_evals: 0
         number_of_jac_adj_muls: 0
@@ -326,7 +387,7 @@ mod test {
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 0
         number_of_steps: 93
-        number_of_error_test_failures: 9
+        number_of_error_test_failures: 11
         number_of_nonlinear_solver_iterations: 0
         number_of_nonlinear_solver_fails: 0
         "###);
@@ -346,13 +407,13 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 0
-        number_of_steps: 5
+        number_of_steps: 9
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 0
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 32
+        number_of_calls: 56
         number_of_jac_muls: 0
         number_of_matrix_evals: 0
         number_of_jac_adj_muls: 0
@@ -366,14 +427,14 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 0
-        number_of_steps: 8
+        number_of_steps: 10
         number_of_error_test_failures: 0
         number_of_nonlinear_solver_iterations: 0
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 50
-        number_of_jac_muls: 98
+        number_of_calls: 62
+        number_of_jac_muls: 122
         number_of_matrix_evals: 0
         number_of_jac_adj_muls: 0
         "###);
@@ -385,14 +446,16 @@ mod test {
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let mut s = problem.tsit45().unwrap();
-        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let (checkpointer, _y, _t, stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         let adjoint_solver = problem.tsit45_solver_adjoint(checkpointer, None).unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 378
+        number_of_calls: 421
         number_of_jac_muls: 8
         number_of_matrix_evals: 4
-        number_of_jac_adj_muls: 123
+        number_of_jac_adj_muls: 361
         "###);
     }
 
@@ -403,7 +466,7 @@ mod test {
         let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
         let (problem, _soln) = exponential_decay_problem_adjoint::<M>(false);
         let mut s = problem.tsit45().unwrap();
-        let (checkpointer, soln) = s
+        let (checkpointer, soln, _stop_reason) = s
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
@@ -411,11 +474,34 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 747
+        number_of_calls: 990
         number_of_jac_muls: 0
         number_of_matrix_evals: 0
-        number_of_jac_adj_muls: 1707
+        number_of_jac_adj_muls: 2233
         "###);
+    }
+
+    #[test]
+    fn explicit_rk_test_nalgebra_logistic_without_out() {
+        let (problem, soln) = logistic_problem_adjoint_no_out::<M>();
+        let mut s = problem.tsit45().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[test]
+    fn explicit_rk_test_nalgebra_logistic_without_out_adjoint_sum_squares() {
+        let (mut problem, soln) = logistic_problem_adjoint_no_out::<M>();
+        let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
+        let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
+        let (problem, _soln) = logistic_problem_adjoint_no_out::<M>();
+        let mut s = problem.tsit45().unwrap();
+        let (checkpointer, soln, _stop_reason) = s
+            .solve_dense_with_checkpointing(times.as_slice(), None)
+            .unwrap();
+        let adjoint_solver = problem
+            .tsit45_solver_adjoint(checkpointer, Some(dgdp.ncols()))
+            .unwrap();
+        test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
     }
 
     #[test]
@@ -427,10 +513,23 @@ mod test {
 
     #[test]
     fn test_root_finder_tsit45() {
-        let (problem, soln) = exponential_decay_problem_with_root::<M>(false);
+        let (problem, soln) = exponential_decay_problem_with_root::<M>(false, true);
         let mut s = problem.tsit45().unwrap();
         let y = test_ode_solver(&mut s, soln, None, false, false);
-        assert!(abs(y[0] - 0.6) < 1e-6, "y[0] = {}", y[0]);
+
+        let y0 = problem.eqn.init().call(0.0);
+        let mut p = problem.context().vector_zeros(2);
+        problem.eqn.get_params(&mut p);
+        let k = p.get_index(0);
+        let target = 0.6_f64;
+        let t_root = -((target / y0.get_index(0)).ln()) / k;
+        let expected = y0.clone() * scale(f64::exp(-k * t_root));
+        y.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
+
+        let g = s.interpolate_out(t_root).unwrap();
+        let integral = (1.0 - f64::exp(-k * t_root)) / k;
+        let expected_g = y0 * scale(integral);
+        g.assert_eq_norm(&expected_g, &problem.atol, problem.rtol, 15.0);
     }
 
     #[test]
@@ -445,7 +544,7 @@ mod test {
         for p in ps {
             problem.eqn_mut().set_params(&p);
             let mut s = problem.tsit45().unwrap();
-            let (ys, _ts) = s.solve(10.0).unwrap();
+            let (ys, _ts, _stop_reason) = s.solve(10.0).unwrap();
             // check that the new solution is different from the old one
             if let Some(old_soln) = &mut old_soln {
                 let new_soln = ys.column(ys.ncols() - 1).into_owned();
@@ -476,5 +575,91 @@ mod test {
             assert!((v - expected_v[i]).abs() < 1e-4);
             assert!((t - expected_t[i]).abs() < 1e-4);
         }
+    }
+
+    /// Test that `step()` includes the root index in `RootFound(t, index)`.
+    #[test]
+    fn test_root_found_index_tsit45() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_two_roots_problem;
+        use crate::ode_solver::tests::test_root_found_index;
+        let (problem, soln) = exponential_decay_with_two_roots_problem::<M>();
+        let solver = problem.tsit45().unwrap();
+        test_root_found_index(solver, &soln, 0, 1e-4);
+    }
+
+    /// Test that `solve()` halts on the first root, even when a reset function is configured.
+    #[test]
+    fn test_solve_with_reset_tsit45() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
+        use crate::ode_solver::tests::test_solve_with_reset;
+        let (problem, soln) = exponential_decay_with_reset_problem::<M>();
+        let solver = problem.tsit45().unwrap();
+        test_solve_with_reset(solver, &soln);
+    }
+
+    /// Test that `solve_dense()` halts on the first root, even when a reset function is configured.
+    #[test]
+    fn test_solve_dense_with_reset_tsit45() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
+        use crate::ode_solver::tests::test_solve_dense_with_reset;
+        let (problem, soln) = exponential_decay_with_reset_problem::<M>();
+        let solver = problem.tsit45().unwrap();
+        test_solve_dense_with_reset(solver, &soln);
+    }
+
+    /// Test that `solve_dense_sensitivities()` halts on the first root for Tsit45.
+    #[test]
+    fn test_solve_dense_sensitivities_with_reset_tsit45() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem_sens;
+        use crate::ode_solver::tests::test_solve_dense_sensitivities_with_reset;
+        let (problem, soln) = exponential_decay_with_reset_problem_sens::<M>();
+        let solver = problem.tsit45_sens().unwrap();
+        test_solve_dense_sensitivities_with_reset(solver, &soln);
+    }
+
+    #[test]
+    fn test_solve_adjoint_with_single_reset_root_tsit45() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_single_reset_root_problem_adjoint;
+        use crate::ode_solver::tests::test_solve_adjoint_with_single_reset_root;
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(true);
+        test_solve_adjoint_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.tsit45_solver(state),
+                None => problem.tsit45(),
+            },
+            &soln,
+            |adjoint_eqn| problem.tsit45_state_adjoint(adjoint_eqn),
+            |state, adjoint_eqn| problem.tsit45_solver_adjoint_from_state(state, adjoint_eqn),
+        );
+    }
+
+    #[test]
+    fn test_solve_adjoint_sum_squares_with_single_reset_root_tsit45() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_single_reset_root_problem_adjoint;
+        use crate::ode_solver::tests::{
+            setup_test_adjoint_sum_squares_with_single_reset_root,
+            single_reset_root_discrete_times,
+            test_solve_adjoint_sum_squares_with_single_reset_root,
+        };
+        let (mut problem, soln) =
+            exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        let times = single_reset_root_discrete_times(soln.solution_points[0].t);
+        let (dgdp, data) = setup_test_adjoint_sum_squares_with_single_reset_root::<LS, _>(
+            &mut problem,
+            times.as_slice(),
+        );
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        test_solve_adjoint_sum_squares_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.tsit45_solver(state),
+                None => problem.tsit45(),
+            },
+            &soln,
+            |adjoint_eqn| problem.tsit45_state_adjoint(adjoint_eqn),
+            |state, adjoint_eqn| problem.tsit45_solver_adjoint_from_state(state, adjoint_eqn),
+            dgdp,
+            data,
+            times.as_slice(),
+        );
     }
 }

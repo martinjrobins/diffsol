@@ -17,6 +17,10 @@ pub enum DiffsolError {
     #[cfg(feature = "cuda")]
     #[error("Cuda error: {0}")]
     VectorError(#[from] CudaError),
+    #[error("DiffSL Parser error: {0}")]
+    DiffslParserError(String),
+    #[error("DiffSL Compiler error: {0}")]
+    DiffslCompilerError(String),
     #[error("Error: {0}")]
     Other(String),
 }
@@ -92,19 +96,25 @@ pub enum OdeSolverError {
     StateNotSet,
     #[error("Sensitivity solve failed")]
     SensitivitySolveFailed,
-    #[error("Exceeded maximum number of error test failures at time = {time}")]
-    TooManyErrorTestFailures { time: f64 },
+    #[error(
+        "Exceeded maximum number of nonlinear solver failures ({num_failures}) at time = {time}"
+    )]
+    TooManyNonlinearSolverFailures { time: f64, num_failures: usize },
+    #[error("Exceeded maximum number of error test failures ({num_failures}) at time = {time}")]
+    TooManyErrorTestFailures { time: f64, num_failures: usize },
     #[error("Step size is too small at time = {time}")]
     StepSizeTooSmall { time: f64 },
     #[error("Sensitivity requested but equations do not support it")]
     SensitivityNotSupported,
+    #[error("A reset operator requires a root operator to propagate sensitivities")]
+    ResetRequiresRootOperator,
     #[error("Failed to get mutable reference to equations. If there is a solver created with this problem, call solver.take_state() to release the problem")]
     FailedToGetMutableReference,
     #[error("Builder error: {0}")]
     BuilderError(String),
-    #[error("t_eval must be increasing and all values must be greater than or equal to the current time")]
-    StateProblemMismatch,
     #[error("State is not consistent with the problem equations")]
+    StateProblemMismatch,
+    #[error("t_eval must be increasing and all values must be greater than or equal to the current time")]
     InvalidTEval,
     #[error("Sundials error: {0}")]
     SundialsError(String),

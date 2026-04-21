@@ -42,7 +42,7 @@ fn main() {
         .unwrap();
     let times = (0..100).map(|i| i as f64 / 100.0).collect::<Vec<f64>>();
     let mut solver = problem.bdf::<LS>().unwrap();
-    let sol = solver.solve_dense(&times).unwrap();
+    let (sol, _stop_reason) = solver.solve_dense(&times).unwrap();
 
     let x = (1..=20).map(|i| i as f64 / 21.0).collect::<Vec<f64>>();
     let y = times;

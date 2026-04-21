@@ -2,15 +2,15 @@ use crate::FaerContext;
 use crate::{error::LinearSolverError, linear_solver_error};
 
 use crate::{
-    error::DiffsolError, linear_solver::LinearSolver, FaerMat, FaerVec, Matrix,
-    NonLinearOpJacobian, Scalar,
+    error::DiffsolError, linear_solver::LinearSolver, FaerMat, FaerScalar, FaerVec, Matrix,
+    NonLinearOpJacobian,
 };
 
 use faer::{linalg::solvers::FullPivLu, linalg::solvers::Solve};
 /// A [LinearSolver] that uses the LU decomposition in the [`faer`](https://github.com/sarah-ek/faer-rs) library to solve the linear system.
 pub struct LU<T>
 where
-    T: Scalar,
+    T: FaerScalar,
 {
     lu: Option<FullPivLu<T>>,
     matrix: Option<FaerMat<T>>,
@@ -18,7 +18,7 @@ where
 
 impl<T> Default for LU<T>
 where
-    T: Scalar,
+    T: FaerScalar,
 {
     fn default() -> Self {
         Self {
@@ -28,7 +28,7 @@ where
     }
 }
 
-impl<T: Scalar> LinearSolver<FaerMat<T>> for LU<T> {
+impl<T: FaerScalar> LinearSolver<FaerMat<T>> for LU<T> {
     fn set_linearisation<C: NonLinearOpJacobian<T = T, V = FaerVec<T>, M = FaerMat<T>>>(
         &mut self,
         op: &C,

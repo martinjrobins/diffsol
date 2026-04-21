@@ -47,7 +47,7 @@ fn main() {
         while !finished {
             let curr_t = match solver.step() {
                 Ok(OdeSolverStopReason::InternalTimestep) => solver.state().t,
-                Ok(OdeSolverStopReason::RootFound(t)) => {
+                Ok(OdeSolverStopReason::RootFound(t, _idx)) => {
                     finished = true;
                     t
                 }

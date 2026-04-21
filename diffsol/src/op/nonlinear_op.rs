@@ -1,6 +1,6 @@
 use super::Op;
-use crate::{Matrix, Vector};
-use num_traits::{One, Zero};
+use crate::{scale, Matrix, Scalar, Vector};
+use num_traits::{One, Signed, Zero};
 
 // NonLinearOp is a trait that defines a nonlinear operator or function `F` that maps an input vector `x` to an output vector `y`, (i.e. `y = F(x, t)`).
 // It extends the [Op] trait with methods for computing the operator and its Jacobian.
@@ -19,6 +19,33 @@ pub trait NonLinearOp: Op {
         y
     }
 }
+
+pub trait NonLinearOpTimePartial: NonLinearOp {
+    /// Compute the partial time derivative `∂F/∂t(x, t)` and store it in `y`.
+    ///
+    /// The default implementation estimates the derivative using a central finite difference
+    /// at the supplied state and time.
+    fn time_derive_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
+        let eps_sqrt = Self::T::EPSILON.sqrt();
+        let h = (Self::T::one() + t.abs()) * eps_sqrt;
+        let mut y_plus = Self::V::zeros(self.nout(), self.context().clone());
+        let mut y_minus = Self::V::zeros(self.nout(), self.context().clone());
+        self.call_inplace(x, t + h, &mut y_plus);
+        self.call_inplace(x, t - h, &mut y_minus);
+        y.copy_from(&y_plus);
+        *y -= &y_minus;
+        *y *= scale(Self::T::one() / (h + h));
+    }
+
+    /// Compute the partial time derivative `∂F/∂t(x, t)` and return it.
+    fn time_derive(&self, x: &Self::V, t: Self::T) -> Self::V {
+        let mut y = Self::V::zeros(self.nout(), self.context().clone());
+        self.time_derive_inplace(x, t, &mut y);
+        y
+    }
+}
+
+impl<T: NonLinearOp> NonLinearOpTimePartial for T {}
 
 pub trait NonLinearOpSens: NonLinearOp {
     /// Compute the product of the gradient of F wrt a parameter vector p with a given vector `J_p(x, t) * v`.
@@ -189,5 +216,214 @@ pub trait NonLinearOpJacobian: NonLinearOp {
             y.set_column(j, &col);
             v.set_index(j, Self::T::zero());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        context::nalgebra::NalgebraContext, matrix::dense_nalgebra_serial::NalgebraMat,
+        DenseMatrix, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
+        NonLinearOpSensAdjoint, NonLinearOpTimePartial, Op, Vector,
+    };
+
+    type M = NalgebraMat<f64>;
+
+    struct FakeNonLinearOp {
+        ctx: NalgebraContext,
+    }
+
+    struct TimeDependentFakeNonLinearOp {
+        ctx: NalgebraContext,
+    }
+
+    impl Op for FakeNonLinearOp {
+        type T = f64;
+        type V = crate::NalgebraVec<f64>;
+        type M = M;
+        type C = NalgebraContext;
+
+        fn context(&self) -> &Self::C {
+            &self.ctx
+        }
+        fn nstates(&self) -> usize {
+            2
+        }
+        fn nout(&self) -> usize {
+            2
+        }
+        fn nparams(&self) -> usize {
+            2
+        }
+    }
+
+    impl NonLinearOp for FakeNonLinearOp {
+        fn call_inplace(&self, x: &Self::V, _t: Self::T, y: &mut Self::V) {
+            y.copy_from(&Self::V::from_vec(
+                vec![
+                    2.0 * x.get_index(0) + 3.0 * x.get_index(1),
+                    -x.get_index(0) + 4.0 * x.get_index(1),
+                ],
+                NalgebraContext,
+            ));
+        }
+    }
+
+    impl Op for TimeDependentFakeNonLinearOp {
+        type T = f64;
+        type V = crate::NalgebraVec<f64>;
+        type M = M;
+        type C = NalgebraContext;
+
+        fn context(&self) -> &Self::C {
+            &self.ctx
+        }
+        fn nstates(&self) -> usize {
+            2
+        }
+        fn nout(&self) -> usize {
+            2
+        }
+        fn nparams(&self) -> usize {
+            0
+        }
+    }
+
+    impl NonLinearOp for TimeDependentFakeNonLinearOp {
+        fn call_inplace(&self, x: &Self::V, t: Self::T, y: &mut Self::V) {
+            y.copy_from(&Self::V::from_vec(
+                vec![
+                    2.0 * x.get_index(0) + t,
+                    -x.get_index(0) + 4.0 * x.get_index(1) - 3.0 * t,
+                ],
+                NalgebraContext,
+            ));
+        }
+    }
+
+    impl NonLinearOpJacobian for FakeNonLinearOp {
+        fn jac_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
+            y.copy_from(&Self::V::from_vec(
+                vec![
+                    2.0 * v.get_index(0) + 3.0 * v.get_index(1),
+                    -v.get_index(0) + 4.0 * v.get_index(1),
+                ],
+                NalgebraContext,
+            ));
+        }
+    }
+
+    impl NonLinearOpAdjoint for FakeNonLinearOp {
+        fn jac_transpose_mul_inplace(
+            &self,
+            _x: &Self::V,
+            _t: Self::T,
+            v: &Self::V,
+            y: &mut Self::V,
+        ) {
+            y.copy_from(&Self::V::from_vec(
+                vec![
+                    -2.0 * v.get_index(0) + v.get_index(1),
+                    -3.0 * v.get_index(0) - 4.0 * v.get_index(1),
+                ],
+                NalgebraContext,
+            ));
+        }
+    }
+
+    impl NonLinearOpSens for FakeNonLinearOp {
+        fn sens_mul_inplace(&self, _x: &Self::V, _t: Self::T, v: &Self::V, y: &mut Self::V) {
+            y.copy_from(&Self::V::from_vec(
+                vec![
+                    v.get_index(0) + 2.0 * v.get_index(1),
+                    3.0 * v.get_index(0) + 4.0 * v.get_index(1),
+                ],
+                NalgebraContext,
+            ));
+        }
+    }
+
+    impl NonLinearOpSensAdjoint for FakeNonLinearOp {
+        fn sens_transpose_mul_inplace(
+            &self,
+            _x: &Self::V,
+            _t: Self::T,
+            v: &Self::V,
+            y: &mut Self::V,
+        ) {
+            y.copy_from(&Self::V::from_vec(
+                vec![
+                    -v.get_index(0) - 3.0 * v.get_index(1),
+                    -2.0 * v.get_index(0) - 4.0 * v.get_index(1),
+                ],
+                NalgebraContext,
+            ));
+        }
+    }
+
+    #[test]
+    fn nonlinear_op_default_helpers_construct_expected_vectors_and_matrices() {
+        let op = FakeNonLinearOp {
+            ctx: NalgebraContext,
+        };
+        let x = crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext);
+        let v = crate::NalgebraVec::from_vec(vec![3.0, -1.0], NalgebraContext);
+
+        op.call(&x, 0.0).assert_eq_st(
+            &crate::NalgebraVec::from_vec(vec![8.0, 7.0], NalgebraContext),
+            1e-12,
+        );
+        op.jac_mul(&x, 0.0, &v).assert_eq_st(
+            &crate::NalgebraVec::from_vec(vec![3.0, -7.0], NalgebraContext),
+            1e-12,
+        );
+        op.sens_mul(&x, 0.0, &v).assert_eq_st(
+            &crate::NalgebraVec::from_vec(vec![1.0, 5.0], NalgebraContext),
+            1e-12,
+        );
+
+        let jac = op.jacobian(&x, 0.0);
+        assert_eq!(jac.get_index(0, 0), 2.0);
+        assert_eq!(jac.get_index(1, 0), -1.0);
+        assert_eq!(jac.get_index(0, 1), 3.0);
+        assert_eq!(jac.get_index(1, 1), 4.0);
+
+        let adj = op.adjoint(&x, 0.0);
+        assert_eq!(adj.get_index(0, 0), -2.0);
+        assert_eq!(adj.get_index(1, 0), -3.0);
+        assert_eq!(adj.get_index(0, 1), 1.0);
+        assert_eq!(adj.get_index(1, 1), -4.0);
+
+        let sens = op.sens(&x, 0.0);
+        assert_eq!(sens.get_index(0, 0), 1.0);
+        assert_eq!(sens.get_index(1, 0), 3.0);
+        assert_eq!(sens.get_index(0, 1), 2.0);
+        assert_eq!(sens.get_index(1, 1), 4.0);
+
+        let sens_adj = op.sens_adjoint(&x, 0.0);
+        assert_eq!(sens_adj.get_index(0, 0), -1.0);
+        assert_eq!(sens_adj.get_index(1, 0), -2.0);
+        assert_eq!(sens_adj.get_index(0, 1), -3.0);
+        assert_eq!(sens_adj.get_index(1, 1), -4.0);
+    }
+
+    #[test]
+    fn nonlinear_op_time_partial_default_helper_uses_finite_differences() {
+        let op = TimeDependentFakeNonLinearOp {
+            ctx: NalgebraContext,
+        };
+        let x = crate::NalgebraVec::from_vec(vec![1.0, 2.0], NalgebraContext);
+
+        op.time_derive(&x, 0.5).assert_eq_st(
+            &crate::NalgebraVec::from_vec(vec![1.0, -3.0], NalgebraContext),
+            1e-8,
+        );
+
+        let mut y = crate::NalgebraVec::zeros(2, NalgebraContext);
+        op.time_derive_inplace(&x, 0.5, &mut y);
+        y.assert_eq_st(
+            &crate::NalgebraVec::from_vec(vec![1.0, -3.0], NalgebraContext),
+            1e-8,
+        );
     }
 }

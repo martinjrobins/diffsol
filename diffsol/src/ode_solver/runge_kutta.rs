@@ -13,6 +13,8 @@ use crate::{
     MatrixView, NonLinearOp, NonLinearSolver, OdeEquations, OdeSolverProblem, OdeSolverState, Op,
     Scalar, Vector, VectorViewMut,
 };
+use log::info;
+use log::trace;
 use num_traits::{abs, FromPrimitive, One, Pow, ToPrimitive, Zero};
 
 use super::bdf::BdfStatistics;
@@ -50,6 +52,17 @@ where
     out_error: Option<Eqn::V>,
     sens_error: Option<Eqn::V>,
     sens_out_error: Option<Eqn::V>,
+}
+
+impl<'a, Eqn, M> Drop for Rk<'a, Eqn, M>
+where
+    Eqn: OdeEquations,
+    M: DenseMatrix<V = Eqn::V, T = Eqn::T>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T, C = Eqn::C>,
+{
+    fn drop(&mut self) {
+        info!("Runge-Kutta Solver Statistics: {}", self.statistics);
+    }
 }
 
 impl<Eqn, M> Clone for Rk<'_, Eqn, M>
@@ -339,8 +352,9 @@ where
         self.state = state;
     }
 
-    pub(crate) fn into_state(self) -> RkState<Eqn::V> {
-        self.state
+    pub(crate) fn into_state(mut self) -> RkState<Eqn::V> {
+        let ctx = self.problem().eqn.context().clone();
+        std::mem::replace(&mut self.state, RkState::new_empty(ctx))
     }
 
     pub(crate) fn checkpoint(&mut self) -> RkState<Eqn::V> {
@@ -359,13 +373,49 @@ where
         &self.state
     }
 
-    pub(crate) fn old_state(&self) -> &RkState<Eqn::V> {
-        &self.old_state
-    }
-
     pub(crate) fn state_mut(&mut self) -> &mut RkState<Eqn::V> {
         self.is_state_mutated = true;
         &mut self.state
+    }
+
+    pub(crate) fn state_mut_back(
+        &mut self,
+        t: M::T,
+        integrate_out: bool,
+    ) -> Result<(), DiffsolError> {
+        let nstates = self.state.y.len();
+        let ctx = self.state.y.context().clone();
+        let mut y = Eqn::V::zeros(nstates, ctx.clone());
+        self.interpolate_inplace(t, &mut y)?;
+        let mut dy = Eqn::V::zeros(nstates, ctx.clone());
+        self.interpolate_dy_inplace(t, &mut dy)?;
+        let g = if integrate_out {
+            let nout = self.state.g.len();
+            let mut g = Eqn::V::zeros(nout, ctx.clone());
+            self.interpolate_out_inplace(t, &mut g)?;
+            Some(g)
+        } else {
+            None
+        };
+        let nparams = self.state.s.len();
+        let s_interp: Vec<Eqn::V> = if nparams > 0 {
+            let mut s = vec![Eqn::V::zeros(nstates, ctx); nparams];
+            self.interpolate_sens_inplace(t, &mut s)?;
+            s
+        } else {
+            vec![]
+        };
+        let state = self.state_mut();
+        state.y.copy_from(&y);
+        state.dy.copy_from(&dy);
+        state.t = t;
+        if let Some(g) = g.as_ref() {
+            state.g.copy_from(g);
+        }
+        for (j, s_j) in s_interp.iter().enumerate() {
+            state.s[j].copy_from(s_j);
+        }
+        Ok(())
     }
 
     pub(crate) fn set_stop_time(&mut self, tstop: <Eqn as Op>::T) -> Result<(), DiffsolError> {
@@ -403,17 +453,22 @@ where
         &self,
         error_norm: Eqn::T,
         safety_factor: f64,
-        min_factor: Eqn::T,
-        max_factor: Eqn::T,
+        min_reduce_factor: Eqn::T,
+        max_reduce_factor: Eqn::T,
+        min_increase_factor: Eqn::T,
+        max_increase_factor: Eqn::T,
     ) -> Eqn::T {
         let safety = Eqn::T::from_f64(0.9 * safety_factor).unwrap();
         let mut factor =
             safety * error_norm.pow(Eqn::T::from_f64(-0.5 / (self.order() as f64 + 1.0)).unwrap());
-        if factor < min_factor {
-            factor = min_factor;
+        if factor > max_reduce_factor && factor < min_increase_factor {
+            factor = Eqn::T::one();
         }
-        if factor > max_factor {
-            factor = max_factor;
+        if factor < min_reduce_factor {
+            factor = min_reduce_factor;
+        }
+        if factor > max_increase_factor {
+            factor = max_increase_factor;
         }
         factor
     }
@@ -426,6 +481,7 @@ where
         // if start == 1, then we need to compute the first stage
         // from the last stage of the previous step
         if self.skip_first_stage() {
+            trace!("Skipping first stage, setting to h * dy from previous step");
             self.diff
                 .column_mut(0)
                 .axpy(h, &self.state.dy, Eqn::T::zero());
@@ -527,19 +583,19 @@ where
         h: Eqn::T,
         dy0: &Eqn::V,
         diff: &M,
-        dy: &mut Eqn::V,
+        hdy: &mut Eqn::V,
         tableau: &Tableau<M>,
     ) {
         if i == 0 {
-            dy.axpy(h, dy0, Eqn::T::zero());
+            hdy.axpy(h, dy0, Eqn::T::zero());
         } else if i == 1 {
-            dy.copy_from_view(&diff.column(i - 1));
+            hdy.copy_from_view(&diff.column(i - 1));
         } else {
             let c = (tableau.c().get_index(i) - tableau.c().get_index(i - 2))
                 / (tableau.c().get_index(i - 1) - tableau.c().get_index(i - 2));
             // dy = c1  + c * (c1 - c2)
-            dy.copy_from_view(&diff.column(i - 1));
-            dy.axpy_v(-c, &diff.column(i - 2), Eqn::T::one() + c);
+            hdy.copy_from_view(&diff.column(i - 1));
+            hdy.axpy_v(-c, &diff.column(i - 2), Eqn::T::one() + c);
         }
     }
 
@@ -557,7 +613,6 @@ where
         AugEqn: AugmentedOdeEquationsImplicit<Eqn>,
     {
         let t = self.state.t + self.tableau.c().get_index(i) * h;
-
         // main equation
         if let Some(op) = op {
             op.set_phi(
@@ -575,18 +630,19 @@ where
                 &self.tableau,
             );
             if !nonlinear_solver.is_jacobian_set() {
-                nonlinear_solver.reset_jacobian(op, &self.old_state.dy, t);
+                nonlinear_solver.reset_jacobian(op, &self.state.y, t);
             }
             let solve_result = nonlinear_solver.solve_in_place(
                 op,
                 &mut self.old_state.dy,
                 t,
                 &self.state.y,
+                //&self.diff.column(0).into_owned(),
                 convergence,
             );
             self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
             solve_result?;
-            self.old_state.y.copy_from(&op.get_last_f_eval());
+            op.get_f_eval(&self.old_state.dy, &mut self.old_state.y);
 
             // update diff with solved dy
             self.diff.column_mut(i).copy_from(&self.old_state.dy);
@@ -628,7 +684,7 @@ where
                 if !nonlinear_solver.is_jacobian_set() {
                     nonlinear_solver.reset_jacobian::<SdirkCallable<AugEqn>>(
                         op,
-                        &self.old_state.ds[j],
+                        &self.old_state.s[j],
                         t,
                     );
                 }
@@ -639,12 +695,13 @@ where
                     &mut self.old_state.ds[j],
                     t,
                     &self.state.s[j],
+                    //&self.sdiff[j].column(0).into_owned(),
                     convergence,
                 );
                 self.statistics.number_of_nonlinear_solver_iterations += convergence.niter();
                 solver_result?;
 
-                self.old_state.s[j].copy_from(&op.get_last_f_eval());
+                op.get_f_eval(&self.old_state.ds[j], &mut self.old_state.s[j]);
                 self.sdiff[j].column_mut(i).copy_from(&self.old_state.ds[j]);
 
                 // calculate sdg and store in sgdiff
@@ -698,12 +755,14 @@ where
         &mut self,
         _h: Eqn::T,
         augmented_eqn: Option<&mut impl AugmentedOdeEquations<Eqn>>,
-    ) -> Eqn::T {
+        linear_solver: impl FnOnce(&mut Eqn::V) -> Result<(), DiffsolError>,
+    ) -> Result<Eqn::T, DiffsolError> {
         let mut ncontributions = 0;
         let mut error_norm = Eqn::T::zero();
         if let Some(error) = self.error.as_mut() {
             self.diff
                 .gemv(Eqn::T::one(), self.tableau.d(), Eqn::T::zero(), error);
+            linear_solver(error)?;
 
             // compute error norm
             let atol = &self.problem.atol;
@@ -754,7 +813,7 @@ where
         if ncontributions > 1 {
             error_norm /= Eqn::T::from_f64(ncontributions as f64).unwrap();
         }
-        error_norm
+        Ok(error_norm)
     }
 
     pub(crate) fn error_test_fail(
@@ -770,6 +829,7 @@ where
             return Err(DiffsolError::from(
                 OdeSolverError::TooManyErrorTestFailures {
                     time: self.state.t.to_f64().unwrap(),
+                    num_failures: nattempts,
                 },
             ));
         }
@@ -786,8 +846,18 @@ where
         &mut self,
         h: Eqn::T,
         min_timestep: Eqn::T,
+        max_nonlinear_solver_fails: usize,
     ) -> Result<(), DiffsolError> {
         self.statistics.number_of_nonlinear_solver_fails += 1;
+        // if too many nonlinear solver failures, then fail
+        if self.statistics.number_of_nonlinear_solver_fails > max_nonlinear_solver_fails {
+            return Err(DiffsolError::from(
+                OdeSolverError::TooManyNonlinearSolverFailures {
+                    time: self.state.t.to_f64().unwrap(),
+                    num_failures: max_nonlinear_solver_fails,
+                },
+            ));
+        }
         // if step size too small, then fail
         if abs(h) < min_timestep {
             return Err(DiffsolError::from(OdeSolverError::StepSizeTooSmall {
@@ -846,8 +916,8 @@ where
                 &self.state.y,
                 self.state.t,
             );
-            if let Some(root) = ret {
-                return Ok(OdeSolverStopReason::RootFound(root));
+            if let Some((root, root_idx)) = ret {
+                return Ok(OdeSolverStopReason::RootFound(root, root_idx));
             }
         }
 
@@ -884,6 +954,27 @@ where
         beta_f
     }
 
+    // Derivative of interpolate_beta_function w.r.t theta.
+    // d/dtheta [theta, theta^2, ..., theta^p] = [1, 2*theta, ..., p*theta^{p-1}]
+    fn interpolate_beta_function_deriv(theta: M::T, beta: &M) -> M::V {
+        let poly_order = beta.ncols();
+        let s_star = beta.nrows();
+        // d_thetav[0] = 1 (d/dtheta theta)
+        // d_thetav[i] = (i+1) * theta^i for i >= 1, computed iteratively
+        let mut d_thetav = Vec::with_capacity(poly_order);
+        d_thetav.push(M::T::one());
+        let mut theta_pow = theta; // theta^1
+        for i in 1..poly_order {
+            let coeff = M::T::from_f64(i as f64 + 1.0).unwrap();
+            d_thetav.push(coeff * theta_pow); // (i+1) * theta^i
+            theta_pow *= theta; // theta^{i+1} for next iteration
+        }
+        let d_thetav = M::V::from_vec(d_thetav, beta.context().clone());
+        let mut d_beta_f = <M::V as Vector>::zeros(s_star, beta.context().clone());
+        beta.gemv(M::T::one(), &d_thetav, M::T::zero(), &mut d_beta_f);
+        d_beta_f
+    }
+
     fn interpolate_hermite(
         scale_diff: M::T,
         theta: M::T,
@@ -905,6 +996,59 @@ where
         y.axpy_v(scale_diff * theta, &f1, M::T::one());
         y.axpy(M::T::one() - theta, u0, theta * (theta - M::T::one()));
         y.axpy(theta, u1, M::T::one());
+    }
+
+    // Derivative of the Hermite interpolant w.r.t. t.
+    //
+    // The Hermite polynomial is p(theta) = theta*(theta-1)*Q(theta) + (1-theta)*u0 + theta*u1
+    // where Q(theta) = (1-2*theta)*(u1-u0) + scale_diff*(theta-1)*f0 + scale_diff*theta*f1
+    //
+    // Its derivative w.r.t. theta is:
+    //   p'(theta) = (2*theta-1)*Q(theta) + theta*(theta-1)*Q'(theta) + (u1-u0)
+    // where Q'(theta) = -2*(u1-u0) + scale_diff*(f0 + f1)
+    //
+    // And dy/dt = p'(theta) / dt.
+    fn interpolate_hermite_deriv(
+        scale_diff: M::T,
+        theta: M::T,
+        dt: M::T,
+        u0: &M::V,
+        u1: &M::V,
+        diff: &M,
+        dy: &mut M::V,
+    ) {
+        let f0 = diff.column(0);
+        let f1 = diff.column(diff.ncols() - 1);
+        let nstates = dy.len();
+
+        // Build Q(theta) into a temporary
+        let mut q = <M::V as Vector>::zeros(nstates, diff.context().clone());
+        q.copy_from(u1);
+        q.sub_assign(u0); // q = u1 - u0
+        q.axpy_v(
+            scale_diff * (theta - M::T::one()),
+            &f0,
+            M::T::one() - M::T::from_f64(2.0).unwrap() * theta,
+        ); // q = (1-2*theta)*(u1-u0) + scale_diff*(theta-1)*f0
+        q.axpy_v(scale_diff * theta, &f1, M::T::one()); // q = Q(theta)
+
+        // dy = (u1-u0)/dt + (2*theta-1)/dt * Q(theta)
+        dy.copy_from(u1);
+        dy.sub_assign(u0); // dy = u1 - u0
+        dy.axpy(
+            (M::T::from_f64(2.0).unwrap() * theta - M::T::one()) / dt,
+            &q,
+            M::T::one() / dt,
+        ); // dy = (1/dt)*(u1-u0) + (2*theta-1)/dt * Q(theta)
+
+        // Reuse q for Q'(theta) = 2*(u0-u1) + scale_diff*(f0 + f1)
+        q.copy_from(u0);
+        q.sub_assign(u1); // q = u0 - u1
+        q.axpy_v(scale_diff, &f0, M::T::from_f64(2.0).unwrap()); // q = 2*(u0-u1) + scale_diff*f0
+        q.axpy_v(scale_diff, &f1, M::T::one()); // q = Q'(theta)
+
+        // dy += theta*(theta-1)/dt * Q'(theta)
+        dy.axpy(theta * (theta - M::T::one()) / dt, &q, M::T::one());
     }
 
     pub(crate) fn interpolate_inplace(&self, t: M::T, ret: &mut M::V) -> Result<(), DiffsolError> {
@@ -951,6 +1095,61 @@ where
                 &self.state.y,
                 &self.diff,
                 ret,
+            );
+        }
+        Ok(())
+    }
+
+    pub(crate) fn interpolate_dy_inplace(
+        &self,
+        t: M::T,
+        dy: &mut M::V,
+    ) -> Result<(), DiffsolError> {
+        if dy.len() != self.state.y.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::InterpolationVectorWrongSize {
+                    expected: self.state.y.len(),
+                    found: dy.len(),
+                },
+            ));
+        }
+        if self.is_state_mutated {
+            if t == self.state.t {
+                dy.copy_from(&self.state.dy);
+                return Ok(());
+            } else {
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+            }
+        }
+
+        // check that t is within the current step depending on the direction
+        let is_forward = self.state.h > M::T::zero();
+        if (is_forward && (t > self.state.t || t < self.old_state.t))
+            || (!is_forward && (t < self.state.t || t > self.old_state.t))
+        {
+            return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+        }
+
+        let dt = self.state.t - self.old_state.t;
+        if dt == M::T::zero() {
+            dy.copy_from(&self.state.dy);
+            return Ok(());
+        }
+        let theta = (t - self.old_state.t) / dt;
+        let scale_diff = Eqn::T::one();
+        if let Some(beta) = self.tableau.beta() {
+            let d_beta_f = Self::interpolate_beta_function_deriv(theta, beta);
+            // dy/dt = (scale_diff / dt) * diff * d_beta_f
+            self.diff.gemv(scale_diff / dt, &d_beta_f, M::T::zero(), dy);
+        } else {
+            Self::interpolate_hermite_deriv(
+                scale_diff,
+                theta,
+                dt,
+                &self.old_state.y,
+                &self.state.y,
+                &self.diff,
+                dy,
             );
         }
         Ok(())
@@ -1081,5 +1280,91 @@ where
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        context::nalgebra::NalgebraContext,
+        error::{DiffsolError, OdeSolverError},
+        matrix::dense_nalgebra_serial::NalgebraMat,
+        ode_equations::test_models::{
+            exponential_decay::exponential_decay_problem,
+            exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem,
+        },
+        DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverProblem, Tableau,
+    };
+
+    use super::Rk;
+
+    type M = NalgebraMat<f64>;
+
+    fn check_sdirk_for_problem<Eqn>(
+        _problem: &OdeSolverProblem<Eqn>,
+        tableau: &Tableau<M>,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquations<T = f64, V = crate::NalgebraVec<f64>, C = NalgebraContext>,
+        Eqn::V: DefaultDenseMatrix<T = f64, C = NalgebraContext, M = M>,
+    {
+        Rk::<Eqn, M>::check_sdirk_rk(tableau)
+    }
+
+    fn make_invalid_explicit_tableau() -> Tableau<M> {
+        let base = Tableau::<M>::tsit45(Default::default());
+        let mut a = base.a().clone();
+        a.set_index(0, 0, 1.0);
+        Tableau::new(
+            a,
+            base.b().clone(),
+            base.c().clone(),
+            base.d().clone(),
+            base.order(),
+            base.beta().cloned(),
+        )
+    }
+
+    fn make_invalid_sdirk_tableau() -> Tableau<M> {
+        let base = Tableau::<M>::tr_bdf2(Default::default());
+        let mut a = base.a().clone();
+        a.set_index(0, 0, 0.25);
+        Tableau::new(
+            a,
+            base.b().clone(),
+            base.c().clone(),
+            base.d().clone(),
+            base.order(),
+            base.beta().cloned(),
+        )
+    }
+
+    fn expect_invalid_tableau(err: DiffsolError) {
+        assert!(err.to_string().contains("Invalid tableau"));
+    }
+
+    #[test]
+    fn explicit_rk_rejects_mass_matrices() {
+        let (problem, _soln) = exponential_decay_with_algebraic_problem::<M>(false);
+        let err =
+            Rk::check_explicit_rk(&problem, &Tableau::<M>::tsit45(Default::default())).unwrap_err();
+        assert!(matches!(
+            err,
+            DiffsolError::OdeSolverError(OdeSolverError::MassMatrixNotSupported)
+        ));
+    }
+
+    #[test]
+    fn explicit_rk_rejects_invalid_a_diagonal() {
+        let (problem, _soln) = exponential_decay_problem::<M>(false);
+        let err = Rk::check_explicit_rk(&problem, &make_invalid_explicit_tableau()).unwrap_err();
+        expect_invalid_tableau(err);
+    }
+
+    #[test]
+    fn sdirk_rk_rejects_invalid_first_diagonal_entry() {
+        let (problem, _soln) = exponential_decay_problem::<M>(false);
+        let err = check_sdirk_for_problem(&problem, &make_invalid_sdirk_tableau()).unwrap_err();
+        expect_invalid_tableau(err);
     }
 }

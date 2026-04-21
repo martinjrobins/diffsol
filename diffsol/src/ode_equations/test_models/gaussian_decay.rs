@@ -1,9 +1,9 @@
 use crate::ode_solver::problem::OdeSolverSolution;
 use crate::OdeSolverProblem;
 use crate::{
-    scalar::scale, ConstantOp, DenseMatrix, OdeBuilder, OdeEquations, OdeEquationsImplicit, Vector,
+    scalar::{scale, Scalar},
+    ConstantOp, DenseMatrix, OdeBuilder, OdeEquations, OdeEquationsImplicit, Vector,
 };
-use nalgebra::ComplexField;
 use num_traits::{FromPrimitive, Pow};
 use num_traits::{One, Zero};
 use std::ops::MulAssign;

@@ -69,7 +69,6 @@ where
 
     let code = format!(
         "
-        in = []
         AA {{ 1.0 }}
         EE {{ 10000.0 }}
         GG {{ 0.5e-6 }}
@@ -815,6 +814,7 @@ where
     type Mass = FoodWebMass<'a, M, NX>;
     type Root = ParameterisedOp<'a, UnitCallable<M>>;
     type Out = FoodWebOut<'a, M, NX>;
+    type Reset = ParameterisedOp<'a, UnitCallable<M>>;
 }
 
 impl<M, const NX: usize> OdeEquations for FoodWeb<M, NX>

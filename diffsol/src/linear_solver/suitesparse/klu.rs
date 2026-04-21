@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn test_klu() {
         let (op, rtol, atol, solns) = linear_problem::<FaerSparseMat<f64>>();
-        let p = FaerVec::zeros(0, op.context().clone());
+        let p = FaerVec::zeros(0, *op.context());
         let op = ParameterisedOp::new(&op, &p);
         let s = KLU::default();
         test_linear_solver(s, op, rtol, &atol, solns);

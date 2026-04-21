@@ -30,7 +30,7 @@ fn solve() {
         )
         .unwrap();
     let mut solver = problem.bdf::<LS>().unwrap();
-    let (ys, ts) = solver.solve(40.0).unwrap();
+    let (ys, ts, _stop_reason) = solver.solve(40.0).unwrap();
 
     let prey: Vec<_> = ys.inner().row(0).into_iter().copied().collect();
     let predator: Vec<_> = ys.inner().row(1).into_iter().copied().collect();
@@ -61,8 +61,7 @@ fn phase_plane() {
         .p([1.0])
         .build_from_diffsl::<CG>(
             "
-        in = [ y0 ]
-        y0 { 1.0 }
+        in { y0 = 1.0 }
         a { 2.0/3.0 } b { 4.0/3.0 } c { 1.0 } d { 1.0 }
         u_i {
             y1 = y0,
@@ -82,7 +81,7 @@ fn phase_plane() {
         problem.eqn_mut().set_params(&p);
 
         let mut solver = problem.bdf::<LS>().unwrap();
-        let (ys, _ts) = solver.solve(40.0).unwrap();
+        let (ys, _ts, _stop_reason) = solver.solve(40.0).unwrap();
 
         let prey: Vec<_> = ys.inner().row(0).into_iter().copied().collect();
         let predator: Vec<_> = ys.inner().row(1).into_iter().copied().collect();

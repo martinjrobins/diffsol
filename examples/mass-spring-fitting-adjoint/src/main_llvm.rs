@@ -35,7 +35,7 @@ impl CostFunction for Problem {
             .set_params(&V::from_vec(param.clone(), context));
         let mut solver = problem.bdf::<LS>().unwrap();
         let ys = match solver.solve_dense(&self.ts_data) {
-            Ok(ys) => ys,
+            Ok((ys, _stop_reason)) => ys,
             Err(_) => return Ok(f64::MAX / 1000.),
         };
         let loss = ys
@@ -59,7 +59,8 @@ impl Gradient for Problem {
             .eqn_mut()
             .set_params(&V::from_vec(param.clone(), context));
         let mut solver = problem.bdf::<LS>().unwrap();
-        let (c, ys) = match solver.solve_dense_with_checkpointing(&self.ts_data, None) {
+        let (c, ys, _stop_reason) = match solver.solve_dense_with_checkpointing(&self.ts_data, None)
+        {
             Ok(ys) => ys,
             Err(_) => return Ok(vec![f64::MAX / 1000.; param.len()]),
         };
@@ -69,7 +70,7 @@ impl Gradient for Problem {
             g_m.column_mut(j).copy_from(&g_m_i);
         }
         let adjoint_solver = problem.bdf_solver_adjoint::<LS, _>(c, Some(1)).unwrap();
-        match adjoint_solver.solve_adjoint_backwards_pass(self.ts_data.as_slice(), &[&g_m]) {
+        match adjoint_solver.solve_adjoint_backwards_pass(None, self.ts_data.as_slice(), &[&g_m]) {
             Ok(soln) => Ok(soln.as_ref().sg[0]
                 .inner()
                 .iter()
@@ -93,8 +94,8 @@ pub fn main() {
         .out_rtol(1e-6)
         .build_from_diffsl(
             "
-        in = [k, c]
-        k { 1.0 } m { 1.0 } c { 0.1 }
+        in_i { k = 1.0, c = 0.1 }
+        m { 1.0 }
         u_i {
             x = 1,
             v = 0,
@@ -106,8 +107,10 @@ pub fn main() {
         ",
         )
         .unwrap();
-    let mut solver = problem.bdf::<LS>().unwrap();
-    let ys_data = solver.solve_dense(&t_data).unwrap();
+    let ys_data = {
+        let mut solver = problem.bdf::<LS>().unwrap();
+        solver.solve_dense(&t_data).unwrap().0
+    };
 
     let cost = Problem {
         ys_data,

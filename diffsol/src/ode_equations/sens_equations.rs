@@ -292,6 +292,7 @@ where
     type Root = <Eqn as OdeEquationsRef<'a>>::Root;
     type Init = &'a SensInit<'b, Eqn>;
     type Out = <Eqn as OdeEquationsRef<'a>>::Out;
+    type Reset = <Eqn as OdeEquationsRef<'a>>::Reset;
 }
 
 impl<'a, Eqn> OdeEquations for SensEquations<'a, Eqn>
@@ -315,6 +316,9 @@ where
     }
     fn set_params(&mut self, p: &Self::V) {
         self.eqn.set_params(p);
+    }
+    fn set_model_index(&mut self, m: usize) {
+        self.eqn.set_model_index(m);
     }
     fn get_params(&self, p: &mut Self::V) {
         self.eqn.get_params(p);

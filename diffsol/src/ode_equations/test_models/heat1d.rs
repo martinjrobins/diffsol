@@ -90,7 +90,7 @@ fn soln<M: Matrix<T = f64>>(ctx: M::C, mgrid: usize, h: f64) -> OdeSolverSolutio
         })
         .collect();
 
-    for (values, time) in data.into_iter().zip(times.into_iter()) {
+    for (values, time) in data.into_iter().zip(times) {
         soln.push(values, time);
     }
     soln

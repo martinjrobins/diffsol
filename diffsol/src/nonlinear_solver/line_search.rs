@@ -13,6 +13,18 @@ use num_traits::{FromPrimitive, One, Pow};
 /// The x vector is also modified in place to take the optimal step
 pub trait LineSearch<V: Vector>: Default {
     /// Take the optimal step for the current iteration
+    ///
+    /// # Arguments
+    /// - `x`: current solution vector, modified in place to take the optimal step
+    /// - `delta`: current Newton step vector, modified in place to scale by the optimal step size (previous value is overwritten)
+    /// - `error_y`: current error estimate vector, used to compute the norm
+    /// - `fun`: function to compute the residual F(x), takes x and modifies delta in place
+    /// - `linear_solver`: function to solve the linear system J delta = -F(x), takes delta and modifies it in place
+    /// - `convergence`: convergence object to compute norms and check convergence
+    ///
+    /// # Returns
+    /// - `ConvergenceStatus`: status of the convergence after taking the optimal step
+    /// - `DiffsolError`: error if the line search fails
     fn take_optimal_step(
         &mut self,
         x: &mut V,

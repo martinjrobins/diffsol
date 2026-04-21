@@ -10,7 +10,7 @@ where
         match solver.step() {
             Ok(OdeSolverStopReason::InternalTimestep) => continue,
             Ok(OdeSolverStopReason::TstopReached) => break,
-            Ok(OdeSolverStopReason::RootFound(_t)) => break,
+            Ok(OdeSolverStopReason::RootFound(_t, _idx)) => break,
             Err(e) => panic!("Solver failed to converge: {e}"),
         }
     }

@@ -2,14 +2,16 @@ use crate::{
     matrix::DenseMatrix, scale, LinearOp, Matrix, MatrixSparsity, NonLinearOp, NonLinearOpJacobian,
     OdeEquationsImplicit, Op, Vector,
 };
-use num_traits::{One, Zero};
+use log::debug;
+use num_traits::{One, ToPrimitive, Zero};
 use std::ops::MulAssign;
 use std::{
     cell::{Ref, RefCell},
     ops::{AddAssign, Deref, SubAssign},
 };
 
-// callable to solve for F(y) = M (y' + psi) - c * f(y) = 0
+/// A NonLinearOp implementation of the BDF implicit equation system.
+/// i.e. F(y) = M (y' + psi) - c * f(y) = 0
 pub struct BdfCallable<Eqn: OdeEquationsImplicit> {
     pub(crate) eqn: Eqn,
     psi_neg_y0: RefCell<Eqn::V>,
@@ -283,6 +285,7 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for BdfCallable<Eqn> {
             let mut rhs_jac = self.rhs_jac.borrow_mut();
             self.eqn.rhs().jacobian_inplace(x, t, &mut rhs_jac);
             let c = *self.c.borrow().deref();
+            debug!("Recomputing RHS Jacobian, c = {}", c.to_f64().unwrap());
             if self.eqn.mass().is_none() {
                 let mass_jac = self.mass_jac.borrow();
                 y.scale_add_and_assign(mass_jac.deref(), -c, rhs_jac.deref());
@@ -297,6 +300,10 @@ impl<Eqn: OdeEquationsImplicit> NonLinearOpJacobian for BdfCallable<Eqn> {
             let rhs_jac = self.rhs_jac.borrow();
             let mass_jac = self.mass_jac.borrow();
             let c = *self.c.borrow().deref();
+            debug!(
+                "Reusing Jacobian, updating with new c = {}",
+                c.to_f64().unwrap()
+            );
             y.scale_add_and_assign(mass_jac.deref(), -c, rhs_jac.deref());
         }
         let number_of_jac_evals = *self.number_of_jac_evals.borrow() + 1;

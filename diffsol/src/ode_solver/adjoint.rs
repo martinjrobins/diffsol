@@ -45,8 +45,12 @@ where
     /// element of the vector is a dense matrix of size `n_o x n`, where `n_o`` is the number of outputs in the model
     /// and `n` is the number of timepoints. The i-th column of `dgdu_eval` is the gradient of `g_i` with respect to `u_i`.
     /// The input `t_eval` is a vector of length `n`, where the i-th element is the timepoint `t_i`.
+    ///
+    /// When solving only part of a checkpointed trajectory by passing `t0`, any `t_eval` entries
+    /// outside the active backwards integration window `[t0, self.state().t]` are ignored.
     fn solve_adjoint_backwards_pass(
         mut self,
+        t0: Option<Eqn::T>,
         t_eval: &[Eqn::T],
         dgdu_eval: &[&<Eqn::V as DefaultDenseMatrix>::M],
     ) -> Result<Self::State, DiffsolError>
@@ -103,9 +107,18 @@ where
         } else {
             None
         };
+        let problem_t0 = self.problem().t0;
+        let solve_t0 = t0.unwrap_or(problem_t0);
+        let solve_t1 = self.state().t;
 
-        // solve the adjoint problem stopping at each t_eval
-        for (i, t) in t_eval.iter().enumerate().rev() {
+        // solve the adjoint problem stopping at each t_eval at or after the requested stop time
+        for (i, t) in t_eval
+            .iter()
+            .enumerate()
+            .rev()
+            .filter(|(_, t)| **t <= solve_t1)
+            .take_while(|(_, t)| **t >= solve_t0)
+        {
             // integrate to t if not already there
             match self.set_stop_time(*t) {
                 Ok(_) => while self.step()? != OdeSolverStopReason::TstopReached {},
@@ -119,31 +132,25 @@ where
             }
         }
 
-        // keep integrating until t0
-        let t0 = self.problem().t0;
-        match self.set_stop_time(t0) {
+        // keep integrating until the requested stop time
+        match self.set_stop_time(solve_t0) {
             Ok(_) => while self.step()? != OdeSolverStopReason::TstopReached {},
             Err(DiffsolError::OdeSolverError(OdeSolverError::StopTimeAtCurrentTime)) => {}
             e => e?,
         }
 
-        // correct the adjoint solution for the initial conditions
+        // correct the adjoint solution for the initial conditions only when solving
+        // all the way back to the problem's initial time
         let (mut state, aug_eqn) = self.into_state_and_eqn();
         let aug_eqn = aug_eqn.unwrap();
-        let state_mut = state.as_mut();
-        aug_eqn.correct_sg_for_init(t0, state_mut.s, state_mut.sg);
+        if t0.is_none() {
+            let state_mut = state.as_mut();
+            aug_eqn.correct_sg_for_init(problem_t0, state_mut.s, state_mut.sg);
+        }
 
         // return the solution
         Ok(state)
     }
-}
-
-impl<'a, Eqn, S, Solver> AdjointOdeSolverMethod<'a, Eqn, S> for Solver
-where
-    Eqn: OdeEquationsImplicitAdjoint + 'a,
-    S: OdeSolverMethod<'a, Eqn>,
-    Solver: AugmentedOdeSolverMethod<'a, Eqn, AdjointEquations<'a, Eqn, S>>,
-{
 }
 
 struct BlockInfoSol<M: Matrix, LS: LinearSolver<M>> {
@@ -429,6 +436,31 @@ where
                 sg_i.sub_assign(&self.tmp_nparams);
             }
         }
+
+        // we have a consistent s_i and sg_i now, calculate ds/dt
+        // ds_d = Mdd^{-1} f(s,t)
+        // ds_a = 0
+        //let n = state_mut.s.len();
+        //for i in 0..n {
+        //    solver.augmented_eqn_mut().unwrap().set_index(i);
+        //    solver.augmented_eqn().unwrap().rhs().call_inplace(&solver.state().s[i], t, &mut self.tmp_nstates);
+
+        //    // mass and algebraic indices
+        //    if let (Some(sol_mdd), Some(p)) = (sol_mdd_opt, self.partition.as_ref()) {
+        //        self.tmp_differential
+        //            .gather(&self.tmp_nstates, &p.differential_indices);
+        //        sol_mdd.solve_in_place(&mut self.tmp_differential)?;
+        //        solver.state_mut().ds[i].assign_at_indices(&p.algebraic_indices, Eqn::T::zero());
+        //        self.tmp_differential.scatter(&p.differential_indices, &mut solver.state_mut().ds[i]);
+        //    // mass only
+        //    } else if let Some(sol_mdd) = sol_mdd_opt {
+        //        sol_mdd.solve_in_place(&mut self.tmp_nstates)?;
+        //        solver.state_mut().ds[i].copy_from(&self.tmp_nstates);
+        //    // no mass
+        //    } else {
+        //        solver.state_mut().ds[i].copy_from(&self.tmp_nstates);
+        //    }
+        //}
         Ok(())
     }
 }

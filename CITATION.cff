@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+title: "diffsol: Rust crate for solving differential equations"
+authors:
+  - family-names: "Robinson"
+    given-names: "Martin"
+  - family-names: "Allmont"
+    given-names: "Alex"
+date-released: 2026-02-26
+version: "11.117"
+publisher: "The Open Journal"
+url: "https://doi.org/10.21105/joss.09384"
+doi: "10.21105/joss.09384"
+license: "Other"
+repository: "https://github.com/martinjrobins/diffsol"
+preferred-citation:
+  type: article
+  title: "diffsol: Rust crate for solving differential equations"
+  authors:
+    - family-names: "Robinson"
+      given-names: "Martin"
+    - family-names: "Allmont"
+      given-names: "Alex"
+  journal: "Journal of Open Source Software"
+  year: 2026
+  volume: 11
+  number: 117
+  pages: 9384
+  doi: "10.21105/joss.09384"
+  url: "https://doi.org/10.21105/joss.09384"

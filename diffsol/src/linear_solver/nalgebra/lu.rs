@@ -4,14 +4,14 @@ use crate::{
     error::{DiffsolError, LinearSolverError},
     linear_solver_error,
     matrix::dense_nalgebra_serial::NalgebraMat,
-    LinearSolver, Matrix, NalgebraContext, NalgebraVec, NonLinearOpJacobian, Scalar,
+    LinearSolver, Matrix, NalgebraContext, NalgebraScalar, NalgebraVec, NonLinearOpJacobian,
 };
 
 /// A [LinearSolver] that uses the LU decomposition in the [`nalgebra` library](https://nalgebra.org/) to solve the linear system.
 #[derive(Clone)]
 pub struct LU<T>
 where
-    T: Scalar,
+    T: NalgebraScalar,
 {
     matrix: Option<NalgebraMat<T>>,
     lu: Option<nalgebra::LU<T, Dyn, Dyn>>,
@@ -19,7 +19,7 @@ where
 
 impl<T> Default for LU<T>
 where
-    T: Scalar,
+    T: NalgebraScalar,
 {
     fn default() -> Self {
         Self {
@@ -29,7 +29,7 @@ where
     }
 }
 
-impl<T: Scalar> LinearSolver<NalgebraMat<T>> for LU<T> {
+impl<T: NalgebraScalar> LinearSolver<NalgebraMat<T>> for LU<T> {
     fn solve_in_place(&self, state: &mut NalgebraVec<T>) -> Result<(), DiffsolError> {
         if self.lu.is_none() {
             return Err(linear_solver_error!(LuNotInitialized))?;

@@ -3,7 +3,7 @@ use crate::{
     linear_solver::LinearSolver,
     linear_solver_error,
     scalar::IndexType,
-    FaerContext, FaerSparseMat, FaerVec, Matrix, NonLinearOpJacobian, Scalar,
+    FaerContext, FaerScalar, FaerSparseMat, FaerVec, Matrix, NonLinearOpJacobian,
 };
 
 use faer::{
@@ -15,7 +15,7 @@ use faer::{
 /// A [LinearSolver] that uses the LU decomposition in the [`faer`](https://github.com/sarah-ek/faer-rs) library to solve the linear system.
 pub struct FaerSparseLU<T>
 where
-    T: Scalar,
+    T: FaerScalar,
 {
     lu: Option<Lu<IndexType, T>>,
     lu_symbolic: Option<SymbolicLu<IndexType>>,
@@ -24,7 +24,7 @@ where
 
 impl<T> Default for FaerSparseLU<T>
 where
-    T: Scalar,
+    T: FaerScalar,
 {
     fn default() -> Self {
         Self {
@@ -35,7 +35,7 @@ where
     }
 }
 
-impl<T: Scalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
+impl<T: FaerScalar> LinearSolver<FaerSparseMat<T>> for FaerSparseLU<T> {
     fn set_linearisation<C: NonLinearOpJacobian<T = T, V = FaerVec<T>, M = FaerSparseMat<T>>>(
         &mut self,
         op: &C,

@@ -1,9 +1,10 @@
 use crate::{
-    matrix::Matrix, ode_solver::problem::OdeSolverSolution, scalar::scale, MatrixHost, OdeBuilder,
-    OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem,
-    Op, Vector,
+    matrix::Matrix,
+    ode_solver::problem::OdeSolverSolution,
+    scalar::{scale, Scalar},
+    MatrixHost, OdeBuilder, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
+    OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
 };
-use nalgebra::ComplexField;
 use num_traits::{FromPrimitive, One, Zero};
 use std::ops::MulAssign;
 
@@ -220,7 +221,7 @@ pub fn exponential_decay_with_algebraic_problem<M: MatrixHost + 'static>(
     for i in 0..10 {
         let t = M::T::from_f64(i as f64 / 10.0).unwrap();
         let y0 = M::V::from_vec(vec![M::T::one(), M::T::one(), M::T::one()], ctx.clone());
-        let y: M::V = y0 * scale(M::T::exp(-p[0] * t));
+        let y: M::V = y0 * scale((-p[0] * t).exp());
         soln.push(y, t);
     }
     (problem, soln)
@@ -277,9 +278,9 @@ pub fn exponential_decay_with_algebraic_adjoint_problem<M: MatrixHost + 'static>
     for i in 0..10 {
         let t = M::T::from_f64(i as f64).unwrap();
         let y0 = M::V::from_vec(vec![M::T::one(), M::T::one(), M::T::one()], ctx.clone());
-        let g = y0.clone() * scale((M::T::exp(-p[0] * t0) - M::T::exp(-p[0] * t)) / p[0]);
+        let g = y0.clone() * scale(((-p[0] * t0).exp() - (-p[0] * t).exp()) / p[0]);
         let g = M::V::from_vec(vec![p[0] * g[2]], ctx.clone());
-        let dgdk = t1 * M::T::exp(-p[0] * t1);
+        let dgdk = t1 * (-p[0] * t1).exp();
         let dg = M::V::from_vec(vec![dgdk], ctx.clone());
         soln.push_sens(g, t, &[dg]);
     }
@@ -315,8 +316,8 @@ pub fn exponential_decay_with_algebraic_problem_sens<M: MatrixHost + 'static>() 
     for i in 0..10 {
         let t = M::T::from_f64(i as f64 / 10.0).unwrap();
         let y0 = M::V::from_vec(vec![M::T::one(), M::T::one(), M::T::one()], ctx.clone());
-        let y: M::V = y0.clone() * scale(M::T::exp(-p[0] * t));
-        let yp = y0 * scale(-t * M::T::exp(-p[0] * t));
+        let y: M::V = y0.clone() * scale((-p[0] * t).exp());
+        let yp = y0 * scale(-t * (-p[0] * t).exp());
         soln.push_sens(y, t, &[yp]);
     }
     (problem, soln)
@@ -340,8 +341,7 @@ pub fn exponential_decay_with_algebraic_problem_diffsl<
         .build_from_diffsl(
             format!(
                 "
-        in = [k]
-        k {{ 0.1 }}
+        in  {{ k = 0.1 }}
         u_i {{ x = 1, y = 1, z = 0 }}
         dudt_i {{ dxdt = 0, dydt = 0, dzdt = 0 }}
         M_i {{ dxdt, dydt, 0 }}
@@ -357,7 +357,7 @@ pub fn exponential_decay_with_algebraic_problem_diffsl<
     for i in 0..10 {
         let t = i as f64 / 10.0;
         let y0 = M::V::from_vec(vec![1.0, 1.0, 1.0], problem.eqn.context().clone());
-        let y: M::V = y0 * scale(M::T::exp(-p[0] * t));
+        let y: M::V = y0 * scale((-p[0] * t).exp());
         soln.push(y, t);
     }
     (problem, soln)

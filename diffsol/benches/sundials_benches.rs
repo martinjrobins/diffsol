@@ -1,5 +1,6 @@
 use std::ffi::c_int;
 
+#[allow(dead_code)]
 extern "C" {
     pub fn cvRoberts_block_klu(ngroups: i32) -> c_int;
     pub fn idaFoodWeb_bnd_5() -> c_int;

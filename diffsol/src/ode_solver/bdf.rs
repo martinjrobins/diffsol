@@ -1,26 +1,29 @@
-use nalgebra::ComplexField;
-use std::cell::Ref;
+use log::{debug, info, trace};
 use std::ops::AddAssign;
+use std::{cell::Ref, fmt::Display};
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
     AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, NoAug, StateRef, StateRefMut,
 };
 
-use num_traits::{abs, FromPrimitive, One, Pow, ToPrimitive, Zero};
+use num_traits::{abs, FromPrimitive, One, Pow, Signed, ToPrimitive, Zero};
 use serde::Serialize;
 
 use crate::ode_solver_error;
 use crate::{
     matrix::MatrixRef, nonlinear_solver::root::RootFinder, op::bdf::BdfCallable, scalar::scale,
     AugmentedOdeEquations, BdfState, DenseMatrix, JacobianUpdate, MatrixViewMut, NonLinearOp,
-    NonLinearSolver, OdeEquationsImplicit, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-    OdeSolverStopReason, Op, Scalar, Vector, VectorRef, VectorView, VectorViewMut,
+    NonLinearSolver, OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Op, Scalar,
+    SensEquations, Vector, VectorRef, VectorView, VectorViewMut,
 };
 
+use super::adjoint::AdjointOdeSolverMethod;
 use super::config::BdfConfig;
 use super::jacobian_update::SolverState;
 use super::method::AugmentedOdeSolverMethod;
+use super::sensitivities::SensitivitiesOdeSolverMethod;
 
 #[derive(Clone, Debug, Serialize, Default)]
 pub struct BdfStatistics {
@@ -29,6 +32,12 @@ pub struct BdfStatistics {
     pub number_of_error_test_failures: usize,
     pub number_of_nonlinear_solver_iterations: usize,
     pub number_of_nonlinear_solver_fails: usize,
+}
+
+impl Display for BdfStatistics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", serde_json::to_string_pretty(self).unwrap())
+    }
 }
 
 impl<'a, M, Eqn, Nls, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
@@ -42,12 +51,42 @@ where
     Nls: NonLinearSolver<Eqn::M>,
     Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
 {
-    fn into_state_and_eqn(self) -> (Self::State, Option<AugEqn>) {
-        (self.state, self.s_op.map(|op| op.eqn))
+    fn into_state_and_eqn(mut self) -> (Self::State, Option<AugEqn>) {
+        let callable = std::mem::take(&mut self.s_op);
+        let state = self.into_state();
+        (state, callable.map(|op| op.eqn))
     }
     fn augmented_eqn(&self) -> Option<&AugEqn> {
         self.s_op.as_ref().map(|op| op.eqn())
     }
+    fn augmented_eqn_mut(&mut self) -> Option<&mut AugEqn> {
+        self.s_op.as_mut().map(|op| &mut op.eqn)
+    }
+}
+
+impl<'a, M, Eqn, Nls> SensitivitiesOdeSolverMethod<'a, Eqn>
+    for Bdf<'a, Eqn, Nls, M, SensEquations<'a, Eqn>>
+where
+    Eqn: OdeEquationsImplicitSens + 'a,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+    Nls: NonLinearSolver<Eqn::M>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
+{
+}
+
+impl<'a, M, Eqn, Nls, Solver> AdjointOdeSolverMethod<'a, Eqn, Solver>
+    for Bdf<'a, Eqn, Nls, M, crate::AdjointEquations<'a, Eqn, Solver>>
+where
+    Eqn: OdeEquationsImplicitAdjoint + 'a,
+    Solver: OdeSolverMethod<'a, Eqn>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
+    for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
+    Nls: NonLinearSolver<Eqn::M>,
+    Eqn::V: DefaultDenseMatrix<T = Eqn::T>,
+{
 }
 
 // notes quadrature.
@@ -128,7 +167,6 @@ where
         let op = if let Some(op) = self.op.as_ref() {
             let op = op.clone_state(&self.ode_problem.eqn);
             nonlinear_solver.set_problem(&op);
-            nonlinear_solver.reset_jacobian(&op, &self.state.y, self.state.t);
             Some(op)
         } else {
             None
@@ -137,10 +175,12 @@ where
             let op = op.clone_state(op.eqn().clone());
             op
         });
+        let mut convergence = self.convergence.clone();
+        convergence.reset_eta();
         Self {
             nonlinear_solver,
             ode_problem: problem,
-            convergence: self.convergence.clone(),
+            convergence,
             op,
             s_op,
             n_equal_steps: self.n_equal_steps,
@@ -158,7 +198,7 @@ where
             alpha: self.alpha.clone(),
             gamma: self.gamma.clone(),
             error_const2: self.error_const2.clone(),
-            statistics: self.statistics.clone(),
+            statistics: BdfStatistics::default(),
             state: self.state.clone(),
             tstop: self.tstop,
             root_finder: self.root_finder.clone(),
@@ -166,6 +206,19 @@ where
             jacobian_update: self.jacobian_update.clone(),
             config: self.config.clone(),
         }
+    }
+}
+
+impl<'a, M, Eqn, Nls, AugmentedEqn> Drop for Bdf<'a, Eqn, Nls, M, AugmentedEqn>
+where
+    Eqn: OdeEquationsImplicit,
+    Nls: NonLinearSolver<Eqn::M>,
+    M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
+    AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn>,
+    Eqn::V: DefaultDenseMatrix,
+{
+    fn drop(&mut self) {
+        info!("BDF Solver Statistics: {}", self.statistics);
     }
 }
 
@@ -222,12 +275,17 @@ where
             let one_over_i_plus_one = Eqn::T::one() / (i_t + Eqn::T::one());
             gamma.push(gamma[i - 1] + one_over_i);
             alpha.push(Eqn::T::one() / ((Eqn::T::one() - kappa[i]) * gamma[i]));
-            error_const2.push((kappa[i] * gamma[i] + one_over_i_plus_one).powi(2));
+            let error_const2_i = kappa[i] * gamma[i] + one_over_i_plus_one;
+            error_const2.push(error_const2_i * error_const2_i);
         }
 
         state.check_consistent_with_problem(problem)?;
 
-        let mut convergence = Convergence::new(problem.rtol, &problem.atol);
+        let mut convergence = Convergence::with_tolerance(
+            problem.rtol,
+            &problem.atol,
+            problem.ode_options.nonlinear_solver_tolerance,
+        );
         convergence.set_max_iter(config.maximum_newton_iterations);
 
         let op = if integrate_main_eqn {
@@ -264,8 +322,8 @@ where
         let y_delta = <Eqn::V as Vector>::zeros(nstates, ctx.clone());
         let y_predict = <Eqn::V as Vector>::zeros(nstates, ctx.clone());
 
-        let nout = if let Some(out) = problem.eqn.out() {
-            out.nout()
+        let nout = if problem.integrate_out {
+            problem.eqn.nout()
         } else {
             0
         };
@@ -302,7 +360,7 @@ where
             tstop: None,
             root_finder,
             is_state_modified,
-            jacobian_update: JacobianUpdate::default(),
+            jacobian_update: JacobianUpdate::new(&problem.ode_options),
             config,
         })
     }
@@ -416,8 +474,9 @@ where
                 self.nonlinear_solver
                     .reset_jacobian(s_op, &self.state.s[0], self.state.t);
             }
-            self.jacobian_update.update_rhs_jacobian();
+            self.jacobian_update.update_rhs_jacobian(c);
             self.jacobian_update.update_jacobian(c);
+            self.convergence.reset_eta();
         } else if self.jacobian_update.check_jacobian_update(c, &state) {
             if let Some(op) = self.op.as_mut() {
                 self.nonlinear_solver
@@ -427,6 +486,7 @@ where
                     .reset_jacobian(s_op, &self.state.s[0], self.state.t);
             }
             self.jacobian_update.update_jacobian(c);
+            self.convergence.reset_eta();
         }
     }
 
@@ -478,6 +538,7 @@ where
         }
 
         self.state.h = new_h;
+        self.convergence.reset_eta_timestep_change();
 
         // if step size too small, then fail
         if self.state.h.abs() < self.config.minimum_timestep {
@@ -485,6 +546,7 @@ where
                 time: self.state.t.to_f64().unwrap(),
             }));
         }
+
         Ok(new_h)
     }
 
@@ -560,13 +622,13 @@ where
         }
 
         // do the same for sensitivities
-        if self.s_op.is_some() {
-            for i in 0..self.s_op.as_ref().unwrap().eqn().max_index() {
+        if let Some(s_op) = self.s_op.as_ref() {
+            for i in 0..s_op.eqn().max_index() {
                 // update sensitivity differences
                 Self::_update_diff(order, &self.s_deltas[i], &mut state.sdiff[i]);
 
                 // integrate sensitivity output equations
-                if self.s_op.as_ref().unwrap().eqn().out().is_some() {
+                if s_op.eqn().out().is_some() {
                     Self::_predict_using_diff(&mut state.sg[i], &state.sgdiff[i], order);
                     state.sg[i].axpy(Eqn::T::one(), &self.sg_deltas[i], Eqn::T::one());
 
@@ -653,28 +715,46 @@ where
         if (state.h > M::T::zero() && state.t + state.h > tstop + troundoff)
             || (state.h < M::T::zero() && state.t + state.h < tstop - troundoff)
         {
+            debug!(
+                "Adjusting step size to hit tstop at t = {}",
+                tstop.to_f64().unwrap()
+            );
             let factor = (tstop - state.t) / state.h;
             // update step size ignoring the possible "step size too small" error
-            _ = self._update_step_size(factor);
+            let _ = self._update_step_size(factor);
         }
         Ok(None)
     }
 
     fn initialise_to_first_order(&mut self) {
         self.n_equal_steps = 0;
+
+        // scale step size h to account for reduction in order at order n error is O(h^{n+2}))
+        // error_b = C * h_old^{n+2}
+        // error_a = C * h_new^{3}
+        // set error_a = error_b
+        // => h_new = h_old^{(n+2)/3}
+        //let sign_h = if self.state.h >= Eqn::T::zero() {
+        //    Eqn::T::one()
+        //} else {
+        //    -Eqn::T::one()
+        //};
+        //self.state.h = sign_h * self.state.h.abs().powf(M::T::from_f64((self.state.order + 2) as f64 / 3.0).unwrap());
+
         self.state.initialise_diff_to_first_order();
 
         if self.ode_problem.integrate_out {
             self.state.initialise_gdiff_to_first_order();
         }
-        if self.s_op.is_some() {
+        if let Some(s_op) = self.s_op.as_ref() {
             self.state.initialise_sdiff_to_first_order();
-            if self.s_op.as_ref().unwrap().eqn().out().is_some() {
+            if s_op.eqn().out().is_some() {
                 self.state.initialise_sgdiff_to_first_order();
             }
         }
 
         self.u = Self::_compute_r(1, Eqn::T::one(), self.problem().eqn.context().clone());
+
         self.is_state_modified = false;
     }
 
@@ -694,6 +774,34 @@ where
             let i_t = <Eqn::T as FromPrimitive>::from_f64(i as f64).unwrap();
             time_factor *= (t - (t1 - h * i_t)) / (h * (Eqn::T::one() + i_t));
             y.axpy_v(time_factor, &diff.column(i + 1), Eqn::T::one());
+        }
+    }
+
+    // Interpolate the time derivative dy/dt of the BDF polynomial at time t.
+    // Uses the product-rule differentiation of the interpolating polynomial from page 7 of [1].
+    // For each term pi_i(t) = prod_{j=0}^{i-1} (t - (t1 - j*h)) / ((j+1)*h),
+    // we maintain pi (the product) and d_pi (its derivative) iteratively.
+    fn interpolate_derivative_from_diff(
+        t: Eqn::T,
+        diff: &M,
+        t1: Eqn::T,
+        h: Eqn::T,
+        order: usize,
+        dy: &mut Eqn::V,
+    ) {
+        let mut pi = Eqn::T::one();
+        let mut d_pi = Eqn::T::zero();
+        dy.fill(Eqn::T::zero());
+        for i in 0..order {
+            let i_t = <Eqn::T as FromPrimitive>::from_f64(i as f64).unwrap();
+            let denom = h * (Eqn::T::one() + i_t);
+            let w = (t - (t1 - h * i_t)) / denom;
+            let dw = Eqn::T::one() / denom;
+            // d(pi_{i+1})/dt = d(pi_i)/dt * w + pi_i * dw
+            let new_d_pi = d_pi * w + pi * dw;
+            pi *= w;
+            d_pi = new_d_pi;
+            dy.axpy_v(d_pi, &diff.column(i + 1), Eqn::T::one());
         }
     }
 
@@ -859,7 +967,7 @@ where
             {
                 let s_new = &mut self.state.s[i];
                 s_new.copy_from(&self.s_predict);
-                // todo: should be a separate convergence object?
+                trace!("Solving sensitivity equation index {}", i);
                 self.nonlinear_solver.solve_in_place(
                     &*s_op,
                     s_new,
@@ -927,6 +1035,10 @@ where
     }
 
     fn set_state(&mut self, state: Self::State) {
+        debug!(
+            "Manually setting BDF state, step size = {}, order = {}, time = {}",
+            state.h, state.order, state.t
+        );
         let old_order = self.state.order;
         self.state = state;
 
@@ -975,6 +1087,32 @@ where
             return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
         }
         Self::interpolate_from_diff(t, &state.diff, state.t, state.h, state.order, y);
+        Ok(())
+    }
+
+    fn interpolate_dy_inplace(&self, t: Eqn::T, dy: &mut Eqn::V) -> Result<(), DiffsolError> {
+        if dy.len() != self.state.y.len() {
+            return Err(DiffsolError::from(
+                OdeSolverError::InterpolationVectorWrongSize {
+                    expected: self.state.y.len(),
+                    found: dy.len(),
+                },
+            ));
+        }
+        let state = &self.state;
+        if self.is_state_modified {
+            if t == state.t {
+                dy.copy_from(&state.dy);
+                return Ok(());
+            } else {
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+            }
+        }
+        let is_forward = state.h > Eqn::T::zero();
+        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
+            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
+        }
+        Self::interpolate_derivative_from_diff(t, &state.diff, state.t, state.h, state.order, dy);
         Ok(())
     }
 
@@ -1062,8 +1200,9 @@ where
         self.state.as_ref()
     }
 
-    fn into_state(self) -> BdfState<Eqn::V, M> {
-        self.state
+    fn into_state(mut self) -> BdfState<Eqn::V, M> {
+        let ctx = self.problem().eqn.context().clone();
+        std::mem::replace(&mut self.state, BdfState::new_empty(ctx))
     }
 
     fn state_mut(&mut self) -> StateRefMut<'_, Eqn::V> {
@@ -1071,7 +1210,44 @@ where
         self.state.as_mut()
     }
 
+    fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError> {
+        let state = &mut self.state;
+        if self.is_state_modified {
+            if t != state.t {
+                return Err(ode_solver_error!(InterpolationTimeOutsideCurrentStep));
+            }
+            // already at the requested time, nothing to do
+            return Ok(());
+        }
+        let is_forward = state.h > Eqn::T::zero();
+        if (is_forward && t > state.t) || (!is_forward && t < state.t) {
+            return Err(ode_solver_error!(InterpolationTimeAfterCurrentTime));
+        }
+        let current_t = state.t;
+        let current_h = state.h;
+        let order = state.order;
+        Self::interpolate_from_diff(t, &state.diff, current_t, current_h, order, &mut state.y);
+        Self::interpolate_derivative_from_diff(
+            t,
+            &state.diff,
+            current_t,
+            current_h,
+            order,
+            &mut state.dy,
+        );
+        if self.ode_problem.integrate_out {
+            Self::interpolate_from_diff(t, &state.gdiff, current_t, current_h, order, &mut state.g);
+        }
+        for (s, sdiff) in state.s.iter_mut().zip(state.sdiff.iter()) {
+            Self::interpolate_from_diff(t, sdiff, current_t, current_h, order, s);
+        }
+        state.t = t;
+        self.is_state_modified = true;
+        Ok(())
+    }
+
     fn checkpoint(&mut self) -> Self::State {
+        debug!("Taking checkpoint");
         self._jacobian_updates(
             self.state.h * self.alpha[self.state.order],
             SolverState::Checkpoint,
@@ -1079,7 +1255,15 @@ where
         self.state.clone()
     }
 
+    fn state_clone(&self) -> Self::State {
+        self.state.clone()
+    }
+
     fn step(&mut self) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError> {
+        debug!(
+            "Taking BDF step at time {} with step size {} and order {}",
+            self.state.t, self.state.h, self.state.order
+        );
         let mut safety: Eqn::T;
         let mut error_norm: Eqn::T;
         let problem = self.ode_problem;
@@ -1106,6 +1290,10 @@ where
             if let Some(t_stop) = self.tstop {
                 self.set_stop_time(t_stop)?;
             }
+            debug!(
+                "State was modified, reinitialised to first order with h = {}",
+                self.state.h
+            );
         }
 
         self._predict_forward();
@@ -1153,11 +1341,25 @@ where
             // handle case where either nonlinear solve failed
             if solve_result.is_err() {
                 self.statistics.number_of_nonlinear_solver_fails += 1;
+                if self.statistics.number_of_nonlinear_solver_fails
+                    > self.config.maximum_newton_fails
+                {
+                    return Err(DiffsolError::from(
+                        OdeSolverError::TooManyNonlinearSolverFailures {
+                            time: self.state.t.to_f64().unwrap(),
+                            num_failures: self.statistics.number_of_nonlinear_solver_fails,
+                        },
+                    ));
+                }
                 if convergence_fail {
                     // newton iteration did not converge, but jacobian has already been
                     // evaluated so reduce step size by 0.3 (as per [1]) and try again
                     let new_h =
                         self._update_step_size(<Eqn::T as FromPrimitive>::from_f64(0.3).unwrap())?;
+                    debug!(
+                        "Second convergence failure, reducing step size to {:.3e} and trying again",
+                        new_h.to_f64().unwrap()
+                    );
                     self._jacobian_updates(
                         new_h * self.alpha[order],
                         SolverState::SecondConvergenceFail,
@@ -1169,6 +1371,7 @@ where
                     // update statistics
                 } else {
                     // newton iteration did not converge, so update jacobian and try again
+                    debug!("First convergence failure, updating Jacobian and trying again",);
                     self._jacobian_updates(
                         self.state.h * self.alpha[order],
                         SolverState::FirstConvergenceFail,
@@ -1192,6 +1395,10 @@ where
             // do the error test
             if error_norm <= Eqn::T::one() {
                 // step is accepted
+                debug!(
+                    "Step accepted with error norm {:.3e}",
+                    error_norm.to_f64().unwrap()
+                );
                 break;
             } else {
                 // step is rejected
@@ -1204,6 +1411,11 @@ where
                 if factor < self.config.minimum_timestep_shrink {
                     factor = self.config.minimum_timestep_shrink;
                 }
+                debug!(
+                    "Step rejected with error norm {:.3e}, reducing step size by factor {:.3e}",
+                    error_norm.to_f64().unwrap(),
+                    factor.to_f64().unwrap()
+                );
                 let new_h = self._update_step_size(factor)?;
                 self._jacobian_updates(new_h * self.alpha[order], SolverState::ErrorTestFail);
 
@@ -1218,6 +1430,7 @@ where
                     return Err(DiffsolError::from(
                         OdeSolverError::TooManyErrorTestFailures {
                             time: self.state.t.to_f64().unwrap(),
+                            num_failures: self.statistics.number_of_error_test_failures,
                         },
                     ));
                 }
@@ -1315,11 +1528,16 @@ where
                 factor = self.config.minimum_timestep_shrink;
             }
             if factor >= self.config.minimum_timestep_growth
-                || factor < self.config.maximum_timestep_shrink
+                || factor <= self.config.maximum_timestep_shrink
                 || max_index == 0
                 || max_index == 2
             {
                 let new_h = self._update_step_size(factor)?;
+                debug!(
+                    "Changing step size to {:.6} and order to {}",
+                    new_h.to_f64().unwrap(),
+                    order
+                );
                 self._jacobian_updates(new_h * self.alpha[order], SolverState::StepSuccess);
             }
         }
@@ -1332,8 +1550,9 @@ where
                 self.state.as_ref().y,
                 self.state.as_ref().t,
             );
-            if let Some(root) = ret {
-                return Ok(OdeSolverStopReason::RootFound(root));
+            if let Some((root, root_idx)) = ret {
+                debug!("Root found at time {}", root);
+                return Ok(OdeSolverStopReason::RootFound(root, root_idx));
             }
         }
 
@@ -1377,6 +1596,7 @@ mod test {
             foodweb::foodweb_problem,
             gaussian_decay::gaussian_decay_problem,
             heat2d::head2d_problem,
+            logistic::logistic_problem_adjoint_no_out,
             robertson::{robertson, robertson_sens},
             robertson_ode::robertson_ode,
             robertson_ode_with_sens::robertson_ode_with_sens,
@@ -1384,13 +1604,12 @@ mod test {
         ode_solver::tests::{
             setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
             test_adjoint_sum_squares, test_checkpointing, test_config, test_interpolate,
-            test_ode_solver, test_problem, test_state_mut, test_state_mut_on_problem,
+            test_interpolate_dy, test_ode_solver, test_problem, test_state_mut,
+            test_state_mut_on_problem,
         },
-        Context, DenseMatrix, FaerLU, FaerMat, FaerSparseLU, FaerSparseMat, MatrixCommon,
-        NalgebraLU, OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
+        scale, ConstantOp, Context, DenseMatrix, FaerLU, FaerMat, FaerSparseLU, FaerSparseMat,
+        MatrixCommon, NalgebraLU, OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
     };
-
-    use num_traits::abs;
 
     type M = NalgebraMat<f64>;
     type LS = NalgebraLU<f64>;
@@ -1420,6 +1639,11 @@ mod test {
     }
 
     #[test]
+    fn bdf_test_interpolate_dy() {
+        test_interpolate_dy(test_problem::<M>(false).bdf::<LS>().unwrap());
+    }
+
+    #[test]
     fn bdf_test_state_mut_exponential_decay() {
         let (p, soln) = exponential_decay_problem::<M>(false);
         let s = p.bdf_solver::<LS>(p.bdf_state::<LS>().unwrap()).unwrap();
@@ -1439,14 +1663,14 @@ mod test {
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 11
-        number_of_steps: 47
+        number_of_linear_solver_setups: 12
+        number_of_steps: 49
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 68
+        number_of_nonlinear_solver_iterations: 50
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 70
+        number_of_calls: 52
         number_of_jac_muls: 2
         number_of_matrix_evals: 1
         number_of_jac_adj_muls: 0
@@ -1485,14 +1709,14 @@ mod test {
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 11
-        number_of_steps: 47
+        number_of_linear_solver_setups: 12
+        number_of_steps: 49
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 68
+        number_of_nonlinear_solver_iterations: 50
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 70
+        number_of_calls: 52
         number_of_jac_muls: 2
         number_of_matrix_evals: 1
         number_of_jac_adj_muls: 0
@@ -1505,15 +1729,15 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 13
-        number_of_steps: 48
+        number_of_linear_solver_setups: 14
+        number_of_steps: 52
         number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 236
+        number_of_nonlinear_solver_iterations: 164
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.statistics(), @r###"
-        number_of_calls: 72
-        number_of_jac_muls: 170
+        number_of_calls: 56
+        number_of_jac_muls: 114
         number_of_matrix_evals: 1
         number_of_jac_adj_muls: 0
         "###);
@@ -1534,10 +1758,10 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 13
-        number_of_steps: 48
+        number_of_linear_solver_setups: 14
+        number_of_steps: 52
         number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 236
+        number_of_nonlinear_solver_iterations: 164
         number_of_nonlinear_solver_fails: 0
         "###);
     }
@@ -1560,16 +1784,17 @@ mod test {
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let (problem, _soln) = exponential_decay_problem_adjoint::<M>(true);
         let mut s = problem.bdf::<LS>().unwrap();
-        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdu.ncols()))
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 181
-        number_of_jac_muls: 6
-        number_of_matrix_evals: 3
-        number_of_jac_adj_muls: 376
+        number_of_calls: 159
+        number_of_jac_muls: 2
+        number_of_matrix_evals: 1
+        number_of_jac_adj_muls: 222
         "###);
     }
 
@@ -1580,7 +1805,7 @@ mod test {
         let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
         let (problem, _soln) = exponential_decay_problem_adjoint::<M>(false);
         let mut s = problem.bdf::<LS>().unwrap();
-        let (checkpointer, soln) = s
+        let (checkpointer, soln, _stop_reason) = s
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
@@ -1588,11 +1813,34 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 484
-        number_of_jac_muls: 6
-        number_of_matrix_evals: 3
-        number_of_jac_adj_muls: 1481
+        number_of_calls: 546
+        number_of_jac_muls: 4
+        number_of_matrix_evals: 2
+        number_of_jac_adj_muls: 1056
         "###);
+    }
+
+    #[test]
+    fn bdf_test_nalgebra_logistic_without_out() {
+        let (problem, soln) = logistic_problem_adjoint_no_out::<M>();
+        let mut s = problem.bdf::<LS>().unwrap();
+        test_ode_solver(&mut s, soln, None, false, false);
+    }
+
+    #[test]
+    fn bdf_test_nalgebra_logistic_without_out_adjoint_sum_squares() {
+        let (mut problem, soln) = logistic_problem_adjoint_no_out::<M>();
+        let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
+        let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
+        let (problem, _soln) = logistic_problem_adjoint_no_out::<M>();
+        let mut s = problem.bdf::<LS>().unwrap();
+        let (checkpointer, soln, _stop_reason) = s
+            .solve_dense_with_checkpointing(times.as_slice(), None)
+            .unwrap();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdp.ncols()))
+            .unwrap();
+        test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
     }
 
     #[cfg(feature = "diffsl-llvm")]
@@ -1603,7 +1851,8 @@ mod test {
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let mut s = problem.bdf::<LS>().unwrap();
-        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdu.ncols()))
             .unwrap();
@@ -1620,7 +1869,8 @@ mod test {
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let mut s = problem.bdf::<LS>().unwrap();
-        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdu.ncols()))
             .unwrap();
@@ -1634,16 +1884,17 @@ mod test {
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let (problem, _soln) = exponential_decay_with_algebraic_adjoint_problem::<M>(true);
         let mut s = problem.bdf::<LS>().unwrap();
-        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdu.ncols()))
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 185
+        number_of_calls: 151
         number_of_jac_muls: 15
         number_of_matrix_evals: 5
-        number_of_jac_adj_muls: 158
+        number_of_jac_adj_muls: 96
         "###);
     }
 
@@ -1654,7 +1905,7 @@ mod test {
         let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
         let (problem, _soln) = exponential_decay_with_algebraic_adjoint_problem::<M>(false);
         let mut s = problem.bdf::<LS>().unwrap();
-        let (checkpointer, soln) = s
+        let (checkpointer, soln, _stop_reason) = s
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
@@ -1662,10 +1913,10 @@ mod test {
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 246
+        number_of_calls: 220
         number_of_jac_muls: 15
         number_of_matrix_evals: 5
-        number_of_jac_adj_muls: 459
+        number_of_jac_adj_muls: 414
         "###);
     }
 
@@ -1678,7 +1929,8 @@ mod test {
         let final_time = soln.solution_points.last().unwrap().t;
         let dgdu = setup_test_adjoint::<LS, _>(&mut problem, soln);
         let mut s = problem.bdf::<LS>().unwrap();
-        let (checkpointer, _y, _t) = s.solve_with_checkpointing(final_time, None).unwrap();
+        let (checkpointer, _y, _t, _stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpointer, None)
             .unwrap();
@@ -1692,13 +1944,13 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 18
-        number_of_steps: 35
+        number_of_steps: 38
         number_of_error_test_failures: 5
-        number_of_nonlinear_solver_iterations: 65
+        number_of_nonlinear_solver_iterations: 49
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 69
+        number_of_calls: 53
         number_of_jac_muls: 6
         number_of_matrix_evals: 2
         number_of_jac_adj_muls: 0
@@ -1718,15 +1970,15 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 21
-        number_of_steps: 43
-        number_of_error_test_failures: 7
-        number_of_nonlinear_solver_iterations: 143
+        number_of_linear_solver_setups: 23
+        number_of_steps: 47
+        number_of_error_test_failures: 8
+        number_of_nonlinear_solver_iterations: 119
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 64
-        number_of_jac_muls: 94
+        number_of_calls: 68
+        number_of_jac_muls: 66
         number_of_matrix_evals: 3
         number_of_jac_adj_muls: 0
         "###);
@@ -1751,10 +2003,10 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 21
-        number_of_steps: 43
-        number_of_error_test_failures: 7
-        number_of_nonlinear_solver_iterations: 143
+        number_of_linear_solver_setups: 23
+        number_of_steps: 47
+        number_of_error_test_failures: 8
+        number_of_nonlinear_solver_iterations: 119
         number_of_nonlinear_solver_fails: 0
         "###);
     }
@@ -1765,16 +2017,16 @@ mod test {
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 77
-        number_of_steps: 316
-        number_of_error_test_failures: 3
-        number_of_nonlinear_solver_iterations: 720
-        number_of_nonlinear_solver_fails: 19
+        number_of_linear_solver_setups: 79
+        number_of_steps: 328
+        number_of_error_test_failures: 7
+        number_of_nonlinear_solver_iterations: 648
+        number_of_nonlinear_solver_fails: 13
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 723
-        number_of_jac_muls: 60
-        number_of_matrix_evals: 20
+        number_of_calls: 651
+        number_of_jac_muls: 45
+        number_of_matrix_evals: 15
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -1813,9 +2065,10 @@ mod test {
         let (mut problem, soln) = robertson_ode::robertson_ode_diffsl_problem::<M, LlvmModule>();
         let times = soln.solution_points.iter().map(|p| p.t).collect::<Vec<_>>();
         let (dgdp, data) = setup_test_adjoint_sum_squares::<LS, _>(&mut problem, times.as_slice());
-        let (problem, _soln) = robertson_ode::robertson_ode_diffsl_problem::<M, LlvmModule>();
+        let (mut problem, _soln) = robertson_ode::robertson_ode_diffsl_problem::<M, LlvmModule>();
+        problem.ode_options.max_nonlinear_solver_failures = 1000;
         let mut s = problem.bdf::<LS>().unwrap();
-        let (checkpointer, soln) = s
+        let (checkpointer, soln, _stop_reason) = s
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
@@ -1826,20 +2079,21 @@ mod test {
 
     #[test]
     fn test_bdf_nalgebra_robertson_sens() {
-        let (problem, soln) = robertson_sens::<M>();
+        let (mut problem, soln) = robertson_sens::<M>();
+        problem.ode_options.max_nonlinear_solver_failures = 70;
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 156
-        number_of_steps: 394
+        number_of_linear_solver_setups: 92
+        number_of_steps: 319
         number_of_error_test_failures: 4
-        number_of_nonlinear_solver_iterations: 2860
-        number_of_nonlinear_solver_fails: 77
+        number_of_nonlinear_solver_iterations: 1941
+        number_of_nonlinear_solver_fails: 28
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 933
-        number_of_jac_muls: 2293
-        number_of_matrix_evals: 67
+        number_of_calls: 575
+        number_of_jac_muls: 1522
+        number_of_matrix_evals: 31
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -1850,16 +2104,16 @@ mod test {
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 77
-        number_of_steps: 316
-        number_of_error_test_failures: 3
-        number_of_nonlinear_solver_iterations: 720
-        number_of_nonlinear_solver_fails: 19
+        number_of_linear_solver_setups: 79
+        number_of_steps: 328
+        number_of_error_test_failures: 7
+        number_of_nonlinear_solver_iterations: 648
+        number_of_nonlinear_solver_fails: 13
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 723
-        number_of_jac_muls: 63
-        number_of_matrix_evals: 20
+        number_of_calls: 651
+        number_of_jac_muls: 48
+        number_of_matrix_evals: 15
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -1870,16 +2124,16 @@ mod test {
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 86
-        number_of_steps: 416
-        number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 909
-        number_of_nonlinear_solver_fails: 15
+        number_of_linear_solver_setups: 81
+        number_of_steps: 400
+        number_of_error_test_failures: 4
+        number_of_nonlinear_solver_iterations: 828
+        number_of_nonlinear_solver_fails: 4
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 911
-        number_of_jac_muls: 162
-        number_of_matrix_evals: 18
+        number_of_calls: 830
+        number_of_jac_muls: 81
+        number_of_matrix_evals: 9
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -1890,16 +2144,16 @@ mod test {
         let mut s = problem.bdf_sens::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, true);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 130
-        number_of_steps: 472
-        number_of_error_test_failures: 4
-        number_of_nonlinear_solver_iterations: 3393
-        number_of_nonlinear_solver_fails: 59
+        number_of_linear_solver_setups: 218
+        number_of_steps: 669
+        number_of_error_test_failures: 110
+        number_of_nonlinear_solver_iterations: 3785
+        number_of_nonlinear_solver_fails: 15
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 1066
-        number_of_jac_muls: 2609
-        number_of_matrix_evals: 52
+        number_of_calls: 1035
+        number_of_jac_muls: 2845
+        number_of_matrix_evals: 22
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -1910,16 +2164,16 @@ mod test {
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 27
-        number_of_steps: 161
-        number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 355
-        number_of_nonlinear_solver_fails: 3
+        number_of_linear_solver_setups: 28
+        number_of_steps: 156
+        number_of_error_test_failures: 3
+        number_of_nonlinear_solver_iterations: 283
+        number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 357
-        number_of_jac_muls: 50
-        number_of_matrix_evals: 5
+        number_of_calls: 285
+        number_of_jac_muls: 30
+        number_of_matrix_evals: 3
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -1930,16 +2184,16 @@ mod test {
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 27
-        number_of_steps: 161
-        number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 355
-        number_of_nonlinear_solver_fails: 3
+        number_of_linear_solver_setups: 28
+        number_of_steps: 156
+        number_of_error_test_failures: 3
+        number_of_nonlinear_solver_iterations: 283
+        number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 357
-        number_of_jac_muls: 15
-        number_of_matrix_evals: 5
+        number_of_calls: 285
+        number_of_jac_muls: 13
+        number_of_matrix_evals: 3
         number_of_jac_adj_muls: 0
         "###);
     }
@@ -1950,14 +2204,14 @@ mod test {
         let mut s = problem.bdf::<LS>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 14
-        number_of_steps: 66
-        number_of_error_test_failures: 1
-        number_of_nonlinear_solver_iterations: 127
+        number_of_linear_solver_setups: 17
+        number_of_steps: 64
+        number_of_error_test_failures: 3
+        number_of_nonlinear_solver_iterations: 92
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 129
+        number_of_calls: 94
         number_of_jac_muls: 20
         number_of_matrix_evals: 2
         number_of_jac_adj_muls: 0
@@ -1971,13 +2225,13 @@ mod test {
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
         number_of_linear_solver_setups: 21
-        number_of_steps: 167
+        number_of_steps: 168
         number_of_error_test_failures: 0
-        number_of_nonlinear_solver_iterations: 326
+        number_of_nonlinear_solver_iterations: 180
         number_of_nonlinear_solver_fails: 0
         "###);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 329
+        number_of_calls: 183
         number_of_jac_muls: 128
         number_of_matrix_evals: 4
         number_of_jac_adj_muls: 0
@@ -2001,20 +2255,19 @@ mod test {
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
         test_ode_solver(&mut s, soln, None, false, false);
         insta::assert_yaml_snapshot!(s.get_statistics(), @r###"
-        number_of_linear_solver_setups: 44
-        number_of_steps: 154
+        number_of_linear_solver_setups: 41
+        number_of_steps: 167
         number_of_error_test_failures: 2
-        number_of_nonlinear_solver_iterations: 339
-        number_of_nonlinear_solver_fails: 16
+        number_of_nonlinear_solver_iterations: 451
+        number_of_nonlinear_solver_fails: 13
         "###);
     }
 
     #[cfg(feature = "diffsl-llvm")]
     #[test]
     fn test_bdf_faer_sparse_foodweb_diffsl() {
-        use diffsl::LlvmModule;
-
         use crate::ode_equations::test_models::foodweb;
+        use diffsl::LlvmModule;
         let (problem, soln) =
             foodweb::foodweb_diffsl_problem::<FaerSparseMat<f64>, LlvmModule, 10>();
         let mut s = problem.bdf::<FaerSparseLU<f64>>().unwrap();
@@ -2030,10 +2283,23 @@ mod test {
 
     #[test]
     fn test_root_finder_bdf() {
-        let (problem, soln) = exponential_decay_problem_with_root::<M>(false);
+        let (problem, soln) = exponential_decay_problem_with_root::<M>(false, true);
         let mut s = problem.bdf::<LS>().unwrap();
         let y = test_ode_solver(&mut s, soln, None, false, false);
-        assert!(abs(y[0] - 0.6) < 1e-6, "y[0] = {}", y[0]);
+
+        let y0 = problem.eqn.init().call(0.0);
+        let mut p = problem.context().vector_zeros(2);
+        problem.eqn.get_params(&mut p);
+        let k = p.get_index(0);
+        let target = 0.6_f64;
+        let t_root = -((target / y0.get_index(0)).ln()) / k;
+        let expected = y0.clone() * scale(f64::exp(-k * t_root));
+        y.assert_eq_norm(&expected, &problem.atol, problem.rtol, 15.0);
+
+        let g = s.interpolate_out(t_root).unwrap();
+        let integral = (1.0 - f64::exp(-k * t_root)) / k;
+        let expected_g = y0 * scale(integral);
+        g.assert_eq_norm(&expected_g, &problem.atol, problem.rtol, 15.0);
     }
 
     #[test]
@@ -2049,7 +2315,7 @@ mod test {
         for p in ps {
             problem.eqn_mut().set_params(&p);
             let mut s = problem.bdf::<LS>().unwrap();
-            let (ys, _ts) = s.solve(10.0).unwrap();
+            let (ys, _ts, _stop_reason) = s.solve(10.0).unwrap();
             // check that the new solution is different from the old one
             if let Some(old_soln) = &mut old_soln {
                 let new_soln = ys.column(ys.ncols() - 1).into_owned();
@@ -2074,16 +2340,152 @@ mod test {
         );
 
         let expected_x = [
-            0.003751514915514589,
-            0.00750117409999241,
-            0.015370589755655079,
+            0.003978879413779122,
+            0.007955671343150521,
+            0.015904102550507716,
         ];
-        let expected_v = [11.202428570923361, 11.19914432101355, 11.192247396202946];
+        let expected_v = [11.202229406994425, 11.198746111635534, 11.191779520917754];
         let expected_t = [1.4281779078441663, 1.4285126937676944, 1.4292157442071036];
         for (i, ((x, v), t)) in x.iter().zip(v.iter()).zip(t.iter()).enumerate() {
-            assert!((x - expected_x[i]).abs() < 1e-4);
-            assert!((v - expected_v[i]).abs() < 1e-4);
-            assert!((t - expected_t[i]).abs() < 1e-4);
+            assert!(
+                (x - expected_x[i]).abs() < 1e-4,
+                "x: {} expected: {}",
+                x,
+                expected_x[i]
+            );
+            assert!(
+                (v - expected_v[i]).abs() < 1e-4,
+                "v: {} expected: {}",
+                v,
+                expected_v[i]
+            );
+            assert!(
+                (t - expected_t[i]).abs() < 1e-4,
+                "t: {} expected: {}",
+                t,
+                expected_t[i]
+            );
         }
+    }
+
+    /// Test that `step()` includes the root index in `RootFound(t, index)`.
+    ///
+    /// Uses a two-output root function (no Reset); root 0 fires at t ≈ 5.108
+    /// (exponential decay y[0] = 0.6, k=0.1) and the test verifies the returned index is 0.
+    #[test]
+    fn test_root_found_index_bdf() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_two_roots_problem;
+        use crate::ode_solver::tests::test_root_found_index;
+        let (problem, soln) = exponential_decay_with_two_roots_problem::<M>();
+        let solver = problem.bdf::<LS>().unwrap();
+        test_root_found_index(solver, &soln, 0, 1e-4);
+    }
+
+    /// Test that `solve()` halts on the first root, even when a reset function is configured.
+    #[test]
+    fn test_solve_with_reset_bdf() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
+        use crate::ode_solver::tests::test_solve_with_reset;
+        let (problem, soln) = exponential_decay_with_reset_problem::<M>();
+        let solver = problem.bdf::<LS>().unwrap();
+        test_solve_with_reset(solver, &soln);
+    }
+
+    /// Test that `solve_dense()` halts on the first root, even when a reset function is configured.
+    #[test]
+    fn test_solve_dense_with_reset_bdf() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
+        use crate::ode_solver::tests::test_solve_dense_with_reset;
+        let (problem, soln) = exponential_decay_with_reset_problem::<M>();
+        let solver = problem.bdf::<LS>().unwrap();
+        test_solve_dense_with_reset(solver, &soln);
+    }
+
+    /// Test that `solve_dense_sensitivities()` halts on the first root for BDF.
+    #[test]
+    fn test_solve_dense_sensitivities_with_reset_bdf() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem_sens;
+        use crate::ode_solver::tests::test_solve_dense_sensitivities_with_reset;
+        let (problem, soln) = exponential_decay_with_reset_problem_sens::<M>();
+        let solver = problem.bdf_sens::<LS>().unwrap();
+        test_solve_dense_sensitivities_with_reset(solver, &soln);
+    }
+
+    #[test]
+    fn test_solve_adjoint_with_single_reset_root_bdf() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_single_reset_root_problem_adjoint;
+        use crate::ode_solver::tests::test_solve_adjoint_with_single_reset_root;
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(true);
+        test_solve_adjoint_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.bdf_solver(state),
+                None => problem.bdf::<LS>(),
+            },
+            &soln,
+            |adjoint_eqn| problem.bdf_state_adjoint::<LS, _>(adjoint_eqn),
+            |state, adjoint_eqn| problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn),
+        );
+    }
+
+    #[test]
+    fn test_solve_adjoint_sum_squares_with_single_reset_root_bdf() {
+        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_single_reset_root_problem_adjoint;
+        use crate::ode_solver::tests::{
+            setup_test_adjoint_sum_squares_with_single_reset_root,
+            single_reset_root_discrete_times,
+            test_solve_adjoint_sum_squares_with_single_reset_root,
+        };
+        let (mut problem, soln) =
+            exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        let times = single_reset_root_discrete_times(soln.solution_points[0].t);
+        let (dgdp, data) = setup_test_adjoint_sum_squares_with_single_reset_root::<LS, _>(
+            &mut problem,
+            times.as_slice(),
+        );
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        test_solve_adjoint_sum_squares_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.bdf_solver(state),
+                None => problem.bdf::<LS>(),
+            },
+            &soln,
+            |adjoint_eqn| problem.bdf_state_adjoint::<LS, _>(adjoint_eqn),
+            |state, adjoint_eqn| problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn),
+            dgdp,
+            data,
+            times.as_slice(),
+        );
+    }
+
+    #[test]
+    fn bdf_clone_resets_statistics_and_preserves_operator_presence() {
+        let (problem, _soln) = exponential_decay_problem::<M>(false);
+        let mut solver = problem.bdf::<LS>().unwrap();
+        solver.step().unwrap();
+        assert!(solver.get_statistics().number_of_steps > 0);
+        assert!(solver.op.is_some());
+        assert!(solver.s_op.is_none());
+
+        let cloned = solver.clone();
+        assert!(cloned.op.is_some());
+        assert!(cloned.s_op.is_none());
+        assert_eq!(cloned.get_statistics().number_of_steps, 0);
+        assert_eq!(cloned.state().t, solver.state().t);
+    }
+
+    #[test]
+    fn bdf_clone_preserves_sensitivity_operator_and_resets_statistics() {
+        let (problem, _soln) = exponential_decay_problem_sens::<M>(false);
+        let mut solver = problem.bdf_sens::<LS>().unwrap();
+        solver.step().unwrap();
+        assert!(solver.get_statistics().number_of_steps > 0);
+        assert!(solver.op.is_some());
+        assert!(solver.s_op.is_some());
+
+        let cloned = solver.clone();
+        assert!(cloned.op.is_some());
+        assert!(cloned.s_op.is_some());
+        assert_eq!(cloned.get_statistics().number_of_steps, 0);
+        assert_eq!(cloned.state().s.len(), solver.state().s.len());
     }
 }

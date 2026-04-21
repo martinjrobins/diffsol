@@ -5,6 +5,9 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+
+permissions:
+  contents: read
       
 env:
   CARGO_TERM_COLOR: always
@@ -123,10 +126,16 @@ jobs:
       run: |
         brew install llvm@${{ env.LLVM_VERSION }}
         echo /usr/local/opt/llvm@${{ env.LLVM_VERSION }}/bin >> $GITHUB_PATH
-    - name: Set features variable and install dependencies (Ubuntu)
-      if: matrix.os == 'ubuntu-latest' && matrix.book == false
+    - name: Set features variable and install dependencies (Ubuntu - not coverage)
+      if: matrix.os == 'ubuntu-latest' && matrix.book == false && matrix.coverage == false
       run: |
-        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse" >> $GITHUB_ENV
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse --features diffsl-external-f64 --features diffsl-external-dynamic" >> $GITHUB_ENV
+        sudo apt-get update
+        sudo apt-get install -y libsuitesparse-dev
+    - name: Set features variable and install dependencies (Ubuntu - coverage)
+      if: matrix.os == 'ubuntu-latest' && matrix.book == false && matrix.coverage == true
+      run: |
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse --features diffsl-external-dynamic" >> $GITHUB_ENV
         sudo apt-get update
         sudo apt-get install -y libsuitesparse-dev
     - name: Install Trunk
@@ -143,11 +152,21 @@ jobs:
     - name: Set features variable and install dependencies (macOS)
       if: matrix.os == 'macos-15-intel' || matrix.os == 'macos-latest'
       run: |
-        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift" >> $GITHUB_ENV
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features diffsl-external-dynamic" >> $GITHUB_ENV
     - name: Set features variable and install dependencies (Windows)
       if: matrix.os == 'windows-latest'
       run: |
-        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-cranelift" >> $GITHUB_ENV
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-cranelift --features diffsl-external-dynamic" >> $GITHUB_ENV
+    - name: Free Disk Space (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      uses: jlumbroso/free-disk-space@main
+      with:
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: false
+        docker-images: true
+        swap-storage: true
     - name: Run tests - default features
       if: matrix.tests == true
       run: cargo test --verbose
@@ -173,7 +192,7 @@ jobs:
         trunk build --release --public-url /diffsol/examples/population-dynamics-wasm-yew/ --dist ${{ github.workspace }}/book/book/examples/population-dynamics-wasm-yew
     - name: Generate coverage report
       if: matrix.coverage == true
-      run: cargo tarpaulin --out Xml --packages diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
+      run: cargo tarpaulin --engine llvm --out Xml --packages diffsol --packages diffsol-c ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
     - name: Upload coverage
       uses: codecov/codecov-action@v5
       if: matrix.coverage == true
@@ -185,6 +204,54 @@ jobs:
       if: matrix.book == true
       with:
         path: "book/book/"
+        
+  gpu-tests:
+    name: "CUDA Tests - Ubuntu - stable"
+    runs-on:
+      - codebuild-diffsol-${{ github.run_id }}-${{ github.run_attempt }}
+    continue-on-error: true
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/cache@v4
+      with:
+        path: |
+          ${{ env.CARGO_HOME }}
+          target
+        key: diffsol-github
+    - name: install rust
+      uses: actions-rust-lang/setup-rust-toolchain@v1
+      with:
+        components: clippy
+    - name: Rust version
+      run: rustc -Vv
+    - name: Install LLVM and Clang
+      uses: KyleMayes/install-llvm-action@v2
+      with:
+        version: ${{ env.LLVM_VERSION }}
+    - name: Check GPU driver version
+      run: nvidia-smi
+    - uses: Jimver/cuda-toolkit@master
+      with:
+        cuda: "11.8.0"
+    - name: Set features variable and install dependencies
+      run: |
+        echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-llvm17 --features diffsl-cranelift --features suitesparse --features cuda" >> $GITHUB_ENV
+        sudo apt-get update
+        sudo apt-get install -y libsuitesparse-dev cmake
+    - name: Run tests - all features
+      run: cargo test --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }} --workspace
+    - name: Clippy - all features
+      run: cargo clippy --verbose ${{ env.ADDITIONAL_FEATURES_FLAGS || ''}} --workspace
+    - name: Install tarpaulin
+      run: cargo install cargo-tarpaulin
+    - name: Generate coverage report
+      run: cargo tarpaulin --engine llvm --out Xml --packages diffsol ${{ env.ADDITIONAL_FEATURES_FLAGS || '' }}
+    - name: Upload coverage
+      uses: codecov/codecov-action@v5
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: cobertura.xml
+        flags: gpu
 
   deploy:
     if: ${{ github.ref == 'refs/heads/main' }}

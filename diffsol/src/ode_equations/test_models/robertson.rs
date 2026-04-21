@@ -14,10 +14,7 @@ pub fn robertson_diffsl_problem<
     OdeSolverSolution<M::V>,
 ) {
     let code = "
-        in = [k1, k2, k3]
-        k1 { 0.04 }
-        k2 { 10000 }
-        k3 { 30000000 }
+        in_i { k1 = 0.04, k2 = 10000, k3 = 30000000 }
         u_i {
             x = 1,
             y = 0,

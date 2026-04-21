@@ -42,7 +42,7 @@ fn main() {
         )
         .unwrap();
     let mut solver = problem.bdf::<LS>().unwrap();
-    let (ys, ts) = solver.solve(1.0).unwrap();
+    let (ys, ts, _stop_reason) = solver.solve(1.0).unwrap();
 
     let ir: Vec<_> = ys.inner().row(0).into_iter().copied().collect();
     let t: Vec<_> = ts.into_iter().collect();

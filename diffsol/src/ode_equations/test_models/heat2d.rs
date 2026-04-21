@@ -10,7 +10,6 @@ use crate::{
     ode_solver::problem::OdeSolverSolution, scalar::Scalar, Matrix, MatrixHost, OdeBuilder,
     OdeEquationsImplicit, OdeSolverProblem, Vector,
 };
-use nalgebra::ComplexField;
 use num_traits::{FromPrimitive, One, Zero};
 
 #[cfg(feature = "diffsl")]
@@ -58,7 +57,6 @@ pub fn heat2d_diffsl_problem<
 
     let code = format!(
         "
-        in = []
         D_ij {{
 {}
         }}
@@ -201,7 +199,8 @@ fn heat2d_mass<M: MatrixHost, const MGRID: usize>(
 fn heat2d_out<M: MatrixHost, const MGRID: usize>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
     let dx = M::T::one() / (M::T::from_f64(MGRID as f64).unwrap() - M::T::one());
     let norm = x.norm(2);
-    y[0] = (norm * dx).powi(2);
+    let scaled_norm = norm * dx;
+    y[0] = scaled_norm * scaled_norm;
 }
 
 fn heat2d_out_jac_mul<M: Matrix, const MGRID: usize>(
@@ -225,14 +224,19 @@ fn _pde_solution<T: Scalar>(x: T, y: T, t: T, max_terms: usize) -> T {
         let nt = T::from_f64(n as f64).unwrap();
         for m in 1..=max_terms {
             let mt = T::from_f64(m as f64).unwrap();
-            let ii = (-pi * mt * (pi * mt).sin() - two * (pi * mt).cos() + two)
-                / (pi.powi(3) * mt.powi(3));
-            let jj = (-pi * nt * (pi * nt).sin() - two * (pi * nt).cos() + two)
-                / (pi.powi(3) * nt.powi(3));
+            let pi_mt = pi * mt;
+            let pi_nt = pi * nt;
+            let pi_cubed = pi * pi * pi;
+            let mt_cubed = mt * mt * mt;
+            let nt_cubed = nt * nt * nt;
+            let ii = (-pi * mt * pi_mt.sin() - two * pi_mt.cos() + two) / (pi_cubed * mt_cubed);
+            let jj = (-pi * nt * pi_nt.sin() - two * pi_nt.cos() + two) / (pi_cubed * nt_cubed);
             let coefficient = four * sixteen * ii * jj;
 
-            let sin_term = (nt * pi * x).sin() * (mt * pi * y).sin();
-            let exp_term = ((-(nt * pi).powi(2) - (mt * pi).powi(2)) * t).exp();
+            let sin_term = (pi_nt * x).sin() * (pi_mt * y).sin();
+            let nt_pi_sq = pi_nt * pi_nt;
+            let mt_pi_sq = pi_mt * pi_mt;
+            let exp_term = ((-nt_pi_sq - mt_pi_sq) * t).exp();
 
             u += coefficient * sin_term * exp_term;
         }

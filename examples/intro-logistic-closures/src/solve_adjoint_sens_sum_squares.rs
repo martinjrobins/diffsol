@@ -11,10 +11,10 @@ where
     Eqn: OdeEquationsImplicitAdjoint<T = T, V = V, C = C, M = M> + 'a,
 {
     let t_data = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
-    let y_data = solver.solve_dense(t_data.as_slice()).unwrap();
+    let (y_data, _stop_reason) = solver.solve_dense(t_data.as_slice()).unwrap();
     let problem = solver.problem();
 
-    let (checkpointing, soln) = solver
+    let (checkpointing, soln, _stop_reason) = solver
         .solve_dense_with_checkpointing(t_data.as_slice(), None)
         .unwrap();
 
@@ -28,7 +28,7 @@ where
         .bdf_solver_adjoint::<LS, _>(checkpointing, Some(1))
         .unwrap();
     let final_state = adjoint_solver
-        .solve_adjoint_backwards_pass(t_data.as_slice(), &[&g_m])
+        .solve_adjoint_backwards_pass(None, t_data.as_slice(), &[&g_m])
         .unwrap();
     for (i, dgdp_i) in final_state.as_ref().sg.iter().enumerate() {
         println!("sens wrt parameter {i}: {dgdp_i:?}");

@@ -5,10 +5,12 @@ use crate::{
     scale, AugmentedOdeEquations, DefaultDenseMatrix, DenseMatrix, OdeEquations, OdeSolverProblem,
     OdeSolverState, Op, StateRef, StateRefMut, Vector, VectorViewMut,
 };
+use num_traits::Zero;
 use std::ops::MulAssign;
 
 use super::state::StateCommon;
 
+/// State container for the BDF integrator. For the common state API use `as_ref` and `as_mut` methods.
 #[derive(Clone)]
 pub struct BdfState<V, M = <V as DefaultDenseMatrix>::M>
 where
@@ -39,9 +41,35 @@ where
 impl<V, M> BdfState<V, M>
 where
     V: Vector + DefaultDenseMatrix,
-    M: DenseMatrix<T = V::T, V = V>,
+    M: DenseMatrix<T = V::T, V = V, C = V::C>,
 {
     pub(crate) const MAX_ORDER: IndexType = 5;
+
+    pub(crate) fn new_empty(ctx: V::C) -> Self {
+        let default_v = V::zeros(0, ctx.clone());
+        let default_m = M::zeros(0, 0, ctx.clone());
+        Self {
+            order: 1,
+            diff: default_m.clone(),
+            sdiff: Vec::new(),
+            gdiff: default_m.clone(),
+            sgdiff: Vec::new(),
+            y: default_v.clone(),
+            dy: default_v.clone(),
+            g: default_v.clone(),
+            dg: default_v.clone(),
+            s: Vec::new(),
+            ds: Vec::new(),
+            sg: Vec::new(),
+            dsg: Vec::new(),
+            t: V::T::zero(),
+            h: V::T::zero(),
+            diff_initialised: false,
+            sdiff_initialised: false,
+            gdiff_initialised: false,
+            sgdiff_initialised: false,
+        }
+    }
 
     pub fn initialise_diff_to_first_order(&mut self) {
         self.order = 1usize;
@@ -98,12 +126,8 @@ where
         if self.diff.nrows() != nstates {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
-        let expected_gdiff_len = if let Some(out) = ode_problem.eqn.out() {
-            if ode_problem.integrate_out {
-                out.nout()
-            } else {
-                0
-            }
+        let expected_gdiff_len = if ode_problem.integrate_out {
+            ode_problem.eqn.nout()
         } else {
             0
         };
@@ -129,12 +153,8 @@ where
         if self.sdiff.len() != naug || self.sdiff[0].nrows() != nstates {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
-        let (sgdiff_len, sgdiff_size) = if let Some(_out) = augmented_eqn.out() {
-            if let Some(out) = augmented_eqn.out() {
-                (naug, out.nout())
-            } else {
-                (0, 0)
-            }
+        let (sgdiff_len, sgdiff_size) = if let Some(out) = augmented_eqn.out() {
+            (naug, out.nout())
         } else {
             (0, 0)
         };
@@ -229,6 +249,10 @@ where
     }
 
     fn as_mut(&mut self) -> StateRefMut<'_, V> {
+        self.diff_initialised = false;
+        self.sdiff_initialised = false;
+        self.gdiff_initialised = false;
+        self.sgdiff_initialised = false;
         StateRefMut {
             y: &mut self.y,
             dy: &mut self.dy,
