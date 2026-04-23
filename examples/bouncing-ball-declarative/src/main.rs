@@ -7,28 +7,25 @@ type CG = CraneliftJitModule;
 type LS = diffsol::NalgebraLU<f64>;
 
 fn main() {
-    let e = 0.8;
-    let x_eps = 1e-12;
-    let model = format!(
-        r#"
-        in_i {{ restitution = {e}, xeps = {x_eps} }}
-        u_i {{
-            position = 10.0,
+    let model = "
+        restitution { 0.8 } xeps { 1e-12 }
+        g { 9.81 } h { 10.0 }
+        u_i {
+            position = h,
             velocity = 0,
-        }}
-        F_i {{
+        }
+        F_i {
             velocity,
-            -9.81,
-        }}
-        stop_i {{
+            -g,
+        }
+        stop_i {
             position,
-        }}
-        reset_i {{
+        }
+        reset_i {
             xeps,
             -restitution * velocity,
-        }}
-    "#
-    );
+        }
+    ";
     let problem = OdeBuilder::<M>::new()
         .build_from_diffsl::<CG>(&model)
         .unwrap();
