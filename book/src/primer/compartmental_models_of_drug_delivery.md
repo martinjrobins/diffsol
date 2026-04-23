@@ -42,7 +42,7 @@ This model describes an *intravenous bolus* dosing protocol, with a linear clear
 - \\(CL\\) [mL/h], the clearance/elimination rate from the central compartment
 - \\(Q_{p1}\\) [mL/h], the transition rate between central compartment and peripheral compartment 1
 
-We will solve this system of ODEs using the Diffsol crate. Rather than trying to write down the dose function as a mathematical function, we will neglect the dose function from the equations and instead using Diffsol's API to specify the dose at specific time points.
+We will solve this system of ODEs using the Diffsol crate. Rather than trying to write down the dose function as a smooth mathematical function, we will treat each bolus dose as a discrete event. We first do this procedurally by stopping the solver at each dose time in Rust, then rewrite the same model declaratively using DiffSL `stop` and `reset` tensors.
 
 First lets write down the equations in the standard form of a first order ODE system:
 
@@ -74,10 +74,24 @@ For the dose function, we will specify a dose of 1000 ng at regular intervals of
 V_c = 1000 \text{ mL}, \quad V_{p1} = 1000 \text{ mL}, \quad CL = 100 \text{ mL/h}, \quad Q_{p1} = 50 \text{ mL/h}
 \\]
 
-Let's now solve this system of ODEs using Diffsol. To implement the discrete dose events, we set a stop time for the simulation at each dose event using the [OdeSolverMethod::set_stop_time](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#tymethod.set_stop_time) method. During timestepping we can check the return value of the [OdeSolverMethod::step](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#tymethod.step) method to see if the solver has reached the stop time. If it has, we can apply the dose and continue the simulation.
+## Procedural approach
+
+To implement the discrete dose events procedurally, we set a stop time for the simulation at each dose event using the [OdeSolverMethod::set_stop_time](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#tymethod.set_stop_time) method. During time-stepping we can check the return value of the [OdeSolverMethod::step](https://docs.rs/diffsol/latest/diffsol/ode_solver/method/trait.OdeSolverMethod.html#tymethod.step) method to see if the solver has reached the stop time. If it has, we apply the dose directly to the state and continue the simulation.
 
 ```rust,ignore
 {{#include ../../../examples/compartmental-models-drug-delivery/src/main.rs}}
 ```
 
 {{#include images/drug-delivery.html}}
+
+## Declarative approach
+
+The same dosing schedule can also be encoded directly in DiffSL. Here the initial condition includes the first dose at \\(t=0\\), the `stop` tensor contains the later dosing times \\(t = 6\\), \\(12\\), and \\(18\\) hours, and the `reset` tensor adds the bolus amount to the central compartment whenever any of those stop conditions fires.
+
+As with the bouncing-ball example, the current solver still reports `RootFound` when the event occurs. The example therefore resumes the integration explicitly after moving the solver to the event time and applying the declarative reset operator defined in the model.
+
+```rust,ignore
+{{#include ../../../examples/compartmental-models-drug-delivery-declarative/src/main.rs}}
+```
+
+{{#include images/drug-delivery-declarative.html}}
