@@ -333,6 +333,7 @@ where
                     &mut soln.tmp_nstates,
                     &mut self,
                     start_col,
+                    false,
                 )?;
                 soln.stop_reason = Some(stop_reason);
                 soln.mode = SolutionMode::Tevals(col);
@@ -350,6 +351,8 @@ where
     ///
     /// If a root function is provided, the solver will stop if any of the root function elements change sign.
     /// The internal state of the solver is set to the time that the zero-crossing occured.
+    /// If both a root function and a reset operator are configured, roots are handled internally by
+    /// applying the reset and continuing the integration until `t_eval[t_eval.len()-1]`.
     ///
     /// # Arguments
     /// - `t_eval`: A slice of times at which to evaluate the solution. Times should be in increasing order.
@@ -357,13 +360,16 @@ where
     /// # Returns
     /// A tuple of `(solution_matrix, stop_reason)` where:
     /// - `solution_matrix` has one column per evaluation time (in the same order as `t_eval`) and one row per state variable,
-    ///   plus one final column at the root time if a root fires before `t_eval` is exhausted.
+    ///   plus one final column at the root time if a root fires before `t_eval` is exhausted and no reset operator is configured.
     /// - `stop_reason` indicates whether the solve reached `t_eval[t_eval.len()-1]` or stopped on a root.
     ///
     /// # Post-condition
     /// In the case that no roots are found that stop the solve early, the internal state is at time `t_eval[t_eval.len()-1]`.
-    /// If a root is found, the solver stops early. The internal state is moved to the root time,
-    /// and the last column corresponds to the root time (which may not be in `t_eval`).
+    /// If a root is found and no reset operator is configured, the solver stops early. The internal
+    /// state is moved to the root time, and the last column corresponds to the root time (which may
+    /// not be in `t_eval`).
+    /// If a reset operator is configured, any `t_eval` values exactly at the root time receive the
+    /// reset state and the solve continues through the remaining evaluation times.
     #[allow(clippy::type_complexity)]
     fn solve_dense(
         &mut self,
@@ -380,8 +386,15 @@ where
         Self: Sized,
     {
         let (mut ret, mut tmp_nout, mut tmp_nstates) = dense_allocate_return(self, t_eval)?;
-        let (stop_reason, col) =
-            solve_dense(&mut ret, t_eval, &mut tmp_nout, &mut tmp_nstates, self, 0)?;
+        let (stop_reason, col) = solve_dense(
+            &mut ret,
+            t_eval,
+            &mut tmp_nout,
+            &mut tmp_nstates,
+            self,
+            0,
+            true,
+        )?;
 
         // if we stopped on a root before exhausting t_eval, we need to write_out the solution at the root time to the last column of ret
         if let OdeSolverStopReason::RootFound(_, _) = stop_reason {
@@ -633,34 +646,58 @@ fn solve_dense<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     tmp_nstates: &mut Eqn::V,
     s: &mut S,
     start_col: usize,
+    continue_after_reset: bool,
 ) -> Result<(OdeSolverStopReason<Eqn::T>, usize), DiffsolError>
 where
     Eqn::V: DefaultDenseMatrix,
 {
     s.set_stop_time(t_eval[t_eval.len() - 1])?;
+    let has_reset = continue_after_reset && s.problem().eqn.reset().is_some();
     let mut stop_reason: OdeSolverStopReason<Eqn::T>;
     let mut col = start_col;
     loop {
         stop_reason = s.step()?;
-        let t_current = if let OdeSolverStopReason::RootFound(t, _idx) = stop_reason {
-            t
-        } else {
-            s.state().t
-        };
-        // Write any t_eval points that fall at or before t_current
-        while col < t_eval.len() && t_eval[col] <= t_current {
-            dense_write_out(s, ret, t_eval[col], col, tmp_nout, tmp_nstates)?;
-            col += 1;
-        }
         match stop_reason {
-            OdeSolverStopReason::InternalTimestep => {}
+            OdeSolverStopReason::InternalTimestep => {
+                while col < t_eval.len() && t_eval[col] <= s.state().t {
+                    dense_write_out(s, ret, t_eval[col], col, tmp_nout, tmp_nstates)?;
+                    col += 1;
+                }
+            }
             OdeSolverStopReason::TstopReached => {
+                while col < t_eval.len() && t_eval[col] <= s.state().t {
+                    dense_write_out(s, ret, t_eval[col], col, tmp_nout, tmp_nstates)?;
+                    col += 1;
+                }
                 assert!(col == t_eval.len(), "Solver reached stop time before consuming all t_eval points, this should not happen");
                 break;
             }
-            OdeSolverStopReason::RootFound(t_root, _root_idx) => {
+            OdeSolverStopReason::RootFound(t_root, root_idx) => {
+                while col < t_eval.len() && t_eval[col] < t_root {
+                    dense_write_out(s, ret, t_eval[col], col, tmp_nout, tmp_nstates)?;
+                    col += 1;
+                }
                 s.state_mut_back(t_root)?;
-                break;
+                if has_reset {
+                    s.apply_reset()?;
+                    while col < t_eval.len() && t_eval[col] == s.state().t {
+                        dense_write_out_current_state(s, ret, col, tmp_nout);
+                        col += 1;
+                    }
+                    if s.state().t < t_eval[t_eval.len() - 1] {
+                        s.set_stop_time(t_eval[t_eval.len() - 1])?;
+                    } else {
+                        stop_reason = OdeSolverStopReason::TstopReached;
+                        break;
+                    }
+                } else {
+                    while col < t_eval.len() && t_eval[col] <= s.state().t {
+                        dense_write_out(s, ret, t_eval[col], col, tmp_nout, tmp_nstates)?;
+                        col += 1;
+                    }
+                    stop_reason = OdeSolverStopReason::RootFound(t_root, root_idx);
+                    break;
+                }
             }
         }
     }
@@ -695,6 +732,36 @@ where
         }
     }
     Ok(())
+}
+
+fn dense_write_out_current_state<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
+    s: &S,
+    y_out: &mut <Eqn::V as DefaultDenseMatrix>::M,
+    i: usize,
+    tmp_nout: &mut Eqn::V,
+) where
+    Eqn::V: DefaultDenseMatrix,
+{
+    let t = s.state().t;
+    let y = s.state().y;
+    let mut y_out = y_out.column_mut(i);
+    match s.problem().eqn.out() {
+        Some(out) => {
+            if s.problem().integrate_out {
+                y_out.copy_from(s.state().g);
+            } else {
+                out.call_inplace(y, t, tmp_nout);
+                y_out.copy_from(tmp_nout);
+            }
+        }
+        None => {
+            if s.problem().integrate_out {
+                y_out.copy_from(s.state().g);
+            } else {
+                y_out.copy_from(y);
+            }
+        }
+    }
 }
 
 fn solve<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
