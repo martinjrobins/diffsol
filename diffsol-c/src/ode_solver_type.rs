@@ -72,13 +72,9 @@ where
         (Some(reset_fn), Some(root_fn)) => {
             let rhs = eqn.rhs();
             let has_mass = eqn.mass().is_some();
-            state.as_mut().state_mut_op_with_sens_and_reset(
-                &rhs,
-                has_mass,
-                &reset_fn,
-                &root_fn,
-                root_idx,
-            )?;
+            state
+                .as_mut()
+                .state_mut_op_with_sens_and_reset(&rhs, has_mass, &reset_fn, &root_fn, root_idx)?;
             Ok(())
         }
     }
