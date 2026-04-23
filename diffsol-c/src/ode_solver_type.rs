@@ -49,7 +49,9 @@ where
 {
     let eqn = &problem.eqn;
     if let Some(reset_fn) = eqn.reset() {
-        state.state_mut_op(eqn, &reset_fn)?;
+        let rhs = eqn.rhs();
+        let has_mass = eqn.mass().is_some();
+        state.as_mut().state_mut_op(&rhs, has_mass, &reset_fn)?;
     }
     Ok(())
 }
@@ -68,7 +70,15 @@ where
         (None, _) => Ok(()),
         (Some(_), None) => Err(ode_solver_error!(ResetRequiresRootOperator)),
         (Some(reset_fn), Some(root_fn)) => {
-            state.state_mut_op_with_sens_and_reset(eqn, &reset_fn, &root_fn, root_idx)?;
+            let rhs = eqn.rhs();
+            let has_mass = eqn.mass().is_some();
+            state.as_mut().state_mut_op_with_sens_and_reset(
+                &rhs,
+                has_mass,
+                &reset_fn,
+                &root_fn,
+                root_idx,
+            )?;
             Ok(())
         }
     }
