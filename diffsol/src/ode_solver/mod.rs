@@ -44,7 +44,7 @@ mod tests {
         ConstantOp, ConstantOpSens, DefaultDenseMatrix, DefaultSolver, LinearSolver,
         NonLinearOpSens, Op, Vector,
     };
-    use num_traits::{FromPrimitive, One, Signed, Zero};
+    use num_traits::{FromPrimitive, One, Signed, ToPrimitive, Zero};
 
     pub fn test_ode_solver<'a, M, Eqn, Method>(
         method: &mut Method,
@@ -1110,11 +1110,8 @@ mod tests {
         }
     }
 
-    /// Test that `solve()` can be continued manually after a root by applying
-    /// `reset()` and calling `solve()` again.
-    ///
-    /// `soln` must contain one solution point at `t_stop` (the state when the
-    /// second root fires after the manual reset).
+    /// Test that `solve()` automatically applies resets at roots and continues
+    /// integrating until `final_time`.
     pub fn test_solve_with_reset<'a, Eqn, Method>(
         mut solver: Method,
         soln: &OdeSolverSolution<Eqn::V>,
@@ -1124,62 +1121,69 @@ mod tests {
         Method: OdeSolverMethod<'a, Eqn>,
     {
         let final_time = Eqn::T::from_f64(100.0).unwrap();
-        let (_ys_first, ts_first, stop_reason_first) = solver.solve(final_time).unwrap();
-        assert!(matches!(
-            stop_reason_first,
-            OdeSolverStopReason::RootFound(_, _)
-        ));
-        let t_first_root = *ts_first.last().unwrap();
+        let (ys, ts, stop_reason) = solver.solve(final_time).unwrap();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
+        let t_last = *ts.last().unwrap();
+        let time_tol = soln.rtol * final_time.abs() + soln.atol.get_index(0);
         assert!(
-            t_first_root < final_time,
-            "expected first solve() call to stop at a root before final_time"
+            (t_last - final_time).abs() < Eqn::T::from_f64(30.0).unwrap() * time_tol,
+            "expected solve() to reach final_time ≈ {:?}, got {:?}",
+            final_time,
+            t_last,
         );
-
-        // Manually apply the reset on the solver state and continue to the next root.
-        let mut state = solver.state_clone();
-        {
-            let problem = solver.problem();
-            if let Some(reset_fn) = problem.eqn.reset() {
-                let rhs = problem.eqn.rhs();
-                let has_mass = problem.eqn.mass().is_some();
-                state
-                    .as_mut()
-                    .state_mut_op(&rhs, has_mass, &reset_fn)
-                    .unwrap();
-            }
-        }
-        solver.set_state(state);
-        let (ys_second, ts_second, stop_reason_second) = solver.solve(final_time).unwrap();
-        assert!(matches!(
-            stop_reason_second,
-            OdeSolverStopReason::RootFound(_, _)
-        ));
+        assert!(
+            (solver.state().t - final_time).abs() < Eqn::T::from_f64(30.0).unwrap() * time_tol,
+            "expected solver state at final_time ≈ {:?}, got {:?}",
+            final_time,
+            solver.state().t,
+        );
 
         let expected = &soln.solution_points[0];
-        let t_second_root = *ts_second.last().unwrap();
-        let time_tol = soln.rtol * expected.t.abs() + soln.atol.get_index(0);
-        assert!(
-            (t_second_root - expected.t).abs() < Eqn::T::from_f64(30.0).unwrap() * time_tol,
-            "expected second root time ≈ {:?}, got {:?}",
-            expected.t,
-            t_second_root,
+        let root_time_tol = soln.rtol * expected.t.abs() + soln.atol.get_index(0);
+        let root_col = ts
+            .iter()
+            .position(|&t| (t - expected.t).abs() < Eqn::T::from_f64(30.0).unwrap() * root_time_tol)
+            .expect("expected solve() output to include the second-root/reset time");
+        let root_expected = Eqn::V::from_element(
+            expected.state.len(),
+            Eqn::T::from_f64(0.4).unwrap(),
+            expected.state.context().clone(),
         );
-
-        let last_col = ts_second.len() - 1;
-        let n = expected.state.len();
-        let ctx = soln.atol.context().clone();
-        let mut actual = Eqn::V::zeros(n, ctx);
-        for j in 0..n {
-            actual.set_index(j, ys_second.get_index(j, last_col));
-        }
-        let error = actual - &expected.state;
-        let error_norm = error
-            .squared_norm(&expected.state, &soln.atol, soln.rtol)
+        let root_state = ys.column(root_col).into_owned();
+        let root_error = root_state - &root_expected;
+        let root_error_norm = root_error
+            .squared_norm(&root_expected, &soln.atol, soln.rtol)
             .sqrt();
         let error_threshold = Eqn::T::from_f64(20.0).unwrap();
         assert!(
-            error_norm < error_threshold,
-            "second-root state mismatch: WRMS error norm {error_norm:?} ≥ {error_threshold:?}",
+            root_error_norm < error_threshold,
+            "expected reset state y=0.4 at second-root time; WRMS error norm {root_error_norm:?} ≥ {error_threshold:?}",
+        );
+
+        let reset_value = Eqn::T::from_f64(0.4).unwrap();
+        let reset_tol = Eqn::T::from_f64(30.0).unwrap()
+            * (soln.rtol * reset_value.abs() + soln.atol.get_index(0));
+        let last_reset_col = (0..ts.len())
+            .rev()
+            .find(|&i| (ys.get_index(0, i) - reset_value).abs() < reset_tol)
+            .expect("expected solve() output to include at least one reset state");
+        let final_time_f64 = final_time.to_f64().unwrap();
+        let last_reset_time_f64 = ts[last_reset_col].to_f64().unwrap();
+        let expected_final_value =
+            Eqn::T::from_f64(0.4 * (-0.1 * (final_time_f64 - last_reset_time_f64)).exp()).unwrap();
+        let expected_final = Eqn::V::from_element(
+            expected.state.len(),
+            expected_final_value,
+            expected.state.context().clone(),
+        );
+        let final_state = ys.column(ts.len() - 1).into_owned();
+        let final_error = final_state - &expected_final;
+        let final_error_norm = final_error
+            .squared_norm(&expected_final, &soln.atol, soln.rtol)
+            .sqrt();
+        assert!(
+            final_error_norm < error_threshold,
+            "final state mismatch after automatic reset continuation: WRMS error norm {final_error_norm:?} ≥ {error_threshold:?}",
         );
     }
 

@@ -587,7 +587,7 @@ mod test {
         test_root_found_index(solver, &soln, 0, 1e-4);
     }
 
-    /// Test that `solve()` halts on the first root, even when a reset function is configured.
+    /// Test that `solve()` applies resets and continues to the final time.
     #[test]
     fn test_solve_with_reset_tsit45() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;

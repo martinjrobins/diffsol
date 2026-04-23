@@ -192,6 +192,8 @@ where
     ///
     /// If a root function is provided, the solver will stop if any of the root function elements change sign.
     /// The internal state of the solver is set to the time that the zero-crossing occured.
+    /// If both a root function and a reset operator are configured, roots are handled internally by
+    /// applying the reset and continuing the integration to `final_time`.
     ///
     /// # Arguments
     /// - `final_time`: The time to integrate to
@@ -204,8 +206,11 @@ where
     ///
     /// # Post-condition
     /// After the solver finishes, the internal state of the solver is at time `final_time`.
-    /// If a root is found, the solver stops early. The internal state is moved to the root time,
-    /// and the root time/value are returned as the last entry.
+    /// If a root is found and no reset operator is configured, the solver stops early. The
+    /// internal state is moved to the root time, and the root time/value are returned as the
+    /// last entry.
+    /// If a reset operator is configured, the solver writes out the reset state at the root time
+    /// and continues integrating.
     #[allow(clippy::type_complexity)]
     fn solve(
         &mut self,
@@ -224,7 +229,14 @@ where
     {
         let mut ret_t = Vec::new();
         let (mut ret_y, mut tmp_nout) = allocate_return(self)?;
-        let stop_reason = solve(&mut ret_y, &mut ret_t, &mut tmp_nout, self, final_time)?;
+        let stop_reason = solve(
+            &mut ret_y,
+            &mut ret_t,
+            &mut tmp_nout,
+            self,
+            final_time,
+            true,
+        )?;
         let ntimes = ret_t.len();
         ret_y.resize_cols(ntimes);
         Ok((ret_y, ret_t, stop_reason))
@@ -309,6 +321,7 @@ where
                     &mut soln.tmp_nout,
                     &mut self,
                     t_final,
+                    false,
                 )?;
                 soln.stop_reason = Some(stop_reason);
             }
@@ -690,6 +703,7 @@ fn solve<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     tmp_nout: &mut Eqn::V,
     s: &mut S,
     final_time: Eqn::T,
+    continue_after_reset: bool,
 ) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError>
 where
     Eqn::V: DefaultDenseMatrix,
@@ -697,6 +711,7 @@ where
     // do the main loop
     write_out(s, ret_y, ret_t, tmp_nout);
     s.set_stop_time(final_time)?;
+    let has_reset = continue_after_reset && s.problem().eqn.reset().is_some();
     let stop_reason = loop {
         match s.step()? {
             OdeSolverStopReason::InternalTimestep => {
@@ -708,8 +723,18 @@ where
             }
             OdeSolverStopReason::RootFound(t_root, root_idx) => {
                 s.state_mut_back(t_root)?;
-                write_out(s, ret_y, ret_t, tmp_nout);
-                break OdeSolverStopReason::RootFound(t_root, root_idx);
+                if has_reset {
+                    s.apply_reset()?;
+                    write_out(s, ret_y, ret_t, tmp_nout);
+                    if s.state().t < final_time {
+                        s.set_stop_time(final_time)?;
+                    } else {
+                        break OdeSolverStopReason::TstopReached;
+                    }
+                } else {
+                    write_out(s, ret_y, ret_t, tmp_nout);
+                    break OdeSolverStopReason::RootFound(t_root, root_idx);
+                }
             }
         }
     };
