@@ -164,6 +164,24 @@ where
     /// This is typically called after a root is found to pin the state to the root time.
     fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError>;
 
+    /// Apply the problem's configured reset operator to the current state.
+    ///
+    /// This is typically used after [`Self::state_mut_back`] has moved the solver to a root time.
+    /// The helper recomputes `dy` from the problem RHS after updating the state vector.
+    fn apply_reset(&mut self) -> Result<(), DiffsolError> {
+        let (rhs, has_mass, reset) = {
+            let eqn = &self.problem().eqn;
+            (
+                eqn.rhs(),
+                eqn.mass().is_some(),
+                eqn.reset().ok_or_else(|| {
+                    ode_solver_error!(Other, "No reset operator configured for this problem")
+                })?,
+            )
+        };
+        self.state_mut().state_mut_op(&rhs, has_mass, &reset)
+    }
+
     /// Get the current order of accuracy of the solver (e.g. explict euler method is first-order)
     fn order(&self) -> usize;
 

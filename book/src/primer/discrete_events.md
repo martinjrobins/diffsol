@@ -11,13 +11,17 @@ Diffsol provides two ways to model discrete events in a system of ODEs:
 
 Diffsol allows you to manipulate the internal state of each solver during the time-stepping. Each solver has an internal state that holds information such as the current time \\(t\\), the current state of the system \\(\mathbf{y}\\), and other solver-specific information. When a discrete event occurs, the user can update the internal state of the solver to reflect the change in the system, and then continue the integration of the ODE as normal.
 
-Diffsol also provides a way to stop the integration of the ODEs, either at a specific time or when a specific condition is met. This can be useful for modelling systems with discrete events, as it allows the user to control the integration of the ODEs and to handle the events in a flexible way.
+Diffsol also provides a way to stop the integration of the ODEs, either at a specific time or when a specific condition is met, by defining a function \\(g\\) that is equal to zero when the event occurs. This can be useful for modelling systems with discrete events, as it allows the user to control the integration of the ODEs and to handle the events in a flexible way.
 
-The [Solving the Problem](../solve/solving_the_problem.md) and [Root Finding](../specify/closure/root_finding.md) sections provide an introduction to the API for solving ODEs and detecting events with Diffsol.
+\\[
+g(\mathbf{y}, t, \mathbf{p}) = 0
+\\]
+
+In DiffSL, the `stop` tensor is used to define the event function \\(g\\). The [Solving the Problem](../solve/solving_the_problem.md) and [Root Finding](../specify/closure/root_finding.md) sections provide an introduction to the API for solving ODEs and detecting events with Diffsol.
 
 ## Declarative Approach
 
-Rather than writing the event logic directly in Rust, it is also possible to write down the mathematical conditions for when an event occurs and what happens when it does. To define when an event occurs, we introduce a stop condition that triggers when the following condition is met:
+Rather than writing the event logic directly in Rust, it is also possible to write down the mathematical conditions for when an event occurs and what happens when it does. To define when an event occurs, we re-introduce a stop condition that triggers when the following condition is met:
 
 \\[
 g(\mathbf{y}, t_e, \mathbf{p}) = 0
@@ -29,8 +33,8 @@ We can then specify that, when this condition is met, the state of the system sh
 \mathbf{y}^+ = \mathbf{r}(\mathbf{y}^-, t_e, \mathbf{p})
 \\]
 
-In DiffSL, the `stop` tensor stores one or more event functions, while the `reset` tensor stores the post-event state. The `reset` tensor must have the same shape as the state tensor `u`, while the `stop` tensor can contain any number of scalar event conditions. When a stop condition fires, the active stop index is also written into the model index `N`. This makes it possible to build hybrid switching models that change equations after an event, although the examples below only use `N` implicitly through the standard `stop` and `reset` semantics.
+In DiffSL, the `stop` tensor stores one or more event functions, while the `reset` tensor stores the post-event state. The `reset` tensor must have the same shape as the state tensor `u`, while the `stop` tensor can contain any number of scalar event conditions. 
 
-The advantage of this approach is that the event is described mathematically inside the model itself. Diffsol can then use the reset map and stop function when propagating sensitivities and adjoints through the event. In the current Rust API, the solver still returns `RootFound` when a `stop` condition is hit, so the caller resumes the solve explicitly after moving the solver state to the event time and applying the configured `reset`.
+When a stop condition fires, the solver will stop the integration and return control to the caller. The caller can then apply the reset function to update the state of the system, and then resume the integration of the ODEs. This allows us to model discrete events in a way that is mathematically consistent with the continuous evolution of the system, and also allows us to propagate sensitivities/adjoints through the event in a way that is consistent with the mathematical description of the system.
 
 In the next two sections, we revisit compartmental models of drug delivery and bouncing-ball dynamics and show both the procedural and declarative versions side by side.

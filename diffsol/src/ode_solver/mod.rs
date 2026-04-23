@@ -331,9 +331,12 @@ mod tests {
         let mut state_after_reset = first_forward_solver.state_clone();
         {
             let problem = first_forward_solver.problem();
+            let rhs = problem.eqn.rhs();
+            let has_mass = problem.eqn.mass().is_some();
             let reset_fn = problem.eqn.reset().unwrap();
             state_after_reset
-                .state_mut_op(&problem.eqn, &reset_fn)
+                .as_mut()
+                .state_mut_op(&rhs, has_mass, &reset_fn)
                 .unwrap();
         }
 
@@ -1137,7 +1140,12 @@ mod tests {
         {
             let problem = solver.problem();
             if let Some(reset_fn) = problem.eqn.reset() {
-                state.state_mut_op(&problem.eqn, &reset_fn).unwrap();
+                let rhs = problem.eqn.rhs();
+                let has_mass = problem.eqn.mass().is_some();
+                state
+                    .as_mut()
+                    .state_mut_op(&rhs, has_mass, &reset_fn)
+                    .unwrap();
             }
         }
         solver.set_state(state);
@@ -1219,7 +1227,12 @@ mod tests {
         {
             let problem = solver.problem();
             if let Some(reset_fn) = problem.eqn.reset() {
-                state.state_mut_op(&problem.eqn, &reset_fn).unwrap();
+                let rhs = problem.eqn.rhs();
+                let has_mass = problem.eqn.mass().is_some();
+                state
+                    .as_mut()
+                    .state_mut_op(&rhs, has_mass, &reset_fn)
+                    .unwrap();
             }
         }
         solver.set_state(state);
@@ -1321,10 +1334,19 @@ mod tests {
         let mut state = solver.state_clone();
         {
             let problem = solver.problem();
+            let rhs = problem.eqn.rhs();
+            let has_mass = problem.eqn.mass().is_some();
             let reset_fn = problem.eqn.reset().unwrap();
             let root_fn = problem.eqn.root().unwrap();
             state
-                .state_mut_op_with_sens_and_reset(&problem.eqn, &reset_fn, &root_fn, first_root_idx)
+                .as_mut()
+                .state_mut_op_with_sens_and_reset(
+                    &rhs,
+                    has_mass,
+                    &reset_fn,
+                    &root_fn,
+                    first_root_idx,
+                )
                 .unwrap();
         }
         solver.set_state(state);
@@ -1420,9 +1442,12 @@ mod tests {
         let fwd_state_minus = first_forward_solver.into_state();
         let mut state_after_reset = fwd_state_minus.clone();
         let problem = pre_reset_checkpointer.problem();
+        let rhs = problem.eqn.rhs();
+        let has_mass = problem.eqn.mass().is_some();
         let reset_fn = problem.eqn.reset().unwrap();
         state_after_reset
-            .state_mut_op(&problem.eqn, &reset_fn)
+            .as_mut()
+            .state_mut_op(&rhs, has_mass, &reset_fn)
             .unwrap();
         let fwd_state_plus = state_after_reset.clone();
 
@@ -1465,6 +1490,7 @@ mod tests {
             }
         };
         post_reset_adjoint_state
+            .as_mut()
             .state_mut_adjoint_terminal_root(
                 &mut post_reset_adjoint_eqn,
                 post_reset_root_idx,
@@ -1484,6 +1510,7 @@ mod tests {
             let reset_fn = reset_problem.eqn.reset().unwrap();
             let root_fn = reset_problem.eqn.root().unwrap();
             adjoint_state
+                .as_mut()
                 .state_mut_op_with_adjoint_and_reset(
                     &mut pre_reset_adjoint_eqn,
                     &reset_fn,
@@ -1584,9 +1611,12 @@ mod tests {
 
         let mut state_after_reset = fwd_state_minus.clone();
         let problem = pre_reset_checkpointer.problem();
+        let rhs = problem.eqn.rhs();
+        let has_mass = problem.eqn.mass().is_some();
         let reset_fn = problem.eqn.reset().unwrap();
         state_after_reset
-            .state_mut_op(&problem.eqn, &reset_fn)
+            .as_mut()
+            .state_mut_op(&rhs, has_mass, &reset_fn)
             .unwrap();
         let fwd_state_plus = state_after_reset.clone();
 
@@ -1619,6 +1649,7 @@ mod tests {
             }
         };
         post_reset_adjoint_state
+            .as_mut()
             .state_mut_adjoint_terminal_root(
                 &mut post_reset_adjoint_eqn,
                 post_reset_root_idx,
@@ -1644,6 +1675,7 @@ mod tests {
             let reset_fn = reset_problem.eqn.reset().unwrap();
             let root_fn = reset_problem.eqn.root().unwrap();
             adjoint_state
+                .as_mut()
                 .state_mut_op_with_adjoint_and_reset(
                     &mut pre_reset_adjoint_eqn,
                     &reset_fn,

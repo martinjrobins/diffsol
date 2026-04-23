@@ -1,7 +1,4 @@
-use diffsol::{
-    CraneliftJitModule, OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverState,
-    OdeSolverStopReason,
-};
+use diffsol::{CraneliftJitModule, OdeBuilder, OdeSolverMethod, OdeSolverStopReason};
 use plotly::{common::Mode, layout::Axis, layout::Layout, Plot, Scatter};
 use std::{fs, path::PathBuf};
 
@@ -53,15 +50,7 @@ fn main() {
             Ok(OdeSolverStopReason::InternalTimestep) => {}
             Ok(OdeSolverStopReason::RootFound(t_root, _)) => {
                 solver.state_mut_back(t_root).unwrap();
-                let mut state = solver.state_clone();
-                {
-                    let problem = solver.problem();
-                    let reset = problem.eqn.reset().expect("reset must be configured");
-                    state
-                        .state_mut_op(&problem.eqn, &reset)
-                        .expect("reset must apply cleanly");
-                }
-                solver.set_state(state);
+                solver.apply_reset().expect("reset must apply cleanly");
                 if solver.state().t < final_time {
                     solver.set_stop_time(final_time).unwrap();
                 } else {
