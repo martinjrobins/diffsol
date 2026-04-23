@@ -1,4 +1,4 @@
-use diffsol::{CraneliftJitModule, OdeBuilder, OdeSolverMethod, OdeSolverStopReason};
+use diffsol::{CraneliftJitModule, MatrixCommon, OdeBuilder, OdeSolverMethod};
 use plotly::{common::Mode, layout::Axis, layout::Layout, Plot, Scatter};
 use std::{fs, path::PathBuf};
 
@@ -35,35 +35,10 @@ fn main() {
         .unwrap();
     let mut solver = problem.bdf::<LS>().unwrap();
 
-    let mut q_c = Vec::new();
-    let mut q_p1 = Vec::new();
-    let mut time = Vec::new();
     let final_time = 24.0;
-
-    q_c.push(solver.state().y[0]);
-    q_p1.push(solver.state().y[1]);
-    time.push(solver.state().t);
-
-    solver.set_stop_time(final_time).unwrap();
-    loop {
-        match solver.step() {
-            Ok(OdeSolverStopReason::InternalTimestep) => {}
-            Ok(OdeSolverStopReason::RootFound(t_root, _)) => {
-                solver.state_mut_back(t_root).unwrap();
-                solver.apply_reset().expect("reset must apply cleanly");
-                if solver.state().t < final_time {
-                    solver.set_stop_time(final_time).unwrap();
-                } else {
-                    break;
-                }
-            }
-            Ok(OdeSolverStopReason::TstopReached) => break,
-            Err(err) => panic!("unexpected solver error: {err}"),
-        }
-        q_c.push(solver.state().y[0]);
-        q_p1.push(solver.state().y[1]);
-        time.push(solver.state().t);
-    }
+    let (ys, time, _stop_reason) = solver.solve(final_time).unwrap();
+    let q_c: Vec<_> = ys.inner().row(0).into_iter().copied().collect();
+    let q_p1: Vec<_> = ys.inner().row(1).into_iter().copied().collect();
 
     let mut plot = Plot::new();
     plot.add_trace(

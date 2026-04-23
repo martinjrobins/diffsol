@@ -5,7 +5,7 @@ ODEs describe the continuous evolution of a system over time, but many systems a
 Diffsol provides two ways to model discrete events in a system of ODEs:
 
 1. Use the event handling feature to detect when a discrete event occurs, and then manually update the state of the system in Rust. This is a straightforward procedural approach, but if you want to calculate sensitivities with respect to the parameters, you need to propagate the event correction yourself.
-2. Use the DiffSL language to specify the `stop` conditions and `reset` actions that occur when a discrete event happens. This is a declarative approach that allows you to describe mathematically *when* a discrete event occurs and *what* happens when it does.
+2. Use the DiffSL language to specify the `stop` conditions and `reset` actions that occur when a discrete event happens. This is a declarative approach that allows you to describe mathematically *when* a discrete event occurs and *what* happens when it does. For ordinary forward solves, `solve` and `solve_dense` will then apply the reset automatically and continue the integration.
 
 ## Procedural Approach
 
@@ -35,6 +35,6 @@ We can then specify that, when this condition is met, the state of the system sh
 
 In DiffSL, the `stop` tensor stores one or more event functions, while the `reset` tensor stores the post-event state. The `reset` tensor must have the same shape as the state tensor `u`, while the `stop` tensor can contain any number of scalar event conditions. 
 
-When a stop condition fires, the solver will stop the integration and return control to the caller. The caller can then apply the reset function to update the state of the system, and then resume the integration of the ODEs. This allows us to model discrete events in a way that is mathematically consistent with the continuous evolution of the system, and also allows us to propagate sensitivities/adjoints through the event in a way that is consistent with the mathematical description of the system.
+When a stop condition fires, Diffsol first locates the event time accurately. For forward solves with `solve` or `solve_dense`, if a `reset` tensor is present then the reset is applied automatically and the integration continues. Manual time-stepping with `step`, staged solve APIs, and current sensitivity/adjoint workflows still expose the event to the caller so that custom event handling and derivative propagation remain explicit.
 
 In the next two sections, we revisit compartmental models of drug delivery and bouncing-ball dynamics and show both the procedural and declarative versions side by side.

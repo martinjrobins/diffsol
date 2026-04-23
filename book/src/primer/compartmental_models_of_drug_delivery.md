@@ -88,7 +88,7 @@ To implement the discrete dose events procedurally, we set a stop time for the s
 
 The same dosing schedule can also be encoded directly in DiffSL. Here the initial condition includes the first dose at \\(t=0\\), the `stop` tensor contains the later dosing times \\(t = 6\\), \\(12\\), and \\(18\\) hours, and the `reset` tensor adds the bolus amount to the central compartment whenever any of those stop conditions fires.
 
-As with the bouncing-ball example, the current solver still reports `RootFound` when the event occurs. The example therefore resumes the integration explicitly after moving the solver to the event time and applying the declarative reset operator defined in the model.
+Because the model supplies both `stop` and `reset`, the high-level `solve` method now applies each declarative dose automatically and continues through the full 24 hour simulation.
 
 ```rust,ignore
 {{#include ../../../examples/compartmental-models-drug-delivery-declarative/src/main.rs}}

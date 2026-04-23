@@ -71,7 +71,7 @@ In code, the bouncing ball problem can be solved using Diffsol as follows:
 
 In DiffSL, we can move the event definition into the model itself. The `stop` tensor declares that an event occurs when `x = 0`, and the `reset` tensor declares the post-impact state. In this version we also reset the position to a very small positive value so that the next step starts just above the ground and does not immediately retrigger the same event.
 
-The current Diffsol runtime still reports `RootFound` when the `stop` condition fires, so the example resumes the solve explicitly after moving the solver state back to the event time and applying the configured `reset` operator from the model.
+Because the model provides both `stop` and `reset`, the high-level `solve` call now handles each bounce automatically. The example can therefore solve straight to the final time and read the returned trajectory directly.
 
 ```rust,ignore
 {{#include ../../../examples/bouncing-ball-declarative/src/main.rs}}
