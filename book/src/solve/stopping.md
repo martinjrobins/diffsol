@@ -4,9 +4,11 @@ There are two methods to halt the solver when a certain condition is met: you ca
 
 ## Stopping with high-level solve methods
 
-The high-level `solve`, `solve_dense`, or `solve_dense_sensitivities` methods stop the solver when either the final time `tfinal` is reached, or when one of the elements of the root function returns a value that changes sign. The internal state of the solver (`t`, `y`, `dy` etc.) is set to the time that the zero-crossing occured.
+The high-level `solve` and `solve_dense` methods stop the solver when either the final time `tfinal` is reached, or when one of the elements of the root function returns a value that changes sign. The internal state of the solver (`t`, `y`, `dy` etc.) is set to the time that the zero-crossing occured.
 
-The exception to this is if the `reset` function is defined, in which case if index 0 of the root function has a zero-crossing then the `reset` function is applied to the state and the solver continues on until `tfinal`. If any of the other indices of the root function have a zero-crossing, then the solver will stop as normal.
+If a `reset` function is also defined, `solve` and `solve_dense` apply the reset automatically at the root time and continue integrating to the requested final time or final evaluation point. In `solve_dense`, any user-specified evaluation time that lands exactly on the event receives the pre-reset state.
+
+The public `solve_dense_sensitivities` method also applies resets automatically when the equations provide sensitivity-aware root and reset operators. The lower-level `step` method, staged solves via `solve_soln` / `solve_soln_sensitivities`, and current adjoint workflows still report `RootFound` and leave it to the caller to decide how to resume.
 
 ## Manual time-stepping
 

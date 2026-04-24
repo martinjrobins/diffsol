@@ -2,7 +2,7 @@
 // stragegy like bdf or esdirk34 in diffsol.
 
 use diffsol::error::{DiffsolError, OdeSolverError};
-use diffsol::ode_equations::OdeEquationsImplicitSensWithReset;
+use diffsol::ode_equations::OdeEquationsImplicitSens;
 use diffsol::{
     matrix::MatrixRef, DefaultDenseMatrix, DiffSl, LinearSolver, Matrix, OdeSolverMethod,
     OdeSolverProblem, OdeSolverState, Vector, VectorHost, VectorRef,
@@ -49,7 +49,9 @@ where
 {
     let eqn = &problem.eqn;
     if let Some(reset_fn) = eqn.reset() {
-        state.state_mut_op(eqn, &reset_fn)?;
+        let rhs = eqn.rhs();
+        let has_mass = eqn.mass().is_some();
+        state.as_mut().state_mut_op(&rhs, has_mass, &reset_fn)?;
     }
     Ok(())
 }
@@ -60,7 +62,7 @@ fn apply_state_reset_with_sens<Eqn, S>(
     root_idx: usize,
 ) -> Result<(), DiffsolError>
 where
-    Eqn: OdeEquationsImplicitSensWithReset,
+    Eqn: OdeEquationsImplicitSens,
     S: OdeSolverState<Eqn::V>,
 {
     let eqn = &problem.eqn;
@@ -68,7 +70,11 @@ where
         (None, _) => Ok(()),
         (Some(_), None) => Err(ode_solver_error!(ResetRequiresRootOperator)),
         (Some(reset_fn), Some(root_fn)) => {
-            state.state_mut_op_with_sens_and_reset(eqn, &reset_fn, &root_fn, root_idx)?;
+            let rhs = eqn.rhs();
+            let has_mass = eqn.mass().is_some();
+            state
+                .as_mut()
+                .state_mut_op_with_sens_and_reset(&rhs, has_mass, &reset_fn, &root_fn, root_idx)?;
             Ok(())
         }
     }

@@ -79,17 +79,15 @@ pub struct StateRefMut<'a, V: Vector> {
     pub h: &'a mut V::T,
 }
 
-fn refresh_augmented_state<V, State, Eqn, AugmentedEqn>(
-    state: &mut State,
+fn refresh_augmented_state_ref_mut<V, Eqn, AugmentedEqn>(
+    state: &mut StateRefMut<'_, V>,
     augmented_eqn: &mut AugmentedEqn,
 ) -> Result<(), DiffsolError>
 where
     V: Vector,
-    State: OdeSolverState<V>,
     Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
     AugmentedEqn: AugmentedOdeEquations<Eqn>,
 {
-    let state = state.as_mut();
     augmented_eqn.update_rhs_out_state(state.y, state.dy, *state.t);
     let naug = augmented_eqn.max_index();
     for i in 0..naug {
@@ -102,6 +100,350 @@ where
         }
     }
     Ok(())
+}
+
+impl<V: Vector> StateRefMut<'_, V> {
+    /// Apply a non-linear operator to the current state in-place, replacing `state.y` with
+    /// `op(state.y, state.t)` and recomputing `state.dy = rhs(state.y, state.t)`.
+    ///
+    /// Note: mass matrix equations are not supported for this operation.
+    pub fn state_mut_op<Rhs, O>(
+        &mut self,
+        rhs: &Rhs,
+        has_mass: bool,
+        op: &O,
+    ) -> Result<(), DiffsolError>
+    where
+        Rhs: NonLinearOp<T = V::T, V = V, C = V::C>,
+        O: NonLinearOp<T = V::T, V = V, M = Rhs::M, C = V::C>,
+    {
+        if has_mass {
+            return Err(ode_solver_error!(MassMatrixNotSupported));
+        }
+
+        let nstates = rhs.nstates();
+        let mut y_out = V::zeros(nstates, rhs.context().clone());
+        op.call_inplace(self.y, *self.t, &mut y_out);
+
+        self.y.copy_from(&y_out);
+        rhs.call_inplace(self.y, *self.t, &mut y_out);
+        self.dy.copy_from(&y_out);
+        Ok(())
+    }
+
+    /// Apply a reset operator to the current state and propagate sensitivities through a
+    /// time-dependent root-triggered event correction.
+    ///
+    /// If the pre-event state is `x^-` and the reset map is `g(x, t, p)`, this method updates
+    /// the state to `x^+ = g(x^-, t, p)`, then recomputes the post-event vector field
+    /// `f^+ = rhs(x^+, t, p)`.
+    ///
+    /// Note: mass matrix equations are not supported for this operation.
+    pub fn state_mut_op_with_sens_and_reset<Rhs, G, R>(
+        &mut self,
+        rhs: &Rhs,
+        has_mass: bool,
+        reset_op: &G,
+        root_op: &R,
+        root_idx: usize,
+    ) -> Result<(), DiffsolError>
+    where
+        Rhs: NonLinearOp<T = V::T, V = V, C = V::C>,
+        G: NonLinearOpJacobian<T = V::T, V = V, M = Rhs::M, C = V::C>
+            + NonLinearOpSens<T = V::T, V = V, M = Rhs::M, C = V::C>
+            + NonLinearOpTimePartial<T = V::T, V = V, M = Rhs::M, C = V::C>,
+        R: NonLinearOpJacobian<T = V::T, V = V, M = Rhs::M, C = V::C>
+            + NonLinearOpSens<T = V::T, V = V, M = Rhs::M, C = V::C>
+            + NonLinearOpTimePartial<T = V::T, V = V, M = Rhs::M, C = V::C>,
+    {
+        if has_mass {
+            return Err(ode_solver_error!(MassMatrixNotSupported));
+        }
+
+        let nstates = rhs.nstates();
+        let nroots = root_op.nout();
+        if root_idx >= nroots {
+            return Err(ode_solver_error!(
+                Other,
+                format!(
+                    "root index {root_idx} out of bounds for root function with {nroots} outputs"
+                )
+            ));
+        }
+
+        let ctx = rhs.context().clone();
+        let t = *self.t;
+        let y_before = self.y.clone();
+        let f_minus = self.dy.clone();
+        let s_before = self.s.to_vec();
+        let nparams = s_before.len();
+        let reset_t = reset_op.time_derive(&y_before, t);
+        let root_t = root_op.time_derive(&y_before, t);
+
+        let mut y_plus = V::zeros(nstates, ctx.clone());
+        reset_op.call_inplace(&y_before, t, &mut y_plus);
+
+        let mut f_plus = V::zeros(nstates, ctx.clone());
+        rhs.call_inplace(&y_plus, t, &mut f_plus);
+
+        let mut correction_dir = V::zeros(nstates, ctx.clone());
+        reset_op.jac_mul_inplace(&y_before, t, &f_minus, &mut correction_dir);
+        correction_dir += &reset_t;
+        correction_dir -= &f_plus;
+
+        let mut root_flow = V::zeros(nroots, ctx.clone());
+        root_op.jac_mul_inplace(&y_before, t, &f_minus, &mut root_flow);
+        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
+        let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
+        if denom.abs() <= denom_tol {
+            return Err(ode_solver_error!(
+                Other,
+                "reset sensitivity correction undefined: active root derivative along flow is zero"
+            ));
+        }
+
+        let mut basis = V::zeros(nparams, ctx.clone());
+        let mut reset_jac_s = V::zeros(nstates, ctx.clone());
+        let mut reset_sens = V::zeros(nstates, ctx.clone());
+        let mut root_jac_s = V::zeros(nroots, ctx.clone());
+        let mut root_sens = V::zeros(nroots, ctx);
+        let mut s_plus = Vec::with_capacity(nparams);
+        for (j, s_j_before) in s_before.iter().enumerate() {
+            basis.set_index(j, V::T::one());
+
+            reset_op.jac_mul_inplace(&y_before, t, s_j_before, &mut reset_jac_s);
+            reset_op.sens_mul_inplace(&y_before, t, &basis, &mut reset_sens);
+
+            root_op.jac_mul_inplace(&y_before, t, s_j_before, &mut root_jac_s);
+            root_op.sens_mul_inplace(&y_before, t, &basis, &mut root_sens);
+
+            let numerator = root_jac_s.get_index(root_idx) + root_sens.get_index(root_idx);
+            let tau_p = -numerator / denom;
+
+            let mut s_j_plus = reset_jac_s.clone();
+            s_j_plus += &reset_sens;
+            s_j_plus.axpy(tau_p, &correction_dir, V::T::one());
+            s_plus.push(s_j_plus);
+
+            basis.set_index(j, V::T::zero());
+        }
+
+        self.y.copy_from(&y_plus);
+        self.dy.copy_from(&f_plus);
+        for (dst, src) in self.s.iter_mut().zip(s_plus.iter()) {
+            dst.copy_from(src);
+        }
+        Ok(())
+    }
+
+    /// Propagate adjoint variables through a time-dependent root-triggered reset.
+    ///
+    /// Note: mass matrix equations are not supported for this operation.
+    pub fn state_mut_op_with_adjoint_and_reset<'a, Eqn, Method, G, R, State>(
+        &mut self,
+        adj_eqn: &mut AdjointEquations<'a, Eqn, Method>,
+        reset_op: &G,
+        root_op: &R,
+        root_idx: usize,
+        fwd_state_minus: &State,
+        fwd_state_plus: &State,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsAdjoint<T = V::T, V = V, C = V::C>,
+        Method: OdeSolverMethod<'a, Eqn>,
+        State: OdeSolverState<V>,
+        G: NonLinearOpJacobian<T = V::T, V = V, M = Eqn::M, C = V::C>
+            + NonLinearOpAdjoint<T = V::T, V = V, M = Eqn::M, C = V::C>
+            + NonLinearOpSensAdjoint<T = V::T, V = V, M = Eqn::M, C = V::C>
+            + NonLinearOpTimePartial<T = V::T, V = V, M = Eqn::M, C = V::C>,
+        R: NonLinearOpJacobian<T = V::T, V = V, M = Eqn::M, C = V::C>
+            + NonLinearOpAdjoint<T = V::T, V = V, M = Eqn::M, C = V::C>
+            + NonLinearOpSensAdjoint<T = V::T, V = V, M = Eqn::M, C = V::C>
+            + NonLinearOpTimePartial<T = V::T, V = V, M = Eqn::M, C = V::C>,
+    {
+        let eqn = adj_eqn.eqn();
+        if eqn.mass().is_some() {
+            return Err(ode_solver_error!(MassMatrixNotSupported));
+        }
+
+        let nroots = root_op.nout();
+        if root_idx >= nroots {
+            return Err(ode_solver_error!(
+                Other,
+                format!(
+                    "root index {root_idx} out of bounds for root function with {nroots} outputs"
+                )
+            ));
+        }
+
+        let ctx = eqn.context().clone();
+        let t_event = fwd_state_minus.as_ref().t;
+        let y_minus = fwd_state_minus.as_ref().y;
+        let y_plus = fwd_state_plus.as_ref().y;
+        let f_minus = fwd_state_minus.as_ref().dy;
+        let f_plus = fwd_state_plus.as_ref().dy;
+        let nchannels = self.s.len();
+        let nstates = y_minus.len();
+        let nparams = eqn.rhs().nparams();
+
+        let reset_t = reset_op.time_derive(y_minus, t_event);
+        let root_t = root_op.time_derive(y_minus, t_event);
+
+        let mut correction_dir = V::zeros(nstates, ctx.clone());
+        reset_op.jac_mul_inplace(y_minus, t_event, f_minus, &mut correction_dir);
+        correction_dir += reset_t;
+        correction_dir -= f_plus;
+
+        let mut root_flow = V::zeros(nroots, ctx.clone());
+        root_op.jac_mul_inplace(y_minus, t_event, f_minus, &mut root_flow);
+        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
+        let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
+        if denom.abs() <= denom_tol {
+            return Err(ode_solver_error!(
+                Other,
+                "reset adjoint correction undefined: active root derivative along flow is zero"
+            ));
+        }
+
+        let (l_minus, l_plus) = if adj_eqn.with_out() {
+            if let Some(out_op) = eqn.out() {
+                (
+                    Some(out_op.call(y_minus, t_event)),
+                    Some(out_op.call(y_plus, t_event)),
+                )
+            } else {
+                (None, None)
+            }
+        } else {
+            (None, None)
+        };
+
+        let mut root_basis = V::zeros(nroots, ctx.clone());
+        let mut reset_adj = V::zeros(nstates, ctx.clone());
+        let mut root_adj = V::zeros(nstates, ctx.clone());
+        let mut reset_sens_adj = V::zeros(nparams, ctx.clone());
+        let mut root_sens_adj = V::zeros(nparams, ctx.clone());
+
+        for i in 0..nchannels {
+            let alpha = {
+                let lambda_i = &self.s[i];
+                let mut alpha_num = V::T::zero();
+                for j in 0..nstates {
+                    alpha_num += lambda_i.get_index(j) * correction_dir.get_index(j);
+                }
+                if let (Some(l_minus), Some(l_plus)) = (&l_minus, &l_plus) {
+                    alpha_num += l_minus.get_index(i) - l_plus.get_index(i);
+                }
+                alpha_num / denom
+            };
+
+            {
+                let lambda_i = &self.s[i];
+                reset_op.jac_transpose_mul_inplace(y_minus, t_event, lambda_i, &mut reset_adj);
+                reset_op.sens_transpose_mul_inplace(
+                    y_minus,
+                    t_event,
+                    lambda_i,
+                    &mut reset_sens_adj,
+                );
+            }
+
+            root_basis.set_index(root_idx, alpha);
+            root_op.jac_transpose_mul_inplace(y_minus, t_event, &root_basis, &mut root_adj);
+            root_op.sens_transpose_mul_inplace(y_minus, t_event, &root_basis, &mut root_sens_adj);
+            root_basis.set_index(root_idx, V::T::zero());
+
+            self.s[i].copy_from(&root_adj);
+            self.s[i].axpy(-V::T::one(), &reset_adj, V::T::one());
+            self.sg[i] -= &reset_sens_adj;
+            self.sg[i] += &root_sens_adj;
+        }
+        refresh_augmented_state_ref_mut::<V, Eqn, _>(self, adj_eqn)
+    }
+
+    /// Add the terminal-root adjoint correction for a root-defined final time.
+    pub fn state_mut_adjoint_terminal_root<'a, Eqn, Method, State>(
+        &mut self,
+        adj_eqn: &mut AdjointEquations<'a, Eqn, Method>,
+        root_idx: usize,
+        forward: &State,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsAdjoint<
+            T = V::T,
+            V = V,
+            C = V::C,
+            Root: NonLinearOpJacobian<T = V::T, V = V, M = Eqn::M, C = V::C>
+                      + NonLinearOpAdjoint<T = V::T, V = V, M = Eqn::M, C = V::C>
+                      + NonLinearOpSensAdjoint<T = V::T, V = V, M = Eqn::M, C = V::C>
+                      + NonLinearOpTimePartial<T = V::T, V = V, M = Eqn::M, C = V::C>,
+            Out: NonLinearOp<T = V::T, V = V, M = Eqn::M, C = V::C>,
+        >,
+        Method: OdeSolverMethod<'a, Eqn>,
+        State: OdeSolverState<V>,
+    {
+        let eqn = adj_eqn.eqn();
+
+        if eqn.mass().is_some() {
+            return Err(ode_solver_error!(MassMatrixNotSupported));
+        }
+
+        if !adj_eqn.with_out() {
+            return Ok(());
+        }
+
+        let Some(out_op) = eqn.out() else {
+            return Ok(());
+        };
+        let Some(root_op) = eqn.root() else {
+            return Ok(());
+        };
+        let forward = forward.as_ref();
+
+        let nout = out_op.nout();
+        if self.s.len() != nout || self.sg.len() != nout || self.dsg.len() != nout {
+            return Ok(());
+        }
+
+        let nroots = root_op.nout();
+        if root_idx >= nroots {
+            return Err(ode_solver_error!(
+                Other,
+                format!(
+                    "root index {root_idx} out of bounds for root function with {nroots} outputs"
+                )
+            ));
+        }
+
+        let ctx = eqn.context().clone();
+        let out = out_op.call(forward.y, forward.t);
+        let root_t = root_op.time_derive(forward.y, forward.t);
+        let mut root_flow = V::zeros(nroots, ctx.clone());
+        root_op.jac_mul_inplace(forward.y, forward.t, forward.dy, &mut root_flow);
+        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
+        let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
+        if denom.abs() <= denom_tol {
+            return Err(ode_solver_error!(
+                Other,
+                "terminal root adjoint correction undefined: active root derivative along flow is zero"
+            ));
+        }
+
+        let nstates = eqn.rhs().nstates();
+        let nparams = eqn.rhs().nparams();
+        let mut root_basis = V::zeros(nroots, ctx.clone());
+        let mut lambda_corr = V::zeros(nstates, ctx.clone());
+        let mut q_corr = V::zeros(nparams, ctx.clone());
+        for i in 0..nout {
+            root_basis.set_index(root_idx, out.get_index(i) / denom);
+            root_op.jac_transpose_mul_inplace(forward.y, forward.t, &root_basis, &mut lambda_corr);
+            root_op.sens_transpose_mul_inplace(forward.y, forward.t, &root_basis, &mut q_corr);
+            root_basis.set_index(root_idx, V::T::zero());
+            self.s[i] += &lambda_corr;
+            self.sg[i] += &q_corr;
+        }
+        refresh_augmented_state_ref_mut::<V, Eqn, _>(self, adj_eqn)
+    }
 }
 
 /// State for the ODE solver, containing:
@@ -174,404 +516,6 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized {
             return Err(ode_solver_error!(StateProblemMismatch));
         }
         Ok(())
-    }
-
-    /// Apply a non-linear operator to the current state in-place, replacing `state.y` with
-    /// `op(state.y, state.t)` and recomputing `state.dy = rhs(state.y, state.t)`.
-    ///
-    /// Note: mass matrix equations are not supported for this operation.
-    fn state_mut_op<Eqn, O>(&mut self, eqn: &Eqn, op: &O) -> Result<(), DiffsolError>
-    where
-        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
-        O: NonLinearOp<T = V::T, V = V, M = Eqn::M>,
-    {
-        if eqn.mass().is_some() {
-            return Err(ode_solver_error!(MassMatrixNotSupported));
-        }
-
-        let nstates = eqn.rhs().nstates();
-        let mut y_out = V::zeros(nstates, eqn.context().clone());
-        op.call_inplace(self.as_ref().y, self.as_ref().t, &mut y_out);
-
-        {
-            let state = self.as_mut();
-            state.y.copy_from(&y_out);
-            eqn.rhs().call_inplace(state.y, *state.t, &mut y_out);
-            state.dy.copy_from(&y_out);
-        }
-        Ok(())
-    }
-
-    /// Apply a reset operator to the current state and propagate sensitivities through a
-    /// time-dependent root-triggered event correction.
-    ///
-    /// If the pre-event state is `x^-` and the reset map is `g(x, t, p)`, this method updates
-    /// the state to
-    /// `x^+ = g(x^-, t, p)`,
-    /// then recomputes the post-event vector field
-    /// `f^+ = rhs(x^+, t, p)`.
-    ///
-    /// For the active root component `r_k(x, t, p) = 0` selected by `root_idx`, the event-time
-    /// sensitivity in parameter direction `p_j` is
-    /// `τ'_j = -([r_x s^-_j]_k + [r_p e_j]_k) / ([r_x f^-]_k + [r_t]_k)`,
-    /// where `s^-_j = ∂x^-/∂p_j`, `f^- = dx^-/dt`, `e_j` is the jth parameter basis vector,
-    /// `r_x = ∂r/∂x`, `r_p = ∂r/∂p`, and `r_t = ∂r/∂t`.
-    ///
-    /// The post-event sensitivity is then updated as
-    /// `s^+_j = g_x s^-_j + g_p e_j + (g_x f^- + g_t - f^+) τ'_j`,
-    /// where `g_x = ∂g/∂x`, `g_p = ∂g/∂p`, and `g_t = ∂g/∂t`.
-    ///
-    /// Explicit time derivatives `∂g/∂t` and `∂r/∂t` are obtained from
-    /// [`NonLinearOpTimePartial`].
-    ///
-    /// Note: mass matrix equations are not supported for this operation.
-    fn state_mut_op_with_sens_and_reset<Eqn, G, R>(
-        &mut self,
-        eqn: &Eqn,
-        reset_op: &G,
-        root_op: &R,
-        root_idx: usize,
-    ) -> Result<(), DiffsolError>
-    where
-        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
-        G: NonLinearOpJacobian<T = V::T, V = V, M = Eqn::M>
-            + NonLinearOpSens<T = V::T, V = V, M = Eqn::M>
-            + NonLinearOpTimePartial<T = V::T, V = V, M = Eqn::M>,
-        R: NonLinearOpJacobian<T = V::T, V = V, M = Eqn::M>
-            + NonLinearOpSens<T = V::T, V = V, M = Eqn::M>
-            + NonLinearOpTimePartial<T = V::T, V = V, M = Eqn::M>,
-    {
-        if eqn.mass().is_some() {
-            return Err(ode_solver_error!(MassMatrixNotSupported));
-        }
-
-        let nstates = eqn.rhs().nstates();
-        let nroots = root_op.nout();
-        if root_idx >= nroots {
-            return Err(ode_solver_error!(
-                Other,
-                format!(
-                    "root index {root_idx} out of bounds for root function with {nroots} outputs"
-                )
-            ));
-        }
-
-        let ctx = eqn.context().clone();
-        let t = self.as_ref().t;
-        let (y_before, f_minus, s_before) = {
-            let state = self.as_ref();
-            (state.y.clone(), state.dy.clone(), state.s.to_vec())
-        };
-        let nparams = s_before.len();
-        let reset_t = reset_op.time_derive(&y_before, t);
-        let root_t = root_op.time_derive(&y_before, t);
-
-        let mut y_plus = V::zeros(nstates, ctx.clone());
-        reset_op.call_inplace(&y_before, t, &mut y_plus);
-
-        let mut f_plus = V::zeros(nstates, ctx.clone());
-        eqn.rhs().call_inplace(&y_plus, t, &mut f_plus);
-
-        let mut correction_dir = V::zeros(nstates, ctx.clone());
-        reset_op.jac_mul_inplace(&y_before, t, &f_minus, &mut correction_dir);
-        correction_dir += &reset_t;
-        correction_dir -= &f_plus;
-
-        let mut root_flow = V::zeros(nroots, ctx.clone());
-        root_op.jac_mul_inplace(&y_before, t, &f_minus, &mut root_flow);
-        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
-        let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
-        if denom.abs() <= denom_tol {
-            return Err(ode_solver_error!(
-                Other,
-                "reset sensitivity correction undefined: active root derivative along flow is zero"
-            ));
-        }
-
-        let mut basis = V::zeros(nparams, ctx.clone());
-        let mut reset_jac_s = V::zeros(nstates, ctx.clone());
-        let mut reset_sens = V::zeros(nstates, ctx.clone());
-        let mut root_jac_s = V::zeros(nroots, ctx.clone());
-        let mut root_sens = V::zeros(nroots, ctx);
-        let mut s_plus = Vec::with_capacity(nparams);
-        for (j, s_j_before) in s_before.iter().enumerate() {
-            basis.set_index(j, V::T::one());
-
-            reset_op.jac_mul_inplace(&y_before, t, s_j_before, &mut reset_jac_s);
-            reset_op.sens_mul_inplace(&y_before, t, &basis, &mut reset_sens);
-
-            root_op.jac_mul_inplace(&y_before, t, s_j_before, &mut root_jac_s);
-            root_op.sens_mul_inplace(&y_before, t, &basis, &mut root_sens);
-
-            let numerator = root_jac_s.get_index(root_idx) + root_sens.get_index(root_idx);
-            let tau_p = -numerator / denom;
-
-            let mut s_j_plus = reset_jac_s.clone();
-            s_j_plus += &reset_sens;
-            s_j_plus.axpy(tau_p, &correction_dir, V::T::one());
-            s_plus.push(s_j_plus);
-
-            basis.set_index(j, V::T::zero());
-        }
-
-        {
-            let state = self.as_mut();
-            state.y.copy_from(&y_plus);
-            state.dy.copy_from(&f_plus);
-            for (dst, src) in state.s.iter_mut().zip(s_plus.iter()) {
-                dst.copy_from(src);
-            }
-        }
-        Ok(())
-    }
-
-    /// Propagate adjoint variables through a time-dependent root-triggered reset.
-    ///
-    /// This method assumes `self` stores the post-event adjoint state `(lambda^+, q^+)`,
-    /// while `fwd_state_minus` and `fwd_state_plus` provide the forward state derivatives
-    /// immediately before and after the reset. The terminal-root contribution for a root-defined
-    /// segment end must already have been applied with
-    /// [`Self::state_mut_adjoint_terminal_root`].
-    ///
-    /// If the pre-event forward state is `x^-`, the post-event state is `x^+ = g(x^-, t, p)`,
-    /// and the active root is `r_k(x^-, t, p) = 0`, define
-    /// `f^- = dx^-/dt`,
-    /// `f^+ = dx^+/dt`,
-    /// `c = g_x f^- + g_t - f^+`,
-    /// `d = [r_x f^-]_k + [r_t]_k`,
-    /// and, when continuous outputs are being integrated, `l^- = out(x^-, t)` and
-    /// `l^+ = out(x^+, t)`.
-    ///
-    /// For each adjoint channel with post-event adjoint `lambda^+` and post-event parameter
-    /// gradient `q^+`, the pre-event values are
-    /// `alpha = (lambda^+ · c + l^- - l^+) / d`,
-    /// `lambda^- = g_x^T lambda^+ - r_{x,k}^T alpha`,
-    /// and
-    /// `q^- = q^+ + g_p^T lambda^+ - r_{p,k}^T alpha`.
-    ///
-    /// Here `g_x = ∂g/∂x`, `g_t = ∂g/∂t`, `g_p = ∂g/∂p`, `r_x = ∂r/∂x`,
-    /// `r_t = ∂r/∂t`, and `r_p = ∂r/∂p`, all evaluated at `(x^-, t, p)`.
-    /// The `l^- - l^+` term is the running-cost jump contribution at the interior event.
-    /// The forward state vectors in `self` are left untouched; `self.s` and `self.sg`
-    /// are updated to the pre-event values, and the derived adjoint derivatives
-    /// `self.ds` and `self.dsg` are refreshed from `adj_eqn`.
-    ///
-    /// Note: mass matrix equations are not supported for this operation.
-    fn state_mut_op_with_adjoint_and_reset<'a, Eqn, Method, G, R>(
-        &mut self,
-        adj_eqn: &mut AdjointEquations<'a, Eqn, Method>,
-        reset_op: &G,
-        root_op: &R,
-        root_idx: usize,
-        fwd_state_minus: &Self,
-        fwd_state_plus: &Self,
-    ) -> Result<(), DiffsolError>
-    where
-        Eqn: OdeEquationsAdjoint<T = V::T, V = V, C = V::C>,
-        Method: OdeSolverMethod<'a, Eqn>,
-        G: NonLinearOpJacobian<T = V::T, V = V, M = Eqn::M>
-            + NonLinearOpAdjoint<T = V::T, V = V, M = Eqn::M>
-            + NonLinearOpSensAdjoint<T = V::T, V = V, M = Eqn::M>
-            + NonLinearOpTimePartial<T = V::T, V = V, M = Eqn::M>,
-        R: NonLinearOpJacobian<T = V::T, V = V, M = Eqn::M>
-            + NonLinearOpAdjoint<T = V::T, V = V, M = Eqn::M>
-            + NonLinearOpSensAdjoint<T = V::T, V = V, M = Eqn::M>
-            + NonLinearOpTimePartial<T = V::T, V = V, M = Eqn::M>,
-    {
-        let eqn = adj_eqn.eqn();
-        if eqn.mass().is_some() {
-            return Err(ode_solver_error!(MassMatrixNotSupported));
-        }
-
-        let nroots = root_op.nout();
-        if root_idx >= nroots {
-            return Err(ode_solver_error!(
-                Other,
-                format!(
-                    "root index {root_idx} out of bounds for root function with {nroots} outputs"
-                )
-            ));
-        }
-
-        let ctx = eqn.context().clone();
-        let t_event = fwd_state_minus.as_ref().t;
-        let y_minus = fwd_state_minus.as_ref().y;
-        let y_plus = fwd_state_plus.as_ref().y;
-        let f_minus = fwd_state_minus.as_ref().dy;
-        let f_plus = fwd_state_plus.as_ref().dy;
-        let nchannels = self.as_ref().s.len();
-        let nstates = y_minus.len();
-        let nparams = eqn.rhs().nparams();
-
-        let reset_t = reset_op.time_derive(y_minus, t_event);
-        let root_t = root_op.time_derive(y_minus, t_event);
-
-        let mut correction_dir = V::zeros(nstates, ctx.clone());
-        reset_op.jac_mul_inplace(y_minus, t_event, f_minus, &mut correction_dir);
-        correction_dir += reset_t;
-        correction_dir -= f_plus;
-
-        let mut root_flow = V::zeros(nroots, ctx.clone());
-        root_op.jac_mul_inplace(y_minus, t_event, f_minus, &mut root_flow);
-        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
-        let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
-        if denom.abs() <= denom_tol {
-            return Err(ode_solver_error!(
-                Other,
-                "reset adjoint correction undefined: active root derivative along flow is zero"
-            ));
-        }
-
-        let (l_minus, l_plus) = if adj_eqn.with_out() {
-            if let Some(out_op) = eqn.out() {
-                (
-                    Some(out_op.call(y_minus, t_event)),
-                    Some(out_op.call(y_plus, t_event)),
-                )
-            } else {
-                (None, None)
-            }
-        } else {
-            (None, None)
-        };
-
-        let mut root_basis = V::zeros(nroots, ctx.clone());
-        let mut reset_adj = V::zeros(nstates, ctx.clone());
-        let mut root_adj = V::zeros(nstates, ctx.clone());
-        let mut reset_sens_adj = V::zeros(nparams, ctx.clone());
-        let mut root_sens_adj = V::zeros(nparams, ctx.clone());
-
-        for i in 0..nchannels {
-            let alpha = {
-                let state = self.as_ref();
-                let lambda_i = &state.s[i];
-                let mut alpha_num = V::T::zero();
-                for j in 0..nstates {
-                    alpha_num += lambda_i.get_index(j) * correction_dir.get_index(j);
-                }
-                if let (Some(l_minus), Some(l_plus)) = (&l_minus, &l_plus) {
-                    alpha_num += l_minus.get_index(i) - l_plus.get_index(i);
-                }
-                alpha_num / denom
-            };
-
-            {
-                let state = self.as_ref();
-                reset_op.jac_transpose_mul_inplace(y_minus, t_event, &state.s[i], &mut reset_adj);
-                reset_op.sens_transpose_mul_inplace(
-                    y_minus,
-                    t_event,
-                    &state.s[i],
-                    &mut reset_sens_adj,
-                );
-            }
-
-            root_basis.set_index(root_idx, alpha);
-            root_op.jac_transpose_mul_inplace(y_minus, t_event, &root_basis, &mut root_adj);
-            root_op.sens_transpose_mul_inplace(y_minus, t_event, &root_basis, &mut root_sens_adj);
-            root_basis.set_index(root_idx, V::T::zero());
-
-            let state = self.as_mut();
-            state.s[i].copy_from(&root_adj);
-            state.s[i].axpy(-V::T::one(), &reset_adj, V::T::one());
-            state.sg[i] -= &reset_sens_adj;
-            state.sg[i] += &root_sens_adj;
-        }
-        refresh_augmented_state::<V, _, Eqn, _>(self, adj_eqn)
-    }
-
-    /// Add the terminal-root adjoint correction for a root-defined final time.
-    ///
-    /// Given a forward terminal state satisfying the active root condition
-    /// `r_k(y_f, t_f, p) = 0`, this method adds the terminal contribution
-    /// `lambda_f += r_{x,k}^T * (u_k / d)` and `q_f += r_{p,k}^T * (u_k / d)` to each adjoint
-    /// channel, where `u_k` is the corresponding model output component and
-    /// `d = [r_x f_f]_k + [r_t]_k`.
-    ///
-    /// The current `self.s` and `self.sg` values are updated in place. If no model output is
-    /// available, this method is a no-op.
-    fn state_mut_adjoint_terminal_root<'a, Eqn, Method>(
-        &mut self,
-        adj_eqn: &mut AdjointEquations<'a, Eqn, Method>,
-        root_idx: usize,
-        forward: &Self,
-    ) -> Result<(), DiffsolError>
-    where
-        Eqn: OdeEquationsAdjoint<
-            T = V::T,
-            V = V,
-            C = V::C,
-            Root: NonLinearOpJacobian<T = V::T, V = V, M = Eqn::M>
-                      + NonLinearOpAdjoint<T = V::T, V = V, M = Eqn::M>
-                      + NonLinearOpSensAdjoint<T = V::T, V = V, M = Eqn::M>
-                      + NonLinearOpTimePartial<T = V::T, V = V, M = Eqn::M>,
-            Out: NonLinearOp<T = V::T, V = V, M = Eqn::M>,
-        >,
-        Method: OdeSolverMethod<'a, Eqn>,
-    {
-        let eqn = adj_eqn.eqn();
-
-        if eqn.mass().is_some() {
-            return Err(ode_solver_error!(MassMatrixNotSupported));
-        }
-
-        if !adj_eqn.with_out() {
-            return Ok(());
-        }
-
-        let Some(out_op) = eqn.out() else {
-            return Ok(());
-        };
-        let Some(root_op) = eqn.root() else {
-            return Ok(());
-        };
-        let forward = forward.as_ref();
-
-        let nout = out_op.nout();
-        let state = self.as_ref();
-        if state.s.len() != nout || state.sg.len() != nout || state.dsg.len() != nout {
-            return Ok(());
-        }
-
-        let nroots = root_op.nout();
-        if root_idx >= nroots {
-            return Err(ode_solver_error!(
-                Other,
-                format!(
-                    "root index {root_idx} out of bounds for root function with {nroots} outputs"
-                )
-            ));
-        }
-
-        let ctx = eqn.context().clone();
-        let out = out_op.call(forward.y, forward.t);
-        let root_t = root_op.time_derive(forward.y, forward.t);
-        let mut root_flow = V::zeros(nroots, ctx.clone());
-        root_op.jac_mul_inplace(forward.y, forward.t, forward.dy, &mut root_flow);
-        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
-        let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
-        if denom.abs() <= denom_tol {
-            return Err(ode_solver_error!(
-                Other,
-                "terminal root adjoint correction undefined: active root derivative along flow is zero"
-            ));
-        }
-
-        let nstates = eqn.rhs().nstates();
-        let nparams = eqn.rhs().nparams();
-        let mut root_basis = V::zeros(nroots, ctx.clone());
-        let mut lambda_corr = V::zeros(nstates, ctx.clone());
-        let mut q_corr = V::zeros(nparams, ctx.clone());
-        for i in 0..nout {
-            root_basis.set_index(root_idx, out.get_index(i) / denom);
-            root_op.jac_transpose_mul_inplace(forward.y, forward.t, &root_basis, &mut lambda_corr);
-            root_op.sens_transpose_mul_inplace(forward.y, forward.t, &root_basis, &mut q_corr);
-            root_basis.set_index(root_idx, V::T::zero());
-            let state = self.as_mut();
-            state.s[i] += &lambda_corr;
-            state.sg[i] += &q_corr;
-        }
-        refresh_augmented_state::<V, _, Eqn, _>(self, adj_eqn)
     }
 
     /// Create a new solver state from an ODE problem.
@@ -1384,6 +1328,8 @@ mod test {
     #[test]
     fn state_mut_op_with_sens_and_reset_matches_autonomous_formula() {
         let problem = scalar_problem(0.25);
+        let rhs = problem.eqn.rhs();
+        let has_mass = problem.eqn.mass().is_some();
         let p = TestVec::from_vec(vec![1.2, -0.7], crate::NalgebraContext);
         let mut state = make_state(&problem, 0.0, 2.0, [0.3, -0.4]);
 
@@ -1423,7 +1369,8 @@ mod test {
         let root = ParameterisedOp::new(&root, &p);
 
         state
-            .state_mut_op_with_sens_and_reset(&problem.eqn, &reset, &root, 1)
+            .as_mut()
+            .state_mut_op_with_sens_and_reset(&rhs, has_mass, &reset, &root, 1)
             .unwrap();
 
         assert_scalar_close(state.as_ref().y[0], 3.31);
@@ -1435,6 +1382,8 @@ mod test {
     #[test]
     fn state_mut_op_with_sens_and_reset_uses_selected_root_component() {
         let problem = scalar_problem(0.25);
+        let rhs = problem.eqn.rhs();
+        let has_mass = problem.eqn.mass().is_some();
         let p = TestVec::from_vec(vec![1.2, -0.7], crate::NalgebraContext);
         let mut state_root0 = make_state(&problem, 0.0, 2.0, [0.3, -0.4]);
         let mut state_root1 = state_root0.clone();
@@ -1475,10 +1424,12 @@ mod test {
         let root = ParameterisedOp::new(&root, &p);
 
         state_root0
-            .state_mut_op_with_sens_and_reset(&problem.eqn, &reset, &root, 0)
+            .as_mut()
+            .state_mut_op_with_sens_and_reset(&rhs, has_mass, &reset, &root, 0)
             .unwrap();
         state_root1
-            .state_mut_op_with_sens_and_reset(&problem.eqn, &reset, &root, 1)
+            .as_mut()
+            .state_mut_op_with_sens_and_reset(&rhs, has_mass, &reset, &root, 1)
             .unwrap();
 
         assert!(
@@ -1490,6 +1441,8 @@ mod test {
     #[test]
     fn state_mut_op_with_sens_and_reset_supports_root_time_dependence_without_state_dependence() {
         let problem = scalar_problem(0.5);
+        let rhs = problem.eqn.rhs();
+        let has_mass = problem.eqn.mass().is_some();
         let p = TestVec::from_vec(vec![1.0, 2.0], crate::NalgebraContext);
         let mut state = make_state(&problem, 1.5, 1.2, [0.1, -0.2]);
 
@@ -1519,7 +1472,8 @@ mod test {
         );
         let root = ParameterisedOp::new(&root, &p);
         state
-            .state_mut_op_with_sens_and_reset(&problem.eqn, &reset, &root, 0)
+            .as_mut()
+            .state_mut_op_with_sens_and_reset(&rhs, has_mass, &reset, &root, 0)
             .unwrap();
 
         assert_scalar_close(state.as_ref().y[0], 2.2);
@@ -1531,6 +1485,8 @@ mod test {
     #[test]
     fn state_mut_op_with_sens_and_reset_matches_time_dependent_formula() {
         let problem = scalar_problem(0.1);
+        let rhs = problem.eqn.rhs();
+        let has_mass = problem.eqn.mass().is_some();
         let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
         let mut state = make_state(&problem, 3.0, 2.0, [0.2, -0.1]);
 
@@ -1564,7 +1520,8 @@ mod test {
         );
         let root = ParameterisedOp::new(&root, &p);
         state
-            .state_mut_op_with_sens_and_reset(&problem.eqn, &reset, &root, 0)
+            .as_mut()
+            .state_mut_op_with_sens_and_reset(&rhs, has_mass, &reset, &root, 0)
             .unwrap();
 
         assert_scalar_close(state.as_ref().y[0], 5.8);
@@ -1619,6 +1576,8 @@ mod test {
     #[test]
     fn state_mut_op_with_sens_and_reset_rejects_invalid_root_index() {
         let problem = scalar_problem(0.25);
+        let rhs = problem.eqn.rhs();
+        let has_mass = problem.eqn.mass().is_some();
         let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
         let mut state = make_state(&problem, 0.0, 1.0, [0.0, 0.0]);
 
@@ -1653,7 +1612,8 @@ mod test {
         let root = ParameterisedOp::new(&root, &p);
 
         let err = state
-            .state_mut_op_with_sens_and_reset(&problem.eqn, &reset, &root, 2)
+            .as_mut()
+            .state_mut_op_with_sens_and_reset(&rhs, has_mass, &reset, &root, 2)
             .unwrap_err();
         assert_other_error(err, "root index 2 out of bounds");
     }
@@ -1661,6 +1621,8 @@ mod test {
     #[test]
     fn state_mut_op_with_sens_and_reset_rejects_zero_event_denominator() {
         let problem = scalar_problem(0.0);
+        let rhs = problem.eqn.rhs();
+        let has_mass = problem.eqn.mass().is_some();
         let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
         let mut state = make_state(&problem, 0.0, 0.0, [0.0, 0.0]);
 
@@ -1686,7 +1648,8 @@ mod test {
         let root = ParameterisedOp::new(&root, &p);
 
         let err = state
-            .state_mut_op_with_sens_and_reset(&problem.eqn, &reset, &root, 0)
+            .as_mut()
+            .state_mut_op_with_sens_and_reset(&rhs, has_mass, &reset, &root, 0)
             .unwrap_err();
         assert_other_error(err, "active root derivative along flow is zero");
     }
@@ -1694,6 +1657,8 @@ mod test {
     #[test]
     fn state_mut_op_with_sens_and_reset_rejects_mass_matrix_equations() {
         let problem = scalar_problem_with_mass(0.25);
+        let rhs = problem.eqn.rhs();
+        let has_mass = problem.eqn.mass().is_some();
         let p = TestVec::from_vec(vec![1.0, -2.0], crate::NalgebraContext);
         let mut state = TestState::new_without_initialise(&problem).unwrap();
 
@@ -1719,7 +1684,8 @@ mod test {
         let root = ParameterisedOp::new(&root, &p);
 
         let err = state
-            .state_mut_op_with_sens_and_reset(&problem.eqn, &reset, &root, 0)
+            .as_mut()
+            .state_mut_op_with_sens_and_reset(&rhs, has_mass, &reset, &root, 0)
             .unwrap_err();
         assert!(matches!(
             err,
@@ -1792,6 +1758,7 @@ mod test {
         let dy_before = state.as_ref().dy[0];
 
         state
+            .as_mut()
             .state_mut_op_with_adjoint_and_reset(
                 &mut adjoint_eqn,
                 &reset,
@@ -1889,6 +1856,7 @@ mod test {
         let root = ParameterisedOp::new(&root, &p);
 
         state_root0
+            .as_mut()
             .state_mut_op_with_adjoint_and_reset(
                 &mut adjoint_eqn_root0,
                 &reset,
@@ -1899,6 +1867,7 @@ mod test {
             )
             .unwrap();
         state_root1
+            .as_mut()
             .state_mut_op_with_adjoint_and_reset(
                 &mut adjoint_eqn_root1,
                 &reset,
@@ -1974,6 +1943,7 @@ mod test {
         let dy_before = state.as_ref().dy[0];
 
         state
+            .as_mut()
             .state_mut_op_with_adjoint_and_reset(
                 &mut adjoint_eqn,
                 &reset,
@@ -2046,6 +2016,7 @@ mod test {
         let root = ParameterisedOp::new(&root, &p);
 
         let err = state
+            .as_mut()
             .state_mut_op_with_adjoint_and_reset(
                 &mut adjoint_eqn,
                 &reset,
@@ -2102,6 +2073,7 @@ mod test {
         let root = ParameterisedOp::new(&root, &p);
 
         let err = state
+            .as_mut()
             .state_mut_op_with_adjoint_and_reset(
                 &mut adjoint_eqn,
                 &reset,
@@ -2161,6 +2133,7 @@ mod test {
         let root = ParameterisedOp::new(&root, &p);
 
         let err = state
+            .as_mut()
             .state_mut_op_with_adjoint_and_reset(
                 &mut adjoint_eqn,
                 &reset,

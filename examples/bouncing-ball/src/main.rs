@@ -12,29 +12,29 @@ fn main() {
             "
         g { 9.81 } h { 10.0 }
         u_i {
-            x = h,
-            v = 0,
+            position = h,
+            velocity = 0,
         }
         F_i {
-            v,
+            velocity,
             -g,
         }
         stop {
-            x,
+            position,
         }
     ",
         )
         .unwrap();
     let mut solver = problem.bdf::<LS>().unwrap();
 
-    let mut x = Vec::new();
-    let mut v = Vec::new();
+    let mut position = Vec::new();
+    let mut velocity = Vec::new();
     let mut t = Vec::new();
     let final_time = 10.0;
 
     // save the initial state
-    x.push(solver.state().y[0]);
-    v.push(solver.state().y[1]);
+    position.push(solver.state().y[0]);
+    velocity.push(solver.state().y[1]);
     t.push(0.0);
 
     // solve until the final time is reached
@@ -60,15 +60,17 @@ fn main() {
             Ok(OdeSolverStopReason::TstopReached) => break,
             Err(_) => panic!("unexpected solver error"),
         }
-        x.push(solver.state().y[0]);
-        v.push(solver.state().y[1]);
+        position.push(solver.state().y[0]);
+        velocity.push(solver.state().y[1]);
         t.push(solver.state().t);
     }
     let mut plot = Plot::new();
-    let x = Scatter::new(t.clone(), x).mode(Mode::Lines).name("x");
-    let v = Scatter::new(t, v).mode(Mode::Lines).name("v");
-    plot.add_trace(x);
-    plot.add_trace(v);
+    let position = Scatter::new(t.clone(), position)
+        .mode(Mode::Lines)
+        .name("position");
+    let velocity = Scatter::new(t, velocity).mode(Mode::Lines).name("velocity");
+    plot.add_trace(position);
+    plot.add_trace(velocity);
 
     let layout = Layout::new()
         .x_axis(Axis::new().title("t"))

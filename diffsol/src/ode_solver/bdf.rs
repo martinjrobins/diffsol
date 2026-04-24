@@ -2381,7 +2381,7 @@ mod test {
         test_root_found_index(solver, &soln, 0, 1e-4);
     }
 
-    /// Test that `solve()` halts on the first root, even when a reset function is configured.
+    /// Test that `solve()` applies resets and continues to the final time.
     #[test]
     fn test_solve_with_reset_bdf() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
@@ -2391,7 +2391,7 @@ mod test {
         test_solve_with_reset(solver, &soln);
     }
 
-    /// Test that `solve_dense()` halts on the first root, even when a reset function is configured.
+    /// Test that `solve_dense()` applies resets and continues to the final evaluation time.
     #[test]
     fn test_solve_dense_with_reset_bdf() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
@@ -2401,7 +2401,7 @@ mod test {
         test_solve_dense_with_reset(solver, &soln);
     }
 
-    /// Test that `solve_dense_sensitivities()` halts on the first root for BDF.
+    /// Test that `solve_dense_sensitivities()` applies resets and continues for BDF.
     #[test]
     fn test_solve_dense_sensitivities_with_reset_bdf() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem_sens;

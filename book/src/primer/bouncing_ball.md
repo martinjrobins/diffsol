@@ -47,7 +47,11 @@ When the ball hits the ground, we need to update the velocity of the ball accord
 v' = -e v
 \\]
 
-where \\(e\\) is the coefficient of restitution. However, to implement this in our ODE solver, we need to detect when the ball hits the ground. We can do this by using Diffsol's event handling feature, which allows us to specify a function that is equal to zero when the event occurs, i.e. when the ball hits the ground. This function \\(g(\mathbf{y}, t)\\) is called an event or root function, and for our bouncing ball problem, it is given by:
+where \\(e\\) is the coefficient of restitution. We will first implement this using Diffsol's procedural event-handling API, then rewrite the same event declaratively using the DiffSL `stop` and `reset` tensors.
+
+## Procedural approach
+
+To implement the bounce in Rust, we need to detect when the ball hits the ground. We can do this by using Diffsol's event handling feature, which allows us to specify a function that is equal to zero when the event occurs, i.e. when the ball hits the ground. This function \\(g(\mathbf{y}, t)\\) is called an event or root function, and for our bouncing ball problem, it is given by:
 
 \\[
 g(\mathbf{y}, t) = x
@@ -62,3 +66,15 @@ In code, the bouncing ball problem can be solved using Diffsol as follows:
 ```
 
 {{#include images/bouncing-ball.html}}
+
+## Declarative approach
+
+In DiffSL, we can move the event definition into the model itself. The `stop` tensor declares that an event occurs when `x = 0`, and the `reset` tensor declares the post-impact state. In this version we also reset the position to a very small positive value so that the next step starts just above the ground and does not immediately retrigger the same event.
+
+Because the model provides both `stop` and `reset`, the high-level `solve` call now handles each bounce automatically. The example can therefore solve straight to the final time and read the returned trajectory directly.
+
+```rust,ignore
+{{#include ../../../examples/bouncing-ball-declarative/src/main.rs}}
+```
+
+{{#include images/bouncing-ball-declarative.html}}

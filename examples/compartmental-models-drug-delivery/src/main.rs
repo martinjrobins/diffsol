@@ -11,12 +11,12 @@ fn main() {
             "
         Vc { 1000.0 } Vp1 { 1000.0 } CL { 100.0 } Qp1 { 50.0 }
         u_i {
-            qc = 0,
-            qp1 = 0,
+            centralamount = 0,
+            peripheralamount = 0,
         }
         F_i {
-            - qc / Vc * CL - Qp1 * (qc / Vc - qp1 / Vp1),
-            Qp1 * (qc / Vc - qp1 / Vp1),
+            - centralamount / Vc * CL - Qp1 * (centralamount / Vc - peripheralamount / Vp1),
+            Qp1 * (centralamount / Vc - peripheralamount / Vp1),
         }
     ",
         )
@@ -24,14 +24,14 @@ fn main() {
     let mut solver = problem.bdf::<LS>().unwrap();
     let doses = vec![(0.0, 1000.0), (6.0, 1000.0), (12.0, 1000.0), (18.0, 1000.0)];
 
-    let mut q_c = Vec::new();
-    let mut q_p1 = Vec::new();
+    let mut central_amount = Vec::new();
+    let mut peripheral_amount = Vec::new();
     let mut time = Vec::new();
 
     // apply the first dose and save the initial state
     solver.state_mut().y[0] = doses[0].1;
-    q_c.push(solver.state().y[0]);
-    q_p1.push(solver.state().y[1]);
+    central_amount.push(solver.state().y[0]);
+    peripheral_amount.push(solver.state().y[1]);
     time.push(0.0);
 
     // solve and apply the remaining doses
@@ -39,8 +39,8 @@ fn main() {
         solver.set_stop_time(t).unwrap();
         loop {
             let ret = solver.step();
-            q_c.push(solver.state().y[0]);
-            q_p1.push(solver.state().y[1]);
+            central_amount.push(solver.state().y[0]);
+            peripheral_amount.push(solver.state().y[1]);
             time.push(solver.state().t);
             match ret {
                 Ok(OdeSolverStopReason::InternalTimestep) => continue,
@@ -51,12 +51,14 @@ fn main() {
         solver.state_mut().y[0] += dose;
     }
     let mut plot = Plot::new();
-    let q_c = Scatter::new(time.clone(), q_c)
+    let central_amount = Scatter::new(time.clone(), central_amount)
         .mode(Mode::Lines)
-        .name("q_c");
-    let q_p1 = Scatter::new(time, q_p1).mode(Mode::Lines).name("q_p1");
-    plot.add_trace(q_c);
-    plot.add_trace(q_p1);
+        .name("central_amount");
+    let peripheral_amount = Scatter::new(time, peripheral_amount)
+        .mode(Mode::Lines)
+        .name("peripheral_amount");
+    plot.add_trace(central_amount);
+    plot.add_trace(peripheral_amount);
 
     let layout = Layout::new()
         .x_axis(Axis::new().title("t [h]"))

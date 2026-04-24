@@ -3,8 +3,7 @@ use crate::{
     scalar::{scale, Scalar},
     ConstantOp, Matrix, MatrixHost, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
     NonLinearOpSensAdjoint, NonLinearOpTimePartial, OdeBuilder, OdeEquations, OdeEquationsImplicit,
-    OdeEquationsImplicitAdjoint, OdeEquationsImplicitAdjointWithReset, OdeEquationsImplicitSens,
-    OdeSolverProblem, Op, Vector,
+    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
 use std::ops::MulAssign;
@@ -540,7 +539,7 @@ pub fn exponential_decay_with_single_reset_root_problem_adjoint<M: MatrixHost + 
     integrate_out: bool,
 ) -> (
     OdeSolverProblem<
-        impl OdeEquationsImplicitAdjointWithReset<
+        impl OdeEquationsImplicitAdjoint<
             M = M,
             V = M::V,
             T = M::T,
@@ -832,8 +831,8 @@ pub fn exponential_decay_with_two_roots_problem<M: MatrixHost + 'static>() -> (
 
 // ------------------------------------------------------------------
 // Exponential-decay problem with Reset (R(y) = y + 2) and forward
-// sensitivity equations. Solve methods halt at the first root event,
-// so the reset is not applied automatically.
+// sensitivity equations. Public dense sensitivity solves apply the reset
+// automatically; staged sensitivity solves still expose root events.
 //
 // Root 0: y[0] - 0.6  (first root, fires at t_root = 10·ln(5/3) ≈ 5.108)
 // Root 1: y[0] - 2.0  (later root, not reached because solve halts at root 0)
@@ -901,11 +900,11 @@ fn exponential_decay_reset_y_plus_2_sens<M: Matrix>(
 ///
 /// `dy/dt = -k·y`, `y(0) = [y0, y0]`, `p = [k, y0] = [0.1, 1.0]`, 2 states, 2 params.
 ///
-/// At t_root ≈ 5.108 root 0 fires. If reset is applied manually (`y -> y + 2`),
-/// root 1 then fires at t_stop ≈ 7.732.
+/// At t_root ≈ 5.108 root 0 fires. If reset is applied (`y -> y + 2`), root 1
+/// then fires at t_stop ≈ 7.732.
 ///
 /// Returns the problem with a single solution point at t_stop containing the exact y and
-/// sensitivity vectors for comparison in manual-reset continuation tests.
+/// sensitivity vectors for comparison in reset-continuation tests.
 #[allow(clippy::type_complexity)]
 pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
     OdeSolverProblem<
