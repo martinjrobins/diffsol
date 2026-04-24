@@ -1396,18 +1396,36 @@ pub unsafe extern "C" fn diffsol_ode_set_param_atol(
     }
 }
 
-#[cfg(all(test, feature = "diffsl-external-f64"))]
+#[cfg(test)]
 mod tests {
+    use std::ffi::CStr;
     use std::ptr;
 
+    use crate::error_c::{
+        diffsol_error_code, diffsol_last_error_file, diffsol_last_error_line,
+        diffsol_last_error_message,
+    };
+    #[cfg(feature = "diffsl-external-f64")]
     use crate::initial_condition_options::InitialConditionSolverOptions;
+    #[cfg(feature = "diffsl-external-f64")]
+    use crate::initial_condition_options_c::{
+        diffsol_ic_options_free, diffsol_ic_options_get_max_linesearch_iterations,
+        diffsol_ic_options_get_use_linesearch, diffsol_ic_options_set_max_linesearch_iterations,
+        diffsol_ic_options_set_use_linesearch,
+    };
     use crate::linear_solver_type::LinearSolverType;
     use crate::linear_solver_type_c::{
         diffsol_linear_solver_type_count, diffsol_linear_solver_type_is_valid,
         diffsol_linear_solver_type_name, linear_solver_to_i32,
     };
     use crate::matrix_type::MatrixType;
+    use crate::matrix_type_c::{
+        diffsol_matrix_type_count, diffsol_matrix_type_is_valid, diffsol_matrix_type_name,
+        matrix_type_to_i32,
+    };
+    #[cfg(feature = "diffsl-external-f64")]
     use crate::ode_options::OdeSolverOptions;
+    #[cfg(feature = "diffsl-external-f64")]
     use crate::ode_options_c::{
         diffsol_ode_options_free, diffsol_ode_options_get_max_nonlinear_solver_iterations,
         diffsol_ode_options_get_min_timestep,
@@ -1424,31 +1442,68 @@ mod tests {
         diffsol_scalar_type_count, diffsol_scalar_type_is_valid, diffsol_scalar_type_name,
         scalar_type_to_i32,
     };
+    #[cfg(feature = "diffsl-external-f64")]
     use crate::solution_wrapper_c::{
         diffsol_solution_wrapper_get_sens, diffsol_solution_wrapper_get_ts,
         diffsol_solution_wrapper_get_ys,
     };
+    use crate::test_support::clear_last_error;
+    #[cfg(feature = "diffsl-external-f64")]
     use crate::test_support::{
-        assert_close, assert_last_error_contains, c_string, clear_last_error, ffi_free_solution,
-        ffi_read_host_array_list_matrices, ffi_read_host_array_matrix, ffi_read_host_array_vector,
-        find_time_window, logistic_state, logistic_state_dr, mass_state_deps, rhs_input_deps,
-        rhs_state_deps, ASSERT_TOL, LOGISTIC_X0,
-    };
-    use crate::{
-        initial_condition_options_c::{
-            diffsol_ic_options_free, diffsol_ic_options_get_max_linesearch_iterations,
-            diffsol_ic_options_get_use_linesearch,
-            diffsol_ic_options_set_max_linesearch_iterations,
-            diffsol_ic_options_set_use_linesearch,
-        },
-        matrix_type_c::{
-            diffsol_matrix_type_count, diffsol_matrix_type_is_valid, diffsol_matrix_type_name,
-            matrix_type_to_i32,
-        },
+        assert_close, ffi_free_solution, ffi_read_host_array_list_matrices,
+        ffi_read_host_array_matrix, ffi_read_host_array_vector, find_time_window, logistic_state,
+        logistic_state_dr, mass_state_deps, rhs_input_deps, rhs_state_deps, ASSERT_TOL,
+        LOGISTIC_X0,
     };
 
     use super::*;
 
+    unsafe fn c_string(ptr: *const std::os::raw::c_char) -> String {
+        assert!(!ptr.is_null(), "expected non-null C string");
+        unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_owned()
+    }
+
+    unsafe fn assert_last_error_set() {
+        assert_eq!(
+            unsafe { diffsol_error_code() },
+            1,
+            "expected last error to be set"
+        );
+        let message_ptr = unsafe { diffsol_last_error_message() };
+        assert!(
+            !message_ptr.is_null(),
+            "expected last error message to be set"
+        );
+        let message = unsafe { c_string(message_ptr) };
+        assert!(
+            !message.is_empty(),
+            "expected last error message to be non-empty"
+        );
+        let file_ptr = unsafe { diffsol_last_error_file() };
+        assert!(!file_ptr.is_null(), "expected last error file to be set");
+        assert!(
+            unsafe { diffsol_last_error_line() } > 0,
+            "expected last error line to be > 0"
+        );
+    }
+
+    unsafe fn assert_last_error_contains(expected_substring: &str) {
+        unsafe { assert_last_error_set() };
+        let message_ptr = unsafe { diffsol_last_error_message() };
+        let message = unsafe { c_string(message_ptr) };
+        assert!(
+            message.contains(expected_substring),
+            "expected last error message to contain {expected_substring:?}, got {message:?}"
+        );
+        let file_ptr = unsafe { diffsol_last_error_file() };
+        assert!(!file_ptr.is_null(), "expected last error file to be set");
+        assert!(
+            unsafe { diffsol_last_error_line() } > 0,
+            "expected last error line to be > 0"
+        );
+    }
+
+    #[cfg(feature = "diffsl-external-f64")]
     fn to_dep_pairs(values: &[(usize, usize)]) -> Vec<DiffsolDepPair> {
         values
             .iter()
@@ -1456,6 +1511,7 @@ mod tests {
             .collect()
     }
 
+    #[cfg(feature = "diffsl-external-f64")]
     unsafe fn make_ode_ptr(
         matrix_type: i32,
         linear_solver: i32,
@@ -1476,27 +1532,6 @@ mod tests {
                 mass_state_deps.as_ptr(),
                 mass_state_deps.len(),
             )
-        }
-    }
-
-    unsafe fn assert_optional_f64(
-        getter: unsafe extern "C" fn(*const OdeWrapper, *mut i32, *mut f64) -> i32,
-        ode: *const OdeWrapper,
-        expected: Option<f64>,
-        name: &str,
-    ) {
-        let mut is_some = -1;
-        let mut value = -1.0;
-        assert_eq!(unsafe { getter(ode, &mut is_some, &mut value) }, DIFFSOL_OK);
-        match expected {
-            Some(expected) => {
-                assert_eq!(is_some, 1, "{name} is_some");
-                assert_close(value, expected, ASSERT_TOL, name);
-            }
-            None => {
-                assert_eq!(is_some, 0, "{name} is_some");
-                assert_close(value, 0.0, ASSERT_TOL, name);
-            }
         }
     }
 
@@ -1566,8 +1601,14 @@ mod tests {
             assert_eq!(status, DIFFSOL_BAD_ARG);
             assert!(out_array.is_null());
             assert_last_error_contains("invalid arguments to diffsol_ode_y0");
-            clear_last_error();
+        }
+    }
 
+    #[cfg(feature = "diffsl-external-f64")]
+    #[test]
+    fn c_api_rejects_invalid_external_ode_arguments() {
+        clear_last_error();
+        unsafe {
             let ode = make_ode_ptr(
                 99,
                 linear_solver_to_i32(LinearSolverType::Default),
@@ -1578,6 +1619,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "diffsl-external-f64")]
     #[test]
     fn c_api_full_lifecycle_matches_external_logistic_model() {
         clear_last_error();
@@ -1614,64 +1656,6 @@ mod tests {
                 diffsol_ode_set_ode_solver(ode, ode_solver_to_i32(OdeSolverType::Bdf)),
                 DIFFSOL_OK
             );
-
-            assert_eq!(diffsol_ode_set_rtol(ode, 1e-8), DIFFSOL_OK);
-            assert_eq!(diffsol_ode_set_atol(ode, 1e-8), DIFFSOL_OK);
-            let mut rtol = 0.0;
-            let mut atol = 0.0;
-            assert_eq!(diffsol_ode_get_rtol(ode, &mut rtol), DIFFSOL_OK);
-            assert_eq!(diffsol_ode_get_atol(ode, &mut atol), DIFFSOL_OK);
-            assert_close(rtol, 1e-8, ASSERT_TOL, "rtol roundtrip");
-            assert_close(atol, 1e-8, ASSERT_TOL, "atol roundtrip");
-
-            assert_eq!(diffsol_ode_set_t0(ode, 0.125), DIFFSOL_OK);
-            assert_eq!(diffsol_ode_set_h0(ode, 0.25), DIFFSOL_OK);
-            let mut t0 = 0.0;
-            let mut h0 = 0.0;
-            assert_eq!(diffsol_ode_get_t0(ode, &mut t0), DIFFSOL_OK);
-            assert_eq!(diffsol_ode_get_h0(ode, &mut h0), DIFFSOL_OK);
-            assert_close(t0, 0.125, ASSERT_TOL, "t0 roundtrip");
-            assert_close(h0, 0.25, ASSERT_TOL, "h0 roundtrip");
-
-            assert_eq!(diffsol_ode_set_integrate_out(ode, 1), DIFFSOL_OK);
-            let mut integrate_out = 0;
-            assert_eq!(
-                diffsol_ode_get_integrate_out(ode, &mut integrate_out),
-                DIFFSOL_OK
-            );
-            assert_eq!(integrate_out, 1);
-            assert_eq!(diffsol_ode_set_integrate_out(ode, 0), DIFFSOL_OK);
-            assert_eq!(
-                diffsol_ode_get_integrate_out(ode, &mut integrate_out),
-                DIFFSOL_OK
-            );
-            assert_eq!(integrate_out, 0);
-
-            assert_eq!(diffsol_ode_set_sens_rtol(ode, 1, 1e-3), DIFFSOL_OK);
-            assert_eq!(diffsol_ode_set_sens_atol(ode, 1, 1e-4), DIFFSOL_OK);
-            assert_eq!(diffsol_ode_set_out_rtol(ode, 1, 2e-3), DIFFSOL_OK);
-            assert_eq!(diffsol_ode_set_out_atol(ode, 1, 2e-4), DIFFSOL_OK);
-            assert_eq!(diffsol_ode_set_param_rtol(ode, 1, 3e-3), DIFFSOL_OK);
-            assert_eq!(diffsol_ode_set_param_atol(ode, 1, 3e-4), DIFFSOL_OK);
-            assert_optional_f64(diffsol_ode_get_sens_rtol, ode, Some(1e-3), "sens rtol");
-            assert_optional_f64(diffsol_ode_get_sens_atol, ode, Some(1e-4), "sens atol");
-            assert_optional_f64(diffsol_ode_get_out_rtol, ode, Some(2e-3), "out rtol");
-            assert_optional_f64(diffsol_ode_get_out_atol, ode, Some(2e-4), "out atol");
-            assert_optional_f64(diffsol_ode_get_param_rtol, ode, Some(3e-3), "param rtol");
-            assert_optional_f64(diffsol_ode_get_param_atol, ode, Some(3e-4), "param atol");
-
-            assert_eq!(diffsol_ode_set_sens_rtol(ode, 0, 1e-3), DIFFSOL_OK);
-            assert_eq!(diffsol_ode_set_sens_atol(ode, 0, 1e-4), DIFFSOL_OK);
-            assert_eq!(diffsol_ode_set_out_rtol(ode, 0, 2e-3), DIFFSOL_OK);
-            assert_eq!(diffsol_ode_set_out_atol(ode, 0, 2e-4), DIFFSOL_OK);
-            assert_eq!(diffsol_ode_set_param_rtol(ode, 0, 3e-3), DIFFSOL_OK);
-            assert_eq!(diffsol_ode_set_param_atol(ode, 0, 3e-4), DIFFSOL_OK);
-            assert_optional_f64(diffsol_ode_get_sens_rtol, ode, None, "sens rtol none");
-            assert_optional_f64(diffsol_ode_get_sens_atol, ode, None, "sens atol none");
-            assert_optional_f64(diffsol_ode_get_out_rtol, ode, None, "out rtol none");
-            assert_optional_f64(diffsol_ode_get_out_atol, ode, None, "out atol none");
-            assert_optional_f64(diffsol_ode_get_param_rtol, ode, None, "param rtol none");
-            assert_optional_f64(diffsol_ode_get_param_atol, ode, None, "param atol none");
 
             let mut ic_options: *mut InitialConditionSolverOptions = ptr::null_mut();
             assert_eq!(diffsol_ode_get_ic_options(ode, &mut ic_options), DIFFSOL_OK);
@@ -1732,9 +1716,6 @@ mod tests {
             );
             assert_close(min_timestep, 1e-4, ASSERT_TOL, "min_timestep roundtrip");
             diffsol_ode_options_free(ode_options);
-
-            assert_eq!(diffsol_ode_set_t0(ode, 0.0), DIFFSOL_OK);
-            assert_eq!(diffsol_ode_set_h0(ode, 1.0), DIFFSOL_OK);
 
             let params = [2.0f64];
             let y = [0.25f64];
@@ -2236,6 +2217,27 @@ mod jit_tests {
         unsafe { CStr::from_ptr(ptr) }.to_str().unwrap().to_owned()
     }
 
+    unsafe fn assert_optional_f64(
+        getter: unsafe extern "C" fn(*const OdeWrapper, *mut i32, *mut f64) -> i32,
+        ode: *const OdeWrapper,
+        expected: Option<f64>,
+        name: &str,
+    ) {
+        let mut is_some = -1;
+        let mut value = -1.0;
+        assert_eq!(unsafe { getter(ode, &mut is_some, &mut value) }, DIFFSOL_OK);
+        match expected {
+            Some(expected) => {
+                assert_eq!(is_some, 1, "{name} is_some");
+                assert_close(value, expected, ASSERT_TOL, name);
+            }
+            None => {
+                assert_eq!(is_some, 0, "{name} is_some");
+                assert_close(value, 0.0, ASSERT_TOL, name);
+            }
+        }
+    }
+
     #[test]
     fn c_api_full_lifecycle_matches_jit_logistic_model() {
         clear_last_error();
@@ -2261,6 +2263,77 @@ mod jit_tests {
                     diffsol_ode_get_linear_solver(ode),
                     linear_solver_to_i32(LinearSolverType::Default)
                 );
+
+                assert_eq!(diffsol_ode_set_rtol(ode, 1e-8), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_set_atol(ode, 1e-8), DIFFSOL_OK);
+                let mut rtol = 0.0;
+                let mut atol = 0.0;
+                assert_eq!(diffsol_ode_get_rtol(ode, &mut rtol), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_get_atol(ode, &mut atol), DIFFSOL_OK);
+                assert_close(rtol, 1e-8, ASSERT_TOL, "jit rtol roundtrip");
+                assert_close(atol, 1e-8, ASSERT_TOL, "jit atol roundtrip");
+
+                assert_eq!(diffsol_ode_set_t0(ode, 0.125), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_set_h0(ode, 0.25), DIFFSOL_OK);
+                let mut t0 = 0.0;
+                let mut h0 = 0.0;
+                assert_eq!(diffsol_ode_get_t0(ode, &mut t0), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_get_h0(ode, &mut h0), DIFFSOL_OK);
+                assert_close(t0, 0.125, ASSERT_TOL, "jit t0 roundtrip");
+                assert_close(h0, 0.25, ASSERT_TOL, "jit h0 roundtrip");
+
+                assert_eq!(diffsol_ode_set_integrate_out(ode, 1), DIFFSOL_OK);
+                let mut integrate_out = 0;
+                assert_eq!(
+                    diffsol_ode_get_integrate_out(ode, &mut integrate_out),
+                    DIFFSOL_OK
+                );
+                assert_eq!(integrate_out, 1);
+                assert_eq!(diffsol_ode_set_integrate_out(ode, 0), DIFFSOL_OK);
+                assert_eq!(
+                    diffsol_ode_get_integrate_out(ode, &mut integrate_out),
+                    DIFFSOL_OK
+                );
+                assert_eq!(integrate_out, 0);
+
+                assert_eq!(diffsol_ode_set_sens_rtol(ode, 1, 1e-3), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_set_sens_atol(ode, 1, 1e-4), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_set_out_rtol(ode, 1, 2e-3), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_set_out_atol(ode, 1, 2e-4), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_set_param_rtol(ode, 1, 3e-3), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_set_param_atol(ode, 1, 3e-4), DIFFSOL_OK);
+                assert_optional_f64(diffsol_ode_get_sens_rtol, ode, Some(1e-3), "jit sens rtol");
+                assert_optional_f64(diffsol_ode_get_sens_atol, ode, Some(1e-4), "jit sens atol");
+                assert_optional_f64(diffsol_ode_get_out_rtol, ode, Some(2e-3), "jit out rtol");
+                assert_optional_f64(diffsol_ode_get_out_atol, ode, Some(2e-4), "jit out atol");
+                assert_optional_f64(
+                    diffsol_ode_get_param_rtol,
+                    ode,
+                    Some(3e-3),
+                    "jit param rtol",
+                );
+                assert_optional_f64(
+                    diffsol_ode_get_param_atol,
+                    ode,
+                    Some(3e-4),
+                    "jit param atol",
+                );
+
+                assert_eq!(diffsol_ode_set_sens_rtol(ode, 0, 1e-3), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_set_sens_atol(ode, 0, 1e-4), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_set_out_rtol(ode, 0, 2e-3), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_set_out_atol(ode, 0, 2e-4), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_set_param_rtol(ode, 0, 3e-3), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_set_param_atol(ode, 0, 3e-4), DIFFSOL_OK);
+                assert_optional_f64(diffsol_ode_get_sens_rtol, ode, None, "jit sens rtol none");
+                assert_optional_f64(diffsol_ode_get_sens_atol, ode, None, "jit sens atol none");
+                assert_optional_f64(diffsol_ode_get_out_rtol, ode, None, "jit out rtol none");
+                assert_optional_f64(diffsol_ode_get_out_atol, ode, None, "jit out atol none");
+                assert_optional_f64(diffsol_ode_get_param_rtol, ode, None, "jit param rtol none");
+                assert_optional_f64(diffsol_ode_get_param_atol, ode, None, "jit param atol none");
+
+                assert_eq!(diffsol_ode_set_t0(ode, 0.0), DIFFSOL_OK);
+                assert_eq!(diffsol_ode_set_h0(ode, 1.0), DIFFSOL_OK);
 
                 let params = [2.0f64];
                 let y = [0.25f64];

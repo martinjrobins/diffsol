@@ -32,7 +32,11 @@ use crate::ode_c::diffsol_host_array_list_free;
 use crate::scalar_type::ScalarType;
 use crate::scalar_type_c::scalar_type_to_i32;
 use crate::solution_wrapper::SolutionWrapper;
-#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
+#[cfg(any(
+    feature = "diffsl-external-f64",
+    feature = "diffsl-cranelift",
+    feature = "diffsl-llvm"
+))]
 use crate::solution_wrapper_c::diffsol_solution_wrapper_free;
 
 pub(crate) const ASSERT_TOL: f64 = 1e-5;
@@ -279,7 +283,11 @@ pub(crate) fn assert_solution_tail(
     }
 }
 
-#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
+#[cfg(any(
+    feature = "diffsl-external-f64",
+    feature = "diffsl-cranelift",
+    feature = "diffsl-llvm"
+))]
 pub(crate) unsafe fn ffi_free_solution(ptr: *mut SolutionWrapper) {
     if !ptr.is_null() {
         unsafe {
@@ -304,7 +312,11 @@ pub(crate) unsafe fn ffi_read_host_array_vector(ptr: *mut HostArray) -> Vec<f64>
     values
 }
 
-#[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-llvm"))]
+#[cfg(any(
+    feature = "diffsl-external-f64",
+    feature = "diffsl-cranelift",
+    feature = "diffsl-llvm"
+))]
 pub(crate) unsafe fn ffi_read_host_array_matrix(ptr: *mut HostArray) -> (usize, usize, Vec<f64>) {
     assert!(!ptr.is_null(), "host array pointer must not be null");
     assert_eq!(unsafe { diffsol_host_array_ndim(ptr) }, 2);
