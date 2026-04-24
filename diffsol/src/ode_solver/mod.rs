@@ -1205,6 +1205,7 @@ mod tests {
 
         let reset_time_tol =
             Eqn::T::from_f64(30.0).unwrap() * (soln.rtol * t_stop.abs() + soln.atol.get_index(0));
+        let post_event_dt = Eqn::T::from_f64(1e-6).unwrap();
         let reset_value = Eqn::T::from_f64(0.4).unwrap();
         let reset_value_tol = Eqn::T::from_f64(30.0).unwrap()
             * (soln.rtol * reset_value.abs() + soln.atol.get_index(0));
@@ -1214,13 +1215,8 @@ mod tests {
                     && (probe_ys.get_index(0, i) - reset_value).abs() < reset_value_tol
             })
             .expect("expected solve() probe output to contain the second-root reset state");
-        let post_reset_col = (reset_col + 1).min(probe_ts.len() - 1);
-        let t_eval = vec![
-            probe_ts[0],
-            probe_ts[reset_col],
-            probe_ts[post_reset_col],
-            *probe_ts.last().unwrap(),
-        ];
+        let t_event = probe_ts[reset_col];
+        let t_eval = vec![Eqn::T::zero(), t_event, t_event + post_event_dt, final_time];
 
         let (ret, stop_reason) = solver.solve_dense(&t_eval).unwrap();
         assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
@@ -1237,20 +1233,32 @@ mod tests {
         );
 
         let error_threshold = Eqn::T::from_f64(20.0).unwrap();
-        for (dense_col, &probe_col) in [0usize, reset_col, post_reset_col, probe_ts.len() - 1]
-            .iter()
-            .enumerate()
-        {
-            let actual = ret.column(dense_col).into_owned();
-            let expected = probe_ys.column(probe_col).into_owned();
-            let error = actual - &expected;
-            let error_norm = error.squared_norm(&expected, &soln.atol, soln.rtol).sqrt();
-            assert!(
-                error_norm < error_threshold,
-                "dense output mismatch at t_eval[{dense_col}] = {:?}: WRMS norm {error_norm:?} ≥ {error_threshold:?}",
-                t_eval[dense_col],
-            );
-        }
+        let pre_reset_state = ret.column(1).into_owned();
+        let pre_reset_error = pre_reset_state - &soln.solution_points[0].state;
+        let pre_reset_error_norm = pre_reset_error
+            .squared_norm(&soln.solution_points[0].state, &soln.atol, soln.rtol)
+            .sqrt();
+        assert!(
+            pre_reset_error_norm < error_threshold,
+            "expected pre-reset state at event time; WRMS norm {pre_reset_error_norm:?} >= {error_threshold:?}",
+        );
+
+        let expected_post_reset_value =
+            reset_value * (-Eqn::T::from_f64(0.1).unwrap() * post_event_dt).exp();
+        let expected_post_reset = Eqn::V::from_element(
+            soln.solution_points[0].state.len(),
+            expected_post_reset_value,
+            soln.solution_points[0].state.context().clone(),
+        );
+        let post_reset_state = ret.column(2).into_owned();
+        let post_reset_error = post_reset_state - &expected_post_reset;
+        let post_reset_error_norm = post_reset_error
+            .squared_norm(&expected_post_reset, &soln.atol, soln.rtol)
+            .sqrt();
+        assert!(
+            post_reset_error_norm < error_threshold,
+            "expected reset state just after event time; WRMS norm {post_reset_error_norm:?} >= {error_threshold:?}",
+        );
     }
 
     /// Test that `solve_dense_sensitivities()` can be continued manually after

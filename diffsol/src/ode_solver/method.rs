@@ -673,17 +673,13 @@ where
                 break;
             }
             OdeSolverStopReason::RootFound(t_root, root_idx) => {
-                while col < t_eval.len() && t_eval[col] < t_root {
+                while col < t_eval.len() && t_eval[col] <= t_root {
                     dense_write_out(s, ret, t_eval[col], col, tmp_nout, tmp_nstates)?;
                     col += 1;
                 }
                 s.state_mut_back(t_root)?;
                 if has_reset {
                     s.apply_reset()?;
-                    while col < t_eval.len() && t_eval[col] == s.state().t {
-                        dense_write_out_current_state(s, ret, col, tmp_nout);
-                        col += 1;
-                    }
                     if s.state().t < t_eval[t_eval.len() - 1] {
                         s.set_stop_time(t_eval[t_eval.len() - 1])?;
                     } else {
@@ -691,10 +687,6 @@ where
                         break;
                     }
                 } else {
-                    while col < t_eval.len() && t_eval[col] <= s.state().t {
-                        dense_write_out(s, ret, t_eval[col], col, tmp_nout, tmp_nstates)?;
-                        col += 1;
-                    }
                     stop_reason = OdeSolverStopReason::RootFound(t_root, root_idx);
                     break;
                 }
@@ -732,36 +724,6 @@ where
         }
     }
     Ok(())
-}
-
-fn dense_write_out_current_state<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
-    s: &S,
-    y_out: &mut <Eqn::V as DefaultDenseMatrix>::M,
-    i: usize,
-    tmp_nout: &mut Eqn::V,
-) where
-    Eqn::V: DefaultDenseMatrix,
-{
-    let t = s.state().t;
-    let y = s.state().y;
-    let mut y_out = y_out.column_mut(i);
-    match s.problem().eqn.out() {
-        Some(out) => {
-            if s.problem().integrate_out {
-                y_out.copy_from(s.state().g);
-            } else {
-                out.call_inplace(y, t, tmp_nout);
-                y_out.copy_from(tmp_nout);
-            }
-        }
-        None => {
-            if s.problem().integrate_out {
-                y_out.copy_from(s.state().g);
-            } else {
-                y_out.copy_from(y);
-            }
-        }
-    }
 }
 
 fn solve<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
