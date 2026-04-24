@@ -2,7 +2,7 @@
 // stragegy like bdf or esdirk34 in diffsol.
 
 use diffsol::error::{DiffsolError, OdeSolverError};
-use diffsol::ode_equations::OdeEquationsImplicitSensWithReset;
+use diffsol::ode_equations::OdeEquationsImplicitSens;
 use diffsol::{
     matrix::MatrixRef, DefaultDenseMatrix, DiffSl, LinearSolver, Matrix, OdeSolverMethod,
     OdeSolverProblem, OdeSolverState, Vector, VectorHost, VectorRef,
@@ -62,7 +62,7 @@ fn apply_state_reset_with_sens<Eqn, S>(
     root_idx: usize,
 ) -> Result<(), DiffsolError>
 where
-    Eqn: OdeEquationsImplicitSensWithReset,
+    Eqn: OdeEquationsImplicitSens,
     S: OdeSolverState<Eqn::V>,
 {
     let eqn = &problem.eqn;

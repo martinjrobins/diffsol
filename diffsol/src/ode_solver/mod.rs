@@ -32,13 +32,11 @@ mod tests {
     use crate::op::ParameterisedOp;
     use crate::Scalar;
     use crate::{
-        ode_equations::{OdeEquationsImplicitAdjointWithReset, OdeEquationsImplicitSens},
-        op::OpStatistics,
-        AdjointEquations, AdjointOdeSolverMethod, Context, DenseMatrix, MatrixCommon, MatrixRef,
-        NonLinearOp, NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit,
-        OdeEquationsImplicitAdjoint, OdeEquationsRef, OdeSolverConfig, OdeSolverMethod,
-        OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Scale, VectorRef, VectorView,
-        VectorViewMut,
+        op::OpStatistics, AdjointEquations, AdjointOdeSolverMethod, Context, DenseMatrix,
+        MatrixCommon, MatrixRef, NonLinearOp, NonLinearOpJacobian, OdeEquations,
+        OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens,
+        OdeEquationsRef, OdeSolverConfig, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+        OdeSolverStopReason, Scale, VectorRef, VectorView, VectorViewMut,
     };
     use crate::{
         ConstantOp, ConstantOpSens, DefaultDenseMatrix, DefaultSolver, LinearSolver,
@@ -308,7 +306,7 @@ mod tests {
         times: &[Eqn::T],
     ) -> <Eqn::V as DefaultDenseMatrix>::M
     where
-        Eqn: OdeEquationsImplicitAdjointWithReset + 'a,
+        Eqn: OdeEquationsImplicitAdjoint + 'a,
         Eqn::V: DefaultDenseMatrix,
         Method: OdeSolverMethod<'a, Eqn>,
         BuildForward: Fn(Option<Method::State>) -> Result<Method, DiffsolError>,
@@ -359,7 +357,7 @@ mod tests {
         <Eqn::V as DefaultDenseMatrix>::M,
     )
     where
-        Eqn: OdeEquationsImplicitAdjointWithReset + 'a,
+        Eqn: OdeEquationsImplicitAdjoint + 'a,
         LS: LinearSolver<Eqn::M>,
         Eqn::V: DefaultDenseMatrix,
         for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -1323,7 +1321,7 @@ mod tests {
         build_adjoint_state: BuildAdjointState,
         build_adjoint_from_state: BuildAdjointFromState,
     ) where
-        Eqn: OdeEquationsImplicitAdjointWithReset + 'a,
+        Eqn: OdeEquationsImplicitAdjoint + 'a,
         Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
         MethodF: OdeSolverMethod<'a, Eqn>,
@@ -1470,7 +1468,7 @@ mod tests {
         data: <Eqn::V as DefaultDenseMatrix>::M,
         times: &[Eqn::T],
     ) where
-        Eqn: OdeEquationsImplicitAdjointWithReset + 'a,
+        Eqn: OdeEquationsImplicitAdjoint + 'a,
         Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
         MethodF: OdeSolverMethod<'a, Eqn>,

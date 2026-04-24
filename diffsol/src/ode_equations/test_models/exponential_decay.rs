@@ -3,8 +3,7 @@ use crate::{
     scalar::{scale, Scalar},
     ConstantOp, Matrix, MatrixHost, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
     NonLinearOpSensAdjoint, NonLinearOpTimePartial, OdeBuilder, OdeEquations, OdeEquationsImplicit,
-    OdeEquationsImplicitAdjoint, OdeEquationsImplicitAdjointWithReset, OdeEquationsImplicitSens,
-    OdeSolverProblem, Op, Vector,
+    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
 use std::ops::MulAssign;
@@ -540,7 +539,7 @@ pub fn exponential_decay_with_single_reset_root_problem_adjoint<M: MatrixHost + 
     integrate_out: bool,
 ) -> (
     OdeSolverProblem<
-        impl OdeEquationsImplicitAdjointWithReset<
+        impl OdeEquationsImplicitAdjoint<
             M = M,
             V = M::V,
             T = M::T,

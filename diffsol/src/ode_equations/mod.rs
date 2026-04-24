@@ -387,6 +387,10 @@ pub trait OdeEquationsImplicitAdjoint:
               + NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
               + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
               + NonLinearOpTimePartial<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
+    Reset: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+               + NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+               + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
+               + NonLinearOpTimePartial<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
     Mass: LinearOpTranspose<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
 >
 {
@@ -403,35 +407,11 @@ impl<T> OdeEquationsImplicitAdjoint for T where
                   + NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
                   + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
                   + NonLinearOpTimePartial<M = T::M, V = T::V, T = T::T, C = T::C>,
-        Mass: LinearOpTranspose<M = T::M, V = T::V, T = T::T, C = T::C>,
-    >
-{
-}
-
-pub trait OdeEquationsImplicitAdjointWithReset:
-    OdeEquationsImplicitAdjoint<
-    Reset: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
-               + NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
-               + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
-               + NonLinearOpTimePartial<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
-    Root: NonLinearOpJacobian<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
-              + NonLinearOpAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
-              + NonLinearOpSensAdjoint<M = Self::M, V = Self::V, T = Self::T, C = Self::C>
-              + NonLinearOpTimePartial<M = Self::M, V = Self::V, T = Self::T, C = Self::C>,
->
-{
-}
-
-impl<T> OdeEquationsImplicitAdjointWithReset for T where
-    T: OdeEquationsImplicitAdjoint<
         Reset: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>
                    + NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
                    + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
                    + NonLinearOpTimePartial<M = T::M, V = T::V, T = T::T, C = T::C>,
-        Root: NonLinearOpJacobian<M = T::M, V = T::V, T = T::T, C = T::C>
-                  + NonLinearOpAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
-                  + NonLinearOpSensAdjoint<M = T::M, V = T::V, T = T::T, C = T::C>
-                  + NonLinearOpTimePartial<M = T::M, V = T::V, T = T::T, C = T::C>,
+        Mass: LinearOpTranspose<M = T::M, V = T::V, T = T::T, C = T::C>,
     >
 {
 }
