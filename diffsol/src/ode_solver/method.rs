@@ -2,6 +2,7 @@ use std::cell::Ref;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
+    ode_equations::OdeEquationsImplicitSensWithReset,
     ode_solver::solution::{SolutionMode, INITIAL_NCOLS},
     ode_solver_error,
     scalar::Scalar,
@@ -180,6 +181,33 @@ where
             )
         };
         self.state_mut().state_mut_op(&rhs, has_mass, &reset)
+    }
+
+    /// Apply the problem's configured reset operator to the current state and
+    /// propagate forward sensitivities through the active root event.
+    ///
+    /// This is typically used after [`Self::state_mut_back`] has moved the solver to a root time.
+    /// The helper recomputes `dy` from the problem RHS after updating the state vector and
+    /// applies the root-time correction to each sensitivity vector.
+    fn apply_reset_with_sens(&mut self, root_idx: usize) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitSensWithReset,
+    {
+        let (rhs, has_mass, reset, root) = {
+            let eqn = &self.problem().eqn;
+            (
+                eqn.rhs(),
+                eqn.mass().is_some(),
+                eqn.reset().ok_or_else(|| {
+                    ode_solver_error!(Other, "No reset operator configured for this problem")
+                })?,
+                eqn.root().ok_or_else(|| {
+                    ode_solver_error!(Other, "No root operator configured for this problem")
+                })?,
+            )
+        };
+        self.state_mut()
+            .state_mut_op_with_sens_and_reset(&rhs, has_mass, &reset, &root, root_idx)
     }
 
     /// Get the current order of accuracy of the solver (e.g. explict euler method is first-order)

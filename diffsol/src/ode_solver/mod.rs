@@ -1261,11 +1261,8 @@ mod tests {
         );
     }
 
-    /// Test that `solve_dense_sensitivities()` can be continued manually after
-    /// a root by applying the root-aware reset directly to the solver state and
-    /// calling `solve_dense_sensitivities()` again.
-    ///
-    /// `soln` must contain one solution point at `t_stop` with exact `y` and sensitivity vectors.
+    /// Test that `solve_dense_sensitivities()` applies root-aware resets and
+    /// continues filling the requested evaluation times.
     pub fn test_solve_dense_sensitivities_with_reset<'a, Eqn, Method>(
         mut solver: Method,
         soln: &OdeSolverSolution<Eqn::V>,
@@ -1275,108 +1272,40 @@ mod tests {
         Method: SensitivitiesOdeSolverMethod<'a, Eqn>,
     {
         let t_stop = soln.solution_points[0].t;
+        let t_event = Eqn::T::from_f64(10.0 * (5.0_f64 / 3.0_f64).ln()).unwrap();
 
-        let n_steps = 20usize;
-        let final_time = t_stop * Eqn::T::from_f64(2.0).unwrap();
-        let dt = final_time / Eqn::T::from_f64(n_steps as f64).unwrap();
-        let t_eval: Vec<Eqn::T> = (0..=n_steps)
-            .map(|i| dt * Eqn::T::from_f64(i as f64).unwrap())
-            .collect();
-
-        let (ret_first, _ret_sens_first, stop_reason_first) =
-            solver.solve_dense_sensitivities(&t_eval).unwrap();
-        assert!(matches!(
-            stop_reason_first,
-            OdeSolverStopReason::RootFound(_, _)
-        ));
-        let ncols_first = ret_first.ncols();
-
-        // First pass should halt at the first root.
-        assert!(
-            ncols_first < t_eval.len(),
-            "expected first solve_dense_sensitivities() call to stop at a root"
-        );
-        let t_first_root = solver.state().t;
-
-        let first_root_idx = match stop_reason_first {
-            OdeSolverStopReason::RootFound(_, root_idx) => root_idx,
-            _ => unreachable!("expected first sensitivity solve to stop on a root"),
-        };
-
-        // Manually apply the root-aware reset directly to the solver state.
-        let mut state = solver.state_clone();
-        {
-            let problem = solver.problem();
-            let rhs = problem.eqn.rhs();
-            let has_mass = problem.eqn.mass().is_some();
-            let reset_fn = problem.eqn.reset().unwrap();
-            let root_fn = problem.eqn.root().unwrap();
-            state
-                .as_mut()
-                .state_mut_op_with_sens_and_reset(
-                    &rhs,
-                    has_mass,
-                    &reset_fn,
-                    &root_fn,
-                    first_root_idx,
-                )
-                .unwrap();
+        let post_event_dt = Eqn::T::from_f64(1e-6).unwrap();
+        let t_eval = vec![Eqn::T::zero(), t_event, t_event + post_event_dt, t_stop];
+        let (ret, ret_sens, stop_reason) = solver.solve_dense_sensitivities(&t_eval).unwrap();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
+        assert_eq!(ret.ncols(), t_eval.len());
+        for ret_sens_j in &ret_sens {
+            assert_eq!(ret_sens_j.ncols(), t_eval.len());
         }
-        solver.set_state(state);
 
-        // Continue from just after the first-root time so t_eval remains valid.
-        let t_eval_after_reset: Vec<Eqn::T> = t_eval
-            .iter()
-            .copied()
-            .filter(|&t| t > t_first_root)
-            .collect();
-        assert!(
-            !t_eval_after_reset.is_empty(),
-            "expected at least one evaluation time after first root"
-        );
-
-        let (ret_second, ret_sens_second, stop_reason_second) = solver
-            .solve_dense_sensitivities(&t_eval_after_reset)
-            .unwrap();
-        assert!(matches!(
-            stop_reason_second,
-            OdeSolverStopReason::RootFound(_, _)
-        ));
-        let ncols = ret_second.ncols();
-
-        // The second root fires before the final t_eval_after_reset → output must be truncated.
-        assert!(
-            ncols < t_eval_after_reset.len(),
-            "expected early stop after manual reset: ncols ({ncols}) should be < t_eval_after_reset.len() ({})",
-            t_eval_after_reset.len(),
-        );
-
-        // Check the last column matches the expected second-root solution.
-        let expected = &soln.solution_points[0];
         let error_threshold = Eqn::T::from_f64(100.0).unwrap();
-        let sens_points = soln.sens_solution_points.as_ref().unwrap();
+        let ctx = soln.solution_points[0].state.context().clone();
+        let nstates = soln.solution_points[0].state.len();
 
-        let last_col = ncols - 1;
-        let ey = ret_second.column(last_col).into_owned() - &expected.state;
-        let mut combined = ey.squared_norm(&expected.state, &soln.atol, soln.rtol);
-        for (param_j, sens_pts_j) in sens_points.iter().enumerate() {
-            let expected_s = &sens_pts_j[0].state;
-            let es = ret_sens_second[param_j].column(last_col).into_owned() - expected_s;
-            combined += es.squared_norm(expected_s, &soln.atol, soln.rtol);
-        }
-        let norm = combined.sqrt();
+        let post_reset_y = Eqn::T::from_f64(2.6).unwrap()
+            * (-Eqn::T::from_f64(0.1).unwrap() * post_event_dt).exp();
+        let post_reset_t = t_event + post_event_dt;
+        let expected_post_reset = Eqn::V::from_element(nstates, post_reset_y, ctx.clone());
+        let expected_post_reset_sk =
+            Eqn::V::from_element(nstates, -post_reset_y * post_reset_t, ctx.clone());
+        let expected_post_reset_sy0 = Eqn::V::from_element(nstates, post_reset_y, ctx);
+
+        let col = 2;
+        let ey = ret.column(col).into_owned() - &expected_post_reset;
+        let esk = ret_sens[0].column(col).into_owned() - &expected_post_reset_sk;
+        let esy0 = ret_sens[1].column(col).into_owned() - &expected_post_reset_sy0;
+        let norm = (ey.squared_norm(&expected_post_reset, &soln.atol, soln.rtol)
+            + esk.squared_norm(&expected_post_reset_sk, &soln.atol, soln.rtol)
+            + esy0.squared_norm(&expected_post_reset_sy0, &soln.atol, soln.rtol))
+        .sqrt();
         assert!(
             norm < error_threshold,
-            "t_stop solution not found in last column; combined WRMS {norm:?} ≥ {error_threshold:?}",
-        );
-
-        let t_second_root = solver.state().t;
-        let time_tol = soln.rtol * t_stop.abs() + soln.atol.get_index(0);
-        assert!(
-            (t_second_root - t_stop).abs() < Eqn::T::from_f64(30.0).unwrap() * time_tol,
-            "expected second root time ≈ {:?}, got {:?}",
-            t_stop,
-            t_second_root,
+            "dense sensitivity mismatch just after reset; combined WRMS {norm:?} >= {error_threshold:?}",
         );
     }
 
