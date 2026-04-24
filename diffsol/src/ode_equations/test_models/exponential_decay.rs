@@ -1,5 +1,4 @@
 use crate::{
-    ode_equations::OdeEquationsImplicitSensWithReset,
     ode_solver::problem::OdeSolverSolution,
     scalar::{scale, Scalar},
     ConstantOp, Matrix, MatrixHost, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
@@ -623,7 +622,7 @@ pub fn exponential_decay_with_single_reset_root_problem_adjoint<M: MatrixHost + 
 pub fn exponential_decay_problem_sens<M: MatrixHost + 'static>(
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquationsImplicitSensWithReset<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverProblem<impl OdeEquationsImplicitSens<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let k = 0.1;
@@ -665,7 +664,7 @@ pub fn exponential_decay_problem_sens<M: MatrixHost + 'static>(
 pub fn exponential_decay_problem_sens_with_out<M: MatrixHost + 'static>(
     use_coloring: bool,
 ) -> (
-    OdeSolverProblem<impl OdeEquationsImplicitSensWithReset<M = M, V = M::V, T = M::T, C = M::C>>,
+    OdeSolverProblem<impl OdeEquationsImplicitSens<M = M, V = M::V, T = M::T, C = M::C>>,
     OdeSolverSolution<M::V>,
 ) {
     let k = 0.1;

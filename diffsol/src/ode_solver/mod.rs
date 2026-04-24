@@ -32,7 +32,7 @@ mod tests {
     use crate::op::ParameterisedOp;
     use crate::Scalar;
     use crate::{
-        ode_equations::{OdeEquationsImplicitAdjointWithReset, OdeEquationsImplicitSensWithReset},
+        ode_equations::{OdeEquationsImplicitAdjointWithReset, OdeEquationsImplicitSens},
         op::OpStatistics,
         AdjointEquations, AdjointOdeSolverMethod, Context, DenseMatrix, MatrixCommon, MatrixRef,
         NonLinearOp, NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit,
@@ -1267,7 +1267,7 @@ mod tests {
         mut solver: Method,
         soln: &OdeSolverSolution<Eqn::V>,
     ) where
-        Eqn: OdeEquationsImplicitSensWithReset + 'a,
+        Eqn: OdeEquationsImplicitSens + 'a,
         Eqn::V: DefaultDenseMatrix,
         Method: SensitivitiesOdeSolverMethod<'a, Eqn>,
     {

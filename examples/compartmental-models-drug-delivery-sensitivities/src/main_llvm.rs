@@ -64,24 +64,24 @@ pub fn main() {
         problem.eqn_mut().set_params(&V::from_vec(vec![dose], ctx));
 
         let mut solver = problem.bdf_sens::<LS>().unwrap();
-        let (concentration, concentration_sens, _stop_reason) =
+        let (concentration_squared, concentration_squared_sens, _stop_reason) =
             solver.solve_dense_sensitivities(&t_eval).unwrap();
 
-        let c = concentration
+        let c2 = concentration_squared
             .inner()
             .row(0)
             .iter()
             .copied()
             .collect::<Vec<_>>();
-        let dc_ddose = concentration_sens[0]
+        let dc2_ddose = concentration_squared_sens[0]
             .inner()
             .row(0)
             .iter()
             .copied()
             .collect::<Vec<_>>();
 
-        aucs.push(trapezoid_integral(&t_eval, &c));
-        auc_grads.push(trapezoid_integral(&t_eval, &dc_ddose));
+        aucs.push(trapezoid_integral(&t_eval, &c2));
+        auc_grads.push(trapezoid_integral(&t_eval, &dc2_ddose));
     }
 
     let mut plot = Plot::new();
@@ -102,7 +102,7 @@ pub fn main() {
             .y_axis(Axis::new().title("AUC2 [ng^2 h / mL^2]"))
             .y_axis2(
                 Axis::new()
-                    .title("dAUC2/ddose [h^2 / mL^2]")
+                    .title("dAUC2/ddose [ng h / mL^2]")
                     .overlaying("y")
                     .side(AxisSide::Right)
                     .position(1.0),

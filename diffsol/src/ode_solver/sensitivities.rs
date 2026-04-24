@@ -1,7 +1,6 @@
 use crate::{
     error::DiffsolError,
     error::OdeSolverError,
-    ode_equations::OdeEquationsImplicitSensWithReset,
     ode_solver::solution::{Solution, SolutionMode},
     ode_solver_error, AugmentedOdeSolverMethod, Context, DefaultDenseMatrix, DenseMatrix,
     MatrixCommon, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens, OdeEquationsImplicitSens,
@@ -123,7 +122,7 @@ where
         DiffsolError,
     >
     where
-        Eqn: OdeEquationsImplicitSensWithReset,
+        Eqn: OdeEquationsImplicitSens,
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
@@ -165,7 +164,7 @@ where
             return Err(ode_solver_error!(InvalidTEval));
         }
 
-        let (stop_reason, col) = solve_dense_sensitivities_with_reset(
+        let (stop_reason, col) = solve_dense_sensitivities_auto_reset(
             &mut ret,
             &mut ret_sens,
             t_eval,
@@ -263,7 +262,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-fn solve_dense_sensitivities_with_reset<'a, Eqn, S>(
+fn solve_dense_sensitivities_auto_reset<'a, Eqn, S>(
     ret: &mut <Eqn::V as DefaultDenseMatrix>::M,
     ret_sens: &mut [<Eqn::V as DefaultDenseMatrix>::M],
     t_eval: &[Eqn::T],
@@ -275,7 +274,7 @@ fn solve_dense_sensitivities_with_reset<'a, Eqn, S>(
     start_col: usize,
 ) -> Result<(OdeSolverStopReason<Eqn::T>, usize), DiffsolError>
 where
-    Eqn: OdeEquationsImplicitSensWithReset + 'a,
+    Eqn: OdeEquationsImplicitSens + 'a,
     Eqn::V: DefaultDenseMatrix,
     S: SensitivitiesOdeSolverMethod<'a, Eqn>,
 {

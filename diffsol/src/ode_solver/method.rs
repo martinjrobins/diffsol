@@ -2,7 +2,7 @@ use std::cell::Ref;
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
-    ode_equations::OdeEquationsImplicitSensWithReset,
+    ode_equations::OdeEquationsImplicitSens,
     ode_solver::solution::{SolutionMode, INITIAL_NCOLS},
     ode_solver_error,
     scalar::Scalar,
@@ -191,7 +191,7 @@ where
     /// applies the root-time correction to each sensitivity vector.
     fn apply_reset_with_sens(&mut self, root_idx: usize) -> Result<(), DiffsolError>
     where
-        Eqn: OdeEquationsImplicitSensWithReset,
+        Eqn: OdeEquationsImplicitSens,
     {
         let (rhs, has_mass, reset, root) = {
             let eqn = &self.problem().eqn;
