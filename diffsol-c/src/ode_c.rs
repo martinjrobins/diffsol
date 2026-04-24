@@ -977,6 +977,425 @@ pub unsafe extern "C" fn diffsol_ode_set_atol(ode: *mut OdeWrapper, value: f64) 
     }
 }
 
+/// Return the initial time configured for an ODE.
+///
+/// # Safety
+/// `ode` must be a valid pointer created by this library. `out_value` must be a
+/// valid, writable pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_get_t0(ode: *const OdeWrapper, out_value: *mut f64) -> i32 {
+    if ode.is_null() || out_value.is_null() {
+        c_invalid_arg!("invalid arguments to diffsol_ode_get_t0");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &*ode };
+    match ode.get_t0() {
+        Ok(value) => {
+            unsafe {
+                *out_value = value;
+            }
+            DIFFSOL_OK
+        }
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
+/// Set the initial time for an ODE.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_set_t0(ode: *mut OdeWrapper, value: f64) -> i32 {
+    if ode.is_null() {
+        c_invalid_arg!("ode is null");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &mut *ode };
+    match ode.set_t0(value) {
+        Ok(()) => DIFFSOL_OK,
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
+/// Return the initial step size configured for an ODE.
+///
+/// # Safety
+/// `ode` must be a valid pointer created by this library. `out_value` must be a
+/// valid, writable pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_get_h0(ode: *const OdeWrapper, out_value: *mut f64) -> i32 {
+    if ode.is_null() || out_value.is_null() {
+        c_invalid_arg!("invalid arguments to diffsol_ode_get_h0");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &*ode };
+    match ode.get_h0() {
+        Ok(value) => {
+            unsafe {
+                *out_value = value;
+            }
+            DIFFSOL_OK
+        }
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
+/// Set the initial step size for an ODE.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_set_h0(ode: *mut OdeWrapper, value: f64) -> i32 {
+    if ode.is_null() {
+        c_invalid_arg!("ode is null");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &mut *ode };
+    match ode.set_h0(value) {
+        Ok(()) => DIFFSOL_OK,
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
+/// Return whether output equations are integrated alongside state equations.
+///
+/// # Safety
+/// `ode` must be a valid pointer created by this library. `out_value` must be a
+/// valid, writable pointer. The value is written as 0 for false and 1 for true.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_get_integrate_out(
+    ode: *const OdeWrapper,
+    out_value: *mut i32,
+) -> i32 {
+    if ode.is_null() || out_value.is_null() {
+        c_invalid_arg!("invalid arguments to diffsol_ode_get_integrate_out");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &*ode };
+    match ode.get_integrate_out() {
+        Ok(value) => {
+            unsafe {
+                *out_value = i32::from(value);
+            }
+            DIFFSOL_OK
+        }
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
+/// Set whether output equations are integrated alongside state equations.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library. Any non-zero
+/// `value` is treated as true.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_set_integrate_out(ode: *mut OdeWrapper, value: i32) -> i32 {
+    if ode.is_null() {
+        c_invalid_arg!("ode is null");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &mut *ode };
+    match ode.set_integrate_out(value != 0) {
+        Ok(()) => DIFFSOL_OK,
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
+unsafe fn write_optional_f64(value: Option<f64>, out_is_some: *mut i32, out_value: *mut f64) {
+    match value {
+        Some(value) => unsafe {
+            *out_is_some = 1;
+            *out_value = value;
+        },
+        None => unsafe {
+            *out_is_some = 0;
+            *out_value = 0.0;
+        },
+    }
+}
+
+/// Return the optional sensitivity relative tolerance.
+///
+/// # Safety
+/// All pointers must be valid and writable where applicable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_get_sens_rtol(
+    ode: *const OdeWrapper,
+    out_is_some: *mut i32,
+    out_value: *mut f64,
+) -> i32 {
+    if ode.is_null() || out_is_some.is_null() || out_value.is_null() {
+        c_invalid_arg!("invalid arguments to diffsol_ode_get_sens_rtol");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &*ode };
+    match ode.get_sens_rtol() {
+        Ok(value) => {
+            unsafe {
+                write_optional_f64(value, out_is_some, out_value);
+            }
+            DIFFSOL_OK
+        }
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
+/// Set the optional sensitivity relative tolerance.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_set_sens_rtol(
+    ode: *mut OdeWrapper,
+    value_is_some: i32,
+    value: f64,
+) -> i32 {
+    if ode.is_null() {
+        c_invalid_arg!("ode is null");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &mut *ode };
+    match ode.set_sens_rtol((value_is_some != 0).then_some(value)) {
+        Ok(()) => DIFFSOL_OK,
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
+/// Return the optional sensitivity absolute tolerance.
+///
+/// # Safety
+/// All pointers must be valid and writable where applicable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_get_sens_atol(
+    ode: *const OdeWrapper,
+    out_is_some: *mut i32,
+    out_value: *mut f64,
+) -> i32 {
+    if ode.is_null() || out_is_some.is_null() || out_value.is_null() {
+        c_invalid_arg!("invalid arguments to diffsol_ode_get_sens_atol");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &*ode };
+    match ode.get_sens_atol() {
+        Ok(value) => {
+            unsafe {
+                write_optional_f64(value, out_is_some, out_value);
+            }
+            DIFFSOL_OK
+        }
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
+/// Set the optional sensitivity absolute tolerance.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_set_sens_atol(
+    ode: *mut OdeWrapper,
+    value_is_some: i32,
+    value: f64,
+) -> i32 {
+    if ode.is_null() {
+        c_invalid_arg!("ode is null");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &mut *ode };
+    match ode.set_sens_atol((value_is_some != 0).then_some(value)) {
+        Ok(()) => DIFFSOL_OK,
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
+/// Return the optional output relative tolerance.
+///
+/// # Safety
+/// All pointers must be valid and writable where applicable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_get_out_rtol(
+    ode: *const OdeWrapper,
+    out_is_some: *mut i32,
+    out_value: *mut f64,
+) -> i32 {
+    if ode.is_null() || out_is_some.is_null() || out_value.is_null() {
+        c_invalid_arg!("invalid arguments to diffsol_ode_get_out_rtol");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &*ode };
+    match ode.get_out_rtol() {
+        Ok(value) => {
+            unsafe {
+                write_optional_f64(value, out_is_some, out_value);
+            }
+            DIFFSOL_OK
+        }
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
+/// Set the optional output relative tolerance.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_set_out_rtol(
+    ode: *mut OdeWrapper,
+    value_is_some: i32,
+    value: f64,
+) -> i32 {
+    if ode.is_null() {
+        c_invalid_arg!("ode is null");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &mut *ode };
+    match ode.set_out_rtol((value_is_some != 0).then_some(value)) {
+        Ok(()) => DIFFSOL_OK,
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
+/// Return the optional output absolute tolerance.
+///
+/// # Safety
+/// All pointers must be valid and writable where applicable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_get_out_atol(
+    ode: *const OdeWrapper,
+    out_is_some: *mut i32,
+    out_value: *mut f64,
+) -> i32 {
+    if ode.is_null() || out_is_some.is_null() || out_value.is_null() {
+        c_invalid_arg!("invalid arguments to diffsol_ode_get_out_atol");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &*ode };
+    match ode.get_out_atol() {
+        Ok(value) => {
+            unsafe {
+                write_optional_f64(value, out_is_some, out_value);
+            }
+            DIFFSOL_OK
+        }
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
+/// Set the optional output absolute tolerance.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_set_out_atol(
+    ode: *mut OdeWrapper,
+    value_is_some: i32,
+    value: f64,
+) -> i32 {
+    if ode.is_null() {
+        c_invalid_arg!("ode is null");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &mut *ode };
+    match ode.set_out_atol((value_is_some != 0).then_some(value)) {
+        Ok(()) => DIFFSOL_OK,
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
+/// Return the optional adjoint parameter relative tolerance.
+///
+/// # Safety
+/// All pointers must be valid and writable where applicable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_get_param_rtol(
+    ode: *const OdeWrapper,
+    out_is_some: *mut i32,
+    out_value: *mut f64,
+) -> i32 {
+    if ode.is_null() || out_is_some.is_null() || out_value.is_null() {
+        c_invalid_arg!("invalid arguments to diffsol_ode_get_param_rtol");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &*ode };
+    match ode.get_param_rtol() {
+        Ok(value) => {
+            unsafe {
+                write_optional_f64(value, out_is_some, out_value);
+            }
+            DIFFSOL_OK
+        }
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
+/// Set the optional adjoint parameter relative tolerance.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_set_param_rtol(
+    ode: *mut OdeWrapper,
+    value_is_some: i32,
+    value: f64,
+) -> i32 {
+    if ode.is_null() {
+        c_invalid_arg!("ode is null");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &mut *ode };
+    match ode.set_param_rtol((value_is_some != 0).then_some(value)) {
+        Ok(()) => DIFFSOL_OK,
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
+/// Return the optional adjoint parameter absolute tolerance.
+///
+/// # Safety
+/// All pointers must be valid and writable where applicable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_get_param_atol(
+    ode: *const OdeWrapper,
+    out_is_some: *mut i32,
+    out_value: *mut f64,
+) -> i32 {
+    if ode.is_null() || out_is_some.is_null() || out_value.is_null() {
+        c_invalid_arg!("invalid arguments to diffsol_ode_get_param_atol");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &*ode };
+    match ode.get_param_atol() {
+        Ok(value) => {
+            unsafe {
+                write_optional_f64(value, out_is_some, out_value);
+            }
+            DIFFSOL_OK
+        }
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
+/// Set the optional adjoint parameter absolute tolerance.
+///
+/// # Safety
+/// `ode` must be a valid mutable pointer created by this library.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn diffsol_ode_set_param_atol(
+    ode: *mut OdeWrapper,
+    value_is_some: i32,
+    value: f64,
+) -> i32 {
+    if ode.is_null() {
+        c_invalid_arg!("ode is null");
+        return DIFFSOL_BAD_ARG;
+    }
+    let ode = unsafe { &mut *ode };
+    match ode.set_param_atol((value_is_some != 0).then_some(value)) {
+        Ok(()) => DIFFSOL_OK,
+        Err(err) => c_error!(&format!("{}", err)),
+    }
+}
+
 #[cfg(all(test, feature = "diffsl-external-f64"))]
 mod tests {
     use std::ptr;
@@ -1057,6 +1476,27 @@ mod tests {
                 mass_state_deps.as_ptr(),
                 mass_state_deps.len(),
             )
+        }
+    }
+
+    unsafe fn assert_optional_f64(
+        getter: unsafe extern "C" fn(*const OdeWrapper, *mut i32, *mut f64) -> i32,
+        ode: *const OdeWrapper,
+        expected: Option<f64>,
+        name: &str,
+    ) {
+        let mut is_some = -1;
+        let mut value = -1.0;
+        assert_eq!(unsafe { getter(ode, &mut is_some, &mut value) }, DIFFSOL_OK);
+        match expected {
+            Some(expected) => {
+                assert_eq!(is_some, 1, "{name} is_some");
+                assert_close(value, expected, ASSERT_TOL, name);
+            }
+            None => {
+                assert_eq!(is_some, 0, "{name} is_some");
+                assert_close(value, 0.0, ASSERT_TOL, name);
+            }
         }
     }
 
@@ -1183,6 +1623,55 @@ mod tests {
             assert_eq!(diffsol_ode_get_atol(ode, &mut atol), DIFFSOL_OK);
             assert_close(rtol, 1e-8, ASSERT_TOL, "rtol roundtrip");
             assert_close(atol, 1e-8, ASSERT_TOL, "atol roundtrip");
+
+            assert_eq!(diffsol_ode_set_t0(ode, 0.125), DIFFSOL_OK);
+            assert_eq!(diffsol_ode_set_h0(ode, 0.25), DIFFSOL_OK);
+            let mut t0 = 0.0;
+            let mut h0 = 0.0;
+            assert_eq!(diffsol_ode_get_t0(ode, &mut t0), DIFFSOL_OK);
+            assert_eq!(diffsol_ode_get_h0(ode, &mut h0), DIFFSOL_OK);
+            assert_close(t0, 0.125, ASSERT_TOL, "t0 roundtrip");
+            assert_close(h0, 0.25, ASSERT_TOL, "h0 roundtrip");
+
+            assert_eq!(diffsol_ode_set_integrate_out(ode, 1), DIFFSOL_OK);
+            let mut integrate_out = 0;
+            assert_eq!(
+                diffsol_ode_get_integrate_out(ode, &mut integrate_out),
+                DIFFSOL_OK
+            );
+            assert_eq!(integrate_out, 1);
+            assert_eq!(diffsol_ode_set_integrate_out(ode, 0), DIFFSOL_OK);
+            assert_eq!(
+                diffsol_ode_get_integrate_out(ode, &mut integrate_out),
+                DIFFSOL_OK
+            );
+            assert_eq!(integrate_out, 0);
+
+            assert_eq!(diffsol_ode_set_sens_rtol(ode, 1, 1e-3), DIFFSOL_OK);
+            assert_eq!(diffsol_ode_set_sens_atol(ode, 1, 1e-4), DIFFSOL_OK);
+            assert_eq!(diffsol_ode_set_out_rtol(ode, 1, 2e-3), DIFFSOL_OK);
+            assert_eq!(diffsol_ode_set_out_atol(ode, 1, 2e-4), DIFFSOL_OK);
+            assert_eq!(diffsol_ode_set_param_rtol(ode, 1, 3e-3), DIFFSOL_OK);
+            assert_eq!(diffsol_ode_set_param_atol(ode, 1, 3e-4), DIFFSOL_OK);
+            assert_optional_f64(diffsol_ode_get_sens_rtol, ode, Some(1e-3), "sens rtol");
+            assert_optional_f64(diffsol_ode_get_sens_atol, ode, Some(1e-4), "sens atol");
+            assert_optional_f64(diffsol_ode_get_out_rtol, ode, Some(2e-3), "out rtol");
+            assert_optional_f64(diffsol_ode_get_out_atol, ode, Some(2e-4), "out atol");
+            assert_optional_f64(diffsol_ode_get_param_rtol, ode, Some(3e-3), "param rtol");
+            assert_optional_f64(diffsol_ode_get_param_atol, ode, Some(3e-4), "param atol");
+
+            assert_eq!(diffsol_ode_set_sens_rtol(ode, 0, 1e-3), DIFFSOL_OK);
+            assert_eq!(diffsol_ode_set_sens_atol(ode, 0, 1e-4), DIFFSOL_OK);
+            assert_eq!(diffsol_ode_set_out_rtol(ode, 0, 2e-3), DIFFSOL_OK);
+            assert_eq!(diffsol_ode_set_out_atol(ode, 0, 2e-4), DIFFSOL_OK);
+            assert_eq!(diffsol_ode_set_param_rtol(ode, 0, 3e-3), DIFFSOL_OK);
+            assert_eq!(diffsol_ode_set_param_atol(ode, 0, 3e-4), DIFFSOL_OK);
+            assert_optional_f64(diffsol_ode_get_sens_rtol, ode, None, "sens rtol none");
+            assert_optional_f64(diffsol_ode_get_sens_atol, ode, None, "sens atol none");
+            assert_optional_f64(diffsol_ode_get_out_rtol, ode, None, "out rtol none");
+            assert_optional_f64(diffsol_ode_get_out_atol, ode, None, "out atol none");
+            assert_optional_f64(diffsol_ode_get_param_rtol, ode, None, "param rtol none");
+            assert_optional_f64(diffsol_ode_get_param_atol, ode, None, "param atol none");
 
             let mut ic_options: *mut InitialConditionSolverOptions = ptr::null_mut();
             assert_eq!(diffsol_ode_get_ic_options(ode, &mut ic_options), DIFFSOL_OK);
@@ -2324,6 +2813,88 @@ mod jit_tests {
                 );
                 assert_eq!(diffsol_ode_get_atol(ode, ptr::null_mut()), DIFFSOL_BAD_ARG);
                 assert_eq!(diffsol_ode_set_atol(ptr::null_mut(), 1e-3), DIFFSOL_BAD_ARG);
+                assert_eq!(
+                    diffsol_ode_get_t0(ptr::null(), &mut out_value),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(diffsol_ode_get_t0(ode, ptr::null_mut()), DIFFSOL_BAD_ARG);
+                assert_eq!(diffsol_ode_set_t0(ptr::null_mut(), 0.0), DIFFSOL_BAD_ARG);
+                assert_eq!(
+                    diffsol_ode_get_h0(ptr::null(), &mut out_value),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(diffsol_ode_get_h0(ode, ptr::null_mut()), DIFFSOL_BAD_ARG);
+                assert_eq!(diffsol_ode_set_h0(ptr::null_mut(), 1.0), DIFFSOL_BAD_ARG);
+                let mut out_bool = 0;
+                assert_eq!(
+                    diffsol_ode_get_integrate_out(ptr::null(), &mut out_bool),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_get_integrate_out(ode, ptr::null_mut()),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_set_integrate_out(ptr::null_mut(), 1),
+                    DIFFSOL_BAD_ARG
+                );
+                let mut out_is_some = 0;
+                assert_eq!(
+                    diffsol_ode_get_sens_rtol(ptr::null(), &mut out_is_some, &mut out_value),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_get_sens_rtol(ode, ptr::null_mut(), &mut out_value),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_get_sens_rtol(ode, &mut out_is_some, ptr::null_mut()),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_set_sens_rtol(ptr::null_mut(), 1, 1e-3),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_get_sens_atol(ptr::null(), &mut out_is_some, &mut out_value),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_set_sens_atol(ptr::null_mut(), 1, 1e-3),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_get_out_rtol(ptr::null(), &mut out_is_some, &mut out_value),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_set_out_rtol(ptr::null_mut(), 1, 1e-3),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_get_out_atol(ptr::null(), &mut out_is_some, &mut out_value),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_set_out_atol(ptr::null_mut(), 1, 1e-3),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_get_param_rtol(ptr::null(), &mut out_is_some, &mut out_value),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_set_param_rtol(ptr::null_mut(), 1, 1e-3),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_get_param_atol(ptr::null(), &mut out_is_some, &mut out_value),
+                    DIFFSOL_BAD_ARG
+                );
+                assert_eq!(
+                    diffsol_ode_set_param_atol(ptr::null_mut(), 1, 1e-3),
+                    DIFFSOL_BAD_ARG
+                );
                 assert_eq!(
                     diffsol_ode_solve(ode, params.as_ptr(), params.len(), 1.0, ptr::null_mut()),
                     DIFFSOL_BAD_ARG

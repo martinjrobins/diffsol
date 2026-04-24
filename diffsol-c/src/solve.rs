@@ -70,6 +70,24 @@ pub(crate) trait Solve {
     fn rtol(&self) -> f64;
     fn set_atol(&mut self, atol: f64);
     fn atol(&self) -> f64;
+    fn set_t0(&mut self, t0: f64);
+    fn t0(&self) -> f64;
+    fn set_h0(&mut self, h0: f64);
+    fn h0(&self) -> f64;
+    fn set_integrate_out(&mut self, integrate_out: bool);
+    fn integrate_out(&self) -> bool;
+    fn set_sens_rtol(&mut self, sens_rtol: Option<f64>);
+    fn sens_rtol(&self) -> Option<f64>;
+    fn set_sens_atol(&mut self, sens_atol: Option<f64>);
+    fn sens_atol(&self) -> Option<f64>;
+    fn set_out_rtol(&mut self, out_rtol: Option<f64>);
+    fn out_rtol(&self) -> Option<f64>;
+    fn set_out_atol(&mut self, out_atol: Option<f64>);
+    fn out_atol(&self) -> Option<f64>;
+    fn set_param_rtol(&mut self, param_rtol: Option<f64>);
+    fn param_rtol(&self) -> Option<f64>;
+    fn set_param_atol(&mut self, param_atol: Option<f64>);
+    fn param_atol(&self) -> Option<f64>;
     fn serialized_diffsl(&self) -> Result<Vec<u8>, DiffsolRtError> {
         unsupported_serialization_error(
             "ODE serialization is only supported for JIT-backed solvers",
@@ -607,6 +625,106 @@ where
         self.problem.rtol.to_f64().unwrap()
     }
 
+    fn set_t0(&mut self, t0: f64) {
+        self.problem.t0 = M::T::from_f64(t0).unwrap();
+    }
+
+    fn t0(&self) -> f64 {
+        self.problem.t0.to_f64().unwrap()
+    }
+
+    fn set_h0(&mut self, h0: f64) {
+        self.problem.h0 = M::T::from_f64(h0).unwrap();
+    }
+
+    fn h0(&self) -> f64 {
+        self.problem.h0.to_f64().unwrap()
+    }
+
+    fn set_integrate_out(&mut self, integrate_out: bool) {
+        self.problem.integrate_out = integrate_out;
+    }
+
+    fn integrate_out(&self) -> bool {
+        self.problem.integrate_out
+    }
+
+    fn set_sens_rtol(&mut self, sens_rtol: Option<f64>) {
+        self.problem.sens_rtol = sens_rtol.map(|value| M::T::from_f64(value).unwrap());
+    }
+
+    fn sens_rtol(&self) -> Option<f64> {
+        self.problem.sens_rtol.map(|value| value.to_f64().unwrap())
+    }
+
+    fn set_sens_atol(&mut self, sens_atol: Option<f64>) {
+        self.problem.sens_atol = sens_atol.map(|value| {
+            M::V::from_element(
+                self.problem.eqn.nstates(),
+                M::T::from_f64(value).unwrap(),
+                M::C::default(),
+            )
+        });
+    }
+
+    fn sens_atol(&self) -> Option<f64> {
+        self.problem
+            .sens_atol
+            .as_ref()
+            .and_then(|value| (value.len() > 0).then(|| value.get_index(0).to_f64().unwrap()))
+    }
+
+    fn set_out_rtol(&mut self, out_rtol: Option<f64>) {
+        self.problem.out_rtol = out_rtol.map(|value| M::T::from_f64(value).unwrap());
+    }
+
+    fn out_rtol(&self) -> Option<f64> {
+        self.problem.out_rtol.map(|value| value.to_f64().unwrap())
+    }
+
+    fn set_out_atol(&mut self, out_atol: Option<f64>) {
+        self.problem.out_atol = out_atol.map(|value| {
+            let len = if self.problem.eqn.out().is_some() {
+                self.problem.eqn.nout()
+            } else {
+                self.problem.eqn.nstates()
+            };
+            M::V::from_element(len, M::T::from_f64(value).unwrap(), M::C::default())
+        });
+    }
+
+    fn out_atol(&self) -> Option<f64> {
+        self.problem
+            .out_atol
+            .as_ref()
+            .and_then(|value| (value.len() > 0).then(|| value.get_index(0).to_f64().unwrap()))
+    }
+
+    fn set_param_rtol(&mut self, param_rtol: Option<f64>) {
+        self.problem.param_rtol = param_rtol.map(|value| M::T::from_f64(value).unwrap());
+    }
+
+    fn param_rtol(&self) -> Option<f64> {
+        self.problem.param_rtol.map(|value| value.to_f64().unwrap())
+    }
+
+    fn set_param_atol(&mut self, param_atol: Option<f64>) {
+        self.problem.param_atol = param_atol.map(|value| {
+            M::V::from_element(
+                self.problem.eqn.nparams(),
+                M::T::from_f64(value).unwrap(),
+                M::C::default(),
+            )
+        });
+    }
+
+    fn param_atol(&self) -> Option<f64> {
+        self.problem
+            .param_atol
+            .as_ref()
+            .and_then(|value| (value.len() > 0).then(|| value.get_index(0).to_f64().unwrap()))
+    }
+
     generate_ic_option_accessors! {
         use_linesearch: bool,
         max_linesearch_iterations: usize,
@@ -974,6 +1092,38 @@ mod tests {
         solve.set_rtol(1e-4);
         assert_close(solve.atol(), 1e-5, tol, "solve atol");
         assert_close(solve.rtol(), 1e-4, tol, "solve rtol");
+        solve.set_t0(0.125);
+        solve.set_h0(0.25);
+        solve.set_integrate_out(true);
+        assert_close(solve.t0(), 0.125, tol, "solve t0");
+        assert_close(solve.h0(), 0.25, tol, "solve h0");
+        assert!(solve.integrate_out());
+
+        solve.set_sens_rtol(Some(1e-3));
+        solve.set_sens_atol(Some(1e-4));
+        solve.set_out_rtol(Some(2e-3));
+        solve.set_out_atol(Some(2e-4));
+        solve.set_param_rtol(Some(3e-3));
+        solve.set_param_atol(Some(3e-4));
+        assert_close(solve.sens_rtol().unwrap(), 1e-3, tol, "solve sens rtol");
+        assert_close(solve.sens_atol().unwrap(), 1e-4, tol, "solve sens atol");
+        assert_close(solve.out_rtol().unwrap(), 2e-3, tol, "solve out rtol");
+        assert_close(solve.out_atol().unwrap(), 2e-4, tol, "solve out atol");
+        assert_close(solve.param_rtol().unwrap(), 3e-3, tol, "solve param rtol");
+        assert_close(solve.param_atol().unwrap(), 3e-4, tol, "solve param atol");
+
+        solve.set_sens_rtol(None);
+        solve.set_sens_atol(None);
+        solve.set_out_rtol(None);
+        solve.set_out_atol(None);
+        solve.set_param_rtol(None);
+        solve.set_param_atol(None);
+        assert_eq!(solve.sens_rtol(), None);
+        assert_eq!(solve.sens_atol(), None);
+        assert_eq!(solve.out_rtol(), None);
+        assert_eq!(solve.out_atol(), None);
+        assert_eq!(solve.param_rtol(), None);
+        assert_eq!(solve.param_atol(), None);
 
         let y0 = Vec::<f64>::from_host_array(solve.y0(&[2.0]).unwrap()).unwrap();
         assert_eq!(y0.len(), 1);
