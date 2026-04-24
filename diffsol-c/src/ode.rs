@@ -44,6 +44,15 @@ struct OdeWrapperSnapshot {
     ode_solver: OdeSolverType,
     rtol: f64,
     atol: f64,
+    t0: f64,
+    h0: f64,
+    integrate_out: bool,
+    sens_rtol: Option<f64>,
+    sens_atol: Option<f64>,
+    out_rtol: Option<f64>,
+    out_atol: Option<f64>,
+    param_rtol: Option<f64>,
+    param_atol: Option<f64>,
     ic_options: InitialConditionSolverOptionsSnapshot,
     ode_options: OdeSolverOptionsSnapshot,
 }
@@ -76,6 +85,15 @@ impl OdeWrapper {
             ode_solver: ode.ode_solver,
             rtol: ode.solve.rtol(),
             atol: ode.solve.atol(),
+            t0: ode.solve.t0(),
+            h0: ode.solve.h0(),
+            integrate_out: ode.solve.integrate_out(),
+            sens_rtol: ode.solve.sens_rtol(),
+            sens_atol: ode.solve.sens_atol(),
+            out_rtol: ode.solve.out_rtol(),
+            out_atol: ode.solve.out_atol(),
+            param_rtol: ode.solve.param_rtol(),
+            param_atol: ode.solve.param_atol(),
             ic_options: InitialConditionSolverOptionsSnapshot::from_solve(ode.solve.as_ref()),
             ode_options: OdeSolverOptionsSnapshot::from_solve(ode.solve.as_ref()),
         })
@@ -118,6 +136,15 @@ impl OdeWrapper {
             let mut ode = wrapper.guard()?;
             ode.solve.set_rtol(snapshot.rtol);
             ode.solve.set_atol(snapshot.atol);
+            ode.solve.set_t0(snapshot.t0);
+            ode.solve.set_h0(snapshot.h0);
+            ode.solve.set_integrate_out(snapshot.integrate_out);
+            ode.solve.set_sens_rtol(snapshot.sens_rtol);
+            ode.solve.set_sens_atol(snapshot.sens_atol);
+            ode.solve.set_out_rtol(snapshot.out_rtol);
+            ode.solve.set_out_atol(snapshot.out_atol);
+            ode.solve.set_param_rtol(snapshot.param_rtol);
+            ode.solve.set_param_atol(snapshot.param_atol);
             snapshot.ic_options.apply_to_solve(ode.solve.as_mut());
             snapshot.ode_options.apply_to_solve(ode.solve.as_mut());
         }
@@ -264,6 +291,96 @@ impl OdeWrapper {
 
     pub fn set_atol(&self, value: f64) -> Result<(), DiffsolRtError> {
         self.guard()?.solve.set_atol(value);
+        Ok(())
+    }
+
+    /// Initial time for the ODE solve, default 0.0.
+    pub fn get_t0(&self) -> Result<f64, DiffsolRtError> {
+        Ok(self.guard()?.solve.t0())
+    }
+
+    pub fn set_t0(&self, value: f64) -> Result<(), DiffsolRtError> {
+        self.guard()?.solve.set_t0(value);
+        Ok(())
+    }
+
+    /// Initial step size for the ODE solver, default 1.0.
+    pub fn get_h0(&self) -> Result<f64, DiffsolRtError> {
+        Ok(self.guard()?.solve.h0())
+    }
+
+    pub fn set_h0(&self, value: f64) -> Result<(), DiffsolRtError> {
+        self.guard()?.solve.set_h0(value);
+        Ok(())
+    }
+
+    /// Whether to integrate output equations alongside state equations.
+    pub fn get_integrate_out(&self) -> Result<bool, DiffsolRtError> {
+        Ok(self.guard()?.solve.integrate_out())
+    }
+
+    pub fn set_integrate_out(&self, value: bool) -> Result<(), DiffsolRtError> {
+        self.guard()?.solve.set_integrate_out(value);
+        Ok(())
+    }
+
+    /// Relative tolerance for forward sensitivity or adjoint equations.
+    pub fn get_sens_rtol(&self) -> Result<Option<f64>, DiffsolRtError> {
+        Ok(self.guard()?.solve.sens_rtol())
+    }
+
+    pub fn set_sens_rtol(&self, value: Option<f64>) -> Result<(), DiffsolRtError> {
+        self.guard()?.solve.set_sens_rtol(value);
+        Ok(())
+    }
+
+    /// Absolute tolerance for forward sensitivity or adjoint equations.
+    pub fn get_sens_atol(&self) -> Result<Option<f64>, DiffsolRtError> {
+        Ok(self.guard()?.solve.sens_atol())
+    }
+
+    pub fn set_sens_atol(&self, value: Option<f64>) -> Result<(), DiffsolRtError> {
+        self.guard()?.solve.set_sens_atol(value);
+        Ok(())
+    }
+
+    /// Relative tolerance for integrated output equations.
+    pub fn get_out_rtol(&self) -> Result<Option<f64>, DiffsolRtError> {
+        Ok(self.guard()?.solve.out_rtol())
+    }
+
+    pub fn set_out_rtol(&self, value: Option<f64>) -> Result<(), DiffsolRtError> {
+        self.guard()?.solve.set_out_rtol(value);
+        Ok(())
+    }
+
+    /// Absolute tolerance for integrated output equations.
+    pub fn get_out_atol(&self) -> Result<Option<f64>, DiffsolRtError> {
+        Ok(self.guard()?.solve.out_atol())
+    }
+
+    pub fn set_out_atol(&self, value: Option<f64>) -> Result<(), DiffsolRtError> {
+        self.guard()?.solve.set_out_atol(value);
+        Ok(())
+    }
+
+    /// Relative tolerance for adjoint parameter gradient equations.
+    pub fn get_param_rtol(&self) -> Result<Option<f64>, DiffsolRtError> {
+        Ok(self.guard()?.solve.param_rtol())
+    }
+
+    pub fn set_param_rtol(&self, value: Option<f64>) -> Result<(), DiffsolRtError> {
+        self.guard()?.solve.set_param_rtol(value);
+        Ok(())
+    }
+
+    /// Absolute tolerance for adjoint parameter gradient equations.
+    pub fn get_param_atol(&self) -> Result<Option<f64>, DiffsolRtError> {
+        Ok(self.guard()?.solve.param_atol())
+    }
+
+    pub fn set_param_atol(&self, value: Option<f64>) -> Result<(), DiffsolRtError> {
+        self.guard()?.solve.set_param_atol(value);
         Ok(())
     }
 
@@ -981,6 +1098,15 @@ mod jit_tests {
         ode.set_ode_solver(OdeSolverType::TrBdf2).unwrap();
         ode.set_rtol(1e-7).unwrap();
         ode.set_atol(1e-9).unwrap();
+        ode.set_t0(0.125).unwrap();
+        ode.set_h0(0.25).unwrap();
+        ode.set_integrate_out(true).unwrap();
+        ode.set_sens_rtol(Some(1e-5)).unwrap();
+        ode.set_sens_atol(Some(1e-6)).unwrap();
+        ode.set_out_rtol(None).unwrap();
+        ode.set_out_atol(None).unwrap();
+        ode.set_param_rtol(Some(2e-5)).unwrap();
+        ode.set_param_atol(Some(2e-6)).unwrap();
 
         let ic_options = ode.get_ic_options();
         ic_options.set_use_linesearch(true).unwrap();
@@ -1053,6 +1179,45 @@ mod jit_tests {
             1e-12,
             "serialized atol",
         );
+        assert_close(
+            decoded.get_t0().unwrap(),
+            scalar_value(0.125, scalar_type),
+            1e-12,
+            "serialized t0",
+        );
+        assert_close(
+            decoded.get_h0().unwrap(),
+            scalar_value(0.25, scalar_type),
+            1e-12,
+            "serialized h0",
+        );
+        assert!(decoded.get_integrate_out().unwrap());
+        assert_close(
+            decoded.get_sens_rtol().unwrap().unwrap(),
+            scalar_value(1e-5, scalar_type),
+            1e-12,
+            "serialized sens_rtol",
+        );
+        assert_close(
+            decoded.get_sens_atol().unwrap().unwrap(),
+            scalar_value(1e-6, scalar_type),
+            1e-12,
+            "serialized sens_atol",
+        );
+        assert_eq!(decoded.get_out_rtol().unwrap(), None);
+        assert_eq!(decoded.get_out_atol().unwrap(), None);
+        assert_close(
+            decoded.get_param_rtol().unwrap().unwrap(),
+            scalar_value(2e-5, scalar_type),
+            1e-12,
+            "serialized param_rtol",
+        );
+        assert_close(
+            decoded.get_param_atol().unwrap().unwrap(),
+            scalar_value(2e-6, scalar_type),
+            1e-12,
+            "serialized param_atol",
+        );
 
         let ic_options = decoded.get_ic_options();
         assert!(ic_options.get_use_linesearch().unwrap());
@@ -1115,6 +1280,8 @@ mod jit_tests {
         decoded
             .set_linear_solver(serialized_linear_solver(matrix_type))
             .unwrap();
+        decoded.set_t0(0.0).unwrap();
+        decoded.set_integrate_out(false).unwrap();
         let t_eval = [0.25, 0.5, 1.0];
         let solution = decoded
             .solve_dense(vector_host(&[2.0]), vector_host(&t_eval))
