@@ -7,31 +7,28 @@ type CG = CraneliftJitModule;
 type LS = diffsol::NalgebraLU<f64>;
 
 fn main() {
-    let dose = 1000.0;
-    let model = format!(
-        r#"
-        Vc {{ 1000.0 }} Vp1 {{ 1000.0 }} CL {{ 100.0 }} Qp1 {{ 50.0 }} dose {{ {dose} }}
-        u_i {{
+    let model = "
+        Vc { 1000.0 } Vp1 { 1000.0 } CL { 100.0 } Qp1 { 50.0 } dose { 1000.0 }
+        u_i {
             qc = dose,
             qp1 = 0,
-        }}
-        F_i {{
+        }
+        F_i {
             -qc / Vc * CL - Qp1 * (qc / Vc - qp1 / Vp1),
             Qp1 * (qc / Vc - qp1 / Vp1),
-        }}
-        stop_i {{
+        }
+        stop_i {
             t - 6.0,
             t - 12.0,
             t - 18.0,
-        }}
-        reset_i {{
+        }
+        reset_i {
             qc + dose,
             qp1,
-        }}
-    "#
-    );
+        }
+    ";
     let problem = OdeBuilder::<M>::new()
-        .build_from_diffsl::<CG>(&model)
+        .build_from_diffsl::<CG>(model)
         .unwrap();
     let mut solver = problem.bdf::<LS>().unwrap();
 

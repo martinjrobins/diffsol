@@ -27,7 +27,7 @@ fn main() {
         }
     ";
     let problem = OdeBuilder::<M>::new()
-        .build_from_diffsl::<CG>(&model)
+        .build_from_diffsl::<CG>(model)
         .unwrap();
     let mut solver = problem.bdf::<LS>().unwrap();
 
