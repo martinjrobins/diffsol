@@ -37,4 +37,5 @@ In DiffSL, the `stop` tensor stores one or more event functions, while the `rese
 
 When a stop condition fires, Diffsol first locates the event time accurately. For forward solves with `solve` or `solve_dense`, if a `reset` tensor is present then the reset is applied automatically and the integration continues. The public `solve_dense_sensitivities` method does the same when the equations provide sensitivity-aware root and reset operators. Manual time-stepping with `step`, staged solve APIs, and current adjoint workflows still expose the event to the caller so that custom event handling and derivative propagation remain explicit.
 
+
 In the next two sections, we revisit compartmental models of drug delivery and bouncing-ball dynamics and show both the procedural and declarative versions side by side.

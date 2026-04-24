@@ -95,3 +95,19 @@ Because the model supplies both `stop` and `reset`, the high-level `solve` metho
 ```
 
 {{#include images/drug-delivery-declarative.html}}
+
+## Sensitivities through declarative dose events
+
+The automatic reset handling in `solve_dense_sensitivities` is useful when the reset itself depends on an input parameter. In the drug-delivery model, we can make the bolus dose an input parameter by putting `dose` in the DiffSL `in` tensor. The initial condition uses the same dose for the dose at \\(t=0\\), and the reset tensor adds `dose` to the central compartment at later dosing times.
+
+In this example the output is the central-compartment concentration squared, \\((q_c / V_c)^2\\) (this is slightly contrived so that the final gradient is not constant). 
+We solve the model at a dense set of evaluation times, integrate the squared concentration so that our final output is the area under the concentration squared (AUC2).
+We will use the `solve_dense_sensitivities` method to obtain both the solution AUC2 and its sensitivities (gradient with respect to the parameter). Repeating this for several dose levels gives the dose-response curve and its gradient.
+
+DiffSL currently needs the LLVM backend for sensitivity-aware reset/root operators in this example.
+
+```rust,ignore
+{{#include ../../../examples/compartmental-models-drug-delivery-sensitivities/src/main_llvm.rs}}
+```
+
+{{#include images/drug-delivery-dose-sensitivity.html}}
