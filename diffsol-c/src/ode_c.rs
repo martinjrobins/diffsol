@@ -1733,6 +1733,9 @@ mod tests {
             assert_close(min_timestep, 1e-4, ASSERT_TOL, "min_timestep roundtrip");
             diffsol_ode_options_free(ode_options);
 
+            assert_eq!(diffsol_ode_set_t0(ode, 0.0), DIFFSOL_OK);
+            assert_eq!(diffsol_ode_set_h0(ode, 1.0), DIFFSOL_OK);
+
             let params = [2.0f64];
             let y = [0.25f64];
             let v = [3.0f64];
