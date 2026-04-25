@@ -33,11 +33,12 @@ mod tests {
     use crate::op::ParameterisedOp;
     use crate::Scalar;
     use crate::{
-        op::OpStatistics, AdjointEquations, AdjointOdeSolverMethod, Context, DenseMatrix,
-        MatrixCommon, MatrixRef, NonLinearOp, NonLinearOpJacobian, OdeEquations,
-        OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens,
-        OdeEquationsRef, OdeSolverConfig, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
-        OdeSolverStopReason, Scale, VectorRef, VectorView, VectorViewMut,
+        op::OpStatistics, AdjointEquations, AdjointOdeSolverMethod, Checkpointing, Context,
+        DenseMatrix, HermiteInterpolator, MatrixCommon, MatrixRef, NonLinearOp,
+        NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
+        OdeEquationsImplicitSens, OdeEquationsRef, OdeSolverConfig, OdeSolverMethod,
+        OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Scale, VectorRef, VectorView,
+        VectorViewMut,
     };
     use crate::{
         ConstantOp, ConstantOpSens, DefaultDenseMatrix, DefaultSolver, LinearSolver,
@@ -230,6 +231,64 @@ mod tests {
             delta3 * Scale(DM::T::from_f64(4.).unwrap()),
         ];
         ret
+    }
+
+    fn solve_with_checkpointing_until_stop<'a, Eqn, Method>(
+        solver: &mut Method,
+        final_time: Eqn::T,
+        max_steps_between_checkpoints: Option<usize>,
+    ) -> Result<
+        (
+            Checkpointing<Eqn, Method::State, Method>,
+            OdeSolverStopReason<Eqn::T>,
+        ),
+        DiffsolError,
+    >
+    where
+        Eqn: OdeEquations + 'a,
+        Eqn::V: DefaultDenseMatrix,
+        Method: OdeSolverMethod<'a, Eqn> + Sized,
+    {
+        let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
+        let mut nsteps = 0;
+        let t0 = solver.state().t;
+        let mut checkpoints = vec![solver.state_clone()];
+        let mut ts = vec![t0];
+        let mut ys = vec![solver.state().y.clone()];
+        let mut ydots = vec![solver.state().dy.clone()];
+
+        solver.set_stop_time(final_time)?;
+        let stop_reason = loop {
+            match solver.step()? {
+                OdeSolverStopReason::InternalTimestep => {
+                    ts.push(solver.state().t);
+                    ys.push(solver.state().y.clone());
+                    ydots.push(solver.state().dy.clone());
+                    nsteps += 1;
+                    if nsteps > max_steps_between_checkpoints {
+                        checkpoints.push(solver.checkpoint());
+                        nsteps = 0;
+                        ts.clear();
+                        ys.clear();
+                        ydots.clear();
+                    }
+                }
+                OdeSolverStopReason::RootFound(t_root, idx) => {
+                    solver.state_mut_back(t_root)?;
+                    break OdeSolverStopReason::RootFound(t_root, idx);
+                }
+                OdeSolverStopReason::TstopReached => break OdeSolverStopReason::TstopReached,
+            }
+        };
+
+        ts.push(solver.state().t);
+        ys.push(solver.state().y.clone());
+        ydots.push(solver.state().dy.clone());
+        checkpoints.push(solver.state_clone());
+        let last_segment = HermiteInterpolator::new(ys, ydots, ts);
+        let checkpointer =
+            Checkpointing::new(None, checkpoints.len() - 2, checkpoints, Some(last_segment));
+        Ok((checkpointer, stop_reason))
     }
 
     pub fn setup_test_adjoint_sum_squares<'a, LS, Eqn>(
@@ -1337,9 +1396,9 @@ mod tests {
         let forward_stop_time = expected_out.t + Eqn::T::from_f64(1.0).unwrap();
 
         let mut first_forward_solver = build_forward(None).unwrap();
-        let (pre_reset_checkpointer, _, _, _) = first_forward_solver
-            .solve_with_checkpointing(forward_stop_time, None)
-            .unwrap();
+        let (pre_reset_checkpointer, _) =
+            solve_with_checkpointing_until_stop(&mut first_forward_solver, forward_stop_time, None)
+                .unwrap();
         let problem = first_forward_solver.problem();
         let pre_reset_solver = first_forward_solver.clone();
         let fwd_state_minus = first_forward_solver.into_state();
@@ -1354,8 +1413,12 @@ mod tests {
         let fwd_state_plus = state_after_reset.clone();
 
         let mut second_forward_solver = build_forward(Some(state_after_reset)).unwrap();
-        let (post_reset_checkpointer, _, _, post_reset_stop_reason) = second_forward_solver
-            .solve_with_checkpointing(forward_stop_time, None)
+        let (post_reset_checkpointer, post_reset_stop_reason) =
+            solve_with_checkpointing_until_stop(
+                &mut second_forward_solver,
+                forward_stop_time,
+                None,
+            )
             .unwrap();
         let post_reset_solver = second_forward_solver.clone();
         let final_forward_state = second_forward_solver.into_state();
@@ -1380,7 +1443,7 @@ mod tests {
         );
 
         let mut post_reset_adjoint_eqn = problem.adjoint_equations(
-            post_reset_checkpointer.clone(),
+            vec![post_reset_checkpointer.clone()],
             Some(post_reset_solver.clone()),
             None,
         );
@@ -1412,7 +1475,7 @@ mod tests {
         let ctx = problem.context().clone();
         let reset_problem = problem;
         let mut pre_reset_adjoint_eqn =
-            problem.adjoint_equations(pre_reset_checkpointer, Some(pre_reset_solver), None);
+            problem.adjoint_equations(vec![pre_reset_checkpointer], Some(pre_reset_solver), None);
         {
             let reset_fn = reset_problem.eqn.reset().unwrap();
             let root_fn = reset_problem.eqn.root().unwrap();
@@ -1499,9 +1562,9 @@ mod tests {
         let dgdu_refs = dgdu.iter().collect::<Vec<_>>();
 
         let mut first_forward_solver = build_forward(None).unwrap();
-        let (pre_reset_checkpointer, _, _, pre_reset_stop_reason) = first_forward_solver
-            .solve_with_checkpointing(forward_stop_time, None)
-            .unwrap();
+        let (pre_reset_checkpointer, pre_reset_stop_reason) =
+            solve_with_checkpointing_until_stop(&mut first_forward_solver, forward_stop_time, None)
+                .unwrap();
         let problem = first_forward_solver.problem();
         let pre_reset_solver = first_forward_solver.clone();
         let fwd_state_minus = first_forward_solver.into_state();
@@ -1529,8 +1592,12 @@ mod tests {
         let fwd_state_plus = state_after_reset.clone();
 
         let mut second_forward_solver = build_forward(Some(state_after_reset)).unwrap();
-        let (post_reset_checkpointer, _, _, post_reset_stop_reason) = second_forward_solver
-            .solve_with_checkpointing(forward_stop_time, None)
+        let (post_reset_checkpointer, post_reset_stop_reason) =
+            solve_with_checkpointing_until_stop(
+                &mut second_forward_solver,
+                forward_stop_time,
+                None,
+            )
             .unwrap();
         let post_reset_solver = second_forward_solver.clone();
         let final_forward_state = second_forward_solver.into_state();
@@ -1545,7 +1612,7 @@ mod tests {
         );
 
         let mut post_reset_adjoint_eqn = problem.adjoint_equations(
-            post_reset_checkpointer.clone(),
+            vec![post_reset_checkpointer.clone()],
             Some(post_reset_solver.clone()),
             Some(dgdu.len()),
         );
@@ -1582,7 +1649,7 @@ mod tests {
         let ctx = problem.context().clone();
         let reset_problem = problem;
         let mut pre_reset_adjoint_eqn = problem.adjoint_equations(
-            pre_reset_checkpointer,
+            vec![pre_reset_checkpointer],
             Some(pre_reset_solver),
             Some(dgdu.len()),
         );

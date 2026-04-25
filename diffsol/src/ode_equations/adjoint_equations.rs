@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     error::DiffsolError, op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations,
-    Checkpointing, ConstantOp, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
+    CheckpointingPath, ConstantOp, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
     NoCheckpointingSolver, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations,
     OdeEquationsAdjoint, OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op,
     Scalar, Vector,
@@ -21,7 +21,8 @@ where
 {
     eqn: &'a Eqn,
     t0: Eqn::T,
-    checkpointer: Checkpointing<Eqn, State, Method>,
+    checkpointers: CheckpointingPath<Eqn, State, Method>,
+    active_checkpointer: usize,
     solver: Option<RefCell<Method>>,
     x: Eqn::V,
     index: usize,
@@ -39,10 +40,14 @@ where
     pub fn new(
         eqn: &'a Eqn,
         t0: Eqn::T,
-        checkpointer: Checkpointing<Eqn, State, Method>,
+        checkpointers: CheckpointingPath<Eqn, State, Method>,
         solver: Option<Method>,
         max_index: usize,
     ) -> Self {
+        let active_checkpointer = checkpointers
+            .len()
+            .checked_sub(1)
+            .expect("adjoint checkpointing path must not be empty");
         let ctx = eqn.context();
         let x = <Eqn::V as Vector>::zeros(eqn.rhs().nstates(), ctx.clone());
         let mut col = <Eqn::V as Vector>::zeros(max_index, ctx.clone());
@@ -51,7 +56,8 @@ where
         Self {
             eqn,
             t0,
-            checkpointer,
+            checkpointers,
+            active_checkpointer,
             solver: solver.map(RefCell::new),
             x,
             index,
@@ -59,6 +65,10 @@ where
             col,
             last_t: None,
         }
+    }
+
+    fn active_checkpointer(&self) -> &crate::Checkpointing<Eqn, State, Method> {
+        &self.checkpointers[self.active_checkpointer]
     }
 
     pub fn set_state(&mut self, t: Eqn::T) {
@@ -69,7 +79,7 @@ where
         }
         // clamp tiny boundary overshoots to the boundary values to avoid interpolation errors
         let t0 = self.t0;
-        let t1 = self.checkpointer.last_t();
+        let t1 = self.checkpointers[self.checkpointers.len() - 1].end_t();
         let boundary_tol = Eqn::T::EPSILON.sqrt() * (t.abs() + t1.abs() + Eqn::T::one());
         let t_interp = if t > t1 && t - t1 <= boundary_tol {
             t1
@@ -79,16 +89,27 @@ where
             t
         };
         self.last_t = Some(t_interp);
+        while self.active_checkpointer > 0
+            && t_interp + boundary_tol < self.active_checkpointer().first_t()
+        {
+            self.active_checkpointer -= 1;
+        }
+        while self.active_checkpointer + 1 < self.checkpointers.len()
+            && t_interp > self.active_checkpointer().end_t() + boundary_tol
+        {
+            self.active_checkpointer += 1;
+        }
+        let active_checkpointer = self.active_checkpointer;
+        let x = &mut self.x;
         match self.solver.as_ref() {
             Some(solver) => {
                 let mut solver = solver.borrow_mut();
-                self.checkpointer
-                    .interpolate(Some(&mut *solver), t_interp, &mut self.x)
+                self.checkpointers[active_checkpointer]
+                    .interpolate(Some(&mut *solver), t_interp, x)
                     .unwrap();
             }
-            None => self
-                .checkpointer
-                .interpolate(None, t_interp, &mut self.x)
+            None => self.checkpointers[active_checkpointer]
+                .interpolate(None, t_interp, x)
                 .unwrap(),
         }
         // for diffsl, we need to set data for the adjoint state!
@@ -488,7 +509,7 @@ where
         let context = Rc::new(RefCell::new(AdjointContext::new(
             context_ref.eqn,
             context_ref.t0,
-            context_ref.checkpointer.clone(),
+            context_ref.checkpointers.clone(),
             context_ref
                 .solver
                 .as_ref()
@@ -570,11 +591,11 @@ where
     }
 
     pub fn last_t(&self) -> Eqn::T {
-        self.context.borrow().checkpointer.last_t()
+        self.context.borrow().checkpointers.last().unwrap().last_t()
     }
 
     pub fn last_h(&self) -> Option<Eqn::T> {
-        self.context.borrow().checkpointer.last_h()
+        self.context.borrow().checkpointers.last().unwrap().last_h()
     }
 
     pub fn with_out(&self) -> bool {
@@ -771,7 +792,7 @@ mod tests {
         let context = Rc::new(RefCell::new(AdjointContext::new(
             &problem.eqn,
             problem.t0,
-            checkpointer,
+            vec![checkpointer],
             Some(solver.clone()),
             nout,
         )));
@@ -856,7 +877,7 @@ mod tests {
         let context = Rc::new(RefCell::new(AdjointContext::new(
             &problem.eqn,
             problem.t0,
-            checkpointer,
+            vec![checkpointer],
             Some(solver.clone()),
             nout,
         )));

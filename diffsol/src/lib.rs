@@ -319,6 +319,7 @@ pub use ode_solver::{
     bdf_state::BdfState,
     builder::OdeBuilder,
     checkpointing::Checkpointing,
+    checkpointing::CheckpointingPath,
     checkpointing::HermiteInterpolator,
     config::{
         BdfConfig, ExplicitRkConfig, OdeSolverConfig, OdeSolverConfigMut, OdeSolverConfigRef,

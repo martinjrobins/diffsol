@@ -196,6 +196,9 @@ where
     phantom: PhantomData<Method>,
 }
 
+pub type CheckpointingPath<Eqn, State, Method = NoCheckpointingSolver<Eqn, State>> =
+    Vec<Checkpointing<Eqn, State, Method>>;
+
 impl<Eqn, State, Method> Clone for Checkpointing<Eqn, State, Method>
 where
     Eqn: OdeEquations,
@@ -276,6 +279,14 @@ where
             .borrow()
             .last_t()
             .expect("segment should not be empty")
+    }
+
+    pub fn first_t(&self) -> Eqn::T {
+        self.checkpoints[0].as_ref().t
+    }
+
+    pub fn end_t(&self) -> Eqn::T {
+        self.checkpoints[self.checkpoints.len() - 1].as_ref().t
     }
 
     /// Get the last time step size in the current segment.

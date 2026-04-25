@@ -3,9 +3,9 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     error::DiffsolError, vector::Vector, AdjointContext, AdjointEquations, AugmentedOdeEquations,
-    AugmentedOdeEquationsImplicit, Bdf, BdfState, Checkpointing, DefaultDenseMatrix, DenseMatrix,
-    ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch, OdeEquations,
-    OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
+    AugmentedOdeEquationsImplicit, Bdf, BdfState, CheckpointingPath, DefaultDenseMatrix,
+    DenseMatrix, ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch,
+    OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
     OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Scalar, Sdirk,
     SensEquations, Tableau, VectorRef,
 };
@@ -191,14 +191,14 @@ macro_rules! sdirk_solver_from_tableau {
             "- `LS`: The linear solver type\n",
             "- `S`: The forward solver method type used for checkpointing\n\n",
             "# Arguments\n",
-            "- `checkpointer`: The checkpointing object containing the stored forward solution and interpolation segments\n",
+            "- `checkpointer`: The checkpointing path containing the stored forward solution segments and interpolation data across reset events\n",
             "- `solver`: Optional replay solver used to rebuild checkpoint interpolation segments when interpolation leaves the current segment. This may be `None` only when the existing checkpoint segments already cover all required interpolation times\n",
             "- `nout_override`: Optional override for the number of adjoint output equations. Use this when the backward solve should track a different output dimension than `eqn.nout()`\n\n",
             "# Returns\n",
             "An SDIRK solver instance configured for adjoint sensitivity analysis using ", stringify!($tableau))]
         pub fn $method_solver_adjoint<'a, LS: LinearSolver<Eqn::M>, S: OdeSolverMethod<'a, Eqn>>(
             &'a self,
-            checkpointer: Checkpointing<Eqn, S::State, S>,
+            checkpointer: CheckpointingPath<Eqn, S::State, S>,
             solver: Option<S>,
             nout_override: Option<usize>,
         ) -> Result<
@@ -346,14 +346,14 @@ macro_rules! rk_solver_from_tableau {
             "# Type Parameters\n",
             "- `S`: The forward solver method type used for checkpointing\n\n",
             "# Arguments\n",
-            "- `checkpointer`: The checkpointing object containing the stored forward solution and interpolation segments\n",
+            "- `checkpointer`: The checkpointing path containing the stored forward solution segments and interpolation data across reset events\n",
             "- `solver`: Optional replay solver used to rebuild checkpoint interpolation segments when interpolation leaves the current segment. This may be `None` only when the existing checkpoint segments already cover all required interpolation times\n",
             "- `nout_override`: Optional override for the number of adjoint output equations. Use this when the backward solve should track a different output dimension than `eqn.nout()`\n\n",
             "# Returns\n",
             "An explicit RK solver instance configured for adjoint sensitivity analysis using ", stringify!($tableau))]
         pub fn $method_solver_adjoint<'a, S: OdeSolverMethod<'a, Eqn>>(
             &'a self,
-            checkpointer: Checkpointing<Eqn, S::State, S>,
+            checkpointer: CheckpointingPath<Eqn, S::State, S>,
             solver: Option<S>,
             nout_override: Option<usize>,
         ) -> Result<
@@ -513,7 +513,7 @@ where
 {
     pub fn adjoint_equations<'a, S: OdeSolverMethod<'a, Eqn>>(
         &'a self,
-        checkpointer: Checkpointing<Eqn, S::State, S>,
+        checkpointer: CheckpointingPath<Eqn, S::State, S>,
         solver: Option<S>,
         nout_override: Option<usize>,
     ) -> AdjointEquations<'a, Eqn, S> {
@@ -638,7 +638,7 @@ where
     /// - `S`: The forward solver method type used for checkpointing (this can be auto-deduced from the `checkpointer`)
     ///
     /// # Arguments
-    /// - `checkpointer`: The checkpointing object containing the forward solution
+    /// - `checkpointer`: The checkpointing path containing the forward solution segments
     /// - `nout_override`: Optional override for the number of output equations
     ///
     /// # Returns
@@ -713,7 +713,7 @@ where
     /// - `S`: The forward solver method type used for checkpointing
     ///
     /// # Arguments
-    /// - `checkpointer`: The checkpointing object containing the stored forward solution and interpolation segments
+    /// - `checkpointer`: The checkpointing path containing the stored forward solution segments and interpolation data across reset events
     /// - `solver`: Optional replay solver used to rebuild checkpoint interpolation segments when interpolation leaves the current segment. This may be `None` only when the existing checkpoint segments already cover all required interpolation times
     /// - `nout_override`: Optional override for the number of adjoint output equations. Use this when the backward solve should track a different output dimension than `eqn.nout()`
     ///
@@ -722,7 +722,7 @@ where
     #[allow(clippy::type_complexity)]
     pub fn bdf_solver_adjoint<'a, LS: LinearSolver<Eqn::M>, S: OdeSolverMethod<'a, Eqn>>(
         &'a self,
-        checkpointer: Checkpointing<Eqn, S::State, S>,
+        checkpointer: CheckpointingPath<Eqn, S::State, S>,
         solver: Option<S>,
         nout_override: Option<usize>,
     ) -> Result<
@@ -917,7 +917,7 @@ where
     >(
         &'a self,
         tableau: Tableau<DM>,
-        checkpointer: Checkpointing<Eqn, S::State, S>,
+        checkpointer: CheckpointingPath<Eqn, S::State, S>,
         solver: Option<S>,
         nout_override: Option<usize>,
     ) -> Result<Sdirk<'a, Eqn, LS, DM, AdjointEquations<'a, Eqn, S>>, DiffsolError>
@@ -1081,7 +1081,7 @@ where
     >(
         &'a self,
         tableau: Tableau<DM>,
-        checkpointer: Checkpointing<Eqn, S::State, S>,
+        checkpointer: CheckpointingPath<Eqn, S::State, S>,
         solver: Option<S>,
         nout_override: Option<usize>,
     ) -> Result<ExplicitRk<'a, Eqn, DM, AdjointEquations<'a, Eqn, S>>, DiffsolError>

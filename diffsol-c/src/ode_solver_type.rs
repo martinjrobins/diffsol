@@ -8,7 +8,7 @@ use diffsol::{
     OdeSolverProblem, OdeSolverState, Vector, VectorHost, VectorRef,
 };
 use diffsol::{
-    ode_solver_error, AdjointOdeSolverMethod, Checkpointing, CodegenModule, DefaultSolver,
+    ode_solver_error, AdjointOdeSolverMethod, CheckpointingPath, CodegenModule, DefaultSolver,
     DenseMatrix, MatrixCommon, OdeEquations, OdeSolverStopReason, Op, SensitivitiesOdeSolverMethod,
     Solution, VectorViewMut,
 };
@@ -632,7 +632,7 @@ impl OdeSolverType {
     pub(crate) fn solve_adjoint_backwards<'solver, M, CG, LS, S>(
         &self,
         problem: &'solver OdeSolverProblem<DiffSl<M, CG>>,
-        checkpointing: Checkpointing<DiffSl<M, CG>, S::State, S>,
+        checkpointing: CheckpointingPath<DiffSl<M, CG>, S::State, S>,
         solver: S,
         _stop_reason: OdeSolverStopReason<M::T>,
         g_m: &<M::V as DefaultDenseMatrix>::M,
