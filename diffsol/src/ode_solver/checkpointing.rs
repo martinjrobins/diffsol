@@ -2,8 +2,7 @@ use num_traits::FromPrimitive;
 use std::cell::RefCell;
 
 use crate::{
-    error::DiffsolError, other_error, OdeEquations, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState, Scalar, Vector,
+    error::DiffsolError, other_error, OdeEquations, OdeSolverMethod, OdeSolverState, Scalar, Vector,
 };
 use num_traits::{abs, One};
 
@@ -187,37 +186,35 @@ where
 ///
 /// # Type Parameters
 /// - `Eqn`: The ODE equations type (inferred from the solver)
-/// - `Method`: The forward solver method type (inferred from the solver)
-pub struct Checkpointing<'a, Eqn, Method>
+/// - `State`: The stored checkpoint state type
+pub struct Checkpointing<Eqn, State>
 where
-    Method: OdeSolverMethod<'a, Eqn>,
     Eqn: OdeEquations,
+    State: OdeSolverState<Eqn::V>,
 {
-    checkpoints: Vec<Method::State>,
+    checkpoints: Vec<State>,
     segment: RefCell<HermiteInterpolator<Eqn::V>>,
     previous_segment: RefCell<Option<HermiteInterpolator<Eqn::V>>>,
-    solver: RefCell<Method>,
 }
 
-impl<'a, Eqn, Method> Clone for Checkpointing<'a, Eqn, Method>
+impl<Eqn, State> Clone for Checkpointing<Eqn, State>
 where
-    Method: OdeSolverMethod<'a, Eqn>,
     Eqn: OdeEquations,
+    State: OdeSolverState<Eqn::V>,
 {
     fn clone(&self) -> Self {
         Checkpointing {
             checkpoints: self.checkpoints.clone(),
             segment: RefCell::new(self.segment.borrow().clone()),
             previous_segment: RefCell::new(self.previous_segment.borrow().clone()),
-            solver: RefCell::new(self.solver.borrow().clone()),
         }
     }
 }
 
-impl<'a, Eqn, Method> Checkpointing<'a, Eqn, Method>
+impl<Eqn, State> Checkpointing<Eqn, State>
 where
-    Method: OdeSolverMethod<'a, Eqn>,
     Eqn: OdeEquations,
+    State: OdeSolverState<Eqn::V>,
 {
     /// Create a new checkpointing system.
     ///
@@ -232,12 +229,16 @@ where
     /// # Panics
     /// Panics if `checkpoints.len() < 2` or if `start_idx >= checkpoints.len() - 1`.
     ///
-    pub fn new(
-        mut solver: Method,
+    pub fn new<'a, Method>(
+        solver: &mut Method,
         start_idx: usize,
-        checkpoints: Vec<Method::State>,
+        checkpoints: Vec<State>,
         segment: Option<HermiteInterpolator<Eqn::V>>,
-    ) -> Self {
+    ) -> Self
+    where
+        Method: OdeSolverMethod<'a, Eqn, State = State>,
+        Eqn: 'a,
+    {
         if checkpoints.len() < 2 {
             panic!("Checkpoints must have at least 2 elements");
         }
@@ -247,22 +248,16 @@ where
         let segment = segment.unwrap_or_else(|| {
             let mut segment = HermiteInterpolator::default();
             segment
-                .reset(
-                    &mut solver,
-                    &checkpoints[start_idx],
-                    &checkpoints[start_idx + 1],
-                )
+                .reset(solver, &checkpoints[start_idx], &checkpoints[start_idx + 1])
                 .unwrap();
             segment
         });
         let segment = RefCell::new(segment);
         let previous_segment = RefCell::new(None);
-        let solver = RefCell::new(solver);
         Checkpointing {
             checkpoints,
             segment,
             previous_segment,
-            solver,
         }
     }
 
@@ -289,15 +284,6 @@ where
         self.segment.borrow().last_h()
     }
 
-    /// Get a reference to the ODE problem associated with this checkpointing system.
-    ///
-    /// # Returns
-    /// A reference to the `OdeSolverProblem` that defines the ODE equations,
-    /// tolerances, and other solver parameters.
-    pub fn problem(&self) -> &'a OdeSolverProblem<Eqn> {
-        self.solver.borrow().problem()
-    }
-
     /// Interpolate the solution at a given time point.
     ///
     /// This method provides the forward solution value at time `t` for use during
@@ -318,7 +304,16 @@ where
     /// # Notes
     /// Small deviations from the checkpoint range (within roundoff error) are automatically
     /// snapped to the nearest checkpoint boundary.
-    pub fn interpolate(&self, t: Eqn::T, y: &mut Eqn::V) -> Result<(), DiffsolError> {
+    pub fn interpolate<'a, Method>(
+        &self,
+        solver: &mut Method,
+        t: Eqn::T,
+        y: &mut Eqn::V,
+    ) -> Result<(), DiffsolError>
+    where
+        Method: OdeSolverMethod<'a, Eqn, State = State>,
+        Eqn: 'a,
+    {
         {
             let segment = self.segment.borrow();
             if segment.interpolate(t, y).is_some() {
@@ -364,11 +359,10 @@ where
             self.previous_segment
                 .replace(Some(HermiteInterpolator::default()));
         }
-        let mut solver = self.solver.borrow_mut();
         let mut previous_segment = self.previous_segment.borrow_mut();
         let mut segment = self.segment.borrow_mut();
         previous_segment.as_mut().unwrap().reset(
-            &mut *solver,
+            solver,
             &self.checkpoints[idx],
             &self.checkpoints[idx + 1],
         )?;
@@ -417,11 +411,17 @@ mod tests {
         }
         checkpoints.push(solver.checkpoint());
         let segment = HermiteInterpolator::new(ys, ydots, ts);
-        let checkpointer =
-            Checkpointing::new(solver, checkpoints.len() - 2, checkpoints, Some(segment));
+        let checkpointer = Checkpointing::new(
+            &mut solver,
+            checkpoints.len() - 2,
+            checkpoints,
+            Some(segment),
+        );
         let mut y = problem.context().vector_zeros(problem.eqn.rhs().nstates());
         for point in soln.solution_points.iter().rev() {
-            checkpointer.interpolate(point.t, &mut y).unwrap();
+            checkpointer
+                .interpolate(&mut solver, point.t, &mut y)
+                .unwrap();
             y.assert_eq_norm(&point.state, &problem.atol, problem.rtol, 10.0);
         }
     }

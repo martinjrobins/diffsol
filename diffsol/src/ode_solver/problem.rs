@@ -197,7 +197,8 @@ macro_rules! sdirk_solver_from_tableau {
             "An SDIRK solver instance configured for adjoint sensitivity analysis using ", stringify!($tableau))]
         pub fn $method_solver_adjoint<'a, LS: LinearSolver<Eqn::M>, S: OdeSolverMethod<'a, Eqn>>(
             &'a self,
-            checkpointer: Checkpointing<'a, Eqn, S>,
+            checkpointer: Checkpointing<Eqn, S::State>,
+            solver: S,
             nout_override: Option<usize>,
         ) -> Result<
             Sdirk<'a, Eqn, LS, <Eqn::V as DefaultDenseMatrix>::M, AdjointEquations<'a, Eqn, S>>,
@@ -209,6 +210,7 @@ macro_rules! sdirk_solver_from_tableau {
             self.sdirk_solver_adjoint(
                 Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(self.context().clone()),
                 checkpointer,
+                solver,
                 nout_override,
             )
         }
@@ -349,7 +351,8 @@ macro_rules! rk_solver_from_tableau {
             "An explicit RK solver instance configured for adjoint sensitivity analysis using ", stringify!($tableau))]
         pub fn $method_solver_adjoint<'a, S: OdeSolverMethod<'a, Eqn>>(
             &'a self,
-            checkpointer: Checkpointing<'a, Eqn, S>,
+            checkpointer: Checkpointing<Eqn, S::State>,
+            solver: S,
             nout_override: Option<usize>,
         ) -> Result<
             ExplicitRk<'a, Eqn, <Eqn::V as DefaultDenseMatrix>::M, AdjointEquations<'a, Eqn, S>>,
@@ -361,6 +364,7 @@ macro_rules! rk_solver_from_tableau {
             self.explicit_rk_solver_adjoint(
                 Tableau::<<Eqn::V as DefaultDenseMatrix>::M>::$tableau(self.context().clone()),
                 checkpointer,
+                solver,
                 nout_override,
             )
         }
@@ -507,11 +511,16 @@ where
 {
     pub fn adjoint_equations<'a, S: OdeSolverMethod<'a, Eqn>>(
         &'a self,
-        checkpointer: Checkpointing<'a, Eqn, S>,
+        checkpointer: Checkpointing<Eqn, S::State>,
+        solver: S,
         nout_override: Option<usize>,
     ) -> AdjointEquations<'a, Eqn, S> {
         let nout = nout_override.unwrap_or_else(|| self.eqn.nout());
-        let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer, nout)));
+        let context = Rc::new(RefCell::new(AdjointContext::new(
+            checkpointer,
+            solver,
+            nout,
+        )));
         AdjointEquations::new(self, context, self.integrate_out)
     }
 }
@@ -695,7 +704,8 @@ where
     #[allow(clippy::type_complexity)]
     pub fn bdf_solver_adjoint<'a, LS: LinearSolver<Eqn::M>, S: OdeSolverMethod<'a, Eqn>>(
         &'a self,
-        checkpointer: Checkpointing<'a, Eqn, S>,
+        checkpointer: Checkpointing<Eqn, S::State>,
+        solver: S,
         nout_override: Option<usize>,
     ) -> Result<
         Bdf<
@@ -710,7 +720,7 @@ where
     where
         Eqn: OdeEquationsImplicitAdjoint,
     {
-        let mut augmented_eqn = self.adjoint_equations(checkpointer, nout_override);
+        let mut augmented_eqn = self.adjoint_equations(checkpointer, solver, nout_override);
         let state = self.bdf_state_adjoint::<LS, _>(&mut augmented_eqn)?;
         self.bdf_solver_adjoint_from_state::<LS, _>(state, augmented_eqn)
     }
@@ -889,13 +899,14 @@ where
     >(
         &'a self,
         tableau: Tableau<DM>,
-        checkpointer: Checkpointing<'a, Eqn, S>,
+        checkpointer: Checkpointing<Eqn, S::State>,
+        solver: S,
         nout_override: Option<usize>,
     ) -> Result<Sdirk<'a, Eqn, LS, DM, AdjointEquations<'a, Eqn, S>>, DiffsolError>
     where
         Eqn: OdeEquationsImplicitAdjoint,
     {
-        let mut augmented_eqn = self.adjoint_equations(checkpointer, nout_override);
+        let mut augmented_eqn = self.adjoint_equations(checkpointer, solver, nout_override);
         let state = self.sdirk_state_adjoint::<LS, _, _>(tableau.clone(), &mut augmented_eqn)?;
         self.sdirk_solver_adjoint_from_state::<LS, DM, _>(tableau, state, augmented_eqn)
     }
@@ -1052,13 +1063,14 @@ where
     >(
         &'a self,
         tableau: Tableau<DM>,
-        checkpointer: Checkpointing<'a, Eqn, S>,
+        checkpointer: Checkpointing<Eqn, S::State>,
+        solver: S,
         nout_override: Option<usize>,
     ) -> Result<ExplicitRk<'a, Eqn, DM, AdjointEquations<'a, Eqn, S>>, DiffsolError>
     where
         Eqn: OdeEquationsAdjoint,
     {
-        let mut augmented_eqn = self.adjoint_equations(checkpointer, nout_override);
+        let mut augmented_eqn = self.adjoint_equations(checkpointer, solver, nout_override);
         let state = self.explicit_rk_state_adjoint(tableau.clone(), &mut augmented_eqn)?;
         self.explicit_rk_solver_adjoint_from_state(tableau, state, augmented_eqn)
     }

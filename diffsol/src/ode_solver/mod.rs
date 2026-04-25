@@ -1339,9 +1339,10 @@ mod tests {
         let (pre_reset_checkpointer, _, _, _) = first_forward_solver
             .solve_with_checkpointing(forward_stop_time, None)
             .unwrap();
+        let problem = first_forward_solver.problem();
+        let pre_reset_solver = first_forward_solver.clone();
         let fwd_state_minus = first_forward_solver.into_state();
         let mut state_after_reset = fwd_state_minus.clone();
-        let problem = pre_reset_checkpointer.problem();
         let rhs = problem.eqn.rhs();
         let has_mass = problem.eqn.mass().is_some();
         let reset_fn = problem.eqn.reset().unwrap();
@@ -1355,6 +1356,7 @@ mod tests {
         let (post_reset_checkpointer, _, _, post_reset_stop_reason) = second_forward_solver
             .solve_with_checkpointing(forward_stop_time, None)
             .unwrap();
+        let post_reset_solver = second_forward_solver.clone();
         let final_forward_state = second_forward_solver.into_state();
         let t_second_root = final_forward_state.as_ref().t;
 
@@ -1376,8 +1378,11 @@ mod tests {
             t_second_root,
         );
 
-        let mut post_reset_adjoint_eqn =
-            problem.adjoint_equations(post_reset_checkpointer.clone(), None);
+        let mut post_reset_adjoint_eqn = problem.adjoint_equations(
+            post_reset_checkpointer.clone(),
+            post_reset_solver.clone(),
+            None,
+        );
         let mut post_reset_adjoint_state =
             build_adjoint_state(&mut post_reset_adjoint_eqn).unwrap();
         let post_reset_root_idx = match post_reset_stop_reason {
@@ -1402,10 +1407,11 @@ mod tests {
         let mut adjoint_state = post_reset_adjoint
             .solve_adjoint_backwards_pass(Some(fwd_state_minus.as_ref().t), &[], &[])
             .unwrap();
-        let t0 = pre_reset_checkpointer.problem().t0;
-        let ctx = pre_reset_checkpointer.problem().context().clone();
-        let reset_problem = pre_reset_checkpointer.problem();
-        let mut pre_reset_adjoint_eqn = problem.adjoint_equations(pre_reset_checkpointer, None);
+        let t0 = problem.t0;
+        let ctx = problem.context().clone();
+        let reset_problem = problem;
+        let mut pre_reset_adjoint_eqn =
+            problem.adjoint_equations(pre_reset_checkpointer, pre_reset_solver, None);
         {
             let reset_fn = reset_problem.eqn.reset().unwrap();
             let root_fn = reset_problem.eqn.root().unwrap();
@@ -1495,6 +1501,8 @@ mod tests {
         let (pre_reset_checkpointer, _, _, pre_reset_stop_reason) = first_forward_solver
             .solve_with_checkpointing(forward_stop_time, None)
             .unwrap();
+        let problem = first_forward_solver.problem();
+        let pre_reset_solver = first_forward_solver.clone();
         let fwd_state_minus = first_forward_solver.into_state();
         match pre_reset_stop_reason {
             OdeSolverStopReason::RootFound(_, 0) => {}
@@ -1510,7 +1518,6 @@ mod tests {
         }
 
         let mut state_after_reset = fwd_state_minus.clone();
-        let problem = pre_reset_checkpointer.problem();
         let rhs = problem.eqn.rhs();
         let has_mass = problem.eqn.mass().is_some();
         let reset_fn = problem.eqn.reset().unwrap();
@@ -1524,6 +1531,7 @@ mod tests {
         let (post_reset_checkpointer, _, _, post_reset_stop_reason) = second_forward_solver
             .solve_with_checkpointing(forward_stop_time, None)
             .unwrap();
+        let post_reset_solver = second_forward_solver.clone();
         let final_forward_state = second_forward_solver.into_state();
         let t_second_root = final_forward_state.as_ref().t;
 
@@ -1535,8 +1543,11 @@ mod tests {
             t_second_root,
         );
 
-        let mut post_reset_adjoint_eqn =
-            problem.adjoint_equations(post_reset_checkpointer.clone(), Some(dgdu.len()));
+        let mut post_reset_adjoint_eqn = problem.adjoint_equations(
+            post_reset_checkpointer.clone(),
+            post_reset_solver.clone(),
+            Some(dgdu.len()),
+        );
         let mut post_reset_adjoint_state =
             build_adjoint_state(&mut post_reset_adjoint_eqn).unwrap();
         let post_reset_root_idx = match post_reset_stop_reason {
@@ -1566,11 +1577,11 @@ mod tests {
             )
             .unwrap();
 
-        let t0 = pre_reset_checkpointer.problem().t0;
-        let ctx = pre_reset_checkpointer.problem().context().clone();
-        let reset_problem = pre_reset_checkpointer.problem();
+        let t0 = problem.t0;
+        let ctx = problem.context().clone();
+        let reset_problem = problem;
         let mut pre_reset_adjoint_eqn =
-            problem.adjoint_equations(pre_reset_checkpointer, Some(dgdu.len()));
+            problem.adjoint_equations(pre_reset_checkpointer, pre_reset_solver, Some(dgdu.len()));
         {
             let reset_fn = reset_problem.eqn.reset().unwrap();
             let root_fn = reset_problem.eqn.root().unwrap();

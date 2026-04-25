@@ -1712,7 +1712,8 @@ mod test {
         fwd_state_plus.as_mut().dy[0] = 0.8275;
         let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
         let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(1.0, None).unwrap();
-        let mut adjoint_eqn = problem.adjoint_equations(checkpointer, Some(2));
+        let mut adjoint_eqn =
+            problem.adjoint_equations(checkpointer, forward_solver.clone(), Some(2));
 
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, p: &TestVec, _t, y: &mut TestVec| {
@@ -1812,8 +1813,10 @@ mod test {
         fwd_state_plus.as_mut().dy[0] = 0.8275;
         let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
         let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(1.0, None).unwrap();
-        let mut adjoint_eqn_root0 = problem.adjoint_equations(checkpointer.clone(), Some(2));
-        let mut adjoint_eqn_root1 = problem.adjoint_equations(checkpointer, Some(2));
+        let mut adjoint_eqn_root0 =
+            problem.adjoint_equations(checkpointer.clone(), forward_solver.clone(), Some(2));
+        let mut adjoint_eqn_root1 =
+            problem.adjoint_equations(checkpointer, forward_solver.clone(), Some(2));
 
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, p: &TestVec, _t, y: &mut TestVec| {
@@ -1903,7 +1906,8 @@ mod test {
         fwd_state_plus.as_mut().dy[0] = 0.58;
         let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
         let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(4.0, None).unwrap();
-        let mut adjoint_eqn = problem.adjoint_equations(checkpointer, Some(2));
+        let mut adjoint_eqn =
+            problem.adjoint_equations(checkpointer, forward_solver.clone(), Some(2));
 
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, p: &TestVec, t, y: &mut TestVec| {
@@ -1982,7 +1986,8 @@ mod test {
         let fwd_state_plus = fwd_state_minus.clone();
         let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
         let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(1.0, None).unwrap();
-        let mut adjoint_eqn = problem.adjoint_equations(checkpointer, Some(2));
+        let mut adjoint_eqn =
+            problem.adjoint_equations(checkpointer, forward_solver.clone(), Some(2));
 
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
@@ -2047,7 +2052,8 @@ mod test {
         let fwd_state_plus = fwd_state_minus.clone();
         let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
         let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(1.0, None).unwrap();
-        let mut adjoint_eqn = problem.adjoint_equations(checkpointer, Some(2));
+        let mut adjoint_eqn =
+            problem.adjoint_equations(checkpointer, forward_solver.clone(), Some(2));
 
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
@@ -2107,7 +2113,8 @@ mod test {
         let fwd_state_plus = state.clone();
         let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
         let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(1.0, None).unwrap();
-        let mut adjoint_eqn = problem.adjoint_equations(checkpointer, Some(2));
+        let mut adjoint_eqn =
+            problem.adjoint_equations(checkpointer, forward_solver.clone(), Some(2));
 
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],

@@ -479,7 +479,7 @@ where
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<
         (
-            Checkpointing<'a, Eqn, Self>,
+            Checkpointing<Eqn, Self::State>,
             <Eqn::V as DefaultDenseMatrix>::M,
             Vec<Eqn::T>,
             OdeSolverStopReason<Eqn::T>,
@@ -546,12 +546,8 @@ where
 
         // construct checkpointing
         let last_segment = HermiteInterpolator::new(ys, ydots, ts);
-        let checkpointer = Checkpointing::new(
-            self.clone(),
-            checkpoints.len() - 2,
-            checkpoints,
-            Some(last_segment),
-        );
+        let checkpointer =
+            Checkpointing::new(self, checkpoints.len() - 2, checkpoints, Some(last_segment));
 
         Ok((checkpointer, ret_y, ret_t, stop_reason))
     }
@@ -587,7 +583,7 @@ where
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<
         (
-            Checkpointing<'a, Eqn, Self>,
+            Checkpointing<Eqn, Self::State>,
             <Eqn::V as DefaultDenseMatrix>::M,
             OdeSolverStopReason<Eqn::T>,
         ),
@@ -646,12 +642,8 @@ where
         let last_segment = HermiteInterpolator::new(ys, ydots, ts);
 
         // construct checkpointing
-        let checkpointer = Checkpointing::new(
-            self.clone(),
-            checkpoints.len() - 2,
-            checkpoints,
-            Some(last_segment),
-        );
+        let checkpointer =
+            Checkpointing::new(self, checkpoints.len() - 2, checkpoints, Some(last_segment));
 
         Ok((checkpointer, ret, stop_reason))
     }
@@ -1250,7 +1242,7 @@ mod test {
             15.0,
         );
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<NalgebraLU<f64>, _>(checkpointer, None)
+            .bdf_solver_adjoint::<NalgebraLU<f64>, _>(checkpointer, s, None)
             .unwrap();
         let state = adjoint_solver
             .solve_adjoint_backwards_pass(None, &[], &[])
@@ -1282,8 +1274,11 @@ mod test {
             y_i.assert_eq_norm(&expect(*t_i), &problem.atol, problem.rtol, 15.0);
         }
         let mut y = NalgebraVec::zeros(problem.eqn.rhs().nstates(), *problem.context());
+        let mut replay_solver = s.clone();
         for point in soln.solution_points.iter() {
-            checkpointer.interpolate(point.t, &mut y).unwrap();
+            checkpointer
+                .interpolate(&mut replay_solver, point.t, &mut y)
+                .unwrap();
             y.assert_eq_norm(&point.state, &problem.atol, problem.rtol, 150.0);
         }
     }
