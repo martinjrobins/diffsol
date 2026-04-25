@@ -450,7 +450,7 @@ mod test {
             s.solve_with_checkpointing(final_time, None).unwrap();
         assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
         let adjoint_solver = problem
-            .tsit45_solver_adjoint(checkpointer, s, None)
+            .tsit45_solver_adjoint(checkpointer, Some(s), None)
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
@@ -472,7 +472,7 @@ mod test {
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
-            .tsit45_solver_adjoint(checkpointer, s, Some(dgdp.ncols()))
+            .tsit45_solver_adjoint(checkpointer, Some(s), Some(dgdp.ncols()))
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
@@ -501,7 +501,7 @@ mod test {
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
-            .tsit45_solver_adjoint(checkpointer, s, Some(dgdp.ncols()))
+            .tsit45_solver_adjoint(checkpointer, Some(s), Some(dgdp.ncols()))
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
     }

@@ -1787,7 +1787,7 @@ mod test {
         let (checkpointer, _y, _t, _stop_reason) =
             s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, s, Some(dgdu.ncols()))
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdu.ncols()))
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
@@ -1809,7 +1809,7 @@ mod test {
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, s, Some(dgdp.ncols()))
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdp.ncols()))
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
@@ -1838,7 +1838,7 @@ mod test {
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, s, Some(dgdp.ncols()))
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdp.ncols()))
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
     }
@@ -1854,7 +1854,7 @@ mod test {
         let (checkpointer, _y, _t, _stop_reason) =
             s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, s, Some(dgdu.ncols()))
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdu.ncols()))
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
     }
@@ -1872,7 +1872,7 @@ mod test {
         let (checkpointer, _y, _t, _stop_reason) =
             s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, s, Some(dgdu.ncols()))
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdu.ncols()))
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
     }
@@ -1887,7 +1887,7 @@ mod test {
         let (checkpointer, _y, _t, _stop_reason) =
             s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, s, Some(dgdu.ncols()))
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdu.ncols()))
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
@@ -1909,7 +1909,7 @@ mod test {
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, s, Some(dgdp.ncols()))
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdp.ncols()))
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
@@ -1932,7 +1932,7 @@ mod test {
         let (checkpointer, _y, _t, _stop_reason) =
             s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, s, None)
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), None)
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
     }
@@ -2072,7 +2072,7 @@ mod test {
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, s, Some(dgdp.ncols()))
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdp.ncols()))
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
     }

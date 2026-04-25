@@ -632,7 +632,7 @@ impl OdeSolverType {
     pub(crate) fn solve_adjoint_backwards<'solver, M, CG, LS, S>(
         &self,
         problem: &'solver OdeSolverProblem<DiffSl<M, CG>>,
-        checkpointing: Checkpointing<DiffSl<M, CG>, S::State>,
+        checkpointing: Checkpointing<DiffSl<M, CG>, S::State, S>,
         solver: S,
         _stop_reason: OdeSolverStopReason<M::T>,
         g_m: &<M::V as DefaultDenseMatrix>::M,
@@ -650,15 +650,23 @@ impl OdeSolverType {
     {
         match self {
             OdeSolverType::Bdf => problem
-                .bdf_solver_adjoint::<LS, _>(checkpointing, solver.clone(), nout_override)?
+                .bdf_solver_adjoint::<LS, _>(checkpointing, Some(solver.clone()), nout_override)?
                 .solve_adjoint_backwards_pass(None, t_eval, &[g_m])
                 .map(|res| res.into_common().sg),
             OdeSolverType::Esdirk34 => problem
-                .esdirk34_solver_adjoint::<LS, _>(checkpointing, solver.clone(), nout_override)?
+                .esdirk34_solver_adjoint::<LS, _>(
+                    checkpointing,
+                    Some(solver.clone()),
+                    nout_override,
+                )?
                 .solve_adjoint_backwards_pass(None, t_eval, &[g_m])
                 .map(|res| res.into_common().sg),
             OdeSolverType::TrBdf2 => problem
-                .tr_bdf2_solver_adjoint::<LS, _>(checkpointing, solver.clone(), nout_override)?
+                .tr_bdf2_solver_adjoint::<LS, _>(
+                    checkpointing,
+                    Some(solver.clone()),
+                    nout_override,
+                )?
                 .solve_adjoint_backwards_pass(None, t_eval, &[g_m])
                 .map(|res| res.into_common().sg),
             OdeSolverType::Tsit45 => Err(DiffsolError::Other(

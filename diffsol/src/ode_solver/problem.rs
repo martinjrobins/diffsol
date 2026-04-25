@@ -191,14 +191,15 @@ macro_rules! sdirk_solver_from_tableau {
             "- `LS`: The linear solver type\n",
             "- `S`: The forward solver method type used for checkpointing\n\n",
             "# Arguments\n",
-            "- `checkpointer`: The checkpointing object containing the forward solution\n",
-            "- `nout_override`: Optional override for the number of output equations\n\n",
+            "- `checkpointer`: The checkpointing object containing the stored forward solution and interpolation segments\n",
+            "- `solver`: Optional replay solver used to rebuild checkpoint interpolation segments when interpolation leaves the current segment. This may be `None` only when the existing checkpoint segments already cover all required interpolation times\n",
+            "- `nout_override`: Optional override for the number of adjoint output equations. Use this when the backward solve should track a different output dimension than `eqn.nout()`\n\n",
             "# Returns\n",
             "An SDIRK solver instance configured for adjoint sensitivity analysis using ", stringify!($tableau))]
         pub fn $method_solver_adjoint<'a, LS: LinearSolver<Eqn::M>, S: OdeSolverMethod<'a, Eqn>>(
             &'a self,
-            checkpointer: Checkpointing<Eqn, S::State>,
-            solver: S,
+            checkpointer: Checkpointing<Eqn, S::State, S>,
+            solver: Option<S>,
             nout_override: Option<usize>,
         ) -> Result<
             Sdirk<'a, Eqn, LS, <Eqn::V as DefaultDenseMatrix>::M, AdjointEquations<'a, Eqn, S>>,
@@ -343,16 +344,17 @@ macro_rules! rk_solver_from_tableau {
             "This method creates a solver for the backward adjoint equations using the ", stringify!($tableau), " method.\n",
             "Requires a checkpointer to provide the forward solution during the backward solve.\n\n",
             "# Type Parameters\n",
-            "- `S`: The forward solver method type used for checkpointing (this can be auto-deduced fromt the `checkpointer`\n\n",
+            "- `S`: The forward solver method type used for checkpointing\n\n",
             "# Arguments\n",
-            "- `checkpointer`: The checkpointing object containing the forward solution\n",
-            "- `nout_override`: Optional override for the number of output equations\n\n",
+            "- `checkpointer`: The checkpointing object containing the stored forward solution and interpolation segments\n",
+            "- `solver`: Optional replay solver used to rebuild checkpoint interpolation segments when interpolation leaves the current segment. This may be `None` only when the existing checkpoint segments already cover all required interpolation times\n",
+            "- `nout_override`: Optional override for the number of adjoint output equations. Use this when the backward solve should track a different output dimension than `eqn.nout()`\n\n",
             "# Returns\n",
             "An explicit RK solver instance configured for adjoint sensitivity analysis using ", stringify!($tableau))]
         pub fn $method_solver_adjoint<'a, S: OdeSolverMethod<'a, Eqn>>(
             &'a self,
-            checkpointer: Checkpointing<Eqn, S::State>,
-            solver: S,
+            checkpointer: Checkpointing<Eqn, S::State, S>,
+            solver: Option<S>,
             nout_override: Option<usize>,
         ) -> Result<
             ExplicitRk<'a, Eqn, <Eqn::V as DefaultDenseMatrix>::M, AdjointEquations<'a, Eqn, S>>,
@@ -511,12 +513,14 @@ where
 {
     pub fn adjoint_equations<'a, S: OdeSolverMethod<'a, Eqn>>(
         &'a self,
-        checkpointer: Checkpointing<Eqn, S::State>,
-        solver: S,
+        checkpointer: Checkpointing<Eqn, S::State, S>,
+        solver: Option<S>,
         nout_override: Option<usize>,
     ) -> AdjointEquations<'a, Eqn, S> {
         let nout = nout_override.unwrap_or_else(|| self.eqn.nout());
         let context = Rc::new(RefCell::new(AdjointContext::new(
+            &self.eqn,
+            self.t0,
             checkpointer,
             solver,
             nout,
@@ -699,13 +703,27 @@ where
         Bdf::new_augmented(state, self, augmented_eqn, newton_solver)
     }
 
-    /// Create a new BDF solver instance for the backwards solve for the adjoint equations. This requires
+    /// Create a new BDF solver instance for the backwards solve for the adjoint equations.
+    ///
+    /// This method creates a solver for the backward adjoint equations using BDF and requires
     /// a checkpointer to provide the forward solution during the backward solve.
+    ///
+    /// # Type Parameters
+    /// - `LS`: The linear solver type used in the Newton solver
+    /// - `S`: The forward solver method type used for checkpointing
+    ///
+    /// # Arguments
+    /// - `checkpointer`: The checkpointing object containing the stored forward solution and interpolation segments
+    /// - `solver`: Optional replay solver used to rebuild checkpoint interpolation segments when interpolation leaves the current segment. This may be `None` only when the existing checkpoint segments already cover all required interpolation times
+    /// - `nout_override`: Optional override for the number of adjoint output equations. Use this when the backward solve should track a different output dimension than `eqn.nout()`
+    ///
+    /// # Returns
+    /// A BDF solver instance configured for adjoint sensitivity analysis
     #[allow(clippy::type_complexity)]
     pub fn bdf_solver_adjoint<'a, LS: LinearSolver<Eqn::M>, S: OdeSolverMethod<'a, Eqn>>(
         &'a self,
-        checkpointer: Checkpointing<Eqn, S::State>,
-        solver: S,
+        checkpointer: Checkpointing<Eqn, S::State, S>,
+        solver: Option<S>,
         nout_override: Option<usize>,
     ) -> Result<
         Bdf<
@@ -899,8 +917,8 @@ where
     >(
         &'a self,
         tableau: Tableau<DM>,
-        checkpointer: Checkpointing<Eqn, S::State>,
-        solver: S,
+        checkpointer: Checkpointing<Eqn, S::State, S>,
+        solver: Option<S>,
         nout_override: Option<usize>,
     ) -> Result<Sdirk<'a, Eqn, LS, DM, AdjointEquations<'a, Eqn, S>>, DiffsolError>
     where
@@ -1063,8 +1081,8 @@ where
     >(
         &'a self,
         tableau: Tableau<DM>,
-        checkpointer: Checkpointing<Eqn, S::State>,
-        solver: S,
+        checkpointer: Checkpointing<Eqn, S::State, S>,
+        solver: Option<S>,
         nout_override: Option<usize>,
     ) -> Result<ExplicitRk<'a, Eqn, DM, AdjointEquations<'a, Eqn, S>>, DiffsolError>
     where

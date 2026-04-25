@@ -7,6 +7,7 @@ pub mod config;
 pub mod explicit_rk;
 pub mod jacobian_update;
 pub mod method;
+pub mod no_checkpointing_solver;
 pub mod problem;
 pub mod runge_kutta;
 pub mod sde;
@@ -1380,7 +1381,7 @@ mod tests {
 
         let mut post_reset_adjoint_eqn = problem.adjoint_equations(
             post_reset_checkpointer.clone(),
-            post_reset_solver.clone(),
+            Some(post_reset_solver.clone()),
             None,
         );
         let mut post_reset_adjoint_state =
@@ -1411,7 +1412,7 @@ mod tests {
         let ctx = problem.context().clone();
         let reset_problem = problem;
         let mut pre_reset_adjoint_eqn =
-            problem.adjoint_equations(pre_reset_checkpointer, pre_reset_solver, None);
+            problem.adjoint_equations(pre_reset_checkpointer, Some(pre_reset_solver), None);
         {
             let reset_fn = reset_problem.eqn.reset().unwrap();
             let root_fn = reset_problem.eqn.root().unwrap();
@@ -1545,7 +1546,7 @@ mod tests {
 
         let mut post_reset_adjoint_eqn = problem.adjoint_equations(
             post_reset_checkpointer.clone(),
-            post_reset_solver.clone(),
+            Some(post_reset_solver.clone()),
             Some(dgdu.len()),
         );
         let mut post_reset_adjoint_state =
@@ -1580,8 +1581,11 @@ mod tests {
         let t0 = problem.t0;
         let ctx = problem.context().clone();
         let reset_problem = problem;
-        let mut pre_reset_adjoint_eqn =
-            problem.adjoint_equations(pre_reset_checkpointer, pre_reset_solver, Some(dgdu.len()));
+        let mut pre_reset_adjoint_eqn = problem.adjoint_equations(
+            pre_reset_checkpointer,
+            Some(pre_reset_solver),
+            Some(dgdu.len()),
+        );
         {
             let reset_fn = reset_problem.eqn.reset().unwrap();
             let root_fn = reset_problem.eqn.root().unwrap();

@@ -8,17 +8,21 @@ use std::{
 use crate::{
     error::DiffsolError, op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations,
     Checkpointing, ConstantOp, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
-    NonLinearOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint,
-    OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, Op, Scalar, Vector,
+    NoCheckpointingSolver, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations,
+    OdeEquationsAdjoint, OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op,
+    Scalar, Vector,
 };
 
-pub struct AdjointContext<'a, Eqn, Method>
+pub struct AdjointContext<'a, Eqn, State, Method = NoCheckpointingSolver<Eqn, State>>
 where
     Eqn: OdeEquations,
-    Method: OdeSolverMethod<'a, Eqn>,
+    State: OdeSolverState<Eqn::V>,
+    Method: OdeSolverMethod<'a, Eqn, State = State>,
 {
-    checkpointer: Checkpointing<Eqn, Method::State>,
-    solver: RefCell<Method>,
+    eqn: &'a Eqn,
+    t0: Eqn::T,
+    checkpointer: Checkpointing<Eqn, State, Method>,
+    solver: Option<RefCell<Method>>,
     x: Eqn::V,
     index: usize,
     max_index: usize,
@@ -26,25 +30,29 @@ where
     col: Eqn::V,
 }
 
-impl<'a, Eqn, Method> AdjointContext<'a, Eqn, Method>
+impl<'a, Eqn, State, Method> AdjointContext<'a, Eqn, State, Method>
 where
     Eqn: OdeEquations,
-    Method: OdeSolverMethod<'a, Eqn>,
+    State: OdeSolverState<Eqn::V>,
+    Method: OdeSolverMethod<'a, Eqn, State = State>,
 {
     pub fn new(
-        checkpointer: Checkpointing<Eqn, Method::State>,
-        solver: Method,
+        eqn: &'a Eqn,
+        t0: Eqn::T,
+        checkpointer: Checkpointing<Eqn, State, Method>,
+        solver: Option<Method>,
         max_index: usize,
     ) -> Self {
-        let problem = solver.problem();
-        let ctx = problem.eqn.context();
-        let x = <Eqn::V as Vector>::zeros(problem.eqn.rhs().nstates(), ctx.clone());
+        let ctx = eqn.context();
+        let x = <Eqn::V as Vector>::zeros(eqn.rhs().nstates(), ctx.clone());
         let mut col = <Eqn::V as Vector>::zeros(max_index, ctx.clone());
         let index = 0;
         col.set_index(0, Eqn::T::one());
         Self {
+            eqn,
+            t0,
             checkpointer,
-            solver: RefCell::new(solver),
+            solver: solver.map(RefCell::new),
             x,
             index,
             max_index,
@@ -60,10 +68,7 @@ where
             }
         }
         // clamp tiny boundary overshoots to the boundary values to avoid interpolation errors
-        let t0 = {
-            let solver = self.solver.borrow();
-            solver.problem().t0
-        };
+        let t0 = self.t0;
         let t1 = self.checkpointer.last_t();
         let boundary_tol = Eqn::T::EPSILON.sqrt() * (t.abs() + t1.abs() + Eqn::T::one());
         let t_interp = if t > t1 && t - t1 <= boundary_tol {
@@ -74,19 +79,22 @@ where
             t
         };
         self.last_t = Some(t_interp);
-        {
-            let mut solver = self.solver.borrow_mut();
-            self.checkpointer
-                .interpolate(&mut *solver, t_interp, &mut self.x)
-                .unwrap();
+        match self.solver.as_ref() {
+            Some(solver) => {
+                let mut solver = solver.borrow_mut();
+                self.checkpointer
+                    .interpolate(Some(&mut *solver), t_interp, &mut self.x)
+                    .unwrap();
+            }
+            None => self
+                .checkpointer
+                .interpolate(None, t_interp, &mut self.x)
+                .unwrap(),
         }
         // for diffsl, we need to set data for the adjoint state!
         // basically just involves calling the normal rhs function with the new self.x
         // todo: this seems a bit hacky, perhaps a dedicated function on the trait for this?
-        {
-            let solver = self.solver.borrow();
-            solver.problem().eqn.rhs().call(&self.x, t_interp);
-        }
+        self.eqn.rhs().call(&self.x, t_interp);
     }
 
     pub fn state(&self) -> &Eqn::V {
@@ -175,7 +183,7 @@ where
 {
     pub fn new(
         eqn: &'a Eqn,
-        _context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
+        _context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
         _with_out: bool,
     ) -> Self {
         Self {
@@ -233,7 +241,7 @@ where
     Method: OdeSolverMethod<'a, Eqn>,
 {
     eqn: &'a Eqn,
-    context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
+    context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
     tmp: RefCell<Eqn::V>,
     with_out: bool,
 }
@@ -245,7 +253,7 @@ where
 {
     pub fn new(
         eqn: &'a Eqn,
-        context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
+        context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
         with_out: bool,
     ) -> Self {
         let tmp_n = if with_out { eqn.rhs().nstates() } else { 0 };
@@ -349,7 +357,7 @@ where
     Method: OdeSolverMethod<'a, Eqn>,
 {
     eqn: &'a Eqn,
-    context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
+    context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
     tmp: RefCell<Eqn::V>,
     with_out: bool,
 }
@@ -361,7 +369,7 @@ where
 {
     pub fn new(
         eqn: &'a Eqn,
-        context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
+        context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
         with_out: bool,
     ) -> Self {
         let tmp_n = if with_out { eqn.rhs().nparams() } else { 0 };
@@ -460,7 +468,7 @@ where
     rhs: AdjointRhs<'a, Eqn, Method>,
     out: AdjointOut<'a, Eqn, Method>,
     mass: Option<AdjointMass<'a, Eqn>>,
-    context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
+    context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
     tmp: RefCell<Eqn::V>,
     tmp2: RefCell<Eqn::V>,
     init: AdjointInit<'a, Eqn, Method>,
@@ -478,8 +486,13 @@ where
     fn clone(&self) -> Self {
         let context_ref = self.context.borrow();
         let context = Rc::new(RefCell::new(AdjointContext::new(
+            context_ref.eqn,
+            context_ref.t0,
             context_ref.checkpointer.clone(),
-            context_ref.solver.borrow().clone(),
+            context_ref
+                .solver
+                .as_ref()
+                .map(|solver| solver.borrow().clone()),
             context_ref.max_index,
         )));
         let rhs = AdjointRhs::new(self.eqn, context.clone(), self.rhs.with_out);
@@ -516,7 +529,7 @@ where
 {
     pub(crate) fn new(
         problem: &'a OdeSolverProblem<Eqn>,
-        context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
+        context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
         with_out: bool,
     ) -> Self {
         let eqn = &problem.eqn;
@@ -749,11 +762,17 @@ mod tests {
         };
         let nout = problem.eqn.out().unwrap().nout();
         let mut solver = problem.esdirk34_solver::<LS>(state.clone()).unwrap();
-        let checkpointer =
-            Checkpointing::new(&mut solver, 0, vec![state.clone(), state.clone()], None);
+        let checkpointer = Checkpointing::new(
+            Some(&mut solver),
+            0,
+            vec![state.clone(), state.clone()],
+            None,
+        );
         let context = Rc::new(RefCell::new(AdjointContext::new(
+            &problem.eqn,
+            problem.t0,
             checkpointer,
-            solver.clone(),
+            Some(solver.clone()),
             nout,
         )));
         let adj_eqn = AdjointEquations::new(&problem, context.clone(), false);
@@ -828,11 +847,17 @@ mod tests {
         let mut solver = problem
             .esdirk34_solver::<FaerSparseLU<f64>>(state.clone())
             .unwrap();
-        let checkpointer =
-            Checkpointing::new(&mut solver, 0, vec![state.clone(), state.clone()], None);
+        let checkpointer = Checkpointing::new(
+            Some(&mut solver),
+            0,
+            vec![state.clone(), state.clone()],
+            None,
+        );
         let context = Rc::new(RefCell::new(AdjointContext::new(
+            &problem.eqn,
+            problem.t0,
             checkpointer,
-            solver.clone(),
+            Some(solver.clone()),
             nout,
         )));
         let mut adj_eqn = AdjointEquations::new(&problem, context, true);

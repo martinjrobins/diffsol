@@ -479,7 +479,7 @@ where
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<
         (
-            Checkpointing<Eqn, Self::State>,
+            Checkpointing<Eqn, Self::State, Self>,
             <Eqn::V as DefaultDenseMatrix>::M,
             Vec<Eqn::T>,
             OdeSolverStopReason<Eqn::T>,
@@ -547,7 +547,7 @@ where
         // construct checkpointing
         let last_segment = HermiteInterpolator::new(ys, ydots, ts);
         let checkpointer =
-            Checkpointing::new(self, checkpoints.len() - 2, checkpoints, Some(last_segment));
+            Checkpointing::new(None, checkpoints.len() - 2, checkpoints, Some(last_segment));
 
         Ok((checkpointer, ret_y, ret_t, stop_reason))
     }
@@ -583,7 +583,7 @@ where
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<
         (
-            Checkpointing<Eqn, Self::State>,
+            Checkpointing<Eqn, Self::State, Self>,
             <Eqn::V as DefaultDenseMatrix>::M,
             OdeSolverStopReason<Eqn::T>,
         ),
@@ -643,7 +643,7 @@ where
 
         // construct checkpointing
         let checkpointer =
-            Checkpointing::new(self, checkpoints.len() - 2, checkpoints, Some(last_segment));
+            Checkpointing::new(None, checkpoints.len() - 2, checkpoints, Some(last_segment));
 
         Ok((checkpointer, ret, stop_reason))
     }
@@ -1242,7 +1242,7 @@ mod test {
             15.0,
         );
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<NalgebraLU<f64>, _>(checkpointer, s, None)
+            .bdf_solver_adjoint::<NalgebraLU<f64>, _>(checkpointer, Some(s), None)
             .unwrap();
         let state = adjoint_solver
             .solve_adjoint_backwards_pass(None, &[], &[])
@@ -1277,7 +1277,7 @@ mod test {
         let mut replay_solver = s.clone();
         for point in soln.solution_points.iter() {
             checkpointer
-                .interpolate(&mut replay_solver, point.t, &mut y)
+                .interpolate(Some(&mut replay_solver), point.t, &mut y)
                 .unwrap();
             y.assert_eq_norm(&point.state, &problem.atol, problem.rtol, 150.0);
         }
