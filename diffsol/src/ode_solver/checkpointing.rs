@@ -274,7 +274,10 @@ where
         self.terminal_reset_root_idx = None;
     }
 
-    pub(crate) fn terminal_reset_root_idx(&self) -> Option<usize> {
+    /// Returns the root index when this checkpointing segment ended at a root.
+    ///
+    /// `None` means the segment ended at a configured stop time.
+    pub fn terminal_reset_root_idx(&self) -> Option<usize> {
         self.terminal_reset_root_idx
     }
 

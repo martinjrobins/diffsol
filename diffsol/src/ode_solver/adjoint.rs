@@ -3,7 +3,7 @@ use crate::{
     ode_solver_error, AdjointEquations, AugmentedOdeEquations, AugmentedOdeSolverMethod,
     DefaultDenseMatrix, DefaultSolver, DenseMatrix, LinearSolver, Matrix, MatrixCommon, MatrixOp,
     NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsImplicitAdjoint,
-    OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op, Vector, VectorIndex,
+    OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op, Solution, Vector, VectorIndex,
 };
 
 use num_traits::{One, Zero};
@@ -87,47 +87,7 @@ where
         Eqn::V: DefaultDenseMatrix,
         Eqn::M: DefaultSolver,
     {
-        // check that aug_eqn exists
-        if self.augmented_eqn().is_none() {
-            return Err(ode_solver_error!(Other, "No augmented equations"));
-        }
-
-        // t_eval should be in increasing order
-        if t_eval.windows(2).any(|w| w[0] >= w[1]) {
-            return Err(ode_solver_error!(
-                Other,
-                "t_eval should be in increasing order"
-            ));
-        }
-
-        let have_neqn = self.augmented_eqn().unwrap().max_index();
-        if dgdu_eval.is_empty() {
-            // if dgdus is empty, then the number of outputs in the model is used
-            let expected_neqn = self.problem().eqn.out().map(|o| o.nout()).unwrap_or(0);
-            if self.augmented_eqn().unwrap().max_index() != expected_neqn {
-                return Err(ode_solver_error!(
-                    Other,
-                    format!("Number of augmented equations does not match number of model outputs: {} != {}", have_neqn, expected_neqn)
-                ));
-            }
-        } else {
-            // if dgdu_eval is not empty, check that aug_eqn has dgdu_eval.len() outputs
-            let expected_neqn = dgdu_eval.len();
-            if have_neqn != expected_neqn {
-                return Err(ode_solver_error!(
-                    Other,
-                    format!("Number of outputs in augmented equations does not match number of outputs in dgdu_eval: {} != {}", have_neqn, expected_neqn)
-                ));
-            }
-        }
-        // check that nrows of each dgdu_eval is the same as the number of outputs in the model
-        let nout = self.problem().eqn.nout();
-        if dgdu_eval.iter().any(|dgdu| dgdu.nrows() != nout) {
-            return Err(ode_solver_error!(
-                Other,
-                "Number of outputs does not match number of rows in gradient"
-            ));
-        }
+        let have_neqn = validate_adjoint_backwards_inputs(&self, t_eval, dgdu_eval)?;
 
         let mut integrate_delta_g = if have_neqn > 0 && !dgdu_eval.is_empty() {
             let integrate_delta_g =
@@ -203,6 +163,150 @@ where
         // return the solution
         Ok(state)
     }
+
+    /// Backwards pass for one segment of a staged adjoint sensitivity solve.
+    ///
+    /// This uses the forward output times and optional discrete-output
+    /// gradients stored on `soln`, then moves the adjoint solver backwards
+    /// through exactly one checkpointing segment.
+    fn solve_soln_adjoint_backwards_pass(
+        mut self,
+        soln: &Solution<Eqn::V>,
+    ) -> Result<Self, DiffsolError>
+    where
+        Eqn::V: DefaultDenseMatrix,
+        Eqn::M: DefaultSolver,
+    {
+        let dgdu_eval = soln.dgdu_eval_refs_checked(self.problem().eqn.nout())?;
+        let t_eval = if dgdu_eval.is_empty() {
+            &[]
+        } else {
+            soln.ts.as_slice()
+        };
+        let have_neqn = validate_adjoint_backwards_inputs(&self, t_eval, dgdu_eval.as_slice())?;
+
+        let mut integrate_delta_g = if have_neqn > 0 && !dgdu_eval.is_empty() {
+            let integrate_delta_g =
+                IntegrateDeltaG::<_, <Eqn::M as DefaultSolver>::LS>::new(&self)?;
+            Some(integrate_delta_g)
+        } else {
+            None
+        };
+        let problem_t0 = self.problem().t0;
+        let solve_t1 = self.state().t;
+        let checkpointing_len = self.augmented_eqn().unwrap().checkpointing_len();
+        let (first_checkpoint_t, _) = self.augmented_eqn().unwrap().checkpointing_bounds(0);
+        if problem_t0 != first_checkpoint_t {
+            return Err(ode_solver_error!(
+                Other,
+                "Problem initial time does not match the first checkpointing segment start time"
+            ));
+        }
+
+        let segment_index = (0..checkpointing_len)
+            .rev()
+            .find(|&index| {
+                let (_, segment_end_t) = self.augmented_eqn().unwrap().checkpointing_bounds(index);
+                segment_end_t == solve_t1
+            })
+            .ok_or_else(|| {
+                ode_solver_error!(
+                    Other,
+                    "Adjoint solver current time does not match any checkpointing segment end time"
+                )
+            })?;
+        let (segment_first_t, segment_end_t) = self
+            .augmented_eqn()
+            .unwrap()
+            .checkpointing_bounds(segment_index);
+
+        solve_adjoint_backwards_segment(
+            &mut self,
+            segment_first_t,
+            segment_end_t,
+            segment_index + 1 < checkpointing_len,
+            t_eval,
+            dgdu_eval.as_slice(),
+            integrate_delta_g.as_mut(),
+        )?;
+
+        if segment_index > 0 {
+            let reset_data = {
+                let aug_eqn = self.augmented_eqn().unwrap();
+                aug_eqn
+                    .checkpointing_terminal_reset_root_idx(segment_index - 1)
+                    .map(|root_idx| {
+                        (
+                            root_idx,
+                            aug_eqn.checkpointing_last_state(segment_index - 1),
+                            aug_eqn.checkpointing_first_state(segment_index),
+                        )
+                    })
+            };
+            if let Some((root_idx, fwd_state_minus, fwd_state_plus)) = reset_data {
+                self.apply_reset_with_adjoint(root_idx, &fwd_state_minus, &fwd_state_plus)?;
+            }
+        } else {
+            let (state, aug_eqn) = self
+                .state_and_augmented_eqn_mut()
+                .ok_or_else(|| ode_solver_error!(Other, "No augmented equations"))?;
+            aug_eqn.correct_sg_for_init(problem_t0, state.s, state.sg);
+        }
+
+        Ok(self)
+    }
+}
+
+fn validate_adjoint_backwards_inputs<'a, Eqn, Solver, AdjointSolver>(
+    solver: &AdjointSolver,
+    t_eval: &[Eqn::T],
+    dgdu_eval: &[&<Eqn::V as DefaultDenseMatrix>::M],
+) -> Result<usize, DiffsolError>
+where
+    Eqn: OdeEquationsImplicitAdjoint + 'a,
+    Eqn::V: DefaultDenseMatrix,
+    Solver: OdeSolverMethod<'a, Eqn>,
+    AdjointSolver: AdjointOdeSolverMethod<'a, Eqn, Solver>,
+{
+    if solver.augmented_eqn().is_none() {
+        return Err(ode_solver_error!(Other, "No augmented equations"));
+    }
+
+    if t_eval.windows(2).any(|w| w[0] >= w[1]) {
+        return Err(ode_solver_error!(
+            Other,
+            "t_eval should be in increasing order"
+        ));
+    }
+
+    let have_neqn = solver.augmented_eqn().unwrap().max_index();
+    if dgdu_eval.is_empty() {
+        let expected_neqn = solver.problem().eqn.out().map(|o| o.nout()).unwrap_or(0);
+        if have_neqn != expected_neqn {
+            return Err(ode_solver_error!(
+                Other,
+                format!("Number of augmented equations does not match number of model outputs: {} != {}", have_neqn, expected_neqn)
+            ));
+        }
+    } else {
+        let expected_neqn = dgdu_eval.len();
+        if have_neqn != expected_neqn {
+            return Err(ode_solver_error!(
+                Other,
+                format!("Number of outputs in augmented equations does not match number of outputs in dgdu_eval: {} != {}", have_neqn, expected_neqn)
+            ));
+        }
+    }
+
+    let nout = solver.problem().eqn.nout();
+    if dgdu_eval.iter().any(|dgdu| dgdu.nrows() != nout) {
+        return Err(ode_solver_error!(
+            Other,
+            "Number of outputs does not match number of rows in gradient"
+        ));
+    }
+
+    Ok(have_neqn)
 }
 
 fn solve_adjoint_backwards_segment<'a, Eqn, Solver, AdjointSolver>(

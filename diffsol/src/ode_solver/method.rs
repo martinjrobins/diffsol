@@ -376,6 +376,70 @@ where
         Ok(self)
     }
 
+    /// Continue solving into an existing [`Solution`], appending newly computed
+    /// output and checkpointing segments.
+    ///
+    /// This has the same staged-solve behavior as [`Self::solve_soln`], but also
+    /// records a checkpointing segment for the call and appends it to the
+    /// caller-owned checkpointing path. A segment with
+    /// `terminal_reset_root_idx() == Some(root_idx)` ended at a root. A segment
+    /// with `None` ended at the configured stop time.
+    fn solve_soln_with_checkpointing(
+        mut self,
+        soln: &mut Solution<Eqn::V>,
+        checkpointing: &mut CheckpointingPath<Eqn, Self::State, Self>,
+        max_steps_between_checkpoints: Option<usize>,
+    ) -> Result<Self, DiffsolError>
+    where
+        Eqn::V: DefaultDenseMatrix,
+        Self: Sized,
+    {
+        let nrows = if let Some(out) = self.problem().eqn.out() {
+            out.nout()
+        } else {
+            self.problem().eqn.rhs().nstates()
+        };
+        let nout = self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0);
+        let nstates = self.problem().eqn.rhs().nstates();
+        soln.ensure_ode_allocation(self.problem().context(), nrows, nout, nstates)?;
+        let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
+
+        let mut new_checkpointing = match soln.mode {
+            SolutionMode::Tfinal(t_final) => {
+                let (stop_reason, checkpointers) = solve(
+                    &mut soln.ys,
+                    &mut soln.ts,
+                    &mut soln.tmp_nout,
+                    &mut self,
+                    t_final,
+                    false,
+                    true,
+                    max_steps_between_checkpoints,
+                )?;
+                soln.stop_reason = Some(stop_reason);
+                checkpointers.unwrap()
+            }
+            SolutionMode::Tevals(start_col) => {
+                let (stop_reason, col, checkpointers) = solve_dense(
+                    &mut soln.ys,
+                    &soln.ts,
+                    &mut soln.tmp_nout,
+                    &mut soln.tmp_nstates,
+                    &mut self,
+                    start_col,
+                    false,
+                    true,
+                    max_steps_between_checkpoints,
+                )?;
+                soln.stop_reason = Some(stop_reason);
+                soln.mode = SolutionMode::Tevals(col);
+                checkpointers.unwrap()
+            }
+        };
+        checkpointing.append(&mut new_checkpointing);
+        Ok(self)
+    }
+
     /// Solve the ODE from the current time to `t_eval[t_eval.len()-1]`, evaluating at specified times.
     ///
     /// This method integrates the system and returns the solution interpolated at the specified times.
@@ -756,7 +820,7 @@ where
                     }
                 } else {
                     if let Some(checkpointing) = checkpointing.as_mut() {
-                        checkpointing.finish_segment(None);
+                        checkpointing.finish_segment(Some(root_idx));
                     }
                     stop_reason = OdeSolverStopReason::RootFound(t_root, root_idx);
                     break;
@@ -872,7 +936,7 @@ where
                 } else {
                     write_out(s, ret_y, ret_t, tmp_nout);
                     if let Some(checkpointing) = checkpointing.as_mut() {
-                        checkpointing.finish_segment(None);
+                        checkpointing.finish_segment(Some(root_idx));
                     }
                     break OdeSolverStopReason::RootFound(t_root, root_idx);
                 }

@@ -70,6 +70,9 @@ pub struct Solution<V: DefaultDenseMatrix> {
     pub ts: Vec<V::T>,
     pub ys: <V as DefaultDenseMatrix>::M,
     pub y_sens: Vec<<V as DefaultDenseMatrix>::M>,
+    /// Discrete output gradients for adjoint solves, with one matrix per
+    /// objective and one column per entry in `ts`.
+    pub dgdu_eval: Vec<<V as DefaultDenseMatrix>::M>,
     pub stop_reason: Option<OdeSolverStopReason<V::T>>,
     pub(crate) tmp_nout: V,
     pub(crate) tmp_nparams: V,
@@ -91,6 +94,7 @@ impl<V: DefaultDenseMatrix> Solution<V> {
             ts: Vec::new(),
             ys: <V as DefaultDenseMatrix>::M::zeros(0, 0, ctx.clone()),
             y_sens: Vec::new(),
+            dgdu_eval: Vec::new(),
             stop_reason: None,
             tmp_nout: V::zeros(0, ctx.clone()),
             tmp_nparams: V::zeros(0, ctx.clone()),
@@ -110,6 +114,7 @@ impl<V: DefaultDenseMatrix> Solution<V> {
             ts: t_evals,
             ys: <V as DefaultDenseMatrix>::M::zeros(0, 0, ctx.clone()),
             y_sens: Vec::new(),
+            dgdu_eval: Vec::new(),
             stop_reason: None,
             tmp_nout: V::zeros(0, ctx.clone()),
             tmp_nparams: V::zeros(0, ctx.clone()),
@@ -181,6 +186,27 @@ impl<V: DefaultDenseMatrix> Solution<V> {
             }
         }
         Ok(())
+    }
+
+    pub(crate) fn dgdu_eval_refs_checked(
+        &self,
+        nout: usize,
+    ) -> Result<Vec<&<V as DefaultDenseMatrix>::M>, DiffsolError> {
+        for dgdu in &self.dgdu_eval {
+            if dgdu.nrows() != nout {
+                return Err(ode_solver_error!(
+                    Other,
+                    "Number of outputs does not match number of rows in gradient"
+                ));
+            }
+            if dgdu.ncols() != self.ts.len() {
+                return Err(ode_solver_error!(
+                    Other,
+                    "Number of solution timepoints does not match number of columns in gradient"
+                ));
+            }
+        }
+        Ok(self.dgdu_eval.iter().collect())
     }
 
     pub(crate) fn ensure_sens_allocation(

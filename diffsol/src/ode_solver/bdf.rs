@@ -1607,7 +1607,10 @@ mod test {
             single_reset_root_discrete_times, test_adjoint, test_adjoint_sum_squares,
             test_checkpointing, test_config, test_interpolate, test_interpolate_dy,
             test_ode_solver, test_problem, test_solve_adjoint_sum_squares_with_single_reset_root,
-            test_solve_adjoint_with_single_reset_root, test_state_mut, test_state_mut_on_problem,
+            test_solve_adjoint_with_single_reset_root,
+            test_solve_soln_adjoint_sum_squares_with_single_reset_root,
+            test_solve_soln_adjoint_with_single_reset_root, test_state_mut,
+            test_state_mut_on_problem,
         },
         scale, ConstantOp, Context, DenseMatrix, FaerLU, FaerMat, FaerSparseLU, FaerSparseMat,
         MatrixCommon, NalgebraLU, OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
@@ -2444,6 +2447,21 @@ mod test {
     }
 
     #[test]
+    fn test_solve_soln_adjoint_with_single_reset_root_bdf() {
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(true);
+        test_solve_soln_adjoint_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.bdf_solver(state),
+                None => problem.bdf::<LS>(),
+            },
+            &soln,
+            |adjoint_eqn| problem.bdf_state_adjoint::<LS, _>(adjoint_eqn),
+            |state, adjoint_eqn| problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn),
+            true,
+        );
+    }
+
+    #[test]
     fn test_solve_adjoint_sum_squares_with_single_reset_root_bdf() {
         let (mut problem, soln) =
             exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
@@ -2454,6 +2472,31 @@ mod test {
         );
         let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
         test_solve_adjoint_sum_squares_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.bdf_solver(state),
+                None => problem.bdf::<LS>(),
+            },
+            &soln,
+            |adjoint_eqn| problem.bdf_state_adjoint::<LS, _>(adjoint_eqn),
+            |state, adjoint_eqn| problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn),
+            true,
+            dgdp,
+            data,
+            times.as_slice(),
+        );
+    }
+
+    #[test]
+    fn test_solve_soln_adjoint_sum_squares_with_single_reset_root_bdf() {
+        let (mut problem, soln) =
+            exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        let times = single_reset_root_discrete_times(soln.solution_points[0].t);
+        let (dgdp, data) = setup_test_adjoint_sum_squares_with_single_reset_root::<LS, _>(
+            &mut problem,
+            times.as_slice(),
+        );
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        test_solve_soln_adjoint_sum_squares_with_single_reset_root(
             |state| match state {
                 Some(state) => problem.bdf_solver(state),
                 None => problem.bdf::<LS>(),
