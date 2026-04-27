@@ -637,23 +637,27 @@ where
         self.checkpoints.push(solver.state_clone());
     }
 
-    fn finish_segment(&mut self) {
+    fn finish_segment(&mut self, terminal_reset_root_idx: Option<usize>) {
         let last_segment = HermiteInterpolator::new(
             self.ys.split_off(0),
             self.ydots.split_off(0),
             self.ts.split_off(0),
         );
-        self.checkpointers.push(Checkpointing::new(
+        let mut checkpointer = Checkpointing::new(
             None,
             self.checkpoints.len() - 2,
             self.checkpoints.split_off(0),
             Some(last_segment),
-        ));
+        );
+        if let Some(root_idx) = terminal_reset_root_idx {
+            checkpointer.set_terminal_reset_root_idx(root_idx);
+        }
+        self.checkpointers.push(checkpointer);
     }
 
     fn finish_terminal_segment(&mut self, solver: &Method) {
         self.record_terminal_state(solver);
-        self.finish_segment();
+        self.finish_segment(None);
     }
 }
 
@@ -665,6 +669,9 @@ where
     fn into_state_and_eqn(self) -> (Self::State, Option<AugmentedEqn>);
     fn augmented_eqn(&self) -> Option<&AugmentedEqn>;
     fn augmented_eqn_mut(&mut self) -> Option<&mut AugmentedEqn>;
+    fn state_and_augmented_eqn_mut(
+        &mut self,
+    ) -> Option<(StateRefMut<'_, Eqn::V>, &mut AugmentedEqn)>;
 }
 
 fn solve_dense<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
@@ -728,9 +735,11 @@ where
                 s.state_mut_back(t_root)?;
                 if let Some(checkpointing) = checkpointing.as_mut() {
                     checkpointing.record_terminal_state(&*s);
-                    checkpointing.finish_segment();
                 }
                 if has_reset {
+                    if let Some(checkpointing) = checkpointing.as_mut() {
+                        checkpointing.finish_segment(Some(root_idx));
+                    }
                     s.apply_reset()?;
                     if let Some(checkpointing) = checkpointing.as_mut() {
                         checkpointing.start_segment_from_current(&*s);
@@ -743,6 +752,9 @@ where
                         break;
                     }
                 } else {
+                    if let Some(checkpointing) = checkpointing.as_mut() {
+                        checkpointing.finish_segment(None);
+                    }
                     stop_reason = OdeSolverStopReason::RootFound(t_root, root_idx);
                     break;
                 }
@@ -840,7 +852,7 @@ where
                 }
                 if has_reset {
                     if let Some(checkpointing) = checkpointing.as_mut() {
-                        checkpointing.finish_segment();
+                        checkpointing.finish_segment(Some(root_idx));
                     }
                     s.apply_reset()?;
                     write_out(s, ret_y, ret_t, tmp_nout);
@@ -856,7 +868,7 @@ where
                 } else {
                     write_out(s, ret_y, ret_t, tmp_nout);
                     if let Some(checkpointing) = checkpointing.as_mut() {
-                        checkpointing.finish_segment();
+                        checkpointing.finish_segment(None);
                     }
                     break OdeSolverStopReason::RootFound(t_root, root_idx);
                 }
@@ -1330,7 +1342,7 @@ mod test {
             .bdf_solver_adjoint::<NalgebraLU<f64>, _>(checkpointers, Some(s), None)
             .unwrap();
         let state = adjoint_solver
-            .solve_adjoint_backwards_pass(None, &[], &[])
+            .solve_adjoint_backwards_pass(&[], &[])
             .unwrap();
 
         let gs_adj = state.sg;

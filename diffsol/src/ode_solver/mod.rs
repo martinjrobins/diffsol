@@ -33,12 +33,11 @@ mod tests {
     use crate::op::ParameterisedOp;
     use crate::Scalar;
     use crate::{
-        op::OpStatistics, AdjointEquations, AdjointOdeSolverMethod, Checkpointing, Context,
-        DenseMatrix, HermiteInterpolator, MatrixCommon, MatrixRef, NonLinearOp,
-        NonLinearOpJacobian, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
-        OdeEquationsImplicitSens, OdeEquationsRef, OdeSolverConfig, OdeSolverMethod,
-        OdeSolverProblem, OdeSolverState, OdeSolverStopReason, Scale, VectorRef, VectorView,
-        VectorViewMut,
+        op::OpStatistics, AdjointEquations, AdjointOdeSolverMethod, Context, DenseMatrix,
+        MatrixCommon, MatrixRef, NonLinearOp, NonLinearOpJacobian, OdeEquations,
+        OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens,
+        OdeEquationsRef, OdeSolverConfig, OdeSolverMethod, OdeSolverProblem, OdeSolverState,
+        OdeSolverStopReason, Scale, VectorRef, VectorView, VectorViewMut,
     };
     use crate::{
         ConstantOp, ConstantOpSens, DefaultDenseMatrix, DefaultSolver, LinearSolver,
@@ -231,64 +230,6 @@ mod tests {
             delta3 * Scale(DM::T::from_f64(4.).unwrap()),
         ];
         ret
-    }
-
-    fn solve_with_checkpointing_until_stop<'a, Eqn, Method>(
-        solver: &mut Method,
-        final_time: Eqn::T,
-        max_steps_between_checkpoints: Option<usize>,
-    ) -> Result<
-        (
-            Checkpointing<Eqn, Method::State, Method>,
-            OdeSolverStopReason<Eqn::T>,
-        ),
-        DiffsolError,
-    >
-    where
-        Eqn: OdeEquations + 'a,
-        Eqn::V: DefaultDenseMatrix,
-        Method: OdeSolverMethod<'a, Eqn> + Sized,
-    {
-        let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
-        let mut nsteps = 0;
-        let t0 = solver.state().t;
-        let mut checkpoints = vec![solver.state_clone()];
-        let mut ts = vec![t0];
-        let mut ys = vec![solver.state().y.clone()];
-        let mut ydots = vec![solver.state().dy.clone()];
-
-        solver.set_stop_time(final_time)?;
-        let stop_reason = loop {
-            match solver.step()? {
-                OdeSolverStopReason::InternalTimestep => {
-                    ts.push(solver.state().t);
-                    ys.push(solver.state().y.clone());
-                    ydots.push(solver.state().dy.clone());
-                    nsteps += 1;
-                    if nsteps > max_steps_between_checkpoints {
-                        checkpoints.push(solver.checkpoint());
-                        nsteps = 0;
-                        ts.clear();
-                        ys.clear();
-                        ydots.clear();
-                    }
-                }
-                OdeSolverStopReason::RootFound(t_root, idx) => {
-                    solver.state_mut_back(t_root)?;
-                    break OdeSolverStopReason::RootFound(t_root, idx);
-                }
-                OdeSolverStopReason::TstopReached => break OdeSolverStopReason::TstopReached,
-            }
-        };
-
-        ts.push(solver.state().t);
-        ys.push(solver.state().y.clone());
-        ydots.push(solver.state().dy.clone());
-        checkpoints.push(solver.state_clone());
-        let last_segment = HermiteInterpolator::new(ys, ydots, ts);
-        let checkpointer =
-            Checkpointing::new(None, checkpoints.len() - 2, checkpoints, Some(last_segment));
-        Ok((checkpointer, stop_reason))
     }
 
     pub fn setup_test_adjoint_sum_squares<'a, LS, Eqn>(
@@ -507,7 +448,7 @@ mod tests {
         );
         let rtol = Eqn::T::from_f64(1e-6).unwrap();
         let state = backwards_solver
-            .solve_adjoint_backwards_pass(None, times, dgdu.iter().collect::<Vec<_>>().as_slice())
+            .solve_adjoint_backwards_pass(times, dgdu.iter().collect::<Vec<_>>().as_slice())
             .unwrap();
         let gs_adj = state.into_common().sg;
         #[allow(clippy::needless_range_loop)]
@@ -539,7 +480,7 @@ mod tests {
         );
         let rtol = Eqn::T::from_f64(1e-6).unwrap();
         let state = backwards_solver
-            .solve_adjoint_backwards_pass(None, &[], &[])
+            .solve_adjoint_backwards_pass(&[], &[])
             .unwrap();
         let gs_adj = state.into_common().sg;
         #[allow(clippy::needless_range_loop)]
@@ -1395,33 +1336,21 @@ mod tests {
         let expected_out = &soln.solution_points[0];
         let forward_stop_time = expected_out.t + Eqn::T::from_f64(1.0).unwrap();
 
-        let mut first_forward_solver = build_forward(None).unwrap();
-        let (pre_reset_checkpointer, _) =
-            solve_with_checkpointing_until_stop(&mut first_forward_solver, forward_stop_time, None)
-                .unwrap();
-        let problem = first_forward_solver.problem();
-        let pre_reset_solver = first_forward_solver.clone();
-        let fwd_state_minus = first_forward_solver.into_state();
-        let mut state_after_reset = fwd_state_minus.clone();
-        let rhs = problem.eqn.rhs();
-        let has_mass = problem.eqn.mass().is_some();
-        let reset_fn = problem.eqn.reset().unwrap();
-        state_after_reset
-            .as_mut()
-            .state_mut_op(&rhs, has_mass, &reset_fn)
+        let mut forward_solver = build_forward(None).unwrap();
+        let (checkpointers, _forward_y, _forward_t, stop_reason) = forward_solver
+            .solve_with_checkpointing(forward_stop_time, None)
             .unwrap();
-        let fwd_state_plus = state_after_reset.clone();
-
-        let mut second_forward_solver = build_forward(Some(state_after_reset)).unwrap();
-        let (post_reset_checkpointer, post_reset_stop_reason) =
-            solve_with_checkpointing_until_stop(
-                &mut second_forward_solver,
-                forward_stop_time,
-                None,
-            )
-            .unwrap();
-        let post_reset_solver = second_forward_solver.clone();
-        let final_forward_state = second_forward_solver.into_state();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
+        assert!(
+            checkpointers.len() >= 3,
+            "expected checkpointing path to include the two reset events"
+        );
+        let problem = forward_solver.problem();
+        let post_reset_solver = forward_solver.clone();
+        let post_reset_root_idx = checkpointers[1]
+            .terminal_reset_root_idx()
+            .expect("second reset segment should record its terminal root index");
+        let final_forward_state = checkpointers[1].last_checkpoint().clone();
         let t_second_root = final_forward_state.as_ref().t;
 
         let out_error = final_forward_state.as_ref().g.clone() - &expected_out.state;
@@ -1442,60 +1371,56 @@ mod tests {
             t_second_root,
         );
 
-        let mut post_reset_adjoint_eqn = problem.adjoint_equations(
-            vec![post_reset_checkpointer.clone()],
+        let adjoint_checkpointers = checkpointers.into_iter().take(2).collect::<Vec<_>>();
+
+        // make a broken adjoint that is missing the reset root metadata on the first segment, which should cause an error
+        let mut missing_metadata_checkpointers = adjoint_checkpointers.clone();
+        missing_metadata_checkpointers[0].clear_terminal_reset_root_idx();
+        let mut missing_metadata_adjoint_eqn = problem.adjoint_equations(
+            missing_metadata_checkpointers,
             Some(post_reset_solver.clone()),
             None,
         );
-        let mut post_reset_adjoint_state =
-            build_adjoint_state(&mut post_reset_adjoint_eqn).unwrap();
-        let post_reset_root_idx = match post_reset_stop_reason {
-            OdeSolverStopReason::RootFound(_, idx) => idx,
-            OdeSolverStopReason::TstopReached => {
-                panic!("expected second forward segment to stop on a root, got TstopReached")
-            }
-            OdeSolverStopReason::InternalTimestep => {
-                panic!("expected second forward segment to stop on a root, got InternalTimestep")
-            }
-        };
-        post_reset_adjoint_state
+        let mut missing_metadata_adjoint_state =
+            build_adjoint_state(&mut missing_metadata_adjoint_eqn).unwrap();
+        missing_metadata_adjoint_state
             .as_mut()
             .state_mut_adjoint_terminal_root(
-                &mut post_reset_adjoint_eqn,
+                &mut missing_metadata_adjoint_eqn,
                 post_reset_root_idx,
                 &final_forward_state,
             )
             .unwrap();
-        let post_reset_adjoint =
-            build_adjoint_from_state(post_reset_adjoint_state, post_reset_adjoint_eqn).unwrap();
-        let mut adjoint_state = post_reset_adjoint
-            .solve_adjoint_backwards_pass(Some(fwd_state_minus.as_ref().t), &[], &[])
+        let missing_metadata_adjoint =
+            build_adjoint_from_state(missing_metadata_adjoint_state, missing_metadata_adjoint_eqn)
+                .unwrap();
+        let missing_metadata_err =
+            match missing_metadata_adjoint.solve_adjoint_backwards_pass(&[], &[]) {
+                Ok(_) => panic!("expected missing reset metadata error"),
+                Err(err) => err,
+            };
+        assert!(
+            format!("{missing_metadata_err:?}").contains("Missing reset root metadata"),
+            "expected missing reset metadata error, got {missing_metadata_err:?}",
+        );
+
+        // now build the correct adjoint and check that it produces the correct gradient
+        let mut adjoint_eqn =
+            problem.adjoint_equations(adjoint_checkpointers, Some(post_reset_solver), None);
+        let mut adjoint_state = build_adjoint_state(&mut adjoint_eqn).unwrap();
+        adjoint_state
+            .as_mut()
+            .state_mut_adjoint_terminal_root(
+                &mut adjoint_eqn,
+                post_reset_root_idx,
+                &final_forward_state,
+            )
             .unwrap();
+        let adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();
+        let adjoint_state = adjoint.solve_adjoint_backwards_pass(&[], &[]).unwrap();
+
         let t0 = problem.t0;
         let ctx = problem.context().clone();
-        let reset_problem = problem;
-        let mut pre_reset_adjoint_eqn =
-            problem.adjoint_equations(vec![pre_reset_checkpointer], Some(pre_reset_solver), None);
-        {
-            let reset_fn = reset_problem.eqn.reset().unwrap();
-            let root_fn = reset_problem.eqn.root().unwrap();
-            adjoint_state
-                .as_mut()
-                .state_mut_op_with_adjoint_and_reset(
-                    &mut pre_reset_adjoint_eqn,
-                    &reset_fn,
-                    &root_fn,
-                    0,
-                    &fwd_state_minus,
-                    &fwd_state_plus,
-                )
-                .unwrap();
-        }
-        let pre_reset_adjoint =
-            build_adjoint_from_state(adjoint_state, pre_reset_adjoint_eqn).unwrap();
-        let adjoint_state = pre_reset_adjoint
-            .solve_adjoint_backwards_pass(None, &[], &[])
-            .unwrap();
 
         let sens_points = soln.sens_solution_points.as_ref().unwrap();
         let expected_grad = Eqn::V::from_vec(
@@ -1561,46 +1486,21 @@ mod tests {
         let dgdu = dsum_squaresdp(&forwards_soln, &data);
         let dgdu_refs = dgdu.iter().collect::<Vec<_>>();
 
-        let mut first_forward_solver = build_forward(None).unwrap();
-        let (pre_reset_checkpointer, pre_reset_stop_reason) =
-            solve_with_checkpointing_until_stop(&mut first_forward_solver, forward_stop_time, None)
-                .unwrap();
-        let problem = first_forward_solver.problem();
-        let pre_reset_solver = first_forward_solver.clone();
-        let fwd_state_minus = first_forward_solver.into_state();
-        match pre_reset_stop_reason {
-            OdeSolverStopReason::RootFound(_, 0) => {}
-            OdeSolverStopReason::RootFound(_, idx) => {
-                panic!("expected first checkpointed segment to stop on root 0, got root {idx}")
-            }
-            OdeSolverStopReason::TstopReached => {
-                panic!("expected first checkpointed segment to stop on the interior root")
-            }
-            OdeSolverStopReason::InternalTimestep => {
-                panic!("first checkpointed segment ended without a terminal stop reason")
-            }
-        }
-
-        let mut state_after_reset = fwd_state_minus.clone();
-        let rhs = problem.eqn.rhs();
-        let has_mass = problem.eqn.mass().is_some();
-        let reset_fn = problem.eqn.reset().unwrap();
-        state_after_reset
-            .as_mut()
-            .state_mut_op(&rhs, has_mass, &reset_fn)
+        let mut forward_solver = build_forward(None).unwrap();
+        let (checkpointers, _forward_y, _forward_t, stop_reason) = forward_solver
+            .solve_with_checkpointing(forward_stop_time, None)
             .unwrap();
-        let fwd_state_plus = state_after_reset.clone();
-
-        let mut second_forward_solver = build_forward(Some(state_after_reset)).unwrap();
-        let (post_reset_checkpointer, post_reset_stop_reason) =
-            solve_with_checkpointing_until_stop(
-                &mut second_forward_solver,
-                forward_stop_time,
-                None,
-            )
-            .unwrap();
-        let post_reset_solver = second_forward_solver.clone();
-        let final_forward_state = second_forward_solver.into_state();
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
+        assert!(
+            checkpointers.len() >= 3,
+            "expected checkpointing path to include the two reset events"
+        );
+        let problem = forward_solver.problem();
+        let post_reset_solver = forward_solver.clone();
+        let post_reset_root_idx = checkpointers[1]
+            .terminal_reset_root_idx()
+            .expect("second reset segment should record its terminal root index");
+        let final_forward_state = checkpointers[1].last_checkpoint().clone();
         let t_second_root = final_forward_state.as_ref().t;
 
         let time_tol = soln.rtol * expected_out.t.abs() + soln.atol.get_index(0);
@@ -1611,68 +1511,27 @@ mod tests {
             t_second_root,
         );
 
-        let mut post_reset_adjoint_eqn = problem.adjoint_equations(
-            vec![post_reset_checkpointer.clone()],
-            Some(post_reset_solver.clone()),
+        let mut adjoint_eqn = problem.adjoint_equations(
+            checkpointers.into_iter().take(2).collect(),
+            Some(post_reset_solver),
             Some(dgdu.len()),
         );
-        let mut post_reset_adjoint_state =
-            build_adjoint_state(&mut post_reset_adjoint_eqn).unwrap();
-        let post_reset_root_idx = match post_reset_stop_reason {
-            OdeSolverStopReason::RootFound(_, idx) => idx,
-            OdeSolverStopReason::TstopReached => {
-                panic!("expected second forward segment to stop on a root, got TstopReached")
-            }
-            OdeSolverStopReason::InternalTimestep => {
-                panic!("expected second forward segment to stop on a root, got InternalTimestep")
-            }
-        };
-        post_reset_adjoint_state
+        let mut adjoint_state = build_adjoint_state(&mut adjoint_eqn).unwrap();
+        adjoint_state
             .as_mut()
             .state_mut_adjoint_terminal_root(
-                &mut post_reset_adjoint_eqn,
+                &mut adjoint_eqn,
                 post_reset_root_idx,
                 &final_forward_state,
             )
             .unwrap();
-        let post_reset_adjoint =
-            build_adjoint_from_state(post_reset_adjoint_state, post_reset_adjoint_eqn).unwrap();
-        let mut adjoint_state = post_reset_adjoint
-            .solve_adjoint_backwards_pass(
-                Some(fwd_state_minus.as_ref().t),
-                times,
-                dgdu_refs.as_slice(),
-            )
+        let adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();
+        let adjoint_state = adjoint
+            .solve_adjoint_backwards_pass(times, dgdu_refs.as_slice())
             .unwrap();
 
         let t0 = problem.t0;
         let ctx = problem.context().clone();
-        let reset_problem = problem;
-        let mut pre_reset_adjoint_eqn = problem.adjoint_equations(
-            vec![pre_reset_checkpointer],
-            Some(pre_reset_solver),
-            Some(dgdu.len()),
-        );
-        {
-            let reset_fn = reset_problem.eqn.reset().unwrap();
-            let root_fn = reset_problem.eqn.root().unwrap();
-            adjoint_state
-                .as_mut()
-                .state_mut_op_with_adjoint_and_reset(
-                    &mut pre_reset_adjoint_eqn,
-                    &reset_fn,
-                    &root_fn,
-                    0,
-                    &fwd_state_minus,
-                    &fwd_state_plus,
-                )
-                .unwrap();
-        }
-        let pre_reset_adjoint =
-            build_adjoint_from_state(adjoint_state, pre_reset_adjoint_eqn).unwrap();
-        let adjoint_state = pre_reset_adjoint
-            .solve_adjoint_backwards_pass(None, times, dgdu_refs.as_slice())
-            .unwrap();
 
         let nparams = dgdp_check.nrows();
         let atol = Eqn::V::from_element(nparams, Eqn::T::from_f64(1e-6).unwrap(), ctx);

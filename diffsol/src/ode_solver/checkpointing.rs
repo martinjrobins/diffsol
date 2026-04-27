@@ -193,6 +193,7 @@ where
     checkpoints: Vec<State>,
     segment: RefCell<HermiteInterpolator<Eqn::V>>,
     previous_segment: RefCell<Option<HermiteInterpolator<Eqn::V>>>,
+    terminal_reset_root_idx: Option<usize>,
     phantom: PhantomData<Method>,
 }
 
@@ -209,6 +210,7 @@ where
             checkpoints: self.checkpoints.clone(),
             segment: RefCell::new(self.segment.borrow().clone()),
             previous_segment: RefCell::new(self.previous_segment.borrow().clone()),
+            terminal_reset_root_idx: self.terminal_reset_root_idx,
             phantom: PhantomData,
         }
     }
@@ -263,8 +265,30 @@ where
             checkpoints,
             segment,
             previous_segment,
+            terminal_reset_root_idx: None,
             phantom: PhantomData,
         }
+    }
+
+    pub(crate) fn set_terminal_reset_root_idx(&mut self, root_idx: usize) {
+        self.terminal_reset_root_idx = Some(root_idx);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn clear_terminal_reset_root_idx(&mut self) {
+        self.terminal_reset_root_idx = None;
+    }
+
+    pub(crate) fn terminal_reset_root_idx(&self) -> Option<usize> {
+        self.terminal_reset_root_idx
+    }
+
+    pub(crate) fn first_checkpoint(&self) -> &State {
+        &self.checkpoints[0]
+    }
+
+    pub(crate) fn last_checkpoint(&self) -> &State {
+        &self.checkpoints[self.checkpoints.len() - 1]
     }
 
     /// Get the last (most recent) time point in the current segment.

@@ -15,6 +15,38 @@ where
     Eqn: OdeEquationsImplicitAdjoint + 'a,
     Solver: OdeSolverMethod<'a, Eqn>,
 {
+    /// Apply the problem reset correction to the adjoint state at a checkpoint
+    /// path boundary.
+    fn apply_reset_with_adjoint(
+        &mut self,
+        root_idx: usize,
+        fwd_state_minus: &Solver::State,
+        fwd_state_plus: &Solver::State,
+    ) -> Result<(), DiffsolError> {
+        let (reset, root) = {
+            let eqn = &self.problem().eqn;
+            (
+                eqn.reset().ok_or_else(|| {
+                    ode_solver_error!(Other, "No reset operator configured for this problem")
+                })?,
+                eqn.root().ok_or_else(|| {
+                    ode_solver_error!(Other, "No root operator configured for this problem")
+                })?,
+            )
+        };
+        let (mut state, adj_eqn) = self
+            .state_and_augmented_eqn_mut()
+            .ok_or_else(|| ode_solver_error!(Other, "No augmented equations"))?;
+        state.state_mut_op_with_adjoint_and_reset(
+            adj_eqn,
+            &reset,
+            &root,
+            root_idx,
+            fwd_state_minus,
+            fwd_state_plus,
+        )
+    }
+
     /// Backwards pass for adjoint sensitivity analysis
     ///
     /// The overall goal is to compute the gradient of an output function `G` with respect to the model parameters `p`
@@ -46,11 +78,8 @@ where
     /// and `n` is the number of timepoints. The i-th column of `dgdu_eval` is the gradient of `g_i` with respect to `u_i`.
     /// The input `t_eval` is a vector of length `n`, where the i-th element is the timepoint `t_i`.
     ///
-    /// When solving only part of a checkpointed trajectory by passing `t0`, any `t_eval` entries
-    /// outside the active backwards integration window `[t0, self.state().t]` are ignored.
     fn solve_adjoint_backwards_pass(
         mut self,
-        t0: Option<Eqn::T>,
         t_eval: &[Eqn::T],
         dgdu_eval: &[&<Eqn::V as DefaultDenseMatrix>::M],
     ) -> Result<Self::State, DiffsolError>
@@ -108,49 +137,116 @@ where
             None
         };
         let problem_t0 = self.problem().t0;
-        let solve_t0 = t0.unwrap_or(problem_t0);
         let solve_t1 = self.state().t;
+        let checkpointing_len = self.augmented_eqn().unwrap().checkpointing_len();
+        let (first_checkpoint_t, _) = self.augmented_eqn().unwrap().checkpointing_bounds(0);
+        let (_, last_checkpoint_t) = self
+            .augmented_eqn()
+            .unwrap()
+            .checkpointing_bounds(checkpointing_len - 1);
+        if problem_t0 != first_checkpoint_t {
+            return Err(ode_solver_error!(
+                Other,
+                "Problem initial time does not match the first checkpointing segment start time"
+            ));
+        }
+        if solve_t1 != last_checkpoint_t {
+            return Err(ode_solver_error!(
+                Other,
+                "Adjoint solver current time does not match the last checkpointing segment end time"
+            ));
+        }
 
-        // solve the adjoint problem stopping at each t_eval at or after the requested stop time
-        for (i, t) in t_eval
-            .iter()
-            .enumerate()
-            .rev()
-            .filter(|(_, t)| **t <= solve_t1)
-            .take_while(|(_, t)| **t >= solve_t0)
-        {
-            // integrate to t if not already there
-            match self.set_stop_time(*t) {
-                Ok(_) => while self.step()? != OdeSolverStopReason::TstopReached {},
-                Err(DiffsolError::OdeSolverError(OdeSolverError::StopTimeAtCurrentTime)) => {}
-                e => e?,
-            }
+        for segment_index in (0..checkpointing_len).rev() {
+            let (segment_first_t, segment_end_t) = self
+                .augmented_eqn()
+                .unwrap()
+                .checkpointing_bounds(segment_index);
 
-            if let Some(integrate_delta_g) = integrate_delta_g.as_mut() {
-                let dudg_i = dgdu_eval.iter().map(|dgdu| dgdu.column(i));
-                integrate_delta_g.integrate_delta_g(&mut self, dudg_i)?;
+            solve_adjoint_backwards_segment(
+                &mut self,
+                segment_first_t,
+                segment_end_t,
+                segment_index + 1 < checkpointing_len,
+                t_eval,
+                dgdu_eval,
+                integrate_delta_g.as_mut(),
+            )?;
+
+            if segment_index > 0 {
+                let (root_idx, fwd_state_minus, fwd_state_plus) = {
+                    let aug_eqn = self.augmented_eqn().unwrap();
+                    let root_idx = aug_eqn
+                        .checkpointing_terminal_reset_root_idx(segment_index - 1)
+                        .ok_or_else(|| {
+                            ode_solver_error!(
+                                Other,
+                                "Missing reset root metadata between checkpointing segments"
+                            )
+                        })?;
+                    (
+                        root_idx,
+                        aug_eqn.checkpointing_last_state(segment_index - 1),
+                        aug_eqn.checkpointing_first_state(segment_index),
+                    )
+                };
+                self.apply_reset_with_adjoint(root_idx, &fwd_state_minus, &fwd_state_plus)?;
             }
         }
 
-        // keep integrating until the requested stop time
-        match self.set_stop_time(solve_t0) {
-            Ok(_) => while self.step()? != OdeSolverStopReason::TstopReached {},
-            Err(DiffsolError::OdeSolverError(OdeSolverError::StopTimeAtCurrentTime)) => {}
-            e => e?,
-        }
-
-        // correct the adjoint solution for the initial conditions only when solving
-        // all the way back to the problem's initial time
+        // correct the adjoint solution for the initial conditions
         let (mut state, aug_eqn) = self.into_state_and_eqn();
         let aug_eqn = aug_eqn.unwrap();
-        if t0.is_none() {
-            let state_mut = state.as_mut();
-            aug_eqn.correct_sg_for_init(problem_t0, state_mut.s, state_mut.sg);
-        }
+        let state_mut = state.as_mut();
+        aug_eqn.correct_sg_for_init(problem_t0, state_mut.s, state_mut.sg);
 
         // return the solution
         Ok(state)
     }
+}
+
+fn solve_adjoint_backwards_segment<'a, Eqn, Solver, AdjointSolver>(
+    solver: &mut AdjointSolver,
+    solve_t0: Eqn::T,
+    solve_t1: Eqn::T,
+    exclude_t1: bool,
+    t_eval: &[Eqn::T],
+    dgdu_eval: &[&<Eqn::V as DefaultDenseMatrix>::M],
+    mut integrate_delta_g: Option<&mut IntegrateDeltaG<Eqn::M, <Eqn::M as DefaultSolver>::LS>>,
+) -> Result<(), DiffsolError>
+where
+    Eqn: OdeEquationsImplicitAdjoint + 'a,
+    Eqn::V: DefaultDenseMatrix,
+    Eqn::M: DefaultSolver,
+    Solver: OdeSolverMethod<'a, Eqn>,
+    AdjointSolver: AdjointOdeSolverMethod<'a, Eqn, Solver>,
+{
+    for (i, t) in t_eval
+        .iter()
+        .enumerate()
+        .rev()
+        .filter(|(_, t)| **t <= solve_t1 && **t >= solve_t0)
+        .filter(|(_, t)| !(exclude_t1 && **t == solve_t1))
+    {
+        match solver.set_stop_time(*t) {
+            Ok(_) => while solver.step()? != OdeSolverStopReason::TstopReached {},
+            Err(DiffsolError::OdeSolverError(OdeSolverError::StopTimeAtCurrentTime)) => {}
+            e => e?,
+        }
+
+        if let Some(integrate_delta_g) = integrate_delta_g.as_deref_mut() {
+            let dudg_i = dgdu_eval.iter().map(|dgdu| dgdu.column(i));
+            integrate_delta_g.integrate_delta_g(solver, dudg_i)?;
+        }
+    }
+
+    match solver.set_stop_time(solve_t0) {
+        Ok(_) => while solver.step()? != OdeSolverStopReason::TstopReached {},
+        Err(DiffsolError::OdeSolverError(OdeSolverError::StopTimeAtCurrentTime)) => {}
+        e => e?,
+    }
+
+    Ok(())
 }
 
 struct BlockInfoSol<M: Matrix, LS: LinearSolver<M>> {

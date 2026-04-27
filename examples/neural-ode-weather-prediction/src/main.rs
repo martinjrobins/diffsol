@@ -398,7 +398,7 @@ fn loss_fn(
         g_m.column_mut(j).copy_from(&g_m_i);
     }
     let adjoint_solver = problem.bdf_solver_adjoint::<LS, _>(c, Some(1)).unwrap();
-    let soln = adjoint_solver.solve_adjoint_backwards_pass(ts_data, &[g_m])?;
+    let soln = adjoint_solver.solve_adjoint_backwards_pass(ts_data, &[&*g_m])?;
     Ok((loss, soln.into_common().sg.pop().unwrap()))
 }
 

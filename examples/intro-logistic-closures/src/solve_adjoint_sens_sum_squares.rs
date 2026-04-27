@@ -12,11 +12,10 @@ where
 {
     let t_data = vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0];
     let (y_data, _stop_reason) = solver.solve_dense(t_data.as_slice()).unwrap();
-    let problem = solver.problem();
-
     let (checkpointing, soln, _stop_reason) = solver
         .solve_dense_with_checkpointing(t_data.as_slice(), None)
         .unwrap();
+    let problem = solver.problem();
 
     let mut g_m = M::zeros(2, t_data.len(), *solver.problem().eqn().context());
     for j in 0..g_m.ncols() {
@@ -25,10 +24,10 @@ where
     }
 
     let adjoint_solver = problem
-        .bdf_solver_adjoint::<LS, _>(checkpointing, Some(1))
+        .bdf_solver_adjoint::<LS, _>(checkpointing, Some(solver.clone()), Some(1))
         .unwrap();
     let final_state = adjoint_solver
-        .solve_adjoint_backwards_pass(None, t_data.as_slice(), &[&g_m])
+        .solve_adjoint_backwards_pass(t_data.as_slice(), &[&g_m])
         .unwrap();
     for (i, dgdp_i) in final_state.as_ref().sg.iter().enumerate() {
         println!("sens wrt parameter {i}: {dgdp_i:?}");

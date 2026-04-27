@@ -598,6 +598,32 @@ where
         self.context.borrow().checkpointers.last().unwrap().last_h()
     }
 
+    pub(crate) fn checkpointing_len(&self) -> usize {
+        self.context.borrow().checkpointers.len()
+    }
+
+    pub(crate) fn checkpointing_bounds(&self, index: usize) -> (Eqn::T, Eqn::T) {
+        let context = self.context.borrow();
+        let checkpointer = &context.checkpointers[index];
+        (checkpointer.first_t(), checkpointer.end_t())
+    }
+
+    pub(crate) fn checkpointing_terminal_reset_root_idx(&self, index: usize) -> Option<usize> {
+        self.context.borrow().checkpointers[index].terminal_reset_root_idx()
+    }
+
+    pub(crate) fn checkpointing_last_state(&self, index: usize) -> Method::State {
+        self.context.borrow().checkpointers[index]
+            .last_checkpoint()
+            .clone()
+    }
+
+    pub(crate) fn checkpointing_first_state(&self, index: usize) -> Method::State {
+        self.context.borrow().checkpointers[index]
+            .first_checkpoint()
+            .clone()
+    }
+
     pub fn with_out(&self) -> bool {
         self.rhs.with_out
     }

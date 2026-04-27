@@ -651,7 +651,7 @@ impl OdeSolverType {
         match self {
             OdeSolverType::Bdf => problem
                 .bdf_solver_adjoint::<LS, _>(checkpointing, Some(solver.clone()), nout_override)?
-                .solve_adjoint_backwards_pass(None, t_eval, &[g_m])
+                .solve_adjoint_backwards_pass(t_eval, &[g_m])
                 .map(|res| res.into_common().sg),
             OdeSolverType::Esdirk34 => problem
                 .esdirk34_solver_adjoint::<LS, _>(
@@ -659,7 +659,7 @@ impl OdeSolverType {
                     Some(solver.clone()),
                     nout_override,
                 )?
-                .solve_adjoint_backwards_pass(None, t_eval, &[g_m])
+                .solve_adjoint_backwards_pass(t_eval, &[g_m])
                 .map(|res| res.into_common().sg),
             OdeSolverType::TrBdf2 => problem
                 .tr_bdf2_solver_adjoint::<LS, _>(
@@ -667,7 +667,7 @@ impl OdeSolverType {
                     Some(solver.clone()),
                     nout_override,
                 )?
-                .solve_adjoint_backwards_pass(None, t_eval, &[g_m])
+                .solve_adjoint_backwards_pass(t_eval, &[g_m])
                 .map(|res| res.into_common().sg),
             OdeSolverType::Tsit45 => Err(DiffsolError::Other(
                 "Tsit45 solver does not support adjoint sensitivity analysis.".to_string(),

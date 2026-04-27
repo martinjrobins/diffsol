@@ -36,6 +36,11 @@ where
     fn augmented_eqn_mut(&mut self) -> Option<&mut AugEqn> {
         self.augmented_eqn.as_mut()
     }
+    fn state_and_augmented_eqn_mut(&mut self) -> Option<(StateRefMut<'_, Eqn::V>, &mut AugEqn)> {
+        let state = self.rk.state_mut().as_mut();
+        let augmented_eqn = self.augmented_eqn.as_mut()?;
+        Some((state, augmented_eqn))
+    }
 }
 
 impl<'a, Eqn, M> SensitivitiesOdeSolverMethod<'a, Eqn>
