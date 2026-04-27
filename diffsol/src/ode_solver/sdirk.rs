@@ -227,22 +227,22 @@ where
         augmented_eqn: AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
         Rk::<Eqn, M>::check_sdirk_rk(&tableau)?;
+        let integrate_main_eqn = augmented_eqn.integrate_main_eqn();
         let rk = Rk::new_augmented(problem, state, tableau, &augmented_eqn)?;
         let mut ret = Self::_new(
             rk,
             problem,
             linear_solver,
-            true,
+            integrate_main_eqn,
             SdirkConfig::new(&problem.ode_options),
         )?;
 
-        ret.s_op = if augmented_eqn.integrate_main_eqn() {
+        ret.s_op = if integrate_main_eqn {
             ret.nonlinear_solver.set_problem(ret.op.as_ref().unwrap());
             let callable = SdirkCallable::new_no_jacobian(augmented_eqn, ret.gamma());
             callable.set_h(ret.rk.state().h);
             Some(callable)
         } else {
-            ret.op = None;
             let state = ret.rk.state();
             let callable = SdirkCallable::new(augmented_eqn, ret.gamma());
             callable.set_h(state.h);

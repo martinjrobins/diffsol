@@ -307,20 +307,17 @@ where
 
         state.set_problem(problem)?;
 
-        // setup root solver
-        let mut root_finder = None;
         let ctx = problem.eqn.context();
-        if let Some(root_fn) = problem.eqn.root() {
-            root_finder = Some(RootFinder::new(
-                root_fn.nout(),
-                problem.eqn.nstates(),
-                ctx.clone(),
-            ));
-            root_finder
-                .as_ref()
-                .unwrap()
-                .init(&root_fn, &state.y, state.t);
-        }
+        let root_finder = if integrate_main_eqn {
+            problem.eqn.root().map(|root_fn| {
+                let root_finder =
+                    RootFinder::new(root_fn.nout(), problem.eqn.nstates(), ctx.clone());
+                root_finder.init(&root_fn, &state.y, state.t);
+                root_finder
+            })
+        } else {
+            None
+        };
 
         // (re)allocate internal state
         let nstates = problem.eqn.rhs().nstates();
@@ -395,13 +392,8 @@ where
     ) -> Result<Self, DiffsolError> {
         state.check_sens_consistent_with_problem(problem, &augmented_eqn)?;
 
-        let mut ret = Self::_new(
-            problem,
-            state,
-            nonlinear_solver,
-            augmented_eqn.integrate_main_eqn(),
-            config,
-        )?;
+        let integrate_main_eqn = augmented_eqn.integrate_main_eqn();
+        let mut ret = Self::_new(problem, state, nonlinear_solver, integrate_main_eqn, config)?;
 
         ret.state.set_augmented_problem(problem, &augmented_eqn)?;
 
@@ -409,7 +401,7 @@ where
         let naug = augmented_eqn.max_index();
         let nstates = problem.eqn.rhs().nstates();
 
-        ret.s_op = if augmented_eqn.integrate_main_eqn() {
+        ret.s_op = if integrate_main_eqn {
             Some(BdfCallable::new_no_jacobian(augmented_eqn))
         } else {
             let bdf_callable = BdfCallable::new(augmented_eqn);
@@ -1282,12 +1274,11 @@ where
 
         if self.is_state_modified {
             // reinitalise root finder if needed
-            if let Some(root_fn) = problem.eqn.root() {
+            if let (Some(root_fn), Some(root_finder)) =
+                (problem.eqn.root(), self.root_finder.as_ref())
+            {
                 let state = &self.state;
-                self.root_finder
-                    .as_ref()
-                    .unwrap()
-                    .init(&root_fn, &state.y, state.t);
+                root_finder.init(&root_fn, &state.y, state.t);
             }
             // reinitialise diff matrix
             self.initialise_to_first_order();
@@ -1549,8 +1540,10 @@ where
         }
 
         // check for root within accepted step
-        if let Some(root_fn) = self.ode_problem.eqn.root() {
-            let ret = self.root_finder.as_ref().unwrap().check_root(
+        if let (Some(root_fn), Some(root_finder)) =
+            (self.ode_problem.eqn.root(), self.root_finder.as_ref())
+        {
+            let ret = root_finder.check_root(
                 &|t: <Eqn as Op>::T, y: &mut <Eqn as Op>::V| self.interpolate_inplace(t, y),
                 &root_fn,
                 self.state.as_ref().y,

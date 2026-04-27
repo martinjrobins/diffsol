@@ -105,13 +105,14 @@ where
         state: RkState<Eqn::V>,
         tableau: Tableau<M>,
     ) -> Result<Self, DiffsolError> {
-        Self::_new(problem, state, tableau)
+        Self::_new(problem, state, tableau, true)
     }
 
     fn _new(
         problem: &'a OdeSolverProblem<Eqn>,
         mut state: RkState<Eqn::V>,
         tableau: Tableau<M>,
+        integrate_main_eqn: bool,
     ) -> Result<Self, DiffsolError> {
         // update statistics
         let statistics = BdfStatistics::default();
@@ -133,10 +134,13 @@ where
         }
 
         state.set_problem(problem)?;
-        let root_finder = if let Some(root_fn) = problem.eqn.root() {
-            let root_finder = RootFinder::new(root_fn.nout(), problem.eqn.nstates(), ctx.clone());
-            root_finder.init(&root_fn, &state.y, state.t);
-            Some(root_finder)
+        let root_finder = if integrate_main_eqn {
+            problem.eqn.root().map(|root_fn| {
+                let root_finder =
+                    RootFinder::new(root_fn.nout(), problem.eqn.nstates(), ctx.clone());
+                root_finder.init(&root_fn, &state.y, state.t);
+                root_finder
+            })
         } else {
             None
         };
@@ -190,7 +194,8 @@ where
         augmented_eqn: &AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
         state.check_sens_consistent_with_problem(problem, augmented_eqn)?;
-        let mut ret = Self::_new(problem, state, tableau)?;
+        let integrate_main_eqn = augmented_eqn.integrate_main_eqn();
+        let mut ret = Self::_new(problem, state, tableau, integrate_main_eqn)?;
         let naug = augmented_eqn.max_index();
         let nstates = augmented_eqn.rhs().nstates();
         let order = ret.tableau.s();
@@ -211,7 +216,7 @@ where
                 ctx.clone(),
             ));
         };
-        if !augmented_eqn.integrate_main_eqn() {
+        if !integrate_main_eqn {
             ret.error = None;
             ret.out_error = None;
         }
@@ -431,12 +436,11 @@ where
     pub(crate) fn start_step(&mut self) -> Result<Eqn::T, DiffsolError> {
         if self.is_state_mutated {
             // reinitalise root finder if needed
-            if let Some(root_fn) = self.problem.eqn.root() {
+            if let (Some(root_fn), Some(root_finder)) =
+                (self.problem.eqn.root(), self.root_finder.as_ref())
+            {
                 let state = &self.state;
-                self.root_finder
-                    .as_ref()
-                    .unwrap()
-                    .init(&root_fn, &state.y, state.t);
+                root_finder.init(&root_fn, &state.y, state.t);
             }
             // reinitialise tstop if needed
             if let Some(t_stop) = self.tstop {
@@ -909,8 +913,10 @@ where
         self.statistics.number_of_steps += 1;
 
         // check for root within accepted step
-        if let Some(root_fn) = self.problem.eqn.root() {
-            let ret = self.root_finder.as_ref().unwrap().check_root(
+        if let (Some(root_fn), Some(root_finder)) =
+            (self.problem.eqn.root(), self.root_finder.as_ref())
+        {
+            let ret = root_finder.check_root(
                 &|t, y| self.interpolate_inplace(t, y),
                 &root_fn,
                 &self.state.y,
