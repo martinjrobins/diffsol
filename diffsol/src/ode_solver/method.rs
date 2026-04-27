@@ -674,6 +674,7 @@ where
     ) -> Option<(StateRefMut<'_, Eqn::V>, &mut AugmentedEqn)>;
 }
 
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn solve_dense<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     ret: &mut <Eqn::V as DefaultDenseMatrix>::M,
     t_eval: &[Eqn::T],
@@ -803,6 +804,7 @@ where
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn solve<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     ret_y: &mut <Eqn::V as DefaultDenseMatrix>::M,
     ret_t: &mut Vec<Eqn::T>,

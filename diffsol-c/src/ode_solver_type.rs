@@ -629,6 +629,7 @@ impl OdeSolverType {
         Ok((y, y_sens.pop().unwrap()))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn solve_adjoint_backwards<'solver, M, CG, LS, S>(
         &self,
         problem: &'solver OdeSolverProblem<DiffSl<M, CG>>,
