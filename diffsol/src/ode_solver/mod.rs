@@ -1321,6 +1321,7 @@ mod tests {
         soln: &OdeSolverSolution<Eqn::V>,
         build_adjoint_state: BuildAdjointState,
         build_adjoint_from_state: BuildAdjointFromState,
+        use_replay_solver: bool,
     ) where
         Eqn: OdeEquationsImplicitAdjoint + 'a,
         Eqn::M: DefaultSolver,
@@ -1376,9 +1377,10 @@ mod tests {
         // make a broken adjoint that is missing the reset root metadata on the first segment, which should cause an error
         let mut missing_metadata_checkpointers = adjoint_checkpointers.clone();
         missing_metadata_checkpointers[0].clear_terminal_reset_root_idx();
+        let missing_metadata_solver = use_replay_solver.then(|| post_reset_solver.clone());
         let mut missing_metadata_adjoint_eqn = problem.adjoint_equations(
             missing_metadata_checkpointers,
-            Some(post_reset_solver.clone()),
+            missing_metadata_solver,
             None,
         );
         let mut missing_metadata_adjoint_state =
@@ -1405,8 +1407,9 @@ mod tests {
         );
 
         // now build the correct adjoint and check that it produces the correct gradient
+        let adjoint_solver = use_replay_solver.then_some(post_reset_solver);
         let mut adjoint_eqn =
-            problem.adjoint_equations(adjoint_checkpointers, Some(post_reset_solver), None);
+            problem.adjoint_equations(adjoint_checkpointers, adjoint_solver, None);
         let mut adjoint_state = build_adjoint_state(&mut adjoint_eqn).unwrap();
         adjoint_state
             .as_mut()
@@ -1459,6 +1462,7 @@ mod tests {
         soln: &OdeSolverSolution<Eqn::V>,
         build_adjoint_state: BuildAdjointState,
         build_adjoint_from_state: BuildAdjointFromState,
+        use_replay_solver: bool,
         dgdp_check: <Eqn::V as DefaultDenseMatrix>::M,
         data: <Eqn::V as DefaultDenseMatrix>::M,
         times: &[Eqn::T],
@@ -1511,9 +1515,10 @@ mod tests {
             t_second_root,
         );
 
+        let adjoint_solver = use_replay_solver.then_some(post_reset_solver);
         let mut adjoint_eqn = problem.adjoint_equations(
             checkpointers.into_iter().take(2).collect(),
-            Some(post_reset_solver),
+            adjoint_solver,
             Some(dgdu.len()),
         );
         let mut adjoint_state = build_adjoint_state(&mut adjoint_eqn).unwrap();

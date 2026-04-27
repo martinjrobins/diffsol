@@ -637,6 +637,7 @@ mod test {
             &soln,
             |adjoint_eqn| problem.tsit45_state_adjoint(adjoint_eqn),
             |state, adjoint_eqn| problem.tsit45_solver_adjoint_from_state(state, adjoint_eqn),
+            true,
         );
     }
 
@@ -664,6 +665,7 @@ mod test {
             &soln,
             |adjoint_eqn| problem.tsit45_state_adjoint(adjoint_eqn),
             |state, adjoint_eqn| problem.tsit45_solver_adjoint_from_state(state, adjoint_eqn),
+            true,
             dgdp,
             data,
             times.as_slice(),

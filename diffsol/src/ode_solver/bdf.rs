@@ -1585,6 +1585,7 @@ mod test {
             exponential_decay::{
                 exponential_decay_problem, exponential_decay_problem_adjoint,
                 exponential_decay_problem_sens, exponential_decay_problem_with_root,
+                exponential_decay_with_single_reset_root_problem_adjoint,
                 negative_exponential_decay_problem,
             },
             exponential_decay_with_algebraic::{
@@ -1601,10 +1602,12 @@ mod test {
             robertson_ode_with_sens::robertson_ode_with_sens,
         },
         ode_solver::tests::{
-            setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
-            test_adjoint_sum_squares, test_checkpointing, test_config, test_interpolate,
-            test_interpolate_dy, test_ode_solver, test_problem, test_state_mut,
-            test_state_mut_on_problem,
+            setup_test_adjoint, setup_test_adjoint_sum_squares,
+            setup_test_adjoint_sum_squares_with_single_reset_root,
+            single_reset_root_discrete_times, test_adjoint, test_adjoint_sum_squares,
+            test_checkpointing, test_config, test_interpolate, test_interpolate_dy,
+            test_ode_solver, test_problem, test_solve_adjoint_sum_squares_with_single_reset_root,
+            test_solve_adjoint_with_single_reset_root, test_state_mut, test_state_mut_on_problem,
         },
         scale, ConstantOp, Context, DenseMatrix, FaerLU, FaerMat, FaerSparseLU, FaerSparseMat,
         MatrixCommon, NalgebraLU, OdeEquations, OdeSolverMethod, Op, Vector, VectorView,
@@ -2412,8 +2415,6 @@ mod test {
 
     #[test]
     fn test_solve_adjoint_with_single_reset_root_bdf() {
-        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_single_reset_root_problem_adjoint;
-        use crate::ode_solver::tests::test_solve_adjoint_with_single_reset_root;
         let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(true);
         test_solve_adjoint_with_single_reset_root(
             |state| match state {
@@ -2423,17 +2424,27 @@ mod test {
             &soln,
             |adjoint_eqn| problem.bdf_state_adjoint::<LS, _>(adjoint_eqn),
             |state, adjoint_eqn| problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn),
+            true,
+        );
+    }
+
+    #[test]
+    fn test_solve_adjoint_with_single_reset_root_bdf_without_replay_solver() {
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(true);
+        test_solve_adjoint_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.bdf_solver(state),
+                None => problem.bdf::<LS>(),
+            },
+            &soln,
+            |adjoint_eqn| problem.bdf_state_adjoint::<LS, _>(adjoint_eqn),
+            |state, adjoint_eqn| problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn),
+            false,
         );
     }
 
     #[test]
     fn test_solve_adjoint_sum_squares_with_single_reset_root_bdf() {
-        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_single_reset_root_problem_adjoint;
-        use crate::ode_solver::tests::{
-            setup_test_adjoint_sum_squares_with_single_reset_root,
-            single_reset_root_discrete_times,
-            test_solve_adjoint_sum_squares_with_single_reset_root,
-        };
         let (mut problem, soln) =
             exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
         let times = single_reset_root_discrete_times(soln.solution_points[0].t);
@@ -2450,6 +2461,32 @@ mod test {
             &soln,
             |adjoint_eqn| problem.bdf_state_adjoint::<LS, _>(adjoint_eqn),
             |state, adjoint_eqn| problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn),
+            true,
+            dgdp,
+            data,
+            times.as_slice(),
+        );
+    }
+
+    #[test]
+    fn test_solve_adjoint_sum_squares_with_single_reset_root_bdf_without_replay_solver() {
+        let (mut problem, soln) =
+            exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        let times = single_reset_root_discrete_times(soln.solution_points[0].t);
+        let (dgdp, data) = setup_test_adjoint_sum_squares_with_single_reset_root::<LS, _>(
+            &mut problem,
+            times.as_slice(),
+        );
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        test_solve_adjoint_sum_squares_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.bdf_solver(state),
+                None => problem.bdf::<LS>(),
+            },
+            &soln,
+            |adjoint_eqn| problem.bdf_state_adjoint::<LS, _>(adjoint_eqn),
+            |state, adjoint_eqn| problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn),
+            false,
             dgdp,
             data,
             times.as_slice(),

@@ -1036,6 +1036,7 @@ mod test {
             |state, adjoint_eqn| {
                 problem.tr_bdf2_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn)
             },
+            true,
         );
     }
 
@@ -1065,6 +1066,7 @@ mod test {
             |state, adjoint_eqn| {
                 problem.tr_bdf2_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn)
             },
+            true,
             dgdp,
             data,
             times.as_slice(),
