@@ -1,5 +1,6 @@
 use diffsol::{
-    LlvmModule, MatrixCommon, OdeBuilder, OdeEquations, Op, SensitivitiesOdeSolverMethod, Vector,
+    AdjointOdeSolverMethod, DenseMatrix, LlvmModule, MatrixCommon, OdeBuilder, OdeEquations,
+    OdeSolverMethod, OdeSolverState, Op, Vector,
 };
 use plotly::{common::AxisSide, common::Mode, layout::Axis, layout::Layout, Plot, Scatter};
 use std::{fs, path::PathBuf};
@@ -8,13 +9,6 @@ type M = diffsol::NalgebraMat<f64>;
 type V = diffsol::NalgebraVec<f64>;
 type CG = LlvmModule;
 type LS = diffsol::NalgebraLU<f64>;
-
-fn trapezoid_integral(ts: &[f64], values: &[f64]) -> f64 {
-    ts.windows(2)
-        .zip(values.windows(2))
-        .map(|(t, y)| 0.5 * (t[1] - t[0]) * (y[0] + y[1]))
-        .sum()
-}
 
 pub fn main() {
     let model = r#"
@@ -42,9 +36,7 @@ pub fn main() {
         }
     "#;
 
-    let t_eval = (0..=240)
-        .map(|i| f64::from(i) * 24.0 / 240.0)
-        .collect::<Vec<_>>();
+    let final_time = 24.0;
     let dose_levels = (0..=12)
         .map(|i| 250.0 + f64::from(i) * 125.0)
         .collect::<Vec<_>>();
@@ -53,6 +45,9 @@ pub fn main() {
         .p([dose_levels[0]])
         .sens_atol([1e-8])
         .sens_rtol(1e-8)
+        .out_atol([1e-8])
+        .out_rtol(1e-8)
+        .integrate_out(true)
         .build_from_diffsl::<CG>(model)
         .unwrap();
 
@@ -63,25 +58,20 @@ pub fn main() {
         let ctx = *problem.eqn().context();
         problem.eqn_mut().set_params(&V::from_vec(vec![dose], ctx));
 
-        let mut solver = problem.bdf_sens::<LS>().unwrap();
-        let (concentration_squared, concentration_squared_sens, _stop_reason) =
-            solver.solve_dense_sensitivities(&t_eval).unwrap();
+        let mut solver = problem.bdf::<LS>().unwrap();
+        let (checkpoints, integrated_output, _output_times, _stop_reason) =
+            solver.solve_with_checkpointing(final_time, None).unwrap();
+        let auc = integrated_output.get_index(0, integrated_output.ncols() - 1);
 
-        let c2 = concentration_squared
-            .inner()
-            .row(0)
-            .iter()
-            .copied()
-            .collect::<Vec<_>>();
-        let dc2_ddose = concentration_squared_sens[0]
-            .inner()
-            .row(0)
-            .iter()
-            .copied()
-            .collect::<Vec<_>>();
+        let adjoint_solver = problem
+            .bdf_solver_adjoint::<LS, _>(checkpoints, Some(solver), None)
+            .unwrap();
+        let adjoint_state = adjoint_solver
+            .solve_adjoint_backwards_pass(&[], &[])
+            .unwrap();
 
-        aucs.push(trapezoid_integral(&t_eval, &c2));
-        auc_grads.push(trapezoid_integral(&t_eval, &dc2_ddose));
+        aucs.push(auc);
+        auc_grads.push(adjoint_state.as_ref().sg[0].get_index(0));
     }
 
     let mut plot = Plot::new();

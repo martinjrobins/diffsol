@@ -46,6 +46,11 @@ where
     fn augmented_eqn_mut(&mut self) -> Option<&mut AugEqn> {
         self.s_op.as_mut().map(|op| &mut op.eqn)
     }
+    fn state_and_augmented_eqn_mut(&mut self) -> Option<(StateRefMut<'_, Eqn::V>, &mut AugEqn)> {
+        let state = self.rk.state_mut().as_mut();
+        let augmented_eqn = self.s_op.as_mut().map(|op| &mut op.eqn)?;
+        Some((state, augmented_eqn))
+    }
 }
 
 impl<'a, M, Eqn, LS> SensitivitiesOdeSolverMethod<'a, Eqn>
@@ -222,22 +227,22 @@ where
         augmented_eqn: AugmentedEqn,
     ) -> Result<Self, DiffsolError> {
         Rk::<Eqn, M>::check_sdirk_rk(&tableau)?;
+        let integrate_main_eqn = augmented_eqn.integrate_main_eqn();
         let rk = Rk::new_augmented(problem, state, tableau, &augmented_eqn)?;
         let mut ret = Self::_new(
             rk,
             problem,
             linear_solver,
-            true,
+            integrate_main_eqn,
             SdirkConfig::new(&problem.ode_options),
         )?;
 
-        ret.s_op = if augmented_eqn.integrate_main_eqn() {
+        ret.s_op = if integrate_main_eqn {
             ret.nonlinear_solver.set_problem(ret.op.as_ref().unwrap());
             let callable = SdirkCallable::new_no_jacobian(augmented_eqn, ret.gamma());
             callable.set_h(ret.rk.state().h);
             Some(callable)
         } else {
-            ret.op = None;
             let state = ret.rk.state();
             let callable = SdirkCallable::new(augmented_eqn, ret.gamma());
             callable.set_h(state.h);
@@ -741,7 +746,7 @@ mod test {
         let (checkpointer, _y, _t, _stop_reason) =
             s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
-            .esdirk34_solver_adjoint::<LS, _>(checkpointer, None)
+            .esdirk34_solver_adjoint::<LS, _>(checkpointer, Some(s), None)
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
@@ -763,7 +768,7 @@ mod test {
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
-            .esdirk34_solver_adjoint::<LS, _>(checkpointer, Some(dgdp.ncols()))
+            .esdirk34_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdp.ncols()))
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
@@ -783,7 +788,7 @@ mod test {
         let (checkpointer, _y, _t, _stop_reason) =
             s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
-            .esdirk34_solver_adjoint::<LS, _>(checkpointer, None)
+            .esdirk34_solver_adjoint::<LS, _>(checkpointer, Some(s), None)
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
@@ -1031,6 +1036,7 @@ mod test {
             |state, adjoint_eqn| {
                 problem.tr_bdf2_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn)
             },
+            true,
         );
     }
 
@@ -1060,6 +1066,7 @@ mod test {
             |state, adjoint_eqn| {
                 problem.tr_bdf2_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn)
             },
+            true,
             dgdp,
             data,
             times.as_slice(),
