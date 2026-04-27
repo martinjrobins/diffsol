@@ -1449,6 +1449,7 @@ mod tests {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn test_solve_adjoint_sum_squares_with_single_reset_root<
         'a,
         Eqn,
