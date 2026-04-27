@@ -166,24 +166,24 @@ where
 
     /// Backwards pass for one segment of a staged adjoint sensitivity solve.
     ///
-    /// This uses the forward output times and optional discrete-output
-    /// gradients stored on `soln`, then moves the adjoint solver backwards
-    /// through exactly one checkpointing segment.
+    /// This uses the forward output times stored on `soln` and optional
+    /// discrete-output gradients from `dgdu_eval`, then moves the adjoint solver
+    /// backwards through exactly one checkpointing segment.
     fn solve_soln_adjoint_backwards_pass(
         mut self,
         soln: &Solution<Eqn::V>,
+        dgdu_eval: &[&<Eqn::V as DefaultDenseMatrix>::M],
     ) -> Result<Self, DiffsolError>
     where
         Eqn::V: DefaultDenseMatrix,
         Eqn::M: DefaultSolver,
     {
-        let dgdu_eval = soln.dgdu_eval_refs_checked(self.problem().eqn.nout())?;
         let t_eval = if dgdu_eval.is_empty() {
             &[]
         } else {
             soln.ts.as_slice()
         };
-        let have_neqn = validate_adjoint_backwards_inputs(&self, t_eval, dgdu_eval.as_slice())?;
+        let have_neqn = validate_adjoint_backwards_inputs(&self, t_eval, dgdu_eval)?;
 
         let mut integrate_delta_g = if have_neqn > 0 && !dgdu_eval.is_empty() {
             let integrate_delta_g =
@@ -226,7 +226,7 @@ where
             segment_end_t,
             segment_index + 1 < checkpointing_len,
             t_eval,
-            dgdu_eval.as_slice(),
+            dgdu_eval,
             integrate_delta_g.as_mut(),
         )?;
 
@@ -303,6 +303,12 @@ where
         return Err(ode_solver_error!(
             Other,
             "Number of outputs does not match number of rows in gradient"
+        ));
+    }
+    if dgdu_eval.iter().any(|dgdu| dgdu.ncols() != t_eval.len()) {
+        return Err(ode_solver_error!(
+            Other,
+            "Number of solution timepoints does not match number of columns in gradient"
         ));
     }
 
