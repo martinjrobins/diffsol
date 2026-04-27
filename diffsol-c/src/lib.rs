@@ -61,6 +61,7 @@ compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
 compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
 
 pub mod c_api_utils;
+pub mod checkpointing_wrapper;
 pub mod error;
 #[path = "error_c.rs"]
 pub mod error_c;
@@ -118,6 +119,7 @@ pub mod solver {
     }
 }
 
+pub use checkpointing_wrapper::CheckpointingWrapper;
 pub use error::DiffsolRtError;
 pub use initial_condition_options::InitialConditionSolverOptions;
 pub use jit::{default_enabled_jit_backend, JitBackendType};

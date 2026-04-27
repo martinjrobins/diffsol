@@ -2,7 +2,10 @@ use crate::{
     error::DiffsolRtError,
     scalar_type::{Scalar, ScalarType},
 };
-use diffsol::{FaerScalar, NalgebraScalar};
+use diffsol::{
+    DefaultDenseMatrix, DenseMatrix, FaerScalar, Matrix, MatrixCommon, NalgebraScalar, Vector,
+    VectorViewMut,
+};
 use ndarray::{ArrayView2, ShapeBuilder};
 use std::any::Any;
 
@@ -65,6 +68,38 @@ impl<T: Scalar + 'static> ToHostArray<T> for Vec<T> {
         let len = owner.len();
         let ptr = owner.as_ptr() as *mut u8;
         HostArray::new_vector(ptr, len, T::scalar_type()).with_owner(owner)
+    }
+}
+
+fn gradient_vecs_to_host_array<V>(gradients: Vec<V>) -> HostArray
+where
+    V: Vector<T: Scalar> + DefaultDenseMatrix,
+    <V as DefaultDenseMatrix>::M: Matrix<T = V::T>,
+    <<V as DefaultDenseMatrix>::M as MatrixCommon>::Inner: ToHostArray<V::T> + Clone,
+{
+    let ncols = gradients.len();
+    let nrows = gradients.first().map(Vector::len).unwrap_or(0);
+    let mut ret = <V as DefaultDenseMatrix>::M::zeros(nrows, ncols, V::C::default());
+    for (col, gradient) in gradients.iter().enumerate() {
+        assert_eq!(
+            gradient.len(),
+            nrows,
+            "Adjoint gradient columns have inconsistent lengths"
+        );
+        ret.column_mut(col).copy_from(gradient);
+    }
+    (*ret.inner()).clone().to_host_array()
+}
+
+impl<T: Scalar + NalgebraScalar + 'static> ToHostArray<T> for Vec<diffsol::NalgebraVec<T>> {
+    fn to_host_array(self) -> HostArray {
+        gradient_vecs_to_host_array(self)
+    }
+}
+
+impl<T: Scalar + FaerScalar + 'static> ToHostArray<T> for Vec<diffsol::FaerVec<T>> {
+    fn to_host_array(self) -> HostArray {
+        gradient_vecs_to_host_array(self)
     }
 }
 
@@ -243,6 +278,21 @@ impl HostArray {
                 self.ptr as *const T,
             ))
         }
+    }
+    pub fn as_matrix<M>(&self) -> Result<<M::V as DefaultDenseMatrix>::M, DiffsolRtError>
+    where
+        M: Matrix<T: Scalar>,
+        M::V: DefaultDenseMatrix,
+    {
+        let array = self.as_array::<M::T>()?;
+        let mut ret =
+            <M::V as DefaultDenseMatrix>::M::zeros(array.nrows(), array.ncols(), M::C::default());
+        for col in 0..array.ncols() {
+            for row in 0..array.nrows() {
+                ret.set_index(row, col, array[(row, col)]);
+            }
+        }
+        Ok(ret)
     }
     pub fn as_slice<T: Scalar>(&self) -> Result<&[T], DiffsolRtError> {
         self.expect_ndim(1)?;

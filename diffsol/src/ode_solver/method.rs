@@ -387,7 +387,7 @@ where
     fn solve_soln_with_checkpointing(
         mut self,
         soln: &mut Solution<Eqn::V>,
-        checkpointing: &mut CheckpointingPath<Eqn, Self::State, Self>,
+        checkpointing: &mut CheckpointingPath<Eqn, Self::State>,
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<Self, DiffsolError>
     where
@@ -551,7 +551,7 @@ where
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<
         (
-            CheckpointingPath<Eqn, Self::State, Self>,
+            CheckpointingPath<Eqn, Self::State>,
             <Eqn::V as DefaultDenseMatrix>::M,
             Vec<Eqn::T>,
             OdeSolverStopReason<Eqn::T>,
@@ -612,7 +612,7 @@ where
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<
         (
-            CheckpointingPath<Eqn, Self::State, Self>,
+            CheckpointingPath<Eqn, Self::State>,
             <Eqn::V as DefaultDenseMatrix>::M,
             OdeSolverStopReason<Eqn::T>,
         ),
@@ -640,25 +640,29 @@ where
     }
 }
 
-struct CheckpointingRecorder<Eqn, State, Method>
+struct CheckpointingRecorder<Eqn, State>
 where
     Eqn: OdeEquations,
     State: OdeSolverState<Eqn::V>,
 {
-    checkpointers: CheckpointingPath<Eqn, State, Method>,
+    checkpointers: CheckpointingPath<Eqn, State>,
     checkpoints: Vec<State>,
     ts: Vec<Eqn::T>,
     ys: Vec<Eqn::V>,
     ydots: Vec<Eqn::V>,
 }
 
-impl<'a, Eqn, Method> CheckpointingRecorder<Eqn, Method::State, Method>
+impl<Eqn, State> CheckpointingRecorder<Eqn, State>
 where
-    Eqn: OdeEquations + 'a,
+    Eqn: OdeEquations,
     Eqn::V: DefaultDenseMatrix,
-    Method: OdeSolverMethod<'a, Eqn>,
+    State: OdeSolverState<Eqn::V>,
 {
-    fn new(solver: &Method) -> Self {
+    fn new<'a, Method>(solver: &Method) -> Self
+    where
+        Eqn: 'a,
+        Method: OdeSolverMethod<'a, Eqn, State = State>,
+    {
         Self {
             checkpointers: Vec::new(),
             checkpoints: vec![solver.state_clone()],
@@ -668,35 +672,55 @@ where
         }
     }
 
-    fn into_checkpointers(self) -> CheckpointingPath<Eqn, Method::State, Method> {
+    fn into_checkpointers(self) -> CheckpointingPath<Eqn, State> {
         self.checkpointers
     }
 
-    fn record_sample(&mut self, solver: &Method) {
+    fn record_sample<'a, Method>(&mut self, solver: &Method)
+    where
+        Eqn: 'a,
+        Method: OdeSolverMethod<'a, Eqn, State = State>,
+    {
         self.ts.push(solver.state().t);
         self.ys.push(solver.state().y.clone());
         self.ydots.push(solver.state().dy.clone());
     }
 
-    fn reset_samples_from_current(&mut self, solver: &Method) {
+    fn reset_samples_from_current<'a, Method>(&mut self, solver: &Method)
+    where
+        Eqn: 'a,
+        Method: OdeSolverMethod<'a, Eqn, State = State>,
+    {
         self.ts.clear();
         self.ys.clear();
         self.ydots.clear();
         self.record_sample(solver);
     }
 
-    fn start_segment_from_current(&mut self, solver: &Method) {
+    fn start_segment_from_current<'a, Method>(&mut self, solver: &Method)
+    where
+        Eqn: 'a,
+        Method: OdeSolverMethod<'a, Eqn, State = State>,
+    {
         self.checkpoints.clear();
         self.checkpoints.push(solver.state_clone());
         self.reset_samples_from_current(solver);
     }
 
-    fn checkpoint_and_restart_samples(&mut self, solver: &mut Method) {
+    fn checkpoint_and_restart_samples<'a, Method>(&mut self, solver: &mut Method)
+    where
+        Eqn: 'a,
+        Method: OdeSolverMethod<'a, Eqn, State = State>,
+    {
         self.checkpoints.push(solver.checkpoint());
         self.reset_samples_from_current(solver);
     }
 
-    fn record_terminal_state(&mut self, solver: &Method) {
+    fn record_terminal_state<'a, Method>(&mut self, solver: &Method)
+    where
+        Eqn: 'a,
+        Method: OdeSolverMethod<'a, Eqn, State = State>,
+    {
         self.record_sample(solver);
         self.checkpoints.push(solver.state_clone());
     }
@@ -707,11 +731,10 @@ where
             self.ydots.split_off(0),
             self.ts.split_off(0),
         );
-        let mut checkpointer = Checkpointing::new(
-            None,
+        let mut checkpointer = Checkpointing::from_segment(
             self.checkpoints.len() - 2,
             self.checkpoints.split_off(0),
-            Some(last_segment),
+            last_segment,
         );
         if let Some(root_idx) = terminal_reset_root_idx {
             checkpointer.set_terminal_reset_root_idx(root_idx);
@@ -719,7 +742,11 @@ where
         self.checkpointers.push(checkpointer);
     }
 
-    fn finish_terminal_segment(&mut self, solver: &Method) {
+    fn finish_terminal_segment<'a, Method>(&mut self, solver: &Method)
+    where
+        Eqn: 'a,
+        Method: OdeSolverMethod<'a, Eqn, State = State>,
+    {
         self.record_terminal_state(solver);
         self.finish_segment(None);
     }
@@ -753,7 +780,7 @@ fn solve_dense<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     (
         OdeSolverStopReason<Eqn::T>,
         usize,
-        Option<CheckpointingPath<Eqn, S::State, S>>,
+        Option<CheckpointingPath<Eqn, S::State>>,
     ),
     DiffsolError,
 >
@@ -881,7 +908,7 @@ fn solve<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
 ) -> Result<
     (
         OdeSolverStopReason<Eqn::T>,
-        Option<CheckpointingPath<Eqn, S::State, S>>,
+        Option<CheckpointingPath<Eqn, S::State>>,
     ),
     DiffsolError,
 >

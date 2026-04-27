@@ -4,8 +4,9 @@ use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize, Serializ
 
 use crate::jit::JitBackendType;
 use crate::{
+    checkpointing_wrapper::CheckpointingWrapper,
     error::DiffsolRtError,
-    host_array::HostArray,
+    host_array::{FromHostArray, HostArray},
     initial_condition_options::{
         InitialConditionSolverOptions, InitialConditionSolverOptionsSnapshot,
     },
@@ -584,6 +585,68 @@ impl OdeWrapper {
         Ok(SolutionWrapper::new(solution))
     }
 
+    /// Solve a hybrid ODE to `final_time`, then solve the continuous-output
+    /// adjoint problem backwards to the start.
+    ///
+    /// Returns `(integral, gradient)`, where `integral` has length `nout` and
+    /// `gradient` has shape `nparams x nout`.
+    pub fn solve_hybrid_continuous_adjoint(
+        &self,
+        params: HostArray,
+        final_time: f64,
+    ) -> Result<(HostArray, HostArray), DiffsolRtError> {
+        let mut self_guard = self.guard()?;
+        let params = params.as_slice()?;
+        let linear_solver = self_guard.linear_solver;
+        let method = self_guard.ode_solver;
+        self_guard
+            .solve
+            .solve_hybrid_continuous_adjoint(method, linear_solver, params, final_time)
+    }
+
+    /// Solve a hybrid ODE at dense evaluation times while saving checkpoints for
+    /// a later discrete adjoint solve.
+    pub fn solve_hybrid_adjoint_fwd(
+        &self,
+        params: HostArray,
+        t_eval: HostArray,
+    ) -> Result<(SolutionWrapper, CheckpointingWrapper), DiffsolRtError> {
+        let mut self_guard = self.guard()?;
+        let params = params.as_slice()?;
+        let t_eval = t_eval.as_slice()?;
+        let linear_solver = self_guard.linear_solver;
+        let method = self_guard.ode_solver;
+        let (solution, checkpointing) =
+            self_guard
+                .solve
+                .solve_hybrid_adjoint_fwd(method, linear_solver, params, t_eval)?;
+        Ok((SolutionWrapper::new(solution), checkpointing))
+    }
+
+    /// Solve a discrete adjoint problem using a dense forward solution and
+    /// checkpointing object returned by `solve_hybrid_adjoint_fwd`.
+    ///
+    /// `dgdu_eval` must have shape `nout x n_eval`, where `n_eval` is the
+    /// number of time points in `solution`.
+    pub fn solve_hybrid_adjoint_bkwd(
+        &self,
+        solution: SolutionWrapper,
+        checkpointing: CheckpointingWrapper,
+        dgdu_eval: HostArray,
+    ) -> Result<HostArray, DiffsolRtError> {
+        let solution_t_eval = Vec::<f64>::from_host_array(solution.get_ts()?)?;
+        let mut self_guard = self.guard()?;
+        let linear_solver = self_guard.linear_solver;
+        let method = self_guard.ode_solver;
+        self_guard.solve.solve_hybrid_adjoint_bkwd(
+            method,
+            linear_solver,
+            solution_t_eval.as_slice(),
+            &checkpointing,
+            dgdu_eval,
+        )
+    }
+
     /// Using the provided state, solve the adjoint problem for the sum of squares
     /// objective given data at timepoints `t_eval`.
     /// Returns the objective value and a list of 1D arrays of adjoint sensitivities
@@ -1033,7 +1096,7 @@ mod jit_tests {
         vector_host, ASSERT_TOL, LOGISTIC_X0,
     };
     #[cfg(feature = "diffsl-llvm")]
-    use crate::test_support::{hybrid_logistic_state_dr, logistic_state_dr};
+    use crate::test_support::{hybrid_logistic_state_dr, logistic_state_dr, matrix_host};
     #[cfg(any(
         all(feature = "diffsl-llvm", not(feature = "diffsl-cranelift")),
         all(feature = "diffsl-cranelift", not(feature = "diffsl-llvm"))
@@ -1423,7 +1486,7 @@ mod jit_tests {
 
         assert_eq!(ys.nrows(), 1);
         assert_eq!(ys.ncols(), t_eval.len());
-        assert_eq!(ts, t_eval);
+        assert_eq!(ts, t_eval.to_vec());
         for (col, &t) in t_eval.iter().enumerate() {
             assert_close(
                 ys[(0, col)],
@@ -1680,6 +1743,73 @@ mod jit_tests {
         for ode_solver in all_ode_solvers() {
             assert_hybrid_forward_sensitivities_match_piecewise_logistic_diffsl_model(ode_solver);
         }
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn hybrid_adjoint_wrapper_paths_return_expected_shapes() {
+        let ode = OdeWrapper::new_jit(
+            hybrid_logistic_diffsl_code(),
+            JitBackendType::Llvm,
+            ScalarType::F64,
+            MatrixType::NalgebraDense,
+            LinearSolverType::Lu,
+            OdeSolverType::Bdf,
+        )
+        .unwrap();
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let (integral, continuous_gradient) = ode
+            .solve_hybrid_continuous_adjoint(vector_host(&[2.0]), 2.0)
+            .unwrap();
+        let integral = Vec::<f64>::from_host_array(integral).unwrap();
+        let continuous_gradient = Vec::<Vec<f64>>::from_host_array(continuous_gradient).unwrap();
+        assert_eq!(integral.len(), 1);
+        assert_eq!(continuous_gradient.len(), 1);
+        assert_eq!(continuous_gradient[0].len(), 1);
+        assert!(integral[0].is_finite());
+        assert!(continuous_gradient[0][0].is_finite());
+
+        let t_eval = [0.5, 1.0, 1.5, 2.0];
+        let (solution, checkpointing) = ode
+            .solve_hybrid_adjoint_fwd(vector_host(&[2.0]), vector_host(&t_eval))
+            .unwrap();
+        let ts = Vec::<f64>::from_host_array(solution.get_ts().unwrap()).unwrap();
+        let ys = Vec::<Vec<f64>>::from_host_array(solution.get_ys().unwrap()).unwrap();
+        assert_eq!(ts, t_eval);
+        assert_eq!(ys.len(), 1);
+        assert_eq!(ys[0].len(), t_eval.len());
+
+        let dgdu_eval = ys[0]
+            .iter()
+            .map(|value| 2.0 * (value - 0.05))
+            .collect::<Vec<_>>();
+        let discrete_gradient = ode
+            .solve_hybrid_adjoint_bkwd(
+                solution,
+                checkpointing.clone(),
+                matrix_host(1, t_eval.len(), &dgdu_eval),
+            )
+            .unwrap();
+        let discrete_gradient = Vec::<Vec<f64>>::from_host_array(discrete_gradient).unwrap();
+        assert_eq!(discrete_gradient.len(), 1);
+        assert_eq!(discrete_gradient[0].len(), 1);
+        assert!(discrete_gradient[0][0].is_finite());
+
+        let err = match ode.solve_hybrid_adjoint_bkwd(
+            ode.solve_hybrid_adjoint_fwd(vector_host(&[2.0]), vector_host(&t_eval))
+                .unwrap()
+                .0,
+            checkpointing,
+            matrix_host(1, t_eval.len() - 1, &dgdu_eval[..t_eval.len() - 1]),
+        ) {
+            Ok(_) => panic!("expected mismatched dgdu_eval columns to fail"),
+            Err(err) => err,
+        };
+        assert!(err
+            .to_string()
+            .contains("Number of solution timepoints does not match"));
     }
 
     #[cfg(feature = "diffsl-llvm")]

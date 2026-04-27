@@ -1,9 +1,8 @@
 use num_traits::FromPrimitive;
-use std::{cell::RefCell, marker::PhantomData};
+use std::cell::RefCell;
 
 use crate::{
-    error::DiffsolError, other_error, NoCheckpointingSolver, OdeEquations, OdeSolverMethod,
-    OdeSolverState, Scalar, Vector,
+    error::DiffsolError, other_error, OdeEquations, OdeSolverMethod, OdeSolverState, Scalar, Vector,
 };
 use num_traits::{abs, One};
 
@@ -185,7 +184,7 @@ where
 /// segment. If not, it re-solves the ODE between the appropriate checkpoints to create
 /// a new segment, then interpolates within that segment.
 ///
-pub struct Checkpointing<Eqn, State, Method = NoCheckpointingSolver<Eqn, State>>
+pub struct Checkpointing<Eqn, State>
 where
     Eqn: OdeEquations,
     State: OdeSolverState<Eqn::V>,
@@ -194,13 +193,11 @@ where
     segment: RefCell<HermiteInterpolator<Eqn::V>>,
     previous_segment: RefCell<Option<HermiteInterpolator<Eqn::V>>>,
     terminal_reset_root_idx: Option<usize>,
-    phantom: PhantomData<Method>,
 }
 
-pub type CheckpointingPath<Eqn, State, Method = NoCheckpointingSolver<Eqn, State>> =
-    Vec<Checkpointing<Eqn, State, Method>>;
+pub type CheckpointingPath<Eqn, State> = Vec<Checkpointing<Eqn, State>>;
 
-impl<Eqn, State, Method> Clone for Checkpointing<Eqn, State, Method>
+impl<Eqn, State> Clone for Checkpointing<Eqn, State>
 where
     Eqn: OdeEquations,
     State: OdeSolverState<Eqn::V>,
@@ -211,16 +208,50 @@ where
             segment: RefCell::new(self.segment.borrow().clone()),
             previous_segment: RefCell::new(self.previous_segment.borrow().clone()),
             terminal_reset_root_idx: self.terminal_reset_root_idx,
-            phantom: PhantomData,
         }
     }
 }
 
-impl<Eqn, State, Method> Checkpointing<Eqn, State, Method>
+impl<Eqn, State> Checkpointing<Eqn, State>
 where
     Eqn: OdeEquations,
     State: OdeSolverState<Eqn::V>,
 {
+    fn validate_new_args(start_idx: usize, checkpoints_len: usize) {
+        if checkpoints_len < 2 {
+            panic!("Checkpoints must have at least 2 elements");
+        }
+        if start_idx >= checkpoints_len - 1 {
+            panic!("start_idx must be less than checkpoints.len() - 1");
+        }
+    }
+
+    /// Create a new checkpointing system from a pre-computed interpolation segment.
+    ///
+    /// # Arguments
+    /// - `start_idx`: Index of the checkpoint represented by `segment`.
+    /// - `checkpoints`: Vector of saved solution states (must have at least 2 elements).
+    /// - `segment`: Pre-computed Hermite interpolator for the interval from
+    ///   `checkpoints[start_idx]` to `checkpoints[start_idx + 1]`.
+    ///
+    /// # Panics
+    /// Panics if `checkpoints.len() < 2` or if `start_idx >= checkpoints.len() - 1`.
+    pub fn from_segment(
+        start_idx: usize,
+        checkpoints: Vec<State>,
+        segment: HermiteInterpolator<Eqn::V>,
+    ) -> Self {
+        Self::validate_new_args(start_idx, checkpoints.len());
+        let segment = RefCell::new(segment);
+        let previous_segment = RefCell::new(None);
+        Checkpointing {
+            checkpoints,
+            segment,
+            previous_segment,
+            terminal_reset_root_idx: None,
+        }
+    }
+
     /// Create a new checkpointing system.
     ///
     /// # Arguments
@@ -234,7 +265,7 @@ where
     /// # Panics
     /// Panics if `checkpoints.len() < 2` or if `start_idx >= checkpoints.len() - 1`.
     ///
-    pub fn new<'a>(
+    pub fn new<'a, Method>(
         solver: Option<&mut Method>,
         start_idx: usize,
         checkpoints: Vec<State>,
@@ -244,12 +275,7 @@ where
         Eqn: 'a,
         Method: OdeSolverMethod<'a, Eqn, State = State>,
     {
-        if checkpoints.len() < 2 {
-            panic!("Checkpoints must have at least 2 elements");
-        }
-        if start_idx >= checkpoints.len() - 1 {
-            panic!("start_idx must be less than checkpoints.len() - 1");
-        }
+        Self::validate_new_args(start_idx, checkpoints.len());
         let segment = segment.unwrap_or_else(|| {
             let solver =
                 solver.expect("solver is required when no initial checkpoint segment is provided");
@@ -266,7 +292,6 @@ where
             segment,
             previous_segment,
             terminal_reset_root_idx: None,
-            phantom: PhantomData,
         }
     }
 
@@ -345,7 +370,7 @@ where
     /// # Notes
     /// Small deviations from the checkpoint range (within roundoff error) are automatically
     /// snapped to the nearest checkpoint boundary.
-    pub fn interpolate<'a>(
+    pub fn interpolate<'a, Method>(
         &self,
         solver: Option<&mut Method>,
         t: Eqn::T,
@@ -420,7 +445,7 @@ where
 mod tests {
 
     use crate::{
-        matrix::dense_nalgebra_serial::NalgebraMat,
+        error::DiffsolError, matrix::dense_nalgebra_serial::NalgebraMat,
         ode_equations::test_models::robertson::robertson, NalgebraLU, OdeEquations,
         OdeSolverMethod, Vector,
     };
@@ -455,15 +480,19 @@ mod tests {
         }
         checkpoints.push(solver.checkpoint());
         let segment = HermiteInterpolator::new(ys, ydots, ts);
-        let checkpointer =
-            Checkpointing::new(None, checkpoints.len() - 2, checkpoints, Some(segment));
+        let checkpointer = Checkpointing::new(
+            Some(&mut solver),
+            checkpoints.len() - 2,
+            checkpoints,
+            Some(segment),
+        );
         let mut y = soln.solution_points.last().unwrap().state.clone();
         checkpointer
-            .interpolate(None, checkpointer.last_t(), &mut y)
+            .interpolate(Some(&mut solver), checkpointer.last_t(), &mut y)
             .unwrap();
-        let err = checkpointer
-            .interpolate(None, soln.solution_points[0].t, &mut y)
-            .unwrap_err();
+        let err =
+            interpolate_without_solver(&solver, &checkpointer, soln.solution_points[0].t, &mut y)
+                .unwrap_err();
         assert!(err
             .to_string()
             .contains("solver is required to rebuild checkpoint interpolation segments"));
@@ -472,6 +501,19 @@ mod tests {
                 .interpolate(Some(&mut solver), point.t, &mut y)
                 .unwrap();
             y.assert_eq_norm(&point.state, &problem.atol, problem.rtol, 10.0);
+        }
+
+        fn interpolate_without_solver<'a, Eqn, Method>(
+            _method: &Method,
+            checkpointer: &Checkpointing<Eqn, Method::State>,
+            t: Eqn::T,
+            y: &mut Eqn::V,
+        ) -> Result<(), DiffsolError>
+        where
+            Eqn: OdeEquations + 'a,
+            Method: OdeSolverMethod<'a, Eqn>,
+        {
+            checkpointer.interpolate::<Method>(None, t, y)
         }
     }
 
@@ -485,7 +527,7 @@ mod tests {
             Eqn: OdeEquations + 'a,
             Method: OdeSolverMethod<'a, Eqn>,
         {
-            let _ = Checkpointing::<Eqn, Method::State, Method>::new(None, 0, checkpoints, None);
+            let _ = Checkpointing::<Eqn, Method::State>::new::<Method>(None, 0, checkpoints, None);
         }
 
         type M = NalgebraMat<f64>;

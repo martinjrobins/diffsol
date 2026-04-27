@@ -329,7 +329,6 @@ pub use ode_solver::{
     method::AugmentedOdeSolverMethod,
     method::OdeSolverMethod,
     method::OdeSolverStopReason,
-    no_checkpointing_solver::NoCheckpointingSolver,
     problem::{InitialConditionSolverOptions, OdeSolverOptions, OdeSolverProblem},
     sdirk::Sdirk,
     sdirk_state::RkState,

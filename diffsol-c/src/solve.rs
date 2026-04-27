@@ -4,6 +4,7 @@
 #[cfg(feature = "diffsl-external-dynamic")]
 use std::path::PathBuf;
 
+use crate::checkpointing_wrapper::CheckpointingWrapper;
 use crate::error::DiffsolRtError;
 use crate::host_array::HostArray;
 use crate::host_array::ToHostArray;
@@ -126,6 +127,31 @@ pub(crate) trait Solve {
         params: &[f64],
         t_eval: &[f64],
     ) -> SolveResult;
+
+    fn solve_hybrid_continuous_adjoint(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        params: &[f64],
+        final_time: f64,
+    ) -> Result<(HostArray, HostArray), DiffsolRtError>;
+
+    fn solve_hybrid_adjoint_fwd(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        params: &[f64],
+        t_eval: &[f64],
+    ) -> Result<(Box<dyn Solution>, CheckpointingWrapper), DiffsolRtError>;
+
+    fn solve_hybrid_adjoint_bkwd(
+        &mut self,
+        backwards_method: OdeSolverType,
+        backwards_linear_solver: LinearSolverType,
+        solution_t_eval: &[f64],
+        checkpointing: &CheckpointingWrapper,
+        dgdu_eval: HostArray,
+    ) -> Result<HostArray, DiffsolRtError>;
 
     fn solve_fwd_sens(
         &mut self,
@@ -571,10 +597,12 @@ where
         + DefaultSolver
         + LuValidator<M>
         + KluValidator<M>
-        + MatrixKind,
-    CG: CodegenModule,
+        + MatrixKind
+        + 'static,
+    CG: CodegenModule + 'static,
     for<'b> <<M::V as DefaultDenseMatrix>::M as MatrixCommon>::Inner: ToHostArray<M::T> + Clone,
     for<'b> <M::V as VectorCommon>::Inner: ToHostArray<M::T> + Clone,
+    Vec<M::V>: ToHostArray<M::T>,
     M::V: VectorHost + DefaultDenseMatrix + Send + Sync + 'static,
     <M::V as DefaultDenseMatrix>::M: Send + Sync,
     for<'b> &'b M::V: VectorRef<M::V>,
@@ -915,6 +943,90 @@ where
         Ok(Box::new(soln?))
     }
 
+    fn solve_hybrid_continuous_adjoint(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        params: &[f64],
+        final_time: f64,
+    ) -> Result<(HostArray, HostArray), DiffsolRtError> {
+        self.check(linear_solver)?;
+        self.setup_problem(params)?;
+        let previous_integrate_out = self.problem.integrate_out;
+        self.problem.integrate_out = true;
+        let final_time = M::T::from_f64(final_time).unwrap();
+
+        let result = (|| {
+            let (integral, gradients) = match linear_solver {
+                LinearSolverType::Default => method
+                    .solve_hybrid_continuous_adjoint::<M, CG, <M as DefaultSolver>::LS>(
+                        &mut self.problem,
+                        final_time,
+                        method,
+                        linear_solver,
+                    ),
+                LinearSolverType::Lu => method
+                    .solve_hybrid_continuous_adjoint::<M, CG, <M as LuValidator<M>>::LS>(
+                        &mut self.problem,
+                        final_time,
+                        method,
+                        linear_solver,
+                    ),
+                LinearSolverType::Klu => method
+                    .solve_hybrid_continuous_adjoint::<M, CG, <M as KluValidator<M>>::LS>(
+                        &mut self.problem,
+                        final_time,
+                        method,
+                        linear_solver,
+                    ),
+            }?;
+            Ok((
+                (*integral.inner()).clone().to_host_array(),
+                gradients.to_host_array(),
+            ))
+        })();
+
+        self.problem.integrate_out = previous_integrate_out;
+        result
+    }
+
+    fn solve_hybrid_adjoint_fwd(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        params: &[f64],
+        t_eval: &[f64],
+    ) -> Result<(Box<dyn Solution>, CheckpointingWrapper), DiffsolRtError> {
+        self.check(linear_solver)?;
+        self.setup_problem(params)?;
+        let t_eval: Vec<M::T> = t_eval.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
+
+        let (solution, checkpointing) = match linear_solver {
+            LinearSolverType::Default => method
+                .solve_hybrid_adjoint_fwd::<M, CG, <M as DefaultSolver>::LS>(
+                    &mut self.problem,
+                    params,
+                    &t_eval,
+                    linear_solver,
+                ),
+            LinearSolverType::Lu => method
+                .solve_hybrid_adjoint_fwd::<M, CG, <M as LuValidator<M>>::LS>(
+                    &mut self.problem,
+                    params,
+                    &t_eval,
+                    linear_solver,
+                ),
+            LinearSolverType::Klu => method
+                .solve_hybrid_adjoint_fwd::<M, CG, <M as KluValidator<M>>::LS>(
+                    &mut self.problem,
+                    params,
+                    &t_eval,
+                    linear_solver,
+                ),
+        }?;
+        Ok((Box::new(solution), checkpointing))
+    }
+
     fn solve_hybrid_fwd_sens(
         &mut self,
         method: OdeSolverType,
@@ -944,6 +1056,71 @@ where
                 ),
         };
         Ok(Box::new(soln?))
+    }
+
+    fn solve_hybrid_adjoint_bkwd(
+        &mut self,
+        backwards_method: OdeSolverType,
+        backwards_linear_solver: LinearSolverType,
+        solution_t_eval: &[f64],
+        checkpointing: &CheckpointingWrapper,
+        dgdu_eval: HostArray,
+    ) -> Result<HostArray, DiffsolRtError> {
+        self.check(backwards_linear_solver)?;
+        OdeSolverType::check_sens_available()?;
+        let solution_t_eval: Vec<M::T> = solution_t_eval
+            .iter()
+            .map(|&x| M::T::from_f64(x).unwrap())
+            .collect();
+        let dgdu_eval = dgdu_eval.as_matrix::<M>()?;
+        if dgdu_eval.nrows() != self.problem.eqn.nout() {
+            return Err(DiffsolRtError::from(DiffsolError::Other(
+                "Number of outputs does not match number of rows in gradient".to_string(),
+            )));
+        }
+        if dgdu_eval.ncols() != solution_t_eval.len() {
+            return Err(DiffsolRtError::from(DiffsolError::Other(
+                "Number of solution timepoints does not match number of columns in gradient"
+                    .to_string(),
+            )));
+        }
+
+        let (forward_method, forward_linear_solver) = checkpointing.forward_settings()?;
+        let params = checkpointing.params()?;
+        self.setup_problem(&params)?;
+        let gradients = match forward_linear_solver {
+            LinearSolverType::Default => forward_method
+                .solve_hybrid_adjoint_bkwd::<M, CG, <M as DefaultSolver>::LS>(
+                    &mut self.problem,
+                    checkpointing,
+                    solution_t_eval.as_slice(),
+                    &dgdu_eval,
+                    backwards_method,
+                    backwards_linear_solver,
+                    forward_linear_solver,
+                ),
+            LinearSolverType::Lu => forward_method
+                .solve_hybrid_adjoint_bkwd::<M, CG, <M as LuValidator<M>>::LS>(
+                    &mut self.problem,
+                    checkpointing,
+                    solution_t_eval.as_slice(),
+                    &dgdu_eval,
+                    backwards_method,
+                    backwards_linear_solver,
+                    forward_linear_solver,
+                ),
+            LinearSolverType::Klu => forward_method
+                .solve_hybrid_adjoint_bkwd::<M, CG, <M as KluValidator<M>>::LS>(
+                    &mut self.problem,
+                    checkpointing,
+                    solution_t_eval.as_slice(),
+                    &dgdu_eval,
+                    backwards_method,
+                    backwards_linear_solver,
+                    forward_linear_solver,
+                ),
+        }?;
+        Ok(gradients.to_host_array())
     }
 
     fn solve_sum_squares_adj(
@@ -1286,6 +1463,104 @@ mod tests {
                 &format!("solve_hybrid_fwd_sens[{i}]"),
             );
         }
+
+        let mut solve = GenericSolve {
+            problem: OdeBuilder::<diffsol::NalgebraMat<f64>>::new()
+                .build_from_diffsl::<diffsol::LlvmModule>(hybrid_logistic_diffsl_code())
+                .unwrap(),
+        };
+        let (integral, gradient) = solve
+            .solve_hybrid_continuous_adjoint(OdeSolverType::Bdf, LinearSolverType::Lu, &[2.0], 2.0)
+            .unwrap();
+        let integral = Vec::<f64>::from_host_array(integral).unwrap();
+        let gradient = Vec::<Vec<f64>>::from_host_array(gradient).unwrap();
+        assert_eq!(integral.len(), 1);
+        assert_eq!(gradient.len(), 1);
+        assert_eq!(gradient[0].len(), 1);
+        assert!(integral[0].is_finite());
+        assert!(gradient[0][0].is_finite());
+
+        let dense_t_eval = [0.5, 1.0, 1.5, 2.0];
+        let mut checkpointed_solve = GenericSolve {
+            problem: OdeBuilder::<diffsol::NalgebraMat<f64>>::new()
+                .build_from_diffsl::<diffsol::LlvmModule>(hybrid_logistic_diffsl_code())
+                .unwrap(),
+        };
+        let (checkpointed_solution, checkpointing) = checkpointed_solve
+            .solve_hybrid_adjoint_fwd(
+                OdeSolverType::Bdf,
+                LinearSolverType::Lu,
+                &[2.0],
+                &dense_t_eval,
+            )
+            .unwrap();
+        let checkpointed_ts = Vec::<f64>::from_host_array(checkpointed_solution.get_ts()).unwrap();
+        let checkpointed_ys =
+            Vec::<Vec<f64>>::from_host_array(checkpointed_solution.get_ys()).unwrap();
+
+        let mut dense_solve = GenericSolve {
+            problem: OdeBuilder::<diffsol::NalgebraMat<f64>>::new()
+                .build_from_diffsl::<diffsol::LlvmModule>(hybrid_logistic_diffsl_code())
+                .unwrap(),
+        };
+        let dense_solution = dense_solve
+            .solve_hybrid_dense(
+                OdeSolverType::Bdf,
+                LinearSolverType::Lu,
+                &[2.0],
+                &dense_t_eval,
+            )
+            .unwrap();
+        let dense_ts = Vec::<f64>::from_host_array(dense_solution.get_ts()).unwrap();
+        let dense_ys = Vec::<Vec<f64>>::from_host_array(dense_solution.get_ys()).unwrap();
+        assert_eq!(checkpointed_ts, dense_ts);
+        assert_eq!(checkpointed_ys.len(), dense_ys.len());
+        for row in 0..dense_ys.len() {
+            for col in 0..dense_ys[row].len() {
+                assert_close(
+                    checkpointed_ys[row][col],
+                    dense_ys[row][col],
+                    1e-10,
+                    &format!("checkpointed_dense[{row},{col}]"),
+                );
+            }
+        }
+
+        let dgdu_eval = checkpointed_ys[0]
+            .iter()
+            .map(|value| 2.0 * (value - 0.05))
+            .collect::<Vec<_>>();
+        let gradient = checkpointed_solve
+            .solve_hybrid_adjoint_bkwd(
+                OdeSolverType::Bdf,
+                LinearSolverType::Lu,
+                checkpointed_ts.as_slice(),
+                &checkpointing,
+                matrix_host(1, dense_t_eval.len(), &dgdu_eval),
+            )
+            .unwrap();
+        let gradient = Vec::<Vec<f64>>::from_host_array(gradient).unwrap();
+        assert_eq!(gradient.len(), 1);
+        assert_eq!(gradient[0].len(), 1);
+        assert!(gradient[0][0].is_finite());
+
+        let err = match checkpointed_solve.solve_hybrid_adjoint_bkwd(
+            OdeSolverType::Bdf,
+            LinearSolverType::Lu,
+            checkpointed_ts.as_slice(),
+            &checkpointing,
+            matrix_host(
+                1,
+                dense_t_eval.len() - 1,
+                &dgdu_eval[..dense_t_eval.len() - 1],
+            ),
+        ) {
+            Ok(_) => panic!("expected mismatched dgdu_eval columns to fail"),
+            Err(err) => err,
+        };
+        assert!(err
+            .to_string()
+            .contains("Number of solution timepoints does not match"));
 
         let adjoint_t_eval = [0.0, 0.25, 0.5, 1.0];
         let adjoint_data: Vec<f64> = adjoint_t_eval
