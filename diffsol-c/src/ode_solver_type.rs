@@ -145,6 +145,7 @@ where
     Ok(soln)
 }
 
+#[allow(clippy::type_complexity)]
 fn solve_with_checkpointing_with_tag<M, CG, LS, Tag>(
     problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
     mut soln: Solution<M::V>,
@@ -191,6 +192,7 @@ where
     Ok(soln.ys.column(soln.ts.len() - 1).into_owned())
 }
 
+#[allow(clippy::type_complexity)]
 fn solve_adjoint_fwd_with_tag<M, CG, LS, Tag>(
     problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
     t_eval: &[M::T],
@@ -510,6 +512,7 @@ impl OdeSolverType {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     pub(crate) fn solve_adjoint_fwd<M, CG, LS>(
         &self,
         problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
@@ -1023,7 +1026,7 @@ mod tests {
         let dgdu = <<M as MatrixCommon>::V as DefaultDenseMatrix>::M::zeros(
             problem.eqn.nout(),
             soln.ts.len(),
-            problem.context().clone(),
+            problem.context().to_owned(),
         );
         let gradient = OdeSolverType::TrBdf2
             .solve_adjoint_bkwd::<M, diffsol::LlvmModule, <M as LuValidator<M>>::LS>(
@@ -1085,7 +1088,7 @@ mod tests {
             let dgdu = <<M as MatrixCommon>::V as DefaultDenseMatrix>::M::zeros(
                 problem.eqn.nout(),
                 soln.ts.len(),
-                problem.context().clone(),
+                problem.context().to_owned(),
             );
             let gradient = backwards_method
                 .solve_adjoint_bkwd::<M, diffsol::LlvmModule, <M as crate::valid_linear_solver::KluValidator<M>>::LS>(
@@ -1112,7 +1115,7 @@ mod tests {
         let dgdu = <<M as MatrixCommon>::V as DefaultDenseMatrix>::M::zeros(
             problem.eqn.nout(),
             soln.ts.len(),
-            problem.context().clone(),
+            problem.context().to_owned(),
         );
         let gradient = OdeSolverType::Bdf
             .solve_adjoint_bkwd::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
@@ -1146,7 +1149,7 @@ mod tests {
             let dgdu = <<M as MatrixCommon>::V as DefaultDenseMatrix>::M::zeros(
                 problem.eqn.nout(),
                 soln.ts.len(),
-                problem.context().clone(),
+                problem.context().to_owned(),
             );
             let gradient = OdeSolverType::Bdf
                 .solve_adjoint_bkwd::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(

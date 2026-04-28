@@ -10,7 +10,7 @@ use crate::{
     ode_solver_tag::OdeSolverMethodTag, ode_solver_type::OdeSolverType, scalar_type::Scalar,
 };
 
-pub(crate) trait AdjointCheckpoint: Any {
+pub(crate) trait AdjointCheckpoint: Any + Send {
     fn as_any(&self) -> &dyn Any;
     fn method(&self) -> OdeSolverType;
     fn linear_solver(&self) -> LinearSolverType;
@@ -33,7 +33,6 @@ impl dyn AdjointCheckpoint + '_ {
                 DiffsolError::Other(
                     "Adjoint checkpoint is incompatible with this ODE solver".to_string(),
                 )
-                .into()
             })
     }
 }

@@ -169,6 +169,7 @@ pub trait Vector:
     + for<'a, 'b> VectorMutOpsByValue<&'b Self::View<'a>>
     + MulAssign<Scale<Self::T>>
     + Clone
+    + Send
 {
     type View<'a>: VectorView<'a, T = Self::T, Owned = Self>
     where

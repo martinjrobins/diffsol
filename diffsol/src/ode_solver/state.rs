@@ -456,7 +456,7 @@ impl<V: Vector> StateRefMut<'_, V> {
 /// - the sensitivity vectors `s`
 /// - the derivative of the sensitivity vectors wrt time `ds`
 ///
-pub trait OdeSolverState<V: Vector>: Clone + Sized {
+pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
     /// Get an immutable reference to the state.
     fn as_ref(&self) -> StateRef<'_, V>;
     /// Get a mutable reference to the state.
