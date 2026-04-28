@@ -281,11 +281,11 @@ where
         self.terminal_reset_root_idx
     }
 
-    pub(crate) fn first_checkpoint(&self) -> &State {
+    pub fn first_checkpoint(&self) -> &State {
         &self.checkpoints[0]
     }
 
-    pub(crate) fn last_checkpoint(&self) -> &State {
+    pub fn last_checkpoint(&self) -> &State {
         &self.checkpoints[self.checkpoints.len() - 1]
     }
 

@@ -1676,14 +1676,8 @@ mod tests {
                 &final_forward_state,
             )
             .unwrap();
-        let mut adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();
-        adjoint = adjoint
-            .solve_soln_adjoint_backwards_pass(&forward_soln, &[])
-            .unwrap();
-        adjoint = adjoint
-            .solve_soln_adjoint_backwards_pass(&forward_soln, &[])
-            .unwrap();
-        let adjoint_state = adjoint.into_state();
+        let adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();
+        let adjoint_state = adjoint.solve_adjoint_backwards_pass(&[], &[]).unwrap();
 
         let t0 = problem.t0;
         let ctx = problem.context().clone();
@@ -1807,7 +1801,6 @@ mod tests {
         let adjoint_solver = use_replay_solver.then_some(terminal_forward_solver.clone());
         let mut adjoint_eqn =
             problem.adjoint_equations(checkpointers, adjoint_solver, Some(dgdu_eval_refs.len()));
-        let checkpointing_len = adjoint_eqn.checkpointing_len();
         let mut adjoint_state = build_adjoint_state(&mut adjoint_eqn).unwrap();
         adjoint_state
             .as_mut()
@@ -1817,13 +1810,10 @@ mod tests {
                 &final_forward_state,
             )
             .unwrap();
-        let mut adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();
-        for _ in 0..checkpointing_len {
-            adjoint = adjoint
-                .solve_soln_adjoint_backwards_pass(&forward_soln, dgdu_eval_refs.as_slice())
-                .unwrap();
-        }
-        let adjoint_state = adjoint.into_state();
+        let adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();
+        let adjoint_state = adjoint
+            .solve_adjoint_backwards_pass(times, dgdu_eval_refs.as_slice())
+            .unwrap();
 
         let t0 = problem.t0;
         let ctx = problem.context().clone();

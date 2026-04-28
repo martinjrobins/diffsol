@@ -226,52 +226,44 @@ where
     let (soln, checkpointing, final_state) =
         solve_with_checkpointing_with_tag::<M, CG, LS, Tag>(problem, soln)?;
     let integral = final_state.as_ref().g.clone();
-    let solver = Tag::solver_with_state::<LS>(problem, final_state)?;
     let sg = match method {
-        OdeSolverType::Bdf => solve_hybrid_adjoint_backward_segments_with_tag::<
-            M,
-            CG,
-            LS,
-            Tag::OdeSolverMethod<'_, LS>,
-            BdfTag,
-        >(
+        OdeSolverType::Bdf => solve_adjoint_bkwds_with_fwd_bkwd_tag::<M, CG, LS, LS, Tag, BdfTag>(
             problem,
             &soln,
-            checkpointing.clone(),
-            solver.clone(),
+            checkpointing,
             &[],
             None,
         ),
-        OdeSolverType::Esdirk34 => solve_hybrid_adjoint_backward_segments_with_tag::<
+        OdeSolverType::Esdirk34 => solve_adjoint_bkwds_with_fwd_bkwd_tag::<
             M,
             CG,
             LS,
-            Tag::OdeSolverMethod<'_, LS>,
+            LS,
+            Tag,
             Esdirk34Tag,
-        >(
-            problem,
-            &soln,
-            checkpointing.clone(),
-            solver.clone(),
-            &[],
-            None,
-        ),
-        OdeSolverType::TrBdf2 => solve_hybrid_adjoint_backward_segments_with_tag::<
+        >(problem, &soln, checkpointing, &[], None),
+        OdeSolverType::TrBdf2 => solve_adjoint_bkwds_with_fwd_bkwd_tag::<
             M,
             CG,
             LS,
-            Tag::OdeSolverMethod<'_, LS>,
+            LS,
+            Tag,
             TrBdf2Tag,
-        >(problem, &soln, checkpointing, solver, &[], None),
-        OdeSolverType::Tsit45 => Err(DiffsolError::Other(
-            "Tsit45 solver does not support adjoint sensitivity analysis.".to_string(),
-        )),
+        >(problem, &soln, checkpointing, &[], None),
+        OdeSolverType::Tsit45 => solve_adjoint_bkwds_with_fwd_bkwd_tag::<
+            M,
+            CG,
+            LS,
+            LS,
+            Tag,
+            Tsit45Tag,
+        >(problem, &soln, checkpointing, &[], None),
     }?;
     let gradient = vectors_to_columns::<M>(sg, problem.eqn.nparams(), integral.len());
     Ok((integral, gradient))
 }
 
-fn solve_split_adjoint_gradient_with_tag<M, CG, FwdLS, BwdLS, Tag>(
+fn solve_adjoint_bkwds_with_fwd_tag<M, CG, FwdLS, BwdLS, Tag>(
     problem: &OdeSolverProblem<DiffSl<M, CG>>,
     checkpoint: &AdjointCheckpointData<M, CG, Tag>,
     backwards_method: OdeSolverType,
@@ -290,51 +282,43 @@ where
     for<'b> &'b M::V: VectorRef<M::V>,
     for<'b> &'b M: MatrixRef<M>,
 {
-    let solver = Tag::solver::<FwdLS>(problem)?;
     let checkpointing = checkpoint.checkpointing.clone();
     let soln = Solution::new_dense(t_eval.to_vec())?;
     let dgdu_eval = [dgdu_eval];
     let mut sg = match backwards_method {
-        OdeSolverType::Bdf => solve_hybrid_adjoint_backward_segments_with_tag::<
+        OdeSolverType::Bdf => solve_adjoint_bkwds_with_fwd_bkwd_tag::<
             M,
             CG,
+            FwdLS,
             BwdLS,
-            Tag::OdeSolverMethod<'_, FwdLS>,
+            Tag,
             BdfTag,
-        >(
-            problem,
-            &soln,
-            checkpointing.clone(),
-            solver.clone(),
-            &dgdu_eval,
-            Some(1),
-        ),
-        OdeSolverType::Esdirk34 => solve_hybrid_adjoint_backward_segments_with_tag::<
+        >(problem, &soln, checkpointing.clone(), &dgdu_eval, Some(1)),
+        OdeSolverType::Esdirk34 => {
+            solve_adjoint_bkwds_with_fwd_bkwd_tag::<M, CG, FwdLS, BwdLS, Tag, Esdirk34Tag>(
+                problem,
+                &soln,
+                checkpointing.clone(),
+                &dgdu_eval,
+                Some(1),
+            )
+        }
+        OdeSolverType::TrBdf2 => solve_adjoint_bkwds_with_fwd_bkwd_tag::<
             M,
             CG,
+            FwdLS,
             BwdLS,
-            Tag::OdeSolverMethod<'_, FwdLS>,
-            Esdirk34Tag,
-        >(
-            problem,
-            &soln,
-            checkpointing.clone(),
-            solver.clone(),
-            &dgdu_eval,
-            Some(1),
-        ),
-        OdeSolverType::TrBdf2 => {
-            solve_hybrid_adjoint_backward_segments_with_tag::<
-                M,
-                CG,
-                BwdLS,
-                Tag::OdeSolverMethod<'_, FwdLS>,
-                TrBdf2Tag,
-            >(problem, &soln, checkpointing, solver, &dgdu_eval, Some(1))
-        }
-        OdeSolverType::Tsit45 => Err(DiffsolError::Other(
-            "Tsit45 solver does not support adjoint sensitivity analysis.".to_string(),
-        )),
+            Tag,
+            TrBdf2Tag,
+        >(problem, &soln, checkpointing, &dgdu_eval, Some(1)),
+        OdeSolverType::Tsit45 => solve_adjoint_bkwds_with_fwd_bkwd_tag::<
+            M,
+            CG,
+            FwdLS,
+            BwdLS,
+            Tag,
+            Tsit45Tag,
+        >(problem, &soln, checkpointing, &dgdu_eval, Some(1)),
     }?;
     let gradient = sg
         .pop()
@@ -374,21 +358,21 @@ where
     ret
 }
 
-fn solve_hybrid_adjoint_backward_segments_with_tag<'solver, M, CG, LS, S, Tag>(
+fn solve_adjoint_bkwds_with_fwd_bkwd_tag<'solver, M, CG, FwdLS, BwdLS, FwdTag, BwdTag>(
     problem: &'solver OdeSolverProblem<DiffSl<M, CG>>,
     soln: &Solution<M::V>,
-    checkpointing: CheckpointingPath<DiffSl<M, CG>, S::State>,
-    solver: S,
+    mut checkpointing: CheckpointingPath<DiffSl<M, CG>, FwdTag::State>,
     dgdu_eval: &[&<M::V as DefaultDenseMatrix>::M],
     nout_override: Option<usize>,
 ) -> Result<Vec<M::V>, DiffsolError>
 where
-    M: Matrix<T: Scalar> + DefaultSolver,
-    CG: CodegenModule,
+    M: Matrix<T: Scalar> + DefaultSolver + 'solver,
+    CG: CodegenModule + 'solver,
     M::V: VectorHost + DefaultDenseMatrix,
-    S: OdeSolverMethod<'solver, DiffSl<M, CG>>,
-    LS: LinearSolver<M>,
-    Tag: OdeSolverMethodTag<M, CG>,
+    FwdLS: LinearSolver<M>,
+    BwdLS: LinearSolver<M>,
+    FwdTag: OdeSolverMethodTag<M, CG>,
+    BwdTag: OdeSolverMethodTag<M, CG>,
     DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>
         + diffsol::OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
     for<'b> &'b M::V: VectorRef<M::V>,
@@ -402,32 +386,51 @@ where
         ));
     }
 
-    let mut state = None;
-    for _ in 0..checkpointing_len {
-        let adjoint = if let Some(state) = state.take() {
+    let t_eval = if dgdu_eval.is_empty() {
+        &[]
+    } else {
+        soln.ts.as_slice()
+    };
+    let fwd_solver = FwdTag::solver::<FwdLS>(problem)?;
+    let mut state: Option<BwdTag::State> = None;
+    let mut pending_reset: Option<(usize, FwdTag::State, FwdTag::State)> = None;
+    while let Some(current_checkpointing) = checkpointing.pop() {
+        let next_reset = checkpointing.last().and_then(|previous_checkpointing| {
+            previous_checkpointing
+                .terminal_reset_root_idx()
+                .map(|root_idx| {
+                    (
+                        root_idx,
+                        previous_checkpointing.last_checkpoint().clone(),
+                        current_checkpointing.first_checkpoint().clone(),
+                    )
+                })
+        });
+        let current_checkpointing = vec![current_checkpointing];
+        let mut adjoint = if let Some(state) = state.take() {
             let adjoint_eqn = problem.adjoint_equations(
-                checkpointing.clone(),
-                Some(solver.clone()),
+                current_checkpointing,
+                Some(fwd_solver.clone()),
                 nout_override,
             );
-            Tag::solver_adjoint_from_state::<LS, _>(problem, state, adjoint_eqn)?
+            BwdTag::solver_adjoint_from_state::<BwdLS, _>(problem, state, adjoint_eqn)?
         } else {
-            Tag::solver_adjoint::<LS, _>(
+            BwdTag::solver_adjoint::<BwdLS, _>(
                 problem,
-                checkpointing.clone(),
-                Some(solver.clone()),
+                current_checkpointing,
+                Some(fwd_solver.clone()),
                 nout_override,
             )?
         };
-        state = Some(
-            adjoint
-                .solve_soln_adjoint_backwards_pass(soln, dgdu_eval)?
-                .into_state(),
-        );
+        if let Some((root_idx, fwd_state_minus, fwd_state_plus)) = pending_reset.take() {
+            adjoint.apply_reset_with_adjoint(root_idx, &fwd_state_minus, &fwd_state_plus)?;
+        }
+        state = Some(adjoint.solve_adjoint_backwards_pass(t_eval, dgdu_eval)?);
+        pending_reset = next_reset;
     }
 
     state
-        .map(|state: Tag::State| state.into_common().sg)
+        .map(|state| state.into_common().sg)
         .ok_or_else(|| ode_solver_error!(Other, "Adjoint backward pass returned no state"))
 }
 
@@ -635,7 +638,7 @@ impl OdeSolverType {
                 let data = checkpoint.data::<M, CG, BdfTag>()?;
                 match data.linear_solver() {
                     LinearSolverType::Default => {
-                        solve_split_adjoint_gradient_with_tag::<
+                        solve_adjoint_bkwds_with_fwd_tag::<
                             M,
                             CG,
                             <M as DefaultSolver>::LS,
@@ -644,7 +647,7 @@ impl OdeSolverType {
                         >(problem, data, *self, dgdu_eval, t_eval)
                     }
                     LinearSolverType::Lu => {
-                        solve_split_adjoint_gradient_with_tag::<
+                        solve_adjoint_bkwds_with_fwd_tag::<
                             M,
                             CG,
                             <M as LuValidator<M>>::LS,
@@ -653,7 +656,7 @@ impl OdeSolverType {
                         >(problem, data, *self, dgdu_eval, t_eval)
                     }
                     LinearSolverType::Klu => {
-                        solve_split_adjoint_gradient_with_tag::<
+                        solve_adjoint_bkwds_with_fwd_tag::<
                             M,
                             CG,
                             <M as KluValidator<M>>::LS,
@@ -667,7 +670,7 @@ impl OdeSolverType {
                 let data = checkpoint.data::<M, CG, Esdirk34Tag>()?;
                 match data.linear_solver() {
                     LinearSolverType::Default => {
-                        solve_split_adjoint_gradient_with_tag::<
+                        solve_adjoint_bkwds_with_fwd_tag::<
                             M,
                             CG,
                             <M as DefaultSolver>::LS,
@@ -676,7 +679,7 @@ impl OdeSolverType {
                         >(problem, data, *self, dgdu_eval, t_eval)
                     }
                     LinearSolverType::Lu => {
-                        solve_split_adjoint_gradient_with_tag::<
+                        solve_adjoint_bkwds_with_fwd_tag::<
                             M,
                             CG,
                             <M as LuValidator<M>>::LS,
@@ -685,7 +688,7 @@ impl OdeSolverType {
                         >(problem, data, *self, dgdu_eval, t_eval)
                     }
                     LinearSolverType::Klu => {
-                        solve_split_adjoint_gradient_with_tag::<
+                        solve_adjoint_bkwds_with_fwd_tag::<
                             M,
                             CG,
                             <M as KluValidator<M>>::LS,
@@ -699,7 +702,7 @@ impl OdeSolverType {
                 let data = checkpoint.data::<M, CG, TrBdf2Tag>()?;
                 match data.linear_solver() {
                     LinearSolverType::Default => {
-                        solve_split_adjoint_gradient_with_tag::<
+                        solve_adjoint_bkwds_with_fwd_tag::<
                             M,
                             CG,
                             <M as DefaultSolver>::LS,
@@ -708,7 +711,7 @@ impl OdeSolverType {
                         >(problem, data, *self, dgdu_eval, t_eval)
                     }
                     LinearSolverType::Lu => {
-                        solve_split_adjoint_gradient_with_tag::<
+                        solve_adjoint_bkwds_with_fwd_tag::<
                             M,
                             CG,
                             <M as LuValidator<M>>::LS,
@@ -717,7 +720,7 @@ impl OdeSolverType {
                         >(problem, data, *self, dgdu_eval, t_eval)
                     }
                     LinearSolverType::Klu => {
-                        solve_split_adjoint_gradient_with_tag::<
+                        solve_adjoint_bkwds_with_fwd_tag::<
                             M,
                             CG,
                             <M as KluValidator<M>>::LS,
@@ -727,9 +730,38 @@ impl OdeSolverType {
                     }
                 }
             }
-            OdeSolverType::Tsit45 => Err(DiffsolError::Other(
-                "Tsit45 solver does not support adjoint sensitivity analysis.".to_string(),
-            )),
+            OdeSolverType::Tsit45 => {
+                let data = checkpoint.data::<M, CG, Tsit45Tag>()?;
+                match data.linear_solver() {
+                    LinearSolverType::Default => {
+                        solve_adjoint_bkwds_with_fwd_tag::<
+                            M,
+                            CG,
+                            <M as DefaultSolver>::LS,
+                            BwdLS,
+                            Tsit45Tag,
+                        >(problem, data, *self, dgdu_eval, t_eval)
+                    }
+                    LinearSolverType::Lu => {
+                        solve_adjoint_bkwds_with_fwd_tag::<
+                            M,
+                            CG,
+                            <M as LuValidator<M>>::LS,
+                            BwdLS,
+                            Tsit45Tag,
+                        >(problem, data, *self, dgdu_eval, t_eval)
+                    }
+                    LinearSolverType::Klu => {
+                        solve_adjoint_bkwds_with_fwd_tag::<
+                            M,
+                            CG,
+                            <M as KluValidator<M>>::LS,
+                            BwdLS,
+                            Tsit45Tag,
+                        >(problem, data, *self, dgdu_eval, t_eval)
+                    }
+                }
+            }
         }
     }
 }

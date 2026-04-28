@@ -3,7 +3,7 @@ use crate::{
     ode_solver_error, AdjointEquations, AugmentedOdeEquations, AugmentedOdeSolverMethod,
     DefaultDenseMatrix, DefaultSolver, DenseMatrix, LinearSolver, Matrix, MatrixCommon, MatrixOp,
     NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsImplicitAdjoint,
-    OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op, Solution, Vector, VectorIndex,
+    OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op, Vector, VectorIndex,
 };
 
 use num_traits::{One, Zero};
@@ -104,12 +104,7 @@ where
             .augmented_eqn()
             .unwrap()
             .checkpointing_bounds(checkpointing_len - 1);
-        if problem_t0 != first_checkpoint_t {
-            return Err(ode_solver_error!(
-                Other,
-                "Problem initial time does not match the first checkpointing segment start time"
-            ));
-        }
+        let path_starts_at_problem_t0 = problem_t0 == first_checkpoint_t;
         if solve_t1 != last_checkpoint_t {
             return Err(ode_solver_error!(
                 Other,
@@ -134,127 +129,58 @@ where
             )?;
 
             if segment_index > 0 {
-                let (root_idx, fwd_state_minus, fwd_state_plus) = {
+                let reset_data = {
                     let aug_eqn = self.augmented_eqn().unwrap();
-                    let root_idx = aug_eqn
-                        .checkpointing_terminal_reset_root_idx(segment_index - 1)
-                        .ok_or_else(|| {
-                            ode_solver_error!(
+                    let fwd_state_minus = aug_eqn.checkpointing_last_state(segment_index - 1);
+                    let fwd_state_plus = aug_eqn.checkpointing_first_state(segment_index);
+                    match aug_eqn.checkpointing_terminal_reset_root_idx(segment_index - 1) {
+                        Some(root_idx) => Some((root_idx, fwd_state_minus, fwd_state_plus)),
+                        None if checkpoint_boundary_is_continuous(
+                            &fwd_state_minus,
+                            &fwd_state_plus,
+                        ) =>
+                        {
+                            None
+                        }
+                        None => {
+                            return Err(ode_solver_error!(
                                 Other,
                                 "Missing reset root metadata between checkpointing segments"
-                            )
-                        })?;
-                    (
-                        root_idx,
-                        aug_eqn.checkpointing_last_state(segment_index - 1),
-                        aug_eqn.checkpointing_first_state(segment_index),
-                    )
+                            ))
+                        }
+                    }
                 };
-                self.apply_reset_with_adjoint(root_idx, &fwd_state_minus, &fwd_state_plus)?;
+                if let Some((root_idx, fwd_state_minus, fwd_state_plus)) = reset_data {
+                    self.apply_reset_with_adjoint(root_idx, &fwd_state_minus, &fwd_state_plus)?;
+                }
             }
         }
 
-        // correct the adjoint solution for the initial conditions
         let (mut state, aug_eqn) = self.into_state_and_eqn();
-        let aug_eqn = aug_eqn.unwrap();
-        let state_mut = state.as_mut();
-        aug_eqn.correct_sg_for_init(problem_t0, state_mut.s, state_mut.sg);
+        if path_starts_at_problem_t0 {
+            let aug_eqn = aug_eqn.unwrap();
+            let state_mut = state.as_mut();
+            aug_eqn.correct_sg_for_init(problem_t0, state_mut.s, state_mut.sg);
+        }
 
         // return the solution
         Ok(state)
     }
+}
 
-    /// Backwards pass for one segment of a staged adjoint sensitivity solve.
-    ///
-    /// This uses the forward output times stored on `soln` and optional
-    /// discrete-output gradients from `dgdu_eval`, then moves the adjoint solver
-    /// backwards through exactly one checkpointing segment.
-    fn solve_soln_adjoint_backwards_pass(
-        mut self,
-        soln: &Solution<Eqn::V>,
-        dgdu_eval: &[&<Eqn::V as DefaultDenseMatrix>::M],
-    ) -> Result<Self, DiffsolError>
-    where
-        Eqn::V: DefaultDenseMatrix,
-        Eqn::M: DefaultSolver,
-    {
-        let t_eval = if dgdu_eval.is_empty() {
-            &[]
-        } else {
-            soln.ts.as_slice()
-        };
-        let have_neqn = validate_adjoint_backwards_inputs(&self, t_eval, dgdu_eval)?;
-
-        let mut integrate_delta_g = if have_neqn > 0 && !dgdu_eval.is_empty() {
-            let integrate_delta_g =
-                IntegrateDeltaG::<_, <Eqn::M as DefaultSolver>::LS>::new(&self)?;
-            Some(integrate_delta_g)
-        } else {
-            None
-        };
-        let problem_t0 = self.problem().t0;
-        let solve_t1 = self.state().t;
-        let checkpointing_len = self.augmented_eqn().unwrap().checkpointing_len();
-        let (first_checkpoint_t, _) = self.augmented_eqn().unwrap().checkpointing_bounds(0);
-        if problem_t0 != first_checkpoint_t {
-            return Err(ode_solver_error!(
-                Other,
-                "Problem initial time does not match the first checkpointing segment start time"
-            ));
-        }
-
-        let segment_index = (0..checkpointing_len)
-            .rev()
-            .find(|&index| {
-                let (_, segment_end_t) = self.augmented_eqn().unwrap().checkpointing_bounds(index);
-                segment_end_t == solve_t1
-            })
-            .ok_or_else(|| {
-                ode_solver_error!(
-                    Other,
-                    "Adjoint solver current time does not match any checkpointing segment end time"
-                )
-            })?;
-        let (segment_first_t, segment_end_t) = self
-            .augmented_eqn()
-            .unwrap()
-            .checkpointing_bounds(segment_index);
-
-        solve_adjoint_backwards_segment(
-            &mut self,
-            segment_first_t,
-            segment_end_t,
-            segment_index + 1 < checkpointing_len,
-            t_eval,
-            dgdu_eval,
-            integrate_delta_g.as_mut(),
-        )?;
-
-        if segment_index > 0 {
-            let reset_data = {
-                let aug_eqn = self.augmented_eqn().unwrap();
-                aug_eqn
-                    .checkpointing_terminal_reset_root_idx(segment_index - 1)
-                    .map(|root_idx| {
-                        (
-                            root_idx,
-                            aug_eqn.checkpointing_last_state(segment_index - 1),
-                            aug_eqn.checkpointing_first_state(segment_index),
-                        )
-                    })
-            };
-            if let Some((root_idx, fwd_state_minus, fwd_state_plus)) = reset_data {
-                self.apply_reset_with_adjoint(root_idx, &fwd_state_minus, &fwd_state_plus)?;
-            }
-        } else {
-            let (state, aug_eqn) = self
-                .state_and_augmented_eqn_mut()
-                .ok_or_else(|| ode_solver_error!(Other, "No augmented equations"))?;
-            aug_eqn.correct_sg_for_init(problem_t0, state.s, state.sg);
-        }
-
-        Ok(self)
-    }
+fn checkpoint_boundary_is_continuous<V, State>(state_minus: &State, state_plus: &State) -> bool
+where
+    V: Vector,
+    State: OdeSolverState<V>,
+{
+    let state_minus = state_minus.as_ref();
+    let state_plus = state_plus.as_ref();
+    state_minus.y.len() == state_plus.y.len()
+        && state_minus.dy.len() == state_plus.dy.len()
+        && state_minus.t == state_plus.t
+        && (0..state_minus.y.len()).all(|i| state_minus.y.get_index(i) == state_plus.y.get_index(i))
+        && (0..state_minus.dy.len())
+            .all(|i| state_minus.dy.get_index(i) == state_plus.dy.get_index(i))
 }
 
 fn validate_adjoint_backwards_inputs<'a, Eqn, Solver, AdjointSolver>(
