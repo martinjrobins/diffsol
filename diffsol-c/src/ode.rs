@@ -4,8 +4,9 @@ use serde::{de::Error as DeError, Deserialize, Deserializer, Serialize, Serializ
 
 use crate::jit::JitBackendType;
 use crate::{
+    adjoint_checkpoint::AdjointCheckpointWrapper,
     error::DiffsolRtError,
-    host_array::HostArray,
+    host_array::{FromHostArray, HostArray},
     initial_condition_options::{
         InitialConditionSolverOptions, InitialConditionSolverOptionsSnapshot,
     },
@@ -609,6 +610,67 @@ impl OdeWrapper {
             t_eval.as_slice()?,
         )
     }
+
+    /// Solve the continuous adjoint problem for the integral of the model output
+    /// from the initial time to `final_time`.
+    ///
+    /// Returns `(integral, gradient)`, where `integral` is a vector of length
+    /// `nout` and `gradient` is an `(nparams, nout)` matrix.
+    pub fn solve_continuous_adjoint(
+        &self,
+        params: HostArray,
+        final_time: f64,
+    ) -> Result<(HostArray, HostArray), DiffsolRtError> {
+        let mut self_guard = self.guard()?;
+        let linear_solver = self_guard.linear_solver;
+        let ode_solver = self_guard.ode_solver;
+        self_guard.solve.solve_continuous_adjoint(
+            ode_solver,
+            linear_solver,
+            params.as_slice()?,
+            final_time,
+        )
+    }
+
+    /// Solve the forward problem at `t_eval` and retain checkpoint data for a
+    /// later discrete adjoint backward pass.
+    pub fn solve_adjoint_fwd(
+        &self,
+        params: HostArray,
+        t_eval: HostArray,
+    ) -> Result<(SolutionWrapper, AdjointCheckpointWrapper), DiffsolRtError> {
+        let mut self_guard = self.guard()?;
+        let params = params.as_slice()?;
+        let t_eval = t_eval.as_slice()?;
+        let linear_solver = self_guard.linear_solver;
+        let method = self_guard.ode_solver;
+        let (solution, checkpoint) =
+            self_guard
+                .solve
+                .solve_adjoint_fwd(method, linear_solver, params, t_eval)?;
+        Ok((SolutionWrapper::new(solution), checkpoint))
+    }
+
+    /// Solve the discrete adjoint backward pass using a prior forward adjoint
+    /// checkpoint and the gradient of a scalar objective with respect to model
+    /// outputs at each saved evaluation time.
+    ///
+    /// Returns an `(nparams, 1)` gradient matrix.
+    pub fn solve_adjoint_bkwd(
+        &self,
+        solution: &SolutionWrapper,
+        checkpoint: &AdjointCheckpointWrapper,
+        dgdu_eval: HostArray,
+    ) -> Result<HostArray, DiffsolRtError> {
+        let t_eval_host = solution.get_ts()?;
+        let t_eval = Vec::<f64>::from_host_array(t_eval_host)?;
+        let mut self_guard = self.guard()?;
+        let linear_solver = self_guard.linear_solver;
+        let method = self_guard.ode_solver;
+        self_guard
+            .solve
+            .solve_adjoint_bkwd(method, linear_solver, checkpoint, &t_eval, dgdu_eval)
+    }
 }
 
 impl Serialize for OdeWrapper {
@@ -1033,7 +1095,9 @@ mod jit_tests {
         vector_host, ASSERT_TOL, LOGISTIC_X0,
     };
     #[cfg(feature = "diffsl-llvm")]
-    use crate::test_support::{hybrid_logistic_state_dr, logistic_state_dr};
+    use crate::test_support::{
+        hybrid_logistic_state_dr, logistic_integral, logistic_state_dr, matrix_host,
+    };
     #[cfg(any(
         all(feature = "diffsl-llvm", not(feature = "diffsl-cranelift")),
         all(feature = "diffsl-cranelift", not(feature = "diffsl-llvm"))
@@ -1711,6 +1775,158 @@ mod jit_tests {
             grad[0].is_finite(),
             "jit sum_squares gradient should be finite"
         );
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn continuous_adjoint_returns_integral_and_parameter_gradient() {
+        let ode = make_ode(
+            JitBackendType::Llvm,
+            ScalarType::F64,
+            MatrixType::NalgebraDense,
+            OdeSolverType::Bdf,
+        );
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let r = 2.0;
+        let final_time = 1.0;
+        let (integral, gradient) = ode
+            .solve_continuous_adjoint(vector_host(&[r]), final_time)
+            .unwrap();
+        let integral = Vec::<f64>::from_host_array(integral).unwrap();
+        let gradient = gradient.as_array::<f64>().unwrap();
+
+        let step = 1e-6;
+        let expected_gradient = (logistic_integral(LOGISTIC_X0, r + step, final_time)
+            - logistic_integral(LOGISTIC_X0, r - step, final_time))
+            / (2.0 * step);
+
+        assert_eq!(integral.len(), 1);
+        assert_close(
+            integral[0],
+            logistic_integral(LOGISTIC_X0, r, final_time),
+            5e-5,
+            "continuous adjoint integral",
+        );
+        assert_eq!(gradient.nrows(), 1);
+        assert_eq!(gradient.ncols(), 1);
+        assert_close(
+            gradient[(0, 0)],
+            expected_gradient,
+            5e-4,
+            "continuous adjoint gradient",
+        );
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn split_adjoint_matches_sum_squares_adjoint() {
+        let ode = make_ode(
+            JitBackendType::Llvm,
+            ScalarType::F64,
+            MatrixType::NalgebraDense,
+            OdeSolverType::Bdf,
+        );
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let t_eval = [0.0, 0.25, 0.5, 1.0];
+        let fit_r = 2.0;
+        let data_r = 1.5;
+        let data_values: Vec<f64> = t_eval
+            .iter()
+            .map(|&t| logistic_state(LOGISTIC_X0, data_r, t))
+            .collect();
+        let (solution, checkpoint) = ode
+            .solve_adjoint_fwd(vector_host(&[fit_r]), vector_host(&t_eval))
+            .unwrap();
+        assert_solution_tail(&solution, &t_eval, LOGISTIC_X0, fit_r, 5e-4);
+
+        let ys = solution.get_ys().unwrap();
+        let ys = ys.as_array::<f64>().unwrap();
+        let dgdu_values: Vec<f64> = (0..t_eval.len())
+            .map(|col| 2.0 * (ys[(0, col)] - data_values[col]))
+            .collect();
+        let split_gradient = ode
+            .solve_adjoint_bkwd(
+                &solution,
+                &checkpoint,
+                matrix_host(1, t_eval.len(), &dgdu_values),
+            )
+            .unwrap();
+        let split_gradient = split_gradient.as_array::<f64>().unwrap();
+
+        let (_objective, sum_squares_gradient) = ode
+            .solve_sum_squares_adj(
+                vector_host(&[fit_r]),
+                matrix_host(1, t_eval.len(), &data_values),
+                vector_host(&t_eval),
+            )
+            .unwrap();
+        let sum_squares_gradient = Vec::<f64>::from_host_array(sum_squares_gradient).unwrap();
+
+        assert_eq!(split_gradient.nrows(), 1);
+        assert_eq!(split_gradient.ncols(), 1);
+        assert_close(
+            split_gradient[(0, 0)],
+            sum_squares_gradient[0],
+            5e-5,
+            "split adjoint gradient",
+        );
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn split_adjoint_rejects_invalid_dgdu_shapes() {
+        let ode = make_ode(
+            JitBackendType::Llvm,
+            ScalarType::F64,
+            MatrixType::NalgebraDense,
+            OdeSolverType::Bdf,
+        );
+        let t_eval = [0.0, 0.25, 0.5, 1.0];
+        let (solution, checkpoint) = ode
+            .solve_adjoint_fwd(vector_host(&[2.0]), vector_host(&t_eval))
+            .unwrap();
+
+        let wrong_rows = matrix_host(2, t_eval.len(), &[0.0; 8]);
+        let err = match ode.solve_adjoint_bkwd(&solution, &checkpoint, wrong_rows) {
+            Ok(_) => panic!("expected invalid dgdu row count to fail"),
+            Err(err) => err.to_string(),
+        };
+        assert!(err.contains("Expected dgdu_eval to have 1 rows"));
+
+        let wrong_cols = matrix_host(1, t_eval.len() - 1, &[0.0; 3]);
+        let err = match ode.solve_adjoint_bkwd(&solution, &checkpoint, wrong_cols) {
+            Ok(_) => panic!("expected invalid dgdu column count to fail"),
+            Err(err) => err.to_string(),
+        };
+        assert!(err.contains("Expected dgdu_eval to have 4 columns"));
+    }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn tsit45_split_adjoint_backward_reports_unsupported_solver() {
+        let ode = make_ode(
+            JitBackendType::Llvm,
+            ScalarType::F64,
+            MatrixType::NalgebraDense,
+            OdeSolverType::Tsit45,
+        );
+        let t_eval = [0.0, 0.25, 0.5, 1.0];
+        let (solution, checkpoint) = ode
+            .solve_adjoint_fwd(vector_host(&[2.0]), vector_host(&t_eval))
+            .unwrap();
+        let err = match ode.solve_adjoint_bkwd(
+            &solution,
+            &checkpoint,
+            matrix_host(1, t_eval.len(), &[0.0; 4]),
+        ) {
+            Ok(_) => panic!("expected Tsit45 adjoint backward pass to fail"),
+            Err(err) => err.to_string(),
+        };
+        assert!(err.contains("Tsit45 solver does not support adjoint sensitivity analysis"));
     }
 
     #[cfg(feature = "diffsl-llvm")]

@@ -4,6 +4,7 @@
 #[cfg(feature = "diffsl-external-dynamic")]
 use std::path::PathBuf;
 
+use crate::adjoint_checkpoint::AdjointCheckpointWrapper;
 use crate::error::DiffsolRtError;
 use crate::host_array::HostArray;
 use crate::host_array::ToHostArray;
@@ -23,9 +24,9 @@ use diffsol::OdeBuilder;
 use diffsol::{
     error::DiffsolError,
     matrix::{MatrixHost, MatrixRef},
-    CodegenModule, ConstantOp, DefaultDenseMatrix, DefaultSolver, DiffSl, MatrixCommon,
-    NonLinearOp, NonLinearOpJacobian, OdeEquations, OdeSolverProblem, Op, Vector, VectorCommon,
-    VectorHost, VectorRef,
+    CodegenModule, ConstantOp, DefaultDenseMatrix, DefaultSolver, DenseMatrix, DiffSl,
+    MatrixCommon, NonLinearOp, NonLinearOpJacobian, OdeEquations, OdeSolverProblem, Op, Vector,
+    VectorCommon, VectorHost, VectorRef,
 };
 #[cfg(any(feature = "diffsl-cranelift", feature = "diffsl-llvm"))]
 use diffsol::{CodegenModuleCompile, CodegenModuleJit};
@@ -155,6 +156,31 @@ pub(crate) trait Solve {
         data: HostArray,
         t_eval: &[f64],
     ) -> Result<(f64, HostArray), DiffsolRtError>;
+
+    fn solve_continuous_adjoint(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        params: &[f64],
+        final_time: f64,
+    ) -> Result<(HostArray, HostArray), DiffsolRtError>;
+
+    fn solve_adjoint_fwd(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        params: &[f64],
+        t_eval: &[f64],
+    ) -> Result<(Box<dyn Solution>, AdjointCheckpointWrapper), DiffsolRtError>;
+
+    fn solve_adjoint_bkwd(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        checkpoint: &AdjointCheckpointWrapper,
+        t_eval: &[f64],
+        dgdu_eval: HostArray,
+    ) -> Result<HostArray, DiffsolRtError>;
 
     generate_trait_ic_option_accessors! {
         use_linesearch: bool,
@@ -996,6 +1022,157 @@ where
             (*y_sens.inner()).clone().to_host_array(),
         ))
     }
+
+    fn solve_continuous_adjoint(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        params: &[f64],
+        final_time: f64,
+    ) -> Result<(HostArray, HostArray), DiffsolRtError> {
+        self.check(linear_solver)?;
+        self.setup_problem(params)?;
+
+        let final_time = M::T::from_f64(final_time).unwrap();
+        let integrate_out = self.problem.integrate_out;
+        self.problem.integrate_out = true;
+        let result = match linear_solver {
+            LinearSolverType::Default => method
+                .solve_continuous_adjoint::<M, CG, <M as DefaultSolver>::LS>(
+                    &mut self.problem,
+                    final_time,
+                ),
+            LinearSolverType::Lu => method
+                .solve_continuous_adjoint::<M, CG, <M as LuValidator<M>>::LS>(
+                    &mut self.problem,
+                    final_time,
+                ),
+            LinearSolverType::Klu => method
+                .solve_continuous_adjoint::<M, CG, <M as KluValidator<M>>::LS>(
+                    &mut self.problem,
+                    final_time,
+                ),
+        };
+        self.problem.integrate_out = integrate_out;
+        let (integral, gradient) = result?;
+        Ok((
+            (*integral.inner()).clone().to_host_array(),
+            (*gradient.inner()).clone().to_host_array(),
+        ))
+    }
+
+    fn solve_adjoint_fwd(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        params: &[f64],
+        t_eval: &[f64],
+    ) -> Result<(Box<dyn Solution>, AdjointCheckpointWrapper), DiffsolRtError> {
+        self.check(linear_solver)?;
+        self.setup_problem(params)?;
+
+        let t_eval: Vec<M::T> = t_eval.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
+        let (soln, checkpoint) = match linear_solver {
+            LinearSolverType::Default => method
+                .solve_adjoint_fwd::<M, CG, <M as DefaultSolver>::LS>(
+                    &mut self.problem,
+                    &t_eval,
+                    params,
+                    linear_solver,
+                ),
+            LinearSolverType::Lu => method.solve_adjoint_fwd::<M, CG, <M as LuValidator<M>>::LS>(
+                &mut self.problem,
+                &t_eval,
+                params,
+                linear_solver,
+            ),
+            LinearSolverType::Klu => method.solve_adjoint_fwd::<M, CG, <M as KluValidator<M>>::LS>(
+                &mut self.problem,
+                &t_eval,
+                params,
+                linear_solver,
+            ),
+        }?;
+        Ok((Box::new(soln), AdjointCheckpointWrapper::new(checkpoint)))
+    }
+
+    fn solve_adjoint_bkwd(
+        &mut self,
+        method: OdeSolverType,
+        linear_solver: LinearSolverType,
+        checkpoint: &AdjointCheckpointWrapper,
+        t_eval: &[f64],
+        dgdu_eval: HostArray,
+    ) -> Result<HostArray, DiffsolRtError> {
+        self.check(linear_solver)?;
+        let checkpoint = checkpoint.guard()?;
+        self.setup_problem(checkpoint.params())?;
+
+        let t_eval: Vec<M::T> = t_eval.iter().map(|&x| M::T::from_f64(x).unwrap()).collect();
+        let dgdu_eval = host_array_to_dense_matrix::<M>(dgdu_eval)?;
+        if dgdu_eval.nrows() != self.problem.eqn.nout() {
+            return Err(DiffsolError::Other(format!(
+                "Expected dgdu_eval to have {} rows, got {}",
+                self.problem.eqn.nout(),
+                dgdu_eval.nrows()
+            ))
+            .into());
+        }
+        if dgdu_eval.ncols() != t_eval.len() {
+            return Err(DiffsolError::Other(format!(
+                "Expected dgdu_eval to have {} columns, got {}",
+                t_eval.len(),
+                dgdu_eval.ncols()
+            ))
+            .into());
+        }
+
+        let gradient = match linear_solver {
+            LinearSolverType::Default => method
+                .solve_adjoint_bkwd::<M, CG, <M as DefaultSolver>::LS>(
+                    &self.problem,
+                    checkpoint.as_ref(),
+                    &dgdu_eval,
+                    &t_eval,
+                ),
+            LinearSolverType::Lu => method.solve_adjoint_bkwd::<M, CG, <M as LuValidator<M>>::LS>(
+                &self.problem,
+                checkpoint.as_ref(),
+                &dgdu_eval,
+                &t_eval,
+            ),
+            LinearSolverType::Klu => method
+                .solve_adjoint_bkwd::<M, CG, <M as KluValidator<M>>::LS>(
+                    &self.problem,
+                    checkpoint.as_ref(),
+                    &dgdu_eval,
+                    &t_eval,
+                ),
+        }?;
+        Ok((*gradient.inner()).clone().to_host_array())
+    }
+}
+
+fn host_array_to_dense_matrix<M>(
+    array: HostArray,
+) -> Result<<M::V as DefaultDenseMatrix>::M, DiffsolRtError>
+where
+    M: MatrixHost<T: Scalar>,
+    M::V: DefaultDenseMatrix,
+{
+    let view = array.as_array::<M::T>()?;
+    let mut values = Vec::with_capacity(view.nrows() * view.ncols());
+    for col in 0..view.ncols() {
+        for row in 0..view.nrows() {
+            values.push(view[(row, col)]);
+        }
+    }
+    Ok(<M::V as DefaultDenseMatrix>::M::from_vec(
+        view.nrows(),
+        view.ncols(),
+        values,
+        M::C::default(),
+    ))
 }
 
 #[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]

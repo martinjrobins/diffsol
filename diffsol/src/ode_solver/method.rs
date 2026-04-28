@@ -1,4 +1,4 @@
-use std::cell::Ref;
+use std::{cell::Ref, marker::PhantomData};
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
@@ -487,7 +487,7 @@ where
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<
         (
-            CheckpointingPath<Eqn, Self::State, Self>,
+            CheckpointingPath<Eqn, Self::State>,
             <Eqn::V as DefaultDenseMatrix>::M,
             Vec<Eqn::T>,
             OdeSolverStopReason<Eqn::T>,
@@ -548,7 +548,7 @@ where
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<
         (
-            CheckpointingPath<Eqn, Self::State, Self>,
+            CheckpointingPath<Eqn, Self::State>,
             <Eqn::V as DefaultDenseMatrix>::M,
             OdeSolverStopReason<Eqn::T>,
         ),
@@ -581,11 +581,12 @@ where
     Eqn: OdeEquations,
     State: OdeSolverState<Eqn::V>,
 {
-    checkpointers: CheckpointingPath<Eqn, State, Method>,
+    checkpointers: CheckpointingPath<Eqn, State>,
     checkpoints: Vec<State>,
     ts: Vec<Eqn::T>,
     ys: Vec<Eqn::V>,
     ydots: Vec<Eqn::V>,
+    phantom: PhantomData<Method>,
 }
 
 impl<'a, Eqn, Method> CheckpointingRecorder<Eqn, Method::State, Method>
@@ -601,10 +602,11 @@ where
             ts: vec![solver.state().t],
             ys: vec![solver.state().y.clone()],
             ydots: vec![solver.state().dy.clone()],
+            phantom: PhantomData,
         }
     }
 
-    fn into_checkpointers(self) -> CheckpointingPath<Eqn, Method::State, Method> {
+    fn into_checkpointers(self) -> CheckpointingPath<Eqn, Method::State> {
         self.checkpointers
     }
 
@@ -643,7 +645,7 @@ where
             self.ydots.split_off(0),
             self.ts.split_off(0),
         );
-        let mut checkpointer = Checkpointing::new(
+        let mut checkpointer = Checkpointing::new::<Method>(
             None,
             self.checkpoints.len() - 2,
             self.checkpoints.split_off(0),
@@ -689,7 +691,7 @@ fn solve_dense<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     (
         OdeSolverStopReason<Eqn::T>,
         usize,
-        Option<CheckpointingPath<Eqn, S::State, S>>,
+        Option<CheckpointingPath<Eqn, S::State>>,
     ),
     DiffsolError,
 >
@@ -817,7 +819,7 @@ fn solve<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
 ) -> Result<
     (
         OdeSolverStopReason<Eqn::T>,
-        Option<CheckpointingPath<Eqn, S::State, S>>,
+        Option<CheckpointingPath<Eqn, S::State>>,
     ),
     DiffsolError,
 >
