@@ -466,7 +466,7 @@ mod tests {
             data.context().clone(),
         );
         let rtol = Eqn::T::from_f64(1e-6).unwrap();
-        let state = backwards_solver
+        let (state, _) = backwards_solver
             .solve_adjoint_backwards_pass(times, dgdu.iter().collect::<Vec<_>>().as_slice())
             .unwrap();
         let gs_adj = state.into_common().sg;
@@ -498,7 +498,7 @@ mod tests {
             dgdp_check.context().clone(),
         );
         let rtol = Eqn::T::from_f64(1e-6).unwrap();
-        let state = backwards_solver
+        let (state, _) = backwards_solver
             .solve_adjoint_backwards_pass(&[], &[])
             .unwrap();
         let gs_adj = state.into_common().sg;
@@ -1439,7 +1439,7 @@ mod tests {
             )
             .unwrap();
         let adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();
-        let adjoint_state = adjoint.solve_adjoint_backwards_pass(&[], &[]).unwrap();
+        let (adjoint_state, _) = adjoint.solve_adjoint_backwards_pass(&[], &[]).unwrap();
 
         let t0 = problem.t0;
         let ctx = problem.context().clone();
@@ -1551,7 +1551,7 @@ mod tests {
             )
             .unwrap();
         let adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();
-        let adjoint_state = adjoint
+        let (adjoint_state, _) = adjoint
             .solve_adjoint_backwards_pass(times, dgdu_refs.as_slice())
             .unwrap();
 
@@ -1677,7 +1677,7 @@ mod tests {
             )
             .unwrap();
         let adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();
-        let adjoint_state = adjoint.solve_adjoint_backwards_pass(&[], &[]).unwrap();
+        let (adjoint_state, _) = adjoint.solve_adjoint_backwards_pass(&[], &[]).unwrap();
 
         let t0 = problem.t0;
         let ctx = problem.context().clone();
@@ -1811,7 +1811,7 @@ mod tests {
             )
             .unwrap();
         let adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();
-        let adjoint_state = adjoint
+        let (adjoint_state, _) = adjoint
             .solve_adjoint_backwards_pass(times, dgdu_eval_refs.as_slice())
             .unwrap();
 

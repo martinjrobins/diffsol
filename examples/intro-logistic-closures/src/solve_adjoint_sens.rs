@@ -15,7 +15,7 @@ where
         .problem()
         .bdf_solver_adjoint::<LS, _>(checkpointing, Some(solver.clone()), Some(1))
         .unwrap();
-    let final_state = adjoint_solver
+    let (final_state, _) = adjoint_solver
         .solve_adjoint_backwards_pass(&[], &[])
         .unwrap();
     for (i, dgdp_i) in final_state.as_ref().sg.iter().enumerate() {

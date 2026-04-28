@@ -1,9 +1,10 @@
 use crate::{
     error::{DiffsolError, OdeSolverError},
     ode_solver_error, AdjointEquations, AugmentedOdeEquations, AugmentedOdeSolverMethod,
-    DefaultDenseMatrix, DefaultSolver, DenseMatrix, LinearSolver, Matrix, MatrixCommon, MatrixOp,
-    NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsImplicitAdjoint,
-    OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op, Vector, VectorIndex,
+    CheckpointingPath, DefaultDenseMatrix, DefaultSolver, DenseMatrix, LinearSolver, Matrix,
+    MatrixCommon, MatrixOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations,
+    OdeEquationsImplicitAdjoint, OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op,
+    StateRef, Vector, VectorIndex,
 };
 
 use num_traits::{One, Zero};
@@ -20,8 +21,8 @@ where
     fn apply_reset_with_adjoint(
         &mut self,
         root_idx: usize,
-        fwd_state_minus: &Solver::State,
-        fwd_state_plus: &Solver::State,
+        fwd_state_minus: StateRef<'_, Eqn::V>,
+        fwd_state_plus: StateRef<'_, Eqn::V>,
     ) -> Result<(), DiffsolError> {
         let (reset, root) = {
             let eqn = &self.problem().eqn;
@@ -82,7 +83,7 @@ where
         mut self,
         t_eval: &[Eqn::T],
         dgdu_eval: &[&<Eqn::V as DefaultDenseMatrix>::M],
-    ) -> Result<Self::State, DiffsolError>
+    ) -> Result<(Self::State, CheckpointingPath<Eqn, Solver::State>), DiffsolError>
     where
         Eqn::V: DefaultDenseMatrix,
         Eqn::M: DefaultSolver,
@@ -129,52 +130,53 @@ where
             )?;
 
             if segment_index > 0 {
-                let reset_data = {
-                    let aug_eqn = self.augmented_eqn().unwrap();
-                    let fwd_state_minus = aug_eqn.checkpointing_last_state(segment_index - 1);
-                    let fwd_state_plus = aug_eqn.checkpointing_first_state(segment_index);
-                    match aug_eqn.checkpointing_terminal_reset_root_idx(segment_index - 1) {
-                        Some(root_idx) => Some((root_idx, fwd_state_minus, fwd_state_plus)),
-                        None if checkpoint_boundary_is_continuous(
-                            &fwd_state_minus,
-                            &fwd_state_plus,
-                        ) =>
-                        {
-                            None
-                        }
-                        None => {
-                            return Err(ode_solver_error!(
-                                Other,
-                                "Missing reset root metadata between checkpointing segments"
-                            ))
-                        }
-                    }
-                };
-                if let Some((root_idx, fwd_state_minus, fwd_state_plus)) = reset_data {
-                    self.apply_reset_with_adjoint(root_idx, &fwd_state_minus, &fwd_state_plus)?;
-                }
+                let checkpointing = self
+                    .augmented_eqn_mut()
+                    .unwrap()
+                    .pop_last_checkpointing()
+                    .unwrap();
+                let fwd_state_plus = checkpointing.last_checkpoint();
+                let fwd_state_minus = self
+                    .augmented_eqn()
+                    .unwrap()
+                    .checkpointing_last_state(segment_index - 1);
+                let root_idx = self
+                    .augmented_eqn()
+                    .unwrap()
+                    .checkpointing_terminal_reset_root_idx(segment_index - 1)
+                    .ok_or_else(|| {
+                        ode_solver_error!(
+                            Other,
+                            "Checkpointing segment does not have a terminal reset root index"
+                        )
+                    })?;
+                self.apply_reset_with_adjoint(
+                    root_idx,
+                    fwd_state_minus.as_ref(),
+                    fwd_state_plus.as_ref(),
+                )?;
             }
         }
 
         let (mut state, aug_eqn) = self.into_state_and_eqn();
+        let aug_eqn = aug_eqn.unwrap();
         if path_starts_at_problem_t0 {
-            let aug_eqn = aug_eqn.unwrap();
             let state_mut = state.as_mut();
             aug_eqn.correct_sg_for_init(problem_t0, state_mut.s, state_mut.sg);
         }
 
-        // return the solution
-        Ok(state)
+        // return the state and checkpointing
+        Ok((state, aug_eqn.into_checkpointing()))
     }
 }
 
-fn checkpoint_boundary_is_continuous<V, State>(state_minus: &State, state_plus: &State) -> bool
+fn checkpoint_boundary_is_continuous<V>(
+    state_minus: StateRef<'_, V>,
+    state_plus: StateRef<'_, V>,
+) -> bool
 where
     V: Vector,
-    State: OdeSolverState<V>,
 {
-    let state_minus = state_minus.as_ref();
-    let state_plus = state_plus.as_ref();
     state_minus.y.len() == state_plus.y.len()
         && state_minus.dy.len() == state_plus.dy.len()
         && state_minus.t == state_plus.t

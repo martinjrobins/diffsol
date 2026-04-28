@@ -66,7 +66,7 @@ pub fn main() {
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(checkpoints, Some(solver), None)
             .unwrap();
-        let adjoint_state = adjoint_solver
+        let (adjoint_state, _) = adjoint_solver
             .solve_adjoint_backwards_pass(&[], &[])
             .unwrap();
 
