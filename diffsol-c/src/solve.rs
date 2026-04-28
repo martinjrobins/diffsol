@@ -892,7 +892,7 @@ where
         let (integral, gradient) = result?;
         Ok((
             (*integral.inner()).clone().to_host_array(),
-            (*gradient.inner()).clone().to_host_array(),
+            gradient.to_host_array(),
         ))
     }
 
@@ -984,7 +984,7 @@ where
                     &t_eval,
                 ),
         }?;
-        Ok((*gradient.inner()).clone().to_host_array())
+        Ok(gradient.to_host_array())
     }
 }
 

@@ -5,12 +5,11 @@ use diffsol::error::{DiffsolError, OdeSolverError};
 use diffsol::ode_equations::OdeEquationsImplicitSens;
 use diffsol::{
     matrix::MatrixRef, DefaultDenseMatrix, DiffSl, LinearSolver, Matrix, OdeSolverProblem,
-    OdeSolverState, Vector, VectorHost, VectorRef,
+    OdeSolverState, VectorHost, VectorRef,
 };
 use diffsol::{
     ode_solver_error, AdjointOdeSolverMethod, CheckpointingPath, CodegenModule, DefaultSolver,
-    DenseMatrix, OdeEquations, OdeSolverMethod, OdeSolverStopReason, Op,
-    SensitivitiesOdeSolverMethod, Solution, VectorViewMut,
+    OdeEquations, OdeSolverMethod, OdeSolverStopReason, SensitivitiesOdeSolverMethod, Solution,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -210,7 +209,7 @@ fn solve_continuous_adjoint_with_tag<M, CG, LS, Tag>(
     problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
     final_time: M::T,
     method: OdeSolverType,
-) -> Result<(M::V, <M::V as DefaultDenseMatrix>::M), DiffsolError>
+) -> Result<(M::V, Vec<M::V>), DiffsolError>
 where
     M: Matrix<T: Scalar> + DefaultSolver + 'static,
     CG: CodegenModule + 'static,
@@ -259,8 +258,7 @@ where
             Tsit45Tag,
         >(problem, &soln, checkpointing, &[], None),
     }?;
-    let gradient = vectors_to_columns::<M>(sg, problem.eqn.nparams(), integral.len());
-    Ok((integral, gradient))
+    Ok((integral, sg))
 }
 
 fn solve_adjoint_bkwds_with_fwd_tag<M, CG, FwdLS, BwdLS, Tag>(
@@ -269,7 +267,7 @@ fn solve_adjoint_bkwds_with_fwd_tag<M, CG, FwdLS, BwdLS, Tag>(
     backwards_method: OdeSolverType,
     dgdu_eval: &<M::V as DefaultDenseMatrix>::M,
     t_eval: &[M::T],
-) -> Result<<M::V as DefaultDenseMatrix>::M, DiffsolError>
+) -> Result<Vec<M::V>, DiffsolError>
 where
     M: Matrix<T: Scalar> + DefaultSolver + 'static,
     CG: CodegenModule + 'static,
@@ -285,7 +283,7 @@ where
     let checkpointing = checkpoint.checkpointing.clone();
     let soln = Solution::new_dense(t_eval.to_vec())?;
     let dgdu_eval = [dgdu_eval];
-    let mut sg = match backwards_method {
+    match backwards_method {
         OdeSolverType::Bdf => solve_adjoint_bkwds_with_fwd_bkwd_tag::<
             M,
             CG,
@@ -319,43 +317,7 @@ where
             Tag,
             Tsit45Tag,
         >(problem, &soln, checkpointing, &dgdu_eval, Some(1)),
-    }?;
-    let gradient = sg
-        .pop()
-        .ok_or_else(|| ode_solver_error!(Other, "Adjoint backward pass returned no gradients"))?;
-    Ok(vector_to_column::<M>(gradient))
-}
-
-fn vector_to_column<M>(v: M::V) -> <M::V as DefaultDenseMatrix>::M
-where
-    M: Matrix<T: Scalar>,
-    M::V: DefaultDenseMatrix,
-{
-    let mut ret = <M::V as DefaultDenseMatrix>::M::zeros(v.len(), 1, v.context().clone());
-    ret.column_mut(0).copy_from(&v);
-    ret
-}
-
-fn vectors_to_columns<M>(
-    vectors: Vec<M::V>,
-    nrows: usize,
-    expected_cols: usize,
-) -> <M::V as DefaultDenseMatrix>::M
-where
-    M: Matrix<T: Scalar>,
-    M::V: DefaultDenseMatrix,
-{
-    let ctx = vectors
-        .first()
-        .map(|v| v.context().clone())
-        .unwrap_or_else(M::C::default);
-    let mut ret = <M::V as DefaultDenseMatrix>::M::zeros(nrows, expected_cols, ctx);
-    for (j, vector) in vectors.into_iter().enumerate() {
-        if j < expected_cols {
-            ret.column_mut(j).copy_from(&vector);
-        }
     }
-    ret
 }
 
 fn solve_adjoint_bkwds_with_fwd_bkwd_tag<'solver, M, CG, FwdLS, BwdLS, FwdTag, BwdTag>(
@@ -391,7 +353,6 @@ where
     } else {
         soln.ts.as_slice()
     };
-    let fwd_solver = FwdTag::solver::<FwdLS>(problem)?;
     let mut state: Option<BwdTag::State> = None;
     let mut pending_reset: Option<(usize, FwdTag::State, FwdTag::State)> = None;
     while let Some(current_checkpointing) = checkpointing.pop() {
@@ -407,18 +368,16 @@ where
                 })
         });
         let current_checkpointing = vec![current_checkpointing];
+        let fwd_solver = FwdTag::uninitialised_solver::<FwdLS>(problem)?;
         let mut adjoint = if let Some(state) = state.take() {
-            let adjoint_eqn = problem.adjoint_equations(
-                current_checkpointing,
-                Some(fwd_solver.clone()),
-                nout_override,
-            );
+            let adjoint_eqn =
+                problem.adjoint_equations(current_checkpointing, Some(fwd_solver), nout_override);
             BwdTag::solver_adjoint_from_state::<BwdLS, _>(problem, state, adjoint_eqn)?
         } else {
             BwdTag::solver_adjoint::<BwdLS, _>(
                 problem,
                 current_checkpointing,
-                Some(fwd_solver.clone()),
+                Some(fwd_solver),
                 nout_override,
             )?
         };
@@ -587,7 +546,7 @@ impl OdeSolverType {
         &self,
         problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
         final_time: M::T,
-    ) -> Result<(M::V, <M::V as DefaultDenseMatrix>::M), DiffsolError>
+    ) -> Result<(M::V, Vec<M::V>), DiffsolError>
     where
         M: Matrix<T: Scalar> + DefaultSolver + 'static,
         CG: CodegenModule + 'static,
@@ -621,7 +580,7 @@ impl OdeSolverType {
         checkpoint: &dyn AdjointCheckpoint,
         dgdu_eval: &<M::V as DefaultDenseMatrix>::M,
         t_eval: &[M::T],
-    ) -> Result<<M::V as DefaultDenseMatrix>::M, DiffsolError>
+    ) -> Result<Vec<M::V>, DiffsolError>
     where
         M: Matrix<T: Scalar> + DefaultSolver + LuValidator<M> + KluValidator<M> + 'static,
         CG: CodegenModule + 'static,
@@ -770,7 +729,7 @@ impl OdeSolverType {
 mod tests {
     use diffsol::{
         CodegenModuleCompile, CodegenModuleJit, DefaultDenseMatrix, DefaultSolver, DenseMatrix,
-        Matrix, MatrixCommon, OdeBuilder, OdeSolverProblem, Op,
+        Matrix, MatrixCommon, OdeBuilder, OdeSolverProblem, Op, Vector,
     };
 
     #[cfg(feature = "diffsl-llvm")]
@@ -1057,8 +1016,8 @@ mod tests {
                 &soln.ts,
             )
             .unwrap();
-        assert_eq!(gradient.ncols(), 1);
-        assert!(gradient.get_index(0, 0).is_finite());
+        assert_eq!(gradient.len(), 1);
+        assert!(gradient[0].get_index(0).is_finite());
     }
 
     #[cfg(feature = "diffsl-llvm")]
@@ -1119,8 +1078,8 @@ mod tests {
                     &soln.ts,
                 )
                 .unwrap();
-            assert_eq!(gradient.ncols(), 1);
-            assert!(gradient.get_index(0, 0).is_finite());
+            assert_eq!(gradient.len(), 1);
+            assert!(gradient[0].get_index(0).is_finite());
         }
 
         let mut problem = build_problem::<diffsol::LlvmModule>(logistic_diffsl_code());
@@ -1138,17 +1097,16 @@ mod tests {
             soln.ts.len(),
             problem.context().clone(),
         );
-        let err = OdeSolverType::Bdf
+        let gradient = OdeSolverType::Bdf
             .solve_adjoint_bkwd::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
                 &problem,
                 checkpoint.as_ref(),
                 &dgdu,
                 &soln.ts,
             )
-            .unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("Tsit45 solver does not support adjoint sensitivity analysis"));
+            .unwrap();
+        assert_eq!(gradient.len(), 1);
+        assert!(gradient[0].get_index(0).is_finite());
     }
 
     #[cfg(feature = "diffsl-llvm")]
@@ -1181,8 +1139,8 @@ mod tests {
                     &soln.ts,
                 )
                 .unwrap();
-            assert_eq!(gradient.ncols(), 1);
-            assert!(gradient.get_index(0, 0).is_finite());
+            assert_eq!(gradient.len(), 1);
+            assert!(gradient[0].get_index(0).is_finite());
         }
     }
 

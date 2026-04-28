@@ -1778,7 +1778,7 @@ mod jit_tests {
 
     #[cfg(feature = "diffsl-llvm")]
     #[test]
-    fn tsit45_split_adjoint_backward_reports_unsupported_solver() {
+    fn tsit45_split_adjoint_backward_returns_gradient() {
         let ode = make_ode(
             JitBackendType::Llvm,
             ScalarType::F64,
@@ -1789,15 +1789,16 @@ mod jit_tests {
         let (solution, checkpoint) = ode
             .solve_adjoint_fwd(vector_host(&[2.0]), vector_host(&t_eval))
             .unwrap();
-        let err = match ode.solve_adjoint_bkwd(
-            &solution,
-            &checkpoint,
-            matrix_host(1, t_eval.len(), &[0.0; 4]),
-        ) {
-            Ok(_) => panic!("expected Tsit45 adjoint backward pass to fail"),
-            Err(err) => err.to_string(),
-        };
-        assert!(err.contains("Tsit45 solver does not support adjoint sensitivity analysis"));
+        let gradient = ode
+            .solve_adjoint_bkwd(
+                &solution,
+                &checkpoint,
+                matrix_host(1, t_eval.len(), &[0.0; 4]),
+            )
+            .unwrap();
+        let gradient = gradient.as_array::<f64>().unwrap();
+        assert_eq!(gradient.shape(), &[1, 1]);
+        assert!(gradient[(0, 0)].is_finite());
     }
 
     #[cfg(feature = "diffsl-llvm")]

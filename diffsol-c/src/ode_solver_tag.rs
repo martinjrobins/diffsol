@@ -57,6 +57,19 @@ where
         CG: 'a,
         LS: LinearSolver<M>;
 
+    fn uninitialised_solver<'a, LS>(
+        problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
+    ) -> Result<Self::OdeSolverMethod<'a, LS>, DiffsolError>
+    where
+        M: 'a,
+        CG: 'a,
+        LS: LinearSolver<M>,
+        DiffSl<M, CG>: OdeEquations<M = M, T = M::T, V = M::V, C = M::C>,
+    {
+        let state = Self::State::new_without_initialise(problem)?;
+        Self::solver_with_state::<LS>(problem, state)
+    }
+
     fn solver_sens<'a, LS>(
         problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
     ) -> Result<Self::SensOdeSolverMethod<'a, LS>, DiffsolError>
