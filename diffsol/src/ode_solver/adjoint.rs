@@ -135,7 +135,7 @@ where
                     .unwrap()
                     .pop_last_checkpointing()
                     .unwrap();
-                let fwd_state_plus = checkpointing.last_checkpoint();
+                let fwd_state_plus = checkpointing.first_checkpoint();
                 let fwd_state_minus = self
                     .augmented_eqn()
                     .unwrap()
@@ -147,7 +147,7 @@ where
                     .ok_or_else(|| {
                         ode_solver_error!(
                             Other,
-                            "Checkpointing segment does not have a terminal reset root index"
+                            "Missing reset root metadata between checkpointing segments"
                         )
                     })?;
                 self.apply_reset_with_adjoint(
@@ -168,21 +168,6 @@ where
         // return the state and checkpointing
         Ok((state, aug_eqn.into_checkpointing()))
     }
-}
-
-fn checkpoint_boundary_is_continuous<V>(
-    state_minus: StateRef<'_, V>,
-    state_plus: StateRef<'_, V>,
-) -> bool
-where
-    V: Vector,
-{
-    state_minus.y.len() == state_plus.y.len()
-        && state_minus.dy.len() == state_plus.dy.len()
-        && state_minus.t == state_plus.t
-        && (0..state_minus.y.len()).all(|i| state_minus.y.get_index(i) == state_plus.y.get_index(i))
-        && (0..state_minus.dy.len())
-            .all(|i| state_minus.dy.get_index(i) == state_plus.dy.get_index(i))
 }
 
 fn validate_adjoint_backwards_inputs<'a, Eqn, Solver, AdjointSolver>(

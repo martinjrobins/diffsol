@@ -354,16 +354,24 @@ where
         let fwd_solver = FwdTag::uninitialised_solver::<FwdLS>(problem)?;
         // TODO: remove clone here
         let previous_checkpointing_last_state = previous_checkpointing.last_checkpoint().clone();
+        let previous_checkpointing_terminal_reset_root_idx =
+            previous_checkpointing.terminal_reset_root_idx();
         let adjoint_eqn = problem.adjoint_equations(
             vec![previous_checkpointing],
             Some(fwd_solver),
             nout_override,
         );
         adjoint = BwdTag::solver_adjoint_from_state::<BwdLS, _>(problem, state, adjoint_eqn)?;
+        let root_idx = previous_checkpointing_terminal_reset_root_idx.ok_or_else(|| {
+            ode_solver_error!(
+                Other,
+                "Missing reset root metadata between checkpointing segments"
+            )
+        })?;
         adjoint.apply_reset_with_adjoint(
-            current_checkpointing[0].terminal_reset_root_idx().unwrap(),
+            root_idx,
             previous_checkpointing_last_state.as_ref(),
-            current_checkpointing[0].last_checkpoint().as_ref(),
+            current_checkpointing[0].first_checkpoint().as_ref(),
         )?;
     }
 }

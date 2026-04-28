@@ -1758,19 +1758,19 @@ mod tests {
         );
 
         let state_after_reset = state_after_manual_reset::<Eqn, MethodF>(&first_forward_solver);
-        let dense_forward_solver = build_forward(Some(state_after_reset))
+        build_forward(Some(state_after_reset.clone()))
             .unwrap()
-            .solve_soln_with_checkpointing(&mut forward_soln, &mut checkpointers, None)
+            .solve_soln(&mut forward_soln)
             .unwrap();
         assert!(forward_soln.is_complete());
         assert_eq!(
             forward_soln.stop_reason,
             Some(OdeSolverStopReason::TstopReached)
         );
-        assert_eq!(checkpointers[1].terminal_reset_root_idx(), None);
 
         let mut terminal_soln = Solution::<Eqn::V>::new(forward_stop_time);
-        let terminal_forward_solver = dense_forward_solver
+        let terminal_forward_solver = build_forward(Some(state_after_reset))
+            .unwrap()
             .solve_soln_with_checkpointing(&mut terminal_soln, &mut checkpointers, None)
             .unwrap();
         let terminal_root_idx = match terminal_soln.stop_reason {
@@ -1780,6 +1780,7 @@ mod tests {
             }
             None => panic!("terminal staged solve did not set a stop reason"),
         };
+        assert_eq!(checkpointers.len(), 2);
         assert_eq!(
             checkpointers.last().unwrap().terminal_reset_root_idx(),
             Some(terminal_root_idx)
