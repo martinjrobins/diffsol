@@ -1,5 +1,5 @@
 use crate::{
-    error::OdeSolverError, ode_solver_error, DefaultDenseMatrix, DiffsolError, Matrix,
+    error::OdeSolverError, ode_solver_error, DefaultDenseMatrix, DenseMatrix, DiffsolError, Matrix,
     MatrixCommon, OdeSolverStopReason, Scalar,
 };
 
@@ -85,6 +85,22 @@ impl<V: DefaultDenseMatrix> Solution<V> {
             SolutionMode::Tfinal(t_final) => self.ts.last().map(|&t| t >= t_final).unwrap_or(false),
         }
     }
+
+    pub fn truncate(&mut self) {
+        if let Some(OdeSolverStopReason::RootFound(t_root, _)) = self.stop_reason {
+            let ncols = self
+                .ts
+                .iter()
+                .position(|&t| t > t_root)
+                .unwrap_or(self.ts.len());
+            self.ts.truncate(ncols);
+            self.ys.resize_cols(ncols);
+            for sens in &mut self.y_sens {
+                sens.resize_cols(ncols);
+            }
+        }
+    }
+
     pub fn new(t_final: V::T) -> Self {
         let ctx = V::C::default();
         Self {

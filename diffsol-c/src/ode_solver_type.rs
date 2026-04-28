@@ -99,6 +99,10 @@ where
             Some(OdeSolverStopReason::RootFound(_, root_idx)) if !soln.is_complete() => root_idx,
             _ => continue,
         };
+        if problem.eqn.reset().is_none() {
+            soln.truncate();
+            return Ok(soln);
+        }
         let mut state = solver.into_state();
         problem.eqn.set_model_index(root_idx);
         apply_state_reset(problem, &mut state)?;
@@ -129,6 +133,10 @@ where
             Some(OdeSolverStopReason::RootFound(_, root_idx)) if !soln.is_complete() => root_idx,
             _ => continue,
         };
+        if problem.eqn.reset().is_none() {
+            soln.truncate();
+            return Ok(soln);
+        }
         let mut state = solver.into_state();
         problem.eqn.set_model_index(root_idx);
         apply_state_reset_with_sens(problem, &mut state, root_idx)?;
@@ -165,6 +173,11 @@ where
             Some(OdeSolverStopReason::RootFound(_, root_idx)) if !soln.is_complete() => root_idx,
             _ => continue,
         };
+        if problem.eqn.reset().is_none() {
+            soln.truncate();
+            let final_state = solver.state_clone();
+            return Ok((soln, checkpointing, final_state));
+        }
         let mut state = solver.into_state();
         problem.eqn.set_model_index(root_idx);
         apply_state_reset(problem, &mut state)?;
