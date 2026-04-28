@@ -46,7 +46,6 @@ where
     Tag: OdeSolverMethodTag<M, CG>,
 {
     pub(crate) checkpointing: CheckpointingPath<DiffSl<M, CG>, Tag::State>,
-    pub(crate) stop_reason: diffsol::OdeSolverStopReason<M::T>,
     params: Vec<f64>,
     method: OdeSolverType,
     linear_solver: LinearSolverType,
@@ -61,14 +60,12 @@ where
 {
     pub(crate) fn new(
         checkpointing: CheckpointingPath<DiffSl<M, CG>, Tag::State>,
-        stop_reason: diffsol::OdeSolverStopReason<M::T>,
         params: Vec<f64>,
         method: OdeSolverType,
         linear_solver: LinearSolverType,
     ) -> Self {
         Self {
             checkpointing,
-            stop_reason,
             params,
             method,
             linear_solver,
