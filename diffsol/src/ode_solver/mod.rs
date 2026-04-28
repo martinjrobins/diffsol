@@ -1407,9 +1407,10 @@ mod tests {
         missing_metadata_adjoint_state
             .as_mut()
             .state_mut_adjoint_terminal_root(
-                &mut missing_metadata_adjoint_eqn,
+                &problem.eqn,
                 post_reset_root_idx,
                 &final_forward_state,
+                problem.integrate_out,
             )
             .unwrap();
         let missing_metadata_adjoint =
@@ -1433,9 +1434,10 @@ mod tests {
         adjoint_state
             .as_mut()
             .state_mut_adjoint_terminal_root(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 post_reset_root_idx,
                 &final_forward_state,
+                problem.integrate_out,
             )
             .unwrap();
         let adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();
@@ -1545,9 +1547,10 @@ mod tests {
         adjoint_state
             .as_mut()
             .state_mut_adjoint_terminal_root(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 post_reset_root_idx,
                 &final_forward_state,
+                problem.integrate_out,
             )
             .unwrap();
         let adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();
@@ -1671,9 +1674,10 @@ mod tests {
         adjoint_state
             .as_mut()
             .state_mut_adjoint_terminal_root(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 terminal_root_idx,
                 &final_forward_state,
+                problem.integrate_out,
             )
             .unwrap();
         let adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();
@@ -1806,9 +1810,10 @@ mod tests {
         adjoint_state
             .as_mut()
             .state_mut_adjoint_terminal_root(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 terminal_root_idx,
                 &final_forward_state,
+                problem.integrate_out,
             )
             .unwrap();
         let adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();

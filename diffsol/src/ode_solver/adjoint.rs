@@ -34,16 +34,18 @@ where
                 })?,
             )
         };
+        let integrate_out = self.problem().integrate_out;
         let (mut state, adj_eqn) = self
             .state_and_augmented_eqn_mut()
             .ok_or_else(|| ode_solver_error!(Other, "No augmented equations"))?;
         state.state_mut_op_with_adjoint_and_reset(
-            adj_eqn,
+            adj_eqn.eqn(),
             &reset,
             &root,
             root_idx,
             fwd_state_minus,
             fwd_state_plus,
+            integrate_out,
         )
     }
 

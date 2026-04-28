@@ -7,12 +7,11 @@ use crate::Scalar;
 use crate::{
     error::{DiffsolError, OdeSolverError},
     nonlinear_solver::{convergence::Convergence, NonLinearSolver},
-    ode_solver_error, scale, AdjointEquations, AugmentedOdeEquations,
-    AugmentedOdeEquationsImplicit, ConstantOp, InitOp, LinearOp, LinearSolver, Matrix,
-    NewtonNonlinearSolver, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
-    NonLinearOpSensAdjoint, NonLinearOpTimePartial, OdeEquations, OdeEquationsAdjoint,
-    OdeEquationsImplicit, OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverMethod,
-    OdeSolverProblem, Op, SensEquations, Vector, VectorIndex,
+    ode_solver_error, scale, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp,
+    InitOp, LinearOp, LinearSolver, Matrix, NewtonNonlinearSolver, NonLinearOp, NonLinearOpAdjoint,
+    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, NonLinearOpTimePartial,
+    OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
+    OdeEquationsImplicitSens, OdeSolverProblem, Op, SensEquations, Vector, VectorIndex,
 };
 use crate::{non_linear_solver_error, BacktrackingLineSearch, NoLineSearch};
 
@@ -78,7 +77,6 @@ pub struct StateRefMut<'a, V: Vector> {
     pub t: &'a mut V::T,
     pub h: &'a mut V::T,
 }
-
 
 impl<V: Vector> StateRefMut<'_, V> {
     /// Apply the equation set's reset operator to the current state in-place.
@@ -276,17 +274,16 @@ impl<V: Vector> StateRefMut<'_, V> {
     ///
     /// This helper pulls the reset and root operators from `eqn`, checks that both are
     /// configured, then delegates to [`Self::state_mut_op_with_adjoint_and_reset`].
-    pub fn apply_reset_with_adjoint<'a, Eqn, Method>(
+    pub fn apply_reset_with_adjoint<Eqn>(
         &mut self,
         eqn: &Eqn,
-        adj_eqn: &mut AdjointEquations<'a, Eqn, Method>,
         root_idx: usize,
         fwd_state_minus: StateRef<'_, V>,
         fwd_state_plus: StateRef<'_, V>,
+        integrate_out: bool,
     ) -> Result<(), DiffsolError>
     where
         Eqn: OdeEquationsImplicitAdjoint<T = V::T, V = V, C = V::C>,
-        Method: OdeSolverMethod<'a, Eqn>,
     {
         let reset = eqn.reset().ok_or_else(|| {
             ode_solver_error!(Other, "No reset operator configured for this problem")
@@ -295,17 +292,18 @@ impl<V: Vector> StateRefMut<'_, V> {
             ode_solver_error!(Other, "No root operator configured for this problem")
         })?;
         self.state_mut_op_with_adjoint_and_reset(
-            adj_eqn,
+            eqn,
             &reset,
             &root,
             root_idx,
             fwd_state_minus,
             fwd_state_plus,
+            integrate_out,
         )
     }
 
     /// Propagate adjoint variables through a time-dependent root-triggered reset.
-    /// 
+    ///
     /// This method assumes `self` stores the post-event adjoint state `(lambda^+, q^+)`,
     /// while `fwd_state_minus` and `fwd_state_plus` provide the forward state derivatives
     /// immediately before and after the reset. The terminal-root contribution for a root-defined
@@ -335,18 +333,18 @@ impl<V: Vector> StateRefMut<'_, V> {
     /// are updated to the pre-event values.
     ///
     /// Note: mass matrix equations are not supported for this operation.
-    pub fn state_mut_op_with_adjoint_and_reset<'a, Eqn, Method, G, R>(
+    pub fn state_mut_op_with_adjoint_and_reset<'a, Eqn, G, R>(
         &mut self,
-        adj_eqn: &mut AdjointEquations<'a, Eqn, Method>,
+        eqn: &Eqn,
         reset_op: &G,
         root_op: &R,
         root_idx: usize,
         fwd_state_minus: StateRef<'_, V>,
         fwd_state_plus: StateRef<'_, V>,
+        integrate_out: bool,
     ) -> Result<(), DiffsolError>
     where
         Eqn: OdeEquationsAdjoint<T = V::T, V = V, C = V::C>,
-        Method: OdeSolverMethod<'a, Eqn>,
         G: NonLinearOpJacobian<T = V::T, V = V, M = Eqn::M, C = V::C>
             + NonLinearOpAdjoint<T = V::T, V = V, M = Eqn::M, C = V::C>
             + NonLinearOpSensAdjoint<T = V::T, V = V, M = Eqn::M, C = V::C>
@@ -356,7 +354,6 @@ impl<V: Vector> StateRefMut<'_, V> {
             + NonLinearOpSensAdjoint<T = V::T, V = V, M = Eqn::M, C = V::C>
             + NonLinearOpTimePartial<T = V::T, V = V, M = Eqn::M, C = V::C>,
     {
-        let eqn = adj_eqn.eqn();
         if eqn.mass().is_some() {
             return Err(ode_solver_error!(MassMatrixNotSupported));
         }
@@ -400,7 +397,7 @@ impl<V: Vector> StateRefMut<'_, V> {
             ));
         }
 
-        let (l_minus, l_plus) = if adj_eqn.with_out() {
+        let (l_minus, l_plus) = if integrate_out {
             if let Some(out_op) = eqn.out() {
                 (
                     Some(out_op.call(y_minus, t_event)),
@@ -457,18 +454,19 @@ impl<V: Vector> StateRefMut<'_, V> {
     }
 
     /// Add the terminal-root adjoint correction for a root-defined final time.
-    /// 
+    ///
     /// Given a forward terminal state satisfying the active root condition
     /// `r_k(y_f, t_f, p) = 0`, this method adds the terminal contribution
     /// `lambda_f += r_{x,k}^T * (u_k / d)` and `q_f += r_{p,k}^T * (u_k / d)` to each adjoint
     /// channel, where `u_k` is the corresponding model output component and
     /// `d = [r_x f_f]_k + [r_t]_k`.
     ///
-    pub fn state_mut_adjoint_terminal_root<'a, Eqn, Method, State>(
+    pub fn state_mut_adjoint_terminal_root<'a, Eqn, State>(
         &mut self,
-        adj_eqn: &mut AdjointEquations<'a, Eqn, Method>,
+        eqn: &Eqn,
         root_idx: usize,
         forward: &State,
+        integrate_out: bool,
     ) -> Result<(), DiffsolError>
     where
         Eqn: OdeEquationsAdjoint<
@@ -481,16 +479,13 @@ impl<V: Vector> StateRefMut<'_, V> {
                       + NonLinearOpTimePartial<T = V::T, V = V, M = Eqn::M, C = V::C>,
             Out: NonLinearOp<T = V::T, V = V, M = Eqn::M, C = V::C>,
         >,
-        Method: OdeSolverMethod<'a, Eqn>,
         State: OdeSolverState<V>,
     {
-        let eqn = adj_eqn.eqn();
-
         if eqn.mass().is_some() {
             return Err(ode_solver_error!(MassMatrixNotSupported));
         }
 
-        if !adj_eqn.with_out() {
+        if !integrate_out {
             return Ok(());
         }
 
@@ -1114,7 +1109,7 @@ mod test {
         op::closure_with_adjoint::ClosureWithAdjoint,
         op::closure_with_sens::ClosureWithSens,
         BdfState, LinearSolver, Matrix, NonLinearOp, NonLinearOpTimePartial, OdeBuilder,
-        OdeEquations, OdeSolverMethod, OdeSolverState, ParameterisedOp, Vector, VectorHost,
+        OdeEquations, OdeSolverState, ParameterisedOp, Vector, VectorHost,
     };
     use num_traits::FromPrimitive;
 
@@ -1874,11 +1869,6 @@ mod test {
         fwd_state_minus.as_mut().dy[0] = 0.5;
         let mut fwd_state_plus = fwd_state_minus.clone();
         fwd_state_plus.as_mut().dy[0] = 0.8275;
-        let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
-        let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(1.0, None).unwrap();
-        let mut adjoint_eqn =
-            problem.adjoint_equations(checkpointer, Some(forward_solver.clone()), Some(2));
-
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, p: &TestVec, _t, y: &mut TestVec| {
                 y[0] = 1.5 * x[0] + 0.2 * p[0] - 0.1 * p[1]
@@ -1925,12 +1915,13 @@ mod test {
         state
             .as_mut()
             .state_mut_op_with_adjoint_and_reset(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 &reset,
                 &root,
                 1,
                 fwd_state_minus.as_ref(),
                 fwd_state_plus.as_ref(),
+                problem.integrate_out,
             )
             .unwrap();
 
@@ -1962,13 +1953,6 @@ mod test {
         fwd_state_minus.as_mut().dy[0] = 0.5;
         let mut fwd_state_plus = fwd_state_minus.clone();
         fwd_state_plus.as_mut().dy[0] = 0.8275;
-        let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
-        let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(1.0, None).unwrap();
-        let mut adjoint_eqn_root0 =
-            problem.adjoint_equations(checkpointer.clone(), Some(forward_solver.clone()), Some(2));
-        let mut adjoint_eqn_root1 =
-            problem.adjoint_equations(checkpointer, Some(forward_solver.clone()), Some(2));
-
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, p: &TestVec, _t, y: &mut TestVec| {
                 y[0] = 1.5 * x[0] + 0.2 * p[0] - 0.1 * p[1]
@@ -2012,23 +1996,25 @@ mod test {
         state_root0
             .as_mut()
             .state_mut_op_with_adjoint_and_reset(
-                &mut adjoint_eqn_root0,
+                &problem.eqn,
                 &reset,
                 &root,
                 0,
                 fwd_state_minus.as_ref(),
                 fwd_state_plus.as_ref(),
+                problem.integrate_out,
             )
             .unwrap();
         state_root1
             .as_mut()
             .state_mut_op_with_adjoint_and_reset(
-                &mut adjoint_eqn_root1,
+                &problem.eqn,
                 &reset,
                 &root,
                 1,
                 fwd_state_minus.as_ref(),
                 fwd_state_plus.as_ref(),
+                problem.integrate_out,
             )
             .unwrap();
 
@@ -2055,11 +2041,6 @@ mod test {
         fwd_state_minus.as_mut().dy[0] = 0.2;
         let mut fwd_state_plus = fwd_state_minus.clone();
         fwd_state_plus.as_mut().dy[0] = 0.58;
-        let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
-        let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(4.0, None).unwrap();
-        let mut adjoint_eqn =
-            problem.adjoint_equations(checkpointer, Some(forward_solver.clone()), Some(2));
-
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, p: &TestVec, t, y: &mut TestVec| {
                 y[0] = 1.2 * x[0] + 0.4 * p[0] - 0.3 * p[1] + 0.8 * t
@@ -2100,12 +2081,13 @@ mod test {
         state
             .as_mut()
             .state_mut_op_with_adjoint_and_reset(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 &reset,
                 &root,
                 0,
                 fwd_state_minus.as_ref(),
                 fwd_state_plus.as_ref(),
+                problem.integrate_out,
             )
             .unwrap();
 
@@ -2135,11 +2117,6 @@ mod test {
         let mut fwd_state_minus = make_state(&forward_problem, 0.0, 1.0, [0.0, 0.0]);
         fwd_state_minus.as_mut().dy[0] = 1.0;
         let fwd_state_plus = fwd_state_minus.clone();
-        let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
-        let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(1.0, None).unwrap();
-        let mut adjoint_eqn =
-            problem.adjoint_equations(checkpointer, Some(forward_solver.clone()), Some(2));
-
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
@@ -2174,12 +2151,13 @@ mod test {
         let err = state
             .as_mut()
             .state_mut_op_with_adjoint_and_reset(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 &reset,
                 &root,
                 2,
                 fwd_state_minus.as_ref(),
                 fwd_state_plus.as_ref(),
+                problem.integrate_out,
             )
             .unwrap_err();
         assert_other_error(err, "root index 2 out of bounds");
@@ -2201,11 +2179,6 @@ mod test {
         let mut fwd_state_minus = make_state(&forward_problem, 0.0, 0.0, [0.0, 0.0]);
         fwd_state_minus.as_mut().dy[0] = 0.0;
         let fwd_state_plus = fwd_state_minus.clone();
-        let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
-        let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(1.0, None).unwrap();
-        let mut adjoint_eqn =
-            problem.adjoint_equations(checkpointer, Some(forward_solver.clone()), Some(2));
-
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
@@ -2232,12 +2205,13 @@ mod test {
         let err = state
             .as_mut()
             .state_mut_op_with_adjoint_and_reset(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 &reset,
                 &root,
                 0,
                 fwd_state_minus.as_ref(),
                 fwd_state_plus.as_ref(),
+                problem.integrate_out,
             )
             .unwrap_err();
         assert_other_error(err, "active root derivative along flow is zero");
@@ -2262,11 +2236,6 @@ mod test {
         let mut state = TestState::new_from_common(common);
         let fwd_state_minus = state.clone();
         let fwd_state_plus = state.clone();
-        let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
-        let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(1.0, None).unwrap();
-        let mut adjoint_eqn =
-            problem.adjoint_equations(checkpointer, Some(forward_solver.clone()), Some(2));
-
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
@@ -2293,12 +2262,13 @@ mod test {
         let err = state
             .as_mut()
             .state_mut_op_with_adjoint_and_reset(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 &reset,
                 &root,
                 0,
                 fwd_state_minus.as_ref(),
                 fwd_state_plus.as_ref(),
+                problem.integrate_out,
             )
             .unwrap_err();
         assert!(matches!(
