@@ -79,6 +79,7 @@ where
     /// and `n` is the number of timepoints. The i-th column of `dgdu_eval` is the gradient of `g_i` with respect to `u_i`.
     /// The input `t_eval` is a vector of length `n`, where the i-th element is the timepoint `t_i`.
     ///
+    #[allow(clippy::type_complexity)]
     fn solve_adjoint_backwards_pass(
         mut self,
         t_eval: &[Eqn::T],

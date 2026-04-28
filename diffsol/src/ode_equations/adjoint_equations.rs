@@ -72,7 +72,7 @@ where
 
     pub(crate) fn pop_last_checkpointing(&mut self) -> Option<crate::Checkpointing<Eqn, State>> {
         if self.active_checkpointer == self.checkpointers.len() - 1 {
-            self.active_checkpointer = self.active_checkpointer.checked_sub(1).unwrap_or(0);
+            self.active_checkpointer = self.active_checkpointer.saturating_sub(1);
         }
         self.checkpointers.pop()
     }

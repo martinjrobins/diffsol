@@ -1360,6 +1360,7 @@ mod tests {
         module::{CodegenModuleCompile, CodegenModuleJit},
         scalar::Scalar as DiffSlScalar,
     };
+    #[cfg(feature = "diffsl-llvm")]
     use diffsl::ObjectModule;
 
     use crate::Scalar;
@@ -1373,6 +1374,7 @@ mod tests {
     use super::{DiffSl, DiffSlContext};
     use num_traits::{FromPrimitive, One, ToPrimitive, Zero};
     use paste::paste;
+    #[cfg(feature = "diffsl-llvm")]
     use serde_json;
 
     /// Macro to generate test functions for all combinations of backend (cranelift/llvm) and scalar type (f32/f64)
