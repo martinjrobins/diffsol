@@ -1,7 +1,8 @@
 use diffsol::matrix::MatrixRef;
 use diffsol::{
-    Bdf, BdfState, CodegenModule, DefaultDenseMatrix, DiffSl, DiffsolError, ExplicitRk,
-    LinearSolver, Matrix, NewtonNonlinearSolver, NoLineSearch, OdeEquations,
+    AdjointEquations, AdjointOdeSolverMethod, Bdf, BdfState, CheckpointingPath, CodegenModule,
+    DefaultDenseMatrix, DiffSl, DiffsolError, ExplicitRk, LinearSolver, Matrix,
+    NewtonNonlinearSolver, NoLineSearch, OdeEquations, OdeEquationsImplicitAdjoint,
     OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverProblem, OdeSolverState, RkState, Sdirk,
     SensEquations, SensitivitiesOdeSolverMethod, VectorRef,
 };
@@ -29,6 +30,15 @@ where
         CG: 'a,
         LS: LinearSolver<M>,
         DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>;
+
+    type AdjointOdeSolverMethod<'a, LS, S>: AdjointOdeSolverMethod<'a, DiffSl<M, CG>, S>
+        + OdeSolverMethod<'a, DiffSl<M, CG>, State = Self::State>
+    where
+        M: 'a,
+        CG: 'a,
+        LS: LinearSolver<M>,
+        S: OdeSolverMethod<'a, DiffSl<M, CG>>,
+        DiffSl<M, CG>: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>;
 
     fn solver<'a, LS>(
         problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
@@ -65,6 +75,31 @@ where
         CG: 'a,
         LS: LinearSolver<M>,
         DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>;
+
+    fn solver_adjoint<'a, LS, S>(
+        problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
+        checkpointing: CheckpointingPath<DiffSl<M, CG>, S::State>,
+        solver: Option<S>,
+        nout_override: Option<usize>,
+    ) -> Result<Self::AdjointOdeSolverMethod<'a, LS, S>, DiffsolError>
+    where
+        M: 'a,
+        CG: 'a,
+        LS: LinearSolver<M>,
+        S: OdeSolverMethod<'a, DiffSl<M, CG>>,
+        DiffSl<M, CG>: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>;
+
+    fn solver_adjoint_from_state<'a, LS, S>(
+        problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
+        state: Self::State,
+        adjoint_eqn: AdjointEquations<'a, DiffSl<M, CG>, S>,
+    ) -> Result<Self::AdjointOdeSolverMethod<'a, LS, S>, DiffsolError>
+    where
+        M: 'a,
+        CG: 'a,
+        LS: LinearSolver<M>,
+        S: OdeSolverMethod<'a, DiffSl<M, CG>>,
+        DiffSl<M, CG>: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>;
 }
 
 pub(crate) struct BdfTag;
@@ -102,6 +137,21 @@ where
         M: 'a,
         CG: 'a,
         LS: LinearSolver<M>;
+
+    type AdjointOdeSolverMethod<'a, LS, S>
+        = Bdf<
+        'a,
+        DiffSl<M, CG>,
+        NewtonNonlinearSolver<M, LS, NoLineSearch>,
+        <M::V as DefaultDenseMatrix>::M,
+        AdjointEquations<'a, DiffSl<M, CG>, S>,
+    >
+    where
+        M: 'a,
+        CG: 'a,
+        LS: LinearSolver<M>,
+        S: OdeSolverMethod<'a, DiffSl<M, CG>>,
+        DiffSl<M, CG>: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>;
 
     fn solver<'a, LS>(
         problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
@@ -148,6 +198,37 @@ where
     {
         problem.bdf_solver_sens::<LS>(state)
     }
+
+    fn solver_adjoint<'a, LS, S>(
+        problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
+        checkpointing: CheckpointingPath<DiffSl<M, CG>, S::State>,
+        solver: Option<S>,
+        nout_override: Option<usize>,
+    ) -> Result<Self::AdjointOdeSolverMethod<'a, LS, S>, DiffsolError>
+    where
+        M: 'a,
+        CG: 'a,
+        LS: LinearSolver<M>,
+        S: OdeSolverMethod<'a, DiffSl<M, CG>>,
+        DiffSl<M, CG>: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    {
+        problem.bdf_solver_adjoint::<LS, _>(checkpointing, solver, nout_override)
+    }
+
+    fn solver_adjoint_from_state<'a, LS, S>(
+        problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
+        state: BdfState<M::V>,
+        adjoint_eqn: AdjointEquations<'a, DiffSl<M, CG>, S>,
+    ) -> Result<Self::AdjointOdeSolverMethod<'a, LS, S>, DiffsolError>
+    where
+        M: 'a,
+        CG: 'a,
+        LS: LinearSolver<M>,
+        S: OdeSolverMethod<'a, DiffSl<M, CG>>,
+        DiffSl<M, CG>: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    {
+        problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn)
+    }
 }
 
 impl<M, CG> OdeSolverMethodTag<M, CG> for Esdirk34Tag
@@ -180,6 +261,21 @@ where
         M: 'a,
         CG: 'a,
         LS: LinearSolver<M>;
+
+    type AdjointOdeSolverMethod<'a, LS, S>
+        = Sdirk<
+        'a,
+        DiffSl<M, CG>,
+        LS,
+        <M::V as DefaultDenseMatrix>::M,
+        AdjointEquations<'a, DiffSl<M, CG>, S>,
+    >
+    where
+        M: 'a,
+        CG: 'a,
+        LS: LinearSolver<M>,
+        S: OdeSolverMethod<'a, DiffSl<M, CG>>,
+        DiffSl<M, CG>: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>;
 
     fn solver<'a, LS>(
         problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
@@ -226,6 +322,37 @@ where
     {
         problem.esdirk34_solver_sens::<LS>(state)
     }
+
+    fn solver_adjoint<'a, LS, S>(
+        problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
+        checkpointing: CheckpointingPath<DiffSl<M, CG>, S::State>,
+        solver: Option<S>,
+        nout_override: Option<usize>,
+    ) -> Result<Self::AdjointOdeSolverMethod<'a, LS, S>, DiffsolError>
+    where
+        M: 'a,
+        CG: 'a,
+        LS: LinearSolver<M>,
+        S: OdeSolverMethod<'a, DiffSl<M, CG>>,
+        DiffSl<M, CG>: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    {
+        problem.esdirk34_solver_adjoint::<LS, _>(checkpointing, solver, nout_override)
+    }
+
+    fn solver_adjoint_from_state<'a, LS, S>(
+        problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
+        state: RkState<M::V>,
+        adjoint_eqn: AdjointEquations<'a, DiffSl<M, CG>, S>,
+    ) -> Result<Self::AdjointOdeSolverMethod<'a, LS, S>, DiffsolError>
+    where
+        M: 'a,
+        CG: 'a,
+        LS: LinearSolver<M>,
+        S: OdeSolverMethod<'a, DiffSl<M, CG>>,
+        DiffSl<M, CG>: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    {
+        problem.esdirk34_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn)
+    }
 }
 
 impl<M, CG> OdeSolverMethodTag<M, CG> for TrBdf2Tag
@@ -258,6 +385,21 @@ where
         M: 'a,
         CG: 'a,
         LS: LinearSolver<M>;
+
+    type AdjointOdeSolverMethod<'a, LS, S>
+        = Sdirk<
+        'a,
+        DiffSl<M, CG>,
+        LS,
+        <M::V as DefaultDenseMatrix>::M,
+        AdjointEquations<'a, DiffSl<M, CG>, S>,
+    >
+    where
+        M: 'a,
+        CG: 'a,
+        LS: LinearSolver<M>,
+        S: OdeSolverMethod<'a, DiffSl<M, CG>>,
+        DiffSl<M, CG>: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>;
 
     fn solver<'a, LS>(
         problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
@@ -304,6 +446,37 @@ where
     {
         problem.tr_bdf2_solver_sens::<LS>(state)
     }
+
+    fn solver_adjoint<'a, LS, S>(
+        problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
+        checkpointing: CheckpointingPath<DiffSl<M, CG>, S::State>,
+        solver: Option<S>,
+        nout_override: Option<usize>,
+    ) -> Result<Self::AdjointOdeSolverMethod<'a, LS, S>, DiffsolError>
+    where
+        M: 'a,
+        CG: 'a,
+        LS: LinearSolver<M>,
+        S: OdeSolverMethod<'a, DiffSl<M, CG>>,
+        DiffSl<M, CG>: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    {
+        problem.tr_bdf2_solver_adjoint::<LS, _>(checkpointing, solver, nout_override)
+    }
+
+    fn solver_adjoint_from_state<'a, LS, S>(
+        problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
+        state: RkState<M::V>,
+        adjoint_eqn: AdjointEquations<'a, DiffSl<M, CG>, S>,
+    ) -> Result<Self::AdjointOdeSolverMethod<'a, LS, S>, DiffsolError>
+    where
+        M: 'a,
+        CG: 'a,
+        LS: LinearSolver<M>,
+        S: OdeSolverMethod<'a, DiffSl<M, CG>>,
+        DiffSl<M, CG>: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    {
+        problem.tr_bdf2_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn)
+    }
 }
 
 impl<M, CG> OdeSolverMethodTag<M, CG> for Tsit45Tag
@@ -335,6 +508,20 @@ where
         M: 'a,
         CG: 'a,
         LS: LinearSolver<M>;
+
+    type AdjointOdeSolverMethod<'a, LS, S>
+        = ExplicitRk<
+        'a,
+        DiffSl<M, CG>,
+        <M::V as DefaultDenseMatrix>::M,
+        AdjointEquations<'a, DiffSl<M, CG>, S>,
+    >
+    where
+        M: 'a,
+        CG: 'a,
+        LS: LinearSolver<M>,
+        S: OdeSolverMethod<'a, DiffSl<M, CG>>,
+        DiffSl<M, CG>: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>;
 
     fn solver<'a, LS>(
         problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
@@ -380,5 +567,36 @@ where
         LS: LinearSolver<M>,
     {
         problem.tsit45_solver_sens(state)
+    }
+
+    fn solver_adjoint<'a, LS, S>(
+        problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
+        checkpointing: CheckpointingPath<DiffSl<M, CG>, S::State>,
+        solver: Option<S>,
+        nout_override: Option<usize>,
+    ) -> Result<Self::AdjointOdeSolverMethod<'a, LS, S>, DiffsolError>
+    where
+        M: 'a,
+        CG: 'a,
+        LS: LinearSolver<M>,
+        S: OdeSolverMethod<'a, DiffSl<M, CG>>,
+        DiffSl<M, CG>: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    {
+        problem.tsit45_solver_adjoint(checkpointing, solver, nout_override)
+    }
+
+    fn solver_adjoint_from_state<'a, LS, S>(
+        problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
+        state: RkState<M::V>,
+        adjoint_eqn: AdjointEquations<'a, DiffSl<M, CG>, S>,
+    ) -> Result<Self::AdjointOdeSolverMethod<'a, LS, S>, DiffsolError>
+    where
+        M: 'a,
+        CG: 'a,
+        LS: LinearSolver<M>,
+        S: OdeSolverMethod<'a, DiffSl<M, CG>>,
+        DiffSl<M, CG>: OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    {
+        problem.tsit45_solver_adjoint_from_state(state, adjoint_eqn)
     }
 }
