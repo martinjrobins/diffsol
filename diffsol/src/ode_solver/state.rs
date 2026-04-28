@@ -333,7 +333,8 @@ impl<V: Vector> StateRefMut<'_, V> {
     /// are updated to the pre-event values.
     ///
     /// Note: mass matrix equations are not supported for this operation.
-    pub fn state_mut_op_with_adjoint_and_reset<'a, Eqn, G, R>(
+    #[allow(clippy::too_many_arguments)]
+    pub fn state_mut_op_with_adjoint_and_reset<Eqn, G, R>(
         &mut self,
         eqn: &Eqn,
         reset_op: &G,
@@ -461,7 +462,7 @@ impl<V: Vector> StateRefMut<'_, V> {
     /// channel, where `u_k` is the corresponding model output component and
     /// `d = [r_x f_f]_k + [r_t]_k`.
     ///
-    pub fn state_mut_adjoint_terminal_root<'a, Eqn, State>(
+    pub fn state_mut_adjoint_terminal_root<Eqn, State>(
         &mut self,
         eqn: &Eqn,
         root_idx: usize,

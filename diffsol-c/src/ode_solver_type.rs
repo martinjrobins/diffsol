@@ -355,7 +355,8 @@ where
         nout_override,
     )?;
     loop {
-        let (mut state, adjoint_eqn) = adjoint.solve_adjoint_backwards_pass(t_eval, dgdu_eval)?;
+        let (mut state, adjoint_checkpointing) =
+            adjoint.solve_adjoint_backwards_pass(t_eval, dgdu_eval)?;
         let Some(previous_checkpointing) = checkpointing.pop() else {
             return Ok(state.into_common().sg);
         };
@@ -368,7 +369,12 @@ where
             })
             .unwrap_or(0);
         let fwd_state_minus = previous_checkpointing.last_checkpoint();
-        let fwd_state_plus = adjoint_eqn.checkpointing_first_state(0);
+        let fwd_state_plus = adjoint_checkpointing
+            .first()
+            .ok_or_else(|| {
+                ode_solver_error!(Other, "Adjoint backward pass returned no checkpointing")
+            })?
+            .first_checkpoint();
         state.as_mut().apply_reset_with_adjoint(
             problem.eqn(),
             previous_checkpointing.terminal_reset_root_idx().unwrap(),
@@ -376,7 +382,6 @@ where
             fwd_state_plus.as_ref(),
             problem.integrate_out,
         )?;
-        drop(adjoint_eqn);
         problem.eqn_mut().set_model_index(model_index);
         let fwd_solver = FwdTag::uninitialised_solver::<FwdLS>(&*problem)?;
         // TODO: remove clone here

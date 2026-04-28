@@ -1,9 +1,10 @@
 use crate::{
     error::{DiffsolError, OdeSolverError},
     ode_solver_error, AdjointEquations, AugmentedOdeEquations, AugmentedOdeSolverMethod,
-    DefaultDenseMatrix, DefaultSolver, DenseMatrix, LinearSolver, Matrix, MatrixCommon, MatrixOp,
-    NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsImplicitAdjoint,
-    OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op, StateRef, Vector, VectorIndex,
+    CheckpointingPath, DefaultDenseMatrix, DefaultSolver, DenseMatrix, LinearSolver, Matrix,
+    MatrixCommon, MatrixOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations,
+    OdeEquationsImplicitAdjoint, OdeSolverMethod, OdeSolverState, OdeSolverStopReason, Op,
+    StateRef, Vector, VectorIndex,
 };
 
 use num_traits::{One, Zero};
@@ -85,7 +86,7 @@ where
         mut self,
         t_eval: &[Eqn::T],
         dgdu_eval: &[&<Eqn::V as DefaultDenseMatrix>::M],
-    ) -> Result<(Self::State, AdjointEquations<'a, Eqn, Solver>), DiffsolError>
+    ) -> Result<(Self::State, CheckpointingPath<Eqn, Solver::State>), DiffsolError>
     where
         Eqn::V: DefaultDenseMatrix,
         Eqn::M: DefaultSolver,
@@ -167,8 +168,7 @@ where
             aug_eqn.correct_sg_for_init(problem_t0, state_mut.s, state_mut.sg);
         }
 
-        // return the state and checkpointing
-        Ok((state, aug_eqn))
+        Ok((state, aug_eqn.into_checkpointing()))
     }
 }
 
