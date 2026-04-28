@@ -2,7 +2,7 @@ use diffsol::matrix::MatrixRef;
 use diffsol::{
     Bdf, BdfState, CodegenModule, DefaultDenseMatrix, DiffSl, DiffsolError, ExplicitRk,
     LinearSolver, Matrix, NewtonNonlinearSolver, NoLineSearch, OdeEquations, OdeEquationsImplicit,
-    OdeSolverMethod, OdeSolverProblem, RkState, Sdirk, VectorRef,
+    OdeSolverMethod, OdeSolverProblem, OdeSolverState, RkState, Sdirk, VectorRef,
 };
 
 use crate::scalar_type::Scalar;
@@ -13,7 +13,9 @@ where
     CG: CodegenModule,
     DiffSl<M, CG>: OdeEquations,
 {
-    type OdeSolverMethod<'a, LS>: OdeSolverMethod<'a, DiffSl<M, CG>>
+    type State: OdeSolverState<M::V>;
+
+    type OdeSolverMethod<'a, LS>: OdeSolverMethod<'a, DiffSl<M, CG>, State = Self::State>
     where
         M: 'a,
         CG: 'a,
@@ -29,7 +31,7 @@ where
 
     fn solver_with_state<'a, LS>(
         problem: &'a OdeSolverProblem<DiffSl<M, CG>>,
-        state: <Self::OdeSolverMethod<'a, LS> as OdeSolverMethod<'a, DiffSl<M, CG>>>::State,
+        state: Self::State,
     ) -> Result<Self::OdeSolverMethod<'a, LS>, DiffsolError>
     where
         M: 'a,
@@ -51,6 +53,8 @@ where
     for<'b> &'b M::V: VectorRef<M::V>,
     for<'b> &'b M: MatrixRef<M>,
 {
+    type State = BdfState<M::V>;
+
     type OdeSolverMethod<'a, LS>
         = Bdf<'a, DiffSl<M, CG>, NewtonNonlinearSolver<M, LS, NoLineSearch>>
     where
@@ -91,6 +95,8 @@ where
     for<'b> &'b M::V: VectorRef<M::V>,
     for<'b> &'b M: MatrixRef<M>,
 {
+    type State = RkState<M::V>;
+
     type OdeSolverMethod<'a, LS>
         = Sdirk<'a, DiffSl<M, CG>, LS, <M::V as DefaultDenseMatrix>::M>
     where
@@ -131,6 +137,8 @@ where
     for<'b> &'b M::V: VectorRef<M::V>,
     for<'b> &'b M: MatrixRef<M>,
 {
+    type State = RkState<M::V>;
+
     type OdeSolverMethod<'a, LS>
         = Sdirk<'a, DiffSl<M, CG>, LS, <M::V as DefaultDenseMatrix>::M>
     where
@@ -171,6 +179,8 @@ where
     for<'b> &'b M::V: VectorRef<M::V>,
     for<'b> &'b M: MatrixRef<M>,
 {
+    type State = RkState<M::V>;
+
     type OdeSolverMethod<'a, LS>
         = ExplicitRk<'a, DiffSl<M, CG>, <M::V as DefaultDenseMatrix>::M>
     where

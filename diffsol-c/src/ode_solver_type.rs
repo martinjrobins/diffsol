@@ -119,6 +119,34 @@ where
     Ok(soln)
 }
 
+fn solve_hybrid_with_tag<M, CG, LS, Tag>(
+    problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+    mut soln: Solution<M::V>,
+) -> Result<Solution<M::V>, DiffsolError>
+where
+    M: Matrix<T: Scalar>,
+    CG: CodegenModule,
+    M::V: VectorHost + DefaultDenseMatrix,
+    LS: LinearSolver<M>,
+    Tag: OdeSolverMethodTag<M, CG>,
+    for<'b> &'b M::V: VectorRef<M::V>,
+    for<'b> &'b M: MatrixRef<M>,
+{
+    let mut solver = Tag::solver::<LS>(problem)?;
+    while !soln.is_complete() {
+        solver = solver.solve_soln(&mut soln)?;
+        let root_idx = match soln.stop_reason {
+            Some(OdeSolverStopReason::RootFound(_, root_idx)) if !soln.is_complete() => root_idx,
+            _ => continue,
+        };
+        let mut state = solver.into_state();
+        problem.eqn.set_model_index(root_idx);
+        apply_state_reset(problem, &mut state)?;
+        solver = Tag::solver_with_state::<LS>(problem, state)?;
+    }
+    Ok(soln)
+}
+
 impl OdeSolverType {
     pub(crate) fn solve<M, CG, LS>(
         &self,
@@ -181,84 +209,16 @@ impl OdeSolverType {
     {
         match self {
             OdeSolverType::Bdf => {
-                let mut soln = Solution::new(final_time);
-                let mut solver = problem.bdf::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset(problem, &mut state)?;
-                    solver = BdfTag::solver_with_state::<LS>(problem, state)?;
-                }
-                Ok(soln)
+                solve_hybrid_with_tag::<M, CG, LS, BdfTag>(problem, Solution::new(final_time))
             }
             OdeSolverType::Esdirk34 => {
-                let mut soln = Solution::new(final_time);
-                let mut solver = problem.esdirk34::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset(problem, &mut state)?;
-                    solver = Esdirk34Tag::solver_with_state::<LS>(problem, state)?;
-                }
-                Ok(soln)
+                solve_hybrid_with_tag::<M, CG, LS, Esdirk34Tag>(problem, Solution::new(final_time))
             }
             OdeSolverType::TrBdf2 => {
-                let mut soln = Solution::new(final_time);
-                let mut solver = problem.tr_bdf2::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset(problem, &mut state)?;
-                    solver = TrBdf2Tag::solver_with_state::<LS>(problem, state)?;
-                }
-                Ok(soln)
+                solve_hybrid_with_tag::<M, CG, LS, TrBdf2Tag>(problem, Solution::new(final_time))
             }
             OdeSolverType::Tsit45 => {
-                let mut soln = Solution::new(final_time);
-                let mut solver = problem.tsit45()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset(problem, &mut state)?;
-                    solver = Tsit45Tag::solver_with_state::<LS>(problem, state)?;
-                }
-                Ok(soln)
+                solve_hybrid_with_tag::<M, CG, LS, Tsit45Tag>(problem, Solution::new(final_time))
             }
         }
     }
@@ -277,86 +237,22 @@ impl OdeSolverType {
         for<'b> &'b M: MatrixRef<M>,
     {
         match self {
-            OdeSolverType::Bdf => {
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                let mut solver = problem.bdf::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset(problem, &mut state)?;
-                    solver = BdfTag::solver_with_state::<LS>(problem, state)?;
-                }
-                Ok(soln)
-            }
-            OdeSolverType::Esdirk34 => {
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                let mut solver = problem.esdirk34::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset(problem, &mut state)?;
-                    solver = Esdirk34Tag::solver_with_state::<LS>(problem, state)?;
-                }
-                Ok(soln)
-            }
-            OdeSolverType::TrBdf2 => {
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                let mut solver = problem.tr_bdf2::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset(problem, &mut state)?;
-                    solver = TrBdf2Tag::solver_with_state::<LS>(problem, state)?;
-                }
-                Ok(soln)
-            }
-            OdeSolverType::Tsit45 => {
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                let mut solver = problem.tsit45()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset(problem, &mut state)?;
-                    solver = Tsit45Tag::solver_with_state::<LS>(problem, state)?;
-                }
-                Ok(soln)
-            }
+            OdeSolverType::Bdf => solve_hybrid_with_tag::<M, CG, LS, BdfTag>(
+                problem,
+                Solution::new_dense(t_eval.to_vec())?,
+            ),
+            OdeSolverType::Esdirk34 => solve_hybrid_with_tag::<M, CG, LS, Esdirk34Tag>(
+                problem,
+                Solution::new_dense(t_eval.to_vec())?,
+            ),
+            OdeSolverType::TrBdf2 => solve_hybrid_with_tag::<M, CG, LS, TrBdf2Tag>(
+                problem,
+                Solution::new_dense(t_eval.to_vec())?,
+            ),
+            OdeSolverType::Tsit45 => solve_hybrid_with_tag::<M, CG, LS, Tsit45Tag>(
+                problem,
+                Solution::new_dense(t_eval.to_vec())?,
+            ),
         }
     }
 
