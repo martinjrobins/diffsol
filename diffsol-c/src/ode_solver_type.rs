@@ -147,6 +147,56 @@ where
     Ok(soln)
 }
 
+fn solve_fwd_sens_with_tag<M, CG, LS, Tag>(
+    problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+    t_eval: &[M::T],
+) -> Result<Solution<M::V>, DiffsolError>
+where
+    M: Matrix<T: Scalar>,
+    CG: CodegenModule,
+    M::V: VectorHost + DefaultDenseMatrix,
+    LS: LinearSolver<M>,
+    Tag: OdeSolverMethodTag<M, CG>,
+    DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>,
+    for<'b> &'b M::V: VectorRef<M::V>,
+    for<'b> &'b M: MatrixRef<M>,
+{
+    let solver = Tag::solver_sens::<LS>(problem)?;
+    let mut soln = Solution::new_dense(t_eval.to_vec())?;
+    solver.solve_soln_sensitivities(&mut soln)?;
+    Ok(soln)
+}
+
+fn solve_hybrid_fwd_sens_with_tag<M, CG, LS, Tag>(
+    problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+    t_eval: &[M::T],
+) -> Result<Solution<M::V>, DiffsolError>
+where
+    M: Matrix<T: Scalar>,
+    CG: CodegenModule,
+    M::V: VectorHost + DefaultDenseMatrix,
+    LS: LinearSolver<M>,
+    Tag: OdeSolverMethodTag<M, CG>,
+    DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>,
+    for<'b> &'b M::V: VectorRef<M::V>,
+    for<'b> &'b M: MatrixRef<M>,
+{
+    let mut soln = Solution::new_dense(t_eval.to_vec())?;
+    let mut solver = Tag::solver_sens::<LS>(problem)?;
+    while !soln.is_complete() {
+        solver = solver.solve_soln_sensitivities(&mut soln)?;
+        let root_idx = match soln.stop_reason {
+            Some(OdeSolverStopReason::RootFound(_, root_idx)) if !soln.is_complete() => root_idx,
+            _ => continue,
+        };
+        let mut state = solver.into_state();
+        problem.eqn.set_model_index(root_idx);
+        apply_state_reset_with_sens(problem, &mut state, root_idx)?;
+        solver = Tag::solver_sens_with_state::<LS>(problem, state)?;
+    }
+    Ok(soln)
+}
+
 impl OdeSolverType {
     pub(crate) fn solve<M, CG, LS>(
         &self,
@@ -281,29 +331,15 @@ impl OdeSolverType {
     {
         Self::check_sens_available()?;
         match self {
-            OdeSolverType::Bdf => {
-                let solver = problem.bdf_sens::<LS>()?;
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                solver.solve_soln_sensitivities(&mut soln)?;
-                Ok(soln)
-            }
+            OdeSolverType::Bdf => solve_fwd_sens_with_tag::<M, CG, LS, BdfTag>(problem, t_eval),
             OdeSolverType::Esdirk34 => {
-                let solver = problem.esdirk34_sens::<LS>()?;
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                solver.solve_soln_sensitivities(&mut soln)?;
-                Ok(soln)
+                solve_fwd_sens_with_tag::<M, CG, LS, Esdirk34Tag>(problem, t_eval)
             }
             OdeSolverType::TrBdf2 => {
-                let solver = problem.tr_bdf2_sens::<LS>()?;
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                solver.solve_soln_sensitivities(&mut soln)?;
-                Ok(soln)
+                solve_fwd_sens_with_tag::<M, CG, LS, TrBdf2Tag>(problem, t_eval)
             }
             OdeSolverType::Tsit45 => {
-                let solver = problem.tsit45_sens()?;
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                solver.solve_soln_sensitivities(&mut soln)?;
-                Ok(soln)
+                solve_fwd_sens_with_tag::<M, CG, LS, Tsit45Tag>(problem, t_eval)
             }
         }
     }
@@ -325,84 +361,16 @@ impl OdeSolverType {
         Self::check_sens_available()?;
         match self {
             OdeSolverType::Bdf => {
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                let mut solver = problem.bdf_sens::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln_sensitivities(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset_with_sens(problem, &mut state, root_idx)?;
-                    solver = problem.bdf_solver_sens::<LS>(state)?;
-                }
-                Ok(soln)
+                solve_hybrid_fwd_sens_with_tag::<M, CG, LS, BdfTag>(problem, t_eval)
             }
             OdeSolverType::Esdirk34 => {
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                let mut solver = problem.esdirk34_sens::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln_sensitivities(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset_with_sens(problem, &mut state, root_idx)?;
-                    solver = problem.esdirk34_solver_sens::<LS>(state)?;
-                }
-                Ok(soln)
+                solve_hybrid_fwd_sens_with_tag::<M, CG, LS, Esdirk34Tag>(problem, t_eval)
             }
             OdeSolverType::TrBdf2 => {
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                let mut solver = problem.tr_bdf2_sens::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln_sensitivities(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset_with_sens(problem, &mut state, root_idx)?;
-                    solver = problem.tr_bdf2_solver_sens::<LS>(state)?;
-                }
-                Ok(soln)
+                solve_hybrid_fwd_sens_with_tag::<M, CG, LS, TrBdf2Tag>(problem, t_eval)
             }
             OdeSolverType::Tsit45 => {
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                let mut solver = problem.tsit45_sens()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln_sensitivities(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset_with_sens(problem, &mut state, root_idx)?;
-                    solver = problem.tsit45_solver_sens(state)?;
-                }
-                Ok(soln)
+                solve_hybrid_fwd_sens_with_tag::<M, CG, LS, Tsit45Tag>(problem, t_eval)
             }
         }
     }
