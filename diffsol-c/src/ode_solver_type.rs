@@ -4,8 +4,9 @@
 use diffsol::error::{DiffsolError, OdeSolverError};
 use diffsol::ode_equations::OdeEquationsImplicitSens;
 use diffsol::{
-    matrix::MatrixRef, DefaultDenseMatrix, DiffSl, LinearSolver, Matrix, OdeSolverMethod,
-    OdeSolverProblem, OdeSolverState, Vector, VectorHost, VectorRef,
+    matrix::MatrixRef, AugmentedOdeSolverMethod, BdfState, DefaultDenseMatrix, DiffSl,
+    LinearSolver, Matrix, OdeSolverMethod, OdeSolverProblem, OdeSolverState, RkState, Vector,
+    VectorHost, VectorRef,
 };
 use diffsol::{
     ode_solver_error, AdjointOdeSolverMethod, CheckpointingPath, CodegenModule, DefaultSolver,
@@ -19,12 +20,149 @@ use serde::{Deserialize, Serialize};
 
 use crate::utils::is_sens_available;
 use crate::{
-    checkpointing_wrapper::CheckpointingWrapper, matrix_type::MatrixKind, scalar_type::Scalar,
+    checkpointing_wrapper::CheckpointingWrapper,
+    matrix_type::{MatrixKind, MatrixType},
+    scalar_type::{Scalar, ToScalarType},
 };
 use crate::{
     linear_solver_type::LinearSolverType,
     valid_linear_solver::{KluValidator, LuValidator},
 };
+
+type BdfForwardSolver<'a, M, CG, LS> =
+    diffsol::Bdf<'a, DiffSl<M, CG>, diffsol::NewtonNonlinearSolver<M, LS, diffsol::NoLineSearch>>;
+type SdirkForwardSolver<'a, M, CG, LS> = diffsol::Sdirk<'a, DiffSl<M, CG>, LS>;
+type Tsit45ForwardSolver<'a, M, CG> =
+    diffsol::ExplicitRk<'a, DiffSl<M, CG>, <<M as MatrixCommon>::V as DefaultDenseMatrix>::M>;
+
+macro_rules! solve_hybrid_adjoint_backwards_loop {
+    (
+        $problem:expr,
+        $checkpointing:expr,
+        $soln:expr,
+        $dgdu_eval:expr,
+        $backwards_method:expr,
+        $backwards_ls:ty,
+        $forward_solver:ty,
+        $nout_override:expr
+    ) => {{
+        match $backwards_method {
+            OdeSolverType::Bdf => {
+                let mut state: Option<BdfState<M::V>> = None;
+                for segment_index in (0..$checkpointing.len()).rev() {
+                    Self::set_hybrid_adjoint_segment_model_index(
+                        $problem,
+                        &$checkpointing,
+                        segment_index,
+                    )?;
+                    let adjoint = match state.take() {
+                        Some(state) => {
+                            let adjoint_eqn = $problem.adjoint_equations::<$forward_solver>(
+                                $checkpointing.clone(),
+                                None,
+                                $nout_override,
+                            );
+                            $problem.bdf_solver_adjoint_from_state::<$backwards_ls, $forward_solver>(
+                                state,
+                                adjoint_eqn,
+                            )?
+                        }
+                        None => $problem.bdf_solver_adjoint::<$backwards_ls, $forward_solver>(
+                            $checkpointing.clone(),
+                            None,
+                            $nout_override,
+                        )?,
+                    };
+                    let adjoint = adjoint.solve_soln_adjoint_backwards_pass($soln, $dgdu_eval)?;
+                    if segment_index == 0 {
+                        return Ok(adjoint.into_state().into_common().sg);
+                    }
+                    let (adjoint_state, _) = adjoint.into_state_and_eqn();
+                    state = Some(adjoint_state);
+                }
+            }
+            OdeSolverType::Esdirk34 => {
+                let mut state: Option<RkState<M::V>> = None;
+                for segment_index in (0..$checkpointing.len()).rev() {
+                    Self::set_hybrid_adjoint_segment_model_index(
+                        $problem,
+                        &$checkpointing,
+                        segment_index,
+                    )?;
+                    let adjoint = match state.take() {
+                        Some(state) => {
+                            let adjoint_eqn = $problem.adjoint_equations::<$forward_solver>(
+                                $checkpointing.clone(),
+                                None,
+                                $nout_override,
+                            );
+                            $problem
+                                .esdirk34_solver_adjoint_from_state::<$backwards_ls, $forward_solver>(
+                                    state,
+                                    adjoint_eqn,
+                                )?
+                        }
+                        None => $problem.esdirk34_solver_adjoint::<$backwards_ls, $forward_solver>(
+                            $checkpointing.clone(),
+                            None,
+                            $nout_override,
+                        )?,
+                    };
+                    let adjoint = adjoint.solve_soln_adjoint_backwards_pass($soln, $dgdu_eval)?;
+                    if segment_index == 0 {
+                        return Ok(adjoint.into_state().into_common().sg);
+                    }
+                    let (adjoint_state, _) = adjoint.into_state_and_eqn();
+                    state = Some(adjoint_state);
+                }
+            }
+            OdeSolverType::TrBdf2 => {
+                let mut state: Option<RkState<M::V>> = None;
+                for segment_index in (0..$checkpointing.len()).rev() {
+                    Self::set_hybrid_adjoint_segment_model_index(
+                        $problem,
+                        &$checkpointing,
+                        segment_index,
+                    )?;
+                    let adjoint = match state.take() {
+                        Some(state) => {
+                            let adjoint_eqn = $problem.adjoint_equations::<$forward_solver>(
+                                $checkpointing.clone(),
+                                None,
+                                $nout_override,
+                            );
+                            $problem
+                                .tr_bdf2_solver_adjoint_from_state::<$backwards_ls, $forward_solver>(
+                                    state,
+                                    adjoint_eqn,
+                                )?
+                        }
+                        None => $problem.tr_bdf2_solver_adjoint::<$backwards_ls, $forward_solver>(
+                            $checkpointing.clone(),
+                            None,
+                            $nout_override,
+                        )?,
+                    };
+                    let adjoint = adjoint.solve_soln_adjoint_backwards_pass($soln, $dgdu_eval)?;
+                    if segment_index == 0 {
+                        return Ok(adjoint.into_state().into_common().sg);
+                    }
+                    let (adjoint_state, _) = adjoint.into_state_and_eqn();
+                    state = Some(adjoint_state);
+                }
+            }
+            OdeSolverType::Tsit45 => {
+                return Err(DiffsolError::Other(
+                    "Tsit45 solver does not support adjoint sensitivity analysis.".to_string(),
+                ));
+            }
+        }
+
+        Err(DiffsolError::Other(
+            "Checkpointing path is empty".to_string(),
+        ))
+    }};
+}
 
 /// Enumerates the possible ODE solver methods for diffsol. See the solver descriptions in the diffsol documentation (https://github.com/martinjrobins/diffsol) for more details.
 ///
@@ -710,53 +848,181 @@ impl OdeSolverType {
         Ok((integral, gradients))
     }
 
-    fn solve_hybrid_adjoint_bkwd_from_solver<'solver, M, CG, S>(
-        solver: S,
-        checkpointing: CheckpointingPath<DiffSl<M, CG>, S::State>,
-        t_eval: &[M::T],
-        dgdu_eval: &<M::V as DefaultDenseMatrix>::M,
+    fn set_hybrid_adjoint_segment_model_index<M, CG, State>(
+        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+        checkpointing: &CheckpointingPath<DiffSl<M, CG>, State>,
+        segment_index: usize,
+    ) -> Result<(), DiffsolError>
+    where
+        M: Matrix<T: Scalar>,
+        CG: CodegenModule,
+        M::V: VectorHost,
+        State: OdeSolverState<M::V>,
+    {
+        let model_index = if segment_index == 0 {
+            0
+        } else {
+            checkpointing[segment_index - 1]
+                .terminal_reset_root_idx()
+                .ok_or_else(|| {
+                    DiffsolError::Other(
+                        "Missing reset root metadata between checkpointing segments".to_string(),
+                    )
+                })?
+        };
+        problem.eqn.set_model_index(model_index);
+        Ok(())
+    }
+
+    fn solve_hybrid_adjoint_bkwd_for_bdf_forward<M, CG, FLS>(
+        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+        checkpointing: CheckpointingPath<DiffSl<M, CG>, BdfState<M::V>>,
+        soln: &Solution<M::V>,
+        dgdu_eval: &[&<M::V as DefaultDenseMatrix>::M],
         backwards_method: OdeSolverType,
         backwards_linear_solver: LinearSolverType,
+        nout_override: Option<usize>,
     ) -> Result<Vec<M::V>, DiffsolError>
     where
         M: Matrix<T: Scalar> + DefaultSolver + LuValidator<M> + KluValidator<M>,
         CG: CodegenModule,
         M::V: VectorHost + DefaultDenseMatrix,
-        S: OdeSolverMethod<'solver, DiffSl<M, CG>>,
+        FLS: LinearSolver<M>,
         for<'b> &'b M::V: VectorRef<M::V>,
         for<'b> &'b M: MatrixRef<M>,
     {
         match backwards_linear_solver {
-            LinearSolverType::Default => backwards_method
-                .solve_adjoint_backwards::<M, CG, <M as DefaultSolver>::LS, S>(
-                    solver.problem(),
-                    checkpointing,
-                    solver.clone(),
-                    OdeSolverStopReason::TstopReached,
-                    dgdu_eval,
-                    t_eval,
-                    Some(1),
-                ),
-            LinearSolverType::Lu => backwards_method
-                .solve_adjoint_backwards::<M, CG, <M as LuValidator<M>>::LS, S>(
-                    solver.problem(),
-                    checkpointing,
-                    solver.clone(),
-                    OdeSolverStopReason::TstopReached,
-                    dgdu_eval,
-                    t_eval,
-                    Some(1),
-                ),
-            LinearSolverType::Klu => backwards_method
-                .solve_adjoint_backwards::<M, CG, <M as KluValidator<M>>::LS, S>(
-                    solver.problem(),
-                    checkpointing,
-                    solver.clone(),
-                    OdeSolverStopReason::TstopReached,
-                    dgdu_eval,
-                    t_eval,
-                    Some(1),
-                ),
+            LinearSolverType::Default => solve_hybrid_adjoint_backwards_loop!(
+                problem,
+                checkpointing,
+                soln,
+                dgdu_eval,
+                backwards_method,
+                <M as DefaultSolver>::LS,
+                BdfForwardSolver<'_, M, CG, FLS>,
+                nout_override
+            ),
+            LinearSolverType::Lu => solve_hybrid_adjoint_backwards_loop!(
+                problem,
+                checkpointing,
+                soln,
+                dgdu_eval,
+                backwards_method,
+                <M as LuValidator<M>>::LS,
+                BdfForwardSolver<'_, M, CG, FLS>,
+                nout_override
+            ),
+            LinearSolverType::Klu => solve_hybrid_adjoint_backwards_loop!(
+                problem,
+                checkpointing,
+                soln,
+                dgdu_eval,
+                backwards_method,
+                <M as KluValidator<M>>::LS,
+                BdfForwardSolver<'_, M, CG, FLS>,
+                nout_override
+            ),
+        }
+    }
+
+    fn solve_hybrid_adjoint_bkwd_for_sdirk_forward<M, CG, FLS>(
+        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+        checkpointing: CheckpointingPath<DiffSl<M, CG>, RkState<M::V>>,
+        soln: &Solution<M::V>,
+        dgdu_eval: &[&<M::V as DefaultDenseMatrix>::M],
+        backwards_method: OdeSolverType,
+        backwards_linear_solver: LinearSolverType,
+        nout_override: Option<usize>,
+    ) -> Result<Vec<M::V>, DiffsolError>
+    where
+        M: Matrix<T: Scalar> + DefaultSolver + LuValidator<M> + KluValidator<M>,
+        CG: CodegenModule,
+        M::V: VectorHost + DefaultDenseMatrix,
+        FLS: LinearSolver<M>,
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        match backwards_linear_solver {
+            LinearSolverType::Default => solve_hybrid_adjoint_backwards_loop!(
+                problem,
+                checkpointing,
+                soln,
+                dgdu_eval,
+                backwards_method,
+                <M as DefaultSolver>::LS,
+                SdirkForwardSolver<'_, M, CG, FLS>,
+                nout_override
+            ),
+            LinearSolverType::Lu => solve_hybrid_adjoint_backwards_loop!(
+                problem,
+                checkpointing,
+                soln,
+                dgdu_eval,
+                backwards_method,
+                <M as LuValidator<M>>::LS,
+                SdirkForwardSolver<'_, M, CG, FLS>,
+                nout_override
+            ),
+            LinearSolverType::Klu => solve_hybrid_adjoint_backwards_loop!(
+                problem,
+                checkpointing,
+                soln,
+                dgdu_eval,
+                backwards_method,
+                <M as KluValidator<M>>::LS,
+                SdirkForwardSolver<'_, M, CG, FLS>,
+                nout_override
+            ),
+        }
+    }
+
+    fn solve_hybrid_adjoint_bkwd_for_tsit45_forward<M, CG>(
+        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+        checkpointing: CheckpointingPath<DiffSl<M, CG>, RkState<M::V>>,
+        soln: &Solution<M::V>,
+        dgdu_eval: &[&<M::V as DefaultDenseMatrix>::M],
+        backwards_method: OdeSolverType,
+        backwards_linear_solver: LinearSolverType,
+        nout_override: Option<usize>,
+    ) -> Result<Vec<M::V>, DiffsolError>
+    where
+        M: Matrix<T: Scalar> + DefaultSolver + LuValidator<M> + KluValidator<M>,
+        CG: CodegenModule,
+        M::V: VectorHost + DefaultDenseMatrix,
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        match backwards_linear_solver {
+            LinearSolverType::Default => solve_hybrid_adjoint_backwards_loop!(
+                problem,
+                checkpointing,
+                soln,
+                dgdu_eval,
+                backwards_method,
+                <M as DefaultSolver>::LS,
+                Tsit45ForwardSolver<'_, M, CG>,
+                nout_override
+            ),
+            LinearSolverType::Lu => solve_hybrid_adjoint_backwards_loop!(
+                problem,
+                checkpointing,
+                soln,
+                dgdu_eval,
+                backwards_method,
+                <M as LuValidator<M>>::LS,
+                Tsit45ForwardSolver<'_, M, CG>,
+                nout_override
+            ),
+            LinearSolverType::Klu => solve_hybrid_adjoint_backwards_loop!(
+                problem,
+                checkpointing,
+                soln,
+                dgdu_eval,
+                backwards_method,
+                <M as KluValidator<M>>::LS,
+                Tsit45ForwardSolver<'_, M, CG>,
+                nout_override
+            ),
         }
     }
 
@@ -787,67 +1053,83 @@ impl OdeSolverType {
         Self::check_sens_available()?;
         match self {
             OdeSolverType::Bdf => {
-                let solver = problem.bdf::<LS>()?;
-                let checkpointing = checkpointing.checkpointing_for_solver::<M, CG, _>(
-                    &solver,
-                    *self,
-                    forward_linear_solver,
-                )?;
-                Self::solve_hybrid_adjoint_bkwd_from_solver(
-                    solver,
+                let (_, checkpointing) = checkpointing
+                    .clone_typed::<M, CG, BdfState<M::V>>(
+                        MatrixType::from_diffsol::<M>(),
+                        M::T::scalar_type(),
+                        *self,
+                        forward_linear_solver,
+                    )
+                    .map_err(|err| DiffsolError::Other(err.to_string()))?;
+                let soln = Solution::new_dense(t_eval.to_vec())?;
+                Self::solve_hybrid_adjoint_bkwd_for_bdf_forward::<M, CG, LS>(
+                    problem,
                     checkpointing,
-                    t_eval,
-                    dgdu_eval,
+                    &soln,
+                    &[dgdu_eval],
                     backwards_method,
                     backwards_linear_solver,
+                    Some(1),
                 )
             }
             OdeSolverType::Esdirk34 => {
-                let solver = problem.esdirk34::<LS>()?;
-                let checkpointing = checkpointing.checkpointing_for_solver::<M, CG, _>(
-                    &solver,
-                    *self,
-                    forward_linear_solver,
-                )?;
-                Self::solve_hybrid_adjoint_bkwd_from_solver(
-                    solver,
+                let (_, checkpointing) = checkpointing
+                    .clone_typed::<M, CG, RkState<M::V>>(
+                        MatrixType::from_diffsol::<M>(),
+                        M::T::scalar_type(),
+                        *self,
+                        forward_linear_solver,
+                    )
+                    .map_err(|err| DiffsolError::Other(err.to_string()))?;
+                let soln = Solution::new_dense(t_eval.to_vec())?;
+                Self::solve_hybrid_adjoint_bkwd_for_sdirk_forward::<M, CG, LS>(
+                    problem,
                     checkpointing,
-                    t_eval,
-                    dgdu_eval,
+                    &soln,
+                    &[dgdu_eval],
                     backwards_method,
                     backwards_linear_solver,
+                    Some(1),
                 )
             }
             OdeSolverType::TrBdf2 => {
-                let solver = problem.tr_bdf2::<LS>()?;
-                let checkpointing = checkpointing.checkpointing_for_solver::<M, CG, _>(
-                    &solver,
-                    *self,
-                    forward_linear_solver,
-                )?;
-                Self::solve_hybrid_adjoint_bkwd_from_solver(
-                    solver,
+                let (_, checkpointing) = checkpointing
+                    .clone_typed::<M, CG, RkState<M::V>>(
+                        MatrixType::from_diffsol::<M>(),
+                        M::T::scalar_type(),
+                        *self,
+                        forward_linear_solver,
+                    )
+                    .map_err(|err| DiffsolError::Other(err.to_string()))?;
+                let soln = Solution::new_dense(t_eval.to_vec())?;
+                Self::solve_hybrid_adjoint_bkwd_for_sdirk_forward::<M, CG, LS>(
+                    problem,
                     checkpointing,
-                    t_eval,
-                    dgdu_eval,
+                    &soln,
+                    &[dgdu_eval],
                     backwards_method,
                     backwards_linear_solver,
+                    Some(1),
                 )
             }
             OdeSolverType::Tsit45 => {
-                let solver = problem.tsit45()?;
-                let checkpointing = checkpointing.checkpointing_for_solver::<M, CG, _>(
-                    &solver,
-                    *self,
-                    forward_linear_solver,
-                )?;
-                Self::solve_hybrid_adjoint_bkwd_from_solver(
-                    solver,
+                let (_, checkpointing) = checkpointing
+                    .clone_typed::<M, CG, RkState<M::V>>(
+                        MatrixType::from_diffsol::<M>(),
+                        M::T::scalar_type(),
+                        *self,
+                        forward_linear_solver,
+                    )
+                    .map_err(|err| DiffsolError::Other(err.to_string()))?;
+                let soln = Solution::new_dense(t_eval.to_vec())?;
+                Self::solve_hybrid_adjoint_bkwd_for_tsit45_forward::<M, CG>(
+                    problem,
                     checkpointing,
-                    t_eval,
-                    dgdu_eval,
+                    &soln,
+                    &[dgdu_eval],
                     backwards_method,
                     backwards_linear_solver,
+                    Some(1),
                 )
             }
         }

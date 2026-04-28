@@ -137,6 +137,7 @@ impl CheckpointingWrapper {
         Ok(guard.params().to_vec())
     }
 
+    #[allow(dead_code)]
     pub(crate) fn checkpointing_for_solver<'solver, M, CG, S>(
         &self,
         _solver: &S,
