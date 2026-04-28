@@ -1,6 +1,7 @@
 use crate::{
     error::OdeSolverError, ode_solver_error, DefaultDenseMatrix, DenseMatrix, DiffsolError, Matrix,
-    MatrixCommon, OdeSolverStopReason, Scalar,
+    MatrixCommon, OdeEquations, OdeSolverProblem, OdeSolverStopReason, Scalar, StateRef,
+    VectorViewMut,
 };
 
 pub(crate) enum SolutionMode<T: Scalar> {
@@ -86,19 +87,48 @@ impl<V: DefaultDenseMatrix> Solution<V> {
         }
     }
 
-    pub fn truncate(&mut self) {
+    pub fn truncate<Eqn>(
+        &mut self,
+        problem: &OdeSolverProblem<Eqn>,
+        state: StateRef<'_, V>,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
+    {
         if let Some(OdeSolverStopReason::RootFound(t_root, _)) = self.stop_reason {
-            let ncols = self
-                .ts
-                .iter()
-                .position(|&t| t > t_root)
-                .unwrap_or(self.ts.len());
+            let ncols = match self.mode {
+                SolutionMode::Tevals(col) if col < self.ts.len() => {
+                    crate::ode_solver::method::write_state_out(
+                        problem,
+                        &state,
+                        &mut self.ys,
+                        col,
+                        &mut self.tmp_nout,
+                    );
+                    for (sens, state_sens) in self.y_sens.iter_mut().zip(state.s.iter()) {
+                        if sens.nrows() == state_sens.len() {
+                            sens.column_mut(col).copy_from(state_sens);
+                        }
+                    }
+                    self.ts[col] = state.t;
+                    col + 1
+                }
+                _ => self
+                    .ts
+                    .iter()
+                    .position(|&t| t > t_root)
+                    .unwrap_or(self.ts.len()),
+            };
             self.ts.truncate(ncols);
             self.ys.resize_cols(ncols);
             for sens in &mut self.y_sens {
                 sens.resize_cols(ncols);
             }
+            if let SolutionMode::Tevals(_) = self.mode {
+                self.mode = SolutionMode::Tevals(ncols);
+            }
         }
+        Ok(())
     }
 
     pub fn new(t_final: V::T) -> Self {

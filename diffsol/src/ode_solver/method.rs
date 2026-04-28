@@ -499,28 +499,7 @@ where
         // if we stopped on a root before exhausting t_eval, we need to write_out the solution at the root time to the last column of ret
         if let OdeSolverStopReason::RootFound(_, _) = stop_reason {
             if col < t_eval.len() {
-                let t = self.state().t;
-                let y = self.state().y;
-                {
-                    let mut ret_y_col = ret.column_mut(col);
-                    match self.problem().eqn.out() {
-                        Some(out) => {
-                            if self.problem().integrate_out {
-                                ret_y_col.copy_from(self.state().g);
-                            } else {
-                                out.call_inplace(y, t, &mut tmp_nout);
-                                ret_y_col.copy_from(&tmp_nout);
-                            }
-                        }
-                        None => {
-                            if self.problem().integrate_out {
-                                ret_y_col.copy_from(self.state().g);
-                            } else {
-                                ret_y_col.copy_from(y);
-                            }
-                        }
-                    }
-                }
+                write_state_out(self.problem(), &self.state(), &mut ret, col, &mut tmp_nout);
                 if col + 1 < ret.ncols() {
                     ret.resize_cols(col + 1);
                 }
@@ -868,6 +847,36 @@ where
         }
     }
     Ok(())
+}
+
+pub(crate) fn write_state_out<Eqn>(
+    problem: &OdeSolverProblem<Eqn>,
+    state: &StateRef<'_, Eqn::V>,
+    y_out: &mut <Eqn::V as DefaultDenseMatrix>::M,
+    col: usize,
+    tmp_nout: &mut Eqn::V,
+) where
+    Eqn: OdeEquations,
+    Eqn::V: DefaultDenseMatrix,
+{
+    let mut y_out_col = y_out.column_mut(col);
+    match problem.eqn.out() {
+        Some(out) => {
+            if problem.integrate_out {
+                y_out_col.copy_from(state.g);
+            } else {
+                out.call_inplace(state.y, state.t, tmp_nout);
+                y_out_col.copy_from(tmp_nout);
+            }
+        }
+        None => {
+            if problem.integrate_out {
+                y_out_col.copy_from(state.g);
+            } else {
+                y_out_col.copy_from(state.y);
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]

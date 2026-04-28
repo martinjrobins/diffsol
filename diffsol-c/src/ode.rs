@@ -1694,13 +1694,16 @@ mod jit_tests {
         let dense_ts = Vec::<f64>::from_host_array(dense_solution.get_ts().unwrap()).unwrap();
         let dense_ys = dense_solution.get_ys().unwrap();
         let dense_ys = dense_ys.as_array::<f64>().unwrap();
-        assert_eq!(dense_ts, vec![0.5, 1.0]);
+        assert_eq!(dense_ts.len(), 3);
+        assert_close(dense_ts[0], 0.5, ASSERT_TOL, "dense first time");
+        assert_close(dense_ts[1], 1.0, ASSERT_TOL, "dense second time");
+        assert_close(dense_ts[2], root_time, 5e-4, "dense stop time");
         assert_eq!(dense_ys.ncols(), dense_ts.len());
         assert_close(
             dense_ys[(0, dense_ys.ncols() - 1)],
-            logistic_state(LOGISTIC_X0, params[0], 1.0),
+            0.6,
             5e-4,
-            "dense last pre-stop value",
+            "dense stop value",
         );
 
         let sens_solution = ode
@@ -1710,7 +1713,10 @@ mod jit_tests {
         let sens_ys = sens_solution.get_ys().unwrap();
         let sens_ys = sens_ys.as_array::<f64>().unwrap();
         let sens = sens_solution.get_sens().unwrap();
-        assert_eq!(sens_ts, dense_ts);
+        assert_eq!(sens_ts.len(), dense_ts.len());
+        for (i, (&actual, &expected)) in sens_ts.iter().zip(dense_ts.iter()).enumerate() {
+            assert_close(actual, expected, 5e-4, &format!("sensitivity time {i}"));
+        }
         assert_eq!(sens_ys.ncols(), sens_ts.len());
         assert_eq!(sens.len(), params.len());
         for sens_component in sens {

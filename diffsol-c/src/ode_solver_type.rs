@@ -4,8 +4,8 @@
 use diffsol::error::{DiffsolError, OdeSolverError};
 use diffsol::ode_equations::OdeEquationsImplicitSens;
 use diffsol::{
-    matrix::MatrixRef, DefaultDenseMatrix, DiffSl, LinearSolver, Matrix, OdeSolverProblem,
-    OdeSolverState, VectorHost, VectorRef,
+    matrix::MatrixRef, DefaultDenseMatrix, DenseMatrix, DiffSl, LinearSolver, Matrix,
+    OdeSolverProblem, OdeSolverState, VectorHost, VectorRef, VectorView,
 };
 use diffsol::{
     ode_solver_error, AdjointOdeSolverMethod, CheckpointingPath, CodegenModule, DefaultSolver,
@@ -100,7 +100,7 @@ where
             _ => continue,
         };
         if problem.eqn.reset().is_none() {
-            soln.truncate();
+            soln.truncate(problem, solver.state())?;
             return Ok(soln);
         }
         let mut state = solver.into_state();
@@ -134,7 +134,7 @@ where
             _ => continue,
         };
         if problem.eqn.reset().is_none() {
-            soln.truncate();
+            soln.truncate(problem, solver.state())?;
             return Ok(soln);
         }
         let mut state = solver.into_state();
@@ -148,14 +148,7 @@ where
 fn solve_with_checkpointing_with_tag<M, CG, LS, Tag>(
     problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
     mut soln: Solution<M::V>,
-) -> Result<
-    (
-        Solution<M::V>,
-        CheckpointingPath<DiffSl<M, CG>, Tag::State>,
-        Tag::State,
-    ),
-    DiffsolError,
->
+) -> Result<(Solution<M::V>, CheckpointingPath<DiffSl<M, CG>, Tag::State>), DiffsolError>
 where
     M: Matrix<T: Scalar>,
     CG: CodegenModule,
@@ -174,17 +167,28 @@ where
             _ => continue,
         };
         if problem.eqn.reset().is_none() {
-            soln.truncate();
-            let final_state = solver.state_clone();
-            return Ok((soln, checkpointing, final_state));
+            soln.truncate(problem, solver.state())?;
+            return Ok((soln, checkpointing));
         }
         let mut state = solver.into_state();
         problem.eqn.set_model_index(root_idx);
         apply_state_reset(problem, &mut state)?;
         solver = Tag::solver_with_state::<LS>(problem, state)?;
     }
-    let final_state = solver.state_clone();
-    Ok((soln, checkpointing, final_state))
+    Ok((soln, checkpointing))
+}
+
+fn integral_from_soln<V>(soln: &Solution<V>) -> Result<V, DiffsolError>
+where
+    V: DefaultDenseMatrix,
+{
+    if soln.ts.is_empty() {
+        return Err(ode_solver_error!(
+            Other,
+            "Continuous adjoint solve returned no integral samples"
+        ));
+    }
+    Ok(soln.ys.column(soln.ts.len() - 1).into_owned())
 }
 
 fn solve_adjoint_fwd_with_tag<M, CG, LS, Tag>(
@@ -205,8 +209,7 @@ where
     for<'b> &'b M: MatrixRef<M>,
 {
     let soln = Solution::new_dense(t_eval.to_vec())?;
-    let (soln, checkpointing, _final_state) =
-        solve_with_checkpointing_with_tag::<M, CG, LS, Tag>(problem, soln)?;
+    let (soln, checkpointing) = solve_with_checkpointing_with_tag::<M, CG, LS, Tag>(problem, soln)?;
     Ok((
         soln,
         Box::new(AdjointCheckpointData::<M, CG, Tag>::new(
@@ -235,9 +238,8 @@ where
     for<'b> &'b M: MatrixRef<M>,
 {
     let soln = Solution::new(final_time);
-    let (soln, checkpointing, final_state) =
-        solve_with_checkpointing_with_tag::<M, CG, LS, Tag>(problem, soln)?;
-    let integral = final_state.as_ref().g.clone();
+    let (soln, checkpointing) = solve_with_checkpointing_with_tag::<M, CG, LS, Tag>(problem, soln)?;
+    let integral = integral_from_soln(&soln)?;
     let sg = match method {
         OdeSolverType::Bdf => solve_adjoint_bkwds_with_fwd_bkwd_tag::<M, CG, LS, LS, Tag, BdfTag>(
             problem,
