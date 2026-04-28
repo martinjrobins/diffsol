@@ -85,6 +85,7 @@ pub mod ode_c;
 pub mod ode_options;
 #[path = "ode_options_c.rs"]
 pub mod ode_options_c;
+mod ode_solver_tag;
 pub mod ode_solver_type;
 #[path = "ode_solver_type_c.rs"]
 pub mod ode_solver_type_c;

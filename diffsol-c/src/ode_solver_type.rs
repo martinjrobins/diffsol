@@ -4,19 +4,20 @@
 use diffsol::error::{DiffsolError, OdeSolverError};
 use diffsol::ode_equations::OdeEquationsImplicitSens;
 use diffsol::{
-    matrix::MatrixRef, DefaultDenseMatrix, DiffSl, LinearSolver, Matrix, OdeSolverMethod,
-    OdeSolverProblem, OdeSolverState, Vector, VectorHost, VectorRef,
+    matrix::MatrixRef, DefaultDenseMatrix, DiffSl, LinearSolver, Matrix, OdeSolverProblem,
+    OdeSolverState, Vector, VectorHost, VectorRef,
 };
 use diffsol::{
     ode_solver_error, AdjointOdeSolverMethod, CheckpointingPath, CodegenModule, DefaultSolver,
-    DenseMatrix, MatrixCommon, OdeEquations, OdeSolverStopReason, Op, SensitivitiesOdeSolverMethod,
-    Solution, VectorViewMut,
+    DenseMatrix, MatrixCommon, OdeEquations, OdeSolverMethod, OdeSolverStopReason, Op,
+    SensitivitiesOdeSolverMethod, Solution, VectorViewMut,
 };
 use ndarray::ArrayView2;
 use num_traits::{FromPrimitive, Zero}; // for generic nums in _solve_sum_squares_adj
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::ode_solver_tag::{BdfTag, Esdirk34Tag, OdeSolverMethodTag, TrBdf2Tag, Tsit45Tag};
 use crate::scalar_type::Scalar;
 use crate::utils::is_sens_available;
 use crate::{
@@ -80,6 +81,44 @@ where
     }
 }
 
+fn solve_with_tag<M, CG, LS, Tag>(
+    problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+    final_time: M::T,
+) -> Result<Solution<M::V>, DiffsolError>
+where
+    M: Matrix<T: Scalar>,
+    CG: CodegenModule,
+    M::V: VectorHost + DefaultDenseMatrix,
+    LS: LinearSolver<M>,
+    Tag: OdeSolverMethodTag<M, CG>,
+    for<'b> &'b M::V: VectorRef<M::V>,
+    for<'b> &'b M: MatrixRef<M>,
+{
+    let solver = Tag::solver::<LS>(problem)?;
+    let mut soln = Solution::new(final_time);
+    solver.solve_soln(&mut soln)?;
+    Ok(soln)
+}
+
+fn solve_dense_with_tag<M, CG, LS, Tag>(
+    problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+    t_eval: &[M::T],
+) -> Result<Solution<M::V>, DiffsolError>
+where
+    M: Matrix<T: Scalar>,
+    CG: CodegenModule,
+    M::V: VectorHost + DefaultDenseMatrix,
+    LS: LinearSolver<M>,
+    Tag: OdeSolverMethodTag<M, CG>,
+    for<'b> &'b M::V: VectorRef<M::V>,
+    for<'b> &'b M: MatrixRef<M>,
+{
+    let solver = Tag::solver::<LS>(problem)?;
+    let mut soln = Solution::new_dense(t_eval.to_vec())?;
+    solver.solve_soln(&mut soln)?;
+    Ok(soln)
+}
+
 impl OdeSolverType {
     pub(crate) fn solve<M, CG, LS>(
         &self,
@@ -95,30 +134,12 @@ impl OdeSolverType {
         for<'b> &'b M: MatrixRef<M>,
     {
         match self {
-            OdeSolverType::Bdf => {
-                let solver = problem.bdf::<LS>()?;
-                let mut soln = Solution::new(final_time);
-                solver.solve_soln(&mut soln)?;
-                Ok(soln)
-            }
+            OdeSolverType::Bdf => solve_with_tag::<M, CG, LS, BdfTag>(problem, final_time),
             OdeSolverType::Esdirk34 => {
-                let solver = problem.esdirk34::<LS>()?;
-                let mut soln = Solution::new(final_time);
-                solver.solve_soln(&mut soln)?;
-                Ok(soln)
+                solve_with_tag::<M, CG, LS, Esdirk34Tag>(problem, final_time)
             }
-            OdeSolverType::TrBdf2 => {
-                let solver = problem.tr_bdf2::<LS>()?;
-                let mut soln = Solution::new(final_time);
-                solver.solve_soln(&mut soln)?;
-                Ok(soln)
-            }
-            OdeSolverType::Tsit45 => {
-                let solver = problem.tsit45()?;
-                let mut soln = Solution::new(final_time);
-                solver.solve_soln(&mut soln)?;
-                Ok(soln)
-            }
+            OdeSolverType::TrBdf2 => solve_with_tag::<M, CG, LS, TrBdf2Tag>(problem, final_time),
+            OdeSolverType::Tsit45 => solve_with_tag::<M, CG, LS, Tsit45Tag>(problem, final_time),
         }
     }
 
@@ -136,30 +157,12 @@ impl OdeSolverType {
         for<'b> &'b M: MatrixRef<M>,
     {
         match self {
-            OdeSolverType::Bdf => {
-                let solver = problem.bdf::<LS>()?;
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                solver.solve_soln(&mut soln)?;
-                Ok(soln)
-            }
+            OdeSolverType::Bdf => solve_dense_with_tag::<M, CG, LS, BdfTag>(problem, t_eval),
             OdeSolverType::Esdirk34 => {
-                let solver = problem.esdirk34::<LS>()?;
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                solver.solve_soln(&mut soln)?;
-                Ok(soln)
+                solve_dense_with_tag::<M, CG, LS, Esdirk34Tag>(problem, t_eval)
             }
-            OdeSolverType::TrBdf2 => {
-                let solver = problem.tr_bdf2::<LS>()?;
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                solver.solve_soln(&mut soln)?;
-                Ok(soln)
-            }
-            OdeSolverType::Tsit45 => {
-                let solver = problem.tsit45()?;
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                solver.solve_soln(&mut soln)?;
-                Ok(soln)
-            }
+            OdeSolverType::TrBdf2 => solve_dense_with_tag::<M, CG, LS, TrBdf2Tag>(problem, t_eval),
+            OdeSolverType::Tsit45 => solve_dense_with_tag::<M, CG, LS, Tsit45Tag>(problem, t_eval),
         }
     }
 
@@ -193,7 +196,7 @@ impl OdeSolverType {
                     let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
                     apply_state_reset(problem, &mut state)?;
-                    solver = problem.bdf_solver::<LS>(state)?;
+                    solver = BdfTag::solver_with_state::<LS>(problem, state)?;
                 }
                 Ok(soln)
             }
@@ -213,7 +216,7 @@ impl OdeSolverType {
                     let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
                     apply_state_reset(problem, &mut state)?;
-                    solver = problem.esdirk34_solver::<LS>(state)?;
+                    solver = Esdirk34Tag::solver_with_state::<LS>(problem, state)?;
                 }
                 Ok(soln)
             }
@@ -233,7 +236,7 @@ impl OdeSolverType {
                     let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
                     apply_state_reset(problem, &mut state)?;
-                    solver = problem.tr_bdf2_solver::<LS>(state)?;
+                    solver = TrBdf2Tag::solver_with_state::<LS>(problem, state)?;
                 }
                 Ok(soln)
             }
@@ -253,7 +256,7 @@ impl OdeSolverType {
                     let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
                     apply_state_reset(problem, &mut state)?;
-                    solver = problem.tsit45_solver(state)?;
+                    solver = Tsit45Tag::solver_with_state::<LS>(problem, state)?;
                 }
                 Ok(soln)
             }
@@ -290,7 +293,7 @@ impl OdeSolverType {
                     let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
                     apply_state_reset(problem, &mut state)?;
-                    solver = problem.bdf_solver::<LS>(state)?;
+                    solver = BdfTag::solver_with_state::<LS>(problem, state)?;
                 }
                 Ok(soln)
             }
@@ -310,7 +313,7 @@ impl OdeSolverType {
                     let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
                     apply_state_reset(problem, &mut state)?;
-                    solver = problem.esdirk34_solver::<LS>(state)?;
+                    solver = Esdirk34Tag::solver_with_state::<LS>(problem, state)?;
                 }
                 Ok(soln)
             }
@@ -330,7 +333,7 @@ impl OdeSolverType {
                     let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
                     apply_state_reset(problem, &mut state)?;
-                    solver = problem.tr_bdf2_solver::<LS>(state)?;
+                    solver = TrBdf2Tag::solver_with_state::<LS>(problem, state)?;
                 }
                 Ok(soln)
             }
@@ -350,7 +353,7 @@ impl OdeSolverType {
                     let mut state = solver.into_state();
                     problem.eqn.set_model_index(root_idx);
                     apply_state_reset(problem, &mut state)?;
-                    solver = problem.tsit45_solver(state)?;
+                    solver = Tsit45Tag::solver_with_state::<LS>(problem, state)?;
                 }
                 Ok(soln)
             }
