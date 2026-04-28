@@ -652,6 +652,12 @@ where
             .clone()
     }
 
+    pub fn checkpointing_first_state(&self, index: usize) -> Method::State {
+        self.context.borrow().checkpointers[index]
+            .first_checkpoint()
+            .clone()
+    }
+
     pub fn pop_last_checkpointing(
         &mut self,
     ) -> Result<crate::Checkpointing<Eqn, Method::State>, DiffsolError> {

@@ -8,40 +8,6 @@ use diffsol_c::{
 pub const ASSERT_TOL: f64 = 1e-5;
 pub const LOGISTIC_X0: f64 = 0.1;
 
-pub fn logistic_diffsl_code() -> &'static str {
-    r#"
-        in_i { r = 1 }
-        u_i { y = 0.1 }
-        dudt_i { dydt = 0 }
-        F_i { (r * y) * (1 - y) }
-        out_i { y }
-    "#
-}
-
-pub fn hybrid_logistic_diffsl_code() -> &'static str {
-    r#"
-        in_i { r = 1 }
-        u_i { y = 0.1 }
-        dudt_i { dydt = 0 }
-        F_i { (r * y) * (1 - y) }
-        stop_i { y - 0.9 }
-        reset_i { 0.1 }
-        out_i { y }
-    "#
-}
-
-pub fn logistic_time_reset_diffsl_code() -> &'static str {
-    r#"
-        in_i { r = 1 }
-        u_i { y = 0.1 }
-        dudt_i { dydt = 0 }
-        F_i { r * y * (1.0 - y) }
-        stop_i { t - 0.5 }
-        reset_i { 0.2 }
-        out_i { y }
-    "#
-}
-
 pub fn all_ode_solvers() -> [OdeSolverType; 4] {
     [
         OdeSolverType::Bdf,

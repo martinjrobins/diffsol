@@ -965,20 +965,20 @@ where
         let gradient = match linear_solver {
             LinearSolverType::Default => method
                 .solve_adjoint_bkwd::<M, CG, <M as DefaultSolver>::LS>(
-                    &self.problem,
+                    &mut self.problem,
                     checkpoint.as_ref(),
                     &dgdu_eval,
                     &t_eval,
                 ),
             LinearSolverType::Lu => method.solve_adjoint_bkwd::<M, CG, <M as LuValidator<M>>::LS>(
-                &self.problem,
+                &mut self.problem,
                 checkpoint.as_ref(),
                 &dgdu_eval,
                 &t_eval,
             ),
             LinearSolverType::Klu => method
                 .solve_adjoint_bkwd::<M, CG, <M as KluValidator<M>>::LS>(
-                    &self.problem,
+                    &mut self.problem,
                     checkpoint.as_ref(),
                     &dgdu_eval,
                     &t_eval,

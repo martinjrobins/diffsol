@@ -240,7 +240,7 @@ where
 }
 
 fn solve_adjoint_bkwds_with_fwd_tag<M, CG, FwdLS, BwdLS, Tag>(
-    problem: &OdeSolverProblem<DiffSl<M, CG>>,
+    problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
     checkpoint: &AdjointCheckpointData<M, CG, Tag>,
     backwards_method: OdeSolverType,
     dgdu_eval: &<M::V as DefaultDenseMatrix>::M,
@@ -302,7 +302,7 @@ where
 }
 
 fn solve_adjoint_bkwds_with_fwd_bkwd_tag<'solver, M, CG, FwdLS, BwdLS, FwdTag, BwdTag>(
-    problem: &'solver OdeSolverProblem<DiffSl<M, CG>>,
+    problem: &'solver mut OdeSolverProblem<DiffSl<M, CG>>,
     soln: &Solution<M::V>,
     mut checkpointing: CheckpointingPath<DiffSl<M, CG>, FwdTag::State>,
     dgdu_eval: &[&<M::V as DefaultDenseMatrix>::M],
@@ -338,41 +338,56 @@ where
     let current_checkpointing = checkpointing
         .pop()
         .ok_or_else(|| ode_solver_error!(Other, "Adjoint backward pass returned no state"))?;
-    let fwd_solver = FwdTag::uninitialised_solver::<FwdLS>(problem)?;
+    let model_index = checkpointing
+        .last()
+        .map(|segment| {
+            segment
+                .terminal_reset_root_idx()
+                .expect("Missing reset root index")
+        })
+        .unwrap_or(0);
+    problem.eqn_mut().set_model_index(model_index);
+    let fwd_solver = FwdTag::uninitialised_solver::<FwdLS>(&*problem)?;
     let mut adjoint = BwdTag::solver_adjoint::<BwdLS, _>(
-        problem,
+        &*problem,
         vec![current_checkpointing],
         Some(fwd_solver),
         nout_override,
     )?;
     loop {
-        let (state, current_checkpointing) =
+        let (mut state, mut adjoint_eqn) =
             adjoint.solve_adjoint_backwards_pass(t_eval, dgdu_eval)?;
         let Some(previous_checkpointing) = checkpointing.pop() else {
             return Ok(state.into_common().sg);
         };
-        let fwd_solver = FwdTag::uninitialised_solver::<FwdLS>(problem)?;
+        let model_index = checkpointing
+            .last()
+            .map(|segment| {
+                segment
+                    .terminal_reset_root_idx()
+                    .expect("Missing reset root index")
+            })
+            .unwrap_or(0);
+        let fwd_state_minus = previous_checkpointing.last_checkpoint();
+        let fwd_state_plus = adjoint_eqn.checkpointing_first_state(0);
+        state.as_mut().apply_reset_with_adjoint(
+            problem.eqn(),
+            &mut adjoint_eqn,
+            previous_checkpointing.terminal_reset_root_idx().unwrap(),
+            fwd_state_minus.as_ref(),
+            fwd_state_plus.as_ref(),
+        )?;
+        drop(adjoint_eqn);
+        problem.eqn_mut().set_model_index(model_index);
+        let fwd_solver = FwdTag::uninitialised_solver::<FwdLS>(&*problem)?;
         // TODO: remove clone here
-        let previous_checkpointing_last_state = previous_checkpointing.last_checkpoint().clone();
-        let previous_checkpointing_terminal_reset_root_idx =
-            previous_checkpointing.terminal_reset_root_idx();
         let adjoint_eqn = problem.adjoint_equations(
             vec![previous_checkpointing],
             Some(fwd_solver),
             nout_override,
         );
-        adjoint = BwdTag::solver_adjoint_from_state::<BwdLS, _>(problem, state, adjoint_eqn)?;
-        let root_idx = previous_checkpointing_terminal_reset_root_idx.ok_or_else(|| {
-            ode_solver_error!(
-                Other,
-                "Missing reset root metadata between checkpointing segments"
-            )
-        })?;
-        adjoint.apply_reset_with_adjoint(
-            root_idx,
-            previous_checkpointing_last_state.as_ref(),
-            current_checkpointing[0].first_checkpoint().as_ref(),
-        )?;
+
+        adjoint = BwdTag::solver_adjoint_from_state::<BwdLS, _>(&*problem, state, adjoint_eqn)?;
     }
 }
 
@@ -560,7 +575,7 @@ impl OdeSolverType {
 
     pub(crate) fn solve_adjoint_bkwd<M, CG, BwdLS>(
         &self,
-        problem: &OdeSolverProblem<DiffSl<M, CG>>,
+        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
         checkpoint: &dyn AdjointCheckpoint,
         dgdu_eval: &<M::V as DefaultDenseMatrix>::M,
         t_eval: &[M::T],
@@ -994,7 +1009,7 @@ mod tests {
         );
         let gradient = OdeSolverType::TrBdf2
             .solve_adjoint_bkwd::<M, diffsol::LlvmModule, <M as LuValidator<M>>::LS>(
-                &problem,
+                &mut problem,
                 checkpoint.as_ref(),
                 &dgdu,
                 &soln.ts,
@@ -1056,7 +1071,7 @@ mod tests {
             );
             let gradient = backwards_method
                 .solve_adjoint_bkwd::<M, diffsol::LlvmModule, <M as crate::valid_linear_solver::KluValidator<M>>::LS>(
-                    &problem,
+                    &mut problem,
                     checkpoint.as_ref(),
                     &dgdu,
                     &soln.ts,
@@ -1083,7 +1098,7 @@ mod tests {
         );
         let gradient = OdeSolverType::Bdf
             .solve_adjoint_bkwd::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
-                &problem,
+                &mut problem,
                 checkpoint.as_ref(),
                 &dgdu,
                 &soln.ts,
@@ -1117,7 +1132,7 @@ mod tests {
             );
             let gradient = OdeSolverType::Bdf
                 .solve_adjoint_bkwd::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
-                    &problem,
+                    &mut problem,
                     checkpoint.as_ref(),
                     &dgdu,
                     &soln.ts,

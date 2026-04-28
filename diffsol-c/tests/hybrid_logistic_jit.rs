@@ -3,14 +3,25 @@
 mod common;
 
 use common::{
-    all_ode_solvers, assert_close, available_jit_backends, hybrid_logistic_diffsl_code,
-    hybrid_logistic_period, hybrid_logistic_state, hybrid_logistic_state_dr, vector_host,
-    ASSERT_TOL,
+    all_ode_solvers, assert_close, available_jit_backends, hybrid_logistic_period,
+    hybrid_logistic_state, hybrid_logistic_state_dr, vector_host, ASSERT_TOL,
 };
 use diffsol_c::host_array::FromHostArray;
 use diffsol_c::{
     JitBackendType, LinearSolverType, MatrixType, OdeSolverType, OdeWrapper, ScalarType,
 };
+
+fn hybrid_logistic_diffsl_code() -> &'static str {
+    r#"
+        in_i { r = 1 }
+        u_i { y = 0.1 }
+        dudt_i { dydt = 0 }
+        F_i { (r * y) * (1 - y) }
+        stop_i { y - 0.9 }
+        reset_i { 0.1 }
+        out_i { y }
+    "#
+}
 
 fn make_hybrid_ode(
     jit_backend: JitBackendType,
