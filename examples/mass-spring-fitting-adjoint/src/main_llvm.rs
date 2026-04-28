@@ -72,14 +72,16 @@ impl Gradient for Problem {
         let adjoint_solver = problem
             .bdf_solver_adjoint::<LS, _>(c, Some(solver), Some(1))
             .unwrap();
-        match adjoint_solver.solve_adjoint_backwards_pass(self.ts_data.as_slice(), &[&g_m]) {
-            Ok((soln, _)) => Ok(soln.as_ref().sg[0]
-                .inner()
-                .iter()
-                .copied()
-                .collect::<Vec<_>>()),
-            Err(_) => Ok(vec![f64::MAX / 1000.; param.len()]),
-        }
+        let gradient =
+            match adjoint_solver.solve_adjoint_backwards_pass(self.ts_data.as_slice(), &[&g_m]) {
+                Ok((soln, _)) => Ok(soln.as_ref().sg[0]
+                    .inner()
+                    .iter()
+                    .copied()
+                    .collect::<Vec<_>>()),
+                Err(_) => Ok(vec![f64::MAX / 1000.; param.len()]),
+            };
+        gradient
     }
 }
 

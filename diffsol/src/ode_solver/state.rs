@@ -79,28 +79,6 @@ pub struct StateRefMut<'a, V: Vector> {
     pub h: &'a mut V::T,
 }
 
-fn refresh_augmented_state_ref_mut<V, Eqn, AugmentedEqn>(
-    state: &mut StateRefMut<'_, V>,
-    augmented_eqn: &mut AugmentedEqn,
-) -> Result<(), DiffsolError>
-where
-    V: Vector,
-    Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
-    AugmentedEqn: AugmentedOdeEquations<Eqn>,
-{
-    augmented_eqn.update_rhs_out_state(state.y, state.dy, *state.t);
-    let naug = augmented_eqn.max_index();
-    for i in 0..naug {
-        augmented_eqn.set_index(i);
-        augmented_eqn
-            .rhs()
-            .call_inplace(&state.s[i], *state.t, &mut state.ds[i]);
-        if let Some(out) = augmented_eqn.out() {
-            out.call_inplace(&state.s[i], *state.t, &mut state.dsg[i]);
-        }
-    }
-    Ok(())
-}
 
 impl<V: Vector> StateRefMut<'_, V> {
     /// Apply the equation set's reset operator to the current state in-place.
@@ -176,8 +154,24 @@ impl<V: Vector> StateRefMut<'_, V> {
     /// time-dependent root-triggered event correction.
     ///
     /// If the pre-event state is `x^-` and the reset map is `g(x, t, p)`, this method updates
+    /// the state to
+    /// `x^+ = g(x^-, t, p)`,
+    /// then recomputes the post-event vector field
     /// the state to `x^+ = g(x^-, t, p)`, then recomputes the post-event vector field
     /// `f^+ = rhs(x^+, t, p)`.
+    ///
+    /// For the active root component `r_k(x, t, p) = 0` selected by `root_idx`, the event-time
+    /// sensitivity in parameter direction `p_j` is
+    /// `τ'_j = -([r_x s^-_j]_k + [r_p e_j]_k) / ([r_x f^-]_k + [r_t]_k)`,
+    /// where `s^-_j = ∂x^-/∂p_j`, `f^- = dx^-/dt`, `e_j` is the jth parameter basis vector,
+    /// `r_x = ∂r/∂x`, `r_p = ∂r/∂p`, and `r_t = ∂r/∂t`.
+    ///
+    /// The post-event sensitivity is then updated as
+    /// `s^+_j = g_x s^-_j + g_p e_j + (g_x f^- + g_t - f^+) τ'_j`,
+    /// where `g_x = ∂g/∂x`, `g_p = ∂g/∂p`, and `g_t = ∂g/∂t`.
+    ///
+    /// Explicit time derivatives `∂g/∂t` and `∂r/∂t` are obtained from
+    /// [`NonLinearOpTimePartial`].
     ///
     /// Note: mass matrix equations are not supported for this operation.
     pub fn state_mut_op_with_sens_and_reset<Rhs, G, R>(
@@ -311,6 +305,34 @@ impl<V: Vector> StateRefMut<'_, V> {
     }
 
     /// Propagate adjoint variables through a time-dependent root-triggered reset.
+    /// 
+    /// This method assumes `self` stores the post-event adjoint state `(lambda^+, q^+)`,
+    /// while `fwd_state_minus` and `fwd_state_plus` provide the forward state derivatives
+    /// immediately before and after the reset. The terminal-root contribution for a root-defined
+    /// segment end must already have been applied with
+    /// [`Self::state_mut_adjoint_terminal_root`].
+    ///
+    /// If the pre-event forward state is `x^-`, the post-event state is `x^+ = g(x^-, t, p)`,
+    /// and the active root is `r_k(x^-, t, p) = 0`, define
+    /// `f^- = dx^-/dt`,
+    /// `f^+ = dx^+/dt`,
+    /// `c = g_x f^- + g_t - f^+`,
+    /// `d = [r_x f^-]_k + [r_t]_k`,
+    /// and, when continuous outputs are being integrated, `l^- = out(x^-, t)` and
+    /// `l^+ = out(x^+, t)`.
+    ///
+    /// For each adjoint channel with post-event adjoint `lambda^+` and post-event parameter
+    /// gradient `q^+`, the pre-event values are
+    /// `alpha = (lambda^+ · c + l^- - l^+) / d`,
+    /// `lambda^- = g_x^T lambda^+ - r_{x,k}^T alpha`,
+    /// and
+    /// `q^- = q^+ + g_p^T lambda^+ - r_{p,k}^T alpha`.
+    ///
+    /// Here `g_x = ∂g/∂x`, `g_t = ∂g/∂t`, `g_p = ∂g/∂p`, `r_x = ∂r/∂x`,
+    /// `r_t = ∂r/∂t`, and `r_p = ∂r/∂p`, all evaluated at `(x^-, t, p)`.
+    /// The `l^- - l^+` term is the running-cost jump contribution at the interior event.
+    /// The forward state vectors in `self` are left untouched; `self.s` and `self.sg`
+    /// are updated to the pre-event values.
     ///
     /// Note: mass matrix equations are not supported for this operation.
     pub fn state_mut_op_with_adjoint_and_reset<'a, Eqn, Method, G, R>(
@@ -431,10 +453,17 @@ impl<V: Vector> StateRefMut<'_, V> {
             self.sg[i] -= &reset_sens_adj;
             self.sg[i] += &root_sens_adj;
         }
-        refresh_augmented_state_ref_mut::<V, Eqn, _>(self, adj_eqn)
+        Ok(())
     }
 
     /// Add the terminal-root adjoint correction for a root-defined final time.
+    /// 
+    /// Given a forward terminal state satisfying the active root condition
+    /// `r_k(y_f, t_f, p) = 0`, this method adds the terminal contribution
+    /// `lambda_f += r_{x,k}^T * (u_k / d)` and `q_f += r_{p,k}^T * (u_k / d)` to each adjoint
+    /// channel, where `u_k` is the corresponding model output component and
+    /// `d = [r_x f_f]_k + [r_t]_k`.
+    ///
     pub fn state_mut_adjoint_terminal_root<'a, Eqn, Method, State>(
         &mut self,
         adj_eqn: &mut AdjointEquations<'a, Eqn, Method>,
@@ -515,7 +544,7 @@ impl<V: Vector> StateRefMut<'_, V> {
             self.s[i] += &lambda_corr;
             self.sg[i] += &q_corr;
         }
-        refresh_augmented_state_ref_mut::<V, Eqn, _>(self, adj_eqn)
+        Ok(())
     }
 }
 
@@ -1913,19 +1942,6 @@ mod test {
         assert_scalar_close(state.as_ref().sg[0][1], -0.195125);
         assert_scalar_close(state.as_ref().sg[1][0], 0.4355);
         assert_scalar_close(state.as_ref().sg[1][1], 0.5935);
-        assert!(
-            state.as_ref().ds.iter().any(|ds_i| ds_i[0].abs() > 1e-12),
-            "expected adjoint reset to refresh ds"
-        );
-        assert!(
-            state
-                .as_ref()
-                .dsg
-                .iter()
-                .flat_map(|dsg_i| (0..dsg_i.len()).map(|j| dsg_i[j]))
-                .any(|value| value.abs() > 1e-12),
-            "expected adjoint reset to refresh dsg"
-        );
     }
 
     #[test]
