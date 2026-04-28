@@ -297,6 +297,8 @@ where
     for<'b> &'b M::V: VectorRef<M::V>,
     for<'b> &'b M: MatrixRef<M>,
 {
+    // TODO: can we avoid cloning here? Adjoint equations require ownership of the checkpointing segments so maybe not
+    // unless we can change the adjoint equations to take references to the checkpointing segments instead
     let checkpointing = checkpoint.checkpointing.clone();
     let soln = Solution::new_dense(t_eval.to_vec())?;
 
@@ -310,16 +312,15 @@ where
             BwdLS,
             Tag,
             BdfTag,
-        >(problem, &soln, checkpointing.clone(), &dgdu_eval, Some(1)),
-        OdeSolverType::Esdirk34 => {
-            solve_adjoint_bkwds_with_fwd_bkwd_tag::<M, CG, FwdLS, BwdLS, Tag, Esdirk34Tag>(
-                problem,
-                &soln,
-                checkpointing.clone(),
-                &dgdu_eval,
-                Some(1),
-            )
-        }
+        >(problem, &soln, checkpointing, &dgdu_eval, Some(1)),
+        OdeSolverType::Esdirk34 => solve_adjoint_bkwds_with_fwd_bkwd_tag::<
+            M,
+            CG,
+            FwdLS,
+            BwdLS,
+            Tag,
+            Esdirk34Tag,
+        >(problem, &soln, checkpointing, &dgdu_eval, Some(1)),
         OdeSolverType::TrBdf2 => solve_adjoint_bkwds_with_fwd_bkwd_tag::<
             M,
             CG,
@@ -381,6 +382,7 @@ where
                 .map(|root_idx| {
                     (
                         root_idx,
+                        // TODO: remove these clones
                         previous_checkpointing.last_checkpoint().clone(),
                         current_checkpointing.first_checkpoint().clone(),
                     )

@@ -17,12 +17,48 @@ const RESET_TIME: f64 = 0.5;
 const RESET_Y: f64 = 0.2;
 const INITIAL_Y: f64 = 0.1;
 
-fn matrix_solver_cases() -> [(MatrixType, OdeSolverType); 4] {
+fn matrix_solver_cases() -> [(MatrixType, OdeSolverType, LinearSolverType); 8] {
     [
-        (MatrixType::FaerDense, OdeSolverType::Bdf),
-        (MatrixType::FaerDense, OdeSolverType::Esdirk34),
-        (MatrixType::FaerSparse, OdeSolverType::TrBdf2),
-        (MatrixType::NalgebraDense, OdeSolverType::Tsit45),
+        (
+            MatrixType::FaerDense,
+            OdeSolverType::Bdf,
+            LinearSolverType::Default,
+        ),
+        (
+            MatrixType::FaerDense,
+            OdeSolverType::Bdf,
+            LinearSolverType::Lu,
+        ),
+        (
+            MatrixType::FaerDense,
+            OdeSolverType::Esdirk34,
+            LinearSolverType::Default,
+        ),
+        (
+            MatrixType::FaerDense,
+            OdeSolverType::Esdirk34,
+            LinearSolverType::Lu,
+        ),
+        (
+            MatrixType::FaerSparse,
+            OdeSolverType::TrBdf2,
+            LinearSolverType::Default,
+        ),
+        (
+            MatrixType::FaerSparse,
+            OdeSolverType::TrBdf2,
+            LinearSolverType::Lu,
+        ),
+        (
+            MatrixType::NalgebraDense,
+            OdeSolverType::Tsit45,
+            LinearSolverType::Default,
+        ),
+        (
+            MatrixType::NalgebraDense,
+            OdeSolverType::Tsit45,
+            LinearSolverType::Lu,
+        ),
     ]
 }
 
@@ -31,13 +67,14 @@ fn make_time_reset_ode(
     scalar_type: ScalarType,
     matrix_type: MatrixType,
     ode_solver: OdeSolverType,
+    linear_solver: LinearSolverType,
 ) -> OdeWrapper {
     let ode = OdeWrapper::new_jit(
         logistic_time_reset_diffsl_code(),
         jit_backend,
         scalar_type,
         matrix_type,
-        LinearSolverType::Default,
+        linear_solver,
         ode_solver,
     )
     .unwrap();
@@ -110,8 +147,14 @@ fn logistic_time_reset_solve_matches_piecewise_solution() {
     let final_time = 1.0;
     for jit_backend in available_jit_backends() {
         for scalar_type in [ScalarType::F64, ScalarType::F32] {
-            for (matrix_type, ode_solver) in matrix_solver_cases() {
-                let ode = make_time_reset_ode(jit_backend, scalar_type, matrix_type, ode_solver);
+            for (matrix_type, ode_solver, linear_solver) in matrix_solver_cases() {
+                let ode = make_time_reset_ode(
+                    jit_backend,
+                    scalar_type,
+                    matrix_type,
+                    ode_solver,
+                    linear_solver,
+                );
                 assert_eq!(ode.get_nstates().unwrap(), 1);
                 assert_eq!(ode.get_nparams().unwrap(), 1);
                 assert_eq!(ode.get_nout().unwrap(), 1);
@@ -155,8 +198,14 @@ fn logistic_time_reset_solve_dense_matches_piecewise_solution() {
     let t_eval = [0.25, 0.75, 1.0];
     for jit_backend in available_jit_backends() {
         for scalar_type in [ScalarType::F64, ScalarType::F32] {
-            for (matrix_type, ode_solver) in matrix_solver_cases() {
-                let ode = make_time_reset_ode(jit_backend, scalar_type, matrix_type, ode_solver);
+            for (matrix_type, ode_solver, linear_solver) in matrix_solver_cases() {
+                let ode = make_time_reset_ode(
+                    jit_backend,
+                    scalar_type,
+                    matrix_type,
+                    ode_solver,
+                    linear_solver,
+                );
                 assert_time_reset_dense_solution(&ode, r, &t_eval);
             }
         }
@@ -172,8 +221,14 @@ fn logistic_time_reset_forward_sensitivities_match_piecewise_solution() {
         if jit_backend != JitBackendType::Llvm {
             continue;
         }
-        for (matrix_type, ode_solver) in matrix_solver_cases() {
-            let ode = make_time_reset_ode(jit_backend, ScalarType::F64, matrix_type, ode_solver);
+        for (matrix_type, ode_solver, linear_solver) in matrix_solver_cases() {
+            let ode = make_time_reset_ode(
+                jit_backend,
+                ScalarType::F64,
+                matrix_type,
+                ode_solver,
+                linear_solver,
+            );
 
             let solution = ode
                 .solve_fwd_sens(vector_host(&[r]), vector_host(&t_eval))
@@ -215,8 +270,14 @@ fn logistic_time_reset_continuous_adjoint_matches_piecewise_integral() {
         if jit_backend != JitBackendType::Llvm {
             continue;
         }
-        for (matrix_type, ode_solver) in matrix_solver_cases() {
-            let ode = make_time_reset_ode(jit_backend, ScalarType::F64, matrix_type, ode_solver);
+        for (matrix_type, ode_solver, linear_solver) in matrix_solver_cases() {
+            let ode = make_time_reset_ode(
+                jit_backend,
+                ScalarType::F64,
+                matrix_type,
+                ode_solver,
+                linear_solver,
+            );
 
             let (integral, gradient) = ode
                 .solve_continuous_adjoint(vector_host(&[r]), final_time)
@@ -257,8 +318,14 @@ fn logistic_time_reset_split_adjoint_matches_analytical_gradient() {
         if jit_backend != JitBackendType::Llvm {
             continue;
         }
-        for (matrix_type, ode_solver) in matrix_solver_cases() {
-            let ode = make_time_reset_ode(jit_backend, ScalarType::F64, matrix_type, ode_solver);
+        for (matrix_type, ode_solver, linear_solver) in matrix_solver_cases() {
+            let ode = make_time_reset_ode(
+                jit_backend,
+                ScalarType::F64,
+                matrix_type,
+                ode_solver,
+                linear_solver,
+            );
 
             let (solution, checkpoint) = ode
                 .solve_adjoint_fwd(vector_host(&[fit_r]), vector_host(&t_eval))
