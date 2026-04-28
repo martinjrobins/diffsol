@@ -1,10 +1,11 @@
 use crate::{
     error::DiffsolError,
     error::OdeSolverError,
+    ode_solver::method::write_state_out,
     ode_solver::solution::{Solution, SolutionMode},
     ode_solver_error, AugmentedOdeSolverMethod, Context, DefaultDenseMatrix, DenseMatrix,
     MatrixCommon, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens, OdeEquationsImplicitSens,
-    OdeSolverStopReason, Op, SensEquations, Vector, VectorViewMut,
+    OdeSolverProblem, OdeSolverStopReason, Op, SensEquations, StateRef, Vector, VectorViewMut,
 };
 use num_traits::{One, Zero};
 use std::ops::AddAssign;
@@ -178,18 +179,15 @@ where
 
         if let OdeSolverStopReason::RootFound(_, _) = stop_reason {
             if col < t_eval.len() {
-                let t = self.state().t;
-                dense_write_out_sensitivities(
-                    self,
-                    &mut ret,
+                write_state_out(self.problem(), &self.state(), &mut ret, col, &mut tmp_nout);
+                write_state_sens_out(
+                    self.problem(),
+                    &self.state(),
                     &mut ret_sens,
-                    t,
                     col,
                     &mut tmp_nout,
                     &mut tmp_nparams,
-                    &mut tmp_nstates,
-                    &mut tmp_nsens,
-                )?;
+                );
                 if col + 1 < ret.ncols() {
                     ret.resize_cols(col + 1);
                     for rs in &mut ret_sens {
@@ -394,4 +392,35 @@ where
         }
     }
     Ok(())
+}
+
+pub(crate) fn write_state_sens_out<Eqn>(
+    problem: &OdeSolverProblem<Eqn>,
+    state: &StateRef<'_, Eqn::V>,
+    ret_sens: &mut [<Eqn::V as DefaultDenseMatrix>::M],
+    col: usize,
+    tmp_nout: &mut Eqn::V,
+    tmp_nparams: &mut Eqn::V,
+) where
+    Eqn: OdeEquationsImplicitSens,
+    Eqn::V: DefaultDenseMatrix,
+{
+    if let Some(out) = problem.eqn.out() {
+        for (j, state_sens) in state.s.iter().enumerate() {
+            if j >= ret_sens.len() {
+                break;
+            }
+            let mut col_v = ret_sens[j].column_mut(col);
+            tmp_nparams.set_index(j, Eqn::T::one());
+            out.jac_mul_inplace(state.y, state.t, state_sens, tmp_nout);
+            col_v.copy_from(&*tmp_nout);
+            out.sens_mul_inplace(state.y, state.t, tmp_nparams, tmp_nout);
+            col_v.add_assign(&*tmp_nout);
+            tmp_nparams.set_index(j, Eqn::T::zero());
+        }
+    } else {
+        for (sens, state_sens) in ret_sens.iter_mut().zip(state.s.iter()) {
+            sens.column_mut(col).copy_from(state_sens);
+        }
+    }
 }

@@ -198,7 +198,7 @@ macro_rules! sdirk_solver_from_tableau {
             "An SDIRK solver instance configured for adjoint sensitivity analysis using ", stringify!($tableau))]
         pub fn $method_solver_adjoint<'a, LS: LinearSolver<Eqn::M>, S: OdeSolverMethod<'a, Eqn>>(
             &'a self,
-            checkpointer: CheckpointingPath<Eqn, S::State, S>,
+            checkpointer: CheckpointingPath<Eqn, S::State>,
             solver: Option<S>,
             nout_override: Option<usize>,
         ) -> Result<
@@ -353,7 +353,7 @@ macro_rules! rk_solver_from_tableau {
             "An explicit RK solver instance configured for adjoint sensitivity analysis using ", stringify!($tableau))]
         pub fn $method_solver_adjoint<'a, S: OdeSolverMethod<'a, Eqn>>(
             &'a self,
-            checkpointer: CheckpointingPath<Eqn, S::State, S>,
+            checkpointer: CheckpointingPath<Eqn, S::State>,
             solver: Option<S>,
             nout_override: Option<usize>,
         ) -> Result<
@@ -513,7 +513,7 @@ where
 {
     pub fn adjoint_equations<'a, S: OdeSolverMethod<'a, Eqn>>(
         &'a self,
-        checkpointer: CheckpointingPath<Eqn, S::State, S>,
+        checkpointer: CheckpointingPath<Eqn, S::State>,
         solver: Option<S>,
         nout_override: Option<usize>,
     ) -> AdjointEquations<'a, Eqn, S> {
@@ -722,7 +722,7 @@ where
     #[allow(clippy::type_complexity)]
     pub fn bdf_solver_adjoint<'a, LS: LinearSolver<Eqn::M>, S: OdeSolverMethod<'a, Eqn>>(
         &'a self,
-        checkpointer: CheckpointingPath<Eqn, S::State, S>,
+        checkpointer: CheckpointingPath<Eqn, S::State>,
         solver: Option<S>,
         nout_override: Option<usize>,
     ) -> Result<
@@ -917,7 +917,7 @@ where
     >(
         &'a self,
         tableau: Tableau<DM>,
-        checkpointer: CheckpointingPath<Eqn, S::State, S>,
+        checkpointer: CheckpointingPath<Eqn, S::State>,
         solver: Option<S>,
         nout_override: Option<usize>,
     ) -> Result<Sdirk<'a, Eqn, LS, DM, AdjointEquations<'a, Eqn, S>>, DiffsolError>
@@ -1081,7 +1081,7 @@ where
     >(
         &'a self,
         tableau: Tableau<DM>,
-        checkpointer: CheckpointingPath<Eqn, S::State, S>,
+        checkpointer: CheckpointingPath<Eqn, S::State>,
         solver: Option<S>,
         nout_override: Option<usize>,
     ) -> Result<ExplicitRk<'a, Eqn, DM, AdjointEquations<'a, Eqn, S>>, DiffsolError>

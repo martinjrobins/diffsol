@@ -536,40 +536,6 @@ pub unsafe extern "C" fn diffsol_ode_solve(
     }
 }
 
-/// Solve a hybrid ODE up to a final time, automatically applying resets after roots.
-///
-/// # Safety
-/// `ode` must be a valid mutable pointer created by this library. `params_ptr`
-/// must point to `params_len` readable `f64` values unless `params_len == 0`.
-/// `out_solution` must be a valid, writable pointer.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn diffsol_ode_solve_hybrid(
-    ode: *mut OdeWrapper,
-    params_ptr: *const f64,
-    params_len: usize,
-    final_time: f64,
-    out_solution: *mut *mut SolutionWrapper,
-) -> i32 {
-    if ode.is_null() || out_solution.is_null() || !valid_f64_ptr(params_ptr, params_len) {
-        c_invalid_arg!("invalid arguments to diffsol_ode_solve_hybrid");
-        return DIFFSOL_BAD_ARG;
-    }
-    let params = HostArray::new_vector(params_ptr as *mut u8, params_len, ScalarType::F64);
-    let ode = unsafe { &mut *ode };
-    match ode.solve_hybrid(params, final_time) {
-        Ok(new_solution) => {
-            unsafe {
-                *out_solution = Box::into_raw(Box::new(new_solution));
-            }
-            DIFFSOL_OK
-        }
-        Err(err) => {
-            c_error!(&format!("{}", err));
-            DIFFSOL_ERR
-        }
-    }
-}
-
 /// Solve an ODE and sample the solution at requested times.
 ///
 /// # Safety
@@ -597,46 +563,6 @@ pub unsafe extern "C" fn diffsol_ode_solve_dense(
     let t_eval = HostArray::new_vector(t_eval_ptr as *mut u8, t_eval_len, ScalarType::F64);
     let ode = unsafe { &mut *ode };
     match ode.solve_dense(params, t_eval) {
-        Ok(new_solution) => {
-            unsafe {
-                *out_solution = Box::into_raw(Box::new(new_solution));
-            }
-            DIFFSOL_OK
-        }
-        Err(err) => {
-            c_error!(&format!("{}", err));
-            DIFFSOL_ERR
-        }
-    }
-}
-
-/// Solve a hybrid ODE and sample the solution at requested times.
-///
-/// # Safety
-/// `ode` must be a valid mutable pointer created by this library. `params_ptr`
-/// and `t_eval_ptr` must point to readable `f64` buffers of the specified
-/// lengths, unless the corresponding length is zero. `out_solution` must be writable.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn diffsol_ode_solve_hybrid_dense(
-    ode: *mut OdeWrapper,
-    params_ptr: *const f64,
-    params_len: usize,
-    t_eval_ptr: *const f64,
-    t_eval_len: usize,
-    out_solution: *mut *mut SolutionWrapper,
-) -> i32 {
-    if ode.is_null()
-        || out_solution.is_null()
-        || !valid_f64_ptr(params_ptr, params_len)
-        || !valid_f64_ptr(t_eval_ptr, t_eval_len)
-    {
-        c_invalid_arg!("invalid arguments to diffsol_ode_solve_hybrid_dense");
-        return DIFFSOL_BAD_ARG;
-    }
-    let params = HostArray::new_vector(params_ptr as *mut u8, params_len, ScalarType::F64);
-    let t_eval = HostArray::new_vector(t_eval_ptr as *mut u8, t_eval_len, ScalarType::F64);
-    let ode = unsafe { &mut *ode };
-    match ode.solve_hybrid_dense(params, t_eval) {
         Ok(new_solution) => {
             unsafe {
                 *out_solution = Box::into_raw(Box::new(new_solution));
@@ -680,105 +606,6 @@ pub unsafe extern "C" fn diffsol_ode_solve_fwd_sens(
         Ok(new_solution) => {
             unsafe {
                 *out_solution = Box::into_raw(Box::new(new_solution));
-            }
-            DIFFSOL_OK
-        }
-        Err(err) => {
-            c_error!(&format!("{}", err));
-            DIFFSOL_ERR
-        }
-    }
-}
-
-/// Solve a hybrid ODE with forward sensitivities at requested times.
-///
-/// # Safety
-/// `ode` must be a valid mutable pointer created by this library. `params_ptr`
-/// and `t_eval_ptr` must point to readable `f64` buffers of the specified
-/// lengths, unless the corresponding length is zero. `out_solution` must be writable.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn diffsol_ode_solve_hybrid_fwd_sens(
-    ode: *mut OdeWrapper,
-    params_ptr: *const f64,
-    params_len: usize,
-    t_eval_ptr: *const f64,
-    t_eval_len: usize,
-    out_solution: *mut *mut SolutionWrapper,
-) -> i32 {
-    if ode.is_null()
-        || out_solution.is_null()
-        || !valid_f64_ptr(params_ptr, params_len)
-        || !valid_f64_ptr(t_eval_ptr, t_eval_len)
-    {
-        c_invalid_arg!("invalid arguments to diffsol_ode_solve_hybrid_fwd_sens");
-        return DIFFSOL_BAD_ARG;
-    }
-    let params = HostArray::new_vector(params_ptr as *mut u8, params_len, ScalarType::F64);
-    let t_eval = HostArray::new_vector(t_eval_ptr as *mut u8, t_eval_len, ScalarType::F64);
-    let ode = unsafe { &mut *ode };
-    match ode.solve_hybrid_fwd_sens(params, t_eval) {
-        Ok(new_solution) => {
-            unsafe {
-                *out_solution = Box::into_raw(Box::new(new_solution));
-            }
-            DIFFSOL_OK
-        }
-        Err(err) => {
-            c_error!(&format!("{}", err));
-            DIFFSOL_ERR
-        }
-    }
-}
-
-/// Solve the sum-of-squares adjoint problem for an ODE.
-///
-/// # Safety
-/// `ode` must be a valid mutable pointer created by this library. `params_ptr`,
-/// `data_ptr`, and `t_eval_ptr` must point to readable buffers matching the
-/// provided dimensions. `out_value` and `out_sens` must be valid, writable
-/// pointers.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn diffsol_ode_solve_sum_squares_adj(
-    ode: *mut OdeWrapper,
-    params_ptr: *const f64,
-    params_len: usize,
-    data_ptr: *const f64,
-    data_rows: usize,
-    data_cols: usize,
-    data_row_stride: usize,
-    data_col_stride: usize,
-    t_eval_ptr: *const f64,
-    t_eval_len: usize,
-    out_value: *mut f64,
-    out_sens: *mut *mut HostArray,
-) -> i32 {
-    if ode.is_null()
-        || out_value.is_null()
-        || out_sens.is_null()
-        || data_ptr.is_null()
-        || !valid_f64_ptr(params_ptr, params_len)
-        || !valid_f64_ptr(t_eval_ptr, t_eval_len)
-    {
-        c_invalid_arg!("invalid arguments to diffsol_ode_solve_sum_squares_adj");
-        return DIFFSOL_BAD_ARG;
-    }
-    let params = HostArray::new_vector(params_ptr as *mut u8, params_len, ScalarType::F64);
-    let t_eval = HostArray::new_vector(t_eval_ptr as *mut u8, t_eval_len, ScalarType::F64);
-    let data = HostArray::new_col_major(
-        data_ptr as *mut u8,
-        data_rows,
-        data_cols,
-        data_row_stride as isize,
-        data_col_stride as isize,
-        ScalarType::F64,
-    );
-    let ode = unsafe { &mut *ode };
-    match ode.solve_sum_squares_adj(params, data, t_eval) {
-        Ok((value, sens)) => {
-            let sens_boxed = boxed_host_array(sens);
-            unsafe {
-                *out_value = value;
-                *out_sens = sens_boxed;
             }
             DIFFSOL_OK
         }
@@ -1868,7 +1695,7 @@ mod tests {
             assert!(!hybrid_ode.is_null());
             let mut hybrid_solution_ptr: *mut SolutionWrapper = ptr::null_mut();
             assert_eq!(
-                diffsol_ode_solve_hybrid_dense(
+                diffsol_ode_solve_dense(
                     hybrid_ode,
                     params.as_ptr(),
                     params.len(),
@@ -1953,35 +1780,6 @@ mod tests {
                     &format!("ffi sensitivity[{i}]"),
                 );
             }
-
-            let adjoint_t_eval = [0.0f64, 0.25f64, 0.5f64, 1.0f64];
-            let adjoint_data: Vec<f64> = adjoint_t_eval
-                .iter()
-                .map(|&t| logistic_state(LOGISTIC_X0, 2.0, t))
-                .collect();
-            let mut objective = 0.0;
-            let mut adjoint_grad_ptr = ptr::null_mut();
-            assert_eq!(
-                diffsol_ode_solve_sum_squares_adj(
-                    analysis_ode,
-                    params.as_ptr(),
-                    params.len(),
-                    adjoint_data.as_ptr(),
-                    1,
-                    adjoint_t_eval.len(),
-                    1,
-                    1,
-                    adjoint_t_eval.as_ptr(),
-                    adjoint_t_eval.len(),
-                    &mut objective,
-                    &mut adjoint_grad_ptr,
-                ),
-                DIFFSOL_OK
-            );
-            assert_close(objective, 0.0, ASSERT_TOL, "ffi adjoint objective");
-            let grad = ffi_read_host_array_vector(adjoint_grad_ptr);
-            assert_eq!(grad.len(), 1);
-            assert_close(grad[0], 0.0, ASSERT_TOL, "ffi adjoint gradient");
 
             ffi_free_solution(sens_solution_ptr);
             diffsol_ode_free(analysis_ode);
@@ -2482,38 +2280,6 @@ mod jit_tests {
                         );
                     }
 
-                    let adjoint_t_eval = [0.0f64, 0.25f64, 0.5f64, 1.0f64];
-                    let adjoint_data: Vec<f64> = adjoint_t_eval
-                        .iter()
-                        .map(|&t| logistic_state(LOGISTIC_X0, 2.0, t))
-                        .collect();
-                    let mut objective = 0.0;
-                    let mut adjoint_grad_ptr = ptr::null_mut();
-                    assert_eq!(
-                        diffsol_ode_solve_sum_squares_adj(
-                            analysis_ode,
-                            params.as_ptr(),
-                            params.len(),
-                            adjoint_data.as_ptr(),
-                            1,
-                            adjoint_t_eval.len(),
-                            1,
-                            1,
-                            adjoint_t_eval.as_ptr(),
-                            adjoint_t_eval.len(),
-                            &mut objective,
-                            &mut adjoint_grad_ptr,
-                        ),
-                        DIFFSOL_OK
-                    );
-                    assert_close(objective, 0.0, ASSERT_TOL, "jit ffi adjoint objective");
-                    let grad = ffi_read_host_array_vector(adjoint_grad_ptr);
-                    assert_eq!(grad.len(), 1);
-                    assert!(
-                        grad[0].is_finite(),
-                        "jit ffi adjoint gradient should be finite"
-                    );
-
                     ffi_free_solution(sens_solution_ptr);
                     diffsol_ode_free(analysis_ode);
                 }
@@ -2782,7 +2548,7 @@ mod jit_tests {
                     DIFFSOL_ERR
                 );
                 assert_eq!(
-                    diffsol_ode_solve_hybrid(
+                    diffsol_ode_solve(
                         ode,
                         no_params.as_ptr(),
                         no_params.len(),
@@ -2803,7 +2569,7 @@ mod jit_tests {
                     DIFFSOL_ERR
                 );
                 assert_eq!(
-                    diffsol_ode_solve_hybrid_dense(
+                    diffsol_ode_solve_dense(
                         ode,
                         no_params.as_ptr(),
                         no_params.len(),
@@ -2828,37 +2594,13 @@ mod jit_tests {
                         DIFFSOL_ERR
                     );
                     assert_eq!(
-                        diffsol_ode_solve_hybrid_fwd_sens(
+                        diffsol_ode_solve_fwd_sens(
                             ode,
                             no_params.as_ptr(),
                             no_params.len(),
                             t_eval.as_ptr(),
                             t_eval.len(),
                             &mut err_solution_ptr,
-                        ),
-                        DIFFSOL_ERR
-                    );
-
-                    let adjoint_data: Vec<f64> = t_eval
-                        .iter()
-                        .map(|&t| logistic_state(LOGISTIC_X0, 2.0, t))
-                        .collect();
-                    let mut objective = 0.0;
-                    let mut sens_ptr = ptr::null_mut();
-                    assert_eq!(
-                        diffsol_ode_solve_sum_squares_adj(
-                            ode,
-                            no_params.as_ptr(),
-                            no_params.len(),
-                            adjoint_data.as_ptr(),
-                            1,
-                            t_eval.len(),
-                            1,
-                            1,
-                            t_eval.as_ptr(),
-                            t_eval.len(),
-                            &mut objective,
-                            &mut sens_ptr,
                         ),
                         DIFFSOL_ERR
                     );
@@ -2976,13 +2718,7 @@ mod jit_tests {
                     DIFFSOL_BAD_ARG
                 );
                 assert_eq!(
-                    diffsol_ode_solve_hybrid(
-                        ode,
-                        params.as_ptr(),
-                        params.len(),
-                        1.0,
-                        ptr::null_mut(),
-                    ),
+                    diffsol_ode_solve(ode, params.as_ptr(), params.len(), 1.0, ptr::null_mut(),),
                     DIFFSOL_BAD_ARG
                 );
                 assert_eq!(
@@ -2997,7 +2733,7 @@ mod jit_tests {
                     DIFFSOL_BAD_ARG
                 );
                 assert_eq!(
-                    diffsol_ode_solve_hybrid_dense(
+                    diffsol_ode_solve_dense(
                         ode,
                         params.as_ptr(),
                         params.len(),
@@ -3021,48 +2757,12 @@ mod jit_tests {
                         DIFFSOL_BAD_ARG
                     );
                     assert_eq!(
-                        diffsol_ode_solve_hybrid_fwd_sens(
+                        diffsol_ode_solve_fwd_sens(
                             ode,
                             params.as_ptr(),
                             params.len(),
                             t_eval.as_ptr(),
                             t_eval.len(),
-                            ptr::null_mut(),
-                        ),
-                        DIFFSOL_BAD_ARG
-                    );
-                    let mut objective = 0.0;
-                    let mut sens_ptr = ptr::null_mut();
-                    assert_eq!(
-                        diffsol_ode_solve_sum_squares_adj(
-                            ode,
-                            params.as_ptr(),
-                            params.len(),
-                            t_eval.as_ptr(),
-                            1,
-                            t_eval.len(),
-                            1,
-                            1,
-                            t_eval.as_ptr(),
-                            t_eval.len(),
-                            ptr::null_mut(),
-                            &mut sens_ptr,
-                        ),
-                        DIFFSOL_BAD_ARG
-                    );
-                    assert_eq!(
-                        diffsol_ode_solve_sum_squares_adj(
-                            ode,
-                            params.as_ptr(),
-                            params.len(),
-                            t_eval.as_ptr(),
-                            1,
-                            t_eval.len(),
-                            1,
-                            1,
-                            t_eval.as_ptr(),
-                            t_eval.len(),
-                            &mut objective,
                             ptr::null_mut(),
                         ),
                         DIFFSOL_BAD_ARG
@@ -3091,13 +2791,7 @@ mod jit_tests {
                 let params = [2.0f64];
                 let mut solution_ptr: *mut SolutionWrapper = ptr::null_mut();
                 assert_eq!(
-                    diffsol_ode_solve_hybrid(
-                        ode,
-                        params.as_ptr(),
-                        params.len(),
-                        2.0,
-                        &mut solution_ptr
-                    ),
+                    diffsol_ode_solve(ode, params.as_ptr(), params.len(), 2.0, &mut solution_ptr),
                     DIFFSOL_OK
                 );
                 let mut ys_ptr = ptr::null_mut();
@@ -3127,7 +2821,7 @@ mod jit_tests {
                     let t_eval = [0.25f64, 0.5f64, 1.0f64];
                     let mut sens_solution_ptr: *mut SolutionWrapper = ptr::null_mut();
                     assert_eq!(
-                        diffsol_ode_solve_hybrid_fwd_sens(
+                        diffsol_ode_solve_fwd_sens(
                             ode,
                             params.as_ptr(),
                             params.len(),

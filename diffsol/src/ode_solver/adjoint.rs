@@ -87,47 +87,7 @@ where
         Eqn::V: DefaultDenseMatrix,
         Eqn::M: DefaultSolver,
     {
-        // check that aug_eqn exists
-        if self.augmented_eqn().is_none() {
-            return Err(ode_solver_error!(Other, "No augmented equations"));
-        }
-
-        // t_eval should be in increasing order
-        if t_eval.windows(2).any(|w| w[0] >= w[1]) {
-            return Err(ode_solver_error!(
-                Other,
-                "t_eval should be in increasing order"
-            ));
-        }
-
-        let have_neqn = self.augmented_eqn().unwrap().max_index();
-        if dgdu_eval.is_empty() {
-            // if dgdus is empty, then the number of outputs in the model is used
-            let expected_neqn = self.problem().eqn.out().map(|o| o.nout()).unwrap_or(0);
-            if self.augmented_eqn().unwrap().max_index() != expected_neqn {
-                return Err(ode_solver_error!(
-                    Other,
-                    format!("Number of augmented equations does not match number of model outputs: {} != {}", have_neqn, expected_neqn)
-                ));
-            }
-        } else {
-            // if dgdu_eval is not empty, check that aug_eqn has dgdu_eval.len() outputs
-            let expected_neqn = dgdu_eval.len();
-            if have_neqn != expected_neqn {
-                return Err(ode_solver_error!(
-                    Other,
-                    format!("Number of outputs in augmented equations does not match number of outputs in dgdu_eval: {} != {}", have_neqn, expected_neqn)
-                ));
-            }
-        }
-        // check that nrows of each dgdu_eval is the same as the number of outputs in the model
-        let nout = self.problem().eqn.nout();
-        if dgdu_eval.iter().any(|dgdu| dgdu.nrows() != nout) {
-            return Err(ode_solver_error!(
-                Other,
-                "Number of outputs does not match number of rows in gradient"
-            ));
-        }
+        let have_neqn = validate_adjoint_backwards_inputs(&self, t_eval, dgdu_eval)?;
 
         let mut integrate_delta_g = if have_neqn > 0 && !dgdu_eval.is_empty() {
             let integrate_delta_g =
@@ -144,12 +104,7 @@ where
             .augmented_eqn()
             .unwrap()
             .checkpointing_bounds(checkpointing_len - 1);
-        if problem_t0 != first_checkpoint_t {
-            return Err(ode_solver_error!(
-                Other,
-                "Problem initial time does not match the first checkpointing segment start time"
-            ));
-        }
+        let path_starts_at_problem_t0 = problem_t0 == first_checkpoint_t;
         if solve_t1 != last_checkpoint_t {
             return Err(ode_solver_error!(
                 Other,
@@ -174,35 +129,116 @@ where
             )?;
 
             if segment_index > 0 {
-                let (root_idx, fwd_state_minus, fwd_state_plus) = {
+                let reset_data = {
                     let aug_eqn = self.augmented_eqn().unwrap();
-                    let root_idx = aug_eqn
-                        .checkpointing_terminal_reset_root_idx(segment_index - 1)
-                        .ok_or_else(|| {
-                            ode_solver_error!(
+                    let fwd_state_minus = aug_eqn.checkpointing_last_state(segment_index - 1);
+                    let fwd_state_plus = aug_eqn.checkpointing_first_state(segment_index);
+                    match aug_eqn.checkpointing_terminal_reset_root_idx(segment_index - 1) {
+                        Some(root_idx) => Some((root_idx, fwd_state_minus, fwd_state_plus)),
+                        None if checkpoint_boundary_is_continuous(
+                            &fwd_state_minus,
+                            &fwd_state_plus,
+                        ) =>
+                        {
+                            None
+                        }
+                        None => {
+                            return Err(ode_solver_error!(
                                 Other,
                                 "Missing reset root metadata between checkpointing segments"
-                            )
-                        })?;
-                    (
-                        root_idx,
-                        aug_eqn.checkpointing_last_state(segment_index - 1),
-                        aug_eqn.checkpointing_first_state(segment_index),
-                    )
+                            ))
+                        }
+                    }
                 };
-                self.apply_reset_with_adjoint(root_idx, &fwd_state_minus, &fwd_state_plus)?;
+                if let Some((root_idx, fwd_state_minus, fwd_state_plus)) = reset_data {
+                    self.apply_reset_with_adjoint(root_idx, &fwd_state_minus, &fwd_state_plus)?;
+                }
             }
         }
 
-        // correct the adjoint solution for the initial conditions
         let (mut state, aug_eqn) = self.into_state_and_eqn();
-        let aug_eqn = aug_eqn.unwrap();
-        let state_mut = state.as_mut();
-        aug_eqn.correct_sg_for_init(problem_t0, state_mut.s, state_mut.sg);
+        if path_starts_at_problem_t0 {
+            let aug_eqn = aug_eqn.unwrap();
+            let state_mut = state.as_mut();
+            aug_eqn.correct_sg_for_init(problem_t0, state_mut.s, state_mut.sg);
+        }
 
         // return the solution
         Ok(state)
     }
+}
+
+fn checkpoint_boundary_is_continuous<V, State>(state_minus: &State, state_plus: &State) -> bool
+where
+    V: Vector,
+    State: OdeSolverState<V>,
+{
+    let state_minus = state_minus.as_ref();
+    let state_plus = state_plus.as_ref();
+    state_minus.y.len() == state_plus.y.len()
+        && state_minus.dy.len() == state_plus.dy.len()
+        && state_minus.t == state_plus.t
+        && (0..state_minus.y.len()).all(|i| state_minus.y.get_index(i) == state_plus.y.get_index(i))
+        && (0..state_minus.dy.len())
+            .all(|i| state_minus.dy.get_index(i) == state_plus.dy.get_index(i))
+}
+
+fn validate_adjoint_backwards_inputs<'a, Eqn, Solver, AdjointSolver>(
+    solver: &AdjointSolver,
+    t_eval: &[Eqn::T],
+    dgdu_eval: &[&<Eqn::V as DefaultDenseMatrix>::M],
+) -> Result<usize, DiffsolError>
+where
+    Eqn: OdeEquationsImplicitAdjoint + 'a,
+    Eqn::V: DefaultDenseMatrix,
+    Solver: OdeSolverMethod<'a, Eqn>,
+    AdjointSolver: AdjointOdeSolverMethod<'a, Eqn, Solver>,
+{
+    if solver.augmented_eqn().is_none() {
+        return Err(ode_solver_error!(Other, "No augmented equations"));
+    }
+
+    if t_eval.windows(2).any(|w| w[0] >= w[1]) {
+        return Err(ode_solver_error!(
+            Other,
+            "t_eval should be in increasing order"
+        ));
+    }
+
+    let have_neqn = solver.augmented_eqn().unwrap().max_index();
+    if dgdu_eval.is_empty() {
+        let expected_neqn = solver.problem().eqn.out().map(|o| o.nout()).unwrap_or(0);
+        if have_neqn != expected_neqn {
+            return Err(ode_solver_error!(
+                Other,
+                format!("Number of augmented equations does not match number of model outputs: {} != {}", have_neqn, expected_neqn)
+            ));
+        }
+    } else {
+        let expected_neqn = dgdu_eval.len();
+        if have_neqn != expected_neqn {
+            return Err(ode_solver_error!(
+                Other,
+                format!("Number of outputs in augmented equations does not match number of outputs in dgdu_eval: {} != {}", have_neqn, expected_neqn)
+            ));
+        }
+    }
+
+    let nout = solver.problem().eqn.nout();
+    if dgdu_eval.iter().any(|dgdu| dgdu.nrows() != nout) {
+        return Err(ode_solver_error!(
+            Other,
+            "Number of outputs does not match number of rows in gradient"
+        ));
+    }
+    if dgdu_eval.iter().any(|dgdu| dgdu.ncols() != t_eval.len()) {
+        return Err(ode_solver_error!(
+            Other,
+            "Number of solution timepoints does not match number of columns in gradient"
+        ));
+    }
+
+    Ok(have_neqn)
 }
 
 fn solve_adjoint_backwards_segment<'a, Eqn, Solver, AdjointSolver>(

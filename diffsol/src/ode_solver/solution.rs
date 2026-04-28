@@ -1,6 +1,7 @@
 use crate::{
-    error::OdeSolverError, ode_solver_error, DefaultDenseMatrix, DiffsolError, Matrix,
-    MatrixCommon, OdeSolverStopReason, Scalar,
+    error::OdeSolverError, ode_solver_error, DefaultDenseMatrix, DenseMatrix, DiffsolError, Matrix,
+    MatrixCommon, OdeEquations, OdeEquationsImplicitSens, OdeSolverProblem, OdeSolverStopReason,
+    Scalar, StateRef,
 };
 
 pub(crate) enum SolutionMode<T: Scalar> {
@@ -85,6 +86,93 @@ impl<V: DefaultDenseMatrix> Solution<V> {
             SolutionMode::Tfinal(t_final) => self.ts.last().map(|&t| t >= t_final).unwrap_or(false),
         }
     }
+
+    pub fn truncate<Eqn>(
+        &mut self,
+        problem: &OdeSolverProblem<Eqn>,
+        state: StateRef<'_, V>,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
+    {
+        if let Some(OdeSolverStopReason::RootFound(t_root, _)) = self.stop_reason {
+            let ncols = match self.mode {
+                SolutionMode::Tevals(col) if col < self.ts.len() => {
+                    crate::ode_solver::method::write_state_out(
+                        problem,
+                        &state,
+                        &mut self.ys,
+                        col,
+                        &mut self.tmp_nout,
+                    );
+                    self.ts[col] = state.t;
+                    col + 1
+                }
+                _ => self
+                    .ts
+                    .iter()
+                    .position(|&t| t > t_root)
+                    .unwrap_or(self.ts.len()),
+            };
+            self.ts.truncate(ncols);
+            self.ys.resize_cols(ncols);
+            for sens in &mut self.y_sens {
+                sens.resize_cols(ncols);
+            }
+            if let SolutionMode::Tevals(_) = self.mode {
+                self.mode = SolutionMode::Tevals(ncols);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn truncate_sens<Eqn>(
+        &mut self,
+        problem: &OdeSolverProblem<Eqn>,
+        state: StateRef<'_, V>,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitSens<T = V::T, V = V, C = V::C>,
+    {
+        if let Some(OdeSolverStopReason::RootFound(t_root, _)) = self.stop_reason {
+            let ncols = match self.mode {
+                SolutionMode::Tevals(col) if col < self.ts.len() => {
+                    crate::ode_solver::method::write_state_out(
+                        problem,
+                        &state,
+                        &mut self.ys,
+                        col,
+                        &mut self.tmp_nout,
+                    );
+                    crate::ode_solver::sensitivities::write_state_sens_out(
+                        problem,
+                        &state,
+                        &mut self.y_sens,
+                        col,
+                        &mut self.tmp_nout,
+                        &mut self.tmp_nparams,
+                    );
+                    self.ts[col] = state.t;
+                    col + 1
+                }
+                _ => self
+                    .ts
+                    .iter()
+                    .position(|&t| t > t_root)
+                    .unwrap_or(self.ts.len()),
+            };
+            self.ts.truncate(ncols);
+            self.ys.resize_cols(ncols);
+            for sens in &mut self.y_sens {
+                sens.resize_cols(ncols);
+            }
+            if let SolutionMode::Tevals(_) = self.mode {
+                self.mode = SolutionMode::Tevals(ncols);
+            }
+        }
+        Ok(())
+    }
+
     pub fn new(t_final: V::T) -> Self {
         let ctx = V::C::default();
         Self {

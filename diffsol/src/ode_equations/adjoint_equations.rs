@@ -8,12 +8,11 @@ use std::{
 use crate::{
     error::DiffsolError, op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations,
     CheckpointingPath, ConstantOp, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
-    NoCheckpointingSolver, NonLinearOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations,
-    OdeEquationsAdjoint, OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op,
-    Scalar, Vector,
+    NonLinearOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint,
+    OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Scalar, Vector,
 };
 
-pub struct AdjointContext<'a, Eqn, State, Method = NoCheckpointingSolver<Eqn, State>>
+pub struct AdjointContext<'a, Eqn, State, Method>
 where
     Eqn: OdeEquations,
     State: OdeSolverState<Eqn::V>,
@@ -21,7 +20,7 @@ where
 {
     eqn: &'a Eqn,
     t0: Eqn::T,
-    checkpointers: CheckpointingPath<Eqn, State, Method>,
+    checkpointers: CheckpointingPath<Eqn, State>,
     active_checkpointer: usize,
     solver: Option<RefCell<Method>>,
     x: Eqn::V,
@@ -40,7 +39,7 @@ where
     pub fn new(
         eqn: &'a Eqn,
         t0: Eqn::T,
-        checkpointers: CheckpointingPath<Eqn, State, Method>,
+        checkpointers: CheckpointingPath<Eqn, State>,
         solver: Option<Method>,
         max_index: usize,
     ) -> Self {
@@ -67,7 +66,7 @@ where
         }
     }
 
-    fn active_checkpointer(&self) -> &crate::Checkpointing<Eqn, State, Method> {
+    fn active_checkpointer(&self) -> &crate::Checkpointing<Eqn, State> {
         &self.checkpointers[self.active_checkpointer]
     }
 
@@ -109,7 +108,7 @@ where
                     .unwrap();
             }
             None => self.checkpointers[active_checkpointer]
-                .interpolate(None, t_interp, x)
+                .interpolate::<Method>(None, t_interp, x)
                 .unwrap(),
         }
         // for diffsl, we need to set data for the adjoint state!

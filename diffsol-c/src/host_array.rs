@@ -1,8 +1,8 @@
 use crate::{
     error::DiffsolRtError,
-    scalar_type::{Scalar, ScalarType},
+    scalar_type::{Scalar, ScalarType, ToScalarType},
 };
-use diffsol::{FaerScalar, NalgebraScalar};
+use diffsol::{FaerScalar, NalgebraScalar, Vector};
 use ndarray::{ArrayView2, ShapeBuilder};
 use std::any::Any;
 
@@ -12,6 +12,31 @@ pub trait ToHostArray<T> {
 
 pub trait FromHostArray<T> {
     fn from_host_array(array: HostArray) -> Result<T, DiffsolRtError>;
+}
+
+impl<V> ToHostArray<Vec<V>> for Vec<V>
+where
+    V: Vector,
+    V::T: Scalar + 'static,
+{
+    fn to_host_array(self) -> HostArray {
+        let ncols = self.len();
+        let nrows = self.first().map(|column| column.len()).unwrap_or(0);
+        let mut owner = Vec::with_capacity(nrows * ncols);
+        for column in self {
+            assert_eq!(
+                column.len(),
+                nrows,
+                "all vector columns must have the same length"
+            );
+            for row in 0..nrows {
+                owner.push(column.get_index(row));
+            }
+        }
+        let ptr = owner.as_mut_ptr() as *mut u8;
+        HostArray::new_col_major(ptr, nrows, ncols, 1, nrows as isize, V::T::scalar_type())
+            .with_owner(Box::new(owner))
+    }
 }
 
 impl<T: Scalar + FaerScalar + 'static> ToHostArray<T> for faer::Mat<T> {

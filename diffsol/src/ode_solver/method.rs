@@ -1,4 +1,4 @@
-use std::cell::Ref;
+use std::{cell::Ref, marker::PhantomData};
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
@@ -376,6 +376,70 @@ where
         Ok(self)
     }
 
+    /// Continue solving into an existing [`Solution`], appending newly computed
+    /// output and checkpointing segments.
+    ///
+    /// This has the same staged-solve behavior as [`Self::solve_soln`], but also
+    /// records a checkpointing segment for the call and appends it to the
+    /// caller-owned checkpointing path. A segment with
+    /// `terminal_reset_root_idx() == Some(root_idx)` ended at a root. A segment
+    /// with `None` ended at the configured stop time.
+    fn solve_soln_with_checkpointing(
+        mut self,
+        soln: &mut Solution<Eqn::V>,
+        checkpointing: &mut CheckpointingPath<Eqn, Self::State>,
+        max_steps_between_checkpoints: Option<usize>,
+    ) -> Result<Self, DiffsolError>
+    where
+        Eqn::V: DefaultDenseMatrix,
+        Self: Sized,
+    {
+        let nrows = if let Some(out) = self.problem().eqn.out() {
+            out.nout()
+        } else {
+            self.problem().eqn.rhs().nstates()
+        };
+        let nout = self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0);
+        let nstates = self.problem().eqn.rhs().nstates();
+        soln.ensure_ode_allocation(self.problem().context(), nrows, nout, nstates)?;
+        let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
+
+        let mut new_checkpointing = match soln.mode {
+            SolutionMode::Tfinal(t_final) => {
+                let (stop_reason, checkpointers) = solve(
+                    &mut soln.ys,
+                    &mut soln.ts,
+                    &mut soln.tmp_nout,
+                    &mut self,
+                    t_final,
+                    false,
+                    true,
+                    max_steps_between_checkpoints,
+                )?;
+                soln.stop_reason = Some(stop_reason);
+                checkpointers.unwrap()
+            }
+            SolutionMode::Tevals(start_col) => {
+                let (stop_reason, col, checkpointers) = solve_dense(
+                    &mut soln.ys,
+                    &soln.ts,
+                    &mut soln.tmp_nout,
+                    &mut soln.tmp_nstates,
+                    &mut self,
+                    start_col,
+                    false,
+                    true,
+                    max_steps_between_checkpoints,
+                )?;
+                soln.stop_reason = Some(stop_reason);
+                soln.mode = SolutionMode::Tevals(col);
+                checkpointers.unwrap()
+            }
+        };
+        checkpointing.append(&mut new_checkpointing);
+        Ok(self)
+    }
+
     /// Solve the ODE from the current time to `t_eval[t_eval.len()-1]`, evaluating at specified times.
     ///
     /// This method integrates the system and returns the solution interpolated at the specified times.
@@ -435,28 +499,7 @@ where
         // if we stopped on a root before exhausting t_eval, we need to write_out the solution at the root time to the last column of ret
         if let OdeSolverStopReason::RootFound(_, _) = stop_reason {
             if col < t_eval.len() {
-                let t = self.state().t;
-                let y = self.state().y;
-                {
-                    let mut ret_y_col = ret.column_mut(col);
-                    match self.problem().eqn.out() {
-                        Some(out) => {
-                            if self.problem().integrate_out {
-                                ret_y_col.copy_from(self.state().g);
-                            } else {
-                                out.call_inplace(y, t, &mut tmp_nout);
-                                ret_y_col.copy_from(&tmp_nout);
-                            }
-                        }
-                        None => {
-                            if self.problem().integrate_out {
-                                ret_y_col.copy_from(self.state().g);
-                            } else {
-                                ret_y_col.copy_from(y);
-                            }
-                        }
-                    }
-                }
+                write_state_out(self.problem(), &self.state(), &mut ret, col, &mut tmp_nout);
                 if col + 1 < ret.ncols() {
                     ret.resize_cols(col + 1);
                 }
@@ -487,7 +530,7 @@ where
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<
         (
-            CheckpointingPath<Eqn, Self::State, Self>,
+            CheckpointingPath<Eqn, Self::State>,
             <Eqn::V as DefaultDenseMatrix>::M,
             Vec<Eqn::T>,
             OdeSolverStopReason<Eqn::T>,
@@ -548,7 +591,7 @@ where
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<
         (
-            CheckpointingPath<Eqn, Self::State, Self>,
+            CheckpointingPath<Eqn, Self::State>,
             <Eqn::V as DefaultDenseMatrix>::M,
             OdeSolverStopReason<Eqn::T>,
         ),
@@ -581,11 +624,12 @@ where
     Eqn: OdeEquations,
     State: OdeSolverState<Eqn::V>,
 {
-    checkpointers: CheckpointingPath<Eqn, State, Method>,
+    checkpointers: CheckpointingPath<Eqn, State>,
     checkpoints: Vec<State>,
     ts: Vec<Eqn::T>,
     ys: Vec<Eqn::V>,
     ydots: Vec<Eqn::V>,
+    phantom: PhantomData<Method>,
 }
 
 impl<'a, Eqn, Method> CheckpointingRecorder<Eqn, Method::State, Method>
@@ -601,10 +645,11 @@ where
             ts: vec![solver.state().t],
             ys: vec![solver.state().y.clone()],
             ydots: vec![solver.state().dy.clone()],
+            phantom: PhantomData,
         }
     }
 
-    fn into_checkpointers(self) -> CheckpointingPath<Eqn, Method::State, Method> {
+    fn into_checkpointers(self) -> CheckpointingPath<Eqn, Method::State> {
         self.checkpointers
     }
 
@@ -643,7 +688,7 @@ where
             self.ydots.split_off(0),
             self.ts.split_off(0),
         );
-        let mut checkpointer = Checkpointing::new(
+        let mut checkpointer = Checkpointing::new::<Method>(
             None,
             self.checkpoints.len() - 2,
             self.checkpoints.split_off(0),
@@ -689,7 +734,7 @@ fn solve_dense<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     (
         OdeSolverStopReason<Eqn::T>,
         usize,
-        Option<CheckpointingPath<Eqn, S::State, S>>,
+        Option<CheckpointingPath<Eqn, S::State>>,
     ),
     DiffsolError,
 >
@@ -754,7 +799,7 @@ where
                     }
                 } else {
                     if let Some(checkpointing) = checkpointing.as_mut() {
-                        checkpointing.finish_segment(None);
+                        checkpointing.finish_segment(Some(root_idx));
                     }
                     stop_reason = OdeSolverStopReason::RootFound(t_root, root_idx);
                     break;
@@ -804,6 +849,36 @@ where
     Ok(())
 }
 
+pub(crate) fn write_state_out<Eqn>(
+    problem: &OdeSolverProblem<Eqn>,
+    state: &StateRef<'_, Eqn::V>,
+    y_out: &mut <Eqn::V as DefaultDenseMatrix>::M,
+    col: usize,
+    tmp_nout: &mut Eqn::V,
+) where
+    Eqn: OdeEquations,
+    Eqn::V: DefaultDenseMatrix,
+{
+    let mut y_out_col = y_out.column_mut(col);
+    match problem.eqn.out() {
+        Some(out) => {
+            if problem.integrate_out {
+                y_out_col.copy_from(state.g);
+            } else {
+                out.call_inplace(state.y, state.t, tmp_nout);
+                y_out_col.copy_from(tmp_nout);
+            }
+        }
+        None => {
+            if problem.integrate_out {
+                y_out_col.copy_from(state.g);
+            } else {
+                y_out_col.copy_from(state.y);
+            }
+        }
+    }
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn solve<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     ret_y: &mut <Eqn::V as DefaultDenseMatrix>::M,
@@ -817,7 +892,7 @@ fn solve<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
 ) -> Result<
     (
         OdeSolverStopReason<Eqn::T>,
-        Option<CheckpointingPath<Eqn, S::State, S>>,
+        Option<CheckpointingPath<Eqn, S::State>>,
     ),
     DiffsolError,
 >
@@ -870,7 +945,7 @@ where
                 } else {
                     write_out(s, ret_y, ret_t, tmp_nout);
                     if let Some(checkpointing) = checkpointing.as_mut() {
-                        checkpointing.finish_segment(None);
+                        checkpointing.finish_segment(Some(root_idx));
                     }
                     break OdeSolverStopReason::RootFound(t_root, root_idx);
                 }
