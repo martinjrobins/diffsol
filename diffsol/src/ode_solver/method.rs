@@ -387,7 +387,7 @@ where
     fn solve_soln_with_checkpointing(
         mut self,
         soln: &mut Solution<Eqn::V>,
-        checkpointing: &mut CheckpointingPath<Eqn, Self::State, Self>,
+        checkpointing: &mut CheckpointingPath<Eqn, Self::State>,
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<Self, DiffsolError>
     where
