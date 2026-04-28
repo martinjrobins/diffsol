@@ -96,6 +96,9 @@ where
     }
 }
 
+/// Wrapper for an adjoint checkpoint that allows it to be shared across threads and mutated safely.    
+///
+/// Mutex is required because Checkpointing uses interior mutability when interpolating checkpoints
 #[derive(Clone)]
 pub struct AdjointCheckpointWrapper(Arc<Mutex<Box<dyn AdjointCheckpoint>>>);
 

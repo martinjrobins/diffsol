@@ -1,4 +1,4 @@
-#![allow(clippy::missing_safety_doc)]
+#![allow(clippy::missing_safety_doc, dead_code)]
 
 #[cfg(any(feature = "diffsl-external-f64", feature = "diffsl-external-dynamic"))]
 use std::ffi::CStr;
