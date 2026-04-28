@@ -1900,4 +1900,74 @@ mod jit_tests {
             );
         }
     }
+
+    #[cfg(feature = "diffsl-llvm")]
+    #[test]
+    fn bdf_continuous_adjoint_matches_finite_difference_gradient_for_logistic_integral() {
+        let logistic_model = r#"
+            in_i { r = 1, k = 1, y0 = 0.1 }
+            u_i { y = y0 }
+            dudt_i { dydt = 0 }
+            F_i { r * y * (1.0 - y / k) }
+            out_i { y }
+        "#;
+        let ode = OdeWrapper::new_jit(
+            logistic_model,
+            JitBackendType::Llvm,
+            ScalarType::F64,
+            MatrixType::NalgebraDense,
+            LinearSolverType::Default,
+            OdeSolverType::Bdf,
+        )
+        .unwrap();
+        ode.set_rtol(1e-8).unwrap();
+        ode.set_atol(1e-8).unwrap();
+
+        let fit_params = [0.8, 1.3, 0.12];
+        let final_time = 1.0;
+        let fd_step = 1e-6;
+        let objective_from_exact_integral = |params: [f64; 3]| -> f64 {
+            let [r, k, y0] = params;
+            let a = (k - y0) / y0;
+            k * (final_time + ((1.0 + a * (-r * final_time).exp()).ln() - (1.0 + a).ln()) / r)
+        };
+
+        let objective_fd = objective_from_exact_integral(fit_params);
+        let mut finite_difference_gradient = [0.0; 3];
+        for i in 0..fit_params.len() {
+            let mut plus = fit_params;
+            let mut minus = fit_params;
+            let step = fd_step * fit_params[i].abs().max(1.0);
+            plus[i] += step;
+            minus[i] -= step;
+            finite_difference_gradient[i] = (objective_from_exact_integral(plus)
+                - objective_from_exact_integral(minus))
+                / (2.0 * step);
+        }
+
+        let (integral, adjoint_gradient) = ode
+            .solve_continuous_adjoint(vector_host(&fit_params), final_time)
+            .unwrap();
+        let integral = Vec::<f64>::from_host_array(integral).unwrap();
+        let adjoint_gradient = adjoint_gradient.as_array::<f64>().unwrap();
+
+        assert!(objective_fd.is_finite());
+        assert_eq!(integral.len(), 1);
+        assert_close(
+            integral[0],
+            objective_fd,
+            ASSERT_TOL,
+            "continuous adjoint logistic integral",
+        );
+        assert_eq!(adjoint_gradient.nrows(), 3);
+        assert_eq!(adjoint_gradient.ncols(), 1);
+        for i in 0..adjoint_gradient.nrows() {
+            assert_close(
+                adjoint_gradient[(i, 0)],
+                finite_difference_gradient[i],
+                5e-4,
+                &format!("continuous adjoint gradient component {i}"),
+            );
+        }
+    }
 }

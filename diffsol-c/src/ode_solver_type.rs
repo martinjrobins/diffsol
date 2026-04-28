@@ -282,6 +282,8 @@ where
 {
     let checkpointing = checkpoint.checkpointing.clone();
     let soln = Solution::new_dense(t_eval.to_vec())?;
+
+    // we will only consider a single output g for now, so nout_override is 1
     let dgdu_eval = [dgdu_eval];
     match backwards_method {
         OdeSolverType::Bdf => solve_adjoint_bkwds_with_fwd_bkwd_tag::<
