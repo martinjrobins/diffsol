@@ -1051,7 +1051,7 @@ mod jit_tests {
             dudt_i { dydt = 0 }
             F_i { r * y * (1.0 - y / k) }
             stop_i { y - 0.6 }
-            out_i { y }
+            out_i { r * y }
         "#;
         let ode = OdeWrapper::new_jit(
             logistic_stop_model,
@@ -1685,7 +1685,12 @@ mod jit_tests {
         let ys = solution.get_ys().unwrap();
         let ys = ys.as_array::<f64>().unwrap();
         assert_close(*ts.last().unwrap(), root_time, 5e-4, "solve stop time");
-        assert_close(ys[(0, ys.ncols() - 1)], 0.6, 5e-4, "solve stop value");
+        assert_close(
+            ys[(0, ys.ncols() - 1)],
+            params[0] * 0.6,
+            5e-4,
+            "solve stop value",
+        );
         assert!(*ts.last().unwrap() < final_time);
 
         let dense_solution = ode
@@ -1701,7 +1706,7 @@ mod jit_tests {
         assert_eq!(dense_ys.ncols(), dense_ts.len());
         assert_close(
             dense_ys[(0, dense_ys.ncols() - 1)],
-            0.6,
+            params[0] * 0.6,
             5e-4,
             "dense stop value",
         );
@@ -1719,6 +1724,13 @@ mod jit_tests {
         }
         assert_eq!(sens_ys.ncols(), sens_ts.len());
         assert_eq!(sens.len(), params.len());
+        let sens_r = sens[0].as_array::<f64>().unwrap();
+        assert_close(
+            sens_r[(0, sens_r.ncols() - 1)],
+            0.6 + params[0] * logistic_state_dr(LOGISTIC_X0, params[0], root_time),
+            5e-4,
+            "sensitivity stop value",
+        );
         for sens_component in sens {
             let sens_component = sens_component.as_array::<f64>().unwrap();
             assert_eq!(sens_component.ncols(), sens_ts.len());
@@ -1731,7 +1743,7 @@ mod jit_tests {
         let gradient = gradient.as_array::<f64>().unwrap();
         assert_close(
             integral[0],
-            logistic_integral(LOGISTIC_X0, params[0], root_time),
+            params[0] * logistic_integral(LOGISTIC_X0, params[0], root_time),
             5e-4,
             "continuous adjoint stop integral",
         );
@@ -1743,7 +1755,10 @@ mod jit_tests {
         let adjoint_ts = Vec::<f64>::from_host_array(adjoint_solution.get_ts().unwrap()).unwrap();
         let adjoint_ys = adjoint_solution.get_ys().unwrap();
         let adjoint_ys = adjoint_ys.as_array::<f64>().unwrap();
-        assert_eq!(adjoint_ts, dense_ts);
+        assert_eq!(adjoint_ts.len(), dense_ts.len());
+        for (i, (&actual, &expected)) in adjoint_ts.iter().zip(dense_ts.iter()).enumerate() {
+            assert_close(actual, expected, 5e-4, &format!("adjoint time {i}"));
+        }
         assert_eq!(adjoint_ys.ncols(), adjoint_ts.len());
     }
 

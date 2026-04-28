@@ -134,7 +134,7 @@ where
             _ => continue,
         };
         if problem.eqn.reset().is_none() {
-            soln.truncate(problem, solver.state())?;
+            soln.truncate_sens(problem, solver.state())?;
             return Ok(soln);
         }
         let mut state = solver.into_state();
