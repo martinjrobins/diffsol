@@ -399,7 +399,7 @@ fn loss_fn(
     let adjoint_solver = problem
         .bdf_solver_adjoint::<LS, _>(c, Some(solver), Some(1))
         .unwrap();
-    let soln = adjoint_solver.solve_adjoint_backwards_pass(ts_data, &[&*g_m])?;
+    let (soln, _) = adjoint_solver.solve_adjoint_backwards_pass(ts_data, &[&*g_m])?;
     Ok((loss, soln.into_common().sg.pop().unwrap()))
 }
 

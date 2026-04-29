@@ -466,7 +466,7 @@ mod tests {
             data.context().clone(),
         );
         let rtol = Eqn::T::from_f64(1e-6).unwrap();
-        let state = backwards_solver
+        let (state, _) = backwards_solver
             .solve_adjoint_backwards_pass(times, dgdu.iter().collect::<Vec<_>>().as_slice())
             .unwrap();
         let gs_adj = state.into_common().sg;
@@ -498,7 +498,7 @@ mod tests {
             dgdp_check.context().clone(),
         );
         let rtol = Eqn::T::from_f64(1e-6).unwrap();
-        let state = backwards_solver
+        let (state, _) = backwards_solver
             .solve_adjoint_backwards_pass(&[], &[])
             .unwrap();
         let gs_adj = state.into_common().sg;
@@ -1407,9 +1407,10 @@ mod tests {
         missing_metadata_adjoint_state
             .as_mut()
             .state_mut_adjoint_terminal_root(
-                &mut missing_metadata_adjoint_eqn,
+                &problem.eqn,
                 post_reset_root_idx,
                 &final_forward_state,
+                problem.integrate_out,
             )
             .unwrap();
         let missing_metadata_adjoint =
@@ -1433,13 +1434,14 @@ mod tests {
         adjoint_state
             .as_mut()
             .state_mut_adjoint_terminal_root(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 post_reset_root_idx,
                 &final_forward_state,
+                problem.integrate_out,
             )
             .unwrap();
         let adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();
-        let adjoint_state = adjoint.solve_adjoint_backwards_pass(&[], &[]).unwrap();
+        let (adjoint_state, _) = adjoint.solve_adjoint_backwards_pass(&[], &[]).unwrap();
 
         let t0 = problem.t0;
         let ctx = problem.context().clone();
@@ -1545,13 +1547,14 @@ mod tests {
         adjoint_state
             .as_mut()
             .state_mut_adjoint_terminal_root(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 post_reset_root_idx,
                 &final_forward_state,
+                problem.integrate_out,
             )
             .unwrap();
         let adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();
-        let adjoint_state = adjoint
+        let (adjoint_state, _) = adjoint
             .solve_adjoint_backwards_pass(times, dgdu_refs.as_slice())
             .unwrap();
 
@@ -1671,13 +1674,14 @@ mod tests {
         adjoint_state
             .as_mut()
             .state_mut_adjoint_terminal_root(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 terminal_root_idx,
                 &final_forward_state,
+                problem.integrate_out,
             )
             .unwrap();
         let adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();
-        let adjoint_state = adjoint.solve_adjoint_backwards_pass(&[], &[]).unwrap();
+        let (adjoint_state, _) = adjoint.solve_adjoint_backwards_pass(&[], &[]).unwrap();
 
         let t0 = problem.t0;
         let ctx = problem.context().clone();
@@ -1758,19 +1762,19 @@ mod tests {
         );
 
         let state_after_reset = state_after_manual_reset::<Eqn, MethodF>(&first_forward_solver);
-        let dense_forward_solver = build_forward(Some(state_after_reset))
+        build_forward(Some(state_after_reset.clone()))
             .unwrap()
-            .solve_soln_with_checkpointing(&mut forward_soln, &mut checkpointers, None)
+            .solve_soln(&mut forward_soln)
             .unwrap();
         assert!(forward_soln.is_complete());
         assert_eq!(
             forward_soln.stop_reason,
             Some(OdeSolverStopReason::TstopReached)
         );
-        assert_eq!(checkpointers[1].terminal_reset_root_idx(), None);
 
         let mut terminal_soln = Solution::<Eqn::V>::new(forward_stop_time);
-        let terminal_forward_solver = dense_forward_solver
+        let terminal_forward_solver = build_forward(Some(state_after_reset))
+            .unwrap()
             .solve_soln_with_checkpointing(&mut terminal_soln, &mut checkpointers, None)
             .unwrap();
         let terminal_root_idx = match terminal_soln.stop_reason {
@@ -1780,6 +1784,7 @@ mod tests {
             }
             None => panic!("terminal staged solve did not set a stop reason"),
         };
+        assert_eq!(checkpointers.len(), 2);
         assert_eq!(
             checkpointers.last().unwrap().terminal_reset_root_idx(),
             Some(terminal_root_idx)
@@ -1805,13 +1810,14 @@ mod tests {
         adjoint_state
             .as_mut()
             .state_mut_adjoint_terminal_root(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 terminal_root_idx,
                 &final_forward_state,
+                problem.integrate_out,
             )
             .unwrap();
         let adjoint = build_adjoint_from_state(adjoint_state, adjoint_eqn).unwrap();
-        let adjoint_state = adjoint
+        let (adjoint_state, _) = adjoint
             .solve_adjoint_backwards_pass(times, dgdu_eval_refs.as_slice())
             .unwrap();
 

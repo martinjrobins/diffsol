@@ -116,6 +116,16 @@ jobs:
       run: rustup default ${{ matrix.toolchain }} && rustup update ${{ matrix.toolchain }} --no-self-update && rustup component add clippy
     - name: Rust version
       run: rustc -Vv
+    - name: Free Disk Space (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      uses: jlumbroso/free-disk-space@main
+      with:
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: false
+        docker-images: true
+        swap-storage: true
     - name: Install LLVM and Clang
       uses: KyleMayes/install-llvm-action@v2
       if : (matrix.os == 'ubuntu-latest' || matrix.os == 'macos-latest') && matrix.book == false
@@ -157,16 +167,6 @@ jobs:
       if: matrix.os == 'windows-latest'
       run: |
         echo "ADDITIONAL_FEATURES_FLAGS=--features diffsl-cranelift --features diffsl-external-dynamic" >> $GITHUB_ENV
-    - name: Free Disk Space (Ubuntu)
-      if: matrix.os == 'ubuntu-latest'
-      uses: jlumbroso/free-disk-space@main
-      with:
-        android: true
-        dotnet: true
-        haskell: true
-        large-packages: false
-        docker-images: true
-        swap-storage: true
     - name: Run tests - default features
       if: matrix.tests == true
       run: cargo test --verbose

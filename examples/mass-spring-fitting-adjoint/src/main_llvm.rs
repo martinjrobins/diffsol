@@ -73,7 +73,7 @@ impl Gradient for Problem {
             .bdf_solver_adjoint::<LS, _>(c, Some(solver), Some(1))
             .unwrap();
         match adjoint_solver.solve_adjoint_backwards_pass(self.ts_data.as_slice(), &[&g_m]) {
-            Ok(soln) => Ok(soln.as_ref().sg[0]
+            Ok((soln, _)) => Ok(soln.as_ref().sg[0]
                 .inner()
                 .iter()
                 .copied()

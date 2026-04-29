@@ -5,13 +5,23 @@ mod common;
 #[cfg(feature = "diffsl-llvm")]
 use common::matrix_host;
 use common::{
-    assert_close, assert_solution_tail, available_jit_backends, logistic_diffsl_code,
-    logistic_integral, logistic_state, logistic_state_dr, vector_host, ASSERT_TOL, LOGISTIC_X0,
+    assert_close, assert_solution_tail, available_jit_backends, logistic_integral, logistic_state,
+    logistic_state_dr, vector_host, ASSERT_TOL, LOGISTIC_X0,
 };
 use diffsol_c::host_array::FromHostArray;
 use diffsol_c::{
     JitBackendType, LinearSolverType, MatrixType, OdeSolverType, OdeWrapper, ScalarType,
 };
+
+fn logistic_diffsl_code() -> &'static str {
+    r#"
+        in_i { r = 1 }
+        u_i { y = 0.1 }
+        dudt_i { dydt = 0 }
+        F_i { (r * y) * (1 - y) }
+        out_i { y }
+    "#
+}
 
 fn make_ode(
     jit_backend: JitBackendType,

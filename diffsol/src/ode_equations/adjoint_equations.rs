@@ -70,6 +70,13 @@ where
         &self.checkpointers[self.active_checkpointer]
     }
 
+    pub(crate) fn pop_last_checkpointing(&mut self) -> Option<crate::Checkpointing<Eqn, State>> {
+        if self.active_checkpointer == self.checkpointers.len() - 1 {
+            self.active_checkpointer = self.active_checkpointer.saturating_sub(1);
+        }
+        self.checkpointers.pop()
+    }
+
     pub fn set_state(&mut self, t: Eqn::T) {
         if let Some(last_t) = self.last_t {
             if last_t == t {
@@ -611,18 +618,6 @@ where
         self.context.borrow().checkpointers[index].terminal_reset_root_idx()
     }
 
-    pub(crate) fn checkpointing_last_state(&self, index: usize) -> Method::State {
-        self.context.borrow().checkpointers[index]
-            .last_checkpoint()
-            .clone()
-    }
-
-    pub(crate) fn checkpointing_first_state(&self, index: usize) -> Method::State {
-        self.context.borrow().checkpointers[index]
-            .first_checkpoint()
-            .clone()
-    }
-
     pub fn with_out(&self) -> bool {
         self.rhs.with_out
     }
@@ -649,6 +644,54 @@ where
         context.set_state(t);
         y.copy_from(context.state());
         Ok(())
+    }
+
+    pub fn checkpointing_last_state(&self, index: usize) -> Method::State {
+        self.context.borrow().checkpointers[index]
+            .last_checkpoint()
+            .clone()
+    }
+
+    pub fn checkpointing_first_state(&self, index: usize) -> Method::State {
+        self.context.borrow().checkpointers[index]
+            .first_checkpoint()
+            .clone()
+    }
+
+    pub fn pop_last_checkpointing(
+        &mut self,
+    ) -> Result<crate::Checkpointing<Eqn, Method::State>, DiffsolError> {
+        let mut context = self.context.borrow_mut();
+        context
+            .pop_last_checkpointing()
+            .ok_or_else(|| DiffsolError::Other("No more checkpointing to pop".to_string()))
+    }
+
+    pub fn into_checkpointing(self) -> CheckpointingPath<Eqn, Method::State> {
+        let Self {
+            rhs,
+            out,
+            context,
+            eqn: _,
+            mass: _,
+            tmp: _,
+            tmp2: _,
+            init: _,
+            atol: _,
+            rtol: _,
+            out_rtol: _,
+            out_atol: _,
+        } = self;
+
+        drop(rhs);
+        drop(out);
+
+        match Rc::try_unwrap(context) {
+            Ok(context) => context.into_inner().checkpointers,
+            Err(_) => {
+                panic!("adjoint context should be uniquely owned after consuming AdjointEquations")
+            }
+        }
     }
 }
 

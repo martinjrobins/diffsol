@@ -38,47 +38,6 @@ pub enum OdeSolverType {
     Tsit45,
 }
 
-fn apply_state_reset<Eqn, S>(
-    problem: &OdeSolverProblem<Eqn>,
-    state: &mut S,
-) -> Result<(), DiffsolError>
-where
-    Eqn: OdeEquations,
-    S: OdeSolverState<Eqn::V>,
-{
-    let eqn = &problem.eqn;
-    if let Some(reset_fn) = eqn.reset() {
-        let rhs = eqn.rhs();
-        let has_mass = eqn.mass().is_some();
-        state.as_mut().state_mut_op(&rhs, has_mass, &reset_fn)?;
-    }
-    Ok(())
-}
-
-fn apply_state_reset_with_sens<Eqn, S>(
-    problem: &OdeSolverProblem<Eqn>,
-    state: &mut S,
-    root_idx: usize,
-) -> Result<(), DiffsolError>
-where
-    Eqn: OdeEquationsImplicitSens,
-    S: OdeSolverState<Eqn::V>,
-{
-    let eqn = &problem.eqn;
-    match (eqn.reset(), eqn.root()) {
-        (None, _) => Ok(()),
-        (Some(_), None) => Err(ode_solver_error!(ResetRequiresRootOperator)),
-        (Some(reset_fn), Some(root_fn)) => {
-            let rhs = eqn.rhs();
-            let has_mass = eqn.mass().is_some();
-            state
-                .as_mut()
-                .state_mut_op_with_sens_and_reset(&rhs, has_mass, &reset_fn, &root_fn, root_idx)?;
-            Ok(())
-        }
-    }
-}
-
 fn solve_with_tag<M, CG, LS, Tag>(
     problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
     mut soln: Solution<M::V>,
@@ -105,7 +64,7 @@ where
         }
         let mut state = solver.into_state();
         problem.eqn.set_model_index(root_idx);
-        apply_state_reset(problem, &mut state)?;
+        state.as_mut().apply_reset(&problem.eqn)?;
         solver = Tag::solver_with_state::<LS>(problem, state)?;
     }
     Ok(soln)
@@ -139,7 +98,9 @@ where
         }
         let mut state = solver.into_state();
         problem.eqn.set_model_index(root_idx);
-        apply_state_reset_with_sens(problem, &mut state, root_idx)?;
+        state
+            .as_mut()
+            .apply_reset_with_sens(&problem.eqn, root_idx)?;
         solver = Tag::solver_sens_with_state::<LS>(problem, state)?;
     }
     Ok(soln)
@@ -173,7 +134,7 @@ where
         }
         let mut state = solver.into_state();
         problem.eqn.set_model_index(root_idx);
-        apply_state_reset(problem, &mut state)?;
+        state.as_mut().apply_reset(&problem.eqn)?;
         solver = Tag::solver_with_state::<LS>(problem, state)?;
     }
     Ok((soln, checkpointing))
@@ -279,7 +240,7 @@ where
 }
 
 fn solve_adjoint_bkwds_with_fwd_tag<M, CG, FwdLS, BwdLS, Tag>(
-    problem: &OdeSolverProblem<DiffSl<M, CG>>,
+    problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
     checkpoint: &AdjointCheckpointData<M, CG, Tag>,
     backwards_method: OdeSolverType,
     dgdu_eval: &<M::V as DefaultDenseMatrix>::M,
@@ -341,7 +302,7 @@ where
 }
 
 fn solve_adjoint_bkwds_with_fwd_bkwd_tag<'solver, M, CG, FwdLS, BwdLS, FwdTag, BwdTag>(
-    problem: &'solver OdeSolverProblem<DiffSl<M, CG>>,
+    problem: &'solver mut OdeSolverProblem<DiffSl<M, CG>>,
     soln: &Solution<M::V>,
     mut checkpointing: CheckpointingPath<DiffSl<M, CG>, FwdTag::State>,
     dgdu_eval: &[&<M::V as DefaultDenseMatrix>::M],
@@ -373,45 +334,65 @@ where
     } else {
         soln.ts.as_slice()
     };
-    let mut state: Option<BwdTag::State> = None;
-    let mut pending_reset: Option<(usize, FwdTag::State, FwdTag::State)> = None;
-    while let Some(current_checkpointing) = checkpointing.pop() {
-        let next_reset = checkpointing.last().and_then(|previous_checkpointing| {
-            previous_checkpointing
-                .terminal_reset_root_idx()
-                .map(|root_idx| {
-                    (
-                        root_idx,
-                        // TODO: remove these clones
-                        previous_checkpointing.last_checkpoint().clone(),
-                        current_checkpointing.first_checkpoint().clone(),
-                    )
-                })
-        });
-        let current_checkpointing = vec![current_checkpointing];
-        let fwd_solver = FwdTag::uninitialised_solver::<FwdLS>(problem)?;
-        let mut adjoint = if let Some(state) = state.take() {
-            let adjoint_eqn =
-                problem.adjoint_equations(current_checkpointing, Some(fwd_solver), nout_override);
-            BwdTag::solver_adjoint_from_state::<BwdLS, _>(problem, state, adjoint_eqn)?
-        } else {
-            BwdTag::solver_adjoint::<BwdLS, _>(
-                problem,
-                current_checkpointing,
-                Some(fwd_solver),
-                nout_override,
-            )?
-        };
-        if let Some((root_idx, fwd_state_minus, fwd_state_plus)) = pending_reset.take() {
-            adjoint.apply_reset_with_adjoint(root_idx, &fwd_state_minus, &fwd_state_plus)?;
-        }
-        state = Some(adjoint.solve_adjoint_backwards_pass(t_eval, dgdu_eval)?);
-        pending_reset = next_reset;
-    }
 
-    state
-        .map(|state| state.into_common().sg)
-        .ok_or_else(|| ode_solver_error!(Other, "Adjoint backward pass returned no state"))
+    let current_checkpointing = checkpointing
+        .pop()
+        .ok_or_else(|| ode_solver_error!(Other, "Adjoint backward pass returned no state"))?;
+    let model_index = checkpointing
+        .last()
+        .map(|segment| {
+            segment
+                .terminal_reset_root_idx()
+                .expect("Missing reset root index")
+        })
+        .unwrap_or(0);
+    problem.eqn_mut().set_model_index(model_index);
+    let fwd_solver = FwdTag::uninitialised_solver::<FwdLS>(&*problem)?;
+    let mut adjoint = BwdTag::solver_adjoint::<BwdLS, _>(
+        &*problem,
+        vec![current_checkpointing],
+        Some(fwd_solver),
+        nout_override,
+    )?;
+    loop {
+        let (mut state, adjoint_checkpointing) =
+            adjoint.solve_adjoint_backwards_pass(t_eval, dgdu_eval)?;
+        let Some(previous_checkpointing) = checkpointing.pop() else {
+            return Ok(state.into_common().sg);
+        };
+        let model_index = checkpointing
+            .last()
+            .map(|segment| {
+                segment
+                    .terminal_reset_root_idx()
+                    .expect("Missing reset root index")
+            })
+            .unwrap_or(0);
+        let fwd_state_minus = previous_checkpointing.last_checkpoint();
+        let fwd_state_plus = adjoint_checkpointing
+            .first()
+            .ok_or_else(|| {
+                ode_solver_error!(Other, "Adjoint backward pass returned no checkpointing")
+            })?
+            .first_checkpoint();
+        state.as_mut().apply_reset_with_adjoint(
+            problem.eqn(),
+            previous_checkpointing.terminal_reset_root_idx().unwrap(),
+            fwd_state_minus.as_ref(),
+            fwd_state_plus.as_ref(),
+            problem.integrate_out,
+        )?;
+        problem.eqn_mut().set_model_index(model_index);
+        let fwd_solver = FwdTag::uninitialised_solver::<FwdLS>(&*problem)?;
+        // TODO: remove clone here
+        let adjoint_eqn = problem.adjoint_equations(
+            vec![previous_checkpointing],
+            Some(fwd_solver),
+            nout_override,
+        );
+
+        adjoint = BwdTag::solver_adjoint_from_state::<BwdLS, _>(&*problem, state, adjoint_eqn)?;
+    }
 }
 
 impl OdeSolverType {
@@ -598,7 +579,7 @@ impl OdeSolverType {
 
     pub(crate) fn solve_adjoint_bkwd<M, CG, BwdLS>(
         &self,
-        problem: &OdeSolverProblem<DiffSl<M, CG>>,
+        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
         checkpoint: &dyn AdjointCheckpoint,
         dgdu_eval: &<M::V as DefaultDenseMatrix>::M,
         t_eval: &[M::T],
@@ -1032,7 +1013,7 @@ mod tests {
         );
         let gradient = OdeSolverType::TrBdf2
             .solve_adjoint_bkwd::<M, diffsol::LlvmModule, <M as LuValidator<M>>::LS>(
-                &problem,
+                &mut problem,
                 checkpoint.as_ref(),
                 &dgdu,
                 &soln.ts,
@@ -1094,7 +1075,7 @@ mod tests {
             );
             let gradient = backwards_method
                 .solve_adjoint_bkwd::<M, diffsol::LlvmModule, <M as crate::valid_linear_solver::KluValidator<M>>::LS>(
-                    &problem,
+                    &mut problem,
                     checkpoint.as_ref(),
                     &dgdu,
                     &soln.ts,
@@ -1121,7 +1102,7 @@ mod tests {
         );
         let gradient = OdeSolverType::Bdf
             .solve_adjoint_bkwd::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
-                &problem,
+                &mut problem,
                 checkpoint.as_ref(),
                 &dgdu,
                 &soln.ts,
@@ -1155,7 +1136,7 @@ mod tests {
             );
             let gradient = OdeSolverType::Bdf
                 .solve_adjoint_bkwd::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
-                    &problem,
+                    &mut problem,
                     checkpoint.as_ref(),
                     &dgdu,
                     &soln.ts,

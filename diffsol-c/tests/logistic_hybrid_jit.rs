@@ -6,25 +6,43 @@ mod common;
 use common::matrix_host;
 use common::{
     assert_close, available_jit_backends, logistic_integral, logistic_integral_dr, logistic_state,
-    logistic_state_dr, vector_host, ASSERT_TOL,
+    logistic_state_dr, vector_host, ASSERT_TOL, LOGISTIC_X0,
 };
 use diffsol_c::host_array::FromHostArray;
 use diffsol_c::{
     JitBackendType, LinearSolverType, MatrixType, OdeSolverType, OdeWrapper, ScalarType,
 };
 
-const RESET_TIME: f64 = 0.5;
-const RESET_Y: f64 = 0.2;
-const INITIAL_Y: f64 = 0.1;
+const A_VALUES: [f64; 4] = [0.8, 1.0, 1.2, 1.4];
+const B_VALUES: [f64; 4] = [0.7, 0.9, 1.2, 1.5];
+const RESET_SCALE: f64 = 0.2;
+const STOP_TIMES: [f64; 3] = [0.5, 1.0, 1.5];
 
-fn logistic_time_reset_diffsl_code() -> &'static str {
+fn logistic_hybrid_diffsl_code() -> &'static str {
     r#"
         in_i { r = 1 }
+        a_i {
+            0.8,
+            1.0,
+            1.2,
+            1.4,
+        }
+        b_i {
+            0.7,
+            0.9,
+            1.2,
+            1.5,
+        }
         u_i { y = 0.1 }
         dudt_i { dydt = 0 }
-        F_i { r * y * (1.0 - y) }
-        stop_i { t - 0.5 }
-        reset_i { 0.2 }
+        F_i { a_i[N] * r * y * (1.0 - y) }
+        stop_i {
+            1.0,
+            t - 0.5,
+            t - 1.0,
+            t - 1.5,
+        }
+        reset_i { b_i[N] * 0.2 }
         out_i { y }
     "#
 }
@@ -74,7 +92,7 @@ fn matrix_solver_cases() -> [(MatrixType, OdeSolverType, LinearSolverType); 8] {
     ]
 }
 
-fn make_time_reset_ode(
+fn make_hybrid_ode(
     jit_backend: JitBackendType,
     scalar_type: ScalarType,
     matrix_type: MatrixType,
@@ -82,7 +100,7 @@ fn make_time_reset_ode(
     linear_solver: LinearSolverType,
 ) -> OdeWrapper {
     let ode = OdeWrapper::new_jit(
-        logistic_time_reset_diffsl_code(),
+        logistic_hybrid_diffsl_code(),
         jit_backend,
         scalar_type,
         matrix_type,
@@ -99,41 +117,81 @@ fn make_time_reset_ode(
     ode
 }
 
-fn time_reset_state(r: f64, t: f64) -> f64 {
-    if t <= RESET_TIME {
-        logistic_state(INITIAL_Y, r, t)
+fn hybrid_segment(t: f64) -> (usize, f64, f64) {
+    if t <= STOP_TIMES[0] {
+        (0, LOGISTIC_X0, t)
+    } else if t <= STOP_TIMES[1] {
+        (1, B_VALUES[1] * RESET_SCALE, t - STOP_TIMES[0])
+    } else if t <= STOP_TIMES[2] {
+        (2, B_VALUES[2] * RESET_SCALE, t - STOP_TIMES[1])
     } else {
-        logistic_state(RESET_Y, r, t - RESET_TIME)
+        (3, B_VALUES[3] * RESET_SCALE, t - STOP_TIMES[2])
     }
 }
 
-fn time_reset_state_dr(r: f64, t: f64) -> f64 {
-    if t <= RESET_TIME {
-        logistic_state_dr(INITIAL_Y, r, t)
-    } else {
-        logistic_state_dr(RESET_Y, r, t - RESET_TIME)
-    }
+fn hybrid_state(r: f64, t: f64) -> f64 {
+    let (segment, y0, local_t) = hybrid_segment(t);
+    logistic_state(y0, A_VALUES[segment] * r, local_t)
 }
 
-fn time_reset_integral(r: f64, final_time: f64) -> f64 {
-    if final_time <= RESET_TIME {
-        logistic_integral(INITIAL_Y, r, final_time)
-    } else {
-        logistic_integral(INITIAL_Y, r, RESET_TIME)
-            + logistic_integral(RESET_Y, r, final_time - RESET_TIME)
-    }
+fn hybrid_state_dr(r: f64, t: f64) -> f64 {
+    let (segment, y0, local_t) = hybrid_segment(t);
+    A_VALUES[segment] * logistic_state_dr(y0, A_VALUES[segment] * r, local_t)
 }
 
-fn time_reset_integral_dr(r: f64, final_time: f64) -> f64 {
-    if final_time <= RESET_TIME {
-        logistic_integral_dr(INITIAL_Y, r, final_time)
-    } else {
-        logistic_integral_dr(INITIAL_Y, r, RESET_TIME)
-            + logistic_integral_dr(RESET_Y, r, final_time - RESET_TIME)
+fn hybrid_integral(r: f64, final_time: f64) -> f64 {
+    let mut total = 0.0;
+    let mut start = 0.0;
+    let mut y0 = LOGISTIC_X0;
+    for segment in 0..A_VALUES.len() {
+        let end = if segment < STOP_TIMES.len() {
+            STOP_TIMES[segment]
+        } else {
+            final_time
+        };
+        if final_time <= start {
+            break;
+        }
+        let duration = final_time.min(end) - start;
+        if duration > 0.0 {
+            total += logistic_integral(y0, A_VALUES[segment] * r, duration);
+        }
+        if final_time <= end {
+            break;
+        }
+        start = end;
+        y0 = B_VALUES[segment + 1] * RESET_SCALE;
     }
+    total
 }
 
-fn assert_time_reset_dense_solution(ode: &OdeWrapper, r: f64, t_eval: &[f64]) {
+fn hybrid_integral_dr(r: f64, final_time: f64) -> f64 {
+    let mut total = 0.0;
+    let mut start = 0.0;
+    let mut y0 = LOGISTIC_X0;
+    for segment in 0..A_VALUES.len() {
+        let end = if segment < STOP_TIMES.len() {
+            STOP_TIMES[segment]
+        } else {
+            final_time
+        };
+        if final_time <= start {
+            break;
+        }
+        let duration = final_time.min(end) - start;
+        if duration > 0.0 {
+            total += A_VALUES[segment] * logistic_integral_dr(y0, A_VALUES[segment] * r, duration);
+        }
+        if final_time <= end {
+            break;
+        }
+        start = end;
+        y0 = B_VALUES[segment + 1] * RESET_SCALE;
+    }
+    total
+}
+
+fn assert_hybrid_dense_solution(ode: &OdeWrapper, r: f64, t_eval: &[f64]) {
     let solution = ode
         .solve_dense(vector_host(&[r]), vector_host(t_eval))
         .unwrap();
@@ -146,21 +204,21 @@ fn assert_time_reset_dense_solution(ode: &OdeWrapper, r: f64, t_eval: &[f64]) {
     for (col, &t) in t_eval.iter().enumerate() {
         assert_close(
             ys[0][col],
-            time_reset_state(r, t),
+            hybrid_state(r, t),
             5e-4,
-            &format!("time-reset dense value[{col}]"),
+            &format!("hybrid dense value[{col}]"),
         );
     }
 }
 
 #[test]
-fn logistic_time_reset_solve_matches_piecewise_solution() {
+fn logistic_hybrid_solve_matches_piecewise_solution() {
     let r = 2.0;
-    let final_time = 1.0;
+    let final_time = 2.0;
     for jit_backend in available_jit_backends() {
         for scalar_type in [ScalarType::F64, ScalarType::F32] {
             for (matrix_type, ode_solver, linear_solver) in matrix_solver_cases() {
-                let ode = make_time_reset_ode(
+                let ode = make_hybrid_ode(
                     jit_backend,
                     scalar_type,
                     matrix_type,
@@ -183,20 +241,27 @@ fn logistic_time_reset_solve_matches_piecewise_solution() {
                     *ts.last().unwrap(),
                     final_time,
                     ASSERT_TOL,
-                    "time-reset solve final time",
+                    "hybrid solve final time",
                 );
-                assert!(ts.iter().any(|&t| (t - RESET_TIME).abs() < 1e-3));
-                assert!(ts.iter().any(|&t| t > RESET_TIME + 1e-3));
+                for &stop_time in &STOP_TIMES {
+                    assert!(
+                        ts.iter().any(|&t| (t - stop_time).abs() < 1e-3),
+                        "expected solve output at stop time {stop_time}"
+                    );
+                }
 
                 for (col, &t) in ts.iter().enumerate() {
-                    if (t - RESET_TIME).abs() < 1e-3 {
+                    if STOP_TIMES
+                        .iter()
+                        .any(|&stop_time| (t - stop_time).abs() < 1e-3)
+                    {
                         continue;
                     }
                     assert_close(
                         ys[0][col],
-                        time_reset_state(r, t),
+                        hybrid_state(r, t),
                         5e-4,
-                        &format!("time-reset solve value[{col}]"),
+                        &format!("hybrid solve value[{col}]"),
                     );
                 }
             }
@@ -205,20 +270,20 @@ fn logistic_time_reset_solve_matches_piecewise_solution() {
 }
 
 #[test]
-fn logistic_time_reset_solve_dense_matches_piecewise_solution() {
+fn logistic_hybrid_solve_dense_matches_piecewise_solution() {
     let r = 2.0;
-    let t_eval = [0.25, 0.75, 1.0];
+    let t_eval = [0.25, 0.75, 1.25, 1.75, 2.0];
     for jit_backend in available_jit_backends() {
         for scalar_type in [ScalarType::F64, ScalarType::F32] {
             for (matrix_type, ode_solver, linear_solver) in matrix_solver_cases() {
-                let ode = make_time_reset_ode(
+                let ode = make_hybrid_ode(
                     jit_backend,
                     scalar_type,
                     matrix_type,
                     ode_solver,
                     linear_solver,
                 );
-                assert_time_reset_dense_solution(&ode, r, &t_eval);
+                assert_hybrid_dense_solution(&ode, r, &t_eval);
             }
         }
     }
@@ -226,15 +291,15 @@ fn logistic_time_reset_solve_dense_matches_piecewise_solution() {
 
 #[cfg(feature = "diffsl-llvm")]
 #[test]
-fn logistic_time_reset_forward_sensitivities_match_piecewise_solution() {
+fn logistic_hybrid_forward_sensitivities_match_piecewise_solution() {
     let r = 2.0;
-    let t_eval = [0.25, 0.75, 1.0];
+    let t_eval = [0.25, 0.75, 1.25, 1.75, 2.0];
     for jit_backend in available_jit_backends() {
         if jit_backend != JitBackendType::Llvm {
             continue;
         }
         for (matrix_type, ode_solver, linear_solver) in matrix_solver_cases() {
-            let ode = make_time_reset_ode(
+            let ode = make_hybrid_ode(
                 jit_backend,
                 ScalarType::F64,
                 matrix_type,
@@ -258,15 +323,15 @@ fn logistic_time_reset_forward_sensitivities_match_piecewise_solution() {
             for (col, &t) in t_eval.iter().enumerate() {
                 assert_close(
                     ys[(0, col)],
-                    time_reset_state(r, t),
+                    hybrid_state(r, t),
                     5e-4,
-                    &format!("time-reset fwd sens value[{col}]"),
+                    &format!("hybrid fwd sens value[{col}]"),
                 );
                 assert_close(
                     sens_r[(0, col)],
-                    time_reset_state_dr(r, t),
+                    hybrid_state_dr(r, t),
                     5e-4,
-                    &format!("time-reset fwd sens dr[{col}]"),
+                    &format!("hybrid fwd sens dr[{col}]"),
                 );
             }
         }
@@ -275,15 +340,15 @@ fn logistic_time_reset_forward_sensitivities_match_piecewise_solution() {
 
 #[cfg(feature = "diffsl-llvm")]
 #[test]
-fn logistic_time_reset_continuous_adjoint_matches_piecewise_integral() {
+fn logistic_hybrid_continuous_adjoint_matches_piecewise_integral() {
     let r = 2.0;
-    let final_time = 1.0;
+    let final_time = 2.0;
     for jit_backend in available_jit_backends() {
         if jit_backend != JitBackendType::Llvm {
             continue;
         }
         for (matrix_type, ode_solver, linear_solver) in matrix_solver_cases() {
-            let ode = make_time_reset_ode(
+            let ode = make_hybrid_ode(
                 jit_backend,
                 ScalarType::F64,
                 matrix_type,
@@ -300,17 +365,17 @@ fn logistic_time_reset_continuous_adjoint_matches_piecewise_integral() {
             assert_eq!(integral.len(), 1);
             assert_close(
                 integral[0],
-                time_reset_integral(r, final_time),
-                1e-4,
-                "time-reset continuous adjoint integral",
+                hybrid_integral(r, final_time),
+                5e-4,
+                "hybrid continuous adjoint integral",
             );
             assert_eq!(gradient.nrows(), 1);
             assert_eq!(gradient.ncols(), 1);
             assert_close(
                 gradient[(0, 0)],
-                time_reset_integral_dr(r, final_time),
+                hybrid_integral_dr(r, final_time),
                 5e-4,
-                "time-reset continuous adjoint gradient",
+                "hybrid continuous adjoint gradient",
             );
         }
     }
@@ -318,20 +383,17 @@ fn logistic_time_reset_continuous_adjoint_matches_piecewise_integral() {
 
 #[cfg(feature = "diffsl-llvm")]
 #[test]
-fn logistic_time_reset_split_adjoint_matches_analytical_gradient() {
+fn logistic_hybrid_split_adjoint_matches_analytical_gradient() {
     let fit_r = 2.0;
     let data_r = 1.5;
-    let t_eval = [0.25, 0.75, 1.0];
-    let data_values: Vec<f64> = t_eval
-        .iter()
-        .map(|&t| time_reset_state(data_r, t))
-        .collect();
+    let t_eval = [0.25, 0.75, 1.25, 1.75, 2.0];
+    let data_values: Vec<f64> = t_eval.iter().map(|&t| hybrid_state(data_r, t)).collect();
     for jit_backend in available_jit_backends() {
         if jit_backend != JitBackendType::Llvm {
             continue;
         }
         for (matrix_type, ode_solver, linear_solver) in matrix_solver_cases() {
-            let ode = make_time_reset_ode(
+            let ode = make_hybrid_ode(
                 jit_backend,
                 ScalarType::F64,
                 matrix_type,
@@ -363,8 +425,8 @@ fn logistic_time_reset_split_adjoint_matches_analytical_gradient() {
                 .iter()
                 .zip(data_values.iter())
                 .map(|(&t, &data_y)| {
-                    let fit_y = time_reset_state(fit_r, t);
-                    2.0 * (fit_y - data_y) * time_reset_state_dr(fit_r, t)
+                    let fit_y = hybrid_state(fit_r, t);
+                    2.0 * (fit_y - data_y) * hybrid_state_dr(fit_r, t)
                 })
                 .sum();
 
@@ -374,7 +436,7 @@ fn logistic_time_reset_split_adjoint_matches_analytical_gradient() {
                 split_gradient[(0, 0)],
                 expected_gradient,
                 5e-4,
-                "time-reset split adjoint gradient",
+                "hybrid split adjoint gradient",
             );
         }
     }

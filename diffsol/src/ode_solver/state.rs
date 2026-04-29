@@ -7,12 +7,11 @@ use crate::Scalar;
 use crate::{
     error::{DiffsolError, OdeSolverError},
     nonlinear_solver::{convergence::Convergence, NonLinearSolver},
-    ode_solver_error, scale, AdjointEquations, AugmentedOdeEquations,
-    AugmentedOdeEquationsImplicit, ConstantOp, InitOp, LinearOp, LinearSolver, Matrix,
-    NewtonNonlinearSolver, NonLinearOp, NonLinearOpAdjoint, NonLinearOpJacobian, NonLinearOpSens,
-    NonLinearOpSensAdjoint, NonLinearOpTimePartial, OdeEquations, OdeEquationsAdjoint,
-    OdeEquationsImplicit, OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverProblem, Op,
-    SensEquations, Vector, VectorIndex,
+    ode_solver_error, scale, AugmentedOdeEquations, AugmentedOdeEquationsImplicit, ConstantOp,
+    InitOp, LinearOp, LinearSolver, Matrix, NewtonNonlinearSolver, NonLinearOp, NonLinearOpAdjoint,
+    NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, NonLinearOpTimePartial,
+    OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
+    OdeEquationsImplicitSens, OdeSolverProblem, Op, SensEquations, Vector, VectorIndex,
 };
 use crate::{non_linear_solver_error, BacktrackingLineSearch, NoLineSearch};
 
@@ -79,30 +78,23 @@ pub struct StateRefMut<'a, V: Vector> {
     pub h: &'a mut V::T,
 }
 
-fn refresh_augmented_state_ref_mut<V, Eqn, AugmentedEqn>(
-    state: &mut StateRefMut<'_, V>,
-    augmented_eqn: &mut AugmentedEqn,
-) -> Result<(), DiffsolError>
-where
-    V: Vector,
-    Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
-    AugmentedEqn: AugmentedOdeEquations<Eqn>,
-{
-    augmented_eqn.update_rhs_out_state(state.y, state.dy, *state.t);
-    let naug = augmented_eqn.max_index();
-    for i in 0..naug {
-        augmented_eqn.set_index(i);
-        augmented_eqn
-            .rhs()
-            .call_inplace(&state.s[i], *state.t, &mut state.ds[i]);
-        if let Some(out) = augmented_eqn.out() {
-            out.call_inplace(&state.s[i], *state.t, &mut state.dsg[i]);
-        }
-    }
-    Ok(())
-}
-
 impl<V: Vector> StateRefMut<'_, V> {
+    /// Apply the equation set's reset operator to the current state in-place.
+    ///
+    /// This helper pulls the RHS, mass-matrix flag, and reset operator from `eqn`, checks that
+    /// a reset operator is configured, then delegates to [`Self::state_mut_op`].
+    pub fn apply_reset<Eqn>(&mut self, eqn: &Eqn) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
+    {
+        let rhs = eqn.rhs();
+        let has_mass = eqn.mass().is_some();
+        let reset = eqn.reset().ok_or_else(|| {
+            ode_solver_error!(Other, "No reset operator configured for this problem")
+        })?;
+        self.state_mut_op(&rhs, has_mass, &reset)
+    }
+
     /// Apply a non-linear operator to the current state in-place, replacing `state.y` with
     /// `op(state.y, state.t)` and recomputing `state.dy = rhs(state.y, state.t)`.
     ///
@@ -131,12 +123,53 @@ impl<V: Vector> StateRefMut<'_, V> {
         Ok(())
     }
 
+    /// Apply the equation set's reset operator and propagate forward sensitivities through
+    /// the root-triggered event correction.
+    ///
+    /// This helper pulls the RHS, mass-matrix flag, reset operator, and root operator from
+    /// `eqn`, checks that both event operators are configured, then delegates to
+    /// [`Self::state_mut_op_with_sens_and_reset`].
+    pub fn apply_reset_with_sens<Eqn>(
+        &mut self,
+        eqn: &Eqn,
+        root_idx: usize,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitSens<T = V::T, V = V, C = V::C>,
+    {
+        let rhs = eqn.rhs();
+        let has_mass = eqn.mass().is_some();
+        let reset = eqn.reset().ok_or_else(|| {
+            ode_solver_error!(Other, "No reset operator configured for this problem")
+        })?;
+        let root = eqn.root().ok_or_else(|| {
+            ode_solver_error!(Other, "No root operator configured for this problem")
+        })?;
+        self.state_mut_op_with_sens_and_reset(&rhs, has_mass, &reset, &root, root_idx)
+    }
+
     /// Apply a reset operator to the current state and propagate sensitivities through a
     /// time-dependent root-triggered event correction.
     ///
     /// If the pre-event state is `x^-` and the reset map is `g(x, t, p)`, this method updates
+    /// the state to
+    /// `x^+ = g(x^-, t, p)`,
+    /// then recomputes the post-event vector field
     /// the state to `x^+ = g(x^-, t, p)`, then recomputes the post-event vector field
     /// `f^+ = rhs(x^+, t, p)`.
+    ///
+    /// For the active root component `r_k(x, t, p) = 0` selected by `root_idx`, the event-time
+    /// sensitivity in parameter direction `p_j` is
+    /// `τ'_j = -([r_x s^-_j]_k + [r_p e_j]_k) / ([r_x f^-]_k + [r_t]_k)`,
+    /// where `s^-_j = ∂x^-/∂p_j`, `f^- = dx^-/dt`, `e_j` is the jth parameter basis vector,
+    /// `r_x = ∂r/∂x`, `r_p = ∂r/∂p`, and `r_t = ∂r/∂t`.
+    ///
+    /// The post-event sensitivity is then updated as
+    /// `s^+_j = g_x s^-_j + g_p e_j + (g_x f^- + g_t - f^+) τ'_j`,
+    /// where `g_x = ∂g/∂x`, `g_p = ∂g/∂p`, and `g_t = ∂g/∂t`.
+    ///
+    /// Explicit time derivatives `∂g/∂t` and `∂r/∂t` are obtained from
+    /// [`NonLinearOpTimePartial`].
     ///
     /// Note: mass matrix equations are not supported for this operation.
     pub fn state_mut_op_with_sens_and_reset<Rhs, G, R>(
@@ -236,22 +269,83 @@ impl<V: Vector> StateRefMut<'_, V> {
         Ok(())
     }
 
+    /// Apply the equation set's reset operator and propagate adjoint variables through
+    /// the root-triggered event correction.
+    ///
+    /// This helper pulls the reset and root operators from `eqn`, checks that both are
+    /// configured, then delegates to [`Self::state_mut_op_with_adjoint_and_reset`].
+    pub fn apply_reset_with_adjoint<Eqn>(
+        &mut self,
+        eqn: &Eqn,
+        root_idx: usize,
+        fwd_state_minus: StateRef<'_, V>,
+        fwd_state_plus: StateRef<'_, V>,
+        integrate_out: bool,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitAdjoint<T = V::T, V = V, C = V::C>,
+    {
+        let reset = eqn.reset().ok_or_else(|| {
+            ode_solver_error!(Other, "No reset operator configured for this problem")
+        })?;
+        let root = eqn.root().ok_or_else(|| {
+            ode_solver_error!(Other, "No root operator configured for this problem")
+        })?;
+        self.state_mut_op_with_adjoint_and_reset(
+            eqn,
+            &reset,
+            &root,
+            root_idx,
+            fwd_state_minus,
+            fwd_state_plus,
+            integrate_out,
+        )
+    }
+
     /// Propagate adjoint variables through a time-dependent root-triggered reset.
     ///
+    /// This method assumes `self` stores the post-event adjoint state `(lambda^+, q^+)`,
+    /// while `fwd_state_minus` and `fwd_state_plus` provide the forward state derivatives
+    /// immediately before and after the reset. The terminal-root contribution for a root-defined
+    /// segment end must already have been applied with
+    /// [`Self::state_mut_adjoint_terminal_root`].
+    ///
+    /// If the pre-event forward state is `x^-`, the post-event state is `x^+ = g(x^-, t, p)`,
+    /// and the active root is `r_k(x^-, t, p) = 0`, define
+    /// `f^- = dx^-/dt`,
+    /// `f^+ = dx^+/dt`,
+    /// `c = g_x f^- + g_t - f^+`,
+    /// `d = [r_x f^-]_k + [r_t]_k`,
+    /// and, when continuous outputs are being integrated, `l^- = out(x^-, t)` and
+    /// `l^+ = out(x^+, t)`.
+    ///
+    /// For each adjoint channel with post-event adjoint `lambda^+` and post-event parameter
+    /// gradient `q^+`, the pre-event values are
+    /// `alpha = (lambda^+ · c + l^- - l^+) / d`,
+    /// `lambda^- = g_x^T lambda^+ - r_{x,k}^T alpha`,
+    /// and
+    /// `q^- = q^+ + g_p^T lambda^+ - r_{p,k}^T alpha`.
+    ///
+    /// Here `g_x = ∂g/∂x`, `g_t = ∂g/∂t`, `g_p = ∂g/∂p`, `r_x = ∂r/∂x`,
+    /// `r_t = ∂r/∂t`, and `r_p = ∂r/∂p`, all evaluated at `(x^-, t, p)`.
+    /// The `l^- - l^+` term is the running-cost jump contribution at the interior event.
+    /// The forward state vectors in `self` are left untouched; `self.s` and `self.sg`
+    /// are updated to the pre-event values.
+    ///
     /// Note: mass matrix equations are not supported for this operation.
-    pub fn state_mut_op_with_adjoint_and_reset<'a, Eqn, Method, G, R, State>(
+    #[allow(clippy::too_many_arguments)]
+    pub fn state_mut_op_with_adjoint_and_reset<Eqn, G, R>(
         &mut self,
-        adj_eqn: &mut AdjointEquations<'a, Eqn, Method>,
+        eqn: &Eqn,
         reset_op: &G,
         root_op: &R,
         root_idx: usize,
-        fwd_state_minus: &State,
-        fwd_state_plus: &State,
+        fwd_state_minus: StateRef<'_, V>,
+        fwd_state_plus: StateRef<'_, V>,
+        integrate_out: bool,
     ) -> Result<(), DiffsolError>
     where
         Eqn: OdeEquationsAdjoint<T = V::T, V = V, C = V::C>,
-        Method: OdeSolverMethod<'a, Eqn>,
-        State: OdeSolverState<V>,
         G: NonLinearOpJacobian<T = V::T, V = V, M = Eqn::M, C = V::C>
             + NonLinearOpAdjoint<T = V::T, V = V, M = Eqn::M, C = V::C>
             + NonLinearOpSensAdjoint<T = V::T, V = V, M = Eqn::M, C = V::C>
@@ -261,7 +355,6 @@ impl<V: Vector> StateRefMut<'_, V> {
             + NonLinearOpSensAdjoint<T = V::T, V = V, M = Eqn::M, C = V::C>
             + NonLinearOpTimePartial<T = V::T, V = V, M = Eqn::M, C = V::C>,
     {
-        let eqn = adj_eqn.eqn();
         if eqn.mass().is_some() {
             return Err(ode_solver_error!(MassMatrixNotSupported));
         }
@@ -277,11 +370,11 @@ impl<V: Vector> StateRefMut<'_, V> {
         }
 
         let ctx = eqn.context().clone();
-        let t_event = fwd_state_minus.as_ref().t;
-        let y_minus = fwd_state_minus.as_ref().y;
-        let y_plus = fwd_state_plus.as_ref().y;
-        let f_minus = fwd_state_minus.as_ref().dy;
-        let f_plus = fwd_state_plus.as_ref().dy;
+        let t_event = fwd_state_minus.t;
+        let y_minus = fwd_state_minus.y;
+        let y_plus = fwd_state_plus.y;
+        let f_minus = fwd_state_minus.dy;
+        let f_plus = fwd_state_plus.dy;
         let nchannels = self.s.len();
         let nstates = y_minus.len();
         let nparams = eqn.rhs().nparams();
@@ -305,7 +398,7 @@ impl<V: Vector> StateRefMut<'_, V> {
             ));
         }
 
-        let (l_minus, l_plus) = if adj_eqn.with_out() {
+        let (l_minus, l_plus) = if integrate_out {
             if let Some(out_op) = eqn.out() {
                 (
                     Some(out_op.call(y_minus, t_event)),
@@ -358,15 +451,23 @@ impl<V: Vector> StateRefMut<'_, V> {
             self.sg[i] -= &reset_sens_adj;
             self.sg[i] += &root_sens_adj;
         }
-        refresh_augmented_state_ref_mut::<V, Eqn, _>(self, adj_eqn)
+        Ok(())
     }
 
     /// Add the terminal-root adjoint correction for a root-defined final time.
-    pub fn state_mut_adjoint_terminal_root<'a, Eqn, Method, State>(
+    ///
+    /// Given a forward terminal state satisfying the active root condition
+    /// `r_k(y_f, t_f, p) = 0`, this method adds the terminal contribution
+    /// `lambda_f += r_{x,k}^T * (u_k / d)` and `q_f += r_{p,k}^T * (u_k / d)` to each adjoint
+    /// channel, where `u_k` is the corresponding model output component and
+    /// `d = [r_x f_f]_k + [r_t]_k`.
+    ///
+    pub fn state_mut_adjoint_terminal_root<Eqn, State>(
         &mut self,
-        adj_eqn: &mut AdjointEquations<'a, Eqn, Method>,
+        eqn: &Eqn,
         root_idx: usize,
         forward: &State,
+        integrate_out: bool,
     ) -> Result<(), DiffsolError>
     where
         Eqn: OdeEquationsAdjoint<
@@ -379,16 +480,13 @@ impl<V: Vector> StateRefMut<'_, V> {
                       + NonLinearOpTimePartial<T = V::T, V = V, M = Eqn::M, C = V::C>,
             Out: NonLinearOp<T = V::T, V = V, M = Eqn::M, C = V::C>,
         >,
-        Method: OdeSolverMethod<'a, Eqn>,
         State: OdeSolverState<V>,
     {
-        let eqn = adj_eqn.eqn();
-
         if eqn.mass().is_some() {
             return Err(ode_solver_error!(MassMatrixNotSupported));
         }
 
-        if !adj_eqn.with_out() {
+        if !integrate_out {
             return Ok(());
         }
 
@@ -442,7 +540,7 @@ impl<V: Vector> StateRefMut<'_, V> {
             self.s[i] += &lambda_corr;
             self.sg[i] += &q_corr;
         }
-        refresh_augmented_state_ref_mut::<V, Eqn, _>(self, adj_eqn)
+        Ok(())
     }
 }
 
@@ -1005,12 +1103,14 @@ mod test {
         matrix::dense_nalgebra_serial::NalgebraMat,
         ode_equations::test_models::{
             exponential_decay::exponential_decay_problem,
+            exponential_decay::exponential_decay_with_reset_problem,
+            exponential_decay::exponential_decay_with_reset_problem_sens,
             exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
         },
         op::closure_with_adjoint::ClosureWithAdjoint,
         op::closure_with_sens::ClosureWithSens,
         BdfState, LinearSolver, Matrix, NonLinearOp, NonLinearOpTimePartial, OdeBuilder,
-        OdeEquations, OdeSolverMethod, OdeSolverState, ParameterisedOp, Vector, VectorHost,
+        OdeEquations, OdeSolverState, ParameterisedOp, Vector, VectorHost,
     };
     use num_traits::FromPrimitive;
 
@@ -1322,6 +1422,66 @@ mod test {
                 );
             }
             other => panic!("expected OdeSolverError::Other, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn state_ref_mut_apply_reset_uses_equation_reset() {
+        let (problem, _soln) = exponential_decay_with_reset_problem::<TestMat>();
+        let mut state = TestState::new_without_initialise(&problem).unwrap();
+        {
+            let mut state_mut = state.as_mut();
+            state_mut.y.fill(0.6);
+            state_mut.dy.fill(-0.06);
+            state_mut.apply_reset(&problem.eqn).unwrap();
+        }
+
+        assert_scalar_close(state.as_ref().y[0], 0.4);
+        assert_scalar_close(state.as_ref().y[1], 0.4);
+        assert_scalar_close(state.as_ref().dy[0], -0.04);
+        assert_scalar_close(state.as_ref().dy[1], -0.04);
+    }
+
+    #[test]
+    fn state_ref_mut_apply_reset_rejects_missing_reset() {
+        let problem = scalar_problem(0.25);
+        let mut state = TestState::new_without_initialise(&problem).unwrap();
+
+        let err = state.as_mut().apply_reset(&problem.eqn).unwrap_err();
+        assert_other_error(err, "No reset operator configured");
+    }
+
+    #[test]
+    fn state_ref_mut_apply_reset_with_sens_matches_operator_path() {
+        let (problem, _soln) = exponential_decay_with_reset_problem_sens::<TestMat>();
+        let mut helper_state = TestState::new_with_sensitivities(&problem, 1).unwrap();
+        let mut operator_state = helper_state.clone();
+
+        helper_state
+            .as_mut()
+            .apply_reset_with_sens(&problem.eqn, 0)
+            .unwrap();
+
+        let rhs = problem.eqn.rhs();
+        let has_mass = problem.eqn.mass().is_some();
+        let reset = problem.eqn.reset().unwrap();
+        let root = problem.eqn.root().unwrap();
+        operator_state
+            .as_mut()
+            .state_mut_op_with_sens_and_reset(&rhs, has_mass, &reset, &root, 0)
+            .unwrap();
+
+        for i in 0..2 {
+            assert_scalar_close(helper_state.as_ref().y[i], operator_state.as_ref().y[i]);
+            assert_scalar_close(helper_state.as_ref().dy[i], operator_state.as_ref().dy[i]);
+            assert_scalar_close(
+                helper_state.as_ref().s[0][i],
+                operator_state.as_ref().s[0][i],
+            );
+            assert_scalar_close(
+                helper_state.as_ref().s[1][i],
+                operator_state.as_ref().s[1][i],
+            );
         }
     }
 
@@ -1710,11 +1870,6 @@ mod test {
         fwd_state_minus.as_mut().dy[0] = 0.5;
         let mut fwd_state_plus = fwd_state_minus.clone();
         fwd_state_plus.as_mut().dy[0] = 0.8275;
-        let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
-        let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(1.0, None).unwrap();
-        let mut adjoint_eqn =
-            problem.adjoint_equations(checkpointer, Some(forward_solver.clone()), Some(2));
-
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, p: &TestVec, _t, y: &mut TestVec| {
                 y[0] = 1.5 * x[0] + 0.2 * p[0] - 0.1 * p[1]
@@ -1761,12 +1916,13 @@ mod test {
         state
             .as_mut()
             .state_mut_op_with_adjoint_and_reset(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 &reset,
                 &root,
                 1,
-                &fwd_state_minus,
-                &fwd_state_plus,
+                fwd_state_minus.as_ref(),
+                fwd_state_plus.as_ref(),
+                problem.integrate_out,
             )
             .unwrap();
 
@@ -1778,19 +1934,6 @@ mod test {
         assert_scalar_close(state.as_ref().sg[0][1], -0.195125);
         assert_scalar_close(state.as_ref().sg[1][0], 0.4355);
         assert_scalar_close(state.as_ref().sg[1][1], 0.5935);
-        assert!(
-            state.as_ref().ds.iter().any(|ds_i| ds_i[0].abs() > 1e-12),
-            "expected adjoint reset to refresh ds"
-        );
-        assert!(
-            state
-                .as_ref()
-                .dsg
-                .iter()
-                .flat_map(|dsg_i| (0..dsg_i.len()).map(|j| dsg_i[j]))
-                .any(|value| value.abs() > 1e-12),
-            "expected adjoint reset to refresh dsg"
-        );
     }
 
     #[test]
@@ -1811,13 +1954,6 @@ mod test {
         fwd_state_minus.as_mut().dy[0] = 0.5;
         let mut fwd_state_plus = fwd_state_minus.clone();
         fwd_state_plus.as_mut().dy[0] = 0.8275;
-        let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
-        let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(1.0, None).unwrap();
-        let mut adjoint_eqn_root0 =
-            problem.adjoint_equations(checkpointer.clone(), Some(forward_solver.clone()), Some(2));
-        let mut adjoint_eqn_root1 =
-            problem.adjoint_equations(checkpointer, Some(forward_solver.clone()), Some(2));
-
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, p: &TestVec, _t, y: &mut TestVec| {
                 y[0] = 1.5 * x[0] + 0.2 * p[0] - 0.1 * p[1]
@@ -1861,23 +1997,25 @@ mod test {
         state_root0
             .as_mut()
             .state_mut_op_with_adjoint_and_reset(
-                &mut adjoint_eqn_root0,
+                &problem.eqn,
                 &reset,
                 &root,
                 0,
-                &fwd_state_minus,
-                &fwd_state_plus,
+                fwd_state_minus.as_ref(),
+                fwd_state_plus.as_ref(),
+                problem.integrate_out,
             )
             .unwrap();
         state_root1
             .as_mut()
             .state_mut_op_with_adjoint_and_reset(
-                &mut adjoint_eqn_root1,
+                &problem.eqn,
                 &reset,
                 &root,
                 1,
-                &fwd_state_minus,
-                &fwd_state_plus,
+                fwd_state_minus.as_ref(),
+                fwd_state_plus.as_ref(),
+                problem.integrate_out,
             )
             .unwrap();
 
@@ -1904,11 +2042,6 @@ mod test {
         fwd_state_minus.as_mut().dy[0] = 0.2;
         let mut fwd_state_plus = fwd_state_minus.clone();
         fwd_state_plus.as_mut().dy[0] = 0.58;
-        let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
-        let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(4.0, None).unwrap();
-        let mut adjoint_eqn =
-            problem.adjoint_equations(checkpointer, Some(forward_solver.clone()), Some(2));
-
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, p: &TestVec, t, y: &mut TestVec| {
                 y[0] = 1.2 * x[0] + 0.4 * p[0] - 0.3 * p[1] + 0.8 * t
@@ -1949,12 +2082,13 @@ mod test {
         state
             .as_mut()
             .state_mut_op_with_adjoint_and_reset(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 &reset,
                 &root,
                 0,
-                &fwd_state_minus,
-                &fwd_state_plus,
+                fwd_state_minus.as_ref(),
+                fwd_state_plus.as_ref(),
+                problem.integrate_out,
             )
             .unwrap();
 
@@ -1984,11 +2118,6 @@ mod test {
         let mut fwd_state_minus = make_state(&forward_problem, 0.0, 1.0, [0.0, 0.0]);
         fwd_state_minus.as_mut().dy[0] = 1.0;
         let fwd_state_plus = fwd_state_minus.clone();
-        let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
-        let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(1.0, None).unwrap();
-        let mut adjoint_eqn =
-            problem.adjoint_equations(checkpointer, Some(forward_solver.clone()), Some(2));
-
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
@@ -2023,12 +2152,13 @@ mod test {
         let err = state
             .as_mut()
             .state_mut_op_with_adjoint_and_reset(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 &reset,
                 &root,
                 2,
-                &fwd_state_minus,
-                &fwd_state_plus,
+                fwd_state_minus.as_ref(),
+                fwd_state_plus.as_ref(),
+                problem.integrate_out,
             )
             .unwrap_err();
         assert_other_error(err, "root index 2 out of bounds");
@@ -2050,11 +2180,6 @@ mod test {
         let mut fwd_state_minus = make_state(&forward_problem, 0.0, 0.0, [0.0, 0.0]);
         fwd_state_minus.as_mut().dy[0] = 0.0;
         let fwd_state_plus = fwd_state_minus.clone();
-        let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
-        let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(1.0, None).unwrap();
-        let mut adjoint_eqn =
-            problem.adjoint_equations(checkpointer, Some(forward_solver.clone()), Some(2));
-
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
@@ -2081,12 +2206,13 @@ mod test {
         let err = state
             .as_mut()
             .state_mut_op_with_adjoint_and_reset(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 &reset,
                 &root,
                 0,
-                &fwd_state_minus,
-                &fwd_state_plus,
+                fwd_state_minus.as_ref(),
+                fwd_state_plus.as_ref(),
+                problem.integrate_out,
             )
             .unwrap_err();
         assert_other_error(err, "active root derivative along flow is zero");
@@ -2111,11 +2237,6 @@ mod test {
         let mut state = TestState::new_from_common(common);
         let fwd_state_minus = state.clone();
         let fwd_state_plus = state.clone();
-        let mut forward_solver = problem.bdf::<crate::NalgebraLU<f64>>().unwrap();
-        let (checkpointer, _, _, _) = forward_solver.solve_with_checkpointing(1.0, None).unwrap();
-        let mut adjoint_eqn =
-            problem.adjoint_equations(checkpointer, Some(forward_solver.clone()), Some(2));
-
         let reset = ClosureWithAdjoint::<TestMat, _, _, _, _>::new(
             |x: &TestVec, _p: &TestVec, _t, y: &mut TestVec| y[0] = x[0],
             |_x: &TestVec, _p: &TestVec, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
@@ -2142,12 +2263,13 @@ mod test {
         let err = state
             .as_mut()
             .state_mut_op_with_adjoint_and_reset(
-                &mut adjoint_eqn,
+                &problem.eqn,
                 &reset,
                 &root,
                 0,
-                &fwd_state_minus,
-                &fwd_state_plus,
+                fwd_state_minus.as_ref(),
+                fwd_state_plus.as_ref(),
+                problem.integrate_out,
             )
             .unwrap_err();
         assert!(matches!(
