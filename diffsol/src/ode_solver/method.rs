@@ -1,12 +1,13 @@
-use std::cell::Ref;
+use std::{cell::Ref, marker::PhantomData};
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
+    ode_equations::OdeEquationsImplicitSens,
     ode_solver::solution::{SolutionMode, INITIAL_NCOLS},
     ode_solver_error,
     scalar::Scalar,
-    AugmentedOdeEquations, Checkpointing, Context, DefaultDenseMatrix, DenseMatrix,
-    HermiteInterpolator, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverConfig,
+    AugmentedOdeEquations, Checkpointing, CheckpointingPath, Context, DefaultDenseMatrix,
+    DenseMatrix, HermiteInterpolator, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverConfig,
     OdeSolverProblem, OdeSolverState, Op, Solution, StateRef, StateRefMut, Vector, VectorViewMut,
 };
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -164,6 +165,51 @@ where
     /// This is typically called after a root is found to pin the state to the root time.
     fn state_mut_back(&mut self, t: Eqn::T) -> Result<(), DiffsolError>;
 
+    /// Apply the problem's configured reset operator to the current state.
+    ///
+    /// This is typically used after [`Self::state_mut_back`] has moved the solver to a root time.
+    /// The helper recomputes `dy` from the problem RHS after updating the state vector.
+    fn apply_reset(&mut self) -> Result<(), DiffsolError> {
+        let (rhs, has_mass, reset) = {
+            let eqn = &self.problem().eqn;
+            (
+                eqn.rhs(),
+                eqn.mass().is_some(),
+                eqn.reset().ok_or_else(|| {
+                    ode_solver_error!(Other, "No reset operator configured for this problem")
+                })?,
+            )
+        };
+        self.state_mut().state_mut_op(&rhs, has_mass, &reset)
+    }
+
+    /// Apply the problem's configured reset operator to the current state and
+    /// propagate forward sensitivities through the active root event.
+    ///
+    /// This is typically used after [`Self::state_mut_back`] has moved the solver to a root time.
+    /// The helper recomputes `dy` from the problem RHS after updating the state vector and
+    /// applies the root-time correction to each sensitivity vector.
+    fn apply_reset_with_sens(&mut self, root_idx: usize) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitSens,
+    {
+        let (rhs, has_mass, reset, root) = {
+            let eqn = &self.problem().eqn;
+            (
+                eqn.rhs(),
+                eqn.mass().is_some(),
+                eqn.reset().ok_or_else(|| {
+                    ode_solver_error!(Other, "No reset operator configured for this problem")
+                })?,
+                eqn.root().ok_or_else(|| {
+                    ode_solver_error!(Other, "No root operator configured for this problem")
+                })?,
+            )
+        };
+        self.state_mut()
+            .state_mut_op_with_sens_and_reset(&rhs, has_mass, &reset, &root, root_idx)
+    }
+
     /// Get the current order of accuracy of the solver (e.g. explict euler method is first-order)
     fn order(&self) -> usize;
 
@@ -174,6 +220,8 @@ where
     ///
     /// If a root function is provided, the solver will stop if any of the root function elements change sign.
     /// The internal state of the solver is set to the time that the zero-crossing occured.
+    /// If both a root function and a reset operator are configured, roots are handled internally by
+    /// applying the reset and continuing the integration to `final_time`.
     ///
     /// # Arguments
     /// - `final_time`: The time to integrate to
@@ -186,8 +234,11 @@ where
     ///
     /// # Post-condition
     /// After the solver finishes, the internal state of the solver is at time `final_time`.
-    /// If a root is found, the solver stops early. The internal state is moved to the root time,
-    /// and the root time/value are returned as the last entry.
+    /// If a root is found and no reset operator is configured, the solver stops early. The
+    /// internal state is moved to the root time, and the root time/value are returned as the
+    /// last entry.
+    /// If a reset operator is configured, the solver writes out the reset state at the root time
+    /// and continues integrating.
     #[allow(clippy::type_complexity)]
     fn solve(
         &mut self,
@@ -206,7 +257,16 @@ where
     {
         let mut ret_t = Vec::new();
         let (mut ret_y, mut tmp_nout) = allocate_return(self)?;
-        let stop_reason = solve(&mut ret_y, &mut ret_t, &mut tmp_nout, self, final_time)?;
+        let (stop_reason, _) = solve(
+            &mut ret_y,
+            &mut ret_t,
+            &mut tmp_nout,
+            self,
+            final_time,
+            true,
+            false,
+            0,
+        )?;
         let ntimes = ret_t.len();
         ret_y.resize_cols(ntimes);
         Ok((ret_y, ret_t, stop_reason))
@@ -285,28 +345,98 @@ where
 
         match soln.mode {
             SolutionMode::Tfinal(t_final) => {
-                let stop_reason = solve(
+                let (stop_reason, _) = solve(
                     &mut soln.ys,
                     &mut soln.ts,
                     &mut soln.tmp_nout,
                     &mut self,
                     t_final,
+                    false,
+                    false,
+                    0,
                 )?;
                 soln.stop_reason = Some(stop_reason);
             }
             SolutionMode::Tevals(start_col) => {
-                let (stop_reason, col) = solve_dense(
+                let (stop_reason, col, _) = solve_dense(
                     &mut soln.ys,
                     &soln.ts,
                     &mut soln.tmp_nout,
                     &mut soln.tmp_nstates,
                     &mut self,
                     start_col,
+                    false,
+                    false,
+                    0,
                 )?;
                 soln.stop_reason = Some(stop_reason);
                 soln.mode = SolutionMode::Tevals(col);
             }
         }
+        Ok(self)
+    }
+
+    /// Continue solving into an existing [`Solution`], appending newly computed
+    /// output and checkpointing segments.
+    ///
+    /// This has the same staged-solve behavior as [`Self::solve_soln`], but also
+    /// records a checkpointing segment for the call and appends it to the
+    /// caller-owned checkpointing path. A segment with
+    /// `terminal_reset_root_idx() == Some(root_idx)` ended at a root. A segment
+    /// with `None` ended at the configured stop time.
+    fn solve_soln_with_checkpointing(
+        mut self,
+        soln: &mut Solution<Eqn::V>,
+        checkpointing: &mut CheckpointingPath<Eqn, Self::State>,
+        max_steps_between_checkpoints: Option<usize>,
+    ) -> Result<Self, DiffsolError>
+    where
+        Eqn::V: DefaultDenseMatrix,
+        Self: Sized,
+    {
+        let nrows = if let Some(out) = self.problem().eqn.out() {
+            out.nout()
+        } else {
+            self.problem().eqn.rhs().nstates()
+        };
+        let nout = self.problem().eqn.out().map(|out| out.nout()).unwrap_or(0);
+        let nstates = self.problem().eqn.rhs().nstates();
+        soln.ensure_ode_allocation(self.problem().context(), nrows, nout, nstates)?;
+        let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
+
+        let mut new_checkpointing = match soln.mode {
+            SolutionMode::Tfinal(t_final) => {
+                let (stop_reason, checkpointers) = solve(
+                    &mut soln.ys,
+                    &mut soln.ts,
+                    &mut soln.tmp_nout,
+                    &mut self,
+                    t_final,
+                    false,
+                    true,
+                    max_steps_between_checkpoints,
+                )?;
+                soln.stop_reason = Some(stop_reason);
+                checkpointers.unwrap()
+            }
+            SolutionMode::Tevals(start_col) => {
+                let (stop_reason, col, checkpointers) = solve_dense(
+                    &mut soln.ys,
+                    &soln.ts,
+                    &mut soln.tmp_nout,
+                    &mut soln.tmp_nstates,
+                    &mut self,
+                    start_col,
+                    false,
+                    true,
+                    max_steps_between_checkpoints,
+                )?;
+                soln.stop_reason = Some(stop_reason);
+                soln.mode = SolutionMode::Tevals(col);
+                checkpointers.unwrap()
+            }
+        };
+        checkpointing.append(&mut new_checkpointing);
         Ok(self)
     }
 
@@ -319,6 +449,8 @@ where
     ///
     /// If a root function is provided, the solver will stop if any of the root function elements change sign.
     /// The internal state of the solver is set to the time that the zero-crossing occured.
+    /// If both a root function and a reset operator are configured, roots are handled internally by
+    /// applying the reset and continuing the integration until `t_eval[t_eval.len()-1]`.
     ///
     /// # Arguments
     /// - `t_eval`: A slice of times at which to evaluate the solution. Times should be in increasing order.
@@ -326,13 +458,16 @@ where
     /// # Returns
     /// A tuple of `(solution_matrix, stop_reason)` where:
     /// - `solution_matrix` has one column per evaluation time (in the same order as `t_eval`) and one row per state variable,
-    ///   plus one final column at the root time if a root fires before `t_eval` is exhausted.
+    ///   plus one final column at the root time if a root fires before `t_eval` is exhausted and no reset operator is configured.
     /// - `stop_reason` indicates whether the solve reached `t_eval[t_eval.len()-1]` or stopped on a root.
     ///
     /// # Post-condition
     /// In the case that no roots are found that stop the solve early, the internal state is at time `t_eval[t_eval.len()-1]`.
-    /// If a root is found, the solver stops early. The internal state is moved to the root time,
-    /// and the last column corresponds to the root time (which may not be in `t_eval`).
+    /// If a root is found and no reset operator is configured, the solver stops early. The internal
+    /// state is moved to the root time, and the last column corresponds to the root time (which may
+    /// not be in `t_eval`).
+    /// If a reset operator is configured, any `t_eval` values exactly at the root time receive the
+    /// reset state and the solve continues through the remaining evaluation times.
     #[allow(clippy::type_complexity)]
     fn solve_dense(
         &mut self,
@@ -349,34 +484,22 @@ where
         Self: Sized,
     {
         let (mut ret, mut tmp_nout, mut tmp_nstates) = dense_allocate_return(self, t_eval)?;
-        let (stop_reason, col) =
-            solve_dense(&mut ret, t_eval, &mut tmp_nout, &mut tmp_nstates, self, 0)?;
+        let (stop_reason, col, _) = solve_dense(
+            &mut ret,
+            t_eval,
+            &mut tmp_nout,
+            &mut tmp_nstates,
+            self,
+            0,
+            true,
+            false,
+            0,
+        )?;
 
         // if we stopped on a root before exhausting t_eval, we need to write_out the solution at the root time to the last column of ret
         if let OdeSolverStopReason::RootFound(_, _) = stop_reason {
             if col < t_eval.len() {
-                let t = self.state().t;
-                let y = self.state().y;
-                {
-                    let mut ret_y_col = ret.column_mut(col);
-                    match self.problem().eqn.out() {
-                        Some(out) => {
-                            if self.problem().integrate_out {
-                                ret_y_col.copy_from(self.state().g);
-                            } else {
-                                out.call_inplace(y, t, &mut tmp_nout);
-                                ret_y_col.copy_from(&tmp_nout);
-                            }
-                        }
-                        None => {
-                            if self.problem().integrate_out {
-                                ret_y_col.copy_from(self.state().g);
-                            } else {
-                                ret_y_col.copy_from(y);
-                            }
-                        }
-                    }
-                }
+                write_state_out(self.problem(), &self.state(), &mut ret, col, &mut tmp_nout);
                 if col + 1 < ret.ncols() {
                     ret.resize_cols(col + 1);
                 }
@@ -395,8 +518,8 @@ where
     /// - `max_steps_between_checkpoints`: The maximum number of solver steps to take between saving checkpoints (if `None`, defaults to 500)
     ///
     /// # Returns
-    /// A tuple of `(checkpointer, output_matrix, output_times, stop_reason)` where:
-    /// - `checkpointer` implements the `Checkpointing` trait and can be used for adjoint integrations
+    /// A tuple of `(checkpointers, output_matrix, output_times, stop_reason)` where:
+    /// - `checkpointers` is a path of checkpointing segments, split at reset events, for adjoint integrations
     /// - `output_matrix` a dense matrix containing the solution at each output time
     /// - `output_times` a vector of timepoints corresponding to the columns of `output_matrix`
     /// - `stop_reason` is the reason the solve terminated
@@ -407,7 +530,7 @@ where
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<
         (
-            Checkpointing<'a, Eqn, Self>,
+            CheckpointingPath<Eqn, Self::State>,
             <Eqn::V as DefaultDenseMatrix>::M,
             Vec<Eqn::T>,
             OdeSolverStopReason<Eqn::T>,
@@ -421,67 +544,20 @@ where
         let mut ret_t = Vec::new();
         let (mut ret_y, mut tmp_nout) = allocate_return(self)?;
         let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
-
-        // allocate checkpoint info
-        let mut nsteps = 0;
-        let t0 = self.state().t;
-        let mut checkpoints = vec![self.state_clone()];
-        let mut ts = vec![t0];
-        let mut ys = vec![self.state().y.clone()];
-        let mut ydots = vec![self.state().dy.clone()];
-        let stop_reason;
-
-        // do the main loop, saving checkpoints
-        write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
-        self.set_stop_time(final_time)?;
-        loop {
-            match self.step()? {
-                OdeSolverStopReason::InternalTimestep => {
-                    write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
-                    ts.push(self.state().t);
-                    ys.push(self.state().y.clone());
-                    ydots.push(self.state().dy.clone());
-                    nsteps += 1;
-                    if nsteps > max_steps_between_checkpoints {
-                        checkpoints.push(self.checkpoint());
-                        nsteps = 0;
-                        ts.clear();
-                        ys.clear();
-                        ydots.clear();
-                    }
-                }
-                OdeSolverStopReason::RootFound(t_root, idx) => {
-                    self.state_mut_back(t_root)?;
-                    write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
-                    stop_reason = OdeSolverStopReason::RootFound(t_root, idx);
-                    break;
-                }
-                OdeSolverStopReason::TstopReached => {
-                    write_out(self, &mut ret_y, &mut ret_t, &mut tmp_nout);
-                    stop_reason = OdeSolverStopReason::TstopReached;
-                    break;
-                }
-            }
-        }
+        let (stop_reason, checkpointers) = solve(
+            &mut ret_y,
+            &mut ret_t,
+            &mut tmp_nout,
+            self,
+            final_time,
+            true,
+            true,
+            max_steps_between_checkpoints,
+        )?;
         let ntimes = ret_t.len();
         ret_y.resize_cols(ntimes);
 
-        // add final checkpoint
-        ts.push(self.state().t);
-        ys.push(self.state().y.clone());
-        ydots.push(self.state().dy.clone());
-        checkpoints.push(self.state_clone());
-
-        // construct checkpointing
-        let last_segment = HermiteInterpolator::new(ys, ydots, ts);
-        let checkpointer = Checkpointing::new(
-            self.clone(),
-            checkpoints.len() - 2,
-            checkpoints,
-            Some(last_segment),
-        );
-
-        Ok((checkpointer, ret_y, ret_t, stop_reason))
+        Ok((checkpointers.unwrap(), ret_y, ret_t, stop_reason))
     }
 
     /// Solve the ODE from the current time to `t_eval[t_eval.len()-1]` with checkpointing, evaluating at specified times.
@@ -497,8 +573,8 @@ where
     ///   If `None`, defaults to 500.
     ///
     /// # Returns
-    /// A tuple of `(checkpointer, solution_matrix, stop_reason)` where:
-    /// - `checkpointer` implements the `Checkpointing` trait and stores the forward integration state for use in adjoint integrations
+    /// A tuple of `(checkpointers, solution_matrix, stop_reason)` where:
+    /// - `checkpointers` is a path of checkpointing segments, split at reset events, storing the forward integration state for use in adjoint integrations
     /// - `solution_matrix` is a dense matrix with one column per evaluation time and one row per state variable
     /// - `stop_reason` is the reason the solve terminated
     ///
@@ -515,7 +591,7 @@ where
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<
         (
-            Checkpointing<'a, Eqn, Self>,
+            CheckpointingPath<Eqn, Self::State>,
             <Eqn::V as DefaultDenseMatrix>::M,
             OdeSolverStopReason<Eqn::T>,
         ),
@@ -527,61 +603,106 @@ where
     {
         let (mut ret, mut tmp_nout, mut tmp_nstates) = dense_allocate_return(self, t_eval)?;
         let max_steps_between_checkpoints = max_steps_between_checkpoints.unwrap_or(500);
+        let (stop_reason, _, checkpointers) = solve_dense(
+            &mut ret,
+            t_eval,
+            &mut tmp_nout,
+            &mut tmp_nstates,
+            self,
+            0,
+            true,
+            true,
+            max_steps_between_checkpoints,
+        )?;
 
-        // allocate checkpoint info
-        let mut nsteps = 0;
-        let t0 = self.state().t;
-        let mut checkpoints = vec![self.state_clone()];
-        let mut ts = vec![t0];
-        let mut ys = vec![self.state().y.clone()];
-        let mut ydots = vec![self.state().dy.clone()];
+        Ok((checkpointers.unwrap(), ret, stop_reason))
+    }
+}
 
-        // do loop, saving checkpoints
-        self.set_stop_time(t_eval[t_eval.len() - 1])?;
-        let mut step_reason = OdeSolverStopReason::InternalTimestep;
-        for (i, t) in t_eval.iter().enumerate() {
-            while self.state().t < *t {
-                step_reason = self.step()?;
-                ts.push(self.state().t);
-                ys.push(self.state().y.clone());
-                ydots.push(self.state().dy.clone());
-                nsteps += 1;
-                if nsteps > max_steps_between_checkpoints
-                    && step_reason != OdeSolverStopReason::TstopReached
-                {
-                    checkpoints.push(self.checkpoint());
-                    nsteps = 0;
-                    ts.clear();
-                    ys.clear();
-                    ydots.clear();
-                }
-            }
-            dense_write_out(
-                self,
-                &mut ret,
-                t_eval[i],
-                i,
-                &mut tmp_nout,
-                &mut tmp_nstates,
-            )?;
+struct CheckpointingRecorder<Eqn, State, Method>
+where
+    Eqn: OdeEquations,
+    State: OdeSolverState<Eqn::V>,
+{
+    checkpointers: CheckpointingPath<Eqn, State>,
+    checkpoints: Vec<State>,
+    ts: Vec<Eqn::T>,
+    ys: Vec<Eqn::V>,
+    ydots: Vec<Eqn::V>,
+    phantom: PhantomData<Method>,
+}
+
+impl<'a, Eqn, Method> CheckpointingRecorder<Eqn, Method::State, Method>
+where
+    Eqn: OdeEquations + 'a,
+    Eqn::V: DefaultDenseMatrix,
+    Method: OdeSolverMethod<'a, Eqn>,
+{
+    fn new(solver: &Method) -> Self {
+        Self {
+            checkpointers: Vec::new(),
+            checkpoints: vec![solver.state_clone()],
+            ts: vec![solver.state().t],
+            ys: vec![solver.state().y.clone()],
+            ydots: vec![solver.state().dy.clone()],
+            phantom: PhantomData,
         }
-        let stop_reason = step_reason;
+    }
 
-        // add final checkpoint
-        checkpoints.push(self.state_clone());
+    fn into_checkpointers(self) -> CheckpointingPath<Eqn, Method::State> {
+        self.checkpointers
+    }
 
-        // construct the adjoint equations
-        let last_segment = HermiteInterpolator::new(ys, ydots, ts);
+    fn record_sample(&mut self, solver: &Method) {
+        self.ts.push(solver.state().t);
+        self.ys.push(solver.state().y.clone());
+        self.ydots.push(solver.state().dy.clone());
+    }
 
-        // construct checkpointing
-        let checkpointer = Checkpointing::new(
-            self.clone(),
-            checkpoints.len() - 2,
-            checkpoints,
+    fn reset_samples_from_current(&mut self, solver: &Method) {
+        self.ts.clear();
+        self.ys.clear();
+        self.ydots.clear();
+        self.record_sample(solver);
+    }
+
+    fn start_segment_from_current(&mut self, solver: &Method) {
+        self.checkpoints.clear();
+        self.checkpoints.push(solver.state_clone());
+        self.reset_samples_from_current(solver);
+    }
+
+    fn checkpoint_and_restart_samples(&mut self, solver: &mut Method) {
+        self.checkpoints.push(solver.checkpoint());
+        self.reset_samples_from_current(solver);
+    }
+
+    fn record_terminal_state(&mut self, solver: &Method) {
+        self.record_sample(solver);
+        self.checkpoints.push(solver.state_clone());
+    }
+
+    fn finish_segment(&mut self, terminal_reset_root_idx: Option<usize>) {
+        let last_segment = HermiteInterpolator::new(
+            self.ys.split_off(0),
+            self.ydots.split_off(0),
+            self.ts.split_off(0),
+        );
+        let mut checkpointer = Checkpointing::new::<Method>(
+            None,
+            self.checkpoints.len() - 2,
+            self.checkpoints.split_off(0),
             Some(last_segment),
         );
+        if let Some(root_idx) = terminal_reset_root_idx {
+            checkpointer.set_terminal_reset_root_idx(root_idx);
+        }
+        self.checkpointers.push(checkpointer);
+    }
 
-        Ok((checkpointer, ret, stop_reason))
+    fn finish_terminal_segment(&mut self, solver: &Method) {
+        self.record_terminal_state(solver);
+        self.finish_segment(None);
     }
 }
 
@@ -593,8 +714,12 @@ where
     fn into_state_and_eqn(self) -> (Self::State, Option<AugmentedEqn>);
     fn augmented_eqn(&self) -> Option<&AugmentedEqn>;
     fn augmented_eqn_mut(&mut self) -> Option<&mut AugmentedEqn>;
+    fn state_and_augmented_eqn_mut(
+        &mut self,
+    ) -> Option<(StateRefMut<'_, Eqn::V>, &mut AugmentedEqn)>;
 }
 
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn solve_dense<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     ret: &mut <Eqn::V as DefaultDenseMatrix>::M,
     t_eval: &[Eqn::T],
@@ -602,38 +727,96 @@ fn solve_dense<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     tmp_nstates: &mut Eqn::V,
     s: &mut S,
     start_col: usize,
-) -> Result<(OdeSolverStopReason<Eqn::T>, usize), DiffsolError>
+    continue_after_reset: bool,
+    checkpointing: bool,
+    max_steps_between_checkpoints: usize,
+) -> Result<
+    (
+        OdeSolverStopReason<Eqn::T>,
+        usize,
+        Option<CheckpointingPath<Eqn, S::State>>,
+    ),
+    DiffsolError,
+>
 where
     Eqn::V: DefaultDenseMatrix,
 {
-    s.set_stop_time(t_eval[t_eval.len() - 1])?;
+    let final_time = t_eval[t_eval.len() - 1];
+    s.set_stop_time(final_time)?;
+    let has_reset = continue_after_reset && s.problem().eqn.reset().is_some();
+    let mut checkpointing = checkpointing.then(|| CheckpointingRecorder::new(&*s));
+    let mut nsteps = 0;
     let mut stop_reason: OdeSolverStopReason<Eqn::T>;
     let mut col = start_col;
     loop {
         stop_reason = s.step()?;
-        let t_current = if let OdeSolverStopReason::RootFound(t, _idx) = stop_reason {
-            t
-        } else {
-            s.state().t
-        };
-        // Write any t_eval points that fall at or before t_current
-        while col < t_eval.len() && t_eval[col] <= t_current {
-            dense_write_out(s, ret, t_eval[col], col, tmp_nout, tmp_nstates)?;
-            col += 1;
-        }
         match stop_reason {
-            OdeSolverStopReason::InternalTimestep => {}
+            OdeSolverStopReason::InternalTimestep => {
+                if let Some(checkpointing) = checkpointing.as_mut() {
+                    checkpointing.record_sample(&*s);
+                    nsteps += 1;
+                    if nsteps > max_steps_between_checkpoints {
+                        checkpointing.checkpoint_and_restart_samples(s);
+                        nsteps = 0;
+                    }
+                }
+                while col < t_eval.len() && t_eval[col] <= s.state().t {
+                    dense_write_out(s, ret, t_eval[col], col, tmp_nout, tmp_nstates)?;
+                    col += 1;
+                }
+            }
             OdeSolverStopReason::TstopReached => {
+                while col < t_eval.len() && t_eval[col] <= s.state().t {
+                    dense_write_out(s, ret, t_eval[col], col, tmp_nout, tmp_nstates)?;
+                    col += 1;
+                }
                 assert!(col == t_eval.len(), "Solver reached stop time before consuming all t_eval points, this should not happen");
                 break;
             }
-            OdeSolverStopReason::RootFound(t_root, _root_idx) => {
+            OdeSolverStopReason::RootFound(t_root, root_idx) => {
+                while col < t_eval.len() && t_eval[col] <= t_root {
+                    dense_write_out(s, ret, t_eval[col], col, tmp_nout, tmp_nstates)?;
+                    col += 1;
+                }
                 s.state_mut_back(t_root)?;
-                break;
+                if let Some(checkpointing) = checkpointing.as_mut() {
+                    checkpointing.record_terminal_state(&*s);
+                }
+                if has_reset {
+                    if let Some(checkpointing) = checkpointing.as_mut() {
+                        checkpointing.finish_segment(Some(root_idx));
+                    }
+                    s.apply_reset()?;
+                    if let Some(checkpointing) = checkpointing.as_mut() {
+                        checkpointing.start_segment_from_current(&*s);
+                        nsteps = 0;
+                    }
+                    if s.state().t < final_time {
+                        s.set_stop_time(final_time)?;
+                    } else {
+                        stop_reason = OdeSolverStopReason::TstopReached;
+                        break;
+                    }
+                } else {
+                    if let Some(checkpointing) = checkpointing.as_mut() {
+                        checkpointing.finish_segment(Some(root_idx));
+                    }
+                    stop_reason = OdeSolverStopReason::RootFound(t_root, root_idx);
+                    break;
+                }
             }
         }
     }
-    Ok((stop_reason, col))
+    if !matches!(stop_reason, OdeSolverStopReason::RootFound(_, _)) {
+        if let Some(checkpointing) = checkpointing.as_mut() {
+            checkpointing.finish_terminal_segment(&*s);
+        }
+    }
+    Ok((
+        stop_reason,
+        col,
+        checkpointing.map(CheckpointingRecorder::into_checkpointers),
+    ))
 }
 
 /// Utility function to write out the solution at a given timepoint
@@ -666,23 +849,74 @@ where
     Ok(())
 }
 
+pub(crate) fn write_state_out<Eqn>(
+    problem: &OdeSolverProblem<Eqn>,
+    state: &StateRef<'_, Eqn::V>,
+    y_out: &mut <Eqn::V as DefaultDenseMatrix>::M,
+    col: usize,
+    tmp_nout: &mut Eqn::V,
+) where
+    Eqn: OdeEquations,
+    Eqn::V: DefaultDenseMatrix,
+{
+    let mut y_out_col = y_out.column_mut(col);
+    match problem.eqn.out() {
+        Some(out) => {
+            if problem.integrate_out {
+                y_out_col.copy_from(state.g);
+            } else {
+                out.call_inplace(state.y, state.t, tmp_nout);
+                y_out_col.copy_from(tmp_nout);
+            }
+        }
+        None => {
+            if problem.integrate_out {
+                y_out_col.copy_from(state.g);
+            } else {
+                y_out_col.copy_from(state.y);
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn solve<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     ret_y: &mut <Eqn::V as DefaultDenseMatrix>::M,
     ret_t: &mut Vec<Eqn::T>,
     tmp_nout: &mut Eqn::V,
     s: &mut S,
     final_time: Eqn::T,
-) -> Result<OdeSolverStopReason<Eqn::T>, DiffsolError>
+    continue_after_reset: bool,
+    checkpointing: bool,
+    max_steps_between_checkpoints: usize,
+) -> Result<
+    (
+        OdeSolverStopReason<Eqn::T>,
+        Option<CheckpointingPath<Eqn, S::State>>,
+    ),
+    DiffsolError,
+>
 where
     Eqn::V: DefaultDenseMatrix,
 {
     // do the main loop
     write_out(s, ret_y, ret_t, tmp_nout);
     s.set_stop_time(final_time)?;
+    let has_reset = continue_after_reset && s.problem().eqn.reset().is_some();
+    let mut checkpointing = checkpointing.then(|| CheckpointingRecorder::new(&*s));
+    let mut nsteps = 0;
     let stop_reason = loop {
         match s.step()? {
             OdeSolverStopReason::InternalTimestep => {
                 write_out(s, ret_y, ret_t, tmp_nout);
+                if let Some(checkpointing) = checkpointing.as_mut() {
+                    checkpointing.record_sample(&*s);
+                    nsteps += 1;
+                    if nsteps > max_steps_between_checkpoints {
+                        checkpointing.checkpoint_and_restart_samples(s);
+                        nsteps = 0;
+                    }
+                }
             }
             OdeSolverStopReason::TstopReached => {
                 write_out(s, ret_y, ret_t, tmp_nout);
@@ -690,12 +924,43 @@ where
             }
             OdeSolverStopReason::RootFound(t_root, root_idx) => {
                 s.state_mut_back(t_root)?;
-                write_out(s, ret_y, ret_t, tmp_nout);
-                break OdeSolverStopReason::RootFound(t_root, root_idx);
+                if let Some(checkpointing) = checkpointing.as_mut() {
+                    checkpointing.record_terminal_state(&*s);
+                }
+                if has_reset {
+                    if let Some(checkpointing) = checkpointing.as_mut() {
+                        checkpointing.finish_segment(Some(root_idx));
+                    }
+                    s.apply_reset()?;
+                    write_out(s, ret_y, ret_t, tmp_nout);
+                    if let Some(checkpointing) = checkpointing.as_mut() {
+                        checkpointing.start_segment_from_current(&*s);
+                        nsteps = 0;
+                    }
+                    if s.state().t < final_time {
+                        s.set_stop_time(final_time)?;
+                    } else {
+                        break OdeSolverStopReason::TstopReached;
+                    }
+                } else {
+                    write_out(s, ret_y, ret_t, tmp_nout);
+                    if let Some(checkpointing) = checkpointing.as_mut() {
+                        checkpointing.finish_segment(Some(root_idx));
+                    }
+                    break OdeSolverStopReason::RootFound(t_root, root_idx);
+                }
             }
         }
     };
-    Ok(stop_reason)
+    if !matches!(stop_reason, OdeSolverStopReason::RootFound(_, _)) {
+        if let Some(checkpointing) = checkpointing.as_mut() {
+            checkpointing.finish_terminal_segment(&*s);
+        }
+    }
+    Ok((
+        stop_reason,
+        checkpointing.map(CheckpointingRecorder::into_checkpointers),
+    ))
 }
 
 /// utility function to write out the solution at a given timepoint
@@ -793,7 +1058,8 @@ mod test {
         ode_equations::test_models::exponential_decay::{
             exponential_decay_problem, exponential_decay_problem_adjoint,
             exponential_decay_problem_sens, exponential_decay_problem_sens_with_out,
-            exponential_decay_problem_with_root, exponential_decay_with_reset_problem_sens,
+            exponential_decay_problem_with_root, exponential_decay_with_reset_problem,
+            exponential_decay_with_reset_problem_sens,
         },
         scale, AdjointOdeSolverMethod, DenseMatrix, NalgebraLU, NalgebraVec, OdeBuilder,
         OdeEquations, OdeSolverMethod, OdeSolverStopReason, Op, SensitivitiesOdeSolverMethod,
@@ -1140,7 +1406,7 @@ mod test {
         let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
 
         let final_time = soln.solution_points[soln.solution_points.len() - 1].t;
-        let (checkpointer, _y, _t, _stop_reason) =
+        let (checkpointers, _y, _t, _stop_reason) =
             s.solve_with_checkpointing(final_time, None).unwrap();
         let g = s.state().g;
         g.assert_eq_norm(
@@ -1150,10 +1416,10 @@ mod test {
             15.0,
         );
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<NalgebraLU<f64>, _>(checkpointer, None)
+            .bdf_solver_adjoint::<NalgebraLU<f64>, _>(checkpointers, Some(s), None)
             .unwrap();
-        let state = adjoint_solver
-            .solve_adjoint_backwards_pass(None, &[], &[])
+        let (state, _) = adjoint_solver
+            .solve_adjoint_backwards_pass(&[], &[])
             .unwrap();
 
         let gs_adj = state.sg;
@@ -1175,16 +1441,79 @@ mod test {
         let y0 = NalgebraVec::from_vec(vec![1.0, 1.0], *problem.context());
         let expect = |t: f64| &y0 * scale(f64::exp(-k * t));
         let final_time = soln.solution_points[soln.solution_points.len() - 1].t;
-        let (checkpointer, y, t, _stop_reason) =
+        let (checkpointers, y, t, _stop_reason) =
             s.solve_with_checkpointing(final_time, None).unwrap();
         for (i, t_i) in t.iter().enumerate() {
             let y_i = y.column(i).into_owned();
             y_i.assert_eq_norm(&expect(*t_i), &problem.atol, problem.rtol, 15.0);
         }
         let mut y = NalgebraVec::zeros(problem.eqn.rhs().nstates(), *problem.context());
+        let mut replay_solver = s.clone();
+        let checkpointer = checkpointers.last().unwrap();
         for point in soln.solution_points.iter() {
-            checkpointer.interpolate(point.t, &mut y).unwrap();
+            checkpointer
+                .interpolate(Some(&mut replay_solver), point.t, &mut y)
+                .unwrap();
             y.assert_eq_norm(&point.state, &problem.atol, problem.rtol, 150.0);
         }
+    }
+
+    #[test]
+    fn test_solve_with_checkpointing_continues_after_reset() {
+        let (problem, soln) = exponential_decay_with_reset_problem::<NalgebraMat<f64>>();
+        let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
+        let final_time = 100.0_f64;
+        let (checkpointers, ys, ts, stop_reason) =
+            s.solve_with_checkpointing(final_time, None).unwrap();
+
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
+        assert!(checkpointers.len() > 1);
+        let time_tol = soln.rtol * final_time.abs() + soln.atol.get_index(0);
+        let t_last = *ts.last().unwrap();
+        assert!((t_last - final_time).abs() < 30.0 * time_tol);
+        assert!((s.state().t - final_time).abs() < 30.0 * time_tol);
+
+        let reset_time = soln.solution_points[0].t;
+        let reset_time_tol = 30.0 * (soln.rtol * reset_time.abs() + soln.atol.get_index(0));
+        let reset_col = ts
+            .iter()
+            .position(|&t| (t - reset_time).abs() < reset_time_tol)
+            .expect("expected checkpointed solve output to include the reset time");
+        let reset_state = ys.column(reset_col).into_owned();
+        let expected_reset = NalgebraVec::from_element(reset_state.len(), 0.4, *problem.context());
+        reset_state.assert_eq_norm(&expected_reset, &problem.atol, problem.rtol, 20.0);
+    }
+
+    #[test]
+    fn test_solve_dense_with_checkpointing_continues_after_reset() {
+        let (problem, soln) = exponential_decay_with_reset_problem::<NalgebraMat<f64>>();
+        let reset_time = soln.solution_points[0].t;
+        let final_time = 2.0 * reset_time;
+        let post_event_dt = 1.0_f64;
+        let t_eval = vec![0.0, reset_time + post_event_dt, final_time];
+        let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
+
+        let (checkpointers, ys, stop_reason) = s
+            .solve_dense_with_checkpointing(t_eval.as_slice(), None)
+            .unwrap();
+
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
+        assert!(checkpointers.len() > 1);
+        assert_eq!(ys.ncols(), t_eval.len());
+        let time_tol = soln.rtol * final_time.abs() + soln.atol.get_index(0);
+        assert!((s.state().t - final_time).abs() < 30.0 * time_tol);
+
+        let expected_post_reset_value = 0.4 * (-0.1 * post_event_dt).exp();
+        let expected_post_reset = NalgebraVec::from_element(
+            problem.eqn.rhs().nstates(),
+            expected_post_reset_value,
+            *problem.context(),
+        );
+        ys.column(1).into_owned().assert_eq_norm(
+            &expected_post_reset,
+            &problem.atol,
+            problem.rtol,
+            20.0,
+        );
     }
 }

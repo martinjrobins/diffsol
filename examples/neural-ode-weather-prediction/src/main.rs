@@ -387,9 +387,8 @@ fn loss_fn(
     g_m: &mut M,
 ) -> Result<(T, V), DiffsolError> {
     problem.eqn.set_params(p);
-    let (c, ys) = problem
-        .bdf::<LS>()?
-        .solve_dense_with_checkpointing(ts_data, None)?;
+    let mut solver = problem.bdf::<LS>()?;
+    let (c, ys, _stop_reason) = solver.solve_dense_with_checkpointing(ts_data, None)?;
     let mut loss = 0.0;
     for j in 0..g_m.ncols() {
         let delta = ys.column(j) - ys_data.column(j);
@@ -397,8 +396,10 @@ fn loss_fn(
         let g_m_i = delta * Scale(2.0);
         g_m.column_mut(j).copy_from(&g_m_i);
     }
-    let adjoint_solver = problem.bdf_solver_adjoint::<LS, _>(c, Some(1)).unwrap();
-    let soln = adjoint_solver.solve_adjoint_backwards_pass(ts_data, &[g_m])?;
+    let adjoint_solver = problem
+        .bdf_solver_adjoint::<LS, _>(c, Some(solver), Some(1))
+        .unwrap();
+    let (soln, _) = adjoint_solver.solve_adjoint_backwards_pass(ts_data, &[&*g_m])?;
     Ok((loss, soln.into_common().sg.pop().unwrap()))
 }
 

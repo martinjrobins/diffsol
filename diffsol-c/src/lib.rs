@@ -60,6 +60,7 @@ compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
 #[cfg(all(feature = "diffsl-llvm20", feature = "diffsl-llvm21"))]
 compile_error!("diffsol-c cannot enable more than one `diffsl-llvm*` feature.");
 
+pub mod adjoint_checkpoint;
 pub mod c_api_utils;
 pub mod error;
 #[path = "error_c.rs"]
@@ -85,6 +86,7 @@ pub mod ode_c;
 pub mod ode_options;
 #[path = "ode_options_c.rs"]
 pub mod ode_options_c;
+mod ode_solver_tag;
 pub mod ode_solver_type;
 #[path = "ode_solver_type_c.rs"]
 pub mod ode_solver_type_c;
@@ -118,6 +120,7 @@ pub mod solver {
     }
 }
 
+pub use adjoint_checkpoint::AdjointCheckpointWrapper;
 pub use error::DiffsolRtError;
 pub use initial_condition_options::InitialConditionSolverOptions;
 pub use jit::{default_enabled_jit_backend, JitBackendType};

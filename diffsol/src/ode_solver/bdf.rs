@@ -62,6 +62,12 @@ where
     fn augmented_eqn_mut(&mut self) -> Option<&mut AugEqn> {
         self.s_op.as_mut().map(|op| &mut op.eqn)
     }
+    fn state_and_augmented_eqn_mut(&mut self) -> Option<(StateRefMut<'_, Eqn::V>, &mut AugEqn)> {
+        self.is_state_modified = true;
+        let state = self.state.as_mut();
+        let augmented_eqn = self.s_op.as_mut().map(|op| &mut op.eqn)?;
+        Some((state, augmented_eqn))
+    }
 }
 
 impl<'a, M, Eqn, Nls> SensitivitiesOdeSolverMethod<'a, Eqn>
@@ -301,20 +307,17 @@ where
 
         state.set_problem(problem)?;
 
-        // setup root solver
-        let mut root_finder = None;
         let ctx = problem.eqn.context();
-        if let Some(root_fn) = problem.eqn.root() {
-            root_finder = Some(RootFinder::new(
-                root_fn.nout(),
-                problem.eqn.nstates(),
-                ctx.clone(),
-            ));
-            root_finder
-                .as_ref()
-                .unwrap()
-                .init(&root_fn, &state.y, state.t);
-        }
+        let root_finder = if integrate_main_eqn {
+            problem.eqn.root().map(|root_fn| {
+                let root_finder =
+                    RootFinder::new(root_fn.nout(), problem.eqn.nstates(), ctx.clone());
+                root_finder.init(&root_fn, &state.y, state.t);
+                root_finder
+            })
+        } else {
+            None
+        };
 
         // (re)allocate internal state
         let nstates = problem.eqn.rhs().nstates();
@@ -389,13 +392,8 @@ where
     ) -> Result<Self, DiffsolError> {
         state.check_sens_consistent_with_problem(problem, &augmented_eqn)?;
 
-        let mut ret = Self::_new(
-            problem,
-            state,
-            nonlinear_solver,
-            augmented_eqn.integrate_main_eqn(),
-            config,
-        )?;
+        let integrate_main_eqn = augmented_eqn.integrate_main_eqn();
+        let mut ret = Self::_new(problem, state, nonlinear_solver, integrate_main_eqn, config)?;
 
         ret.state.set_augmented_problem(problem, &augmented_eqn)?;
 
@@ -403,7 +401,7 @@ where
         let naug = augmented_eqn.max_index();
         let nstates = problem.eqn.rhs().nstates();
 
-        ret.s_op = if augmented_eqn.integrate_main_eqn() {
+        ret.s_op = if integrate_main_eqn {
             Some(BdfCallable::new_no_jacobian(augmented_eqn))
         } else {
             let bdf_callable = BdfCallable::new(augmented_eqn);
@@ -1276,12 +1274,11 @@ where
 
         if self.is_state_modified {
             // reinitalise root finder if needed
-            if let Some(root_fn) = problem.eqn.root() {
+            if let (Some(root_fn), Some(root_finder)) =
+                (problem.eqn.root(), self.root_finder.as_ref())
+            {
                 let state = &self.state;
-                self.root_finder
-                    .as_ref()
-                    .unwrap()
-                    .init(&root_fn, &state.y, state.t);
+                root_finder.init(&root_fn, &state.y, state.t);
             }
             // reinitialise diff matrix
             self.initialise_to_first_order();
@@ -1543,8 +1540,10 @@ where
         }
 
         // check for root within accepted step
-        if let Some(root_fn) = self.ode_problem.eqn.root() {
-            let ret = self.root_finder.as_ref().unwrap().check_root(
+        if let (Some(root_fn), Some(root_finder)) =
+            (self.ode_problem.eqn.root(), self.root_finder.as_ref())
+        {
+            let ret = root_finder.check_root(
                 &|t: <Eqn as Op>::T, y: &mut <Eqn as Op>::V| self.interpolate_inplace(t, y),
                 &root_fn,
                 self.state.as_ref().y,
@@ -1586,6 +1585,7 @@ mod test {
             exponential_decay::{
                 exponential_decay_problem, exponential_decay_problem_adjoint,
                 exponential_decay_problem_sens, exponential_decay_problem_with_root,
+                exponential_decay_with_single_reset_root_problem_adjoint,
                 negative_exponential_decay_problem,
             },
             exponential_decay_with_algebraic::{
@@ -1602,9 +1602,14 @@ mod test {
             robertson_ode_with_sens::robertson_ode_with_sens,
         },
         ode_solver::tests::{
-            setup_test_adjoint, setup_test_adjoint_sum_squares, test_adjoint,
-            test_adjoint_sum_squares, test_checkpointing, test_config, test_interpolate,
-            test_interpolate_dy, test_ode_solver, test_problem, test_state_mut,
+            setup_test_adjoint, setup_test_adjoint_sum_squares,
+            setup_test_adjoint_sum_squares_with_single_reset_root,
+            single_reset_root_discrete_times, test_adjoint, test_adjoint_sum_squares,
+            test_checkpointing, test_config, test_interpolate, test_interpolate_dy,
+            test_ode_solver, test_problem, test_solve_adjoint_sum_squares_with_single_reset_root,
+            test_solve_adjoint_with_single_reset_root,
+            test_solve_soln_adjoint_sum_squares_with_single_reset_root,
+            test_solve_soln_adjoint_with_single_reset_root, test_state_mut,
             test_state_mut_on_problem,
         },
         scale, ConstantOp, Context, DenseMatrix, FaerLU, FaerMat, FaerSparseLU, FaerSparseMat,
@@ -1787,7 +1792,7 @@ mod test {
         let (checkpointer, _y, _t, _stop_reason) =
             s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdu.ncols()))
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdu.ncols()))
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
@@ -1809,13 +1814,13 @@ mod test {
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdp.ncols()))
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdp.ncols()))
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
-        number_of_calls: 546
-        number_of_jac_muls: 4
-        number_of_matrix_evals: 2
+        number_of_calls: 500
+        number_of_jac_muls: 2
+        number_of_matrix_evals: 1
         number_of_jac_adj_muls: 1056
         "###);
     }
@@ -1838,7 +1843,7 @@ mod test {
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdp.ncols()))
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdp.ncols()))
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
     }
@@ -1854,7 +1859,7 @@ mod test {
         let (checkpointer, _y, _t, _stop_reason) =
             s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdu.ncols()))
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdu.ncols()))
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
     }
@@ -1872,7 +1877,7 @@ mod test {
         let (checkpointer, _y, _t, _stop_reason) =
             s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdu.ncols()))
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdu.ncols()))
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
     }
@@ -1887,7 +1892,7 @@ mod test {
         let (checkpointer, _y, _t, _stop_reason) =
             s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdu.ncols()))
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdu.ncols()))
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
@@ -1909,7 +1914,7 @@ mod test {
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdp.ncols()))
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdp.ncols()))
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
         insta::assert_yaml_snapshot!(problem.eqn.rhs().statistics(), @r###"
@@ -1932,7 +1937,7 @@ mod test {
         let (checkpointer, _y, _t, _stop_reason) =
             s.solve_with_checkpointing(final_time, None).unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, None)
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), None)
             .unwrap();
         test_adjoint(adjoint_solver, dgdu);
     }
@@ -2072,7 +2077,7 @@ mod test {
             .solve_dense_with_checkpointing(times.as_slice(), None)
             .unwrap();
         let adjoint_solver = problem
-            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(dgdp.ncols()))
+            .bdf_solver_adjoint::<LS, _>(checkpointer, Some(s), Some(dgdp.ncols()))
             .unwrap();
         test_adjoint_sum_squares(adjoint_solver, dgdp, soln, data, times.as_slice());
     }
@@ -2381,7 +2386,7 @@ mod test {
         test_root_found_index(solver, &soln, 0, 1e-4);
     }
 
-    /// Test that `solve()` halts on the first root, even when a reset function is configured.
+    /// Test that `solve()` applies resets and continues to the final time.
     #[test]
     fn test_solve_with_reset_bdf() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
@@ -2391,7 +2396,7 @@ mod test {
         test_solve_with_reset(solver, &soln);
     }
 
-    /// Test that `solve_dense()` halts on the first root, even when a reset function is configured.
+    /// Test that `solve_dense()` applies resets and continues to the final evaluation time.
     #[test]
     fn test_solve_dense_with_reset_bdf() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem;
@@ -2401,7 +2406,7 @@ mod test {
         test_solve_dense_with_reset(solver, &soln);
     }
 
-    /// Test that `solve_dense_sensitivities()` halts on the first root for BDF.
+    /// Test that `solve_dense_sensitivities()` applies resets and continues for BDF.
     #[test]
     fn test_solve_dense_sensitivities_with_reset_bdf() {
         use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_reset_problem_sens;
@@ -2413,8 +2418,6 @@ mod test {
 
     #[test]
     fn test_solve_adjoint_with_single_reset_root_bdf() {
-        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_single_reset_root_problem_adjoint;
-        use crate::ode_solver::tests::test_solve_adjoint_with_single_reset_root;
         let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(true);
         test_solve_adjoint_with_single_reset_root(
             |state| match state {
@@ -2424,17 +2427,42 @@ mod test {
             &soln,
             |adjoint_eqn| problem.bdf_state_adjoint::<LS, _>(adjoint_eqn),
             |state, adjoint_eqn| problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn),
+            true,
+        );
+    }
+
+    #[test]
+    fn test_solve_adjoint_with_single_reset_root_bdf_without_replay_solver() {
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(true);
+        test_solve_adjoint_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.bdf_solver(state),
+                None => problem.bdf::<LS>(),
+            },
+            &soln,
+            |adjoint_eqn| problem.bdf_state_adjoint::<LS, _>(adjoint_eqn),
+            |state, adjoint_eqn| problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn),
+            false,
+        );
+    }
+
+    #[test]
+    fn test_solve_soln_adjoint_with_single_reset_root_bdf() {
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(true);
+        test_solve_soln_adjoint_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.bdf_solver(state),
+                None => problem.bdf::<LS>(),
+            },
+            &soln,
+            |adjoint_eqn| problem.bdf_state_adjoint::<LS, _>(adjoint_eqn),
+            |state, adjoint_eqn| problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn),
+            true,
         );
     }
 
     #[test]
     fn test_solve_adjoint_sum_squares_with_single_reset_root_bdf() {
-        use crate::ode_equations::test_models::exponential_decay::exponential_decay_with_single_reset_root_problem_adjoint;
-        use crate::ode_solver::tests::{
-            setup_test_adjoint_sum_squares_with_single_reset_root,
-            single_reset_root_discrete_times,
-            test_solve_adjoint_sum_squares_with_single_reset_root,
-        };
         let (mut problem, soln) =
             exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
         let times = single_reset_root_discrete_times(soln.solution_points[0].t);
@@ -2451,6 +2479,57 @@ mod test {
             &soln,
             |adjoint_eqn| problem.bdf_state_adjoint::<LS, _>(adjoint_eqn),
             |state, adjoint_eqn| problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn),
+            true,
+            dgdp,
+            data,
+            times.as_slice(),
+        );
+    }
+
+    #[test]
+    fn test_solve_soln_adjoint_sum_squares_with_single_reset_root_bdf() {
+        let (mut problem, soln) =
+            exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        let times = single_reset_root_discrete_times(soln.solution_points[0].t);
+        let (dgdp, data) = setup_test_adjoint_sum_squares_with_single_reset_root::<LS, _>(
+            &mut problem,
+            times.as_slice(),
+        );
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        test_solve_soln_adjoint_sum_squares_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.bdf_solver(state),
+                None => problem.bdf::<LS>(),
+            },
+            &soln,
+            |adjoint_eqn| problem.bdf_state_adjoint::<LS, _>(adjoint_eqn),
+            |state, adjoint_eqn| problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn),
+            true,
+            dgdp,
+            data,
+            times.as_slice(),
+        );
+    }
+
+    #[test]
+    fn test_solve_adjoint_sum_squares_with_single_reset_root_bdf_without_replay_solver() {
+        let (mut problem, soln) =
+            exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        let times = single_reset_root_discrete_times(soln.solution_points[0].t);
+        let (dgdp, data) = setup_test_adjoint_sum_squares_with_single_reset_root::<LS, _>(
+            &mut problem,
+            times.as_slice(),
+        );
+        let (problem, soln) = exponential_decay_with_single_reset_root_problem_adjoint::<M>(false);
+        test_solve_adjoint_sum_squares_with_single_reset_root(
+            |state| match state {
+                Some(state) => problem.bdf_solver(state),
+                None => problem.bdf::<LS>(),
+            },
+            &soln,
+            |adjoint_eqn| problem.bdf_state_adjoint::<LS, _>(adjoint_eqn),
+            |state, adjoint_eqn| problem.bdf_solver_adjoint_from_state::<LS, _>(state, adjoint_eqn),
+            false,
             dgdp,
             data,
             times.as_slice(),

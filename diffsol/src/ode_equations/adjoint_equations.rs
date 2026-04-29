@@ -7,17 +7,22 @@ use std::{
 
 use crate::{
     error::DiffsolError, op::nonlinear_op::NonLinearOpJacobian, AugmentedOdeEquations,
-    Checkpointing, ConstantOp, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
+    CheckpointingPath, ConstantOp, ConstantOpSensAdjoint, LinearOp, LinearOpTranspose, Matrix,
     NonLinearOp, NonLinearOpAdjoint, NonLinearOpSensAdjoint, OdeEquations, OdeEquationsAdjoint,
-    OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, Op, Scalar, Vector,
+    OdeEquationsRef, OdeSolverMethod, OdeSolverProblem, OdeSolverState, Op, Scalar, Vector,
 };
 
-pub struct AdjointContext<'a, Eqn, Method>
+pub struct AdjointContext<'a, Eqn, State, Method>
 where
     Eqn: OdeEquations,
-    Method: OdeSolverMethod<'a, Eqn>,
+    State: OdeSolverState<Eqn::V>,
+    Method: OdeSolverMethod<'a, Eqn, State = State>,
 {
-    checkpointer: Checkpointing<'a, Eqn, Method>,
+    eqn: &'a Eqn,
+    t0: Eqn::T,
+    checkpointers: CheckpointingPath<Eqn, State>,
+    active_checkpointer: usize,
+    solver: Option<RefCell<Method>>,
     x: Eqn::V,
     index: usize,
     max_index: usize,
@@ -25,25 +30,51 @@ where
     col: Eqn::V,
 }
 
-impl<'a, Eqn, Method> AdjointContext<'a, Eqn, Method>
+impl<'a, Eqn, State, Method> AdjointContext<'a, Eqn, State, Method>
 where
     Eqn: OdeEquations,
-    Method: OdeSolverMethod<'a, Eqn>,
+    State: OdeSolverState<Eqn::V>,
+    Method: OdeSolverMethod<'a, Eqn, State = State>,
 {
-    pub fn new(checkpointer: Checkpointing<'a, Eqn, Method>, max_index: usize) -> Self {
-        let ctx = checkpointer.problem().eqn.context();
-        let x = <Eqn::V as Vector>::zeros(checkpointer.problem().eqn.rhs().nstates(), ctx.clone());
+    pub fn new(
+        eqn: &'a Eqn,
+        t0: Eqn::T,
+        checkpointers: CheckpointingPath<Eqn, State>,
+        solver: Option<Method>,
+        max_index: usize,
+    ) -> Self {
+        let active_checkpointer = checkpointers
+            .len()
+            .checked_sub(1)
+            .expect("adjoint checkpointing path must not be empty");
+        let ctx = eqn.context();
+        let x = <Eqn::V as Vector>::zeros(eqn.rhs().nstates(), ctx.clone());
         let mut col = <Eqn::V as Vector>::zeros(max_index, ctx.clone());
         let index = 0;
         col.set_index(0, Eqn::T::one());
         Self {
-            checkpointer,
+            eqn,
+            t0,
+            checkpointers,
+            active_checkpointer,
+            solver: solver.map(RefCell::new),
             x,
             index,
             max_index,
             col,
             last_t: None,
         }
+    }
+
+    fn active_checkpointer(&self) -> &crate::Checkpointing<Eqn, State> {
+        &self.checkpointers[self.active_checkpointer]
+    }
+
+    pub(crate) fn pop_last_checkpointing(&mut self) -> Option<crate::Checkpointing<Eqn, State>> {
+        if self.active_checkpointer == self.checkpointers.len() - 1 {
+            self.active_checkpointer = self.active_checkpointer.saturating_sub(1);
+        }
+        self.checkpointers.pop()
     }
 
     pub fn set_state(&mut self, t: Eqn::T) {
@@ -53,8 +84,8 @@ where
             }
         }
         // clamp tiny boundary overshoots to the boundary values to avoid interpolation errors
-        let t0 = self.checkpointer.problem().t0;
-        let t1 = self.checkpointer.last_t();
+        let t0 = self.t0;
+        let t1 = self.checkpointers[self.checkpointers.len() - 1].end_t();
         let boundary_tol = Eqn::T::EPSILON.sqrt() * (t.abs() + t1.abs() + Eqn::T::one());
         let t_interp = if t > t1 && t - t1 <= boundary_tol {
             t1
@@ -64,17 +95,33 @@ where
             t
         };
         self.last_t = Some(t_interp);
-        self.checkpointer
-            .interpolate(t_interp, &mut self.x)
-            .unwrap();
+        while self.active_checkpointer > 0
+            && t_interp + boundary_tol < self.active_checkpointer().first_t()
+        {
+            self.active_checkpointer -= 1;
+        }
+        while self.active_checkpointer + 1 < self.checkpointers.len()
+            && t_interp > self.active_checkpointer().end_t() + boundary_tol
+        {
+            self.active_checkpointer += 1;
+        }
+        let active_checkpointer = self.active_checkpointer;
+        let x = &mut self.x;
+        match self.solver.as_ref() {
+            Some(solver) => {
+                let mut solver = solver.borrow_mut();
+                self.checkpointers[active_checkpointer]
+                    .interpolate(Some(&mut *solver), t_interp, x)
+                    .unwrap();
+            }
+            None => self.checkpointers[active_checkpointer]
+                .interpolate::<Method>(None, t_interp, x)
+                .unwrap(),
+        }
         // for diffsl, we need to set data for the adjoint state!
         // basically just involves calling the normal rhs function with the new self.x
         // todo: this seems a bit hacky, perhaps a dedicated function on the trait for this?
-        self.checkpointer
-            .problem()
-            .eqn
-            .rhs()
-            .call(&self.x, t_interp);
+        self.eqn.rhs().call(&self.x, t_interp);
     }
 
     pub fn state(&self) -> &Eqn::V {
@@ -163,7 +210,7 @@ where
 {
     pub fn new(
         eqn: &'a Eqn,
-        _context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
+        _context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
         _with_out: bool,
     ) -> Self {
         Self {
@@ -221,7 +268,7 @@ where
     Method: OdeSolverMethod<'a, Eqn>,
 {
     eqn: &'a Eqn,
-    context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
+    context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
     tmp: RefCell<Eqn::V>,
     with_out: bool,
 }
@@ -233,7 +280,7 @@ where
 {
     pub fn new(
         eqn: &'a Eqn,
-        context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
+        context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
         with_out: bool,
     ) -> Self {
         let tmp_n = if with_out { eqn.rhs().nstates() } else { 0 };
@@ -337,7 +384,7 @@ where
     Method: OdeSolverMethod<'a, Eqn>,
 {
     eqn: &'a Eqn,
-    context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
+    context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
     tmp: RefCell<Eqn::V>,
     with_out: bool,
 }
@@ -349,7 +396,7 @@ where
 {
     pub fn new(
         eqn: &'a Eqn,
-        context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
+        context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
         with_out: bool,
     ) -> Self {
         let tmp_n = if with_out { eqn.rhs().nparams() } else { 0 };
@@ -448,7 +495,7 @@ where
     rhs: AdjointRhs<'a, Eqn, Method>,
     out: AdjointOut<'a, Eqn, Method>,
     mass: Option<AdjointMass<'a, Eqn>>,
-    context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
+    context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
     tmp: RefCell<Eqn::V>,
     tmp2: RefCell<Eqn::V>,
     init: AdjointInit<'a, Eqn, Method>,
@@ -464,9 +511,16 @@ where
     Method: OdeSolverMethod<'a, Eqn>,
 {
     fn clone(&self) -> Self {
+        let context_ref = self.context.borrow();
         let context = Rc::new(RefCell::new(AdjointContext::new(
-            self.context.borrow().checkpointer.clone(),
-            self.context.borrow().max_index,
+            context_ref.eqn,
+            context_ref.t0,
+            context_ref.checkpointers.clone(),
+            context_ref
+                .solver
+                .as_ref()
+                .map(|solver| solver.borrow().clone()),
+            context_ref.max_index,
         )));
         let rhs = AdjointRhs::new(self.eqn, context.clone(), self.rhs.with_out);
         let init = AdjointInit::new(self.eqn, context.clone(), self.rhs.with_out);
@@ -502,7 +556,7 @@ where
 {
     pub(crate) fn new(
         problem: &'a OdeSolverProblem<Eqn>,
-        context: Rc<RefCell<AdjointContext<'a, Eqn, Method>>>,
+        context: Rc<RefCell<AdjointContext<'a, Eqn, Method::State, Method>>>,
         with_out: bool,
     ) -> Self {
         let eqn = &problem.eqn;
@@ -543,11 +597,25 @@ where
     }
 
     pub fn last_t(&self) -> Eqn::T {
-        self.context.borrow().checkpointer.last_t()
+        self.context.borrow().checkpointers.last().unwrap().last_t()
     }
 
     pub fn last_h(&self) -> Option<Eqn::T> {
-        self.context.borrow().checkpointer.last_h()
+        self.context.borrow().checkpointers.last().unwrap().last_h()
+    }
+
+    pub(crate) fn checkpointing_len(&self) -> usize {
+        self.context.borrow().checkpointers.len()
+    }
+
+    pub(crate) fn checkpointing_bounds(&self, index: usize) -> (Eqn::T, Eqn::T) {
+        let context = self.context.borrow();
+        let checkpointer = &context.checkpointers[index];
+        (checkpointer.first_t(), checkpointer.end_t())
+    }
+
+    pub(crate) fn checkpointing_terminal_reset_root_idx(&self, index: usize) -> Option<usize> {
+        self.context.borrow().checkpointers[index].terminal_reset_root_idx()
     }
 
     pub fn with_out(&self) -> bool {
@@ -572,9 +640,58 @@ where
     }
 
     pub fn interpolate_forward_state(&self, t: Eqn::T, y: &mut Eqn::V) -> Result<(), DiffsolError> {
-        self.context.borrow_mut().set_state(t);
-        let context = self.context.borrow();
-        context.checkpointer.interpolate(t, y)
+        let mut context = self.context.borrow_mut();
+        context.set_state(t);
+        y.copy_from(context.state());
+        Ok(())
+    }
+
+    pub fn checkpointing_last_state(&self, index: usize) -> Method::State {
+        self.context.borrow().checkpointers[index]
+            .last_checkpoint()
+            .clone()
+    }
+
+    pub fn checkpointing_first_state(&self, index: usize) -> Method::State {
+        self.context.borrow().checkpointers[index]
+            .first_checkpoint()
+            .clone()
+    }
+
+    pub fn pop_last_checkpointing(
+        &mut self,
+    ) -> Result<crate::Checkpointing<Eqn, Method::State>, DiffsolError> {
+        let mut context = self.context.borrow_mut();
+        context
+            .pop_last_checkpointing()
+            .ok_or_else(|| DiffsolError::Other("No more checkpointing to pop".to_string()))
+    }
+
+    pub fn into_checkpointing(self) -> CheckpointingPath<Eqn, Method::State> {
+        let Self {
+            rhs,
+            out,
+            context,
+            eqn: _,
+            mass: _,
+            tmp: _,
+            tmp2: _,
+            init: _,
+            atol: _,
+            rtol: _,
+            out_rtol: _,
+            out_atol: _,
+        } = self;
+
+        drop(rhs);
+        drop(out);
+
+        match Rc::try_unwrap(context) {
+            Ok(context) => context.into_inner().checkpointers,
+            Err(_) => {
+                panic!("adjoint context should be uniquely owned after consuming AdjointEquations")
+            }
+        }
     }
 }
 
@@ -733,9 +850,20 @@ mod tests {
             h: 0.0,
         };
         let nout = problem.eqn.out().unwrap().nout();
-        let solver = problem.esdirk34_solver::<LS>(state.clone()).unwrap();
-        let checkpointer = Checkpointing::new(solver, 0, vec![state.clone(), state.clone()], None);
-        let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer, nout)));
+        let mut solver = problem.esdirk34_solver::<LS>(state.clone()).unwrap();
+        let checkpointer = Checkpointing::new(
+            Some(&mut solver),
+            0,
+            vec![state.clone(), state.clone()],
+            None,
+        );
+        let context = Rc::new(RefCell::new(AdjointContext::new(
+            &problem.eqn,
+            problem.t0,
+            vec![checkpointer],
+            Some(solver.clone()),
+            nout,
+        )));
         let adj_eqn = AdjointEquations::new(&problem, context.clone(), false);
         // F(λ, x, t) = -f^T_x(x, t) λ
         // f_x = |-a 0|
@@ -805,11 +933,22 @@ mod tests {
             h: 0.0,
         };
         let nout = problem.eqn.out().unwrap().nout();
-        let solver = problem
+        let mut solver = problem
             .esdirk34_solver::<FaerSparseLU<f64>>(state.clone())
             .unwrap();
-        let checkpointer = Checkpointing::new(solver, 0, vec![state.clone(), state.clone()], None);
-        let context = Rc::new(RefCell::new(AdjointContext::new(checkpointer, nout)));
+        let checkpointer = Checkpointing::new(
+            Some(&mut solver),
+            0,
+            vec![state.clone(), state.clone()],
+            None,
+        );
+        let context = Rc::new(RefCell::new(AdjointContext::new(
+            &problem.eqn,
+            problem.t0,
+            vec![checkpointer],
+            Some(solver.clone()),
+            nout,
+        )));
         let mut adj_eqn = AdjointEquations::new(&problem, context, true);
 
         // f_x^T = |-a 0|

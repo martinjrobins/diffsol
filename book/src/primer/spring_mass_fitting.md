@@ -38,13 +38,13 @@ $$
 We can calculate this using Diffsol's adjoint sensitivity analysis functionality. First we solve the forwards problem, generating a checkpointing struct. Using the forward solution we can then calculate \\(\frac{\partial loss}{\partial y_i}\\) for each time point, and then pass this into the adjoint backwards pass to calculate the gradient of the cost function with respect to the parameters.
 
 ```rust,ignore
-{{#include ../../../examples/mass-spring-fitting-adjoint/src/main_llvm.rs:51:81}}
+{{#include ../../../examples/mass-spring-fitting-adjoint/src/main_llvm.rs:51:84}}
 ```
 
 In our main function we'll create the model, generate some synthetic data, and then call argmin to fit the model to the data.
 
 ```rust,ignore
-{{#include ../../../examples/mass-spring-fitting-adjoint/src/main_llvm.rs:83::}}
+{{#include ../../../examples/mass-spring-fitting-adjoint/src/main_llvm.rs:86::}}
 ```
 
 ```

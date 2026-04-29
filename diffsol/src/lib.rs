@@ -307,8 +307,8 @@ pub use ode_equations::{
     adjoint_equations::AdjointInit, adjoint_equations::AdjointRhs, sens_equations::SensEquations,
     sens_equations::SensInit, sens_equations::SensRhs, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, NoAug, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit,
-    OdeEquationsImplicitAdjoint, OdeEquationsImplicitAdjointWithReset, OdeEquationsImplicitSens,
-    OdeEquationsRef, OdeEquationsStoch, OdeSolverEquations,
+    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeEquationsRef, OdeEquationsStoch,
+    OdeSolverEquations,
 };
 use ode_solver::jacobian_update::JacobianUpdate;
 pub use ode_solver::sde::SdeSolverMethod;
@@ -319,6 +319,7 @@ pub use ode_solver::{
     bdf_state::BdfState,
     builder::OdeBuilder,
     checkpointing::Checkpointing,
+    checkpointing::CheckpointingPath,
     checkpointing::HermiteInterpolator,
     config::{
         BdfConfig, ExplicitRkConfig, OdeSolverConfig, OdeSolverConfigMut, OdeSolverConfigRef,
@@ -328,6 +329,7 @@ pub use ode_solver::{
     method::AugmentedOdeSolverMethod,
     method::OdeSolverMethod,
     method::OdeSolverStopReason,
+    no_checkpointing_solver::NoCheckpointingSolver,
     problem::{InitialConditionSolverOptions, OdeSolverOptions, OdeSolverProblem},
     sdirk::Sdirk,
     sdirk_state::RkState,

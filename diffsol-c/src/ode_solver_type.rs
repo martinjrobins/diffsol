@@ -2,21 +2,20 @@
 // stragegy like bdf or esdirk34 in diffsol.
 
 use diffsol::error::{DiffsolError, OdeSolverError};
-use diffsol::ode_equations::OdeEquationsImplicitSensWithReset;
+use diffsol::ode_equations::OdeEquationsImplicitSens;
 use diffsol::{
-    matrix::MatrixRef, DefaultDenseMatrix, DiffSl, LinearSolver, Matrix, OdeSolverMethod,
-    OdeSolverProblem, OdeSolverState, Vector, VectorHost, VectorRef,
+    matrix::MatrixRef, DefaultDenseMatrix, DenseMatrix, DiffSl, LinearSolver, Matrix,
+    OdeSolverProblem, OdeSolverState, VectorHost, VectorRef, VectorView,
 };
 use diffsol::{
-    ode_solver_error, AdjointOdeSolverMethod, Checkpointing, CodegenModule, DefaultSolver,
-    DenseMatrix, MatrixCommon, OdeEquations, OdeSolverStopReason, Op, SensitivitiesOdeSolverMethod,
-    Solution, VectorViewMut,
+    ode_solver_error, AdjointOdeSolverMethod, CheckpointingPath, CodegenModule, DefaultSolver,
+    OdeEquations, OdeSolverMethod, OdeSolverStopReason, SensitivitiesOdeSolverMethod, Solution,
 };
-use ndarray::ArrayView2;
-use num_traits::{FromPrimitive, Zero}; // for generic nums in _solve_sum_squares_adj
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::adjoint_checkpoint::{AdjointCheckpoint, AdjointCheckpointData};
+use crate::ode_solver_tag::{BdfTag, Esdirk34Tag, OdeSolverMethodTag, TrBdf2Tag, Tsit45Tag};
 use crate::scalar_type::Scalar;
 use crate::utils::is_sens_available;
 use crate::{
@@ -39,38 +38,360 @@ pub enum OdeSolverType {
     Tsit45,
 }
 
-fn apply_state_reset<Eqn, S>(
-    problem: &OdeSolverProblem<Eqn>,
-    state: &mut S,
-) -> Result<(), DiffsolError>
+fn solve_with_tag<M, CG, LS, Tag>(
+    problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+    mut soln: Solution<M::V>,
+) -> Result<Solution<M::V>, DiffsolError>
 where
-    Eqn: OdeEquations,
-    S: OdeSolverState<Eqn::V>,
+    M: Matrix<T: Scalar>,
+    CG: CodegenModule,
+    M::V: VectorHost + DefaultDenseMatrix,
+    LS: LinearSolver<M>,
+    Tag: OdeSolverMethodTag<M, CG>,
+    for<'b> &'b M::V: VectorRef<M::V>,
+    for<'b> &'b M: MatrixRef<M>,
 {
-    let eqn = &problem.eqn;
-    if let Some(reset_fn) = eqn.reset() {
-        state.state_mut_op(eqn, &reset_fn)?;
+    let mut solver = Tag::solver::<LS>(problem)?;
+    while !soln.is_complete() {
+        solver = solver.solve_soln(&mut soln)?;
+        let root_idx = match soln.stop_reason {
+            Some(OdeSolverStopReason::RootFound(_, root_idx)) if !soln.is_complete() => root_idx,
+            _ => continue,
+        };
+        if problem.eqn.reset().is_none() {
+            soln.truncate(problem, solver.state())?;
+            return Ok(soln);
+        }
+        let mut state = solver.into_state();
+        problem.eqn.set_model_index(root_idx);
+        state.as_mut().apply_reset(&problem.eqn)?;
+        solver = Tag::solver_with_state::<LS>(problem, state)?;
     }
-    Ok(())
+    Ok(soln)
 }
 
-fn apply_state_reset_with_sens<Eqn, S>(
-    problem: &OdeSolverProblem<Eqn>,
-    state: &mut S,
-    root_idx: usize,
-) -> Result<(), DiffsolError>
+fn solve_fwd_sens_with_tag<M, CG, LS, Tag>(
+    problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+    t_eval: &[M::T],
+) -> Result<Solution<M::V>, DiffsolError>
 where
-    Eqn: OdeEquationsImplicitSensWithReset,
-    S: OdeSolverState<Eqn::V>,
+    M: Matrix<T: Scalar>,
+    CG: CodegenModule,
+    M::V: VectorHost + DefaultDenseMatrix,
+    LS: LinearSolver<M>,
+    Tag: OdeSolverMethodTag<M, CG>,
+    DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>,
+    for<'b> &'b M::V: VectorRef<M::V>,
+    for<'b> &'b M: MatrixRef<M>,
 {
-    let eqn = &problem.eqn;
-    match (eqn.reset(), eqn.root()) {
-        (None, _) => Ok(()),
-        (Some(_), None) => Err(ode_solver_error!(ResetRequiresRootOperator)),
-        (Some(reset_fn), Some(root_fn)) => {
-            state.state_mut_op_with_sens_and_reset(eqn, &reset_fn, &root_fn, root_idx)?;
-            Ok(())
+    let mut soln = Solution::new_dense(t_eval.to_vec())?;
+    let mut solver = Tag::solver_sens::<LS>(problem)?;
+    while !soln.is_complete() {
+        solver = solver.solve_soln_sensitivities(&mut soln)?;
+        let root_idx = match soln.stop_reason {
+            Some(OdeSolverStopReason::RootFound(_, root_idx)) if !soln.is_complete() => root_idx,
+            _ => continue,
+        };
+        if problem.eqn.reset().is_none() {
+            soln.truncate_sens(problem, solver.state())?;
+            return Ok(soln);
         }
+        let mut state = solver.into_state();
+        problem.eqn.set_model_index(root_idx);
+        state
+            .as_mut()
+            .apply_reset_with_sens(&problem.eqn, root_idx)?;
+        solver = Tag::solver_sens_with_state::<LS>(problem, state)?;
+    }
+    Ok(soln)
+}
+
+#[allow(clippy::type_complexity)]
+fn solve_with_checkpointing_with_tag<M, CG, LS, Tag>(
+    problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+    mut soln: Solution<M::V>,
+) -> Result<(Solution<M::V>, CheckpointingPath<DiffSl<M, CG>, Tag::State>), DiffsolError>
+where
+    M: Matrix<T: Scalar>,
+    CG: CodegenModule,
+    M::V: VectorHost + DefaultDenseMatrix,
+    LS: LinearSolver<M>,
+    Tag: OdeSolverMethodTag<M, CG>,
+    for<'b> &'b M::V: VectorRef<M::V>,
+    for<'b> &'b M: MatrixRef<M>,
+{
+    let mut solver = Tag::solver::<LS>(problem)?;
+    let mut checkpointing = Vec::new();
+    while !soln.is_complete() {
+        solver = solver.solve_soln_with_checkpointing(&mut soln, &mut checkpointing, None)?;
+        let root_idx = match soln.stop_reason {
+            Some(OdeSolverStopReason::RootFound(_, root_idx)) if !soln.is_complete() => root_idx,
+            _ => continue,
+        };
+        if problem.eqn.reset().is_none() {
+            soln.truncate(problem, solver.state())?;
+            return Ok((soln, checkpointing));
+        }
+        let mut state = solver.into_state();
+        problem.eqn.set_model_index(root_idx);
+        state.as_mut().apply_reset(&problem.eqn)?;
+        solver = Tag::solver_with_state::<LS>(problem, state)?;
+    }
+    Ok((soln, checkpointing))
+}
+
+fn integral_from_soln<V>(soln: &Solution<V>) -> Result<V, DiffsolError>
+where
+    V: DefaultDenseMatrix,
+{
+    if soln.ts.is_empty() {
+        return Err(ode_solver_error!(
+            Other,
+            "Continuous adjoint solve returned no integral samples"
+        ));
+    }
+    Ok(soln.ys.column(soln.ts.len() - 1).into_owned())
+}
+
+#[allow(clippy::type_complexity)]
+fn solve_adjoint_fwd_with_tag<M, CG, LS, Tag>(
+    problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+    t_eval: &[M::T],
+    params: &[f64],
+    method: OdeSolverType,
+    linear_solver: LinearSolverType,
+) -> Result<(Solution<M::V>, Box<dyn AdjointCheckpoint>), DiffsolError>
+where
+    M: Matrix<T: Scalar> + 'static,
+    CG: CodegenModule + 'static,
+    M::V: VectorHost + DefaultDenseMatrix,
+    LS: LinearSolver<M>,
+    DiffSl<M, CG>: OdeEquations<M = M, T = M::T, V = M::V, C = M::C>,
+    Tag: OdeSolverMethodTag<M, CG> + 'static,
+    for<'b> &'b M::V: VectorRef<M::V>,
+    for<'b> &'b M: MatrixRef<M>,
+{
+    let soln = Solution::new_dense(t_eval.to_vec())?;
+    let (soln, checkpointing) = solve_with_checkpointing_with_tag::<M, CG, LS, Tag>(problem, soln)?;
+    Ok((
+        soln,
+        Box::new(AdjointCheckpointData::<M, CG, Tag>::new(
+            checkpointing,
+            params.to_vec(),
+            method,
+            linear_solver,
+        )),
+    ))
+}
+
+fn solve_continuous_adjoint_with_tag<M, CG, LS, Tag>(
+    problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+    final_time: M::T,
+    method: OdeSolverType,
+) -> Result<(M::V, Vec<M::V>), DiffsolError>
+where
+    M: Matrix<T: Scalar> + DefaultSolver + 'static,
+    CG: CodegenModule + 'static,
+    M::V: VectorHost + DefaultDenseMatrix,
+    LS: LinearSolver<M>,
+    Tag: OdeSolverMethodTag<M, CG> + 'static,
+    DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>
+        + diffsol::OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    for<'b> &'b M::V: VectorRef<M::V>,
+    for<'b> &'b M: MatrixRef<M>,
+{
+    let soln = Solution::new(final_time);
+    let (soln, checkpointing) = solve_with_checkpointing_with_tag::<M, CG, LS, Tag>(problem, soln)?;
+    let integral = integral_from_soln(&soln)?;
+    let sg = match method {
+        OdeSolverType::Bdf => solve_adjoint_bkwds_with_fwd_bkwd_tag::<M, CG, LS, LS, Tag, BdfTag>(
+            problem,
+            &soln,
+            checkpointing,
+            &[],
+            None,
+        ),
+        OdeSolverType::Esdirk34 => solve_adjoint_bkwds_with_fwd_bkwd_tag::<
+            M,
+            CG,
+            LS,
+            LS,
+            Tag,
+            Esdirk34Tag,
+        >(problem, &soln, checkpointing, &[], None),
+        OdeSolverType::TrBdf2 => solve_adjoint_bkwds_with_fwd_bkwd_tag::<
+            M,
+            CG,
+            LS,
+            LS,
+            Tag,
+            TrBdf2Tag,
+        >(problem, &soln, checkpointing, &[], None),
+        OdeSolverType::Tsit45 => solve_adjoint_bkwds_with_fwd_bkwd_tag::<
+            M,
+            CG,
+            LS,
+            LS,
+            Tag,
+            Tsit45Tag,
+        >(problem, &soln, checkpointing, &[], None),
+    }?;
+    Ok((integral, sg))
+}
+
+fn solve_adjoint_bkwds_with_fwd_tag<M, CG, FwdLS, BwdLS, Tag>(
+    problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+    checkpoint: &AdjointCheckpointData<M, CG, Tag>,
+    backwards_method: OdeSolverType,
+    dgdu_eval: &<M::V as DefaultDenseMatrix>::M,
+    t_eval: &[M::T],
+) -> Result<Vec<M::V>, DiffsolError>
+where
+    M: Matrix<T: Scalar> + DefaultSolver + 'static,
+    CG: CodegenModule + 'static,
+    M::V: VectorHost + DefaultDenseMatrix,
+    FwdLS: LinearSolver<M>,
+    BwdLS: LinearSolver<M>,
+    Tag: OdeSolverMethodTag<M, CG> + 'static,
+    DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>
+        + diffsol::OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    for<'b> &'b M::V: VectorRef<M::V>,
+    for<'b> &'b M: MatrixRef<M>,
+{
+    // TODO: can we avoid cloning here? Adjoint equations require ownership of the checkpointing segments so maybe not
+    // unless we can change the adjoint equations to take references to the checkpointing segments instead
+    let checkpointing = checkpoint.checkpointing.clone();
+    let soln = Solution::new_dense(t_eval.to_vec())?;
+
+    // we will only consider a single output g for now, so nout_override is 1
+    let dgdu_eval = [dgdu_eval];
+    match backwards_method {
+        OdeSolverType::Bdf => solve_adjoint_bkwds_with_fwd_bkwd_tag::<
+            M,
+            CG,
+            FwdLS,
+            BwdLS,
+            Tag,
+            BdfTag,
+        >(problem, &soln, checkpointing, &dgdu_eval, Some(1)),
+        OdeSolverType::Esdirk34 => solve_adjoint_bkwds_with_fwd_bkwd_tag::<
+            M,
+            CG,
+            FwdLS,
+            BwdLS,
+            Tag,
+            Esdirk34Tag,
+        >(problem, &soln, checkpointing, &dgdu_eval, Some(1)),
+        OdeSolverType::TrBdf2 => solve_adjoint_bkwds_with_fwd_bkwd_tag::<
+            M,
+            CG,
+            FwdLS,
+            BwdLS,
+            Tag,
+            TrBdf2Tag,
+        >(problem, &soln, checkpointing, &dgdu_eval, Some(1)),
+        OdeSolverType::Tsit45 => solve_adjoint_bkwds_with_fwd_bkwd_tag::<
+            M,
+            CG,
+            FwdLS,
+            BwdLS,
+            Tag,
+            Tsit45Tag,
+        >(problem, &soln, checkpointing, &dgdu_eval, Some(1)),
+    }
+}
+
+fn solve_adjoint_bkwds_with_fwd_bkwd_tag<'solver, M, CG, FwdLS, BwdLS, FwdTag, BwdTag>(
+    problem: &'solver mut OdeSolverProblem<DiffSl<M, CG>>,
+    soln: &Solution<M::V>,
+    mut checkpointing: CheckpointingPath<DiffSl<M, CG>, FwdTag::State>,
+    dgdu_eval: &[&<M::V as DefaultDenseMatrix>::M],
+    nout_override: Option<usize>,
+) -> Result<Vec<M::V>, DiffsolError>
+where
+    M: Matrix<T: Scalar> + DefaultSolver + 'solver,
+    CG: CodegenModule + 'solver,
+    M::V: VectorHost + DefaultDenseMatrix,
+    FwdLS: LinearSolver<M>,
+    BwdLS: LinearSolver<M>,
+    FwdTag: OdeSolverMethodTag<M, CG>,
+    BwdTag: OdeSolverMethodTag<M, CG>,
+    DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>
+        + diffsol::OdeEquationsImplicitAdjoint<M = M, T = M::T, V = M::V, C = M::C>,
+    for<'b> &'b M::V: VectorRef<M::V>,
+    for<'b> &'b M: MatrixRef<M>,
+{
+    let checkpointing_len = checkpointing.len();
+    if checkpointing_len == 0 {
+        return Err(ode_solver_error!(
+            Other,
+            "Adjoint backward pass requires at least one checkpointing segment"
+        ));
+    }
+
+    let t_eval = if dgdu_eval.is_empty() {
+        &[]
+    } else {
+        soln.ts.as_slice()
+    };
+
+    let current_checkpointing = checkpointing
+        .pop()
+        .ok_or_else(|| ode_solver_error!(Other, "Adjoint backward pass returned no state"))?;
+    let model_index = checkpointing
+        .last()
+        .map(|segment| {
+            segment
+                .terminal_reset_root_idx()
+                .expect("Missing reset root index")
+        })
+        .unwrap_or(0);
+    problem.eqn_mut().set_model_index(model_index);
+    let fwd_solver = FwdTag::uninitialised_solver::<FwdLS>(&*problem)?;
+    let mut adjoint = BwdTag::solver_adjoint::<BwdLS, _>(
+        &*problem,
+        vec![current_checkpointing],
+        Some(fwd_solver),
+        nout_override,
+    )?;
+    loop {
+        let (mut state, adjoint_checkpointing) =
+            adjoint.solve_adjoint_backwards_pass(t_eval, dgdu_eval)?;
+        let Some(previous_checkpointing) = checkpointing.pop() else {
+            return Ok(state.into_common().sg);
+        };
+        let model_index = checkpointing
+            .last()
+            .map(|segment| {
+                segment
+                    .terminal_reset_root_idx()
+                    .expect("Missing reset root index")
+            })
+            .unwrap_or(0);
+        let fwd_state_minus = previous_checkpointing.last_checkpoint();
+        let fwd_state_plus = adjoint_checkpointing
+            .first()
+            .ok_or_else(|| {
+                ode_solver_error!(Other, "Adjoint backward pass returned no checkpointing")
+            })?
+            .first_checkpoint();
+        state.as_mut().apply_reset_with_adjoint(
+            problem.eqn(),
+            previous_checkpointing.terminal_reset_root_idx().unwrap(),
+            fwd_state_minus.as_ref(),
+            fwd_state_plus.as_ref(),
+            problem.integrate_out,
+        )?;
+        problem.eqn_mut().set_model_index(model_index);
+        let fwd_solver = FwdTag::uninitialised_solver::<FwdLS>(&*problem)?;
+        // TODO: remove clone here
+        let adjoint_eqn = problem.adjoint_equations(
+            vec![previous_checkpointing],
+            Some(fwd_solver),
+            nout_override,
+        );
+
+        adjoint = BwdTag::solver_adjoint_from_state::<BwdLS, _>(&*problem, state, adjoint_eqn)?;
     }
 }
 
@@ -90,28 +411,16 @@ impl OdeSolverType {
     {
         match self {
             OdeSolverType::Bdf => {
-                let solver = problem.bdf::<LS>()?;
-                let mut soln = Solution::new(final_time);
-                solver.solve_soln(&mut soln)?;
-                Ok(soln)
+                solve_with_tag::<M, CG, LS, BdfTag>(problem, Solution::new(final_time))
             }
             OdeSolverType::Esdirk34 => {
-                let solver = problem.esdirk34::<LS>()?;
-                let mut soln = Solution::new(final_time);
-                solver.solve_soln(&mut soln)?;
-                Ok(soln)
+                solve_with_tag::<M, CG, LS, Esdirk34Tag>(problem, Solution::new(final_time))
             }
             OdeSolverType::TrBdf2 => {
-                let solver = problem.tr_bdf2::<LS>()?;
-                let mut soln = Solution::new(final_time);
-                solver.solve_soln(&mut soln)?;
-                Ok(soln)
+                solve_with_tag::<M, CG, LS, TrBdf2Tag>(problem, Solution::new(final_time))
             }
             OdeSolverType::Tsit45 => {
-                let solver = problem.tsit45()?;
-                let mut soln = Solution::new(final_time);
-                solver.solve_soln(&mut soln)?;
-                Ok(soln)
+                solve_with_tag::<M, CG, LS, Tsit45Tag>(problem, Solution::new(final_time))
             }
         }
     }
@@ -131,223 +440,20 @@ impl OdeSolverType {
     {
         match self {
             OdeSolverType::Bdf => {
-                let solver = problem.bdf::<LS>()?;
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                solver.solve_soln(&mut soln)?;
-                Ok(soln)
+                solve_with_tag::<M, CG, LS, BdfTag>(problem, Solution::new_dense(t_eval.to_vec())?)
             }
-            OdeSolverType::Esdirk34 => {
-                let solver = problem.esdirk34::<LS>()?;
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                solver.solve_soln(&mut soln)?;
-                Ok(soln)
-            }
-            OdeSolverType::TrBdf2 => {
-                let solver = problem.tr_bdf2::<LS>()?;
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                solver.solve_soln(&mut soln)?;
-                Ok(soln)
-            }
-            OdeSolverType::Tsit45 => {
-                let solver = problem.tsit45()?;
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                solver.solve_soln(&mut soln)?;
-                Ok(soln)
-            }
-        }
-    }
-
-    pub(crate) fn solve_hybrid<M, CG, LS>(
-        &self,
-        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
-        final_time: M::T,
-    ) -> Result<Solution<M::V>, DiffsolError>
-    where
-        M: Matrix<T: Scalar>,
-        CG: CodegenModule,
-        M::V: VectorHost + DefaultDenseMatrix,
-        LS: LinearSolver<M>,
-        for<'b> &'b M::V: VectorRef<M::V>,
-        for<'b> &'b M: MatrixRef<M>,
-    {
-        match self {
-            OdeSolverType::Bdf => {
-                let mut soln = Solution::new(final_time);
-                let mut solver = problem.bdf::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset(problem, &mut state)?;
-                    solver = problem.bdf_solver::<LS>(state)?;
-                }
-                Ok(soln)
-            }
-            OdeSolverType::Esdirk34 => {
-                let mut soln = Solution::new(final_time);
-                let mut solver = problem.esdirk34::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset(problem, &mut state)?;
-                    solver = problem.esdirk34_solver::<LS>(state)?;
-                }
-                Ok(soln)
-            }
-            OdeSolverType::TrBdf2 => {
-                let mut soln = Solution::new(final_time);
-                let mut solver = problem.tr_bdf2::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset(problem, &mut state)?;
-                    solver = problem.tr_bdf2_solver::<LS>(state)?;
-                }
-                Ok(soln)
-            }
-            OdeSolverType::Tsit45 => {
-                let mut soln = Solution::new(final_time);
-                let mut solver = problem.tsit45()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset(problem, &mut state)?;
-                    solver = problem.tsit45_solver(state)?;
-                }
-                Ok(soln)
-            }
-        }
-    }
-
-    pub(crate) fn solve_hybrid_dense<M, CG, LS>(
-        &self,
-        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
-        t_eval: &[M::T],
-    ) -> Result<Solution<M::V>, DiffsolError>
-    where
-        M: Matrix<T: Scalar>,
-        CG: CodegenModule,
-        M::V: VectorHost + DefaultDenseMatrix,
-        LS: LinearSolver<M>,
-        for<'b> &'b M::V: VectorRef<M::V>,
-        for<'b> &'b M: MatrixRef<M>,
-    {
-        match self {
-            OdeSolverType::Bdf => {
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                let mut solver = problem.bdf::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset(problem, &mut state)?;
-                    solver = problem.bdf_solver::<LS>(state)?;
-                }
-                Ok(soln)
-            }
-            OdeSolverType::Esdirk34 => {
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                let mut solver = problem.esdirk34::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset(problem, &mut state)?;
-                    solver = problem.esdirk34_solver::<LS>(state)?;
-                }
-                Ok(soln)
-            }
-            OdeSolverType::TrBdf2 => {
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                let mut solver = problem.tr_bdf2::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset(problem, &mut state)?;
-                    solver = problem.tr_bdf2_solver::<LS>(state)?;
-                }
-                Ok(soln)
-            }
-            OdeSolverType::Tsit45 => {
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                let mut solver = problem.tsit45()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset(problem, &mut state)?;
-                    solver = problem.tsit45_solver(state)?;
-                }
-                Ok(soln)
-            }
+            OdeSolverType::Esdirk34 => solve_with_tag::<M, CG, LS, Esdirk34Tag>(
+                problem,
+                Solution::new_dense(t_eval.to_vec())?,
+            ),
+            OdeSolverType::TrBdf2 => solve_with_tag::<M, CG, LS, TrBdf2Tag>(
+                problem,
+                Solution::new_dense(t_eval.to_vec())?,
+            ),
+            OdeSolverType::Tsit45 => solve_with_tag::<M, CG, LS, Tsit45Tag>(
+                problem,
+                Solution::new_dense(t_eval.to_vec())?,
+            ),
         }
     }
 
@@ -376,284 +482,248 @@ impl OdeSolverType {
     {
         Self::check_sens_available()?;
         match self {
-            OdeSolverType::Bdf => {
-                let solver = problem.bdf_sens::<LS>()?;
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                solver.solve_soln_sensitivities(&mut soln)?;
-                Ok(soln)
-            }
+            OdeSolverType::Bdf => solve_fwd_sens_with_tag::<M, CG, LS, BdfTag>(problem, t_eval),
             OdeSolverType::Esdirk34 => {
-                let solver = problem.esdirk34_sens::<LS>()?;
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                solver.solve_soln_sensitivities(&mut soln)?;
-                Ok(soln)
+                solve_fwd_sens_with_tag::<M, CG, LS, Esdirk34Tag>(problem, t_eval)
             }
             OdeSolverType::TrBdf2 => {
-                let solver = problem.tr_bdf2_sens::<LS>()?;
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                solver.solve_soln_sensitivities(&mut soln)?;
-                Ok(soln)
+                solve_fwd_sens_with_tag::<M, CG, LS, TrBdf2Tag>(problem, t_eval)
             }
             OdeSolverType::Tsit45 => {
-                let solver = problem.tsit45_sens()?;
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                solver.solve_soln_sensitivities(&mut soln)?;
-                Ok(soln)
+                solve_fwd_sens_with_tag::<M, CG, LS, Tsit45Tag>(problem, t_eval)
             }
         }
     }
 
     #[allow(clippy::type_complexity)]
-    pub(crate) fn solve_hybrid_fwd_sens<M, CG, LS>(
+    pub(crate) fn solve_adjoint_fwd<M, CG, LS>(
         &self,
         problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
         t_eval: &[M::T],
-    ) -> Result<Solution<M::V>, DiffsolError>
+        params: &[f64],
+        linear_solver: LinearSolverType,
+    ) -> Result<(Solution<M::V>, Box<dyn AdjointCheckpoint>), DiffsolError>
     where
-        M: Matrix<T: Scalar> + DefaultSolver,
-        CG: CodegenModule,
+        M: Matrix<T: Scalar> + DefaultSolver + 'static,
+        CG: CodegenModule + 'static,
         M::V: VectorHost + DefaultDenseMatrix,
         LS: LinearSolver<M>,
+        DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>,
+        for<'b> &'b M::V: VectorRef<M::V>,
+        for<'b> &'b M: MatrixRef<M>,
+    {
+        Self::check_sens_available()?;
+        match self {
+            OdeSolverType::Bdf => solve_adjoint_fwd_with_tag::<M, CG, LS, BdfTag>(
+                problem,
+                t_eval,
+                params,
+                *self,
+                linear_solver,
+            ),
+            OdeSolverType::Esdirk34 => solve_adjoint_fwd_with_tag::<M, CG, LS, Esdirk34Tag>(
+                problem,
+                t_eval,
+                params,
+                *self,
+                linear_solver,
+            ),
+            OdeSolverType::TrBdf2 => solve_adjoint_fwd_with_tag::<M, CG, LS, TrBdf2Tag>(
+                problem,
+                t_eval,
+                params,
+                *self,
+                linear_solver,
+            ),
+            OdeSolverType::Tsit45 => solve_adjoint_fwd_with_tag::<M, CG, LS, Tsit45Tag>(
+                problem,
+                t_eval,
+                params,
+                *self,
+                linear_solver,
+            ),
+        }
+    }
+
+    pub(crate) fn solve_continuous_adjoint<M, CG, LS>(
+        &self,
+        problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
+        final_time: M::T,
+    ) -> Result<(M::V, Vec<M::V>), DiffsolError>
+    where
+        M: Matrix<T: Scalar> + DefaultSolver + 'static,
+        CG: CodegenModule + 'static,
+        M::V: VectorHost + DefaultDenseMatrix,
+        LS: LinearSolver<M>,
+        DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>
+            + diffsol::OdeEquationsImplicitAdjoint,
         for<'b> &'b M::V: VectorRef<M::V>,
         for<'b> &'b M: MatrixRef<M>,
     {
         Self::check_sens_available()?;
         match self {
             OdeSolverType::Bdf => {
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                let mut solver = problem.bdf_sens::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln_sensitivities(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset_with_sens(problem, &mut state, root_idx)?;
-                    solver = problem.bdf_solver_sens::<LS>(state)?;
-                }
-                Ok(soln)
+                solve_continuous_adjoint_with_tag::<M, CG, LS, BdfTag>(problem, final_time, *self)
             }
-            OdeSolverType::Esdirk34 => {
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                let mut solver = problem.esdirk34_sens::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln_sensitivities(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset_with_sens(problem, &mut state, root_idx)?;
-                    solver = problem.esdirk34_solver_sens::<LS>(state)?;
-                }
-                Ok(soln)
-            }
-            OdeSolverType::TrBdf2 => {
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                let mut solver = problem.tr_bdf2_sens::<LS>()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln_sensitivities(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset_with_sens(problem, &mut state, root_idx)?;
-                    solver = problem.tr_bdf2_solver_sens::<LS>(state)?;
-                }
-                Ok(soln)
-            }
-            OdeSolverType::Tsit45 => {
-                let mut soln = Solution::new_dense(t_eval.to_vec())?;
-                let mut solver = problem.tsit45_sens()?;
-                while !soln.is_complete() {
-                    solver = solver.solve_soln_sensitivities(&mut soln)?;
-                    let root_idx = match soln.stop_reason {
-                        Some(OdeSolverStopReason::RootFound(_, root_idx))
-                            if !soln.is_complete() =>
-                        {
-                            root_idx
-                        }
-                        _ => continue,
-                    };
-                    let mut state = solver.into_state();
-                    problem.eqn.set_model_index(root_idx);
-                    apply_state_reset_with_sens(problem, &mut state, root_idx)?;
-                    solver = problem.tsit45_solver_sens(state)?;
-                }
-                Ok(soln)
-            }
+            OdeSolverType::Esdirk34 => solve_continuous_adjoint_with_tag::<M, CG, LS, Esdirk34Tag>(
+                problem, final_time, *self,
+            ),
+            OdeSolverType::TrBdf2 => solve_continuous_adjoint_with_tag::<M, CG, LS, TrBdf2Tag>(
+                problem, final_time, *self,
+            ),
+            OdeSolverType::Tsit45 => solve_continuous_adjoint_with_tag::<M, CG, LS, Tsit45Tag>(
+                problem, final_time, *self,
+            ),
         }
     }
 
-    pub(crate) fn solve_sum_squares_adj<'a, M, CG, LS>(
+    pub(crate) fn solve_adjoint_bkwd<M, CG, BwdLS>(
         &self,
         problem: &mut OdeSolverProblem<DiffSl<M, CG>>,
-        data: ArrayView2<'a, M::T>,
+        checkpoint: &dyn AdjointCheckpoint,
+        dgdu_eval: &<M::V as DefaultDenseMatrix>::M,
         t_eval: &[M::T],
-        backwards_method: OdeSolverType,
-        backwards_linear_solver: LinearSolverType,
-    ) -> Result<(M::T, M::V), DiffsolError>
+    ) -> Result<Vec<M::V>, DiffsolError>
     where
-        M: Matrix<T: Scalar> + DefaultSolver + LuValidator<M> + KluValidator<M>,
-        CG: CodegenModule,
+        M: Matrix<T: Scalar> + DefaultSolver + LuValidator<M> + KluValidator<M> + 'static,
+        CG: CodegenModule + 'static,
         M::V: VectorHost + DefaultDenseMatrix,
-        LS: LinearSolver<M>,
+        BwdLS: LinearSolver<M>,
+        DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>
+            + diffsol::OdeEquationsImplicitAdjoint,
         for<'b> &'b M::V: VectorRef<M::V>,
         for<'b> &'b M: MatrixRef<M>,
     {
         Self::check_sens_available()?;
-        match self {
-            OdeSolverType::Bdf => self._solve_sum_squares_adj(
-                problem.bdf::<LS>()?,
-                data,
-                t_eval,
-                backwards_method,
-                backwards_linear_solver,
-            ),
-            OdeSolverType::Esdirk34 => self._solve_sum_squares_adj(
-                problem.esdirk34::<LS>()?,
-                data,
-                t_eval,
-                backwards_method,
-                backwards_linear_solver,
-            ),
-            OdeSolverType::TrBdf2 => self._solve_sum_squares_adj(
-                problem.tr_bdf2::<LS>()?,
-                data,
-                t_eval,
-                backwards_method,
-                backwards_linear_solver,
-            ),
-            OdeSolverType::Tsit45 => self._solve_sum_squares_adj(
-                problem.tsit45()?,
-                data,
-                t_eval,
-                backwards_method,
-                backwards_linear_solver,
-            ),
-        }
-    }
-
-    pub(crate) fn _solve_sum_squares_adj<'data, 'solver, M, CG, S>(
-        &self,
-        mut solver: S,
-        data: ArrayView2<'data, M::T>,
-        t_eval: &[M::T],
-        backwards_method: OdeSolverType,
-        backwards_linear_solver: LinearSolverType,
-    ) -> Result<(M::T, M::V), DiffsolError>
-    where
-        M: Matrix<T: Scalar> + DefaultSolver + LuValidator<M> + KluValidator<M>,
-        CG: CodegenModule,
-        M::V: VectorHost + DefaultDenseMatrix,
-        S: OdeSolverMethod<'solver, DiffSl<M, CG>>,
-        for<'b> &'b M::V: VectorRef<M::V>,
-        for<'b> &'b M: MatrixRef<M>,
-    {
-        let (chk, ys, stop_reason) = solver.solve_dense_with_checkpointing(t_eval, None)?;
-        let eqn = solver.problem().eqn();
-        let ctx = eqn.context();
-        let mut g_m = <M::V as DefaultDenseMatrix>::M::zeros(eqn.nout(), t_eval.len(), ctx.clone());
-        let mut y = M::T::zero();
-        for j in 0..g_m.ncols() {
-            let ys_col = ys.column(j);
-            // TODO: can we avoid this allocation? (I can't see how right now)
-            let mut tmp = M::V::from_slice(data.column(j).as_slice().unwrap(), ctx.clone());
-            // tmp = 2 * ys_col - 2 * tmp
-            tmp.axpy_v(
-                M::T::from_f64(2.0).unwrap(),
-                &ys_col,
-                M::T::from_f64(-2.0).unwrap(),
-            );
-            g_m.column_mut(j).copy_from(&tmp);
-
-            // y = (1/4) * dot(tmp, tmp) + y
-            let norm = tmp.norm(2);
-            y += M::T::from_f64(1.0 / 4.0).unwrap() * norm * norm;
-        }
-        let mut y_sens = match backwards_linear_solver {
-            LinearSolverType::Default => backwards_method
-                .solve_adjoint_backwards::<M, CG, <M as DefaultSolver>::LS, S>(
-                    solver.problem(),
-                    chk,
-                    stop_reason,
-                    &g_m,
-                    t_eval,
-                    Some(1),
-                )?,
-            LinearSolverType::Lu => backwards_method
-                .solve_adjoint_backwards::<M, CG, <M as LuValidator<M>>::LS, S>(
-                    solver.problem(),
-                    chk,
-                    stop_reason,
-                    &g_m,
-                    t_eval,
-                    Some(1),
-                )?,
-            LinearSolverType::Klu => backwards_method
-                .solve_adjoint_backwards::<M, CG, <M as KluValidator<M>>::LS, S>(
-                    solver.problem(),
-                    chk,
-                    stop_reason,
-                    &g_m,
-                    t_eval,
-                    Some(1),
-                )?,
-        };
-        Ok((y, y_sens.pop().unwrap()))
-    }
-
-    pub(crate) fn solve_adjoint_backwards<'solver, M, CG, LS, S>(
-        &self,
-        problem: &'solver OdeSolverProblem<DiffSl<M, CG>>,
-        checkpointing: Checkpointing<'solver, DiffSl<M, CG>, S>,
-        _stop_reason: OdeSolverStopReason<M::T>,
-        g_m: &<M::V as DefaultDenseMatrix>::M,
-        t_eval: &[M::T],
-        nout_override: Option<usize>,
-    ) -> Result<Vec<M::V>, DiffsolError>
-    where
-        M: Matrix<T: Scalar> + DefaultSolver,
-        CG: CodegenModule,
-        M::V: VectorHost + DefaultDenseMatrix,
-        S: OdeSolverMethod<'solver, DiffSl<M, CG>>,
-        LS: LinearSolver<M>,
-        for<'b> &'b M::V: VectorRef<M::V>,
-        for<'b> &'b M: MatrixRef<M>,
-    {
-        match self {
-            OdeSolverType::Bdf => problem
-                .bdf_solver_adjoint::<LS, _>(checkpointing, nout_override)?
-                .solve_adjoint_backwards_pass(None, t_eval, &[g_m])
-                .map(|res| res.into_common().sg),
-            OdeSolverType::Esdirk34 => problem
-                .esdirk34_solver_adjoint::<LS, _>(checkpointing, nout_override)?
-                .solve_adjoint_backwards_pass(None, t_eval, &[g_m])
-                .map(|res| res.into_common().sg),
-            OdeSolverType::TrBdf2 => problem
-                .tr_bdf2_solver_adjoint::<LS, _>(checkpointing, nout_override)?
-                .solve_adjoint_backwards_pass(None, t_eval, &[g_m])
-                .map(|res| res.into_common().sg),
-            OdeSolverType::Tsit45 => Err(DiffsolError::Other(
-                "Tsit45 solver does not support adjoint sensitivity analysis.".to_string(),
-            )),
+        match checkpoint.method() {
+            OdeSolverType::Bdf => {
+                let data = checkpoint.data::<M, CG, BdfTag>()?;
+                match data.linear_solver() {
+                    LinearSolverType::Default => {
+                        solve_adjoint_bkwds_with_fwd_tag::<
+                            M,
+                            CG,
+                            <M as DefaultSolver>::LS,
+                            BwdLS,
+                            BdfTag,
+                        >(problem, data, *self, dgdu_eval, t_eval)
+                    }
+                    LinearSolverType::Lu => {
+                        solve_adjoint_bkwds_with_fwd_tag::<
+                            M,
+                            CG,
+                            <M as LuValidator<M>>::LS,
+                            BwdLS,
+                            BdfTag,
+                        >(problem, data, *self, dgdu_eval, t_eval)
+                    }
+                    LinearSolverType::Klu => {
+                        solve_adjoint_bkwds_with_fwd_tag::<
+                            M,
+                            CG,
+                            <M as KluValidator<M>>::LS,
+                            BwdLS,
+                            BdfTag,
+                        >(problem, data, *self, dgdu_eval, t_eval)
+                    }
+                }
+            }
+            OdeSolverType::Esdirk34 => {
+                let data = checkpoint.data::<M, CG, Esdirk34Tag>()?;
+                match data.linear_solver() {
+                    LinearSolverType::Default => {
+                        solve_adjoint_bkwds_with_fwd_tag::<
+                            M,
+                            CG,
+                            <M as DefaultSolver>::LS,
+                            BwdLS,
+                            Esdirk34Tag,
+                        >(problem, data, *self, dgdu_eval, t_eval)
+                    }
+                    LinearSolverType::Lu => {
+                        solve_adjoint_bkwds_with_fwd_tag::<
+                            M,
+                            CG,
+                            <M as LuValidator<M>>::LS,
+                            BwdLS,
+                            Esdirk34Tag,
+                        >(problem, data, *self, dgdu_eval, t_eval)
+                    }
+                    LinearSolverType::Klu => {
+                        solve_adjoint_bkwds_with_fwd_tag::<
+                            M,
+                            CG,
+                            <M as KluValidator<M>>::LS,
+                            BwdLS,
+                            Esdirk34Tag,
+                        >(problem, data, *self, dgdu_eval, t_eval)
+                    }
+                }
+            }
+            OdeSolverType::TrBdf2 => {
+                let data = checkpoint.data::<M, CG, TrBdf2Tag>()?;
+                match data.linear_solver() {
+                    LinearSolverType::Default => {
+                        solve_adjoint_bkwds_with_fwd_tag::<
+                            M,
+                            CG,
+                            <M as DefaultSolver>::LS,
+                            BwdLS,
+                            TrBdf2Tag,
+                        >(problem, data, *self, dgdu_eval, t_eval)
+                    }
+                    LinearSolverType::Lu => {
+                        solve_adjoint_bkwds_with_fwd_tag::<
+                            M,
+                            CG,
+                            <M as LuValidator<M>>::LS,
+                            BwdLS,
+                            TrBdf2Tag,
+                        >(problem, data, *self, dgdu_eval, t_eval)
+                    }
+                    LinearSolverType::Klu => {
+                        solve_adjoint_bkwds_with_fwd_tag::<
+                            M,
+                            CG,
+                            <M as KluValidator<M>>::LS,
+                            BwdLS,
+                            TrBdf2Tag,
+                        >(problem, data, *self, dgdu_eval, t_eval)
+                    }
+                }
+            }
+            OdeSolverType::Tsit45 => {
+                let data = checkpoint.data::<M, CG, Tsit45Tag>()?;
+                match data.linear_solver() {
+                    LinearSolverType::Default => {
+                        solve_adjoint_bkwds_with_fwd_tag::<
+                            M,
+                            CG,
+                            <M as DefaultSolver>::LS,
+                            BwdLS,
+                            Tsit45Tag,
+                        >(problem, data, *self, dgdu_eval, t_eval)
+                    }
+                    LinearSolverType::Lu => {
+                        solve_adjoint_bkwds_with_fwd_tag::<
+                            M,
+                            CG,
+                            <M as LuValidator<M>>::LS,
+                            BwdLS,
+                            Tsit45Tag,
+                        >(problem, data, *self, dgdu_eval, t_eval)
+                    }
+                    LinearSolverType::Klu => {
+                        solve_adjoint_bkwds_with_fwd_tag::<
+                            M,
+                            CG,
+                            <M as KluValidator<M>>::LS,
+                            BwdLS,
+                            Tsit45Tag,
+                        >(problem, data, *self, dgdu_eval, t_eval)
+                    }
+                }
+            }
         }
     }
 }
@@ -661,8 +731,8 @@ impl OdeSolverType {
 #[cfg(all(test, any(feature = "diffsl-cranelift", feature = "diffsl-llvm")))]
 mod tests {
     use diffsol::{
-        CodegenModuleCompile, CodegenModuleJit, DefaultSolver, DenseMatrix, OdeBuilder,
-        OdeSolverProblem, Vector,
+        CodegenModuleCompile, CodegenModuleJit, DefaultDenseMatrix, DefaultSolver, DenseMatrix,
+        Matrix, MatrixCommon, OdeBuilder, OdeSolverProblem, Op, Vector,
     };
 
     #[cfg(feature = "diffsl-llvm")]
@@ -672,10 +742,8 @@ mod tests {
         logistic_state, LOGISTIC_X0,
     };
     #[cfg(feature = "diffsl-llvm")]
-    use crate::test_support::{hybrid_logistic_state_dr, logistic_integral, logistic_state_dr};
+    use crate::test_support::{hybrid_logistic_state_dr, logistic_state_dr};
     use crate::valid_linear_solver::LuValidator;
-    #[cfg(feature = "diffsl-llvm")]
-    use ndarray::Array2;
 
     use super::OdeSolverType;
 
@@ -755,7 +823,7 @@ mod tests {
         ] {
             let mut problem = build_problem::<CG>(hybrid_logistic_diffsl_code());
             let soln = method
-                .solve_hybrid::<M, CG, <M as DefaultSolver>::LS>(&mut problem, 2.0)
+                .solve::<M, CG, <M as DefaultSolver>::LS>(&mut problem, 2.0)
                 .unwrap();
             assert_close(*soln.ts.last().unwrap(), 2.0, 5e-4, "hybrid final time");
             assert_close(
@@ -767,7 +835,7 @@ mod tests {
 
             let mut problem = build_problem::<CG>(hybrid_logistic_diffsl_code());
             let soln = method
-                .solve_hybrid_dense::<M, CG, <M as DefaultSolver>::LS>(&mut problem, &t_eval)
+                .solve_dense::<M, CG, <M as DefaultSolver>::LS>(&mut problem, &t_eval)
                 .unwrap();
             assert_dense_solution_matches_expected(&soln, &t_eval, |t| {
                 hybrid_logistic_state(2.0, t)
@@ -815,13 +883,13 @@ mod tests {
         ] {
             let mut problem = build_problem::<CG>(hybrid_logistic_diffsl_code());
             let soln = method
-                .solve_hybrid::<M, CG, <M as LuValidator<M>>::LS>(&mut problem, 2.0)
+                .solve::<M, CG, <M as LuValidator<M>>::LS>(&mut problem, 2.0)
                 .unwrap();
             assert_close(*soln.ts.last().unwrap(), 2.0, 5e-4, "lu hybrid final time");
 
             let mut problem = build_problem::<CG>(hybrid_logistic_diffsl_code());
             let soln = method
-                .solve_hybrid_dense::<M, CG, <M as LuValidator<M>>::LS>(&mut problem, &t_eval)
+                .solve_dense::<M, CG, <M as LuValidator<M>>::LS>(&mut problem, &t_eval)
                 .unwrap();
             assert_dense_solution_matches_expected(&soln, &t_eval, |t| {
                 hybrid_logistic_state(2.0, t)
@@ -837,7 +905,7 @@ mod tests {
 
         let mut problem = build_problem::<CG>(hybrid_logistic_diffsl_code());
         let soln = method
-            .solve_hybrid::<M, CG, <M as DefaultSolver>::LS>(&mut problem, 2.0)
+            .solve::<M, CG, <M as DefaultSolver>::LS>(&mut problem, 2.0)
             .unwrap();
         assert_close(
             *soln.ts.last().unwrap(),
@@ -854,7 +922,7 @@ mod tests {
 
         let mut problem = build_problem::<CG>(hybrid_logistic_diffsl_code());
         let soln = method
-            .solve_hybrid_dense::<M, CG, <M as DefaultSolver>::LS>(&mut problem, &t_eval)
+            .solve_dense::<M, CG, <M as DefaultSolver>::LS>(&mut problem, &t_eval)
             .unwrap();
         assert_dense_solution_matches_expected(&soln, &t_eval, |t| hybrid_logistic_state(2.0, t));
     }
@@ -886,7 +954,7 @@ mod tests {
 
             let mut problem = build_problem::<diffsol::LlvmModule>(hybrid_logistic_diffsl_code());
             let soln = method
-                .solve_hybrid_fwd_sens::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
+                .solve_fwd_sens::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
                     &mut problem,
                     &t_eval,
                 )
@@ -928,29 +996,31 @@ mod tests {
             }
         }
 
-        let adjoint_t_eval = [0.0, 0.25, 0.5, 1.0];
-        let data = Array2::from_shape_vec(
-            (1, adjoint_t_eval.len()),
-            adjoint_t_eval
-                .iter()
-                .map(|&t| logistic_integral(LOGISTIC_X0, 2.0, t))
-                .collect(),
-        )
-        .unwrap();
-
         let mut problem = build_problem::<diffsol::LlvmModule>(logistic_diffsl_code());
-        let (objective, gradient) = OdeSolverType::Bdf
-            .solve_sum_squares_adj::<M, diffsol::LlvmModule, <M as LuValidator<M>>::LS>(
+        let adjoint_t_eval = [0.0, 0.25, 0.5, 1.0];
+        let (soln, checkpoint) = OdeSolverType::Bdf
+            .solve_adjoint_fwd::<M, diffsol::LlvmModule, <M as LuValidator<M>>::LS>(
                 &mut problem,
-                data.view(),
                 &adjoint_t_eval,
-                OdeSolverType::TrBdf2,
+                &[2.0],
                 LinearSolverType::Lu,
             )
             .unwrap();
-        assert!(objective.is_finite());
+        let dgdu = <<M as MatrixCommon>::V as DefaultDenseMatrix>::M::zeros(
+            problem.eqn.nout(),
+            soln.ts.len(),
+            problem.context().to_owned(),
+        );
+        let gradient = OdeSolverType::TrBdf2
+            .solve_adjoint_bkwd::<M, diffsol::LlvmModule, <M as LuValidator<M>>::LS>(
+                &mut problem,
+                checkpoint.as_ref(),
+                &dgdu,
+                &soln.ts,
+            )
+            .unwrap();
         assert_eq!(gradient.len(), 1);
-        assert!(gradient.get_index(0).is_finite());
+        assert!(gradient[0].get_index(0).is_finite());
     }
 
     #[cfg(feature = "diffsl-llvm")]
@@ -963,7 +1033,7 @@ mod tests {
         ] {
             let mut problem = build_problem::<diffsol::LlvmModule>(hybrid_logistic_diffsl_code());
             let soln = method
-                .solve_hybrid_fwd_sens::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
+                .solve_fwd_sens::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
                     &mut problem,
                     &t_eval,
                 )
@@ -987,78 +1057,93 @@ mod tests {
 
     #[cfg(feature = "diffsl-llvm")]
     fn test_adjoint_backwards_methods_and_klu_branch() {
-        let t_eval = [0.0, 0.25, 0.5, 1.0];
-        let data = Array2::from_shape_vec(
-            (1, t_eval.len()),
-            t_eval
-                .iter()
-                .map(|&t| logistic_integral(LOGISTIC_X0, 2.0, t))
-                .collect(),
-        )
-        .unwrap();
-
         for backwards_method in [OdeSolverType::Esdirk34, OdeSolverType::TrBdf2] {
             let mut problem = build_problem::<diffsol::LlvmModule>(logistic_diffsl_code());
-            let (objective, gradient) = OdeSolverType::Bdf
-                .solve_sum_squares_adj::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
+            let t_eval = [0.0, 0.25, 0.5, 1.0];
+            let (soln, checkpoint) = OdeSolverType::Bdf
+                .solve_adjoint_fwd::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
                     &mut problem,
-                    data.view(),
                     &t_eval,
-                    backwards_method,
-                    LinearSolverType::Klu,
+                    &[2.0],
+                    LinearSolverType::Default,
                 )
                 .unwrap();
-            assert!(objective.is_finite());
+            let dgdu = <<M as MatrixCommon>::V as DefaultDenseMatrix>::M::zeros(
+                problem.eqn.nout(),
+                soln.ts.len(),
+                problem.context().to_owned(),
+            );
+            let gradient = backwards_method
+                .solve_adjoint_bkwd::<M, diffsol::LlvmModule, <M as crate::valid_linear_solver::KluValidator<M>>::LS>(
+                    &mut problem,
+                    checkpoint.as_ref(),
+                    &dgdu,
+                    &soln.ts,
+                )
+                .unwrap();
             assert_eq!(gradient.len(), 1);
-            assert!(gradient.get_index(0).is_finite());
+            assert!(gradient[0].get_index(0).is_finite());
         }
 
         let mut problem = build_problem::<diffsol::LlvmModule>(logistic_diffsl_code());
-        let err = OdeSolverType::Bdf
-            .solve_sum_squares_adj::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
+        let t_eval = [0.0, 0.25, 0.5, 1.0];
+        let (soln, checkpoint) = OdeSolverType::Tsit45
+            .solve_adjoint_fwd::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
                 &mut problem,
-                data.view(),
                 &t_eval,
-                OdeSolverType::Tsit45,
+                &[2.0],
                 LinearSolverType::Default,
             )
-            .unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("Tsit45 solver does not support adjoint sensitivity analysis"));
+            .unwrap();
+        let dgdu = <<M as MatrixCommon>::V as DefaultDenseMatrix>::M::zeros(
+            problem.eqn.nout(),
+            soln.ts.len(),
+            problem.context().to_owned(),
+        );
+        let gradient = OdeSolverType::Bdf
+            .solve_adjoint_bkwd::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
+                &mut problem,
+                checkpoint.as_ref(),
+                &dgdu,
+                &soln.ts,
+            )
+            .unwrap();
+        assert_eq!(gradient.len(), 1);
+        assert!(gradient[0].get_index(0).is_finite());
     }
 
     #[cfg(feature = "diffsl-llvm")]
     fn test_all_adjoint_solver_variants() {
         let t_eval = [0.0, 0.25, 0.5, 1.0];
-        let data = Array2::from_shape_vec(
-            (1, t_eval.len()),
-            t_eval
-                .iter()
-                .map(|&t| logistic_integral(LOGISTIC_X0, 2.0, t))
-                .collect(),
-        )
-        .unwrap();
-
         for method in [
             OdeSolverType::Bdf,
             OdeSolverType::Esdirk34,
             OdeSolverType::TrBdf2,
-            OdeSolverType::Tsit45,
         ] {
             let mut problem = build_problem::<diffsol::LlvmModule>(logistic_diffsl_code());
-            let (objective, gradient) = method
-                .solve_sum_squares_adj::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
+            let (soln, checkpoint) = method
+                .solve_adjoint_fwd::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
                     &mut problem,
-                    data.view(),
                     &t_eval,
-                    OdeSolverType::Bdf,
-                    crate::linear_solver_type::LinearSolverType::Default,
+                    &[2.0],
+                    LinearSolverType::Default,
                 )
                 .unwrap();
-            assert!(objective.is_finite());
+            let dgdu = <<M as MatrixCommon>::V as DefaultDenseMatrix>::M::zeros(
+                problem.eqn.nout(),
+                soln.ts.len(),
+                problem.context().to_owned(),
+            );
+            let gradient = OdeSolverType::Bdf
+                .solve_adjoint_bkwd::<M, diffsol::LlvmModule, <M as DefaultSolver>::LS>(
+                    &mut problem,
+                    checkpoint.as_ref(),
+                    &dgdu,
+                    &soln.ts,
+                )
+                .unwrap();
             assert_eq!(gradient.len(), 1);
-            assert!(gradient.get_index(0).is_finite());
+            assert!(gradient[0].get_index(0).is_finite());
         }
     }
 

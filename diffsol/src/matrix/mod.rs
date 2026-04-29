@@ -166,7 +166,9 @@ pub trait MatrixView<'a>:
 ///
 /// Implementing matrices can be dense or sparse, and may be hosted on CPU or GPU.
 /// Users typically do not need to implement this trait; use provided implementations.
-pub trait Matrix: MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + 'static {
+pub trait Matrix:
+    MatrixCommon + Mul<Scale<Self::T>, Output = Self> + Clone + Send + 'static
+{
     type Sparsity: MatrixSparsity<Self>;
     type SparsityRef<'a>: MatrixSparsityRef<'a, Self>
     where

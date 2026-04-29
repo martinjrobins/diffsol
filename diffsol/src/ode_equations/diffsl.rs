@@ -1362,6 +1362,7 @@ mod tests {
         module::{CodegenModuleCompile, CodegenModuleJit},
         scalar::Scalar as DiffSlScalar,
     };
+    #[cfg(feature = "diffsl-llvm")]
     use diffsl::ObjectModule;
 
     use crate::Scalar;
@@ -1375,6 +1376,7 @@ mod tests {
     use super::{DiffSl, DiffSlContext};
     use num_traits::{FromPrimitive, One, ToPrimitive, Zero};
     use paste::paste;
+    #[cfg(feature = "diffsl-llvm")]
     use serde_json;
 
     /// Macro to generate test functions for all combinations of backend (cranelift/llvm) and scalar type (f32/f64)
@@ -2082,15 +2084,14 @@ mod tests {
         let ctx = <M as crate::matrix::MatrixCommon>::C::default();
         let p = ctx.vector_from_vec(vec![3.0, 5.0]);
         let compiled =
-            DiffSl::<M, crate::LlvmModule>::compile(serialization_test_model(), ctx.clone(), true)
-                .unwrap();
+            DiffSl::<M, crate::LlvmModule>::compile(serialization_test_model(), ctx, true).unwrap();
         let external_object = compiled.to_external_object().unwrap();
         let rhs_state_deps = external_object.rhs_state_deps.clone();
         let rhs_input_deps = external_object.rhs_input_deps.clone();
         let mass_state_deps = external_object.mass_state_deps.clone();
 
         let mut imported =
-            DiffSl::<M, ObjectModule>::from_external_object(external_object, ctx.clone()).unwrap();
+            DiffSl::<M, ObjectModule>::from_external_object(external_object, ctx).unwrap();
         imported.set_params(&p);
 
         let encoded = serde_json::to_string(&imported).unwrap();
