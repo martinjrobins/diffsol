@@ -882,6 +882,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpJacobian
     for DiffSlReset<'_, M, CG>
 {
     fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        self.0.context.ddata.borrow_mut().fill(M::T::zero());
         let tmp = self.0.context.tmp.borrow();
         self.0.context.compiler.reset_grad(
             t,
@@ -1083,6 +1084,7 @@ impl<M: MatrixHost<T: DiffSlScalar>, CG: CodegenModule> NonLinearOpJacobian
     for DiffSlRhs<'_, M, CG>
 {
     fn jac_mul_inplace(&self, x: &Self::V, t: Self::T, v: &Self::V, y: &mut Self::V) {
+        self.0.context.ddata.borrow_mut().fill(M::T::zero());
         let tmp = self.0.context.tmp.borrow();
         self.0.context.compiler.rhs_grad(
             t,
