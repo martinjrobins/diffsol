@@ -12,7 +12,7 @@ type LS = diffsol::NalgebraLU<f64>;
 fn main() {
     let model = "
         Vc { 1000.0 } Vp1 { 1000.0 } CL { 100.0 } Qp1 { 50.0 }
-        doses_i { 1000.0, 500.0, 2000.0, 1500.0 }
+        doses_i { 1000.0, 500.0, 2000.0}
         u_i {
             qc = doses_i[0],
             qp1 = 0,
@@ -22,10 +22,9 @@ fn main() {
             Qp1 * (qc / Vc - qp1 / Vp1),
         }
         stop_i {
-            1.0
+            1.0,
             t - 6.0,
             t - 12.0,
-            t - 18.0,
         }
         reset_i {
             qc + doses_i[N],
@@ -71,7 +70,7 @@ fn main() {
     );
 
     let output_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../book/src/primer/images/drug-delivery-declarative.html");
-    let plot_html = plot.to_inline_html(Some("drug-delivery-declarative"));
+        .join("../../book/src/primer/images/drug-delivery-hybrid.html");
+    let plot_html = plot.to_inline_html(Some("drug-delivery-hybrid"));
     fs::write(output_path, plot_html).expect("Unable to write file");
 }
