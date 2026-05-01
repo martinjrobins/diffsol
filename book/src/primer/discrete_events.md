@@ -11,20 +11,20 @@ Diffsol provides two ways to model discrete events in a system of ODEs:
 
 Diffsol allows you to manipulate the internal state of each solver during the time-stepping. Each solver has an internal state that holds information such as the current time \\(t\\), the current state of the system \\(\mathbf{y}\\), and other solver-specific information. When a discrete event occurs, the user can update the internal state of the solver to reflect the change in the system, and then continue the integration of the ODE as normal.
 
-Diffsol also provides a way to stop the integration of the ODEs, either at a specific time or when a specific condition is met, by defining a function \\(g\\) that is equal to zero when the event occurs. This can be useful for modelling systems with discrete events, as it allows the user to control the integration of the ODEs and to handle the events in a flexible way.
+Diffsol also provides a way to stop the integration of the ODEs, either at a specific time or when a specific condition is met, by defining a function \\(s\\) that is equal to zero when the event occurs. This can be useful for modelling systems with discrete events, as it allows the user to control the integration of the ODEs and to handle the events in a flexible way.
 
 \\[
-g(\mathbf{y}, t, \mathbf{p}) = 0
+s(\mathbf{y}, t, \mathbf{p}) = 0
 \\]
 
-In DiffSL, the `stop` tensor is used to define the event function \\(g\\). The [Solving the Problem](../solve/solving_the_problem.md) and [Root Finding](../specify/closure/root_finding.md) sections provide an introduction to the API for solving ODEs and detecting events with Diffsol.
+In DiffSL, the `stop` tensor is used to define the event function \\(s\\). The [Solving the Problem](../solve/solving_the_problem.md) and [Root Finding](../specify/closure/root_finding.md) sections provide an introduction to the API for solving ODEs and detecting events with Diffsol.
 
 ## Declarative Approach
 
 Rather than writing the event logic directly in Rust, it is also possible to write down the mathematical conditions for when an event occurs and what happens when it does. To define when an event occurs, we re-introduce a stop condition that triggers when the following condition is met:
 
 \\[
-g(\mathbf{y}, t_e, \mathbf{p}) = 0
+s(\mathbf{y}, t_e, \mathbf{p}) = 0
 \\]
 
 We can then specify that, when this condition is met, the state of the system should be updated according to a reset function:

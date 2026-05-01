@@ -355,6 +355,10 @@ where
                     false,
                     0,
                 )?;
+                // if we've finished then need to set ys to the right length
+                if let OdeSolverStopReason::TstopReached = stop_reason {
+                    soln.ys.resize_cols(soln.ts.len());
+                }
                 soln.stop_reason = Some(stop_reason);
             }
             SolutionMode::Tevals(start_col) => {
@@ -416,6 +420,10 @@ where
                     true,
                     max_steps_between_checkpoints,
                 )?;
+                // if we've finished then need to set ys to the right length
+                if let OdeSolverStopReason::TstopReached = stop_reason {
+                    soln.ys.resize_cols(soln.ts.len());
+                }
                 soln.stop_reason = Some(stop_reason);
                 checkpointers.unwrap()
             }
@@ -1396,6 +1404,7 @@ mod test {
             }
         }
 
+        assert!(soln.ts.len() == soln.ys.ncols());
         assert!(!soln.ts.is_empty());
         assert!((soln.ts.last().copied().unwrap() - t_final).abs() < 1e-8);
     }
