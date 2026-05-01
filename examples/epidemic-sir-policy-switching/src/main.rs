@@ -62,27 +62,9 @@ fn main() {
     }
 
     let time = soln.ts.clone();
-    let susceptible: Vec<_> = soln
-        .ys
-        .inner()
-        .row(0)
-        .into_iter()
-        .copied()
-        .collect();
-    let infected: Vec<_> = soln
-        .ys
-        .inner()
-        .row(1)
-        .into_iter()
-        .copied()
-        .collect();
-    let recovered: Vec<_> = soln
-        .ys
-        .inner()
-        .row(2)
-        .into_iter()
-        .copied()
-        .collect();
+    let susceptible: Vec<_> = soln.ys.inner().row(0).into_iter().copied().collect();
+    let infected: Vec<_> = soln.ys.inner().row(1).into_iter().copied().collect();
+    let recovered: Vec<_> = soln.ys.inner().row(2).into_iter().copied().collect();
     let lockdown: Vec<_> = time
         .iter()
         .map(|t| {
