@@ -474,6 +474,8 @@ where
         let nparams = self.problem.eqn.nparams();
         if params.len() == nparams {
             self.problem.eqn.set_params(&params);
+            // Reset model index to 0 for hybrid solves
+            self.problem.eqn.set_model_index(0);
             Ok(())
         } else {
             Err(DiffsolError::Other(format!(
