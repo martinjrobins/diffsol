@@ -14,7 +14,7 @@ use diffsol_c::{
 };
 
 const RESET_TIME: f64 = 0.5;
-const RESET_Y: f64 = 0.2;
+const RESET_Y_AT_N0: f64 = 0.1; // 0.1 + 0.5 * 0
 const INITIAL_Y: f64 = 0.1;
 
 fn logistic_time_reset_diffsl_code() -> &'static str {
@@ -24,7 +24,7 @@ fn logistic_time_reset_diffsl_code() -> &'static str {
         dudt_i { dydt = 0 }
         F_i { r * y * (1.0 - y) }
         stop_i { t - 0.5 }
-        reset_i { 0.2 }
+        reset_i { 0.1 + 0.5 * N }
         out_i { y }
     "#
 }
@@ -103,7 +103,7 @@ fn time_reset_state(r: f64, t: f64) -> f64 {
     if t <= RESET_TIME {
         logistic_state(INITIAL_Y, r, t)
     } else {
-        logistic_state(RESET_Y, r, t - RESET_TIME)
+        logistic_state(RESET_Y_AT_N0, r, t - RESET_TIME)
     }
 }
 
@@ -111,7 +111,7 @@ fn time_reset_state_dr(r: f64, t: f64) -> f64 {
     if t <= RESET_TIME {
         logistic_state_dr(INITIAL_Y, r, t)
     } else {
-        logistic_state_dr(RESET_Y, r, t - RESET_TIME)
+        logistic_state_dr(RESET_Y_AT_N0, r, t - RESET_TIME)
     }
 }
 
@@ -120,7 +120,7 @@ fn time_reset_integral(r: f64, final_time: f64) -> f64 {
         logistic_integral(INITIAL_Y, r, final_time)
     } else {
         logistic_integral(INITIAL_Y, r, RESET_TIME)
-            + logistic_integral(RESET_Y, r, final_time - RESET_TIME)
+            + logistic_integral(RESET_Y_AT_N0, r, final_time - RESET_TIME)
     }
 }
 
@@ -129,7 +129,7 @@ fn time_reset_integral_dr(r: f64, final_time: f64) -> f64 {
         logistic_integral_dr(INITIAL_Y, r, final_time)
     } else {
         logistic_integral_dr(INITIAL_Y, r, RESET_TIME)
-            + logistic_integral_dr(RESET_Y, r, final_time - RESET_TIME)
+            + logistic_integral_dr(RESET_Y_AT_N0, r, final_time - RESET_TIME)
     }
 }
 
@@ -218,6 +218,29 @@ fn logistic_time_reset_solve_dense_matches_piecewise_solution() {
                     ode_solver,
                     linear_solver,
                 );
+                assert_time_reset_dense_solution(&ode, r, &t_eval);
+            }
+        }
+    }
+}
+
+#[test]
+fn logistic_time_reset_solve_dense_twice_matches_piecewise_solution() {
+    let r = 2.0;
+    let t_eval = [0.25, 0.75, 1.0];
+    for jit_backend in available_jit_backends() {
+        for scalar_type in [ScalarType::F64, ScalarType::F32] {
+            for (matrix_type, ode_solver, linear_solver) in matrix_solver_cases() {
+                let ode = make_time_reset_ode(
+                    jit_backend,
+                    scalar_type,
+                    matrix_type,
+                    ode_solver,
+                    linear_solver,
+                );
+                // First solve
+                assert_time_reset_dense_solution(&ode, r, &t_eval);
+                // Second solve - should still work correctly
                 assert_time_reset_dense_solution(&ode, r, &t_eval);
             }
         }
