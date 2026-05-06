@@ -248,9 +248,9 @@ fn main() -> Result<(), String> {
         let mut files = compile_benches(&sundials, &suitesparse);
         files.push("benches/sundials_benches.rs".to_string());
         files.push("benches/idaHeat2d_klu_v5.c".to_string());
-        files.push("benches/idaHeat2d_klu_v6.c".to_string());
+        files.push("benches/idaHeat2d_klu_v6_7.c".to_string());
         files.push("benches/idaFoodWeb_bnd_v5.c".to_string());
-        files.push("benches/idaFoodWeb_bnd_v6.c".to_string());
+        files.push("benches/idaFoodWeb_bnd_v6_7.c".to_string());
         for name in files.into_iter() {
             println!("cargo:rerun-if-changed={}", name);
         }

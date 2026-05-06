@@ -4,10 +4,9 @@
 
 #include <sundials/sundials_version.h>
 #if SUNDIALS_VERSION_MAJOR > 5
-#include "idaHeat2d_klu_v6.c"
+#include "idaHeat2d_klu_v6_7.c"
 #else
 #include "idaHeat2d_klu_v5.c"
 #endif
-
 
 

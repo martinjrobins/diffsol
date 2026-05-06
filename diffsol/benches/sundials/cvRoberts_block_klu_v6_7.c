@@ -39,11 +39,18 @@
 
 #include <stdio.h>
 
+#include <sundials/sundials_types.h>    /* defs. of realtype, sunindextype      */
+#if SUNDIALS_VERSION_MAJOR >= 7
+#define realtype sunrealtype
+#define RCONST SUN_RCONST
+#define SUNCTX_COMM 0
+#else
+#define SUNCTX_COMM NULL
+#endif
 #include <cvode/cvode.h>                /* prototypes for CVODE fcts., consts.  */
 #include <nvector/nvector_serial.h>     /* access to serial N_Vector            */
 #include <sunmatrix/sunmatrix_sparse.h> /* access to sparse SUNMatrix           */
 #include <sunlinsol/sunlinsol_klu.h>    /* access to KLU sparse direct solver   */
-#include <sundials/sundials_types.h>    /* defs. of realtype, sunindextype      */
 
 /* User-defined vector and matrix accessor macro: Ith */
 
@@ -128,7 +135,7 @@ int cvRoberts_block_klu(int ngroups)
   udata.ngroups = ngroups;
   udata.neq = neq;
 
-  retval = SUNContext_Create(NULL, &sunctx);
+  retval = SUNContext_Create(SUNCTX_COMM, &sunctx);
   if (check_retval(&retval, "CVodeInit", 1)) return(1);
 
   /* Create serial vector of length neq for I.C. and abstol */
