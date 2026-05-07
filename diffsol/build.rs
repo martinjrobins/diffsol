@@ -266,6 +266,9 @@ fn main() -> Result<(), String> {
                 library_type, lib_name
             );
         }
+        if major >= 7 {
+            println!("cargo:rustc-link-lib={}=sundials_core", library_type);
+        }
         // link to klu
         if let Some(dir) = suitesparse.lib.as_ref() {
             println!("cargo:rustc-link-search=native={}", dir);
