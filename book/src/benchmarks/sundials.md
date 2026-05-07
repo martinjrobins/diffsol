@@ -10,7 +10,7 @@ To choose the test problems we have used several of the examples provided in the
 - `robertson` : A stiff DAE system with 3 equations (2 differential and 1 algebraic). In Sundials this is part of the
 IDA examples and is contained in the file `ida/serial/idaRoberts_dns.c`. In Sundials the problem is solved using the
 Sundials dense linear solver and `Sunmatrix_Dense`, in diffsol we use the dense LU linear solver, dense matrices and
-vectors from the [nalgebra](https://nalgebra.org) library.
+vectors from the [nalgebra](https://nalgebra.rs) library.
 - `robertson_ode`: The same problem as `robertson` but in the form of an ODE. This problem has a variable size
 implemented by duplicating the 3 original equations \\(n^2\\) times, where \\(n\\) is the size input parameter. In
 Sundials problem is solved using the KLU sparse linear solver and the `Sunmatrix_Sparse` matrix, and in diffsol we use
@@ -38,6 +38,10 @@ diffsol-compatible functions representing the RHS, mass matrix and jacobian mult
 have used the outputs published in the Sundials examples as the reference outputs for the tests to ensure that the
 implementations are equivalent. The relative and absolute tolerances for the solvers were set to the same values in both
 implementations.
+
+All of the benchmarks discussed in this section, for both diffsol and Sundials, are serial and don't use any
+parallelism. All rayon and openmp parallelism was turned off by setting `RAYON_NUM_THREADS=1` and `OMP_NUM_THREADS=1` in
+the environment variables.
 
 There are a number of differences between the Sundials and diffsol implementations that may affect the performance of
 the solvers. The main differences are:
