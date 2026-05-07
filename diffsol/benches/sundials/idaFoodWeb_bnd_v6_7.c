@@ -92,11 +92,19 @@
 #include <stdlib.h>
 #include <math.h>
 
+#include <sundials/sundials_types.h>  /* definition of type realtype          */
+#if SUNDIALS_VERSION_MAJOR >= 7
+#define realtype sunrealtype
+#define RCONST SUN_RCONST
+#define SUNCTX_COMM 0
+#else
+#define SUNCTX_COMM NULL
+#endif
 #include <ida/ida.h>                  /* prototypes for IDA fcts., consts.    */
 #include <nvector/nvector_serial.h>   /* access to serial N_Vector            */
 #include <sunmatrix/sunmatrix_band.h> /* access to band SUNMatrix             */
 #include <sunlinsol/sunlinsol_band.h> /* access to band SUNLinearSolver       */
-#include <sundials/sundials_types.h>  /* definition of type realtype          */
+#include <sundials/sundials_direct.h>
 
 /* Problem Constants. */
 
@@ -192,7 +200,7 @@ int FUNC_NAME(void)
   LS = NULL;
 
   /* Create the SUNDIALS context object for this simulation */
-  retval = SUNContext_Create(NULL, &ctx);
+  retval = SUNContext_Create(SUNCTX_COMM, &ctx);
   if (check_retval(&retval, "SUNContext_Create", 1))
     return 1;
 

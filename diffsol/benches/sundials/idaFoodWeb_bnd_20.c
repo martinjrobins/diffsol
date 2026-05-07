@@ -4,9 +4,8 @@
 
 #include <sundials/sundials_version.h>
 #if SUNDIALS_VERSION_MAJOR > 5
-#include "idaFoodWeb_bnd_v6.c"
+#include "idaFoodWeb_bnd_v6_7.c"
 #else
 #include "idaFoodWeb_bnd_v5.c"
 #endif
-
 
