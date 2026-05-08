@@ -43,6 +43,18 @@ impl<T: FaerScalar> From<Col<T>> for FaerVec<T> {
     }
 }
 
+impl<T: FaerScalar> FaerVec<T> {
+    pub fn check_for_nan(&self, label: &str) -> bool {
+        for i in 0..self.data.nrows() {
+            if unsafe { self.data.get_unchecked(i) }.is_nan() {
+                eprintln!("{}: NaN at index {}", label, i);
+                return true;
+            }
+        }
+        false
+    }
+}
+
 impl<T: FaerScalar> DefaultDenseMatrix for FaerVec<T> {
     type M = FaerMat<T>;
 }
@@ -217,7 +229,8 @@ impl<T: FaerScalar> Vector for FaerVec<T> {
             let yi = unsafe { y.data.get_unchecked(i) };
             let ai = unsafe { atol.data.get_unchecked(i) };
             let xi = unsafe { self.data.get_unchecked(i) };
-            let term = *xi / (yi.abs() * rtol + *ai);
+            let denom = yi.abs() * rtol + *ai;
+            let term = *xi / denom;
             acc += term * term;
         }
         acc / Self::T::from_f64(self.len() as f64).unwrap()
@@ -366,7 +379,8 @@ impl<'a, T: FaerScalar> VectorView<'a> for FaerVecRef<'a, T> {
             let yi = unsafe { y.data.get_unchecked(i) };
             let ai = unsafe { atol.data.get_unchecked(i) };
             let xi = unsafe { self.data.get_unchecked(i) };
-            let term = *xi / (yi.abs() * rtol + *ai);
+            let denom = yi.abs() * rtol + *ai;
+            let term = *xi / denom;
             acc += term * term;
         }
         acc / Self::T::from_f64(self.data.nrows() as f64).unwrap()

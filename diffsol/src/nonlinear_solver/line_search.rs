@@ -4,6 +4,7 @@ use crate::{
     nonlinear_solver::convergence::ConvergenceStatus,
     Convergence, InitialConditionSolverOptions, Scalar, Vector,
 };
+use log::warn;
 use num_traits::{FromPrimitive, One, Pow};
 
 /// Line search trait for nonlinear solvers
@@ -130,6 +131,10 @@ impl<V: Vector> LineSearch<V> for BacktrackingLineSearch<V> {
 
             self.norm = convergence.norm(delta, error_y);
 
+            if self.norm.is_nan() {
+                warn!("Linesearch: Convergence norm is NaN on first iteration. Check model for NaN in residual computation.");
+            }
+
             // if we've already converged, take the step and return
             if let ConvergenceStatus::Converged = convergence.check_norm(self.norm) {
                 x.sub_assign(&*delta);
@@ -151,6 +156,7 @@ impl<V: Vector> LineSearch<V> for BacktrackingLineSearch<V> {
         let two_phi0 = norm * norm;
         let min_alpha = self.steptol / norm;
         let mut alpha = V::T::one();
+
         for i in 0..self.max_iter {
             // take the step and recompute the norm
             x.axpy(-alpha, &self.delta0, V::T::one());
@@ -168,18 +174,29 @@ impl<V: Vector> LineSearch<V> for BacktrackingLineSearch<V> {
             // directional derivative for phi along p is: grad_phi^T p = F^T J p = -||F||^2
             // so the Armijo condition reduces to phi(u+α p) <= phi0 - c * α * ||F||^2``
             let phi1 = new_norm * new_norm * half;
+
             if phi1 <= phi0 - self.c * alpha * two_phi0 {
                 self.norm = new_norm;
                 return Ok(convergence.check_norm(new_norm));
             }
-            alpha *= self.tau;
             if alpha < min_alpha {
+                warn!(
+                    "Linesearch: Step size fell below minimum threshold. This usually indicates: \
+                    (1) model produces NaN/Inf, (2) very ill-conditioned Jacobian, or (3) incorrect initial conditions."
+                );
                 return Err(non_linear_solver_error!(LinesearchFailedMinStep));
             }
+
+            alpha *= self.tau;
 
             // reset x
             x.copy_from(&self.x0);
         }
+        warn!(
+            "Linesearch: Failed to find acceptable step after {} iterations. \
+            This usually indicates a stiff problem or model producing NaN/Inf values.",
+            self.max_iter
+        );
         Err(non_linear_solver_error!(LinesearchFailedMaxIterations))
     }
 }

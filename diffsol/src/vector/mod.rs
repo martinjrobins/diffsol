@@ -1,7 +1,7 @@
 use crate::matrix::DenseMatrix;
 use crate::scalar::Scale;
 use crate::{Context, IndexType, Scalar};
-use num_traits::Zero;
+use num_traits::{Zero, Signed};
 use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
@@ -306,6 +306,19 @@ pub trait Vector:
         let tol = tol.clone_as_vec();
         Self::assert_eq_vec(s, other, tol);
     }
+
+    /// Check if the vector contains any NaN or infinite values.
+    /// Returns `Some((index, value))` for the first invalid value found, or `None` if all values are finite.
+    fn check_finite(&self) -> Option<(IndexType, Self::T)> {
+        for i in 0..self.len() {
+            let val = self.get_index(i);
+            if val.is_nan() || val.abs() == Self::T::INFINITY {
+                return Some((i, val));
+            }
+        }
+        None
+    }
+
 
     fn assert_eq_vec(s: Vec<Self::T>, other: Vec<Self::T>, tol: Vec<Self::T>) {
         for i in 0..s.len() {
