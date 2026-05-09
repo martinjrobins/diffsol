@@ -1,7 +1,7 @@
 use crate::matrix::DenseMatrix;
 use crate::scalar::Scale;
 use crate::{Context, IndexType, Scalar};
-use num_traits::{Zero, Signed};
+use num_traits::{Signed, Zero};
 use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Div, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
 
@@ -318,7 +318,6 @@ pub trait Vector:
         }
         None
     }
-
 
     fn assert_eq_vec(s: Vec<Self::T>, other: Vec<Self::T>, tol: Vec<Self::T>) {
         for i in 0..s.len() {
