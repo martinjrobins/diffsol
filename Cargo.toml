@@ -14,14 +14,14 @@ repository = "https://github.com/martinjrobins/diffsol"
 [workspace.dependencies]
 nalgebra = "0.34"
 faer = { version = "0.24", default-features = false, features = [
-    "std",
-    "sparse-linalg",
-    "rand",
-    "npy",
+  "std",
+  "sparse-linalg",
+  "rand",
+  "npy",
 ] }
 faer-traits = "0.24"
 cudarc = { version = "0.19", default-features = false }
-diffsl = { version = "0.11.8", features = ["rayon"] }
+diffsl = { version = "0.11.9", features = ["rayon"] }
 
 plotly = { version = "0.14" }
 argmin = { version = "0.11.0" }
