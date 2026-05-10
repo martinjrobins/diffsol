@@ -35,12 +35,6 @@ macro_rules! gen_find_non_zeros_nonlinear {
                     }
                     col.set_index(i, F::T::zero());
                 }
-                // OR:
-                //col.clone_as_vec().into_iter().for_each(|v| {
-                //    if v.is_nan() {
-                //        triplets.push((0, 0));
-                //    }
-                //});
                 col.fill(F::T::zero());
                 v.set_index(j, F::T::zero());
             }
@@ -218,16 +212,6 @@ impl<M: Matrix> JacobianColoring<M> {
             scratch_col,
         }
     }
-
-    //pub fn new_non_linear<F: NonLinearOp<M = M>>(op: &F) -> Self {
-    //    let non_zeros = find_non_zeros_nonlinear(op, &F::V::zeros(op.nstates()), F::T::zero());
-    //    Self::new_from_non_zeros(op, non_zeros)
-    //}
-
-    //pub fn new_linear<F: LinearOp<M = M>>(op: &F) -> Self {
-    //    let non_zeros = find_non_zeros_linear(op, F::T::zero());
-    //    Self::new_from_non_zeros(op, non_zeros)
-    //}
 
     /// Compute the Jacobian matrix in-place using the coloring scheme.
     ///
