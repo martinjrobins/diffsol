@@ -23,7 +23,7 @@ use crate::{
     valid_linear_solver::{KluValidator, LuValidator},
 };
 
-/// Enumerates the possible ODE solver methods for diffsol. See the solver descriptions in the diffsol documentation (https://github.com/martinjrobins/diffsol) for more details.
+/// Enumerates the possible ODE solver methods for diffsol. See the solver descriptions in the diffsol documentation (<https://github.com/martinjrobins/diffsol>) for more details.
 ///
 /// :attr bdf: Backward Differentiation Formula (BDF) method for stiff ODEs and singular mass matrices
 /// :attr esdirk34: Explicit Singly Diagonally Implicit Runge-Kutta (ESDIRK) method for moderately stiff ODEs and singular mass matrices.
