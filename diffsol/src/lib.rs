@@ -20,6 +20,9 @@
 //!
 //! To view the state within a solver, you can use the [OdeSolverMethod::state] or [OdeSolverMethod::state_mut] methods. These will return references to the state using either the [StateRef] or [StateRefMut] structs
 //!
+//! Note that many of the solver creation methods (e.g. [OdeSolverProblem::bdf]) will create and initialise a new state for you, so you might not need to manually create a state in many cases.
+//! However, if you want to have more control over the initialisation of the state, or you want to reuse a state across multiple solvers, then you can create and initialise the state manually as described above.
+//!
 //! ## The solver
 //!
 //! To solve the problem given the initial state, you need to choose a solver. Diffsol provides the following solvers:
@@ -30,18 +33,19 @@
 //! These create a new solver from a provided state and problem. Alternatively, you can create both the solver and the state at once using [OdeSolverProblem::bdf], [OdeSolverProblem::tr_bdf2], [OdeSolverProblem::esdirk34].
 //!
 //! See the [OdeSolverMethod] trait for a more detailed description of the available methods on each solver. Possible workflows are:
+//! - Use the high-level functions [OdeSolverMethod::solve] or [OdeSolverMethod::solve_dense] that will both initialise the problem and solve the problem up to a specific time or a sequence of times.
+//! - Use [Solution::new] or [Solution::new_dense] to create a new solution and step through one or more solve segments using the [OdeSolverMethod::solve_soln] method.
 //! - Use the [OdeSolverMethod::step] method to step the solution forward in time with an internal time step chosen by the solver to meet the error tolerances.
 //! - Use the [OdeSolverMethod::interpolate] method to interpolate the solution between the last two time steps.
 //! - Use the [OdeSolverMethod::set_stop_time] method to stop the solver at a specific time (i.e. this will override the internal time step so that the solver stops at the specified time).
-//! - Alternatively, use the convenience functions [OdeSolverMethod::solve] or [OdeSolverMethod::solve_dense] that will both initialise the problem and solve the problem up to a specific time or a sequence of times.
 //!
 //! ## DiffSL
 //!
 //! DiffSL is a domain-specific language for specifying differential equations <https://github.com/martinjrobins/diffsl>. It uses the LLVM compiler framwork
 //! to compile the equations to efficient machine code and uses the EnzymeAD library to compute the jacobian.
 //!
-//! You can use DiffSL with Diffsol using the [DiffSlContext] and [DiffSl] structs and [OdeBuilder::build_from_eqn] method. You need to enable one of the `diffsl-llvm*` features
-//! corresponding to the version of LLVM you have installed. E.g. to use your LLVM 10 installation, enable the `diffsl-llvm10` feature.
+//! You can use DiffSL with Diffsol using the [DiffSl] struct, which is created using the [OdeBuilder::build_from_diffsl] method. You need to enable one of the `diffsl-llvm*` features
+//! corresponding to the version of LLVM you have installed. E.g. to use your LLVM 17 installation, enable the `diffsl-llvm17` feature.
 //!
 //! For more information on the DiffSL language, see the [DiffSL documentation](https://martinjrobins.github.io/diffsl/)
 //!
@@ -108,6 +112,24 @@
 //!
 //! If you wish to manually do the timestepping, then the best place to start is by looking at the source code for the [AdjointOdeSolverMethod::solve_adjoint_backwards_pass] method. During the solution of the forwards problem
 //! you will need to use checkpointing to store the solution at a set of times, and you can see how this is done in the [OdeSolverMethod::solve_with_checkpointing] method.
+//!
+//! ## Resets
+//!
+//! Diffsol supports a reset operator `R(y)` which maps the current state to a new state at the
+//! same point in time. You provide the reset via methods like [OdeBuilder::reset] or [OdeBuilder::reset_implicit].
+//!
+//! ### Automatic resets
+//!
+//! When using [`OdeSolverMethod::solve`] or [`OdeSolverMethod::solve_dense`], and the solver stops with
+//! [`OdeSolverStopReason::RootFound`], the reset is applied automatically if one is configured. After applying
+//! the reset, the solver continues integrating to the final time.
+//!
+//! ### Manual resets
+//!
+//! When stepping manually with [OdeSolverMethod::step] or [OdeSolverMethod::solve_soln], after encountering a root event you can apply the reset
+//! via [`OdeSolverMethod::apply_reset`] (for forward problems) or
+//! [`OdeSolverMethod::apply_reset_with_sens`] (for forward sensitivity problems). For adjoint problems, use [`OdeBuilder::reset_adjoint_implicit`] during the backwards pass to
+//! provide the corrections to the adjoint equations.
 //!
 //! ## Nonlinear and linear solvers
 //!
