@@ -14,9 +14,9 @@
 //! the [OdeBuilder::build] function to create a [OdeSolverProblem].
 //!
 //! You will also need to choose a matrix type to use. Diffsol can use the
-//! [nalgebra](https://nalgebra.org) `DMatrix` type, the
-//! [faer](https://github.com/sarah-ek/faer-rs) `Mat` type, or any other type that implements the
-//! [Matrix] trait.
+//! [nalgebra](https://nalgebra.org) type via [NalgebraMat], the
+//! [faer](https://github.com/sarah-ek/faer-rs) type via [FaerMat],
+//! or you can use any other type that implements the [Matrix] trait.
 //!
 //! ## Initial state
 //!
@@ -45,8 +45,8 @@
 //!    - A Backwards Difference Formulae [Bdf] solver, suitable for stiff problems
 //!      and singular mass matrices.
 //!    - A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver
-//!     [Sdirk]. You can use your own butcher tableau using [Tableau] or use one of the provided
-//!     ([Tableau::tr_bdf2], [Tableau::esdirk34]).
+//!      [Sdirk]. You can use your own butcher tableau using [Tableau] or use one of the provided
+//!      ([Tableau::tr_bdf2], [Tableau::esdirk34]).
 //!    - A variable order Explict Runge-Kutta (ERK) solver, suitable for non-stiff problems.
 //!      One butcher tableau is provided, the 4th order [Tableau::tsit45].
 //!
@@ -68,7 +68,7 @@
 //!    - Use [Solution::new] or [Solution::new_dense] to create a new solution and step through
 //!      one or more solve segments using the [OdeSolverMethod::solve_soln] method.
 //!    - Use the [OdeSolverMethod::step] method to step the solution forward in time with an internal
-//!     time step chosen by the solver to meet the error tolerances.
+//!      time step chosen by the solver to meet the error tolerances.
 //!    - Use the [OdeSolverMethod::interpolate] method to interpolate the solution between he last two time steps.
 //!    - Use the [OdeSolverMethod::set_stop_time] method to stop the solver at a specific time
 //!      (i.e. this will override the internal time step so that the solver stops at the specified time).
@@ -196,16 +196,16 @@
 //!
 //! ### Automatic resets
 //!
-//! When using [`OdeSolverMethod::solve`] or [`OdeSolverMethod::solve_dense`], and the solver stops
+//! When using [OdeSolverMethod::solve] or [OdeSolverMethod::solve_dense], and the solver stops
 //! with [OdeSolverStopReason::RootFound], the reset is applied automatically if one is
 //! configured. After applying the reset, the solver continues integrating to the final time.
 //!
 //! ### Manual resets
 //!
 //! When stepping manually with [OdeSolverMethod::step] or [OdeSolverMethod::solve_soln], after
-//! encountering a root event you can apply the reset via [`OdeSolverMethod::apply_reset`] (for
-//! forward problems) or [`OdeSolverMethod::apply_reset_with_sens`] (for forward sensitivity
-//! problems). For adjoint problems, use [`OdeBuilder::reset_adjoint_implicit`] during the
+//! encountering a root event you can apply the reset via [OdeSolverMethod::apply_reset] (for
+//! forward problems) or [OdeSolverMethod::apply_reset_with_sens] (for forward sensitivity
+//! problems). For adjoint problems, use [OdeBuilder::reset_adjoint_implicit] during the
 //! backwards pass to provide the corrections to the adjoint equations.
 //!
 //! ## Nonlinear and linear solvers
@@ -221,7 +221,7 @@
 //!   - [FaerLU]: a direct solver that uses the LU decomposition implemented in the
 //!     [faer](https://github.com/sarah-ek/faer-rs) library.
 //!   - [FaerSparseLU]: a sparse direct solver that uses the sparse LU decomposition implemented
-//!      in the [faer](https://github.com/sarah-ek/faer-rs).
+//!     in the [faer](https://github.com/sarah-ek/faer-rs).
 //!
 //! The provided nonlinear solvers are: - [NewtonNonlinearSolver]: a nonlinear solver that uses the
 //! Newton method.
