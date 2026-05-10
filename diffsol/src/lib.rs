@@ -41,39 +41,50 @@
 //! ## The solver
 //!
 //! To solve the problem given the initial state, you need to choose a solver. Diffsol provides the
-//! following solvers: - A Backwards Difference Formulae [Bdf] solver, suitable for stiff problems
-//! and singular mass matrices. - A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver
-//! [Sdirk]. You can use your own butcher tableau using [Tableau] or use one of the provided
-//! ([Tableau::tr_bdf2], [Tableau::esdirk34]).
+//! following solvers:
+//!    - A Backwards Difference Formulae [Bdf] solver, suitable for stiff problems
+//!      and singular mass matrices.
+//!    - A Singly Diagonally Implicit Runge-Kutta (SDIRK or ESDIRK) solver
+//!     [Sdirk]. You can use your own butcher tableau using [Tableau] or use one of the provided
+//!     ([Tableau::tr_bdf2], [Tableau::esdirk34]).
+//!    - A variable order Explict Runge-Kutta (ERK) solver, suitable for non-stiff problems.
+//!      One butcher tableau is provided, the 4th order [Tableau::tsit45].
 //!
 //! The easiest way to create a solver is to use one of the provided methods on the
-//! [OdeSolverProblem] struct ([OdeSolverProblem::bdf_solver], [OdeSolverProblem::tr_bdf2_solver],
-//! [OdeSolverProblem::esdirk34_solver]). These create a new solver from a provided state and
-//! problem. Alternatively, you can create both the solver and the state at once using
-//! [OdeSolverProblem::bdf], [OdeSolverProblem::tr_bdf2], [OdeSolverProblem::esdirk34].
+//! [OdeSolverProblem] struct ([OdeSolverProblem::bdf], [OdeSolverProblem::tr_bdf2],
+//! [OdeSolverProblem::esdirk34], [OdeSolverProblem::tsit45]). These will create a new solver and a new state that is
+//! initialised with the initial conditions provided in the problem. If you want more control over the
+//! initialisation of the state, or you want to reuse a state across multiple solvers, then you can create
+//! a state manually as described above, and then create a solver using the corresponding method on the
+//! [OdeSolverProblem] struct that takes a state as an argument
+//! ([OdeSolverProblem::bdf_solver], [OdeSolverProblem::tr_bdf2_solver], [OdeSolverProblem::esdirk34_solver],
+//! [OdeSolverProblem::tsit45]).
 //!
 //! See the [OdeSolverMethod] trait for a more detailed description of the available methods on
-//! each solver. Possible workflows are: - Use the high-level functions [OdeSolverMethod::solve] or
-//! [OdeSolverMethod::solve_dense] that will both initialise the problem and solve the problem up
-//! to a specific time or a sequence of times. - Use [Solution::new] or [Solution::new_dense] to
-//! create a new solution and step through one or more solve segments using the
-//! [OdeSolverMethod::solve_soln] method. - Use the [OdeSolverMethod::step] method to step the
-//! solution forward in time with an internal time step chosen by the solver to meet the error
-//! tolerances. - Use the [OdeSolverMethod::interpolate] method to interpolate the solution between
-//! the last two time steps. - Use the [OdeSolverMethod::set_stop_time] method to stop the solver
-//! at a specific time (i.e. this will override the internal time step so that the solver stops at
-//! the specified time).
+//! each solver. Possible workflows are:
+//!    - Use the high-level functions [OdeSolverMethod::solve] or
+//!      [OdeSolverMethod::solve_dense] that will both initialise the problem and solve the problem up
+//!      to a specific time or a sequence of times.
+//!    - Use [Solution::new] or [Solution::new_dense] to create a new solution and step through
+//!      one or more solve segments using the [OdeSolverMethod::solve_soln] method.
+//!    - Use the [OdeSolverMethod::step] method to step the solution forward in time with an internal
+//!     time step chosen by the solver to meet the error tolerances.
+//!    - Use the [OdeSolverMethod::interpolate] method to interpolate the solution between he last two time steps.
+//!    - Use the [OdeSolverMethod::set_stop_time] method to stop the solver at a specific time
+//!      (i.e. this will override the internal time step so that the solver stops at the specified time).
 //!
 //! ## DiffSL
 //!
 //! DiffSL is a domain-specific language for specifying differential equations
-//! <https://github.com/martinjrobins/diffsl>. It uses the LLVM compiler framwork to compile the
-//! equations to efficient machine code and uses the EnzymeAD library to compute the jacobian.
+//! <https://github.com/martinjrobins/diffsl>. It uses the LLVM or Cranelift compiler frameworks
+//! to compile the equations to efficient machine code. The LLVM JIT backend also uses the EnzymeAD
+//! library to compute the jacobian and sensitivity/adjoint equations.
 //!
 //! You can use DiffSL with Diffsol using the [DiffSl] struct, which is created using the
 //! [OdeBuilder::build_from_diffsl] method. You need to enable one of the `diffsl-llvm*` features
 //! corresponding to the version of LLVM you have installed. E.g. to use your LLVM 17 installation,
-//! enable the `diffsl-llvm17` feature.
+//! enable the `diffsl-llvm17` feature. Or you can use the `diffsl-cranelift` feature to use the
+//! Cranelift backend.
 //!
 //! For more information on the DiffSL language, see the [DiffSL
 //! documentation](https://martinjrobins.github.io/diffsl/)
@@ -186,7 +197,7 @@
 //! ### Automatic resets
 //!
 //! When using [`OdeSolverMethod::solve`] or [`OdeSolverMethod::solve_dense`], and the solver stops
-//! with [`OdeSolverStopReason::RootFound`], the reset is applied automatically if one is
+//! with [OdeSolverStopReason::RootFound], the reset is applied automatically if one is
 //! configured. After applying the reset, the solver continues integrating to the final time.
 //!
 //! ### Manual resets
@@ -204,11 +215,13 @@
 //! provided traits. The linear solver trait is [LinearSolver], and the nonlinear solver trait is
 //! [NonLinearSolver].
 //!
-//! The provided linear solvers are: - [NalgebraLU]: a direct solver that uses the LU decomposition
-//! implemented in the [nalgebra](https://nalgebra.org) library. - [FaerLU]: a direct solver that
-//! uses the LU decomposition implemented in the [faer](https://github.com/sarah-ek/faer-rs)
-//! library. - [FaerSparseLU]: a sparse direct solver that uses the sparse LU decomposition
-//! implemented in the [faer](https://github.com/sarah-ek/faer-rs).
+//! The provided linear solvers are:
+//!   - [NalgebraLU]: a direct solver that uses the LU decomposition
+//!     implemented in the [nalgebra](https://nalgebra.org) library.
+//!   - [FaerLU]: a direct solver that uses the LU decomposition implemented in the
+//!     [faer](https://github.com/sarah-ek/faer-rs) library.
+//!   - [FaerSparseLU]: a sparse direct solver that uses the sparse LU decomposition implemented
+//!      in the [faer](https://github.com/sarah-ek/faer-rs).
 //!
 //! The provided nonlinear solvers are: - [NewtonNonlinearSolver]: a nonlinear solver that uses the
 //! Newton method.
@@ -216,15 +229,19 @@
 //! ## Matrix and vector types
 //!
 //! When solving ODEs, you will need to choose a matrix and vector type to use. Diffsol uses the
-//! following types: - [NalgebraVec] and [NalgebraMat] (wrappers around [nalgebra::DMatrix] and
-//! [nalgebra::DVector] from the [nalgebra](https://nalgebra.org) library). - [FaerVec], [FaerMat]
-//! and [FaerSparseMat] (wrappers around [faer::Mat], [faer::Col] and [faer::sparse::SparseColMat]
-//! from the [faer](https://github.com/sarah-ek/faer-rs) library).
+//! following types:
+//!   - [NalgebraVec] and [NalgebraMat] (wrappers around [nalgebra::DMatrix] and
+//!     [nalgebra::DVector] from the [nalgebra](https://nalgebra.org) library).
+//!   - [FaerVec], [FaerMat] and [FaerSparseMat]
+//!     (wrappers around [faer::Mat], [faer::Col] and [faer::sparse::SparseColMat]
+//!     from the [faer](https://github.com/sarah-ek/faer-rs) library).
 //!
 //! If you wish to use your own matrix and vector types, you will need to implement the following
-//! traits: - For matrices: [Matrix], [MatrixView], [MatrixViewMut], [DenseMatrix], and
-//! [MatrixCommon]. - For vectors: [Vector], [VectorIndex], [VectorView], [VectorViewMut], and
-//! [VectorCommon].
+//! traits:
+//!   - For matrices: [Matrix], [MatrixView], [MatrixViewMut], [DenseMatrix], and
+//!     [MatrixCommon].
+//!   - For vectors: [Vector], [VectorIndex], [VectorView], [VectorViewMut], and
+//!     [VectorCommon].
 //!
 
 #[cfg(feature = "diffsl")]
@@ -309,6 +326,8 @@ pub mod ode_equations;
 ///
 /// This module provides the complete ODE solving interface including:
 /// - [OdeSolverMethod] trait with implementations: [Bdf], [Sdirk], [ExplicitRk]
+/// - [SensitivitiesOdeSolverMethod] trait for solving forward sensitivity problems
+/// - [AdjointOdeSolverMethod] trait for solving adjoint sensitivity problems
 /// - [OdeSolverProblem] for problem setup (equations, parameters, tolerances, solver options etc.)
 /// - [OdeSolverState] for managing solution state (including state vector, sensitivities, time, step size etc.)
 /// - [OdeBuilder] for convenient problem construction (builds and configures [OdeSolverProblem])
