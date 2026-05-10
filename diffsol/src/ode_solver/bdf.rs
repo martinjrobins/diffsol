@@ -582,25 +582,14 @@ where
         let out = s_op.eqn().out().unwrap();
         out.call_inplace(&state.s[i], self.t_predict, &mut state.dsg[i]);
 
-        if let Some(op) = self.s_op.as_ref() {
-            op.integrate_out(
-                &state.dsg[i],
-                &state.sgdiff[i],
-                self.gamma.as_slice(),
-                self.alpha.as_slice(),
-                state.order,
-                &mut self.sg_deltas[i],
-            );
-        } else if let Some(s_op) = self.s_op.as_ref() {
-            s_op.integrate_out(
-                &state.dsg[i],
-                &state.sgdiff[i],
-                self.gamma.as_slice(),
-                self.alpha.as_slice(),
-                state.order,
-                &mut self.sg_deltas[i],
-            );
-        }
+        s_op.integrate_out(
+            &state.dsg[i],
+            &state.sgdiff[i],
+            self.gamma.as_slice(),
+            self.alpha.as_slice(),
+            state.order,
+            &mut self.sg_deltas[i],
+        );
     }
 
     fn update_differences_and_integrate_out(&mut self) {

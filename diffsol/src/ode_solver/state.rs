@@ -1,4 +1,4 @@
-use log::{debug, warn};
+use log::debug;
 use num_traits::FromPrimitive;
 use num_traits::{One, Pow, Signed, Zero};
 
@@ -909,22 +909,6 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
             state.y,
             algebraic_indices.clone(),
         );
-
-        // Validate initial state vectors
-        if let Some((idx, val)) = state.y.check_finite() {
-            warn!(
-                "Initial state vector y contains invalid value {} at index {}. \
-                This will likely cause the initial condition solver to fail.",
-                val, idx
-            );
-        }
-        if let Some((idx, val)) = state.dy.check_finite() {
-            warn!(
-                "Initial derivative vector dy contains invalid value {} at index {}. \
-                This will likely cause the initial condition solver to fail.",
-                val, idx
-            );
-        }
 
         debug!(
             "Found {} algebraic variables (zero diagonal in mass matrix) out of {} total states",
