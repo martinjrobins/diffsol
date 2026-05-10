@@ -30,7 +30,7 @@ You can add diffsol using `cargo add diffsol` or directly in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-diffsol = "0.10"
+diffsol = "0.13"
 ```
 
 Diffsol has the following features that can be enabled or disabled:
@@ -140,4 +140,4 @@ Diffsol makes heavy use of generic programming, which can make it difficult to u
 - <a id="3"></a> Jørgensen, J. B., Kristensen, M. R., & Thomsen, P. G. (2018). A family of ESDIRK integration methods. arXiv Preprint arXiv:1803.01613.
 - <a id="4"></a> Shampine, L. F., & Reichelt, M. W. (1997). The matlab ode suite. SIAM Journal on Scientific Computing, 18(1), 1–22.
 - <a id="5"></a> Virtanen, P., Gommers, R., Oliphant, T. E., Haberland, M., Reddy, T., Cournapeau, D., Burovski, E., Peterson, P., Weckesser, W., Bright, J., & others. (2020). SciPy 1.0: Fundamental algorithms for scientific computing in python. Nature Methods, 17(3), 261–272.
- - <a id="5"></a> Tsitouras, C. (2011). Runge–Kutta pairs of order 5 (4) satisfying only the first column simplifying assumption. Computers & Mathematics with Applications, 62(2), 770-775.
+- <a id="5"></a> Tsitouras, C. (2011). Runge–Kutta pairs of order 5 (4) satisfying only the first column simplifying assumption. Computers & Mathematics with Applications, 62(2), 770-775.
