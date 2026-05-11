@@ -134,11 +134,13 @@ fn hybrid_state(r: f64, t: f64) -> f64 {
     logistic_state(y0, A_VALUES[segment] * r, local_t)
 }
 
+#[cfg(feature = "diffsl-llvm")]
 fn hybrid_state_dr(r: f64, t: f64) -> f64 {
     let (segment, y0, local_t) = hybrid_segment(t);
     A_VALUES[segment] * logistic_state_dr(y0, A_VALUES[segment] * r, local_t)
 }
 
+#[cfg(feature = "diffsl-llvm")]
 fn hybrid_integral(r: f64, final_time: f64) -> f64 {
     let mut total = 0.0;
     let mut start = 0.0;
@@ -165,6 +167,7 @@ fn hybrid_integral(r: f64, final_time: f64) -> f64 {
     total
 }
 
+#[cfg(feature = "diffsl-llvm")]
 fn hybrid_integral_dr(r: f64, final_time: f64) -> f64 {
     let mut total = 0.0;
     let mut start = 0.0;
