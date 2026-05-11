@@ -430,24 +430,6 @@ fn deserialization_rejects_unavailable_jit_backend() {
     assert!(err.contains("unknown variant"));
 }
 
-#[cfg(all(feature = "diffsl-cranelift", not(feature = "diffsl-llvm")))]
-#[test]
-fn deserialization_rejects_unavailable_jit_backend() {
-    let ode = make_ode(
-        JitBackendType::Cranelift,
-        ScalarType::F64,
-        MatrixType::NalgebraDense,
-        OdeSolverType::Bdf,
-    );
-    let mut value = serde_json::to_value(&ode).unwrap();
-    value["jit_backend"] = serde_json::Value::String("llvm".to_string());
-    let err = serde_json::from_value::<OdeWrapper>(value)
-        .err()
-        .unwrap()
-        .to_string();
-    assert!(err.contains("unknown variant"));
-}
-
 #[cfg(feature = "diffsl-llvm")]
 #[test]
 fn bdf_forward_sensitivities_match_logistic_derivative_from_diffsl() {
