@@ -45,6 +45,7 @@
   - [Forward Sensitivities](./solve/forward_sens.md)
 - [Using Diffsol from other languages](./use/use_from_other_languages.md)
   - [Python](./use/python.md)
+  - [C and other languages](./use/c.md)
   - [WebAssembly](./use/webassembly.md)
   - [WebAssembly with JIT](./use/webassembly-jit.md)
 - [Benchmarks](./benchmarks/benchmarks.md)

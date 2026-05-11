@@ -107,6 +107,7 @@ fn time_reset_state(r: f64, t: f64) -> f64 {
     }
 }
 
+#[cfg(feature = "diffsl-llvm")]
 fn time_reset_state_dr(r: f64, t: f64) -> f64 {
     if t <= RESET_TIME {
         logistic_state_dr(INITIAL_Y, r, t)
@@ -115,6 +116,7 @@ fn time_reset_state_dr(r: f64, t: f64) -> f64 {
     }
 }
 
+#[cfg(feature = "diffsl-llvm")]
 fn time_reset_integral(r: f64, final_time: f64) -> f64 {
     if final_time <= RESET_TIME {
         logistic_integral(INITIAL_Y, r, final_time)
@@ -124,6 +126,7 @@ fn time_reset_integral(r: f64, final_time: f64) -> f64 {
     }
 }
 
+#[cfg(feature = "diffsl-llvm")]
 fn time_reset_integral_dr(r: f64, final_time: f64) -> f64 {
     if final_time <= RESET_TIME {
         logistic_integral_dr(INITIAL_Y, r, final_time)
