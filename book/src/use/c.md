@@ -22,25 +22,29 @@ implementations behind trait objects.
 
 ### Key types
 
-The central type is the [OdeWrapper](https://docs.rs/diffsol-c/latest/diffsol_c/struct.OdeWrapper.html), which wraps the solver state in an `Arc<Mutex<...>>` for safe sharing across threads and FFI boundaries. It provides methods to create, configure, solve, and serialize the solver.
+The central type is the
+[OdeWrapper](https://docs.rs/diffsol-c/latest/diffsol_c/ode/struct.OdeWrapper.html),
+which wraps the solver state in an `Arc<Mutex<...>>` for safe sharing across
+threads and FFI boundaries. It provides methods to create, configure, solve,
+and serialize the solver.
 
 Configuration is done via runtime enum types:
 
-- [OdeSolverType](https://docs.rs/diffsol-c/latest/diffsol_c/enum.OdeSolverType.html):
+- [OdeSolverType](https://docs.rs/diffsol-c/latest/diffsol_c/ode_solver_type/enum.OdeSolverType.html):
 the ODE integration method
-- [MatrixType](https://docs.rs/diffsol-c/latest/diffsol_c/enum.MatrixType.html):
+- [MatrixType](https://docs.rs/diffsol-c/latest/diffsol_c/matrix_type/enum.MatrixType.html):
 the linear algebra backend
-- [ScalarType](https://docs.rs/diffsol-c/latest/diffsol_c/enum.ScalarType.html):
+- [ScalarType](https://docs.rs/diffsol-c/latest/diffsol_c/scalar_type/enum.ScalarType.html):
 the floating-point precision for the solver
-- [LinearSolverType](https://docs.rs/diffsol-c/latest/diffsol_c/enum.LinearSolverType.html):
+- [LinearSolverType](https://docs.rs/diffsol-c/latest/diffsol_c/linear_solver_type/enum.LinearSolverType.html):
 the linear solver for implicit methods
-- [JitBackendType](https://docs.rs/diffsol-c/latest/diffsol_c/enum.JitBackendType.html):
+- [JitBackendType](https://docs.rs/diffsol-c/latest/diffsol_c/jit/enum.JitBackendType.html):
 the JIT compilation backend for DiffSL code
 
 Solution results are returned as a
-[SolutionWrapper](https://docs.rs/diffsol-c/latest/diffsol_c/struct.SolutionWrapper.html),
+[SolutionWrapper](https://docs.rs/diffsol-c/latest/diffsol_c/solution_wrapper/struct.SolutionWrapper.html),
 from which you can extract the time points, state values, and sensitivities as
-[HostArray](https://docs.rs/diffsol-c/latest/diffsol_c/struct.HostArray.html)
+[HostArray](https://docs.rs/diffsol-c/latest/diffsol_c/host_array/struct.HostArray.html)
 objects — read-only views of Rust-allocated data that can be accessed without
 copying.
 
