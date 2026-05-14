@@ -24,25 +24,12 @@ where
         fwd_state_minus: StateRef<'_, Eqn::V>,
         fwd_state_plus: StateRef<'_, Eqn::V>,
     ) -> Result<(), DiffsolError> {
-        let (reset, root) = {
-            let eqn = &self.problem().eqn;
-            (
-                eqn.reset().ok_or_else(|| {
-                    ode_solver_error!(Other, "No reset operator configured for this problem")
-                })?,
-                eqn.root().ok_or_else(|| {
-                    ode_solver_error!(Other, "No root operator configured for this problem")
-                })?,
-            )
-        };
         let integrate_out = self.problem().integrate_out;
         let (mut state, adj_eqn) = self
             .state_and_augmented_eqn_mut()
             .ok_or_else(|| ode_solver_error!(Other, "No augmented equations"))?;
-        state.state_mut_op_with_adjoint_and_reset(
+        state.apply_reset_with_adjoint(
             adj_eqn.eqn(),
-            &reset,
-            &root,
             root_idx,
             fwd_state_minus,
             fwd_state_plus,
