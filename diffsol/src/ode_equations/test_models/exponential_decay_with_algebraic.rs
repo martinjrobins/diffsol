@@ -2,7 +2,8 @@ use crate::{
     matrix::Matrix,
     ode_solver::problem::OdeSolverSolution,
     scalar::{scale, Scalar},
-    MatrixHost, OdeBuilder, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
+    ConstantOp, MatrixHost, NonLinearOpJacobian, NonLinearOpSens, NonLinearOpTimePartial,
+    OdeBuilder, OdeEquations, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
     OdeEquationsImplicitSens, OdeSolverProblem, Op, Vector,
 };
 use num_traits::{FromPrimitive, One, Zero};
@@ -360,6 +361,97 @@ pub fn exponential_decay_with_algebraic_problem_diffsl<
         let y: M::V = y0 * scale((-p[0] * t).exp());
         soln.push(y, t);
     }
+    (problem, soln)
+}
+
+fn exponential_decay_with_algebraic_reset_init<M: Matrix>(p: &M::V, _t: M::T, y: &mut M::V) {
+    y.fill(p.get_index(1));
+}
+
+fn exponential_decay_with_algebraic_reset_init_sens<M: Matrix>(
+    _p: &M::V,
+    _t: M::T,
+    v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(v.get_index(1));
+}
+
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_with_algebraic_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
+    OdeSolverProblem<
+        impl OdeEquationsImplicitSens<
+            M = M,
+            V = M::V,
+            T = M::T,
+            C = M::C,
+            Reset: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpSens<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpTimePartial<M = M, V = M::V, T = M::T, C = M::C>,
+            Root: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpSens<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpTimePartial<M = M, V = M::V, T = M::T, C = M::C>,
+        >,
+    >,
+    OdeSolverSolution<M::V>,
+) {
+    use super::exponential_decay::{
+        exponential_decay_reset_y_plus_2, exponential_decay_reset_y_plus_2_jac,
+        exponential_decay_reset_y_plus_2_sens, exponential_decay_root_0_6_and_2_0,
+        exponential_decay_root_0_6_and_2_0_jac, exponential_decay_root_0_6_and_2_0_sens,
+    };
+
+    let problem = OdeBuilder::<M>::new()
+        .p([0.1, 1.0])
+        .sens_rtol(1e-6)
+        .sens_atol([1e-6, 1e-6, 1e-6])
+        .rhs_sens_implicit(
+            exponential_decay_with_algebraic::<M>,
+            exponential_decay_with_algebraic_jacobian::<M>,
+            exponential_decay_with_algebraic_sens::<M>,
+        )
+        .init_sens(
+            exponential_decay_with_algebraic_reset_init::<M>,
+            exponential_decay_with_algebraic_reset_init_sens::<M>,
+            3,
+        )
+        .mass(exponential_decay_with_algebraic_mass::<M>)
+        .root_sens_implicit(
+            exponential_decay_root_0_6_and_2_0::<M>,
+            exponential_decay_root_0_6_and_2_0_jac::<M>,
+            exponential_decay_root_0_6_and_2_0_sens::<M>,
+            2,
+        )
+        .reset_sens_implicit(
+            exponential_decay_reset_y_plus_2::<M>,
+            exponential_decay_reset_y_plus_2_jac::<M>,
+            exponential_decay_reset_y_plus_2_sens::<M>,
+        )
+        .build()
+        .unwrap();
+
+    let t_root = M::T::from_f64(10.0 * (5.0_f64 / 3.0_f64).ln()).unwrap();
+    let dt = M::T::from_f64(10.0 * 1.3_f64.ln()).unwrap();
+    let t_stop = t_root + dt;
+
+    let y0 = problem.eqn.init().call(M::T::zero());
+    let ctx = y0.context().clone();
+    let nstates = problem.eqn.rhs().nstates();
+    let y_stop = M::V::from_element(nstates, M::T::from_f64(2.0).unwrap(), ctx.clone());
+
+    let s_k_val = -M::T::from_f64(2.0).unwrap() * t_stop;
+    let s_y0_val = M::T::from_f64(2.0).unwrap();
+
+    let s_k = M::V::from_element(nstates, s_k_val, ctx.clone());
+    let s_y0 = M::V::from_element(nstates, s_y0_val, ctx.clone());
+
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
+    soln.push_sens(y_stop, t_stop, &[s_k, s_y0]);
+
     (problem, soln)
 }
 

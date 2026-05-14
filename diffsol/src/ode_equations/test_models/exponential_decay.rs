@@ -839,15 +839,19 @@ pub fn exponential_decay_with_two_roots_problem<M: MatrixHost + 'static>() -> (
 // Reset:  y → y + 2   (component-wise; y_new = [2.6, 2.6])
 // ------------------------------------------------------------------
 
-fn exponential_decay_reset_y_plus_2<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+pub(crate) fn exponential_decay_reset_y_plus_2<M: Matrix>(
+    x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    y: &mut M::V,
+) {
     // R(y) = y + 2  (component-wise)
-    let nstates = 2;
-    for i in 0..nstates {
+    for i in 0..x.len() {
         y.set_index(i, x.get_index(i) + M::T::from_f64(2.0).unwrap());
     }
 }
 
-fn exponential_decay_reset_y_plus_2_jac<M: Matrix>(
+pub(crate) fn exponential_decay_reset_y_plus_2_jac<M: Matrix>(
     _x: &M::V,
     _p: &M::V,
     _t: M::T,
@@ -858,14 +862,19 @@ fn exponential_decay_reset_y_plus_2_jac<M: Matrix>(
     y.copy_from(v);
 }
 
-fn exponential_decay_root_0_6_and_2_0<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+pub(crate) fn exponential_decay_root_0_6_and_2_0<M: Matrix>(
+    x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    y: &mut M::V,
+) {
     // Root 0: y[0] = 0.6  (reset trigger)
     y.set_index(0, x.get_index(0) - M::T::from_f64(0.6).unwrap());
     // Root 1: y[0] = 2.0  (stop; fires after reset when y decays from 2.6 to 2.0)
     y.set_index(1, x.get_index(0) - M::T::from_f64(2.0).unwrap());
 }
 
-fn exponential_decay_root_0_6_and_2_0_jac<M: Matrix>(
+pub(crate) fn exponential_decay_root_0_6_and_2_0_jac<M: Matrix>(
     _x: &M::V,
     _p: &M::V,
     _t: M::T,
@@ -876,7 +885,7 @@ fn exponential_decay_root_0_6_and_2_0_jac<M: Matrix>(
     y.set_index(1, v.get_index(0));
 }
 
-fn exponential_decay_root_0_6_and_2_0_sens<M: Matrix>(
+pub(crate) fn exponential_decay_root_0_6_and_2_0_sens<M: Matrix>(
     _x: &M::V,
     _p: &M::V,
     _t: M::T,
@@ -886,7 +895,7 @@ fn exponential_decay_root_0_6_and_2_0_sens<M: Matrix>(
     y.fill(M::T::zero());
 }
 
-fn exponential_decay_reset_y_plus_2_sens<M: Matrix>(
+pub(crate) fn exponential_decay_reset_y_plus_2_sens<M: Matrix>(
     _x: &M::V,
     _p: &M::V,
     _t: M::T,
