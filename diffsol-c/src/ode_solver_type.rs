@@ -101,7 +101,7 @@ where
         problem.eqn.set_model_index(root_idx);
         state
             .as_mut()
-            .apply_reset_with_sens(&problem.eqn, root_idx)?;
+            .apply_reset_with_sens::<_, M::LS>(problem, root_idx)?;
         solver = Tag::solver_sens_with_state::<LS>(problem, state)?;
     }
     Ok(soln)

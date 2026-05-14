@@ -8,7 +8,7 @@ use crate::{
     scalar::Scalar,
     AugmentedOdeEquations, Checkpointing, CheckpointingPath, Context, DefaultDenseMatrix,
     DefaultSolver, DenseMatrix, HermiteInterpolator, MatrixCommon,
-    NewtonNonlinearSolver, NoLineSearch, NonLinearOp, OdeEquations, OdeSolverConfig,
+    NonLinearOp, OdeEquations, OdeSolverConfig,
     OdeSolverProblem, OdeSolverState, Op, Solution, StateRef, StateRefMut, Vector, VectorViewMut,
 };
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -191,22 +191,11 @@ where
     fn apply_reset_with_sens(&mut self, root_idx: usize) -> Result<(), DiffsolError>
     where
         Eqn: OdeEquationsImplicitSens,
+        Eqn::M: DefaultSolver,
     {
-        let (rhs, has_mass, reset, root) = {
-            let eqn = &self.problem().eqn;
-            (
-                eqn.rhs(),
-                eqn.mass().is_some(),
-                eqn.reset().ok_or_else(|| {
-                    ode_solver_error!(Other, "No reset operator configured for this problem")
-                })?,
-                eqn.root().ok_or_else(|| {
-                    ode_solver_error!(Other, "No root operator configured for this problem")
-                })?,
-            )
-        };
+        let problem = self.problem();
         self.state_mut()
-            .state_mut_op_with_sens_and_reset(&rhs, has_mass, &reset, &root, root_idx)
+            .apply_reset_with_sens::<_, <Eqn::M as DefaultSolver>::LS>(problem, root_idx)
     }
 
     /// Get the current order of accuracy of the solver (e.g. explict euler method is first-order)
@@ -1536,5 +1525,80 @@ mod test {
             problem.rtol,
             20.0,
         );
+    }
+
+    #[test]
+    fn test_solve_dense_sensitivities_with_reset_fd() {
+        let (mut problem, _soln) = exponential_decay_with_reset_problem_sens::<NalgebraMat<f64>>();
+
+        let t_event = 10.0 * (5.0_f64 / 3.0_f64).ln();
+        let post_event_dt = 0.1;
+        let t_eval = vec![0.0, t_event + post_event_dt, t_event + post_event_dt + 0.1];
+
+        let (ret, ret_sens, stop_reason) = {
+            let mut s = problem.bdf_sens::<NalgebraLU<f64>>().unwrap();
+            s.solve_dense_sensitivities(&t_eval).unwrap()
+        };
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
+        assert_eq!(ret.ncols(), t_eval.len());
+        for ret_sens_j in &ret_sens {
+            assert_eq!(ret_sens_j.ncols(), t_eval.len());
+        }
+
+        let nparams = problem.eqn.nparams();
+        let ctx = problem.eqn.context().clone();
+        let mut p_nom = NalgebraVec::zeros(nparams, ctx.clone());
+        problem.eqn.get_params(&mut p_nom);
+
+        let fd_eps = 1e-6;
+
+        for iparam in 0..nparams {
+            let p_nom_i = p_nom.get_index(iparam);
+            let h = fd_eps * (1.0 + p_nom_i.abs());
+
+            let mut p = p_nom.clone();
+            p.set_index(iparam, p_nom_i + h);
+            problem.eqn.set_params(&p);
+            let y_plus = {
+                let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
+                let (ret_p, reason_p) = s.solve_dense(&t_eval).unwrap();
+                assert_eq!(reason_p, OdeSolverStopReason::TstopReached);
+                ret_p
+            };
+
+            p.set_index(iparam, p_nom_i - h);
+            problem.eqn.set_params(&p);
+            let y_minus = {
+                let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
+                let (ret_m, reason_m) = s.solve_dense(&t_eval).unwrap();
+                assert_eq!(reason_m, OdeSolverStopReason::TstopReached);
+                ret_m
+            };
+
+            problem.eqn.set_params(&p_nom);
+
+            for jcol in 0..t_eval.len() {
+                let fd_sens =
+                    (y_plus.column(jcol).into_owned() - y_minus.column(jcol).into_owned())
+                        / scale(2.0 * h);
+                let actual_sens = ret_sens[iparam].column(jcol).into_owned();
+                let error = fd_sens.clone() - &actual_sens;
+                let abs_tol: f64 = 1e-2;
+                let rel_tol: f64 = 1e-3;
+                let max_abs_err = error
+                    .get_index(0)
+                    .abs()
+                    .max(error.get_index(1).abs());
+                let ref_scale = actual_sens
+                    .get_index(0)
+                    .abs()
+                    .max(actual_sens.get_index(1).abs());
+                assert!(
+                    max_abs_err < abs_tol || max_abs_err < rel_tol * ref_scale,
+                    "FD sensitivity mismatch for param {iparam} at col {jcol} (t={}); max_abs_err={max_abs_err:e}, ref_scale={ref_scale:e}",
+                    t_eval[jcol],
+                );
+            }
+        }
     }
 }

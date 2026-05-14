@@ -1288,6 +1288,7 @@ mod tests {
     ) where
         Eqn: OdeEquationsImplicitSens + 'a,
         Eqn::V: DefaultDenseMatrix,
+        Eqn::M: DefaultSolver,
         Method: SensitivitiesOdeSolverMethod<'a, Eqn>,
     {
         let t_stop = soln.solution_points[0].t;
