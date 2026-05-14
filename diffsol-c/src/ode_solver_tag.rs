@@ -1,17 +1,17 @@
 use diffsol::matrix::MatrixRef;
 use diffsol::{
     AdjointEquations, AdjointOdeSolverMethod, Bdf, BdfState, CheckpointingPath, CodegenModule,
-    DefaultDenseMatrix, DiffSl, DiffsolError, ExplicitRk, LinearSolver, Matrix,
-    NewtonNonlinearSolver, NoLineSearch, OdeEquations, OdeEquationsImplicitAdjoint,
-    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverProblem, OdeSolverState, RkState, Sdirk,
-    SensEquations, SensitivitiesOdeSolverMethod, VectorRef,
+    DefaultDenseMatrix, DefaultSolver, DiffSl, DiffsolError, ExplicitRk, LinearSolver, Matrix,
+    NewtonNonlinearSolver, NoLineSearch, OdeEquations,
+    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverProblem,
+    OdeSolverState, RkState, Sdirk, SensEquations, SensitivitiesOdeSolverMethod, VectorRef,
 };
 
 use crate::scalar_type::Scalar;
 
 pub(crate) trait OdeSolverMethodTag<M, CG>
 where
-    M: Matrix<T: Scalar>,
+    M: Matrix<T: Scalar> + DefaultSolver,
     CG: CodegenModule,
     DiffSl<M, CG>: OdeEquations,
 {
@@ -122,7 +122,7 @@ pub(crate) struct Tsit45Tag;
 
 impl<M, CG> OdeSolverMethodTag<M, CG> for BdfTag
 where
-    M: Matrix<T: Scalar>,
+    M: Matrix<T: Scalar> + DefaultSolver,
     M::V: DefaultDenseMatrix<T = M::T, C = M::C>,
     CG: CodegenModule,
     DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>,
@@ -246,7 +246,7 @@ where
 
 impl<M, CG> OdeSolverMethodTag<M, CG> for Esdirk34Tag
 where
-    M: Matrix<T: Scalar>,
+    M: Matrix<T: Scalar> + DefaultSolver,
     M::V: DefaultDenseMatrix<T = M::T, C = M::C>,
     CG: CodegenModule,
     DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>,
@@ -370,7 +370,7 @@ where
 
 impl<M, CG> OdeSolverMethodTag<M, CG> for TrBdf2Tag
 where
-    M: Matrix<T: Scalar>,
+    M: Matrix<T: Scalar> + DefaultSolver,
     M::V: DefaultDenseMatrix<T = M::T, C = M::C>,
     CG: CodegenModule,
     DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>,
@@ -494,7 +494,7 @@ where
 
 impl<M, CG> OdeSolverMethodTag<M, CG> for Tsit45Tag
 where
-    M: Matrix<T: Scalar>,
+    M: Matrix<T: Scalar> + DefaultSolver,
     M::V: DefaultDenseMatrix<T = M::T, C = M::C>,
     CG: CodegenModule,
     DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>,

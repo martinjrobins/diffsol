@@ -659,8 +659,10 @@ where
         if let Some(h) = h {
             *state.as_mut().h = -h;
         }
-        state.set_consistent(self, &mut newton_solver)?;
-        state.set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
+        state.as_mut().set_consistent(self, &mut newton_solver)?;
+        state
+            .as_mut()
+            .set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
         state.set_step_size(
             state.h,
             augmented_eqn.atol().unwrap(),
@@ -697,8 +699,10 @@ where
     {
         let mut newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
         let mut state = state;
-        state.set_consistent(self, &mut newton_solver)?;
-        state.set_consistent_augmented(self, &mut augmented_eqn, &mut newton_solver)?;
+        state.as_mut().set_consistent(self, &mut newton_solver)?;
+        state
+            .as_mut()
+            .set_consistent_augmented(self, &mut augmented_eqn, &mut newton_solver)?;
         let newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
         Bdf::new_augmented(state, self, augmented_eqn, newton_solver)
     }
@@ -950,8 +954,10 @@ where
             *state.as_mut().h = -h;
         }
         let mut newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
-        state.set_consistent(self, &mut newton_solver)?;
-        state.set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
+        state.as_mut().set_consistent(self, &mut newton_solver)?;
+        state
+            .as_mut()
+            .set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
         state.set_step_size(
             state.h,
             augmented_eqn.atol().unwrap(),
@@ -977,8 +983,10 @@ where
         Eqn: OdeEquationsImplicitAdjoint,
     {
         let mut newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
-        state.set_consistent(self, &mut newton_solver)?;
-        state.set_consistent_augmented(self, &mut augmented_eqn, &mut newton_solver)?;
+        state.as_mut().set_consistent(self, &mut newton_solver)?;
+        state
+            .as_mut()
+            .set_consistent_augmented(self, &mut augmented_eqn, &mut newton_solver)?;
         Sdirk::new_augmented(self, state, tableau, LS::default(), augmented_eqn)
     }
 

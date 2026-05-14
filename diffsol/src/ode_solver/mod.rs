@@ -242,6 +242,7 @@ mod tests {
     where
         Eqn: OdeEquationsImplicitAdjoint + 'a,
         LS: LinearSolver<Eqn::M>,
+        Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
         for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
         for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
@@ -308,6 +309,7 @@ mod tests {
     ) -> <Eqn::V as DefaultDenseMatrix>::M
     where
         Eqn: OdeEquationsImplicitAdjoint + 'a,
+        Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
         Method: OdeSolverMethod<'a, Eqn>,
         BuildForward: Fn(Option<Method::State>) -> Result<Method, DiffsolError>,
@@ -330,12 +332,9 @@ mod tests {
         let mut state_after_reset = first_forward_solver.state_clone();
         {
             let problem = first_forward_solver.problem();
-            let rhs = problem.eqn.rhs();
-            let has_mass = problem.eqn.mass().is_some();
-            let reset_fn = problem.eqn.reset().unwrap();
             state_after_reset
                 .as_mut()
-                .state_mut_op(&rhs, has_mass, &reset_fn)
+                .apply_reset::<<Eqn::M as DefaultSolver>::LS, _>(problem)
                 .unwrap();
         }
 
@@ -353,17 +352,15 @@ mod tests {
     fn state_after_manual_reset<'a, Eqn, Method>(solver: &Method) -> Method::State
     where
         Eqn: OdeEquationsImplicitAdjoint + 'a,
+        Eqn::M: DefaultSolver,
         Method: OdeSolverMethod<'a, Eqn>,
     {
         let mut state_after_reset = solver.state_clone();
         {
             let problem = solver.problem();
-            let rhs = problem.eqn.rhs();
-            let has_mass = problem.eqn.mass().is_some();
-            let reset_fn = problem.eqn.reset().unwrap();
             state_after_reset
                 .as_mut()
-                .state_mut_op(&rhs, has_mass, &reset_fn)
+                .apply_reset::<<Eqn::M as DefaultSolver>::LS, _>(problem)
                 .unwrap();
         }
         state_after_reset
@@ -379,6 +376,7 @@ mod tests {
     where
         Eqn: OdeEquationsImplicitAdjoint + 'a,
         LS: LinearSolver<Eqn::M>,
+        Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
         for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
         for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
@@ -1054,6 +1052,7 @@ mod tests {
         soln: OdeSolverSolution<Eqn::V>,
     ) where
         Eqn: OdeEquationsImplicit + 'a,
+        Eqn::M: DefaultSolver,
         Method: OdeSolverMethod<'a, Eqn>,
         Eqn::V: DefaultDenseMatrix,
     {
@@ -1134,7 +1133,8 @@ mod tests {
         mut solver: Method,
         soln: &OdeSolverSolution<Eqn::V>,
     ) where
-        Eqn: OdeEquations + 'a,
+        Eqn: OdeEquationsImplicit + 'a,
+        Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
         Method: OdeSolverMethod<'a, Eqn>,
     {
@@ -1211,7 +1211,8 @@ mod tests {
         mut solver: Method,
         soln: &OdeSolverSolution<Eqn::V>,
     ) where
-        Eqn: OdeEquations + 'a,
+        Eqn: OdeEquationsImplicit + 'a,
+        Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
         Method: OdeSolverMethod<'a, Eqn>,
     {

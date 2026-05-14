@@ -79,47 +79,193 @@ pub struct StateRefMut<'a, V: Vector> {
 }
 
 impl<V: Vector> StateRefMut<'_, V> {
+    /// Calculate a consistent state and time derivative of the state, based on the equations of the problem.
+    pub fn set_consistent<Eqn, S>(
+        &mut self,
+        ode_problem: &OdeSolverProblem<Eqn>,
+        root_solver: &mut S,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit<T = V::T, V = V, C = V::C>,
+        S: NonLinearSolver<Eqn::M>,
+    {
+        if ode_problem.eqn.mass().is_none() {
+            return Ok(());
+        }
+        let (algebraic_indices, _) = ode_problem
+            .eqn
+            .mass()
+            .unwrap()
+            .matrix(ode_problem.t0)
+            .partition_indices_by_zero_diagonal();
+        if algebraic_indices.is_empty() {
+            return Ok(());
+        }
+
+        // equations are:
+        // h(t, u, v, du) = 0
+        // g(t, u, v) = 0
+        // first we solve for du, v
+
+        debug!(
+            "Setting consistent initial conditions: checking mass matrix for algebraic constraints"
+        );
+
+        let f = InitOp::new(
+            &ode_problem.eqn,
+            ode_problem.t0,
+            self.y,
+            algebraic_indices.clone(),
+        );
+
+        debug!(
+            "Found {} algebraic variables (zero diagonal in mass matrix) out of {} total states",
+            algebraic_indices.len(),
+            self.y.len()
+        );
+
+        let rtol = ode_problem.rtol;
+        let atol = &ode_problem.atol;
+        root_solver.set_problem(&f);
+        let mut y_tmp = self.dy.clone();
+        y_tmp.copy_from_indices(self.y, &f.algebraic_indices);
+        let mut yerr = y_tmp.clone();
+        let mut convergence = Convergence::with_tolerance(
+            rtol,
+            atol,
+            ode_problem.ode_options.nonlinear_solver_tolerance,
+        );
+        convergence.set_max_iter(ode_problem.ic_options.max_newton_iterations);
+        let mut result = Ok(());
+        debug!("Setting consistent initial conditions at t = {}", self.t);
+        for _ in 0..ode_problem.ic_options.max_linear_solver_setups {
+            root_solver.reset_jacobian(&f, &y_tmp, *self.t);
+            result = root_solver.solve_in_place(&f, &mut y_tmp, *self.t, &yerr, &mut convergence);
+            match &result {
+                Ok(()) => break,
+                Err(DiffsolError::NonLinearSolverError(
+                    NonLinearSolverError::NewtonMaxIterations,
+                )) => (),
+                e => e.clone()?,
+            }
+            yerr.copy_from(&y_tmp);
+        }
+        if result.is_err() {
+            return Err(non_linear_solver_error!(InitialConditionDidNotConverge));
+        }
+        f.scatter_soln(&y_tmp, self.y, self.dy);
+        // dv is not solved for, so we set it to zero, it will be solved for in the first step of the solver
+        self.dy
+            .assign_at_indices(&algebraic_indices, Eqn::T::zero());
+        Ok(())
+    }
+
+    /// Calculate the initial sensitivity vectors and their time derivatives, based on the equations of the problem.
+    /// Note that this function assumes that the state is already consistent with the algebraic constraints
+    /// (either via [Self::set_consistent] or by setting the state up manually).
+    pub fn set_consistent_augmented<Eqn, AugmentedEqn, S>(
+        &mut self,
+        ode_problem: &OdeSolverProblem<Eqn>,
+        augmented_eqn: &mut AugmentedEqn,
+        root_solver: &mut S,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicit<T = V::T, V = V, C = V::C>,
+        AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> + std::fmt::Debug,
+        S: NonLinearSolver<AugmentedEqn::M>,
+    {
+        augmented_eqn.update_rhs_out_state(self.y, self.dy, *self.t);
+        let naug = augmented_eqn.max_index();
+        for i in 0..naug {
+            augmented_eqn.set_index(i);
+            augmented_eqn
+                .rhs()
+                .call_inplace(&self.s[i], *self.t, &mut self.ds[i]);
+        }
+
+        if ode_problem.eqn.mass().is_none() {
+            return Ok(());
+        }
+
+        let mut convergence = Convergence::with_tolerance(
+            ode_problem.rtol,
+            &ode_problem.atol,
+            ode_problem.ode_options.nonlinear_solver_tolerance,
+        );
+        convergence.set_max_iter(ode_problem.ic_options.max_newton_iterations);
+        let (algebraic_indices, _) = ode_problem
+            .eqn
+            .mass()
+            .unwrap()
+            .matrix(ode_problem.t0)
+            .partition_indices_by_zero_diagonal();
+        if algebraic_indices.is_empty() {
+            return Ok(());
+        }
+
+        for i in 0..naug {
+            augmented_eqn.set_index(i);
+            let f = InitOp::new(
+                augmented_eqn,
+                *self.t,
+                &self.s[i],
+                algebraic_indices.clone(),
+            );
+            root_solver.set_problem(&f);
+
+            let mut y = self.ds[i].clone();
+            y.copy_from_indices(&self.s[i], &f.algebraic_indices);
+            let mut yerr = y.clone();
+            let mut result = Ok(());
+            for _ in 0..ode_problem.ic_options.max_linear_solver_setups {
+                root_solver.reset_jacobian(&f, &y, *self.t);
+                result = root_solver.solve_in_place(&f, &mut y, *self.t, &yerr, &mut convergence);
+                match &result {
+                    Ok(()) => break,
+                    Err(DiffsolError::NonLinearSolverError(
+                        NonLinearSolverError::NewtonMaxIterations,
+                    )) => (),
+                    e => e.clone()?,
+                }
+                yerr.copy_from(&y);
+            }
+            if result.is_err() {
+                return Err(non_linear_solver_error!(InitialConditionDidNotConverge));
+            }
+            f.scatter_soln(&y, &mut self.s[i], &mut self.ds[i]);
+        }
+        Ok(())
+    }
+
     /// Apply the equation set's reset operator to the current state in-place.
     ///
-    /// This helper pulls the RHS, mass-matrix flag, and reset operator from `eqn`, checks that
-    /// a reset operator is configured, then delegates to [`Self::state_mut_op`].
-    pub fn apply_reset<Eqn>(&mut self, eqn: &Eqn) -> Result<(), DiffsolError>
+    /// Applies `op(y, t)` to update `y`, then recomputes `dy`. If the equations have no mass
+    /// matrix, `dy` is set directly from `rhs(y, t)`. If a mass matrix is present,
+    /// [`Self::set_consistent`] is called after the reset to ensure `y` and `dy` satisfy the
+    /// algebraic constraints.
+    pub fn apply_reset<LS, Eqn>(&mut self, problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError>
     where
-        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
+        Eqn: OdeEquationsImplicit<T = V::T, V = V, C = V::C>,
+        LS: LinearSolver<Eqn::M>,
     {
+        let eqn = &problem.eqn;
         let rhs = eqn.rhs();
-        let has_mass = eqn.mass().is_some();
         let reset = eqn.reset().ok_or_else(|| {
             ode_solver_error!(Other, "No reset operator configured for this problem")
         })?;
-        self.state_mut_op(&rhs, has_mass, &reset)
-    }
-
-    /// Apply a non-linear operator to the current state in-place, replacing `state.y` with
-    /// `op(state.y, state.t)` and recomputing `state.dy = rhs(state.y, state.t)`.
-    ///
-    /// Note: mass matrix equations are not supported for this operation.
-    pub fn state_mut_op<Rhs, O>(
-        &mut self,
-        rhs: &Rhs,
-        has_mass: bool,
-        op: &O,
-    ) -> Result<(), DiffsolError>
-    where
-        Rhs: NonLinearOp<T = V::T, V = V, C = V::C>,
-        O: NonLinearOp<T = V::T, V = V, M = Rhs::M, C = V::C>,
-    {
-        if has_mass {
-            return Err(ode_solver_error!(MassMatrixNotSupported));
-        }
 
         let nstates = rhs.nstates();
         let mut y_out = V::zeros(nstates, rhs.context().clone());
-        op.call_inplace(self.y, *self.t, &mut y_out);
-
+        reset.call_inplace(self.y, *self.t, &mut y_out);
         self.y.copy_from(&y_out);
-        rhs.call_inplace(self.y, *self.t, &mut y_out);
-        self.dy.copy_from(&y_out);
+
+        if eqn.mass().is_some() {
+            let mut root_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
+            self.set_consistent(problem, &mut root_solver)?;
+        } else {
+            rhs.call_inplace(self.y, *self.t, &mut y_out);
+            self.dy.copy_from(&y_out);
+        }
         Ok(())
     }
 
@@ -619,7 +765,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
     /// Create a new solver state from an ODE problem.
     /// This function will set the initial step size based on the given solver.
     /// If you want to create a state without this default initialisation, use [Self::new_without_initialise] instead.
-    /// You can then use [Self::set_consistent] and [Self::set_step_size] to set the state up if you need to.
+    /// You can then use [`StateRefMut::set_consistent`] and [Self::set_step_size] to set the state up if you need to.
     fn new<Eqn>(
         ode_problem: &OdeSolverProblem<Eqn>,
         solver_order: usize,
@@ -642,7 +788,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
     /// This function will make the state consistent with any algebraic constraints using a default nonlinear solver.
     /// It will also set the initial step size based on the given solver.
     /// If you want to create a state without this default initialisation, use [Self::new_without_initialise] instead.
-    /// You can then use [Self::set_consistent] and [Self::set_step_size] to set the state up if you need to.
+    /// You can then use [`StateRefMut::set_consistent`] and [Self::set_step_size] to set the state up if you need to.
     fn new_and_consistent<LS, Eqn>(
         ode_problem: &OdeSolverProblem<Eqn>,
         solver_order: usize,
@@ -658,10 +804,10 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
             ls.max_iter = ode_problem.ic_options.max_linesearch_iterations;
             ls.tau = ode_problem.ic_options.step_reduction_factor;
             let mut root_solver = NewtonNonlinearSolver::new(LS::default(), ls);
-            ret.set_consistent(ode_problem, &mut root_solver)?;
+            ret.as_mut().set_consistent(ode_problem, &mut root_solver)?;
         } else {
             let mut root_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
-            ret.set_consistent(ode_problem, &mut root_solver)?;
+            ret.as_mut().set_consistent(ode_problem, &mut root_solver)?;
         }
         ret.set_step_size(
             ode_problem.h0,
@@ -722,10 +868,10 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
             ls.max_iter = ode_problem.ic_options.max_linesearch_iterations;
             ls.tau = ode_problem.ic_options.step_reduction_factor;
             let mut root_solver = NewtonNonlinearSolver::new(LS::default(), ls);
-            ret.set_consistent(ode_problem, &mut root_solver)?;
+            ret.as_mut().set_consistent(ode_problem, &mut root_solver)?;
         } else {
             let mut root_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
-            ret.set_consistent(ode_problem, &mut root_solver)?;
+            ret.as_mut().set_consistent(ode_problem, &mut root_solver)?;
         }
         if ode_problem.ic_options.use_linesearch {
             let mut ls = BacktrackingLineSearch::default();
@@ -733,10 +879,18 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
             ls.max_iter = ode_problem.ic_options.max_linesearch_iterations;
             ls.tau = ode_problem.ic_options.step_reduction_factor;
             let mut root_solver_sens = NewtonNonlinearSolver::new(LS::default(), ls);
-            ret.set_consistent_augmented(ode_problem, &mut augmented_eqn, &mut root_solver_sens)?;
+            ret.as_mut().set_consistent_augmented(
+                ode_problem,
+                &mut augmented_eqn,
+                &mut root_solver_sens,
+            )?;
         } else {
             let mut root_solver_sens = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
-            ret.set_consistent_augmented(ode_problem, &mut augmented_eqn, &mut root_solver_sens)?;
+            ret.as_mut().set_consistent_augmented(
+                ode_problem,
+                &mut augmented_eqn,
+                &mut root_solver_sens,
+            )?;
         }
         ret.set_step_size(
             ode_problem.h0,
@@ -870,167 +1024,6 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
         Ok(())
     }
 
-    /// Calculate a consistent state and time derivative of the state, based on the equations of the problem.
-    fn set_consistent<Eqn, S>(
-        &mut self,
-        ode_problem: &OdeSolverProblem<Eqn>,
-        root_solver: &mut S,
-    ) -> Result<(), DiffsolError>
-    where
-        Eqn: OdeEquationsImplicit<T = V::T, V = V, C = V::C>,
-        S: NonLinearSolver<Eqn::M>,
-    {
-        if ode_problem.eqn.mass().is_none() {
-            return Ok(());
-        }
-        let state = self.as_mut();
-        let (algebraic_indices, _) = ode_problem
-            .eqn
-            .mass()
-            .unwrap()
-            .matrix(ode_problem.t0)
-            .partition_indices_by_zero_diagonal();
-        if algebraic_indices.is_empty() {
-            return Ok(());
-        }
-
-        // equations are:
-        // h(t, u, v, du) = 0
-        // g(t, u, v) = 0
-        // first we solve for du, v
-
-        debug!(
-            "Setting consistent initial conditions: checking mass matrix for algebraic constraints"
-        );
-
-        let f = InitOp::new(
-            &ode_problem.eqn,
-            ode_problem.t0,
-            state.y,
-            algebraic_indices.clone(),
-        );
-
-        debug!(
-            "Found {} algebraic variables (zero diagonal in mass matrix) out of {} total states",
-            algebraic_indices.len(),
-            state.y.len()
-        );
-
-        let rtol = ode_problem.rtol;
-        let atol = &ode_problem.atol;
-        root_solver.set_problem(&f);
-        let mut y_tmp = state.dy.clone();
-        y_tmp.copy_from_indices(state.y, &f.algebraic_indices);
-        let mut yerr = y_tmp.clone();
-        let mut convergence = Convergence::with_tolerance(
-            rtol,
-            atol,
-            ode_problem.ode_options.nonlinear_solver_tolerance,
-        );
-        convergence.set_max_iter(ode_problem.ic_options.max_newton_iterations);
-        let mut result = Ok(());
-        debug!("Setting consistent initial conditions at t = {}", state.t);
-        for _ in 0..ode_problem.ic_options.max_linear_solver_setups {
-            root_solver.reset_jacobian(&f, &y_tmp, *state.t);
-            result = root_solver.solve_in_place(&f, &mut y_tmp, *state.t, &yerr, &mut convergence);
-            match &result {
-                Ok(()) => break,
-                Err(DiffsolError::NonLinearSolverError(
-                    NonLinearSolverError::NewtonMaxIterations,
-                )) => (),
-                e => e.clone()?,
-            }
-            yerr.copy_from(&y_tmp);
-        }
-        if result.is_err() {
-            return Err(non_linear_solver_error!(InitialConditionDidNotConverge));
-        }
-        f.scatter_soln(&y_tmp, state.y, state.dy);
-        // dv is not solved for, so we set it to zero, it will be solved for in the first step of the solver
-        state
-            .dy
-            .assign_at_indices(&algebraic_indices, Eqn::T::zero());
-        Ok(())
-    }
-
-    /// Calculate the initial sensitivity vectors and their time derivatives, based on the equations of the problem.
-    /// Note that this function assumes that the state is already consistent with the algebraic constraints
-    /// (either via [Self::set_consistent] or by setting the state up manually).
-    fn set_consistent_augmented<Eqn, AugmentedEqn, S>(
-        &mut self,
-        ode_problem: &OdeSolverProblem<Eqn>,
-        augmented_eqn: &mut AugmentedEqn,
-        root_solver: &mut S,
-    ) -> Result<(), DiffsolError>
-    where
-        Eqn: OdeEquationsImplicit<T = V::T, V = V, C = V::C>,
-        AugmentedEqn: AugmentedOdeEquationsImplicit<Eqn> + std::fmt::Debug,
-        S: NonLinearSolver<AugmentedEqn::M>,
-    {
-        let state = self.as_mut();
-        augmented_eqn.update_rhs_out_state(state.y, state.dy, *state.t);
-        let naug = augmented_eqn.max_index();
-        for i in 0..naug {
-            augmented_eqn.set_index(i);
-            augmented_eqn
-                .rhs()
-                .call_inplace(&state.s[i], *state.t, &mut state.ds[i]);
-        }
-
-        if ode_problem.eqn.mass().is_none() {
-            return Ok(());
-        }
-
-        let mut convergence = Convergence::with_tolerance(
-            ode_problem.rtol,
-            &ode_problem.atol,
-            ode_problem.ode_options.nonlinear_solver_tolerance,
-        );
-        convergence.set_max_iter(ode_problem.ic_options.max_newton_iterations);
-        let (algebraic_indices, _) = ode_problem
-            .eqn
-            .mass()
-            .unwrap()
-            .matrix(ode_problem.t0)
-            .partition_indices_by_zero_diagonal();
-        if algebraic_indices.is_empty() {
-            return Ok(());
-        }
-
-        for i in 0..naug {
-            augmented_eqn.set_index(i);
-            let f = InitOp::new(
-                augmented_eqn,
-                *state.t,
-                &state.s[i],
-                algebraic_indices.clone(),
-            );
-            root_solver.set_problem(&f);
-
-            let mut y = state.ds[i].clone();
-            y.copy_from_indices(&state.s[i], &f.algebraic_indices);
-            let mut yerr = y.clone();
-            let mut result = Ok(());
-            for _ in 0..ode_problem.ic_options.max_linear_solver_setups {
-                root_solver.reset_jacobian(&f, &y, *state.t);
-                result = root_solver.solve_in_place(&f, &mut y, *state.t, &yerr, &mut convergence);
-                match &result {
-                    Ok(()) => break,
-                    Err(DiffsolError::NonLinearSolverError(
-                        NonLinearSolverError::NewtonMaxIterations,
-                    )) => (),
-                    e => e.clone()?,
-                }
-                yerr.copy_from(&y);
-            }
-            if result.is_err() {
-                return Err(non_linear_solver_error!(InitialConditionDidNotConverge));
-            }
-            f.scatter_soln(&y, &mut state.s[i], &mut state.ds[i]);
-        }
-        Ok(())
-    }
-
     /// compute size of first step based on alg in Hairer, Norsett, Wanner
     /// Solving Ordinary Differential Equations I, Nonstiff Problems
     /// Section II.4.2
@@ -1121,8 +1114,8 @@ mod test {
         },
         op::closure_with_adjoint::ClosureWithAdjoint,
         op::closure_with_sens::ClosureWithSens,
-        BdfState, LinearSolver, Matrix, NonLinearOp, NonLinearOpTimePartial, OdeBuilder,
-        OdeEquations, OdeSolverState, ParameterisedOp, Vector, VectorHost,
+        BdfState, LinearSolver, Matrix, NalgebraLU, NonLinearOp, NonLinearOpTimePartial,
+        OdeBuilder, OdeEquations, OdeSolverState, ParameterisedOp, Vector, VectorHost,
     };
     use num_traits::FromPrimitive;
 
@@ -1445,7 +1438,7 @@ mod test {
             let mut state_mut = state.as_mut();
             state_mut.y.fill(0.6);
             state_mut.dy.fill(-0.06);
-            state_mut.apply_reset(&problem.eqn).unwrap();
+            state_mut.apply_reset::<NalgebraLU<f64>, _>(&problem).unwrap();
         }
 
         assert_scalar_close(state.as_ref().y[0], 0.4);
@@ -1459,7 +1452,7 @@ mod test {
         let problem = scalar_problem(0.25);
         let mut state = TestState::new_without_initialise(&problem).unwrap();
 
-        let err = state.as_mut().apply_reset(&problem.eqn).unwrap_err();
+        let err = state.as_mut().apply_reset::<NalgebraLU<f64>, _>(&problem).unwrap_err();
         assert_other_error(err, "No reset operator configured");
     }
 
