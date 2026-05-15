@@ -1366,10 +1366,9 @@ mod tests {
     use diffsl::ObjectModule;
 
     use crate::{
-        matrix::MatrixRef, ConstantOp, Context, DefaultDenseMatrix,
-        DefaultSolver, Matrix, NonLinearOpAdjoint,
-        NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations,
-        Vector, VectorHost, VectorRef,
+        matrix::MatrixRef, ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, Matrix,
+        NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, Vector,
+        VectorHost, VectorRef,
     };
 
     use super::DiffSl;
