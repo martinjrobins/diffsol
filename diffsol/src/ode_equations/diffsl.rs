@@ -1366,10 +1366,14 @@ mod tests {
     use diffsl::ObjectModule;
 
     use crate::{
-        matrix::MatrixRef, ConstantOp, Context, DefaultDenseMatrix, DefaultSolver, Matrix,
-        NonLinearOpAdjoint, NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations, Vector,
-        VectorHost, VectorRef,
+        matrix::MatrixRef, ConstantOp, Context, DefaultDenseMatrix, DefaultSolver,
+        DenseMatrix, DiffSlContext, DiffsolError, Matrix, NonLinearOpAdjoint, NonLinearOpSens,
+        NonLinearOpSensAdjoint, OdeBuilder, OdeEquations, OdeSolverMethod, Vector, VectorHost,
+        VectorRef, VectorView,
+        op::{linear_op::LinearOp, nonlinear_op::{NonLinearOp, NonLinearOpJacobian}},
+        scalar::Scalar,
     };
+    use num_traits::ToPrimitive;
 
     use super::DiffSl;
     use num_traits::{FromPrimitive, One, Zero};
