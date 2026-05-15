@@ -4,8 +4,8 @@ use std::{cell::Ref, fmt::Display};
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
-    AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, DefaultSolver, NoAug,
-    StateRef, StateRefMut,
+    AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, DefaultSolver, NoAug, StateRef,
+    StateRefMut,
 };
 
 use num_traits::{abs, FromPrimitive, One, Pow, Signed, ToPrimitive, Zero};

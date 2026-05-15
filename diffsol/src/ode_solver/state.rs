@@ -242,10 +242,7 @@ impl<V: Vector> StateRefMut<'_, V> {
     /// Applies `op(y, t)` to update `y`, then recomputes `dy = rhs(y, t)`.
     /// Only valid for equations without a mass matrix. If a mass matrix is present use
     /// [`Self::apply_reset_with_mass`] instead.
-    pub fn apply_reset<Eqn>(
-        &mut self,
-        problem: &OdeSolverProblem<Eqn>,
-    ) -> Result<(), DiffsolError>
+    pub fn apply_reset<Eqn>(&mut self, problem: &OdeSolverProblem<Eqn>) -> Result<(), DiffsolError>
     where
         Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
     {
@@ -1657,10 +1654,7 @@ mod test {
         let problem = scalar_problem_with_mass(0.25);
         let mut state = TestState::new_without_initialise(&problem).unwrap();
 
-        let err = state
-            .as_mut()
-            .apply_reset::<_>(&problem)
-            .unwrap_err();
+        let err = state.as_mut().apply_reset::<_>(&problem).unwrap_err();
         assert_other_error(err, "apply_reset cannot be used with a mass matrix");
     }
 
@@ -1699,7 +1693,10 @@ mod test {
             .as_mut()
             .apply_reset_with_sens::<_>(&problem, 0)
             .unwrap_err();
-        assert_other_error(err, "apply_reset_with_sens cannot be used with a mass matrix");
+        assert_other_error(
+            err,
+            "apply_reset_with_sens cannot be used with a mass matrix",
+        );
     }
 
     #[test]

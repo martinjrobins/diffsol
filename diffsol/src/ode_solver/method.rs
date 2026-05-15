@@ -7,9 +7,8 @@ use crate::{
     ode_solver_error,
     scalar::Scalar,
     AugmentedOdeEquations, Checkpointing, CheckpointingPath, Context, DefaultDenseMatrix,
-    DenseMatrix, HermiteInterpolator, MatrixCommon, NonLinearOp, OdeEquations,
-    OdeSolverConfig, OdeSolverProblem, OdeSolverState, Op, Solution, StateRef, StateRefMut, Vector,
-    VectorViewMut,
+    DenseMatrix, HermiteInterpolator, MatrixCommon, NonLinearOp, OdeEquations, OdeSolverConfig,
+    OdeSolverProblem, OdeSolverState, Op, Solution, StateRef, StateRefMut, Vector, VectorViewMut,
 };
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum OdeSolverStopReason<T: Scalar> {
