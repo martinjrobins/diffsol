@@ -1086,10 +1086,7 @@ pub fn exponential_decay_with_constant_reset_problem_sens<M: MatrixHost + 'stati
         rtol: problem.rtol,
         ..Default::default()
     };
-    soln.push(
-        M::V::from_element(nstates, M::T::zero(), ctx),
-        M::T::zero(),
-    );
+    soln.push(M::V::from_element(nstates, M::T::zero(), ctx), M::T::zero());
 
     (problem, soln)
 }

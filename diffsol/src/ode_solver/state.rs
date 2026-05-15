@@ -1108,7 +1108,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
         }
 
         if is_neg_h {
-        *state.h = -*state.h;
+            *state.h = -*state.h;
         }
     }
 }
@@ -1210,7 +1210,9 @@ mod test {
         problem.h0 = -problem.h0.abs();
 
         let mut state = BdfState::<V>::new_without_initialise(&problem).unwrap();
-        state.as_mut().set_step_size(problem.h0, &problem.atol, problem.rtol, &problem.eqn, 1);
+        state
+            .as_mut()
+            .set_step_size(problem.h0, &problem.atol, problem.rtol, &problem.eqn, 1);
 
         assert!(state.as_ref().h < 0.0);
     }
@@ -1227,7 +1229,9 @@ mod test {
             .unwrap();
         let mut state = BdfState::<V>::new_without_initialise(&problem).unwrap();
 
-        state.as_mut().set_step_size(problem.h0, &problem.atol, problem.rtol, &problem.eqn, 1);
+        state
+            .as_mut()
+            .set_step_size(problem.h0, &problem.atol, problem.rtol, &problem.eqn, 1);
 
         assert!((state.as_ref().h - 1e-6).abs() < 1e-12);
     }
@@ -1537,8 +1541,7 @@ mod test {
 
     #[test]
     fn state_ref_mut_apply_reset_with_sens_updates_state_and_sensitivities() {
-        let (problem, _soln) =
-            exponential_decay_with_constant_reset_problem_sens::<TestMat>();
+        let (problem, _soln) = exponential_decay_with_constant_reset_problem_sens::<TestMat>();
         let mut state = TestState::new_with_sensitivities(&problem, 1).unwrap();
 
         let t_root = 10.0 * f64::ln(5.0 / 3.0);
@@ -1563,10 +1566,7 @@ mod test {
         for i in 0..2 {
             assert_scalar_close(state.as_ref().y[i], 0.4);
             assert_scalar_close(state.as_ref().dy[i], -0.04);
-            assert_scalar_close(
-                state.as_ref().s[0][i],
-                -4.0 * f64::ln(5.0 / 3.0),
-            );
+            assert_scalar_close(state.as_ref().s[0][i], -4.0 * f64::ln(5.0 / 3.0));
             assert_scalar_close(state.as_ref().s[1][i], 0.4);
         }
     }

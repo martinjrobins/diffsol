@@ -666,7 +666,9 @@ where
         let h = state.h;
         let atol = augmented_eqn.atol().unwrap();
         let rtol = augmented_eqn.rtol().unwrap();
-        state.as_mut().set_step_size(h, atol, rtol, augmented_eqn, 1);
+        state
+            .as_mut()
+            .set_step_size(h, atol, rtol, augmented_eqn, 1);
 
         Ok(state)
     }
