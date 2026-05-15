@@ -1372,6 +1372,7 @@ mod test {
             .unwrap()
     }
 
+    #[allow(dead_code)]
     fn scalar_problem_adjoint(
         lambda: f64,
     ) -> crate::OdeSolverProblem<
@@ -1429,6 +1430,7 @@ mod test {
             .unwrap()
     }
 
+    #[allow(dead_code)]
     fn scalar_problem_with_mass_adjoint(
         lambda: f64,
     ) -> crate::OdeSolverProblem<

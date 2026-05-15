@@ -1365,16 +1365,15 @@ mod tests {
     #[cfg(feature = "diffsl-llvm")]
     use diffsl::ObjectModule;
 
-    use crate::Scalar;
     use crate::{
-        error::DiffsolError, matrix::MatrixRef, ConstantOp, Context, DefaultDenseMatrix,
-        DefaultSolver, DenseMatrix, LinearOp, Matrix, NonLinearOp, NonLinearOpAdjoint,
-        NonLinearOpJacobian, NonLinearOpSens, NonLinearOpSensAdjoint, OdeBuilder, OdeEquations,
-        OdeSolverMethod, Vector, VectorHost, VectorRef, VectorView,
+        matrix::MatrixRef, ConstantOp, Context, DefaultDenseMatrix,
+        DefaultSolver, Matrix, NonLinearOpAdjoint,
+        NonLinearOpSens, NonLinearOpSensAdjoint, OdeEquations,
+        Vector, VectorHost, VectorRef,
     };
 
-    use super::{DiffSl, DiffSlContext};
-    use num_traits::{FromPrimitive, One, ToPrimitive, Zero};
+    use super::DiffSl;
+    use num_traits::{FromPrimitive, One, Zero};
     use paste::paste;
     #[cfg(feature = "diffsl-llvm")]
     use serde_json;
