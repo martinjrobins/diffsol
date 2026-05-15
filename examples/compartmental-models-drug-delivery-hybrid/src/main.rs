@@ -48,7 +48,7 @@ fn main() {
             .into_state();
         if let Some(OdeSolverStopReason::RootFound(_t_root, root_idx)) = soln.stop_reason {
             problem.eqn_mut().set_model_index(root_idx);
-            state.as_mut().apply_reset(problem.eqn()).unwrap();
+            state.as_mut().apply_reset_with_mass::<LS, _>(&problem).unwrap();
         }
     }
 

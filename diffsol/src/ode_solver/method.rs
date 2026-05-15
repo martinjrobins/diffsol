@@ -2,12 +2,12 @@ use std::{cell::Ref, marker::PhantomData};
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
-    ode_equations::{OdeEquationsImplicit, OdeEquationsImplicitSens},
+    ode_equations::OdeEquationsImplicitSens,
     ode_solver::solution::{SolutionMode, INITIAL_NCOLS},
     ode_solver_error,
     scalar::Scalar,
     AugmentedOdeEquations, Checkpointing, CheckpointingPath, Context, DefaultDenseMatrix,
-    DefaultSolver, DenseMatrix, HermiteInterpolator, MatrixCommon, NonLinearOp, OdeEquations,
+    DenseMatrix, HermiteInterpolator, MatrixCommon, NonLinearOp, OdeEquations,
     OdeSolverConfig, OdeSolverProblem, OdeSolverState, Op, Solution, StateRef, StateRefMut, Vector,
     VectorViewMut,
 };
@@ -175,12 +175,10 @@ where
     /// constraints.
     fn apply_reset(&mut self) -> Result<(), DiffsolError>
     where
-        Eqn: OdeEquationsImplicit,
-        Eqn::M: DefaultSolver,
+        Eqn: OdeEquations,
     {
         let problem = self.problem();
-        self.state_mut()
-            .apply_reset::<<Eqn::M as DefaultSolver>::LS, _>(problem)
+        self.state_mut().apply_reset(problem)
     }
 
     /// Apply the problem's configured reset operator to the current state and
@@ -192,11 +190,9 @@ where
     fn apply_reset_with_sens(&mut self, root_idx: usize) -> Result<(), DiffsolError>
     where
         Eqn: OdeEquationsImplicitSens,
-        Eqn::M: DefaultSolver,
     {
         let problem = self.problem();
-        self.state_mut()
-            .apply_reset_with_sens::<_, <Eqn::M as DefaultSolver>::LS>(problem, root_idx)
+        self.state_mut().apply_reset_with_sens(problem, root_idx)
     }
 
     /// Get the current order of accuracy of the solver (e.g. explict euler method is first-order)
@@ -241,9 +237,8 @@ where
         DiffsolError,
     >
     where
-        Eqn: OdeEquationsImplicit,
+        Eqn: OdeEquations,
         Eqn::V: DefaultDenseMatrix,
-        Eqn::M: DefaultSolver,
         Self: Sized,
     {
         let mut ret_t = Vec::new();
@@ -322,9 +317,8 @@ where
     /// calls to `solve_soln`.
     fn solve_soln(mut self, soln: &mut Solution<Eqn::V>) -> Result<Self, DiffsolError>
     where
-        Eqn: OdeEquationsImplicit,
+        Eqn: OdeEquations,
         Eqn::V: DefaultDenseMatrix,
-        Eqn::M: DefaultSolver,
         Self: Sized,
     {
         let nrows = if let Some(out) = self.problem().eqn.out() {
@@ -388,9 +382,8 @@ where
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<Self, DiffsolError>
     where
-        Eqn: OdeEquationsImplicit,
+        Eqn: OdeEquations,
         Eqn::V: DefaultDenseMatrix,
-        Eqn::M: DefaultSolver,
         Self: Sized,
     {
         let nrows = if let Some(out) = self.problem().eqn.out() {
@@ -483,9 +476,8 @@ where
         DiffsolError,
     >
     where
-        Eqn: OdeEquationsImplicit,
+        Eqn: OdeEquations,
         Eqn::V: DefaultDenseMatrix,
-        Eqn::M: DefaultSolver,
         Self: Sized,
     {
         let (mut ret, mut tmp_nout, mut tmp_nstates) = dense_allocate_return(self, t_eval)?;
@@ -543,9 +535,8 @@ where
         DiffsolError,
     >
     where
-        Eqn: OdeEquationsImplicit,
+        Eqn: OdeEquations,
         Eqn::V: DefaultDenseMatrix,
-        Eqn::M: DefaultSolver,
         Self: Sized,
     {
         let mut ret_t = Vec::new();
@@ -605,9 +596,8 @@ where
         DiffsolError,
     >
     where
-        Eqn: OdeEquationsImplicit,
+        Eqn: OdeEquations,
         Eqn::V: DefaultDenseMatrix,
-        Eqn::M: DefaultSolver,
         Self: Sized,
     {
         let (mut ret, mut tmp_nout, mut tmp_nstates) = dense_allocate_return(self, t_eval)?;
@@ -729,7 +719,7 @@ where
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
-fn solve_dense<'a, Eqn: OdeEquationsImplicit + 'a, S: OdeSolverMethod<'a, Eqn>>(
+fn solve_dense<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     ret: &mut <Eqn::V as DefaultDenseMatrix>::M,
     t_eval: &[Eqn::T],
     tmp_nout: &mut Eqn::V,
@@ -749,7 +739,6 @@ fn solve_dense<'a, Eqn: OdeEquationsImplicit + 'a, S: OdeSolverMethod<'a, Eqn>>(
 >
 where
     Eqn::V: DefaultDenseMatrix,
-    Eqn::M: DefaultSolver,
 {
     let final_time = t_eval[t_eval.len() - 1];
     s.set_stop_time(final_time)?;
@@ -890,7 +879,7 @@ pub(crate) fn write_state_out<Eqn>(
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
-fn solve<'a, Eqn: OdeEquationsImplicit + 'a, S: OdeSolverMethod<'a, Eqn>>(
+fn solve<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
     ret_y: &mut <Eqn::V as DefaultDenseMatrix>::M,
     ret_t: &mut Vec<Eqn::T>,
     tmp_nout: &mut Eqn::V,
@@ -908,7 +897,6 @@ fn solve<'a, Eqn: OdeEquationsImplicit + 'a, S: OdeSolverMethod<'a, Eqn>>(
 >
 where
     Eqn::V: DefaultDenseMatrix,
-    Eqn::M: DefaultSolver,
 {
     write_out(s, ret_y, ret_t, tmp_nout);
     s.set_stop_time(final_time)?;

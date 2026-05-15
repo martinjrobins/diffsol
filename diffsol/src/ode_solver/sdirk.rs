@@ -349,6 +349,24 @@ where
         self.rk.order()
     }
 
+    fn apply_reset(&mut self) -> Result<(), DiffsolError> {
+        let problem = self.problem();
+        self.rk
+            .state_mut()
+            .as_mut()
+            .apply_reset_with_mass::<LS, _>(problem)
+    }
+
+    fn apply_reset_with_sens(&mut self, root_idx: usize) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitSens,
+    {
+        let problem = self.problem();
+        self.rk
+            .state_mut()
+            .as_mut()
+            .apply_reset_with_sens_mass::<LS, _>(problem, root_idx)
+    }
     fn set_state(&mut self, state: Self::State) {
         let h = state.h;
         self.rk.set_state(state);

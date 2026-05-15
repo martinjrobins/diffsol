@@ -65,7 +65,7 @@ where
         }
         let mut state = solver.into_state();
         problem.eqn.set_model_index(root_idx);
-        state.as_mut().apply_reset::<M::LS, _>(problem)?;
+        state.as_mut().apply_reset_with_mass::<M::LS, _>(problem)?;
         solver = Tag::solver_with_state::<LS>(problem, state)?;
     }
     Ok(soln)
@@ -101,7 +101,7 @@ where
         problem.eqn.set_model_index(root_idx);
         state
             .as_mut()
-            .apply_reset_with_sens::<_, M::LS>(problem, root_idx)?;
+            .apply_reset_with_sens_mass::<M::LS, _>(problem, root_idx)?;
         solver = Tag::solver_sens_with_state::<LS>(problem, state)?;
     }
     Ok(soln)
@@ -136,7 +136,7 @@ where
         }
         let mut state = solver.into_state();
         problem.eqn.set_model_index(root_idx);
-        state.as_mut().apply_reset::<M::LS, _>(problem)?;
+        state.as_mut().apply_reset_with_mass::<M::LS, _>(problem)?;
         solver = Tag::solver_with_state::<LS>(problem, state)?;
     }
     Ok((soln, checkpointing))

@@ -144,6 +144,7 @@ mod tests {
     where
         Eqn: OdeEquationsImplicitAdjoint + 'a,
         LS: LinearSolver<Eqn::M>,
+        Eqn::M: DefaultSolver,
         Eqn::V: DefaultDenseMatrix,
         for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
         for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
@@ -334,7 +335,7 @@ mod tests {
             let problem = first_forward_solver.problem();
             state_after_reset
                 .as_mut()
-                .apply_reset::<<Eqn::M as DefaultSolver>::LS, _>(problem)
+                .apply_reset_with_mass::<<Eqn::M as DefaultSolver>::LS, _>(problem)
                 .unwrap();
         }
 
@@ -360,7 +361,7 @@ mod tests {
             let problem = solver.problem();
             state_after_reset
                 .as_mut()
-                .apply_reset::<<Eqn::M as DefaultSolver>::LS, _>(problem)
+                .apply_reset_with_mass::<<Eqn::M as DefaultSolver>::LS, _>(problem)
                 .unwrap();
         }
         state_after_reset

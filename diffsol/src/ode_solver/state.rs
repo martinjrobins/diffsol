@@ -237,13 +237,48 @@ impl<V: Vector> StateRefMut<'_, V> {
         Ok(())
     }
 
-    /// Apply the equation set's reset operator to the current state in-place.
+    /// Apply the equation set's reset operator to the current state in-place (no mass matrix).
+    ///
+    /// Applies `op(y, t)` to update `y`, then recomputes `dy = rhs(y, t)`.
+    /// Only valid for equations without a mass matrix. If a mass matrix is present use
+    /// [`Self::apply_reset_with_mass`] instead.
+    pub fn apply_reset<Eqn>(
+        &mut self,
+        problem: &OdeSolverProblem<Eqn>,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
+    {
+        let eqn = &problem.eqn;
+        if eqn.mass().is_some() {
+            return Err(ode_solver_error!(
+                Other,
+                "apply_reset cannot be used with a mass matrix; use apply_reset_with_mass instead"
+            ));
+        }
+        let rhs = eqn.rhs();
+        let reset = eqn.reset().ok_or_else(|| {
+            ode_solver_error!(Other, "No reset operator configured for this problem")
+        })?;
+
+        let nstates = rhs.nstates();
+        let mut y_out = V::zeros(nstates, rhs.context().clone());
+        reset.call_inplace(self.y, *self.t, &mut y_out);
+        self.y.copy_from(&y_out);
+
+        rhs.call_inplace(self.y, *self.t, &mut y_out);
+        self.dy.copy_from(&y_out);
+        Ok(())
+    }
+
+    /// Apply the equation set's reset operator to the current state in-place (with mass matrix
+    /// support).
     ///
     /// Applies `op(y, t)` to update `y`, then recomputes `dy`. If the equations have no mass
     /// matrix, `dy` is set directly from `rhs(y, t)`. If a mass matrix is present,
     /// [`Self::set_consistent`] is called after the reset to ensure `y` and `dy` satisfy the
     /// algebraic constraints.
-    pub fn apply_reset<LS, Eqn>(
+    pub fn apply_reset_with_mass<LS, Eqn>(
         &mut self,
         problem: &OdeSolverProblem<Eqn>,
     ) -> Result<(), DiffsolError>
@@ -272,29 +307,107 @@ impl<V: Vector> StateRefMut<'_, V> {
         Ok(())
     }
 
+    pub fn apply_reset_with_sens<Eqn>(
+        &mut self,
+        problem: &OdeSolverProblem<Eqn>,
+        root_idx: usize,
+    ) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitSens<T = V::T, V = V, C = V::C>,
+    {
+        let eqn = &problem.eqn;
+        if eqn.mass().is_some() {
+            return Err(ode_solver_error!(
+                Other,
+                "apply_reset_with_sens cannot be used with a mass matrix; use apply_reset_with_sens_mass instead"
+            ));
+        }
+        let rhs = eqn.rhs();
+        let reset_op = eqn.reset().ok_or_else(|| {
+            ode_solver_error!(Other, "No reset operator configured for this problem")
+        })?;
+        let root_op = eqn.root().ok_or_else(|| {
+            ode_solver_error!(Other, "No root operator configured for this problem")
+        })?;
+
+        let nstates = rhs.nstates();
+        let nroots = root_op.nout();
+        if root_idx >= nroots {
+            return Err(ode_solver_error!(
+                Other,
+                format!(
+                    "root index {root_idx} out of bounds for root function with {nroots} outputs"
+                )
+            ));
+        }
+
+        let ctx = rhs.context().clone();
+        let t = *self.t;
+        let y_before = self.y.clone();
+        let f_minus = self.dy.clone();
+        let s_before = self.s.to_vec();
+        let nparams = s_before.len();
+        let reset_t = reset_op.time_derive(&y_before, t);
+        let root_t = root_op.time_derive(&y_before, t);
+
+        // Delegate reset of self.y and self.dy (no mass matrix path).
+        self.apply_reset::<Eqn>(problem)?;
+
+        let mut correction_dir = V::zeros(nstates, ctx.clone());
+        reset_op.jac_mul_inplace(&y_before, t, &f_minus, &mut correction_dir);
+        correction_dir += &reset_t;
+        correction_dir -= &*self.dy;
+
+        let mut root_flow = V::zeros(nroots, ctx.clone());
+        root_op.jac_mul_inplace(&y_before, t, &f_minus, &mut root_flow);
+        let denom = root_flow.get_index(root_idx) + root_t.get_index(root_idx);
+        let denom_tol = V::T::from_f64(100.0).unwrap() * V::T::EPSILON;
+        if denom.abs() <= denom_tol {
+            return Err(ode_solver_error!(
+                Other,
+                "reset sensitivity correction undefined: active root derivative along flow is zero"
+            ));
+        }
+
+        let mut basis = V::zeros(nparams, ctx.clone());
+        let mut reset_jac_s = V::zeros(nstates, ctx.clone());
+        let mut reset_sens = V::zeros(nstates, ctx.clone());
+        let mut root_jac_s = V::zeros(nroots, ctx.clone());
+        let mut root_sens = V::zeros(nroots, ctx);
+        let mut s_plus = Vec::with_capacity(nparams);
+        for (j, s_j_before) in s_before.iter().enumerate() {
+            basis.set_index(j, V::T::one());
+
+            reset_op.jac_mul_inplace(&y_before, t, s_j_before, &mut reset_jac_s);
+            reset_op.sens_mul_inplace(&y_before, t, &basis, &mut reset_sens);
+
+            root_op.jac_mul_inplace(&y_before, t, s_j_before, &mut root_jac_s);
+            root_op.sens_mul_inplace(&y_before, t, &basis, &mut root_sens);
+
+            let numerator = root_jac_s.get_index(root_idx) + root_sens.get_index(root_idx);
+            let tau_p = -numerator / denom;
+
+            let mut s_j_plus = reset_jac_s.clone();
+            s_j_plus += &reset_sens;
+            s_j_plus.axpy(tau_p, &correction_dir, V::T::one());
+            s_plus.push(s_j_plus);
+
+            basis.set_index(j, V::T::zero());
+        }
+
+        for (dst, src) in self.s.iter_mut().zip(s_plus.iter()) {
+            dst.copy_from(src);
+        }
+
+        Ok(())
+    }
+
     /// Apply a reset operator to the current state and propagate sensitivities through a
-    /// time-dependent root-triggered event correction.
+    /// time-dependent root-triggered event correction, with mass-matrix support.
     ///
-    /// If the pre-event state is `x^-` and the reset map is `g(x, t, p)`, this method updates
-    /// the state to
-    /// `x^+ = g(x^-, t, p)`,
-    /// then recomputes the post-event vector field
-    /// the state to `x^+ = g(x^-, t, p)`, then recomputes the post-event vector field
-    /// `f^+ = rhs(x^+, t, p)`.
-    ///
-    /// For the active root component `r_k(x, t, p) = 0` selected by `root_idx`, the event-time
-    /// sensitivity in parameter direction `p_j` is
-    /// `τ'_j = -([r_x s^-_j]_k + [r_p e_j]_k) / ([r_x f^-]_k + [r_t]_k)`,
-    /// where `s^-_j = ∂x^-/∂p_j`, `f^- = dx^-/dt`, `e_j` is the jth parameter basis vector,
-    /// `r_x = ∂r/∂x`, `r_p = ∂r/∂p`, and `r_t = ∂r/∂t`.
-    ///
-    /// The post-event sensitivity is then updated as
-    /// `s^+_j = g_x s^-_j + g_p e_j + (g_x f^- + g_t - f^+) τ'_j`,
-    /// where `g_x = ∂g/∂x`, `g_p = ∂g/∂p`, and `g_t = ∂g/∂t`.
-    ///
-    /// Explicit time derivatives `∂g/∂t` and `∂r/∂t` are obtained from
-    /// [`NonLinearOpTimePartial`].
-    pub fn apply_reset_with_sens<Eqn, LS>(
+    /// Like [`Self::apply_reset_with_sens`] but also handles DAE problems with a mass matrix by
+    /// calling [`Self::set_consistent_augmented`] after the reset.
+    pub fn apply_reset_with_sens_mass<LS, Eqn>(
         &mut self,
         problem: &OdeSolverProblem<Eqn>,
         root_idx: usize,
@@ -332,8 +445,8 @@ impl<V: Vector> StateRefMut<'_, V> {
         let reset_t = reset_op.time_derive(&y_before, t);
         let root_t = root_op.time_derive(&y_before, t);
 
-        // Delegate reset of self.y and self.dy (including set_consistent for mass matrices) to apply_reset.
-        self.apply_reset::<LS, Eqn>(problem)?;
+        // Delegate reset of self.y and self.dy (including set_consistent for mass matrices).
+        self.apply_reset_with_mass::<LS, Eqn>(problem)?;
 
         let mut correction_dir = V::zeros(nstates, ctx.clone());
         reset_op.jac_mul_inplace(&y_before, t, &f_minus, &mut correction_dir);
@@ -1517,7 +1630,7 @@ mod test {
             state_mut.y.fill(0.6);
             state_mut.dy.fill(-0.06);
             state_mut
-                .apply_reset::<NalgebraLU<f64>, _>(&problem)
+                .apply_reset_with_mass::<NalgebraLU<f64>, _>(&problem)
                 .unwrap();
         }
 
@@ -1534,9 +1647,59 @@ mod test {
 
         let err = state
             .as_mut()
-            .apply_reset::<NalgebraLU<f64>, _>(&problem)
+            .apply_reset_with_mass::<NalgebraLU<f64>, _>(&problem)
             .unwrap_err();
         assert_other_error(err, "No reset operator configured");
+    }
+
+    #[test]
+    fn apply_reset_rejects_mass_matrix_problem() {
+        let problem = scalar_problem_with_mass(0.25);
+        let mut state = TestState::new_without_initialise(&problem).unwrap();
+
+        let err = state
+            .as_mut()
+            .apply_reset::<_>(&problem)
+            .unwrap_err();
+        assert_other_error(err, "apply_reset cannot be used with a mass matrix");
+    }
+
+    #[test]
+    fn apply_reset_with_sens_rejects_mass_matrix_problem() {
+        // Build a minimal sens problem that also has a mass matrix.
+        let problem = OdeBuilder::<TestMat>::new()
+            .p([1.0])
+            .rhs_sens_implicit(
+                |x: &TestVec, _p, _t, y: &mut TestVec| y[0] = -x[0],
+                |_x, _p, _t, v: &TestVec, y: &mut TestVec| y[0] = -v[0],
+                |_x, _p, _t, v: &TestVec, y: &mut TestVec| y[0] = -v[0],
+            )
+            .mass(|v, _p, _t, beta, y: &mut TestVec| y.axpy(1.0, v, beta))
+            .init_sens(
+                |_p, _t, y: &mut TestVec| y[0] = 1.0,
+                |_p, _t, _v, y: &mut TestVec| y[0] = 0.0,
+                1,
+            )
+            .root_sens_implicit(
+                |x: &TestVec, _p, _t, y: &mut TestVec| y[0] = x[0] - 0.5,
+                |_x, _p, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
+                |_x, _p, _t, _v, y: &mut TestVec| y[0] = 0.0,
+                1,
+            )
+            .reset_sens_implicit(
+                |x: &TestVec, _p, _t, y: &mut TestVec| y[0] = x[0],
+                |_x, _p, _t, v: &TestVec, y: &mut TestVec| y[0] = v[0],
+                |_x, _p, _t, _v, y: &mut TestVec| y[0] = 0.0,
+            )
+            .build()
+            .unwrap();
+        let mut state = TestState::new_with_sensitivities(&problem, 1).unwrap();
+
+        let err = state
+            .as_mut()
+            .apply_reset_with_sens::<_>(&problem, 0)
+            .unwrap_err();
+        assert_other_error(err, "apply_reset_with_sens cannot be used with a mass matrix");
     }
 
     #[test]
@@ -1560,7 +1723,7 @@ mod test {
 
         state
             .as_mut()
-            .apply_reset_with_sens::<_, NalgebraLU<f64>>(&problem, 0)
+            .apply_reset_with_sens_mass::<NalgebraLU<f64>, _>(&problem, 0)
             .unwrap();
 
         for i in 0..2 {
@@ -1578,7 +1741,7 @@ mod test {
 
         let err = state
             .as_mut()
-            .apply_reset_with_sens::<_, NalgebraLU<f64>>(&problem, 2)
+            .apply_reset_with_sens_mass::<NalgebraLU<f64>, _>(&problem, 2)
             .unwrap_err();
         assert_other_error(err, "root index 2 out of bounds");
     }
@@ -1616,7 +1779,7 @@ mod test {
 
         let err = state
             .as_mut()
-            .apply_reset_with_sens::<_, NalgebraLU<f64>>(&problem, 0)
+            .apply_reset_with_sens_mass::<NalgebraLU<f64>, _>(&problem, 0)
             .unwrap_err();
         assert_other_error(err, "active root derivative along flow is zero");
     }

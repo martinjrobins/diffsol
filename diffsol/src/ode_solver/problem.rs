@@ -4,10 +4,10 @@ use std::{cell::RefCell, rc::Rc};
 use crate::{
     error::DiffsolError, vector::Vector, AdjointContext, AdjointEquations, AugmentedOdeEquations,
     AugmentedOdeEquationsImplicit, Bdf, BdfState, CheckpointingPath, DefaultDenseMatrix,
-    DenseMatrix, ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver, NoLineSearch,
-    OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit, OdeEquationsImplicitAdjoint,
-    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState, RkState, Scalar, Sdirk,
-    SensEquations, Tableau, VectorRef,
+    DefaultSolver, DenseMatrix, ExplicitRk, LinearSolver, MatrixRef, NewtonNonlinearSolver,
+    NoLineSearch, OdeEquations, OdeEquationsAdjoint, OdeEquationsImplicit,
+    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverState,
+    RkState, Scalar, Sdirk, SensEquations, Tableau, VectorRef,
 };
 
 /// Options for the initial condition solver used to find consistent initial conditions
@@ -575,6 +575,7 @@ where
     ) -> Result<Bdf<'_, Eqn, NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>>, DiffsolError>
     where
         Eqn: OdeEquationsImplicit,
+        Eqn::M: DefaultSolver,
     {
         let newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
         Bdf::new(self, state, newton_solver)
@@ -596,6 +597,7 @@ where
     ) -> Result<Bdf<'_, Eqn, NewtonNonlinearSolver<Eqn::M, LS, NoLineSearch>>, DiffsolError>
     where
         Eqn: OdeEquationsImplicit,
+        Eqn::M: DefaultSolver,
     {
         let state = self.bdf_state::<LS>()?;
         self.bdf_solver(state)
@@ -621,6 +623,7 @@ where
     >
     where
         Eqn: OdeEquationsImplicit,
+        Eqn::M: DefaultSolver,
     {
         let newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
         Bdf::new_augmented(state, self, aug_eqn, newton_solver)
@@ -696,6 +699,7 @@ where
     >
     where
         Eqn: OdeEquationsImplicitAdjoint,
+        Eqn::M: DefaultSolver,
     {
         let mut newton_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
         let mut state = state;
@@ -741,6 +745,7 @@ where
     >
     where
         Eqn: OdeEquationsImplicitAdjoint,
+        Eqn::M: DefaultSolver,
     {
         let mut augmented_eqn = self.adjoint_equations(checkpointer, solver, nout_override);
         let state = self.bdf_state_adjoint::<LS, _>(&mut augmented_eqn)?;
@@ -776,6 +781,7 @@ where
     >
     where
         Eqn: OdeEquationsImplicitSens,
+        Eqn::M: DefaultSolver,
     {
         let sens_eqn = SensEquations::new(self);
         self.bdf_solver_aug(state, sens_eqn)
@@ -806,6 +812,7 @@ where
     >
     where
         Eqn: OdeEquationsImplicitSens,
+        Eqn::M: DefaultSolver,
     {
         let state = self.bdf_state_sens::<LS>()?;
         self.bdf_solver_sens(state)
