@@ -628,6 +628,79 @@ impl<V: Vector> StateRefMut<'_, V> {
         }
         Ok(())
     }
+
+    /// compute size of first step based on alg in Hairer, Norsett, Wanner
+    /// Solving Ordinary Differential Equations I, Nonstiff Problems
+    /// Section II.4.2
+    /// Note: this assumes that the state is already consistent with the algebraic constraints
+    /// and y and dy are already set appropriately
+    pub fn set_step_size<Eqn>(
+        &mut self,
+        h0: Eqn::T,
+        atol: &Eqn::V,
+        rtol: Eqn::T,
+        eqn: &Eqn,
+        solver_order: usize,
+    ) where
+        Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
+    {
+        let is_neg_h = h0 < Eqn::T::zero();
+        let (h0, h1) = {
+            let y0 = &*self.y;
+            let t0 = *self.t;
+            let f0 = &*self.dy;
+
+            let d0 = y0.squared_norm(y0, atol, rtol).sqrt();
+            let d1 = f0.squared_norm(y0, atol, rtol).sqrt();
+
+            let h0 = if d0 < Eqn::T::from_f64(1e-5).unwrap() || d1 < Eqn::T::from_f64(1e-5).unwrap()
+            {
+                Eqn::T::from_f64(1e-6).unwrap()
+            } else {
+                Eqn::T::from_f64(0.01).unwrap() * (d0 / d1)
+            };
+
+            // make sure we preserve the sign of h0
+            let f1 = if is_neg_h {
+                let y1 = f0.clone() * scale(-h0) + y0;
+                let t1 = t0 - h0;
+                eqn.rhs().call(&y1, t1)
+            } else {
+                let y1 = f0.clone() * scale(h0) + y0;
+                let t1 = t0 + h0;
+                eqn.rhs().call(&y1, t1)
+            };
+
+            let df = f1 - f0;
+            let d2 = df.squared_norm(y0, atol, rtol).sqrt() / h0.abs();
+
+            let mut max_d = d2;
+            if max_d < d1 {
+                max_d = d1;
+            }
+            let h1 = if max_d < Eqn::T::from_f64(1e-15).unwrap() {
+                let h1 = h0 * Eqn::T::from_f64(1e-3).unwrap();
+                if h1 < Eqn::T::from_f64(1e-6).unwrap() {
+                    Eqn::T::from_f64(1e-6).unwrap()
+                } else {
+                    h1
+                }
+            } else {
+                (Eqn::T::from_f64(0.01).unwrap() / max_d)
+                    .pow(Eqn::T::one() / Eqn::T::from_f64(1.0 + solver_order as f64).unwrap())
+            };
+            (h0, h1)
+        };
+
+        *self.h = Eqn::T::from_f64(100.0).unwrap() * h0;
+        if *self.h > h1 {
+            *self.h = h1;
+        }
+
+        if is_neg_h {
+            *self.h = -*self.h;
+        }
+    }
 }
 
 /// State for the ODE solver, containing:
@@ -705,7 +778,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
     /// Create a new solver state from an ODE problem.
     /// This function will set the initial step size based on the given solver.
     /// If you want to create a state without this default initialisation, use [Self::new_without_initialise] instead.
-    /// You can then use [`StateRefMut::set_consistent`] and [Self::set_step_size] to set the state up if you need to.
+    /// You can then use [`StateRefMut::set_consistent`] and [StateRefMut::set_step_size] to set the state up if you need to.
     fn new<Eqn>(
         ode_problem: &OdeSolverProblem<Eqn>,
         solver_order: usize,
@@ -714,7 +787,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
         Eqn: OdeEquations<T = V::T, V = V, C = V::C>,
     {
         let mut ret = Self::new_without_initialise(ode_problem)?;
-        ret.set_step_size(
+        ret.as_mut().set_step_size(
             ode_problem.h0,
             &ode_problem.atol,
             ode_problem.rtol,
@@ -728,7 +801,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
     /// This function will make the state consistent with any algebraic constraints using a default nonlinear solver.
     /// It will also set the initial step size based on the given solver.
     /// If you want to create a state without this default initialisation, use [Self::new_without_initialise] instead.
-    /// You can then use [`StateRefMut::set_consistent`] and [Self::set_step_size] to set the state up if you need to.
+    /// You can then use [`StateRefMut::set_consistent`] and [StateRefMut::set_step_size] to set the state up if you need to.
     fn new_and_consistent<LS, Eqn>(
         ode_problem: &OdeSolverProblem<Eqn>,
         solver_order: usize,
@@ -749,7 +822,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
             let mut root_solver = NewtonNonlinearSolver::new(LS::default(), NoLineSearch);
             ret.as_mut().set_consistent(ode_problem, &mut root_solver)?;
         }
-        ret.set_step_size(
+        ret.as_mut().set_step_size(
             ode_problem.h0,
             &ode_problem.atol,
             ode_problem.rtol,
@@ -781,7 +854,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
                 .rhs()
                 .call_inplace(&state.s[i], *state.t, &mut state.ds[i]);
         }
-        ret.set_step_size(
+        ret.as_mut().set_step_size(
             ode_problem.h0,
             &ode_problem.atol,
             ode_problem.rtol,
@@ -832,7 +905,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
                 &mut root_solver_sens,
             )?;
         }
-        ret.set_step_size(
+        ret.as_mut().set_step_size(
             ode_problem.h0,
             &ode_problem.atol,
             ode_problem.rtol,
@@ -1035,7 +1108,7 @@ pub trait OdeSolverState<V: Vector>: Clone + Sized + Send {
         }
 
         if is_neg_h {
-            *state.h = -*state.h;
+        *state.h = -*state.h;
         }
     }
 }
@@ -1048,6 +1121,7 @@ mod test {
         matrix::dense_nalgebra_serial::NalgebraMat,
         ode_equations::test_models::{
             exponential_decay::exponential_decay_problem,
+            exponential_decay::exponential_decay_with_constant_reset_problem_sens,
             exponential_decay::exponential_decay_with_reset_problem,
             exponential_decay::exponential_decay_with_reset_problem_sens,
             exponential_decay_with_algebraic::exponential_decay_with_algebraic_problem_sens,
@@ -1136,7 +1210,7 @@ mod test {
         problem.h0 = -problem.h0.abs();
 
         let mut state = BdfState::<V>::new_without_initialise(&problem).unwrap();
-        state.set_step_size(problem.h0, &problem.atol, problem.rtol, &problem.eqn, 1);
+        state.as_mut().set_step_size(problem.h0, &problem.atol, problem.rtol, &problem.eqn, 1);
 
         assert!(state.as_ref().h < 0.0);
     }
@@ -1153,7 +1227,7 @@ mod test {
             .unwrap();
         let mut state = BdfState::<V>::new_without_initialise(&problem).unwrap();
 
-        state.set_step_size(problem.h0, &problem.atol, problem.rtol, &problem.eqn, 1);
+        state.as_mut().set_step_size(problem.h0, &problem.atol, problem.rtol, &problem.eqn, 1);
 
         assert!((state.as_ref().h - 1e-6).abs() < 1e-12);
     }
@@ -1297,7 +1371,12 @@ mod test {
         root_sens_adj_fn: GSA,
         nroots: usize,
     ) -> crate::OdeSolverProblem<
-        impl crate::OdeEquationsImplicitAdjoint<M = TestMat, V = TestVec, T = f64, C = crate::NalgebraContext>,
+        impl crate::OdeEquationsImplicitAdjoint<
+            M = TestMat,
+            V = TestVec,
+            T = f64,
+            C = crate::NalgebraContext,
+        >,
     >
     where
         RF: Fn(&TestVec, &TestVec, f64, &mut TestVec),
@@ -1458,8 +1537,23 @@ mod test {
 
     #[test]
     fn state_ref_mut_apply_reset_with_sens_updates_state_and_sensitivities() {
-        let (problem, _soln) = exponential_decay_with_reset_problem_sens::<TestMat>();
+        let (problem, _soln) =
+            exponential_decay_with_constant_reset_problem_sens::<TestMat>();
         let mut state = TestState::new_with_sensitivities(&problem, 1).unwrap();
+
+        let t_root = 10.0 * f64::ln(5.0 / 3.0);
+        {
+            let state_mut = state.as_mut();
+            *state_mut.t = t_root;
+            state_mut.y[0] = 0.6;
+            state_mut.y[1] = 0.6;
+            state_mut.dy[0] = -0.06;
+            state_mut.dy[1] = -0.06;
+            state_mut.s[0][0] = -t_root * 0.6;
+            state_mut.s[0][1] = -t_root * 0.6;
+            state_mut.s[1][0] = 0.6;
+            state_mut.s[1][1] = 0.6;
+        }
 
         state
             .as_mut()
@@ -1473,7 +1567,7 @@ mod test {
                 state.as_ref().s[0][i],
                 -4.0 * f64::ln(5.0 / 3.0),
             );
-            assert_scalar_close(state.as_ref().s[1][i], 0.0);
+            assert_scalar_close(state.as_ref().s[1][i], 0.4);
         }
     }
 

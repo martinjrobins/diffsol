@@ -663,13 +663,11 @@ where
         state
             .as_mut()
             .set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
-        state.set_step_size(
-            state.h,
-            augmented_eqn.atol().unwrap(),
-            augmented_eqn.rtol().unwrap(),
-            augmented_eqn,
-            1,
-        );
+        let h = state.h;
+        let atol = augmented_eqn.atol().unwrap();
+        let rtol = augmented_eqn.rtol().unwrap();
+        state.as_mut().set_step_size(h, atol, rtol, augmented_eqn, 1);
+
         Ok(state)
     }
 
@@ -958,13 +956,12 @@ where
         state
             .as_mut()
             .set_consistent_augmented(self, augmented_eqn, &mut newton_solver)?;
-        state.set_step_size(
-            state.h,
-            augmented_eqn.atol().unwrap(),
-            augmented_eqn.rtol().unwrap(),
-            augmented_eqn,
-            tableau.order(),
-        );
+        let h = state.h;
+        let atol = augmented_eqn.atol().unwrap();
+        let rtol = augmented_eqn.rtol().unwrap();
+        state
+            .as_mut()
+            .set_step_size(h, atol, rtol, augmented_eqn, tableau.order());
         Ok(state)
     }
 
@@ -1121,13 +1118,12 @@ where
             *state.as_mut().h = -h;
         }
 
-        state.set_step_size(
-            state.h,
-            augmented_eqn.atol().unwrap(),
-            augmented_eqn.rtol().unwrap(),
-            augmented_eqn,
-            tableau.order(),
-        );
+        let h = state.h;
+        let atol = augmented_eqn.atol().unwrap();
+        let rtol = augmented_eqn.rtol().unwrap();
+        state
+            .as_mut()
+            .set_step_size(h, atol, rtol, augmented_eqn, tableau.order());
         Ok(state)
     }
 

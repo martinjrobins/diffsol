@@ -7,9 +7,9 @@ use crate::{
     ode_solver_error,
     scalar::Scalar,
     AugmentedOdeEquations, Checkpointing, CheckpointingPath, Context, DefaultDenseMatrix,
-    DefaultSolver, DenseMatrix, HermiteInterpolator, MatrixCommon,
-    NonLinearOp, OdeEquations, OdeSolverConfig,
-    OdeSolverProblem, OdeSolverState, Op, Solution, StateRef, StateRefMut, Vector, VectorViewMut,
+    DefaultSolver, DenseMatrix, HermiteInterpolator, MatrixCommon, NonLinearOp, OdeEquations,
+    OdeSolverConfig, OdeSolverProblem, OdeSolverState, Op, Solution, StateRef, StateRefMut, Vector,
+    VectorViewMut,
 };
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum OdeSolverStopReason<T: Scalar> {
@@ -179,7 +179,8 @@ where
         Eqn::M: DefaultSolver,
     {
         let problem = self.problem();
-        self.state_mut().apply_reset::<<Eqn::M as DefaultSolver>::LS, _>(problem)
+        self.state_mut()
+            .apply_reset::<<Eqn::M as DefaultSolver>::LS, _>(problem)
     }
 
     /// Apply the problem's configured reset operator to the current state and
@@ -1070,12 +1071,10 @@ mod test {
             exponential_decay_problem_with_root, exponential_decay_with_reset_problem,
             exponential_decay_with_reset_problem_sens,
         },
-        ode_equations::test_models::exponential_decay_with_algebraic::{
-            exponential_decay_with_algebraic_with_reset_problem_sens,
-        },
-        scale, AdjointOdeSolverMethod, DenseMatrix, NalgebraLU, NalgebraVec,
-        OdeBuilder, OdeEquations, OdeSolverMethod, OdeSolverStopReason, Op,
-        SensitivitiesOdeSolverMethod, Solution, Vector, VectorView,
+        ode_equations::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_with_reset_problem_sens,
+        scale, AdjointOdeSolverMethod, DenseMatrix, NalgebraLU, NalgebraVec, OdeBuilder,
+        OdeEquations, OdeSolverMethod, OdeSolverStopReason, Op, SensitivitiesOdeSolverMethod,
+        Solution, Vector, VectorView,
     };
 
     #[test]
@@ -1532,8 +1531,7 @@ mod test {
 
     #[test]
     fn test_solve_dense_sensitivities_with_reset_fd_no_mass() {
-        let (mut problem, _soln) =
-            exponential_decay_with_reset_problem_sens::<NalgebraMat<f64>>();
+        let (mut problem, _soln) = exponential_decay_with_reset_problem_sens::<NalgebraMat<f64>>();
 
         let t_event = 10.0 * (5.0_f64 / 3.0_f64).ln();
         let post_event_dt = 0.1;
@@ -1583,12 +1581,11 @@ mod test {
             problem.eqn.set_params(&p_nom);
 
             for jcol in 0..t_eval.len() {
-                let fd_sens =
-                    (y_plus.column(jcol).into_owned() - y_minus.column(jcol).into_owned())
-                        / scale(2.0 * h);
+                let fd_sens = (y_plus.column(jcol).into_owned()
+                    - y_minus.column(jcol).into_owned())
+                    / scale(2.0 * h);
                 let actual_sens = ret_sens[iparam].column(jcol).into_owned();
-                let fd_atol =
-                    NalgebraVec::from_element(nstates, 1e-4_f64, ctx.clone());
+                let fd_atol = NalgebraVec::from_element(nstates, 1e-4_f64, ctx.clone());
                 let fd_rtol = 1e-4_f64;
                 fd_sens.assert_eq_norm(&actual_sens, &fd_atol, fd_rtol, 20.0);
             }
@@ -1648,12 +1645,11 @@ mod test {
             problem.eqn.set_params(&p_nom);
 
             for jcol in 0..t_eval.len() {
-                let fd_sens =
-                    (y_plus.column(jcol).into_owned() - y_minus.column(jcol).into_owned())
-                        / scale(2.0 * h);
+                let fd_sens = (y_plus.column(jcol).into_owned()
+                    - y_minus.column(jcol).into_owned())
+                    / scale(2.0 * h);
                 let actual_sens = ret_sens[iparam].column(jcol).into_owned();
-                let fd_atol =
-                    NalgebraVec::from_element(nstates, 1e-4_f64, ctx.clone());
+                let fd_atol = NalgebraVec::from_element(nstates, 1e-4_f64, ctx.clone());
                 let fd_rtol = 1e-4_f64;
                 fd_sens.assert_eq_norm(&actual_sens, &fd_atol, fd_rtol, 20.0);
             }

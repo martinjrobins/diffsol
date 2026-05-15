@@ -992,6 +992,108 @@ pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
     (problem, soln)
 }
 
+fn exponential_decay_constant_reset_jac<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+fn exponential_decay_constant_reset_sens<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+fn exponential_decay_two_root_jac<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    v: &M::V,
+    y: &mut M::V,
+) {
+    y.set_index(0, v.get_index(0));
+    y.set_index(1, v.get_index(0));
+}
+
+fn exponential_decay_two_root_sens<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+/// Exponential decay with two roots (0.6 trigger, 0.3 stop), constant reset to 0.4,
+/// and forward sensitivity equations.
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_with_constant_reset_problem_sens<M: MatrixHost + 'static>() -> (
+    OdeSolverProblem<
+        impl OdeEquationsImplicitSens<
+            M = M,
+            V = M::V,
+            T = M::T,
+            C = M::C,
+            Reset: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpSens<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpTimePartial<M = M, V = M::V, T = M::T, C = M::C>,
+            Root: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpSens<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpTimePartial<M = M, V = M::V, T = M::T, C = M::C>,
+        >,
+    >,
+    OdeSolverSolution<M::V>,
+) {
+    let problem = OdeBuilder::<M>::new()
+        .p([0.1, 1.0])
+        .rhs_sens_implicit(
+            exponential_decay::<M>,
+            exponential_decay_jacobian::<M>,
+            exponential_decay_sens::<M>,
+        )
+        .init_sens(
+            exponential_decay_init::<M>,
+            exponential_decay_init_sens::<M>,
+            2,
+        )
+        .root_sens_implicit(
+            exponential_decay_two_root::<M>,
+            exponential_decay_two_root_jac::<M>,
+            exponential_decay_two_root_sens::<M>,
+            2,
+        )
+        .reset_sens_implicit(
+            exponential_decay_reset::<M>,
+            exponential_decay_constant_reset_jac::<M>,
+            exponential_decay_constant_reset_sens::<M>,
+        )
+        .build()
+        .unwrap();
+
+    let nstates = problem.eqn.rhs().nstates();
+    let ctx = problem.context().clone();
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
+    soln.push(
+        M::V::from_element(nstates, M::T::zero(), ctx),
+        M::T::zero(),
+    );
+
+    (problem, soln)
+}
+
 #[cfg(test)]
 mod tests {
     #[cfg(feature = "diffsl-llvm")]

@@ -2,9 +2,9 @@ use diffsol::matrix::MatrixRef;
 use diffsol::{
     AdjointEquations, AdjointOdeSolverMethod, Bdf, BdfState, CheckpointingPath, CodegenModule,
     DefaultDenseMatrix, DefaultSolver, DiffSl, DiffsolError, ExplicitRk, LinearSolver, Matrix,
-    NewtonNonlinearSolver, NoLineSearch, OdeEquations,
-    OdeEquationsImplicitAdjoint, OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverProblem,
-    OdeSolverState, RkState, Sdirk, SensEquations, SensitivitiesOdeSolverMethod, VectorRef,
+    NewtonNonlinearSolver, NoLineSearch, OdeEquations, OdeEquationsImplicitAdjoint,
+    OdeEquationsImplicitSens, OdeSolverMethod, OdeSolverProblem, OdeSolverState, RkState, Sdirk,
+    SensEquations, SensitivitiesOdeSolverMethod, VectorRef,
 };
 
 use crate::scalar_type::Scalar;
