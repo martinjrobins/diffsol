@@ -8,6 +8,8 @@ use std::ops::{Add, AddAssign, Mul, MulAssign, Sub, SubAssign};
 
 use crate::{
     error::{DiffsolError, MatrixError},
+    linear_solver::cuda::lu::CudaLU,
+    matrix::default_solver::DefaultSolver,
     matrix_error, CudaContext, CudaType, CudaVec, CudaVecMut, CudaVecRef, IndexType, MatrixCommon,
     ScalarCuda, Scale, Vector, VectorIndex,
 };
@@ -213,9 +215,9 @@ impl<T: ScalarCuda> CudaMat<T> {
     }
 }
 
-//impl<T: Scalar> DefaultSolver for CudaMat<T> {
-//    type LS = CudaLU<T>;
-//}
+impl<T: ScalarCuda> DefaultSolver for CudaMat<T> {
+    type LS = CudaLU<T>;
+}
 
 macro_rules! impl_matrix_common {
     ($mat:ty, $vec:ty, $con:ty, $in:ty) => {

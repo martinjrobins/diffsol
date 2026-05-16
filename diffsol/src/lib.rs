@@ -26,7 +26,7 @@
 //! [OdeSolverProblem::rk_state], [OdeSolverProblem::rk_state_and_consistent]). Or you can manually
 //! intitialise a new state using [OdeSolverState::new], or create an uninitialised state using
 //! [OdeSolverState::new_without_initialise] and intitialise it manually or using the
-//! [OdeSolverState::set_consistent] and [OdeSolverState::set_step_size] methods.
+//! [StateRefMut::set_consistent] and [StateRefMut::set_step_size] methods.
 //!
 //! To view the state within a solver, you can use the [OdeSolverMethod::state] or
 //! [OdeSolverMethod::state_mut] methods. These will return references to the state using either

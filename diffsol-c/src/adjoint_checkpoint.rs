@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 
-use diffsol::{CheckpointingPath, DiffSl, DiffsolError, OdeEquations};
+use diffsol::{CheckpointingPath, DefaultSolver, DiffSl, DiffsolError, OdeEquationsImplicit};
 
 use crate::{
     error::DiffsolRtError, linear_solver_type::LinearSolverType,
@@ -22,9 +22,9 @@ impl dyn AdjointCheckpoint + '_ {
         &self,
     ) -> Result<&AdjointCheckpointData<M, CG, Tag>, DiffsolError>
     where
-        M: diffsol::Matrix<T: Scalar> + 'static,
+        M: diffsol::Matrix<T: Scalar> + DefaultSolver + 'static,
         CG: diffsol::CodegenModule + 'static,
-        DiffSl<M, CG>: OdeEquations<V = M::V> + 'static,
+        DiffSl<M, CG>: OdeEquationsImplicit<V = M::V> + 'static,
         Tag: OdeSolverMethodTag<M, CG> + 'static,
     {
         self.as_any()
@@ -39,9 +39,9 @@ impl dyn AdjointCheckpoint + '_ {
 
 pub(crate) struct AdjointCheckpointData<M, CG, Tag>
 where
-    M: diffsol::Matrix<T: Scalar>,
+    M: diffsol::Matrix<T: Scalar> + DefaultSolver,
     CG: diffsol::CodegenModule,
-    DiffSl<M, CG>: OdeEquations<V = M::V>,
+    DiffSl<M, CG>: OdeEquationsImplicit<V = M::V>,
     Tag: OdeSolverMethodTag<M, CG>,
 {
     pub(crate) checkpointing: CheckpointingPath<DiffSl<M, CG>, Tag::State>,
@@ -52,9 +52,9 @@ where
 
 impl<M, CG, Tag> AdjointCheckpointData<M, CG, Tag>
 where
-    M: diffsol::Matrix<T: Scalar>,
+    M: diffsol::Matrix<T: Scalar> + DefaultSolver,
     CG: diffsol::CodegenModule,
-    DiffSl<M, CG>: OdeEquations<V = M::V>,
+    DiffSl<M, CG>: OdeEquationsImplicit<V = M::V>,
     Tag: OdeSolverMethodTag<M, CG>,
 {
     pub(crate) fn new(
@@ -74,9 +74,9 @@ where
 
 impl<M, CG, Tag> AdjointCheckpoint for AdjointCheckpointData<M, CG, Tag>
 where
-    M: diffsol::Matrix<T: Scalar> + 'static,
+    M: diffsol::Matrix<T: Scalar> + DefaultSolver + 'static,
     CG: diffsol::CodegenModule + 'static,
-    DiffSl<M, CG>: OdeEquations<V = M::V> + 'static,
+    DiffSl<M, CG>: OdeEquationsImplicit<V = M::V> + 'static,
     Tag: OdeSolverMethodTag<M, CG> + 'static,
 {
     fn as_any(&self) -> &dyn Any {

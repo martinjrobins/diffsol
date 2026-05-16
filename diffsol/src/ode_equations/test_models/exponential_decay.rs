@@ -839,15 +839,19 @@ pub fn exponential_decay_with_two_roots_problem<M: MatrixHost + 'static>() -> (
 // Reset:  y → y + 2   (component-wise; y_new = [2.6, 2.6])
 // ------------------------------------------------------------------
 
-fn exponential_decay_reset_y_plus_2<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+pub(crate) fn exponential_decay_reset_y_plus_2<M: Matrix>(
+    x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    y: &mut M::V,
+) {
     // R(y) = y + 2  (component-wise)
-    let nstates = 2;
-    for i in 0..nstates {
+    for i in 0..x.len() {
         y.set_index(i, x.get_index(i) + M::T::from_f64(2.0).unwrap());
     }
 }
 
-fn exponential_decay_reset_y_plus_2_jac<M: Matrix>(
+pub(crate) fn exponential_decay_reset_y_plus_2_jac<M: Matrix>(
     _x: &M::V,
     _p: &M::V,
     _t: M::T,
@@ -858,14 +862,19 @@ fn exponential_decay_reset_y_plus_2_jac<M: Matrix>(
     y.copy_from(v);
 }
 
-fn exponential_decay_root_0_6_and_2_0<M: Matrix>(x: &M::V, _p: &M::V, _t: M::T, y: &mut M::V) {
+pub(crate) fn exponential_decay_root_0_6_and_2_0<M: Matrix>(
+    x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    y: &mut M::V,
+) {
     // Root 0: y[0] = 0.6  (reset trigger)
     y.set_index(0, x.get_index(0) - M::T::from_f64(0.6).unwrap());
     // Root 1: y[0] = 2.0  (stop; fires after reset when y decays from 2.6 to 2.0)
     y.set_index(1, x.get_index(0) - M::T::from_f64(2.0).unwrap());
 }
 
-fn exponential_decay_root_0_6_and_2_0_jac<M: Matrix>(
+pub(crate) fn exponential_decay_root_0_6_and_2_0_jac<M: Matrix>(
     _x: &M::V,
     _p: &M::V,
     _t: M::T,
@@ -876,7 +885,7 @@ fn exponential_decay_root_0_6_and_2_0_jac<M: Matrix>(
     y.set_index(1, v.get_index(0));
 }
 
-fn exponential_decay_root_0_6_and_2_0_sens<M: Matrix>(
+pub(crate) fn exponential_decay_root_0_6_and_2_0_sens<M: Matrix>(
     _x: &M::V,
     _p: &M::V,
     _t: M::T,
@@ -886,7 +895,7 @@ fn exponential_decay_root_0_6_and_2_0_sens<M: Matrix>(
     y.fill(M::T::zero());
 }
 
-fn exponential_decay_reset_y_plus_2_sens<M: Matrix>(
+pub(crate) fn exponential_decay_reset_y_plus_2_sens<M: Matrix>(
     _x: &M::V,
     _p: &M::V,
     _t: M::T,
@@ -979,6 +988,105 @@ pub fn exponential_decay_with_reset_problem_sens<M: MatrixHost + 'static>() -> (
         ..Default::default()
     };
     soln.push_sens(y_stop, t_stop, &[s_k, s_y0]);
+
+    (problem, soln)
+}
+
+fn exponential_decay_constant_reset_jac<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+fn exponential_decay_constant_reset_sens<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+fn exponential_decay_two_root_jac<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    v: &M::V,
+    y: &mut M::V,
+) {
+    y.set_index(0, v.get_index(0));
+    y.set_index(1, v.get_index(0));
+}
+
+fn exponential_decay_two_root_sens<M: Matrix>(
+    _x: &M::V,
+    _p: &M::V,
+    _t: M::T,
+    _v: &M::V,
+    y: &mut M::V,
+) {
+    y.fill(M::T::zero());
+}
+
+/// Exponential decay with two roots (0.6 trigger, 0.3 stop), constant reset to 0.4,
+/// and forward sensitivity equations.
+#[allow(clippy::type_complexity)]
+pub fn exponential_decay_with_constant_reset_problem_sens<M: MatrixHost + 'static>() -> (
+    OdeSolverProblem<
+        impl OdeEquationsImplicitSens<
+            M = M,
+            V = M::V,
+            T = M::T,
+            C = M::C,
+            Reset: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpSens<M = M, V = M::V, T = M::T, C = M::C>
+                       + NonLinearOpTimePartial<M = M, V = M::V, T = M::T, C = M::C>,
+            Root: NonLinearOpJacobian<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpSens<M = M, V = M::V, T = M::T, C = M::C>
+                      + NonLinearOpTimePartial<M = M, V = M::V, T = M::T, C = M::C>,
+        >,
+    >,
+    OdeSolverSolution<M::V>,
+) {
+    let problem = OdeBuilder::<M>::new()
+        .p([0.1, 1.0])
+        .rhs_sens_implicit(
+            exponential_decay::<M>,
+            exponential_decay_jacobian::<M>,
+            exponential_decay_sens::<M>,
+        )
+        .init_sens(
+            exponential_decay_init::<M>,
+            exponential_decay_init_sens::<M>,
+            2,
+        )
+        .root_sens_implicit(
+            exponential_decay_two_root::<M>,
+            exponential_decay_two_root_jac::<M>,
+            exponential_decay_two_root_sens::<M>,
+            2,
+        )
+        .reset_sens_implicit(
+            exponential_decay_reset::<M>,
+            exponential_decay_constant_reset_jac::<M>,
+            exponential_decay_constant_reset_sens::<M>,
+        )
+        .build()
+        .unwrap();
+
+    let nstates = problem.eqn.rhs().nstates();
+    let ctx = problem.context().clone();
+    let mut soln = OdeSolverSolution {
+        atol: problem.atol.clone(),
+        rtol: problem.rtol,
+        ..Default::default()
+    };
+    soln.push(M::V::from_element(nstates, M::T::zero(), ctx), M::T::zero());
 
     (problem, soln)
 }

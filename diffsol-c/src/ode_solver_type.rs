@@ -2,7 +2,7 @@
 // stragegy like bdf or esdirk34 in diffsol.
 
 use diffsol::error::{DiffsolError, OdeSolverError};
-use diffsol::ode_equations::OdeEquationsImplicitSens;
+use diffsol::ode_equations::{OdeEquationsImplicit, OdeEquationsImplicitSens};
 use diffsol::{
     matrix::MatrixRef, DefaultDenseMatrix, DenseMatrix, DiffSl, LinearSolver, Matrix,
     OdeSolverProblem, OdeSolverState, VectorHost, VectorRef, VectorView,
@@ -43,11 +43,12 @@ fn solve_with_tag<M, CG, LS, Tag>(
     mut soln: Solution<M::V>,
 ) -> Result<Solution<M::V>, DiffsolError>
 where
-    M: Matrix<T: Scalar>,
+    M: Matrix<T: Scalar> + DefaultSolver,
     CG: CodegenModule,
     M::V: VectorHost + DefaultDenseMatrix,
     LS: LinearSolver<M>,
     Tag: OdeSolverMethodTag<M, CG>,
+    DiffSl<M, CG>: OdeEquationsImplicit<M = M, T = M::T, V = M::V, C = M::C>,
     for<'b> &'b M::V: VectorRef<M::V>,
     for<'b> &'b M: MatrixRef<M>,
 {
@@ -64,7 +65,7 @@ where
         }
         let mut state = solver.into_state();
         problem.eqn.set_model_index(root_idx);
-        state.as_mut().apply_reset(&problem.eqn)?;
+        state.as_mut().apply_reset_with_mass::<M::LS, _>(problem)?;
         solver = Tag::solver_with_state::<LS>(problem, state)?;
     }
     Ok(soln)
@@ -75,7 +76,7 @@ fn solve_fwd_sens_with_tag<M, CG, LS, Tag>(
     t_eval: &[M::T],
 ) -> Result<Solution<M::V>, DiffsolError>
 where
-    M: Matrix<T: Scalar>,
+    M: Matrix<T: Scalar> + DefaultSolver,
     CG: CodegenModule,
     M::V: VectorHost + DefaultDenseMatrix,
     LS: LinearSolver<M>,
@@ -100,7 +101,7 @@ where
         problem.eqn.set_model_index(root_idx);
         state
             .as_mut()
-            .apply_reset_with_sens(&problem.eqn, root_idx)?;
+            .apply_reset_with_sens_mass::<M::LS, _>(problem, root_idx)?;
         solver = Tag::solver_sens_with_state::<LS>(problem, state)?;
     }
     Ok(soln)
@@ -112,11 +113,12 @@ fn solve_with_checkpointing_with_tag<M, CG, LS, Tag>(
     mut soln: Solution<M::V>,
 ) -> Result<(Solution<M::V>, CheckpointingPath<DiffSl<M, CG>, Tag::State>), DiffsolError>
 where
-    M: Matrix<T: Scalar>,
+    M: Matrix<T: Scalar> + DefaultSolver,
     CG: CodegenModule,
     M::V: VectorHost + DefaultDenseMatrix,
     LS: LinearSolver<M>,
     Tag: OdeSolverMethodTag<M, CG>,
+    DiffSl<M, CG>: OdeEquationsImplicit<M = M, T = M::T, V = M::V, C = M::C>,
     for<'b> &'b M::V: VectorRef<M::V>,
     for<'b> &'b M: MatrixRef<M>,
 {
@@ -134,7 +136,7 @@ where
         }
         let mut state = solver.into_state();
         problem.eqn.set_model_index(root_idx);
-        state.as_mut().apply_reset(&problem.eqn)?;
+        state.as_mut().apply_reset_with_mass::<M::LS, _>(problem)?;
         solver = Tag::solver_with_state::<LS>(problem, state)?;
     }
     Ok((soln, checkpointing))
@@ -162,11 +164,11 @@ fn solve_adjoint_fwd_with_tag<M, CG, LS, Tag>(
     linear_solver: LinearSolverType,
 ) -> Result<(Solution<M::V>, Box<dyn AdjointCheckpoint>), DiffsolError>
 where
-    M: Matrix<T: Scalar> + 'static,
+    M: Matrix<T: Scalar> + DefaultSolver + 'static,
     CG: CodegenModule + 'static,
     M::V: VectorHost + DefaultDenseMatrix,
     LS: LinearSolver<M>,
-    DiffSl<M, CG>: OdeEquations<M = M, T = M::T, V = M::V, C = M::C>,
+    DiffSl<M, CG>: OdeEquationsImplicit<M = M, T = M::T, V = M::V, C = M::C>,
     Tag: OdeSolverMethodTag<M, CG> + 'static,
     for<'b> &'b M::V: VectorRef<M::V>,
     for<'b> &'b M: MatrixRef<M>,
@@ -402,12 +404,13 @@ impl OdeSolverType {
         final_time: M::T,
     ) -> Result<Solution<M::V>, DiffsolError>
     where
-        M: Matrix<T: Scalar>,
+        M: Matrix<T: Scalar> + DefaultSolver,
         CG: CodegenModule,
         M::V: VectorHost + DefaultDenseMatrix,
         LS: LinearSolver<M>,
         for<'b> &'b M::V: VectorRef<M::V>,
         for<'b> &'b M: MatrixRef<M>,
+        DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>,
     {
         match self {
             OdeSolverType::Bdf => {
@@ -431,12 +434,13 @@ impl OdeSolverType {
         t_eval: &[M::T],
     ) -> Result<Solution<M::V>, DiffsolError>
     where
-        M: Matrix<T: Scalar>,
+        M: Matrix<T: Scalar> + DefaultSolver,
         CG: CodegenModule,
         M::V: VectorHost + DefaultDenseMatrix,
         LS: LinearSolver<M>,
         for<'b> &'b M::V: VectorRef<M::V>,
         for<'b> &'b M: MatrixRef<M>,
+        DiffSl<M, CG>: OdeEquationsImplicitSens<M = M, T = M::T, V = M::V, C = M::C>,
     {
         match self {
             OdeSolverType::Bdf => {

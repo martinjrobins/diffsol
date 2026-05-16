@@ -4,7 +4,8 @@ use std::{cell::Ref, fmt::Display};
 
 use crate::{
     error::{DiffsolError, OdeSolverError},
-    AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, NoAug, StateRef, StateRefMut,
+    AugmentedOdeEquationsImplicit, Convergence, DefaultDenseMatrix, DefaultSolver, NoAug, StateRef,
+    StateRefMut,
 };
 
 use num_traits::{abs, FromPrimitive, One, Pow, Signed, ToPrimitive, Zero};
@@ -44,6 +45,7 @@ impl<'a, M, Eqn, Nls, AugEqn> AugmentedOdeSolverMethod<'a, Eqn, AugEqn>
     for Bdf<'a, Eqn, Nls, M, AugEqn>
 where
     Eqn: OdeEquationsImplicit,
+    Eqn::M: DefaultSolver,
     AugEqn: AugmentedOdeEquationsImplicit<Eqn>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -74,6 +76,7 @@ impl<'a, M, Eqn, Nls> SensitivitiesOdeSolverMethod<'a, Eqn>
     for Bdf<'a, Eqn, Nls, M, SensEquations<'a, Eqn>>
 where
     Eqn: OdeEquationsImplicitSens + 'a,
+    Eqn::M: DefaultSolver,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
     for<'b> &'b Eqn::M: MatrixRef<Eqn::M>,
@@ -86,6 +89,7 @@ impl<'a, M, Eqn, Nls, Solver> AdjointOdeSolverMethod<'a, Eqn, Solver>
     for Bdf<'a, Eqn, Nls, M, crate::AdjointEquations<'a, Eqn, Solver>>
 where
     Eqn: OdeEquationsImplicitAdjoint + 'a,
+    Eqn::M: DefaultSolver,
     Solver: OdeSolverMethod<'a, Eqn>,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -232,6 +236,7 @@ impl<'a, M, Eqn, Nls, AugmentedEqn> Bdf<'a, Eqn, Nls, M, AugmentedEqn>
 where
     AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
     Eqn: OdeEquationsImplicit,
+    Eqn::M: DefaultSolver,
     Eqn::V: DefaultDenseMatrix,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     for<'b> &'b Eqn::V: VectorRef<Eqn::V>,
@@ -979,6 +984,7 @@ where
 impl<'a, M, Eqn, Nls, AugmentedEqn> OdeSolverMethod<'a, Eqn> for Bdf<'a, Eqn, Nls, M, AugmentedEqn>
 where
     Eqn: OdeEquationsImplicit,
+    Eqn::M: DefaultSolver,
     AugmentedEqn: AugmentedOdeEquations<Eqn> + OdeEquationsImplicit,
     M: DenseMatrix<T = Eqn::T, V = Eqn::V, C = Eqn::C>,
     Eqn::V: DefaultDenseMatrix,
@@ -999,6 +1005,23 @@ where
 
     fn order(&self) -> usize {
         self.state.order
+    }
+
+    fn apply_reset(&mut self) -> Result<(), DiffsolError> {
+        let problem = self.problem();
+        self.state
+            .as_mut()
+            .apply_reset_with_mass::<<Eqn::M as DefaultSolver>::LS, _>(problem)
+    }
+
+    fn apply_reset_with_sens(&mut self, root_idx: usize) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquationsImplicitSens,
+    {
+        let problem = self.problem();
+        self.state
+            .as_mut()
+            .apply_reset_with_sens_mass::<<Eqn::M as DefaultSolver>::LS, _>(problem, root_idx)
     }
 
     fn jacobian(&self) -> Option<Ref<'_, <Eqn>::M>> {

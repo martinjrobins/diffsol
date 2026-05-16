@@ -3,9 +3,10 @@ use crate::{
     error::OdeSolverError,
     ode_solver::method::write_state_out,
     ode_solver::solution::{Solution, SolutionMode},
-    ode_solver_error, AugmentedOdeSolverMethod, Context, DefaultDenseMatrix, DenseMatrix,
-    MatrixCommon, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens, OdeEquationsImplicitSens,
-    OdeSolverProblem, OdeSolverStopReason, Op, SensEquations, StateRef, Vector, VectorViewMut,
+    ode_solver_error, AugmentedOdeSolverMethod, Context, DefaultDenseMatrix, DefaultSolver,
+    DenseMatrix, MatrixCommon, NonLinearOp, NonLinearOpJacobian, NonLinearOpSens,
+    OdeEquationsImplicitSens, OdeSolverProblem, OdeSolverStopReason, Op, SensEquations, StateRef,
+    Vector, VectorViewMut,
 };
 use num_traits::{One, Zero};
 use std::ops::AddAssign;
@@ -125,6 +126,7 @@ where
     where
         Eqn: OdeEquationsImplicitSens,
         Eqn::V: DefaultDenseMatrix,
+        Eqn::M: DefaultSolver,
         Self: Sized,
     {
         if self.problem().integrate_out {
@@ -274,6 +276,7 @@ fn solve_dense_sensitivities_auto_reset<'a, Eqn, S>(
 where
     Eqn: OdeEquationsImplicitSens + 'a,
     Eqn::V: DefaultDenseMatrix,
+    Eqn::M: DefaultSolver,
     S: SensitivitiesOdeSolverMethod<'a, Eqn>,
 {
     s.set_stop_time(t_eval[t_eval.len() - 1])?;

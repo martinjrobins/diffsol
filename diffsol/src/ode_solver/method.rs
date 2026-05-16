@@ -168,19 +168,16 @@ where
     /// Apply the problem's configured reset operator to the current state.
     ///
     /// This is typically used after [`Self::state_mut_back`] has moved the solver to a root time.
-    /// The helper recomputes `dy` from the problem RHS after updating the state vector.
-    fn apply_reset(&mut self) -> Result<(), DiffsolError> {
-        let (rhs, has_mass, reset) = {
-            let eqn = &self.problem().eqn;
-            (
-                eqn.rhs(),
-                eqn.mass().is_some(),
-                eqn.reset().ok_or_else(|| {
-                    ode_solver_error!(Other, "No reset operator configured for this problem")
-                })?,
-            )
-        };
-        self.state_mut().state_mut_op(&rhs, has_mass, &reset)
+    /// Applies the reset operator to update `y`, then recomputes `dy`. If the equations have no
+    /// mass matrix, `dy` is set directly from `rhs(y, t)`. If a mass matrix is present,
+    /// [`StateRefMut::set_consistent`] is called to ensure `y` and `dy` satisfy algebraic
+    /// constraints.
+    fn apply_reset(&mut self) -> Result<(), DiffsolError>
+    where
+        Eqn: OdeEquations,
+    {
+        let problem = self.problem();
+        self.state_mut().apply_reset(problem)
     }
 
     /// Apply the problem's configured reset operator to the current state and
@@ -193,21 +190,8 @@ where
     where
         Eqn: OdeEquationsImplicitSens,
     {
-        let (rhs, has_mass, reset, root) = {
-            let eqn = &self.problem().eqn;
-            (
-                eqn.rhs(),
-                eqn.mass().is_some(),
-                eqn.reset().ok_or_else(|| {
-                    ode_solver_error!(Other, "No reset operator configured for this problem")
-                })?,
-                eqn.root().ok_or_else(|| {
-                    ode_solver_error!(Other, "No root operator configured for this problem")
-                })?,
-            )
-        };
-        self.state_mut()
-            .state_mut_op_with_sens_and_reset(&rhs, has_mass, &reset, &root, root_idx)
+        let problem = self.problem();
+        self.state_mut().apply_reset_with_sens(problem, root_idx)
     }
 
     /// Get the current order of accuracy of the solver (e.g. explict euler method is first-order)
@@ -252,6 +236,7 @@ where
         DiffsolError,
     >
     where
+        Eqn: OdeEquations,
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
@@ -331,6 +316,7 @@ where
     /// calls to `solve_soln`.
     fn solve_soln(mut self, soln: &mut Solution<Eqn::V>) -> Result<Self, DiffsolError>
     where
+        Eqn: OdeEquations,
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
@@ -395,6 +381,7 @@ where
         max_steps_between_checkpoints: Option<usize>,
     ) -> Result<Self, DiffsolError>
     where
+        Eqn: OdeEquations,
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
@@ -488,6 +475,7 @@ where
         DiffsolError,
     >
     where
+        Eqn: OdeEquations,
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
@@ -546,6 +534,7 @@ where
         DiffsolError,
     >
     where
+        Eqn: OdeEquations,
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
@@ -606,6 +595,7 @@ where
         DiffsolError,
     >
     where
+        Eqn: OdeEquations,
         Eqn::V: DefaultDenseMatrix,
         Self: Sized,
     {
@@ -907,7 +897,6 @@ fn solve<'a, Eqn: OdeEquations + 'a, S: OdeSolverMethod<'a, Eqn>>(
 where
     Eqn::V: DefaultDenseMatrix,
 {
-    // do the main loop
     write_out(s, ret_y, ret_t, tmp_nout);
     s.set_stop_time(final_time)?;
     let has_reset = continue_after_reset && s.problem().eqn.reset().is_some();
@@ -1069,6 +1058,7 @@ mod test {
             exponential_decay_problem_with_root, exponential_decay_with_reset_problem,
             exponential_decay_with_reset_problem_sens,
         },
+        ode_equations::test_models::exponential_decay_with_algebraic::exponential_decay_with_algebraic_with_reset_problem_sens,
         scale, AdjointOdeSolverMethod, DenseMatrix, NalgebraLU, NalgebraVec, OdeBuilder,
         OdeEquations, OdeSolverMethod, OdeSolverStopReason, Op, SensitivitiesOdeSolverMethod,
         Solution, Vector, VectorView,
@@ -1524,5 +1514,132 @@ mod test {
             problem.rtol,
             20.0,
         );
+    }
+
+    #[test]
+    fn test_solve_dense_sensitivities_with_reset_fd_no_mass() {
+        let (mut problem, _soln) = exponential_decay_with_reset_problem_sens::<NalgebraMat<f64>>();
+
+        let t_event = 10.0 * (5.0_f64 / 3.0_f64).ln();
+        let post_event_dt = 0.1;
+        let t_eval = vec![0.0, t_event + post_event_dt, t_event + post_event_dt + 0.1];
+
+        let (ret, ret_sens, stop_reason) = {
+            let mut s = problem.bdf_sens::<NalgebraLU<f64>>().unwrap();
+            s.solve_dense_sensitivities(&t_eval).unwrap()
+        };
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
+        assert_eq!(ret.ncols(), t_eval.len());
+        for ret_sens_j in &ret_sens {
+            assert_eq!(ret_sens_j.ncols(), t_eval.len());
+        }
+
+        let nparams = problem.eqn.nparams();
+        let nstates = problem.eqn.rhs().nstates();
+        let ctx = problem.eqn.context().clone();
+        let mut p_nom = NalgebraVec::zeros(nparams, ctx.clone());
+        problem.eqn.get_params(&mut p_nom);
+
+        let fd_eps = 1e-6;
+
+        for iparam in 0..nparams {
+            let p_nom_i = p_nom.get_index(iparam);
+            let h = fd_eps * (1.0 + p_nom_i.abs());
+
+            let mut p = p_nom.clone();
+            p.set_index(iparam, p_nom_i + h);
+            problem.eqn.set_params(&p);
+            let y_plus = {
+                let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
+                let (ret_p, reason_p) = s.solve_dense(&t_eval).unwrap();
+                assert_eq!(reason_p, OdeSolverStopReason::TstopReached);
+                ret_p
+            };
+
+            p.set_index(iparam, p_nom_i - h);
+            problem.eqn.set_params(&p);
+            let y_minus = {
+                let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
+                let (ret_m, reason_m) = s.solve_dense(&t_eval).unwrap();
+                assert_eq!(reason_m, OdeSolverStopReason::TstopReached);
+                ret_m
+            };
+
+            problem.eqn.set_params(&p_nom);
+
+            for jcol in 0..t_eval.len() {
+                let fd_sens = (y_plus.column(jcol).into_owned()
+                    - y_minus.column(jcol).into_owned())
+                    / scale(2.0 * h);
+                let actual_sens = ret_sens[iparam].column(jcol).into_owned();
+                let fd_atol = NalgebraVec::from_element(nstates, 1e-4_f64, ctx.clone());
+                let fd_rtol = 1e-4_f64;
+                fd_sens.assert_eq_norm(&actual_sens, &fd_atol, fd_rtol, 20.0);
+            }
+        }
+    }
+
+    #[test]
+    fn test_solve_dense_sensitivities_with_reset_fd_with_mass() {
+        let (mut problem, _soln) =
+            exponential_decay_with_algebraic_with_reset_problem_sens::<NalgebraMat<f64>>();
+
+        let t_event = 10.0 * (5.0_f64 / 3.0_f64).ln();
+        let post_event_dt = 0.1;
+        let t_eval = vec![0.0, t_event + post_event_dt, t_event + post_event_dt + 0.1];
+
+        let (ret, ret_sens, stop_reason) = {
+            let mut s = problem.bdf_sens::<NalgebraLU<f64>>().unwrap();
+            s.solve_dense_sensitivities(&t_eval).unwrap()
+        };
+        assert_eq!(stop_reason, OdeSolverStopReason::TstopReached);
+        assert_eq!(ret.ncols(), t_eval.len());
+        for ret_sens_j in &ret_sens {
+            assert_eq!(ret_sens_j.ncols(), t_eval.len());
+        }
+
+        let nparams = problem.eqn.nparams();
+        let nstates = problem.eqn.rhs().nstates();
+        let ctx = problem.eqn.context().clone();
+        let mut p_nom = NalgebraVec::zeros(nparams, ctx.clone());
+        problem.eqn.get_params(&mut p_nom);
+
+        let fd_eps = 1e-6;
+
+        for iparam in 0..nparams {
+            let p_nom_i = p_nom.get_index(iparam);
+            let h = fd_eps * (1.0 + p_nom_i.abs());
+
+            let mut p = p_nom.clone();
+            p.set_index(iparam, p_nom_i + h);
+            problem.eqn.set_params(&p);
+            let y_plus = {
+                let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
+                let (ret_p, reason_p) = s.solve_dense(&t_eval).unwrap();
+                assert_eq!(reason_p, OdeSolverStopReason::TstopReached);
+                ret_p
+            };
+
+            p.set_index(iparam, p_nom_i - h);
+            problem.eqn.set_params(&p);
+            let y_minus = {
+                let mut s = problem.bdf::<NalgebraLU<f64>>().unwrap();
+                let (ret_m, reason_m) = s.solve_dense(&t_eval).unwrap();
+                assert_eq!(reason_m, OdeSolverStopReason::TstopReached);
+                ret_m
+            };
+
+            problem.eqn.set_params(&p_nom);
+
+            for jcol in 0..t_eval.len() {
+                let fd_sens = (y_plus.column(jcol).into_owned()
+                    - y_minus.column(jcol).into_owned())
+                    / scale(2.0 * h);
+                let actual_sens = ret_sens[iparam].column(jcol).into_owned();
+                let fd_atol = NalgebraVec::from_element(nstates, 1e-4_f64, ctx.clone());
+                let fd_rtol = 1e-4_f64;
+                fd_sens.assert_eq_norm(&actual_sens, &fd_atol, fd_rtol, 20.0);
+            }
+        }
     }
 }
