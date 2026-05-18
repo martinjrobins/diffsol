@@ -223,8 +223,8 @@
 //!   - [FaerSparseLU]: a sparse direct solver that uses the sparse LU decomposition implemented
 //!     in the [faer](https://github.com/sarah-ek/faer-rs).
 //!
-//! The provided nonlinear solvers are: - [NewtonNonlinearSolver]: a nonlinear solver that uses the
-//! Newton method.
+//! The provided nonlinear solvers are:
+//!   - [NewtonNonlinearSolver]: a nonlinear solver that uses the Newton method.
 //!
 //! ## Matrix and vector types
 //!
