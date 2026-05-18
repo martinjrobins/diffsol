@@ -30,7 +30,7 @@ You can add diffsol using `cargo add diffsol` or directly in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-diffsol = "0.13"
+diffsol = "0.14"
 ```
 
 Diffsol has the following features that can be enabled or disabled:
