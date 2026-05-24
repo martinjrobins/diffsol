@@ -12,7 +12,7 @@ readme = "../README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["nalgebra", "faer", "rayon"]
+default = ["nalgebra", "faer"]
 faer = []
 nalgebra = []
 rayon = ["faer/rayon", "diffsl?/rayon"]
