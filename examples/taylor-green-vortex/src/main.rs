@@ -1,7 +1,7 @@
 use diffsol::{
     CraneliftJitModule, FaerContext, FaerSparseLU, FaerSparseMat, FaerVec,
     LinearSolver, Matrix, NonLinearOp, NonLinearOpJacobian, OdeBuilder,
-    OdeEquations, OdeSolverMethod, Op, Vector, VectorHost,
+    OdeEquations, OdeSolverMethod, OdeSolverStopReason, Op, Vector, VectorHost,
 };
 use diffsol::ConstantOp as _;
 use ndarray::Array1;
@@ -109,24 +109,22 @@ fn main() {
     let mut tmp = V::zeros(n_u, ctx.clone());
     let mut u_tmp = V::zeros(n_u, ctx.clone());
 
-    let dt = 0.1;
+    let dt0 = 0.1;
     let t_final = 5.0;
-    let n_steps = (t_final / dt) as usize;
-    let save_every = (n_steps / 200).max(1);
-    let n_save = n_steps / save_every + 1;
+    let n_save = 201;
     let mut sol = ndarray::Array2::<f64>::zeros((n_u + n_p, n_save));
     let mut ts_save = vec![0.0f64; n_save];
 
     let init_y = problem.eqn().init().call(0.0);
     let init_dy = problem.eqn().rhs().call(&init_y, 0.0);
 
-    let mut solver = problem.bdf::<LS>().unwrap();
+    let mut solver = problem.esdirk34::<LS>().unwrap();
     {
         let state = solver.state_mut();
         state.y.copy_from(&init_y);
         state.dy.copy_from(&init_dy);
         *state.t = 0.0;
-        *state.h = dt;
+        *state.h = dt0;
     }
 
     for (dest, src) in sol.column_mut(0).slice_mut(ndarray::s![0..n_u]).iter_mut().zip(init_y.as_slice()) {
@@ -134,49 +132,65 @@ fn main() {
     }
     ts_save[0] = 0.0;
     let mut save_idx = 1;
+    let dt_save = t_final / (n_save - 1) as f64;
+    let mut t_save_next = dt_save;
+    let mut step_count = 0usize;
 
-    for step in 0..n_steps {
-        let t_next = (step + 1) as f64 * dt;
+    loop {
+        let reason = solver.step().expect("step");
+        step_count += 1;
+        let t = solver.state().t;
+        let u: Vec<f64> = solver.state().y.as_slice().to_vec();
+        let h = solver.state().h;
 
-        solver.set_stop_time(t_next).expect("set_stop_time");
-        let (_ys, _times, _reason) = solver.solve(t_next).expect("solve");
-
-        let u_star: Vec<f64> = solver.state().y.as_slice().to_vec();
-
+        // Compute divergence: div = GT * (m_lumped ⊙ u)
         for j in 0..n_u {
-            tmp.as_mut_slice()[j] = m_lumped[j] * u_star[j];
+            tmp.as_mut_slice()[j] = m_lumped[j] * u[j];
         }
         GT.gemv(1.0, &tmp, 0.0, &mut div);
 
+        // Pressure Poisson: L * phi = div / h
         let mut rhs = V::zeros(n_p, ctx.clone());
         for j in 0..n_p {
-            rhs.as_mut_slice()[j] = div.as_slice()[j] / dt;
+            rhs.as_mut_slice()[j] = div.as_slice()[j] / h;
         }
         let phi = l_solver.solve(&rhs).expect("L solve");
 
+        // Project: u_next = u - h * G * phi
         G.gemv(1.0, &phi, 0.0, &mut g_phi);
         for j in 0..n_u {
-            u_tmp.as_mut_slice()[j] = u_star[j] - dt * g_phi.as_slice()[j];
+            u_tmp.as_mut_slice()[j] = u[j] - h * g_phi.as_slice()[j];
         }
 
+        // Write corrected velocity back — ESDIRK34 is single-step, no history to break
         {
             let state = solver.state_mut();
             state.y.copy_from(&u_tmp);
-            *state.t = t_next;
-            *state.h = dt;
         }
 
-        if step % save_every == 0 || step == n_steps - 1 {
+        // Save at requested output times
+        while t >= t_save_next - 1e-12 && save_idx < n_save {
             for (dest, src) in sol.column_mut(save_idx).slice_mut(ndarray::s![0..n_u]).iter_mut().zip(u_tmp.as_slice()) {
                 *dest = *src;
             }
             for (dest, src) in sol.column_mut(save_idx).slice_mut(ndarray::s![n_u..n_u + n_p]).iter_mut().zip(phi.as_slice()) {
                 *dest = *src;
             }
-            ts_save[save_idx] = t_next;
+            ts_save[save_idx] = t;
             save_idx += 1;
+            t_save_next = save_idx as f64 * dt_save;
         }
+
+        if matches!(reason, OdeSolverStopReason::TstopReached) && t >= t_final - 1e-12 {
+            break;
+        }
+        if t >= t_final - 1e-12 {
+            break;
+        }
+        solver.set_stop_time(t_final).expect("set_stop_time");
     }
+
+    println!("Integration complete: {step_count} steps, t = {:.6}", solver.state().t);
 
     let sol_slice = sol.slice(ndarray::s![.., ..save_idx]);
     let sol_trimmed = sol_slice.to_owned();
