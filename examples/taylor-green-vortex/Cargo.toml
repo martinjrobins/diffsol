@@ -1,0 +1,12 @@
+[package]
+name = "taylor-green-vortex"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+diffsol = { path = "../../diffsol", features = ["diffsl-cranelift"] }
+faer = { version = "0.24", default-features = false, features = ["sparse"] }
+ndarray = "0.15"
+ndarray-npy = "0.8"
+
