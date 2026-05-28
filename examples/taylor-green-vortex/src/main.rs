@@ -1,61 +1,61 @@
 use diffsol::{
-    ConstantOp as _, CraneliftJitModule, FaerContext, FaerSparseLU, FaerSparseMat, FaerVec,
-    LinearSolver, Matrix, NonLinearOp, NonLinearOpJacobian,
-    OdeBuilder, OdeEquations, OdeSolverMethod, Op, Vector, VectorHost,
+    ConstantOp as _, CraneliftJitModule, FaerSparseLU, FaerSparseMat,
+    NonLinearOp, OdeBuilder, OdeEquations, OdeSolverMethod, Op, Vector, VectorHost,
 };
 use ndarray::Array1;
 use ndarray_npy::{read_npy, write_npy};
-use std::cell::RefCell;
 use std::fs;
 
+use faer::linalg::solvers::Solve;
+use faer::sparse::linalg::solvers::{Lu, SymbolicLu};
+use faer::sparse::{SparseColMat, Triplet};
+
 type M = FaerSparseMat<f64>;
-type V = FaerVec<f64>;
 type LS = FaerSparseLU<f64>;
 type CG = CraneliftJitModule;
 
-// --- Load / factor helpers ---
+// --- Sparse matrix helpers using raw faer ---
 
-fn load(prefix: &str, ctx: &FaerContext) -> M {
+/// Load sparse matrix from NPY triplet files
+fn load(prefix: &str) -> SparseColMat<usize, f64> {
     let dims: Array1<i64> = read_npy::<_, Array1<i64>>(format!("{prefix}_dims.npy")).unwrap();
+    let rows = dims[0] as usize;
+    let cols = dims[1] as usize;
     let i: Array1<i64> = read_npy::<_, Array1<i64>>(format!("{prefix}_i.npy")).unwrap();
     let j: Array1<i64> = read_npy::<_, Array1<i64>>(format!("{prefix}_j.npy")).unwrap();
     let v: Array1<f64> = read_npy::<_, Array1<f64>>(format!("{prefix}_v.npy")).unwrap();
-    let triplets: Vec<(usize, usize, f64)> = (0..i.len())
-        .map(|k| (i[k] as usize, j[k] as usize, v[k]))
+    let triplets: Vec<Triplet<usize, usize, f64>> = (0..i.len())
+        .map(|k| Triplet::new(i[k] as usize, j[k] as usize, v[k]))
         .collect();
-    M::try_from_triplets(dims[0] as usize, dims[1] as usize, triplets, ctx.clone()).unwrap()
+    SparseColMat::try_new_from_triplets(rows, cols, &triplets).unwrap()
 }
 
-struct ConstOp {
-    mat: RefCell<M>,
-    ctx: FaerContext,
-    n: usize,
-    sp: Option<<M as Matrix>::Sparsity>,
-}
-impl Op for ConstOp {
-    type T = f64; type V = V; type M = M; type C = FaerContext;
-    fn nstates(&self) -> usize { self.n }
-    fn nout(&self) -> usize { self.n }
-    fn nparams(&self) -> usize { 0 }
-    fn context(&self) -> &Self::C { &self.ctx }
-}
-impl NonLinearOp for ConstOp {
-    fn call_inplace(&self, _x: &V, _t: f64, _y: &mut V) {}
-}
-impl NonLinearOpJacobian for ConstOp {
-    fn jac_mul_inplace(&self, _x: &V, _t: f64, _v: &V, _y: &mut V) {}
-    fn jacobian_inplace(&self, _x: &V, _t: f64, y: &mut M) { y.copy_from(&self.mat.borrow()); }
-    fn jacobian_sparsity(&self) -> Option<<M as Matrix>::Sparsity> { self.sp.clone() }
+/// y = alpha * A * x (CSC format)
+fn gemv(alpha: f64, a: &SparseColMat<usize, f64>, x: &[f64], y: &mut [f64]) {
+    y.fill(0.0);
+    for j in 0..a.ncols() {
+        let xj = alpha * x[j];
+        if xj == 0.0 { continue; }
+        let col = a.col_range(j);
+        if col.is_empty() { continue; }
+        let rows = &a.row_idx()[col.start..col.end];
+        let vals = &a.val()[col.start..col.end];
+        for (&row, &val) in rows.iter().zip(vals.iter()) {
+            y[row] += val * xj;
+        }
+    }
 }
 
-fn factor(mat: M) -> LS {
-    let n = mat.sparsity().map(|s| s.nrows()).unwrap_or(0);
-    let sp = mat.sparsity().map(|s| s.to_owned()).transpose().ok().flatten();
-    let op = ConstOp { n, sp, ctx: mat.context().clone(), mat: RefCell::new(mat) };
-    let mut solver = LS::default();
-    solver.set_problem(&op);
-    solver.set_linearisation(&op, &V::zeros(n, op.ctx.clone()), 0.0);
-    solver
+/// Solve L * x = b (factored sparse matrix)
+fn lu_solve(lu: &Lu<usize, f64>, b: &[f64]) -> Vec<f64> {
+    let mut x = b.to_vec();
+    let n = x.len();
+    unsafe {
+        lu.solve_in_place(
+            faer::MatMut::from_raw_parts_mut(x.as_mut_ptr(), n, 1, 1, n as isize)
+        );
+    }
+    x
 }
 
 // --- Main ---
@@ -67,24 +67,32 @@ fn main() {
     let problem = OdeBuilder::<M>::new().rtol(1e-6).atol([1e-8])
         .build_from_diffsl::<CG>(&code).unwrap();
 
-    let ctx = problem.context().clone();
     let n_u = problem.eqn().rhs().nstates();
     let n_p = read_npy::<_, Array1<i64>>("L_dims.npy").unwrap()[0] as usize;
 
-    let g  = load("G",  &ctx);    // G  = M⁻¹ Bᵀ  (n_u × n_p)
-    let gt = load("GT", &ctx);    // GT = B M⁻¹   (n_p × n_u)
-    let l_solver = factor(load("L", &ctx));  // L = B M⁻¹ Bᵀ  (factored)
+    // Load and factor projection operators (raw faer)
+    let g  = load("G");          // G  = M⁻¹ Bᵀ  (n_u × n_p)
+    let gt = load("GT");         // GT = B M⁻¹   (n_p × n_u)
+    let l_mat = load("L");       // L  = B M⁻¹ Bᵀ (n_p × n_p)
+    let l_lu = {
+        let sym = SymbolicLu::try_new(l_mat.symbolic()).unwrap();
+        Lu::try_new_with_symbolic(sym, l_mat.as_ref()).unwrap()
+    };
 
-    let mut div   = V::zeros(n_p, ctx.clone());
-    let mut g_phi = V::zeros(n_u, ctx.clone());
-    let mut tmp   = V::zeros(n_u, ctx.clone());
+    // Work buffers
+    let mut div = vec![0.0; n_p];
+    let mut g_phi = vec![0.0; n_u];
+    let mut tmp = vec![0.0; n_u];
+    let mut u = vec![0.0; n_u];
 
+    // Output storage
     let t_final = 5.0;
     let n_save = 201;
     let dt_save = t_final / (n_save - 1) as f64;
     let mut sol = ndarray::Array2::<f64>::zeros((n_u + n_p, n_save));
     let mut ts_save = vec![0.0; n_save];
 
+    // Initialise TR-BDF2 solver
     let init_y = problem.eqn().init().call(0.0);
     let init_dy = problem.eqn().rhs().call(&init_y, 0.0);
     let mut solver = problem.tr_bdf2::<LS>().unwrap();
@@ -96,10 +104,10 @@ fn main() {
     sol.column_mut(0).slice_mut(ndarray::s![0..n_u]).iter_mut()
         .zip(init_y.as_slice()).for_each(|(d, s)| *d = *s);
     ts_save[0] = 0.0;
+
+    // Time-stepping loop
     let mut save_idx = 1;
     let mut t_save_next = dt_save;
-
-    let mut u = vec![0.0; n_u];
     let start = std::time::Instant::now();
     let mut step_count = 0;
     let mut t;
@@ -110,25 +118,24 @@ fn main() {
         t = solver.state().t;
         let h = solver.state().h;
 
-        let u_s = solver.state().y.as_slice();
-        u.copy_from_slice(u_s);
+        u.copy_from_slice(solver.state().y.as_slice());
 
-        for j in 0..n_u { tmp.as_mut_slice()[j] = m_lumped[j] * u[j]; }
-        gt.gemv(1.0, &tmp, 0.0, &mut div);
+        // div = GT * (m_lumped ⊙ u)
+        for j in 0..n_u { tmp[j] = m_lumped[j] * u[j]; }
+        gemv(1.0, &gt, &tmp, &mut div);
 
-        let mut rhs = V::zeros(n_p, ctx.clone());
-        for j in 0..n_p { rhs.as_mut_slice()[j] = div.as_slice()[j] / h; }
-        let phi = l_solver.solve(&rhs).unwrap();
-
-        g.gemv(1.0, &phi, 0.0, &mut g_phi);
-        for j in 0..n_u { u[j] -= h * g_phi.as_slice()[j]; }
+        // Project: u = u - h * G * phi  where  L * phi = div / h
+        let phi = lu_solve(&l_lu, &div.iter().map(|d| d / h).collect::<Vec<_>>());
+        gemv(1.0, &g, &phi, &mut g_phi);
+        for j in 0..n_u { u[j] -= h * g_phi[j]; }
         solver.state_mut().y.as_mut_slice().copy_from_slice(&u);
 
+        // Save output
         while t >= t_save_next - 1e-12 && save_idx < n_save {
             let mut col = sol.column_mut(save_idx);
             col.slice_mut(ndarray::s![0..n_u]).iter_mut().zip(u.iter())
                 .for_each(|(d, s)| *d = *s);
-            col.slice_mut(ndarray::s![n_u..n_u + n_p]).iter_mut().zip(phi.as_slice().iter())
+            col.slice_mut(ndarray::s![n_u..n_u + n_p]).iter_mut().zip(phi.iter())
                 .for_each(|(d, s)| *d = *s);
             ts_save[save_idx] = t;
             save_idx += 1;
