@@ -8,10 +8,11 @@ import matplotlib.pyplot as plt
 import imageio.v2 as imageio
 
 from firedrake import *
-from firedrake.pyplot import tricontourf
+from firedrake.pyplot import tricontourf, tripcolor
 
 
 def main():
+    print("Loading meta.json...", flush=True)
     with open("meta.json", "r") as f:
         meta = json.load(f)
 
@@ -20,8 +21,8 @@ def main():
     n_u = int(meta["n_u"])
     n_p = int(meta["n_p"])
 
-    Y = np.load("solution.npy")  # shape: (n_u + n_p, nt)
-    ts = np.load("time.npy")     # shape: (nt,)
+    Y = np.load("solution.npy")
+    ts = np.load("time.npy")
     nt = Y.shape[1]
 
     mesh = UnitSquareMesh(nx, ny)
@@ -30,15 +31,15 @@ def main():
 
     u_fun = Function(V, name="velocity")
     p_fun = Function(Q, name="pressure")
+    speed_fun = Function(Q, name="speed")
 
-    # Extract mesh vertex coordinates for quiver
-    vx = mesh.coordinates.dat.data_ro[:, 0]
-    vy = mesh.coordinates.dat.data_ro[:, 1]
+    coords = mesh.coordinates.dat.data_ro
 
     fig, axes = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
-
     frames = []
     stride = max(1, nt // 200)
+
+    print(f"Plotting {nt} time steps, stride {stride} -> {1 + nt // stride} frames", flush=True)
 
     for k in range(0, nt, stride):
         u_fun.dat.data[:] = Y[:n_u, k].reshape(-1, 2)
@@ -46,25 +47,24 @@ def main():
         pvals -= pvals.mean()
         p_fun.dat.data[:] = pvals
 
-        # Evaluate velocity at mesh vertices
-        u_at_verts = np.array(u_fun.at(mesh.coordinates.dat.data_ro))
-        speed = np.sqrt(u_at_verts[:, 0]**2 + u_at_verts[:, 1]**2)
+        speed_fun.interpolate(sqrt(dot(u_fun, u_fun)))
+        uv = np.array(u_fun.at(coords))
 
         for ax in axes:
             ax.clear()
 
-        # Quiver colored by speed magnitude
-        q = axes[0].quiver(
-            vx, vy,
-            u_at_verts[:, 0], u_at_verts[:, 1],
-            speed, cmap="viridis", scale=8, width=0.005,
-        )
-        axes[0].set_title(f"u, t={ts[k]:.3f}")
+        # Velocity: magnitude as background + arrow overlay
+        tripcolor(speed_fun, axes=axes[0], shading="gouraud", cmap="inferno")
+        axes[0].quiver(coords[:, 0], coords[:, 1],
+                       uv[:, 0], uv[:, 1], color="white", scale=15, width=0.004)
+        axes[0].set_title(f"|u| + arrows, t={ts[k]:.3f}")
         axes[0].set_aspect("equal")
 
         tricontourf(p_fun, axes=axes[1], levels=30)
         axes[1].set_title(f"p, t={ts[k]:.3f}")
         axes[1].set_aspect("equal")
+
+        print(f"  frame {len(frames)+1}/{1+nt//stride}", flush=True)
 
         fig.canvas.draw()
         w, h = fig.canvas.get_width_height()
