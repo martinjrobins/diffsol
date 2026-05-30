@@ -249,6 +249,22 @@ impl<'a, T: FaerScalar> MatrixSparsityRef<'a, FaerSparseMat<T>>
     }
 }
 
+impl<T: FaerScalar> FaerSparseMat<T> {
+    /// Direct mutable access to the CSC nonzero values array.
+    ///
+    /// Returns the `nnz` stored nonzero values in CSC storage order (column-major;
+    /// within a column, in ascending stored-row-index order). The index of each value
+    /// matches the data-array index used by [`set_data_with_indices`](Matrix::set_data_with_indices)
+    /// and produced by the matrix sparsity (`MatrixSparsity::get_index` / `indices`), so a
+    /// caller can write values in place without going through `set_data_with_indices`.
+    ///
+    /// The sparsity pattern is fixed: this borrow can only overwrite the values of existing
+    /// nonzeros, not add, remove, or reorder them (the slice length is exactly `nnz`).
+    pub fn values_as_mut_slice(&mut self) -> &mut [T] {
+        self.data.val_mut()
+    }
+}
+
 impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
     type Sparsity = SymbolicSparseColMat<IndexType>;
     type SparsityRef<'a> = SymbolicSparseColMatRef<'a, IndexType>;
