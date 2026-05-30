@@ -1,0 +1,21 @@
+[package]
+name = "lid-driven-cavity-stokes"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[features]
+diffsl-llvm17 = ["diffsol/diffsl-llvm17", "diffsl-llvm"]
+diffsl-llvm18 = ["diffsol/diffsl-llvm18", "diffsl-llvm"]
+diffsl-llvm19 = ["diffsol/diffsl-llvm19", "diffsl-llvm"]
+diffsl-llvm21= ["diffsol/diffsl-llvm21", "diffsl-llvm"]
+diffsl-llvm = []
+
+
+[dependencies]
+diffsol = { path = "../../diffsol" }
+faer = { version = "0.24", default-features = false, features = ["sparse"] }
+ndarray = "0.15"
+ndarray-npy = "0.8"
+serde_json = "1"
+

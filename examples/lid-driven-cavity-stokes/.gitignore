@@ -1,0 +1,8 @@
+venv*
+*.npy
+*.npz
+meta.json
+*.gif
+*.dsl
+firedrake*
+*.tns
