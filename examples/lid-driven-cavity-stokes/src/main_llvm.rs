@@ -1,6 +1,6 @@
 use diffsol::{
-    FaerSparseLU, FaerSparseMat, LlvmModule, OdeBuilder, OdeSolverMethod, Vector, VectorCommon,
-    VectorHost,
+    FaerSparseMat, LlvmModule,
+    OdeBuilder, OdeSolverMethod, Vector, VectorCommon, VectorHost,
 };
 use faer::linalg::solvers::Solve;
 use faer::sparse::linalg::solvers::{Lu, SymbolicLu};
@@ -11,7 +11,6 @@ use ndarray_npy::{read_npy, write_npy};
 use std::fs;
 
 type Mat = FaerSparseMat<f64>;
-type LS = FaerSparseLU<f64>;
 type CG = LlvmModule;
 
 fn load(prefix: &str) -> SparseColMat<usize, f64> {
@@ -125,7 +124,7 @@ pub(crate) fn main() {
         let h = t - t0;
         let inv_h = 1.0 / h;
 
-        if n_steps % 500 == 0 {
+        if n_steps.is_multiple_of(500) {
             println!("  step {}, t = {:.4}", n_steps, t);
         }
 
