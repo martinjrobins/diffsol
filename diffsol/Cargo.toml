@@ -15,6 +15,7 @@ readme = "../README.md"
 default = ["nalgebra", "faer"]
 faer = []
 nalgebra = []
+rayon = ["faer/rayon", "diffsl?/rayon"]
 cuda = ["dep:cudarc"]
 sundials = ["suitesparse_sys", "bindgen", "cc"]
 suitesparse = ["suitesparse_sys"]
@@ -57,11 +58,6 @@ cudarc = { workspace = true, optional = true, default-features = false, features
 ] }
 log = "0.4.29"
 serde_json = { workspace = true }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-faer = { workspace = true, features = ["rayon"] }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
 faer = { workspace = true }
 
 [dev-dependencies]

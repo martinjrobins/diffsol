@@ -14,6 +14,7 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = ["diffsl-external-dynamic"]
 wasm = ["getrandom/js"]
+rayon = ["diffsol/rayon", "faer/rayon"]
 external = []
 external-dynamic = []
 diffsl-external-f64 = [
@@ -43,7 +44,7 @@ suitesparse = ["diffsol/suitesparse"]
 
 [dependencies]
 diffsl = { workspace = true }
-diffsol = { path = "../diffsol", version = "0.14.0", features = ["diffsl"] }
+diffsol = { path = "../diffsol", version = "0.14.0", default-features = false, features = ["nalgebra", "faer", "diffsl"] }
 dlmalloc = { version = "0.2", features = ["global"] }
 nalgebra = { workspace = true, features = ["std"] }
 ndarray = { version = "0.17.2" }
@@ -52,12 +53,11 @@ schemars = "1.1.0"
 serde = { workspace = true }
 serde_json = { workspace = true }
 paste = { workspace = true }
+faer = { workspace = true }
 
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2", features = ["js"] }
-faer = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = { version = "0.2", optional = true }
-faer = { workspace = true, features = ["rayon"] }
