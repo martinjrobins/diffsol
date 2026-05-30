@@ -1,6 +1,5 @@
 use diffsol::{
-    FaerSparseMat, LlvmModule,
-    OdeBuilder, OdeSolverMethod, Vector, VectorCommon, VectorHost,
+    FaerSparseMat, LlvmModule, OdeBuilder, OdeSolverMethod, Vector, VectorCommon, VectorHost,
 };
 use faer::linalg::solvers::Solve;
 use faer::sparse::linalg::solvers::{Lu, SymbolicLu};
