@@ -180,6 +180,9 @@ pub trait Matrix:
     /// Get the context associated with this matrix (for device placement, memory management, etc.).
     fn context(&self) -> &Self::C;
 
+    /// Get a mutable reference to the inner representation of the matrix.
+    fn inner_mut(&mut self) -> &mut Self::Inner;
+
     /// Returns true if this matrix is stored in a sparse format
     fn is_sparse() -> bool {
         Self::zeros(1, 1, Default::default()).sparsity().is_some()

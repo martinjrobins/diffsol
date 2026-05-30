@@ -259,6 +259,9 @@ impl<T: FaerScalar> Matrix for FaerSparseMat<T> {
     fn context(&self) -> &FaerContext {
         &self.context
     }
+    fn inner_mut(&mut self) -> &mut Self::Inner {
+        &mut self.data
+    }
 
     fn gather(&mut self, other: &Self, indices: &<Self::V as Vector>::Index) {
         let dst_data = self.data.val_mut();
@@ -415,6 +418,46 @@ mod tests {
             assert_eq!(j, triplet.1);
             assert_eq!(val, triplet.2);
         }
+    }
+
+    #[test]
+    fn test_inner_mut() {
+        use crate::{FaerVec, FaerVecIndex, Vector, VectorIndex};
+
+        // CSC data-array order: column-major, ascending row within each column.
+        let triplets = vec![
+            (0, 0, 1.0),
+            (2, 0, 2.0),
+            (1, 1, 3.0),
+            (0, 2, 4.0),
+            (2, 2, 5.0),
+        ];
+        let mut mat =
+            FaerSparseMat::<f64>::try_from_triplets(3, 3, triplets.clone(), Default::default())
+                .unwrap();
+
+        assert_eq!(mat.inner_mut().val_mut().len(), triplets.len());
+
+        let new_values = [10.0, 11.0, 12.0, 13.0, 14.0];
+        mat.inner_mut().val_mut().copy_from_slice(&new_values);
+        let got: Vec<(usize, usize, f64)> = mat.triplet_iter().collect();
+        let expected: Vec<(usize, usize, f64)> = triplets
+            .iter()
+            .zip(new_values.iter())
+            .map(|(&(i, j, _), &v)| (i, j, v))
+            .collect();
+        assert_eq!(got, expected);
+
+        let mut via_set_data =
+            FaerSparseMat::<f64>::try_from_triplets(3, 3, triplets, Default::default()).unwrap();
+        let nnz = new_values.len();
+        let identity = FaerVecIndex::from_vec((0..nnz).collect(), Default::default());
+        let data = FaerVec::from_vec(new_values.to_vec(), Default::default());
+        via_set_data.set_data_with_indices(&identity, &identity, &data);
+        assert_eq!(
+            mat.inner_mut().val_mut(),
+            via_set_data.inner_mut().val_mut()
+        );
     }
 
     #[test]
