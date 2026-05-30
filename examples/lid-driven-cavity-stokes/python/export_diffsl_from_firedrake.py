@@ -38,7 +38,7 @@ def save_npy(prefix, triplets, nrows, ncols):
     print(f"  {prefix}_*.npy ({nrows}×{ncols}, {len(triplets)} nnz)")
 
 # ---------------------------------------------------------------------------
-Re = 400.0; nu = 1.0 / Re; nx = 16; ny = 16
+Re = 400.0; nu = 1.0 / Re; nx = 32; ny = 32
 mesh = UnitSquareMesh(nx, ny)
 V = VectorFunctionSpace(mesh, "CG", 2); Q = FunctionSpace(mesh, "CG", 1)
 bcu_walls = DirichletBC(V, Constant((0.0, 0.0)), (1, 2, 3))
@@ -95,6 +95,7 @@ init_free = [u_init.dat.data_ro.ravel()[i] for i in range(n_u) if free_mask[i]]
 # Lumped mass from M_ff
 m_lumped = np.zeros(n_free)
 for i, j, v in M_trip: m_lumped[i] += abs(v)
+inv_mass = 1.0 / m_lumped
 
 # Write DiffSL tensors (FROSTT)
 H_trip = [(i, j, -nu*v) for i,j,v in A_trip]
@@ -102,6 +103,7 @@ write_tns("mass.tns", M_trip, rank=2)
 write_tns("H.tns", H_trip, rank=2)
 write_vec_tns("f_mom.tns", f_mom)
 write_vec_tns("init.tns", init_free)
+write_vec_tns("inv_mass.tns", inv_mass)
 
 # Metadata
 with open("meta.json", "w") as f:

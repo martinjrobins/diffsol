@@ -36,18 +36,17 @@ pub(crate) fn main() {
     let n_u = meta["n_u"].as_u64().unwrap() as usize;
     let n_p = meta["n_p"].as_u64().unwrap() as usize;
 
-    // DSL (F1_i intermediate tensor works around DiffSL addition bug)
+    // For explicit solver: absorb M_lumped^{-1} into RHS
     let code = format!(
         "in_i {{ nu = {nu:.16e} }}\n\
-         Mass_ij {{ (0:{n_free}, 0:{n_free}): read('mass.tns') }}\n\
          H_ij    {{ (0:{n_free}, 0:{n_free}): read('H.tns') }}\n\
          Fmom_i  {{ (0:{n_free}): read('f_mom.tns') }}\n\
+         InvM_i  {{ (0:{n_free}): read('inv_mass.tns') }}\n\
          I_i     {{ (0:{n_free}): read('init.tns') }}\n\
          u_i     {{ y = I_i }}\n\
          dudt_i  {{ (0:{n_free}): dydt = 0 }}\n\
-         M_i     {{ Mass_ij * dydt_j }}\n\
          F1_i    {{ H_ij * y_j }}\n\
-         F_i     {{ F1_i + Fmom_i }}\n\
+         F_i     {{ InvM_i * (F1_i + Fmom_i) }}\n\
          out_i   {{ u_i }}\n");
 
     let m_lumped = load_vec("m_lumped");
@@ -55,18 +54,21 @@ pub(crate) fn main() {
     let free_mask: Array1<bool> = read_npy::<_, _>("free_mask.npy").unwrap();
     let bc_vals_full: Array1<f64> = read_npy::<_, _>("bc_vals_full.npy").unwrap();
 
+    let t0 = std::time::Instant::now();
     let problem = OdeBuilder::<Mat>::new().rtol(1e-6).atol([1e-8])
         .build_from_diffsl::<CG>(&code).unwrap();
+    println!("DiffSL init: {:.2}s", t0.elapsed().as_secs_f64());
 
+    let t0 = std::time::Instant::now();
     let g = load("G"); let gt = load("GT"); let l_mat = load("L");
     let l_lu = { let s = SymbolicLu::try_new(l_mat.symbolic()).unwrap();
         Lu::try_new_with_symbolic(s, l_mat.as_ref()).unwrap() };
+    println!("Load + factor L: {:.2}s", t0.elapsed().as_secs_f64());
 
-    let t_final = 5.0; let n_save = 201; let dt_save = t_final / (n_save as f64 - 1.0);
+    let t_final = 20.0; let n_save = 201; let dt_save = t_final / (n_save as f64 - 1.0);
     let mut sol = ndarray::Array2::<f64>::zeros((n_u + n_p, n_save));
     let mut ts_save = Vec::with_capacity(n_save);
-    let mut solver = problem.tr_bdf2::<LS>().unwrap();
-    // Save initial (reconstruct full velocity)
+    let mut solver = problem.tsit45().unwrap();
     {
         let mut fi = 0usize;
         let v: Vec<f64> = (0..n_u).map(|i| {
@@ -82,12 +84,23 @@ pub(crate) fn main() {
     let mut save_idx = 1; let mut next_save = dt_save;
     let start = std::time::Instant::now();
     let mut t = solver.state().t;
+    let mut total_step = 0.0f64;
+    let mut total_proj = 0.0f64;
+    let mut total_save = 0.0f64;
+    let mut n_steps = 0usize;
 
     while t < t_final {
+        let ts = std::time::Instant::now();
         let t0 = solver.state().t; solver.step().unwrap(); t = solver.state().t;
+        total_step += ts.elapsed().as_secs_f64();
+        n_steps += 1;
         let h = t - t0; let inv_h = 1.0 / h;
 
-        // div = GT * (m_lumped ⊙ u_f) / h + f_div / h
+        if n_steps % 500 == 0 {
+            println!("  step {}, t = {:.4}", n_steps, t);
+        }
+
+        let ts = std::time::Instant::now();
         let mut tmp = Col::zeros(n_free);
         zip!(tmp.as_mut(), &m_lumped, solver.state().y.inner())
             .for_each(|unzip!(t, m, u)| *t = m * u * inv_h);
@@ -97,9 +110,11 @@ pub(crate) fn main() {
         let grad = &g * &phi;
         zip!(solver.state_mut().y.inner_mut(), &grad)
             .for_each(|unzip!(u, gphi)| *u -= h * gphi);
+        total_proj += ts.elapsed().as_secs_f64();
 
         if t > next_save - 1e-12 {
             next_save += dt_save;
+            let ts = std::time::Instant::now();
             let pv: Vec<f64> = phi.iter().copied().collect();
             let mut fi = 0usize;
             let v: Vec<f64> = (0..n_u).map(|i| {
@@ -112,10 +127,29 @@ pub(crate) fn main() {
             col.slice_mut(ndarray::s![n_u..]).iter_mut().zip(&pv)
                 .for_each(|(d, s)| *d = *s);
             save_idx += 1; ts_save.push(t);
+            total_save += ts.elapsed().as_secs_f64();
         }
     }
-    println!("tr_bdf2: {save_idx} steps, t = {:.6}, wall = {:.2}s",
-             solver.state().t, start.elapsed().as_secs_f64());
+
+    let wall = start.elapsed().as_secs_f64();
+    let pct_step = 100.0 * total_step / wall;
+    let pct_proj = 100.0 * total_proj / wall;
+    let pct_save = 100.0 * total_save / wall;
+    println!("\n=== Profile ({n_steps} steps, t_final={t_final}) ===");
+    println!("  ODE step:     {total_step:.3}s  ({pct_step:.1}%)");
+    println!("  Projection:   {total_proj:.3}s  ({pct_proj:.1}%)");
+    println!("  Save/output:  {total_save:.3}s  ({pct_save:.1}%)");
+    println!("  Other:        {:.3}s", wall - total_step - total_proj - total_save);
+    println!("  Total wall:   {:.3}s", wall);
+    println!("  Avg ODE step: {:.3}s", total_step / n_steps as f64);
+    println!("  Avg proj:     {:.3}s", total_proj / n_steps as f64);
+    let stats = solver.get_statistics();
+    println!("\nSolver statistics:");
+    println!("  Steps:                {}", stats.number_of_steps);
+    println!("  Error test failures:  {}", stats.number_of_error_test_failures);
+    println!("  NLS iterations:       {}", stats.number_of_nonlinear_solver_iterations);
+    println!("  NLS failures:         {}", stats.number_of_nonlinear_solver_fails);
+    println!("  Linear solver setups: {}", stats.number_of_linear_solver_setups);
     write_npy("solution.npy", &sol.slice(ndarray::s![.., ..save_idx]).to_owned()).unwrap();
     write_npy("time.npy", &Array1::from_vec(ts_save[..save_idx].to_vec())).unwrap();
 }

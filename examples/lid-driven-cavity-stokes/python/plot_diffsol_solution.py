@@ -56,11 +56,11 @@ def main():
         # Velocity: magnitude as background + arrow overlay
         tripcolor(speed_fun, axes=axes[0], shading="gouraud", cmap="inferno")
         axes[0].quiver(coords[:, 0], coords[:, 1],
-                       uv[:, 0], uv[:, 1], color="white", scale=15, width=0.004)
+                       uv[:, 0], uv[:, 1], color="white", scale=3, width=0.006)
         axes[0].set_title(f"|u| + arrows, t={ts[k]:.3f}")
         axes[0].set_aspect("equal")
 
-        tricontourf(p_fun, axes=axes[1], levels=30)
+        tricontourf(p_fun, axes=axes[1], vmin=0.0, vmax=0.4)
         axes[1].set_title(f"p, t={ts[k]:.3f}")
         axes[1].set_aspect("equal")
 
